@@ -1,432 +1,109 @@
 # Mainworthy: rules for coding agents
 
-A test case management system, called Casebook until 2026-10-13
-(`docs/decisions/0015-the-project-is-called-mainworthy.md`). Owner: `endqwerty`,
-the person your global instructions name. Personal project, public on GitHub since 2026-10-13, and the owner
-reviews every change there before it lands. Your global
-`~/.<agent>/AGENTS.md` applies too.
+A test case management system: TypeScript on Bun 1.4 (no other runtime or build tool), one SQLite file, a React
+web UI. Personal project, public on GitHub; the owner (`endqwerty`, the person your global instructions name)
+reviews every change before it lands. Your global `~/.<agent>/AGENTS.md` applies too.
 
-Read [README.md](README.md) first, then `docs/product-vision.md`,
-`docs/competitors.md` and `docs/open-questions.md`.
+Read [README.md](README.md), then `docs/product-vision.md`, `docs/competitors.md` and `docs/open-questions.md`.
+Where it stands: `docs/roadmap.md`, `docs/decisions/` and [issue #64](https://github.com/endqwerty/mainworthy/issues/64)
+(the work order and every open issue); how it fits together: `docs/architecture.md`. The instance at
+`https://mainworthy.com` follows `main` (`docs/deploy.md`).
 
-## State
+A rule here names what enforces it; one that nothing enforces is a judgment call. A mistake that happens twice is
+fixed in code, a check or a script, not noted here (decision 0091). This file stays under 12,000 bytes.
 
-The MVP is built (2026-10-12): TypeScript on Bun, one SQLite file, a React web UI
-(`docs/decisions/0010-stack.md`). What it contains and where it departs from the
-design: `docs/decisions/0012-mvp-scope-and-departures.md`. What is left: the
-GitHub milestones M1 to M7 and the separate `iOS app` milestone. The phases are in
-`docs/roadmap.md`; [issue #64](https://github.com/endqwerty/mainworthy/issues/64)
-keeps the current work order and every open issue. How it fits
-together: `docs/architecture.md`.
-It runs on the owner's Coolify for their own use since 2026-10-12, at
-`https://mainworthy.com` since 2026-10-13 (`docs/deploy.md`; the home lab's notes
-say where and how to redeploy). This repository's CI reports to it since 2026-10-13 (issue #92).
-No blocking defect is known: issue
-#81, in the web UI's conflict card, is fixed (`docs/decisions/0013-ask-what-became-of-a-command.md`).
-Sign-in was rebuilt on 2026-10-13 (`docs/decisions/0017-sign-in-sessions-and-credentials.md`): a browser
-session that is not the token, token expiry, a limit on failed attempts, and people signing in as themselves
-with a password or a passkey after an invitation, in the web UI (the sign-in page, the page of an invitation,
-and "Your sign-in", "Your sessions" and "People" in Settings), through the API and on the command line.
-The queue was reworked on 2026-10-13, after the owner opened it on this project and could not tell what it
-wanted (decisions 0021 and 0022). What happens to a test with no case is a setting of the policy (`unlinked`:
-track, create a case for each, or ask), and `standard` tracks them. The queue's header says how many failures
-wait to be explained and how many questions can wait, each question says what leaving it costs, and a test
-with no case comes after every other question. A change ends (the operation `change`, which
-`.github/workflows/change.yml` sends when a pull request closes) and is then not asked about. Several rows
-of one kind take one answer since 2026-10-14 (decision 0024): a box on each row, shift for a range, `*` for all
-of a kind. `mainworthy seed` keeps sixty unlinked rows to try it against.
-An iPhone app landed on 2026-10-13 (`ios/`, decision 0023, issue #171): sign-in, the queue, runs, the suite,
-changes and your sessions. It is installed from a Mac with `bun scripts/ios.ts install`; what it does not do yet
-is under the GitHub milestone `iOS app`.
+## Commands
 
-## Stack rules
+| Command | What |
+| --- | --- |
+| `bun run check` | type-check, lint and every test, about two minutes; a machine that cannot run it says why in one line (`scripts/preflight.ts`) |
+| `bun run test`, `bun test <file>` | the tests alone; one file |
+| `bun run dev` | the server on `127.0.0.1:7357`, restarting on change |
+| `bun scripts/ci-scope.ts` | what CI would run for the branch (`.github/workflows/check.yml` says what each job does) |
+| `bun scripts/work.ts scratch new <name>`, `scratch rm <directory>` | scratch files go in `~/.cache`, never in the worktree (the architecture test reads every file of the tree); `rm` deletes only a directory `new` made. A reviewer works in a `git archive <rev>` export there |
+| `bun scripts/work.ts stop-server`, `wait-tests` | stop the servers you started; wait for another agent's test run (one agent at a time runs the whole suite; `bun run check` notes another run) |
+| `bun scripts/work.ts release` | last command of a task, and the `release worktree` script of `t3.json`; refuses while a server or test run still works from the checkout |
+| `bun scripts/work.ts board`, `pr-body`, `sync-branch`, `check-time` | below; `bun scripts/work.ts` alone lists every command, and `test/work.test.ts` holds each |
 
-- **Commands.** `bun install`; `bun run check` (type-check, lint and every test,
-  side by side: the test files in eight parallel workers, then the tests that
-  measure time with the machine to themselves; the browser tests are skipped, with
-  a message, on a machine with no Chromium); `bun run dev` (the server on
-  `127.0.0.1:7357`, restarting on change). Bun 1.4; no other runtime or build tool.
-  The check takes 120 to 122 s on the 16-thread desktop (2026-10-13, eight runs;
-  it was 403 s with the files one after another). By that evening `main` took 149 to 153 s there, with every
-  test passing: at its limit, so a run of `main` itself can exit 1 on time alone (issue #77 has the numbers). `bun run test` is the
-  tests alone, printed as they run. One file: `bun test test/suite.test.ts`. One
-  shard, as CI runs it: `bun run test --only=parallel --shard=2/6`; the quiet
-  tests: `bun run test --only=quiet`. CI (`.github/workflows/check.yml`) runs six shards (five until 2026-10-13) and the quiet
-  tests on a runner each, then one `gate` job reports every shard to Mainworthy and
-  its gate is the result (the deployed instance when the repository names one and
-  the job can use it, else a Mainworthy the job starts: `scripts/ci-instance.ts`,
-  decision 0014; since 2026-10-13 that is `https://mainworthy.com`, project `mainworthy`: `docs/deploy.md`);
-  a shard with no report fails it, and so does a test
-  file in which every test was skipped. An `image` job builds the container and
-  asks it for `/docs`; the gate job fails with it. An `ios` job on a macOS runner runs the
-  iPhone app's package tests and builds the app; the gate job fails with it too. A first job, `scope`, runs only the jobs a change needs
-  (`scripts/ci-scope.ts`, decision 0090): a change to prose, another workflow or the iPhone app runs, of the tests,
-  the three that read the whole tree and the ones that name a changed file; a change to `src/web` skips the `ios` job.
-  `bun scripts/ci-scope.ts` says what CI would run for the branch. A new job gets its paths there, held by
-  `test/ci-scope.test.ts` to the Dockerfile and the configuration; code outside the tests that reads prose or
-  `ios/` breaks the narrowing, and that test lists it. On GitHub the whole workflow takes about four
-  minutes (2026-10-12, two runs: 4 min 24 s and 3 min 49 s; it was about 12 in one job).
-- **A failure says what to do.** The suite passes on macOS as on Linux (issue #103, 2026-10-13), so a failure
-  on either is the change's. A test that depends on the system (a key, a tool of the shell, what the browser
-  calls itself) says so where it does; do not write one that holds on Linux alone. `bun run check`, `bun run test`
-  and `bun test <file>` run nothing on a machine with a Bun older than 1.4 or with packages missing, and say which
-  in one line (`scripts/preflight.ts`; exit 4). `bun run` starts the script with the `bun` that is first on `PATH`,
-  not with the one that ran it. A run that fails ends with each failed test, its file and what it said, and with
-  the files that did not load. A run without a browser ends with a note that the browser tests did not run and
-  what to set. Keep it so: a new way for the machine to be wrong gets a line there, not a paragraph here.
-- **One registry.** A capability is an operation in `src/server/ops/index.ts`. HTTP,
-  the OpenAPI document, the CLI, the MCP tools and the web client come from it. Never
-  add a route, a command or a tool beside it.
-- **The module map is a test.** `test/architecture.test.ts` fails on an import that
-  goes up the map, on SQL outside its owning module, and on any second way to mint a
-  decision witness. Fix the design, not the test.
-- **Standing changes only through a decision.** Anything that is "current" (a case's
-  head, a link, an excuse, a closed run, the policy) is written by a function that
-  takes a `Witness`. Do not add a writer without one. Five functions put back what
-  a withdrawn or ended decision did (`restoreLink`, `dropExcuse`, `dropResultExcuses`, `reopenRun`,
-  `restoreFailures`) and take no witness: the withdrawal is the recorded event,
-  and a test allows only the kind handlers to call them.
-- **`src/core` is pure** and runs in the browser and the server. No I/O, no Node or
-  Bun APIs. `src/web` imports only `src/core`.
-- **A phone is styled in one file.** A phone gets its own layout (decision 0018): one pane at a time, the
-  sidebar as a drawer, the actions under one button. Its styles are `src/web/phone.css`, each rule starting
-  with `:root[data-layout="phone"]`, which only a device whose first pointer is a finger gets
-  (`src/web/lib/layout.ts`). No other stylesheet names the attribute, and the desktop layout does not change for
-  a phone's sake. Both are tests. A screen adds no touch control for what a key does: the palette lists it.
-  A binding is `list: true` only when it decides nothing about the selected row (New case, Filter): while a
-  phone shows the list, neither a key nor the palette runs anything else, so nobody answers a question they have
-  not opened. A test names the marked bindings, so a new mark is seen in review (it reads the source as text,
-  and does not see a mark that is computed).
-- **SQL** is declared with `sql()` in the module that owns the table (the owner of
-  each table is listed in `test/architecture.test.ts`), so the check can prepare every
-  statement against the schema. To read another module's data, call its functions; do
-  not join its tables. A schema change is a new file in
-  `src/server/kernel/migrations/`; a shipped migration is never edited. Versions
-  are contiguous from 1, and a branch takes the next free number when it lands (a
-  test holds both). Its entry
-  in `MIGRATIONS` says whether it breaks archive replay (`archive`): an import
-  requires the last version that did. Added nullable, non-key columns may use
-  `archive: false` when filling them with NULL preserves the earlier behavior; import
-  fills missing columns with NULL even if they have defaults. An added column with a
-  non-NULL default requires `archive: true`. A backfill or other data write to an
-  exported table in the migration also changes the archive version, even when the
-  table shape stays the same. A test checks these declarations against the schema
-  and migration SQL; the behavior needs a test too.
-- **Who a request is, is asked once.** A surface calls `admit` in
-  `src/server/identity/identity.ts` and holds no secret (decision 0017). Nothing
-  outside `src/server/identity` imports another file of it. A table that holds the
-  hash of a secret is listed in `UNEXPORTED` (`src/server/transfer/transfer.ts`),
-  so no archive carries it. Both are tests. An id read before a wait at the write
-  gate is not used after it: an import deletes every token and session, and the
-  next row made takes the first id again. Carry the hash and look the row up
-  again inside the write (`openSession`; the verifier's finding of 2026-10-13).
-- **The iPhone app reads the server through one contract** (decision 0023). `ios/` is a SwiftUI app that calls
-  the operations like any client. What it decodes of a reply is listed in `scripts/ios/contract.ts`, and
-  `test/ios-contract.test.ts` holds real replies to that list, in the check that runs everywhere. When it fails,
-  a change would stop the app reading a reply: `ios/README.md`, "When the contract test fails", says what to do,
-  with or without a Mac. `bun scripts/ios.ts gen` writes the Swift in the two `Generated/` directories; never
-  edit it. On a Mac, `bun scripts/ios.ts test` runs the app's tests against a real server in two seconds, and
-  `uitest` drives the screens in a simulator (there is one, so a second run waits for the first). A view in `ios/App`
-  reaches the server only through a class of `MainworthyScreens` (the package's access rules and a test hold it
-  to that): a new screen copies the queue (`ios/README.md`). Builds
-  go to `~/.cache/mainworthy-ios`, never into the worktree. The team that signs the app is in
-  `ios/Config/Local.xcconfig`, which is not committed: never write a team id into the repository.
-- **Licences are read from the build** (decision 0025). Mainworthy is Apache-2.0. `THIRD-PARTY-NOTICES.md`
-  is written by `bun scripts/licences.ts` from the npm packages the build bundles and from `licences/` (the Bun
-  runtime and its libraries, what the diagrams embed). After adding, removing or upgrading a dependency, run it
-  and commit the result. A licence that `LICENCES` in that script does not name fails `test/licences.test.ts`:
-  whether Mainworthy may ship it is the owner's call, asked in the pull request. Upgrading Bun means reading its
-  libraries again (`licences/README.md`); the Dockerfile, CI and the notices name the same version.
-- **The time of a write is the server's.** Only a demo project takes one from its caller (decision 0020):
-  `Call.at` in the registry, the header `X-Mainworthy-At`, and `project.demo`, which marks only a project
-  nothing was written to. Do not add a second way to date a row, and do not put a time in an operation's input.
-  What `mainworthy seed` writes is decided in `src/cli/demo/`, which is pure: the same seed, cases and days give
-  the same requests, or a seed sent again is refused as another request.
-- **A feature adds to the demo** (the owner, 2026-10-15). The owner tries a change on the instance's project
-  `demo`, which every deploy empties and seeds again (`MAINWORTHY_DEMO`, `src/cli/demo.ts`). So a new feature, or a
-  change to one, adds what uses it to the demo in the same pull request when the demo has nothing that does:
-  `src/cli/demo/` decides what is written (the history in `history.ts`, the cases in `cases.ts` and `catalog.ts`)
-  and `src/cli/seed.ts` sends it. Draw nothing new from an existing random stream, so the rest of the demo stays
-  as it was (`end` and `archive` in `history.ts` show how). Leave it out only when that is truly unreasonable (it
-  needs an outside service, a person's credentials, or people on the instance), and say why in the pull request.
-- **Budgets are tests** (`test/budgets.test.ts`, `bench/`). A change that misses a
-  hot-path budget does not merge; do not raise the number.
-- **The check's wall time is a budget** (`scripts/check-plan.ts`). The check warns
-  when its tests take more than 130 s and fails above 150 s, unless other work
-  keeps the machine busy. The owner raised the limit from 120 s on 2026-10-13, when
-  `main` itself took 120 to 122 s: the longer check is accepted for now, and two
-  minutes is still the aim (issue #77). A change that makes the check slower says
-  so and fixes it: split the file, share the set-up, do less in the browser. Do
-  not raise the limit; that is the owner's to do. A file that takes a worker longer than half a minute is the next thing to
-  split; after adding or splitting one, `bun run test --update-timings` (six
-  minutes) and commit `scripts/test-timings.json`, which balances the CI shards.
-- **Tests run beside each other.** A test takes its ports, directories and browser
-  from the helpers (`test/helpers.ts`, `test/e2e/support.ts`), never a fixed port
-  or a shared path. One that fails only beside others shares something: fix that,
-  do not retry it. Only a test that compares a measured time with a limit goes in
-  `QUIET` (`scripts/check-plan.ts`), where it runs after the others.
-- **Worktree release:** `rm -rf node_modules .mainworthy .casebook test-results` (also the
-  `release worktree` script in `t3.json`, which runs when a thread settles).
+## Rules
+
+| Rule | What enforces it |
+| --- | --- |
+| **One registry.** A capability is an operation in `src/server/ops/index.ts`; HTTP, the OpenAPI document, the CLI, the MCP tools and the web client come from it. Add no route, command or tool beside it | `test/architecture.test.ts`, "the registry" |
+| **The module map.** Imports go down the map. SQL is declared with `sql()` in the module that owns the table; read another module's data through its functions. `src/core` is pure (no I/O); `src/web` imports only `src/core`. Fix the design, not the test | `test/architecture.test.ts`, "the module map" |
+| **Standing changes only through a decision.** Anything "current" (a case's head, a link, an excuse, a closed run, the policy) is written by a function that takes a `Witness`. Add no writer without one | `test/architecture.test.ts`, witness tests |
+| **Schema changes are a new migration** in `src/server/kernel/migrations/`; a shipped one is never edited. Mark `archive` as the comment on `MIGRATIONS` says, and test the behaviour too | `test/architecture.test.ts`, migration tests |
+| **Who a request is, is asked once.** A surface calls `admit` (`src/server/identity/identity.ts`) and holds no secret. A table with the hash of a secret is in `UNEXPORTED` | `test/architecture.test.ts`, identity tests; the comment on `openSession` says why a hash, not an id, crosses the write gate |
+| **A phone is styled in one file**, `src/web/phone.css`, each rule under `:root[data-layout="phone"]`. A screen adds no touch control for what a key does. A binding is `list: true` only when it decides nothing about the selected row | `test/architecture.test.ts`, "the phone layout" |
+| **The iPhone app reads the server through one contract** (decision 0023): `scripts/ios/contract.ts`. Never edit a `Generated/` directory (`bun scripts/ios.ts gen`). Write no team id into the repository | `test/ios-contract.test.ts`; `ios/README.md` says what to do when it fails |
+| **Licences are read from the build** (decision 0025). After changing a dependency run `bun scripts/licences.ts` and commit the result. A licence the script does not name is the owner's call, asked in the pull request | `test/licences.test.ts` |
+| **The time of a write is the server's.** Only a demo project takes one from its caller (decision 0020). Put no time in an operation's input | `test/demo-time.test.ts`; `src/cli/demo/` is pure |
+| **A feature adds to the demo** (the owner, 2026-10-15): `src/cli/demo/` decides what is written, `src/cli/seed.ts` sends it; draw nothing new from an existing random stream. Leave it out only when truly unreasonable, and say why in the pull request | the owner's review (nothing runs) |
+| **Budgets are tests**; raise no number. A change that slows the check says so and fixes it (split the file, share the set-up); the limits are the owner's. After adding or splitting a test file, `bun run test --update-timings` (six minutes) and commit `scripts/test-timings.json` | `test/budgets.test.ts`, `scripts/check-plan.ts` |
+| **Tests run beside each other.** Take ports, directories and browser from the helpers; a test that fails only beside others shares something, so fix that. Only a test that compares a time with a limit goes in `QUIET` | `test/helpers.ts`, `test/e2e/support.ts`, `scripts/check-plan.ts` |
+| **A command-line test starts the command once** and asks the rest in-process (each start is 0.13 s) | the check's time limit |
+| **A sentence on a screen about what the server does is a claim.** Say only what the screen can know | `test/evidence.test.ts` |
+| **A user-visible change updates `docs/guide/` in the same pull request** and runs `bun scripts/gen-docs.ts` after a change to an operation, command, preset, capability or answer; a new page is also listed in `src/core/docs.ts` and `src/surfaces/docs/content.ts` | `test/docs.test.ts`, `test/e2e/docs.test.ts` (neither can tell whether a sentence is still true: read the page) |
+| **The repository is public.** Write no tailnet name, address on the tailnet or home network, or machine name: `example.ts.net` and a documentation-range address | `test/architecture.test.ts`, "a public repository" (tailnet names only; the rest is review) |
+| **The owner's name is not written here** (their request, 2026-10-13): write "the owner", and `robin` for an example person. The one exception is the copyright line (decision 0025) | `test/licences.test.ts`, "the owner's name is written only in the copyright line" |
+| **The former name** (decision 0015) stays only in the files the architecture test lists | `test/architecture.test.ts`, "the project's name" |
+| **A failing test in CI is a question on the instance**, and `gate` stays red until a person answers it there (`docs/deploy.md`). Fix the test, or leave the question to the owner and say which. Never answer your own pull request's with the owner token | `scripts/ci-gate.ts` |
 
 ## Working rules
 
-- Nothing has to stay compatible before 1.0, and the owner says when that is (2026-10-13): the product has no
-  users and has promised nothing. A change may break stored data, cookies, tokens, the API and the CLI when that
-  makes the result simpler. Say what breaks in `CHANGELOG.md`; do not build a migration path nobody needs.
-- The instance follows `main` (the owner, 2026-10-13). A job on the home server deploys the tip of `main` once it
-  has stood for ten minutes (issue #90; the home lab's notes say where the job is and how to hold it). After a
-  pull request lands, check that `/healthz` names its commit and that the instance answers.
-- Behaviour changes need tests and a check run on the real surface.
-- Record user-visible changes in `CHANGELOG.md`; record design decisions in
-  `docs/decisions/NNNN-title.md`.
-- **A user-visible change updates the user docs in the same pull request.** The
-  docs are the Markdown pages in `docs/guide/`, which the instance serves at
-  `/docs` (decision 0016). Change the page that describes what you changed; a new
-  page goes in `src/core/docs.ts` and `src/surfaces/docs/content.ts` too. After a
-  change to an operation, a command, a preset, a capability or an answer, run
-  `bun scripts/gen-docs.ts`, which rewrites the tables between the
-  `<!-- generated:NAME -->` markers. A diagram is built from its source in
-  `docs/diagrams/src/` with `bun scripts/diagrams.ts build <archify directory>
-  <name>` (`docs/diagrams/src/README.md`). `test/docs.test.ts` and
-  `test/e2e/docs.test.ts` fail on a stale table, a name the docs do not say, a
-  dead link, a key the keyboard page lacks and a diagram not built again. They
-  cannot tell whether a sentence is still true: read the page you touched.
-- Secrets never enter the repo, logs or chat.
-- The repository is public (the owner, 2026-10-13). Anyone can read the code, every commit, every issue and pull
-  request with its comments, and the log of every workflow run. Do not write there the tailnet's name, an address
-  on the tailnet or the home network, or the name of a machine at home. Write `example.ts.net` and an address
-  from a documentation range; the real ones are in the home lab's notes. Commits made before that day still
-  carry the tailnet's name and one address: the history was not rewritten.
-- The owner's name is not written in the repository (their request, 2026-10-13):
-  not in docs, comments, tests, commit messages or pull requests. Write "the
-  owner"; an example person is `robin`. The one exception is the copyright line, `Copyright 2026` and their
-  legal name, in the licence files, the iPhone app's `Info.plist` (which its About section shows) and the tests
-  that check them (decision 0025, their request of 2026-10-14). Do not add it anywhere else.
-- The former name, Casebook, stays only in the files `test/architecture.test.ts`
-  lists, each with its reason.
-- Competitor claims in `docs/competitors.md` are hypotheses until verified;
-  do not build on one without checking it.
-- A review is sized to the change. The independent verdict is a review of the
-  diff: the reviewer reads the change, runs `bun run check` (two minutes) and
-  probes what the change could break next to it. The brief names the diff and a
-  time, fifteen minutes for an ordinary change. A review of a whole area, with
-  every earlier probe run again, is for a release or for a change that rewrites
-  that area, and the brief says which. A finding becomes a test, so the suite
-  finds it from then on and the next review does not look for it again. The owner's
-  goal (2026-10-12, issue #77): landing a feature costs minutes of waiting, not
-  most of an hour.
-- One agent at a time runs the whole browser suite on a machine. On 2026-10-12 an
-  agent's serial pass ran beside another agent's parallel check for an hour and
-  failed for reasons outside its code. A second agent runs single files, or waits.
-- A failing test in CI is a question on the instance, and the `gate` job stays red (exit 2) until a person
-  answers it there (`docs/deploy.md`). Fix the test, or leave the question to the owner and say which one it is.
-  Do not answer a failure of your own pull request with the owner token (issue #91). On 2026-10-13 an agent did
-  that once, for a test that failed on purpose in a pull request made to try the switch-on (#104), and the reason
-  recorded with the decision says so.
-- Briefing a verifier: write the brief as a QA review of application logic and say
-  that everything runs locally. On 2026-10-12 a Codex verifier was stopped by its
-  provider's content filter in the middle of a run whose brief used the vocabulary
-  of security testing ("forge", "escalate", "hostile"); the same checks in plain
-  words ran to the end. Have it write each finding to its report as it confirms it,
-  so a run that is cut off still leaves its findings.
-- A delegated worker that ends with "Selected model is at capacity" has stopped for
-  good: read what it left in the tree, finish or re-delegate the rest, and do not
-  wait for it.
-- A delegated child shares this checkout, and its own rules tell it to release the
-  worktree when it finishes. Say in every task that it must not: on 2026-10-12 two
-  children did, and removed `node_modules` under the lead and a builder that were
-  still running. Reviewers work in an export (`git archive <rev> | tar -x -C <dir>`)
-  and clean only that. If modules vanish mid-task: `bun install --frozen-lockfile`.
-  On the desktop `/tmp` is kept in memory and `test/budgets.test.ts` refuses it, so the export goes under
-  `~/.cache`, in a directory made for the task (`mktemp -d ~/.cache/mw-XXXXXX`), which is the one thing deleted
-  afterwards. Every agent's scratch is in `~/.cache`: never delete there by a pattern or recreate a fixed name. On
-  2026-10-16 an agent's cleanup, `rm -rf ~/.cache/mw-verify-*`, deleted earlier verifiers' reports. To wait for another agent's test run: `pgrep -f '[t]est-worker'`; without the brackets pgrep
-  finds the shell that runs it and the wait never ends (both on 2026-10-12, PR #97).
-- Issues, pull requests and the board are kept in step by GitHub when a pull request names its issue the way
-  GitHub reads it. How: "Issues, pull requests and the board" below.
-- Scratch files stay out of the worktree: a log, a draft of a pull request, screenshots. `test/architecture.test.ts`
-  reads every file in it, tracked or not, and fails when one holds the former name. On 2026-10-13 an agent's
-  decision log under `.audit/` failed a nine-minute `--update-timings` run that way. `~/.cache` is the place.
-- A verifier that is asked for the check's time leaves `TMPDIR` alone and times the base beside the head. On
-  2026-10-13 a verifier's run with `TMPDIR` on disk took 156 s and failed the 150 s limit on a change that added
-  0.1 s, while `main` itself took about 140 s that day (#77). The verdict waited for a third round that compared
-  the two. And `main` moves while a review runs: a change that passed and is then rebased gets a short round that
-  compares the two revisions (`git range-diff`, the trees) and runs the tests next to it, not the whole review again.
-  While `main` is at the limit, one run says nothing about a change's time: ask for base and head alternately,
-  twice each, and judge whether the head is slower by more than the spread between runs of one revision (#167 and
-  #168 on 2026-10-13: the spread was 0.9 s in one hour and 3.6 s in the next). A rebase that leaves a change's tree
-  as it was verified (`git rev-parse <rev>^{tree}`, the same for both) needs no round at all.
-- A sentence on a screen that says what the server does is a claim, and a test holds it to the server
-  (`test/evidence.test.ts`, "what a failure question says leaving it costs"). Say only what the thing on the
-  screen can know. On 2026-10-13 the sentence under a failure question went through five rounds of verification
-  (#167): it named the gate that was blocked and how the block would end, and each round found a case where that
-  was false (a question lists a sample of its tests, keeps the runs of older commits, and cannot tell which
-  result replaces which). The sentence that stayed makes one claim, the one the system guarantees, and the
-  guide describes the rest.
-- A test of the command line starts the command once and asks the rest in-process (the server's operations
-  through the client, a function called directly). Each start is about 0.13 s, the file is the suite's
-  slowest that is not a browser test (`src/cli/main.test.ts`, 18 s), and on 2026-10-13 three new tests that
-  started it several times each added a second to the check, which tipped it over its limit (#168 to #170).
-- To stop a server you started, `pkill -f '[m]ain.ts serve'`, with the brackets: a pattern that is also in your
-  own command line stops your shell too, and the commands after it never run (three times on 2026-10-13).
+- Nothing is compatible before 1.0, and the owner says when that is. A change may break stored data, tokens, the
+  API and the CLI when that makes the result simpler. Say what breaks in `CHANGELOG.md`; build no migration path.
+- Behaviour changes need tests and a check on the real surface. Record user-visible changes in `CHANGELOG.md` and
+  design decisions in `docs/decisions/NNNN-title.md`. Secrets never enter the repository, logs or chat.
+- After a pull request lands, check that `/healthz` names its commit and that the instance answers.
+- Competitor claims in `docs/competitors.md` are hypotheses until verified; build on none unchecked.
+- A review is sized to the change: the verifier reads the diff, runs `bun run check` and probes what the change
+  could break next to it. The brief names the diff and a time (fifteen minutes for an ordinary change); a whole-area
+  review is for a release or a rewrite. A finding becomes a test. The owner's goal (#77): landing costs minutes.
+- To compare the check's time, `bun scripts/work.ts check-time <base> <head>` times both alternately and judges the
+  spread; a rebase that leaves the tree as it was verified needs no round (it says so). Leave `TMPDIR` alone.
 
 ## Issues, pull requests and the board
 
-The owner reads progress on the board, `https://github.com/users/endqwerty/projects/2`, and wants it true
-(2026-10-13). GitHub does most of it when a pull request is linked to its issue. The issue then shows the pull
-request under Development, the board moves the issue to In Progress, and the merge closes the issue and moves
-both to Done. A closing keyword in the pull request's description makes that link. Nothing else you can write
-does. This is from GitHub's pages on linking a pull request to an issue and on a project's workflows, read on
-2026-10-13. The move to In Progress has not been seen on this board yet: the first agent whose pull request
-closes an issue says in it whether the issue moved.
+The board is `https://github.com/users/endqwerty/projects/2`; a closing keyword in a pull request links it to its
+issue and GitHub's workflows move both. A task the owner gave in a thread needs no issue: the pull request is its card.
 
-**Filing an issue.** It gets one milestone, and an `area:` label when it is about a part of the product. The
-milestones M1 to M7 are in the order of `docs/roadmap.md`, and each one's description says what belongs in it.
-A test that fails by chance gets `flaky-test` and goes to M1. `decision` and `waiting-for-feedback` mark what an
-agent cannot finish alone. Add the issue to its list in #64. The board adds a new issue or pull request by
-itself, as Todo (seen for pull requests on 2026-10-13).
-
-**Starting on an issue.** Set it In Progress before the first edit, so a second agent sees it is taken:
-
-```
-item=$(gh project item-add 2 --owner endqwerty --url <URL of the issue or pull request> --format json --jq .id)
-gh project item-edit --id "$item" --project-id PVT_kwHOAArmbc4Bm7Xt \
-  --field-id PVTSSF_lAHOAArmbc4Bm7XtzhliU7A --single-select-option-id 47fc9ee4
-```
-
-The last value is the status: `47fc9ee4` In Progress, `f75ad846` Todo, `98236657` Done. The first command adds
-nothing when the item is already on the board and prints its id either way.
-
-**Opening the pull request.**
-
-- Name each issue it finishes on a line of its own: `Closes #123`. Use it only when the merge makes everything
-  the issue asks for true. For part of an issue write `Part of #123`, which links nothing: the issue stays open
-  and its status is yours to set.
-- Give it the milestone of its issue (`gh pr create --milestone "<title>"`). GitHub copies nothing from the
-  issue. With no issue, use the milestone whose description fits, or none.
-- Set it In Progress with the two commands above. The board adds a new pull request as Todo.
-- Read back what GitHub linked: `gh pr view <n> --json closingIssuesReferences --jq
-  '[.closingIssuesReferences[].number]'`. It lists the issues you meant and no other. Any closing word before
-  an issue number links it: "the closed #88" in the description of #172 linked #88 (2026-10-13). Write "issue
-  #88, which is closed".
-- A keyword counts only while the pull request's base is `main`. In a stack GitHub ignores it and makes no link
-  until the pull request below has merged. Read the links again then, and set the issue In Progress by hand
-  meanwhile.
-- A task the owner gave in a thread needs no issue. The pull request is its card. Do not file an issue to
-  close it.
-
-**Stopping without finishing.** Set the issue back to Todo and say on it what is left. Do the same when a pull
-request is closed without a merge: what the board does with its issue then is not known.
-
-**After the merge.** The issue is closed and both cards are Done. If the issue is still open, close it with a
-comment that links the pull request. A problem found on the way gets its own issue; it is not a line in the pull
-request.
-
-**What only the owner can change.** A view filters on milestone titles, so a milestone that is renamed or added
-is changed in the view's filter, in `docs/roadmap.md` and in #64 in the same change. The board's workflows are
-set in the browser (the board's menu, Workflows), and the API neither reads nor changes them: "Auto-add to
-project" has been on since 2026-10-13, and "Pull request linked to issue" is what moves an issue to In Progress.
-`gh project` needs the `project` scope on the token. The desktop's has it since 2026-10-13. On a machine whose
-token lacks it, run `gh auth refresh -h github.com -s project` and give the owner the code it prints: only they
-can approve it, at `github.com/login/device`. Milestones, labels and issues need `repo` alone.
+- **Filing an issue.** One milestone (M1 to M7, `docs/roadmap.md`; each description says what belongs) and an `area:`
+  label. A test that fails by chance gets `flaky-test` and M1; `decision` and `waiting-for-feedback` mark what an
+  agent cannot finish alone. Add it to its list in #64.
+- **Starting.** Before the first edit, `bun scripts/work.ts board start <number>` for the issue, and again for the
+  pull request once it is open. `todo` and `done` set the other statuses; `board check` says when the ids in
+  `scripts/work/board.ts` no longer fit the board.
+- **Opening the pull request.** `Closes #123` on a line of its own only when the merge makes everything the issue
+  asks for true; `Part of #123` otherwise. Give it the issue's milestone (`gh pr create --milestone`). Run
+  `bun scripts/work.ts pr-body <number>`: it reads back what GitHub linked, and the `description` job of CI runs it
+  (after a fix, run that job again). A keyword counts only while the base is `main`; in a stack set the issue In
+  Progress by hand and read the links again when the pull request below has merged.
+- **Stopping without finishing.** `board todo <number>` and say on the issue what is left, also when a pull request
+  is closed unmerged.
+- **After the merge** both cards are Done; close a still-open issue with a comment that links the pull request. A
+  problem found on the way gets its own issue.
+- **Only the owner** changes the board's workflows (in the browser), a renamed or added milestone (the view's filter,
+  `docs/roadmap.md` and #64 together), and approves `gh auth refresh -h github.com -s project` (the `project` scope).
 
 ## Model profile
 
-**deep**, the owner's standing choice for this project (named 2026-10-11). Every
-agent that delegates here takes models and effort from `homelab route models
---profile deep` instead of the default `balanced`: higher effort for all
-classes, Opus on Claude verifiers and reviewers, Astra or Fable for `hard` and
-`lead`. It is not `max`; the owner names that for a single thread or task. A model
-the owner names in a thread still wins.
-
-Deep's Claude judges run Opus, so with the Opus window spent and Codex as the
-author, `homelab route plan --profile deep --role verifier --author codex` names
-no one. Then take the verifier from `--profile balanced` (Claude Sonnet at high)
-and say in the PR that it ran at balanced. If no provider other than the author
-can verify, report the work as not independently verified.
+**deep**, the owner's standing choice: delegation takes models and effort from `homelab route models --profile
+deep`, not `balanced`; `max` is for a thread or task the owner names. When `homelab route plan --profile deep --role
+verifier --author codex` names no one (the Opus window is spent), take the verifier from `--profile balanced` and
+say in the pull request that it ran at balanced; with no other provider able to verify, report the work as not
+independently verified.
 
 ## Delivery
 
-Delivery: **review-first**. The owner merges; you do not.
+**Review-first: the owner merges; you do not.** Work on the T3 branch in your worktree and follow the `build` skill:
+check the change, get the independent verification `verify` asks for, open a non-draft pull request with a
+standalone description that names its issue (above), link it to the thread, and stop. Do not merge, arm auto-merge,
+close it or push to `main`, even when the checks are green. Only the owner saying, in the current thread, to merge
+identified work lets you land it (the `ship` skill, by rebase: `gh pr merge --rebase`, keeping the branch). A stack
+lands in one step when the owner's word covers it: `docs/landing-a-stack.md`. Under `build`, `babysit` and
+`autopilot-stack` nothing merges, and a stack is no exception.
 
-Work on the T3 branch in your worktree and follow the `build` skill: check the
-change, get the independent verification `verify` asks for, open a non-draft PR
-with a standalone description (`gh pr create`) that names its issue ("Issues, pull
-requests and the board" above), link it to the thread, and stop.
-Do not merge, arm auto-merge, close the PR or push to `main`, even when the
-checks are green. Opening the PR does not start a watcher; use `babysit` when
-the owner asks you to get an open PR merge-ready. Only the owner saying, in the
-current thread, to merge identified work lets you land it (the `ship` skill,
-with its gates; the merge method is rebase, `gh pr merge --rebase`, keeping the
-branch). "Keep going" or a budget request is not that.
-
-A stack lands in one step when the owner's word covers it (the owner, 2026-10-13).
-A stack is a chain of pull requests: each one's base is the branch of the one
-below, and the lowest one's base is `main`. After a layer lands by rebase its
-commits have new ids on `main`, so the rest of the chain has to be rebased onto
-the result and pushed, and a changed revision or base needs its checks and a
-short round of review again. When the owner has said to merge a stack, or its
-lower layers, land them together instead:
-
-```
-gh stack merge <the highest pull request the owner's word covers> --rebase --yes
-```
-
-This merges that pull request and every layer below it into the stack's base, or
-none of them. You look at every layer before the command and at every result
-after it. That replaces two things in `ship`: landing one request at a time, and
-looking at the next request between landings. Its other gates hold.
-
-- The owner's word covers every layer the command merges. It merges all the
-  layers below the one you name, so merge nothing if one of them is a layer the
-  owner did not name.
-- The number means the pull request. The command first tries its argument as the
-  number of a stack, and merges the whole of a stack that has it, so
-  `gh api 'repos/{owner}/{repo}/stacks/<number>'` must answer 404. In the answer
-  of `gh api 'repos/{owner}/{repo}/stacks?pull_request=<number>'` the base is
-  `main` and the members are the layers you expect, in order.
-- Each layer has its own passing independent verdict and a green `gate` on the
-  head and the base it has now. The command sends no revision: what the branches
-  hold when it runs is what lands. Just before you run it, compare every head
-  and base with the ones that were verified, and run it only while nothing else
-  pushes to those branches. The extension checks that a layer is open and not a
-  draft, and `main` has neither branch protection nor a ruleset (2026-10-13), so
-  only you stop a layer whose check failed.
-- Pass `--rebase`. Without it the command picks the method: the one the account
-  used last or the repository's default, and the first one the repository allows
-  if that one is switched off. A merge queue on `main` would ignore the flag and
-  could land the layers apart. There is none (2026-10-13); with one, do not use
-  this command.
-- Afterwards, check that every layer says merged and that `main` holds its
-  commits. The `/healthz` check is made once, for the commit `main` ends on.
-- A command that fails can leave the merge running. It asks for the status up
-  to 600 times, a second apart, and gives up at the first request that fails.
-  Read the state of every layer first. Land nothing one at a time until you know
-  that no layer merged and that no merge is still running.
-
-Under `build`, `babysit` and `autopilot-stack` nothing merges, and a stack is no
-exception: open it, link it to the thread and stop.
-
-`gh stack` is an extension of `gh`: `gh extension install github/gh-stack`
-(0.2.1 has `merge`). It merges only pull requests that GitHub holds as a stack.
-The second query above prints `[]` for a chain that only its base branches hold
-together, and `gh stack link <lowest> ... <highest>`, with the numbers of the
-pull requests, makes a stack of it. That command also changes a base that does
-not fit the order you gave, and only warns when it could not. Read the members
-and the bases afterwards; a layer whose base changed needs its checks and its
-verdict again. The repository's list of stacks was empty on 2026-10-13: this
-section comes from the extension's code and README, not from a landing. When the
-command does something the section does not say, correct the section.
-
-After the owner has merged and you start new work on the same T3 branch, move the
-branch onto the merge first, so T3 does not keep showing the merged commits as
-new changes (a rebase or squash merge leaves the branch's own commits outside
-`main`):
-
-```
-git fetch && git reset --hard origin/main && git push --force-with-lease origin HEAD
-```
-
-Only when the previous PR is merged and the branch holds nothing unmerged. Then
-check `git rev-list --count origin/main..HEAD` prints 0 (local `main` can be
-checked out in another worktree and stale).
+After the owner has merged and you start new work on the same T3 branch, run `bun scripts/work.ts sync-branch`:
+it moves the branch onto `origin/main` and pushes it, and refuses while the branch holds a commit that is not on
+`main` or the worktree has changes.

@@ -183,18 +183,26 @@ test("the workflow gives the pipeline's token to the one step that reports, and 
 		steps.filter((step) => JSON.stringify(step.env ?? {}).includes("secrets.")).map((step) => `${job}: ${step.name}`),
 	);
 	expect(holders).toEqual(["gate: Report every shard to Mainworthy, then the gate"]);
+	// The gate is the job to require on the branch, so every job reaches it and a failed description blocks a merge.
+	expect(readFileSync(".github/workflows/check.yml", "utf8")).toContain(
+		"needs: [scope, static, tests, image, ios, description]",
+	);
 	// No secret in an environment every step of a job or of the workflow would share.
-	expect(Object.keys(workflow.jobs)).toEqual(["scope", "static", "image", "ios", "tests", "gate"]);
+	expect(Object.keys(workflow.jobs)).toEqual(["scope", "static", "image", "ios", "description", "tests", "gate"]);
 	expect(
 		[workflow.env, ...Object.values(workflow.jobs).map((job) => job.env)].filter((env) => env !== undefined),
 	).toEqual([]);
-	// Only the gate job may ask GitHub who it is (to join the tailnet); the jobs that run the tests may not.
+	// Only the gate job may ask GitHub who it is (to join the tailnet); the jobs that run the tests may not. The
+	// description job reads the pull request and its issues, and writes nothing.
 	expect(workflow.permissions).toEqual({ contents: "read" });
 	expect(
 		Object.entries(workflow.jobs)
 			.filter(([, job]) => job.permissions)
 			.map(([name, job]) => [name, job.permissions]),
-	).toEqual([["gate", { contents: "read", "id-token": "write" }]]);
+	).toEqual([
+		["description", { contents: "read", issues: "read", "pull-requests": "read" }],
+		["gate", { contents: "read", "id-token": "write" }],
+	]);
 	// The choice of instance is the script's (scripts/ci-instance.ts): no step starts a server. (The `image` job
 	// runs the container it built, to ask it for a page; nothing reports to that one.)
 	expect(readFileSync(".github/workflows/check.yml", "utf8")).not.toContain("serve");
