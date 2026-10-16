@@ -87,9 +87,8 @@ To answer from a question's page, follow these steps:
    such as "Adds 1 step." For an edit to an existing case, choose one of three views:
    **Changes** shows the steps with **Added**, **Removed**, **Changed** and **Moved** marks.
    **Current** shows the case as it is now, which **Reject** keeps.
-   **Proposed** shows the case as **Accept** would leave it.
-   If someone changed the case after the edit was proposed, **Proposed** keeps their change.
-   If accepting is refused now, for example because they changed a field the edit changes too, the page says why.
+   **Proposed** shows the case with the edit applied to it as it is now, so a change made after the edit was proposed is kept.
+   If the edit on its own would be refused now, for example because someone changed a field it changes too, the page says why.
 3. Press an answer. Each answer has a sentence that says what it does.
 4. If the project's policy asks for a reason, enter the reason before the app records the answer.
    **Defect in the product** asks where the defect is tracked. You can leave that field empty.

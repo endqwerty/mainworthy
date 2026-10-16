@@ -276,7 +276,9 @@ export function runView(ctx: Ctx, run: RunRow): Record<string, unknown> {
 /**
  * A proposal as a reviewer needs it: per edit, the case by ref, the body proposed, the body it would replace, and
  * for a conflict both sides of each field, so the diff can be drawn without another read. While the proposal waits,
- * an edit's body is what accepting writes now, and `refused` says why accepting is refused, if it is.
+ * an edit's body is the edit applied to its case as it is now, and `refused` says why accepting that edit on its own
+ * would be refused now. Accepting the whole proposal applies its edits in order and checks the proposal as a whole,
+ * so it can still be refused when no edit is.
  */
 function proposalView(ctx: Ctx, proposal: ProposalRow): Record<string, unknown> {
 	const index = folderIndex(ctx.db, proposal.project);

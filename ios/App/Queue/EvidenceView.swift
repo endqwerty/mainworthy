@@ -220,7 +220,7 @@ private struct ProposalEvidence: View {
 }
 
 /// One case of a proposal. An edit to a case that exists can be read three ways: what it changes, the case as
-/// it is, and the case as accepting would leave it. A new case is read as it would be.
+/// it is, and the case with the edit applied to it. A new case is read as it would be.
 private struct EditedCaseView: View {
 	let document: EditedCase
 	/// Whether the proposal still waits for an answer. A decided one is set against the case as it is now.
@@ -251,7 +251,7 @@ private struct EditedCaseView: View {
 				.padding(.top, 4)
 				.accessibilityIdentifier("edit-side")
 				if let refused = document.refused {
-					Label("Accepting is refused now: \(refused).", systemImage: "exclamationmark.triangle")
+					Label("On its own, this edit would be refused: \(refused).", systemImage: "exclamationmark.triangle")
 					.font(.subheadline)
 					.foregroundStyle(Color.warn)
 					.accessibilityIdentifier("edit-refused")
@@ -274,13 +274,15 @@ private struct EditedCaseView: View {
 		}
 	}
 
+	/// Says what each view is, and nothing of what accepting does: that depends on the proposal's other edits and on
+	/// what changes before it is answered, and the answer's reply says it.
 	private func caption(_ ref: String) -> String {
 		switch (side, waits && document.refused == nil) {
-		case (.changes, true): "The steps as accepting would leave them, with what changes marked. Unmarked steps stay as they are."
+		case (.changes, true): "What this edit changes in the case as it is now. Unmarked steps stay as they are."
 		case (.changes, false): "The steps as the edit has them, set against the case as it is now. Unmarked steps stay as they are."
 		case (.current, true): "\(ref) as it is now. Rejecting leaves it so."
 		case (.current, false): "\(ref) as it is now."
-		case (.proposed, true): "\(ref) as accepting would leave it."
+		case (.proposed, true): "\(ref) with this edit applied to it as it is now."
 		case (.proposed, false): "\(ref) as the edit has it."
 		}
 	}

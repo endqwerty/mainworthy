@@ -416,9 +416,9 @@ export function adoptionPolicy(db: Db, project: number, edits: readonly Resolved
 /**
  * What adopting an edit does to its case now. When the case has a newer version than the proposal was made on, the
  * body proposed is merged with it, and a body that would make a new version must meet the policy's field definitions
- * and pin fragments that can be pinned. Adopting checks this, and a waiting proposal is read through it too, so what
- * a reader is shown is what accepting does. Each edit is checked against the suite as it is, before the proposal's
- * other edits.
+ * and pin fragments that can be pinned. Adopting checks this for each edit, in order, after the proposal's earlier
+ * edits. A waiting proposal is read through it too, each edit against the suite as it is now, so a reader sees each
+ * edit applied to its case and what would refuse that edit on its own.
  */
 export function adoption(db: Db, row: CaseRow, edit: Extract<Resolved, { op: "edit" }>, policy: Policy): Adoption {
 	if (edit.conflicts.length > 0) {

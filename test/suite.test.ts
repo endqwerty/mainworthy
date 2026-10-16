@@ -774,6 +774,30 @@ describe("a proposal that waits while its case moves on", () => {
 		expect(accept(waiting.question)).toMatchObject({ status: "invalid", needs: refusal });
 	});
 
+	test("reads each edit on its own, so a proposal whose edits refuse each other reads clean and accepting refuses it", () => {
+		const waiting = h.call<Proposed>(
+			"propose",
+			{
+				edits: [
+					{ op: "edit", case: "C-1", base: 1, body: { title: "First" } },
+					{ op: "edit", case: "C-1", base: 1, body: { title: "Second" } },
+				],
+			},
+			agent,
+		);
+		expect(waiting.status).toBe("open");
+		const [proposal] = h.call<Read[]>("get", { refs: [waiting.proposal] });
+		expect(proposal?.edits.map((edit) => [edit.body.title, edit.refused])).toEqual([
+			["First", null],
+			["Second", null],
+		]);
+		// Accepting applies them in order: the second meets a version the first made. The answer says so.
+		expect(accept(waiting.question)).toMatchObject({
+			status: "conflict",
+			needs: "C-1 changed after this proposal was made; redo the proposal on version 2",
+		});
+	});
+
 	test("once decided, reads as it was proposed: a later version adds nothing to it and refuses nothing", () => {
 		const waiting = proposeAsAgent({ title: "Retitled by the agent" });
 		expect(accept(waiting.question)?.status).toBe("decided");

@@ -284,7 +284,8 @@ enum Wire {
 		let tags: JSONValue?
 		/// For create: the requirements the case covers.
 		let covers: [String]?
-		/// For edit, while the proposal waits: why accepting it is refused now, as a sentence. Null when it is not.
+		/// For edit, while the proposal waits: why accepting this edit on its own would be refused now, as a sentence.
+		/// Null when nothing is found; the proposal's other edits can still refuse it.
 		let refused: String?
 	}
 
