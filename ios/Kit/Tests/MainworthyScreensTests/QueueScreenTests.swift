@@ -910,6 +910,42 @@ struct QueueScreenFailureTests {
 		#expect(screen.current("Q-9") == nil)
 	}
 
+	@Test("a proposal that is decided is read again, so it no longer says that accepting is refused")
+	func decidedProposalIsReadAgain() async throws {
+		let key = try await Live.project()
+		let owner = try await Live.signedIn(as: Live.owner)
+		let screen = QueueScreen(project: try await Live.signedIn().project(key))
+		await screen.show(.open, filter: .adopt)
+		let open = try #require(screen.questions.first)
+		// The case gets a third step of its own while the agent's edit, which adds one too, waits.
+		let _: JSONValue = try await owner.write("propose", in: key, [
+			"edits": [[
+				"op": "edit", "case": "C-2", "base": 1,
+				"body": ["steps": [
+					["id": "s1", "action": "Open the cart with one $100.00 item", "expected": .null],
+					["id": "s2", "action": "Apply the coupon SAVE10", "expected": "Total shows $90.00"],
+					["id": "s3", "action": "A different third step", "expected": .null],
+				]],
+			]],
+		])
+		await screen.readDocuments(of: open)
+		guard case .read(let waiting) = screen.documents(of: open) else {
+			Issue.record("the open proposal was not read")
+			return
+		}
+		#expect(waiting.first?.refused?.hasPrefix("C-2 changed after this proposal was made") == true)
+		#expect(await screen.answer(open, with: try #require(open.choices.first { $0.answer == "reject" })))
+		await screen.show(.decided, filter: .adopt)
+		let decided = try #require(screen.questions.first { $0.ref == open.ref })
+		#expect(!decided.isOpen && decided.evidenceHash == open.evidenceHash)
+		await screen.readDocuments(of: decided)
+		guard case .read(let settled) = screen.documents(of: decided) else {
+			Issue.record("the decided proposal was not read")
+			return
+		}
+		#expect(settled.count == 1 && settled.first?.refused == nil)
+	}
+
 	@Test("the first read that fails says why, in place of the list")
 	func firstReadFails() async throws {
 		let server = Server(instance: try #require(Instance(address: "mainworthy.example")), secrets: MemoryStore(), transport: Down())

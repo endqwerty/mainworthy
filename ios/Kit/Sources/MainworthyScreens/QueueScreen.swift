@@ -529,7 +529,7 @@ public final class QueueScreen: ProjectScreen {
 	}
 
 	/// What the edit a question asks about changes, as far as it was read for the evidence the question has
-	/// now. An edit whose case changed since is another piece of evidence, and is read again.
+	/// now, open or decided. An edit whose case changed since is another piece of evidence, and is read again.
 	public func documents(of question: Question) -> Documents? {
 		documents[QueueScreen.key(question)]
 	}
@@ -551,7 +551,9 @@ public final class QueueScreen: ProjectScreen {
 		}
 	}
 
+	/// What the documents were read for. Deciding a question keeps its evidence, but a decided proposal reads as it
+	/// was proposed, and one that waits as what accepting does now, so the two are read apart.
 	private static func key(_ question: Question) -> String {
-		"\(question.ref) \(question.evidenceHash)"
+		"\(question.ref) \(question.evidenceHash) \(question.isOpen ? "open" : "decided")"
 	}
 }

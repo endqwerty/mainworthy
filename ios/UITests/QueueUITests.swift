@@ -369,4 +369,50 @@ final class QueueUITests: XCTestCase {
 		XCTAssertTrue(app.textFields["name"].waitForExistence(timeout: 10))
 		XCTAssertFalse(app.textFields["address"].exists)
 	}
+
+	@MainActor func testARefusedProposalSaysWhyUntilItIsDecided() async throws {
+		let project = try await makeProject()
+		let address = try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])
+		// The case gets a third step of its own while the agent's edit, which adds one too, waits.
+		var request = URLRequest(url: try XCTUnwrap(URL(string: "\(address)/api/p/\(project)/propose")))
+		request.httpMethod = "POST"
+		request.setValue("Bearer \(environment["MAINWORTHY_TEST_TOKEN"] ?? "")", forHTTPHeaderField: "Authorization")
+		request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+		request.httpBody = try JSONSerialization.data(withJSONObject: [
+			"edits": [[
+				"op": "edit", "case": "C-2", "base": 1,
+				"body": ["steps": [
+					["id": "s1", "action": "Open the cart with one $100.00 item", "expected": NSNull()],
+					["id": "s2", "action": "Apply the coupon SAVE10", "expected": "Total shows $90.00"],
+					["id": "s3", "action": "A different third step", "expected": NSNull()],
+				]],
+			]],
+		])
+		let (_, response) = try await URLSession.shared.data(for: request)
+		XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", address]
+		app.launch()
+		try signIn(app)
+		selectProject(project, in: app)
+		let row = app.staticTexts.matching(identifier: "Edit: A percentage coupon lowers the total").firstMatch
+		XCTAssertTrue(row.waitForExistence(timeout: 10))
+		row.tap()
+		// While it waits, the page says why accepting it is refused, in the server's words.
+		let refused = app.staticTexts["edit-refused"]
+		XCTAssertTrue(refused.waitForExistence(timeout: 10))
+		XCTAssertTrue(refused.label.hasPrefix("Accepting is refused now: C-2 changed after this proposal was made"), refused.label)
+		shot("9-proposal-refused")
+		app.swipeUp()
+		app.buttons["answer-reject"].tap()
+		XCTAssertTrue(app.staticTexts["notice"].waitForExistence(timeout: 10))
+		// Decided, it no longer says so.
+		app.buttons["Decided"].tap()
+		XCTAssertTrue(row.waitForExistence(timeout: 10))
+		row.tap()
+		XCTAssertTrue(app.segmentedControls["edit-side"].waitForExistence(timeout: 10))
+		XCTAssertFalse(refused.exists)
+		shot("10-proposal-decided")
+	}
 }
