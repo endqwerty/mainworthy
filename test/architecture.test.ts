@@ -812,6 +812,7 @@ describe("the project's name", () => {
 			"src/web/lib/former-name.test.ts": "what a browser kept under the former name",
 			"src/web/lib/former-name.ts": "what a browser kept under the former name",
 			"t3.json": "releases the `.casebook` of an older checkout",
+			"test/compose-coolify.test.ts": "the copy of the existing deployment's volume to its new name",
 			"test/architecture.test.ts": "this list",
 			"test/e2e/shell.test.ts": "what a browser kept under the former name",
 		};
