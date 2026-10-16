@@ -243,13 +243,15 @@ and grants for the next start to fill. Writes, including administration lists an
 transaction, then proceed alongside the seed's API requests. After ten minutes the reset requests its worker
 to stop. It stops only between SQLite statements: a running statement must finish before rollback releases
 waiting writes. The seed gets a fresh fifteen-minute token after removal, which is revoked when seeding ends.
-A graceful stop during reset skips that token. If seeding has begun, the stop waits for its token cleanup
-before closing the database.
+A graceful stop during reset skips that token. If seeding has begun, the stop waits for the seed to finish
+and its token cleanup before closing the database.
 
 Step timings go to stderr, for example `[mainworthy] demo "demo": delete results took 12.3 ms`. The log names
 the provenance check, grant capture, table discovery, every table count and delete, foreign-key check,
-recreation with grants, the reset transaction, and the seed. Migration 24 adds plain foreign-key child indexes
-so removing demo rows does not repeatedly scan unrelated projects. It changes no archive data or version.
+recreation with grants, the reset transaction, and the seed. The worker disables per-row foreign-key enforcement
+before its reset transaction and checks all foreign keys before commit. A violation rolls the whole reset back.
+Migration 25 removes indexes needed only for removal, so reports no longer maintain them.
+It changes no archive data or version.
 [Decision 0087](decisions/0087-responsive-demo-refresh.md) records the tradeoff.
 
 ## This repository's CI reporting to the instance

@@ -166,7 +166,7 @@ describe("quarantine", () => {
 			.query<{ detail: string }, []>(`EXPLAIN QUERY PLAN ${statement}`)
 			.all()
 			.map((row) => row.detail);
-		expect(plan).toEqual(["SEARCH results USING INDEX results_quarantine_exit_fk (quarantine_exit=?)"]);
+		expect(plan).toEqual(["SEARCH results USING INDEX results_quarantine_exit (quarantine_exit=?)"]);
 	});
 
 	test("a person's decision excuses one test and makes quarantined failures explicit", () => {
