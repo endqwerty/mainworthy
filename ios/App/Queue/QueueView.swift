@@ -265,19 +265,6 @@ private struct SelectionMode: ViewModifier {
 					Task { await screen.answerAll(chosen.questions, with: chosen.choice, reference: reference, reason: reason) }
 				}
 			}
-			.confirmationDialog(
-				"\(confirming?.choice.label ?? "Answer") for \(confirming?.what ?? "the selected questions")?",
-				isPresented: isConfirming, titleVisibility: .visible, presenting: confirming
-			) { chosen in
-				Button(chosen.choice.label) {
-					confirming = nil
-					Task { await screen.answerAll(chosen.questions, with: chosen.choice) }
-				}
-				.accessibilityIdentifier("bulk-confirm")
-				Button("Cancel", role: .cancel) { confirming = nil }
-			} message: { chosen in
-				Text(message(for: chosen))
-			}
 	}
 
 	/// Select All, of the selection's kind or the kind the list shows; Deselect All once all of them are selected.
@@ -322,6 +309,20 @@ private struct SelectionMode: ViewModifier {
 		.menuStyle(.button)
 		.buttonStyle(.glassProminent)
 		.tint(.accentColor)
+		// The confirmation comes from the button that asked for it, as an action sheet's source should.
+		.confirmationDialog(
+			"\(confirming?.choice.label ?? "Answer") for \(confirming?.what ?? "the selected questions")?",
+			isPresented: isConfirming, titleVisibility: .visible, presenting: confirming
+		) { chosen in
+			Button(chosen.choice.label) {
+				confirming = nil
+				Task { await screen.answerAll(chosen.questions, with: chosen.choice) }
+			}
+			.accessibilityIdentifier("bulk-confirm")
+			Button("Cancel", role: .cancel) { confirming = nil }
+		} message: { chosen in
+			Text(message(for: chosen))
+		}
 		.disabled(screen.selection.isEmpty || screen.sharedChoices.isEmpty || !screen.busy.isDisjoint(with: screen.selected))
 		.accessibilityIdentifier("bulk-answer")
 	}
