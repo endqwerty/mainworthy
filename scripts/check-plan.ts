@@ -102,6 +102,8 @@ export type Phase = "parallel" | "quiet";
 export type TestOptions = {
 	/** `i/n`: the parallel phase runs only that share of its files. */
 	shard?: string | undefined;
+	/** Only these of the phase's files (`scripts/ci-scope.ts` chooses them for a change). */
+	files?: readonly string[] | undefined;
 	/** Workers, where the phase's own number is not wanted. */
 	workers?: number | undefined;
 	junit?: string | undefined;
@@ -124,14 +126,16 @@ export function testArgs(phase: Phase, options: TestOptions): string[] {
 		"--update-timings",
 		...(options.junit ? ["--reporter=junit", `--reporter-outfile=${options.junit}`] : []),
 		...(options.failuresOnly ? ["--only-failures"] : []),
-		...(phase === "quiet"
-			? QUIET.map((file) => `./${file}`)
-			: [
-					...QUIET.map((file) => `--path-ignore-patterns=${file}`),
-					...(options.shard ? [`--shard=${options.shard}`] : []),
-					"src",
-					"test",
-				]),
+		...(options.files
+			? (phaseFiles(phase, undefined, options.files) ?? []).map((file) => `./${file}`)
+			: phase === "quiet"
+				? QUIET.map((file) => `./${file}`)
+				: [
+						...QUIET.map((file) => `--path-ignore-patterns=${file}`),
+						...(options.shard ? [`--shard=${options.shard}`] : []),
+						"src",
+						"test",
+					]),
 	];
 }
 
@@ -245,8 +249,9 @@ export function failedTests(results: readonly ResultIn[]): FailedTest[] {
 		}));
 }
 
-/** The test files of a phase, or null for a shard, whose share of them Bun chooses. */
-export function phaseFiles(phase: Phase, shard?: string | undefined): string[] | null {
+/** The test files of a phase, of `only` when given, or null for a shard, whose share of them Bun chooses. */
+export function phaseFiles(phase: Phase, shard?: string | undefined, only?: readonly string[]): string[] | null {
+	if (only) return [...only].filter((file) => QUIET.includes(file) === (phase === "quiet")).sort();
 	if (phase === "quiet") return QUIET;
 	if (shard) return null;
 	const files = [...new Glob("{src,test}/**/*.test.{ts,tsx}").scanSync(".")];

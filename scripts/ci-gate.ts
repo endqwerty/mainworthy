@@ -5,7 +5,10 @@
 // runner with no browser skips every browser test, exits 0 and writes a complete report), and a test file whose
 // name is too long for a report to keep whole, because its tests cannot be told from another file's.
 //
-//   bun scripts/ci-gate.ts <directory> <shard>...        from the repository's root
+//   bun scripts/ci-gate.ts <directory> <shard>... [--files=<file>,<file>...]        from the repository's root
+//
+// `--files` names the test files the shards were given, when a change needed only those (`scripts/ci-scope.ts`);
+// without it every test file of the checkout is expected in a report.
 //
 // For each shard there are two files: `<shard>.xml` (JUnit) and `<shard>.json` (what `scripts/check.ts test
 // --junit` wrote beside it). In the workflow they are in the directory of the shard's artifact, one for each
@@ -22,9 +25,11 @@ import { parseJUnit, TEST_FILE_LIMIT } from "../src/surfaces/formats/junit.ts";
 import { CI_SHARD_LIMITS, newestAttempt, type Outcome, over, readOutcome, seconds } from "./check-plan.ts";
 import { chooseInstance, describeChoice, type Environment, type Own, startOwn } from "./ci-instance.ts";
 
-const [directory, ...shards] = process.argv.slice(2);
-if (!directory || shards.length === 0) {
-	console.error("usage: bun scripts/ci-gate.ts <directory> <shard>...");
+const filesFlag = process.argv.slice(2).find((arg) => arg.startsWith("--files="));
+const [directory, ...shards] = process.argv.slice(2).filter((arg) => arg !== filesFlag);
+const expected = filesFlag?.slice("--files=".length).split(",").filter(Boolean);
+if (!directory || shards.length === 0 || shards.some((shard) => shard.startsWith("-")) || expected?.length === 0) {
+	console.error("usage: bun scripts/ci-gate.ts <directory> <shard>... [--files=<file>,<file>...]");
 	process.exit(4);
 }
 
@@ -127,7 +132,7 @@ try {
 	own?.stop();
 }
 
-const unreported = [...new Glob("{src,test}/**/*.test.{ts,tsx}").scanSync(".")]
+const unreported = (expected ?? [...new Glob("{src,test}/**/*.test.{ts,tsx}").scanSync(".")])
 	.filter((file) => !reported.has(file))
 	.sort();
 if (unreported.length > 0) problems.push(`in no shard's report: ${unreported.join(", ")}`);

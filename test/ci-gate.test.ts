@@ -71,6 +71,8 @@ async function gate(
 		/** Routes of the instance of the test that answer in place of its own. */
 		routes?: NonNullable<Parameters<typeof withInstance>[1]>["routes"];
 		configure?: (running: Running) => Promise<Record<string, string>>;
+		/** The test files the change needed (`--files`), where the shards were not given every file. */
+		files?: string[];
 	} = {},
 ) {
 	return withInstance(
@@ -105,6 +107,7 @@ async function gate(
 						resolve("scripts/ci-gate.ts"),
 						"test-results",
 						...new Set(shards.map((shard) => shard.name)),
+						...(options.files ? [`--files=${options.files.join(",")}`] : []),
 					],
 					{
 						cwd: root,
@@ -410,6 +413,20 @@ test("a test file that is in no shard's report fails the job", async () => {
 	expect(result.output).toContain("::error::in no shard's report: test/e2e/forgotten.test.ts");
 	expect(result.output).not.toContain("helpers.ts");
 	expect(result.code).toBe(1);
+}, 20_000);
+
+// Decision 0089: a change that needs only some test files runs those, and the gate expects those in a report.
+test("given the files the change needed, the job expects those in a report and no other", async () => {
+	const chosen: Shard[] = [
+		{ name: "tests", files: { "test/architecture.test.ts": null, "test/licences.test.ts": null } },
+	];
+	const repository = ["test/architecture.test.ts", "test/licences.test.ts", "test/e2e/browser.test.ts"];
+	const narrowed = await gate(chosen, { repository, files: ["test/architecture.test.ts", "test/licences.test.ts"] });
+	expect(narrowed.output).not.toContain("in no shard's report");
+	expect(narrowed.code).toBe(0);
+	const short = await gate(chosen, { repository, files: ["test/architecture.test.ts", "test/docs.test.ts"] });
+	expect(short.output).toContain("::error::in no shard's report: test/docs.test.ts");
+	expect(short.code).toBe(1);
 }, 20_000);
 
 test("a slow shard is a warning above the budget and a failure above the limit", async () => {

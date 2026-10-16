@@ -9,6 +9,8 @@
 //   bun scripts/check.ts test --workers=4     that many workers in the parallel phase
 //   bun scripts/check.ts test --update-timings     record scripts/test-timings.json: every file alone, six minutes
 //   bun scripts/check.ts test --only=parallel --shard=2/6 --junit=test-results/tests-2.xml     a CI shard
+//   bun scripts/check.ts test --only=parallel test/docs.test.ts test/architecture.test.ts     those files of a phase,
+//                                             as CI runs the ones a change needs (`scripts/ci-scope.ts`)
 //
 // One file is `bun test <file>`; this is for the whole suite.
 //
@@ -28,6 +30,7 @@ import {
 	type Phase,
 	phaseFiles,
 	phaseReport,
+	QUIET,
 	REFERENCE_THREADS,
 	SHARED_CORES,
 	seconds,
@@ -43,7 +46,12 @@ requireReady("check");
 const argv = process.argv.slice(2);
 const testsOnly = argv[0] === "test";
 const flags = new Map<string, string>();
+const files: string[] = [];
 for (const arg of argv.slice(testsOnly ? 1 : 0)) {
+	if (testsOnly && !arg.startsWith("-")) {
+		files.push(arg.replace(/^\.\//, ""));
+		continue;
+	}
 	const match = /^--(shard|only|junit|workers)=(.+)$/.exec(arg) ?? /^--(update-timings)()$/.exec(arg);
 	if (!match?.[1] || (!testsOnly && match[1] !== "update-timings")) {
 		console.error(`check: unknown argument ${arg}. One file is \`bun test <file>\`; scripts/check.ts lists the rest.`);
@@ -62,6 +70,20 @@ if (junit !== undefined && (only === undefined || !junit.endsWith(".xml"))) {
 	process.exit(4);
 }
 const shard = flags.get("shard");
+// A phase given no file would run every file: each named file is a test of this checkout and of the phase named.
+const notTests = files.filter((file) => !/^(src|test)\/.+\.test\.tsx?$/.test(file) || !existsSync(file));
+const otherPhase = files.filter((file) => QUIET.includes(file) !== (only === "quiet"));
+if (notTests.length > 0 || (files.length > 0 && (only === undefined || shard !== undefined)) || otherPhase.length > 0) {
+	console.error(
+		notTests.length > 0
+			? `check: not a test file of this checkout: ${notTests.join(", ")}`
+			: otherPhase.length > 0
+				? `check: not a file of the ${only} phase (QUIET in scripts/check-plan.ts): ${otherPhase.join(", ")}`
+				: "check: test files are named with --only and without --shard, one phase at a time",
+	);
+	process.exit(4);
+}
+const chosen = files.length > 0 ? files : undefined;
 // The recorded timings are each file's time with nothing beside it, which is what a CI shard gives it.
 const record = flags.has("update-timings");
 const workers = flags.has("workers") ? Number(flags.get("workers")) : record ? 1 : undefined;
@@ -130,6 +152,7 @@ async function tests(capture: boolean): Promise<TestPart[]> {
 		rmSync(report, { force: true });
 		const args = testArgs(phase, {
 			shard,
+			files: chosen,
 			workers: phase === "parallel" || record ? workers : undefined,
 			junit: report,
 			timings,
@@ -206,7 +229,7 @@ if (failedPhases.length > 0) {
 		phaseReport(
 			part.name,
 			existsSync(part.report) ? parseJUnit(readFileSync(part.report, "utf8")).results : null,
-			phaseFiles(part.phase, shard),
+			phaseFiles(part.phase, shard, chosen),
 		),
 	);
 	console.log(`\n${failureLines(reports).join("\n")}`);
