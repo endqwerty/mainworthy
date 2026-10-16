@@ -50,7 +50,7 @@ struct RunView: View {
 				Text("Cases in order")
 			} footer: {
 				if screen.slots.contains(where: screen.isLeftToOthers) {
-					Text("A slot that a pipeline, an agent or another person filled is left to that result and does not open.")
+					Text("A slot that a pipeline, an agent or another person filled, and you have not, is left to that result and does not open.")
 				}
 			}
 			if case .failed(let why) = screen.loading {

@@ -60,7 +60,7 @@ final class RunsUITests: XCTestCase {
 		shot("2b-left-to-others")
 		XCTAssertTrue(
 			app.staticTexts[
-				"A slot that a pipeline, an agent or another person filled is left to that result and does not open."
+				"A slot that a pipeline, an agent or another person filled, and you have not, is left to that result and does not open."
 			].waitForExistence(timeout: 5))
 		app.swipeDown()
 		start.tap()
