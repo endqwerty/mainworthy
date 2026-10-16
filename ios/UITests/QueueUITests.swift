@@ -62,7 +62,7 @@ final class QueueUITests: XCTestCase {
 		app.secureTextFields["password"].typeText(environment["MAINWORTHY_TEST_PASSWORD"] ?? "")
 		shot("1-sign-in")
 		app.buttons["sign-in"].tap()
-		XCTAssertTrue(app.navigationBars["Queue"].waitForExistence(timeout: 20))
+		XCTAssertTrue(app.buttons["project-menu"].waitForExistence(timeout: 20))
 	}
 
 	@MainActor private func selectProject(_ project: String, in app: XCUIApplication) {

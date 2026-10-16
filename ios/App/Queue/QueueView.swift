@@ -9,30 +9,43 @@ struct QueueView: View {
 	let workspace: Workspace
 	@State private var path: [String] = []
 
+	/// Whether Select is offered: on the open questions, to a person who may answer.
+	private var canSelect: Bool { screen.showing == .open && workspace.project?.may(.produce) == true }
+
+	private var selectButton: some View {
+		Button(screen.isSelecting ? "Done" : "Select") { screen.select(!screen.isSelecting) }
+			.fontWeight(screen.isSelecting ? .semibold : .regular)
+			.accessibilityIdentifier("queue-select")
+	}
+
+	private var unsentLink: some View {
+		NavigationLink {
+			UnsentAnswersView(screen: screen)
+		} label: {
+			Label("Unsent answers (\(screen.outbox.pendingCount))", systemImage: "tray.and.arrow.up")
+		}
+		.accessibilityIdentifier("unsent-answers")
+	}
+
+	private var showingPicker: some View {
+		Picker("Show", selection: showing) {
+			Text("Open").tag(QueueScreen.Showing.open)
+			Text("Decided").tag(QueueScreen.Showing.decided)
+		}
+		.pickerStyle(.segmented)
+	}
+
 	var body: some View {
 		NavigationStack(path: $path) {
 			list
+				// The tab says Queue. The bar keeps its room for the project, Unsent answers and Select, as Photos
+				// and Files keep Select at the top right; Open and Decided are the segmented control under it.
 				.navigationTitle("Queue")
-				.navigationBarTitleDisplayMode(.inline)
+				.toolbar(removing: .title)
 				.toolbar {
 					ProjectMenu(workspace: workspace)
-					ToolbarItem(placement: .topBarTrailing) {
-						NavigationLink {
-							UnsentAnswersView(screen: screen)
-						} label: {
-							Label("Unsent answers (\(screen.outbox.pendingCount))", systemImage: "tray.and.arrow.up")
-						}
-						.accessibilityIdentifier("unsent-answers")
-					}
-
-					ToolbarItem(placement: .principal) {
-						Picker("Show", selection: showing) {
-							Text("Open").tag(QueueScreen.Showing.open)
-							Text("Decided").tag(QueueScreen.Showing.decided)
-						}
-						.pickerStyle(.segmented)
-						.frame(maxWidth: 200)
-					}
+					ToolbarItem(placement: .topBarTrailing) { unsentLink }
+					if canSelect { ToolbarItem(placement: .topBarTrailing) { selectButton } }
 				}
 				.navigationDestination(for: String.self) { ref in
 					QuestionView(ref: ref, screen: screen, workspace: workspace) { path.removeAll() }
@@ -83,15 +96,9 @@ struct QueueView: View {
 							.task { await screen.more() }
 					}
 				} header: {
-					HStack(spacing: 8) {
+					VStack(spacing: 8) {
+						showingPicker.padding(.trailing, 16).padding(.top, 4)
 						Filters(screen: screen)
-						// Beside the kinds, not in the navigation bar, where it would push out Open and Decided.
-						if screen.showing == .open, workspace.project?.may(.produce) == true {
-							Button(screen.isSelecting ? "Done" : "Select") { screen.select(!screen.isSelecting) }
-								.font(.subheadline.weight(screen.isSelecting ? .semibold : .regular))
-								.padding(.trailing, 16)
-								.accessibilityIdentifier("queue-select")
-						}
 					}
 					.listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 0))
 					.textCase(nil)
@@ -475,3 +482,4 @@ private struct UnsentAnswersView: View {
 		}
 	}
 }
+

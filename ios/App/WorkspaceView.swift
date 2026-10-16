@@ -80,7 +80,12 @@ struct ProjectMenu: ToolbarContent {
 				}
 			} label: {
 				HStack(spacing: 4) {
+					// A long name gives way, so the bar keeps room for each screen's own buttons.
 					Text(workspace.project?.name ?? "No project")
+						.lineLimit(1)
+						.truncationMode(.middle)
+						.frame(maxWidth: 110, alignment: .leading)
+						.fixedSize(horizontal: false, vertical: true)
 					Image(systemName: "chevron.down").imageScale(.small)
 				}
 				.font(.subheadline.weight(.medium))
