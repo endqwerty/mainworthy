@@ -32,9 +32,11 @@ test("a change to prose runs no job but the tests, and of them only the ones tha
 	expect(chosen.tests).not.toBe("all");
 	for (const file of TREE) expect(chosen.tests).toContain(file);
 	expect(chosen.tests).not.toContain("test/e2e/queue-and-runs.test.ts");
-	// README.md is read by no test but the two that read every file (and this one, which names it); `ios/README.md`
-	// does not name it.
-	expect(plan(["README.md"], tests).tests).toEqual([...TREE, "test/ci-scope.test.ts"].sort());
+	// README.md is read by no test but the ones that read every file; `ios/README.md` does not name it.
+	expect(plan(["README.md"], tests).tests).toEqual(TREE);
+	// A new file at the top is one the list of top-level entries below does not have yet (the verifier's finding of
+	// 2026-10-16): that test runs for it.
+	expect(plan(["CONTRIBUTING.md"], tests).tests).toContain("test/ci-scope.test.ts");
 });
 
 test("a change to the iPhone app runs its job and the tests that read the app, and not the image", () => {

@@ -25,8 +25,8 @@ Each job runs when a file it reads changed:
 
 The tests run whole unless every changed file is one that no code of the product, the tests or the scripts
 reads: `docs/` other than what `/docs` serves, a Markdown file at the root other than `THIRD-PARTY-NOTICES.md`,
-`.github/` other than `check.yml`, and `ios/`. Then one runner runs the two tests that read every file of the tree
-(the former name, the owner's name) and each test file that names a changed file or a directory it is in, from
+`.github/` other than `check.yml`, and `ios/`. Then one runner runs the three tests that read every file of the tree
+or every entry at its top (the former name, the owner's name, the jobs of each top-level entry) and each test file that names a changed file or a directory it is in, from
 the root or through `../`. A change to `CHANGELOG.md` runs three test files, one to `AGENTS.md` four, one to the
 iPhone app five beside the `ios` job, and one to a decision record nine: every test that names a file under
 `docs/` is one that might read that directory.
