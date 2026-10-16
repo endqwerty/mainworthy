@@ -47,5 +47,5 @@ and build. Each result in `get T-n` and in a case's timeline now names its commi
 - MCP's `find` does not offer `results`. Its tools/list was at its measured budget of 3,950 tokens before this
   change, and the smallest form of the new choice took it to 3,994. Whether agents get results at that cost is
   the owner's call; the HTTP API and the CLI have them, as they alone have `deployments`.
-- The iPhone app shows neither the results nor the Tests screen yet.
+- The iPhone app showed neither the results nor the Tests screen; decision 0088 adds both.
 - A test's page lists its last twenty results; older ones are read through the case's timeline or not at all.

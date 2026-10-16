@@ -3,7 +3,7 @@
 Work with Mainworthy from your phone in a native app.
 This page says how to install the app, how to sign in and what it does today.
 
-The app has the queue, planned runs, the cases, changes and your sessions (issue #171). What an admin does,
+The app has the queue, planned runs, the cases, the automated tests, changes and your sessions (issue #171). What an admin does,
 inviting people, tokens and the project's policy, is not in the app: open the instance in the phone's browser,
 which gets [a layout of its own](./keyboard.md#on-a-phone).
 
@@ -85,7 +85,7 @@ A passkey does not work in the app.
    asks for one. Both decisions stay in the ledger. Undo sends the decision id returned by your answer.
    If somebody replaced that answer meanwhile, their decision stays and the app says the decision changed.
 
-You cannot answer from the list. A question is answered from its page, where its evidence is.
+A question is answered from its page, where its evidence is, or with others of its kind from the list.
 
 **Decided** at the top shows what was decided and by whom. Open a question there to withdraw its decision.
 The withdrawal names the decision shown. If it changed meanwhile, read the question again before withdrawing it.
@@ -93,6 +93,26 @@ An unconfirmed withdrawal shows the server's response without claiming that the 
 
 The chips over the list show one kind of question. The name at the top left is the project that is open. Press
 it to open another.
+
+## Answer several questions at once
+
+1. In **Queue**, press **Select**. Each open question gets a circle.
+2. Press questions to select them. A selection holds one kind, such as unlinked tests or failures, and at most
+   100 questions. **Select all** selects every listed question of that kind; with a kind's chip chosen, it
+   selects that kind. A question that cannot join is drawn faint and, when pressed, says why: another kind, a
+   proposal or a finding with a suggested edit (these are answered on their own page, where the edit is shown),
+   one the policy does not let you settle, or one with an answer still waiting to send.
+3. Press **Answer all** and choose an answer. Only the answers every selected question takes are offered.
+   **Link to a case** is not among them: each test needs its own case, so link one question at a time.
+   **Create cases** makes and links one automated case for each test of the selected questions.
+4. Confirm. Where the policy asks for a reason, or the answer takes a defect reference, the app asks first, and
+   the same reason and reference go to every selected question.
+
+Each question gets its own decision on the evidence it was listed with. The answers are saved on this device and
+sent one by one, as in [Answer during a network drop](#answer-during-a-network-drop). The bar under the list says
+how many were recorded and names any question that was decided or changed meanwhile: read that one again.
+**Undo** withdraws every decision the answer made, with one reason where the policy asks for one. Press **Done**
+to leave Select.
 
 ## Link tests to cases
 
@@ -146,6 +166,13 @@ Planning needs the project's `plan` capability. A selection with no cases is ref
    project's change stream. An open page stays readable when its change leaves the list.
 3. Press an open question to read its evidence and answer it, as in Queue. When you answer, the change's
    gate is read again.
+4. **Results** lists every test the gate of the change's head counted, with a case or tracked without one: how
+   the gate counted it (unexplained, needs a fix, excused, could not run, skipped, passed), its case or **no
+   case**, its file, job, attempt, duration, who reported it and the failure message. The counts above the list
+   choose what it shows, and the field under them filters by test name or file. A row's question opens it, and
+   **Open the build** opens the CI build when the report named one. Press a row to open its test.
+   **Show more** reads the next hundred. If the results changed since the first page, the app says so and
+   **Read them again** starts from the top.
 
 The head, gate, failing tests and affected cases are checked against the commits named in the replies. If the
 head moves during a read, the app tries again once. If it moves again, the app says so and keeps the previous
@@ -188,15 +215,17 @@ is known. Token creation, people, and policy administration still need the web a
 1. Open **Cases**. It works like the Files app: **All cases**, the top folders, and the most used tags, with
    **All tags** for the rest. A folder opens as its own page with its subfolders above its own cases. Swipe from
    the left edge of the screen, or press the back button, to go up. Scroll to the end of a list to read the next
-   page. A mark at the end of a case's row shows its worst result on the current version: a cross for a failure
-   or an error, a triangle for blocked, a tick for a pass.
+   page. Under a case's title, a chip for each way it was run shows its latest result: the icon of who ran it (a
+   person, a pipeline's gears, an agent's sparkles), a tick or a cross, and the word, such as **passed** or
+   **failed**. A grey chip that says **older version** is a result on an earlier version of the case.
    A list you opened recently shows at once and is read again in the background after a change. The app keeps the
    last forty lists you left; an older one is read again with a spinner. Pull down to read a list now.
    The magnifier at the top searches for words of a case or its number, such as `C-12`. Opened in a folder, it
    searches that folder and its subfolders; in a tag, the cases with that tag. Press **Everywhere** to search the
    whole project. A case number finds that case only inside the folder or tag you search. Closing the search
    clears it.
-2. Open a case to read its version, preconditions, steps and who may run it. **History** lists who wrote each
+2. Open a case to read its version, preconditions, steps and who may run it: a badge each for **Person**,
+   **Pipeline** and **Agent**, struck through where the case does not allow that way. **History** lists who wrote each
    version, when and why. Saved versions are read-only. **Open current case** opens the editable page.
    Folder and tags show the current placement.
 3. If you may produce evidence, press **+** to write a case in the folder you are in, or **Edit case** on its
@@ -228,9 +257,18 @@ The editor keeps custom field values without editing them. A newly required fiel
 Moving, tagging, archiving and restoring cases, changing folders and version diffs still
 need the web app. The button on a case's page opens it there.
 
+## Read the automated tests
+
+**Cases**, **Automated tests** lists every test a pipeline has reported, newest first, with its case or **no
+case**, and **quarantined** while it is. Search by name or file, and turn on **Only tests with no case** to see
+the tests tracked without one. Open a test to read its file, its key, its case (or that it is tracked without
+one, and its results still count for the gate), its quarantine, how often it flipped between passing and
+failing on the same code, and its latest twenty results with their commit, change, job, who reported them and
+the build. A test opened from a change's results shows the same page.
+
 ## Answer during a network drop
 
-Except for linking tests and creating cases, you can answer questions whose evidence the app has already shown. Before sending, the app saves each answer on this device with its original evidence and command id. The question stays open until the server confirms a decision. While an answer is waiting to send, another answer to that question waits until the saved answer has an outcome or you drop it.
+Except for linking tests and creating cases from a question's page, you can answer questions whose evidence the app has already shown. Before sending, the app saves each answer on this device with its original evidence and command id. The question stays open until the server confirms a decision. While an answer is waiting to send, another answer to that question waits until the saved answer has an outcome or you drop it.
 
 Open **Unsent answers** at the top right of Queue. Each entry shows **Waiting to send**, **Dropped**, **Recorded**, **Recorded as advice**, **Overtaken**, or **Refused**, with the server's reason. Keep the app open. Waiting answers send in order when the connection returns, including answers in other projects. **Send waiting answers** tries again immediately.
 
