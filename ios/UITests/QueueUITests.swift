@@ -144,7 +144,8 @@ final class QueueUITests: XCTestCase {
 		app.buttons["queue-select"].tap()
 		let count = app.staticTexts["selection-count"]
 		XCTAssertTrue(count.waitForExistence(timeout: 5))
-		XCTAssertEqual(count.label, "Select questions of one kind")
+		XCTAssertEqual(count.label, "Select questions")
+		shot("bulk-select")
 		let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'select-Q-'"))
 		let unlinked = rows.matching(NSPredicate(format: "label CONTAINS 'has no case'"))
 		XCTAssertEqual(unlinked.count, 4)
@@ -186,12 +187,17 @@ final class QueueUITests: XCTestCase {
 		let entry = app.staticTexts.matching(NSPredicate(format: "label == %@", "Track without a case for 4 questions")).firstMatch
 		XCTAssertTrue(entry.waitForExistence(timeout: 5))
 		XCTAssertTrue(app.staticTexts["Recorded"].exists)
-		let clear = app.buttons["Clear outcomes"]
-		for _ in 0..<3 where !clear.exists { app.swipeUp() }
+		// A recorded answer is listed under Replied, and with nothing waiting there is no button to send.
+		XCTAssertTrue(app.staticTexts["nothing-waiting"].exists)
+		XCTAssertFalse(app.buttons["send-waiting-answers"].exists)
+		XCTAssertTrue(app.staticTexts["replied-header"].exists)
+		XCTAssertFalse(app.staticTexts["No reply yet"].exists)
 		shot("bulk-unsent")
-		XCTAssertTrue(clear.exists, "a recorded answer to several questions can be cleared")
+		let clear = app.buttons["Clear outcomes"]
+		XCTAssertTrue(clear.isHittable, "Clear outcomes sits above the answers it clears, not under them")
 		clear.tap()
 		XCTAssertFalse(entry.waitForExistence(timeout: 2))
+		XCTAssertFalse(app.staticTexts["replied-header"].exists)
 	}
 
 	@MainActor func testSavedAnswerSurvivesClosingAndShowsItsOutcome() async throws {
@@ -286,9 +292,14 @@ final class QueueUITests: XCTestCase {
 		app.buttons["answer-flaky"].tap()
 		XCTAssertTrue(app.staticTexts["notice"].waitForExistence(timeout: 15))
 		app.buttons["unsent-answers"].tap()
-		XCTAssertTrue(app.staticTexts["Recorded"].waitForExistence(timeout: 15))
-		XCTAssertTrue(app.staticTexts["Dropped"].exists)
+		// The Dropped answer has no reply and comes first; the recorded one is under Replied, below it.
+		XCTAssertTrue(app.staticTexts["Dropped"].waitForExistence(timeout: 15))
+		XCTAssertTrue(app.staticTexts["No reply yet"].exists)
 		XCTAssertFalse(app.staticTexts["Waiting to send"].exists)
+		let recorded = app.staticTexts["Recorded"]
+		for _ in 0..<3 where !recorded.waitForExistence(timeout: 5) { app.swipeUp() }
+		XCTAssertTrue(recorded.exists)
+		XCTAssertTrue(app.staticTexts["replied-header"].exists)
 		shot("206-recorded-answer")
 	}
 

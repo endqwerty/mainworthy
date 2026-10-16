@@ -112,7 +112,7 @@ it to open another.
 To give one answer to several questions of one kind, follow these steps:
 
 1. In **Queue**, press **Select** at the top right. Each open question gets a circle. The tabs give way to a bar
-   that says what is selected. **Done** at the top right ends selection.
+   that says what is selected, or **Select questions** while nothing is. **Done** at the top right ends selection.
 2. Press questions to select them. A selection holds one kind, such as unlinked tests or failures, and at most
    500 questions. Select a question or choose a kind's chip before pressing **Select All** at the top left. The button
    selects eligible questions of that kind from the list, up to the limit, and then reads **Deselect All**. A question that cannot join appears faint.
@@ -361,10 +361,13 @@ While an answer is waiting to send, another answer to that question waits until 
 
 To check saved answers and send them when the connection returns, follow these steps:
 
-1. Open **Unsent answers** at the top right of Queue. Each entry shows **Waiting to send**, **Dropped**,
-   **Recorded**, **Recorded as advice**, **Overtaken**, or **Refused**, with the server's reason.
+1. Open **Unsent answers** at the top right of Queue. Answers the server has not replied to are under
+   **No reply yet**, each marked **Waiting to send** or **Dropped**. Answers it replied to are under **Replied**,
+   each marked **Recorded**, **Recorded as advice**, **Overtaken**, or **Refused**, with the server's reason.
+   When nothing waits, the page says **Nothing is waiting to send**.
 2. Keep the app open. Waiting answers send in order when the connection returns, including answers in other projects.
-3. To try again immediately, press **Send waiting answers**.
+3. To try again immediately, press **Send waiting answers**. It is there only while an answer has no reply.
+4. To remove the answers the server replied to, press **Clear outcomes** at the top of **Replied**.
 
 If an uncertain reply holds later answers in that project, the first waiting entry shows the problem and two choices. **Keep trying** sends the same answer and command again. **Drop saved answer** asks for confirmation, then checks that command with the server. A recorded answer shows its outcome. If every send attempt got a definite HTTP error reply and the command is still unrecorded, the app removes that entry.
 
