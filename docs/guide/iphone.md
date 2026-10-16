@@ -161,8 +161,10 @@ To record results for a planned run, follow these steps:
 
 1. Open **Runs**.
 2. Open a run. Its page shows the server's verdict, the results it accepts and its cases in order.
-3. Press **Start** to open the first case with no result, or press any slot to open that slot.
+3. Press **Start** to open the first case with no result, or press a slot to open it.
    The case is shown at the version pinned when the run was planned.
+   A slot that a pipeline, an agent or another person filled, and you have not, does not open: it is left to
+   that result, as in the web app. Its row shows who filled it and with what outcome.
 4. If a step failed, press that step to mark it. Press the step again to clear the mark.
 5. If needed, add a note.
 6. Press **Pass**, **Fail**, **Blocked** or **Skip**. **Fail** records the marked step.

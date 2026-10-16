@@ -75,9 +75,15 @@ public final class OpenRunScreen: ProjectScreen {
 	package func planned(_ sentence: String) { notice = sentence }
 	public var firstUnfilled: RunSlot? { slots.first { $0.fills.isEmpty && $0.caseRef != nil } }
 	public var isReadOnly: Bool { !permission.may(.produce) }
+	/// Whether a pipeline, an agent or another person filled this slot and this person has not: the slot is left
+	/// to that evidence, as the web app leaves it. Read from the latest slots, so a fill that arrives counts.
+	public func isLeftToOthers(_ slot: RunSlot) -> Bool {
+		let latest = slots.first { $0.id == slot.id } ?? slot
+		return !latest.fills.isEmpty && latest.ownFill(by: person) == nil
+	}
 	public func mayRecord(_ execution: RunExecution) -> Bool {
 		permission.may(.produce) && run.state == .open && execution.run == run.ref
-			&& execution.content.methods.contains("human")
+			&& execution.content.methods.contains("human") && !isLeftToOthers(execution.slot)
 	}
 
 	public func refresh() async { _ = await read() }

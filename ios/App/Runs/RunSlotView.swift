@@ -57,7 +57,9 @@ struct RunSlotView: View {
 								? "Slots are read-only. Recording results needs the produce capability."
 								: screen.run.state == .closed
 									? "This run is closed. Withdrawing its sign-off in the Queue reopens it."
-									: "This pinned case does not admit a person's results, or the run is not open."
+									: screen.isLeftToOthers(execution.slot)
+										? "Another producer filled this slot, and it is left to that result. Go back to record a slot of your own."
+										: "This pinned case does not admit a person's results, or the run is not open."
 						)
 						.font(.subheadline)
 					}
