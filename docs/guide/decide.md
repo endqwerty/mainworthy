@@ -205,7 +205,8 @@ See [answer during a network drop](./iphone.md#answer-during-a-network-drop).
 
 An adoption question asks whether a proposed edit becomes current.
 Read the proposed changes beside the existing case.
-If the case changed after the edit was proposed, each edit is shown applied to the case as it is now.
+While a proposal waits, each edit is shown applied to the case as it is now, so a change made after the edit was proposed shows too.
+An edit that would be refused on its own is shown as it was proposed, and so is every edit of a decided proposal.
 "Accept" makes the proposal current. "Reject" leaves the case as it is and keeps
 the proposal in history. These choices do not by themselves excuse a test failure.
 

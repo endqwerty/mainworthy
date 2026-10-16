@@ -750,7 +750,8 @@ describe("a proposal that waits while its case moves on", () => {
 		const waiting = proposeAsAgent({ title: "Retitled by the agent" });
 		retitle("Retitled by a person", 1);
 		const refusal = "C-1 changed after this proposal was made; redo the proposal on version 2";
-		expect(read(waiting.proposal)?.refused).toBe(refusal);
+		// Refused, the edit is shown as it was proposed.
+		expect(read(waiting.proposal)).toMatchObject({ refused: refusal, body: { title: "Retitled by the agent" } });
 		expect(accept(waiting.question)).toMatchObject({ status: "conflict", needs: refusal });
 	});
 
