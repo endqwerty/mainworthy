@@ -34,8 +34,13 @@ export const CI: Paths = {
 	],
 };
 
-/** What the type-check and the lint read: tsconfig.json's `include`, biome.json's `files`, and the packages. */
-export const STATIC: Paths = { include: ["src/**", "test/**", "bench/**", "scripts/**", "*.json", "bun.lock"] };
+/**
+ * What the type-check and the lint read: tsconfig.json's `include`, biome.json's `files`, `.gitignore` (biome.json's
+ * `vcs.useIgnoreFile`), and the packages with what installs them.
+ */
+export const STATIC: Paths = {
+	include: ["src/**", "test/**", "bench/**", "scripts/**", "*.json", ".gitignore", "bun.lock", "bunfig.toml"],
+};
 
 /** What the image is built from: the Dockerfile's COPY lines, and the two files that decide what they copy. */
 export const IMAGE: Paths = {
@@ -60,10 +65,20 @@ export const IMAGE: Paths = {
 
 /**
  * What the iPhone app's job runs: the app, the scripts that write its Swift and start its server, and the server
- * with what it is built from. Not the web UI, which the server serves to a browser and the app never reads.
+ * with what Bun reads to load them (the packages, `tsconfig.json`'s paths, `bunfig.toml`). Not the web UI, which
+ * the server serves to a browser and the app never reads.
  */
 export const IOS: Paths = {
-	include: ["ios/**", "scripts/ios.ts", "scripts/ios/**", "src/**", "package.json", "bun.lock", "bunfig.toml"],
+	include: [
+		"ios/**",
+		"scripts/ios.ts",
+		"scripts/ios/**",
+		"src/**",
+		"package.json",
+		"bun.lock",
+		"tsconfig.json",
+		"bunfig.toml",
+	],
 	exclude: ["src/web/**"],
 };
 
