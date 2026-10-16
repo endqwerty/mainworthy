@@ -238,7 +238,9 @@ is under the GitHub milestone `iOS app`.
   still running. Reviewers work in an export (`git archive <rev> | tar -x -C <dir>`)
   and clean only that. If modules vanish mid-task: `bun install --frozen-lockfile`.
   On the desktop `/tmp` is kept in memory and `test/budgets.test.ts` refuses it, so the export goes under
-  `~/.cache`. To wait for another agent's test run: `pgrep -f '[t]est-worker'`; without the brackets pgrep
+  `~/.cache`, in a directory made for the task (`mktemp -d ~/.cache/mw-XXXXXX`), which is the one thing deleted
+  afterwards. Every agent's scratch is in `~/.cache`: never delete there by a pattern or recreate a fixed name. On
+  2026-10-16 an agent's cleanup, `rm -rf ~/.cache/mw-verify-*`, deleted earlier verifiers' reports. To wait for another agent's test run: `pgrep -f '[t]est-worker'`; without the brackets pgrep
   finds the shell that runs it and the wait never ends (both on 2026-10-12, PR #97).
 - Issues, pull requests and the board are kept in step by GitHub when a pull request names its issue the way
   GitHub reads it. How: "Issues, pull requests and the board" below.
