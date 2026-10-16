@@ -1,6 +1,6 @@
 // What a pull request's description and milestone must say for GitHub, the board and the owner to agree
 // (AGENTS.md, "Issues, pull requests and the board"). `bun scripts/work.ts pr-body <number>` runs it by hand, and
-// `.github/workflows/pull-request.yml` runs it on every pull request.
+// the `description` job of `.github/workflows/check.yml` runs it on every pull request.
 //
 // GitHub links a pull request to an issue on any closing word before the issue's number: "the closed #88" in a
 // description once closed an issue nobody meant. So a closing word is allowed only on a line of its own

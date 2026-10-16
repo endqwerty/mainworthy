@@ -25,8 +25,13 @@
 # read (prose, the iPhone app, another workflow); then one runner runs those tests and the ones that read every file.
 # A job the change does not need is skipped, and the gate counts a skip as a pass only when `scope` asked for it.
 #
+# `description` checks a pull request's description and milestone (scripts/work/pull-request.ts): a closing word is
+# only on a line of its own, GitHub links the issues the description closes and no other, and the milestone is the
+# issue's. It reads them when the check starts, so after a fix to either, run the job again
+# (`gh run rerun <run> --job <id>`). A push to `main` has no pull request and skips it.
+#
 # `gate` is the job to require on the branch. It fails when the gate does not pass, when a report is missing,
-# and when the type-check, the lint, the image or the iPhone app failed.
+# and when the type-check, the lint, the image, the iPhone app or the description failed.
 name: check
 
 on:
@@ -115,6 +120,24 @@ jobs:
       - name: The app builds for a simulator
         run: bun scripts/ios.ts build
 
+  description:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - name: Closing words, linked issues and milestone
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun scripts/work.ts pr-body ${{ github.event.pull_request.number }}
+
   tests:
     name: ${{ matrix.name }}
     needs: scope
@@ -157,7 +180,7 @@ jobs:
           retention-days: 7
 
   gate:
-    needs: [scope, static, tests, image, ios]
+    needs: [scope, static, tests, image, ios, description]
     # Also when a shard or the lint failed: Mainworthy is told what ran, and this job is the one that fails.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
@@ -202,7 +225,7 @@ jobs:
           SHARDS: ${{ needs.scope.outputs.shards }}
           FILES: ${{ needs.scope.outputs.files }}
         run: bun scripts/ci-gate.ts test-results $SHARDS ${FILES:+"--files=$FILES"}
-      - name: The scope, the type-check, the lint, the image, the iPhone app and every shard's job passed
+      - name: The scope, the type-check, the lint, the image, the iPhone app, the description and every shard's job passed
         # A shard's job succeeds with failing tests, which the gate judges. It fails when it could not be set up
         # or left nothing to upload, and after a re-run the gate above would then read its older attempt's. A job
         # the scope did not ask for is skipped, and passes only then.
@@ -213,3 +236,4 @@ jobs:
           test "${{ needs.static.result }}" = success || test "${{ needs.scope.outputs.static }}:${{ needs.static.result }}" = false:skipped
           test "${{ needs.image.result }}" = success || test "${{ needs.scope.outputs.image }}:${{ needs.image.result }}" = false:skipped
           test "${{ needs.ios.result }}" = success || test "${{ needs.scope.outputs.ios }}:${{ needs.ios.result }}" = false:skipped
+          test "${{ needs.description.result }}" = success || test "${{ github.event_name }}:${{ needs.description.result }}" = push:skipped

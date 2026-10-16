@@ -52,7 +52,7 @@ and command semantics. App instance selection and licence screens are deferred
 owner choices; distribution requirements remain separate obligations.
 
 The check still warns above 130 s and fails above 150 s under the conditions in
-`AGENTS.md`. Under 120 s remains the goal, not the current failure threshold.
+`scripts/check-plan.ts`. Under 120 s remains the goal, not the current failure threshold.
 Runner, CLI-start and reader-startup reductions have shipped. Existing native reply
 tests, case field values and policy presets also narrow the work left to do.
 

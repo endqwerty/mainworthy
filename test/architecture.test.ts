@@ -817,7 +817,6 @@ describe("the project's name", () => {
 		// says so. A new mention anywhere else fails: use the current name, or add the file with its reason.
 		const allowed: Record<string, string> = {
 			".gitignore": "a checkout made before the rename keeps its `.casebook` directory",
-			"AGENTS.md": "says what the project was called, and releases the `.casebook` of an older checkout",
 			"CHANGELOG.md": "the entry for the rename",
 			"README.md": "says what the project was called",
 			"docs/decisions/0014-pipeline-token-and-ci-instance.md": "the address of the existing deployment",
