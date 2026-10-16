@@ -157,8 +157,10 @@ struct RunsScreenTests {
 	func closed() async throws {
 		let key = try await Live.project(strict: true)
 		let client = try await Live.signedIn().project(key)
+		// The run's one slot is the owner's result, so the owner's screen may record on it while the run is open.
 		let screen = RunsScreen(
-			project: client, permission: Project(key: key, name: key, can: ["read", "produce"]), person: Live.name)
+			project: try await Live.signedIn(as: Live.owner).project(key),
+			permission: Project(key: key, name: key, can: ["read", "produce"]), person: Live.ownerName)
 		await screen.refresh()
 		let run = screen.open(try #require(screen.runs.first))
 		await run.refresh()

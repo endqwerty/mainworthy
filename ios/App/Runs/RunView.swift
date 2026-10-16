@@ -31,30 +31,26 @@ struct RunView: View {
 				}
 			}
 			if let notice = screen.notice { Section { Text(notice).font(.subheadline) } }
-			Section("Cases in order") {
+			Section {
 				ForEach(Array(screen.slots.enumerated()), id: \.element.id) { index, slot in
-					Button {
-						open(slot)
-					} label: {
-						VStack(alignment: .leading, spacing: 6) {
-							HStack {
-								Text("\(index + 1).").foregroundStyle(.secondary)
-								RefText(slot.caseRef ?? "Case unavailable")
-								Text("pinned v\(slot.version)").font(.caption).foregroundStyle(.secondary)
-								Spacer()
-								Tag(text: slot.state.word, tint: slot.state.tint)
-							}
-							Text(slot.title ?? "Case unavailable").foregroundStyle(.primary)
-							ForEach(slot.fills) { fill in
-								Text("\(fill.method.name.capitalized) \(fill.by) · \(fill.outcome.word)")
-									.font(.caption).foregroundStyle(.secondary)
-								if let note = fill.note { Text(note).font(.caption).foregroundStyle(.secondary) }
-							}
+					// A slot another producer filled is left to that result, as the web app leaves it: it does not open.
+					if screen.isLeftToOthers(slot) {
+						row(index, slot).accessibilityIdentifier("run-slot-\(index + 1)")
+					} else {
+						Button {
+							open(slot)
+						} label: {
+							row(index, slot)
 						}
-						.padding(.vertical, 4)
+						.buttonStyle(.plain)
+						.accessibilityIdentifier("run-slot-\(index + 1)")
 					}
-					.buttonStyle(.plain)
-					.accessibilityIdentifier("run-slot-\(index + 1)")
+				}
+			} header: {
+				Text("Cases in order")
+			} footer: {
+				if screen.slots.contains(where: screen.isLeftToOthers) {
+					Text("A slot that a pipeline, an agent or another person filled is left to that result and does not open.")
 				}
 			}
 			if case .failed(let why) = screen.loading {
@@ -69,6 +65,25 @@ struct RunView: View {
 		.refreshable { await screen.refresh() }
 		.task { await screen.refresh() }
 		.navigationDestination(isPresented: $executing) { RunSlotView(screen: screen) }
+	}
+
+	private func row(_ index: Int, _ slot: RunSlot) -> some View {
+		VStack(alignment: .leading, spacing: 6) {
+			HStack {
+				Text("\(index + 1).").foregroundStyle(.secondary)
+				RefText(slot.caseRef ?? "Case unavailable")
+				Text("pinned v\(slot.version)").font(.caption).foregroundStyle(.secondary)
+				Spacer()
+				Tag(text: slot.state.word, tint: slot.state.tint)
+			}
+			Text(slot.title ?? "Case unavailable").foregroundStyle(.primary)
+			ForEach(slot.fills) { fill in
+				Text("\(fill.method.name.capitalized) \(fill.by) · \(fill.outcome.word)")
+					.font(.caption).foregroundStyle(.secondary)
+				if let note = fill.note { Text(note).font(.caption).foregroundStyle(.secondary) }
+			}
+		}
+		.padding(.vertical, 4)
 	}
 
 	private func open(_ slot: RunSlot) {

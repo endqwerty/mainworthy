@@ -97,27 +97,43 @@ actor ReviewFailPinnedRead: Transport {
         #expect(other.note.isEmpty && other.failedStep == nil)
         print("REVIEW drafts: correct slot on server, cleared after result, empty in another run")
     }
-    @Test("Undo does not restore a pipeline fill or a failed-step mark for an earlier Pass")
-    func undoNonFailureAndOtherProducer() async throws {
+    @Test("a slot the pipeline filled is left to it: it records nothing and keeps the pipeline's fill")
+    func otherProducersSlot() async throws {
         let (_,run,_) = try await setup()
         let slot = try #require(run.slots.first { $0.fills.contains { $0.method == .pipeline } })
+        #expect(run.isLeftToOthers(slot))
+        #expect(!run.isLeftToOthers(try #require(run.firstUnfilled)))
         await run.execute(slot)
         guard case .read(let shown) = run.document else { Issue.record("no pipeline slot"); return }
+        #expect(!run.mayRecord(shown))
+        run.mark(try #require(shown.content.steps.first))
+        #expect(run.failedStep == nil)
+        #expect(await run.record(shown,outcome:.pass) == false)
+        await run.refresh()
+        let after = try #require(run.slots.first { $0.id == slot.id })
+        #expect(after.ownFill(by:Live.name) == nil && after.fills.map(\.method) == [.pipeline])
+    }
+    @Test("Undo of a Pass with an unused step mark corrects to skipped, and of a Fail restores the Pass without a step")
+    func undoNonFailure() async throws {
+        let (_,run,_) = try await setup()
+        let slot = try #require(run.firstUnfilled)
+        await run.execute(slot)
+        guard case .read(let shown) = run.document else { Issue.record("no slot"); return }
         run.mark(try #require(shown.content.steps.first)); run.note = "Pass despite unused mark"
         #expect(await run.record(shown,outcome:.pass))
         await run.undo()
         #expect(run.slots.first { $0.id == slot.id }?.ownFill(by:Live.name)?.outcome == .manual(.skip))
-        #expect(run.slots.first { $0.id == slot.id }?.fills.contains { $0.method == .pipeline } == true)
         guard case .read(let again) = run.document else { Issue.record("no slot after Undo"); return }
+        #expect(again.slot.id == slot.id)
         #expect(await run.record(again,outcome:.pass))
         await run.execute(try #require(run.slots.first { $0.id == slot.id }))
         guard case .read(let latest) = run.document else { Issue.record("no latest"); return }
+        #expect(!run.isLeftToOthers(latest.slot))
         run.mark(try #require(latest.content.steps.first))
         #expect(await run.record(latest,outcome:.fail))
         await run.undo()
         let restored = try #require(run.slots.first { $0.id == slot.id }?.ownFill(by:Live.name))
         #expect(restored.outcome == .manual(.pass) && restored.atStep == nil)
-        print("REVIEW Undo: other producer retained, earlier Pass has no atStep")
     }
     @Test("changing a saved plan's inputs retries its read and project switching isolates it")
     func savedPlanChangedInputs() async throws {

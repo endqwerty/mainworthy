@@ -51,6 +51,18 @@ final class RunsUITests: XCTestCase {
 		let start = app.buttons["start-run"]
 		XCTAssertTrue(start.waitForExistence(timeout: 10))
 		shot("2-run")
+		// The pipeline filled the first four slots: each is left to that result, so its row does not open, and the
+		// list says why. The fifth, which nobody filled, opens.
+		XCTAssertFalse(app.buttons["run-slot-1"].exists)
+		app.swipeUp()
+		XCTAssertTrue(app.buttons["run-slot-5"].waitForExistence(timeout: 5))
+		XCTAssertFalse(app.buttons["run-slot-4"].exists)
+		shot("2b-left-to-others")
+		XCTAssertTrue(
+			app.staticTexts[
+				"A slot that a pipeline, an agent or another person filled is left to that result and does not open."
+			].waitForExistence(timeout: 5))
+		app.swipeDown()
 		start.tap()
 		let title = app.staticTexts["executing-case"]
 		XCTAssertTrue(title.waitForExistence(timeout: 10))

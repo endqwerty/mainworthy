@@ -53,8 +53,9 @@ import Testing
 	@Test("opening another slot keeps each slot's draft")
 	func navigationKeepsDrafts() async throws {
 		let (run, _) = try await setup()
-		let first = try #require(run.slots.first)
-		let second = try #require(run.slots.last)
+		// Two slots nobody has filled: one the pipeline filled is left to it and takes no step mark.
+		let first = try #require(run.firstUnfilled)
+		let second = try #require(run.slots.last { $0.fills.isEmpty && $0.id != first.id })
 		await run.execute(first)
 		guard case .read(let shown) = run.document else {
 			Issue.record("no case")
