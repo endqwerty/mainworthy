@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { addArgs, BOARD, drift, editArgs, isMove } from "../scripts/work/board.ts";
 import { checkSeconds, compare, judge, sameTree } from "../scripts/work/check-time.ts";
 import {
+	directoriesFromLsof,
 	isServer,
 	isTestWorker,
 	lineage,
@@ -82,6 +83,10 @@ test("a delete refuses a pattern, a directory nobody made with `scratch new` and
 	expect(existsSync(join(theirs, "report.md"))).toBe(true);
 	expect(existsSync(outside)).toBe(true);
 	expect(() => make("Bad Name", root)).toThrow("lower-case words");
+	// `alias/` and `alias/.` are the link's target to the file system.
+	expect(() => remove(`${join(root, "mw-alias")}/`, root)).toThrow("is a link");
+	expect(() => remove(`${join(root, "mw-alias")}/.`, root)).toThrow("is a link");
+	expect(existsSync(made1)).toBe(true);
 });
 
 test("the process table is read, and a caller's lineage is every process above it", () => {
@@ -98,6 +103,13 @@ test("a server is `bun src/cli/main.ts serve`, not a shell that has those words 
 	expect(isServer("bun start")).toBe(false);
 	expect(isServer("bun src/cli/main.ts report --run 3")).toBe(false);
 	expect(procs.filter((p) => isTestWorker(p.command)).map((p) => p.pid)).toEqual([400]);
+	// The quiet phase of the check runs `bun test --parallel=1`, which starts no worker.
+	expect(isTestWorker("/opt/homebrew/bin/bun test --parallel=1 --no-orphans ./test/budgets.test.ts")).toBe(true);
+	expect(["bun run test", "bun scripts/check.ts test", "bun test/e2e/serve.ts"].map(isTestWorker)).toEqual([
+		false,
+		false,
+		false,
+	]);
 	expect(within("/a/b/c", "/a/b")).toBe(true);
 	expect(within("/a/bc", "/a/b")).toBe(false);
 });
@@ -410,4 +422,28 @@ test("check-time stops at a command that failed, and at no rounds", async () => 
 	};
 	expect(await compare("HEAD~1", "HEAD", over, () => {})).toContain("base: 160.0 s");
 	await expect(compare("HEAD~1", "HEAD", { ...options, rounds: 0 }, () => {})).rejects.toThrow("at least 1");
+});
+
+test("a process listing that did not work is an error, so that a release does not go by an empty answer", async () => {
+	await expect(directoriesFromLsof(["sh", "-c", "echo 'no lsof' >&2; exit 1"])).rejects.toThrow("could not be read");
+	const some = await directoriesFromLsof(["sh", "-c", "printf 'p42\\nn/a/b\\n'; exit 1"]);
+	expect(some.get(42)).toBe("/a/b");
+});
+
+test("wait-tests takes a number of seconds and nothing else", async () => {
+	for (const timeout of ["oops", "Infinity", "-1"]) {
+		const done = await run([
+			process.execPath,
+			join(import.meta.dir, "../scripts/work.ts"),
+			"wait-tests",
+			`--timeout=${timeout}`,
+		]);
+		expect(done.status).toBe(4);
+		expect(done.err).toContain("usage:");
+	}
+});
+
+test("a code fence the description ends inside is code to its end", () => {
+	expect(closing("~~~text\nCloses #12\n")).toEqual({ closes: [], stray: [] });
+	expect(closing("Closes #5\n```\nCloses #12\n")).toEqual({ closes: [5], stray: [] });
 });

@@ -37,13 +37,34 @@ export function isServer(command: string): boolean {
 	return runsBun(command) && at >= 0 && tokens[at + 1] === "serve";
 }
 
-/** `bun test --test-worker ...`: one of the processes a test run starts for its files. */
-export const isTestWorker = (command: string): boolean => runsBun(command) && words(command).includes("--test-worker");
+/**
+ * A test run: `bun test ...` itself (the quiet phase runs with `--parallel=1` and has no worker) or one of the
+ * `bun test --test-worker ...` processes it starts for its files.
+ */
+export const isTestWorker = (command: string): boolean =>
+	runsBun(command) && (words(command)[1] === "test" || words(command).includes("--test-worker"));
 
 export const outsideLineage = (procs: readonly Proc[], self: number): Proc[] => {
 	const own = lineage(procs, self);
 	return procs.filter((proc) => !own.has(proc.pid));
 };
+
+/** What `lsof` says of each process's directory; an `lsof` that did not work is an error, not an empty answer. */
+export async function directoriesFromLsof(
+	command: readonly string[] = ["lsof", "-a", "-d", "cwd", "-Fpn"],
+): Promise<Map<number, string>> {
+	const found = new Map<number, string>();
+	let pid = 0;
+	const listed = await run(command);
+	// lsof exits 1 for a process it may not look at; with nothing listed it did not work, and a release must not guess.
+	if (listed.status !== 0 && listed.out.trim() === "")
+		throw new Error(`the processes' directories could not be read (lsof exit ${listed.status}: ${listed.err.trim()})`);
+	for (const line of listed.out.split("\n")) {
+		if (line.startsWith("p")) pid = Number(line.slice(1));
+		else if (line.startsWith("n") && pid > 0) found.set(pid, line.slice(1));
+	}
+	return found;
+}
 
 /** The directory each process runs in, by pid, for the processes this user may look at. */
 export async function directories(): Promise<Map<number, string>> {
@@ -56,12 +77,7 @@ export async function directories(): Promise<Map<number, string>> {
 		}
 		return found;
 	}
-	let pid = 0;
-	for (const line of (await run(["lsof", "-a", "-d", "cwd", "-Fpn"])).out.split("\n")) {
-		if (line.startsWith("p")) pid = Number(line.slice(1));
-		else if (line.startsWith("n") && pid > 0) found.set(pid, line.slice(1));
-	}
-	return found;
+	return directoriesFromLsof();
 }
 
 export const within = (directory: string, root: string): boolean =>

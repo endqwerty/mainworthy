@@ -61,6 +61,7 @@ async function main(args: string[]): Promise<void> {
 		}
 		case "wait-tests": {
 			const timeout = Number(flag(rest, "timeout") ?? 1800);
+			if (!Number.isFinite(timeout) || timeout < 0) return fail(USAGE, 4);
 			const left = await waitForTests(timeout);
 			if (left.length > 0)
 				fail(
