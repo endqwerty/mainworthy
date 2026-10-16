@@ -2,9 +2,9 @@
 
 This policy explains what Mainworthy keeps, why we keep it, how we handle it and your rights over your data. We never sell your data, and we keep as little of it as Mainworthy can work with.
 
-*Last updated: October 15, 2026*
+*Last updated: October 16, 2026*
 
-This policy covers the instance at `mainworthy.com` and the Mainworthy iPhone app, which are run by the owner of the Mainworthy project ("we", "us"). Mainworthy is software that anyone can run. If you use an instance that somebody else runs, that person decides what happens to your data there, and you should ask them. Most of this page describes what the software itself keeps on every instance.
+This policy covers the instance at `mainworthy.com` and the Mainworthy iPhone app. The owner of the Mainworthy project runs both. "We" and "us" refer to that owner. Mainworthy is software that anyone can run. If you use an instance that somebody else runs, that person decides what happens to your data there. Ask that person about their policy. Most of this page describes what the software itself keeps on every instance.
 
 ## What we collect and why
 
@@ -12,7 +12,7 @@ This policy covers the instance at `mainworthy.com` and the Mainworthy iPhone ap
 
 An account is a name and a way to sign in. We do not require an email address or a real name. If the instance has mail enabled, you can add a recovery email address. We store the address and whether and when you verified it, so we can send recovery links and notices about changes to your sign-in methods.
 
-Somebody who already has an account invites you, and you choose how you sign in:
+Somebody who already has an account invites you. You choose how you sign in:
 
 - **A password.** We store it as an argon2id hash, never the password itself.
 - **A passkey.** We store its public key, its credential id, a counter, the label you gave it and when it was made and last used. Mainworthy never receives the private key. Your device or password manager decides where it keeps that key and whether it syncs between devices.
@@ -24,7 +24,7 @@ We store an invitation as a hash of its code, with who it is for and who made it
 
 ### Sessions
 
-When you sign in, we keep a session record so that you can see where you are signed in and end a session that is not yours. The record holds when the session started and was last used, what the browser or app calls itself (its user agent, up to 256 characters), and its opening and latest network addresses. We keep no history of addresses between those two.
+When you sign in, we keep a session record so that you can see where you are signed in and end a session that is not yours. The record holds when the session started and was last used, the browser or app's user agent, and the session's opening and latest network addresses. The user agent identifies what the browser or app calls itself, up to 256 characters. We keep no history of addresses between those two.
 
 A session ends when you sign out, after 14 days without use, or after 90 days. Revoking its token also records its end at once. When a token expires, the next minute job records that expiry time as the end of its sessions. The job also records earlier token revocations whose sessions an older build left unended. An earlier recorded end stays. Once a session has been ended for 30 days, the server deletes its record.
 
@@ -32,11 +32,11 @@ The server checks retention every minute while it runs. A stopped server or a lo
 
 ### Failed sign-ins
 
-To slow down anybody guessing passwords, the server remembers failed sign-in attempts: the network address they came from and the name that was typed. The server keeps these attempts in memory only, never on disk or in a log. The server stops using them at most 30 minutes after the last failed attempt, and its memory is cleared when it restarts.
+To slow down anybody guessing passwords, the server remembers the network address and the name typed for each failed sign-in attempt. The server keeps these attempts only in memory, never on disk or in a log. The server stops using them at most 30 minutes after the last failed attempt. Restarting the server clears the attempts from memory.
 
 ### Product interactions
 
-We store the content you put into Mainworthy: cases, test results, decisions, notes and the reasons you give. Each change records who made it and when, because a trustworthy record of who decided what is the point of the product. This content is kept for as long as the instance exists. Mainworthy keeps history and does not erase it yet: see [data retention](#data-retention).
+We store the content you put into Mainworthy: cases, test results, decisions, notes and the reasons you give. Each change records who made it and when. A trustworthy record of who decided what is the point of the product. This content is kept for as long as the instance exists. Mainworthy keeps history and does not erase it yet. See [data retention](#data-retention).
 
 ### Cookies and browser storage
 
@@ -46,7 +46,7 @@ The web app keeps your unsaved case drafts, queue answers, run notes, theme, and
 
 Clearing takes effect in other open tabs and survives a reload. It leaves the theme and sidebar preference, other people's drafts, and content already recorded on the server. If the sign-out reply is lost, the page checks the session, with a second check if the first gets no answer. Your choice to clear applies if either check confirms that the session ended. If a check finds you still signed in, or neither check answers, the attempt ends and keeps your browser data. The page tells you the result and lets you sign out again. When it cannot tell, it also explains how to clear the site's data in your browser settings before leaving a shared computer.
 
-The pending choice stays only in the tab making the attempt and does not survive a reload. It cannot clear data when a later session expires or another tab signs out. A session that expires keeps your drafts, as does signing in again as the same person. If the browser cannot clear its storage after a confirmed sign-out, the app warns you to clear the site's data in your browser settings.
+The pending choice stays only in the tab making the attempt and does not survive a reload. The choice cannot clear data when a later session expires or another tab signs out. Your drafts stay when a session expires or you sign in again as the same person. If the browser cannot clear its storage after a confirmed sign-out, the app warns you to clear the site's data in your browser settings.
 
 Your personal home is stored separately for each signed-in name and project. It does not sync to other browsers. **Sign out and keep drafts** keeps this preference. **Sign out and clear browser data** removes it. Clearing the site's browser data removes it.
 
@@ -56,11 +56,11 @@ The server writes no log of requests. It logs when it starts and when something 
 
 ### The iPhone app
 
-The app talks only to `mainworthy.com`, or to the instance a build of the app from its source code names. A phone that an earlier version signed in to another instance may stay signed in there and keep talking to it. It keeps your session in the phone's keychain and your last project in its settings.
+The app talks only to `mainworthy.com`, or to the instance named in a build made from the app's source code. A phone that an earlier version signed in to another instance may stay signed in there and keep talking to that instance. The app keeps your session in the phone's keychain and your last project in its settings.
 
-It also saves queue answers, except linking tests and creating cases, in the app's files before sending them, with each question's title, evidence hash, reference and reason, the command id, and the eventual server outcomes. These files survive closing the app and signing out, separated by instance, person, and project. The app excludes these answer files from iCloud and computer backups. **Clear outcomes** removes completed answers and keeps waiting and Dropped answers. A Dropped answer stays until the server records an outcome that you can clear. There is no automatic expiry. Removing the app deletes the files.
+Before sending queue answers, the app saves them in its files, except answers that link tests or create cases. The saved data includes each question's title, evidence hash, reference and reason, the command id, and the eventual server outcomes. These files survive closing the app and signing out, separated by instance, person, and project. The app excludes these answer files from iCloud and computer backups. **Clear outcomes** removes completed answers and keeps waiting and Dropped answers. A Dropped answer stays until the server records an outcome that you can clear. There is no automatic expiry. Removing the app deletes the files.
 
-It does not keep your password. It contains no analytics, advertising or crash-reporting code. Its user agent tells the server that it is "Mainworthy for iPhone" and which version. The only permission it can ask for is to reach your local network, and only when the instance it talks to is on it.
+The app does not keep your password. It contains no analytics, advertising or crash-reporting code. Its user agent tells the server that it is "Mainworthy for iPhone" and which version. The only permission the app can ask for is to reach your local network. It asks only when the instance it talks to is on that network.
 
 ### Voluntary correspondence
 
@@ -94,16 +94,20 @@ We apply the same rights to everyone, wherever they are:
 
   Attachments and their file names also stay when a person is forgotten. Screenshots and files can contain personal information. Mainworthy does not scan or redact them, and has no attachment deletion control yet. Text you typed into cases and notes stays because Mainworthy cannot yet erase part of its history ([#40](https://github.com/endqwerty/mainworthy/issues/40)).
 
-  A fingerprint (a SHA-256 hash) of each request sent with a command id also stays. It prevents a retried request from being recorded twice and lets someone who holds the database confirm a name they already guess. Your name stays in replies and questions saved before 2026-10-14 if you were forgotten before then. Records of your tokens, passwords, passkeys and authenticators stay, including when they were made and used and each passkey's credential id, but nothing that signs in. Your invitations are deleted 30 days after they end, and your tokens' network addresses 30 days after the tokens end ([Data retention](#data-retention)).
+  A fingerprint of each request sent with a command id also stays. The fingerprint is a SHA-256 hash. It prevents a retried request from being recorded twice and lets someone who holds the database confirm a name they already guess. Your name stays in replies and questions saved before 2026-10-14 if you were forgotten before then. Records of your tokens, passwords, passkeys and authenticators stay, with nothing in them that signs in. The records include when those credentials were made and used and each passkey's credential id. Your invitations are deleted 30 days after they end. Your tokens' network addresses are erased 30 days after the tokens end. See [Data retention](#data-retention).
 - **Right to restrict processing and to object.** Ask us, and we will tell you what we can do.
 - **Right to complain.** You can complain to the data protection authority where you live.
 - **Right to non-discrimination.** Exercising these rights never costs you anything.
 
-You can do some of this yourself. Under Settings, **Your sessions** lists every session you have open and ends any of them, and **Your sign-in** removes a password or a passkey, as long as one way to sign in is left. A person who administers the instance can forget somebody through Settings, **People**, **Forget a person**, or `mainworthy actor forget <name> --confirm <name>`. Both require confirmation and explain what stays. The page opens a confirmation beside the selection. **Cancel** or <kbd>Esc</kbd> closes it without forgetting anybody. Your own name and the current owner's name are unavailable, with the reason beside each. [People, agents and pipelines](./access.md#forget-a-person) gives the steps. There is no in-app request for forgetting or self-service account deletion yet. For the rest, contact us as described in [changes and questions](#changes-and-questions). We may need to make sure a request comes from you before acting on it.
+You can manage your sessions and sign-in methods yourself. Under Settings, **Your sessions** lists every session you have open and lets you end any of them. **Your sign-in** removes a password or a passkey, as long as one way to sign in is left.
+
+A person who administers the instance can forget somebody through Settings, **People**, **Forget a person**, or `mainworthy actor forget <name> --confirm <name>`. Both the page and the command require confirmation and explain what stays. The page opens a confirmation beside the selection. **Cancel** or <kbd>Esc</kbd> closes the confirmation without forgetting anybody. Your own name and the current owner's name are unavailable, with the reason beside each. [People, agents and pipelines](./access.md#forget-a-person) gives the steps.
+
+There is no in-app request for forgetting or self-service account deletion yet. For other requests, contact us as described in [changes and questions](#changes-and-questions). We may need to make sure a request comes from you before acting on it.
 
 ## How we secure your data
 
-Every connection to `mainworthy.com` is encrypted with TLS. Passwords are stored as argon2id hashes, and tokens, session cookies and invitation codes as SHA-256 hashes, so none of them can be read back from the database. The database itself is not encrypted by Mainworthy. It is protected by the server it lives on. An export never contains a password, a passkey, an authenticator, a token, a session or an invitation. Recovery email addresses and their verification status do travel in exports.
+Every connection to `mainworthy.com` is encrypted with TLS. We store passwords as argon2id hashes. We store tokens, session cookies and invitation codes as SHA-256 hashes. None of these secrets can be read back from the database. Mainworthy does not encrypt the database itself. The server protects the database. An export never contains a password, a passkey, an authenticator, a token, a session or an invitation. Recovery email addresses and their verification status are included in exports.
 
 ## Data retention
 
@@ -111,12 +115,12 @@ We keep information only for as long as it is needed:
 
 | What | How long |
 | --- | --- |
-| Failed sign-in attempts | Used for at most 30 minutes; in memory only, until the server restarts |
-| A passkey sign-in or authenticator step in progress | Usable for 5 minutes; in memory only, until the server restarts |
-| An email verification link | Usable once for 24 hours; in memory only, until the server restarts |
-| A password reset link | Usable once for 15 minutes; in memory only, until the server restarts |
+| Failed sign-in attempts | Used for at most 30 minutes. Kept only in memory and cleared when the server restarts. |
+| A passkey sign-in or authenticator step in progress | Usable for 5 minutes. Kept only in memory and cleared when the server restarts. |
+| An email verification link | Usable once for 24 hours. Kept only in memory and cleared when the server restarts. |
+| A password reset link | Usable once for 15 minutes. Kept only in memory and cleared when the server restarts. |
 | A recovery email address | Until you remove or replace it, or your account is forgotten |
-| A session's record | Deleted once the session has been ended for 30 days, by the running server (see [sessions](#sessions)) |
+| A session's record | Deleted by the running server once the session has been ended for 30 days. See [sessions](#sessions). |
 | A token's last network address | Erased 30 days after revocation or expiry, whichever happens first |
 | An invitation's record | Deleted 30 days after use, revocation or expiry, whichever happens first |
 | Your account and content | As long as the instance exists |

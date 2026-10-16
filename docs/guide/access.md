@@ -6,7 +6,7 @@ Only a person who administers the instance changes grants. An admin-issued token
 
 ## Kinds of actor
 
-An actor makes each change in Mainworthy, and the record names who made it. There are four kinds.
+An actor makes each change in Mainworthy, and the record names who made it. There are four kinds of actor:
 
 - A person. Someone who reads, writes and answers. The queue and the web UI are built for people.
 - An agent. An AI tool that reviews changes, proposes edits and reports results. [Let an agent in](./agents.md) covers it.
@@ -50,7 +50,7 @@ agent  reviewer  scratch  read, record, produce, answer
 ci     github-actions  scratch  read, record
 ```
 
-Change a grant with `grant`. It replaces what the actor could do there, so list everything you want it to keep.
+To change a grant, use `grant`. The command replaces the actor's capabilities for that scope, so list every capability you want the actor to keep.
 
 ```
 $ mainworthy actor grant reviewer --can read,produce --project checkout
@@ -59,7 +59,7 @@ $ mainworthy actor ungrant reviewer --project checkout
 reviewer holds no grant on checkout any more
 ```
 
-Leave out `--project` to change the grant on every project. Only a person changes a grant: an agent that holds `admin` is refused. You cannot change your own grant, because a slip could lock the instance. Another admin does it. Nobody changes the owner's grant, which Mainworthy writes again at every start.
+Leave out `--project` to change the grant on every project. Only a person changes a grant: an agent that holds `admin` is refused. You cannot change your own grant, because a slip could lock the instance. Another admin does it. Nobody changes the owner's grant. Mainworthy writes that grant again at every start.
 
 ### Named roles
 
@@ -74,12 +74,12 @@ reviewer on checkout: read, produce, answer; roles: approver
 ```
 
 Role names use lowercase letters, digits and `-`, start with a letter, and have at most 32 characters.
-`--roles` accepts commas or repeated flags. Omit it to keep the grant's roles; use `--roles=` to clear them.
+`--roles` accepts commas or repeated flags. To keep the grant's roles, omit `--roles`. To clear the roles, use `--roles=`.
 Removing a grant removes its roles. A new token or invitation for an existing actor keeps their roles.
 Settings, People and `mainworthy actor list` show the roles with their grants. Assign them through the command above or the `admin` operation's `grant.set` action.
 
 Only a person who administers the instance can change roles. The existing guards for self and owner grants also apply.
-The owner has no implicit named role and cannot be assigned one through `grant.set`; use separate people as approvers.
+The owner has no implicit named role and cannot be assigned one through `grant.set`. Use separate people as approvers.
 Changing roles affects later answers and withdrawals. It leaves recorded decisions in place.
 An agent can hold a role and give a counted answer if the clause permits agent answers.
 Grant and role changes do not yet have an attributed change history.
@@ -91,10 +91,14 @@ The owner is the person named by `MAINWORTHY_OWNER`. See [configuration](./confi
 Sign in with your password or a passkey, then open Settings, **Your sign-in**, **Your command-line tokens**.
 You need no admin capability. As the local owner, you can make one without signing in.
 
+To create a personal token, follow these steps:
+
 1. Enter a **Token label** that says where you use it.
 2. Choose a **Token lifetime**. The default is 30 days, and the longest is one year.
-3. Choose **Create personal token**, then **Copy personal token**. Store the token in your shell or script's secret store.
-4. Choose **Dismiss personal token** when you have stored it. Leaving the section also clears the secret from the page.
+3. Choose **Create personal token**.
+4. Choose **Copy personal token**.
+5. Store the token in your shell or script's secret store.
+6. When you have stored the token, choose **Dismiss personal token**. Leaving the section also clears the secret from the page.
 
 Set `MAINWORTHY_URL` to your instance's address and `MAINWORTHY_TOKEN` to the token, then run the CLI:
 
@@ -130,7 +134,18 @@ There is no instance setting to disable personal tokens. An admin who is a perso
 
 A team is a named set of grants. A person's effective permissions are their own grants plus the grants of every team they belong to. Grants on one project and on every project add up. Removing a person from one team takes away that team's contribution immediately, including requests waiting to run. A personal grant or another team's grant still applies.
 
-In Settings, People, use **New team name** and **Create team**, then choose the team under **Team to manage**. Choose **Grant on**, tick **Team permissions**, and press **Set team grant**. This replaces that team's grant on the chosen project, so tick everything it should keep. **Remove grant** removes just that project grant. Select **Person to add** and press **Add team member**. **Remove member** takes a person out in one step. Each person's row shows their own grants and a separate line for each team's grants.
+To create a team and assign its permissions, open Settings, People, and follow these steps:
+
+1. Enter a name in **New team name**.
+2. Press **Create team**.
+3. Choose the team under **Team to manage**.
+4. Choose the project scope under **Grant on**.
+5. Tick **Team permissions**. The new grant replaces the team's grant in that scope, so tick every permission to keep.
+6. Press **Set team grant**.
+7. Select **Person to add**.
+8. Press **Add team member**.
+
+**Remove grant** removes just the chosen project grant. **Remove member** takes a person out of the team in one step. Each person's row shows their own grants and a separate line for each team's grants.
 
 Only a person who administers the instance manages teams. Agents, pipelines and the policy cannot join. Another admin changes your membership or the grants of a team you belong to. The owner keeps every capability independently and cannot join a team. A team with `admin` on every project lets every member administer the instance.
 
@@ -152,7 +167,17 @@ Leave out `--project` for a grant on every project. `mainworthy actor list` labe
 
 A token is a secret that stands for one actor. An agent or a pipeline sends it with each request, and a person types it to sign in.
 
-In Settings, open Tokens (<kbd>g</kbd> <kbd>,</kbd>, then <kbd>j</kbd> to move down). Press <kbd>n</kbd>, then fill in "Token actor", pick a "Producer" (Agent, Pipeline or Person), tick the "Permissions" and choose "Create token". The new secret appears once, with "Copy token" and "Dismiss secret". A token made here is limited to the project you are in.
+To create an admin-issued token in Settings, follow these steps:
+
+1. Open Settings with <kbd>g</kbd> <kbd>,</kbd>.
+2. Open Tokens. Use <kbd>j</kbd> to move down the sections.
+3. Press <kbd>n</kbd> to enter "Token actor".
+4. Fill in the actor's name.
+5. Pick Agent, Pipeline or Person under "Producer".
+6. Tick the "Permissions".
+7. Choose "Create token".
+
+The new secret appears once, with "Copy token" and "Dismiss secret". A token made here is limited to the project you are in.
 
 From the command line:
 
@@ -181,11 +206,17 @@ $ mainworthy token new --ci github-actions --project scratch --expires 90d
 
 In Settings, Tokens, choose "Expires" before you create the token: never, 30 days, 90 days or 1 year. A token past its end is refused exactly as a revoked one is, and so is a browser that signed in with it.
 
-To replace a token without a gap, make a second one for the same actor, put it where the first is used, then revoke the first. Two tokens of one actor work side by side. Each start of the server names every token that ends within 14 days, by its id, actor and label.
+To replace a token without a gap, follow these steps:
+
+1. Make a second token for the same actor.
+2. Replace the first token wherever you use it.
+3. Revoke the first token.
+
+Two tokens of one actor work side by side. Each start of the server names every token that ends within 14 days, by its id, actor and label.
 
 ## See and revoke tokens
 
-Settings, Tokens, and Settings, People, list "Issued tokens" with each token's number, label, actor, who made it, when it was made, when and from which address it was last used, and when it ends. A token with no recorded use says "never used". Forgetting a person reads this list again, so their tokens show the forgotten name and revoked state. The actor is who the token identifies; the list cannot tell which person held a shared token. "Revoke" next to a token stops it at once. In server mode the last token the owner can sign in with is not revoked: make the owner another one first.
+Settings, Tokens, and Settings, People, show "Issued tokens". The list includes each token's number, label, actor, issuer, creation time, last-use time and address, and expiry. A token with no recorded use says "never used". Forgetting a person reads this list again, so their tokens show the forgotten name and revoked state. The actor is who the token identifies. The list cannot tell which person held a shared token. "Revoke" next to a token stops it at once. In server mode the last token the owner can sign in with is not revoked: make the owner another one first.
 
 ```
 $ mainworthy token list
@@ -197,9 +228,9 @@ token 2 revoked
 
 The server reads your token or session, your actor and your grants in the same snapshot that runs an operation. A read waiting for a reader sees a grant removed before it starts. A report already accepted keeps its actor and finishes even if that actor's token is then revoked.
 
-A token with no end works until somebody revokes it, so revoke one you no longer use. Revoking a token leaves the actor and its grants in place. To stop an actor on one project, use `actor ungrant`. To remove who a person was, forget the actor. Only a person who administers forgets an actor, and the owner is not forgotten. The name becomes a pseudonym, `forgotten-` and the actor's number (with `-2`, `-3` and so on added when an archive imported from an older build already holds that name), the tokens stop working, the person's passwords, passkeys and open invitations are revoked, and the history keeps what the actor did.
+A token with no end works until somebody revokes it, so revoke one you no longer use. Revoking a token leaves the actor and its grants in place. To stop an actor on one project, use `actor ungrant`. To remove who a person was, forget the actor. Only a person who administers forgets an actor, and the owner is not forgotten. The name becomes a pseudonym made from `forgotten-` and the actor's number. If an archive imported from an older build already holds that name, Mainworthy adds `-2`, `-3` or a later suffix. The tokens stop working. Mainworthy revokes the person's passwords, passkeys and open invitations. The history keeps what the actor did.
 
-Forgetting also clears the person's token and credential labels, including labels on revoked rows. Question evidence, saved command replies and report receipts use the pseudonym for attribution. New questions keep actor ids and resolve names when read; forgetting rewrites display names saved by older builds. This leaves the evidence hash unchanged because it covers the decision's material basis and target, not display attribution. Command ids still name the same requests, so retrying a command does not repeat the write. Replies that held secrets remain unavailable. Text in cases and notes stays as written.
+Forgetting also clears the person's token and credential labels, including labels on revoked rows. Question evidence, saved command replies and report receipts use the pseudonym for attribution. New questions keep actor ids and resolve names when read. Forgetting rewrites display names saved by older builds. This leaves the evidence hash unchanged because it covers the decision's material basis and target, not display attribution. Command ids still name the same requests, so retrying a command does not repeat the write. Replies that held secrets remain unavailable. Text in cases and notes stays as written.
 
 ```
 $ mainworthy admin --json '{"do":"actor.forget","name":"dana"}'
@@ -212,9 +243,13 @@ The raw operation remains available. The page and shorter command are described 
 
 In Settings, open **Your sign-in**, then choose **Add an authenticator**.
 
+To enrol the authenticator, follow these steps:
+
 1. Scan the QR code with a TOTP authenticator, or enter the setup key by hand. Mainworthy generates the QR code on the instance without contacting another service.
-2. Enter the six-digit **Authenticator code** and choose **Confirm authenticator** within five minutes.
-3. Save the ten recovery codes somewhere private, then choose **I saved the recovery codes**. Mainworthy shows these codes once. Each code works once with your password.
+2. Enter the six-digit **Authenticator code**.
+3. Within five minutes, choose **Confirm authenticator**.
+4. Save the ten recovery codes somewhere private.
+5. Choose **I saved the recovery codes**. Mainworthy shows these codes once. Each code works once with your password.
 
 Your other sessions end when you confirm. Your current session stays signed in. The next password sign-in shows **One more step**. Enter a fresh authenticator code or an unused recovery code. The password alone opens no session. A passkey with user verification needs no extra code.
 
@@ -232,9 +267,12 @@ The [configuration](./configuration.md#require-a-second-factor-for-admins) page 
 
 In Settings, open **People** and find **Forget a person** below the list of people.
 
+To forget a person, follow these steps:
+
 1. Choose the person in **Person to forget**. Your own name and the current owner's name are unavailable, with the reason beside each.
 2. Press **Forget this person**.
-3. Read what forgetting erases and what stays, then press **Forget** followed by the person's name to confirm.
+3. Read what forgetting erases and what stays.
+4. To confirm, press **Forget** followed by the person's name.
 
 The confirmation takes the keyboard focus. **Cancel** or <kbd>Esc</kbd> closes it without changing anything and returns focus to **Forget this person**.
 
@@ -259,7 +297,7 @@ Manage invitations and sign-in methods in Settings. The sections below also list
 
 ### Invite a person
 
-In Settings, open People. You see it when you are a person who holds `admin` on every project.
+In Settings, open People. This section is visible to a person who holds `admin` on every project. To invite a person, follow these steps:
 
 1. Type the person's name. <kbd>n</kbd> puts the caret in the field.
 2. Tick what they may do. The form starts with `read`, `record`, `produce`, `answer` and `plan`. `admin` starts unticked. Tick it for somebody who should administer the project. On every project, `admin` also lets them invite people, issue tokens, create projects and change grants.
@@ -273,7 +311,7 @@ With mail enabled, the form also offers **Send to email address, optional**. The
 
 "Open invitations" lists the links nobody has accepted yet: who each is for, what that person may do, who made it and when it runs out. "Revoke" withdraws one.
 
-The same from the command line:
+To create an invitation from the command line, run `mainworthy invite new`:
 
 ```
 $ mainworthy invite new dana --can read,produce,answer --project checkout
@@ -281,6 +319,8 @@ invitation 1 for "dana" (may read, record, produce, answer on checkout), until 2
 https://mainworthy.example/invite#<code>
 This link is shown once. Hand it to dana: it works once.
 ```
+
+Command-line invitations follow these rules:
 
 - The link is printed once. Mainworthy keeps only a hash of the code in it, so it cannot print the link again. If it is lost, make another.
 - The link works once, for three days. `--expires` takes a whole number and `h`, `d` or `w`, up to `30d`. A new invitation for the same person replaces the one before it.
@@ -292,13 +332,14 @@ This link is shown once. Hand it to dana: it works once.
 
 ### Accept an invitation
 
-Open the link. The page says "You are invited as dana" and until when the link works.
+Open the link. The page says "You are invited as dana" and until when the link works. To accept the invitation, follow these steps:
 
-1. Type a password twice. The page counts the characters as you type. A password is 12 to 256 characters, and nothing else is asked of it: no digit, no capital letter, no symbol.
-2. Or tick "Make a passkey on this device" and give the passkey a name. It starts as the name of your browser. You can do both.
-3. Press "Accept and sign in". You are signed in and the app opens.
+1. Choose a password, a passkey, or both:
+   - For a password, type the password twice. The page counts the characters as you type. A password is 12 to 256 characters. No digit, capital letter or symbol is required.
+   - For a passkey, tick "Make a passkey on this device". Give the passkey a name. The default is the name of your browser.
+2. Press "Accept and sign in". You are signed in and the app opens.
 
-The page takes the code out of the address bar as soon as it has read it. The address you see, and the one Back returns to, has no code, so copying that address does not copy the invitation. The browser's own record of the address first opened still holds the whole link. The code is the part after the `#`, which the browser does not send to the server. If you reload the page, open the original link again.
+The page takes the code out of the address bar as soon as it has read it. The address you see, and the one Back returns to, has no code, so copying that address does not copy the invitation. The browser's own record of the address first opened still holds the whole link. The code is the part after the `#`. The browser does not send that part of the address to the server. If you reload the page, open the original link again.
 
 If the browser is signed in as somebody else, the page names them and asks before signing them out. The fields stay disabled until the page knows who is signed in and you answer. If the request fails or takes more than twenty seconds, the page says so and keeps the fields disabled. **Try again** checks once more and keeps the invitation.
 
@@ -306,7 +347,7 @@ Your confirmation applies to the person the page named. If the acceptance reques
 
 Two sign-ins already in flight can each finish and set this browser's cookie. The last response chooses who this browser is signed in as. A session whose cookie was replaced can remain open on the server, because the earlier request did not carry that cookie. Sign in as that person and end it in **Your sessions**, or leave it to expire after 14 days without use, at the default lifetime. This does not end their sessions on other devices.
 
-If no answer comes back when you accept, the page says that it cannot tell whether the invitation was accepted. Go to the sign-in page and try what you chose. If that signs you in, it was.
+If no answer comes back when you accept, the page says that it cannot tell whether the invitation was accepted. Go to the sign-in page and try what you chose. If sign-in succeeds, the invitation was accepted.
 
 A link that was used, was revoked or has run out says "This invitation does not work any more." So does one that was cut short when it was copied. Ask whoever sent it for a new one.
 
@@ -330,7 +371,7 @@ A password manager such as 1Password can generate a password, fill both new-pass
 
 To add a passkey, give it a name under "Passkeys" in the same section and press "Add a passkey". "Ways you sign in" lists your password and each passkey with when it was last used, and "Remove" beside each. Your last way of signing in has no working "Remove".
 
-Failed attempts are counted. The fifth wrong password for one name within 15 minutes blocks sign-in with a password for that name for one second, from every address, and each further one doubles the wait, up to 15 minutes. A blocked sign-in is answered `limited` and is not looked at, so the right password waits too. A name nobody has is counted the same way, so the count does not say which names exist. A passkey is not held up by a block on the name. [Troubleshooting](./troubleshooting.md#limited-too-many-failed-attempts) says what to do.
+Failed attempts are counted. The fifth wrong password for one name within 15 minutes blocks password sign-in for that name for one second, from every address. Each further wrong password doubles the wait, up to 15 minutes. A blocked sign-in is answered `limited` and is not looked at, so the right password waits too. A name nobody has is counted the same way, so the count does not say which names exist. A passkey is not held up by a block on the name. [Troubleshooting](./troubleshooting.md#limited-too-many-failed-attempts) says what to do.
 
 ### A lost password or passkey
 
@@ -338,7 +379,13 @@ With mail enabled, **Forgot your password?** on the sign-in page opens a reset r
 
 The reset link works once for 15 minutes. It replaces your password and ends all your sessions, without signing you in. Your passkeys and tokens stay, and an enrolled authenticator is still required for password sign-in. A later password change, address change, accepted admin recovery invitation, reset request, restart or archive import invalidates the link. Losing your authenticator still needs a recovery code, a passkey or an admin recovery invitation.
 
-In **Your sign-in**, set **Email for password reset**, then open the verification mail and press **Verify email**. The link works once for 24 hours. Until you verify, the address cannot receive reset links or sign-in method notices. The instance owner can set an address under a person's **Sign-in details**, but the person who holds that mailbox must still verify it. As with recovery invitations, another admin cannot change someone else's recovery address. The API uses `credential` with `do: "email.get"` or `do: "email.set"`, an optional `actor`, and `email` on set. Set `email` to `null` to remove it. Changing it needs a signed-in browser for your own address, or the instance owner for somebody else's.
+To set a recovery address, follow these steps:
+
+1. In **Your sign-in**, set **Email for password reset**.
+2. Open the verification mail.
+3. Press **Verify email**.
+
+The link works once for 24 hours. Until you verify, the address cannot receive reset links or sign-in method notices. The instance owner can set an address under a person's **Sign-in details**, but the person who holds that mailbox must still verify it. As with recovery invitations, another admin cannot change someone else's recovery address. The API uses `credential` with `do: "email.get"` or `do: "email.set"`, an optional `actor`, and `email` on set. Set `email` to `null` to remove it. Changing it needs a signed-in browser for your own address, or the instance owner for somebody else's.
 
 As with adding a passkey, the browser session is sufficient without re-entering an existing credential. With mail enabled, replacing or removing a verified address sends a notice to the previous address. That notice contains no verification or reset code and asks you to contact an instance admin if you did not make the change. You can remove a stored address through the API even after mail is switched off, when no notice can be sent.
 
@@ -359,7 +406,7 @@ https://mainworthy.example/invite#<code>
 This link is shown once. Hand it to dana: it works once. When it is accepted, every password, passkey and token dana had stops working and every session of theirs ends.
 ```
 
-Nothing changes until the link is accepted, so a link nobody uses locks nobody out. The owner makes a recovery link for anybody. An admin who is a person can make their own. Everybody else asks the owner: a person who does not administer cannot make an invitation at all, and an admin who asks for another person's link is refused, for the same reason as with a token: whoever accepts the link is that person from then on.
+Nothing changes until the link is accepted, so a link nobody uses locks nobody out. The owner makes a recovery link for anybody. An admin who is a person can make their own. Everybody else asks the owner. A person who does not administer cannot make an invitation. An admin cannot make another person's recovery link because whoever accepts that link acts as that person, as with a token.
 
 Accepting recovery revokes every token belonging to that person, including personal CLI tokens and tokens made by an admin. Scripts using those tokens stop working and need new tokens. Tokens belonging to other people, agents and pipelines stay as they are.
 
@@ -367,11 +414,11 @@ Recovering the owner also revokes their configured `MAINWORTHY_OWNER_TOKEN`, eve
 
 ### Your sessions and your ways of signing in
 
-A session is one browser that is signed in. Settings, "Your sessions" lists yours: what opened each one and from which address, the browser as it named itself, when and from where it was last used, and when it ends at the latest. "this browser" marks the one you are looking at. "End" signs that browser out. On your own it is the same as signing out.
+A session is one browser that is signed in. Settings, "Your sessions" lists your sessions. Each row shows the sign-in method, initial address, browser name, last-use time and address, and maximum expiry. "this browser" marks your current session. "End" signs the selected browser out. Ending your current session is the same as signing out.
 
 A person who administers the instance can inspect another person in Settings, **People**. Beside their name, open **Sign-in details**. It lists their sessions with the same details and **End** button as your own sessions. For another person, **End** asks you to confirm with **End this session** or **Cancel**. Ending this browser's session opens the sign-out dialog.
 
-The details also say whether the person has a password and list their passkeys and authenticator, with labels, when they were added, and their last use. **Remove** removes a password or passkey and ends the sessions that used it. Removing an authenticator ends all of the person's sessions. For another person, removal first asks you to confirm with **Remove this sign-in method** or **Cancel**. The person's last usable password or passkey stays. They must add another before you can remove it. You cannot set their password or add a passkey for them. Recovery links keep the rules described above.
+The details say whether the person has a password. They also list the person's passkeys and authenticator, with labels, creation times and last-use times. **Remove** removes a password or passkey and ends the sessions that used it. Removing an authenticator ends all of the person's sessions. For another person, removal first asks you to confirm with **Remove this sign-in method** or **Cancel**. The person's last usable password or passkey stays. They must add another before you can remove it. You cannot set their password or add a passkey for them. Recovery links keep the rules described above.
 
 These confirmations move focus to **End this session** or **Remove this sign-in method** when they open. **Cancel** or <kbd>Esc</kbd> closes the confirmation and returns focus to the original **End** or **Remove** button. Cancel has a target of at least 44 by 44 pixels on a phone, as it does for a recovery link.
 
@@ -400,7 +447,7 @@ $ mainworthy session --do end --id 2
 }
 ```
 
-`openedWith` is `token`, `password` or `passkey`. `current` is true for the session the request itself came by, so from the command line, which uses a token, it is always false.
+`openedWith` is `token`, `password` or `passkey`. `current` is true for the session that sent the request. The command line uses a token, so `current` is always false for command-line requests.
 
 `mainworthy credential --do list` shows your password, passkeys and authenticator, each with an id, a label and when it was last used. It never shows a password, a hash or a key. `mainworthy credential --do remove --id <id>` removes one and ends the sessions that used it. Removing an authenticator ends all your sessions. Your last usable way of signing in stays:
 
@@ -409,15 +456,15 @@ $ mainworthy credential --do remove --id 1
 invalid: this is the last way dana signs in, so it stays. Add a passkey or set a password first, then remove this one. If it is lost, an admin can make a recovery link (mainworthy invite new dana)
 ```
 
-These two commands need no capability. A person who is signed in runs them for what is their own. An agent lists and ends its own sessions, and `credential` refuses it with `forbidden`: only a person has a password or a passkey. A pipeline is refused by both.
+These two commands need no capability. A person who is signed in runs them for what is their own. An agent can list and end its own sessions. The `credential` operation refuses an agent with `forbidden` because only a person has a password or a passkey. A pipeline is refused by both.
 
 ### What an admin can do for somebody else
 
 A person who holds `admin` on every project can:
 
-- list somebody's sessions with `mainworthy session --do list --actor dana`, and end any session by its id;
-- list somebody's password, passkeys and authenticator with `mainworthy credential --do list --actor dana`, and remove one by its id, but not their last usable sign-in method;
-- invite a new person, and list and revoke invitations.
+- List somebody's sessions with `mainworthy session --do list --actor dana` and end any session by its id.
+- List somebody's password, passkeys and authenticator with `mainworthy credential --do list --actor dana`. An admin can remove one by its id, except the last usable sign-in method.
+- Invite a new person and list and revoke invitations.
 
 An admin cannot see or set anybody's password, and cannot register a passkey for somebody else. Only the owner makes a recovery link for another person. An agent that holds `admin` can do none of this. Settings, **People**, offers the first two under each person's **Sign-in details**.
 
@@ -431,7 +478,7 @@ In server mode the sign-in page has three ways in, one under the other:
 - "Sign in with a passkey", where the instance has passkeys and your browser has them. You type no name.
 - "Use a token": paste a token under "Sign in with your token" and press "Sign in with the token". This is how the owner signs in before anybody has a password, and how you try a token somebody handed you.
 
-The caret starts in the name, <kbd>Tab</kbd> goes down the page, and <kbd>↵</kbd> sends the form the caret is in. The server opens a session for that browser, and the browser keeps a cookie that names the session. The cookie is not the token or the password: the browser holds neither after that.
+The caret starts in the name, <kbd>Tab</kbd> goes down the page, and <kbd>↵</kbd> sends the form the caret is in. The server opens a session for that browser, and the browser keeps a cookie that names the session. The cookie identifies the session. After sign-in, the browser holds neither the token nor the password.
 
 To sign out, press **Sign out** at the bottom of the sidebar, or <kbd>g</kbd> <kbd>x</kbd>. Ending this browser's session in Settings, **Your sessions**, opens the same dialog. It offers three choices:
 
@@ -455,9 +502,9 @@ owner token (shown once): <token>
 
 The second line says who the owner is and how people sign in. Server mode signs nobody in on its own. In local mode the line reads `you are robin@this-machine`, because there you are the owner.
 
-Copy it then. If you miss it, set `MAINWORTHY_OWNER_TOKEN` to a new value of 20 to 512 characters and restart, and that value becomes a token too. A new value there also retires every token that came from the variable before: the server revokes them and names them in one line when it starts. A value that is a token which was revoked, has reached its end, or is somebody else's is not accepted: the server says which in one line when it starts and leaves the token as it is. With no value set, a start on which the owner holds no token that works prints a new one, as the first start does. In the container, `docker compose logs` has the line.
+Copy the owner token when it appears. If you miss the token, set `MAINWORTHY_OWNER_TOKEN` to a new value of 20 to 512 characters. Restart the server to add that value as a token. A new value also revokes every token previously issued through that variable. At startup, the server names those tokens in one log line. The server refuses a value that matches a revoked or expired token, or somebody else's token. At startup, it names the reason in one line and leaves the token unchanged. With no value set, a start on which the owner holds no token that works prints a new one, as the first start does. In the container, `docker compose logs` has the line.
 
-The command line needs no token in local mode on the same machine. In server mode, give it one with `MAINWORTHY_TOKEN`, or `--token-file` for a token in a file. `--token` works too, but an argument is in the process list and the shell's history; prefer the variable. The command warns once on standard error if it is about to send a token to plain `http://` on another machine: [use an `https://` address](./cli.md#give-the-token-in-the-environment-or-in-a-file).
+The command line needs no token in local mode on the same machine. In server mode, give it one with `MAINWORTHY_TOKEN`, or `--token-file` for a token in a file. `--token` works too, but an argument appears in the process list and the shell's history. Prefer the variable. The command warns once on standard error if it is about to send a token to plain `http://` on another machine: [use an `https://` address](./cli.md#give-the-token-in-the-environment-or-in-a-file).
 
 ## What a pipeline can never do
 
@@ -471,6 +518,8 @@ invalid: a pipeline may hold read and record, not produce; give an agent or a pe
 A pipeline with only `record` cannot read cases or the queue either. Add `read` if its job needs them. The token for a pipeline is in [report results](./report-results.md#give-a-pipeline-its-own-token).
 
 ## Where it is in Settings
+
+These Settings sections manage policy, access and sign-in:
 
 - Policy shows who answers under the current policy. See [policy](./policy.md).
 - Tokens makes, lists and revokes tokens. An admin sees the form, and anyone else sees "An admin creates and revokes tokens."

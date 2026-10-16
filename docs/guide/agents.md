@@ -8,7 +8,7 @@ or need a person's decision.
 
 ## Make a token for the agent
 
-Give the agent its own actor, so every record names it.
+Create a token with the agent's own actor, so every record names the agent.
 
 ```
 $ mainworthy token new --agent reviewer --can read,produce --project scratch
@@ -17,10 +17,11 @@ token for agent "reviewer" (read, record, produce)
 Shown once. It will not be shown again.
 ```
 
-`read` lets it read cases, questions, and gates. `produce` lets it propose edits, record
-reviews and results, and send answers. It includes `record`. Without `--can`, a new
-agent gets `read` and `produce`. It does not hold `answer`, so its answer is advice
-or the policy refuses it. Add `answer` only where you want an agent's answer to count.
+`read` lets the agent read cases, questions, and gates. `produce` lets the agent
+propose edits, record reviews and results, and send answers. The `produce` capability
+includes `record`. Without `--can`, a new agent gets `read` and `produce`. The
+agent does not hold `answer`, so its answer is advice or the policy refuses the
+answer. Add `answer` only where you want an agent's answer to count.
 [People, agents and pipelines](./access.md) covers grants and revocation.
 
 > [!WARNING]
@@ -28,9 +29,16 @@ or the policy refuses it. Add `answer` only where you want an agent's answer to 
 
 ## Connect over MCP
 
-MCP is the protocol most agent tools use to call a server's tools. Mainworthy supports protocol 2026-07-28 with the v2 TypeScript SDK, and keeps the 2025-11-25 client path. Mainworthy speaks it two ways.
+Mainworthy supports MCP protocol 2026-07-28 with the v2 TypeScript SDK, and
+retains support for 2025-11-25 clients. Choose either standard input and output
+or HTTP to connect the agent.
 
-Over standard input and output, run `mainworthy mcp`. It forwards each call to the running server, so the server must be up. Point it at the server with the same variables the other commands use, and give the agent's token:
+For standard input and output, configure the MCP client as follows. The server
+must be running because `mainworthy mcp` forwards each call to the server.
+
+1. Set the client's command to `mainworthy`.
+2. Set its argument to `mcp`.
+3. Set the server address, agent token, and project in the client's environment:
 
 ```
 MAINWORTHY_URL=http://127.0.0.1:7357
@@ -38,34 +46,49 @@ MAINWORTHY_TOKEN=<token>
 MAINWORTHY_PROJECT=scratch
 ```
 
-Most MCP clients take a command, its arguments and a set of environment variables, so the client's entry runs `mainworthy` with the argument `mcp` and these three variables. The exact file depends on the client.
+The configuration file depends on the MCP client.
 
-Over HTTP, send MCP requests to `/mcp` on the server, for example `http://127.0.0.1:7357/mcp`, with the header `Authorization: Bearer <token>`. The endpoint takes `POST` only. Each request stands alone, with no session to open or close, and a body can be up to 4 MiB. Use the command line for a bigger report.
+For HTTP, send MCP requests to the server's `/mcp` address, such as
+`http://127.0.0.1:7357/mcp`. Include the header `Authorization: Bearer <token>`.
+The endpoint accepts only `POST`. Each request stands alone, with no session to
+open or close. A request body can be up to 4 MiB. For a bigger report, use the
+command line.
 
 A 2026-07-28 client uses `server/discover` to learn the server's capabilities, without an initialization handshake. Its requests carry the protocol and client metadata in `_meta`. Over HTTP, a request must send `Mcp-Method` with its JSON-RPC method. Without it, the server returns HTTP 400 with error code `-32020`. The SDK sends this header, `MCP-Protocol-Version`, and `Mcp-Name` for a tool call. A 2025-11-25 client keeps its `initialize` handshake and the same tools and replies. Clients on 2025-06-18 or later receive output schemas and structured replies. A 2025-03-26 client receives text replies and tool definitions without output schemas.
 
-Settings, Connect, shows the `/mcp` address of this instance.
+To find this instance's `/mcp` address, open Connect in Settings.
 
 If the agent can access more than one project, name one. Every tool takes a
-`project` field. The stdio form also reads `MAINWORTHY_PROJECT` and `--project`.
+`project` field. The standard input and output connection also reads `MAINWORTHY_PROJECT`
+and `--project`.
 With exactly one accessible project, the agent can leave it out.
 
 ## The tools and where to start
 
-An agent gets ten tools. Six read.
+An agent gets ten tools. The following six tools read data.
 
-- `impact` takes a change such as `pr:482`, or a list of changed files, and returns the cases it touches, why, what was already reviewed, open questions and files nothing covers.
+- `impact` takes a change such as `pr:482` or a list of changed files. It returns affected cases, the reasons they are affected, prior reviews, open questions, and uncovered files.
 - `inbox` lists the open questions with their evidence.
 - `get` reads cases, questions, runs and tests by ref, and `find` searches.
 - `since` returns what changed after a cursor.
 - `gate` returns `passed`, `failed`, `blocked` or `pending` for a commit, change or run.
 
-Four write. `propose` creates or changes cases, `claim` records a review and its findings, `report` records results, and `decide` answers a question.
+The other four tools write data. `propose` creates or changes cases, `claim`
+records a review and its findings, `report` records results, and `decide` answers
+a question.
 
-Start with `impact`. It tells the agent which few cases matter, so it does not read the whole suite. Keep the returned cursor and pass it back as `since` on the next call. [API and agent tools](./api.md#agent-tools) lists every tool's inputs.
+Start with `impact` to find the relevant cases without reading the whole suite.
+Keep the returned cursor. On the next `impact` call, pass that cursor as `since`.
+[API and agent tools](./api.md#agent-tools) lists every tool's inputs.
 
-When recording a change review with `claim`, set `about` to its change key and `patch` to the exact commit you reviewed.
-Copy that commit from `impact`'s `change.head` before reading the patch. Set `reviewed` to the case refs and hashes you read.
+To record a change review, follow these steps.
+
+1. Before reading the patch, copy the commit from `impact`'s `change.head`.
+2. Set `claim`'s `about` to the change key.
+3. Set `patch` to the copied commit.
+4. Set `reviewed` to the case refs and hashes you read.
+5. Send the `claim` request.
+
 For example, send `about: "pr:482"`, `patch: "cccc0001"`, and `reviewed: ["C-1@<hash>"]`.
 Keep the original `patch` value if another commit arrives while you are reviewing.
 
@@ -73,7 +96,8 @@ Keep the original `patch` value if another commit arrives while you are reviewin
 A different change starts unreviewed, even at the same commit. A new commit needs another review, even if the case text is unchanged.
 Passing `since` still returns those affected cases when the change moves. With an unchanged change, it returns only cases that moved or are failing.
 Reviews without `about` and `patch` remain recorded but cannot cover a change. A files-only impact request has no known head and cannot reuse reviews.
-An unchanged basis preserves the review. Use `ledger: false` to request fresh eyes.
+An unchanged basis preserves the review. To request a review without prior review
+filtering, use `ledger: false`.
 
 ## Install the skill
 
@@ -85,14 +109,26 @@ starts with `impact`, reads the cases it needs, records findings in one `claim`,
 and reports outcomes in one `report`. It answers a question using the evidence
 hash it read.
 
-The instance serves the skill, as one archive of the `mainworthy` directory, at `/docs/skill/mainworthy.tar.gz`. Like the rest of the documentation it needs no token. One command unpacks it into the skills directory your agent reads. For Claude Code, use `~/.claude/skills` for every project, or `.claude/skills` inside one:
+The instance serves an archive of the `mainworthy` skill directory at
+`/docs/skill/mainworthy.tar.gz`. The archive needs no token.
+
+To install the skill for Claude Code, follow these steps.
+
+1. Choose `~/.claude/skills` for every project, or `.claude/skills` inside one project.
+2. Create the skills directory.
+3. Download the archive.
+4. Unpack the archive into that directory.
+
+For example, these commands install the skill for every project:
 
 ```
 $ mkdir -p ~/.claude/skills
 $ curl -fsS "$MAINWORTHY_URL/docs/skill/mainworthy.tar.gz" | tar -xz -C ~/.claude/skills
 ```
 
-The skill matches the version of the instance that served it, so unpack it again after an upgrade. Other agents keep skills in a directory of their own: give `tar` that one. The same files are in the Mainworthy source tree, as `skill/mainworthy`.
+The skill matches the instance version. After an upgrade, unpack the skill again.
+For other agents, use the skills directory that the agent reads as the `tar`
+destination. The same files are in the Mainworthy source tree at `skill/mainworthy`.
 
 ## What agent work is worth
 
@@ -104,7 +140,11 @@ Policy edits and [quarantine proposals](./report-results.md#quarantine-an-unreli
 need a person's decision under every preset. The agent that wrote an edit can always
 withdraw its own conflicting proposal.
 
-A finding from a review is recorded and shown. A person accepts, rejects, defers or marks it a duplicate. In the web queue, accepting a finding that carries a suggestion turns the suggestion into a proposed edit, with the agent as its author, and that edit follows the policy again. A finding never changes a gate by itself.
+Mainworthy records and shows findings from a review. A person accepts, rejects,
+defers, or marks each finding as a duplicate. In the web queue, accepting a
+finding with a suggestion turns the suggestion into a proposed edit. The agent
+is the edit's author, and the policy applies to the edit. A finding never
+changes a gate by itself.
 
 A finding can suggest a step edit with `suggest: { step, action, expected }`, or a new case with
 `suggest: { case: { title, folder, steps } }`. For a new case, `folder` is optional and each step is
@@ -115,7 +155,11 @@ the suggestion into a proposal.
 Mainworthy records and shows an agent's result. A failure can raise a question,
 but the result does not move a commit's gate. The next section explains why.
 
-An answer from an agent is one of three things, and the reply to `decide` says which. `decided` means the answer counts. `advised` means it is recorded as advice and a person decides. `forbidden` means the policy refuses it. With the default grant, `read` and `produce`, an agent's failure answer is advised under `loose` and `standard` and forbidden under `strict`:
+The reply to `decide` gives the status of the agent's answer. `decided` means
+the answer counts. `advised` means Mainworthy records the answer as advice and
+a person decides. `forbidden` means the policy refuses the answer. With the
+default grant of `read` and `produce`, an agent's failure answer is advised under
+`loose` and `standard` and forbidden under `strict`:
 
 ```
 [{"q":"Q-19","status":"advised","needs":"one member who is not an agent","decision":null}]
@@ -141,10 +185,12 @@ The agent's failure still raises a question for a person, who can read the evide
 
 ## Runs that ask for agents
 
-An agent's result counts in one place, a planned run that asks for agents, on a case that admits them. Both are choices you make.
+An agent's result counts in a planned run that asks for agents, on a case that
+admits them. To enable agent results, follow these steps.
 
-1. Open the case and, under "Can be exercised by", tick Agent. In Markdown this is `methods: [human, agent]`.
-2. Plan the run with a requirement that names the agent method.
+1. Open the case.
+2. Under "Can be exercised by", tick Agent. The Markdown equivalent is `methods: [human, agent]`.
+3. Plan the run with a requirement that names the agent method.
 
 ```
 $ mainworthy plan --json '{"name":"Agent smoke","select":{"cases":["C-2"]},"require":[{"id":"exercise","kind":"exercise","methods":["human","agent"],"minActors":1,"basis":"exact-or-assumed"}]}'
@@ -155,7 +201,10 @@ $ mainworthy plan --json '{"name":"Agent smoke","select":{"cases":["C-2"]},"requ
 }
 ```
 
-The agent then reports to the run, with `run` set to `R-2`. Its pass fills the slot, and `mainworthy gate --run R-2` reads `passed`. The web planner does not offer this requirement yet, so use the command line or the API. A run that does not name the agent method ignores agent results, even on a case that admits agents.
+The web planner does not offer this requirement yet, so use the command line or
+the API. After planning the run, have the agent report to it with `run` set to `R-2`. Its pass
+fills the slot, and `mainworthy gate --run R-2` reads `passed`. A run that does
+not name the agent method ignores agent results, even on a case that admits agents.
 
 ## See also
 

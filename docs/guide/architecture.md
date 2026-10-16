@@ -20,11 +20,11 @@ The registry checks the input and the caller's permission. A project write runs 
 
 Case versions, observations and decisions retain their history. A correction records what it replaces instead of overwriting the earlier content. Automatic [demo refreshes](./customize.md#a-project-of-demo-data) replace the demo project's history at startup.
 
-Each project has a sequence counter. A project transaction takes the next number and stamps its changes with it. Clients use that number as a cursor to read subsequent changes through `since`.
+Each project has a sequence counter. A project transaction takes the next number and stamps its changes with that number. Clients use that number as a cursor to read subsequent changes through `since`.
 
 ## One way to change what is current
 
-The current case version, test links, failure classifications, run closure and policy are the state that decisions control. Functions that establish that state require proof of a recorded decision. Dedicated withdrawal handlers reverse a decision's effects when it ends. The database refuses a row that cites a decision the record does not hold.
+The current case version, test links, failure classifications, run closure and policy are the state that decisions control. Functions that establish the current state require proof of a recorded decision. Dedicated withdrawal handlers reverse a decision's effects when it ends. The database refuses a row that cites a decision the record does not hold.
 
 The recorded decision names who decided, on what evidence and under which policy clause. Tests check that the modules use these writers. A verdict follows the evidence and the decisions still in force. It can also change when a decision's hold expires. [How Mainworthy works](./concepts.md) explains what this means when you use it.
 
@@ -32,11 +32,13 @@ The recorded decision names who decided, on what evidence and under which policy
 
 [Diagram: one red build, from upload to a green gate](../diagrams/red-build.html)
 
+A pipeline report goes through these stages.
+
 1. `mainworthy report` reads the JUnit XML and the commit, branch and pull request from the CI environment.
-2. The server stores the report durably before applying it. From that moment the gate for the commit reads `pending` until application finishes.
+2. The server stores the report durably before applying its results. The gate for the commit then reads `pending` until the server finishes applying those results.
 3. The server applies the results in slices of 200 and yields between slices to answer other requests.
 4. Mainworthy groups failures by cause. A cause on an open change raises a question unless a decision about it still holds. A planned run can also require an answer after the change ends.
-5. The server computes the verdict. When someone answers a failure question, it computes the affected verdicts again in the same transaction.
+5. The server computes the verdict. When someone answers a failure question, the server computes the affected verdicts again in the same transaction.
 
 ## The rules are tests
 

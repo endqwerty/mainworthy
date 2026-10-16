@@ -1,15 +1,16 @@
 # API and agent tools
 
-Every Mainworthy operation, with its address, required capability, and input.
+This page lists every Mainworthy operation, with its address, required capability,
+and input.
 The web UI, command line, and agent tools call these operations. The command line
 and HTTP API reach every operation. MCP exposes ten of them as agent tools.
 
 ## Call an operation
 
 An operation is one `POST` with a JSON body. An operation on a project is at
-`/api/p/<project>/<operation>`. An operation on the instance (`admin`, `session`,
-`credential`, and `invitation`) is at `/api/<operation>`. At a project's address,
-the server returns `not_found` with the correct address.
+`/api/p/<project>/<operation>`. The instance operations `admin`, `session`,
+`credential`, and `invitation` are at `/api/<operation>`. Calling an instance operation at a project's address
+returns `not_found` with the correct address.
 
 ```
 $ curl -s -X POST http://127.0.0.1:7357/api/p/scratch/find \
@@ -18,14 +19,19 @@ $ curl -s -X POST http://127.0.0.1:7357/api/p/scratch/find \
 {"ok":true,"result":{"count":0,"items":[],"cursor":null},"seq":1}
 ```
 
-The OpenAPI document at `/api/openapi.json` describes each operation's input and successful reply, including the fields inside `result`. The registry supplies both schemas. `seq` is required and is `null` for an instance operation. A field declared nullable may hold `null`; an optional field may be absent. Replies selected by an action or a ref are described as alternatives.
+The OpenAPI document at `/api/openapi.json` describes each operation's input and
+successful reply, including the fields inside `result`. The registry supplies
+both schemas. `seq` is required and is `null` for an instance operation. A field
+declared nullable may hold `null`. An optional field may be absent. Replies
+selected by an action or a ref are described as alternatives.
 
 A successful operation returns `ok: true`, `result`, and `seq`, the project's
-sequence number at that point. To ask what changed after sequence 12, call `since`
-with `{"cursor":"s:12"}`. When `since` returns `more: true`, pass its returned
-`cursor` to the next call until `more` is false.
+sequence number at that point. The `since` operation with `{"cursor":"s:12"}`
+returns changes after sequence 12. A reply with `more: true` has more changes
+available through another call with the returned `cursor`.
 
-A reply that did not run has `ok: false` and an `error` with a `code` and a `message`:
+When an operation does not run, its reply has `ok: false` and an `error` with a
+`code` and a `message`:
 
 ```
 {"ok":false,"error":{"code":"not_found","message":"no operation named nope"}}
@@ -36,14 +42,17 @@ A reply that did not run has `ok: false` and an `error` with a `code` and a `mes
 | `invalid` | 400 | The input is wrong. `details` says which field. |
 | `unauthenticated` | 401 | The caller supplied no working credentials. Refused names, passwords, passkey answers, and invitation codes get the same reply, regardless of the reason. |
 | `forbidden` | 403 | The caller lacks the required capability, or the operation or policy refuses the action. |
-| `not_found` | 404 | No such operation, project or ref. A project the caller holds no grant on is answered the same way. |
+| `not_found` | 404 | No such operation, project, or ref. The server returns the same code for a project the caller has no grant on. |
 | `conflict` | 409 | The edit was made on an older version, the command id was used for something else, or the client's API version differs from the server's. |
 | `limited` | 429 | Too many failed attempts: wrong tokens from this address or for a token that starts as this one does, wrong passwords from this address or for this name, wrong authenticator codes from this address or for this name, or refused passkeys or invitation codes from this address. The `Retry-After` header says how many seconds to wait. |
 | `internal` | 500 | The server failed. The message is `internal error`, and the detail is in the server's log. A report can commit in stages, so a failure does not prove that nothing was written. |
 
 ## Authenticate
 
-Send a token as `Authorization: Bearer <token>`. A server in local mode trusts requests from the same machine and needs none. [People, agents and pipelines](./access.md) explains how to make a token and what it may do.
+Token authentication uses `Authorization: Bearer <token>`. A server in local
+mode trusts requests from the same machine and needs no token.
+[People, agents and pipelines](./access.md) explains how to make a token and
+what the token may do.
 
 ## Sign in as a person
 
@@ -58,11 +67,11 @@ logout needs no body. Replies use the operation envelope without `seq`.
 | --- | --- | --- |
 | `GET /api/login/methods` | none | Returns `{"password": true, "passkey": <boolean>, "mail": <boolean>}`. The booleans say whether the instance offers passkeys and mail. |
 | `POST /api/login` | `{"token"}` | Signs in with a token. |
-| `POST /api/login` | `{"name", "password"}` | Signs in with a name and a password, or returns `{"signedIn": false, "secondFactor": {"challenge", "expiresAt"}}` when an authenticator is enrolled. No session is created yet. Keep the ceremony cookie from this response. |
+| `POST /api/login` | `{"name", "password"}` | Signs in with a name and a password, or returns `{"signedIn": false, "secondFactor": {"challenge", "expiresAt"}}` when an authenticator is enrolled. A second-factor reply creates no session. The next step requires the ceremony cookie from this response. |
 | `POST /api/login` | `{"challenge", "code"}` | Completes the password sign-in with a fresh six-digit TOTP or unused recovery code, plus the ceremony cookie from the first step. The challenge lasts five minutes and works once. A successful reply is `{"signedIn": true}` and sets the session cookie. |
-| `POST /api/login/challenge` | `{}` | Returns the options for `navigator.credentials.get` in `result.passkey`. The challenge works once for five minutes. The reply sets an `HttpOnly` cookie, `mainworthy_ceremony` over HTTP or `__Host-mainworthy_ceremony` over HTTPS. The answer must carry that cookie. A browser sends it automatically. A script must keep it. |
+| `POST /api/login/challenge` | `{}` | Returns the options for `navigator.credentials.get` in `result.passkey`. The challenge works once for five minutes. The reply sets an `HttpOnly` cookie, `mainworthy_ceremony` over HTTP or `__Host-mainworthy_ceremony` over HTTPS. The answer must carry that cookie. A browser sends the cookie automatically. A script must retain the cookie. |
 | `POST /api/login` | `{"passkey"}` | Signs in with what the browser returned for those options: `id`, `clientDataJSON`, `authenticatorData`, `signature`, `userHandle`, each base64url. |
-| `POST /api/login/challenge` | `{"invitation"}` | Who the invitation is for, what it does (`join` or `recover`) and when it runs out, with the options for `navigator.credentials.create`, or `null` for them on an instance without passkeys. It writes no row. On an instance with passkeys, each lookup that finds the invitation makes a challenge the server keeps in memory for five minutes. A code that accepts nothing is answered `not_found`. |
+| `POST /api/login/challenge` | `{"invitation"}` | Returns the invitation's recipient, purpose (`join` or `recover`), and expiry, with options for `navigator.credentials.create`. On an instance without passkeys, the options are `null`. The request writes no row. On an instance with passkeys, each lookup that finds the invitation makes a challenge the server keeps in memory for five minutes. A code that accepts nothing is answered `not_found`. |
 | `POST /api/login` | `{"invitation", "password"?, "passkey"?, "label"?, "replace"?}` | Accepts an invitation with a password, a passkey, or both, and signs in. `passkey` holds `id`, `clientDataJSON`, `authenticatorData`, `publicKey`, `publicKeyAlgorithm`, and `transports` from the browser. If the browser is signed in as another person, the reply is `conflict` with their name in `details.signedInAs`. Sending that name as `replace` signs them out of this browser when the invitation is accepted. Any other name is refused the same way, with the name the browser is signed in as. A `replace` that is not a string, such as `true`, returns `invalid`. |
 | `POST /api/login` | `{"resetRequest":"robin@example.com"}` | Requests a password-reset email for a verified address. Returns `{"requested":true}` whether or not the address matches an account. Requires mail. |
 | `POST /api/login` | `{"emailVerification":"<code>"}` | Verifies a recovery email address. Returns `{"verified":true}` on success. The code works once for 24 hours. Requires mail. |
@@ -76,7 +85,14 @@ who is signed in, their numeric actor id (`actorId`), the current session id
 `credentials` says whether they have a password and how many passkeys they have.
 An archive import can replace actor ids.
 
-Passwords use Unicode NFC before hashing and checking. An older password also accepts its original spelling. If that spelling is not NFC, successful sign-in refreshes its hash without ending existing sessions. Accepting a recovery invitation revokes the person's previous passwords, passkeys and tokens, and ends their existing sessions. It leaves other actors' tokens alone. See [passwords and recovery](./access.md#a-name-and-a-password-or-a-passkey) for the legacy-password behavior and the limit when concurrent responses replace the browser's cookie.
+Passwords use Unicode NFC before hashing and checking. An older password also
+accepts its original spelling. If that spelling is not NFC, successful sign-in
+refreshes the password's hash without ending existing sessions. Accepting a
+recovery invitation revokes the person's previous passwords, passkeys, and tokens,
+and ends their existing sessions. Recovery does not change other actors' tokens. See
+[passwords and recovery](./access.md#a-name-and-a-password-or-a-passkey) for the
+legacy-password behavior and the limit when concurrent responses replace the
+browser's cookie.
 
 A signed-in person registers another passkey with the `credential` operation.
 `passkey.begin` returns the options for `navigator.credentials.create`.
@@ -94,15 +110,22 @@ These inputs refuse command ids, and the server never caches or replays their
 secret replies. Ordinary credential lists return kind `totp` and descriptive
 fields only. `remove` removes the authenticator and ends all the person's sessions.
 
-The same operation manages personal CLI tokens with `token.create`, `token.list`, and `token.revoke`. Creation requires a password or passkey session, or local-owner access, binds the caller as the token actor, and returns the secret once. It defaults to a 30-day expiry, with a 365-day maximum. A bearer token or a token-backed browser session cannot create one. [Make your own command-line token](./access.md#make-your-own-command-line-token) gives the inputs, replies, and CLI setup.
+The same operation manages personal CLI tokens with `token.create`, `token.list`,
+and `token.revoke`. Creation requires a password or passkey session, or local-owner
+access. The new token belongs to the caller, and the reply returns the secret once.
+The default expiry is 30 days, with a 365-day maximum. A bearer token or a
+token-backed browser session cannot create a personal CLI token.
+[Make your own command-line token](./access.md#make-your-own-command-line-token)
+gives the inputs, replies, and CLI setup.
 
 ## Send a write twice safely
 
-For a write whose input accepts `cmd`, choose an id for that request. If you send
-the same completed request again, the server returns its saved reply and writes
-nothing. Reusing the id with different content returns `conflict`. If you lost
-the reply, ask the `command` operation what became of the id. A report that began
-but did not finish resumes when retried with the same id and input.
+For a write whose input accepts `cmd`, that field identifies the request.
+Repeating the same completed request with the same id returns its saved reply
+and writes nothing. Reusing the id with different content returns `conflict`.
+The `command` operation returns the request's status if the reply was lost.
+A report that began but did not finish resumes when retried with the same id
+and input.
 
 Secret replies are an exception. Token and invitation creation keep the command's
 record but do not save its secret reply. Retrying the same id returns `conflict`
@@ -110,13 +133,28 @@ without repeating the write. Authenticator enrolment refuses command ids.
 
 ## Say when a write happened
 
-Every write is recorded with the server's clock. A caller cannot give another time, with one exception: a demo project. `mainworthy seed` uses it to write the days before today.
+The server records every write with its own clock, except in a demo project.
+`mainworthy seed` uses demo projects to write records dated before today.
 
-`admin` with `{"do": "project.demo", "key": "<project>"}` makes a project a demo. It works only on a project nothing was written to since it was made, and it cannot be undone. The reply holds `key` and `since`, the moment the project became a demo. Both fields are required by the API reply schema. Asked again, it returns the same moment. `project.list` and the session name each project with `demo: true` or `false`, so a client can tell whose dates it is reading.
+`admin` with `{"do": "project.demo", "key": "<project>"}` makes a project a demo.
+The operation works only on a project with no writes since its creation. The
+demo status cannot be undone. The reply holds `key` and `since`, the moment
+the project became a demo. Both fields are required by the API reply schema.
+Repeating the call returns the same moment. Both `project.list` and the session
+reply mark each project with `demo: true` or `false`. A client can use that flag
+to identify projects whose writes accept caller-supplied times.
 
-A write to a demo project may carry the header `X-Mainworthy-At` with a time in milliseconds since 1970. The server records the write at that time. It refuses a time in the future, a value that is not a whole number, the header on a read or on an operation of the instance, and the header on any project that is not a demo. The time is part of what `cmd` names: the same request at another time is another request.
+A write to a demo project may carry `X-Mainworthy-At` with a time in milliseconds
+since 1970. The server records the write at that time. The server refuses a
+future time or a value that is not a whole number. The header is invalid on
+reads, instance operations, or projects that are not demos. The time is part
+of the request identified by `cmd`. The same request at another time is a
+different request.
 
-Nothing checks that the times of a demo's writes are in order. Send them oldest first. Avoid the answer `flaky` in the past: it holds for a number of days from the time it was given, and one that has already run out reopens its question within a minute.
+The server does not check whether a demo's write times are in order. Writes sent
+oldest first preserve that order. A `flaky` answer holds for a number of days
+from the time the answer was given. An answer dated in the past may already
+have expired, causing its question to reopen within a minute.
 
 An archive does not say which project is a demo. After an import every project records the server's clock.
 
@@ -126,13 +164,16 @@ An archive does not say which project is a demo. After an import every project r
 
 ## Follow changes
 
-`GET /api/p/<project>/events` is a stream of server-sent events, one for each write to the project. It needs the `read` capability. A client that misses an event loses nothing: it reads again, or asks `since`.
+`GET /api/p/<project>/events` is a stream of server-sent events, one for each write
+to the project. The stream needs the `read` capability. A client that misses an
+event can read the data again or request the changes through `since`.
 
 ## Operations
 
-Ordinary JSON case reads omit custom field values and fragment users. Request
-them explicitly with `get` field selections such as `fields: ["title", "fields"]`
-or `fields: ["users"]`. The latter lists a fragment's current consumers and pins.
+Ordinary JSON case reads omit custom field values and fragment users. Explicit
+`get` field selections such as `fields: ["title", "fields"]` or `fields: ["users"]`
+include those values. The `users` selection lists a fragment's current consumers
+and pins.
 The default selection includes `tests` as well as the fields named below.
 When `steps` is selected, `hasFragments` says whether that case version has pins.
 Only a version with pins also returns `sourceSteps`, the editable references

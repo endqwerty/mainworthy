@@ -5,12 +5,11 @@ Keep the pipeline's identity, retries, and case links with its results.
 
 ## Upload JUnit XML
 
-Have your runner write a JUnit XML file. Then report it to your instance:
+To upload results and read the verdict, follow these steps.
 
-```sh
-$ mainworthy report results.xml
-$ mainworthy gate
-```
+1. Configure your runner to write a JUnit XML file, such as `results.xml`.
+2. Run `mainworthy report results.xml` to upload the file to your instance.
+3. Run `mainworthy gate` to read the verdict for the tested commit.
 
 You can pass several files or a shell glob such as `results/*.xml`.
 The receipt lists outcomes, new or existing questions, unlinked tests, result bases,
@@ -19,15 +18,15 @@ and the gate at the time of the upload.
 A successful `report` exits `0` even when tests fail. Use `gate` for the verdict.
 An invalid input or refused command exits `4`. See [changes](./changes.md).
 Sending an identical report again returns the original receipt and says
-"already received; nothing was written". The gate line in it is the gate as
-it was at the first upload, so a repeat can show "blocked" for a commit that
-has passed since. The command says so on stderr and points at `mainworthy gate`,
-which reads the verdict now.
+"already received; nothing was written". The receipt's gate line shows the verdict
+at the first upload. A repeat can therefore show "blocked" for a commit
+that has passed since. The command explains this on stderr and points at
+`mainworthy gate` to read the current verdict.
 
 Reports also fill qualifying slots in planned runs that accept the tested commit,
 even after those runs close. A late report makes the run's gate `pending` until
-all accepted reports are applied, then Mainworthy reconsiders its sign-off on the
-new evidence if the report added or corrected qualifying slot results. A report
+Mainworthy applies all accepted reports. If the report added or corrected
+qualifying slot results, Mainworthy reconsiders the run's sign-off on the new evidence. A report
 that does neither leaves the approval in place. See [planned runs](./runs.md#close-and-reopen-a-run).
 
 [Diagram: one red build, from upload to a green gate](../diagrams/red-build.html)
@@ -47,6 +46,8 @@ one format for every file in the command. The default is `--format auto`. Jest a
 the same JSON structure. Detection reads the content. A `.trx` extension also
 selects TRX, and a `.json` extension makes invalid JSON an input error.
 
+The commands below produce and upload each native report format.
+
 | Runner | Produce the report | Upload |
 | --- | --- | --- |
 | Playwright | `PLAYWRIGHT_JSON_OUTPUT_FILE=results.json playwright test --reporter=json` | `mainworthy report results.json` |
@@ -64,15 +65,15 @@ CTRF is not supported.
 Native adapters keep the file, suite path, test name, case annotations in the
 name, duration, and failure diagnostics. Playwright includes the project name
 in the test key, so Chromium and Firefox results stay separate. TRX uses the
-class in `TestDefinitions` when present and the test name; its assembly path
-is not a source file. A TRX test without a definition keeps its name as its key.
+class in `TestDefinitions` when present, together with the test name. Its
+assembly path is not a source file. A TRX test without a definition keeps its name as its key.
 The report's filename and TRX execution IDs do not enter test keys.
 
 Jest and Vitest source paths are relative to the report's `rootDir` when present.
 Otherwise the command uses the Git checkout's top level, or its working directory
 outside Git. Run the command in the source checkout that produced the report,
-including when the report file is stored elsewhere. This keeps keys stable
-between checkouts. The JSON reporters normally omit `rootDir`.
+including when the report file is stored elsewhere. Running from the source
+checkout keeps keys stable between checkouts. The JSON reporters normally omit `rootDir`.
 The command refuses a relative `rootDir`, a filesystem root, or a source path
 outside the chosen root. It exits with code 4 and names the report file and root.
 
@@ -94,9 +95,14 @@ $ mainworthy report --nothing-required --commit 11111111111111111111111111111111
 $ mainworthy gate --commit 1111111111111111111111111111111111111111
 ```
 
-The report needs a CI token. It accepts no files, results, or planned run. CI detection can supply the commit, job, and other build metadata as for an ordinary report.
+The declaration needs a CI token and accepts no files, results, or planned run.
+CI detection can supply the commit, job, and other build metadata as for an
+ordinary report.
 
-All presets keep this gate pending by default. A project admin must first record `mainworthy policy empty nothing-required`. See [reports with no tests](./policy.md#reports-with-no-tests) for the policy choice and its record.
+All presets keep this gate pending by default. Before the declaration can pass
+the gate, a project admin must record `mainworthy policy empty nothing-required`. See
+[reports with no tests](./policy.md#reports-with-no-tests) for the policy choice
+and its record.
 
 The declaration passes only a commit with no ordinary reports. It cannot turn skips, refused results, agent results, or an existing failure into a pass. It never satisfies a planned run or a required CI job. An empty JUnit file without the explicit declaration is refused.
 
@@ -163,7 +169,7 @@ before a head observation cannot replace that head with a late job.
 An identical report with the same head and build URL is a retry and does not move the
 change again. With `--head`, the build URL distinguishes a new CI run even when its
 results and attempt number match an earlier run. GitHub Actions supplies a URL containing
-the run ID; other producers can set `MAINWORTHY_BUILD_URL` or send `buildUrl` in JSON.
+the run ID. Other producers can set `MAINWORTHY_BUILD_URL` or send `buildUrl` in JSON.
 Keep it unchanged for a retry.
 Without a build URL, use a new `--attempt` number for a fresh observation with identical
 results and the same head. Through the API, a new `cmd` value also names a fresh
@@ -190,20 +196,23 @@ You can instead put a property inside the test case:
 
 An [imported alias](./data.md#bring-cases-from-another-tool), such as `C1234` or `PAY-7`,
 works wherever a case ref does here. Use `@C1234` in a name or `C1234` in a property.
-Add `@v1` to claim version 1 in Mainworthy, not the version in the source tool.
+To claim version 1 in Mainworthy, add `@v1`. The claim does not name the version
+in the source tool.
 Aliases keep their original letter case and resolve within the report's project.
 In a name, native refs match without regard to letter case: `@c-2` names `C-2`.
 Mainworthy normalizes native refs to uppercase and leaves alias letter case unchanged.
 A non-native `@token` claims a case only when that alias exists in the report's project.
-Other tokens, such as `@smoke`, `@media`, and the address in `user@example.com`, are ignored when they name no alias.
-They do not hide a later native ref or drop a previously decided link.
+Mainworthy ignores other tokens, such as `@smoke`, `@media`, and the address in
+`user@example.com`, when those tokens name no alias. Those tokens do not hide a
+later native ref or drop a previously decided link.
 Trailing sentence punctuation is excluded from name claims: `@C1234.` names `C1234`.
 Use explicit metadata for an alias whose final punctuation belongs to its identifier.
 Separate claims with whitespace. Glued tokens such as `@smoke@C-2`,
 `@C-2x`, and `@C-2@v1x` do not claim a case.
 
-Name annotations work in JUnit, Playwright, Jest, Vitest and TRX test names,
-and in pytest node IDs, including parameter IDs. These formats also carry case claims outside the name:
+Name annotations work in JUnit, Playwright, Jest, Vitest, and TRX test names,
+and in pytest node IDs, including parameter IDs. The following formats also
+carry case claims outside the name:
 
 - JUnit uses the `mainworthy` property shown above.
 - Playwright JSON uses a test annotation with `type: "mainworthy"` and `description: "C1234@v1"`.
@@ -216,7 +225,8 @@ An unknown non-native token is ignored even after a valid claim.
 
 These properties and Playwright annotations take precedence over every claim in the name.
 When several explicit metadata claims name the case on one test, the last syntactically valid claim wins.
-An unknown alias in explicit metadata is recorded without a case, and the receipt explains why, just as for an unknown native ref.
+An unknown alias in explicit metadata is recorded without a case, just as for
+an unknown native ref. The receipt explains why.
 Metadata preserves the alias's punctuation and requires uppercase native refs.
 A test can also use a link previously decided in [Queue](./decide.md).
 
@@ -225,17 +235,22 @@ together with its suite path and name. Keep those values stable across reports.
 The report file's name is not the test's source file.
 
 What happens to a test without a case is the project's choice. Under `loose` and `standard`
-it starts as "Track without a case": the test is kept and nobody is asked. A project can have
-a case made for each such test, or have each file raise an unlinked-test question, which is
-where `strict` starts. See [policy](./policy.md#tests-with-no-case).
+the policy starts as "Track without a case". Mainworthy keeps the test and asks
+nobody. A project can instead create a case for each such test or raise an
+unlinked-test question for each file. The `strict` preset starts with questions. See [policy](./policy.md#tests-with-no-case).
 An unlinked automated test still counts toward the commit gate.
 
 ## Read what each test did
 
-Press <kbd>g</kbd> <kbd>t</kbd> to open Tests. It lists every automated test the project's
-reports have named, the newest first, with its file and its case or "no case". Type in the
-filter to find one by name or file, and check "Only tests with no case" to see the tests
-tracked without one. <kbd>j</kbd> and <kbd>k</kbd> move between tests.
+To find an automated test, follow these steps.
+
+1. Press <kbd>g</kbd> <kbd>t</kbd> to open Tests.
+2. Type a name or file in the filter.
+3. To show tests tracked without a case, check "Only tests with no case".
+4. Use <kbd>j</kbd> and <kbd>k</kbd> to select a test.
+
+Tests lists every automated test the project's reports have named, newest first.
+Each row shows the test's file and its case or "no case".
 
 A test's page shows its file, key, and case. It also shows how often the test flipped
 between passing and failing on the same code, and any quarantine in force.
@@ -304,40 +319,44 @@ across different trunk commits are not built yet. Change the detector's settings
 through a [policy edit](./policy.md#same-code-detector-settings).
 
 Playwright retries become one logical test result. The highest numbered decisive
-execution supplies its outcome and failure; a skipped retry does not erase an
+execution supplies its outcome and failure. A skipped retry does not erase an
 earlier failure. Its duration sums all executions, and a pass after retries has
 the same `passed after N retries` note as JUnit. An expected Playwright failure
-counts as a pass; an unexpected pass counts as a failure.
+counts as a pass. An unexpected pass counts as a failure.
 
 Jest and Vitest JSON contain the final assertion outcome and duration, but their
 standard JSON reporters do not export a retry count. Mainworthy does not invent
 one. The pytest adapter sums setup, call, and teardown durations and keeps setup
 or teardown failures as errors. Its failure message uses `crash.message` when
 available and keeps the traceback in the details. Expected pytest failures are skipped.
-TRX keeps each execution and its duration; ambiguous or unfinished outcomes count as errors.
+TRX keeps each execution and its duration. Ambiguous or unfinished outcomes
+count as errors.
 
 ## Give a pipeline its own token
 
-As an administrator, create a token for the pipeline:
+To give a pipeline its own identity, follow these steps.
 
-```sh
-$ mainworthy token new --ci github-actions --project scratch
-```
-
-Store the returned secret in your CI secret store. It is shown once.
+1. As an administrator, run `mainworthy token new --ci github-actions --project scratch`.
+2. Store the returned secret in your CI secret store. Mainworthy shows the secret once.
+3. Set `MAINWORTHY_URL` to the server address.
+4. Set `MAINWORTHY_TOKEN` to the secret.
+5. Set `MAINWORTHY_PROJECT` to the project key.
 A pipeline token can report results, say when a change ended, and read the gate. It cannot answer questions,
 edit cases, plan runs, or administer the instance.
 See [access](./access.md) for token scope and revocation.
 
-Set `MAINWORTHY_URL` to the server address, `MAINWORTHY_TOKEN` to this secret,
-and `MAINWORTHY_PROJECT` to the project key.
 The CLI can choose the project when the token can access exactly one project.
 
 ## Add GitHub Actions reporting
 
-This step assumes your job has `mainworthy` on its path and a preceding test step
-writes `results.xml` even when tests fail. Configure the URL and project as repository
-variables, and the pipeline token as a repository secret.
+Before adding this step, put `mainworthy` on the job's path. The preceding test
+step must write `results.xml` even when tests fail.
+
+To add reporting to the job, follow these steps.
+
+1. Configure the URL and project as repository variables.
+2. Store the pipeline token as a repository secret.
+3. Add the following step after the test step.
 
 ```yaml
 - name: Report results and read the gate
@@ -361,9 +380,10 @@ that updates after a later decision. It does not change this workflow step's rec
 ## Say when a pull request ends
 
 Mainworthy does not watch your code host, so it does not know that a pull request was
-merged or closed. Until it is told, a failure nobody explained on that pull request stays
-in the queue. Add a workflow that tells it. It needs the same variables and the pipeline's
-token, and no checkout:
+merged or closed. Until Mainworthy receives that information, unexplained failures on that pull
+request stay in the queue. Add the following workflow to report when the pull
+request ends. The workflow needs the same variables and pipeline token as the
+reporting step. It needs no checkout.
 
 ```yaml
 on:
@@ -402,9 +422,12 @@ The call is answered `not_found` for a pull request that never sent a report.
 
 ## Attach screenshots and small files
 
-In a planned run, paste a screenshot into **Result note** or choose **Attach a file**
-before recording the outcome. The files belong to that slot's next result. They
-stay on the open page until recorded, so keep the page open. Files selected while
+To attach files to a planned run's result, follow these steps.
+
+1. Paste a screenshot into **Result note** or choose **Attach a file**.
+2. Record the outcome. Keep the page open until Mainworthy records the result.
+
+The files belong to that slot's next result. Files selected while
 an earlier result is saving are kept for the next result. Each saved result shows
 raster images inline and offers a download for every file. The case's timeline
 shows the same attachments.
@@ -419,15 +442,15 @@ A report through the API can include `attachments` on each result. Each entry ha
 `attach` appends a file to a result you recorded. Send
 `{"result":123,"attachment":{"name":"details.txt","data":"ZXhwZWN0ZWQgcmVhZHk="},"cmd":"attachment-123"}`.
 Use a new `cmd` for a different file and reuse it for a retry. `attachment` with
-`{"result":123}` lists metadata; add `"id":456` to read one file's base64 data.
+`{"result":123}` lists metadata. To read one file's base64 data, add `"id":456`.
 Both operations are available through the CLI and API. They are not additional
 MCP tools, and the MCP report schema omits attachment inputs to keep tool discovery
 within its token budget.
 
 Each file is limited to 4 MiB. A report may include at most 100 files and 16 MiB of
 decoded data. One result may hold at most 20 files and 16 MiB, including files
-appended later. These limits bound upload memory and per-result disk growth while
-allowing screenshots and small diagnostics. Large recordings belong in an external
+appended later. These limits bound upload memory and disk growth for each result while allowing
+screenshots and small diagnostics. Large recordings belong in an external
 artifact store. File names cannot contain paths, control characters or bidi
 overrides and isolates. The API refuses the whole request if an attachment is
 invalid or exceeds a limit. Large reports can briefly delay other requests while
@@ -444,8 +467,8 @@ never opens a path. Permit local file reads explicitly:
 mainworthy report reports/results.xml --attachments reports
 ```
 
-The directory is the boundary for file reads. Relative paths try that directory
-first, then the XML file's directory. Absolute paths must still be inside the
+The CLI reads files only within the permitted directory. For relative paths,
+the CLI tries that directory first, then the XML file's directory. Absolute paths must still be inside the
 permitted directory. Keep only intended evidence in that directory. Without
 `--attachments`, file markers are ignored and stderr says so once. The results
 still upload, including reports from Playwright's JUnit reporter that always names
@@ -488,18 +511,25 @@ preserves the verdicts of results reported while it stood. A covered failure is
 excused even if an independent defect answer applies to it. Ending quarantine
 leaves that answer and the earlier result's coverage in force.
 
-In a failure question, open **Quarantined tests**, or use the list below the detector
-settings in **Settings**, **Policy**. Enter the test ref, reason and exit rule,
-then choose **Propose quarantine**. Review and accept the proposal in the queue
-with a reason. A person with answer authority must decide under every preset.
+To propose quarantine, follow these steps.
+
+1. In a failure question, open **Quarantined tests**.
+   Alternatively, open the list below the detector settings in **Settings**, **Policy**.
+2. Enter the test ref, reason, and exit rule.
+3. Choose **Propose quarantine**.
+4. Review the proposal in the queue.
+5. Enter a reason.
+6. As a person with answer authority, accept the proposal.
+
+A person with answer authority must decide under every preset.
 Agents may propose and leave advice. Detector suggestions never enter quarantine.
 A quarantine covers results reported from its entry on, so the failure you opened it from
-still counts: run the job again once the quarantine stands to see it covered.
-To propose an end, fill **Reason to end quarantine** and choose the test's end
+still counts. After the proposal is accepted, run the job again to report covered results.
+To propose an end, fill **Reason to end quarantine**. Then choose the test's end
 button. Entry and expiry times appear in your browser's local time, including an
 expiry entered in the form.
 
-Choose one exit rule:
+Choose one of the following exit rules.
 
 - A person's decision, recorded through a proposal to end quarantine.
 - An expiry date. The first result reported at or after that instant counts
@@ -530,8 +560,9 @@ mainworthy find --json '{"in":"tests","state":"quarantined"}'
 mainworthy get T-1 --json
 ```
 
-The quarantine edit is available through HTTP, the CLI and the web UI; MCP discovery
-omits it. The list returns each test's reason, person, entry time, decision and exit rule.
+The quarantine edit is available through HTTP, the CLI, and the web UI. MCP
+discovery omits the edit. The list returns each test's reason, person, entry time,
+decision, and exit rule.
 `get` retains the last entry after it ends. Set `exit` to null to propose ending
 quarantine, or use `{"kind":"person"}` or `{"kind":"expiry","at":1800000000000}`
 for the other rules. The expiry is UTC milliseconds. A new quarantine can begin

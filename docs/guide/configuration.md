@@ -1,6 +1,6 @@
 # Configuration
 
-Run a Mainworthy instance on your machine or on a server, and set where it listens, where it keeps its data and who owns it. The server reads its settings from environment variables. There is no configuration file.
+The server reads its settings from environment variables. These settings control where the server listens, where it keeps its data, and who owns it. There is no configuration file.
 
 ## Local mode and server mode
 
@@ -14,9 +14,9 @@ In local mode you are the owner. The server listens on the loopback address, and
 
 Any other request needs a token or signed-in session. Both modes refuse browser requests made from another site's page when signing in or using a session cookie.
 
-In server mode every request to a project needs a token or a browser that is signed in. A few addresses answer without either, such as `/healthz`, `/docs` and the ones a browser signs in with: [they are listed below](#what-answers-without-a-token). The web UI shows a sign-in page, and a command needs `--token` or `MAINWORTHY_TOKEN`. [People, agents and pipelines](./access.md#sign-in-to-the-web-ui) explains tokens and signing in.
+In server mode every request to a project needs a token or a browser that is signed in. A few addresses answer without either, including `/healthz`, `/docs` and the sign-in endpoints. See [What answers without a token](#what-answers-without-a-token). The web UI shows a sign-in page, and a command needs `--token` or `MAINWORTHY_TOKEN`. [People, agents and pipelines](./access.md#sign-in-to-the-web-ui) explains tokens and signing in.
 
-Two things choose server mode. One is `MAINWORTHY_MODE=server`. The other is any `MAINWORTHY_HOST` that is not a loopback address. Either one is enough, and setting `MAINWORTHY_MODE=local` does not undo the second. Every other start is local mode. The first line the server prints says which mode it is in:
+Either `MAINWORTHY_MODE=server` or a non-loopback `MAINWORTHY_HOST` selects server mode. Setting `MAINWORTHY_MODE=local` does not override a non-loopback host. Every other start is local mode. The first line the server prints says which mode it is in:
 
 ```
 $ mainworthy serve
@@ -25,11 +25,11 @@ project "scratch" · you are robin@this-machine · policy: loose
 ```
 
 > [!WARNING]
-> Always set `MAINWORTHY_MODE=server` when anything sits between users and the server. A proxy that adds its headers is not taken for you, but a relay on the same machine that passes bytes on unchanged cannot be told apart from you, and local mode would trust everyone who reaches it as the owner.
+> When anything sits between users and the server, set `MAINWORTHY_MODE=server`. Local mode does not treat a proxy that adds headers as the owner. However, it cannot distinguish you from a relay on the same machine that forwards bytes unchanged. Local mode trusts everyone who reaches that relay as the owner.
 
 ## Variables the server reads
 
-`mainworthy` with no command, or `mainworthy serve`, starts the server. These variables change how.
+`mainworthy` with no command, or `mainworthy serve`, starts the server. The server reads the following environment variables.
 
 | Variable | Default | What it sets |
 | --- | --- | --- |
@@ -55,7 +55,7 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_TRUSTED_PROXY` | none | The addresses or CIDR ranges of the proxy in front, comma-separated. Set it together with the next one, or neither. |
 | `MAINWORTHY_CLIENT_ADDRESS_HEADER` | none | The header in which that proxy reports the visitor's address. Believed only on a connection from a proxy named above. |
 | `MAINWORTHY_READERS` | the CPU count minus 2, at least 1 and at most 8 | How many reader threads answer reads, from `0` to `8`. `0` answers them on the main thread. |
-| `MAINWORTHY_DEMO` | none | A demo project the server empties and fills with the demo again on every start, once it listens: a demo that shows what this build does. Only a demo project is emptied, one that `mainworthy seed` made. See [a project of demo data](./customize.md#a-project-of-demo-data). |
+| `MAINWORTHY_DEMO` | none | A demo project the server empties and fills with the demo again on every start, once it listens: a demo that shows what this build does. Only a demo project is emptied, a project that `mainworthy seed` made. See [a project of demo data](./customize.md#a-project-of-demo-data). |
 | `MAINWORTHY_COMMIT` | none | The commit this server was built from, which `/healthz` reports. It must have 40 lower-case hexadecimal characters. If absent or invalid, the server tries `SOURCE_COMMIT`, then reports unknown. |
 | `MAINWORTHY_GITHUB_PROJECT` | none | The project allowed to send defects and optional gate commit statuses to GitHub. Set the project, repository, and token together. |
 | `MAINWORTHY_GITHUB_REPOSITORY` | none | The destination on github.com, written `owner/repository`. Requests cannot choose another repository. |
@@ -74,7 +74,7 @@ For `MAINWORTHY_PUBLIC_URL`, use `https` and a host name with nothing after it, 
 
 The server checks configuration before creating the data directory or taking its lock. A refused public address, owner token length or reserved owner name creates no files.
 
-The first start creates the data directory, one owner and a project named `scratch`. It does not need any variable. The server holds `server.lock` in that directory until it stops. Another server using the same directory waits up to `MAINWORTHY_LOCK_WAIT_SECONDS` before it opens the application database. It says once on standard error that it is waiting for another server on the data directory. If the lock is still held at the deadline, startup is refused with `another server is already using this data directory; stop it or choose another MAINWORTHY_DATA`. This permits a replacement to start when the previous server finishes stopping. A deployment must let the previous server stop while the replacement waits; waiting for the replacement to become healthy first prevents that handoff. The operating system releases the lock if the process is killed. The file stays in place; do not delete or replace it while a server runs.
+The first start creates the data directory, one owner and a project named `scratch`. It does not need any variable. The server holds `server.lock` in that directory until it stops. Another server using the same directory waits up to `MAINWORTHY_LOCK_WAIT_SECONDS` before it opens the application database. It says once on standard error that it is waiting for another server on the data directory. If the lock is still held at the deadline, startup is refused with `another server is already using this data directory; stop it or choose another MAINWORTHY_DATA`. This permits a replacement to start when the previous server finishes stopping. A deployment must let the previous server stop while the replacement waits. Waiting for the replacement to become healthy first prevents that handoff. The operating system releases the lock if the process is killed. The file stays in place. Do not delete or replace it while a server runs.
 
 A reader thread that fails to start retries after 100 ms, then doubles the wait up to 30 seconds. A thread that becomes ready resets that wait. Reads use ready threads or run inline when none is ready. The server starts without waiting for the full pool.
 
@@ -88,7 +88,14 @@ Changing the variable to a new name creates a second person with every capabilit
 
 ### Turn on mail
 
-Set `MAINWORTHY_SMTP_HOST`, `MAINWORTHY_MAIL_FROM` and `MAINWORTHY_PUBLIC_URL` in the server's environment, then restart. If your SMTP server requires authentication, set `MAINWORTHY_SMTP_USER` and `MAINWORTHY_SMTP_PASSWORD` together. Set `MAINWORTHY_SMTP_PORT` and `MAINWORTHY_SMTP_TLS` to the provider's values. The default is port 587 with required STARTTLS. SMTP authentication uses AUTH PLAIN. The Compose service passes these variables through.
+To enable mail, configure the server's environment as follows:
+
+1. Set `MAINWORTHY_SMTP_HOST`, `MAINWORTHY_MAIL_FROM` and `MAINWORTHY_PUBLIC_URL`.
+2. If your SMTP server requires authentication, set `MAINWORTHY_SMTP_USER` and `MAINWORTHY_SMTP_PASSWORD` together.
+3. Set `MAINWORTHY_SMTP_PORT` and `MAINWORTHY_SMTP_TLS` to the provider's values.
+4. Restart the server.
+
+The default is port 587 with required STARTTLS. SMTP authentication uses AUTH PLAIN. The Compose service passes these variables through.
 
 With all mail variables unset, invitations remain links you copy and the sign-in page offers no password reset. Partial or malformed settings stop startup with a generic configuration message that does not repeat their values. These settings are never stored in the database or an archive, and are never returned by an API.
 
@@ -97,6 +104,8 @@ Mail delivery starts after the identity transaction commits. At most 100 message
 ### Rename the owner
 
 The owner's name comes from `MAINWORTHY_OWNER`, or `USER` when unset, or `owner` when neither is set. To rename an owner currently named `owner` to `robin`:
+
+Before renaming the owner, record any browser drafts under the old name. Then follow these steps:
 
 1. Set `MAINWORTHY_OWNER` to the new name and `MAINWORTHY_OWNER_WAS` to the name the owner has now.
 
@@ -111,17 +120,17 @@ The owner's name comes from `MAINWORTHY_OWNER`, or `USER` when unset, or `owner`
    MAINWORTHY_OWNER_WAS: owner is now robin, with the tokens, password, passkeys, sessions and history owner had. robin signs in under the new name. Unset MAINWORTHY_OWNER_WAS.
    ```
 
-3. Unset `MAINWORTHY_OWNER_WAS`. Left in place it renames nobody, and every start says so.
+3. Unset `MAINWORTHY_OWNER_WAS`. If the variable stays set, the server renames nobody and says so at every start.
 
-Their tokens and passkeys keep working, their browser sessions stay signed in, and history shows their new name. Three things need an update:
+The owner's tokens and passkeys keep working. Their browser sessions stay signed in, and history shows their new name. The rename affects sign-in and browser drafts as follows:
 
 - A password is typed with the new name. Change the name in your password manager.
 - A passkey signs in as before. The device or password manager that holds it still shows the old name for it.
-- A browser stores an unrecorded draft under the name of whoever typed it. Record your drafts before the rename. The new name does not show drafts stored under the old one.
+- A browser stores an unrecorded draft under the name of whoever typed it. The new name does not show drafts stored under the old one. Record your drafts before the rename.
 
 Startup refuses the rename when `MAINWORTHY_OWNER_WAS` names nobody on the instance, an agent, a pipeline, a forgotten person, or a person without every capability on every project. The error says why. The database has no separate owner marker, so the rename checks the grants that every start gives the owner. An admin granted all of those capabilities also passes that check and becomes the owner under the new name.
 
-The new name follows the rule for every name: letters, digits, `.`, `_`, `@` and `-`, starting with a letter or a digit, 64 characters at most. Another one stops the start.
+The new name follows the rule for every actor name. It uses letters, digits, `.`, `_`, `@` and `-`, starts with a letter or digit, and has at most 64 characters. Any other name stops startup.
 
 When the new name is already somebody's, the start renames nobody and says so. That person becomes an owner, as they do without the variable. When the name is an agent's, a pipeline's or a forgotten person's, the start is refused instead, as it is without the variable.
 
@@ -152,7 +161,7 @@ Commands that talk to a server find its address in this order: the flag, then th
 
 With more than one project and no choice, a command stops with `invalid: choose a project with --project or MAINWORTHY_PROJECT; projects: scratch, checkout`. The `mainworthy health` command, with no `--url` or `MAINWORTHY_URL`, asks the server on this machine at `MAINWORTHY_PORT`.
 
-Prefer `MAINWORTHY_TOKEN` or `--token-file` to `--token`, which the process list and the shell's history show. [Command line](./cli.md#give-the-token-in-the-environment-or-in-a-file) says more. For these variables, a value that is set but empty counts as not set. [Command line](./cli.md) lists every command.
+Prefer `MAINWORTHY_TOKEN` or `--token-file` to `--token`. The process list and the shell's history show the value passed through `--token`. [Command line](./cli.md#give-the-token-in-the-environment-or-in-a-file) says more. For these variables, a value that is set but empty counts as not set. [Command line](./cli.md) lists every command.
 
 ## Variables that describe a CI build
 
@@ -183,20 +192,22 @@ healthy: Mainworthy 0.1.0 at http://127.0.0.1:7357
 
 `mainworthy health` exits 0 when the server answers and 1 when it does not. Use `/healthz` for a monitor of your own. Its `apiVersion` is the CLI compatibility contract. `mainworthy health --json` also reports `compatible`, which is false for an older server that advertises no API version. An incompatible healthy server still exits 0. [CLI and server versions](./cli.md#cli-and-server-versions) explains refusal of operations.
 
-`commit` is the commit the server runs, when it was told. Build the image with `MAINWORTHY_COMMIT=$(git rev-parse HEAD) docker compose build` and `/healthz` names that commit, and `mainworthy health` prints its first 12 characters. Without it the answer is `null`.
+`commit` identifies the server's build when the commit was supplied. To include the commit, build the image with `MAINWORTHY_COMMIT=$(git rev-parse HEAD) docker compose build`. Then `/healthz` names that commit, and `mainworthy health` prints its first 12 characters. Without a supplied commit, the answer is `null`.
 
 Back up the volume. [Your data](./data.md) explains how.
 
 ## Run behind a proxy that ends TLS
 
-The server speaks plain HTTP. To serve it over HTTPS, put a proxy in front that ends TLS, and set `MAINWORTHY_MODE=server`. The proxy must do two things.
+The server speaks plain HTTP. To serve it over HTTPS, put a proxy in front that ends TLS, and set `MAINWORTHY_MODE=server`. The proxy must do two things:
 
 1. Pass the `Host` header on unchanged, so the server sees the name the browser used.
 2. Set `X-Forwarded-Proto: https`. A list such as `https,http` counts as https.
 
 When a browser sends `Origin` while signing in or using a session cookie, the server checks that it has the request's scheme and host. Without `X-Forwarded-Proto`, the server sees `http` and refuses sign-in from the `https` page with `unauthenticated: a token is required`. The error does not name the cause. With the header, the session cookie is marked `Secure`.
 
-The server also reads the `Sec-Fetch-Site` header, in which a browser says which site made a request, and refuses a sign-in, or a request that uses the session cookie, when another site's page made it. A browser sends that header only to https addresses and to this machine. Over plain http to a name or an address on your network, which is how an instance on a LAN is reached without a proxy, it sends none, and the request is checked by `Origin` alone. The session cookie is still `SameSite=Strict`, which keeps it out of requests that another site's page makes. What is lost is the encryption: the password or token and the cookie travel in the clear, and the cookie has neither its `__Host-` prefix nor its `Secure` mark. Put https in front, as this section describes: it is the supported way to serve an instance to anybody but yourself.
+The server also reads `Sec-Fetch-Site`, the header that identifies which site made a browser request. The server refuses sign-in and session-cookie requests from another site's page. A browser sends that header only to HTTPS addresses and to this machine. For plain HTTP to a name or address on your network, the browser sends no `Sec-Fetch-Site` header. The server then checks `Origin` alone.
+
+The session cookie still has `SameSite=Strict`, so the browser excludes it from requests made by another site's page. However, plain HTTP sends the password or token and the cookie without encryption. The cookie also lacks its `__Host-` prefix and `Secure` mark. HTTPS through a proxy is the supported way to serve an instance to anybody but yourself.
 
 The server counts wrong tokens by their source address and first 8 characters, both on authenticated operations and in the sign-in form. `/healthz`, the API description and the documentation need no sign-in and ignore tokens. The fifth wrong token within 15 minutes blocks that address or token prefix for one second. Each further wrong token doubles the wait, up to 15 minutes. A blocked request gets HTTP 429 with `Retry-After`.
 
@@ -204,9 +215,9 @@ A signed-in browser is unaffected. A correct server-generated token also works w
 
 Password sign-in shares the address count. The server counts a wrong password by the address and account name, including a wrong current password entered when changing it. Names count the same regardless of capitalisation, and unknown names count like existing names. While an address or name is blocked, the server does not check passwords, so the right one waits too. Refused passkey answers and invitation codes count by address alone. Valid passkeys and invitation codes still work from a blocked address.
 
-Behind a proxy every connection comes from the proxy, so the server cannot tell visitors apart unless you tell it where to look. Set `MAINWORTHY_TRUSTED_PROXY` to the proxy's address as the server sees it, and `MAINWORTHY_CLIENT_ADDRESS_HEADER` to the header the proxy writes the visitor's address in. Name a header the proxy sets itself and a visitor cannot: a visitor who could write it would choose their own address. The header must hold one address and nothing else. With only one of the two set, with an entry that is not an address or a range, or with a header name that is not one, the server does not start and says which.
+Behind a proxy every connection comes from the proxy, so the server cannot tell visitors apart unless you tell it where to look. Set `MAINWORTHY_TRUSTED_PROXY` to the proxy's address as the server sees it, and `MAINWORTHY_CLIENT_ADDRESS_HEADER` to the header the proxy writes the visitor's address in. Choose a header that the proxy sets and visitors cannot control. Otherwise, a visitor could choose the address Mainworthy counts. The header must hold one address and nothing else. The server refuses startup if only one variable is set, an address or range is invalid, or the header name is invalid. The startup message identifies the invalid setting.
 
-With neither set, what happens depends on the proxy's address. A loopback or private address, such as a proxy on the same machine or the same Docker network, is not counted at all, and wrong tokens are counted only by their first 8 characters. A server-mode start says so in one line. A public address is counted as one address: every visitor behind the proxy shares one count, and one visitor's wrong tokens block the owner token you chose for all of them until the wait is over. Setting the two variables fixes both.
+With neither set, what happens depends on the proxy's address. A loopback or private address, such as a proxy on the same machine or the same Docker network, is not counted at all, and wrong tokens are counted only by their first 8 characters. A server-mode start says so in one line. A public proxy address has one shared count for every visitor behind it. One visitor's wrong tokens can block your chosen owner token for all visitors until the wait ends. Setting the two variables fixes both.
 
 The server closes a connection nobody has signed in on after three minutes of silence, and answers a sign-in whose body has not arrived within five seconds with 408. A request with a valid token or session is not timed out, so a long reply is not cut off.
 
@@ -214,7 +225,7 @@ The server accepts a request body of up to 64 MiB for an operation. A proxy with
 
 ## What answers without a token
 
-In server mode everything that reads or changes a project needs a token or a signed-in session. These addresses answer anyone who can reach the server.
+In server mode everything that reads or changes a project needs a token or a signed-in session. These addresses answer anyone who can reach the server:
 
 | Address | What it returns |
 | --- | --- |
@@ -247,7 +258,10 @@ The same file is the command line: `./dist/mainworthy gate`. The variables above
 
 ## Require a second factor for admins
 
-Set `MAINWORTHY_REQUIRE_ADMIN_MFA=true` and restart the instance. Before enabling it, give each admin a verified passkey or [enrol an authenticator](./access.md#add-an-authenticator-for-password-sign-in).
+Before enabling the requirement, give each admin a verified passkey or [enrol an authenticator](./access.md#add-an-authenticator-for-password-sign-in). Then follow these steps:
+
+1. Set `MAINWORTHY_REQUIRE_ADMIN_MFA=true`.
+2. Restart the instance.
 
 A password with no enrolled authenticator then opens no admin session. This applies to `admin` held through personal or team grants, on one project or every project. A verified passkey still signs in without a code. An invitation that would sign an admin in must include a verified passkey. The owner can sign in with the owner token to enrol an authenticator when no other session is available. Tokens and local-owner access keep their existing authority.
 

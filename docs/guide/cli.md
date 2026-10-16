@@ -1,33 +1,47 @@
 # Command line
 
-Every `mainworthy` command, with its flags and exit codes. The program generates
-the tables on this page for the version that serves these docs.
+This page lists every `mainworthy` command, with its flags and exit codes. The program
+generates the tables for the version that serves these docs.
 
-`mainworthy` is one executable. With no arguments it starts the server. Almost every other command talks to a running server over HTTP, on this machine or another one. `mainworthy fmt`, `mainworthy audit verify <file>`, and `mainworthy help` need no server.
+`mainworthy` is one executable. With no arguments, it starts the server. Almost
+every other command talks to a running server over HTTP, on this machine or
+another one. `mainworthy fmt`, `mainworthy audit verify <file>`, and
+`mainworthy help` need no server.
 
 ## Sign in with a password and a code
 
 `login` exchanges your password for a personal CLI token. If you have an enrolled
-authenticator, it also needs an authenticator or recovery code. The command prints
-the token once and tries to end the temporary session. Store the input secrets in
-private files, then run:
+authenticator, `login` also needs an authenticator or recovery code. The command
+prints the token once and tries to end the temporary session. It reads the input
+secrets from private files, as in this example:
 
 ```
 mainworthy login --url https://mainworthy.example --name robin --password-file /private/password --code-file /private/code --label laptop --expires 30d
 ```
 
-The password file holds the password, with one optional final newline. The code file holds a current authenticator code or unused recovery code. Each file is limited to 4096 bytes. Neither secret is an argument or printed in an error. `--code-file` is needed only for an account with an enrolled authenticator. The command refuses plain HTTP to another machine. It ignores existing token options because you are signing in anew.
+The password file holds the password, with one optional final newline. The code
+file holds a current authenticator code or an unused recovery code. Each file is
+limited to 4096 bytes. Neither secret appears as an argument or in an error.
+`--code-file` is required only for an account with an enrolled authenticator. The
+command refuses plain HTTP to another machine. It ignores existing token options
+because the command starts a new sign-in.
 
-Set the returned token as `MAINWORTHY_TOKEN` or keep it in a private token file.
+The returned token works as `MAINWORTHY_TOKEN` or in a private token file.
 `--json` returns `id`, `actor`, `token`, and `expiresAt`. The default token lifetime
 is 30 days, and the maximum is 365 days. Delete the password and code files when
 you no longer need them.
 
-As the local owner, `mainworthy credential --do totp.begin` starts [authenticator enrolment](./access.md#add-an-authenticator-for-password-sign-in). `mainworthy credential --do totp.confirm --challenge <challenge> --code <code>` confirms it within five minutes and prints recovery codes once. Remote bearer tokens cannot enrol an authenticator. Use Settings in a signed-in browser instead.
+For the local owner, `mainworthy credential --do totp.begin` starts
+[authenticator enrolment](./access.md#add-an-authenticator-for-password-sign-in).
+`mainworthy credential --do totp.confirm --challenge <challenge> --code <code>`
+confirms enrolment within five minutes and prints recovery codes once. Remote
+bearer tokens cannot enrol an authenticator. Remote enrolment is available in
+Settings in a signed-in browser.
 
 ## Reach a server
 
-A command finds its server in this order: the flag, then the environment variable, then the default.
+A command uses the flag first, then the environment variable, then the default
+from this table.
 
 | What | Flag | Variable | Default |
 | --- | --- | --- | --- |
@@ -37,8 +51,9 @@ A command finds its server in this order: the flag, then the environment variabl
 
 ### Give the token in the environment or in a file
 
-Prefer `MAINWORTHY_TOKEN` to `--token`. An argument appears in the machine's process
-list while the command runs and in the shell's history afterwards.
+`MAINWORTHY_TOKEN` avoids exposing the token as an argument. An argument appears
+in the machine's process list while the command runs and in the shell's history
+afterwards.
 `--token-file <path>` or `MAINWORTHY_TOKEN_FILE` reads the token from a file, such as
 a secret file mounted by a pipeline. The CLI removes surrounding whitespace,
 including a final newline. The token may have at most 512 characters, the server's
@@ -51,10 +66,11 @@ flag is present, it refuses both token variables being set. A flag wins over a v
 
 `health`, `version`, `fmt`, `help` and a command's `--help` need no token. They ignore token flags and variables, including unreadable token files and conflicting token options. `serve` uses the [server configuration](./configuration.md#variables-the-server-reads), not the client token options.
 
-A command warns once on standard error before it sends a token to a plain `http://`
-address on another machine, then continues. The token travels unencrypted, so use
-an `https://` address. Loopback addresses (`localhost`, `127.0.0.0/8`, and `[::1]`),
-`https://` addresses, and commands that send no token get no warning.
+Before sending a token to a plain `http://` address on another machine, a command
+warns once on standard error. The command then continues and sends the token
+unencrypted. An `https://` address encrypts the token in transit. The warning
+does not appear for loopback addresses, `https://` addresses, or commands that
+send no token. Loopback addresses include `localhost`, `127.0.0.0/8`, and `[::1]`.
 The warning does not affect standard output, so `--json` remains valid JSON.
 
 [Configuration](./configuration.md) explains local and server mode. [People, agents and pipelines](./access.md) explains tokens.
@@ -70,9 +86,12 @@ Before its first authenticated request, the CLI reads `/healthz` without sending
 If that probe redirects, the error gives the destination's origin for `--url`, without the `/healthz` path.
 The server must advertise the same API version as the CLI. Software versions and build commits may differ.
 An absent, malformed or different API version stops the command with `incompatible` and exit code 4, before it sends an operation.
-Use a CLI and server with the same API version to retry. Servers from before this contract need an upgrade.
-Every subsequent request carries `X-Mainworthy-API-Version`. A server with a different API version refuses it with HTTP 409 and code `conflict` before reading or writing project data.
-This also catches a server upgrade after the first probe.
+A retry requires a CLI and server with the same API version. Servers from before
+this contract need an upgrade.
+Every subsequent request carries `X-Mainworthy-API-Version`. A server with a
+different API version refuses the request with HTTP 409 and code `conflict`
+before reading or writing project data.
+The header check also catches a server upgrade after the first probe.
 
 Before 1.0, adding or removing an operation, or an incompatible change to its inputs, replies, capabilities or meaning, increments the API version.
 There is no promise to support the previous API version. Clients from before this check cannot detect a version mismatch.
@@ -276,7 +295,11 @@ Every operation of the API is also a command with the same name. Give its input 
 
 <!-- /generated -->
 
-A command that could not run prints one line to standard error, the error code and then the message, for example `forbidden: ...`, and exits with 4. [Troubleshooting](./troubleshooting.md) lists the codes. A command that ran and has bad news, such as a gate that is blocked or a suite with problems, prints its result and uses the exit code in the table above.
+A command that could not run exits with code 4 and prints one line to standard
+error. The line contains the error code followed by the message, for example
+`forbidden: ...`. [Troubleshooting](./troubleshooting.md) lists the codes. A command
+that ran and has bad news prints its result and uses the exit code in the table
+above. Examples include a blocked gate or a suite with problems.
 
 ## See also
 

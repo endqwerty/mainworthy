@@ -7,13 +7,16 @@ Use the answer's stated consequence to decide what the gate needs next.
 
 ## Find the question to answer
 
+To answer a question, follow these steps.
+
 1. Press <kbd>g</kbd> <kbd>q</kbd> to open Queue.
 2. Select a question.
 3. Read its evidence and the text beside each available answer.
 4. Press the answer key.
 
 The queue lists the questions that block most first, then the newest first.
-A test with no case comes after every other question, however new it is. It blocks nothing.
+A test with no case comes after every other question, regardless of its age.
+That question blocks nothing.
 
 Use <kbd>j</kbd> and <kbd>k</kbd> to move between questions.
 Press <kbd>Space</kbd> to expand the evidence.
@@ -23,9 +26,9 @@ See [the keyboard guide](./keyboard.md) for the full key list.
 
 ## Know what needs you today
 
-The line beside "Queue" splits the open questions in two, for example
-"1 failure to explain · 104 can wait". Start with the failures. They are listed first,
-and the count beside Queue in the sidebar is red only while one is open.
+The line beside "Queue" separates failures from questions that can wait, for example
+"1 failure to explain · 104 can wait". Start with the failures. The queue lists failures first.
+The count beside Queue in the sidebar is red only while a failure question is open.
 
 A failure is the one kind of question that blocks anything. While nobody has explained a
 failure, no gate that counts it passes. An earlier occurrence of the same cause that someone
@@ -33,7 +36,7 @@ answered for another build stays excused there. Every other kind leaves things a
 someone answers. A proposed edit waits, a finding stays on record, and a test with no case
 still runs and still gates the build.
 
-Under its title, each open question says what leaving it costs. For example:
+Under its title, each open question says what leaving it costs. These are example messages.
 
 - "Listed as blocking R-83. While this is open, no gate that counts the unexplained failure passes."
 - "Blocks nothing. Left alone, these tests still run and still gate the build, and no case gets credit for them."
@@ -42,11 +45,11 @@ The runs a failure lists are the ones it was listed under as its results arrived
 run to read its gate as it is now: an older commit's run can pass again while a newer
 commit keeps the question open.
 
-A failure stops blocking a gate when a decision explains it or the failing result is replaced. A newer attempt of the same job that passes replaces it; an attempt
-that is skipped or blocked leaves the failure in place. A result that names
-the failing one as the result it corrects replaces it whatever its outcome: passed, skipped
-or blocked. A pass reported beside the failure replaces nothing. The two disagree, and a
-person settles that.
+A failure stops blocking a gate when a decision explains the failure or another result replaces the failing result.
+A newer passing attempt of the same job replaces the failing result.
+A skipped or blocked attempt leaves the failure in place.
+A result that explicitly corrects the failing result replaces that failure regardless of the correction's outcome, including passed, skipped, or blocked.
+A pass reported beside the failure replaces nothing. The pass and failure disagree, and a person settles the disagreement.
 A pull request's gate is the gate of its newest commit, so a newer commit that passes moves
 the pull request on. The older commit keeps the verdict it had.
 
@@ -57,8 +60,7 @@ A question asks for a judgment about recorded evidence. It is not a test result.
 Several occurrences of the same failure cause can share one question.
 A planned run's disputed slot has a separate "Disputed" question for each cause
 and scope. Explaining the cause leaves that dispute waiting for its own answer,
-even when the cause was explained first. Under standard and strict, someone who
-reported neither side settles it. The cause answer still applies in other slots,
+even when the cause was explained first. Under `standard` and `strict`, someone who reported neither side settles the dispute. The cause answer still applies in other slots,
 runs and scopes where that answer already held. See [disputed slots](./runs.md#resolve-a-disputed-slot).
 An assertion cause shared by more than 50 distinct tests across more than five files in one commit's
 applied reports gets a question per file, starting with the report that crosses those limits.
@@ -82,7 +84,8 @@ The decision appears in Settled. It names exact results of one commit and the ba
 Other tests with the same message still need their own evidence. Splitting a report does not change which tests qualify.
 
 The comparison uses the change's current base in its own repository and the effective results of pipelines and people.
-The base must fail in the same environment, method and job as the change's result. A failure in another lane does not qualify.
+The base must fail in the same environment, method, and job as the change's result.
+A failure in a different environment, method, or job does not qualify.
 A newer passing attempt, a correction, a result judged a mistake, or a different base can end the excuse.
 Mainworthy updates the affected commits and planned runs immediately when that evidence changes, including reports recovered after a restart.
 Landing the change's head on trunk ends that commit's inherited excuse. Trunk answers apply, and unexplained failures are asked again.
@@ -90,10 +93,10 @@ A skipped or blocked retry does not remove an earlier failure. An agent's report
 
 If you withdraw the rule's answer, the queue keeps one ordinary failure question for you to answer.
 The rule stops answering that commit and cause, including after base or change retries. Another commit or cause can still qualify.
-Your answer follows the usual failure holds; a failing base retry does not take it away.
+Your answer follows the usual failure holds. A failing base retry does not withdraw your answer.
 
 Standard and strict policies leave the comparison as a hint for a person. A person's "Already failing on base" answer
-still covers the build they answered about. Changing to a newer preset requires applying it; stored policies keep their existing clauses.
+still covers the build they answered about. To use a newer preset, apply the preset. Stored policies keep their existing clauses.
 
 ## Choose an answer
 
@@ -152,8 +155,8 @@ For example, "The failure was a mistake" applies to a disputed planned-run resul
 
 A key records the answer immediately unless the answer needs another field.
 "Link to a case" opens a case picker for each test. "Defect in the product" lets you
-enter an optional defect reference. <kbd>Enter</kbd> records the defect with it and
-<kbd>Escape</kbd> records the defect without one. If the policy requires a reason, enter it before
+enter an optional defect reference. <kbd>Enter</kbd> records the defect answer with that reference.
+<kbd>Escape</kbd> records the defect answer without a reference. If the policy requires a reason, enter it before
 submitting. The queue keeps unfinished reference and reason text on this device.
 
 If evidence changes while you answer, Mainworthy refuses the stale answer.
@@ -161,20 +164,22 @@ Read the new evidence before trying again. A decision names the evidence you saw
 
 ## Answer several questions at once
 
-Select the questions, then give one answer. It goes to every selected question in one request.
+To answer several questions, select the questions and give one answer.
+The answer goes to every selected question in one request.
+Use these controls to change the selection.
 
-- Click the box at the start of a row, or press <kbd>x</kbd> on the question shown. Either adds the question to the selection, or takes it out. A click elsewhere on the row opens the question and keeps the selection.
-- Shift and a click on a row select every row from the last one you selected or cleared to it.
-- <kbd>⌘</kbd> or Ctrl and a click on a row does what a click on its box does.
-- <kbd>*</kbd> selects every listed question of the selection's kind, or of the question shown when nothing is selected. Pressed again, it clears the selection.
-- <kbd>Esc</kbd> clears the selection.
+- To add or remove a question, click the box at the start of its row or press <kbd>x</kbd> on the question shown. A click elsewhere on the row opens the question and keeps the selection.
+- To select a range, hold Shift and click a row. The range starts at the last row you selected or cleared and ends at the clicked row.
+- To add or remove a question by clicking its row, hold <kbd>⌘</kbd> or Ctrl while you click.
+- To select all listed questions of the selection's kind, press <kbd>*</kbd>. With nothing selected, the key uses the kind of the question shown. Press <kbd>*</kbd> again to clear the selection.
+- To clear the selection, press <kbd>Esc</kbd>.
 
 A selection contains one kind of question, so one answer means the same thing to every question in it.
 You cannot select a question you cannot settle or a row of another kind. The status line says why.
 Proposals and findings that suggest edits need their edits on screen before an answer counts.
 Answer those one at a time.
 
-"Select all" takes the questions listed so far. Press "More questions" first to include the rest.
+"Select all" takes the questions listed so far. To include the rest, press "More questions" first.
 A selection holds at most 500 questions, the most one answer sends. The status line says how many it left out.
 
 The bar above the list counts the selection. The answers under the evidence apply to the selection.
@@ -185,7 +190,9 @@ An answer that needs a defect reference or a reason asks once and gives the same
 Record or cancel that answer before changing the selection.
 Advice is about the question shown, so <kbd>↵</kbd> does not take it while a selection exists.
 
-Each question gets its own decision. Press <kbd>u</kbd> to withdraw them all, as you would one. One that was refused, for example because its evidence changed while you were choosing, comes back to the list, and the others stay answered.
+Each question gets its own decision. To withdraw all those decisions, press <kbd>u</kbd>, as you would for one decision.
+A refused question returns to the list, for example if its evidence changed while you were choosing an answer.
+The other questions stay answered.
 
 In a phone browser, open a question and choose **Actions** for "Select question", "Select all of this kind", or "Clear selection".
 The rows have no box there.
@@ -215,18 +222,22 @@ Under `standard` with "Create a case for each test", an agent's reported tests a
 See [policy](./policy.md#tests-with-no-case).
 "Link to a case" makes future results count for the chosen case.
 "Create cases" creates one case per test and links each test to its case.
-It works where the policy adopts your new case by rule: under `loose`, and for a person
-under `standard`. Where a person must adopt a new case, under `strict` or for an agent
-under `standard`, the answer is refused. Propose the cases, have them adopted, then
-answer with "Link to a case".
+"Create cases" works where the policy adopts your new case by rule, under `loose` or for a person under `standard`.
+Under `strict`, or for an agent under `standard`, a person must adopt each new case. Mainworthy refuses "Create cases" in those situations.
+To link tests when a person must adopt new cases, follow these steps.
+
+1. Propose the cases.
+2. Have a person adopt the cases.
+3. Answer with "Link to a case".
+
 "Track without a case" keeps the test without a case. The test still gates the build.
 
-Tests that came with neither a file nor a class name are asked about together, as the file "(no file)". The question lists them like any other, and every answer acts on them.
+Tests reported with neither a file nor a class name share one question under the file "(no file)".
+The question lists those tests like any other file's tests. Every answer acts on the listed tests.
 
 To answer several files now, [select them](#answer-several-questions-at-once) and give one answer.
 To give every file the same answer from now on, change the project's choice instead of answering each row.
-In Settings, Policy, choose "Track without a case" or "Create a case for each test" under
-"Tests with no case". The rule then answers every open question about a file at once.
+Open Policy in Settings. Under "Tests with no case", choose "Track without a case" or "Create a case for each test". The rule then answers every open question about a file at once.
 
 A link holds for the tests it names. A test that turns up later in the same file is a new
 question, and the earlier links stay. "Track without a case" is about the file as it was:
@@ -268,8 +279,8 @@ reports of that cause keep a person's settlement while the non-agent evidence an
 count in an open run and in their commit gate. It does not judge a new failure reported later.
 See [runs](./runs.md#resolve-a-disputed-slot).
 
-An excuse removes that failure's block. The gate passes only if nothing else prevents
-it. Missing results, other failures, and disputes still need attention.
+An excuse removes that failure's block. The gate passes only if no other condition prevents a pass.
+Missing results, other failures, and disputes still need attention.
 
 ## Judge a finding
 
@@ -295,16 +306,22 @@ See [runs](./runs.md#close-and-reopen-a-run).
 
 ## Undo or withdraw an answer
 
-Press <kbd>u</kbd> to withdraw your latest answer, or open "Settled", select a decision,
-and use its withdrawal button. Your authority still depends on the current policy.
+To withdraw your latest answer, press <kbd>u</kbd>.
+To withdraw an earlier answer, follow these steps.
+
+1. Open "Settled".
+2. Select a decision.
+3. Use its withdrawal button.
+
+Your authority still depends on the current policy.
 The original decision and its withdrawal both stay in the record.
 
 Undo names the decision returned by your answer. If somebody replaced it meanwhile,
 the withdrawal conflicts and their decision stays. The withdrawal button in "Settled"
 names the decision shown there. Read the question again before withdrawing a replacement.
 For several answers, undo withdraws each decision separately. A refused answer is not
-withdrawn, and a failed withdrawal does not stop the others. The message names the failures;
-pressing <kbd>u</kbd> again retries only those, with the same decision ids and command ids.
+withdrawn, and a failed withdrawal does not stop the others. The message names the failed withdrawals.
+Pressing <kbd>u</kbd> again retries only those withdrawals, with the same decision ids and command ids.
 If the server took a withdrawal but its reply was lost, the retry reads its recorded reply.
 If somebody already withdrew the decision, the queue reads the question again and says
 it is already open.
@@ -334,7 +351,9 @@ The request sends the failure message and detail, the tested target, and the rep
 It also sends the recorded case version and its content when known.
 Review what the report contains before sending it to a public repository or shared Jira project.
 
-A test's `get` reply lists result ids in `last[].id`. A case's `timeline` reply also includes result ids, and a run slot lists them in `fills[].result`. For example, if the failed result is `123`:
+A test's `get` reply lists result ids in `last[].id`.
+A case's `timeline` reply also includes result ids. A run slot lists result ids in `fills[].result`.
+If the failed result is `123`, use these commands:
 
 ```
 mainworthy tracker --json '{"do":"create","result":123,"cmd":"defect-result-123"}'
@@ -346,7 +365,7 @@ The server sends up to twenty queued requests once a minute.
 When stopping, it waits for the request already in flight and leaves queued requests for the next start.
 If saving that reply fails, the server logs the error once and finishes shutting down.
 A completed request returns an issue URL and the issue's state as the tracker reported it.
-To check an existing issue instead of creating one:
+To check an existing issue, use these commands:
 
 ```
 mainworthy tracker --json '{"do":"link","result":123,"key":"42","cmd":"link-result-123"}'
@@ -365,8 +384,9 @@ After a timeout or a restart that leaves a request `sending`, check the tracker 
 The issue may already exist. Link that issue if you find it.
 
 Delivery requests and their status stay on this instance. Archives leave them out.
-Record the issue reference in a decision before archiving if you need to keep it.
-A restored archive keeps historical command receipts but has no corresponding tracker status and does not send those requests again.
+To keep the issue reference in an archive, record the reference in a decision before archiving.
+A restored archive keeps historical command receipts but has no corresponding tracker status.
+The restored instance does not send those requests again.
 Requirement mirroring, Azure DevOps, and GitHub Enterprise remain planned.
 
 ### End a defect hold when its issue closes
@@ -384,11 +404,11 @@ The deadline survives a restart. The server does not poll references outside the
 GitHub references look like `github:example/shop#42`. Jira references look like `jira:https://example.atlassian.net#QA-42`.
 
 An archive keeps the defect decision and its reference but leaves out polling state.
-After import, the server checks live defect holds afresh if their destination is configured on that instance.
+If the destination is configured on the instance, the server checks live defect holds afresh after import.
 
 If a check fails, the defect decision in the queue and the failure's case history show when the tracker first became unreadable.
 They also show a short reason. The question's `get` reply and the decided `inbox` reply carry the warning in `decision.trackerError`.
-A successful read clears it. The server logs one warning per failing issue until a successful read clears the failure.
+A successful read clears the warning. The server logs one warning per failing issue until a successful read clears the failure.
 Several holds naming the same issue, retries, and restarts do not repeat the warning.
 
 For HTTP 401, ask the operator to renew the tracker token in the server configuration and restart the server.
