@@ -333,7 +333,7 @@ final class QueueUITests: XCTestCase {
 		XCTAssertTrue(app.staticTexts["Added"].exists && app.staticTexts["Remove the coupon"].exists)
 		XCTAssertTrue(app.staticTexts["Expected: Total returns to $100.00"].exists)
 		shot("5-proposal")
-		// The case as it is, which rejecting keeps, and as accepting would leave it.
+		// The case as it is, which rejecting keeps, and with the edit applied to it.
 		app.segmentedControls["edit-side"].buttons["Current"].tap()
 		XCTAssertTrue(app.staticTexts["Apply the coupon SAVE10"].waitForExistence(timeout: 5))
 		XCTAssertFalse(app.staticTexts["Remove the coupon"].exists)
@@ -399,10 +399,10 @@ final class QueueUITests: XCTestCase {
 		let row = app.staticTexts.matching(identifier: "Edit: A percentage coupon lowers the total").firstMatch
 		XCTAssertTrue(row.waitForExistence(timeout: 10))
 		row.tap()
-		// While it waits, the page says why accepting it is refused, in the server's words.
+		// While it waits, the page says why the edit would be refused on its own, in the server's words.
 		let refused = app.staticTexts["edit-refused"]
 		XCTAssertTrue(refused.waitForExistence(timeout: 10))
-		XCTAssertTrue(refused.label.hasPrefix("Accepting is refused now: C-2 changed after this proposal was made"), refused.label)
+		XCTAssertTrue(refused.label.hasPrefix("On its own, this edit would be refused: C-2 changed after this proposal was made"), refused.label)
 		shot("9-proposal-refused")
 		app.swipeUp()
 		app.buttons["answer-reject"].tap()

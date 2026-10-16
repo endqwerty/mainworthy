@@ -63,8 +63,8 @@ public struct EditedCase: Identifiable, Equatable, Sendable {
 	/// Where a new case goes: its folder's path, its tags and the requirements it covers. An edit to a case
 	/// that exists changes none of them.
 	public let placement: Placement?
-	/// Why accepting is refused now, in the server's words, when it is. `after` is then what the edit has, not what
-	/// the case would become. Nil when accepting writes `after`, for a new case, and for a decided proposal.
+	/// Why this edit, accepted on its own, would be refused now, in the server's words. `after` is then what the edit
+	/// has, not the edit applied to the case. Nil when nothing is found, for a new case, and for a decided proposal.
 	public let refused: String?
 
 	public struct Placement: Equatable, Sendable {

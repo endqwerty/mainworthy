@@ -231,7 +231,7 @@ export const Proposal = struct("Proposal", "`get` with a P- ref: a proposed edit
 			covers: [maybe(list(text)), "For create: the requirements the case covers."],
 			refused: [
 				maybe(text),
-				"For edit, while the proposal waits: why accepting it is refused now, as a sentence. Null when it is not.",
+				"For edit, while the proposal waits: why accepting this edit on its own would be refused now, as a sentence. Null when nothing is found; the proposal's other edits can still refuse it.",
 			],
 		}),
 	),

@@ -159,7 +159,9 @@ function ProposalEvidence({ question }: { question: QuestionItem }) {
 												must resolve both sides.
 											</p>
 										) : (
-											edit.refused && <p className="queue-warning">Accepting is refused now: {edit.refused}.</p>
+											edit.refused && (
+												<p className="queue-warning">On its own, this edit would be refused: {edit.refused}.</p>
+											)
 										)}
 									</div>
 								);
