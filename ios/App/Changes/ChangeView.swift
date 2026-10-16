@@ -2,6 +2,11 @@ import MainworthyClient
 import MainworthyScreens
 import SwiftUI
 
+/// A question pushed from a change's page: one about the change, or one a result's standing rests on.
+struct QuestionLink: Hashable {
+	let ref: String
+}
+
 struct ChangeView: View {
 	let key: String
 	let screen: ChangesScreen
@@ -29,9 +34,10 @@ struct ChangeView: View {
 				ChangeQuestionView(ref: question.ref, queue: queue, changes: screen, workspace: workspace)
 			}
 		}
+		.navigationDestination(for: TestLink.self) { test in
+			if let tests = workspace.tests { TestView(ref: test.ref, screen: tests, workspace: workspace, opensCase: false) }
+		}
 	}
-
-	private struct QuestionLink: Hashable { let ref: String }
 
 	private func page(_ detail: ChangeDetails) -> some View {
 		ScrollView {
@@ -62,6 +68,7 @@ struct ChangeView: View {
 					}
 				}
 				if let notice = screen.notice { Text(notice).foregroundStyle(Color.fail) }
+				if let results = screen.results, results.change == key { ChangeResultsPanel(results: results) }
 				Panel("Open questions") {
 					if detail.questions.isEmpty { Text("No open questions about this change.").foregroundStyle(.secondary) }
 					ForEach(detail.questions) { question in

@@ -65,16 +65,7 @@ struct SuiteCaseView: View {
 						.padding(.vertical, 4)
 					}
 				}
-				Panel("Who may run it") {
-					Text(document.content.methods.map { method in
-						switch method {
-						case "human": "A person"
-						case "auto": "An automated test"
-						case "agent": "An agent"
-						default: method
-						}
-					}.joined(separator: ", "))
-				}
+				Panel("Who may run it") { MethodBadges(methods: document.content.methods) }
 				NavigationLink(value: SuiteRoute.history(document.ref)) {
 					Label("History", systemImage: "clock.arrow.circlepath").frame(maxWidth: .infinity, alignment: .leading)
 				}

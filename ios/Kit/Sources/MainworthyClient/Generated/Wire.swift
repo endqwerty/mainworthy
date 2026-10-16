@@ -550,6 +550,90 @@ enum Wire {
 		let failing: [ChangeFailure]?
 	}
 
+	/// One test as the gate counted it.
+	struct CountedResult: Decodable, Equatable, Sendable {
+		let result: Int
+		/// The test's ref, T-9.
+		let test: String
+		let name: String
+		let file: String?
+		/// The case the result claimed, else the one its test is linked to. None: tracked without one.
+		let `case`: String?
+		let outcome: String
+		/// How the gate counted it: unexplained, attributed, excused, missing, skipped or pass.
+		let standing: String
+		let quarantined: Bool
+		/// The question its standing rests on, or the open one the gate waits for.
+		let question: String?
+		let attempt: Int
+		let durationMs: Double?
+		let message: String?
+		let job: String
+		let by: String
+		/// Where the CI build is, as the report named it.
+		let build: String?
+	}
+
+	/// `find` in results: what a commit's gate counted, a page.
+	struct CountedResults: Decodable, Equatable, Sendable {
+		/// How many rows match the filter.
+		let count: Int?
+		let items: [CountedResult]
+		let cursor: String?
+		/// Every row the gate counts, by standing, whatever the filter.
+		let tally: [String: Int]
+	}
+
+	/// A quarantine a test is or was in.
+	struct TestQuarantine: Decodable, Equatable, Sendable {
+		let active: Bool
+		let reason: String
+	}
+
+	/// One automated test.
+	struct TestSummary: Decodable, Equatable, Sendable {
+		let ref: String
+		let name: String
+		let file: String?
+		/// The case it is linked to. None: tracked without one.
+		let `case`: String?
+		let quarantine: TestQuarantine?
+	}
+
+	/// `find` in tests: the automated tests a project has seen.
+	struct TestList: Decodable, Equatable, Sendable {
+		let items: [TestSummary]
+		let cursor: String?
+	}
+
+	/// One of a test's latest results, newest first.
+	struct TestResult: Decodable, Equatable, Sendable {
+		let id: Int
+		let outcome: String
+		let by: String
+		let at: Double
+		let attempt: Int
+		let durationMs: Double?
+		let message: String?
+		let commit: String?
+		let change: String?
+		let job: String
+		let build: String?
+	}
+
+	/// `get` with a T- ref: a test and its latest results.
+	struct TestDetail: Decodable, Equatable, Sendable {
+		let ref: String
+		let key: String
+		let name: String
+		let file: String?
+		let `case`: String?
+		/// How often it flipped between passing and failing on the same code.
+		let flips: Int
+		let quarantine: TestQuarantine?
+		let last: [TestResult]
+	}
+
 	/// `session` list: one of the caller's living sessions.
 	struct SessionRow: Decodable, Equatable, Sendable {
 		let id: Int

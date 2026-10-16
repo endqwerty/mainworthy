@@ -46,8 +46,6 @@ public struct CaseProof: Equatable, Sendable {
 		default: .other(wire.outcome)
 		}
 	}
-
-	public var sentence: String { "\(method): \(outcome.word)\(current ? "" : " on an earlier version")" }
 }
 
 public struct SuiteFolder: Identifiable, Hashable, Sendable {

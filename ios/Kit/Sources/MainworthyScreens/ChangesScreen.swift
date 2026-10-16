@@ -13,6 +13,8 @@ public final class ChangesScreen: ProjectScreen {
 	public private(set) var detail: ChangeDetails?
 	public private(set) var detailLoading = Loading.first
 	public private(set) var notice: String?
+	/// What the gate of the open change's head counted, read when its page asks.
+	public private(set) var results: ChangeResults?
 	private var selected: String?
 	private var selectedChange: ChangeSummary?
 	private var reads = 0
@@ -24,6 +26,7 @@ public final class ChangesScreen: ProjectScreen {
 	public func open(_ key: String) async {
 		guard key != selected || detailLoading != .done else { return }
 		selectedChange = changes.first { $0.key == key } ?? (selected == key ? selectedChange : nil)
+		if selected != key { results = ChangeResults(project: project, change: key) }
 		selected = key
 		detail = nil
 		detailLoading = .first
@@ -47,6 +50,7 @@ public final class ChangesScreen: ProjectScreen {
 		}
 		guard mine == reads else { return }
 		if selected != nil { await readDetail() }
+		await results?.refresh()
 	}
 
 	private func readDetail() async {

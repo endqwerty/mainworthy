@@ -10,7 +10,20 @@
 //
 // To change what the app reads: change the shape here, run `bun scripts/ios.ts gen`, and fix what no longer
 // compiles in `ios/Kit` (`bun scripts/ios.ts test`, on a Mac). `ios/README.md` says the rest.
-import { anything, dictionary, flag, list, maybe, moment, nullable, type Shape, struct, text, whole } from "./shape.ts";
+import {
+	anything,
+	dictionary,
+	flag,
+	list,
+	maybe,
+	moment,
+	nullable,
+	number,
+	type Shape,
+	struct,
+	text,
+	whole,
+} from "./shape.ts";
 
 // ── Who is signed in ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -403,6 +416,79 @@ export const ChangeRun = struct("ChangeRun", "`get` of the head's run: the first
 	),
 });
 
+// What a change's gate counted, and the tests a project has seen (decision 0087).
+
+export const CountedResults = struct("CountedResults", "`find` in results: what a commit's gate counted, a page.", {
+	count: [maybe(whole), "How many rows match the filter."],
+	items: list(
+		struct("CountedResult", "One test as the gate counted it.", {
+			result: whole,
+			test: [text, "The test's ref, T-9."],
+			name: text,
+			file: maybe(text),
+			case: [
+				maybe(text),
+				"The case the result claimed, else the one its test is linked to. None: tracked without one.",
+			],
+			outcome: text,
+			standing: [text, "How the gate counted it: unexplained, attributed, excused, missing, skipped or pass."],
+			quarantined: flag,
+			question: [maybe(text), "The question its standing rests on, or the open one the gate waits for."],
+			attempt: whole,
+			durationMs: maybe(number),
+			message: maybe(text),
+			job: text,
+			by: text,
+			build: [maybe(text), "Where the CI build is, as the report named it."],
+		}),
+	),
+	cursor: maybe(text),
+	tally: [dictionary(whole), "Every row the gate counts, by standing, whatever the filter."],
+});
+
+const TestQuarantine = struct("TestQuarantine", "A quarantine a test is or was in.", {
+	active: flag,
+	reason: text,
+});
+
+export const TestList = struct("TestList", "`find` in tests: the automated tests a project has seen.", {
+	items: list(
+		struct("TestSummary", "One automated test.", {
+			ref: text,
+			name: text,
+			file: maybe(text),
+			case: [maybe(text), "The case it is linked to. None: tracked without one."],
+			quarantine: maybe(TestQuarantine),
+		}),
+	),
+	cursor: maybe(text),
+});
+
+export const TestDetail = struct("TestDetail", "`get` with a T- ref: a test and its latest results.", {
+	ref: text,
+	key: text,
+	name: text,
+	file: maybe(text),
+	case: maybe(text),
+	flips: [whole, "How often it flipped between passing and failing on the same code."],
+	quarantine: maybe(TestQuarantine),
+	last: list(
+		struct("TestResult", "One of a test's latest results, newest first.", {
+			id: whole,
+			outcome: text,
+			by: text,
+			at: moment,
+			attempt: whole,
+			durationMs: maybe(number),
+			message: maybe(text),
+			commit: maybe(text),
+			change: maybe(text),
+			job: text,
+			build: maybe(text),
+		}),
+	),
+});
+
 export const SessionRow = struct("SessionRow", "`session` list: one of the caller's living sessions.", {
 	id: whole,
 	openedWith: text,
@@ -535,6 +621,9 @@ export const SHAPES: readonly Shape[] = [
 	ChangeGate,
 	ChangeImpact,
 	ChangeRun,
+	CountedResults,
+	TestList,
+	TestDetail,
 	SessionRow,
 	SessionEnd,
 	TokenRow,
