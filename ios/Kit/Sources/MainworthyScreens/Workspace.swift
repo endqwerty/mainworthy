@@ -27,6 +27,7 @@ public final class Workspace {
 	}
 	@ObservationIgnored public private(set) lazy var tokens = TokensScreen(server: server)
 	public private(set) var suite: SuiteScreen?
+	public private(set) var tests: TestsScreen?
 
 	/// Every screen of the open project. What the change stream tells of, each of them reads again.
 	private var screens: [any ProjectScreen] = []
@@ -60,7 +61,9 @@ public final class Workspace {
 		self.changes = changes
 		let suite = SuiteScreen(project: server.project(project.key))
 		self.suite = suite
-		screens = [queue, runs, suite, changes]
+		let tests = TestsScreen(project: server.project(project.key))
+		self.tests = tests
+		screens = [queue, runs, suite, changes, tests]
 	}
 
 	/// Reads who is signed in and what they may open again: when the app comes to the front. A project can be
@@ -85,6 +88,7 @@ public final class Workspace {
 			runs = nil
 			changes = nil
 			suite = nil
+			tests = nil
 			screens = []
 		}
 	}
@@ -133,6 +137,7 @@ public final class Workspace {
 		case "Q": page = "queue/\(number)"
 		case "R": page = "runs/\(number)"
 		case "C": page = "suite/c/\(number)"
+		case "T": page = "tests/\(number)"
 		default: return nil
 		}
 		return server.instance.url.appending(path: "/p/\(key)/\(page)")

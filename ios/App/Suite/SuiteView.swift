@@ -24,6 +24,7 @@ enum SuiteRoute: Hashable {
 	case search(SearchContext?)
 	case document(ref: String, version: Int? = nil)
 	case history(String)
+	case tests
 }
 
 /// The test cases of the project, in their folders, as the Files app shows files.
@@ -48,6 +49,12 @@ struct SuiteView: View {
 					case .document(let ref, let version):
 						SuiteCaseView(ref: ref, version: version, screen: screen, workspace: workspace)
 					case .history(let ref): SuiteHistoryView(ref: ref, screen: screen)
+					case .tests: if let tests = workspace.tests { TestsListView(screen: tests) }
+					}
+				}
+				.navigationDestination(for: TestLink.self) { test in
+					if let tests = workspace.tests {
+						TestView(ref: test.ref, screen: tests, workspace: workspace, opensCase: true)
 					}
 				}
 		}
@@ -92,6 +99,8 @@ private struct SuiteRootView: View {
 			Section {
 				NavigationLink(value: SuiteRoute.all) { Label("All cases", systemImage: "tray.full") }
 					.accessibilityIdentifier("suite-all")
+				NavigationLink(value: SuiteRoute.tests) { Label("Automated tests", systemImage: "gearshape.2") }
+					.accessibilityIdentifier("suite-tests")
 			}
 			let top = screen.children(of: nil)
 			if !top.isEmpty {
@@ -360,34 +369,18 @@ private struct SuiteCaseRow: View {
 	let item: SuiteCase
 
 	var body: some View {
-		HStack(alignment: .firstTextBaseline, spacing: 10) {
-			VStack(alignment: .leading, spacing: 4) {
-				Text(item.title).font(.body.weight(.medium))
-				HStack(spacing: 6) {
-					RefText(item.ref)
-					if !item.tags.isEmpty {
-						Text(item.tags.map { "#\($0)" }.joined(separator: " "))
-							.font(.footnote).foregroundStyle(.tint).lineLimit(1)
-					}
-				}
-				if !item.proof.isEmpty {
-					Text(item.proof.map(\.sentence).joined(separator: " · "))
-						.font(.caption).foregroundStyle(.secondary)
+		VStack(alignment: .leading, spacing: 4) {
+			Text(item.title).font(.body.weight(.medium))
+			HStack(spacing: 6) {
+				RefText(item.ref)
+				if !item.tags.isEmpty {
+					Text(item.tags.map { "#\($0)" }.joined(separator: " "))
+						.font(.footnote).foregroundStyle(.tint).lineLimit(1)
 				}
 			}
-			Spacer(minLength: 0)
-			if let mark { Image(systemName: mark.symbol).foregroundStyle(mark.tint).accessibilityHidden(true) }
+			if !item.proof.isEmpty { ProofChips(proof: item.proof) }
 		}
 		.padding(.vertical, 2)
-	}
-
-	/// The worst of the results on the current version: what the row's sentences say, at a glance.
-	private var mark: (symbol: String, tint: Color)? {
-		let outcomes = item.proof.filter(\.current).map(\.outcome)
-		if outcomes.contains(where: { $0 == .fail || $0 == .error }) { return ("xmark.circle.fill", .fail) }
-		if outcomes.contains(.blocked) { return ("exclamationmark.triangle.fill", .warn) }
-		if outcomes.contains(.pass) { return ("checkmark.circle.fill", .pass) }
-		return nil
 	}
 }
 

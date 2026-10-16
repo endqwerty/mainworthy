@@ -111,6 +111,6 @@ struct StepIDTests {
 		let wire = try JSONDecoder().decode(Wire.SuiteProof.self, from: Data(#"{"outcome":"inconclusive","current":false}"#.utf8))
 		let proof = CaseProof(method: "agent", wire: wire)
 		#expect(proof.outcome == .other("inconclusive"))
-		#expect(proof.sentence == "agent: inconclusive on an earlier version")
+		#expect(proof.outcome.word == "inconclusive" && !proof.current && proof.method == "agent")
 	}
 }

@@ -39,7 +39,8 @@ struct CaseConflictView: View {
 					if let expected = step.expected { Text(expected).foregroundStyle(.secondary) }
 				}
 			}
-			Text("Methods: " + conflict.merged.methods.joined(separator: ", "))
+			Text("Who may run it").font(.subheadline).foregroundStyle(.secondary)
+			MethodBadges(methods: conflict.merged.methods)
 			Text("Automation: " + conflict.merged.automate)
 			ForEach(conflict.merged.fields.keys.sorted(), id: \.self) { key in
 				Text("\(key): \(conflict.merged.fields[key] ?? "")")

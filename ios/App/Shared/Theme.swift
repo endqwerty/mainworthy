@@ -110,3 +110,132 @@ struct Panel<Content: View>: View {
 		.background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 12))
 	}
 }
+
+/// A way a case is run, as a case's `methods` and its results name it: `human`, `auto`, `agent`. Each is drawn
+/// with the producer's symbol, so a person, a pipeline and an agent look the same on every screen.
+enum Method: String, CaseIterable {
+	case human, auto, agent
+
+	var producer: Producer {
+		switch self {
+		case .human: .person
+		case .auto: .pipeline
+		case .agent: .agent
+		}
+	}
+
+	/// What it is called on a badge.
+	var name: String {
+		switch self {
+		case .human: "Person"
+		case .auto: "Pipeline"
+		case .agent: "Agent"
+		}
+	}
+
+	/// Who it is, in a sentence: "A person may run it".
+	var who: String {
+		switch self {
+		case .human: "A person"
+		case .auto: "A pipeline"
+		case .agent: "An agent"
+		}
+	}
+}
+
+/// Who may run a case: every way, each with its symbol, and the ones the case does not allow struck through.
+struct MethodBadges: View {
+	let methods: [String]
+
+	var body: some View {
+		HStack(spacing: 8) {
+			ForEach(Method.allCases, id: \.self) { method in
+				let allowed = methods.contains(method.rawValue)
+				Label(method.name, systemImage: method.producer.symbol)
+					.font(.subheadline.weight(allowed ? .semibold : .regular))
+					.strikethrough(!allowed)
+					.foregroundStyle(allowed ? method.producer.tint : Color.secondary.opacity(0.6))
+					.padding(.horizontal, 8)
+					.padding(.vertical, 4)
+					.background(allowed ? method.producer.tint.opacity(0.12) : Color.clear, in: .capsule)
+					.overlay { if !allowed { Capsule().strokeBorder(Color.secondary.opacity(0.3)) } }
+					.accessibilityElement(children: .ignore)
+					.accessibilityLabel("\(method.who) \(allowed ? "may" : "may not") run it")
+					.accessibilityIdentifier("method-\(method.rawValue)")
+			}
+		}
+	}
+}
+
+extension CaseProof.Outcome {
+	/// What the result was, as a chip says it: "passed".
+	var said: String {
+		switch self {
+		case .pass: "passed"
+		case .fail: "failed"
+		case .skip: "skipped"
+		case .blocked: "blocked"
+		case .error: "error"
+		case .other(let word): word
+		}
+	}
+
+	var symbol: String {
+		switch self {
+		case .pass: "checkmark"
+		case .fail, .error: "xmark"
+		case .blocked: "exclamationmark.triangle"
+		case .skip, .other: "minus"
+		}
+	}
+
+	var tint: Color {
+		switch self {
+		case .pass: .pass
+		case .fail, .error: .fail
+		case .blocked: .warn
+		case .skip, .other: .secondary
+		}
+	}
+}
+
+/// The latest result of each way a case was run: who ran it, and what came of it. A result on an earlier version
+/// of the case says so, and is grey: it says nothing about the case as it is.
+struct ProofChips: View {
+	let proof: [CaseProof]
+
+	var body: some View {
+		ViewThatFits(in: .horizontal) {
+			HStack(spacing: 6) { chips }
+			VStack(alignment: .leading, spacing: 4) { chips }
+		}
+	}
+
+	private var chips: some View {
+		ForEach(proof, id: \.method) { ProofChip(proof: $0) }
+	}
+}
+
+private struct ProofChip: View {
+	let proof: CaseProof
+
+	var body: some View {
+		let method = Method(rawValue: proof.method)
+		let tint = proof.current ? proof.outcome.tint : .secondary
+		HStack(spacing: 3) {
+			Image(systemName: method?.producer.symbol ?? "questionmark")
+			Image(systemName: proof.outcome.symbol).fontWeight(.bold)
+			Text(proof.current ? proof.outcome.said : "\(proof.outcome.said), older version")
+		}
+		.font(.caption.weight(.medium))
+		.foregroundStyle(tint)
+		.padding(.horizontal, 6)
+		.padding(.vertical, 2)
+		.background(tint.opacity(0.12), in: .capsule)
+		.accessibilityElement(children: .ignore)
+		.accessibilityLabel(
+			"\(method?.name ?? proof.method): \(proof.outcome.said)\(proof.current ? "" : " on an earlier version")"
+		)
+		.accessibilityIdentifier("proof-\(proof.method)")
+	}
+}

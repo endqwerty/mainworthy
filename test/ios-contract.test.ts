@@ -16,6 +16,7 @@ import {
 	ChangeImpact,
 	ChangeList,
 	ChangeRun,
+	CountedResults,
 	DecideReply,
 	EVIDENCE,
 	Inbox,
@@ -25,6 +26,8 @@ import {
 	SessionInfo,
 	SessionRow,
 	SignInReply,
+	TestDetail,
+	TestList,
 	TokenRevoke,
 	TokenRow,
 } from "../scripts/ios/contract.ts";
@@ -444,6 +447,47 @@ describe("what Changes and Your sessions read", () => {
 		expect(rows[0]).toMatchObject({ ref: run, accepts: { commit: head }, change: { key, head } });
 		expect(impact).toMatchObject({ change: { key, head }, gate: { run } });
 		expect(rows[0]).toMatchObject({ failing: [{ name: "Shop check 1", case: expect.stringMatching(/^C-/) }] });
+	});
+
+	test("the results a change's gate counted, the tests, and one test with its latest results", async () => {
+		const own = z.object({ result: z.object({ project: z.string() }) }).parse(await send("POST", "/test/project", {}));
+		const key = own.result.project;
+		const all = await op(key, "find", { in: "results", change: "pr:482", limit: 2 });
+		holds("find results of a change", CountedResults, all);
+		// The test with no case is counted with the rest, and the tally is the whole gate's whatever the page.
+		expect(all).toMatchObject({ count: 5, tally: { pass: 4, unexplained: 1 }, cursor: expect.any(String) });
+		const unexplained = await op(key, "find", { in: "results", change: "pr:482", state: "unexplained" });
+		holds("find results by standing", CountedResults, unexplained);
+		expect(unexplained).toMatchObject({ count: 1, items: [{ name: "Shop check 1", question: expect.any(String) }] });
+		const tracked = await op(key, "find", { in: "results", change: "pr:482", text: "shipping" });
+		expect(tracked).toMatchObject({ items: [{ name: "Shipping accepts an address", case: null, standing: "pass" }] });
+		const ref = z.object({ items: z.array(z.object({ test: z.string() })) }).parse(tracked).items[0]?.test;
+		const proposed = z.object({ question: z.string() }).parse(
+			await op(key, "propose", {
+				edits: [{ op: "quarantine", test: ref, base: null, exit: { kind: "person" } }],
+				reason: "Unreliable address service",
+			}),
+		);
+		const waiting = (await open(key)).find((item) => item.q === proposed.question);
+		if (!waiting) throw new Error("the quarantine did not wait for an answer");
+		const accepted = await op(key, "decide", {
+			q: waiting.q,
+			onEvidence: waiting.evidenceHash,
+			answer: { is: "accept" },
+			reason: "It fails when the address service is slow",
+		});
+		expect(accepted).toMatchObject([{ status: "decided" }]);
+		const tests = await op(key, "find", { in: "tests", limit: 100 });
+		holds("find tests", TestList, tests);
+		const unlinked = await op(key, "find", { in: "tests", unlinked: true, text: "shipping" });
+		holds("find tests with no case", TestList, unlinked);
+		expect(unlinked).toMatchObject({
+			items: [{ ref, case: null, quarantine: { active: true, reason: "It fails when the address service is slow" } }],
+		});
+		const rows = z.array(z.unknown()).parse(await op(key, "get", { refs: [ref] }));
+		expect(rows).toHaveLength(1);
+		holds(`get ${ref}`, TestDetail, rows[0]);
+		expect(rows[0]).toMatchObject({ case: null, last: [{ outcome: "pass", change: "pr:482", job: "shop" }] });
 	});
 
 	test("a run's accepted commit stays its own when its change has a newer head", async () => {
