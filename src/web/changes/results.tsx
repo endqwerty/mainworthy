@@ -126,10 +126,18 @@ export function ChangeResults({
 					{total === 0 ? "No results counted for the latest commit." : "No result matches."}
 				</EmptyState>
 			)}
-			{read.hasNextPage && (
-				<button type="button" className="change-results-more" onClick={() => void read.fetchNextPage()}>
-					Show more ({matching - rows.length} left)
+			{read.isFetchNextPageError ? (
+				// The results changed since the first page, so the server refused the next one rather than skip or repeat
+				// a row. Reading again starts from the first page.
+				<button type="button" className="change-results-more" onClick={() => void read.refetch()}>
+					Read the results again
 				</button>
+			) : (
+				read.hasNextPage && (
+					<button type="button" className="change-results-more" onClick={() => void read.fetchNextPage()}>
+						Show more ({matching - rows.length} left)
+					</button>
+				)
 			)}
 		</>
 	);

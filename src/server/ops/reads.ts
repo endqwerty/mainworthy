@@ -3,6 +3,7 @@
 import type { z } from "zod";
 import { diffBodies, summariseDiff } from "../../core/diff.ts";
 import { QuarantineExit } from "../../core/flaky.ts";
+import { contentHash } from "../../core/hash.ts";
 import { printCase } from "../../core/markdown.ts";
 import type { CaseBody, MethodKind } from "../../core/model.ts";
 import {
@@ -66,7 +67,7 @@ import { deployments } from "../evidence/releases.ts";
 import { actorLabel } from "../identity/identity.ts";
 import { type Ctx, findCommand, UNFINISHED } from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
-import { invalid, notFound } from "../kernel/errors.ts";
+import { conflict, invalid, notFound } from "../kernel/errors.ts";
 import { currentPolicy, policyName } from "../policy/policy.ts";
 import {
 	type CountedTest,
@@ -471,8 +472,9 @@ const isStanding = (text: string): text is CountedTest["standing"] => STANDINGS.
 
 /**
  * The tests a commit's gate counted, each as it counts it: one row per test and lane, so the rows add up to the
- * gate's tally. Ordered problems first, then by when the result arrived; the cursor is the last row's place in
- * that order, so a page is not shifted by results that arrive while someone reads.
+ * gate's tally. Ordered problems first, then by when the result arrived. A retry or a decision moves a row in that
+ * order, so the cursor also names every row and how it counted: a page asked for after any of that changed is
+ * refused, and the list is read again from the start, instead of skipping or repeating the row that moved.
  */
 function countedResults(ctx: Ctx, input: FindInput, limit: number): Found {
 	if (!input.commit && !input.change && !input.run) throw invalid("results need a commit, a change or a run");
@@ -500,7 +502,10 @@ function countedResults(ctx: Ctx, input: FindInput, limit: number): Found {
 			return !text || `${test.name} ${test.key} ${test.file ?? ""}`.toLowerCase().includes(text);
 		})
 		.sort((a, b) => rank(a) - rank(b) || a.result - b.result);
+	const version = contentHash(counted.map((row) => [row.result, row.standing])).slice(0, 12);
 	const after = input.cursor ? parseResultCursor(input.cursor) : null;
+	if (after && after.version !== version)
+		throw conflict("the results changed since this cursor was given: read them again from the first page");
 	const rest = after
 		? matching.filter((row) => rank(row) > after.rank || (rank(row) === after.rank && row.result > after.result))
 		: matching;
@@ -509,15 +514,15 @@ function countedResults(ctx: Ctx, input: FindInput, limit: number): Found {
 	return {
 		count: matching.length,
 		items: page.map((row) => countedView(ctx, row)),
-		cursor: rest.length > limit && last ? `${rank(last)}.${last.result}` : null,
+		cursor: rest.length > limit && last ? `${rank(last)}.${last.result}.${version}` : null,
 		tally,
 	};
 }
 
-function parseResultCursor(cursor: string): { rank: number; result: number } {
-	const match = /^(\d+)\.(\d+)$/.exec(cursor.trim());
+function parseResultCursor(cursor: string): { rank: number; result: number; version: string } {
+	const match = /^(\d+)\.(\d+)\.([0-9a-z]+)$/.exec(cursor.trim());
 	if (!match) throw invalid(`"${cursor}" is not a cursor of results`);
-	return { rank: Number(match[1]), result: Number(match[2]) };
+	return { rank: Number(match[1]), result: Number(match[2]), version: match[3] ?? "" };
 }
 
 function countedView(ctx: Ctx, row: CountedTest): Record<string, unknown> {

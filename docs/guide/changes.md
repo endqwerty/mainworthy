@@ -66,7 +66,10 @@ $ mainworthy find --in results --commit 1111111111111111111111111111111111111111
 
 `--state` takes the words in the second column. `--unlinked` keeps the tests with no
 case and `--text` filters by name or file. The reply's `tally` counts every row, whatever
-the filter. A planned run's results are its slots: `mainworthy find --in slots --run R-2`.
+the filter. Pass the reply's `cursor` to read the next page. A new result or a decision can
+move a row in the order, so a cursor given before any such change is refused with
+`conflict`: read again from the first page. The web UI then offers "Read the results again".
+A planned run's results are its slots: `mainworthy find --in slots --run R-2`.
 
 The diagram follows the default policy, which requires counted evidence. A project can separately allow an explicit [CI declaration that no tests are required](./policy.md#reports-with-no-tests).
 

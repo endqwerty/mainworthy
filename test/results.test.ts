@@ -173,4 +173,26 @@ describe("the results behind a gate", () => {
 			build: "https://ci.example.com/build/1",
 		});
 	});
+	test("a cursor read after the results changed is refused, so no row is skipped or listed twice", () => {
+		seed();
+		const first = results({ commit: COMMIT, limit: 6 });
+		expect(first.cursor).not.toBeNull();
+		// "cart adds" passed and is not on the first page yet; a retry makes it fail, which would sort it before the
+		// cursor. Reading on would skip it, so the next page is refused and the list is read again from the start.
+		h.call("report", { target, job: "e2e", attempt: 3, results: [result("cart adds", "fail", "now it fails")] });
+		expect(() => results({ commit: COMMIT, limit: 6, cursor: first.cursor })).toThrow(/conflict: .*changed/);
+		const again = results({ commit: COMMIT, limit: 500 });
+		expect(again.items.filter((row) => row.name === "cart adds")).toHaveLength(1);
+		expect(again.tally).toEqual(gate().tally);
+	});
+
+	test("the list of tests finds a test by its file", () => {
+		h.call("report", {
+			target,
+			job: "e2e",
+			results: [{ test: { key: "opaque-id", name: "checks out", file: "specs/needle.spec.ts" }, outcome: "pass" }],
+		});
+		const found = h.call<{ items: { name: string }[] }>("find", { in: "tests", text: "needle" });
+		expect(found.items.map((row) => row.name)).toEqual(["checks out"]);
+	});
 });

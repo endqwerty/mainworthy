@@ -1461,8 +1461,8 @@ export function listTests(
 	const params: SqlValue[] = [input.project];
 	if (input.unlinked) where.push("case_id IS NULL AND kind = 'auto'");
 	if (input.text) {
-		where.push("(key LIKE ? OR name LIKE ?)");
-		params.push(`%${input.text}%`, `%${input.text}%`);
+		where.push("(key LIKE ? OR name LIKE ? OR file LIKE ?)");
+		params.push(`%${input.text}%`, `%${input.text}%`, `%${input.text}%`);
 	}
 	if (input.before !== null) {
 		where.push("id < ?");
