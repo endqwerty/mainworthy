@@ -6,10 +6,16 @@ import Testing
 
 @Suite("Results and tests against the server", .enabled(if: Live.isRunning, "needs `bun scripts/ios.ts test`"))
 struct ResultsLiveTests {
+	/// The run of the gate a change's page shows.
+	func run(_ client: ProjectClient) async throws -> String {
+		try #require(try await client.details(of: "pr:482").gate.run)
+	}
+
 	@Test("a change's results, by standing and by words, count a test tracked without a case")
 	func changeResults() async throws {
 		let client = try await Live.signedIn().project(try await Live.project())
-		let all = try await client.results(of: "pr:482")
+		let run = try await run(client)
+		let all = try await client.results(of: run)
 		#expect(all.count == 5 && all.next == nil)
 		#expect(all.tally[.pass] == 4 && all.tally[.unexplained] == 1 && all.tally.values.reduce(0, +) == 5)
 		// Problems first: the failure nobody has explained, with the question the gate waits for.
@@ -19,9 +25,9 @@ struct ResultsLiveTests {
 		#expect(failed.message == "expected $90.00, got $100.00" && failed.job == "shop")
 		let tracked = try #require(all.rows.first { $0.name == "Shipping accepts an address" })
 		#expect(tracked.caseRef == nil && tracked.standing == .pass && tracked.file == "tests/shipping.spec.ts")
-		let unexplained = try await client.results(of: "pr:482", standing: .unexplained)
+		let unexplained = try await client.results(of: run, standing: .unexplained)
 		#expect(unexplained.rows.map(\.name) == ["Shop check 1"] && unexplained.tally == all.tally)
-		let words = try await client.results(of: "pr:482", text: " shipping ")
+		let words = try await client.results(of: run, text: " shipping ")
 		#expect(words.rows.map(\.test) == [tracked.test] && words.count == 1)
 	}
 
@@ -54,13 +60,14 @@ struct ResultsLiveTests {
 				["test": ["key": .string("bulk-\(number)"), "name": .string("Bulk \(number)")], "outcome": "pass"]
 			}),
 		])
-		let first = try await client.results(of: "pr:482")
+		let run = try await run(client)
+		let first = try await client.results(of: run)
 		#expect(first.rows.count == 100 && first.count == 125)
 		let cursor = try #require(first.next)
 		let failure = try #require(try await client.questions(open: true, kind: .failure).questions.first)
 		_ = try await client.answer(failure, with: try #require(failure.choices.first { $0.answer == "flaky" }))
-		await #expect(throws: ResultsMoved.self) { try await client.results(of: "pr:482", after: cursor) }
-		let again = try await client.results(of: "pr:482")
+		await #expect(throws: ResultsMoved.self) { try await client.results(of: run, after: cursor) }
+		let again = try await client.results(of: run)
 		#expect(again.tally[.excused] == 1 && (again.tally[.unexplained] ?? 0) == 0)
 	}
 
@@ -76,8 +83,24 @@ struct ResultsLiveTests {
 				"results": [["test": ["key": .string("build-\(job)")], "outcome": "pass"]],
 			])
 		}
-		let rows = try await client.results(of: "pr:482", text: "build-").rows
+		let rows = try await client.results(of: try await run(client), text: "build-").rows
 		#expect(rows.first { $0.job == "web" }?.build == URL(string: "https://ci.example.com/run/7"))
 		#expect(rows.contains { $0.job == "file" } && rows.first { $0.job == "file" }?.build == nil)
+	}
+
+	@Test("the results of a gate's run stay that commit's after the change has a newer head")
+	func olderRun() async throws {
+		let server = Live.server()
+		_ = try await server.signIn(Live.owner)
+		let client = server.project(try await Live.project())
+		let shown = try await run(client)
+		let _: JSONValue = try await server.write("report", in: client.key, [
+			"target": ["commit": .string(String(repeating: "9", count: 40)), "repo": "acme/shop", "pr": 482],
+			"job": "new-head", "results": [["test": ["key": "other-head", "name": "Only the newer head ran this"], "outcome": "pass"]],
+		])
+		let old = try await client.results(of: shown)
+		#expect(old.count == 5 && !old.rows.contains { $0.name == "Only the newer head ran this" })
+		let newer = try await client.results(of: try await run(client))
+		#expect(newer.rows.map(\.name) == ["Only the newer head ran this"])
 	}
 }

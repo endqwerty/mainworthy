@@ -88,7 +88,8 @@ public struct ChangeGate: Equatable, Sendable {
 	public let reason: String
 	public let stale: Bool
 	public let tally: [String: Int]
-	package let run: String?
+	/// The run whose verdict this is. None: nothing a gate counts was reported for the head.
+	public let run: String?
 
 	init(_ wire: Wire.ChangeGate) {
 		verdict = ChangeVerdict(wire.verdict)

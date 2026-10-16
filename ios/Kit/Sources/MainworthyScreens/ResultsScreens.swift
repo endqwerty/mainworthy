@@ -8,10 +8,14 @@ public enum ListLoading: Equatable, Sendable {
 }
 
 /// Every test the gate of one change's head counted, as it counted it (decision 0087): the evidence behind the
-/// verdict. The tally chooses what is shown, and words of a test's name or file narrow it.
+/// verdict. It reads the run whose gate the change's page shows, so a newer head's results never appear under an
+/// older head's gate: a page that reads a new head gets a new one of these. The tally chooses what is shown, and
+/// words of a test's name or file narrow it.
 @MainActor @Observable
 public final class ChangeResults {
 	public let change: String
+	/// The gate's run. None: nothing a gate counts was reported for the head.
+	public let run: String?
 	public private(set) var standing: ResultStanding?
 	/// The words the rows are narrowed by. A view sets it and calls `read` once typing pauses.
 	public var text = ""
@@ -31,9 +35,10 @@ public final class ChangeResults {
 	private var reads = 0
 	private let project: ProjectClient
 
-	package init(project: ProjectClient, change: String) {
+	package init(project: ProjectClient, change: String, run: String?) {
 		self.project = project
 		self.change = change
+		self.run = run
 	}
 
 	/// Reads the first page, once.
@@ -57,13 +62,13 @@ public final class ChangeResults {
 		let mine = reads
 		let wanted = rows.count
 		do {
-			let first = try await project.results(of: change, standing: standing, text: text)
+			let first = try await page(after: nil)
 			var read = first.rows
 			var cursor = first.next
 			while let after = cursor, read.count < wanted {
-				let page = try await project.results(of: change, standing: standing, text: text, after: after)
-				read += page.rows
-				cursor = page.next
+				let more = try await page(after: after)
+				read += more.rows
+				cursor = more.next
 			}
 			guard mine == reads else { return }
 			rows = read
@@ -97,7 +102,7 @@ public final class ChangeResults {
 		reads += 1
 		let mine = reads
 		do {
-			let page = try await project.results(of: change, standing: standing, text: text, after: cursor)
+			let page = try await page(after: cursor)
 			guard mine == reads else { return }
 			let known = Set(rows.map(\.id))
 			rows += page.rows.filter { !known.contains($0.id) }
@@ -112,6 +117,11 @@ public final class ChangeResults {
 			guard mine == reads else { return }
 			notice = error.shown
 		}
+	}
+
+	private func page(after cursor: String?) async throws -> CountedPage {
+		guard let run else { return .none }
+		return try await project.results(of: run, standing: standing, text: text, after: cursor)
 	}
 
 	/// What the change stream told of: read again, if anybody read the list.
@@ -142,6 +152,8 @@ public final class TestsScreen: ProjectScreen {
 	public private(set) var notice: String?
 	public var hasMore: Bool { next != nil }
 	private var details: [String: TestReading] = [:]
+	/// Counts the reads of each test, so that a slow one that was overtaken does not replace a newer one.
+	private var detailReads: [String: Int] = [:]
 	private var next: String?
 	private var reads = 0
 	private let project: ProjectClient
@@ -213,11 +225,17 @@ public final class TestsScreen: ProjectScreen {
 	/// Reads one test and its latest results. What was read before stays on screen until the reply.
 	public func open(_ ref: String) async {
 		if details[ref] == nil { details[ref] = .reading }
+		detailReads[ref, default: 0] += 1
+		let mine = detailReads[ref]
 		do {
-			details[ref] = try await project.test(ref).map(TestReading.read) ?? .missing
+			let read = try await project.test(ref).map(TestReading.read) ?? .missing
+			guard mine == detailReads[ref] else { return }
+			details[ref] = read
 		} catch is CancellationError {
+			guard mine == detailReads[ref] else { return }
 			if details[ref] == .reading { details[ref] = nil }
 		} catch {
+			guard mine == detailReads[ref] else { return }
 			if case .read = details[ref] { return }
 			details[ref] = .failed(error.shown)
 		}

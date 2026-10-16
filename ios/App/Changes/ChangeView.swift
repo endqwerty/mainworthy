@@ -68,7 +68,10 @@ struct ChangeView: View {
 					}
 				}
 				if let notice = screen.notice { Text(notice).foregroundStyle(Color.fail) }
-				if let results = screen.results, results.change == key { ChangeResultsPanel(results: results) }
+				if let results = screen.results, results.change == key, results.run == detail.gate.run {
+					// Another run's results are another panel, which reads them when it appears.
+					ChangeResultsPanel(results: results).id(ObjectIdentifier(results))
+				}
 				Panel("Open questions") {
 					if detail.questions.isEmpty { Text("No open questions about this change.").foregroundStyle(.secondary) }
 					ForEach(detail.questions) { question in

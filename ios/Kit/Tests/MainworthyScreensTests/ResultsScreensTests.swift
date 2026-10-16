@@ -15,7 +15,8 @@ struct ResultsScreensTests {
 		await screen.refresh()
 		await screen.open("pr:482")
 		let results = try #require(screen.results)
-		#expect(results.change == "pr:482" && results.loading == .first && results.rows.isEmpty)
+		#expect(results.change == "pr:482" && results.run == screen.detail?.gate.run && results.run != nil)
+		#expect(results.loading == .first && results.rows.isEmpty)
 		await results.load()
 		#expect(results.loading == .done && results.total == 5 && results.rows.count == 5 && !results.hasMore)
 		await results.show(.unexplained)
@@ -47,7 +48,8 @@ struct ResultsScreensTests {
 				["test": ["key": .string("bulk-\(number)")], "outcome": "pass"]
 			}),
 		])
-		let results = ChangeResults(project: client, change: "pr:482")
+		let run = try await client.details(of: "pr:482").gate.run
+		let results = ChangeResults(project: client, change: "pr:482", run: run)
 		await results.load()
 		#expect(results.rows.count == 100 && results.hasMore && results.count == 125)
 		let failure = try #require(try await client.questions(open: true, kind: .failure).questions.first)
@@ -61,6 +63,54 @@ struct ResultsScreensTests {
 		// Read again from the change stream, the list is read as far down as it was.
 		await results.refresh()
 		#expect(results.rows.count == 125)
+	}
+
+	@Test("the results shown are the shown gate's, and a newer head's gate brings its own")
+	func shownHead() async throws {
+		let key = try await Live.project()
+		let screen = ChangesScreen(project: try await Live.signedIn().project(key))
+		await screen.refresh()
+		await screen.open("pr:482")
+		let shown = try #require(screen.results)
+		let owner = Live.server()
+		_ = try await owner.signIn(Live.owner)
+		let _: JSONValue = try await owner.write("report", in: key, [
+			"target": ["commit": .string(String(repeating: "9", count: 40)), "repo": "acme/shop", "pr": 482],
+			"job": "new-head", "results": [["test": ["key": "other-head", "name": "Only the newer head ran this"], "outcome": "pass"]],
+		])
+		// The page still shows the older head's gate: its results are that gate's, read after the new report.
+		await shown.load()
+		#expect(shown.total == 5 && !shown.rows.contains { $0.name == "Only the newer head ran this" })
+		await screen.refresh()
+		let newer = try #require(screen.results)
+		#expect(newer !== shown && newer.run == screen.detail?.gate.run && newer.run != shown.run)
+		await newer.load()
+		#expect(newer.rows.map(\.name) == ["Only the newer head ran this"])
+	}
+
+	@Test("a slower read of a test does not replace a newer one")
+	func staleTest() async throws {
+		let key = try await Live.project()
+		let transport = HeldReply("get")
+		let screen = TestsScreen(project: try await Live.signedIn(transport: transport).project(key))
+		await transport.gate.holdNext()
+		let old = Task { await screen.open("T-5") }
+		try await transport.gate.waitUntilPaused()
+		let owner = Live.server()
+		_ = try await owner.signIn(Live.owner)
+		let _: JSONValue = try await owner.write("report", in: key, [
+			"target": ["commit": .string(String(repeating: "3", count: 40)), "repo": "acme/shop", "pr": 482],
+			"job": "again", "results": [["test": ["key": "tests/shipping.spec.ts::shipping::address"], "outcome": "fail"]],
+		])
+		await screen.open("T-5")
+		guard case .read(let fresh) = screen.detail("T-5") else {
+			Issue.record("the newer read failed")
+			return
+		}
+		#expect(fresh.results.count == 2 && fresh.results.first?.outcome == "fail")
+		await transport.gate.release()
+		await old.value
+		#expect(screen.detail("T-5") == .read(fresh))
 	}
 
 	@Test("the tests, those with no case, and a test's page")
@@ -87,5 +137,24 @@ struct ResultsScreensTests {
 		#expect(screen.tests.isEmpty, "only tests with no case are shown, and none of them is a check")
 		await screen.showUnlinked(false)
 		#expect(screen.tests.count == 4)
+	}
+}
+
+/// Holds the reply of the next request to one operation until the test releases it.
+final class HeldReply: Transport, Sendable {
+	let gate = QueueSendGate()
+	private let operation: String
+	private let inner = URLSessionTransport()
+
+	init(_ operation: String) { self.operation = operation }
+
+	func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+		let reply = try await inner.send(request)
+		if request.url?.lastPathComponent == operation { await gate.pauseIfNeeded() }
+		return reply
+	}
+
+	func lines(_ request: URLRequest) async throws -> (AsyncThrowingStream<String, any Error>, HTTPURLResponse) {
+		try await inner.lines(request)
 	}
 }
