@@ -183,22 +183,21 @@ dashboard. This page writes the tailnet's name as `example.ts.net` and the node'
 2. **New resource → Docker Compose**, from this repository with that key: compose file `/compose.coolify.yaml`
    (the instance's own file, with the Tailscale sidecar; `/compose.yaml` is the plain one), the branch to follow
    (`main`).
-3. **Environment:** Coolify reads `CASEBOOK_OWNER_TOKEN`, `CASEBOOK_OWNER` and `TS_AUTHKEY` from the compose
-   file (the first two keep the names this instance was created with; the file passes them to the container as
-   `MAINWORTHY_OWNER_TOKEN` and `MAINWORTHY_OWNER`). Set the token to a long random string (`openssl rand -hex 32`) and the owner to your name, before the first start.
+3. **Environment:** Coolify reads `MAINWORTHY_OWNER_TOKEN`, `MAINWORTHY_OWNER` and `TS_AUTHKEY` from the compose
+   file. Set the token to a long random string (`openssl rand -hex 32`) and the owner to your name, before the first start.
    `TS_AUTHKEY` is a single-use Tailscale auth key (admin console → Settings → Keys), needed for the first
    deploy only; never use the sign-in link the sidecar prints, it rotates every minute.
-4. **Storage:** the compose file declares the volume `casebook-data` at `/data`. Coolify creates it as a named
+4. **Storage:** the compose file declares the volume `mainworthy-data` at `/data`. Coolify creates it as a named
    volume. Bind it to a path you back up if you have one.
-5. **Network:** the `tailscale` service in `compose.coolify.yaml` is its own tailnet node, `casebook`, and serves
-   the app at `https://casebook.example.ts.net` (Tailscale issues the certificate; the first request can take
+5. **Network:** the `tailscale` service in `compose.coolify.yaml` is its own tailnet node, `mainworthy`, and serves
+   the app at `https://mainworthy.example.ts.net` (Tailscale issues the certificate; the first request can take
    a few seconds). Nothing is published on the LAN; port 7357 is bound to `127.0.0.1` on the host for debugging
    only. Anything on the tailnet can reach the name, and every request still needs a token. The node's identity
    lives in the `tailscale-state` volume: deleting it registers a new node.
    Once the node is up, disable its key expiry in the Tailscale admin console (Machines → the node), and delete
    `TS_AUTHKEY` from Coolify. For a server without Tailscale, use `compose.yaml` (publishes 7357) or give the
    service a domain in Coolify.
-6. **Deploy**, then check: `curl https://casebook.example.ts.net/healthz` answers `{"ok":true,"version":"…","commit":"…"}`, and `commit` is the commit Coolify
+6. **Deploy**, then check: `curl https://mainworthy.example.ts.net/healthz` answers `{"ok":true,"version":"…","commit":"…"}`, and `commit` is the commit Coolify
    built (it comes from `SOURCE_COMMIT`; `compose.coolify.yaml` needs no line for it: naming the variable there would
    make Coolify list it as one of yours, and an empty value of yours replaces the one it generates). Compare it with
    the tip of `main` (`git ls-remote origin refs/heads/main`) to see whether the instance is behind. Open the page
@@ -208,7 +207,7 @@ dashboard. This page writes the tailnet's name as `example.ts.net` and the node'
    1.0, and they can cut it off at any time. Every request still needs a token, and wrong tokens are limited
    ("The limit on failed sign-ins"; on this instance not yet by address). The path is the one the server's other public
    apps use: a proxied Cloudflare record for the name, a route in the server's Cloudflare tunnel, Coolify's
-   proxy, and a domain on the service in Coolify (`https://mainworthy.com:7357` on the service `casebook`, with
+   proxy, and a domain on the service in Coolify (`https://mainworthy.com:7357` on the service `mainworthy`, with
    "connect to the predefined network" on and Coolify's own HTTPS redirect off). Two things differ from an
    ordinary app behind that proxy:
    - **The tunnel route goes to the proxy's HTTPS port** (`https://localhost:443`, certificate not verified,
@@ -409,21 +408,28 @@ What you do once:
 
 - **Sign in again.** The session cookie has a new name. The owner token is unchanged.
 - **Rename the variables you set**: `CASEBOOK_*` becomes `MAINWORTHY_*`, in a pipeline (`MAINWORTHY_URL`,
-  `MAINWORTHY_TOKEN`, `MAINWORTHY_PROJECT`) and on a server. The old names are not read. `compose.coolify.yaml`
-  is the exception: it still reads `CASEBOOK_OWNER_TOKEN` and `CASEBOOK_OWNER` from Coolify.
+  `MAINWORTHY_TOKEN`, `MAINWORTHY_PROJECT`) and on a server. The old names are not read.
 - **`compose.yaml`:** its volume is now `mainworthy-data`. If you started it before the rename, the data is in
   `casebook-data`; copy it across before the first start, or the instance starts empty:
   `docker run --rm -v <project>_casebook-data:/from -v <project>_mainworthy-data:/to alpine cp -a /from/. /to/`.
 
-The instance on Coolify keeps four names from before the rename, so that a redeploy finds the same data, tailnet
-node and variables. Each can be moved by hand, and none has to be:
+The instance on Coolify kept its names from before the rename until 2026-10-16: the service and the tailnet
+node `casebook`, the volume `casebook-data` and the Coolify variables `CASEBOOK_OWNER_TOKEN` and
+`CASEBOOK_OWNER`. `compose.coolify.yaml` now names all of them `mainworthy`, and the deploy that first runs it
+carries the data over by itself: Coolify stops the old container, the one-shot service `carry-data` copies
+`casebook-data` into `mainworthy-data` (the database last, so an interrupted copy is made again), and the app
+starts once it has finished. A later start finds a database in `mainworthy-data` and copies nothing. Before
+that deploy, three things were changed in Coolify (on 2026-10-16), the first two because the file needs them:
 
-| Name | Where | To move it |
-| --- | --- | --- |
-| `casebook` (tailnet node, `https://casebook.example.ts.net`) | `TS_HOSTNAME` in `compose.coolify.yaml` | Set `TS_HOSTNAME=mainworthy` in Coolify and redeploy. The address changes; the node's identity does not. |
-| `casebook-data` (volume) | `compose.coolify.yaml` | Stop the app, copy the volume to a new one as above, change the name in the file. |
-| `CASEBOOK_OWNER_TOKEN`, `CASEBOOK_OWNER` | Coolify's variables | Add the variables under the new names, change the two lines in the file, delete the old ones. |
-| `casebook` (service) | `compose.coolify.yaml` | Rename it together with the proxy address in the `tailscale-serve` config. |
+- the variables `MAINWORTHY_OWNER_TOKEN` and `MAINWORTHY_OWNER`, with the values of the old ones;
+- the domain `https://mainworthy.com` on the service `mainworthy` as well as on `casebook` (Coolify keys a
+  domain by the service's name; without it the public address would lose its route);
+- the Coolify project and application were renamed `mainworthy`.
+
+After that deploy has run and `https://mainworthy.com` answers with the data, delete the old variables and the
+old domain in Coolify, remove `carry-data` and `casebook-data` from the file, and then delete the volume
+`<application>_casebook-data` on the server. The tailnet node takes the name `mainworthy` at that deploy (its
+identity is kept in `tailscale-state`), so its address becomes `https://mainworthy.example.ts.net`.
 
 ## The upgrade to sessions
 

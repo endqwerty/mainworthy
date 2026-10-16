@@ -1,19 +1,14 @@
-# The Coolify deployment: Mainworthy as its own node on the tailnet, https://casebook.example.ts.net, through a
+# The Coolify deployment: Mainworthy as its own node on the tailnet, https://mainworthy.example.ts.net, through a
 # Tailscale sidecar (the pattern in the home lab's services/coolify-tailnet-apps.md). Nothing is published on the
 # LAN. For a laptop or a plain server use compose.yaml instead.
 #
 # It is also public at https://mainworthy.com, through the server's Cloudflare tunnel and Coolify's proxy. That
-# needs nothing in this file: the domain is a setting of the service `casebook` in Coolify (docs/deploy.md).
-#
-# This deployment was created when the project was called Casebook. The names it stored then are kept, so that a
-# redeploy finds the same data, node and variables: the service `casebook`, the volume `casebook-data`, the
-# tailnet name `casebook` and the Coolify variables CASEBOOK_OWNER_TOKEN and CASEBOOK_OWNER. docs/deploy.md says
-# how to move each one.
+# needs nothing in this file: the domain is a setting of the service `mainworthy` in Coolify (docs/deploy.md).
 #
 # First deploy only: set TS_AUTHKEY in Coolify to a single-use auth key. The node's identity then persists in the
 # tailscale-state volume and the variable can be deleted. Never use the sign-in link the sidecar prints.
 services:
-  casebook:
+  mainworthy:
     build: .
     restart: unless-stopped
     ports:
@@ -22,8 +17,8 @@ services:
     environment:
       MAINWORTHY_LOCK_WAIT_SECONDS: ${MAINWORTHY_LOCK_WAIT_SECONDS:-30}
       # A long random string. Leave unset to have one generated and printed once on first start.
-      MAINWORTHY_OWNER_TOKEN: ${CASEBOOK_OWNER_TOKEN:-}
-      MAINWORTHY_OWNER: ${CASEBOOK_OWNER:-owner}
+      MAINWORTHY_OWNER_TOKEN: ${MAINWORTHY_OWNER_TOKEN:-}
+      MAINWORTHY_OWNER: ${MAINWORTHY_OWNER:-owner}
       # To rename the owner: the name the owner has now, beside the new name above. Unset it after that start.
       MAINWORTHY_OWNER_WAS: ${MAINWORTHY_OWNER_WAS:-}
       # The address people open the instance at. Passkeys belong to its host name and an invitation link starts
@@ -37,15 +32,41 @@ services:
       # `-`, not `:-`, which would read an empty value as unset).
       MAINWORTHY_DEMO: ${MAINWORTHY_DEMO-demo}
     volumes:
-      - casebook-data:/data
+      - mainworthy-data:/data
+    depends_on:
+      carry-data:
+        condition: service_completed_successfully
+
+  # Until 2026-10-16 this deployment kept its data in the volume `casebook-data`, from when the project was called
+  # Casebook. On the first start with this file the step copies it to `mainworthy-data`; Coolify has stopped the
+  # old container by then. It copies the database last, under a temporary name it then renames, so a copy that
+  # stopped half-way is made again, and once `mainworthy-data` holds a database it copies nothing.
+  # docs/deploy.md, "An instance made before the rename", says when to remove it.
+  carry-data:
+    image: busybox:1.37
+    restart: "no"
+    exclude_from_hc: true
+    volumes:
+      - casebook-data:/from:ro
+      - mainworthy-data:/to
+    entrypoint:
+      - sh
+      - -euc
+      - |
+        if [ -e /to/mainworthy.db ]; then echo "carry-data: mainworthy-data holds a database, nothing to copy"; exit 0; fi
+        if [ ! -e /from/mainworthy.db ]; then echo "carry-data: casebook-data holds no database, nothing to copy"; exit 0; fi
+        find /from -mindepth 1 -maxdepth 1 ! -name mainworthy.db -exec cp -a {} /to/ \;
+        cp -a /from/mainworthy.db /to/.mainworthy.db.carry
+        mv /to/.mainworthy.db.carry /to/mainworthy.db
+        echo "carry-data: copied casebook-data to mainworthy-data"
 
   tailscale:
     image: tailscale/tailscale:stable
-    # No `hostname:` here: the sidecar would then resolve the service name `casebook` to itself, not to the app.
+    # No `hostname:` here: the sidecar would then resolve the service name `mainworthy` to itself, not to the app.
     # TS_HOSTNAME names the tailnet node.
     environment:
       TS_AUTHKEY: ${TS_AUTHKEY:-}
-      TS_HOSTNAME: ${TS_HOSTNAME:-casebook}
+      TS_HOSTNAME: ${TS_HOSTNAME:-mainworthy}
       TS_STATE_DIR: /var/lib/tailscale
       TS_SERVE_CONFIG: /config/serve.json
       TS_USERSPACE: "true"
@@ -67,11 +88,13 @@ configs:
         "TCP": { "443": { "HTTPS": true } },
         "Web": {
           "$${TS_CERT_DOMAIN}:443": {
-            "Handlers": { "/": { "Proxy": "http://casebook:7357" } }
+            "Handlers": { "/": { "Proxy": "http://mainworthy:7357" } }
           }
         }
       }
 
 volumes:
+  mainworthy-data:
+  # Read once by carry-data, above.
   casebook-data:
   tailscale-state:
