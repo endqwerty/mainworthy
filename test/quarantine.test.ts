@@ -3,7 +3,7 @@ import { type AuditRecord, AuditReply, verifyAudit } from "../src/core/audit.ts"
 import type { Quarantine } from "../src/core/flaky.ts";
 import type { GateStatus, InboxReply, ProposeReply, ReportReceipt } from "../src/core/ops.ts";
 import { effectiveQuarantine, quarantineEntries, quarantineLookup } from "../src/server/evidence/quarantine.ts";
-import { Db } from "../src/server/kernel/db.ts";
+import { Db, declaredSql } from "../src/server/kernel/db.ts";
 import { migrate } from "../src/server/kernel/migrate.ts";
 import { pollDefectHolds } from "../src/server/tracker-holds.ts";
 import { exportArchive, importArchive } from "../src/server/transfer/transfer.ts";
@@ -144,6 +144,18 @@ describe("quarantine covers observations when reported", () => {
 });
 
 describe("quarantine", () => {
+	test("the history plan finds a commit's targets before looking up their test results", () => {
+		const statement = declaredSql().find((text) => text.includes("FROM targets initial"));
+		if (!statement) throw new Error("missing quarantine history statement");
+		const plan = h.app.db.raw
+			.query<{ detail: string }, []>(`EXPLAIN QUERY PLAN ${statement}`)
+			.all()
+			.map((row) => row.detail);
+		const initial = plan.indexOf("SEARCH initial USING COVERING INDEX targets_commit (project=? AND commit_sha=?)");
+		const first = plan.indexOf("SEARCH first USING INDEX results_target (target=? AND test=?)");
+		expect(initial).toBeGreaterThanOrEqual(0);
+		expect(first).toBeGreaterThan(initial);
+	});
 	test("a person's decision excuses one test and makes quarantined failures explicit", () => {
 		report("aaaa0001");
 		expect(gate("aaaa0001").verdict).toBe("blocked");

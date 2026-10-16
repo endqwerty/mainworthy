@@ -37,6 +37,74 @@ const titles = async (client: Client, project: string) =>
 	(await client.with({ project }).call("find", { limit: 500 })).items.map((item) => item.title);
 
 test(
+	"restoring demo admin grants applies the server's MFA configuration to password sessions",
+	async () => {
+		await withInstance(
+			async ({ instance, client }) => {
+				await refreshDemo(instance, "demo", small);
+				const invitation = z.object({ code: z.string() }).parse(
+					await client.call("invitation", {
+						do: "create",
+						name: "demo-admin",
+						can: ["read", "admin"],
+						project: "demo",
+					}),
+				);
+				const accepted = await fetch(`${instance.url}/api/login`, {
+					method: "POST",
+					headers: { "content-type": "application/json", origin: instance.url },
+					body: JSON.stringify({ invitation: invitation.code, password: "correct horse battery staple" }),
+				});
+				expect(accepted.status).toBe(200);
+				await accepted.text();
+				const cookie = accepted.headers.get("set-cookie")?.split(";")[0];
+				if (!cookie) throw new Error("joining did not open a session");
+				const status = async () => {
+					const reply = await fetch(`${instance.url}/api/session`, { headers: { cookie } });
+					await reply.text();
+					return reply.status;
+				};
+				expect(await status()).toBe(200);
+				instance.app.config.requireAdminMfa = true;
+				await refreshDemo(instance, "demo", small);
+				expect(await grantsOf(client, "demo-admin")).toMatchObject([{ project: "demo", can: ["read", "admin"] }]);
+				expect(await status()).toBe(401);
+			},
+			{
+				mode: "server",
+				env: {
+					MAINWORTHY_TRUSTED_PROXY: "203.0.113.7",
+					MAINWORTHY_CLIENT_ADDRESS_HEADER: "x-real-ip",
+				},
+			},
+		);
+	},
+	SLOW,
+);
+
+test(
+	"a stop during reset makes no seed token after the reset commits",
+	async () => {
+		await withInstance(async ({ instance, client }) => {
+			await refreshDemo(instance, "demo", small);
+			const controller = new AbortController();
+			await expect(
+				refreshDemo(instance, "demo", small, {
+					signal: controller.signal,
+					step: async () => controller.abort(new Error("server stopping")),
+				}),
+			).rejects.toThrow("server stopping");
+			const tokens = Tokens.parse(await client.call("admin", { do: "token.list" }));
+			const seedTokens = tokens.filter((token) => token.label === "demo seed of demo");
+			expect(seedTokens).toHaveLength(1);
+			expect(tokens.filter((token) => token.label.startsWith("demo ")).every((token) => token.revoked)).toBe(true);
+			expect(await titles(client, "demo")).toEqual([]);
+		});
+	},
+	SLOW,
+);
+
+test(
 	"a start seeds the demo again: what was written there is gone, its grants stay, no seed token works",
 	async () => {
 		await withInstance(
