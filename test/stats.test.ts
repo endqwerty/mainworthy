@@ -181,6 +181,40 @@ describe("flaky tests and time lost to reruns", () => {
 	});
 });
 
+describe("what a flip and a rerun are (review of #461)", () => {
+	test("a flip whose failure its producer corrected is not flaky", () => {
+		h = harness({ unlinked: "track" });
+		h.call("report", ciReport({ commit: "aaaa0001", n: 2, fail: { 1: "socket hang up" } }));
+		const failed = lastResult("T-2");
+		h.call("report", ciReport({ commit: "aaaa0001", n: 2, attempt: 2, only: [1] }));
+		expect(stats({ of: "flaky", days: 1 })).toMatchObject({ flaky: 1 });
+		const fixed = ciReport({ commit: "aaaa0001", n: 2, only: [1] });
+		h.call("report", { ...fixed, results: fixed.results.map((r) => ({ ...r, corrects: failed })) });
+		expect(stats({ of: "flaky", days: 1 })).toMatchObject({ flaky: 0, items: [] });
+	});
+
+	test("an automated test an agent reports is one of the automated tests", () => {
+		h = harness({ unlinked: "track" });
+		h.call("report", ciReport({ commit: "aaaa0001", n: 2 }));
+		const agent = h.actor("reviewer", "agent", ["read", "produce"]);
+		const extra = ciReport({ commit: "aaaa0001", n: 3, only: [2] });
+		h.call("report", { ...extra, method: "agent" }, agent);
+		expect(stats({ of: "flaky", days: 1 })).toMatchObject({ tests: 3 });
+	});
+
+	test("two results of one attempt and then a rerun are one rerun, timed by the result that attempt counted", () => {
+		h = harness({ unlinked: "track" });
+		const first = ciReport({ commit: "aaaa0001", n: 1, fail: { 0: "socket hang up" } });
+		h.call("report", { ...first, results: first.results.map((r) => ({ ...r, durationMs: 40 })) });
+		h.call("report", {
+			...first,
+			results: first.results.map((r) => ({ ...r, outcome: "pass", failure: undefined, durationMs: 7 })),
+		});
+		h.call("report", ciReport({ commit: "aaaa0001", n: 1, attempt: 2 }));
+		expect(stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 1, lostMs: 40, unknown: 0 });
+	});
+});
+
 /**
  * C-1 to C-3 are made for the pipeline's three tests (C-2's fails); C-4 to C-6 are run by hand, and want automation,
  * have no say, and cannot be automated; C-3 is then archived. REQ-1 is covered by C-1 and C-4, REQ-2 by C-2 and C-5,

@@ -36,14 +36,17 @@ beside the rate and are not in it.
 ## Flaky tests
 
 A flaky test passed and failed on the same code: the same commit, job and producer, one attempt after another.
-Mainworthy records such a flip when the report arrives. The report lists the tests with flips in the window, the
-most flips first, and says which of them are in quarantine. The headline compares them with every automated test
-that reported in the window.
+Mainworthy records such a flip when the report arrives. A flip whose pass or failure its producer later corrected
+is not counted. The report lists the automated tests with flips in the window, the most flips first, and says which
+of them are in quarantine. The headline compares them with every automated test that reported in the window, whoever
+reported it.
 
 ## Time lost to reruns
 
-An attempt that a later attempt of the same test, job, commit and producer repeated is a rerun. The report adds up
-the time those attempts took, as their reports said it, and lists the tests that cost the most. An attempt whose
+An attempt that a later attempt of the same test, job, commit and producer repeated is a rerun, counted once
+however many times that attempt was reported. The report adds up the time those attempts took, as their reports said
+it (of an attempt reported twice, the time of the result it counted: the worse, then the later), and lists the tests
+that cost the most. An attempt whose
 report gave no duration is counted, and its time is not: the report says how many there were.
 
 ## Automation

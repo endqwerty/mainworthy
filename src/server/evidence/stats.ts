@@ -35,29 +35,43 @@ const Q = {
 		FROM ranked k WHERE k.rank = 1
 		GROUP BY slot, k.outcome, k.quarantined
 	`),
+	// A flip of an automated test, unless its producer corrected either side of it: then the pass and the failure
+	// were not both what happened.
 	flaky: sql<{ project: number; since: number }, { test: number; flips: number; last_at: number }>(`
 		SELECT f.test, count(*) AS flips, max(r.at) AS last_at
-		FROM flips f JOIN results r ON r.id = f.second_result
-		WHERE f.project = $project AND r.at >= $since
+		FROM flips f JOIN results r ON r.id = f.second_result JOIN tests t ON t.id = f.test
+		WHERE f.project = $project AND r.at >= $since AND t.kind = 'auto'
+		  AND NOT EXISTS (SELECT 1 FROM results c WHERE c.corrects IN (f.first_result, f.second_result))
 		GROUP BY f.test ORDER BY flips DESC, last_at DESC, f.test
 	`),
+	// Automated is what the test is, whoever reported it: an agent can report an automated test too.
 	reporting: sql<{ project: number; since: number }, { n: number }>(`
-		SELECT count(DISTINCT r.test) AS n FROM results r
-		WHERE r.project = $project AND r.at >= $since AND r.method = 'auto'
+		SELECT count(DISTINCT r.test) AS n FROM results r JOIN tests t ON t.id = r.test
+		WHERE r.project = $project AND r.at >= $since AND t.kind = 'auto'
 	`),
-	// An attempt that a higher attempt of the same lane repeated. A corrected result, and a correction, are a
-	// producer saying it was wrong, not a rerun.
+	// An attempt that a higher attempt of the same lane repeated, once per attempt: of several results of one attempt,
+	// the one the attempt counted (the worse, then the later) gives its time. A corrected result, and a correction,
+	// are a producer saying it was wrong, not a rerun.
 	reruns: sql<{ project: number; since: number }, { test: number; reruns: number; lost: number; unknown: number }>(`
-		SELECT r.test, count(*) AS reruns, coalesce(sum(r.duration_ms), 0) AS lost, sum(r.duration_ms IS NULL) AS unknown
-		FROM results r JOIN batches b ON b.id = r.batch
-		WHERE r.project = $project AND r.at >= $since
-		  AND NOT EXISTS (SELECT 1 FROM results c WHERE c.corrects = r.id)
-		  AND EXISTS (
-		    SELECT 1 FROM results n JOIN batches nb ON nb.id = n.batch
-		    WHERE n.target = r.target AND n.test = r.test AND n.actor = r.actor AND n.method = r.method
-		      AND nb.job = b.job AND n.attempt > r.attempt AND n.corrects IS NULL
-		  )
-		GROUP BY r.test
+		WITH attempts AS (
+		  SELECT r.test, r.target, r.actor, r.method, b.job, r.attempt, r.duration_ms,
+		         row_number() OVER (
+		           PARTITION BY r.target, r.test, r.actor, r.method, b.job, r.attempt
+		           ORDER BY CASE r.outcome WHEN 'fail' THEN 3 WHEN 'error' THEN 3 WHEN 'pass' THEN 2 WHEN 'blocked' THEN 1 ELSE 0 END DESC,
+		                    r.seq DESC, r.ord DESC
+		         ) AS rank
+		  FROM results r JOIN batches b ON b.id = r.batch
+		  WHERE r.project = $project AND r.at >= $since
+		    AND NOT EXISTS (SELECT 1 FROM results c WHERE c.corrects = r.id)
+		)
+		SELECT a.test, count(*) AS reruns, coalesce(sum(a.duration_ms), 0) AS lost, sum(a.duration_ms IS NULL) AS unknown
+		FROM attempts a
+		WHERE a.rank = 1 AND EXISTS (
+		  SELECT 1 FROM results n JOIN batches nb ON nb.id = n.batch
+		  WHERE n.target = a.target AND n.test = a.test AND n.actor = a.actor AND n.method = a.method
+		    AND nb.job = a.job AND n.attempt > a.attempt AND n.corrects IS NULL
+		)
+		GROUP BY a.test
 	`),
 	automated: sql<{ project: number }, { case_id: number }>(
 		"SELECT DISTINCT case_id FROM tests WHERE project = $project AND kind = 'auto' AND case_id IS NOT NULL",
