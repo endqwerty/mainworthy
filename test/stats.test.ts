@@ -103,6 +103,7 @@ describe("pass rate over time", () => {
 			{ of: "pass-rate", days: 91 },
 			{ of: "pass-rate", days: 0 },
 			{ of: "pass-rate", zone: "Mars/Olympus" },
+			{ of: "pass-rate", zone: "+05:37" },
 			{ of: "everything" },
 		]) {
 			const reply = h.raw("stats", input);
@@ -191,6 +192,20 @@ describe("what a flip and a rerun are (review of #461)", () => {
 		const fixed = ciReport({ commit: "aaaa0001", n: 2, only: [1] });
 		h.call("report", { ...fixed, results: fixed.results.map((r) => ({ ...r, corrects: failed })) });
 		expect(stats({ of: "flaky", days: 1 })).toMatchObject({ flaky: 0, items: [] });
+	});
+
+	test("a case run by hand that failed and then passed is no automated test that flipped", () => {
+		h = harness({ unlinked: "track" });
+		h.call("propose", { edits: [{ op: "create", outline: "Manual check\n  Look > Fine" }] });
+		const run = (outcome: string, attempt: number) =>
+			h.call("report", {
+				target: { commit: "aaaa0001", branch: "main" },
+				attempt,
+				results: [{ test: { case: "C-1" }, outcome }],
+			});
+		run("fail", 1);
+		run("pass", 2);
+		expect(stats({ of: "flaky", days: 1 })).toMatchObject({ tests: 0, flaky: 0, items: [] });
 	});
 
 	test("an automated test an agent reports is one of the automated tests", () => {
