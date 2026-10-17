@@ -1197,6 +1197,28 @@ describe("holds", () => {
 		expect(state(again.q)).toBe("dissolved");
 	});
 
+	test("a change closed and opened again asks about its failures, and that answer ends when they pass", () => {
+		const fail = { 0: "the coupon expired a day early", 1: "the coupon expired a day early" };
+		h.call("report", ciReport({ commit: "reopen1a", branch: "fix", pr: 53, n: 2, fail }));
+		const asked = first(queue().items);
+		h.call("change", { change: "pr:53", state: "closed" });
+		expect(state(asked.q)).toBe("dissolved");
+		h.call("change", { change: "pr:53", state: "open" });
+		const again = first(queue().items);
+		expect(again.q).not.toBe(asked.q);
+		decide(again, { is: "defect" });
+		// Only test 1 reports on the next commit: test 0 failed too, so the answer holds.
+		h.call("report", ciReport({ commit: "reopen1b", branch: "fix", pr: 53, n: 2, only: [1] }));
+		expect(state(again.q)).toBe("decided");
+		h.call("report", ciReport({ commit: "reopen1c", branch: "fix", pr: 53, n: 2 }));
+		expect(state(again.q)).toBe("dissolved");
+		const recurred = h.call<ReportReceipt>(
+			"report",
+			ciReport({ commit: "reopen1d", branch: "fix", pr: 53, n: 2, fail }),
+		);
+		expect(recurred.questions[0]).toMatchObject({ how: "new", state: "open" });
+	});
+
 	test("a pass of other tests does not end the answer: the tests it named must pass", () => {
 		const fail = { 0: "expected 3 rows, got 2" };
 		h.call("report", ciReport({ commit: "named01a", branch: "fix", pr: 44, n: 2, fail }));

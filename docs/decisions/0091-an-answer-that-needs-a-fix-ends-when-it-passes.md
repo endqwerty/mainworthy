@@ -28,21 +28,24 @@ commit of a scope, after a report, and the answer ends only when that commit's r
 
 - No test fails with the cause, whether an answer explains it or not. `stoppedFailing` counts an explained row as
   gone, which would end an answer on the failure it explains.
-- Every test the question lists passes, in each environment where it failed with the cause in its scope since the
-  question first saw it: what was reported after the last occurrence of the question before it about the same
-  cause. Neither the sample the question shows (replaced as failures attach) nor the earliest failure on its
-  targets (a retry of a commit reuses its target, so that holds an earlier question's failures) is that bound. A shard that has not reported one of those tests yet ends nothing. A test the fix renamed
-  or removed never passes, so its answer stays. Where it failed is read from the results as reported, which a
-  passing retry does not change; the runs that rest on the answer forget a failure once a retry replaces it. The
-  job and the reporter are left out: a sharded pipeline moves a test between jobs when it balances them again,
-  and a pipeline's token can be replaced. Both were in the first version, and the verifier found both ways
-  wrong (a retry that left the answer standing for good, and job names that compared equal). The second and third
-  versions bounded the history by the question's sample and then by its targets' earliest failure, and the
-  second and third rounds found both wrong.
+- Every test the question lists passes, in each environment where the question saw it fail with the cause. A
+  shard that has not reported one of those tests yet ends nothing. A test the fix renamed or removed never passes,
+  so its answer stays. Where it failed comes from two places. The question records each pair of test and
+  environment that a commit's gate counted failing, when it is raised and each time a failure attaches. And the
+  results reported since it was raised add the failures its answer carried afterwards. A passing retry changes
+  neither. The job and the reporter are left out: a sharded pipeline moves a test between jobs when it balances
+  them again, and a pipeline's token can be replaced.
+
+  The first four versions worked this out from the results alone, bounded first by the runs resting on the
+  answer, then by the question's sample, the earliest failure on its targets, and the last occurrence of the
+  question before it. The verifier found each one wrong: a retry erases what a run counts, a sample is replaced,
+  a retry reuses its commit's target, and a change opened again asks about failures reported before the question
+  before it ended. The question knowing what it saw is the one answer that does not depend on when it was raised.
 - The question lists every test it has seen. It lists fifty; with more, the rest are unknown.
 - No open planned run names the question. A person asked for that run, and it waits for its own evidence.
 
-Each condition errs towards keeping the answer. When the answer is kept, today's behaviour holds and a person can
+Within what the newest commit has reported, each condition errs towards keeping the answer. A job that has not
+reported yet is the exception, as the guide says, until Mainworthy knows a commit's shards. When the answer is kept, today's behaviour holds and a person can
 still withdraw it. An answer that ends too early costs a person one question, never a gate passing on a failure.
 
 **The ending is the one the ledger has.** `endHold`, which already ends a flaky answer when its time runs out and
