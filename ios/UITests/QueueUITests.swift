@@ -366,6 +366,12 @@ final class QueueUITests: XCTestCase {
 		XCTAssertTrue(failure.waitForExistence(timeout: 10))
 		XCTAssertTrue(app.staticTexts["1 failure to explain · 3 can wait"].exists)
 		shot("2-queue")
+		// Open and Decided and the kinds stay under the bar: pulling to refresh moves the questions, not them.
+		XCTAssertTrue(app.segmentedControls["queue-showing"].exists)
+		XCTAssertFalse(app.collectionViews.firstMatch.segmentedControls["queue-showing"].exists)
+		let all = NSPredicate(format: "label BEGINSWITH 'All'")
+		XCTAssertTrue(app.buttons.matching(all).firstMatch.exists)
+		XCTAssertFalse(app.collectionViews.firstMatch.buttons.matching(all).firstMatch.exists)
 
 		// The question is answered from its own page, where its evidence is.
 		failure.tap()

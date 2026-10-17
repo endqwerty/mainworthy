@@ -145,13 +145,14 @@ struct SuiteFolderView: View {
 				Section { ForEach(subfolders) { FolderRow(folder: $0) } }
 			}
 			CaseSection(query: query, expected: shown.cases, screen: screen)
-		}
-		.overlay {
 			if subfolders.isEmpty, let listing = screen.listing(query), listing.loading == .done, listing.cases.isEmpty {
-				ContentUnavailableView("Empty folder", systemImage: "folder",
-					description: Text("No cases or folders in \(shown.name)."))
+				ListPlaceholder {
+					ContentUnavailableView("Empty folder", systemImage: "folder",
+						description: Text("No cases or folders in \(shown.name)."))
+				}
 			}
 		}
+		.holdsPlaceholder()
 		.navigationTitle(shown.name)
 		.toolbar { SuiteToolbar(context: .folder(shown), folder: shown.path, screen: screen, workspace: workspace) }
 		.shows(query, on: screen)
@@ -169,16 +170,17 @@ struct SuiteListView: View {
 	let workspace: Workspace
 
 	var body: some View {
-		List { CaseSection(query: query, expected: nil, screen: screen) }
-			.overlay {
-				if let listing = screen.listing(query), listing.loading == .done, listing.cases.isEmpty {
-					ContentUnavailableView("No cases", systemImage: "tray")
-				}
+		List {
+			CaseSection(query: query, expected: nil, screen: screen)
+			if let listing = screen.listing(query), listing.loading == .done, listing.cases.isEmpty {
+				ListPlaceholder { ContentUnavailableView("No cases", systemImage: "tray") }
 			}
-			.navigationTitle(title)
-			.toolbar { SuiteToolbar(context: context, folder: nil, screen: screen, workspace: workspace) }
-			.shows(query, on: screen)
-			.refreshable { await screen.refresh() }
+		}
+		.holdsPlaceholder()
+		.navigationTitle(title)
+		.toolbar { SuiteToolbar(context: context, folder: nil, screen: screen, workspace: workspace) }
+		.shows(query, on: screen)
+		.refreshable { await screen.refresh() }
 	}
 }
 

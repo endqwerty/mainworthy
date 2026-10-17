@@ -83,7 +83,8 @@ A passkey does not work in the app.
 To answer from a question's page, follow these steps:
 
 1. Open **Queue**. The list shows what waits for an answer, the failures first. The line under the list says how
-   much needs an answer today: "1 failure to explain · 3 can wait".
+   much needs an answer today: "1 failure to explain · 3 can wait". **Open** and **Decided** and the kinds stay
+   at the top while you pull the list down to refresh it.
 2. Press a question. Its page shows the evidence: what failed and where, what an edit changes, what a review
    found.
    A proposed edit shows why it was proposed and who proposed it. It also says in a sentence what the edit does,

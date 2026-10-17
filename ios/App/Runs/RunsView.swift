@@ -11,22 +11,6 @@ struct RunsView: View {
 	var body: some View {
 		NavigationStack(path: $path) {
 			List {
-				Section {
-					Picker("Kind", selection: kind) {
-						Text("All").tag(RunFilter.Kind?.none)
-						Text("Planned").tag(RunFilter.Kind?.some(.planned))
-						Text("Change").tag(RunFilter.Kind?.some(.change))
-					}
-					.accessibilityIdentifier("runs-kind")
-					Picker("State", selection: state) {
-						Text("Any state").tag(RunFilter.State?.none)
-						Text("Open").tag(RunFilter.State?.some(.open))
-						Text("Closed").tag(RunFilter.State?.some(.closed))
-					}
-					.accessibilityIdentifier("runs-state")
-				}
-				.pickerStyle(.segmented)
-				.listRowSeparator(.hidden)
 				ForEach(screen.runs) { run in
 					NavigationLink(value: run.ref) {
 						VStack(alignment: .leading, spacing: 6) {
@@ -48,16 +32,19 @@ struct RunsView: View {
 					}
 				}
 				if screen.loading == .done, screen.runs.isEmpty, screen.filter != RunFilter() {
-					// A row, not the overlay of an empty list: the filters above stay within reach.
+					// A row where the runs would be: the empty list's placeholder is for a project with no runs at all.
 					Text("No run matches.").foregroundStyle(.secondary)
 				}
 				if screen.hasMore {
 					Button("More runs") { Task { await screen.more() } }
 				}
 				if let notice = screen.notice { Text(notice).font(.subheadline) }
+				if showsEmpty { ListPlaceholder { empty } }
 			}
-			.overlay { empty }
+			.holdsPlaceholder()
 			.refreshable { await screen.refresh() }
+			// The filters stay under the bar, as the Queue's do: pulling to refresh moves the runs, not them.
+			.safeAreaBar(edge: .top) { filters }
 			.navigationTitle("Runs")
 			.navigationBarTitleDisplayMode(.inline)
 			.toolbar {
@@ -100,6 +87,27 @@ struct RunsView: View {
 		.task { if screen.loading == .first { await screen.refresh() } }
 	}
 
+	private var filters: some View {
+		VStack(spacing: 8) {
+			Picker("Kind", selection: kind) {
+				Text("All").tag(RunFilter.Kind?.none)
+				Text("Planned").tag(RunFilter.Kind?.some(.planned))
+				Text("Change").tag(RunFilter.Kind?.some(.change))
+			}
+			.accessibilityIdentifier("runs-kind")
+			Picker("State", selection: state) {
+				Text("Any state").tag(RunFilter.State?.none)
+				Text("Open").tag(RunFilter.State?.some(.open))
+				Text("Closed").tag(RunFilter.State?.some(.closed))
+			}
+			.accessibilityIdentifier("runs-state")
+		}
+		.pickerStyle(.segmented)
+		.padding(.horizontal, 16)
+		.padding(.top, 4)
+		.padding(.bottom, 8)
+	}
+
 	private var kind: Binding<RunFilter.Kind?> {
 		Binding(
 			get: { screen.filter.kind },
@@ -117,6 +125,14 @@ struct RunsView: View {
 		switch run.kind {
 		case .planned: run.left.map { "\($0) \($0 == 1 ? "case" : "cases") left" } ?? "Remaining cases unavailable"
 		case .change(let change): change?.title ?? "Change run"
+		}
+	}
+
+	/// Whether the list says something in place of its runs. Under a filter, a row says that no run matches.
+	private var showsEmpty: Bool {
+		switch screen.loading {
+		case .first, .failed: true
+		case .done: screen.runs.isEmpty && screen.filter == RunFilter()
 		}
 	}
 
