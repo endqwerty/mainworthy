@@ -82,6 +82,9 @@ const Q = {
 		`INSERT INTO commands (id, project, op, actor, at, seq, touched, outcome, request)
 		 VALUES ($id, $project, $op, $actor, $at, $seq, $touched, $outcome, $request)`,
 	),
+	begunCommand: sql<{ project: number; actor: number; op: string; seq: number; unfinished: string }, { id: string }>(
+		"SELECT id FROM commands WHERE project = $project AND actor = $actor AND op = $op AND seq = $seq AND outcome = $unfinished",
+	),
 	finishCommand: sql<{ id: string; seq: number; touched: string; outcome: string }>(
 		"UPDATE commands SET seq = $seq, touched = $touched, outcome = $outcome WHERE id = $id",
 	),
@@ -179,6 +182,21 @@ export function beginCommand(ctx: Ctx, input: { id: string; op: string; request:
 		outcome: UNFINISHED,
 		request: input.request,
 	});
+}
+
+/**
+ * The command that `beginCommand` bound in the transaction that committed at `seq`, when it is still unfinished.
+ * A report's batch is accepted in that transaction, so a batch that recovery applies finds its command here.
+ */
+export function begunCommand(ctx: Ctx, input: { op: string; seq: number }): string | null {
+	const row = ctx.db.get(Q.begunCommand, {
+		project: ctx.project.id,
+		actor: ctx.actor.id,
+		op: input.op,
+		seq: input.seq,
+		unfinished: UNFINISHED,
+	});
+	return row?.id ?? null;
 }
 
 /** Gives a command bound by `beginCommand` its reply. */

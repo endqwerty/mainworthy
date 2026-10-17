@@ -1,6 +1,6 @@
 // Things that must never happen, each found by an independent review of the engine and reproduced here first.
 // One test per promise: what a result may prove, what a decision may change, and what a caller may see.
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { emptyBody } from "../src/core/model.ts";
 import type { DecideReply, GateStatus, InboxReply, PlanReply, ProposeReply, ReportReceipt } from "../src/core/ops.ts";
 import { PRESETS } from "../src/core/presets.ts";
@@ -3371,6 +3371,45 @@ describe("what a caller is told", () => {
 			unsubscribe();
 			await pending;
 		}
+	});
+
+	// Issue #377. The process stops after the first transaction of a report committed, with a command id bound to it.
+	test("a report that recovery applies finishes its command with the receipt, as the request would have", () => {
+		const fate = (cmd: string) =>
+			invoke(h.app, OPS, { op: "command", project: "scratch", input: { cmd }, actor: () => h.owner });
+		const unsubscribe = h.app.subscribe(() => {
+			throw new Error("the process stopped");
+		});
+		const logged = spyOn(console, "error").mockImplementation(() => {});
+		const stopped = invoke(h.app, OPS, {
+			op: "report",
+			project: "scratch",
+			actor: () => h.owner,
+			input: { ...ciReport({ commit: "c0ffee02", n: 3 }), cmd: "report-cmd-02" },
+		});
+		unsubscribe();
+		logged.mockRestore();
+		expect(stopped.ok).toBe(false);
+		expect(fate("report-cmd-02")).toMatchObject({ ok: true, result: { state: "begun", op: "report" } });
+		const seqBefore = rows<{ seq: number }>("SELECT seq FROM projects WHERE key = 'scratch'")[0]?.seq ?? 0;
+
+		expect(recoverAccepted(h.app)).toBe(1);
+
+		const receipt = rows<{ receipt: string }>("SELECT receipt FROM batches")[0]?.receipt;
+		expect(receipt).toBeDefined();
+		expect(fate("report-cmd-02")).toMatchObject({
+			ok: true,
+			result: { state: "done", op: "report", seq: seqBefore + 1, reply: JSON.parse(receipt ?? "null") },
+		});
+		// The same request sent again gets that reply and takes no number.
+		const again = invoke(h.app, OPS, {
+			op: "report",
+			project: "scratch",
+			actor: () => h.owner,
+			input: { ...ciReport({ commit: "c0ffee02", n: 3 }), cmd: "report-cmd-02" },
+		});
+		expect(again).toMatchObject({ ok: true, result: JSON.parse(receipt ?? "null"), seq: seqBefore + 1 });
+		expect(rows<{ seq: number }>("SELECT seq FROM projects WHERE key = 'scratch'")[0]?.seq).toBe(seqBefore + 1);
 	});
 
 	test("a retry is the same request however a client orders the keys of its objects", () => {

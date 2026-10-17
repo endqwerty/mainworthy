@@ -61,7 +61,7 @@ import { insertFinding, insertReview, reviewBasis, reviewedAt } from "../evidenc
 import { recordQuarantines, validateQuarantineEdit } from "../evidence/quarantine.ts";
 import { announce } from "../evidence/releases.ts";
 import { actorByName, actorLabel } from "../identity/identity.ts";
-import type { Ctx } from "../kernel/ctx.ts";
+import { begunCommand, type Ctx, finishCommand } from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
 import { conflict, forbidden, invalid, notFound } from "../kernel/errors.ts";
 import { complete } from "../kernel/steps.ts";
@@ -345,6 +345,18 @@ function raiseMap(ctx: Ctx, file: string, producer: ActorKind): Raised {
 export function processBatch(ctx: Ctx, batchId: number): ReportReceipt {
 	const steps = processBatchSteps(ctx, batchId);
 	for (let step = steps.next(); ; step = steps.next()) if (step.done) return step.value;
+}
+
+/**
+ * Applies a batch that was accepted and not applied (`recoverAccepted`) and finishes the command its acceptance
+ * bound, in the same transaction, as the request would have: the command is done, with the receipt as its reply.
+ * A batch accepted without a command id has none to finish.
+ */
+export function applyAccepted(ctx: Ctx, batch: BatchRow): ReportReceipt {
+	const receipt = processBatch(ctx, batch.id);
+	const cmd = begunCommand(ctx, { op: reportOp.name, seq: batch.seq });
+	if (cmd) finishCommand(ctx, { id: cmd, outcome: receipt });
+	return receipt;
 }
 
 /**
