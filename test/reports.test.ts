@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { ReportsReply } from "../src/core/replies.ts";
+import { formatRate } from "../src/core/reports.ts";
 import { evidenceReports } from "../src/server/evidence/reports.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
@@ -514,4 +515,14 @@ test("excuses, ending answers, quarantine coverage and incomplete shards preserv
 	} finally {
 		h.close();
 	}
+});
+
+test("a rate shows 100.0% only when everything passed, and 0.0% only when nothing did", () => {
+	expect(formatRate(1)).toBe("100.0%");
+	expect(formatRate(3599 / 3600)).toBe("99.9%");
+	expect(formatRate(0.9996)).toBe("99.9%");
+	expect(formatRate(0.5)).toBe("50.0%");
+	expect(formatRate(1 / 10_000)).toBe("0.1%");
+	expect(formatRate(0)).toBe("0.0%");
+	expect(formatRate(null)).toBe("No cases");
 });

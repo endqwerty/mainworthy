@@ -1,4 +1,5 @@
 import { ReportsReply } from "../../core/replies.ts";
+import { formatRate as percent } from "../../core/reports.ts";
 import { useQueryOp } from "../lib/data.ts";
 import { useBindings } from "../lib/keys.ts";
 import { navigate, refUrl, routeUrl } from "../lib/router.ts";
@@ -13,7 +14,6 @@ const topics = [
 	{ id: "flaky", title: "Top flaky tests" },
 	{ id: "reruns", title: "Time spent on reruns" },
 ];
-const percent = (rate: number | null) => (rate === null ? "No cases" : `${(rate * 100).toFixed(1)}%`);
 
 export function ReportsScreen() {
 	const { project, route, overlayOpen } = useApp();
