@@ -12,7 +12,7 @@
     "test/sequences-extended-loose.test.ts": 22231,
     "test/e2e/round3-interactions.test.ts": 18383,
     "test/e2e/round6.test.ts": 18265,
-    "test/budgets.test.ts": 18081,
+    "test/budgets.test.ts": 14360,
     "test/e2e/people-signin.test.ts": 17185,
     "test/e2e/phone.test.ts": 15797,
     "test/http.test.ts": 15200,

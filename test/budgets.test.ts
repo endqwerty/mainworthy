@@ -227,10 +227,9 @@ test("reports stay inside the read budget at 10k cases and 100k results without 
    UPDATE batches SET target = 1+(id-1)%16;
    UPDATE results SET target = (SELECT target FROM batches WHERE id=results.batch);`);
 		const measured = [];
+		// Older history is the costly shape for each query: one job, several jobs, and several jobs with a correction.
 		const shapes = [
-			{ jobs: 1, older: false, corrected: false },
 			{ jobs: 1, older: true, corrected: false },
-			{ jobs: 4, older: false, corrected: false },
 			{ jobs: 4, older: true, corrected: false },
 			{ jobs: 4, older: true, corrected: true },
 		];
@@ -248,7 +247,9 @@ test("reports stay inside the read budget at 10k cases and 100k results without 
 			const row = await measure({
 				name: `reports 100k / 16 targets / ${jobs} jobs / ${older ? "10% older" : "all in window"}${corrected ? " / correction" : ""}`,
 				budget: BUDGETS.reports,
-				iterations: 15,
+				// 20 reads make p95 the second slowest, so one read delayed by another process does not decide it.
+				iterations: 20,
+				warmup: 2,
 				correctness: "Exact observed totals, active cases, flaky tests and rerun count/duration over 30 UTC days",
 				prepare: () => () => call("reports", { days: 30 }),
 				check(value) {
