@@ -5,7 +5,7 @@ import { ApiError } from "../lib/api.ts";
 import { browserName } from "../lib/browser.ts";
 import { makePasskey, PasskeyError, passkeysAvailable } from "../lib/passkey.ts";
 import { addPasskey, beginPasskey, listCredentials, removeCredential } from "../lib/people.ts";
-import { NO_ANSWER, setPassword, signInMethods } from "../lib/signin.ts";
+import { NO_ANSWER, setPassword, signInMethods, startOidc } from "../lib/signin.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, DocLink, PASSWORD_RULES, PasswordCount, SectionHeading } from "../ui/index.tsx";
 import { Authenticator } from "./authenticator.tsx";
@@ -85,6 +85,16 @@ export function YourSignIn({ passwordRef }: { passwordRef: RefObject<HTMLInputEl
 			)}
 			{methods.data?.passkey && !passkeysAvailable() && <p className="dim">This browser has no passkeys.</p>}
 			{methods.data?.passkey && passkeysAvailable() && <PasskeyForm onAdded={changed} />}
+			{methods.data?.oidc && (
+				<>
+					<SectionHeading>{methods.data.oidc.name}</SectionHeading>
+					<ProviderLink
+						provider={methods.data.oidc.name}
+						linked={rows.some((row) => row.kind === "oidc")}
+						browser={session.via === "cookie"}
+					/>
+				</>
+			)}
 			<SectionHeading>Authenticator</SectionHeading>
 			<Authenticator enrolled={rows.some((row) => row.kind === "totp")} onChanged={changed} />
 			<SectionHeading>Ways you sign in</SectionHeading>
@@ -96,7 +106,8 @@ export function YourSignIn({ passwordRef }: { passwordRef: RefObject<HTMLInputEl
 						<span>
 							<b>{title}</b>
 							<small>
-								{row.kind === "passkey" && "passkey · "}added {age(row.createdAt)} ·{" "}
+								{row.kind === "passkey" && "passkey · "}
+								{row.kind === "oidc" && "identity provider · "}added {age(row.createdAt)} ·{" "}
 								{row.lastUsedAt === null ? "never used" : `last used ${age(row.lastUsedAt)}`}
 							</small>
 							<small className="settings-refusal" role="status">
@@ -125,6 +136,41 @@ export function YourSignIn({ passwordRef }: { passwordRef: RefObject<HTMLInputEl
 			</p>
 			<YourTokens />
 		</>
+	);
+}
+
+/**
+ * Linking the instance's identity provider to the person signed in here: the browser goes to the provider and
+ * comes back to this page. Once linked, the person can sign in through it; it is listed with the other ways in.
+ */
+function ProviderLink({ provider, linked, browser }: { provider: string; linked: boolean; browser: boolean }) {
+	const [busy, setBusy] = useState(false);
+	const [problem, setProblem] = useState("");
+	if (!browser) return <p className="dim">The provider is linked from a browser that signed in.</p>;
+	if (linked) return <p className="dim">You can sign in through {provider}. It is listed below.</p>;
+	return (
+		<div className="settings-row">
+			<span>
+				<small>Sign in through {provider} as well.</small>
+				<small className="settings-refusal" role="status">
+					{problem}
+				</small>
+			</span>
+			<button
+				type="button"
+				aria-disabled={busy}
+				onClick={() => {
+					if (busy) return;
+					setBusy(true);
+					setProblem("");
+					void startOidc({ link: true }, "Your sign-in")
+						.catch((error: unknown) => setProblem(saidBy(error)))
+						.finally(() => setBusy(false));
+				}}
+			>
+				{busy ? `Opening ${provider}…` : `Link ${provider}`}
+			</button>
+		</div>
 	);
 }
 

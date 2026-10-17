@@ -68,7 +68,17 @@ export type Config = {
 	githubStatuses?: boolean;
 	jira?: { project: string; site: string; projectKey: string; issueType: string; email: string; token: string };
 	mail?: MailConfig | undefined;
+	/** The identity provider people may sign in through, when the operator named one (`oidcOf`). */
+	oidc?: OidcConfig;
 };
+
+/**
+ * An OpenID Connect provider: `MAINWORTHY_OIDC_ISSUER`, `_CLIENT_ID`, `_CLIENT_SECRET` and `_NAME`, set together
+ * or not at all. The provider sends a person back to `MAINWORTHY_PUBLIC_URL` and `/signin/oidc`, so that is
+ * needed too. `mfa` is `MAINWORTHY_OIDC_MFA`: the operator's word that the provider asks everybody for a second
+ * factor, which is what lets an admin in through it where `requireAdminMfa` asks for one.
+ */
+export type OidcConfig = { issuer: string; clientId: string; clientSecret: string; name: string; mfa: boolean };
 
 /**
  * A proxy whose word for the client's address is believed. The two halves come from two variables that are set
@@ -288,7 +298,39 @@ export function defaultConfig(env: Record<string, string | undefined>): Config {
 		...githubOf(env),
 		...jiraOf(env),
 		mail: mailConfig(env),
+		...oidcOf(env),
 	};
+}
+
+const OIDC_NAMES = ["ISSUER", "CLIENT_ID", "CLIENT_SECRET", "NAME"] as const;
+/** Plain http is taken only from a provider on this machine, which is a test's or a developer's. */
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+function oidcOf(env: Record<string, string | undefined>): Pick<Config, "oidc"> {
+	const [issuer, clientId, clientSecret, name] = OIDC_NAMES.map((name) => env[`MAINWORTHY_OIDC_${name}`]?.trim() ?? "");
+	const mfa = env.MAINWORTHY_OIDC_MFA;
+	if (mfa !== undefined && mfa !== "" && mfa !== "true" && mfa !== "false")
+		throw new Error("MAINWORTHY_OIDC_MFA must be true or false");
+	if (!issuer && !clientId && !clientSecret && !name) return {};
+	if (!issuer || !clientId || !clientSecret || !name)
+		throw new Error(
+			"Set MAINWORTHY_OIDC_ISSUER, MAINWORTHY_OIDC_CLIENT_ID, MAINWORTHY_OIDC_CLIENT_SECRET and MAINWORTHY_OIDC_NAME together.",
+		);
+	if (!env.MAINWORTHY_PUBLIC_URL)
+		throw new Error(
+			"MAINWORTHY_OIDC_ISSUER needs MAINWORTHY_PUBLIC_URL: the provider sends people back to that address.",
+		);
+	let url: URL;
+	try {
+		url = new URL(issuer);
+	} catch {
+		throw new Error("MAINWORTHY_OIDC_ISSUER must be the provider's issuer address, such as https://id.example.com.");
+	}
+	if (url.search || url.hash || url.username || url.password)
+		throw new Error("MAINWORTHY_OIDC_ISSUER must be the issuer address without a query, a fragment or credentials.");
+	if (url.protocol !== "https:" && !(url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname)))
+		throw new Error("MAINWORTHY_OIDC_ISSUER must use https (plain http only on this machine's loopback address).");
+	return { oidc: { issuer, clientId, clientSecret, name, mfa: mfa === "true" } };
 }
 
 function jiraOf(env: Record<string, string | undefined>): Pick<Config, "jira"> {

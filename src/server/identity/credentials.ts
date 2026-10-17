@@ -1,20 +1,22 @@
-// What a person signs in with: a password, a passkey, or a TOTP second factor. Owns the tables `credentials` and `passkey_users`.
+// What a person signs in with: a password, a passkey, an identity at the identity provider, or a TOTP second factor. Owns the tables `credentials` and `passkey_users`.
 //
 // A row is one secret and is never changed into another. A new password is a new row and the old one is
 // revoked, which erases what it held. A password's hash may be refreshed after a legacy sign-in, and a
 // passkey's row is given a later counter. A session rests on the row that opened it
 // (`sessions.ts`), so revoking a row ends those sessions. A passkey's credential id (`handle`) belongs to its
 // row for good, a revoked row included: an index of the database holds that, and nothing here works around it.
+// An identity at the provider is the exception: its handle (issuer and subject) says who somebody is elsewhere,
+// so revoking the row erases it, and the same identity can be linked again later.
 import { z } from "zod";
 import { type Db, sql } from "../kernel/db.ts";
 import { ALGORITHMS, type Passkey } from "./webauthn.ts";
 
-export type CredentialKind = "password" | "passkey" | "totp";
+export type CredentialKind = "password" | "passkey" | "oidc" | "totp";
 export type CredentialRow = {
 	id: number;
 	actor: number;
 	kind: CredentialKind;
-	/** A passkey's credential id. Null for a password. */
+	/** A passkey's credential id, or an identity's issuer and subject (`oidcHandle`). Null for a password. */
 	handle: string | null;
 	/**
 	 * A password's argon2id string, a passkey's JSON (`StoredPasskey`), or a TOTP secret, replay counter and recovery hashes. Empty once revoked. It
@@ -38,6 +40,9 @@ const StoredPasskey = z.object({
 });
 type StoredPasskey = z.infer<typeof StoredPasskey>;
 
+/** A revoked row keeps a passkey's credential id and drops an identity's issuer and subject. */
+const HANDLE_KEPT = "handle = CASE WHEN kind = 'oidc' THEN NULL ELSE handle END";
+
 const Q = {
 	byId: sql<{ id: number }, CredentialRow>("SELECT * FROM credentials WHERE id = $id"),
 	live: sql<{ actor: number }, CredentialRow>(
@@ -50,21 +55,27 @@ const Q = {
 	passkey: sql<{ handle: string }, CredentialRow>(
 		"SELECT * FROM credentials WHERE kind = 'passkey' AND handle = $handle",
 	),
+	oidc: sql<{ handle: string }, CredentialRow>(
+		"SELECT * FROM credentials WHERE kind = 'oidc' AND handle = $handle AND revoked_at IS NULL",
+	),
 	insert: sql<{ actor: number; kind: CredentialKind; handle: string | null; data: string; label: string; at: number }>(
 		`INSERT INTO credentials (actor, kind, handle, data, label, created_at)
 		 VALUES ($actor, $kind, $handle, $data, $label, $at)`,
 	),
 	// What a revoked row held is erased with it. An old password's hash is of use to nobody but whoever steals
 	// the database, and a key nothing signs in with any more is not worth keeping. The row and its credential
-	// id stay: the id is never registered again.
+	// id stay: the id is never registered again. An identity's handle goes with what it held.
 	revoke: sql<{ id: number; at: number }>(
-		"UPDATE credentials SET revoked_at = $at, data = '' WHERE id = $id AND revoked_at IS NULL",
+		`UPDATE credentials SET revoked_at = $at, data = '', ${HANDLE_KEPT}
+		 WHERE id = $id AND revoked_at IS NULL`,
 	),
 	revokeOf: sql<{ actor: number; at: number }>(
-		"UPDATE credentials SET revoked_at = $at, data = '' WHERE actor = $actor AND revoked_at IS NULL",
+		`UPDATE credentials SET revoked_at = $at, data = '', ${HANDLE_KEPT}
+		 WHERE actor = $actor AND revoked_at IS NULL`,
 	),
 	forgetOf: sql<{ actor: number; at: number }>(
-		"UPDATE credentials SET revoked_at = coalesce(revoked_at, $at), data = '', label = '' WHERE actor = $actor",
+		`UPDATE credentials SET revoked_at = coalesce(revoked_at, $at), data = '', label = '', ${HANDLE_KEPT}
+		 WHERE actor = $actor`,
 	),
 	used: sql<{ id: number; at: number }>("UPDATE credentials SET last_used_at = $at WHERE id = $id"),
 	// A refreshed password hash or passkey counter replaces only what the sign-in was checked against.
@@ -114,6 +125,31 @@ export const liveTotp = (db: Db, actor: number): CredentialRow | null =>
 /** The row a credential id was registered under, at any time and whether or not it still works; else null. */
 export const passkeyByCredentialId = (db: Db, credentialId: string): CredentialRow | null =>
 	db.get(Q.passkey, { handle: credentialId });
+
+/** The handle of an identity at a provider: its issuer and subject. An issuer has no `#` (it has no fragment). */
+export const oidcHandle = (identity: { issuer: string; subject: string }): string =>
+	`${identity.issuer}#${identity.subject}`;
+
+/** The row an identity is linked under now, or null. */
+export const oidcByHandle = (db: Db, handle: string): CredentialRow | null => db.get(Q.oidc, { handle });
+
+/**
+ * Stores an identity a provider vouched for, as a new row of this person. Throws when the identity is linked
+ * already: the caller looks first, and the index holds when two links of one identity arrive together.
+ */
+export function insertOidc(db: Db, input: { actor: number; handle: string; label: string; at: number }): CredentialRow {
+	const { lastId } = db.run(Q.insert, {
+		actor: input.actor,
+		kind: "oidc",
+		handle: input.handle,
+		data: JSON.stringify({ linked: input.at }),
+		label: input.label,
+		at: input.at,
+	});
+	const row = db.get(Q.byId, { id: lastId });
+	if (!row) throw new Error("the identity was not stored");
+	return row;
+}
 
 /** What the verifier checks a sign-in against, read from a passkey's row. Null when the row holds no passkey. */
 export function storedPasskey(row: CredentialRow): (StoredPasskey & { credentialId: string }) | null {

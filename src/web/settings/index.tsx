@@ -119,7 +119,11 @@ export function SettingsScreen() {
 }
 function SettingsWorkbench() {
 	const { project, session, instanceCan, overlayOpen, refreshSession, setStatus } = useApp();
-	const [section, setSection] = useState("Policy");
+	// A person back from the identity provider returns to the section they left (`OidcReturn`).
+	const [section, setSection] = useState(() => {
+		const back = (history.state as { settingsSection?: unknown } | null)?.settingsSection;
+		return typeof back === "string" ? back : "Policy";
+	});
 	// The policy edit on its way to a proposal and accepting decision.
 	const [switching, setSwitching] = useState<PolicyChange | null>(null);
 	const policyAttempt = useRef<{ key: string; propose: string; decide: string } | null>(null);

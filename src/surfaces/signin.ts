@@ -1,4 +1,5 @@
-// The sign-in routes for people: a name and a password, a passkey, an invitation, and setting a password. They
+// The sign-in routes for people: a name and a password, a passkey, the identity provider, an invitation, and
+// setting a password. They
 // are exchanges of the HTTP surface and not operations (decision 0017, 4): nobody is signed in yet, a password
 // is checked outside the write gate, and a password must never reach the registry, which keeps a digest of
 // each request that carries a command id.
@@ -19,7 +20,11 @@ import { EmailAddress, whyNotPassword } from "../core/people.ts";
 import {
 	type Accepted,
 	acceptInvitation,
+	beginOidcSignIn,
 	changePassword,
+	finishOidcSignIn,
+	OIDC_OFF,
+	type OidcStart,
 	PASSKEYS_OFF,
 	type PasswordChange,
 	passkeySignInOptions,
@@ -87,6 +92,8 @@ const ResetRequest = z.strictObject({ resetRequest: EmailAddress });
 const EmailVerification = z.strictObject({ emailVerification: z.string().min(1).max(128) });
 const ResetPassword = z.strictObject({ reset: z.string().min(1).max(128), password: z.string().max(4096) });
 const WithPasskey = z.strictObject({ passkey: z.record(z.string(), z.unknown()) });
+/** The query the identity provider sent the browser back to `/signin/oidc` with, as the page found it. */
+const WithOidc = z.strictObject({ oidc: z.string().min(1).max(4096) });
 const WithInvitation = z.strictObject({
 	invitation: z.string().min(1).max(128),
 	password: z.string().max(4096).optional(),
@@ -101,6 +108,12 @@ const WithInvitation = z.strictObject({
  */
 const Replace = z.string().min(1).max(64);
 const Challenge = z.union([z.strictObject({}), z.strictObject({ invitation: z.string().min(1).max(128) })]);
+/** What the page begins with the provider: a sign-in, an invitation's acceptance, or linking a signed-in person. */
+const OidcBegin = z.union([
+	z.strictObject({}),
+	z.strictObject({ invitation: z.string().min(1).max(128), replace: z.string().min(1).max(64).optional() }),
+	z.strictObject({ link: z.literal(true) }),
+]);
 const NewPassword = z.strictObject({ current: z.string().min(1).max(512).optional(), next: z.string().max(4096) });
 
 /** The largest body of each route. A passkey's answer with an RSA key is the longest thing a browser sends. */
@@ -132,6 +145,7 @@ export function signInRoutes(app: App, tools: Tools) {
 		// this browser is cleared with the reply, accepted, refused or told to wait.
 		if (
 			WithPasskey.safeParse(input).success ||
+			WithOidc.safeParse(input).success ||
 			(WithTotp.safeParse(input).success && reply.ok && reply.headers.has("set-cookie"))
 		)
 			for (const cookie of tools.ceremony.clear(req)) reply.headers.append("set-cookie", cookie);
@@ -182,8 +196,23 @@ export function signInRoutes(app: App, tools: Tools) {
 		const withPasskey = WithPasskey.safeParse(input);
 		const withTotp = WithTotp.safeParse(input);
 		const withInvitation = WithInvitation.safeParse(input);
+		const withOidc = WithOidc.safeParse(input);
 		let entry: Accepted;
-		if (withPassword.success) {
+		if (withOidc.success) {
+			if (!app.config.oidc) return failed("invalid", OIDC_OFF);
+			const finished = await finishOidcSignIn(
+				app,
+				{ query: withOidc.data.oidc, ceremony: tools.ceremony.of(req), browser: tools.cookieOf(req) },
+				about,
+			);
+			if (finished.ok && "linked" in finished) return answered({ linked: true });
+			if (!finished.ok && finished.why === "linked-already")
+				return failed(
+					"conflict",
+					"this identity is linked already, to you or to somebody else on this instance; nothing was changed",
+				);
+			entry = finished;
+		} else if (withPassword.success) {
 			const password = await signInWithPassword(app, withPassword.data, about);
 			if (password.ok && "secondFactor" in password) {
 				const headers = new Headers();
@@ -272,6 +301,61 @@ export function signInRoutes(app: App, tools: Tools) {
 		return tools.json({ ok: true, result: { passkey: begun.options } }, 200, headers);
 	}
 
+	/**
+	 * `POST /api/login/oidc`: where to send the browser to sign in through the provider (`{}`), to accept an
+	 * invitation that way (`{ invitation, replace? }`), or to link the provider to the person this browser is
+	 * signed in as (`{ link: true }`). The reply sets the ceremony cookie, which the answer must come back with.
+	 */
+	async function oidc(req: Request, server: Listener): Promise<Response> {
+		if (!tools.sameOrigin(req)) return failed("unauthenticated", NOT_SIGNED_IN);
+		const read = await tools.read(req, CHALLENGE_BODY_LIMIT);
+		if (read instanceof Response) return read;
+		if (!app.config.oidc) return failed("invalid", OIDC_OFF);
+		const body = OidcBegin.safeParse(read.input);
+		if (!body.success)
+			return failed("invalid", "send {} to sign in, { invitation } to accept an invitation, or { link: true }");
+		let start: OidcStart;
+		if ("link" in body.data) {
+			const session = tools.sessionFor(req, server);
+			if (session instanceof Response) return session;
+			const actor = session.actor(0);
+			const browser = tools.cookieOf(req);
+			if (session.via !== "cookie" || !actor || browser === null)
+				return failed("forbidden", "an identity is linked from a browser that is signed in, not with a token");
+			start = { purpose: "link", actor: actor.id, browser };
+		} else if ("invitation" in body.data)
+			start = {
+				purpose: "join",
+				code: body.data.invitation,
+				replace: body.data.replace ?? null,
+				browser: tools.cookieOf(req),
+			};
+		else start = { purpose: "sign-in" };
+		const begun = await beginOidcSignIn(app, start, tools.address(req, server));
+		if (begun.ok) {
+			const headers = new Headers();
+			for (const cookie of tools.ceremony.set(req, begun.ceremony, Math.ceil(begun.lastsMs / 1000)))
+				headers.append("set-cookie", cookie);
+			return tools.json({ ok: true, result: { url: begun.url } }, 200, headers);
+		}
+		switch (begun.why) {
+			case "limited":
+				return tools.limited(begun.retryAfter);
+			case "other-session":
+				return failed(
+					"conflict",
+					`this browser is signed in as ${begun.signedInAs}, and the invitation is for somebody else. Send replace: "${begun.signedInAs}" to sign ${begun.signedInAs} out of this browser and accept it`,
+					{ signedInAs: begun.signedInAs },
+				);
+			case "unreachable":
+				return failed("conflict", "the identity provider did not answer; try again in a moment");
+			case "not-a-person":
+				return failed("forbidden", "only a person links an identity");
+			default:
+				return failed("not_found", NO_INVITATION);
+		}
+	}
+
 	const CHANGE_REFUSED: Record<
 		Exclude<Extract<PasswordChange, { ok: false }>["why"], "limited">,
 		[ErrorCode, string]
@@ -320,6 +404,7 @@ export function signInRoutes(app: App, tools: Tools) {
 		routes: {
 			"/api/login/methods": { GET: () => answered(signInMethods(app)) },
 			"/api/login/challenge": { POST: (req: Request, server: Listener) => challenge(req, server) },
+			"/api/login/oidc": { POST: (req: Request, server: Listener) => oidc(req, server) },
 			"/api/account/password": { POST: (req: Request, server: Listener) => password(req, server) },
 		},
 	};

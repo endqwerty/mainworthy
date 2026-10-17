@@ -44,6 +44,11 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_SESSION_IDLE` | `14d` | How long a browser stays signed in without being used. A whole number and `h`, `d` or `w`: `12h`, `14d`, `2w`. |
 | `MAINWORTHY_SESSION_MAX` | `90d` | How long a browser stays signed in at most, however much it is used. The same form. |
 | `MAINWORTHY_REQUIRE_ADMIN_MFA` | `false` | `true` requires a second factor for password sign-in by anyone with `admin` on any project. See [require a second factor for admins](#require-a-second-factor-for-admins). Other nonempty values except `false` stop startup. |
+| `MAINWORTHY_OIDC_ISSUER` | none | The issuer address of an OpenID Connect identity provider, such as `https://login.example.com`. Set it with `MAINWORTHY_OIDC_CLIENT_ID`, `MAINWORTHY_OIDC_CLIENT_SECRET`, `MAINWORTHY_OIDC_NAME` and `MAINWORTHY_PUBLIC_URL`. See [sign in through an identity provider](#sign-in-through-an-identity-provider). |
+| `MAINWORTHY_OIDC_CLIENT_ID` | none | The client id the provider gave this instance. |
+| `MAINWORTHY_OIDC_CLIENT_SECRET` | none | The client secret the provider gave this instance. |
+| `MAINWORTHY_OIDC_NAME` | none | What the sign-in button calls the provider, such as `Okta`: "Sign in with Okta". |
+| `MAINWORTHY_OIDC_MFA` | `false` | `true` says that the provider requires a second factor of everybody. Only then can an admin sign in through it when `MAINWORTHY_REQUIRE_ADMIN_MFA` is `true`. Other nonempty values stop startup. |
 | `MAINWORTHY_PUBLIC_URL` | none | The address people open the instance at, such as `https://mainworthy.example`. A passkey belongs to its host name, and an invitation link starts with it. Without it there are no passkeys and `mainworthy invite` prints a link with no host. |
 | `MAINWORTHY_SMTP_HOST` | none | SMTP host. Set it with `MAINWORTHY_MAIL_FROM` and `MAINWORTHY_PUBLIC_URL` to enable mail. |
 | `MAINWORTHY_SMTP_PORT` | `587` | SMTP port, from 1 to 65535. |
@@ -256,6 +261,18 @@ The same file is the command line: `./dist/mainworthy gate`. The variables above
 - [Your data](./data.md) for the data directory, backups and moving machines.
 - [What you can customize](./customize.md) for settings that are not environment variables.
 
+## Sign in through an identity provider
+
+Mainworthy signs people in through one OpenID Connect provider. It uses the authorization code flow with PKCE and checks the provider's ID token, including its signature.
+
+1. At the provider, register a web application (a "confidential client"). Set its redirect address, also called the callback URL, to the instance's public address followed by `/signin/oidc`, for example `https://mainworthy.example/signin/oidc`. Allow the scopes `openid`, `email` and `profile`.
+2. Set `MAINWORTHY_OIDC_ISSUER` to the provider's issuer address. It is the address whose `/.well-known/openid-configuration` the provider publishes, exactly as that document's `issuer` writes it. Set `MAINWORTHY_OIDC_CLIENT_ID` and `MAINWORTHY_OIDC_CLIENT_SECRET` to what the provider gave you, and `MAINWORTHY_OIDC_NAME` to the name the button shows.
+3. Make sure `MAINWORTHY_PUBLIC_URL` is set, then restart the instance.
+
+The four variables are set together or not at all. Startup stops when only some are set, when `MAINWORTHY_PUBLIC_URL` is missing, or when the issuer is not `https`. Plain `http` is accepted only on the loopback address, for a provider on the same machine.
+
+Nobody gets a person from the provider alone. An admin invites each person, and the person accepts through the provider, or a person links it from their settings. See [through an identity provider](./access.md#through-an-identity-provider). The client secret goes to the provider and nowhere else: it is not in an archive, the log or a reply.
+
 ## Require a second factor for admins
 
 Before enabling the requirement, give each admin a verified passkey or [enrol an authenticator](./access.md#add-an-authenticator-for-password-sign-in). Then follow these steps:
@@ -263,7 +280,7 @@ Before enabling the requirement, give each admin a verified passkey or [enrol an
 1. Set `MAINWORTHY_REQUIRE_ADMIN_MFA=true`.
 2. Restart the instance.
 
-A password with no enrolled authenticator then opens no admin session. This applies to `admin` held through personal or team grants, on one project or every project. A verified passkey still signs in without a code. An invitation that would sign an admin in must include a verified passkey. The owner can sign in with the owner token to enrol an authenticator when no other session is available. Tokens and local-owner access keep their existing authority.
+A password with no enrolled authenticator then opens no admin session. Neither does the identity provider, unless `MAINWORTHY_OIDC_MFA=true` says that the provider requires a second factor of everybody. This applies to `admin` held through personal or team grants, on one project or every project. A verified passkey still signs in without a code. An invitation that would sign an admin in must include a verified passkey. The owner can sign in with the owner token to enrol an authenticator when no other session is available. Tokens and local-owner access keep their existing authority.
 
 Each start with this setting ends every admin password session, including sessions that previously completed a second step. The admin signs in again. Becoming an admin also ends existing password sessions, whether through a personal grant, a team grant, or joining an admin team. Passkey sessions remain signed in.
 

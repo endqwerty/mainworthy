@@ -373,6 +373,19 @@ To add a passkey, give it a name under "Passkeys" in the same section and press 
 
 Failed attempts are counted. The fifth wrong password for one name within 15 minutes blocks password sign-in for that name for one second, from every address. Each further wrong password doubles the wait, up to 15 minutes. A blocked sign-in is answered `limited`. The credentials are not checked, so the right password waits too. A name nobody has is counted the same way, so the count does not say which names exist. A passkey is not held up by a block on the name. [Troubleshooting](./troubleshooting.md#limited-too-many-failed-attempts) says what to do.
 
+### Through an identity provider
+
+An instance can let people sign in through an OpenID Connect identity provider, such as Okta, Microsoft Entra ID, Google Workspace, Keycloak or Authentik. Whoever runs the instance [sets it up](./configuration.md#sign-in-through-an-identity-provider). The sign-in page then has a "Sign in with" button named after the provider.
+
+The provider says who signed in. Mainworthy decides which person that is here, and it never decides by an email address or a name the provider sends. An identity reaches a person in one of two ways:
+
+- **An invitation.** On the invitation's page, choose "Accept with" and the provider's name instead of setting a password. The identity becomes the person's way in. A recovery invitation accepted this way replaces every other way in, as one accepted with a password does.
+- **Linking.** A person who is signed in opens Settings, **Your sign-in**, and chooses "Link" with the provider's name. The browser goes to the provider and comes back to that section.
+
+An identity belongs to one person at a time. Linking one that somebody already has is refused. "Ways you sign in" lists it with the provider's name and the email the provider gave. Removing it, or forgetting the person, erases the identity, and it can be linked again later. An identity counts as a way in: with it, a person can remove their password. When admins must use a second factor, an admin signs in through the provider only if the operator has said the provider asks everybody for one (`MAINWORTHY_OIDC_MFA=true`).
+
+An identity the provider vouches for that nobody here has linked does not sign in. The page says "That did not sign you in." An admin invites the person, or the person links the provider from a session they have.
+
 ### A lost password or passkey
 
 With mail enabled, **Forgot your password?** on the sign-in page opens a reset request. Enter your verified email address. The page gives the same answer for known, unknown and unverified addresses. Requests are counted per email address and client address by the failed-attempt limiter, including its exemption for private and loopback client addresses. The sixth request inside the counting window waits one second, and later requests increase the wait. A public client's count is shared with failed sign-ins. [Configuration](./configuration.md#run-behind-a-proxy-that-ends-tls) describes how a proxy supplies the client address.
@@ -472,9 +485,10 @@ An admin cannot see or set anybody's password, and cannot register a passkey for
 
 In local mode you sign in as the owner, with no step. An operation waiting across an archive import still runs as the configured local owner. See [configuration](./configuration.md#local-mode-and-server-mode) for what local mode means.
 
-In server mode the sign-in page has three ways in, one under the other:
+In server mode the sign-in page has these ways in, one under the other:
 
 - Your name and password, then "Sign in".
+- "Sign in with" and the name of the instance's identity provider, where it has one. See [through an identity provider](#through-an-identity-provider).
 - "Sign in with a passkey", where the instance has passkeys and your browser has them. You type no name.
 - "Use a token": paste a token under "Sign in with your token" and press "Sign in with the token". This is how the owner signs in before anybody has a password, and how you try a token somebody handed you.
 

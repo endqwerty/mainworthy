@@ -28,6 +28,7 @@ import { SettingsScreen } from "./settings/index.tsx";
 import { SignIn } from "./signin/index.tsx";
 import { INVITE_PATH, Invitation } from "./signin/invite.tsx";
 import { MailEntry } from "./signin/mail.tsx";
+import { OIDC_PATH, OidcReturn } from "./signin/oidc.tsx";
 import { SuiteScreen } from "./suite/index.tsx";
 import { TestsScreen } from "./tests/index.tsx";
 import { AppContext, type PaletteItem, type PaletteOptions } from "./ui/context.tsx";
@@ -144,6 +145,7 @@ export function App() {
 	>({ kind: "loading" });
 	const [inviting, setInviting] = useState(() => location.pathname === INVITE_PATH);
 	const [mailEntry, setMailEntry] = useState(() => location.pathname === "/reset" || location.pathname === "/email");
+	const [returning, setReturning] = useState(() => location.pathname === OIDC_PATH);
 	const person = useRef<string | null>(null);
 	const refreshSession = useCallback(async (): Promise<void> => {
 		const owner = deviceSession();
@@ -180,7 +182,7 @@ export function App() {
 				}
 			} else if (
 				!location.pathname.startsWith("/p/") &&
-				![INVITE_PATH, "/reset", "/email"].includes(location.pathname)
+				![INVITE_PATH, OIDC_PATH, "/reset", "/email"].includes(location.pathname)
 			) {
 				const first = info.projects[0];
 				if (first) history.replaceState(null, "", routeUrl({ project: first.key, screen: "suite" }));
@@ -233,6 +235,18 @@ export function App() {
 					history.replaceState(null, "", "/");
 					await refreshSession();
 					setMailEntry(false);
+				}}
+			/>
+		);
+	// The identity provider sent the browser back: its answer is handed to the server before anything else.
+	if (returning)
+		return (
+			<OidcReturn
+				onDone={async (to) => {
+					// Settings opens at the section the person linked the provider from (`settingsSection`).
+					history.replaceState(to.section ? { settingsSection: to.section } : null, "", to.path);
+					await refreshSession();
+					setReturning(false);
 				}}
 			/>
 		);

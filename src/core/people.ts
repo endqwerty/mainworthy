@@ -55,7 +55,7 @@ export type SessionInput = z.infer<typeof SessionInput>;
 export const SessionRow = z.object({
 	id: z.number(),
 	/** What proved who the person was when it was opened. */
-	openedWith: z.enum(["token", "password", "passkey"]),
+	openedWith: z.enum(["token", "password", "passkey", "oidc"]),
 	/** The label of that token or credential. */
 	label: z.string(),
 	/** What the browser called itself at sign-in, cut to 256 characters. Not verified. */
@@ -146,7 +146,7 @@ export type CredentialInput = z.infer<typeof CredentialInput>;
 /** One way a person signs in. Never the hash, the key or the passkey's credential id. */
 export const CredentialRow = z.object({
 	id: z.number(),
-	kind: z.enum(["password", "passkey", "totp"]),
+	kind: z.enum(["password", "passkey", "oidc", "totp"]),
 	label: z.string(),
 	createdAt: z.number(),
 	lastUsedAt: z.number().nullable(),

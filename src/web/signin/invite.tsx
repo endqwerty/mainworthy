@@ -11,6 +11,8 @@ import {
 	refusalOf,
 	type ShownInvitation,
 	showInvitation,
+	signInMethods,
+	startOidc,
 } from "../lib/signin.ts";
 import { PASSWORD_RULES, PasswordCount } from "../ui/index.tsx";
 import "./signin.css";
@@ -184,7 +186,7 @@ export function Invitation({
 	);
 }
 
-type Problem = { at: "password" | "again" | "passkey" | "form"; message: string };
+type Problem = { at: "password" | "again" | "passkey" | "form" | "provider"; message: string };
 
 function Accept({
 	code,
@@ -223,6 +225,20 @@ function Accept({
 	const [confirmed, setConfirmed] = useState<string | null>(null);
 	const passwordRef = useRef<HTMLInputElement>(null);
 	const passkeyOffered = shown.passkey !== null && passkeysAvailable();
+	// The identity provider, when the instance has one: accepting through it needs no password or passkey here.
+	const [provider, setProvider] = useState<string | null>(null);
+	useEffect(() => {
+		let shown = true;
+		void signInMethods().then(
+			(offered) => {
+				if (shown) setProvider(offered.oidc?.name ?? null);
+			},
+			() => {},
+		);
+		return () => {
+			shown = false;
+		};
+	}, []);
 	// Not known who is signed in here, because the answer is on its way or did not come: the page may be about
 	// to sign somebody out, and cannot ask about them. A refusal that named the holder is an answer too.
 	const waiting = who.state !== "known" && refusedFor === null;
@@ -451,6 +467,27 @@ function Accept({
 						</button>
 					</fieldset>
 				</form>
+				{provider && (
+					<div className="signin-way">
+						<button
+							type="button"
+							className="plain"
+							disabled={held}
+							aria-disabled={busy}
+							onClick={() =>
+								run(
+									() => startOidc({ invitation: code, ...(confirmed === null ? {} : { replace: confirmed }) }),
+									"provider",
+								)
+							}
+						>
+							Accept with {provider}
+						</button>
+						<div className="signin-problem" role="status">
+							{said("provider")}
+						</div>
+					</div>
+				)}
 			</main>
 		</div>
 	);

@@ -1,7 +1,7 @@
-// People sign in as themselves: with a name and a password, with a passkey, or the first time with the
-// invitation an admin handed them. This file is what happens in each case, in order; the rows are in
-// `credentials.ts`, `invitations.ts` and `sessions.ts`, the challenges in `challenges.ts`, and what a passkey's
-// answer is worth in `webauthn.ts`. Other layers reach all of it through `identity.ts`.
+// People sign in as themselves: with a name and a password, with a passkey, through the identity provider, or
+// the first time with the invitation an admin handed them. This file is what happens in each case, in order; the rows are in
+// `credentials.ts`, `invitations.ts` and `sessions.ts`, the challenges in `challenges.ts`, what a passkey's
+// answer is worth in `webauthn.ts`, and what a provider's answer is worth in `oidc.ts`. Other layers reach all of it through `identity.ts`.
 //
 // Every way in has the same two halves. First, outside the write gate, what was presented is judged against
 // committed rows: a password is hashed and compared on another thread, a passkey's signature is checked. Then,
@@ -23,6 +23,7 @@ import {
 	countPasskeyUse,
 	credentialById,
 	ensureUserHandle,
+	insertOidc,
 	insertPasskey,
 	insertPassword,
 	insertTotp,
@@ -30,6 +31,8 @@ import {
 	livePassword,
 	liveTotp,
 	noteCredentialUse,
+	oidcByHandle,
+	oidcHandle,
 	passkeyByCredentialId,
 	rehashPassword,
 	revokeCredential,
@@ -49,6 +52,7 @@ import {
 	spendInvitation,
 } from "./invitations.ts";
 import { accountKey, addressKey, type LimiterAnswer } from "./limiter.ts";
+import { beginOidc, finishOidc, type Identity, type OidcPurpose, type OidcRefusal } from "./oidc.ts";
 import { dummyHash, hashPassword, type PasswordMatch, PasswordWorkBusy, verifyPassword } from "./passwords.ts";
 import {
 	endOtherSessions,
@@ -149,8 +153,18 @@ function mustHavePasskeys(app: App): RelyingParty {
 }
 
 /** What `GET /api/login/methods` says: the ways of signing in this instance offers. */
-export function signInMethods(app: App): { password: true; passkey: boolean; mail: boolean } {
-	return { password: true, passkey: publicAddress(app.config) !== null, mail: app.config.mail !== undefined };
+export function signInMethods(app: App): {
+	password: true;
+	passkey: boolean;
+	mail: boolean;
+	oidc: { name: string } | null;
+} {
+	return {
+		password: true,
+		passkey: publicAddress(app.config) !== null,
+		mail: app.config.mail !== undefined,
+		oidc: app.config.oidc ? { name: app.config.oidc.name } : null,
+	};
 }
 
 // ── Refusals ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -162,6 +176,10 @@ export function signInMethods(app: App): { password: true; passkey: boolean; mai
 export type WhyNot =
 	/** What the passkey verifier found wrong with an answer. */
 	| Refusal
+	/** What was wrong with the identity provider's answer, or with where it came back to. */
+	| OidcRefusal
+	/** The provider vouched for an identity no person here has linked. */
+	| "unknown-identity"
 	/** No person of that name stands: unknown, forgotten, or an agent's or a pipeline's name. */
 	| "unknown-name"
 	/** The person has no password that works. */
@@ -647,6 +665,14 @@ export function credentialOwner(db: Db, id: number): number | null {
 	return row && row.revoked_at === null ? row.actor : null;
 }
 
+/** How a notice names a credential of each kind. */
+const REMOVED: Record<CredentialRow["kind"], string> = {
+	password: "A password",
+	passkey: "A passkey",
+	oidc: "An identity provider sign-in",
+	totp: "An authenticator",
+};
+
 /**
  * Removes one way a person signs in, and ends the sessions that rest on it. The last one stays: with none, the
  * person could not sign in to add another, and only an admin's recovery link would let them back.
@@ -660,8 +686,10 @@ export function removeCredential(app: App, id: number): { removed: true; session
 			"this instance requires a second factor for admins with a password; remove the password first to use only passkeys",
 		);
 	const passwordWorks = !requiresFactor || liveTotp(app.db, row.actor) !== null;
+	const identityWorks = !requiresFactor || app.config.oidc?.mfa === true;
 	const waysIn = liveCredentials(app.db, row.actor).filter(
-		(held) => held.kind === "passkey" || (held.kind === "password" && passwordWorks),
+		(held) =>
+			held.kind === "passkey" || (held.kind === "password" && passwordWorks) || (held.kind === "oidc" && identityWorks),
 	);
 	if (row.kind === "passkey" && !passwordWorks && waysIn.length <= 1)
 		throw invalid(
@@ -675,7 +703,7 @@ export function removeCredential(app: App, id: number): { removed: true; session
 	}
 	const at = app.now();
 	revokeCredential(app.db, id, at);
-	credentialNotice(app, row.actor, row.kind === "totp" ? "An authenticator was removed" : `A ${row.kind} was removed`);
+	credentialNotice(app, row.actor, `${REMOVED[row.kind]} was removed`);
 	return {
 		removed: true,
 		sessionsEnded: row.kind === "totp" ? endSessionsOf(app.db, row.actor, at, "ended") : endSessionsOn(app.db, id, at),
@@ -795,7 +823,7 @@ export type Accepted = Entry | { ok: false; why: "other-session"; signedInAs: st
  * session, or the invited person's own, `replace` ends nothing.
  * The new session rests on the passkey when there is one, else on the password.
  */
-export async function acceptInvitation(
+export function acceptInvitation(
 	app: App,
 	input: {
 		code: string;
@@ -807,7 +835,28 @@ export async function acceptInvitation(
 	},
 	about: About,
 ): Promise<Accepted> {
-	const hash = hashOf(input.code);
+	const { code, ...rest } = input;
+	return acceptByHash(app, hashOf(code), { ...rest, identity: null }, about);
+}
+
+/**
+ * `acceptInvitation` for an invitation known by the hash of its code, which is how a ceremony with the provider
+ * keeps it. `identity` is what the provider vouched for, stored as the person's way in instead of a password
+ * or a passkey.
+ */
+async function acceptByHash(
+	app: App,
+	hash: string,
+	input: {
+		password: string | undefined;
+		passkey: unknown;
+		label: string | undefined;
+		replace: string | null;
+		browser: string | null;
+		identity: { handle: string; label: string } | null;
+	},
+	about: About,
+): Promise<Accepted> {
 	const judge = (db: Db) => {
 		const found = openInvitation(app, db, hash);
 		if (!found) return no("invitation");
@@ -848,7 +897,8 @@ export async function acceptInvitation(
 		const now = judge(app.db);
 		if (!now.ok) return now;
 		const { invitation, person, registration } = now;
-		if (!registration && app.config.requireAdminMfa && hasAdminGrant(app.db, person.id))
+		const vouched = input.identity !== null && app.config.oidc?.mfa === true;
+		if (!registration && !vouched && app.config.requireAdminMfa && hasAdminGrant(app.db, person.id))
 			return no("second-factor-required");
 		// Who the browser holds, on committed rows and before anything is written: nothing else writes while this
 		// holds the gate. The name is the one that person has now.
@@ -867,6 +917,10 @@ export async function acceptInvitation(
 		let root: CredentialRow | null = null;
 		if (passwordHash !== null)
 			root = credentialById(app.db, insertPassword(app.db, { actor: person.id, hash: passwordHash, at }));
+		if (input.identity) {
+			if (oidcByHandle(app.db, input.identity.handle)) throw new Stop(no("credential-exists"));
+			root = insertOidc(app.db, { actor: person.id, ...input.identity, at });
+		}
 		if (registration)
 			root = insertPasskey(app.db, {
 				actor: person.id,
@@ -891,6 +945,145 @@ export async function acceptInvitation(
 		);
 		return { ok: true, signedIn: { cookie, expiresAt: opened.expiresAt } } as const;
 	});
+}
+
+// ── An identity provider ───────────────────────────────────────────────────────────────────────────────────
+//
+// A person reaches their identity at the provider by an invitation or by linking it from their settings, and
+// never by what the provider says about them (an email, a name): the provider vouches for an issuer and a
+// subject, and this instance decides whose that is. The provider's answer is judged outside the gate (the code
+// is exchanged over the network, `oidc.ts`), and the rows are read again and written under it.
+
+/** What a route about the provider answers on an instance that has none. */
+export const OIDC_OFF =
+	"this instance has no identity provider. Whoever runs it sets MAINWORTHY_OIDC_ISSUER and the variables beside it, and starts it again";
+
+/** The page of the web UI the provider sends the browser back to, at the instance's public address. */
+function oidcRedirect(app: App): string {
+	const address = publicAddress(app.config);
+	if (!app.config.oidc || !address) throw invalid(OIDC_OFF);
+	return `${address.url}/signin/oidc`;
+}
+
+/** What the identity is called in a person's list of ways in: the provider, and the email or name it gave. */
+function identityLabel(app: App, identity: Identity): string {
+	const provider = app.config.oidc?.name ?? "Identity provider";
+	const who = identity.email ?? identity.name;
+	return (who ? `${provider} (${who})` : provider).slice(0, 120);
+}
+
+export type OidcStart =
+	| { purpose: "sign-in" }
+	/** `browser` is the session cookie the request carried, if any, and `replace` the name the page asked about. */
+	| { purpose: "join"; code: string; replace: string | null; browser: string | null }
+	/** Somebody signed in with a browser's session: the actor, and the session cookie the request carried. */
+	| { purpose: "link"; actor: number; browser: string };
+
+export type OidcBegun =
+	| { ok: true; url: string; ceremony: string; lastsMs: number }
+	| Refused
+	| Limited
+	| { ok: false; why: "other-session"; signedInAs: string }
+	| { ok: false; why: "unreachable" | "not-a-person" };
+
+/**
+ * Begins signing in, accepting an invitation or linking through the provider: where the browser goes next, and
+ * the ceremony cookie that ties the answer to this browser. An invitation is looked at now, as its page does,
+ * and a browser signed in as somebody else is asked about first, so the person is not sent to the provider for
+ * an acceptance that could not go through. Throws `OIDC_OFF` on an instance with no provider.
+ */
+export async function beginOidcSignIn(app: App, start: OidcStart, address: string | null): Promise<OidcBegun> {
+	const redirect = oidcRedirect(app);
+	let purpose: OidcPurpose;
+	if (start.purpose === "join") {
+		const attempt = byAddress(app, address);
+		const hash = hashOf(start.code);
+		const found = openInvitation(app, app.reader, hash);
+		if (!found) return attempt.wrong(no("invitation"));
+		const holder = start.browser === null ? null : holderOf(app, start.browser);
+		if (holder && holder.id !== found.person.id && start.replace !== holder.name)
+			return { ok: false, why: "other-session", signedInAs: holder.name };
+		purpose = { purpose: "join", invitation: hash, replace: start.replace };
+	} else if (start.purpose === "link") {
+		if (!app.reader.get(Q.personById, { id: start.actor })) return { ok: false, why: "not-a-person" };
+		purpose = { purpose: "link", actor: start.actor, session: hashOf(start.browser) };
+	} else purpose = start;
+	const ceremony = newSessionSecret();
+	const url = await beginOidc(app, { purpose, browser: hashOf(ceremony), redirect });
+	return url === null ? { ok: false, why: "unreachable" } : { ok: true, url, ceremony, lastsMs: CEREMONY_MS };
+}
+
+export type OidcFinished = Accepted | { ok: true; linked: true } | { ok: false; why: "linked-already" };
+
+/**
+ * Finishes what `beginOidcSignIn` began, with the query the provider sent the browser back with. `ceremony` is
+ * the ceremony cookie the request carried and `browser` its session cookie, each or null. A refused answer is
+ * counted under the address, as a passkey's is: nobody guesses a provider's signature.
+ */
+export async function finishOidcSignIn(
+	app: App,
+	input: { query: string; ceremony: string | null; browser: string | null },
+	about: About,
+): Promise<OidcFinished> {
+	const attempt = byAddress(app, about.address);
+	const judged = await finishOidc(app, {
+		query: input.query,
+		browser: input.ceremony === null ? null : hashOf(input.ceremony),
+		redirect: oidcRedirect(app),
+	});
+	if (!judged.ok) return attempt.wrong(no(judged.why));
+	const { purpose, identity } = judged;
+	const handle = oidcHandle(identity);
+	const label = identityLabel(app, identity);
+	if (purpose.purpose === "join") {
+		return acceptByHash(
+			app,
+			purpose.invitation,
+			{
+				password: undefined,
+				passkey: undefined,
+				label: undefined,
+				replace: purpose.replace,
+				browser: input.browser,
+				identity: { handle, label },
+			},
+			about,
+		);
+	}
+	if (purpose.purpose === "link") {
+		const linking = purpose;
+		return commit(app, (): OidcFinished => {
+			// The browser that finishes is the session that began, and that session is still the person's.
+			const held = input.browser === null ? null : findSession(app, hashOf(input.browser), { db: app.db });
+			if (input.browser === null || hashOf(input.browser) !== linking.session || held?.actor.id !== linking.actor)
+				return no("context");
+			if (oidcByHandle(app.db, handle)) return { ok: false, why: "linked-already" };
+			insertOidc(app.db, { actor: linking.actor, handle, label, at: app.now() });
+			credentialNotice(app, linking.actor, "An identity provider sign-in was added");
+			return { ok: true, linked: true };
+		});
+	}
+	about.proven?.();
+	const cookie = newSessionSecret();
+	const entry = await commit(app, (): Entry => {
+		const row = oidcByHandle(app.db, handle);
+		const person = row ? app.db.get(Q.personById, { id: row.actor }) : null;
+		if (!row || !person) return no("unknown-identity");
+		if (app.config.requireAdminMfa && hasAdminGrant(app.db, person.id) && app.config.oidc?.mfa !== true)
+			return no("second-factor-required");
+		const opened = openOn(app, row, cookie, about);
+		if (!opened) throw new Stop(no("changed-meanwhile"));
+		noteCredentialUse(app.db, row.id, app.now());
+		return { ok: true, signedIn: { cookie, expiresAt: opened.expiresAt } };
+	});
+	// An identity nobody linked is somebody trying; a person refused by the rule for admins, or a row that changed
+	// under a good answer, is not.
+	return entry.ok ||
+		entry.why === "limited" ||
+		entry.why === "changed-meanwhile" ||
+		entry.why === "second-factor-required"
+		? entry
+		: attempt.wrong(entry);
 }
 
 function factorAttempt(app: App, input: { kind: "sign-in" | "enrol"; name: string; address: string | null }) {
