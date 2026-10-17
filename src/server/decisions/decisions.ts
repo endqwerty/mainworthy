@@ -1063,12 +1063,10 @@ export function raiseFailure(
 			// Every target this question has seen the cause on. An answer that holds "here only" covers the
 			// latest of them; the others of that commit are asked about again.
 			targets: [...new Set([...(earlier.targets ?? []), target.id])],
-			// Each test a commit's gate counted failing with the cause, with the environment it failed in: what a
-			// passing commit must show passing before an answer that needs a fix ends (`passedIn`).
-			failed: unionPairs(
-				earlier.failed ?? [],
-				group.gateTests.map((test): [number, string] => [test, target.env]),
-			).slice(0, PAIRS_KEPT),
+			// Each test a commit's gate counted failing with the cause, with the environment of the result that
+			// failed: what a passing commit must show passing before an answer that needs a fix ends (`passedIn`). A
+			// planned run's group gathers results from several targets, so each pair is read from its own result.
+			failed: unionPairs(earlier.failed ?? [], gatePairs(ctx, group)).slice(0, PAIRS_KEPT),
 			sample: group.results[0] ?? earlier.sample ?? null,
 		},
 		// A slot dispute has its own question. New reports never end an answer about this cause in its scope.
@@ -1088,6 +1086,17 @@ export function raiseFailure(
 
 /** The most pairs of test and environment a failure question keeps. With that many, its answer never ends by rule. */
 const PAIRS_KEPT = 500;
+
+/** Each test of a group that a commit's gate counts failing with its cause, with the environment it failed in. */
+function gatePairs(ctx: Ctx, group: FailingGroup): [number, string][] {
+	const counted = new Set(group.gateTests);
+	return group.results.flatMap((id): [number, string][] => {
+		const result = resultById(ctx.db, id);
+		if (!result || !counted.has(result.test) || result.method === "agent" || result.signature !== group.signature.id)
+			return [];
+		return [[result.test, mustTarget(ctx.db, result.target).env]];
+	});
+}
 
 /** Pairs of test and environment, each once, in the order first seen. */
 function unionPairs(a: readonly [number, string][], b: readonly [number, string][]): [number, string][] {
@@ -1710,8 +1719,9 @@ function passedIn(ctx: Ctx, question: QuestionRow, run: RunRow): { reason: strin
 	const { signature, scope } = json<{ signature: number; scope: string }>(question.subject);
 	const evidence = json<{ tests?: { id: number }[]; count?: number; failed?: [number, string][] }>(question.evidence);
 	const listed = new Set((evidence.tests ?? []).map((test) => test.id));
-	if (listed.size === 0 || (evidence.count ?? 0) > listed.size || (evidence.failed?.length ?? 0) >= PAIRS_KEPT)
-		return null;
+	// A question raised before it recorded where it saw the cause fail keeps its answer until a person withdraws it.
+	if (!evidence.failed || evidence.failed.length >= PAIRS_KEPT) return null;
+	if (listed.size === 0 || (evidence.count ?? 0) > listed.size) return null;
 	const planned = runsAbout(ctx, question).some((id) => {
 		const named = runById(ctx.db, id);
 		return named?.origin === "planned" && named.state === "open";
