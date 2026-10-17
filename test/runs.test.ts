@@ -815,3 +815,47 @@ describe("deploy announcements and release runs", () => {
 		}
 	});
 });
+
+describe("a person's refusal of a rule's answer", () => {
+	beforeEach(() => {
+		h = harness();
+		seed(1);
+	});
+
+	test("holds however many questions the rule was not asked in between", () => {
+		const planned = h.call<PlanReply>("plan", {
+			name: "refused",
+			select: { cases: ["C-1"] },
+			accepts: { commit: "refuse01" },
+		});
+		const report = (attempt: number, outcome: "pass" | "fail") =>
+			h.call("report", {
+				run: planned.run,
+				target: { commit: "refuse01", branch: "main" },
+				job: "tests",
+				attempt,
+				results: [
+					{
+						test: { key: "tests/a.spec.ts::case one" },
+						outcome,
+						annotation: { case: "C-1", version: 1 },
+						...(outcome === "fail" ? { failure: { message: `failed at attempt ${attempt}` } } : {}),
+					},
+				],
+			});
+		report(1, "pass");
+		const approved = first(h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" }).items);
+		h.call("decide", { undo: approved.q, reason: "withdraw the automatic approval" });
+		const asked = first(h.call<InboxReply>("inbox", { kind: "signoff" }).items);
+		h.call("decide", { q: asked.q, onEvidence: asked.evidenceHash, answer: { is: "reject" }, reason: "not yet" });
+		// The walk back through earlier questions stopped after 100 (issue #369): the rule approved at cycle 101.
+		for (let cycle = 1; cycle <= 101; cycle++) {
+			report(2 * cycle, "fail");
+			report(2 * cycle + 1, "pass");
+		}
+		expect(run(planned.run).state).toBe("open");
+		const decided = h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" }).items;
+		expect(decided.map((q) => q.decision?.answer)).not.toContainEqual({ is: "approve" });
+		expect(first(h.call<InboxReply>("inbox", { kind: "signoff" }).items).evidence).toMatchObject({ verdict: "passed" });
+	}, 30_000);
+});
