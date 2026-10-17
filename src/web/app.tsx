@@ -212,12 +212,15 @@ export function App() {
 		};
 		window.addEventListener("storage", changed);
 		window.addEventListener(unauthenticatedEvent, refused);
-		void refreshSession();
+		// On the way back from the identity provider the sign-in is in flight: a look at the session now can
+		// be refused before it lands, and its late refusal would sign the page out of the session just made.
+		// `OidcReturn` is done first, and this look comes with `returning` ending.
+		if (!returning) void refreshSession();
 		return () => {
 			window.removeEventListener(unauthenticatedEvent, refused);
 			window.removeEventListener("storage", changed);
 		};
-	}, [refreshSession]);
+	}, [refreshSession, returning]);
 	useEffect(() => {
 		const media = matchMedia("(prefers-color-scheme: dark)");
 		const changed = () => {
@@ -242,10 +245,9 @@ export function App() {
 	if (returning)
 		return (
 			<OidcReturn
-				onDone={async (to) => {
+				onDone={(to) => {
 					// Settings opens at the section the person linked the provider from (`settingsSection`).
 					history.replaceState(to.section ? { settingsSection: to.section } : null, "", to.path);
-					await refreshSession();
 					setReturning(false);
 				}}
 			/>

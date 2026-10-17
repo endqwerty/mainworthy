@@ -14,9 +14,10 @@ let handing: { query: string; done: Promise<{ linked: boolean; back: Back | null
 /**
  * The page the identity provider sends the browser back to. It hands the provider's answer to the server from
  * this origin, which is how the browser's cookies go with it, and then opens the app: signed in, or back where
- * a person was when they linked the provider. The query leaves the address bar at once.
+ * a person was when they linked the provider. The app asks who is signed in only once `onDone` is called. The
+ * query leaves the address bar at once.
  */
-export function OidcReturn({ onDone }: { onDone: (to: Back) => Promise<void> }) {
+export function OidcReturn({ onDone }: { onDone: (to: Back) => void }) {
 	const [problem, setProblem] = useState<string | null>(null);
 	// The app's callback may be a new function on each render; the answer is handed over once all the same.
 	const done = useRef(onDone);
@@ -32,7 +33,7 @@ export function OidcReturn({ onDone }: { onDone: (to: Back) => Promise<void> }) 
 		let shown = true;
 		handing.done.then(
 			({ linked, back }) => {
-				if (shown) void done.current(linked && back ? back : { path: "/", section: null });
+				if (shown) done.current(linked && back ? back : { path: "/", section: null });
 			},
 			(error: unknown) => {
 				if (shown) setProblem(refusalOf(error, "That did not sign you in. Start again from the sign-in page."));

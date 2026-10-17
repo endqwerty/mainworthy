@@ -5,6 +5,7 @@
 // server holds both, since each needs the address people open the pages at.
 // `people.test.ts` and `oidc.test.ts` prove the routes with `fetch`; this file proves the pages reach them.
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import type { Page } from "playwright-core";
 import { type Provider, provider, stopProviders } from "../oidc-support.ts";
 import { addAuthenticator, browserAvailable, openPage, type PageHarness, type Server, startServer } from "./support.ts";
 
@@ -218,6 +219,31 @@ test.skipIf(!browserAvailable)(
 	30_000,
 );
 
+/**
+ * A slow server on the way back from the provider: the sign-in reaches it a moment after the page's first look at
+ * the session, and the refusal that look drew is delivered once the sign-in has been answered. A busy machine does
+ * this by chance; here it is every time.
+ */
+async function slowReturn(page: Page): Promise<void> {
+	let answered: Promise<void> | null = null;
+	await page.route("**/api/login", async (route) => {
+		if (!route.request().postData()?.includes('"oidc"')) return route.fallback();
+		let done = (): void => {};
+		answered = new Promise((resolve) => {
+			done = resolve;
+		});
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		const response = await route.fetch();
+		await route.fulfill({ response });
+		done();
+	});
+	await page.route("**/api/session", async (route) => {
+		const response = await route.fetch();
+		if (response.status() === 401) await answered;
+		await route.fulfill({ response });
+	});
+}
+
 test.skipIf(!browserAvailable)(
 	"a person accepts an invitation through the provider, signs out, and signs in again with its button",
 	async () => {
@@ -228,6 +254,7 @@ test.skipIf(!browserAvailable)(
 			browser = await openPage(server, { signedIn: false, path: `/invite#${made.code}`, ready: "h1" });
 			const { page } = browser;
 			page.setDefaultTimeout(8000);
+			await slowReturn(page);
 			await page.getByRole("heading", { name: "You are invited as noor" }).waitFor();
 			idp.next({ subject: "sub-noor", email: "noor@example.com" });
 			await page.getByRole("button", { name: "Accept with Example ID" }).click();
