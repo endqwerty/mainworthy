@@ -399,6 +399,47 @@ test("repeated report returns the same receipt, writes one batch, and names the 
 	});
 });
 
+for (const policy of ["track", "ask", "create"] as const) {
+	test(`report receipt describes recorded result bases under ${policy}, including policy changes and replay`, async () => {
+		await withInstance(async ({ cli, run, client, directory }) => {
+			expect((await run(["policy", "tests", policy])).code).toBe(0);
+			const file = join(directory, "passing.xml");
+			await writeFile(file, '<testsuite><testcase name="one" classname="checkout" /></testsuite>');
+			const argv = ["report", file, "--commit", COMMIT, "--branch", "main"];
+			const first = await cli(argv);
+			expect([first.code, first.stderr]).toEqual([0, ""]);
+			expect((await client.call("find", { in: "cases" })).count).toBe(policy === "create" ? 1 : 0);
+			expect((await client.call("inbox", { kind: "map" })).items).toHaveLength(policy === "ask" ? 1 : 0);
+			expect(first.stdout).toContain("  1 result had no case or version when recorded\n");
+
+			const repeated = join(directory, "repeated.xml");
+			await writeFile(
+				repeated,
+				'<testsuite><testcase name="two" classname="checkout" /><testcase name="two" classname="checkout" /></testsuite>',
+			);
+			const plural = await run(["report", repeated, "--commit", COMMIT]);
+			expect([plural.code, plural.stderr]).toEqual([0, ""]);
+			expect((await client.call("find", { in: "tests" })).items).toHaveLength(2);
+			expect(plural.stdout).toContain("  2 results had no case or version when recorded\n");
+
+			expect((await run(["policy", "tests", policy === "create" ? "track" : "create"])).code).toBe(0);
+			const again = await run(argv);
+			expect(again.code).toBe(0);
+			expect(again.stdout).toBe(`${first.stdout}  already received; nothing was written\n`);
+			expect(again.stderr).toBe(
+				"mainworthy: this report was received before. Its receipt, and the gate line in it, are as they were then; `mainworthy gate` says what the verdict is now.\n",
+			);
+			const machine = await run([...argv, "--json"]);
+			expect(machine.code).toBe(0);
+			expect(JSON.parse(machine.stdout)).toMatchObject({
+				fresh: false,
+				unlinked: 1,
+				basis: { exact: 0, assumed: 0, unresolved: 1 },
+			});
+		});
+	});
+}
+
 test("missing commit names both ways out and an explicit session uploads", async () => {
 	await withInstance(async ({ run }) => {
 		const missing = await run(["report", RED_XML]);
