@@ -441,6 +441,11 @@ const Q = {
 	caseIdsOfFile: sql<{ project: number; file: string }, { case_id: number | null }>(
 		"SELECT case_id FROM tests WHERE project = $project AND file = $file LIMIT 500",
 	),
+	failedWith: sql<{ project: number; signature: number; since: number }, { test: number; target: number }>(
+		`SELECT DISTINCT test, target FROM results
+		 WHERE project = $project AND signature = $signature AND seq >= $since
+		   AND outcome IN ('fail', 'error') AND method != 'agent'`,
+	),
 	dropExcuse: sql<{ project: number; signature: number; scope: string; decision: number }>(
 		"DELETE FROM excuses WHERE project = $project AND signature = $signature AND scope = $scope AND decision = $decision",
 	),
@@ -1511,6 +1516,25 @@ export function restoreLink(
 	ctx.db.run(Q.linkTest, { id: test.id, caseId: to.caseId, by: to.by });
 	ctx.touched.add(testRef(test));
 	return true;
+}
+
+/**
+ * Where these tests have failed with a cause in a scope, from the result at `since` on: each test with each
+ * environment it failed in, as reported. A newer attempt that passed does not take a failure out of this history.
+ * The job is left out, because a sharded pipeline moves a test from one job to another; so is who reported, because
+ * a pipeline's token can be replaced. A gate counts pipelines and people, so an agent's failure is left out.
+ */
+export function failedIn(
+	db: Db,
+	input: { project: number; signature: number; scope: string; since: number; tests: ReadonlySet<number> },
+): { test: number; env: string }[] {
+	return db
+		.all(Q.failedWith, { project: input.project, signature: input.signature, since: input.since })
+		.flatMap((row) => {
+			if (!input.tests.has(row.test)) return [];
+			const target = mustTarget(db, row.target);
+			return scopeOf(target, null) === input.scope ? [{ test: row.test, env: target.env }] : [];
+		});
 }
 
 /**

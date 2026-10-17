@@ -285,8 +285,9 @@ See [export and verify an audit](./data.md#export-and-verify-an-audit). If the c
 The answer ends only when that commit's run shows all of the following.
 
 - No test fails with the cause, whether an answer explains the failure or not.
-- Every test the question lists passes, in each environment and job where it failed with the cause.
-  A job that has not reported yet keeps the answer. So does a test that the fix renamed or removed.
+- Every test the question lists passes, in each environment where it failed with the cause since the question opened.
+  A passing retry of the failing commit counts. The job that runs a test does not matter, so a sharded pipeline can move tests between jobs.
+  A shard that has not reported one of those tests yet keeps the answer. So does a test that the fix renamed or removed.
 
 The answer stays when the question has more tests than it lists, which is fifty.
 It also stays while an open planned run names the question. Withdraw such an answer yourself when it no longer applies.

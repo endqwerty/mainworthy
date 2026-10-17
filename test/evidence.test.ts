@@ -1068,6 +1068,72 @@ describe("holds", () => {
 		expect(state(asked.q)).toBe("dissolved");
 	});
 
+	test("a passing retry of the failing commit ends the answer, and a later failure is asked again", () => {
+		const fail = { 0: "expected 4 items, got 3" };
+		const at = (commit: string, attempt: number, failing: boolean) =>
+			ciReport({ commit, branch: "retry", pr: 45, n: 2, job: "checks", attempt, ...(failing ? { fail } : {}) });
+		h.call("report", at("retry01a", 1, true));
+		const asked = first(queue().items);
+		decide(asked, { is: "test" });
+		h.call("report", at("retry01a", 2, false));
+		expect(state(asked.q)).toBe("dissolved");
+		const again = h.call<ReportReceipt>("report", at("retry01c", 1, true));
+		expect(again.questions[0]).toMatchObject({ how: "new", state: "open" });
+	});
+
+	test("a job that failed and then passed on a retry still has to pass on the next commit", () => {
+		const fail = { 0: "the order total is wrong" };
+		const unit = (commit: string, attempt: number, failing: boolean) =>
+			ciReport({
+				commit,
+				branch: "fix",
+				pr: 46,
+				n: 2,
+				job: "unit",
+				file: "tests/unit.spec.ts",
+				attempt,
+				...(failing ? { fail } : {}),
+			});
+		const e2e = (commit: string, attempt: number, failing: boolean) =>
+			ciReport({ commit, branch: "fix", pr: 46, n: 2, job: "e2e", attempt, ...(failing ? { fail } : {}) });
+		h.call("report", unit("retry02a", 1, true));
+		h.call("report", e2e("retry02a", 1, true));
+		const asked = first(queue().items);
+		decide(asked, { is: "defect" });
+		h.call("report", e2e("retry02a", 2, false));
+		h.call("report", unit("retry02b", 1, false));
+		// e2e failed on the first commit and has not reported on this one: its test has not passed, so the answer holds.
+		expect(state(asked.q)).toBe("decided");
+		h.call("report", e2e("retry02b", 1, false));
+		expect(state(asked.q)).toBe("dissolved");
+	});
+
+	test("a test that failed in two environments must pass in both, whatever they are called", () => {
+		const fail = { 0: "a specific checkout assertion" };
+		const report = (commit: string, env: string, failing: boolean) => {
+			const input = ciReport({ commit, branch: "fix", pr: 47, n: 1, ...(failing ? { fail } : {}) });
+			return { ...input, target: { ...input.target, env } };
+		};
+		h.call("report", report("lanes01a", "linux|chrome", true));
+		h.call("report", report("lanes01a", "linux", true));
+		const asked = first(queue().items);
+		decide(asked, { is: "test" });
+		h.call("report", report("lanes01b", "linux|chrome", false));
+		expect(state(asked.q)).toBe("decided");
+		h.call("report", report("lanes01b", "linux", false));
+		expect(state(asked.q)).toBe("dissolved");
+	});
+
+	test("a test that moved to another shard ends the answer where it passes", () => {
+		const fail = { 0: "expected the receipt, got none" };
+		h.call("report", ciReport({ commit: "shard02a", branch: "fix", pr: 48, n: 2, job: "shard-2", fail }));
+		const asked = first(queue().items);
+		decide(asked, { is: "defect" });
+		// The shards were balanced again: the same test now runs in another job.
+		h.call("report", ciReport({ commit: "shard02b", branch: "fix", pr: 48, n: 2, job: "shard-3" }));
+		expect(state(asked.q)).toBe("dissolved");
+	});
+
 	test("a pass of other tests does not end the answer: the tests it named must pass", () => {
 		const fail = { 0: "expected 3 rows, got 2" };
 		h.call("report", ciReport({ commit: "named01a", branch: "fix", pr: 44, n: 2, fail }));

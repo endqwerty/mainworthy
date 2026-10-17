@@ -28,9 +28,13 @@ commit of a scope, after a report, and the answer ends only when that commit's r
 
 - No test fails with the cause, whether an answer explains it or not. `stoppedFailing` counts an explained row as
   gone, which would end an answer on the failure it explains.
-- Every test the question lists passes, in each environment, job and reporter where it failed with the cause on
-  the commits that rest on the answer. One job's pass, sent before another job reports its failure, ends nothing.
-  A test the fix renamed or removed never passes, so its answer stays.
+- Every test the question lists passes, in each environment where it failed with the cause in its scope since the
+  question was raised. A shard that has not reported one of those tests yet ends nothing. A test the fix renamed
+  or removed never passes, so its answer stays. Where it failed is read from the results as reported, which a
+  passing retry does not change; the runs that rest on the answer forget a failure once a retry replaces it. The
+  job and the reporter are left out: a sharded pipeline moves a test between jobs when it balances them again,
+  and a pipeline's token can be replaced. Both were in the first version, and the verifier found both ways
+  wrong (a retry that left the answer standing for good, and job names that compared equal).
 - The question lists every test it has seen. It lists fifty; with more, the rest are unknown.
 - No open planned run names the question. A person asked for that run, and it waits for its own evidence.
 
@@ -56,12 +60,15 @@ a mistake" are about results already recorded. There is no policy setting.
   wrong later would explain those commits for good. The random sequences of `test/sequences.ts` failed with it
   under `loose` and `strict`, and pass without it. Reading `blocked` instead of `failed` changes no decision: both fail the gate, and a pull
   request's gate is its newest commit's.
-- **A completed report set, and failure episodes** (an independent design by GPT 6.1 Sol). CI would call a new
-  operation once every job of a commit had reported. The answer would end only on that signal, and tables of
-  episodes would keep each answer on its own commits. It removes the early-pass race entirely. It also needs every
-  user's CI to send the new signal before anything ends, an archive-breaking migration, and an episode lookup on
-  every excuse read. The lane check above catches the race this repository's CI and most sharded CIs can produce,
-  and what it misses costs one question.
+- **Failure episodes** (from an independent design by GPT 6.1 Sol): tables that keep each answer on its own
+  commits, so an earlier commit keeps its explanation. That is the first item above, at the cost of an episode
+  lookup on every excuse read.
+- **Waiting for the whole commit here.** The same design had the answer end only once CI said every job of the
+  commit had reported. Mainworthy has no word for that yet, and the gate has the same gap: a sharded pipeline whose
+  first shard reports only passes reads `passed` before the other shards report. The owner asked for sharded CI to
+  be supported (2026-10-16), so the signal is its own change, which the gate and this ending both use. Until then,
+  the requirement that every listed test pass covers the failures already seen, and a test failing with the cause
+  for the first time in a shard that reports late is asked about as a new question.
 - **A hold term checked when the cause comes back.** `stillHolds` would ask whether the cause passed since the
   answer. It needs no sweep, but the answer would keep reading as current after the fix until the cause failed
   again, which is the stale state the owner asked to be rid of. And `stillHolds` reads no database.
