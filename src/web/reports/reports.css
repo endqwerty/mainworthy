@@ -1,0 +1,165 @@
+#app:has(.reports-pane) {
+	grid-template-columns: var(--side-width) minmax(0, 1fr) minmax(520px, calc(max(520px, 56%) + var(--side-freed)));
+}
+.reports-pane .row {
+	height: 52px;
+	gap: 12px;
+}
+.report-title {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.report-title > span {
+	display: block;
+	font-size: 12px;
+	font-weight: 400;
+}
+.reports-window,
+.reports-filter {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 12px;
+	border-bottom: 1px solid var(--line);
+	color: var(--dim);
+	font-size: 12px;
+}
+.reports-filter {
+	padding: 0 0 10px;
+	border-bottom: 0;
+}
+.report-hero {
+	margin: 0 0 12px;
+}
+.report-hero b {
+	font-size: 22px;
+	font-variant-numeric: tabular-nums;
+}
+.rate-chart {
+	position: relative;
+	height: 140px;
+	margin: 8px 8px 0 44px;
+	border-bottom: 1px solid var(--line);
+	border-top: 1px dashed var(--line2);
+}
+.rate-chart svg {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	overflow: visible;
+}
+.rate-chart polyline {
+	fill: none;
+	stroke: var(--acc);
+	stroke-width: 2px;
+	stroke-linejoin: round;
+}
+.rate-dot {
+	position: absolute;
+	width: 8px;
+	height: 8px;
+	border: 2px solid var(--panel);
+	border-radius: 50%;
+	background: var(--acc);
+	transform: translate(-50%, 50%);
+}
+.rate-dot::after {
+	/* A larger target than the dot, for the pointer that reads its day. */
+	content: "";
+	position: absolute;
+	inset: -8px;
+}
+.rate-scale {
+	position: absolute;
+	left: -44px;
+	width: 38px;
+	color: var(--dim);
+	font: 11px var(--mono);
+	text-align: right;
+}
+.rate-top {
+	top: -7px;
+}
+.rate-floor {
+	bottom: -7px;
+}
+.rate-axis {
+	display: flex;
+	justify-content: space-between;
+	margin: 6px 8px 14px 44px;
+	font: 11px var(--mono);
+}
+.report-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-variant-numeric: tabular-nums;
+}
+.report-table th,
+.report-table td {
+	padding: 6px 8px 6px 0;
+	border-bottom: 1px solid var(--line2);
+	text-align: right;
+	white-space: nowrap;
+}
+.report-table th:first-child {
+	width: 100%;
+	text-align: left;
+	font-weight: 400;
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+.report-table thead th {
+	color: var(--dim);
+	font-size: 12px;
+	font-weight: 500;
+}
+.report-gap th:first-child {
+	color: var(--warn);
+}
+.report-tag {
+	margin-left: 6px;
+	padding: 1px 6px;
+	border-radius: 8px;
+	background: var(--warn-soft);
+	color: var(--warn);
+	font-size: 11px;
+}
+.report-facts {
+	display: grid;
+	grid-template-columns: max-content minmax(0, 1fr);
+	gap: 6px 14px;
+	margin: 0 0 12px;
+}
+.report-facts dt {
+	color: var(--dim);
+}
+.report-facts dd {
+	margin: 0;
+	font-variant-numeric: tabular-nums;
+}
+.report-note {
+	margin: 12px 0 0;
+	font-size: 12px;
+}
+.reports-pane .sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}
+@media (max-width: 1100px) {
+	#app:has(.reports-pane) {
+		grid-template-columns: var(--side-width) minmax(220px, 1fr) minmax(440px, calc(max(440px, 52%) + var(--side-freed)));
+	}
+}
+@media (max-width: 760px) {
+	#app:has(.reports-pane) {
+		grid-template-columns: var(--side-width) minmax(220px, 1fr);
+	}
+}

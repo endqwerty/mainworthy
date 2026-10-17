@@ -32,6 +32,7 @@ import {
 	TotpEnrolment,
 } from "./people.ts";
 import { Obligation, TargetMatch, Verdict } from "./runs.ts";
+import { StatsReply } from "./stats.ts";
 import { TeamReply, TeamSource } from "./teams.ts";
 import { TrackerReceipt } from "./tracker.ts";
 
@@ -531,6 +532,7 @@ export const REPLIES = {
 	history: HistoryReply,
 	timeline: TimelineReply,
 	check: CheckReply,
+	stats: StatsReply,
 	command: CommandFate,
 	admin: AdminReply,
 	session: SessionReply,

@@ -17,6 +17,7 @@ Numeric misses or correctness errors exit nonzero, including any repeat miss.
 | Ingest 10,000 results, ten fresh reports | every call < 2,000 |
 | Gate readable from report start, with failure questions | every call < 5,000 |
 | Queue: 50 rows and counts at the actual open population | p95 < 50 |
+| Each report of `stats` over 30 days (pass rate, flaky, reruns, automation, coverage) | p95 < 100 each |
 | Changed since, impact for 20 files, JUnit file read/parse | report only |
 | HTTP reads while reports and saves arrive (server in its own process) | p95 < 50 pooled |
 | Small check: fresh ingest of 5,000 results | every call < 1,000 |

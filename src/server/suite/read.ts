@@ -1,7 +1,7 @@
 // Reads over the suite: listing, search, selection, the folder tree and version history.
 // Every list is a bounded range read on a key from the schema; nothing here fetches everything and filters.
 import { diffBodies, summariseDiff } from "../../core/diff.ts";
-import { type CaseBody, cleanPath } from "../../core/model.ts";
+import { type Automate, type CaseBody, cleanPath } from "../../core/model.ts";
 import type { Selection } from "../../core/ops.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { type Db, json, placeholders, type SqlValue, sql } from "../kernel/db.ts";
@@ -39,6 +39,15 @@ const Q = {
 	casesCovering: sql<{ project: number; key: string }, CaseRow>(
 		`SELECT c.* FROM requirements r JOIN covers v ON v.requirement = r.id JOIN cases c ON c.id = v.case_id
 		 WHERE r.project = $project AND r.key = $key`,
+	),
+	automation: sql<{ project: number }, { id: number; no: number; title: string; automate: Automate }>(
+		"SELECT id, no, title, automate FROM cases WHERE project = $project AND state = 'active' ORDER BY no",
+	),
+	covering: sql<{ project: number }, { key: string; title: string; case_id: number | null }>(
+		`SELECT r.key, r.title, c.id AS case_id FROM requirements r
+		 LEFT JOIN covers v ON v.requirement = r.id
+		 LEFT JOIN cases c ON c.id = v.case_id AND c.state = 'active'
+		 WHERE r.project = $project ORDER BY r.key, c.no`,
 	),
 	total: sql<{ project: number }, { n: number }>(
 		"SELECT count(*) AS n FROM cases WHERE project = $project AND state = 'active'",
@@ -397,5 +406,18 @@ export const casesChangedSince = (
 ): CaseRow[] => db.all(Q.changedSince, { project, rev: from.rev, id: from.id, limit });
 export const tagCounts = (db: Db, project: number) => db.all(Q.tags, { project });
 export const requirementList = (db: Db, project: number) => db.all(Q.requirements, { project });
+/** The active cases, with what each says about automating it, by number. */
+export const automationOfCases = (db: Db, project: number) => db.all(Q.automation, { project });
+/** Every requirement, by key, with the ids of the active cases that cover it. */
+export function requirementCases(db: Db, project: number): { key: string; title: string; cases: number[] }[] {
+	const out: { key: string; title: string; cases: number[] }[] = [];
+	for (const row of db.all(Q.covering, { project })) {
+		const last = out.at(-1);
+		const entry = last?.key === row.key ? last : { key: row.key, title: row.title, cases: [] };
+		if (entry !== last) out.push(entry);
+		if (row.case_id !== null && !entry.cases.includes(row.case_id)) entry.cases.push(row.case_id);
+	}
+	return out;
+}
 export const casesCovering = (db: Db, project: number, key: string): CaseRow[] =>
 	db.all(Q.casesCovering, { project, key });

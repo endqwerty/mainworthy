@@ -20,6 +20,7 @@ export const BUDGETS = {
 	execute: 50,
 	mixed: 50,
 	smallIngest: 1_000,
+	report: 100,
 };
 
 const stamp = z.object({ ref: z.string(), version: z.number().int(), hash: z.string() });

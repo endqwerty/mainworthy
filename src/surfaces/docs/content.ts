@@ -32,6 +32,7 @@ import policy from "../../../docs/guide/policy.md" with { type: "text" };
 import privacy from "../../../docs/guide/privacy.md" with { type: "text" };
 import quickstart from "../../../docs/guide/quickstart.md" with { type: "text" };
 import reportResults from "../../../docs/guide/report-results.md" with { type: "text" };
+import reports from "../../../docs/guide/reports.md" with { type: "text" };
 import runs from "../../../docs/guide/runs.md" with { type: "text" };
 import troubleshooting from "../../../docs/guide/troubleshooting.md" with { type: "text" };
 import writeCases from "../../../docs/guide/write-cases.md" with { type: "text" };
@@ -41,6 +42,8 @@ import changesDark from "../../../docs/ui/screenshots/changes-dark.png" with { t
 import changesLight from "../../../docs/ui/screenshots/changes-light.png" with { type: "file" };
 import queueDark from "../../../docs/ui/screenshots/queue-dark.png" with { type: "file" };
 import queueLight from "../../../docs/ui/screenshots/queue-light.png" with { type: "file" };
+import reportsDark from "../../../docs/ui/screenshots/reports-dark.png" with { type: "file" };
+import reportsLight from "../../../docs/ui/screenshots/reports-light.png" with { type: "file" };
 import runsDark from "../../../docs/ui/screenshots/runs-dark.png" with { type: "file" };
 import runsLight from "../../../docs/ui/screenshots/runs-light.png" with { type: "file" };
 import settingsDark from "../../../docs/ui/screenshots/settings-dark.png" with { type: "file" };
@@ -75,6 +78,7 @@ export const PAGES: Readonly<Record<DocSlug, string>> = {
 	"write-cases": writeCases,
 	"import-cases": importCases,
 	"report-results": reportResults,
+	reports,
 	decide,
 	runs,
 	changes,
@@ -117,6 +121,8 @@ export const SCREENSHOTS: Readonly<Record<string, string>> = {
 	"changes-light": changesLight,
 	"queue-dark": queueDark,
 	"queue-light": queueLight,
+	"reports-dark": reportsDark,
+	"reports-light": reportsLight,
 	"runs-dark": runsDark,
 	"runs-light": runsLight,
 	"settings-dark": settingsDark,

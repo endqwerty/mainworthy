@@ -47,6 +47,8 @@ export type HistoryEvent = Base &
 				};
 				/** The automated cases that failed. Every other one passed. */
 				failures: Failure[];
+				/** A rerun: the attempt, and the cases it ran again. Absent: the first attempt, of every automated case. */
+				rerun?: { attempt: number; cases: number[] };
 				/** Varies the durations of this report's results. */
 				jitter: number;
 		  }
@@ -112,6 +114,8 @@ const ASSERTIONS = [
 	"expected status Shipped, got Processing",
 	"expected the confirmation email, got none",
 ];
+/** What the flaky test says when it fails; the job runs it again and it passes. */
+const FLAKE = "socket hang up while waiting for the payment widget";
 /** What a night without its services looks like: one cause in several tests. */
 const OUTAGES: readonly (readonly [message: string, reason: string])[] = [
 	["connect ECONNREFUSED payments-sandbox.internal:443", "The payment sandbox was down for the night."],
@@ -214,6 +218,11 @@ export function demoHistory(options: {
 	);
 	const outageNight = nights[2];
 
+	// ── A test that sometimes fails on `main` and passes when the job runs it again (decision 0094). Its own
+	// stream, so the rest of the history stays as it was. Not the quarantined test, which is the first. ──
+	const flakyRng = random(options.seed ^ 0x3c6ef372);
+	const flaky = automated.length > 1 ? automated[1 + Math.floor(flakyRng() * (automated.length - 1))] : undefined;
+
 	// ── The pull requests, numbered up to the one before today's. ──
 	// Draw the quieter days from their own stream, so the real weekday only changes dates.
 	const firstWeekday = between(random(options.seed ^ 0x85ebca6b), 0, 7);
@@ -242,14 +251,25 @@ export function demoHistory(options: {
 			: outage
 				? failing("Checkout/Payment", 4).map((index) => ({ case: index, message: outageMessage }))
 				: [];
+		const flakes = flakyRng() < 0.4 && failures.length === 0 && flaky !== undefined;
 		events.push({
 			kind: "pipeline",
 			at: nightAt,
 			step: `n${ago}`,
 			target: { commit: main, branch: "main" },
-			failures,
+			failures: flakes ? [{ case: flaky, message: FLAKE }] : failures,
 			jitter: rng(),
 		});
+		if (flakes)
+			events.push({
+				kind: "pipeline",
+				at: nightAt + 9 * MINUTE,
+				step: `n${ago}r`,
+				target: { commit: main, branch: "main" },
+				failures: [],
+				rerun: { attempt: 2, cases: [flaky] },
+				jitter: 0.5,
+			});
 		if (n === 0) events.push({ kind: "link", at: nightAt + 12 * MINUTE, step: "link" });
 		if (failures.length > 0)
 			events.push({

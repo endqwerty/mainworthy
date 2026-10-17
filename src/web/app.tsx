@@ -23,6 +23,7 @@ import { navigate, projectUrl, readRoute, refUrl, routeUrl, type Screen, useRout
 import { signOut } from "./lib/signin.ts";
 import { PhoneBar, usePhoneShell } from "./phone.tsx";
 import { QueueScreen } from "./queue/index.tsx";
+import { ReportsScreen } from "./reports/index.tsx";
 import { RunsScreen } from "./runs/index.tsx";
 import { SettingsScreen } from "./settings/index.tsx";
 import { SignIn } from "./signin/index.tsx";
@@ -43,6 +44,7 @@ const screens = {
 	runs: RunsScreen,
 	changes: ChangesScreen,
 	tests: TestsScreen,
+	reports: ReportsScreen,
 	settings: SettingsScreen,
 } satisfies Record<Screen, typeof SuiteScreen>;
 type Place = { screen: Screen; label: string; icon: string; key: string };
@@ -53,6 +55,7 @@ const navigation: Place[] = [
 	{ screen: "runs", label: "Runs", icon: "▷", key: "g r" },
 	{ screen: "changes", label: "Changes", icon: "↗", key: "g c" },
 	{ screen: "tests", label: "Tests", icon: "≡", key: "g t" },
+	{ screen: "reports", label: "Reports", icon: "%", key: "g o" },
 ];
 /** Not a place of the work, so not in the navigation: it is in the sidebar's footer, beside who is signed in. */
 const settings: Place = { screen: "settings", label: "Settings", icon: "⚙︎", key: "g ," };

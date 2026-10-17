@@ -7,7 +7,7 @@ import type { Api } from "../core/api.ts";
 import { type ActorKind, type Capability, PolicySettings } from "../core/kinds.ts";
 import { ProposeReply } from "../core/ops.ts";
 import type { Client } from "./client.ts";
-import { type DemoCase, demoCases, random } from "./demo/cases.ts";
+import { automateOf, type DemoCase, demoCases, random, requirementOf } from "./demo/cases.ts";
 import { DEMO_FIELDS, demoAliases, demoFields } from "./demo/fields.ts";
 import { dayStart, demoHistory, type Failure, hex, REPO } from "./demo/history.ts";
 import { CliError } from "./errors.ts";
@@ -237,7 +237,7 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 					title: item.title,
 					pre: item.pre,
 					methods: ["human", "auto", "agent"],
-					automate: "none",
+					automate: automateOf(item, offset + n),
 					// The first case is the one today's questions are about, and the tests of the web app read it.
 					fields: offset + n === 0 ? {} : demoFields(item),
 					steps: item.steps,
@@ -247,6 +247,17 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 		const at = suiteAt + Math.min((offset / 250) * 5_000, 25 * MINUTE);
 		const reply = await write(owner, "propose", `cases-${offset}`, at, { edits });
 		refs.push(...reply.cases.map((item) => item.ref));
+	}
+	// Each case covers the requirement of its feature, which the coverage report reads (decision 0094).
+	for (let offset = 0; offset < cases; offset += 250) {
+		const edits: Api["propose"]["input"]["edits"] = suite.slice(offset, offset + 250).flatMap((item, n) => {
+			const ref = refs[offset + n];
+			const requirement = requirementOf(item.folder);
+			return ref && requirement
+				? [{ op: "cover", case: ref, requirement: requirement.key, title: requirement.title, on: true }]
+				: [];
+		});
+		if (edits.length > 0) await write(owner, "propose", `covers-${offset}`, suiteAt + 26 * MINUTE, { edits });
 	}
 	const first = refs[0];
 	if (!first) throw new CliError("internal", "the server created no case");
@@ -263,10 +274,16 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 
 	// ── What a pipeline reports: every automated case, each as the test that covers it. ──
 	const tests = suite.flatMap((item, index) => (item.test ? [{ index, test: item.test }] : []));
-	const pipelineResults = (failures: readonly Failure[], jitter: number, attach = false): Result[] =>
-		tests.map(({ index, test }, n) => {
+	const pipelineResults = (
+		failures: readonly Failure[],
+		jitter: number,
+		attach = false,
+		only: readonly number[] | null = null,
+	): Result[] =>
+		tests.flatMap(({ index, test }, n) => {
+			if (only && !only.includes(index)) return [];
 			const failure = failures.find((item) => item.case === index);
-			return {
+			const result = {
 				test,
 				outcome: failure ? "fail" : "pass",
 				durationMs: Math.round((300 + ((n * 7919) % 4200)) * (0.85 + jitter * 0.3)),
@@ -275,6 +292,7 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 				...(failure && attach ? { attachments: [traceOf(test.name, failure.message)] } : {}),
 				annotation: { case: refOf(index), version: 1 },
 			} satisfies Result;
+			return [result];
 		});
 
 	/**
@@ -315,7 +333,8 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 				const receipt = await write(ci, "report", event.step, event.at, {
 					target: { ...event.target, repo: REPO },
 					job: "shop",
-					results: pipelineResults(event.failures, event.jitter),
+					...(event.rerun ? { attempt: event.rerun.attempt } : {}),
+					results: pipelineResults(event.failures, event.jitter, false, event.rerun?.cases ?? null),
 				});
 				opened.set(event.step, stillOpen(receipt.questions));
 				break;

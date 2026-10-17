@@ -14,8 +14,8 @@ It was called Casebook until 2026-10-13 ([decision 0015](docs/decisions/0015-the
 
 The other screens, in both themes, are in [docs/ui/screenshots](docs/ui/screenshots): the
 [queue](docs/ui/screenshots/queue-dark.png), a [run](docs/ui/screenshots/runs-light.png), a
-[change](docs/ui/screenshots/changes-light.png), a [case with its diff](docs/ui/screenshots/case-light.png) and
-[settings](docs/ui/screenshots/settings-light.png).
+[change](docs/ui/screenshots/changes-light.png), a [case with its diff](docs/ui/screenshots/case-light.png), the
+[reports](docs/ui/screenshots/reports-light.png) and [settings](docs/ui/screenshots/settings-light.png).
 
 ## Start (no account, no configuration)
 

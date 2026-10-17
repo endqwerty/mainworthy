@@ -1,0 +1,173 @@
+// What the reports read of the results (decision 0094). Facts only: nothing here changes a gate or an excuse.
+
+import type { LocalDay } from "../../core/days.ts";
+import type { MethodKind } from "../../core/model.ts";
+import type { OutcomeCounts } from "../../core/stats.ts";
+import { type Db, sql } from "../kernel/db.ts";
+
+type Window = { project: number; from: number; to: number };
+type Tally = { slot: number; outcome: string; quarantined: number; n: number };
+/**
+ * The results are counted in quarters of an hour, and each quarter falls in one of the reader's days: every time
+ * zone's midnight is a whole quarter of an hour in UTC. Joining each result to its day in SQL cost ten times more.
+ */
+const SLOT = 900_000;
+
+const Q = {
+	// Each lane (a target, test, producer, method and job) counts the result it ended with: ranked by the rule a
+	// gate counts with (`replacesInLane`), for results that arrived in the order of their attempts. A decisive
+	// result (pass, fail, error) before one that decided nothing, a higher attempt before a lower, the worse of one
+	// attempt, then the later. A corrected result is not ranked: its correction stands in its place.
+	effective: sql<Window & { method: string | null }, Tally>(`
+		WITH ranked AS (
+		  SELECT r.at, r.outcome, r.quarantine_decision IS NOT NULL AS quarantined,
+		         row_number() OVER (
+		           PARTITION BY r.target, r.test, r.actor, r.method, b.job
+		           ORDER BY r.outcome IN ('pass', 'fail', 'error') DESC, r.attempt DESC,
+		                    CASE r.outcome WHEN 'fail' THEN 3 WHEN 'error' THEN 3 WHEN 'pass' THEN 2 WHEN 'blocked' THEN 1 ELSE 0 END DESC,
+		                    r.seq DESC, r.ord DESC
+		         ) AS rank
+		  FROM results r JOIN batches b ON b.id = r.batch
+		  WHERE r.project = $project AND r.at >= $from AND r.at < $to AND ($method IS NULL OR r.method = $method)
+		    AND NOT EXISTS (SELECT 1 FROM results c WHERE c.corrects = r.id)
+		)
+		SELECT k.at / ${SLOT} AS slot, k.outcome, k.quarantined, count(*) AS n
+		FROM ranked k WHERE k.rank = 1
+		GROUP BY slot, k.outcome, k.quarantined
+	`),
+	flaky: sql<{ project: number; since: number }, { test: number; flips: number; last_at: number }>(`
+		SELECT f.test, count(*) AS flips, max(r.at) AS last_at
+		FROM flips f JOIN results r ON r.id = f.second_result
+		WHERE f.project = $project AND r.at >= $since
+		GROUP BY f.test ORDER BY flips DESC, last_at DESC, f.test
+	`),
+	reporting: sql<{ project: number; since: number }, { n: number }>(`
+		SELECT count(DISTINCT r.test) AS n FROM results r
+		WHERE r.project = $project AND r.at >= $since AND r.method = 'auto'
+	`),
+	// An attempt that a higher attempt of the same lane repeated. A corrected result, and a correction, are a
+	// producer saying it was wrong, not a rerun.
+	reruns: sql<{ project: number; since: number }, { test: number; reruns: number; lost: number; unknown: number }>(`
+		SELECT r.test, count(*) AS reruns, coalesce(sum(r.duration_ms), 0) AS lost, sum(r.duration_ms IS NULL) AS unknown
+		FROM results r JOIN batches b ON b.id = r.batch
+		WHERE r.project = $project AND r.at >= $since
+		  AND NOT EXISTS (SELECT 1 FROM results c WHERE c.corrects = r.id)
+		  AND EXISTS (
+		    SELECT 1 FROM results n JOIN batches nb ON nb.id = n.batch
+		    WHERE n.target = r.target AND n.test = r.test AND n.actor = r.actor AND n.method = r.method
+		      AND nb.job = b.job AND n.attempt > r.attempt AND n.corrects IS NULL
+		  )
+		GROUP BY r.test
+	`),
+	automated: sql<{ project: number }, { case_id: number }>(
+		"SELECT DISTINCT case_id FROM tests WHERE project = $project AND kind = 'auto' AND case_id IS NOT NULL",
+	),
+	byHand: sql<{ project: number; since: number }, { case_id: number; runs: number; time: number | null }>(`
+		SELECT t.case_id, count(*) AS runs, sum(r.duration_ms) AS time
+		FROM results r JOIN tests t ON t.id = r.test
+		WHERE r.project = $project AND r.at >= $since AND r.method = 'human' AND t.case_id IS NOT NULL
+		  AND NOT EXISTS (SELECT 1 FROM results c WHERE c.corrects = r.id)
+		GROUP BY t.case_id
+	`),
+	// `+r.at` keeps each test's read on `results_test`, newest first, which stops at its first match; on
+	// `results_at` it would read the whole window once for every test.
+	latest: sql<{ project: number; since: number; cases: string }, { case_id: number; outcome: string | null }>(`
+		SELECT t.case_id, (
+		  SELECT r.outcome FROM results r
+		  WHERE r.project = t.project AND r.test = t.id AND +r.at >= $since
+		    AND NOT EXISTS (SELECT 1 FROM results c WHERE c.corrects = r.id)
+		  ORDER BY r.seq DESC, r.ord DESC LIMIT 1
+		) AS outcome
+		FROM tests t WHERE t.project = $project AND t.case_id IN (SELECT value FROM json_each($cases))
+	`),
+};
+
+const empty = (): OutcomeCounts => ({ pass: 0, fail: 0, skip: 0, blocked: 0, quarantined: 0, rate: null });
+function add(counts: OutcomeCounts, outcome: string, quarantined: boolean, n: number): void {
+	if (outcome === "pass") counts.pass += n;
+	else if (outcome === "skip") counts.skip += n;
+	else if (outcome === "blocked") counts.blocked += n;
+	else if (quarantined) counts.quarantined += n;
+	else counts.fail += n;
+}
+const rated = (counts: OutcomeCounts): OutcomeCounts => {
+	const decided = counts.pass + counts.fail;
+	return { ...counts, rate: decided === 0 ? null : counts.pass / decided };
+};
+
+/**
+ * Each day's results, one per lane: the result each lane (a target, test, producer, method and job) ended with in
+ * the window. An attempt that was run again, and a result its producer corrected, are not counted. A failure that a
+ * quarantine covered is counted as `quarantined`, apart from `fail`.
+ */
+export function outcomesByDay(
+	db: Db,
+	input: { project: number; days: readonly LocalDay[]; method: MethodKind | null },
+): OutcomeCounts[] {
+	const counts = input.days.map(empty);
+	const from = input.days[0]?.from ?? 0;
+	const to = input.days.at(-1)?.to ?? 0;
+	for (const row of db.all(Q.effective, { project: input.project, from, to, method: input.method })) {
+		const at = row.slot * SLOT;
+		const day = counts[input.days.findIndex((d) => at >= d.from && at < d.to)];
+		if (day) add(day, row.outcome, row.quarantined === 1, row.n);
+	}
+	return counts.map(rated);
+}
+
+/** The sum of several days' counts, with its own rate. */
+export function totalOf(days: readonly OutcomeCounts[]): OutcomeCounts {
+	const total = empty();
+	for (const day of days) {
+		total.pass += day.pass;
+		total.fail += day.fail;
+		total.skip += day.skip;
+		total.blocked += day.blocked;
+		total.quarantined += day.quarantined;
+	}
+	return rated(total);
+}
+
+/** Tests with a flip (a pass and a failure on the same code) since a moment, the most flips first. */
+export const flakyTests = (db: Db, project: number, since: number) => db.all(Q.flaky, { project, since });
+/** How many automated tests reported a result since a moment. */
+export const testsReporting = (db: Db, project: number, since: number): number =>
+	db.get(Q.reporting, { project, since })?.n ?? 0;
+/** Per test, the attempts since a moment that a later attempt in their lane repeated, and their time. */
+export const rerunsByTest = (db: Db, project: number, since: number) => db.all(Q.reruns, { project, since });
+/** The cases with at least one automated test. */
+export const automatedCases = (db: Db, project: number): Set<number> =>
+	new Set(db.all(Q.automated, { project }).map((row) => row.case_id));
+/** Per case, the results a person recorded since a moment, and the time of those that said it. */
+export const runsByHand = (db: Db, project: number, since: number) => db.all(Q.byHand, { project, since });
+
+export type CaseOutcome = "passed" | "failed" | "other" | "notRun";
+/**
+ * Each case by the latest result of each of its tests since a moment: failed when one of them failed, passed when
+ * none failed and one passed, other when they were only skipped or blocked, not run when none has a result.
+ */
+export function caseOutcomes(
+	db: Db,
+	project: number,
+	cases: readonly number[],
+	since: number,
+): Map<number, CaseOutcome> {
+	const latest = new Map<number, string[]>();
+	for (const row of db.all(Q.latest, { project, since, cases: JSON.stringify(cases) }))
+		if (row.outcome !== null) latest.set(row.case_id, [...(latest.get(row.case_id) ?? []), row.outcome]);
+	const out = new Map<number, CaseOutcome>();
+	for (const id of cases) {
+		const outcomes = latest.get(id) ?? [];
+		out.set(
+			id,
+			outcomes.some((o) => o === "fail" || o === "error")
+				? "failed"
+				: outcomes.includes("pass")
+					? "passed"
+					: outcomes.length > 0
+						? "other"
+						: "notRun",
+		);
+	}
+	return out;
+}

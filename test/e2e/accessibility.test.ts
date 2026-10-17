@@ -254,6 +254,9 @@ test.skipIf(!browserAvailable)(
 			await page.keyboard.press("Escape");
 			await visit("/p/scratch/changes", "#list [role=option]");
 			await scan("changes");
+			// The pass rate holds what the other reports have (a select, a table, links) and the chart besides.
+			await visit("/p/scratch/reports/pass-rate", "#detail .report-hero");
+			await scan("reports");
 			await visit("/p/scratch/settings", "#detail h2");
 			for (const section of [
 				"Policy",

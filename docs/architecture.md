@@ -61,7 +61,7 @@ an operation named like a shortcut (`createCase`, `closeRun`) appears.
 | Produce evidence | `propose` (create or change cases, folders, links, the policy) · `report` (results) · `claim` (a review and its findings) |
 | Request evidence | `plan` (start a run) |
 | Decide | `decide` (answer a question, or withdraw a decision) |
-| Read | `inbox` · `get` · `find` · `impact` · `since` · `gate` · `history` · `timeline` · `check` · `command` |
+| Read | `inbox` · `get` · `find` · `impact` · `since` · `gate` · `history` · `timeline` · `check` · `stats` · `command` |
 | Administer | `admin` (projects, actors, grants, tokens) |
 | Sign in as yourself | `session` (your browser sessions: list, end) · `credential` (your password and passkeys: list, register a passkey, remove) · `invitation` (an admin invites a person with a link) |
 

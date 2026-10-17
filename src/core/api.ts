@@ -28,6 +28,7 @@ import type {
 } from "./ops.ts";
 import type { CredentialInput, CredentialSummary, InvitationInput, SessionInput } from "./people.ts";
 import type { REPLIES } from "./replies.ts";
+import type { StatsInput } from "./stats.ts";
 import type { TrackerInput, TrackerStatusInput } from "./tracker.ts";
 
 type In<S extends z.ZodType> = z.input<S>;
@@ -55,6 +56,7 @@ type Inputs = {
 	history: In<typeof HistoryInput>;
 	timeline: In<typeof TimelineInput>;
 	check: In<typeof CheckInput>;
+	stats: In<typeof StatsInput>;
 	command: In<typeof CommandInput>;
 	admin: In<typeof AdminInput>;
 	session: In<typeof SessionInput>;

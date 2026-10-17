@@ -16,6 +16,7 @@ try {
 			{ name: "queue", path: "/p/scratch/queue" },
 			{ name: "runs", path: `/p/scratch/runs/${run.slice(2)}` },
 			{ name: "changes", path: "/p/scratch/changes/pr%3A482" },
+			{ name: "reports", path: "/p/scratch/reports/pass-rate" },
 			{ name: "settings", path: "/p/scratch/settings" },
 		];
 		for (const item of pages) {

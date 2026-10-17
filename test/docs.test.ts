@@ -154,6 +154,7 @@ describe("what the docs must name", () => {
 			runs: "run",
 			changes: "Changes",
 			tests: "Tests",
+			reports: "Reports",
 			settings: "Settings",
 		};
 		for (const [screen, slug] of Object.entries(SCREEN_DOCS)) {
