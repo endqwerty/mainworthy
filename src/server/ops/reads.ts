@@ -32,11 +32,13 @@ import {
 	openCountOn,
 	openCounts,
 	openQuestionsOn,
+	parseQueueCursor,
 	type QuestionRow,
 	questionById,
 	questionRef,
 	questionsChangedSince,
 	questionsOn,
+	queueCursorOf,
 	queuePage,
 	refsOf,
 } from "../decisions/questions.ts";
@@ -147,14 +149,14 @@ export function inbox(ctx: Ctx, input: InboxInput): InboxReply {
 		const before = at ? { rev: Number(at[1]), id: Number(at[2]) } : null;
 		rows = ledgerPage(ctx.db, { project: ctx.project.id, kind: input.kind, before, limit: limit + 1 });
 	} else {
-		const after = input.cursor ? Number(input.cursor) : Number.MIN_SAFE_INTEGER;
-		if (Number.isNaN(after)) throw invalid("that is not a cursor of the queue");
+		const after = input.cursor ? (parseQueueCursor(input.cursor) ?? null) : null;
+		if (input.cursor && !after) throw invalid("that is not a cursor of the queue");
 		rows = queuePage(ctx.db, { project: ctx.project.id, state: "open", kind: input.kind, after, limit: limit + 1 });
 	}
 	const page = rows.slice(0, limit);
 	const last = page.at(-1);
 	const cursor =
-		rows.length > limit && last ? (input.state === "open" ? String(last.rank) : `${last.rev}.${last.id}`) : null;
+		rows.length > limit && last ? (input.state === "open" ? queueCursorOf(last) : `${last.rev}.${last.id}`) : null;
 	return { counts, items: page.map((row) => withTrackerPollError(ctx.db, toItemFor(ctx, row))), cursor };
 }
 

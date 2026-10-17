@@ -188,13 +188,18 @@ const Q = {
 		`SELECT count(*) AS n FROM question_refs r JOIN questions q ON q.id = r.question
 		 WHERE r.project = $project AND r.ref = $ref AND q.state = 'open'`,
 	),
-	queue: sql<{ project: number; state: string; rank: number; limit: number }, QuestionRow>(
-		`SELECT * FROM questions WHERE project = $project AND state = $state AND owner = 0 AND rank > $rank
-		 ORDER BY rank LIMIT $limit`,
+	// The queue is ordered by rank and id together: one report can raise many questions that share a rank, so a page
+	// cut on the rank alone would skip the rest of them. (`questions_queue` ends in the id, so no sort is needed.)
+	queue: sql<{ project: number; state: string; rank: number; id: number; limit: number }, QuestionRow>(
+		`SELECT * FROM questions WHERE project = $project AND state = $state AND owner = 0 AND (rank, id) > ($rank, $id)
+		 ORDER BY rank, id LIMIT $limit`,
 	),
-	queueOfKind: sql<{ project: number; state: string; kind: string; rank: number; limit: number }, QuestionRow>(
-		`SELECT * FROM questions WHERE project = $project AND state = $state AND owner = 0 AND rank > $rank AND kind = $kind
-		 ORDER BY rank LIMIT $limit`,
+	queueOfKind: sql<
+		{ project: number; state: string; kind: string; rank: number; id: number; limit: number },
+		QuestionRow
+	>(
+		`SELECT * FROM questions WHERE project = $project AND state = $state AND owner = 0 AND (rank, id) > ($rank, $id)
+		 AND kind = $kind ORDER BY rank, id LIMIT $limit`,
 	),
 	// Newest first. Several questions can be decided at one revision (one command), so the page is cut on the
 	// revision and the id together.
@@ -417,11 +422,25 @@ export const everyQuestionOn = (db: Db, project: number, about: string): Questio
 export const openCountOn = (db: Db, project: number, about: string): number =>
 	db.get(Q.openCountOnRef, { project, ref: about })?.n ?? 0;
 
+/** A position in the queue: the rank and id of the last question seen. A client holds it as an opaque string. */
+export type QueueCursor = { rank: number; id: number };
+
+export const queueCursorOf = (row: Pick<QuestionRow, "rank" | "id">): string => `${row.rank}:${row.id}`;
+
+/** The position a cursor names, or `undefined` for text that no page gave. */
+export function parseQueueCursor(text: string): QueueCursor | undefined {
+	const at = /^(-?\d+):(\d+)$/.exec(text);
+	if (!at) return undefined;
+	const [rank, id] = [Number(at[1]), Number(at[2])];
+	return Number.isSafeInteger(rank) && Number.isSafeInteger(id) ? { rank, id } : undefined;
+}
+
 export function queuePage(
 	db: Db,
-	input: { project: number; state: "open"; kind: Kind | undefined; after: number; limit: number },
+	input: { project: number; state: "open"; kind: Kind | undefined; after: QueueCursor | null; limit: number },
 ) {
-	const base = { project: input.project, state: input.state, rank: input.after, limit: input.limit };
+	const at = input.after ?? { rank: Number.MIN_SAFE_INTEGER, id: Number.MIN_SAFE_INTEGER };
+	const base = { project: input.project, state: input.state, rank: at.rank, id: at.id, limit: input.limit };
 	return input.kind ? db.all(Q.queueOfKind, { ...base, kind: input.kind }) : db.all(Q.queue, base);
 }
 
