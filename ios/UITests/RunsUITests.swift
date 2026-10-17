@@ -116,10 +116,13 @@ final class RunsUITests: XCTestCase {
 		app.launchArguments = ["-forget", "-instance", try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])]
 		app.launch()
 		try signIn(app)
-		app.buttons["project-menu"].tap()
-		app.buttons[project].tap()
-		app.tabBars.buttons["Runs"].tap()
+		app.openProject(project)
+		app.openTab("Runs")
 		XCTAssertTrue(app.staticTexts["Checkout regression"].waitForExistence(timeout: 15))
+		// The filters stay under the bar: pulling to refresh moves the runs, not them.
+		XCTAssertTrue(app.segmentedControls["runs-kind"].exists && app.segmentedControls["runs-state"].exists)
+		XCTAssertFalse(app.collectionViews.firstMatch.segmentedControls["runs-kind"].exists)
+		XCTAssertFalse(app.collectionViews.firstMatch.segmentedControls["runs-state"].exists)
 		let changeRun = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", " on pr:482")).firstMatch
 		XCTAssertTrue(changeRun.waitForExistence(timeout: 10))
 		shot("7-every-kind")
