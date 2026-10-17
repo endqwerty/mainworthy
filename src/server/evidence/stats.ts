@@ -50,10 +50,11 @@ const Q = {
 		WHERE r.project = $project AND r.at >= $since AND t.kind = 'auto'
 	`),
 	// An attempt that a higher attempt of the same lane repeated, once per attempt. What ran is an execution (a result
-	// that corrects nothing) at its own attempt; a correction says what that execution's outcome and time were, from the
-	// end of its chain of corrections, whatever attempt the correction was sent with (a correction is stored at an
-	// attempt no older than the one it corrects, so by its own attempt it could hide the attempt it repeats). Of several
-	// executions of one attempt, the one the attempt counted (the worse, then the later) gives its time.
+	// that corrects nothing) at its own attempt; its corrections say what its outcome and time were, whatever attempt
+	// they were sent with (a correction is stored at an attempt no older than the one it corrects, so by its own attempt
+	// it could hide the attempt it repeats). What stands of an execution is every result in its tree of corrections that
+	// nothing corrects in turn, as the gate counts it; of what stands for one attempt, the worse, then the later, gives
+	// its time.
 	reruns: sql<{ project: number; since: number }, { test: number; reruns: number; lost: number; unknown: number }>(`
 		WITH RECURSIVE executions AS (
 		  SELECT r.id, r.test, r.target, r.actor, r.method, b.job, r.attempt, r.outcome, r.duration_ms, r.seq, r.ord
@@ -65,25 +66,20 @@ const Q = {
 		        AND nb.job = b.job AND n.attempt > r.attempt AND n.corrects IS NULL
 		    )
 		),
-		chain(root, id, outcome, duration_ms, depth) AS (
-		  SELECT e.id, c.id, c.outcome, c.duration_ms, 1 FROM executions e JOIN results c ON c.corrects = e.id
+		chain(root, id, outcome, duration_ms, seq, ord) AS (
+		  SELECT e.id, e.id, e.outcome, e.duration_ms, e.seq, e.ord FROM executions e
 		  UNION ALL
-		  SELECT k.root, c.id, c.outcome, c.duration_ms, k.depth + 1 FROM chain k JOIN results c ON c.corrects = k.id
-		),
-		final AS (
-		  SELECT root, outcome, duration_ms FROM (
-		    SELECT *, row_number() OVER (PARTITION BY root ORDER BY depth DESC, id DESC) AS last FROM chain
-		  ) WHERE last = 1
+		  SELECT k.root, c.id, c.outcome, c.duration_ms, c.seq, c.ord FROM chain k JOIN results c ON c.corrects = k.id
 		),
 		attempts AS (
-		  SELECT e.test, coalesce(f.duration_ms, CASE WHEN f.root IS NULL THEN e.duration_ms END) AS duration_ms,
+		  SELECT e.test, k.duration_ms,
 		         row_number() OVER (
 		           PARTITION BY e.target, e.test, e.actor, e.method, e.job, e.attempt
-		           ORDER BY CASE coalesce(f.outcome, e.outcome) WHEN 'fail' THEN 3 WHEN 'error' THEN 3 WHEN 'pass' THEN 2
-		                      WHEN 'blocked' THEN 1 ELSE 0 END DESC,
-		                    e.seq DESC, e.ord DESC
+		           ORDER BY CASE k.outcome WHEN 'fail' THEN 3 WHEN 'error' THEN 3 WHEN 'pass' THEN 2 WHEN 'blocked' THEN 1 ELSE 0 END DESC,
+		                    k.seq DESC, k.ord DESC
 		         ) AS rank
-		  FROM executions e LEFT JOIN final f ON f.root = e.id
+		  FROM executions e JOIN chain k ON k.root = e.id
+		  WHERE NOT EXISTS (SELECT 1 FROM results c WHERE c.corrects = k.id)
 		)
 		SELECT a.test, count(*) AS reruns, coalesce(sum(a.duration_ms), 0) AS lost, sum(a.duration_ms IS NULL) AS unknown
 		FROM attempts a WHERE a.rank = 1
