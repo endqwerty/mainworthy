@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { z } from "zod";
-import { ANSWER_LABELS, ANSWERS, Ask, Blocks, clauseOf, Kind, Policy, PolicySettings } from "../../core/kinds.ts";
+import { ANSWER_LABELS, Ask, Blocks, clauseOf, Kind, Policy, PolicySettings } from "../../core/kinds.ts";
 import type { QuestionItem } from "../../core/ops.ts";
 import { whoAnswers } from "../../core/policy-guide.ts";
 import { policyProblem } from "../../core/presets.ts";
@@ -41,8 +41,6 @@ function validate(draft: Draft): { policy: Policy; problem: null } | { policy: n
 		for (const clause of policy.clauses) {
 			if (ids.has(clause.id)) return { policy: null, problem: `Clause ids must be unique: ${clause.id}` };
 			ids.add(clause.id);
-			if (clause.ask.who === "rule" && !ANSWERS[clause.kind].safeParse(clause.answer).success)
-				return { policy: null, problem: `Clause ${clause.id} needs a valid ${clause.kind} rule answer.` };
 		}
 		const problem = policyProblem(policy);
 		return problem ? { policy: null, problem } : { policy, problem: null };
