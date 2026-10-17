@@ -8,7 +8,7 @@
     "quality_profile": "showcase",
     "repository": {
       "url": "git@github.com:endqwerty/mainworthy.git",
-      "revision": "7f776a78817fb916f83e9b163b0272b52e6ddba9",
+      "revision": "5902b9c5de36e6bb203bf043a1a21b637f62cbe8",
       "link_mode": "local-only"
     }
   },
@@ -416,7 +416,7 @@
       "items": [
         "An open failure question is closed without an answer in two cases. One, closeAnswered: another answer in force already covers every build it had seen the cause on. Two, dissolveStale: nothing that speaks for it still shows the cause (the newest commit's run in its scope, and every open planned run the question names) and something shows it gone.",
         "Gone means: one of its tests that a commit's gate counted as failing with the cause now passes on the newest commit, or a named planned run has cleared. A late report for an older commit, a pipeline's pass where a run asked for an agent, or a pipeline's pass of a test only an agent showed failing closes nothing: a failure only an agent showed stays asked about until a person answers.",
-        "An answer that says the target needs a fix (defect, test, expected) ends by the rule passed when the newest commit of its scope shows no test failing with the cause and every test the question lists passing in each environment where it had failed since the question opened, whichever job ran it (endPassed). It is recorded as outdated through endHold, like an expiry, and the question closes as dissolved. flaky, infra and inherited do not end on a pass.",
+        "An answer that says the target needs a fix (defect, test, expected) ends by the rule passed when the newest commit of its scope shows no test failing with the cause and every test the question lists passing in each environment where it has failed with the cause in its scope, whichever job ran it (endPassed). It is recorded as outdated through endHold, like an expiry, and the question closes as dissolved. flaky, infra and inherited do not end on a pass.",
         "Dissolved questions and decisions remain in the record. If the same cause returns, raise opens the next epoch."
       ]
     }
