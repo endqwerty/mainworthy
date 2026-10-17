@@ -273,6 +273,7 @@ Search cases by text, folder or tag; list tests (`unlinked: true`), runs or slot
 | `deep` | `boolean` | no | With `folder`: include its subfolders. |
 | `tags` | `array<string>` | no |  |
 | `state` | `string` | no |  |
+| `origin` | `"planned" \| "change"` | no | For runs: planned by hand, or one per reported commit. |
 | `run` | `string` | no | For slots: the run. |
 | `commit` | `string` | no | For results: the commit. |
 | `change` | `string` | no | For results: a change key (pr:482). |
