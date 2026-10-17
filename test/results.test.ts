@@ -216,6 +216,34 @@ describe("the results behind a gate", () => {
 		}
 	});
 
+	test("the queue's pages reach every question one report raised, however many share a rank (issue #367)", () => {
+		const k = harness({ unlinked: "ask" });
+		try {
+			// One question is raised for each file with tests that no case covers, so each test has its own file.
+			const report = ciReport({ commit: "probe002", n: 1100 });
+			k.call("report", {
+				...report,
+				results: report.results.map((row, i) => ({
+					...row,
+					test: { ...row.test, key: `tests/file${i}.spec.ts::test ${i}`, file: `tests/file${i}.spec.ts` },
+				})),
+			});
+			expect(k.call<InboxReply>("inbox", { limit: 1 }).counts.open).toBe(1100);
+			const listed: string[] = [];
+			let page = k.call<InboxReply>("inbox", { limit: 99 });
+			for (;;) {
+				listed.push(...page.items.map((item) => item.q));
+				if (!page.cursor) break;
+				page = k.call<InboxReply>("inbox", { limit: 99, cursor: page.cursor });
+			}
+			expect(listed).toHaveLength(1100);
+			expect(new Set(listed).size).toBe(1100);
+			expect(() => k.call("inbox", { cursor: "12" })).toThrow(/not a cursor of the queue/);
+		} finally {
+			k.close();
+		}
+	});
+
 	test("the list of tests finds a test by its file", () => {
 		h.call("report", {
 			target,

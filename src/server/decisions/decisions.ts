@@ -397,7 +397,8 @@ function* openSteps(
 		basis,
 		ask: clause.ask,
 		blocks: blockedRuns(clause.blocks, r.runs),
-		// Most blocking first, then newest first: one ascending range read is the queue.
+		// Most blocking first, then newest first: one ascending range read is the queue. One command that raises
+		// more than 1,000 questions repeats ranks, so the queue is read by rank and id together.
 		rank: -(priorityOf(r.kind, clause.blocks) * 1_000_000_000_000 + ctx.seq * 1000 + (ctx.ord() % 1000)),
 		refs: r.refs,
 	});
@@ -442,8 +443,7 @@ function* ruleTakesUnlinkedSteps(ctx: Ctx): Generator<undefined, number, void> {
 	const policy = currentPolicy(ctx.db, ctx.project.id);
 	if (!policy.clauses.some((clause) => clause.kind === "map" && clause.ask.who === "rule")) return 0;
 	let taken = 0;
-	// Every one of them, by id: the queue's order cannot page them, because questions raised by one report can
-	// share a rank.
+	// Every one of them, by id: answering one changes the queue the loop would be reading.
 	for (const id of openQuestionIds(ctx.db, ctx.project.id, "map")) {
 		const question = questionById(ctx.db, id);
 		if (question?.state !== "open") continue;
