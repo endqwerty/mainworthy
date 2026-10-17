@@ -1619,12 +1619,23 @@ export function SuiteScreen() {
 				: cached,
 		);
 		queryClient.setQueryData<Api["get"]["reply"]>(detailKey, (cached) => cached?.map(applied(detailMade, true)));
-		const draftTags = { before: oldDraft?.tags ?? [], after: oldDraft?.tags ?? [] };
-		if (oldDraft?.ref) {
-			const changed = patch({ ref: oldDraft.ref, tags: oldDraft.tags }, true);
-			draftTags.after = z.array(z.string()).parse(changed.tags);
-			change({ ...oldDraft, tags: draftTags.after });
+		const tagsOf = (value: unknown): string[] => {
+			const parsed = z.array(z.string()).safeParse(value);
+			return parsed.success ? parsed.data : [];
+		};
+		// The tags each case this change touches held before it and after it, for a draft of that case: one that is
+		// open now, or one the person opens while the change is on its way (it takes its tags from the page).
+		const draftTags = new Map<string, { before: string[]; after: string[] }>();
+		for (const edit of edits) {
+			if (edit.op !== "place" && edit.op !== "state") continue;
+			for (const ref of edit.cases) {
+				const held = (detailMade.get(ref) ?? listMade.get(ref))?.before.tags;
+				const before = oldDraft?.ref === ref ? oldDraft.tags : tagsOf(held);
+				draftTags.set(ref, { before, after: tagsOf(patch({ ref, tags: before }, true).tags) });
+			}
 		}
+		const open = oldDraft?.ref ? draftTags.get(oldDraft.ref) : undefined;
+		if (oldDraft && open) change({ ...oldDraft, tags: open.after });
 		/** Takes back this change alone, from the cache and the draft as they are now (issue #383). */
 		return () => {
 			queryClient.setQueryData<typeof list.data>(listKey, (cached) =>
@@ -1634,22 +1645,47 @@ export function SuiteScreen() {
 			);
 			queryClient.setQueryData<Api["get"]["reply"]>(detailKey, (cached) => cached?.map(undone(detailMade)));
 			const current = draftRef.current;
-			if (oldDraft && current?.id === oldDraft.id) {
-				const tags = z
-					.array(z.string())
-					.parse(undoChange({ tags: current.tags }, { tags: draftTags.before }, { tags: draftTags.after }).tags);
-				if (JSON.stringify(tags) !== JSON.stringify(current.tags)) change({ ...current, tags });
+			const own = current?.ref ? draftTags.get(current.ref) : undefined;
+			if (!current || !own) return;
+			const undoTags = (tags: string[]): string[] =>
+				tagsOf(undoChange({ tags }, { tags: own.before }, { tags: own.after }).tags);
+			const tags = undoTags(current.tags);
+			const originalTags = undoTags(current.originalTags);
+			const same = (left: string[], right: string[]): boolean => JSON.stringify(left) === JSON.stringify(right);
+			if (!same(tags, current.tags)) change({ ...current, tags });
+			// A draft opened while the change was on its way was based on the page with the change in it.
+			const latest = draftRef.current;
+			if (latest?.id === current.id && !same(originalTags, latest.originalTags)) {
+				const based = { ...latest, originalTags };
+				followDraft(based);
+				if (based.dirty && mayWrite(based.id)) writeOwnedDraft(based);
 			}
 		};
+	}
+	/**
+	 * The placements on their way. A read of the project replaces the page's rows with the server's, and so erases
+	 * the optimistic change of every placement still on its way (issue #383). The read a settled placement owes
+	 * waits for the last one.
+	 */
+	const placing = useRef({ inFlight: 0, owed: false });
+	function settlePlacement(wantsRead: boolean): Promise<void> {
+		const state = placing.current;
+		state.inFlight -= 1;
+		if (wantsRead) state.owed = true;
+		if (state.inFlight > 0 || !state.owed) return Promise.resolve();
+		state.owed = false;
+		return invalidateProject(project);
 	}
 	async function placement(edits: Edit[], inverse: Edit[]): Promise<void> {
 		const rollback = optimisticPlacement(edits);
 		const previous = undo.current?.queued ? null : undo.current;
 		const count = selection().length;
+		placing.current.inFlight += 1;
 		const ready = call("propose", { edits }, { project, owner });
 		const action: PlacementUndo = { edits: inverse, ready, queued: false };
 		undo.current = action;
 		setStatus(`${count} case${count === 1 ? "" : "s"} changing. Press u to undo.`);
+		let wantsRead = false;
 		try {
 			const reply = await ready;
 			if (!sessionCurrent(owner)) return;
@@ -1662,14 +1698,16 @@ export function SuiteScreen() {
 				setStatus(`${count} case${count === 1 ? "" : "s"} changed. Press u to undo.`);
 			}
 			setPicked(new Set());
-			if (!action.queued || reply.status !== "adopted") await invalidateProject(project);
+			wantsRead = !action.queued || reply.status !== "adopted";
 		} catch (error) {
 			if (!sessionCurrent(owner)) return;
 			rollback();
 			setHidden(new Set());
 			if (undo.current === action) undo.current = previous;
 			setStatus(error instanceof Error ? error.message : "The change failed");
-			void invalidateProject(project);
+			wantsRead = true;
+		} finally {
+			await settlePlacement(wantsRead);
 		}
 	}
 	function move(): void {
@@ -1743,6 +1781,7 @@ export function SuiteScreen() {
 			}
 			if (original.status !== "adopted") return;
 			optimisticPlacement(action.edits);
+			placing.current.inFlight += 1;
 			try {
 				const reply = action.edits.length
 					? await call("propose", { edits: action.edits }, { project, owner })
@@ -1760,7 +1799,7 @@ export function SuiteScreen() {
 				action.queued = false;
 				setStatus(error instanceof Error ? error.message : "Undo failed. Press u to retry.");
 			}
-			void invalidateProject(project);
+			void settlePlacement(true);
 		} else if (view && view.version > 1) {
 			const focused = document.activeElement;
 			const raw =

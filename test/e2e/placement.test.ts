@@ -305,3 +305,134 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+function pending() {
+	let settle = () => {};
+	const promise = new Promise<void>((resolve) => {
+		settle = resolve;
+	});
+	return { promise, settle };
+}
+const failedReply = (message: string) => ({
+	status: 500,
+	contentType: "application/json",
+	body: JSON.stringify({ ok: false, error: { code: "internal", message } }),
+});
+async function tagSelected(page: Awaited<ReturnType<typeof openPage>>["page"], text: string): Promise<void> {
+	await page.keyboard.press("t");
+	await page.getByRole("textbox", { name: "Tag selected cases" }).fill(text);
+	await page.keyboard.press("Enter");
+}
+const ctags = async (page: Awaited<ReturnType<typeof openPage>>["page"]): Promise<string> =>
+	(await page.locator(".ctags").textContent()) ?? "";
+
+test.skipIf(!browserAvailable)(
+	"a failed tag leaves a second tag still on its way on the page",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", { edits: [{ op: "create", body: { title: "Two tags" } }] });
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		const first = pending();
+		const second = pending();
+		try {
+			const { page } = h;
+			await page.getByRole("button", { name: "Two tags", exact: true }).waitFor();
+			let seen = 0;
+			await page.context().route("**/api/p/scratch/propose", async (route) => {
+				seen += 1;
+				if (seen === 1) {
+					await first.promise;
+					await route.fulfill(failedReply("The first write failed"));
+				} else {
+					await second.promise;
+					await route.continue();
+				}
+			});
+			await tagSelected(page, "alpha");
+			await eventually(
+				async () => seen,
+				(count) => count === 1,
+			);
+			await tagSelected(page, "beta");
+			await eventually(
+				async () => seen,
+				(count) => count === 2,
+			);
+			await eventually(
+				() => ctags(page),
+				(text) => text.includes("#beta"),
+			);
+			// Before the fix a read of the project followed the failure at once and emptied the tags. The read is
+			// started in the same task as the failure's status, so counting the reads sent sees it however slow
+			// the machine; it is owed until the second tag settles.
+			const reads: string[] = [];
+			page.on("request", (request) => {
+				if (/\/api\/p\/scratch\/(get|find)$/.test(request.url())) reads.push(request.url());
+			});
+			first.settle();
+			await page.waitForFunction(() =>
+				document.querySelector("#stat")?.textContent?.includes("The first write failed"),
+			);
+			await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+			expect(reads).toEqual([]);
+			expect(await ctags(page)).toContain("#beta");
+			expect(await ctags(page)).not.toContain("#alpha");
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.tags).toEqual([]);
+			second.settle();
+			await eventually(
+				async () => (await server.api("get", { refs: ["C-1"] }))[0]?.tags,
+				(tags) => Array.isArray(tags) && tags.join() === "beta",
+			);
+			await eventually(
+				() => ctags(page),
+				(text) => text.includes("#beta") && !text.includes("#alpha"),
+			);
+		} finally {
+			first.settle();
+			second.settle();
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"a failed tag leaves the editor opened while it was on its way showing the server's tags",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", { edits: [{ op: "create", body: { title: "Edit while tagging" } }] });
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		const fail = pending();
+		try {
+			const { page } = h;
+			await page.getByRole("button", { name: "Edit while tagging", exact: true }).waitFor();
+			let started = false;
+			await page.context().route("**/api/p/scratch/propose", async (route) => {
+				started = true;
+				await fail.promise;
+				await route.fulfill(failedReply("The tag failed"));
+			});
+			await tagSelected(page, "alpha");
+			await eventually(async () => started, Boolean);
+			await page.keyboard.press("e");
+			await page.getByRole("textbox", { name: "Case title", exact: true }).waitFor();
+			expect(await ctags(page)).toContain("#alpha");
+			let reread = false;
+			page.on("response", (response) => {
+				if (response.url().endsWith("/get")) reread = true;
+			});
+			fail.settle();
+			await eventually(async () => reread, Boolean);
+			await page.waitForFunction(() => document.querySelector("#stat")?.textContent?.includes("The tag failed"));
+			await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+			expect(await ctags(page)).not.toContain("#alpha");
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.tags).toEqual([]);
+		} finally {
+			fail.settle();
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
