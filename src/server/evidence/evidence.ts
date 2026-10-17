@@ -441,9 +441,9 @@ const Q = {
 	caseIdsOfFile: sql<{ project: number; file: string }, { case_id: number | null }>(
 		"SELECT case_id FROM tests WHERE project = $project AND file = $file LIMIT 500",
 	),
-	failedWith: sql<{ project: number; signature: number; since: number }, { test: number; target: number }>(
+	failedWith: sql<{ project: number; signature: number; after: number }, { test: number; target: number }>(
 		`SELECT DISTINCT test, target FROM results
-		 WHERE project = $project AND signature = $signature AND seq >= $since
+		 WHERE project = $project AND signature = $signature AND seq > $after
 		   AND outcome IN ('fail', 'error') AND method != 'agent'`,
 	),
 	dropExcuse: sql<{ project: number; signature: number; scope: string; decision: number }>(
@@ -1519,39 +1519,28 @@ export function restoreLink(
 }
 
 /**
- * Where these tests have failed with a cause in a scope since the cause first failed on any of `seen`, the targets
- * a question has seen it on: each test with each environment it failed in, as reported. A newer attempt that passed
- * does not take a failure out of this history. The job is left out, because a sharded pipeline moves a test from
- * one job to another; so is who reported, because a pipeline's token can be replaced. A gate counts pipelines and
- * people, so an agent's failure is left out. Null when none of `seen` holds a failure of the cause.
+ * Where these tests have failed with a cause in a scope after `after`, the last occurrence of the question before
+ * this one about the cause (0 for the first): each test with each environment it failed in, as reported. A newer
+ * attempt that passed does not take a failure out of this history. The job is left out, because a sharded pipeline
+ * moves a test from one job to another; so is who reported, because a pipeline's token can be replaced. A gate
+ * counts pipelines and people, so an agent's failure is left out.
  */
 export function failedIn(
 	db: Db,
-	input: {
-		project: number;
-		signature: number;
-		scope: string;
-		seen: readonly number[];
-		tests: ReadonlySet<number>;
-	},
-): { test: number; env: string }[] | null {
-	if (input.seen.length === 0) return null;
-	const since = db.allDynamic<{ seq: number | null }>(
-		`SELECT min(seq) AS seq FROM results WHERE signature = ? AND outcome IN ('fail', 'error')
-		 AND target IN (${input.seen.map(() => "?").join(", ")})`,
-		[input.signature, ...input.seen],
-	)[0]?.seq;
-	if (since == null) return null;
+	input: { project: number; signature: number; scope: string; after: number; tests: ReadonlySet<number> },
+): { test: number; env: string }[] {
 	const targets = new Map<number, TargetRow>();
-	return db.all(Q.failedWith, { project: input.project, signature: input.signature, since }).flatMap((row) => {
-		if (!input.tests.has(row.test)) return [];
-		let target = targets.get(row.target);
-		if (!target) {
-			target = mustTarget(db, row.target);
-			targets.set(row.target, target);
-		}
-		return scopeOf(target, null) === input.scope ? [{ test: row.test, env: target.env }] : [];
-	});
+	return db
+		.all(Q.failedWith, { project: input.project, signature: input.signature, after: input.after })
+		.flatMap((row) => {
+			if (!input.tests.has(row.test)) return [];
+			let target = targets.get(row.target);
+			if (!target) {
+				target = mustTarget(db, row.target);
+				targets.set(row.target, target);
+			}
+			return scopeOf(target, null) === input.scope ? [{ test: row.test, env: target.env }] : [];
+		});
 }
 
 /**
