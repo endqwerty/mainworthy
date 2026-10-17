@@ -334,10 +334,13 @@ layout at every width. A screen's one part in it: a binding says when it is an a
 (`Binding.list`), and while the detail is covered on a phone only those run, from the palette or from a key.
 What takes the focus in the detail is shown, and under the palette the app is inert.
 
-What the device keeps (drafts, the notes typed for a run) is kept per actor, under the actor's id and never the sign-in name, which can be given to somebody else after a person is forgotten (`ActorId` in `lib/device.ts`, issue #380). Every request the page makes names
-the person it was loaded as (`X-Mainworthy-As`), and the server refuses it when the session has become somebody
-else's, in another tab for instance: text one person typed is never recorded under another's name. A caller that
-sends no name (a script, the CLI, an agent) is whoever its token says.
+What the device keeps (drafts, the notes typed for a run) is kept per actor, under the actor's id and never the
+sign-in name, which can be given to somebody else after a person is forgotten (`ActorId` in `lib/device.ts`,
+issue #380). Operation requests and signed-in account exchanges send that actor's id in `X-Mainworthy-As` as
+canonical decimal text. The shared HTTP admission guard compares it exactly with the session's actor id before
+the handler runs. It refuses a different id, a name or a noncanonical value with the changed-session reply,
+even when a forgotten person's name has been given to somebody else (issue #441). A caller that omits the header
+(a script, the CLI, a native client or an agent) is whoever its credentials say.
 
 Two pages render with nobody signed in: the sign-in page and the page of an invitation, at `/invite`
 (`src/web/signin/`). They call the routes of `src/surfaces/signin.ts` through `src/web/lib/signin.ts`. An

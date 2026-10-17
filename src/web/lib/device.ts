@@ -5,13 +5,11 @@
 // their own. Sign-out can explicitly clear it; otherwise it stays for when that person signs in again. Work
 // started as one person (a pending save, a retry, clean-up) carries the session it started in (`DeviceSession`)
 // and stops when the page's person changes or the browser data is cleared, in this tab or another.
-// The name is kept only to say, on a request, who the page believes it is (`X-Mainworthy-As`).
 declare const actorIdBrand: unique symbol;
 /** An actor id from the session reply: the only thing a device key can be built from. */
 export type ActorId = number & { readonly [actorIdBrand]: true };
 const nobody = 0 as ActorId;
 let id = nobody;
-let name = "";
 let revision = 0;
 let active = false;
 export const deviceClearKey = "mainworthy:device-clear";
@@ -24,12 +22,11 @@ function clearRevision(): string {
 }
 let cleared = clearRevision();
 export const sessionPersonKey = "mainworthy:session-person";
-export type DeviceSession = { actorId: ActorId; name: string; revision: number; cleared: string };
+export type DeviceSession = { actorId: ActorId; revision: number; cleared: string };
 
 export function setDevicePerson(info: { actor: string; actorId: number }): void {
 	if (!active || info.actorId !== id) revision++;
 	id = info.actorId as ActorId;
-	name = info.actor;
 	cleared = clearRevision();
 	active = true;
 	try {
@@ -41,7 +38,7 @@ export function suspendDeviceSession(): void {
 	cleared = clearRevision();
 	revision++;
 }
-export const deviceSession = (): DeviceSession => ({ actorId: id, name, revision, cleared });
+export const deviceSession = (): DeviceSession => ({ actorId: id, revision, cleared });
 export const sessionUnchanged = (owner: DeviceSession): boolean =>
 	owner.actorId === id && owner.revision === revision && owner.cleared === clearRevision();
 export const sessionCurrent = (owner: DeviceSession): boolean => active && sessionUnchanged(owner);

@@ -266,23 +266,18 @@ const limited = (seconds: number): Response =>
 	);
 
 /**
- * A page may say who it believes it is signed in as (`X-Mainworthy-As`, the actor's name, percent-encoded). When
+ * A page may say who it believes it is signed in as (`X-Mainworthy-As`, the actor's id in canonical decimal). When
  * the session has become somebody else's since the page was loaded (another tab signed in), the request is
  * refused here, in the request that would have written: text one person typed is never recorded under another
- * person's name, and a page never shows one person's view as another's. A caller that sends no name (a script,
+ * person's name, and a page never shows one person's view as another's. A caller that sends no header (a script,
  * the CLI, an agent) is whoever its token says.
  */
 export const AS_HEADER = "x-mainworthy-as";
 function sameCaller(req: Request, session: Session): boolean {
-	const named = req.headers.get(AS_HEADER);
-	if (named === null) return true;
-	let name: string;
-	try {
-		name = decodeURIComponent(named);
-	} catch {
-		return false;
-	}
-	return session.actor(0)?.name === name;
+	const expected = req.headers.get(AS_HEADER);
+	if (expected === null) return true;
+	const actor = session.actor(0);
+	return actor !== null && String(actor.id) === expected;
 }
 const changedSession = (): Response =>
 	jsonResponse(

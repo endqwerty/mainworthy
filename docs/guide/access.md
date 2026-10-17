@@ -494,6 +494,10 @@ In server mode the sign-in page has these ways in, one under the other:
 
 The caret starts in the name, <kbd>Tab</kbd> goes down the page, and <kbd>↵</kbd> sends the form the caret is in. The server opens a session for that browser, and the browser keeps a cookie that names the session. The cookie identifies the session. After sign-in, the browser holds neither the token nor the password.
 
+A page's operation requests and signed-in account changes carry the actor id the page loaded, so a shared cookie cannot record your text as somebody else. If another tab signs in as a different person, the server refuses the stale page's request and asks you to sign in again. This also applies when the new person has the same name as a forgotten person.
+
+For HTTP clients that send `X-Mainworthy-As`, its value is the exact decimal `actorId` from `/api/session`, such as `3`. Names, percent-encoded values and other number formats such as `03` are refused. Clients that omit the header continue to act as their credentials identify them.
+
 To sign out, press **Sign out** at the bottom of the sidebar, or <kbd>g</kbd> <kbd>x</kbd>. Ending this browser's session in Settings, **Your sessions**, opens the same dialog. It offers three choices:
 
 - **Sign out and keep drafts** starts with the focus. It keeps your browser data so your drafts are there when you sign in again.

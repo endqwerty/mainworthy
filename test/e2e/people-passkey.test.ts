@@ -6,6 +6,7 @@
 // `people.test.ts` and `oidc.test.ts` prove the routes with `fetch`; this file proves the pages reach them.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Page } from "playwright-core";
+import { z } from "zod";
 import { type Provider, provider, stopProviders } from "../oidc-support.ts";
 import { addAuthenticator, browserAvailable, openPage, type PageHarness, type Server, startServer } from "./support.ts";
 
@@ -109,6 +110,14 @@ test.skipIf(!browserAvailable)(
 			// A person with a passkey and no password sets one, and is not asked for a current one.
 			await page.getByRole("option", { name: "Your sign-in", exact: true }).click();
 			await page.getByRole("button", { name: "Set password" }).waitFor();
+			const {
+				result: { actorId },
+			} = z
+				.object({
+					result: z.object({ actorId: z.number().int() }),
+				})
+				.parse(await (await browser.context.request.get(`${server.url}/api/session`)).json());
+			const passwordRequest = page.waitForRequest((request) => request.url().endsWith("/api/account/password"));
 			expect(await page.locator("#password-current").count()).toBe(0);
 			await page.locator("#password-next").fill("a password set later");
 			await page.locator("#password-again").fill("a password set later");
@@ -124,6 +133,7 @@ test.skipIf(!browserAvailable)(
 			expect(await marked.count()).toBe(2);
 			await page.keyboard.press("Enter");
 			await page.getByRole("status").filter({ hasText: "Password set." }).waitFor();
+			expect((await passwordRequest).headers()["x-mainworthy-as"]).toBe(String(actorId));
 			// The page emptied the fields itself, so nothing typed took the marks away: the fields are new ones.
 			// The caret was in one of them, and is on the button now, not in a field a manager would offer to fill.
 			expect(await marked.count()).toBe(0);

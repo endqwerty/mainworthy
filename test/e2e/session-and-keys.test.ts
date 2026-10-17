@@ -1,6 +1,7 @@
 // The session, opening keys and keepalive: the findings of the fourth review (R4C).
 import { expect, test } from "bun:test";
 import { z } from "zod";
+import { Client } from "../../src/cli/client.ts";
 import { Slot } from "../../src/web/runs/models.ts";
 import { browserAvailable, devicePrefix, eventually, openPage, type Server, startServer } from "./support.ts";
 
@@ -70,14 +71,18 @@ const ready = (page: Awaited<ReturnType<typeof openPage>>["page"]) =>
 
 for (const surface of ["case", "run", "queue"])
 	check(
-		`R4C-1 server rejects ${surface} write after shared cookie changes without an extra session read`,
+		`R4C-1 server rejects ${surface} write after shared cookie changes to a reused name without an extra session read`,
 		async () => {
 			const server = await startServer({ mode: "server", preset: "standard" });
 			if (surface === "queue") await failures(server);
 			else await cases(server);
 			const run = await server.api("plan", { name: "Identity", select: {} });
-			const alice = await grant(server, "alice"),
-				bob = await grant(server, "bob");
+			const alice = await grant(server, "alice");
+			const { actorId: aliceId } = await new Client({
+				url: server.url,
+				project: server.project,
+				token: alice,
+			}).session();
 			const alicePrefix = await devicePrefix(server, alice);
 			const h = await openPage(
 				{ ...server, token: alice },
@@ -111,12 +116,21 @@ for (const surface of ["case", "run", "queue"])
 				});
 				await page.route(`**/${op}`, async (route) => {
 					actor = route.request().headers()["x-mainworthy-as"];
-					await h.context.request.post(`${server.url}/api/login`, { data: { token: bob } });
+					await server.api("admin", { do: "actor.forget", name: "alice" });
+					const replacement = await grant(server, "alice");
+					await h.context.request.post(`${server.url}/api/login`, { data: { token: replacement } });
 					await route.continue();
 				});
+				const refusal = page.waitForResponse((response) => response.url().endsWith(`/${op}`));
 				await page.keyboard.press(surface === "case" ? "Control+Enter" : surface === "run" ? "Enter" : "f");
+				const response = await refusal;
+				expect(response.status()).toBe(401);
+				expect(await response.json()).toMatchObject({
+					ok: false,
+					error: { code: "unauthenticated", message: "the session now belongs to another person; sign in again" },
+				});
 				await page.locator("#token").waitFor();
-				expect(actor).toBe("alice");
+				expect(actor).toBe(String(aliceId));
 				expect(sessions).toBe(0);
 				expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(1);
 				expect(
