@@ -2559,8 +2559,13 @@ describe("the surface", () => {
 			await checked("timeline", { ref });
 		}
 		for (const area of ["cases", "tests", "runs", "slots", "folders", "tags", "requirements", "changes"]) {
-			for (const state of ["active", "archived", "change"]) {
-				const input = { in: area, state, run: seeded.run, limit: 2 };
+			// Runs take their own filters; a state they do not have is refused.
+			const variants =
+				area === "runs"
+					? [{ state: "open" }, { state: "closed" }, { origin: "planned" }, { origin: "change" }, { change: "pr:482" }]
+					: ["active", "archived", "change"].map((state) => ({ state }));
+			for (const variant of variants) {
+				const input = { in: area, ...variant, run: seeded.run, limit: 2 };
 				let page = rows.parse(await checked("find", input));
 				while (page.cursor) page = rows.parse(await checked("find", { ...input, cursor: page.cursor }));
 			}

@@ -667,6 +667,41 @@ async function cases(server: Server, count: number) {
 			await history.getByRole("link").nth(1).click();
 			await view.page.waitForURL(/\/p\/scratch\/runs\/2$/);
 			await view.page.locator("#detail").getByText("Commit feat0001feat0001").waitFor();
+
+			// Jumping to another run and going Back shows the run the address names again.
+			await view.page.keyboard.press("ControlOrMeta+k");
+			await view.page.keyboard.type("R-3");
+			await view.page.keyboard.press("Enter");
+			await view.page.waitForURL(/\/p\/scratch\/runs\/3$/);
+			await view.page.locator("#detail").getByText("Commit feat0002feat0002").waitFor();
+			await view.page.goBack();
+			await view.page.waitForURL(/\/p\/scratch\/runs\/2$/);
+			await view.page.locator("#detail").getByText("Commit feat0001feat0001").waitFor();
+
+			// A change with more runs than a page reads the rest on request: the reply is split in two here.
+			let rest: unknown = null;
+			await view.page.route("**/find", async (route) => {
+				const input = z
+					.object({ in: z.string(), change: z.string().optional(), cursor: z.string().optional() })
+					.parse(route.request().postDataJSON());
+				if (input.in !== "runs" || input.change !== "pr:7") return route.continue();
+				if (input.cursor === "rest")
+					return route.fulfill({ json: { ok: true, result: { count: null, items: [rest], cursor: null } } });
+				const response = await route.fetch();
+				const reply = z
+					.object({ ok: z.literal(true), result: z.object({ items: z.array(z.unknown()) }) })
+					.passthrough()
+					.parse(await response.json());
+				rest = reply.result.items[1];
+				return route.fulfill({
+					response,
+					json: { ...reply, result: { ...reply.result, items: reply.result.items.slice(0, 1), cursor: "rest" } },
+				});
+			});
+			await view.page.goto(`${server.url}/p/scratch/changes/pr%3A7`);
+			await eventually(pushes, (texts) => texts.length === 1);
+			await view.page.getByRole("button", { name: "More runs" }).click();
+			await eventually(pushes, (texts) => texts.length === 2);
 			expect(view.errors).toEqual([]);
 		} finally {
 			await view?.close();
