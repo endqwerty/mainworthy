@@ -355,8 +355,9 @@ function overruled(ctx: Ctx, question: QuestionRow | null, ruleAnswer: unknown):
 			(clause) => clause.id === signer.clause && clause.ask.who === "rule",
 		) ??
 			false);
-	let at = question;
-	for (let hops = 0; at && hops < 100; hops++) {
+	const walked = new Set<number>();
+	for (let at = question; at && !walked.has(at.id); at = at.prior !== null ? questionById(ctx.db, at.prior) : null) {
+		walked.add(at.id);
 		const given = decisionsOf(ctx.db, at.id).filter(
 			(decision) => !["expired", "outdated", "withdrawn"].includes(json<{ is?: string }>(decision.answer).is ?? ""),
 		);
@@ -364,7 +365,6 @@ function overruled(ctx: Ctx, question: QuestionRow | null, ruleAnswer: unknown):
 		if (last) {
 			return json<Signer[]>(last.signers).some(overRule) && json<{ is?: string }>(last.answer).is !== wanted;
 		}
-		at = at.prior !== null ? questionById(ctx.db, at.prior) : null;
 	}
 	return false;
 }
