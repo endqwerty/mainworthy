@@ -25,6 +25,7 @@ enum SuiteRoute: Hashable {
 	case document(ref: String, version: Int? = nil)
 	case history(String)
 	case tests
+	case test(String)
 }
 
 /// The test cases of the project, in their folders, as the Files app shows files.
@@ -50,11 +51,8 @@ struct SuiteView: View {
 						SuiteCaseView(ref: ref, version: version, screen: screen, workspace: workspace)
 					case .history(let ref): SuiteHistoryView(ref: ref, screen: screen)
 					case .tests: if let tests = workspace.tests { TestsListView(screen: tests) }
-					}
-				}
-				.navigationDestination(for: TestLink.self) { test in
-					if let tests = workspace.tests {
-						TestView(ref: test.ref, screen: tests, workspace: workspace, opensCase: true)
+					case .test(let ref):
+						if let tests = workspace.tests { TestView(ref: ref, screen: tests, workspace: workspace, opensCase: true) }
 					}
 				}
 		}
