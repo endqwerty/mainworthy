@@ -22,6 +22,10 @@ import { browserAvailable, openPage, startServer } from "./support.ts";
 			await list.getByRole("option", { name: /Pass rate\s*100% of 4 passed/ }).waitFor();
 			await list.getByRole("option", { name: /Flaky tests\s*1 of 4 tests flipped/ }).waitFor();
 			await list.getByRole("option", { name: /Time lost to reruns\s*11 ms in 1 rerun$/ }).waitFor();
+			// A report that arrives while the screen is open is in it without a reload: a third attempt that passes
+			// makes the second one a rerun too (the second verification of #461).
+			await server.api("report", ciReport({ commit, n: 4, attempt: 3, only: [1] }));
+			await list.getByRole("option", { name: /Time lost to reruns\s*\d+ ms in 2 reruns$/ }).waitFor();
 			// Thirty days in the table, newest first; only today had results, so the chart has one point.
 			expect(await page.locator("#detail tbody tr").count()).toBe(30);
 			expect(await page.locator(".rate-dot").count()).toBe(1);
