@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { type Api, type Envelope, ERROR_CODES, INSTANCE_OPS, type OpName, type SessionInfo } from "../../core/api.ts";
 import { Unlinked } from "../../core/kinds.ts";
-import { type DeviceSession, deviceSession, sessionCurrent, suspendDeviceSession } from "./device.ts";
+import { type DeviceSession, deviceSession, sessionCurrent, sessionUnchanged, suspendDeviceSession } from "./device.ts";
 
 const Wire = z.discriminatedUnion("ok", [
 	z.object({ ok: z.literal(true), result: z.unknown(), seq: z.number().nullable().optional() }),
@@ -114,12 +114,13 @@ export async function call<O extends OpName>(
 export async function session(
 	options: { owner?: DeviceSession; signal?: AbortSignal; keepalive?: boolean } = {},
 ): Promise<SessionInfo> {
+	const owner = options.owner ?? deviceSession();
 	const response = await fetch("/api/session", {
 		...(options.signal ? { signal: options.signal } : {}),
 		keepalive: options.keepalive ?? false,
 	});
 	const envelope = Wire.parse(await response.json());
-	if (options.owner && !sessionCurrent(options.owner))
+	if (!(options.owner ? sessionCurrent(owner) : sessionUnchanged(owner)))
 		throw new ApiError("unauthenticated", "The session changed. Your input is kept.");
 	if (!envelope.ok) refuse(envelope.error, response.status);
 	const info = Session.parse(envelope.result);
@@ -163,6 +164,8 @@ export async function exchange(
 				},
 	);
 	const envelope = Wire.parse(await response.json());
+	if (owner && !sessionCurrent(owner))
+		throw new ApiError("unauthenticated", "The session changed. Your input is kept.");
 	if (envelope.ok) return envelope.result;
 	// Every one of these routes may be answered `limited`: a wrong token, password, passkey or invitation code
 	// too often, or a wrong current password. The sentence is the same wherever it is shown.

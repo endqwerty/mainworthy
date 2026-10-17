@@ -150,3 +150,81 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+for (const request of ["session", "password"])
+	test.skipIf(!browserAvailable)(
+		`a late ${request} 401 cannot undo a newer sign-in (issue #447)`,
+		async () => {
+			const server = await startServer({ mode: "server" });
+			const next = z.object({ token: z.string() }).parse(
+				await server.api("admin", {
+					do: "token.create",
+					actor: "sam",
+					kind: "human",
+					can: ["read", "produce"],
+					project: "scratch",
+				}),
+			);
+			const browser = await openPage(server, { path: "/p/scratch/settings" });
+			const arrived = Promise.withResolvers<number>();
+			const held = Promise.withResolvers<void>();
+			try {
+				const { page } = browser;
+				page.setDefaultTimeout(5000);
+				await page.getByRole("option", { name: "Your sign-in", exact: true }).click();
+				await page.locator("#password-next").fill("a password for the old session");
+				await page.locator("#password-again").fill("a password for the old session");
+				let intercepted = false;
+				await page.route(request === "session" ? "**/api/session" : "**/api/account/password", async (route) => {
+					if (intercepted) return route.continue();
+					intercepted = true;
+					// Get a real expired-session refusal, then hold its reply while this tab signs in again.
+					const response = await route.fetch({ headers: { ...route.request().headers(), cookie: "" } });
+					arrived.resolve(response.status());
+					await held.promise;
+					await route.fulfill({ response });
+				});
+				await page.getByRole("button", { name: "Set password", exact: true }).click();
+				expect(await arrived.promise).toBe(401);
+				await page.getByRole("button", { name: "Sign out", exact: true }).click();
+				await page.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
+				await page.locator("#token").fill(request === "session" ? next.token : server.token);
+				await page.keyboard.press("Enter");
+				await page.locator("#app").waitFor();
+				const actor = request === "session" ? "sam" : "robin";
+				expect(await page.locator(".sfoot .me").textContent()).toContain(actor);
+				// Count only sign-outs after the new session is established, including a same-actor re-sign-in.
+				await page.evaluate(() => {
+					Reflect.set(window, "late401SignOuts", 0);
+					window.addEventListener("mainworthy:unauthenticated", () => {
+						Reflect.set(window, "late401SignOuts", Number(Reflect.get(window, "late401SignOuts")) + 1);
+					});
+				});
+				const completed = page.waitForEvent("requestfinished", {
+					predicate: (sent) => sent.url().endsWith(request === "session" ? "/api/session" : "/api/account/password"),
+				});
+				held.resolve();
+				await completed;
+				expect(await page.evaluate((): unknown => Reflect.get(window, "late401SignOuts"))).toBe(0);
+				await page.getByRole("link", { name: "Suite", exact: true }).click();
+				await page.keyboard.press("c");
+				await page.getByRole("textbox", { name: "Case title", exact: true }).fill("Created after the late refusal");
+				await page.keyboard.press("Control+Enter");
+				const found = await eventually(
+					() => server.api("find", { in: "cases" }),
+					(result) => result.items.some((row) => row.title === "Created after the late refusal"),
+				);
+				expect(found.items).toHaveLength(1);
+				expect((await server.api("timeline", { ref: "C-1" })).entries).toContainEqual(
+					expect.objectContaining({ t: "version", version: 1, by: actor }),
+				);
+				expect(await page.locator("#app").count()).toBe(1);
+				expect(browser.errors).toEqual([]);
+			} finally {
+				held.resolve();
+				await browser.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
