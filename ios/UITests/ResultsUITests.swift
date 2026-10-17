@@ -91,6 +91,17 @@ final class ResultsUITests: XCTestCase {
 		XCTAssertEqual(XCTWaiter.wait(for: [linked], timeout: 10), .completed)
 		XCTAssertTrue(app.buttons["test-T-5"].exists)
 		shot("tests-unlinked")
+
+		// A row of the list opens its test, here as from a change's results.
+		app.buttons["test-T-5"].tap()
+		let left = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.switches["tests-unlinked"])
+		XCTAssertEqual(XCTWaiter.wait(for: [left], timeout: 10), .completed)
+		let page = app.staticTexts["test-case"]
+		XCTAssertTrue(page.waitForExistence(timeout: 10))
+		XCTAssertTrue(page.label.hasPrefix("None: the test is tracked without a case."))
+		shot("tests-test")
+		app.navigationBars.buttons.element(boundBy: 0).tap()
+		XCTAssertTrue(app.switches["tests-unlinked"].waitForExistence(timeout: 10))
 		app.navigationBars.buttons.element(boundBy: 0).tap()
 
 		// A case's row says who ran it and what came of it; its page, who may run it.

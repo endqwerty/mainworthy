@@ -2,7 +2,7 @@ import MainworthyClient
 import MainworthyScreens
 import SwiftUI
 
-/// A test's page, pushed from the Tests list or from a change's results.
+/// A test's page, pushed from a change's results. The Cases tab pushes `SuiteRoute.test`: its path holds only routes.
 struct TestLink: Hashable {
 	let ref: String
 }
@@ -25,7 +25,7 @@ struct TestsListView: View {
 			if let notice = screen.notice { Text(notice).foregroundStyle(Color.fail) }
 			Section {
 				ForEach(screen.tests) { test in
-					NavigationLink(value: TestLink(ref: test.ref)) { TestRow(test: test) }
+					NavigationLink(value: SuiteRoute.test(test.ref)) { TestRow(test: test) }
 						.accessibilityIdentifier("test-\(test.ref)")
 				}
 				if screen.hasMore {
