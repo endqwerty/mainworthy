@@ -16,9 +16,10 @@ test.skipIf(!browserAvailable)(
 		const h = await openPage(server, { path: `/p/scratch/runs/${run.run.slice(2)}` });
 		try {
 			const { page } = h;
-			const note = page.getByRole("textbox", { name: "Result note" });
+			const note = page.getByRole("textbox", { name: "Result note", disabled: false });
 			await note.waitFor();
 			await page.keyboard.press("1");
+			expect(await page.locator(".run-control-hint").innerText()).toContain("Step 1 marked.");
 			await note.evaluate((input, data) => {
 				const transfer = new DataTransfer();
 				transfer.items.add(
