@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { Glob } from "bun";
 import { z } from "zod";
 import api1Actors from "../../test/fixtures/cli/actor-list-api1.json";
+import { API_VERSION } from "../core/version.ts";
 import { OP_LIST } from "../server/ops/index.ts";
 import { Client, plainHttpToAnotherMachine } from "./client.ts";
 import { COMMAND_NAMES } from "./dispatch.ts";
@@ -981,6 +982,63 @@ test("the generated gate JSON input uses the same reserved verdict exit codes", 
 		expect(result.code).toBe(3);
 		expect(result.stdout).toContain('"verdict":"pending"');
 	});
+});
+
+test("a generated command refuses a reply its operation's schema does not describe, as the adapter does", async () => {
+	const gate = {
+		run: null,
+		verdict: "blocked",
+		reason: "blocked: one open",
+		tally: {},
+		open: [],
+		url: null,
+		stale: false,
+	};
+	const { reason: _reason, ...withoutReason } = gate;
+	let reply: unknown = gate;
+	const server = Bun.serve({
+		hostname: "127.0.0.1",
+		port: 0,
+		fetch(req) {
+			if (new URL(req.url).pathname === "/healthz")
+				return Response.json({ ok: true, version: "0.1.0", apiVersion: API_VERSION });
+			return reply instanceof Response ? reply.clone() : Response.json({ ok: true, result: reply, seq: 1 });
+		},
+	});
+	try {
+		await withInstance(async ({ run }) => {
+			const base = ["--url", `http://127.0.0.1:${server.port}`, "--project", "scratch"];
+			const json = ["gate", "--json", JSON.stringify({ commit: "c0ffee01" }), ...base];
+			reply = gate;
+			const readable = await run(json);
+			expect([readable.code, readable.stderr]).toEqual([2, ""]);
+			for (const [what, unreadable] of [
+				["a result that is no gate", "blocked"],
+				["a missing field", { verdict: "blocked" }],
+				["a missing reason", withoutReason],
+				["an unknown verdict", { ...gate, verdict: "maybe" }],
+				["an envelope that is no envelope", new Response("proxy page")],
+			] as const) {
+				reply = unreadable;
+				const result = await run(json);
+				expect([what, result.code, result.stdout]).toEqual([what, 4, ""]);
+				expect(result.stderr).toContain(
+					unreadable instanceof Response
+						? "the server returned an invalid response (HTTP 200)"
+						: "internal: the server returned invalid gate data",
+				);
+				const human = await run(["gate", "--commit", "c0ffee01", ...base]);
+				expect([what, human.code]).toEqual([what, 4]);
+				expect(human.stderr).toBe(result.stderr);
+			}
+			reply = {};
+			const find = await run(["find", "--json", "{}", ...base]);
+			expect([find.code, find.stdout]).toEqual([4, ""]);
+			expect(find.stderr).toContain("internal: the server returned invalid find data");
+		});
+	} finally {
+		await server.stop(true);
+	}
 });
 
 test("policy use checks the caller's project permission, including a scoped admin token", async () => {

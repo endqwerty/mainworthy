@@ -265,16 +265,29 @@ export class Client {
 		return { ok: false, error: { code, message, ...(details ? { details } : {}) } };
 	}
 
+	/**
+	 * The one place a successful reply is read: it is checked against `schema` before anyone sees it, so no caller
+	 * prints, or chooses an exit code from, a reply its operation does not describe (decision 0035).
+	 */
+	private async checked<T>(op: string, schema: z.ZodType<T>, input: unknown, at?: number): Promise<T> {
+		const definition = OPS[op];
+		if (!definition) throw new CliError("invalid", `unknown operation ${op}`);
+		const result = unwrap(
+			await this.forward(op, definition.scope === "project" ? await this.project() : null, input, at),
+		);
+		const parsed = schema.safeParse(result);
+		if (!parsed.success) throw new CliError("internal", `the server returned invalid ${op} data`);
+		return parsed.data;
+	}
+
+	/** An operation named at run time (the generated commands): its reply is checked against the registry's schema. */
 	async operation(op: string, input: unknown, at?: number): Promise<unknown> {
 		const definition = OPS[op];
 		if (!definition) throw new CliError("invalid", `unknown operation ${op}`);
-		return unwrap(await this.forward(op, definition.scope === "project" ? await this.project() : null, input, at));
+		return this.checked(op, definition.output, input, at);
 	}
 
 	async call<N extends OpName>(op: N, input: Api[N]["input"], at?: number): Promise<Api[N]["reply"]> {
-		const result = await this.operation(op, input, at);
-		const parsed = REPLY_SCHEMAS[op].safeParse(result);
-		if (!parsed.success) throw new CliError("internal", `the server returned invalid ${op} data`);
-		return parsed.data;
+		return this.checked(op, REPLY_SCHEMAS[op], input, at);
 	}
 }
