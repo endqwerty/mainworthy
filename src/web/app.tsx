@@ -239,6 +239,7 @@ export function App() {
 		};
 		window.addEventListener("storage", changed);
 		window.addEventListener(unauthenticatedEvent, refused);
+		if (!sessionUnchanged(deviceSession())) refused();
 		// On the way back from the identity provider the sign-in is in flight: a look at the session now can
 		// be refused before it lands, and its late refusal would sign the page out of the session just made.
 		// `OidcReturn` is done first, and this look comes with `returning` ending.

@@ -29,6 +29,10 @@ and other in-progress state only in memory. Remounting would discard them. Exist
 handling still returns a different actor's tabs to sign-in, and explicit clear retains its deletion barrier.
 Old writes are never automatically retried under another identity.
 
+App subscribes to storage and global refusal before comparing its cached clear barrier with current storage.
+A missed clear uses the existing refusal path to synchronize and invalidate old work before the startup read,
+including on return from OIDC. Reply ownership checks remain in place.
+
 A server session id alone requires another discovery request before publication and still leaves an interval
 after cookie replacement. Keep session ids as test evidence rather than a second runtime generation. A
 browser can apply the cookie before JavaScript publishes the generation. Protection begins after the newer
