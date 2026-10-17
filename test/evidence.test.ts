@@ -1134,6 +1134,47 @@ describe("holds", () => {
 		expect(state(asked.q)).toBe("dissolved");
 	});
 
+	test("every environment the question saw before the answer must pass, in whatever order they reported", () => {
+		const fail = { 0: "the receipt shows the wrong tax" };
+		const report = (commit: string, env: string, failing: boolean) => {
+			const input = ciReport({ commit, branch: "fix", pr: 49, n: 1, ...(failing ? { fail } : {}) });
+			return { ...input, target: { ...input.target, env } };
+		};
+		h.call("report", report("order01a", "early", true));
+		h.call("report", report("order01a", "late", true));
+		const asked = first(queue().items);
+		decide(asked, { is: "defect" });
+		h.call("report", report("order01b", "late", false));
+		expect(state(asked.q)).toBe("decided");
+		h.call("report", report("order01b", "early", false));
+		expect(state(asked.q)).toBe("dissolved");
+	});
+
+	test("every test the question saw before the answer must pass, in whatever order they reported", () => {
+		const fail = { 0: "the basket is empty after sign-in" };
+		const report = (commit: string, file: string, failing: boolean) =>
+			ciReport({ commit, branch: "fix", pr: 50, n: 1, job: file, file, ...(failing ? { fail } : {}) });
+		h.call("report", report("order02a", "tests/first.spec.ts", true));
+		h.call("report", report("order02a", "tests/last.spec.ts", true));
+		const asked = first(queue().items);
+		decide(asked, { is: "test" });
+		h.call("report", report("order02b", "tests/last.spec.ts", false));
+		expect(state(asked.q)).toBe("decided");
+		h.call("report", report("order02b", "tests/first.spec.ts", false));
+		expect(state(asked.q)).toBe("dissolved");
+	});
+
+	test("an agent's later report of the cause does not keep the answer once the pipeline passes", () => {
+		const fail = { 0: "the coupon is applied twice" };
+		h.call("report", ciReport({ commit: "agent01a", branch: "fix", pr: 51, n: 1, fail }));
+		const agent = h.actor("explorer", "agent", ["read", "produce"]);
+		h.call("report", ciReport({ commit: "agent01a", branch: "fix", pr: 51, n: 1, job: "explore", fail }), agent);
+		const asked = first(queue().items.filter((item) => item.kind === "failure"));
+		decide(asked, { is: "defect" });
+		h.call("report", ciReport({ commit: "agent01b", branch: "fix", pr: 51, n: 1 }));
+		expect(state(asked.q)).toBe("dissolved");
+	});
+
 	test("a pass of other tests does not end the answer: the tests it named must pass", () => {
 		const fail = { 0: "expected 3 rows, got 2" };
 		h.call("report", ciReport({ commit: "named01a", branch: "fix", pr: 44, n: 2, fail }));
