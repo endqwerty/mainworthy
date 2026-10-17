@@ -285,7 +285,7 @@ See [export and verify an audit](./data.md#export-and-verify-an-audit). If the c
 The answer ends only when that commit's run shows all of the following.
 
 - No test fails with the cause, whether an answer explains the failure or not.
-- Every test the question lists passes, in each environment where it failed with the cause since the question first saw it.
+- Every test the question lists passes, in each environment where a pipeline or a person has seen it fail with the cause in this scope.
   A passing retry of the failing commit counts. The job that runs a test does not matter, so a sharded pipeline can move tests between jobs.
   A shard that has not reported one of those tests yet keeps the answer. So does a test that the fix renamed or removed.
 
@@ -293,8 +293,8 @@ Mainworthy does not know whether every job of a commit has reported. So the answ
 not reported yet: one that runs a test the question does not list, or one that runs a listed test that another job
 or a person already passed in that environment. If that job then fails with the cause, the failure is a new question.
 
-The answer stays when the question has more tests than it lists, which is fifty, or has seen the cause fail in
-500 pairs of test and environment. An answer given before this feature stays too.
+The answer stays when the question has more tests than it lists, which is fifty.
+It also stays when the cause once failed in an environment that no longer reports. Withdraw it then.
 It also stays while an open planned run names the question. Withdraw such an answer yourself when it no longer applies.
 
 Like an answer that expired, an answer that ended no longer explains the earlier commits it covered.

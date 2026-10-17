@@ -441,9 +441,9 @@ const Q = {
 	caseIdsOfFile: sql<{ project: number; file: string }, { case_id: number | null }>(
 		"SELECT case_id FROM tests WHERE project = $project AND file = $file LIMIT 500",
 	),
-	failedWith: sql<{ project: number; signature: number; since: number }, { test: number; target: number }>(
+	failedWith: sql<{ project: number; signature: number }, { test: number; target: number }>(
 		`SELECT DISTINCT test, target FROM results
-		 WHERE project = $project AND signature = $signature AND seq >= $since
+		 WHERE project = $project AND signature = $signature
 		   AND outcome IN ('fail', 'error') AND method != 'agent'`,
 	),
 	dropExcuse: sql<{ project: number; signature: number; scope: string; decision: number }>(
@@ -1519,27 +1519,25 @@ export function restoreLink(
 }
 
 /**
- * Where these tests have failed with a cause in a scope from `since` on: each test with each environment it failed
- * in, as reported. A newer attempt that passed does not take a failure out of this history. The job is left out,
- * because a sharded pipeline moves a test from one job to another; so is who reported, because a pipeline's token
- * can be replaced. A gate counts pipelines and people, so an agent's failure is left out.
+ * Where these tests have failed with a cause in a scope, as reported: each test with each environment it failed in.
+ * A newer attempt that passed does not take a failure out. The job is left out, because a sharded pipeline moves a
+ * test from one job to another; so is who reported, because a pipeline's token can be replaced. A gate counts
+ * pipelines and people, so an agent's failure is left out.
  */
 export function failedIn(
 	db: Db,
-	input: { project: number; signature: number; scope: string; since: number; tests: ReadonlySet<number> },
+	input: { project: number; signature: number; scope: string; tests: ReadonlySet<number> },
 ): { test: number; env: string }[] {
 	const targets = new Map<number, TargetRow>();
-	return db
-		.all(Q.failedWith, { project: input.project, signature: input.signature, since: input.since })
-		.flatMap((row) => {
-			if (!input.tests.has(row.test)) return [];
-			let target = targets.get(row.target);
-			if (!target) {
-				target = mustTarget(db, row.target);
-				targets.set(row.target, target);
-			}
-			return scopeOf(target, null) === input.scope ? [{ test: row.test, env: target.env }] : [];
-		});
+	return db.all(Q.failedWith, { project: input.project, signature: input.signature }).flatMap((row) => {
+		if (!input.tests.has(row.test)) return [];
+		let target = targets.get(row.target);
+		if (!target) {
+			target = mustTarget(db, row.target);
+			targets.set(row.target, target);
+		}
+		return scopeOf(target, null) === input.scope ? [{ test: row.test, env: target.env }] : [];
+	});
 }
 
 /**
