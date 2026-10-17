@@ -13,7 +13,11 @@
 // signed with another key was accepted that way when this was built (2026-10-17).
 //
 // Ceremonies live in memory, as passkey challenges do: a restart ends them, and the person starts again.
-import * as client from "openid-client";
+//
+// The library is loaded the first time a ceremony needs it. An instance without a provider never loads it, and
+// neither does a command or a test that starts a server: loading it cost 5 ms a process (15 ms cold), which made
+// the check 2 s slower when every server loaded it (2026-10-17).
+import type { Configuration } from "openid-client";
 import type { App } from "../kernel/app.ts";
 import { CEREMONY_MS } from "./webauthn.ts";
 
@@ -49,18 +53,21 @@ export type OidcRefusal =
 /** As many as the passkeys' map keeps, for the same reason: anybody can begin one without signing in. */
 const MOST = 10_000;
 const ceremonies = new WeakMap<App, Map<string, Kept>>();
-const configurations = new WeakMap<App, Promise<client.Configuration>>();
+type Library = typeof import("openid-client");
+type Held = { client: Library; configuration: Configuration };
+const configurations = new WeakMap<App, Promise<Held>>();
 
 /** The provider's configuration, discovered once; a failed discovery is tried again by the next ceremony. */
-function configurationOf(app: App): Promise<client.Configuration> {
+function configurationOf(app: App): Promise<Held> {
 	const held = configurations.get(app);
 	if (held) return held;
 	const oidc = app.config.oidc;
 	if (!oidc) return Promise.reject(new Error("no identity provider"));
 	const issuer = new URL(oidc.issuer);
 	// Plain http is let through for a provider on this machine only, which the configuration already holds to.
-	const insecure = issuer.protocol === "http:" ? { execute: [client.allowInsecureRequests] } : undefined;
-	const found = client.discovery(issuer, oidc.clientId, oidc.clientSecret, undefined, insecure).then((discovered) => {
+	const found = import("openid-client").then(async (client) => {
+		const insecure = issuer.protocol === "http:" ? { execute: [client.allowInsecureRequests] } : undefined;
+		const discovered = await client.discovery(issuer, oidc.clientId, oidc.clientSecret, undefined, insecure);
 		// The client's secret goes the way the provider takes it: in the Authorization header, which is what a
 		// provider that names no way takes (RFC 8414), or in the body when that is the only way it names.
 		const metadata = discovered.serverMetadata();
@@ -72,7 +79,7 @@ function configurationOf(app: App): Promise<client.Configuration> {
 		const configuration = new client.Configuration(metadata, oidc.clientId, oidc.clientSecret, auth);
 		if (insecure) client.allowInsecureRequests(configuration);
 		client.enableNonRepudiationChecks(configuration);
-		return configuration;
+		return { client, configuration };
 	});
 	configurations.set(app, found);
 	found.catch(() => {
@@ -99,13 +106,14 @@ export async function beginOidc(
 	app: App,
 	input: { purpose: OidcPurpose; browser: string; redirect: string },
 ): Promise<string | null> {
-	let configuration: client.Configuration;
+	let held: Held;
 	try {
-		configuration = await configurationOf(app);
+		held = await configurationOf(app);
 	} catch (error) {
 		console.warn(`[mainworthy] the identity provider could not be reached: ${(error as Error).message}`);
 		return null;
 	}
+	const { client, configuration } = held;
 	const verifier = client.randomPKCECodeVerifier();
 	const state = client.randomState();
 	const nonce = client.randomNonce();
@@ -145,7 +153,7 @@ export async function finishOidc(
 	if (input.browser === null || kept.browser !== input.browser) return { ok: false, why: "context" };
 	ceremonies.get(app)?.delete(state);
 	try {
-		const configuration = await configurationOf(app);
+		const { client, configuration } = await configurationOf(app);
 		const tokens = await client.authorizationCodeGrant(configuration, new URL(`${input.redirect}?${params}`), {
 			pkceCodeVerifier: kept.verifier,
 			expectedState: state,
