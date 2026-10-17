@@ -90,6 +90,59 @@ test.skipIf(!browserAvailable)(
 	30_000,
 );
 
+// Issue #381. The create was accepted, then the read of the recorded version failed. That is not a refusal of the
+// write: the next save asks what the server recorded (`command`) and does not create the case again.
+test.skipIf(!browserAvailable)(
+	"a failed read after a case was created does not make the next save create it again",
+	async () => {
+		const server = await startServer();
+		const browser = await openPage(server);
+		try {
+			const { page } = browser;
+			const commands: string[] = [];
+			const lookups: string[] = [];
+			await browser.context.route("**/api/p/scratch/propose", async (route) => {
+				commands.push(z.object({ cmd: z.string() }).parse(route.request().postDataJSON()).cmd);
+				await route.continue();
+			});
+			await browser.context.route("**/api/p/scratch/command", async (route) => {
+				lookups.push(z.object({ cmd: z.string() }).parse(route.request().postDataJSON()).cmd);
+				await route.continue();
+			});
+			let failed = false;
+			await browser.context.route("**/api/p/scratch/get", async (route) => {
+				const asked = z.object({ version: z.number().optional() }).parse(route.request().postDataJSON());
+				if (!failed && asked.version !== undefined) {
+					failed = true;
+					await route.fulfill({
+						status: 500,
+						contentType: "application/json",
+						body: JSON.stringify({ ok: false, error: { code: "internal", message: "Temporarily unavailable" } }),
+					});
+				} else await route.continue();
+			});
+			await page.keyboard.press("c");
+			await page.keyboard.type("Created once");
+			await page.keyboard.press("Enter");
+			await page.keyboard.type("The case is recorded");
+			await page.keyboard.press("Escape");
+			await page.waitForFunction(() => document.getElementById("stat")?.textContent?.includes("kept on this device"));
+			expect(failed).toBe(true);
+			expect((await server.api("find", { in: "cases" })).items.length).toBe(1);
+			await page.keyboard.press("Control+Enter");
+			await page.waitForURL("**/suite/c/*");
+			expect(page.url()).toEndWith("/suite/c/1");
+			expect((await server.api("find", { in: "cases" })).items.length).toBe(1);
+			expect(new Set(commands).size).toBe(1);
+			expect(lookups).toEqual([commands[0] ?? ""]);
+		} finally {
+			await browser.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
 // Issue #86. A step with an expected result and no action yet cannot be recorded, so no version holds it. Its
 // draft stays on the device when the rest is recorded, and is not proposed again until the step can be.
 test.skipIf(!browserAvailable)(
