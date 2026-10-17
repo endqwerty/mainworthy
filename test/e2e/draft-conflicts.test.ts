@@ -225,45 +225,53 @@ check(
 	30000,
 );
 
-check(
-	"R4A-5 a live window's unfinished capture is read-only in another window",
-	async () => {
-		const server = await startServer();
-		await cases(server, 1);
-		const h = await openPage(server);
-		try {
-			const a = h.page;
-			a.setDefaultTimeout(5000);
-			await a.keyboard.press("c");
-			await title(a).fill("Refund to the original pay");
-			const b = await h.context.newPage();
-			b.setDefaultTimeout(5000);
-			await b.goto(`${server.url}/p/scratch/suite`);
-			await b.locator("#app").waitFor();
-			await title(b).waitFor();
-			expect(await title(b).evaluate((el) => el instanceof HTMLTextAreaElement && el.readOnly)).toBe(true);
-			await title(b).press("X");
-			await b.locator("#bar").filter({ hasText: "This case is being edited in another window" }).waitFor();
-			await b.keyboard.press("Escape");
-			await title(a).click();
-			await a.keyboard.press("End");
-			await a.keyboard.type("ment method");
-			await a.keyboard.press("Escape");
-			await eventually(
-				() => server.api("find", { in: "cases" }),
-				(rows) => rows.items.some((row) => row.title === "Refund to the original payment method"),
-			);
-			expect((await server.api("find", { in: "cases" })).items.map((row) => row.title).sort()).toEqual([
-				"Case 1",
-				"Refund to the original payment method",
-			]);
-		} finally {
-			await h.close();
-			await server.stop();
-		}
-	},
-	30000,
-);
+// The other window may be busy when the new one starts (a large render, a loaded machine): it is live all the
+// same, and its draft is not taken over (issue #406).
+for (const busy of [false, true])
+	check(
+		`R4A-5 a live window's unfinished capture is read-only in another window${busy ? " that opens while it is busy" : ""}`,
+		async () => {
+			const server = await startServer();
+			await cases(server, 1);
+			const h = await openPage(server);
+			try {
+				const a = h.page;
+				a.setDefaultTimeout(5000);
+				await a.keyboard.press("c");
+				await title(a).fill("Refund to the original pay");
+				const b = await h.context.newPage();
+				b.setDefaultTimeout(5000);
+				if (busy)
+					void a.evaluate(() => {
+						const end = performance.now() + 3000;
+						while (performance.now() < end);
+					});
+				await b.goto(`${server.url}/p/scratch/suite`);
+				await b.locator("#app").waitFor();
+				await title(b).waitFor();
+				expect(await title(b).evaluate((el) => el instanceof HTMLTextAreaElement && el.readOnly)).toBe(true);
+				await title(b).press("X");
+				await b.locator("#bar").filter({ hasText: "This case is being edited in another window" }).waitFor();
+				await b.keyboard.press("Escape");
+				await title(a).click();
+				await a.keyboard.press("End");
+				await a.keyboard.type("ment method");
+				await a.keyboard.press("Escape");
+				await eventually(
+					() => server.api("find", { in: "cases" }),
+					(rows) => rows.items.some((row) => row.title === "Refund to the original payment method"),
+				);
+				expect((await server.api("find", { in: "cases" })).items.map((row) => row.title).sort()).toEqual([
+					"Case 1",
+					"Refund to the original payment method",
+				]);
+			} finally {
+				await h.close();
+				await server.stop();
+			}
+		},
+		30000,
+	);
 
 check(
 	"R4A-1 a conflict after a missing reply shows the current draft, not the earlier send",

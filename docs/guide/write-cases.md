@@ -113,10 +113,10 @@ Ordinary takeovers carry the shared text forward and leave no preserved copy. If
 storage is full, keep the window open until you have copied the text.
 
 Moving from one case to another never takes over its draft. Opening the app directly on a case,
-through a link or a reload, continues a draft whose window is not answering.
-If the window holding a draft has closed, crashed, or is busy, another window showing the draft says
-"This draft is held by a window that is not answering, or has closed".
-Press <kbd>e</kbd> or choose "Take over here" to continue the draft in the window you are in.
+through a link or a reload, continues a draft whose window has closed.
+A window that is open keeps its draft, however busy it is. If the window holding a draft has closed or
+crashed, another window showing the draft says "This draft is held by a window that is not answering, or
+has closed". Press <kbd>e</kbd> or choose "Take over here" to continue the draft in the window you are in.
 
 ## Read versions and restore earlier content
 
