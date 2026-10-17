@@ -783,13 +783,17 @@ describe("the executable, built the way `bun run build` builds it", () => {
 		);
 		// `NODE_ENV=production bun build ...`: the assignments the script makes, then the command.
 		const assigned = words.filter((word) => /^[A-Z_]+=/.test(word));
-		const [, ...build] = words.slice(assigned.length);
+		const root = new URL("..", import.meta.url).pathname;
+		// Bun writes the executable it is making to `.<hash>-<number>.bun-build` in the directory it runs in, and does
+		// not always remove it: run from the checkout, a check left 67 MB there (#401). It runs in this test's own
+		// directory instead, with the entry points named from the checkout.
+		const build = words.slice(assigned.length + 1).map((word) => (word.startsWith("src/") ? join(root, word) : word));
 		expect(build).toContain(executable);
 		// `bun test` runs with NODE_ENV=test, which a build that does not set its own would inherit: this test builds
 		// the way a shell with some other NODE_ENV would, and the script must still make the production bundle.
 		const built = Bun.spawn([process.execPath, ...build], {
 			env: { ...process.env, ...Object.fromEntries(assigned.map((word) => word.split("="))) },
-			cwd: new URL("..", import.meta.url).pathname,
+			cwd: directory,
 			stdout: "ignore",
 			stderr: "pipe",
 		});

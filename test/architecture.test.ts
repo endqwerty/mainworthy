@@ -793,9 +793,10 @@ export const LOCAL = /^(\.env(?!\.example$)|bench\/results-.*\.json$|\.[0-9a-f]+
 
 /**
  * Every text file of the checkout, tracked or not: scratch left in the tree is read too. Bun writes an executable it
- * is building to `.<hash>-<number>.bun-build` in the directory it was started in, and removes it. `test/headers.test.ts`
- * builds one from here beside this test, and that file holds the whole source: seen in that moment it failed a test
- * that read it (2026-10-13, on macOS, in one check of two).
+ * is building to `.<hash>-<number>.bun-build` in the directory it was started in, and does not always remove it. That
+ * file holds the whole source: seen while `test/headers.test.ts` still built from here, it failed a test that read it
+ * (2026-10-13, on macOS, in one check of two). The test now builds in its own directory (#401); `bun run build` still
+ * makes one here.
  */
 function wholeTree(): string[] {
 	const outside = new Set([".git", "node_modules", "dist", ".mainworthy", ".casebook", "test-results"]);
