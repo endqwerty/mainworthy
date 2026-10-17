@@ -1,5 +1,6 @@
 import { caseAnnotation } from "../../core/case-annotation.ts";
 import type { ResultIn } from "../../core/ops.ts";
+import { clip } from "../../core/text.ts";
 import type { ParsedResult } from "./native.ts";
 
 type Attributes = Partial<Record<"name" | "file" | "classname" | "time" | "status" | "message" | "value", string>>;
@@ -202,22 +203,24 @@ function attributes(content: string, from: number, to: number, offset: number, w
 
 function appendFailure(element: FailureElement, text: string): void {
 	if (element.report === null) return;
-	if (element.detail.length < 20_000) element.detail += text.slice(0, 20_000 - element.detail.length);
+	// Keep a whole character across the limit so a later chunk cannot refill a clipped prefix.
+	if (element.detail.length < 20_000) element.detail += clip(text, 20_001 - element.detail.length);
 	if (element.hasMessage) return;
 	let pending = element.line + text;
 	let end = pending.search(/[\r\n]/);
 	while (end >= 0) {
 		const line = pending.slice(0, end).trim();
 		if (line.length > 0) {
-			element.report.message = line.slice(0, 4000);
+			element.report.message = clip(line, 4000);
 			element.hasMessage = true;
 			return;
 		}
 		pending = pending.slice(end + 1);
 		end = pending.search(/[\r\n]/);
 	}
-	element.line = pending.trimStart().slice(0, 4000);
-	if (element.line.length === 4000) {
+	pending = pending.trimStart();
+	element.line = clip(pending, 4000);
+	if (pending.length >= 4000) {
 		element.report.message = element.line;
 		element.hasMessage = true;
 	}
@@ -246,7 +249,7 @@ function testKey(
 		hash = hash.length > 0 ? appendDigest(appendDigest(hash, separatorDigest), suite.pathDigest) : suite.pathDigest;
 	if (name.length > 0)
 		hash = hash.length > 0 ? appendDigest(appendDigest(hash, separatorDigest), digest(name)) : digest(name);
-	const shown = [prefix.slice(0, 983), suite?.path, name.slice(0, 983)].filter(Boolean).join("::").slice(0, 983);
+	const shown = clip([prefix, suite?.path, name].filter(Boolean).join("::"), 983);
 	return `${shown}#${(hash.first >>> 0).toString(16).padStart(8, "0")}${(hash.second >>> 0).toString(16).padStart(8, "0")}`;
 }
 
@@ -390,8 +393,8 @@ export function parseJUnit(
 				break;
 			case "failure":
 				if (element.report !== null) {
-					element.report.detail = element.detail;
-					if (!element.hasMessage) element.report.message = element.line.trim().slice(0, 4000);
+					element.report.detail = clip(element.detail, 20_000);
+					if (!element.hasMessage) element.report.message = element.line.trim();
 				}
 				currentFailure = element.previous;
 				break;
@@ -422,7 +425,7 @@ export function parseJUnit(
 				const end = newline < 0 ? decoded.length : newline + 1;
 				const remaining = Math.max(0, 4098 - currentOutput.line.length);
 				currentOutput.overflow ||= end - offset > remaining;
-				currentOutput.line += decoded.slice(offset, Math.min(end, offset + remaining));
+				currentOutput.line += clip(decoded.slice(offset, end), remaining);
 				if (newline >= 0) outputLine(currentOutput);
 				offset = end;
 			}
@@ -446,7 +449,7 @@ export function parseJUnit(
 	};
 	const limited = (value: string, limit: number, label: string, offset: number) => {
 		if (value.length > limit) warn(`${label} truncated to ${limit} characters`, offset);
-		return value.slice(0, limit);
+		return clip(value, limit);
 	};
 
 	while (position < xml.length) {
@@ -610,10 +613,10 @@ export function parseJUnit(
 					: (suite?.pathDigest ?? emptyDigest);
 				const path = suiteName
 					? suite?.path
-						? suite.path.length === 1000
+						? suite.pathDigest.length >= 1000
 							? suite.path
-							: `${suite.path}::${suiteName}`.slice(0, 1000)
-						: suiteName.slice(0, 1000)
+							: clip(`${suite.path}::${suiteName}`, 1000)
+						: clip(suiteName, 1000)
 					: (suite?.path ?? "");
 				element = {
 					kind: "suite",

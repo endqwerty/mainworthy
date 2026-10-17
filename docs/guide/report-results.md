@@ -81,6 +81,12 @@ Keep source paths and suite names stable. Switching exporters can change those
 values. Before switching an existing pipeline, compare the exporters' keys. An
 unlinked native test follows the same project policy as an unlinked JUnit test.
 
+Long names and source files are shortened to at most 500 UTF-16 units, failure
+messages to 4,000, and failure details to 20,000. Shortening keeps whole Unicode
+characters, including emoji. Test keys longer than 1,000 units keep a prefix
+and a digest of the full original identity, so differences beyond the prefix
+still distinguish tests. These limits apply to JUnit and native reports.
+
 Native reports with unknown statuses, malformed test details, or errors outside
 test executions stop the upload with exit `4`. No files in that command are
 sent. A pytest test passes only when its call stage ran and passed: a test with

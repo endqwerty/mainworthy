@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
-import { ReportInput } from "../../core/ops.ts";
+import { harness } from "../../../test/helpers.ts";
+import { ReportInput, type ReportReceipt } from "../../core/ops.ts";
 import { normaliseFailure, signatureHash } from "../../core/signature.ts";
 import { parseJUnit } from "./junit.ts";
+import { nativeResult } from "./native.ts";
 import { parseReport, type ReportFormat } from "./report.ts";
 
 const directory = new URL("../../../test/fixtures/reports/", import.meta.url);
@@ -568,4 +570,98 @@ test.each(["jest", "vitest"] as const)("real %s report refuses a source outside 
 	expect(() => parseReport(text, { file: "other-checkout.json", rootDir: "/home/robin/other" })).toThrow(
 		"other-checkout.json: Jest/Vitest outside root: /home/robin/other",
 	);
+});
+
+test("Unicode names at the cutoff upload through the registry in every report format", () => {
+	const name = `${"n".repeat(499)}🦊`;
+	const reports: [ReportFormat, string][] = [
+		["junit", `<testsuite><testcase name="${name}"/></testsuite>`],
+		...(["jest", "vitest"] as const).map((format): [ReportFormat, string] => [
+			format,
+			JSON.stringify(jestReport("passed", { title: name })),
+		]),
+		[
+			"playwright",
+			JSON.stringify({
+				suites: [
+					{
+						title: "",
+						file: "test.js",
+						specs: [
+							{
+								title: name,
+								file: "test.js",
+								tests: [
+									{ projectName: "", expectedStatus: "passed", results: [{ status: "passed", duration: 0, retry: 0 }] },
+								],
+							},
+						],
+					},
+				],
+			}),
+		],
+		[
+			"pytest",
+			JSON.stringify({
+				exitcode: 0,
+				tests: [{ nodeid: `test.py::${name}`, outcome: "passed", call: { outcome: "passed", duration: 0 } }],
+			}),
+		],
+		["trx", `<TestRun><Results><UnitTestResult testId="one" testName="${name}" outcome="Passed"/></Results></TestRun>`],
+	];
+	const h = harness();
+	try {
+		for (const [format, text] of reports) {
+			const { results } = parseReport(text, { file: "unicode.report", format });
+			const receipt = h.call<ReportReceipt>("report", { target: { session: format }, results });
+			expect(receipt.counts).toMatchObject({ total: 1, pass: 1, fail: 0, error: 0, skip: 0 });
+			expect(results[0]?.test).toMatchObject({ name: "n".repeat(499) });
+		}
+	} finally {
+		h.close();
+	}
+});
+
+test("native result limits keep whole characters and hash the full original identity", () => {
+	const base = {
+		name: `${"n".repeat(499)}🦊`,
+		file: `${"f".repeat(499)}🦊`,
+		suites: [],
+		outcome: "fail" as const,
+		message: `${"m".repeat(3999)}🦊`,
+		detail: `${"d".repeat(19_999)}🦊`,
+	};
+	const first = nativeResult(base);
+	const second = nativeResult({ ...base, name: `${base.name}other` });
+	const { results } = ReportInput.parse({ target: { session: "unicode" }, results: [first, second] });
+	expect(results).toMatchObject([{ test: { name: "n".repeat(499) } }, { test: { name: "n".repeat(499) } }]);
+	expect(first.test).toMatchObject({ file: "f".repeat(499) });
+	expect(first.failure).toEqual({ message: "m".repeat(3999), detail: "d".repeat(19_999) });
+	expect(first.test).not.toEqual(second.test);
+	const keyed = nativeResult({ name: `${"k".repeat(982)}🦊${"x".repeat(30)}`, suites: [], outcome: "pass" });
+	expect(keyed.test).toMatchObject({ key: `${"k".repeat(982)}#0e1ae6aab8c9cb0c` });
+	expect(nativeResult({ name: "short 🦊", file: "test.js", suites: [], outcome: "fail", detail: "bad 🦊" })).toEqual({
+		test: { key: "test.js::short 🦊", name: "short 🦊", file: "test.js" },
+		outcome: "fail",
+		failure: { message: "bad 🦊", detail: "bad 🦊" },
+	});
+});
+
+test("TRX diagnostics keep the original prefix across text and CDATA chunks", () => {
+	const { results } = parseReport(
+		`<TestRun><Results><UnitTestResult testId="one" testName="fails" outcome="Failed"><Output><ErrorInfo><Message>${"m".repeat(3999)}🦊<![CDATA[later]]></Message><StackTrace>${"d".repeat(19_999)}🦊<![CDATA[later]]></StackTrace></ErrorInfo></Output></UnitTestResult></Results></TestRun>`,
+		{ file: "unicode.trx" },
+	);
+	expect(results[0]?.failure).toEqual({
+		message: "m".repeat(3999),
+		detail: `${"m".repeat(3999)}\n${"d".repeat(16_000)}`,
+	});
+});
+
+test("TRX stack-only diagnostics do not refill space left by a clipped emoji", () => {
+	const { results } = parseReport(
+		`<TestRun><Results><UnitTestResult testId="one" testName="fails" outcome="Failed"><Output><ErrorInfo><StackTrace>${"d".repeat(19_999)}🦊<![CDATA[later]]></StackTrace></ErrorInfo></Output></UnitTestResult></Results></TestRun>`,
+		{ file: "unicode.trx" },
+	);
+	expect(results[0]?.failure).toEqual({ message: "d".repeat(4000), detail: "d".repeat(19_999) });
 });

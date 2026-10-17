@@ -582,3 +582,56 @@ describe("parseJUnit recovery and boundaries", () => {
 		expect(median).toBeLessThan(300);
 	});
 });
+
+test("JUnit clips Unicode names, files, messages and details without splitting characters", () => {
+	const parsed = parseJUnit(
+		`<testsuite><testcase name="${"n".repeat(499)}🦊" file="${"f".repeat(499)}🦊"><failure message="${"m".repeat(3999)}🦊">${"d".repeat(19_999)}🦊<![CDATA[later]]></failure></testcase></testsuite>`,
+	);
+	expect(parsed.results[0]?.test).toMatchObject({ name: "n".repeat(499), file: "f".repeat(499) });
+	expect(parsed.results[0]?.failure).toEqual({ message: "m".repeat(3999), detail: "d".repeat(19_999) });
+});
+
+test.each(["", "\n", "<![CDATA[later]]>", "<![CDATA[later\n]]>"])(
+	"JUnit first-line clipping preserves its prefix across chunks: %j",
+	(suffix) => {
+		const { results } = parseJUnit(
+			`<testsuite><testcase name="one"><failure>${"m".repeat(3999)}🦊${suffix}</failure></testcase></testsuite>`,
+		);
+		expect(results[0]?.failure?.message).toBe("m".repeat(3999));
+	},
+);
+
+test.each(["name", "file", "classname", "suite"])(
+	"JUnit long keys preserve the full digest when Unicode crosses the displayed %s cutoff",
+	(part) => {
+		const long = `${"k".repeat(982)}🦊${"x".repeat(30)}`;
+		const xml = (suffix: string) =>
+			part === "suite"
+				? `<testsuite name="${long}${suffix}"><testcase name="one"/></testsuite>`
+				: `<testsuite><testcase ${part === "name" ? `name="${long}${suffix}"` : `name="one" ${part}="${long}${suffix}"`}/></testsuite>`;
+		const first = parseJUnit(xml("")).results[0];
+		const second = parseJUnit(xml("other")).results[0];
+		expect(first?.test).toMatchObject({
+			key: `${"k".repeat(982)}#${part === "name" ? "0e1ae6aab8c9cb0c" : "01a2e2e002d829da"}`,
+		});
+		expect(first?.test).not.toEqual(second?.test);
+	},
+);
+
+test("JUnit nested suite clipping does not insert later suite names into a truncated prefix", () => {
+	const name = `${"s".repeat(999)}🦊tail`;
+	const nested = parseJUnit(
+		`<testsuite name="${name}"><testsuite name="child"><testcase name="one"/></testsuite></testsuite>`,
+	);
+	const flat = parseJUnit(`<testsuite name="${name}::child"><testcase name="one"/></testsuite>`);
+	expect(nested.results).toEqual(flat.results);
+	expect(nested.results[0]?.test).toMatchObject({ key: `${"s".repeat(983)}#25d4d265f3ae1bb9` });
+});
+
+test("JUnit system-out keeps Unicode attachment paths across CDATA and ignores an overflowed marker", () => {
+	const path = `${"p".repeat(4079)}🦊`;
+	const { results } = parseJUnit(
+		`<testsuite><testcase name="one"><system-out>[[ATTACHMENT|<![CDATA[${path}]]>]]\n[[ATTACHMENT|${"x".repeat(4084)}🦊]]\n[[ATTACHMENT|short🦊.png]]</system-out></testcase></testsuite>`,
+	);
+	expect(results[0]?.attachmentPaths).toEqual([path, "short🦊.png"]);
+});

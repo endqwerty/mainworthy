@@ -1,4 +1,5 @@
 import type { ResultIn } from "../../core/ops.ts";
+import { clip } from "../../core/text.ts";
 
 export type ParsedResult = ResultIn & { attachmentPaths?: string[] };
 export type ParsedReport = { results: ParsedResult[]; warnings: string[] };
@@ -32,10 +33,10 @@ export function nativeResult(input: {
 			first = (Math.imul(first, 33) + key.charCodeAt(index)) | 0;
 			second = (Math.imul(second, 65599) + key.charCodeAt(index)) | 0;
 		}
-		key = `${key.slice(0, 983)}#${(first >>> 0).toString(16).padStart(8, "0")}${(second >>> 0).toString(16).padStart(8, "0")}`;
+		key = `${clip(key, 983)}#${(first >>> 0).toString(16).padStart(8, "0")}${(second >>> 0).toString(16).padStart(8, "0")}`;
 	} else key = key.trim();
 	const result: ResultIn = {
-		test: { key, name: input.name.slice(0, 500), ...(file === undefined ? {} : { file: file.slice(0, 500) }) },
+		test: { key, name: clip(input.name, 500), ...(file === undefined ? {} : { file: clip(file, 500) }) },
 		outcome: input.outcome,
 	};
 	if (input.durationMs !== undefined) {
@@ -46,8 +47,8 @@ export function nativeResult(input: {
 	if (input.outcome === "fail" || input.outcome === "error") {
 		const detail = input.detail?.trim() || `Test ${input.outcome === "fail" ? "failed" : "errored"}`;
 		result.failure = {
-			message: (input.message?.trim() || detail.split(/\r?\n/)[0] || detail).slice(0, 4000),
-			detail: detail.slice(0, 20_000),
+			message: clip(input.message?.trim() || detail.split(/\r?\n/)[0] || detail, 4000),
+			detail: clip(detail, 20_000),
 		};
 	}
 	const claim = input.annotation;
