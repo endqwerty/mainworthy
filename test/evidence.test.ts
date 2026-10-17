@@ -1222,7 +1222,7 @@ describe("holds", () => {
 		expect(recurred.questions[0]).toMatchObject({ how: "new", state: "open" });
 	});
 
-	test("a planned run over failures in two environments records each where it failed", () => {
+	test("a planned run over failures in two environments waits for each where it failed, and no other", () => {
 		const message = "the order total is wrong";
 		const report = (commit: string, env: string, i: number, failing: boolean, attempt = 1) => {
 			const input = ciReport({
