@@ -20,6 +20,7 @@ import {
 	TREE,
 	testFiles,
 } from "../scripts/ci-scope.ts";
+import { MARKER } from "../scripts/work/scratch.ts";
 
 const tests = testFiles();
 const covers = (paths: { include: readonly string[]; exclude?: readonly string[] }, file: string): boolean =>
@@ -143,24 +144,36 @@ test("the static job runs for every file the type-check and the lint read", () =
 		expect(covers(STATIC, file), file).toBe(true);
 });
 
+/**
+ * The entries at the top of the repository: those of the files git lists, or, in an export with no git, those of the
+ * tree without what a checkout makes and git ignores, and without the marker `scratch new` writes into an export.
+ */
+function topEntries(listed: string, tree: () => string[]): string[] {
+	if (listed)
+		return [
+			...new Set(
+				listed
+					.split("\n")
+					.filter(Boolean)
+					.map((file) => file.split("/")[0] ?? ""),
+			),
+		];
+	const made = ["node_modules", ".mainworthy", "test-results", "dist", ".git", MARKER];
+	return tree().filter((name) => !made.includes(name));
+}
+
+test("an export's top entries leave out what a checkout or a scratch export makes", () => {
+	expect(topEntries("", () => [".mw-scratch", "node_modules", "src", "README.md"])).toEqual(["src", "README.md"]);
+	expect(topEntries("src/a.ts\nsrc/b.ts\nREADME.md\n", () => [".mw-scratch"])).toEqual(["src", "README.md"]);
+});
+
 // Each entry at the top of the repository, and the jobs a change to it runs. A new one is decided here, in review:
 // a configuration file a job reads goes into that job's paths in scripts/ci-scope.ts. Every one of these runs every
 // test, except the files that only the tests naming them read.
 test("every entry at the top of the repository has the jobs it needs", () => {
-	const listed = Bun.spawnSync(["git", "ls-files"], { stdout: "pipe" }).stdout.toString();
-	// An export has no git: then the entries of the tree, without what git ignores.
-	const entries = listed
-		? [
-				...new Set(
-					listed
-						.split("\n")
-						.filter(Boolean)
-						.map((file) => file.split("/")[0] ?? ""),
-				),
-			]
-		: readdirSync(".").filter(
-				(name) => !["node_modules", ".mainworthy", "test-results", "dist", ".git"].includes(name),
-			);
+	const entries = topEntries(Bun.spawnSync(["git", "ls-files"], { stdout: "pipe" }).stdout.toString(), () =>
+		readdirSync("."),
+	);
 	const jobs = (entry: string): string => {
 		const file = existsSync(entry) && statSync(entry).isDirectory() ? `${entry}/a-file.ts` : entry;
 		const chosen = plan([file], tests);
