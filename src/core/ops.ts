@@ -648,7 +648,7 @@ export const FindInput = z.object({
 		.meta({ "x-mcp-hidden": true }),
 	run: z.string().optional().describe("For slots: the run."),
 	commit: z.string().optional().describe("For results: the commit.").meta({ "x-mcp-hidden": true }),
-	change: z.string().optional().describe("For results: a change key (pr:482).").meta({ "x-mcp-hidden": true }),
+	change: z.string().optional().describe("For results and runs: a change key (pr:482).").meta({ "x-mcp-hidden": true }),
 	repo: z.string().optional().meta({ "x-mcp-hidden": true }),
 	unlinked: z.boolean().optional().describe("For tests: only those with no case."),
 	limit,

@@ -732,7 +732,7 @@ Search and list: cases (by text, folder, tag), tests, runs, slots of a run, fold
 | `origin` | `"planned" \| "change"` | no | For runs: planned by hand, or one per reported commit. |
 | `run` | `string` | no | For slots: the run. |
 | `commit` | `string` | no | For results: the commit. |
-| `change` | `string` | no | For results: a change key (pr:482). |
+| `change` | `string` | no | For results and runs: a change key (pr:482). |
 | `repo` | `string` | no |  |
 | `unlinked` | `boolean` | no | For tests: only those with no case. |
 | `limit` | `integer` | no |  |
