@@ -65,9 +65,8 @@ final class SuiteUITests: XCTestCase {
 		app.launchArguments = ["-forget", "-instance", try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])]
 		app.launch()
 		try signIn(app)
-		app.buttons["project-menu"].tap()
-		app.buttons[project].tap()
-		app.tabBars.buttons["Cases"].tap()
+		app.openProject(project)
+		app.openTab("Cases")
 		XCTAssertTrue(app.buttons["folder-Checkout"].waitForExistence(timeout: 10))
 		shot("folders")
 		app.buttons["folder-Checkout"].tap()
@@ -211,16 +210,8 @@ final class SuiteUITests: XCTestCase {
 		app.launchArguments = ["-forget", "-instance", try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])]
 		app.launch()
 		try signIn(app)
-		let projectMenu = app.buttons["project-menu"]
-		projectMenu.tap()
-		let projectOption = app.buttons[project]
-		XCTAssertTrue(projectOption.wait(for: \.isHittable, toEqual: true, timeout: 5))
-		projectOption.tap()
-		XCTAssertTrue(projectMenu.wait(for: \.label, toEqual: project, timeout: 10))
-		let casesTab = app.tabBars.buttons["Cases"]
-		XCTAssertTrue(casesTab.wait(for: \.isHittable, toEqual: true, timeout: 5))
-		casesTab.tap()
-		XCTAssertTrue(casesTab.wait(for: \.isSelected, toEqual: true, timeout: 5))
+		app.openProject(project)
+		app.openTab("Cases")
 		XCTAssertTrue(app.buttons["folder-Checkout"].waitForExistence(timeout: 10))
 		app.buttons["folder-Checkout"].tap(); app.buttons["folder-Checkout/Coupons"].tap()
 		XCTAssertTrue(app.staticTexts["Expired coupon is rejected"].waitForExistence(timeout: 10))

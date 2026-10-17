@@ -50,8 +50,7 @@ final class ResultsUITests: XCTestCase {
 		app.launchArguments = ["-forget", "-instance", try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])]
 		app.launch()
 		try signIn(app)
-		app.buttons["project-menu"].tap()
-		app.buttons[project].tap()
+		app.openProject(project)
 		XCTAssertTrue(app.staticTexts["expected $90.00, got $100.00"].waitForExistence(timeout: 10))
 
 		// The change's results: every test its gate counted, the one with no case among them.

@@ -65,17 +65,6 @@ final class QueueUITests: XCTestCase {
 		XCTAssertTrue(app.buttons["project-menu"].waitForExistence(timeout: 20))
 	}
 
-	@MainActor private func selectProject(_ project: String, in app: XCUIApplication) {
-		let projectMenu = app.buttons["project-menu"]
-		projectMenu.tap()
-		let projectOption = app.collectionViews.buttons[project]
-		let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: projectOption)
-		XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 10), .completed)
-		projectOption.tap()
-		let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", project), object: projectMenu)
-		XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 10), .completed)
-	}
-
 	@MainActor private func dropConfirmation(in app: XCUIApplication) -> XCUIElement {
 		let confirm = app.buttons.matching(
 			NSPredicate(format: "label == %@ AND identifier != %@", "Drop saved answer", "drop-saved-answer")
@@ -91,7 +80,7 @@ final class QueueUITests: XCTestCase {
 		app.launchArguments = ["-forget", "-instance", try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])]
 		app.launch()
 		try signIn(app)
-		selectProject(project, in: app)
+		app.openProject(project)
 		let question = app.staticTexts["1 test in tests/shipping.spec.ts has no case"]
 		XCTAssertTrue(question.waitForExistence(timeout: 10))
 		question.tap()
@@ -118,7 +107,7 @@ final class QueueUITests: XCTestCase {
 		app.buttons["Done"].tap()
 		app.navigationBars.buttons.element(boundBy: 0).tap()
 
-		selectProject(second, in: app)
+		app.openProject(second)
 		XCTAssertTrue(question.waitForExistence(timeout: 10))
 		question.tap()
 		app.buttons["answer-create"].tap()
@@ -139,7 +128,7 @@ final class QueueUITests: XCTestCase {
 		app.launchArguments = ["-forget", "-instance", try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])]
 		app.launch()
 		try signIn(app)
-		selectProject(project, in: app)
+		app.openProject(project)
 		XCTAssertTrue(app.staticTexts["1 test in tests/search.spec.ts has no case"].waitForExistence(timeout: 10))
 		app.buttons["queue-select"].tap()
 		let count = app.staticTexts["selection-count"]
@@ -217,7 +206,7 @@ final class QueueUITests: XCTestCase {
 		app.launchArguments = ["-forget", "-instance", proxy]
 		app.launch()
 		try signIn(app)
-		selectProject(project, in: app)
+		app.openProject(project)
 		let failure = app.staticTexts["expected $90.00, got $100.00"]
 		XCTAssertTrue(failure.waitForExistence(timeout: 10))
 		failure.tap()
@@ -361,7 +350,7 @@ final class QueueUITests: XCTestCase {
 		try signIn(app)
 
 		// The instance's first project is empty. The test's own is opened from the menu.
-		selectProject(project, in: app)
+		app.openProject(project)
 		let failure = app.staticTexts["expected $90.00, got $100.00"]
 		XCTAssertTrue(failure.waitForExistence(timeout: 10))
 		XCTAssertTrue(app.staticTexts["1 failure to explain · 3 can wait"].exists)
@@ -462,7 +451,7 @@ final class QueueUITests: XCTestCase {
 		app.launchArguments = ["-forget", "-instance", address]
 		app.launch()
 		try signIn(app)
-		selectProject(project, in: app)
+		app.openProject(project)
 		let row = app.staticTexts.matching(identifier: "Edit: A percentage coupon lowers the total").firstMatch
 		XCTAssertTrue(row.waitForExistence(timeout: 10))
 		row.tap()

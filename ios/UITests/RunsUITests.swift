@@ -41,9 +41,8 @@ final class RunsUITests: XCTestCase {
 		app.launchArguments = ["-forget", "-instance", try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])]
 		app.launch()
 		try signIn(app)
-		app.buttons["project-menu"].tap()
-		app.buttons[project].tap()
-		app.tabBars.buttons["Runs"].tap()
+		app.openProject(project)
+		app.openTab("Runs")
 		let regression = app.staticTexts["Checkout regression"]
 		XCTAssertTrue(regression.waitForExistence(timeout: 15))
 		shot("1-list")
