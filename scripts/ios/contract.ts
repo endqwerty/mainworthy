@@ -292,14 +292,19 @@ export const ChangeEvent = struct("ChangeEvent", "One event of `GET /api/p/<proj
 	touched: [list(text), "The refs the command touched. Empty does not mean nothing changed."],
 });
 
-// Planned runs, their pinned slots, and manual results.
-export const PlannedRun = struct("PlannedRun", "A planned run, with the server's verdict.", {
+// Runs, a planned run's pinned slots, and manual results.
+export const Run = struct("Run", "A planned run or a change run, with the server's verdict.", {
 	ref: text,
 	name: text,
+	origin: [text, "planned, or change: the run of one reported commit."],
 	state: text,
 	verdict: text,
 	reason: text,
-	slots: maybe(whole),
+	createdAt: [whole, "Milliseconds since 1970."],
+	slots: [maybe(whole), "A planned run's pinned cases."],
+	change: maybe(
+		struct("RunChange", "The change a change run's commit belongs to.", { key: text, title: maybe(text) }),
+	),
 	tally: dictionary(whole),
 	accepts: struct("RunTarget", "Only this run, or a commit's results.", {
 		self: maybe(flag),
@@ -308,8 +313,8 @@ export const PlannedRun = struct("PlannedRun", "A planned run, with the server's
 		env: maybe(text),
 	}),
 });
-export const RunPage = struct("RunPage", "A page of planned runs, newest first.", {
-	items: list(PlannedRun),
+export const RunPage = struct("RunPage", "A page of runs, newest first.", {
+	items: list(Run),
 	cursor: maybe(text),
 });
 const RunFill = struct("RunFill", "An admitted result that fills a slot.", {
@@ -616,7 +621,7 @@ export const SHAPES: readonly Shape[] = [
 	MergeReply,
 	MergeCommand,
 	ChangeEvent,
-	PlannedRun,
+	Run,
 	RunPage,
 	RunSlot,
 	SlotPage,

@@ -139,7 +139,8 @@ public final class ChangeResults {
 		public var text = ""
 	}
 
-	public let change: String
+	/// The change whose gate it is. None for a run on a commit no change was reported for.
+	public let change: String?
 	/// The gate's run. None: nothing a gate counts was reported for the head.
 	public let run: String?
 	/// The words being typed. `search` reads the list for them once typing pauses.
@@ -159,7 +160,7 @@ public final class ChangeResults {
 	public var moved: Bool { list.moved }
 	public var hasMore: Bool { list.hasMore }
 
-	package init(project: ProjectClient, change: String, run: String?, query: Query = Query()) {
+	package init(project: ProjectClient, change: String?, run: String?, query: Query = Query()) {
 		self.change = change
 		self.run = run
 		text = query.text

@@ -413,7 +413,7 @@ describe("the Swift that is written from this repository", () => {
 // Each Runs shape is held to replies of a project made for this test alone.
 describe("what Runs reads", () => {
 	test("planning, ordered slots, pinned cases, reports and corrections", async () => {
-		const { PlannedRun, RunPage, SlotPage, PinnedCase, RunFolders, RunPlanReply, RunReportReply } = await import(
+		const { Run, RunPage, SlotPage, PinnedCase, RunFolders, RunPlanReply, RunReportReply } = await import(
 			"../scripts/ios/contract.ts"
 		);
 		const made = z
@@ -426,7 +426,7 @@ describe("what Runs reads", () => {
 		holds("plan", RunPlanReply, planned);
 		const run = z.object({ run: z.string() }).parse(planned).run;
 		const rows = z.array(z.unknown()).parse(await op(key, "get", { refs: [run] }));
-		holds("get run", PlannedRun, rows[0]);
+		holds("get run", Run, rows[0]);
 		const slots = await op(key, "find", { in: "slots", run, limit: 1 });
 		holds("find slots", SlotPage, slots);
 		const slot = z.object({ items: z.array(z.object({ case: z.string(), version: z.number() })) }).parse(slots)
@@ -552,6 +552,12 @@ describe("what Changes and Your sessions read", () => {
 		const run = z.object({ run: z.string() }).parse(gate).run;
 		expect(run).not.toBe(oldGate.run);
 		expect(impact).toMatchObject({ change: { key: "pr:482", head }, gate: { run } });
+		const { RunPage } = await import("../scripts/ios/contract.ts");
+		const runs = await op(key, "find", { in: "runs", change: "pr:482" });
+		holds("the change's runs", RunPage, runs);
+		const listed = z.object({ items: z.array(z.object({ ref: z.string() })) }).parse(runs).items;
+		expect(listed.map((item) => item.ref)).toEqual([run, oldGate.run]);
+		holds("every run", RunPage, await op(key, "find", { in: "runs", limit: 100 }));
 	});
 
 	test("an ended change retains its last gate and reports its end", async () => {
