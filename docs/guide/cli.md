@@ -266,6 +266,7 @@ Every operation of the API is also a command with the same name. Give its input 
 | `mainworthy history` | The versions of a case, or the step-level diff between two of them. |
 | `mainworthy timeline` | One timeline for a case: versions, moves, results from every producer, findings, reviews and its questions. |
 | `mainworthy check` | Check the suite for structural problems: cases with no steps or no expected result, duplicate titles, dangling links. |
+| `mainworthy reports` | Pass rate by UTC day, current automation and requirement coverage, flaky tests and rerun duration. |
 | `mainworthy command` | What became of a command you sent under an idempotency key: not recorded, begun, or done with its reply. |
 | `mainworthy tracker-status` | Read a tracker request's delivery state and its verified issue reference. |
 | `mainworthy audit` | Export a project's retained decisions, answers, policy changes and case versions as a verifiable audit file. |

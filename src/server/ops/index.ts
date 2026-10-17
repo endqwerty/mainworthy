@@ -19,6 +19,7 @@ import {
 	timelineOp,
 } from "./reads.ts";
 import type { AnyOp } from "./registry.ts";
+import { reportsOp } from "./reports.ts";
 import { trackerOp, trackerStatusOp } from "./trackers.ts";
 import { announceOp, changeOp, claimOp, decideOp, planOp, proposeOp, reportOp } from "./writes.ts";
 
@@ -47,6 +48,7 @@ const list: AnyOp[] = [
 	historyOp,
 	timelineOp,
 	checkOp,
+	reportsOp,
 	commandOp,
 	trackerStatusOp,
 	// administer

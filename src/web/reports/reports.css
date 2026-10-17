@@ -1,0 +1,24 @@
+.reports-body table {
+	width: 100%;
+	border-collapse: collapse;
+	font-variant-numeric: tabular-nums;
+}
+.reports-body th,
+.reports-body td {
+	text-align: left;
+	padding: 10px 6px;
+	border-bottom: 1px solid var(--line);
+	overflow-wrap: anywhere;
+}
+.reports-body small {
+	display: block;
+	font-weight: normal;
+	color: var(--dim);
+}
+.reports-body meter {
+	width: 64px;
+}
+.reports-body li {
+	margin: 10px 0;
+	overflow-wrap: anywhere;
+}

@@ -34,6 +34,7 @@ claim of WCAG conformance.
 - [Report results](./report-results.md). Send a test report from a runner or CI, then read the gate for the tested commit. Keep the pipeline's identity, retries, and case links with its results.
 - [Decide in the queue](./decide.md). Read the evidence behind a question and record an answer with one key. Use the answer's stated consequence to decide what the gate needs next.
 - [Planned runs](./runs.md). Choose cases for a run, record results against their pinned versions, and close the run with a verdict. Let CI results fill slots so you do not repeat completed work.
+- [Reports](./reports.md). Open **Reports** in the sidebar, or press `g a`. Select a report with `j` and `k`, then press Enter to open it. On a phone, tap a report in the list.
 - [Changes and the gate](./changes.md). Read a change's latest verdict and find what prevents it from passing. Use the same gate from the command line to decide whether CI can continue.
 - [Let an agent in](./agents.md). Give an AI agent its own token and connect it over MCP to read cases, review changes, and report results. The project's policy decides whether its edits and answers count or need a person's decision.
 - [The iPhone app](./iphone.md). Install the iPhone app, sign in and work with your queue, runs, cases and automated tests.

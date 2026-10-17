@@ -151,6 +151,7 @@ test.skipIf(!browserAvailable)(
 	"every key the Keys overlay lists on a screen is on the keyboard page, with the same words",
 	async () => {
 		const server = await startServer({ cases: 12 });
+		await server.api("admin", { do: "project.create", key: "second" });
 		const run = server.seeded?.run ?? "R-1";
 		const browser = await openPage(server);
 		try {
@@ -167,6 +168,7 @@ test.skipIf(!browserAvailable)(
 				"/p/scratch/changes/pr%3A482",
 				"/p/scratch/tests",
 				"/p/scratch/settings",
+				"/p/scratch/reports",
 			];
 			let listed = 0;
 			for (const path of screens) {
@@ -176,9 +178,12 @@ test.skipIf(!browserAvailable)(
 				await page.keyboard.press("?");
 				const rows = page.getByRole("region", { name: "Keyboard shortcuts" }).locator(".hk");
 				await rows.first().waitFor();
+				const keys = new Set<string>();
 				for (const row of await rows.all()) {
 					const label = (await row.locator("span").first().innerText()).trim().toLowerCase();
 					const key = (await row.locator("kbd").innerText()).trim().toLowerCase();
+					if (key.startsWith("g ")) expect(keys.has(key), `${path}: duplicate navigation shortcut ${key}`).toBe(false);
+					keys.add(key);
 					listed++;
 					const found = documented.some(
 						(entry) => (entry.does.startsWith(label) || label.startsWith(entry.does)) && entry.keys.has(lastKey(key)),

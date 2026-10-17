@@ -308,3 +308,6 @@
 	min-height: 44px;
 	padding: 0 12px;
 }
+:root[data-layout="phone"] .reports-body meter {
+	display: none;
+}

@@ -876,6 +876,27 @@ Check the suite for structural problems: cases with no steps or no expected resu
 
 </details>
 
+### reports
+
+Pass rate by UTC day, current automation and requirement coverage, flaky tests and rerun duration.
+
+|  |  |
+| --- | --- |
+| HTTP | `POST /api/p/<project>/reports` |
+| Command | `mainworthy reports` |
+| Needs | `read` |
+| Effect | reads |
+| Agent tool | no |
+
+<details>
+<summary>Input of <code>reports</code></summary>
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `days` | `integer` | no | UTC calendar days, including today. Default: `30`. |
+
+</details>
+
 ### command
 
 What became of a command you sent under an idempotency key: not recorded, begun, or done with its reply.

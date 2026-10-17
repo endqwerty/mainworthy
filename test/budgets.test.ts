@@ -8,7 +8,13 @@ import { join, resolve } from "node:path";
 import { BUDGETS } from "../bench/contracts.ts";
 import { buildDataset, openDataset, Parameters } from "../bench/dataset.ts";
 import { measure, table } from "../bench/measure.ts";
-import { ingestWorkload, prepareRecentChanges, readWorkloads, saveWorkload } from "../bench/workloads.ts";
+import {
+	ingestWorkload,
+	prepareRecentChanges,
+	readWorkloads,
+	reportsWorkload,
+	saveWorkload,
+} from "../bench/workloads.ts";
 import type { Quarantine } from "../src/core/flaky.ts";
 import type { GateStatus, InboxReply, ProposeReply, ReportReceipt } from "../src/core/ops.ts";
 import { ciReport, harness } from "./helpers.ts";
@@ -158,3 +164,36 @@ test("a report that makes many failures go away recomputes each run once, not on
 		h.close();
 	}
 });
+
+test("reports stay inside the read budget at 10k cases and 100k results without statistics", async () => {
+	const root = resolve(".mainworthy", "bench");
+	mkdirSync(root, { recursive: true });
+	const dir = mkdtempSync(join(root, "reports-"));
+	try {
+		const dataset = buildDataset({
+			dir: join(dir, "baseline"),
+			parameters: Parameters.parse({
+				cases: 10_000,
+				tests: 2_000,
+				results: 100_000,
+				openQuestions: 200,
+				queueTimeMs: 3_000,
+			}),
+			log: () => {},
+		});
+		const instance = openDataset(dataset, join(dir, "measurement"));
+		try {
+			expect(instance.app.db.raw.query("SELECT name FROM sqlite_master WHERE name = 'sqlite_stat1'").get()).toBeNull();
+			const row = await measure(reportsWorkload(instance, 15));
+			console.log(`\nReports at product scale, milliseconds:\n${table([row])}`);
+			expect(row.errors, row.errorMessages.join("; ")).toBe(0);
+			expect(row.warmupErrors).toEqual([]);
+			expect(row.checked).toBe(row.n);
+			expect(row.pass, `reports: p95 ${row.p95.toFixed(2)} ms must be < ${BUDGETS.reports} ms`).toBe(true);
+		} finally {
+			instance.close();
+		}
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}, 180_000);
