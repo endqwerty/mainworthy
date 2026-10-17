@@ -10,16 +10,17 @@ import {
 	signInWithPassword,
 	signInWithToken,
 	signInWithTotp,
+	startOidc,
 } from "../lib/signin.ts";
 import { DocLink } from "../ui/index.tsx";
 import "./signin.css";
 
-/** The three ways in, in the order the page shows them. */
-type Way = "password" | "passkey" | "token" | "code";
+/** The ways in, in the order the page shows them. */
+type Way = "password" | "oidc" | "passkey" | "token" | "code";
 
 /**
- * The sign-in page of an instance in server mode. A person signs in with their name and password, or with a
- * passkey where the instance and the browser have them. A token is the third way: it is how the owner gets in
+ * The sign-in page of an instance in server mode. A person signs in with their name and password, through the
+ * instance's identity provider where it has one, or with a passkey where the instance and the browser have them. A token is the third way: it is how the owner gets in
  * before anybody has a password, and how a token handed to somebody is tried in a browser.
  *
  * All three are on the page at once, so each is reached with Tab and none is behind a click. One request runs
@@ -159,6 +160,23 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
 							Start again
 						</button>
 					</form>
+				)}
+				{methods?.oidc && !second && (
+					<div className="signin-way">
+						<button
+							type="button"
+							className="plain"
+							aria-disabled={busy !== null}
+							onClick={() =>
+								attempt("oidc", "The identity provider could not be reached. Try again.", () => startOidc({}))
+							}
+						>
+							{busy === "oidc" ? `Opening ${methods.oidc.name}…` : `Sign in with ${methods.oidc.name}`}
+						</button>
+						<div className="signin-problem" role="status">
+							{said("oidc")}
+						</div>
+					</div>
 				)}
 				{methods?.passkey && passkeysAvailable() && (
 					<div className="signin-way">

@@ -7,7 +7,13 @@ import { ApiError, exchange, session } from "./api.ts";
 import { clearDevicePerson, type DeviceSession, deviceSession } from "./device.ts";
 import { type Assertion, CreationOptions, type Registration, RequestOptions } from "./passkey.ts";
 
-const Methods = z.object({ password: z.boolean(), passkey: z.boolean(), mail: z.boolean().default(false) });
+const Methods = z.object({
+	password: z.boolean(),
+	passkey: z.boolean(),
+	mail: z.boolean().default(false),
+	/** The identity provider people may sign in through, by the name the operator gave it; null for none. */
+	oidc: z.object({ name: z.string() }).nullable().default(null),
+});
 export type Methods = z.infer<typeof Methods>;
 
 /** What this instance offers on its sign-in page. `passkey` is false on an instance with no public address. */
@@ -66,6 +72,46 @@ export const acceptInvitation = (accepted: Acceptance): Promise<void> =>
 		...(accepted.passkey ? { passkey: accepted.passkey.made, label: accepted.passkey.label } : {}),
 		...(accepted.replace === null ? {} : { replace: accepted.replace }),
 	});
+
+/** Where the page goes back to once the provider sends the browser back, kept for that one return. */
+const OIDC_RETURN = "mainworthy:oidc-return";
+
+/**
+ * Sends the browser to the identity provider: to sign in (`{}`), to accept an invitation, or to link the
+ * provider to the person signed in here. The provider sends it back to `/signin/oidc` (`finishOidc`). It does
+ * not return unless the server refused to begin.
+ */
+export async function startOidc(
+	body: Record<string, never> | { invitation: string; replace?: string } | { link: true },
+	/** The section of Settings to open again when the browser comes back. */
+	section: string | null = null,
+): Promise<void> {
+	const { url } = z
+		.object({ url: z.string() })
+		.parse(await exchange("/api/login/oidc", { body, signedIn: "link" in body }));
+	sessionStorage.setItem(OIDC_RETURN, JSON.stringify({ path: location.pathname + location.search, section }));
+	location.assign(url);
+	await new Promise(() => {});
+}
+
+const Back = z.object({ path: z.string().startsWith("/"), section: z.string().nullable() });
+export type Back = z.infer<typeof Back>;
+
+/**
+ * Finishes with the query the provider sent the browser back with: signed in, or the provider linked to the
+ * person signed in here. `back` is where the page was when it began, for a link to return to.
+ */
+export async function finishOidc(query: string): Promise<{ linked: boolean; back: Back | null }> {
+	let back: Back | null = null;
+	try {
+		back = Back.parse(JSON.parse(sessionStorage.getItem(OIDC_RETURN) ?? "null"));
+	} catch {}
+	sessionStorage.removeItem(OIDC_RETURN);
+	const result = z
+		.union([z.object({ signedIn: z.literal(true) }), z.object({ linked: z.literal(true) })])
+		.parse(await exchange("/api/login", { body: { oidc: query } }));
+	return { linked: "linked" in result, back };
+}
 
 /**
  * The options to sign in with a passkey. They hold a challenge that lives five minutes and is good for one

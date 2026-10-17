@@ -112,6 +112,7 @@ export async function startServer({
 	days = 0,
 	passkeys = false,
 	mail,
+	oidc,
 }: {
 	cases?: number;
 	firstProject?: string;
@@ -128,6 +129,8 @@ export async function startServer({
 	 */
 	passkeys?: boolean;
 	mail?: { port: number };
+	/** An identity provider (`test/oidc-support.ts`). People open the pages at `localhost`, as with passkeys. */
+	oidc?: { issuer: string; clientId: string; clientSecret: string; name: string };
 } = {}): Promise<Server> {
 	const dataDir = await mkdtemp(join(tmpdir(), `mainworthy-e2e-${process.pid}-`));
 	ownedDirectories.add(dataDir);
@@ -145,7 +148,11 @@ export async function startServer({
 			MAINWORTHY_MODE: mode,
 			MAINWORTHY_FIRST_PROJECT: firstProject,
 			MAINWORTHY_OWNER_TOKEN: token,
-			MAINWORTHY_PUBLIC_URL: passkeys || mail ? `http://localhost:${port}` : "",
+			MAINWORTHY_PUBLIC_URL: passkeys || mail || oidc ? `http://localhost:${port}` : "",
+			MAINWORTHY_OIDC_ISSUER: oidc?.issuer ?? "",
+			MAINWORTHY_OIDC_CLIENT_ID: oidc?.clientId ?? "",
+			MAINWORTHY_OIDC_CLIENT_SECRET: oidc?.clientSecret ?? "",
+			MAINWORTHY_OIDC_NAME: oidc?.name ?? "",
 			MAINWORTHY_SMTP_HOST: mail ? "127.0.0.1" : "",
 			MAINWORTHY_SMTP_PORT: mail ? String(mail.port) : "",
 			MAINWORTHY_SMTP_TLS: mail ? "none" : "",

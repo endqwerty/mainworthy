@@ -101,6 +101,7 @@ test.skipIf(!browserAvailable)(
 				password: true,
 				passkey: true,
 				mail: false,
+				oidc: null,
 			});
 			expect((await send(page, "/api/session")).status).toBe(401);
 

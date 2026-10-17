@@ -97,7 +97,7 @@ const Q = {
 			user_agent: string | null;
 			created_addr: string | null;
 			last_seen_addr: string | null;
-			via: "token" | "password" | "passkey";
+			via: "token" | "password" | "passkey" | "oidc";
 			label: string;
 		}
 	>(

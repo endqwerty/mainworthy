@@ -110,6 +110,9 @@ export type Boot = {
 	 * comes from loopback, which is never counted by its address.
 	 */
 	proxied?: boolean;
+	/** An identity provider people may sign in through (`test/oidc-support.ts` makes one). */
+	oidc?: Config["oidc"];
+	requireAdminMfa?: boolean;
 };
 /** A server-mode instance whose owner signs in with `TOKEN`. Passwords are hashed at a cost a test can afford. */
 export function world(options: Boot = {}): World {
@@ -134,6 +137,8 @@ export function world(options: Boot = {}): World {
 				: null,
 			passwordCost: { memoryCost: 8, timeCost: 1 },
 			...(publicUrl === null ? {} : { publicUrl }),
+			...(options.oidc ? { oidc: options.oidc } : {}),
+			...(options.requireAdminMfa ? { requireAdminMfa: true } : {}),
 		},
 		(app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }),
 		{ readers: 0, now: clock.now },

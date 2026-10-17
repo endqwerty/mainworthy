@@ -11,6 +11,7 @@
 
 import type { App } from "../kernel/app.ts";
 import { clearMailLinks } from "./contacts.ts";
+import { clearOidc } from "./oidc.ts";
 import { clearTotp } from "./totp.ts";
 import { CEREMONY_MS, type Challenge, type Expected, newChallenge, type RelyingParty } from "./webauthn.ts";
 
@@ -117,5 +118,6 @@ export function spendChallenge(app: App, challenge: string): void {
 export function clearChallenges(app: App): void {
 	kept.delete(app);
 	clearTotp(app);
+	clearOidc(app);
 	clearMailLinks(app);
 }

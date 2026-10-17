@@ -22,6 +22,8 @@ function proof(row: SessionRow): string {
 			return "the password";
 		case "passkey":
 			return `the passkey ${row.label}`;
+		case "oidc":
+			return row.label;
 		case "token":
 			return `a token (${row.label})`;
 		default: {

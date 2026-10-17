@@ -22,7 +22,7 @@ const Purpose = z.enum(["join", "recover"]);
 const SessionRows = z.array(
 	z.object({
 		id: z.number(),
-		openedWith: z.enum(["token", "password", "passkey"]),
+		openedWith: z.enum(["token", "password", "passkey", "oidc"]),
 		label: z.string(),
 		userAgent: z.string().nullable(),
 		createdAt: z.number(),
@@ -37,7 +37,7 @@ const SessionRows = z.array(
 const CredentialRows = z.array(
 	z.object({
 		id: z.number(),
-		kind: z.enum(["password", "passkey", "totp"]),
+		kind: z.enum(["password", "passkey", "oidc", "totp"]),
 		label: z.string(),
 		createdAt: z.number(),
 		lastUsedAt: z.number().nullable(),
