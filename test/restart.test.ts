@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { Envelope } from "../src/core/api.ts";
-import type { GateStatus, ReportReceipt } from "../src/core/ops.ts";
+import type { CommandFate, GateStatus, ReportReceipt } from "../src/core/ops.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
 import { start } from "../src/server/start.ts";
 
@@ -183,13 +183,17 @@ test("a replacement server waits for a stopping server to release the data direc
 	expect(stderr.split("waiting for another server on the data directory")).toHaveLength(2);
 });
 
-async function call<T>(url: string, op: string, input: unknown): Promise<T> {
+async function send<T>(url: string, op: string, input: unknown): Promise<Envelope<T>> {
 	const response = await fetch(`${url}/api/p/scratch/${op}`, {
 		method: "POST",
 		headers: { "content-type": "application/json" },
 		body: typeof input === "string" ? input : JSON.stringify(input),
 	});
-	const reply = (await response.json()) as Envelope<T>;
+	return (await response.json()) as Envelope<T>;
+}
+
+async function call<T>(url: string, op: string, input: unknown): Promise<T> {
+	const reply = await send<T>(url, op, input);
 	if (!reply.ok) throw new Error(`${op}: ${JSON.stringify(reply.error)}`);
 	return reply.result;
 }
@@ -247,8 +251,17 @@ test("a report accepted when the server is killed is applied in full when it sta
 	});
 	expect((await other.json()) as Envelope<unknown>).toMatchObject({ ok: false, error: { code: "conflict" } });
 	expect((await call<GateStatus>(second.url, "gate", { commit: "c0ffee1234" })).tally).toEqual(gate.tally);
-	// The pipeline's retry of the same report is recognised and adds nothing.
-	const retried = await call<ReportReceipt>(second.url, "report", report);
-	expect(retried).toMatchObject({ fresh: false, counts: { total, fail: failing } });
-	expect((await call<GateStatus>(second.url, "gate", { commit: "c0ffee1234" })).tally).toEqual(gate.tally);
+	// Recovery finished the command the dead process never answered: its reply is the receipt of the applied report.
+	const fate = await call<CommandFate>(second.url, "command", { cmd: "upload-0001" });
+	expect(fate).toMatchObject({ state: "done", op: "report", reply: { fresh: true, counts: { total, fail: failing } } });
+	// The pipeline's retry of the same report under the same id gets that saved reply and adds nothing: no new
+	// sequence number, no second report.
+	const retried = await send<ReportReceipt>(second.url, "report", report);
+	if (!retried.ok || fate.state !== "done") throw new Error("the retry was refused");
+	expect(retried.result).toEqual(fate.reply as ReportReceipt);
+	expect(retried.seq).toBe(fate.seq);
+	const after = await send<GateStatus>(second.url, "gate", { commit: "c0ffee1234" });
+	if (!after.ok) throw new Error("the gate was refused");
+	expect(after.seq).toBe(fate.seq);
+	expect(after.result.tally).toEqual(gate.tally);
 }, 120_000);
