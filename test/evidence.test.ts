@@ -1219,6 +1219,59 @@ describe("holds", () => {
 		expect(recurred.questions[0]).toMatchObject({ how: "new", state: "open" });
 	});
 
+	test("a planned run over failures in two environments records each where it failed", () => {
+		const message = "the order total is wrong";
+		const report = (commit: string, env: string, i: number, failing: boolean, attempt = 1) => {
+			const input = ciReport({
+				commit,
+				branch: "fix",
+				pr: 54,
+				n: 2,
+				only: [i],
+				attempt,
+				fail: failing ? { [i]: message } : {},
+			});
+			return h.call("report", {
+				...input,
+				target: { ...input.target, env },
+				results: input.results.map((result) => ({ ...result, annotation: { case: `C-${i + 1}`, version: 1 } })),
+			});
+		};
+		h.call("propose", {
+			edits: [
+				{ op: "create", outline: "First checkout" },
+				{ op: "create", outline: "Second checkout" },
+			],
+		});
+		report("planp01a", "A", 0, true);
+		report("planp01a", "B", 1, true);
+		decide(first(queue().items), { is: "defect" });
+		report("planp01b", "A", 0, false);
+		report("planp01b", "B", 1, false);
+		h.call("plan", { name: "Old evidence", select: {}, accepts: { commit: "planp01a" } });
+		const asked = first(queue().items.filter((item) => item.kind === "failure" && !item.answers.includes("mistaken")));
+		decide(asked, { is: "defect" });
+		report("planp01a", "A", 0, false, 2);
+		report("planp01a", "B", 1, false, 2);
+		report("planp01b", "A", 0, false, 2);
+		report("planp01b", "B", 1, false, 2);
+		// Test 0 never ran in B: nothing waits for it there.
+		expect(state(asked.q)).toBe("dissolved");
+	});
+
+	test("an answer given before questions recorded where they failed stands until a person withdraws it", () => {
+		const fail = { 0: "the gift card balance is negative" };
+		h.call("report", ciReport({ commit: "legacy1a", branch: "fix", pr: 55, n: 2, fail }));
+		const asked = first(queue().items);
+		decide(asked, { is: "test" });
+		// What a question raised before this change holds: no pairs of test and environment.
+		h.app.db.raw.run("UPDATE questions SET evidence = json_remove(evidence, '$.failed') WHERE no = ?", [
+			Number(asked.q.slice(2)),
+		]);
+		h.call("report", ciReport({ commit: "legacy1b", branch: "fix", pr: 55, n: 2 }));
+		expect(state(asked.q)).toBe("decided");
+	});
+
 	test("a pass of other tests does not end the answer: the tests it named must pass", () => {
 		const fail = { 0: "expected 3 rows, got 2" };
 		h.call("report", ciReport({ commit: "named01a", branch: "fix", pr: 44, n: 2, fail }));

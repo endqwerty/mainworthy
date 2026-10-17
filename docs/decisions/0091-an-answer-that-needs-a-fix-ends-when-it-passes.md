@@ -31,7 +31,8 @@ commit of a scope, after a report, and the answer ends only when that commit's r
 - Every test the question lists passes, in each environment where the question saw it fail with the cause. A
   shard that has not reported one of those tests yet ends nothing. A test the fix renamed or removed never passes,
   so its answer stays. Where it failed comes from two places. The question records each pair of test and
-  environment that a commit's gate counted failing, when it is raised and each time a failure attaches. And the
+  environment that a commit's gate counted failing, each read from its own result (a planned run gathers results
+  from several environments), when it is raised and each time a failure attaches. And the
   results reported since it was raised add the failures its answer carried afterwards. A passing retry changes
   neither. The job and the reporter are left out: a sharded pipeline moves a test between jobs when it balances
   them again, and a pipeline's token can be replaced.
@@ -41,7 +42,8 @@ commit of a scope, after a report, and the answer ends only when that commit's r
   question before it. The verifier found each one wrong: a retry erases what a run counts, a sample is replaced,
   a retry reuses its commit's target, and a change opened again asks about failures reported before the question
   before it ended. The question knowing what it saw is the one answer that does not depend on when it was raised.
-- The question lists every test it has seen. It lists fifty; with more, the rest are unknown.
+- The question lists every test it has seen. It lists fifty; with more, the rest are unknown. It keeps 500 pairs
+  of test and environment, and with that many its answer stays too.
 - No open planned run names the question. A person asked for that run, and it waits for its own evidence.
 
 Within what the newest commit has reported, each condition errs towards keeping the answer. A job that has not
@@ -86,4 +88,5 @@ a mistake" are about results already recorded. There is no policy setting.
 
 - Settled lists decided questions only, so an answer that ended leaves it, as one that expired or whose tracker
   issue closed does today. The ledger and the audit export keep the answer and its ending.
-- Answers given before this change end the same way, at the next passing report in their scope.
+- Answers given before this change stand until a person withdraws them, as before: their questions did not record
+  where they saw the cause fail.
