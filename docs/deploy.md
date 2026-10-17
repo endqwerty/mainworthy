@@ -285,7 +285,7 @@ the steps are kept below for an instance that has none.
 
    That token records results on `mainworthy` and reads its gate. It cannot read the suite, edit a case, answer
    a question, plan a run or administer, under any policy. Where a project's policy creates a case for each test
-   with none (decision 0021), its reports add those cases; `mainworthy` tracks such tests and makes none.
+   with none (decision 0021), its reports add those cases. `mainworthy` does, since 2026-10-17 (below).
 
    On the Coolify instance the commands ran inside the container, which already holds the owner token, so that
    token was copied nowhere: `docker exec <container> sh -c 'MAINWORTHY_TOKEN="$MAINWORTHY_OWNER_TOKEN" mainworthy …'`.
@@ -333,6 +333,29 @@ the steps are kept below for an instance that has none.
   gate. `standard` now tracks such tests by rule, and what happens to them is the project's own choice
   (`docs/guide/policy.md`, "Tests with no case"). A project made before that keeps the clauses it had and is
   listed as `custom`: choose `standard` again in Settings, Policy, and the rule answers the open questions.
+- **Every test of this repository is a case** since 2026-10-17, at the owner's request. Project `mainworthy`
+  runs `standard` with tests with no case set to `create`, so a test that turns up later gets its case from the
+  rule when its report arrives. The switch made 3,196 cases, one for each test the instance knew. 116 of those
+  tests had stopped reporting before the switch, and the names of 115 of them no longer appear in their files at
+  `c1dddcc`: they were renamed or removed (#458). A case's proof starts with the first report
+  after the switch; the results recorded before it stay with the tests (Tests, `g t`). The gate's verdicts did not
+  change: before and after, `c1dddcc` passed on 3,060 results and `b128b5d` on 3,062.
+
+  How it was done, with the owner token over the public address. Choosing `create` answers only the open
+  questions. The owner had answered `track` for 132 files, and that answer holds until a file's tests with no case
+  change. Withdrawing such an answer keeps the question with people, so the rule does not take it back. The
+  three steps, in this order:
+
+  1. Withdraw each `track` answer: `decide {"undo": "Q-n", "ifDecision": <id>}`.
+  2. Propose `{"op": "policy", "preset": "standard", "unlinked": "create"}` and accept it. The rule answered the
+     16 open questions. `policy use standard` would set the choice back to `track`.
+  3. Answer the 132 reopened questions `create` in one `decide {"all": [...]}`.
+
+  The same steps on a copy of the project (`mainworthy export`, then `mainworthy import` into an empty local
+  server) made the same cases first. On that copy, a report then put a pass on an existing case and made a case
+  for a new test. On the instance, the first report after the switch came from the push of `f4382b8` to `main`.
+  Its run started a minute before the switch and reported after it. That commit passed the gate on 3,063 results,
+  and the report gave case C-579 a pass from the pipeline.
 - **A pull request that is merged or closed tells the instance** (`.github/workflows/change.yml`, decision
   0022, since 2026-10-13). A failure nobody explained on it is then no longer asked about. Before this, such a
   question stayed in the queue until a person answered it: the one about pull request 150 outlived its merge.
