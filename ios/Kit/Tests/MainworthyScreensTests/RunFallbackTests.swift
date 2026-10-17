@@ -16,7 +16,7 @@ actor OvertakenSlotsTransport: Transport {
 	func waitFallback() async { for await _ in sawFallback.stream { break } }
 	func releaseFallback() { fallback.continuation.yield() }
 	func runJSON() -> String {
-		#"{"ref":"R-1","name":"Review","state":"open","verdict":"pending","reason":"missing","slots":2,"tally":{"missing":1,"pass":1},"accepts":{"self":true}}"#
+		#"{"ref":"R-1","name":"Review","origin":"planned","state":"open","verdict":"pending","reason":"missing","createdAt":1800000000000,"slots":2,"tally":{"missing":1,"pass":1},"accepts":{"self":true}}"#
 	}
 	func slotJSON(_ n: Int, filled: Bool) -> String {
 		let fills = filled ? #"[{"result":\#(n),"by":"robin","method":"human","outcome":"pass"}]"# : "[]"

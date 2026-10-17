@@ -113,19 +113,35 @@ public enum FillMethod: Equatable, Sendable {
 	}
 }
 
-public struct PlannedRun: Identifiable, Equatable, Sendable {
+/// What a run is: one somebody planned, or the one Mainworthy makes for each reported commit.
+public enum RunKind: Equatable, Sendable {
+	/// Planned by hand, with the number of its pinned cases when the server said.
+	case planned(slots: Int?)
+	/// A reported commit's run, and the change the commit belongs to, if it belongs to one.
+	case change(RunChange?)
+}
+
+/// The change a change run's commit belongs to.
+public struct RunChange: Equatable, Sendable {
+	public let key: String
+	public let title: String?
+}
+
+public struct Run: Identifiable, Equatable, Sendable {
 	public var id: String { ref }
 	public let ref: String
 	public let name: String
+	public let kind: RunKind
 	public let state: RunState
 	public let verdict: RunVerdict
 	public let reason: String
 	public let tally: [String: Int]
 	public let accepts: AcceptedResults
-	public let slots: Int?
+	public let createdAt: Date
+	public var isPlanned: Bool { if case .planned = kind { true } else { false } }
 	/// Missing jobs are part of the tally too. Only the slot counts say how many cases remain.
 	public var left: Int? {
-		guard let slots else { return nil }
+		guard case .planned(let slots?) = kind else { return nil }
 		let filled = ["pass", "excused", "attributed", "unexplained", "disputed", "skipped"]
 			.reduce(0) { $0 + (tally[$1] ?? 0) }
 		return max(0, slots - filled)
@@ -144,14 +160,17 @@ public struct PlannedRun: Identifiable, Equatable, Sendable {
 			return "\(count) \(name)"
 		}.joined(separator: " · ")
 	}
-	init(_ wire: Wire.PlannedRun) {
+	init(_ wire: Wire.Run) {
 		ref = wire.ref
 		name = wire.name
 		state = RunState(wire.state)
 		verdict = RunVerdict(wire.verdict)
 		reason = wire.reason
 		tally = wire.tally
-		slots = wire.slots
+		createdAt = Date(timeIntervalSince1970: Double(wire.createdAt) / 1000)
+		kind =
+			wire.origin == "change"
+			? .change(wire.change.map { RunChange(key: $0.key, title: $0.title) }) : .planned(slots: wire.slots)
 		if wire.accepts.`self` == true {
 			accepts = .own
 		} else if let commit = wire.accepts.commit {
@@ -239,22 +258,45 @@ public enum RunPlanOutcome: Equatable, Sendable {
 }
 
 package struct RunPage: Sendable {
-	package let runs: [PlannedRun]
+	package let runs: [Run]
 	package let next: String?
 }
 
+/// Which runs a list shows. Nothing chosen is every one of them.
+public struct RunFilter: Equatable, Sendable {
+	public enum Kind: String, CaseIterable, Sendable { case planned, change }
+	public enum State: String, CaseIterable, Sendable { case open, closed }
+	public var kind: Kind?
+	public var state: State?
+	public init(kind: Kind? = nil, state: State? = nil) {
+		self.kind = kind
+		self.state = state
+	}
+	/// Whether the list this filter chooses holds the run.
+	public func admits(_ run: Run) -> Bool {
+		let kindHolds =
+			switch (kind, run.kind) {
+			case (nil, _), (.planned, .planned), (.change, .change): true
+			default: false
+			}
+		return kindHolds && (state == nil || state?.rawValue == run.state.word)
+	}
+}
+
 extension ProjectClient {
-	package func runs(after cursor: String? = nil) async throws -> RunPage {
+	package func runs(_ filter: RunFilter = RunFilter(), after cursor: String? = nil) async throws -> RunPage {
 		var input: [String: JSONValue] = ["in": "runs", "limit": 100]
+		if let kind = filter.kind { input["origin"] = .string(kind.rawValue) }
+		if let state = filter.state { input["state"] = .string(state.rawValue) }
 		if let cursor { input["cursor"] = .string(cursor) }
 		let wire: Wire.RunPage = try await server.read("find", in: key, .object(input))
-		return RunPage(runs: wire.items.map(PlannedRun.init), next: wire.cursor)
+		return RunPage(runs: wire.items.map(Run.init), next: wire.cursor)
 	}
 
-	package func run(_ ref: String) async throws -> PlannedRun {
-		let rows: [Wire.PlannedRun] = try await server.read("get", in: key, ["refs": [.string(ref)]])
+	package func run(_ ref: String) async throws -> Run {
+		let rows: [Wire.Run] = try await server.read("get", in: key, ["refs": [.string(ref)]])
 		guard let row = rows.first, row.ref == ref else { throw ClientError.unreadable }
-		return PlannedRun(row)
+		return Run(row)
 	}
 
 	package func slots(of run: String) async throws -> [RunSlot] {

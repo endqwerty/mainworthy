@@ -366,6 +366,12 @@ enum Wire {
 		let touched: [String]
 	}
 
+	/// The change a change run's commit belongs to.
+	struct RunChange: Decodable, Equatable, Sendable {
+		let key: String
+		let title: String?
+	}
+
 	/// Only this run, or a commit's results.
 	struct RunTarget: Decodable, Equatable, Sendable {
 		let `self`: Bool?
@@ -374,21 +380,27 @@ enum Wire {
 		let env: String?
 	}
 
-	/// A planned run, with the server's verdict.
-	struct PlannedRun: Decodable, Equatable, Sendable {
+	/// A planned run or a change run, with the server's verdict.
+	struct Run: Decodable, Equatable, Sendable {
 		let ref: String
 		let name: String
+		/// planned, or change: the run of one reported commit.
+		let origin: String
 		let state: String
 		let verdict: String
 		let reason: String
+		/// Milliseconds since 1970.
+		let createdAt: Int
+		/// A planned run's pinned cases.
 		let slots: Int?
+		let change: RunChange?
 		let tally: [String: Int]
 		let accepts: RunTarget
 	}
 
-	/// A page of planned runs, newest first.
+	/// A page of runs, newest first.
 	struct RunPage: Decodable, Equatable, Sendable {
-		let items: [PlannedRun]
+		let items: [Run]
 		let cursor: String?
 	}
 

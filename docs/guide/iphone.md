@@ -166,6 +166,15 @@ Your own confirmed answer shows the recorded result without a **Question changed
 When a reply is uncertain, editing pauses. **Retry** sends the same command to learn its result without making cases twice.
 A question with more tests than this build can show still needs the web app.
 
+## Find a run
+
+**Runs** lists every run of the project, newest first: the runs somebody planned, and the change run
+Mainworthy makes for each commit a report names. Each row shows the verdict and how long ago the run was made.
+Choose **Planned** or **Change** to see one kind, and **Open** or **Closed** to see one state.
+
+Open a change run to see its commit, its change and every result its gate counted.
+Press a standing above the results to see only those results, or type part of a test's name or file.
+
 ## Execute a planned run
 
 To record results for a planned run, follow these steps:

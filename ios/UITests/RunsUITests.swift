@@ -110,4 +110,30 @@ final class RunsUITests: XCTestCase {
 		XCTAssertTrue(app.staticTexts["Phone regression"].waitForExistence(timeout: 10))
 		shot("6-planned-list")
 	}
+
+	@MainActor func testChangeRunsAndTheirResults() async throws {
+		let project = try await makeProject()
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])]
+		app.launch()
+		try signIn(app)
+		app.buttons["project-menu"].tap()
+		app.buttons[project].tap()
+		app.tabBars.buttons["Runs"].tap()
+		XCTAssertTrue(app.staticTexts["Checkout regression"].waitForExistence(timeout: 15))
+		let changeRun = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", " on pr:482")).firstMatch
+		XCTAssertTrue(changeRun.waitForExistence(timeout: 10))
+		shot("7-every-kind")
+		app.segmentedControls.buttons["Change"].tap()
+		XCTAssertTrue(changeRun.waitForExistence(timeout: 10))
+		XCTAssertFalse(app.staticTexts["Checkout regression"].waitForExistence(timeout: 2))
+		shot("8-change-runs")
+		changeRun.tap()
+		XCTAssertTrue(app.staticTexts["Results"].waitForExistence(timeout: 10))
+		XCTAssertTrue(app.staticTexts["Commit"].exists)
+		shot("9-change-run")
+		app.navigationBars.buttons["Runs"].tap()
+		app.segmentedControls.buttons["Closed"].tap()
+		XCTAssertTrue(app.staticTexts["No run matches."].waitForExistence(timeout: 10))
+	}
 }

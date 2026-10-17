@@ -4,7 +4,7 @@ import SwiftUI
 
 struct RunPlannerView: View {
 	let screen: RunsScreen
-	let planned: (PlannedRun) -> Void
+	let planned: (Run) -> Void
 	@Environment(\.dismiss) private var dismiss
 	@State private var name = ""
 	@State private var mode = Selection.all

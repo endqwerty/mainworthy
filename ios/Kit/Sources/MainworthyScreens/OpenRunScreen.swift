@@ -11,7 +11,7 @@ public final class OpenRunScreen: ProjectScreen {
 		case read(RunExecution)
 		case failed(RunSlot, String)
 	}
-	public private(set) var run: PlannedRun
+	public private(set) var run: Run
 	public private(set) var slots: [RunSlot] = []
 	public private(set) var loading = RunsScreen.Loading.first
 	public private(set) var document = Document.none
@@ -64,7 +64,7 @@ public final class OpenRunScreen: ProjectScreen {
 		let previous: OwnResult?
 	}
 
-	package init(project: ProjectClient, run: PlannedRun, permission: Project, person: String) {
+	package init(project: ProjectClient, run: Run, permission: Project, person: String) {
 		self.project = project
 		self.run = run
 		self.permission = permission

@@ -20,8 +20,8 @@ struct RunsScreenTests {
 	@Test("recording advances, marks a failed step, and Undo corrects it before recording blocked")
 	func execute() async throws {
 		let screen = try await screen()
-		#expect(screen.loading == .done && screen.runs.count == 1)
-		let run = screen.open(try #require(screen.runs.first))
+		#expect(screen.loading == .done && screen.runs.filter { $0.isPlanned }.count == 1)
+		let run = screen.open(try #require(screen.runs.first { $0.isPlanned }))
 		await run.refresh()
 		let first = try #require(run.firstUnfilled)
 		await run.execute(first)
@@ -181,6 +181,28 @@ struct RunsScreenTests {
 		#expect(run.run.state == .open && run.mayRecord(execution))
 	}
 
+	@Test("change runs are listed beside the planned run, a filter keeps one kind or state, and a change run reads its results")
+	func kinds() async throws {
+		let screen = try await screen()
+		#expect(screen.runs.contains { !$0.isPlanned })
+		await screen.show(RunFilter(kind: .change))
+		#expect(!screen.runs.isEmpty && screen.runs.allSatisfy { !$0.isPlanned })
+		let change = try #require(screen.runs.first)
+		guard case .change(let header?) = change.kind else {
+			Issue.record("\(change.ref) names no change")
+			return
+		}
+		#expect(change.name.hasSuffix("on \(header.key)"))
+		let results = screen.results(of: change)
+		#expect(results === screen.results(of: change))
+		await results.load()
+		#expect(results.loading == .done && results.total > 0 && results.run == change.ref)
+		await screen.show(RunFilter(kind: .planned, state: .closed))
+		#expect(screen.loading == .done && screen.runs.isEmpty)
+		await screen.show(RunFilter(kind: .planned))
+		#expect(screen.runs.map(\.name) == ["Checkout regression"])
+	}
+
 	@Test("planning shows the slot count and opens the new run, while an empty selection keeps its sentence")
 	func plans() async throws {
 		let screen = try await screen()
@@ -215,7 +237,7 @@ actor RunPages: Transport {
 		let ref = old ? "R-0" : second ? "R-1" : "R-2"
 		let cursor = second ? "null" : #""next""#
 		let row =
-			#"{"ref":"\#(ref)","name":"Run","state":"open","verdict":"pending","reason":"missing","tally":{"missing":1},"accepts":{"self":true}}"#
+			#"{"ref":"\#(ref)","name":"Run","origin":"planned","state":"open","verdict":"pending","reason":"missing","createdAt":1800000000000,"tally":{"missing":1},"accepts":{"self":true}}"#
 		let body = #"{"ok":true,"result":{"items":[\#(row)],"cursor":\#(cursor)}}"#
 		return (
 			Data(body.utf8),
