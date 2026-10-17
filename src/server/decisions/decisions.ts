@@ -1001,6 +1001,7 @@ export function raiseFailure(
 				producers?: number[];
 				parties?: number[];
 				targets?: number[];
+				failed?: [number, string][];
 			}>(open.evidence)
 		: {};
 	const tests = new Map((earlier.tests ?? []).map((test) => [test.id, test]));
@@ -1062,6 +1063,12 @@ export function raiseFailure(
 			// Every target this question has seen the cause on. An answer that holds "here only" covers the
 			// latest of them; the others of that commit are asked about again.
 			targets: [...new Set([...(earlier.targets ?? []), target.id])],
+			// Each test a commit's gate counted failing with the cause, with the environment it failed in: what a
+			// passing commit must show passing before an answer that needs a fix ends (`passedIn`).
+			failed: unionPairs(
+				earlier.failed ?? [],
+				group.gateTests.map((test): [number, string] => [test, target.env]),
+			).slice(0, PAIRS_KEPT),
 			sample: group.results[0] ?? earlier.sample ?? null,
 		},
 		// A slot dispute has its own question. New reports never end an answer about this cause in its scope.
@@ -1077,6 +1084,16 @@ export function raiseFailure(
 		runs: group.runs,
 		target: target.id,
 	});
+}
+
+/** The most pairs of test and environment a failure question keeps. With that many, its answer never ends by rule. */
+const PAIRS_KEPT = 500;
+
+/** Pairs of test and environment, each once, in the order first seen. */
+function unionPairs(a: readonly [number, string][], b: readonly [number, string][]): [number, string][] {
+	const seen = new Map<string, [number, string]>();
+	for (const pair of [...a, ...b]) seen.set(JSON.stringify(pair), pair);
+	return [...seen.values()];
 }
 
 /**
@@ -1679,20 +1696,22 @@ function endPassed(ctx: Ctx, run: RunRow): void {
  * whole run, so it asks for more than `stoppedFailing` does of an open question:
  *
  * - no test fails with the cause in the run, whether an answer explains it or not;
- * - every test the question lists passes, in each environment where it failed with the cause in its scope since
- *   the question was raised, so a shard that has not reported one of them yet holds the answer, and so does a test
+ * - every test the question lists passes, in each environment where the question saw it fail with the cause, so a
+ *   shard that has not reported one of them yet holds the answer, and so does a test
  *   the fix renamed or removed. Which job ran a test does not matter: a sharded pipeline moves tests between jobs.
  *   The history is read from the results as reported, which a passing retry does not change;
- * - the question lists every test it has seen (it keeps fifty), and no open planned run names it: that run was
+ * - the question lists every test it has seen (it keeps fifty, and 500 pairs of test and environment), and no open
+ *   planned run names it: that run was
  *   asked for by a person and waits for its own evidence.
  *
  * Returns the reason to record.
  */
 function passedIn(ctx: Ctx, question: QuestionRow, run: RunRow): { reason: string } | null {
 	const { signature, scope } = json<{ signature: number; scope: string }>(question.subject);
-	const evidence = json<{ tests?: { id: number }[]; count?: number }>(question.evidence);
+	const evidence = json<{ tests?: { id: number }[]; count?: number; failed?: [number, string][] }>(question.evidence);
 	const listed = new Set((evidence.tests ?? []).map((test) => test.id));
-	if (listed.size === 0 || (evidence.count ?? 0) > listed.size) return null;
+	if (listed.size === 0 || (evidence.count ?? 0) > listed.size || (evidence.failed?.length ?? 0) >= PAIRS_KEPT)
+		return null;
 	const planned = runsAbout(ctx, question).some((id) => {
 		const named = runById(ctx.db, id);
 		return named?.origin === "planned" && named.state === "open";
@@ -1701,16 +1720,13 @@ function passedIn(ctx: Ctx, question: QuestionRow, run: RunRow): { reason: strin
 	const tests = [...listed];
 	// The cheap questions first: they settle the usual report, in which the cause still fails or did not run.
 	if (failsWith(ctx.db, run.id, signature) || !passesAny(ctx.db, run.id, tests)) return null;
-	// The history is this question's: what was reported after the last occurrence of the one before it. A retry
-	// of a commit reuses its target, so a target's history can hold an earlier question's failures.
-	const prior = question.prior !== null ? questionById(ctx.db, question.prior) : null;
-	const failed = failedIn(ctx.db, {
-		project: ctx.project.id,
-		signature,
-		scope,
-		after: prior?.seen_last ?? 0,
-		tests: listed,
-	});
+	// Where the cause failed: what the question recorded as it was raised and as failures attached, and what was
+	// reported since it was raised, which takes in the failures its answer has carried since. A retry that passed
+	// changes neither; a question asked before about the cause adds nothing to them.
+	const failed = [
+		...(evidence.failed ?? []).flatMap(([test, env]) => (listed.has(test) ? [{ test, env }] : [])),
+		...failedIn(ctx.db, { project: ctx.project.id, signature, scope, since: question.seen_first, tests: listed }),
+	];
 	const where = (row: { test: number; env: string }): string => JSON.stringify([row.test, row.env]);
 	const passing = new Set(passingIn(ctx.db, run.id, tests).map(where));
 	if (failed.length === 0 || failed.some((row) => !passing.has(where(row)))) return null;

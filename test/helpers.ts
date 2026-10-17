@@ -83,8 +83,11 @@ export function ciReport(input: {
 	file?: string;
 	attempt?: number;
 	job?: string;
+	/** The test numbers to report, when not 0 to n - 1: a shard or a job holds some of the tests. */
+	only?: readonly number[];
 }) {
-	const results = Array.from({ length: input.n }, (_, i) => {
+	const numbers = input.only ?? Array.from({ length: input.n }, (_, i) => i);
+	const results = numbers.map((i) => {
 		const message = input.fail?.[i];
 		return {
 			test: {
