@@ -1746,10 +1746,18 @@ export function SuiteScreen() {
 				setStatus("Version 1 is the first version.");
 				return;
 			}
-			await call("propose", { edits: [{ op: "restore", case: view.ref, to: previous }] }, { project, owner });
-			draftRef.current = null;
-			setDraftState(null);
-			setStatus("Previous version restored as a new version.");
+			const reply = await call(
+				"propose",
+				{ edits: [{ op: "restore", case: view.ref, to: previous }] },
+				{ project, owner },
+			);
+			if (reply.status === "adopted") {
+				draftRef.current = null;
+				setDraftState(null);
+				setStatus("Previous version restored as a new version.");
+			} else if (reply.status === "open") {
+				setStatus(`Restore proposed, waiting for a person${reply.question ? ` · ${reply.question}` : ""}`);
+			} else setStatus(`The restore was ${reply.status}. The case is unchanged.`);
 			void invalidateProject(project);
 		}
 	}

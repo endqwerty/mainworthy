@@ -163,3 +163,66 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+async function twoVersions(server: Awaited<ReturnType<typeof startServer>>) {
+	await server.api("propose", { edits: [{ op: "create", body: { title: "First title" } }] });
+	await server.api("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Second title" } }] });
+}
+
+test.skipIf(!browserAvailable)(
+	"u restores the version before as a new version when the policy adopts it",
+	async () => {
+		const server = await startServer();
+		await twoVersions(server);
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = h;
+			await page.getByRole("button", { name: "Second title", exact: true }).waitFor();
+			await page.keyboard.press("u");
+			await page.waitForFunction(() =>
+				document.querySelector("#stat")?.textContent?.includes("Previous version restored as a new version."),
+			);
+			const row = (await server.api("get", { refs: ["C-1"] }))[0];
+			expect(row?.version).toBe(3);
+			expect(row?.title).toBe("First title");
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"u under strict says the restore is proposed, names its question and leaves the case at its version",
+	async () => {
+		const server = await startServer();
+		await twoVersions(server);
+		const policy = await server.api("propose", { edits: [{ op: "policy", preset: "strict" }] });
+		const asked = (await server.api("inbox", { kind: "adopt" })).items.find((item) => item.q === policy.question);
+		if (!asked) throw new Error("No policy question");
+		await server.api("decide", { q: asked.q, onEvidence: asked.evidenceHash, answer: { is: "accept" } });
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = h;
+			await page.getByRole("button", { name: "Second title", exact: true }).waitFor();
+			await page.keyboard.press("u");
+			await page.waitForFunction(() => document.querySelector("#stat")?.textContent?.includes("waiting for a person"));
+			const status = (await page.locator("#stat").textContent()) ?? "";
+			const open = (await server.api("inbox", { kind: "adopt" })).items.filter((item) => status.includes(item.q));
+			expect(status).toMatch(/^Restore proposed, waiting for a person · Q-\d+$/);
+			expect(open).toHaveLength(1);
+			expect(status).not.toContain("restored as a new version");
+			const row = (await server.api("get", { refs: ["C-1"] }))[0];
+			expect(row?.version).toBe(2);
+			expect(row?.title).toBe("Second title");
+			expect(await page.getByRole("button", { name: "Second title", exact: true }).count()).toBeGreaterThan(0);
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);

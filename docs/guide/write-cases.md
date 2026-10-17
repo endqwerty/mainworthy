@@ -138,6 +138,8 @@ In Suite, <kbd>u</kbd> first undoes the latest placement action when one is avai
 Otherwise, on a recorded case with more than one version, it restores the preceding
 version as a new version. With a timeline version focused, it restores that version's
 predecessor. The API can request a specific version to restore.
+When the policy asks a person first, the status line says the restore is proposed and names its question.
+The case stays at its current version until that question is answered.
 See [the API guide](./api.md) for that operation.
 
 Restoring creates history. It never deletes or rewrites the earlier versions.
