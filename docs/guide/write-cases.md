@@ -176,6 +176,11 @@ When the policy uses `unlinked: create`, the server creates cases during report 
 To filter the current list, press <kbd>/</kbd> to focus "Filter cases". Type the words to match.
 Use the sidebar's tags to narrow the suite by tag.
 
+The header counts every case that matches the words, the folder and the tags, and the list loads all of them, best match first.
+Words that match more than 2,000 cases are too broad to rank. The list then shows one page of the newest matches,
+those with the words in their title first, and the header says `N+ cases`. Add a word, a folder or a tag to reach the rest.
+Planning a run from such a search says "Too many matching cases to count".
+
 ## Resolve simultaneous edits
 
 Edits to different fields can merge without a conflict. If two edits change the
