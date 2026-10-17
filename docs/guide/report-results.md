@@ -83,7 +83,8 @@ unlinked native test follows the same project policy as an unlinked JUnit test.
 
 Long names and source files are shortened to at most 500 UTF-16 units, failure
 messages to 4,000, and failure details to 20,000. Shortening keeps whole Unicode
-characters, including emoji. Test keys longer than 1,000 units keep a prefix
+code points, so text stays valid; an emoji made of several code points can still
+be shortened. Test keys longer than 1,000 units keep a prefix
 and a digest of the full original identity, so differences beyond the prefix
 still distinguish tests. These limits apply to JUnit and native reports.
 

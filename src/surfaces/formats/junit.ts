@@ -249,7 +249,13 @@ function testKey(
 		hash = hash.length > 0 ? appendDigest(appendDigest(hash, separatorDigest), suite.pathDigest) : suite.pathDigest;
 	if (name.length > 0)
 		hash = hash.length > 0 ? appendDigest(appendDigest(hash, separatorDigest), digest(name)) : digest(name);
-	const shown = clip([prefix, suite?.path, name].filter(Boolean).join("::"), 983);
+	const shown = clip(
+		[prefix, suite?.path ?? "", name]
+			.map((part) => clip(part, 984))
+			.filter(Boolean)
+			.join("::"),
+		983,
+	);
 	return `${shown}#${(hash.first >>> 0).toString(16).padStart(8, "0")}${(hash.second >>> 0).toString(16).padStart(8, "0")}`;
 }
 
