@@ -1175,6 +1175,28 @@ describe("holds", () => {
 		expect(state(asked.q)).toBe("dissolved");
 	});
 
+	test("a question asked again on a retried commit needs only what it saw itself", () => {
+		const fail = { 0: "the voucher is rejected" };
+		const report = (commit: string, env: string, attempt: number, failing: boolean) => {
+			const input = ciReport({ commit, branch: "fix", pr: 52, n: 1, attempt, ...(failing ? { fail } : {}) });
+			return { ...input, target: { ...input.target, env } };
+		};
+		h.call("report", report("epoch01a", "new", 1, true));
+		h.call("report", report("epoch01a", "old", 1, true));
+		const asked = first(queue().items);
+		decide(asked, { is: "defect" });
+		h.call("report", report("epoch01a", "new", 2, false));
+		h.call("report", report("epoch01a", "old", 2, false));
+		expect(state(asked.q)).toBe("dissolved");
+		// The cause comes back on a retry of the same commit, in one environment: a new question about it.
+		h.call("report", report("epoch01a", "new", 3, true));
+		const again = first(queue().items);
+		expect(again.q).not.toBe(asked.q);
+		decide(again, { is: "defect" });
+		h.call("report", report("epoch01b", "new", 1, false));
+		expect(state(again.q)).toBe("dissolved");
+	});
+
 	test("a pass of other tests does not end the answer: the tests it named must pass", () => {
 		const fail = { 0: "expected 3 rows, got 2" };
 		h.call("report", ciReport({ commit: "named01a", branch: "fix", pr: 44, n: 2, fail }));
