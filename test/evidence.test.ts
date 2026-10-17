@@ -1375,6 +1375,26 @@ describe("a commit reported in shards", () => {
 		expect(state(asked.q)).toBe("dissolved");
 	});
 
+	test("a planned run that clears does not close the question while the newest commit waits for a shard", () => {
+		h.call("propose", { edits: [{ op: "create", outline: "Checkout total" }] });
+		const report = (commit: string, outcome: "pass" | "fail", attempt = 1) => {
+			const input = shard(commit, 1, [0], outcome === "fail" ? { 0: "the total is off by one" } : {}, 88);
+			return h.call("report", {
+				...input,
+				attempt,
+				results: input.results.map((result) => ({ ...result, annotation: { case: "C-1", version: 1 } })),
+			});
+		};
+		report("planwait1", "fail");
+		h.call("plan", { name: "Release", select: {}, accepts: { commit: "planwait1" } });
+		const asked = first(queue().items.filter((item) => item.kind === "failure"));
+		report("planwait2", "pass");
+		expect(state(asked.q)).toBe("open");
+		// A passing retry on the older commit clears the planned run, but the newest commit still waits for shards.
+		report("planwait1", "pass", 2);
+		expect(state(asked.q)).toBe("open");
+	});
+
 	test("a shard's retry counts as that shard", () => {
 		h.call("report", shard("shard15a", 1, [0, 1]));
 		h.call("report", shard("shard15a", 2, [2, 3], { 2: "timed out" }));

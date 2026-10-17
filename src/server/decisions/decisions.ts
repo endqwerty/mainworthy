@@ -1789,10 +1789,10 @@ function stoppedFailing(ctx: Ctx, question: QuestionRow, shown: Map<number, Set<
 	};
 	let gone = false;
 	const newest = newestInScope(ctx.db, ctx.project.id, subject.scope);
-	// A commit still waiting for shards of a job says nothing yet about what those shards hold (decision 0092).
-	if (newest && waitingFor(ctx.db, newest).length > 0) {
-		if (shows(newest)) return false;
-	} else if (newest) {
+	// A commit still waiting for shards of a job may yet show the cause in one of them: nothing closes the question
+	// meanwhile, not even a planned run that cleared (decision 0092).
+	if (newest && waitingFor(ctx.db, newest).length > 0) return false;
+	if (newest) {
 		if (shows(newest)) return false;
 		// A commit's gate counts pipelines and people, so its pass speaks only for a test it counted as failing.
 		const tests = (json<{ tests?: { id: number; counted?: boolean }[] }>(question.evidence).tests ?? []).flatMap(
