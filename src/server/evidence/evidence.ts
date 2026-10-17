@@ -1498,14 +1498,17 @@ export function resultsOfCaseOnTargets(db: Db, caseId: number, targets: readonly
 export const caseIdsOfFile = (db: Db, project: number, file: string): number[] =>
 	db.all(Q.caseIdsOfFile, { project, file }).flatMap((row) => (row.case_id === null ? [] : [row.case_id]));
 
-/** A page of tests, newest first, optionally only those with no case or matching a text. */
+/**
+ * A page of automated tests, newest first, optionally only those with no case or matching a text. The manual test
+ * a case's hand-run results hang on is the case's, and is not listed.
+ */
 export function listTests(
 	db: Db,
 	input: { project: number; unlinked: boolean; text: string | undefined; before: number | null; limit: number },
 ): TestRow[] {
-	const where: string[] = ["project = ?"];
+	const where: string[] = ["project = ?", "kind = 'auto'"];
 	const params: SqlValue[] = [input.project];
-	if (input.unlinked) where.push("case_id IS NULL AND kind = 'auto'");
+	if (input.unlinked) where.push("case_id IS NULL");
 	if (input.text) {
 		where.push("(key LIKE ? OR name LIKE ? OR file LIKE ?)");
 		params.push(`%${input.text}%`, `%${input.text}%`, `%${input.text}%`);

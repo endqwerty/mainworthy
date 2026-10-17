@@ -225,4 +225,19 @@ describe("the results behind a gate", () => {
 		const found = h.call<{ items: { name: string }[] }>("find", { in: "tests", text: "needle" });
 		expect(found.items.map((row) => row.name)).toEqual(["checks out"]);
 	});
+
+	test("the list of tests holds only automated tests, not a case run by hand (issue #355)", () => {
+		h.call("propose", { edits: [{ op: "create", outline: "Needle case\n  Pay > Paid" }] });
+		h.call("report", { target, job: "by hand", results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+		h.call("report", {
+			target,
+			job: "e2e",
+			results: [{ test: { key: "needle-auto", name: "needle pays", file: "specs/pay.spec.ts" }, outcome: "pass" }],
+		});
+		const names = (input: Record<string, unknown>) =>
+			h.call<{ items: { name: string }[] }>("find", { in: "tests", ...input }).items.map((row) => row.name);
+		expect(names({})).toEqual(["needle pays"]);
+		expect(names({ text: "Needle" })).toEqual(["needle pays"]);
+		expect(names({ unlinked: true })).toEqual(["needle pays"]);
+	});
 });
