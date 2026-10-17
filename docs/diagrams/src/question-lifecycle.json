@@ -8,7 +8,7 @@
     "quality_profile": "showcase",
     "repository": {
       "url": "git@github.com:endqwerty/mainworthy.git",
-      "revision": "de737a44d10e90ba00789642f160298f6f165bd3",
+      "revision": "0d74c0746615d7fa0ad671f6359637bba75b6a1c",
       "link_mode": "local-only"
     }
   },
@@ -227,6 +227,31 @@
         }
       ],
       "tag": "History stays"
+    },
+    {
+      "id": "fixed",
+      "type": "neutral",
+      "label": "dissolved",
+      "sublabel": "Fix passed; answer ended",
+      "lane": "terminal",
+      "col": 3,
+      "width": 140,
+      "height": 64,
+      "sources": [
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "label": "endPassed; passedIn; endHold"
+        },
+        {
+          "path": "src/core/kinds.ts",
+          "label": "ATTRIBUTED"
+        },
+        {
+          "path": "test/evidence.test.ts",
+          "label": "holds: an answer that needs a fix ends"
+        }
+      ],
+      "tag": "History stays"
     }
   ],
   "transitions": [
@@ -305,7 +330,9 @@
       "from": "carried",
       "to": "swept",
       "label": "time; sweepExpired",
-      "variant": "security"
+      "variant": "security",
+      "labelDx": -62,
+      "labelDy": 10
     },
     {
       "id": "answer-after-sweep",
@@ -326,6 +353,20 @@
       "from": "asked-again",
       "to": "dissolved-again",
       "label": "dissolveStale",
+      "variant": "dashed"
+    },
+    {
+      "id": "fix-passes",
+      "from": "carried",
+      "to": "fixed",
+      "label": "cause passes; endPassed",
+      "variant": "security"
+    },
+    {
+      "id": "cause-returns-after-fix",
+      "from": "fixed",
+      "to": "asked-again",
+      "label": "raise again",
       "variant": "dashed"
     },
     {
@@ -375,6 +416,7 @@
       "items": [
         "An open failure question is closed without an answer in two cases. One, closeAnswered: another answer in force already covers every build it had seen the cause on. Two, dissolveStale: nothing that speaks for it still shows the cause (the newest commit's run in its scope, and every open planned run the question names) and something shows it gone.",
         "Gone means: one of its tests that a commit's gate counted as failing with the cause now passes on the newest commit, or a named planned run has cleared. A late report for an older commit, a pipeline's pass where a run asked for an agent, or a pipeline's pass of a test only an agent showed failing closes nothing: a failure only an agent showed stays asked about until a person answers.",
+        "An answer that says the target needs a fix (defect, test, expected) ends by the rule passed when the newest commit of its scope shows no test failing with the cause and every test the question lists passing in each environment and job where it had failed (endPassed). It is recorded as outdated through endHold, like an expiry, and the question closes as dissolved. flaky, infra and inherited do not end on a pass.",
         "Dissolved questions and decisions remain in the record. If the same cause returns, raise opens the next epoch."
       ]
     }
