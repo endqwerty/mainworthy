@@ -1,6 +1,6 @@
 # Mainworthy: rules for coding agents
 
-A test case management system: TypeScript on Bun 1.4 (no other runtime or build tool), one SQLite file, a React
+A test case management system: TypeScript on Bun 1.4 (a choice, not a lock-in: decision 0010), one SQLite file, a React
 web UI. Personal project, public on GitHub; the owner (`endqwerty`, the person your global instructions name)
 reviews every change before it lands. Your global `~/.<agent>/AGENTS.md` applies too.
 

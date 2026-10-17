@@ -148,6 +148,15 @@ built in. The candidate ran the same code under Node 26 with `node:sqlite` and m
 this is a choice of convenience with a way back, not a lock-in: nothing outside `src/server/kernel/db.ts` and
 the entry point touches a Bun-only API.
 
+**2026-10-17, the owner: Bun is not locked in stone.** "We can always move off it, if it's locking us into something
+we don't want. We just want to deliver a fast secure product." So Bun is weighed like any other dependency. When it
+is what stands between the product and being fast or secure (a library that will not run on it, a missing API, a
+defect), the agent says so with evidence and proposes the move or a smaller way around it. "It runs on Bun" alone
+neither rules a choice in nor out. The sentence above is no longer true as written: on 2026-10-17, 21 files in
+`src` used a Bun-only API. Most of them have a direct Node counterpart (`Bun.file` and `Bun.write`, `Bun.spawn`,
+`Bun.password` with an argon2 package, `Bun.sleep`). The larger pieces of a move would be `Bun.serve` with its
+route table and HTML bundles, `bun:test`, and the single executable from `bun build --compile`.
+
 ### Why SQLite only, for now
 
 This amends decision 0002, which said the Server layer runs on a server database.
