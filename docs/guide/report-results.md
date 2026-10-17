@@ -12,8 +12,12 @@ To upload results and read the verdict, follow these steps.
 3. Run `mainworthy gate` to read the verdict for the tested commit.
 
 You can pass several files or a shell glob such as `results/*.xml`.
-The receipt lists outcomes, new or existing questions, unlinked tests, result bases,
-and the gate at the time of the upload.
+The receipt lists outcomes, new or existing questions, result bases,
+and the gate at the time of the upload. "1 result had no case or version when
+recorded" counts results with an unresolved basis, even if the project's policy
+has since created cases or someone has linked the tests. Several results can
+belong to the same test. See [tests with no case](./policy.md#tests-with-no-case)
+for the policy choices.
 
 A successful `report` exits `0` even when tests fail. Use `gate` for the verdict.
 An invalid input or refused command exits `4`. See [changes](./changes.md).

@@ -42,7 +42,9 @@ export function printReceipt(input: {
 			`  ${count(cause.tests)} ${disposition}   ${cause.q} ${JSON.stringify(cause.title)}   (${count(cause.tests)} ${cause.tests === 1 ? "test" : "tests"})`,
 		);
 	}
-	line(`  ${count(receipt.unlinked)} tests have no case (tracked)`);
+	line(
+		`  ${count(receipt.unlinked)} ${receipt.unlinked === 1 ? "result" : "results"} had no case or version when recorded`,
+	);
 	const basis =
 		Object.entries(receipt.basis)
 			.filter(([, value]) => value > 0)
