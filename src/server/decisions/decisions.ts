@@ -52,8 +52,10 @@ import {
 	effectiveFillsOf,
 	type FailingGroup,
 	failsOnBase,
+	failsWith,
 	inheritanceAffected,
 	inheritedEvidenceOf,
+	lanesOf,
 	newestInScope,
 	passesAny,
 	type RunRow,
@@ -74,6 +76,7 @@ import {
 	alsoAbout,
 	answersOf,
 	attachEvidence,
+	attributedQuestionsOn,
 	type DecisionRow,
 	decisionById,
 	decisionsOf,
@@ -1569,7 +1572,10 @@ export function refold(ctx: Ctx, runIds: Iterable<number>, options: { dissolveSt
 						blockersOf(ctx, result.run),
 						currentPolicy(ctx.db, ctx.project.id).settings.emptyReports,
 					);
-				if (ctx.dissolveStale) dissolveStale(ctx, result.run);
+				if (ctx.dissolveStale) {
+					dissolveStale(ctx, result.run);
+					endPassed(ctx, result.run);
+				}
 				const run = result.run;
 				const asked =
 					run.origin === "planned"
@@ -1648,6 +1654,62 @@ function dissolveStale(ctx: Ctx, run: RunRow): void {
 		if (named)
 			retally(ctx, named.id, blockersOf(ctx, named), currentPolicy(ctx.db, ctx.project.id).settings.emptyReports);
 	}
+}
+
+/**
+ * An answer that says the target needs a fix (`ATTRIBUTED`) ends when its cause passes in the newest commit of its
+ * scope: the fix arrived, so a later failure of the cause is asked about and not put down to the old answer
+ * (decision 0091). Like every ending, it stops explaining the commits that failed before: they read `blocked`, and
+ * nobody is asked about them. Called for each run a report counted toward, like `dissolveStale`.
+ */
+function endPassed(ctx: Ctx, run: RunRow): void {
+	if (run.origin !== "change" || run.scope === null) return;
+	if (newestInScope(ctx.db, ctx.project.id, run.scope)?.id !== run.id) return;
+	for (const question of attributedQuestionsOn(ctx.db, ctx.project.id, `scope:${run.scope}`)) {
+		if (json<{ scope?: string }>(question.subject).scope !== run.scope || question.decision === null) continue;
+		const decision = decisionById(ctx.db, question.decision);
+		const passed = decision ? passedIn(ctx, question, decision, run) : null;
+		if (decision && passed) endHold(ctx, decision, { is: "outdated", clause: "passed", ...passed });
+	}
+}
+
+/**
+ * Did the cause of an answered question pass in this run? Absence is not proof, and an early report is not the
+ * whole run, so it asks for more than `stoppedFailing` does of an open question:
+ *
+ * - no test fails with the cause in the run, whether an answer explains it or not;
+ * - every test the question lists passes, in each environment and job where it failed with the cause before, so a
+ *   shard that has not reported yet holds the answer, and so does a test the fix renamed or removed;
+ * - the question lists every test it has seen (it keeps fifty), and no open planned run names it: that run was
+ *   asked for by a person and waits for its own evidence.
+ *
+ * Returns the reason to record.
+ */
+function passedIn(ctx: Ctx, question: QuestionRow, decision: DecisionRow, run: RunRow): { reason: string } | null {
+	const { signature } = json<{ signature: number }>(question.subject);
+	const evidence = json<{ tests?: { id: number }[]; count?: number }>(question.evidence);
+	const listed = new Set((evidence.tests ?? []).map((test) => test.id));
+	if (listed.size === 0 || (evidence.count ?? 0) > listed.size) return null;
+	const planned = runsAbout(ctx, question).some((id) => {
+		const named = runById(ctx.db, id);
+		return named?.origin === "planned" && named.state === "open";
+	});
+	if (planned) return null;
+	const tests = [...listed];
+	// The cheap questions first: they settle the usual report, in which the cause still fails or did not run.
+	if (failsWith(ctx.db, run.id, signature) || !passesAny(ctx.db, run.id, tests)) return null;
+	const passing = new Set(
+		lanesOf(ctx.db, run.id, tests).flatMap((row) => (row.outcome === "pass" ? [`${row.test}|${row.where}`] : [])),
+	);
+	// Where it failed before: the commits that rest on the answer.
+	const failed = new Set<string>();
+	for (const id of runsDependingOn(ctx.db, decision.id)) {
+		for (const row of lanesOf(ctx.db, id, tests))
+			if (row.signature === signature) failed.add(`${row.test}|${row.where}`);
+	}
+	if (failed.size === 0 || [...failed].some((lane) => !passing.has(lane))) return null;
+	const commit = json<{ commit?: string }>(run.accepts).commit?.slice(0, 12) ?? runRef(run);
+	return { reason: `Every test it named passed on ${commit} where it had failed; the answer ended.` };
 }
 
 /**
@@ -1761,7 +1823,7 @@ function stoppedFailing(ctx: Ctx, question: QuestionRow, shown: Map<number, Set<
 export function sweepExpired(ctx: Ctx, expired: readonly DecisionRow[]): number {
 	let reopened = 0;
 	for (const decision of expired) {
-		if (endHold(ctx, decision, "expired", null)) reopened++;
+		if (endHold(ctx, decision, { is: "expired", clause: "hold-expired", reason: null })) reopened++;
 	}
 	return reopened;
 }
@@ -1771,22 +1833,36 @@ export function endDefectHold(ctx: Ctx, decision: DecisionRow, ref: string): boo
 	if (!current || current.project !== ctx.project.id || current.kind !== "failure") return false;
 	const answer = json<{ is?: string; ref?: string }>(current.answer);
 	if (answer.is !== "defect" || answer.ref !== ref) return false;
-	return endHold(ctx, current, "outdated", `Tracker issue ${ref} is closed; the defect hold ended.`);
+	return endHold(ctx, current, {
+		is: "outdated",
+		clause: "tracker-closed",
+		reason: `Tracker issue ${ref} is closed; the defect hold ended.`,
+	});
 }
 
-function endHold(ctx: Ctx, decision: DecisionRow, ending: "expired" | "outdated", reason: string | null): boolean {
+/**
+ * A decision stops holding by the rule: its time ran out (`hold-expired`), its tracker issue closed
+ * (`tracker-closed`), or its cause passed (`passed`). Each way it no longer explains anything.
+ */
+type Ending = {
+	is: "expired" | "outdated";
+	clause: "hold-expired" | "tracker-closed" | "passed";
+	reason: string | null;
+};
+
+function endHold(ctx: Ctx, decision: DecisionRow, ending: Ending): boolean {
 	const question = questionById(ctx.db, decision.question);
 	if (question?.state !== "decided" || question.decision !== decision.id) return false;
 	HANDLERS[question.kind].revert(ctx, question, decision);
 	insertDecision(ctx, {
 		question,
-		answer: { is: ending },
+		answer: { is: ending.is },
 		signers: [
 			{
 				by: ruleActor(ctx.db).id,
-				clause: ending === "expired" ? "hold-expired" : "tracker-closed",
+				clause: ending.clause,
 				policy: currentPolicy(ctx.db, ctx.project.id).version,
-				reason,
+				reason: ending.reason,
 			},
 		],
 		holds: [],

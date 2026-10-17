@@ -149,24 +149,15 @@ export const ANSWERS = {
 export type AnswerOf<K extends Kind> = z.infer<(typeof ANSWERS)[K]>;
 export type AnyAnswer = { [K in Kind]: AnswerOf<K> }[Kind];
 
+/**
+ * The answers that say the target needs a fix. A cause answered so carries to later commits while it keeps
+ * failing, and ends when it passes there: the fix arrived, and a later failure is a new question (decision 0091).
+ */
+export const ATTRIBUTED = ["defect", "test", "expected"] as const satisfies readonly FailureAnswer["is"][];
+
 /** How a failure answer counts in a run: `attributed` makes the gate `failed`; `excused` does not block. */
-export function failureClass(answer: FailureAnswer): "attributed" | "excused" {
-	switch (answer.is) {
-		case "defect":
-		case "test":
-		case "expected":
-			return "attributed";
-		case "flaky":
-		case "infra":
-		case "inherited":
-		case "mistaken":
-			return "excused";
-		default: {
-			const _exhaustive: never = answer;
-			return _exhaustive;
-		}
-	}
-}
+export const failureClass = (answer: FailureAnswer): "attributed" | "excused" =>
+	(ATTRIBUTED as readonly string[]).includes(answer.is) ? "attributed" : "excused";
 
 /**
  * The single key that gives each answer in the queue (commitment L4). Checked for uniqueness per kind by a test,

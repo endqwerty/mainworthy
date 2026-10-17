@@ -972,6 +972,112 @@ describe("holds", () => {
 		expect(asked.kind).toBe("failure");
 	});
 
+	/** The ledger rows of a question, oldest first: each answer and how it ended. */
+	const ledger = (q: string) =>
+		h.app.db.raw
+			.query<{ answer: string; signers: string }, [number]>(
+				"SELECT d.answer, d.signers FROM decisions d JOIN questions q ON q.id = d.question WHERE q.no = ? ORDER BY d.id",
+			)
+			.all(Number(q.slice(2)))
+			.map((row) => ({
+				is: (JSON.parse(row.answer) as { is: string }).is,
+				clause: (JSON.parse(row.signers) as { clause: string; reason: string | null }[])[0]?.clause,
+				reason: (JSON.parse(row.signers) as { clause: string; reason: string | null }[])[0]?.reason ?? null,
+			}));
+	const state = (q: string) => h.call<{ state: string }[]>("get", { refs: [q] })[0]?.state;
+
+	test("an answer that needs a fix ends when a later commit of the pull request passes, and a new failure is asked", () => {
+		const fail = { 0: "expected 90, got 100" };
+		h.call("report", ciReport({ commit: "fixed01a", branch: "fix", pr: 41, n: 3, fail }));
+		const asked = first(queue().items);
+		decide(asked, { is: "test" });
+		expect(gate("fixed01a").verdict).toBe("failed");
+		h.call("report", ciReport({ commit: "fixed01b", branch: "fix", pr: 41, n: 3 }));
+		expect(gate("fixed01b").verdict).toBe("passed");
+		expect(state(asked.q)).toBe("dissolved");
+		expect(ledger(asked.q)).toEqual([
+			{ is: "test", clause: expect.any(String), reason: null },
+			{
+				is: "outdated",
+				clause: "passed",
+				reason: "Every test it named passed on fixed01b where it had failed; the answer ended.",
+			},
+		]);
+		// Like any answer that ended, it no longer explains the older commit, and nobody is asked about that one.
+		expect(gate("fixed01a")).toMatchObject({ verdict: "blocked", open: [] });
+		expect(queue().items).toEqual([]);
+		const again = h.call<ReportReceipt>("report", ciReport({ commit: "fixed01c", branch: "fix", pr: 41, n: 3, fail }));
+		expect(again.questions[0]).toMatchObject({ how: "new", state: "open" });
+		expect(again.gate?.verdict).toBe("blocked");
+		expect(first(queue().items).q).not.toBe(asked.q);
+	});
+
+	test("on the line too: a defect answer ends when the line passes, and the regression is asked", () => {
+		const fail = { 1: "checkout total is wrong" };
+		h.call("report", ciReport({ commit: "line001a", n: 3, fail }));
+		const asked = first(queue().items);
+		decide(asked, { is: "defect" });
+		// While the line keeps failing the answer carries, so nobody is asked on every commit.
+		const still = h.call<ReportReceipt>("report", ciReport({ commit: "line001b", n: 3, fail }));
+		expect(still.questions[0]).toMatchObject({ how: "already decided", q: asked.q });
+		expect(still.gate?.verdict).toBe("failed");
+		h.call("report", ciReport({ commit: "line001c", n: 3 }));
+		expect(state(asked.q)).toBe("dissolved");
+		const again = h.call<ReportReceipt>("report", ciReport({ commit: "line001d", n: 3, fail }));
+		expect(again.questions[0]).toMatchObject({ how: "new", state: "open" });
+	});
+
+	test("a flaky answer does not end on a pass: a flaky test passes", () => {
+		const fail = { 0: "timed out after 5000 ms" };
+		h.call("report", ciReport({ commit: "flaky01a", branch: "fix", pr: 42, n: 3, fail }));
+		const asked = first(queue().items);
+		decide(asked, { is: "flaky" });
+		h.call("report", ciReport({ commit: "flaky01b", branch: "fix", pr: 42, n: 3 }));
+		expect(state(asked.q)).toBe("decided");
+		const again = h.call<ReportReceipt>("report", ciReport({ commit: "flaky01c", branch: "fix", pr: 42, n: 3, fail }));
+		expect(again.questions[0]).toMatchObject({ how: "already decided", q: asked.q });
+		expect(again.gate?.verdict).toBe("passed");
+	});
+
+	test("a pass from one job does not end the answer while another job that failed has not reported", () => {
+		const fail = { 0: "connection reset by fixture" };
+		const unit = (commit: string, failing: boolean) =>
+			ciReport({
+				commit,
+				branch: "fix",
+				pr: 43,
+				n: 2,
+				job: "unit",
+				file: "tests/unit.spec.ts",
+				...(failing ? { fail } : {}),
+			});
+		const e2e = (commit: string, failing: boolean) =>
+			ciReport({ commit, branch: "fix", pr: 43, n: 2, job: "e2e", ...(failing ? { fail } : {}) });
+		h.call("report", e2e("shard01a", true));
+		h.call("report", unit("shard01a", true));
+		const asked = first(queue().items);
+		decide(asked, { is: "defect" });
+		h.call("report", e2e("shard01b", false));
+		expect(state(asked.q)).toBe("decided");
+		// The other job still fails with the cause on the same commit: the answer carries, nobody is asked again.
+		const late = h.call<ReportReceipt>("report", unit("shard01b", true));
+		expect(late.questions[0]).toMatchObject({ how: "already decided", q: asked.q });
+		expect(gate("shard01b").verdict).toBe("failed");
+		h.call("report", e2e("shard01c", false));
+		h.call("report", unit("shard01c", false));
+		expect(state(asked.q)).toBe("dissolved");
+	});
+
+	test("a pass of other tests does not end the answer: the tests it named must pass", () => {
+		const fail = { 0: "expected 3 rows, got 2" };
+		h.call("report", ciReport({ commit: "named01a", branch: "fix", pr: 44, n: 2, fail }));
+		const asked = first(queue().items);
+		decide(asked, { is: "test" });
+		// The fix renamed the file: none of the tests the answer named ran.
+		h.call("report", ciReport({ commit: "named01b", branch: "fix", pr: 44, n: 2, file: "tests/rows.spec.ts" }));
+		expect(state(asked.q)).toBe("decided");
+	});
+
 	test("an infrastructure excuse covers the commit it was given for and no other", () => {
 		const fail = { 0: "connect ECONNREFUSED 10.0.0.5:5432" };
 		h.call("report", ciReport({ commit: "2222222a", n: 3, fail }));
