@@ -160,8 +160,11 @@ export function listCases(
 
 	if (query.text?.trim()) {
 		const from = searchOffset(query.cursor);
-		const { ids, exact } = searchIds(ctx, query, where, params, from);
-		const page = ids.slice(from, from + query.limit);
+		const { ids, exact } = searchIds(ctx, query, where, params);
+		// Only a search of every match has an order that holds from one page to the next. One too broad to rank is
+		// read only as far as its first page needs, and a longer read would change that order, so it answers one page
+		// and no cursor; a cursor into it reads nothing more.
+		const page = exact || from === 0 ? ids.slice(from, from + query.limit) : [];
 		const rows = page.length
 			? ctx.db.allDynamic<CaseRow>(`SELECT c.* FROM cases c WHERE c.id IN (${placeholders(page.length)})`, page)
 			: [];
@@ -172,7 +175,7 @@ export function listCases(
 		// A search too broad to rank is bounded: its count is null ("more than shown"), as is its reach.
 		return {
 			items: rows,
-			cursor: ids.length > from + query.limit ? String(from + query.limit) : null,
+			cursor: exact && ids.length > from + query.limit ? String(from + query.limit) : null,
 			count: exact ? ids.length : null,
 		};
 	}
@@ -208,13 +211,7 @@ function searchOffset(cursor: string | undefined): number {
  * Otherwise the word is too common to rank: newest first, matches in the title before matches in the steps, and the
  * list is only as long as the page asked for needs.
  */
-function searchIds(
-	ctx: Ctx,
-	query: CaseQuery,
-	where: string[],
-	params: SqlValue[],
-	from: number,
-): { ids: number[]; exact: boolean } {
+function searchIds(ctx: Ctx, query: CaseQuery, where: string[], params: SqlValue[]): { ids: number[]; exact: boolean } {
 	const project = ctx.project.id;
 	const text = query.text ?? "";
 	const direct = /^(?:c-)?(\d+)$/i.exec(text.trim());
@@ -255,7 +252,7 @@ function searchIds(
 		return { ids, exact: true };
 	}
 	const filtered = where.length > 2 || query.state === "archived";
-	const wanted = from + query.limit;
+	const wanted = query.limit;
 	const cut = Math.min(Math.max(wanted * (filtered ? 20 : 3), 200), RANKED_MATCHES);
 	const args = { project, limit: cut };
 	const inTitle = ctx.db.all(Q.searchNewest, { match: `title : (${match})`, ...args }).map((row) => row.rowid);
