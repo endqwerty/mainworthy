@@ -155,25 +155,3 @@ export function useEvents(project: string, setStatus: (text: string) => void): v
 		};
 	}, [project, setStatus]);
 }
-/** Optimistic cache changes roll back on failure; the caller keeps its input outside the cache. */
-export async function optimisticWrite<T>({
-	key,
-	update,
-	write,
-}: {
-	key: readonly unknown[];
-	update: (previous: T | undefined) => T;
-	write: () => Promise<unknown>;
-}): Promise<void> {
-	await queryClient.cancelQueries({ queryKey: key });
-	const previous = queryClient.getQueryData<T>(key);
-	queryClient.setQueryData<T>(key, update(previous));
-	try {
-		await write();
-	} catch (error) {
-		queryClient.setQueryData(key, previous);
-		throw error;
-	} finally {
-		void queryClient.invalidateQueries({ queryKey: key });
-	}
-}

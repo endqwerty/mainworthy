@@ -48,6 +48,7 @@ import {
 	refusedStatus,
 	sameBody,
 } from "../lib/merges.ts";
+import { undoChange } from "../lib/rollback.ts";
 import { navigate, readRoute, refUrl, routeEntry, routeUrl, WENT } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { EmptyState, ProofStrip } from "../ui/index.tsx";
@@ -1569,10 +1570,11 @@ export function SuiteScreen() {
 	function optimisticPlacement(edits: Edit[]): () => void {
 		const listKey = [project, "find", input, "pages"];
 		void queryClient.cancelQueries({ queryKey: listKey });
-		const oldList = queryClient.getQueryData<typeof list.data>(listKey);
 		const detailKey = [project, "get", { refs: [selected ?? "C-0"] }];
-		const oldDetail = queryClient.getQueryData<Api["get"]["reply"]>(detailKey);
 		const oldDraft = draftRef.current;
+		type Made = Map<string, { before: Record<string, unknown>; after: Record<string, unknown> }>;
+		const listMade: Made = new Map();
+		const detailMade: Made = new Map();
 		function patch(row: Record<string, unknown>, full: boolean): Record<string, unknown> {
 			let next = row;
 			const ref = row.ref;
@@ -1599,24 +1601,45 @@ export function SuiteScreen() {
 			}
 			return next;
 		}
+		const applied = (made: Made, full: boolean) => (row: Record<string, unknown>) => {
+			const next = patch(row, full);
+			if (next !== row && typeof row.ref === "string") made.set(row.ref, { before: row, after: next });
+			return next;
+		};
+		const undone = (made: Made) => (row: Record<string, unknown>) => {
+			const own = typeof row.ref === "string" ? made.get(row.ref) : undefined;
+			return own ? undoChange(row, own.before, own.after) : row;
+		};
 		queryClient.setQueryData<typeof list.data>(listKey, (cached) =>
 			cached
 				? {
 						...cached,
-						pages: cached.pages.map((page) => ({ ...page, items: page.items.map((row) => patch(row, false)) })),
+						pages: cached.pages.map((page) => ({ ...page, items: page.items.map(applied(listMade, false)) })),
 					}
 				: cached,
 		);
-		queryClient.setQueryData<Api["get"]["reply"]>(detailKey, (cached) => cached?.map((row) => patch(row, true)));
+		queryClient.setQueryData<Api["get"]["reply"]>(detailKey, (cached) => cached?.map(applied(detailMade, true)));
+		const draftTags = { before: oldDraft?.tags ?? [], after: oldDraft?.tags ?? [] };
 		if (oldDraft?.ref) {
 			const changed = patch({ ref: oldDraft.ref, tags: oldDraft.tags }, true);
-			const tags = z.array(z.string()).parse(changed.tags);
-			change({ ...oldDraft, tags });
+			draftTags.after = z.array(z.string()).parse(changed.tags);
+			change({ ...oldDraft, tags: draftTags.after });
 		}
+		/** Takes back this change alone, from the cache and the draft as they are now (issue #383). */
 		return () => {
-			queryClient.setQueryData(listKey, oldList);
-			queryClient.setQueryData(detailKey, oldDetail);
-			if (oldDraft && draftRef.current?.id === oldDraft.id) change({ ...draftRef.current, tags: oldDraft.tags });
+			queryClient.setQueryData<typeof list.data>(listKey, (cached) =>
+				cached
+					? { ...cached, pages: cached.pages.map((page) => ({ ...page, items: page.items.map(undone(listMade)) })) }
+					: cached,
+			);
+			queryClient.setQueryData<Api["get"]["reply"]>(detailKey, (cached) => cached?.map(undone(detailMade)));
+			const current = draftRef.current;
+			if (oldDraft && current?.id === oldDraft.id) {
+				const tags = z
+					.array(z.string())
+					.parse(undoChange({ tags: current.tags }, { tags: draftTags.before }, { tags: draftTags.after }).tags);
+				if (JSON.stringify(tags) !== JSON.stringify(current.tags)) change({ ...current, tags });
+			}
 		};
 	}
 	async function placement(edits: Edit[], inverse: Edit[]): Promise<void> {
@@ -1646,6 +1669,7 @@ export function SuiteScreen() {
 			setHidden(new Set());
 			if (undo.current === action) undo.current = previous;
 			setStatus(error instanceof Error ? error.message : "The change failed");
+			void invalidateProject(project);
 		}
 	}
 	function move(): void {

@@ -254,3 +254,54 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+test.skipIf(!browserAvailable)(
+	"a failed tag leaves the tags the change stream showed, not the list from before the request",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", { edits: [{ op: "create", body: { title: "Tag then fail" } }] });
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		let fail = () => {};
+		try {
+			const { page } = h;
+			await page.getByRole("button", { name: "Tag then fail", exact: true }).waitFor();
+			let started = false;
+			const held = new Promise<void>((resolve) => {
+				fail = resolve;
+			});
+			await page.context().route("**/api/p/scratch/propose", async (route) => {
+				started = true;
+				await held;
+				await route.fulfill({
+					status: 500,
+					contentType: "application/json",
+					body: JSON.stringify({ ok: false, error: { code: "internal", message: "The write failed" } }),
+				});
+			});
+			await page.keyboard.press("t");
+			await page.keyboard.type("alpha");
+			await page.keyboard.press("Enter");
+			await page.waitForFunction(() => document.querySelector(".ctags")?.textContent?.includes("#alpha"));
+			await eventually(async () => started, Boolean);
+			await server.api("propose", { edits: [{ op: "place", cases: ["C-1"], tags: { add: ["beta"] } }] });
+			await eventually(
+				async () => (await page.locator(".ctags").textContent()) ?? "",
+				(text) => text.includes("#beta"),
+			);
+			fail();
+			await page.waitForFunction(() => document.querySelector("#stat")?.textContent?.includes("The write failed"));
+			await eventually(
+				async () => (await page.locator(".ctags").textContent()) ?? "",
+				(text) => !text.includes("#alpha") && text.includes("#beta"),
+			);
+			expect(await page.locator(".ctags").textContent()).toContain("#beta");
+			expect(await page.locator(".ctags").textContent()).not.toContain("#alpha");
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.tags).toEqual(["beta"]);
+		} finally {
+			fail();
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
