@@ -5,7 +5,6 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
-import { CI_SHARD_LIMITS } from "../scripts/check-plan.ts";
 import { chooseInstance, contractDifferences, type Probe } from "../scripts/ci-instance.ts";
 import { type Running, withInstance } from "../src/cli/test-support.ts";
 import { API_VERSION } from "../src/core/version.ts";
@@ -432,17 +431,17 @@ test("given the files the change needed, the job expects those in a report and n
 	expect(short.code).toBe(1);
 }, 20_000);
 
-test("a slow shard is a warning above the budget and a failure above the limit", async () => {
-	const taking = (seconds: number): Shard[] =>
-		green.map((shard) => (shard.name === "quiet" ? { ...shard, seconds } : shard));
-	const warned = await gate(taking(CI_SHARD_LIMITS.warn + 1));
-	expect(warned.output).toContain(
-		`::warning::the slowest shard's tests took ${(CI_SHARD_LIMITS.warn + 1).toFixed(1)} s`,
-	);
-	expect(warned.code).toBe(0);
-	const failed = await gate(taking(CI_SHARD_LIMITS.fail + 1));
-	expect(failed.output).toContain(`::error::the slowest shard's tests took ${(CI_SHARD_LIMITS.fail + 1).toFixed(1)} s`);
-	expect(failed.code).toBe(1);
+test("a slow shard only warns, and a slow failed test still blocks", async () => {
+	const taking = (shards: Shard[], seconds: number): Shard[] =>
+		shards.map((shard) => (shard.name === "quiet" ? { ...shard, seconds } : shard));
+	for (const seconds of [181, 241]) {
+		const result = await gate(taking(green, seconds));
+		expect(result.output).toContain(`::warning::the slowest shard's tests took ${seconds.toFixed(1)} s`);
+		expect(result.code).toBe(0);
+	}
+	const failed = await gate(taking(withFailure("one is two"), 241));
+	expect(failed.output).toContain("::warning::the slowest shard's tests took 241.0 s");
+	expect(failed.code).toBe(2);
 }, 30_000);
 
 test("a job that breaks off leaves no Mainworthy running and nothing in the temporary directory", async () => {

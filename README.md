@@ -151,7 +151,7 @@ See [your data](docs/guide/data.md) for what an archive includes and leaves out.
 
 | Command | What |
 | --- | --- |
-| `bun run check` | Type-checks, lints, and runs every test, including latency budgets and browser tests. Without Chromium, browser tests are skipped with a message. `MAINWORTHY_CHROMIUM` names a browser. The command lists each failed test at the end. It requires Bun 1.4 and installed packages, and prints one line if either is missing. |
+| `bun run check` | Type-checks, lints, and runs every test, including latency budgets and browser tests. Without Chromium, browser tests are skipped with a message. `MAINWORTHY_CHROMIUM` names a browser. The command lists each failed test at the end. Whole-check duration is advisory; product latency budgets still fail when exceeded. It requires Bun 1.4 and installed packages, and prints one line if either is missing. |
 | `bun run dev` | Runs the server on `127.0.0.1:7357` with Bun's development bundle of the web UI and restarts it on change. A changed module reaches the open page under a looser page policy (`docs/architecture.md`). |
 | `bun run start` | the same server as a person runs it: the built web UI under the strict page policy, no reload |
 | `bun bench/run.ts` | the benchmark on 100,000 cases and 1,000,000 results (`--quick` for a small one) |

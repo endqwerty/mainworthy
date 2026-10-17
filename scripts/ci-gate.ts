@@ -23,7 +23,7 @@ import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Glob } from "bun";
 import { parseJUnit, TEST_FILE_LIMIT } from "../src/surfaces/formats/junit.ts";
-import { CI_SHARD_LIMITS, newestAttempt, type Outcome, over, readOutcome, seconds } from "./check-plan.ts";
+import { CI_SHARD_WARNING_SECONDS, newestAttempt, type Outcome, readOutcome, seconds } from "./check-plan.ts";
 import { chooseInstance, describeChoice, type Environment, type Own, startOwn } from "./ci-instance.ts";
 
 const filesFlag = process.argv.slice(2).find((arg) => arg.startsWith("--files="));
@@ -156,11 +156,10 @@ for (const row of rows) {
 	);
 }
 const longest = Math.max(0, ...rows.map((row) => row.outcome?.seconds ?? 0));
-const budget = over(longest, CI_SHARD_LIMITS);
-const slow = `the slowest shard's tests took ${seconds(longest)}`;
-if (budget === "fail") problems.push(`${slow}, over the limit of ${CI_SHARD_LIMITS.fail} s (scripts/check-plan.ts)`);
-if (budget === "warn")
-	console.log(`::warning::${slow}, over the budget of ${CI_SHARD_LIMITS.warn} s (scripts/check-plan.ts)`);
+if (longest > CI_SHARD_WARNING_SECONDS)
+	console.log(
+		`::warning::the slowest shard's tests took ${seconds(longest)}, above ${CI_SHARD_WARNING_SECONDS} s. Duration is advisory (decision 0097; issue #77).`,
+	);
 
 for (const problem of problems) console.log(`::error::${problem}`);
 console.log(`\n${chosen}`);
