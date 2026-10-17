@@ -234,6 +234,14 @@ export const ReportInput = z
 		run: z.string().optional().describe("A planned run these results are for, for example R-4."),
 		job: z.string().max(120).optional(),
 		attempt: z.number().int().min(1).optional(),
+		shard: z
+			.object({ index: z.number().int().min(1), of: z.number().int().min(1).max(1000) })
+			.refine((shard) => shard.index <= shard.of, { message: "a shard's index is at most the number of shards" })
+			.optional()
+			.meta({ "x-mcp-hidden": true })
+			.describe(
+				"This report is one shard of its job: index of of. A commit's gate waits until every shard of the job has reported.",
+			),
 		buildUrl: z.string().max(500).optional(),
 		results: z.array(ResultIn).max(100_000),
 		nothingRequired: z
@@ -287,6 +295,10 @@ export const GateStatus = z.object({
 	url: z.string().nullable(),
 	/** True when the stored verdict was overridden because an upload is unapplied or a hold expired. */
 	stale: z.boolean(),
+	/** Jobs of the commit that reported in shards and are missing some: the gate is pending until they report. */
+	waiting: z
+		.array(z.object({ job: z.string(), env: z.string(), missing: z.array(z.number().int()), of: z.number().int() }))
+		.optional(),
 });
 export type GateStatus = z.infer<typeof GateStatus>;
 export const ReportReceipt = z.object({

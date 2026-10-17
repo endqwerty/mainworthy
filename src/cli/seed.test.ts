@@ -131,7 +131,13 @@ test("a seeded project holds a suite in folders, a fortnight of history and five
 			.array(z.object({ key: z.string(), state: z.string() }))
 			.parse((await demo.call("find", { in: "changes", limit: 100 })).items);
 		expect(changes.find((change) => change.key === "pr:482")?.state).toBe("open");
-		const ended = changes.filter((change) => change.key !== "pr:482");
+		// Today's other pull request reported two of its three shards, and its gate waits for the third.
+		expect(changes.find((change) => change.key === "pr:483")?.state).toBe("open");
+		expect(await demo.call("gate", { change: "pr:483" })).toMatchObject({
+			verdict: "pending",
+			reason: "pending: waiting for shard 3 of 3 of job shop",
+		});
+		const ended = changes.filter((change) => change.key !== "pr:482" && change.key !== "pr:483");
 		expect(ended.length).toBeGreaterThan(5);
 		expect(ended.every((change) => change.state === "merged")).toBe(true);
 		// The project's own fields, set on its cases; two cases archived; the back office's TestRail ids.

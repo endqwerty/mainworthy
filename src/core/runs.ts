@@ -88,49 +88,65 @@ export const emptyTally = (): Tally => ({
 	skipped: 0,
 });
 
+/** A job of a commit that reported in shards and is missing some: which, of how many, in which environment. */
+export type ShardWait = { job: string; env: string; missing: number[]; of: number };
+
+/** "shards 3 and 5 of 6 of job tests", as a gate's reason says it. */
+export function describeShardWait(wait: ShardWait): string {
+	const numbers =
+		wait.missing.length === 1
+			? `shard ${wait.missing[0]}`
+			: `shards ${wait.missing.slice(0, -1).join(", ")} and ${wait.missing.at(-1)}`;
+	return `${numbers} of ${wait.of} of job ${wait.job || "(unnamed)"}${wait.env ? ` in ${wait.env}` : ""}`;
+}
+
 /**
  * The gate. Reading it computes nothing beyond these comparisons.
- * - `pending`: evidence is missing, an accepted upload is not yet applied, or a decision it rests on has expired.
+ * - `pending`: evidence is missing (a result, or a shard of a job that has not reported), an accepted upload is
+ *   not yet applied, or a decision it rests on has expired.
  * - `failed`: something is attributed to the target and needs a fix.
  * - `blocked`: a failure nobody has explained, a dispute, or an open question that blocks this run.
  * - `passed`: none of the above, and something was proven, or the caller established a policy-permitted
  *   declaration of nothing required. A skip or refused result cannot establish that declaration.
  */
-export function verdict(input: {
+export type VerdictFacts = {
 	tally: Tally;
 	blocking: number;
 	outstanding: number;
 	expired: boolean;
 	nothingRequired?: boolean;
-}): Verdict {
+	/** Jobs of the commit that reported in shards and are missing some. A failure already shown still counts. */
+	waiting?: readonly ShardWait[];
+};
+
+export function verdict(input: VerdictFacts): Verdict {
 	const { tally } = input;
 	if (input.outstanding > 0 || input.expired) return "pending";
 	if (tally.attributed > 0) return "failed";
 	if (tally.unexplained > 0 || tally.disputed > 0 || input.blocking > 0) return "blocked";
+	if ((input.waiting?.length ?? 0) > 0) return "pending";
 	if (tally.missing > 0 || (tally.pass + tally.excused === 0 && !input.nothingRequired)) return "pending";
 	return "passed";
 }
 
 /** One sentence for a person, and for the last line of `mainworthy gate`. */
-export function explainVerdict(input: {
-	tally: Tally;
-	blocking: number;
-	outstanding: number;
-	expired: boolean;
-	nothingRequired?: boolean;
-}): string {
+export function explainVerdict(input: VerdictFacts): string {
 	const { tally } = input;
 	const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+	// A failure shows before every shard has reported; the reason says that more is to come.
+	const waiting = input.waiting && input.waiting.length > 0 ? input.waiting.map(describeShardWait).join("; ") : null;
+	const more = waiting ? `; still waiting for ${waiting}` : "";
 	if (input.outstanding > 0) return `pending: ${plural(input.outstanding, "report")} accepted and not yet applied`;
 	if (input.expired) return "pending: a decision this run rests on has expired";
-	if (tally.attributed > 0) return `failed: ${plural(tally.attributed, "failure")} attributed to this target`;
+	if (tally.attributed > 0) return `failed: ${plural(tally.attributed, "failure")} attributed to this target${more}`;
 	if (tally.unexplained > 0 || tally.disputed > 0 || input.blocking > 0) {
 		const parts = [];
 		if (tally.unexplained > 0) parts.push(`${plural(tally.unexplained, "failure")} unexplained`);
 		if (tally.disputed > 0) parts.push(`${plural(tally.disputed, "result")} disputed`);
 		if (input.blocking > 0) parts.push(`${plural(input.blocking, "question")} open`);
-		return `blocked: ${parts.join(", ")}`;
+		return `blocked: ${parts.join(", ")}${more}`;
 	}
+	if (waiting) return `pending: waiting for ${waiting}`;
 	if (tally.missing > 0) return `pending: ${plural(tally.missing, "result")} missing`;
 	if (tally.pass + tally.excused === 0) {
 		if (input.nothingRequired) return "passed: the pipeline declared nothing required under the project's policy";

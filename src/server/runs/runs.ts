@@ -14,6 +14,7 @@ import {
 	type Obligation,
 	qualifies,
 	replacesInLane,
+	type ShardWait,
 	type SlotState,
 	slotState,
 	type Tally,
@@ -52,6 +53,7 @@ import {
 	targetsOfCommit,
 	targetsWithCommit,
 	testById,
+	waitingShards,
 } from "../evidence/evidence.ts";
 import { quarantineLookup } from "../evidence/quarantine.ts";
 import { buildWhat } from "../evidence/releases.ts";
@@ -1372,6 +1374,7 @@ export function retally(
 		outstanding: run.outstanding,
 		expired: false,
 		nothingRequired: permitsEmpty(ctx, run, tally, emptyReports),
+		waiting: waitingFor(ctx.db, run),
 	});
 	ctx.db.run(Q.project, {
 		id: run.id,
@@ -1719,16 +1722,25 @@ export const nothingCounted = (): GateStatus => ({
 	stale: false,
 });
 
+/**
+ * The shards a commit's run waits for (decision 0092). A planned run says which jobs it requires, and a run of
+ * what is typed into it has no jobs, so only a commit's own run waits for shards.
+ */
+export const waitingFor = (db: Db, run: RunRow): ShardWait[] =>
+	run.origin === "change" ? waitingShards(db, targetsOfRun(db, run)) : [];
+
 export function gateOf(ctx: Ctx, run: RunRow): GateStatus {
 	const tally = json<Tally>(run.tally);
 	const open = json<string[]>(run.blocking);
 	const expired = run.next_expiry !== null && run.next_expiry <= ctx.now;
+	const waiting = waitingFor(ctx.db, run);
 	const facts = {
 		tally,
 		blocking: open.length,
 		outstanding: run.outstanding,
 		expired,
 		nothingRequired: run.origin === "change" && run.verdict === "passed",
+		waiting,
 	};
 	const now = verdict(facts);
 	return {
@@ -1744,6 +1756,7 @@ export function gateOf(ctx: Ctx, run: RunRow): GateStatus {
 		open,
 		url: null,
 		stale: now !== run.verdict,
+		...(waiting.length > 0 ? { waiting } : {}),
 	};
 }
 

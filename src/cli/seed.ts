@@ -472,6 +472,27 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 		job: "shop",
 		results: pipelineResults(broken, 0.6, true),
 	});
+	// Another pull request, whose pipeline runs its tests in three shards: two have reported and pass, and its gate
+	// waits for the third (decision 0092). Its commit is drawn from a stream of its own, so nothing else moves.
+	const sharded = hex(random(seedNumber ^ 0x27d4eb2f));
+	const shardResults = pipelineResults([], 0.55);
+	// A demo with fewer than two automated cases has nothing to put in the second shard, and leaves it out.
+	for (const index of shardResults.length >= 2 ? [1, 2] : []) {
+		await write(ci, "report", `shard-${index}`, since - (80 - index * 5) * MINUTE, {
+			target: {
+				commit: sharded,
+				repo: REPO,
+				branch: "shipping-estimate",
+				pr: 483,
+				base: red,
+				title: "Show the shipping estimate in the cart",
+				files: ["src/cart.ts"],
+			},
+			job: "shop",
+			shard: { index, of: 3 },
+			results: shardResults.filter((_, n) => n % 3 === index - 1),
+		});
+	}
 	const checkout = suite.flatMap((item, index) => (item.folder.startsWith("Checkout") ? [refOf(index)] : []));
 	const planned = await write(owner, "plan", "run", since - 90 * MINUTE, {
 		name: "Checkout regression",

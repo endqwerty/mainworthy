@@ -156,6 +156,9 @@ Record test results in one batch. Give `target` (the commit tested) or `run` (a 
 | `run` | `string` | no | A planned run these results are for, for example R-4. |
 | `job` | `string` | no |  |
 | `attempt` | `integer` | no |  |
+| `shard` | `object` | no | This report is one shard of its job: index of of. A commit's gate waits until every shard of the job has reported. |
+| `shard.index` | `integer` | yes |  |
+| `shard.of` | `integer` | yes |  |
 | `buildUrl` | `string` | no |  |
 | `results` | `array<object>` | yes |  |
 | `results[].test` | `object` | yes |  |

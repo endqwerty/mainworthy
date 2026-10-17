@@ -9,6 +9,7 @@ import { contentHash } from "../../core/hash.ts";
 import type { ActorKind } from "../../core/kinds.ts";
 import type { MethodKind } from "../../core/model.ts";
 import type { ChangeInput, Outcome, ReportInput, ResultIn, TargetIn } from "../../core/ops.ts";
+import type { ShardWait } from "../../core/runs.ts";
 import { normaliseFailure, signatureHash } from "../../core/signature.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { type Db, json, placeholders, type SqlValue, sql } from "../kernel/db.ts";
@@ -69,6 +70,9 @@ export type BatchRow = {
 	job: string;
 	nothing_required: number;
 	attempt: number;
+	/** Which shard of its job this report is, of how many; null for a report of a whole job. */
+	shard: number | null;
+	shards: number | null;
 	method: MethodKind;
 	actor: number;
 	run: number | null;
@@ -244,6 +248,8 @@ const Q = {
 		job: string;
 		nothingRequired: number;
 		attempt: number;
+		shard: number | null;
+		shards: number | null;
 		method: string;
 		actor: number;
 		run: number | null;
@@ -253,8 +259,14 @@ const Q = {
 		at: number;
 		seq: number;
 	}>(
-		`INSERT INTO batches (project, key, target, job, nothing_required, attempt, method, actor, run, build_url, state, counts, staged, at, seq)
-		 VALUES ($project, $key, $target, $job, $nothingRequired, $attempt, $method, $actor, $run, $url, 'accepted', $counts, $staged, $at, $seq)`,
+		`INSERT INTO batches (project, key, target, job, nothing_required, attempt, shard, shards, method, actor, run, build_url, state, counts, staged, at, seq)
+		 VALUES ($project, $key, $target, $job, $nothingRequired, $attempt, $shard, $shards, $method, $actor, $run, $url, 'accepted', $counts, $staged, $at, $seq)`,
+	),
+	// The shards a job of a target has reported, by the number of shards they said the job has. An agent's report
+	// under the job's name is not the job.
+	shardsOf: sql<{ target: number }, { job: string; shards: number; reported: string }>(
+		`SELECT job, shards, group_concat(DISTINCT shard) AS reported FROM batches
+		 WHERE target = $target AND shards IS NOT NULL AND method != 'agent' GROUP BY job, shards ORDER BY job`,
 	),
 	emptyReports: sql<{ target: number }, { declared: number; ordinary: number }>(
 		`SELECT coalesce(max(nothing_required = 1 AND method = 'auto'), 0) AS declared,
@@ -813,7 +825,10 @@ export function accept(
 	input: {
 		target: TargetRow;
 		run: number | null;
-		report: Pick<ReportInput, "target" | "job" | "attempt" | "buildUrl" | "results" | "cmd" | "nothingRequired">;
+		report: Pick<
+			ReportInput,
+			"target" | "job" | "attempt" | "shard" | "buildUrl" | "results" | "cmd" | "nothingRequired"
+		>;
 		/**
 		 * For results recorded against a case: the command id, so recording the same outcome again later is a new
 		 * fact. A report of automated tests only has no nonce: the same files sent twice are the same batch.
@@ -841,6 +856,7 @@ export function accept(
 		method,
 		actor: ctx.actor.id,
 		nonce: files ? null : input.nonce,
+		...(report.shard ? { shard: report.shard } : {}),
 		results: report.results,
 		...(report.target && "commit" in report.target && report.target.head !== undefined
 			? {
@@ -854,6 +870,15 @@ export function accept(
 	});
 	const existing = ctx.db.get(Q.batchByKey, { project: ctx.project.id, key });
 	if (existing) return { batch: existing, fresh: false };
+	if (report.shard) {
+		const other = ctx.db
+			.all(Q.shardsOf, { target: input.target.id })
+			.find((row) => row.job === job && row.shards !== report.shard?.of);
+		if (other)
+			throw invalid(
+				`job "${job}" of this commit was reported in ${other.shards} shards; this report says ${report.shard.of}`,
+			);
+	}
 	const { lastId } = ctx.db.run(Q.insertBatch, {
 		project: ctx.project.id,
 		key,
@@ -864,6 +889,8 @@ export function accept(
 		actor: ctx.actor.id,
 		run: input.run,
 		nothingRequired: report.nothingRequired ? 1 : 0,
+		shard: report.shard?.index ?? null,
+		shards: report.shard?.of ?? null,
 		url: report.buildUrl ?? null,
 		counts: JSON.stringify(countOutcomes(report.results)),
 		staged: JSON.stringify(report.results),
@@ -877,6 +904,20 @@ export function accept(
 
 export const batchById = (db: Db, id: number): BatchRow | null => db.get(Q.batchById, { id });
 export const acceptedBatches = (db: Db): BatchRow[] => db.all(Q.accepted);
+
+/**
+ * The shards a commit is still waiting for: for each job of each of its targets that reported in shards, the shards
+ * that have not reported, sent or applied. Empty when every job reported whole, or every shard of it arrived.
+ */
+export function waitingShards(db: Db, targets: readonly TargetRow[]): ShardWait[] {
+	return targets.flatMap((target) =>
+		db.all(Q.shardsOf, { target: target.id }).flatMap((row) => {
+			const reported = new Set(row.reported.split(",").map(Number));
+			const missing = Array.from({ length: row.shards }, (_, i) => i + 1).filter((i) => !reported.has(i));
+			return missing.length > 0 ? [{ job: row.job, env: target.env, missing, of: row.shards }] : [];
+		}),
+	);
+}
 
 /** A declaration proves nothing once any ordinary report exists on any target the commit counts. */
 export function nothingRequiredOn(db: Db, targets: readonly TargetRow[]): boolean {

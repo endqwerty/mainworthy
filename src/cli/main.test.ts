@@ -535,6 +535,25 @@ test("change says a pull request ended, and the questions about it are no longer
 	});
 });
 
+test("report --shard sends which shard of its job a report is, and the gate names the shards it waits for", async () => {
+	await withInstance(async ({ run }) => {
+		const sent = await run(["report", RED_XML, "--commit", COMMIT, "--job", "tests", "--shard", "1/2"]);
+		expect(sent.code).toBe(0);
+		expect(sent.stdout).toContain("job tests  shard 1/2");
+		expect(sent.stdout).toContain(
+			"blocked: 1 failure unexplained, 1 question open; still waiting for shard 2 of 2 of job tests",
+		);
+		const gate = await run(["gate", "--commit", COMMIT, "--json"]);
+		expect(JSON.parse(gate.stdout)).toMatchObject({
+			verdict: "blocked",
+			waiting: [{ job: "tests", missing: [2], of: 2 }],
+		});
+		const wrong = await run(["report", RED_XML, "--commit", COMMIT, "--shard", "2of2"]);
+		expect(wrong.code).toBe(4);
+		expect(wrong.stderr).toContain("--shard takes index/count, for example 2/6");
+	});
+});
+
 test("CI can declare nothing required and a recorded policy choice controls the gate exit code", async () => {
 	await withInstance(
 		async ({ cli, run, client }) => {

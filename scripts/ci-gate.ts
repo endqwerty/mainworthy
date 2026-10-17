@@ -14,7 +14,8 @@
 // --junit` wrote beside it). In the workflow they are in the directory of the shard's artifact, one for each
 // attempt of the run the shard ran in, and the newest attempt is read (`newestAttempt` in
 // `scripts/check-plan.ts`); otherwise they are in the directory itself. Each report goes in under the shard's
-// name as its job, with the two commands a pipeline would run: `mainworthy report` and `mainworthy gate`.
+// name as its job, or as a shard of the job `tests` for the parallel tests' shards, with the two commands a
+// pipeline would run: `mainworthy report` and `mainworthy gate`.
 //
 // Which Mainworthy: the one MAINWORTHY_URL names when it can be used, else one started here for this run
 // (`scripts/ci-instance.ts`). The run's summary says which, also when the gate passes.
@@ -34,6 +35,8 @@ if (!directory || shards.length === 0 || shards.some((shard) => shard.startsWith
 }
 
 const CLI = join(import.meta.dir, "../src/cli/main.ts");
+// How many shards the parallel tests ran in.
+const parallel = shards.filter((shard) => /^tests-\d+$/.test(shard)).length;
 // The job's own Mainworthy, once there is one. It is stopped on every way out of this script: its end, an error, a
 // signal. The signals are listened for before anything is started, so there is no moment at which a Mainworthy
 // runs and nobody would stop it. Every command below blocks until it is done, so a signal waits; `heard` lets a
@@ -121,7 +124,14 @@ try {
 		if (results.length === 0) problems.push(`${shard}: its report holds no test`);
 		if (outcome.exit !== 0 && failed === 0)
 			problems.push(`${shard}: the tests exited ${outcome.exit} and the report shows no failure`);
-		const exit = cli(["report", file, "--job", shard]);
+		// The parallel tests run as shards of one job, `tests-1` to `tests-<n>`: each is reported as that shard of `tests`,
+		// so the gate of the commit waits for all of them (decision 0092). A runner of chosen files is the whole job.
+		const index = /^tests-(\d+)$/.exec(shard)?.[1];
+		const exit = cli([
+			"report",
+			file,
+			...(index ? ["--job", "tests", "--shard", `${index}/${parallel}`] : ["--job", shard]),
+		]);
 		if (exit !== 0) problems.push(`${shard}: mainworthy report exited ${exit}`);
 	}
 

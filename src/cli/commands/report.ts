@@ -25,7 +25,7 @@ export function printReceipt(input: {
 }): void {
 	const { report, receipt } = input;
 	line(
-		`mainworthy report  ${input.project} @ ${identity(report.target, receipt)}${report.attempt !== undefined ? `  attempt ${report.attempt}` : ""}${report.job ? `  job ${report.job}` : ""}`,
+		`mainworthy report  ${input.project} @ ${identity(report.target, receipt)}${report.attempt !== undefined ? `  attempt ${report.attempt}` : ""}${report.job ? `  job ${report.job}` : ""}${report.shard ? `  shard ${report.shard.index}/${report.shard.of}` : ""}`,
 	);
 	const counts = receipt.counts;
 	line(
@@ -97,6 +97,12 @@ export const reportCommand: AdapterCommand = {
 		{ name: "job", kind: "string", description: "CI job name. Overrides detection." },
 		{ name: "attempt", kind: "number", description: "Build attempt. Overrides detection." },
 		{
+			name: "shard",
+			kind: "string",
+			description:
+				"This report is one shard of its job, as index/count, for example 2/6. The commit's gate waits for every shard.",
+		},
+		{
 			name: "nothing-required",
 			kind: "boolean",
 			description: "CI declares this commit requires no tests, if its policy allows. No files.",
@@ -133,11 +139,16 @@ export const reportCommand: AdapterCommand = {
 			);
 		const job = args.value("job") ?? detected.job;
 		const attempt = args.number("attempt") ?? detected.attempt;
+		const shardText = args.value("shard");
+		const shardMatch = shardText === undefined ? null : /^(\d+)\/(\d+)$/.exec(shardText);
+		if (shardText !== undefined && !shardMatch)
+			throw new CliError("invalid", `--shard takes index/count, for example 2/6, not "${shardText}"`);
 		const report = ReportInput.parse({
 			...(target ? { target } : {}),
 			...(args.has("run") ? { run: args.value("run") } : {}),
 			...(job !== null ? { job } : {}),
 			...(attempt !== null ? { attempt } : {}),
+			...(shardMatch ? { shard: { index: Number(shardMatch[1]), of: Number(shardMatch[2]) } } : {}),
 			...(detected.buildUrl ? { buildUrl: detected.buildUrl } : {}),
 			results,
 			...(nothingRequired ? { nothingRequired: true } : {}),
