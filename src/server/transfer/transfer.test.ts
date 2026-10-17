@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { harness } from "../../../test/helpers.ts";
+import { PRESETS } from "../../core/presets.ts";
 import { type BlobStore, memoryBlobs } from "../kernel/blobs.ts";
 import { Db } from "../kernel/db.ts";
 import { OpError } from "../kernel/errors.ts";
@@ -427,8 +428,8 @@ const fixtures: Record<string, Row[]> = {
 			project: 23,
 			version: 1,
 			preset: "standard",
-			clauses: "[]",
-			settings: '{ "named": "雪" }',
+			clauses: JSON.stringify(PRESETS.standard.clauses),
+			settings: JSON.stringify({ ...PRESETS.standard.settings, named: "雪" }),
 			actor: 71,
 			decision: null,
 			at: time,
@@ -641,8 +642,11 @@ afterEach(() => {
 describe("Mainworthy instance archives", () => {
 	test("a project archive keeps every head, decision and verdict and excludes other projects", () => {
 		const from = source();
-		const selectedSettings =
-			'{ "named": "雪", "fields": { "risk": { "kind": "choice", "label": "Risk", "required": true, "choices": ["low", "high"] } } }';
+		const selectedSettings = JSON.stringify({
+			...PRESETS.standard.settings,
+			named: "雪",
+			fields: { risk: { kind: "choice", label: "Risk", required: true, choices: ["low", "high"] } },
+		});
 		from.raw.query("UPDATE policies SET settings = ? WHERE project = 23").run(selectedSettings);
 		const expected = dump(from);
 		from.exec(`
@@ -655,7 +659,10 @@ describe("Mainworthy instance archives", () => {
 			INSERT INTO actors VALUES (81, 17, 'human', 'Other project only', NULL, 1, NULL);
 			INSERT INTO grants (actor, project, can) VALUES (81, 24, '["read"]');
 		`);
-		const otherSettings = '{"fields":{"other_only":{"kind":"text","label":"Private field","required":false}}}';
+		const otherSettings = JSON.stringify({
+			...PRESETS.standard.settings,
+			fields: { other_only: { kind: "text", label: "Private field", required: false } },
+		});
 		insert(from, "policies", { ...fixtures.policies?.[0], project: 24, settings: otherSettings, actor: 80 });
 		const chunks: string[] = [];
 		exportArchive(from, (chunk) => chunks.push(chunk), { now: time, project: "qa" });

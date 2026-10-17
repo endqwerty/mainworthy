@@ -398,6 +398,51 @@ describe("rule answers", () => {
 		const { edit } = edited({ is: "create", folder: "Imported" });
 		expect(h.raw("propose", { edits: [edit] })).toMatchObject({ ok: true, result: { status: "open" } });
 	});
+
+	// The rows an older release could store: a policy whose map-track clause answers `approve`.
+	const bad = (clauses: string): string =>
+		JSON.stringify(
+			(JSON.parse(clauses) as Clause[]).map((c) => (c.id === "map-track" ? { ...c, answer: { is: "approve" } } : c)),
+		);
+
+	test("a pending proposal holding such a clause is refused when decided, and the policy stays", () => {
+		const { policy, edit } = edited({ is: "create", folder: "Imported" });
+		expect(h.raw("propose", { edits: [edit] })).toMatchObject({ ok: true });
+		const stored = h.app.db.raw.query<{ id: number; resolved: string }, []>("SELECT id, resolved FROM proposals").all();
+		expect(stored).toHaveLength(1);
+		const [row] = stored;
+		const resolved = JSON.parse(row?.resolved ?? "[]") as { op: string; policy: Policy }[];
+		for (const entry of resolved)
+			if (entry.op === "policy") entry.policy.clauses = JSON.parse(bad(JSON.stringify(entry.policy.clauses)));
+		h.app.db.raw.query("UPDATE proposals SET resolved = ? WHERE id = ?").run(JSON.stringify(resolved), row?.id ?? 0);
+		const question = first(queue({ kind: "adopt" }).items);
+		expect(
+			h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" } }),
+		).toMatchObject([{ status: "invalid", needs: "Clause map-track needs a valid map rule answer." }]);
+		expect(h.call<Policy & { version: number }>("admin", { do: "policy.show", project: "scratch" })).toEqual(policy);
+	});
+
+	test("an archive whose current policy holds such a clause is refused whole", () => {
+		const row = h.app.db.raw
+			.query<{ version: number; clauses: string }, []>("SELECT version, clauses FROM policies ORDER BY version DESC")
+			.get();
+		h.app.db.raw
+			.query("UPDATE policies SET clauses = ? WHERE version = ?")
+			.run(bad(row?.clauses ?? "[]"), row?.version ?? 0);
+		const chunks: string[] = [];
+		exportArchive(h.app.db, (chunk) => chunks.push(chunk));
+		const restored = new Db(":memory:");
+		try {
+			migrate(restored, ":memory:");
+			expect(() => importArchive(restored, linesOf(chunks.join("")))).toThrow(
+				"archive policy of project scratch is refused: Clause map-track needs a valid map rule answer.",
+			);
+			expect(restored.raw.query("SELECT count(*) AS n FROM projects").get()).toEqual({ n: 0 });
+			expect(restored.raw.query("SELECT count(*) AS n FROM policies").get()).toEqual({ n: 0 });
+		} finally {
+			restored.close();
+		}
+	});
 });
 
 describe("the presets", () => {

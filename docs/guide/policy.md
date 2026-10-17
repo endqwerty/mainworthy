@@ -292,6 +292,8 @@ It also refuses a rule clause whose answer its kind of question does not accept,
 invalid: Clause map-track needs a valid map rule answer.
 ```
 
+The same check runs when a proposal is accepted, so a waiting proposal that holds such a clause (one made before the check, or restored from an archive) is answered `invalid` with that message and the policy stays. An archive whose policy in force fails these checks is refused whole on import, naming the project and the clause; earlier policy versions in it are history and are not checked.
+
 The settings are sent whole: `unlinked`, `emptyReports`, the basis, the holds, custom field definitions in `fields`, and `flakyDetection`.
 Omitting `emptyReports` selects `pending`. Omitting `fields` keeps the current definitions. Send `"fields": {}` to remove them. Omitting `flakyDetection` selects its defaults.
 The flaky hold takes 1 to 365 days. `infraThisTargetOnly` is true when an "Infrastructure" answer covers only the build it was given for.
