@@ -1078,36 +1078,15 @@ export const countedTestsOf = (db: Db, run: number) => db.all(Q.allRunTests, { r
 export const failsWith = (db: Db, run: number, signature: number): boolean =>
 	db.get(Q.failsWith, { run, signature }) !== null;
 
-/**
- * How a run counts these tests, each in each of its lanes, with the lane said without the commit: the environment,
- * the job and who reported. A lane names its target, which is one commit in one environment, so the same job's
- * lanes on two commits compare by `where`.
- */
-export function lanesOf(
-	db: Db,
-	run: number,
-	tests: readonly number[],
-): { test: number; outcome: string; signature: number | null; where: string }[] {
+/** Where a run counts these tests passing: each test with each environment it passed in. */
+export function passingIn(db: Db, run: number, tests: readonly number[]): { test: number; env: string }[] {
 	if (tests.length === 0) return [];
-	const env = new Map<number, string>();
 	return db
-		.allDynamic<{ test: number; target: number; outcome: string; signature: number | null; lane: string }>(
-			`SELECT test, target, outcome, signature, lane FROM run_tests WHERE run = ? AND test IN (${tests.map(() => "?").join(", ")})`,
+		.allDynamic<{ test: number; target: number }>(
+			`SELECT test, target FROM run_tests WHERE run = ? AND outcome = 'pass' AND test IN (${tests.map(() => "?").join(", ")})`,
 			[run, ...tests],
 		)
-		.map((row) => {
-			let where = env.get(row.target);
-			if (where === undefined) {
-				where = mustTarget(db, row.target).env;
-				env.set(row.target, where);
-			}
-			return {
-				test: row.test,
-				outcome: row.outcome,
-				signature: row.signature,
-				where: `${where}|${row.lane.slice(row.lane.indexOf(":") + 1)}`,
-			};
-		});
+		.map((row) => ({ test: row.test, env: mustTarget(db, row.target).env }));
 }
 
 /** Failures counted by this commit or pinned in a planned run, including a run already closed on them. */

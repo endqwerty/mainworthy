@@ -24,6 +24,7 @@ import {
 	changeById,
 	excuseFor,
 	excuseForResult,
+	failedIn,
 	mustTarget,
 	ownChangeOf,
 	resultById,
@@ -55,9 +56,9 @@ import {
 	failsWith,
 	inheritanceAffected,
 	inheritedEvidenceOf,
-	lanesOf,
 	newestInScope,
 	passesAny,
+	passingIn,
 	type RunRow,
 	retally,
 	runById,
@@ -1668,7 +1669,7 @@ function endPassed(ctx: Ctx, run: RunRow): void {
 	for (const question of attributedQuestionsOn(ctx.db, ctx.project.id, `scope:${run.scope}`)) {
 		if (json<{ scope?: string }>(question.subject).scope !== run.scope || question.decision === null) continue;
 		const decision = decisionById(ctx.db, question.decision);
-		const passed = decision ? passedIn(ctx, question, decision, run) : null;
+		const passed = decision ? passedIn(ctx, question, run) : null;
 		if (decision && passed) endHold(ctx, decision, { is: "outdated", clause: "passed", ...passed });
 	}
 }
@@ -1678,16 +1679,18 @@ function endPassed(ctx: Ctx, run: RunRow): void {
  * whole run, so it asks for more than `stoppedFailing` does of an open question:
  *
  * - no test fails with the cause in the run, whether an answer explains it or not;
- * - every test the question lists passes, in each environment and job where it failed with the cause before, so a
- *   shard that has not reported yet holds the answer, and so does a test the fix renamed or removed;
+ * - every test the question lists passes, in each environment where it failed with the cause in its scope since
+ *   the question was raised, so a shard that has not reported one of them yet holds the answer, and so does a test
+ *   the fix renamed or removed. Which job ran a test does not matter: a sharded pipeline moves tests between jobs.
+ *   The history is read from the results as reported, which a passing retry does not change;
  * - the question lists every test it has seen (it keeps fifty), and no open planned run names it: that run was
  *   asked for by a person and waits for its own evidence.
  *
  * Returns the reason to record.
  */
-function passedIn(ctx: Ctx, question: QuestionRow, decision: DecisionRow, run: RunRow): { reason: string } | null {
-	const { signature } = json<{ signature: number }>(question.subject);
-	const evidence = json<{ tests?: { id: number }[]; count?: number }>(question.evidence);
+function passedIn(ctx: Ctx, question: QuestionRow, run: RunRow): { reason: string } | null {
+	const { signature, scope } = json<{ signature: number; scope: string }>(question.subject);
+	const evidence = json<{ tests?: { id: number }[]; count?: number; sample?: number | null }>(question.evidence);
 	const listed = new Set((evidence.tests ?? []).map((test) => test.id));
 	if (listed.size === 0 || (evidence.count ?? 0) > listed.size) return null;
 	const planned = runsAbout(ctx, question).some((id) => {
@@ -1698,16 +1701,13 @@ function passedIn(ctx: Ctx, question: QuestionRow, decision: DecisionRow, run: R
 	const tests = [...listed];
 	// The cheap questions first: they settle the usual report, in which the cause still fails or did not run.
 	if (failsWith(ctx.db, run.id, signature) || !passesAny(ctx.db, run.id, tests)) return null;
-	const passing = new Set(
-		lanesOf(ctx.db, run.id, tests).flatMap((row) => (row.outcome === "pass" ? [`${row.test}|${row.where}`] : [])),
-	);
-	// Where it failed before: the commits that rest on the answer.
-	const failed = new Set<string>();
-	for (const id of runsDependingOn(ctx.db, decision.id)) {
-		for (const row of lanesOf(ctx.db, id, tests))
-			if (row.signature === signature) failed.add(`${row.test}|${row.where}`);
-	}
-	if (failed.size === 0 || [...failed].some((lane) => !passing.has(lane))) return null;
+	// The question keeps the first failing result it was raised on: its failures are that one and the later ones.
+	const first = evidence.sample != null ? resultById(ctx.db, evidence.sample) : null;
+	if (!first) return null;
+	const where = (row: { test: number; env: string }): string => JSON.stringify([row.test, row.env]);
+	const failed = failedIn(ctx.db, { project: ctx.project.id, signature, scope, since: first.seq, tests: listed });
+	const passing = new Set(passingIn(ctx.db, run.id, tests).map(where));
+	if (failed.length === 0 || failed.some((row) => !passing.has(where(row)))) return null;
 	const commit = json<{ commit?: string }>(run.accepts).commit?.slice(0, 12) ?? runRef(run);
 	return { reason: `Every test it named passed on ${commit} where it had failed; the answer ended.` };
 }
