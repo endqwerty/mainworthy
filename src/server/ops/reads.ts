@@ -675,6 +675,8 @@ function slotRow(ctx: Ctx, slot: SlotRow): Record<string, unknown> {
 	};
 }
 
+const RUN_STATES = ["open", "closed"] as const satisfies readonly RunRow["state"][];
+
 export function find(ctx: Ctx, input: FindInput): Found {
 	const limit = input.limit ?? 100;
 	const project = ctx.project.id;
@@ -721,11 +723,14 @@ export function find(ctx: Ctx, input: FindInput): Found {
 		case "requirements":
 			return { count: null, items: requirementList(ctx.db, project), cursor: null };
 		case "runs": {
-			const state = input.state ?? null;
-			if (state !== null && state !== "open" && state !== "closed")
-				throw invalid(`a run is "open" or "closed", not "${state}"`);
+			const state = RUN_STATES.find((known) => known === input.state) ?? null;
+			if (input.state !== undefined && state === null)
+				throw invalid(`a run is "open" or "closed", not "${input.state}"`);
+			const change = input.change ? changeByKey(ctx.db, project, input.change) : null;
+			if (input.change && !change) throw notFound(`change ${input.change}`);
 			const before = input.cursor ? Number(input.cursor) : Number.MAX_SAFE_INTEGER;
-			const rows = recentRuns(ctx.db, project, { origin: input.origin ?? null, state }, before, limit + 1);
+			const filter = { origin: input.origin ?? null, state, change: change?.id ?? null };
+			const rows = recentRuns(ctx.db, project, filter, before, limit + 1);
 			const page = rows.slice(0, limit);
 			return {
 				count: null,

@@ -136,9 +136,20 @@ const Q = {
 		`SELECT id FROM runs WHERE project = $project AND origin = 'planned'
 		 AND json_extract(accepts, '$.commit') = $commit`,
 	),
-	recent: sql<{ project: number; origin: string | null; state: string | null; before: number; limit: number }, RunRow>(
+	recent: sql<
+		{
+			project: number;
+			origin: string | null;
+			state: string | null;
+			change: number | null;
+			before: number;
+			limit: number;
+		},
+		RunRow
+	>(
 		`SELECT * FROM runs WHERE project = $project AND id < $before
 		 AND ($origin IS NULL OR origin = $origin) AND ($state IS NULL OR state = $state)
+		 AND ($change IS NULL OR change = $change)
 		 ORDER BY id DESC LIMIT $limit`,
 	),
 	insert: sql<{
@@ -342,11 +353,11 @@ export function mustRun(db: Db, project: number, text: string): RunRow {
 	if (!row) throw notFound(`run ${text}`);
 	return row;
 }
-/** A project's runs, newest first, of one origin or state when given. */
+/** A project's runs, newest first, of one origin, state or change when given. */
 export const recentRuns = (
 	db: Db,
 	project: number,
-	filter: { origin: RunRow["origin"] | null; state: RunRow["state"] | null },
+	filter: { origin: RunRow["origin"] | null; state: RunRow["state"] | null; change: number | null },
 	before: number,
 	limit: number,
 ): RunRow[] => db.all(Q.recent, { project, ...filter, before, limit });

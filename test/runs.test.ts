@@ -180,6 +180,27 @@ describe("a run typed by hand", () => {
 		});
 		expect([rest.items.map((item) => item.ref), rest.cursor]).toEqual([["R-1"], null]);
 	});
+
+	test("the runs of one change are its pushed commits, newest first", () => {
+		h.call("report", ciReport({ commit: "feat0001", branch: "feature", pr: 7, n: 1 }));
+		h.call("report", ciReport({ commit: "other001", branch: "other", pr: 8, n: 1 }));
+		h.call("report", ciReport({ commit: "feat0002", branch: "feature", pr: 7, n: 1, fail: { 0: "broke" } }));
+		h.call("plan", { name: "smoke", select: { cases: ["C-1"] } });
+		type Listed = { ref: string; name: string; verdict: string; accepts: { commit: string } };
+		const of = (change: string) =>
+			h
+				.call<{ items: Listed[] }>("find", { in: "runs", change })
+				.items.map((item) => [item.ref, item.name, item.accepts.commit, item.verdict]);
+		expect(of("pr:7")).toEqual([
+			["R-3", "feat000 on pr:7", "feat0002", "blocked"],
+			["R-1", "feat000 on pr:7", "feat0001", "passed"],
+		]);
+		expect(of("pr:8")).toEqual([["R-2", "other00 on pr:8", "other001", "passed"]]);
+		expect(h.raw("find", { in: "runs", change: "pr:9" })).toMatchObject({
+			ok: false,
+			error: { code: "not_found", message: "change pr:9 not found" },
+		});
+	});
 });
 
 describe("a run that accepts a build", () => {
