@@ -813,3 +813,49 @@ for (const fate of ["recorded", "in flight", "lost reconciliation reply"]) {
 		30_000,
 	);
 }
+
+// A duplicated tab copies the owner id with its session storage and takes a new one (decision 0094). The id it
+// gave up must not stay live once the tab it was copied from has closed: that tab's draft is then a closed window's,
+// and a new window continues it.
+check(
+	"a duplicated tab gives up the copied owner id, so the original's draft is continued after it closes",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [
+				{ op: "create", outline: "Original case\n  A step" },
+				{ op: "create", outline: "Other case\n  A step" },
+			],
+		});
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const a = h.page;
+			await a.getByRole("button", { name: "Original case", exact: true }).waitFor();
+			await a.route("**/propose", (route) => route.abort("failed"));
+			await a.keyboard.press("e");
+			await title(a).fill("Original case unfinished");
+			const owner = await a.evaluate(() => sessionStorage.getItem("mainworthy:draft-window"));
+			// A duplicate: another tab with the first one's session storage, loaded again.
+			const b = await h.context.newPage();
+			await b.goto(`${server.url}/p/scratch/suite/c/2`);
+			await b.getByRole("button", { name: "Other case", exact: true }).waitFor();
+			await b.evaluate((owner) => sessionStorage.setItem("mainworthy:draft-window", owner ?? ""), owner);
+			await b.reload();
+			await b.getByRole("button", { name: "Other case", exact: true }).waitFor();
+			expect(await b.evaluate(() => sessionStorage.getItem("mainworthy:draft-window"))).not.toBe(owner);
+			await a.close();
+			const held = () =>
+				b.evaluate(() => navigator.locks.query().then((locks) => (locks.held ?? []).map((l) => l.name)));
+			await eventually(held, (names) => !names.includes(`mainworthy:draft-window:${owner}`));
+			const c = await h.context.newPage();
+			await c.goto(`${server.url}/p/scratch/suite/c/1`);
+			await title(c).waitFor();
+			expect(await title(c).inputValue()).toBe("Original case unfinished");
+			expect(await readOnly(c)).toBe(false);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
