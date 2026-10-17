@@ -75,7 +75,7 @@ a mistake" are about results already recorded. There is no policy setting.
 - **Waiting for the whole commit here.** The same design had the answer end only once CI said every job of the
   commit had reported. Mainworthy has no word for that yet, and the gate has the same gap: a sharded pipeline whose
   first shard reports only passes reads `passed` before the other shards report. The owner asked for sharded CI to
-  be supported (2026-10-16), so the signal is its own change, which the gate and this ending both use. Until then,
+  be supported (2026-10-16), so the signal is its own change (decision 0092), which the gate and this ending both use. Until then,
   the requirement that every listed test pass covers the failures already seen, and a test failing with the cause
   for the first time in a shard that reports late is asked about as a new question.
 - **A hold term checked when the cause comes back.** `stillHolds` would ask whether the cause passed since the

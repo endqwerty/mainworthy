@@ -102,6 +102,8 @@ Re-running alone is not a substitute for explaining a failure that still counts.
 Report missing evidence, wait for an accepted upload to be applied, or renew an
 expired decision. A run with only skipped results has proven nothing and stays pending.
 A planned run can also wait for a required job or an unfilled slot.
+A commit whose job reports in shards waits for every shard of that job.
+See [report from sharded jobs](./report-results.md#report-from-sharded-jobs).
 
 An unexplained failure can make a run blocked even when it also has missing results.
 The reason names the condition that currently determines the verdict.

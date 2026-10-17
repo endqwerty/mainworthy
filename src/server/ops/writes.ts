@@ -165,6 +165,8 @@ export function acceptReport(ctx: Ctx, input: ReportInput): { batch: BatchRow; f
 		throw invalid("nothingRequired needs a CI actor and an explicit commit target");
 	if (input.nothingRequired && input.run !== undefined)
 		throw invalid("nothing required is a declaration about a commit, not a planned run");
+	if (input.shard && (input.run !== undefined || !input.target || !("commit" in input.target)))
+		throw invalid("a shard is part of a job's report about a commit: give the commit as the target");
 	const run = input.run ? mustRun(ctx.db, ctx.project.id, input.run) : null;
 	if (run?.state === "closed" && !json<{ commit?: string }>(run.accepts).commit)
 		throw conflict(`${runRef(run)} is closed; withdraw its sign-off to reopen it`);

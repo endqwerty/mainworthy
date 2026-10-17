@@ -164,6 +164,7 @@ Flags of `mainworthy report`:
 - `--run <string>`: Planned run these results are for.
 - `--job <string>`: CI job name. Overrides detection.
 - `--attempt <number>`: Build attempt. Overrides detection.
+- `--shard <string>`: This report is one shard of its job, as index/count, for example 2/6. The commit's gate waits for every shard.
 - `--nothing-required`: CI declares this commit requires no tests, if its policy allows. No files.
 
 Flags of `mainworthy login`:

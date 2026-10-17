@@ -332,6 +332,42 @@ available and keeps the traceback in the details. Expected pytest failures are s
 TRX keeps each execution and its duration. Ambiguous or unfinished outcomes
 count as errors.
 
+## Report from sharded jobs
+
+When a job's tests run in shards, report each shard as that shard of the job.
+Use one job name for all shards, and give each shard its index and the number of shards.
+
+```
+mainworthy report results.xml --job tests --shard 2/6
+```
+
+The commit's gate then waits for every shard of the job.
+Until the last shard reports, the gate reads `pending` and names the missing shards,
+for example `pending: waiting for shards 3 and 5 of 6 of job tests`.
+A failure in a shard that already reported shows at once, and the reason says which shards are still due.
+`mainworthy gate --json` lists them in `waiting`.
+Each shard can run `mainworthy gate` after its own report. The last shard's gate gives the commit's verdict.
+
+A retry of a shard keeps the shard's index. Every shard of a job must give the same number of shards.
+A report that gives another number is refused. Each environment of a commit waits for its own shards.
+Without `--shard`, Mainworthy cannot tell that more reports are coming, and the gate reads what it has.
+
+In GitHub Actions, the shard's matrix values supply both numbers.
+
+```yaml
+strategy:
+  matrix:
+    shard: [1, 2, 3, 4, 5, 6]
+steps:
+  - run: npx playwright test --shard=${{ matrix.shard }}/6 --reporter=junit > results.xml
+  - run: |
+      mainworthy report results.xml --job tests --shard ${{ matrix.shard }}/6
+      mainworthy gate
+```
+
+A failure question waits for every shard too. Its question closes, or its answer ends, only when the commit's
+shards have all reported. See [decide](./decide.md#when-the-fix-arrives).
+
 ## Give a pipeline its own token
 
 To give a pipeline its own identity, follow these steps.

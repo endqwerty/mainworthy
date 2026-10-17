@@ -83,6 +83,7 @@ export function ciReport(input: {
 	file?: string;
 	attempt?: number;
 	job?: string;
+	shard?: { index: number; of: number };
 	/** The test numbers to report, when not 0 to n - 1: a shard or a job holds some of the tests. */
 	only?: readonly number[];
 }) {
@@ -110,6 +111,7 @@ export function ciReport(input: {
 		},
 		job: input.job ?? "e2e",
 		attempt: input.attempt ?? 1,
+		...(input.shard ? { shard: input.shard } : {}),
 		results,
 	};
 }

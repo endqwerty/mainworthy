@@ -1306,6 +1306,84 @@ describe("holds", () => {
 	});
 });
 
+describe("a commit reported in shards", () => {
+	const shard = (commit: string, index: number, only: number[], fail: Record<number, string> = {}, pr = 60) =>
+		ciReport({ commit, branch: "fix", pr, n: 6, job: "tests", shard: { index, of: 3 }, only, fail });
+	const state = (q: string) => h.call<{ state: string }[]>("get", { refs: [q] })[0]?.state;
+
+	test("its gate waits for every shard of the job, and passes when the last one does", () => {
+		h.call("report", shard("shard10a", 1, [0, 1]));
+		expect(gate("shard10a")).toMatchObject({
+			verdict: "pending",
+			reason: "pending: waiting for shards 2 and 3 of 3 of job tests",
+			waiting: [{ job: "tests", env: "", missing: [2, 3], of: 3 }],
+		});
+		h.call("report", shard("shard10a", 3, [4, 5]));
+		expect(gate("shard10a").reason).toBe("pending: waiting for shard 2 of 3 of job tests");
+		h.call("report", shard("shard10a", 2, [2, 3]));
+		const done = gate("shard10a");
+		expect(done.verdict).toBe("passed");
+		expect(done.waiting).toBeUndefined();
+	});
+
+	test("a failure in a shard that reported shows at once", () => {
+		h.call("report", shard("shard11a", 2, [2, 3], { 2: "expected 3, got 4" }));
+		expect(gate("shard11a").verdict).toBe("blocked");
+	});
+
+	test("a shard that says the job has another number of shards is refused", () => {
+		h.call("report", shard("shard12a", 1, [0, 1]));
+		const other = { ...shard("shard12a", 2, [2, 3]), shard: { index: 2, of: 4 } };
+		expect(h.raw("report", other)).toMatchObject({ ok: false, error: { code: "invalid" } });
+	});
+
+	test("a shard is about a commit, not a planned run", () => {
+		const input = { run: "R-1", job: "tests", shard: { index: 1, of: 2 }, results: shard("x", 1, [0]).results };
+		expect(h.raw("report", input)).toMatchObject({ ok: false, error: { code: "invalid" } });
+	});
+
+	test("an answer that needs a fix waits for the whole commit before it ends", () => {
+		h.call("report", shard("shard13a", 1, [0, 1], { 0: "the total is off by one" }));
+		h.call("report", shard("shard13a", 2, [2, 3]));
+		h.call("report", shard("shard13a", 3, [4, 5]));
+		const asked = first(queue().items);
+		decide(asked, { is: "defect" });
+		// The shards were balanced again: test 0 passes in shard 3, while shards 1 and 2 have not reported.
+		h.call("report", shard("shard13b", 3, [0, 5]));
+		expect(state(asked.q)).toBe("decided");
+		// A test of the cause that never failed before fails in a later shard: the answer covers it, nobody is asked.
+		const late = h.call<ReportReceipt>("report", shard("shard13b", 1, [1, 2], { 1: "the total is off by one" }));
+		expect(late.questions[0]).toMatchObject({ how: "already decided", q: asked.q });
+		expect(gate("shard13b").verdict).toBe("failed");
+		h.call("report", shard("shard13b", 2, [3, 4]));
+		expect(state(asked.q)).toBe("decided");
+		// The next commit passes in every shard.
+		h.call("report", shard("shard13c", 1, [0, 1]));
+		h.call("report", shard("shard13c", 2, [2, 3]));
+		expect(state(asked.q)).toBe("decided");
+		h.call("report", shard("shard13c", 3, [4, 5]));
+		expect(state(asked.q)).toBe("dissolved");
+	});
+
+	test("an open failure question waits for the whole commit before it closes", () => {
+		h.call("report", shard("shard14a", 1, [0, 1], { 0: "the button is missing" }));
+		const asked = first(queue().items);
+		h.call("report", shard("shard14b", 1, [0, 1]));
+		expect(state(asked.q)).toBe("open");
+		h.call("report", shard("shard14b", 2, [2, 3]));
+		h.call("report", shard("shard14b", 3, [4, 5]));
+		expect(state(asked.q)).toBe("dissolved");
+	});
+
+	test("a shard's retry counts as that shard", () => {
+		h.call("report", shard("shard15a", 1, [0, 1]));
+		h.call("report", shard("shard15a", 2, [2, 3], { 2: "timed out" }));
+		h.call("report", { ...shard("shard15a", 2, [2, 3]), attempt: 2 });
+		h.call("report", shard("shard15a", 3, [4, 5]));
+		expect(gate("shard15a").verdict).toBe("passed");
+	});
+});
+
 describe("who may answer", () => {
 	test("loose: an agent advises on a failure and a person decides", () => {
 		const agent = h.actor("triage-bot", "agent", ["read", "produce"]);

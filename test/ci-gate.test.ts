@@ -203,7 +203,7 @@ async function pipelineToken({ client }: Running): Promise<string> {
 	return z.object({ token: z.string() }).parse(made).token;
 }
 
-test("every shard passed: each is reported under its own job to the deployed instance, and the gate passes", async () => {
+test("every shard passed: each is reported as a shard of the job tests to the deployed instance, and the gate passes", async () => {
 	// A deployed instance asks for a token. This one records on `scratch` and reads its gate. No project is named
 	// to the job, and the token sees a second one it may read and not record on: the job reports to the one
 	// project it may record on.
@@ -220,8 +220,8 @@ test("every shard passed: each is reported under its own job to the deployed ins
 		/^::notice::Reported to the deployed Mainworthy: http:\/\/127\.0\.0\.1:\d+, project scratch\.$/m,
 	);
 	expect(result.summary).toBe(`${/Reported to the deployed Mainworthy: .*\./.exec(result.output)?.[0]}\n`);
-	expect(result.output).toContain("$ mainworthy report test-results/tests-1.xml --job tests-1");
-	expect(result.output).toContain("job tests-2");
+	expect(result.output).toContain("$ mainworthy report test-results/tests-1.xml --job tests --shard 1/2");
+	expect(result.output).toContain("job tests  shard 2/2");
 	expect(result.output).toContain("job quiet");
 	expect(result.output).toMatch(/mainworthy gate\s+passed/);
 	expect(result.output).not.toContain("::error::");
@@ -249,7 +249,7 @@ test("a failing test in one shard ends in a blocked gate, also in the Mainworthy
 	expect(result.code).toBe(2);
 }, 20_000);
 
-test("a shard that left no report fails the job, though the gate passes on the others", async () => {
+test("a shard that left no report fails the job, and the gate waits for that shard", async () => {
 	// With no instance named the job starts its own, and that is a notice, not a warning.
 	const result = await gate(green, { missing: ["tests-2"], configure: async () => ({ MAINWORTHY_URL: "" }) });
 	expect(result.output).toMatch(
@@ -260,11 +260,12 @@ test("a shard that left no report fails the job, though the gate passes on the o
 	// Its own Mainworthy is stopped and its data removed when the job ends.
 	expect(result.output).toMatch(/^Started a Mainworthy for this job: http:\/\/127\.0\.0\.1:\d+ \(process \d+\)$/m);
 	expect(result.left).toEqual([]);
-	expect(result.output).toContain("job tests-1");
-	expect(result.output).toMatch(/mainworthy gate\s+passed/);
+	expect(result.output).toContain("job tests  shard 1/2");
+	expect(result.output).toMatch(/mainworthy gate\s+pending: waiting for shard 2 of 2 of job tests/);
 	expect(result.output).toContain("::error::tests-2: no report (test-results/tests-2.xml is missing or empty)");
 	expect(result.output).toContain("::error::in no shard's report: test/c.test.ts");
-	expect(result.code).toBe(1);
+	// The gate itself knows a shard is missing, and its exit code (3, pending) is the job's.
+	expect(result.code).toBe(3);
 }, 20_000);
 
 // Issue #124. A run that was run again holds one artifact of a shard for each attempt the shard ran in. The
@@ -280,10 +281,10 @@ test("a shard that ran again is read from its newest attempt, and the others fro
 		{ configure: async () => ({ MAINWORTHY_URL: "" }) },
 	);
 	expect(result.output).toContain(
-		"$ mainworthy report test-results/results-tests-2-attempt-2/tests-2.xml --job tests-2",
+		"$ mainworthy report test-results/results-tests-2-attempt-2/tests-2.xml --job tests --shard 2/2",
 	);
 	expect(result.output).toContain(
-		"$ mainworthy report test-results/results-tests-1-attempt-1/tests-1.xml --job tests-1",
+		"$ mainworthy report test-results/results-tests-1-attempt-1/tests-1.xml --job tests --shard 1/2",
 	);
 	// The table says which attempt each row is from, and the row is that attempt's.
 	expect(result.output).toMatch(/^tests-1 +1 +4 +0 +0 +60\.0 s$/m);
@@ -316,7 +317,9 @@ test("the newest attempt of a shard is its report also when it failed, or left a
 	expect(empty.output).toContain(
 		"::error::tests-2: no report (test-results/results-tests-2-attempt-2/tests-2.xml is missing or empty)",
 	);
-	expect(empty.code).toBe(1);
+	// The newest attempt is the shard's report, and it holds none: shard 2 is not reported, and the gate waits for it.
+	expect(empty.output).toMatch(/mainworthy gate\s+pending: waiting for shard 2 of 2 of job tests/);
+	expect(empty.code).toBe(3);
 }, 40_000);
 
 test("a test file whose tests were all skipped fails the job, though the gate passes on the others", async () => {
