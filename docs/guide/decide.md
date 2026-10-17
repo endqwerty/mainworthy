@@ -270,9 +270,31 @@ Choose "Expected: behaviour changed" when the intended behavior changed.
 All three attribute the failure to the target and make its gate `failed`.
 An expected change still needs the case and test to agree with that change.
 
-These answers carry to later occurrences of the same cause in the same scope
-while their basis holds. They have no fixed expiry date.
-Withdraw or replace the answer when the judgment no longer applies.
+These answers carry to later occurrences of the same cause in the same scope,
+so nobody is asked again on each commit while the cause keeps failing.
+They have no fixed expiry date.
+
+### When the fix arrives
+
+You do not withdraw these three answers after a fix. The answer ends by itself when the cause passes in the newest
+commit of its scope, for example the next commit of the pull request, or the next commit on trunk.
+The question leaves "Settled". The ledger keeps your answer and records its end, signed by the rule `passed`, with
+the reason "Every test it named passed on `<commit>` where it had failed; the answer ended."
+See [export and verify an audit](./data.md#export-and-verify-an-audit). If the cause fails again later, it is a new question.
+
+The answer ends only when that commit's run shows all of the following.
+
+- No test fails with the cause, whether an answer explains the failure or not.
+- Every test the question lists passes, in each environment and job where it failed with the cause.
+  A job that has not reported yet keeps the answer. So does a test that the fix renamed or removed.
+
+The answer stays when the question has more tests than it lists, which is fifty.
+It also stays while an open planned run names the question. Withdraw such an answer yourself when it no longer applies.
+
+Like an answer that expired, an answer that ended no longer explains the earlier commits it covered.
+Their gates read `blocked`, and nobody is asked about them. A pull request's gate is the gate of its newest commit.
+
+"Flaky", "Infrastructure" and "Already failing on base" do not end on a pass. A flaky test passes some of the time.
 
 Choose "Flaky" for an unreliable failure. The outcome stays recorded but is excused.
 With the supplied presets, that answer carries for 14 days or until its basis changes.

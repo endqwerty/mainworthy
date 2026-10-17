@@ -1,6 +1,6 @@
 // Storage for the queue and the ledger. Owns questions, question_refs, answers and decisions.
 // The rules (who may answer, when a decision holds) are in decisions.ts; this file only reads and writes rows.
-import type { ActorKind, Ask, Kind } from "../../core/kinds.ts";
+import { type ActorKind, type Ask, ATTRIBUTED, type Kind } from "../../core/kinds.ts";
 import { type Ctx, ref } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
 import { notFound } from "../kernel/errors.ts";
@@ -168,6 +168,14 @@ const Q = {
 	allOnRef: sql<{ project: number; ref: string }, QuestionRow>(
 		`SELECT q.* FROM question_refs r JOIN questions q ON q.id = r.question
 		 WHERE r.project = $project AND r.ref = $ref ORDER BY q.id`,
+	),
+	// A cause answer that says the target needs a fix and still stands: it ends when its cause passes.
+	attributedOnRef: sql<{ project: number; ref: string }, QuestionRow>(
+		`SELECT q.* FROM question_refs r JOIN questions q ON q.id = r.question JOIN decisions d ON d.id = q.decision
+		 WHERE r.project = $project AND r.ref = $ref AND q.kind = 'failure' AND q.state = 'decided'
+		   AND json_extract(q.subject, '$.slot') IS NULL AND json_extract(q.subject, '$.perResult') IS NULL
+		   AND json_extract(d.answer, '$.is') IN (${ATTRIBUTED.map((is) => `'${is}'`).join(", ")})
+		 ORDER BY q.id`,
 	),
 	openOnRef: sql<
 		{ project: number; ref: string },
@@ -400,6 +408,9 @@ export const refsOf = (db: Db, question: number): string[] => db.all(Q.refsOf, {
 export const questionsOn = (db: Db, project: number, about: string): QuestionRow[] =>
 	db.all(Q.onRef, { project, ref: about });
 export const openQuestionsOn = (db: Db, project: number, about: string) => db.all(Q.openOnRef, { project, ref: about });
+/** The failure questions about a thing whose standing answer says the target needs a fix (`ATTRIBUTED`). */
+export const attributedQuestionsOn = (db: Db, project: number, about: string): QuestionRow[] =>
+	db.all(Q.attributedOnRef, { project, ref: about });
 /** Every question about a thing, oldest first, however many there are. */
 export const everyQuestionOn = (db: Db, project: number, about: string): QuestionRow[] =>
 	db.all(Q.allOnRef, { project, ref: about });

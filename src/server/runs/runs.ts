@@ -118,6 +118,9 @@ const Q = {
 		{ run: number },
 		{ test: number; result: number; target: number; outcome: string; signature: number | null }
 	>("SELECT test, result, target, outcome, signature FROM run_tests WHERE run = $run ORDER BY result"),
+	failsWith: sql<{ run: number; signature: number }, { n: number }>(
+		"SELECT 1 AS n FROM run_tests WHERE run = $run AND outcome IN ('fail', 'error') AND signature = $signature LIMIT 1",
+	),
 	byNo: sql<{ project: number; no: number }, RunRow>("SELECT * FROM runs WHERE project = $project AND no = $no"),
 	byId: sql<{ id: number }, RunRow>("SELECT * FROM runs WHERE id = $id"),
 	changeRun: sql<{ project: number; what: string }, RunRow>(
@@ -1070,6 +1073,42 @@ export function failsOnBase(db: Db, id: number): boolean {
 }
 export const changeRunsOf = (db: Db, change: number): number[] => db.all(Q.changeRuns, { change }).map((row) => row.id);
 export const countedTestsOf = (db: Db, run: number) => db.all(Q.allRunTests, { run });
+
+/** Whether a run counts a test failing with this cause, whether an answer explains it or not. */
+export const failsWith = (db: Db, run: number, signature: number): boolean =>
+	db.get(Q.failsWith, { run, signature }) !== null;
+
+/**
+ * How a run counts these tests, each in each of its lanes, with the lane said without the commit: the environment,
+ * the job and who reported. A lane names its target, which is one commit in one environment, so the same job's
+ * lanes on two commits compare by `where`.
+ */
+export function lanesOf(
+	db: Db,
+	run: number,
+	tests: readonly number[],
+): { test: number; outcome: string; signature: number | null; where: string }[] {
+	if (tests.length === 0) return [];
+	const env = new Map<number, string>();
+	return db
+		.allDynamic<{ test: number; target: number; outcome: string; signature: number | null; lane: string }>(
+			`SELECT test, target, outcome, signature, lane FROM run_tests WHERE run = ? AND test IN (${tests.map(() => "?").join(", ")})`,
+			[run, ...tests],
+		)
+		.map((row) => {
+			let where = env.get(row.target);
+			if (where === undefined) {
+				where = mustTarget(db, row.target).env;
+				env.set(row.target, where);
+			}
+			return {
+				test: row.test,
+				outcome: row.outcome,
+				signature: row.signature,
+				where: `${where}|${row.lane.slice(row.lane.indexOf(":") + 1)}`,
+			};
+		});
+}
 
 /** Failures counted by this commit or pinned in a planned run, including a run already closed on them. */
 export function inheritedResultsOf(db: Db, run: RunRow) {

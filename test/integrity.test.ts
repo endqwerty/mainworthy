@@ -2162,7 +2162,7 @@ describe("what a decision may change", () => {
 		expect(gate({ commit: "older001" })).toEqual(before);
 	});
 
-	test("an answer withdrawn after its failure went away leaves nobody asked", () => {
+	test("an answer whose failure went away ends, and nobody is asked", () => {
 		const pipeline = h.actor("pipeline", "ci", ["read", "record"]);
 		report(
 			{
@@ -2173,14 +2173,17 @@ describe("what a decision may change", () => {
 		);
 		const asked = open("failure");
 		decide(asked, { is: "test" });
-		// The next commit passes the test: the failure is gone. The answer stays what it was.
+		// The next commit passes the test: the failure is gone, and so is the answer (decision 0091). There is nothing
+		// left to withdraw.
 		report(
 			{ target: { commit: "gone0002", branch: "main" }, results: [{ test: { key: "one" }, outcome: "pass" }] },
 			pipeline,
 		);
-		// Withdrawing it does not put a question about a failure that no longer exists in front of anybody, and the
-		// older commit's gate does not name a question nobody can find.
-		h.call("decide", { undo: asked.q, reason: "wrong answer" });
+		expect(h.call<{ status: string }[]>("decide", { undo: asked.q, reason: "wrong answer" })[0]?.status).toBe(
+			"invalid",
+		);
+		// That puts no question about a failure that no longer exists in front of anybody, and the older commit's gate
+		// does not name a question nobody can find.
 		expect(h.call<InboxReply>("inbox", { kind: "failure" }).items).toEqual([]);
 		const older = gate({ commit: "gone0001" });
 		expect(older.verdict).toBe("blocked");
