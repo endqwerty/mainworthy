@@ -73,7 +73,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		if (slot.fills.every((fill) => fill.result > 0)) confirmedSlots.current.set(slot.id, slot);
 	const [local, setLocal] = useState<Map<number, LocalFill>>(new Map());
 	const [cursor, setCursor] = useState<number | null>(null);
-	const stepPrefix = deviceKey("run-step", `${project}:${runRef}:`, owner.person);
+	const stepPrefix = deviceKey("run-step", `${project}:${runRef}:`, owner.actorId);
 	const digitSequence = useRef({ slot: 0, at: 0 });
 	const consumedNotes = useRef(new Map<number, string>());
 	const consumedSteps = useRef(new Map<number, string>());
@@ -81,7 +81,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 	const [noting, setNoting] = useState<Slot | null>(null);
 	// A note belongs to its slot and is kept on this device from the first key until the server has the result:
 	// a reload, a failed request, or two failed requests in a row lose none of them.
-	const notePrefix = deviceKey("run-note", `${project}:${runRef}:`, owner.person);
+	const notePrefix = deviceKey("run-note", `${project}:${runRef}:`, owner.actorId);
 	const [notes, setNotes] = useState<Record<string, string>>(() => readNotes(notePrefix));
 	const setNoteOf = (slotId: number, text: string): void => {
 		if (!sessionCurrent(owner)) return;

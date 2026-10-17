@@ -136,7 +136,7 @@ export function useEvents(project: string, setStatus: (text: string) => void): v
 			try {
 				const current = await session({ owner });
 				if (disposed || !sessionCurrent(owner)) return;
-				if (current.actor !== owner.person) {
+				if (current.actorId !== owner.actorId) {
 					suspendDeviceSession();
 					window.dispatchEvent(new Event(unauthenticatedEvent));
 					return;

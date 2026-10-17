@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { browserAvailable, eventually, openPage, type Server, startServer } from "./support.ts";
+import { browserAvailable, devicePrefix, eventually, openPage, type Server, startServer } from "./support.ts";
 
 /** A server with the preset these tests ask for, on a port the helpers hand out. */
 function fixture({
@@ -389,6 +389,7 @@ async function cases(server: Server, count: number) {
 					project: "scratch",
 				}),
 			).token;
+			const executorPrefix = await devicePrefix(server, token);
 			view = await openPage({ ...server, token }, { path: `/p/scratch/runs/${planned.run.slice(2)}` });
 			view.page.setDefaultTimeout(3000);
 			await view.page.waitForSelector('[data-run-document="C-1"][data-active="true"][data-ready="true"]');
@@ -407,8 +408,8 @@ async function cases(server: Server, count: number) {
 			expect(unrecorded.every((slot) => slot.state === "missing" && slot.fills.length === 0)).toBe(true);
 			const first = unrecorded.find((slot) => slot.case === "C-1");
 			if (!first) throw new Error("First pinned slot missing");
-			// Kept on the device under the person's name and the slot, until the server has it.
-			const key = `mainworthy:executor:run-note:scratch:${planned.run}:${first.id}`;
+			// Kept on the device under the person's id and the slot, until the server has it.
+			const key = `${executorPrefix}run-note:scratch:${planned.run}:${first.id}`;
 			expect(await view.page.evaluate((key) => localStorage.getItem(key), key)).toBe("Keep this failure note");
 			// The same person signs in again, with a new token.
 			const renewed = z.object({ token: z.string() }).parse(

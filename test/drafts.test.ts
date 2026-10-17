@@ -3,7 +3,7 @@
 // the screen's own check before it writes. These pin the rule in `src/web/lib/drafts.ts` itself (issue #79).
 import { beforeEach, expect, test } from "bun:test";
 import { emptyBody } from "../src/core/model.ts";
-import { setDevicePerson, suspendDeviceSession } from "../src/web/lib/device.ts";
+import { dropNameKeyedData, setDevicePerson, suspendDeviceSession } from "../src/web/lib/device.ts";
 import {
 	claimCopiedDraft,
 	discardDraftCopy,
@@ -31,7 +31,7 @@ Object.defineProperty(globalThis, "localStorage", {
 });
 beforeEach(() => {
 	suspendDeviceSession();
-	setDevicePerson("");
+	setDevicePerson({ actor: "", actorId: 1 });
 	for (const copy of readDraftCopies({ project, id: "C-1" })) discardDraftCopy(copy.key);
 	kept.clear();
 	forgetDraftCopy({ project, draft: draft({}) });
@@ -134,11 +134,11 @@ test("a losing window keeps its whole accepted draft separately from the shared 
 	const winner = another({ body: { ...body, title: "Coupon case B" } });
 	expect(readDraftCopies({ project, id: mine.id }).map((copy) => copy.draft)).toEqual([mine]);
 	expect(stored()).toEqual(winner);
-	setDevicePerson("another-person");
+	setDevicePerson({ actor: "another-person", actorId: 7 });
 	try {
 		expect(readDraftCopies({ project, id: mine.id })).toEqual([]);
 	} finally {
-		setDevicePerson("");
+		setDevicePerson({ actor: "", actorId: 1 });
 	}
 });
 
@@ -208,7 +208,7 @@ for (const afterSignIn of [false, true])
 		kept.set(key, JSON.stringify({ draft: interrupted, state: "writing" }));
 		if (afterSignIn) {
 			suspendDeviceSession();
-			setDevicePerson("");
+			setDevicePerson({ actor: "", actorId: 1 });
 		}
 		const mine = draft({ body: { ...body, title: "Text typed after returning" } });
 		expect(writeCopiedDraft({ project, draft: mine })).toBe(true);
@@ -302,27 +302,27 @@ test("a losing copy that matches a later recorded version is removed", () => {
 });
 
 test("copies stay under the person's device prefix so clearing that prefix removes them", () => {
-	setDevicePerson("person/one");
+	setDevicePerson({ actor: "person/one", actorId: 5 });
 	const mine = draft({ body: { ...body, title: "This person's accepted text" } });
 	writeCopiedDraft({ project, draft: mine });
 	another({ body: { ...body, title: "The competing first write" } });
 	const [copy] = readDraftCopies({ project, id: mine.id });
 	expect(copy?.draft.body.title).toBe("This person's accepted text");
-	expect(copy?.key.startsWith("mainworthy:person%2Fone:")).toBe(true);
-	for (const key of kept.keys()) if (key.startsWith("mainworthy:person%2Fone:")) kept.delete(key);
+	expect(copy?.key.startsWith("mainworthy:#5:")).toBe(true);
+	for (const key of kept.keys()) if (key.startsWith("mainworthy:#5:")) kept.delete(key);
 	expect(readDraftCopies({ project, id: mine.id })).toEqual([]);
-	setDevicePerson("");
+	setDevicePerson({ actor: "", actorId: 1 });
 });
 
 test("clearing a person's keys and signing in again cannot reuse the old ownership confirmation", async () => {
-	setDevicePerson("returning-person");
+	setDevicePerson({ actor: "returning-person", actorId: 6 });
 	const first = draft({ body: { ...body, title: "Before sign-out" } });
 	writeCopiedDraft({ project, draft: first });
 	await new Promise((done) => setTimeout(done, 5));
 	expect([...kept.keys()].filter((key) => key.includes(":draft-copy:")).length).toBe(0);
 	suspendDeviceSession();
 	kept.clear();
-	setDevicePerson("returning-person");
+	setDevicePerson({ actor: "returning-person", actorId: 6 });
 	try {
 		const next = draft({ body: { ...body, title: "Accepted after signing in again" } });
 		writeCopiedDraft({ project, draft: next });
@@ -331,6 +331,55 @@ test("clearing a person's keys and signing in again cannot reuse the old ownersh
 	} finally {
 		suspendDeviceSession();
 		kept.clear();
-		setDevicePerson("");
+		setDevicePerson({ actor: "", actorId: 1 });
 	}
+});
+
+test("two people with one name and different ids never see each other's device data", () => {
+	setDevicePerson({ actor: "robin", actorId: 3 });
+	const first = draft({ body: { ...body, title: "Typed by the first robin" } });
+	expect(writeDraft({ project, draft: first })).toBe(true);
+	expect(stored()?.body.title).toBe("Typed by the first robin");
+	suspendDeviceSession();
+	setDevicePerson({ actor: "robin", actorId: 4 });
+	expect(stored()).toBeNull();
+	expect(writeDraft({ project, draft: draft({ body: { ...body, title: "Typed by the second robin" } }) })).toBe(true);
+	expect([...kept.keys()].sort()).toEqual([
+		"mainworthy:#3:active:scratch",
+		"mainworthy:#3:draft:scratch:C-1",
+		"mainworthy:#3:steps:scratch:C-1",
+		"mainworthy:#4:active:scratch",
+		"mainworthy:#4:draft:scratch:C-1",
+		"mainworthy:#4:steps:scratch:C-1",
+		"mainworthy:session-person",
+	]);
+	suspendDeviceSession();
+	setDevicePerson({ actor: "robin", actorId: 3 });
+	expect(stored()?.body.title).toBe("Typed by the first robin");
+});
+
+test("data kept under a sign-in name is dropped at start, and nothing else is", () => {
+	const entries = {
+		"mainworthy:robin:draft:scratch:C-1": "A name-keyed draft",
+		"mainworthy:robin%20two:run-note:scratch:R-1:s1:": "A name-keyed note",
+		"mainworthy::home:scratch": "A home kept under the empty name",
+		"mainworthy:#3:draft:scratch:C-1": "Kept for actor 3",
+		"mainworthy:theme": "dark",
+		"mainworthy:sidebar": "collapsed",
+		"mainworthy:session-person": "3",
+		"mainworthy:device-clear": "1,2,3,4",
+		"another-app:robin:draft:x": "Not ours",
+		"mainworthy:route:somewhere:else": "A key of the app's own, not a person's",
+	};
+	for (const [key, value] of Object.entries(entries)) kept.set(key, value);
+	dropNameKeyedData(localStorage);
+	expect(Object.fromEntries(kept)).toEqual({
+		"mainworthy:#3:draft:scratch:C-1": "Kept for actor 3",
+		"mainworthy:theme": "dark",
+		"mainworthy:sidebar": "collapsed",
+		"mainworthy:session-person": "3",
+		"mainworthy:device-clear": "1,2,3,4",
+		"another-app:robin:draft:x": "Not ours",
+		"mainworthy:route:somewhere:else": "A key of the app's own, not a person's",
+	});
 });

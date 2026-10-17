@@ -4,11 +4,23 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { z } from "zod";
 import { totpCode } from "../../src/server/identity/totp.ts";
-import { advanceClock, browserAvailable, openPage, type PageHarness, type Server, startServer } from "./support.ts";
+import {
+	advanceClock,
+	browserAvailable,
+	devicePrefix,
+	openPage,
+	type PageHarness,
+	type Server,
+	startServer,
+} from "./support.ts";
 
 let server: Server;
 beforeAll(async () => {
-	if (browserAvailable) server = await startServer({ mode: "server" });
+	if (browserAvailable) {
+		server = await startServer({ mode: "server" });
+		// The tests below name the owner's storage keys by id: a new instance's owner has id 2.
+		expect(await devicePrefix(server, server.token)).toBe("mainworthy:#2:");
+	}
 });
 afterAll(async () => {
 	await server?.stop();
@@ -28,7 +40,7 @@ for (const device of ["desktop", "phone"] as const)
 					if (request.url().endsWith("/api/logout") && request.method() === "POST") posts++;
 				});
 				await page.evaluate(() =>
-					localStorage.setItem("mainworthy:robin:queue-input:scratch:pending", "Keep this answer"),
+					localStorage.setItem("mainworthy:#2:queue-input:scratch:pending", "Keep this answer"),
 				);
 				for (const source of ["sidebar", "sessions", "keys"] as const) {
 					if (source === "sidebar") {
@@ -74,7 +86,7 @@ for (const device of ["desktop", "phone"] as const)
 					await dialog.waitFor({ state: "detached" });
 					expect(posts).toBe(0);
 					expect((await page.request.get(`${server.url}/api/session`)).ok()).toBe(true);
-					expect(await page.evaluate(() => localStorage.getItem("mainworthy:robin:queue-input:scratch:pending"))).toBe(
+					expect(await page.evaluate(() => localStorage.getItem("mainworthy:#2:queue-input:scratch:pending"))).toBe(
 						"Keep this answer",
 					);
 				}
@@ -84,7 +96,7 @@ for (const device of ["desktop", "phone"] as const)
 				await page.keyboard.press("Enter");
 				await page.locator("#signin-name").waitFor();
 				expect(posts).toBe(1);
-				expect(await page.evaluate(() => localStorage.getItem("mainworthy:robin:queue-input:scratch:pending"))).toBe(
+				expect(await page.evaluate(() => localStorage.getItem("mainworthy:#2:queue-input:scratch:pending"))).toBe(
 					"Keep this answer",
 				);
 				expect(browser.dialogs).toEqual([]);
@@ -411,7 +423,7 @@ test.skipIf(!browserAvailable)(
 			browser = await openPage(server, { path: "/p/scratch/settings" });
 			const { page } = browser;
 			page.setDefaultTimeout(8000);
-			await page.evaluate(() => localStorage.setItem("mainworthy:robin:queue-input:scratch:pending", "Private answer"));
+			await page.evaluate(() => localStorage.setItem("mainworthy:#2:queue-input:scratch:pending", "Private answer"));
 			// The server signs the browser out, and the reply is dropped on its way back.
 			await page.route("**/api/logout", async (route) => {
 				await route.fetch();
@@ -421,9 +433,7 @@ test.skipIf(!browserAvailable)(
 			await page.getByRole("button", { name: "Sign out and clear browser data", exact: true }).click();
 			await page.locator("#signin-name").waitFor();
 			expect(await page.locator("#app").count()).toBe(0);
-			expect(
-				await page.evaluate(() => localStorage.getItem("mainworthy:robin:queue-input:scratch:pending")),
-			).toBeNull();
+			expect(await page.evaluate(() => localStorage.getItem("mainworthy:#2:queue-input:scratch:pending"))).toBeNull();
 			expect(browser.errors).toEqual(["Failed to load resource: net::ERR_FAILED"]);
 		} finally {
 			await browser?.close();
@@ -446,10 +456,10 @@ for (const storage of ["available", "unavailable"] as const)
 				await other.goto(`${server.url}/p/scratch/settings`);
 				await other.locator("#app").waitFor();
 				await page.evaluate((refuseRemoval) => {
-					localStorage.setItem("mainworthy:robin:queue-input:scratch:pending", "Private answer");
-					localStorage.setItem("mainworthy:robin:draft-copy:scratch:C-1", "Private copy");
-					localStorage.setItem("mainworthy:someone-else:draft:scratch:C-2", "Their draft");
-					localStorage.setItem("mainworthy:someone-else:draft-copy:scratch:C-2", "Their copy");
+					localStorage.setItem("mainworthy:#2:queue-input:scratch:pending", "Private answer");
+					localStorage.setItem("mainworthy:#2:draft-copy:scratch:C-1", "Private copy");
+					localStorage.setItem("mainworthy:#99:draft:scratch:C-2", "Their draft");
+					localStorage.setItem("mainworthy:#99:draft-copy:scratch:C-2", "Their copy");
 					if (refuseRemoval)
 						Storage.prototype.removeItem = () => {
 							throw new DOMException("Storage unavailable", "SecurityError");
@@ -470,7 +480,7 @@ for (const storage of ["available", "unavailable"] as const)
 					expect(
 						await page.evaluate(() =>
 							Object.keys(localStorage).filter(
-								(key) => key.startsWith("mainworthy:robin:") || key === "mainworthy:session-person",
+								(key) => key.startsWith("mainworthy:#2:") || key === "mainworthy:session-person",
 							),
 						),
 					).toEqual([]);
@@ -479,7 +489,7 @@ for (const storage of ["available", "unavailable"] as const)
 						await tab.reload();
 						await tab.locator("#signin-name").waitFor();
 						expect(
-							await tab.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("mainworthy:robin:"))),
+							await tab.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("mainworthy:#2:"))),
 						).toEqual([]);
 					}
 					expect(browser.dialogs).toEqual([]);
@@ -487,14 +497,12 @@ for (const storage of ["available", "unavailable"] as const)
 					expect(browser.dialogs).toEqual([
 						"You are signed out, but this browser could not clear all your data. Clear this site's data in your browser settings before leaving a shared computer.",
 					]);
-					expect(await page.evaluate(() => localStorage.getItem("mainworthy:robin:queue-input:scratch:pending"))).toBe(
+					expect(await page.evaluate(() => localStorage.getItem("mainworthy:#2:queue-input:scratch:pending"))).toBe(
 						"Private answer",
 					);
 				}
-				expect(await page.evaluate(() => localStorage.getItem("mainworthy:someone-else:draft:scratch:C-2"))).toBe(
-					"Their draft",
-				);
-				expect(await page.evaluate(() => localStorage.getItem("mainworthy:someone-else:draft-copy:scratch:C-2"))).toBe(
+				expect(await page.evaluate(() => localStorage.getItem("mainworthy:#99:draft:scratch:C-2"))).toBe("Their draft");
+				expect(await page.evaluate(() => localStorage.getItem("mainworthy:#99:draft-copy:scratch:C-2"))).toBe(
 					"Their copy",
 				);
 				expect(browser.errors).toEqual([
@@ -545,7 +553,7 @@ for (const recovery of ["first check", "fallback check", "no answer"] as const)
 				await page.keyboard.press("e");
 				const step = page.getByRole("textbox", { name: "Step 1", exact: true });
 				await step.fill("Draft after failed clear");
-				const stored = () => page.evaluate(() => localStorage.getItem("mainworthy:robin:draft:scratch:C-1") ?? "");
+				const stored = () => page.evaluate(() => localStorage.getItem("mainworthy:#2:draft:scratch:C-1") ?? "");
 				expect(await stored()).toContain("Draft after failed clear");
 				await advanceClock(local, 366 * 24 * 60 * 60 * 1000);
 				// Leave the editor without saving, so the draft on the device is all that holds the text.
@@ -583,7 +591,7 @@ for (const tab of ["same tab (Q2)", "another tab (Q4)"] as const)
 				const { page, context } = browser;
 				page.setDefaultTimeout(5000);
 				await page.evaluate(() =>
-					localStorage.setItem("mainworthy:robin:queue-input:scratch:pending", "Kept after failed clear"),
+					localStorage.setItem("mainworthy:#2:queue-input:scratch:pending", "Kept after failed clear"),
 				);
 				await page.route("**/api/logout", (route) => route.abort());
 				await page.getByRole("button", { name: "Sign out", exact: true }).click();
@@ -606,17 +614,17 @@ for (const tab of ["same tab (Q2)", "another tab (Q4)"] as const)
 				}
 				await page.reload();
 				await page.locator("#signin-name").waitFor();
-				expect(await page.evaluate(() => localStorage.getItem("mainworthy:robin:queue-input:scratch:pending"))).toBe(
+				expect(await page.evaluate(() => localStorage.getItem("mainworthy:#2:queue-input:scratch:pending"))).toBe(
 					"Kept after failed clear",
 				);
-				expect(await page.evaluate(() => localStorage.getItem("mainworthy:session-person"))).toBe("robin");
+				expect(await page.evaluate(() => localStorage.getItem("mainworthy:session-person"))).toBe("2");
 				await page.locator("#token").fill(local.token);
 				await page.keyboard.press("Enter");
 				await page.locator("#app").waitFor();
 				await advanceClock(local, 366 * 24 * 60 * 60 * 1000);
 				await page.reload();
 				await page.locator("#signin-name").waitFor();
-				expect(await page.evaluate(() => localStorage.getItem("mainworthy:robin:queue-input:scratch:pending"))).toBe(
+				expect(await page.evaluate(() => localStorage.getItem("mainworthy:#2:queue-input:scratch:pending"))).toBe(
 					"Kept after failed clear",
 				);
 				expect(browser.dialogs).toEqual([]);
@@ -636,12 +644,12 @@ test.skipIf(!browserAvailable)(
 			browser = await openPage(server, { path: "/p/scratch/settings" });
 			const { page } = browser;
 			page.setDefaultTimeout(8000);
-			await page.evaluate(() => localStorage.setItem("mainworthy:robin:queue-input:scratch:pending", "Private answer"));
+			await page.evaluate(() => localStorage.setItem("mainworthy:#2:queue-input:scratch:pending", "Private answer"));
 			await page.route("**/api/logout", (route) => route.abort());
 			await page.getByRole("button", { name: "Sign out", exact: true }).click();
 			await page.getByRole("button", { name: "Sign out and clear browser data", exact: true }).click();
 			await page.getByText("this browser is still signed in", { exact: false }).waitFor();
-			expect(await page.evaluate(() => localStorage.getItem("mainworthy:robin:queue-input:scratch:pending"))).toBe(
+			expect(await page.evaluate(() => localStorage.getItem("mainworthy:#2:queue-input:scratch:pending"))).toBe(
 				"Private answer",
 			);
 			expect(await page.locator("#app").count()).toBe(1);
@@ -678,8 +686,8 @@ for (const source of ["sidebar", "sessions"] as const)
 				await other.locator('[data-active="true"][data-ready="true"]').waitFor();
 				await other.getByRole("textbox", { name: "Result note" }).fill("Private unsaved run note");
 				await page.evaluate(() => {
-					localStorage.setItem("mainworthy:robin:queue-input:scratch:Q-1:excuse:reason", "Private queue answer");
-					localStorage.setItem("mainworthy:someone-else:draft:scratch:C-2", "Their draft");
+					localStorage.setItem("mainworthy:#2:queue-input:scratch:Q-1:excuse:reason", "Private queue answer");
+					localStorage.setItem("mainworthy:#99:draft:scratch:C-2", "Their draft");
 					localStorage.setItem("mainworthy:theme", "dark");
 				});
 				if (source === "sessions") {
@@ -695,7 +703,7 @@ for (const source of ["sidebar", "sessions"] as const)
 				expect(
 					await signingOut.evaluate(() =>
 						Object.keys(localStorage).filter(
-							(key) => key.startsWith("mainworthy:robin:") || key === "mainworthy:session-person",
+							(key) => key.startsWith("mainworthy:#2:") || key === "mainworthy:session-person",
 						),
 					),
 				).toEqual([]);
@@ -723,14 +731,12 @@ for (const source of ["sidebar", "sessions"] as const)
 					expect(
 						await tab.evaluate(() =>
 							Object.entries(localStorage).filter(
-								([key]) => key.startsWith("mainworthy:robin:") || key === "mainworthy:session-person",
+								([key]) => key.startsWith("mainworthy:#2:") || key === "mainworthy:session-person",
 							),
 						),
 					).toEqual([]);
 				}
-				expect(await page.evaluate(() => localStorage.getItem("mainworthy:someone-else:draft:scratch:C-2"))).toBe(
-					"Their draft",
-				);
+				expect(await page.evaluate(() => localStorage.getItem("mainworthy:#99:draft:scratch:C-2"))).toBe("Their draft");
 				expect(await page.evaluate(() => localStorage.getItem("mainworthy:theme"))).toBe("dark");
 				expect((await local.api("get", { refs: ["C-1"] }))[0]?.version).toBe(1);
 				expect(browser.errors).toEqual([]);
@@ -760,7 +766,7 @@ test.skipIf(!browserAvailable)(
 			await page.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
 			await page.locator("#signin-name").waitFor();
 			expect(browser.dialogs).toEqual([]);
-			const stored = () => page.evaluate(() => localStorage.getItem("mainworthy:robin:draft:scratch:C-1"));
+			const stored = () => page.evaluate(() => localStorage.getItem("mainworthy:#2:draft:scratch:C-1"));
 			expect(await stored()).toContain("Keep my unsaved text");
 			for (const expired of [false, true]) {
 				if (expired) {
@@ -819,7 +825,7 @@ test.skipIf(!browserAvailable)(
 			await note.fill("Old tab tried to restore private text");
 			expect(
 				await other.evaluate(() =>
-					Object.keys(localStorage).filter((key) => key.startsWith("mainworthy:robin:run-note:")),
+					Object.keys(localStorage).filter((key) => key.startsWith("mainworthy:#2:run-note:")),
 				),
 			).toEqual([]);
 			await page.reload();

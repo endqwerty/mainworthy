@@ -2,7 +2,7 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
 import { Slot } from "../../src/web/runs/models.ts";
-import { browserAvailable, eventually, openPage, type Server, startServer } from "./support.ts";
+import { browserAvailable, devicePrefix, eventually, openPage, type Server, startServer } from "./support.ts";
 
 const check = test.skipIf(!browserAvailable);
 const latch = () => {
@@ -78,6 +78,7 @@ for (const surface of ["case", "run", "queue"])
 			const run = await server.api("plan", { name: "Identity", select: {} });
 			const alice = await grant(server, "alice"),
 				bob = await grant(server, "bob");
+			const alicePrefix = await devicePrefix(server, alice);
 			const h = await openPage(
 				{ ...server, token: alice },
 				{
@@ -124,11 +125,13 @@ for (const surface of ["case", "run", "queue"])
 				if (q) expect((await server.api("get", { refs: [q] }))[0]?.state).toBe("open");
 				else
 					expect(
-						await page.evaluate(() =>
-							Object.entries(localStorage)
-								.filter(([k]) => k.startsWith("mainworthy:alice:"))
-								.map(([, v]) => v)
-								.join(" "),
+						await page.evaluate(
+							(prefix) =>
+								Object.entries(localStorage)
+									.filter(([k]) => k.startsWith(prefix))
+									.map(([, v]) => v)
+									.join(" "),
+							alicePrefix,
 						),
 					).toContain(surface === "case" ? "Alice private draft" : "Alice private note");
 			} finally {

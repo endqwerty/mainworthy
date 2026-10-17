@@ -99,7 +99,7 @@ export async function call<O extends OpName>(
 		method: "POST",
 		headers: {
 			"content-type": "application/json",
-			...(owner ? { "X-Mainworthy-As": encodeURIComponent(owner.person) } : {}),
+			...(owner ? { "X-Mainworthy-As": encodeURIComponent(owner.name) } : {}),
 			...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
 		},
 		body: JSON.stringify(input),
@@ -157,7 +157,7 @@ export async function exchange(
 					method: "POST",
 					headers: {
 						"content-type": "application/json",
-						...(owner ? { "X-Mainworthy-As": encodeURIComponent(owner.person) } : {}),
+						...(owner ? { "X-Mainworthy-As": encodeURIComponent(owner.name) } : {}),
 					},
 					body: JSON.stringify(body),
 				},
