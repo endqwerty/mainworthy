@@ -545,3 +545,81 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+for (const cookie of ["ended", "valid"] as const)
+	test.skipIf(!browserAvailable)(
+		`startup reconciles a clear missed before subscription when the cookie is ${cookie}`,
+		async () => {
+			const server = await startServer({ mode: "server" });
+			await server.api("propose", { edits: [{ op: "create", outline: "Startup clear case\n  Original step" }] });
+			const run = await server.api("plan", { name: "Startup clear", select: {} });
+			const browser = await openPage(server, { path: `/p/scratch/runs/${run.run.slice(2)}` });
+			try {
+				const { page, context } = browser;
+				page.setDefaultTimeout(5000);
+				await page.getByRole("textbox", { name: "Result note" }).fill("Discarded startup sentence");
+				const { result } = z
+					.object({ result: z.object({ actorId: z.number() }) })
+					.parse(await (await context.request.get(`${server.url}/api/session`)).json());
+				const prefix = `mainworthy:#${result.actorId}:`;
+				if (cookie === "ended") await context.clearCookies();
+				await page.addInitScript((prefix) => {
+					let injected = false;
+					window.addEventListener = new Proxy(window.addEventListener, {
+						apply(target, receiver, args) {
+							if (args[0] === "storage" && !injected) {
+								injected = true;
+								localStorage.setItem("mainworthy:device-clear", "clear-before-subscription");
+								for (const key of Object.keys(localStorage)) if (key.startsWith(prefix)) localStorage.removeItem(key);
+							}
+							return Reflect.apply(target, receiver, args);
+						},
+					});
+				}, prefix);
+				const reply = page.waitForResponse((response) => response.url().endsWith("/api/session"));
+				await page.reload();
+				expect((await reply).status()).toBe(cookie === "ended" ? 401 : 200);
+				try {
+					await page.locator(cookie === "ended" ? "#signin-name" : "#app").waitFor();
+				} finally {
+					const evidence = process.env.MAINWORTHY_STARTUP_CLEAR_EVIDENCE;
+					if (evidence) await page.screenshot({ path: `${evidence}/startup-clear-${cookie}.png` });
+				}
+				if (cookie === "ended") {
+					expect(await page.locator("#app").count()).toBe(0);
+					await page.locator("#token").fill(server.token);
+					await page.keyboard.press("Enter");
+					await page.locator("#app").waitFor();
+				}
+				expect(await page.locator(".sfoot .me").textContent()).toContain("robin");
+				expect(
+					await page.evaluate(
+						(prefix) =>
+							Object.entries(localStorage)
+								.filter(([key]) => key.startsWith(prefix))
+								.some(([, value]) => value.includes("Discarded startup sentence")),
+						prefix,
+					),
+				).toBe(false);
+				const note = page.getByRole("textbox", { name: "Result note" });
+				await note.waitFor();
+				expect(await note.inputValue()).toBe("");
+				await note.fill("Recorded after startup clear");
+				await note.press("Enter");
+				const entries = await eventually(
+					async () => (await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "result"),
+					(items) => items.length === 1,
+				);
+				expect(entries[0]).toMatchObject({ note: "Recorded after startup clear", by: "robin" });
+				expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({
+					version: 1,
+					steps: [{ action: "Original step" }],
+				});
+				expect(browser.errors).toEqual([]);
+			} finally {
+				await browser.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);

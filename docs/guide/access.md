@@ -518,7 +518,7 @@ Each of these sends you back to the sign-in page. [Configuration](./configuratio
 
 After a tab processes a successful sign-in, replies to earlier session checks and signed-in requests are discarded. This also protects another open tab when the same person signs in again and this site's browser storage is available. That tab keeps its drafts, run notes and pending attachments. Signing in as somebody else still returns the other tab to the sign-in page. If repeated sign-ins interrupt both startup session checks, **Reconnect** reads the session again.
 
-The browser can replace its session cookie before the sign-in tab processes the reply. Cross-tab protection begins after that reply is processed. Without browser storage, the protection applies within each tab. Overlapping sign-ins still follow the browser's cookie arrival order.
+The browser can replace its session cookie before the sign-in tab processes the reply. Cross-tab protection begins after that reply is processed. Without browser storage, the protection applies within each tab. Overlapping sign-ins still follow the browser's cookie arrival order. A discarded reply can represent work the server already completed. Check the recorded state before trying the write again.
 
 The owner's token comes from the server. If you set `MAINWORTHY_OWNER_TOKEN`, that value is the token. If you did not, the server prints one on its first start:
 
