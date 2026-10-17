@@ -268,9 +268,12 @@ public struct RunFilter: Equatable, Sendable {
 	public enum State: String, CaseIterable, Sendable { case open, closed }
 	public var kind: Kind?
 	public var state: State?
-	public init(kind: Kind? = nil, state: State? = nil) {
+	/// A change key: only the runs of that change's commits.
+	public var change: String?
+	public init(kind: Kind? = nil, state: State? = nil, change: String? = nil) {
 		self.kind = kind
 		self.state = state
+		self.change = change
 	}
 	/// Whether the list this filter chooses holds the run.
 	public func admits(_ run: Run) -> Bool {
@@ -279,7 +282,12 @@ public struct RunFilter: Equatable, Sendable {
 			case (nil, _), (.planned, .planned), (.change, .change): true
 			default: false
 			}
-		return kindHolds && (state == nil || state?.rawValue == run.state.word)
+		let changeHolds =
+			switch run.kind {
+			case .change(let header): change == nil || header?.key == change
+			case .planned: change == nil
+			}
+		return kindHolds && changeHolds && (state == nil || state?.rawValue == run.state.word)
 	}
 }
 
@@ -288,6 +296,7 @@ extension ProjectClient {
 		var input: [String: JSONValue] = ["in": "runs", "limit": 100]
 		if let kind = filter.kind { input["origin"] = .string(kind.rawValue) }
 		if let state = filter.state { input["state"] = .string(state.rawValue) }
+		if let change = filter.change { input["change"] = .string(change) }
 		if let cursor { input["cursor"] = .string(cursor) }
 		let wire: Wire.RunPage = try await server.read("find", in: key, .object(input))
 		return RunPage(runs: wire.items.map(Run.init), next: wire.cursor)

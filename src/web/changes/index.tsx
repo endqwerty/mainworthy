@@ -5,6 +5,8 @@ import { RESULT_STANDING_LABELS, type ResultStanding, Verdict } from "../../core
 import { useQueryOp } from "../lib/data.ts";
 import { useBindings } from "../lib/keys.ts";
 import { navigate, refUrl, routeUrl } from "../lib/router.ts";
+import { openRun } from "../runs/index.tsx";
+import { Run } from "../runs/models.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, EmptyState, ListRow, ProducerGlyph, SectionHeading } from "../ui/index.tsx";
 import { ChangeResults, standingOf } from "./results.tsx";
@@ -220,6 +222,7 @@ function ChangesWorkbench() {
 							))}
 							{settledData?.items.length === 0 && <p className="dim">No decisions on this change yet.</p>}
 							<ChangeResults key={key} of={{ change: key }} standing={standing} choose={setStanding} />
+							<ChangeRuns key={`runs:${key}`} change={key} />
 							<SectionHeading>Impact</SectionHeading>
 							{impact.error && <p role="status">{impact.error.message}</p>}
 							{impactData.success && (
@@ -276,6 +279,44 @@ function ChangesWorkbench() {
 					<EmptyState>Select a change to see its gate, decisions and affected cases.</EmptyState>
 				)}
 			</section>
+		</>
+	);
+}
+
+/** The change's runs, one for each commit reported on it, newest first: how its verdict moved from push to push. */
+function ChangeRuns({ change }: { change: string }) {
+	const { project } = useApp();
+	const read = useQueryOp({ project, op: "find", input: { in: "runs", change, limit: 100 } });
+	const parsed = Run.array().safeParse(read.data?.items);
+	const runs = parsed.success ? parsed.data : [];
+	return (
+		<>
+			<SectionHeading>Runs, newest first</SectionHeading>
+			{read.error && <p role="status">{read.error.message}</p>}
+			<ul className="change-runs" aria-label="Runs of this change">
+				{runs.map((run) => (
+					<li key={run.ref}>
+						<a
+							href={routeUrl({ project, screen: "runs", ref: run.ref })}
+							onClick={(event) => {
+								event.preventDefault();
+								openRun(project, run);
+							}}
+						>
+							<span className="ref">{run.ref}</span>
+							<code>{"commit" in run.accepts ? run.accepts.commit.slice(0, 12) : run.name}</code>
+							<span className={`change-verdict v-${run.verdict}`}>{run.verdict}</span>
+							<span className="change-run-reason dim">{run.reason}</span>
+							<time dateTime={new Date(run.createdAt).toISOString()} title={new Date(run.createdAt).toLocaleString()}>
+								{age(run.createdAt)}
+							</time>
+						</a>
+					</li>
+				))}
+			</ul>
+			{!read.isPending && !read.error && runs.length === 0 && (
+				<p className="dim">No commit of this change has been reported yet.</p>
+			)}
 		</>
 	);
 }

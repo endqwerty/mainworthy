@@ -83,6 +83,18 @@ The diagram follows the default policy, which requires counted evidence. A proje
 
 [Diagram: how a gate reaches its verdict](../diagrams/gate-verdict.html)
 
+## Follow a change from push to push
+
+Each commit a report names on a change gets a change run of its own. Under "Results", "Runs, newest
+first" lists the change's runs: the commit, the verdict, its reason and how long ago the run was made.
+Choose a row to open that run in Runs, with every result its gate counted.
+
+From the command line:
+
+```sh
+$ mainworthy find --in runs --change pr:482
+```
+
 ## Act on the verdict
 
 `passed` means counted evidence exists, or the project's policy accepts an applied CI declaration that no tests are required.

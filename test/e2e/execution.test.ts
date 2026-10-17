@@ -650,6 +650,23 @@ async function cases(server: Server, count: number) {
 			await view.page.locator("#detail").getByRole("heading", { name: "feat000 on pr:7" }).waitFor();
 			await view.page.keyboard.press("Enter");
 			await view.page.waitForURL(/\/p\/scratch\/changes\/pr(%3A|:)7$/);
+
+			// A second push makes the change's second run; the change lists both, newest first, and each opens.
+			await server.api("report", {
+				target: { commit: "feat0002feat0002", repo: "acme/web", branch: "feature", pr: 7 },
+				job: "e2e",
+				results: [{ test: { key: `${file}::adds`, name: "adds an item", file }, outcome: "pass" }],
+			});
+			const history = view.page.getByRole("list", { name: "Runs of this change" });
+			const pushes = () => history.getByRole("link").allInnerTexts();
+			await eventually(pushes, (texts) => texts.length === 2);
+			expect((await pushes()).map((text) => text.split(/\s+/).slice(0, 3))).toEqual([
+				["R-3", "feat0002feat", "passed"],
+				["R-2", "feat0001feat", "blocked"],
+			]);
+			await history.getByRole("link").nth(1).click();
+			await view.page.waitForURL(/\/p\/scratch\/runs\/2$/);
+			await view.page.locator("#detail").getByText("Commit feat0001feat0001").waitFor();
 			expect(view.errors).toEqual([]);
 		} finally {
 			await view?.close();

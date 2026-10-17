@@ -16,6 +16,9 @@ public final class ChangesScreen: ProjectScreen {
 	/// What the gate of the open change's head counted, read when its page asks. It is made for the run of the
 	/// gate the page shows, and made again when a read of the page finds another run.
 	public private(set) var results: ChangeResults?
+	/// The open change's runs, one for each of its commits that was reported, newest first.
+	public private(set) var runs: [Run] = []
+	private var counted: [String: ChangeResults] = [:]
 	private var selected: String?
 	private var selectedChange: ChangeSummary?
 	private var reads = 0
@@ -27,7 +30,10 @@ public final class ChangesScreen: ProjectScreen {
 	public func open(_ key: String) async {
 		guard key != selected || detailLoading != .done else { return }
 		selectedChange = changes.first { $0.key == key } ?? (selected == key ? selectedChange : nil)
-		if selected != key { results = nil }
+		if selected != key {
+			results = nil
+			runs = []
+		}
 		selected = key
 		detail = nil
 		detailLoading = .first
@@ -55,6 +61,28 @@ public final class ChangesScreen: ProjectScreen {
 		await results?.refresh()
 	}
 
+	/// What one of the open change's runs counted. The newest one's is the panel of the change's own gate.
+	public func results(of run: Run) -> ChangeResults {
+		if let results = counted[run.ref] { return results }
+		guard case .change(let change) = run.kind else { preconditionFailure("\(run.ref) is a planned run") }
+		let results = ChangeResults(project: project, change: change?.key, run: run.ref)
+		counted[run.ref] = results
+		return results
+	}
+
+	private func readRuns(of key: String, read: Int) async {
+		do {
+			let page = try await project.runs(RunFilter(change: key))
+			guard read == detailReads else { return }
+			runs = page.runs
+		} catch is CancellationError {
+		} catch {
+			guard read == detailReads else { return }
+			notice = error.shown
+		}
+		for results in counted.values { await results.refresh() }
+	}
+
 	private func readDetail() async {
 		detailReads += 1
 		let mine = detailReads
@@ -66,6 +94,7 @@ public final class ChangesScreen: ProjectScreen {
 			detail = fresh
 			selectedChange = fresh.change
 			detailLoading = .done
+			await readRuns(of: key, read: mine)
 			// The results shown are the shown gate's: a gate of another run gets results of its own.
 			if results?.change != key || results?.run != fresh.gate.run {
 				// Another run of the same change keeps what the person chose to see.

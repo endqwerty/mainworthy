@@ -74,6 +74,17 @@ final class ChangesUITests: XCTestCase {
 		let result = await XCTWaiter.fulfillment(of: [changed], timeout: 10)
 		XCTAssertEqual(result, .completed)
 		shot("change-passed")
+		// The change's runs, one per reported commit; one opens to what its gate counted.
+		let runRow = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "change-run-R-")).firstMatch
+		for _ in 0..<4 where !runRow.isHittable { app.swipeUp() }
+		XCTAssertTrue(runRow.waitForExistence(timeout: 10))
+		shot("change-runs")
+		let ref = String(runRow.identifier.dropFirst("change-run-".count))
+		runRow.tap()
+		XCTAssertTrue(app.navigationBars[ref].waitForExistence(timeout: 10))
+		XCTAssertTrue(app.staticTexts["Results"].waitForExistence(timeout: 10))
+		shot("change-run")
+		app.navigationBars.buttons["pr:482"].tap()
 		app.tabBars.buttons["You"].tap()
 		app.buttons["Your sessions"].tap()
 		XCTAssertTrue(app.staticTexts["current-session"].waitForExistence(timeout: 10))

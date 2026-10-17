@@ -34,6 +34,13 @@ struct ChangeView: View {
 				ChangeQuestionView(ref: question.ref, queue: queue, changes: screen, workspace: workspace)
 			}
 		}
+		.navigationDestination(for: RunLink.self) { link in
+			if let run = screen.runs.first(where: { $0.ref == link.ref }) {
+				ChangeRunView(run: run, results: screen.results(of: run))
+			} else {
+				ContentUnavailableView("Run unavailable", systemImage: "questionmark.folder")
+			}
+		}
 		.navigationDestination(for: TestLink.self) { test in
 			if let tests = workspace.tests { TestView(ref: test.ref, screen: tests, workspace: workspace, opensCase: false) }
 		}
@@ -71,6 +78,25 @@ struct ChangeView: View {
 				if let results = screen.results, results.change == key, results.run == detail.gate.run {
 					// Another run's results are another panel, which reads them when it appears.
 					ChangeResultsPanel(results: results).id(ObjectIdentifier(results))
+				}
+				if !screen.runs.isEmpty {
+					Panel("Runs, newest first") {
+						ForEach(screen.runs) { run in
+							NavigationLink(value: RunLink(ref: run.ref)) {
+								HStack {
+									RefText(run.ref)
+									if case .commit(let commit, _, _) = run.accepts {
+										Text(commit.prefix(7)).font(.subheadline.monospaced())
+									}
+									Tag(text: run.verdict.word, tint: run.verdict.tint)
+									Spacer()
+									Text(run.createdAt, format: .relative(presentation: .named))
+										.font(.caption).foregroundStyle(.secondary)
+								}
+							}
+							.accessibilityIdentifier("change-run-\(run.ref)")
+						}
+					}
 				}
 				Panel("Open questions") {
 					if detail.questions.isEmpty { Text("No open questions about this change.").foregroundStyle(.secondary) }
