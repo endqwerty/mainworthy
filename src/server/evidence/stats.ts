@@ -50,8 +50,9 @@ const Q = {
 		WHERE r.project = $project AND r.at >= $since AND t.kind = 'auto'
 	`),
 	// An attempt that a higher attempt of the same lane repeated, once per attempt: of several results of one attempt,
-	// the one the attempt counted (the worse, then the later) gives its time. A corrected result, and a correction,
-	// are a producer saying it was wrong, not a rerun.
+	// the one the attempt counted (the worse, then the later) gives its time. A corrected result is not counted, and
+	// its correction stands in its place, time included; a correction never repeats an attempt, so it is never the
+	// higher attempt that makes a rerun.
 	reruns: sql<{ project: number; since: number }, { test: number; reruns: number; lost: number; unknown: number }>(`
 		WITH attempts AS (
 		  SELECT r.test, r.target, r.actor, r.method, b.job, r.attempt, r.duration_ms,

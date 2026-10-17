@@ -4,9 +4,13 @@
 /** One day: its date where the reader is (`2027-01-15`) and the instants it starts and ends at, in milliseconds. */
 export type LocalDay = { day: string; from: number; to: number };
 
-/** True when the platform knows the time zone by this name (an IANA name such as `Europe/Berlin`, or `UTC`). */
+/**
+ * True when the platform knows the time zone by this name (an IANA name such as `Europe/Berlin`, or `UTC`). An offset
+ * such as `+05:37` is not a name: the reports count in quarters of an hour, and every named zone's midnight is a whole
+ * quarter of an hour in UTC, which an offset's need not be.
+ */
 export function isZone(zone: string): boolean {
-	if (zone === "") return false;
+	if (!/^[A-Za-z]/.test(zone)) return false;
 	try {
 		new Intl.DateTimeFormat("en", { timeZone: zone });
 		return true;
@@ -42,12 +46,15 @@ function wall(ms: number, zone: string): number {
 	return Date.UTC(year, month - 1, day, hour, minute, second);
 }
 
-/** The instant the zone's clock reads midnight of a date (given as that date's midnight in UTC). */
+/** The first instant of a date where the zone is (the date given as its midnight in UTC). */
 function midnight(date: number, zone: string): number {
-	// The offset at the guess may differ from the one at the answer when the clocks change that day; a second
-	// step settles it.
+	// The offset at a guess may differ from the one at the answer when the clocks change that day, so each guess is
+	// taken from the one before. Where the clocks skip midnight (Santiago goes from 00:00 to 01:00), the second guess
+	// is an hour early, in the day before: the day starts at the earliest guess whose clock reads that date.
 	const first = date - (wall(date, zone) - date);
-	return date - (wall(first, zone) - first);
+	const second = date - (wall(first, zone) - first);
+	const onDate = [first, second].filter((at) => wall(at, zone) >= date && wall(at, zone) < date + 86_400_000);
+	return Math.min(...(onDate.length > 0 ? onDate : [second]));
 }
 
 const isoDate = (date: number): string => new Date(date).toISOString().slice(0, 10);

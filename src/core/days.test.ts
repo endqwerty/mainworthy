@@ -38,3 +38,22 @@ test("a time zone is a name the platform knows", () => {
 	expect([isZone("UTC"), isZone("Europe/Berlin"), isZone("America/Los_Angeles")]).toEqual([true, true, true]);
 	expect([isZone("Mars/Olympus"), isZone(""), isZone("+05:00x")]).toEqual([false, false, false]);
 });
+
+test("a day whose midnight the clocks skip starts when the day does, at the jump (verifier, #461)", () => {
+	// Santiago moves from 00:00 to 01:00 on 2026-09-06: the 6th begins at 04:00 UTC, and the 5th is 24 hours long.
+	const days = localDays(Date.UTC(2026, 8, 7, 12), 3, "America/Santiago");
+	expect(days.map((d) => [d.day, iso(d.from), (d.to - d.from) / HOUR])).toEqual([
+		["2026-09-05", "2026-09-05T04:00:00.000Z", 24],
+		["2026-09-06", "2026-09-06T04:00:00.000Z", 23],
+		["2026-09-07", "2026-09-07T03:00:00.000Z", 24],
+	]);
+});
+
+test("a time zone is a name, not an offset: the days are counted in quarters of an hour (verifier, #461)", () => {
+	expect([isZone("+05:37"), isZone("-03:00"), isZone("+0530"), isZone("Asia/Kathmandu")]).toEqual([
+		false,
+		false,
+		false,
+		true,
+	]);
+});
