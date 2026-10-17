@@ -526,3 +526,54 @@ test("a rate shows 100.0% only when everything passed, and 0.0% only when nothin
 	expect(formatRate(0)).toBe("0.0%");
 	expect(formatRate(null)).toBe("No cases");
 });
+
+test("two live corrections share one execution while both outcomes remain observed", () => {
+	const h = harness();
+	try {
+		const send = (outcome: "pass" | "fail", durationMs: number, corrects?: number) =>
+			h.call<{ results: number[] }>("report", {
+				target: { commit: "a".repeat(40) },
+				job: "unit",
+				results: [
+					{
+						test: { key: "two-corrections" },
+						outcome,
+						durationMs,
+						...(outcome === "fail" ? { failure: { message: "missing" } } : {}),
+						...(corrects ? { corrects } : {}),
+					},
+				],
+			}).results[0];
+		const original = send("pass", 10);
+		const correction = send("fail", 30, original);
+		send("pass", 40, original);
+		let read = ReportsReply.parse(h.call("reports"));
+		expect(read.days.map(({ pass, total }) => [pass, total])).toEqual([[1, 2]]);
+		expect(read.flaky.map(({ key, lanes }) => [key, lanes])).toEqual([["two-corrections", 1]]);
+		expect(read.reruns).toEqual({ count: 0, durationMs: 0, missingDuration: 0 });
+		const retry = send("pass", 20);
+		send("pass", 50, correction);
+		read = ReportsReply.parse(h.call("reports"));
+		expect(read.days.map(({ pass, total }) => [pass, total])).toEqual([[3, 3]]);
+		expect(read.flaky).toEqual([]);
+		expect(read.reruns).toEqual({ count: 1, durationMs: 20, missingDuration: 0 });
+		send("fail", 60, retry);
+		const latest = send("pass", 70, retry);
+		read = ReportsReply.parse(h.call("reports"));
+		expect(read.days.map(({ pass, total }) => [pass, total])).toEqual([[3, 4]]);
+		expect(read.flaky.map(({ key, lanes }) => [key, lanes])).toEqual([["two-corrections", 1]]);
+		expect(read.reruns).toEqual({ count: 1, durationMs: 70, missingDuration: 0 });
+		h.advance(40 * 86_400_000);
+		h.call("report", {
+			target: { commit: "a".repeat(40) },
+			job: "unit",
+			results: [{ test: { key: "two-corrections" }, outcome: "pass", corrects: latest }],
+		});
+		read = ReportsReply.parse(h.call("reports", { days: 1 }));
+		expect(read.days.map(({ pass, total }) => [pass, total])).toEqual([[1, 1]]);
+		expect(read.flaky).toEqual([]);
+		expect(read.reruns).toEqual({ count: 1, durationMs: 0, missingDuration: 1 });
+	} finally {
+		h.close();
+	}
+});

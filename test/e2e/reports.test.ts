@@ -62,6 +62,14 @@ check(
 				results: [{ test: { key: "third" }, outcome: "pass" }],
 			});
 			await page.getByText("100.0%", { exact: true }).waitFor();
+			await server.api("report", {
+				target: { commit: "a".repeat(40) },
+				attempt: 2,
+				results: [{ test: { key: "checkout" }, outcome: "pass" }],
+			});
+			await page.getByRole("option", { name: "Time spent on reruns" }).click();
+			await page.getByText("1 rerun has no duration and contributes no time.", { exact: false }).waitFor();
+			await page.getByRole("option", { name: "Pass rate over time" }).click();
 			await page.keyboard.press("j");
 			await page.keyboard.press("Enter");
 			await page.getByRole("heading", { name: "No cases automated" }).waitFor();

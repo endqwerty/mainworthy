@@ -1,6 +1,6 @@
 # Reports
 
-Open **Reports** in the sidebar, or press `g a`. Select a report with `j` and `k`, then press Enter to open it. On a phone, tap a report in the list.
+Open **Reports** in the sidebar, or press `g a`. Select a report with `j` and `k`. On a desktop, its detail appears immediately. On a phone, press Enter or tap a report to open its detail.
 
 The web screen reads the last 30 UTC calendar days, including today. The command `mainworthy reports --days 90` reads up to 366 days. The API operation is `reports`. It needs read access and changes no data. Each report belongs to the selected project.
 
@@ -26,6 +26,6 @@ The list shows up to 50 tests ordered by the number of affected combinations, ca
 
 ## Time spent on reruns
 
-A rerun is an automated result after an earlier execution for the same test, target, producer, and job. The earlier execution can precede the period. A correction replaces an observation rather than adding an execution. It keeps the original execution position, including through a chain of corrections.
+A rerun is an automated result after an earlier execution for the same test, target, producer, and job. The earlier execution can precede the period. A correction replaces an observation rather than adding an execution. It keeps the original execution position, including through a chain of corrections. If two live corrections replace the same result, both observations count toward daily rates and flaky signals, but their shared execution counts once for reruns. Its duration comes from the latest live correction within the period.
 
 The report sums recorded durations of reruns within the period. It also gives the count with no recorded duration. Parallel tests can overlap: the sum measures test execution time, not elapsed build time or staff time lost.

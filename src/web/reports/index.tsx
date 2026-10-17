@@ -198,9 +198,11 @@ export function ReportsScreen() {
 								<>
 									<h2>{(data.reruns.durationMs / 1000).toFixed(2)} seconds recorded</h2>
 									<p>
-										{data.reruns.count} automated results repeat an earlier execution on the same target, producer and
-										job. The earlier execution may precede this period. {data.reruns.missingDuration} reruns have no
-										duration and contribute no time.
+										{data.reruns.count} automated {data.reruns.count === 1 ? "execution repeats" : "executions repeat"}{" "}
+										an earlier execution on the same target, producer and job. The earlier execution may precede this
+										period. {data.reruns.missingDuration}{" "}
+										{data.reruns.missingDuration === 1 ? "rerun has" : "reruns have"} no duration and{" "}
+										{data.reruns.missingDuration === 1 ? "contributes" : "contribute"} no time.
 									</p>
 									<p>
 										Durations add test execution time. Parallel tests can overlap, so this is not elapsed build time or
