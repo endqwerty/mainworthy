@@ -721,9 +721,11 @@ export function find(ctx: Ctx, input: FindInput): Found {
 		case "requirements":
 			return { count: null, items: requirementList(ctx.db, project), cursor: null };
 		case "runs": {
-			const origin = input.state === "change" ? "change" : "planned";
+			const state = input.state ?? null;
+			if (state !== null && state !== "open" && state !== "closed")
+				throw invalid(`a run is "open" or "closed", not "${state}"`);
 			const before = input.cursor ? Number(input.cursor) : Number.MAX_SAFE_INTEGER;
-			const rows = recentRuns(ctx.db, project, origin, before, limit + 1);
+			const rows = recentRuns(ctx.db, project, { origin: input.origin ?? null, state }, before, limit + 1);
 			const page = rows.slice(0, limit);
 			return {
 				count: null,

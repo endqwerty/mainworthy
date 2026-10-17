@@ -7,7 +7,7 @@ import { Db } from "../src/server/kernel/db.ts";
 import { migrate } from "../src/server/kernel/migrate.ts";
 import { acceptReport, processBatch } from "../src/server/ops/writes.ts";
 import { exportArchive, importArchive, linesOf } from "../src/server/transfer/transfer.ts";
-import { type Harness, harness } from "./helpers.ts";
+import { ciReport, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
 afterEach(() => h.close());
@@ -147,6 +147,38 @@ describe("a run typed by hand", () => {
 		const signoff = first(h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" }).items);
 		expect(h.call<{ status: string }[]>("decide", { undo: signoff.q })[0]?.status).toBe("reopened");
 		expect(run("R-1").state).toBe("open");
+	});
+
+	test("the list of runs holds planned and change runs, newest first, and filters by kind and state", () => {
+		h.call("plan", { name: "smoke", select: { cases: ["C-1"] } });
+		record("R-1", "C-1", "pass");
+		h.call("report", ciReport({ commit: "feat0001", branch: "feature", pr: 7, n: 1 }));
+		h.call("plan", { name: "regression", select: { cases: ["C-2"] } });
+		type Listed = { ref: string; origin: string; state: string; change: { key: string } | null };
+		const listed = (input: Record<string, unknown> = {}) =>
+			h
+				.call<{ items: Listed[] }>("find", { in: "runs", ...input })
+				.items.map((item) => [item.ref, item.origin, item.state, item.change?.key ?? null]);
+		expect(listed()).toEqual([
+			["R-3", "planned", "open", null],
+			["R-2", "change", "open", "pr:7"],
+			["R-1", "planned", "closed", null],
+		]);
+		expect(listed({ origin: "change" })).toEqual([["R-2", "change", "open", "pr:7"]]);
+		expect(listed({ origin: "planned", state: "open" })).toEqual([["R-3", "planned", "open", null]]);
+		expect(listed({ state: "closed" })).toEqual([["R-1", "planned", "closed", null]]);
+		expect(h.raw("find", { in: "runs", state: "change" })).toMatchObject({
+			ok: false,
+			error: { code: "invalid", message: 'a run is "open" or "closed", not "change"' },
+		});
+		const page = h.call<{ items: Listed[]; cursor: string | null }>("find", { in: "runs", limit: 2 });
+		expect(page.items.map((item) => item.ref)).toEqual(["R-3", "R-2"]);
+		const rest = h.call<{ items: Listed[]; cursor: string | null }>("find", {
+			in: "runs",
+			limit: 2,
+			cursor: page.cursor,
+		});
+		expect([rest.items.map((item) => item.ref), rest.cursor]).toEqual([["R-1"], null]);
 	});
 });
 

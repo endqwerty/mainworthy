@@ -96,7 +96,7 @@ test("a seeded project holds a suite in folders, a fortnight of history and five
 		for (const entry of timeline) expect(entry.at).toBeLessThanOrEqual(since);
 
 		// The runs: one every other day, the old ones closed as passed, one failed, one not finished, today's open.
-		const runs = z.array(Run).parse((await demo.call("find", { in: "runs", limit: 100 })).items);
+		const runs = z.array(Run).parse((await demo.call("find", { in: "runs", origin: "planned", limit: 100 })).items);
 		expect(runs.find((run) => run.ref === seeded.run)).toMatchObject({ name: "Checkout regression", state: "open" });
 		const past = runs.filter((run) => run.ref !== seeded.run);
 		expect(past.length).toBeGreaterThanOrEqual(7);
@@ -176,7 +176,7 @@ test("the same seed writes the same suite, another seed another, and no days lea
 
 		// With no days there is today's run and no other, and the five questions all the same.
 		const today = on(client, "two");
-		const runs = z.array(Run).parse((await today.call("find", { in: "runs", limit: 100 })).items);
+		const runs = z.array(Run).parse((await today.call("find", { in: "runs", origin: "planned", limit: 100 })).items);
 		expect(runs.map((run) => run.name)).toEqual(["Checkout regression"]);
 		expect((await today.call("inbox", { limit: 50 })).items).toHaveLength(5);
 		const inherited = (await today.call("inbox", { on: "pr:482", kind: "failure" })).items;

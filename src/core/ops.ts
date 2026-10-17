@@ -641,6 +641,11 @@ export const FindInput = z.object({
 	deep: z.boolean().optional().describe("With `folder`: include its subfolders."),
 	tags: z.array(z.string()).optional(),
 	state: z.string().optional(),
+	origin: z
+		.enum(["planned", "change"])
+		.optional()
+		.describe("For runs: planned by hand, or one per reported commit.")
+		.meta({ "x-mcp-hidden": true }),
 	run: z.string().optional().describe("For slots: the run."),
 	commit: z.string().optional().describe("For results: the commit.").meta({ "x-mcp-hidden": true }),
 	change: z.string().optional().describe("For results: a change key (pr:482).").meta({ "x-mcp-hidden": true }),

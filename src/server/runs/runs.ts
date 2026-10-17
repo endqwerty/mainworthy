@@ -136,8 +136,10 @@ const Q = {
 		`SELECT id FROM runs WHERE project = $project AND origin = 'planned'
 		 AND json_extract(accepts, '$.commit') = $commit`,
 	),
-	recent: sql<{ project: number; origin: string; before: number; limit: number }, RunRow>(
-		"SELECT * FROM runs WHERE project = $project AND origin = $origin AND id < $before ORDER BY id DESC LIMIT $limit",
+	recent: sql<{ project: number; origin: string | null; state: string | null; before: number; limit: number }, RunRow>(
+		`SELECT * FROM runs WHERE project = $project AND id < $before
+		 AND ($origin IS NULL OR origin = $origin) AND ($state IS NULL OR state = $state)
+		 ORDER BY id DESC LIMIT $limit`,
 	),
 	insert: sql<{
 		project: number;
@@ -340,13 +342,14 @@ export function mustRun(db: Db, project: number, text: string): RunRow {
 	if (!row) throw notFound(`run ${text}`);
 	return row;
 }
+/** A project's runs, newest first, of one origin or state when given. */
 export const recentRuns = (
 	db: Db,
 	project: number,
-	origin: "change" | "planned",
+	filter: { origin: RunRow["origin"] | null; state: RunRow["state"] | null },
 	before: number,
 	limit: number,
-): RunRow[] => db.all(Q.recent, { project, origin, before, limit });
+): RunRow[] => db.all(Q.recent, { project, ...filter, before, limit });
 export const slotById = (db: Db, id: number): SlotRow | null => db.get(Q.slotById, { id });
 export const slotsPage = (db: Db, run: number, after: number, limit: number): SlotRow[] =>
 	db.all(Q.slotsOfRun, { run, after, limit });
