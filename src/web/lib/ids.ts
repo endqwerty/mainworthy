@@ -39,12 +39,16 @@ export function draftOwnedElsewhere(draft: { owner: string }): boolean {
  * (issue #406). Web Locks are for secure contexts; on plain HTTP the channel is all there is.
  */
 const LOCK = "mainworthy:draft-window:";
+/** Lets go of the lock this window holds now; the browser lets go of it anyway when the document goes. */
+let releaseLock = (): void => {};
 async function holdLock(owner: string): Promise<void> {
 	await new Promise<void>((held) => {
 		void navigator.locks
 			.request(LOCK + owner, { mode: "shared" }, () => {
 				held();
-				return new Promise<never>(() => {});
+				return new Promise<void>((release) => {
+					releaseLock = release;
+				});
 			})
 			.catch(held);
 	});
@@ -56,9 +60,13 @@ async function readLocks(): Promise<void> {
 	const held = (await navigator.locks.query()).held ?? [];
 	const owners = held.map((lock) => lock.name ?? "").filter((name) => name.startsWith(LOCK));
 	if (owners.filter((name) => name === LOCK + draftOwner()).length > 1) {
+		// A duplicated tab: the id belongs to the tab it was copied from. Take a new one and give the copied one up,
+		// so it stops being live when that tab closes.
+		const copied = releaseLock;
 		windowOwner = randomId();
 		sessionStorage.setItem("mainworthy:draft-window", windowOwner);
 		await holdLock(windowOwner);
+		copied();
 	}
 	for (const name of owners) liveOwners.add(name.slice(LOCK.length));
 }
