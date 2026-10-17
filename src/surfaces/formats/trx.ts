@@ -1,5 +1,6 @@
 import { SaxesParser } from "saxes";
 import { z } from "zod";
+import { clip } from "../../core/text.ts";
 import { nativeResult, type ParsedReport } from "./native.ts";
 
 const Attributes = z.object({
@@ -82,8 +83,11 @@ export function parseTRX(xml: string): ParsedReport {
 	});
 	const text = (value: string) => {
 		if (!current || stack.length !== 6 || stack[3] !== "Output" || stack[4] !== "ErrorInfo") return;
-		if (stack[5] === "Message") current.message += value.slice(0, Math.max(0, 4000 - current.message.length));
-		if (stack[5] === "StackTrace") current.detail += value.slice(0, Math.max(0, 20_000 - current.detail.length));
+		// Retain a whole character across the limit until the completed diagnostic is clipped.
+		if (stack[5] === "Message" && current.message.length < 4000)
+			current.message += clip(value, 4001 - current.message.length);
+		if (stack[5] === "StackTrace" && current.detail.length < 20_000)
+			current.detail += clip(value, 20_001 - current.detail.length);
 	};
 	parser.on("text", text);
 	parser.on("cdata", text);
@@ -110,7 +114,7 @@ export function parseTRX(xml: string): ParsedReport {
 							? "skip"
 							: "error",
 			durationMs: duration(test.duration),
-			detail: [message, detail].filter(Boolean).join("\n"),
+			detail: [clip(message, 4000), clip(detail, 20_000)].filter(Boolean).join("\n"),
 		}),
 	);
 	if (
