@@ -377,6 +377,29 @@ describe("named role grants", () => {
 	});
 });
 
+describe("rule answers", () => {
+	const edited = (answer: unknown) => {
+		const policy = h.call<Policy & { version: number }>("admin", { do: "policy.show", project: "scratch" });
+		const clauses = policy.clauses.map((clause) => (clause.id === "map-track" ? { ...clause, answer } : clause));
+		return { policy, edit: { op: "policy", base: policy.version, clauses } };
+	};
+
+	test("a proposal refuses a rule answer its question kind does not accept, and stores nothing", () => {
+		const { policy, edit } = edited({ is: "approve" });
+		expect(h.raw("propose", { edits: [edit] })).toMatchObject({
+			ok: false,
+			error: { code: "invalid", message: "Clause map-track needs a valid map rule answer." },
+		});
+		expect(h.call<Policy & { version: number }>("admin", { do: "policy.show", project: "scratch" })).toEqual(policy);
+		expect(queue().items).toEqual([]);
+	});
+
+	test("a proposal accepts a rule answer its question kind accepts", () => {
+		const { edit } = edited({ is: "create", folder: "Imported" });
+		expect(h.raw("propose", { edits: [edit] })).toMatchObject({ ok: true, result: { status: "open" } });
+	});
+});
+
 describe("the presets", () => {
 	test("every preset is valid and total: no kind of question is left without an owner", () => {
 		for (const name of PRESET_NAMES) {

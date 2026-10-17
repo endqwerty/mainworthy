@@ -286,6 +286,12 @@ Use the version you read in place of `1`. Preset-only, `unlinked` and `emptyRepo
 invalid: every kind must end with a clause that always matches; missing for: finding
 ```
 
+It also refuses a rule clause whose answer its kind of question does not accept, such as `{"is":"approve"}` for a map question, and names the clause:
+
+```
+invalid: Clause map-track needs a valid map rule answer.
+```
+
 The settings are sent whole: `unlinked`, `emptyReports`, the basis, the holds, custom field definitions in `fields`, and `flakyDetection`.
 Omitting `emptyReports` selects `pending`. Omitting `fields` keeps the current definitions. Send `"fields": {}` to remove them. Omitting `flakyDetection` selects its defaults.
 The flaky hold takes 1 to 365 days. `infraThisTargetOnly` is true when an "Infrastructure" answer covers only the build it was given for.

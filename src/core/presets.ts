@@ -2,7 +2,7 @@
 // force. `strict` is a fixture that proves the same data works under a policy where a person answers everything;
 // the regulated preset still needs quorum, frozen evidence and the `gap` kind.
 import { FlakyDetectionSettings } from "./flaky.ts";
-import { type Ask, Clause, clauseOf, KINDS, type Kind, type Policy, type PolicySettings } from "./kinds.ts";
+import { ANSWERS, type Ask, Clause, clauseOf, KINDS, type Kind, type Policy, type PolicySettings } from "./kinds.ts";
 
 const rule: Ask = { who: "rule", agents: "none", notProducer: false, reason: "optional" };
 const member: Ask = { who: "member", agents: "advise", notProducer: false, reason: "optional" };
@@ -146,6 +146,8 @@ export function missingCatchAll(clauses: readonly Clause[]): Kind[] {
 
 /** The policy checks shared by proposal validation and the clause editor. */
 export function policyProblem(policy: Policy): string | null {
+	const unanswerable = policy.clauses.find((c) => c.ask.who === "rule" && !ANSWERS[c.kind].safeParse(c.answer).success);
+	if (unanswerable) return `Clause ${unanswerable.id} needs a valid ${unanswerable.kind} rule answer.`;
 	const missing = missingCatchAll(policy.clauses);
 	if (missing.length > 0)
 		return `every kind must end with a clause that always matches; missing for: ${missing.join(", ")}`;
