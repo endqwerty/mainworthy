@@ -201,3 +201,20 @@ export function demoCases(seed: number, count: number): DemoCase[] {
 	]);
 	return cases.map((item, index) => (kept.has(index) ? item : { ...item, test: null }));
 }
+
+/**
+ * What a case says about automating it. A case with a test has one; of the rest, some are wanted and a few are
+ * checks only a person can make. By the case's place in the suite, so it draws from no stream.
+ */
+export function automateOf(item: DemoCase, index: number): "none" | "wanted" | "not-applicable" {
+	if (item.test) return "none";
+	if (index % 5 === 2) return "wanted";
+	return index % 11 === 7 ? "not-applicable" : "none";
+}
+
+/** The requirement each feature's cases cover: one per folder of the catalog, keyed by its place in it. */
+export function requirementOf(folder: string): { key: string; title: string } | null {
+	const index = CATALOG.findIndex((feature) => feature.path === folder);
+	const feature = CATALOG[index];
+	return feature ? { key: `REQ-${101 + index}`, title: feature.path.replace("/", ": ") } : null;
+}

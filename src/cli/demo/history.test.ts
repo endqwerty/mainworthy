@@ -34,7 +34,7 @@ describe("the demo's history", () => {
 	test("every day of it has a pipeline's report on main, and the days reach back as far as was asked", () => {
 		for (const days of [1, 10, 14, 30]) {
 			const nights = of(history(days), "pipeline").filter(
-				(event) => event.target.branch === "main" && event.step !== "qreport",
+				(event) => event.target.branch === "main" && event.step !== "qreport" && !event.rerun,
 			);
 			const dates = nights.map((event) => Math.floor(event.at / DAY));
 			expect(dates).toEqual(Array.from({ length: days }, (_, n) => Math.floor(SINCE / DAY) - days + n));
@@ -58,7 +58,7 @@ describe("the demo's history", () => {
 		expect(Math.max(...steps.map((step) => step.length))).toBeLessThanOrEqual(15);
 	});
 
-	test("a failure is answered after it was reported, and the case of today's failure never fails before today", () => {
+	test("a failure is answered or passed by a rerun after it was reported, and the case of today's failure never fails before today", () => {
 		const events = history(30);
 		const failed = events.filter(
 			(event) =>
@@ -68,7 +68,8 @@ describe("the demo's history", () => {
 		expect(failed.length).toBeGreaterThan(5);
 		for (const event of failed) {
 			const answer = of(events, "answer").find((candidate) => candidate.of === event.step);
-			expect(answer?.at).toBeGreaterThan(event.at);
+			const rerun = of(events, "pipeline").find((candidate) => candidate.rerun && candidate.step === `${event.step}r`);
+			expect((answer ?? rerun)?.at).toBeGreaterThan(event.at);
 		}
 		for (const event of of(events, "pipeline")) {
 			expect(event.failures.map((failure) => failure.case)).not.toContain(0);
@@ -146,6 +147,22 @@ describe("the demo's history", () => {
 		expect(of(events, "pipeline").length).toBeGreaterThanOrEqual(14);
 		for (const event of of(events, "pipeline")) expect(event.failures).toEqual([]);
 	});
+	test("a flaky test fails on some nights and passes when the job runs it again", () => {
+		const events = of(history(), "pipeline");
+		const reruns = events.filter((event) => event.rerun);
+		expect(reruns.length).toBeGreaterThanOrEqual(2);
+		const flaky = reruns[0]?.rerun?.cases;
+		for (const rerun of reruns) {
+			expect(rerun.rerun).toEqual({ attempt: 2, cases: flaky ?? [] });
+			expect(rerun.failures).toEqual([]);
+			// The night it repeats failed that test, and only that test.
+			const night = events.find((event) => event.step === rerun.step.slice(0, -1));
+			expect(night?.target.commit).toBe(rerun.target.commit);
+			expect(night?.failures.map((failure) => failure.case)).toEqual(flaky ?? []);
+			expect(night?.at).toBeLessThan(rerun.at);
+		}
+	});
+
 	test("a quarantine covers a report before a person ends it", () => {
 		const events = history();
 		const [entry, exit] = of(events, "quarantine");

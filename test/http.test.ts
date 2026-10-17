@@ -1007,6 +1007,14 @@ describe("reads on other cores through HTTP", () => {
 			history: [{ ref: "C-1" }, { ref: "C-1", from: 1, to: 2 }],
 			timeline: [{ ref: "C-1" }],
 			check: [{}],
+			stats: [
+				{ of: "pass-rate" },
+				{ of: "flaky" },
+				{ of: "reruns" },
+				{ of: "automation" },
+				{ of: "coverage" },
+				{ of: "pass-rate", zone: "Nowhere/None" },
+			],
 			command: [{ cmd: "edit-0001" }, { cmd: "never-sent" }],
 			"tracker-status": [{ id: "tracker-read-01" }, { id: "not-a-request" }, {}],
 		};
@@ -2444,6 +2452,8 @@ describe("the surface", () => {
 		await checked("history", { ref: "C-1", from: 1, to: 1 });
 		await checked("timeline", { ref: "C-1" });
 		await checked("check");
+		for (const of of ["pass-rate", "flaky", "reruns", "automation", "coverage"]) await checked("stats", { of });
+		await checked("stats", { of: "pass-rate", days: 7, zone: "Europe/Berlin", method: "auto" });
 		await checked("command", { cmd: "schema-create" });
 		await checked("command", { cmd: "schema-absent" });
 		await checked("change", { change: "pr:52", state: "closed" });
@@ -2656,6 +2666,8 @@ describe("the surface", () => {
 		await checked("gate", { commit: "abcdef0" });
 		await checked("gate", { run: seeded.run });
 		await checked("check");
+		for (const of of ["pass-rate", "flaky", "reruns", "automation", "coverage"])
+			await checked("stats", { of, days: 90 });
 		expect(await checked("command", { cmd: "demo-demo-cases-0-v2" })).toMatchObject({
 			state: "done",
 			op: "propose",

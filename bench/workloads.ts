@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { StatsReply } from "../src/core/stats.ts";
 import type { Actor } from "../src/server/kernel/ctx.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
@@ -357,6 +358,21 @@ export function readWorkloads(instance: DatasetInstance, iterations: number): Wo
 			},
 		},
 	);
+	// The reports read a window of results; a lost index makes one of them seconds long (decision 0094).
+	for (const of of ["pass-rate", "flaky", "reruns", "automation", "coverage"] as const)
+		reads.push({
+			name: `report: ${of}`,
+			budget: BUDGETS.report,
+			iterations,
+			correctness: "The report asked for, over 30 days; the pass rate counts at least one result.",
+			prepare: () => () => operation(instance, "stats", { of, days: 30 }),
+			check(value) {
+				const report = StatsReply.parse(value);
+				ensure(report.of === of, "the reply must be the report asked for");
+				if (report.of === "pass-rate")
+					ensure(report.total.pass + report.total.fail > 0, "the pass rate must count the dataset's results");
+			},
+		});
 	// Resolve the owner outside timings; this also proves the same actor reads every operation.
 	ensure(owner.kind === "human", "reads must use the owner actor");
 	return reads;

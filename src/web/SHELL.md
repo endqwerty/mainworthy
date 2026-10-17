@@ -80,8 +80,8 @@ screen in the other project, with no ref, folder or tag. Settings, Projects goes
 same function. Add no other way to build that URL. On a phone the line is in the drawer,
 and the binding is marked `list`: it goes somewhere and records nothing about a row.
 
-The sidebar's navigation is the four screens the work is done on: Suite, Queue, Runs and
-Changes. What is not the work is in the footer, on two lines. The first is the account
+The sidebar's navigation is the screens the work is done and read on: Suite, Queue, Runs,
+Changes, Tests and Reports. What is not the work is in the footer, on two lines. The first is the account
 area: who is signed in, the link to Settings (a gear, `g ,`) beside the name, and "Sign
 out" where the session is a browser's (`session.via === "cookie"`). The second has Docs
 (the page about the screen that is open, `g d`), Keys and Theme. `g x` signs out; the binding is

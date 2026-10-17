@@ -65,6 +65,7 @@ A tablet whose window is wider than 900 px and taller than 500 px also keeps the
 | <kbd>g</kbd> <kbd>r</kbd> | Go to Runs |
 | <kbd>g</kbd> <kbd>c</kbd> | Go to Changes |
 | <kbd>g</kbd> <kbd>t</kbd> | Go to Tests |
+| <kbd>g</kbd> <kbd>o</kbd> | Go to Reports |
 | <kbd>g</kbd> <kbd>,</kbd> | Go to Settings |
 | <kbd>g</kbd> <kbd>p</kbd> | Switch project. Lists the projects you can read. Type part of a name or key and press <kbd>↵</kbd>. The current screen stays open. Available when you can read more than one project. |
 | <kbd>g</kbd> <kbd>d</kbd> | Docs for this screen. Opens the page about the screen you are on, in a new tab. |
@@ -197,6 +198,13 @@ A step number typed before <kbd>f</kbd> marks the failed step. [Planned runs](./
 | --- | --- |
 | <kbd>j</kbd> | Next test |
 | <kbd>k</kbd> | Previous test |
+
+## Reports
+
+| Key | What it does |
+| --- | --- |
+| <kbd>j</kbd> | Next report |
+| <kbd>k</kbd> | Previous report |
 
 ## Settings
 

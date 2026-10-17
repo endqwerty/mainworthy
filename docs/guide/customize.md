@@ -135,7 +135,7 @@ Press "Theme" at the bottom of the sidebar to switch between light and dark. Unt
 
 ## The sidebar
 
-To make room for what you are reading, press the button beside "Mainworthy" at the top of the sidebar, or <kbd>[</kbd>. The sidebar becomes a strip 64 px wide. The strip keeps the project, the search, the five screens and the footer, each as an icon. It does not show the folders and tags of the Suite.
+To make room for what you are reading, press the button beside "Mainworthy" at the top of the sidebar, or <kbd>[</kbd>. The sidebar becomes a strip 64 px wide. The strip keeps the project, the search, the six screens and the footer, each as an icon. It does not show the folders and tags of the Suite.
 
 The pane on the right takes the width the sidebar gave up. That is the pane where you read a case, a question, a run or a change. The list keeps its width. In a window narrower than about 900 px the panes are at their least width and do not all fit beside the open sidebar. Part of the width goes to fitting them in first. In a window narrower than 760 px the list is above the other pane, and both get wider.
 
@@ -176,7 +176,7 @@ The following behavior is fixed on every instance:
 - Sign-in uses a token, or a person uses a name and password or a passkey set up through an admin's invitation. A password can require an authenticator code. There is no single sign-on. With [mail configured](./configuration.md#turn-on-mail), a person can reset a lost password through their verified email address. Without mail, the owner can make a [recovery invitation](./access.md#a-lost-password-or-passkey). A password is 12 to 256 characters and has no other rule. A token works until you revoke it or until the end you gave it.
 - The database is one SQLite file.
 
-Stable-trunk flakiness detection, a requirements coverage matrix, two-person approval, frozen evidence, gap waivers and dashboards are not built yet. [Same-code detection and quarantine](./report-results.md#quarantine-an-unreliable-test) are available, as are [CSV imports](./import-cases.md).
+Stable-trunk flakiness detection, a requirements coverage matrix, two-person approval, frozen evidence, gap waivers and dashboards you arrange yourself are not built yet. [Same-code detection and quarantine](./report-results.md#quarantine-an-unreliable-test) are available, as are [CSV imports](./import-cases.md) and [five fixed reports](./reports.md).
 
 ## See also
 

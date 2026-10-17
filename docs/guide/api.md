@@ -876,6 +876,42 @@ Check the suite for structural problems: cases with no steps or no expected resu
 
 </details>
 
+### stats
+
+Reports over the last days: pass rate per day, flaky tests, time lost to reruns, automation and its backlog, coverage by requirement.
+
+|  |  |
+| --- | --- |
+| HTTP | `POST /api/p/<project>/stats` |
+| Command | `mainworthy stats` |
+| Needs | `read` |
+| Effect | reads |
+| Agent tool | no |
+
+<details>
+<summary>Input of <code>stats</code></summary>
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `[1].of` | `"pass-rate"` | yes | Per day: the results that passed, failed, were skipped or blocked. |
+| `[1].days` | `integer` | no | How many days to read, today included: 1 to 90. Default: `30`. |
+| `[1].zone` | `string` | no | Whose days: a time zone such as Europe/Berlin. Default: `"UTC"`. |
+| `[1].method` | `"human" \| "auto" \| "agent"` | no | Only one producer's results: human, auto or agent. |
+| `[2].of` | `"flaky"` | yes | The tests that passed and failed on the same code, most often first. |
+| `[2].days` | `integer` | no | How many days to read, today included: 1 to 90. Default: `30`. |
+| `[2].limit` | `integer` | no | How many rows to list. Default: `20`. |
+| `[3].of` | `"reruns"` | yes | The attempts that were run again, and the time they took. |
+| `[3].days` | `integer` | no | How many days to read, today included: 1 to 90. Default: `30`. |
+| `[3].limit` | `integer` | no | How many rows to list. Default: `20`. |
+| `[4].of` | `"automation"` | yes | How many cases have an automated test, and which to automate next. |
+| `[4].days` | `integer` | no | How many days to read, today included: 1 to 90. Default: `30`. |
+| `[4].limit` | `integer` | no | How many rows to list. Default: `20`. |
+| `[5].of` | `"coverage"` | yes | Each requirement's cases, by the latest result of their tests. |
+| `[5].days` | `integer` | no | How many days to read, today included: 1 to 90. Default: `30`. |
+| `[5].limit` | `integer` | no | How many requirements to list. Default: `100`. |
+
+</details>
+
 ### command
 
 What became of a command you sent under an idempotency key: not recorded, begun, or done with its reply.
