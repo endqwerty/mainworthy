@@ -231,7 +231,6 @@ test("the iPhone app's job runs for every module its script loads, and none of t
 // it. A module that names one in its code is listed here with what it does with it.
 test("no module outside the tests reads a file that only the tests naming it are run for", () => {
 	const expected: Record<string, string> = {
-		"scripts/check.ts": "a message that points to AGENTS.md",
 		"scripts/ios/swift.ts": "writes the app's generated Swift; test/ios-contract.test.ts compares it and names ios/",
 		"src/server/identity/identity.ts": "a message that points to docs/deploy.md",
 	};
