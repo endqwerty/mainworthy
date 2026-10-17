@@ -240,7 +240,7 @@ private struct SelectionMode: ViewModifier {
 		let questions: [Question]
 
 		/// "12 failures", for the questions the answer goes to.
-		var what: String { questions.first.map { $0.kind.counted(questions.count) } ?? "the selected questions" }
+		var what: String { questions.isEmpty ? "the selected questions" : questions.counted }
 	}
 
 	func body(content: Content) -> some View {
@@ -249,7 +249,8 @@ private struct SelectionMode: ViewModifier {
 			.toolbar {
 				if screen.isSelecting {
 					ToolbarItem(placement: .topBarLeading) { selectAll }
-					ToolbarItem(placement: .status) { status }
+					// The count is a label, not a control: on glass of its own it would read as a button.
+					ToolbarItem(placement: .status) { status }.sharedBackgroundVisibility(.hidden)
 					ToolbarSpacer(.flexible, placement: .bottomBar)
 					// The button is glass of its own: the bar's glass behind it would show as a wider capsule.
 					ToolbarItem(placement: .bottomBar) { answer }.sharedBackgroundVisibility(.hidden)
@@ -274,7 +275,7 @@ private struct SelectionMode: ViewModifier {
 		let all = screen.selectable
 		if all.count > selection.count {
 			Button("Select All") { screen.selectAll() }
-				.accessibilityLabel("Select all \(all.first.map { $0.kind.counted(all.count) } ?? "")")
+				.accessibilityLabel("Select all \(all.counted)")
 				.accessibilityIdentifier("select-all")
 		} else if !selection.isEmpty {
 			Button("Deselect All") { screen.clearSelection() }.accessibilityIdentifier("select-clear")
@@ -284,10 +285,10 @@ private struct SelectionMode: ViewModifier {
 	private var status: some View {
 		let selection = screen.selection
 		let text: String =
-			if let first = selection.first {
+			if !selection.isEmpty {
 				screen.sharedChoices.isEmpty
 					? "No answer fits all \(selection.count)"
-					: "\(first.kind.counted(selection.count)) selected"
+					: "\(selection.counted) selected"
 			} else {
 				"Select questions"
 			}
@@ -344,7 +345,7 @@ private struct SelectionMode: ViewModifier {
 
 	private func message(for chosen: Chosen) -> String {
 		let makes = chosen.choice.answer == "create"
-			? " The server makes and links \(QueueScreen.casesCreated(by: chosen.questions)) automated cases, one for each of their tests."
+			? " The server makes and links \(chosen.questions.unlinkedTests) automated cases, one for each of their tests."
 			: ""
 		return "\(chosen.choice.help)\(makes) They are sent together. Each question gets its own decision, and Undo withdraws them together."
 	}

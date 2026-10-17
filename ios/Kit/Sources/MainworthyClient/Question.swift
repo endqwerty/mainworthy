@@ -32,37 +32,39 @@ public enum Kind: Hashable, Sendable {
 	/// The kinds a queue is filtered by, in the order the web shows them.
 	public static let known: [Kind] = [.failure, .adopt, .map, .finding, .signoff]
 
-	/// What the queue calls one such question, as the web does.
-	public var name: String {
-		switch self {
-		case .adopt: "proposal"
-		case .map: "unlinked"
-		case .failure: "failure"
-		case .finding: "finding"
-		case .signoff: "sign-off"
-		case .other(let word): word
+	/// What every client calls it: `src/core/kinds.ts`. A kind this build does not know is called by its word.
+	private var words: (tag: String, filter: String, one: String, many: String) {
+		Vocabulary.kindWords[word] ?? (tag: word, filter: word.capitalized, one: word, many: word)
+	}
+
+	/// What a question's tag says: "failure", "unlinked".
+	public var name: String { words.tag }
+
+	/// What the queue's filter calls several: "Failures", "Unlinked".
+	public var plural: String { words.filter }
+
+	/// What several are, in a sentence: "failures", "unlinked tests".
+	public var many: String { words.many }
+
+	/// How many, in words: "1 failure", "3 failures", "2 unlinked tests".
+	func counted(_ count: Int) -> String {
+		"\(count) \(count == 1 ? words.one : words.many)"
+	}
+}
+
+extension [Question] {
+	/// How many tests these unlinked questions are about, also those past the fifty a question names.
+	public var unlinkedTests: Int {
+		reduce(0) { sum, question in
+			if case .unlinked(let unlinked) = question.evidence { sum + unlinked.count } else { sum }
 		}
 	}
 
-	/// How many, in words: "1 failure", "3 failures", "2 unlinked".
-	public func counted(_ count: Int) -> String {
-		guard count != 1 else { return "1 \(name)" }
-		return switch self {
-		case .map: "\(count) unlinked"
-		default: "\(count) \(plural.lowercased())"
-		}
-	}
-
-	/// What the queue calls several, for a filter.
-	public var plural: String {
-		switch self {
-		case .adopt: "Proposals"
-		case .map: "Unlinked"
-		case .failure: "Failures"
-		case .finding: "Findings"
-		case .signoff: "Sign-offs"
-		case .other(let word): word.capitalized
-		}
+	/// How many, in words, of questions of one kind: "3 failures". Unlinked questions are counted by their tests,
+	/// "9 unlinked tests": one is about a file's tests, or about every test that came with no file.
+	public var counted: String {
+		guard let first else { return "" }
+		return first.kind.counted(first.kind == .map ? unlinkedTests : count)
 	}
 }
 

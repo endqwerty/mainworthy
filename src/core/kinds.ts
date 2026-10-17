@@ -9,6 +9,24 @@ export const Kind = z.enum(["adopt", "map", "failure", "finding", "signoff"]);
 export type Kind = z.infer<typeof Kind>;
 export const KINDS = Kind.options;
 
+/**
+ * What every client calls a kind of question: on a row's tag, on the queue's filter, and counted. Unlinked
+ * questions are counted by their tests: one is about a file's tests with no case, or about every test that came
+ * with no file, so neither questions nor files are what a person is answering for.
+ */
+export const KIND_WORDS: Record<Kind, { tag: string; filter: string; one: string; many: string }> = {
+	adopt: { tag: "proposal", filter: "Proposals", one: "proposal", many: "proposals" },
+	map: { tag: "unlinked", filter: "Unlinked", one: "unlinked test", many: "unlinked tests" },
+	failure: { tag: "failure", filter: "Failures", one: "failure", many: "failures" },
+	finding: { tag: "finding", filter: "Findings", one: "finding", many: "findings" },
+	signoff: { tag: "sign-off", filter: "Sign-offs", one: "sign-off", many: "sign-offs" },
+};
+
+/** "1 failure", "3 failures", "2 unlinked tests". */
+export function countOf(count: number, kind: Kind): string {
+	return `${count} ${count === 1 ? KIND_WORDS[kind].one : KIND_WORDS[kind].many}`;
+}
+
 export const ActorKind = z.enum(["human", "agent", "ci", "rule"]);
 export type ActorKind = z.infer<typeof ActorKind>;
 

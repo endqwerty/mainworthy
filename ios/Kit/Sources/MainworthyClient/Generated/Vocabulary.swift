@@ -59,6 +59,16 @@ enum Vocabulary {
 			"reject": "Leaves the run open.",
 		],
 	]
+
+	/// What each kind of question is called, by the server's word for it: on a row's tag, on the queue's filter,
+	/// and counted, one and several.
+	static let kindWords: [String: (tag: String, filter: String, one: String, many: String)] = [
+		"adopt": (tag: "proposal", filter: "Proposals", one: "proposal", many: "proposals"),
+		"map": (tag: "unlinked", filter: "Unlinked", one: "unlinked test", many: "unlinked tests"),
+		"failure": (tag: "failure", filter: "Failures", one: "failure", many: "failures"),
+		"finding": (tag: "finding", filter: "Findings", one: "finding", many: "findings"),
+		"signoff": (tag: "sign-off", filter: "Sign-offs", one: "sign-off", many: "sign-offs"),
+	]
 }
 
 /// How many answers one `decide` request carries: the most one saved answer, and so one selection, holds.

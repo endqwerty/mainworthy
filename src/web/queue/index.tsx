@@ -2,7 +2,7 @@ import { type InfiniteData, useInfiniteQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import type { Api } from "../../core/api.ts";
-import { ANSWER_HELP, ANSWER_KEYS, ANSWER_LABELS, ANSWERS, KINDS, type Kind } from "../../core/kinds.ts";
+import { ANSWER_HELP, ANSWER_KEYS, ANSWER_LABELS, ANSWERS, KIND_WORDS, KINDS, type Kind } from "../../core/kinds.ts";
 import { DECIDE_MAX, type InboxReply, type QuestionItem } from "../../core/ops.ts";
 import { stakes, waitingPhrase } from "../../core/stakes.ts";
 import { call } from "../lib/api.ts";
@@ -24,7 +24,7 @@ import {
 import {
 	allOfKind,
 	capped,
-	countOf,
+	counted,
 	named,
 	type Row,
 	rangeOf,
@@ -34,20 +34,6 @@ import {
 } from "./selection.ts";
 import "./queue.css";
 
-const kindLabels: Record<Kind, string> = {
-	adopt: "Proposals",
-	map: "Unlinked",
-	failure: "Failures",
-	finding: "Findings",
-	signoff: "Sign-offs",
-};
-const kindNames: Record<Kind, string> = {
-	adopt: "proposal",
-	map: "unlinked",
-	failure: "failure",
-	finding: "finding",
-	signoff: "sign-off",
-};
 type DecisionEntry = { question: QuestionItem; answer: Record<string, unknown> };
 type Withdrawal = {
 	question: QuestionItem;
@@ -483,8 +469,12 @@ function QueueWorkbench() {
 			return;
 		}
 		select(all);
-		if (inbox.hasNextPage && !left)
-			setStatus(`${countOf(kept.length, kind)} selected. More questions are not listed yet.`);
+		if (inbox.hasNextPage && !left) {
+			const keptRefs = new Set(kept);
+			setStatus(
+				`${counted(items.filter((item) => keptRefs.has(item.q)))} selected. More questions are not listed yet.`,
+			);
+		}
 	}
 	function answer(is: string, suggested?: Record<string, unknown>): void {
 		if (state !== "open" || inline) return;
@@ -816,6 +806,7 @@ function QueueWorkbench() {
 	const answerKind = bulk ? selection[0]?.kind : current?.kind;
 	/** What "Select all" in the bar would select: the listed questions of the selection's kind, as many as one answer sends. */
 	const selectable = bulk && selection[0] ? capped(allOfKind(items, selection[0].kind, alone)).kept : [];
+	const selectableRefs = new Set(selectable);
 	const help: Readonly<Record<string, string>> = answerKind ? ANSWER_HELP[answerKind] : {};
 	return (
 		<>
@@ -875,7 +866,7 @@ function QueueWorkbench() {
 								setSelected(new Set());
 							}}
 						>
-							{kindLabels[value]} <span>{counts[value] ?? 0}</span>
+							{KIND_WORDS[value].filter} <span>{counts[value] ?? 0}</span>
 						</button>
 					))}
 				</nav>
@@ -894,10 +885,10 @@ function QueueWorkbench() {
 				)}
 				{bulk && selection[0] && (
 					<div className="queue-bulk">
-						<span>{countOf(selection.length, selection[0].kind)} selected</span>
+						<span>{counted(selection)} selected</span>
 						{selectable.some((ref) => !selected.has(ref)) && (
 							<button type="button" onClick={selectAll}>
-								<KeyCap>*</KeyCap> Select all {countOf(selectable.length, selection[0].kind)}
+								<KeyCap>*</KeyCap> Select all {counted(items.filter((item) => selectableRefs.has(item.q)))}
 							</button>
 						)}
 						<button type="button" onClick={() => select([])}>
@@ -934,7 +925,7 @@ function QueueWorkbench() {
 								</span>
 								<ProducerGlyph kind={question.producer} />
 								<span className="ref">{question.q}</span>
-								<span className={`kind k-${question.kind}`}>{kindNames[question.kind]}</span>
+								<span className={`kind k-${question.kind}`}>{KIND_WORDS[question.kind].tag}</span>
 								<span className="queue-title">{question.title}</span>
 								<span className="queue-case ref">{question.about.find((ref) => ref.startsWith("C-"))}</span>
 								{question.blocks.length > 0 && <span className="blk">blocks gate</span>}
@@ -978,7 +969,7 @@ function QueueWorkbench() {
 								<span className="ref" data-current-question={current.q}>
 									{current.q}
 								</span>
-								<span className={`kind k-${current.kind}`}>{kindNames[current.kind]}</span>
+								<span className={`kind k-${current.kind}`}>{KIND_WORDS[current.kind].tag}</span>
 								<ProducerGlyph kind={current.producer} />
 								<span className="dim">{age(current.openedAt)}</span>
 								{current.blocks.length > 0 && <span className="blk">blocks {current.blocks.join(", ")}</span>}
@@ -1040,7 +1031,7 @@ function QueueWorkbench() {
 								<div className="queue-needs">
 									{settled && <p>This question was settled elsewhere. Your note is kept.</p>}
 									{bulk && selection[0]
-										? `The answer you choose goes to the ${countOf(selection.length, selection[0].kind)} selected.${selected.has(current.q) ? "" : " The question shown is not one of them."}`
+										? `The answer you choose goes to the ${counted(selection)} selected.${selected.has(current.q) ? "" : " The question shown is not one of them."}`
 										: current.you === "forbidden"
 											? `You cannot settle this. Needs ${current.needs}.`
 											: current.you === "advice"

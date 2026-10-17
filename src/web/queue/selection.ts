@@ -1,23 +1,29 @@
 // Which questions may be answered together. One answer is for one kind, and nobody selects what they cannot settle.
-import { ANSWER_KEYS, type Kind } from "../../core/kinds.ts";
+import { z } from "zod";
+import { ANSWER_KEYS, countOf, KIND_WORDS, type Kind } from "../../core/kinds.ts";
 import { DECIDE_MAX, type QuestionItem } from "../../core/ops.ts";
 
-export type Row = Pick<QuestionItem, "q" | "kind" | "you" | "answers">;
+export type Row = Pick<QuestionItem, "q" | "kind" | "you" | "answers" | "evidence">;
 
-const one: Record<Kind, string> = {
-	adopt: "proposal",
-	map: "unlinked",
-	failure: "failure",
-	finding: "finding",
-	signoff: "sign-off",
-};
-const many: Record<Kind, string> = {
-	adopt: "proposals",
-	map: "unlinked",
-	failure: "failures",
-	finding: "findings",
-	signoff: "sign-offs",
-};
+const Tests = z.object({ count: z.number() });
+
+/** How many tests an unlinked question is about, or null when its evidence could not be read. */
+function testsOf(question: Row): number | null {
+	const parsed = Tests.safeParse(question.evidence);
+	return parsed.success ? parsed.data.count : null;
+}
+
+/**
+ * How many, in words, of questions of one kind: "3 failures". Unlinked questions are counted by their tests,
+ * "9 unlinked tests": one is about a file's tests, or about every test that came with no file.
+ */
+export function counted(questions: readonly Row[]): string {
+	const first = questions[0];
+	if (!first) return "";
+	const count =
+		first.kind === "map" ? questions.reduce((sum, question) => sum + (testsOf(question) ?? 0), 0) : questions.length;
+	return countOf(count, first.kind);
+}
 
 /**
  * Whether the question takes this answer. A reply the page could not read may lack the list; the question then
@@ -33,17 +39,10 @@ export function capped(refs: readonly string[]): { kept: string[]; left: number 
 	return { kept, left: refs.length - kept.length };
 }
 
-/** "3 failures", "1 failure", "2 unlinked". */
-export function countOf(count: number, kind: Kind): string {
-	return `${count} ${count === 1 ? one[kind] : many[kind]}`;
-}
-
 /** The questions by ref, or by how many there are once a list of refs would be too long to read in one line. */
 export function named(questions: readonly Row[]): string {
 	const first = questions[0];
-	return first && questions.length > 3
-		? countOf(questions.length, first.kind)
-		: questions.map((question) => question.q).join(", ");
+	return first && questions.length > 3 ? counted(questions) : questions.map((question) => question.q).join(", ");
 }
 
 /**
@@ -59,9 +58,11 @@ export function whyNotSelectable(question: Row, selection: readonly Row[], alone
 	if (question.you === "forbidden") return `You cannot settle ${question.q}.`;
 	if (alone(question))
 		return `${question.q} is answered on its own: its ${question.kind === "adopt" ? "edits are" : "suggested edit is"} read on screen before an answer counts.`;
+	if (question.kind === "map" && testsOf(question) === null)
+		return `${question.q} is answered on its own: its tests could not be read.`;
 	const kind = selection[0]?.kind;
 	if (kind && question.kind !== kind)
-		return `${question.q} is ${question.kind === "map" ? "unlinked" : `a ${one[question.kind]}`} and the selection is of ${many[kind]}: one answer is for one kind.`;
+		return `${question.q} is ${question.kind === "map" ? "unlinked" : `a ${KIND_WORDS[question.kind].one}`} and the selection is of ${KIND_WORDS[kind].many}: one answer is for one kind.`;
 	return null;
 }
 

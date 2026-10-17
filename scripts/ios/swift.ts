@@ -10,7 +10,7 @@
 //
 // `bun scripts/ios.ts gen` writes the files; `test/ios-contract.test.ts` fails when one is not what this prints.
 import { execFileSync } from "node:child_process";
-import { ANSWER_HELP, ANSWER_LABELS, KINDS } from "../../src/core/kinds.ts";
+import { ANSWER_HELP, ANSWER_LABELS, KIND_WORDS, KINDS } from "../../src/core/kinds.ts";
 import { METHOD_LABELS, MethodKind } from "../../src/core/model.ts";
 import { DECIDE_MAX } from "../../src/core/ops.ts";
 import { RESULT_STANDING_LABELS, RESULT_STANDINGS } from "../../src/core/runs.ts";
@@ -137,6 +137,13 @@ export function vocabulary(): string {
 		]),
 		"\t\t",
 	);
+	const kinds = table(
+		KINDS.map((kind) => {
+			const { tag, filter, one, many } = KIND_WORDS[kind];
+			return [kind, `(tag: ${literal(tag)}, filter: ${literal(filter)}, one: ${literal(one)}, many: ${literal(many)})`];
+		}),
+		"\t\t",
+	);
 	/** A Swift enum whose cases are these words, in this order, each with its label. */
 	const words = (name: string, doc: string, entries: readonly (readonly [string, string])[]): string[] => [
 		...comment(doc, "").trimEnd().split("\n"),
@@ -161,6 +168,10 @@ export function vocabulary(): string {
 		"",
 		"\t/// What each answer does, in a sentence, by the kind of question and the answer.",
 		`\tstatic let answerHelp: [String: [String: String]] = [\n${help}\t]`,
+		"",
+		"\t/// What each kind of question is called, by the server's word for it: on a row's tag, on the queue's filter,",
+		"\t/// and counted, one and several.",
+		`\tstatic let kindWords: [String: (tag: String, filter: String, one: String, many: String)] = [\n${kinds}\t]`,
 		"}",
 		"",
 		"/// How many answers one `decide` request carries: the most one saved answer, and so one selection, holds.",

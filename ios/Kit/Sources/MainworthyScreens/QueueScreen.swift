@@ -329,7 +329,7 @@ public final class QueueScreen: ProjectScreen {
 		default: break
 		}
 		if let kind = selection.first?.kind, kind != question.kind {
-			return "\(ref) is \(question.kind == .map ? "unlinked" : "a \(question.kind.name)") and the selection is of \(kind.plural.lowercased()): one answer is for one kind."
+			return "\(ref) is \(question.kind == .map ? "unlinked" : "a \(question.kind.name)") and the selection is of \(kind.many): one answer is for one kind."
 		}
 		return nil
 	}
@@ -384,14 +384,6 @@ public final class QueueScreen: ProjectScreen {
 		}
 	}
 
-	/// How many cases "Create cases" makes for these unlinked questions: one for each test of each file, also the
-	/// tests past the first fifty that a question names.
-	public static func casesCreated(by questions: [Question]) -> Int {
-		questions.reduce(0) { sum, question in
-			if case .unlinked(let unlinked) = question.evidence { sum + unlinked.count } else { sum }
-		}
-	}
-
 	/// Gives one answer to these selected questions, as they were shown when the person chose it: one saved answer,
 	/// sent as one request on the evidence the person saw. A question whose evidence changed since is refused by
 	/// the server, never answered on its new evidence, and each question gets its own decision and its own
@@ -400,7 +392,7 @@ public final class QueueScreen: ProjectScreen {
 	public func answerAll(
 		_ chosen: [Question], with choice: Choice, reference: String = "", reason: String = ""
 	) async -> Bool {
-		guard let first = chosen.first, chosen.allSatisfy({ selected.contains($0.ref) }) else {
+		guard !chosen.isEmpty, chosen.allSatisfy({ selected.contains($0.ref) }) else {
 			notice = Notice(text: "Nothing was recorded: the selection changed. Select the questions again.", isProblem: true, undoes: nil)
 			return false
 		}
@@ -434,7 +426,7 @@ public final class QueueScreen: ProjectScreen {
 			// The whole answer waits on the device: nothing is claimed of any question.
 			let state = outbox.sending ? "sending" : "saved on this device, waiting to send"
 			notice = Notice(
-				text: "\(first.kind.counted(chosen.count)): \(state). Open Unsent answers to see the outcome.",
+				text: "\(chosen.counted): \(state). Open Unsent answers to see the outcome.",
 				isProblem: false, undoes: nil
 			)
 			return false
@@ -457,7 +449,7 @@ public final class QueueScreen: ProjectScreen {
 		}
 		if refused.isEmpty { typed[QueueScreen.selectionTyping] = nil }
 		var parts: [String] = []
-		if !decided.isEmpty { parts.append("\(first.kind.counted(decided.count)): \(choice.label).") }
+		if !decided.isEmpty { parts.append("\(decided.counted): \(choice.label).") }
 		if advised > 0 { parts.append("\(advised) recorded as advice.") }
 		if !refused.isEmpty {
 			parts.append("Not recorded, read \(refused.count == 1 ? "it" : "them") again: \(refused.joined(separator: "; ")).")

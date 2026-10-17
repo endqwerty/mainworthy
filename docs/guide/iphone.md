@@ -115,7 +115,8 @@ it to open another.
 To give one answer to several questions of one kind, follow these steps:
 
 1. In **Queue**, press **Select** at the top right. Each open question gets a circle. The tabs give way to a bar
-   that says what is selected, or **Select questions** while nothing is. **Done** at the top right ends selection.
+   that counts what is selected, such as **9 unlinked tests selected** (questions about tests with no case are
+   counted by their tests), or says **Select questions** while nothing is. **Done** at the top right ends selection.
 2. Press questions to select them. A selection holds one kind, such as unlinked tests or failures, and at most
    500 questions. Select a question or choose a kind's chip before pressing **Select All** at the top left. The button
    selects eligible questions of that kind from the list, up to the limit, and then reads **Deselect All**. A question that cannot join appears faint.
