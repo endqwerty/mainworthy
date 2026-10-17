@@ -23,14 +23,15 @@ Agents read reports this way too: `stats` is not one of the agent tools.
 The share of results that passed, per day, of those that passed or failed. Skipped and blocked results are counted
 beside the rate and are not in it.
 
-- Each test counts once for each job on each commit, by the attempt it ended with. A failure that a rerun of the
+- Each test counts once for each job and producer on each commit, by the attempt it ended with. A failure that a rerun of the
   same job then passed counts as a pass, and the failed attempt is in [time lost to reruns](#time-lost-to-reruns).
   This is the rule a gate counts with.
 - A result its producer corrected is replaced by the correction.
 - A failure of a test in [quarantine](./report-results.md#quarantine-an-unreliable-test) is counted as quarantined, apart from the failures, and does not
   lower the rate.
 - The days are the reader's. The web page uses your browser's time zone. The command line and the API use UTC
-  unless you give `--zone`, for example `--zone Europe/Berlin`.
+  unless you give `--zone` with a time zone's name, for example `--zone Europe/Berlin`. An offset such as `+05:30`
+  is refused.
 - Choose a producer to read only people's, pipelines' or agents' results (`--method human`, `auto` or `agent`).
 
 ## Flaky tests

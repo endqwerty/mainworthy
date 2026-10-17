@@ -277,7 +277,8 @@ function PassRate({ days }: { days: number }) {
 						</tbody>
 					</table>
 					<p className="dim report-note">
-						Each test counts once per job on each commit, by its last attempt. Days are {data.zone}'s.
+						Each test counts once for each job and producer on each commit, by the attempt it ended with. Days are{" "}
+						{data.zone}'s.
 					</p>
 				</>
 			)}

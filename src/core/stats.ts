@@ -15,7 +15,7 @@ export const StatsInput = z.discriminatedUnion("of", [
 		zone: z
 			.string()
 			.max(64)
-			.refine(isZone, "not a time zone: write a name such as Europe/Berlin or UTC")
+			.refine(isZone, "not a time zone: write a name such as Europe/Berlin or UTC, not an offset")
 			.default("UTC")
 			.describe("Whose days: a time zone such as Europe/Berlin."),
 		method: MethodKind.optional().describe("Only one producer's results: human, auto or agent."),

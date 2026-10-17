@@ -26,7 +26,11 @@ skips and blocks are counted beside the rate and not in it.
 **Days are the reader's.** The pass rate takes a time zone (`zone`, default UTC; the web page sends the browser's)
 and splits the window at that zone's midnights (`src/core/days.ts`), so a day the clocks change is 23 or 25 hours.
 SQL counts the results in quarters of an hour and each quarter is placed in its day; every zone's midnight is a
-whole quarter of an hour in UTC. Joining each result to its day in SQL cost ten times as much.
+whole quarter of an hour in UTC. Joining each result to its day in SQL cost ten times as much. So `zone` is a name:
+an offset such as `+05:37`, which the platform also takes, is refused, because its midnight need not be a quarter of
+an hour. A day whose midnight the clocks skip (Santiago goes from 00:00 to 01:00) starts at the jump. Checked for every
+zone the platform knows over two years: each day starts on its own date, where the day before ended, on a quarter
+of an hour.
 
 **The other reports.**
 
