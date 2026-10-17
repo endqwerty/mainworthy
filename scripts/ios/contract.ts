@@ -302,9 +302,7 @@ export const Run = struct("Run", "A planned run or a change run, with the server
 	reason: text,
 	createdAt: [whole, "Milliseconds since 1970."],
 	slots: [maybe(whole), "A planned run's pinned cases."],
-	change: maybe(
-		struct("RunChange", "The change a change run's commit belongs to.", { key: text, title: maybe(text) }),
-	),
+	change: maybe(struct("RunChange", "The change a change run's commit belongs to.", { key: text, title: maybe(text) })),
 	tally: dictionary(whole),
 	accepts: struct("RunTarget", "Only this run, or a commit's results.", {
 		self: maybe(flag),
