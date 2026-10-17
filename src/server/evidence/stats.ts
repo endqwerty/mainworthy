@@ -1,4 +1,4 @@
-// What the reports read of the results (decision 0094). Facts only: nothing here changes a gate or an excuse.
+// What the reports read of the results (decision 0095). Facts only: nothing here changes a gate or an excuse.
 
 import type { LocalDay } from "../../core/days.ts";
 import type { MethodKind } from "../../core/model.ts";

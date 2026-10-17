@@ -1,4 +1,4 @@
-// The reports (decision 0094): what the stream of results says over a window of days. One operation, `stats`,
+// The reports (decision 0095): what the stream of results says over a window of days. One operation, `stats`,
 // answers each; `of` names which, and each has its own reply.
 
 import { z } from "zod";

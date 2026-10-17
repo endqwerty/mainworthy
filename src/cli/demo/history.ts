@@ -218,7 +218,7 @@ export function demoHistory(options: {
 	);
 	const outageNight = nights[2];
 
-	// ── A test that sometimes fails on `main` and passes when the job runs it again (decision 0094). Its own
+	// ── A test that sometimes fails on `main` and passes when the job runs it again (decision 0095). Its own
 	// stream, so the rest of the history stays as it was. Not the quarantined test, which is the first. ──
 	const flakyRng = random(options.seed ^ 0x3c6ef372);
 	const flaky = automated.length > 1 ? automated[1 + Math.floor(flakyRng() * (automated.length - 1))] : undefined;

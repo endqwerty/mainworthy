@@ -358,7 +358,7 @@ export function readWorkloads(instance: DatasetInstance, iterations: number): Wo
 			},
 		},
 	);
-	// The reports read a window of results; a lost index makes one of them seconds long (decision 0094).
+	// The reports read a window of results; a lost index makes one of them seconds long (decision 0095).
 	for (const of of ["pass-rate", "flaky", "reruns", "automation", "coverage"] as const)
 		reads.push({
 			name: `report: ${of}`,

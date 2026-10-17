@@ -248,7 +248,7 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 		const reply = await write(owner, "propose", `cases-${offset}`, at, { edits });
 		refs.push(...reply.cases.map((item) => item.ref));
 	}
-	// Each case covers the requirement of its feature, which the coverage report reads (decision 0094).
+	// Each case covers the requirement of its feature, which the coverage report reads (decision 0095).
 	for (let offset = 0; offset < cases; offset += 250) {
 		const edits: Api["propose"]["input"]["edits"] = suite.slice(offset, offset + 250).flatMap((item, n) => {
 			const ref = refs[offset + n];

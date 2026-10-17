@@ -1,4 +1,4 @@
-// The reports (decision 0094): one read, `stats`, with one answer for each kind named by `of`.
+// The reports (decision 0095): one read, `stats`, with one answer for each kind named by `of`.
 
 import { localDays } from "../../core/days.ts";
 import { REPLIES } from "../../core/replies.ts";
