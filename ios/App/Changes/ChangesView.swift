@@ -53,19 +53,20 @@ struct ChangesView: View {
 					}
 					.accessibilityIdentifier("change-\(change.key)")
 				}
-			}
-			.refreshable { await screen.refresh() }
-			.overlay {
 				if screen.changes.isEmpty {
-					ContentUnavailableView {
-						Label("No changes yet", systemImage: "arrow.triangle.branch")
-					} description: {
-						Text("A change appears when a pipeline reports results for a commit with a branch or pull request.")
-					} actions: {
-						Link("How to send a report", destination: workspace.docsAddress.appending(path: "report-results"))
+					ListPlaceholder {
+						ContentUnavailableView {
+							Label("No changes yet", systemImage: "arrow.triangle.branch")
+						} description: {
+							Text("A change appears when a pipeline reports results for a commit with a branch or pull request.")
+						} actions: {
+							Link("How to send a report", destination: workspace.docsAddress.appending(path: "report-results"))
+						}
 					}
 				}
 			}
+			.holdsPlaceholder()
+			.refreshable { await screen.refresh() }
 		}
 	}
 }

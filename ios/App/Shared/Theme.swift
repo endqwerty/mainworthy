@@ -238,4 +238,50 @@ extension View {
 			.padding(.horizontal, 12)
 			.padding(.bottom, 6)
 	}
+
+}
+
+/// What a list says in place of its rows: that it has none, that it is still reading, or that it could not be read.
+/// It is a row of the list, not an overlay over it, so it comes down with the list when the list is pulled to refresh,
+/// and a pull that starts on it refreshes too: an overlay stays where it is and takes the drag from the list. The list
+/// says how tall it shows with `holdsPlaceholder`, and the row takes most of that, with what it says in the middle.
+struct ListPlaceholder<Content: View>: View {
+	@ViewBuilder var content: Content
+	@Environment(\.listShownHeight) private var shown
+
+	var body: some View {
+		Section {
+			content
+				.frame(maxWidth: .infinity, minHeight: shown * 0.75)
+				.listRowBackground(Color.clear)
+				.listRowSeparator(.hidden)
+				// Only an action's own button acts, not the whole row.
+				.buttonStyle(.borderless)
+		}
+	}
+}
+
+extension View {
+	/// Tells a `ListPlaceholder` in this list how tall the list shows, between its bars.
+	func holdsPlaceholder() -> some View {
+		modifier(ShownHeight())
+	}
+}
+
+private struct ShownHeight: ViewModifier {
+	@State private var height: CGFloat = 0
+
+	func body(content: Content) -> some View {
+		content
+			.onScrollGeometryChange(for: CGFloat.self) { geometry in
+				geometry.containerSize.height - geometry.contentInsets.top - geometry.contentInsets.bottom
+			} action: { _, shown in
+				height = max(0, shown)
+			}
+			.environment(\.listShownHeight, height)
+	}
+}
+
+extension EnvironmentValues {
+	@Entry var listShownHeight: CGFloat = 0
 }

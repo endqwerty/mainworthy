@@ -32,19 +32,20 @@ struct TestsListView: View {
 					ProgressView().frame(maxWidth: .infinity).task { await screen.more() }
 				}
 			}
-		}
-		.overlay {
 			if screen.loading == .first {
-				ProgressView()
+				ListPlaceholder { ProgressView() }
 			} else if screen.loading == .done, screen.tests.isEmpty {
-				ContentUnavailableView(
-					"No tests", systemImage: "gearshape.2",
-					description: Text(!screen.isFiltered
-						? "A pipeline's report adds the tests it ran."
-						: "No test matches.")
-				)
+				ListPlaceholder {
+					ContentUnavailableView(
+						"No tests", systemImage: "gearshape.2",
+						description: Text(!screen.isFiltered
+							? "A pipeline's report adds the tests it ran."
+							: "No test matches.")
+					)
+				}
 			}
 		}
+		.holdsPlaceholder()
 		.navigationTitle("Automated tests")
 		.navigationBarTitleDisplayMode(.inline)
 		.searchable(text: $screen.text, placement: .navigationBarDrawer(displayMode: .always), prompt: "Name or file")

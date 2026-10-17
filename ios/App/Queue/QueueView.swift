@@ -37,6 +37,7 @@ struct QueueView: View {
 			Text("Decided").tag(QueueScreen.Showing.decided)
 		}
 		.pickerStyle(.segmented)
+		.accessibilityIdentifier("queue-showing")
 	}
 
 	var body: some View {
@@ -63,6 +64,9 @@ struct QueueView: View {
 				.navigationDestination(for: String.self) { ref in
 					QuestionView(ref: ref, screen: screen, workspace: workspace) { path.removeAll() }
 				}
+				// Open and Decided and the kinds stay under the bar, as the bar does: pulling to refresh moves the
+				// questions under them, and choosing another list keeps them in place while it is read.
+				.safeAreaBar(edge: .top) { showingBar }
 				.safeAreaBar(edge: .bottom) { NoticeBar(screen: screen) }
 		}
 		.task { await screen.show(screen.showing, filter: screen.filter) }
@@ -73,6 +77,15 @@ struct QueueView: View {
 			get: { screen.showing },
 			set: { chosen in Task { await screen.show(chosen, filter: screen.filter) } }
 		)
+	}
+
+	private var showingBar: some View {
+		VStack(spacing: 8) {
+			showingPicker.padding(.trailing, 16)
+			Filters(screen: screen)
+		}
+		.padding(.leading, 16)
+		.padding(.top, 4)
 	}
 
 	@ViewBuilder private var list: some View {
@@ -103,27 +116,22 @@ struct QueueView: View {
 							.frame(maxWidth: .infinity)
 							.task { await screen.more() }
 					}
-				} header: {
-					VStack(spacing: 8) {
-						showingPicker.padding(.trailing, 16).padding(.top, 4)
-						Filters(screen: screen)
-					}
-					.listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 0))
-					.textCase(nil)
 				} footer: {
-					if screen.showing == .open { Text(screen.counts.phrase.capitalizedFirst) }
+					// An empty list says so once, in the middle.
+					if screen.showing == .open, !screen.questions.isEmpty { Text(screen.counts.phrase.capitalizedFirst) }
+				}
+				if screen.questions.isEmpty {
+					ListPlaceholder {
+						ContentUnavailableView(
+							screen.showing == .open ? "Nothing needs an answer" : "Nothing was decided yet",
+							systemImage: screen.showing == .open ? "checkmark.circle" : "tray"
+						)
+					}
 				}
 			}
 			.listStyle(.plain)
+			.holdsPlaceholder()
 			.refreshable { await screen.refresh() }
-			.overlay {
-				if screen.questions.isEmpty {
-					ContentUnavailableView(
-						screen.showing == .open ? "Nothing needs an answer" : "Nothing was decided yet",
-						systemImage: screen.showing == .open ? "checkmark.circle" : "tray"
-					)
-				}
-			}
 		}
 	}
 }
