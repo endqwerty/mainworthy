@@ -49,29 +49,44 @@ const Q = {
 		SELECT count(DISTINCT r.test) AS n FROM results r JOIN tests t ON t.id = r.test
 		WHERE r.project = $project AND r.at >= $since AND t.kind = 'auto'
 	`),
-	// An attempt that a higher attempt of the same lane repeated, once per attempt: of several results of one attempt,
-	// the one the attempt counted (the worse, then the later) gives its time. A corrected result is not counted, and
-	// its correction stands in its place, time included; a correction never repeats an attempt, so it is never the
-	// higher attempt that makes a rerun.
+	// An attempt that a higher attempt of the same lane repeated, once per attempt. What ran is an execution (a result
+	// that corrects nothing) at its own attempt; a correction says what that execution's outcome and time were, from the
+	// end of its chain of corrections, whatever attempt the correction was sent with (a correction is stored at an
+	// attempt no older than the one it corrects, so by its own attempt it could hide the attempt it repeats). Of several
+	// executions of one attempt, the one the attempt counted (the worse, then the later) gives its time.
 	reruns: sql<{ project: number; since: number }, { test: number; reruns: number; lost: number; unknown: number }>(`
-		WITH attempts AS (
-		  SELECT r.test, r.target, r.actor, r.method, b.job, r.attempt, r.duration_ms,
-		         row_number() OVER (
-		           PARTITION BY r.target, r.test, r.actor, r.method, b.job, r.attempt
-		           ORDER BY CASE r.outcome WHEN 'fail' THEN 3 WHEN 'error' THEN 3 WHEN 'pass' THEN 2 WHEN 'blocked' THEN 1 ELSE 0 END DESC,
-		                    r.seq DESC, r.ord DESC
-		         ) AS rank
+		WITH RECURSIVE executions AS (
+		  SELECT r.id, r.test, r.target, r.actor, r.method, b.job, r.attempt, r.outcome, r.duration_ms, r.seq, r.ord
 		  FROM results r JOIN batches b ON b.id = r.batch
-		  WHERE r.project = $project AND r.at >= $since
-		    AND NOT EXISTS (SELECT 1 FROM results c WHERE c.corrects = r.id)
+		  WHERE r.project = $project AND r.at >= $since AND r.corrects IS NULL
+		    AND EXISTS (
+		      SELECT 1 FROM results n JOIN batches nb ON nb.id = n.batch
+		      WHERE n.target = r.target AND n.test = r.test AND n.actor = r.actor AND n.method = r.method
+		        AND nb.job = b.job AND n.attempt > r.attempt AND n.corrects IS NULL
+		    )
+		),
+		chain(root, id, outcome, duration_ms, depth) AS (
+		  SELECT e.id, c.id, c.outcome, c.duration_ms, 1 FROM executions e JOIN results c ON c.corrects = e.id
+		  UNION ALL
+		  SELECT k.root, c.id, c.outcome, c.duration_ms, k.depth + 1 FROM chain k JOIN results c ON c.corrects = k.id
+		),
+		final AS (
+		  SELECT root, outcome, duration_ms FROM (
+		    SELECT *, row_number() OVER (PARTITION BY root ORDER BY depth DESC, id DESC) AS last FROM chain
+		  ) WHERE last = 1
+		),
+		attempts AS (
+		  SELECT e.test, coalesce(f.duration_ms, CASE WHEN f.root IS NULL THEN e.duration_ms END) AS duration_ms,
+		         row_number() OVER (
+		           PARTITION BY e.target, e.test, e.actor, e.method, e.job, e.attempt
+		           ORDER BY CASE coalesce(f.outcome, e.outcome) WHEN 'fail' THEN 3 WHEN 'error' THEN 3 WHEN 'pass' THEN 2
+		                      WHEN 'blocked' THEN 1 ELSE 0 END DESC,
+		                    e.seq DESC, e.ord DESC
+		         ) AS rank
+		  FROM executions e LEFT JOIN final f ON f.root = e.id
 		)
 		SELECT a.test, count(*) AS reruns, coalesce(sum(a.duration_ms), 0) AS lost, sum(a.duration_ms IS NULL) AS unknown
-		FROM attempts a
-		WHERE a.rank = 1 AND EXISTS (
-		  SELECT 1 FROM results n JOIN batches nb ON nb.id = n.batch
-		  WHERE n.target = a.target AND n.test = a.test AND n.actor = a.actor AND n.method = a.method
-		    AND nb.job = a.job AND n.attempt > a.attempt AND n.corrects IS NULL
-		)
+		FROM attempts a WHERE a.rank = 1
 		GROUP BY a.test
 	`),
 	automated: sql<{ project: number }, { case_id: number }>(

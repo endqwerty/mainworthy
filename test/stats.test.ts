@@ -217,6 +217,26 @@ describe("what a flip and a rerun are (review of #461)", () => {
 		expect(stats({ of: "flaky", days: 1 })).toMatchObject({ tests: 3 });
 	});
 
+	test("a correction sent with a later attempt still leaves the first attempt repeated (verifier, round 2)", () => {
+		for (const batchAttempt of [1, 2, 3]) {
+			h = harness({ unlinked: "track" });
+			const first = ciReport({ commit: "aaaa0001", n: 1, fail: { 0: "socket hang up" } });
+			h.call("report", { ...first, results: first.results.map((r) => ({ ...r, durationMs: 10 })) });
+			const failed = lastResult("T-1");
+			const second = ciReport({ commit: "aaaa0001", n: 1, attempt: 2 });
+			h.call("report", { ...second, results: second.results.map((r) => ({ ...r, durationMs: 20 })) });
+			const fix = ciReport({ commit: "aaaa0001", n: 1, attempt: batchAttempt });
+			h.call("report", { ...fix, results: fix.results.map((r) => ({ ...r, durationMs: 999, corrects: failed })) });
+			// The correction stands in place of the attempt it corrects, its time included, whatever attempt it came with.
+			expect([batchAttempt, stats({ of: "reruns", days: 1 })]).toMatchObject([
+				batchAttempt,
+				{ reruns: 1, lostMs: 999 },
+			]);
+			h.close();
+		}
+		h = harness();
+	});
+
 	test("two results of one attempt and then a rerun are one rerun, timed by the result that attempt counted", () => {
 		h = harness({ unlinked: "track" });
 		const first = ciReport({ commit: "aaaa0001", n: 1, fail: { 0: "socket hang up" } });
