@@ -95,7 +95,7 @@ Upload a failing result for the case with these steps.
 	mainworthy report  scratch @ 1111111  (quickstart)
 	  1 results   0 pass   1 fail   0 skip  (R-1)
 	  1 new   Q-2 "expected $90.00, got $100.00"   (1 test)
-	  0 tests have no case (tracked)
+	  0 results had no case or version when recorded
 	  basis: exact 1
 	mainworthy gate    blocked: 1 failure unexplained, 1 question open
 	```
