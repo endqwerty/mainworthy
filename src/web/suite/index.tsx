@@ -995,6 +995,8 @@ export function SuiteScreen() {
 			? JSON.stringify({ body, tags: cleaned.tags, covers: cleaned.covers, folder: snapshot.folder })
 			: fingerprint;
 		let moreToSend = false;
+		// Set once the server has answered the write. From then on a failure is not a refusal of the write (issue #381).
+		let reply: Api["propose"]["reply"] | null = null;
 		const task = (async () => {
 			try {
 				let after = snapshot.after;
@@ -1055,7 +1057,6 @@ export function SuiteScreen() {
 										(requirement) => ({ op: "cover", case: source.ref ?? "", requirement, on: false }) satisfies Edit,
 									),
 							];
-				let reply: Api["propose"]["reply"] | null = null;
 				// The reply was given to the save of unknown fate, and is read now (`command`), not just received.
 				let recorded = false;
 				if (recovered) {
@@ -1302,7 +1303,9 @@ export function SuiteScreen() {
 				void invalidateProject(project);
 			} catch (error) {
 				if (!sessionCurrent(owner) || !mayWrite(snapshot.id, !draftStored)) return;
-				if (error instanceof ApiError) forgetRequest(snapshot.id);
+				// Only a refusal of the write forgets its command. After the write, the draft keeps it, and the next save asks
+				// what the server recorded (`command`) instead of creating again.
+				if (error instanceof ApiError && !reply) forgetRequest(snapshot.id);
 				setStatus(
 					`${error instanceof Error ? error.message : "Could not record this version"}. Your draft is kept on this device.`,
 				);
