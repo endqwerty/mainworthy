@@ -384,6 +384,24 @@ describe("parseJUnit recovery and boundaries", () => {
 		expect(ResultIn.safeParse(nested.results[0]).success).toBe(true);
 	});
 
+	test("a large inherited file is not copied in full for every displayed key", () => {
+		const file = `${"f".repeat(982)}🦊${"x".repeat(2_000_000)}`;
+		const cases = Array.from({ length: 4000 }, (_, index) => `<testcase name="case ${index}"/>`).join("");
+		const xml = `<testsuite file="${file}">${cases}</testsuite>`;
+		const start = performance.now();
+		const parsed = parseJUnit(xml);
+		expect(performance.now() - start).toBeLessThan(500);
+		expect(parsed.results).toHaveLength(4000);
+		expect(parsed.results[0]).toMatchObject({
+			test: { name: "case 0", file: "f".repeat(500) },
+			outcome: "pass",
+		});
+		const keys = parsed.results.map((item) => ("key" in item.test ? item.test.key : ""));
+		expect(keys[0]?.split("#")[0]).toBe("f".repeat(982));
+		expect(keys[0]).toHaveLength(999);
+		expect(new Set(keys).size).toBe(4000);
+	});
+
 	test("comma decimals remain supported independently of runner fixtures", () => {
 		expect(parseJUnit('<testsuite><testcase name="one" time="0,015"/></testsuite>').results).toEqual([
 			result("one", "one", "pass", { durationMs: 15 }),
