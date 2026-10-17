@@ -41,7 +41,7 @@ import {
 	updateTotp,
 	userHandleOf,
 } from "./credentials.ts";
-import { hasAdminGrant, revokeTokensOf, type SignedIn } from "./identity.ts";
+import { hasAdminGrant, providerVouches, revokeTokensOf, type SignedIn } from "./identity.ts";
 import {
 	type InvitationPurpose,
 	type InvitationRow,
@@ -686,10 +686,15 @@ export function removeCredential(app: App, id: number): { removed: true; session
 			"this instance requires a second factor for admins with a password; remove the password first to use only passkeys",
 		);
 	const passwordWorks = !requiresFactor || liveTotp(app.db, row.actor) !== null;
-	const identityWorks = !requiresFactor || app.config.oidc?.mfa === true;
+	// An identity is a way in only at the provider the instance is configured with now.
+	const provider = app.config.oidc ? `${app.config.oidc.issuer}#` : null;
+	const identityWorks = (held: CredentialRow): boolean =>
+		provider !== null && held.handle?.startsWith(provider) === true && (!requiresFactor || providerVouches(app));
 	const waysIn = liveCredentials(app.db, row.actor).filter(
 		(held) =>
-			held.kind === "passkey" || (held.kind === "password" && passwordWorks) || (held.kind === "oidc" && identityWorks),
+			held.kind === "passkey" ||
+			(held.kind === "password" && passwordWorks) ||
+			(held.kind === "oidc" && identityWorks(held)),
 	);
 	if (row.kind === "passkey" && !passwordWorks && waysIn.length <= 1)
 		throw invalid(
@@ -897,7 +902,7 @@ async function acceptByHash(
 		const now = judge(app.db);
 		if (!now.ok) return now;
 		const { invitation, person, registration } = now;
-		const vouched = input.identity !== null && app.config.oidc?.mfa === true;
+		const vouched = input.identity !== null && providerVouches(app);
 		if (!registration && !vouched && app.config.requireAdminMfa && hasAdminGrant(app.db, person.id))
 			return no("second-factor-required");
 		// Who the browser holds, on committed rows and before anything is written: nothing else writes while this
@@ -1069,7 +1074,7 @@ export async function finishOidcSignIn(
 		const row = oidcByHandle(app.db, handle);
 		const person = row ? app.db.get(Q.personById, { id: row.actor }) : null;
 		if (!row || !person) return no("unknown-identity");
-		if (app.config.requireAdminMfa && hasAdminGrant(app.db, person.id) && app.config.oidc?.mfa !== true)
+		if (app.config.requireAdminMfa && hasAdminGrant(app.db, person.id) && !providerVouches(app))
 			return no("second-factor-required");
 		const opened = openOn(app, row, cookie, about);
 		if (!opened) throw new Stop(no("changed-meanwhile"));

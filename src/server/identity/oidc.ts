@@ -56,6 +56,8 @@ const ceremonies = new WeakMap<App, Map<string, Kept>>();
 type Library = typeof import("openid-client");
 type Held = { client: Library; configuration: Configuration };
 const configurations = new WeakMap<App, Promise<Held>>();
+/** How many times the ceremonies were cleared: a finish already past the map compares it when the provider answers. */
+const generations = new WeakMap<App, number>();
 
 /** The provider's configuration, discovered once; a failed discovery is tried again by the next ceremony. */
 function configurationOf(app: App): Promise<Held> {
@@ -152,6 +154,7 @@ export async function finishOidc(
 	if (state === null || !kept || app.now() >= kept.deadline) return { ok: false, why: "challenge" };
 	if (input.browser === null || kept.browser !== input.browser) return { ok: false, why: "context" };
 	ceremonies.get(app)?.delete(state);
+	const generation = generations.get(app) ?? 0;
 	try {
 		const { client, configuration } = await configurationOf(app);
 		const tokens = await client.authorizationCodeGrant(configuration, new URL(`${input.redirect}?${params}`), {
@@ -160,6 +163,8 @@ export async function finishOidc(
 			expectedNonce: kept.nonce,
 			idTokenExpected: true,
 		});
+		// An import while the code was exchanged ended this ceremony too, though it was no longer in the map.
+		if ((generations.get(app) ?? 0) !== generation) return { ok: false, why: "challenge" };
 		const claims = tokens.claims();
 		if (!claims) return { ok: false, why: "provider" };
 		const text = (value: unknown): string | null =>
@@ -183,4 +188,5 @@ export async function finishOidc(
 /** Ends every ceremony under way: an import replaced every person a ceremony could name. */
 export function clearOidc(app: App): void {
 	ceremonies.delete(app);
+	generations.set(app, (generations.get(app) ?? 0) + 1);
 }

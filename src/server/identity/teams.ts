@@ -4,8 +4,8 @@ import type { App } from "../kernel/app.ts";
 import { type Actor, allProjects } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
-import { hasAdminGrant } from "./identity.ts";
-import { endPasswordSessions } from "./sessions.ts";
+import { hasAdminGrant, providerVouches } from "./identity.ts";
+import { endSessionsWithoutFactor } from "./sessions.ts";
 
 type Team = { id: number; name: string; created_at: number };
 type Grant = { project: number; can: string };
@@ -178,7 +178,8 @@ export function manageTeams(app: App, by: Actor, org: number, input: TeamInput) 
 		}
 	}
 	for (const [actor, wasAdmin] of adminsBefore)
-		if (changed && !wasAdmin && hasAdminGrant(db, actor)) endPasswordSessions(db, actor, app.now());
+		if (changed && !wasAdmin && hasAdminGrant(db, actor))
+			endSessionsWithoutFactor(db, actor, app.now(), providerVouches(app));
 	if (changed) db.run(Q.event, { team: team.id, by: by.id, at: app.now(), action, person, project, can });
 	return { team: name, changed };
 }

@@ -64,6 +64,11 @@ organisation member register a provider until 1.6.11 (CVE-2026-53515).
 - **Admins.** With `MAINWORTHY_REQUIRE_ADMIN_MFA`, an admin signs in through the provider only when
   `MAINWORTHY_OIDC_MFA=true`, which is the operator's word that the provider asks everybody for a second factor.
   Mainworthy does not read `amr` or `acr`, because providers fill them inconsistently.
+  Without that word, a start with the rule, and becoming an admin, end an admin's sessions opened through the
+  provider, as they end password sessions (`endSessionsWithoutFactor`). The independent review found the first
+  build ending only password sessions.
+- **A way in is a way in now.** When removing a credential, an `oidc` row counts only if its issuer is the
+  provider configured now. With the provider gone or replaced, the last password or passkey stays.
 
 ## Not done here
 
