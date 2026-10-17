@@ -21,6 +21,27 @@ function clearRevision(): string {
 	}
 }
 let cleared = clearRevision();
+// Authentication changes replace the shared cookie, while same-actor drafts and pending files keep their UI owner.
+// The local revision also invalidates requests when storage reads work but publishing fails.
+const authenticationKey = "mainworthy:auth-generation";
+let authenticationRevision = 0;
+function sharedAuthentication(): string | null {
+	try {
+		return localStorage.getItem(authenticationKey) ?? "";
+	} catch {
+		return null;
+	}
+}
+export const authenticationGeneration = () => ({ revision: authenticationRevision, shared: sharedAuthentication() });
+export const authenticationUnchanged = (held: ReturnType<typeof authenticationGeneration>): boolean =>
+	held.revision === authenticationRevision && held.shared === sharedAuthentication();
+export function publishAuthentication(): void {
+	authenticationRevision++;
+	try {
+		localStorage.setItem(authenticationKey, String(crypto.getRandomValues(new Uint32Array(4))));
+	} catch {}
+}
+
 export const sessionPersonKey = "mainworthy:session-person";
 export type DeviceSession = { actorId: ActorId; revision: number; cleared: string };
 

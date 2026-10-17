@@ -516,7 +516,9 @@ A session ends after 14 days without use and after 90 days in any case. It also 
 
 Each of these sends you back to the sign-in page. [Configuration](./configuration.md#variables-the-server-reads) says how to change the two lifetimes.
 
-A late reply to a session check or signed-in request does not end a newer sign-in or replace its session details. This also applies when the same person signs in again.
+After a tab processes a successful sign-in, replies to earlier session checks and signed-in requests are discarded. This also protects another open tab when the same person signs in again and this site's browser storage is available. That tab keeps its drafts, run notes and pending attachments. Signing in as somebody else still returns the other tab to the sign-in page. If repeated sign-ins interrupt both startup session checks, **Reconnect** reads the session again.
+
+The browser can replace its session cookie before the sign-in tab processes the reply. Cross-tab protection begins after that reply is processed. Without browser storage, the protection applies within each tab. Overlapping sign-ins still follow the browser's cookie arrival order.
 
 The owner's token comes from the server. If you set `MAINWORTHY_OWNER_TOKEN`, that value is the token. If you did not, the server prints one on its first start:
 
