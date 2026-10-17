@@ -27,7 +27,9 @@ import { type Instance, open, start } from "../src/server/start.ts";
 import { pollDefectHolds } from "../src/server/tracker-holds.ts";
 import type { TrackerPort } from "../src/server/trackers/port.ts";
 import { deliverTrackerRequests } from "../src/server/trackers/requests.ts";
+import { archiveRoutes } from "../src/surfaces/archive.ts";
 import { PATIENCE, type Patience, sessionOf } from "../src/surfaces/http.ts";
+import { mcpRoute } from "../src/surfaces/mcp.ts";
 import { fakeSmtp } from "./mail-support.ts";
 import { authenticator } from "./people-support.ts";
 
@@ -57,7 +59,14 @@ function boot(
 	mode: Config["mode"],
 	ownerToken: string | null = null,
 	existing?: string,
-	options: { owner?: string; host?: string; patience?: Patience; publicUrl?: string } = {},
+	options: {
+		owner?: string;
+		host?: string;
+		patience?: Patience;
+		publicUrl?: string;
+		surfaces?: boolean;
+		oidc?: Config["oidc"];
+	} = {},
 ): Instance {
 	const dataDir = existing ?? mkdtempSync(join(tmpdir(), "mainworthy-http-"));
 	if (!existing) dirs.push(dataDir);
@@ -70,11 +79,15 @@ function boot(
 			owner: options.owner ?? "robin",
 			ownerToken,
 			...(options.publicUrl ? { publicUrl: options.publicUrl } : {}),
+			...(options.oidc ? { oidc: options.oidc } : {}),
 			commit: null,
 			...SESSION_LIFETIMES,
 			proxy: null,
 		},
-		() => ({ ui: null }),
+		(app, owner) => ({
+			ui: null,
+			...(options.surfaces ? { routes: { "/mcp": mcpRoute(app), ...archiveRoutes(app, owner) } } : {}),
+		}),
 		{
 			...(options.patience ? { patience: options.patience } : {}),
 			trackerPort: {
@@ -1355,52 +1368,174 @@ describe("server mode", () => {
 		expect((await fetch(`${instance.url}/api/session`, { headers: script })).status).toBe(200);
 	});
 
-	test("a request that names who it believes it is, is refused when the session is somebody else's", async () => {
+	test("a forgotten actor's name cannot let an old tab write as its replacement", async () => {
 		const instance = boot("server", "owner-secret-0123456789");
-		const owner = bearer("owner-secret-0123456789");
-		const made = await post<{ token: string }>(
-			instance,
-			"/api/admin",
-			{ do: "token.create", actor: "bob", kind: "human", can: ["read", "produce"], project: "scratch" },
-			owner,
+		const owner = new Client({ url: instance.url, project: "scratch", token: "owner-secret-0123456789" });
+		const grant = () =>
+			owner.call("admin", {
+				do: "token.create",
+				actor: "alice",
+				kind: "human",
+				can: ["read", "produce"],
+				project: "scratch",
+			});
+		const original = z.object({ token: z.string() }).parse(await grant());
+		const originalSession = await new Client({
+			url: instance.url,
+			project: "scratch",
+			token: original.token,
+		}).session();
+		await owner.call("admin", { do: "actor.forget", name: "alice" });
+		const replacement = z.object({ token: z.string() }).parse(await grant());
+		const replacementSession = await new Client({
+			url: instance.url,
+			project: "scratch",
+			token: replacement.token,
+		}).session();
+		expect(originalSession.actor).toBe("alice");
+		expect(replacementSession.actor).toBe("alice");
+		expect(replacementSession.actorId).not.toBe(originalSession.actorId);
+		const login = await post(instance, "/api/login", { token: replacement.token });
+		const cookie = (login.cookie ?? "").split(";")[0] ?? "";
+		const create = { edits: [{ op: "create", outline: "Private text from the old tab" }] };
+		for (const actor of ["alice", String(originalSession.actorId)]) {
+			const refused = await post(instance, "/api/p/scratch/propose", create, { cookie, "x-mainworthy-as": actor });
+			expect(refused.status).toBe(401);
+			expect(refused.body).toMatchObject({
+				ok: false,
+				error: { code: "unauthenticated", message: "the session now belongs to another person; sign in again" },
+			});
+		}
+		expect((await owner.call("find", {})).count).toBe(0);
+		const accepted = await post(instance, "/api/p/scratch/propose", create, {
+			cookie,
+			"x-mainworthy-as": String(replacementSession.actorId),
+		});
+		expect(accepted.status).toBe(200);
+		expect((await owner.call("find", {})).count).toBe(1);
+	});
+
+	test("every session route refuses a changed actor or a noncanonical actor id", async () => {
+		const instance = boot("server", "owner-secret-0123456789", undefined, {
+			surfaces: true,
+			publicUrl: "https://mainworthy.example",
+			oidc: {
+				issuer: "https://identity.example",
+				clientId: "example",
+				clientSecret: "example",
+				name: "Example",
+				mfa: false,
+			},
+		});
+		const owner = new Client({ url: instance.url, project: "scratch", token: "owner-secret-0123456789" });
+		const made = z.object({ token: z.string() }).parse(
+			await owner.call("admin", {
+				do: "token.create",
+				actor: "bob",
+				kind: "human",
+				can: ["read", "produce"],
+				project: "scratch",
+			}),
 		);
-		const bob = bearer(made.body.ok ? made.body.result.token : "");
-		const create = { edits: [{ op: "create", outline: "Typed by Alice" }] };
-		// A page that was opened as Alice sends her text; the browser's session has become Bob's since.
-		const wrong = await post(instance, "/api/p/scratch/propose", create, { ...bob, "x-mainworthy-as": "alice" });
-		expect(wrong.status).toBe(401);
-		expect(wrong.body).toMatchObject({ ok: false, error: { code: "unauthenticated" } });
-		const found = await post<{ count: number }>(instance, "/api/p/scratch/find", {}, bob);
-		expect(found.body.ok && found.body.result.count).toBe(0);
-		// Reads are refused the same way: the page would otherwise show Bob's view as Alice's.
-		expect((await post(instance, "/api/p/scratch/find", {}, { ...bob, "x-mainworthy-as": "alice" })).status).toBe(401);
-		// So is every other route that takes a session (who am I, the change stream), and a name that cannot be read.
-		const as = (name: string) => ({ headers: { ...bob, "x-mainworthy-as": name } });
-		expect((await fetch(`${instance.url}/api/session`, as("alice"))).status).toBe(401);
-		expect((await fetch(`${instance.url}/api/p/scratch/events`, as("alice"))).status).toBe(401);
-		expect((await fetch(`${instance.url}/api/session`, as("%E0%A4%A"))).status).toBe(401);
-		expect((await post(instance, "/api/p/scratch/find", {}, { ...bob, "x-mainworthy-as": "%E0%A4%A" })).status).toBe(
-			401,
+		const bob = bearer(made.token);
+		const { actorId } = await new Client({ url: instance.url, project: "scratch", token: made.token }).session();
+		const wrongId = String((await owner.session()).actorId);
+		const id = String(actorId);
+		const guarded: { method: string; path: string; body?: unknown }[] = [
+			...OP_LIST.map((op) => ({
+				method: "POST",
+				path: op.scope === "instance" ? `/api/${op.name}` : `/api/p/scratch/${op.name}`,
+			})),
+			{ method: "GET", path: "/api/session" },
+			{ method: "GET", path: "/api/p/scratch/events" },
+			{ method: "POST", path: "/api/account/password" },
+			{ method: "POST", path: "/api/login/oidc", body: { link: true } },
+			{ method: "POST", path: "/mcp" },
+			{ method: "GET", path: "/api/export" },
+			{ method: "POST", path: "/api/import" },
+		];
+		for (const actor of [
+			wrongId,
+			"",
+			"bob",
+			"%E0%A4%A",
+			`0${id}`,
+			`+${id}`,
+			`${id}.0`,
+			`${id}e0`,
+			`0x${actorId.toString(16)}`,
+			`%${id.charCodeAt(0).toString(16)}${id.slice(1)}`,
+			"undefined",
+			"NaN",
+		]) {
+			for (const route of guarded) {
+				const response = await fetch(`${instance.url}${route.path}`, {
+					method: route.method,
+					headers: { ...bob, "x-mainworthy-as": actor, "content-type": "application/json" },
+					...(route.method === "POST" ? { body: JSON.stringify(route.body ?? {}) } : {}),
+				});
+				expect({ actor, route: route.path, status: response.status }).toEqual({
+					actor,
+					route: route.path,
+					status: 401,
+				});
+				await response.body?.cancel();
+			}
+		}
+		expect((await owner.call("find", {})).count).toBe(0);
+		for (const headers of [bob, { ...bob, "x-mainworthy-as": id }]) {
+			expect((await fetch(`${instance.url}/api/session`, { headers })).status).toBe(200);
+			expect((await post(instance, "/api/p/scratch/find", {}, headers)).status).toBe(200);
+		}
+		expect(
+			(
+				await post(
+					instance,
+					"/api/p/scratch/propose",
+					{
+						edits: [{ op: "create", outline: "Typed by Bob" }],
+					},
+					{ ...bob, "x-mainworthy-as": id },
+				)
+			).status,
+		).toBe(200);
+		// Even a name consisting only of digits is a name, not the actor's id.
+		const numeric = z.object({ token: z.string() }).parse(
+			await owner.call("admin", {
+				do: "token.create",
+				actor: "999",
+				kind: "human",
+				can: ["read"],
+				project: "scratch",
+			}),
 		);
-		expect((await fetch(`${instance.url}/api/session`, as("bob"))).status).toBe(200);
-		// The right name, and no name at all (a script, the CLI), go through. The name is percent-encoded, so one
-		// that a header could not carry as it is still matches.
-		expect((await post(instance, "/api/p/scratch/propose", create, { ...bob, "x-mainworthy-as": "bob" })).status).toBe(
-			200,
-		);
-		expect((await post(instance, "/api/p/scratch/find", {}, bob)).status).toBe(200);
-		const zoe = await post<{ token: string }>(
-			instance,
-			"/api/admin",
-			{ do: "token.create", actor: "zoe@qa", kind: "human", can: ["read"], project: "scratch" },
-			owner,
-		);
-		expect(zoe.body).toMatchObject({ ok: true });
-		const named = {
-			...bearer(zoe.body.ok ? zoe.body.result.token : ""),
-			"x-mainworthy-as": encodeURIComponent("zoe@qa"),
-		};
-		expect((await post(instance, "/api/p/scratch/find", {}, named)).status).toBe(200);
+		const numericSession = await new Client({ url: instance.url, project: "scratch", token: numeric.token }).session();
+		expect(
+			(
+				await post(
+					instance,
+					"/api/p/scratch/find",
+					{},
+					{
+						...bearer(numeric.token),
+						"x-mainworthy-as": "999",
+					},
+				)
+			).status,
+		).toBe(401);
+		expect(
+			(
+				await post(
+					instance,
+					"/api/p/scratch/find",
+					{},
+					{
+						...bearer(numeric.token),
+						"x-mainworthy-as": String(numericSession.actorId),
+					},
+				)
+			).status,
+		).toBe(200);
 	});
 
 	test("nothing works without a token; the owner token signs in; a wrong one does not", async () => {
