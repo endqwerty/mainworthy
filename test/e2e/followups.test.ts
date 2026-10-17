@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
 import { Slot } from "../../src/web/runs/models.ts";
-import { browserAvailable, eventually, launchBrowser, openPage, startServer } from "./support.ts";
+import { answerWhenRead, browserAvailable, eventually, launchBrowser, openPage, startServer } from "./support.ts";
 
 for (const refusal of ["request", "changed evidence"]) {
 	test.skipIf(!browserAvailable)(
@@ -59,7 +59,9 @@ for (const refusal of ["request", "changed evidence"]) {
 					}
 					await route.continue();
 				});
-				await page.keyboard.press(refusal === "request" ? "i" : "a");
+				// A proposal is answered only once the page has read it (R3C-1): the key is refused until then.
+				if (refusal === "request") await page.keyboard.press("i");
+				else await answerWhenRead(page, first.q, "a");
 				await page.locator(`[data-current-question="${next.q}"]`).waitFor();
 				await eventually(
 					async () => requests,

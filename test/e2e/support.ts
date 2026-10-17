@@ -292,11 +292,13 @@ export async function openPage(
 		colorScheme: "light",
 	});
 	routesWaitForInterception(context);
+	throttleRenderers(context);
 	if (signedIn) {
 		const opened = await context.request.post(`${server.url}/api/login`, { data: as ?? { token: server.token } });
 		if (as && !opened.ok()) throw new Error(`The e2e sign-in of ${as.name} was refused: ${opened.status()}`);
 	}
 	const page = await context.newPage();
+	await throttled(page);
 	const errors: string[] = [];
 	const dialogs: string[] = [];
 	let loads = 0;
@@ -334,6 +336,21 @@ export async function openPage(
 			if (!lent) await ownedBrowser.close();
 		},
 	};
+}
+/**
+ * `MAINWORTHY_E2E_CPU_THROTTLE=n` runs every page of a test n times slower, as a loaded machine does, so that a
+ * test that fails only beside others can be made to fail alone (issues #406, #322, #411). Off unless set.
+ */
+const THROTTLE = Number(process.env.MAINWORTHY_E2E_CPU_THROTTLE ?? "");
+const slowed = new WeakSet<Page>();
+async function throttled(page: Page): Promise<void> {
+	if (!(THROTTLE > 1) || slowed.has(page)) return;
+	slowed.add(page);
+	const cdp = await page.context().newCDPSession(page);
+	await cdp.send("Emulation.setCPUThrottlingRate", { rate: THROTTLE });
+}
+function throttleRenderers(context: BrowserContext): void {
+	if (THROTTLE > 1) context.on("page", (page) => void throttled(page).catch(() => {}));
 }
 /**
  * Gives the page an authenticator that Chromium keeps in memory and that confirms the person by itself, so a
@@ -391,21 +408,27 @@ export async function interceptionLive(page: Page): Promise<void> {
 	const probe = (url: URL) => url.searchParams.get("interception") === id;
 	const route = unwrappedRoute.get(page) ?? page.route.bind(page);
 	const end = Date.now() + 10_000;
+	// What the probes met, for the error: a reply the server gave means the request went past the interceptor; a
+	// probe that did not answer means the page did not run it.
+	const met = { probes: 0, served: 0, failed: 0 };
 	try {
 		await route(probe, (route) => route.fulfill({ status: 204, headers: { "x-mainworthy-e2e": "intercepted" } }));
 		while (Date.now() < end) {
-			const intercepted = await Promise.race([
+			met.probes++;
+			const outcome = await Promise.race([
 				page.evaluate(
 					(url) =>
 						fetch(url).then(
-							(reply) => reply.headers.get("x-mainworthy-e2e") === "intercepted",
-							() => false,
+							(reply) => (reply.headers.get("x-mainworthy-e2e") === "intercepted" ? "intercepted" : "served"),
+							() => "failed",
 						),
 					`/healthz?interception=${id}`,
 				),
-				Bun.sleep(Math.max(0, end - Date.now())).then(() => false),
+				Bun.sleep(Math.max(0, end - Date.now())).then(() => "unanswered" as const),
 			]);
-			if (intercepted) return;
+			if (outcome === "intercepted") return;
+			if (outcome === "served") met.served++;
+			if (outcome === "failed") met.failed++;
 		}
 	} catch {
 		// The page closed or went to another document meanwhile. Neither has a key waiting ahead of the switch.
@@ -413,7 +436,9 @@ export async function interceptionLive(page: Page): Promise<void> {
 	} finally {
 		await page.unroute(probe).catch(() => {});
 	}
-	throw new Error(`Interception did not start on ${page.url()} within 10 s of installing a route`);
+	throw new Error(
+		`Interception did not start on ${page.url()} within 10 s of installing a route: ${met.probes} probes, ${met.served} answered by the server, ${met.failed} failed, the rest unanswered`,
+	);
 }
 const unwrappedRoute = new WeakMap<Page, Page["route"]>();
 /** Makes installing a route on the context, or on any page it has or opens, wait until the route is in force. */
@@ -475,6 +500,43 @@ export async function eventually<T>(read: () => Promise<T>, accepts: (value: T) 
 		await Bun.sleep(40);
 		value = await read();
 	}
-	if (!accepts(value)) throw new Error("The expected server state did not arrive");
+	if (!accepts(value))
+		throw new Error(`The expected server state did not arrive within 10 s. The last read was ${shown(value)}`);
 	return value;
+}
+/** A value in an error message: short enough to read, long enough to say what the state was. */
+function shown(value: unknown): string {
+	const text = typeof value === "string" ? value : (JSON.stringify(value) ?? String(value));
+	return text.length > 400 ? `${text.slice(0, 400)}…` : text;
+}
+/**
+ * Presses the answer key for proposal `q` once the page has read the proposal, and again when the page refused it.
+ * A proposal is answered only while its card says it is read (`data-proposal-read="ready"`, `src/web/queue/
+ * evidence.tsx`), and the page reads it again on its own: once when its change stream opens, right after the
+ * edits first appear, and after every change to a case it touches. The card is marked read between those reads,
+ * so a key that follows the mark by a few milliseconds can still land in a read and be refused with "Still
+ * reading the proposal" (issues #322 and #411: 2 of 56 runs beside sixteen busy loops). A person told so presses
+ * again, and so does this. Whether a press was refused is read the way the page decides it, from the card at the
+ * moment of the key (`proposalReadMessage`), not guessed from how long a request takes.
+ */
+export async function answerWhenRead(page: Page, q: string, key: string): Promise<void> {
+	for (let attempt = 1; attempt <= 5; attempt++) {
+		await page.locator(`[data-proposal-evidence="${q}"][data-proposal-read="ready"]`).waitFor();
+		await page.evaluate((q) => {
+			const read = () =>
+				document.querySelector<HTMLElement>(`[data-proposal-evidence="${CSS.escape(q)}"]`)?.dataset.proposalRead;
+			window.addEventListener("keydown", () => Reflect.set(window, "mainworthyReadAtKey", read() === "ready"), {
+				capture: true,
+				once: true,
+			});
+		}, q);
+		const sent = page.waitForRequest((request) => request.url().endsWith("/decide"));
+		await page.keyboard.press(key);
+		if (await page.evaluate((): unknown => Reflect.get(window, "mainworthyReadAtKey"))) {
+			await sent;
+			return;
+		}
+		sent.catch(() => {});
+	}
+	throw new Error(`${key} was refused 5 times while the page read ${q} again`);
 }
