@@ -65,7 +65,10 @@ test.skipIf(!browserAvailable)(
 				document.head.append(script);
 			});
 			expect(await page.evaluate((): unknown => Reflect.get(window, "mainworthyInjected"))).toBeUndefined();
-			expect(await violations()).toEqual([{ directive: "script-src-elem", blocked: "inline" }]);
+			// The browser reports the refusal with an event of its own, after the script was refused: wait for it.
+			expect(await eventually(violations, (seen) => Array.isArray(seen) && seen.length > 0)).toEqual([
+				{ directive: "script-src-elem", blocked: "inline" },
+			]);
 		} finally {
 			await browser.close();
 			await server.stop();

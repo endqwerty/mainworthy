@@ -1,7 +1,16 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
 import { Slot } from "../../src/web/runs/models.ts";
-import { answer, browserAvailable, eventually, fetched, openPage, type Server, startServer } from "./support.ts";
+import {
+	answer,
+	answerWhenRead,
+	browserAvailable,
+	eventually,
+	fetched,
+	openPage,
+	type Server,
+	startServer,
+} from "./support.ts";
 
 const check = test.skipIf(!browserAvailable);
 const setupCases = (server: Server, count = 3) =>
@@ -441,9 +450,7 @@ for (const surface of ["case", "queue"])
 						expect((await server.api("get", { refs: [proposed.question] }))[0]?.state).toBe("open");
 						gate.release();
 						if (read === "slow") {
-							await page.locator("#detail .diff").waitFor();
-							await page.keyboard.press(answer);
-							await page.keyboard.press(answer);
+							await answerWhenRead(page, proposed.question, answer);
 							await eventually(
 								() => server.api("get", { refs: [proposed.question ?? ""] }),
 								(rows) => rows[0]?.state === "decided",
