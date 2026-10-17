@@ -1519,22 +1519,39 @@ export function restoreLink(
 }
 
 /**
- * Where these tests have failed with a cause in a scope, from the result at `since` on: each test with each
- * environment it failed in, as reported. A newer attempt that passed does not take a failure out of this history.
- * The job is left out, because a sharded pipeline moves a test from one job to another; so is who reported, because
- * a pipeline's token can be replaced. A gate counts pipelines and people, so an agent's failure is left out.
+ * Where these tests have failed with a cause in a scope since the cause first failed on any of `seen`, the targets
+ * a question has seen it on: each test with each environment it failed in, as reported. A newer attempt that passed
+ * does not take a failure out of this history. The job is left out, because a sharded pipeline moves a test from
+ * one job to another; so is who reported, because a pipeline's token can be replaced. A gate counts pipelines and
+ * people, so an agent's failure is left out. Null when none of `seen` holds a failure of the cause.
  */
 export function failedIn(
 	db: Db,
-	input: { project: number; signature: number; scope: string; since: number; tests: ReadonlySet<number> },
-): { test: number; env: string }[] {
-	return db
-		.all(Q.failedWith, { project: input.project, signature: input.signature, since: input.since })
-		.flatMap((row) => {
-			if (!input.tests.has(row.test)) return [];
-			const target = mustTarget(db, row.target);
-			return scopeOf(target, null) === input.scope ? [{ test: row.test, env: target.env }] : [];
-		});
+	input: {
+		project: number;
+		signature: number;
+		scope: string;
+		seen: readonly number[];
+		tests: ReadonlySet<number>;
+	},
+): { test: number; env: string }[] | null {
+	if (input.seen.length === 0) return null;
+	const since = db.allDynamic<{ seq: number | null }>(
+		`SELECT min(seq) AS seq FROM results WHERE signature = ? AND outcome IN ('fail', 'error')
+		 AND target IN (${input.seen.map(() => "?").join(", ")})`,
+		[input.signature, ...input.seen],
+	)[0]?.seq;
+	if (since == null) return null;
+	const targets = new Map<number, TargetRow>();
+	return db.all(Q.failedWith, { project: input.project, signature: input.signature, since }).flatMap((row) => {
+		if (!input.tests.has(row.test)) return [];
+		let target = targets.get(row.target);
+		if (!target) {
+			target = mustTarget(db, row.target);
+			targets.set(row.target, target);
+		}
+		return scopeOf(target, null) === input.scope ? [{ test: row.test, env: target.env }] : [];
+	});
 }
 
 /**
