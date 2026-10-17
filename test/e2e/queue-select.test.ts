@@ -127,18 +127,18 @@ test.skipIf(!browserAvailable)(
 
 			// Select all takes the kind of the question shown; Escape clears; pressing it twice clears too.
 			await page.keyboard.press("*");
-			await bar.getByText("3 unlinked selected").waitFor();
+			await bar.getByText("3 unlinked tests selected").waitFor();
 			await page.keyboard.press("Escape");
 			await bar.waitFor({ state: "detached" });
 			await page.keyboard.press("*");
-			await bar.getByText("3 unlinked selected").waitFor();
+			await bar.getByText("3 unlinked tests selected").waitFor();
 			await page.keyboard.press("*");
 			await bar.waitFor({ state: "detached" });
 
 			// Shift and a box select the range between two rows.
 			await box(u1).click();
 			await box(u3).click({ modifiers: ["Shift"] });
-			await bar.getByText("3 unlinked selected").waitFor();
+			await bar.getByText("3 unlinked tests selected").waitFor();
 			// Linking needs a case for each test, so it is offered for one question at a time.
 			expect(await page.getByRole("button", { name: /Link to a case/ }).isDisabled()).toBe(true);
 			await page.getByRole("button", { name: /Track without a case/ }).click();
@@ -148,6 +148,25 @@ test.skipIf(!browserAvailable)(
 			);
 			expect(submissions).toHaveLength(2);
 			expect(z.object({ all: z.array(z.unknown()) }).parse(submissions[1]).all).toHaveLength(3);
+
+			// Unlinked questions are counted by their tests: those that came with no file share one question, which
+			// is no one file.
+			await server.api("report", {
+				target: { session: "select" },
+				results: [
+					{ test: { key: "bare a", name: "a" }, outcome: "pass" },
+					{ test: { key: "bare b", name: "b" }, outcome: "pass" },
+					{ test: { key: "tests/d.ts::d", file: "tests/d.ts" }, outcome: "pass" },
+				],
+			});
+			const open = (await server.api("inbox", { kind: "map" })).items;
+			expect(open.map((item) => item.title).sort()).toEqual([
+				"1 test in tests/d.ts has no case",
+				"2 tests in (no file) have no case",
+			]);
+			await page.reload();
+			for (const item of open) await box(item.q).click();
+			await bar.getByText("3 unlinked tests selected").waitFor();
 			expect(view.errors).toEqual([]);
 		} finally {
 			await view.close();

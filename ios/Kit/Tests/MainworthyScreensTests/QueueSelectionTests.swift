@@ -47,13 +47,13 @@ struct QueueSelectionTests {
 		screen.toggle(unlinked[0])
 		screen.toggle(failure)
 		#expect(screen.selected == [unlinked[0].ref])
-		#expect(screen.notice?.text == "\(failure.ref) is a failure and the selection is of unlinked: one answer is for one kind.")
+		#expect(screen.notice?.text == "\(failure.ref) is a failure and the selection is of unlinked tests: one answer is for one kind.")
 		#expect(screen.selectable.map(\.ref) == unlinked.map(\.ref))
 		screen.selectAll()
 		#expect(screen.selected == unlinked.map(\.ref))
 		// Linking needs a case for each test, on the question's own page.
 		#expect(screen.sharedChoices.map(\.answer).sorted() == ["create", "track"])
-		#expect(QueueScreen.casesCreated(by: screen.selection) == 4)
+		#expect(screen.selection.unlinkedTests == 4)
 		screen.toggle(unlinked[1])
 		#expect(screen.selected.count == 3 && !screen.selected.contains(unlinked[1].ref))
 		// Another filter or the decided list is another selection.
@@ -81,7 +81,7 @@ struct QueueSelectionTests {
 		#expect(carried.map { $0["q"]?.string } == unlinked.prefix(3).map(\.ref))
 		#expect(carried.map { $0["onEvidence"]?.string } == unlinked.prefix(3).map { Optional($0.evidenceHash) })
 		#expect(carried.allSatisfy { $0["ifOpen"] == true })
-		#expect(screen.notice?.text == "3 unlinked: Track without a case." && screen.notice?.isProblem == false)
+		#expect(screen.notice?.text == "3 unlinked tests: Track without a case." && screen.notice?.isProblem == false)
 		#expect(screen.notice?.undoesAll.map(\.ref) == unlinked.prefix(3).map(\.ref))
 		#expect(screen.selected.isEmpty && screen.isSelecting)
 		#expect(screen.questions.filter { $0.kind == .map }.map(\.ref) == [unlinked[3].ref])
@@ -106,7 +106,7 @@ struct QueueSelectionTests {
 		let track = try #require(screen.sharedChoices.first { $0.answer == "track" })
 		#expect(await screen.answerAll(screen.selection, with: track))
 		let text = try #require(screen.notice?.text)
-		#expect(text.hasPrefix("1 unlinked: Track without a case. Not recorded, read it again: \(first.ref): "))
+		#expect(text.hasPrefix("1 unlinked test: Track without a case. Not recorded, read it again: \(first.ref): "))
 		#expect(screen.notice?.isProblem == true && screen.notice?.undoesAll.map(\.ref) == [unlinked[1].ref])
 		let entry = try #require(screen.outbox.entries.last)
 		#expect(entry.status == "Recorded 1 of 2" && entry.detail.hasPrefix("\(first.ref): Overtaken."))
@@ -154,7 +154,7 @@ struct QueueSelectionTests {
 		transport.offline.withLock { $0 = true }
 		transport.commands.withLock { $0 = [] }
 		#expect(await screen.answerAll(screen.selection, with: track) == false)
-		#expect(screen.notice?.text == "2 unlinked: saved on this device, waiting to send. Open Unsent answers to see the outcome.")
+		#expect(screen.notice?.text == "2 unlinked tests: saved on this device, waiting to send. Open Unsent answers to see the outcome.")
 		#expect(screen.notice?.undoesAll.isEmpty == true && screen.outbox.pendingCount == 2)
 		// Every attempt was of the one saved command: a selection is not sent again for each of its questions.
 		let attempts = try transport.commands.withLock { try $0.map { try JSONDecoder().decode(JSONValue.self, from: $0) } }
@@ -167,7 +167,7 @@ struct QueueSelectionTests {
 		#expect(screen.outbox.pendingCount == 0 && screen.questions.filter { $0.kind == .map }.count == 2)
 	}
 
-	@Test("Create cases says how many cases it makes: every test of each file, not the fifty a question names")
+	@Test("a selection of unlinked questions counts every test of each file, not the fifty a question names")
 	func casesCreated() async throws {
 		let key = try await project()
 		let owner = Live.server()
@@ -191,7 +191,9 @@ struct QueueSelectionTests {
 		screen.select(true)
 		screen.toggle(many)
 		screen.toggle(search)
-		#expect(QueueScreen.casesCreated(by: screen.selection) == 61)
+		#expect(screen.selection.unlinkedTests == 61)
+		// Two questions, counted by their tests: what Create cases makes cases for.
+		#expect(screen.selection.counted == "61 unlinked tests")
 		let create = try #require(screen.sharedChoices.first { $0.answer == "create" })
 		#expect(await screen.answerAll(screen.selection, with: create))
 		let made: JSONValue = try await owner.read("find", in: key, ["in": "tests", "unlinked": true, "limit": 100])

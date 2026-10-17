@@ -150,15 +150,15 @@ final class QueueUITests: XCTestCase {
 		let unlinked = rows.matching(NSPredicate(format: "label CONTAINS 'has no case'"))
 		XCTAssertEqual(unlinked.count, 4)
 		unlinked.element(boundBy: 0).tap()
-		XCTAssertEqual(count.label, "1 unlinked selected")
+		XCTAssertEqual(count.label, "1 unlinked test selected")
 		// A failure is another kind: it says so and stays out.
 		let failure = rows.matching(NSPredicate(format: "label CONTAINS 'expected $90.00'")).firstMatch
 		failure.tap()
 		XCTAssertTrue(app.staticTexts["notice"].waitForExistence(timeout: 5))
 		XCTAssertTrue(app.staticTexts["notice"].label.hasSuffix("one answer is for one kind."), app.staticTexts["notice"].label)
-		XCTAssertEqual(count.label, "1 unlinked selected")
+		XCTAssertEqual(count.label, "1 unlinked test selected")
 		app.buttons["select-all"].tap()
-		XCTAssertEqual(count.label, "4 unlinked selected")
+		XCTAssertEqual(count.label, "4 unlinked tests selected")
 		shot("bulk-selected")
 		app.buttons["bulk-answer"].tap()
 		XCTAssertFalse(app.buttons["bulk-link"].exists)
@@ -168,7 +168,7 @@ final class QueueUITests: XCTestCase {
 		shot("bulk-confirm")
 		confirm.tap()
 		let notice = app.staticTexts["notice"]
-		let recorded = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "4 unlinked: Track without a case."), object: notice)
+		let recorded = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "4 unlinked tests: Track without a case."), object: notice)
 		XCTAssertEqual(XCTWaiter.wait(for: [recorded], timeout: 15), .completed, notice.label)
 		XCTAssertEqual(unlinked.count, 0)
 		shot("bulk-recorded")

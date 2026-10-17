@@ -182,7 +182,10 @@ Answer those one at a time.
 "Select all" takes the questions listed so far. To include the rest, press "More questions" first.
 A selection holds at most 500 questions, the most one answer sends. The status line says how many it left out.
 
-The bar above the list counts the selection. The answers under the evidence apply to the selection.
+The bar above the list counts the selection, such as "3 failures selected". Questions about tests with no case are
+counted by their tests, "9 unlinked tests selected": one question covers the tests of a file, or every test that
+came with no file. A question whose tests cannot be read is answered on its own. The answers under the evidence
+apply to the selection.
 The line above them says when the question shown is not one of the selected questions.
 The queue offers an answer only when every selected question takes it.
 "Link to a case" asks for a case for each test, so answer one question at a time.

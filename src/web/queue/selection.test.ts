@@ -1,22 +1,32 @@
 import { expect, test } from "bun:test";
 import { DECIDE_MAX } from "../../core/ops.ts";
 import { readOnScreen } from "./evidence.tsx";
-import { allOfKind, capped, named, type Row, rangeOf, sharedAnswers, whyNotSelectable } from "./selection.ts";
+import { allOfKind, capped, counted, named, type Row, rangeOf, sharedAnswers, whyNotSelectable } from "./selection.ts";
 
 const failure = (q: string, more: Partial<Row> = {}): Row => ({
 	q,
 	kind: "failure",
 	you: "counts",
 	answers: ["defect", "test", "expected", "flaky", "infra"],
+	evidence: {},
 	...more,
 });
-const unlinked = (q: string): Row => ({ q, kind: "map", you: "counts", answers: ["link", "create", "track"] });
+const unlinked = (q: string, count = 1, file = `tests/${q}.ts`): Row => ({
+	q,
+	kind: "map",
+	you: "counts",
+	answers: ["link", "create", "track"],
+	evidence: { file, tests: [], count },
+});
 
 test("a question joins a selection of its own kind that you may answer", () => {
 	expect(whyNotSelectable(failure("Q-1"), [])).toBeNull();
 	expect(whyNotSelectable(failure("Q-2"), [failure("Q-1")])).toBeNull();
 	expect(whyNotSelectable(unlinked("Q-3"), [failure("Q-1")])).toBe(
 		"Q-3 is unlinked and the selection is of failures: one answer is for one kind.",
+	);
+	expect(whyNotSelectable(failure("Q-1"), [unlinked("Q-3")])).toBe(
+		"Q-1 is a failure and the selection is of unlinked tests: one answer is for one kind.",
 	);
 	expect(whyNotSelectable(failure("Q-4", { you: "forbidden" }), [])).toBe("You cannot settle Q-4.");
 });
@@ -71,12 +81,18 @@ test("a selection is offered the answers every question in it takes, and links o
 
 test("a status line names up to three questions and counts more", () => {
 	expect(named([failure("Q-1"), failure("Q-2"), failure("Q-3")])).toBe("Q-1, Q-2, Q-3");
-	expect(named(["Q-1", "Q-2", "Q-3", "Q-4"].map(unlinked))).toBe("4 unlinked");
+	expect(named(["Q-1", "Q-2", "Q-3", "Q-4"].map((q) => unlinked(q)))).toBe("4 unlinked tests");
 	expect(named([failure("Q-1"), failure("Q-2"), failure("Q-3"), failure("Q-4")])).toBe("4 failures");
 });
 
 test("a question whose content is read on screen before an answer counts is answered alone", () => {
-	const proposal = (q: string): Row => ({ q, kind: "adopt", you: "counts", answers: ["accept", "reject"] });
+	const proposal = (q: string): Row => ({
+		q,
+		kind: "adopt",
+		you: "counts",
+		answers: ["accept", "reject"],
+		evidence: {},
+	});
 	const alone = (row: Row) => row.kind === "adopt";
 	expect(whyNotSelectable(proposal("Q-1"), [], alone)).toBe(
 		"Q-1 is answered on its own: its edits are read on screen before an answer counts.",
@@ -108,4 +124,13 @@ test("a selection holds at most what one decide request takes, in the order it w
 	const { kept, left } = capped(refs);
 	expect([kept.length, kept[0], kept.at(-1), left]).toEqual([DECIDE_MAX, "Q-1", `Q-${DECIDE_MAX}`, 2]);
 	expect(capped(["Q-1", "Q-2"])).toEqual({ kept: ["Q-1", "Q-2"], left: 0 });
+});
+
+test("unlinked questions are counted by their tests, also those that came with no file", () => {
+	expect(counted([unlinked("Q-1", 7), unlinked("Q-2", 2)])).toBe("9 unlinked tests");
+	expect(counted([unlinked("Q-1", 3, "(no file)")])).toBe("3 unlinked tests");
+	expect(counted([unlinked("Q-1")])).toBe("1 unlinked test");
+	expect(counted([failure("Q-1"), failure("Q-2")])).toBe("2 failures");
+	const unread: Row = { ...unlinked("Q-3"), evidence: { file: "tests/a.ts" } };
+	expect(whyNotSelectable(unread, [])).toBe("Q-3 is answered on its own: its tests could not be read.");
 });
