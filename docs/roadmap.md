@@ -51,8 +51,9 @@ candidate features. Persistent offline decisions wait for sound shared decision
 and command semantics. App instance selection and licence screens are deferred
 owner choices; distribution requirements remain separate obligations.
 
-The check still warns above 130 s and fails above 150 s under the conditions in
-`scripts/check-plan.ts`. Under 120 s remains the goal, not the current failure threshold.
+The check warns above 130 s; CI shards warn above 180 s. Elapsed time is advisory by the
+owner's decision 0097. Under 120 s remains the local goal, and
+[issue #77](https://github.com/endqwerty/mainworthy/issues/77) tracks a future timing gate.
 Runner, CLI-start and reader-startup reductions have shipped. Existing native reply
 tests, case field values and policy presets also narrow the work left to do.
 
