@@ -320,6 +320,28 @@ test("runner errors cannot become a passing native upload", () => {
 	}
 });
 
+test("pytest passes only a completed passing call, and a failed exit code needs a failure", () => {
+	const stage = (outcome: string) => ({ outcome, duration: 0.01 });
+	const nodeid = "tests/test.py::test_one";
+	expect(() => parse({ exitcode: 0, tests: [{ nodeid, outcome: "passed", setup: stage("passed") }] })).toThrow(
+		"report.json: pytest test tests/test.py::test_one has no call stage",
+	);
+	expect(
+		parse({
+			exitcode: 0,
+			tests: [{ nodeid, outcome: "passed", setup: stage("passed"), call: stage("skipped") }],
+		}).results.map((result) => result.outcome),
+	).toEqual(["skip"]);
+	expect(
+		parse({ exitcode: 0, tests: [{ nodeid, outcome: "skipped", setup: stage("skipped") }] }).results.map(
+			(result) => result.outcome,
+		),
+	).toEqual(["skip"]);
+	expect(() => parse({ exitcode: 1, tests: [{ nodeid, outcome: "passed", call: stage("passed") }] })).toThrow(
+		"report.json: pytest exited with 1 but no test failed; fix the runner before uploading",
+	);
+});
+
 test("Jest focused and skipped suites keep each assertion's own outcome", () => {
 	for (const status of ["focused", "skipped"]) {
 		const report = jestReport("pending");

@@ -23,6 +23,22 @@ const Report = z.object({
 	),
 });
 
+type Test = z.infer<typeof Report>["tests"][number];
+
+/** A pass needs a completed passing call; a test whose body never ran cannot pass. */
+function resultOf(test: Test): ParsedReport["results"][number]["outcome"] {
+	const { setup, call, teardown } = test;
+	if (test.outcome === "error" || setup?.outcome === "failed" || teardown?.outcome === "failed") return "error";
+	if (test.outcome === "xfailed") return "skip";
+	if (test.outcome === "failed" || call?.outcome === "failed") return "fail";
+	if (!call) {
+		if (setup?.outcome === "skipped") return "skip";
+		throw new Error(`pytest test ${test.nodeid} has no call stage`);
+	}
+	if (call.outcome === "skipped" || test.outcome === "skipped") return "skip";
+	return "pass";
+}
+
 export function parsePytest(value: unknown): ParsedReport {
 	const report = Report.parse(value);
 	if (
@@ -51,16 +67,7 @@ export function parsePytest(value: unknown): ParsedReport {
 				detail: detail || stage.crash?.message,
 			};
 		});
-		const error = test.outcome === "error" || test.setup?.outcome === "failed" || test.teardown?.outcome === "failed";
-		const outcome = error
-			? "error"
-			: test.outcome === "xfailed"
-				? "skip"
-				: test.outcome === "failed" || broken.length
-					? "fail"
-					: test.outcome === "passed" || test.outcome === "xpassed"
-						? "pass"
-						: "skip";
+		const outcome = resultOf(test);
 		results.push(
 			nativeResult({
 				name,
@@ -82,5 +89,7 @@ export function parsePytest(value: unknown): ParsedReport {
 			}),
 		);
 	}
+	if (report.exitcode === 1 && !results.some((result) => result.outcome === "fail" || result.outcome === "error"))
+		throw new Error("pytest exited with 1 but no test failed; fix the runner before uploading");
 	return { results, warnings: [] };
 }

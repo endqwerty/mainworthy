@@ -83,8 +83,12 @@ unlinked native test follows the same project policy as an unlinked JUnit test.
 
 Native reports with unknown statuses, malformed test details, or errors outside
 test executions stop the upload with exit `4`. No files in that command are
-sent. Keep the runner's exit status as a CI check too, since a report cannot
-prove work that the runner omitted. JUnit keeps its existing parser and warnings.
+sent. A pytest test passes only when its call stage ran and passed: a test with
+no call stage (other than one skipped in setup) is refused, a skipped call is a
+skip, and a failed setup or teardown is an error. A pytest report with
+`exitcode` 1 and no failed or errored test is refused too. Keep the runner's
+exit status as a CI check too, since a report cannot prove work that the runner
+omitted. JUnit keeps its existing parser and warnings.
 
 ## Report that no tests are required
 
