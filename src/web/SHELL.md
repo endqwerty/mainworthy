@@ -53,11 +53,11 @@ The shell owns exactly one event stream for the current project. Streams,
 window focus and reconnect invalidate cached reads; edits also invalidate.
 
 For optimistic writes, update `queryClient.setQueryData` synchronously before
-starting the request. Preserve the previous cache and typed input. On error,
-restore the cache and call `setStatus(error.message)`, keeping the input.
-`optimisticWrite({key, update, write})` is available for a single cache; it
-cancels queries, snapshots, patches, rolls back on errors, and invalidates.
-For multiple caches or same-frame keyboard effects, patch manually before call.
+starting the request, and keep each row's value before and after the patch, and
+the typed input. On error, undo only this write's own change against the cache as
+it is now (`undoChange` in `lib/rollback.ts`), never a snapshot from before the
+request: the stream may have shown a newer change since (issue #383). Then call
+`setStatus(error.message)`, keep the input, and invalidate.
 Cancel each affected list's active read before taking its snapshot or patching its
 cache, including a next page that would return its earlier pages too. Leave a first
 read with no cached data running: there is no patch for that reply to replace.
