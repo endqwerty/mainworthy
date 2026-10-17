@@ -1395,6 +1395,33 @@ describe("a commit reported in shards", () => {
 		expect(state(asked.q)).toBe("open");
 	});
 
+	test("a shard that is accepted and not yet applied keeps the answer until it is", () => {
+		const inTx = <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): T =>
+			h.app.db.transaction(() => {
+				const project = findProject(h.app.db, "scratch");
+				if (!project) throw new Error("no project");
+				const ctx = makeCtx(h.app, project, h.owner, true);
+				const out = fn(ctx);
+				stampSeq(ctx);
+				return out;
+			});
+		const cause = "the receipt total is off by one";
+		const two = (commit: string, index: number, only: number[], fail: Record<number, string> = {}) => ({
+			...ciReport({ commit, branch: "fix", pr: 89, n: 6, job: "tests", only, fail }),
+			shard: { index, of: 2 },
+		});
+		h.call("report", two("unapp01a", 1, [0, 1, 2], { 0: cause }));
+		h.call("report", two("unapp01a", 2, [3, 4, 5]));
+		const asked = first(queue().items);
+		decide(asked, { is: "defect" });
+		// Shard 2 of the next commit is accepted, holding a new test that fails with the cause, and is not applied yet.
+		const late = inTx((ctx) => acceptReport(ctx, two("unapp01b", 2, [3, 4, 5], { 3: cause }))).batch;
+		h.call("report", two("unapp01b", 1, [0, 1, 2]));
+		expect(state(asked.q)).toBe("decided");
+		const applied = inTx((ctx) => processBatch(ctx, late.id));
+		expect(applied.questions[0]).toMatchObject({ how: "already decided", q: asked.q });
+	});
+
 	test("a shard's retry counts as that shard", () => {
 		h.call("report", shard("shard15a", 1, [0, 1]));
 		h.call("report", shard("shard15a", 2, [2, 3], { 2: "timed out" }));

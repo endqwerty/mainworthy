@@ -366,7 +366,7 @@ steps:
 ```
 
 A failure question waits for every shard too. Its question closes, or its answer ends, only when the commit's
-shards have all reported. See [decide](./decide.md#when-the-fix-arrives).
+shards have all reported and every report of the commit has been applied. See [decide](./decide.md#when-the-fix-arrives).
 
 ## Give a pipeline its own token
 

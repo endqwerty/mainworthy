@@ -67,9 +67,9 @@ import {
 	runsShowing,
 	shownFailure,
 	slotById,
+	stillArriving,
 	unexplainedIn,
 	unexplainedShown,
-	waitingFor,
 } from "../runs/runs.ts";
 import { caseById, caseRef, proposalById, resolvedOf, scopeFactsSteps } from "../suite/suite.ts";
 import { disputeParties, HANDLERS, runsAbout } from "./kinds.ts";
@@ -1702,8 +1702,8 @@ function passedIn(ctx: Ctx, question: QuestionRow, run: RunRow): { reason: strin
 	const tests = [...listed];
 	// The cheap questions first: they settle the usual report, in which the cause still fails or did not run.
 	if (failsWith(ctx.db, run.id, signature) || !passesAny(ctx.db, run.id, tests)) return null;
-	// A shard that has not reported may hold the cause failing (decision 0092).
-	if (waitingFor(ctx.db, run).length > 0) return null;
+	// A report not yet applied, or a shard that has not reported, may hold the cause failing (decision 0092).
+	if (stillArriving(ctx.db, run)) return null;
 	// Where the cause has failed: every listed test in every environment a pipeline or a person saw it fail with
 	// the cause in this scope, as reported. No point in time bounds it, so no way of raising a question can leave a
 	// failure out; a retry that passed changes nothing.
@@ -1789,9 +1789,9 @@ function stoppedFailing(ctx: Ctx, question: QuestionRow, shown: Map<number, Set<
 	};
 	let gone = false;
 	const newest = newestInScope(ctx.db, ctx.project.id, subject.scope);
-	// A commit still waiting for shards of a job may yet show the cause in one of them: nothing closes the question
-	// meanwhile, not even a planned run that cleared (decision 0092).
-	if (newest && waitingFor(ctx.db, newest).length > 0) return false;
+	// A commit whose results are still arriving (a report not yet applied, a shard of a job not yet reported) may yet
+	// show the cause: nothing closes the question meanwhile, not even a planned run that cleared (decision 0092).
+	if (newest && stillArriving(ctx.db, newest)) return false;
 	if (newest) {
 		if (shows(newest)) return false;
 		// A commit's gate counts pipelines and people, so its pass speaks only for a test it counted as failing.
