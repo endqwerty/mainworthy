@@ -31,7 +31,39 @@ export function draftOwnerIsLive(owner: string): boolean {
 export function draftOwnedElsewhere(draft: { owner: string }): boolean {
 	return draft.owner !== draftOwner() && draftOwnerIsLive(draft.owner);
 }
+/**
+ * Each window holds a lock named for its owner id for as long as its document lives: the browser releases it when
+ * the window closes, goes elsewhere or crashes, and a window that starts reads which are held. Over the channel
+ * alone a starting window knew the others only by their answer to its hello within 40 ms, and a window busy for
+ * longer (a large render, a loaded machine) looked closed: the new window took over the draft it was typing in
+ * (issue #406). Web Locks are for secure contexts; on plain HTTP the channel is all there is.
+ */
+const LOCK = "mainworthy:draft-window:";
+async function holdLock(owner: string): Promise<void> {
+	await new Promise<void>((held) => {
+		void navigator.locks
+			.request(LOCK + owner, { mode: "shared" }, () => {
+				held();
+				return new Promise<never>(() => {});
+			})
+			.catch(held);
+	});
+}
+/** The owners of the windows that are open, from the locks held; renames this one when another holds its id. */
+async function readLocks(): Promise<void> {
+	if (typeof navigator === "undefined" || !navigator.locks) return;
+	await holdLock(draftOwner());
+	const held = (await navigator.locks.query()).held ?? [];
+	const owners = held.map((lock) => lock.name ?? "").filter((name) => name.startsWith(LOCK));
+	if (owners.filter((name) => name === LOCK + draftOwner()).length > 1) {
+		windowOwner = randomId();
+		sessionStorage.setItem("mainworthy:draft-window", windowOwner);
+		await holdLock(windowOwner);
+	}
+	for (const name of owners) liveOwners.add(name.slice(LOCK.length));
+}
 export async function initializeDraftOwners(): Promise<void> {
+	await readLocks().catch(() => {});
 	if (typeof BroadcastChannel === "undefined") return;
 	const instance = randomId();
 	const channel = new BroadcastChannel("mainworthy:draft-windows");

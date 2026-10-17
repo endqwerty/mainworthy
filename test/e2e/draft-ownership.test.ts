@@ -385,7 +385,8 @@ check(
 			await b.getByRole("button", { name: "Take over here", exact: true }).waitFor();
 			expect(await merged.inputValue()).toBe("Typed where nothing could store it");
 			expect(await merged.evaluate((el) => el instanceof HTMLTextAreaElement && el.readOnly)).toBe(false);
-			expect(await b.locator("#detail").innerText()).toContain("held by a window that is not answering, or has closed");
+			// A is open, so its lock says it is live however late it answers: B says so, and offers the take-over.
+			expect(await b.locator("#detail").innerText()).toContain("This case is being edited in another window");
 		} finally {
 			await h.close();
 			await server.stop();
