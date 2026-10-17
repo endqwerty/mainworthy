@@ -149,14 +149,10 @@ function ProviderLink({ provider, linked, browser }: { provider: string; linked:
 	if (!browser) return <p className="dim">The provider is linked from a browser that signed in.</p>;
 	if (linked) return <p className="dim">You can sign in through {provider}. It is listed below.</p>;
 	return (
-		<div className="settings-row">
-			<span>
-				<small>Sign in through {provider} as well.</small>
-				<small className="settings-refusal" role="status">
-					{problem}
-				</small>
-			</span>
+		<div>
+			<p>Sign in through {provider} as well.</p>
 			<button
+				className="out"
 				type="button"
 				aria-disabled={busy}
 				onClick={() => {
@@ -170,6 +166,9 @@ function ProviderLink({ provider, linked, browser }: { provider: string; linked:
 			>
 				{busy ? `Opening ${provider}…` : `Link ${provider}`}
 			</button>
+			<p className="settings-problem" role="status">
+				{problem}
+			</p>
 		</div>
 	);
 }
