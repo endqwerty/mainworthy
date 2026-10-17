@@ -2,6 +2,11 @@ import MainworthyClient
 import MainworthyScreens
 import SwiftUI
 
+/// A run pushed from a change's page.
+struct RunLink: Hashable {
+	let ref: String
+}
+
 /// A change run: the gate of one reported commit, and every result it counted. It has no slots to work through.
 struct ChangeRunView: View {
 	let run: Run

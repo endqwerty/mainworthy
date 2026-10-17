@@ -22,6 +22,34 @@ struct ChangesScreenTests {
 		#expect(screen.changes.first?.verdict == .passed && screen.detail?.gate.verdict == .passed)
 	}
 
+	@Test("a change lists its runs, newest first, and each one reads what its gate counted")
+	func runs() async throws {
+		let server = Live.server()
+		_ = try await server.signIn(Live.owner)
+		let client = server.project(try await Live.project())
+		let screen = ChangesScreen(project: client)
+		await screen.refresh()
+		await screen.open("pr:482")
+		let first = try #require(screen.runs.first)
+		#expect(screen.runs.count == 1)
+		let _: JSONValue = try await server.write("report", in: client.key, [
+			"target": ["commit": .string(String(repeating: "5", count: 40)), "repo": "acme/shop",
+				"branch": "coupon-total", "pr": 482],
+			"job": "review", "results": [["test": ["key": "review-pass"], "outcome": "pass"]]
+		])
+		await screen.refresh()
+		#expect(screen.runs.map(\.ref).last == first.ref && screen.runs.count == 2)
+		let newest = try #require(screen.runs.first)
+		guard case .commit(let commit, _, _) = newest.accepts else {
+			Issue.record("\(newest.ref) accepts no commit")
+			return
+		}
+		#expect(commit == String(repeating: "5", count: 40))
+		let older = screen.results(of: first)
+		await older.load()
+		#expect(older.loading == .done && older.total > 0 && older.run == first.ref)
+	}
+
 	@Test("a change remains readable outside the newest 500, with its new head and its end")
 	func capEvictsDetail() async throws {
 		let server = Live.server()

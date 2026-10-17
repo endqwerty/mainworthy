@@ -130,7 +130,7 @@ final class RunsUITests: XCTestCase {
 		shot("8-change-runs")
 		changeRun.tap()
 		XCTAssertTrue(app.staticTexts["Results"].waitForExistence(timeout: 10))
-		XCTAssertTrue(app.staticTexts["Commit"].exists)
+		XCTAssertTrue(app.staticTexts["Apply a percentage coupon"].exists)
 		shot("9-change-run")
 		app.navigationBars.buttons["Runs"].tap()
 		app.segmentedControls.buttons["Closed"].tap()
