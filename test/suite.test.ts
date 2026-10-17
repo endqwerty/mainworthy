@@ -1070,10 +1070,44 @@ describe("organising", () => {
 		});
 		expect(broad.count).toBeNull(); // more than can be ranked: the caller is told the number is not known
 		expect(broad.items.map((c) => c.ref)).toEqual(["C-2100", "C-2099", "C-2098", "C-2097", "C-2096"]); // in the title, newest first
+		const second = h.call<{ cursor: string | null; items: { ref: string }[] }>("find", {
+			text: "common",
+			limit: 5,
+			cursor: "5",
+		});
+		expect(second.items.map((c) => c.ref)).toEqual(["C-2095", "C-2094", "C-2093", "C-2092", "C-2091"]); // the next page, not the first again
+		expect(second.cursor).toBe("10");
 		const narrow = h.call<{ count: number | null; items: { ref: string }[] }>("find", { text: "common needle" });
 		expect(narrow).toMatchObject({ count: 1, items: [{ ref: "C-2101" }] });
 		const ranked = h.call<{ count: number | null; items: { ref: string }[] }>("find", { text: "thing 1500" });
 		expect(ranked.count).toBe(1);
+	});
+
+	test("a search's count and its pages do not depend on the page size", () => {
+		h.call("propose", {
+			edits: Array.from({ length: 600 }, (_, i) => ({ op: "create", outline: `Needle ${i}\n  Step > Result` })),
+		});
+		type Page = { count: number | null; cursor: string | null; items: { ref: string }[] };
+		for (const limit of [50, 100, 200]) {
+			const refs: string[] = [];
+			let page = h.call<Page>("find", { text: "needle", limit });
+			expect(page.count).toBe(600);
+			refs.push(...page.items.map((c) => c.ref));
+			while (page.cursor) {
+				page = h.call<Page>("find", { text: "needle", limit, cursor: page.cursor });
+				expect(page.count).toBe(600);
+				refs.push(...page.items.map((c) => c.ref));
+			}
+			expect(refs).toHaveLength(600);
+			expect(new Set(refs).size).toBe(600);
+		}
+		// Narrowed by a tag the cases do not have: the count is of what qualifies, not of what matches.
+		expect(h.call<Page>("find", { text: "needle", tags: ["absent"], limit: 50 })).toMatchObject({
+			count: 0,
+			cursor: null,
+			items: [],
+		});
+		expect(h.raw("find", { text: "needle", cursor: "3:abc" })).toMatchObject({ ok: false, error: { code: "invalid" } });
 	});
 
 	test("archiving hides a case from lists and keeps it readable", () => {

@@ -1828,7 +1828,7 @@ export function SuiteScreen() {
 							? "Cases unavailable"
 							: list.isPending
 								? "Reading cases…"
-								: `${(list.data?.pages[0]?.count ?? cases.length).toLocaleString()} cases`}
+								: `${(list.data?.pages[0]?.count ?? cases.length).toLocaleString()}${list.data?.pages[0]?.count === null ? "+" : ""} cases`}
 					</span>
 					{picked.size > 0 && <span className="bulk-indicator">{picked.size} selected</span>}
 					<label className="fwrap">

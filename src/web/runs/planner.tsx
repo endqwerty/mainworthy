@@ -140,7 +140,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 				)
 			)}
 			<div className="dim" role="status">
-				{found.data?.count ?? 0} matching cases
+				{found.data?.count === null ? "Too many matching cases to count" : `${found.data?.count ?? 0} matching cases`}
 			</div>
 			<label className="run-radio">
 				<input type="radio" name="run-target" checked={target === "self"} onChange={() => setTarget("self")} /> Count
