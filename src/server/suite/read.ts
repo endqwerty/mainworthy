@@ -137,7 +137,7 @@ export type CaseQuery = {
 
 /**
  * One page of cases. Without text: in outline order (folder, then rank), from the cursor. With text: by relevance,
- * one page only. Folder and tag filters are applied by the database in the same query.
+ * from a place in that order (the cursor). Folder and tag filters are applied by the database in the same query.
  */
 export function listCases(
 	ctx: Ctx,
@@ -159,66 +159,22 @@ export function listCases(
 	}
 
 	if (query.text?.trim()) {
-		const direct = /^(?:c-)?(\d+)$/i.exec(query.text.trim());
-		const match = ftsQuery(query.text);
-		const found: CaseRow[] = [];
-		// A ref is found like any match: only where the folder, the tags and the state let it be.
-		if (direct) {
-			const [row] = ctx.db.allDynamic<CaseRow>(`SELECT c.* FROM cases c WHERE c.no = ? AND ${where.join(" AND ")}`, [
-				Number(direct[1]),
-				...params,
-			]);
-			if (row) found.push(row);
-		}
-		let broad = false;
-		if (match) {
-			// Work inside the full-text index first and fetch only the survivors: joining every match to its case
-			// before sorting costs a row read per match, and a common word matches tens of thousands of cases.
-			const filtered = where.length > 2 || query.state === "archived";
-			const cut = Math.min(Math.max(query.limit * (filtered ? 20 : 3), 200), RANKED_MATCHES);
-			const args = { project, limit: cut };
-			// How many match? Stop counting at the limit: this read is bounded whatever the word.
-			const probe = ctx.db.all(Q.searchAny, { match, project, limit: RANKED_MATCHES + 1 });
-			let ranked: number[];
-			if (probe.length <= RANKED_MATCHES) {
-				// Few enough to score every one: order by relevance.
-				ranked = ctx.db.all(Q.searchRanked, { match, ...args }).map((row) => row.rowid);
-			} else {
-				// Too many for relevance to mean anything, and scoring them all would make the user wait. Newest
-				// first, matches in the title before matches in the steps; the caller is told to narrow the search.
-				broad = true;
-				const inTitle = ctx.db.all(Q.searchNewest, { match: `title : (${match})`, ...args }).map((row) => row.rowid);
-				const seen = new Set(inTitle);
-				const anywhere =
-					inTitle.length >= cut ? [] : ctx.db.all(Q.searchNewest, { match, ...args }).map((row) => row.rowid);
-				ranked = [...inTitle, ...anywhere.filter((id) => !seen.has(id))].slice(0, cut);
-			}
-			if (ranked.length > 0) {
-				const order = new Map(ranked.map((id, i) => [id, i]));
-				const rows = ctx.db.allDynamic<CaseRow>(
-					`SELECT c.* FROM cases c WHERE c.id IN (${placeholders(ranked.length)}) AND ${where.join(" AND ")}`,
-					[...ranked, ...params],
-				);
-				rows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
-				for (const row of rows) if (!found.some((f) => f.id === row.id)) found.push(row);
-			}
-			// The cut above is of every match in the project. When a folder, a tag or the archive narrows the search,
-			// matches that qualify can lie beyond it. What the cut gave is the best-ranked of them; if that does not
-			// fill the page, the rest are read with the filter applied first, newest first, so a match that exists
-			// is never reported as absent.
-			if (filtered && found.length < query.limit && (broad || ranked.length >= cut)) {
-				const rest = ctx.db.allDynamic<CaseRow>(
-					`SELECT c.* FROM cases c WHERE ${where.join(" AND ")}
-					 AND c.id IN (SELECT rowid FROM search_docs WHERE search_docs MATCH ?)
-					 ORDER BY c.rev DESC, c.id DESC LIMIT ?`,
-					[...params, match, query.limit + found.length + 1],
-				);
-				for (const row of rest) if (!found.some((f) => f.id === row.id)) found.push(row);
-				if (found.length > query.limit) broad = true;
-			}
-		}
-		// For a broad search the true number of matches is unknown by design: null says "more than shown".
-		return { items: found.slice(0, query.limit), cursor: null, count: broad ? null : found.length };
+		const from = searchOffset(query.cursor);
+		const { ids, exact } = searchIds(ctx, query, where, params, from);
+		const page = ids.slice(from, from + query.limit);
+		const rows = page.length
+			? ctx.db.allDynamic<CaseRow>(`SELECT c.* FROM cases c WHERE c.id IN (${placeholders(page.length)})`, page)
+			: [];
+		const order = new Map(page.map((id, i) => [id, i]));
+		rows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+		// A search is paged by its place in its own order, which is read again for each page. A case that joins or
+		// leaves the matches between two pages can move one row across the boundary; the page size changes nothing.
+		// A search too broad to rank is bounded: its count is null ("more than shown"), as is its reach.
+		return {
+			items: rows,
+			cursor: ids.length > from + query.limit ? String(from + query.limit) : null,
+			count: exact ? ids.length : null,
+		};
 	}
 
 	// The count is of the whole selection, not the page, so a list can say "2,000 cases" and a plan "214 selected".
@@ -237,6 +193,87 @@ export function listCases(
 	const items = rows.slice(0, query.limit);
 	const last = items.at(-1);
 	return { items, cursor: rows.length > query.limit && last ? `${last.folder}:${last.rank}` : null, count };
+}
+
+/** Where a search page starts in the search's order: the cursor a search gave, which is a place, not a case. */
+function searchOffset(cursor: string | undefined): number {
+	if (cursor === undefined) return 0;
+	if (!/^\d+$/.test(cursor)) throw invalid(`"${cursor}" is not a cursor of a search`);
+	return Math.min(Number(cursor), RANKED_MATCHES);
+}
+
+/**
+ * The cases a text search finds, best first, as far as this page needs. `exact` says the list is every match: the
+ * project has at most RANKED_MATCHES of them, each is scored, and the folder, tags and state are applied to all.
+ * Otherwise the word is too common to rank: newest first, matches in the title before matches in the steps, and the
+ * list is only as long as the page asked for needs.
+ */
+function searchIds(
+	ctx: Ctx,
+	query: CaseQuery,
+	where: string[],
+	params: SqlValue[],
+	from: number,
+): { ids: number[]; exact: boolean } {
+	const project = ctx.project.id;
+	const text = query.text ?? "";
+	const direct = /^(?:c-)?(\d+)$/i.exec(text.trim());
+	const match = ftsQuery(text);
+	const ids: number[] = [];
+	// A ref is found like any match: only where the folder, the tags and the state let it be.
+	if (direct) {
+		const [row] = ctx.db.allDynamic<{ id: number }>(
+			`SELECT c.id FROM cases c WHERE c.no = ? AND ${where.join(" AND ")}`,
+			[Number(direct[1]), ...params],
+		);
+		if (row) ids.push(row.id);
+	}
+	if (!match) return { ids, exact: true };
+	// Work inside the full-text index first and fetch only the survivors: joining every match to its case before
+	// sorting costs a row read per match, and a common word matches tens of thousands of cases.
+	const survivors = (candidates: number[]): number[] => {
+		if (candidates.length === 0) return [];
+		const kept = new Set(
+			ctx.db
+				.allDynamic<{ id: number }>(
+					`SELECT c.id FROM cases c WHERE c.id IN (${placeholders(candidates.length)}) AND ${where.join(" AND ")}`,
+					[...candidates, ...params],
+				)
+				.map((row) => row.id),
+		);
+		return candidates.filter((id) => kept.has(id));
+	};
+	const append = (more: number[]) => {
+		const seen = new Set(ids);
+		for (const id of more) if (!seen.has(id)) ids.push(id);
+	};
+	// How many match? Stop counting past the limit: this read is bounded whatever the word.
+	const probe = ctx.db.all(Q.searchAny, { match, project, limit: RANKED_MATCHES + 1 });
+	if (probe.length <= RANKED_MATCHES) {
+		// Few enough to score every one: order by relevance.
+		append(survivors(ctx.db.all(Q.searchRanked, { match, project, limit: RANKED_MATCHES }).map((row) => row.rowid)));
+		return { ids, exact: true };
+	}
+	const filtered = where.length > 2 || query.state === "archived";
+	const wanted = from + query.limit;
+	const cut = Math.min(Math.max(wanted * (filtered ? 20 : 3), 200), RANKED_MATCHES);
+	const args = { project, limit: cut };
+	const inTitle = ctx.db.all(Q.searchNewest, { match: `title : (${match})`, ...args }).map((row) => row.rowid);
+	const anywhere = inTitle.length >= cut ? [] : ctx.db.all(Q.searchNewest, { match, ...args }).map((row) => row.rowid);
+	append(survivors([...new Set([...inTitle, ...anywhere])].slice(0, cut)));
+	// The cut above is of every match in the project. When a folder, a tag or the archive narrows the search, matches
+	// that qualify can lie beyond it. If what it gave does not reach past this page, the rest are read with the filter
+	// applied first, newest first, so a match that exists is never reported as absent.
+	if (filtered && ids.length <= wanted) {
+		const rest = ctx.db.allDynamic<{ id: number }>(
+			`SELECT c.id FROM cases c WHERE ${where.join(" AND ")}
+			 AND c.id IN (SELECT rowid FROM search_docs WHERE search_docs MATCH ?)
+			 ORDER BY c.rev DESC, c.id DESC LIMIT ?`,
+			[...params, match, wanted + ids.length + 1],
+		);
+		append(rest.map((row) => row.id));
+	}
+	return { ids, exact: false };
 }
 
 function splitCursor(cursor: string): [number, string] {
