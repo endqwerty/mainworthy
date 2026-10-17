@@ -187,7 +187,7 @@ test("the same seed writes the same suite, another seed another, and no days lea
 });
 
 test("a seed sent again with another seed or other days is refused, and the project it began in is as it was", async () => {
-	await withInstance(async ({ client, cli }) => {
+	await withInstance(async ({ client, run }) => {
 		await seed(client, { project: "demo", cases: 30, seed: 5, days: 3 });
 		const demo = on(client, "demo");
 		const runs = (await demo.call("find", { in: "runs", limit: 100 })).items.length;
@@ -195,13 +195,13 @@ test("a seed sent again with another seed or other days is refused, and the proj
 			["--seed", "6", "--days", "3"],
 			["--seed", "5", "--days", "4"],
 		]) {
-			const refused = await cli(["seed", "demo", "--cases", "30", ...other]);
+			const refused = await run(["seed", "demo", "--cases", "30", ...other]);
 			expect(refused.code).toBe(4);
 			expect(refused.stderr).toContain("another seed or other days");
 		}
 		expect((await demo.call("find", { in: "runs", limit: 100 })).items).toHaveLength(runs);
 		expect(await titlesOf(demo)).toHaveLength(30);
-		const again = await cli(["seed", "demo", "--cases", "30", "--seed", "5", "--days", "3"]);
+		const again = await run(["seed", "demo", "--cases", "30", "--seed", "5", "--days", "3"]);
 		expect(again.stderr).toBe("");
 		expect(again.code).toBe(0);
 		for (const [flag, value, words] of [
@@ -211,7 +211,7 @@ test("a seed sent again with another seed or other days is refused, and the proj
 			["--seed", "-3", "the seed is a whole number"],
 			["--seed", "4294967296", "the seed is a whole number"],
 		] as const) {
-			const refused = await cli(["seed", "other", "--cases", "3", flag, value]);
+			const refused = await run(["seed", "other", "--cases", "3", flag, value]);
 			expect([flag, value, refused.code]).toEqual([flag, value, 4]);
 			expect(refused.stderr).toContain(words);
 		}
