@@ -1751,7 +1751,10 @@ export function SuiteScreen() {
 				{ edits: [{ op: "restore", case: view.ref, to: previous }] },
 				{ project, owner },
 			);
-			if (reply.status === "adopted") {
+			// Adopted with no case stamped: the case already holds that content, and nothing was recorded.
+			if (reply.status === "adopted" && reply.cases.length === 0)
+				setStatus("The case already has that version's content. Nothing changed.");
+			else if (reply.status === "adopted") {
 				draftRef.current = null;
 				setDraftState(null);
 				setStatus("Previous version restored as a new version.");

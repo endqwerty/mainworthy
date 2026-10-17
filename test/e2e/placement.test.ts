@@ -195,6 +195,34 @@ test.skipIf(!browserAvailable)(
 );
 
 test.skipIf(!browserAvailable)(
+	"u says nothing changed when the version it restores is already the case's content",
+	async () => {
+		const server = await startServer();
+		await twoVersions(server);
+		await server.api("propose", { edits: [{ op: "restore", case: "C-1", to: 1 }] });
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = h;
+			await page.getByRole("button", { name: "First title", exact: true }).waitFor();
+			// Focused on version 2, u restores its predecessor, version 1, whose content version 3 already has.
+			await page.locator(".timeline-group summary").click();
+			await page.locator('[data-version="2"]').focus();
+			await page.keyboard.press("u");
+			await page.waitForFunction(() => document.querySelector("#stat")?.textContent?.includes("Nothing changed."));
+			expect(await page.locator("#stat").textContent()).toBe(
+				"The case already has that version's content. Nothing changed.",
+			);
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(3);
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
 	"u under strict says the restore is proposed, names its question and leaves the case at its version",
 	async () => {
 		const server = await startServer();
