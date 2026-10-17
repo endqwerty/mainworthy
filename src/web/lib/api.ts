@@ -1,7 +1,16 @@
 import { z } from "zod";
 import { type Api, type Envelope, ERROR_CODES, INSTANCE_OPS, type OpName, type SessionInfo } from "../../core/api.ts";
 import { Unlinked } from "../../core/kinds.ts";
-import { type DeviceSession, deviceSession, sessionCurrent, sessionUnchanged, suspendDeviceSession } from "./device.ts";
+import {
+	authenticationGeneration,
+	authenticationUnchanged,
+	type DeviceSession,
+	deviceSession,
+	publishAuthentication,
+	sessionCurrent,
+	sessionUnchanged,
+	suspendDeviceSession,
+} from "./device.ts";
 
 const Wire = z.discriminatedUnion("ok", [
 	z.object({ ok: z.literal(true), result: z.unknown(), seq: z.number().nullable().optional() }),
@@ -85,8 +94,9 @@ export async function call<O extends OpName>(
 ): Promise<Api[O]["reply"]> {
 	const owner =
 		typeof window !== "undefined" && !options.token && !options.url ? (options.owner ?? deviceSession()) : null;
+	const authentication = owner ? authenticationGeneration() : null;
 	const assertOwner = (): void => {
-		if (owner && !sessionCurrent(owner))
+		if (owner && (!sessionCurrent(owner) || (authentication && !authenticationUnchanged(authentication))))
 			throw new ApiError("unauthenticated", "The session changed. Your input is kept for the person who typed it.");
 	};
 	assertOwner();
@@ -115,12 +125,13 @@ export async function session(
 	options: { owner?: DeviceSession; signal?: AbortSignal; keepalive?: boolean } = {},
 ): Promise<SessionInfo> {
 	const owner = options.owner ?? deviceSession();
+	const authentication = authenticationGeneration();
 	const response = await fetch("/api/session", {
 		...(options.signal ? { signal: options.signal } : {}),
 		keepalive: options.keepalive ?? false,
 	});
 	const envelope = Wire.parse(await response.json());
-	if (!(options.owner ? sessionCurrent(owner) : sessionUnchanged(owner)))
+	if (!authenticationUnchanged(authentication) || !(options.owner ? sessionCurrent(owner) : sessionUnchanged(owner)))
 		throw new ApiError("unauthenticated", "The session changed. Your input is kept.");
 	if (!envelope.ok) refuse(envelope.error, response.status);
 	const info = Session.parse(envelope.result);
@@ -150,6 +161,7 @@ export async function exchange(
 	{ body, signedIn = false }: { body?: unknown; signedIn?: boolean } = {},
 ): Promise<unknown> {
 	const owner = signedIn ? deviceSession() : null;
+	const authentication = owner ? authenticationGeneration() : null;
 	const response = await fetch(
 		path,
 		body === undefined
@@ -164,9 +176,13 @@ export async function exchange(
 				},
 	);
 	const envelope = Wire.parse(await response.json());
-	if (owner && !sessionCurrent(owner))
+	if (owner && (!sessionCurrent(owner) || (authentication && !authenticationUnchanged(authentication))))
 		throw new ApiError("unauthenticated", "The session changed. Your input is kept.");
-	if (envelope.ok) return envelope.result;
+	if (envelope.ok) {
+		if (path === "/api/logout" || z.object({ signedIn: z.literal(true) }).safeParse(envelope.result).success)
+			publishAuthentication();
+		return envelope.result;
+	}
 	// Every one of these routes may be answered `limited`: a wrong token, password, passkey or invitation code
 	// too often, or a wrong current password. The sentence is the same wherever it is shown.
 	const error =

@@ -144,8 +144,11 @@ export function useEvents(project: string, setStatus: (text: string) => void): v
 					return;
 				}
 			} catch (error) {
-				if (disposed || !sessionCurrent(owner) || (error instanceof ApiError && error.code === "unauthenticated"))
+				if (disposed || !sessionCurrent(owner)) return;
+				if (error instanceof ApiError && error.code === "unauthenticated") {
+					if (error.status === null) retry = setTimeout(() => void reconnect(), 1000);
 					return;
+				}
 			}
 			retry = setTimeout(connect, 1000);
 		}

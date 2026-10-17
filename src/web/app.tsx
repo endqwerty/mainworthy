@@ -153,7 +153,22 @@ export function App() {
 	const refreshSession = useCallback(async (): Promise<void> => {
 		const owner = deviceSession();
 		try {
-			const info = await session();
+			const info = await session().catch(async (error: unknown) => {
+				if (
+					error instanceof ApiError &&
+					error.code === "unauthenticated" &&
+					error.status === null &&
+					sessionUnchanged(owner)
+				) {
+					const current = await session();
+					if (person.current !== null && current.actorId !== person.current) {
+						signedOut();
+						throw error;
+					}
+					return current;
+				}
+				throw error;
+			});
 			if (!sessionUnchanged(owner)) return;
 			// What the device keeps is kept per actor, by id: a name can be given to somebody else later. A different
 			// person from the one before starts with nothing of theirs: not their drafts, not their notes, not what
@@ -194,6 +209,14 @@ export function App() {
 			setAuth({ kind: "ready", session: info, homeStatus });
 		} catch (error) {
 			if (!sessionUnchanged(owner)) return;
+			if (error instanceof ApiError && error.code === "unauthenticated" && error.status === null) {
+				setAuth((current) =>
+					current.kind === "ready"
+						? current
+						: { kind: "error", message: "Your session changed. Reconnect to continue." },
+				);
+				return;
+			}
 			setAuth(
 				error instanceof ApiError && error.code === "unauthenticated"
 					? { kind: "signin" }

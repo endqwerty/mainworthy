@@ -177,7 +177,7 @@ export const signOut = async ({ clear }: { clear: boolean }): Promise<"signed-ou
 				await session();
 				return "signed-in";
 			} catch (error) {
-				if (error instanceof ApiError && error.code === "unauthenticated") {
+				if (error instanceof ApiError && error.code === "unauthenticated" && error.status === 401) {
 					ended = true;
 					break;
 				}

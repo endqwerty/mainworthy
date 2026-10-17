@@ -12,6 +12,7 @@ import {
 	setDevicePerson,
 	suspendDeviceSession,
 } from "../src/web/lib/device.ts";
+import { signOut } from "../src/web/lib/signin.ts";
 
 test("the client's list of instance operations is the registry's, so each is sent to the path that serves it", () => {
 	const registered: string[] = OP_LIST.filter((op) => op.scope === "instance").map((op) => op.name);
@@ -21,6 +22,7 @@ test("the client's list of instance operations is the registry's, so each is sen
 /** Only resolves relative URLs for Bun; the request and delayed reply cross a real HTTP connection. */
 async function deviceReply(
 	run: (http: { arrived: Promise<void>; release: (status: number) => void }) => Promise<void>,
+	options: { login?: unknown; logout?: "success" | "lost"; storage?: "unavailable" | "read-only" | "write-only" } = {},
 ) {
 	const arrived = Promise.withResolvers<void>();
 	const reply = Promise.withResolvers<number>();
@@ -40,7 +42,13 @@ async function deviceReply(
 	const server = Bun.serve({
 		hostname: "127.0.0.1",
 		port: 0,
-		async fetch() {
+		async fetch(request) {
+			const path = new URL(request.url).pathname;
+			if (path === "/api/login" && "login" in options) return Response.json({ ok: true, result: options.login });
+			if (path === "/api/logout" && options.logout) {
+				if (options.logout === "lost") return new Response("Reply lost", { status: 502 });
+				return Response.json({ ok: true, result: {} });
+			}
 			arrived.resolve();
 			const status = await reply.promise;
 			return Response.json(
@@ -58,8 +66,14 @@ async function deviceReply(
 	Object.defineProperty(globalThis, "localStorage", {
 		configurable: true,
 		value: {
-			getItem: (key: string) => stored.get(key) ?? null,
-			setItem: (key: string, value: string) => stored.set(key, value),
+			getItem: (key: string) => {
+				if (options.storage === "unavailable" || options.storage === "write-only") throw new Error("No storage read");
+				return stored.get(key) ?? null;
+			},
+			setItem: (key: string, value: string) => {
+				if (options.storage === "unavailable" || options.storage === "read-only") throw new Error("No storage write");
+				stored.set(key, value);
+			},
 		},
 	});
 	const transport = globalThis.fetch;
@@ -94,7 +108,13 @@ const ownedRequests = {
 };
 
 for (const [name, request] of Object.entries(ownedRequests)) {
-	for (const change of ["another actor", "same actor signs in again", "device data cleared"])
+	for (const change of [
+		"another actor",
+		"same actor signs in again",
+		"same actor in another tab",
+		"another tab signs A to B to A",
+		"device data cleared",
+	])
 		for (const status of [200, 401])
 			test(`a delayed ${name} ${status} cannot affect the session after ${change}`, () =>
 				deviceReply(async ({ arrived, release }) => {
@@ -104,7 +124,10 @@ for (const [name, request] of Object.entries(ownedRequests)) {
 					const pending = request().catch((error: unknown) => error);
 					await arrived;
 					if (change === "device data cleared") localStorage.setItem(deviceClearKey, "cleared-in-another-tab");
-					else {
+					else if (change === "same actor in another tab" || change === "another tab signs A to B to A") {
+						if (change === "another tab signs A to B to A") localStorage.setItem("mainworthy:auth-generation", "B");
+						localStorage.setItem("mainworthy:auth-generation", "A-new-session");
+					} else {
 						suspendDeviceSession();
 						setDevicePerson(change === "another actor" ? { actor: "sam", actorId: 2 } : { actor: "robin", actorId: 1 });
 					}
@@ -169,3 +192,70 @@ test("call sends an instance operation to /api/<op> and a project's operation to
 		await echo.stop(true);
 	}
 });
+
+for (const storage of [undefined, "unavailable", "read-only", "write-only"] as const)
+	for (const transition of ["login", "logout"] as const)
+		test(`successful ${transition} discards a held response with ${storage ?? "working"} storage without ending UI ownership`, () =>
+			deviceReply(
+				async ({ arrived, release }) => {
+					setDevicePerson({ actor: "robin", actorId: 1 });
+					const owner = deviceSession();
+					let signedOut = 0;
+					window.addEventListener(unauthenticatedEvent, () => signedOut++);
+					const pending = session().catch((error: unknown) => error);
+					await arrived;
+					await exchange(transition === "login" ? "/api/login" : "/api/logout", { body: {} });
+					release(401);
+					expect(await pending).toMatchObject({ code: "unauthenticated", status: null });
+					expect(signedOut).toBe(0);
+					expect(sessionCurrent(owner)).toBe(true);
+				},
+				{ login: { signedIn: true }, logout: "success", ...(storage ? { storage } : {}) },
+			));
+
+for (const result of [
+	{ signedIn: false, secondFactor: { challenge: "second-factor", expiresAt: 123 } },
+	{ linked: true },
+	{ requested: true },
+	{ verified: true },
+	{ changed: true },
+])
+	test(`a non-session login reply ${JSON.stringify(result)} leaves a held session current`, () =>
+		deviceReply(
+			async ({ arrived, release }) => {
+				setDevicePerson({ actor: "robin", actorId: 1 });
+				const pending = session();
+				await arrived;
+				await exchange("/api/login", { body: {} });
+				release(200);
+				expect(await pending).toMatchObject({ actor: "robin", actorId: 1, session: 1 });
+			},
+			{ login: result },
+		));
+
+test("ordinary session reads and identity adoption leave an earlier response usable", () =>
+	deviceReply(async ({ arrived, release }) => {
+		setDevicePerson({ actor: "robin", actorId: 1 });
+		const pending = session();
+		await arrived;
+		release(200);
+		const info = await session();
+		setDevicePerson(info);
+		expect(await pending).toMatchObject({ actor: "robin", actorId: 1, session: 1 });
+	}));
+
+for (const clear of [false, true])
+	test(`a lost logout reply is not confirmed by a stale session refusal with clear=${clear}`, () =>
+		deviceReply(
+			async ({ arrived, release }) => {
+				setDevicePerson({ actor: "robin", actorId: 1 });
+				const owner = deviceSession();
+				const pending = signOut({ clear });
+				await arrived;
+				await exchange("/api/login", { body: {} });
+				release(200);
+				expect(await pending).toBe("signed-in");
+				expect(sessionCurrent(owner)).toBe(true);
+			},
+			{ login: { signedIn: true }, logout: "lost" },
+		));

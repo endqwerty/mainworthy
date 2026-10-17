@@ -228,3 +228,320 @@ for (const request of ["session", "password"])
 		},
 		30_000,
 	);
+
+for (const request of ["session", "password", "operation", "round-trip", "different actor"] as const)
+	test.skipIf(!browserAvailable)(
+		`a cross-tab ${request} transition discards its late 401 and preserves actor privacy`,
+		async () => {
+			const server = await startServer({ mode: "server" });
+			const browser = await openPage(server, { path: "/p/scratch/settings" });
+			const arrived = Promise.withResolvers<number>();
+			const held = Promise.withResolvers<void>();
+			const otherChecks = Promise.withResolvers<void>();
+			try {
+				const { page, context } = browser;
+				page.setDefaultTimeout(5000);
+				if (request === "round-trip" || request === "different actor") {
+					await page.addInitScript(() => {
+						window.addEventListener("storage", (event) => event.stopImmediatePropagation(), true);
+					});
+					await page.reload();
+					await page.locator("#app").waitFor();
+				}
+				const info = z.object({ result: z.object({ session: z.number(), actorId: z.number() }) });
+				const before = info.parse(await (await context.request.get(`${server.url}/api/session`)).json()).result;
+				await page.getByRole("option", { name: "Your sign-in", exact: true }).click();
+				await page.locator("#password-next").fill("a password for the old session");
+				await page.locator("#password-again").fill("a password for the old session");
+				const path =
+					request === "operation"
+						? "/api/p/scratch/find"
+						: request === "password" || request === "round-trip"
+							? "/api/account/password"
+							: "/api/session";
+				let intercepted = false;
+				let released = false;
+				await page.route(`**${path}`, async (route) => {
+					if (intercepted) {
+						if (request === "different actor" && !released) await otherChecks.promise;
+						return route.continue();
+					}
+					intercepted = true;
+					const response = await route.fetch({ headers: { ...route.request().headers(), cookie: "" } });
+					arrived.resolve(response.status());
+					await held.promise;
+					await route.fulfill({ response });
+				});
+				if (request === "operation") await page.getByRole("link", { name: "Suite", exact: true }).click();
+				else await page.getByRole("button", { name: "Set password", exact: true }).click();
+				expect(await arrived.promise).toBe(401);
+				const generation = await page.evaluate(() => localStorage.getItem("mainworthy:auth-generation"));
+				const other = await context.newPage();
+				other.setDefaultTimeout(5000);
+				await other.goto(`${server.url}/p/scratch/settings`);
+				await other.locator("#app").waitFor();
+				// A new tab and ordinary refresh must not publish a new authentication generation.
+				expect(await other.evaluate(() => localStorage.getItem("mainworthy:auth-generation"))).toBe(generation);
+				await other.reload();
+				await other.locator("#app").waitFor();
+				expect(await other.evaluate(() => localStorage.getItem("mainworthy:auth-generation"))).toBe(generation);
+				const changesActor = request === "round-trip" || request === "different actor";
+				const next = changesActor
+					? z.object({ token: z.string() }).parse(
+							await server.api("admin", {
+								do: "token.create",
+								actor: "sam",
+								kind: "human",
+								can: ["read", "produce"],
+								project: "scratch",
+							}),
+						).token
+					: server.token;
+				if (request === "round-trip")
+					await page.route("**/api/session", async (route) => {
+						await otherChecks.promise;
+						await route.continue();
+					});
+				await other.getByRole("button", { name: "Sign out", exact: true }).click();
+				await other.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
+				await other.locator("#token").fill(next);
+				await other.keyboard.press("Enter");
+				await other.locator("#app").waitFor();
+				if (request === "round-trip") {
+					await other.getByRole("button", { name: "Sign out", exact: true }).click();
+					await other.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
+					await other.locator("#token").fill(server.token);
+					await other.keyboard.press("Enter");
+					await other.locator("#app").waitFor();
+				}
+				if (request === "round-trip") otherChecks.resolve();
+				const after = info.parse(await (await context.request.get(`${server.url}/api/session`)).json()).result;
+				if (request === "different actor") expect(after.actorId).not.toBe(before.actorId);
+				else expect(after.actorId).toBe(before.actorId);
+				expect(after.session).not.toBe(before.session);
+				const evidence = process.env.MAINWORTHY_CROSS_TAB_EVIDENCE;
+				await page.bringToFront();
+				if (evidence) await page.screenshot({ path: `${evidence}/cross-tab-${request}-held.png` });
+				await page.evaluate(() => {
+					Reflect.set(window, "crossTabSignOuts", 0);
+					window.addEventListener("mainworthy:unauthenticated", () =>
+						Reflect.set(window, "crossTabSignOuts", Number(Reflect.get(window, "crossTabSignOuts")) + 1),
+					);
+				});
+				const completed = page.waitForEvent("requestfinished", { predicate: (sent) => sent.url().endsWith(path) });
+				released = true;
+				held.resolve();
+				await completed;
+				if (request === "different actor") {
+					await page.locator("#token").waitFor();
+					expect(await page.locator("#app").count()).toBe(0);
+					return;
+				}
+				if (evidence) {
+					await page.screenshot({ path: `${evidence}/cross-tab-${request}-released.png` });
+					console.info(
+						JSON.stringify({
+							request,
+							before: before.session,
+							after: after.session,
+							signOuts: await page.evaluate((): unknown => Reflect.get(window, "crossTabSignOuts")),
+							app: await page.locator("#app").count(),
+						}),
+					);
+				}
+				await page.getByRole("link", { name: "Suite", exact: true }).click();
+				await page.keyboard.press("c");
+				await page.getByRole("textbox", { name: "Case title", exact: true }).fill("Created after cross-tab sign-in");
+				await page.keyboard.press("Control+Enter");
+				const found = await eventually(
+					() => server.api("find", { in: "cases" }),
+					(reply) => reply.items.length === 1,
+				);
+				expect(found.items[0]?.title).toBe("Created after cross-tab sign-in");
+				expect((await server.api("timeline", { ref: "C-1" })).entries).toContainEqual(
+					expect.objectContaining({ t: "version", version: 1, by: "robin" }),
+				);
+				expect(await page.evaluate((): unknown => Reflect.get(window, "crossTabSignOuts"))).toBe(0);
+				expect(await page.locator("#app").count()).toBe(1);
+				expect(browser.errors).toEqual([]);
+			} finally {
+				otherChecks.resolve();
+				held.resolve();
+				await browser.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+
+test.skipIf(!browserAvailable)(
+	"a stale reconnect check preserves pending files and resumes live updates after same-actor sign-in",
+	async () => {
+		const server = await startServer({ mode: "server" });
+		await server.api("propose", { edits: [{ op: "create", outline: "Pending evidence\n  Open > Visible" }] });
+		const run = await server.api("plan", { name: "Cross-tab attachments", select: {} });
+		const browser = await openPage(server, { path: `/p/scratch/runs/${run.run.slice(2)}` });
+		const streamHeld = Promise.withResolvers<void>();
+		const arrived = Promise.withResolvers<number>();
+		const held = Promise.withResolvers<void>();
+		try {
+			const { page, context } = browser;
+			page.setDefaultTimeout(5000);
+			const other = await context.newPage();
+			await other.goto(`${server.url}/p/scratch/settings`);
+			await other.locator("#app").waitFor();
+			let streams = 0;
+			await page.route("**/events", async (route) => {
+				if (++streams === 1) {
+					await streamHeld.promise;
+					await route.fulfill({ status: 502, body: "Disconnected" });
+				} else await route.continue();
+			});
+			await page.reload();
+			const note = page.getByRole("textbox", { name: "Result note" });
+			await note.fill("Keep the pending evidence");
+			await page.getByLabel("Attach a file", { exact: true }).setInputFiles({
+				name: "pending.txt",
+				mimeType: "text/plain",
+				buffer: Buffer.from("Preserved attachment bytes"),
+			});
+			await page.getByRole("button", { name: "Remove pending.txt" }).waitFor();
+			let intercepted = false;
+			await page.route("**/api/session", async (route) => {
+				if (intercepted) return route.continue();
+				intercepted = true;
+				const response = await route.fetch({ headers: { ...route.request().headers(), cookie: "" } });
+				arrived.resolve(response.status());
+				await held.promise;
+				await route.fulfill({ response });
+			});
+			streamHeld.resolve();
+			expect(await arrived.promise).toBe(401);
+			await other.getByRole("button", { name: "Sign out", exact: true }).click();
+			await other.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
+			await other.locator("#token").fill(server.token);
+			await other.keyboard.press("Enter");
+			await other.locator("#app").waitFor();
+			held.resolve();
+			await page.getByText("Live updates reconnected.", { exact: true }).waitFor();
+			expect(streams).toBe(2);
+			expect(await note.inputValue()).toBe("Keep the pending evidence");
+			await page.getByRole("button", { name: "Remove pending.txt" }).waitFor();
+			await note.press("Enter");
+			const entries = await eventually(
+				async () => (await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "result"),
+				(items) => items.length === 1,
+			);
+			const recorded = entries[0];
+			if (!recorded) throw new Error("The result was not recorded");
+			expect(recorded).toMatchObject({ by: "robin", note: "Keep the pending evidence" });
+			const files = await server.api("attachment", { result: recorded.id });
+			if (files.kind !== "list" || !files.items[0]) throw new Error("The attachment was not recorded");
+			expect(files.items.map((file) => file.name)).toEqual(["pending.txt"]);
+			const file = await server.api("attachment", { result: recorded.id, id: files.items[0].id });
+			expect(file.kind === "file" && atob(file.data)).toBe("Preserved attachment bytes");
+		} finally {
+			streamHeld.resolve();
+			held.resolve();
+			await browser.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+for (const replacements of [1, 2])
+	test.skipIf(!browserAvailable)(
+		`startup recovers after ${replacements} authentication replacements with at most one automatic retry`,
+		async () => {
+			const server = await startServer({ mode: "server" });
+			const browser = await openPage(server, { path: "/p/scratch/settings" });
+			const gates = Array.from({ length: replacements }, () => ({
+				arrived: Promise.withResolvers<number>(),
+				held: Promise.withResolvers<void>(),
+			}));
+			try {
+				const first = await browser.context.newPage();
+				first.setDefaultTimeout(5000);
+				let reads = 0;
+				await first.route("**/api/session", async (route) => {
+					const gate = gates[reads++];
+					if (!gate) return route.continue();
+					const response = await route.fetch({ headers: { ...route.request().headers(), cookie: "" } });
+					gate.arrived.resolve(response.status());
+					await gate.held.promise;
+					await route.fulfill({ response });
+				});
+				await first.goto(`${server.url}/p/scratch/suite`);
+				for (const gate of gates) {
+					expect(await gate.arrived.promise).toBe(401);
+					await browser.page.getByRole("button", { name: "Sign out", exact: true }).click();
+					await browser.page.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
+					await browser.page.locator("#token").fill(server.token);
+					await browser.page.keyboard.press("Enter");
+					await browser.page.locator("#app").waitFor();
+					gate.held.resolve();
+				}
+				if (replacements === 2) {
+					await first.getByText("Your session changed. Reconnect to continue.", { exact: true }).waitFor();
+					expect(reads).toBe(2);
+					await first.getByRole("button", { name: "Reconnect", exact: true }).click();
+				}
+				await first.locator("#app").waitFor();
+				expect(await first.locator(".sfoot .me").textContent()).toContain("robin");
+				expect(reads).toBe(replacements === 2 ? 3 : 2);
+			} finally {
+				for (const gate of gates) gate.held.resolve();
+				await browser.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+
+test.skipIf(!browserAvailable)(
+	"a held successful session reply cannot restore obsolete credentials after another tab signs in",
+	async () => {
+		const server = await startServer({ mode: "server" });
+		const browser = await openPage(server, { path: "/p/scratch/settings" });
+		const arrived = Promise.withResolvers<number>();
+		const held = Promise.withResolvers<void>();
+		try {
+			const first = await browser.context.newPage();
+			first.setDefaultTimeout(5000);
+			let intercepted = false;
+			await first.route("**/api/session", async (route) => {
+				if (intercepted) return route.continue();
+				intercepted = true;
+				const response = await route.fetch();
+				arrived.resolve(response.status());
+				await held.promise;
+				await route.fulfill({ response });
+			});
+			await first.goto(`${server.url}/p/scratch/settings`);
+			expect(await arrived.promise).toBe(200);
+			const { page } = browser;
+			await page.getByRole("option", { name: "Your sign-in", exact: true }).click();
+			await page.locator("#password-next").fill("a password established in the other tab");
+			await page.locator("#password-again").fill("a password established in the other tab");
+			await page.getByRole("button", { name: "Set password", exact: true }).click();
+			await page.locator("#password-current").waitFor();
+			await page.getByRole("button", { name: "Sign out", exact: true }).click();
+			await page.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
+			await page.locator("#token").fill(server.token);
+			await page.keyboard.press("Enter");
+			await page.locator("#app").waitFor();
+			held.resolve();
+			await first.locator("#app").waitFor();
+			await first.getByRole("option", { name: "Your sign-in", exact: true }).click();
+			await first.locator("#password-current").waitFor();
+			expect(await first.getByRole("button", { name: "Change password", exact: true }).count()).toBe(1);
+			expect(browser.errors).toEqual([]);
+		} finally {
+			held.resolve();
+			await browser.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
