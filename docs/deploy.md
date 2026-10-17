@@ -307,6 +307,10 @@ the steps are kept below for an instance that has none.
   person answers the question in the queue (`g q`). After an answer, re-run the `gate` job alone: the shards'
   reports are artifacts of the run, kept for seven days. The pipeline's token cannot answer, and under `standard`
   an agent's answer is advice.
+- **Elapsed time is advisory.** A shard over 180 seconds emits a warning, including above the former
+  240-second failure limit. Failed tests, incomplete reports and skipped test files still block the gate.
+  Decision 0097 records the owner's suspension; [issue #77](https://github.com/endqwerty/mainworthy/issues/77)
+  tracks a future timing gate. Job timeouts still stop hung jobs.
 - **A newer attempt of a shard replaces the older one.** When the test passes in it, the gate passes and the
   question leaves the queue with no answer. Seen on this instance on 2026-10-13: `main` at `89d431a` was blocked
   by a browser test that fails now and then (#94), and green after a re-run of shard `tests-4`. GitHub's "Re-run

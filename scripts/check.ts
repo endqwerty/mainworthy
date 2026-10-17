@@ -1,6 +1,6 @@
 // The check: the type-check, the lint and the tests side by side, the test files in parallel workers, then the
-// tests that measure time on a machine that runs nothing else. Prints the wall time of each part and holds the
-// tests to a budget (`scripts/check-plan.ts`).
+// tests that measure time on a machine that runs nothing else. Prints the wall time of each part and warns
+// about slow runs (`scripts/check-plan.ts`); elapsed time alone does not fail the check.
 //
 //   bun scripts/check.ts                      everything (`bun run check`)
 //   bun scripts/check.ts test                 the tests only, output as it comes (`bun run test`)
@@ -18,21 +18,18 @@
 // whether the browser tests ran. On a machine that cannot run the tests it says why and runs nothing
 // (`scripts/preflight.ts`).
 import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync } from "node:fs";
-import { availableParallelism, cpus, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
+	CHECK_WARNING_SECONDS,
 	failureLines,
 	findChromium,
-	LIMITS,
 	type Outcome,
 	outcomePath,
-	over,
 	type Phase,
 	phaseFiles,
 	phaseReport,
 	QUIET,
-	REFERENCE_THREADS,
-	SHARED_CORES,
 	seconds,
 	slowest,
 	TIMINGS,
@@ -93,7 +90,7 @@ if (workers !== undefined && !(Number.isInteger(workers) && workers > 0)) {
 }
 const phases: Phase[] = only ? [only] : shard ? ["parallel"] : ["parallel", "quiet"];
 const everyFile = phases.length === 2;
-// The budget is about the whole suite with its own number of workers.
+// Warn about the whole suite with its own number of workers.
 const whole = everyFile && workers === undefined;
 
 const scratch = mkdtempSync(join(tmpdir(), "mainworthy-check-"));
@@ -112,15 +109,6 @@ for (const signal of ["SIGINT", "SIGTERM"] satisfies NodeJS.Signals[])
 
 type Part = { name: string; exit: number; seconds: number; log: string | null };
 type TestPart = Part & { phase: Phase; report: string };
-
-/** Cores the whole machine keeps busy over the next `ms`, whoever by. */
-async function busyCores(ms: number): Promise<number> {
-	const work = (): number =>
-		cpus().reduce((sum, cpu) => sum + cpu.times.user + cpu.times.nice + cpu.times.sys + cpu.times.irq, 0);
-	const before = work();
-	await Bun.sleep(ms);
-	return (work() - before) / ms;
-}
 
 /** Runs one command. Captured, its output goes to a file of its own; otherwise straight to the terminal. */
 async function run(name: string, command: string[], capture: boolean): Promise<Part> {
@@ -164,8 +152,6 @@ async function tests(capture: boolean): Promise<TestPart[]> {
 	return parts;
 }
 
-// What else the machine is doing, before anything of this run starts.
-const busyBefore = whole ? await busyCores(250) : 0;
 // A test run beside this one makes both slower and some tests fail for reasons outside the code.
 if (whole && (await (await import("./work/processes.ts")).otherTestRuns()))
 	console.log("NOTE: another test run is going on this machine. Wait for it with `bun scripts/work.ts wait-tests`.\n");
@@ -216,12 +202,11 @@ const chromium = findChromium();
 if (chromium.path === null) console.log(`NOTE: the browser tests did not run. ${chromium.skipped}\n`);
 if (testParts.length > 1) console.log(`${"tests".padEnd(16)} ${seconds(testSeconds).padStart(8)}`);
 console.log(`${"total".padEnd(16)} ${seconds(total).padStart(8)}`);
-if (whole) console.log(`other work kept ${busyBefore.toFixed(1)} cores of this machine busy when the run began`);
 const slow = slowest(measured, 5).filter((entry) => existsSync(entry.file));
 if (everyFile && slow.length > 0)
 	console.log(`slowest files: ${slow.map((entry) => `${entry.file} ${entry.seconds.toFixed(0)} s`).join(", ")}`);
 
-let code = failed[0]?.exit ?? 0;
+const code = failed[0]?.exit ?? 0;
 if (failed.length > 0) console.log(`\nFAILED: ${failed.map((part) => part.name).join(", ")}`);
 const failedPhases = testParts.filter((part) => part.exit !== 0);
 if (failedPhases.length > 0) {
@@ -237,21 +222,9 @@ if (failedPhases.length > 0) {
 	);
 	console.log(`\n${failureLines(reports).join("\n")}`);
 }
-if (whole && over(testSeconds, LIMITS) !== "ok") {
-	const where = `scripts/check-plan.ts; AGENTS.md: "Budgets are tests"`;
-	const took = `the tests took ${seconds(testSeconds)}; the budget is ${LIMITS.warn} s and the limit ${LIMITS.fail} s`;
-	// The limits are for a machine that is this run's alone. This run has ended: what is busy now is other work.
-	const busy = Math.max(busyBefore, await busyCores(1000));
-	const small = availableParallelism() < REFERENCE_THREADS;
-	if (over(testSeconds, LIMITS) === "warn") console.log(`\nWARNING: ${took} (${where}).`);
-	else if (small || busy > SHARED_CORES) {
-		const why = small
-			? `this machine has ${availableParallelism()} threads and the limit was measured on ${REFERENCE_THREADS}`
-			: `other work keeps ${busy.toFixed(1)} cores of this machine busy`;
-		console.log(`\nWARNING: ${took} (${where}). Not held to the limit: ${why}.`);
-	} else {
-		console.log(`\nOVER BUDGET: ${took} (${where}).`);
-		code ||= 1;
-	}
-}
+if (whole && testSeconds > CHECK_WARNING_SECONDS)
+	console.log(
+		`\nWARNING: the tests took ${seconds(testSeconds)}, above ${CHECK_WARNING_SECONDS} s. Duration is advisory (decision 0097; issue #77).`,
+	);
+
 leave(code);

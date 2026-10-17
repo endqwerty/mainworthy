@@ -1,4 +1,4 @@
-// What the check runs and how long it may take. One place, read by `scripts/check.ts`, `scripts/ci-gate.ts`,
+// What the check runs and when its duration warrants a warning. One place, read by `scripts/check.ts`, `scripts/ci-gate.ts`,
 // the browser tests' set-up and `test/check.test.ts`.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
@@ -54,47 +54,14 @@ export const parallelWorkers = (cores = availableParallelism()): number => Math.
  */
 export const testReaders = (): string => "1";
 
-export type Limits = { warn: number; fail: number };
-
-/**
- * Seconds the tests of one whole `bun run check` may take (the parallel phase plus the quiet one), on the
- * 16-thread desktop. Measured there on 2026-10-12 with nothing else running, five checks in a row: 106.9, 107.1,
- * 107.2, 108.0 and 107.9 s (about 71 s and 36 s). Over `warn` the check says so; over `fail` it fails.
- *
- * The limits were 115 and 120 s, the two minutes the check was promised to stay under (issue #77). By 2026-10-13
- * the tests took 120.1 to 122.3 s with nothing else running, on `main` and on every branch, so every check ended
- * in a failure that was not its change. The owner raised them that day: the longer check is accepted for now and is
- * to be brought back down later (#77). They are the owner's to raise, nobody else's: make the check faster (AGENTS.md).
- */
-export const LIMITS: Limits = { warn: 130, fail: 150 };
-
-/** The machine the limits were measured on. On a smaller one, a run over the limit is reported and does not fail. */
-export const REFERENCE_THREADS = 16;
-
-/**
- * The limits are for a machine that runs nothing else. When other work keeps more than this many cores busy
- * (another agent's tests: on 2026-10-12 a load generator beside the check made it take 283 s), a run over the
- * limit is reported and does not fail. The desktop's own background is under one core.
- */
-export const SHARED_CORES = 2;
+/** Whole-suite durations only warn, by the owner's decision 0097; issue #77 tracks a future timing gate. */
+export const CHECK_WARNING_SECONDS = 130;
 
 /** The shards the workflow splits the parallel phase into; `.github/workflows/check.yml` lists as many. */
 export const CI_SHARDS = 6;
 
-/**
- * Seconds the tests of one CI shard may take. Not measured on GitHub's runner yet: the suite took 716 s there in
- * one job, which is about 125 s for each of five shards and 100 s for the quiet one. Set from the first pushed
- * runs; until then these only catch a shard that takes twice what is expected. A shard has ten minutes in all.
- *
- * Measured since (2026-10-13): with five shards the slowest, which holds most of the browser files, took 176 to
- * 215 s on `main` and 234 to 258 s once the sign-in pages' browser tests were added, so the gate passed or failed
- * by the runner it drew. Six shards bring it back under the limit. The limits are the owner's to change.
- */
-export const CI_SHARD_LIMITS: Limits = { warn: 180, fail: 240 };
-
-export function over(seconds: number, limits: Limits): "ok" | "warn" | "fail" {
-	return seconds > limits.fail ? "fail" : seconds > limits.warn ? "warn" : "ok";
-}
+/** The existing CI warning threshold. Elapsed time does not change the gate's verdict (decision 0097). */
+export const CI_SHARD_WARNING_SECONDS = 180;
 
 export const seconds = (value: number): string => `${value.toFixed(1)} s`;
 
