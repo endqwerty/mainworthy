@@ -17,6 +17,7 @@ export const BUDGETS = {
 	test: 20,
 	gate: 20,
 	queue: 50,
+	reports: 100,
 	execute: 50,
 	mixed: 50,
 	smallIngest: 1_000,

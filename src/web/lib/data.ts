@@ -81,7 +81,8 @@ export function changed(project: string, change: z.infer<typeof Change>): void {
 	void readAgain((query) => {
 		if (query.queryKey[0] !== project) return false;
 		const op = query.queryKey[1];
-		if (op === "find" || op === "inbox" || op === "gate" || op === "impact" || op === "admin") return true;
+		if (op === "reports" || op === "find" || op === "inbox" || op === "gate" || op === "impact" || op === "admin")
+			return true;
 		// A proposal's event names its proposal and question, so an open case's timeline must be read again.
 		if (
 			(op === "timeline" && change.op === "propose") ||

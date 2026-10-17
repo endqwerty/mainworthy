@@ -20,6 +20,7 @@ const SECTIONS = [
 			{ slug: "report-results", title: "Report results" },
 			{ slug: "decide", title: "Decide in the queue" },
 			{ slug: "runs", title: "Planned runs" },
+			{ slug: "reports", title: "Reports" },
 			{ slug: "changes", title: "Changes and the gate" },
 			{ slug: "agents", title: "Let an agent in" },
 			{ slug: "iphone", title: "The iPhone app" },
@@ -82,6 +83,7 @@ export const SCREEN_DOCS = {
 	runs: "runs",
 	changes: "changes",
 	tests: "report-results",
+	reports: "reports",
 	settings: "customize",
 } as const satisfies Record<string, DocSlug>;
 

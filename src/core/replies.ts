@@ -506,6 +506,26 @@ export const CsvImportReply = z.object({
 	proposal: ProposeReply.nullable(),
 });
 export type CsvImportReply = z.infer<typeof CsvImportReply>;
+const count = z.number().int().nonnegative();
+export const ReportsReply = z.object({
+	from: z.number(),
+	to: z.number(),
+	days: z.array(z.object({ day: z.string(), pass: count, total: count, passRate: z.number() })),
+	automation: z.object({
+		total: count,
+		automated: count,
+		wanted: count,
+		rate: z.number().nullable(),
+		backlog: z.array(z.object({ ref: z.string(), title: z.string() })),
+	}),
+	requirements: z.object({
+		total: count,
+		covered: count,
+		items: z.array(z.object({ key: z.string(), title: z.string(), cases: count })),
+	}),
+	flaky: z.array(z.object({ ref: z.string(), key: z.string(), name: z.string(), lanes: count })),
+	reruns: z.object({ count, durationMs: count, missingDuration: count }),
+});
 
 /** Reply contracts shared by clients and registered beside each operation's input on the server. */
 export const REPLIES = {
@@ -515,6 +535,7 @@ export const REPLIES = {
 	tracker: TrackerReceipt,
 	"tracker-status": TrackerReceipt,
 	announce: AnnounceReply,
+	reports: ReportsReply,
 	propose: ProposeReply,
 	"import-csv": CsvImportReply,
 	report: ReportReceipt,

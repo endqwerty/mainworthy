@@ -34,7 +34,7 @@ describe("the demo's history", () => {
 	test("every day of it has a pipeline's report on main, and the days reach back as far as was asked", () => {
 		for (const days of [1, 10, 14, 30]) {
 			const nights = of(history(days), "pipeline").filter(
-				(event) => event.target.branch === "main" && event.step !== "qreport",
+				(event) => event.target.branch === "main" && !event.step.startsWith("q"),
 			);
 			const dates = nights.map((event) => Math.floor(event.at / DAY));
 			expect(dates).toEqual(Array.from({ length: days }, (_, n) => Math.floor(SINCE / DAY) - days + n));
@@ -146,6 +146,14 @@ describe("the demo's history", () => {
 		expect(of(events, "pipeline").length).toBeGreaterThanOrEqual(14);
 		for (const event of of(events, "pipeline")) expect(event.failures).toEqual([]);
 	});
+	test("reports have a deterministic same-target retry to show flaky signals and rerun time", () => {
+		const events = history();
+		const first = of(events, "pipeline").find((event) => event.step === "qreport");
+		const retry = of(events, "pipeline").find((event) => event.step === "qretry");
+		expect(retry).toMatchObject({ target: first?.target, failures: [], jitter: 1 });
+		expect(retry?.at).toBe((first?.at ?? 0) + 90_000);
+	});
+
 	test("a quarantine covers a report before a person ends it", () => {
 		const events = history();
 		const [entry, exit] = of(events, "quarantine");

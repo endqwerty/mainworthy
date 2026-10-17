@@ -63,6 +63,7 @@ A tablet whose window is wider than 900 px and taller than 500 px also keeps the
 | <kbd>g</kbd> <kbd>s</kbd> | Go to Suite |
 | <kbd>g</kbd> <kbd>q</kbd> | Go to Queue |
 | <kbd>g</kbd> <kbd>r</kbd> | Go to Runs |
+| <kbd>g</kbd> <kbd>a</kbd> | Go to Reports |
 | <kbd>g</kbd> <kbd>c</kbd> | Go to Changes |
 | <kbd>g</kbd> <kbd>t</kbd> | Go to Tests |
 | <kbd>g</kbd> <kbd>,</kbd> | Go to Settings |
@@ -225,3 +226,11 @@ Both pages use plain forms with these keys.
 The caret starts in the name on the sign-in page and in the password on an invitation.
 If the browser is signed in as somebody else, an invitation first asks whether to sign that person out. Focus starts on **Continue**.
 A pressed button keeps keyboard focus while its request runs and after a refusal. The next <kbd>↵</kbd> tries again.
+
+## Reports
+
+| Key | What it does |
+| --- | --- |
+| <kbd>j</kbd> | Next report |
+| <kbd>k</kbd> | Previous report |
+| <kbd>↵</kbd> | Open report |

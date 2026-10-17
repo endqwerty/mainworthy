@@ -32,6 +32,7 @@ import policy from "../../../docs/guide/policy.md" with { type: "text" };
 import privacy from "../../../docs/guide/privacy.md" with { type: "text" };
 import quickstart from "../../../docs/guide/quickstart.md" with { type: "text" };
 import reportResults from "../../../docs/guide/report-results.md" with { type: "text" };
+import reports from "../../../docs/guide/reports.md" with { type: "text" };
 import runs from "../../../docs/guide/runs.md" with { type: "text" };
 import troubleshooting from "../../../docs/guide/troubleshooting.md" with { type: "text" };
 import writeCases from "../../../docs/guide/write-cases.md" with { type: "text" };
@@ -75,6 +76,7 @@ export const PAGES: Readonly<Record<DocSlug, string>> = {
 	"write-cases": writeCases,
 	"import-cases": importCases,
 	"report-results": reportResults,
+	reports,
 	decide,
 	runs,
 	changes,

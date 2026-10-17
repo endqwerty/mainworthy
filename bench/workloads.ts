@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ReportsReply } from "../src/core/replies.ts";
 import type { Actor } from "../src/server/kernel/ctx.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
@@ -207,6 +208,48 @@ export function readRequests(instance: DatasetInstance, index: number): ReadRequ
 	}
 }
 
+/** Reads all report sections and checks raw outcome counts outside the timer. */
+export function reportsWorkload(instance: DatasetInstance, iterations: number): Workload {
+	const expected = z.object({ total: z.number(), pass: z.number() }).parse(
+		instance.app.db.raw
+			.query(`SELECT count(*) AS total, coalesce(sum(r.outcome = 'pass'), 0) AS pass
+ FROM results r WHERE r.project = (SELECT id FROM projects WHERE key = 'benchmark')
+ AND NOT EXISTS (SELECT 1 FROM results c WHERE c.corrects = r.id)`)
+			.get(),
+	);
+	const repeats = z.object({ count: z.number(), durationMs: z.number(), missingDuration: z.number() }).parse(
+		instance.app.db.raw
+			.query(`WITH ordered AS (
+ SELECT r.duration_ms, row_number() OVER (PARTITION BY r.test, r.target, r.actor, b.job ORDER BY r.seq, r.ord) AS position
+ FROM results r JOIN batches b ON b.id = r.batch
+ WHERE r.project = (SELECT id FROM projects WHERE key = 'benchmark') AND r.method = 'auto'
+ AND NOT EXISTS (SELECT 1 FROM results c WHERE c.corrects = r.id))
+ SELECT count(*) AS count, coalesce(sum(duration_ms), 0) AS durationMs,
+ coalesce(sum(duration_ms IS NULL), 0) AS missingDuration FROM ordered WHERE position > 1`)
+			.get(),
+	);
+	return {
+		name: "reports",
+		budget: instance.metadata.parameters.results <= 100_000 ? BUDGETS.reports : null,
+		iterations,
+		correctness: "Complete live-result totals and passes, active suite count, linked automation and rerun evidence.",
+		prepare: () => () => operation(instance, "reports", { days: 366 }),
+		check(value) {
+			const report = ReportsReply.parse(value);
+			ensure(
+				report.days.reduce((n, day) => n + day.total, 0) === expected.total &&
+					report.days.reduce((n, day) => n + day.pass, 0) === expected.pass &&
+					report.automation.total === instance.metadata.counts.cases &&
+					report.automation.automated === instance.metadata.counts.linked &&
+					report.reruns.count === repeats.count &&
+					report.reruns.durationMs === repeats.durationMs &&
+					report.reruns.missingDuration === repeats.missingDuration,
+				"reports must account for all persisted evidence and suite links",
+			);
+		},
+	};
+}
+
 /** Produces isolated reads, including the complete proof strip and queue counts, over an immutable baseline clone. */
 export function readWorkloads(instance: DatasetInstance, iterations: number): Workload[] {
 	const { metadata, app, owner } = instance;
@@ -214,6 +257,7 @@ export function readWorkloads(instance: DatasetInstance, iterations: number): Wo
 	const expectedGate = Gate.parse(operation(instance, "gate", { commit: metadata.lastCommit }));
 	let expectedRef = "";
 	const reads: Workload[] = [
+		reportsWorkload(instance, iterations),
 		{
 			name: "case read",
 			budget: BUDGETS.case,

@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-export type Screen = "suite" | "case" | "queue" | "runs" | "changes" | "tests" | "settings";
+export type Screen = "suite" | "case" | "queue" | "runs" | "changes" | "tests" | "reports" | "settings";
 export type Route = { project: string; screen: Screen; ref: string | null; folder: string | null };
 const changed = "mainworthy:route";
 let entry: "initial" | "navigation" | "history" = "initial";
@@ -28,7 +28,12 @@ export function readRoute(): Route {
 	const project = parts[0] === "p" ? (parts[1] ?? "scratch") : "scratch";
 	const segment = parts[2];
 	const screen: Screen =
-		segment === "queue" || segment === "runs" || segment === "changes" || segment === "tests" || segment === "settings"
+		segment === "queue" ||
+		segment === "runs" ||
+		segment === "changes" ||
+		segment === "reports" ||
+		segment === "tests" ||
+		segment === "settings"
 			? segment
 			: parts[3] === "c"
 				? "case"

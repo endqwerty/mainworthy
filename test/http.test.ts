@@ -16,7 +16,7 @@ import { Policy } from "../src/core/kinds.ts";
 import type { InboxReply, ProposeReply } from "../src/core/ops.ts";
 import { InboxReply as InboxSchema, ReportReceipt } from "../src/core/ops.ts";
 import { PRESETS } from "../src/core/presets.ts";
-import { REPLIES } from "../src/core/replies.ts";
+import { REPLIES, ReportsReply } from "../src/core/replies.ts";
 import { TrackerReceipt } from "../src/core/tracker.ts";
 import type { RegistrationOptions } from "../src/server/identity/webauthn.ts";
 import { type Config, defaultConfig, SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
@@ -1004,6 +1004,7 @@ describe("reads on other cores through HTTP", () => {
 			impact: [{ files: ["checkout.spec.ts"] }],
 			since: [{ cursor: "s:0" }],
 			gate: [{ commit: "feedc0de1" }],
+			reports: [{}, { days: 1 }, { days: 0 }],
 			history: [{ ref: "C-1" }, { ref: "C-1", from: 1, to: 2 }],
 			timeline: [{ ref: "C-1" }],
 			check: [{}],
@@ -1016,22 +1017,34 @@ describe("reads on other cores through HTTP", () => {
 		let checked = 0;
 		for (const op of reads) {
 			for (const input of inputs[op.name] ?? []) {
-				const expected = invoke(instance.app, OPS, {
-					op: op.name,
-					project: "scratch",
-					input,
-					actor: () => instance.owner,
-				});
+				const started = Date.now();
 				const reply = await post(instance, `/api/p/scratch/${op.name}`, input);
-				if (op.name === "audit" && expected.ok && reply.body.ok) {
-					const actual = AuditReply.parse(reply.body.result);
-					const baseline = AuditReply.parse(expected.result);
-					expect(verifyAudit(actual.ndjson)).toMatchObject({ project: baseline.project, records: baseline.records });
-					// Each read has its own export time and checksum; the retained records must match.
-					expect(actual.ndjson.trimEnd().split("\n").slice(1, -1)).toEqual(
-						baseline.ndjson.trimEnd().split("\n").slice(1, -1),
-					);
-				} else expect(reply.body).toEqual(JSON.parse(JSON.stringify(expected)));
+				const now = instance.app.now;
+				if (op.name === "reports" && reply.body.ok) {
+					const report = ReportsReply.parse(reply.body.result);
+					expect(report.to).toBeGreaterThanOrEqual(started + 1);
+					expect(report.to).toBeLessThanOrEqual(Date.now() + 1);
+					instance.app.now = () => report.to - 1;
+				}
+				try {
+					const expected = invoke(instance.app, OPS, {
+						op: op.name,
+						project: "scratch",
+						input,
+						actor: () => instance.owner,
+					});
+					if (op.name === "audit" && expected.ok && reply.body.ok) {
+						const actual = AuditReply.parse(reply.body.result);
+						const baseline = AuditReply.parse(expected.result);
+						expect(verifyAudit(actual.ndjson)).toMatchObject({ project: baseline.project, records: baseline.records });
+						// Each read has its own export time and checksum; the retained records must match.
+						expect(actual.ndjson.trimEnd().split("\n").slice(1, -1)).toEqual(
+							baseline.ndjson.trimEnd().split("\n").slice(1, -1),
+						);
+					} else expect(reply.body).toEqual(JSON.parse(JSON.stringify(expected)));
+				} finally {
+					instance.app.now = now;
+				}
 				checked++;
 			}
 		}
@@ -2327,6 +2340,7 @@ describe("the surface", () => {
 			code: [{ repo: "acme/web", commit: "1".repeat(40) }],
 		});
 		await checked("find", { in: "deployments" });
+		expect(ReportsReply.parse(await checked("reports")).automation.rate).toBeNull();
 		await checked("propose", {
 			cmd: "schema-create",
 			edits: [
@@ -2412,6 +2426,20 @@ describe("the surface", () => {
 			expect(OPS.get?.output.safeParse([invalid]).success).toBe(false);
 			expect(validateGet.ok({ ok: true, result: [invalid], seq: null }).valid).toBe(false);
 		}
+		await checked(
+			"report",
+			{
+				target: { commit: "abcdef1", pr: 52 },
+				attempt: 4,
+				results: [{ test: { key: "schema-test", file: "schema.ts" }, outcome: "pass", durationMs: 5 }],
+			},
+			bearer(producer.token),
+		);
+		const reports = ReportsReply.parse(await checked("reports"));
+		expect(reports.automation.rate).toBe(0);
+		expect(reports.requirements.items).toHaveLength(1);
+		expect(reports.flaky).toHaveLength(1);
+		expect(reports.reruns).toEqual({ count: 3, durationMs: 5, missingDuration: 2 });
 		await checked("claim", {
 			lens: "review",
 			findings: [{ on: "C-1", category: "other", note: "Review the expected value" }],
@@ -2546,6 +2574,9 @@ describe("the surface", () => {
 			code: [{ repo: "acme/web", commit: "1".repeat(40) }],
 		});
 		await checked("find", { in: "deployments" });
+		await checked("reports");
+		await checked("reports", { days: 1 });
+		await checked("reports", { days: 0 }, {}, "invalid");
 		const rows = z.object({ items: z.array(z.record(z.string(), z.unknown())), cursor: z.string().nullable() });
 		for (const ref of seeded.cases) {
 			const doc = z.array(z.object({ hash: z.string() })).parse(await checked("get", { refs: [ref] }))[0];
@@ -2787,6 +2818,7 @@ describe("the surface", () => {
 			await empty.checked("find", { in: area });
 		await empty.checked("get", { refs: [] }, {}, "invalid");
 		await empty.checked("inbox");
+		expect(ReportsReply.parse(await empty.checked("reports")).automation.rate).toBeNull();
 		for (const op of OP_LIST) await checked(op.name, [], {}, "invalid");
 		await checked("get", { refs: ["C-99999"] }, {}, "not_found");
 		await checked("get", { refs: ["C-1"] }, bearer("wrong-token"), "unauthenticated");

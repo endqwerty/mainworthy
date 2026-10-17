@@ -23,6 +23,7 @@ import { navigate, projectUrl, readRoute, refUrl, routeUrl, type Screen, useRout
 import { signOut } from "./lib/signin.ts";
 import { PhoneBar, usePhoneShell } from "./phone.tsx";
 import { QueueScreen } from "./queue/index.tsx";
+import { ReportsScreen } from "./reports/index.tsx";
 import { RunsScreen } from "./runs/index.tsx";
 import { SettingsScreen } from "./settings/index.tsx";
 import { SignIn } from "./signin/index.tsx";
@@ -41,6 +42,7 @@ const screens = {
 	case: CaseScreen,
 	queue: QueueScreen,
 	runs: RunsScreen,
+	reports: ReportsScreen,
 	changes: ChangesScreen,
 	tests: TestsScreen,
 	settings: SettingsScreen,
@@ -51,6 +53,7 @@ const navigation: Place[] = [
 	{ screen: "suite", label: "Suite", icon: "▤", key: "g s" },
 	{ screen: "queue", label: "Queue", icon: "◎", key: "g q" },
 	{ screen: "runs", label: "Runs", icon: "▷", key: "g r" },
+	{ screen: "reports", label: "Reports", icon: "▥", key: "g a" },
 	{ screen: "changes", label: "Changes", icon: "↗", key: "g c" },
 	{ screen: "tests", label: "Tests", icon: "≡", key: "g t" },
 ];

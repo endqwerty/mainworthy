@@ -638,6 +638,9 @@ describe("the phone layout", () => {
 			"src/web/app.tsx: Jump to or run",
 			"src/web/app.tsx: Sign out",
 			"src/web/app.tsx: Switch project",
+			"src/web/reports/index.tsx: Next report",
+			"src/web/reports/index.tsx: Open report",
+			"src/web/reports/index.tsx: Previous report",
 			"src/web/runs/index.tsx: Plan run",
 			// While its form is open: closing a form decides nothing, and a phone has no Escape key.
 			"src/web/suite/bindings.ts: Cancel new folder",

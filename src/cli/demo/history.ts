@@ -440,6 +440,14 @@ export function demoHistory(options: {
 				reason: "The isolated example runner lost its connection",
 			},
 			{
+				kind: "pipeline",
+				at: at + 2.5 * MINUTE,
+				step: "qretry",
+				target: { commit, branch: "main" },
+				failures: [],
+				jitter: 1,
+			},
+			{
 				kind: "quarantine",
 				at: at + 3 * MINUTE,
 				step: "qexit",
