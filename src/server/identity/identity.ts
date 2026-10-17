@@ -33,11 +33,11 @@ import { listInvitations, revokeInvitation, revokeInvitationsOf, sweepInvitation
 import { addressKey, isGeneratedSecret, prefixKey } from "./limiter.ts";
 import { publicAddress } from "./people.ts";
 import {
-	endPasswordSessions,
 	endSession,
 	endSessionById,
 	endSessionsOf,
 	endSessionsOnToken,
+	endSessionsWithoutFactor,
 	findSession,
 	hasUnendedSession,
 	listSessions,
@@ -418,7 +418,7 @@ export function bootstrap(app: App): { owner: Actor; generatedToken: string | nu
 		if (server && app.config.proxy === null) warnings.push(NO_PROXY_NAMED);
 		if (app.config.requireAdminMfa) {
 			for (const actor of app.db.all(Q.actors, { org }))
-				if (hasAdminGrant(app.db, actor.id)) endPasswordSessions(app.db, actor.id, at);
+				if (hasAdminGrant(app.db, actor.id)) endSessionsWithoutFactor(app.db, actor.id, at, providerVouches(app));
 		}
 		return { owner: toActor(app.db, owner, 0), generatedToken, warnings };
 	});
@@ -995,7 +995,7 @@ export function setGrant(
 	const wasAdmin = hasAdminGrant(app.db, row.id);
 	app.db.run(Q.setGrant, { actor: row.id, project: input.project, can: JSON.stringify(input.can) });
 	if (app.config.requireAdminMfa && !wasAdmin && hasAdminGrant(app.db, row.id))
-		endPasswordSessions(app.db, row.id, app.now());
+		endSessionsWithoutFactor(app.db, row.id, app.now(), providerVouches(app));
 	if (input.roles !== undefined)
 		app.db.run(Q.setRoles, { actor: row.id, project: input.project, roles: JSON.stringify([...new Set(input.roles)]) });
 	return Role.array().parse(
@@ -1188,6 +1188,12 @@ export function listActors(db: Db) {
 		})),
 	}));
 }
+
+/**
+ * Whether the identity provider counts as a second factor, for the rule that admins need one: the operator said
+ * that it asks everybody for one (`MAINWORTHY_OIDC_MFA`). Mainworthy reads no claim for it.
+ */
+export const providerVouches = (app: App): boolean => app.config.oidc?.mfa === true;
 
 export function hasAdminGrant(db: Db, actor: number): boolean {
 	const row = db.get(Q.actorById, { id: actor });

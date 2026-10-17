@@ -4,6 +4,7 @@
 // identity reaches a person only by an invitation or by the person linking it, never by a claim; and an `oidc`
 // credential is a way in like a password, for the rules about removing one and about admins.
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { bootstrap, clearChallenges } from "../src/server/identity/identity.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
 import { type Provider, provider, stopProviders } from "./oidc-support.ts";
 import {
@@ -399,6 +400,91 @@ describe("the rules about ways in", () => {
 				expect(must(await viaProvider(w, idp, "sub-robin"))).toEqual({ signedIn: true });
 			} else expect(accepted.status).toBe(403);
 		}
+	});
+});
+
+describe("admins and a second factor", () => {
+	for (const mfa of [false, true])
+		for (const path of ["a personal grant", "a team grant", "a start"])
+			test(`an admin by ${path} keeps a session through the provider only when it enforces a second factor (${mfa})`, async () => {
+				const idp = await provider();
+				const w = world({ oidc: idp.config({ mfa }) });
+				const { code } = await invite(w, { name: "robin", can: ["read"], project: "scratch" });
+				const begun = await begin(w, { invitation: code });
+				const query = await authorize(idp, begun, { subject: "sub-robin" });
+				const cookie = sessionOf(await finish(w, query, jar(begun.ceremony)));
+				const password = await joined(w, "sam", PASSWORD);
+				if (path === "a start") {
+					await w.ok("admin", { do: "grant.set", actor: "robin", project: "scratch", can: ["read", "admin"] });
+					await w.ok("admin", { do: "grant.set", actor: "sam", project: "scratch", can: ["read", "admin"] });
+					w.instance.app.config.requireAdminMfa = true;
+					await w.instance.app.gate.run(() => bootstrap(w.instance.app));
+				} else {
+					w.instance.app.config.requireAdminMfa = true;
+					for (const name of ["robin", "sam"])
+						if (path === "a personal grant")
+							await w.ok("admin", { do: "grant.set", actor: name, project: "scratch", can: ["read", "admin"] });
+					if (path === "a team grant") {
+						await w.ok("admin", { do: "team.create", name: "Admins" });
+						await w.ok("admin", { do: "team.member.add", team: "Admins", person: "robin" });
+						await w.ok("admin", { do: "team.member.add", team: "Admins", person: "sam" });
+						await w.ok("admin", { do: "team.grant.set", team: "Admins", project: "scratch", can: ["admin"] });
+					}
+				}
+				expect(await w.status(jar(cookie))).toBe(mfa ? 200 : 401);
+				// A password session ends either way: the provider's word says nothing of a password.
+				expect(await w.status(jar(password))).toBe(401);
+			});
+});
+
+describe("a provider that is gone or replaced", () => {
+	test("an identity of no configured provider is no way in: the last password stays", async () => {
+		for (const now of ["gone", "replaced"] as const) {
+			const idp = await provider();
+			const w = world({ oidc: idp.config() });
+			const robin = await linked(w, idp, "robin", "sub-robin");
+			// As a start without the provider, or with another one, would have it.
+			if (now === "gone") delete w.instance.app.config.oidc;
+			else w.instance.app.config.oidc = idp.config({ issuer: "https://login.example.com" });
+			const listed = must(await w.op<{ id: number; kind: string }[]>("credential", { do: "list" }, jar(robin)));
+			const password = listed.find((row) => row.kind === "password");
+			expect((await w.op("credential", { do: "remove", id: password?.id }, jar(robin))).status).toBe(400);
+			expect((await signIn(w, "robin", PASSWORD)).status).toBe(200);
+		}
+	});
+});
+
+describe("a slow provider", () => {
+	test("an import while the code is being exchanged ends that ceremony too", async () => {
+		const idp = await provider();
+		const w = world({ oidc: idp.config() });
+		await linked(w, idp, "robin", "sub-robin");
+		let arrived = (): void => {};
+		const reached = new Promise<void>((resolve) => {
+			arrived = resolve;
+		});
+		let release = (): void => {};
+		const released = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const begun = await begin(w);
+		const query = await authorize(idp, begun, {
+			subject: "sub-robin",
+			twist: {
+				held: () => {
+					arrived();
+					return released;
+				},
+			},
+		});
+		const lines = await logged(async () => {
+			const finishing = finish(w, query, jar(begun.ceremony));
+			await reached;
+			clearChallenges(w.instance.app);
+			release();
+			expect((await finishing).text).toBe(REFUSED);
+		});
+		expect(lines).toEqual(["[mainworthy] sign-in refused: challenge"]);
 	});
 });
 

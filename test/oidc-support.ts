@@ -24,6 +24,8 @@ export type Next = {
 		expiresIn?: number;
 		/** The authorization endpoint answers with this error instead of a code. */
 		error?: string;
+		/** The token endpoint waits for this before it answers: a slow provider. */
+		held?: () => Promise<void>;
 	};
 };
 
@@ -113,6 +115,7 @@ export async function provider(): Promise<Provider> {
 					createHash("sha256").update(verifier).digest("base64url") !== found.challenge
 				)
 					return Response.json({ error: "invalid_grant" }, { status: 400 });
+				await found.next.twist?.held?.();
 				exchanged++;
 				const { next, nonce } = found;
 				const twist = next.twist ?? {};

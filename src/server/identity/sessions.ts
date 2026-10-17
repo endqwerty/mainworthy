@@ -119,8 +119,11 @@ const Q = {
 	endById: sql<{ id: number; at: number; why: EndedWhy }>(
 		"UPDATE sessions SET ended_at = $at, ended_why = $why WHERE id = $id AND ended_at IS NULL",
 	),
-	endPasswordOf: sql<{ actor: number; at: number }>(
-		"UPDATE sessions SET ended_at = $at, ended_why = 'ended' WHERE actor = $actor AND ended_at IS NULL AND credential IN (SELECT id FROM credentials WHERE kind = 'password')",
+	// A password session, and one through the identity provider unless the provider vouches for a second factor.
+	endWithoutFactorOf: sql<{ actor: number; at: number; vouched: number }>(
+		`UPDATE sessions SET ended_at = $at, ended_why = 'ended'
+		 WHERE actor = $actor AND ended_at IS NULL
+		   AND credential IN (SELECT id FROM credentials WHERE kind = 'password' OR (kind = 'oidc' AND $vouched = 0))`,
 	),
 	endOthers: sql<{ actor: number; keep: number; at: number }>(
 		"UPDATE sessions SET ended_at = $at, ended_why = 'ended' WHERE actor = $actor AND id != $keep AND ended_at IS NULL",
@@ -355,6 +358,11 @@ export function endOtherSessions(db: Db, actor: number, keep: number | null, at:
 	return db.run(Q.endOthers, { actor, keep: keep ?? 0, at }).changes;
 }
 
-export function endPasswordSessions(db: Db, actor: number, at: number): number {
-	return db.run(Q.endPasswordOf, { actor, at }).changes;
+/**
+ * Ends the sessions of an actor that rest on no second factor, for the rule that admins need one: those opened
+ * with a password, and those opened through the identity provider unless `providerVouches` (the operator's word,
+ * `MAINWORTHY_OIDC_MFA`). A passkey's sessions stay.
+ */
+export function endSessionsWithoutFactor(db: Db, actor: number, at: number, providerVouches: boolean): number {
+	return db.run(Q.endWithoutFactorOf, { actor, at, vouched: providerVouches ? 1 : 0 }).changes;
 }
