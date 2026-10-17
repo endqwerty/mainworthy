@@ -122,6 +122,18 @@ export type ResultRow = {
 	quarantine_exit: number | null;
 };
 
+/** What `Q.updateChange` writes. */
+type ChangeWrite = {
+	id: number;
+	base: string | null;
+	head: string | null;
+	observed: number | null;
+	title: string | null;
+	url: string | null;
+	files: string;
+	rev: number;
+};
+
 const TRUNK_BRANCHES = new Set(["main", "master", "trunk"]);
 
 const Q = {
@@ -219,16 +231,7 @@ const Q = {
 		`INSERT INTO changes (project, key, repo, base_sha, head_sha, head_observed_seq, branch, title, url, files, rev)
 		 VALUES ($project, $key, $repo, $base, $head, $observed, $branch, $title, $url, $files, $rev)`,
 	),
-	updateChange: sql<{
-		id: number;
-		base: string | null;
-		head: string | null;
-		observed: number | null;
-		title: string | null;
-		url: string | null;
-		files: string;
-		rev: number;
-	}>(
+	updateChange: sql<ChangeWrite>(
 		"UPDATE changes SET base_sha = $base, head_sha = $head, head_observed_seq = $observed, title = $title, url = $url, files = $files, rev = $rev WHERE id = $id",
 	),
 	endChange: sql<{ id: number; ended: string; at: number }>(
@@ -656,7 +659,7 @@ function upsertChange(
 		if (mine !== null && mine <= Math.max(head ?? 0, existing.head_observed_seq ?? 0)) return existing;
 	}
 	const files = input.files ?? json<string[]>(existing.files);
-	const next = {
+	const next: ChangeWrite = {
 		id: existing.id,
 		base: input.base ?? existing.base_sha,
 		head: input.head ?? input.commit,
@@ -666,13 +669,19 @@ function upsertChange(
 		files: JSON.stringify(files),
 		rev: ctx.seq,
 	};
-	if (
-		input.head !== undefined ||
-		next.base !== existing.base_sha ||
-		next.head !== existing.head_sha ||
-		next.title !== existing.title ||
-		next.files !== existing.files
-	) {
+	// The stored row in the shape the update writes, so a field added to `ChangeWrite` must be filled in here
+	// and is compared below. `rev` is the write's own stamp, so it never decides.
+	const stored: ChangeWrite = {
+		id: existing.id,
+		base: existing.base_sha,
+		head: existing.head_sha,
+		observed: existing.head_observed_seq,
+		title: existing.title,
+		url: existing.url,
+		files: existing.files,
+		rev: ctx.seq,
+	};
+	if ((Object.keys(next) as (keyof ChangeWrite)[]).some((field) => next[field] !== stored[field])) {
 		if (next.base !== existing.base_sha) ctx.changedBases.add(existing.id);
 		ctx.db.run(Q.updateChange, next);
 		ctx.touched.add(key);

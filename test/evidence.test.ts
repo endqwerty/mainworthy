@@ -2080,6 +2080,24 @@ describe("a change that ends", () => {
 		return asked;
 	};
 
+	test("a report that corrects only a change's URL updates it, and a report that corrects nothing writes nothing", () => {
+		const urls = () =>
+			h.call<{ items: { key: string; url: string | null }[] }>("find", { in: "changes" }).items.map((c) => c.url);
+		const rev = () => h.app.db.raw.query("SELECT rev FROM changes").all();
+		const at = (attempt: number, url: string) => {
+			const report = ciReport({ commit: "url00001", branch: "fix", pr: 12, n: 2, attempt });
+			return { ...report, target: { ...report.target, url } };
+		};
+		h.call("report", at(1, "https://github.com/acme/old/issues/12"));
+		expect(urls()).toEqual(["https://github.com/acme/old/issues/12"]);
+		const written = rev();
+		h.call("report", at(2, "https://github.com/acme/old/issues/12"));
+		expect(rev()).toEqual(written);
+		h.call("report", at(3, "https://github.com/acme/new/pull/12"));
+		expect(urls()).toEqual(["https://github.com/acme/new/pull/12"]);
+		expect(rev()).not.toEqual(written);
+	});
+
 	test("its unanswered failures are no longer asked about, and nothing else about it changes", () => {
 		const asked = failingPull();
 		expect(asked.blocks).toHaveLength(1);
