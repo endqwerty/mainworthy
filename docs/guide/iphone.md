@@ -230,7 +230,7 @@ To inspect a change and the results its gate counted, follow these steps:
    **Show more** reads the next hundred. If the results changed since the first page, the app says so.
    **Read them again** starts from the top.
 5. Under **Runs, newest first**, each row is one commit of the change that was reported, with its verdict. Press
-   one to read what its gate counted.
+   one to read what its gate counted. **More runs** reads the next hundred.
 
 The head, gate, failing tests and affected cases are checked against the commits named in the replies. If the
 head moves during a read, the app tries again once. If the head moves again, the app says so and keeps any

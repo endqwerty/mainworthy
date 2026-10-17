@@ -1,8 +1,10 @@
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { z } from "zod";
 import { ANSWER_LABELS } from "../../core/kinds.ts";
 import { RESULT_STANDING_LABELS, type ResultStanding, Verdict } from "../../core/runs.ts";
-import { useQueryOp } from "../lib/data.ts";
+import { call } from "../lib/api.ts";
+import { queryKey, useQueryOp } from "../lib/data.ts";
 import { useBindings } from "../lib/keys.ts";
 import { navigate, refUrl, routeUrl } from "../lib/router.ts";
 import { openRun } from "../runs/index.tsx";
@@ -286,8 +288,15 @@ function ChangesWorkbench() {
 /** The change's runs, one for each commit reported on it, newest first: how its verdict moved from push to push. */
 function ChangeRuns({ change }: { change: string }) {
 	const { project } = useApp();
-	const read = useQueryOp({ project, op: "find", input: { in: "runs", change, limit: 100 } });
-	const parsed = Run.array().safeParse(read.data?.items);
+	const input = { in: "runs", change, limit: 100 } satisfies Parameters<typeof call<"find">>[1];
+	const read = useInfiniteQuery({
+		queryKey: [...queryKey({ project, op: "find", input }), "pages"],
+		initialPageParam: "",
+		queryFn: ({ pageParam, signal }) =>
+			call("find", { ...input, ...(pageParam ? { cursor: pageParam } : {}) }, { project, signal }),
+		getNextPageParam: (page) => page.cursor ?? undefined,
+	});
+	const parsed = Run.array().safeParse(read.data?.pages.flatMap((page) => page.items));
 	const runs = parsed.success ? parsed.data : [];
 	return (
 		<>
@@ -314,6 +323,11 @@ function ChangeRuns({ change }: { change: string }) {
 					</li>
 				))}
 			</ul>
+			{read.hasNextPage && (
+				<button type="button" className="change-results-more" onClick={() => void read.fetchNextPage()}>
+					More runs
+				</button>
+			)}
 			{!read.isPending && !read.error && runs.length === 0 && (
 				<p className="dim">No commit of this change has been reported yet.</p>
 			)}

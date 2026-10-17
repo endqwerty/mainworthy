@@ -96,6 +96,9 @@ struct ChangeView: View {
 							}
 							.accessibilityIdentifier("change-run-\(run.ref)")
 						}
+						if screen.hasMoreRuns {
+							Button("More runs") { Task { await screen.moreRuns() } }
+						}
 					}
 				}
 				Panel("Open questions") {

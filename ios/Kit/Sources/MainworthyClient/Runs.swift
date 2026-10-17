@@ -292,8 +292,10 @@ public struct RunFilter: Equatable, Sendable {
 }
 
 extension ProjectClient {
-	package func runs(_ filter: RunFilter = RunFilter(), after cursor: String? = nil) async throws -> RunPage {
-		var input: [String: JSONValue] = ["in": "runs", "limit": 100]
+	package func runs(_ filter: RunFilter = RunFilter(), after cursor: String? = nil, limit: Int = 100) async throws
+		-> RunPage
+	{
+		var input: [String: JSONValue] = ["in": "runs", "limit": .number(Double(limit))]
 		if let kind = filter.kind { input["origin"] = .string(kind.rawValue) }
 		if let state = filter.state { input["state"] = .string(state.rawValue) }
 		if let change = filter.change { input["change"] = .string(change) }

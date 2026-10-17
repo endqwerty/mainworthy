@@ -18,6 +18,9 @@ public final class ChangesScreen: ProjectScreen {
 	public private(set) var results: ChangeResults?
 	/// The open change's runs, one for each of its commits that was reported, newest first.
 	public private(set) var runs: [Run] = []
+	/// The change has more runs than were read.
+	public private(set) var hasMoreRuns = false
+	private var nextRuns: String?
 	private var counted: [String: ChangeResults] = [:]
 	private var selected: String?
 	private var selectedChange: ChangeSummary?
@@ -25,7 +28,13 @@ public final class ChangesScreen: ProjectScreen {
 	private var detailReads = 0
 	private let project: ProjectClient
 
-	package init(project: ProjectClient) { self.project = project }
+	/// How many runs of a change one read asks for.
+	private let runsPerPage: Int
+
+	package init(project: ProjectClient, runsPerPage: Int = 100) {
+		self.project = project
+		self.runsPerPage = runsPerPage
+	}
 
 	public func open(_ key: String) async {
 		guard key != selected || detailLoading != .done else { return }
@@ -33,6 +42,8 @@ public final class ChangesScreen: ProjectScreen {
 		if selected != key {
 			results = nil
 			runs = []
+			nextRuns = nil
+			hasMoreRuns = false
 		}
 		selected = key
 		detail = nil
@@ -70,17 +81,43 @@ public final class ChangesScreen: ProjectScreen {
 		return results
 	}
 
+	/// Reads the change's runs again, as many pages as were shown.
 	private func readRuns(of key: String, read: Int) async {
 		do {
-			let page = try await project.runs(RunFilter(change: key))
+			let wanted = runs.count
+			var page = try await project.runs(RunFilter(change: key), limit: runsPerPage)
+			var found = page.runs
+			while let cursor = page.next, found.count < wanted {
+				page = try await project.runs(RunFilter(change: key), after: cursor, limit: runsPerPage)
+				found += page.runs
+			}
 			guard read == detailReads else { return }
-			runs = page.runs
+			runs = found
+			nextRuns = page.next
+			hasMoreRuns = page.next != nil
 		} catch is CancellationError {
 		} catch {
 			guard read == detailReads else { return }
 			notice = error.shown
 		}
 		for results in counted.values { await results.refresh() }
+	}
+
+	/// Reads the open change's next page of runs.
+	public func moreRuns() async {
+		guard let key = selected, let cursor = nextRuns else { return }
+		let mine = detailReads
+		do {
+			let page = try await project.runs(RunFilter(change: key), after: cursor, limit: runsPerPage)
+			guard mine == detailReads else { return }
+			let known = Set(runs.map(\.ref))
+			runs += page.runs.filter { !known.contains($0.ref) }
+			nextRuns = page.next
+			hasMoreRuns = page.next != nil
+		} catch is CancellationError {
+		} catch {
+			if mine == detailReads { notice = error.shown }
+		}
 	}
 
 	private func readDetail() async {
@@ -94,13 +131,13 @@ public final class ChangesScreen: ProjectScreen {
 			detail = fresh
 			selectedChange = fresh.change
 			detailLoading = .done
-			await readRuns(of: key, read: mine)
 			// The results shown are the shown gate's: a gate of another run gets results of its own.
 			if results?.change != key || results?.run != fresh.gate.run {
 				// Another run of the same change keeps what the person chose to see.
 				let query = results?.change == key ? results?.query : nil
 				results = ChangeResults(project: project, change: key, run: fresh.gate.run, query: query ?? .init())
 			}
+			await readRuns(of: key, read: mine)
 		} catch is CancellationError {
 		} catch {
 			guard mine == detailReads else { return }

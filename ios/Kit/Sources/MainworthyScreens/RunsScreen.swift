@@ -143,8 +143,14 @@ public final class RunsScreen: ProjectScreen {
 		guard let saved = savedPlan else { return nil }
 		do {
 			let run = try await project.run(saved.ref)
+			// The new run opens from the list, so a filter that leaves it out is set aside.
+			if !filter.admits(run) {
+				filter = RunFilter()
+				runs = []
+				next = nil
+			}
 			await refresh()
-			if filter.admits(run), !runs.contains(where: { $0.ref == run.ref }) { runs.insert(run, at: 0) }
+			if !runs.contains(where: { $0.ref == run.ref }) { runs.insert(run, at: 0) }
 			loading = .done
 			notice = saved.sentence
 			open(run).planned(saved.sentence)

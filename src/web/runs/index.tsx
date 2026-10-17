@@ -64,6 +64,12 @@ function RunListing({ opened }: { opened: Run | null }) {
 	const [planning, setPlanning] = useState(false);
 	const [filter, setFilter] = useState<RunFilter>({ origin: null, state: null });
 	const [chosen, setChosen] = useState<string | null>(opened?.ref ?? null);
+	// An address that names another run, by Back, Forward or a jump, selects it.
+	const [addressed, setAddressed] = useState<string | null>(opened?.ref ?? null);
+	if ((opened?.ref ?? null) !== addressed) {
+		setAddressed(opened?.ref ?? null);
+		if (opened) setChosen(opened.ref);
+	}
 	const input = {
 		in: "runs",
 		limit: 100,
