@@ -6,7 +6,7 @@ import { acceptedBatches } from "./evidence/evidence.ts";
 import { actorById, ruleActor } from "./identity/identity.ts";
 import type { App } from "./kernel/app.ts";
 import { allProjects, makeCtx, projectById, stampSeq } from "./kernel/ctx.ts";
-import { processBatch } from "./ops/writes.ts";
+import { applyAccepted } from "./ops/writes.ts";
 
 /**
  * Applies every batch that was accepted but not applied. A report is stored durably before it is applied, so a
@@ -27,7 +27,7 @@ export function recoverAccepted(app: App): number {
 				// A report applied here keeps the time it was accepted at, as one applied by its own request does:
 				// its results are not dated by the restart, and a demo's history stays where the seed put it.
 				const ctx = makeCtx(app, project, actorById(app.db, batch.actor, project.id), true, batch.at);
-				processBatch(ctx, batch.id);
+				applyAccepted(ctx, batch);
 				stampSeq(ctx);
 				return { key: project.key, seq: ctx.seq, touched: [...ctx.touched], actor: ctx.actor.name };
 			});
