@@ -1729,6 +1729,12 @@ export const nothingCounted = (): GateStatus => ({
 export const waitingFor = (db: Db, run: RunRow): ShardWait[] =>
 	run.origin === "change" ? waitingShards(db, targetsOfRun(db, run)) : [];
 
+/**
+ * Whether more of a commit's results are on their way: a report accepted and not yet applied, or a shard of a job
+ * that has not reported. What has been applied so far cannot say the commit's failures are gone.
+ */
+export const stillArriving = (db: Db, run: RunRow): boolean => run.outstanding > 0 || waitingFor(db, run).length > 0;
+
 export function gateOf(ctx: Ctx, run: RunRow): GateStatus {
 	const tally = json<Tally>(run.tally);
 	const open = json<string[]>(run.blocking);

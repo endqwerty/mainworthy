@@ -30,7 +30,9 @@ agent's report under the job's name is not the job.
 
 **Questions wait for the whole commit too.** An open failure question closes when its cause is gone from the
 newest commit, and an answer that needs a fix ends when its cause passes there (decision 0091). Neither happens
-while that commit waits for a shard: the missing shard may hold the cause.
+while that commit waits for a shard, or while a report of it is accepted and not yet applied: either may hold the
+cause. Not even a planned run that cleared closes the question then. (Both found in review: the first by the
+verifier, the second by the automated review of the pull request.)
 
 **This repository reports its parallel shards so.** `scripts/ci-gate.ts` reports `tests-1` to `tests-<n>` as
 shards of the job `tests`. A shard that left no report now leaves the gate `pending` as well as failing the job.

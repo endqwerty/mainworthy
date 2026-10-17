@@ -290,7 +290,7 @@ The answer ends only when that commit's run shows all of the following.
   A shard that has not reported one of those tests yet keeps the answer. So does a test that the fix renamed or removed.
 
 When your pipeline reports its shards with `--shard`, the answer also waits until every shard of the commit has
-reported. See [report from sharded jobs](./report-results.md#report-from-sharded-jobs).
+reported. A report that is accepted and not yet applied keeps the answer too. See [report from sharded jobs](./report-results.md#report-from-sharded-jobs).
 Otherwise Mainworthy does not know whether every job of a commit has reported. So the answer can end before a job
 that has not reported yet: one that runs a test the question does not list, or one that runs a listed test that
 another job or a person already passed in that environment. If that job then fails with the cause, the failure is
