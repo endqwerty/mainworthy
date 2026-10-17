@@ -237,6 +237,27 @@ describe("what a flip and a rerun are (review of #461)", () => {
 		h = harness();
 	});
 
+	test("an attempt corrected twice counts the worse of what stands, not the longest chain (verifier, round 3)", () => {
+		h = harness({ unlinked: "track" });
+		const send = (outcome: "pass" | "fail", durationMs: number, extra: Record<string, unknown> = {}, attempt = 1) => {
+			const one = ciReport({
+				commit: "aaaa0001",
+				n: 1,
+				attempt,
+				...(outcome === "fail" ? { fail: { 0: "broke" } } : {}),
+			});
+			h.call("report", { ...one, results: one.results.map((r) => ({ ...r, durationMs, ...extra })) });
+			return lastResult("T-1");
+		};
+		const original = send("fail", 10);
+		send("pass", 20, {}, 2);
+		const first = send("pass", 999, { corrects: original });
+		send("pass", 777, { corrects: first });
+		send("fail", 555, { corrects: original });
+		// Two corrections stand, 777 ms (pass) and 555 ms (fail): the attempt counts the worse, as the gate does.
+		expect(stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 1, lostMs: 555 });
+	});
+
 	test("two results of one attempt and then a rerun are one rerun, timed by the result that attempt counted", () => {
 		h = harness({ unlinked: "track" });
 		const first = ciReport({ commit: "aaaa0001", n: 1, fail: { 0: "socket hang up" } });

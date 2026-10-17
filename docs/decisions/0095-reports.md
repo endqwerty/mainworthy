@@ -39,9 +39,10 @@ of an hour.
   it, and a flip with a corrected side is not counted.
 - Reruns: an attempt that a higher attempt of the same lane repeated, once per attempt however often it was reported.
   The duration of the result that attempt counted is time lost; an attempt with no duration is counted and said apart.
-  What ran is an execution at its own attempt; a correction gives that execution's outcome and time from the end of
-  its chain, whatever attempt it was sent with, because a correction is stored at an attempt no older than the one it
-  corrects and by its own attempt would hide the rerun (the second verification).
+  What ran is an execution at its own attempt; its corrections give its outcome and time, whatever attempt they were
+  sent with, because a correction is stored at an attempt no older than the one it corrects and by its own attempt
+  would hide the rerun (the second verification). Corrections can branch, so what stands is every correction nothing
+  corrects in turn, and the attempt counts the worse of those, then the later, as the gate does (the third).
 - Automation: a case is automated when an automated test is linked to it. The rate is automated cases over active
   cases, less those marked as cannot be automated that have no test. The backlog is the rest, the ones run by hand
   most often in the window first.
