@@ -436,3 +436,81 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+test.skipIf(!browserAvailable)(
+	"an undo queued behind a tag is not erased by a read an earlier failure owes",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", { edits: [{ op: "create", body: { title: "Undo behind a tag" } }] });
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		const first = pending();
+		const second = pending();
+		const inverse = pending();
+		try {
+			const { page } = h;
+			// The change stream reads the project too; without it, every read here is the placements' own.
+			await page.addInitScript(() => {
+				Reflect.set(
+					window,
+					"EventSource",
+					class {
+						close(): void {}
+					},
+				);
+			});
+			await page.reload();
+			await page.getByRole("button", { name: "Undo behind a tag", exact: true }).waitFor();
+			let seen = 0;
+			await page.context().route("**/api/p/scratch/propose", async (route) => {
+				seen += 1;
+				const turn = seen;
+				await (turn === 1 ? first : turn === 2 ? second : inverse).promise;
+				if (turn === 1) await route.fulfill(failedReply("The first write failed"));
+				else await route.continue();
+			});
+			await tagSelected(page, "alpha");
+			await eventually(
+				async () => seen,
+				(count) => count === 1,
+			);
+			await tagSelected(page, "beta");
+			await eventually(
+				async () => seen,
+				(count) => count === 2,
+			);
+			first.settle();
+			await page.waitForFunction(() =>
+				document.querySelector("#stat")?.textContent?.includes("The first write failed"),
+			);
+			// Undo beta while it is on its way: the inverse waits for it, and the read alpha's failure owes waits too.
+			await page.keyboard.press("u");
+			await page.waitForFunction(() => document.querySelector("#stat")?.textContent?.includes("Undo queued"));
+			const reads: string[] = [];
+			page.on("request", (request) => {
+				if (/\/api\/p\/scratch\/(get|find)$/.test(request.url())) reads.push(request.url());
+			});
+			second.settle();
+			await eventually(
+				async () => seen,
+				(count) => count === 3,
+			);
+			await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+			expect(reads).toEqual([]);
+			expect(await ctags(page)).not.toContain("#beta");
+			inverse.settle();
+			await page.waitForFunction(() => document.querySelector("#stat")?.textContent?.includes("Undone."));
+			await eventually(
+				async () => reads.length,
+				(count) => count > 0,
+			);
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.tags).toEqual([]);
+		} finally {
+			first.settle();
+			second.settle();
+			inverse.settle();
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);

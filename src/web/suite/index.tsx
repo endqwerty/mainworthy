@@ -1771,35 +1771,42 @@ export function SuiteScreen() {
 			if (action.queued) return;
 			action.queued = true;
 			const rollback = optimisticPlacement(action.edits);
-			setHidden(new Set());
-			setStatus("Undo queued. It will follow the pending change.");
-			let original: Api["propose"]["reply"];
-			try {
-				original = await action.ready;
-			} catch {
-				return;
-			}
-			if (original.status !== "adopted") return;
-			optimisticPlacement(action.edits);
+			// The inverse is on its way from now, though it is sent only after the change it undoes: counted here, a
+			// read that change owes cannot start in between and erase it.
 			placing.current.inFlight += 1;
+			let wantsRead = false;
 			try {
-				const reply = action.edits.length
-					? await call("propose", { edits: action.edits }, { project, owner })
-					: original;
-				if (reply.status === "adopted") {
-					if (undo.current === action) undo.current = null;
-					setStatus("Undone. The inverse change is recorded.");
-				} else {
+				setHidden(new Set());
+				setStatus("Undo queued. It will follow the pending change.");
+				let original: Api["propose"]["reply"];
+				try {
+					original = await action.ready;
+				} catch {
+					return;
+				}
+				if (original.status !== "adopted") return;
+				optimisticPlacement(action.edits);
+				wantsRead = true;
+				try {
+					const reply = action.edits.length
+						? await call("propose", { edits: action.edits }, { project, owner })
+						: original;
+					if (reply.status === "adopted") {
+						if (undo.current === action) undo.current = null;
+						setStatus("Undone. The inverse change is recorded.");
+					} else {
+						rollback();
+						action.queued = false;
+						setStatus(`Undo proposed, waiting for a person · ${reply.question ?? ""}`);
+					}
+				} catch (error) {
 					rollback();
 					action.queued = false;
-					setStatus(`Undo proposed, waiting for a person · ${reply.question ?? ""}`);
+					setStatus(error instanceof Error ? error.message : "Undo failed. Press u to retry.");
 				}
-			} catch (error) {
-				rollback();
-				action.queued = false;
-				setStatus(error instanceof Error ? error.message : "Undo failed. Press u to retry.");
+			} finally {
+				void settlePlacement(wantsRead);
 			}
-			void settlePlacement(true);
 		} else if (view && view.version > 1) {
 			const focused = document.activeElement;
 			const raw =
