@@ -271,6 +271,8 @@ Mainworthy signs people in through one OpenID Connect provider. It uses the auth
 
 The four variables are set together or not at all. Startup stops when only some are set, when `MAINWORTHY_PUBLIC_URL` is missing, or when the issuer is not `https`. Plain `http` is accepted only on the loopback address, for a provider on the same machine.
 
+A provider that offers only SAML 2.0 can still be used: put a broker that turns SAML into OpenID Connect in front of Mainworthy, such as Keycloak, Authentik or Dex, and configure the broker here. Mainworthy itself does not take SAML.
+
 Nobody gets a person from the provider alone. An admin invites each person, and the person accepts through the provider, or a person links it from their settings. See [through an identity provider](./access.md#through-an-identity-provider). The client secret goes to the provider and nowhere else: it is not in an archive, the log or a reply.
 
 ## Require a second factor for admins

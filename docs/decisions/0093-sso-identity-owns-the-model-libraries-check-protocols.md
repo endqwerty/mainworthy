@@ -23,7 +23,7 @@ checkers** come from maintained libraries, behind one file each, and decide only
 | TOTP | our RFC 6238 code, which is small and fully specified |
 | Passkeys | our verifier for now; whether to move to `@simplewebauthn/server` is #419 |
 | OpenID Connect | `openid-client` (this decision, `src/server/identity/oidc.ts`) |
-| SAML 2.0 | a library chosen by the spike in #418 |
+| SAML 2.0 | not built: deferred by the owner on 2026-10-17 (#418) |
 
 An identity at a provider is a **credential of kind `oidc`**. The `credentials` table already allowed the kind
 (migration 0004), so no migration was needed. The handle is the issuer and the subject joined by `#`. A session
@@ -69,6 +69,15 @@ organisation member register a provider until 1.6.11 (CVE-2026-53515).
   build ending only password sessions.
 - **A way in is a way in now.** When removing a credential, an `oidc` row counts only if its issuer is the
   provider configured now. With the provider gone or replaced, the last password or passkey stays.
+
+## SAML is not built
+
+The spike in #418 found every SAML library on the same XML core (`xml-crypto`, `@xmldom/xmldom`), none safe on its
+default settings, and the best of them (`@node-saml/node-saml`) bundling `sax` under BlueOak-1.0.0, which the owner
+declined. Holding `sax` at 1.4.1, the last ISC release, would forgo later fixes for hostile input. A design that owns a
+strict SAML profile on the XML core, with the provider's cross-site POST staged and finished from our own page, is
+recorded on #418. On 2026-10-17 the owner deferred SAML. A provider that speaks only SAML reaches Mainworthy through
+a broker that turns SAML into OpenID Connect (Keycloak, Authentik, Dex).
 
 ## Not done here
 
