@@ -136,6 +136,25 @@ export function presetOf(policy: Pick<Policy, "preset" | "clauses">): PresetName
 	return name && canonical(policy.clauses) === canonical(PRESETS[name].clauses) ? name : null;
 }
 
+/**
+ * A policy as stored: a row's JSON text read back. A policy stored before the `unlinked` setting existed has none,
+ * so its clauses alone say who is asked. Not checked: parse it with `Policy` and ask `policyProblem`.
+ */
+export function storedPolicy(row: { preset: string; clauses: string; settings: string }): Policy {
+	const stored = JSON.parse(row.settings) as Partial<Pick<Policy["settings"], "unlinked" | "emptyReports">> &
+		Omit<Policy["settings"], "unlinked" | "emptyReports" | "flakyDetection"> & { flakyDetection?: unknown };
+	return {
+		preset: row.preset,
+		clauses: JSON.parse(row.clauses),
+		settings: {
+			...stored,
+			unlinked: stored.unlinked ?? "ask",
+			emptyReports: stored.emptyReports ?? "pending",
+			flakyDetection: FlakyDetectionSettings.parse(stored.flakyDetection),
+		},
+	};
+}
+
 /** A policy is total when every kind ends in a clause that always matches, so no question is left unowned. */
 export function missingCatchAll(clauses: readonly Clause[]): Kind[] {
 	return KINDS.filter((kind) => {

@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { Attachment, AttachmentData } from "../../core/attachments.ts";
+import { Policy } from "../../core/kinds.ts";
+import { policyProblem, storedPolicy } from "../../core/presets.ts";
 import { attachmentType, type BlobStore, blobHash } from "../kernel/blobs.ts";
 import type { Db } from "../kernel/db.ts";
 import { OpError } from "../kernel/errors.ts";
@@ -519,6 +521,16 @@ export function importArchive(db: Db, lines: Iterable<string>, options: { blobs?
 			}
 			if (!ended) throw invalid("truncated archive: footer is missing");
 			rebuildSearch(db);
+			// Earlier versions are history; the policy in force is what the next report is asked under.
+			const current = db.raw.query<{ key: string; preset: string; clauses: string; settings: string }, []>(
+				`SELECT p.key, o.preset, o.clauses, o.settings FROM projects p
+				 JOIN policies o ON o.project = p.id AND o.version = (SELECT max(version) FROM policies WHERE project = p.id)`,
+			);
+			for (const row of current.all()) {
+				const parsed = Policy.safeParse(storedPolicy(row));
+				const problem = parsed.success ? policyProblem(parsed.data) : "policy is not valid";
+				if (problem) throw invalid(`archive policy of project ${row.key} is refused: ${problem}`);
+			}
 			const foreign = db.raw.query<{ table: string; parent: string }, []>("PRAGMA foreign_key_check").get();
 			if (foreign)
 				throw invalid(`archive foreign key violation in table ${foreign.table}, referencing ${foreign.parent}`);

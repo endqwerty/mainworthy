@@ -1,10 +1,9 @@
 // The project's policy: a versioned clause table. Owns the table `policies`.
 // Reading is open to every module; the only writer is the effect of an `adopt` decision (see suite/adopt).
-import { FlakyDetectionSettings } from "../../core/flaky.ts";
 import { type Clause, clauseOf, type Facts, Policy, type Unlinked } from "../../core/kinds.ts";
-import { PRESETS, type PresetName, policyProblem, presetOf } from "../../core/presets.ts";
+import { PRESETS, type PresetName, policyProblem, presetOf, storedPolicy } from "../../core/presets.ts";
 import type { Ctx } from "../kernel/ctx.ts";
-import { type Db, json, sql } from "../kernel/db.ts";
+import { type Db, sql } from "../kernel/db.ts";
 import { invalid } from "../kernel/errors.ts";
 import { decisionOf, type Witness } from "../kernel/witness.ts";
 
@@ -35,24 +34,7 @@ const Q = {
 
 export type CurrentPolicy = Policy & { version: number };
 
-function read(row: PolicyRow): CurrentPolicy {
-	// A policy stored before the `unlinked` setting existed has none: its clauses alone say who is asked.
-	const stored = json<
-		Partial<Pick<Policy["settings"], "unlinked" | "emptyReports">> &
-			Omit<Policy["settings"], "unlinked" | "emptyReports" | "flakyDetection"> & { flakyDetection?: unknown }
-	>(row.settings);
-	return {
-		version: row.version,
-		preset: row.preset,
-		clauses: json(row.clauses),
-		settings: {
-			...stored,
-			unlinked: stored.unlinked ?? "ask",
-			emptyReports: stored.emptyReports ?? "pending",
-			flakyDetection: FlakyDetectionSettings.parse(stored.flakyDetection),
-		},
-	};
-}
+const read = (row: PolicyRow): CurrentPolicy => ({ version: row.version, ...storedPolicy(row) });
 
 export function currentPolicy(db: Db, project: number): CurrentPolicy {
 	const row = db.get(Q.current, { project });
@@ -156,8 +138,13 @@ export function seedPolicy(ctx: Ctx, preset: PresetName, unlinked?: Unlinked): v
 	});
 }
 
-/** Puts a policy in force. Standing: callable only with the witness of the decision that adopted it. */
+/**
+ * Puts a policy in force. Standing: callable only with the witness of the decision that adopted it. A proposal made
+ * before this check, or restored from an archive, may hold a policy that is refused today, so it is checked again here.
+ */
 export function writePolicy(ctx: Ctx, witness: Witness, policy: Policy): number {
+	const problem = policyProblem(policy);
+	if (problem) throw invalid(problem);
 	const version = currentPolicy(ctx.db, ctx.project.id).version + 1;
 	ctx.db.run(Q.insert, {
 		project: ctx.project.id,
