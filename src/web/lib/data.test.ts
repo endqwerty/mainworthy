@@ -282,3 +282,30 @@ test("taking back a change undoes only what it did to the row as it is now (issu
 	expect(undoChange({ tags: ["x"] }, { tags: ["x", "y"] }, { tags: ["x"] })).toEqual({ tags: ["x", "y"] });
 	expect(undoChange({ tags: ["x", "y"] }, { tags: ["x", "y"] }, { tags: ["x"] })).toEqual({ tags: ["x", "y"] });
 });
+
+// The second verification of #461: a report read only its kind and window, so no ref of an event matched it, and
+// Reports showed the numbers from before a report arrived until the page was loaded again.
+test("a report is read again on any change to its project, whatever the change names", async () => {
+	let reads = 0;
+	const observer = new QueryObserver(queryClient, {
+		queryKey: queryKey({ project: "scratch", op: "stats", input: { of: "reruns", days: 30 } }),
+		queryFn: async () => ({ read: ++reads }),
+	});
+	const stop = observer.subscribe(() => {});
+	try {
+		await until(() => expect(reads).toBe(1));
+		changed("other", { op: "report", touched: ["R-1"] });
+		expect(reads).toBe(1);
+		for (const [op, touched] of [
+			["report", ["R-1", "T-2"]],
+			["decide", ["Q-9"]],
+			["propose", ["C-4"]],
+		] as const) {
+			const before = reads;
+			changed("scratch", { op, touched: [...touched] });
+			await until(() => expect(reads).toBe(before + 1));
+		}
+	} finally {
+		stop();
+	}
+});
