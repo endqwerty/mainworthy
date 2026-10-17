@@ -1,6 +1,6 @@
 // `mainworthy invite` against a real server: the link is printed once, a list never shows it, and a revoked
-// invitation signs nobody in. The first command of the long test is started as a process; the rest are run by
-// `runCli` in the test's own process (`run` in `test-support.ts`), so the test does not wait on sixteen starts.
+// invitation signs nobody in. The long test starts no process: its commands are run by `runCli` in the test's own
+// process (`run` in `test-support.ts`). The executable around `invite new` is held by the SMTP test, which starts it.
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -60,9 +60,11 @@ test("invite new --email delivers the printed link through the configured SMTP s
 
 test("invite new prints the link once, invite list never shows the code, and invite revoke withdraws it", async () => {
 	await withInstance(
-		async ({ cli, run, instance }) => {
+		async ({ run, instance }) => {
+			// One sign-in below hashes a password; the default cost is most of this test's own time.
+			instance.app.config.passwordCost = { memoryCost: 8, timeCost: 1 };
 			const before = Date.now();
-			const made = await cli([
+			const made = await run([
 				"invite",
 				"new",
 				"sam",
