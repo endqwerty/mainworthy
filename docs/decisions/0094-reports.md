@@ -30,10 +30,11 @@ whole quarter of an hour in UTC. Joining each result to its day in SQL cost ten 
 
 **The other reports.**
 
-- Flaky: the tests with a flip in the window (a pass and a failure on the same code, recorded on ingest), most flips
-  first, against the automated tests that reported in it.
-- Reruns: an attempt that a higher attempt of the same lane repeated. Its reported duration is time lost; an attempt
-  with no duration is counted and said apart.
+- Flaky: the automated tests with a flip in the window (a pass and a failure on the same code, recorded on ingest),
+  most flips first, against the automated tests that reported in it. A test is automated by its kind, whoever reported
+  it, and a flip with a corrected side is not counted.
+- Reruns: an attempt that a higher attempt of the same lane repeated, once per attempt however often it was reported.
+  The duration of the result that attempt counted is time lost; an attempt with no duration is counted and said apart.
 - Automation: a case is automated when an automated test is linked to it. The rate is automated cases over active
   cases, less those marked as cannot be automated that have no test. The backlog is the rest, the ones run by hand
   most often in the window first.
