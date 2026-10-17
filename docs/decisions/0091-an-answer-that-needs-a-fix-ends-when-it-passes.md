@@ -28,22 +28,22 @@ commit of a scope, after a report, and the answer ends only when that commit's r
 
 - No test fails with the cause, whether an answer explains it or not. `stoppedFailing` counts an explained row as
   gone, which would end an answer on the failure it explains.
-- Every test the question lists passes, in each environment where the question saw it fail with the cause. A
-  shard that has not reported one of those tests yet ends nothing. A test the fix renamed or removed never passes,
-  so its answer stays. Where it failed comes from two places. The question records each pair of test and
-  environment that a commit's gate counted failing, each read from its own result (a planned run gathers results
-  from several environments), when it is raised and each time a failure attaches. And the
-  results reported since it was raised add the failures its answer carried afterwards. A passing retry changes
-  neither. The job and the reporter are left out: a sharded pipeline moves a test between jobs when it balances
-  them again, and a pipeline's token can be replaced.
+- Every test the question lists passes, in each environment where a pipeline or a person has seen it fail with
+  the cause in the scope. A shard that has not reported one of those tests yet ends nothing. A test the fix renamed
+  or removed never passes, so its answer stays. Where it failed is read from the results as reported, which a
+  passing retry does not change, with no point in time to start from. The job and the reporter are left out: a
+  sharded pipeline moves a test between jobs when it balances them again, and a pipeline's token can be replaced.
 
-  The first four versions worked this out from the results alone, bounded first by the runs resting on the
-  answer, then by the question's sample, the earliest failure on its targets, and the last occurrence of the
-  question before it. The verifier found each one wrong: a retry erases what a run counts, a sample is replaced,
-  a retry reuses its commit's target, and a change opened again asks about failures reported before the question
-  before it ended. The question knowing what it saw is the one answer that does not depend on when it was raised.
-- The question lists every test it has seen. It lists fifty; with more, the rest are unknown. It keeps 500 pairs
-  of test and environment, and with that many its answer stays too.
+  The first six versions tried to know where this question's own failures were: from the runs resting on the
+  answer, then from the results after the question's sample, after the earliest failure on its targets, after the
+  last occurrence of the question before it, and from pairs the question recorded as it was raised. The verifier
+  found each one wrong, every time by a way of raising a question that the bound or the record did not see: a
+  retry erases what a run counts, a sample is replaced, a retry reuses its commit's target, a change opened again
+  asks about earlier failures, a planned run gathers several environments, and a commit that moves into a pull
+  request brings a sample. Every failure of the cause in the scope is the one set no way of raising a question can
+  leave short. What it costs: an environment where the cause failed once and that no longer reports keeps the
+  answer, as before this change, until a person withdraws it.
+- The question lists every test it has seen. It lists fifty; with more, the rest are unknown.
 - No open planned run names the question. A person asked for that run, and it waits for its own evidence.
 
 Within what the newest commit has reported, each condition errs towards keeping the answer. A job that has not
@@ -88,5 +88,4 @@ a mistake" are about results already recorded. There is no policy setting.
 
 - Settled lists decided questions only, so an answer that ended leaves it, as one that expired or whose tracker
   issue closed does today. The ledger and the audit export keep the answer and its ending.
-- Answers given before this change stand until a person withdraws them, as before: their questions did not record
-  where they saw the cause fail.
+- Answers given before this change end the same way, at the next passing report in their scope.

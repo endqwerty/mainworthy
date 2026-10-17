@@ -1175,7 +1175,7 @@ describe("holds", () => {
 		expect(state(asked.q)).toBe("dissolved");
 	});
 
-	test("a question asked again on a retried commit needs only what it saw itself", () => {
+	test("a question asked again on a retried commit waits for every environment its cause failed in", () => {
 		const fail = { 0: "the voucher is rejected" };
 		const report = (commit: string, env: string, attempt: number, failing: boolean) => {
 			const input = ciReport({ commit, branch: "fix", pr: 52, n: 1, attempt, ...(failing ? { fail } : {}) });
@@ -1194,6 +1194,9 @@ describe("holds", () => {
 		expect(again.q).not.toBe(asked.q);
 		decide(again, { is: "defect" });
 		h.call("report", report("epoch01b", "new", 1, false));
+		// The cause failed in `old` in this scope too, and `old` has not reported on this commit.
+		expect(state(again.q)).toBe("decided");
+		h.call("report", report("epoch01b", "old", 1, false));
 		expect(state(again.q)).toBe("dissolved");
 	});
 
@@ -1259,17 +1262,28 @@ describe("holds", () => {
 		expect(state(asked.q)).toBe("dissolved");
 	});
 
-	test("an answer given before questions recorded where they failed stands until a person withdraws it", () => {
-		const fail = { 0: "the gift card balance is negative" };
-		h.call("report", ciReport({ commit: "legacy1a", branch: "fix", pr: 55, n: 2, fail }));
-		const asked = first(queue().items);
-		decide(asked, { is: "test" });
-		// What a question raised before this change holds: no pairs of test and environment.
-		h.app.db.raw.run("UPDATE questions SET evidence = json_remove(evidence, '$.failed') WHERE no = ?", [
-			Number(asked.q.slice(2)),
-		]);
-		h.call("report", ciReport({ commit: "legacy1b", branch: "fix", pr: 55, n: 2 }));
+	test("a commit that moves into a pull request takes all of its failures along", () => {
+		const message = "the order total is wrong";
+		const report = (commit: string, env: string, only: number[], failing: boolean, pr?: number) => {
+			const input = ciReport({
+				commit,
+				n: 2,
+				only,
+				...(pr ? { pr, branch: "feature" } : {}),
+				fail: failing ? { 0: message, 1: message } : {},
+			});
+			return h.call("report", { ...input, target: { ...input.target, env, ...(pr ? {} : { branch: undefined }) } });
+		};
+		report("movep01a", "A", [0], true);
+		report("movep01a", "B", [1], true);
+		// A report that says the commit belongs to pull request 77 moves it, and its failures, into that scope.
+		report("movep01a", "A", [0], false, 77);
+		const asked = first(queue().items.filter((item) => item.evidence.scope === "pr:77"));
+		decide(asked, { is: "defect" });
+		report("movep01b", "B", [1], false, 77);
 		expect(state(asked.q)).toBe("decided");
+		report("movep01b", "A", [0], false, 77);
+		expect(state(asked.q)).toBe("dissolved");
 	});
 
 	test("a pass of other tests does not end the answer: the tests it named must pass", () => {
