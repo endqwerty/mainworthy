@@ -298,3 +298,13 @@
 	overflow: visible;
 	overflow-wrap: anywhere;
 }
+
+/* A run's name says what it is on, so a phone leaves out the column of kinds. */
+:root[data-layout="phone"] .run-list-kind {
+	display: none;
+}
+/* The run filters are pressed by a finger. */
+:root[data-layout="phone"] .run-filter button {
+	min-height: 44px;
+	padding: 0 12px;
+}

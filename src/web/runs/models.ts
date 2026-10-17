@@ -13,6 +13,8 @@ export const Run = z.object({
 	accepts: TargetMatch,
 	require: z.array(Obligation),
 	slots: z.number().nullable(),
+	/** The change a change run's commit belongs to. A planned run has none. */
+	change: z.object({ key: z.string(), title: z.string().nullable() }).nullable(),
 	createdAt: z.number(),
 	createdBy: z.string(),
 	open: z.array(z.string()),

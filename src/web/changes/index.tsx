@@ -219,7 +219,7 @@ function ChangesWorkbench() {
 								</div>
 							))}
 							{settledData?.items.length === 0 && <p className="dim">No decisions on this change yet.</p>}
-							<ChangeResults key={key} change={key} standing={standing} choose={setStanding} />
+							<ChangeResults key={key} of={{ change: key }} standing={standing} choose={setStanding} />
 							<SectionHeading>Impact</SectionHeading>
 							{impact.error && <p role="status">{impact.error.message}</p>}
 							{impactData.success && (

@@ -5,6 +5,22 @@ the run with a verdict. Let CI results fill slots so you do not repeat completed
 
 ![A planned run with CI results, unfilled slots, and the selected case](../ui/screenshots/runs-light.png)
 
+## Find a run
+
+Runs (<kbd>g</kbd> <kbd>r</kbd>) lists every run of the project, newest first.
+A planned run is one somebody planned, as this page describes.
+A change run is the one Mainworthy makes for each commit a report names; its name is the
+commit and the change or branch it is on, such as `58fbc1c on pr:482`.
+Each row shows the verdict, the slot count of a planned run, and how long ago the run was made.
+
+Choose **Planned** or **Change** to see one kind, and **Open** or **Closed** to see one state.
+Select a planned run and press <kbd>Enter</kbd> to open its cockpit.
+Select a change run to see its commit, its change, and every result its gate counted, with the
+same filters as a change's results. Press <kbd>Enter</kbd> to open its change.
+
+From the command line, `mainworthy find --in runs` lists the same runs. Add `--origin planned` or
+`--origin change` for one kind, and `--state open` or `--state closed` for one state.
+
 ## Plan a run in the web app
 
 To plan a run, follow these steps.

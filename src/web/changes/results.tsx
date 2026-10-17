@@ -37,15 +37,15 @@ export const duration = (ms: number | null): string | null =>
 	ms === null ? null : ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
 
 /**
- * Every test the change's gate counted, as it counted it: the evidence behind the verdict. The filter is owned by
- * the screen, so the tally above can choose it too.
+ * Every test a gate counted, as it counted it: the evidence behind the verdict. Of a change, the gate of its newest
+ * commit; of a run, that run's. The filter is owned by the screen, so the tally above can choose it too.
  */
 export function ChangeResults({
-	change,
+	of,
 	standing,
 	choose,
 }: {
-	change: string;
+	of: { change: string } | { run: string };
 	standing: ResultStanding | null;
 	choose: (standing: ResultStanding | null) => void;
 }) {
@@ -54,7 +54,7 @@ export function ChangeResults({
 	const text = useDeferredValue(typed.trim());
 	const input = {
 		in: "results",
-		change,
+		...of,
 		limit: 100,
 		...(standing ? { state: standing } : {}),
 		...(text ? { text } : {}),
@@ -112,7 +112,11 @@ export function ChangeResults({
 			</ul>
 			{rows.length === 0 && !read.isPending && !read.error && (
 				<EmptyState doc={{ page: "report-results", label: "How to send a report" }}>
-					{total === 0 ? "No results counted for the latest commit." : "No result matches."}
+					{total === 0
+						? "change" in of
+							? "No results counted for the latest commit."
+							: "No results counted for this commit."
+						: "No result matches."}
 				</EmptyState>
 			)}
 			{read.isFetchNextPageError ? (

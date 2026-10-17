@@ -604,3 +604,57 @@ async function cases(server: Server, count: number) {
 	},
 	40000,
 );
+
+(browserAvailable ? test : test.skip)(
+	"the runs list shows change runs beside planned ones, filters them, and opens a change run's results",
+	async () => {
+		const server = await fixture();
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await cases(server, 1);
+			await server.api("plan", { name: "Smoke", select: { cases: ["C-1"] } });
+			const file = "tests/cart.spec.ts";
+			await server.api("report", {
+				target: { commit: "feat0001feat0001", repo: "acme/web", branch: "feature", pr: 7 },
+				job: "e2e",
+				results: [
+					{ test: { key: `${file}::adds`, name: "adds an item", file }, outcome: "pass" },
+					{
+						test: { key: `${file}::removes`, name: "removes an item", file },
+						outcome: "fail",
+						failure: { message: "expected 0 items" },
+					},
+				],
+			});
+			view = await openPage(server, { path: "/p/scratch/runs" });
+			view.page.setDefaultTimeout(8000);
+			const list = view.page.getByRole("listbox", { name: "Runs", exact: true });
+			const rows = () => list.getByRole("option").allInnerTexts();
+			await list.getByRole("option").nth(1).waitFor();
+			expect((await rows()).map((row) => row.split("\n")[0])).toEqual(["R-2", "R-1"]);
+			await view.page.getByRole("group", { name: "Kind of run" }).getByRole("button", { name: "Planned" }).click();
+			await eventually(rows, (texts) => texts.length === 1 && texts[0]?.startsWith("R-1") === true);
+			await view.page.getByRole("group", { name: "Kind of run" }).getByRole("button", { name: "Change" }).click();
+			await eventually(rows, (texts) => texts.length === 1 && texts[0]?.startsWith("R-2") === true);
+			const detail = view.page.locator("#detail");
+			await detail.getByRole("heading", { name: "feat000 on pr:7" }).waitFor();
+			await detail.getByText("Commit feat0001feat0001").waitFor();
+			const results = detail.getByRole("list", { name: "Results the gate counted" });
+			await results.getByText("removes an item").waitFor();
+			await results.getByText("expected 0 items").waitFor();
+			await view.page.getByRole("group", { name: "State of run" }).getByRole("button", { name: "Closed" }).click();
+			await list.getByText("No run matches.").waitFor();
+
+			// The address of a change run opens the list with it selected; its change is a key away.
+			await view.page.goto(`${server.url}/p/scratch/runs/2`);
+			await view.page.locator("#detail").getByRole("heading", { name: "feat000 on pr:7" }).waitFor();
+			await view.page.keyboard.press("Enter");
+			await view.page.waitForURL(/\/p\/scratch\/changes\/pr(%3A|:)7$/);
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
