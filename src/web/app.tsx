@@ -146,17 +146,18 @@ export function App() {
 	const [inviting, setInviting] = useState(() => location.pathname === INVITE_PATH);
 	const [mailEntry, setMailEntry] = useState(() => location.pathname === "/reset" || location.pathname === "/email");
 	const [returning, setReturning] = useState(() => location.pathname === OIDC_PATH);
-	const person = useRef<string | null>(null);
+	const person = useRef<number | null>(null);
 	const refreshSession = useCallback(async (): Promise<void> => {
 		const owner = deviceSession();
 		try {
 			const info = await session();
 			if (!sessionUnchanged(owner)) return;
-			// What the device keeps is kept per person. A different person from the one before starts with nothing
-			// of theirs: not their drafts, not their notes, not what the app had read for them.
-			if (person.current !== null && person.current !== info.actor) queryClient.clear();
-			person.current = info.actor;
-			setDevicePerson(info.actor);
+			// What the device keeps is kept per actor, by id: a name can be given to somebody else later. A different
+			// person from the one before starts with nothing of theirs: not their drafts, not their notes, not what
+			// the app had read for them.
+			if (person.current !== null && person.current !== info.actorId) queryClient.clear();
+			person.current = info.actorId;
+			setDevicePerson(info);
 			// This is still the entry address, before the shell mounts. Keep it an initial visit so Suite restores drafts.
 			const address = location.href;
 			const requested = readRoute().project;
@@ -206,7 +207,7 @@ export function App() {
 		const changed = (event: StorageEvent) => {
 			if (
 				(event.key === deviceClearKey && !sessionUnchanged(deviceSession())) ||
-				(event.key === sessionPersonKey && localStorage.getItem(sessionPersonKey) !== deviceSession().person)
+				(event.key === sessionPersonKey && localStorage.getItem(sessionPersonKey) !== String(deviceSession().actorId))
 			)
 				refused();
 		};

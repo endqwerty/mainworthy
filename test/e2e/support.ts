@@ -359,6 +359,11 @@ export async function addAuthenticator(harness: PageHarness): Promise<{ remove: 
 		},
 	};
 }
+/** The start of every storage key the page keeps for the actor this token belongs to: their id, not their name (issue #380). */
+export async function devicePrefix(server: Pick<Server, "url" | "project">, token: string): Promise<string> {
+	const { actorId } = await new Client({ url: server.url, token, project: server.project }).session();
+	return `mainworthy:#${actorId}:`;
+}
 export async function keyCount(page: Page): Promise<number> {
 	return page.evaluate(() => {
 		const value: unknown = Reflect.get(window, "mainworthyKeyCount");

@@ -1,10 +1,17 @@
 // What this browser keeps for a person until the server has it: drafts, the step ids a case has used, and the
-// notes typed for a run. Every key names the person signed in. Somebody else who signs in on the same browser is
-// never shown what the person before them typed, and cannot record it as their own. Sign-out can explicitly
-// clear it; otherwise it stays for when that person signs in again. Work started as one person (a pending
-// save, a retry, clean-up) carries the session it started in (`DeviceSession`) and stops when the page's person
-// changes or the browser data is cleared, in this tab or another.
-let person = "";
+// notes typed for a run. Every key names the actor the session belongs to by its id, never by its sign-in name:
+// a name outlives the person (an admin forgets them, and another person can be given it), an id does not. Somebody
+// else who signs in on the same browser is never shown what the person before them typed, and cannot record it as
+// their own. Sign-out can explicitly clear it; otherwise it stays for when that person signs in again. Work
+// started as one person (a pending save, a retry, clean-up) carries the session it started in (`DeviceSession`)
+// and stops when the page's person changes or the browser data is cleared, in this tab or another.
+// The name is kept only to say, on a request, who the page believes it is (`X-Mainworthy-As`).
+declare const actorIdBrand: unique symbol;
+/** An actor id from the session reply: the only thing a device key can be built from. */
+export type ActorId = number & { readonly [actorIdBrand]: true };
+const nobody = 0 as ActorId;
+let id = nobody;
+let name = "";
 let revision = 0;
 let active = false;
 export const deviceClearKey = "mainworthy:device-clear";
@@ -17,15 +24,16 @@ function clearRevision(): string {
 }
 let cleared = clearRevision();
 export const sessionPersonKey = "mainworthy:session-person";
-export type DeviceSession = { person: string; revision: number; cleared: string };
+export type DeviceSession = { actorId: ActorId; name: string; revision: number; cleared: string };
 
-export function setDevicePerson(actor: string): void {
-	if (!active || actor !== person) revision++;
-	person = actor;
+export function setDevicePerson(info: { actor: string; actorId: number }): void {
+	if (!active || info.actorId !== id) revision++;
+	id = info.actorId as ActorId;
+	name = info.actor;
 	cleared = clearRevision();
 	active = true;
 	try {
-		localStorage.setItem(sessionPersonKey, actor);
+		localStorage.setItem(sessionPersonKey, String(id));
 	} catch {}
 }
 export function suspendDeviceSession(): void {
@@ -33,19 +41,43 @@ export function suspendDeviceSession(): void {
 	cleared = clearRevision();
 	revision++;
 }
-export const deviceSession = (): DeviceSession => ({ person, revision, cleared });
+export const deviceSession = (): DeviceSession => ({ actorId: id, name, revision, cleared });
 export const sessionUnchanged = (owner: DeviceSession): boolean =>
-	owner.person === person && owner.revision === revision && owner.cleared === clearRevision();
+	owner.actorId === id && owner.revision === revision && owner.cleared === clearRevision();
 export const sessionCurrent = (owner: DeviceSession): boolean => active && sessionUnchanged(owner);
 
 /** Invalidate old work before deleting, so other tabs and delayed replies cannot put cleared drafts back. */
 export function clearDevicePerson(owner: DeviceSession): void {
 	localStorage.setItem(deviceClearKey, String(crypto.getRandomValues(new Uint32Array(4))));
 	suspendDeviceSession();
-	if (localStorage.getItem(sessionPersonKey) === owner.person) localStorage.removeItem(sessionPersonKey);
-	const prefix = personPrefix(owner.person);
+	if (localStorage.getItem(sessionPersonKey) === String(owner.actorId)) localStorage.removeItem(sessionPersonKey);
+	const prefix = personPrefix(owner.actorId);
 	for (const key of Object.keys(localStorage)) if (key.startsWith(prefix)) localStorage.removeItem(key);
 }
-const personPrefix = (actor: string): string => `mainworthy:${encodeURIComponent(actor)}:`;
-export const deviceKey = (kind: string, rest: string, actor = person): string =>
+/** What the device keeps for a person, each under its own kind of key. */
+const PERSON_KINDS = ["active", "draft", "draft-copy", "home", "queue-input", "run-note", "run-step", "steps"] as const;
+type PersonKind = (typeof PERSON_KINDS)[number];
+/** `#` is escaped in every name, so no sign-in name can write a key of this shape. */
+const personPrefix = (actor: ActorId): string => `mainworthy:#${actor}:`;
+export const deviceKey = (kind: PersonKind, rest: string, actor: ActorId = id): string =>
 	`${personPrefix(actor)}${kind}:${rest}`;
+
+/** A key an earlier version wrote under a sign-in name (escaped, so it holds no `:` and cannot start with `#`). */
+const nameKeyed = new RegExp(`^mainworthy:(?!#)[^:]*:(?:${PERSON_KINDS.join("|")}):`);
+/**
+ * Removes what an earlier version kept under a sign-in name: a name can belong to another person later, so such
+ * data is never read and does not linger (issue #380). Only a person's kinds of key go; every other key stays.
+ */
+export function dropNameKeyedData(store: Pick<Storage, "length" | "key" | "removeItem">): void {
+	const named: string[] = [];
+	for (let index = 0; index < store.length; index++) {
+		const key = store.key(index);
+		if (key && nameKeyed.test(key)) named.push(key);
+	}
+	for (const key of named) store.removeItem(key);
+}
+try {
+	dropNameKeyedData(localStorage);
+} catch {
+	// No storage (a private window, a test outside a browser): nothing was kept, so nothing is dropped.
+}

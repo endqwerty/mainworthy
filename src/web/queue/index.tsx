@@ -260,7 +260,11 @@ function QueueWorkbench() {
 		if (select) setCursor(questions[0]?.q ?? null);
 	}
 	function extraKey(entry: DecisionEntry, field: InlineAnswer["field"]): string {
-		return deviceKey("queue-input", `${project}:${entry.question.q}:${String(entry.answer.is)}:${field}`, owner.person);
+		return deviceKey(
+			"queue-input",
+			`${project}:${entry.question.q}:${String(entry.answer.is)}:${field}`,
+			owner.actorId,
+		);
 	}
 	function readExtra(entry: DecisionEntry, field: InlineAnswer["field"]): string {
 		const key = extraKey(entry, field);

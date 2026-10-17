@@ -110,7 +110,7 @@ Mail delivery starts after the identity transaction commits. At most 100 message
 
 The owner's name comes from `MAINWORTHY_OWNER`. When that variable is unset, the name comes from `USER`. When neither is set, the name is `owner`. To rename an owner currently named `owner` to `robin`:
 
-Before renaming the owner, record any browser drafts under the old name. Then follow these steps:
+Follow these steps:
 
 1. Set `MAINWORTHY_OWNER` to the new name and `MAINWORTHY_OWNER_WAS` to the name the owner has now.
 
@@ -131,7 +131,7 @@ The owner's tokens and passkeys keep working. Their browser sessions stay signed
 
 - A password is typed with the new name. Change the name in your password manager.
 - A passkey signs in as before. The device or password manager that holds it still shows the old name for it.
-- A browser stores an unrecorded draft under the name of whoever typed it. The new name does not show drafts stored under the old one. Record your drafts before the rename.
+- A browser keeps an unrecorded draft for the person, not for their name, so the owner still sees their drafts under the new name.
 
 Startup refuses the rename when `MAINWORTHY_OWNER_WAS` names nobody on the instance, an agent, a pipeline, a forgotten person, or a person without every capability on every project. The error says why. The database has no separate owner marker, so the rename checks the grants that every start gives the owner. An admin granted all of those capabilities also passes that check and becomes the owner under the new name.
 

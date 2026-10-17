@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import type { Locator } from "playwright-core";
 import { z } from "zod";
 import { Slot } from "../../src/web/runs/models.ts";
-import { browserAvailable, eventually, openPage, type Server, startServer } from "./support.ts";
+import { browserAvailable, devicePrefix, eventually, openPage, type Server, startServer } from "./support.ts";
 
 const check = test.skipIf(!browserAvailable);
 async function grant(server: Server, actor: string, admin = false) {
@@ -37,6 +37,7 @@ check(
 		await server.api("propose", { edits: [{ op: "create", outline: "Pending case\n  Original step" }] });
 		const alice = await grant(server, "alice"),
 			bob = await grant(server, "bob");
+		const [alicePrefix, bobPrefix] = [await devicePrefix(server, alice), await devicePrefix(server, bob)];
 		const h = await openPage({ ...server, token: alice }, { path: "/p/scratch/suite/c/1" });
 		let release = () => {};
 		const held = new Promise<void>((resolve) => {
@@ -92,12 +93,14 @@ check(
 			expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(2);
 			expect(
 				await page.evaluate(
-					() => JSON.parse(localStorage.getItem("mainworthy:bob:draft:scratch:C-1") ?? "null")?.body.steps[0].action,
+					(key) => JSON.parse(localStorage.getItem(key) ?? "null")?.body.steps[0].action,
+					`${bobPrefix}draft:scratch:C-1`,
 				),
 			).toBe("Bob private text");
 			expect(
 				await page.evaluate(
-					() => JSON.parse(localStorage.getItem("mainworthy:alice:draft:scratch:C-1") ?? "null")?.body.steps[0].action,
+					(key) => JSON.parse(localStorage.getItem(key) ?? "null")?.body.steps[0].action,
+					`${alicePrefix}draft:scratch:C-1`,
 				),
 			).toBe("Alice newer private text");
 			expect(await step.inputValue()).toBe("Bob private text");
@@ -120,6 +123,7 @@ for (const surface of ["case", "run"]) {
 			const run = await server.api("plan", { name: "Identity run", select: {} });
 			const alice = await grant(server, "alice"),
 				bob = await grant(server, "bob");
+			const alicePrefix = await devicePrefix(server, alice);
 			const h = await openPage(
 				{ ...server, token: alice },
 				{ path: surface === "case" ? "/p/scratch/suite/c/1" : `/p/scratch/runs/${run.run.slice(2)}` },
@@ -158,11 +162,13 @@ for (const surface of ["case", "run"]) {
 				expect(
 					Slot.array().parse((await server.api("find", { in: "slots", run: run.run })).items)[0]?.fills,
 				).toHaveLength(0);
-				const kept = await a.evaluate(() =>
-					Object.entries(localStorage)
-						.filter(([k]) => k.startsWith("mainworthy:alice:"))
-						.map(([, v]) => v)
-						.join(" "),
+				const kept = await a.evaluate(
+					(prefix) =>
+						Object.entries(localStorage)
+							.filter(([k]) => k.startsWith(prefix))
+							.map(([, v]) => v)
+							.join(" "),
+					alicePrefix,
 				);
 				expect(kept).toContain(surface === "case" ? "Alice private case" : "Alice private note");
 			} finally {
@@ -419,4 +425,48 @@ check(
 		}
 	},
 	30_000,
+);
+
+check(
+	"a person given a forgotten person's name does not open the old person's draft (issue #380)",
+	async () => {
+		const server = await startServer({ mode: "server" });
+		await server.api("propose", { edits: [{ op: "create", outline: "Shared name case\n  Original step" }] });
+		const first = await grant(server, "alice");
+		const firstPrefix = await devicePrefix(server, first);
+		const h = await openPage({ ...server, token: first }, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = h;
+			page.setDefaultTimeout(5000);
+			const title = page.getByRole("textbox", { name: "Case title", exact: true });
+			await page.getByRole("button", { name: "Shared name case", exact: true }).waitFor();
+			await page.keyboard.press("e");
+			await title.fill("The first alice's unsaved draft");
+			await eventually(
+				() => page.evaluate(() => Object.keys(localStorage).some((k) => k.includes(":draft:scratch:"))),
+				Boolean,
+			);
+			await server.api("admin", { do: "actor.forget", name: "alice" });
+			const second = await grant(server, "alice");
+			const secondPrefix = await devicePrefix(server, second);
+			expect(secondPrefix).not.toBe(firstPrefix);
+			await page.goto(`${server.url}/p/scratch/suite`);
+			await signIn(page, second);
+			await page.getByRole("option").first().waitFor();
+			expect(await title.count()).toBe(0);
+			expect(await page.locator("body").textContent()).not.toContain("The first alice's unsaved draft");
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(1);
+			expect(
+				await page.evaluate(
+					(prefix) => Object.keys(localStorage).filter((k) => k.startsWith(`${prefix}draft`)),
+					secondPrefix,
+				),
+			).toEqual([]);
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30000,
 );

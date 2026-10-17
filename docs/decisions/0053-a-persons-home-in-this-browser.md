@@ -26,7 +26,7 @@ the router's default project when that project is absent or inaccessible.
 the current project's choice through `navigate`, so leaving an editor still seals it.
 
 The browser stores the validated preference in localStorage through `deviceKey`,
-under `mainworthy:<encoded actor>:home:<project>`. This separates people sharing
+under `mainworthy:#<actor id>:home:<project>` (the actor's id, not the name: issue #380). This separates people sharing
 a browser and projects sharing a person. A fresh browser has no choice. The
 preference stays when signing out with drafts kept. Explicitly clearing browser
 data at sign-out or clearing site data removes it. It does not
