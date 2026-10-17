@@ -516,6 +516,8 @@ A session ends after 14 days without use and after 90 days in any case. It also 
 
 Each of these sends you back to the sign-in page. [Configuration](./configuration.md#variables-the-server-reads) says how to change the two lifetimes.
 
+A late reply to a session check or signed-in request does not end a newer sign-in or replace its session details. This also applies when the same person signs in again.
+
 The owner's token comes from the server. If you set `MAINWORTHY_OWNER_TOKEN`, that value is the token. If you did not, the server prints one on its first start:
 
 ```
