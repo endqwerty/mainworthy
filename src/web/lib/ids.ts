@@ -54,8 +54,8 @@ async function holdLock(owner: string): Promise<void> {
 	});
 }
 /** The owners of the windows that are open, from the locks held; renames this one when another holds its id. */
-async function readLocks(): Promise<void> {
-	if (typeof navigator === "undefined" || !navigator.locks) return;
+async function readLocks(): Promise<boolean> {
+	if (typeof navigator === "undefined" || !navigator.locks) return false;
 	await holdLock(draftOwner());
 	const held = (await navigator.locks.query()).held ?? [];
 	const owners = held.map((lock) => lock.name ?? "").filter((name) => name.startsWith(LOCK));
@@ -69,9 +69,10 @@ async function readLocks(): Promise<void> {
 		copied();
 	}
 	for (const name of owners) liveOwners.add(name.slice(LOCK.length));
+	return true;
 }
 export async function initializeDraftOwners(): Promise<void> {
-	await readLocks().catch(() => {});
+	const locksRead = await readLocks().catch(() => false);
 	if (typeof BroadcastChannel === "undefined") return;
 	const instance = randomId();
 	const channel = new BroadcastChannel("mainworthy:draft-windows");
@@ -95,5 +96,5 @@ export async function initializeDraftOwners(): Promise<void> {
 	window.addEventListener("pagehide", () => send("gone"));
 	window.addEventListener("pageshow", () => send("hello"));
 	send("hello");
-	await new Promise<void>((resolve) => window.setTimeout(resolve, 40));
+	if (!locksRead) await new Promise<void>((resolve) => window.setTimeout(resolve, 40));
 }
