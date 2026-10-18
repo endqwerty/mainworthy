@@ -35,6 +35,7 @@
 //
 // The tests are in `sequences-loose.test.ts`, `sequences-standard.test.ts` and `sequences-strict.test.ts`.
 // More seeds: MAINWORTHY_SEQUENCE_SEEDS=500 bun test test/sequences-
+import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import {
 	aggregateSlot,
@@ -54,6 +55,37 @@ import { failingSlotResults, invalidInherited, slotSettlement } from "./inherite
 
 const SEEDS = Number(process.env.MAINWORTHY_SEQUENCE_SEEDS ?? 40);
 const STEPS = 80;
+
+type AuditExcuse = { class: string; decision: number };
+
+function auditExcuses(db: Database) {
+	const key = (project: number, signature: number, scope: string, target: number) =>
+		JSON.stringify([project, signature, scope, target]);
+	const broad = new Map(
+		db
+			.query<AuditExcuse & { project: number; signature: number; scope: string; target: number }, []>(
+				"SELECT project, signature, scope, target, class, decision FROM excuses",
+			)
+			.all()
+			.map((row) => [key(row.project, row.signature, row.scope, row.target), row]),
+	);
+	const exact = new Map(
+		db
+			.query<AuditExcuse & { result: number }, []>(
+				"SELECT result, class, decision FROM result_excuses WHERE slot IS NULL",
+			)
+			.all()
+			.map((row) => [row.result, row]),
+	);
+	return (project: number, signature: number, scope: string, target: number, result = 0): AuditExcuse | undefined => {
+		// Target specificity wins within broad standing, even against a newer global decision.
+		const cause = broad.get(key(project, signature, scope, target)) ?? broad.get(key(project, signature, scope, 0));
+		const named = exact.get(result);
+		// A tie keeps the broad decision, as in the compound query's left-hand SELECT.
+		const held = named && (!cause || named.decision > cause.decision) ? named : cause;
+		return held ? { class: held.class, decision: held.decision } : undefined;
+	};
+}
 
 type Row = Record<string, string | number | null>;
 type Problem = { seed: number; step: number; what: string; detail: unknown; last: unknown[] };
@@ -91,30 +123,33 @@ function sequence(seed: number, preset: string): Problem | null {
 
 	const audit = (): { what: string; detail: unknown } | null => {
 		const runs = rows("SELECT * FROM runs");
+		const newestInScope = new Map<string, number>();
+		for (const run of runs) {
+			if (run.scope !== null) {
+				const scope = String(run.scope);
+				newestInScope.set(scope, Math.max(newestInScope.get(scope) ?? 0, Number(run.id)));
+			}
+		}
 		const targets = new Map(rows("SELECT * FROM targets").map((target) => [Number(target.id), target]));
-		const open = rows(
+		const open = rows<{ no: number; subject: string; evidence: string; refs: string | null }>(
 			`SELECT q.no, q.subject, q.evidence, group_concat(r.ref) AS refs FROM questions q
 			 LEFT JOIN question_refs r ON r.question = q.id WHERE q.state = 'open' AND q.kind = 'failure' GROUP BY q.id`,
-		);
+		).map((question) => ({
+			...question,
+			subject: JSON.parse(String(question.subject)) as { signature: number; scope: string; slot?: number },
+			evidence: JSON.parse(String(question.evidence)) as { targets?: number[]; results?: number[] },
+			refs: String(question.refs ?? "").split(","),
+		}));
+		const excuseSnapshot = auditExcuses(h.app.db.raw);
 		const excuseOf = (project: number, signature: number, scope: string, target: number, result = 0, slot?: number) =>
 			slot !== undefined
 				? slotSettlement(h.app.db, slot, result)
-				: rows(
-						`SELECT class, decision FROM (SELECT class, decision FROM excuses WHERE project = ? AND signature = ? AND scope = ? AND target IN (0, ?) ORDER BY (target != 0) DESC, decision DESC LIMIT 1) UNION ALL SELECT class, decision FROM result_excuses WHERE result = ? AND slot IS NULL ORDER BY decision DESC LIMIT 1`,
-						project,
-						signature,
-						scope,
-						target,
-						result,
-					)[0];
+				: excuseSnapshot(project, signature, scope, target, result);
 
 		for (const run of runs) {
 			const id = Number(run.id);
 			// 1. Live runs and their unexplained failures.
-			const newest =
-				run.scope === null
-					? null
-					: Math.max(...runs.filter((other) => other.scope === run.scope).map((o) => Number(o.id)));
+			const newest = run.scope === null ? null : newestInScope.get(String(run.scope));
 			const live = run.origin === "planned" ? run.state === "open" : id === newest;
 			if (live) {
 				const causes: { signature: number; target: number; result: number; slot?: number }[] =
@@ -138,16 +173,14 @@ function sequence(seed: number, preset: string): Problem | null {
 					const scope = scopeOf(target, id);
 					if (excuseOf(Number(run.project), cause.signature, scope, cause.target, cause.result, cause.slot)) continue;
 					const asked = open.filter((question) => {
-						const subject = JSON.parse(String(question.subject)) as { signature: number; scope: string; slot?: number };
-						const evidence = JSON.parse(String(question.evidence)) as { targets?: number[] };
+						const subject = question.subject;
+						const evidence = question.evidence;
 						return (
 							subject.signature === cause.signature &&
 							subject.scope === scope &&
 							subject.slot === cause.slot &&
 							(evidence.targets ?? []).includes(cause.target) &&
-							String(question.refs ?? "")
-								.split(",")
-								.includes(`R-${run.no}`)
+							question.refs.includes(`R-${run.no}`)
 						);
 					});
 					if (asked.length === 0)
@@ -385,8 +418,8 @@ function sequence(seed: number, preset: string): Problem | null {
 
 		// 7. Nobody is asked about what already has an answer.
 		for (const question of open) {
-			const subject = JSON.parse(String(question.subject)) as { signature: number; scope: string; slot?: number };
-			const evidence = JSON.parse(String(question.evidence)) as { targets?: number[]; results?: number[] };
+			const subject = question.subject;
+			const evidence = question.evidence;
 			if (subject.slot !== undefined) {
 				if (
 					(evidence.results ?? []).length > 0 &&
@@ -725,6 +758,25 @@ function sequence(seed: number, preset: string): Problem | null {
 
 /** The test of one policy preset. Each preset has a file of its own, so the three run side by side. */
 export function sequences(preset: "loose" | "standard" | "strict"): void {
+	test(`the ${preset} audit resolves broad and exact-result standing independently`, () => {
+		using db = new Database(":memory:");
+		db.exec(`CREATE TABLE excuses (project INTEGER, signature INTEGER, scope TEXT, target INTEGER, class TEXT, decision INTEGER);
+			CREATE TABLE result_excuses (result INTEGER, slot INTEGER, class TEXT, decision INTEGER);
+			INSERT INTO excuses VALUES (1, 2, 'line:main', 0, 'excused', 30), (1, 2, 'line:main', 4, 'attributed', 10);
+			INSERT INTO result_excuses VALUES (5, NULL, 'excused', 20), (6, NULL, 'excused', 9),
+				(7, NULL, 'excused', 10), (8, 99, 'excused', 40);`);
+		const excuseOf = auditExcuses(db);
+		expect(excuseOf(1, 2, "line:main", 4, 5)).toEqual({ class: "excused", decision: 20 });
+		expect(excuseOf(1, 2, "line:main", 4, 6)).toEqual({ class: "attributed", decision: 10 });
+		expect(excuseOf(1, 2, "line:main", 4, 7)).toEqual({ class: "attributed", decision: 10 });
+		expect(excuseOf(1, 2, "line:main", 4, 8)).toEqual({ class: "attributed", decision: 10 });
+		expect(excuseOf(1, 2, "line:main", 9, 5)).toEqual({ class: "excused", decision: 30 });
+		expect(excuseOf(1, 2, "line:main", 0)).toEqual({ class: "excused", decision: 30 });
+		expect(excuseOf(2, 2, "line:main", 4, 5)).toEqual({ class: "excused", decision: 20 });
+		expect(excuseOf(1, 3, "line:main", 4)).toBeUndefined();
+		expect(excuseOf(1, 2, "line:other", 4)).toBeUndefined();
+	});
+
 	test(`${SEEDS} random sequences under the ${preset} policy keep every invariant`, () => {
 		const problems: Problem[] = [];
 		for (let seed = 1; seed <= SEEDS && problems.length < 3; seed++) {
