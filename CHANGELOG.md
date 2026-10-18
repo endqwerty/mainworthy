@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-10-18: fixed search and text-selected runs missing cases whose matching words appear only in pinned fragment steps (issue #371). Existing databases rebuild their search index on upgrade, and archive imports use the same pinned-step projection as case writes. No archive or API compatibility change.
+
 - 2026-10-09: project created (docs only; stack undecided).
 - 2026-10-10: docs: ranked priorities (fast backend, agent access via MCP and skills, instant UI/UX) and stack selection criteria.
 - 2026-10-10: added docs/competitive-analysis.md (13 competitors, source-linked).

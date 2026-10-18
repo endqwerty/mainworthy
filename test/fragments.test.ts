@@ -4,10 +4,12 @@ import { claimHash, versionHash } from "../src/core/hash.ts";
 import { parseCase } from "../src/core/markdown.ts";
 import { mergeBodies } from "../src/core/merge3.ts";
 import { emptyBody, Step } from "../src/core/model.ts";
-import type { ProposeReply } from "../src/core/ops.ts";
+import type { PlanReply, ProposeReply } from "../src/core/ops.ts";
 import { REPLIES } from "../src/core/replies.ts";
 import { Db } from "../src/server/kernel/db.ts";
 import { migrate } from "../src/server/kernel/migrate.ts";
+import { OPS } from "../src/server/ops/index.ts";
+import { invoke } from "../src/server/ops/registry.ts";
 import { structuralProblems } from "../src/server/suite/read.ts";
 import { bodyOf, expandSteps, fragmentUsers, mustCase } from "../src/server/suite/suite.ts";
 import { exportArchive, importArchive, linesOf } from "../src/server/transfer/transfer.ts";
@@ -58,6 +60,183 @@ const updateFragment = () =>
 			},
 		],
 	});
+
+function seedSearchPins(): void {
+	h.call("propose", {
+		edits: [
+			{
+				op: "create",
+				kind: "fragment",
+				folder: "Fragments",
+				body: {
+					title: "Shared sign in",
+					pre: "fragmentprecondition",
+					steps: [{ id: "ab", action: "Enter zephyrpassword", expected: "luminousreply" }],
+				},
+			},
+		],
+	});
+	h.call("propose", {
+		edits: [
+			{
+				op: "create",
+				folder: "Consumers",
+				body: { title: "Pinned only", steps: [{ id: "cd", use: { fragment: "C-1", version: 1 } }] },
+			},
+			{
+				op: "create",
+				folder: "Consumers",
+				body: { title: "Inline sibling", steps: [{ id: "ef", action: "Enter zephyrpassword", expected: null }] },
+			},
+		],
+	});
+	updateFragment();
+}
+
+test("search finds pinned actions and expectations at the pinned version and follows pin and tag edits", () => {
+	seedSearchPins();
+	expect(h.call("find", { text: "zephyrpassword", folder: "Consumers" })).toMatchObject({
+		count: 2,
+		items: expect.arrayContaining([expect.objectContaining({ ref: "C-2", title: "Pinned only" })]),
+	});
+	expect(h.call("find", { text: "luminousreply", folder: "Consumers" })).toMatchObject({
+		count: 1,
+		items: [{ ref: "C-2" }],
+	});
+	expect(h.call("find", { text: "passkey", folder: "Consumers" })).toMatchObject({ count: 0 });
+	expect(h.call("find", { text: "fragmentprecondition", folder: "Consumers" })).toMatchObject({ count: 0 });
+	h.call("propose", { edits: [{ op: "place", cases: ["C-2"], tags: { add: ["regression"] } }] });
+	expect(h.call("find", { text: "zephyrpassword", folder: "Consumers", tags: ["regression"] })).toMatchObject({
+		count: 1,
+		items: [{ ref: "C-2" }],
+	});
+	h.call("propose", {
+		edits: [{ op: "fragment", fragment: "C-1", from: 1, to: 2, cases: [{ case: "C-2", base: 1 }] }],
+	});
+	expect(h.call("find", { text: "passkey", folder: "Consumers" })).toMatchObject({
+		count: 1,
+		items: [{ ref: "C-2", version: 2 }],
+	});
+	expect(h.call("find", { text: "zephyrpassword", folder: "Consumers" })).toMatchObject({
+		count: 1,
+		items: [{ ref: "C-3" }],
+	});
+});
+
+test("a run selected by text includes the pinned-only case beside the inline sibling", () => {
+	seedSearchPins();
+	expect(
+		h.call<PlanReply>("plan", { name: "Password checks", select: { text: "zephyrpassword", folders: ["Consumers"] } }),
+	).toEqual({ run: "R-1", slots: 2, already: 0 });
+	expect(h.call("find", { in: "slots", run: "R-1" })).toMatchObject({ items: [{ case: "C-2" }, { case: "C-3" }] });
+	expect(
+		h.call<PlanReply>("plan", { name: "Pinned only", select: { text: "luminousreply", folders: ["Consumers"] } }),
+	).toEqual({ run: "R-2", slots: 1, already: 0 });
+	expect(h.call("find", { in: "slots", run: "R-2" })).toMatchObject({ items: [{ case: "C-2" }] });
+});
+
+test.each(["instance", "project"])("%s archive replay rebuilds pinned search for find and plan", (scope) => {
+	seedSearchPins();
+	const chunks: string[] = [];
+	exportArchive(
+		h.app.db,
+		(chunk) => {
+			chunks.push(chunk);
+		},
+		scope === "project" ? { project: "scratch" } : {},
+	);
+	const db = new Db(":memory:");
+	try {
+		migrate(db, ":memory:");
+		importArchive(db, linesOf(chunks.join("")));
+		const app = { ...h.app, db, reader: db };
+		expect(
+			invoke(app, OPS, {
+				op: "find",
+				project: "scratch",
+				input: { text: "zephyrpassword", folder: "Consumers" },
+				actor: () => h.owner,
+			}),
+		).toMatchObject({ ok: true, result: { count: 2 } });
+		expect(
+			invoke(app, OPS, {
+				op: "find",
+				project: "scratch",
+				input: { text: "luminousreply", folder: "Consumers" },
+				actor: () => h.owner,
+			}),
+		).toMatchObject({ ok: true, result: { count: 1, items: [{ ref: "C-2" }] } });
+		expect(
+			invoke(app, OPS, {
+				op: "plan",
+				project: "scratch",
+				input: { name: "Restored password checks", select: { text: "zephyrpassword", folders: ["Consumers"] } },
+				actor: () => h.owner,
+			}),
+		).toMatchObject({ ok: true, result: { slots: 2 } });
+	} finally {
+		db.close();
+	}
+});
+
+test("upgrading an existing database rebuilds pinned search once", () => {
+	seedSearchPins();
+	h.call("propose", {
+		edits: [
+			{
+				op: "create",
+				body: {
+					title: "Mixed steps",
+					pre: "consumerpre",
+					steps: [
+						{ id: "aa", action: "Before", expected: null },
+						{ id: "bb", use: { fragment: "C-1", version: 1 } },
+						{ id: "cc", use: { fragment: "C-1", version: 2 } },
+						{ id: "dd", action: "After", expected: "Done" },
+					],
+				},
+				tags: ["smoke", "regression"],
+			},
+			{ op: "create", kind: "fragment", body: { title: "Empty fragment", steps: [] } },
+		],
+	});
+	h.call("propose", {
+		edits: [
+			{
+				op: "create",
+				body: { title: "Empty pin", pre: "emptyconsumer", steps: [{ id: "ee", use: { fragment: "C-5", version: 1 } }] },
+			},
+		],
+	});
+	h.call("propose", { edits: [{ op: "state", cases: ["C-1"], to: "archived" }] });
+	const db = h.app.db;
+	const documents = () =>
+		db.raw.query("SELECT rowid, title, body, tags, project FROM search_docs ORDER BY rowid").all();
+	const expected = documents();
+	// Schema 29 indexed only the pin's empty action. Restore that derived row and schema marker.
+	db.exec(
+		"UPDATE search_docs SET body = '' WHERE rowid = 2; UPDATE meta SET value = '29' WHERE key = 'schema_version'",
+	);
+	expect(h.call("find", { text: "zephyrpassword", folder: "Consumers" })).toMatchObject({
+		count: 1,
+		items: [{ ref: "C-3" }],
+	});
+	expect(migrate(db, ":memory:")).toEqual({ from: 29, to: 30, backup: null });
+	expect(documents()).toEqual(expected);
+	expect(h.call("find", { text: "zephyrpassword", folder: "Consumers" })).toMatchObject({ count: 2 });
+	expect(h.call("find", { text: "luminousreply", folder: "Consumers" })).toMatchObject({
+		count: 1,
+		items: [{ ref: "C-2" }],
+	});
+	expect(
+		h.call<PlanReply>("plan", {
+			name: "Upgraded password checks",
+			select: { text: "zephyrpassword", folders: ["Consumers"] },
+		}),
+	).toEqual({ run: "R-1", slots: 2, already: 0 });
+	expect(migrate(db, ":memory:")).toEqual({ from: 30, to: 30, backup: null });
+	expect(h.call("find", { text: "zephyrpassword", folder: "Consumers" })).toMatchObject({ count: 2 });
+});
 
 test("a case expands its pinned fragment, retaining the editable pin and source marker", () => {
 	createFragment();

@@ -2,11 +2,13 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { Attachment, AttachmentData } from "../../core/attachments.ts";
 import { Policy } from "../../core/kinds.ts";
+import { CaseBody } from "../../core/model.ts";
 import { policyProblem, storedPolicy } from "../../core/presets.ts";
 import { attachmentType, type BlobStore, blobHash } from "../kernel/blobs.ts";
 import type { Db } from "../kernel/db.ts";
 import { OpError } from "../kernel/errors.ts";
 import { ARCHIVE_VERSION } from "../kernel/migrate.ts";
+import { searchText } from "../suite/suite.ts";
 
 const CHUNK_BYTES = 64 * 1024;
 const Count = z.number().int().nonnegative();
@@ -542,14 +544,8 @@ export function importArchive(db: Db, lines: Iterable<string>, options: { blobs?
 	});
 }
 
-const SearchBody = z.object({
-	title: z.string(),
-	pre: z.string(),
-	steps: z.array(z.object({ action: z.string(), expected: z.string().nullable() })),
-});
 const Tags = z.array(z.string());
 
-/** Mirrors suite.ts's private indexCase/searchText helpers, including steps whose expected result is null. */
 function rebuildSearch(db: Db): void {
 	const heads = db.raw.prepare<{ id: string; project: string; tags: string; body: string | null }, []>(`
 		SELECT CAST(c.id AS TEXT) AS id, CAST(c.project AS TEXT) AS project, c.tags, v.body
@@ -562,12 +558,9 @@ function rebuildSearch(db: Db): void {
 		for (const row of heads.iterate()) {
 			if (row.body === null) throw invalid(`case ${row.id} has no head version; cannot rebuild search`);
 			try {
-				const body = SearchBody.parse(JSON.parse(row.body));
+				const body = CaseBody.parse(JSON.parse(row.body));
 				const tags = Tags.parse(JSON.parse(row.tags));
-				const text = [
-					body.pre,
-					...body.steps.map((step) => (step.expected ? `${step.action}\n${step.expected}` : step.action)),
-				].join("\n");
+				const text = searchText(db, Number(row.project), body);
 				insert.run(BigInt(row.id), body.title, text, tags.join(" "), BigInt(row.project));
 			} catch (error) {
 				throw invalid(
