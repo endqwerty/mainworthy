@@ -37,6 +37,7 @@ import {
 	TIMINGS,
 	testArgs,
 	testReaders,
+	writeTimings,
 } from "./check-plan.ts";
 import { requireReady } from "./preflight.ts";
 
@@ -83,7 +84,7 @@ if (notTests.length > 0 || (files.length > 0 && (only === undefined || shard !==
 	process.exit(4);
 }
 const chosen = files.length > 0 ? files : undefined;
-// The recorded timings are each file's time with nothing beside it, which is what a CI shard gives it.
+// Local recording measures every file alone. CI imports can refresh the same weights from JUnit reports.
 const record = flags.has("update-timings");
 const workers = flags.has("workers") ? Number(flags.get("workers")) : record ? 1 : undefined;
 if (workers !== undefined && !(Number.isInteger(workers) && workers > 0)) {
@@ -210,9 +211,9 @@ if (record) {
 		const files = Object.fromEntries(
 			slowest(measured, Number.POSITIVE_INFINITY)
 				.filter((entry) => existsSync(entry.file))
-				.map((entry) => [entry.file, Math.round(entry.seconds * 1000)]),
+				.map((entry) => [entry.file, entry.seconds * 1000]),
 		);
-		await Bun.write(TIMINGS, `${JSON.stringify({ version: 1, files }, null, 2)}\n`);
+		writeTimings(TIMINGS, files);
 		console.log(`\n${TIMINGS} holds this run's durations.`);
 	} else console.log(`\n${TIMINGS} is unchanged: it is recorded from a run of every file, one at a time, that passed.`);
 }
