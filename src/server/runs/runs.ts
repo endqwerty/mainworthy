@@ -130,11 +130,13 @@ const Q = {
 	),
 	receivingPlanned: sql<{ project: number; commit: string | null }, RunRow>(
 		`SELECT * FROM runs WHERE project = $project AND origin = 'planned'
-		 AND (state = 'open' OR (state = 'closed' AND json_extract(accepts, '$.commit') = $commit))`,
+		 AND (state = 'open' OR (state = 'closed' AND json_extract(accepts, '$.commit') = $commit))
+		 ORDER BY state, id DESC`,
 	),
 	plannedForCommit: sql<{ project: number; commit: string }, { id: number }>(
 		`SELECT id FROM runs WHERE project = $project AND origin = 'planned'
-		 AND json_extract(accepts, '$.commit') = $commit`,
+		 AND json_extract(accepts, '$.commit') = $commit
+		 ORDER BY state, id DESC`,
 	),
 	recent: sql<
 		{
