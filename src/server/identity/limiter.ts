@@ -86,8 +86,10 @@ export type Limiter = {
 	check: (keys: readonly string[], now: number) => LimiterAnswer;
 	/** An attempt was looked at and was wrong: one failure for each of these keys. A key named twice counts once. */
 	failed: (keys: readonly string[], now: number) => void;
-	/** An attempt was right: these keys are forgotten. The caller chooses them; see the top of this file. */
-	succeeded: (keys: readonly string[]) => void;
+	/** An attempt was right: forget these keys, except blocks newer than the supplied version. */
+	succeeded: (keys: readonly string[], blockVersion?: number) => void;
+	/** The newest block's version. A slow success may clear only blocks no newer than when its check began. */
+	readonly blockVersion: number;
 	/** The keys held, those not yet dropped after their time included. This is the number the bound is on. */
 	readonly size: number;
 };
@@ -97,7 +99,13 @@ type Entry =
 	/** Fewer than five failures inside the window: `recent` is their times, oldest first. */
 	| { readonly kind: "counting"; readonly lastFailure: number; readonly recent: readonly number[] }
 	/** The fifth failure or a later one: a block of `blockMs`, from `lastFailure` to `until`. */
-	| { readonly kind: "tripped"; readonly lastFailure: number; readonly blockMs: number; readonly until: number };
+	| {
+			readonly kind: "tripped";
+			readonly lastFailure: number;
+			readonly blockMs: number;
+			readonly until: number;
+			readonly blockVersion: number;
+	  };
 
 const FREE: LimiterAnswer = { kind: "free" };
 
@@ -113,14 +121,14 @@ function blockLeft(entry: Entry | undefined, now: number): number {
 }
 
 /** What a key is after one more failure. `entry` is undefined for a key that is unknown or forgotten. */
-function afterFailure(entry: Entry | undefined, now: number): Entry {
+function afterFailure(entry: Entry | undefined, now: number, blockVersion: number): Entry {
 	if (entry?.kind === "tripped") {
 		const blockMs = Math.min(entry.blockMs * 2, LONGEST_BLOCK_MS);
-		return { kind: "tripped", lastFailure: now, blockMs, until: now + blockMs };
+		return { kind: "tripped", lastFailure: now, blockMs, until: now + blockMs, blockVersion };
 	}
 	const recent = [...(entry?.recent ?? []).filter((at) => at > now - WINDOW_MS), now];
 	if (recent.length <= FREE_FAILURES) return { kind: "counting", lastFailure: now, recent };
-	return { kind: "tripped", lastFailure: now, blockMs: FIRST_BLOCK_MS, until: now + FIRST_BLOCK_MS };
+	return { kind: "tripped", lastFailure: now, blockMs: FIRST_BLOCK_MS, until: now + FIRST_BLOCK_MS, blockVersion };
 }
 
 /**
@@ -148,6 +156,7 @@ export function createLimiter(options: { maxKeys?: number } = {}): Limiter {
 	// keys does not cost each of them a pass over every key. A clock that was set back can put the times out of
 	// this order; room is still made then, by dropping the key whose failure was reported longest ago.
 	const entries = new Map<string, Entry>();
+	let blockVersion = 0;
 
 	const remembered = (key: string, now: number): Entry | undefined => {
 		const entry = entries.get(key);
@@ -174,13 +183,20 @@ export function createLimiter(options: { maxKeys?: number } = {}): Limiter {
 		},
 		failed: (keys, now) => {
 			for (const key of new Set(keys)) {
-				const next = afterFailure(remembered(key, now), now);
+				const next = afterFailure(remembered(key, now), now, blockVersion + 1);
+				if (next.kind === "tripped") blockVersion = next.blockVersion;
 				if (!entries.delete(key) && entries.size >= maxKeys) makeRoom(now);
 				entries.set(key, next);
 			}
 		},
-		succeeded: (keys) => {
-			for (const key of keys) entries.delete(key);
+		succeeded: (keys, observedVersion = blockVersion) => {
+			for (const key of keys) {
+				const entry = entries.get(key);
+				if (entry?.kind !== "tripped" || entry.blockVersion <= observedVersion) entries.delete(key);
+			}
+		},
+		get blockVersion() {
+			return blockVersion;
 		},
 		get size() {
 			return entries.size;

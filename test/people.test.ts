@@ -181,6 +181,89 @@ test("TOTP failed codes remain limited across fresh correct passwords and across
 	expect(answers.map((reply) => reply.status).sort()).toEqual([401, 401, 401, 401, 401, 429, 429, 429]);
 });
 
+for (const path of ["sign-in", "change"] as const) {
+	test(`queued password ${path} attempts stop when the name becomes blocked`, async () => {
+		const w = world();
+		const cookie = await joined(w, "queued-robin", FIRST);
+		const attempt = (password: string) =>
+			path === "sign-in"
+				? signIn(w, "queued-robin", password)
+				: w.post("/api/account/password", { current: password, next: SECOND }, { cookie });
+		const verified = spyOn(Bun.password, "verify");
+		const logged = spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const answers = await Promise.all([
+				...Array.from({ length: 16 }, () => attempt("a wrong password")),
+				attempt(FIRST),
+			]);
+			expect(answers.at(-1)?.status).toBe(429);
+			expect(verified.mock.calls.some(([password]) => password === FIRST)).toBe(false);
+			expect(answers.map((reply) => reply.status).sort()).toEqual([
+				...Array.from({ length: 5 }, () => (path === "sign-in" ? 401 : 403)),
+				...Array.from({ length: 12 }, () => 429),
+			]);
+			for (const answer of answers.filter((reply) => reply.status === 429)) {
+				expect(said(answer)).toBe("429 limited, retry after 1");
+				expect(answer.setCookies).toEqual([]);
+			}
+			expect(said(await signIn(w, "queued-robin", FIRST))).toBe("429 limited, retry after 1");
+			w.clock.advance(1000);
+			expect(said(await signIn(w, "queued-robin", FIRST))).toBe("200");
+		} finally {
+			verified.mockRestore();
+			logged.mockRestore();
+		}
+	});
+	for (const expires of [false, true]) {
+		test(`an in-flight password ${path} preserves a newer block${expires ? " after it expires" : " while it is active"}`, async () => {
+			const w = world();
+			const cookie = await joined(w, "running-robin", FIRST);
+			const started = Promise.withResolvers<void>();
+			const finish = Promise.withResolvers<void>();
+			const verify = Bun.password.verify.bind(Bun.password);
+			let held = false;
+			const verified = spyOn(Bun.password, "verify").mockImplementation(async (password, hash, algorithm) => {
+				const right = await verify(password, hash, algorithm);
+				if (!held && password === FIRST) {
+					held = true;
+					started.resolve();
+					await finish.promise;
+				}
+				return right;
+			});
+			const logged = spyOn(console, "warn").mockImplementation(() => {});
+			const running =
+				path === "sign-in"
+					? signIn(w, "running-robin", FIRST)
+					: w.post("/api/account/password", { current: FIRST, next: SECOND }, { cookie });
+			try {
+				await started.promise;
+				for (let n = 0; n < 5; n++)
+					expect(said(await signIn(w, "running-robin", "a wrong password"))).toBe("401 unauthenticated");
+				if (expires) w.clock.advance(1000);
+				finish.resolve();
+				const answer = await running;
+				if (expires) {
+					expect(said(answer)).toBe("200");
+					expect(said(await signIn(w, "running-robin", "a wrong password"))).toBe("401 unauthenticated");
+					expect(said(await signIn(w, "running-robin", path === "sign-in" ? FIRST : SECOND))).toBe(
+						"429 limited, retry after 2",
+					);
+				} else {
+					expect(said(answer)).toBe("429 limited, retry after 1");
+					expect(answer.setCookies).toEqual([]);
+					expect(said(await signIn(w, "running-robin", FIRST))).toBe("429 limited, retry after 1");
+				}
+			} finally {
+				finish.resolve();
+				await running;
+				verified.mockRestore();
+				logged.mockRestore();
+			}
+		});
+	}
+}
+
 test("TOTP pending proofs expire and cannot finish after password replacement or credential removal", async () => {
 	const w = world();
 	const cookie = await joined(w, "totp-stale", FIRST);

@@ -44,9 +44,10 @@ export function hashPassword(password: string, cost: Cost): Promise<string> {
 
 export type PasswordMatch = "normalized" | "legacy" | "wrong";
 
-/** A legacy match needs a new NFC hash. A stored text that is no hash at all matches nothing. */
-export function verifyPassword(password: string, stored: string): Promise<PasswordMatch> {
+/** A legacy match needs a new NFC hash. `before` runs at the scheduler turn, before the password is checked. */
+export function verifyPassword(password: string, stored: string, before?: () => void): Promise<PasswordMatch> {
 	return inTurn<PasswordMatch>(async () => {
+		before?.();
 		const normalized = password.normalize("NFC");
 		if (await Bun.password.verify(normalized, stored).catch(() => false)) return "normalized";
 		if (normalized !== password && (await Bun.password.verify(password, stored).catch(() => false))) return "legacy";

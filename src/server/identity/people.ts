@@ -296,6 +296,42 @@ function openOn(app: App, row: CredentialRow, cookie: string, about: About) {
 
 // ── A name and a password ──────────────────────────────────────────────────────────────────────────────────
 
+class PasswordBlocked extends Error {
+	constructor(readonly answer: Extract<LimiterAnswer, { kind: "blocked" }>) {
+		super("password check is blocked");
+	}
+}
+
+/** Admission and result accounting shared by sign-in and a change's current-password check. */
+async function checkPassword(
+	app: App,
+	input: { password: string; stored: string; name: string; address: string | null },
+): Promise<PasswordMatch | Limited> {
+	const limiter = limiterOf(app);
+	const account = accountKey(input.name);
+	const keys = counted(addressKey(input.address), account);
+	const answer = limiter.check(keys, app.now());
+	if (answer.kind === "blocked") return waiting(answer);
+	let blockVersion = limiter.blockVersion;
+	let right: PasswordMatch;
+	try {
+		right = await verifyPassword(input.password, input.stored, () => {
+			const turn = limiter.check(keys, app.now());
+			if (turn.kind === "blocked") throw new PasswordBlocked(turn);
+			blockVersion = limiter.blockVersion;
+		});
+	} catch (error) {
+		if (error instanceof PasswordBlocked) return waiting(error.answer);
+		throw error;
+	}
+	const after = limiter.check(keys, app.now());
+	if (after.kind === "blocked") return waiting(after);
+	if (right === "wrong") limiter.failed(keys, app.now());
+	// A success clears only the name, and cannot erase a block begun while this check was running.
+	else if (account !== null) limiter.succeeded([account], blockVersion);
+	return right;
+}
+
 /**
  * Signs a person in with their name and password.
  *
@@ -321,20 +357,22 @@ export async function signInWithPassword(
 	try {
 		// Asked for whoever is named, so that the one sign-in that has to make it first is not marked by that.
 		const nobodys = await dummyHash(app.config.passwordCost);
-		right = await verifyPassword(input.password, stored?.data ?? nobodys);
+		const checked = await checkPassword(app, {
+			password: input.password,
+			stored: stored?.data ?? nobodys,
+			name: input.name,
+			address: about.address,
+		});
+		if (typeof checked !== "string") return checked;
+		right = checked;
 		if (right === "legacy") rehashed = await hashPassword(input.password, app.config.passwordCost);
 	} catch (error) {
 		if (error instanceof PasswordWorkBusy) return no("busy");
 		throw error;
 	}
 	if (!person || !stored || right === "wrong") {
-		// The clock is read again: the check took a tenth of a second, and a failure counts from when it is known.
-		limiter.failed(keys, app.now());
 		return no(!person ? "unknown-name" : !stored ? "no-password" : "wrong-password");
 	}
-	// The name's count starts again. The address's does not: one right password between guesses must not reset
-	// the count of the address that is guessing at other names.
-	if (account !== null) limiter.succeeded([account]);
 	about.proven?.();
 	const cookie = newSessionSecret();
 	return commit(app, () => {
@@ -404,16 +442,14 @@ export async function changePassword(
 	try {
 		if (held) {
 			if (input.current === undefined) return { ok: false, why: "current-required" };
-			const limiter = limiterOf(app);
-			const account = accountKey(person.name);
-			const keys = counted(addressKey(input.address), account);
-			const answer = limiter.check(keys, app.now());
-			if (answer.kind === "blocked") return waiting(answer);
-			if ((await verifyPassword(input.current, held.data)) === "wrong") {
-				limiter.failed(keys, app.now());
-				return { ok: false, why: "wrong-current" };
-			}
-			if (account !== null) limiter.succeeded([account]);
+			const checked = await checkPassword(app, {
+				password: input.current,
+				stored: held.data,
+				name: person.name,
+				address: input.address,
+			});
+			if (typeof checked !== "string") return checked;
+			if (checked === "wrong") return { ok: false, why: "wrong-current" };
 		}
 		hash = await hashPassword(input.next, app.config.passwordCost);
 	} catch (error) {
