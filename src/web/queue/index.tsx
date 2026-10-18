@@ -54,7 +54,7 @@ export function QueueScreen() {
 const READING = "Reading this question before answering. Your note is kept.";
 
 function QueueWorkbench() {
-	const { project, route, overlayOpen, openPalette, setStatus } = useApp();
+	const { project, route, openPalette, setStatus } = useApp();
 	const owner = useRef(deviceSession()).current;
 	const writes = useRef(new Map<string, Promise<unknown>>());
 	const refActions = useRef(new Map<string, number>());
@@ -745,7 +745,7 @@ function QueueWorkbench() {
 			navigate(routeUrl({ project, screen: "queue", ref: item.q }), { replace: true });
 		}
 	}
-	const active = () => !overlayOpen && !inline;
+	const active = () => !inline;
 	/** The answers on offer: to the selection when there is one, else to the question shown. */
 	const offered = bulk
 		? sharedAnswers(selection)
@@ -762,26 +762,26 @@ function QueueWorkbench() {
 				}))
 			: [];
 	const keys: Binding[] = [
-		{ key: "j", label: "Next question", handler: () => move(1), when: active },
-		{ key: "k", label: "Previous question", handler: () => move(-1), when: active },
-		{ key: "arrowdown", label: "Next question", handler: () => move(1), when: active, hidden: true },
-		{ key: "arrowup", label: "Previous question", handler: () => move(-1), when: active, hidden: true },
-		{ key: "space", label: "All evidence", handler: () => setFull((value) => !value), when: active },
+		{ key: "j", label: "Next question", handler: () => move(1), applies: active },
+		{ key: "k", label: "Previous question", handler: () => move(-1), applies: active },
+		{ key: "arrowdown", label: "Next question", handler: () => move(1), applies: active, hidden: true },
+		{ key: "arrowup", label: "Previous question", handler: () => move(-1), applies: active, hidden: true },
+		{ key: "space", label: "All evidence", handler: () => setFull((value) => !value), applies: active },
 		{
 			key: "x",
 			label: "Select question",
-			when: () => active() && state === "open",
+			applies: () => active() && state === "open",
 			handler: () => {
 				if (current) toggle(current);
 			},
 		},
-		{ key: "*", label: "Select all of this kind", handler: selectAll, when: () => active() && state === "open" },
-		{ key: "escape", label: "Clear selection", handler: () => select([]), when: () => active() && bulk },
+		{ key: "*", label: "Select all of this kind", handler: selectAll, applies: () => active() && state === "open" },
+		{ key: "escape", label: "Clear selection", handler: () => select([]), applies: () => active() && bulk },
 		...offered.map(({ key, is, why }) => ({
 			key,
 			label: ANSWER_LABELS[is] ?? is,
 			handler: () => answer(is),
-			when: () => active() && state === "open" && why === null,
+			applies: () => active() && state === "open" && why === null,
 		})),
 		{
 			key: "enter",
@@ -790,20 +790,20 @@ function QueueWorkbench() {
 				const suggestion = current?.advice.at(-1)?.answer;
 				if (suggestion && typeof suggestion.is === "string") answer(suggestion.is, suggestion);
 			},
-			when: () => active() && state === "open" && Boolean(current?.advice.length) && current?.you !== "forbidden",
+			applies: () => active() && state === "open" && Boolean(current?.advice.length) && current?.you !== "forbidden",
 		},
 		{
 			key: "u",
 			label: "Undo answer",
 			handler: () => undo(state === "decided" && current ? [current] : undefined),
-			when: () => active() && Boolean(last || current?.decision),
+			applies: () => active() && Boolean(last || current?.decision),
 		},
 		// A reason the policy asks for, or one for a withdrawal, is left with Escape, which a phone has no key for:
 		// the palette lists it while the field is open (decision 0018), and runs it when chosen. The key stands aside
 		// while the palette or the sheet of keys is open, whose Escape closes it. The reference's field needs none:
 		// Enter records the answer without one, as its Escape does.
 		...(inline && inline.field === "reason"
-			? [{ key: "escape", label: "Cancel", handler: () => setInline(null), when: () => !overlayOpen }]
+			? [{ key: "escape", label: "Cancel", handler: () => setInline(null) }]
 			: []),
 	];
 	useBindings(keys);

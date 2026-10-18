@@ -15,6 +15,6 @@ export function useCaseBindings({
 			{ key: "v", label: "Version diff", handler: diff },
 			{ key: "a", label: "Accept proposal", handler: accept },
 			{ key: "r", label: "Reject proposal", handler: reject },
-		].map((binding) => ({ ...binding, when: () => enabled })),
+		].map((binding) => ({ ...binding, applies: () => enabled })),
 	);
 }

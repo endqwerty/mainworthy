@@ -1383,3 +1383,57 @@ for (const control of ["Policy preset", "Tests with no case"] as const)
 	},
 	30000,
 );
+
+(browserAvailable ? test : test.skip)(
+	"the Settings palette offers only applicable commands and overlays pause screen keys",
+	async () => {
+		const server = await fixture({ preset: "loose", mode: "server" });
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			view = await openPage(server, { path: "/p/scratch/settings" });
+			const { page } = view;
+			page.setDefaultTimeout(3000);
+			const sections = page.getByRole("listbox", { name: "Settings sections" });
+			const palette = page.getByRole("region", { name: "Command palette", exact: true });
+			for (const [section, command, field] of [
+				["Policy", null, null],
+				["Tokens", "New token", "token-actor"],
+				["Projects", "New project", "project-key"],
+				["People", "New invitation", "invite-name"],
+				["Your sign-in", "New password", "password-next"],
+			] as const) {
+				await sections.getByRole("option", { name: section, exact: true }).click();
+				await page.keyboard.press("ControlOrMeta+k");
+				await palette.waitFor();
+				expect(await palette.getByRole("option", { name: /New / }).locator(".t").allTextContents()).toEqual(
+					command ? [command] : [],
+				);
+				await page.keyboard.press("j");
+				await page.evaluate(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "j", bubbles: true })));
+				expect(await sections.getByRole("option", { selected: true }).innerText()).toBe(section);
+				await page.keyboard.press("Escape");
+				await palette.waitFor({ state: "detached" });
+				if (command && field) {
+					await page.keyboard.press("ControlOrMeta+k");
+					await palette.getByRole("option", { name: new RegExp(command) }).click();
+					expect(await page.evaluate(() => document.activeElement?.id)).toBe(field);
+				}
+			}
+			await sections.getByRole("option", { name: "Policy", exact: true }).click();
+			await page.keyboard.press("?");
+			await page.getByRole("region", { name: "Keyboard shortcuts" }).waitFor();
+			await page.keyboard.press("j");
+			await page.evaluate(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "j", bubbles: true })));
+			expect(await sections.getByRole("option", { selected: true }).innerText()).toBe("Policy");
+			await page.keyboard.press("Escape");
+			await page.getByRole("region", { name: "Keyboard shortcuts" }).waitFor({ state: "detached" });
+			await page.keyboard.press("j");
+			expect(await sections.getByRole("option", { selected: true }).innerText()).toBe("Tokens");
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30000,
+);

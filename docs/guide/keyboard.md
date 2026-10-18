@@ -12,6 +12,8 @@ records the automated coverage and remaining manual checks, including screen-rea
 
 ## How the keys work
 
+The command palette offers actions that apply to the current screen and section. In Settings, for example, **New invitation** appears under People and **New project** under Projects.
+
 - A sequence such as <kbd>g</kbd> <kbd>q</kbd> means one key followed by the other. You have a little under a second to press the second key.
 - <kbd>⌘</kbd> is Command on macOS and Ctrl everywhere else.
 - While you type in a field, the available keys are <kbd>⌘</kbd> combinations, <kbd>Esc</kbd>, and the case editor keys. <kbd>Esc</kbd> leaves the case editor, the filter, and a run's note. A field in Settings keeps the focus until you click or tab outside it.

@@ -116,7 +116,7 @@ export function CasePane({
 	copies: DraftCopy[];
 	onDiscardCopy: (copy: DraftCopy) => void;
 }) {
-	const { project, session, setStatus, overlayOpen } = useApp();
+	const { project, session, setStatus } = useApp();
 	const elsewhereStatus = ending ? draftEndedStatus[ending] : ownershipStatus(ownerLive);
 	const owner = useRef(deviceSession()).current;
 	const ref = draft?.ref ?? view?.ref ?? null;
@@ -176,7 +176,7 @@ export function CasePane({
 		else setStatus("This case has no version yet. There is nothing to compare.");
 	}
 	useCaseBindings({
-		enabled: !overlayOpen && ref !== null,
+		enabled: ref !== null,
 		diff: () => openDiff(draft?.base ?? view?.version ?? 1),
 		accept: () => answerShown("accept", "key"),
 		reject: () => answerShown("reject", "key"),

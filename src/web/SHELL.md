@@ -16,7 +16,7 @@ Put scrolling content in `.pane-scroll`.
 Each screen imports its own CSS. Do not edit another screen or the shell.
 
 `useApp()` from `ui/context.tsx` supplies `project`, `route`, `session`,
-`setStatus(text)`, `openPalette(options)`, `refreshSession()` and `overlayOpen`.
+`setStatus(text)`, `openPalette(options)` and `refreshSession()`.
 `route` has `screen`, `project`, `ref` and `folder`, with null for no selection.
 `navigate(path)` from `lib/router.ts` changes history without a page load.
 `routeUrl({project, screen, ref?})` and `refUrl({project, ref})` build URLs.
@@ -127,10 +127,12 @@ A save stores its request with the draft before it leaves (`sent`), and its repl
 
 ## Keyboard and palette
 
-`useBindings([{key, label, handler, when?, allowInInput?, hidden?}])` from
+`useBindings([{key, label, handler, applies?, allowInInput?, hidden?}])` from
 `lib/keys.ts` registers handlers for the mounted screen. Keys are lowercase,
 for example `j`, `space`, `g q`, `mod+enter`, `shift+enter`, `escape`.
-Use `when: () => !overlayOpen` for normal screen handlers. `mod` is Ctrl or Cmd.
+Use `applies` for conditions such as the current section or an open form. The palette and keys both check it.
+`useKeyboard({listOnly, overlayOpen})` pauses screen keys under overlays; only the shell's palette toggle and close bindings set `allowInOverlay`. Do not put overlay state in `applies`.
+`mod` is Ctrl or Cmd.
 Plain keys are ignored in input fields. Escape and modified keys still work.
 Call preventDefault in an input's local handler to keep global keys from firing.
 The same registry feeds footer hints, the palette and the `?` sheet.
@@ -222,7 +224,7 @@ place (`navigate` with `replace`) leaves the pane as it is: use it when nobody g
 A binding that is an action of the list says `list: true`: New case, Filter, Plan run, and the Cancel of a form
 that closes only with Escape (the tag and folder forms), which a phone has no key for. While the detail is
 covered, by the list or by the sidebar (`listOnly`), only those run, from the palette and from a key of an
-attached keyboard (`useKeyboard(listOnly)`), because every other binding may act on the selected row. Mark a new binding `list` only
+attached keyboard (`useKeyboard({listOnly, overlayOpen})`), because every other binding may act on the selected row. Mark a new binding `list` only
 if it records no answer, result or change about the selected row, and add it to the list of marked bindings in
 `test/architecture.test.ts`. `openPage(server, { device: "phone" })` opens a page as a phone
 (`test/e2e/phone.test.ts`).

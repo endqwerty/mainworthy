@@ -100,7 +100,7 @@ function sentBody(draft: Draft): CaseBody {
 const focusOnce = (node: HTMLElement | null): void => node?.focus();
 
 export function SuiteScreen() {
-	const { project, route, setStatus, openPalette, overlayOpen } = useApp();
+	const { project, route, setStatus, openPalette } = useApp();
 	const owner = useRef(deviceSession()).current;
 	const windowId = useRef(draftOwner()).current;
 	const ownedDraft = useCallback((saved: Draft): Draft => claimCopiedDraft({ project, draft: saved }), [project]);
@@ -1844,7 +1844,6 @@ export function SuiteScreen() {
 		return () => window.removeEventListener("mainworthy:drop", drop);
 	});
 	useSuiteBindings({
-		enabled: !overlayOpen,
 		create,
 		edit: () => edit(),
 		next: () => stepCursor(1),

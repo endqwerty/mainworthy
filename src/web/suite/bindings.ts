@@ -1,6 +1,5 @@
 import { useBindings } from "../lib/keys.ts";
 export function useSuiteBindings({
-	enabled,
 	create,
 	edit,
 	next,
@@ -20,7 +19,6 @@ export function useSuiteBindings({
 	cancelTag,
 	cancelFolder,
 }: {
-	enabled: boolean;
 	create: () => void;
 	edit: () => void;
 	next: () => void;
@@ -43,51 +41,45 @@ export function useSuiteBindings({
 }): void {
 	// The tag and folder forms close with Escape, which a phone has no key for: while one is open, the palette lists
 	// what Escape does there (decision 0018), and runs it when chosen. Escape in the form's field is the field's own.
-	// The key stands aside while the palette or the sheet of keys is open (`enabled`), whose Escape closes it, and
-	// while the focus is in the case editor, whose Escape leaves the editor.
+	// The keyboard handler pauses screen keys under overlays. In the case editor, Escape leaves the editor.
 	const cancelling = () =>
-		enabled && !(document.activeElement instanceof Element && document.activeElement.closest(".body-editor"));
-	useBindings(
-		[
-			// The three marked `list` do not act on the case the detail shows (`Binding.list`).
-			{ key: "c", label: "New case", list: true, handler: create },
-			{ key: "e", label: "Edit case", handler: edit },
-			{ key: "enter", label: "Edit case", handler: edit },
-			{ key: "j", label: "Next case", handler: next },
-			{ key: "arrowdown", label: "Next case", handler: next, hidden: true },
-			{ key: "k", label: "Previous case", handler: previous },
-			{ key: "arrowup", label: "Previous case", handler: previous, hidden: true },
-			{ key: "/", label: "Filter", list: true, handler: filter },
-			{ key: "escape", label: "Seal and leave editor", handler: seal },
-			{ key: "mod+enter", label: "Record version", handler: seal },
-			{ key: "shift+enter", label: "Next new case", handler: rapid },
-			{ key: "x", label: "Select case", handler: select },
-			{ key: "m", label: "Move selected", handler: move },
-			{ key: "t", label: "Tag selected", handler: tag },
-			{ key: "#", label: "Archive selected", handler: archive },
-			{ key: "u", label: "Undo", handler: undo },
-			{ key: "space", label: "Peek timeline", handler: peek },
-			{ key: "alt+[", label: "Previous folder", handler: () => folder(-1) },
-			{ key: "]", label: "Next folder", handler: () => folder(1) },
-			// Its form is in the sidebar, which a phone keeps closed: the shell opens it (`mainworthy:sidebar`). It
-			// makes a folder and decides nothing about a case, so a phone offers it over the list too.
-			{
-				key: "n f",
-				label: "New folder",
-				list: true,
-				handler: () => {
-					newFolder();
-					window.dispatchEvent(new Event("mainworthy:sidebar"));
-				},
+		!(document.activeElement instanceof Element && document.activeElement.closest(".body-editor"));
+	useBindings([
+		// The three marked `list` do not act on the case the detail shows (`Binding.list`).
+		{ key: "c", label: "New case", list: true, handler: create },
+		{ key: "e", label: "Edit case", handler: edit },
+		{ key: "enter", label: "Edit case", handler: edit },
+		{ key: "j", label: "Next case", handler: next },
+		{ key: "arrowdown", label: "Next case", handler: next, hidden: true },
+		{ key: "k", label: "Previous case", handler: previous },
+		{ key: "arrowup", label: "Previous case", handler: previous, hidden: true },
+		{ key: "/", label: "Filter", list: true, handler: filter },
+		{ key: "escape", label: "Seal and leave editor", handler: seal },
+		{ key: "mod+enter", label: "Record version", handler: seal },
+		{ key: "shift+enter", label: "Next new case", handler: rapid },
+		{ key: "x", label: "Select case", handler: select },
+		{ key: "m", label: "Move selected", handler: move },
+		{ key: "t", label: "Tag selected", handler: tag },
+		{ key: "#", label: "Archive selected", handler: archive },
+		{ key: "u", label: "Undo", handler: undo },
+		{ key: "space", label: "Peek timeline", handler: peek },
+		{ key: "alt+[", label: "Previous folder", handler: () => folder(-1) },
+		{ key: "]", label: "Next folder", handler: () => folder(1) },
+		// Its form is in the sidebar, which a phone keeps closed: the shell opens it (`mainworthy:sidebar`). It
+		// makes a folder and decides nothing about a case, so a phone offers it over the list too.
+		{
+			key: "n f",
+			label: "New folder",
+			list: true,
+			handler: () => {
+				newFolder();
+				window.dispatchEvent(new Event("mainworthy:sidebar"));
 			},
-			{ key: "z", label: "Widen case pane", handler: zoom },
-		]
-			.map((binding) => ({ ...binding, when: () => enabled }))
-			.concat(
-				cancelTag ? [{ key: "escape", label: "Cancel tag", list: true, handler: cancelTag, when: cancelling }] : [],
-				cancelFolder
-					? [{ key: "escape", label: "Cancel new folder", list: true, handler: cancelFolder, when: cancelling }]
-					: [],
-			),
-	);
+		},
+		{ key: "z", label: "Widen case pane", handler: zoom },
+		...(cancelTag ? [{ key: "escape", label: "Cancel tag", list: true, handler: cancelTag, applies: cancelling }] : []),
+		...(cancelFolder
+			? [{ key: "escape", label: "Cancel new folder", list: true, handler: cancelFolder, applies: cancelling }]
+			: []),
+	]);
 }

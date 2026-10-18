@@ -128,20 +128,20 @@ export function BodyEditor({
 		document.activeElement instanceof HTMLElement &&
 		document.activeElement.matches(".body-editor textarea");
 	useBindings([
-		{ key: "shift+enter", label: "Next new case", handler: rapid, allowInInput: true, when: editing },
+		{ key: "shift+enter", label: "Next new case", handler: rapid, allowInInput: true, applies: editing },
 		{
 			key: "enter",
 			label: draft.caret.field === "title" || draft.caret.field === "capture-title" ? "First step" : "Next step",
 			handler: nextStep,
 			allowInInput: true,
-			when: editing,
+			applies: editing,
 		},
 		{
 			key: "tab",
 			label: "Expected result",
 			handler: expected,
 			allowInInput: true,
-			when: () => editing() && draft.caret.field.endsWith(":action"),
+			applies: () => editing() && draft.caret.field.endsWith(":action"),
 		},
 	]);
 	const root = useRef<HTMLDivElement>(null);
