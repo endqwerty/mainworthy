@@ -8,7 +8,6 @@ const Collection = z.object({ in: FindInput.shape.in });
 const Administration = z.object({ do: z.string() });
 const staticAdministration: ReadonlySet<string> = new Set([
 	"actor.list",
-	"team.list",
 ] satisfies readonly Api["admin"]["input"]["do"][]);
 
 type Writes = { attachments: boolean; deployments: boolean };
@@ -56,6 +55,7 @@ export function affected(key: readonly unknown[], change: Change): boolean {
 	if (touched.some((ref) => !/^[CQRPT]-\d+$/.test(ref) && ref !== "policy" && ref !== "folders")) return true;
 	const read = key[1];
 	const input = key[2];
+	if (read === "teams") return false;
 	if (read === "attachment") return changes.attachments;
 	if (read === "admin") {
 		const method = Administration.safeParse(input);

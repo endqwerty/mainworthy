@@ -49,6 +49,11 @@ read finishes before one coalesced refresh, yielding to automatic next-page read
 so Suite can finish under continuous changes (issue #199). Awaiting
 `invalidateProject` also waits for that refresh. Nothing outside `lib/data.ts` calls
 `queryClient.invalidateQueries`; keep it so.
+For active ordinary queries that already have data, `invalidateProject` replaces any
+in-flight read. A handler can hold a newer reply with `setQueryData` and invalidate
+in the same task without an older reply replacing it. Events let all active reads
+finish before their trailing refresh. Calls to `changed` within one task share a
+microtask; separate SSE messages merge while a read is in flight.
 The shell owns exactly one event stream for the current project. Streams,
 window focus and reconnect invalidate cached reads; edits also invalidate.
 

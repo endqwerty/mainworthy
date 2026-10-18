@@ -24,6 +24,29 @@ async function until(check: () => void): Promise<void> {
 	}
 }
 
+test("replacing an event's pending refresh still owes a read for an event during its replacement", async () => {
+	const read = question();
+	try {
+		await read.answer(0, "open");
+		changed("scratch", { op: "decide", touched: ["Q-3"] });
+		await until(() => expect(read.replies).toHaveLength(2));
+		changed("scratch", { op: "decide", touched: ["Q-3"] });
+		await Promise.resolve();
+		const refreshed = invalidateProject("scratch");
+		expect(read.replies).toHaveLength(3);
+		changed("scratch", { op: "decide", touched: ["Q-3"] });
+		await Promise.resolve();
+		read.replies[1]?.("older");
+		await read.answer(2, "decided");
+		await refreshed;
+		await until(() => expect(read.replies).toHaveLength(4));
+		await read.answer(3, "reopened");
+		expect(read.replies).toHaveLength(4);
+	} finally {
+		read.stop();
+	}
+});
+
 /** A read of `Q-3` that the test answers when it chooses, as a screen holds it. */
 function question() {
 	const replies: ((state: string) => void)[] = [];
@@ -38,6 +61,73 @@ function question() {
 	};
 	return { replies, answer, stop, shown: () => observer.getCurrentResult().data?.[0]?.state };
 }
+
+for (const pendingEvent of [false, true]) {
+	test(`a held case cannot be replaced by a pre-write reply, including a pending event refresh: ${pendingEvent}`, async () => {
+		const key = queryKey({ project: "scratch", op: "get", input: { refs: ["C-1"] } });
+		const requests: { signal: AbortSignal; reply: (version: number) => void }[] = [];
+		const observer = new QueryObserver<{ version: number }[]>(queryClient, {
+			queryKey: key,
+			queryFn: ({ signal }) =>
+				new Promise((resolve) => requests.push({ signal, reply: (version) => resolve([{ version }]) })),
+		});
+		const seen: number[] = [];
+		const stop = observer.subscribe((read) => {
+			const version = read.data?.[0]?.version;
+			if (version !== undefined && seen.at(-1) !== version) seen.push(version);
+		});
+		try {
+			requests[0]?.reply(1);
+			await until(() => expect(observer.getCurrentResult().isFetching).toBe(false));
+			void observer.refetch();
+			expect(requests).toHaveLength(2);
+			if (pendingEvent) {
+				changed("scratch", { op: "propose", touched: ["C-1"] });
+				await Promise.resolve();
+			}
+			// Suite's readCase/holdCase publishes a newer read, then releases the draft and refreshes in this task.
+			queryClient.setQueryData(key, [{ version: 3 }]);
+			const refreshed = invalidateProject("scratch");
+			requests[1]?.reply(2);
+			await until(() => expect(requests).toHaveLength(3));
+			expect(observer.getCurrentResult().data?.[0]?.version).toBe(3);
+			expect(requests[1]?.signal.aborted).toBe(true);
+			requests[2]?.reply(3);
+			await refreshed;
+			expect(seen).toEqual([1, 3]);
+			expect(observer.getCurrentResult().data?.[0]?.version).toBe(3);
+		} finally {
+			stop();
+		}
+	});
+}
+
+test("an explicit refresh preserves an inactive read's event so enabling it reads the change", async () => {
+	const options = {
+		queryKey: queryKey({ project: "scratch", op: "get", input: { refs: ["C-1"] } }),
+		initialData: [{ version: 1 }],
+		enabled: false,
+		queryFn: () => new Promise<{ version: number }[]>((resolve) => replies.push(resolve)),
+	};
+	const replies: ((rows: { version: number }[]) => void)[] = [];
+	const observer = new QueryObserver(queryClient, options);
+	const stop = observer.subscribe(() => {});
+	try {
+		void observer.refetch();
+		changed("scratch", { op: "propose", touched: ["C-1"] });
+		await Promise.resolve();
+		const refreshed = invalidateProject("scratch");
+		replies[0]?.([{ version: 2 }]);
+		await refreshed;
+		await until(() => expect(observer.getCurrentResult().data?.[0]?.version).toBe(2));
+		observer.setOptions({ ...options, enabled: true });
+		await until(() => expect(replies).toHaveLength(2));
+		replies[1]?.([{ version: 3 }]);
+		await until(() => expect(observer.getCurrentResult().data?.[0]?.version).toBe(3));
+	} finally {
+		stop();
+	}
+});
 
 // Issue #87: the queue first asked for a question 10 ms before it was settled elsewhere. The reply was read
 // before the settlement and arrived after its event, and the page took it as the question's state.
@@ -375,6 +465,9 @@ test("refresh dependencies follow read projections and preserve unknown-event re
 	expect(affected(["scratch", "admin", { do: "token.list" }], reported)).toBe(true);
 	expect(affected(policy, { op: "decide", touched: ["policy"] })).toBe(true);
 	expect(affected(["scratch", "admin", { do: "actor.list" }], edited)).toBe(false);
+	expect(affected(["scratch", "teams", { do: "list" }], edited)).toBe(false);
+	expect(affected(["scratch", "teams", { do: "list" }], { op: "propose", touched: [] })).toBe(false);
+	expect(affected(["scratch", "teams", { do: "list" }], { op: "admin", touched: [] })).toBe(true);
 	const question = ["scratch", "get", { refs: ["Q-30"] }];
 	expect(affected(question, { op: "decide", touched: ["Q-3"] })).toBe(false);
 	expect(affected(question, { op: "decide", touched: ["Q-30"] })).toBe(true);

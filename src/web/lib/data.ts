@@ -37,23 +37,29 @@ export function useQueryOp<O extends OpName>({
 }
 const askedAgain = new Map<Query, Promise<void>>();
 /**
- * Every in-flight read finishes before its one pending refresh, so an event flood cannot keep cancelling it.
+ * On events, every in-flight read finishes before its one pending refresh, so a flood cannot keep cancelling it.
+ * Explicit refreshes replace active ordinary reads with data: callers may have just held a newer cached reply.
  * First reads need the trailing read too: their reply may precede the event on the server (issue #87).
  * Yield after each reply so automatic paging can start its next page before refreshing the loaded pages.
  */
-function readAgain(stale: (query: Query) => boolean): Promise<void> {
+function readAgain(stale: (query: Query) => boolean, replace = false): Promise<void> {
+	const replaces = (query: Query): boolean =>
+		replace && query.isActive() && query.state.data !== undefined && query.queryKey[3] !== "pages";
+	for (const query of askedAgain.keys()) if (stale(query) && replaces(query)) askedAgain.delete(query);
 	const loading = queryClient.getQueryCache().findAll({
-		predicate: (query) => stale(query) && query.state.fetchStatus !== "idle",
+		predicate: (query) => stale(query) && !replaces(query) && query.state.fetchStatus !== "idle",
 	});
 	for (const query of loading) {
 		const reading = query.promise;
 		if (askedAgain.has(query) || !reading) continue;
 		const again = async (): Promise<void> => {
 			await new Promise<void>((resolve) => setTimeout(resolve, 0));
+			if (askedAgain.get(query) !== refresh) return;
 			askedAgain.delete(query);
 			if (queryClient.getQueryCache().get(query.queryHash) === query) await readAgain((current) => current === query);
 		};
-		askedAgain.set(query, reading.then(again, again));
+		const refresh = reading.then(again, again);
+		askedAgain.set(query, refresh);
 	}
 	const waiting = [...askedAgain].filter(([query]) => stale(query)).map(([, read]) => read);
 	return Promise.all([
@@ -62,10 +68,10 @@ function readAgain(stale: (query: Query) => boolean): Promise<void> {
 	]).then(() => {});
 }
 export function invalidateProject(project: string): Promise<void> {
-	return readAgain((query) => query.queryKey[0] === project);
+	return readAgain((query) => query.queryKey[0] === project, true);
 }
 const pending = new Set<Query>();
-/** Coalesces one event burst; a read already in flight is allowed to land and owes one trailing read. */
+/** Merges calls within one task. Separate SSE messages merge while a read is in flight and owe one trailing read. */
 export function changed(project: string, change: Parameters<typeof affected>[1]): void {
 	const scheduled = pending.size > 0;
 	for (const query of queryClient.getQueryCache().findAll())
