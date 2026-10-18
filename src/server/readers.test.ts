@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
 import { harness } from "../../test/helpers.ts";
+import { start } from "../app/start.ts";
 import { type App, type Config, openApp, SESSION_LIFETIMES } from "./kernel/app.ts";
 import { Db } from "./kernel/db.ts";
-import { Readers, readerCount } from "./readers.ts";
-import { start } from "./start.ts";
+import { Readers, readerCount } from "./ops/readers.ts";
 
 const apps: App[] = [];
 const pools: Readers[] = [];

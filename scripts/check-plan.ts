@@ -79,7 +79,7 @@ export const parallelWorkers = (cores = availableParallelism()): number => Math.
 
 /**
  * The reader threads of a server a test starts, where MAINWORTHY_READERS does not say. A server takes the cores
- * less two, up to eight (`src/server/readers.ts`), and the browser tests start several hundred servers. Each
+ * less two, up to eight (`src/server/ops/readers.ts`), and the browser tests start several hundred servers. Each
  * thread loads the whole operation registry, which is about 110 ms of CPU, and a server that gets as far as a page
  * has used about 540 ms in all: on the 16-thread desktop the eight threads were 38% of the CPU time of the longest
  * browser file (121 CPU-seconds; 76 with two), and each thread of the two that are left is 0.11 s of a server's 0.54
@@ -143,8 +143,8 @@ export function fixtureBuildArgs(outfile: string): string[] {
 		"--banner",
 		"/*! Mainworthy, Apache-2.0. Software from others is in this file; its licences and notices: /docs/licence */",
 		"test/e2e/serve.ts",
-		"src/server/read-worker.ts",
-		"src/server/checkpoint-worker.ts",
+		"src/server/ops/read-worker.ts",
+		"src/server/kernel/checkpoint-worker.ts",
 		"src/cli/demo-worker.ts",
 		"--outfile",
 		outfile,

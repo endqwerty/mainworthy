@@ -4,13 +4,13 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { type Instance, start } from "../src/app/start.ts";
 import { ReportInput } from "../src/core/ops.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
 import { acceptReport } from "../src/server/ops/writes.ts";
-import { type Instance, start } from "../src/server/start.ts";
 import { exportArchive, importArchive, linesOf } from "../src/server/transfer/transfer.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
 import { type Harness, harness } from "./helpers.ts";

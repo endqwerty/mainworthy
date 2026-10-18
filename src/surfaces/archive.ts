@@ -2,11 +2,11 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { HTTP_STATUS } from "../core/api.ts";
-import { runArchive } from "../server/archives.ts";
 import { clearChallenges, clearUses, type Session } from "../server/identity/identity.ts";
 import type { App } from "../server/kernel/app.ts";
 import type { Actor } from "../server/kernel/ctx.ts";
 import { OpError } from "../server/kernel/errors.ts";
+import { runArchive } from "../server/ops/archives.ts";
 
 const CHUNK_BYTES = 64 * 1024;
 const json = (body: unknown, status = 200): Response =>

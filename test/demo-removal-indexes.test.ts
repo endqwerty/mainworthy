@@ -4,7 +4,7 @@ import { migrate } from "../src/server/kernel/migrate.ts";
 import { exportArchive, removeProject } from "../src/server/transfer/transfer.ts";
 import { removalFixture } from "./demo-removal-fixture.ts";
 import "../src/server/ops/index.ts";
-import "../src/server/jobs.ts";
+import "../src/server/ops/jobs.ts";
 
 test("ordinary lookups use the existing non-null partial indexes after dropping their duplicates", () => {
 	const db = new Db(":memory:");

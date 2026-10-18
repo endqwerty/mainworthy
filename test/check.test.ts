@@ -245,12 +245,13 @@ test("a browser phase builds once, including quiet and shards, but named server 
 test("a broken browser fixture build fails the check before any test runs, even with an inherited executable", async () => {
 	const root = mkdtempSync(join(tmpdir(), "mainworthy-broken-fixture-"));
 	try {
-		for (const dir of ["scripts", "test/e2e", "src/server", "src/cli"]) mkdirSync(join(root, dir), { recursive: true });
+		for (const dir of ["scripts", "test/e2e", "src/server/ops", "src/cli"])
+			mkdirSync(join(root, dir), { recursive: true });
 		for (const file of ["check.ts", "check-plan.ts", "preflight.ts"])
 			copyFileSync(`scripts/${file}`, join(root, "scripts", file));
 		writeFileSync(join(root, "package.json"), "{}");
 		writeFileSync(join(root, "test/e2e/serve.ts"), "const broken = ;");
-		for (const worker of ["src/server/read-worker.ts", "src/cli/demo-worker.ts"])
+		for (const worker of ["src/server/ops/read-worker.ts", "src/cli/demo-worker.ts"])
 			writeFileSync(join(root, worker), "export {};");
 		writeFileSync(join(root, "test/e2e/broken.test.ts"), 'throw new Error("TEST_MUST_NOT_RUN");');
 		const child = Bun.spawn(

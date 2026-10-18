@@ -5,7 +5,7 @@ import type { GateStatus, InboxReply, ProposeReply, ReportReceipt } from "../src
 import { effectiveQuarantine, quarantineEntries, quarantineLookup } from "../src/server/evidence/quarantine.ts";
 import { Db, declaredSql } from "../src/server/kernel/db.ts";
 import { migrate } from "../src/server/kernel/migrate.ts";
-import { pollDefectHolds } from "../src/server/tracker-holds.ts";
+import { pollDefectHolds } from "../src/server/ops/tracker-holds.ts";
 import { exportArchive, importArchive } from "../src/server/transfer/transfer.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 

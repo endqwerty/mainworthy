@@ -4,16 +4,16 @@
 		"page": "83a943a47d9cec712e20c652e7407d0ece51ee36b97deda91b1c8256c5bb3f40"
 	},
 	"architecture": {
-		"candidate": "f9bdc2bad847298f54bd36d2355ec7c9e2af490d1ec6d51efbe063b50f876bf7",
-		"page": "69a48b5368fa5343b8cc487302e859eb3642faab75dd0aa63ee6544c33fb1ba1"
+		"candidate": "701ac9a1e8ac58eb91ca0b083bd9961b79996e27d9f338c32cb829099c85127f",
+		"page": "104544b63791119b217ce41a81acfa898a69de966e6a659cb5a1d108b0cf4af9"
 	},
 	"case-lifecycle": {
 		"candidate": "95fcf9f83a206aecfb8c60a5b8b89df3be6c2e1aa66be6b043d43ef8a13812a2",
 		"page": "15057565266418488a893f4ce26edc9992e4d80ab96927e0c25e910e8f4ec848"
 	},
 	"customize-map": {
-		"candidate": "ac7802ce00f2801a12e1c5bae32bac05f68c07995812d2b7772b9b6d3714b8e7",
-		"page": "392a09df55803f7fdeee5d48d382359a9fce95bade4de51d0131698ae5f5a1d1"
+		"candidate": "d62a75227340f5e5416c2393fc61bdbcbe783dde8ab20f8426ec451d98b0a8ec",
+		"page": "114a7598eac1ffbf54fcd81f13f484bad0fdcb10967a22e8b4d3f13113385b09"
 	},
 	"gate-verdict": {
 		"candidate": "35f3c208e1bf00b6edf092b8ab3b3ef7bac2b3849b979448f314bf64b3fe08f1",
@@ -32,8 +32,8 @@
 		"page": "ac1059b8fd76809db54e32759ffe076bb18847be04d3a2eccec11af5b44510a3"
 	},
 	"question-lifecycle": {
-		"candidate": "935cabeeafd41a891e74123d59e133b1606807bd9f6954275593fcda72a86b8b",
-		"page": "7bed71fe6d5b6323e07bc68fb2d60b07c86d65ebe5d8d2d34d36b284c4095fee"
+		"candidate": "38fad0e0c1df96a8d4be8df858f97a983d06077a606ff457aed74f80cb5a5491",
+		"page": "c835ac60a1d6a4069bcb8a242bc178e7c56832ac40e5dcfc713cbfcd5992c394"
 	},
 	"red-build": {
 		"candidate": "0faf56afc77382825e894534a9a66ee6b80708f26b38b8bf1a73f0d2ab9ccc6b",

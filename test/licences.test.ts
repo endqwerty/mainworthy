@@ -18,8 +18,8 @@ import {
 	unapproved,
 } from "../scripts/licences.ts";
 import { importAudit } from "../scripts/licences-import-bun.ts";
+import { VERSION } from "../src/app/start.ts";
 import { DOC_PAGES, DOCS_ROOT, docUrl, LICENCE_FILES, licenceFileUrl } from "../src/core/docs.ts";
-import { VERSION } from "../src/server/start.ts";
 import { docsHandler } from "../src/surfaces/docs/site.ts";
 
 const read = (path: string): string => readFileSync(path, "utf8");

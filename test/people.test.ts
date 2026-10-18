@@ -1803,7 +1803,7 @@ describe("an upgrade and an import", () => {
 		const dataDir = scratch();
 		const path = databasePath(dataDir);
 		writeFileSync(path, Bun.gunzipSync(readFileSync(join(import.meta.dir, "fixtures", "people", "instance-v2.db.gz"))));
-		const { start } = await import("../src/server/start.ts");
+		const { start } = await import("../src/app/start.ts");
 		const clock = clockAt(T0 + HOUR);
 		const instance = start(
 			{

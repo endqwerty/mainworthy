@@ -1,7 +1,7 @@
 // Copies committed pages from the write-ahead log into the database file, so the writer's commits do not
 // have to. Keep this entry independent of the read and archive workers' application and schema imports.
 import { parentPort, workerData } from "node:worker_threads";
-import { Db, databasePath } from "./kernel/db.ts";
+import { Db, databasePath } from "./db.ts";
 
 if (!parentPort) throw new Error("a worker needs its parent thread");
 const port = parentPort;

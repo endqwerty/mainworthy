@@ -17,17 +17,24 @@ import { MIGRATIONS, migrate, openDatabase, SCHEMA_VERSION, schemaVersion } from
 import { MCP_OPS, OP_LIST } from "../src/server/ops/index.ts";
 import { UNEXPORTED } from "../src/server/transfer/transfer.ts";
 import { openApi } from "../src/surfaces/http.ts";
-import "../src/server/jobs.ts";
+import "../src/server/ops/jobs.ts";
 
 const files = [...new Glob("src/**/*.{ts,tsx}").scanSync(".")].filter(
 	(file) => !file.endsWith(".test.ts") && !file.endsWith(".d.ts"),
 );
-const imports = (file: string): string[] =>
-	[
-		...readFileSync(file, "utf8").matchAll(
-			/^\s*(?:import|export)\s[^'"]*?from\s+["']([^"']+)["']|^\s*import\s+["']([^"']+)["']/gm,
-		),
-	].map((m) => m[1] ?? m[2] ?? "");
+const transpilers = { ts: new Bun.Transpiler({ loader: "ts" }), tsx: new Bun.Transpiler({ loader: "tsx" }) };
+const imports = (file: string): string[] => {
+	const source = readFileSync(file, "utf8").replace(/^#![^\n]*/, "");
+	return [
+		...new Set([
+			...transpilers[file.endsWith(".tsx") ? "tsx" : "ts"].scanImports(source).map(({ path }) => path),
+			// Bun erases type-only imports; keep checking the static imports the map already covered.
+			...[
+				...source.matchAll(/^\s*(?:import|export)\s[^'"]*?from\s+["']([^"']+)["']|^\s*import\s+["']([^"']+)["']/gm),
+			].map((m) => m[1] ?? m[2] ?? ""),
+		]),
+	];
+};
 const layerOf = (file: string): string => {
 	const parts = file.split("/");
 	return parts[1] === "server" ? `server/${parts[2]}` : (parts[1] ?? "");
@@ -482,7 +489,7 @@ describe("the module map", () => {
 	test("domain modules do not reach upward: imports go down the map, never up", () => {
 		// Each layer may import the layers listed after it. `ops` composes everything; `decisions` sits above the
 		// modules whose standing it writes; none of those may import `decisions` or `ops`.
-		const allowed: Record<string, string[]> = {
+		const domain: Record<string, string[]> = {
 			"server/kernel": [],
 			"server/identity": ["server/kernel"],
 			"server/policy": ["server/kernel"],
@@ -501,15 +508,40 @@ describe("the module map", () => {
 			"server/trackers": ["server/kernel", "server/evidence", "server/suite"],
 			"server/statuses": ["server/kernel", "server/evidence", "server/runs"],
 		};
+		const server = [...Object.keys(domain), "server/ops"];
+		const allowed: Record<string, string[]> = {
+			...domain,
+			core: [],
+			web: [],
+			"server/ops": Object.keys(domain),
+			surfaces: ["server/ops", "server/kernel", "server/identity", "web"],
+			app: [...server, "surfaces"],
+			cli: ["app", "surfaces", "server/ops", "server/kernel", "server/policy", "web"],
+		};
+		const exceptions: Record<string, string[]> = {
+			// The HTTP client shares the sign-in token length bound.
+			"src/cli/client.ts": ["server/identity"],
+			// Demo refresh issues temporary tokens, resets demo storage and restores grants before HTTP seeding.
+			"src/cli/demo.ts": ["server/identity", "server/transfer"],
+			// The demo reset worker resolves the owner before running that same reset.
+			"src/cli/demo-worker.ts": ["server/identity"],
+		};
 		const offenders: string[] = [];
 		for (const file of files) {
 			const layer = layerOf(file);
 			const may = allowed[layer];
-			if (!may) continue;
+			if (!may) {
+				offenders.push(`${file} belongs to an unlisted layer (${layer})`);
+				continue;
+			}
 			for (const path of imports(file)) {
 				if (!path.startsWith(".")) continue;
-				const target = layerOf(new URL(path, `file:///${file}`).pathname.slice(1));
-				if (target === layer || target === "core" || may.includes(target)) continue;
+				const resolved = new URL(path, `file:///${file}`).pathname.slice(1);
+				// Bundled documentation and licence text outside src are assets, not runtime layers.
+				if (!resolved.startsWith("src/") && !/\.tsx?$/.test(resolved)) continue;
+				const target = layerOf(resolved);
+				if (target === layer || target === "core" || may.includes(target) || exceptions[file]?.includes(target))
+					continue;
 				offenders.push(`${file} imports ${path} (${layer} may not import ${target})`);
 			}
 		}

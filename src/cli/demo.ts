@@ -2,12 +2,12 @@
 // seed it again once it listens, so an instance that follows `main` always shows the demo of the code it runs.
 import { Worker } from "node:worker_threads";
 import { z } from "zod";
+import type { Instance } from "../app/start.ts";
 import { Capability, type Role } from "../core/kinds.ts";
 import { createToken, manageTeams, orgId, revokeToken, setGrant } from "../server/identity/identity.ts";
 import type { App, Config } from "../server/kernel/app.ts";
 import { type Actor, demoSince, findProject, markDemo } from "../server/kernel/ctx.ts";
 import { actorsWithGrants, createProject } from "../server/ops/admin.ts";
-import type { Instance } from "../server/start.ts";
 import { firstWrite, removeProject } from "../server/transfer/transfer.ts";
 import { Client } from "./client.ts";
 import { CliError } from "./errors.ts";

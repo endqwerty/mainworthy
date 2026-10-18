@@ -48,8 +48,8 @@ import {
 	type Tally,
 	verdict,
 } from "../src/core/runs.ts";
-import { sweep } from "../src/server/jobs.ts";
 import type { Actor } from "../src/server/kernel/ctx.ts";
+import { sweep } from "../src/server/ops/jobs.ts";
 import { harness } from "./helpers.ts";
 import { failingSlotResults, invalidInherited, slotSettlement } from "./inherited-audit.ts";
 

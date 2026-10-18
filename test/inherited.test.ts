@@ -2,13 +2,13 @@ import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { start } from "../src/app/start.ts";
 import { Client } from "../src/cli/client.ts";
 import type { GateStatus, InboxReply } from "../src/core/ops.ts";
-import { recoverAccepted } from "../src/server/jobs.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
+import { recoverAccepted } from "../src/server/ops/jobs.ts";
 import { acceptReport } from "../src/server/ops/writes.ts";
-import { start } from "../src/server/start.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;

@@ -5,6 +5,7 @@ import { createHash, generateKeyPairSync, randomBytes, sign } from "node:crypto"
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { type Instance, start } from "../src/app/start.ts";
 import type {
 	AssertionOptions,
 	AssertionResponse,
@@ -12,7 +13,6 @@ import type {
 	RegistrationResponse,
 } from "../src/server/identity/webauthn.ts";
 import { type Config, defaultConfig } from "../src/server/kernel/app.ts";
-import { type Instance, start } from "../src/server/start.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
 
 /** The owner of every instance here, and the token the owner signs in with. */

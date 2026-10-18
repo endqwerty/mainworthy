@@ -3,16 +3,16 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { type Instance, start } from "../src/app/start.ts";
 import type { Envelope } from "../src/core/api.ts";
 import { AT_HEADER } from "../src/core/version.ts";
 import { actorByName } from "../src/server/identity/identity.ts";
-import { recoverAccepted } from "../src/server/jobs.ts";
 import { SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
 import { OPS } from "../src/server/ops/index.ts";
+import { recoverAccepted } from "../src/server/ops/jobs.ts";
 import { invoke, type Reply } from "../src/server/ops/registry.ts";
 import { acceptReport } from "../src/server/ops/writes.ts";
-import { type Instance, start } from "../src/server/start.ts";
 import { exportArchive, importArchive, linesOf, removeBootstrap } from "../src/server/transfer/transfer.ts";
 import { type Harness, harness } from "./helpers.ts";
 

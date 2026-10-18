@@ -4,9 +4,9 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { type Instance, start } from "../src/app/start.ts";
 import type { Envelope, SessionInfo } from "../src/core/api.ts";
 import { type Config, defaultConfig } from "../src/server/kernel/app.ts";
-import { type Instance, start } from "../src/server/start.ts";
 
 /** 36 characters: long enough that the start has nothing to say about it. */
 const TOKEN = "owner-secret-0123456789abcdef-012345";

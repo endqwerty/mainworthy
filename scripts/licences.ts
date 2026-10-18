@@ -24,8 +24,8 @@ const VENDORED = join(ROOT, "licences");
 /** What `bun run build` compiles (package.json); the test holds the two to each other. */
 export const ENTRYPOINTS = [
 	"src/cli/main.ts",
-	"src/server/read-worker.ts",
-	"src/server/checkpoint-worker.ts",
+	"src/server/ops/read-worker.ts",
+	"src/server/kernel/checkpoint-worker.ts",
 	"src/cli/demo-worker.ts",
 ];
 

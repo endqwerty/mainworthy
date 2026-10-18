@@ -1,12 +1,12 @@
 // Work the server does without being asked: finishing reports a crash interrupted, and reopening questions
 // whose decisions ran out of time. Both are idempotent and run inside ordinary write transactions.
-import { recoverDisputes as reconcileDisputes, sweepExpired } from "./decisions/decisions.ts";
-import { expiredDecisions } from "./decisions/questions.ts";
-import { acceptedBatches } from "./evidence/evidence.ts";
-import { actorById, ruleActor } from "./identity/identity.ts";
-import type { App } from "./kernel/app.ts";
-import { allProjects, makeCtx, projectById, stampSeq } from "./kernel/ctx.ts";
-import { applyAccepted } from "./ops/writes.ts";
+import { recoverDisputes as reconcileDisputes, sweepExpired } from "../decisions/decisions.ts";
+import { expiredDecisions } from "../decisions/questions.ts";
+import { acceptedBatches } from "../evidence/evidence.ts";
+import { actorById, ruleActor } from "../identity/identity.ts";
+import type { App } from "../kernel/app.ts";
+import { allProjects, makeCtx, projectById, stampSeq } from "../kernel/ctx.ts";
+import { applyAccepted } from "./writes.ts";
 
 /**
  * Applies every batch that was accepted but not applied. A report is stored durably before it is applied, so a
