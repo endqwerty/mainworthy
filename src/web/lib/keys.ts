@@ -5,7 +5,9 @@ export type Binding = {
 	key: string;
 	label: string;
 	handler: () => void;
-	when?: () => boolean;
+	applies?: () => boolean;
+	/** The shell's palette toggle and close keys still work while an overlay pauses screen keys. */
+	allowInOverlay?: boolean;
 	allowInInput?: boolean;
 	hidden?: boolean;
 	/**
@@ -38,7 +40,7 @@ export function useBindings(items: Binding[]): void {
 	const latest = useRef(items);
 	latest.current = items;
 	const signature = JSON.stringify(
-		items.map(({ key, label, hidden, when }) => ({ key, label, hidden, available: !when || when() })),
+		items.map(({ key, label, hidden, applies }) => ({ key, label, hidden, available: !applies || applies() })),
 	);
 	useEffect(() => {
 		groups.set(id, latest);
@@ -73,9 +75,9 @@ function keyOf(event: KeyboardEvent): string {
 	return `${event.ctrlKey || event.metaKey ? "mod+" : ""}${event.altKey ? "alt+" : ""}${event.shiftKey && key.length > 1 ? "shift+" : ""}${key}`;
 }
 /** `listOnly`: a phone that shows the list. Then a key runs an action of the list and no other (`Binding.list`). */
-export function useKeyboard(listOnly = false): void {
-	const onlyList = useRef(listOnly);
-	onlyList.current = listOnly;
+export function useKeyboard(options: { listOnly: boolean; overlayOpen: boolean }): void {
+	const latest = useRef(options);
+	latest.current = options;
 	useEffect(() => {
 		const openingKeys = new Set<string>();
 		const release = (event: KeyboardEvent) => openingKeys.delete(event.code);
@@ -133,8 +135,9 @@ export function useKeyboard(listOnly = false): void {
 			}
 			const candidates = bindings().filter(
 				(binding) =>
-					(!binding.when || binding.when()) &&
-					(!onlyList.current || binding.list) &&
+					(!binding.applies || binding.applies()) &&
+					(!latest.current.overlayOpen || binding.allowInOverlay) &&
+					(!latest.current.listOnly || binding.list) &&
 					(!input || key.startsWith("mod+") || key === "escape" || binding.allowInInput) &&
 					(!inOverlay || key === "escape" || key === "mod+k"),
 			);

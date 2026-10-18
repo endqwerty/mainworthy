@@ -60,7 +60,7 @@ const STATES = [
 ] as const satisfies readonly (readonly [RunFilter["state"], string])[];
 
 function RunListing({ opened }: { opened: Run | null }) {
-	const { project, route, overlayOpen } = useApp();
+	const { project, route } = useApp();
 	const [planning, setPlanning] = useState(false);
 	const [filter, setFilter] = useState<RunFilter>({ origin: null, state: null });
 	const [chosen, setChosen] = useState<string | null>(opened?.ref ?? null);
@@ -103,15 +103,15 @@ function RunListing({ opened }: { opened: Run | null }) {
 		run.origin === "planned"
 			? openRun(project, run)
 			: run.change && navigate(routeUrl({ project, screen: "changes", ref: run.change.key }));
-	const active = () => !overlayOpen && !planning;
+	const active = () => !planning;
 	useBindings([
-		{ key: "n", label: "Plan run", list: true, when: active, handler: () => setPlanning(true) },
-		{ key: "j", label: "Next run", when: active, handler: () => move(1) },
-		{ key: "k", label: "Previous run", when: active, handler: () => move(-1) },
+		{ key: "n", label: "Plan run", list: true, applies: active, handler: () => setPlanning(true) },
+		{ key: "j", label: "Next run", applies: active, handler: () => move(1) },
+		{ key: "k", label: "Previous run", applies: active, handler: () => move(-1) },
 		{
 			key: "enter",
 			label: selected?.origin === "change" ? "Open change" : "Open cockpit",
-			when: () => active() && Boolean(selected && (selected.origin === "planned" || selected.change)),
+			applies: () => active() && Boolean(selected && (selected.origin === "planned" || selected.change)),
 			handler: () => {
 				if (selected) open(selected);
 			},

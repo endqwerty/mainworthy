@@ -118,7 +118,7 @@ export function SettingsScreen() {
 	return <SettingsWorkbench key={project} />;
 }
 function SettingsWorkbench() {
-	const { project, session, instanceCan, overlayOpen, refreshSession, setStatus } = useApp();
+	const { project, session, instanceCan, refreshSession, setStatus } = useApp();
 	// A person back from the identity provider returns to the section they left (`OidcReturn`).
 	const [section, setSection] = useState(() => {
 		const back = (history.state as { settingsSection?: unknown } | null)?.settingsSection;
@@ -159,19 +159,17 @@ function SettingsWorkbench() {
 		{
 			key: "j",
 			label: "Next setting",
-			when: () => !overlayOpen,
 			handler: () => setSection(sections[Math.min(sections.length - 1, sections.indexOf(section) + 1)] ?? "Policy"),
 		},
 		{
 			key: "k",
 			label: "Previous setting",
-			when: () => !overlayOpen,
 			handler: () => setSection(sections[Math.max(0, sections.indexOf(section) - 1)] ?? "Policy"),
 		},
 		{
 			key: "n",
 			label: section === "Tokens" ? "New token" : "New project",
-			when: () => !overlayOpen && instanceAdmin && (section === "Tokens" || section === "Projects"),
+			applies: () => instanceAdmin && (section === "Tokens" || section === "Projects"),
 			handler: () => (section === "Tokens" ? actorRef.current?.focus() : projectRef.current?.focus()),
 		},
 		// Each is registered only for a caller who has the section, so the keys sheet does not list it for one
@@ -181,7 +179,7 @@ function SettingsWorkbench() {
 					{
 						key: "n",
 						label: "New invitation",
-						when: () => !overlayOpen && section === "People",
+						applies: () => section === "People",
 						handler: () => inviteRef.current?.focus(),
 					},
 				]
@@ -191,7 +189,7 @@ function SettingsWorkbench() {
 					{
 						key: "n",
 						label: "New password",
-						when: () => !overlayOpen && section === "Your sign-in",
+						applies: () => section === "Your sign-in",
 						handler: () => passwordRef.current?.focus(),
 					},
 				]

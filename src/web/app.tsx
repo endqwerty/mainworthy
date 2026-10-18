@@ -428,7 +428,7 @@ function Workbench({
 	const registry = useKeyRegistry();
 	// A phone on which the detail of the selected row is covered: only the actions of the list run, by a key
 	// or from the palette (decision 0018).
-	useKeyboard(listOnly);
+	useKeyboard({ listOnly, overlayOpen: palette !== null || help || signOutOpen });
 	useEvents(project, setStatus);
 	const folders = useQueryOp({ project, op: "find", input: { in: "folders" } });
 	const tags = useQueryOp({ project, op: "find", input: { in: "tags" }, enabled: suiteOpen });
@@ -494,7 +494,6 @@ function Workbench({
 						{
 							key: "[",
 							label: "Collapse / expand sidebar",
-							when: () => palette === null && !help,
 							handler: () => setSidebarCollapsed((value) => !value),
 						},
 					]),
@@ -515,6 +514,7 @@ function Workbench({
 			{
 				key: "mod+k",
 				label: "Jump to or run",
+				allowInOverlay: true,
 				list: true,
 				desktopOnly: true,
 				handler: () => {
@@ -542,9 +542,10 @@ function Workbench({
 			{
 				key: "escape",
 				label: "Close palette / keys",
+				allowInOverlay: true,
 				list: true,
 				hidden: true,
-				when: () => palette !== null || help,
+				applies: () => palette !== null || help,
 				handler: () => {
 					closePalette();
 					setHelp(false);
@@ -581,7 +582,7 @@ function Workbench({
 		.filter(
 			(binding) =>
 				!binding.hidden &&
-				(!binding.when || binding.when()) &&
+				(!binding.applies || binding.applies()) &&
 				(!inInput || binding.allowInInput || binding.key.startsWith("mod+") || binding.key === "escape"),
 		)
 		.filter((binding) => priorities.includes(binding.key))
@@ -600,7 +601,6 @@ function Workbench({
 				openPalette,
 				refreshSession,
 				requestSignOut: leave,
-				overlayOpen: palette !== null || help || signOutOpen,
 			}}
 		>
 			<div
@@ -1023,7 +1023,13 @@ function Palette({
 	const actions =
 		options.items ??
 		registry
-			.filter((item) => !item.hidden && (!listOnly || item.list) && (typing || !item.desktopOnly))
+			.filter(
+				(item) =>
+					!item.hidden &&
+					(!item.applies || item.applies()) &&
+					(!listOnly || item.list) &&
+					(typing || !item.desktopOnly),
+			)
 			.map((item) => ({ id: item.key, label: item.label, detail: item.key, handler: item.handler }));
 	const cases =
 		found.data?.items

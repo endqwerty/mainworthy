@@ -44,7 +44,7 @@ export function ChangesScreen() {
 	return <ChangesWorkbench key={project} />;
 }
 function ChangesWorkbench() {
-	const { project, route, overlayOpen } = useApp();
+	const { project, route } = useApp();
 	const [cursor, setCursor] = useState<string | null>(null);
 	const [standing, setStanding] = useState<ResultStanding | null>(null);
 	const read = useQueryOp({ project, op: "find", input: { in: "changes", limit: 100 } });
@@ -82,12 +82,12 @@ function ChangesWorkbench() {
 		if (item) choose(item.key);
 	};
 	useBindings([
-		{ key: "j", label: "Next change", when: () => !overlayOpen, handler: () => move(1) },
-		{ key: "k", label: "Previous change", when: () => !overlayOpen, handler: () => move(-1) },
+		{ key: "j", label: "Next change", handler: () => move(1) },
+		{ key: "k", label: "Previous change", handler: () => move(-1) },
 		{
 			key: "enter",
 			label: "Open blocking question",
-			when: () => !overlayOpen && Boolean(openData?.items[0]),
+			applies: () => Boolean(openData?.items[0]),
 			handler: () => {
 				const question = openData?.items[0];
 				if (question) go(question.q);

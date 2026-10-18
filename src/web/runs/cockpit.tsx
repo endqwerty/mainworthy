@@ -49,7 +49,7 @@ type PendingAttachment = AttachmentInput & { key: string };
 type LastResult = { slot: Slot; outcome: RunOutcome; previous: Fill | null; ready: Promise<ReportReceipt> };
 
 export function RunCockpit({ runRef }: { runRef: string }) {
-	const { project, session, overlayOpen, setStatus } = useApp();
+	const { project, session, setStatus } = useApp();
 	const owner = useRef(deviceSession()).current;
 	const runRead = useQueryOp({ project, op: "get", input: { refs: [runRef] } });
 	const parsedRun = Run.safeParse(runRead.data?.[0]);
@@ -471,14 +471,14 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 				: "The result is corrected to skipped. A skipped slot counts as no proof.",
 		);
 	}
-	const active = () => !overlayOpen && !noting;
+	const active = () => !noting;
 	const bindings: Binding[] = [
 		{
 			key: "enter",
 			label: "Record failure",
 			allowInInput: true,
 			hidden: !noting,
-			when: () => !overlayOpen && Boolean(noting),
+			applies: () => Boolean(noting),
 			handler: () => {
 				if (noting) record("fail", noting, notes[noting.id] ?? "", true, true);
 			},
@@ -487,7 +487,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			key: "escape",
 			label: "Cancel note",
 			hidden: !noting,
-			when: () => !overlayOpen && Boolean(noting),
+			applies: () => Boolean(noting),
 			handler: () => {
 				setNoting(null);
 				noteRef.current?.blur();
@@ -497,13 +497,13 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			key,
 			label: "Clear step mark",
 			handler: () => setStep(""),
-			when: () => active() && Boolean(step),
+			applies: () => active() && Boolean(step),
 			hidden: true,
 		})),
-		{ key: "j", label: "Next slot", handler: () => move(1), when: active },
-		{ key: "k", label: "Previous slot", handler: () => move(-1), when: active },
-		{ key: "arrowdown", label: "Next slot", handler: () => move(1), when: active, hidden: true },
-		{ key: "arrowup", label: "Previous slot", handler: () => move(-1), when: active, hidden: true },
+		{ key: "j", label: "Next slot", handler: () => move(1), applies: active },
+		{ key: "k", label: "Previous slot", handler: () => move(-1), applies: active },
+		{ key: "arrowdown", label: "Next slot", handler: () => move(1), applies: active, hidden: true },
+		{ key: "arrowup", label: "Previous slot", handler: () => move(-1), applies: active, hidden: true },
 		...Array.from({ length: 10 }, (_, digit) => ({
 			key: String(digit),
 			label: `Mark step digit ${digit}`,
@@ -514,10 +514,10 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 				setStep((value) => `${append ? value : ""}${digit}`.replace(/^0+/, ""));
 				digitSequence.current = { slot: current.id, at: performance.now() };
 			},
-			when: () => active() && canRecord,
+			applies: () => active() && canRecord,
 			hidden: true,
 		})),
-		{ key: "u", label: "Correct last result", handler: undo, when: () => active() && Boolean(last) },
+		{ key: "u", label: "Correct last result", handler: undo, applies: () => active() && Boolean(last) },
 		{
 			key: "p",
 			label: "Pass",
@@ -525,14 +525,14 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			handler: () => {
 				record("pass");
 			},
-			when: () => active() && canRecord,
+			applies: () => active() && canRecord,
 		},
 		{
 			key: "f",
 			label: "Fail and note",
 			hidden: !canRecord || Boolean(noting),
 			handler: startFail,
-			when: () => active() && canRecord,
+			applies: () => active() && canRecord,
 		},
 		{
 			key: "b",
@@ -541,7 +541,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			handler: () => {
 				record("blocked");
 			},
-			when: () => active() && canRecord,
+			applies: () => active() && canRecord,
 		},
 		{
 			key: "s",
@@ -550,7 +550,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			handler: () => {
 				record("skip");
 			},
-			when: () => active() && canRecord,
+			applies: () => active() && canRecord,
 		},
 	];
 	useBindings(bindings);

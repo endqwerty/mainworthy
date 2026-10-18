@@ -56,7 +56,7 @@ export function ReportsScreen() {
 
 /** What the stream of results says over the last days: one row per report, and the selected one beside the list. */
 function ReportsWorkbench() {
-	const { project, route, overlayOpen } = useApp();
+	const { project, route } = useApp();
 	const [days, setDays] = useState<number>(30);
 	const selected: StatsKind = isKind(route.ref) ? route.ref : "pass-rate";
 	const choose = (of: StatsKind) => navigate(routeUrl({ project, screen: "reports", ref: of }), { replace: true });
@@ -66,8 +66,8 @@ function ReportsWorkbench() {
 		if (next) choose(next.of);
 	};
 	useBindings([
-		{ key: "j", label: "Next report", when: () => !overlayOpen, handler: () => move(1) },
-		{ key: "k", label: "Previous report", when: () => !overlayOpen, handler: () => move(-1) },
+		{ key: "j", label: "Next report", handler: () => move(1) },
+		{ key: "k", label: "Previous report", handler: () => move(-1) },
 	]);
 	return (
 		<>

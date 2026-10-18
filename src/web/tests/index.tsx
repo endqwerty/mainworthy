@@ -41,7 +41,7 @@ export function TestsScreen() {
 
 /** Every automated test the project has seen, with a case or without one, and what each of its results was. */
 function TestsWorkbench() {
-	const { project, route, overlayOpen } = useApp();
+	const { project, route } = useApp();
 	const [typed, setTyped] = useState("");
 	const [unlinked, setUnlinked] = useState(false);
 	const text = useDeferredValue(typed.trim());
@@ -68,8 +68,8 @@ function TestsWorkbench() {
 		if (next) choose(next.ref);
 	};
 	useBindings([
-		{ key: "j", label: "Next test", when: () => !overlayOpen, handler: () => move(1) },
-		{ key: "k", label: "Previous test", when: () => !overlayOpen, handler: () => move(-1) },
+		{ key: "j", label: "Next test", handler: () => move(1) },
+		{ key: "k", label: "Previous test", handler: () => move(-1) },
 	]);
 	return (
 		<>

@@ -14,7 +14,6 @@ export type AppContext = {
 	openPalette: (options?: PaletteOptions) => void;
 	refreshSession: () => Promise<void>;
 	requestSignOut: () => void;
-	overlayOpen: boolean;
 };
 export const AppContext = createContext<AppContext | null>(null);
 export function useApp(): AppContext {
