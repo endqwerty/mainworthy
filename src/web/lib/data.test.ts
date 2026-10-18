@@ -3,6 +3,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { InfiniteQueryObserver, notifyManager, QueryObserver } from "@tanstack/react-query";
 import { changed, invalidateProject, queryClient, queryKey } from "./data.ts";
+import { affected } from "./refresh.ts";
 import { undoChange } from "./rollback.ts";
 
 afterEach(() => {
@@ -307,5 +308,85 @@ test("a report is read again on any change to its project, whatever the change n
 		}
 	} finally {
 		stop();
+	}
+});
+
+test("a burst keeps an answered read in flight and reads once more after the last change", async () => {
+	const read = question();
+	try {
+		await read.answer(0, "open");
+		changed("scratch", { op: "decide", touched: ["Q-3"] });
+		await until(() => expect(read.replies).toHaveLength(2));
+		for (let event = 0; event < 100; event++) changed("scratch", { op: "decide", touched: ["Q-3"] });
+		expect(read.replies).toHaveLength(2);
+		await read.answer(1, "before last change");
+		await until(() => expect(read.replies).toHaveLength(3));
+		await read.answer(2, "after last change");
+		expect(read.shown()).toBe("after last change");
+	} finally {
+		read.stop();
+	}
+});
+
+test("case proposal bursts leave existing result attachments and deployment lists alone", async () => {
+	const reads = { attachment: 0, deployments: 0, cases: 0 };
+	const observers = [
+		new QueryObserver(queryClient, {
+			queryKey: ["scratch", "attachment", { result: 1 }],
+			queryFn: async () => ({ items: [], read: ++reads.attachment }),
+		}),
+		new QueryObserver(queryClient, {
+			queryKey: ["scratch", "find", { in: "deployments" }],
+			queryFn: async () => ({ items: [], read: ++reads.deployments }),
+		}),
+		new QueryObserver(queryClient, {
+			queryKey: ["scratch", "find", { in: "cases" }],
+			queryFn: async () => ({ items: [], read: ++reads.cases }),
+		}),
+	];
+	const stops = observers.map((observer) => observer.subscribe(() => {}));
+	try {
+		await until(() => expect(reads).toEqual({ attachment: 1, deployments: 1, cases: 1 }));
+		for (let event = 0; event < 100; event++) changed("scratch", { op: "propose", touched: [] });
+		await until(() => expect(reads.cases).toBe(2));
+		expect(reads).toEqual({ attachment: 1, deployments: 1, cases: 2 });
+		changed("scratch", { op: "attach", touched: [] });
+		await until(() => expect(reads.attachment).toBe(2));
+		changed("scratch", { op: "announce", touched: [] });
+		await until(() => expect(reads.deployments).toBe(2));
+	} finally {
+		for (const stop of stops) stop();
+	}
+});
+
+test("refresh dependencies follow read projections and preserve unknown-event recovery", () => {
+	const proposal = { op: "propose", touched: ["P-2", "Q-3"] };
+	const edited = { op: "propose", touched: ["P-2", "C-1"] };
+	const reported = { op: "report", touched: ["T-2", "R-1"] };
+	for (const collection of ["folders", "tags", "requirements"]) {
+		const key = ["scratch", "find", { in: collection }];
+		expect(affected(key, proposal)).toBe(false);
+		expect(affected(key, edited)).toBe(true);
+		expect(affected(key, reported)).toBe(false);
+	}
+	const policy = ["scratch", "admin", { do: "policy.show", project: "scratch" }];
+	expect(affected(policy, edited)).toBe(false);
+	expect(affected(["scratch", "admin", { do: "project.list" }], edited)).toBe(true);
+	expect(affected(["scratch", "admin", { do: "token.list" }], reported)).toBe(true);
+	expect(affected(policy, { op: "decide", touched: ["policy"] })).toBe(true);
+	expect(affected(["scratch", "admin", { do: "actor.list" }], edited)).toBe(false);
+	const question = ["scratch", "get", { refs: ["Q-30"] }];
+	expect(affected(question, { op: "decide", touched: ["Q-3"] })).toBe(false);
+	expect(affected(question, { op: "decide", touched: ["Q-30"] })).toBe(true);
+	expect(affected(["scratch", "get", { refs: ["P-1"] }], edited)).toBe(true);
+	expect(affected(["scratch", "get", { refs: ["P-1"] }], { op: "decide", touched: ["Q-3"] })).toBe(true);
+	expect(affected(["scratch", "get", { refs: ["C-1"] }], reported)).toBe(true);
+	expect(affected(["scratch", "timeline", { ref: "C-1" }], proposal)).toBe(true);
+	for (const op of ["inbox", "gate", "impact", "stats"]) expect(affected(["scratch", op, {}], proposal)).toBe(true);
+	for (const key of [policy, question, ["scratch", "attachment", { result: 1 }]]) {
+		expect(affected(key, { touched: [] })).toBe(true);
+		expect(affected(key, { op: "future-op", touched: [] })).toBe(true);
+		expect(affected(key, { op: "tracker", touched: ["C-1"] })).toBe(true);
+		expect(affected(key, { op: "propose", touched: ["future-kind"] })).toBe(true);
 	}
 });

@@ -1,9 +1,9 @@
 import { type Query, QueryClient, useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { z } from "zod";
 import type { Api, OpName } from "../../core/api.ts";
 import { ApiError, call, session, unauthenticatedEvent } from "./api.ts";
 import { deviceSession, sessionCurrent, suspendDeviceSession } from "./device.ts";
+import { affected, Change } from "./refresh.ts";
 
 export const queryClient = new QueryClient({
 	defaultOptions: { queries: { staleTime: 15_000, retry: 1, refetchOnWindowFocus: true, refetchOnReconnect: true } },
@@ -37,23 +37,13 @@ export function useQueryOp<O extends OpName>({
 }
 const askedAgain = new Map<Query, Promise<void>>();
 /**
- * Reads again what `stale` says a change on the server may have made out of date.
- *
- * A read that already has an answer is dropped if it is on its way and asked afresh. A first read is not: the
- * query client hands back the read that is on its way (`Query.fetch` drops one only for a query that has data),
- * and the reply, which the server may have read before the change, then counts as current for `staleTime`. On
- * 2026-10-13 a question settled elsewhere 10 ms after the queue first asked for it stayed "open" on the page
- * (issue #87). So a first read on its way is asked once more when it lands. It is not dropped instead: under a
- * stream of changes a first read that is dropped at each one would never show anything. Paged reads also
- * finish before being asked again, including a refresh of pages already loaded. Yield after each reply so a
- * screen can ask for its next page first; carry the one pending refresh across those reads until they finish.
+ * Every in-flight read finishes before its one pending refresh, so an event flood cannot keep cancelling it.
+ * First reads need the trailing read too: their reply may precede the event on the server (issue #87).
+ * Yield after each reply so automatic paging can start its next page before refreshing the loaded pages.
  */
 function readAgain(stale: (query: Query) => boolean): Promise<void> {
 	const loading = queryClient.getQueryCache().findAll({
-		predicate: (query) =>
-			stale(query) &&
-			query.state.fetchStatus !== "idle" &&
-			(query.state.data === undefined || query.queryKey[3] === "pages"),
+		predicate: (query) => stale(query) && query.state.fetchStatus !== "idle",
 	});
 	for (const query of loading) {
 		const reading = query.promise;
@@ -61,7 +51,7 @@ function readAgain(stale: (query: Query) => boolean): Promise<void> {
 		const again = async (): Promise<void> => {
 			await new Promise<void>((resolve) => setTimeout(resolve, 0));
 			askedAgain.delete(query);
-			await readAgain((current) => current === query);
+			if (queryClient.getQueryCache().get(query.queryHash) === query) await readAgain((current) => current === query);
 		};
 		askedAgain.set(query, reading.then(again, again));
 	}
@@ -74,26 +64,17 @@ function readAgain(stale: (query: Query) => boolean): Promise<void> {
 export function invalidateProject(project: string): Promise<void> {
 	return readAgain((query) => query.queryKey[0] === project);
 }
-const Change = z.object({ op: z.string().optional(), touched: z.array(z.string()) });
-/** Reads again what a change on the server, as the event stream tells it, may have made out of date. */
-export function changed(project: string, change: z.infer<typeof Change>): void {
-	const refs = change.touched;
-	void readAgain((query) => {
-		if (query.queryKey[0] !== project) return false;
-		const op = query.queryKey[1];
-		// A report (`stats`) counts across the whole project, so any change can move it.
-		if (op === "find" || op === "inbox" || op === "gate" || op === "impact" || op === "admin" || op === "stats")
-			return true;
-		// A proposal's event names its proposal and question, so an open case's timeline must be read again.
-		if (
-			(op === "timeline" && change.op === "propose") ||
-			((op === "get" || op === "timeline") && change.op === "report")
-		)
-			return true;
-		const input = JSON.stringify(query.queryKey[2]) ?? "";
-		// A proposal is read as accepting it would leave its cases now, so a change to a case can change it.
-		if (op === "get" && input.includes('"P-') && refs.some((ref) => ref.startsWith("C-"))) return true;
-		return refs.length === 0 || refs.some((ref) => input.includes(ref)) || refs.some((ref) => !/^[CQRPT]-/.test(ref));
+const pending = new Set<Query>();
+/** Coalesces one event burst; a read already in flight is allowed to land and owes one trailing read. */
+export function changed(project: string, change: Parameters<typeof affected>[1]): void {
+	const scheduled = pending.size > 0;
+	for (const query of queryClient.getQueryCache().findAll())
+		if (query.queryKey[0] === project && affected(query.queryKey, change)) pending.add(query);
+	if (scheduled || pending.size === 0) return;
+	queueMicrotask(() => {
+		const queries = new Set(pending);
+		pending.clear();
+		void readAgain((query) => queries.has(query));
 	});
 }
 /** One stream per active project. Focus/reconnect refetches repair every missed event. */

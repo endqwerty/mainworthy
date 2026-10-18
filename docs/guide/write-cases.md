@@ -3,6 +3,9 @@
 Write cases as outlines, keep their versions, and resolve edits that overlap.
 Use folders, tags, and search to find the cases you need.
 
+Suite keeps loading the rest of the list while new results and edits arrive,
+and shows live changes without a reload.
+
 ![Suite with cases, folders, tags, and the selected case](../ui/screenshots/suite-light.png)
 
 ## Capture a case
