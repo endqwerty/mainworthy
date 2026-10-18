@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { Client, InMemoryTransport, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/client/validators/ajv";
@@ -651,6 +651,52 @@ test("tool errors name bad fields and require a project when the choice is ambig
 	} finally {
 		await client.close();
 		await server.close();
+		h.close();
+	}
+});
+
+test("HTTP tools/list reuses definitions without sharing mutable tool documents", async () => {
+	const h = harness();
+	const http = serve(h.app, h.owner, { ui: null, routes: { "/mcp": mcpRoute(h.app) } });
+	const list = () =>
+		fetch(`http://127.0.0.1:${http.port}/mcp`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				accept: "application/json, text/event-stream",
+				"mcp-protocol-version": "2025-11-25",
+			},
+			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+		});
+	try {
+		const first = await list();
+		expect(first.status).toBe(200);
+		const bytes = await first.text();
+		const tools = mcpTools();
+		const original = structuredClone(tools);
+		const find = tools.find((tool) => tool.name === "find");
+		if (!find) throw new Error("Missing find tool");
+		find.description = "Changed by a caller";
+		find.inputSchema.properties = {};
+		find.annotations.readOnlyHint = false;
+		tools.pop();
+		expect(mcpTools()).toEqual(original);
+		expect(JSON.parse(bytes).result.tools).toEqual(original);
+		expect(original.find((tool) => tool.name === "find")?.annotations.readOnlyHint).toBe(true);
+		const conversion = spyOn(z, "toJSONSchema").mockImplementation(() => {
+			throw new Error("Schemas must not be regenerated");
+		});
+		try {
+			const second = await list();
+			expect(second.status).toBe(200);
+			expect(second.headers.get("mcp-session-id")).toBeNull();
+			expect(await second.text()).toBe(bytes);
+			expect(mcpTools()).toEqual(original);
+		} finally {
+			conversion.mockRestore();
+		}
+	} finally {
+		await http.stop(true);
 		h.close();
 	}
 });

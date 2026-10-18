@@ -44,11 +44,15 @@ function incompatibleRequest(req: Request): Response | null {
  * A JSON reply. `extra` may be a `Headers` object, which is how a reply carries more than one `Set-Cookie`: each
  * is a header of its own, and a record has room for one.
  */
-const jsonResponse = (body: unknown, status = 200, extra: Headers | Record<string, string> = {}): Response => {
+const jsonResponse = (body: unknown, status = 200, extra: Headers | Record<string, string> = {}): Response =>
+	jsonText(JSON.stringify(body), status, extra);
+
+/** A JSON reply whose text is already serialized, such as a document built once per process. */
+const jsonText = (text: string, status = 200, extra: Headers | Record<string, string> = {}): Response => {
 	const headers = new Headers(extra);
 	if (!headers.has("content-type")) headers.set("content-type", "application/json; charset=utf-8");
 	if (!headers.has("cache-control")) headers.set("cache-control", "no-store");
-	return new Response(JSON.stringify(body), { status, headers });
+	return new Response(text, { status, headers });
 };
 
 const replyResponse = (reply: Reply): Response => jsonResponse(reply, reply.ok ? 200 : HTTP_STATUS[reply.error.code]);
@@ -643,8 +647,19 @@ function events(app: App, req: Request, session: Session, project: string, closi
 	});
 }
 
-/** The API description, generated from the registry on every call. There is no hand-written copy to drift. */
+let apiDocument: string | undefined;
+
+function openApiJson(): string {
+	apiDocument ??= JSON.stringify(buildOpenApi());
+	return apiDocument;
+}
+
+/** An independently mutable copy of the API description, generated lazily once from the registry. */
 export function openApi(): Record<string, unknown> {
+	return JSON.parse(openApiJson());
+}
+
+function buildOpenApi(): Record<string, unknown> {
 	const paths: Record<string, unknown> = {};
 	for (const op of OP_LIST) {
 		const path = op.scope === "project" ? `/api/p/{project}/${op.name}` : `/api/${op.name}`;
@@ -796,7 +811,7 @@ export function serve(app: App, owner: Actor, extra: Extra = { ui: null }, patie
 			app.config.appleApps?.length
 				? jsonResponse({ webcredentials: { apps: app.config.appleApps } })
 				: jsonResponse({ ok: false, error: { code: "not_found", message: "no such route" } }, 404),
-		"/api/openapi.json": () => jsonResponse(openApi()),
+		"/api/openapi.json": () => jsonText(openApiJson()),
 		"/api/session": { GET: guarded((_req, session) => sessionInfo(app, session)) },
 		"/api/login": { POST: (req: Request, server: Listener) => login(app, req, server, patience, people.signIn) },
 		...people.routes,
