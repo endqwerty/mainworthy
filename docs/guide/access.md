@@ -276,6 +276,8 @@ To forget a person, follow these steps:
 
 The confirmation takes the keyboard focus. **Cancel** or <kbd>Esc</kbd> closes it without changing anything and returns focus to **Forget this person**.
 
+The warning names the sign-in data that forgetting erases, including linked provider identities, recovery email addresses, authenticator secrets and recovery-code hashes. It also names token network addresses and labels, and explains that team memberships are removed. History, attachments and typed case and note text stay. Some sign-in records and request fingerprints stay too. [Privacy](./privacy.md#your-rights-with-respect-to-your-information) describes those retained records.
+
 The page shows the pseudonym and the number of tokens revoked. It reads the people and invitations again and removes any invitation link it was showing for that person. If no reply comes back, it reads the lists again. If the person is no longer listed, the page says so and clears the confirmation. Otherwise, retrying the same confirmation uses the same command id.
 
 From the command line, `mainworthy actor forget dana` prints the warning and makes no change. After reading it, repeat the name to confirm:

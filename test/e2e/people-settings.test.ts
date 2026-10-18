@@ -41,8 +41,20 @@ const rows = (page: Page) => page.locator(".settings-row");
 test.skipIf(!browserAvailable)(
 	"People forgets a person only after confirmation and ends their access",
 	async () => {
-		await person("forget-web", ["read"]);
-		await server.api("admin", { do: "token.create", actor: "forget-web", kind: "human", label: "forget-web-token" });
+		await person("forget-web", ["read", "produce"]);
+		const issuedToken = z.object({ token: z.string() }).parse(
+			await server.api("admin", {
+				do: "token.create",
+				actor: "forget-web",
+				kind: "human",
+				label: "forget-web-token",
+			}),
+		);
+		await server.api(
+			"propose",
+			{ edits: [{ op: "create", outline: "Keep forget-web's case text\n  Ask forget-web to open the cart" }] },
+			{ token: issuedToken.token },
+		);
 		const admin = await openPage(server, { path: "/p/scratch/settings" });
 		const other = await openPage(server, { as: { name: "forget-web", password: OLD } });
 		try {
@@ -60,6 +72,10 @@ test.skipIf(!browserAvailable)(
 			await page.getByLabel("Person to forget", { exact: true }).selectOption("forget-web");
 			await trigger.click();
 			await page.getByText("text the person typed in cases and notes stay", { exact: false }).waitFor();
+			expect(await page.locator("#detail").innerText()).toContain("authenticator secrets and recovery-code hashes");
+			expect(await page.locator("#detail").innerText()).toContain(
+				"Linked provider identities and recovery email addresses are erased",
+			);
 			const confirm = page.getByRole("button", { name: "Forget forget-web", exact: true });
 			expect(await confirm.evaluate((element) => element === document.activeElement)).toBe(true);
 			expect(
@@ -106,6 +122,9 @@ test.skipIf(!browserAvailable)(
 			expect(await refreshed.getByRole("button", { name: /^Revoke / }).count()).toBe(0);
 			await other.page.reload();
 			await other.page.locator("#signin-name").waitFor();
+			await page.goto(`${server.url}/p/scratch/suite/c/1`);
+			await page.getByRole("button", { name: "Keep forget-web's case text", exact: true }).waitFor();
+			expect(await page.locator("#detail").innerText()).toContain("Ask forget-web to open the cart");
 			expect(admin.errors).toEqual(["Failed to load resource: net::ERR_FAILED"]);
 		} finally {
 			await admin.close();

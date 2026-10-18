@@ -272,6 +272,10 @@ test("actor forget requires a named confirmation, removes access, and preserves 
 			expect(unconfirmed.code).toBe(4);
 			expect(unconfirmed.stderr).toContain("--confirm forget-cli");
 			expect(unconfirmed.stderr).toContain("text the person typed in cases and notes stay");
+			expect(unconfirmed.stderr).toContain("authenticator secrets and recovery-code hashes");
+			expect(unconfirmed.stderr).toContain("Linked provider identities and recovery email addresses are erased");
+			expect(unconfirmed.stderr).toContain("token network addresses");
+			expect(unconfirmed.stderr).toContain("attachments");
 			expect((await run(["actor", "forget", "forget-cli", "--confirm", "somebody-else"])).code).toBe(4);
 			expect((await run(["actor", "list"])).stdout).toContain("forget-cli");
 			const forgotten = await cli(["actor", "forget", "forget-cli", "--confirm", "forget-cli", "--json"]);
