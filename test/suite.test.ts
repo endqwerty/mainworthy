@@ -197,6 +197,131 @@ describe("atomic bulk proposals", () => {
 		}
 	});
 
+	test("sealing a 5,000-case fragment move answers reads even when its last case conflicts", async () => {
+		const instance = disk();
+		try {
+			result(
+				instance.raw("propose", {
+					edits: [
+						{
+							op: "create",
+							kind: "fragment",
+							body: {
+								title: "Sign in",
+								steps: [{ id: "ab", action: "Password", expected: "Signed in" }],
+							},
+						},
+					],
+				}),
+			);
+			const created = result<ProposeReply>(
+				instance.raw("propose", {
+					edits: Array.from({ length: 5000 }, (_, i) => ({
+						op: "create",
+						body: {
+							title: `Consumer ${i}`,
+							steps: [{ id: "cd", use: { fragment: "C-1", version: 1 } }],
+						},
+					})),
+				}),
+			);
+			result(
+				instance.raw("propose", {
+					edits: [
+						{
+							op: "edit",
+							case: "C-1",
+							base: 1,
+							body: { steps: [{ id: "ab", action: "Passkey", expected: "Signed in" }] },
+						},
+						{ op: "edit", case: "C-5001", base: 1, body: { title: "Changed consumer" } },
+					],
+				}),
+			);
+			const before = {
+				versions: storedCount(instance, "versions"),
+				decisions: storedCount(instance, "decisions"),
+			};
+			const edits: Edit[] = [
+				{
+					op: "fragment",
+					fragment: "C-1",
+					from: 1,
+					to: 2,
+					cases: created.cases.map(({ ref }) => ({ case: ref, base: 1 })),
+				},
+			];
+			let done = false;
+			const moving = invokeAsync(instance.app, OPS, instance.call("propose", { edits }));
+			void moving.then(() => {
+				done = true;
+			});
+			let readDuringSealing = false;
+			while (!done) {
+				await tick();
+				if (done) break;
+				expect(
+					result<unknown[]>(await invokeAsync(instance.app, OPS, instance.call("get", { refs: ["C-2", "C-5001"] }))),
+				).toMatchObject([
+					{ version: 1, steps: [{ action: "Password", source: { version: 1 } }] },
+					{ version: 2, title: "Changed consumer", steps: [{ action: "Password", source: { version: 1 } }] },
+				]);
+				readDuringSealing = true;
+			}
+			expect(await moving).toMatchObject({
+				ok: false,
+				error: {
+					code: "conflict",
+					message: "C-5001 changed; redo the fragment batch",
+				},
+			});
+			expect(storedCount(instance, "versions")).toBe(before.versions);
+			expect(storedCount(instance, "decisions")).toBe(before.decisions);
+			expect(instance.raw("get", { refs: ["P-4"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
+			expect(readDuringSealing).toBe(true);
+
+			const retry = invokeAsync(
+				instance.app,
+				OPS,
+				instance.call("propose", {
+					edits: [
+						{
+							op: "fragment",
+							fragment: "C-1",
+							from: 1,
+							to: 2,
+							cases: created.cases.map(({ ref }) => ({ case: ref, base: ref === "C-5001" ? 2 : 1 })),
+						},
+					],
+				}),
+			);
+			done = false;
+			void retry.then(() => {
+				done = true;
+			});
+			while (!done) {
+				await tick();
+				if (done) break;
+				expect(result<unknown[]>(instance.raw("get", { refs: ["C-2", "C-5001"] }))).toMatchObject([
+					{ version: 1, steps: [{ action: "Password", source: { version: 1 } }] },
+					{ version: 2, steps: [{ action: "Password", source: { version: 1 } }] },
+				]);
+			}
+			const adopted = result<ProposeReply>(await retry);
+			expect(adopted.status).toBe("adopted");
+			expect(adopted.cases).toHaveLength(5000);
+			expect(storedCount(instance, "versions")).toBe(before.versions + 5000);
+			expect(storedCount(instance, "decisions")).toBe(before.decisions + 1);
+			expect(result<unknown[]>(instance.raw("get", { refs: ["C-2", "C-5001"] }))).toMatchObject([
+				{ version: 2, steps: [{ action: "Passkey", source: { version: 2 } }] },
+				{ version: 3, title: "Changed consumer", steps: [{ action: "Passkey", source: { version: 2 } }] },
+			]);
+		} finally {
+			await instance.app.gate.run(() => {});
+			instance.close();
+		}
+	}, 30000);
+
 	test("a bulk save answers reads between slices and publishes the complete proposal and decision once", async () => {
 		const instance = disk();
 		try {
