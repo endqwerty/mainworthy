@@ -248,7 +248,7 @@ try {
 		closesShared = false;
 		await (await shared?.catch(() => null))?.close();
 		shared = null;
-	});
+	}, 60_000); // A hang guard for teardown, not a browser-performance assertion (issue #497).
 	closesShared = true;
 } catch {}
 async function fileBrowser(): Promise<Browser | null> {
