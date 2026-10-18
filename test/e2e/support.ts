@@ -317,6 +317,13 @@ export async function openPage(
 	const errors: string[] = [];
 	const dialogs: string[] = [];
 	let loads = 0;
+	await page.exposeFunction("mainworthyWindowError", (message: string) => errors.push(message));
+	await page.addInitScript(() => {
+		window.addEventListener("error", (event) => {
+			const report: unknown = Reflect.get(window, "mainworthyWindowError");
+			if (typeof report === "function") void report(event.message);
+		});
+	});
 	page.on("pageerror", (error) => errors.push(error.message));
 	page.on("console", (message) => {
 		if (

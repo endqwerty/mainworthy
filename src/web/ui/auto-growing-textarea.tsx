@@ -18,15 +18,25 @@ export function AutoGrowingTextarea({
 		const element = ref.current;
 		if (!element) return;
 		let width: number | null = null;
+		let frame: number | null = null;
 		const observer = new ResizeObserver((entries) => {
 			for (const entry of entries) {
 				if (entry.contentRect.width === width) continue;
 				width = entry.contentRect.width;
-				fit(element);
+				if (frame !== null) cancelAnimationFrame(frame);
+				frame = null;
+				if (width === 0) continue;
+				frame = requestAnimationFrame(() => {
+					frame = null;
+					fit(element);
+				});
 			}
 		});
 		observer.observe(element);
-		return () => observer.disconnect();
+		return () => {
+			observer.disconnect();
+			if (frame !== null) cancelAnimationFrame(frame);
+		};
 	}, []);
 	return <textarea {...props} ref={ref} value={value} />;
 }

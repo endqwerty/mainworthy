@@ -508,6 +508,62 @@ for (const device of ["desktop", "phone"] satisfies ("desktop" | "phone")[])
 		30_000,
 	);
 
+for (const device of ["desktop", "phone"] satisfies ("desktop" | "phone")[])
+	test.skipIf(!browserAvailable)(
+		`a hidden editor fits its fields when shown without window errors on ${device}`,
+		async () => {
+			const server = await startServer();
+			const body = {
+				title: "Shown again",
+				pre: "First line\nSecond line\nThird line",
+				steps: [
+					{
+						id: "s1",
+						action: "Open the cart and check every item before applying the coupon. ".repeat(5).trim(),
+						expected: "The total includes the discount.\nEvery item stays visible.\nThe coupon remains applied.",
+					},
+				],
+			};
+			await server.api("propose", { edits: [{ op: "create", body }] });
+			const browser = await openPage(server, { path: "/p/scratch/suite/c/1", device });
+			try {
+				const { page } = browser;
+				await page.getByRole("button", { name: body.title, exact: true }).waitFor();
+				await page.keyboard.press("e");
+				const fields = page.locator(".body-editor textarea");
+				const values = [body.title, body.pre, ...body.steps.flatMap((step) => [step.action, step.expected])];
+				for (const width of ["280px", ""]) {
+					await page.locator(".body-editor").evaluate(async (node) => {
+						await document.fonts.ready;
+						node.style.display = "none";
+						await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+					});
+					expect(await fields.evaluateAll((nodes) => nodes.map((node) => node.clientWidth))).toEqual([0, 0, 0, 0]);
+					await page.locator(".body-editor").evaluate(async (node, width) => {
+						node.style.width = width;
+						node.style.display = "";
+						await new Promise((resolve) =>
+							requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+						);
+					}, width);
+					expect(
+						await fields.evaluateAll((nodes) =>
+							nodes.map((node) => ({
+								value: node instanceof HTMLTextAreaElement ? node.value : null,
+								fits: node.clientWidth > 0 && node.clientHeight >= node.scrollHeight,
+							})),
+						),
+					).toEqual(values.map((value) => ({ value, fits: true })));
+					expect(browser.errors).toEqual([]);
+				}
+			} finally {
+				await browser.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+
 test.skipIf(!browserAvailable)(
 	"typing in one editor field measures that field without measuring unchanged siblings",
 	async () => {
