@@ -19,7 +19,7 @@ export const EmailAddress = z
 	.transform((text) => text.toLowerCase());
 
 export const FORGET_NOTICE =
-	"A pseudonym replaces the name in attribution, question evidence and saved replies. Password hashes, passkey public keys, and token and credential labels are erased. Passwords, passkeys, tokens and invitations stop working, and sessions end. History and text the person typed in cases and notes stay. Some sign-in records and request fingerprints stay. This cannot be undone.";
+	"A pseudonym replaces the name in attribution, question evidence and saved replies. Linked provider identities and recovery email addresses are erased. So are password hashes, passkey public keys, authenticator secrets and recovery-code hashes, token network addresses, and token and credential labels. Team memberships are removed. Passwords, passkeys, authenticators, tokens and invitations stop working, and sessions end. History, attachments and text the person typed in cases and notes stay. Some sign-in records and request fingerprints stay. This cannot be undone.";
 
 /**
  * How long a password is, in characters. Twelve, because nothing else is asked of it: no digit, no capital

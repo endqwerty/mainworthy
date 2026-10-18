@@ -201,7 +201,7 @@ Flags of `mainworthy actor`:
 
 - `--roles <a,b,...>`: Named roles, comma-separated or repeated. Omit to keep; an empty value clears.
 - `--can <a,b,...>`: Capabilities, comma-separated or repeated.
-- `--confirm <string>`: Repeat the name to confirm forgetting. A pseudonym replaces the name in attribution, question evidence and saved replies. Password hashes, passkey public keys, and token and credential labels are erased. Passwords, passkeys, tokens and invitations stop working, and sessions end. History and text the person typed in cases and notes stay. Some sign-in records and request fingerprints stay. This cannot be undone.
+- `--confirm <string>`: Repeat the name to confirm forgetting. A pseudonym replaces the name in attribution, question evidence and saved replies. Linked provider identities and recovery email addresses are erased. So are password hashes, passkey public keys, authenticator secrets and recovery-code hashes, token network addresses, and token and credential labels. Team memberships are removed. Passwords, passkeys, authenticators, tokens and invitations stop working, and sessions end. History, attachments and text the person typed in cases and notes stay. Some sign-in records and request fingerprints stay. This cannot be undone.
 
 Flags of `mainworthy audit`:
 
