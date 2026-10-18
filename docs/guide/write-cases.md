@@ -304,6 +304,8 @@ One proposal records the selected updates and who requested them. The
 project's policy may require acceptance. Unselected cases stay pinned. If any
 selected case changes before the update is accepted, refresh and propose the
 batch again. No selected case moves from that refused batch.
+Large batches let reads answer while checking and applying the selected updates.
+Until the batch commits, readers see every case at its previous version.
 Moving a pin makes earlier results no longer current proof of the updated case,
 even when the two fragment versions have the same instructions.
 
