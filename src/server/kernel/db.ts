@@ -63,9 +63,12 @@ export class Db {
 	 * `reader: true` opens a connection that refuses writes. In WAL mode it reads a consistent snapshot of what is
 	 * committed, however long a write on another connection is taking.
 	 */
-	constructor(path: string, options: { reader?: boolean } = {}) {
-		if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
-		this.raw = new Database(path, { create: true, strict: true });
+	constructor(source: string | Buffer, options: { reader?: boolean } = {}) {
+		if (typeof source === "string" && source !== ":memory:") mkdirSync(dirname(source), { recursive: true });
+		this.raw =
+			typeof source === "string"
+				? new Database(source, { create: true, strict: true })
+				: Database.deserialize(source, { strict: true });
 		// WAL keeps readers and the writer out of each other's way; NORMAL syncs at checkpoints, which is the
 		// durability SQLite documents as safe against application crashes in WAL mode.
 		this.exec(`
