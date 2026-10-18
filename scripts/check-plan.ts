@@ -88,6 +88,7 @@ export function fixtureBuildArgs(outfile: string): string[] {
 		"/*! Mainworthy, Apache-2.0. Software from others is in this file; its licences and notices: /docs/licence */",
 		"test/e2e/serve.ts",
 		"src/server/read-worker.ts",
+		"src/server/checkpoint-worker.ts",
 		"src/cli/demo-worker.ts",
 		"--outfile",
 		outfile,
