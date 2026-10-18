@@ -1,6 +1,6 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { z } from "zod";
 import type { Api } from "../../core/api.ts";
@@ -490,7 +490,7 @@ export function SuiteScreen() {
 		if (list.hasNextPage && !list.isFetching) void list.fetchNextPage();
 	}, [list.hasNextPage, list.isFetching, list.fetchNextPage]);
 	const previousRoute = useRef({ ref: route.ref, folder: route.folder });
-	useEffect(() => {
+	useLayoutEffect(() => {
 		const previous = previousRoute.current;
 		if (previous.ref === route.ref && previous.folder === route.folder) return;
 		previousRoute.current = { ref: route.ref, folder: route.folder };
