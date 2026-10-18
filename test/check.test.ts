@@ -150,6 +150,72 @@ test("second file has fresh storage and the first file's page is gone", async ()
 	30_000,
 );
 
+test.skipIf(findChromium().path === null || process.platform === "win32")(
+	"a file waits for slow Chromium teardown after its assertions pass",
+	async () => {
+		const root = mkdtempSync(join(tmpdir(), "mainworthy-browser-teardown-"));
+		const fixture = join(root, "teardown.test.ts");
+		writeFileSync(
+			fixture,
+			`import { expect, test } from "bun:test";
+import { openPage } from ${JSON.stringify(join(process.cwd(), "test/e2e/support.ts"))};
+test("the page is ready before teardown", async () => {
+ const server = Bun.serve({ hostname: "127.0.0.1", port: 0,
+  fetch: () => new Response('<div id="probe">ready</div>', { headers: { "content-type": "text/html" } }) });
+ try {
+  const {page, context, close} = await openPage({ url: server.url.origin }, { signedIn: false, path: "/", ready: "#probe" });
+  expect(await page.locator("#probe").textContent()).toBe("ready");
+  const browser = context.browser();
+  const cdp = await browser.newBrowserCDPSession();
+  const {processInfo} = await cdp.send("SystemInfo.getProcessInfo");
+  const pid = processInfo.find(process => process.type === "browser").id;
+  await cdp.detach();
+  await close();
+  browser.on("disconnected", () => console.log("CHROMIUM_CLOSED"));
+  process.kill(pid, "SIGSTOP");
+  process.send({ pid });
+ } finally { await server.stop(true); }
+}, 30_000);`,
+		);
+		let paused: number | undefined;
+		let resume: ReturnType<typeof setTimeout> | undefined;
+		const child = Bun.spawn([process.execPath, "test", "--no-orphans", fixture], {
+			env: { ...process.env, MAINWORTHY_E2E_BROWSER_ENDPOINTS: "", MAINWORTHY_E2E_CPU_THROTTLE: "" },
+			stdout: "pipe",
+			stderr: "pipe",
+			ipc(message) {
+				const { pid } = z.object({ pid: z.number().int().positive() }).parse(message);
+				paused = pid;
+				// Only teardown waits for Chromium: the page assertion has already passed.
+				resume = setTimeout(() => process.kill(pid, "SIGCONT"), 6_000);
+			},
+		});
+		try {
+			const [out, err, exit] = await Promise.all([
+				new Response(child.stdout).text(),
+				new Response(child.stderr).text(),
+				child.exited,
+			]);
+			expect({ exit, output: (out + err).match(/1 pass\s+0 fail/)?.[0].replace(/\s+/g, " ") }, out + err).toEqual({
+				exit: 0,
+				output: "1 pass 0 fail",
+			});
+			expect(out).toContain("CHROMIUM_CLOSED");
+		} finally {
+			clearTimeout(resume);
+			if (paused) {
+				try {
+					process.kill(paused, "SIGCONT");
+				} catch {}
+			}
+			child.kill();
+			await child.exited;
+			rmSync(root, { recursive: true, force: true });
+		}
+	},
+	60_000,
+);
+
 test("the browser fixture uses the production compiler flags and worker layout", () => {
 	const args = fixtureBuildArgs("/scratch/fixture");
 	const production = z
