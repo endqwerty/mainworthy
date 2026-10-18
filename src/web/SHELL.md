@@ -47,7 +47,8 @@ first read that was still on its way once more when it lands: its reply may be f
 before the change (issue #87). List queries end their key with `"pages"`. Their active
 read finishes before one coalesced refresh, yielding to automatic next-page reads
 so Suite can finish under continuous changes (issue #199). Awaiting
-`invalidateProject` also waits for that refresh. Nothing outside `lib/data.ts` calls
+`invalidateProject` waits for the refresh it started; a later call's replacement read can still be on its
+way when an earlier call resolves. Nothing outside `lib/data.ts` calls
 `queryClient.invalidateQueries`; keep it so.
 For active ordinary queries that already have data, `invalidateProject` replaces any
 in-flight read. A handler can hold a newer reply with `setQueryData` and invalidate
