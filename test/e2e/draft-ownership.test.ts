@@ -48,6 +48,57 @@ async function windows() {
 	};
 }
 
+for (const locks of ["available", "unavailable", "query fails"])
+	check(
+		`startup ownership with Web Locks ${locks}: renders safely while channel discovery is deferred`,
+		async () => {
+			const server = await startServer();
+			await server.api("propose", { edits: [{ op: "create", outline: "Coupon case\n  Apply the coupon" }] });
+			const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+			try {
+				const a = h.page;
+				await a.getByRole("button", { name: "Coupon case", exact: true }).waitFor();
+				await a.keyboard.press("e");
+				await title(a).fill("Coupon case owned by A");
+				const owner = (await stored(a)).owner;
+				const b = await h.context.newPage();
+				b.setDefaultTimeout(5000);
+				b.on("pageerror", (error) => h.errors.push(error.message));
+				await b.addInitScript((locks) => {
+					if (locks === "unavailable") Object.defineProperty(navigator, "locks", { value: undefined });
+					if (locks === "query fails")
+						navigator.locks.query = () => Promise.reject(new Error("Lock query unavailable"));
+					const timeout = window.setTimeout.bind(window);
+					Object.defineProperty(window, "setTimeout", {
+						value: (handler: TimerHandler, delay?: number, ...args: unknown[]) => {
+							if (delay !== 40) return timeout(handler, delay, ...args);
+							// Hold discovery without making this a machine-speed assertion. Fallback startup must wait;
+							// authoritative locks must let the real editor render before this callback is released.
+							Object.assign(window, { finishDraftDiscovery: () => timeout(handler, 0, ...args) });
+							return 0;
+						},
+					});
+				}, locks);
+				await b.goto(`${server.url}/p/scratch/suite/c/1`, { waitUntil: "commit" });
+				if (locks !== "available") {
+					await b.waitForFunction(() => typeof Reflect.get(window, "finishDraftDiscovery") === "function");
+					expect(await b.locator("#root").evaluate((root) => root.childElementCount)).toBe(0);
+					await b.evaluate(() => Reflect.get(window, "finishDraftDiscovery")());
+				}
+				await title(b).waitFor();
+				expect(await title(b).inputValue()).toBe("Coupon case owned by A");
+				expect(await readOnly(b)).toBe(true);
+				expect((await stored(b)).owner).toBe(owner);
+				expect(await readOnly(a)).toBe(false);
+				expect(h.errors).toEqual([]);
+			} finally {
+				await h.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+
 check(
 	"R8 ownership: opening, refusing a key, taking over and leaving the former owner",
 	async () => {
