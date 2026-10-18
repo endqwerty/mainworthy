@@ -6,7 +6,7 @@ import { DURATION_FORMAT, durationMs } from "../../core/duration.ts";
 import { type AddressRanges, parseAddressRanges } from "./address.ts";
 import { type BlobStore, diskBlobs, memoryBlobs } from "./blobs.ts";
 import type { CallerReference } from "./caller.ts";
-import { Db } from "./db.ts";
+import { Db, databasePath } from "./db.ts";
 import { type MailConfig, mailConfig } from "./mail.ts";
 import { migrate } from "./migrate.ts";
 
@@ -150,9 +150,6 @@ export type App = {
 	publish: (event: ChangeEvent) => void;
 	close: () => void;
 };
-
-/** The one database file of an instance. */
-export const databasePath = (dataDir: string): string => join(dataDir, "mainworthy.db");
 
 /** The data directory of an instance that names none. */
 export const defaultDataDir = (env: Record<string, string | undefined>): string => join(env.HOME ?? ".", ".mainworthy");

@@ -2,8 +2,8 @@
 // `~/.casebook/casebook.db`. This module moves that data to where this build looks, once, when the server starts.
 import { existsSync, renameSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { type Config, databasePath, defaultDataDir } from "./app.ts";
-import { foldLog } from "./db.ts";
+import { type Config, defaultDataDir } from "./app.ts";
+import { databasePath, foldLog } from "./db.ts";
 
 const FORMER_DIR = ".casebook";
 const FORMER_FILE = "casebook.db";

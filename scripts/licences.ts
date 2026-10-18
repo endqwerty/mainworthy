@@ -22,7 +22,12 @@ export const NOTICES = join(ROOT, "THIRD-PARTY-NOTICES.md");
 const VENDORED = join(ROOT, "licences");
 
 /** What `bun run build` compiles (package.json); the test holds the two to each other. */
-export const ENTRYPOINTS = ["src/cli/main.ts", "src/server/read-worker.ts", "src/cli/demo-worker.ts"];
+export const ENTRYPOINTS = [
+	"src/cli/main.ts",
+	"src/server/read-worker.ts",
+	"src/server/checkpoint-worker.ts",
+	"src/cli/demo-worker.ts",
+];
 
 /**
  * Every licence a shipped component relies on, with what it asks of us. A component under a licence that is not

@@ -12,7 +12,8 @@ import type { InboxReply, ProposeReply } from "../src/core/ops.ts";
 import { PersonalTokenCreated, PersonalTokenRow } from "../src/core/people.ts";
 import { bootstrap } from "../src/server/identity/identity.ts";
 import type { AssertionOptions, RegistrationOptions } from "../src/server/identity/webauthn.ts";
-import { databasePath, defaultConfig } from "../src/server/kernel/app.ts";
+import { defaultConfig } from "../src/server/kernel/app.ts";
+import { databasePath } from "../src/server/kernel/db.ts";
 import { SCHEMA_VERSION } from "../src/server/kernel/migrate.ts";
 import {
 	authenticator,

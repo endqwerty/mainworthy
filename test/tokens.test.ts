@@ -16,7 +16,8 @@ import {
 	hashToken,
 	listActors,
 } from "../src/server/identity/identity.ts";
-import { type Config, databasePath, type WriteGate } from "../src/server/kernel/app.ts";
+import type { Config, WriteGate } from "../src/server/kernel/app.ts";
+import { databasePath } from "../src/server/kernel/db.ts";
 import { SCHEMA_VERSION } from "../src/server/kernel/migrate.ts";
 import { type Instance, start } from "../src/server/start.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";

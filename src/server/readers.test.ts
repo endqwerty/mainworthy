@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
@@ -7,6 +7,7 @@ import { harness } from "../../test/helpers.ts";
 import { type App, type Config, openApp, SESSION_LIFETIMES } from "./kernel/app.ts";
 import { Db } from "./kernel/db.ts";
 import { Readers, readerCount } from "./readers.ts";
+import { start } from "./start.ts";
 
 const apps: App[] = [];
 const pools: Readers[] = [];
@@ -144,6 +145,37 @@ describe("reader threads", () => {
 			log.mockRestore();
 		}
 	});
+
+	test("the server checkpoints committed rows on its background thread while the writer is idle", async () => {
+		const settings = config();
+		const instance = start(settings, () => ({ ui: null }), { readers: 1 });
+		try {
+			const writer = instance.app.db;
+			writer.exec("PRAGMA wal_autocheckpoint = 0");
+			writer.exec(
+				"CREATE TABLE checkpoint_probe (value TEXT); INSERT INTO checkpoint_probe VALUES ('background checkpoint row')",
+			);
+			const path = join(settings.dataDir, "mainworthy.db");
+			const marker = Buffer.from("background checkpoint row");
+			expect(readFileSync(`${path}-wal`).includes(marker)).toBe(true);
+			const deadline = Date.now() + 5000;
+			while (!readFileSync(path).includes(marker) && Date.now() < deadline) await Bun.sleep(25);
+			// Copy only the database, while the server still owns the WAL. Opening or closing the writer here
+			// would let SQLite checkpoint on this thread and hide a missing background worker.
+			const snapshot = join(config().dataDir, "snapshot.db");
+			copyFileSync(path, snapshot);
+			const copy = new Db(snapshot, { reader: true });
+			try {
+				expect(copy.raw.query("SELECT value FROM checkpoint_probe").get()).toEqual({
+					value: "background checkpoint row",
+				});
+			} finally {
+				copy.close();
+			}
+		} finally {
+			await instance.stop();
+		}
+	}, 10_000);
 
 	test("overlapping snapshots may grow the WAL, then checkpoint and reuse trim it to four MiB", () => {
 		const path = join(config().dataDir, "wal-test.db");

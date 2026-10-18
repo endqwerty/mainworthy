@@ -1,12 +1,15 @@
 // The only module that talks to SQLite. Everything above it calls `get`, `all`, `run` and `transaction`.
 import { Database, type Statement as PreparedStatement, type SQLQueryBindings } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 
 export type SqlValue = string | number | bigint | boolean | null | Uint8Array;
 export type Params = Record<string, SqlValue> | readonly SqlValue[];
 
 /** Every SQL text the server can run, collected at module load so a test can prepare each against the schema. */
+/** The one database file of an instance. */
+export const databasePath = (dataDir: string): string => join(dataDir, "mainworthy.db");
+
 const DECLARED = new Set<string>();
 
 /**
