@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
 import { Slot } from "../../src/web/runs/models.ts";
-import { browserAvailable, eventually, openPage, startServer } from "./support.ts";
+import { browserAvailable, eventually, launchBrowser, openPage, startServer } from "./support.ts";
 
 for (const first of ["fail", "pass"]) {
 	test.skipIf(!browserAvailable)(
@@ -513,6 +513,58 @@ test.skipIf(!browserAvailable)(
 			expect(browser.errors).toEqual([]);
 		} finally {
 			await browser.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"rapid trusted navigation settles warmed case state",
+	async () => {
+		const server = await startServer({ cases: 2, days: 0 });
+		let browser: Awaited<ReturnType<typeof launchBrowser>> | undefined;
+		let harness: Awaited<ReturnType<typeof openPage>> | undefined;
+		try {
+			browser = await launchBrowser();
+			harness = await openPage(server, { browser });
+			const { page, context } = harness;
+			await page.waitForFunction(
+				() => Number(document.querySelector('[data-testid="case-list"]')?.getAttribute("data-loaded")) === 2,
+			);
+			await page.keyboard.press("j");
+			await page.waitForFunction(() => document.querySelector("#detail .cid")?.textContent === "C-2");
+			await page.keyboard.press("k");
+			await page.waitForFunction(() => document.querySelector("#detail .cid")?.textContent === "C-1");
+			const cdp = await context.newCDPSession(page);
+			const sent: Promise<unknown>[] = [];
+			for (let index = 0; index < 128; index++) {
+				const key = index % 2 ? "k" : "j";
+				const code = key === "j" ? "KeyJ" : "KeyK";
+				const virtualKeyCode = key === "j" ? 74 : 75;
+				for (const type of ["keyDown", "keyUp"] as const) {
+					sent.push(
+						cdp.send("Input.dispatchKeyEvent", {
+							type,
+							key,
+							code,
+							windowsVirtualKeyCode: virtualKeyCode,
+							nativeVirtualKeyCode: virtualKeyCode,
+						}),
+					);
+				}
+			}
+			await Promise.all(sent);
+			await page.evaluate(
+				() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+			);
+			expect(harness.errors).toEqual([]);
+			expect(await page.locator('#list [role="option"][aria-selected="true"] .id').textContent()).toBe("C-1");
+			expect(await page.locator("#detail .cid").textContent()).toBe("C-1");
+			await cdp.detach();
+		} finally {
+			await harness?.close();
+			await browser?.close();
 			await server.stop();
 		}
 	},
