@@ -5,7 +5,7 @@ import { browserAvailable, openPage, startServer } from "./support.ts";
 test.skipIf(!browserAvailable)(
 	"two pages share the browser and none of what a page stores",
 	async () => {
-		const server = await startServer();
+		const server = await startServer({ source: true });
 		const first = await openPage(server);
 		try {
 			await first.page.evaluate(() => localStorage.setItem("left-behind", "by the first page"));

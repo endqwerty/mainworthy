@@ -1,7 +1,7 @@
 // The plan of the check (`scripts/check-plan.ts`) and what the workflow says about it. The check's own wall time
 // is measured by the check (`scripts/check.ts`); this keeps the plan whole.
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Glob } from "bun";
@@ -11,6 +11,8 @@ import {
 	failedTests,
 	failureLines,
 	findChromium,
+	fixtureBuildArgs,
+	needsBrowserFixture,
 	newestAttempt,
 	parallelWorkers,
 	phaseFiles,
@@ -24,6 +26,61 @@ import {
 import { matrix, outputs } from "../scripts/ci-scope.ts";
 import { OLDEST_BUN, unready } from "../scripts/preflight.ts";
 import { parseJUnit, TEST_FILE_LIMIT } from "../src/surfaces/formats/junit.ts";
+
+test("the browser fixture uses the production compiler flags and worker layout", () => {
+	const args = fixtureBuildArgs("/scratch/fixture");
+	const production = z
+		.object({ scripts: z.object({ build: z.string() }) })
+		.parse(JSON.parse(readFileSync("package.json", "utf8"))).scripts.build;
+	const productionArgs = args
+		.filter((arg) => arg !== "--root=src")
+		.map((arg, i, all) => {
+			if (all[i - 1] === "--banner") return `'${arg}'`;
+			if (arg === "test/e2e/serve.ts") return "src/cli/main.ts";
+			return arg === "/scratch/fixture" ? "dist/mainworthy" : arg;
+		});
+	expect(`NODE_ENV=production bun ${productionArgs.join(" ")}`).toBe(production);
+	expect(args).toContain("test/e2e/serve.ts");
+	expect(args).toContain("--root=src");
+	expect(args.slice(-2)).toEqual(["--outfile", "/scratch/fixture"]);
+});
+
+test("a browser phase builds once, including quiet and shards, but named server tests need no fixture", () => {
+	expect(needsBrowserFixture(["parallel", "quiet"])).toBe(true);
+	expect(needsBrowserFixture(["quiet"])).toBe(true);
+	expect(needsBrowserFixture(["parallel"], "2/6")).toBe(true);
+	expect(needsBrowserFixture(["parallel"], undefined, ["test/e2e/phone.test.ts"])).toBe(true);
+	expect(needsBrowserFixture(["parallel"], undefined, ["test/check.test.ts"])).toBe(false);
+});
+
+test("a broken browser fixture build fails the check before any test runs, even with an inherited executable", async () => {
+	const root = mkdtempSync(join(tmpdir(), "mainworthy-broken-fixture-"));
+	try {
+		for (const dir of ["scripts", "test/e2e", "src/server", "src/cli"]) mkdirSync(join(root, dir), { recursive: true });
+		for (const file of ["check.ts", "check-plan.ts", "preflight.ts"])
+			copyFileSync(`scripts/${file}`, join(root, "scripts", file));
+		writeFileSync(join(root, "package.json"), "{}");
+		writeFileSync(join(root, "test/e2e/serve.ts"), "const broken = ;");
+		for (const worker of ["src/server/read-worker.ts", "src/cli/demo-worker.ts"])
+			writeFileSync(join(root, worker), "export {};");
+		writeFileSync(join(root, "test/e2e/broken.test.ts"), 'throw new Error("TEST_MUST_NOT_RUN");');
+		const child = Bun.spawn(
+			[process.execPath, "scripts/check.ts", "test", "--only=parallel", "test/e2e/broken.test.ts"],
+			{ cwd: root, env: { ...process.env, MAINWORTHY_E2E_SERVER: "/do-not-reuse" }, stdout: "pipe", stderr: "pipe" },
+		);
+		const [out, err, exit] = await Promise.all([
+			new Response(child.stdout).text(),
+			new Response(child.stderr).text(),
+			child.exited,
+		]);
+		expect(exit).toBe(1);
+		expect(out + err).toContain("check: browser fixture build failed; no tests ran");
+		expect(out + err).toContain("test/e2e/serve.ts");
+		expect(out + err).not.toContain("TEST_MUST_NOT_RUN");
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
 
 test("every test file is in exactly one phase: the quiet files, and everything but them", () => {
 	for (const file of QUIET) expect(existsSync(file), `${file} is listed as quiet and is not there`).toBe(true);

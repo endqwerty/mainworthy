@@ -392,7 +392,7 @@ route is the server's own (`src/surfaces/ui.ts`), and it has two forms, for the 
 - **In the executable** the import lists the files that were built into it. The route serves them: the page
   with `Cache-Control: no-cache`, the files it names (their names carry a hash of their content) to be kept for
   a year. Nothing is bundled when the server runs and nothing else listens.
-- **From source** (`bun run start`, `bun run dev`, the tests) Bun bundles on request, as before, on a socket
+- **From source** (`bun run start`, `bun run dev`, standalone browser tests) Bun bundles on request, as before, on a socket
   file in a private temporary directory, and the route passes each reply on with the headers. With
   `NODE_ENV=production`, which `bun run start` and the browser tests set, that is the same bundle and the same
   strict policy as the executable's. Without it, as under `bun run dev`, it is Bun's development bundle with its
@@ -414,6 +414,13 @@ route is the server's own (`src/surfaces/ui.ts`), and it has two forms, for the 
   opens the visitor's only if the bundler accepted that one. Bun refuses a name that is not this machine's
   or an address (a page reached through DNS rebinding) and an Origin on another site. The first rule is the
   stricter one for an Origin: Bun's lets in a page on another port of this machine, and the route does not.
+
+`scripts/check.ts` compiles `test/e2e/serve.ts` once into its private temporary directory when a selected
+phase may run browser tests. CI shards use the same runner. Each scenario still starts a fresh process with
+its own data directory, port and token. `MAINWORTHY_E2E_SERVER` passes the executable to `startServer`; a failed
+build stops the check before tests run. The browser isolation smoke test explicitly starts from source, and
+the header and HMR tests keep their own source servers. A standalone `bun test test/e2e/<file>` uses source
+unless `MAINWORTHY_E2E_SERVER` names a compiled fixture. The check deletes the executable when it exits.
 
 The documentation site (`/docs`, `src/surfaces/docs/site.ts`) writes the policy of its own pages, and keeps it
 (`withHeadersKeepingPolicy`): a page of the documentation loads the site's script and style sheet and frames its
