@@ -102,6 +102,7 @@ type TokenState = { actor: number; revoked_at: number | null; expires_at: number
  * it because the owner held none. A token somebody made with `token.create` has no source.
  */
 type TokenSource = "env" | "generated";
+const Roles = Role.array();
 
 /** A token the owner chose and shorter than this stops the start. */
 const OWNER_TOKEN_MIN = 20;
@@ -133,6 +134,9 @@ const Q = {
 	grants: sql<{ actor: number }, { project: number; can: string; roles: string }>(
 		"SELECT project, can, roles FROM grants WHERE actor = $actor ORDER BY project",
 	),
+	projectGrants: sql<{ actor: number; project: number }, { project: number; can: string; roles: string }>(
+		"SELECT project, can, roles FROM grants WHERE actor = $actor AND project IN (0, $project) ORDER BY project",
+	),
 	setRoles: sql<{ actor: number; project: number; roles: string }>(
 		"UPDATE grants SET roles = $roles WHERE actor = $actor AND project = $project",
 	),
@@ -143,6 +147,13 @@ const Q = {
 	),
 	tokenByHash: sql<{ hash: string }, TokenState & { id: number; source: TokenSource | null }>(
 		"SELECT id, actor, revoked_at, expires_at, source FROM tokens WHERE hash = $hash",
+	),
+	tokenActorByHash: sql<
+		{ hash: string },
+		TokenState & Omit<ActorRow, "id"> & { id: number; source: TokenSource | null }
+	>(
+		`SELECT t.id, t.actor, t.revoked_at, t.expires_at, t.source, a.org, a.kind, a.name, a.disabled_at
+		 FROM tokens t JOIN actors a ON a.id = t.actor WHERE t.hash = $hash`,
 	),
 	insertToken: sql<{
 		actor: number;
@@ -507,10 +518,11 @@ function ensureActor(db: Db, input: { org: number; kind: ActorKind; name: string
 function toActor(db: Db, row: ActorRow, project: number | null): Actor {
 	const granted: Capability[] = row.kind === "human" ? teamCapabilities(db, row.id, project) : [];
 	const roles = new Set<Role>();
-	for (const grant of db.all(Q.grants, { actor: row.id })) {
-		if (project !== null && grant.project !== 0 && grant.project !== project) continue;
+	const grants =
+		project === null ? db.all(Q.grants, { actor: row.id }) : db.all(Q.projectGrants, { actor: row.id, project });
+	for (const grant of grants) {
 		granted.push(...json<Capability[]>(grant.can));
-		for (const role of Role.array().parse(json(grant.roles))) roles.add(role);
+		for (const role of Roles.parse(json(grant.roles))) roles.add(role);
 	}
 	return { id: row.id, kind: row.kind, name: row.name, can: heldCapabilities(row.kind, granted), roles: [...roles] };
 }
@@ -552,11 +564,13 @@ type StandingToken = { id: number; actor: ActorRow; chosen: boolean };
  * command's transaction is open on it.
  */
 function standingToken(db: Db, hash: string, now: number): StandingToken | null {
-	const token = db.get(Q.tokenByHash, { hash });
-	if (!token || !works(token, now)) return null;
-	const actor = db.get(Q.actorById, { id: token.actor });
-	if (!actor || actor.disabled_at !== null) return null;
-	return { id: token.id, actor, chosen: token.source === "env" };
+	const token = db.get(Q.tokenActorByHash, { hash });
+	if (!token || !works(token, now) || token.disabled_at !== null) return null;
+	return {
+		id: token.id,
+		actor: { id: token.actor, org: token.org, kind: token.kind, name: token.name, disabled_at: token.disabled_at },
+		chosen: token.source === "env",
+	};
 }
 
 /**
@@ -998,7 +1012,7 @@ export function setGrant(
 		endSessionsWithoutFactor(app.db, row.id, app.now(), providerVouches(app));
 	if (input.roles !== undefined)
 		app.db.run(Q.setRoles, { actor: row.id, project: input.project, roles: JSON.stringify([...new Set(input.roles)]) });
-	return Role.array().parse(
+	return Roles.parse(
 		json(app.db.all(Q.grants, { actor: row.id }).find((grant) => grant.project === input.project)?.roles ?? "[]"),
 	);
 }
@@ -1184,7 +1198,7 @@ export function listActors(db: Db) {
 		grants: db.all(Q.grants, { actor: row.id }).map((grant) => ({
 			project: grant.project,
 			can: heldCapabilities(row.kind, json<Capability[]>(grant.can)),
-			roles: Role.array().parse(json(grant.roles)),
+			roles: Roles.parse(json(grant.roles)),
 		})),
 	}));
 }
