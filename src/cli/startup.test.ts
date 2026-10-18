@@ -4,6 +4,7 @@ import { mkdtemp, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { API_VERSION, VERSION } from "../core/version.ts";
 import { contentSecurityPolicy } from "../surfaces/headers.ts";
 import { CLI_ENTRY, COMMIT, withInstance } from "./test-support.ts";
 
@@ -15,6 +16,34 @@ const NO_PROXY_NAMED =
 	"mainworthy: MAINWORTHY_TRUSTED_PROXY and MAINWORTHY_CLIENT_ADDRESS_HEADER are not set: a failed sign-in from a loopback or private address, which behind a proxy is every visitor's, is not counted against that address, only against the first 8 characters of the token it tried. docs/deploy.md says how to set the two.\n";
 /** The two variables, for a start that is about something else and should have nothing to say about the limit. */
 const BEHIND_PROXY = { MAINWORTHY_TRUSTED_PROXY: "10.0.0.1", MAINWORTHY_CLIENT_ADDRESS_HEADER: "x-real-ip" };
+
+test("version loads its adapter without starting other command implementations", async () => {
+	const child = Bun.spawn(
+		[
+			process.execPath,
+			"--eval",
+			`const { runCli } = await import(${JSON.stringify(new URL("./dispatch.ts", import.meta.url).href)});
+			const code = await runCli(["version"], undefined);
+			const loaded = Object.keys(require.cache);
+			process.stdout.write(JSON.stringify({ code, adapters: loaded
+				.filter(path => path.includes("/cli/commands/") && path.endsWith(".ts"))
+				.map(path => path.split("/").at(-1)).sort(),
+				runtimes: loaded.filter(path => path.includes("/@modelcontextprotocol/")
+					|| path.endsWith("/surfaces/http.ts") || path.endsWith("/cli/demo.ts")) }) + "\\n");`,
+		],
+		{ env: { PATH: process.env.PATH ?? "" }, stdout: "pipe", stderr: "pipe", timeout: 4000 },
+	);
+	const [stdout, stderr, code] = await Promise.all([
+		new Response(child.stdout).text(),
+		new Response(child.stderr).text(),
+		child.exited,
+	]);
+	expect({ stdout, stderr, code }).toEqual({
+		stdout: `Mainworthy ${VERSION} (API ${API_VERSION})\n{"code":0,"adapters":["version.ts"],"runtimes":[]}\n`,
+		stderr: "",
+		code: 0,
+	});
+});
 
 for (const options of [
 	{ argv: [], mode: "local", signal: "SIGTERM" },

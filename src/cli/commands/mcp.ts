@@ -1,4 +1,3 @@
-import { runStdio } from "../../surfaces/mcp.ts";
 import { assertPositionals } from "../args.ts";
 import type { AdapterCommand } from "./types.ts";
 
@@ -9,6 +8,7 @@ export const mcpCommand: AdapterCommand = {
 	flags: [],
 	async run(args, client) {
 		assertPositionals(args, 0, 0, mcpCommand.usage);
+		const { runStdio } = await import("../../surfaces/mcp.ts");
 		await runStdio(
 			(op, project, input) => client.forward(op, project ?? client.options.project ?? null, input),
 			async () =>

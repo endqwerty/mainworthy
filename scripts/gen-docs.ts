@@ -146,8 +146,9 @@ const flagList = (flags: readonly Flag[]): string =>
 		.map((flag) => `- ${code(`--${flag.name}${flagShape(flag)}`)}${flag.description ? `: ${flag.description}` : ""}`)
 		.join("\n");
 
+const adapters = await Promise.all([...ADAPTER_COMMANDS.values()].map((load) => load()));
+
 function cliCommands(): string {
-	const adapters = [...ADAPTER_COMMANDS.values()];
 	const generated = [...GENERATED_COMMANDS.values()];
 	return [
 		"### Commands for people",
