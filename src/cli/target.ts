@@ -42,9 +42,9 @@ export function repoOf(remote: string | undefined): string | undefined {
 /** Git is a read-only fallback when a CI environment does not identify the build. */
 export function gitTarget(): { commit?: string; branch?: string; repo?: string } | null {
 	const commit = gitValue(["rev-parse", "HEAD"]);
+	if (!commit) return null;
 	const branch = gitValue(["rev-parse", "--abbrev-ref", "HEAD"]);
 	const repo = repoOf(gitValue(["remote", "get-url", "origin"]));
-	if (!commit) return null;
 	return { commit, ...(branch && branch !== "HEAD" ? { branch } : {}), ...(repo ? { repo } : {}) };
 }
 

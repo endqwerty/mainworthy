@@ -12,6 +12,7 @@ import { Client, plainHttpToAnotherMachine } from "./client.ts";
 import { ADAPTER_COMMANDS, COMMAND_NAMES } from "./dispatch.ts";
 import { GENERATED_COMMANDS } from "./generated.ts";
 import { MAX_SEED_UNLINKED_FILES, seed, unitTests } from "./seed.ts";
+import { gitTarget } from "./target.ts";
 import { COMMIT, inThisProcess, outputWith, RED_XML, withInstance } from "./test-support.ts";
 
 const Ref = z.object({ ref: z.string() });
@@ -21,6 +22,93 @@ const Inbox = z.object({ items: z.array(Question) });
 const Token = z.object({ token: z.string() });
 const Created = z.object({ cases: z.array(Ref) });
 const Receipt = z.object({ batch: z.number(), fresh: z.boolean(), counts: z.object({ total: z.number() }) });
+
+test("git target detection stops after one Git process outside a repository or without commits", async () => {
+	await withInstance(async ({ directory }) => {
+		const bin = join(directory, "bin");
+		const log = join(directory, "git-calls");
+		const git = Bun.which("git");
+		if (!git) throw new Error("git is required for target detection tests");
+		await mkdir(bin);
+		await writeFile(join(bin, "git"), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$GIT_CALL_LOG"\nexec "$REAL_GIT" "$@"\n', {
+			mode: 0o755,
+		});
+		for (const checkout of ["plain", "unborn"]) {
+			const cwd = join(directory, checkout);
+			await mkdir(cwd);
+			if (checkout === "unborn") expect(Bun.spawnSync([git, "init", "--quiet", cwd]).exitCode).toBe(0);
+			await writeFile(log, "");
+			const result = await inThisProcess(
+				`git target in ${checkout}`,
+				async () => {
+					process.stdout.write(JSON.stringify(gitTarget()));
+					return 0;
+				},
+				{
+					cwd,
+					input: "",
+					environment: {
+						PATH: bin,
+						HOME: directory,
+						REAL_GIT: git,
+						GIT_CALL_LOG: log,
+						GIT_CEILING_DIRECTORIES: directory,
+					},
+				},
+			);
+			expect(result).toEqual({ code: 0, stdout: "null", stderr: "" });
+			expect(await Bun.file(log).text()).toBe("rev-parse HEAD\n");
+		}
+	});
+});
+
+test("git target detection preserves branch, detached HEAD and missing origin metadata", async () => {
+	await withInstance(async ({ directory }) => {
+		const git = (...args: string[]) => {
+			const result = Bun.spawnSync(["git", ...args], { cwd: directory });
+			expect(result.exitCode).toBe(0);
+			return result.stdout.toString().trim();
+		};
+		git("init", "--quiet", "--initial-branch=feature");
+		git(
+			"-c",
+			"user.name=robin",
+			"-c",
+			"user.email=robin@example.com",
+			"-c",
+			"commit.gpgsign=false",
+			"commit",
+			"--quiet",
+			"--allow-empty",
+			"-m",
+			"Initial",
+		);
+		const commit = git("rev-parse", "HEAD");
+		git("remote", "add", "origin", "https://github.com/acme/web.git");
+		for (const state of ["branch", "detached", "no-origin"]) {
+			if (state === "detached") git("checkout", "--quiet", "--detach");
+			if (state === "no-origin") {
+				git("checkout", "--quiet", "feature");
+				git("remote", "remove", "origin");
+			}
+			const result = await inThisProcess(
+				`git target with ${state}`,
+				async () => {
+					process.stdout.write(JSON.stringify(gitTarget()));
+					return 0;
+				},
+				{ cwd: directory, input: "", environment: { PATH: process.env.PATH ?? "", HOME: directory } },
+			);
+			expect(result.code).toBe(0);
+			expect(result.stderr).toBe("");
+			expect(JSON.parse(result.stdout)).toEqual({
+				commit,
+				...(state === "detached" ? {} : { branch: "feature" }),
+				...(state === "no-origin" ? {} : { repo: "acme/web" }),
+			});
+		}
+	});
+});
 
 test("get prints folder archive and placement proposals with nullable edit fields", async () => {
 	await withInstance(async ({ client, cli, run }) => {
