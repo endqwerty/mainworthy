@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import { chooseInstance, contractDifferences, type Probe } from "../scripts/ci-instance.ts";
+import { runCli } from "../src/cli/dispatch.ts";
 import { type Running, withInstance } from "../src/cli/test-support.ts";
 import { API_VERSION } from "../src/core/version.ts";
 import { openApi } from "../src/surfaces/http.ts";
@@ -118,6 +119,9 @@ async function gate(
 							MAINWORTHY_URL: instance.url,
 							MAINWORTHY_TOKEN: "",
 							MAINWORTHY_PROJECT: "",
+							...(process.env.MAINWORTHY_READERS !== undefined
+								? { MAINWORTHY_READERS: process.env.MAINWORTHY_READERS }
+								: {}),
 							GITHUB_ACTIONS: "true",
 							GITHUB_EVENT_NAME: "pull_request",
 							GITHUB_REF: "refs/pull/77/merge",
@@ -451,6 +455,46 @@ test("a job that breaks off leaves no Mainworthy running and nothing in the temp
 	expect(result.output).toContain("EISDIR");
 	expect(result.code).not.toBe(0);
 	expect(result.left).toEqual([]);
+}, 20_000);
+
+test("a refused report keeps its command diagnostic and exit 4 while the gate still runs", async () => {
+	const result = await gate(green, {
+		routes: {
+			"/api/p/scratch/report": () =>
+				Response.json({ ok: false, error: { code: "forbidden", message: "report refused" } }, { status: 403 }),
+		},
+	});
+	expect(result.output.match(/forbidden: report refused/g)).toHaveLength(3);
+	for (const shard of green) expect(result.output).toContain(`::error::${shard.name}: mainworthy report exited 4`);
+	expect(result.output).toContain("$ mainworthy gate");
+	expect(result.output).toContain("The gate did not pass (exit 3).");
+	expect([result.code, result.batches, result.left]).toEqual([3, 0, []]);
+}, 20_000);
+
+test("an explicit command client environment leaves the ambient environment unchanged", async () => {
+	await withInstance(async ({ instance, client }) => {
+		await client.call("admin", { do: "project.create", key: "configured" });
+		await client.with({ project: "configured" }).call("report", {
+			target: { commit: "c0ffee0123456789012345678901234567890123" },
+			results: [{ test: { key: "client-environment" }, outcome: "pass" }],
+		});
+		const before = { ...process.env };
+		const code = await runCli(["gate", "--commit", "c0ffee0123456789012345678901234567890123"], undefined, {
+			MAINWORTHY_URL: instance.url,
+			MAINWORTHY_PROJECT: "configured",
+		});
+		expect(code).toBe(0);
+		expect({ ...process.env }).toEqual(before);
+	});
+});
+
+test("an explicit invalid reader count reaches the job's own server and its refusal leaves nothing", async () => {
+	const result = await gate(green, {
+		configure: async () => ({ MAINWORTHY_URL: "", MAINWORTHY_READERS: "invalid" }),
+	});
+	expect(result.output).toContain("MAINWORTHY_READERS must be an integer between 0 and 8");
+	expect(result.output).not.toContain("$ mainworthy report");
+	expect([result.code, result.left]).toEqual([1, []]);
 }, 20_000);
 
 test("a job that is told to stop does so before its next command, exits as stopped, and leaves nothing", async () => {
