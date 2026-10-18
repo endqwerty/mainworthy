@@ -158,3 +158,69 @@ test("a report that makes many failures go away recomputes each run once, not on
 		h.close();
 	}
 });
+
+/** A report reuses its tally and reads each target's scope once per discovery pass, however many tests fail. */
+test.each(["scans", "targets"] as const)("a report with existing failures bounds repeated %s reads", (metric) => {
+	const work = (failures: number) => {
+		const h = harness({ unlinked: "track" });
+		try {
+			const ci = h.actor("pipeline", "ci", ["read", "record"]);
+			h.call(
+				"report",
+				ciReport({
+					commit: "reuse001",
+					n: failures,
+					fail: Object.fromEntries(Array.from({ length: failures }, (_, i) => [i, "same cause"])),
+				}),
+				ci,
+			);
+			const reads = { scans: 0, targets: 0 };
+			const db = h.app.db;
+			const all = db.all.bind(db);
+			const get = db.get.bind(db);
+			db.all = (statement, ...params) => {
+				if (
+					statement.text ===
+					"SELECT test, result, target, outcome, signature FROM run_tests WHERE run = $run ORDER BY result"
+				)
+					reads.scans++;
+				return all(statement, ...params);
+			};
+			db.get = (statement, ...params) => {
+				if (statement.text === "SELECT * FROM targets WHERE id = $id") reads.targets++;
+				return get(statement, ...params);
+			};
+			let receipt: ReportReceipt;
+			try {
+				receipt = h.call<ReportReceipt>(
+					"report",
+					{
+						target: { commit: "reuse001", repo: "acme/web", branch: "main" },
+						job: "e2e",
+						results: [{ test: { key: "new-pass" }, outcome: "pass" }],
+					},
+					ci,
+				);
+			} finally {
+				db.all = all;
+				db.get = get;
+			}
+			expect(receipt).toMatchObject({ fresh: true, counts: { total: 1, pass: 1 }, rejected: [] });
+			expect(h.call<GateStatus>("gate", { commit: "reuse001", repo: "acme/web" })).toMatchObject({
+				verdict: "blocked",
+				tally: { pass: 1, unexplained: failures },
+			});
+			expect(h.call<InboxReply>("inbox", { kind: "failure" }).items.map((q) => q.state)).toEqual(["open"]);
+			return reads;
+		} finally {
+			h.close();
+		}
+	};
+	const small = work(3);
+	const large = work(30);
+	if (metric === "scans") {
+		// One tally and one question-discovery pass. Stale handling already has the tally's failing set.
+		expect(small.scans).toBe(2);
+		expect(large.scans).toBe(2);
+	} else expect(large.targets).toBe(small.targets);
+});

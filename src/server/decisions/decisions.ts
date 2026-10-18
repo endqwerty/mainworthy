@@ -59,6 +59,7 @@ import {
 	newestInScope,
 	passesAny,
 	passingIn,
+	type Retallied,
 	type RunRow,
 	retally,
 	runById,
@@ -1595,7 +1596,7 @@ export function refold(ctx: Ctx, runIds: Iterable<number>, options: { dissolveSt
 						currentPolicy(ctx.db, ctx.project.id).settings.emptyReports,
 					);
 				if (ctx.dissolveStale) {
-					dissolveStale(ctx, result.run);
+					dissolveStale(ctx, result);
 					endPassed(ctx, result.run);
 				}
 				const run = result.run;
@@ -1656,14 +1657,15 @@ function blockersOf(ctx: Ctx, run: RunRow): Blocker[] {
  * something failed after it passed. The question and its history remain. Called for each run a report counted
  * toward, about the questions that name the run or its scope.
  */
-function dissolveStale(ctx: Ctx, run: RunRow): void {
+function dissolveStale(ctx: Ctx, { run, failing }: Pick<Retallied, "run" | "failing">): void {
 	const candidates = new Set<number>();
 	for (const about of [runRef(run), ...(run.scope !== null ? [`scope:${run.scope}`] : [])]) {
 		for (const open of openQuestionsOn(ctx.db, ctx.project.id, about)) {
 			if (open.kind === "failure") candidates.add(open.id);
 		}
 	}
-	const shown = new Map<number, Set<string>>();
+	// The latest tally includes rules applied while asking. Dissolving open questions changes no standing.
+	const shown = new Map<number, Set<string>>([[run.id, failing]]);
 	// One report can make thousands of questions go away, all waited for by the same run: it is recomputed once,
 	// when they are all closed, not once for each.
 	const waited = new Set<number>();
