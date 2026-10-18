@@ -100,6 +100,127 @@ for (const locks of ["available", "unavailable", "query fails"])
 	);
 
 check(
+	"startup with Web Locks and no stored drafts renders while channel discovery is deferred",
+	async () => {
+		const server = await startServer();
+		const h = await openPage(server);
+		try {
+			const b = await h.context.newPage();
+			b.setDefaultTimeout(5000);
+			b.on("pageerror", (error) => h.errors.push(error.message));
+			await b.addInitScript(() => {
+				const timeout = window.setTimeout.bind(window);
+				Object.defineProperty(window, "setTimeout", {
+					value: (handler: TimerHandler, delay?: number, ...args: unknown[]) =>
+						delay === 40 ? 0 : timeout(handler, delay, ...args),
+				});
+			});
+			await b.goto(`${server.url}/p/scratch/suite`, { waitUntil: "commit" });
+			await b.locator("#list").waitFor();
+			expect(await b.locator("#app").innerText()).toContain("Suite");
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+check(
+	"a reloading owner keeps its draft when another window starts in the lock gap",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", { edits: [{ op: "create", outline: "Coupon case\n  Apply the coupon" }] });
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const a = h.page;
+			a.setDefaultTimeout(10_000);
+			await a.getByRole("button", { name: "Coupon case", exact: true }).waitFor();
+			await h.context.route("**/api/p/scratch/propose", (route) =>
+				route.fulfill({ json: { ok: false, error: { code: "internal", message: "Capture unavailable" } } }),
+			);
+			await a.evaluate(() => {
+				const fetch = window.fetch.bind(window);
+				Object.defineProperty(window, "fetch", {
+					value: (input: RequestInfo | URL, init?: RequestInit) =>
+						init?.keepalive ? new Promise<Response>(() => {}) : fetch(input, init),
+				});
+			});
+			await a.keyboard.press("e");
+			await title(a).fill("Coupon case owned by A");
+			const owner = (await stored(a)).owner;
+			await a.addInitScript(() => {
+				const request = navigator.locks.request.bind(navigator.locks);
+				let release = () => {};
+				const gate = new Promise<void>((resolve) => {
+					release = resolve;
+				});
+				Object.assign(window, { releaseReloadOwner: () => release() });
+				Object.defineProperty(navigator.locks, "request", {
+					value: (...args: unknown[]) => {
+						Object.assign(window, { reloadOwnerWaiting: true });
+						return gate.then(() => Reflect.apply(request, navigator.locks, args));
+					},
+				});
+			});
+			const b = await h.context.newPage();
+			b.setDefaultTimeout(10_000);
+			b.on("pageerror", (error) => h.errors.push(error.message));
+			await b.addInitScript((owner) => {
+				const timeout = window.setTimeout.bind(window);
+				Object.defineProperty(window, "setTimeout", {
+					value: (handler: TimerHandler, delay?: number, ...args: unknown[]) => {
+						if (delay !== 40) return timeout(handler, delay, ...args);
+						Object.assign(window, { finishDraftDiscovery: () => timeout(handler, 0, ...args) });
+						return 0;
+					},
+				});
+				const channel = new BroadcastChannel("mainworthy:draft-windows");
+				channel.onmessage = (event: MessageEvent<unknown>) => {
+					const message = event.data;
+					if (
+						message &&
+						typeof message === "object" &&
+						"kind" in message &&
+						message.kind === "hello" &&
+						"id" in message &&
+						message.id === owner
+					)
+						Object.assign(window, { reloadedOwnerArrived: true });
+				};
+			}, owner);
+			await a.reload({ waitUntil: "commit" });
+			await a.waitForFunction(() => Reflect.get(window, "reloadOwnerWaiting") === true);
+			await b.goto(`${server.url}/p/scratch/suite/c/1`, { waitUntil: "commit" });
+			await b.waitForFunction(
+				() =>
+					typeof Reflect.get(window, "finishDraftDiscovery") === "function" ||
+					Boolean(document.querySelector("#root")?.childElementCount),
+			);
+			const held = await b.evaluate(async () => (await navigator.locks.query()).held?.map((lock) => lock.name));
+			expect(held).not.toContain(`mainworthy:draft-window:${owner}`);
+			const waited = await b.evaluate(() => typeof Reflect.get(window, "finishDraftDiscovery") === "function");
+			await a.evaluate(() => Reflect.get(window, "releaseReloadOwner")());
+			await b.waitForFunction(() => Reflect.get(window, "reloadedOwnerArrived") === true);
+			if (waited) await b.evaluate(() => Reflect.get(window, "finishDraftDiscovery")());
+			await title(a).waitFor();
+			await title(b).waitFor();
+			expect((await stored(b)).owner).toBe(owner);
+			expect(await title(b).inputValue()).toBe("Coupon case owned by A");
+			expect(await readOnly(a)).toBe(false);
+			expect(await readOnly(b)).toBe(true);
+			expect(waited).toBe(true);
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+check(
 	"R8 ownership: opening, refusing a key, taking over and leaving the former owner",
 	async () => {
 		const w = await windows();

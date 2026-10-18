@@ -71,7 +71,7 @@ async function readLocks(): Promise<boolean> {
 	for (const name of owners) liveOwners.add(name.slice(LOCK.length));
 	return true;
 }
-export async function initializeDraftOwners(): Promise<void> {
+export async function initializeDraftOwners(storedOwners: () => readonly string[]): Promise<void> {
 	const locksRead = await readLocks().catch(() => false);
 	if (typeof BroadcastChannel === "undefined") return;
 	const instance = randomId();
@@ -96,5 +96,7 @@ export async function initializeDraftOwners(): Promise<void> {
 	window.addEventListener("pagehide", () => send("gone"));
 	window.addEventListener("pageshow", () => send("hello"));
 	send("hello");
-	if (!locksRead) await new Promise<void>((resolve) => window.setTimeout(resolve, 40));
+	// A missing owner may be between documents during reload. Let it return before its draft can be claimed.
+	if (!locksRead || storedOwners().some((owner) => owner !== draftOwner() && !draftOwnerIsLive(owner)))
+		await new Promise<void>((resolve) => window.setTimeout(resolve, 40));
 }
