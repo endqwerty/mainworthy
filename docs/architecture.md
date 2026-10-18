@@ -1,6 +1,6 @@
 # How Mainworthy fits together
 
-A guide to the code as built in the MVP. The product design it implements is
+A guide to the current code. The product design it implements is
 [product-design.md](product-design.md); where the code departs from it is
 [decision 0012](decisions/0012-mvp-scope-and-departures.md).
 
@@ -15,8 +15,8 @@ Explorable diagrams (open in a browser; they are self-contained HTML):
 Mainworthy keeps three kinds of record: what the software should do (cases, with versions), what was observed
 (results from people, pipelines and agents, in one shape), and what people decided about it. Producers append
 evidence; detectors turn evidence into questions, one per cause; a decision answers a question and is the only
-thing that can change what is "current". Every surface (web, command line, API, agent tools) calls the same
-nineteen operations. The whole instance is one process and one SQLite file.
+thing that can change what is "current". Every surface (web, command line, API, agent tools) calls operations
+from the same registry. The whole instance is one process and one SQLite file.
 
 ## One process
 
@@ -40,6 +40,9 @@ nineteen operations. The whole instance is one process and one SQLite file.
                           one SQLite file (WAL)          one writer connection, reader threads
 ```
 
+`src/server/trackers` handles tracker delivery, and `src/server/statuses` publishes commit statuses.
+`src/server/transfer` exports and imports archives and produces audit exports.
+
 The documentation a user reads is served by the same process, at `/docs`: the Markdown pages in `docs/guide`,
 rendered once and sent without a session, because they are the same for every instance of a version
 (`src/surfaces/docs`, decision 0016).
@@ -58,12 +61,14 @@ an operation named like a shortcut (`createCase`, `closeRun`) appears.
 
 | | Operations |
 | --- | --- |
-| Produce evidence | `propose` (create or change cases, folders, links, the policy) · `report` (results) · `claim` (a review and its findings) |
+| Produce evidence | `attach` (append a file to a result) · `propose` (create or change cases, folders, links, the policy) · `import-csv` (preview and confirm mapped cases) · `report` (results) · `claim` (a review and its findings) · `change` (record a change's scope and head, or end it) · `announce` (a deployment and its build) · `tracker` (queue a defect issue) |
 | Request evidence | `plan` (start a run) |
 | Decide | `decide` (answer a question, or withdraw a decision) |
-| Read | `inbox` · `get` · `find` · `impact` · `since` · `gate` · `history` · `timeline` · `check` · `stats` · `command` |
-| Administer | `admin` (projects, actors, grants, tokens) |
-| Sign in as yourself | `session` (your browser sessions: list, end) · `credential` (your password and passkeys: list, register a passkey, remove) · `invitation` (an admin invites a person with a link) |
+| Read | `attachment` (list or read a result's files) · `inbox` · `get` · `find` · `impact` · `since` · `gate` · `history` · `timeline` · `check` · `stats` · `command` · `tracker-status` (delivery state and issue reference) |
+| Administer | `audit` (export retained decisions and evidence) · `admin` (projects, actors, grants, teams, tokens) |
+| Sign in as yourself | `session` (your browser sessions: list, end) · `credential` (your password, passkeys, authenticator, recovery email and CLI tokens) · `invitation` (an admin invites or recovers a person with a link) |
+
+`test/docs.test.ts` holds this table to the registry's operation names.
 
 `invoke` does the same things for every operation: check that the caller may run it, parse the input at the
 boundary, and for a write, open a transaction, give the command the project's next **sequence number**, run it, record the
@@ -81,18 +86,21 @@ one for every project): a list of capabilities. A token names an actor and carri
 
 | Capability | Lets its holder |
 | --- | --- |
-| `read` | call the reads |
-| `record` | `report` results and read the `gate` |
-| `produce` | `propose`, `claim`, `decide`, and everything `record` does |
+| `read` | call the reads except `audit` |
+| `record` | `report` results, `attach` files, `change` a scope or head, `announce` deployments and read the `gate` |
+| `produce` | `propose`, `import-csv`, `claim`, `tracker`, `decide`, and everything `record` does |
 | `answer` | have a `decide` count where the policy asks a member |
 | `plan` | `plan` a run |
-| `admin` | `admin` |
+| `admin` | `admin`, `audit`, `invitation` |
+
+Individual operations may restrict actor kinds further: only pipelines and human admins announce deployments.
 
 A pipeline holds `read` and `record` at most, whatever its grant says: it cannot edit a case, answer or
 plan under any policy, because it cannot call the operations that do (`heldCapabilities` in `src/core/kinds.ts`;
 decision 0014). One thing its reports add: where the project's policy creates a case for each test with none,
-a report's new tests get cases (decision 0021). The caller is refused before the operation checks its input. `grant.set` and `grant.remove` are the one way a
-grant changes; a new token for an actor that exists changes nothing it may do.
+a report's new tests get cases (decision 0021). The caller is refused before the operation checks its input.
+`grant.set` and `grant.remove` change direct grants; team membership and team grants also contribute to an
+actor's effective capabilities. A new token for an actor that exists changes nothing it may do.
 
 `session` and `credential` ask for no capability. Their need is `self`: whoever is signed in runs them, a person
 or an agent, with whatever grants, on what is their own. `credential` then refuses an agent (403), which has
@@ -100,7 +108,8 @@ no password and no passkey: an agent lists and ends its own sessions and no more
 every project may also
 list and end what is somebody else's, and one function decides that for every such operation (`mayActFor` in
 `src/server/identity/identity.ts`; a test names the operations and where the decision is made). A pipeline is
-refused: its token reaches `report` and `gate` and nothing else.
+refused by `self` operations. Its token can reach reporting, attachments, change updates and deployment
+announcements. With `read`, it can also call the reads permitted by its grants.
 
 A caller that holds no grant on a project is told what it would be told of a project that does not exist, word
 for word, in an operation and on the change stream: a refusal that named the missing capability would confirm
@@ -142,14 +151,15 @@ refusals is answered `internal error` and nothing more; what failed is in the se
 A browser does not hold a token (decision 0017). `POST /api/login` takes a token and opens a session: a row in
 `sessions` and a cookie of 32 random bytes, of which only the SHA-256 is stored. The cookie is
 `__Host-mainworthy_sid` over https and `mainworthy_sid` over plain http, `HttpOnly` and `SameSite=Strict`. A
-session ends when its browser signs out, after 14 days without use, after 90 days in any case, when the token
-that opened it is revoked or reaches its end, and when its actor is forgotten. `POST /api/logout` commits the end before it answers,
+session ends when its browser signs out, when the token that opened it is revoked or reaches its end, and when
+its actor is forgotten. By default it also ends after 14 days without use or 90 days in any case.
+`POST /api/logout` commits the end before it answers,
 so a copy of the cookie stops working with it. Signing in and out are routes of the HTTP surface and not
 operations: nobody is signed in yet, and the registry runs nothing for a caller it cannot name.
 
 A person signs in as themselves with a name and a password or with a passkey, and the first time with an
-invitation, the link an admin hands them since there is no mail (decision 0017). These are further bodies of
-`POST /api/login`, beside the token, in `src/surfaces/signin.ts`, with `POST /api/login/challenge` for a
+invitation, the link an admin hands them or sends through optional mail (decisions 0017 and 0086). These are
+further bodies of `POST /api/login`, beside the token, in `src/surfaces/signin.ts`, with `POST /api/login/challenge` for a
 passkey's challenge and `POST /api/account/password` to set a password. They are routes and not operations for
 one more reason: the registry keeps a digest of each request that carries a command id, and a password must
 not reach it. A test fails when an operation's input has a field named like a password. A name, a password, a
@@ -248,13 +258,13 @@ connection open, as before there was a timeout.
   one function that makes it is handed out once, and the database refuses a row that cites a decision the ledger
   does not hold. So there is no way in the code to change what is current without a row in the ledger saying who
   decided, on what evidence, under which policy clause. A rule's decision is recorded exactly like a person's.
-  Withdrawing a decision undoes only what that decision made. (The four writes that look like standing and are
+  Withdrawing a decision undoes only what that decision made. (The writes that look like standing and are
   not are listed in decision 0012.)
 - **One clock per project.** Every command gets the next sequence number, in commit order, and stamps its rows
   with it (a report gets two, one for each of its transactions). "What changed since I last looked" is one range
   read; the cursor an agent passes back is that number.
 - **The time is the server's.** A row carries the clock of the server at the command that wrote it, and a caller
-  cannot give another. The one exception is a demo project (decision 0020): a project marked as one while it was
+  cannot give another. The one exception is a demo project (decision 0100): a project marked as one while it was
   empty accepts a write that says when it happened, which is how `mainworthy seed` writes the days before today.
   A report applied after a restart keeps the time it was accepted at.
 
@@ -371,7 +381,7 @@ a socket, so there they would promise nothing; who may open that socket is decid
 
 | Header | Value | What it is for |
 | --- | --- | --- |
-| `Content-Security-Policy` | for the page: `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`. For every other reply: `default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` | The page runs the one script and the one style sheet this instance serves and talks to this instance only. No page, here or elsewhere, can show it in a frame: in local mode the workbench opens without a sign-in, so a frame on any site the person visits would have been the workbench itself. |
+| `Content-Security-Policy` | for the page: `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`. For every other reply: `default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` | The page runs the one script and the one style sheet this instance serves and talks to this instance only. Raster attachments use blob URLs. No page, here or elsewhere, can show it in a frame: in local mode the workbench opens without a sign-in, so a frame on any site the person visits would have been the workbench itself. |
 | `X-Frame-Options` | `DENY` | The same rule for browsers that only know this header. |
 | `X-Content-Type-Options` | `nosniff` | A reply is what its content type says. |
 | `Referrer-Policy` | `no-referrer` | An address names a project and a case; no other site learns it from a link. |
@@ -450,12 +460,12 @@ so a 500 carries every header but `Strict-Transport-Security` and `Cross-Origin-
 ## Rules the code enforces on itself
 
 `test/architecture.test.ts` fails the check when: a module imports up the map (the suite reaching into
-decisions); a module runs SQL on a table another module owns (every one of the 42 tables has one owner, and a
+decisions); a module runs SQL on a table another module owns (each domain table has one owner, and a
 read of someone else's data goes through their functions); anything but the kernel talks to SQLite; anything
 but the decision machinery mints a witness; a writer that undoes a withdrawn decision is called from anywhere
 but a kind handler; the core imports I/O; the web UI imports the server; a declared SQL statement does not
 prepare against the schema; the error codes of a reply are written out a second time outside `src/core/api.ts`;
-a table of identity other than `orgs`, `actors` and `grants` could travel in an archive; an operation that needs
+an identity table outside the archive test's explicit allowlist could travel in an archive; an operation that needs
 `self` decides by itself whose things it touches; an operation's input has a field named like a password; or the
 agent surface grows past ten tools. `test/integrity.test.ts` holds one test
 per thing that must never happen (a green gate with nothing proven, an agent's result counted as a pipeline's, a
@@ -468,7 +478,9 @@ when a hot path gets slow.
 | --- | --- |
 | `src/core/` | pure logic and schemas shared by browser and server |
 | `src/server/kernel/` | the database wrapper, migrations, the command context, the witness, the configuration and how an address is written |
-| `src/server/{suite,evidence,runs,decisions,identity,policy}/` | one module per owner of tables |
+| `src/server/kernel/migrations/` | ordered schema changes, listed in `src/server/kernel/migrate.ts` |
+| `src/server/{suite,evidence,runs,decisions,identity,policy,trackers,statuses}/` | domain modules, each owning its tables |
+| `src/server/transfer/` | archive import and export, project export, audit export |
 | `src/server/ops/` | the registry and the operations |
 | `src/surfaces/` | HTTP, MCP, the JUnit reader, CI environment detection, archive routes, the documentation site, the web UI's files, the headers on every reply |
 | `docs/guide/` | the user documentation, served at `/docs`; its table of contents is `src/core/docs.ts` |

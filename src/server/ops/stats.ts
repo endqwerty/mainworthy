@@ -166,7 +166,7 @@ export const statsOp = defineOp({
 	needs: "read",
 	scope: "project",
 	effect: "read",
-	// The agent tools are at their token budget (decision 0087); an agent reads these over HTTP or the CLI.
+	// The agent tools are at their token budget (decision 0101); an agent reads these over HTTP or the CLI.
 	mcp: null,
 	run: stats,
 });

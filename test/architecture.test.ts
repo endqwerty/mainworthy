@@ -641,7 +641,7 @@ describe("the module map", () => {
 		];
 		const identity = owners["server/identity"] ?? [];
 		// Change endings, scope-move audit rows and demo marks preserve the old archive version (decisions 0022, 0038
-		// and 0020). Tracker delivery must never replay after import. None of these tables holds credentials.
+		// and 0100). Tracker delivery must never replay after import. None of these tables holds credentials.
 		const other = [
 			"change_ends",
 			"tracker_requests",

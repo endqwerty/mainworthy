@@ -141,7 +141,7 @@ export type Call = {
 	context?: () => string | null;
 	/**
 	 * When the caller says this happened, in milliseconds. Only a write to a demo project takes it (decision
-	 * 0020); anywhere else it is refused, not ignored, so nobody believes a real project recorded the time it
+	 * 0100); anywhere else it is refused, not ignored, so nobody believes a real project recorded the time it
 	 * was given. It is part of what a command id names: the same request at another time is another request.
 	 */
 	at?: number;

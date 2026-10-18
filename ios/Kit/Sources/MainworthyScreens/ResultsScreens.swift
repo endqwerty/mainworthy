@@ -127,7 +127,7 @@ final class PagedList<Query: Equatable & Sendable, Page: ListPage> {
 	}
 }
 
-/// Every test the gate of one change's head counted, as it counted it (decision 0087): the evidence behind the
+/// Every test the gate of one change's head counted, as it counted it (decision 0101): the evidence behind the
 /// verdict. It reads the run whose gate the change's page shows, so a newer head's results never appear under an
 /// older head's gate: a page that reads a new head gets a new one of these, which keeps what the person chose to
 /// see. The tally chooses what is shown, and words of a test's name or file narrow it.

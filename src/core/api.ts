@@ -141,7 +141,7 @@ export type SessionInfo = {
 	 */
 	owner: boolean;
 	version: string;
-	/** `demo`: the project's dates were given by whoever wrote them, not read from the server's clock (decision 0020). */
+	/** `demo`: the project's dates were given by whoever wrote them, not read from the server's clock (decision 0100). */
 	projects: {
 		key: string;
 		name: string;

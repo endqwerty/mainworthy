@@ -1,4 +1,4 @@
-// A demo project takes the time of a write from its caller, and no other project does (decision 0020).
+// A demo project takes the time of a write from its caller, and no other project does (decision 0100).
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

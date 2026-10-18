@@ -81,7 +81,7 @@ type Result = Api["report"]["input"]["results"][number];
 
 /**
  * Fills `project` with the demo, as whoever `client` signs in as: a person who administers the instance. The
- * project is made when the instance has none of that name, and made a demo (decision 0020): its history is dated
+ * project is made when the instance has none of that name, and made a demo (decision 0100): its history is dated
  * in the days before the moment it became one. One that holds cases, tests or runs is left alone, unless this
  * caller's seed began there: every write to the project carries a command id and the same time as before, so
  * sending the same seed again finishes one that stopped and writes nothing in the project twice. It does make

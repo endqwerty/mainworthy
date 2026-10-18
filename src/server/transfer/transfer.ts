@@ -64,7 +64,7 @@ type Table = {
  *
  * `change_ends` says which changes have ended (decision 0022), and it does not travel either: a change that
  * arrives in an archive is open, and the questions that were closed when it ended stay closed.
- * `demo_projects` is the leave to date a write (decision 0020), and it does not travel either: a project that
+ * `demo_projects` is the leave to date a write (decision 0100), and it does not travel either: a project that
  * arrives in an archive takes the server's clock from then on, whatever it was where it came from. Exported, either
  * table would raise the archive version and refuse every archive taken before it.
  * `tracker_requests` is delivery state for this instance only. Importing it must never send an issue again.

@@ -14,7 +14,7 @@ a report and a gate would disagree about the same day.
 **One read, tagged by what it reports.** `stats` takes `of` (`pass-rate`, `flaky`, `reruns`, `automation`,
 `coverage`) and a window of 1 to 90 days, and each kind has its own reply in `src/core/stats.ts`. The web screen
 reads each report on its own, so a slow one does not hold the others, and the CLI prints one report, not five.
-It is not an agent tool: the tools are at their token budget (decision 0087). Agents read it over HTTP or the CLI.
+It is not an agent tool: the tools are at their token budget (decision 0101). Agents read it over HTTP or the CLI.
 
 **The pass rate counts what a gate counts.** Each lane (a target, test, producer, method and job) counts the result
 it ended with in the window, ranked in SQL by the order of `replacesInLane`: a decisive result before one that
