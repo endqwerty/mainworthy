@@ -8,7 +8,7 @@ import { type BlobStore, diskBlobs, memoryBlobs } from "./blobs.ts";
 import type { CallerReference } from "./caller.ts";
 import { Db, databasePath } from "./db.ts";
 import { type MailConfig, mailConfig } from "./mail.ts";
-import { migrate } from "./migrate.ts";
+import { openDatabase } from "./migrate.ts";
 
 export type Config = {
 	/** Where the database and attachments live. */
@@ -157,14 +157,7 @@ export const defaultDataDir = (env: Record<string, string | undefined>): string 
 export function openApp(config: Config, options: { memory?: boolean; now?: () => number; reader?: boolean } = {}): App {
 	const path = options.memory ? ":memory:" : databasePath(config.dataDir);
 	if (options.reader && !existsSync(path)) throw new Error("a reader needs an existing database");
-	const db = new Db(path, options.reader ? { reader: true } : {});
-	try {
-		if (!options.reader) migrate(db, path);
-	} catch (error) {
-		// A migration that fails leaves the database at the version it had. It is left closed too, not held.
-		db.close();
-		throw error;
-	}
+	const db = options.reader ? new Db(path, { reader: true }) : openDatabase(path);
 	const reader = options.memory || options.reader ? db : new Db(path, { reader: true });
 	const listeners = new Set<(event: ChangeEvent) => void>();
 	return {

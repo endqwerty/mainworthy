@@ -1,6 +1,6 @@
 // Versioned migrations, run on start in every layer (decision 0002, rule 8).
 import { existsSync } from "node:fs";
-import type { Db } from "./db.ts";
+import { Db } from "./db.ts";
 import init from "./migrations/0001_init.sql" with { type: "text" };
 import sessions from "./migrations/0002_sessions.sql" with { type: "text" };
 import tokenLimits from "./migrations/0003_token_limits.sql" with { type: "text" };
@@ -80,6 +80,36 @@ export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;
  * import requires it, so the database's schema can move on without refusing every archive taken before.
  */
 export const ARCHIVE_VERSION = MIGRATIONS.findLast((migration) => migration.archive)?.version ?? 0;
+
+let pristine: Buffer | null = null;
+
+function schemaImage(): Buffer {
+	if (pristine) return pristine;
+	const db = new Db(":memory:");
+	try {
+		migrate(db, ":memory:");
+		pristine = db.raw.serialize();
+		return pristine;
+	} finally {
+		db.close();
+	}
+}
+
+/**
+ * Opens a database at the current schema. An in-memory one (tests) starts from a private image of the empty
+ * schema, built once per process by the migrations themselves. A file always goes through the migrations: copying
+ * the image into a new file would let a stale write-ahead log left beside a deleted database replay onto it.
+ */
+export function openDatabase(path: string): Db {
+	const db = new Db(path === ":memory:" ? schemaImage() : path);
+	try {
+		migrate(db, path);
+		return db;
+	} catch (error) {
+		db.close();
+		throw error;
+	}
+}
 
 export function schemaVersion(db: Db): number {
 	const table = db.raw.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta'").get();

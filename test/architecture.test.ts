@@ -2,14 +2,18 @@
 // compiles, and reaches across a boundary to do it, fails here with a message that says which rule and why.
 import { Statement as PreparedStatement } from "bun:sqlite";
 import { describe, expect, spyOn, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import * as fs from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Glob } from "bun";
 import { z } from "zod";
 import { ERROR_CODES, HTTP_STATUS } from "../src/core/api.ts";
 import { needs } from "../src/core/kinds.ts";
 import { REPLIES } from "../src/core/replies.ts";
-import { Db, declaredSql, sql } from "../src/server/kernel/db.ts";
-import { MIGRATIONS, migrate, SCHEMA_VERSION, schemaVersion } from "../src/server/kernel/migrate.ts";
+import { defaultConfig, openApp } from "../src/server/kernel/app.ts";
+import { Db, databasePath, declaredSql, sql } from "../src/server/kernel/db.ts";
+import { MIGRATIONS, migrate, openDatabase, SCHEMA_VERSION, schemaVersion } from "../src/server/kernel/migrate.ts";
 import { MCP_OPS, OP_LIST } from "../src/server/ops/index.ts";
 import { UNEXPORTED } from "../src/server/transfer/transfer.ts";
 import { openApi } from "../src/surfaces/http.ts";
@@ -28,6 +32,164 @@ const layerOf = (file: string): string => {
 	const parts = file.split("/");
 	return parts[1] === "server" ? `server/${parts[2]}` : (parts[1] ?? "");
 };
+
+describe("fresh schema image", () => {
+	const contents = (db: Db) => {
+		const schema = db.raw
+			.query<{ type: string; name: string; tbl_name: string; sql: string | null }, []>(
+				"SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY name",
+			)
+			.all();
+		return {
+			schema,
+			tables: schema
+				.filter((entry) => entry.type === "table")
+				.map(({ name }) => {
+					const quoted = `"${name.replaceAll('"', '""')}"`;
+					return {
+						name,
+						columns: db.raw.query(`PRAGMA table_xinfo(${quoted})`).all(),
+						indexes: db.raw.query(`PRAGMA index_list(${quoted})`).all(),
+						rows: db.raw.query(`SELECT * FROM ${quoted}`).all(),
+					};
+				}),
+			pragmas: [
+				"schema_version",
+				"user_version",
+				"application_id",
+				"page_size",
+				"auto_vacuum",
+				"journal_mode",
+				"synchronous",
+				"foreign_keys",
+				"busy_timeout",
+				"cache_size",
+				"temp_store",
+				"mmap_size",
+				"journal_size_limit",
+				"wal_autocheckpoint",
+				"query_only",
+			].map((name) => ({ name, value: db.raw.query(`PRAGMA ${name}`).all() })),
+		};
+	};
+
+	for (const memory of [true, false]) {
+		test(`matches real migrations and isolates later databases on ${memory ? "memory" : "disk"}`, () => {
+			const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-"));
+			const config = defaultConfig({ MAINWORTHY_DATA: join(directory, "image"), USER: "robin" });
+			const path = memory ? ":memory:" : join(directory, "migrated.db");
+			const migrated = new Db(path);
+			const app = openApp(config, { memory });
+			try {
+				expect(migrate(migrated, path)).toEqual({ from: 0, to: SCHEMA_VERSION, backup: null });
+				expect(schemaVersion(app.db)).toBe(SCHEMA_VERSION);
+				expect(app.db.raw.query("SELECT * FROM meta").all()).toEqual([
+					{ key: "schema_version", value: String(SCHEMA_VERSION) },
+				]);
+				expect(contents(app.db)).toEqual(contents(migrated));
+				expect(() => app.db.raw.query("SELECT $value").get({ wrong: 1 })).toThrow();
+				app.db.exec("INSERT INTO meta VALUES ('private', 'first app'); CREATE TABLE private_rows (value TEXT)");
+				const next = openApp({ ...config, dataDir: join(directory, "next") }, { memory });
+				try {
+					expect(contents(next.db)).toEqual(contents(migrated));
+				} finally {
+					next.close();
+				}
+			} finally {
+				app.close();
+				migrated.close();
+				rmSync(directory, { recursive: true, force: true });
+			}
+		});
+	}
+
+	test("a stale write-ahead log beside a deleted database is not replayed onto the new one", () => {
+		const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-stale-wal-"));
+		const path = databasePath(directory);
+		try {
+			const old = openDatabase(path);
+			old.exec("PRAGMA wal_autocheckpoint = 0; INSERT INTO meta VALUES ('late', 'from the old database')");
+			const wal = fs.readFileSync(`${path}-wal`);
+			old.close();
+			rmSync(path);
+			fs.writeFileSync(`${path}-wal`, wal);
+			const fresh = openDatabase(path);
+			try {
+				expect(fresh.raw.query("PRAGMA integrity_check").all()).toEqual([{ integrity_check: "ok" }]);
+				expect(fresh.raw.query("SELECT * FROM meta ORDER BY key").all()).toEqual([
+					{ key: "schema_version", value: String(SCHEMA_VERSION) },
+				]);
+			} finally {
+				fresh.close();
+			}
+		} finally {
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
+
+	test("existing version-zero files keep their data and run the migrations", () => {
+		const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-existing-"));
+		const path = databasePath(directory);
+		const original = new Db(path);
+		original.exec("CREATE TABLE preserved (value TEXT); INSERT INTO preserved VALUES ('kept')");
+		original.close();
+		const db = openDatabase(path);
+		try {
+			expect(schemaVersion(db)).toBe(SCHEMA_VERSION);
+			expect(db.raw.query("SELECT value FROM preserved").all()).toEqual([{ value: "kept" }]);
+		} finally {
+			db.close();
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
+
+	test("existing files retain upgrade backups and rollback when opening fails", () => {
+		const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-upgrade-"));
+		const path = databasePath(directory);
+		const migration = MIGRATIONS.at(-1);
+		if (!migration) throw new Error("expected a shipped migration");
+		const original = migration.sql;
+		const previous = migration.version - 1;
+		const db = new Db(path);
+		try {
+			for (const entry of MIGRATIONS.slice(0, -1)) db.exec(entry.sql);
+			db.raw.query("INSERT INTO meta VALUES ('schema_version', ?)").run(String(previous));
+			db.exec("INSERT INTO meta VALUES ('preserved', 'kept')");
+			migration.sql = `INSERT INTO meta VALUES ('before', 'temporary');
+				INSERT INTO meta VALUES ('preserved', 'duplicate');
+				INSERT INTO meta VALUES ('after', 'must not run');`;
+			expect(() => openDatabase(path)).toThrow("UNIQUE");
+			expect(db.raw.query("SELECT * FROM meta ORDER BY key").all()).toEqual([
+				{ key: "preserved", value: "kept" },
+				{ key: "schema_version", value: String(previous) },
+			]);
+			const backup = new Db(`${path}.v${previous}.bak`, { reader: true });
+			try {
+				expect(backup.raw.query("SELECT * FROM meta ORDER BY key").all()).toEqual([
+					{ key: "preserved", value: "kept" },
+					{ key: "schema_version", value: String(previous) },
+				]);
+			} finally {
+				backup.close();
+			}
+			migration.sql = original;
+			const reopened = openDatabase(path);
+			try {
+				expect(schemaVersion(reopened)).toBe(SCHEMA_VERSION);
+				expect(reopened.raw.query("SELECT value FROM meta WHERE key = 'preserved'").get()).toEqual({ value: "kept" });
+			} finally {
+				reopened.close();
+			}
+			db.raw.query("UPDATE meta SET value = ? WHERE key = 'schema_version'").run(String(SCHEMA_VERSION + 1));
+			expect(() => openDatabase(path)).toThrow("is newer than this build");
+			expect(schemaVersion(db)).toBe(SCHEMA_VERSION + 1);
+		} finally {
+			migration.sql = original;
+			db.close();
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
+});
 
 describe("declared statements", () => {
 	const read = sql<{ key: string }, { value: string }>("SELECT value FROM meta WHERE key = $key");
