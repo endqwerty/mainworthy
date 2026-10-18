@@ -1,14 +1,21 @@
 // What a token is allowed to be, on a real listener: when it ends, who made it, where it was last used from, and
 // what the start does with the owner's. Time is the test's own clock, so nothing here waits for a token to expire.
 import { Database } from "bun:sqlite";
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { COMMIT, outputWith, RED_XML, withInstance } from "../src/cli/test-support.ts";
 import type { Envelope } from "../src/core/api.ts";
-import { flushUses, hashToken } from "../src/server/identity/identity.ts";
+import {
+	admit,
+	authenticate,
+	flushUses,
+	hasAdminGrant,
+	hashToken,
+	listActors,
+} from "../src/server/identity/identity.ts";
 import { type Config, databasePath, type WriteGate } from "../src/server/kernel/app.ts";
 import { SCHEMA_VERSION } from "../src/server/kernel/migrate.ts";
 import { type Instance, start } from "../src/server/start.ts";
@@ -191,6 +198,112 @@ const sessions = (instance: Instance): SessionRow[] =>
 	instance.app.reader.raw
 		.query<SessionRow, []>("SELECT id, ended_at, last_seen_at, created_addr, last_seen_addr FROM sessions ORDER BY id")
 		.all();
+
+test("project-scoped actor resolution reads only global and requested direct grants", async () => {
+	const instance = boot();
+	const sam = await token(instance, { actor: "sam", project: undefined });
+	expect((await admin(instance, { do: "project.create", key: "other" })).status).toBe(200);
+	expect((await admin(instance, { do: "grant.set", actor: "sam", can: ["read"], roles: ["auditor"] })).status).toBe(
+		200,
+	);
+	expect(
+		(
+			await admin(instance, {
+				do: "grant.set",
+				actor: "sam",
+				project: "scratch",
+				can: ["produce"],
+				roles: ["approver"],
+			})
+		).status,
+	).toBe(200);
+	expect(
+		(await admin(instance, { do: "grant.set", actor: "sam", project: "other", can: ["admin"], roles: ["lead"] }))
+			.status,
+	).toBe(200);
+	const projects = instance.app.reader.raw
+		.query<{ id: number; key: string }, []>("SELECT id, key FROM projects ORDER BY id")
+		.all();
+	const scratch = projects.find((project) => project.key === "scratch")?.id;
+	const other = projects.find((project) => project.key === "other")?.id;
+	if (scratch === undefined || other === undefined) throw new Error("missing project");
+	const reads = spyOn(instance.app.reader, "all");
+	try {
+		expect(authenticate(instance.app, sam.token, scratch)).toMatchObject({
+			name: "sam",
+			can: ["read", "record", "produce"],
+			roles: ["auditor", "approver"],
+		});
+		const grantReads = reads.mock.calls.flatMap(([statement], index) =>
+			/\bFROM grants\b/.test(statement.text) ? [reads.mock.results[index]] : [],
+		);
+		expect(grantReads).toEqual([
+			{
+				type: "return",
+				value: [
+					{ project: 0, can: '["read"]', roles: '["auditor"]' },
+					{ project: scratch, can: '["produce"]', roles: '["approver"]' },
+				],
+			},
+		]);
+		expect(authenticate(instance.app, sam.token, other)).toMatchObject({
+			name: "sam",
+			can: ["read", "admin"],
+			roles: ["auditor", "lead"],
+		});
+		expect(authenticate(instance.app, sam.token, 0)).toMatchObject({
+			name: "sam",
+			can: ["read"],
+			roles: ["auditor"],
+		});
+	} finally {
+		reads.mockRestore();
+	}
+});
+
+test("all-project admin checks and actor listings retain grants on other projects", async () => {
+	const instance = boot();
+	const sam = await token(instance, { actor: "sam" });
+	expect((await admin(instance, { do: "project.create", key: "other" })).status).toBe(200);
+	expect(
+		(await admin(instance, { do: "grant.set", actor: "sam", project: "other", can: ["admin"], roles: ["lead"] }))
+			.status,
+	).toBe(200);
+	const actor = authenticate(instance.app, sam.token, 0);
+	if (!actor) throw new Error("token did not authenticate");
+	expect(actor.can).toEqual([]);
+	expect(hasAdminGrant(instance.app.reader, actor.id)).toBe(true);
+	expect(listActors(instance.app.reader).find((listed) => listed.name === "sam")?.grants).toEqual([
+		{ project: 1, can: ["read"], roles: [] },
+		{ project: 2, can: ["admin"], roles: ["lead"] },
+	]);
+	expect((await admin(instance, { do: "grant.remove", actor: "sam", project: "other" })).status).toBe(200);
+	expect(hasAdminGrant(instance.app.reader, actor.id)).toBe(false);
+	expect(authenticate(instance.app, sam.token, 1)?.can).toEqual(["read"]);
+});
+
+test("grant and token revocation are visible to the next request and an admitted caller", async () => {
+	const instance = boot();
+	const sam = await token(instance, { actor: "sam", can: ["read", "produce"] });
+	const admission = admit(instance.app, {
+		bearer: sam.token,
+		cookie: null,
+		sameOrigin: false,
+		localOwner: null,
+		address: null,
+	});
+	if (admission.kind !== "admitted") throw new Error("token was not admitted");
+	expect(admission.session.actor(1)?.can).toEqual(["read", "record", "produce"]);
+	expect((await create(instance, "Before revocation", bearer(sam.token))).status).toBe(200);
+	expect((await admin(instance, { do: "grant.set", actor: "sam", project: "scratch", can: ["read"] })).status).toBe(
+		200,
+	);
+	expect(admission.session.actor(1)?.can).toEqual(["read"]);
+	expect((await create(instance, "After grant revocation", bearer(sam.token))).status).toBe(403);
+	expect((await admin(instance, { do: "token.revoke", id: sam.id })).status).toBe(200);
+	expect(admission.session.actor(1)).toBeNull();
+	expect(await statusOf(instance, bearer(sam.token))).toBe(401);
+});
 
 describe("sign-in record retention", () => {
 	test("revocation records the end of its sessions immediately, without changing an earlier end", async () => {
