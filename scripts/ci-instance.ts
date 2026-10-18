@@ -169,6 +169,7 @@ export function startOwn(cli: string): Own {
 			MAINWORTHY_DATA: data,
 			MAINWORTHY_PORT: "0",
 			MAINWORTHY_HOST: "127.0.0.1",
+			...(process.env.MAINWORTHY_READERS !== undefined ? { MAINWORTHY_READERS: process.env.MAINWORTHY_READERS } : {}),
 		},
 		stdout: "pipe",
 		stderr: "inherit",

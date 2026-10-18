@@ -82,7 +82,11 @@ function machineOnly(adapter: AdapterCommand, args: Args): boolean {
 }
 
 /** Dispatches the registry-generated operation form or the small human adapter. Only serve opens local data. */
-export async function runCli(argv: readonly string[], ui: unknown): Promise<number> {
+export async function runCli(
+	argv: readonly string[],
+	ui: unknown,
+	clientEnv: Record<string, string | undefined> = process.env,
+): Promise<number> {
 	const { name, tokens } = splitCommand(argv);
 	if (name === "help") {
 		parseArgs(tokens);
@@ -121,6 +125,7 @@ export async function runCli(argv: readonly string[], ui: unknown): Promise<numb
 			: clientOptions(
 					args,
 					name === "login" || name === "health" || name === "fmt" || name === "version" ? "none" : "token",
+					clientEnv,
 				),
 	);
 	if (generated && (!adapter || hasJsonInput(tokens) || machineOnly(adapter, args)))

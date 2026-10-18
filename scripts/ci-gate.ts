@@ -22,9 +22,14 @@
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Glob } from "bun";
+import { runCli } from "../src/cli/dispatch.ts";
+import { printError } from "../src/cli/errors.ts";
+import { installOutputHandlers } from "../src/cli/output.ts";
 import { parseJUnit, TEST_FILE_LIMIT } from "../src/surfaces/formats/junit.ts";
 import { CI_SHARD_WARNING_SECONDS, newestAttempt, type Outcome, readOutcome, seconds } from "./check-plan.ts";
 import { chooseInstance, describeChoice, type Environment, type Own, startOwn } from "./ci-instance.ts";
+
+installOutputHandlers();
 
 const filesFlag = process.argv.slice(2).find((arg) => arg.startsWith("--files="));
 const [directory, ...shards] = process.argv.slice(2).filter((arg) => arg !== filesFlag);
@@ -39,10 +44,11 @@ const CLI = join(import.meta.dir, "../src/cli/main.ts");
 const parallel = shards.filter((shard) => /^tests-\d+$/.test(shard)).length;
 // The job's own Mainworthy, once there is one. It is stopped on every way out of this script: its end, an error, a
 // signal. The signals are listened for before anything is started, so there is no moment at which a Mainworthy
-// runs and nobody would stop it. Every command below blocks until it is done, so a signal waits; `heard` lets a
-// waiting one in, before the next command.
+// runs and nobody would stop it. `heard` lets a waiting signal in before the next command, also while startup
+// or report parsing has been synchronous.
 let own: Own | null = null;
 let ownEnv: Environment = {};
+process.on("exit", () => own?.stop());
 for (const signal of ["SIGINT", "SIGTERM"] as const)
 	process.on(signal, () => {
 		own?.stop();
@@ -59,17 +65,19 @@ console.log(
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${chosen}\n`);
 if (choice.use === "none") process.exit(4);
 
-const cli = (argv: string[]): number => {
+const cli = async (argv: string[]): Promise<number> => {
 	console.log(`\n$ mainworthy ${argv.join(" ")}`);
-	return Bun.spawnSync([process.execPath, CLI, ...argv], {
-		env: {
+	try {
+		return await runCli(argv, undefined, {
 			...process.env,
 			// The project the choice settled on, also when none was named: the CLI is not left to pick one.
 			...(choice.use === "deployed" ? { MAINWORTHY_PROJECT: choice.project } : {}),
 			...ownEnv,
-		},
-		stdio: ["ignore", "inherit", "inherit"],
-	}).exitCode;
+		});
+	} catch (error) {
+		printError(error);
+		return 4;
+	}
 };
 
 const problems: string[] = [];
@@ -127,7 +135,7 @@ try {
 		// The parallel tests run as shards of one job, `tests-1` to `tests-<n>`: each is reported as that shard of `tests`,
 		// so the gate of the commit waits for all of them (decision 0092). A runner of chosen files is the whole job.
 		const index = /^tests-(\d+)$/.exec(shard)?.[1];
-		const exit = cli([
+		const exit = await cli([
 			"report",
 			file,
 			...(index ? ["--job", "tests", "--shard", `${index}/${parallel}`] : ["--job", shard]),
@@ -136,7 +144,7 @@ try {
 	}
 
 	await heard();
-	gate = cli(["gate"]);
+	gate = await cli(["gate"]);
 	await heard();
 } finally {
 	own?.stop();
