@@ -422,6 +422,19 @@ build stops the check before tests run. The browser isolation smoke test explici
 the header and HMR tests keep their own source servers. A standalone `bun test test/e2e/<file>` uses source
 unless `MAINWORTHY_E2E_SERVER` names a compiled fixture. The check deletes the executable when it exits.
 
+For each browser phase the runner also owns one Chromium server per Bun worker slot. It passes their
+WebSocket endpoints in `MAINWORTHY_E2E_BROWSER_ENDPOINTS`; `support.ts` chooses the slot using Bun's
+one-based `BUN_TEST_WORKER_ID`, or slot one for a single worker. A file connects once and disconnects after
+its last test, which closes all contexts that connection created. Every journey still gets its own context,
+page, cookies and storage. Phone emulation stays in the context options. Explicit `launchBrowser` calls,
+`browser.test.ts`, `followups.test.ts` with its DNS flags, and runs with `MAINWORTHY_E2E_CPU_THROTTLE` keep
+local launches. Standalone tests have no endpoint list and launch locally too.
+
+The runner closes shared browsers after each phase and on interruption or failure, with a forced kill after
+five seconds if graceful shutdown stalls. Launch and connection attempts have bounded timeouts. If a shared
+browser dies, its slot is reported and the check fails. The other slots continue; later files assigned to the
+dead slot fail to connect with a worker-specific error rather than silently falling back to local launches.
+
 The documentation site (`/docs`, `src/surfaces/docs/site.ts`) writes the policy of its own pages, and keeps it
 (`withHeadersKeepingPolicy`): a page of the documentation loads the site's script and style sheet and frames its
 diagrams, and a diagram is a sandboxed page with its script inside it, so neither is the app's page nor

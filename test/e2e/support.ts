@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/p
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type APIResponse, type Browser, type BrowserContext, chromium, type Page, type Route } from "playwright-core";
-import { findChromium, testReaders } from "../../scripts/check-plan.ts";
+import { chromiumLaunchOptions, findChromium, sharedBrowserEndpoint, testReaders } from "../../scripts/check-plan.ts";
 import { Client } from "../../src/cli/client.ts";
 import { type SeedResult, seed } from "../../src/cli/seed.ts";
 import type { Api, OpName } from "../../src/core/api.ts";
@@ -231,15 +231,12 @@ export async function advanceClock(server: Server, ms: number): Promise<void> {
 }
 export async function launchBrowser({ args = [] }: { args?: string[] } = {}): Promise<Browser> {
 	if (!chromiumPath) throw new Error("System Chromium is missing");
-	return chromium.launch({
-		executablePath: chromiumPath,
-		headless: true,
-		args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", ...args],
-	});
+	return chromium.launch(chromiumLaunchOptions(chromiumPath, args));
 }
 /**
- * One Chromium for a test file, and for every page a test opens a context of its own: its own storage, cache
+ * One browser connection for a test file, and for every page a test opens a context of its own: its own storage, cache
  * and permissions, as a browser of its own had. A launch for each page was a quarter of the longest file's time.
+ * The check lends this file a worker-slot browser; closing a connected Browser disconnects and closes its contexts.
  * Bun runs this hook after the file's last test. Where nothing would close a shared browser, each page has its
  * own, as before: outside `bun test` (`screenshots.ts`, `profile-latency.ts`), and in the later files of a run
  * with no `--isolate` or `--parallel`, which load this module once.
@@ -256,9 +253,18 @@ try {
 } catch {}
 async function fileBrowser(): Promise<Browser | null> {
 	if (!closesShared) return null;
-	// Bun ends the processes a test started when the test runs out of time, this browser among them. The tests
-	// after it get a new one: one test's failure is not the failure of the rest of its file.
-	if (!(await shared?.catch(() => null))?.isConnected()) shared = launchBrowser();
+	// A timed-out test can lose its local browser or its connection. Reconnect to the runner-owned slot,
+	// or launch a new local browser. A dead runner-owned slot fails clearly instead of falling back.
+	if (!(await shared?.catch(() => null))?.isConnected()) {
+		const endpoint = sharedBrowserEndpoint(Bun.main);
+		shared = endpoint
+			? chromium.connect(endpoint, { timeout: 10_000 }).catch((cause: unknown) => {
+					throw new Error(`Cannot connect to shared Chromium for Bun worker ${process.env.BUN_TEST_WORKER_ID ?? "1"}`, {
+						cause,
+					});
+				})
+			: launchBrowser();
+	}
 	return shared;
 }
 export type PageHarness = {

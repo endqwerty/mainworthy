@@ -4,6 +4,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { join } from "node:path";
 import { Glob } from "bun";
+import type { LaunchOptions } from "playwright-core";
 import type { ResultIn } from "../src/core/ops.ts";
 
 /** Per-file weights in milliseconds. Shards are balanced by them; the slowest files start first. */
@@ -99,6 +100,28 @@ export const CI_SHARD_WARNING_SECONDS = 180;
 export const seconds = (value: number): string => `${value.toFixed(1)} s`;
 
 export type Phase = "parallel" | "quiet";
+
+export function chromiumLaunchOptions(executablePath: string, args: string[] = []): LaunchOptions {
+	return {
+		executablePath,
+		headless: true,
+		args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", ...args],
+	};
+}
+
+/** Each Bun worker borrows one runner-owned browser; lifecycle and launch-option tests keep their own. */
+export function sharedBrowserEndpoint(
+	file: string,
+	env: Readonly<Record<string, string | undefined>> = process.env,
+): string | undefined {
+	const endpoints = env.MAINWORTHY_E2E_BROWSER_ENDPOINTS;
+	if (!endpoints || env.MAINWORTHY_E2E_CPU_THROTTLE || /(^|\/)test\/e2e\/(browser|followups)\.test\.ts$/.test(file))
+		return undefined;
+	const worker = Number(env.BUN_TEST_WORKER_ID ?? "1");
+	const endpoint = Number.isInteger(worker) && worker > 0 ? endpoints.split("\n")[worker - 1] : undefined;
+	if (!endpoint) throw new Error(`No shared Chromium endpoint for Bun worker ${env.BUN_TEST_WORKER_ID ?? "1"}`);
+	return endpoint;
+}
 
 /** Build once for any phase that may run a browser test. Bun chooses a shard's files. */
 export function needsBrowserFixture(phases: readonly Phase[], shard?: string, files?: readonly string[]): boolean {

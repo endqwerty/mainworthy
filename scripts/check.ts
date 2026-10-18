@@ -20,8 +20,10 @@
 import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import type { BrowserServer } from "playwright-core";
 import {
 	CHECK_WARNING_SECONDS,
+	chromiumLaunchOptions,
 	failureLines,
 	findChromium,
 	fixtureBuildArgs,
@@ -29,9 +31,11 @@ import {
 	type Outcome,
 	outcomePath,
 	type Phase,
+	parallelWorkers,
 	phaseFiles,
 	phaseReport,
 	QUIET,
+	quietWorkers,
 	seconds,
 	slowest,
 	TIMINGS,
@@ -100,14 +104,50 @@ const scratch = mkdtempSync(join(tmpdir(), "mainworthy-check-"));
 const timings = join(scratch, "timings.json");
 if (existsSync(TIMINGS)) copyFileSync(TIMINGS, timings);
 const children = new Set<Bun.Subprocess>();
-const leave = (code: number): never => {
-	rmSync(scratch, { recursive: true, force: true });
-	process.exit(code);
+const browsers = new Set<BrowserServer>();
+let browserFailed = false;
+async function closeBrowsers(): Promise<void> {
+	await Promise.all(
+		[...browsers].map(async (browser) => {
+			browsers.delete(browser);
+			const force = setTimeout(() => void browser.kill(), 5_000);
+			try {
+				await browser.close();
+			} catch (error) {
+				browserFailed = true;
+				console.error("check: shared Chromium shutdown failed", error);
+				await browser.kill();
+			} finally {
+				clearTimeout(force);
+			}
+		}),
+	);
+}
+let leaving: Promise<never> | undefined;
+const leave = (code: number): Promise<never> => {
+	leaving ??= (async () => {
+		for (const child of children) child.kill("SIGTERM");
+		await closeBrowsers();
+		await Promise.all(
+			[...children].map(async (child) => {
+				const force = setTimeout(() => child.kill("SIGKILL"), 2_000);
+				await child.exited;
+				clearTimeout(force);
+			}),
+		);
+		rmSync(scratch, { recursive: true, force: true });
+		process.exit(code || (browserFailed ? 1 : 0));
+	})();
+	return leaving;
 };
-for (const signal of ["SIGINT", "SIGTERM"] satisfies NodeJS.Signals[])
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] satisfies NodeJS.Signals[])
 	process.on(signal, () => {
-		for (const child of children) child.kill(signal);
-		leave(130);
+		void leave(130);
+	});
+for (const event of ["uncaughtException", "unhandledRejection"] as const)
+	process.on(event, (error) => {
+		console.error("check:", error);
+		void leave(1);
 	});
 
 type Part = { name: string; exit: number; seconds: number; log: string | null };
@@ -146,20 +186,54 @@ async function tests(capture: boolean, fixture: string | undefined): Promise<Tes
 		// an earlier run goes first, so that a runner that stops before it writes leaves none.
 		const report = junit ?? join(scratch, `${phase}.xml`);
 		rmSync(report, { force: true });
+		const phaseWorkers = phase === "parallel" || record ? workers : undefined;
 		const args = testArgs(phase, {
 			shard,
 			files: chosen,
-			workers: phase === "parallel" || record ? workers : undefined,
+			workers: phaseWorkers,
 			junit: report,
 			timings,
 			failuresOnly: capture,
 		});
 		if (!capture) console.log(`\n$ bun ${args.join(" ")}`);
-		parts.push({
-			...(await run(`tests: ${phase}`, [process.execPath, ...args], capture, { MAINWORTHY_E2E_SERVER: fixture })),
-			phase,
-			report,
-		});
+		try {
+			const chromium = findChromium();
+			const selected = phaseFiles(phase, shard, chosen);
+			const slots = phaseWorkers ?? (phase === "parallel" ? parallelWorkers() : quietWorkers());
+			if (fixture && chromium.path && !process.env.MAINWORTHY_E2E_CPU_THROTTLE) {
+				const { chromium: launcher } = await import("playwright-core");
+				for (let slot = 1; slot <= Math.min(slots, selected?.length ?? slots); slot++) {
+					const browser = await launcher.launchServer({
+						...chromiumLaunchOptions(chromium.path),
+						host: "127.0.0.1",
+						timeout: 15_000,
+						handleSIGINT: false,
+						handleSIGTERM: false,
+						handleSIGHUP: false,
+					});
+					browsers.add(browser);
+					browser.on("close", () => {
+						if (!browsers.has(browser) || leaving) return;
+						browserFailed = true;
+						const child = browser.process();
+						console.error(
+							`check: shared Chromium slot ${slot} exited unexpectedly (exit ${child.exitCode}, signal ${child.signalCode})`,
+						);
+					});
+				}
+				console.log(`check: ${browsers.size} shared Chromium slots (${phase})`);
+			}
+			parts.push({
+				...(await run(`tests: ${phase}`, [process.execPath, ...args], capture, {
+					MAINWORTHY_E2E_SERVER: fixture,
+					MAINWORTHY_E2E_BROWSER_ENDPOINTS: [...browsers].map((browser) => browser.wsEndpoint()).join("\n"),
+				})),
+				phase,
+				report,
+			});
+		} finally {
+			await closeBrowsers();
+		}
 	}
 	return parts;
 }
@@ -175,7 +249,7 @@ if (fixture) {
 	});
 	if (build.exit !== 0) {
 		console.error("check: browser fixture build failed; no tests ran");
-		leave(build.exit);
+		await leave(build.exit);
 	}
 }
 const [testParts, ...staticParts] = await Promise.all([
@@ -249,4 +323,4 @@ if (whole && testSeconds > CHECK_WARNING_SECONDS)
 		`\nWARNING: the tests took ${seconds(testSeconds)}, above ${CHECK_WARNING_SECONDS} s. Duration is advisory (decision 0097; issue #77).`,
 	);
 
-leave(code);
+await leave(code);
