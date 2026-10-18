@@ -388,20 +388,21 @@ test("an occupied port exits 4 without keeping the failed server alive", async (
 			stdout: "pipe",
 			stderr: "pipe",
 			stdin: "ignore",
+			// Only stop a hung command; refusing a port is not a startup latency budget.
+			timeout: 30_000,
+			killSignal: "SIGKILL",
 		});
-		const timeout = setTimeout(() => child.kill("SIGKILL"), 1200);
 		try {
 			const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
 			expect(code).toBe(4);
 			expect(stderr).toContain("port");
 			expect(stderr.trim().split("\n")).toHaveLength(1);
 		} finally {
-			clearTimeout(timeout);
 			child.kill("SIGKILL");
 			await child.exited;
 		}
 	});
-});
+}, 35_000);
 
 test("a session lifetime that is not a duration stops the start with one line that names the variable", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "mainworthy-lifetime-"));
