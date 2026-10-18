@@ -17,7 +17,7 @@ COPY docs/ui/screenshots ./docs/ui/screenshots
 # The licence files, which /docs serves too, and Archify's, which each diagram page carries.
 COPY LICENSE NOTICE THIRD-PARTY-NOTICES.md ./
 COPY licences/archify ./licences/archify
-RUN NODE_ENV=production bun build --compile --minify --sourcemap --banner '/*! Mainworthy, Apache-2.0. Software from others is in this file; its licences and notices: /docs/licence */' src/cli/main.ts src/server/read-worker.ts src/server/checkpoint-worker.ts src/cli/demo-worker.ts --outfile /out/mainworthy
+RUN NODE_ENV=production bun build --compile --minify --sourcemap --banner '/*! Mainworthy, Apache-2.0. Software from others is in this file; its licences and notices: /docs/licence */' src/cli/main.ts src/server/ops/read-worker.ts src/server/kernel/checkpoint-worker.ts src/cli/demo-worker.ts --outfile /out/mainworthy
 
 FROM debian:bookworm-slim
 RUN useradd --system --uid 10001 --home-dir /data mainworthy && mkdir -p /data && chown mainworthy:mainworthy /data

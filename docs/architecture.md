@@ -51,6 +51,33 @@ rendered once and sent without a session, because they are the same for every in
 grammar, canonical Markdown, diff, three-way merge, hashes, failure signatures, the policy presets, the verdict
 function). The browser and the server run the same code from it.
 
+## The module map
+
+Imports go down this order. Every runtime TypeScript source file must belong to a named layer in
+`test/architecture.test.ts`; an unlisted directory or top-level server file fails the check.
+The check reads dynamic `import()` as well as static imports, including type-only imports.
+
+- `src/cli` starts the instance and adapts commands. It imports `app`, surfaces, the registry, kernel configuration
+  and policy reads. The entry point bundles the web UI.
+- `src/app/start.ts` composes the instance above the surfaces. It opens the database, starts HTTP, recovery,
+  reader threads and periodic jobs, and stops them together. Server modules never import a surface.
+- `src/surfaces` adapts HTTP, MCP and file formats to operations. It reads identity and kernel request context,
+  and bundles documentation and web assets.
+- `src/server/ops` composes all domain modules. It also owns recovery jobs, tracker hold coordination,
+  the operation reader pool and the read/archive worker. The checkpoint worker lives in `server/kernel` because
+  it only copies committed SQLite pages.
+- Domain modules keep their existing dependency rules: decisions may read identity, policy, suite, evidence and
+  runs; runs may read suite and evidence; evidence may read suite; suite may read policy. Trackers may read
+  evidence and suite, statuses may read evidence and runs, and transfer may read suite. Every domain module may
+  read the kernel. None imports operations or an outer layer.
+- `src/core` stays pure and is available to every layer. `src/web` imports only itself and core.
+
+The CLI has named identity exceptions in the test's map. `client.ts` shares the sign-in token length bound.
+`demo.ts` and `demo-worker.ts` may call identity directly to issue temporary tokens, resolve the owner and
+restore demo grants. `demo.ts` may also call transfer to reset the demo project. This instance-maintenance code
+is an intentional exception to the registry entry point. The seed in `src/cli/seed.ts` writes through HTTP
+operations, and the catalog and history under `src/cli/demo/` stay pure.
+
 ## The operation layer
 
 `src/server/ops/index.ts` lists every operation. Each has a name, a one-line summary, an input schema, the
@@ -459,8 +486,9 @@ so a 500 carries every header but `Strict-Transport-Security` and `Cross-Origin-
 
 ## Rules the code enforces on itself
 
-`test/architecture.test.ts` fails the check when: a module imports up the map (the suite reaching into
-decisions); a module runs SQL on a table another module owns (each domain table has one owner, and a
+`test/architecture.test.ts` fails the check when: a source file belongs to an unlisted layer; a static or
+dynamic import goes up the map (the suite reaching into decisions); a module runs SQL on a table another
+module owns (each domain table has one owner, and a
 read of someone else's data goes through their functions); anything but the kernel talks to SQLite; anything
 but the decision machinery mints a witness; a writer that undoes a withdrawn decision is called from anywhere
 but a kind handler; the core imports I/O; the web UI imports the server; a declared SQL statement does not
@@ -481,7 +509,8 @@ when a hot path gets slow.
 | `src/server/kernel/migrations/` | ordered schema changes, listed in `src/server/kernel/migrate.ts` |
 | `src/server/{suite,evidence,runs,decisions,identity,policy,trackers,statuses}/` | domain modules, each owning its tables |
 | `src/server/transfer/` | archive import and export, project export, audit export |
-| `src/server/ops/` | the registry and the operations |
+| `src/server/ops/` | the registry, operations, recovery jobs, tracker hold coordination and operation reader/archive workers |
+| `src/app/` | instance startup and shutdown, above the surfaces |
 | `src/surfaces/` | HTTP, MCP, the JUnit reader, CI environment detection, archive routes, the documentation site, the web UI's files, the headers on every reply |
 | `docs/guide/` | the user documentation, served at `/docs`; its table of contents is `src/core/docs.ts` |
 | `src/cli/` | the command line, generated from the registry plus a few adapters |

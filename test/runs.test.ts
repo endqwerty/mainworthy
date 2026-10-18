@@ -2,10 +2,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { AnnounceReply, DecideReply, GateStatus, InboxReply, PlanReply, ReportReceipt } from "../src/core/ops.ts";
 import { mustTarget } from "../src/server/evidence/evidence.ts";
-import { recoverAccepted } from "../src/server/jobs.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
 import { Db, declaredSql } from "../src/server/kernel/db.ts";
 import { migrate } from "../src/server/kernel/migrate.ts";
+import { recoverAccepted } from "../src/server/ops/jobs.ts";
 import { acceptReport, processBatch } from "../src/server/ops/writes.ts";
 import { plannedCounting, runsFor } from "../src/server/runs/runs.ts";
 import { exportArchive, importArchive, linesOf } from "../src/server/transfer/transfer.ts";

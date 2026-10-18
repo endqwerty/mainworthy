@@ -5,10 +5,10 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { start } from "../src/app/start.ts";
 import type { Envelope } from "../src/core/api.ts";
 import type { CommandFate, GateStatus, ReportReceipt } from "../src/core/ops.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
-import { start } from "../src/server/start.ts";
 
 const ENTRY = resolve(import.meta.dir, "../src/cli/main.ts");
 const dirs: string[] = [];

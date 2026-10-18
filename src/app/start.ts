@@ -1,8 +1,8 @@
 // Starting an instance: open the data, make sure an owner and a first project exist, finish interrupted work,
 // then listen. The same function is the Local layer on a laptop and the Server layer in a container; only the
 // configuration differs (decision 0002).
-import { type Extra, type Patience, serve, VERSION } from "../surfaces/http.ts";
-import { attachmentHashes } from "./evidence/attachments.ts";
+
+import { attachmentHashes } from "../server/evidence/attachments.ts";
 import {
 	bootstrap,
 	flushUses,
@@ -12,18 +12,19 @@ import {
 	sweepSignInRecords,
 	validateBootstrap,
 	waitMail,
-} from "./identity/identity.ts";
-import { recoverAccepted, recoverDisputes, sweep } from "./jobs.ts";
-import { type App, type Config, openApp } from "./kernel/app.ts";
-import { type Actor, allProjects } from "./kernel/ctx.ts";
-import { lockInstance } from "./kernel/instance-lock.ts";
-import { createProject } from "./ops/admin.ts";
-import { Readers, readerCount } from "./readers.ts";
-import type { StatusPort } from "./statuses/port.ts";
-import { deliverCommitStatuses, stopCommitStatuses, waitCommitStatuses } from "./statuses/statuses.ts";
-import { pollDefectHolds, stopTrackerPolls, waitTrackerPolls } from "./tracker-holds.ts";
-import type { TrackerPort } from "./trackers/port.ts";
-import { deliverTrackerRequests, stopTrackerRequests, waitTrackerRequests } from "./trackers/requests.ts";
+} from "../server/identity/identity.ts";
+import { type App, type Config, openApp } from "../server/kernel/app.ts";
+import { type Actor, allProjects } from "../server/kernel/ctx.ts";
+import { lockInstance } from "../server/kernel/instance-lock.ts";
+import { createProject } from "../server/ops/admin.ts";
+import { recoverAccepted, recoverDisputes, sweep } from "../server/ops/jobs.ts";
+import { Readers, readerCount } from "../server/ops/readers.ts";
+import { pollDefectHolds, stopTrackerPolls, waitTrackerPolls } from "../server/ops/tracker-holds.ts";
+import type { StatusPort } from "../server/statuses/port.ts";
+import { deliverCommitStatuses, stopCommitStatuses, waitCommitStatuses } from "../server/statuses/statuses.ts";
+import type { TrackerPort } from "../server/trackers/port.ts";
+import { deliverTrackerRequests, stopTrackerRequests, waitTrackerRequests } from "../server/trackers/requests.ts";
+import { type Extra, type Patience, serve, VERSION } from "../surfaces/http.ts";
 
 export type Instance = {
 	app: App;

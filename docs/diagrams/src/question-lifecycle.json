@@ -172,11 +172,11 @@
           "label": "sweepExpired"
         },
         {
-          "path": "src/server/jobs.ts",
+          "path": "src/server/ops/jobs.ts",
           "label": "sweep"
         },
         {
-          "path": "src/server/start.ts",
+          "path": "src/app/start.ts",
           "label": "start: sweep every 60 seconds"
         }
       ],

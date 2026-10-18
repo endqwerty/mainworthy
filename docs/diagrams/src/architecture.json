@@ -602,11 +602,11 @@
       ],
       "sources": [
         {
-          "path": "src/server/readers.ts",
+          "path": "src/server/ops/readers.ts",
           "label": "Readers: the pool; readerCount"
         },
         {
-          "path": "src/server/read-worker.ts",
+          "path": "src/server/ops/read-worker.ts",
           "label": "read and checkpoint roles"
         },
         {

@@ -1,6 +1,6 @@
 import { z } from "zod";
+import { start, VERSION } from "../../src/app/start.ts";
 import { defaultConfig, SESSION_LIFETIMES } from "../../src/server/kernel/app.ts";
-import { start, VERSION } from "../../src/server/start.ts";
 import { archiveRoutes } from "../../src/surfaces/archive.ts";
 import { docsRoutes } from "../../src/surfaces/docs/site.ts";
 import ui from "../../src/web/index.html";

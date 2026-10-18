@@ -6,6 +6,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { type Instance, start } from "../src/app/start.ts";
 import { COMMIT, outputWith, RED_XML, withInstance } from "../src/cli/test-support.ts";
 import type { Envelope } from "../src/core/api.ts";
 import {
@@ -19,7 +20,6 @@ import {
 import type { Config, WriteGate } from "../src/server/kernel/app.ts";
 import { databasePath } from "../src/server/kernel/db.ts";
 import { SCHEMA_VERSION } from "../src/server/kernel/migrate.ts";
-import { type Instance, start } from "../src/server/start.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
 import { sessionOf } from "../src/surfaces/http.ts";
 

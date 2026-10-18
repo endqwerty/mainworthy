@@ -1,9 +1,9 @@
 import { Worker } from "node:worker_threads";
 import { z } from "zod";
-import { ERROR_CODES } from "../core/api.ts";
-import { ActorKind, Capability, Role } from "../core/kinds.ts";
-import type { App } from "./kernel/app.ts";
-import { OpError } from "./kernel/errors.ts";
+import { ERROR_CODES } from "../../core/api.ts";
+import { ActorKind, Capability, Role } from "../../core/kinds.ts";
+import type { App } from "../kernel/app.ts";
+import { OpError } from "../kernel/errors.ts";
 
 export const ArchiveTask = z.discriminatedUnion("op", [
 	z.object({ op: z.literal("export"), path: z.string(), now: z.number(), project: z.string().min(1).optional() }),
@@ -50,7 +50,7 @@ export const ArchiveReply = z.discriminatedUnion("ok", [
 /** Runs a transfer on its own connection. A failed worker never replays archive work on the HTTP thread. */
 export async function runArchive(app: App, task: z.infer<typeof ArchiveTask>) {
 	const worker = new Worker(
-		new URL(Bun.isStandaloneExecutable ? "./server/read-worker.js" : "./read-worker.ts", import.meta.url),
+		new URL(Bun.isStandaloneExecutable ? "./server/ops/read-worker.js" : "./read-worker.ts", import.meta.url),
 		{ workerData: { dataDir: app.config.dataDir, role: "archive", task }, name: "mainworthy-archive" },
 	);
 	try {

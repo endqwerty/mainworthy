@@ -11,12 +11,12 @@ import {
 import { loadavg } from "node:os";
 import { join, resolve } from "node:path";
 import { z } from "zod";
+import { open } from "../src/app/start.ts";
 import type { Edit, ReportInput, ResultIn, TargetIn } from "../src/core/ops.ts";
 import { authenticate, createToken } from "../src/server/identity/identity.ts";
 import { type App, type Config, SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
 import type { Actor } from "../src/server/kernel/ctx.ts";
 import { MIGRATIONS } from "../src/server/kernel/migrate.ts";
-import { open } from "../src/server/start.ts";
 import { call, Decisions, ensure, itemAt, Plan, Proposal, Queue, Receipt, Slots, TestPage } from "./contracts.ts";
 
 const GENERATOR = 1;

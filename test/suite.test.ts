@@ -2,13 +2,13 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { open } from "../src/app/start.ts";
 import { parseCase } from "../src/core/markdown.ts";
 import type { DecideReply, Edit, ProposeReply } from "../src/core/ops.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
 import { Db } from "../src/server/kernel/db.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke, invokeAsync, type Reply } from "../src/server/ops/registry.ts";
-import { open } from "../src/server/start.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
@@ -521,7 +521,7 @@ describe("atomic bulk proposals", () => {
 						`
 import { OPS } from ${module("../src/server/ops/index.ts")};
 import { invokeAsync } from ${module("../src/server/ops/registry.ts")};
-import { open } from ${module("../src/server/start.ts")};
+import { open } from ${module("../src/app/start.ts")};
 const { config, op, input } = JSON.parse(await Bun.stdin.text());
 const { app, owner } = open(config);
 const operation = OPS[op];

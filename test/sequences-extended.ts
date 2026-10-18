@@ -31,8 +31,8 @@
 // More seeds: MAINWORTHY_SEQUENCE_SEEDS=500 bun test test/sequences-extended-
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
-import { recoverAccepted, sweep } from "../src/server/jobs.ts";
 import { type Actor, findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
+import { recoverAccepted, sweep } from "../src/server/ops/jobs.ts";
 import { acceptReport } from "../src/server/ops/writes.ts";
 import { harness } from "./helpers.ts";
 import { failingSlotResults, invalidInherited, slotSettlement } from "./inherited-audit.ts";

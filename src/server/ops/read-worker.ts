@@ -6,12 +6,12 @@
 // `archive`: exports a read snapshot or restores an archive under the parent's write gate, on its own connection.
 import { parentPort, workerData } from "node:worker_threads";
 import { z } from "zod";
+import { openApp } from "../kernel/app.ts";
+import { diskBlobs } from "../kernel/blobs.ts";
+import { CallerReference } from "../kernel/caller.ts";
+import { Db, databasePath } from "../kernel/db.ts";
 import { type ArchiveReply, ArchiveTask } from "./archives.ts";
-import { openApp } from "./kernel/app.ts";
-import { diskBlobs } from "./kernel/blobs.ts";
-import { CallerReference } from "./kernel/caller.ts";
-import { Db, databasePath } from "./kernel/db.ts";
-import type { Reply } from "./ops/registry.ts";
+import type { Reply } from "./registry.ts";
 
 const data = z
 	.discriminatedUnion("role", [
@@ -32,10 +32,10 @@ async function archive(task: z.infer<typeof ArchiveTask>): Promise<void> {
 		{ closeSync, openSync },
 		{ OpError },
 	] = await Promise.all([
-		import("./transfer/transfer.ts"),
-		import("./transfer/spool.ts"),
+		import("../transfer/transfer.ts"),
+		import("../transfer/spool.ts"),
 		import("node:fs"),
-		import("./kernel/errors.ts"),
+		import("../kernel/errors.ts"),
 	]);
 	let app: ReturnType<typeof openApp> | undefined;
 	let reply: z.infer<typeof ArchiveReply>;
@@ -59,8 +59,8 @@ async function archive(task: z.infer<typeof ArchiveTask>): Promise<void> {
 				db.close();
 			}
 		} else {
-			const { defaultConfig } = await import("./kernel/app.ts");
-			const { bootstrap } = await import("./identity/identity.ts");
+			const { defaultConfig } = await import("../kernel/app.ts");
+			const { bootstrap } = await import("../identity/identity.ts");
 			const { recoverAccepted } = await import("./jobs.ts");
 			const now = task.now;
 			app = openApp(
@@ -102,7 +102,7 @@ async function archive(task: z.infer<typeof ArchiveTask>): Promise<void> {
 
 async function reads(): Promise<void> {
 	// Archive work needs no operation registry.
-	const [{ OPS }, { invoke }] = await Promise.all([import("./ops/index.ts"), import("./ops/registry.ts")]);
+	const [{ OPS }, { invoke }] = await Promise.all([import("./index.ts"), import("./registry.ts")]);
 	const config = {
 		dataDir: data.dataDir,
 		host: "127.0.0.1",

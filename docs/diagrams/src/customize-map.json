@@ -38,7 +38,7 @@
           "end_line": 115
         },
         {
-          "path": "src/server/readers.ts",
+          "path": "src/server/ops/readers.ts",
           "line": 7,
           "end_line": 18
         },

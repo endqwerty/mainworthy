@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { type Instance, start, VERSION } from "../../src/server/start.ts";
+import { type Instance, start, VERSION } from "../../src/app/start.ts";
 import { docsRoutes } from "../../src/surfaces/docs/site.ts";
 import { passedRun, scenario } from "./scenario.ts";
 

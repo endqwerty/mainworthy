@@ -1,8 +1,8 @@
+import { start, VERSION } from "../../app/start.ts";
 import { defaultConfig, defaultDataDir } from "../../server/kernel/app.ts";
 import { findProject } from "../../server/kernel/ctx.ts";
 import { adoptFormerInstall } from "../../server/kernel/former-name.ts";
 import { currentPolicy, policyName } from "../../server/policy/policy.ts";
-import { start, VERSION } from "../../server/start.ts";
 import { archiveRoutes } from "../../surfaces/archive.ts";
 import { docsRoutes } from "../../surfaces/docs/site.ts";
 import { mcpRoute } from "../../surfaces/mcp.ts";

@@ -657,7 +657,7 @@ describe("the relying party", () => {
 	});
 
 	test("a public address no browser takes for passkeys stops the start, with a line that says why", async () => {
-		const { start } = await import("../src/server/start.ts");
+		const { start } = await import("../src/app/start.ts");
 		const { defaultConfig } = await import("../src/server/kernel/app.ts");
 		const boot = (publicUrl: string) =>
 			start(

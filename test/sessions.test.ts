@@ -6,14 +6,14 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { type Instance, start } from "../src/app/start.ts";
 import type { Envelope, SessionInfo } from "../src/core/api.ts";
 import { flushUses, removeGrant, revokeToken, sweepSessions } from "../src/server/identity/identity.ts";
 import { openSession } from "../src/server/identity/sessions.ts";
 import { type Config, defaultConfig, openApp, type ReadCall, type ReadPool } from "../src/server/kernel/app.ts";
 import { databasePath } from "../src/server/kernel/db.ts";
 import { ARCHIVE_VERSION, SCHEMA_VERSION } from "../src/server/kernel/migrate.ts";
-import { Readers } from "../src/server/readers.ts";
-import { type Instance, start } from "../src/server/start.ts";
+import { Readers } from "../src/server/ops/readers.ts";
 import { exportArchive } from "../src/server/transfer/transfer.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
 

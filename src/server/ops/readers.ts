@@ -2,9 +2,9 @@ import { availableParallelism } from "node:os";
 import { clearTimeout, setTimeout } from "node:timers";
 import { Worker } from "node:worker_threads";
 import { z } from "zod";
-import { type Envelope, ERROR_CODES } from "../core/api.ts";
-import type { ReadCall, ReadPool } from "./kernel/app.ts";
-import { INTERNAL_ERROR } from "./kernel/errors.ts";
+import { type Envelope, ERROR_CODES } from "../../core/api.ts";
+import type { ReadCall, ReadPool } from "../kernel/app.ts";
+import { INTERNAL_ERROR } from "../kernel/errors.ts";
 
 /**
  * How many reader threads to start. By default: the cores, less one for the thread that writes and answers
@@ -45,9 +45,11 @@ type Options = {
 	schedule?: (callback: () => void, delay: number) => ReturnType<typeof setTimeout>;
 };
 
-/** The worker file: beside this one from source, and under `server/` in the compiled executable. */
-const workerUrl = (role: "read" | "checkpoint"): URL =>
-	new URL(Bun.isStandaloneExecutable ? `./server/${role}-worker.js` : `./${role}-worker.ts`, import.meta.url);
+/** Source workers live in their owning module; the executable keeps the same paths under `server/`. */
+const workerUrl = (role: "read" | "checkpoint"): URL => {
+	const path = role === "read" ? "ops/read-worker" : "kernel/checkpoint-worker";
+	return new URL(Bun.isStandaloneExecutable ? `./server/${path}.js` : `../${path}.ts`, import.meta.url);
+};
 
 export class Readers implements ReadPool {
 	private readonly slots = new Set<Slot>();

@@ -6,11 +6,11 @@ import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { type Instance, start } from "../src/app/start.ts";
 import { Client } from "../src/cli/client.ts";
 import { seed } from "../src/cli/seed.ts";
 import { SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
 import { Db } from "../src/server/kernel/db.ts";
-import { type Instance, start } from "../src/server/start.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
 import { docsRoutes } from "../src/surfaces/docs/site.ts";
 import {

@@ -1,14 +1,14 @@
 import { z } from "zod";
-import { TrackerItem } from "../core/tracker.ts";
-import { endDefectHold } from "./decisions/decisions.ts";
-import { liveDefectDecisions, questionById, questionRef, refsOf } from "./decisions/questions.ts";
-import { ruleActor } from "./identity/identity.ts";
-import type { App } from "./kernel/app.ts";
-import { allProjects, makeCtx, projectById, stampSeq } from "./kernel/ctx.ts";
-import { json } from "./kernel/db.ts";
-import { configuredTrackers } from "./trackers/config.ts";
-import { finishTrackerPoll, trackerPoll, trackerPollError } from "./trackers/polls.ts";
-import { TrackerError, type TrackerPort, type TrackerReadFailure } from "./trackers/port.ts";
+import { TrackerItem } from "../../core/tracker.ts";
+import { endDefectHold } from "../decisions/decisions.ts";
+import { liveDefectDecisions, questionById, questionRef, refsOf } from "../decisions/questions.ts";
+import { ruleActor } from "../identity/identity.ts";
+import type { App } from "../kernel/app.ts";
+import { allProjects, makeCtx, projectById, stampSeq } from "../kernel/ctx.ts";
+import { json } from "../kernel/db.ts";
+import { configuredTrackers } from "../trackers/config.ts";
+import { finishTrackerPoll, trackerPoll, trackerPollError } from "../trackers/polls.ts";
+import { TrackerError, type TrackerPort, type TrackerReadFailure } from "../trackers/port.ts";
 
 const Defect = z.object({ is: z.literal("defect"), ref: z.string() });
 const active = new WeakMap<App, Promise<number>>();
