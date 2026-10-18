@@ -1,7 +1,5 @@
 # Changelog
 
-- 2026-10-18: fixed search and text-selected runs missing cases whose matching words appear only in pinned fragment steps (issue #371). Existing databases rebuild their search index on upgrade, and archive imports use the same pinned-step projection as case writes. No archive or API compatibility change.
-
 - 2026-10-09: project created (docs only; stack undecided).
 - 2026-10-10: docs: ranked priorities (fast backend, agent access via MCP and skills, instant UI/UX) and stack selection criteria.
 - 2026-10-10: added docs/competitive-analysis.md (13 competitors, source-linked).
@@ -256,3 +254,4 @@
 - 2026-10-17: **Fixed:** an old reply in one tab could sign it out after another tab signed in again as the same person. Successful sign-in and sign-out now invalidate earlier browser requests through a shared authentication generation. Same-person tabs retain pending attachment bytes and other in-progress state. Session refresh, live-update reconnect and lost sign-out confirmation distinguish an obsolete reply from a current server refusal. Cross-tab protection needs browser storage and starts when the successful authentication reply is processed. Ordinary session reads and new tabs do not invalidate requests. See decision 0096.
 - 2026-10-17: **Fixed:** opening or reloading a tab while another tab cleared browser data could leave it on the loading screen forever. Startup now reconciles a missed clear before reading the current session, so an ended session shows sign-in and a valid session opens the workspace without restoring cleared notes (issue #472 and the startup regression in issue #447).
 - 2026-10-17: **Changed:** local full-check and CI shard durations are advisory at the owner's request. Slow passing tests no longer fail the check; failed tests, product latency budgets and incomplete reports still block. Decision 0097 records the suspension, and issue #77 retains the work to set a useful timing gate.
+- 2026-10-18: **Fixed:** search and text-selected runs missing cases whose matching words appear only in pinned fragment steps (issue #371). Existing databases rebuild their search index on upgrade, and archive imports use the same pinned-step projection as case writes. No archive or API compatibility change.
