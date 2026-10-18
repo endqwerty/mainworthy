@@ -373,6 +373,8 @@ To add a passkey, give it a name under "Passkeys" in the same section and press 
 
 Failed attempts are counted. The fifth wrong password for one name within 15 minutes blocks password sign-in for that name for one second, from every address. Each further wrong password doubles the wait, up to 15 minutes. A blocked sign-in is answered `limited`. The credentials are not checked, so the right password waits too. A name nobody has is counted the same way, so the count does not say which names exist. A passkey is not held up by a block on the name. [Troubleshooting](./troubleshooting.md#limited-too-many-failed-attempts) says what to do.
 
+The same limit applies to the current password when changing it. Password attempts already waiting to be checked stop if the name or address becomes blocked. A check that finishes during a block returns `limited` too. A successful check never clears a block that began while it was running, even if that block has since expired.
+
 ### Through an identity provider
 
 An instance can let people sign in through an OpenID Connect identity provider, such as Okta, Microsoft Entra ID, Google Workspace, Keycloak or Authentik. Whoever runs the instance [sets it up](./configuration.md#sign-in-through-an-identity-provider). The sign-in page then has a "Sign in with" button named after the provider.
