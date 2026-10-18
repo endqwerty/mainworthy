@@ -2,7 +2,7 @@
 // the session, the change stream and the generated API description. Nothing here knows what an operation does.
 import { z } from "zod";
 import { ERROR_CODES, HTTP_STATUS } from "../core/api.ts";
-import { API_VERSION, API_VERSION_HEADER, VERSION } from "../core/version.ts";
+import { API_VERSION, API_VERSION_HEADER, AT_HEADER, VERSION } from "../core/version.ts";
 import {
 	admit,
 	credentialSummary,
@@ -289,11 +289,9 @@ const changedSession = (): Response =>
 	);
 
 /**
- * A write to a demo project may say when it happened (`X-Mainworthy-At`, milliseconds since 1970; decision
- * 0020). The registry decides whether the call may carry one; here it is only read, and one that is not a
- * number is refused instead of dropped.
+ * A write to a demo project may say when it happened (`AT_HEADER`). The registry decides whether the call may
+ * carry one; here it is only read, and one that is not a number is refused instead of dropped.
  */
-export const AT_HEADER = "x-mainworthy-at";
 function timeOf(req: Request): number | null | undefined {
 	const text = req.headers.get(AT_HEADER);
 	if (text === null) return undefined;

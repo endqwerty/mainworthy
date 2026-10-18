@@ -1,58 +1,33 @@
 import { VERSION } from "../core/version.ts";
 import { type Args, GLOBAL_FLAGS, hasJsonInput, parseArgs } from "./args.ts";
-import { Client, clientOptions } from "./client.ts";
-import { actorCommand } from "./commands/actor.ts";
-import { announceCommand } from "./commands/announce.ts";
-import { auditCommand } from "./commands/audit.ts";
-import { checkCommand } from "./commands/check.ts";
-import { exportCommand } from "./commands/export.ts";
-import { fmtCommand } from "./commands/fmt.ts";
-import { gateCommand } from "./commands/gate.ts";
-import { getCommand } from "./commands/get.ts";
-import { healthCommand } from "./commands/health.ts";
-import { importCommand } from "./commands/import.ts";
-import { csvImportCommand } from "./commands/import-csv.ts";
-import { inviteCommand } from "./commands/invite.ts";
-import { loginCommand } from "./commands/login.ts";
-import { mcpCommand } from "./commands/mcp.ts";
-import { newCommand } from "./commands/new.ts";
-import { openCommand } from "./commands/open.ts";
-import { policyCommand } from "./commands/policy.ts";
-import { reportCommand } from "./commands/report.ts";
-import { seedCommand } from "./commands/seed.ts";
-import { serveCommand } from "./commands/serve.ts";
-import { tokenCommand } from "./commands/token.ts";
 import type { AdapterCommand } from "./commands/types.ts";
-import { versionCommand } from "./commands/version.ts";
 import { CliError } from "./errors.ts";
 import { GENERATED_COMMANDS, generatedHelp, printFlags, runGenerated } from "./generated.ts";
 import { line } from "./output.ts";
 
-export const ADAPTER_COMMANDS: ReadonlyMap<string, AdapterCommand> = new Map(
-	[
-		announceCommand,
-		reportCommand,
-		loginCommand,
-		gateCommand,
-		tokenCommand,
-		inviteCommand,
-		actorCommand,
-		auditCommand,
-		policyCommand,
-		newCommand,
-		seedCommand,
-		getCommand,
-		fmtCommand,
-		checkCommand,
-		exportCommand,
-		importCommand,
-		csvImportCommand,
-		mcpCommand,
-		openCommand,
-		healthCommand,
-		versionCommand,
-	].map((command) => [command.name, command]),
-);
+export const ADAPTER_COMMANDS: ReadonlyMap<string, () => Promise<AdapterCommand>> = new Map([
+	["announce", async () => (await import("./commands/announce.ts")).announceCommand],
+	["report", async () => (await import("./commands/report.ts")).reportCommand],
+	["login", async () => (await import("./commands/login.ts")).loginCommand],
+	["gate", async () => (await import("./commands/gate.ts")).gateCommand],
+	["token", async () => (await import("./commands/token.ts")).tokenCommand],
+	["invite", async () => (await import("./commands/invite.ts")).inviteCommand],
+	["actor", async () => (await import("./commands/actor.ts")).actorCommand],
+	["audit", async () => (await import("./commands/audit.ts")).auditCommand],
+	["policy", async () => (await import("./commands/policy.ts")).policyCommand],
+	["new", async () => (await import("./commands/new.ts")).newCommand],
+	["seed", async () => (await import("./commands/seed.ts")).seedCommand],
+	["get", async () => (await import("./commands/get.ts")).getCommand],
+	["fmt", async () => (await import("./commands/fmt.ts")).fmtCommand],
+	["check", async () => (await import("./commands/check.ts")).checkCommand],
+	["export", async () => (await import("./commands/export.ts")).exportCommand],
+	["import", async () => (await import("./commands/import.ts")).importCommand],
+	["import-csv", async () => (await import("./commands/import-csv.ts")).csvImportCommand],
+	["mcp", async () => (await import("./commands/mcp.ts")).mcpCommand],
+	["open", async () => (await import("./commands/open.ts")).openCommand],
+	["health", async () => (await import("./commands/health.ts")).healthCommand],
+	["version", async () => (await import("./commands/version.ts")).versionCommand],
+]);
 
 /** The exposed names include all registry operations, even where a human adapter shares the name. */
 export const COMMAND_NAMES: ReadonlySet<string> = new Set([
@@ -62,14 +37,17 @@ export const COMMAND_NAMES: ReadonlySet<string> = new Set([
 	"help",
 ]);
 
-function printHelp(): void {
+async function printHelp(): Promise<void> {
 	line(`Mainworthy ${VERSION}`);
 	line("usage: mainworthy [serve] | <command> [--help]");
 	line(
 		"A token: prefer MAINWORTHY_TOKEN or --token-file to --token, which the process list and the shell's history show.",
 	);
 	for (const command of GENERATED_COMMANDS.values()) line(`  ${command.name.padEnd(12)} ${command.summary}`);
-	for (const command of ADAPTER_COMMANDS.values()) line(`  ${command.name.padEnd(12)} ${command.summary}`);
+	for (const load of ADAPTER_COMMANDS.values()) {
+		const command = await load();
+		line(`  ${command.name.padEnd(12)} ${command.summary}`);
+	}
 	line("  serve        Start the server and web UI. Also the default with no arguments.");
 	line("  help         List every operation and adapter.");
 }
@@ -108,7 +86,7 @@ export async function runCli(argv: readonly string[], ui: unknown): Promise<numb
 	const { name, tokens } = splitCommand(argv);
 	if (name === "help") {
 		parseArgs(tokens);
-		printHelp();
+		await printHelp();
 		return 0;
 	}
 	if (name === "serve") {
@@ -116,11 +94,14 @@ export async function runCli(argv: readonly string[], ui: unknown): Promise<numb
 		if (args.bool("help")) {
 			line("mainworthy serve: Start the server and web UI.");
 			printFlags(GLOBAL_FLAGS);
-		} else serveCommand(args, ui);
+		} else {
+			const { serveCommand } = await import("./commands/serve.ts");
+			serveCommand(args, ui);
+		}
 		return 0;
 	}
 	const generated = GENERATED_COMMANDS.get(name);
-	const adapter = ADAPTER_COMMANDS.get(name);
+	const adapter = await ADAPTER_COMMANDS.get(name)?.();
 	if (!generated && !adapter) throw new CliError("invalid", `unknown command ${name}; use mainworthy help`);
 	const flags = [...(generated?.flags ?? []), ...(adapter?.flags ?? [])];
 	const args = parseArgs(tokens, flags);
@@ -133,6 +114,7 @@ export async function runCli(argv: readonly string[], ui: unknown): Promise<numb
 		}
 		return 0;
 	}
+	const { Client, clientOptions } = await import("./client.ts");
 	const client = new Client(
 		name === "audit" && args.positionals[0] === "verify"
 			? { url: "http://127.0.0.1:7357", token: undefined, project: undefined }

@@ -58,7 +58,21 @@ export type GeneratedCommand = { name: string; summary: string; op: AnyOp; flags
 
 /** Every operation becomes a CLI command here, with no operation-specific mapping or dispatch code. */
 export const GENERATED_COMMANDS: ReadonlyMap<string, GeneratedCommand> = new Map(
-	OP_LIST.map((op) => [op.name, { name: op.name, summary: op.summary, op, flags: operationFlags(op) }]),
+	OP_LIST.map((op) => {
+		let flags: Flag[] | undefined;
+		return [
+			op.name,
+			{
+				name: op.name,
+				summary: op.summary,
+				op,
+				get flags() {
+					flags ??= operationFlags(op);
+					return flags;
+				},
+			},
+		];
+	}),
 );
 
 export function printFlags(flags: readonly Flag[]): void {

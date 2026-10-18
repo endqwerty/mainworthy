@@ -9,7 +9,7 @@ import api1Actors from "../../test/fixtures/cli/actor-list-api1.json";
 import { API_VERSION } from "../core/version.ts";
 import { OP_LIST } from "../server/ops/index.ts";
 import { Client, plainHttpToAnotherMachine } from "./client.ts";
-import { COMMAND_NAMES } from "./dispatch.ts";
+import { ADAPTER_COMMANDS, COMMAND_NAMES } from "./dispatch.ts";
 import { GENERATED_COMMANDS } from "./generated.ts";
 import { MAX_SEED_UNLINKED_FILES, seed, unitTests } from "./seed.ts";
 import { COMMIT, inThisProcess, outputWith, RED_XML, withInstance } from "./test-support.ts";
@@ -727,6 +727,8 @@ test("all registry operations have generated commands, global help and --help", 
 	await withInstance(async ({ cli, run }) => {
 		const help = await cli(["help"]);
 		expect(help.code).toBe(0);
+		const adapters = await Promise.all([...ADAPTER_COMMANDS.values()].map((load) => load()));
+		expect([...ADAPTER_COMMANDS.keys()]).toEqual(adapters.map((command) => command.name));
 		const helps = await Promise.all(OP_LIST.map((op) => run([op.name, "--help"])));
 		for (const [index, op] of OP_LIST.entries()) {
 			expect(COMMAND_NAMES.has(op.name)).toBe(true);

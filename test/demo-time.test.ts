@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Envelope } from "../src/core/api.ts";
+import { AT_HEADER } from "../src/core/version.ts";
 import { actorByName } from "../src/server/identity/identity.ts";
 import { recoverAccepted } from "../src/server/jobs.ts";
 import { SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
@@ -13,7 +14,6 @@ import { invoke, type Reply } from "../src/server/ops/registry.ts";
 import { acceptReport } from "../src/server/ops/writes.ts";
 import { type Instance, start } from "../src/server/start.ts";
 import { exportArchive, importArchive, linesOf, removeBootstrap } from "../src/server/transfer/transfer.ts";
-import { AT_HEADER } from "../src/surfaces/http.ts";
 import { type Harness, harness } from "./helpers.ts";
 
 const DAY = 86_400_000;
