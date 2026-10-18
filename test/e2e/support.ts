@@ -266,6 +266,7 @@ export async function openPage(
 		signedIn = true,
 		as,
 		ready,
+		setup,
 		browser,
 		device = "desktop",
 	}: {
@@ -275,6 +276,8 @@ export async function openPage(
 		as?: { name: string; password: string };
 		/** What shows that the page is up, for a page that is neither the app nor the sign-in page. */
 		ready?: string;
+		/** Installs routes and init scripts before the first document loads. */
+		setup?: (page: Page, context: BrowserContext) => Promise<void>;
 		browser?: Browser;
 		/**
 		 * A phone is a window 390 wide whose pointer is a finger, so the page lays itself out for one
@@ -322,6 +325,7 @@ export async function openPage(
 		});
 		Object.defineProperty(window, "mainworthyKeyCount", { get: () => count });
 	});
+	await setup?.(page, context);
 	await page.goto(`${server.url}${path}`);
 	await page.waitForSelector(ready ?? (signedIn ? "#app" : "#token"));
 	return {

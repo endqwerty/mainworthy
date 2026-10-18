@@ -613,25 +613,34 @@ for (const kind of ["failure", "finding", "map", "signoff", "adopt"])
 		async () => {
 			const server = await startServer({ preset: "standard" });
 			await failures(server);
-			const h = await openPage(server);
+			let reads = 0;
+			const h = await openPage(server, {
+				path: "/p/scratch/queue",
+				setup: async (page) => {
+					await page.route("**/inbox", async (route) => {
+						reads++;
+						// The page asks for the inbox again by itself. One such request can be here when the test closes it.
+						const reply = await fetched(route);
+						if (!reply) return;
+						const raw = z
+							.object({
+								ok: z.literal(true),
+								result: z.object({ items: z.array(z.record(z.string(), z.unknown())) }).passthrough(),
+							})
+							.parse(reply.json);
+						const first = raw.result.items[0];
+						if (first) raw.result.items = [{ ...first, kind, evidence: {}, answers: undefined }];
+						await answer(route, { json: raw });
+					});
+				},
+			});
 			try {
 				const { page } = h;
 				page.setDefaultTimeout(5000);
-				await page.route("**/inbox", async (route) => {
-					// The page asks for the inbox again by itself. One such request can be here when the test closes it.
-					const reply = await fetched(route);
-					if (!reply) return;
-					const raw = z
-						.object({
-							ok: z.literal(true),
-							result: z.object({ items: z.array(z.record(z.string(), z.unknown())) }).passthrough(),
-						})
-						.parse(reply.json);
-					const first = raw.result.items[0];
-					if (first) raw.result.items = [{ ...first, kind, evidence: {}, answers: undefined }];
-					await answer(route, { json: raw });
-				});
-				await page.goto(`${server.url}/p/scratch/queue`);
+				await eventually(
+					async () => reads,
+					(n) => n > 0,
+				);
 				await page.locator("[data-current-question]").waitFor();
 				let calls = 0;
 				page.on("request", (r) => {
@@ -721,29 +730,38 @@ check(
 	async () => {
 		const server = await startServer({ preset: "standard" });
 		await failures(server);
-		const h = await openPage(server);
+		let reads = 0;
+		const h = await openPage(server, {
+			path: "/p/scratch/queue",
+			setup: async (page) => {
+				await page.route("**/inbox", async (route) => {
+					reads++;
+					// The page asks for the inbox again by itself. One such request can be here when the test closes it.
+					const reply = await fetched(route);
+					if (!reply) return;
+					const raw = z
+						.object({
+							ok: z.literal(true),
+							result: z
+								.object({ items: z.array(z.object({ evidence: z.record(z.string(), z.unknown()) }).passthrough()) })
+								.passthrough(),
+						})
+						.parse(reply.json);
+					for (const item of raw.result.items) {
+						item.evidence.message = null;
+						item.evidence.sample = null;
+					}
+					await answer(route, { json: raw });
+				});
+			},
+		});
 		try {
 			const { page } = h;
 			page.setDefaultTimeout(5000);
-			await page.route("**/inbox", async (route) => {
-				// The page asks for the inbox again by itself. One such request can be here when the test closes it.
-				const reply = await fetched(route);
-				if (!reply) return;
-				const raw = z
-					.object({
-						ok: z.literal(true),
-						result: z
-							.object({ items: z.array(z.object({ evidence: z.record(z.string(), z.unknown()) }).passthrough()) })
-							.passthrough(),
-					})
-					.parse(reply.json);
-				for (const item of raw.result.items) {
-					item.evidence.message = null;
-					item.evidence.sample = null;
-				}
-				await answer(route, { json: raw });
-			});
-			await page.goto(`${server.url}/p/scratch/queue`);
+			await eventually(
+				async () => reads,
+				(n) => n > 0,
+			);
 			await page.locator("[data-current-question]").waitFor();
 			expect(await page.locator(".queue-evidence").textContent()).not.toContain("could not be read");
 			expect(await page.locator(".queue-answers button:enabled").count()).toBeGreaterThan(0);
@@ -772,25 +790,34 @@ for (const read of ["held", "failed"])
 					},
 				],
 			});
-			const h = await openPage(server);
+			let reads = 0;
 			const gate = latch();
+			const h = await openPage(server, {
+				path: "/p/scratch/queue",
+				setup: async (page) => {
+					await page.route("**/get", async (route) => {
+						const input = z.object({ refs: z.array(z.string()) }).parse(route.request().postDataJSON());
+						if (input.refs.includes("C-1")) {
+							reads++;
+							if (read === "held") await gate.held;
+							else {
+								await route.fulfill({
+									json: { ok: false, error: { code: "internal", message: "Suggested edit read failed" } },
+								});
+								return;
+							}
+						}
+						await route.continue();
+					});
+				},
+			});
 			try {
 				const { page } = h;
 				page.setDefaultTimeout(5000);
-				await page.route("**/get", async (route) => {
-					const input = z.object({ refs: z.array(z.string()) }).parse(route.request().postDataJSON());
-					if (input.refs.includes("C-1")) {
-						if (read === "held") await gate.held;
-						else {
-							await route.fulfill({
-								json: { ok: false, error: { code: "internal", message: "Suggested edit read failed" } },
-							});
-							return;
-						}
-					}
-					await route.continue();
-				});
-				await page.goto(`${server.url}/p/scratch/queue`);
+				await eventually(
+					async () => reads,
+					(n) => n > 0,
+				);
 				await page.locator("[data-current-question]").waitFor();
 				if (read === "failed") await page.getByText("Suggested edit read failed", { exact: false }).waitFor();
 				let writes = 0;
