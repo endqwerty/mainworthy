@@ -566,6 +566,7 @@ export function* sealSteps(ctx: Ctx, input: Parameters<typeof seal>[1]): Generat
 				bodyOf(ctx.db, fragment.id, edit.to);
 				const selected = new Set<number>();
 				for (const consumer of edit.cases) {
+					if (++work % SLICE === 0) yield;
 					const row = lookup(consumer.case);
 					if (selected.has(row.id)) throw invalid("a fragment batch names each case once");
 					selected.add(row.id);
