@@ -206,9 +206,13 @@ export function* raiseSteps(ctx: Ctx, r: Raise): Generator<undefined, Raised, vo
 	const latest = latestByFingerprint(ctx.db, ctx.project.id, fingerprint);
 	if (!latest) return yield* openSteps(ctx, r, fingerprint, hash, basis, 0, null);
 	const occurrence = { hash: basis, target: r.target, facts: r.facts, now: ctx.now };
-	const standing = standingOn(ctx, fingerprint);
-	for (const { question, decision } of standing) {
-		if (!stillHolds(decision, occurrence)) continue;
+	const standing = standingOn(ctx, fingerprint).map(({ question, decision }) => ({
+		question,
+		decision,
+		terms: json<HoldTerm[]>(decision.holds),
+	}));
+	for (const { question, decision, terms } of standing) {
+		if (!stillHolds(terms, occurrence)) continue;
 		noteCarried(ctx, question, r.refs);
 		const parties = (r.evidence as { parties?: number[] }).parties;
 		if (parties && parties.length > 0) addQuestionParties(ctx, question, parties);
@@ -219,13 +223,13 @@ export function* raiseSteps(ctx: Ctx, r: Raise): Generator<undefined, Raised, vo
 	// of no longer holding (the evidence changed, the time ran out) withdraws its standing.
 	const rested: number[] = [];
 	let ended: QuestionRow | null = null;
-	for (const { question, decision } of standing) {
+	for (const { question, decision, terms } of standing) {
 		// An answer given for certain targets is judged only by what is reported about those targets. The same
 		// cause on another commit says nothing about it: without this, an answer for one commit and a failure on
 		// another could undo each other for ever.
-		const here = json<HoldTerm[]>(decision.holds).find((term) => term.until === "this-target");
+		const here = terms.find((term) => term.until === "this-target");
 		if (here?.until === "this-target" && (r.target === undefined || !here.targets.includes(r.target))) continue;
-		if (stillHolds(decision, occurrence, { anyTarget: true })) continue;
+		if (stillHolds(terms, occurrence, { anyTarget: true })) continue;
 		HANDLERS[question.kind].revert(ctx, question, decision);
 		lapse(ctx, question, decision, occurrence.now);
 		rested.push(...runsDependingOn(ctx.db, decision.id));
@@ -461,11 +465,11 @@ function* ruleTakesUnlinkedSteps(ctx: Ctx): Generator<undefined, number, void> {
  * `anyTarget` the target term is left out: the answer is whether it would hold on the targets it does cover.
  */
 export function stillHolds(
-	decision: Pick<DecisionRow, "holds">,
+	terms: readonly HoldTerm[],
 	occurrence: { hash: string; target: number | undefined; facts: readonly string[]; now: number },
 	options: { anyTarget?: boolean } = {},
 ): boolean {
-	return json<HoldTerm[]>(decision.holds).every((term) => {
+	return terms.every((term) => {
 		switch (term.until) {
 			case "basis-changes":
 				return term.basis === occurrence.hash;
@@ -813,17 +817,33 @@ function askAgain(ctx: Ctx, question: QuestionRow, targets: readonly number[]): 
 	const others = liveByFingerprint(ctx.db, ctx.project.id, question.fingerprint).filter(
 		(other) => other.id !== question.id,
 	);
-	const pending = targets.filter(
-		(target) =>
-			!others.some((other) => {
-				if (other.state === "open")
-					return (json<{ targets?: number[] }>(other.evidence).targets ?? []).includes(target);
-				const decision = other.decision !== null ? decisionById(ctx.db, other.decision) : null;
-				return (
-					decision !== null && stillHolds(decision, { hash: question.basis, target, facts: facts ?? [], now: ctx.now })
-				);
-			}),
-	);
+	const covered = new Set<number>();
+	for (const other of others) {
+		if (other.state === "open") {
+			for (const target of json<{ targets?: number[] }>(other.evidence).targets ?? []) covered.add(target);
+			continue;
+		}
+		const decision = other.decision !== null ? decisionById(ctx.db, other.decision) : null;
+		if (decision === null) continue;
+		const terms = json<HoldTerm[]>(decision.holds);
+		if (terms.some((term) => term.until === "results-named")) continue;
+		if (
+			!stillHolds(
+				terms,
+				{ hash: question.basis, target: undefined, facts: facts ?? [], now: ctx.now },
+				{ anyTarget: true },
+			)
+		)
+			continue;
+		const targetTerms = terms.filter((term) => term.until === "this-target");
+		const first = targetTerms[0];
+		if (first === undefined) return;
+		const remaining = targetTerms.slice(1).map((term) => new Set(term.targets));
+		for (const target of first.targets) {
+			if (remaining.every((targets) => targets.has(target))) covered.add(target);
+		}
+	}
+	const pending = targets.filter((target) => !covered.has(target));
 	const latest = pending.at(-1);
 	if (latest === undefined) return;
 	const subject = json<Record<string, unknown> & { signature?: number; scope?: string }>(question.subject);

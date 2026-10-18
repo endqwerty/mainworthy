@@ -5,6 +5,7 @@ import { emptyBody } from "../src/core/model.ts";
 import type { DecideReply, GateStatus, InboxReply, PlanReply, ProposeReply, ReportReceipt } from "../src/core/ops.ts";
 import { PRESETS } from "../src/core/presets.ts";
 import { HANDLERS } from "../src/server/decisions/kinds.ts";
+import type { HoldTerm } from "../src/server/decisions/questions.ts";
 import { linkTest, setExcuse, testById } from "../src/server/evidence/evidence.ts";
 import { recoverAccepted, recoverDisputes, sweep } from "../src/server/jobs.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
@@ -2950,6 +2951,73 @@ describe("what a decision may change", () => {
 		expect(gate({ commit: "headfail1", repo: "app" }).verdict).toBe("blocked");
 		expect(gate({ commit: "headfail2", repo: "app" }).verdict).toBe("blocked");
 	});
+
+	for (const scenario of [
+		"some targets",
+		"expired",
+		"at expiry",
+		"results only",
+		"intersecting targets",
+		"disjoint targets",
+		"basis changed",
+	] as const) {
+		test(`answering leaves exactly the targets a neighbouring hold does not cover: ${scenario}`, () => {
+			const failing = { test: { key: "one" }, outcome: "fail", failure: { message: "same cause" } };
+			for (const env of ["one", "two", "three", "four"])
+				report({ target: { commit: "holdsets01", branch: "main", env }, results: [failing] });
+			const neighbour = open("failure");
+			const seen = neighbour.evidence as { targets: number[]; targetId: number };
+			const [one, two, three, four] = seen.targets;
+			if (one === undefined || two === undefined || three === undefined || four === undefined)
+				throw new Error("expected four environments");
+			expect(seen.targetId).toBe(four);
+			// The handler currently emits one target term. Supply compound terms here to exercise the stored
+			// hold contract through decide, including combinations that no answer preset currently emits.
+			const original = HANDLERS.failure.holds;
+			const held = spyOn(HANDLERS.failure, "holds").mockImplementation((input) => {
+				if (input.question.no !== Number(neighbour.q.slice(2))) return original(input);
+				const terms: HoldTerm[] = [
+					{ until: "this-target", targets: [four, two] },
+					{ until: "basis-changes", basis: input.question.basis },
+				];
+				switch (scenario) {
+					case "expired":
+						terms.push({ until: "time", at: input.now - 1 });
+						break;
+					case "at expiry":
+						terms.push({ until: "time", at: input.now + 2 });
+						break;
+					case "results only":
+						terms.push({ until: "results-named" });
+						break;
+					case "intersecting targets":
+						terms.push({ until: "this-target", targets: [four, one] });
+						break;
+					case "disjoint targets":
+						terms.push({ until: "this-target", targets: [one] });
+						break;
+					case "basis changed":
+						terms.push({ until: "basis-changes", basis: "earlier basis" });
+						break;
+				}
+				return terms;
+			});
+			try {
+				expect(decide(neighbour, { is: "infra" }).status).toBe("decided");
+			} finally {
+				held.mockRestore();
+			}
+			const next = open("failure");
+			expect(next.evidence).toMatchObject({ targets: [one, two, three], targetId: three });
+			expect(decide(next, { is: "infra" }).status).toBe("decided");
+			const pending = h.call<InboxReply>("inbox", { kind: "failure" }).items;
+			expect(pending).toHaveLength(1);
+			expect(first(pending).evidence).toMatchObject({
+				targets: scenario === "some targets" ? [one] : [one, two],
+				targetId: scenario === "some targets" ? one : two,
+			});
+		});
+	}
 
 	test("replacing an answer that covered every environment asks again about the one it leaves uncovered", () => {
 		const target = (env: string) => ({ commit: "twoenv02", branch: "main", env });
