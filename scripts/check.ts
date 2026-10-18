@@ -24,6 +24,8 @@ import {
 	CHECK_WARNING_SECONDS,
 	failureLines,
 	findChromium,
+	fixtureBuildArgs,
+	needsBrowserFixture,
 	type Outcome,
 	outcomePath,
 	type Phase,
@@ -111,7 +113,12 @@ type Part = { name: string; exit: number; seconds: number; log: string | null };
 type TestPart = Part & { phase: Phase; report: string };
 
 /** Runs one command. Captured, its output goes to a file of its own; otherwise straight to the terminal. */
-async function run(name: string, command: string[], capture: boolean): Promise<Part> {
+async function run(
+	name: string,
+	command: string[],
+	capture: boolean,
+	env: Record<string, string | undefined> = {},
+): Promise<Part> {
 	const log = capture ? join(scratch, `${name.replace(/\W+/g, "-")}.log`) : null;
 	const out = log === null ? "inherit" : openSync(log, "w");
 	const started = performance.now();
@@ -119,7 +126,7 @@ async function run(name: string, command: string[], capture: boolean): Promise<P
 		stdin: "ignore",
 		stdout: out,
 		stderr: out,
-		env: { ...process.env, MAINWORTHY_READERS: process.env.MAINWORTHY_READERS ?? testReaders() },
+		env: { ...process.env, MAINWORTHY_READERS: process.env.MAINWORTHY_READERS ?? testReaders(), ...env },
 	});
 	children.add(child);
 	const exit = await child.exited;
@@ -130,7 +137,7 @@ async function run(name: string, command: string[], capture: boolean): Promise<P
 	return { name, exit, seconds: took, log };
 }
 
-async function tests(capture: boolean): Promise<TestPart[]> {
+async function tests(capture: boolean, fixture: string | undefined): Promise<TestPart[]> {
 	const parts: TestPart[] = [];
 	for (const phase of phases) {
 		if (junit) mkdirSync(dirname(junit), { recursive: true }); // Bun does not create the report's directory.
@@ -147,7 +154,11 @@ async function tests(capture: boolean): Promise<TestPart[]> {
 			failuresOnly: capture,
 		});
 		if (!capture) console.log(`\n$ bun ${args.join(" ")}`);
-		parts.push({ ...(await run(`tests: ${phase}`, [process.execPath, ...args], capture)), phase, report });
+		parts.push({
+			...(await run(`tests: ${phase}`, [process.execPath, ...args], capture, { MAINWORTHY_E2E_SERVER: fixture })),
+			phase,
+			report,
+		});
 	}
 	return parts;
 }
@@ -156,8 +167,18 @@ async function tests(capture: boolean): Promise<TestPart[]> {
 if (whole && (await (await import("./work/processes.ts")).otherTestRuns()))
 	console.log("NOTE: another test run is going on this machine. Wait for it with `bun scripts/work.ts wait-tests`.\n");
 const started = performance.now();
+const fixture = needsBrowserFixture(phases, shard, chosen) ? join(scratch, "browser-fixture") : undefined;
+if (fixture) {
+	const build = await run("browser fixture", [process.execPath, ...fixtureBuildArgs(fixture)], false, {
+		NODE_ENV: "production",
+	});
+	if (build.exit !== 0) {
+		console.error("check: browser fixture build failed; no tests ran");
+		leave(build.exit);
+	}
+}
 const [testParts, ...staticParts] = await Promise.all([
-	tests(!testsOnly),
+	tests(!testsOnly, fixture),
 	...(testsOnly
 		? []
 		: [

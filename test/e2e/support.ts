@@ -103,6 +103,7 @@ export async function reservePort(
 	throw new Error("No free Mainworthy e2e port in 7400..7449 or 7500..7599");
 }
 export async function startServer({
+	source = false,
 	cases = 0,
 	firstProject = "scratch",
 	mode = "local",
@@ -114,6 +115,8 @@ export async function startServer({
 	mail,
 	oidc,
 }: {
+	/** Exercise Bun's source bundler even when the check supplies a compiled fixture. */
+	source?: boolean;
 	cases?: number;
 	firstProject?: string;
 	/** How many days of history the seed writes. Absent: no history. */
@@ -138,32 +141,41 @@ export async function startServer({
 	const port = reservation.port;
 	const token = crypto.randomUUID();
 	const url = `http://127.0.0.1:${port}`;
-	const child = Bun.spawn([process.execPath, "test/e2e/serve.ts"], {
-		cwd: process.cwd(),
-		env: {
-			...process.env,
-			NODE_ENV: "production",
-			MAINWORTHY_DATA: dataDir,
-			MAINWORTHY_PORT: String(port),
-			MAINWORTHY_MODE: mode,
-			MAINWORTHY_FIRST_PROJECT: firstProject,
-			MAINWORTHY_OWNER_TOKEN: token,
-			MAINWORTHY_PUBLIC_URL: passkeys || mail || oidc ? `http://localhost:${port}` : "",
-			MAINWORTHY_OIDC_ISSUER: oidc?.issuer ?? "",
-			MAINWORTHY_OIDC_CLIENT_ID: oidc?.clientId ?? "",
-			MAINWORTHY_OIDC_CLIENT_SECRET: oidc?.clientSecret ?? "",
-			MAINWORTHY_OIDC_NAME: oidc?.name ?? "",
-			MAINWORTHY_SMTP_HOST: mail ? "127.0.0.1" : "",
-			MAINWORTHY_SMTP_PORT: mail ? String(mail.port) : "",
-			MAINWORTHY_SMTP_TLS: mail ? "none" : "",
-			MAINWORTHY_SMTP_USER: "",
-			MAINWORTHY_SMTP_PASSWORD: "",
-			MAINWORTHY_MAIL_FROM: mail ? "mainworthy@example.com" : "",
-			MAINWORTHY_READERS: process.env.MAINWORTHY_READERS ?? testReaders(),
-		},
-		stdout: "ignore",
-		stderr: "pipe",
-	});
+	const executable = source ? undefined : process.env.MAINWORTHY_E2E_SERVER;
+	let child: Bun.Subprocess<"ignore", "ignore", "pipe">;
+	try {
+		child = Bun.spawn(executable === undefined ? [process.execPath, "test/e2e/serve.ts"] : [executable], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				NODE_ENV: "production",
+				MAINWORTHY_DATA: dataDir,
+				MAINWORTHY_PORT: String(port),
+				MAINWORTHY_MODE: mode,
+				MAINWORTHY_FIRST_PROJECT: firstProject,
+				MAINWORTHY_OWNER_TOKEN: token,
+				MAINWORTHY_PUBLIC_URL: passkeys || mail || oidc ? `http://localhost:${port}` : "",
+				MAINWORTHY_OIDC_ISSUER: oidc?.issuer ?? "",
+				MAINWORTHY_OIDC_CLIENT_ID: oidc?.clientId ?? "",
+				MAINWORTHY_OIDC_CLIENT_SECRET: oidc?.clientSecret ?? "",
+				MAINWORTHY_OIDC_NAME: oidc?.name ?? "",
+				MAINWORTHY_SMTP_HOST: mail ? "127.0.0.1" : "",
+				MAINWORTHY_SMTP_PORT: mail ? String(mail.port) : "",
+				MAINWORTHY_SMTP_TLS: mail ? "none" : "",
+				MAINWORTHY_SMTP_USER: "",
+				MAINWORTHY_SMTP_PASSWORD: "",
+				MAINWORTHY_MAIL_FROM: mail ? "mainworthy@example.com" : "",
+				MAINWORTHY_READERS: process.env.MAINWORTHY_READERS ?? testReaders(),
+			},
+			stdout: "ignore",
+			stderr: "pipe",
+		});
+	} catch (error) {
+		await rm(dataDir, { recursive: true, force: true });
+		ownedDirectories.delete(dataDir);
+		await reservation.release();
+		throw error;
+	}
 	const stop = async () => {
 		child.kill("SIGTERM");
 		await child.exited;

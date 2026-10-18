@@ -66,6 +66,34 @@ export const CI_SHARD_WARNING_SECONDS = 180;
 export const seconds = (value: number): string => `${value.toFixed(1)} s`;
 
 export type Phase = "parallel" | "quiet";
+
+/** Build once for any phase that may run a browser test. Bun chooses a shard's files. */
+export function needsBrowserFixture(phases: readonly Phase[], shard?: string, files?: readonly string[]): boolean {
+	return phases.some((phase) => {
+		const selected = phaseFiles(phase, shard, files);
+		return selected === null || selected.some((file) => file.startsWith("test/e2e/"));
+	});
+}
+
+/** Production's compile flags, with the test fixture and the same embedded worker paths. */
+export function fixtureBuildArgs(outfile: string): string[] {
+	return [
+		"build",
+		"--compile",
+		"--minify",
+		"--sourcemap",
+		// The fixture is outside src, but workers resolve server/ and cli/ from the executable's root.
+		"--root=src",
+		"--banner",
+		"/*! Mainworthy, Apache-2.0. Software from others is in this file; its licences and notices: /docs/licence */",
+		"test/e2e/serve.ts",
+		"src/server/read-worker.ts",
+		"src/cli/demo-worker.ts",
+		"--outfile",
+		outfile,
+	];
+}
+
 export type TestOptions = {
 	/** `i/n`: the parallel phase runs only that share of its files. */
 	shard?: string | undefined;
