@@ -79,6 +79,10 @@ export type HoldTerm =
 export type Signer = { by: number; clause: string; policy: number; reason: string | null };
 
 const Q = {
+	inherited: sql<{ project: number }, QuestionRow>(
+		`SELECT * FROM questions WHERE project = $project AND kind = 'failure'
+		 AND json_extract(subject, '$.perResult') = 1 AND state IN ('open', 'decided')`,
+	),
 	latest: sql<{ project: number; fingerprint: string }, QuestionRow>(
 		"SELECT * FROM questions WHERE project = $project AND fingerprint = $fingerprint ORDER BY epoch DESC LIMIT 1",
 	),
@@ -421,6 +425,8 @@ export const everyQuestionOn = (db: Db, project: number, about: string): Questio
 	db.all(Q.allOnRef, { project, ref: about });
 export const openCountOn = (db: Db, project: number, about: string): number =>
 	db.get(Q.openCountOnRef, { project, ref: about })?.n ?? 0;
+
+export const inheritedQuestions = (db: Db, project: number): QuestionRow[] => db.all(Q.inherited, { project });
 
 /** A position in the queue: the rank and id of the last question seen. A client holds it as an opaque string. */
 export type QueueCursor = { rank: number; id: number };

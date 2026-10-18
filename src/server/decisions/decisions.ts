@@ -85,6 +85,7 @@ import {
 	decisionsOf,
 	everyQuestionOn,
 	type HoldTerm,
+	inheritedQuestions,
 	insertAnswer,
 	insertDecision,
 	insertQuestion,
@@ -437,14 +438,10 @@ function* settleByRuleSteps(
 	}
 }
 
-/**
- * A policy has just come into force: the open questions about tests with no case that it gives a rule's answer
- * are answered by the rule now, and the number is returned. The next report that names their files would hand
- * them to the rule anyway (see `raise`); done here, whoever changed the setting sees the queue as the new policy
- * leaves it. Only `map` questions: a proposal or a run that waited for a person under the old policy still waits
- * for one under the new, because no later report asks about those again.
- */
-function* ruleTakesUnlinkedSteps(ctx: Ctx): Generator<undefined, number, void> {
+/** Reconcile existing inherited standing and let the new policy answer unlinked tests by rule. */
+function* reconsiderPolicySteps(ctx: Ctx): Generator<undefined, number, void> {
+	for (const question of inheritedQuestions(ctx.db, ctx.project.id))
+		for (const id of runsAbout(ctx, question)) ctx.recompute.add(id);
 	const policy = currentPolicy(ctx.db, ctx.project.id);
 	if (!policy.clauses.some((clause) => clause.kind === "map" && clause.ask.who === "rule")) return 0;
 	let taken = 0;
@@ -539,7 +536,11 @@ export function* answerSteps(
 	if (asked) return reply(question, "conflict", { needs: asked });
 	if (question.state === "decided" && question.decision !== null) {
 		const prior = decisionById(ctx.db, question.decision);
-		if (prior && JSON.stringify(json(prior.answer)) === JSON.stringify(given))
+		if (
+			prior &&
+			!json<{ perResult?: boolean }>(question.subject).perResult &&
+			JSON.stringify(json(prior.answer)) === JSON.stringify(given)
+		)
 			return reply(question, "already", { decision: prior.id });
 	}
 
@@ -571,19 +572,49 @@ export function* answerSteps(
 			});
 	}
 
-	insertAnswer(ctx, {
-		question: question.id,
-		answer: given,
-		reason: input.reason ?? null,
-		hash: question.evidence_hash,
-		counts: standing === "counts",
-	});
-	if (standing === "advice") {
-		ctx.touched.add(questionRef(question));
-		return reply(question, "advised", { needs: describeAsk({ ...ask, agents: "none" }) });
-	}
-	const signer: Signer = { by: ctx.actor.id, clause: clause.id, policy: policy.version, reason: input.reason ?? null };
 	try {
+		if (
+			standing === "counts" &&
+			question.kind === "failure" &&
+			json<{ perResult?: boolean }>(question.subject).perResult
+		) {
+			return yield* ctx.db.savepointSteps(function* () {
+				const withdrawn = undo(ctx, { q: input.q, ifDecision: question.decision ?? undefined, reason: input.reason });
+				if (withdrawn.status !== "reopened") throw conflict(withdrawn.needs ?? "the inherited answer changed");
+				const subject = json<{ signature: number; scope: string }>(question.subject);
+				const signature = signatureById(ctx.db, subject.signature);
+				const target = json<{ targetId: number }>(question.evidence).targetId;
+				const cause = signature
+					? openFailureQuestion(ctx.db, ctx.project.id, { signature: signature.hash, scope: subject.scope, target })
+					: null;
+				if (!cause) throw conflict("this failure no longer has an open cause question");
+				const replacement = yield* answerSteps(ctx, {
+					...input,
+					q: questionRef(cause),
+					onEvidence: cause.evidence_hash,
+				});
+				if (replacement.status !== "decided")
+					throw conflict(replacement.needs ?? "the cause answer could not be recorded");
+				return { ...replacement, q: input.q, effects: { ...replacement.effects, question: replacement.q } };
+			});
+		}
+		insertAnswer(ctx, {
+			question: question.id,
+			answer: given,
+			reason: input.reason ?? null,
+			hash: question.evidence_hash,
+			counts: standing === "counts",
+		});
+		if (standing === "advice") {
+			ctx.touched.add(questionRef(question));
+			return reply(question, "advised", { needs: describeAsk({ ...ask, agents: "none" }) });
+		}
+		const signer: Signer = {
+			by: ctx.actor.id,
+			clause: clause.id,
+			policy: policy.version,
+			reason: input.reason ?? null,
+		};
 		const settled = yield* ctx.db.savepointSteps(function* () {
 			// The facts this answer is given under stay with the question while the answer is in force: an answer
 			// given to a dispute is still an answer to a dispute after it has set the disputed result aside, or
@@ -656,7 +687,7 @@ function* settleSteps(
 		signers.map((signer) => signer.by),
 		decision.expires_at,
 	);
-	const effects = yield* handler.effect(ctx, witness, question, given, { raise, raiseSteps, ruleTakesUnlinkedSteps });
+	const effects = yield* handler.effect(ctx, witness, question, given, { raise, raiseSteps, reconsiderPolicySteps });
 	setDecisionEffects(ctx, decision.id, effects);
 	const about = runsAbout(ctx, question);
 	if (Array.isArray(effects.reask) && effects.reask.length > 0) askAgain(ctx, question, effects.reask as number[]);
@@ -1385,13 +1416,6 @@ function refreshInherited(ctx: Ctx, run: RunRow): Raised[] {
 		const scope = scopeOf(target, null);
 		const material = { inherited };
 		const prior = bySignature.get(signatureId);
-		if (prior?.state === "decided" && prior.decision !== null && prior.basis === contentHash(material)) {
-			const decision = decisionById(ctx.db, prior.decision);
-			if (decision) {
-				raised.push({ s: "carried", question: prior, decision });
-				continue;
-			}
-		}
 		const facts = ["scope:change", "inherited"];
 		const clause = clauseFor(policy, { kind: "failure", facts: new Set(facts) });
 		const answer = ANSWERS.failure.safeParse(clause.answer);
@@ -1406,6 +1430,13 @@ function refreshInherited(ctx: Ctx, run: RunRow): Raised[] {
 			}
 			if (prior) setQuestionState(ctx, prior, "dissolved", questionById(ctx.db, prior.id)?.decision ?? null);
 			continue;
+		}
+		if (prior?.state === "decided" && prior.decision !== null && prior.basis === contentHash(material)) {
+			const decision = decisionById(ctx.db, prior.decision);
+			if (decision) {
+				raised.push({ s: "carried", question: prior, decision });
+				continue;
+			}
 		}
 		const change = target.change === null ? null : changeById(ctx.db, target.change);
 		const tests = inherited.flatMap((item) => {

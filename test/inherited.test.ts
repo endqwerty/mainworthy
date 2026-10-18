@@ -4,10 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { start } from "../src/app/start.ts";
 import { Client } from "../src/cli/client.ts";
-import type { GateStatus, InboxReply } from "../src/core/ops.ts";
+import type { Policy } from "../src/core/kinds.ts";
+import type { DecideReply, GateStatus, InboxReply } from "../src/core/ops.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
-import { recoverAccepted } from "../src/server/ops/jobs.ts";
+import { recoverAccepted, sweep } from "../src/server/ops/jobs.ts";
 import { acceptReport } from "../src/server/ops/writes.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
@@ -145,6 +146,102 @@ test("after loose changes to standard one question owns the failure", () => {
 	h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "flaky" } });
 	expect(gate("change01").tally).toMatchObject({ excused: 1, unexplained: 0 });
 	expect(h.call<InboxReply>("inbox", { on: "pr:69", kind: "failure" }).items).toHaveLength(0);
+});
+
+for (const unrelatedReport of [false, true]) {
+	test(`standard retires inherited standing ${unrelatedReport ? "after an unrelated passing report" : "on adoption alone"}`, () => {
+		base();
+		change({ 0: "same cause" });
+		expect(gate("change01")).toMatchObject({ verdict: "passed", tally: { excused: 1, unexplained: 0 } });
+		h.call("propose", { edits: [{ op: "policy", preset: "standard" }] });
+		const adoption = h.call<InboxReply>("inbox", { kind: "adopt" }).items[0];
+		if (!adoption) throw new Error("missing policy adoption");
+		h.call("decide", { q: adoption.q, onEvidence: adoption.evidenceHash, answer: { is: "accept" } });
+		if (unrelatedReport) {
+			const input = ciReport({ commit: "change01", branch: "feature", pr: 69, base: "base0001", n: 2 });
+			h.call("report", { ...input, results: input.results.slice(1) });
+		}
+		expect(gate("change01")).toMatchObject({ verdict: "blocked", tally: { excused: 0, unexplained: 1 } });
+		const questions = h.call<InboxReply>("inbox", { on: "pr:69", kind: "failure" }).items;
+		expect(questions).toHaveLength(1);
+		expect(questions[0]).toMatchObject({ state: "open", title: "same cause" });
+		expect(questions[0]?.evidence).not.toHaveProperty("inherited");
+	});
+}
+
+for (const answer of ["flaky", "defect", "inherited"] as const) {
+	test(`a direct ${answer} replacement of inherited standing uses manual failure holds`, () => {
+		base();
+		change({ 0: "same cause" });
+		const automatic = h.call<InboxReply>("inbox", { state: "decided", kind: "failure", on: "pr:69" }).items[0];
+		if (!automatic) throw new Error("missing rule decision");
+		const [replacement] = h.call<DecideReply[]>("decide", {
+			q: automatic.q,
+			onEvidence: automatic.evidenceHash,
+			answer: { is: answer },
+		});
+		if (!replacement) throw new Error("missing replacement reply");
+		expect(replacement).toMatchObject({ q: automatic.q, status: "decided" });
+		const expected = {
+			verdict: answer === "defect" ? "failed" : "passed",
+			tally: { attributed: answer === "defect" ? 1 : 0, excused: answer === "defect" ? 0 : 1, unexplained: 0 },
+		};
+		expect(gate("change01")).toMatchObject(expected);
+		const decided = h.call<InboxReply>("inbox", { state: "decided", on: "pr:69", kind: "failure" }).items;
+		expect(decided).toHaveLength(1);
+		expect(decided[0]).toMatchObject({ q: replacement.effects?.question, decision: { answer: { is: answer } } });
+		expect(decided[0]?.evidence).not.toHaveProperty("inherited");
+		if (answer === "flaky") {
+			h.advance(13 * 86_400_000);
+			expect(sweep(h.app, h.owner.id)).toBe(0);
+			expect(gate("change01")).toMatchObject(expected);
+			h.advance(2 * 86_400_000);
+			expect(sweep(h.app, h.owner.id)).toBe(1);
+			expect(gate("change01")).toMatchObject({ verdict: "blocked", tally: { excused: 0, unexplained: 1 } });
+			expect(h.call<InboxReply>("inbox", { on: "pr:69", kind: "failure" }).items).toHaveLength(1);
+			return;
+		}
+		base({ 0: "same cause" }, 2);
+		expect(gate("change01")).toMatchObject(expected);
+		expect(h.call<InboxReply>("inbox", { on: "pr:69", kind: "failure" }).items).toHaveLength(0);
+		expect(h.call("decide", { undo: replacement.effects?.question, ifDecision: replacement.decision })).toMatchObject([
+			{ status: "reopened" },
+		]);
+		expect(gate("change01")).toMatchObject({ verdict: "blocked", tally: { excused: 0, unexplained: 1 } });
+		expect(h.call<InboxReply>("inbox", { on: "pr:69", kind: "failure" }).items).toHaveLength(1);
+	});
+}
+
+test("a rejected direct replacement keeps the inherited answer until the cause's policy is met", () => {
+	const policy = h.call<Policy & { version: number }>("admin", { do: "policy.show", project: "scratch" });
+	h.call("propose", {
+		edits: [
+			{
+				op: "policy",
+				base: policy.version,
+				clauses: policy.clauses.map((clause) =>
+					clause.kind === "failure" && clause.ask.who !== "rule"
+						? { ...clause, ask: { ...clause.ask, reason: "required" } }
+						: clause,
+				),
+			},
+		],
+	});
+	const adoption = h.call<InboxReply>("inbox", { kind: "adopt" }).items[0];
+	if (!adoption) throw new Error("missing policy adoption");
+	h.call("decide", { q: adoption.q, onEvidence: adoption.evidenceHash, answer: { is: "accept" } });
+	base();
+	change({ 0: "same cause" });
+	const automatic = h.call<InboxReply>("inbox", { state: "decided", kind: "failure", on: "pr:69" }).items[0];
+	if (!automatic) throw new Error("missing rule decision");
+	const input = { q: automatic.q, onEvidence: automatic.evidenceHash, answer: { is: "defect" } };
+	expect(h.call("decide", input)).toMatchObject([{ q: automatic.q, status: "conflict", needs: "a reason" }]);
+	expect(gate("change01")).toMatchObject({ verdict: "passed", tally: { excused: 1, unexplained: 0 } });
+	expect(h.call<InboxReply>("inbox", { state: "decided", kind: "failure", on: "pr:69" }).items).toMatchObject([
+		{ q: automatic.q, decision: { answer: { is: "inherited" } } },
+	]);
+	expect(h.call("decide", { ...input, reason: "The product needs a fix" })).toMatchObject([{ status: "decided" }]);
+	expect(gate("change01")).toMatchObject({ verdict: "failed", tally: { attributed: 1, excused: 0, unexplained: 0 } });
 });
 
 test("loose inherits individual tests, not their shared cause or report", () => {
@@ -522,39 +619,48 @@ test("mutual base references reconcile from results without cycling decisions", 
 	expect(gate("change02").tally.excused).toBe(1);
 });
 
-test("HTTP report and gate expose inheritance and immediate base revocation", async () => {
-	const directory = await mkdtemp(join(tmpdir(), "mainworthy-inherited-"));
-	const instance = start(
-		defaultConfig({
-			MAINWORTHY_DATA: directory,
-			MAINWORTHY_PORT: "0",
-			MAINWORTHY_OWNER: "robin",
-			MAINWORTHY_MODE: "local",
-		}),
-		() => ({ ui: null }),
-		{ readers: 0 },
-	);
-	try {
-		const client = new Client({ url: instance.url, token: undefined, project: "scratch" });
-		await client.call("report", ciReport({ commit: "base0001", n: 1, fail: { 0: "same cause" } }));
-		await client.call(
-			"report",
-			ciReport({ commit: "change01", branch: "feature", pr: 69, base: "base0001", n: 1, fail: { 0: "same cause" } }),
+for (const revocation of ["base", "policy"]) {
+	test(`HTTP report and gate expose inheritance and immediate ${revocation} revocation`, async () => {
+		const directory = await mkdtemp(join(tmpdir(), "mainworthy-inherited-"));
+		const instance = start(
+			defaultConfig({
+				MAINWORTHY_DATA: directory,
+				MAINWORTHY_PORT: "0",
+				MAINWORTHY_OWNER: "robin",
+				MAINWORTHY_MODE: "local",
+			}),
+			() => ({ ui: null }),
+			{ readers: 0 },
 		);
-		expect(await client.call("gate", { commit: "change01" })).toMatchObject({
-			verdict: "passed",
-			tally: { excused: 1 },
-		});
-		await client.call("report", ciReport({ commit: "base0001", n: 1, attempt: 2 }));
-		expect(await client.call("gate", { commit: "change01" })).toMatchObject({
-			verdict: "blocked",
-			tally: { excused: 0, unexplained: 1 },
-		});
-	} finally {
-		await instance.stop();
-		await rm(directory, { recursive: true, force: true });
-	}
-});
+		try {
+			const client = new Client({ url: instance.url, token: undefined, project: "scratch" });
+			await client.call("report", ciReport({ commit: "base0001", n: 1, fail: { 0: "same cause" } }));
+			await client.call(
+				"report",
+				ciReport({ commit: "change01", branch: "feature", pr: 69, base: "base0001", n: 1, fail: { 0: "same cause" } }),
+			);
+			expect(await client.call("gate", { commit: "change01" })).toMatchObject({
+				verdict: "passed",
+				tally: { excused: 1 },
+			});
+			if (revocation === "base") {
+				await client.call("report", ciReport({ commit: "base0001", n: 1, attempt: 2 }));
+			} else {
+				await client.call("propose", { edits: [{ op: "policy", preset: "standard" }] });
+				const adoption = (await client.call("inbox", { kind: "adopt" })).items[0];
+				if (!adoption) throw new Error("missing policy adoption");
+				await client.call("decide", { q: adoption.q, onEvidence: adoption.evidenceHash, answer: { is: "accept" } });
+			}
+			expect(await client.call("gate", { commit: "change01" })).toMatchObject({
+				verdict: "blocked",
+				tally: { excused: 0, unexplained: 1 },
+			});
+		} finally {
+			await instance.stop();
+			await rm(directory, { recursive: true, force: true });
+		}
+	});
+}
 
 test("a receipt names the matching rule decision for each of several causes", () => {
 	const fail = { 0: "coupon amount is wrong", 1: "inventory lookup timed out" };

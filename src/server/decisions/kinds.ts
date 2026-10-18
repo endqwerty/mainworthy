@@ -66,8 +66,8 @@ import {
 type Tools = {
 	raise: (ctx: Ctx, r: Raise) => Raised;
 	raiseSteps: (ctx: Ctx, r: Raise) => Generator<undefined, Raised, void>;
-	/** After a policy change: lets the new policy's rule answer the open questions about tests with no case. */
-	ruleTakesUnlinkedSteps: (ctx: Ctx) => Generator<undefined, number, void>;
+	/** Apply the new policy to inherited standing and open questions about tests with no case. */
+	reconsiderPolicySteps: (ctx: Ctx) => Generator<undefined, number, void>;
 };
 
 type Handler<K extends Kind> = {
@@ -178,7 +178,7 @@ const adoptHandler: Handler<"adopt"> = {
 		const effects = { cases: adopted.cases, created: adopted.created, policyVersion: adopted.policyVersion };
 		if (adopted.policyVersion === null) return effects;
 		reconsiderEmptyReports(ctx);
-		const ruled = yield* tools.ruleTakesUnlinkedSteps(ctx);
+		const ruled = yield* tools.reconsiderPolicySteps(ctx);
 		return ruled > 0 ? { ...effects, ruled } : effects;
 	},
 	revert() {
