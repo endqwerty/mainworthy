@@ -1,13 +1,14 @@
 // The rules of the module map, as failing tests (principles P9 and P10). An agent that takes the shortest path that
 // compiles, and reaches across a boundary to do it, fails here with a message that says which rule and why.
-import { describe, expect, test } from "bun:test";
+import { Statement as PreparedStatement } from "bun:sqlite";
+import { describe, expect, spyOn, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { Glob } from "bun";
 import { z } from "zod";
 import { ERROR_CODES, HTTP_STATUS } from "../src/core/api.ts";
 import { needs } from "../src/core/kinds.ts";
 import { REPLIES } from "../src/core/replies.ts";
-import { Db, declaredSql } from "../src/server/kernel/db.ts";
+import { Db, declaredSql, sql } from "../src/server/kernel/db.ts";
 import { MIGRATIONS, migrate, SCHEMA_VERSION, schemaVersion } from "../src/server/kernel/migrate.ts";
 import { MCP_OPS, OP_LIST } from "../src/server/ops/index.ts";
 import { UNEXPORTED } from "../src/server/transfer/transfer.ts";
@@ -27,6 +28,97 @@ const layerOf = (file: string): string => {
 	const parts = file.split("/");
 	return parts[1] === "server" ? `server/${parts[2]}` : (parts[1] ?? "");
 };
+
+describe("declared statements", () => {
+	const read = sql<{ key: string }, { value: string }>("SELECT value FROM meta WHERE key = $key");
+	const write = sql<{ key: string; value: string }>(
+		"INSERT INTO meta (key, value) VALUES ($key, $value) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+	);
+	const tables = sql<readonly [], { name: string }>(
+		"SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'meta'",
+	);
+
+	test("1000 bound reads and writes prepare once each despite dynamic SQL churn, and close finalizes them", () => {
+		const db = new Db(":memory:");
+		migrate(db, ":memory:");
+		const prepare = spyOn(db.raw, "prepare");
+		const query = spyOn(db.raw, "query");
+		try {
+			for (let i = 0; i < 1000; i++) {
+				expect(db.run(write, { key: "cache-probe", value: String(i) }).changes).toBe(1);
+				expect(db.get(read, { key: "cache-probe" })).toEqual({ value: String(i) });
+				expect(db.all(read, { key: "cache-probe" })).toEqual([{ value: String(i) }]);
+				expect(db.allDynamic(`SELECT ? AS value /* dynamic ${i} */`, [i])).toEqual([{ value: i }]);
+				if (i === 0)
+					for (let j = 0; j < 32; j++)
+						expect(db.allDynamic(`SELECT ? AS value /* evict ${j} */`, [j])).toEqual([{ value: j }]);
+			}
+			const handles = new Set(
+				[prepare, query].flatMap((call) =>
+					call.mock.calls.flatMap(([text], index) => {
+						if (text !== write.text && text !== read.text) return [];
+						const result = call.mock.results[index];
+						if (!(result?.value instanceof PreparedStatement)) throw new Error("expected a native prepared statement");
+						return [result.value];
+					}),
+				),
+			);
+			expect(handles.size).toBe(2);
+			expect(query.mock.calls.filter(([text]) => text.includes("/* dynamic") || text.includes("/* evict")).length).toBe(
+				1032,
+			);
+			const finalize = [...handles].map((statement) => spyOn(statement, "finalize"));
+			db.close();
+			expect(finalize.map((call) => call.mock.calls.length)).toEqual([1, 1]);
+			db.close();
+			expect(finalize.map((call) => call.mock.calls.length)).toEqual([1, 1]);
+			for (const call of finalize) call.mockRestore();
+			for (const statement of handles) expect(() => statement.get()).toThrow("finalized");
+			expect(() => db.get(read, { key: "cache-probe" })).toThrow("closed database");
+			expect(() => db.all(read, { key: "cache-probe" })).toThrow("closed database");
+			expect(() => db.run(write, { key: "cache-probe", value: "closed" })).toThrow("closed database");
+			expect(() => db.allDynamic("SELECT 1", [])).toThrow("closed database");
+			expect(() => db.all(tables)).toThrow("closed database");
+		} finally {
+			db.close();
+			prepare.mockRestore();
+			query.mockRestore();
+		}
+	});
+
+	test("connections keep their own bindings, data and statement lifetimes", () => {
+		const first = new Db(":memory:");
+		const second = new Db(":memory:");
+		try {
+			for (const db of [first, second]) migrate(db, ":memory:");
+			first.run(write, { key: "cache-probe", value: "first" });
+			second.run(write, { key: "cache-probe", value: "second" });
+			expect(first.get(read, { key: "cache-probe" })).toEqual({ value: "first" });
+			expect(second.get(read, { key: "cache-probe" })).toEqual({ value: "second" });
+			first.close();
+			second.run(write, { key: "cache-probe", value: "still open" });
+			expect(second.all(read, { key: "cache-probe" })).toEqual([{ value: "still open" }]);
+		} finally {
+			first.close();
+			second.close();
+		}
+	});
+
+	test("a statement prepared before migration reads the migrated schema on the same connection", () => {
+		const db = new Db(":memory:");
+		try {
+			expect(db.all(tables)).toEqual([]);
+			expect(() => db.get(read, { key: "schema_version" })).toThrow("no such table");
+			expect(migrate(db, ":memory:")).toEqual({ from: 0, to: SCHEMA_VERSION, backup: null });
+			expect(db.get(read, { key: "schema_version" })).toEqual({ value: String(SCHEMA_VERSION) });
+			expect(db.all(tables)).toEqual([{ name: "meta" }]);
+			db.run(write, { key: "cache-probe", value: "after migration" });
+			expect(db.get(read, { key: "cache-probe" })).toEqual({ value: "after migration" });
+		} finally {
+			db.close();
+		}
+	});
+});
 
 describe("SQL batches", () => {
 	test("a failed statement stops the batch before later writes", () => {

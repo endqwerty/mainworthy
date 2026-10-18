@@ -1,5 +1,5 @@
 // The only module that talks to SQLite. Everything above it calls `get`, `all`, `run` and `transaction`.
-import { Database, type SQLQueryBindings } from "bun:sqlite";
+import { Database, type Statement as PreparedStatement, type SQLQueryBindings } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
@@ -10,8 +10,8 @@ export type Params = Record<string, SqlValue> | readonly SqlValue[];
 const DECLARED = new Set<string>();
 
 /**
- * Declares a statement once, with the types of its parameters and its rows. The text is the cache key for the
- * prepared statement, and `declaredSql()` lets the check prepare every statement the code can run.
+ * Declares a statement once, with the types of its parameters and its rows. Its object identity keys each Db
+ * cache, and `declaredSql()` lets the check prepare every statement the code can run.
  */
 export function sql<P extends Params = readonly [], R = never>(text: string): Statement<P, R> {
 	DECLARED.add(text);
@@ -47,6 +47,7 @@ export function foldLog(path: string): boolean {
 export class Db {
 	readonly raw: Database;
 	private depth = 0;
+	private statements = new Map<Statement<Params, unknown>, PreparedStatement<unknown, SQLQueryBindings[]>>();
 	private committed: (() => void)[] = [];
 
 	/** Schedules a non-throwing effect after the outer commit. Rollback discards it, including a savepoint's effects. */
@@ -128,16 +129,26 @@ export class Db {
 		for (const callback of callbacks) callback();
 	}
 
+	private prepared<P extends Params, R>(statement: Statement<P, R>): PreparedStatement<R, SQLQueryBindings[]> {
+		let prepared = this.statements.get(statement);
+		if (!prepared) {
+			prepared = this.raw.prepare(statement.text);
+			this.statements.set(statement, prepared);
+		}
+		// The declaration's phantom row type is preserved by its identity in this heterogeneous cache.
+		return prepared as PreparedStatement<R, SQLQueryBindings[]>;
+	}
+
 	get<P extends Params, R>(statement: Statement<P, R>, ...params: P extends readonly [] ? [] : [P]): R | null {
-		return this.raw.query<R, SQLQueryBindings[]>(statement.text).get(...bind(params[0]));
+		return this.prepared(statement).get(...bind(params[0]));
 	}
 
 	all<P extends Params, R>(statement: Statement<P, R>, ...params: P extends readonly [] ? [] : [P]): R[] {
-		return this.raw.query<R, SQLQueryBindings[]>(statement.text).all(...bind(params[0]));
+		return this.prepared(statement).all(...bind(params[0]));
 	}
 
 	run<P extends Params>(statement: Statement<P, unknown>, ...params: P extends readonly [] ? [] : [P]): RunResult {
-		const result = this.raw.query(statement.text).run(...bind(params[0]));
+		const result = this.prepared(statement).run(...bind(params[0]));
 		return { changes: result.changes, lastId: Number(result.lastInsertRowid) };
 	}
 
@@ -278,6 +289,8 @@ export class Db {
 	}
 
 	close(): void {
+		for (const statement of this.statements.values()) statement.finalize();
+		this.statements.clear();
 		this.raw.close();
 	}
 }
