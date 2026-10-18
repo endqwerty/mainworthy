@@ -28,15 +28,19 @@ async function windows() {
 	});
 	const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 	const a = h.page;
-	const b = await h.context.newPage();
-	for (const page of [a, b]) page.setDefaultTimeout(5000);
-	await b.goto(`${server.url}/p/scratch/suite/c/1`);
-	for (const page of [a, b]) await page.getByRole("button", { name: "Coupon case", exact: true }).waitFor();
+	a.setDefaultTimeout(5000);
+	await a.getByRole("button", { name: "Coupon case", exact: true }).waitFor();
 	return {
 		server,
 		h,
 		a,
-		b,
+		openFollower: async () => {
+			const b = await h.context.newPage();
+			b.setDefaultTimeout(5000);
+			await b.goto(`${server.url}/p/scratch/suite/c/1`);
+			await b.getByRole("button", { name: "Coupon case", exact: true }).waitFor();
+			return b;
+		},
 		close: async () => {
 			await h.close();
 			await server.stop();
@@ -140,7 +144,8 @@ for (const editorOpen of [false, true])
 				release = done;
 			});
 			try {
-				const { a, b, server } = w;
+				const { a, server } = w;
+				const b = await w.openFollower();
 				await a.keyboard.press("e");
 				await title(a).fill("Coupon case mine");
 				await server.api("propose", {

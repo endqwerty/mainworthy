@@ -14,26 +14,29 @@ test.skipIf(!browserAvailable)(
 				{ op: "create", body: { title: "Remote case" } },
 			],
 		});
-		const h = await openPage(server, { path: "/p/scratch/queue" });
+		const h = await openPage(server, {
+			path: "/p/scratch/suite/c/1",
+			setup: async (page) => {
+				await page.addInitScript(() => {
+					const send = window.fetch.bind(window);
+					let reads = 0;
+					const sending = async (input: RequestInfo | URL, init?: RequestInit) => {
+						const reply = await send(input, init);
+						if (String(input).endsWith("/find") && typeof init?.body === "string" && init.body.includes('"cases"')) {
+							const read = ++reads;
+							document.documentElement.dataset.heldReads = String(read);
+							await new Promise<void>((resolve) =>
+								window.addEventListener(read === 1 ? "test:first" : "test:fresh", () => resolve(), { once: true }),
+							);
+						}
+						return reply;
+					};
+					window.fetch = Object.assign(sending, { preconnect: window.fetch.preconnect });
+				});
+			},
+		});
 		try {
 			const { page } = h;
-			await page.addInitScript(() => {
-				const send = window.fetch.bind(window);
-				let reads = 0;
-				const sending = async (input: RequestInfo | URL, init?: RequestInit) => {
-					const reply = await send(input, init);
-					if (String(input).endsWith("/find") && typeof init?.body === "string" && init.body.includes('"cases"')) {
-						const read = ++reads;
-						document.documentElement.dataset.heldReads = String(read);
-						await new Promise<void>((resolve) =>
-							window.addEventListener(read === 1 ? "test:first" : "test:fresh", () => resolve(), { once: true }),
-						);
-					}
-					return reply;
-				};
-				window.fetch = Object.assign(sending, { preconnect: window.fetch.preconnect });
-			});
-			await page.goto(`${server.url}/p/scratch/suite/c/1`);
 			await page.getByRole("button", { name: "Local case", exact: true }).waitFor();
 			await page.waitForFunction(() => document.documentElement.dataset.heldReads === "1");
 			expect(await page.locator('[data-testid="case-list"]').getAttribute("data-loaded")).toBe("0");
@@ -186,45 +189,70 @@ test.skipIf(!browserAvailable)(
 	"the Suite finishes paging and refreshes while changes arrive during every read",
 	async () => {
 		const server = await startServer({ cases: 1001 });
-		const h = await openPage(server, { path: "/p/scratch/queue" });
+		const h = await openPage(server, {
+			path: "/p/scratch/suite",
+			setup: async (page) => {
+				await page.addInitScript(() => {
+					let changes = 0;
+					let reads = 0;
+					let eventfulReads = 0;
+					const Native = window.EventSource;
+					window.EventSource = class extends Native {
+						private timer: ReturnType<typeof setInterval>;
+						constructor(url: string | URL, init?: EventSourceInit) {
+							super(url, init);
+							this.timer = setInterval(() => {
+								if (this.onmessage) {
+									this.onmessage(new MessageEvent("message", { data: '{"op":"propose","touched":[]}' }));
+									changes++;
+								}
+							}, 10);
+						}
+						override close() {
+							clearInterval(this.timer);
+							super.close();
+						}
+					};
+					const send = window.fetch.bind(window);
+					const sending = async (input: RequestInfo | URL, init?: RequestInit) => {
+						const reply = await send(input, init);
+						if (String(input).endsWith("/find") && typeof init?.body === "string" && init.body.includes('"cases"')) {
+							const before = changes;
+							await new Promise((resolve) => setTimeout(resolve, 60));
+							if (changes > before) eventfulReads++;
+							document.documentElement.dataset.caseReads = String(++reads);
+							document.documentElement.dataset.eventfulReads = String(eventfulReads);
+						}
+						return reply;
+					};
+					window.fetch = Object.assign(sending, { preconnect: window.fetch.preconnect });
+				});
+			},
+		});
 		try {
 			const { page } = h;
-			await page.addInitScript(() => {
-				const Native = window.EventSource;
-				window.EventSource = class extends Native {
-					private timer: ReturnType<typeof setInterval>;
-					constructor(url: string | URL, init?: EventSourceInit) {
-						super(url, init);
-						this.timer = setInterval(() => {
-							this.onmessage?.(new MessageEvent("message", { data: '{"op":"propose","touched":[]}' }));
-						}, 10);
-					}
-					override close() {
-						clearInterval(this.timer);
-						super.close();
-					}
-				};
-				const send = window.fetch.bind(window);
-				const sending = async (input: RequestInfo | URL, init?: RequestInit) => {
-					const reply = await send(input, init);
-					if (String(input).endsWith("/find") && typeof init?.body === "string" && init.body.includes('"cases"'))
-						await new Promise((resolve) => setTimeout(resolve, 60));
-					return reply;
-				};
-				window.fetch = Object.assign(sending, { preconnect: window.fetch.preconnect });
-			});
-			await page.goto(`${server.url}/p/scratch/suite`);
 			await page.waitForFunction(
 				() => document.querySelector('[data-testid="case-list"]')?.getAttribute("data-loaded") === "1001",
 				undefined,
 				{ timeout: 4000 },
 			);
 			expect(await page.locator('[data-testid="case-list"]').getAttribute("data-total")).toBe("1001");
+			const duringReads = () =>
+				page.evaluate(() => ({
+					reads: Number(document.documentElement.dataset.caseReads),
+					eventful: Number(document.documentElement.dataset.eventfulReads),
+				}));
+			const initialReads = await duringReads();
+			expect(initialReads.reads).toBeGreaterThan(0);
+			expect(initialReads.eventful).toBe(initialReads.reads);
 			await server.api("propose", {
 				edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Updated while reading" } }],
 			});
 			await page.getByRole("option").filter({ hasText: "Updated while reading" }).waitFor({ timeout: 4000 });
 			expect(await page.locator('[data-testid="case-list"]').getAttribute("data-loaded")).toBe("1001");
+			const refreshedReads = await duringReads();
+			expect(refreshedReads.reads).toBeGreaterThan(initialReads.reads);
+			expect(refreshedReads.eventful).toBe(refreshedReads.reads);
 			expect(h.errors).toEqual([]);
 		} finally {
 			await h.close();

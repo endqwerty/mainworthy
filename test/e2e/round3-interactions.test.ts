@@ -405,27 +405,30 @@ for (const surface of ["case", "queue"])
 						{ token: agent },
 					);
 					if (!proposed.question || !proposed.proposal) throw new Error("Missing proposal");
-					const h = await openPage(server);
 					const gate = latch();
+					let reads = 0;
+					const h = await openPage(server, {
+						path: surface === "case" ? "/p/scratch/suite/c/1" : "/p/scratch/queue",
+						setup: async (page) => {
+							await page.route("**/get", async (route) => {
+								const input = z.object({ refs: z.array(z.string()) }).parse(route.request().postDataJSON());
+								if (input.refs.includes(proposed.proposal ?? "")) {
+									reads++;
+									if (read === "slow") await gate.held;
+									else {
+										await route.fulfill({
+											json: { ok: false, error: { code: "internal", message: "Proposal read failed" } },
+										});
+										return;
+									}
+								}
+								await route.continue();
+							});
+						},
+					});
 					try {
 						const { page } = h;
 						page.setDefaultTimeout(5000);
-						let reads = 0;
-						await page.route("**/get", async (route) => {
-							const input = z.object({ refs: z.array(z.string()) }).parse(route.request().postDataJSON());
-							if (input.refs.includes(proposed.proposal ?? "")) {
-								reads++;
-								if (read === "slow") await gate.held;
-								else {
-									await route.fulfill({
-										json: { ok: false, error: { code: "internal", message: "Proposal read failed" } },
-									});
-									return;
-								}
-							}
-							await route.continue();
-						});
-						await page.goto(`${server.url}${surface === "case" ? "/p/scratch/suite/c/1" : "/p/scratch/queue"}`);
 						await page
 							.locator(surface === "case" ? `[data-proposal="${proposed.question}"]` : "[data-current-question]")
 							.waitFor();

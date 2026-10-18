@@ -451,6 +451,7 @@ async function cases(server: Server, count: number) {
 	async () => {
 		const server = await fixture();
 		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		const failedReports = Promise.withResolvers<void>();
 		try {
 			const created = await cases(server, 3);
 			const planned = await server.api("plan", {
@@ -471,8 +472,10 @@ async function cases(server: Server, count: number) {
 			expect(await note.inputValue()).toBe("Unsaved failure detail");
 
 			// Two results whose requests both fail: each slot keeps its own note.
+			let reports = 0;
 			await page.route("**/api/p/*/report", async (route) => {
-				await new Promise((resolve) => setTimeout(resolve, 600));
+				reports++;
+				await failedReports.promise;
 				await route.abort();
 			});
 			await page.keyboard.press("f");
@@ -482,8 +485,15 @@ async function cases(server: Server, count: number) {
 			await page.keyboard.press("f");
 			await page.keyboard.type("Second failed note");
 			await page.keyboard.press("Enter");
-			// Both requests are aborted after 600 ms; give both rollbacks time to land.
-			await page.waitForTimeout(2500);
+			await eventually(
+				async () => reports,
+				(n) => n === 2,
+			);
+			for (const ref of ["C-1", "C-2"])
+				await page.getByRole("button", { name: new RegExp(`${ref}, failing`) }).waitFor();
+			failedReports.resolve();
+			for (const ref of ["C-1", "C-2"])
+				await page.getByRole("button", { name: new RegExp(`${ref}, missing`) }).waitFor();
 			await page.unroute("**/api/p/*/report");
 			await page.locator('[data-slot="1"]').click();
 			expect(await note.inputValue()).toBe("First failed note");
@@ -517,6 +527,7 @@ async function cases(server: Server, count: number) {
 			);
 			expect(passed[1]?.fills[0]?.note).toBe("Second failed note");
 		} finally {
+			failedReports.resolve();
 			await view?.close();
 			await server.stop();
 		}

@@ -306,12 +306,32 @@ test.skipIf(!browserAvailable)(
 		try {
 			const { page } = browser;
 			await page.getByRole("button", { name: "Idle case", exact: true }).waitFor();
+			let writes = 0;
+			page.on("request", (request) => {
+				if (request.url().endsWith("/propose")) writes++;
+			});
+			await page.clock.install();
+			await page.clock.pauseAt(new Date(Date.now() + 1000));
 			await page.keyboard.press("e");
 			const title = page.getByRole("textbox", { name: "Case title", exact: true });
 			await title.fill("Idle case revised");
-			await page.waitForFunction(() => document.querySelector(".cstate")?.textContent?.includes("v2"), null, {
-				timeout: 35_000,
-			});
+			await page.clock.fastForward(29_999);
+			expect(writes).toBe(0);
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(1);
+			expect(
+				await page.evaluate(() =>
+					Object.keys(localStorage)
+						.filter((key) => key.includes(":draft:") && key.endsWith(":C-1"))
+						.map((key) => JSON.parse(localStorage.getItem(key) ?? "null")),
+				),
+			).toMatchObject([{ body: { title: "Idle case revised" } }]);
+			const recorded = page.waitForResponse((response) => response.url().endsWith("/propose"), { timeout: 5000 });
+			await page.clock.fastForward(2);
+			await recorded;
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(2);
+			await page.clock.resume();
+			await page.waitForFunction(() => document.querySelector(".cstate")?.textContent?.includes("v2"));
+			expect(writes).toBe(1);
 			expect(await title.inputValue()).toBe("Idle case revised");
 			expect(
 				await title.evaluate((node) =>
@@ -325,6 +345,7 @@ test.skipIf(!browserAvailable)(
 			);
 			await page.keyboard.press("Control+Enter");
 			expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(2);
+			expect(writes).toBe(1);
 			expect(browser.errors).toEqual([]);
 		} finally {
 			await browser.close();
