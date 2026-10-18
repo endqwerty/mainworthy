@@ -5,6 +5,7 @@ import { parseOutline, splitExpected } from "../../core/outline.ts";
 import { type Draft, knownStepIds } from "../lib/drafts.ts";
 import { useBindings } from "../lib/keys.ts";
 import { readRoute } from "../lib/router.ts";
+import { AutoGrowingTextarea } from "../ui/auto-growing-textarea.tsx";
 import { useApp } from "../ui/context.tsx";
 import { KeyCap } from "../ui/index.tsx";
 import { FragmentInsert, FragmentReference } from "./fragments.tsx";
@@ -380,16 +381,10 @@ export function BodyEditor({
 		);
 	}
 	const input = (field: string, value: string, label: string, className: string, placeholder = "") => (
-		<textarea
+		<AutoGrowingTextarea
 			rows={Math.max(1, value.split("\n").length)}
 			data-field={field}
 			aria-label={label}
-			ref={(element) => {
-				if (element) {
-					element.style.height = "auto";
-					element.style.height = `${element.scrollHeight}px`;
-				}
-			}}
 			className={className}
 			placeholder={placeholder}
 			value={value}
