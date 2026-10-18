@@ -1,4 +1,4 @@
-# 0020: A demo project takes the time of a write from its caller, and no other project does
+# 0100: A demo project takes the time of a write from its caller, and no other project does
 
 - Date: 2026-10-13
 - Status: proposed (built in the pull request that adds it; the owner reviews)

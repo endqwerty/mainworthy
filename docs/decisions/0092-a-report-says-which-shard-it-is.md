@@ -1,7 +1,7 @@
 # 0092: A report says which shard of its job it is
 
 - Date: 2026-10-16
-- Status: accepted (the owner asked for sharded CI to be supported, 2026-10-16, in the thread that built 0091)
+- Status: accepted (the owner asked for sharded CI to be supported, 2026-10-16, in the thread that built 0102)
 
 ## Problem
 
@@ -11,7 +11,7 @@ gate read `passed` before the other shards had run. A shard that never reported 
 repository's own CI avoided it only because one job uploads every shard and then reads the gate
 (`scripts/ci-gate.ts`), and that job failed on a missing shard by its own check, not by the gate.
 
-The same gap made decision 0091 weaker. An answer that needs a fix ends when its cause passes in the newest
+The same gap made decision 0102 weaker. An answer that needs a fix ends when its cause passes in the newest
 commit. With no idea of a whole commit, a test failing with the cause for the first time in a shard that reported
 late was asked about as a new question, after the answer had already ended.
 
@@ -29,7 +29,7 @@ verdict keeps its order. An unexplained or attributed failure in a shard that al
 agent's report under the job's name is not the job.
 
 **Questions wait for the whole commit too.** An open failure question closes when its cause is gone from the
-newest commit, and an answer that needs a fix ends when its cause passes there (decision 0091). Neither happens
+newest commit, and an answer that needs a fix ends when its cause passes there (decision 0102). Neither happens
 while that commit waits for a shard, or while a report of it is accepted and not yet applied: either may hold the
 cause. Not even a planned run that cleared closes the question then. (Both found in review: the first by the
 verifier, the second by the automated review of the pull request.)

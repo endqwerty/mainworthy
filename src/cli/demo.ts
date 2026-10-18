@@ -35,7 +35,7 @@ export type DemoResetData = {
 
 /**
  * Empties `project` and seeds the demo there again, as the owner, through the instance's own HTTP surface. Only a
- * demo project is emptied (decision 0020): one is made a demo while nothing was written to it, so nothing in it is
+ * demo project is emptied (decision 0100): one is made a demo while nothing was written to it, so nothing in it is
  * older than the demo, and the setting's name slipping onto somebody's work empties nothing. Any other project is
  * left as it is and refused. One that does not exist yet is made. The grants on the project, a team's included, are
  * kept: whoever could use the demo still can.

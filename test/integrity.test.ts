@@ -2174,7 +2174,7 @@ describe("what a decision may change", () => {
 		);
 		const asked = open("failure");
 		decide(asked, { is: "test" });
-		// The next commit passes the test: the failure is gone, and so is the answer (decision 0091). There is nothing
+		// The next commit passes the test: the failure is gone, and so is the answer (decision 0102). There is nothing
 		// left to withdraw.
 		report(
 			{ target: { commit: "gone0002", branch: "main" }, results: [{ test: { key: "one" }, outcome: "pass" }] },

@@ -1,4 +1,4 @@
-# The results behind a gate
+# 0101: The results behind a gate
 
 Date: 2026-10-15. Issue [#343](https://github.com/endqwerty/mainworthy/issues/343).
 

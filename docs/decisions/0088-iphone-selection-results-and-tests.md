@@ -1,12 +1,12 @@
 # 0088. The iPhone answers a selection, and shows results and tests
 
-Date: 2026-10-16. Asked by the owner in a thread; follows decisions 0024, 0074 and 0087.
+Date: 2026-10-16. Asked by the owner in a thread; follows decisions 0024, 0074 and 0101.
 
 ## Problem
 
 The owner asked for four things in the iPhone app:
 
-- It showed neither the results behind a change's gate nor the Tests screen (decision 0087, "Not done"), so a
+- It showed neither the results behind a change's gate nor the Tests screen (decision 0101, "Not done"), so a
   test tracked without a case could not be seen on the phone at all.
 - The queue answered one question at a time, from its page. Sixty unlinked tests took sixty visits.
 - A case's row ended in a green tick that said nothing of whose result it was or that it was the worst of
@@ -21,7 +21,7 @@ interface cannot scale that way, and an architecture review (two independent des
 
 **Results and tests read what the web reads.** A change's page gets **Results** from `find --in results`, with the
 tally's counts as filters and a text filter, a hundred rows a page. A later page refused because the results
-changed (`conflict`, decision 0087) is not added; the panel says so and **Read them again** reads the first page. **Cases** gets **Automated tests** from `find --in
+changed (`conflict`, decision 0101) is not added; the panel says so and **Read them again** reads the first page. **Cases** gets **Automated tests** from `find --in
 tests`, with **Only tests with no case**, and a test's page from `get T-n`. The three replies are in the app's
 contract (`scripts/ios/contract.ts`), held to real replies by `test/ios-contract.test.ts`. One `PagedList` owns
 the paging of both lists: the query its rows answer, the next cursor, and which read may still change them, so a

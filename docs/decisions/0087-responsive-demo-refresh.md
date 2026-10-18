@@ -24,7 +24,7 @@ Keep the quarantine history query's commit-target lookup first with `CROSS JOIN`
 Run provenance checks and the reset on a dedicated worker connection while the parent holds its write gate.
 Keep removal, recreation, the demo mark, and retained grants in one transaction, using `savepointSteps` to
 pause before recreation. Only a marked demo or a legacy demo whose seed command was its first write may be
-emptied, as in decision 0020. A failed or interrupted transaction preserves the old demo and grants. After
+emptied, as in decision 0100. A failed or interrupted transaction preserves the old demo and grants. After
 commit, an interrupted start leaves the empty marked demo and its grants for the next seed.
 
 Reads use separate connections and see the old committed state until commit. Health checks keep answering.

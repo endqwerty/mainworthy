@@ -1683,7 +1683,7 @@ function dissolveStale(ctx: Ctx, { run, failing }: Pick<Retallied, "run" | "fail
 /**
  * An answer that says the target needs a fix (`ATTRIBUTED`) ends when its cause passes in the newest commit of its
  * scope: the fix arrived, so a later failure of the cause is asked about and not put down to the old answer
- * (decision 0091). Like every ending, it stops explaining the commits that failed before: they read `blocked`, and
+ * (decision 0102). Like every ending, it stops explaining the commits that failed before: they read `blocked`, and
  * nobody is asked about them. Called for each run a report counted toward, like `dissolveStale`.
  */
 function endPassed(ctx: Ctx, run: RunRow): void {

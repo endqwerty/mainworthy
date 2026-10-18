@@ -426,7 +426,7 @@ export const ChangeRun = struct("ChangeRun", "`get` of the head's run: the first
 	),
 });
 
-// What a change's gate counted, and the tests a project has seen (decision 0087).
+// What a change's gate counted, and the tests a project has seen (decision 0101).
 
 export const CountedResults = struct("CountedResults", "`find` in results: what a commit's gate counted, a page.", {
 	count: [maybe(whole), "How many rows match the filter."],

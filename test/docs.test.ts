@@ -32,6 +32,27 @@ const read = (slug: string): string => readFileSync(join(GUIDE, `${slug}.md`), "
 const articles = new Map(DOC_PAGES.map((page) => [page.slug, renderArticle(PAGES[page.slug])] as const));
 const everything = DOC_PAGES.map((page) => PAGES[page.slug]).join("\n");
 
+describe("the decision records", () => {
+	test("decision numbers are unique and numbered headings match their filenames", () => {
+		const records = readdirSync("docs/decisions")
+			.filter((file) => file.endsWith(".md"))
+			.sort();
+		const numbers = new Map<string, string>();
+		const problems: string[] = [];
+		for (const file of records) {
+			expect(file, "a decision filename starts with its four-digit number").toMatch(/^\d{4}-.+\.md$/);
+			const number = file.slice(0, 4);
+			const prior = numbers.get(number);
+			if (prior) problems.push(`${prior} and ${file} share decision ${number}`);
+			numbers.set(number, file);
+			const heading = readFileSync(join("docs/decisions", file), "utf8").match(/^# (\d+)[.:] /)?.[1];
+			if (heading !== undefined && heading !== number)
+				problems.push(`${file} has heading number ${heading}, expected ${number}`);
+		}
+		expect(problems).toEqual([]);
+	});
+});
+
 describe("the pages", () => {
 	test("step choices name inline instructions and fragment pins, including the forbidden inline use field", () => {
 		const api = generatedBlocks().operations ?? "";
@@ -119,6 +140,11 @@ describe("what the docs must name", () => {
 		);
 
 	test("every operation and every command", () => {
+		const architecture = readFileSync("docs/architecture.md", "utf8");
+		const table = architecture.split("| | Operations |\n")[1]?.split("\n\n")[0] ?? "";
+		expect([...table.matchAll(/`([^`]+)`/g)].map((match) => match[1]).sort()).toEqual(
+			OP_LIST.map((op) => op.name).sort(),
+		);
 		expect(missing(OP_LIST.map((op) => `mainworthy ${op.name}`))).toEqual([]);
 		expect(missing([...ADAPTER_COMMANDS.keys(), "serve", "help"].map((name) => `mainworthy ${name}`))).toEqual([]);
 	});

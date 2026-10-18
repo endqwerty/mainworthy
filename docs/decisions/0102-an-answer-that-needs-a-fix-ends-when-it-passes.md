@@ -1,4 +1,4 @@
-# 0091: An answer that needs a fix ends when its cause passes
+# 0102: An answer that needs a fix ends when its cause passes
 
 - Date: 2026-10-16
 - Status: accepted (the owner asked for the flow in the thread that built it, 2026-10-16)

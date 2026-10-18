@@ -49,7 +49,7 @@ refuses an archive older than that: five tests that import an archive of an earl
 end is not worth every backup taken before today. So after an import every change is open. The questions that
 were closed when a change ended stay closed, because that is their own state; only a failure reported again
 for such a change would be asked about, until somebody says once more that it ended. The pull request that
-makes demo projects (decision 0020 there) keeps its mark the same way, for the same reason.
+makes demo projects (decision 0100 there) keeps its mark the same way, for the same reason.
 
 ## A third operation for a pipeline
 

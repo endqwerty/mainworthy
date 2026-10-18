@@ -169,7 +169,7 @@ export type AnyAnswer = { [K in Kind]: AnswerOf<K> }[Kind];
 
 /**
  * The answers that say the target needs a fix. A cause answered so carries to later commits while it keeps
- * failing, and ends when it passes there: the fix arrived, and a later failure is a new question (decision 0091).
+ * failing, and ends when it passes there: the fix arrived, and a later failure is a new question (decision 0102).
  */
 export const ATTRIBUTED = ["defect", "test", "expected"] as const satisfies readonly FailureAnswer["is"][];
 
