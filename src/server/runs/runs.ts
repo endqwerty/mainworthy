@@ -819,12 +819,12 @@ export type Unexplained = { signature: number; target: number; scope: string };
  * make sure each of them has a question somebody can answer.
  */
 export function unexplainedShown(db: Db, run: RunRow): Unexplained[] {
-	const quarantined = quarantineLookup(db, run.project);
+	const { quarantineFor, scopeFor } = counting(db, run);
 	const shown = new Map<string, Unexplained>();
 	const note = (result: { id: number; signature: number | null; target: number }): void => {
 		if (result.signature === null) return;
-		const scope = scopeIn(db, run, result.target);
-		if (!quarantined(result.id) && !excuseForResult(db, { ...result, project: run.project }, scope))
+		const scope = scopeFor(result.target);
+		if (!quarantineFor(result.id) && !excuseForResult(db, { ...result, project: run.project }, scope))
 			shown.set(`${result.signature}:${result.target}`, { signature: result.signature, target: result.target, scope });
 	};
 	if (run.origin === "change") {
