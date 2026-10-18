@@ -1,5 +1,6 @@
 // The HTTP surface on a real listener: who gets in, in each mode, and that every operation is there.
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+// Bulk imports and schema sweeps have a 60-second hang guard; they assert outcomes, not latency.
+import { describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { connect } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
@@ -18,6 +19,7 @@ import { InboxReply as InboxSchema, ReportReceipt } from "../src/core/ops.ts";
 import { PRESETS } from "../src/core/presets.ts";
 import { REPLIES } from "../src/core/replies.ts";
 import { TrackerReceipt } from "../src/core/tracker.ts";
+import { waitMail } from "../src/server/identity/identity.ts";
 import type { RegistrationOptions } from "../src/server/identity/webauthn.ts";
 import { type Config, defaultConfig, SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
 import { OP_LIST, OPS } from "../src/server/ops/index.ts";
@@ -33,18 +35,32 @@ import { mcpRoute } from "../src/surfaces/mcp.ts";
 import { fakeSmtp } from "./mail-support.ts";
 import { authenticator } from "./people-support.ts";
 
-const dirs: string[] = [];
-const running: Instance[] = [];
-const mailServers: Awaited<ReturnType<typeof fakeSmtp>>[] = [];
-afterEach(async () => {
-	for (const instance of running.splice(0)) await instance.stop();
-	for (const smtp of mailServers.splice(0)) await smtp.close();
-	for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
-});
+function testDirectory(prefix: string) {
+	const path = mkdtempSync(join(tmpdir(), prefix));
+	return { path, [Symbol.dispose]: () => rmSync(path, { recursive: true, force: true }) };
+}
 
-async function schemaMail(instance: Instance): Promise<void> {
+function startFixture(ownsDirectory: boolean, ...args: Parameters<typeof start>): Instance & AsyncDisposable {
+	const removeDirectory = () => {
+		if (ownsDirectory) rmSync(args[0].dataDir, { recursive: true, force: true });
+	};
+	let instance: Instance;
+	try {
+		instance = start(...args);
+	} catch (error) {
+		removeDirectory();
+		throw error;
+	}
+	return Object.assign(instance, {
+		async [Symbol.asyncDispose]() {
+			await instance.stop();
+			removeDirectory();
+		},
+	});
+}
+
+async function schemaMail(instance: Instance) {
 	const smtp = await fakeSmtp();
-	mailServers.push(smtp);
 	instance.app.config.publicUrl ??= "https://mainworthy.example";
 	instance.app.config.mail = defaultConfig({
 		MAINWORTHY_SMTP_HOST: "127.0.0.1",
@@ -53,6 +69,12 @@ async function schemaMail(instance: Instance): Promise<void> {
 		MAINWORTHY_MAIL_FROM: "mainworthy@example.com",
 		MAINWORTHY_PUBLIC_URL: "https://mainworthy.example",
 	}).mail;
+	return {
+		async [Symbol.asyncDispose]() {
+			await waitMail(instance.app);
+			await smtp.close();
+		},
+	};
 }
 
 function boot(
@@ -67,10 +89,10 @@ function boot(
 		surfaces?: boolean;
 		oidc?: Config["oidc"];
 	} = {},
-): Instance {
+): Instance & AsyncDisposable {
 	const dataDir = existing ?? mkdtempSync(join(tmpdir(), "mainworthy-http-"));
-	if (!existing) dirs.push(dataDir);
-	const instance = start(
+	return startFixture(
+		!existing,
 		{
 			dataDir,
 			host: options.host ?? "127.0.0.1",
@@ -100,12 +122,10 @@ function boot(
 			},
 		},
 	);
-	running.push(instance);
-	return instance;
 }
 
 test("one data directory admits one server, releases on stop, and releases after failed startup", async () => {
-	const first = boot("local");
+	await using first = boot("local");
 	const previousWait = process.env.MAINWORTHY_LOCK_WAIT_SECONDS;
 	process.env.MAINWORTHY_LOCK_WAIT_SECONDS = "0";
 	try {
@@ -121,7 +141,7 @@ test("one data directory admits one server, releases on stop, and releases after
 	}
 	expect((await fetch(`${first.url}/healthz`)).status).toBe(200);
 	await first.stop();
-	const second = boot("local", null, first.app.config.dataDir);
+	await using second = boot("local", null, first.app.config.dataDir);
 	expect((await fetch(`${second.url}/healthz`)).status).toBe(200);
 	await second.stop();
 	const config = { ...first.app.config };
@@ -134,7 +154,7 @@ test("one data directory admits one server, releases on stop, and releases after
 			{ readers: 0 },
 		),
 	).toThrow("extra failed");
-	const third = boot("local", null, config.dataDir);
+	await using third = boot("local", null, config.dataDir);
 	expect((await fetch(`${third.url}/healthz`)).status).toBe(200);
 });
 
@@ -144,9 +164,9 @@ test.each([
 	{ setting: { ownerToken: "x".repeat(513) }, error: "MAINWORTHY_OWNER_TOKEN is longer than 512" },
 	{ setting: { owner: "forgotten-9" }, error: "MAINWORTHY_OWNER names forgotten-9" },
 ])("invalid startup configuration creates no data and takes no lock: $error", async ({ setting, error }) => {
-	const parent = mkdtempSync(join(tmpdir(), "mainworthy-start-config-"));
-	dirs.push(parent);
-	const first = boot("local");
+	using directory = testDirectory("mainworthy-start-config-");
+	const parent = directory.path;
+	await using first = boot("local");
 	const previousWait = process.env.MAINWORTHY_LOCK_WAIT_SECONDS;
 	process.env.MAINWORTHY_LOCK_WAIT_SECONDS = "0";
 	try {
@@ -169,8 +189,8 @@ test.each([
 });
 
 test("an invalid lock wait refuses startup before creating the data directory", () => {
-	const parent = mkdtempSync(join(tmpdir(), "mainworthy-lock-setting-"));
-	dirs.push(parent);
+	using directory = testDirectory("mainworthy-lock-setting-");
+	const parent = directory.path;
 	const previousWait = process.env.MAINWORTHY_LOCK_WAIT_SECONDS;
 	try {
 		for (const value of ["-1", "NaN", "Infinity", "1e309", "later"]) {
@@ -208,7 +228,7 @@ const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 test.each(["answer-then-pass", "pass-then-answer"])(
 	"HTTP disputes keep the slot separate from its cause: %s",
 	async (order) => {
-		const instance = boot("local");
+		await using instance = boot("local");
 		const owner = new Client({ url: instance.url, token: undefined, project: "disputes" });
 		await owner.call("admin", { do: "project.create", key: "disputes", preset: "standard" });
 		const member = async (actor: string) => {
@@ -478,7 +498,7 @@ async function sweepTrackerReplies(
 	}
 }
 test("scoped agent edits wait for a person through HTTP", async () => {
-	const instance = boot("local");
+	await using instance = boot("local");
 	const { checked } = await replySweep(instance, "scratch");
 	const token = await post<{ token: string }>(instance, "/api/admin", {
 		do: "token.create",
@@ -576,7 +596,7 @@ test("scoped agent edits wait for a person through HTTP", async () => {
 	);
 	expect(tagged).toMatchObject({ status: "open", needs: "a member who is not an agent" });
 	expect(await checked("admin", { do: "policy.show", project: "scratch" })).toMatchObject({ clauses, settings });
-});
+}, 60_000);
 
 async function sweepAttachmentReplies(checked: Awaited<ReturnType<typeof replySweep>>["checked"]) {
 	const report = z.object({ results: z.array(z.number()).min(1) }).parse(
@@ -627,10 +647,10 @@ const lanAddress = Object.values(networkInterfaces())
 	.flat()
 	.find((entry) => entry?.family === "IPv4" && !entry.internal)?.address;
 
-function bootReaders(count: number, patience: Patience = PATIENCE, trackerPort?: TrackerPort): Instance {
+function bootReaders(count: number, patience: Patience = PATIENCE, trackerPort?: TrackerPort) {
 	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-http-readers-"));
-	dirs.push(dataDir);
-	const instance = start(
+	return startFixture(
+		true,
 		{
 			dataDir,
 			host: "127.0.0.1",
@@ -645,8 +665,6 @@ function bootReaders(count: number, patience: Patience = PATIENCE, trackerPort?:
 		() => ({ ui: null }),
 		{ readers: count, patience, ...(trackerPort ? { trackerPort } : {}) },
 	);
-	running.push(instance);
-	return instance;
 }
 
 function readersOf(instance: Instance): Readers {
@@ -655,7 +673,7 @@ function readersOf(instance: Instance): Readers {
 }
 
 test("a confirmed 5,000-row CSV import answers reads and publishes all rows or none", async () => {
-	const instance = bootReaders(4);
+	await using instance = bootReaders(4);
 	await readersOf(instance).ready();
 	const csv = `ID,Title\n${Array.from({ length: 5000 }, (_, i) => `OLD${i},CSV case ${i}`).join("\n")}`;
 	const mapping = { id: "ID", title: "Title" };
@@ -710,10 +728,10 @@ test("a confirmed 5,000-row CSV import answers reads and publishes all rows or n
 		readsPerAttempt.push(readsDuringAdoption);
 	}
 	for (const count of readsPerAttempt) expect(count).toBeGreaterThan(0);
-});
+}, 60_000);
 
 test("reader threads resolve current team grants from the credential reference", async () => {
-	const instance = bootReaders(1);
+	await using instance = bootReaders(1);
 	const pool = readersOf(instance);
 	await pool.ready();
 	const made = await post<{ token: string }>(instance, "/api/admin", {
@@ -750,7 +768,7 @@ test("reader threads resolve current team grants from the credential reference",
 });
 
 test("role-restricted answers use current project grants for bearer and browser sessions", async () => {
-	const instance = boot("server", "role-test-owner-token-0123456789");
+	await using instance = boot("server", "role-test-owner-token-0123456789");
 	const headers = bearer("role-test-owner-token-0123456789");
 	const admin = async <T>(input: unknown): Promise<T> => {
 		const reply = await post<T>(instance, "/api/admin", input, headers);
@@ -876,7 +894,7 @@ test("role-restricted answers use current project grants for bearer and browser 
 describe("graceful stop", () => {
 	for (const count of [0, 2]) {
 		test(`a waiting write receives its reply and the event stream ends, with ${count} readers`, async () => {
-			const instance = bootReaders(count);
+			await using instance = bootReaders(count);
 			if (count > 0) await readersOf(instance).ready();
 			const events = await fetch(`${instance.url}/api/p/scratch/events`);
 			const reader = events.body?.getReader();
@@ -918,7 +936,7 @@ describe("graceful stop", () => {
 	}
 
 	test("a read already dispatched to a reader thread receives its reply before that thread stops", async () => {
-		const instance = bootReaders(2);
+		await using instance = bootReaders(2);
 		const pool = readersOf(instance);
 		await pool.ready();
 		const dispatched = Promise.withResolvers<void>();
@@ -943,7 +961,7 @@ describe("graceful stop", () => {
 	});
 
 	test("a request whose body never finishes cannot keep shutdown waiting indefinitely", async () => {
-		const instance = bootReaders(0, { ...PATIENCE, shutdownMs: 50 });
+		await using instance = bootReaders(0, { ...PATIENCE, shutdownMs: 50 });
 		const host = `Host: ${new URL(instance.url).host}\r\n`;
 		const client = wire(instance, `POST /api/p/scratch/propose HTTP/1.1\r\n${host}Content-Length: 1000\r\n\r\n{`);
 		try {
@@ -962,7 +980,7 @@ describe("reads on other cores through HTTP", () => {
 		const noNetwork = async () => {
 			throw new Error("Tracker network is disabled in this test.");
 		};
-		const instance = bootReaders(2, PATIENCE, { createDefect: noNetwork, getItem: noNetwork });
+		await using instance = bootReaders(2, PATIENCE, { createDefect: noNetwork, getItem: noNetwork });
 		const pool = readersOf(instance);
 		await pool.ready();
 		await post(instance, "/api/p/scratch/propose", {
@@ -1061,7 +1079,7 @@ describe("reads on other cores through HTTP", () => {
 	});
 
 	test("sixteen clients see every committed case immediately after their write while a report is applied", async () => {
-		const instance = bootReaders(4);
+		await using instance = bootReaders(4);
 		const pool = readersOf(instance);
 		await pool.ready();
 		await post(instance, "/api/p/scratch/propose", {
@@ -1094,7 +1112,7 @@ describe("reads on other cores through HTTP", () => {
 	}, 15_000);
 
 	test("killing a worker with HTTP reads in flight loses no requests and the replacement serves reads", async () => {
-		const instance = bootReaders(1);
+		await using instance = bootReaders(1);
 		const pool = readersOf(instance);
 		await pool.ready();
 		const worker = pool.threads[0];
@@ -1121,7 +1139,7 @@ describe("reads on other cores through HTTP", () => {
 	});
 
 	test("a read its caller may not make is refused before any worker sees it", async () => {
-		const instance = bootReaders(2);
+		await using instance = bootReaders(2);
 		const owner = bearer(instance.generatedToken ?? "");
 		const made = await post<{ token: string }>(
 			instance,
@@ -1141,7 +1159,7 @@ describe("reads on other cores through HTTP", () => {
 	});
 
 	test("a worker refuses write operations even when handed the owner's credential reference", async () => {
-		const instance = bootReaders(1);
+		await using instance = bootReaders(1);
 		const pool = readersOf(instance);
 		await pool.ready();
 		const refused = await pool.run(
@@ -1168,7 +1186,7 @@ describe("reads on other cores through HTTP", () => {
 	test.each([2, 0])(
 		"forgetting an actor clears the name from every read at once (%d reader threads)",
 		async (count) => {
-			const instance = bootReaders(count);
+			await using instance = bootReaders(count);
 			if (count > 0) await readersOf(instance).ready();
 			const created = await post<{ token: string }>(instance, "/api/admin", {
 				do: "token.create",
@@ -1198,17 +1216,18 @@ describe("reads on other cores through HTTP", () => {
 
 	test("MAINWORTHY_READERS=0 uses the inline reader and stop awaits all worker exits", async () => {
 		const previous = process.env.MAINWORTHY_READERS;
-		let inline: Instance;
+		let inlineFixture: ReturnType<typeof boot>;
 		try {
 			process.env.MAINWORTHY_READERS = "0";
-			inline = boot("local");
+			inlineFixture = boot("local");
 		} finally {
 			if (previous === undefined) delete process.env.MAINWORTHY_READERS;
 			else process.env.MAINWORTHY_READERS = previous;
 		}
+		await using inline = inlineFixture;
 		expect(inline.app.readers).toBeNull();
 		expect((await post(inline, "/api/p/scratch/find", {})).body).toMatchObject({ ok: true, result: { items: [] } });
-		const pooled = bootReaders(2);
+		await using pooled = bootReaders(2);
 		const pool = readersOf(pooled);
 		await pool.ready();
 		const exits = pool.threads.map((worker) => new Promise<void>((resolve) => worker.once("exit", () => resolve())));
@@ -1221,7 +1240,7 @@ describe("reads on other cores through HTTP", () => {
 
 describe("local mode", () => {
 	test("the browser on this machine is the owner with no step, and a first project exists", async () => {
-		const instance = boot("local");
+		await using instance = boot("local");
 		const session = (await (await fetch(`${instance.url}/api/session`)).json()) as Envelope<SessionInfo>;
 		expect(session.ok && session.result).toMatchObject({ actor: "robin", kind: "human", mode: "local", via: "local" });
 		expect(session.ok && session.result.projects.map((p) => p.key)).toEqual(["scratch"]);
@@ -1232,7 +1251,7 @@ describe("local mode", () => {
 	});
 
 	test("a page on another site cannot act as the owner: a foreign Origin or Host is refused", async () => {
-		const instance = boot("local");
+		await using instance = boot("local");
 		const body = { edits: [{ op: "create", outline: "Planted" }] };
 		expect((await post(instance, "/api/p/scratch/propose", body, { origin: "http://evil.example" })).status).toBe(401);
 		expect((await post(instance, "/api/p/scratch/propose", body, { origin: "null" })).status).toBe(401);
@@ -1244,7 +1263,7 @@ describe("local mode", () => {
 	test("a request that came through a forwarder is not the owner, whatever Host the forwarder wrote", async () => {
 		// A proxy that does not keep the client's Host (nginx and Apache by default), or a forwarded port, presents
 		// a loopback Host for a visitor from anywhere. Each of these headers says the request did not start here.
-		const instance = boot("local");
+		await using instance = boot("local");
 		const body = { edits: [{ op: "create", outline: "Planted through a proxy" }] };
 		expect((await fetch(`${instance.url}/api/session`)).status).toBe(200);
 		for (const [header, value] of [
@@ -1266,7 +1285,7 @@ describe("local mode", () => {
 	test("a GET another site's page makes is refused: the browser says so where it sends no Origin", async () => {
 		// An image or a script on any page the owner visits can ask for `/api/session` or the change stream, and a
 		// browser sends no Origin on such a GET. It does send Sec-Fetch-Site.
-		const instance = boot("local");
+		await using instance = boot("local");
 		const session = (site: string) => fetch(`${instance.url}/api/session`, { headers: { "sec-fetch-site": site } });
 		const seen: string[] = [];
 		for (const site of ["cross-site", "same-site", "same-origin", "none"])
@@ -1277,8 +1296,8 @@ describe("local mode", () => {
 		await stream.body?.cancel();
 	});
 
-	test("the owner with no step is a connection from this machine: any other peer address is refused", () => {
-		const instance = boot("local");
+	test("the owner with no step is a connection from this machine: any other peer address is refused", async () => {
+		await using instance = boot("local");
 		const request = new Request(`${instance.url}/api/session`, { headers: { host: new URL(instance.url).host } });
 		const via = (peer: string | null) => sessionOf(instance.app, request, instance.owner, peer)?.via ?? "refused";
 		expect(["127.0.0.1", "127.0.0.53", "::1", "::ffff:127.0.0.1"].map(via)).toEqual(Array(4).fill("local"));
@@ -1292,7 +1311,7 @@ describe("local mode", () => {
 	test.skipIf(!lanAddress)(
 		"a connection from another address is not the owner, though its Host says loopback",
 		async () => {
-			const instance = boot("local", null, undefined, { host: "0.0.0.0" });
+			await using instance = boot("local", null, undefined, { host: "0.0.0.0" });
 			const port = new URL(instance.url).port;
 			const session = (address: string) =>
 				fetch(`http://${address}:${port}/api/session`, { headers: { host: `127.0.0.1:${port}` } });
@@ -1304,7 +1323,7 @@ describe("local mode", () => {
 
 describe("server mode", () => {
 	test("a session cookie that cannot be decoded is no session: 401, and nothing in the log", async () => {
-		const instance = boot("server", "owner-secret-0123456789");
+		await using instance = boot("server", "owner-secret-0123456789");
 		const logged = spyOn(console, "error").mockImplementation(() => {});
 		try {
 			const cookie = { cookie: "mainworthy_sid=%" };
@@ -1323,7 +1342,7 @@ describe("server mode", () => {
 	test("the forwarded scheme is read one way: a list or upper case is still https, signs in, and the cookie is Secure", async () => {
 		// A second proxy appends its own scheme to the header, so the first element is the browser's. Before, the
 		// Origin check took the first element and the cookie wanted the whole header to be exactly `https`.
-		const instance = boot("server", "owner-secret-0123456789");
+		await using instance = boot("server", "owner-secret-0123456789");
 		const origin = `https://${new URL(instance.url).host}`;
 		const seen: string[] = [];
 		for (const proto of ["https", "https,http", "https, https", "HTTPS"]) {
@@ -1354,7 +1373,7 @@ describe("server mode", () => {
 	});
 
 	test("the cookie does not travel with a GET the browser says another site made", async () => {
-		const instance = boot("server", "owner-secret-0123456789");
+		await using instance = boot("server", "owner-secret-0123456789");
 		const login = await post(instance, "/api/login", { token: "owner-secret-0123456789" });
 		const cookie = (login.cookie ?? "").split(";")[0] ?? "";
 		const session = (site: string) =>
@@ -1369,7 +1388,7 @@ describe("server mode", () => {
 	});
 
 	test("a forgotten actor's name cannot let an old tab write as its replacement", async () => {
-		const instance = boot("server", "owner-secret-0123456789");
+		await using instance = boot("server", "owner-secret-0123456789");
 		const owner = new Client({ url: instance.url, project: "scratch", token: "owner-secret-0123456789" });
 		const grant = () =>
 			owner.call("admin", {
@@ -1416,7 +1435,7 @@ describe("server mode", () => {
 	});
 
 	test("every session route refuses a changed actor or a noncanonical actor id", async () => {
-		const instance = boot("server", "owner-secret-0123456789", undefined, {
+		await using instance = boot("server", "owner-secret-0123456789", undefined, {
 			surfaces: true,
 			publicUrl: "https://mainworthy.example",
 			oidc: {
@@ -1539,7 +1558,7 @@ describe("server mode", () => {
 	});
 
 	test("nothing works without a token; the owner token signs in; a wrong one does not", async () => {
-		const instance = boot("server", "owner-secret-0123456789");
+		await using instance = boot("server", "owner-secret-0123456789");
 		expect((await fetch(`${instance.url}/api/session`)).status).toBe(401);
 		expect((await post(instance, "/api/p/scratch/find", {})).status).toBe(401);
 		expect((await post(instance, "/api/p/scratch/find", {}, bearer("wrong-token-0123456789"))).status).toBe(401);
@@ -1562,20 +1581,20 @@ describe("server mode", () => {
 	});
 
 	test("with no token configured, one is generated on first start and only then", async () => {
-		const instance = boot("server");
+		await using instance = boot("server");
 		const token = instance.generatedToken ?? "";
 		expect(token).toMatch(/^cb_[0-9A-Za-z]{32}$/);
 		expect((await post(instance, "/api/p/scratch/find", {}, bearer(token))).status).toBe(200);
 		// The same data directory started again: no second token, and the first one still opens the door.
 		await instance.stop();
-		const again = boot("server", null, instance.app.config.dataDir);
+		await using again = boot("server", null, instance.app.config.dataDir);
 		expect(again.generatedToken).toBeNull();
 		expect((await post(again, "/api/p/scratch/find", {}, bearer(token))).status).toBe(200);
 		expect(again.app.db.raw.query("SELECT count(*) AS n FROM tokens").get()).toEqual({ n: 1 });
 	});
 
 	test("a token carries its actor's capabilities and nothing more", async () => {
-		const instance = boot("server", "owner-secret-0123456789");
+		await using instance = boot("server", "owner-secret-0123456789");
 		const owner = bearer("owner-secret-0123456789");
 		await post(instance, "/api/admin", { do: "project.create", key: "other" }, owner);
 		const made = await post<{ token: string }>(
@@ -1636,7 +1655,7 @@ describe("a pipeline's token", () => {
 			.get(project);
 
 	test("issued with no list of capabilities, it records and attaches evidence, ends changes, announces deploys and reads gates under every preset", async () => {
-		const instance = boot("server", OWNER);
+		await using instance = boot("server", OWNER);
 		for (const preset of ["loose", "standard", "strict"]) {
 			await admin(instance, { do: "project.create", key: preset, preset });
 			const made = await admin<{ can: string[] }>(instance, {
@@ -1723,7 +1742,7 @@ describe("a pipeline's token", () => {
 	});
 
 	test("a pipeline is not given more than recording and reading, and a stored grant that says more does not count", async () => {
-		const instance = boot("server", OWNER);
+		await using instance = boot("server", OWNER);
 		for (const can of [["produce"], ["read", "answer"], ["plan"], ["admin"]]) {
 			const refused = await admin(instance, { do: "token.create", actor: "wide", kind: "ci", can, project: "scratch" });
 			expect(refused.body).toMatchObject(invalid);
@@ -1748,7 +1767,7 @@ describe("a pipeline's token", () => {
 	});
 
 	test("whoever may produce may record, and reading alone records nothing", async () => {
-		const instance = boot("server", OWNER);
+		await using instance = boot("server", OWNER);
 		const agent = await token(instance, {
 			actor: "reviewer",
 			kind: "agent",
@@ -1764,7 +1783,7 @@ describe("a pipeline's token", () => {
 	});
 
 	test("what each actor may do is listed for each project, and a grant is changed or taken away by name", async () => {
-		const instance = boot("server", OWNER);
+		await using instance = boot("server", OWNER);
 		await admin(instance, { do: "project.create", key: "other" });
 		const ci = await token(instance, { actor: "github-actions", kind: "ci", project: "scratch" });
 		const listed = async () => {
@@ -1815,7 +1834,7 @@ describe("a pipeline's token", () => {
 	});
 
 	test("a second token for an actor changes nothing the actor may do", async () => {
-		const instance = boot("server", OWNER);
+		await using instance = boot("server", OWNER);
 		const first = await token(instance, { actor: "reviewer", kind: "agent", can: ["read"], project: "scratch" });
 		const second = await token(instance, { actor: "reviewer", kind: "agent" });
 		// Naming the grant the actor already holds asks for no change, and is the same request.
@@ -1849,7 +1868,7 @@ describe("a pipeline's token", () => {
 	});
 
 	test("the session names the project a pipeline records for, with what it may do there", async () => {
-		const instance = boot("server", OWNER);
+		await using instance = boot("server", OWNER);
 		await admin(instance, { do: "project.create", key: "other" });
 		const ci = await token(instance, { actor: "github-actions", kind: "ci", project: "scratch" });
 		const session = (await (
@@ -1891,7 +1910,7 @@ describe("who may make a token for whom", () => {
 	test("a person's token is made by that person or by the owner, and the owner's by the owner alone", async () => {
 		// Whoever holds a token for a name acts under that name: the record says a decision or a typed text is
 		// that person's. So an admin does not make one for somebody else, and nobody makes one for the owner.
-		const instance = boot("server", OWNER);
+		await using instance = boot("server", OWNER);
 		const dana = await token(instance, { actor: "dana", kind: "human" });
 		await token(instance, { actor: "eve", kind: "human", can: ["read"], project: "scratch" });
 		const forOwner = await admin(instance, { do: "token.create", actor: "robin", kind: "human" }, dana);
@@ -1920,7 +1939,7 @@ describe("who may make a token for whom", () => {
 
 	test("an agent that administers makes no person, no person's token, no grant and forgets nobody", async () => {
 		// An agent with a person's token is a person to every policy clause that says "not an agent".
-		const instance = boot("server", OWNER);
+		await using instance = boot("server", OWNER);
 		const bot = await token(instance, { actor: "rootbot", kind: "agent", can: ["admin"] });
 		await token(instance, { actor: "eve", kind: "human", can: ["read"], project: "scratch" });
 		const before = actors(instance);
@@ -1995,7 +2014,7 @@ describe("the owner always has a way in", () => {
 	};
 
 	test("the owner's last token is not revoked and the owner is not forgotten, by the owner or by another admin", async () => {
-		const instance = boot("server", OWNER);
+		await using instance = boot("server", OWNER);
 		const dana = bearer(await token(instance, { actor: "dana", kind: "human" }));
 		const [only] = await ownTokens(instance);
 		for (const caller of [owner, dana]) {
@@ -2037,7 +2056,7 @@ describe("the owner always has a way in", () => {
 	});
 
 	test("in local mode the owner needs no token, so the last one can be revoked", async () => {
-		const instance = boot("local");
+		await using instance = boot("local");
 		const made = await post<{ token: string }>(instance, "/api/admin", {
 			do: "token.create",
 			actor: "robin",
@@ -2053,14 +2072,14 @@ describe("the owner always has a way in", () => {
 	});
 
 	test("a configured owner token that was revoked, or is somebody else's, is not revived: the start says so and names the variable", async () => {
-		const first = boot("server", OWNER);
+		await using first = boot("server", OWNER);
 		const dana = await token(first, { actor: "dana", kind: "human" });
 		expect(first.warnings).toEqual([NO_PROXY_NAMED]);
 		// Revoked before this rule existed, or in the database by hand.
 		first.app.db.raw.query("UPDATE tokens SET revoked_at = 1 WHERE label LIKE 'owner %'").run();
 		await first.stop();
 
-		const revoked = boot("server", OWNER, first.app.config.dataDir);
+		await using revoked = boot("server", OWNER, first.app.config.dataDir);
 		expect(revoked.warnings).toEqual([
 			expect.stringMatching(/^MAINWORTHY_OWNER_TOKEN .*revoked.* Set MAINWORTHY_OWNER_TOKEN to a new value/),
 			NO_PROXY_NAMED,
@@ -2069,7 +2088,7 @@ describe("the owner always has a way in", () => {
 		expect([await whoIs(revoked, OWNER), revoked.generatedToken]).toEqual(["401", null]);
 		await revoked.stop();
 
-		const borrowed = boot("server", dana, first.app.config.dataDir);
+		await using borrowed = boot("server", dana, first.app.config.dataDir);
 		expect(borrowed.warnings).toEqual([
 			expect.stringMatching(/^MAINWORTHY_OWNER_TOKEN .*dana.* Set MAINWORTHY_OWNER_TOKEN to a new value/),
 			NO_PROXY_NAMED,
@@ -2079,7 +2098,7 @@ describe("the owner always has a way in", () => {
 		await borrowed.stop();
 
 		// A new value is a new token for the owner, and the start has nothing to say about it.
-		const renewed = boot("server", "another-owner-secret-0123456789abcdef", first.app.config.dataDir);
+		await using renewed = boot("server", "another-owner-secret-0123456789abcdef", first.app.config.dataDir);
 		expect([renewed.warnings, await whoIs(renewed, "another-owner-secret-0123456789abcdef")]).toEqual([
 			[NO_PROXY_NAMED],
 			"robin",
@@ -2087,14 +2106,14 @@ describe("the owner always has a way in", () => {
 	});
 
 	test("with no token configured and none left for the owner, as after an import, the start makes one and shows it", async () => {
-		const first = boot("server");
+		await using first = boot("server");
 		const original = first.generatedToken ?? "";
 		expect(await whoIs(first, original)).toBe("robin");
 		// What an import does to the tokens of the instance it replaces.
 		first.app.db.raw.query("DELETE FROM tokens").run();
 		await first.stop();
 
-		const again = boot("server", null, first.app.config.dataDir);
+		await using again = boot("server", null, first.app.config.dataDir);
 		const generated = again.generatedToken ?? "";
 		expect(generated).toMatch(/^cb_[0-9A-Za-z]{32}$/);
 		expect(generated).not.toBe(original);
@@ -2102,14 +2121,14 @@ describe("the owner always has a way in", () => {
 		await again.stop();
 
 		// Once the owner holds one, the next start makes no other.
-		const third = boot("server", null, first.app.config.dataDir);
+		await using third = boot("server", null, first.app.config.dataDir);
 		expect([third.generatedToken, await whoIs(third, generated)]).toEqual([null, "robin"]);
 	});
 
 	test("the start gives everything to a person only: an owner name that is an agent's or a pipeline's stops it", async () => {
 		// The owner's name comes from a variable, and the compose files default it to `owner`. A token issued to
 		// read one project must not administer the instance after a restart in which that variable was lost.
-		const first = boot("server", OWNER);
+		await using first = boot("server", OWNER);
 		const reader = await token(first, { actor: "owner", kind: "agent", can: ["read"], project: "scratch" });
 		await token(first, { actor: "github-actions", kind: "ci", project: "scratch" });
 		await first.stop();
@@ -2117,7 +2136,8 @@ describe("the owner always has a way in", () => {
 		for (const name of ["owner", "github-actions", "policy"]) {
 			let message = "started";
 			try {
-				await boot("server", OWNER, dataDir, { owner: name }).stop();
+				await using refused = boot("server", OWNER, dataDir, { owner: name });
+				await refused.stop();
 			} catch (error) {
 				message = error instanceof Error ? error.message : String(error);
 			}
@@ -2125,7 +2145,7 @@ describe("the owner always has a way in", () => {
 			expect(message).toContain(name);
 		}
 		// Nothing was granted on the way to the refusal.
-		const again = boot("server", OWNER, dataDir);
+		await using again = boot("server", OWNER, dataDir);
 		const session = (await (
 			await fetch(`${again.url}/api/session`, { headers: bearer(reader) })
 		).json()) as Envelope<SessionInfo>;
@@ -2145,7 +2165,8 @@ describe("names and failures", () => {
 		for (const name of ["forgotten-3", "Forgotten-robin"]) {
 			let message = "started";
 			try {
-				await boot("server", OWNER, undefined, { owner: name }).stop();
+				await using refused = boot("server", OWNER, undefined, { owner: name });
+				await refused.stop();
 			} catch (error) {
 				message = error instanceof Error ? error.message : String(error);
 			}
@@ -2158,7 +2179,7 @@ describe("names and failures", () => {
 	const owner = bearer(OWNER);
 
 	test("nobody is given the name a forgotten actor is known by", async () => {
-		const instance = boot("server", OWNER);
+		await using instance = boot("server", OWNER);
 		for (const actor of ["forgotten-3", "forgotten-", "Forgotten-12", "forgotten-robin"]) {
 			const made = await post(
 				instance,
@@ -2182,7 +2203,7 @@ describe("names and failures", () => {
 	});
 
 	test("a failure nobody foresaw is answered with one fixed sentence, and what failed goes to the log", async () => {
-		const instance = boot("server", OWNER);
+		await using instance = boot("server", OWNER);
 		await post(instance, "/api/admin", { do: "token.create", actor: "dana", kind: "human", can: ["read"] }, owner);
 		// A failure of the database that nothing here foresaw, as a full disk is: forgetting dana runs into it.
 		instance.app.db.raw
@@ -2219,7 +2240,7 @@ describe("what a session may see", () => {
 	// said the token does not get the other project's name. The two statuses were the name: any token, a
 	// pipeline's included, could ask for a key and learn whether a project has it (review F4, 2026-10-13).
 	test("a token for one project is told the same of another project as of one that does not exist", async () => {
-		const instance = boot("server", "owner-secret-0123456789");
+		await using instance = boot("server", "owner-secret-0123456789");
 		const owner = bearer("owner-secret-0123456789");
 		await post(instance, "/api/admin", { do: "project.create", key: "private-other" }, owner);
 		const made = await post<{ token: string }>(
@@ -2291,7 +2312,7 @@ describe("what a session may see", () => {
 	});
 
 	test("an open change stream stops when its actor is forgotten", async () => {
-		const instance = boot("server", "owner-secret-0123456789");
+		await using instance = boot("server", "owner-secret-0123456789");
 		const owner = bearer("owner-secret-0123456789");
 		const made = await post<{ token: string }>(
 			instance,
@@ -2325,7 +2346,7 @@ describe("what a session may see", () => {
 	});
 
 	test("an Origin with this host and another scheme is another site", async () => {
-		const instance = boot("local");
+		await using instance = boot("local");
 		const host = new URL(instance.url).host;
 		const body = { edits: [{ op: "create", outline: "Planted" }] };
 		expect((await post(instance, "/api/p/scratch/propose", body, { origin: `https://${host}` })).status).toBe(401);
@@ -2336,7 +2357,7 @@ describe("what a session may see", () => {
 	});
 
 	test("another site cannot sign a browser out", async () => {
-		const instance = boot("server", "owner-secret-0123456789");
+		await using instance = boot("server", "owner-secret-0123456789");
 		const refused = await post(instance, "/api/logout", {}, { origin: "http://evil.example" });
 		expect(refused.status).toBe(401);
 		expect(refused.cookie).toBeNull();
@@ -2346,7 +2367,7 @@ describe("what a session may see", () => {
 
 describe("the surface", () => {
 	test("review reuse through HTTP requires the same change and exact patch", async () => {
-		const instance = boot("local");
+		await using instance = boot("local");
 		const request = async <T>(op: string, input: unknown): Promise<T> => {
 			const reply = await post<T>(instance, `/api/p/scratch/${op}`, input);
 			expect(reply.status).toBe(200);
@@ -2381,7 +2402,7 @@ describe("the surface", () => {
 	});
 
 	test("the API document is reused without sharing mutable documents or request headers", async () => {
-		const instance = boot("local");
+		await using instance = boot("local");
 		const url = `${instance.url}/api/openapi.json`;
 		const first = await fetch(url, { headers: { "x-forwarded-proto": "https" } });
 		expect(first.status).toBe(200);
@@ -2415,7 +2436,7 @@ describe("the surface", () => {
 	});
 
 	test("every operation in the registry is a route and is in the generated API description", async () => {
-		const instance = boot("local");
+		await using instance = boot("local");
 		const api = (await (await fetch(`${instance.url}/api/openapi.json`)).json()) as {
 			paths: Record<string, { post: { operationId: string; requestBody: unknown } }>;
 		};
@@ -2440,7 +2461,7 @@ describe("the surface", () => {
 	});
 
 	test("the API description validates real replies and rejects missing or retyped result fields", async () => {
-		const instance = boot("local");
+		await using instance = boot("local");
 		const api = z
 			.object({
 				paths: z.record(
@@ -2481,7 +2502,7 @@ describe("the surface", () => {
 	});
 
 	test("every operation validates real replies against Zod and the served OpenAPI schema", async () => {
-		const instance = boot("local");
+		await using instance = boot("local");
 		const sweep = await replySweep(instance, "scratch");
 		const { checked } = sweep;
 		await checked("admin", { do: "project.create", key: "schema-demo" });
@@ -2507,7 +2528,13 @@ describe("the surface", () => {
 		await checked("propose", {
 			cmd: "schema-create",
 			edits: [
-				{ op: "create", outline: "Schema case\n  Open > Visible", folder: "Checks", tags: ["api"], covers: ["API-1"] },
+				{
+					op: "create",
+					outline: "Schema case\n  Open > Visible",
+					folder: "Checks",
+					tags: ["api"],
+					covers: ["API-1"],
+				},
 			],
 		});
 		await checked("plan", { name: "Schema run", select: { cases: ["C-1"] } });
@@ -2688,7 +2715,7 @@ describe("the surface", () => {
 		await checked("session", { do: "list" });
 		await checked("credential", { do: "list" });
 		await checked("invitation", { do: "create", name: "schema-person" });
-		await schemaMail(instance);
+		await using _mail = await schemaMail(instance);
 		await checked("credential", { do: "email.get", actor: "schema-person" });
 		await checked("credential", { do: "email.set", actor: "schema-person", email: "schema@example.com" });
 		await checked("invitation", { do: "list" });
@@ -2708,10 +2735,10 @@ describe("the surface", () => {
 		await sweepQuarantineReplies(checked);
 		expect([...sweep.seen].sort()).toEqual(OP_LIST.map((op) => op.name).sort());
 		console.log(`all-operation sweep: ${sweep.counts.success} real HTTP replies; Zod and Ajv`);
-	});
+	}, 60_000);
 
 	test("seeded reply sweep covers variants, empty results, paging and errors in Zod and served OpenAPI", async () => {
-		const instance = boot("local", "schema-owner-token-0123456789", undefined, {
+		await using instance = boot("local", "schema-owner-token-0123456789", undefined, {
 			publicUrl: "https://mainworthy.example",
 		});
 		const client = new Client({ url: instance.url, token: undefined, project: "demo" });
@@ -2958,7 +2985,7 @@ describe("the surface", () => {
 				}),
 			]),
 		);
-		await schemaMail(instance);
+		await using _mail = await schemaMail(instance);
 		await checked("credential", { do: "email.get", actor: "sweep-person" });
 		await checked("credential", { do: "email.set", actor: "sweep-person", email: "sweep@example.com" });
 		await checked("invitation", { do: "list" });
@@ -2983,10 +3010,10 @@ describe("the surface", () => {
 		console.log(
 			`reply sweep: ${total} real HTTP replies; ${sweep.counts.error + empty.counts.error} errors; Zod and Ajv`,
 		);
-	});
+	}, 60_000);
 
 	test("a body that is not JSON and an input that is not valid are refused with the field named", async () => {
-		const instance = boot("local");
+		await using instance = boot("local");
 		const raw = await fetch(`${instance.url}/api/p/scratch/propose`, { method: "POST", body: "{not json" });
 		expect(raw.status).toBe(400);
 		const invalid = await post(instance, "/api/p/scratch/propose", { edits: [{ op: "edit", case: "C-1" }] });
@@ -2995,7 +3022,7 @@ describe("the surface", () => {
 	});
 
 	test("a committed write is pushed on the project's change stream", async () => {
-		const instance = boot("local");
+		await using instance = boot("local");
 		const response = await fetch(`${instance.url}/api/p/scratch/events`);
 		const reader = response.body?.getReader();
 		if (!reader) throw new Error("no stream");
@@ -3023,8 +3050,8 @@ describe("/healthz and the commit", () => {
 
 	/** Asks `/healthz` of a server whose configuration was read from `env`, as `mainworthy serve` reads it. */
 	async function healthz(env: Record<string, string>): Promise<unknown> {
-		const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-http-healthz-"));
-		dirs.push(dataDir);
+		using directory = testDirectory("mainworthy-http-healthz-");
+		const dataDir = directory.path;
 		const config = defaultConfig({ MAINWORTHY_DATA: dataDir, MAINWORTHY_PORT: "0", MAINWORTHY_OWNER: "robin", ...env });
 		// No reader threads: this route does not read a project, and the loop below starts one server per value.
 		const instance = start(config, () => ({ ui: null }), { readers: 0 });
@@ -3100,8 +3127,8 @@ describe("/.well-known/apple-app-site-association", () => {
 
 	/** Asks for the file of a server whose configuration was read from `env`, as `mainworthy serve` reads it. */
 	async function association(env: Record<string, string>): Promise<Response> {
-		const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-http-aasa-"));
-		dirs.push(dataDir);
+		using directory = testDirectory("mainworthy-http-aasa-");
+		const dataDir = directory.path;
 		const config = defaultConfig({ MAINWORTHY_DATA: dataDir, MAINWORTHY_PORT: "0", MAINWORTHY_OWNER: "robin", ...env });
 		const instance = start(config, () => ({ ui: null }), { readers: 0 });
 		try {
@@ -3137,7 +3164,7 @@ describe("/.well-known/apple-app-site-association", () => {
 
 describe("a large report on a live server", () => {
 	test("C5 and E2: from the moment it is accepted the gate reads pending, reads are answered while it is applied, and no stale green is served", async () => {
-		const instance = boot("local");
+		await using instance = boot("local");
 		const results = (n: number, failing: boolean) =>
 			Array.from({ length: n }, (_, i) => ({
 				test: { key: `tests/f${i % 40}.spec.ts::test ${i}`, file: `tests/f${i % 40}.spec.ts` },
@@ -3182,7 +3209,7 @@ describe("a large report on a live server", () => {
 	});
 
 	test("writes that arrive during a large report wait their turn and all land", async () => {
-		const instance = boot("local");
+		await using instance = boot("local");
 		const big = Array.from({ length: 6000 }, (_, i) => ({ test: { key: `tests/a.spec.ts::t${i}` }, outcome: "pass" }));
 		const upload = post(instance, "/api/p/scratch/report", {
 			target: { commit: "0123abcd9", branch: "main" },
@@ -3207,7 +3234,7 @@ describe("a connection that sends nothing", () => {
 	test("is closed after the idle time, and a change stream outlives it", async () => {
 		// One second here; three minutes on a server nobody configured. Bun counts idle time in steps of four seconds, so
 		// one second is over within five.
-		const instance = boot("local", null, undefined, { patience: { ...PATIENCE, idleSeconds: 1 } });
+		await using instance = boot("local", null, undefined, { patience: { ...PATIENCE, idleSeconds: 1 } });
 		const host = `Host: ${new URL(instance.url).host}\r\n`;
 		const idle = wire(instance, `GET /healthz HTTP/1.1\r\n${host}\r\n`);
 		const stream = wire(instance, `GET /api/p/scratch/events HTTP/1.1\r\n${host}\r\n`);
@@ -3230,7 +3257,7 @@ describe("a connection that sends nothing", () => {
 	test("the idle time is for a connection nobody has vouched for: an authenticated request's reply may take longer, and a wrong token's connection is closed", async () => {
 		// The idle time counts the server's own silence too. A write that waits at the gate behind a long report, a
 		// large report on a slow machine, a tool call: each may answer after it, and must not lose its reply.
-		const instance = boot("server", "owner-secret-0123456789", undefined, {
+		await using instance = boot("server", "owner-secret-0123456789", undefined, {
 			patience: { ...PATIENCE, idleSeconds: 1 },
 		});
 		const host = `Host: ${new URL(instance.url).host}\r\n`;
@@ -3282,7 +3309,7 @@ describe("a connection that sends nothing", () => {
 
 	test("the body of a sign-in has a few seconds to arrive, then the request is answered and the connection closed", async () => {
 		// 300 ms here; five seconds on a server nobody configured. The body is ten bytes of the 4000 it announced.
-		const instance = boot("server", "owner-secret-0123456789", undefined, {
+		await using instance = boot("server", "owner-secret-0123456789", undefined, {
 			patience: { ...PATIENCE, idleSeconds: 30, signInBodyMs: 300 },
 		});
 		const host = `Host: ${new URL(instance.url).host}\r\n`;
@@ -3304,7 +3331,7 @@ describe("a connection that sends nothing", () => {
 
 describe("request size", () => {
 	test("an operation body over the limit is refused without being held in memory; sign-in takes a few kilobytes at most", async () => {
-		const instance = boot("server", "owner-secret-0123456789");
+		await using instance = boot("server", "owner-secret-0123456789");
 		const headers = { "content-type": "application/json", authorization: "Bearer owner-secret-0123456789" };
 		// 65 MB with an honest Content-Length
 		const big = new Uint8Array(65 * 1024 * 1024).fill(32);
@@ -3363,7 +3390,7 @@ describe("request size", () => {
 });
 
 test("a mismatched CLI contract is refused before an operation writes", async () => {
-	const instance = boot("local");
+	await using instance = boot("local");
 	const input = { do: "project.create", key: "contract-test", preset: "loose" };
 	const refused = await post(instance, "/api/admin", input, { "x-mainworthy-api-version": "2" });
 	expect(refused.status).toBe(409);
