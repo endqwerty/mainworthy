@@ -377,6 +377,7 @@ export function buildDataset(options: {
 						op: "create",
 						folder: index % 10 === 0 ? hotFolder : itemAt(folders, index % folders.length).id,
 						tags: [domain, index % 3 === 0 ? "smoke" : "regression", `priority-${index % 4}`],
+						covers: [`BENCH-${index % 100}`],
 						body: {
 							title: `${domain} ${itemAt(actions, index % actions.length)} ${subject} scenario ${index}${index % 997 === 0 ? " benchneedle" : ""}`,
 							pre: "Customer has an active account and a valid basket. Verify access before checkout.",
@@ -520,6 +521,34 @@ export function buildDataset(options: {
 				if (start % 100_000 < 5_000)
 					log(`  results ${Math.min(parameters.results, start + 5_000)}/${parameters.results}`);
 			}
+		});
+		const retried = tests.slice(0, 1);
+		phase("fail-then-pass retries", retried.length * 2, () => {
+			send(
+				retried.map((test) => ({
+					test: { key: test.key, name: test.name, file: test.file },
+					outcome: "fail",
+					durationMs: 120,
+					failure: { message: "Customer journey passed only on retry" },
+				})),
+			);
+			const receipt = call(
+				app,
+				ci,
+				"report",
+				{
+					target: { commit: lastCommit, repo: "example/mainworthy", branch: "main" },
+					job: "e2e",
+					attempt: 2,
+					results: retried.map((test) => ({
+						test: { key: test.key, name: test.name, file: test.file },
+						outcome: "pass",
+						durationMs: 80,
+					})),
+				},
+				Receipt,
+			);
+			verifyReport(app, receipt, retried.length);
 		});
 		const base = lastCommit;
 		const files = [...new Set(tests.map((test) => test.file))].slice(0, 20);

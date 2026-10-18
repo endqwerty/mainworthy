@@ -364,13 +364,51 @@ export function readWorkloads(instance: DatasetInstance, iterations: number): Wo
 			name: `report: ${of}`,
 			budget: BUDGETS.report,
 			iterations,
-			correctness: "The report asked for, over 30 days; the pass rate counts at least one result.",
+			correctness: "The report asked for, over 30 days, with populated counts and rows from the dataset.",
 			prepare: () => () => operation(instance, "stats", { of, days: 30 }),
 			check(value) {
 				const report = StatsReply.parse(value);
 				ensure(report.of === of, "the reply must be the report asked for");
 				if (report.of === "pass-rate")
 					ensure(report.total.pass + report.total.fail > 0, "the pass rate must count the dataset's results");
+				if (report.of === "flaky")
+					ensure(
+						report.tests === metadata.tests.length &&
+							report.flaky > 0 &&
+							report.items.length === Math.min(20, report.flaky) &&
+							report.items.every((row) => row.flips > 0 && !row.quarantined),
+						"the flaky report must list the dataset's fail-then-pass tests",
+					);
+				if (report.of === "reruns")
+					ensure(
+						report.reruns === 1 &&
+							report.lostMs === 120 &&
+							report.unknown === 0 &&
+							report.items.length === 1 &&
+							report.items.every(
+								(row) => row.test === test.ref && row.name === test.name && row.reruns === 1 && row.lostMs === 120,
+							),
+						"the reruns report must list the first test's repeated 120 ms attempt",
+					);
+				if (report.of === "automation")
+					ensure(
+						report.cases === metadata.parameters.cases &&
+							report.automated > 0 &&
+							report.automated + report.manual.wanted + report.manual.none === report.cases,
+						"the automation report must count the dataset's linked and manual cases",
+					);
+				if (report.of === "coverage")
+					ensure(
+						report.requirements === 100 &&
+							report.covered === 100 &&
+							report.items.length === 100 &&
+							report.items.reduce((sum, row) => sum + row.cases, 0) === metadata.parameters.cases &&
+							report.items.every(
+								(row) => row.cases > 0 && row.passed + row.failed + row.other + row.notRun === row.cases,
+							) &&
+							report.items.some((row) => row.passed + row.failed > 0),
+						"the coverage report must list 100 requirements covering every case and count their latest results",
+					);
 			},
 		});
 	// Resolve the owner outside timings; this also proves the same actor reads every operation.
