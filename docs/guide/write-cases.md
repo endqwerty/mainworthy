@@ -18,6 +18,7 @@ Create a case in Suite with the outline editor.
 7. Press <kbd>Escape</kbd> to record the case and leave the editor.
 
 Use <kbd>Tab</kbd> to move to the expected result field.
+Fields grow and shrink to fit their text, including when the case pane changes width.
 Press <kbd>Shift</kbd> <kbd>Enter</kbd> to record this case and start another.
 The [keyboard guide](./keyboard.md) lists the remaining editor keys.
 

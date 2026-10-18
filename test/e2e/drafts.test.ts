@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
-import { browserAvailable, eventually, openPage, startServer } from "./support.ts";
+import { browserAvailable, eventually, openPage, paste, startServer } from "./support.ts";
 
 test.skipIf(!browserAvailable)(
 	"L2 reload restores an unsealed sentence and its caret",
@@ -370,6 +370,172 @@ test.skipIf(!browserAvailable)(
 			expect(h.errors).toEqual([]);
 		} finally {
 			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+for (const device of ["desktop", "phone"] satisfies ("desktop" | "phone")[])
+	test.skipIf(!browserAvailable)(
+		`editor textareas fit initial text, pasted lines and pane wrapping without moving the caret on ${device}`,
+		async () => {
+			const server = await startServer();
+			await server.api("propose", {
+				edits: [
+					{
+						op: "create",
+						body: {
+							title: "Growing fields",
+							pre: "First line\nSecond line\nThird line",
+							steps: [{ id: "s1", action: "Open the cart", expected: null }],
+						},
+					},
+				],
+			});
+			const browser = await openPage(server, { path: "/p/scratch/suite/c/1", device });
+			try {
+				const { page } = browser;
+				await page.getByRole("button", { name: "Growing fields", exact: true }).waitFor();
+				await page.keyboard.press("e");
+				const pre = page.getByRole("textbox", { name: "Preconditions", exact: true });
+				expect(await pre.inputValue()).toBe("First line\nSecond line\nThird line");
+				expect(await pre.evaluate((node) => node.clientHeight >= node.scrollHeight)).toBe(true);
+				const step = page.getByRole("textbox", { name: "Step 1", exact: true });
+				await step.focus();
+				await page.keyboard.press("Tab");
+				const expected = page.getByRole("textbox", { name: "Expected result 1", exact: true });
+				const height = () => expected.evaluate((node) => node.clientHeight);
+				const short = await height();
+				const lines = "One\nTwo\nThree\nFour\nFive";
+				await paste(page, lines);
+				expect(await expected.inputValue()).toBe(lines);
+				expect(await height()).toBeGreaterThan(short);
+				expect(await expected.evaluate((node) => node.clientHeight >= node.scrollHeight)).toBe(true);
+				await page.keyboard.press("ControlOrMeta+A");
+				await page.keyboard.type("Visible");
+				expect(await height()).toBe(short);
+				await page.keyboard.press("ArrowLeft");
+				await page.keyboard.type("X");
+				expect(await expected.inputValue()).toBe("VisiblXe");
+				expect(
+					await expected.evaluate(
+						(node) =>
+							node instanceof HTMLTextAreaElement && {
+								start: node.selectionStart,
+								end: node.selectionEnd,
+								focused: document.activeElement === node,
+							},
+					),
+				).toEqual({ start: 7, end: 7, focused: true });
+				const wrapped = "The expected result stays completely visible when the case pane becomes narrower. ".repeat(5);
+				await expected.fill(wrapped);
+				const wide = await height();
+				await page.locator(".body-editor").evaluate((node) => {
+					node.style.width = "280px";
+				});
+				await page.waitForFunction(() => {
+					const field = document.querySelector('[aria-label="Expected result 1"]');
+					return field instanceof HTMLTextAreaElement && field.clientHeight >= field.scrollHeight;
+				});
+				expect(await height()).toBeGreaterThan(wide);
+				await page.locator(".body-editor").evaluate((node) => {
+					node.style.width = "";
+				});
+				await page.waitForFunction((wide) => {
+					const field = document.querySelector('[aria-label="Expected result 1"]');
+					return field instanceof HTMLTextAreaElement && field.clientHeight === wide;
+				}, wide);
+				expect(await expected.inputValue()).toBe(wrapped);
+				if (device === "phone") {
+					const portraitWidth = await expected.evaluate((node) => node.clientWidth);
+					await page.setViewportSize({ width: 844, height: 390 });
+					await page.waitForFunction((portraitWidth) => {
+						const field = document.querySelector('[aria-label="Expected result 1"]');
+						return (
+							field instanceof HTMLTextAreaElement &&
+							field.clientWidth > portraitWidth &&
+							field.clientHeight >= field.scrollHeight
+						);
+					}, portraitWidth);
+					await page.setViewportSize({ width: 390, height: 844 });
+					await page.waitForFunction((portraitWidth) => {
+						const field = document.querySelector('[aria-label="Expected result 1"]');
+						return (
+							field instanceof HTMLTextAreaElement &&
+							field.clientWidth === portraitWidth &&
+							field.clientHeight >= field.scrollHeight
+						);
+					}, portraitWidth);
+				}
+
+				await expected.fill("");
+				const cdp = await browser.context.newCDPSession(page);
+				await cdp.send("Input.imeSetComposition", { text: "にほんご", selectionStart: 4, selectionEnd: 4 });
+				expect(await expected.inputValue()).toBe("にほんご");
+				await cdp.send("Input.imeSetComposition", { text: "日本語", selectionStart: 3, selectionEnd: 3 });
+				await cdp.send("Input.insertText", { text: "日本語" });
+				expect(await expected.inputValue()).toBe("日本語");
+				expect(await page.getByRole("textbox", { name: /^Step \d+$/ }).count()).toBe(1);
+				expect(await expected.evaluate((node) => document.activeElement === node)).toBe(true);
+				expect(browser.errors).toEqual([]);
+			} finally {
+				await browser.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+
+test.skipIf(!browserAvailable)(
+	"typing in one editor field measures that field without measuring unchanged siblings",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [
+				{
+					op: "create",
+					body: {
+						title: "Independent fields",
+						steps: Array.from({ length: 12 }, (_, i) => ({
+							id: `s${i}`,
+							action: `Step ${i}`,
+							expected: `Expected ${i}`,
+						})),
+					},
+				},
+			],
+		});
+		const browser = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = browser;
+			await page.getByRole("button", { name: "Independent fields", exact: true }).waitFor();
+			await page.keyboard.press("e");
+			const field = page.getByRole("textbox", { name: "Step 1", exact: true });
+			await field.focus();
+			await page.evaluate(async () => {
+				await document.fonts.ready;
+				await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+				const native = Object.getOwnPropertyDescriptor(Element.prototype, "scrollHeight")?.get;
+				if (!native) throw new Error("No scrollHeight getter");
+				const reads: string[] = [];
+				Reflect.set(window, "textareaHeightReads", reads);
+				Object.defineProperty(Element.prototype, "scrollHeight", {
+					configurable: true,
+					get() {
+						if (this instanceof HTMLTextAreaElement) reads.push(this.getAttribute("aria-label") ?? "");
+						return native.call(this);
+					},
+				});
+			});
+			await page.keyboard.type("abcdefgh");
+			expect(await field.inputValue()).toBe("abcdefghStep 0");
+			const reads = z.array(z.string()).parse(await page.evaluate(() => Reflect.get(window, "textareaHeightReads")));
+			expect(reads.length).toBe(8);
+			expect([...new Set(reads)]).toEqual(["Step 1"]);
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser.close();
 			await server.stop();
 		}
 	},
