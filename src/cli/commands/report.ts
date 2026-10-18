@@ -8,6 +8,7 @@ import { detectedTarget, reportRoot, reportTarget, TARGET_FLAGS } from "../targe
 import type { AdapterCommand } from "./types.ts";
 
 const count = (value: number): string => value.toLocaleString("en-US");
+const plural = (value: number, one: string, many = `${one}s`): string => `${count(value)} ${value === 1 ? one : many}`;
 
 function identity(target: TargetIn | undefined, receipt: ReportReceipt): string {
 	if (!target) return receipt.target;
@@ -29,7 +30,7 @@ export function printReceipt(input: {
 	);
 	const counts = receipt.counts;
 	line(
-		`  ${count(counts.total)} results   ${count(counts.pass)} pass   ${count(counts.fail)} fail   ${count(counts.skip)} skip${counts.error ? `   ${count(counts.error)} error` : ""}${counts.blocked ? `   ${count(counts.blocked)} blocked` : ""}${receipt.gate?.run ? `  (${receipt.gate.run})` : ""}`,
+		`  ${plural(counts.total, "result")}   ${count(counts.pass)} pass   ${count(counts.fail)} fail   ${count(counts.skip)} skip${counts.error ? `   ${count(counts.error)} error` : ""}${counts.blocked ? `   ${count(counts.blocked)} blocked` : ""}${receipt.gate?.run ? `  (${receipt.gate.run})` : ""}`,
 	);
 	for (const cause of receipt.questions) {
 		const disposition =
@@ -39,29 +40,28 @@ export function printReceipt(input: {
 					? `decided by rule ${cause.by ?? "policy"}: ${cause.answer ?? "unknown"}`
 					: cause.how;
 		line(
-			`  ${count(cause.tests)} ${disposition}   ${cause.q} ${JSON.stringify(cause.title)}   (${count(cause.tests)} ${cause.tests === 1 ? "test" : "tests"})`,
+			`  ${count(cause.tests)} ${disposition}   ${cause.q} ${JSON.stringify(cause.title)}   (${plural(cause.tests, "test")})`,
 		);
 	}
-	line(
-		`  ${count(receipt.unlinked)} ${receipt.unlinked === 1 ? "result" : "results"} had no case or version when recorded`,
-	);
+	line(`  ${plural(receipt.unlinked, "result")} had no case or version when recorded`);
 	const basis =
 		Object.entries(receipt.basis)
 			.filter(([, value]) => value > 0)
-			.map(([kind, value]) => `${kind} ${count(value)}`)
+			.map(
+				([kind, value]) =>
+					`${kind} ${plural(value, "result")}${kind === "assumed" ? " (case versions current when recorded; add a version manifest for exact)" : kind === "unresolved" ? " (no case or version when recorded)" : ""}`,
+			)
 			.join(", ") || "none";
-	line(
-		`  basis: ${basis}${receipt.basis.assumed ? " (cases at their current version; add a version manifest for exact)" : ""}${receipt.basis.unresolved ? " (tests without a case or version)" : ""}`,
-	);
+	line(`  basis: ${basis}`);
 	if (receipt.rejected.length > 0) {
-		line(`  ${receipt.rejected.length} results rejected`);
+		line(`  ${plural(receipt.rejected.length, "result")} rejected`);
 		for (const rejected of receipt.rejected) warning(`result ${rejected.index + 1}: ${rejected.reason}`);
 	}
 	if (receipt.declined.length > 0) {
-		line(`  ${receipt.declined.length} case/version claims declined; results kept without a case`);
+		line(`  ${plural(receipt.declined.length, "case/version claim")} declined; results kept without a case`);
 		for (const declined of receipt.declined) warning(`result ${declined.index + 1}: ${declined.reason}`);
 	}
-	if (receipt.skippedAttachments) line(`  ${count(receipt.skippedAttachments)} attachments skipped; results kept`);
+	if (receipt.skippedAttachments) line(`  ${plural(receipt.skippedAttachments, "attachment")} skipped; results kept`);
 	const gate = receipt.gate;
 	const reason = gate?.reason.replace(new RegExp(`^${gate.verdict}:\\s*`), "");
 	line(
