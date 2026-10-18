@@ -8,6 +8,7 @@ import { Glob } from "bun";
 import { z } from "zod";
 import {
 	CI_SHARDS,
+	chromiumLaunchOptions,
 	failedTests,
 	failureLines,
 	findChromium,
@@ -19,6 +20,7 @@ import {
 	phaseReport,
 	QUIET,
 	quietWorkers,
+	sharedBrowserEndpoint,
 	slowest,
 	testArgs,
 	testReaders,
@@ -26,6 +28,127 @@ import {
 import { matrix, outputs } from "../scripts/ci-scope.ts";
 import { OLDEST_BUN, unready } from "../scripts/preflight.ts";
 import { parseJUnit, TEST_FILE_LIMIT } from "../src/surfaces/formats/junit.ts";
+
+test("browser slots follow Bun's worker index and preserve local browser ownership", () => {
+	const env = { MAINWORTHY_E2E_BROWSER_ENDPOINTS: "ws://127.0.0.1:1/a\nws://127.0.0.1:2/b", BUN_TEST_WORKER_ID: "2" };
+	expect(sharedBrowserEndpoint("/repo/test/e2e/phone.test.ts", env)).toBe("ws://127.0.0.1:2/b");
+	expect(sharedBrowserEndpoint("test/e2e/headers.test.ts", env)).toBe("ws://127.0.0.1:2/b");
+	expect(sharedBrowserEndpoint("test/e2e/phone.test.ts", { ...env, BUN_TEST_WORKER_ID: undefined })).toBe(
+		"ws://127.0.0.1:1/a",
+	);
+	for (const file of ["browser", "followups"])
+		expect(sharedBrowserEndpoint(`/repo/test/e2e/${file}.test.ts`, env)).toBeUndefined();
+	expect(sharedBrowserEndpoint("test/e2e/phone.test.ts", {})).toBeUndefined();
+	expect(sharedBrowserEndpoint("test/e2e/phone.test.ts", { ...env, MAINWORTHY_E2E_CPU_THROTTLE: "4" })).toBeUndefined();
+	for (const worker of ["0", "-1", "3", "1.5", "NaN"])
+		expect(() => sharedBrowserEndpoint("test/e2e/phone.test.ts", { ...env, BUN_TEST_WORKER_ID: worker })).toThrow(
+			"No shared Chromium endpoint for Bun worker",
+		);
+});
+
+test("owned and shared Chromium launches use the same flags, with explicit flags added for owned launches", () => {
+	expect(chromiumLaunchOptions("/chrome")).toEqual({
+		executablePath: "/chrome",
+		headless: true,
+		args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+	});
+	expect(chromiumLaunchOptions("/chrome", ["--host-resolver-rules=MAP mainworthy.test 127.0.0.1"]).args).toEqual([
+		"--no-sandbox",
+		"--disable-dev-shm-usage",
+		"--disable-gpu",
+		"--host-resolver-rules=MAP mainworthy.test 127.0.0.1",
+	]);
+});
+
+test.skipIf(findChromium().path === null)(
+	"two isolated files borrow one browser, disconnect after each file, and leave no page or storage behind",
+	async () => {
+		const path = findChromium().path;
+		if (!path) throw new Error("Chromium disappeared");
+		const { chromium } = await import("playwright-core");
+		const browser = await chromium.launchServer(chromiumLaunchOptions(path));
+		const root = mkdtempSync(join(tmpdir(), "mainworthy-browser-files-"));
+		const server = Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			fetch: () => new Response('<div id="probe">ready</div>', { headers: { "content-type": "text/html" } }),
+		});
+		try {
+			const setup = `import { expect, test } from "bun:test";
+import { openPage } from ${JSON.stringify(join(process.cwd(), "test/e2e/support.ts"))};
+const server = { url: ${JSON.stringify(server.url.origin)} };
+async function expectRunnerBrowser(context) {
+ const cdp = await context.browser().newBrowserCDPSession();
+ const {processInfo} = await cdp.send("SystemInfo.getProcessInfo");
+ expect(processInfo.find(process => process.type === "browser")?.id).toBe(${browser.process().pid});
+ await cdp.detach();
+}
+`;
+			writeFileSync(
+				join(root, "first.test.ts"),
+				`${setup}
+test("first file leaves a page and storage for its disconnect to clean", async () => {
+ const {page, context} = await openPage(server, { signedIn: false, path: "/?first-file", ready: "#probe" });
+ await expectRunnerBrowser(context);
+ await page.evaluate(() => localStorage.setItem("left-behind", "first"));
+ await context.addCookies([{name: "left-behind", value: "first", url: server.url}]);
+ expect((await context.cookies()).map(cookie => cookie.name)).toEqual(["left-behind"]);
+ expect(await page.evaluate(() => localStorage.getItem("left-behind"))).toBe("first");
+});`,
+			);
+			writeFileSync(
+				join(root, "second.test.ts"),
+				`${setup}
+test("second file has fresh storage and the first file's page is gone", async () => {
+ const {page, context, close} = await openPage(server, { signedIn: false, path: "/?second-file", ready: "#probe" });
+ try {
+  await expectRunnerBrowser(context);
+  expect(await page.evaluate(() => localStorage.getItem("left-behind"))).toBeNull();
+  expect(await context.cookies()).toEqual([]);
+  const cdp = await context.browser().newBrowserCDPSession();
+  const {targetInfos} = await cdp.send("Target.getTargets");
+  expect(targetInfos.filter(t => t.type === "page").map(t => t.url)).toEqual([server.url + "/?second-file"]);
+ } finally { await close(); }
+});`,
+			);
+			const child = Bun.spawn(
+				[
+					process.execPath,
+					"test",
+					"--parallel=1",
+					"--no-orphans",
+					join(root, "first.test.ts"),
+					join(root, "second.test.ts"),
+				],
+				{
+					env: {
+						...process.env,
+						MAINWORTHY_E2E_BROWSER_ENDPOINTS: browser.wsEndpoint(),
+						MAINWORTHY_E2E_CPU_THROTTLE: "",
+						BUN_TEST_WORKER_ID: "1",
+					},
+					stdout: "pipe",
+					stderr: "pipe",
+				},
+			);
+			const [out, err, exit] = await Promise.all([
+				new Response(child.stdout).text(),
+				new Response(child.stderr).text(),
+				child.exited,
+			]);
+			expect({ exit, output: (out + err).match(/2 pass\s+0 fail/)?.[0].replace(/\s+/g, " ") }, out + err).toEqual({
+				exit: 0,
+				output: "2 pass 0 fail",
+			});
+			expect(browser.process().exitCode).toBeNull();
+		} finally {
+			await browser.close();
+			await server.stop(true);
+			rmSync(root, { recursive: true, force: true });
+		}
+	},
+	30_000,
+);
 
 test("the browser fixture uses the production compiler flags and worker layout", () => {
 	const args = fixtureBuildArgs("/scratch/fixture");
