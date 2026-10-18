@@ -1,11 +1,13 @@
 // Three producers, one run: planned runs, slots and what may fill them (fixtures E1, E3, E5, E7 in the design).
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { AnnounceReply, DecideReply, GateStatus, InboxReply, PlanReply, ReportReceipt } from "../src/core/ops.ts";
+import { mustTarget } from "../src/server/evidence/evidence.ts";
 import { recoverAccepted } from "../src/server/jobs.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
-import { Db } from "../src/server/kernel/db.ts";
+import { Db, declaredSql } from "../src/server/kernel/db.ts";
 import { migrate } from "../src/server/kernel/migrate.ts";
 import { acceptReport, processBatch } from "../src/server/ops/writes.ts";
+import { plannedCounting, runsFor } from "../src/server/runs/runs.ts";
 import { exportArchive, importArchive, linesOf } from "../src/server/transfer/transfer.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
@@ -200,6 +202,108 @@ describe("a run typed by hand", () => {
 			ok: false,
 			error: { code: "not_found", message: "change pr:9 not found" },
 		});
+	});
+});
+
+describe("planned lookups beside change history", () => {
+	beforeEach(() => {
+		h = harness({ preset: "standard", unlinked: "ask" });
+		seed();
+		link("tests/a.spec.ts::case one", "C-1", "seed0001");
+	});
+
+	test("planned lookups preserve mixed-history membership, processing order and closed horizons", () => {
+		const plan = (name: string, commit?: string, caseRef = "C-1") =>
+			h.call<PlanReply>("plan", { name, select: { cases: [caseRef] }, ...(commit ? { accepts: { commit } } : {}) });
+		plan("first z", "zzzz0001");
+		plan("other commit", "aaaa0001");
+		plan("typed only");
+		const report = (commit: string, job: string) => ({
+			target: { commit, branch: "main" },
+			job,
+			results: [{ test: { key: "tests/a.spec.ts::case one" }, outcome: "pass" as const }],
+		});
+		h.call("report", report("zzzz0001", "first"));
+		plan("second z", "zzzz0001");
+		plan("open z", "zzzz0001", "C-2");
+		h.call("report", report("aaaa0001", "first"));
+		const project = findProject(h.app.db, "scratch");
+		if (!project) throw new Error("no project");
+		const refs = (ids: number[]) =>
+			ids.map(
+				(id) => `R-${h.app.db.raw.query<{ no: number }, [number]>("SELECT no FROM runs WHERE id = ?").get(id)?.no}`,
+			);
+		expect(refs(plannedCounting(h.app.db, project.id, "zzzz0001"))).toEqual(["R-6", "R-2", "R-7"]);
+		expect(refs(plannedCounting(h.app.db, project.id, "aaaa0001"))).toEqual(["R-3"]);
+		expect(plannedCounting(h.app.db, project.id, "absent01")).toEqual([]);
+		const horizons = () =>
+			h.app.db.raw
+				.query<{ no: number; accepted_seq: number; applied_seq: number; outstanding: number }, []>(
+					"SELECT no, accepted_seq, applied_seq, outstanding FROM runs WHERE origin = 'planned' ORDER BY no",
+				)
+				.all();
+		const before = horizons();
+		const inTx = <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): T =>
+			h.app.db.transaction(() => {
+				const ctx = makeCtx(h.app, project, h.owner, true);
+				const result = fn(ctx);
+				stampSeq(ctx);
+				return result;
+			});
+		const batch = inTx((ctx) => acceptReport(ctx, report("zzzz0001", "late"))).batch;
+		const target = mustTarget(h.app.db, batch.target);
+		expect(inTx((ctx) => runsFor(ctx, target, null, h.owner.kind)).map((row) => `R-${row.no}`)).toEqual([
+			"R-5",
+			"R-6",
+			"R-2",
+			"R-7",
+		]);
+		const waiting = horizons();
+		for (const no of [2, 6, 7])
+			expect(waiting.find((row) => row.no === no)).toEqual({
+				no,
+				accepted_seq: batch.seq,
+				applied_seq: first(before.filter((row) => row.no === no)).applied_seq,
+				outstanding: 1,
+			});
+		for (const no of [3, 4]) expect(waiting.find((row) => row.no === no)).toEqual(before.find((row) => row.no === no));
+		inTx((ctx) => processBatch(ctx, batch.id));
+		const after = horizons();
+		for (const no of [2, 6, 7])
+			expect(after.find((row) => row.no === no)).toEqual({
+				no,
+				accepted_seq: batch.seq,
+				applied_seq: batch.seq,
+				outstanding: 0,
+			});
+		for (const no of [3, 4]) expect(after.find((row) => row.no === no)).toEqual(before.find((row) => row.no === no));
+		for (const ref of ["R-2", "R-3", "R-6"])
+			expect(run(ref)).toMatchObject({ state: "closed", verdict: "passed", tally: { pass: 1, missing: 0 } });
+		for (const ref of ["R-4", "R-7"])
+			expect(run(ref)).toMatchObject({ state: "open", verdict: "pending", tally: { pass: 0, missing: 1 } });
+	});
+
+	test("planned lookups exclude change history in their query plans", () => {
+		const queries = declaredSql().filter(
+			(text) => text.startsWith("SELECT") && text.includes("FROM runs WHERE project = $project AND origin = 'planned'"),
+		);
+		expect(queries).toHaveLength(2);
+		for (const text of queries) {
+			const details = h.app.db.raw
+				.query<{ detail: string }, [{ project: number; commit: string }]>(`EXPLAIN QUERY PLAN ${text}`)
+				.all({ project: 1, commit: "zzzz0001" })
+				.map((row) => row.detail);
+			expect(
+				details.some((detail) =>
+					detail.includes(
+						text.startsWith("SELECT id")
+							? "USING INDEX runs_planned_commit (project=? AND <expr>=?)"
+							: "USING INDEX runs_planned_receiving (project=?)",
+					),
+				),
+				text,
+			).toBe(true);
+		}
 	});
 });
 

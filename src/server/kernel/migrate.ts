@@ -29,6 +29,7 @@ import projectRemovalIndexes from "./migrations/0024_project_removal_indexes.sql
 import removalIndexCost from "./migrations/0025_removal_index_cost.sql" with { type: "text" };
 import reportShards from "./migrations/0026_report_shards.sql" with { type: "text" };
 import resultsAt from "./migrations/0027_results_at.sql" with { type: "text" };
+import plannedRunIndex from "./migrations/0028_planned_run_index.sql" with { type: "text" };
 
 /**
  * In order. A migration is never edited after it ships; a change is a new entry.
@@ -67,6 +68,7 @@ export const MIGRATIONS: readonly { version: number; name: string; sql: string; 
 	{ version: 25, name: "removal_index_cost", sql: removalIndexCost, archive: false },
 	{ version: 26, name: "report_shards", sql: reportShards, archive: false },
 	{ version: 27, name: "results_at", sql: resultsAt, archive: false },
+	{ version: 28, name: "planned_run_index", sql: plannedRunIndex, archive: false },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;
