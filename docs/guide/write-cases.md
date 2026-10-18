@@ -289,6 +289,10 @@ fragment ref and pinned version. Publishing another fragment version leaves
 existing cases unchanged. Old case versions and runs keep their original pins.
 Fragments themselves are omitted from run selections.
 
+Search and run selections by text include the actions and expected results of
+pinned steps at their pinned version. A newer fragment version changes those
+matches only after you update the case's pin.
+
 Open a fragment to see **Fragment users** and the versions each case uses.
 To update cases pinned to an older fragment version, follow these steps.
 

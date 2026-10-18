@@ -31,6 +31,7 @@ import reportShards from "./migrations/0026_report_shards.sql" with { type: "tex
 import resultsAt from "./migrations/0027_results_at.sql" with { type: "text" };
 import plannedRunIndex from "./migrations/0028_planned_run_index.sql" with { type: "text" };
 import excuseSignatureIndex from "./migrations/0029_excuse_signature_index.sql" with { type: "text" };
+import pinnedSearch from "./migrations/0030_pinned_search.sql" with { type: "text" };
 
 /**
  * In order. A migration is never edited after it ships; a change is a new entry.
@@ -71,6 +72,7 @@ export const MIGRATIONS: readonly { version: number; name: string; sql: string; 
 	{ version: 27, name: "results_at", sql: resultsAt, archive: false },
 	{ version: 28, name: "planned_run_index", sql: plannedRunIndex, archive: false },
 	{ version: 29, name: "excuse_signature_index", sql: excuseSignatureIndex, archive: false },
+	{ version: 30, name: "pinned_search", sql: pinnedSearch, archive: false },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

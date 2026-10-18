@@ -507,10 +507,12 @@ function fromOutline(text: string): { body: PartialBody; tags: string[]; covers:
 	return { body: { title: outline.title ?? "", steps }, tags: outline.tags, covers: outline.covers };
 }
 
-const searchText = (body: CaseBody): string =>
-	[body.pre, ...body.steps.map((step) => (step.expected ? `${step.action}\n${step.expected}` : step.action))].join(
-		"\n",
-	);
+export function searchText(db: Db, project: number, body: CaseBody): string {
+	return [
+		body.pre,
+		...expandSteps(db, project, body).map((step) => (step.expected ? `${step.action}\n${step.expected}` : step.action)),
+	].join("\n");
+}
 
 // ── Seal ───────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -1106,7 +1108,7 @@ function indexCase(ctx: Ctx, id: number, body: CaseBody, tags: readonly string[]
 	ctx.db.run(Q.insertDoc, {
 		id,
 		title: body.title,
-		body: searchText(body),
+		body: searchText(ctx.db, ctx.project.id, body),
 		tags: tags.join(" "),
 		project: ctx.project.id,
 	});
