@@ -39,6 +39,70 @@ const first = <T>(items: T[]): T => {
 	return item;
 };
 
+describe("standing excuse precedence", () => {
+	test("an exact target wins, another target falls back to the cause, and an unanswered cause stays unexplained", () => {
+		const report = (commit: string, attempt = 1, message = "shared cause") =>
+			h.call<ReportReceipt>("report", ciReport({ commit, attempt, n: 1, fail: { 0: message } }));
+		const failure = () => first(queue().items.filter((item) => item.kind === "failure"));
+		expect(report("lookup01").gate).toMatchObject({ verdict: "blocked", tally: { unexplained: 1 } });
+		const broad = failure();
+		expect(decide(broad, { is: "infra" })?.status).toBe("decided");
+		report("lookup02");
+		const exact = failure();
+		expect(decide(exact, { is: "infra" })?.status).toBe("decided");
+		expect(decide(broad, { is: "defect" })?.status).toBe("decided");
+		expect(decide(exact, { is: "infra" })?.status).toBe("decided");
+		expect(h.app.db.raw.query("SELECT target, class FROM excuses ORDER BY target").all()).toEqual([
+			{ target: 0, class: "attributed" },
+			{ target: 2, class: "excused" },
+		]);
+		expect(report("lookup02", 2).gate).toMatchObject({
+			verdict: "passed",
+			tally: { excused: 1, attributed: 0, unexplained: 0 },
+		});
+		expect(report("lookup03").gate).toMatchObject({
+			verdict: "failed",
+			tally: { excused: 0, attributed: 1, unexplained: 0 },
+		});
+		expect(report("lookup04", 1, "another cause").gate).toMatchObject({
+			verdict: "blocked",
+			tally: { excused: 0, attributed: 0, unexplained: 1 },
+		});
+	});
+
+	test("a newer exact-result decision wins over both target and scope standing in counted results", () => {
+		const failed = { test: { key: "one" }, outcome: "fail", failure: { message: "shared cause" } };
+		h.call("report", { target: { repo: "app", commit: "lookupbase", branch: "main" }, results: [failed] });
+		expect(decide(first(queue().items), { is: "defect" })?.status).toBe("decided");
+		const receipt = h.call<ReportReceipt>("report", {
+			target: { repo: "app", commit: "lookuphead", branch: "feature", pr: 91, base: "lookupbase" },
+			results: [failed],
+		});
+		expect(receipt.questions).toMatchObject([{ how: "decided by rule", answer: "inherited" }]);
+		const exact = first(receipt.questions);
+		// Seed overlapping older standing without refolding: refreshing inherited questions removes this overlap.
+		h.app.db.raw.run(
+			`INSERT INTO excuses (project, signature, scope, target, decision, class, expires_at)
+			 SELECT r.project, r.signature, 'change:' || t.change, wanted.target, e.decision, e.class, e.expires_at
+			 FROM results r JOIN targets t ON t.id = r.target
+			 JOIN excuses e ON e.project = r.project AND e.signature = r.signature AND e.target = 0
+			 JOIN (SELECT 0 AS target UNION ALL SELECT target FROM results WHERE id = ?) wanted
+			 WHERE r.id = ?`,
+			[first(receipt.results), first(receipt.results)],
+		);
+		const found = h.call<{ items: { standing: string; question: string }[] }>("find", {
+			in: "results",
+			commit: "lookuphead",
+			repo: "app",
+		});
+		expect(found.items).toMatchObject([{ standing: "excused", question: exact.q }]);
+		expect(h.app.db.raw.query("SELECT class FROM excuses WHERE scope LIKE 'change:%'").all()).toEqual([
+			{ class: "attributed" },
+			{ class: "attributed" },
+		]);
+	});
+});
+
 describe("a green report", () => {
 	test("is recorded with an explicit basis and the gate passes", () => {
 		const receipt = h.call<ReportReceipt>("report", ciReport({ commit: "aaaaaaa1", n: 20 }));

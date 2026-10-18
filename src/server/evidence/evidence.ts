@@ -419,8 +419,7 @@ const Q = {
 		{ decision: number; class: "attributed" | "excused"; expires_at: number | null }
 	>(
 		`SELECT decision, class, expires_at FROM excuses
-		 WHERE project = $project AND signature = $signature AND scope = $scope AND target IN ($target, 0)
-		 ORDER BY (target != 0) DESC, decision DESC LIMIT 1`,
+		 WHERE project = $project AND signature = $signature AND scope = $scope AND target = $target`,
 	),
 	setExcuse: sql<{
 		project: number;
@@ -1599,7 +1598,7 @@ export function failedIn(
  * later judgement, or is the answer to a dispute, which another question's answer does not end.)
  */
 export const excuseFor = (db: Db, project: number, signature: number, scope: string, target: number) =>
-	db.get(Q.excuse, { project, signature, scope, target });
+	db.get(Q.excuse, { project, signature, scope, target }) ?? db.get(Q.excuse, { project, signature, scope, target: 0 });
 
 /**
  * Records how a cause is answered in a scope. Standing: only by a `failure` decision. `targets` limits it to the
