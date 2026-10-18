@@ -76,6 +76,9 @@ Their existing partial indexes cover equality lookups. The index test now checks
 refuses remaining removal indexes that no declared statement uses. Migration 25 changes indexes only,
 so its `archive` flag is false and the archive version stays 23.
 
+Migration 29 (2026-10-17) drops `excuses_signature_fk` too: the excuse lookup now reads the primary key, so no
+declared statement uses it any more, and the index test refused it.
+
 ### Measurements
 
 Bun 1.4.3 on the same ten-core Mac, without a concurrent test worker. For ingestion, every run executes the
