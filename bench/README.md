@@ -27,17 +27,25 @@ pragmas. Memory filesystems are refused. Parameters, generator hash and migratio
 hash must match for reuse. Every run clones the closed baseline and removes its
 writes afterward. About 500 folders have two levels. Cases have 3–9 steps, about
 60% expected results, tags and natural search terms; 20% have 1–5 history edits.
+Every case covers one of 100 requirements, assigned by its index without drawing
+from the case generator's random stream.
 Owner proposals create and edit cases in batches of 1,000. An authenticated CI
 actor registers tests and reports results in batches of 5,000 on trunk commits.
 Standard-preset map questions get bulk link decisions for three quarters of tests.
+The first test fails a 120 ms attempt, then passes attempt 2 on the same commit
+and job, so the flaky and rerun reports have rows to read.
 Failure decisions carry while others stay open. Separate PR reports fill the queue,
 capped at three minutes or five seconds in quick mode. Those results and 250 manual
-results are additional to the requested history. A 500-case run is half filled.
+results, plus both retry attempts, are additional to the requested history.
+A 500-case run is half filled.
 Twenty untimed recent edits on each clone exercise real changed-since diffs.
 Full cursors are 300 commands back; quick/small cursors precede the recent edits.
 
 Each workload has warmup and five sample blocks. Assertions check real outputs
 and committed writes outside operation/HTTP-response timers. Failed samples count.
+Report checks require populated results: coverage lists all 100 requirements and
+their cases' latest outcomes; flaky lists flips; reruns identifies the first test
+and its repeated 120 ms attempt. Automation counts both linked and manual cases.
 Full workloads within 2x their budget repeat five times on fresh clones; the report
 prints median and range, and any trial miss fails. First-run numbers stay visible.
 Random case reads warm five requests; repeated identical list/search queries are
