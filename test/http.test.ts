@@ -28,7 +28,7 @@ import { pollDefectHolds } from "../src/server/tracker-holds.ts";
 import type { TrackerPort } from "../src/server/trackers/port.ts";
 import { deliverTrackerRequests } from "../src/server/trackers/requests.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
-import { PATIENCE, type Patience, sessionOf } from "../src/surfaces/http.ts";
+import { openApi, PATIENCE, type Patience, sessionOf } from "../src/surfaces/http.ts";
 import { mcpRoute } from "../src/surfaces/mcp.ts";
 import { fakeSmtp } from "./mail-support.ts";
 import { authenticator } from "./people-support.ts";
@@ -2378,6 +2378,40 @@ describe("the surface", () => {
 			cases: 1,
 			unreviewed: 1,
 		});
+	});
+
+	test("the API document is reused without sharing mutable documents or request headers", async () => {
+		const instance = boot("local");
+		const url = `${instance.url}/api/openapi.json`;
+		const first = await fetch(url, { headers: { "x-forwarded-proto": "https" } });
+		expect(first.status).toBe(200);
+		expect(first.headers.get("strict-transport-security")).toBe("max-age=31536000");
+		const bytes = await first.text();
+		expect(JSON.parse(bytes).openapi).toBe("3.1.0");
+		const document = openApi();
+		const info = document.info;
+		if (typeof info !== "object" || info === null) throw new Error("Missing API info");
+		Reflect.set(info, "title", "Changed by a caller");
+		document.paths = {};
+		expect(JSON.stringify(openApi())).toBe(bytes);
+		// Equal bytes cannot show whether schemas were rebuilt. Make conversion unavailable after the first use.
+		const conversion = spyOn(z, "toJSONSchema").mockImplementation(() => {
+			throw new Error("Schemas must not be regenerated");
+		});
+		try {
+			const second = await fetch(url);
+			expect(second.status).toBe(200);
+			expect(second.headers.get("strict-transport-security")).toBeNull();
+			expect(second.headers.get("content-type")).toBe("application/json; charset=utf-8");
+			expect(second.headers.get("cache-control")).toBe("no-store");
+			expect(await second.text()).toBe(bytes);
+			expect(JSON.stringify(openApi())).toBe(bytes);
+			const third = await fetch(url, { headers: { "x-forwarded-proto": "https" } });
+			expect(third.headers.get("strict-transport-security")).toBe("max-age=31536000");
+			expect(await third.text()).toBe(bytes);
+		} finally {
+			conversion.mockRestore();
+		}
 	});
 
 	test("every operation in the registry is a route and is in the generated API description", async () => {

@@ -250,8 +250,21 @@ function dedupeSchema(schema: Schema): Schema {
 	return Object.keys(definitions).length === 0 ? result : { ...result, $defs: { ...result.$defs, ...definitions } };
 }
 
-/** Lists only the registry's agent operations, with compact input schemas and truthful tool hints. */
+let toolDefinitions: ToolDefinition[] | undefined;
+
+function freezeDefinition(value: unknown): void {
+	if (typeof value !== "object" || value === null) return;
+	for (const child of Object.values(value)) freezeDefinition(child);
+	Object.freeze(value);
+}
+
+/** Lists only the registry's agent operations, as an independently mutable copy. */
 export function mcpTools(): ToolDefinition[] {
+	return structuredClone(registryTools());
+}
+
+function registryTools(): ToolDefinition[] {
+	if (toolDefinitions) return toolDefinitions;
 	const tools: ToolDefinition[] = [];
 	for (const op of MCP_OPS) {
 		if (op.mcp === null) continue;
@@ -288,7 +301,9 @@ export function mcpTools(): ToolDefinition[] {
 			},
 		});
 	}
-	return tools;
+	freezeDefinition(tools);
+	toolDefinitions = tools;
+	return toolDefinitions;
 }
 
 function toolError(code: string, message: string): CallToolResult {
@@ -334,7 +349,7 @@ function errorMessage(error: Extract<Reply, { ok: false }>["error"]): string {
 class AgentServer extends McpServer {
 	constructor(call: Call, listProjects: ListProjects, protocolVersion: string) {
 		super({ name: "mainworthy", version: VERSION }, { instructions: INSTRUCTIONS });
-		const tools = mcpTools();
+		const tools = registryTools();
 		const supportsStructured = () => (this.server.getNegotiatedProtocolVersion() ?? protocolVersion) >= "2025-06-18";
 		for (const tool of tools) {
 			this.registerTool(
