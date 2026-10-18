@@ -1,13 +1,46 @@
 // What the check runs and when its duration warrants a warning. One place, read by `scripts/check.ts`, `scripts/ci-gate.ts`,
 // the browser tests' set-up and `test/check.test.ts`.
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { join } from "node:path";
 import { Glob } from "bun";
 import type { ResultIn } from "../src/core/ops.ts";
 
-/** Per-file durations in milliseconds, written by Bun. Shards are balanced by it; the slowest files start first. */
+/** Per-file weights in milliseconds. Shards are balanced by them; the slowest files start first. */
 export const TIMINGS = "scripts/test-timings.json";
+
+const TIMINGS_VERSION = 1;
+
+// Loaded before preflight: this boundary cannot depend on an installed package.
+export function readTimings(value: unknown): Record<string, number> {
+	if (
+		typeof value !== "object" ||
+		value === null ||
+		!("version" in value) ||
+		value.version !== TIMINGS_VERSION ||
+		!("files" in value) ||
+		typeof value.files !== "object" ||
+		value.files === null ||
+		Array.isArray(value.files)
+	)
+		throw new Error("Expected version-1 test timings with a files object");
+	const files: Record<string, number> = {};
+	for (const [file, ms] of Object.entries(value.files)) {
+		if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) throw new Error(`Invalid test timing for ${file}`);
+		files[file] = ms;
+	}
+	return files;
+}
+
+/** Both local recording and CI import write the format Bun reads, in descending order with integer milliseconds. */
+export function writeTimings(path: string, durations: Readonly<Record<string, number>>): void {
+	const files = Object.fromEntries(
+		Object.entries(readTimings({ version: TIMINGS_VERSION, files: durations }))
+			.sort(([a, msA], [b, msB]) => msB - msA || a.localeCompare(b))
+			.map(([file, ms]) => [file, Math.round(ms)]),
+	);
+	writeFileSync(path, `${JSON.stringify({ version: TIMINGS_VERSION, files }, null, 2)}\n`);
+}
 
 /**
  * The tests that compare a measured time with a limit. They run after the parallel phase, on a machine that

@@ -160,6 +160,26 @@ See [your data](docs/guide/data.md) for what an archive includes and leaves out.
 
 Rules for contributors, people and agents: [AGENTS.md](AGENTS.md).
 
+To refresh test scheduling weights from a passing CI run, use GitHub CLI with access to the repository:
+
+```
+$ gh run list --workflow check.yml --branch main --status success
+$ bun scripts/work.ts timings-from-ci <run-id>
+```
+
+The command downloads the run's JUnit artifacts and uses the newest attempt of each shard, including quiet tests.
+It reads each file's outer suite duration, which includes setup, instead of summing nested suites or testcases.
+It rescales CI milliseconds by the median existing-weight-to-CI-time ratio for positive matching durations.
+This preserves CI's relative weights while keeping files absent from the run on a comparable scale. With no
+positive matches, it uses CI milliseconds directly. Missing files keep their old values. A failed report or
+invalid duration leaves the timing file unchanged. Prefer a run of all tests to refresh every weight.
+Repeating an import preserves weights that already match the CI ratios within millisecond rounding.
+Both CI shard assignment and local parallel worker order read `scripts/test-timings.json`.
+
+For fresh local measurements with every file alone, run `bun run test --update-timings`.
+Commit the refreshed timing file with the change. Historic CI weights are scheduling estimates, not a prediction
+of local elapsed time or a measurement of future CI shard wall time.
+
 ## Where to read next
 
 | File | What |

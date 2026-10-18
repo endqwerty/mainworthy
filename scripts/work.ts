@@ -11,6 +11,7 @@
 //   bun scripts/work.ts release                       gives back the worktree's disk (node_modules and the rest); refuses while it is in use
 //   bun scripts/work.ts check-time <base> <head> [--rounds=2] [--no-install] [-- <command...>]
 //                                                     times the check on both, alternately, and judges the spread
+//   bun scripts/work.ts timings-from-ci <run-id>       refreshes test weights from a passing CI run's JUnit reports
 import { realpathSync } from "node:fs";
 import { join } from "node:path";
 import { check as checkBoard, isMove, move } from "./work/board.ts";
@@ -30,6 +31,7 @@ const USAGE = `usage: bun scripts/work.ts <command>
   pr-body <pull request number>
   sync-branch
   release
+  timings-from-ci <run-id>
   check-time <base> <head> [--rounds=2] [--no-install] [-- <command...>]`;
 
 const fail = (message: string, code = 1): never => {
@@ -95,6 +97,13 @@ async function main(args: string[]): Promise<void> {
 		case "release":
 			console.log(await release(ROOT));
 			return;
+		case "timings-from-ci": {
+			const [runId] = rest;
+			if (rest.length !== 1 || !runId || !/^[1-9]\d*$/.test(runId)) return fail(USAGE, 4);
+			const { timingsFromCi } = await import("./work/timings-from-ci.ts");
+			console.log(await timingsFromCi(ROOT, runId));
+			return;
+		}
 		case "check-time": {
 			const split = rest.indexOf("--");
 			const own = split < 0 ? rest : rest.slice(0, split);

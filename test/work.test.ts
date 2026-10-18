@@ -3,7 +3,17 @@
 // shell that asked, a wait that never ends, a pull request that closes an issue by a stray word, a time compared
 // from one run.
 import { afterEach, expect, test } from "bun:test";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	cpSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { addArgs, BOARD, drift, editArgs, isMove } from "../scripts/work/board.ts";
@@ -25,6 +35,7 @@ import { RELEASED, release } from "../scripts/work/release.ts";
 import { run } from "../scripts/work/run.ts";
 import { MARKER, make, refusal, remove } from "../scripts/work/scratch.ts";
 import { syncBranch } from "../scripts/work/sync-branch.ts";
+import { timingsFromReports } from "../scripts/work/timings-from-ci.ts";
 
 const made: string[] = [];
 const directory = (): string => {
@@ -47,6 +58,148 @@ const PROCS = `
   500     1 bun --watch src/cli/main.ts serve
   600   100 sh -c pkill -f 'main.ts serve'
 `;
+
+test("CI timings use each file's suite duration, the newest attempt, and preserve absent files", () => {
+	const root = directory();
+	mkdirSync(join(root, "scripts"));
+	const timings = join(root, "scripts/test-timings.json");
+	writeFileSync(
+		timings,
+		JSON.stringify({
+			version: 1,
+			files: {
+				"test/a.test.ts": 1000,
+				"test/b.test.ts": 3000,
+				"test/absent.test.ts": 7000,
+			},
+		}),
+	);
+	const reports = join(root, "reports");
+	const report = (shard: string, attempt: number, xml: string, exit = 0): void => {
+		const target = join(reports, `results-${shard}-attempt-${attempt}`);
+		mkdirSync(target, { recursive: true });
+		writeFileSync(join(target, `${shard}.xml`), xml);
+		writeFileSync(join(target, `${shard}.json`), JSON.stringify({ exit, seconds: 10 }));
+	};
+	report("tests-1", 1, '<testsuites><testsuite file="test/a.test.ts" time="999"/></testsuites>');
+	report(
+		"tests-1",
+		2,
+		`<testsuites time="100">
+		<testsuite file="test/a.test.ts" time="8" failures="0">
+			<testsuite name="describe" file="test/a.test.ts" time="99"/>
+			<testcase file="test/a.test.ts" time="99"/>
+		</testsuite>
+		<testsuite file="test/b.test.ts" time="4.0004"/>
+	</testsuites>`,
+	);
+	// Ratios 1000/8000 and 3000/4000.4: median scale, then rounded to Bun's integer milliseconds.
+	const result = timingsFromReports(root, reports);
+	expect(result.files).toBe(2);
+	expect(JSON.parse(readFileSync(timings, "utf8"))).toEqual({
+		version: 1,
+		files: {
+			"test/absent.test.ts": 7000,
+			"test/a.test.ts": 3500,
+			"test/b.test.ts": 1750,
+		},
+	});
+	const saved = readFileSync(timings, "utf8");
+	for (const xml of [
+		'<testsuites><testsuite file="test/a.test.ts" time="NaN"/></testsuites>',
+		'<testsuites><testsuite file="test/a.test.ts" time="-1"/></testsuites>',
+		'<testsuites><testsuite file="test/a.test.ts" time="1e999"/></testsuites>',
+		'<testsuites><testsuite file="test/a.test.ts"/></testsuites>',
+		'<testsuites><testsuite file="test/../a.test.ts" time="1"/></testsuites>',
+		'<testsuites><testsuite file="test/a.test.ts" time="1"/><testsuite file="test/a.test.ts" time="1"/></testsuites>',
+		"<testsuites/>",
+		'<testsuites><testsuite file="test/a.test.ts" time="1">',
+	]) {
+		report("tests-1", 3, xml);
+		expect(() => timingsFromReports(root, reports)).toThrow();
+		expect(readFileSync(timings, "utf8")).toBe(saved);
+	}
+	report("tests-1", 3, '<testsuites><testsuite file="test/a.test.ts" time="1"/></testsuites>', 1);
+	expect(() => timingsFromReports(root, reports)).toThrow("did not pass");
+	expect(readFileSync(timings, "utf8")).toBe(saved);
+	// A newest attempt with no XML must not fall back to the old passing artifact.
+	mkdirSync(join(reports, "results-tests-1-attempt-4"));
+	expect(() => timingsFromReports(root, reports)).toThrow();
+	expect(readFileSync(timings, "utf8")).toBe(saved);
+});
+
+test("CI timings accept scoped and quiet reports, new files, XML entities and zero durations", () => {
+	const root = directory();
+	mkdirSync(join(root, "scripts"));
+	const timings = join(root, "scripts/test-timings.json");
+	writeFileSync(timings, JSON.stringify({ version: 1, files: { "test/absent.test.ts": 7000 } }));
+	const reports = join(root, "reports");
+	for (const [shard, suite] of [
+		["tests", '<testsuite file="test/a&amp;b.test.ts" time="1.25"/>'],
+		["quiet", '<testsuite file="src/core/a.test.ts" time="0"/>'],
+	]) {
+		const target = join(reports, `results-${shard}-attempt-1`);
+		mkdirSync(target, { recursive: true });
+		writeFileSync(join(target, `${shard}.xml`), `<testsuites>${suite}</testsuites>`);
+		writeFileSync(join(target, `${shard}.json`), JSON.stringify({ exit: 0, seconds: 2 }));
+	}
+	expect(timingsFromReports(root, reports)).toEqual({ files: 2, scale: 1 });
+	expect(JSON.parse(readFileSync(timings, "utf8"))).toEqual({
+		version: 1,
+		files: {
+			"test/absent.test.ts": 7000,
+			"test/a&b.test.ts": 1250,
+			"src/core/a.test.ts": 0,
+		},
+	});
+	const saved = readFileSync(timings, "utf8");
+	writeFileSync(
+		join(reports, "results-quiet-attempt-1/quiet.xml"),
+		'<testsuites><testsuite file="test/a&amp;b.test.ts" time="1"/></testsuites>',
+	);
+	expect(() => timingsFromReports(root, reports)).toThrow("Duplicate JUnit file across shards");
+	expect(readFileSync(timings, "utf8")).toBe(saved);
+});
+
+test("repeating a CI timing refresh does not drift by a millisecond through rescaling", () => {
+	const root = directory();
+	mkdirSync(join(root, "scripts"));
+	const timings = join(root, "scripts/test-timings.json");
+	writeFileSync(
+		timings,
+		JSON.stringify({
+			version: 1,
+			files: {
+				"test/a.test.ts": 132664,
+				"test/b.test.ts": 88181,
+				"test/c.test.ts": 4676,
+			},
+		}),
+	);
+	const reports = join(root, "results-tests-attempt-1");
+	mkdirSync(reports);
+	writeFileSync(join(reports, "tests.json"), '{"exit":0,"seconds":200}');
+	writeFileSync(
+		join(reports, "tests.xml"),
+		`<testsuites>
+		<testsuite file="test/a.test.ts" time="37.122"/>
+		<testsuite file="test/b.test.ts" time="178.943"/>
+		<testsuite file="test/c.test.ts" time="107.132"/>
+	</testsuites>`,
+	);
+	timingsFromReports(root, root);
+	expect(JSON.parse(readFileSync(timings, "utf8"))).toEqual({
+		version: 1,
+		files: {
+			"test/b.test.ts": 88181,
+			"test/c.test.ts": 52793,
+			"test/a.test.ts": 18293,
+		},
+	});
+	const saved = readFileSync(timings, "utf8");
+	timingsFromReports(root, root);
+	expect(readFileSync(timings, "utf8")).toBe(saved);
+});
 
 test("a scratch directory is made under the root and deleted by the same command", () => {
 	const root = directory();
