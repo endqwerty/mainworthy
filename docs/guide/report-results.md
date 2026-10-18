@@ -19,6 +19,18 @@ has since created cases or someone has linked the tests. Several results can
 belong to the same test. See [tests with no case](./policy.md#tests-with-no-case)
 for the policy choices.
 
+The totals and each basis count results, not distinct tests. For two passing
+results from one unmapped test, the receipt includes:
+
+```text
+  2 results   2 pass   0 fail   0 skip
+  2 results had no case or version when recorded
+  basis: unresolved 2 results (no case or version when recorded)
+```
+
+An assumed basis uses the case version current when the result was recorded.
+Linking the test, editing the case, or changing policy does not change a replayed receipt.
+
 A successful `report` exits `0` even when tests fail. Use `gate` for the verdict.
 An invalid input or refused command exits `4`. See [changes](./changes.md).
 Sending an identical report again returns the original receipt and says

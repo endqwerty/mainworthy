@@ -499,6 +499,8 @@ for (const policy of ["track", "ask", "create"] as const) {
 			expect((await client.call("find", { in: "cases" })).count).toBe(policy === "create" ? 1 : 0);
 			expect((await client.call("inbox", { kind: "map" })).items).toHaveLength(policy === "ask" ? 1 : 0);
 			expect(first.stdout).toContain("  1 result had no case or version when recorded\n");
+			expect(first.stdout).toContain("  1 result   1 pass   0 fail   0 skip");
+			expect(first.stdout).toContain("  basis: unresolved 1 result (no case or version when recorded)\n");
 
 			const repeated = join(directory, "repeated.xml");
 			await writeFile(
@@ -509,6 +511,24 @@ for (const policy of ["track", "ask", "create"] as const) {
 			expect([plural.code, plural.stderr]).toEqual([0, ""]);
 			expect((await client.call("find", { in: "tests" })).items).toHaveLength(2);
 			expect(plural.stdout).toContain("  2 results had no case or version when recorded\n");
+			expect(plural.stdout).toContain("  2 results   2 pass   0 fail   0 skip");
+			expect(plural.stdout).toContain("  basis: unresolved 2 results (no case or version when recorded)\n");
+
+			if (policy === "ask") {
+				await client.call("propose", { edits: [{ op: "create", outline: "Checkout" }] });
+				const [question] = (await client.call("inbox", { kind: "map" })).items;
+				if (!question) throw new Error("the upload did not ask for a case link");
+				expect(
+					await client.call("decide", {
+						q: question.q,
+						onEvidence: question.evidenceHash,
+						answer: { is: "link", pairs: [["T-1", "C-1"]] },
+					}),
+				).toMatchObject([{ status: "decided" }]);
+				const linkedReplay = await run(argv);
+				expect(linkedReplay.code).toBe(0);
+				expect(linkedReplay.stdout).toBe(`${first.stdout}  already received; nothing was written\n`);
+			}
 
 			expect((await run(["policy", "tests", policy === "create" ? "track" : "create"])).code).toBe(0);
 			const again = await run(argv);
@@ -524,6 +544,28 @@ for (const policy of ["track", "ask", "create"] as const) {
 				unlinked: 1,
 				basis: { exact: 0, assumed: 0, unresolved: 1 },
 			});
+
+			if (policy === "track") await client.call("propose", { edits: [{ op: "create", outline: "Checkout" }] });
+			const mixed = join(directory, "mixed.xml");
+			await writeFile(
+				mixed,
+				'<testsuite><testcase name="exact @C-1@v1" /><testcase name="assumed @C-1" /><testcase name="also assumed @C-1" /><testcase name="unmapped" /></testsuite>',
+			);
+			const mixedArgv = ["report", mixed, "--commit", COMMIT];
+			const bases = await run(mixedArgv);
+			expect([bases.code, bases.stderr]).toEqual([0, ""]);
+			expect(bases.stdout).toContain("  4 results   4 pass   0 fail   0 skip");
+			expect(bases.stdout).toContain(
+				"  basis: exact 1 result, assumed 2 results (case versions current when recorded; add a version manifest for exact), unresolved 1 result (no case or version when recorded)\n",
+			);
+			expect(
+				await client.call("propose", {
+					edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Updated checkout" } }],
+				}),
+			).toMatchObject({ status: "adopted", cases: [{ ref: "C-1", version: 2 }] });
+			const basesReplay = await run(mixedArgv);
+			expect(basesReplay.code).toBe(0);
+			expect(basesReplay.stdout).toBe(`${bases.stdout}  already received; nothing was written\n`);
 		});
 	});
 }
@@ -699,7 +741,8 @@ test("CI can declare nothing required and a recorded policy choice controls the 
 			const env = { MAINWORTHY_TOKEN: pipeline.token };
 			const sent = await cli(["report", "--nothing-required", "--commit", COMMIT], { env });
 			expect(sent.code).toBe(0);
-			expect(sent.stdout).toContain("0 results");
+			expect(sent.stdout).toContain("  0 results   0 pass   0 fail   0 skip");
+			expect(sent.stdout).toContain("  0 results had no case or version when recorded\n  basis: none\n");
 			expect(sent.stdout).toContain("pending:");
 			expect((await run(["gate", "--commit", COMMIT], { env })).code).toBe(3);
 			const changed = await run(["policy", "empty", "nothing-required"]);
@@ -1389,7 +1432,7 @@ test("a declined case annotation is visible and its failure stays in the gate", 
 		);
 		const report = await run(["report", file, "--commit", COMMIT]);
 		expect(report.code).toBe(0);
-		expect(report.stdout).toContain("1 case/version claims declined; results kept without a case");
+		expect(report.stdout).toContain("1 case/version claim declined; results kept without a case");
 		expect(report.stderr).toContain("C-999");
 		expect(report.stderr.trim().split("\n")).toHaveLength(1);
 		expect((await run(["gate", "--commit", COMMIT])).code).toBe(2);
