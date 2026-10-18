@@ -98,6 +98,21 @@ export function readDraft({ project, id }: { project: string; id: string }): Dra
 		return null;
 	}
 }
+/** Bootstrap runs before the session selects an account and project, so include every canonical draft. */
+export function storedDraftOwners(): string[] {
+	const owners: string[] = [];
+	try {
+		for (let index = 0; index < localStorage.length; index++) {
+			const key = localStorage.key(index);
+			if (!key || !/^mainworthy:#\d+:draft:/.test(key)) continue;
+			try {
+				const parsed = Draft.safeParse(JSON.parse(localStorage.getItem(key) ?? "null"));
+				if (parsed.success && parsed.data.dirty) owners.push(parsed.data.owner);
+			} catch {}
+		}
+	} catch {}
+	return owners;
+}
 export function claimDraft({
 	project,
 	draft,

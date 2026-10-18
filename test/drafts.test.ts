@@ -12,7 +12,15 @@ import {
 	readDraftCopies,
 	writeCopiedDraft,
 } from "../src/web/lib/draft-copies.ts";
-import { claimDraft, type Draft, draftKey, readDraft, removeDraft, writeDraft } from "../src/web/lib/drafts.ts";
+import {
+	claimDraft,
+	type Draft,
+	draftKey,
+	readDraft,
+	removeDraft,
+	storedDraftOwners,
+	writeDraft,
+} from "../src/web/lib/drafts.ts";
 import { draftOwner } from "../src/web/lib/ids.ts";
 
 // The module reads the page's storage. No window is live here but this one: nothing answers on the channel.
@@ -73,6 +81,21 @@ function another(more: Partial<Draft> = {}): Draft {
 	kept.set(draftKey({ project, id: "C-1" }), JSON.stringify(theirs));
 	return theirs;
 }
+
+test("startup discovers dirty canonical owners across accounts and projects, including pending saves", () => {
+	expect(storedDraftOwners()).toEqual([]);
+	kept.set(draftKey({ project, id: "C-1" }), JSON.stringify(draft({ owner: "first-owner" })));
+	kept.set("mainworthy:#2:draft:other:C-2", JSON.stringify(draft({ owner: "pending-owner", sent: request })));
+	kept.set("mainworthy:#2:draft:other:C-3", JSON.stringify(draft({ owner: "clean-owner", dirty: false })));
+	kept.set("mainworthy:#2:draft:other:C-4", "not json");
+	kept.set("mainworthy:#2:draft:other:C-5", JSON.stringify({ owner: "invalid-owner", dirty: true }));
+	kept.set(
+		"mainworthy:#2:draft-copy:other:C-6:copy",
+		JSON.stringify({ draft: draft({ owner: "copy-owner" }), state: "lost" }),
+	);
+	kept.set("unrelated", JSON.stringify(draft({ owner: "unrelated-owner" })));
+	expect(storedDraftOwners()).toEqual(["first-owner", "pending-owner"]);
+});
 
 test("a window writes its own draft, and not over a draft another window owns", () => {
 	expect(writeDraft({ project, draft: draft({}) })).toBe(true);
