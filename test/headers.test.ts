@@ -1,7 +1,7 @@
 // The headers every reply carries: the policy by itself, then on a real listener for each kind of route, for the
 // web UI as the executable holds it (a list of built files) and as a start from source serves it (Bun's bundle).
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +9,7 @@ import { z } from "zod";
 import { Client } from "../src/cli/client.ts";
 import { seed } from "../src/cli/seed.ts";
 import { SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
+import { Db } from "../src/server/kernel/db.ts";
 import { type Instance, start } from "../src/server/start.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
 import { docsRoutes } from "../src/surfaces/docs/site.ts";
@@ -878,6 +879,33 @@ describe("the executable, built the way `bun run build` builds it", () => {
 			expect(carried(api)).toEqual(expected(OTHER, false));
 			// The executable serves its files itself: it has no bundler behind it and so no socket of one.
 			expect(readdirSync(data).filter((name) => name.startsWith("mainworthy-ui-"))).toEqual([]);
+			// A commit below the server writer's 20,000-page fallback must reach the database file while
+			// both connections stay open. The probe writer cannot checkpoint its own commit.
+			const path = join(data, "mainworthy.db");
+			const probe = new Db(path);
+			try {
+				probe.exec("PRAGMA wal_autocheckpoint = 0");
+				probe.exec(
+					"CREATE TABLE checkpoint_probe (value TEXT); INSERT INTO checkpoint_probe VALUES ('compiled checkpoint row')",
+				);
+				const marker = Buffer.from("compiled checkpoint row");
+				expect(readFileSync(`${path}-wal`).includes(marker)).toBe(true);
+				const deadline = Date.now() + 5000;
+				while (!readFileSync(path).includes(marker) && Date.now() < deadline) await Bun.sleep(25);
+				const snapshot = join(scratch(), "snapshot.db");
+				copyFileSync(path, snapshot);
+				const copy = new Db(snapshot, { reader: true });
+				try {
+					expect(copy.raw.query("SELECT value FROM checkpoint_probe").get()).toEqual({
+						value: "compiled checkpoint row",
+					});
+				} finally {
+					copy.close();
+				}
+			} finally {
+				probe.exec("DROP TABLE checkpoint_probe");
+				probe.close();
+			}
 			// Leave a small demo for a second start, so the compiled reset worker must actually run.
 			await seed(new Client({ url, token: TOKEN, project: "scratch" }), {
 				project: "demo",

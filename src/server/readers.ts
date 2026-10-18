@@ -46,8 +46,8 @@ type Options = {
 };
 
 /** The worker file: beside this one from source, and under `server/` in the compiled executable. */
-const workerUrl = (): URL =>
-	new URL(Bun.isStandaloneExecutable ? "./server/read-worker.js" : "./read-worker.ts", import.meta.url);
+const workerUrl = (role: "read" | "checkpoint"): URL =>
+	new URL(Bun.isStandaloneExecutable ? `./server/${role}-worker.js` : `./${role}-worker.ts`, import.meta.url);
 
 export class Readers implements ReadPool {
 	private readonly slots = new Set<Slot>();
@@ -71,8 +71,8 @@ export class Readers implements ReadPool {
 
 	private checkpoints(): void {
 		try {
-			const worker = new Worker(workerUrl(), {
-				workerData: { dataDir: this.options.dataDir, role: "checkpoint" },
+			const worker = new Worker(workerUrl("checkpoint"), {
+				workerData: { dataDir: this.options.dataDir },
 				name: "mainworthy-checkpoint",
 			});
 			// If it stops, the writer's own checkpoint target takes over: slower commits, nothing lost.
@@ -152,7 +152,7 @@ export class Readers implements ReadPool {
 	private spawn(failures = 0): void {
 		if (this.stopped) return;
 		try {
-			const url = workerUrl();
+			const url = workerUrl("read");
 			const worker = this.options.spawn
 				? this.options.spawn(url, this.options.dataDir)
 				: new Worker(url, { workerData: { dataDir: this.options.dataDir }, name: "mainworthy-reader" });

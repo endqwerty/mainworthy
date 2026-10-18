@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type Config, databasePath, defaultConfig } from "./app.ts";
-import { Db } from "./db.ts";
+import { type Config, defaultConfig } from "./app.ts";
+import { Db, databasePath } from "./db.ts";
 import { adoptFormerInstall } from "./former-name.ts";
 
 /**

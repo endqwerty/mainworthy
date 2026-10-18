@@ -3,32 +3,26 @@
 // `read` (the default): answers read operations on its own read-only connection, so a read never waits for the
 // thread that writes. It resolves the credential and grants inside the snapshot that answers the call.
 //
-// `checkpoint`: copies committed pages from the write-ahead log into the database file, so that no commit on the
-// main thread has to. SQLite otherwise checkpoints inside the commit that fills the log, and the server answers
-// nobody while it does.
-//
 // `archive`: exports a read snapshot or restores an archive under the parent's write gate, on its own connection.
 import { parentPort, workerData } from "node:worker_threads";
 import { z } from "zod";
 import { type ArchiveReply, ArchiveTask } from "./archives.ts";
-import { databasePath, openApp } from "./kernel/app.ts";
+import { openApp } from "./kernel/app.ts";
 import { diskBlobs } from "./kernel/blobs.ts";
 import { CallerReference } from "./kernel/caller.ts";
-import { Db } from "./kernel/db.ts";
+import { Db, databasePath } from "./kernel/db.ts";
 import type { Reply } from "./ops/registry.ts";
 
 const data = z
 	.discriminatedUnion("role", [
 		z.object({ dataDir: z.string(), role: z.literal("archive"), task: ArchiveTask }),
 		z.object({ dataDir: z.string(), role: z.literal("read") }),
-		z.object({ dataDir: z.string(), role: z.literal("checkpoint") }),
 	])
 	.parse({ role: "read", ...workerData });
 if (!parentPort) throw new Error("a worker needs its parent thread");
 const port = parentPort;
 
 if (data.role === "archive") await archive(data.task);
-else if (data.role === "checkpoint") checkpoints();
 else await reads();
 
 async function archive(task: z.infer<typeof ArchiveTask>): Promise<void> {
@@ -106,27 +100,8 @@ async function archive(task: z.infer<typeof ArchiveTask>): Promise<void> {
 	port.postMessage(reply);
 }
 
-function checkpoints(): void {
-	// An ordinary connection that never writes a row. A passive checkpoint makes nobody wait: it copies what no
-	// reader still needs and leaves the rest for the next round.
-	const db = new Db(databasePath(data.dataDir));
-	const timer = setInterval(() => {
-		try {
-			db.checkpoint();
-		} catch (error) {
-			console.error("[mainworthy] checkpoint failed:", error);
-		}
-	}, 500);
-	process.once("exit", () => {
-		clearInterval(timer);
-		db.close();
-	});
-	port.postMessage("ready");
-}
-
 async function reads(): Promise<void> {
-	// Loaded here and not at the top: the checkpoint thread reads no operation and has no use for them, and the
-	// registry is most of what a thread costs to start (about 100 ms of CPU).
+	// Archive work needs no operation registry.
 	const [{ OPS }, { invoke }] = await Promise.all([import("./ops/index.ts"), import("./ops/registry.ts")]);
 	const config = {
 		dataDir: data.dataDir,
