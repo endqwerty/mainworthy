@@ -374,10 +374,11 @@ The original decision and its withdrawal both stay in the record.
 Undo names the decision returned by your answer. If somebody replaced it meanwhile,
 the withdrawal conflicts and their decision stays. The withdrawal button in "Settled"
 names the decision shown there. Read the question again before withdrawing a replacement.
-For several answers, undo withdraws each decision separately. A refused answer is not
-withdrawn, and a failed withdrawal does not stop the others. The message names the failed withdrawals.
-Pressing <kbd>u</kbd> again retries only those withdrawals, with the same decision ids and command ids.
-If the server took a withdrawal but its reply was lost, the retry reads its recorded reply.
+For a selection, undo sends one request with each decision id. A refused answer is not
+withdrawn, and a refused withdrawal does not stop the others. The message names the failed withdrawals.
+Pressing <kbd>u</kbd> again sends the same request under the same command id and reads its recorded reply.
+The queue updates only withdrawals it has not yet confirmed, including when the first reply was lost.
+The iPhone's **Undo** after **Answer all** also withdraws the selection in one request.
 If somebody already withdrew the decision, the queue reads the question again and says
 it is already open.
 
@@ -386,6 +387,17 @@ compares `ifDecision` inside the transaction that withdraws the decision. Withou
 undo deliberately withdraws whichever decision currently stands, subject to the current
 policy. Use the receipt's `decision` id when taking back a specific answer. Advice is
 not a decision receipt, and undo does not withdraw advice on an open question.
+
+To withdraw up to 500 decisions together, send a list with a required `ifDecision` for each question:
+
+```
+mainworthy decide --json '{"undo":[{"q":"Q-12","ifDecision":31},{"q":"Q-13","ifDecision":32}],"reason":"Taking back the selection","cmd":"undo-selection-1"}'
+```
+
+The HTTP API accepts the same input. One shared reason applies to every withdrawal.
+The reply has one entry per question, in request order. A changed decision returns `conflict`
+without preventing other withdrawals. Retry with the same input and `cmd` to read the recorded replies without new writes.
+MCP discovery offers only the single-question withdrawal form.
 
 Withdrawing an excuse recomputes gates that depended on it. A failure can become
 unexplained again. Withdrawing a link removes that decision's link unless a newer

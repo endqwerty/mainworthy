@@ -187,8 +187,8 @@ export const EVIDENCE = {
 	}),
 } as const satisfies Record<string, Shape>;
 
-export const DecideReply = struct("DecideReply", "`decide`: what became of one answer, or of one withdrawal.", {
-	q: text,
+export const DecideReply = struct("DecideReply", "`decide`: one reply per answer or withdrawal, in request order.", {
+	q: [text, "The question this reply answers, including in a selection withdrawal."],
 	status: [text, "decided, advised, already, conflict, forbidden, invalid or reopened."],
 	needs: [maybe(text), "Why not, or who decides instead, as a sentence."],
 	decision: maybe(whole),

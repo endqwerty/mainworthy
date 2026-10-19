@@ -653,6 +653,10 @@ Answer a question, or withdraw a decision. Policy says whether your answer settl
 | `[3].undo` | `string` | yes | The question whose decision to withdraw. |
 | `[3].ifDecision` | `integer` | no |  |
 | `[3].reason` | `string` | no |  |
+| `[4].undo` | `array<object>` | yes |  |
+| `[4].undo[].q` | `string` | yes | The question whose decision to withdraw. |
+| `[4].undo[].ifDecision` | `integer` | yes |  |
+| `[4].reason` | `string` | no |  |
 
 </details>
 

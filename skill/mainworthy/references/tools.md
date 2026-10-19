@@ -234,6 +234,10 @@ Answer inbox using evidenceHash as onEvidence. Status: decided, advised=person d
 | `[3].undo` | `string` | yes | The question whose decision to withdraw. |
 | `[3].ifDecision` | `integer` | no |  |
 | `[3].reason` | `string` | no |  |
+| `[4].undo` | `array<object>` | yes |  |
+| `[4].undo[].q` | `string` | yes | The question whose decision to withdraw. |
+| `[4].undo[].ifDecision` | `integer` | yes |  |
+| `[4].reason` | `string` | no |  |
 
 ## inbox
 

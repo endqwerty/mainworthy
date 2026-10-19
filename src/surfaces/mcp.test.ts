@@ -14,7 +14,7 @@ import { z } from "zod";
 import { generateToolReference } from "../../scripts/gen-skill.ts";
 import { harness } from "../../test/helpers.ts";
 import type { Ask } from "../core/kinds.ts";
-import { FindInput, type InboxReply, ProposeInput } from "../core/ops.ts";
+import { DecideInput, FindInput, type InboxReply, ProposeInput } from "../core/ops.ts";
 import { PRESETS } from "../core/presets.ts";
 import { REPLIES } from "../core/replies.ts";
 import { actorByName, createToken, listTokens } from "../server/identity/identity.ts";
@@ -96,6 +96,22 @@ test("tools come from the registry and stay within their measured token limits",
 	}
 	console.log(`tool definitions: ${total} tokens; budget ${TOOL_TOKEN_BUDGET}; o200k_base`);
 	console.table(tools.map((tool) => ({ tool: tool.name, tokens: tokens(tool) })));
+});
+
+test("decide keeps selection withdrawal out of discovery while HTTP accepts it", () => {
+	const tool = mcpTools().find((entry) => entry.name === "decide");
+	if (!tool) throw new Error("decide");
+	const { properties, required, ...base } = tool.inputSchema;
+	const schema: Record<string, unknown> = {
+		...base,
+		...(properties ? { properties } : {}),
+		...(required ? { required } : {}),
+	};
+	const validate = new AjvJsonSchemaValidator().getValidator(schema);
+	const selection = { project: "scratch", undo: [{ q: "Q-1", ifDecision: 31 }] };
+	expect(DecideInput.parse(selection)).toEqual({ undo: [{ q: "Q-1", ifDecision: 31 }] });
+	expect(validate(selection).valid).toBe(false);
+	expect(validate({ project: "scratch", undo: "Q-1", ifDecision: 31 }).valid).toBe(true);
 });
 
 test("report tools omit the CI-only nothing-required declaration", () => {

@@ -88,24 +88,37 @@ extension ProjectClient {
 		}
 	}
 
-	/// Withdraws the decision that stands on a question. Both decisions stay in the ledger. The policy can ask
-	/// for a reason here too.
+	/// Withdraws a shown decision. Both decisions stay in the ledger. The policy can ask for a reason too.
 	package func withdraw(_ question: Question, reason: String = "") async throws -> WithdrawOutcome {
-		var input: [String: JSONValue] = ["undo": .string(question.ref)]
-		if let decision = question.ifDecision { input["ifDecision"] = .number(Double(decision)) }
-		let reason = reason.trimmingCharacters(in: .whitespacesAndNewlines)
-		if !reason.isEmpty { input["reason"] = .string(reason) }
-		let reply = try await decide(.object(input))
-		return reply.status == "reopened"
-			? .withdrawn(reply.needs)
-			: .notTaken(reply.needs ?? "another request (\(reply.status))")
+		let outcomes = try await withdraw([question], reason: reason)
+		guard let outcome = outcomes[question.ref] else { throw ClientError.unreadable }
+		return outcome
 	}
 
-	/// `decide` answers with one reply for each question it was sent. A withdrawal is of one question.
-	private func decide(_ input: JSONValue) async throws -> Wire.DecideReply {
-		let replies: [Wire.DecideReply] = try await server.write("decide", in: key, input)
-		guard let reply = replies.first, replies.count == 1 else { throw ClientError.unreadable }
-		return reply
+	/// Withdraws a selection under one command, conditional on each decision the person was shown.
+	package func withdraw(_ questions: [Question], reason: String = "") async throws -> [String: WithdrawOutcome] {
+		guard (1...decideMax).contains(questions.count), Set(questions.map(\.ref)).count == questions.count,
+			let first = questions.first else { throw ClientError.unreadable }
+		var input: [String: JSONValue]
+		if questions.count == 1 {
+			input = ["undo": .string(first.ref)]
+			if let decision = first.ifDecision { input["ifDecision"] = .number(Double(decision)) }
+		} else {
+			let withdrawals = try questions.map { question -> JSONValue in
+				guard let decision = question.ifDecision else { throw ClientError.unreadable }
+				return ["q": .string(question.ref), "ifDecision": .number(Double(decision))]
+			}
+			input = ["undo": .array(withdrawals)]
+		}
+		let reason = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+		if !reason.isEmpty { input["reason"] = .string(reason) }
+		let replies: [Wire.DecideReply] = try await server.write("decide", in: key, .object(input))
+		guard replies.map(\.q) == questions.map(\.ref) else { throw ClientError.unreadable }
+		return Dictionary(uniqueKeysWithValues: replies.map { reply -> (String, WithdrawOutcome) in
+			(reply.q, reply.status == "reopened"
+				? .withdrawn(reply.needs)
+				: .notTaken(reply.needs ?? "another request (\(reply.status))"))
+		})
 	}
 
 	/// The cases a proposal would make or change, each as it is and as it would be. Only a proposal that is
