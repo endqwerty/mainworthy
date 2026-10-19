@@ -376,7 +376,12 @@ export function buildDataset(options: {
 					return {
 						op: "create",
 						folder: index % 10 === 0 ? hotFolder : itemAt(folders, index % folders.length).id,
-						tags: [domain, index % 3 === 0 ? "smoke" : "regression", `priority-${index % 4}`],
+						tags: [
+							domain,
+							index % 3 === 0 ? "smoke" : "regression",
+							`priority-${index % 4}`,
+							...(index % 100 === 0 ? ["benchrare"] : []),
+						],
 						covers: [`BENCH-${index % 100}`],
 						body: {
 							title: `${domain} ${itemAt(actions, index % actions.length)} ${subject} scenario ${index}${index % 997 === 0 ? " benchneedle" : ""}`,

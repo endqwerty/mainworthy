@@ -61,9 +61,18 @@ export function prepareRecentChanges(instance: DatasetInstance): void {
 }
 
 /** Checks every returned search row against its persisted document and FTS word/prefix semantics. */
-export function verifySearch(instance: DatasetInstance, result: unknown, text: string): void {
+export function verifySearch(
+	instance: DatasetInstance,
+	result: unknown,
+	text: string,
+	scope: { folder?: number; tags?: string[] } = {},
+): void {
 	const page = CasePage.parse(result);
 	ensure(page.items.length > 0 && page.items.length <= 50, `search ${text} must match a bounded nonempty page`);
+	ensure(
+		scope.folder === undefined || page.items.every((row) => row.folder === scope.folder),
+		"search must keep the requested folder",
+	);
 	const body = z.object({
 		title: z.string(),
 		pre: z.string(),
@@ -79,6 +88,10 @@ export function verifySearch(instance: DatasetInstance, result: unknown, text: s
 	);
 	const terms = text.toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [];
 	for (const doc of docs) {
+		ensure(
+			(scope.tags ?? []).every((tag) => doc.tags.includes(tag)),
+			"search must keep every requested tag",
+		);
 		const words =
 			[doc.title, doc.pre, ...doc.tags, ...doc.steps.flatMap((step) => [step.action, step.expected ?? ""])]
 				.join(" ")
@@ -249,15 +262,34 @@ export function readWorkloads(instance: DatasetInstance, iterations: number): Wo
 			},
 		},
 	];
-	for (const search of SEARCHES)
+	const searches: { name: string; text: string; scope: { folder?: number; tags?: string[] } }[] = [
+		...SEARCHES.map((search) => ({ ...search, scope: {} })),
+		{ name: "search/common folder", text: "customer", scope: { folder: itemAt(metadata.folders, 1).id } },
+		{ name: "search/common rare tag", text: "customer", scope: { tags: ["benchrare"] } },
+	];
+	for (const search of searches) {
+		const filtered = search.scope.folder !== undefined || search.scope.tags !== undefined;
+		const expected = filtered
+			? CasePage.parse(operation(instance, "find", { in: "cases", ...search.scope, limit: 1 })).count
+			: null;
+		if (filtered) ensure(expected !== null && expected > 0, "filtered search must exercise a populated selection");
 		reads.push({
 			name: search.name,
 			budget: BUDGETS.search,
 			iterations,
-			correctness: "Nonempty bounded results; every persisted document satisfies the query's FTS terms.",
-			prepare: () => () => operation(instance, "find", { in: "cases", text: search.text, limit: 50 }),
-			check: (value) => verifySearch(instance, value, search.text),
+			correctness:
+				"Nonempty bounded results; persisted documents satisfy the FTS terms, folder and tags; filtered counts are exact.",
+			prepare: () => () => operation(instance, "find", { in: "cases", text: search.text, ...search.scope, limit: 50 }),
+			check(value) {
+				verifySearch(instance, value, search.text, search.scope);
+				if (expected !== null) {
+					const page = CasePage.parse(value);
+					ensure(page.items.length === Math.min(50, expected), "filtered search must fill its page");
+					ensure(page.count === expected, "common-word search must count every case in the selection");
+				}
+			},
 		});
+	}
 	const test = itemAt(metadata.tests, 0);
 	const testId = Number(test.ref.slice(2));
 	const historyCount = z

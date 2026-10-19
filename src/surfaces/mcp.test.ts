@@ -30,7 +30,7 @@ const TOKEN_COUNTS: Record<string, number> = {
 	claim: 390,
 	decide: 318,
 	inbox: 166,
-	get: 205,
+	get: 209,
 	find: 263,
 	impact: 196,
 	since: 158,
@@ -564,11 +564,11 @@ test.each(["2025-11-25", "2026-07-28"])(
 			expect(impact.cases).toContainEqual({ id: created.ref, hash: created.hash });
 			const got = resultOf(
 				await call("get", { refs: [created.ref], as: "md" }),
-				z.array(z.object({ ref: z.string(), hash: z.string(), md: z.string() })),
+				z.array(z.object({ ref: z.string(), hash: z.string(), etag: z.string(), md: z.string() })),
 			);
 			expect(got[0]?.md).toContain("> Total shows $90.00");
 			const unchanged = resultOf(
-				await call("get", { refs: [created.ref], as: "md", unless: { [created.ref]: created.hash } }),
+				await call("get", { refs: [created.ref], as: "md", unless: { [created.ref]: got[0]?.etag } }),
 				z.array(z.object({ ref: z.string(), unchanged: z.literal(true), hash: z.string() })),
 			);
 			expect(unchanged).toEqual([{ ref: created.ref, unchanged: true, hash: created.hash }]);
@@ -761,7 +761,7 @@ test("authenticated stateless HTTP answers initialize and tools/list and keeps t
 		expect(initialized.headers.get("mcp-session-id")).toBeNull();
 		const init = z.object({ result: InitializeResultSchema }).parse(await initialized.json()).result;
 		expect(init.protocolVersion).toBe("2025-11-25");
-		expect(init.instructions).toContain("onEvidence");
+		expect(init.instructions).toContain("Pass etag back with unless and hashes with onEvidence");
 		// Tool schemas call `project` optional; the rule for omitting it is said once, here.
 		expect(init.instructions).toContain("omit project only when the instance has exactly one project");
 		expect(init.instructions).toContain(

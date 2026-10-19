@@ -2778,10 +2778,10 @@ describe("the surface", () => {
 		await checked("find", { in: "deployments" });
 		const rows = z.object({ items: z.array(z.record(z.string(), z.unknown())), cursor: z.string().nullable() });
 		for (const ref of seeded.cases) {
-			const doc = z.array(z.object({ hash: z.string() })).parse(await checked("get", { refs: [ref] }))[0];
+			const doc = z.array(z.object({ etag: z.string() })).parse(await checked("get", { refs: [ref] }))[0];
 			if (!doc) throw new Error(ref);
 			await checked("get", { refs: [ref], as: "md" });
-			await checked("get", { refs: [ref], unless: { [ref]: doc.hash } });
+			await checked("get", { refs: [ref], unless: { [ref]: doc.etag } });
 			await checked("get", { refs: [ref], fields: ["title"] });
 			await checked("get", { refs: [ref], version: 1 });
 			await checked("history", { ref });

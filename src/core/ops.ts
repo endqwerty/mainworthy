@@ -644,7 +644,7 @@ export const GetInput = z.object({
 	unless: z
 		.record(z.string(), z.string())
 		.optional()
-		.describe("Ref to the hash you already hold. An unchanged case comes back as {ref, unchanged: true}."),
+		.describe("Ref to the etag from get for the same as/fields. Unchanged: {ref, unchanged: true, etag}."),
 	version: z.number().int().optional().describe("For one case: this version instead of the current one."),
 });
 export type GetInput = z.infer<typeof GetInput>;

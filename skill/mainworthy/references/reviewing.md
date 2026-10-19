@@ -1,7 +1,7 @@
 # Review a change
 
 1. Call `impact` with a `change` key such as `pr:482`, or with changed `files`. Read the counts, affected cases, reasons, hashes, open questions, and uncovered files. Keep the cursor.
-2. Read only the cases you need with `get`, `as: "md"`, and saved hashes in `unless`. Use `fields` for data reads that need only part of a case.
+2. Read only the cases you need with `get`, `as: "md"`, and saved document `etag` values in `unless`. Use `fields` for data reads that need only part of a case.
 3. Read the patch. Challenge each case's starting state, steps, and expected results. Try the uncovered paths with your own test tools. Mainworthy records observations; it does not run the software for you.
 4. Batch findings in `claim`. Set `lens: "adversarial-review"`, `about` to the change key, `patch` to the exact `change.head` you read from `impact`, and `reviewed` to the case refs and hashes, such as `C-1@hash`. Keep that original commit if the head moves while you review. Record a review even with no findings. Read `known` before raising the same issue again.
 5. To advise on a failure, read its question from `inbox`. Call `decide` with the `evidenceHash` as `onEvidence`, an answer such as `{"is":"defect"}`, and the facts behind it. With only `read` and `produce`, your answer is advice.
