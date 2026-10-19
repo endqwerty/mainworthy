@@ -28,6 +28,44 @@ const Token = z.object({ token: z.string() });
 const Created = z.object({ cases: z.array(Ref) });
 const Receipt = z.object({ batch: z.number(), fresh: z.boolean(), counts: z.object({ total: z.number() }) });
 
+test("report prints a conflict for a CI correction whose result was already corrected", async () => {
+	await withInstance(async ({ client, cli }) => {
+		const { token } = Token.parse(
+			await client.call("admin", {
+				do: "token.create",
+				actor: "correction-pipeline",
+				kind: "ci",
+				can: ["read", "record"],
+				project: "scratch",
+			}),
+		);
+		const pipeline = new Client({ url: client.url, token, project: "scratch" });
+		const input = { target: { commit: "clicorrect611" } };
+		const original = (
+			await pipeline.call("report", { ...input, results: [{ test: { key: "test" }, outcome: "pass" }] })
+		).results[0];
+		await pipeline.call("report", {
+			...input,
+			results: [{ test: { key: "test" }, outcome: "fail", note: "Broken", corrects: original }],
+		});
+		const refused = await cli(
+			[
+				"report",
+				"--project",
+				"scratch",
+				"--json",
+				JSON.stringify({ ...input, results: [{ test: { key: "test" }, outcome: "pass", corrects: original }] }),
+			],
+			{ env: { MAINWORTHY_TOKEN: token } },
+		);
+		expect(refused).toMatchObject({
+			code: 4,
+			stdout: "",
+			stderr: `conflict: result ${original} was already corrected; read the latest results and correct the current result instead\n`,
+		});
+	});
+});
+
 for (const refusal of ["reason", "admin"] as const) {
 	test(`decide prints a refused inherited replacement when the cause requires ${refusal}`, async () => {
 		await withInstance(async ({ client, cli }) => {

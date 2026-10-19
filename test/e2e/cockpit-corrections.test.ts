@@ -58,6 +58,57 @@ async function slots(server: Server, run: string) {
 }
 
 check(
+	"undo refuses a correction that moved after its client check (611)",
+	async () => {
+		const { server, run, path } = await fixture();
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		const held = Promise.withResolvers<void>();
+		const sent = Promise.withResolvers<number>();
+		try {
+			view = await openPage(server, { path });
+			const { page } = view;
+			await ready(page);
+			await page.keyboard.press("p");
+			await page.locator("#stat").filter({ hasText: "C-1 pass recorded" }).waitFor();
+			await fail(page, "First failure");
+			await page.locator("#stat").filter({ hasText: "C-1 fail recorded" }).waitFor();
+			await page.route("**/report", async (route) => {
+				const input = z
+					.object({ results: z.array(z.object({ corrects: z.number() })) })
+					.parse(route.request().postDataJSON());
+				const result = input.results[0];
+				if (!result) throw new Error("Undo sent no result");
+				sent.resolve(result.corrects);
+				await held.promise;
+				await route.continue();
+			});
+			await page.keyboard.press("u");
+			const corrects = await sent.promise;
+			await server.api("report", {
+				run,
+				results: [{ test: { case: "C-1" }, outcome: "fail", note: "Newer failure", corrects }],
+			});
+			const reply = page.waitForResponse((response) => response.url().endsWith("/report"));
+			held.resolve();
+			expect((await reply).status()).toBe(409);
+			await page.locator("#stat").filter({ hasText: "was already corrected" }).waitFor();
+			await page.locator(".run-evidence").filter({ hasText: "Newer failure" }).waitFor();
+			expect((await slots(server, run))[0]?.fills).toMatchObject([{ outcome: "fail", note: "Newer failure" }]);
+			expect((await slots(server, run))[0]?.fills).toHaveLength(1);
+			expect((await server.api("gate", { run })).verdict).toBe("blocked");
+			expect(
+				(await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "result"),
+			).toHaveLength(3);
+		} finally {
+			held.resolve();
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+check(
 	"undo preserves a newer failure recorded in another tab (542)",
 	async () => {
 		const { server, run, path } = await fixture();

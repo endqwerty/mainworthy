@@ -480,6 +480,7 @@ describe("what Runs reads", () => {
 		const cases = z.array(z.unknown()).parse(await op(key, "get", { refs: [slot.case], version: slot.version }));
 		holds("get pinned case", PinnedCase, cases[0]);
 		let corrects: number | undefined;
+		let original: number | undefined;
 		for (const outcome of ["pass", "fail", "skip", "blocked"]) {
 			const reply = await op(key, "report", {
 				run,
@@ -499,6 +500,7 @@ describe("what Runs reads", () => {
 			expect(receipt.rejected).toEqual([]);
 			expect(receipt.declined).toEqual([]);
 			corrects = receipt.results[0];
+			original ??= corrects;
 			expect(corrects).toBeNumber();
 			const filled = await op(key, "find", { in: "slots", run });
 			holds(`slots after ${outcome}`, SlotPage, filled);
@@ -511,6 +513,18 @@ describe("what Runs reads", () => {
 				.find((fill) => fill.result === corrects);
 			expect(result?.atStep).toBe(outcome === "fail" ? "s1" : null);
 		}
+		expect(
+			await send("POST", `/api/p/${key}/report`, {
+				run,
+				results: [{ test: { case: slot.case }, outcome: "pass", corrects: original }],
+			}),
+		).toEqual({
+			ok: false,
+			error: {
+				code: "conflict",
+				message: `result ${original} was already corrected; read the latest results and correct the current result instead`,
+			},
+		});
 		holds("slots after correction", SlotPage, await op(key, "find", { in: "slots", run }));
 	});
 });

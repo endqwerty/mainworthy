@@ -237,7 +237,7 @@ describe("what a flip and a rerun are (review of #461)", () => {
 		h = harness();
 	});
 
-	test("an attempt corrected twice counts the worse of what stands, not the longest chain (verifier, round 3)", () => {
+	test("legacy branching corrections count the worse of what stands, not the longest chain (verifier, round 3)", () => {
 		h = harness({ unlinked: "track" });
 		const send = (outcome: "pass" | "fail", durationMs: number, extra: Record<string, unknown> = {}, attempt = 1) => {
 			const one = ciReport({
@@ -253,7 +253,9 @@ describe("what a flip and a rerun are (review of #461)", () => {
 		send("pass", 20, {}, 2);
 		const first = send("pass", 999, { corrects: original });
 		send("pass", 777, { corrects: first });
-		send("fail", 555, { corrects: original });
+		const sibling = send("fail", 555);
+		// Stored history from before second corrections were refused still folds, including after archive import.
+		h.app.db.raw.query("UPDATE results SET corrects = ? WHERE id = ?").run(original, sibling);
 		// Two corrections stand, 777 ms (pass) and 555 ms (fail): the attempt counts the worse, as the gate does.
 		expect(stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 1, lostMs: 555 });
 	});
