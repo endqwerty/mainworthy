@@ -24,6 +24,18 @@ Two designs were compared locally. A separate edit-limit checker would decide wh
 
 Derive scope from resolved edits so every caller uses the same folder and tag facts. Refresh those facts when a pending proposal is shown or answered, because a case may have moved or changed tags since the proposal was sealed.
 
+The suite projects the whole batch's folder tree in adoption order, including folders created by case placement.
+Each folder keeps its identity through ancestor and child renames. Scope includes its original, intermediate,
+and final paths, and the final folders of created and moved cases. Computing a destination separately for each
+rename misses paths produced by combined renames, as reported in [#553](https://github.com/endqwerty/mainworthy/issues/553).
+
+Sealing and adoption check that this projected tree has one folder per canonical path. A collision is refused,
+including collisions between two edits or with a folder added while a proposal waited. Folder names can be
+swapped in one batch if their final paths are distinct. An unresolved path target that encounters temporary
+duplicates is refused rather than choosing an arbitrary folder. This preserves path-based case and run
+selection, as reported in [#551](https://github.com/endqwerty/mainworthy/issues/551). Waiting proposals remain
+readable and rejectable when a later collision prevents acceptance. No folders are merged.
+
 We refuse non-canonical folder and tag predicates at set time, naming the clause and its normalised spelling. Silently accepting a spelling that never matches would let an agent's edit be adopted without the intended review. Matching normalises older stored predicates and current scope names with the same cleaners. Paths and tags strip Unicode format characters and use NFC before their existing whitespace and case rules. A predicate empty after cleaning is invalid.
 
 Suite writes use the same cleaning for folder paths, explicit folder names and tags. Existing NFD folder names are not rewritten. Folder lookup and scope matching normalise them, so a canonical path reuses the existing folder and its scope still requires review. A later explicit rename stores the cleaned name.

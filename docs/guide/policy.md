@@ -62,6 +62,11 @@ This clause holds the whole proposal for a person. Other clauses still decide wh
 
 Conditions describe the whole proposal, including the current and proposed folders and tags. Moving a case out of a folder or removing its tag still matches its original scope. Folder changes include descendant paths and the tags of cases inside them. A proposal with several edits needs every matching condition somewhere in the proposal, even if different cases supply them. Pending proposals recheck the current folders and tags when shown or answered.
 
+Folder scopes include the combined result of all edits in their given order.
+Renaming `Public` to `Checkout` and `Public/Temp` to `Secure` in one proposal matches `folder:checkout/secure`.
+This applies to empty folders and to cases created or moved before those renames.
+Paths touched between edits also count, even when a later edit changes them again.
+
 The presets do not add scope restrictions. Per-day limits and protection based on who wrote particular content are not available yet. Under `standard`, every agent proposal already waits for a person.
 
 ## Read the policy

@@ -329,7 +329,10 @@ export type FolderIndex = {
 
 /** Every folder of a project with its path. A project has hundreds of folders at most, so this is one small read. */
 export function folderIndex(db: Db, project: number): FolderIndex {
-	const rows = db.all(Q.folders, { project });
+	return indexFolders(db.all(Q.folders, { project }));
+}
+
+function indexFolders<T extends Pick<FolderRow, "id" | "parent" | "name">>(rows: readonly T[]) {
 	const byId = new Map(rows.map((row) => [row.id, row]));
 	const paths = new Map<number, string>();
 	const path = (id: number): string => {
@@ -341,9 +344,14 @@ export function folderIndex(db: Db, project: number): FolderIndex {
 		paths.set(id, full);
 		return full;
 	};
-	const byPath = new Map<string, FolderRow>();
-	for (const row of rows) byPath.set(cleanPath(path(row.id)).join("/").toLowerCase(), row);
-	return { byId, path, byPath };
+	const byPath = new Map<string, T>();
+	const ambiguous = new Set<string>();
+	for (const row of rows) {
+		const key = cleanPath(path(row.id)).join("/").toLowerCase();
+		if (byPath.has(key)) ambiguous.add(key);
+		byPath.set(key, row);
+	}
+	return { byId, path, byPath, ambiguous };
 }
 
 function folderTarget(index: FolderIndex, target: number | string): FolderTarget {
@@ -768,7 +776,9 @@ export function* sealSteps(ctx: Ctx, input: Parameters<typeof seal>[1]): Generat
 		else if (edit.op === "edit") validateFields(edit.body, policy, bodyOf(ctx.db, edit.caseId, edit.head));
 	}
 
-	const facts = [`author:${ctx.actor.kind}`, ...(yield* scopeFactsSteps(ctx.db, ctx.project.id, resolved))];
+	const folders = yield* projectFoldersSteps(index, resolved);
+	validateFolderPaths(index, folders);
+	const facts = [`author:${ctx.actor.kind}`, ...(yield* scopeFactsSteps(ctx.db, ctx.project.id, resolved, folders))];
 	if (conflicts.length > 0) facts.push("conflict");
 	if (resolved.some((r) => r.op === "policy")) facts.push("policy");
 	if (resolved.some((r) => r.op === "quarantine")) facts.push("quarantine");
@@ -789,13 +799,130 @@ export function* sealSteps(ctx: Ctx, input: Parameters<typeof seal>[1]): Generat
 	return { proposal, resolved, facts, conflicts, cases: [...cases] };
 }
 
-function isInside(index: FolderIndex, folder: number | null, ancestor: number): boolean {
+function isInside(
+	index: { byId: ReadonlyMap<number, Pick<FolderRow, "parent">> },
+	folder: number | null,
+	ancestor: number,
+): boolean {
 	const seen = new Set<number>();
 	for (let at: number | null = folder; at !== null && !seen.has(at); at = index.byId.get(at)?.parent ?? null) {
 		if (at === ancestor) return true;
 		seen.add(at);
 	}
 	return false;
+}
+
+type FolderProjection = {
+	after: ReturnType<typeof indexFolders<Pick<FolderRow, "id" | "parent" | "name">>>;
+	targets: Map<Resolved, number>;
+	placed: Map<number, number>;
+	touched: Set<number>;
+	paths: Set<string>;
+	ambiguousTargets: Set<string>;
+	refusal: string | null;
+};
+
+/** Replay placement and folder edits in adoption order; new folders have proposal-local negative ids. */
+function* projectFoldersSteps(
+	index: FolderIndex,
+	edits: readonly Resolved[],
+): Generator<undefined, FolderProjection, void> {
+	let after = indexFolders([...index.byId.values()].map(({ id, parent, name }) => ({ id, parent, name })));
+	let nextId = -1;
+	const targets = new Map<Resolved, number>();
+	const placed = new Map<number, number>();
+	const touched = new Set<number>();
+	const paths = new Set<string>();
+	const ambiguousTargets = new Set<string>();
+	const ensure = (target: FolderTarget): number => {
+		if ("id" in target) return target.id;
+		let parent: number | null = null;
+		let walked = "";
+		for (const name of cleanPath(target.path)) {
+			walked = walked ? `${walked}/${name}` : name;
+			if (after.ambiguous.has(walked.toLowerCase())) ambiguousTargets.add(walked);
+			const existing = after.byPath.get(walked.toLowerCase());
+			if (existing) parent = existing.id;
+			else {
+				const row: Pick<FolderRow, "id" | "parent" | "name"> = { id: nextId--, parent, name };
+				after.byId.set(row.id, row);
+				after.byPath.set(walked.toLowerCase(), row);
+				parent = row.id;
+			}
+		}
+		if (parent === null) throw invalid("a folder path cannot be empty");
+		return parent;
+	};
+	let work = 0;
+	for (const edit of edits) {
+		if (++work % SLICE === 0) yield;
+		if (edit.op === "create") {
+			const folder = ensure(edit.folder);
+			targets.set(edit, folder);
+			paths.add(after.path(folder));
+		} else if (edit.op === "place" && edit.folder) {
+			const folder = ensure(edit.folder);
+			targets.set(edit, folder);
+			paths.add(after.path(folder));
+			for (const id of edit.caseIds) {
+				placed.set(id, folder);
+				if (++work % SLICE === 0) yield;
+			}
+		} else if (edit.op === "folder") {
+			const parent = edit.parent === undefined ? undefined : edit.parent === null ? null : ensure(edit.parent);
+			if (edit.id !== null && parent !== undefined && parent !== null && isInside(after, parent, edit.id)) {
+				// An invalid pending proposal must still be readable and rejectable.
+				return {
+					after,
+					targets,
+					placed,
+					touched,
+					paths,
+					ambiguousTargets,
+					refusal: "a folder cannot be moved into itself or into a folder inside it",
+				};
+			}
+			if (edit.id === null) {
+				const row = { id: nextId--, parent: parent ?? null, name: edit.name ?? "Untitled" };
+				after.byId.set(row.id, row);
+				touched.add(row.id);
+			} else {
+				const row = after.byId.get(edit.id);
+				if (!row) throw notFound(`folder ${edit.id}`);
+				for (const child of after.byId.values()) {
+					if (!isInside(after, child.id, row.id)) continue;
+					touched.add(child.id);
+					paths.add(after.path(child.id));
+				}
+				after.byId.set(row.id, {
+					...row,
+					parent: parent === undefined ? row.parent : parent,
+					name: edit.name ?? row.name,
+				});
+				touched.add(row.id);
+			}
+			after = indexFolders([...after.byId.values()]);
+			for (const id of touched) paths.add(after.path(id));
+		}
+	}
+	return { after, targets, placed, touched, paths, ambiguousTargets, refusal: null };
+}
+
+function validateFolderPaths(index: FolderIndex, { after, ambiguousTargets }: FolderProjection): void {
+	for (const path of ambiguousTargets)
+		throw invalid(`folder path "${path}" is ambiguous during the proposal; reorder the folder edits`);
+	const paths = new Map<string, number>();
+	for (const row of after.byId.values()) {
+		const path = cleanPath(after.path(row.id)).join("/");
+		const key = path.toLowerCase();
+		const previous = paths.get(key);
+		if (
+			previous !== undefined &&
+			(index.path(row.id) !== after.path(row.id) || index.path(previous) !== after.path(previous))
+		)
+			throw invalid(`folder path "${path}" is already in use; choose another name or parent`);
+		paths.set(key, row.id);
+	}
 }
 
 /** Scopes touched by the whole proposal, before and after its edits, including nested folders. */
@@ -807,13 +934,16 @@ export function* scopeFactsSteps(
 	db: Db,
 	project: number,
 	edits: readonly Resolved[],
+	projection?: FolderProjection,
 ): Generator<undefined, string[], void> {
 	const index = folderIndex(db, project);
+	const { after, targets, placed, touched, paths } = projection ?? (yield* projectFoldersSteps(index, edits));
 	const facts = new Set<string>();
 	const folder = (path: string) => {
 		const parts = cleanPath(path.toLowerCase());
 		for (let n = 1; n <= parts.length; n++) facts.add(`folder:${parts.slice(0, n).join("/")}`);
 	};
+	for (const path of paths) folder(path);
 	const targetPath = (target: FolderTarget) => ("id" in target ? index.path(target.id) : target.path);
 	const tags = (values: readonly string[]) => {
 		for (const tag of values) facts.add(`tag:${cleanTag(tag)}`);
@@ -822,11 +952,25 @@ export function* scopeFactsSteps(
 		const row = caseById(db, id);
 		if (!row) throw notFound(`case ${id}`);
 		folder(index.path(row.folder));
+		folder(after.path(placed.get(id) ?? row.folder));
 		tags(json<string[]>(row.tags));
 	};
 	let work = 0;
+	for (const row of after.byId.values()) {
+		if (++work % SLICE === 0) yield;
+		const before = index.path(row.id);
+		const next = after.path(row.id);
+		if (before === next && !touched.has(row.id)) continue;
+		folder(before);
+		folder(next);
+		if (index.byId.has(row.id))
+			for (const rowWithTags of db.all(Q.folderCaseTags, { project, folder: row.id }))
+				tags(json<string[]>(rowWithTags.tags));
+	}
 	for (const edit of edits) {
 		if (++work % SLICE === 0) yield;
+		const target = targets.get(edit);
+		if (target !== undefined) folder(after.path(target));
 		switch (edit.op) {
 			case "create":
 				folder(targetPath(edit.folder));
@@ -851,24 +995,7 @@ export function* scopeFactsSteps(
 					if (++work % SLICE === 0) yield;
 				}
 				break;
-			case "folder": {
-				const row = edit.id === null ? null : index.byId.get(edit.id);
-				const parent = edit.parent === undefined ? row?.parent : edit.parent;
-				const parentPath = typeof parent === "number" ? index.path(parent) : parent ? targetPath(parent) : "";
-				const next = [parentPath, edit.name ?? row?.name].filter(Boolean).join("/");
-				folder(next);
-				if (edit.id !== null) {
-					const before = index.path(edit.id);
-					for (const child of index.byId.values()) {
-						if (!isInside(index, child.id, edit.id)) continue;
-						const path = index.path(child.id);
-						folder(path);
-						folder(next + path.slice(before.length));
-						for (const row of db.all(Q.folderCaseTags, { project, folder: child.id })) tags(json<string[]>(row.tags));
-					}
-				}
-				break;
-			}
+			case "folder":
 			case "policy":
 			case "quarantine":
 				break;
@@ -917,6 +1044,10 @@ export function* adoptSteps(ctx: Ctx, witness: Witness, proposal: ProposalRow): 
 	const out: Adopted = { cases: [], created: [], policyVersion: null };
 	const author = proposal.author;
 	const edits = resolvedOf(proposal);
+	const index = folderIndex(ctx.db, ctx.project.id);
+	const folders = yield* projectFoldersSteps(index, edits);
+	if (folders.refusal) throw invalid(folders.refusal);
+	validateFolderPaths(index, folders);
 	const policy = adoptionPolicy(ctx.db, ctx.project.id, edits);
 	const stamp = (row: CaseRow, version: number, hash: string) => {
 		ctx.touched.add(caseRef(row));
@@ -1175,11 +1306,6 @@ export function ranksAtEnd(ctx: Ctx, folder: number, n: number): string[] {
 function applyFolder(ctx: Ctx, witness: Witness, edit: Extract<Resolved, { op: "folder" }>): void {
 	decisionOf(witness, "adopt");
 	const parent = edit.parent === undefined ? undefined : edit.parent === null ? null : ensureFolder(ctx, edit.parent);
-	// The tree may have changed since the proposal was sealed: check again where it is applied. A refusal here
-	// undoes the whole adoption, including any folder the path above just created.
-	if (edit.id !== null && parent && isInside(folderIndex(ctx.db, ctx.project.id), parent, edit.id)) {
-		throw invalid("a folder cannot be moved into itself or into a folder inside it");
-	}
 	if (edit.id === null) {
 		const last = ctx.db.get(Q.lastFolderRank, { project: ctx.project.id, parent: parent ?? null });
 		ctx.db.run(Q.insertFolder, {

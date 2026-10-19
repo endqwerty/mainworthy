@@ -722,7 +722,7 @@ describe("agent edits", () => {
 			{ op: "place", cases: ["C-1"], folder: "Other" },
 			{ op: "place", cases: ["C-2"], folder: "Checkout/Coupons" },
 			{ op: "folder", folder: "Checkout", name: "Renamed" },
-			{ op: "folder", folder: "Other", name: "Checkout" },
+			{ op: "folder", folder: "Other", parent: "Checkout" },
 		])
 			expect(h.call<Proposed>("propose", { edits: [edit] }, agent).status).toBe("open");
 	});
@@ -738,6 +738,130 @@ describe("agent edits", () => {
 				h.call<Proposed>("propose", { edits: [{ op: "folder", folder: "Parent", name: "Renamed" }] }, agent).status,
 			).toBe("open");
 		}
+	});
+
+	test.each([false, true])("combined ancestor and child renames require review, child first: %s", (childFirst) => {
+		h.call("propose", { edits: [{ op: "create", outline: "Original", folder: "Public/Temp" }] });
+		scopePolicy(["folder:checkout/secure"]);
+		const agent = h.actor("writer", "agent", ["read", "produce"]);
+		const renames = [
+			{ op: "folder", folder: "Public", name: "Checkout" },
+			{ op: "folder", folder: "Public/Temp", name: "Secure" },
+		];
+		if (childFirst) renames.reverse();
+		const proposed = h.call<Proposed>(
+			"propose",
+			{ edits: [...renames, { op: "edit", case: "C-1", base: 1, body: { title: "Agent changed protected content" } }] },
+			agent,
+		);
+		expect(proposed).toMatchObject({ status: "open", needs: "a member who is not an agent" });
+		expect(title("C-1")).toBe("Original");
+		const q = first(queue({ kind: "adopt" }).items);
+		expect(proposed).toMatchObject({ question: q.q });
+		expect(
+			h.call<{ status: string }[]>("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } })[0]
+				?.status,
+		).toBe("decided");
+		expect(h.call<{ title: string; folder: { path: string } }[]>("get", { refs: ["C-1"] })[0]).toMatchObject({
+			title: "Agent changed protected content",
+			folder: { path: "Checkout/Secure" },
+		});
+	});
+
+	test.each(["create", "place"])("a %s before combined renames is reviewed at its final path", (op) => {
+		h.call("propose", {
+			edits: [
+				{ op: "folder", name: "Public" },
+				{ op: "folder", name: "Temp", parent: "Public" },
+				{ op: "create", outline: "Outside", folder: "Other" },
+			],
+		});
+		scopePolicy(["folder:checkout/secure"]);
+		const agent = h.actor("writer", "agent", ["read", "produce"]);
+		const edit =
+			op === "create"
+				? { op, outline: "New case", folder: "Public/Temp" }
+				: { op, cases: ["C-1"], folder: "Public/Temp" };
+		expect(
+			h.call<Proposed>(
+				"propose",
+				{
+					edits: [
+						edit,
+						{ op: "folder", folder: "Public", name: "Checkout" },
+						{ op: "folder", folder: "Public/Temp", name: "Secure" },
+					],
+				},
+				agent,
+			),
+		).toMatchObject({ status: "open", needs: "a member who is not an agent" });
+		expect(h.call<{ folder: { path: string } }[]>("get", { refs: ["C-1"] })[0]?.folder.path).toBe("Other");
+	});
+
+	test("combined renames of empty folders still require review", () => {
+		h.call("propose", { edits: [{ op: "folder", name: "Temp", parent: "Public" }] });
+		scopePolicy(["folder:checkout/secure"]);
+		const agent = h.actor("writer", "agent", ["read", "produce"]);
+		expect(
+			h.call<Proposed>(
+				"propose",
+				{
+					edits: [
+						{ op: "folder", folder: "Public", name: "Checkout" },
+						{ op: "folder", folder: "Public/Temp", name: "Secure" },
+					],
+				},
+				agent,
+			),
+		).toMatchObject({ status: "open", needs: "a member who is not an agent" });
+		expect(h.call("find", { in: "folders" })).toMatchObject({
+			items: [{ path: "Public" }, { path: "Public/Temp" }],
+		});
+	});
+
+	test("a temporary protected path in a batch still requires review", () => {
+		h.call("propose", { edits: [{ op: "create", outline: "Original", folder: "Public/Temp" }] });
+		scopePolicy(["folder:checkout/secure"]);
+		const agent = h.actor("writer", "agent", ["read", "produce"]);
+		expect(
+			h.call<Proposed>(
+				"propose",
+				{
+					edits: [
+						{ op: "folder", folder: "Public", name: "Checkout" },
+						{ op: "folder", folder: "Public/Temp", name: "Secure" },
+						{ op: "folder", folder: "Public", name: "Other" },
+					],
+				},
+				agent,
+			),
+		).toMatchObject({ status: "open", needs: "a member who is not an agent" });
+		expect(title("C-1")).toBe("Original");
+	});
+
+	test("a pending child rename rechecks its final path after an ancestor changes", () => {
+		h.call("propose", { edits: [{ op: "create", outline: "Original", folder: "Public/Temp" }] });
+		scopePolicy(["folder:checkout/secure"], true);
+		const agent = h.actor("writer", "agent", ["read", "produce", "answer"]);
+		const proposed = h.call<Proposed>(
+			"propose",
+			{ edits: [{ op: "folder", folder: "Public/Temp", name: "Secure" }] },
+			agent,
+		);
+		expect(proposed.status).toBe("open");
+		h.call("propose", { edits: [{ op: "folder", folder: "Public", name: "Checkout" }] });
+		const q = first(queue({ kind: "adopt" }).items);
+		expect(q.q).toBe(proposed.question ?? "");
+		expect(
+			h.call<{ status: string }[]>("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } }, agent)[0]
+				?.status,
+		).toBe("forbidden");
+		expect(h.call<{ folder: { path: string } }[]>("get", { refs: ["C-1"] })[0]?.folder.path).toBe("Checkout/Temp");
+		expect(
+			h.call<{ status: string }[]>("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } })[0]
+				?.status,
+		).toBe("decided");
+		expect(h.call<{ folder: { path: string } }[]>("get", { refs: ["C-1"] })[0]?.folder.path).toBe("Checkout/Secure");
 	});
 
 	test("pending proposals are answered against the case's current folder and tags", () => {

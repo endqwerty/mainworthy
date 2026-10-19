@@ -655,6 +655,214 @@ describe("capture", () => {
 		expect(h.call<CaseView[]>("get", { refs: ["C-1"] })[0]?.folder.path).toBe("Résumé");
 	});
 
+	test.each([
+		["Checkout", "Checkout"],
+		["check\u200bout", "checkout"],
+	])("a rename cannot hide a sibling's cases at %s", (name, path) => {
+		h.call("propose", {
+			edits: [
+				{ op: "create", outline: "Checkout case", folder: "Checkout" },
+				{ op: "create", outline: "Refund case", folder: "Refunds" },
+			],
+		});
+		expect(h.raw("propose", { edits: [{ op: "folder", folder: "Refunds", name }] })).toMatchObject({
+			ok: false,
+			error: { code: "invalid", message: `folder path "${path}" is already in use; choose another name or parent` },
+		});
+		expect(h.call<{ items: { path: string }[] }>("find", { in: "folders" }).items.map((row) => row.path)).toEqual([
+			"Checkout",
+			"Refunds",
+		]);
+		expect(h.call("find", { folder: "Checkout" })).toMatchObject({ count: 1, items: [{ ref: "C-1" }] });
+		expect(h.call("find", { folder: "Refunds" })).toMatchObject({ count: 1, items: [{ ref: "C-2" }] });
+		expect(h.call("find")).toMatchObject({ count: 2 });
+		expect(h.call("plan", { name: "Checkout regression", select: { folders: ["Checkout"] } })).toMatchObject({
+			run: "R-1",
+			slots: 1,
+		});
+		expect(h.call("plan", { name: "Both folders", select: { folders: ["Checkout", "Refunds"] } })).toMatchObject({
+			run: "R-2",
+			slots: 2,
+		});
+	});
+
+	test.each([false, true])("legacy duplicate paths allow edits and repairs, new folder first: %s", (first) => {
+		const names = first ? ["Public", "Checkout", "Refunds"] : ["Checkout", "Refunds", "Public"];
+		h.call("propose", {
+			edits: [
+				...names.map((name) => ({ op: "folder", name })),
+				{ op: "create", outline: "Unrelated", folder: "Public" },
+			],
+		});
+		const duplicate = h
+			.call<{ items: { id: number; path: string }[] }>("find", { in: "folders" })
+			.items.find((row) => row.path === "Refunds");
+		if (!duplicate) throw new Error("no folder to duplicate");
+		h.app.db.raw.query("UPDATE folders SET name = 'Checkout' WHERE id = ?").run(duplicate.id);
+		expect(
+			h.raw("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Updated" } }] }),
+		).toMatchObject({ ok: true, result: { status: "adopted" } });
+		expect(h.call<CaseView[]>("get", { refs: ["C-1"] })[0]).toMatchObject({
+			title: "Updated",
+			version: 2,
+			folder: { path: "Public" },
+		});
+		expect(
+			h
+				.call<{ items: { path: string }[] }>("find", { in: "folders" })
+				.items.map((row) => row.path)
+				.sort(),
+		).toEqual(["Checkout", "Checkout", "Public"]);
+		expect(h.raw("propose", { edits: [{ op: "folder", folder: "Public", name: "Checkout" }] })).toMatchObject({
+			ok: false,
+			error: {
+				code: "invalid",
+				message: 'folder path "Checkout" is already in use; choose another name or parent',
+			},
+		});
+		expect(
+			h.call<Proposed>("propose", {
+				edits: [{ op: "folder", folder: duplicate.id, name: "Repaired" }],
+			}).status,
+		).toBe("adopted");
+		expect(
+			h
+				.call<{ items: { path: string }[] }>("find", { in: "folders" })
+				.items.map((row) => row.path)
+				.sort(),
+		).toEqual(["Checkout", "Public", "Repaired"]);
+	});
+
+	test("two renames cannot create the same final folder path", () => {
+		h.call("propose", {
+			edits: [
+				{ op: "create", outline: "First", folder: "Public/First" },
+				{ op: "create", outline: "Second", folder: "Public/Second" },
+			],
+		});
+		expect(
+			h.raw("propose", {
+				edits: [
+					{ op: "folder", folder: "Public", name: "Checkout" },
+					{ op: "folder", folder: "Public/First", name: "Secure" },
+					{ op: "folder", folder: "Public/Second", name: "Secure" },
+				],
+			}),
+		).toMatchObject({
+			ok: false,
+			error: {
+				code: "invalid",
+				message: 'folder path "Checkout/Secure" is already in use; choose another name or parent',
+			},
+		});
+		expect(h.call<CaseView[]>("get", { refs: ["C-1", "C-2"] }).map((row) => row.folder.path)).toEqual([
+			"Public/First",
+			"Public/Second",
+		]);
+	});
+
+	test("creating or moving a folder cannot duplicate a canonical sibling path", () => {
+		h.call("propose", {
+			edits: [
+				{ op: "create", outline: "Existing", folder: "Parent/Café" },
+				{ op: "create", outline: "Moving", folder: "Other/Café" },
+			],
+		});
+		for (const edit of [
+			{ op: "folder", parent: "Parent", name: "CAFE\u0301" },
+			{ op: "folder", folder: "Other/Café", parent: "Parent" },
+		])
+			expect(h.raw("propose", { edits: [edit] })).toMatchObject({ ok: false, error: { code: "invalid" } });
+		expect(h.call<CaseView[]>("get", { refs: ["C-1", "C-2"] }).map((row) => row.folder.path)).toEqual([
+			"Parent/Café",
+			"Other/Café",
+		]);
+	});
+
+	test("a pending rename rechecks collisions at adoption and leaves the proposal rejectable", () => {
+		h.call("propose", { edits: [{ op: "create", outline: "Original", folder: "Refunds" }] });
+		const agent = h.actor("writer", "agent", ["read", "produce"]);
+		h.call("propose", { edits: [{ op: "policy", preset: "standard" }] });
+		const policy = h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }).items[0];
+		if (!policy) throw new Error("no policy question");
+		h.call("decide", { q: policy.q, onEvidence: policy.evidenceHash, answer: { is: "accept" } });
+		const pending = h.call<Proposed>(
+			"propose",
+			{
+				edits: [
+					{ op: "edit", case: "C-1", base: 1, body: { title: "Must roll back" } },
+					{ op: "folder", folder: "Refunds", name: "Checkout" },
+				],
+			},
+			agent,
+		);
+		h.call("propose", { edits: [{ op: "create", outline: "New sibling", folder: "Checkout" }] });
+		const question = h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }).items[0];
+		if (!question) throw new Error("no rename question");
+		expect(pending).toMatchObject({ question: question.q });
+		expect(
+			h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" } }),
+		).toMatchObject([
+			{ status: "invalid", needs: 'folder path "Checkout" is already in use; choose another name or parent' },
+		]);
+		expect(h.call<CaseView[]>("get", { refs: ["C-1"] })[0]).toMatchObject({
+			title: "Original",
+			version: 1,
+			folder: { path: "Refunds" },
+		});
+		expect(
+			h.call<{ status: string }[]>("decide", {
+				q: question.q,
+				onEvidence: question.evidenceHash,
+				answer: { is: "reject" },
+			})[0]?.status,
+		).toBe("decided");
+	});
+
+	test("a batch may swap folder names when its final paths are distinct", () => {
+		h.call("propose", {
+			edits: [
+				{ op: "create", outline: "First", folder: "Checkout" },
+				{ op: "create", outline: "Second", folder: "Refunds" },
+			],
+		});
+		expect(
+			h.call<Proposed>("propose", {
+				edits: [
+					{ op: "folder", folder: "Checkout", name: "Refunds" },
+					{ op: "folder", folder: "Refunds", name: "Checkout" },
+				],
+			}).status,
+		).toBe("adopted");
+		expect(h.call("find", { folder: "Checkout" })).toMatchObject({ count: 1, items: [{ ref: "C-2" }] });
+		expect(h.call("find", { folder: "Refunds" })).toMatchObject({ count: 1, items: [{ ref: "C-1" }] });
+	});
+
+	test("path targets cannot pick an arbitrary folder while a batch swaps names", () => {
+		h.call("propose", {
+			edits: [
+				{ op: "create", outline: "First", folder: "Checkout" },
+				{ op: "create", outline: "Second", folder: "Refunds" },
+			],
+		});
+		expect(
+			h.raw("propose", {
+				edits: [
+					{ op: "folder", folder: "Checkout", name: "Refunds" },
+					{ op: "create", outline: "Ambiguous", folder: "Refunds/New" },
+					{ op: "folder", folder: "Refunds", name: "Checkout" },
+				],
+			}),
+		).toMatchObject({
+			ok: false,
+			error: {
+				code: "invalid",
+				message: 'folder path "Refunds" is ambiguous during the proposal; reorder the folder edits',
+			},
+		});
+		expect(h.call("find", { folder: "Checkout" })).toMatchObject({ count: 1, items: [{ ref: "C-1" }] });
+	});
+
 	test.each(["\u200b", " \u200b "])("a folder name empty after cleaning is refused: %s", (name) => {
 		expect(h.raw("propose", { edits: [{ op: "folder", name }] })).toMatchObject({
 			ok: false,
