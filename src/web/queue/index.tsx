@@ -12,6 +12,7 @@ import { randomId } from "../lib/ids.ts";
 import { type Binding, useBindings } from "../lib/keys.ts";
 import { answerShown } from "../lib/proposals.ts";
 import { navigate, routeUrl } from "../lib/router.ts";
+import { AnswerExtra } from "../ui/answer-extra.tsx";
 import { useApp } from "../ui/context.tsx";
 import { age, EmptyState, KeyCap, ListRow, ProducerGlyph } from "../ui/index.tsx";
 import {
@@ -89,7 +90,6 @@ function QueueWorkbench() {
 	const [last, setLast] = useState<LastAnswer | null>(null);
 	const [lastMessage, setLastMessage] = useState("One key answers. Every decision stays in the ledger.");
 	const [inline, setInline] = useState<InlineAnswer | null>(null);
-	const inlineRef = useRef<HTMLInputElement>(null);
 	const extraInputs = useRef(new Map<string, string>());
 	const actionNo = useRef(0);
 	const undoing = useRef(new Set<LastAnswer>());
@@ -219,9 +219,6 @@ function QueueWorkbench() {
 	useEffect(() => {
 		if (route.ref) setCursor(route.ref);
 	}, [route.ref]);
-	useEffect(() => {
-		if (inline) inlineRef.current?.focus();
-	}, [inline]);
 	useEffect(() => {
 		if (current?.q) document.querySelector(`[data-question="${current.q}"]`)?.scrollIntoView({ block: "nearest" });
 	}, [current?.q]);
@@ -833,13 +830,6 @@ function QueueWorkbench() {
 				current?.state !== "dissolved" &&
 				!current?.decision?.supersedes,
 		},
-		// A reason the policy asks for, or one for a withdrawal, is left with Escape, which a phone has no key for:
-		// the palette lists it while the field is open (decision 0018), and runs it when chosen. The key stands aside
-		// while the palette or the sheet of keys is open, whose Escape closes it. The reference's field needs none:
-		// Enter records the answer without one, as its Escape does.
-		...(inline && inline.field === "reason"
-			? [{ key: "escape", label: "Cancel", handler: () => setInline(null) }]
-			: []),
 	];
 	useBindings(keys);
 	const answerKind = bulk ? selection[0]?.kind : current?.kind;
@@ -1116,16 +1106,17 @@ function QueueWorkbench() {
 					<EmptyState>Select a question to read its evidence and answer keys.</EmptyState>
 				)}
 				{inline && (
-					<form
-						className="queue-inline"
-						onSubmit={(event) => {
-							event.preventDefault();
-
-							if (inline.field === "reason" && !inline.value.trim()) return;
+					<AnswerExtra
+						kind={inline.kind}
+						field={inline.field}
+						value={inline.value}
+						onChange={(value) => rememberInline({ ...inline, value })}
+						onCancel={() => setInline(null)}
+						onSubmit={(value) => {
 							if (inline.kind === "withdrawal") {
 								undo(
 									inline.entries.map((entry) => entry.question),
-									inline.value.trim(),
+									value,
 									inline,
 								);
 								return;
@@ -1133,45 +1124,13 @@ function QueueWorkbench() {
 							submit(
 								inline.entries.map((entry) => ({
 									...entry,
-									answer:
-										inline.field === "ref" && inline.value.trim()
-											? { ...entry.answer, ref: inline.value.trim() }
-											: entry.answer,
+									answer: inline.field === "ref" && value ? { ...entry.answer, ref: value } : entry.answer,
 								})),
-								inline.field === "reason" ? inline.value.trim() : undefined,
+								inline.field === "reason" ? value : undefined,
 								inline,
 							);
 						}}
-					>
-						<label htmlFor="answer-extra">
-							{inline.kind === "withdrawal"
-								? "Reason for withdrawing the answer"
-								: inline.field === "ref"
-									? "Defect reference, optional"
-									: "Reason required by policy"}
-						</label>
-						<input
-							className="form-input"
-							id="answer-extra"
-							ref={inlineRef}
-							value={inline.value}
-							onChange={(event) => rememberInline({ ...inline, value: event.target.value })}
-							onKeyDown={(event) => {
-								if (event.repeat && (event.key === "Enter" || event.key === "Escape")) {
-									event.preventDefault();
-									return;
-								}
-								if (event.key === "Escape") {
-									event.preventDefault();
-									if (inline.field === "ref") submit(inline.entries, undefined, inline);
-									else setInline(null);
-								}
-							}}
-						/>
-						<span className="dim">
-							Enter records · Escape {inline.field === "ref" ? "skips the reference" : "cancels"}
-						</span>
-					</form>
+					/>
 				)}
 				<div className="queue-last" role="status" aria-live="polite">
 					<span>{lastMessage}</span>

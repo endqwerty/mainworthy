@@ -1115,6 +1115,7 @@ pre.log .ok {
 	background: var(--panel);
 }
 .dl {
+	overflow-wrap: anywhere;
 	display: grid;
 	grid-template-columns: 22px minmax(0, 1fr);
 	padding: 3px 8px 3px 4px;
@@ -1824,4 +1825,12 @@ button[aria-disabled="true"] {
 .quarantine-list select {
 	width: 100%;
 	min-width: 0;
+}
+
+.queue-inline {
+	display: grid;
+	padding: 8px 24px;
+	gap: 4px;
+	border-top: 1px solid var(--line);
+	flex: none;
 }

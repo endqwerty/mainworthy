@@ -153,6 +153,7 @@ To read a version diff, follow these steps.
 
 The first version of a case has nothing before it. Asking for its diff opens nothing.
 The status line at the bottom of the window says that there is no earlier version.
+Diff rows wrap long words and tokens so their full text can be read.
 
 In Suite, <kbd>u</kbd> first undoes the latest placement action when one is available.
 Otherwise, on a recorded case with more than one version, it restores the preceding
@@ -252,6 +253,8 @@ since accepting it accepts all of them. An authorized person can use
 <kbd>a</kbd> to accept it or <kbd>r</kbd> to reject it.
 A key, or the Accept or Reject button, first brings the proposal into view and pages through its edits.
 It answers only once the last edit is showing.
+When the policy requires a reason, the case pane opens the same reason field as Queue.
+Type the reason and press <kbd>Enter</kbd> to record the answer, or <kbd>Escape</kbd> to cancel.
 Conflicts and policy changes have separate rules. See [policy](./policy.md).
 
 ## Write cases from the command line

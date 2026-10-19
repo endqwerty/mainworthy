@@ -14,6 +14,139 @@ function fixture({
 
 import { z } from "zod";
 
+for (const answer of ["accept", "reject"] as const)
+	(browserAvailable ? test : test.skip)(
+		`strict: the case pane records ${answer} with the required reason`,
+		async () => {
+			const server = await startServer({ preset: "strict", seed: false });
+			let view: Awaited<ReturnType<typeof openPage>> | null = null;
+			try {
+				const created = await server.api("propose", { edits: [{ op: "create", outline: "Original strict" }] });
+				const initial = (await server.api("inbox", { kind: "adopt" })).items.find((q) => q.q === created.question);
+				if (!initial) throw new Error("Missing creation question");
+				await server.api("decide", {
+					q: initial.q,
+					onEvidence: initial.evidenceHash,
+					answer: { is: "accept" },
+					reason: "Establish the original case",
+				});
+				const proposed = await server.api("propose", {
+					edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Changed strict" } }],
+				});
+				if (!proposed.question) throw new Error("Missing edit question");
+				view = await openPage(server, { path: "/p/scratch/suite/c/1" });
+				const { page } = view;
+				await page.setViewportSize({ width: 1280, height: 800 });
+				await page.locator(`[data-proposal-evidence="${proposed.question}"][data-proposal-read="ready"]`).waitFor();
+				if (answer === "accept") await page.getByRole("button", { name: "Accept" }).click();
+				else await page.keyboard.press("r");
+				const reason = page.getByRole("textbox", { name: "Reason required by policy" });
+				expect(await reason.count()).toBe(1);
+				await reason.fill("   ");
+				await reason.press("Enter");
+				expect((await server.api("get", { refs: [proposed.question] }))[0]?.state).toBe("open");
+				await reason.fill("The title should name the expected result");
+				const response = page.waitForResponse((reply) => reply.url().endsWith("/decide"));
+				await reason.press("Enter");
+				await response;
+				expect((await server.api("get", { refs: [proposed.question] }))[0]?.decision).toMatchObject({
+					answer: { is: answer },
+					reason: "The title should name the expected result",
+				});
+				expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({
+					title: answer === "accept" ? "Changed strict" : "Original strict",
+					version: answer === "accept" ? 2 : 1,
+				});
+				expect(view.errors).toEqual([]);
+			} finally {
+				await view?.close();
+				await server.stop();
+			}
+		},
+		30000,
+	);
+
+for (const surface of ["case", "queue"] as const)
+	for (const device of ["desktop", "phone"] as const)
+		(browserAvailable ? test : test.skip)(
+			`${surface} on ${device}: an unbroken diff wraps and every part must be shown before answering`,
+			async () => {
+				const server = await startServer({ preset: "standard", seed: false });
+				let view: Awaited<ReturnType<typeof openPage>> | null = null;
+				try {
+					await server.api("propose", {
+						edits: [{ op: "create", outline: "Read the entire token\n  Original step > Token is visible" }],
+					});
+					const writer = z.object({ token: z.string() }).parse(
+						await server.api("admin", {
+							do: "token.create",
+							actor: "writer",
+							kind: "agent",
+							can: ["read", "produce"],
+							project: "scratch",
+						}),
+					).token;
+					const proposed = await server.api(
+						"propose",
+						{
+							edits: [
+								{
+									op: "edit",
+									case: "C-1",
+									base: 1,
+									body: {
+										steps: [{ id: "token", action: "x".repeat(6000), expected: "Token is visible" }],
+									},
+								},
+							],
+						},
+						{ token: writer },
+					);
+					if (!proposed.question) throw new Error("Missing edit question");
+					view = await openPage(server, {
+						device,
+						path: surface === "case" ? "/p/scratch/suite/c/1" : `/p/scratch/queue/${proposed.question.slice(2)}`,
+					});
+					const { page } = view;
+					if (device === "desktop") await page.setViewportSize({ width: 1280, height: 800 });
+					const evidence = page.locator(`[data-proposal-evidence="${proposed.question}"][data-proposal-loaded="true"]`);
+					await evidence.waitFor();
+					const row = evidence.locator(".dl").filter({ hasText: "x".repeat(100) });
+					expect(await row.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+					expect(await evidence.getAttribute("data-proposal-read")).toBe("loaded");
+					// Jumping to the end must leave the unshown middle unread.
+					const scroller = surface === "case" ? evidence : page.locator(".queue-evidence");
+					await scroller.evaluate((element) => {
+						element.scrollTop = element.scrollHeight;
+					});
+					await page.keyboard.press("r");
+					expect((await server.api("get", { refs: [proposed.question] }))[0]?.state).toBe("open");
+					let pages = 0;
+					while ((await evidence.getAttribute("data-proposal-read")) !== "ready" && pages++ < 40) {
+						await page.keyboard.press("r");
+						await page.waitForTimeout(50);
+						expect((await server.api("get", { refs: [proposed.question] }))[0]?.state).toBe("open");
+					}
+					expect(await evidence.getAttribute("data-proposal-read")).toBe("ready");
+					const response = page.waitForResponse((reply) => reply.url().endsWith("/decide"));
+					await page.keyboard.press("r");
+					await response;
+					expect((await server.api("get", { refs: [proposed.question] }))[0]?.decision).toMatchObject({
+						answer: { is: "reject" },
+					});
+					expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({
+						title: "Read the entire token",
+						version: 1,
+					});
+					expect(view.errors).toEqual([]);
+				} finally {
+					await view?.close();
+					await server.stop();
+				}
+			},
+			30000,
+		);
+
 (browserAvailable ? test : test.skip)(
 	"a case proposal answer cannot replace a decision made before its request arrives",
 	async () => {

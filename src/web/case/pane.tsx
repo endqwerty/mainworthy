@@ -20,6 +20,7 @@ import { answerShown, proposalReadMessage } from "../lib/proposals.ts";
 import { navigate, refUrl } from "../lib/router.ts";
 import { ProposalEdits } from "../queue/evidence.tsx";
 import { bodyOf, CaseView, editDraft } from "../suite/model.ts";
+import { AnswerExtra } from "../ui/answer-extra.tsx";
 import { ResultAttachments } from "../ui/attachments.tsx";
 import { useApp } from "../ui/context.tsx";
 import { age, DiffView, EmptyState, KeyCap, ProducerGlyph, SectionHeading, Select } from "../ui/index.tsx";
@@ -133,19 +134,29 @@ export function CasePane({
 	const entries = useMemo(() => z.array(Entry).parse(timelineData?.entries ?? []), [timelineData]);
 	const groups = useMemo(() => grouped(entries), [entries]);
 	const [diffVersion, setDiffVersion] = useState<number | null>(null);
+	const [pendingAnswer, setPendingAnswer] = useState<{
+		question: QuestionItem;
+		answer: "accept" | "reject";
+		value: string;
+	} | null>(null);
 	// A diff belongs to the case it was opened on. The pane stays mounted across a change of case, so it closes
 	// the diff while rendering the first frame of the next one, before the card could read that case's versions.
 	const [diffOf, setDiffOf] = useState(ref);
 	if (diffOf !== ref) {
 		setDiffOf(ref);
 		setDiffVersion(null);
+		setPendingAnswer(null);
 	}
 	const proposals = timelineData?.questions.filter((q) => q.kind === "adopt" && q.state === "open") ?? [];
-	async function answerProposal(answer: "accept" | "reject", question = proposals[0]): Promise<void> {
+	async function answerProposal(answer: "accept" | "reject", question = proposals[0], reason?: string): Promise<void> {
 		if (!question) return;
 		const message = proposalReadMessage(question.q);
 		if (message) {
 			setStatus(message);
+			return;
+		}
+		if (question.needs.includes("with a reason") && !reason) {
+			setPendingAnswer({ question, answer, value: "" });
 			return;
 		}
 		const key = queryKey({ project, op: "timeline", input: timelineInput });
@@ -156,7 +167,13 @@ export function CasePane({
 		try {
 			const reply = await call(
 				"decide",
-				{ q: question.q, onEvidence: question.evidenceHash, ifOpen: true, answer: { is: answer } },
+				{
+					q: question.q,
+					onEvidence: question.evidenceHash,
+					ifOpen: true,
+					answer: { is: answer },
+					...(reason ? { reason } : {}),
+				},
 				{ project, owner },
 			);
 			if (reply[0]?.status !== "decided" && reply[0]?.status !== "already") {
@@ -169,6 +186,7 @@ export function CasePane({
 						: (reply[0]?.needs ?? "This proposal needs a person."),
 				);
 			} else {
+				setPendingAnswer(null);
 				setStatus(`${question.q} ${answer === "accept" ? "adopted" : "rejected"}. The author remains recorded.`);
 			}
 			void invalidateProject(project);
@@ -462,6 +480,16 @@ export function CasePane({
 					</section>
 				</div>
 			</div>
+			{pendingAnswer && (
+				<AnswerExtra
+					kind="answer"
+					field="reason"
+					value={pendingAnswer.value}
+					onChange={(value) => setPendingAnswer({ ...pendingAnswer, value })}
+					onCancel={() => setPendingAnswer(null)}
+					onSubmit={(reason) => void answerProposal(pendingAnswer.answer, pendingAnswer.question, reason)}
+				/>
+			)}
 		</section>
 	);
 }
