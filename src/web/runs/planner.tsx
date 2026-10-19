@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import type { Api } from "../../core/api.ts";
-import { call } from "../lib/api.ts";
+import { ApiError, call } from "../lib/api.ts";
 import { invalidateProject, useQueryOp } from "../lib/data.ts";
 import { randomId } from "../lib/ids.ts";
 import { navigate, navigationToken, routeUrl } from "../lib/router.ts";
@@ -16,7 +16,11 @@ export function RunPlanner({ close }: { close: () => void }) {
 	const [query, setQuery] = useState("");
 	const [target, setTarget] = useState<"self" | "commit">("self");
 	const [commit, setCommit] = useState("");
-	const [busy, setBusy] = useState(false);
+	const [submission, setSubmission] = useState<{
+		state: "sending" | "uncertain";
+		input: Api["plan"]["input"];
+	} | null>(null);
+	const busy = submission?.state === "sending";
 	const nameRef = useRef<HTMLInputElement>(null);
 	useEffect(() => {
 		nameRef.current?.focus();
@@ -50,26 +54,29 @@ export function RunPlanner({ close }: { close: () => void }) {
 			onSubmit={(event) => {
 				event.preventDefault();
 				if (!name.trim() || busy || (target === "commit" && commit.trim().length < 7)) return;
-				setBusy(true);
+				const input = submission?.input ?? {
+					name: name.trim(),
+					select: selection(filter),
+					...(target === "commit" ? { accepts: { commit: commit.trim() } } : {}),
+					cmd: randomId(),
+				};
+				event.currentTarget.querySelector<HTMLButtonElement>('button[type="submit"]')?.focus();
+				setSubmission({ state: "sending", input });
 				const navigation = navigationToken();
-				void call(
-					"plan",
-					{
-						name: name.trim(),
-						select: selection(filter),
-						...(target === "commit" ? { accepts: { commit: commit.trim() } } : {}),
-						cmd: randomId(),
-					},
-					{ project },
-				)
+				void call("plan", input, { project })
 					.then((reply) => {
 						setStatus(`${reply.run} planned with ${reply.slots} slots; ${reply.already} already filled.`);
 						void invalidateProject(project);
 						navigate(routeUrl({ project, screen: "runs", ref: reply.run }), { ifCurrent: navigation });
 					})
 					.catch((error: unknown) => {
-						setStatus(error instanceof Error ? error.message : "The run could not be planned.");
-						setBusy(false);
+						const refused = error instanceof ApiError;
+						setSubmission(refused ? null : { state: "uncertain", input });
+						setStatus(
+							refused
+								? error.message
+								: "The run's outcome is unknown. Retry plan sends the same request; your submitted choices are kept.",
+						);
 					});
 			}}
 			onKeyDown={(event) => {
@@ -85,6 +92,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 				id="run-name"
 				ref={nameRef}
 				value={name}
+				readOnly={submission !== null}
 				onChange={(event) => setName(event.target.value)}
 				placeholder="Regression for 1.4 rc3"
 				required
@@ -95,6 +103,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 				className="form-input"
 				id="run-selection"
 				value={mode}
+				disabled={submission !== null}
 				onChange={(event) => {
 					const value = z.enum(["all", "folder", "tag", "text"]).parse(event.target.value);
 					setMode(value);
@@ -111,6 +120,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 					className="form-input"
 					aria-label="Folder"
 					value={filter}
+					disabled={submission !== null}
 					onChange={(event) => {
 						setFilter(event.target.value);
 					}}
@@ -129,6 +139,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 						className="form-input"
 						aria-label={mode === "tag" ? "Tag" : "Search cases"}
 						value={filter}
+						readOnly={submission !== null}
 						onChange={(event) => setFilter(event.target.value)}
 						placeholder={mode === "tag" ? "regression" : "checkout"}
 					/>
@@ -138,11 +149,23 @@ export function RunPlanner({ close }: { close: () => void }) {
 				{found.error ? found.error.message : `${found.data?.count ?? 0} matching cases`}
 			</div>
 			<label className="run-radio">
-				<input type="radio" name="run-target" checked={target === "self"} onChange={() => setTarget("self")} /> Count
-				only results recorded in this run
+				<input
+					type="radio"
+					name="run-target"
+					checked={target === "self"}
+					disabled={submission !== null}
+					onChange={() => setTarget("self")}
+				/>{" "}
+				Count only results recorded in this run
 			</label>
 			<label className="run-radio">
-				<input type="radio" name="run-target" checked={target === "commit"} onChange={() => setTarget("commit")} />{" "}
+				<input
+					type="radio"
+					name="run-target"
+					checked={target === "commit"}
+					disabled={submission !== null}
+					onChange={() => setTarget("commit")}
+				/>{" "}
 				Accept results for a commit
 			</label>
 			{target === "commit" && (
@@ -150,14 +173,15 @@ export function RunPlanner({ close }: { close: () => void }) {
 					className="form-input"
 					aria-label="Commit"
 					value={commit}
+					readOnly={submission !== null}
 					onChange={(event) => setCommit(event.target.value)}
 					minLength={7}
 					required
 					placeholder="Commit SHA"
 				/>
 			)}
-			<button type="submit" className="out" disabled={busy || !name.trim()}>
-				<KeyCap>Enter</KeyCap> Plan run
+			<button type="submit" className="out" aria-disabled={busy || !name.trim()}>
+				<KeyCap>Enter</KeyCap> {submission?.state === "uncertain" ? "Retry plan" : "Plan run"}
 			</button>
 			<button type="button" className="dim" onClick={close}>
 				Cancel <KeyCap>Esc</KeyCap>

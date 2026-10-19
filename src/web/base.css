@@ -1560,6 +1560,11 @@ button[aria-disabled="true"] {
 	border-radius: 6px;
 	font: inherit;
 }
+.form-input[readonly],
+.form-input:disabled {
+	cursor: default;
+	opacity: 0.7;
+}
 .inline-form {
 	padding: 8px 16px;
 	display: flex;
