@@ -393,12 +393,20 @@ To withdraw an earlier answer, follow these steps.
 Your authority still depends on the current policy.
 The original decision and its withdrawal both stay in the record.
 
+The undo button on the last-answer line withdraws that answer even while you read "Settled".
+The question returns to "Open" only after the server confirms the withdrawal or a fresh read confirms it is already open.
+While a withdrawal is pending, its question stays shown as withdrawing, outside the Open list.
+An answer key queues a replacement for that question and sends it only after the withdrawal is confirmed.
+A refused or lost withdrawal reports failure without showing the question as reopened and discards the queued answer.
+
 Undo names the decision returned by your answer. If somebody replaced it meanwhile,
 the withdrawal conflicts and their decision stays. The withdrawal button in "Settled"
 names the decision shown there. Read the question again before withdrawing a replacement.
 For a selection, undo sends one request with each decision id. A refused answer is not
 withdrawn, and a refused withdrawal does not stop the others. The message names the failed withdrawals.
-Pressing <kbd>u</kbd> again sends the same request under the same command id and reads its recorded reply.
+After a lost reply, pressing <kbd>u</kbd> again sends the same request under the same command id and reads its recorded reply.
+In "Settled", <kbd>u</kbd> withdraws the question shown; it retries a lost withdrawal only when that withdrawal names the question shown.
+After a refusal, read the question again before withdrawing its current answer.
 The queue updates only withdrawals it has not yet confirmed, including when the first reply was lost.
 The iPhone's **Undo** after **Answer all** also withdraws the selection in one request.
 If somebody already withdrew the decision, the queue reads the question again and says
