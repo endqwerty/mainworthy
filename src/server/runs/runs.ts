@@ -43,6 +43,7 @@ import {
 	resolveCommit,
 	resultById,
 	resultsOfCaseOnTargets,
+	resultsWithFlips,
 	type SignatureRow,
 	SLICE,
 	scopeOf,
@@ -203,14 +204,13 @@ const Q = {
 		outcome: string;
 		signature: number | null;
 		attempt: number;
-		flipped: number;
 		lane: string;
 		target: number;
 	}>(
-		`INSERT INTO run_tests (run, test, result, outcome, signature, attempt, flipped, lane, target)
-		 VALUES ($run, $test, $result, $outcome, $signature, $attempt, $flipped, $lane, $target)
+		`INSERT INTO run_tests (run, test, result, outcome, signature, attempt, lane, target)
+		 VALUES ($run, $test, $result, $outcome, $signature, $attempt, $lane, $target)
 		 ON CONFLICT (run, test, lane) DO UPDATE SET result = excluded.result, outcome = excluded.outcome, signature = excluded.signature,
-		   attempt = excluded.attempt, flipped = max(run_tests.flipped, excluded.flipped)
+		   attempt = excluded.attempt
 		 WHERE (excluded.attempt > run_tests.attempt
 		        AND NOT (excluded.outcome IN ('skip', 'blocked') AND run_tests.outcome IN ('pass', 'fail', 'error')))
 		    OR (excluded.attempt = run_tests.attempt
@@ -219,15 +219,13 @@ const Q = {
 	),
 	runTests: sql<
 		{ run: number; outcome: string; limit: number },
-		{ test: number; result: number; outcome: string; signature: number | null; flipped: number }
-	>(
-		"SELECT test, result, outcome, signature, flipped FROM run_tests WHERE run = $run AND outcome = $outcome LIMIT $limit",
-	),
+		{ test: number; result: number; outcome: string; signature: number | null }
+	>("SELECT test, result, outcome, signature FROM run_tests WHERE run = $run AND outcome = $outcome LIMIT $limit"),
 	failingRunTests: sql<
 		{ run: number; limit: number },
-		{ test: number; result: number; outcome: string; signature: number | null; flipped: number }
+		{ test: number; result: number; outcome: string; signature: number | null }
 	>(
-		"SELECT test, result, outcome, signature, flipped FROM run_tests WHERE run = $run AND outcome IN ('fail', 'error') LIMIT $limit",
+		"SELECT test, result, outcome, signature FROM run_tests WHERE run = $run AND outcome IN ('fail', 'error') LIMIT $limit",
 	),
 	commitsShowing: sql<{ project: number; signature: number }, { run: number }>(
 		`SELECT DISTINCT rt.run AS run FROM run_tests rt JOIN runs r ON r.id = rt.run
@@ -242,12 +240,7 @@ const Q = {
 		`SELECT test, result FROM run_tests
 		 WHERE run = $run AND signature = $signature AND target = $target AND outcome IN ('fail', 'error') LIMIT 200`,
 	),
-	flippedCount: sql<{ run: number }, { n: number }>(
-		"SELECT count(*) AS n FROM run_tests WHERE run = $run AND flipped = 1",
-	),
-	laneRow: sql<{ run: number; test: number; lane: string }, { result: number; flipped: number }>(
-		"SELECT result, flipped FROM run_tests WHERE run = $run AND test = $test AND lane = $lane",
-	),
+	resultsOfRun: sql<{ run: number }, { result: number }>("SELECT result FROM run_tests WHERE run = $run"),
 	dropLane: sql<{ run: number; test: number; lane: string }>(
 		"DELETE FROM run_tests WHERE run = $run AND test = $test AND lane = $lane",
 	),
@@ -426,10 +419,22 @@ export function fillsOf(db: Db, slot: number): Fill[] {
 	}
 	return fills.sort((a, b) => a.seq - b.seq || a.ord - b.ord);
 }
-export const failingTestsOf = (db: Db, run: number, limit: number) => db.all(Q.failingRunTests, { run, limit });
+function withFlips<T extends { result: number }>(db: Db, rows: T[]): (T & { flipped: number })[] {
+	const flipped = resultsWithFlips(
+		db,
+		rows.map((row) => row.result),
+	);
+	return rows.map((row) => ({ ...row, flipped: flipped.has(row.result) ? 1 : 0 }));
+}
+export const failingTestsOf = (db: Db, run: number, limit: number) =>
+	withFlips(db, db.all(Q.failingRunTests, { run, limit }));
 export const runTestsWith = (db: Db, run: number, outcome: string, limit: number) =>
-	db.all(Q.runTests, { run, outcome, limit });
-export const flippedIn = (db: Db, run: number): number => db.get(Q.flippedCount, { run })?.n ?? 0;
+	withFlips(db, db.all(Q.runTests, { run, outcome, limit }));
+export const flippedIn = (db: Db, run: number): number =>
+	resultsWithFlips(
+		db,
+		db.all(Q.resultsOfRun, { run }).map((row) => row.result),
+	).size;
 /** Whether a change run holds a passing result for any of these tests: the evidence that a failure stopped. */
 export function passesAny(db: Db, run: number, tests: readonly number[]): boolean {
 	if (tests.length === 0) return false;
@@ -654,7 +659,6 @@ export function* applyBatchSteps(
 				outcome: result.outcome,
 				signature: result.signature?.id ?? null,
 				attempt: result.attempt,
-				flipped: result.flipped ? 1 : 0,
 				lane,
 				target: batch.target,
 			});
@@ -1685,7 +1689,6 @@ function refoldLaneOf(ctx: Ctx, commit: RunRow, id: number): void {
 	if (!result || result.method === "agent") return;
 	const job = batchById(ctx.db, result.batch)?.job ?? "";
 	const lane = `${result.target}:${job}:${result.actor}`;
-	const before = ctx.db.get(Q.laneRow, { run: commit.id, test: result.test, lane });
 	const held = heldInLane(
 		ctx.db,
 		{ target: result.target, test: result.test, actor: result.actor, job },
@@ -1700,7 +1703,6 @@ function refoldLaneOf(ctx: Ctx, commit: RunRow, id: number): void {
 			outcome: held.outcome,
 			signature: held.signature,
 			attempt: held.attempt,
-			flipped: before?.flipped ?? 0,
 			lane,
 			target: held.target,
 		});

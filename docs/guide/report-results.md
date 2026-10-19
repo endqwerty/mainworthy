@@ -330,6 +330,8 @@ Mainworthy records a same-code flip when a higher decisive attempt changes betwe
 and failure within one producer, job, test, and target. Failure includes `fail` and `error`.
 A skip does not hide the previous decisive result. An old attempt or same-attempt
 disagreement adds no flip. Identical reports add nothing.
+If the producer corrects either result, that flip no longer counts in the test detail,
+the run, the flaky report, or the detector.
 
 The detector counts recent flips per test and failure signature, across assertion,
 timeout, and infrastructure classes. By default, two flips of one cause within

@@ -183,6 +183,81 @@ describe("flaky tests and time lost to reruns", () => {
 });
 
 describe("what a flip and a rerun are (review of #461)", () => {
+	test("correcting a false failure removes the test and run flip as well as report and detector evidence", () => {
+		h = harness({ unlinked: "track" });
+		h.call("report", ciReport({ commit: "flip0001", n: 1, fail: { 0: "socket hang up" } }));
+		const failed = lastResult("T-1");
+		h.call("report", ciReport({ commit: "flip0001", n: 1, attempt: 2 }));
+		const read = () => {
+			const [test] = h.call<{ flips: number; sameCode: unknown }[]>("get", { refs: ["T-1"] });
+			const [run] = h.call<{ flips: number }[]>("get", { refs: ["R-1"] });
+			return {
+				stats: stats({ of: "flaky", days: 1 }),
+				testFlips: test?.flips,
+				sameCode: test?.sameCode,
+				runFlips: run?.flips,
+			};
+		};
+		expect(read()).toMatchObject({ stats: { flaky: 1 }, testFlips: 1, runFlips: 1 });
+		const fixed = ciReport({ commit: "flip0001", n: 1 });
+		h.call("report", { ...fixed, results: fixed.results.map((r) => ({ ...r, corrects: failed })) });
+		expect(read()).toEqual({
+			stats: { of: "flaky", tests: 1, flaky: 0, items: [] },
+			testFlips: 0,
+			sameCode: { enabled: true, windowDays: 14, minFlips: 2, signals: [] },
+			runFlips: 0,
+		});
+	});
+
+	test("a remaining flip keeps its lane marked until either endpoint is corrected", () => {
+		h = harness({ unlinked: "track" });
+		h.call("report", ciReport({ commit: "flip0001", n: 1, fail: { 0: "socket hang up" } }));
+		const first = lastResult("T-1");
+		h.call("report", ciReport({ commit: "flip0001", n: 1, attempt: 2 }));
+		const second = lastResult("T-1");
+		h.call("report", ciReport({ commit: "flip0001", n: 1, attempt: 3, fail: { 0: "socket hang up" } }));
+		expect(h.call("get", { refs: ["T-1", "R-1"] })).toMatchObject([
+			{ flips: 2 },
+			{ flips: 1, failing: [{ flipped: true }] },
+		]);
+		const fixed = ciReport({ commit: "flip0001", n: 1 });
+		h.call("report", { ...fixed, results: fixed.results.map((r) => ({ ...r, corrects: first })) });
+		expect(h.call("get", { refs: ["T-1", "R-1"] })).toMatchObject([
+			{ flips: 1 },
+			{ flips: 1, failing: [{ flipped: true }] },
+		]);
+		h.call("report", { ...fixed, results: fixed.results.map((r) => ({ ...r, corrects: second })) });
+		expect(h.call("get", { refs: ["T-1", "R-1"] })).toMatchObject([
+			{ flips: 0 },
+			{ flips: 0, failing: [{ flipped: false }] },
+		]);
+		expect(stats({ of: "flaky", days: 1 })).toEqual({ of: "flaky", tests: 1, flaky: 0, items: [] });
+	});
+
+	test("live run flips stay within their target, job and producer", () => {
+		h = harness({ unlinked: "track" });
+		const failed = ciReport({ commit: "flip0001", n: 1, fail: { 0: "socket hang up" } });
+		h.call("report", failed);
+		const original = lastResult("T-1");
+		h.call("report", ciReport({ commit: "flip0001", n: 1, attempt: 2 }));
+		h.call("report", { ...failed, job: "unit" });
+		const other = h.actor("other-pipeline", "ci", ["record"]);
+		h.call("report", failed, other);
+		h.call("report", { ...failed, target: { ...failed.target, env: "staging" } });
+		expect(h.call("get", { refs: ["R-1"] })).toMatchObject([
+			{ flips: 1, failing: [{ flipped: false }, { flipped: false }, { flipped: false }] },
+		]);
+		h.call("report", ciReport({ commit: "flip0002", n: 1, fail: { 0: "socket hang up" } }));
+		h.call("report", ciReport({ commit: "flip0002", n: 1, attempt: 2 }));
+		const fixed = ciReport({ commit: "flip0001", n: 1 });
+		h.call("report", { ...fixed, results: fixed.results.map((r) => ({ ...r, corrects: original })) });
+		expect(h.call("get", { refs: ["T-1", "R-1", "R-2"] })).toMatchObject([
+			{ flips: 1 },
+			{ flips: 0, failing: [{ flipped: false }, { flipped: false }, { flipped: false }] },
+			{ flips: 1 },
+		]);
+	});
+
 	test("a flip whose failure its producer corrected is not flaky", () => {
 		h = harness({ unlinked: "track" });
 		h.call("report", ciReport({ commit: "aaaa0001", n: 2, fail: { 1: "socket hang up" } }));

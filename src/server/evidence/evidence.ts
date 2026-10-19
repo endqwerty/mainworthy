@@ -399,7 +399,19 @@ const Q = {
 		"INSERT INTO flips (project, test, target, first_result, second_result, seq) VALUES ($project, $test, $target, $first, $second, $seq)",
 	),
 	flipCount: sql<{ project: number; test: number }, { n: number }>(
-		"SELECT count(*) AS n FROM flips WHERE project = $project AND test = $test",
+		`SELECT count(*) AS n FROM flips f WHERE f.project = $project AND f.test = $test
+		   AND ${uncorrectedResults("f.first_result", "f.second_result")}`,
+	),
+	resultsWithFlips: sql<{ results: string }, { id: number }>(
+		`SELECT r.id FROM results r JOIN batches b ON b.id = r.batch
+		 WHERE r.id IN (SELECT value FROM json_each($results))
+		   AND EXISTS (
+		     SELECT 1 FROM flips f JOIN results first ON first.id = f.first_result
+		     JOIN batches fb ON fb.id = first.batch
+		     WHERE f.project = r.project AND f.test = r.test AND f.target = r.target
+		       AND first.actor = r.actor AND fb.job = b.job AND first.method != 'agent'
+		       AND ${uncorrectedResults("f.first_result", "f.second_result")}
+		   )`,
 	),
 	lastOfTest: sql<{ project: number; test: number; limit: number }, ResultRow>(
 		"SELECT * FROM results WHERE project = $project AND test = $test ORDER BY seq DESC, ord DESC LIMIT $limit",
@@ -969,8 +981,6 @@ export type Applied = {
 	signature: SignatureRow | null;
 	message: string | null;
 	corrects: number | null;
-	/** True when a higher decisive attempt changes outcome within one producer, job, method and target. */
-	flipped: boolean;
 	/** True when this test was first seen in this batch. */
 	fresh: boolean;
 };
@@ -1197,7 +1207,6 @@ export function* applySteps(
 			signature,
 			message,
 			corrects,
-			flipped,
 			fresh,
 		});
 	}
@@ -1427,6 +1436,12 @@ export const resultsOfBatch = (db: Db, batch: number, limit: number): ResultRow[
 	db.all(Q.ofBatch, { batch, limit });
 export const flipCount = (db: Db, project: number, test: number): number =>
 	db.get(Q.flipCount, { project, test })?.n ?? 0;
+
+/** Effective results whose target, test, producer and job still have an uncorrected flip. */
+export function resultsWithFlips(db: Db, results: readonly number[]): Set<number> {
+	if (results.length === 0) return new Set();
+	return new Set(db.all(Q.resultsWithFlips, { results: JSON.stringify(results) }).map((row) => row.id));
+}
 
 /**
  * Every target reported for a commit, named by its full hash or by a prefix of at least seven characters that

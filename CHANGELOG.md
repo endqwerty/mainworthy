@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-10-18: **Fixed:** correcting either result of a same-code flip removes it from test details and run counts, including each failing test's flip flag. No schema or API changes (issue #630).
+
 - 2026-10-18: **Fixed:** a private draft's timeline names its base version. Failed proposal answers keep newer timeline updates and read the case again. In the case pane, the required reason names Accept or Reject, keeps that answer while you type, and closes when the question is settled elsewhere. No stored data or API changes (issues #574, #445, #606).
 
 - 2026-10-18: **Fixed:** large folder proposals seal without rebuilding the whole folder tree after every creation, rename, or move. Collision checks and review of protected paths still include intermediate paths. No stored data or API changes (issue #581).
