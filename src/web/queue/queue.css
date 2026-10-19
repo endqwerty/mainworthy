@@ -258,13 +258,6 @@
 .queue-warning {
 	color: var(--warn);
 }
-.queue-inline {
-	display: grid;
-	padding: 8px 24px;
-	gap: 4px;
-	border-top: 1px solid var(--line);
-	flex: none;
-}
 .queue-more,
 .queue-read-error {
 	padding: 12px 16px;
