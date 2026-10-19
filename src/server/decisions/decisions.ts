@@ -85,6 +85,7 @@ import {
 	decisionsOf,
 	everyQuestionOn,
 	type HoldTerm,
+	holdEndingById,
 	inheritedQuestions,
 	insertAnswer,
 	insertDecision,
@@ -1913,7 +1914,7 @@ function endHold(ctx: Ctx, decision: DecisionRow, ending: Ending): boolean {
 	const question = questionById(ctx.db, decision.question);
 	if (question?.state !== "decided" || question.decision !== decision.id) return false;
 	HANDLERS[question.kind].revert(ctx, question, decision);
-	insertDecision(ctx, {
+	const ended = insertDecision(ctx, {
 		question,
 		answer: { is: ending.is },
 		signers: [
@@ -1931,6 +1932,7 @@ function endHold(ctx: Ctx, decision: DecisionRow, ending: Ending): boolean {
 	const closed = closeAnswered(ctx, question);
 	refold(ctx, [...runsAbout(ctx, question), ...runsDependingOn(ctx.db, decision.id), ...closed]);
 	closeIfGone(ctx, question.id);
+	if (questionById(ctx.db, question.id)?.state === "dissolved") setQuestionState(ctx, question, "dissolved", ended.id);
 	return true;
 }
 
@@ -1996,8 +1998,10 @@ function itemOf(db: Db, row: QuestionRow, facts: ReadonlySet<string>, ask: Ask):
 	if (facts.has("hint:disputed")) hints.unshift("disputed");
 	const answers = answersOf(db, row.id);
 	const decision = row.decision !== null ? decisionById(db, row.decision) : null;
-	const signers = decision ? json<Signer[]>(decision.signers) : [];
-	const rule = signers.find((signer) => actorLabel(db, signer.by).kind === "rule");
+	const supersedes =
+		decision && decision.supersedes !== null && holdEndingById(db, decision.id) !== null
+			? decisionById(db, decision.supersedes)
+			: null;
 	return {
 		q: questionRef(row),
 		kind: row.kind,
@@ -2024,15 +2028,20 @@ function itemOf(db: Db, row: QuestionRow, facts: ReadonlySet<string>, ask: Ask):
 				reason: a.reason,
 			})),
 		decision: decision
-			? {
-					id: decision.id,
-					answer: json<Record<string, unknown>>(decision.answer),
-					by: signers.map((signer) => actorLabel(db, signer.by).name),
-					rule: rule ? rule.clause : null,
-					reason: signers.find((signer) => signer.reason)?.reason ?? null,
-					at: decision.at,
-				}
+			? { ...decisionItem(db, decision), ...(supersedes ? { supersedes: decisionItem(db, supersedes) } : {}) }
 			: null,
+	};
+}
+
+function decisionItem(db: Db, decision: DecisionRow) {
+	const signers = json<Signer[]>(decision.signers);
+	return {
+		id: decision.id,
+		answer: json<Record<string, unknown>>(decision.answer),
+		by: signers.map((signer) => actorLabel(db, signer.by).name),
+		rule: signers.find((signer) => actorLabel(db, signer.by).kind === "rule")?.clause ?? null,
+		reason: signers.find((signer) => signer.reason)?.reason ?? null,
+		at: decision.at,
 	};
 }
 

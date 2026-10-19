@@ -201,27 +201,36 @@ function ChangesWorkbench() {
 							)}
 							<SectionHeading>Settled and excused</SectionHeading>
 							{settled.error && <p role="status">{settled.error.message}</p>}
-							{settledData?.items.map((q) => (
-								<div className="change-decision" key={q.q}>
-									<a
-										className="ref"
-										href={refUrl({ project, ref: q.q })}
-										onClick={(event) => {
-											event.preventDefault();
-											go(q.q);
-										}}
-									>
-										{q.q}
-									</a>
-									<b>{ANSWER_LABELS[String(q.decision?.answer.is)] ?? String(q.decision?.answer.is)}</b>
-									<span>{q.title}</span>
-									<small className="dim">
-										{q.decision?.rule ? `Rule ${q.decision.rule}` : q.decision?.by.join(", ")} ·{" "}
-										{q.decision && age(q.decision.at)}
-										{q.decision?.reason && ` · ${q.decision.reason}`}
-									</small>
-								</div>
-							))}
+							{settledData?.items.map((q) => {
+								const decision = q.decision?.supersedes ?? q.decision;
+								return (
+									<div className="change-decision" key={q.q}>
+										<a
+											className="ref"
+											href={refUrl({ project, ref: q.q })}
+											onClick={(event) => {
+												event.preventDefault();
+												go(q.q);
+											}}
+										>
+											{q.q}
+										</a>
+										<b>{ANSWER_LABELS[String(decision?.answer.is)] ?? String(decision?.answer.is)}</b>
+										<span>{q.title}</span>
+										<small className="dim">
+											{decision?.rule ? `Rule ${decision.rule}` : decision?.by.join(", ")} ·{" "}
+											{decision && age(decision.at)}
+											{decision?.reason && ` · ${decision.reason}`}
+										</small>
+										{q.decision?.supersedes && (
+											<small>
+												Ended by {q.decision.rule ? `rule ${q.decision.rule}` : q.decision.by.join(", ")}
+												{q.decision.reason && ` · ${q.decision.reason}`}
+											</small>
+										)}
+									</div>
+								);
+							})}
 							{settledData?.items.length === 0 && <p className="dim">No decisions on this change yet.</p>}
 							<ChangeResults key={key} of={{ change: key }} standing={standing} choose={setStanding} />
 							<ChangeRuns key={`runs:${key}`} change={key} />

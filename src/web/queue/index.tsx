@@ -113,7 +113,7 @@ function QueueWorkbench() {
 	useEffect(() => {
 		if (route.ref && routeQuestionRef === route.ref && seenRoute.current !== route.ref) {
 			seenRoute.current = route.ref;
-			if (routeQuestionState === "decided") setState("decided");
+			if (routeQuestionState === "decided" || routeQuestionState === "dissolved") setState("decided");
 		}
 	}, [route.ref, routeQuestionRef, routeQuestionState]);
 	const input: Api["inbox"]["input"] = { state, ...(kind ? { kind } : {}), limit: 100 };
@@ -144,7 +144,8 @@ function QueueWorkbench() {
 	const merged = [...restored.filter((item) => !fetched.some((q) => q.q === item.q)), ...fetched];
 	const items = merged.filter(
 		(item) =>
-			item.state === state &&
+			(item.state === state ||
+				(state === "decided" && item.state === "dissolved" && Boolean(item.decision?.supersedes))) &&
 			(!kind || item.kind === kind) &&
 			(state !== "open" || !hidden.has(item.q)) &&
 			(rules || item.kind !== "map" || !item.decision?.rule),
@@ -152,6 +153,7 @@ function QueueWorkbench() {
 	for (const question of items) shown.current.set(question.q, question);
 	if (cursor === null && items[0]) setCursor(items[0].q);
 	const current = cursor === null ? items[0] : (items.find((item) => item.q === cursor) ?? shown.current.get(cursor));
+	const answered = current?.decision?.supersedes ?? current?.decision;
 	const selection = items.filter((item) => selected.has(item.q));
 	const byRef = new Map(items.map((item) => [item.q, item]));
 	const alone = (row: Row) => {
@@ -585,6 +587,10 @@ function QueueWorkbench() {
 		extra?: InlineAnswer,
 	): void {
 		if (!questions.length) return;
+		if (questions.some((question) => question.state === "dissolved" || question.decision?.supersedes)) {
+			setStatus("This answer has ended. There is no answer to withdraw.");
+			return;
+		}
 		const prior =
 			extra?.kind === "withdrawal"
 				? extra.prior
@@ -932,7 +938,7 @@ function QueueWorkbench() {
 								<span className={`kind k-${question.kind}`}>{KIND_WORDS[question.kind].tag}</span>
 								<span className="queue-title">{question.title}</span>
 								<span className="queue-case ref">{question.about.find((ref) => ref.startsWith("C-"))}</span>
-								{question.blocks.length > 0 && <span className="blk">blocks gate</span>}
+								{question.state === "open" && question.blocks.length > 0 && <span className="blk">blocks gate</span>}
 								<span className="queue-age">{age(question.openedAt)}</span>
 							</ListRow>
 						</div>
@@ -976,7 +982,9 @@ function QueueWorkbench() {
 								<span className={`kind k-${current.kind}`}>{KIND_WORDS[current.kind].tag}</span>
 								<ProducerGlyph kind={current.producer} />
 								<span className="dim">{age(current.openedAt)}</span>
-								{current.blocks.length > 0 && <span className="blk">blocks {current.blocks.join(", ")}</span>}
+								{current.state === "open" && current.blocks.length > 0 && (
+									<span className="blk">blocks {current.blocks.join(", ")}</span>
+								)}
 							</div>
 							<h2>{current.title}</h2>
 							{state === "open" && (
@@ -997,7 +1005,7 @@ function QueueWorkbench() {
 								</button>
 							</div>
 							<QuestionEvidence question={current} full={full} />
-							{current.seen.carried > 0 && (
+							{current.state === "open" && current.seen.carried > 0 && (
 								<p className="hintbox">
 									An earlier answer carried to {current.seen.carried} occurrences. This evidence is awaiting a fresh
 									decision.
@@ -1009,24 +1017,34 @@ function QueueWorkbench() {
 									{advice.reason && `: ${advice.reason}`} <KeyCap>Enter</KeyCap> takes the suggestion.
 								</div>
 							))}
-							{state === "decided" && current.decision && (
+							{state === "decided" && current.decision && answered && (
 								<div className="queue-decision">
-									<b>{ANSWER_LABELS[String(current.decision.answer.is)] ?? String(current.decision.answer.is)}</b>
+									<b>{ANSWER_LABELS[String(answered.answer.is)] ?? String(answered.answer.is)}</b>
 									<p className="dim">
-										{current.decision.rule
-											? `Decided by rule ${current.decision.rule}`
-											: `Decided by ${current.decision.by.join(", ")}`}{" "}
-										· {age(current.decision.at)}
+										{answered.rule ? `Decided by rule ${answered.rule}` : `Decided by ${answered.by.join(", ")}`} ·{" "}
+										{age(answered.at)}
 									</p>
-									{current.decision.reason && <p>{current.decision.reason}</p>}
+									{answered.reason && <p>{answered.reason}</p>}
+									{current.decision.supersedes && (
+										<>
+											<p className="dim">
+												Ended by{" "}
+												{current.decision.rule ? `rule ${current.decision.rule}` : current.decision.by.join(", ")} ·{" "}
+												{age(current.decision.at)}
+											</p>
+											{current.decision.reason && <p>{current.decision.reason}</p>}
+										</>
+									)}
 									{current.decision.trackerError && (
 										<p role="status" className="hintbox">
 											{current.decision.trackerError}
 										</p>
 									)}
-									<button className="out" type="button" onClick={() => undo([current])}>
-										<KeyCap>u</KeyCap> Withdraw answer
-									</button>
+									{current.state === "decided" && !current.decision.supersedes && (
+										<button className="out" type="button" onClick={() => undo([current])}>
+											<KeyCap>u</KeyCap> Withdraw answer
+										</button>
+									)}
 								</div>
 							)}
 						</div>

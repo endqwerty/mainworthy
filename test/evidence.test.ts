@@ -11,6 +11,9 @@ import { SameCodeEvidence } from "../src/core/flaky.ts";
 import { Policy } from "../src/core/kinds.ts";
 import type { ClaimReply, CommandFate, DecideReply, GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
 import { stakes } from "../src/core/stakes.ts";
+import { toItem } from "../src/server/decisions/decisions.ts";
+import { mustQuestion } from "../src/server/decisions/questions.ts";
+import { ruleActor } from "../src/server/identity/identity.ts";
 import { type Config, defaultConfig, openApp } from "../src/server/kernel/app.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
 import { Db } from "../src/server/kernel/db.ts";
@@ -1133,6 +1136,31 @@ describe("holds", () => {
 		h.call("report", ciReport({ commit: "fixed01b", branch: "fix", pr: 41, n: 3 }));
 		expect(gate("fixed01b").verdict).toBe("passed");
 		expect(state(asked.q)).toBe("dissolved");
+		const ended = {
+			q: asked.q,
+			state: "dissolved",
+			decision: {
+				answer: { is: "outdated" },
+				by: ["policy"],
+				rule: "passed",
+				reason: "Every test it named passed on fixed01b where it had failed; the answer ended.",
+				supersedes: { answer: { is: "test" }, by: ["robin"], reason: null },
+			},
+		};
+		expect(h.call("get", { refs: [asked.q] })).toMatchObject([ended]);
+		expect(h.call<InboxReply>("inbox", { state: "decided", kind: "failure", limit: 1 }).items).toMatchObject([ended]);
+		expect(h.call<InboxReply>("inbox", { state: "decided", on: "pr:41" }).items).toMatchObject([ended]);
+		const chunks: string[] = [];
+		exportArchive(h.app.db, (chunk) => chunks.push(chunk));
+		const restored = new Db(":memory:");
+		try {
+			migrate(restored, ":memory:");
+			importArchive(restored, linesOf(chunks.join("")));
+			const question = mustQuestion(restored, 1, asked.q);
+			expect(toItem(restored, question)).toMatchObject(ended);
+		} finally {
+			restored.close();
+		}
 		expect(ledger(asked.q)).toEqual([
 			{ is: "test", clause: expect.any(String), reason: null },
 			{
@@ -1148,6 +1176,73 @@ describe("holds", () => {
 		expect(again.questions[0]).toMatchObject({ how: "new", state: "open" });
 		expect(again.gate?.verdict).toBe("blocked");
 		expect(first(queue().items).q).not.toBe(asked.q);
+	});
+
+	test("an expired flaky answer stays in Settled when its failure has gone, without claiming a pass ended it", () => {
+		h.call(
+			"report",
+			ciReport({ commit: "expired408a", branch: "fix", pr: 408, n: 1, fail: { 0: "expected 90, got 100" } }),
+		);
+		const asked = first(queue().items);
+		decide(asked, { is: "flaky" });
+		h.call("report", ciReport({ commit: "expired408b", branch: "fix", pr: 408, n: 1 }));
+		h.advance(15 * 86_400_000);
+		const rule = ruleActor(h.app.db);
+		expect(sweep(h.app, rule.id)).toBe(1);
+		const ended = {
+			q: asked.q,
+			state: "dissolved",
+			decision: {
+				answer: { is: "expired" },
+				by: ["policy"],
+				rule: "hold-expired",
+				reason: null,
+				supersedes: { answer: { is: "flaky" }, by: ["robin"], reason: null },
+			},
+		};
+		expect(h.call("get", { refs: [asked.q] })).toMatchObject([ended]);
+		expect(h.call<InboxReply>("inbox", { state: "decided", kind: "failure" }).items).toMatchObject([ended]);
+		expect(queue().counts.open).toBe(0);
+		expect(gate("expired408b").verdict).toBe("passed");
+	});
+
+	test("Settled paginates decided and ended answers together, leaving out unanswered dissolved questions", () => {
+		const report = (commit: string, pr: number, fail: Record<number, string> = {}) =>
+			h.call("report", ciReport({ commit, branch: "fix", pr, n: 1, fail }));
+		report("page408a", 408, { 0: "expected 90, got 100" });
+		const ended = first(queue().items);
+		decide(ended, { is: "test" });
+		report("page408b", 408);
+		report("page409a", 409, { 0: "expected 90, got 100" });
+		const standing = first(queue().items);
+		decide(standing, { is: "flaky" });
+		report("page410a", 410, { 0: "expected 90, got 100" });
+		const unanswered = first(queue().items);
+		report("page410b", 410);
+		expect(h.call("get", { refs: [unanswered.q] })).toMatchObject([{ state: "dissolved", decision: null }]);
+		for (const kind of [undefined, "failure"] as const) {
+			const firstPage = h.call<InboxReply>("inbox", { state: "decided", kind, limit: 1 });
+			expect(firstPage.items).toMatchObject([
+				{ q: standing.q, state: "decided", decision: { answer: { is: "flaky" } } },
+			]);
+			expect(firstPage.cursor).not.toBeNull();
+			const nextPage = h.call<InboxReply>("inbox", { state: "decided", kind, limit: 1, cursor: firstPage.cursor });
+			expect(nextPage.items).toMatchObject([
+				{
+					q: ended.q,
+					state: "dissolved",
+					decision: { answer: { is: "outdated" }, supersedes: { answer: { is: "test" } } },
+				},
+			]);
+			if (kind === "failure") expect(nextPage.cursor).toBeNull();
+			else {
+				const lastPage = h.call<InboxReply>("inbox", { state: "decided", limit: 1, cursor: nextPage.cursor });
+				expect(lastPage.items).toMatchObject([
+					{ kind: "map", state: "decided", decision: { answer: { is: "track" } } },
+				]);
+				expect(lastPage.cursor).toBeNull();
+			}
+		}
 	});
 
 	test("on the line too: a defect answer ends when the line passes, and the regression is asked", () => {

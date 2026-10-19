@@ -100,6 +100,10 @@ To answer from a question's page, follow these steps:
 
 Back in the list, a bar says what was recorded. **Undo** withdraws the answer, with a reason where the policy
 asks for one. Both decisions stay in the ledger. Undo sends the decision id returned by your answer.
+Settled also keeps answers that ended when their cause passed, their flaky hold expired, or their tracker issue closed.
+Replacing an inherited answer lists the answer on the ordinary cause question. Open an ended answer to read the
+original answer and who gave it, followed by the recorded rule and reason for its end. There is no withdrawal
+button for an answer that has ended.
 If somebody replaced that answer meanwhile, their decision stays and the app says the decision changed.
 
 A question is answered from its page, where its evidence is, or with others of its kind from the list.

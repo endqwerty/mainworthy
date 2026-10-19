@@ -212,6 +212,44 @@ for (const answer of ["flaky", "defect", "inherited"] as const) {
 	});
 }
 
+test("Settled keeps an ended cause answer but excludes the inherited question handed off to it", () => {
+	base();
+	change({ 0: "same cause" });
+	const automatic = h.call<InboxReply>("inbox", { state: "decided", kind: "failure", on: "pr:69" }).items[0];
+	if (!automatic) throw new Error("missing rule decision");
+	const [replacement] = h.call<DecideReply[]>("decide", {
+		q: automatic.q,
+		onEvidence: automatic.evidenceHash,
+		answer: { is: "test" },
+	});
+	if (typeof replacement?.effects?.question !== "string") throw new Error("missing cause question");
+	const causeQuestion = replacement.effects.question;
+	change({}, "change02");
+	expect(gate("change02")).toMatchObject({ verdict: "passed", tally: { pass: 2, unexplained: 0 } });
+	expect(h.call("get", { refs: [automatic.q, causeQuestion] })).toMatchObject([
+		{ q: automatic.q, state: "dissolved", decision: { answer: { is: "withdrawn" } } },
+		{
+			q: causeQuestion,
+			state: "dissolved",
+			decision: { answer: { is: "outdated" }, rule: "passed", supersedes: { answer: { is: "test" }, by: ["robin"] } },
+		},
+	]);
+	h.call(
+		"report",
+		ciReport({ commit: "other001", branch: "other", pr: 70, base: "base0001", n: 2, fail: { 0: "same cause" } }),
+	);
+	const reconciled = h.call<InboxReply>("inbox", { state: "decided", kind: "failure", on: "pr:70" }).items[0];
+	if (!reconciled) throw new Error("missing second inherited question");
+	base({}, 2);
+	const [retired] = h.call<InboxReply["items"]>("get", { refs: [reconciled.q] });
+	expect(retired).toMatchObject({ state: "dissolved", decision: { answer: { is: "outdated" }, rule: "hold-ended" } });
+	expect(retired?.decision).not.toHaveProperty("supersedes");
+	for (const filters of [{}, { kind: "failure" }, { on: "pr:69" }, { on: "pr:69", kind: "failure" }]) {
+		const settled = h.call<InboxReply>("inbox", { state: "decided", ...filters }).items;
+		expect(settled.filter((q) => q.kind === "failure").map((q) => q.q)).toEqual([causeQuestion]);
+	}
+});
+
 test("a rejected direct replacement keeps the inherited answer until the cause's policy is met", () => {
 	const policy = h.call<Policy & { version: number }>("admin", { do: "policy.show", project: "scratch" });
 	h.call("propose", {

@@ -186,7 +186,7 @@ private struct QuestionRow: View {
 					.accessibilityLabel("From \(question.producer.name)")
 				RefText(question.ref)
 				Tag(text: question.kind.name, tint: question.kind.tint)
-				if !question.blocks.isEmpty { Tag(text: "blocks \(question.blocks.joined(separator: ", "))", tint: .fail) }
+				if question.isOpen && !question.blocks.isEmpty { Tag(text: "blocks \(question.blocks.joined(separator: ", "))", tint: .fail) }
 				Spacer()
 				Text(question.decision?.at ?? question.openedAt, format: .relative(presentation: .named))
 					.font(.caption)
@@ -196,7 +196,7 @@ private struct QuestionRow: View {
 				.font(.body)
 				.lineLimit(2)
 			if let decision = question.decision {
-				Text("\(decision.label) · \(decision.byRule ? "by rule" : decision.by.joined(separator: ", "))")
+				Text("\(decision.label) · \(decision.byRule ? "by rule" : decision.by.joined(separator: ", "))\(decision.ending == nil ? "" : " · ended")")
 					.font(.footnote)
 					.foregroundStyle(.secondary)
 			}

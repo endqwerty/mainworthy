@@ -567,6 +567,16 @@ export const InboxInput = z.object({
 });
 export type InboxInput = z.infer<typeof InboxInput>;
 
+const DecisionItem = z.object({
+	id: z.number(),
+	answer: z.record(z.string(), z.unknown()),
+	by: z.array(z.string()),
+	rule: z.string().nullable(),
+	reason: z.string().nullable(),
+	trackerError: z.string().optional(),
+	at: z.number(),
+});
+
 export const QuestionItem = z.object({
 	q: z.string(),
 	kind: Kind,
@@ -596,14 +606,9 @@ export const QuestionItem = z.object({
 	/** In a listing: what the caller's own answer would be worth under the policy. */
 	you: z.enum(["counts", "advice", "forbidden"]).optional(),
 	decision: z.union([
-		z.object({
-			id: z.number(),
-			answer: z.record(z.string(), z.unknown()),
-			by: z.array(z.string()),
-			rule: z.string().nullable(),
-			reason: z.string().nullable(),
-			trackerError: z.string().optional(),
-			at: z.number(),
+		DecisionItem.extend({
+			/** For an ending: the answer it ended, with its original attribution. */
+			supersedes: DecisionItem.optional(),
 		}),
 		z.null(),
 	]),

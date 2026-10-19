@@ -36,6 +36,7 @@ import { mismatches, type Shape } from "../scripts/ios/shape.ts";
 import { generated } from "../scripts/ios/swift.ts";
 import { KINDS } from "../src/core/kinds.ts";
 import { OPS } from "../src/server/ops/index.ts";
+import { ciReport } from "./helpers.ts";
 
 const WHAT_TO_DO =
 	"The iOS app reads this (scripts/ios/contract.ts). If the change is meant, change the contract, run `bun scripts/ios.ts gen` and see ios/README.md.";
@@ -120,6 +121,43 @@ const open = async (key: string): Promise<Item[]> =>
 	((await op(key, "inbox", { state: "open", limit: 100 })) as { items: Item[] }).items;
 
 describe("what the iOS app reads", () => {
+	test("Settled decodes the answer and its ending on a dissolved failure question", async () => {
+		const { project: key } = z.object({ project: z.string() }).parse(await result("POST", "/test/project", {}));
+		await op(
+			key,
+			"report",
+			ciReport({ commit: "native408a", branch: "fix", pr: 408, n: 1, fail: { 0: "native contract trace failure" } }),
+		);
+		const question = z
+			.object({ items: z.array(z.object({ q: z.string(), title: z.string(), evidenceHash: z.string() })) })
+			.parse(await op(key, "inbox", { kind: "failure" }))
+			.items.find((item) => item.title === "native contract trace failure");
+		if (!question) throw new Error("expected a failure question");
+		await op(key, "decide", {
+			q: question.q,
+			onEvidence: question.evidenceHash,
+			answer: { is: "test" },
+			reason: "The assertion needs a fix.",
+		});
+		await op(key, "report", ciReport({ commit: "native408b", branch: "fix", pr: 408, n: 1 }));
+		const inbox = await op(key, "inbox", { state: "decided", on: "pr:408" });
+		holds("Settled, ended answer", Inbox, inbox);
+		expect(inbox).toMatchObject({
+			items: [
+				{
+					q: question.q,
+					state: "dissolved",
+					decision: {
+						rule: "passed",
+						reason: "Every test it named passed on native408b where it had failed; the answer ended.",
+						supersedes: { answer: { is: "test" }, by: ["robin"], reason: "The assertion needs a fix." },
+					},
+				},
+			],
+		});
+		const read = z.array(z.unknown()).parse(await op(key, "get", { refs: [question.q] }))[0];
+		holds("get, ended answer", Question, read);
+	});
 	test("a native map answer cannot replace an answer recorded while its sheet was open", async () => {
 		const made = z.object({ project: z.string() }).parse(await result("POST", "/test/project", {}));
 		const question = (await open(made.project)).find((item) => item.kind === "map");

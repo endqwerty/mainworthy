@@ -236,8 +236,14 @@ struct QuestionView: View {
 			.foregroundStyle(.secondary)
 			if let reference = decision.reference { Text("Reference: \(reference)").font(.subheadline) }
 			if let reason = decision.reason { Text(reason).font(.subheadline) }
+			if let ending = decision.ending {
+				Text("Ended by \(ending.rule.map { "rule \($0)" } ?? ending.by.joined(separator: ", ")) · \(ending.at.formatted(date: .abbreviated, time: .shortened))")
+					.font(.subheadline)
+					.foregroundStyle(.secondary)
+				if let reason = ending.reason { Text(reason).font(.subheadline) }
+			}
 			// An accepted edit is undone in the case's history, not here.
-			if question.kind != .adopt {
+			if question.kind != .adopt && decision.ending == nil {
 				Button("Withdraw this decision", role: .destructive) {
 					if question.wantsReason { asking = .withdrawal(question) } else { withdraw(question) }
 				}

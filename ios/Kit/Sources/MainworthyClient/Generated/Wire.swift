@@ -60,8 +60,8 @@ enum Wire {
 		let reason: String?
 	}
 
-	/// The decision that stands on a question.
-	struct Decision: Decodable, Equatable, Sendable {
+	/// The answer an ending supersedes, with its original attribution.
+	struct PriorDecision: Decodable, Equatable, Sendable {
 		let id: Int
 		let answer: GivenAnswer
 		/// Who signed it.
@@ -72,7 +72,20 @@ enum Wire {
 		let at: Double
 	}
 
-	/// One question of the queue, open or decided.
+	/// A question's decision, or the ending of its answer.
+	struct Decision: Decodable, Equatable, Sendable {
+		let id: Int
+		let answer: GivenAnswer
+		/// Who signed it.
+		let by: [String]
+		/// The policy clause that answered, when a rule did.
+		let rule: String?
+		let reason: String?
+		let at: Double
+		let supersedes: PriorDecision?
+	}
+
+	/// One question of the queue, open, decided or dissolved.
 	struct Question: Decodable, Equatable, Sendable {
 		/// Its ref, for example Q-12.
 		let q: String

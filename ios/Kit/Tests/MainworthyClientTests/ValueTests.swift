@@ -5,6 +5,19 @@ import Testing
 
 @Suite("What the app works out by itself")
 struct ValueTests {
+	@Test("an ended answer keeps its original signer and the recorded ending separately")
+	func endedAnswer() throws {
+		let json = #"{"id":2,"answer":{"is":"outdated"},"by":["policy"],"rule":"passed","reason":"Every test it named passed on fixed408 where it had failed; the answer ended.","at":2000,"supersedes":{"id":1,"answer":{"is":"test"},"by":["robin"],"rule":null,"reason":null,"at":1000}}"#
+		let decision = Decision(try JSONDecoder().decode(Wire.Decision.self, from: Data(json.utf8)))
+		#expect(decision.label == "The test is wrong")
+		#expect(decision.by == ["robin"] && !decision.byRule)
+		#expect(decision.reason == nil)
+		#expect(decision.at == Date(timeIntervalSince1970: 1))
+		#expect(decision.ending?.by == ["policy"] && decision.ending?.rule == "passed")
+		#expect(decision.ending?.reason == "Every test it named passed on fixed408 where it had failed; the answer ended.")
+		#expect(decision.ending?.at == Date(timeIntervalSince1970: 2))
+	}
+
 	@Test("an address as a person types it", arguments: [
 		("mainworthy.example", "https://mainworthy.example"),
 		("  Mainworthy.Example  ", "https://mainworthy.example"),
