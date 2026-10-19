@@ -706,7 +706,7 @@ Read cases, questions, runs, tests or proposals by ref.
 | `refs` | `array<string>` | yes | Refs of cases (C-), questions (Q-), runs (R-), tests (T-) or proposals (P-). |
 | `fields` | `array<string>` | no | For cases: any of title, pre, steps, methods, tags, covers, place, proof. Default: all. |
 | `as` | `"data" \| "md"` | no | `md` returns a case as canonical Markdown: fewer tokens than JSON. Default: `"data"`. |
-| `unless` | `record<string>` | no | Ref to the hash you already hold. An unchanged case comes back as {ref, unchanged: true}. |
+| `unless` | `record<string>` | no | Ref to the etag from get for the same as/fields. Unchanged: {ref, unchanged: true, etag}. |
 | `version` | `integer` | no | For one case: this version instead of the current one. |
 
 </details>
@@ -1164,7 +1164,7 @@ guidance for commit reuse, question answers, and review filtering.
 | `claim` | Review cases (`reviewed`, C-311@hash) at change `about` and commit `patch`. Record findings; `known` returns prior findings and answers. |
 | `decide` | Answer inbox using evidenceHash as onEvidence. Status: decided, advised=person decides, forbidden, invalid, already, reopened, conflict=evidence or decision changed. Choose from answers. Withdraw with undo and ifDecision=reply.decision. |
 | `inbox` | Open questions and evidenceHash; filter with on. |
-| `get` | Read refs; page proposals with cursor. |
+| `get` | Read refs; unless=etag; page proposals with cursor. |
 | `find` | Search cases by text, folder or tag; list tests (`unlinked: true`), runs or slots. Page with `cursor`. |
 | `impact` | Review a change (`pr:482`) or changed `files`: affected cases, hashes, prior reviews, questions, uncovered files. Reuse `cursor` as `since`. |
 | `since` | What changed since an earlier `cursor`: changed cases (one-line diff, no bodies) and settled questions. If `more`, call again with the new cursor. |

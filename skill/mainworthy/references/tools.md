@@ -254,7 +254,7 @@ Open questions and evidenceHash; filter with on.
 
 ## get
 
-Read refs; page proposals with cursor.
+Read refs; unless=etag; page proposals with cursor.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -262,7 +262,7 @@ Read refs; page proposals with cursor.
 | `refs` | `array<string>` | yes | Refs of cases (C-), questions (Q-), runs (R-), tests (T-) or proposals (P-). |
 | `fields` | `array<string>` | no | For cases: any of title, pre, steps, methods, tags, covers, place, proof. Default: all. |
 | `as` | `"data" \| "md"` | no | `md` returns a case as canonical Markdown: fewer tokens than JSON. Default: `"data"`. |
-| `unless` | `record<string>` | no | Ref to the hash you already hold. An unchanged case comes back as {ref, unchanged: true}. |
+| `unless` | `record<string>` | no | Ref to the etag from get for the same as/fields. Unchanged: {ref, unchanged: true, etag}. |
 | `version` | `integer` | no | For one case: this version instead of the current one. |
 | `project` | `string` | no |  |
 

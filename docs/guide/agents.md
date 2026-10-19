@@ -209,6 +209,15 @@ the API. After planning the run, have the agent report to it with `run` set to `
 fills the slot, and `mainworthy gate --run R-2` reads `passed`. A run that does
 not name the agent method ignores agent results, even on a case that admits agents.
 
+## Skip unchanged case documents
+
+Each case from `get` includes an `etag` for the returned document. Pass it back in
+`unless`, keyed by case ref, with the same `as` and `fields` to skip a document
+you already hold. The etag changes whenever a returned field changes, including
+metadata and requested proof in data reads. Markdown etags cover the Markdown reply.
+The separate `hash` still identifies the version's body for `claim.reviewed`.
+Old clients that send body hashes in `unless` receive full documents.
+
 ## See also
 
 - [Policy](./policy.md) for who answers each question.

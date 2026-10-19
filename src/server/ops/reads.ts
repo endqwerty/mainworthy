@@ -496,8 +496,7 @@ export function get(ctx: Ctx, input: GetInput): Record<string, unknown>[] {
 		}
 		const row = mustCase(ctx.db, ctx.project.id, text);
 		const version = input.refs.length === 1 ? input.version : undefined;
-		if (version === undefined && input.unless?.[caseRef(row)] === row.head_hash)
-			return { ref: caseRef(row), unchanged: true, hash: row.head_hash };
+		let document: Record<string, unknown>;
 		if (input.as === "md") {
 			const stored = versionOf(ctx.db, row.id, version ?? row.head);
 			if (!stored) throw notFound(`${caseRef(row)} version ${version}`);
@@ -508,9 +507,14 @@ export function get(ctx: Ctx, input: GetInput): Record<string, unknown>[] {
 				tags: json<string[]>(row.tags),
 				covers: coversOf(ctx.db, row.id),
 			});
-			return { ref: caseRef(row), version: stored.no, hash: stored.hash, md };
+			document = { ref: caseRef(row), version: stored.no, hash: stored.hash, md };
+		} else {
+			document = caseView(ctx, row, { fields: input.fields, version });
 		}
-		return caseView(ctx, row, { fields: input.fields, version });
+		const etag = contentHash(document);
+		if (version === undefined && input.unless?.[caseRef(row)] === etag)
+			return { ref: caseRef(row), unchanged: true, hash: document.hash, etag };
+		return { ...document, etag };
 	});
 }
 
@@ -522,7 +526,7 @@ export const getOp = defineOp({
 	needs: "read",
 	scope: "project",
 	effect: "read",
-	mcp: "Read refs; page proposals with cursor.",
+	mcp: "Read refs; unless=etag; page proposals with cursor.",
 	run: get,
 });
 

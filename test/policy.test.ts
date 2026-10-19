@@ -1824,9 +1824,11 @@ describe("what an agent reads", () => {
 		expect(impact.gate.verdict).toBe("blocked");
 
 		const held = first(impact.cases).hash;
-		expect(h.call<Record<string, unknown>[]>("get", { refs: ["C-1"], unless: { "C-1": held } }, agent)).toEqual([
-			{ ref: "C-1", unchanged: true, hash: held },
-		]);
+		const document = first(h.call<{ etag: string; hash: string }[]>("get", { refs: ["C-1"] }, agent));
+		expect(document.hash).toBe(held);
+		expect(
+			h.call<Record<string, unknown>[]>("get", { refs: ["C-1"], unless: { "C-1": document.etag } }, agent),
+		).toEqual([{ ref: "C-1", unchanged: true, hash: held, etag: document.etag }]);
 		h.call(
 			"claim",
 			{ lens: "adversarial-review", about: "pr:482", patch: "cccc0002", reviewed: [`C-1@${held}`], findings: [] },

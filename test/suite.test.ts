@@ -1399,6 +1399,16 @@ describe("organising", () => {
 		expect(byPrefix.items.map((c) => c.ref)).toEqual(["C-2"]);
 		expect(h.call<{ items: { ref: string }[] }>("find", { text: "C-2" }).items[0]?.ref).toBe("C-2");
 		expect(h.call<{ items: unknown[] }>("find", { text: '"*) OR 1=1 --' }).items).toEqual([]);
+		h.call("propose", {
+			edits: [
+				{ op: "create", folder: "Ranked", tags: ["ranked"], outline: "Needle\n  Check > Good" },
+				{ op: "create", folder: "Ranked", tags: ["ranked"], outline: "Other\n  Needle needle needle needle > Good" },
+			],
+		});
+		for (const scope of [{}, { folder: "Ranked" }, { tags: ["ranked"] }]) {
+			const ranked = h.call<{ items: { ref: string }[] }>("find", { text: "needle", ...scope });
+			expect(ranked.items.map((item) => item.ref)).toEqual(["C-3", "C-4"]);
+		}
 	});
 
 	test("a search by ref keeps to the folder, the tags and the state it is narrowed by", () => {
@@ -1479,6 +1489,118 @@ describe("organising", () => {
 		h.call("propose", { edits: [{ op: "state", cases: ["C-1"], to: "archived" }] });
 		expect(h.call<{ items: unknown[] }>("find", {}).items).toEqual([]);
 		expect(h.call<{ state: string }[]>("get", { refs: ["C-1"] })[0]?.state).toBe("archived");
+	});
+
+	test("archived search matches cannot hide the active match or change its count", () => {
+		for (const [from, length] of [
+			[0, 1100],
+			[1100, 1001],
+		] as const) {
+			h.call("propose", {
+				edits: Array.from({ length }, (_, i) => ({
+					op: "create",
+					folder: "Regression",
+					outline: `Checkout common ${from + i}\n  Check > Pass`,
+				})),
+			});
+		}
+		h.call("propose", {
+			edits: [{ op: "state", cases: Array.from({ length: 2100 }, (_, i) => `C-${i + 2}`), to: "archived" }],
+		});
+		type Page = { count: number | null; cursor: string | null; items: { ref: string }[] };
+		for (const limit of [5, 50, 200]) {
+			for (const scope of [{}, { folder: "Regression" }, { state: "active" }]) {
+				const found = h.call<Page>("find", { text: "common", limit, ...scope });
+				expect(found.items.map((item) => item.ref)).toEqual(["C-1"]);
+				expect(found.count).toBe(1);
+				expect(found.cursor).toBeNull();
+			}
+		}
+		expect(h.call<Page>("find", { limit: 5 })).toMatchObject({ count: 1, items: [{ ref: "C-1" }] });
+		expect(h.call("plan", { name: "Search regression", select: { text: "common" } })).toMatchObject({ slots: 1 });
+		expect(h.call<Page>("find", { text: "common", state: "archived", limit: 5 })).toMatchObject({
+			count: null,
+			items: [{ ref: "C-2101" }, { ref: "C-2100" }, { ref: "C-2099" }, { ref: "C-2098" }, { ref: "C-2097" }],
+		});
+	});
+
+	test.each(["data", "md"] as const)("conditional %s case reads refresh changed tags, coverage and state", (as) => {
+		h.call("propose", { edits: [{ op: "create", outline: "Checkout #smoke @REQ-1\n  Check > Pass" }] });
+		type Document = { hash: string; etag?: string; md?: string; tags?: string[]; covers?: string[]; state?: string };
+		const before = h.call<Document[]>("get", { refs: ["C-1"], as })[0];
+		if (!before) throw new Error("missing case");
+		h.call("propose", {
+			edits: [
+				{ op: "place", cases: ["C-1"], tags: { set: ["critical"] } },
+				{ op: "cover", case: "C-1", requirement: "REQ-2", on: true },
+				{ op: "state", cases: ["C-1"], to: "archived" },
+			],
+		});
+		const conditional = h.call<Document[]>("get", { refs: ["C-1"], as, unless: { "C-1": before.etag ?? before.hash } });
+		if (as === "md") {
+			expect(conditional[0]?.md).toContain("tags: [critical]");
+			expect(conditional[0]?.md).toContain("covers: [REQ-1, REQ-2]");
+		} else {
+			expect(conditional[0]).toMatchObject({ tags: ["critical"], covers: ["REQ-1", "REQ-2"], state: "archived" });
+		}
+		expect(conditional).toEqual(h.call("get", { refs: ["C-1"], as }));
+	});
+
+	test("a document etag covers each requested field and keeps the body hash for reviews", () => {
+		h.call("propose", {
+			edits: [{ op: "create", folder: "Regression", outline: "Checkout #smoke @REQ-1\n  Check > Pass" }],
+		});
+		const read = (input = {}) => {
+			const [doc] = h.call<Record<string, unknown>[]>("get", { refs: ["C-1"], ...input });
+			if (!doc) throw new Error("missing case");
+			return doc;
+		};
+		const created = read();
+		for (const [edit, expected] of [
+			[{ op: "place", cases: ["C-1"], tags: { set: ["critical"] } }, { tags: ["critical"] }],
+			[{ op: "cover", case: "C-1", requirement: "REQ-2", on: true }, { covers: ["REQ-1", "REQ-2"] }],
+			[{ op: "place", cases: ["C-1"], folder: "Moved" }, { folder: { path: "Moved" } }],
+			[{ op: "folder", folder: "Moved", name: "Renamed" }, { folder: { path: "Renamed" } }],
+			[{ op: "state", cases: ["C-1"], to: "archived" }, { state: "archived" }],
+		] as const) {
+			const before = read();
+			expect(read({ unless: { "C-1": before.etag } })).toEqual({
+				ref: "C-1",
+				unchanged: true,
+				hash: created.hash,
+				etag: before.etag,
+			});
+			h.call("propose", { edits: [edit] });
+			const changed = read({ unless: { "C-1": before.etag } });
+			expect(changed).toMatchObject(expected);
+			expect(changed.hash).toBe(created.hash);
+			expect(changed.etag).not.toBe(before.etag);
+		}
+		const beforeEdit = read();
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Changed checkout" } }] });
+		expect(read({ unless: { "C-1": beforeEdit.etag } })).toMatchObject({ title: "Changed checkout", version: 2 });
+		const titleOnly = read({ fields: ["title"] });
+		expect(read({ fields: ["title"], unless: { "C-1": titleOnly.etag } })).toMatchObject({ unchanged: true });
+		expect(read({ unless: { "C-1": titleOnly.etag } })).toMatchObject({
+			tags: ["critical"],
+			covers: ["REQ-1", "REQ-2"],
+		});
+		expect(read({ as: "md", unless: { "C-1": read().etag } })).toMatchObject({
+			md: expect.stringContaining("Changed checkout"),
+		});
+		expect(read({ version: 1, unless: { "C-1": created.etag } })).toMatchObject({ title: "Checkout", version: 1 });
+		expect(read({ unless: { "C-1": read().hash } })).toMatchObject({ title: "Changed checkout" });
+	});
+
+	test("conditional data reads refresh proof without a body edit", () => {
+		h.call("propose", { edits: [{ op: "create", outline: "Checkout\n  Check > Pass" }] });
+		const [before] = h.call<{ etag: string; hash: string }[]>("get", { refs: ["C-1"] });
+		if (!before) throw new Error("missing case");
+		h.call("plan", { name: "Smoke", select: { cases: ["C-1"] } });
+		h.call("report", { run: "R-1", results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+		expect(h.call("get", { refs: ["C-1"], unless: { "C-1": before.etag } })).toMatchObject([
+			{ hash: before.hash, title: "Checkout", proof: { human: { outcome: "pass", current: true } } },
+		]);
 	});
 });
 

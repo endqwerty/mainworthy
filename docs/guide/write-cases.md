@@ -3,6 +3,10 @@
 Write cases as outlines, keep their versions, and resolve edits that overlap.
 Use folders, tags, and search to find the cases you need.
 
+Search applies the active or archived state, folder and tags before limiting matches.
+Archived matches cannot hide an active case. A search with at most 2,000 matching
+cases reports the full count for those filters, independent of the page size.
+
 Suite keeps loading the rest of the list while new results and edits arrive,
 and shows live changes without a reload. A tag or move still being sent stays visible
 when live updates arrive. If the write fails, only that pending change disappears.

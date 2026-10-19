@@ -51,6 +51,7 @@ const CaseDocument = z.looseObject({
 	ref: text.regex(/^C-\d+$/),
 	version: whole,
 	head: whole,
+	etag: text,
 	hash: text,
 	claim: text,
 	state: text,
@@ -300,8 +301,8 @@ const Settled = z.looseObject({ q: text, kind: text, title: text, answer: data.n
 
 const GetRow: z.ZodType<Record<string, unknown>> = z.union([
 	CaseDocument,
-	z.looseObject({ ref: text.regex(/^C-\d+$/), unchanged: z.literal(true), hash: text }),
-	z.looseObject({ ref: text.regex(/^C-\d+$/), version: whole, hash: text, md: text }),
+	z.looseObject({ ref: text.regex(/^C-\d+$/), unchanged: z.literal(true), hash: text, etag: text }),
+	z.looseObject({ ref: text.regex(/^C-\d+$/), version: whole, hash: text, etag: text, md: text }),
 	QuestionItem,
 	Run,
 	Proposal,
