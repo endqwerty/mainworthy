@@ -24,6 +24,42 @@ import { PRESET_GUIDE, PRESET_SUMMARY } from "../../src/core/policy-guide.ts";
 import { PRESETS } from "../../src/core/presets.ts";
 
 (browserAvailable ? test : test.skip)(
+	"a Settings answer preserves a rejection made before its request arrives",
+	async () => {
+		const server = await fixture({ preset: "loose", mode: "server" });
+		const view = await openPage(server, { path: "/p/scratch/settings" });
+		try {
+			const { page } = view;
+			page.setDefaultTimeout(5000);
+			let q = "";
+			await page.route("**/decide", async (route) => {
+				const input = z.object({ q: z.string(), onEvidence: z.string() }).parse(route.request().postDataJSON());
+				q = input.q;
+				await server.api("decide", { ...input, answer: { is: "reject" } });
+				await route.continue();
+			});
+			const replied = page.waitForResponse((response) => response.url().endsWith("/decide"));
+			await page.getByLabel("Policy preset", { exact: true }).selectOption("strict");
+			await replied;
+			expect((await server.api("get", { refs: [q] }))[0]?.decision).toMatchObject({ answer: { is: "reject" } });
+			expect(await server.api("admin", { do: "policy.show", project: "scratch" })).toMatchObject({
+				preset: "loose",
+				version: 1,
+			});
+			await page
+				.locator("#detail .settings-message")
+				.getByText("The policy changed before this selection was saved.", { exact: false })
+				.waitFor();
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
+
+(browserAvailable ? test : test.skip)(
 	"policy clause drafts validate and preview without writing, then record an accepting decision",
 	async () => {
 		const server = await fixture({ preset: "loose", mode: "server" });

@@ -27,6 +27,11 @@ An ended answer shows who answered, what they answered, and the rule and reason 
 You can filter by "Proposals", "Unlinked", "Failures", "Findings", or "Sign-offs".
 See [the keyboard guide](./keyboard.md) for the full key list.
 
+If somebody settles a question before your answer arrives, their decision stands.
+Queue says the question was settled meanwhile and shows its current decision.
+This also applies when you answer a selection or take advice.
+Other questions in the selection can still receive your answer.
+
 ## Know what needs you today
 
 The line beside "Queue" separates failures from questions that can wait, for example

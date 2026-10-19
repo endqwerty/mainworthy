@@ -244,7 +244,14 @@ function SettingsWorkbench() {
 				.parse((await call("get", { refs: [proposed.question] }, { project }))[0]);
 			const replies = await call(
 				"decide",
-				{ q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" }, reason, cmd: attempt.decide },
+				{
+					q: question.q,
+					onEvidence: question.evidenceHash,
+					ifOpen: true,
+					answer: { is: "accept" },
+					reason,
+					cmd: attempt.decide,
+				},
 				{ project },
 			);
 			if (replies[0]?.status === "conflict") throw new Error(conflictMessage);

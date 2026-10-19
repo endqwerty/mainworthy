@@ -15,6 +15,55 @@ function fixture({
 import { z } from "zod";
 
 (browserAvailable ? test : test.skip)(
+	"a case proposal answer cannot replace a decision made before its request arrives",
+	async () => {
+		const server = await fixture();
+		await server.api("propose", { edits: [{ op: "create", outline: "Original title" }] });
+		const writer = z.object({ token: z.string() }).parse(
+			await server.api("admin", {
+				do: "token.create",
+				actor: "writer",
+				kind: "agent",
+				can: ["read", "produce"],
+				project: "scratch",
+			}),
+		).token;
+		const proposed = await server.api(
+			"propose",
+			{
+				edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Proposed title" } }],
+			},
+			{ token: writer },
+		);
+		const question = (await server.api("inbox", { kind: "adopt" })).items.find((q) => q.q === proposed.question);
+		if (!question) throw Error("Missing proposal");
+		const view = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = view;
+			page.setDefaultTimeout(5000);
+			await page.locator(`[data-proposal-evidence="${question.q}"][data-proposal-read="ready"]`).waitFor();
+			await page.route("**/decide", async (route) => {
+				await server.api("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "reject" } });
+				await route.continue();
+			});
+			const replied = page.waitForResponse((response) => response.url().endsWith("/decide"));
+			await page.locator(`[data-proposal="${question.q}"]`).getByRole("button", { name: "Accept" }).click();
+			await replied;
+			expect((await server.api("get", { refs: [question.q] }))[0]?.decision).toMatchObject({
+				answer: { is: "reject" },
+			});
+			expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({ title: "Original title", version: 1 });
+			await page.locator("#bar").getByText("settled meanwhile", { exact: false }).waitFor();
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
+
+(browserAvailable ? test : test.skip)(
 	"standard: a adopts the agent's real diff and preserves agent attribution",
 	async () => {
 		const server = await fixture();

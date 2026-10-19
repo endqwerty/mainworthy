@@ -141,6 +141,96 @@ check(
 	},
 	30000,
 );
+for (const mode of ["single", "bulk", "advice"])
+	check(
+		`an open Queue answer preserves a decision made while it was in flight: ${mode}`,
+		async () => {
+			const server = await startServer({ preset: "standard" });
+			await cases(server);
+			await server.api("report", {
+				target: { commit: "queue544", branch: "main" },
+				results: ["C-1", "C-2", "C-3"].map((ref) => ({
+					test: { case: ref },
+					outcome: "fail",
+					failure: { message: `Expected ${ref}, got broken` },
+				})),
+			});
+			const colleague = await grant(server, "colleague");
+			if (mode === "advice") {
+				const agent = z.object({ token: z.string() }).parse(
+					await server.api("admin", {
+						do: "token.create",
+						actor: "reviewer",
+						kind: "agent",
+						can: ["read", "produce", "answer"],
+						project: "scratch",
+					}),
+				).token;
+				for (const q of (await server.api("inbox", { kind: "failure" })).items)
+					await server.api("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "flaky" } }, { token: agent });
+			}
+			const h = await openPage(server, { path: "/p/scratch/queue" });
+			const held = latch();
+			const arrived = latch();
+			let sent: unknown;
+			try {
+				const { page } = h;
+				page.setDefaultTimeout(5000);
+				await page.locator("[data-current-question]").waitFor();
+				const q = await qref(page);
+				const question = (await server.api("inbox", { kind: "failure" })).items.find((one) => one.q === q);
+				if (!question) throw Error("Missing the current failure");
+				await page.route("**/decide", async (route) => {
+					sent = route.request().postDataJSON();
+					arrived.release();
+					await held.held;
+					await route.continue();
+				});
+				if (mode === "bulk") await page.keyboard.press("*");
+				if (mode === "advice") await page.getByText("reviewer suggests flaky", { exact: false }).waitFor();
+				const replied = page.waitForResponse((reply) => reply.url().endsWith("/decide"));
+				await page.keyboard.press(mode === "advice" ? "Enter" : "f");
+				await arrived.held;
+				const decided = await server.api(
+					"decide",
+					{
+						q: question.q,
+						onEvidence: question.evidenceHash,
+						answer: { is: "defect" },
+					},
+					{ token: colleague },
+				);
+				expect((await server.api("gate", { commit: "queue544" })).verdict).toBe("failed");
+				held.release();
+				await replied;
+				expect((await server.api("get", { refs: [question.q] }))[0]?.decision).toMatchObject({
+					id: decided[0]?.decision,
+					answer: { is: "defect" },
+					by: ["colleague"],
+				});
+				expect((await server.api("gate", { commit: "queue544" })).verdict).toBe("failed");
+				await page.locator(".queue-last").getByText(`${question.q} was settled meanwhile`, { exact: false }).waitFor();
+				await page.locator(`[data-current-question="${question.q}"]`).waitFor();
+				await page.locator(".queue-decision").getByText("Defect in the product", { exact: true }).waitFor();
+				await page.locator(".queue-decision").getByText("Decided by colleague", { exact: false }).waitFor();
+				const member = z.object({ q: z.string(), ifOpen: z.literal(true) });
+				const members = mode === "bulk" ? z.object({ all: z.array(member) }).parse(sent).all : [member.parse(sent)];
+				expect(members).toHaveLength(mode === "bulk" ? 3 : 1);
+				if (mode === "bulk") {
+					const others = (await server.api("inbox", { kind: "failure", state: "decided" })).items.filter(
+						(one) => one.q !== question.q,
+					);
+					expect(others.map((one) => one.decision?.answer.is)).toEqual(["flaky", "flaky"]);
+				}
+				expect(h.errors).toEqual([]);
+			} finally {
+				held.release();
+				await h.close();
+				await server.stop();
+			}
+		},
+		30000,
+	);
 
 for (const scenario of [
 	"single replacement",

@@ -916,7 +916,13 @@ export function SuiteScreen() {
 			asked = true;
 			const reply = await call(
 				"decide",
-				{ q: open.q, onEvidence: open.evidenceHash, answer: { is: "merge", body: sent.body }, cmd: sent.cmd },
+				{
+					q: open.q,
+					onEvidence: open.evidenceHash,
+					ifOpen: true,
+					answer: { is: "merge", body: sent.body },
+					cmd: sent.cmd,
+				},
 				{ project, owner },
 			);
 			if (!sessionCurrent(owner) || !mayWrite(state.draftId)) return;
