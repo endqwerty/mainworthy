@@ -113,6 +113,9 @@ const Q = {
 		`SELECT id FROM runs WHERE project = $project AND origin = 'change'
 		 AND json_extract(tally, '$.pass') + json_extract(tally, '$.excused') = 0`,
 	),
+	inheritanceRuns: sql<{ project: number }, { id: number }>(
+		"SELECT id FROM runs WHERE project = $project AND origin = 'change' AND scope LIKE 'change:%'",
+	),
 	changeRuns: sql<{ change: number }, { id: number }>(
 		"SELECT id FROM runs WHERE change = $change AND origin = 'change'",
 	),
@@ -1096,6 +1099,9 @@ export function failsOnBase(db: Db, id: number): boolean {
 		return support !== null && comparisonLane(db, support) === lane;
 	});
 }
+/** Every change-scope commit, including those whose inherited questions were retired or never raised. */
+export const inheritanceRuns = (db: Db, project: number): number[] =>
+	db.all(Q.inheritanceRuns, { project }).map((row) => row.id);
 export const changeRunsOf = (db: Db, change: number): number[] => db.all(Q.changeRuns, { change }).map((row) => row.id);
 export const countedTestsOf = (db: Db, run: number) => db.all(Q.allRunTests, { run });
 
