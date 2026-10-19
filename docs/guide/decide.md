@@ -240,6 +240,8 @@ Accepting applies the edits in order. A case asked to follow another lands right
 A case asked to follow itself goes to the end. Cases moved together follow one another in the order given, in each folder they end up in, and with the case they follow among them they take the place where it stood.
 "Accept" makes the proposal current. "Reject" leaves the case as it is and keeps
 the proposal in history. These choices do not by themselves excuse a test failure.
+Queue confirms Reject with "The proposal stays in history; the case is unchanged."
+Accept keeps the adopted version in history.
 
 An edit conflict needs a merged body, rather than a plain acceptance.
 Resolve it in the case's conflict card. See [write cases](./write-cases.md#resolve-simultaneous-edits).
@@ -306,6 +308,7 @@ See [export and verify an audit](./data.md#export-and-verify-an-audit). If the c
 The command `mainworthy get Q-1` also returns the ending and the original answer under `decision.supersedes`.
 An ended answer cannot be withdrawn. A timed expiry or tracker closure shows its own recorded rule and reason,
 without claiming that the cause passed.
+When you select an ended answer, the footer and command palette leave out "Undo answer".
 
 The answer ends only when that commit's run shows all of the following.
 

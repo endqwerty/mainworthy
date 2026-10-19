@@ -338,9 +338,12 @@ function QueueWorkbench() {
 		patchRemoved(entries);
 		const text = `${named(entries.map((entry) => entry.question))} · ${ANSWER_LABELS[String(entries[0]?.answer.is)] ?? entries[0]?.answer.is}`;
 		setLastMessage(`${text} · recording`);
-		setStatus(
-			`${text}. ${entries.some((entry) => entry.question.kind === "adopt") ? "The adopted version stays in history." : "u withdraws the decision."}`,
-		);
+		const consequence = entries.some((entry) => entry.question.kind === "adopt")
+			? entries[0]?.answer.is === "reject"
+				? "The proposal stays in history; the case is unchanged."
+				: "The adopted version stays in history."
+			: "u withdraws the decision.";
+		setStatus(`${text}. ${consequence}`);
 		const all = entries.map(({ question, answer }) => ({
 			q: question.q,
 			onEvidence: question.evidenceHash,
@@ -824,7 +827,11 @@ function QueueWorkbench() {
 			key: "u",
 			label: "Undo answer",
 			handler: () => undo(state === "decided" && current ? [current] : undefined),
-			applies: () => active() && Boolean(last || current?.decision),
+			applies: () =>
+				active() &&
+				Boolean(last || current?.decision) &&
+				current?.state !== "dissolved" &&
+				!current?.decision?.supersedes,
 		},
 		// A reason the policy asks for, or one for a withdrawal, is left with Escape, which a phone has no key for:
 		// the palette lists it while the field is open (decision 0018), and runs it when chosen. The key stands aside
