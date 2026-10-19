@@ -93,6 +93,38 @@ describe("a run typed by hand", () => {
 		});
 	});
 
+	test("planning repeated case names makes one slot per case in first-appearance order", () => {
+		const planned = h.call<PlanReply>("plan", { name: "Repeated case", select: { cases: ["C-2", "C-2"] } });
+		expect(planned).toEqual({ run: "R-1", slots: 1, already: 0 });
+		expect(slots(planned.run).map((slot) => slot.case)).toEqual(["C-2"]);
+
+		const ordered = h.call<PlanReply>("plan", {
+			name: "Repeated references",
+			select: { cases: ["C-2", "C-1", "C-2", "2", "C-3", "C-1"] },
+		});
+		expect(ordered).toEqual({ run: "R-2", slots: 3, already: 0 });
+		expect(slots(ordered.run).map((slot) => slot.case)).toEqual(["C-2", "C-1", "C-3"]);
+	});
+
+	test("previewing repeated case names counts each case once in first-appearance order", () => {
+		expect(h.call("find", { in: "cases", select: { cases: ["C-2", "C-2"] } })).toMatchObject({
+			count: 1,
+			items: [{ ref: "C-2" }],
+			cursor: null,
+		});
+		const select = { cases: ["C-2", "C-1", "C-2", "2", "C-3", "C-1"] };
+		expect(h.call("find", { in: "cases", select, limit: 2 })).toMatchObject({
+			count: 3,
+			items: [{ ref: "C-2" }, { ref: "C-1" }],
+			cursor: "2",
+		});
+		expect(h.call("find", { in: "cases", select, limit: 2, cursor: "2" })).toMatchObject({
+			count: 3,
+			items: [{ ref: "C-3" }],
+			cursor: null,
+		});
+	});
+
 	test("a failure opens a question in the run's own scope; the run is blocked until it is answered", () => {
 		h.call("plan", { name: "smoke", select: { folders: ["checkout"] } });
 		record("R-1", "C-1", "pass");

@@ -291,7 +291,16 @@ function splitCursor(cursor: string): [number, string] {
 export function selectCases(ctx: Ctx, selection: Selection): CaseRow[] {
 	const project = ctx.project.id;
 	if ((selection.cases?.length ?? 0) > MAX_SELECTION) throw tooMany();
-	const named = selection.cases?.map((text) => mustCase(ctx.db, project, text)) ?? null;
+	const named = selection.cases
+		? [
+				...new Map(
+					selection.cases.map((text) => {
+						const row = mustCase(ctx.db, project, text);
+						return [row.id, row];
+					}),
+				).values(),
+			]
+		: null;
 	const narrowing = selection.folders?.length || selection.tags?.length || selection.text;
 	if (named?.some((row) => row.kind === "fragment"))
 		throw invalid("fragments are shared steps; select their cases to run");
