@@ -179,7 +179,7 @@ private struct ProposalEvidence: View {
 			// Once the cases are read, each says whether accepting is refused now, and why.
 			ForEach(isRead ? [] : edit.conflicts, id: \.caseRef) { conflict in
 				Label(
-					"\(conflict.caseRef) changed since this edit was made: \(conflict.fields.joined(separator: ", ")). Its author resolves it in the web app.",
+					"\(conflict.caseRef) changed since this edit was made: \(conflict.addresses.map(\.label).joined(separator: ", ")). Its author resolves it in the web app.",
 					systemImage: "exclamationmark.triangle"
 				)
 				.font(.subheadline)

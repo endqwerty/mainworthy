@@ -1,6 +1,48 @@
 import Foundation
 import JavaScriptCore
 
+/// The tagged address defined in the core contract. Step ids and field keys remain opaque values.
+public enum ConflictAddress: Hashable, Decodable, Sendable {
+	public enum Field: String, Hashable, Decodable, Sendable { case title, pre, methods, automate }
+	public enum StepField: String, Hashable, Decodable, Sendable { case action, expected }
+	case field(Field)
+	case step(String)
+	case stepField(String, StepField)
+	case stepOrder
+	case customField(String)
+
+	private enum Keys: String, CodingKey { case kind, name, id, key }
+	public init(from decoder: Decoder) throws {
+		let value = try decoder.container(keyedBy: Keys.self)
+		switch try value.decode(String.self, forKey: .kind) {
+		case "field": self = .field(try value.decode(Field.self, forKey: .name))
+		case "step": self = .step(try value.decode(String.self, forKey: .id))
+		case "step-field": self = .stepField(try value.decode(String.self, forKey: .id), try value.decode(StepField.self, forKey: .name))
+		case "step-order": self = .stepOrder
+		case "custom-field": self = .customField(try value.decode(String.self, forKey: .key))
+		default: throw DecodingError.dataCorruptedError(forKey: .kind, in: value, debugDescription: "Unknown conflict address")
+		}
+	}
+	public var label: String {
+		switch self {
+		case .field(let name): return name.rawValue
+		case .step(let id): return "Step ^\(id)"
+		case .stepField(let id, let name): return "Step ^\(id) \(name.rawValue)"
+		case .stepOrder: return "Step order"
+		case .customField(let key): return "Field \(key)"
+		}
+	}
+	package var json: JSONValue {
+		switch self {
+		case .field(let name): return ["kind": "field", "name": .string(name.rawValue)]
+		case .step(let id): return ["kind": "step", "id": .string(id)]
+		case .stepField(let id, let name): return ["kind": "step-field", "id": .string(id), "name": .string(name.rawValue)]
+		case .stepOrder: return ["kind": "step-order"]
+		case .customField(let key): return ["kind": "custom-field", "key": .string(key)]
+		}
+	}
+}
+
 /// A merge made on the documents the person saw, with no network or view state of its own.
 public struct CaseConflict: Equatable, Sendable {
 	public let question: String
@@ -9,9 +51,9 @@ public struct CaseConflict: Equatable, Sendable {
 	public let current: CaseContent
 	public let mine: CaseContent
 	public private(set) var merged: CaseContent
-	public let paths: [String]
-	public private(set) var selections: [String: Side] = [:]
-	public var chosen: Set<String> { Set(selections.keys) }
+	public let addresses: [ConflictAddress]
+	public private(set) var selections: [ConflictAddress: Side] = [:]
+	public var chosen: Set<ConflictAddress> { Set(selections.keys) }
 
 	package init(question: String, evidence: String, ref: String, base: CaseContent,
 		mine: CaseContent, current: CaseContent) throws {
@@ -19,16 +61,16 @@ public struct CaseConflict: Equatable, Sendable {
 		self.current = current; self.mine = mine
 		let input: JSONValue = ["base": base.json, "mine": mine.json, "theirs": current.json]
 		struct Result: Decodable {
-			struct Conflict: Decodable { let path: String }
+			struct Conflict: Decodable { let address: ConflictAddress }
 			let merged: Wire.CaseBody
 			let conflicts: [Conflict]
 		}
 		let decoded: Result = try Self.evaluate("mergeCase", input: input)
 		merged = CaseContent(decoded.merged)
-		paths = decoded.conflicts.map(\.path)
+		addresses = decoded.conflicts.map(\.address)
 	}
 
-	public var complete: Bool { Set(paths).isSubset(of: chosen) }
+	public var complete: Bool { Set(addresses).isSubset(of: chosen) }
 	public enum Side: Equatable, Sendable { case mine, current }
 
 	private static func evaluate<T: Decodable>(_ function: String, input: JSONValue) throws -> T {
@@ -41,59 +83,60 @@ public struct CaseConflict: Equatable, Sendable {
 		return try JSONDecoder().decode(T.self, from: Data(result.utf8))
 	}
 
-	public mutating func choose(_ path: String, side: Side) throws {
-		guard paths.contains(path) else { return }
+	public mutating func choose(_ address: ConflictAddress, side: Side) throws {
+		guard addresses.contains(address) else { return }
 		let body = side == .mine ? mine : current
-		let order = path == "steps.order" ? side : selections["steps.order"]
-		var input: [String: JSONValue] = ["merged": merged.json, "source": body.json, "path": .string(path)]
+		let order = address == .stepOrder ? side : selections[.stepOrder]
+		var input: [String: JSONValue] = ["merged": merged.json, "source": body.json, "address": address.json]
 		if let order { input["order"] = (order == .mine ? mine : current).json["steps"] }
 		let decoded: Wire.CaseBody = try Self.evaluate("chooseCase", input: .object(input))
 		merged = CaseContent(decoded)
-		selections[path] = side
+		selections[address] = side
 	}
 
-	public func label(_ path: String) -> String {
-		switch path {
-		case "title": return "Title"
-		case "pre": return "Preconditions"
-		case "methods": return "Methods"
-		case "automate": return "Automation"
-		case "steps.order": return "Step order"
-		default:
-			if path.hasPrefix("fields.") { return "Field: " + path.dropFirst(7) }
-			let parts = path.split(separator: ".").map(String.init)
-			guard parts.count >= 2,
-				let index = mine.steps.firstIndex(where: { $0.id == parts[1] })
-					?? current.steps.firstIndex(where: { $0.id == parts[1] }) else { return path }
-			let part = parts.count == 2 ? "" : parts[2] == "action" ? " action" : " expected result"
-			return "Step \(index + 1)\(part)"
+	public func label(_ address: ConflictAddress) -> String {
+		switch address {
+		case .field(.title): return "Title"
+		case .field(.pre): return "Preconditions"
+		case .field(.methods): return "Methods"
+		case .field(.automate): return "Automation"
+		case .stepOrder: return "Step order"
+		case .customField(let key): return "Field: " + key
+		case .step(let id): return stepLabel(id)
+		case .stepField(let id, let name): return stepLabel(id) + (name == .action ? " action" : " expected result")
 		}
 	}
+	private func stepLabel(_ id: String) -> String {
+		guard let index = mine.steps.firstIndex(where: { $0.id == id })
+			?? current.steps.firstIndex(where: { $0.id == id }) else { return "Step " + id }
+		return "Step \(index + 1)"
+	}
 
-	public func text(_ path: String, side: Side) -> String {
+	public func text(_ address: ConflictAddress, side: Side) -> String {
 		let body = side == .mine ? mine : current
-		switch path {
-		case "title": return body.title
-		case "pre": return body.pre.isEmpty ? "No preconditions" : body.pre
-		case "methods": return body.methods.joined(separator: ", ")
-		case "automate": return body.automate
-		case "steps.order": return body.steps.map { "\($0.id): \($0.action)" }.joined(separator: "\n")
-		default:
-			if path.hasPrefix("fields.") { return body.fields[String(path.dropFirst(7))] ?? "Field removed" }
-			let parts = path.split(separator: ".").map(String.init)
-			guard parts.count >= 2, let step = body.steps.first(where: { $0.id == parts[1] }) else { return "Step removed" }
-			if parts.count == 2 { return step.action + (step.expected.map { "\nExpected: \($0)" } ?? "") }
-			return parts[2] == "action" ? step.action : step.expected ?? "No expected result"
+		switch address {
+		case .field(.title): return body.title
+		case .field(.pre): return body.pre.isEmpty ? "No preconditions" : body.pre
+		case .field(.methods): return body.methods.joined(separator: ", ")
+		case .field(.automate): return body.automate
+		case .stepOrder: return body.steps.map { "\($0.id): \($0.action)" }.joined(separator: "\n")
+		case .customField(let key): return body.fields[key] ?? "Field removed"
+		case .step(let id):
+			guard let step = body.steps.first(where: { $0.id == id }) else { return "Step removed" }
+			return step.action + (step.expected.map { "\nExpected: \($0)" } ?? "")
+		case .stepField(let id, let name):
+			guard let step = body.steps.first(where: { $0.id == id }) else { return "Step removed" }
+			return name == .action ? step.action : step.expected ?? "No expected result"
 		}
 	}
+
 }
 
 extension CaseContent {
 	package var json: JSONValue { [
 		"title": .string(title), "pre": .string(pre), "methods": .array(methods.map(JSONValue.string)),
 		"automate": .string(automate), "fields": .object(fields.mapValues(JSONValue.string)),
-		"steps": .array(steps.map { ["id": .string($0.id), "action": .string($0.action),
-			"expected": $0.expected.map(JSONValue.string) ?? .null] }),
+		"steps": .array(steps.map(\.json)),
 	] }
 }
 

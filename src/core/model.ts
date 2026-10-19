@@ -65,6 +65,32 @@ export const CaseBody = z.object({
 });
 export type CaseBody = z.infer<typeof CaseBody>;
 
+/** An overlap names a domain value, never a dotted path that can collide with a step id or field key. */
+export const ConflictAddress = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("field"), name: z.enum(["title", "pre", "methods", "automate"]) }),
+	z.object({ kind: z.literal("step"), id: StepId }),
+	z.object({ kind: z.literal("step-field"), id: StepId, name: z.enum(["action", "expected"]) }),
+	z.object({ kind: z.literal("step-order") }),
+	z.object({ kind: z.literal("custom-field"), key: z.string() }),
+]);
+export type ConflictAddress = z.infer<typeof ConflictAddress>;
+
+/** A display label only. Choices always use the structured address. */
+export function conflictLabel(address: ConflictAddress): string {
+	switch (address.kind) {
+		case "field":
+			return address.name;
+		case "step":
+			return `Step ^${address.id}`;
+		case "step-field":
+			return `Step ^${address.id} ${address.name}`;
+		case "step-order":
+			return "Step order";
+		case "custom-field":
+			return `Field ${address.key}`;
+	}
+}
+
 export const emptyBody = (title = ""): CaseBody => ({
 	title,
 	pre: "",

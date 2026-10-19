@@ -10,6 +10,7 @@ import { newStepId } from "../../core/ids.ts";
 import type { Policy } from "../../core/kinds.ts";
 import { parseCase } from "../../core/markdown.ts";
 import { type Conflict, mergeBodies } from "../../core/merge3.ts";
+import type { ConflictAddress } from "../../core/model.ts";
 import {
 	CaseBody,
 	type CaseKind,
@@ -423,7 +424,7 @@ export function adoptionPolicy(db: Db, project: number, edits: readonly Resolved
 export function adoption(db: Db, row: CaseRow, edit: Extract<Resolved, { op: "edit" }>, policy: Policy): Adoption {
 	if (edit.conflicts.length > 0) {
 		const refused = conflict(`${caseRef(row)} has an unresolved conflict; its author must resolve it`, {
-			paths: edit.conflicts.map((c) => c.path),
+			addresses: edit.conflicts.map((c) => c.address),
 		});
 		return { body: edit.body, refused };
 	}
@@ -440,7 +441,7 @@ export function adoption(db: Db, row: CaseRow, edit: Extract<Resolved, { op: "ed
 		if (merge.conflicts.length > 0) {
 			const refused = conflict(
 				`${caseRef(row)} changed after this proposal was made; redo the proposal on version ${row.head}`,
-				{ paths: merge.conflicts.map((c) => c.path) },
+				{ addresses: merge.conflicts.map((c) => c.address) },
 			);
 			return { body: merge.merged, refused };
 		}
@@ -521,7 +522,7 @@ export type Sealed = {
 	resolved: Resolved[];
 	/** Policy facts about this proposal: the author's kind, whether it conflicts, whether it changes the policy. */
 	facts: string[];
-	conflicts: { case: string; paths: string[] }[];
+	conflicts: { case: string; addresses: ConflictAddress[] }[];
 	/** Refs of the existing cases the proposal would change. */
 	cases: string[];
 };
@@ -650,7 +651,7 @@ export function* sealSteps(ctx: Ctx, input: Parameters<typeof seal>[1]): Generat
 					edit.base === row.head ? { merged: mine, conflicts: [] } : mergeBodies({ base, mine, theirs: head });
 				if (versionHash(merge.merged) === row.head_hash && merge.conflicts.length === 0) break;
 				if (merge.conflicts.length > 0)
-					conflicts.push({ case: caseRef(row), paths: merge.conflicts.map((c) => c.path) });
+					conflicts.push({ case: caseRef(row), addresses: merge.conflicts.map((c) => c.address) });
 				resolved.push({
 					op: "edit",
 					caseId: row.id,

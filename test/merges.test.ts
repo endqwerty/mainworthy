@@ -2,7 +2,7 @@
 // in `test/e2e/conflict-merge.test.ts` run the routes; these pin the rule itself, case by case.
 import { describe, expect, test } from "bun:test";
 import { applyMergeChoice } from "../src/core/merge3.ts";
-import type { CaseBody } from "../src/core/model.ts";
+import type { CaseBody, ConflictAddress } from "../src/core/model.ts";
 import type { Draft, DraftConflict } from "../src/web/lib/drafts.ts";
 import {
 	allRecorded,
@@ -46,7 +46,7 @@ const conflict = (merged: CaseBody): DraftConflict => ({
 	current: v2,
 	merged,
 	sentMerges: [{ cmd: "merge-cmd-01", body: sent }],
-	paths: ["title"],
+	addresses: [{ kind: "field", name: "title" }],
 	draftId: "C-1",
 });
 const draft = (card: DraftConflict, text: Draft["body"] = mine): Draft => ({
@@ -395,8 +395,15 @@ test("shared choices apply every case property without changing the source docum
 	};
 	const before = structuredClone({ initial, source });
 	let merged = initial;
-	for (const path of ["title", "pre", "methods", "automate", "fields.remove", "fields.priority.level"])
-		merged = applyMergeChoice({ merged, source, path });
+	for (const address of [
+		{ kind: "field", name: "title" },
+		{ kind: "field", name: "pre" },
+		{ kind: "field", name: "methods" },
+		{ kind: "field", name: "automate" },
+		{ kind: "custom-field", key: "remove" },
+		{ kind: "custom-field", key: "priority.level" },
+	] satisfies ConflictAddress[])
+		merged = applyMergeChoice({ merged, source, address });
 	expect(merged).toEqual({
 		...v1,
 		title: v2.title,

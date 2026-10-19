@@ -1,0 +1,548 @@
+[
+	{
+		"kind": "inline",
+		"base": {
+			"title": "Base",
+			"pre": "base",
+			"steps": [
+				{
+					"id": "order",
+					"action": "order",
+					"expected": "base"
+				},
+				{
+					"id": "ds",
+					"action": "ds",
+					"expected": "base"
+				},
+				{
+					"id": "sf",
+					"action": "sf",
+					"expected": "base"
+				},
+				{
+					"id": "pf",
+					"use": {
+						"fragment": "C-1",
+						"version": 1
+					},
+					"action": "",
+					"expected": null
+				},
+				{
+					"id": "a1",
+					"action": "a1",
+					"expected": "base"
+				},
+				{
+					"id": "b1",
+					"action": "b1",
+					"expected": "base"
+				},
+				{
+					"id": "c1",
+					"action": "c1",
+					"expected": "base"
+				}
+			],
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {
+				"risk.dot\"x": "base",
+				"gone": "base"
+			}
+		},
+		"mine": {
+			"title": "Mine",
+			"pre": "mine",
+			"steps": [
+				{
+					"id": "ds",
+					"action": "mine",
+					"expected": "base"
+				},
+				{
+					"id": "sf",
+					"action": "mine",
+					"expected": "mine"
+				},
+				{
+					"id": "pf",
+					"use": {
+						"fragment": "C-1",
+						"version": 2
+					},
+					"action": "",
+					"expected": null
+				},
+				{
+					"id": "b1",
+					"action": "b1",
+					"expected": "base"
+				},
+				{
+					"id": "a1",
+					"action": "a1",
+					"expected": "base"
+				},
+				{
+					"id": "c1",
+					"action": "c1",
+					"expected": "base"
+				}
+			],
+			"methods": ["auto"],
+			"automate": "wanted",
+			"fields": {
+				"risk.dot\"x": "mine"
+			}
+		},
+		"theirs": {
+			"title": "Theirs",
+			"pre": "theirs",
+			"steps": [
+				{
+					"id": "order",
+					"action": "theirs",
+					"expected": "base"
+				},
+				{
+					"id": "sf",
+					"action": "theirs",
+					"expected": "theirs"
+				},
+				{
+					"id": "pf",
+					"use": {
+						"fragment": "C-1",
+						"version": 3
+					},
+					"action": "",
+					"expected": null
+				},
+				{
+					"id": "a1",
+					"action": "a1",
+					"expected": "base"
+				},
+				{
+					"id": "c1",
+					"action": "c1",
+					"expected": "base"
+				},
+				{
+					"id": "b1",
+					"action": "b1",
+					"expected": "base"
+				}
+			],
+			"methods": ["agent"],
+			"automate": "not-applicable",
+			"fields": {
+				"risk.dot\"x": "theirs",
+				"gone": "theirs"
+			}
+		},
+		"conflicts": [
+			{
+				"path": "title",
+				"base": "Base",
+				"mine": "Mine",
+				"theirs": "Theirs"
+			},
+			{
+				"path": "pre",
+				"base": "base",
+				"mine": "mine",
+				"theirs": "theirs"
+			},
+			{
+				"path": "methods",
+				"base": ["human"],
+				"mine": ["auto"],
+				"theirs": ["agent"]
+			},
+			{
+				"path": "automate",
+				"base": "none",
+				"mine": "wanted",
+				"theirs": "not-applicable"
+			},
+			{
+				"path": "fields.risk.dot\"x",
+				"base": "base",
+				"mine": "mine",
+				"theirs": "theirs"
+			},
+			{
+				"path": "fields.gone",
+				"base": "base",
+				"theirs": "theirs"
+			},
+			{
+				"path": "steps.order",
+				"base": {
+					"id": "order",
+					"action": "order",
+					"expected": "base"
+				},
+				"theirs": {
+					"id": "order",
+					"action": "theirs",
+					"expected": "base"
+				}
+			},
+			{
+				"path": "steps.ds",
+				"base": {
+					"id": "ds",
+					"action": "ds",
+					"expected": "base"
+				},
+				"mine": {
+					"id": "ds",
+					"action": "mine",
+					"expected": "base"
+				}
+			},
+			{
+				"path": "steps.sf.action",
+				"base": "sf",
+				"mine": "mine",
+				"theirs": "theirs"
+			},
+			{
+				"path": "steps.sf.expected",
+				"base": "base",
+				"mine": "mine",
+				"theirs": "theirs"
+			},
+			{
+				"path": "steps.pf",
+				"base": {
+					"id": "pf",
+					"use": {
+						"fragment": "C-1",
+						"version": 1
+					},
+					"action": "",
+					"expected": null
+				},
+				"mine": {
+					"id": "pf",
+					"use": {
+						"fragment": "C-1",
+						"version": 2
+					},
+					"action": "",
+					"expected": null
+				},
+				"theirs": {
+					"id": "pf",
+					"use": {
+						"fragment": "C-1",
+						"version": 3
+					},
+					"action": "",
+					"expected": null
+				}
+			},
+			{
+				"path": "steps.order",
+				"base": ["order", "ds", "sf", "pf", "a1", "b1", "c1"],
+				"mine": ["ds", "sf", "pf", "b1", "a1", "c1"],
+				"theirs": ["order", "sf", "pf", "a1", "c1", "b1"]
+			}
+		]
+	},
+	{
+		"kind": "pin",
+		"base": {
+			"title": "Base",
+			"pre": "base",
+			"steps": [
+				{
+					"id": "order",
+					"use": {
+						"fragment": "C-1",
+						"version": 1
+					},
+					"action": "",
+					"expected": null
+				},
+				{
+					"id": "ds",
+					"action": "ds",
+					"expected": "base"
+				},
+				{
+					"id": "sf",
+					"action": "sf",
+					"expected": "base"
+				},
+				{
+					"id": "pf",
+					"use": {
+						"fragment": "C-1",
+						"version": 1
+					},
+					"action": "",
+					"expected": null
+				},
+				{
+					"id": "a1",
+					"action": "a1",
+					"expected": "base"
+				},
+				{
+					"id": "b1",
+					"action": "b1",
+					"expected": "base"
+				},
+				{
+					"id": "c1",
+					"action": "c1",
+					"expected": "base"
+				}
+			],
+			"methods": ["human"],
+			"automate": "none",
+			"fields": {
+				"risk.dot\"x": "base",
+				"gone": "base"
+			}
+		},
+		"mine": {
+			"title": "Mine",
+			"pre": "mine",
+			"steps": [
+				{
+					"id": "order",
+					"use": {
+						"fragment": "C-1",
+						"version": 2
+					},
+					"action": "",
+					"expected": null
+				},
+				{
+					"id": "ds",
+					"action": "mine",
+					"expected": "base"
+				},
+				{
+					"id": "sf",
+					"action": "mine",
+					"expected": "mine"
+				},
+				{
+					"id": "pf",
+					"use": {
+						"fragment": "C-1",
+						"version": 2
+					},
+					"action": "",
+					"expected": null
+				},
+				{
+					"id": "b1",
+					"action": "b1",
+					"expected": "base"
+				},
+				{
+					"id": "a1",
+					"action": "a1",
+					"expected": "base"
+				},
+				{
+					"id": "c1",
+					"action": "c1",
+					"expected": "base"
+				}
+			],
+			"methods": ["auto"],
+			"automate": "wanted",
+			"fields": {
+				"risk.dot\"x": "mine"
+			}
+		},
+		"theirs": {
+			"title": "Theirs",
+			"pre": "theirs",
+			"steps": [
+				{
+					"id": "order",
+					"use": {
+						"fragment": "C-1",
+						"version": 3
+					},
+					"action": "",
+					"expected": null
+				},
+				{
+					"id": "sf",
+					"action": "theirs",
+					"expected": "theirs"
+				},
+				{
+					"id": "pf",
+					"use": {
+						"fragment": "C-1",
+						"version": 3
+					},
+					"action": "",
+					"expected": null
+				},
+				{
+					"id": "a1",
+					"action": "a1",
+					"expected": "base"
+				},
+				{
+					"id": "c1",
+					"action": "c1",
+					"expected": "base"
+				},
+				{
+					"id": "b1",
+					"action": "b1",
+					"expected": "base"
+				}
+			],
+			"methods": ["agent"],
+			"automate": "not-applicable",
+			"fields": {
+				"risk.dot\"x": "theirs",
+				"gone": "theirs"
+			}
+		},
+		"conflicts": [
+			{
+				"path": "title",
+				"base": "Base",
+				"mine": "Mine",
+				"theirs": "Theirs"
+			},
+			{
+				"path": "pre",
+				"base": "base",
+				"mine": "mine",
+				"theirs": "theirs"
+			},
+			{
+				"path": "methods",
+				"base": ["human"],
+				"mine": ["auto"],
+				"theirs": ["agent"]
+			},
+			{
+				"path": "automate",
+				"base": "none",
+				"mine": "wanted",
+				"theirs": "not-applicable"
+			},
+			{
+				"path": "fields.risk.dot\"x",
+				"base": "base",
+				"mine": "mine",
+				"theirs": "theirs"
+			},
+			{
+				"path": "fields.gone",
+				"base": "base",
+				"theirs": "theirs"
+			},
+			{
+				"path": "steps.order",
+				"base": {
+					"id": "order",
+					"use": {
+						"fragment": "C-1",
+						"version": 1
+					},
+					"action": "",
+					"expected": null
+				},
+				"mine": {
+					"id": "order",
+					"use": {
+						"fragment": "C-1",
+						"version": 2
+					},
+					"action": "",
+					"expected": null
+				},
+				"theirs": {
+					"id": "order",
+					"use": {
+						"fragment": "C-1",
+						"version": 3
+					},
+					"action": "",
+					"expected": null
+				}
+			},
+			{
+				"path": "steps.ds",
+				"base": {
+					"id": "ds",
+					"action": "ds",
+					"expected": "base"
+				},
+				"mine": {
+					"id": "ds",
+					"action": "mine",
+					"expected": "base"
+				}
+			},
+			{
+				"path": "steps.sf.action",
+				"base": "sf",
+				"mine": "mine",
+				"theirs": "theirs"
+			},
+			{
+				"path": "steps.sf.expected",
+				"base": "base",
+				"mine": "mine",
+				"theirs": "theirs"
+			},
+			{
+				"path": "steps.pf",
+				"base": {
+					"id": "pf",
+					"use": {
+						"fragment": "C-1",
+						"version": 1
+					},
+					"action": "",
+					"expected": null
+				},
+				"mine": {
+					"id": "pf",
+					"use": {
+						"fragment": "C-1",
+						"version": 2
+					},
+					"action": "",
+					"expected": null
+				},
+				"theirs": {
+					"id": "pf",
+					"use": {
+						"fragment": "C-1",
+						"version": 3
+					},
+					"action": "",
+					"expected": null
+				}
+			},
+			{
+				"path": "steps.order",
+				"base": ["order", "ds", "sf", "pf", "a1", "b1", "c1"],
+				"mine": ["order", "ds", "sf", "pf", "b1", "a1", "c1"],
+				"theirs": ["order", "sf", "pf", "a1", "c1", "b1"]
+			}
+		]
+	}
+]

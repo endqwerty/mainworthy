@@ -80,7 +80,11 @@ describe("canonical hashes", () => {
 					fields: Object.fromEntries(Object.entries(body.fields).reverse()),
 					automate: body.automate,
 					methods: body.methods,
-					steps: body.steps.map(({ id, action, expected }) => ({ expected, action, id })),
+					steps: body.steps.map(({ id, action, expected, use }) =>
+						use
+							? { expected, action, use: { version: use.version, fragment: use.fragment }, id }
+							: { expected, action, id },
+					),
 					pre: body.pre,
 					title: body.title,
 				};
@@ -101,16 +105,22 @@ describe("canonical hashes", () => {
 					{ ...body, steps: [...body.steps, { id: "zz", action: "new", expected: null }] },
 				];
 				for (const changed of changes) expect(versionHash(changed)).not.toBe(original);
-				for (const key of ["id", "action", "expected"]) {
-					const first = body.steps[0];
-					if (!first) continue;
-					const step =
-						key === "id"
-							? { ...first, id: first.id === "zz" ? "yy" : "zz" }
-							: key === "action"
-								? { ...first, action: `${first.action}x` }
-								: { ...first, expected: `${first.expected ?? ""}x` };
-					expect(versionHash({ ...body, steps: [step, ...body.steps.slice(1)] })).not.toBe(original);
+				const first = body.steps[0];
+				if (first) {
+					const stepChanges = [
+						{ ...first, id: first.id === "zz" ? "yy" : "zz" },
+						...(first.use
+							? [
+									{ ...first, use: { ...first.use, version: first.use.version + 1 } },
+									{ ...first, use: { ...first.use, fragment: first.use.fragment === "C-1" ? "C-2" : "C-1" } },
+								]
+							: [
+									{ ...first, action: `${first.action}x` },
+									{ ...first, expected: `${first.expected ?? ""}x` },
+								]),
+					];
+					for (const step of stepChanges)
+						expect(versionHash({ ...body, steps: [step, ...body.steps.slice(1)] })).not.toBe(original);
 				}
 			}),
 		);
@@ -138,15 +148,17 @@ describe("canonical hashes", () => {
 				expect(claimHash({ ...body, pre: `${body.pre}\nx` })).not.toBe(original);
 				const first = body.steps[0];
 				if (first) {
-					expect(
-						claimHash({ ...body, steps: [{ ...first, action: `${first.action}\nx` }, ...body.steps.slice(1)] }),
-					).not.toBe(original);
-					expect(
-						claimHash({
-							...body,
-							steps: [{ ...first, expected: `${first.expected ?? ""}\nx` }, ...body.steps.slice(1)],
-						}),
-					).not.toBe(original);
+					const stepChanges = first.use
+						? [
+								{ ...first, use: { ...first.use, version: first.use.version + 1 } },
+								{ ...first, use: { ...first.use, fragment: first.use.fragment === "C-1" ? "C-2" : "C-1" } },
+							]
+						: [
+								{ ...first, action: `${first.action}\nx` },
+								{ ...first, expected: `${first.expected ?? ""}\nx` },
+							];
+					for (const step of stepChanges)
+						expect(claimHash({ ...body, steps: [step, ...body.steps.slice(1)] })).not.toBe(original);
 				}
 			}),
 		);

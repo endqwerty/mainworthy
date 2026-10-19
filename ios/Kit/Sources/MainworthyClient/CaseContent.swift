@@ -7,15 +7,29 @@ public struct Step: Identifiable, Equatable, Sendable {
 	public var action: String
 	/// What must be true afterwards. Nil when the author has not said.
 	public var expected: String?
+	public var use: FragmentPin?
 
-	public init(id: String, action: String, expected: String?) {
+	public struct FragmentPin: Equatable, Sendable {
+		public let fragment: String
+		public let version: Int
+		public init(fragment: String, version: Int) { self.fragment = fragment; self.version = version }
+	}
+
+	public init(id: String, action: String, expected: String?, use: FragmentPin? = nil) {
 		self.id = id
 		self.action = action
 		self.expected = expected
+		self.use = use
 	}
 
 	init(_ wire: Wire.Step) {
-		self.init(id: wire.id, action: wire.action, expected: wire.expected)
+		self.init(id: wire.id, action: wire.action, expected: wire.expected,
+			use: wire.use.map { FragmentPin(fragment: $0.fragment, version: $0.version) })
+	}
+	package var json: JSONValue {
+		var body: [String: JSONValue] = ["id": .string(id), "action": .string(action), "expected": expected.map(JSONValue.string) ?? .null]
+		if let use { body["use"] = ["fragment": .string(use.fragment), "version": .number(Double(use.version))] }
+		return .object(body)
 	}
 }
 

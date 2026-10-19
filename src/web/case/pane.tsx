@@ -2,7 +2,14 @@ import { useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import { printCase } from "../../core/markdown.ts";
 import { applyMergeChoice } from "../../core/merge3.ts";
-import { Automate, type CaseBody, type ExpandedStep, METHOD_LABELS } from "../../core/model.ts";
+import {
+	Automate,
+	type CaseBody,
+	type ConflictAddress,
+	conflictLabel,
+	type ExpandedStep,
+	METHOD_LABELS,
+} from "../../core/model.ts";
 import type { QuestionItem } from "../../core/ops.ts";
 import { call } from "../lib/api.ts";
 import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
@@ -686,57 +693,56 @@ function ConflictCard({
 	const [resolving, setResolving] = useState(false);
 	const refusal = readOnlyStatus ?? (resolving ? pendingStatus : null);
 	const body = state.merged;
-	function choose(path: string, source: CaseBody, side?: "mine" | "current"): void {
+	function choose(address: ConflictAddress, source: CaseBody, side?: "mine" | "current"): void {
 		if (refusal) {
 			setStatus(refusal);
 			return;
 		}
-		const stepOrder = path === "steps.order" ? side : state.stepOrder;
+		const stepOrder = address.kind === "step-order" ? side : state.stepOrder;
 		changed({
 			...state,
 			stepOrder,
-			merged: applyMergeChoice({ merged: body, source, path, order: stepOrder ? state[stepOrder].steps : undefined }),
+			merged: applyMergeChoice({
+				merged: body,
+				source,
+				address,
+				order: stepOrder ? state[stepOrder].steps : undefined,
+			}),
 		});
 	}
-	const fields: { key: string; mine: string; current: string; set: (text: string) => void }[] = [
-		{
-			key: "title",
-			mine: state.mine.title,
-			current: state.current.title,
-			set: (title: string) => choose("title", { ...state.mine, title }),
-		},
-		{
-			key: "pre",
-			mine: state.mine.pre,
-			current: state.current.pre,
-			set: (pre: string) => choose("pre", { ...state.mine, pre }),
-		},
-	].filter((field) => state.paths.includes(field.key));
-	for (const mine of state.mine.steps) {
-		const current = state.current.steps.find((step) => step.id === mine.id);
-		for (const part of ["action", "expected"] satisfies ("action" | "expected")[]) {
-			const a = mine[part] ?? "";
-			const b = current?.[part] ?? "";
-			if (a !== b && state.paths.includes(`steps.${mine.id}.${part}`))
-				fields.push({
-					key: `steps.${mine.id}.${part}`,
-					mine: a,
-					current: b,
-					set: (text) =>
-						choose(`steps.${mine.id}.${part}`, {
-							...state.mine,
-							steps: state.mine.steps.map((step) =>
-								step.id === mine.id
-									? part === "action"
-										? { ...step, action: text }
-										: { ...step, expected: text || null }
-									: step,
-							),
-						}),
-				});
+	const fields: { key: string; mine: string; current: string; value: string; set: (text: string) => void }[] = [];
+	for (const address of state.addresses) {
+		if (address.kind === "field" && (address.name === "title" || address.name === "pre")) {
+			const name = address.name;
+			fields.push({
+				key: conflictLabel(address),
+				mine: state.mine[name],
+				current: state.current[name],
+				value: body[name],
+				set: (text) => choose(address, { ...state.mine, [name]: text }),
+			});
+		} else if (address.kind === "step-field") {
+			const { id, name } = address;
+			fields.push({
+				key: conflictLabel(address),
+				mine: state.mine.steps.find((step) => step.id === id)?.[name] ?? "",
+				current: state.current.steps.find((step) => step.id === id)?.[name] ?? "",
+				value: body.steps.find((step) => step.id === id)?.[name] ?? "",
+				set: (text) =>
+					choose(address, {
+						...state.mine,
+						steps: state.mine.steps.map((step) =>
+							step.id === id
+								? name === "action"
+									? { ...step, action: text }
+									: { ...step, expected: text || null }
+								: step,
+						),
+					}),
+			});
 		}
 	}
-	const membership = state.paths.filter((path) => path === "steps.order" || /^steps\.[a-z0-9]+$/.test(path));
+	const membership = state.addresses.filter((address) => address.kind === "step-order" || address.kind === "step");
 
 	async function resolve(): Promise<void> {
 		if (refusal) {
@@ -811,25 +817,15 @@ function ConflictCard({
 									setStatus(refusal);
 								}
 							}}
-							value={
-								field.key === "title"
-									? body.title
-									: field.key === "pre"
-										? body.pre
-										: (() => {
-												const parts = field.key.split(".");
-												const step = body.steps.find((item) => item.id === parts[1]);
-												return parts[2] === "expected" ? (step?.expected ?? "") : (step?.action ?? "");
-											})()
-							}
+							value={field.value}
 							onChange={(event) => field.set(event.target.value)}
 						/>
 					</label>
 				</div>
 			))}
-			{membership.map((path) => (
-				<div className="conflict-field" key={path}>
-					<b>{path}</b>
+			{membership.map((address) => (
+				<div className="conflict-field" key={JSON.stringify(address)}>
+					<b>{conflictLabel(address)}</b>
 					<div className="conflict-sides">
 						{[
 							{ label: "Your draft", side: state.mine },
@@ -838,17 +834,17 @@ function ConflictCard({
 							<div className="conflict-side" key={label}>
 								<h4>{label}</h4>
 								<p>
-									{path === "steps.order"
+									{address.kind === "step-order"
 										? side.steps.map((step) => step.action).join(" → ")
-										: (side.steps.find((step) => `steps.${step.id}` === path)?.action ?? "Step removed")}
+										: (side.steps.find((step) => step.id === address.id)?.action ?? "Step removed")}
 								</p>
 								<button
 									type="button"
 									className="out"
 									disabled={Boolean(refusal)}
-									onClick={() => choose(path, side, label === "Your draft" ? "mine" : "current")}
+									onClick={() => choose(address, side, label === "Your draft" ? "mine" : "current")}
 								>
-									Use {label.toLowerCase()} {path === "steps.order" ? "order" : "step"}
+									Use {label.toLowerCase()} {address.kind === "step-order" ? "order" : "step"}
 								</button>
 							</div>
 						))}

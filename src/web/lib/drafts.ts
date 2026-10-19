@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CaseBody, CaseKind, FragmentStep, InlineStep, StepId } from "../../core/model.ts";
+import { CaseBody, CaseKind, ConflictAddress, FragmentStep, InlineStep, StepId } from "../../core/model.ts";
 import { ProposeInput } from "../../core/ops.ts";
 import { deviceKey, deviceSession, sessionCurrent } from "./device.ts";
 import { draftOwnedElsewhere, draftOwner, randomId } from "./ids.ts";
@@ -26,20 +26,20 @@ export const DraftConflict = z.object({
 	 * says what became of one, the page does not know: the reply can be lost after the merge was recorded.
 	 */
 	sentMerges: z.array(z.object({ cmd: z.string(), body: CaseBody })).default([]),
-	paths: z.array(z.string()),
+	addresses: z.array(ConflictAddress),
 	draftId: z.string(),
 });
 export type DraftConflict = z.infer<typeof DraftConflict>;
 
 export function hasTypedMerge(state: DraftConflict): boolean {
-	return state.paths.some((path) => {
+	return state.addresses.some((address) => {
 		const text = (body: CaseBody): string | null => {
-			if (path === "title") return body.title;
-			if (path === "pre") return body.pre;
-			const [kind, id, part] = path.split(".");
-			if (kind !== "steps") return null;
-			const step = body.steps.find((step) => step.id === id);
-			return part === "action" ? (step?.action ?? null) : part === "expected" ? (step?.expected ?? "") : null;
+			if (address.kind === "field") {
+				return address.name === "title" || address.name === "pre" ? body[address.name] : null;
+			}
+			if (address.kind !== "step-field") return null;
+			const step = body.steps.find((step) => step.id === address.id);
+			return address.name === "action" ? (step?.action ?? null) : (step?.expected ?? "");
 		};
 		const merged = text(state.merged);
 		return merged !== null && merged !== text(state.mine) && merged !== text(state.current);

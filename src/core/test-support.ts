@@ -19,11 +19,23 @@ export const textArbitrary = fc.oneof(
 	),
 );
 export const nonemptyTextArbitrary = textArbitrary.filter((text) => text.length > 0);
-export const stepArbitrary: fc.Arbitrary<Step> = fc.record({
-	id: fc.stringMatching(/^[a-z0-9]{2,8}$/),
-	action: nonemptyTextArbitrary,
-	expected: fc.option(nonemptyTextArbitrary, { nil: null }),
-});
+export const stepIdArbitrary = fc.oneof(fc.constant("order"), fc.stringMatching(/^[a-z0-9]{2,8}$/));
+export const stepArbitrary: fc.Arbitrary<Step> = fc.oneof(
+	fc.record({
+		id: stepIdArbitrary,
+		action: nonemptyTextArbitrary,
+		expected: fc.option(nonemptyTextArbitrary, { nil: null }),
+	}),
+	fc.record({
+		id: stepIdArbitrary,
+		use: fc.record({
+			fragment: fc.integer({ min: 1, max: 9999 }).map((no) => `C-${no}`),
+			version: fc.integer({ min: 1, max: 100 }),
+		}),
+		action: fc.constant(""),
+		expected: fc.constant(null),
+	}),
+);
 export const bodyArbitrary: fc.Arbitrary<CaseBody> = fc.record({
 	title: textArbitrary,
 	pre: textArbitrary,

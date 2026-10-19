@@ -175,7 +175,7 @@ public struct ProposedEdit: Equatable, Sendable {
 
 	public struct Conflict: Equatable, Sendable {
 		public let caseRef: String
-		public let fields: [String]
+		public let addresses: [ConflictAddress]
 	}
 
 	init(_ wire: Wire.AdoptEvidence) {
@@ -184,7 +184,7 @@ public struct ProposedEdit: Equatable, Sendable {
 		reason = wire.reason
 		summaries = wire.edits.map(ProposedEdit.summary)
 		count = wire.count
-		conflicts = wire.conflicts.map { Conflict(caseRef: $0.case, fields: $0.paths) }
+		conflicts = wire.conflicts.map { Conflict(caseRef: $0.case, addresses: $0.addresses) }
 		// The summaries are the first twenty edits. A longer proposal is not known to be shown whole.
 		if !wire.edits.allSatisfy({ ["create", "edit"].contains($0.op) }) {
 			notShown = .otherThanContent

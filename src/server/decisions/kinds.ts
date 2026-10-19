@@ -108,7 +108,7 @@ export function raiseAdopt<T>(ctx: Ctx, tools: { raise: (ctx: Ctx, r: Raise) => 
 					op: edit.op,
 					case: row ? `C-${row.no}` : null,
 					title: row?.title ?? null,
-					...(edit.op === "edit" ? { base: edit.base, conflicts: edit.conflicts.map((c) => c.path) } : {}),
+					...(edit.op === "edit" ? { base: edit.base, conflicts: edit.conflicts.map((c) => c.address) } : {}),
 				};
 			}
 			case "place":

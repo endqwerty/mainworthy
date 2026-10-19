@@ -2,7 +2,7 @@ import { z } from "zod";
 import { SameCodeEvidence } from "../../core/flaky.ts";
 import { newStepId } from "../../core/ids.ts";
 import { Policy } from "../../core/kinds.ts";
-import { CaseBody, emptyBody } from "../../core/model.ts";
+import { CaseBody, ConflictAddress, conflictLabel, emptyBody } from "../../core/model.ts";
 import type { QuestionItem } from "../../core/ops.ts";
 import { QuarantineEdit } from "../../core/ops.ts";
 import { parseOutline } from "../../core/outline.ts";
@@ -69,7 +69,7 @@ const ProposalEdit = z.discriminatedUnion("op", [
 		body: CaseBody,
 		current: CaseBody.nullable(),
 		mine: CaseBody,
-		conflicts: z.array(z.object({ path: z.string() }).passthrough()),
+		conflicts: z.array(z.object({ address: ConflictAddress }).passthrough()),
 		refused: z.string().nullable(),
 	}),
 	z.object({
@@ -224,8 +224,9 @@ export function ProposalEdits({ question }: { question: QuestionItem }) {
 										/>
 										{edit.conflicts.length > 0 ? (
 											<p className="queue-warning">
-												Conflicting fields: {edit.conflicts.map((conflict) => conflict.path).join(", ")}. The author
-												must resolve both sides.
+												Conflicting fields:{" "}
+												{edit.conflicts.map((conflict) => conflictLabel(conflict.address)).join(", ")}. The author must
+												resolve both sides.
 											</p>
 										) : (
 											edit.refused && (

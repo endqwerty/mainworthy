@@ -53,8 +53,8 @@ struct SuiteLiveTests {
 		var competing = body
 		competing.title = "A competing title"
 		let overlap = try await client.saveCase(SuiteSubmission(source: .edit(opened), content: competing, reason: "Old"))
-		guard case .overlap(let question, let paths, _) = overlap else { Issue.record("old base did not overlap"); return }
-		#expect(question != nil && paths.contains("title"))
+		guard case .overlap(let question, let addresses, _) = overlap else { Issue.record("old base did not overlap"); return }
+		#expect(question != nil && addresses.contains(.field(.title)))
 		let inbox = try await client.questions(open: true, kind: .adopt)
 		let conflict = try #require(inbox.questions.first { $0.ref == question })
 		guard case .proposal(let proposed) = conflict.evidence else { Issue.record("no proposal evidence"); return }

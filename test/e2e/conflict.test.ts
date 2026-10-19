@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { z } from "zod";
 import choicesTable from "../../ios/Kit/Tests/MainworthyScreensTests/Fixtures/conflict-choices.json";
 import { mergeBodies } from "../../src/core/merge3.ts";
-import { CaseBody } from "../../src/core/model.ts";
+import { CaseBody, ConflictAddress, conflictLabel } from "../../src/core/model.ts";
 import { browserAvailable, eventually, openPage, startServer } from "./support.ts";
 
 test.skipIf(!browserAvailable)(
@@ -53,8 +53,8 @@ const scenarios = z
 			mine: CaseBody,
 			current: CaseBody,
 			expected: CaseBody,
-			paths: z.array(z.string()),
-			choices: z.array(z.object({ path: z.string(), side: z.enum(["mine", "current"]) })),
+			addresses: z.array(ConflictAddress),
+			choices: z.array(z.object({ address: ConflictAddress, side: z.enum(["mine", "current"]) })),
 		}),
 	)
 	.parse(choicesTable);
@@ -77,7 +77,7 @@ for (const row of scenarios)
 				const question = (await server.api("inbox", { on: "C-1", kind: "adopt" })).items[0];
 				if (!question) throw Error("Missing conflict question");
 				const merge = mergeBodies({ base: row.base, mine: row.mine, theirs: row.current });
-				expect(merge.conflicts.map((item) => item.path)).toEqual(row.paths);
+				expect(merge.conflicts.map((item) => item.address)).toEqual(row.addresses);
 				// Restore a saved card so every table row starts with exactly the native draft and documents.
 				await page.evaluate(
 					({ row, question, merged }) => {
@@ -92,7 +92,7 @@ for (const row of scenarios)
 							mine: row.mine,
 							current: row.current,
 							merged,
-							paths: row.paths,
+							addresses: row.addresses,
 							draftId: "C-1",
 							sentMerges: [],
 						};
@@ -104,9 +104,15 @@ for (const row of scenarios)
 				const card = page.getByRole("region", { name: "Edit conflict" });
 				await card.waitFor();
 				for (const choice of row.choices) {
-					const field = card.locator(".conflict-field").filter({ has: page.getByText(choice.path, { exact: true }) });
+					const field = card
+						.locator(".conflict-field")
+						.filter({ has: page.getByText(conflictLabel(choice.address), { exact: true }) });
 					const kind =
-						choice.path === "steps.order" ? "order" : /^steps\.[a-z0-9]+$/.test(choice.path) ? "step" : choice.path;
+						choice.address.kind === "step-order"
+							? "order"
+							: choice.address.kind === "step"
+								? "step"
+								: conflictLabel(choice.address);
 					const side =
 						kind === "step" || kind === "order"
 							? choice.side === "mine"
@@ -116,7 +122,7 @@ for (const row of scenarios)
 								? "my"
 								: "current";
 					await field.getByRole("button", { name: `Use ${side} ${kind}`, exact: true }).click();
-					if (row.choices.length > 1 && choice.path === "steps.order") {
+					if (row.choices.length > 1 && choice.address.kind === "step-order") {
 						await page.reload();
 						await card.waitFor();
 					}

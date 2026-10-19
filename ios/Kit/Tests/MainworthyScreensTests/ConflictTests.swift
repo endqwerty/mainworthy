@@ -22,8 +22,8 @@ struct NativeConflictTests {
 		#expect(editor.notice?.contains("web app") != true)
 		#expect(editor.content.title == "My overlapping title")
 		let conflict = try #require(editor.conflict)
-		#expect(conflict.paths == ["title"] && !editor.maySave)
-		editor.chooseConflict("title", side: .mine)
+		#expect(conflict.addresses == [.field(.title)] && !editor.maySave)
+		editor.chooseConflict(.field(.title), side: .mine)
 		#expect(editor.maySave)
 		guard case .adopted(let stamp) = await editor.save(), let stamp else {
 			Issue.record("\(editor.notice ?? "merge did not adopt")"); return
@@ -39,25 +39,37 @@ struct ConflictChoiceTests {
 	@Test("the shared web choice scenarios produce the same complete body in JavaScriptCore")
 	func sharedChoices() throws {
 		struct Scenario: Decodable {
-			struct Choice: Decodable { let path: String; let side: String }
+			struct Choice: Decodable { let address: ConflictAddress; let side: String }
 			let name: String
 			let base: Wire.CaseBody
 			let mine: Wire.CaseBody
 			let current: Wire.CaseBody
 			let choices: [Choice]
 			let expected: Wire.CaseBody
-			let paths: [String]
+			let addresses: [ConflictAddress]
 		}
 		let url = try #require(Bundle.module.url(forResource: "conflict-choices", withExtension: "json", subdirectory: "Fixtures"))
 		let scenarios = try JSONDecoder().decode([Scenario].self, from: Data(contentsOf: url))
 		for row in scenarios {
 			var conflict = try CaseConflict(question: "Q-1", evidence: "read", ref: "C-1",
 				base: CaseContent(row.base), mine: CaseContent(row.mine), current: CaseContent(row.current))
-			#expect(conflict.paths == row.paths, "\(row.name)")
-			for choice in row.choices { try conflict.choose(choice.path, side: choice.side == "mine" ? .mine : .current) }
+			#expect(conflict.addresses == row.addresses, "\(row.name)")
+			for choice in row.choices { try conflict.choose(choice.address, side: choice.side == "mine" ? .mine : .current) }
 			#expect(conflict.complete, "\(row.name)")
 			#expect(conflict.merged == CaseContent(row.expected), "\(row.name)")
 		}
+	}
+
+	@Test("a pin named order keeps the chosen current version")
+	func pinNamedOrder() throws {
+		let base = CaseContent(title: "Pin", steps: [Step(id: "order", action: "", expected: nil,
+			use: .init(fragment: "C-1", version: 1))])
+		var mine = base; mine.steps[0].use = .init(fragment: "C-1", version: 2)
+		var current = base; current.steps[0].use = .init(fragment: "C-1", version: 3)
+		var conflict = try CaseConflict(question: "Q-1", evidence: "read", ref: "C-2", base: base, mine: mine, current: current)
+		#expect(conflict.addresses == [.step("order")])
+		try conflict.choose(.step("order"), side: .current)
+		#expect(conflict.complete && conflict.merged.steps[0].use == .init(fragment: "C-1", version: 3))
 	}
 
 	@Test("independent step parts, deletion and custom fields keep the whole document")
@@ -75,17 +87,17 @@ struct ConflictChoiceTests {
 		current.pre = "Concurrent precondition"
 		current.fields["priority"] = "normal"
 		var conflict = try CaseConflict(question: "Q-1", evidence: "read", ref: "C-1", base: base, mine: mine, current: current)
-		#expect(Set(conflict.paths) == ["steps.a0.action", "steps.a0.expected", "steps.a1", "fields.priority"])
-		try conflict.choose("steps.a0.action", side: .mine)
-		try conflict.choose("steps.a0.expected", side: .current)
-		try conflict.choose("steps.a1", side: .current)
-		try conflict.choose("fields.priority", side: .mine)
+		#expect(Set(conflict.addresses) == [.stepField("a0", .action), .stepField("a0", .expected), .step("a1"), .customField("priority")])
+		try conflict.choose(.stepField("a0", .action), side: .mine)
+		try conflict.choose(.stepField("a0", .expected), side: .current)
+		try conflict.choose(.step("a1"), side: .current)
+		try conflict.choose(.customField("priority"), side: .mine)
 		#expect(conflict.complete)
 		#expect(conflict.merged == CaseContent(title: "Base", pre: "Concurrent precondition", steps: [
 			Step(id: "a0", action: "My action", expected: "Their expectation"),
 			Step(id: "a1", action: "Remove", expected: "Their removal expectation"),
 		], fields: ["priority": "low", "keep": "yes"]))
-		try conflict.choose("steps.a1", side: .mine)
+		try conflict.choose(.step("a1"), side: .mine)
 		#expect(conflict.merged.steps.map(\.id) == ["a0"])
 	}
 
@@ -96,7 +108,7 @@ struct ConflictChoiceTests {
 		var mine = base; mine.steps.remove(at: 1)
 		var current = base; current.steps[1].expected = "Keep this expected result"
 		var conflict = try CaseConflict(question: "Q-1", evidence: "read", ref: "C-1", base: base, mine: mine, current: current)
-		try conflict.choose("steps.a1", side: .current)
+		try conflict.choose(.step("a1"), side: .current)
 		#expect(conflict.merged.steps.map(\.id) == ["a0", "a1", "a2"])
 		#expect(conflict.merged.steps[1].expected == "Keep this expected result")
 	}
@@ -108,8 +120,8 @@ struct ConflictChoiceTests {
 		var mine = base; mine.steps = [steps[1], steps[0], steps[2]]
 		var current = base; current.steps = [steps[0], steps[2], steps[1], Step(id: "b0", action: "Added", expected: nil)]
 		var conflict = try CaseConflict(question: "Q-1", evidence: "read", ref: "C-1", base: base, mine: mine, current: current)
-		#expect(conflict.paths == ["steps.order"])
-		try conflict.choose("steps.order", side: .current)
+		#expect(conflict.addresses == [.stepOrder])
+		try conflict.choose(.stepOrder, side: .current)
 		#expect(conflict.merged.steps.map(\.id) == ["a0", "a2", "a1", "b0"])
 	}
 }
@@ -145,8 +157,8 @@ struct ConflictRecoveryTests {
 		var other = opened.content; other.title = "Their title"
 		_ = try await project.saveCase(SuiteSubmission(source: .edit(opened), content: other, reason: "Other"))
 		_ = await editor.save()
-		#expect(editor.conflict?.paths == ["title"])
-		editor.chooseConflict("title", side: .mine)
+		#expect(editor.conflict?.addresses == [.field(.title)])
+		editor.chooseConflict(.field(.title), side: .mine)
 		return (opened, editor)
 	}
 
@@ -160,7 +172,7 @@ struct ConflictRecoveryTests {
 		await transport.lose()
 		#expect(await editor.save() == nil)
 		#expect(editor.isRetrying && editor.content.title == "My title")
-		editor.chooseConflict("title", side: .current)
+		editor.chooseConflict(.field(.title), side: .current)
 		#expect(editor.conflict?.merged.title == "My title")
 		let count = await transport.merges.count
 		guard case .adopted(let stamp) = await editor.save(), let stamp else { Issue.record("\(editor.notice ?? "not recovered")"); return }
@@ -182,7 +194,7 @@ struct ConflictRecoveryTests {
 		let replacement = try #require(editor.conflict)
 		#expect(replacement.question != first && replacement.mine.title == "My title")
 		#expect(replacement.current.title == "A third title" && !replacement.complete)
-		editor.chooseConflict("title", side: .mine)
+		editor.chooseConflict(.field(.title), side: .mine)
 		_ = await editor.save()
 		#expect(editor.savedDocument?.content.title == "My title")
 		#expect(editor.savedDocument?.content.pre == "Concurrent precondition")
@@ -192,7 +204,7 @@ struct ConflictRecoveryTests {
 	func unchanged() async throws {
 		let project = try await Live.signedIn().project(try await Live.project())
 		let (opened, editor) = try await setup(project)
-		editor.chooseConflict("title", side: .current)
+		editor.chooseConflict(.field(.title), side: .current)
 		_ = await editor.save()
 		#expect(editor.settled && editor.notice == "Conflict resolved. The recorded version already holds this text.")
 		#expect(try await project.caseHistory(opened.ref).map(\.version) == [2, 1])
@@ -215,9 +227,9 @@ struct ConflictRecoveryTests {
 			"body": ["title": "Their custom case", "fields": ["priority": "normal"]],
 		]]])
 		_ = await editor.save()
-		#expect(editor.conflict?.paths == ["title"])
+		#expect(editor.conflict?.addresses == [.field(.title)])
 		#expect(editor.conflict?.merged.fields == ["priority": "normal"])
-		editor.chooseConflict("title", side: .mine)
+		editor.chooseConflict(.field(.title), side: .mine)
 		_ = await editor.save()
 		#expect(editor.savedDocument?.content.title == "My custom case")
 		let fields: Wire.ConflictBaseFields = try await server.read("history", in: project.key,

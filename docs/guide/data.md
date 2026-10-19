@@ -93,6 +93,12 @@ An unknown key is an error. Without `--project`, the command exports the whole i
 `MAINWORTHY_PROJECT` is set. Import either archive into a fresh instance with the command below.
 Import refuses an instance that already has data.
 
+Migration 31 converts stored proposal conflicts and saved propose replies to structured addresses.
+Commands recorded before the upgrade can still be retried with their original command id.
+Archives from before this conversion are refused as an older archive schema.
+Upgrade the original database and export a new archive before importing it into this build.
+Historical question evidence stays unchanged.
+
 ## Export and verify an audit
 
 A project admin can export retained decision history for a time range. Run the export command, then verify the saved file:

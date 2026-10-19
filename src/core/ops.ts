@@ -18,7 +18,7 @@ import {
 	SignoffAnswer,
 	Unlinked,
 } from "./kinds.ts";
-import { Automate, CaseBody, CaseKind, MethodKind } from "./model.ts";
+import { Automate, CaseBody, CaseKind, ConflictAddress, MethodKind } from "./model.ts";
 import { Obligation, TargetMatch, Verdict } from "./runs.ts";
 import { TeamInput } from "./teams.ts";
 
@@ -162,7 +162,7 @@ export const ProposeReply = z.object({
 	conflicts: z.array(
 		z.object({
 			case: z.string(),
-			paths: z.array(z.string()),
+			addresses: z.array(ConflictAddress),
 		}),
 	),
 });
