@@ -436,28 +436,19 @@ export async function interceptionLive(page: Page): Promise<void> {
 	const id = crypto.randomUUID();
 	const probe = (url: URL) => url.searchParams.get("interception") === id;
 	const route = unwrappedRoute.get(page) ?? page.route.bind(page);
-	const end = Date.now() + 10_000;
-	// What the probes met, for the error: a reply the server gave means the request went past the interceptor; a
-	// probe that did not answer means the page did not run it.
-	const met = { probes: 0, served: 0, failed: 0 };
 	try {
 		await route(probe, (route) => route.fulfill({ status: 204, headers: { "x-mainworthy-e2e": "intercepted" } }));
-		while (Date.now() < end) {
-			met.probes++;
-			const outcome = await Promise.race([
-				page.evaluate(
-					(url) =>
-						fetch(url).then(
-							(reply) => (reply.headers.get("x-mainworthy-e2e") === "intercepted" ? "intercepted" : "served"),
-							() => "failed",
-						),
-					`/healthz?interception=${id}`,
-				),
-				Bun.sleep(Math.max(0, end - Date.now())).then(() => "unanswered" as const),
-			]);
-			if (outcome === "intercepted") return;
-			if (outcome === "served") met.served++;
-			if (outcome === "failed") met.failed++;
+		// A busy renderer may not run the probe promptly. The test's hang guard bounds the wait, not readiness.
+		while (true) {
+			const intercepted = await page.evaluate(
+				(url) =>
+					fetch(url).then(
+						(reply) => reply.headers.get("x-mainworthy-e2e") === "intercepted",
+						() => false,
+					),
+				`/healthz?interception=${id}`,
+			);
+			if (intercepted) return;
 		}
 	} catch {
 		// The page closed or went to another document meanwhile. Neither has a key waiting ahead of the switch.
@@ -465,9 +456,6 @@ export async function interceptionLive(page: Page): Promise<void> {
 	} finally {
 		await page.unroute(probe).catch(() => {});
 	}
-	throw new Error(
-		`Interception did not start on ${page.url()} within 10 s of installing a route: ${met.probes} probes, ${met.served} answered by the server, ${met.failed} failed, the rest unanswered`,
-	);
 }
 const unwrappedRoute = new WeakMap<Page, Page["route"]>();
 /** Makes installing a route on the context, or on any page it has or opens, wait until the route is in force. */
