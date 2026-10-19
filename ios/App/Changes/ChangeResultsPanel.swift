@@ -17,6 +17,7 @@ struct ChangeResultsPanel: View {
 			case .done: list
 			}
 		}
+		.resultAttachments(results.attachments)
 		.task { await results.load() }
 		.task(id: results.text) {
 			guard results.loading == .done else { return }
@@ -48,7 +49,7 @@ struct ChangeResultsPanel: View {
 				.foregroundStyle(.secondary)
 		}
 		ForEach(results.rows) { row in
-			ResultRow(row: row)
+			ResultRow(row: row, attachments: results.attachments)
 			if row.id != results.rows.last?.id { Divider() }
 		}
 		if results.moved {
@@ -81,6 +82,7 @@ struct ChangeResultsPanel: View {
 
 private struct ResultRow: View {
 	let row: CountedResult
+	let attachments: ResultAttachmentScreen
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 6) {
@@ -105,6 +107,7 @@ private struct ResultRow: View {
 			}
 			.buttonStyle(.plain)
 			.accessibilityIdentifier("result-\(row.test)")
+			if let steps = row.steps { ResultTrailView(steps: steps, result: row.result, attachments: attachments) }
 			if row.question != nil || row.build != nil {
 				HStack(spacing: 16) {
 					if let ref = row.question {

@@ -649,3 +649,55 @@ Quarantine entries, recorded result coverage, and pass-count exits travel in
 archives. This schema requires archives exported with this build. Imported
 expiry rules use the destination server's clock. Earlier covered results keep
 their coverage there too.
+
+## Keep the work at each step
+
+Send `steps` in a JSON report through HTTP, CLI, or MCP. Each entry records a
+step's `outcome`, optional `durationMs`, and optional `actions`. Each action has
+`text`, an optional `outcome`, and optional `durationMs`. Times are non-negative
+whole milliseconds. Zero means measured zero; an omitted time means unrecorded.
+Action times need not sum to the step's time.
+
+```sh
+$ mainworthy report --json '{"target":{"session":"checkout-check"},"results":[{"test":{"case":"C-1"},"outcome":"pass","annotation":{"case":"C-1","version":1},"steps":[{"step":"a1","outcome":"pass","durationMs":120,"actions":[{"text":"Open the cart","outcome":"pass","durationMs":120}]},{"step":"b2","outcome":"pass","durationMs":800,"actions":[{"text":"Apply the coupon","durationMs":700},{"text":"Read the discounted total","outcome":"pass","durationMs":100}]}]}]}'
+$ mainworthy get C-1 --json
+```
+
+Use the stable step `id` from the case version you tested. A fragment's expanded
+ID includes its occurrence, such as `a1.b2`. Read a planned run's slot to get its
+pinned steps. Runner steps can instead use a short text label. Labels are
+producer-supplied observations; Mainworthy does not verify that they identify a
+case step. The result's recorded case version remains its basis after a case edit.
+A trail may cover only part of a case or repeat a step. Its order is the order
+sent, and it does not change the result's overall outcome.
+
+A step's optional `attachment` is a zero-based index into that result's own
+`attachments` array in the same report. Send an image there as
+`{"name":"cart.png","data":"<canonical base64>"}`. Only image attachments can be
+step screenshots. A step's screenshot opens from its row on web and iPhone.
+Later `attach` calls append files and do not change those indexes. MCP accepts
+inline attachments, though its compact tool list omits their schema; the HTTP
+operation reference describes the attachment fields.
+
+`get` and HTTP replies return the trail with the recorded result, including the
+original action order and omitted fields. Test latest results, counted change
+results, and planned-run slots show it on web and iPhone. Each step and any
+recorded action outcome appears in words. Longer steps have a stronger background
+tint relative to the longest step in that result. Missing and zero times have no
+tint. The first `fail` or `error` in a present trail supplies `atStep` and takes
+precedence over `failure.at`. An empty trail has no failed step. Without a trail,
+`failure.at` remains the failure location.
+
+A report is refused before acceptance when it exceeds any trail limit. The reply
+names the limit: 100 steps per result, 100 actions per step, 160 characters per
+step ID or label, 2,000 characters per action, 65,536 UTF-8 bytes of serialized
+trail JSON per result, or 1,048,576 bytes of trails per report. Text lengths count
+UTF-16 units. Attachment limits apply separately. Split a report to meet the
+report-wide limit, or shorten the observations to meet a result limit.
+
+Playwright JSON carries recorded `test.step` data when the runner writes it.
+The adapter keeps the final attempt's top-level steps and lists nested steps as
+actions, with their path, outcome, and rounded milliseconds. A step with an error
+is `fail`; a completed step without one is `pass`. Earlier retry steps do not
+become the final result's trail. The JUnit, Jest, Vitest, pytest, and TRX adapters
+do not currently carry case-step observations and do not invent trails.

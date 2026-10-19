@@ -24,6 +24,10 @@ struct RunsLiveTests {
 		let fills = try #require(slots.first).fills
 		#expect(fills.filter { $0.method == .agent }.map(\.model) == ["claude-opus-5-5", "claude-opus-5-5"])
 		#expect(fills.first { $0.method == .person }?.model == nil)
+		let agentTrail = try #require(fills.first { $0.method == .agent && $0.note != nil }?.steps)
+		#expect(agentTrail.map(\.step) == ["a1", "b2", "c3"])
+		#expect(agentTrail.map(\.durationMs) == [100, 700, 200])
+		#expect(agentTrail.map(\.outcome) == [.pass, .pass, .pass])
 		let detail = try #require(try await project.test("T-2"))
 		#expect(detail.results.first?.by == "reviewer")
 		#expect(detail.results.first?.model == "claude-opus-5-5")

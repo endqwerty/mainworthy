@@ -665,3 +665,42 @@ test("TRX stack-only diagnostics do not refill space left by a clipped emoji", (
 	);
 	expect(results[0]?.failure).toEqual({ message: "d".repeat(4000), detail: "d".repeat(19_999) });
 });
+
+test("Playwright's recorded steps keep nested actions and final-attempt times", () => {
+	const parsed = parse(
+		playwrightReport([
+			{
+				status: "failed",
+				retry: 0,
+				duration: 500,
+				steps: [{ title: "Old attempt", duration: 500, error: { message: "Oops" } }],
+			},
+			{
+				status: "passed",
+				retry: 1,
+				duration: 90,
+				steps: [
+					{
+						title: "Apply coupon",
+						duration: 80,
+						steps: [
+							{ title: 'press("Enter")', duration: 70 },
+							{ title: "Read total", duration: 10 },
+						],
+					},
+				],
+			},
+		]),
+	);
+	expect(parsed.results[0]?.steps).toEqual([
+		{
+			step: "Apply coupon",
+			outcome: "pass",
+			durationMs: 80,
+			actions: [
+				{ text: 'press("Enter")', outcome: "pass", durationMs: 70 },
+				{ text: "Read total", outcome: "pass", durationMs: 10 },
+			],
+		},
+	]);
+});

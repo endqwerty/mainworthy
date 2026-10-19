@@ -27,6 +27,7 @@ export const TOOL_TOKEN_BUDGET = 3950;
 const INSTRUCTIONS =
 	"Start with impact for a change or inbox for questions, and omit project only when the instance has exactly one project. Pass etag back with unless and hashes with onEvidence, and reuse cursors with since. Your answers may be advice; check the reply status, and with admin, read base for policy clauses or settings through CLI policy show --json or HTTP admin policy.show.";
 const DESCRIPTIONS = new Map([
+	["Exact commit from impact's change.head; required for review reuse.", ""],
 	["Current code host head.", ""],
 	["C-, Q-, R-, T-, P-, commit:hash or change:key.", ""],
 	["For commit refs: disambiguate repositories.", ""],
@@ -55,17 +56,11 @@ const DESCRIPTIONS = new Map([
 	["Where: a case (C-311), a step (C-311#b7), a requirement (req:WEB-290) or a change (pr:482).", ""],
 	["The question, for example Q-12.", ""],
 	["The evidence hash you saw. If the evidence changed since, the reply is a conflict with the new evidence.", ""],
-	[
-		'The answer, for example {"is":"defect"}. The allowed answers depend on the question kind.',
-		'Use this question\'s answers, e.g. {"is":"defect"}.',
-	],
+	['The answer, for example {"is":"defect"}. The allowed answers depend on the question kind.', ""],
 	["The question whose decision to withdraw.", ""],
 	["Only questions about this case, run, test or change.", ""],
 	["The cursor from the previous page.", ""],
-	[
-		"For one proposal: the cursor from its previous page of edits. Restart without it after a project change.",
-		"Proposal page; restart after changes.",
-	],
+	["For one proposal: the cursor from its previous page of edits. Restart without it after a project change.", ""],
 	["Refs of cases (C-), questions (Q-), runs (R-), tests (T-) or proposals (P-).", ""],
 	["For cases: any of title, pre, steps, methods, tags, covers, place, proof. Default: all.", ""],
 	["`md` returns a case as canonical Markdown: fewer tokens than JSON.", ""],
@@ -77,7 +72,7 @@ const DESCRIPTIONS = new Map([
 	["A change key, for example pr:482.", ""],
 	["Changed paths, when the change is not known to Mainworthy.", ""],
 	["A cursor from an earlier call: only what moved since.", ""],
-	["False for fresh eyes: do not hide what was already reviewed.", "False includes already reviewed cases."],
+	["False for fresh eyes: do not hide what was already reviewed.", ""],
 	["A cursor from any earlier read.", ""],
 	["A change key, for example pr:482: the gate of its latest commit.", ""],
 ]);
@@ -237,7 +232,7 @@ function dedupeSchema(schema: Schema): Schema {
 		const count = (node: SchemaNode): SchemaNode => {
 			if (typeof node === "boolean") return node;
 			const key = JSON.stringify(node);
-			if (key.length >= 70) {
+			if (key.length >= 40) {
 				const prior = repeated.get(key);
 				repeated.set(key, { schema: node, count: (prior?.count ?? 0) + 1 });
 			}
@@ -248,7 +243,7 @@ function dedupeSchema(schema: Schema): Schema {
 		const reference = { $ref: `#/$defs/${name}` };
 		const cost = JSON.stringify(reference).length;
 		const candidates = [...repeated.entries()]
-			.filter(([key, entry]) => entry.count > 1 && (entry.count - 1) * key.length > entry.count * cost + 50)
+			.filter(([key, entry]) => entry.count > 1 && (entry.count - 1) * key.length > entry.count * cost + 10)
 			.sort(([a, left], [b, right]) => (right.count - 1) * b.length - (left.count - 1) * a.length);
 		const chosen = candidates[0];
 		if (!chosen) break;

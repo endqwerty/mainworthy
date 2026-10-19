@@ -26,6 +26,7 @@ struct RunSlotView: View {
 			.padding(16)
 		}
 		.background(Color(.systemGroupedBackground))
+		.resultAttachments(screen.attachments)
 		.scrollDismissesKeyboard(.interactively)
 		.navigationTitle("Execute")
 		// The outcome buttons are at the foot of the page, where the tab bar would lie over them.
@@ -131,6 +132,9 @@ struct RunSlotView: View {
 					ForEach(execution.slot.fills) { fill in
 						Text("\(fill.method.name.capitalized) \(fill.by)\(fill.model.map { " · \($0)" } ?? "") · \(fill.outcome.word)")
 						if let note = fill.note { Text(note).font(.subheadline) }
+						if let steps = fill.steps {
+							ResultTrailView(steps: steps, result: fill.result, attachments: screen.attachments)
+						}
 					}
 				}
 			}

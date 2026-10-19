@@ -133,6 +133,7 @@ final class PagedList<Query: Equatable & Sendable, Page: ListPage> {
 /// see. The tally chooses what is shown, and words of a test's name or file narrow it.
 @MainActor @Observable
 public final class ChangeResults {
+	public let attachments: ResultAttachmentScreen
 	/// What the rows are filtered by.
 	public struct Query: Equatable, Sendable {
 		public var standing: ResultStanding?
@@ -161,6 +162,7 @@ public final class ChangeResults {
 	public var hasMore: Bool { list.hasMore }
 
 	package init(project: ProjectClient, change: String?, run: String?, query: Query = Query()) {
+		attachments = ResultAttachmentScreen(project: project)
 		self.change = change
 		self.run = run
 		text = query.text
@@ -214,6 +216,7 @@ public enum TestReading: Equatable, Sendable {
 /// Every automated test the project has seen, with a case or tracked without one, and what each one did.
 @MainActor @Observable
 public final class TestsScreen: ProjectScreen {
+	public let attachments: ResultAttachmentScreen
 	struct Query: Equatable, Sendable {
 		var text = ""
 		var unlinked = false
@@ -241,6 +244,7 @@ public final class TestsScreen: ProjectScreen {
 
 	package init(project: ProjectClient) {
 		self.project = project
+		attachments = ResultAttachmentScreen(project: project)
 		list = PagedList(query: Query()) { query, cursor in
 			try await project.tests(text: query.text, unlinked: query.unlinked, after: cursor)
 		}

@@ -58,6 +58,8 @@ import {
 	type ResultRow,
 	recentChanges,
 	resultById,
+	resultFailedStep,
+	resultTrail,
 	signatureById,
 	testById,
 	testRef,
@@ -180,7 +182,7 @@ export const inboxOp = defineOp({
 	needs: "read",
 	scope: "project",
 	effect: "read",
-	mcp: "Open questions and evidenceHash; filter with on.",
+	mcp: "Open questions with evidenceHash; on filters.",
 	run: inbox,
 });
 
@@ -440,7 +442,8 @@ function resultView(ctx: Ctx, row: ResultRow): Record<string, unknown> {
 		durationMs: row.duration_ms,
 		message: row.message,
 		note: row.note,
-		atStep: row.at_step,
+		atStep: resultFailedStep(row),
+		steps: resultTrail(row),
 		signature: row.signature !== null ? (signatureById(ctx.db, row.signature)?.text ?? null) : null,
 		corrects: row.corrects,
 		commit: target.commit_sha,
@@ -536,7 +539,7 @@ export const getOp = defineOp({
 	needs: "read",
 	scope: "project",
 	effect: "read",
-	mcp: "Read refs; verdicts at commit:hash, change:key, R-n. unless=etag; proposals page with cursor.",
+	mcp: "Read refs; verdicts: commit:hash, change:key, R-n. unless=etag; cursor pages proposals.",
 	run: get,
 });
 
@@ -632,6 +635,7 @@ function countedView(ctx: Ctx, row: CountedTest): Record<string, unknown> {
 		job: view.job,
 		by: view.by,
 		model: result.model,
+		steps: resultTrail(result),
 		at: result.at,
 		commit: view.commit,
 		build: view.build,
@@ -711,6 +715,7 @@ function slotRow(ctx: Ctx, slot: SlotRow): Record<string, unknown> {
 			at: fill.at,
 			note: fill.note ?? fill.message,
 			atStep: fill.atStep,
+			steps: fill.steps,
 		})),
 	};
 }
@@ -890,7 +895,7 @@ export const findOp = defineOp({
 	needs: "read",
 	scope: "project",
 	effect: "read",
-	mcp: "Search cases by text, folder or tag; list tests (`unlinked: true`), runs or slots. Page with `cursor`.",
+	mcp: "Find cases/tests/runs/slots; cursor pages.",
 	run: find,
 });
 
@@ -1119,7 +1124,7 @@ export const sinceOp = defineOp({
 	needs: "read",
 	scope: "project",
 	effect: "read",
-	mcp: "Changes after cursor: case diffs and settled questions. If more, repeat with returned cursor.",
+	mcp: "Case changes and settled questions since cursor; repeat while more.",
 	run: since,
 });
 
@@ -1290,7 +1295,7 @@ export const impactOp = defineOp({
 	needs: "read",
 	scope: "project",
 	effect: "read",
-	mcp: "Review change or files: affected cases, hashes, prior reviews, questions, gaps. Reuse cursor as since.",
+	mcp: "Cases and review evidence for change/files; cursor becomes since.",
 	run: impact,
 });
 

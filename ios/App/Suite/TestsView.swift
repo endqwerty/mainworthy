@@ -115,6 +115,7 @@ struct TestView: View {
 				}
 			}
 		}
+		.resultAttachments(screen.attachments)
 		.task(id: ref) { await screen.open(ref) }
 		.onDisappear { screen.close(ref) }
 	}
@@ -156,7 +157,7 @@ struct TestView: View {
 				Panel("Latest results") {
 					if test.results.isEmpty { Text("No results yet.").foregroundStyle(.secondary) }
 					ForEach(test.results) { result in
-						TestResultRow(result: result)
+						TestResultRow(result: result, attachments: screen.attachments)
 						if result.id != test.results.last?.id { Divider() }
 					}
 				}
@@ -170,6 +171,7 @@ struct TestView: View {
 
 private struct TestResultRow: View {
 	let result: TestDetail.Result
+	let attachments: ResultAttachmentScreen
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 4) {
@@ -183,10 +185,10 @@ private struct TestResultRow: View {
 			Text(facts(job: result.job, attempt: result.attempt, duration: result.duration, by: result.by, model: result.model))
 				.font(.caption).foregroundStyle(.secondary)
 			if let message = result.message { Text(message).font(.footnote).lineLimit(4) }
+			if let steps = result.steps { ResultTrailView(steps: steps, result: result.id, attachments: attachments) }
 			if let build = result.build { Link("Open the build", destination: build).font(.footnote) }
 		}
 		.padding(.vertical, 2)
-		.accessibilityElement(children: .combine)
 	}
 }
 

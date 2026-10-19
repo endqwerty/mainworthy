@@ -428,6 +428,23 @@ enum Wire {
 		let cursor: String?
 	}
 
+	/// One action taken while executing a case step.
+	struct ResultAction: Decodable, Equatable, Sendable {
+		let text: String
+		let outcome: ResultOutcome?
+		let durationMs: Int?
+	}
+
+	/// A recorded step, with its stable case ID or runner label.
+	struct ResultStep: Decodable, Equatable, Sendable {
+		let step: String
+		let outcome: ResultOutcome
+		let durationMs: Int?
+		let actions: [ResultAction]?
+		/// Zero-based index into this result's ordered attachments.
+		let attachment: Int?
+	}
+
 	/// An admitted result that fills a slot.
 	struct RunFill: Decodable, Equatable, Sendable {
 		let model: String?
@@ -437,6 +454,21 @@ enum Wire {
 		let outcome: String
 		let note: String?
 		let atStep: String?
+		let steps: [ResultStep]?
+
+		private enum CodingKeys: String, CodingKey { case model, result, by, method, outcome, note, atStep, steps }
+
+		init(from decoder: any Decoder) throws {
+			let container = try decoder.container(keyedBy: CodingKeys.self)
+			model = try container.decodeIfPresent(String.self, forKey: .model)
+			result = try container.decode(Int.self, forKey: .result)
+			by = try container.decode(String.self, forKey: .by)
+			method = try container.decode(String.self, forKey: .method)
+			outcome = try container.decode(String.self, forKey: .outcome)
+			note = try container.decodeIfPresent(String.self, forKey: .note)
+			atStep = try container.decodeIfPresent(String.self, forKey: .atStep)
+			steps = try container.decode([ResultStep]?.self, forKey: .steps)
+		}
 	}
 
 	/// Free or held until the server deadline.
@@ -603,6 +635,7 @@ enum Wire {
 	/// One test as the gate counted it.
 	struct CountedResult: Decodable, Equatable, Sendable {
 		let model: String?
+		let steps: [ResultStep]?
 		let result: Int
 		/// The test's ref, T-9.
 		let test: String
@@ -623,6 +656,29 @@ enum Wire {
 		let by: String
 		/// Where the CI build is, as the report named it.
 		let build: String?
+
+		private enum CodingKeys: String, CodingKey { case model, steps, result, test, name, file, `case`, outcome, standing, quarantined, question, attempt, durationMs, message, job, by, build }
+
+		init(from decoder: any Decoder) throws {
+			let container = try decoder.container(keyedBy: CodingKeys.self)
+			model = try container.decodeIfPresent(String.self, forKey: .model)
+			steps = try container.decode([ResultStep]?.self, forKey: .steps)
+			result = try container.decode(Int.self, forKey: .result)
+			test = try container.decode(String.self, forKey: .test)
+			name = try container.decode(String.self, forKey: .name)
+			file = try container.decodeIfPresent(String.self, forKey: .file)
+			`case` = try container.decodeIfPresent(String.self, forKey: .case)
+			outcome = try container.decode(String.self, forKey: .outcome)
+			standing = try container.decode(String.self, forKey: .standing)
+			quarantined = try container.decode(Bool.self, forKey: .quarantined)
+			question = try container.decodeIfPresent(String.self, forKey: .question)
+			attempt = try container.decode(Int.self, forKey: .attempt)
+			durationMs = try container.decodeIfPresent(Double.self, forKey: .durationMs)
+			message = try container.decodeIfPresent(String.self, forKey: .message)
+			job = try container.decode(String.self, forKey: .job)
+			by = try container.decode(String.self, forKey: .by)
+			build = try container.decodeIfPresent(String.self, forKey: .build)
+		}
 	}
 
 	/// `find` in results: what a commit's gate counted, a page.
@@ -633,6 +689,27 @@ enum Wire {
 		let cursor: String?
 		/// Every row the gate counts, by standing, whatever the filter.
 		let tally: [String: Int]
+	}
+
+	/// A result's attachment metadata.
+	struct Attachment: Decodable, Equatable, Sendable {
+		let id: Int
+		let result: Int
+		let name: String
+		let type: String
+	}
+
+	/// The attachment operation's ordered list.
+	struct AttachmentList: Decodable, Equatable, Sendable {
+		let kind: String
+		let items: [Attachment]
+	}
+
+	/// One attachment and its base64 data.
+	struct AttachmentFile: Decodable, Equatable, Sendable {
+		let kind: String
+		let attachment: Attachment
+		let data: String
 	}
 
 	/// A quarantine a test is or was in.
@@ -660,6 +737,7 @@ enum Wire {
 	/// One of a test's latest results, newest first.
 	struct TestResult: Decodable, Equatable, Sendable {
 		let model: String?
+		let steps: [ResultStep]?
 		let id: Int
 		let outcome: String
 		let by: String
@@ -671,6 +749,25 @@ enum Wire {
 		let change: String?
 		let job: String
 		let build: String?
+
+		private enum CodingKeys: String, CodingKey { case model, steps, id, outcome, by, at, attempt, durationMs, message, commit, change, job, build }
+
+		init(from decoder: any Decoder) throws {
+			let container = try decoder.container(keyedBy: CodingKeys.self)
+			model = try container.decodeIfPresent(String.self, forKey: .model)
+			steps = try container.decode([ResultStep]?.self, forKey: .steps)
+			id = try container.decode(Int.self, forKey: .id)
+			outcome = try container.decode(String.self, forKey: .outcome)
+			by = try container.decode(String.self, forKey: .by)
+			at = try container.decode(Double.self, forKey: .at)
+			attempt = try container.decode(Int.self, forKey: .attempt)
+			durationMs = try container.decodeIfPresent(Double.self, forKey: .durationMs)
+			message = try container.decodeIfPresent(String.self, forKey: .message)
+			commit = try container.decodeIfPresent(String.self, forKey: .commit)
+			change = try container.decodeIfPresent(String.self, forKey: .change)
+			job = try container.decode(String.self, forKey: .job)
+			build = try container.decodeIfPresent(String.self, forKey: .build)
+		}
 	}
 
 	/// `get` with a T- ref: a test and its latest results.

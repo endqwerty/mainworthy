@@ -208,6 +208,7 @@ public struct RunFill: Identifiable, Equatable, Sendable {
 	public let outcome: FilledOutcome
 	public let note: String?
 	public let atStep: String?
+	public let steps: [ResultStep]?
 	init(_ wire: Wire.RunFill) {
 		result = wire.result
 		by = wire.by
@@ -216,6 +217,7 @@ public struct RunFill: Identifiable, Equatable, Sendable {
 		outcome = FilledOutcome(wire.outcome)
 		note = wire.note
 		atStep = wire.atStep
+		steps = wire.steps?.map(ResultStep.init)
 	}
 }
 

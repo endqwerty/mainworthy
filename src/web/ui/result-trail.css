@@ -1,0 +1,46 @@
+:root {
+	--trail-tint: #e1eafb;
+}
+:root[data-theme="dark"] {
+	--trail-tint: #26334a;
+}
+.result-trail {
+	list-style: none;
+	margin: 8px 0;
+	padding: 0;
+	color: var(--ink);
+	font: 12px / 1.5 var(--sans);
+}
+.result-trail > li {
+	padding: 8px 10px;
+	border: 1px solid var(--line);
+	border-radius: 4px;
+	margin: 3px 0;
+}
+.trail-step,
+.result-trail ul > li {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 12px;
+	align-items: baseline;
+}
+.result-trail ul {
+	list-style: none;
+	padding: 4px 0 0 14px;
+	margin: 0;
+}
+.trail-action {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	flex: 1 1 140px;
+}
+.trail-step strong {
+	overflow-wrap: anywhere;
+}
+.trail-screenshot {
+	margin-top: 6px;
+}
+.trail-screenshot summary {
+	cursor: pointer;
+	text-decoration: underline;
+}

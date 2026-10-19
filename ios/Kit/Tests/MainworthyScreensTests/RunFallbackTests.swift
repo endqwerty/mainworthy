@@ -19,7 +19,7 @@ actor OvertakenSlotsTransport: Transport {
 		#"{"ref":"R-1","name":"Review","origin":"planned","inProgress":0,"workUntil":null,"state":"open","verdict":"pending","reason":"missing","createdAt":1800000000000,"slots":2,"tally":{"missing":1,"pass":1},"accepts":{"self":true}}"#
 	}
 	func slotJSON(_ n: Int, filled: Bool) -> String {
-		let fills = filled ? #"[{"result":\#(n),"by":"robin","method":"human","outcome":"pass"}]"# : "[]"
+		let fills = filled ? #"[{"result":\#(n),"by":"robin","method":"human","outcome":"pass","steps":null}]"# : "[]"
 		return
 			#"{"id":\#(n),"case":"C-\#(n)","title":"Case \#(n)","version":1,"state":"\#(filled ? "satisfied" : "missing")","work":{"kind":"free"},"fills":\#(fills)}"#
 	}

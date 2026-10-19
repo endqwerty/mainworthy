@@ -67,7 +67,7 @@ function FileAttachment({ result, item }: { result: number; item: Attachment }) 
 		</li>
 	);
 }
-export function ResultAttachments({ result }: { result: number }) {
+export function ResultAttachments({ result, index }: { result: number; index?: number }) {
 	const { project } = useApp();
 	const read = useQueryOp({ project, op: "attachment", input: { result }, enabled: result > 0 });
 	const parsed = AttachmentReply.safeParse(read.data);
@@ -82,9 +82,11 @@ export function ResultAttachments({ result }: { result: number }) {
 		return null;
 	return (
 		<ul className="result-attachments" aria-label="Result attachments">
-			{parsed.data.items.map((item) => (
-				<FileAttachment key={`${project}:${result}:${item.id}:${item.hash}`} result={result} item={item} />
-			))}
+			{parsed.data.items
+				.filter((_, ordinal) => index === undefined || index === ordinal)
+				.map((item) => (
+					<FileAttachment key={`${project}:${result}:${item.id}:${item.hash}`} result={result} item={item} />
+				))}
 		</ul>
 	);
 }
