@@ -261,13 +261,21 @@ test("export pulls fixed chunks and cancels without leaving its spool on disk", 
 
 test("imports spool privately on the data filesystem and remove rejected uploads", async () => {
 	await withInstance(async ({ instance }) => {
+		const reading = Promise.withResolvers<void>();
 		let input: ReadableStreamDefaultController<Uint8Array> | undefined;
-		const body = new ReadableStream<Uint8Array>({
-			start(controller) {
-				input = controller;
-				controller.enqueue(new TextEncoder().encode("not an archive"));
+		const body = new ReadableStream<Uint8Array>(
+			{
+				start(controller) {
+					input = controller;
+					controller.enqueue(new TextEncoder().encode("not an archive"));
+				},
+				pull() {
+					reading.resolve();
+				},
 			},
-		});
+			// Only request another chunk once the import has opened its spool and consumed the first.
+			{ highWaterMark: 0 },
+		);
 		const route = archiveRoutes(instance.app)["/api/import"];
 		if (!route || !input) throw new Error("missing import input");
 		const pending = route(new Request(`${instance.url}/api/import`, { method: "POST", body }), {
@@ -276,7 +284,7 @@ test("imports spool privately on the data filesystem and remove rejected uploads
 		});
 		const spool = join(instance.app.config.dataDir, "spool");
 		try {
-			await Bun.sleep(0);
+			await reading.promise;
 			const entries = await readdir(spool);
 			expect(entries).toHaveLength(1);
 			const directory = join(spool, entries[0] ?? "missing");
