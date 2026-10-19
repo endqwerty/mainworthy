@@ -1,4 +1,4 @@
-# NNNN: A configured owner token must survive HTTP transport unchanged
+# 0106: A configured owner token must survive HTTP transport unchanged
 
 Date: 2026-10-18
 
