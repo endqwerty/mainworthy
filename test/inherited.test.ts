@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { start } from "../src/app/start.ts";
 import { Client } from "../src/cli/client.ts";
 import type { Policy } from "../src/core/kinds.ts";
-import type { DecideReply, GateStatus, InboxReply } from "../src/core/ops.ts";
+import type { DecideReply, GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
 import { recoverAccepted, sweep } from "../src/server/ops/jobs.ts";
@@ -22,6 +22,47 @@ const base = (fail: Record<number, string> = { 0: "same cause" }, attempt = 1) =
 	h.call("report", ciReport({ commit: "base0001", n: 2, fail, attempt }));
 const change = (fail: Record<number, string>, commit = "change01", attempt = 1) =>
 	h.call("report", ciReport({ commit, branch: "feature", pr: 69, base: "base0001", n: 2, fail, attempt }));
+
+for (const answer of ["inherited", "mistaken"]) {
+	for (const existing of [false, true]) {
+		test(`a rule's ${answer} answer cannot excuse a ${existing ? "pre-existing" : "new"} trunk failure`, () => {
+			if (existing) base();
+			const policy = h.call<Policy & { version: number }>("admin", { do: "policy.show", project: "scratch" });
+			const clauses = policy.clauses.map((clause) =>
+				clause.kind === "failure" ? { ...clause, ask: { ...clause.ask, who: "rule" }, answer: { is: answer } } : clause,
+			);
+			h.call("propose", { edits: [{ op: "policy", base: policy.version, clauses }] });
+			const adoption = h.call<InboxReply>("inbox", { kind: "adopt" }).items[0];
+			if (!adoption) throw new Error("missing policy adoption");
+			expect(
+				h.call("decide", { q: adoption.q, onEvidence: adoption.evidenceHash, answer: { is: "accept" } }),
+			).toMatchObject([{ status: "decided" }]);
+			const receipt = h.call<ReportReceipt>(
+				"report",
+				ciReport({ commit: "base0001", branch: "main", n: 1, fail: { 0: "same cause" }, attempt: existing ? 2 : 1 }),
+			);
+			const blocked = { verdict: "blocked", tally: { excused: 0, unexplained: 1 } };
+			expect(receipt.gate).toMatchObject(blocked);
+			expect(gate("base0001")).toMatchObject(blocked);
+			const questions = h.call<InboxReply>("inbox", { kind: "failure" }).items;
+			expect(questions).toHaveLength(1);
+			const question = questions[0];
+			if (!question) throw new Error("missing trunk failure question");
+			expect(question).toMatchObject({ state: "open", needs: "one member", decision: null });
+			expect(question.answers).toEqual(["defect", "test", "expected", "flaky", "infra"]);
+			expect(
+				h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: answer } }),
+			).toMatchObject([{ status: "invalid" }]);
+			expect(
+				h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "defect" } }),
+			).toMatchObject([{ status: "decided" }]);
+			expect(gate("base0001")).toMatchObject({
+				verdict: "failed",
+				tally: { excused: 0, unexplained: 0, attributed: 1 },
+			});
+		});
+	}
+}
 
 for (const preset of ["loose", "standard"]) {
 	for (const declarationFirst of [true, false]) {
