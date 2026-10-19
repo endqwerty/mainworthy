@@ -1062,7 +1062,10 @@ describe("editing", () => {
 			onEvidence: q?.evidenceHash,
 			answer: { is: "accept" },
 		});
-		expect(refused[0]?.status).toBe("conflict");
+		expect(refused[0]).toMatchObject({
+			status: "invalid",
+			needs: "one of merge, reject: `accept` does not apply to this proposal",
+		});
 		const body = {
 			title: "Mine and theirs",
 			pre: "",

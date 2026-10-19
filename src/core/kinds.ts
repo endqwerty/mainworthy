@@ -253,7 +253,7 @@ export const ANSWER_HELP = {
 /**
  * The answers that make sense for one question, in key order. A failure on trunk cannot be "already failing on
  * the base", and "the failure was a mistake" exists only where a pass and a fail disagree. The queue offers
- * exactly these, and the server refuses a failure answer outside them.
+ * exactly these, and the server refuses failure and adoption answers outside them.
  */
 export function applicableAnswers(kind: Kind, facts: ReadonlySet<string>): string[] {
 	switch (kind) {

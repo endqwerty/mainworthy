@@ -29,6 +29,8 @@ The `when` column holds the conditions a clause tests. `always` matches every qu
 - A named role, written as `role:approver`. An actor with `answer` and that role on the project, subject to the clause's rules for agents.
 - The author. The person who wrote the proposal, or an admin.
 
+A rule that answers an adoption question with `merge` must include `conflict` among its conditions. The merged body becomes a new proposal and follows the ordinary adoption rules. A rule cannot merge a proposal with no conflict. If an older stored rule asks for that, the question stays open for a member instead of creating replacement proposals.
+
 An agent's answer either counts as a decision, is shown as advice for a person to decide, or is refused. The table also says whether a person who produced the evidence may answer, and whether the answer needs a reason.
 
 An unexplained failure with no quarantine cover blocks the runs that count it, under all three presets. The policy decides who may explain it. The `blocks` column says only which runs list a question. A separate setting says whether an explicit CI declaration that no tests are required may pass an empty commit gate.
@@ -196,6 +198,8 @@ The change is a proposal and a decision like any policy change, so it needs `pro
 ```
 invalid: under this policy a person adopts every new case, so a rule cannot create cases for tests: choose ask or track
 ```
+
+A custom policy that rejects a pipeline's new cases by rule also refuses `create`. A rule must answer `accept` to create and link cases automatically. A person who answers a file's question with `create` needs the same acceptance rule for their own new cases. Otherwise the answer is refused and the question stays open, with no create decision or links recorded.
 
 Under `create`, anyone who can report results can add cases, one for each test name they send. A report still cannot change or remove a case. Under `standard` an agent's report is the exception. An agent's new case waits for a person, so the rule makes none and the file's question stays open.
 

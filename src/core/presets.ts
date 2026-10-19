@@ -167,6 +167,11 @@ export function missingCatchAll(clauses: readonly Clause[]): Kind[] {
 export function policyProblem(policy: Policy): string | null {
 	const unanswerable = policy.clauses.find((c) => c.ask.who === "rule" && !ANSWERS[c.kind].safeParse(c.answer).success);
 	if (unanswerable) return `Clause ${unanswerable.id} needs a valid ${unanswerable.kind} rule answer.`;
+	for (const clause of policy.clauses) {
+		if (clause.kind !== "adopt" || clause.ask.who !== "rule" || clause.when.includes("conflict")) continue;
+		const answer = ANSWERS.adopt.safeParse(clause.answer);
+		if (answer.success && answer.data.is === "merge") return `Clause ${clause.id}: a merge rule must require conflict.`;
+	}
 	const missing = missingCatchAll(policy.clauses);
 	if (missing.length > 0)
 		return `every kind must end with a clause that always matches; missing for: ${missing.join(", ")}`;
@@ -176,6 +181,9 @@ export function policyProblem(policy: Policy): string | null {
 		const adoption = clauseOf(policy, { kind: "adopt", facts: new Set(["author:ci"]) });
 		if (adoption?.ask.who !== "rule")
 			return "under this policy a person adopts every new case, so a rule cannot create cases for tests: choose ask or track";
+		const acceptance = ANSWERS.adopt.safeParse(adoption.answer);
+		if (!acceptance.success || acceptance.data.is !== "accept")
+			return "tests with no case need a rule that accepts new cases automatically: choose ask or track";
 	}
 	return null;
 }
