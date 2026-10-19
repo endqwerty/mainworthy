@@ -708,11 +708,16 @@ function* settleSteps(
 	const about = runsAbout(ctx, question);
 	if (Array.isArray(effects.reask) && effects.reask.length > 0) askAgain(ctx, question, effects.reask as number[]);
 	about.push(...closeAnswered(ctx, question), ...rested);
-	// A decision about a failure changes how every run that shows the cause counts it, an older commit's run and
-	// a run the question never named included. Each is recomputed now, so none is left with yesterday's tally.
+	// A cause answer reaches older commits and planned runs the question never named. An inherited answer
+	// excuses only its exact results: its named commit and that commit's planned runs are folded by refold.
 	if (question.kind === "failure") {
-		const subject = json<{ signature?: number; scope?: string; slot?: number }>(question.subject);
-		if (subject.slot === undefined && subject.signature !== undefined && subject.scope !== undefined)
+		const subject = json<{ signature?: number; scope?: string; slot?: number; perResult?: boolean }>(question.subject);
+		if (
+			!subject.perResult &&
+			subject.slot === undefined &&
+			subject.signature !== undefined &&
+			subject.scope !== undefined
+		)
 			about.push(...runsShowing(ctx.db, ctx.project.id, subject.signature));
 	}
 	refold(ctx, [...about, ...(supersedes !== null ? runsDependingOn(ctx.db, supersedes) : [])], {

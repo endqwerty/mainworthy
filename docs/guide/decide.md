@@ -90,6 +90,7 @@ Look for "blocks gate" and the runs named beside the question.
 Under the loose policy, a test that fails with the same cause on the change's base is excused by rule.
 The decision appears in Settled. It names exact results of one commit and the base results that support them.
 Other tests with the same message still need their own evidence. Splitting a report does not change which tests qualify.
+An inherited answer on one pull request does not change a sibling pull request that shares its base.
 
 The comparison uses the change's current base in its own repository and the effective results of pipelines and people.
 The base must fail in the same environment, method, and job as the change's result.
