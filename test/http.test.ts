@@ -3045,27 +3045,45 @@ describe("the surface", () => {
 		expect(invalid.body.ok === false && invalid.body.error.message).toContain("base");
 	});
 
-	test("a committed write is pushed on the project's change stream", async () => {
+	test("a throwing subscriber preserves the HTTP reply and the project's change stream", async () => {
 		await using instance = boot("local");
-		const response = await fetch(`${instance.url}/api/p/scratch/events`);
-		const reader = response.body?.getReader();
-		if (!reader) throw new Error("no stream");
-		await post(instance, "/api/p/scratch/propose", { edits: [{ op: "create", outline: "Streamed" }] });
-		const decoder = new TextDecoder();
-		let text = "";
-		while (!text.includes("data:")) {
-			const { value, done } = await reader.read();
-			if (done) break;
-			text += decoder.decode(value);
+		const logged = spyOn(console, "error").mockImplementation(() => {});
+		const unsubscribe = instance.app.subscribe(() => {
+			throw new Error("subscriber-private-detail");
+		});
+		try {
+			const response = await fetch(`${instance.url}/api/p/scratch/events`, { signal: AbortSignal.timeout(2000) });
+			const reader = response.body?.getReader();
+			if (!reader) throw new Error("no stream");
+			try {
+				for (const [seq, title] of [
+					[2, "Streamed"],
+					[3, "Still streaming"],
+				] as const) {
+					const reply = await post(instance, "/api/p/scratch/propose", { edits: [{ op: "create", outline: title }] });
+					expect(reply.status).toBe(200);
+					expect(reply.body).toMatchObject({ ok: true, seq, result: { status: "adopted" } });
+					const decoder = new TextDecoder();
+					let text = "";
+					while (!text.includes("data:")) {
+						const { value, done } = await reader.read();
+						if (done) break;
+						text += decoder.decode(value);
+					}
+					const event: unknown = JSON.parse(text.slice(text.indexOf("data:") + 5).split("\n")[0] ?? "{}");
+					expect(event).toMatchObject({ op: "propose", seq, touched: expect.arrayContaining([`C-${seq - 1}`]) });
+				}
+			} finally {
+				await reader.cancel();
+			}
+			expect(logged.mock.calls).toEqual([
+				["[mainworthy] change subscriber failed:", { seq: 2 }],
+				["[mainworthy] change subscriber failed:", { seq: 3 }],
+			]);
+		} finally {
+			unsubscribe();
+			logged.mockRestore();
 		}
-		await reader.cancel();
-		const event = JSON.parse(text.slice(text.indexOf("data:") + 5).split("\n")[0] ?? "{}") as {
-			op: string;
-			touched: string[];
-			seq: number;
-		};
-		expect(event).toMatchObject({ op: "propose", seq: 2 });
-		expect(event.touched).toContain("C-1");
 	});
 });
 
