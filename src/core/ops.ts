@@ -653,6 +653,9 @@ export const FindInput = z.object({
 			z.literal("results").meta({ "x-mcp-hidden": true }),
 		])
 		.default("cases"),
+	select: Selection.optional()
+		.describe("For cases: preview a run selection instead of the listing filters. Excludes fragments.")
+		.meta({ "x-mcp-hidden": true }),
 	text: z.string().max(200).optional(),
 	folder: FolderRef.optional(),
 	deep: z.boolean().optional().describe("With `folder`: include its subfolders."),

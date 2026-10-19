@@ -598,6 +598,53 @@ test("two uses of the same fragment have distinct result anchors, and plans sele
 	});
 });
 
+test("run selection previews share planned membership and paging, while Suite listings keep fragments", () => {
+	createFragment();
+	createUser();
+	createUser("Checkout again");
+	createUser("Checkout retired");
+	h.call("propose", {
+		edits: [
+			{ op: "place", cases: ["C-1", "C-2", "C-3", "C-4"], folder: "checkout/pay", tags: { add: ["smoke"] } },
+			{ op: "place", cases: ["C-1"], tags: { add: ["shared"] } },
+			{ op: "state", cases: ["C-4"], to: "archived" },
+		],
+	});
+	expect(h.call("find", { in: "cases" })).toMatchObject({ count: 3 });
+	for (const select of [{}, { folders: ["checkout"] }, { tags: ["#smoke"] }, { text: "Checkout" }]) {
+		const preview = h.call<{ count: number; items: { ref: string }[]; cursor: string | null }>("find", {
+			in: "cases",
+			select,
+			limit: 1,
+		});
+		expect(preview).toMatchObject({ count: 2, items: [{ ref: "C-2" }], cursor: "1" });
+		expect(h.call("find", { in: "cases", select, limit: 1, cursor: preview.cursor })).toMatchObject({
+			count: 2,
+			items: [{ ref: "C-3" }],
+			cursor: null,
+		});
+		const planned = h.call<{ run: string; slots: number }>("plan", { name: "Previewed checkout", select });
+		expect(planned.slots).toBe(2);
+		expect(h.call("find", { in: "slots", run: planned.run })).toMatchObject({
+			count: 2,
+			items: [{ case: "C-2" }, { case: "C-3" }],
+		});
+	}
+	expect(h.call("find", { in: "cases", select: { tags: ["shared"] } })).toMatchObject({
+		count: 0,
+		items: [],
+		cursor: null,
+	});
+	expect(h.raw("plan", { name: "Only shared steps", select: { tags: ["shared"] } })).toMatchObject({
+		ok: false,
+		error: { code: "invalid", message: "the selection matches no active case" },
+	});
+	expect(h.raw("find", { in: "cases", select: { cases: ["C-1"] } })).toMatchObject({
+		ok: false,
+		error: { code: "invalid", message: "fragments are shared steps; select their cases to run" },
+	});
+});
+
 test("a batch waiting for review refuses a case changed after the proposal was sealed", () => {
 	createFragment();
 	createUser();

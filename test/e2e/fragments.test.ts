@@ -1,7 +1,73 @@
 import { expect, test } from "bun:test";
 import { mkdir } from "node:fs/promises";
+import { z } from "zod";
 import { CaseView } from "../../src/web/suite/model.ts";
 import { browserAvailable, eventually, openPage, startServer } from "./support.ts";
+
+test.skipIf(!browserAvailable)(
+	"the planner counts runnable cases, excluding fragments from every selection",
+	async () => {
+		const server = await startServer();
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await server.api("propose", {
+				edits: [
+					{
+						op: "create",
+						kind: "fragment",
+						body: { title: "Shared checkout" },
+						folder: "checkout/shared",
+						tags: ["smoke", "shared"],
+					},
+					{ op: "create", body: { title: "Pay checkout" }, folder: "checkout", tags: ["smoke"] },
+				],
+			});
+			view = await openPage(server, { path: "/p/scratch/runs" });
+			const { page } = view;
+			page.setDefaultTimeout(3000);
+			await page.keyboard.press("n");
+			await page.getByLabel("Run name").fill("Checkout plan");
+			await page
+				.locator(".run-planner [role=status]")
+				.filter({ hasText: /^[12] matching cases$/ })
+				.waitFor();
+			const directory = process.env.MAINWORTHY_FRAGMENT_SCREENSHOT_DIR;
+			if (directory) {
+				await mkdir(directory, { recursive: true });
+				await page.screenshot({ path: `${directory}/planner-fragments.png`, fullPage: true });
+			}
+			expect(await page.locator(".run-planner [role=status]").textContent()).toBe("1 matching cases");
+			await page.getByLabel("Cases", { exact: true }).selectOption("folder");
+			await page.getByLabel("Folder", { exact: true }).selectOption("checkout/shared");
+			await page.getByText("0 matching cases", { exact: true }).waitFor();
+			await page.getByLabel("Folder", { exact: true }).selectOption("checkout");
+			await page.getByText("1 matching cases", { exact: true }).waitFor();
+			await page.getByLabel("Cases", { exact: true }).selectOption("tag");
+			await page.getByLabel("Tag", { exact: true }).fill("shared");
+			await page.getByText("0 matching cases", { exact: true }).waitFor();
+			await page.getByLabel("Tag", { exact: true }).fill("#smoke");
+			await page.getByText("1 matching cases", { exact: true }).waitFor();
+			await page.getByLabel("Cases", { exact: true }).selectOption("text");
+			await page.getByLabel("Search cases", { exact: true }).fill("Shared");
+			await page.getByText("0 matching cases", { exact: true }).waitFor();
+			await page.getByLabel("Search cases", { exact: true }).fill("checkout");
+			await page.getByText("1 matching cases", { exact: true }).waitFor();
+			const planned = page.waitForResponse((response) => response.url().endsWith("/plan"));
+			await page.getByRole("button", { name: "Enter Plan run", exact: true }).click();
+			await planned;
+			const slots = await server.api("find", { in: "slots", run: "R-1" });
+			expect(slots.count).toBe(1);
+			expect(z.array(z.object({ case: z.string(), title: z.string() })).parse(slots.items)).toEqual([
+				{ case: "C-2", title: "Pay checkout" },
+			]);
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
 
 test.skipIf(!browserAvailable)(
 	"insert a pinned fragment, read it inline, and update only selected users",
