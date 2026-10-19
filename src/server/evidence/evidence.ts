@@ -9,8 +9,10 @@ import { contentHash } from "../../core/hash.ts";
 import type { ActorKind } from "../../core/kinds.ts";
 import type { MethodKind } from "../../core/model.ts";
 import type { ChangeInput, Outcome, ReportInput, ResultIn, TargetIn } from "../../core/ops.ts";
+import { failedStep, type ResultStep } from "../../core/results.ts";
 import type { ShardWait } from "../../core/runs.ts";
 import { normaliseFailure, signatureHash } from "../../core/signature.ts";
+import { attachmentType } from "../kernel/blobs.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { type Db, json, placeholders, type SqlValue, sql } from "../kernel/db.ts";
 import { conflict, invalid } from "../kernel/errors.ts";
@@ -119,7 +121,7 @@ export type ResultRow = {
 	message: string | null;
 	detail: string | null;
 	at_step: string | null;
-	steps: string | null;
+	trail: string | null;
 	note: string | null;
 	run: number | null;
 	corrects: number | null;
@@ -127,6 +129,13 @@ export type ResultRow = {
 	quarantine_decision: number | null;
 	quarantine_exit: number | null;
 };
+
+export const resultTrail = (row: ResultRow): ResultStep[] | null =>
+	row.trail === null ? null : json<ResultStep[]>(row.trail);
+export function resultFailedStep(row: ResultRow): string | null {
+	const steps = resultTrail(row);
+	return steps === null ? row.at_step : failedStep(steps);
+}
 
 /** What `Q.updateChange` writes. */
 type ChangeWrite = {
@@ -368,16 +377,16 @@ const Q = {
 		message: string | null;
 		detail: string | null;
 		atStep: string | null;
-		steps: string | null;
+		trail: string | null;
 		note: string | null;
 		run: number | null;
 		corrects: number | null;
 		at: number;
 	}>(
 		`INSERT INTO results (project, test, seq, ord, batch, target, method, actor, model, basis, basis_case, basis_version, basis_claim,
-		                      outcome, attempt, duration_ms, signature, message, detail, at_step, steps, note, run, corrects, at)
+		                      outcome, attempt, duration_ms, signature, message, detail, at_step, trail, note, run, corrects, at)
 		 VALUES ($project, $test, $seq, $ord, $batch, $target, $method, $actor, $model, $basis, $basisCase, $basisVersion, $basisClaim,
-		         $outcome, $attempt, $duration, $signature, $message, $detail, $atStep, $steps, $note, $run, $corrects, $at)`,
+		         $outcome, $attempt, $duration, $signature, $message, $detail, $atStep, $trail, $note, $run, $corrects, $at)`,
 	),
 	laneHistory: sql<{ target: number; test: number; actor: number; job: string }, ResultRow>(
 		`SELECT r.* FROM results r JOIN batches b ON b.id = r.batch
@@ -853,6 +862,14 @@ export function accept(
 	},
 ): { batch: BatchRow; fresh: boolean } {
 	const { report } = input;
+	for (const result of report.results) {
+		for (const step of result.steps ?? []) {
+			if (step.attachment === undefined) continue;
+			const file = result.attachments?.[step.attachment];
+			if (!file || !attachmentType(Buffer.from(file.data, "base64")).startsWith("image/"))
+				throw invalid("A step screenshot attachment must be an image");
+		}
+	}
 	const reserved = report.results.find((result) => "key" in result.test && RESERVED_KEY.test(result.test.key));
 	if (reserved && "key" in reserved.test) {
 		throw invalid(
@@ -1173,8 +1190,8 @@ export function* applySteps(
 			signature: signature?.id ?? null,
 			message,
 			detail: input.failure?.detail ?? null,
-			atStep: input.failure?.at ?? input.steps?.find((step) => step.outcome === "fail")?.step ?? null,
-			steps: input.steps ? JSON.stringify(input.steps) : null,
+			atStep: input.steps === undefined ? (input.failure?.at ?? null) : null,
+			trail: input.steps === undefined ? null : JSON.stringify(input.steps),
 			note: input.note ?? null,
 			run: batch.run,
 			corrects,

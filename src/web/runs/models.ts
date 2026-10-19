@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CaseBody, ExpandedStep, MethodKind } from "../../core/model.ts";
+import { ResultTrail } from "../../core/results.ts";
 import { Obligation, SlotState, SlotWork, Tally, TargetMatch, Verdict } from "../../core/runs.ts";
 
 export const Run = z.object({
@@ -32,6 +33,7 @@ export const Fill = z.object({
 	at: z.number(),
 	note: z.string().nullable(),
 	atStep: z.string().nullable(),
+	steps: ResultTrail.nullable(),
 });
 export type Fill = z.infer<typeof Fill>;
 export const Slot = z.object({

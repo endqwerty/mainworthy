@@ -5,6 +5,7 @@ import Observation
 /// One open run, with the case a person is executing and the last result they may correct with Undo.
 @MainActor @Observable
 public final class OpenRunScreen: ProjectScreen {
+	public let attachments: ResultAttachmentScreen
 	public enum Document: Equatable {
 		case none
 		case reading(Int)
@@ -66,6 +67,7 @@ public final class OpenRunScreen: ProjectScreen {
 
 	package init(project: ProjectClient, run: Run, permission: Project, person: String) {
 		self.project = project
+		attachments = ResultAttachmentScreen(project: project)
 		self.run = run
 		self.permission = permission
 		self.person = person

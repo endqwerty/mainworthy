@@ -2,15 +2,23 @@ import { stripVTControlCharacters } from "node:util";
 import { z } from "zod";
 import { caseAnnotation } from "../../core/case-annotation.ts";
 import type { Outcome } from "../../core/ops.ts";
+import { ResultTrail, TRAIL_LIMITS } from "../../core/results.ts";
 import { nativeResult, type ParsedReport } from "./native.ts";
 
 const ErrorInfo = z.object({ message: z.string().optional(), stack: z.string().optional() });
+const RunnerStep = z.object({
+	title: z.string(),
+	duration: z.number().nonnegative(),
+	error: ErrorInfo.optional(),
+	steps: z.array(z.unknown()).max(TRAIL_LIMITS.actions, "Limit: 100 actions per step").optional(),
+});
 const Attempt = z.object({
 	status: z.enum(["passed", "failed", "timedOut", "skipped", "interrupted"]),
 	duration: z.number().nonnegative(),
 	retry: z.number().int().nonnegative(),
 	error: ErrorInfo.optional(),
 	errors: z.array(ErrorInfo).optional(),
+	steps: z.array(RunnerStep).max(TRAIL_LIMITS.steps, "Limit: 100 steps per result").optional(),
 });
 const outcomes: Record<z.infer<typeof Attempt>["status"], Outcome> = {
 	passed: "pass",
@@ -71,21 +79,42 @@ export function parsePlaywright(value: unknown): ParsedReport {
 					.join("\n");
 				const unexpectedPass = test.expectedStatus === "failed" && final.status === "passed";
 				const expectedFailure = test.expectedStatus === "failed" && final.status === "failed";
-				results.push(
-					nativeResult({
-						name: spec.title,
-						file: spec.file || suite.file,
-						suites: [test.projectName, ...path],
-						outcome: unexpectedPass ? "fail" : expectedFailure ? "pass" : outcomes[final.status],
-						durationMs: test.results.reduce((sum, attempt) => sum + attempt.duration, 0),
-						retries: final.retry,
-						annotation: test.annotations
-							?.filter((item) => item.type === "mainworthy")
-							.map((item) => caseAnnotation(item.description ?? ""))
-							.findLast((claim) => claim !== undefined),
-						detail: unexpectedPass ? "Expected test to fail, but it passed" : stripVTControlCharacters(detail),
-					}),
-				);
+				const result = nativeResult({
+					name: spec.title,
+					file: spec.file || suite.file,
+					suites: [test.projectName, ...path],
+					outcome: unexpectedPass ? "fail" : expectedFailure ? "pass" : outcomes[final.status],
+					durationMs: test.results.reduce((sum, attempt) => sum + attempt.duration, 0),
+					retries: final.retry,
+					annotation: test.annotations
+						?.filter((item) => item.type === "mainworthy")
+						.map((item) => caseAnnotation(item.description ?? ""))
+						.findLast((claim) => claim !== undefined),
+					detail: unexpectedPass ? "Expected test to fail, but it passed" : stripVTControlCharacters(detail),
+				});
+				if (final.steps)
+					result.steps = ResultTrail.parse(
+						final.steps.map((step) => {
+							const actions = [];
+							const pending = (step.steps ?? []).toReversed().map((value) => ({ value, path: "" }));
+							while (pending.length) {
+								const entry = pending.pop();
+								if (!entry) break;
+								const child = RunnerStep.parse(entry.value);
+								const text = entry.path + child.title;
+								if (actions.length >= TRAIL_LIMITS.actions) throw new Error("Limit: 100 actions per step");
+								actions.push({ text, outcome: child.error ? "fail" : "pass", durationMs: Math.round(child.duration) });
+								for (const value of (child.steps ?? []).toReversed()) pending.push({ value, path: `${text} / ` });
+							}
+							return {
+								step: step.title,
+								outcome: step.error ? "fail" : "pass",
+								durationMs: Math.round(step.duration),
+								actions,
+							};
+						}),
+					);
+				results.push(result);
 			}
 		}
 		for (const child of (suite.suites ?? []).toReversed()) pending.push({ suite: child, path, root: false });

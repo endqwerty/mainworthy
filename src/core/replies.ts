@@ -32,6 +32,7 @@ import {
 	TotpConfirmed,
 	TotpEnrolment,
 } from "./people.ts";
+import { ResultTrail } from "./results.ts";
 import { Obligation, SlotWork, TargetMatch, Verdict } from "./runs.ts";
 import { StatsReply } from "./stats.ts";
 import { TeamReply, TeamSource } from "./teams.ts";
@@ -91,6 +92,7 @@ const CaseSummary = z.looseObject({
 });
 const Result = z.looseObject({
 	model: nullableText,
+	steps: ResultTrail.nullable(),
 	id: whole,
 	test: nullableText,
 	name: nullableText,
@@ -115,6 +117,7 @@ const Result = z.looseObject({
 /** A test as a commit's gate counted it: `find --in results`. */
 const CountedResult = z.looseObject({
 	model: nullableText,
+	steps: ResultTrail.nullable(),
 	result: whole,
 	test: text.regex(/^T-\d+$/),
 	name: text,
@@ -272,6 +275,7 @@ const Slot = z.looseObject({
 			result: whole,
 			by: text,
 			model: nullableText,
+			steps: ResultTrail.nullable(),
 			method: text,
 			outcome: text,
 			admitted: text,

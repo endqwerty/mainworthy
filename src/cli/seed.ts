@@ -10,6 +10,7 @@ import type { Client } from "./client.ts";
 import { automateOf, type DemoCase, demoCases, random, requirementOf } from "./demo/cases.ts";
 import { DEMO_FIELDS, demoAliases, demoFields } from "./demo/fields.ts";
 import { AGENT_MODEL, dayStart, demoHistory, type Failure, hex, REPO } from "./demo/history.ts";
+import { demoAgentScreenshot, demoScreenshot, demoTrail } from "./demo/trails.ts";
 import { DEMO_WORK } from "./demo/work.ts";
 import { CliError } from "./errors.ts";
 
@@ -296,7 +297,10 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 				durationMs: Math.round((300 + ((n * 7919) % 4200)) * (0.85 + jitter * 0.3)),
 				...(failure ? { failure: { message: failure.message } } : {}),
 				// Today's failure carries the trace the test runner wrote, as a pipeline attaches it.
-				...(failure && attach ? { attachments: [traceOf(test.name, failure.message)] } : {}),
+				...(failure && attach ? { attachments: [traceOf(test.name, failure.message), demoScreenshot] } : {}),
+				...(attach && n < 2
+					? { steps: demoTrail(caseOf(index).steps, Boolean(failure), failure ? 1 : undefined) }
+					: {}),
 				annotation: { case: refOf(index), version: 1 },
 			} satisfies Result;
 			return [result];
@@ -540,7 +544,13 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 		run: agentRun.run,
 		model: AGENT_MODEL,
 		results: [
-			{ test: { case: agentCase }, outcome: "pass", note: "The coupon check passed." },
+			{
+				test: { case: agentCase },
+				outcome: "pass",
+				note: "The coupon check passed.",
+				steps: demoTrail(caseOf(refs.length > 1 ? 1 : 0).steps, false, 0),
+				attachments: [refs.length > 1 ? demoAgentScreenshot : demoScreenshot],
+			},
 			...pipelineResults([], 0.3, true).slice(refs.length > 1 ? 1 : 0, refs.length > 1 ? 2 : 1),
 		],
 	});

@@ -264,3 +264,5 @@ Old clients that send body hashes in `unless` receive full documents.
 - [Policy](./policy.md) for who answers each question.
 - [People, agents and pipelines](./access.md) for tokens and grants.
 - [Planned runs](./runs.md) for planned runs.
+
+When reporting a pass, include the work observed in `results[].steps`: stable case step IDs, outcomes, optional milliseconds, and actions with text, optional outcomes, and times. Use a fragment occurrence ID such as `a1.b2` for an expanded fragment step. The same trail reads back through `get` and appears in result details. See [step trails and their limits](./report-results.md#keep-the-work-at-each-step).

@@ -149,7 +149,7 @@ export const proposeOp = defineOp({
 	needs: "produce",
 	scope: "project",
 	effect: "write",
-	mcp: "Propose cases at their base version. Status: adopted=current, open=needs acceptance, conflict=resolve, rejected.",
+	mcp: "Propose cases at base: adopted=current, open=needs acceptance, conflict=resolve, rejected.",
 	steps: proposeSteps,
 });
 
@@ -473,7 +473,7 @@ export const claimOp = defineOp({
 	needs: "produce",
 	scope: "project",
 	effect: "write",
-	mcp: "Review cases (`reviewed`, C-311@hash) at change `about` and commit `patch`. Record findings; `known` returns prior findings and answers.",
+	mcp: "Review cases C-311@hash at about/patch; known reads prior findings.",
 	run: claim,
 });
 
@@ -593,7 +593,7 @@ export const decideOp = defineOp({
 	needs: "produce",
 	scope: "project",
 	effect: "write",
-	mcp: "Answer inbox using evidenceHash as onEvidence. Status: decided, advised=person decides, forbidden, invalid, already, reopened, conflict=evidence or decision changed. Choose from answers. Withdraw with undo and ifDecision=reply.decision.",
+	mcp: "onEvidence=evidenceHash. decided, advised=person decides, forbidden, invalid, already, reopened, conflict=changed. undo requires ifDecision.",
 	steps: decideSteps,
 });
 

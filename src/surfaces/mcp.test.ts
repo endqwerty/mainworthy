@@ -25,16 +25,16 @@ import { compactSchema, mcpRoute, mcpServer, mcpTools, TOOL_TOKEN_BUDGET } from 
 
 const tokens = (value: unknown): number => encode(JSON.stringify(value)).length;
 const TOKEN_COUNTS: Record<string, number> = {
-	propose: 1388,
-	report: 696,
-	claim: 390,
-	decide: 318,
-	inbox: 166,
-	get: 229,
-	find: 263,
-	impact: 183,
-	since: 144,
+	propose: 1368,
+	report: 839,
+	claim: 358,
 	work: 169,
+	decide: 280,
+	inbox: 165,
+	get: 219,
+	find: 246,
+	impact: 164,
+	since: 137,
 };
 
 function resultOf<S extends z.ZodType>(reply: unknown, schema: S): z.output<S> {
@@ -63,10 +63,10 @@ test("tools/list names every proposal and decision reply status", () => {
 test("tools/list explains proposal statuses and how to identify reported tests", () => {
 	const tools = mcpTools();
 	expect(tools.find((tool) => tool.name === "get")?.inputSchema.properties?.cursor).toMatchObject({
-		description: "Proposal page; restart after changes.",
+		type: "string",
 	});
 	expect(tools.find((tool) => tool.name === "propose")?.description).toBe(
-		"Propose cases at their base version. Status: adopted=current, open=needs acceptance, conflict=resolve, rejected.",
+		"Propose cases at base: adopted=current, open=needs acceptance, conflict=resolve, rejected.",
 	);
 	expect(tools.find((tool) => tool.name === "report")?.description).toBe(
 		"Report to target or run; tests by key or case.",
@@ -1138,6 +1138,64 @@ test("two MCP producers taking next concurrently receive different slots", async
 			await p.client.close();
 			await p.server.close();
 		}
+		h.close();
+	}
+});
+
+test("MCP discovers and roundtrips a complete result trail", async () => {
+	const h = harness();
+	const actor = h.actor("trail-runner", "agent", ["read", "produce"]);
+	const server = mcpServer(
+		async (op, project, input) => invoke(h.app, OPS, { op, project, input, actor: () => actor }),
+		async () => ["scratch"],
+	);
+	const client = new Client({ name: "trail-client", version: "1" });
+	const [ct, st] = InMemoryTransport.createLinkedPair();
+	const steps = [
+		{
+			step: "u1.a1",
+			outcome: "pass",
+			durationMs: 0,
+			actions: [{ text: 'press("Enter")', outcome: "pass", durationMs: 0 }, { text: "Read total" }],
+		},
+	];
+	try {
+		await server.connect(st);
+		await client.connect(ct);
+		const listed = (await client.listTools()).tools.find((t) => t.name === "report");
+		expect(JSON.stringify(listed?.inputSchema)).toContain('"actions"');
+		resultOf(
+			await client.callTool({
+				name: "report",
+				arguments: { target: { session: "trail" }, results: [{ test: { key: "trail" }, outcome: "pass", steps }] },
+			}),
+			z.object({ counts: z.object({ total: z.literal(1) }) }),
+		);
+		const read = resultOf(
+			await client.callTool({ name: "get", arguments: { refs: ["T-1"] } }),
+			z.array(z.object({ last: z.array(z.object({ steps: z.unknown() })) })),
+		);
+		expect(read[0]?.last[0]?.steps).toEqual(steps);
+		const refused = CallToolResultSchema.parse(
+			await client.callTool({
+				name: "report",
+				arguments: {
+					target: { session: "over" },
+					results: [
+						{
+							test: { key: "over" },
+							outcome: "pass",
+							steps: Array.from({ length: 101 }, () => ({ step: "s1", outcome: "pass" })),
+						},
+					],
+				},
+			}),
+		);
+		expect(refused.isError).toBe(true);
+		expect(JSON.stringify(refused.content)).toContain("100 steps per result");
+	} finally {
+		await client.close();
+		await server.close();
 		h.close();
 	}
 });

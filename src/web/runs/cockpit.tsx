@@ -13,6 +13,7 @@ import { navigate, refUrl, routeUrl } from "../lib/router.ts";
 import { ResultAttachments } from "../ui/attachments.tsx";
 import { useApp } from "../ui/context.tsx";
 import { age, EmptyState, KeyCap, ListRow, ProducerGlyph } from "../ui/index.tsx";
+import { ResultTrail } from "../ui/result-trail.tsx";
 import { type Fill, outcomeName, Run, RunCase, type RunOutcome, Slot, tallyText } from "./models.ts";
 import { useWorkExpiry } from "./work.ts";
 
@@ -308,6 +309,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			at: Date.now(),
 			note: text || null,
 			atStep: null,
+			steps: null,
 		};
 		setLocal((value) => new Map(value).set(slot.id, { fill, pending: true, questions: [] }));
 		void queryClient.cancelQueries({ queryKey: cacheKey });
@@ -945,6 +947,7 @@ function RunDocument({ slot, active, step }: { slot: Slot; active: boolean; step
 					<ProducerGlyph kind={fill.method} /> {fill.outcome} by {fill.by}
 					{fill.model && ` · ${fill.model}`} · basis {fill.admitted} · {age(fill.at)}
 					{fill.note && <p>{fill.note}</p>}
+					<ResultTrail result={fill.result} steps={fill.steps} />
 					<ResultAttachments result={fill.result} />
 				</div>
 			))}

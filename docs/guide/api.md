@@ -462,8 +462,14 @@ Record results: a parsed CI report, one manual result, or an agent's batch. The 
 | `results[].failure.detail` | `string` | no |  |
 | `results[].failure.at` | `string` | no |  |
 | `results[].steps` | `array<object>` | no |  |
-| `results[].steps[].step` | `string` | yes |  |
+| `results[].steps[].step` | `string` | yes | Case step ID or runner label. |
 | `results[].steps[].outcome` | `"pass" \| "fail" \| "skip" \| "blocked" \| "error"` | yes |  |
+| `results[].steps[].durationMs` | `integer` | no |  |
+| `results[].steps[].actions` | `array<object>` | no |  |
+| `results[].steps[].actions[].text` | `string` | yes |  |
+| `results[].steps[].actions[].outcome` | `"pass" \| "fail" \| "skip" \| "blocked" \| "error"` | no |  |
+| `results[].steps[].actions[].durationMs` | `integer` | no |  |
+| `results[].steps[].attachment` | `integer` | no | Screenshot's zero-based attachment index. |
 | `results[].note` | `string` | no |  |
 | `results[].annotation` | `object` | no |  |
 | `results[].annotation.case` | `string` | yes |  |
@@ -1192,15 +1198,15 @@ guidance for commit reuse, question answers, and review filtering.
 
 | Tool | What the agent is told it is for |
 | --- | --- |
-| `propose` | Propose cases at their base version. Status: adopted=current, open=needs acceptance, conflict=resolve, rejected. |
+| `propose` | Propose cases at base: adopted=current, open=needs acceptance, conflict=resolve, rejected. |
 | `report` | Report to target or run; tests by key or case. |
-| `claim` | Review cases (`reviewed`, C-311@hash) at change `about` and commit `patch`. Record findings; `known` returns prior findings and answers. |
+| `claim` | Review cases C-311@hash at about/patch; known reads prior findings. |
 | `work` | Take next slot with run; renew with slot. Report or give-back releases. |
-| `decide` | Answer inbox using evidenceHash as onEvidence. Status: decided, advised=person decides, forbidden, invalid, already, reopened, conflict=evidence or decision changed. Choose from answers. Withdraw with undo and ifDecision=reply.decision. |
-| `inbox` | Open questions and evidenceHash; filter with on. |
-| `get` | Read refs; verdicts at commit:hash, change:key, R-n. unless=etag; proposals page with cursor. |
-| `find` | Search cases by text, folder or tag; list tests (`unlinked: true`), runs or slots. Page with `cursor`. |
-| `impact` | Review change or files: affected cases, hashes, prior reviews, questions, gaps. Reuse cursor as since. |
-| `since` | Changes after cursor: case diffs and settled questions. If more, repeat with returned cursor. |
+| `decide` | onEvidence=evidenceHash. decided, advised=person decides, forbidden, invalid, already, reopened, conflict=changed. undo requires ifDecision. |
+| `inbox` | Open questions with evidenceHash; on filters. |
+| `get` | Read refs; verdicts: commit:hash, change:key, R-n. unless=etag; cursor pages proposals. |
+| `find` | Find cases/tests/runs/slots; cursor pages. |
+| `impact` | Cases and review evidence for change/files; cursor becomes since. |
+| `since` | Case changes and settled questions since cursor; repeat while more. |
 
 <!-- /generated -->

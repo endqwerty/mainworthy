@@ -36,6 +36,7 @@ import pinnedSearch from "./migrations/0030_pinned_search.sql" with { type: "tex
 import conflictAddresses from "./migrations/0031_conflict_addresses.sql" with { type: "text" };
 import slotLeases from "./migrations/0032_slot_leases.sql" with { type: "text" };
 import resultModel from "./migrations/0033_result_model.sql" with { type: "text" };
+import resultTrail from "./migrations/0034_result_trail.sql" with { type: "text" };
 
 /**
  * In order. A migration is never edited after it ships; a change is a new entry.
@@ -80,6 +81,7 @@ export const MIGRATIONS: readonly { version: number; name: string; sql: string; 
 	{ version: 31, name: "conflict_addresses", sql: conflictAddresses, archive: true },
 	{ version: 32, name: "slot_leases", sql: slotLeases, archive: false },
 	{ version: 33, name: "result_model", sql: resultModel, archive: false },
+	{ version: 34, name: "result_trail", sql: resultTrail, archive: true },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

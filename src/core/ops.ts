@@ -19,6 +19,7 @@ import {
 	Unlinked,
 } from "./kinds.ts";
 import { Automate, CaseBody, CaseKind, ConflictAddress, MethodKind } from "./model.ts";
+import { Outcome, ResultTrail, TRAIL_LIMITS, trailBytes } from "./results.ts";
 import { Obligation, SlotWork, TargetMatch, Verdict } from "./runs.ts";
 import { TeamInput } from "./teams.ts";
 
@@ -35,6 +36,8 @@ export const cmd = z
 const ref = (what: string) => z.string().describe(what);
 const limit = z.number().int().min(1).max(500).optional();
 const cursor = z.string().optional().describe("The cursor from the previous page.");
+
+export { Outcome } from "./results.ts";
 
 // ── propose ────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -170,9 +173,6 @@ export type ProposeReply = z.infer<typeof ProposeReply>;
 
 // ── report ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-export const Outcome = z.enum(["pass", "fail", "skip", "blocked", "error"]);
-export type Outcome = z.infer<typeof Outcome>;
-
 export const ResultIn = z.object({
 	test: z.union([
 		z.object({
@@ -189,10 +189,10 @@ export const ResultIn = z.object({
 		.object({
 			message: z.string().max(4000),
 			detail: z.string().max(20_000).optional(),
-			at: z.string().max(40).optional(),
+			at: z.string().max(40).optional().meta({ "x-mcp-hidden": true }),
 		})
 		.optional(),
-	steps: z.array(z.object({ step: z.string(), outcome: Outcome })).optional(),
+	steps: ResultTrail.optional(),
 	note: z.string().max(4000).optional(),
 	/** A claim by the producer that this result exercised this version of this case (`@C-311@v7` in a test name). */
 	annotation: z.object({ case: z.string(), version: z.number().int().optional() }).optional(),
@@ -267,7 +267,26 @@ export const ReportInput = z
 	.superRefine((report, ctx) => {
 		let size = 0;
 		let count = 0;
-		for (const result of report.results) {
+		let trails = 0;
+		for (const [index, result] of report.results.entries()) {
+			if (result.steps) {
+				const bytes = trailBytes(result.steps);
+				trails += bytes;
+				if (bytes > TRAIL_LIMITS.resultBytes)
+					ctx.addIssue({
+						code: "custom",
+						message: "Limit: 65536 bytes per result trail",
+						path: ["results", index, "steps"],
+					});
+				for (const [ordinal, step] of result.steps.entries()) {
+					if (step.attachment !== undefined && step.attachment >= (result.attachments?.length ?? 0))
+						ctx.addIssue({
+							code: "custom",
+							message: "A step attachment index must name this result's own attachments (zero-based)",
+							path: ["results", index, "steps", ordinal, "attachment"],
+						});
+				}
+			}
 			let resultSize = 0;
 			for (const attachment of result.attachments ?? []) {
 				resultSize += attachmentBytes(attachment.data);
@@ -277,6 +296,8 @@ export const ReportInput = z
 				ctx.addIssue({ code: "custom", message: "Attachments exceed 16 MiB for one result", path: ["results"] });
 			size += resultSize;
 		}
+		if (trails > TRAIL_LIMITS.reportBytes)
+			ctx.addIssue({ code: "custom", message: "Limit: 1048576 bytes of trails per report", path: ["results"] });
 		if (size > ATTACHMENT_LIMITS.report || count > ATTACHMENT_LIMITS.perReport)
 			ctx.addIssue({ code: "custom", message: "Attachments exceed 16 MiB or 100 files per report", path: ["results"] });
 	});

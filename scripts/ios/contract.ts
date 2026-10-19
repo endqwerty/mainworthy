@@ -11,6 +11,7 @@
 // To change what the app reads: change the shape here, run `bun scripts/ios.ts gen`, and fix what no longer
 // compiles in `ios/Kit` (`bun scripts/ios.ts test`, on a Mac). `ios/README.md` says the rest.
 import { ConflictAddress } from "../../src/core/model.ts";
+import { Outcome } from "../../src/core/results.ts";
 import {
 	anything,
 	dictionary,
@@ -335,6 +336,34 @@ export const RunPage = struct("RunPage", "A page of runs, newest first.", {
 	items: list(Run),
 	cursor: maybe(text),
 });
+const resultOutcome: Shape = { zod: Outcome, swift: "ResultOutcome", structs: [] };
+const ResultAction = struct("ResultAction", "One action taken while executing a case step.", {
+	text,
+	outcome: maybe(resultOutcome),
+	durationMs: maybe(whole),
+});
+const ResultStep = struct("ResultStep", "A recorded step, with its stable case ID or runner label.", {
+	step: text,
+	outcome: resultOutcome,
+	durationMs: maybe(whole),
+	actions: maybe(list(ResultAction)),
+	attachment: [maybe(whole), "Zero-based index into this result's ordered attachments."],
+});
+const Attachment = struct("Attachment", "A result's attachment metadata.", {
+	id: whole,
+	result: whole,
+	name: text,
+	type: text,
+});
+export const AttachmentList = struct("AttachmentList", "The attachment operation's ordered list.", {
+	kind: text,
+	items: list(Attachment),
+});
+export const AttachmentFile = struct("AttachmentFile", "One attachment and its base64 data.", {
+	kind: text,
+	attachment: Attachment,
+	data: text,
+});
 const RunFill = struct("RunFill", "An admitted result that fills a slot.", {
 	model: maybe(text),
 	result: whole,
@@ -343,6 +372,7 @@ const RunFill = struct("RunFill", "An admitted result that fills a slot.", {
 	outcome: text,
 	note: maybe(text),
 	atStep: maybe(text),
+	steps: nullable(list(ResultStep)),
 });
 export const RunSlot = struct("RunSlot", "One case pinned at a version in a run, in order.", {
 	id: whole,
@@ -460,6 +490,7 @@ export const CountedResults = struct("CountedResults", "`find` in results: what 
 	items: list(
 		struct("CountedResult", "One test as the gate counted it.", {
 			model: maybe(text),
+			steps: nullable(list(ResultStep)),
 			result: whole,
 			test: [text, "The test's ref, T-9."],
 			name: text,
@@ -513,6 +544,7 @@ export const TestDetail = struct("TestDetail", "`get` with a T- ref: a test and 
 	last: list(
 		struct("TestResult", "One of a test's latest results, newest first.", {
 			model: maybe(text),
+			steps: nullable(list(ResultStep)),
 			id: whole,
 			outcome: text,
 			by: text,
@@ -663,6 +695,8 @@ export const SHAPES: readonly Shape[] = [
 	ChangeImpact,
 	ChangeRun,
 	CountedResults,
+	AttachmentList,
+	AttachmentFile,
 	TestList,
 	TestDetail,
 	SessionRow,

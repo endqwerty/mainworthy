@@ -1,18 +1,21 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useDeferredValue, useState } from "react";
 import { z } from "zod";
+import { ResultTrail as TrailSchema } from "../../core/results.ts";
 import { isResultStanding, RESULT_STANDING_LABELS, RESULT_STANDINGS, type ResultStanding } from "../../core/runs.ts";
 import { call } from "../lib/api.ts";
 import { queryKey } from "../lib/data.ts";
 import { navigate, refUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { EmptyState, SectionHeading } from "../ui/index.tsx";
+import { ResultTrail } from "../ui/result-trail.tsx";
 
 /** The tally key a gate counts a result under, when it is one a result can have. */
 export const standingOf = (key: string): ResultStanding | null => (isResultStanding(key) ? key : null);
 
 export const Counted = z.object({
 	model: z.string().nullable(),
+	steps: TrailSchema.nullable(),
 	result: z.number(),
 	test: z.string(),
 	name: z.string(),
@@ -157,13 +160,14 @@ function ResultRow({ row, project }: { row: Counted; project: string }) {
 				{row.quarantined ? "quarantined" : RESULT_STANDING_LABELS[row.standing]}
 				{row.outcome === "error" && " (error)"}
 			</span>
-			<span className="result-body">
+			<div className="result-body">
 				<a href={refUrl({ project, ref: row.test })} onClick={go(row.test)}>
 					{row.name}
 				</a>
 				<small className="dim">{facts.join(" · ")}</small>
 				{row.message && <small className="result-message">{row.message}</small>}
-			</span>
+				<ResultTrail result={row.result} steps={row.steps} />
+			</div>
 			<span className="result-refs">
 				{row.case && (
 					<a className="ref" href={refUrl({ project, ref: row.case })} onClick={go(row.case)}>

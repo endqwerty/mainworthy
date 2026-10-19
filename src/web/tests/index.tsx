@@ -2,6 +2,7 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { useDeferredValue, useState } from "react";
 import { z } from "zod";
 import { Quarantine } from "../../core/flaky.ts";
+import { ResultTrail as TrailSchema } from "../../core/results.ts";
 import { duration, webUrl } from "../changes/results.tsx";
 import { call } from "../lib/api.ts";
 import { queryKey, useQueryOp } from "../lib/data.ts";
@@ -10,6 +11,7 @@ import { navigate, refUrl, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, EmptyState, ListRow, SectionHeading } from "../ui/index.tsx";
 import { quarantineExitText } from "../ui/quarantine.tsx";
+import { ResultTrail } from "../ui/result-trail.tsx";
 import "./tests.css";
 
 const Test = z.object({
@@ -21,6 +23,7 @@ const Test = z.object({
 });
 const Result = z.object({
 	model: z.string().nullable(),
+	steps: TrailSchema.nullable(),
 	id: z.number(),
 	outcome: z.string(),
 	by: z.string(),
@@ -202,7 +205,7 @@ function TestDetail({ testRef }: { testRef: string }) {
 						return (
 							<li key={result.id} className={`test-result o-${result.outcome}`}>
 								<span className="result-outcome">{result.outcome}</span>
-								<span className="result-body">
+								<div className="result-body">
 									<span>
 										{result.commit && <span className="mono">{result.commit.slice(0, 12)}</span>}
 										{result.change && (
@@ -216,7 +219,8 @@ function TestDetail({ testRef }: { testRef: string }) {
 									</span>
 									<small className="dim">{facts.join(" · ")}</small>
 									{result.message && <small className="result-message">{result.message}</small>}
-								</span>
+									<ResultTrail result={result.id} steps={result.steps} />
+								</div>
 								{build && (
 									<a href={build} target="_blank" rel="noreferrer noopener">
 										build
