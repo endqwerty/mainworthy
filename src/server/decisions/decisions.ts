@@ -2039,7 +2039,11 @@ function itemOf(db: Db, row: QuestionRow, facts: ReadonlySet<string>, ask: Ask):
 				reason: a.reason,
 			})),
 		decision: decision
-			? { ...decisionItem(db, decision), ...(supersedes ? { supersedes: decisionItem(db, supersedes) } : {}) }
+			? {
+					...decisionItem(db, decision),
+					effects: json<Record<string, unknown>>(decision.effects),
+					...(supersedes ? { supersedes: decisionItem(db, supersedes) } : {}),
+				}
 			: null,
 	};
 }

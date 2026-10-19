@@ -67,6 +67,10 @@ The policy then decides whether the proposal becomes current or waits for review
 If you open another screen while a save finishes, its reply leaves you on the screen you chose.
 There is no save button. Moving the caret or selecting text while a save finishes
 does not submit the text again. Text waiting for review stays in its proposal.
+When a new case proposal is accepted, its draft follows the case and version that acceptance recorded.
+Continuing the draft edits that case. Text typed while the proposal waits stays in your draft.
+Submitting while the question is open sends nothing new. After acceptance, leave the editor again to submit that text.
+If reading the waiting question fails, the draft keeps its link to the proposal and tries that read again on the next submission.
 If the case updates before you edit, your next edit starts from the newer version.
 While you edit, the folder and tags follow changes made elsewhere. Tags you add in
 the editor appear alongside those live tags. Saving changes only the tags you added
@@ -78,8 +82,10 @@ A step with an expected result but no action stays in your draft on this device,
 The recorded version excludes that step.
 To record the step, type its action and leave the editor again.
 To discard the step, remove it and leave the editor again.
-A new case with neither a title nor a step that has an action is not kept when you leave it,
-whatever else it holds.
+A new draft is discarded on leave only when all its text, tags, and requirement links are empty.
+An expected result or precondition keeps the draft even when its title and actions are blank.
+Leaving a new draft that holds only an expected result records an untitled case with no steps, subject to the policy.
+The expected result stays in your draft until you add an action.
 
 Emptying the action of a recorded step removes the step from the next version.
 Its expected result, if it has one, stays in your draft in the same way.

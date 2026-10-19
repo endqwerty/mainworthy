@@ -143,6 +143,16 @@ export function remainingTagChanges({ sent, current }: { sent: TagChanges; curre
 		],
 	};
 }
+export function hasDraftText(draft: Draft): boolean {
+	return Boolean(
+		draft.body.title.trim() ||
+			draft.body.pre.trim() ||
+			draft.body.steps.some((step) => step.use || step.action.trim() || step.expected?.trim()) ||
+			draftTags(draft).length ||
+			draft.covers.length ||
+			Object.values(draft.body.fields).some((value) => value.trim()),
+	);
+}
 export function draftKey({ project, id }: { project: string; id: string }): string {
 	return deviceKey("draft", `${project}:${id}`);
 }

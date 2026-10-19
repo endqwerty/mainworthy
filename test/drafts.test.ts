@@ -18,6 +18,7 @@ import {
 	type Draft,
 	draftKey,
 	draftTags,
+	hasDraftText,
 	readDraft,
 	remainingTagChanges,
 	removeDraft,
@@ -453,4 +454,23 @@ test("retiring an accepted save keeps later tag edits and reversals without clai
 		"beta",
 		"restored",
 	]);
+});
+
+test("draft emptiness includes every typed field and pinned steps", () => {
+	const empty = draft({ ref: null, body: emptyBody("") });
+	expect(hasDraftText(empty)).toBe(false);
+	for (const body of [
+		{ ...empty.body, title: "Checkout" },
+		{ ...empty.body, pre: "Signed in" },
+		{ ...empty.body, steps: [{ id: "s1", action: "Open the cart", expected: null }] },
+		{ ...empty.body, steps: [{ id: "s1", action: "", expected: "The purchase is confirmed" }] },
+		{ ...empty.body, steps: [{ id: "s1", use: { fragment: "C-1", version: 1 }, action: "", expected: null }] },
+		{ ...empty.body, fields: { environment: "Staging" } },
+	])
+		expect(hasDraftText({ ...empty, body })).toBe(true);
+	expect(hasDraftText({ ...empty, tagChanges: { add: ["checkout"], remove: [] } })).toBe(true);
+	expect(hasDraftText({ ...empty, covers: ["REQ-1"] })).toBe(true);
+	expect(hasDraftText({ ...empty, body: { ...empty.body, steps: [{ id: "s1", action: "", expected: "" }] } })).toBe(
+		false,
+	);
 });
