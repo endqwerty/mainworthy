@@ -411,6 +411,63 @@ for (const refusal of ["reason", "admin"] as const) {
 	});
 }
 
+for (const refusal of ["reason", "admin"] as const) {
+	test(`a direct replacement preserves the inherited withdrawal refusal for ${refusal}`, () => {
+		const policy = h.call<Policy & { version: number }>("admin", { do: "policy.show", project: "scratch" });
+		h.call("propose", {
+			edits: [
+				{
+					op: "policy",
+					base: policy.version,
+					clauses: [
+						{
+							id: "withdraw-inherited",
+							kind: "failure",
+							when: ["answer:inherited"],
+							ask: {
+								who: refusal === "admin" ? "admin" : "member",
+								agents: "none",
+								notProducer: false,
+								reason: refusal === "reason" ? "required" : "optional",
+							},
+							blocks: "change",
+						},
+						...policy.clauses,
+					],
+				},
+			],
+		});
+		const adoption = h.call<InboxReply>("inbox", { kind: "adopt" }).items[0];
+		if (!adoption) throw new Error("missing policy adoption");
+		h.call("decide", { q: adoption.q, onEvidence: adoption.evidenceHash, answer: { is: "accept" } });
+		base();
+		change({ 0: "same cause" });
+		const automatic = h.call<InboxReply>("inbox", { state: "decided", kind: "failure", on: "pr:69" }).items[0];
+		if (!automatic) throw new Error("missing inherited answer");
+		const input = { q: automatic.q, onEvidence: automatic.evidenceHash, answer: { is: "defect" } };
+		const member = h.actor("member", "human", ["read", "produce", "answer"]);
+		const caller = refusal === "admin" ? member : h.owner;
+		expect(h.call("decide", input, caller)).toMatchObject([
+			{
+				q: automatic.q,
+				status: refusal === "admin" ? "forbidden" : "invalid",
+				needs: refusal === "admin" ? "an admin who is not an agent" : "a reason",
+				decision: null,
+			},
+		]);
+		expect(gate("change01")).toMatchObject({ verdict: "passed", tally: { excused: 1, unexplained: 0 } });
+		expect(h.call<InboxReply["items"]>("get", { refs: [automatic.q] })).toMatchObject([
+			{
+				q: automatic.q,
+				state: "decided",
+				decision: { id: automatic.decision?.id, answer: { is: "inherited" } },
+			},
+		]);
+		expect(h.call("decide", { ...input, reason: "The product needs a fix" })).toMatchObject([{ status: "decided" }]);
+		expect(gate("change01")).toMatchObject({ verdict: "failed", tally: { excused: 0, attributed: 1, unexplained: 0 } });
+	});
+}
+
 test("loose inherits individual tests, not their shared cause or report", () => {
 	base();
 	change({ 0: "same cause", 1: "same cause" });

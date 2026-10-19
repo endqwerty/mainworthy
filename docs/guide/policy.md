@@ -257,6 +257,10 @@ policy proposal P-2: open Q-2 needs an admin
 
 An admin finds it in Queue under "Proposals". Reading the clause table needs `admin` on every project. Switching needs `admin` only on the project being changed.
 
+If the command attempts to accept the proposal and the server refuses, it exits 4 with the server's status and requirement.
+`forbidden` means the policy does not let you accept it, `invalid` means the answer needs correcting, and `conflict` means the evidence or decision changed.
+With `--json`, the recorded proposal and decision reply remain on stdout.
+
 A policy change rewrites nothing that is recorded. Results, decisions and cases stay as they were. What changes is who may answer, whether a reason is needed, and whether an empty declaration passes. The new policy applies to future and open questions. Each open question waits for whoever the new policy names. Automatic inherited excuses are reconsidered immediately in both directions. A switch to `standard` ends them, and a switch back to `loose` restores eligible excuses without another report. If the new policy has a rule for [tests with no case](#tests-with-no-case), that rule answers the open questions about them. Under `create`, the rule also makes their cases.
 
 ## Change single clauses

@@ -596,7 +596,7 @@ export function* answerSteps(
 		) {
 			return yield* ctx.db.savepointSteps(function* () {
 				const withdrawn = undo(ctx, { q: input.q, ifDecision: question.decision ?? undefined, reason: input.reason });
-				if (withdrawn.status !== "reopened") throw conflict(withdrawn.needs ?? "the inherited answer changed");
+				if (withdrawn.status !== "reopened") throw new RefusedReplacement(withdrawn);
 				const subject = json<{ signature: number; scope: string }>(question.subject);
 				const signature = signatureById(ctx.db, subject.signature);
 				const target = json<{ targetId: number }>(question.evidence).targetId;

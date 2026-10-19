@@ -111,12 +111,9 @@ export const policyCommand: AdapterCommand = {
 			line(
 				`policy proposal ${proposal.proposal}: ${proposal.status}${proposal.question ? ` ${proposal.question}` : ""}${proposal.needs ? ` needs ${proposal.needs}` : ""}`,
 			);
-		if (
-			decision?.some(
-				(reply) => reply.status === "forbidden" || reply.status === "invalid" || reply.status === "conflict",
-			)
-		) {
-			throw new CliError("conflict", `${proposal.question} could not be decided; read it again before answering`);
+		for (const reply of decision ?? []) {
+			if (reply.status === "forbidden" || reply.status === "invalid" || reply.status === "conflict")
+				throw new CliError(reply.status, reply.needs ?? "the policy proposal could not be decided");
 		}
 		return 0;
 	},
