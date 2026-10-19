@@ -21,8 +21,8 @@ import { MCP_OPS, OPS } from "../server/ops/index.ts";
 import { invokeAsync, type Reply } from "../server/ops/registry.ts";
 import { grantedProjects, VERSION } from "./http.ts";
 
-/** The measured tools/list ceiling in o200k_base tokens. B7's draft target of 1,500 remains unmet. */
-export const TOOL_TOKEN_BUDGET = 3950;
+/** The tools/list size agents should expect, in o200k_base tokens: a guideline, not a gate (decision 0118). */
+export const TOOL_TOKEN_GUIDELINE = { total: 5000, perTool: 1500 };
 
 const INSTRUCTIONS =
 	"Start with impact for a change or inbox for questions, and omit project only when the instance has exactly one project. Pass etag back with unless and hashes with onEvidence, and reuse cursors with since. Your answers may be advice; check the reply status, and with admin, read base for policy clauses or settings through CLI policy show --json or HTTP admin policy.show.";

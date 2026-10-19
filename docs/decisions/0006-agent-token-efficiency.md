@@ -6,6 +6,7 @@
   2026-10-11: mechanism 5's findings ledger becomes the ledger of all
   decisions, and review reuse is keyed by a basis that includes the relevant
   patch ([0008](0008-one-evidence-model.md)).
+- Amended 2026-10-19 by decision 0118: the size of the MCP tool list is a guideline, not a gate.
 
 The owner's position: with agents doing review and testing, a test management
 system should help reduce the tokens agents spend on adversarial review and
