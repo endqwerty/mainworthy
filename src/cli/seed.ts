@@ -9,7 +9,7 @@ import { ProposeReply } from "../core/ops.ts";
 import type { Client } from "./client.ts";
 import { automateOf, type DemoCase, demoCases, random, requirementOf } from "./demo/cases.ts";
 import { DEMO_FIELDS, demoAliases, demoFields } from "./demo/fields.ts";
-import { dayStart, demoHistory, type Failure, hex, REPO } from "./demo/history.ts";
+import { AGENT_MODEL, dayStart, demoHistory, type Failure, hex, REPO } from "./demo/history.ts";
 import { DEMO_WORK } from "./demo/work.ts";
 import { CliError } from "./errors.ts";
 
@@ -524,6 +524,25 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 		name: "Checkout regression",
 		select: { cases: checkout.slice(0, 40) },
 		accepts: { commit: change, repo: REPO },
+	});
+	const agentCase = refs[1] ?? first;
+	const agentRun = await write(owner, "plan", "agent-run", since - 85 * MINUTE, {
+		name: "Agent checkout check",
+		select: { cases: [agentCase] },
+		accepts: { commit: change, repo: REPO },
+		require: [{ id: "agent", kind: "exercise", methods: ["human", "agent"], minActors: 1, basis: "exact" }],
+	});
+	await write(owner, "report", "agent-person-result", since - 82 * MINUTE, {
+		run: agentRun.run,
+		results: [{ test: { case: agentCase }, outcome: "pass" }],
+	});
+	await write(agent, "report", "agent-results", since - 80 * MINUTE, {
+		run: agentRun.run,
+		model: AGENT_MODEL,
+		results: [
+			{ test: { case: agentCase }, outcome: "pass", note: "The coupon check passed." },
+			...pipelineResults([], 0.3, true).slice(refs.length > 1 ? 1 : 0, refs.length > 1 ? 2 : 1),
+		],
 	});
 	const featured = caseOf(0).steps;
 	await write(agent, "claim", "finding", since - 40 * MINUTE, {

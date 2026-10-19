@@ -35,6 +35,7 @@ import excuseSignatureIndex from "./migrations/0029_excuse_signature_index.sql" 
 import pinnedSearch from "./migrations/0030_pinned_search.sql" with { type: "text" };
 import conflictAddresses from "./migrations/0031_conflict_addresses.sql" with { type: "text" };
 import slotLeases from "./migrations/0032_slot_leases.sql" with { type: "text" };
+import resultModel from "./migrations/0033_result_model.sql" with { type: "text" };
 
 /**
  * In order. A migration is never edited after it ships; a change is a new entry.
@@ -78,6 +79,7 @@ export const MIGRATIONS: readonly { version: number; name: string; sql: string; 
 	{ version: 30, name: "pinned_search", sql: pinnedSearch, archive: false },
 	{ version: 31, name: "conflict_addresses", sql: conflictAddresses, archive: true },
 	{ version: 32, name: "slot_leases", sql: slotLeases, archive: false },
+	{ version: 33, name: "result_model", sql: resultModel, archive: false },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

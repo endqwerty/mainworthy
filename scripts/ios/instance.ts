@@ -10,6 +10,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { type Instance, start, VERSION } from "../../src/app/start.ts";
+import { Client } from "../../src/cli/client.ts";
+import { seed } from "../../src/cli/seed.ts";
 import { docsRoutes } from "../../src/surfaces/docs/site.ts";
 import { passedRun, scenario } from "./scenario.ts";
 
@@ -26,7 +28,7 @@ export type TestInstance = {
 	stop: () => Promise<void>;
 };
 
-const Ask = z.object({ kind: z.enum(["standard", "strict"]).default("standard") });
+const Ask = z.object({ kind: z.enum(["standard", "strict", "demo"]).default("standard") });
 const Invited = z.object({ ok: z.literal(true), result: z.object({ code: z.string() }) });
 const Issued = z.object({ ok: z.literal(true), result: z.object({ token: z.string() }) });
 
@@ -94,7 +96,16 @@ export async function testInstance(): Promise<TestInstance> {
 						const result =
 							asked.data.kind === "strict"
 								? { project: key, run: await passedRun(made.url, token, key) }
-								: await scenario(made.url, token, key);
+								: asked.data.kind === "demo"
+									? {
+											project: key,
+											...(await seed(new Client({ url: made.url, token, project: key }), {
+												project: key,
+												cases: 12,
+												days: 0,
+											})),
+										}
+									: await scenario(made.url, token, key);
 						return Response.json({ ok: true, result });
 					},
 					"/test/answer-connection": async (req) => {

@@ -180,7 +180,7 @@ private struct TestResultRow: View {
 				Spacer(minLength: 0)
 				Text(result.at, format: .relative(presentation: .named)).font(.caption).foregroundStyle(.secondary)
 			}
-			Text(facts(job: result.job, attempt: result.attempt, duration: result.duration, by: result.by))
+			Text(facts(job: result.job, attempt: result.attempt, duration: result.duration, by: result.by, model: result.model))
 				.font(.caption).foregroundStyle(.secondary)
 			if let message = result.message { Text(message).font(.footnote).lineLimit(4) }
 			if let build = result.build { Link("Open the build", destination: build).font(.footnote) }
@@ -201,12 +201,13 @@ func outcomeTint(_ outcome: String) -> Color {
 }
 
 /// "shop · attempt 2 · 1.4 s · robin": where a result came from, as one line.
-func facts(job: String, attempt: Int, duration: Double?, by: String) -> String {
+func facts(job: String, attempt: Int, duration: Double?, by: String, model: String? = nil) -> String {
 	var parts = [job]
 	if attempt > 1 { parts.append("attempt \(attempt)") }
 	if let duration {
 		parts.append(duration < 1000 ? "\(Int(duration)) ms" : String(format: duration < 10_000 ? "%.1f s" : "%.0f s", duration / 1000))
 	}
 	parts.append(by)
+	if let model { parts.append(model) }
 	return parts.joined(separator: " · ")
 }

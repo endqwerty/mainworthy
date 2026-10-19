@@ -161,6 +161,8 @@ export const proposeOp = defineOp({
  * evidence about another build count for it.
  */
 export function acceptReport(ctx: Ctx, input: ReportInput): { batch: BatchRow; fresh: boolean } {
+	if (input.model !== undefined && ctx.actor.kind !== "agent")
+		throw invalid("Only an agent's report can name a model.");
 	if (input.nothingRequired && (ctx.actor.kind !== "ci" || !input.target || !("commit" in input.target)))
 		throw invalid("nothingRequired needs a CI actor and an explicit commit target");
 	if (input.nothingRequired && input.run !== undefined)
@@ -381,7 +383,7 @@ export const reportOp = defineOp({
 	needs: "record",
 	scope: "project",
 	effect: "write",
-	mcp: "Record results for `target` (commit) or `run` (planned). Identify each test by `key` or case ref.",
+	mcp: "Report to target or run; tests by key or case.",
 	steps: reportSteps,
 });
 

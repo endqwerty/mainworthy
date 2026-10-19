@@ -438,6 +438,7 @@ Record results: a parsed CI report, one manual result, or an agent's batch. The 
 | `target[2].files` | `array<string>` | no | Paths the change touches, for impact. |
 | `target[3].session` | `string` | yes |  |
 | `run` | `string` | no | A planned run these results are for, for example R-4. |
+| `model` | `string` | no | The model that produced this report's results. Agent tokens only; 1 to 120 characters after trimming. |
 | `job` | `string` | no |  |
 | `attempt` | `integer` | no |  |
 | `shard` | `object` | no | This report is one shard of its job: index of of. A commit's gate waits until every shard of the job has reported. |
@@ -1192,9 +1193,9 @@ guidance for commit reuse, question answers, and review filtering.
 | Tool | What the agent is told it is for |
 | --- | --- |
 | `propose` | Propose cases at their base version. Status: adopted=current, open=needs acceptance, conflict=resolve, rejected. |
-| `report` | Record results for `target` (commit) or `run` (planned). Identify each test by `key` or case ref. |
+| `report` | Report to target or run; tests by key or case. |
 | `claim` | Review cases (`reviewed`, C-311@hash) at change `about` and commit `patch`. Record findings; `known` returns prior findings and answers. |
-| `work` | Before working, take with run and no slot. Renew with slot; report or give-back releases. |
+| `work` | Take next slot with run; renew with slot. Report or give-back releases. |
 | `decide` | Answer inbox using evidenceHash as onEvidence. Status: decided, advised=person decides, forbidden, invalid, already, reopened, conflict=evidence or decision changed. Choose from answers. Withdraw with undo and ifDecision=reply.decision. |
 | `inbox` | Open questions and evidenceHash; filter with on. |
 | `get` | Read refs; verdicts at commit:hash, change:key, R-n. unless=etag; proposals page with cursor. |

@@ -592,7 +592,13 @@ test.skipIf(!browserAvailable)(
 			await field.focus();
 			await page.evaluate(async () => {
 				await document.fonts.ready;
-				await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+				await new Promise<void>((resolve) => {
+					const observer = new ResizeObserver(() => {
+						observer.disconnect();
+						requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+					});
+					for (const textarea of document.querySelectorAll("textarea")) observer.observe(textarea);
+				});
 				const native = Object.getOwnPropertyDescriptor(Element.prototype, "scrollHeight")?.get;
 				if (!native) throw new Error("No scrollHeight getter");
 				const reads: string[] = [];

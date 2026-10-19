@@ -32,6 +32,10 @@ const DESCRIPTIONS = new Map([
 	["For commit refs: disambiguate repositories.", ""],
 	["Slot id from find slots. Omit to take the next free unfinished slot.", ""],
 	["Lease length in seconds, from 30 to 86400. Default: 900.", ""],
+	[
+		"The model that produced this report's results. Agent tokens only; 1 to 120 characters after trimming.",
+		"Agent model.",
+	],
 	["The case, for example C-311.", ""],
 	["The version this edit was made on. A stale base is merged or reported, never overwritten.", ""],
 	["Required with clauses or settings.", ""],

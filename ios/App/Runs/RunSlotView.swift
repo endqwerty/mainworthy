@@ -129,7 +129,7 @@ struct RunSlotView: View {
 			if !execution.slot.fills.isEmpty {
 				Panel("Recorded results") {
 					ForEach(execution.slot.fills) { fill in
-						Text("\(fill.method.name.capitalized) \(fill.by) · \(fill.outcome.word)")
+						Text("\(fill.method.name.capitalized) \(fill.by)\(fill.model.map { " · \($0)" } ?? "") · \(fill.outcome.word)")
 						if let note = fill.note { Text(note).font(.subheadline) }
 					}
 				}

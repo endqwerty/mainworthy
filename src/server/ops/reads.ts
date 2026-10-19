@@ -432,6 +432,7 @@ function resultView(ctx: Ctx, row: ResultRow): Record<string, unknown> {
 		outcome: row.outcome,
 		method: row.method,
 		by: who(ctx, row.actor).name,
+		model: row.model,
 		at: row.at,
 		basis: row.basis,
 		version: row.basis_version,
@@ -630,6 +631,7 @@ function countedView(ctx: Ctx, row: CountedTest): Record<string, unknown> {
 		message: result.message,
 		job: view.job,
 		by: view.by,
+		model: result.model,
 		at: result.at,
 		commit: view.commit,
 		build: view.build,
@@ -702,6 +704,7 @@ function slotRow(ctx: Ctx, slot: SlotRow): Record<string, unknown> {
 		fills: fills.map((fill) => ({
 			result: fill.id,
 			by: who(ctx, fill.actor).name,
+			model: fill.model,
 			method: fill.method,
 			outcome: fill.outcome,
 			admitted: fill.admitted,

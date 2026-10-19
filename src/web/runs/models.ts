@@ -23,6 +23,7 @@ export const Run = z.object({
 });
 export type Run = z.infer<typeof Run>;
 export const Fill = z.object({
+	model: z.string().nullable(),
 	result: z.number(),
 	by: z.string(),
 	method: MethodKind,

@@ -22,6 +22,7 @@ public struct CountedResult: Identifiable, Equatable, Sendable {
 	public let message: String?
 	public let job: String
 	public let by: String
+	public let model: String?
 	/// The CI build, when the report named a web address for it.
 	public let build: URL?
 
@@ -40,6 +41,7 @@ public struct CountedResult: Identifiable, Equatable, Sendable {
 		message = wire.message
 		job = wire.job
 		by = wire.by
+		model = wire.model
 		build = webAddress(wire.build)
 	}
 }
@@ -88,6 +90,7 @@ public struct TestDetail: Equatable, Sendable {
 		public let id: Int
 		public let outcome: String
 		public let by: String
+		public let model: String?
 		public let at: Date
 		public let attempt: Int
 		public let duration: Double?
@@ -119,7 +122,7 @@ public struct TestDetail: Equatable, Sendable {
 		quarantine = wire.quarantine.flatMap { $0.active ? $0.reason : nil }
 		results = wire.last.map {
 			Result(
-				id: $0.id, outcome: $0.outcome, by: $0.by, at: Date(milliseconds: $0.at), attempt: $0.attempt,
+				id: $0.id, outcome: $0.outcome, by: $0.by, model: $0.model, at: Date(milliseconds: $0.at), attempt: $0.attempt,
 				duration: $0.durationMs, message: $0.message, commit: $0.commit, change: $0.change, job: $0.job,
 				build: webAddress($0.build)
 			)

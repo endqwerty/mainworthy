@@ -97,7 +97,7 @@ private struct ResultRow: View {
 					if let file = row.file {
 						Text(file).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
 					}
-					Text(facts(job: row.job, attempt: row.attempt, duration: row.duration, by: row.by))
+					Text(facts(job: row.job, attempt: row.attempt, duration: row.duration, by: row.by, model: row.model))
 						.font(.caption).foregroundStyle(.secondary)
 					if let message = row.message { Text(message).font(.footnote).lineLimit(3) }
 				}

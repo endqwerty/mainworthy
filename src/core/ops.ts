@@ -232,6 +232,15 @@ export const ReportInput = z
 	.object({
 		target: TargetIn.optional().describe("What was tested. Required unless `run` is given."),
 		run: z.string().optional().describe("A planned run these results are for, for example R-4."),
+		model: z
+			.string()
+			.trim()
+			.min(1)
+			.max(120)
+			.optional()
+			.describe(
+				"The model that produced this report's results. Agent tokens only; 1 to 120 characters after trimming.",
+			),
 		job: z.string().max(120).optional(),
 		attempt: z.number().int().min(1).optional(),
 		shard: z

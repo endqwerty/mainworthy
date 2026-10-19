@@ -88,7 +88,7 @@ struct RunView: View {
 					.font(.caption).foregroundStyle(.secondary)
 			}
 			ForEach(slot.fills) { fill in
-				Text("\(fill.method.name.capitalized) \(fill.by) · \(fill.outcome.word)")
+				Text("\(fill.method.name.capitalized) \(fill.by)\(fill.model.map { " · \($0)" } ?? "") · \(fill.outcome.word)")
 					.font(.caption).foregroundStyle(.secondary)
 				if let note = fill.note { Text(note).font(.caption).foregroundStyle(.secondary) }
 			}

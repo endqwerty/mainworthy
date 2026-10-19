@@ -436,6 +436,7 @@ export function releaseWork(ctx: Ctx, run: RunRow, slot: SlotRow): void {
 
 export const slotCount = (db: Db, run: number): number => db.get(Q.slotCount, { run })?.n ?? 0;
 export type Fill = {
+	model: string | null;
 	id: number;
 	actor: number;
 	test: number;
@@ -473,6 +474,7 @@ export function fillsOf(db: Db, slot: number): Fill[] {
 		fills.push({
 			id: result.id,
 			actor: result.actor,
+			model: result.model,
 			test: result.test,
 			attempt: result.attempt,
 			outcome: result.outcome,

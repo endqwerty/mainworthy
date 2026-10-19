@@ -301,6 +301,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		const fill: Fill = {
 			result: -Date.now(),
 			by: session.actor,
+			model: null,
 			method,
 			outcome,
 			admitted: "exact",
@@ -665,7 +666,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 							type="button"
 							key={slot.id}
 							className={`run-dot ${slot.work.kind === "held" ? "in-progress" : ""} state-${slot.state} method-${slot.fills.at(-1)?.method ?? "none"} ${current?.id === slot.id ? "on" : ""}`}
-							aria-label={`Slot ${index + 1}: ${slot.case}, ${slot.work.kind === "held" ? `in progress by ${slot.work.actor}` : slot.state}${slot.fills.at(-1) ? ` by ${slot.fills.at(-1)?.by}` : ""}`}
+							aria-label={`Slot ${index + 1}: ${slot.case}, ${slot.work.kind === "held" ? `in progress by ${slot.work.actor}` : slot.state}${slot.fills.at(-1) ? ` by ${slot.fills.at(-1)?.by}${slot.fills.at(-1)?.model ? ` · ${slot.fills.at(-1)?.model}` : ""}` : ""}`}
 							onClick={() => {
 								setCursor(slot.id);
 								setNoting(null);
@@ -696,12 +697,15 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 									{slot.fills.length ? (
 										slot.fills.map((fill) => (
 											<span
-												key={`${fill.by}:${fill.method}`}
-												title={`${fill.outcome} by ${fill.by}, basis ${fill.admitted}`}
+												key={fill.result}
+												title={`${fill.outcome} by ${fill.by}${fill.model ? ` · ${fill.model}` : ""}, basis ${fill.admitted}`}
 											>
 												<ProducerGlyph kind={fill.method} />
 												<span className={`outcome-${fill.outcome}`}>{fill.outcome}</span>
-												<span className="fill-by">{fill.by}</span>
+												<span className="fill-by">
+													{fill.by}
+													{fill.model && ` · ${fill.model}`}
+												</span>
 											</span>
 										))
 									) : (
@@ -754,8 +758,8 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 							{current.fills.map((fill) => (
 								<span key={fill.result}>
 									<ProducerGlyph kind={fill.method} /> Filled by{" "}
-									{fill.method === "auto" ? "pipeline" : fill.method === "agent" ? "agent" : "person"} {fill.by} ·{" "}
-									{fill.outcome} · basis {fill.admitted}
+									{fill.method === "auto" ? "pipeline" : fill.method === "agent" ? "agent" : "person"} {fill.by}
+									{fill.model && ` · ${fill.model}`} · {fill.outcome} · basis {fill.admitted}
 								</span>
 							))}
 							<span>j skips to your next slot.</span>
@@ -938,7 +942,8 @@ function RunDocument({ slot, active, step }: { slot: Slot; active: boolean; step
 			)}
 			{slot.fills.map((fill) => (
 				<div className="run-evidence" key={fill.result}>
-					<ProducerGlyph kind={fill.method} /> {fill.outcome} by {fill.by} · basis {fill.admitted} · {age(fill.at)}
+					<ProducerGlyph kind={fill.method} /> {fill.outcome} by {fill.by}
+					{fill.model && ` · ${fill.model}`} · basis {fill.admitted} · {age(fill.at)}
 					{fill.note && <p>{fill.note}</p>}
 					<ResultAttachments result={fill.result} />
 				</div>

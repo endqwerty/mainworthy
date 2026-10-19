@@ -79,6 +79,7 @@ export type BatchRow = {
 	shards: number | null;
 	method: MethodKind;
 	actor: number;
+	model: string | null;
 	run: number | null;
 	build_url: string | null;
 	state: "accepted" | "processed";
@@ -106,6 +107,7 @@ export type ResultRow = {
 	target: number;
 	method: MethodKind;
 	actor: number;
+	model: string | null;
 	basis: "exact" | "assumed" | "unresolved";
 	basis_case: number | null;
 	basis_version: number | null;
@@ -259,6 +261,7 @@ const Q = {
 		shards: number | null;
 		method: string;
 		actor: number;
+		model: string | null;
 		run: number | null;
 		url: string | null;
 		counts: string;
@@ -266,8 +269,8 @@ const Q = {
 		at: number;
 		seq: number;
 	}>(
-		`INSERT INTO batches (project, key, target, job, nothing_required, attempt, shard, shards, method, actor, run, build_url, state, counts, staged, at, seq)
-		 VALUES ($project, $key, $target, $job, $nothingRequired, $attempt, $shard, $shards, $method, $actor, $run, $url, 'accepted', $counts, $staged, $at, $seq)`,
+		`INSERT INTO batches (project, key, target, job, nothing_required, attempt, shard, shards, method, actor, model, run, build_url, state, counts, staged, at, seq)
+		 VALUES ($project, $key, $target, $job, $nothingRequired, $attempt, $shard, $shards, $method, $actor, $model, $run, $url, 'accepted', $counts, $staged, $at, $seq)`,
 	),
 	// The shards a job of a target has reported, by the number of shards they said the job has. An agent's report
 	// under the job's name is not the job.
@@ -353,6 +356,7 @@ const Q = {
 		target: number;
 		method: string;
 		actor: number;
+		model: string | null;
 		basis: string;
 		basisCase: number | null;
 		basisVersion: number | null;
@@ -370,9 +374,9 @@ const Q = {
 		corrects: number | null;
 		at: number;
 	}>(
-		`INSERT INTO results (project, test, seq, ord, batch, target, method, actor, basis, basis_case, basis_version, basis_claim,
+		`INSERT INTO results (project, test, seq, ord, batch, target, method, actor, model, basis, basis_case, basis_version, basis_claim,
 		                      outcome, attempt, duration_ms, signature, message, detail, at_step, steps, note, run, corrects, at)
-		 VALUES ($project, $test, $seq, $ord, $batch, $target, $method, $actor, $basis, $basisCase, $basisVersion, $basisClaim,
+		 VALUES ($project, $test, $seq, $ord, $batch, $target, $method, $actor, $model, $basis, $basisCase, $basisVersion, $basisClaim,
 		         $outcome, $attempt, $duration, $signature, $message, $detail, $atStep, $steps, $note, $run, $corrects, $at)`,
 	),
 	laneHistory: sql<{ target: number; test: number; actor: number; job: string }, ResultRow>(
@@ -839,7 +843,7 @@ export function accept(
 		run: number | null;
 		report: Pick<
 			ReportInput,
-			"target" | "job" | "attempt" | "shard" | "buildUrl" | "results" | "cmd" | "nothingRequired"
+			"target" | "model" | "job" | "attempt" | "shard" | "buildUrl" | "results" | "cmd" | "nothingRequired"
 		>;
 		/**
 		 * For results recorded against a case: the command id, so recording the same outcome again later is a new
@@ -868,6 +872,7 @@ export function accept(
 		method,
 		actor: ctx.actor.id,
 		nonce: files ? null : input.nonce,
+		...(report.model !== undefined ? { model: report.model } : {}),
 		...(report.shard ? { shard: report.shard } : {}),
 		results: report.results,
 		...(report.target && "commit" in report.target && report.target.head !== undefined
@@ -915,6 +920,7 @@ export function accept(
 		nothingRequired: report.nothingRequired ? 1 : 0,
 		shard: report.shard?.index ?? null,
 		shards: report.shard?.of ?? null,
+		model: report.model ?? null,
 		url: report.buildUrl ?? null,
 		counts: JSON.stringify(countOutcomes(report.results)),
 		staged: JSON.stringify(report.results),
@@ -1156,6 +1162,7 @@ export function* applySteps(
 			target: batch.target,
 			method,
 			actor: batch.actor,
+			model: batch.model,
 			basis,
 			basisCase,
 			basisVersion,

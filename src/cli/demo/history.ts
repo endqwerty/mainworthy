@@ -13,6 +13,8 @@ const MINUTE = 60_000;
 /** The repository the demo's pipeline reports on. */
 export const REPO = "demo/shop";
 
+export const AGENT_MODEL = "claude-opus-5-5";
+
 /**
  * How a person answered a failure or a finding. None of these ends by the clock (`flaky` does, after a week), so
  * nothing in the history comes back open while somebody looks at the demo.
