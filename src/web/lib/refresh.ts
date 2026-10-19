@@ -74,7 +74,8 @@ export function affected(key: readonly unknown[], change: Change): boolean {
 		return true;
 	}
 	if (read === "inbox" || read === "gate" || read === "impact" || read === "stats") return true;
-	if (read === "timeline" && op === "propose") return true;
+	// A rejection may touch only its question; a case timeline projects that question too.
+	if (read === "timeline" && (op === "propose" || touched.some((ref) => ref.startsWith("Q-")))) return true;
 	if ((read === "get" || read === "timeline") && op === "report") return true;
 	// A waiting proposal projects its cases now. A question's decision can change the proposal's standing.
 	if (

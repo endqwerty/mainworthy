@@ -148,6 +148,8 @@ export function CasePane({
 		setPendingAnswer(null);
 	}
 	const proposals = timelineData?.questions.filter((q) => q.kind === "adopt" && q.state === "open") ?? [];
+	const pendingQuestion = timelineData?.questions.find((q) => q.q === pendingAnswer?.question.q);
+	if (pendingAnswer && pendingQuestion && pendingQuestion.state !== "open") setPendingAnswer(null);
 	async function answerProposal(answer: "accept" | "reject", question = proposals[0], reason?: string): Promise<void> {
 		if (!question) return;
 		const message = proposalReadMessage(question.q);
@@ -160,7 +162,13 @@ export function CasePane({
 			return;
 		}
 		const key = queryKey({ project, op: "timeline", input: timelineInput });
-		const before = queryClient.getQueryData(key);
+		const restoreQuestion = (): void => {
+			queryClient.setQueryData<typeof timeline.data>(key, (current) =>
+				current && !current.questions.some((q) => q.q === question.q)
+					? { ...current, questions: [...current.questions, question] }
+					: current,
+			);
+		};
 		queryClient.setQueryData<typeof timeline.data>(key, (previous) =>
 			previous ? { ...previous, questions: previous.questions.filter((q) => q.q !== question.q) } : previous,
 		);
@@ -177,7 +185,7 @@ export function CasePane({
 				{ project, owner },
 			);
 			if (reply[0]?.status !== "decided" && reply[0]?.status !== "already") {
-				queryClient.setQueryData(key, before);
+				restoreQuestion();
 				setStatus(
 					reply[0]?.status === "conflict"
 						? reply[0].needs === "the question is no longer open; read it again before answering"
@@ -189,11 +197,12 @@ export function CasePane({
 				setPendingAnswer(null);
 				setStatus(`${question.q} ${answer === "accept" ? "adopted" : "rejected"}. The author remains recorded.`);
 			}
-			void invalidateProject(project);
 		} catch (error) {
 			if (!sessionCurrent(owner)) return;
-			queryClient.setQueryData(key, before);
+			restoreQuestion();
 			setStatus(error instanceof Error ? error.message : "The answer failed");
+		} finally {
+			if (sessionCurrent(owner)) void invalidateProject(project);
 		}
 	}
 	/** Shows what a version changed. The first has none before it, and the status line says so. */
@@ -209,7 +218,7 @@ export function CasePane({
 		reject: () => answerVisibleProposal("reject", "key"),
 	});
 	function answerVisibleProposal(answer: "accept" | "reject", via: "key" | "button", question = proposals[0]): void {
-		if (!question) return;
+		if (!question || pendingAnswer) return;
 		const message = answerShown(question.q, answer, via);
 		if (message) setStatus(message);
 		else void answerProposal(answer, question);
@@ -392,7 +401,7 @@ export function CasePane({
 							<div className="ev draft">
 								<span>•</span>
 								<div>
-									Your private draft. Others see version {draft.base}.
+									Your private draft. {draft.base ? `Based on version ${draft.base}.` : "No version yet."}
 									<DiffView
 										before={draft.original}
 										after={{ ...draft.body, steps: draft.body.steps.filter((step) => step.use || step.action) }}
@@ -404,6 +413,7 @@ export function CasePane({
 							<ProposalCard
 								key={question.q}
 								question={question}
+								disabled={pendingAnswer !== null}
 								answer={(answer) => answerVisibleProposal(answer, "button", question)}
 							/>
 						))}
@@ -483,6 +493,7 @@ export function CasePane({
 			{pendingAnswer && (
 				<AnswerExtra
 					kind="answer"
+					label={`${pendingAnswer.answer === "accept" ? "Accept" : "Reject"}: reason required by policy`}
 					field="reason"
 					value={pendingAnswer.value}
 					onChange={(value) => setPendingAnswer({ ...pendingAnswer, value })}
@@ -631,7 +642,15 @@ function VersionDiff({ refName, to, close }: { refName: string; to: number; clos
 	);
 }
 /** A proposal in a case's timeline. It may change other cases too, and accepting it accepts all of it: it shows all. */
-function ProposalCard({ question, answer }: { question: QuestionItem; answer: (is: "accept" | "reject") => void }) {
+function ProposalCard({
+	question,
+	answer,
+	disabled,
+}: {
+	question: QuestionItem;
+	answer: (is: "accept" | "reject") => void;
+	disabled: boolean;
+}) {
 	return (
 		<div className={`ev ${question.producer === "agent" ? "prop" : ""}`} data-proposal={question.q}>
 			<ProducerGlyph kind={question.producer} />
@@ -646,10 +665,10 @@ function ProposalCard({ question, answer }: { question: QuestionItem; answer: (i
 				</p>
 				<ProposalEdits question={question} />
 				<div className="pbtn">
-					<button type="button" className="out" onClick={() => answer("accept")}>
+					<button type="button" className="out" disabled={disabled} onClick={() => answer("accept")}>
 						<KeyCap>a</KeyCap> Accept
 					</button>
-					<button type="button" className="out" onClick={() => answer("reject")}>
+					<button type="button" className="out" disabled={disabled} onClick={() => answer("reject")}>
 						<KeyCap>r</KeyCap> Reject
 					</button>
 				</div>

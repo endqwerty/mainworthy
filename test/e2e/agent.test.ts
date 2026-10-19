@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { browserAvailable, eventually, openPage, type Server, startServer } from "./support.ts";
+import { answer, browserAvailable, eventually, openPage, type Server, startServer } from "./support.ts";
 
 /** A server with the preset these tests ask for, on a port the helpers hand out. */
 function fixture({
@@ -40,7 +40,9 @@ for (const answer of ["accept", "reject"] as const)
 				await page.locator(`[data-proposal-evidence="${proposed.question}"][data-proposal-read="ready"]`).waitFor();
 				if (answer === "accept") await page.getByRole("button", { name: "Accept" }).click();
 				else await page.keyboard.press("r");
-				const reason = page.getByRole("textbox", { name: "Reason required by policy" });
+				const reason = page.getByRole("textbox", {
+					name: `${answer === "accept" ? "Accept" : "Reject"}: reason required by policy`,
+				});
 				expect(await reason.count()).toBe(1);
 				await reason.fill("   ");
 				await reason.press("Enter");
@@ -930,3 +932,237 @@ for (const via of ["key", "button"] as const) {
 	},
 	30000,
 );
+
+async function strictEdit(server: Server) {
+	const created = await server.api("propose", { edits: [{ op: "create", outline: "Original strict" }] });
+	const initial = (await server.api("inbox", { kind: "adopt" })).items.find((q) => q.q === created.question);
+	if (!initial) throw new Error("Missing creation question");
+	await server.api("decide", {
+		q: initial.q,
+		onEvidence: initial.evidenceHash,
+		answer: { is: "accept" },
+		reason: "Establish the original case",
+	});
+	const proposed = await server.api("propose", {
+		edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Changed strict" } }],
+	});
+	const question = (await server.api("inbox", { kind: "adopt" })).items.find((q) => q.q === proposed.question);
+	if (!question) throw new Error("Missing edit question");
+	return question;
+}
+
+(browserAvailable ? test : test.skip)(
+	"a case reason keeps its selected answer and text while other answer controls are disabled",
+	async () => {
+		const server = await startServer({ preset: "strict", seed: false });
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			const question = await strictEdit(server);
+			view = await openPage(server, { path: "/p/scratch/suite/c/1" });
+			const { page } = view;
+			await page.setViewportSize({ width: 1280, height: 800 });
+			await page.locator(`[data-proposal-evidence="${question.q}"][data-proposal-read="ready"]`).waitFor();
+			await page.getByRole("button", { name: "Accept" }).click();
+			const reason = page.locator("#answer-extra");
+			await reason.fill("Keep this acceptance reason");
+			// Focus outside the input so the keys reach the case bindings, as they do after clicking the card.
+			await page.locator(".history-title").click();
+			await page.keyboard.press("r");
+			await page.keyboard.press("a");
+			expect(await reason.inputValue()).toBe("Keep this acceptance reason");
+			expect(await page.getByRole("textbox", { name: "Accept: reason required by policy" }).count()).toBe(1);
+			for (const label of ["Accept", "Reject"]) {
+				const button = page.getByRole("button", { name: label });
+				expect(await button.isDisabled()).toBe(true);
+				await button.evaluate((element) => {
+					if (!(element instanceof HTMLButtonElement)) throw new Error("Expected an answer button");
+					element.click();
+				});
+				expect(await reason.inputValue()).toBe("Keep this acceptance reason");
+			}
+			const response = page.waitForResponse((reply) => reply.url().endsWith("/decide"));
+			await reason.press("Enter");
+			await response;
+			expect((await server.api("get", { refs: [question.q] }))[0]?.decision).toMatchObject({
+				answer: { is: "accept" },
+				reason: "Keep this acceptance reason",
+			});
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
+
+for (const settled of ["accepted elsewhere", "rejected elsewhere", "with a lost reply"] as const)
+	(browserAvailable ? test : test.skip)(
+		`a case reason closes when its question is settled ${settled}`,
+		async () => {
+			const server = await startServer({ preset: "strict", seed: false });
+			let view: Awaited<ReturnType<typeof openPage>> | null = null;
+			let release = () => {};
+			const held = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			try {
+				const question = await strictEdit(server);
+				const decision = settled === "rejected elsewhere" ? "reject" : "accept";
+				view = await openPage(server, { path: "/p/scratch/suite/c/1" });
+				const { page } = view;
+				await page.locator(`[data-proposal-evidence="${question.q}"][data-proposal-read="ready"]`).waitFor();
+				await page.getByRole("button", { name: decision === "accept" ? "Accept" : "Reject" }).click();
+				const reason = page.locator("#answer-extra");
+				await reason.fill("This proposal has been reviewed");
+				if (settled !== "with a lost reply") {
+					await server.api("decide", {
+						q: question.q,
+						onEvidence: question.evidenceHash,
+						answer: { is: decision },
+						reason: "Another reviewer settled it",
+					});
+				} else {
+					await page.route("**/decide", async (route) => {
+						await route.fetch();
+						await held;
+						await answer(route, {
+							status: 503,
+							json: { ok: false, error: { code: "internal", message: "Answer reply lost" } },
+						});
+					});
+					await reason.press("Enter");
+				}
+				const remaining = await eventually(
+					() => reason.count(),
+					(count) => count === 0,
+				).catch(() => reason.count());
+				expect(remaining).toBe(0);
+				await page.locator(".question-card").filter({ hasText: question.q }).waitFor();
+				expect((await server.api("get", { refs: [question.q] }))[0]?.decision).toMatchObject({
+					answer: { is: decision },
+				});
+				if (settled === "with a lost reply") {
+					release();
+					await page.locator("#bar").getByText("Answer reply lost", { exact: false }).waitFor();
+					expect(await reason.count()).toBe(0);
+					await page.locator(".question-card").filter({ hasText: question.q }).waitFor();
+				}
+				expect(view.errors).toEqual(
+					settled === "with a lost reply"
+						? ["Failed to load resource: the server responded with a status of 503 (Service Unavailable)"]
+						: [],
+				);
+			} finally {
+				release();
+				await view?.close();
+				await server.stop();
+			}
+		},
+		30000,
+	);
+
+for (const failure of ["error", "refusal", "error without a stream update"] as const)
+	(browserAvailable ? test : test.skip)(
+		`a case answer ${failure} preserves the current timeline and restores its question`,
+		async () => {
+			const server = await startServer({ preset: "standard", seed: false });
+			let view: Awaited<ReturnType<typeof openPage>> | null = null;
+			let release = () => {};
+			let releaseReads = () => {};
+			const held = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			const reads = new Promise<void>((resolve) => {
+				releaseReads = resolve;
+			});
+			try {
+				await server.api("propose", { edits: [{ op: "create", outline: "Original title" }] });
+				const { token } = z.object({ token: z.string() }).parse(
+					await server.api("admin", {
+						do: "token.create",
+						actor: "writer",
+						kind: "agent",
+						can: ["read", "produce"],
+						project: "scratch",
+					}),
+				);
+				const proposed = await server.api(
+					"propose",
+					{
+						edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Proposed title" } }],
+					},
+					{ token },
+				);
+				if (failure === "error without a stream update")
+					await server.api("propose", {
+						edits: [{ op: "edit", case: "C-1", base: 1, body: { pre: "New public precondition" } }],
+					});
+				view = await openPage(server, { path: "/p/scratch/suite/c/1" });
+				const { page } = view;
+				await page.locator(`[data-proposal-evidence="${proposed.question}"][data-proposal-read="ready"]`).waitFor();
+				await page.route("**/decide", async (route) => {
+					await held;
+					await answer(
+						route,
+						failure !== "refusal"
+							? { status: 503, json: { ok: false, error: { code: "internal", message: "Held answer failed" } } }
+							: {
+									json: {
+										ok: true,
+										result: [
+											{
+												q: proposed.question,
+												status: "forbidden",
+												needs: "Held answer refused",
+												decision: null,
+												effects: null,
+												evidence: null,
+											},
+										],
+									},
+								},
+					);
+				});
+				const sent = page.waitForRequest((request) => request.url().endsWith("/decide"));
+				await page.getByRole("button", { name: "Reject" }).click();
+				await sent;
+				if (failure !== "error without a stream update")
+					await server.api("propose", {
+						edits: [{ op: "edit", case: "C-1", base: 1, body: { pre: "New public precondition" } }],
+					});
+				await page.locator('[data-version="2"]').waitFor({ state: "attached" });
+				let rereads = 0;
+				await page.route("**/timeline", async (route) => {
+					rereads++;
+					await reads;
+					await route.continue();
+				});
+				release();
+				await page
+					.locator("#bar")
+					.getByText(failure !== "refusal" ? "Held answer failed" : "Held answer refused", { exact: false })
+					.waitFor();
+				expect(await page.locator('[data-version="2"]').count()).toBe(1);
+				expect(await page.locator(`[data-proposal="${proposed.question}"]`).count()).toBe(1);
+				await eventually(
+					async () => rereads,
+					(count) => count > 0,
+				);
+				releaseReads();
+				await page.locator(`[data-proposal-evidence="${proposed.question}"][data-proposal-read="ready"]`).waitFor();
+				expect(await page.locator('[data-version="2"]').count()).toBe(1);
+				expect(view.errors).toEqual(
+					failure !== "refusal"
+						? ["Failed to load resource: the server responded with a status of 503 (Service Unavailable)"]
+						: [],
+				);
+			} finally {
+				release();
+				releaseReads();
+				await view?.close();
+				await server.stop();
+			}
+		},
+		30000,
+	);
