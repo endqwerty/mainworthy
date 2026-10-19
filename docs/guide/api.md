@@ -166,9 +166,16 @@ An archive does not say which project is a demo. After an import every project r
 
 ## Follow changes
 
-`GET /api/p/<project>/events` is a stream of server-sent events, one for each write
-to the project. The stream needs the `read` capability. A client that misses an
-event can read the data again or request the changes through `since`.
+`GET /api/p/<project>/events` is a stream of server-sent events about committed
+writes to the project. The stream needs the `read` capability. Delivery is best
+effort: a failed subscriber does not change a committed write's successful reply
+or prevent delivery to other subscribers. The server logs the failure without
+the subscriber's error text.
+
+The stream does not replay missed events on reconnect. A client that misses an
+event can read the data again or request changes through `since` with its last
+cursor. The web app reads again when the stream opens and refreshes stale reads
+when the window regains focus.
 
 ## Operations
 

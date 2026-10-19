@@ -852,6 +852,37 @@ test.each(["2025-03-26", "2025-11-25", "2026-07-28"])(
 	},
 );
 
+test("an HTTP MCP tool returns its committed reply when a subscriber throws", async () => {
+	const h = harness();
+	const http = serve(h.app, h.owner, { ui: null, routes: { "/mcp": mcpRoute(h.app) } });
+	const client = new Client({ name: "publish-failure", version: "1" });
+	const logged = spyOn(console, "error").mockImplementation(() => {});
+	const unsubscribe = h.app.subscribe(() => {
+		throw new Error("subscriber-private-detail");
+	});
+	try {
+		await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${http.port}/mcp`)));
+		const reply = await client.callTool({
+			name: "propose",
+			arguments: { edits: [{ op: "create", outline: "MCP durable" }] },
+		});
+		expect(
+			resultOf(reply, z.object({ status: z.literal("adopted"), cases: z.array(z.object({ ref: z.string() })) })),
+		).toEqual({ status: "adopted", cases: [{ ref: "C-1" }] });
+		expect(CallToolResultSchema.parse(reply).structuredContent).toMatchObject({ seq: 2 });
+		expect(
+			resultOf(await client.callTool({ name: "find", arguments: { in: "cases" } }), z.object({ count: z.number() })),
+		).toEqual({ count: 1 });
+		expect(logged.mock.calls).toEqual([["[mainworthy] change subscriber failed:", { seq: 2 }]]);
+	} finally {
+		unsubscribe();
+		logged.mockRestore();
+		await client.close();
+		await http.stop(true);
+		h.close();
+	}
+});
+
 test("an HTTP tool write waits for an applying report and records token use", async () => {
 	const h = harness();
 	const { secret } = createToken(h.app, {

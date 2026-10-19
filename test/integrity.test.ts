@@ -3433,6 +3433,74 @@ describe("what a decision may change", () => {
 });
 
 describe("what a caller is told", () => {
+	test("a throwing subscriber cannot change a committed reply or hide the event from other subscribers", () => {
+		const logged = spyOn(console, "error").mockImplementation(() => {});
+		const stopBroken = h.app.subscribe(() => {
+			throw new Error("subscriber-private-detail");
+		});
+		const events: { op: string; seq: number; touched: string[] }[] = [];
+		const stopHealthy = h.app.subscribe((event) => events.push(event));
+		try {
+			const input = { cmd: "publish-failed-01", edits: [{ op: "create", outline: "Durable case" }] };
+			const reply = h.raw("propose", input);
+			expect(h.call("command", { cmd: input.cmd })).toMatchObject({ state: "done", op: "propose", seq: 2 });
+			expect(h.call("find", { in: "cases" })).toMatchObject({
+				count: 1,
+				items: [{ ref: "C-1", title: "Durable case" }],
+			});
+			expect(reply).toMatchObject({
+				ok: true,
+				seq: 2,
+				result: { status: "adopted", cases: [{ ref: "C-1", version: 1 }] },
+			});
+			expect(events).toMatchObject([{ op: "propose", seq: 2, touched: expect.arrayContaining(["C-1"]) }]);
+			expect(logged.mock.calls).toEqual([["[mainworthy] change subscriber failed:", { seq: 2 }]]);
+			expect(h.raw("propose", input)).toEqual(reply);
+			expect(h.call("find", { in: "cases" })).toMatchObject({ count: 1 });
+			expect(events).toHaveLength(1);
+			// A subscriber that missed the hint can recover the durable change without another write or event.
+			expect(h.call("since", { cursor: "s:1" })).toMatchObject({
+				changed: [{ ref: "C-1", title: "Durable case", version: 1, changed: "created" }],
+				cursor: "s:2",
+				more: false,
+			});
+		} finally {
+			stopBroken();
+			stopHealthy();
+			logged.mockRestore();
+		}
+	});
+
+	test.each([2, 3])("a subscriber throwing at report sequence %i cannot interrupt either commit", async (failedSeq) => {
+		const logged = spyOn(console, "error").mockImplementation(() => {});
+		const stopBroken = h.app.subscribe((event) => {
+			if (event.seq === failedSeq) throw new Error("subscriber-private-detail");
+		});
+		const events: { op: string; seq: number }[] = [];
+		const stopHealthy = h.app.subscribe(({ op, seq }) => events.push({ op, seq }));
+		try {
+			const input = { ...ciReport({ commit: "c0ffee03", n: 1 }), cmd: "publish-report-01" };
+			const reply = await invokeAsync(h.app, OPS, {
+				op: "report",
+				project: "scratch",
+				actor: () => h.owner,
+				input,
+			});
+			expect(reply).toMatchObject({ ok: true, seq: 3, result: { fresh: true, counts: { total: 1, pass: 1 } } });
+			expect(events).toEqual([
+				{ op: "report", seq: 2 },
+				{ op: "report", seq: 3 },
+			]);
+			expect(h.call("command", { cmd: input.cmd })).toMatchObject({ state: "done", op: "report", seq: 3 });
+			expect(h.raw("report", input)).toEqual(reply);
+			expect(logged.mock.calls).toEqual([["[mainworthy] change subscriber failed:", { seq: failedSeq }]]);
+		} finally {
+			stopBroken();
+			stopHealthy();
+			logged.mockRestore();
+		}
+	});
+
 	test("a command id used in another project is a conflict, not the first project's reply", () => {
 		const cmd = "same-command-01";
 		const made = h.raw("propose", { cmd, edits: [{ op: "create", outline: "Once" }] });
@@ -3555,8 +3623,11 @@ describe("what a caller is told", () => {
 	test("a report that recovery applies finishes its command with the receipt, as the request would have", () => {
 		const fate = (cmd: string) =>
 			invoke(h.app, OPS, { op: "command", project: "scratch", input: { cmd }, actor: () => h.owner });
-		const unsubscribe = h.app.subscribe(() => {
-			throw new Error("the process stopped");
+		const begin = h.app.db.begin.bind(h.app.db);
+		let transactions = 0;
+		const interrupted = spyOn(h.app.db, "begin").mockImplementation(() => {
+			if (++transactions === 2) throw new Error("the process stopped before applying the report");
+			begin();
 		});
 		const logged = spyOn(console, "error").mockImplementation(() => {});
 		const stopped = invoke(h.app, OPS, {
@@ -3565,7 +3636,7 @@ describe("what a caller is told", () => {
 			actor: () => h.owner,
 			input: { ...ciReport({ commit: "c0ffee02", n: 3 }), cmd: "report-cmd-02" },
 		});
-		unsubscribe();
+		interrupted.mockRestore();
 		logged.mockRestore();
 		expect(stopped.ok).toBe(false);
 		expect(fate("report-cmd-02")).toMatchObject({ ok: true, result: { state: "begun", op: "report" } });

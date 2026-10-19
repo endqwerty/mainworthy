@@ -147,6 +147,7 @@ export type App = {
 	now: () => number;
 	/** Subscribes to change events. Returns the unsubscribe function. */
 	subscribe: (listener: (event: ChangeEvent) => void) => () => void;
+	/** A failed subscriber is logged without its error text; the other subscribers still receive the event. */
 	publish: (event: ChangeEvent) => void;
 	close: () => void;
 };
@@ -173,7 +174,13 @@ export function openApp(config: Config, options: { memory?: boolean; now?: () =>
 			return () => listeners.delete(listener);
 		},
 		publish(event) {
-			for (const listener of listeners) listener(event);
+			for (const listener of listeners) {
+				try {
+					listener(event);
+				} catch {
+					console.error("[mainworthy] change subscriber failed:", { seq: event.seq });
+				}
+			}
 		},
 		close() {
 			listeners.clear();

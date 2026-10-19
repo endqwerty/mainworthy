@@ -106,6 +106,12 @@ commits twice, and it takes a sequence number for each transaction (see the red 
 reader thread with its own read-only connection, so a long write does not hold it up; a write waits its turn at
 one gate, because the file has one writer.
 
+`App.publish` isolates each change subscriber. A throwing subscriber is logged
+without its error text, and later subscribers still receive that event. A
+notification failure cannot change a committed reply or interrupt a report
+between commits. The stream is best effort; reads and `since` recover changes
+that a client missed.
+
 ## Who may call
 
 An actor is a person, an agent, a pipeline or the policy's own rule. What it may do is a grant per project (or
