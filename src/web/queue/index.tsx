@@ -10,6 +10,7 @@ import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/dat
 import { deviceKey, deviceSession, sessionCurrent } from "../lib/device.ts";
 import { randomId } from "../lib/ids.ts";
 import { type Binding, useBindings } from "../lib/keys.ts";
+import { answerShown } from "../lib/proposals.ts";
 import { navigate, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, EmptyState, KeyCap, ListRow, ProducerGlyph } from "../ui/index.tsx";
@@ -485,7 +486,7 @@ function QueueWorkbench() {
 			);
 		}
 	}
-	function answer(is: string, suggested?: Record<string, unknown>): void {
+	function answer(is: string, suggested?: Record<string, unknown>, via: "key" | "button" = "key"): void {
 		if (state !== "open" || inline) return;
 		if (bulk && suggested) {
 			setStatus("Advice is for the question shown. Clear the selection to take it.");
@@ -504,7 +505,7 @@ function QueueWorkbench() {
 		if (!first) return;
 		if (!bulk && first.you === "forbidden") return;
 		for (const question of questions) {
-			const message = questionReadMessage(question);
+			const message = question.kind === "adopt" ? answerShown(question.q, is, via) : questionReadMessage(question);
 			if (message) {
 				setStatus(message);
 				return;
@@ -1073,7 +1074,7 @@ function QueueWorkbench() {
 											why !== null
 										}
 										title={why ?? undefined}
-										onClick={() => answer(is)}
+										onClick={() => answer(is, undefined, "button")}
 									>
 										<KeyCap>{key}</KeyCap>
 										<b>{ANSWER_LABELS[is]}</b>

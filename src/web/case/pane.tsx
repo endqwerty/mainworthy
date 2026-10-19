@@ -16,7 +16,7 @@ import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/dat
 import { deviceSession, sessionCurrent } from "../lib/device.ts";
 import type { DraftCopy } from "../lib/draft-copies.ts";
 import { type Draft, type DraftConflict, draftTags } from "../lib/drafts.ts";
-import { proposalReadMessage } from "../lib/proposals.ts";
+import { answerShown, proposalReadMessage } from "../lib/proposals.ts";
 import { navigate, refUrl } from "../lib/router.ts";
 import { ProposalEdits } from "../queue/evidence.tsx";
 import { bodyOf, CaseView, editDraft } from "../suite/model.ts";
@@ -185,38 +185,14 @@ export function CasePane({
 	useCaseBindings({
 		enabled: ref !== null,
 		diff: () => openDiff(draft?.base ?? view?.version ?? 1),
-		accept: () => answerShown("accept", "key"),
-		reject: () => answerShown("reject", "key"),
+		accept: () => answerVisibleProposal("accept", "key"),
+		reject: () => answerVisibleProposal("reject", "key"),
 	});
-	/**
-	 * A key or a button answers only what is on the screen (decision 0011: nothing a key acts on is clipped), since
-	 * accepting a proposal accepts every edit in it, other cases' too. A proposal is never taller than the pane: its
-	 * edits scroll inside it, between its heading and its answer buttons. A press first brings the whole proposal
-	 * into view, then pages through long edits, and answers only once the end of the last one is showing. Each
-	 * press that does not answer says what it did.
-	 */
-	function answerShown(answer: "accept" | "reject", via: "key" | "button", question = proposals[0]): void {
+	function answerVisibleProposal(answer: "accept" | "reject", via: "key" | "button", question = proposals[0]): void {
 		if (!question) return;
-		const message = proposalReadMessage(question.q);
-		if (message) {
-			revealProposal(question.q);
-			setStatus(message);
-			return;
-		}
-		const again =
-			via === "key"
-				? `press ${answer === "accept" ? "a" : "r"} again`
-				: `choose ${answer === "accept" ? "Accept" : "Reject"} again`;
-		if (!proposalInView(question.q)) {
-			revealProposal(question.q);
-			setStatus(`${question.q} is now in view. Read it, then ${again}.`);
-			return;
-		}
-		if (pageProposal(question.q)) {
-			setStatus(`${question.q} has more below: the next part is now in view. Read it, then ${again}.`);
-			return;
-		}
-		void answerProposal(answer, question);
+		const message = answerShown(question.q, answer, via);
+		if (message) setStatus(message);
+		else void answerProposal(answer, question);
 	}
 	if (!view && !draft)
 		return (
@@ -408,7 +384,7 @@ export function CasePane({
 							<ProposalCard
 								key={question.q}
 								question={question}
-								answer={(answer) => answerShown(answer, "button", question)}
+								answer={(answer) => answerVisibleProposal(answer, "button", question)}
 							/>
 						))}
 						{diffVersion && ref && <VersionDiff refName={ref} to={diffVersion} close={() => setDiffVersion(null)} />}{" "}
@@ -651,39 +627,6 @@ function ProposalCard({ question, answer }: { question: QuestionItem; answer: (i
 			<span className="age">{age(question.openedAt)}</span>
 		</div>
 	);
-}
-const proposalCard = (q: string): HTMLElement | null =>
-	document.querySelector<HTMLElement>(`[data-proposal="${CSS.escape(q)}"]`);
-
-/** Whether the whole of a proposal (heading, diff and answer buttons) is inside the visible part of the pane. */
-function proposalInView(q: string): boolean {
-	const card = proposalCard(q);
-	const pane = card?.closest<HTMLElement>(".pane-scroll");
-	if (!card || !pane) return false;
-	const box = card.getBoundingClientRect();
-	const frame = pane.getBoundingClientRect();
-	const top = Math.max(frame.top, 0);
-	const bottom = Math.min(frame.bottom, window.innerHeight);
-	return box.top >= top - 1 && box.bottom <= bottom + 1;
-}
-
-function revealProposal(q: string): void {
-	const card = proposalCard(q);
-	const pane = card?.closest<HTMLElement>(".pane-scroll");
-	if (!card || !pane) return;
-	const box = card.getBoundingClientRect();
-	const frame = pane.getBoundingClientRect();
-	if (box.top < frame.top) pane.scrollTop += box.top - frame.top - 8;
-	else if (box.bottom > frame.bottom)
-		pane.scrollTop += Math.min(box.bottom - frame.bottom + 8, box.top - frame.top - 8);
-}
-
-/** Shows the next part of a proposal's edits when it has more below. False when its end is already showing. */
-function pageProposal(q: string): boolean {
-	const edits = proposalCard(q)?.querySelector<HTMLElement>(".proposal-edits");
-	if (!edits || edits.scrollTop + edits.clientHeight >= edits.scrollHeight - 2) return false;
-	edits.scrollTop += Math.max(40, edits.clientHeight - 32);
-	return true;
 }
 
 function ConflictCard({

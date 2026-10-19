@@ -26,13 +26,13 @@ import { compactSchema, mcpRoute, mcpServer, mcpTools, TOOL_TOKEN_BUDGET } from 
 const tokens = (value: unknown): number => encode(JSON.stringify(value)).length;
 const TOKEN_COUNTS: Record<string, number> = {
 	propose: 1388,
-	report: 710,
+	report: 697,
 	claim: 390,
 	decide: 318,
 	inbox: 166,
-	get: 193,
+	get: 205,
 	find: 263,
-	impact: 200,
+	impact: 196,
 	since: 158,
 	gate: 160,
 };
@@ -62,11 +62,14 @@ test("tools/list names every proposal and decision reply status", () => {
 
 test("tools/list explains proposal statuses and how to identify reported tests", () => {
 	const tools = mcpTools();
+	expect(tools.find((tool) => tool.name === "get")?.inputSchema.properties?.cursor).toMatchObject({
+		description: "Proposal page; restart after changes.",
+	});
 	expect(tools.find((tool) => tool.name === "propose")?.description).toBe(
 		"Propose cases at their base version. Status: adopted=current, open=needs acceptance, conflict=resolve, rejected.",
 	);
 	expect(tools.find((tool) => tool.name === "report")?.description).toBe(
-		"Record test results in one batch. Give `target` (the commit tested) or `run` (a planned run). Each result names a test by `key` or a case by ref.",
+		"Record results for `target` (commit) or `run` (planned). Identify each test by `key` or case ref.",
 	);
 });
 

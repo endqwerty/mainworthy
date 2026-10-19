@@ -42,7 +42,15 @@ const askedAgain = new Map<Query, Promise<void>>();
  * First reads need the trailing read too: their reply may precede the event on the server (issue #87).
  * Yield after each reply so automatic paging can start its next page before refreshing the loaded pages.
  */
-function readAgain(stale: (query: Query) => boolean, replace = false): Promise<void> {
+async function readAgain(stale: (query: Query) => boolean, replace = false): Promise<void> {
+	// Proposal cursors belong to one project snapshot. Its next page is obsolete as soon as a write is known.
+	const snapshots = queryClient.getQueryCache().findAll({
+		predicate: (query) => stale(query) && query.meta?.restartOnChange === true && query.state.fetchStatus !== "idle",
+	});
+	if (snapshots.length) {
+		for (const query of snapshots) askedAgain.delete(query);
+		await Promise.all(snapshots.map((query) => queryClient.cancelQueries({ queryKey: query.queryKey, exact: true })));
+	}
 	const replaces = (query: Query): boolean =>
 		replace && query.isActive() && query.state.data !== undefined && query.queryKey[3] !== "pages";
 	for (const query of askedAgain.keys()) if (stale(query) && replaces(query)) askedAgain.delete(query);
@@ -75,7 +83,8 @@ const pending = new Set<Query>();
 export function changed(project: string, change: Parameters<typeof affected>[1]): void {
 	const scheduled = pending.size > 0;
 	for (const query of queryClient.getQueryCache().findAll())
-		if (query.queryKey[0] === project && affected(query.queryKey, change)) pending.add(query);
+		if (query.queryKey[0] === project && (query.meta?.restartOnChange === true || affected(query.queryKey, change)))
+			pending.add(query);
 	if (scheduled || pending.size === 0) return;
 	queueMicrotask(() => {
 		const queries = new Set(pending);

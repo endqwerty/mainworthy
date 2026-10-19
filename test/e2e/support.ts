@@ -527,18 +527,13 @@ function shown(value: unknown): string {
 	return text.length > 400 ? `${text.slice(0, 400)}…` : text;
 }
 /**
- * Presses the answer key for proposal `q` once the page has read the proposal, and again when the page refused it.
- * A proposal is answered only while its card says it is read (`data-proposal-read="ready"`, `src/web/queue/
- * evidence.tsx`), and the page reads it again on its own: once when its change stream opens, right after the
- * edits first appear, and after every change to a case it touches. The card is marked read between those reads,
- * so a key that follows the mark by a few milliseconds can still land in a read and be refused with "Still
- * reading the proposal" (issues #322 and #411: 2 of 56 runs beside sixteen busy loops). A person told so presses
- * again, and so does this. Whether a press was refused is read the way the page decides it, from the card at the
- * moment of the key (`proposalReadMessage`), not guessed from how long a request takes.
+ * Answers short proposals after their edits load. A press can reveal evidence, or meet a fresh read started by
+ * the change stream (issues #322 and #411). Retry when the card was not yet shown whole at the key; otherwise
+ * wait for the decide request. Tests of long proposals page explicitly, rather than using this helper's five tries.
  */
 export async function answerWhenRead(page: Page, q: string, key: string): Promise<void> {
 	for (let attempt = 1; attempt <= 5; attempt++) {
-		await page.locator(`[data-proposal-evidence="${q}"][data-proposal-read="ready"]`).waitFor();
+		await page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`).waitFor();
 		await page.evaluate((q) => {
 			const read = () =>
 				document.querySelector<HTMLElement>(`[data-proposal-evidence="${CSS.escape(q)}"]`)?.dataset.proposalRead;

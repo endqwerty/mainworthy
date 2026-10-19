@@ -702,6 +702,7 @@ Read cases, questions, runs, tests or proposals by ref.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
+| `cursor` | `string` | no | For one proposal: the cursor from its previous page of edits. Restart without it after a project change. |
 | `refs` | `array<string>` | yes | Refs of cases (C-), questions (Q-), runs (R-), tests (T-) or proposals (P-). |
 | `fields` | `array<string>` | no | For cases: any of title, pre, steps, methods, tags, covers, place, proof. Default: all. |
 | `as` | `"data" \| "md"` | no | `md` returns a case as canonical Markdown: fewer tokens than JSON. Default: `"data"`. |
@@ -1159,13 +1160,13 @@ guidance for commit reuse, question answers, and review filtering.
 | Tool | What the agent is told it is for |
 | --- | --- |
 | `propose` | Propose cases at their base version. Status: adopted=current, open=needs acceptance, conflict=resolve, rejected. |
-| `report` | Record test results in one batch. Give `target` (the commit tested) or `run` (a planned run). Each result names a test by `key` or a case by ref. |
+| `report` | Record results for `target` (commit) or `run` (planned). Identify each test by `key` or case ref. |
 | `claim` | Review cases (`reviewed`, C-311@hash) at change `about` and commit `patch`. Record findings; `known` returns prior findings and answers. |
 | `decide` | Answer inbox using evidenceHash as onEvidence. Status: decided, advised=person decides, forbidden, invalid, already, reopened, conflict=evidence or decision changed. Choose from answers. Withdraw with undo and ifDecision=reply.decision. |
 | `inbox` | Open questions and evidenceHash; filter with on. |
-| `get` | Read refs. For cases: as, fields, unless. |
+| `get` | Read refs; page proposals with cursor. |
 | `find` | Search cases by text, folder or tag; list tests (`unlinked: true`), runs or slots. Page with `cursor`. |
-| `impact` | Start a review with a change (`pr:482`) or changed `files`. Returns affected cases, hashes, prior reviews, questions and uncovered files. Reuse `cursor` as `since`. |
+| `impact` | Review a change (`pr:482`) or changed `files`: affected cases, hashes, prior reviews, questions, uncovered files. Reuse `cursor` as `since`. |
 | `since` | What changed since an earlier `cursor`: changed cases (one-line diff, no bodies) and settled questions. If `more`, call again with the new cursor. |
 | `gate` | Is this commit, change or run tested? Returns passed, failed, blocked or pending with the reason and the open questions. |
 

@@ -53,6 +53,10 @@ const DESCRIPTIONS = new Map([
 	["The question whose decision to withdraw.", ""],
 	["Only questions about this case, run, test or change.", ""],
 	["The cursor from the previous page.", ""],
+	[
+		"For one proposal: the cursor from its previous page of edits. Restart without it after a project change.",
+		"Proposal page; restart after changes.",
+	],
 	["Refs of cases (C-), questions (Q-), runs (R-), tests (T-) or proposals (P-).", ""],
 	["For cases: any of title, pre, steps, methods, tags, covers, place, proof. Default: all.", ""],
 	["`md` returns a case as canonical Markdown: fewer tokens than JSON.", ""],

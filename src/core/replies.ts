@@ -245,8 +245,9 @@ const Proposal = z.looseObject({
 	kind: ActorKind,
 	reason: nullableText,
 	at: number,
-	/** How many edits the proposal has; `edits` holds the first 200. */
+	/** How many edits the proposal has; `edits` holds this page of at most 200. */
 	count: whole,
+	cursor: nullableText,
 	edits: z.array(ProposalEdit),
 });
 const Slot = z.looseObject({
