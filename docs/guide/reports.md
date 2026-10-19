@@ -10,7 +10,8 @@ Every report reads the one stream of results, from people, pipelines and agents 
 
 1. Press <kbd>g</kbd> <kbd>o</kbd> to open Reports.
 2. Select a report from the list. Each row shows its headline number.
-3. Choose how many days to read: 7, 14, 30 or 90. Today is one of them.
+3. Choose how many days to read: 7, 14, 30 or 90. Pass rate reads calendar days, today included. The other
+   reports read that many 24-hour periods back from now.
 
 Use <kbd>j</kbd> and <kbd>k</kbd> to move between reports.
 
@@ -18,17 +19,23 @@ From the command line, `mainworthy stats --of <report>` prints the same report a
 `mainworthy stats --of flaky --days 14`. Over HTTP it is `POST /api/p/<project>/stats` (see [the API](./api.md#stats)).
 Agents read reports this way too: `stats` is not one of the agent tools.
 
+The flaky, rerun and automation reports list 20 tests or cases, and coverage lists 100 requirements. The headline
+numbers count all of them. To list more, pass `--limit`: up to 200 rows, or 500 requirements for coverage.
+
 ## Pass rate
 
 The share of results that passed, per day, of those that passed or failed. Skipped and blocked results are counted
 beside the rate and are not in it.
 
-- Each test counts once for each job and producer on each commit, by the attempt it ended with. A failure that a rerun of the
-  same job then passed counts as a pass, and the failed attempt is in [time lost to reruns](#time-lost-to-reruns).
-  This is the rule a gate counts with.
+- Each test counts once for each job, producer and method on each target, by its latest attempt that passed or
+  failed. A target is a commit in one repository and environment, so two environments of one commit count apart.
+  A later skip or blocked attempt does not replace a pass or a failure, and of two results for one attempt the worse
+  counts. A failure that a rerun of the same job then passed counts as a pass, and the failed attempt is in
+  [time lost to reruns](#time-lost-to-reruns). This is the rule a gate counts with.
 - A result its producer corrected is replaced by the correction.
-- A failure of a test in [quarantine](./report-results.md#quarantine-an-unreliable-test) is counted as quarantined, apart from the failures, and does not
-  lower the rate.
+- A failure recorded while its test was in [quarantine](./report-results.md#quarantine-an-unreliable-test) is counted as
+  quarantined, apart from the failures, and does not lower the rate. Quarantine that starts or ends later does not
+  change how earlier results count.
 - The days are the reader's. The web page uses your browser's time zone. The command line and the API use UTC
   unless you give `--zone` with a time zone's name, for example `--zone Europe/Berlin`. An offset such as `+05:30`
   is refused.
@@ -36,7 +43,8 @@ beside the rate and are not in it.
 
 ## Flaky tests
 
-A flaky test passed and failed on the same code: the same commit, job and producer, one attempt after another.
+A flaky test passed and failed on the same code: the same target (repository, commit and environment), job and
+producer, one attempt after another.
 Mainworthy records such a flip when the report arrives. A flip whose pass or failure its producer later corrected
 is not counted. The report lists the automated tests with flips in the window, the most flips first, and says which
 of them are in quarantine. The headline compares them with every automated test that reported in the window, whoever
@@ -63,7 +71,8 @@ first. Where people recorded how long a run took, the time is shown too.
 
 ## Coverage by requirement
 
-Each requirement with the active cases that cover it. A case counts by the latest result of each of its tests in
+Each requirement with the active cases that cover it. The list shows the first 100 requirements, and the headline
+counts all of them. A case counts by the latest result of each of its tests in
 the window: failed when one of them failed, passed when none failed and one passed, skipped or blocked when that
 is all they were, and not run when none of its tests has a result in the window. A requirement with no active case
 is marked. A case covers a requirement through `covers: [KEY]` in its Markdown, or `@KEY` on the title line of a

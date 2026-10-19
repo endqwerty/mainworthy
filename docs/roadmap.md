@@ -46,9 +46,10 @@ wait for a device check or an owner decision.
 
 The native MVP has shipped. The separate `iOS app` milestone tracks the remaining
 app work and distribution evidence. TestFlight upload tooling does not prove that
-installation works. Native passkeys and edit-overlap resolution are the next
-candidate features. Persistent offline decisions wait for sound shared decision
-and command semantics. App instance selection and licence screens are deferred
+installation works. Edit-overlap resolution shipped in the app on 2026-10-15. The
+app also saves eligible queue answers on the device and sends them when it
+reconnects. Linking a test and creating a case still need a connection. Native
+passkeys are the next candidate feature. App instance selection and licence screens are deferred
 owner choices; distribution requirements remain separate obligations.
 
 The check warns above 130 s; CI shards warn above 180 s. Elapsed time is advisory by the
@@ -73,6 +74,14 @@ for the individual issues, their order and dependencies:
 5. Then prioritize exact gate evidence and the change and patch that an agent
    reviewed. Bring reply schemas forward when CI compatibility needs them.
    Outbound GitHub checks precede optional private report fetching.
+
+Checked against the code on 2026-10-18, parts of this list have shipped: draft
+takeover protection and kept copies of competing edits, removal of a forgotten
+person's name from stored replies, bulk undo in the queue, paging of `since` under
+sustained changes, erasure of revoked credentials and the admin's forget action,
+reply schemas for every operation, and optional GitHub commit statuses for the
+gate. Measured proxy configuration is not done. The rest of each item was not
+checked here, and issue #64 keeps its state.
 
 In parallel, confirm TestFlight installation, settle the private contact, and
 gather sign-in and phone evidence on real devices. Public-source research for the

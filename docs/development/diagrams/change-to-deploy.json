@@ -1,0 +1,643 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "A change, from a branch to the deployed instance",
+    "locale": "en",
+    "output": "docs/development/diagrams/change-to-deploy.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:endqwerty/mainworthy.git",
+      "revision": "35f1b3b43de241180d1946c48853eb8a38bd2042",
+      "link_mode": "local-only"
+    },
+    "legend": {
+      "mode": "hidden"
+    }
+  },
+  "lanes": [
+    {
+      "id": "author",
+      "label": "Author \u00b7 local branch and pull request"
+    },
+    {
+      "id": "ci",
+      "label": "GitHub Actions \u00b7 check.yml"
+    },
+    {
+      "id": "recovery",
+      "label": "Blocked \u00b7 resolve the failure",
+      "variant": "exception"
+    },
+    {
+      "id": "review",
+      "label": "Independent verifier and owner"
+    },
+    {
+      "id": "deploy",
+      "label": "Main branch \u00b7 external deploy job and Coolify"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "edit",
+      "lane": "author",
+      "col": 0,
+      "type": "frontend",
+      "label": "Edit the change",
+      "sublabel": "T3 worktree branch",
+      "width": 160,
+      "sources": [
+        {
+          "path": "AGENTS.md",
+          "line": 95,
+          "end_line": 103
+        }
+      ]
+    },
+    {
+      "id": "local",
+      "lane": "author",
+      "col": 1,
+      "type": "backend",
+      "label": "Check locally",
+      "sublabel": "One file, then full check",
+      "width": 160,
+      "sources": [
+        {
+          "path": "package.json",
+          "line": 13,
+          "end_line": 17
+        },
+        {
+          "path": "scripts/check.ts",
+          "line": 1,
+          "end_line": 15
+        },
+        {
+          "path": "scripts/check.ts",
+          "line": 255,
+          "end_line": 263
+        }
+      ]
+    },
+    {
+      "id": "pr",
+      "lane": "author",
+      "col": 2,
+      "type": "frontend",
+      "label": "Open a pull request",
+      "sublabel": "pr-body; board start",
+      "width": 160,
+      "sources": [
+        {
+          "path": "scripts/work.ts",
+          "line": 75,
+          "end_line": 91
+        },
+        {
+          "path": "AGENTS.md",
+          "line": 65,
+          "end_line": 80
+        }
+      ]
+    },
+    {
+      "id": "scope",
+      "lane": "ci",
+      "col": 0,
+      "type": "backend",
+      "label": "scope",
+      "sublabel": "Choose jobs and test files",
+      "width": 160,
+      "sources": [
+        {
+          "path": ".github/workflows/check.yml",
+          "line": 45,
+          "end_line": 71
+        },
+        {
+          "path": "scripts/ci-scope.ts",
+          "line": 139,
+          "end_line": 178
+        }
+      ],
+      "height": 100
+    },
+    {
+      "id": "static",
+      "lane": "ci",
+      "col": 2,
+      "type": "backend",
+      "label": "static",
+      "sublabel": "Typecheck + lint, if chosen",
+      "width": 160,
+      "sources": [
+        {
+          "path": ".github/workflows/check.yml",
+          "line": 73,
+          "end_line": 85
+        }
+      ],
+      "yOffset": -72,
+      "height": 52
+    },
+    {
+      "id": "tests",
+      "lane": "ci",
+      "col": 2,
+      "type": "backend",
+      "label": "tests",
+      "sublabel": "Six shards + quiet, or subset",
+      "width": 160,
+      "sources": [
+        {
+          "path": ".github/workflows/check.yml",
+          "line": 141,
+          "end_line": 179
+        },
+        {
+          "path": "scripts/check-plan.ts",
+          "line": 93,
+          "end_line": 95
+        },
+        {
+          "path": "scripts/ci-scope.ts",
+          "line": 163,
+          "end_line": 178
+        }
+      ],
+      "yOffset": 0,
+      "height": 52
+    },
+    {
+      "id": "image",
+      "lane": "ci",
+      "col": 2,
+      "type": "backend",
+      "label": "image",
+      "sublabel": "Build and probe \u00b7 if selected",
+      "width": 160,
+      "sources": [
+        {
+          "path": ".github/workflows/check.yml",
+          "line": 87,
+          "end_line": 104
+        }
+      ],
+      "yOffset": 72,
+      "height": 52
+    },
+    {
+      "id": "ios",
+      "lane": "ci",
+      "col": 2,
+      "type": "backend",
+      "label": "ios",
+      "sublabel": "Test and build \u00b7 if selected",
+      "width": 160,
+      "sources": [
+        {
+          "path": ".github/workflows/check.yml",
+          "line": 106,
+          "end_line": 121
+        }
+      ],
+      "yOffset": 144,
+      "height": 52
+    },
+    {
+      "id": "description",
+      "lane": "ci",
+      "col": 2,
+      "type": "backend",
+      "label": "description",
+      "sublabel": "pr-body \u00b7 PR only",
+      "width": 160,
+      "sources": [
+        {
+          "path": ".github/workflows/check.yml",
+          "line": 123,
+          "end_line": 139
+        }
+      ],
+      "yOffset": -144,
+      "height": 52
+    },
+    {
+      "id": "gate",
+      "lane": "ci",
+      "col": 4,
+      "type": "security",
+      "label": "gate",
+      "sublabel": "Report shards; read gate",
+      "width": 160,
+      "sources": [
+        {
+          "path": ".github/workflows/check.yml",
+          "line": 182,
+          "end_line": 239
+        },
+        {
+          "path": "scripts/ci-gate.ts",
+          "line": 59,
+          "end_line": 147
+        },
+        {
+          "path": "scripts/ci-instance.ts",
+          "line": 61,
+          "end_line": 140
+        }
+      ],
+      "height": 110
+    },
+    {
+      "id": "question",
+      "lane": "recovery",
+      "col": 3,
+      "type": "security",
+      "label": "A failure question",
+      "sublabel": "On the instance; gate blocked",
+      "width": 160,
+      "sources": [
+        {
+          "path": "docs/deploy.md",
+          "line": 303,
+          "end_line": 309
+        },
+        {
+          "path": "src/core/runs.ts",
+          "line": 44,
+          "end_line": 44
+        }
+      ],
+      "yOffset": 0
+    },
+    {
+      "id": "answer",
+      "lane": "recovery",
+      "col": 4,
+      "type": "frontend",
+      "label": "Fix, rerun or answer",
+      "sublabel": "Fix \u00b7 rerun \u00b7 person answers",
+      "width": 160,
+      "sources": [
+        {
+          "path": "docs/deploy.md",
+          "line": 303,
+          "end_line": 334
+        }
+      ],
+      "yOffset": 0
+    },
+    {
+      "id": "verify",
+      "lane": "review",
+      "col": 5,
+      "type": "security",
+      "label": "Verify and review",
+      "sublabel": "Independent + owner review",
+      "width": 160,
+      "sources": [
+        {
+          "path": "AGENTS.md",
+          "line": 59,
+          "end_line": 61
+        },
+        {
+          "path": "AGENTS.md",
+          "line": 95,
+          "end_line": 103
+        }
+      ]
+    },
+    {
+      "id": "merge",
+      "lane": "review",
+      "col": 4,
+      "type": "frontend",
+      "label": "Owner merges",
+      "sublabel": "Rebase the pull request",
+      "width": 160,
+      "sources": [
+        {
+          "path": "AGENTS.md",
+          "line": 97,
+          "end_line": 103
+        }
+      ],
+      "yOffset": 0
+    },
+    {
+      "id": "change",
+      "lane": "review",
+      "col": 3,
+      "type": "backend",
+      "label": "Tell the instance",
+      "sublabel": "change.yml \u00b7 merged or closed",
+      "width": 160,
+      "sources": [
+        {
+          "path": ".github/workflows/change.yml",
+          "line": 1,
+          "end_line": 15
+        },
+        {
+          "path": ".github/workflows/change.yml",
+          "line": 36,
+          "end_line": 66
+        }
+      ],
+      "yOffset": 0
+    },
+    {
+      "id": "main",
+      "lane": "deploy",
+      "col": 4,
+      "type": "backend",
+      "label": "Check the push to main",
+      "sublabel": "check.yml runs again",
+      "width": 160,
+      "sources": [
+        {
+          "path": ".github/workflows/check.yml",
+          "line": 35,
+          "end_line": 41
+        },
+        {
+          "path": "docs/deploy.md",
+          "line": 683,
+          "end_line": 710
+        }
+      ],
+      "yOffset": -40
+    },
+    {
+      "id": "wait",
+      "lane": "deploy",
+      "col": 5,
+      "type": "security",
+      "label": "External deploy job",
+      "sublabel": "Green gate; main tip settled",
+      "width": 160,
+      "sources": [
+        {
+          "path": "docs/deploy.md",
+          "line": 683,
+          "end_line": 710
+        }
+      ],
+      "yOffset": -40
+    },
+    {
+      "id": "coolify",
+      "lane": "deploy",
+      "col": 5,
+      "type": "cloud",
+      "label": "Coolify deploys",
+      "sublabel": "compose.coolify.yaml",
+      "width": 160,
+      "sources": [
+        {
+          "path": "docs/deploy.md",
+          "line": 175,
+          "end_line": 202
+        },
+        {
+          "path": "docs/deploy.md",
+          "line": 229,
+          "end_line": 231
+        },
+        {
+          "path": "compose.coolify.yaml",
+          "line": 10,
+          "end_line": 13
+        }
+      ],
+      "yOffset": 40
+    },
+    {
+      "id": "health",
+      "lane": "deploy",
+      "col": 4,
+      "type": "backend",
+      "label": "Read GET /healthz",
+      "sublabel": "Deployed commit must match",
+      "width": 160,
+      "sources": [
+        {
+          "path": "src/surfaces/http.ts",
+          "line": 807,
+          "end_line": 809
+        },
+        {
+          "path": "src/server/kernel/app.ts",
+          "line": 189,
+          "end_line": 200
+        },
+        {
+          "path": "docs/deploy.md",
+          "line": 700,
+          "end_line": 704
+        }
+      ],
+      "yOffset": 40
+    }
+  ],
+  "edges": [
+    {
+      "id": "edit-local",
+      "from": "edit",
+      "to": "local"
+    },
+    {
+      "id": "local-pr",
+      "from": "local",
+      "to": "pr"
+    },
+    {
+      "id": "pr-scope",
+      "from": "pr",
+      "to": "scope",
+      "label": "PR check"
+    },
+    {
+      "id": "scope-static",
+      "from": "scope",
+      "to": "static",
+      "role": "branch",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "scope-tests",
+      "from": "scope",
+      "to": "tests",
+      "role": "branch",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "scope-image",
+      "from": "scope",
+      "to": "image",
+      "role": "branch",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "scope-ios",
+      "from": "scope",
+      "to": "ios",
+      "role": "branch",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "pr-description",
+      "from": "pr",
+      "to": "description",
+      "label": "PR only",
+      "role": "branch"
+    },
+    {
+      "id": "static-gate",
+      "from": "static",
+      "to": "gate",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "tests-gate",
+      "from": "tests",
+      "to": "gate",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "image-gate",
+      "from": "image",
+      "to": "gate",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "ios-gate",
+      "from": "ios",
+      "to": "gate",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "description-gate",
+      "from": "description",
+      "to": "gate",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "gate-question",
+      "from": "gate",
+      "to": "question",
+      "label": "blocked \u00b7 exit 2",
+      "variant": "security",
+      "role": "error",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "question-answer",
+      "from": "question",
+      "to": "answer"
+    },
+    {
+      "id": "answer-gate",
+      "from": "answer",
+      "to": "gate",
+      "label": "back to gate",
+      "variant": "dashed",
+      "role": "return",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "gate-verify",
+      "from": "gate",
+      "to": "verify",
+      "label": "passed \u00b7 exit 0",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "top"
+    },
+    {
+      "id": "verify-merge",
+      "from": "verify",
+      "to": "merge"
+    },
+    {
+      "id": "merge-change",
+      "from": "merge",
+      "to": "change",
+      "label": "merged",
+      "role": "async"
+    },
+    {
+      "id": "merge-main",
+      "from": "merge",
+      "to": "main",
+      "label": "push to main"
+    },
+    {
+      "id": "main-wait",
+      "from": "main",
+      "to": "wait",
+      "label": "successful push run"
+    },
+    {
+      "id": "wait-coolify",
+      "from": "wait",
+      "to": "coolify",
+      "label": "same commit; tip settled"
+    },
+    {
+      "id": "coolify-health",
+      "from": "coolify",
+      "to": "health"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Local work and the pull request",
+      "items": [
+        "Run bun test <file>, then bun run check (typecheck, lint and all tests).",
+        "Run bun scripts/work.ts pr-body <n> and bun scripts/work.ts board start <n> for the pull request. Start an issue card before editing, when there is one."
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Reports and the instance",
+      "items": [
+        "Each test runner uploads JUnit as results-<shard>-attempt-<n>. The gate reads the newest available attempt for each shard (scripts/ci-gate.ts:13\u201321, 93\u2013143).",
+        "scripts/ci-instance.ts chooses MAINWORTHY_URL: mainworthy.com, project mainworthy. With no usable compatible instance, start one for the run; rejected credentials or project access fail instead (scripts/ci-instance.ts:61\u2013140; docs/deploy.md:256\u2013261).",
+        "The gate also requires complete reports and successful required jobs. Only scope-authorized skips count as a pass; description skips on main pushes (check.yml:228\u2013239)."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "When the gate is red",
+      "items": [
+        "A person can answer in the queue; an agent can only advise under standard. Rerun gate alone to reuse the saved reports. A shard rerun replaces its older attempt; fix a flaky test rather than relying on retries (docs/deploy.md:303\u2013334).",
+        "mainworthy gate exits 0 passed, 1 failed, 2 blocked or 3 pending. Only a passed gate continues to review (src/core/runs.ts:44)."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Deployment is a separate handoff",
+      "items": [
+        "The deploy job lives outside this repository. Require the newest main push run and its current gate attempt to succeed, then reread main and the run before deploying. If the tip changed, start over with the settle delay (docs/deploy.md:683\u2013710).",
+        "The external job is documented here, not verified by this diagram. After deployment, require HTTP 200, ok: true and commit equal to the candidate SHA. Missing build metadata makes commit null (docs/deploy.md:700\u2013713; src/server/kernel/app.ts:189\u2013200)."
+      ]
+    }
+  ]
+}

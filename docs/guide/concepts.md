@@ -78,7 +78,7 @@ The gate is the answer for a commit, a change or a run. It has four verdicts, an
 | `passed` | 0 | Nothing. |
 | `failed` | 1 | A fix. A decision said a failure is real. |
 | `blocked` | 2 | A decision. A failure has no explanation yet, or two results disagree. |
-| `pending` | 3 | Evidence. A report or a shard of a job has not arrived or is still being applied, or nothing was proven. |
+| `pending` | 3 | Evidence. A report or a shard of a job has not arrived or is still being applied, or nothing was proven. A policy can accept a pipeline's declaration that no tests were required instead: see [reports with no tests](./policy.md#reports-with-no-tests). |
 
 Mainworthy computes the verdict from the evidence and the decisions in force. The verdict changes when the evidence or decisions change. When you answer a failure in the queue, Mainworthy computes the verdict again at once. If nothing else blocks the gate, excusing a flaky failure can turn the gate green without another pipeline run. A passing retry can do the same without a decision. [Changes and the gate](./changes.md) has the details.
 

@@ -29,6 +29,29 @@ can do that without recruiting users, in order of weight:
 
 Frequencies are guesses, marked "(guess)", for sizing the workload only.
 
+## What was built (checked against the code on 2026-10-18)
+
+The flows below were written before the code. They stay as written, as the record of what the design set out to
+cover. This table says what became of each at commit `35f1b3b`. [What Mainworthy does today](../features-and-flows.md)
+describes the workflows as they are.
+
+| Flow | Status | Where it departs |
+| --- | --- | --- |
+| F1 | Built | A local start makes the project `scratch` under `loose`, so a first case needs no project step. |
+| F2 | Built | Execution is a list of methods (person, pipeline, agent), not one manual or automated type. Drafts are kept on each keypress and become a version on leaving or after 30 idle seconds. |
+| F3 | Built in part | Search, bulk move, tag, archive and undo exist. A fragment updates its users only when selected. There is no bulk field editor and no merge of duplicate cases: `check` reports duplicate titles. |
+| F4 | Built | A run is planned from cases, a folder, a tag or a search. There is no selection by requirement or by "not run in N days", and no approval to start a run. |
+| F5 | Built | GitHub receives a commit status, not a check run. A test with no case follows the project's `ask`, `track` or `create` setting. |
+| F6 | Built in part | Tests are linked, made into cases or tracked without one. No warning yet says that a linked test stopped reporting. |
+| F7 | Built in part | Coverage by requirement is a report, and a run can target an announced build. There is no single release screen with scope, matrix and gaps. |
+| F8 | Built | Every save is a proposal, and the policy decides whether it waits for a person. |
+| F9 | Built in part | `tracker` makes or checks a GitHub or Jira issue, and a closed issue ends a defect's hold. The web UI has no button to file an issue, closing one starts no rerun, and Azure DevOps is not a tracker. |
+| F10 | Built in part | A passed run closes through a sign-off, and `audit` exports a verifiable file. A sign-off can be withdrawn, so a closed run is not frozen for good. |
+| F11 | Built in part | Cases import from CSV, TestRail and Qase without their history. An archive restores only into an empty instance. Local and server use the same SQLite file. |
+| F12 | Built and extended | Grants per project, scoped tokens with an end, invitations, passwords, passkeys, OIDC, authenticator apps and teams. A pipeline holds `read` and `record` at most. |
+| F13 | Built | `impact`, `claim` and finding questions. Accepting a finding's suggestion makes a separate proposal that the policy routes. |
+| F14 | Built as context and recording | An agent reads through `impact` and `get` and reports through `report` and `claim`. Mainworthy runs no agent's tools, and an agent's results count only in a run that asked for agents. |
+
 ## Actors
 
 | Actor | Does |

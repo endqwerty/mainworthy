@@ -24,13 +24,17 @@ to a commit that is on GitHub, then run
 bun scripts/diagrams.ts build <archify directory> <name>
 ```
 
-where the archify directory is a checkout of archify, or the installed skill. The script runs archify's
+where the archify directory is a checkout of archify, or the installed skill at `~/.claude/skills/archify`. The script runs archify's
 `finalize`, which validates the candidate against the files it cites, renders it and checks the page in a
 browser. It then records the hash of the candidate and of the page in `built.json`. `test/docs.test.ts` fails
 when a candidate and its page no longer match that record, so a candidate is never edited without its page.
 
 A new diagram is a new candidate, built the same way, then one line in `src/surfaces/docs/content.ts` and one
 link on the page that shows it: a paragraph that is only `[Diagram: caption](../diagrams/<name>.html)`.
+
+Diagrams that no instance serves, for the pages read on GitHub (`docs/development/` and
+`docs/features-and-flows.md`), are in `docs/development/diagrams/`, each candidate beside its page and a PNG of
+it. The same command builds them, draws each PNG and stamps them in that directory's `built.json`. A name is in one set only.
 
 The `.png` beside three of the pages is a screenshot, for places that do not render HTML (a pull request
 description).

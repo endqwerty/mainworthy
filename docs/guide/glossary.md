@@ -32,7 +32,7 @@ What the software should do, written as a title and steps with expected results.
 
 ## Change
 
-A commit or pull request that results were reported for, shown on the Changes screen with its gate. See [changes and the gate](./changes.md).
+A pull request, a branch other than the trunk, or a commit that results were reported for. The Changes screen shows each with the gate of its current head. See [changes and the gate](./changes.md).
 
 ## Clause
 
@@ -49,6 +49,10 @@ What you have typed into a case and not yet recorded as a version. Mainworthy ke
 ## Finding
 
 Something a review noticed about a case, reported by a person or an agent. A finding is a question until someone accepts, rejects or defers it.
+
+## Fragment
+
+A case whose steps other cases reuse. A case that uses a fragment pins it at one version, and moves to a newer version only through a proposal. See [reuse pinned fragments](./write-cases.md#reuse-pinned-fragments).
 
 ## Gate
 
@@ -92,7 +96,11 @@ One suite with its own cases, results, queue and policy. An instance can hold se
 
 ## Proposal
 
-An edit to a case, a link or the policy, as it was submitted. Saving and proposing are the same call. The policy decides whether a proposal takes effect at once or waits for a person. A proposal has a ref such as `P-4`.
+A set of edits as it was submitted: to cases, folders, the requirements a case covers, fragment pins, quarantine or the policy. Linking a test to a case is a separate answer to a `map` question, not a proposal. Saving and proposing are the same call. The policy decides whether a proposal takes effect at once or waits for a person. A proposal has a ref such as `P-4`.
+
+## Quarantine
+
+A decision that excuses the failures of one automated test reported while it stands. It ends when a person ends it, at its expiry, or after the passing streak its exit rule names. Results reported before it started or after it ended are not covered. See [quarantine an unreliable test](./report-results.md#quarantine-an-unreliable-test).
 
 ## Question
 
@@ -101,6 +109,10 @@ Something that needs an answer: a proposed edit, a test with no case, a failed r
 ## Queue
 
 The one list of open questions for a project, with the most blocking questions first. <kbd>g</kbd> <kbd>q</kbd> opens the queue.
+
+## Requirement
+
+A key such as `WEB-290` that cases cover through `covers: [KEY]`. The coverage report counts each requirement's cases by their latest results. See [reports](./reports.md#coverage-by-requirement).
 
 ## Result
 
@@ -112,7 +124,7 @@ The policy acting by itself. Where a clause assigns an answer to a rule, Mainwor
 
 ## Run
 
-A request for evidence that specifies which results count and what is needed before the run is complete. A change run exists for each reported commit. A planned run is started by hand.
+A request for evidence that specifies which results count and what is needed before the run is complete. A change run exists for each commit that a pipeline or a person reported. A commit only an agent reported has none. A planned run is started by hand.
 
 ## Session
 

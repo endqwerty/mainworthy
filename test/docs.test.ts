@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Glob } from "bun";
 import { z } from "zod";
-import { candidatePath, currentStamp, diagramNames, STAMP, Stamp } from "../scripts/diagrams.ts";
+import { candidatePath, currentStamp, diagramNames, REPOSITORY, SETS, Stamp, stampPath } from "../scripts/diagrams.ts";
 import { applyBlocks, blocksIn, generatedBlocks } from "../scripts/gen-docs.ts";
 import { type Instance, start, VERSION } from "../src/app/start.ts";
 import { ADAPTER_COMMANDS } from "../src/cli/dispatch.ts";
@@ -194,18 +194,36 @@ describe("what the docs must name", () => {
 
 describe("the diagrams", () => {
 	test("every diagram has its source, and its page was built from the source as it is now", () => {
-		const pages = readdirSync("docs/diagrams")
-			.filter((file) => file.endsWith(".html"))
-			.map((file) => file.slice(0, -".html".length))
-			.sort();
-		expect(pages).toEqual(diagramNames());
-		const stamp = Stamp.parse(JSON.parse(readFileSync(STAMP, "utf8")));
-		// A candidate edited without `bun scripts/diagrams.ts build`, or a page edited by hand, differs here.
-		expect(currentStamp(), "run bun scripts/diagrams.ts build <archify directory> <name>").toEqual(stamp);
+		for (const set of SETS) {
+			const pages = readdirSync(set.pages)
+				.filter((file) => file.endsWith(".html"))
+				.map((file) => file.slice(0, -".html".length))
+				.sort();
+			expect(pages, set.pages).toEqual(diagramNames(set));
+			const stamp = Stamp.parse(JSON.parse(readFileSync(stampPath(set), "utf8")));
+			// A candidate edited without `bun scripts/diagrams.ts build`, or a page edited by hand, differs here.
+			expect(currentStamp(set), "run bun scripts/diagrams.ts build <archify directory> <name>").toEqual(stamp);
+		}
 	});
 
 	test("only pages and their pictures are beside the sources: no receipt of the tool that built them", () => {
 		expect(readdirSync("docs/diagrams").filter((file) => !/\.(html|png)$/.test(file))).toEqual(["src"]);
+		// The repository's diagrams keep each candidate beside its page, and a picture of a page is named for it.
+		const names = diagramNames(REPOSITORY);
+		const strays = readdirSync(REPOSITORY.pages).filter((file) => {
+			if (file === "built.json") return false;
+			const match = /^([a-z0-9-]+)\.(html|json|png)$/.exec(file);
+			return !match || !names.includes(match[1] ?? "");
+		});
+		expect(strays).toEqual([]);
+	});
+
+	test("a diagram the repository keeps names no path on the machine it was built on", () => {
+		const local = /\/(Users|Volumes|home)\/[A-Za-z]/;
+		const offenders = diagramNames(REPOSITORY)
+			.flatMap((name) => [`${name}.html`, `${name}.json`])
+			.filter((file) => local.test(readFileSync(join(REPOSITORY.pages, file), "utf8")));
+		expect(offenders).toEqual([]);
 	});
 });
 
