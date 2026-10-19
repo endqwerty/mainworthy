@@ -113,6 +113,20 @@ for (const surface of ["case", "queue"] as const)
 					if (device === "desktop") await page.setViewportSize({ width: 1280, height: 800 });
 					const evidence = page.locator(`[data-proposal-evidence="${proposed.question}"][data-proposal-loaded="true"]`);
 					await evidence.waitFor();
+					const rejectAtReadState = async () => {
+						await page.evaluate(
+							() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+						);
+						await evidence.evaluate((element) => {
+							window.addEventListener(
+								"keydown",
+								() => Reflect.set(window, "proposalReadAtReject", element.getAttribute("data-proposal-read")),
+								{ capture: true, once: true },
+							);
+						});
+						await page.keyboard.press("r");
+						return (await page.evaluate((): unknown => Reflect.get(window, "proposalReadAtReject"))) === "ready";
+					};
 					const row = evidence.locator(".dl").filter({ hasText: "x".repeat(100) });
 					expect(await row.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
 					expect(await evidence.getAttribute("data-proposal-read")).toBe("loaded");
@@ -121,18 +135,27 @@ for (const surface of ["case", "queue"] as const)
 					await scroller.evaluate((element) => {
 						element.scrollTop = element.scrollHeight;
 					});
-					await page.keyboard.press("r");
+					expect(await rejectAtReadState()).toBe(false);
 					expect((await server.api("get", { refs: [proposed.question] }))[0]?.state).toBe("open");
 					let pages = 0;
+					let answered = false;
 					while ((await evidence.getAttribute("data-proposal-read")) !== "ready" && pages++ < 40) {
-						await page.keyboard.press("r");
+						if (await rejectAtReadState()) {
+							answered = true;
+							break;
+						}
 						await page.waitForTimeout(50);
 						expect((await server.api("get", { refs: [proposed.question] }))[0]?.state).toBe("open");
 					}
-					expect(await evidence.getAttribute("data-proposal-read")).toBe("ready");
-					const response = page.waitForResponse((reply) => reply.url().endsWith("/decide"));
-					await page.keyboard.press("r");
-					await response;
+					if (!answered) {
+						expect(await evidence.getAttribute("data-proposal-read")).toBe("ready");
+						expect(await rejectAtReadState()).toBe(true);
+					}
+					const question = proposed.question;
+					await eventually(
+						async () => (await server.api("get", { refs: [question] }))[0]?.state,
+						(state) => state === "decided",
+					);
 					expect((await server.api("get", { refs: [proposed.question] }))[0]?.decision).toMatchObject({
 						answer: { is: "reject" },
 					});
