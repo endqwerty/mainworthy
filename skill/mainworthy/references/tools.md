@@ -272,6 +272,11 @@ Search cases by text, folder or tag; list tests (`unlinked: true`), runs or slot
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `in` | `"cases" \| "tests" \| "runs" \| "folders" \| "tags" \| "requirements" \| "slots" \| "changes" \| "deployments" \| "results"` | no |  Default: `"cases"`. |
+| `select` | `object` | no | For cases: preview a run selection instead of the listing filters. Excludes fragments. |
+| `select.cases` | `array<string>` | no |  |
+| `select.folders` | `array<integer \| string>` | no |  |
+| `select.tags` | `array<string>` | no |  |
+| `select.text` | `string` | no |  |
 | `text` | `string` | no |  |
 | `folder` | `integer \| string` | no |  |
 | `deep` | `boolean` | no | With `folder`: include its subfolders. |
