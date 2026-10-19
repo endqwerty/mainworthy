@@ -693,3 +693,32 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+(browserAvailable ? test : test.skip)(
+	"a private draft timeline names its base after a newer version arrives",
+	async () => {
+		const server = await startServer();
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await server.api("propose", { edits: [{ op: "create", outline: "Original title" }] });
+			view = await openPage(server, { path: "/p/scratch/suite/c/1" });
+			const { page } = view;
+			await page.getByRole("button", { name: "Original title", exact: true }).waitFor();
+			await page.keyboard.press("e");
+			await page.getByRole("textbox", { name: "Case title", exact: true }).fill("Private title");
+			await server.api("propose", {
+				edits: [{ op: "edit", case: "C-1", base: 1, body: { pre: "A newer public precondition" } }],
+			});
+			await page.getByText("Others see version 2", { exact: true }).waitFor();
+			expect(await page.locator(".timeline-block .ev.draft").innerText()).toContain(
+				"Your private draft. Based on version 1.",
+			);
+			expect(await page.getByRole("textbox", { name: "Case title", exact: true }).inputValue()).toBe("Private title");
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30000,
+);

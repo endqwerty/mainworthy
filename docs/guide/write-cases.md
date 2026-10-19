@@ -60,7 +60,8 @@ A numeric first column can supply step numbers without becoming action text.
 
 While you type, the editor keeps a private draft on this device.
 A new draft shows "Private, no version yet". For an existing case, others still see
-the recorded version named beside your draft.
+the recorded version named beside your draft. The timeline names the version your draft is based on,
+which can be older if someone else records a version while you type.
 
 The editor submits a changed draft when you leave or pause for 30 seconds.
 To submit sooner, press <kbd>Cmd</kbd> <kbd>Enter</kbd> on macOS or <kbd>Ctrl</kbd> <kbd>Enter</kbd> elsewhere.
@@ -258,7 +259,10 @@ since accepting it accepts all of them. An authorized person can use
 <kbd>a</kbd> to accept it or <kbd>r</kbd> to reject it.
 A key, or the Accept or Reject button, first brings the proposal into view and pages through its edits.
 It answers only once the last edit is showing.
-When the policy requires a reason, the case pane opens the same reason field as Queue.
+When the policy requires a reason, the case pane opens a field labeled with Accept or Reject.
+The answer buttons and keys stay disabled while this field is open.
+If someone settles the question meanwhile, the field closes when the page receives that decision.
+If your answer fails, the pane keeps newer timeline updates and reads the case again.
 Type the reason and press <kbd>Enter</kbd> to record the answer, or <kbd>Escape</kbd> to cancel.
 Conflicts and policy changes have separate rules. See [policy](./policy.md).
 

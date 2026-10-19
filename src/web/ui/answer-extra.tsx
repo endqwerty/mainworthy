@@ -5,6 +5,7 @@ import { useBindings } from "../lib/keys.ts";
 export function AnswerExtra({
 	kind,
 	field,
+	label,
 	value,
 	onChange,
 	onSubmit,
@@ -12,6 +13,7 @@ export function AnswerExtra({
 }: {
 	kind: "answer" | "withdrawal";
 	field: "ref" | "reason";
+	label?: string;
 	value: string;
 	onChange: (value: string) => void;
 	onSubmit: (value: string) => void;
@@ -35,11 +37,12 @@ export function AnswerExtra({
 			}}
 		>
 			<label htmlFor="answer-extra">
-				{kind === "withdrawal"
-					? "Reason for withdrawing the answer"
-					: field === "ref"
-						? "Defect reference, optional"
-						: "Reason required by policy"}
+				{label ??
+					(kind === "withdrawal"
+						? "Reason for withdrawing the answer"
+						: field === "ref"
+							? "Defect reference, optional"
+							: "Reason required by policy")}
 			</label>
 			<input
 				className="form-input"
