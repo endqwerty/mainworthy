@@ -1389,6 +1389,54 @@ test("policy use checks the caller's project permission, including a scoped admi
 	});
 });
 
+test("policy use keeps an acceptance refusal's status and needs", async () => {
+	await withInstance(async ({ client, cli, run }) => {
+		const policy = Policy.extend({ version: z.number() }).parse(
+			await client.call("admin", { do: "policy.show", project: "scratch" }),
+		);
+		await client.call("propose", {
+			edits: [
+				{
+					op: "policy",
+					base: policy.version,
+					clauses: [
+						{
+							id: "accept-policy",
+							kind: "adopt",
+							when: ["policy", "answer:accept"],
+							ask: { who: "admin", agents: "none", notProducer: true, reason: "optional" },
+							blocks: "nothing",
+						},
+						...policy.clauses,
+					],
+				},
+			],
+		});
+		const adoption = (await client.call("inbox", { kind: "adopt" })).items[0];
+		if (!adoption) throw new Error("missing policy adoption");
+		await client.call("decide", { q: adoption.q, onEvidence: adoption.evidenceHash, answer: { is: "accept" } });
+		const refused = await cli(["policy", "use", "standard", "--json"]);
+		expect(refused.code).toBe(4);
+		expect(JSON.parse(refused.stdout)).toMatchObject({
+			decision: [{ status: "forbidden", needs: "an admin who did not produce the evidence who is not an agent" }],
+		});
+		expect(refused.stderr).toBe("forbidden: an admin who did not produce the evidence who is not an agent\n");
+		const text = await run(["policy", "use", "standard"]);
+		expect(text.code).toBe(4);
+		expect(text.stderr).toBe("forbidden: an admin who did not produce the evidence who is not an agent\n");
+		expect(Policy.parse(await client.call("admin", { do: "policy.show", project: "scratch" })).clauses).toEqual([
+			{
+				id: "accept-policy",
+				kind: "adopt",
+				when: ["policy", "answer:accept"],
+				ask: { who: "admin", agents: "none", notProducer: true, reason: "optional" },
+				blocks: "nothing",
+			},
+			...policy.clauses,
+		]);
+	});
+});
+
 test("JUnit parser warnings go only to stderr", async () => {
 	await withInstance(async ({ cli, directory }) => {
 		const file = join(directory, "warning.xml");
