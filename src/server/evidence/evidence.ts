@@ -19,6 +19,10 @@ import { type CaseRow, caseById, caseRef, findCase, versionOf } from "../suite/s
 import { recordAttachments } from "./attachments.ts";
 import { buildWhat } from "./releases.ts";
 
+/** SQL predicate for result id expressions: a correction withdraws what it names, whatever its own outcome. */
+export const uncorrectedResults = (id: string, ...others: string[]): string =>
+	`NOT EXISTS (SELECT 1 FROM results correction WHERE correction.corrects IN (${[id, ...others].join(", ")}))`;
+
 export type TestRow = {
 	id: number;
 	project: number;
@@ -286,7 +290,7 @@ const Q = {
 	processedJobs: sql<{ target: number }, { job: string }>(
 		`SELECT DISTINCT job FROM batches WHERE target = $target AND state = 'processed'
 		 AND EXISTS (SELECT 1 FROM results r WHERE r.batch = batches.id AND r.method = 'auto'
-		             AND r.outcome IN ('pass', 'fail', 'error'))`,
+		             AND r.outcome IN ('pass', 'fail', 'error') AND ${uncorrectedResults("r.id")})`,
 	),
 	correctionOf: sql<{ result: number }, { id: number }>("SELECT id FROM results WHERE corrects = $result LIMIT 1"),
 	testByKey: sql<{ project: number; key: string }, TestRow>(
@@ -374,7 +378,7 @@ const Q = {
 	laneHistory: sql<{ target: number; test: number; actor: number; job: string }, ResultRow>(
 		`SELECT r.* FROM results r JOIN batches b ON b.id = r.batch
 		 WHERE r.target = $target AND r.test = $test AND r.actor = $actor AND b.job = $job
-		   AND NOT EXISTS (SELECT 1 FROM results later WHERE later.corrects = r.id)
+		   AND ${uncorrectedResults("r.id")}
 		 ORDER BY r.seq, r.ord`,
 	),
 	producedOn: sql<{ project: number; signature: number; actor: number }, { target: number; run: number | null }>(
@@ -388,7 +392,7 @@ const Q = {
 		`SELECT r.id, r.outcome, r.attempt FROM results r JOIN batches b ON b.id = r.batch
 		 WHERE r.target = $target AND r.test = $test AND r.actor = $actor AND b.job = $job
 		   AND r.method = $method AND r.outcome IN ('pass', 'fail', 'error')
-		   AND NOT EXISTS (SELECT 1 FROM results c WHERE c.corrects = r.id)
+		   AND ${uncorrectedResults("r.id")}
 		 ORDER BY r.attempt DESC, CASE WHEN r.outcome = 'pass' THEN 0 ELSE 1 END DESC, r.id DESC LIMIT 1`,
 	),
 	insertFlip: sql<{ project: number; test: number; target: number; first: number; second: number; seq: number }>(
@@ -939,8 +943,8 @@ export function nothingRequiredOn(db: Db, targets: readonly TargetRow[]): boolea
 }
 /**
  * The jobs that have reported for a target, for a run that requires a job: a pipeline's report (or a person
- * passing one on) that ran something. What counts is a decisive automated result in the batch, each result by
- * its own method: an agent's report under the job's name is not the job, a report in which every automated
+ * passing one on) that ran something. What counts is an uncorrected decisive automated result in the batch,
+ * each result by its own method: an agent's report under the job's name is not the job, a report in which every automated
  * result was skipped or could not run says the job ran nothing, and a person's own pass of a case sent along
  * with it is theirs, not the job's.
  */
@@ -1495,9 +1499,9 @@ const RESERVED_KEY = /^case:\d+$/i;
 export function resultsOfCaseOnTargets(db: Db, caseId: number, targets: readonly number[]): ResultRow[] {
 	if (targets.length === 0) return [];
 	return db.allDynamic<ResultRow>(
-		`SELECT * FROM results WHERE basis_case = ? AND target IN (${placeholders(targets.length)})
-		 AND NOT EXISTS (SELECT 1 FROM results later WHERE later.corrects = results.id)
-		 ORDER BY seq, ord`,
+		`SELECT r.* FROM results r WHERE r.basis_case = ? AND r.target IN (${placeholders(targets.length)})
+		 AND ${uncorrectedResults("r.id")}
+		 ORDER BY r.seq, r.ord`,
 		[caseId, ...targets],
 	);
 }

@@ -1,5 +1,6 @@
 import type { FlakyDetectionSettings, SameCodeEvidence } from "../../core/flaky.ts";
 import { type Db, sql } from "../kernel/db.ts";
+import { uncorrectedResults } from "./evidence.ts";
 
 type Flip = {
 	signature: number;
@@ -39,13 +40,13 @@ const Q = {
 			  AND a.at >= $since AND r.at >= $since
 			  AND ((a.outcome = 'pass' AND r.outcome IN ('fail', 'error'))
 			    OR (r.outcome = 'pass' AND a.outcome IN ('fail', 'error')))
-			  AND NOT EXISTS (SELECT 1 FROM results c WHERE c.corrects IN (a.id, r.id))
+			  AND ${uncorrectedResults("a.id", "r.id")}
 			  AND NOT EXISTS (
 			    SELECT 1 FROM results worse JOIN batches wb ON wb.id = worse.batch
 			    WHERE worse.target = r.target AND worse.test = r.test AND worse.actor = r.actor
 			      AND worse.method = 'auto' AND wb.job = b.job AND worse.outcome IN ('fail', 'error')
 			      AND worse.attempt = CASE WHEN a.outcome = 'pass' THEN a.attempt ELSE r.attempt END
-			      AND NOT EXISTS (SELECT 1 FROM results c WHERE c.corrects = worse.id)
+			      AND ${uncorrectedResults("worse.id")}
 			  )
 		) WHERE sample <= 3 ORDER BY CASE class WHEN 'assertion' THEN 0 WHEN 'timeout' THEN 1 ELSE 2 END, signature, sample
 	`),
