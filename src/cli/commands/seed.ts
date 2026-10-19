@@ -1,6 +1,6 @@
 import { assertPositionals } from "../args.ts";
 import { CliError } from "../errors.ts";
-import { line, printJson } from "../output.ts";
+import { displayUrl, line, printJson } from "../output.ts";
 import { DEFAULT_SEED, DEFAULT_SEED_CASES, DEFAULT_SEED_DAYS, seed } from "../seed.ts";
 import type { AdapterCommand } from "./types.ts";
 
@@ -49,7 +49,7 @@ export const seedCommand: AdapterCommand = {
 			run: seeded.run,
 			proposal: seeded.proposal,
 			questions: seeded.questions,
-			url: `${client.url}/p/${project}/suite`,
+			url: displayUrl(`${client.url}/p/${project}/suite`),
 		};
 		if (args.has("json")) printJson(summary, args.bool("compact"));
 		else {

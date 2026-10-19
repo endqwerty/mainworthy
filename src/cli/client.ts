@@ -8,7 +8,7 @@ import { OPS } from "../server/ops/index.ts";
 import type { Reply } from "../server/ops/registry.ts";
 import type { Args } from "./args.ts";
 import { CliError } from "./errors.ts";
-import { warning } from "./output.ts";
+import { displayUrl, warning } from "./output.ts";
 import { REPLY_SCHEMAS } from "./replies.ts";
 
 const ErrorSchema = z.object({
@@ -177,7 +177,10 @@ export class Client {
 		try {
 			response = await fetch(`${this.url}/healthz`, { redirect: "manual", signal: AbortSignal.timeout(5000) });
 		} catch {
-			throw new CliError("connection", `cannot connect to ${this.url}; start the server with mainworthy serve`);
+			throw new CliError(
+				"connection",
+				`cannot connect to ${displayUrl(this.url)}; start the server with mainworthy serve`,
+			);
 		}
 		if (response.status >= 300 && response.status < 400) {
 			const location = response.headers.get("location");
@@ -188,21 +191,21 @@ export class Client {
 			);
 		}
 		if (!response.ok)
-			throw new CliError("connection", `the server answered ${response.status} to /healthz at ${this.url}`);
+			throw new CliError("connection", `the server answered ${response.status} to /healthz at ${displayUrl(this.url)}`);
 		let body: unknown;
 		try {
 			body = await response.json();
 		} catch {
 			throw new CliError(
 				"connection",
-				`the server answered ${response.status} to /healthz with invalid JSON at ${this.url}`,
+				`the server answered ${response.status} to /healthz with invalid JSON at ${displayUrl(this.url)}`,
 			);
 		}
 		const health = ApiHealth.safeParse(body);
 		if (!health.success || health.data.apiVersion !== API_VERSION)
 			throw new CliError(
 				"incompatible",
-				`CLI requires API ${API_VERSION}; the server at ${this.url} does not advertise it; use a CLI and server with the same API version (mainworthy version; mainworthy health --json)`,
+				`CLI requires API ${API_VERSION}; the server at ${displayUrl(this.url)} does not advertise it; use a CLI and server with the same API version (mainworthy version; mainworthy health --json)`,
 			);
 	}
 
@@ -219,7 +222,10 @@ export class Client {
 		try {
 			return await fetch(`${this.url}${path}`, { ...init, headers });
 		} catch {
-			throw new CliError("connection", `cannot connect to ${this.url}; start the server with mainworthy serve`);
+			throw new CliError(
+				"connection",
+				`cannot connect to ${displayUrl(this.url)}; start the server with mainworthy serve`,
+			);
 		}
 	}
 
