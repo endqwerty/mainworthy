@@ -13,7 +13,16 @@ import ui from "../../src/web/index.html";
 import { call } from "../../src/web/lib/api.ts";
 import { Slot } from "../../src/web/runs/models.ts";
 import { ciReport } from "../helpers.ts";
-import { answer, browserAvailable, eventually, fetched, openPage, type Server, startServer } from "./support.ts";
+import {
+	answer,
+	answerWhenRead,
+	browserAvailable,
+	eventually,
+	fetched,
+	openPage,
+	type Server,
+	startServer,
+} from "./support.ts";
 
 const check = test.skipIf(!browserAvailable);
 const latch = () => {
@@ -61,7 +70,7 @@ async function failures(server: Server, strict = false) {
 			{ token: producer },
 		);
 }
-async function grant(server: Server, actor: string, kind: "human" | "ci" = "human") {
+async function grant(server: Server, actor: string, kind: "human" | "agent" | "ci" = "human") {
 	return z.object({ token: z.string() }).parse(
 		await server.api("admin", {
 			do: "token.create",
@@ -76,6 +85,46 @@ const qref = (page: Awaited<ReturnType<typeof openPage>>["page"]) =>
 	page.locator("[data-current-question]").getAttribute("data-current-question");
 const ready = (page: Awaited<ReturnType<typeof openPage>>["page"]) =>
 	page.locator('[data-active="true"][data-ready="true"]').waitFor();
+
+for (const is of ["accept", "reject"] as const)
+	check(
+		`Queue describes what ${is} did to a proposal`,
+		async () => {
+			const server = await startServer({ preset: "standard" });
+			await server.api("propose", { edits: [{ op: "create", outline: "Original title" }] });
+			const agent = await grant(server, "reviewer", "agent");
+			const proposed = await server.api(
+				"propose",
+				{ edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Proposed title" } }] },
+				{ token: agent },
+			);
+			if (!proposed.question || !proposed.proposal) throw new Error("Expected a waiting proposal");
+			const h = await openPage(server, { path: "/p/scratch/queue" });
+			try {
+				const { page } = h;
+				page.setDefaultTimeout(5000);
+				await answerWhenRead(page, proposed.question, is === "accept" ? "a" : "r");
+				await page.locator(".queue-last").getByText("recorded", { exact: false }).waitFor();
+				expect(await page.locator("#bar [role=status]").innerText()).toBe(
+					`${proposed.question} · ${is === "accept" ? "Accept. The adopted version stays in history." : "Reject. The proposal stays in history; the case is unchanged."}`,
+				);
+				const [question, proposal, current] = await server.api("get", {
+					refs: [proposed.question, proposed.proposal, "C-1"],
+				});
+				expect(question).toMatchObject({ state: "decided", decision: { answer: { is } } });
+				expect(proposal).toMatchObject({ ref: proposed.proposal });
+				expect(current).toMatchObject({
+					head: is === "accept" ? 2 : 1,
+					title: is === "accept" ? "Proposed title" : "Original title",
+				});
+				expect(h.errors).toEqual([]);
+			} finally {
+				await h.close();
+				await server.stop();
+			}
+		},
+		30000,
+	);
 
 check(
 	"Settled keeps an answer and its recorded ending after the cause passes",
@@ -100,7 +149,6 @@ check(
 				answer: { is: "test" },
 				reason: "The assertion needs a fix.",
 			});
-			await server.api("report", report("trace408b"));
 			const { page } = h;
 			page.setDefaultTimeout(5000);
 			await page.getByRole("button", { name: "Settled", exact: true }).click();
@@ -109,12 +157,24 @@ check(
 			await decision.getByText("The test is wrong", { exact: true }).waitFor();
 			await decision.getByText("Decided by robin", { exact: false }).waitFor();
 			await decision.getByText("The assertion needs a fix.", { exact: true }).waitFor();
+			expect(await page.locator("#hints").getByText("Undo answer", { exact: false }).count()).toBe(1);
+			await page.keyboard.press("Control+k");
+			const palette = page.locator("[data-overlay=palette]");
+			await palette.waitFor();
+			expect(await palette.getByRole("option", { name: /Undo answer/ }).count()).toBe(1);
+			await page.keyboard.press("Escape");
+			await server.api("report", report("trace408b"));
 			await decision
 				.getByText("Every test it named passed on trace408b where it had failed; the answer ended.", { exact: true })
 				.waitFor();
 			expect(await decision.getByRole("button", { name: "Withdraw answer" }).count()).toBe(0);
 			expect(await page.locator(`[data-question="${question.q}"] .blk`).count()).toBe(0);
 			expect(await page.locator(".queue-heading .blk").count()).toBe(0);
+			const footerUndo = await page.locator("#hints").getByText("Undo answer", { exact: false }).count();
+			await page.keyboard.press("Control+k");
+			await palette.waitFor();
+			expect([footerUndo, await palette.getByRole("option", { name: /Undo answer/ }).count()]).toEqual([0, 0]);
+			await page.keyboard.press("Escape");
 			await page.keyboard.press("u");
 			expect((await server.api("get", { refs: [question.q] }))[0]).toMatchObject({ state: "dissolved" });
 			await page.reload();
