@@ -2,6 +2,8 @@ import { expect, test } from "bun:test";
 import type { Page } from "playwright-core";
 import { z } from "zod";
 import { emptyBody } from "../../src/core/model.ts";
+import { ReportInput } from "../../src/core/ops.ts";
+import { Slot } from "../../src/web/runs/models.ts";
 import { browserAvailable, eventually, openPage, type Server, startServer } from "./support.ts";
 
 const check = test.skipIf(!browserAvailable);
@@ -729,7 +731,7 @@ check(
 );
 
 check(
-	"R5B-1 a failed note request behind a later write releases the note for the next shortcut",
+	"R5B-1 a lost note request reconciles its note before the queued shortcut",
 	async () => {
 		const server = await startServer({ preset: "standard" });
 		await cases(server, 3);
@@ -741,9 +743,9 @@ check(
 			const { page } = h;
 			page.setDefaultTimeout(5000);
 			await page.locator('[data-active="true"][data-ready="true"]').waitFor();
-			const requests: unknown[] = [];
+			const requests: z.infer<typeof ReportInput>[] = [];
 			await page.route("**/report", async (route) => {
-				requests.push(route.request().postDataJSON());
+				requests.push(ReportInput.parse(route.request().postDataJSON()));
 				if (requests.length === 1) {
 					await first.held;
 					await route.abort("failed");
@@ -774,9 +776,32 @@ check(
 				async () => requests.length,
 				(n) => n === 3,
 			);
-			const notes = z.object({ results: z.array(z.object({ note: z.string().optional() })) });
-			expect(notes.parse(requests[1]).results[0]?.note).toBeUndefined();
-			expect(notes.parse(requests[2]).results[0]?.note).toBe("wrong total");
+			await eventually(
+				() => page.locator("#stat").innerText(),
+				(text) => text.includes("C-1 pass recorded"),
+			);
+			expect(requests.map((request) => request.results[0])).toEqual([
+				{ test: { case: "C-1" }, outcome: "fail", note: "wrong total" },
+				{ test: { case: "C-1" }, outcome: "fail", note: "wrong total" },
+				{ test: { case: "C-1" }, outcome: "pass", corrects: 1 },
+			]);
+			const commands = requests.map((request) => request.cmd);
+			expect(commands[0]).toBeTypeOf("string");
+			expect(commands[1]).toBe(commands[0]);
+			expect(commands[2]).toBeTypeOf("string");
+			expect(commands[2]).not.toBe(commands[0]);
+			const timeline = await server.api("timeline", { ref: "C-1" });
+			expect(
+				timeline.entries
+					.filter((entry) => entry.t === "result")
+					.reverse()
+					.map(({ outcome, note, corrects }) => ({ outcome, note, corrects })),
+			).toEqual([
+				{ outcome: "fail", note: "wrong total", corrects: null },
+				{ outcome: "pass", note: null, corrects: 1 },
+			]);
+			const slots = Slot.array().parse((await server.api("find", { in: "slots", run: run.run })).items);
+			expect(slots[0]).toMatchObject({ case: "C-1", fills: [{ outcome: "pass", note: null }] });
 		} finally {
 			first.release();
 			second.release();

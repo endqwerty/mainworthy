@@ -34,7 +34,7 @@ export function YourTokens() {
 				setMessage(
 					saidOfWrite(
 						error,
-						"No answer came back. If the token was created, its secret is lost. Check the list, revoke that token and make another.",
+						"No readable answer came back. If the token was created, its secret is lost. Check the list, revoke that token and make another.",
 					),
 				);
 				void tokens.refetch();
@@ -56,7 +56,7 @@ export function YourTokens() {
 				setMessage(
 					saidOfWrite(
 						error,
-						"No answer came back, so the page cannot tell whether the token was revoked. Check the list.",
+						"No readable answer came back, so the page cannot tell whether the token was revoked. Check the list.",
 					),
 				);
 				void tokens.refetch();

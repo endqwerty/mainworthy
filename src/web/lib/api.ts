@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { type Api, type Envelope, ERROR_CODES, INSTANCE_OPS, type OpName, type SessionInfo } from "../../core/api.ts";
 import { Unlinked } from "../../core/kinds.ts";
+import { REPLIES } from "../../core/replies.ts";
 import {
 	authenticationGeneration,
 	authenticationUnchanged,
@@ -49,6 +50,18 @@ const Session = z.object({
 });
 
 type Refusal = Extract<Envelope<unknown>, { ok: false }>["error"];
+/**
+ * The server answered `ok`, in a shape this page cannot read: a tab from before a deploy that changed the reply.
+ * Not an `ApiError`: the server did not refuse, so a write may have been recorded, and a caller that keeps a
+ * command for a write that may have happened keeps it.
+ */
+export class UnreadableReply extends Error {
+	constructor() {
+		super("The server answered something this page cannot read; reload.");
+		this.name = "UnreadableReply";
+	}
+}
+
 export class ApiError extends Error {
 	constructor(
 		readonly code: Refusal["code"],
@@ -85,8 +98,9 @@ export type CallOptions = {
 };
 
 const instanceOps: readonly OpName[] = INSTANCE_OPS;
+const replySchemas: { [O in OpName]: z.ZodType<Api[O]["reply"]> } = REPLIES;
 
-/** The operation map owns input and reply types; wire envelopes are validated at this boundary. */
+/** The operation map owns input and reply types; envelopes and replies are validated at this boundary. */
 export async function call<O extends OpName>(
 	op: O,
 	input: Api[O]["input"],
@@ -119,7 +133,9 @@ export async function call<O extends OpName>(
 	const envelope = Wire.parse(await response.json());
 	assertOwner();
 	if (!envelope.ok) refuse(envelope.error, response.status);
-	return envelope.result as Api[O]["reply"];
+	const parsed = replySchemas[op].safeParse(envelope.result);
+	if (!parsed.success) throw new UnreadableReply();
+	return parsed.data;
 }
 export async function session(
 	options: { owner?: DeviceSession; signal?: AbortSignal; keepalive?: boolean } = {},

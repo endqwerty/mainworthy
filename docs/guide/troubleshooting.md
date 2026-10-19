@@ -159,6 +159,17 @@ Server mode refuses to revoke the owner's last working token so the owner can st
 
 ## The web UI
 
+### "The server answered something this page cannot read; reload."
+
+The reply does not match the operation's expected data. Reload the page to load the current web app, then try again.
+If the message persists, ask the operator to check the server. After an action that writes data, check whether it took effect before repeating it.
+
+On a run page, an unreadable or lost report reply leaves the outcome unknown until the page checks the original command.
+If that check also fails, keep the run page open. Press a result key on the affected slot to check the same request again.
+That press resolves the earlier result before you can record another one. If the server refuses the resent report,
+the page shows the refusal and keeps the note. The next result key can send a new result.
+Settings reads the credential list again after a possible passkey addition.
+
 ### A list is loading while reports or edits arrive
 
 Suite keeps loading the remaining cases while changes arrive. The web app lets a page or refresh finish before reading the list again. Changes that arrive during that read are combined into one refresh. The newest changes can appear after the current load finishes. Queue and Runs use the same behaviour.

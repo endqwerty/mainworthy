@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
+import { ReportInput } from "../../src/core/ops.ts";
 import { Slot } from "../../src/web/runs/models.ts";
 import { browserAvailable, eventually, openPage, type Server, startServer } from "./support.ts";
 
@@ -201,9 +202,10 @@ for (const missingReply of [false, true])
 				const { page } = h;
 				page.setDefaultTimeout(5000);
 				await ready(page);
-				let sent = 0;
+				const requests: z.infer<typeof ReportInput>[] = [];
 				await page.route("**/report", async (route) => {
-					if (++sent === 1) {
+					requests.push(ReportInput.parse(route.request().postDataJSON()));
+					if (requests.length === 1) {
 						await gate.held;
 						if (missingReply) {
 							await route.abort("failed");
@@ -216,7 +218,7 @@ for (const missingReply of [false, true])
 				await page.keyboard.type("wrong total");
 				await page.keyboard.press("Enter");
 				await eventually(
-					async () => sent,
+					async () => requests.length,
 					(count) => count === 1,
 				);
 				if (missingReply) await page.keyboard.press("u");
@@ -227,22 +229,35 @@ for (const missingReply of [false, true])
 				await page.keyboard.press("Enter");
 				gate.release();
 				await eventually(
-					async () => sent,
-					(count) => count === (missingReply ? 3 : 2),
+					async () => requests.length,
+					(count) => count === (missingReply ? 4 : 2),
 				);
-				const slots = await eventually(
-					() => server.api("find", { in: "slots", run: run.run }),
-					(rows) =>
-						Slot.array().parse(rows.items)[0]?.fills[0]?.outcome === "fail" &&
-						Slot.array().parse(rows.items)[0]?.fills[0]?.result !== undefined,
+				const timeline = await eventually(
+					() => server.api("timeline", { ref: "C-1" }),
+					(row) => row.entries.filter((entry) => entry.t === "result").length === (missingReply ? 3 : 2),
+				);
+				const results = timeline.entries.filter((entry) => entry.t === "result").reverse();
+				expect(results.map(({ outcome, note, atStep }) => ({ outcome, note, atStep }))).toEqual([
+					{ outcome: "fail", note: "wrong total", atStep: null },
+					...(missingReply ? [{ outcome: "skip", note: "Withdrawn by the author", atStep: null }] : []),
+					{ outcome: "fail", note: "wrong total", atStep: "s2" },
+				]);
+				const commands = requests.map((request) => request.cmd);
+				expect(commands[0]).toBeTypeOf("string");
+				expect(new Set(commands).size).toBe(missingReply ? 3 : 2);
+				if (missingReply) {
+					expect(commands[1]).toBe(commands[0]);
+					expect(requests[1]).toEqual(requests[0]);
+				}
+				expect(requests.map((request) => request.results[0]?.outcome)).toEqual(
+					missingReply ? ["fail", "fail", "skip", "fail"] : ["fail", "fail"],
 				);
 				await eventually(
-					() => server.api("timeline", { ref: "C-1" }),
-					(row) => row.entries.filter((entry) => entry.t === "result").length === 2,
+					() => page.locator("#stat").innerText(),
+					(text) => text.includes("C-1 fail recorded"),
 				);
 				const final = Slot.array().parse((await server.api("find", { in: "slots", run: run.run })).items)[0]?.fills[0];
-				expect(final?.note).toBe("wrong total");
-				expect(Slot.array().parse(slots.items)[0]?.case).toBe("C-1");
+				expect(final).toMatchObject({ outcome: "fail", note: "wrong total", atStep: "s2" });
 			} finally {
 				gate.release();
 				await h.close();

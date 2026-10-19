@@ -516,16 +516,26 @@ async function cases(server: Server, count: number) {
 			await page.locator('[data-slot="1"]').click();
 			expect(await note.inputValue()).toBe("");
 
-			// The note on the slot goes with whatever is recorded next, as the field beside the keys shows (issue #73):
-			// a pass takes the note a failed request left there.
+			// An uncertain failure keeps its original request and note. The next result key resolves that failure
+			// before a later key can record a correction.
 			await page.locator('[data-slot="2"]').click();
 			expect(await note.inputValue()).toBe("Second failed note");
+			await page.keyboard.press("p");
+			const recovered = await eventually(
+				async () => Slot.array().parse((await server.api("find", { in: "slots", run: planned.run })).items),
+				(slots) => slots[1]?.fills[0]?.outcome === "fail",
+			);
+			expect(recovered[1]?.fills[0]?.note).toBe("Second failed note");
+			await eventually(
+				() => note.inputValue(),
+				(text) => text === "",
+			);
 			await page.keyboard.press("p");
 			const passed = await eventually(
 				async () => Slot.array().parse((await server.api("find", { in: "slots", run: planned.run })).items),
 				(slots) => slots[1]?.fills[0]?.outcome === "pass",
 			);
-			expect(passed[1]?.fills[0]?.note).toBe("Second failed note");
+			expect(passed[1]?.fills[0]?.note).toBeNull();
 		} finally {
 			failedReports.resolve();
 			await view?.close();
@@ -700,7 +710,7 @@ async function cases(server: Server, count: number) {
 					return route.fulfill({ json: { ok: true, result: { count: null, items: [rest], cursor: null } } });
 				const response = await route.fetch();
 				const reply = z
-					.object({ ok: z.literal(true), result: z.object({ items: z.array(z.unknown()) }) })
+					.object({ ok: z.literal(true), result: z.object({ items: z.array(z.unknown()) }).passthrough() })
 					.passthrough()
 					.parse(await response.json());
 				rest = reply.result.items[1];

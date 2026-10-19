@@ -39,7 +39,7 @@ export function Teams({ people, changed }: { people: readonly string[]; changed:
 			setMessage(
 				saidOfWrite(
 					error,
-					"No answer came back, so the page cannot tell whether the team changed. The lists are read again; check them before sending another change.",
+					"No readable answer came back, so the page cannot tell whether the team changed. The lists are read again; check them before sending another change.",
 				),
 			);
 		} finally {

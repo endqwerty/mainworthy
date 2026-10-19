@@ -117,7 +117,7 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 				setProblem(
 					saidOfWrite(
 						error,
-						`No answer came back, so the page cannot tell whether ${wanted} was invited. The lists below are read again. If ${wanted} is in them, that link is lost: a recovery link is their way in.`,
+						`No readable answer came back, so the page cannot tell whether ${wanted} was invited. The lists below are read again. If ${wanted} is in them, that link is lost: a recovery link is their way in.`,
 					),
 				);
 				void Promise.all([invitations.refetch(), actors.refetch()]);
@@ -140,7 +140,7 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 					about: person,
 					message: saidOfWrite(
 						error,
-						"No answer came back. If a link was made it is lost, and making another takes its place.",
+						"No readable answer came back. If a link was made it is lost, and making another takes its place.",
 					),
 				});
 				void invitations.refetch();

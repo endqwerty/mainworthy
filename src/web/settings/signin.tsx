@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, type RefObject, useRef, useState } from "react";
 import { type CredentialRow, whyNotPassword } from "../../core/people.ts";
-import { ApiError } from "../lib/api.ts";
+import { ApiError, UnreadableReply } from "../lib/api.ts";
 import { browserName } from "../lib/browser.ts";
 import { makePasskey, PasskeyError, passkeysAvailable } from "../lib/passkey.ts";
 import { addPasskey, beginPasskey, listCredentials, removeCredential } from "../lib/people.ts";
@@ -10,7 +10,7 @@ import { useApp } from "../ui/context.tsx";
 import { age, DocLink, PASSWORD_RULES, PasswordCount, SectionHeading } from "../ui/index.tsx";
 import { Authenticator } from "./authenticator.tsx";
 import { EmailForm } from "./email.tsx";
-import { saidBy, useList, withId } from "./list.ts";
+import { saidBy, saidOfWrite, useList, withId } from "./list.ts";
 import { YourTokens } from "./personal-tokens.tsx";
 import "./people.css";
 
@@ -209,7 +209,7 @@ function PasswordForm({
 			return {
 				at: "form",
 				message:
-					"No answer came back, so the page cannot tell whether the password was changed. It may or may not have been: sign in with the new password to find out. The list below is read again.",
+					"No readable answer came back, so the page cannot tell whether the password was changed. It may or may not have been: sign in with the new password to find out. The list below is read again.",
 			};
 		if (error.code === "forbidden") return { at: "current", message: "The current password is not right." };
 		// Wrong too often. The wait is all that is said, and the right password is refused too until it is over.
@@ -336,7 +336,7 @@ function PasskeyForm({ onAdded }: { onAdded: () => Promise<void> }) {
 	const [message, setMessage] = useState("");
 
 	function refused(error: unknown): string {
-		if (error instanceof PasskeyError) return error.message;
+		if (error instanceof PasskeyError || error instanceof UnreadableReply) return error.message;
 		if (!(error instanceof ApiError)) return NO_ANSWER;
 		// One credential is registered once on the instance. The browser usually says so first.
 		if (error.code === "conflict") return "This passkey is already registered.";
@@ -354,15 +354,30 @@ function PasskeyForm({ onAdded }: { onAdded: () => Promise<void> }) {
 		if (!name) return;
 		setBusy(true);
 		// The challenge is asked for at each press: it is good for five minutes and for one registration.
+		let adding = false;
 		void beginPasskey()
 			.then(makePasskey)
-			.then((made) => addPasskey({ made, label: name }))
+			.then((made) => {
+				adding = true;
+				return addPasskey({ made, label: name });
+			})
 			.then(() => {
 				setMessage(`${name} was added.`);
 				setLabel(named());
 				return onAdded();
 			})
-			.catch((error: unknown) => setProblem(refused(error)))
+			.catch((error: unknown) => {
+				if (adding && !(error instanceof ApiError)) {
+					setProblem(
+						saidOfWrite(
+							error,
+							"The page cannot tell whether the passkey was added. The credential list is read again; check it before adding another passkey.",
+						),
+					);
+					return onAdded();
+				}
+				setProblem(refused(error));
+			})
 			.finally(() => setBusy(false));
 	}
 
