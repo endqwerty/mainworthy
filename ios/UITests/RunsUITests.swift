@@ -49,6 +49,7 @@ final class RunsUITests: XCTestCase {
 		regression.tap()
 		let start = app.buttons["start-run"]
 		XCTAssertTrue(start.waitForExistence(timeout: 10))
+		XCTAssertTrue(app.staticTexts["1 in progress"].waitForExistence(timeout: 10))
 		shot("2-run")
 		// The pipeline filled the first four slots: each is left to that result, so its row does not open, and the
 		// list says why. The fifth, which nobody filled, opens.
@@ -56,6 +57,7 @@ final class RunsUITests: XCTestCase {
 		app.swipeUp()
 		XCTAssertTrue(app.buttons["run-slot-5"].waitForExistence(timeout: 5))
 		XCTAssertFalse(app.buttons["run-slot-4"].exists)
+		XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "In progress · robin · since")).firstMatch.waitForExistence(timeout: 10))
 		shot("2b-left-to-others")
 		XCTAssertTrue(
 			app.staticTexts[
@@ -137,5 +139,36 @@ final class RunsUITests: XCTestCase {
 		app.navigationBars.buttons["Runs"].tap()
 		app.segmentedControls.buttons["Closed"].tap()
 		XCTAssertTrue(app.staticTexts["No run matches."].waitForExistence(timeout: 10))
+	}
+	@MainActor func testRunListRefreshesWhenOnlyOneOfTwoLeasesExpires() async throws {
+		let project = try await makeProject()
+		let address = try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])
+		func request(_ op: String, _ body: String) async throws -> Data {
+			var request = URLRequest(url: try XCTUnwrap(URL(string: "\(address)/api/p/\(project)/\(op)")))
+			request.httpMethod = "POST"
+			request.setValue("Bearer \(environment["MAINWORTHY_TEST_TOKEN"] ?? "")", forHTTPHeaderField: "Authorization")
+			request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+			request.httpBody = Data(body.utf8)
+			let (data, response) = try await URLSession.shared.data(for: request)
+			XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+			return data
+		}
+		struct Slots: Decodable {
+			struct Page: Decodable { struct Slot: Decodable {let id: Int; let state: String}; let items: [Slot] }
+			let result: Page
+		}
+		let data = try await request("find", #"{"in":"slots","run":"R-3"}"#)
+		let slots = try JSONDecoder().decode(Slots.self, from: data).result.items.filter { $0.state == "missing" }
+		XCTAssertEqual(slots.count, 2)
+		_ = try await request("work", #"{"do":"take","run":"R-3","slot":\#(slots[0].id),"seconds":30}"#)
+		_ = try await request("work", #"{"do":"take","run":"R-3","slot":\#(slots[1].id),"seconds":3600}"#)
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", address]
+		app.launch()
+		try signIn(app)
+		app.openProject(project)
+		app.openTab("Runs")
+		XCTAssertTrue(app.staticTexts["2 cases left · 2 in progress"].waitForExistence(timeout: 10))
+		XCTAssertTrue(app.staticTexts["2 cases left · 1 in progress"].waitForExistence(timeout: 45))
 	}
 }

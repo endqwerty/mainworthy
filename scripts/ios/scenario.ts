@@ -189,6 +189,7 @@ export async function scenario(url: string, ownerToken: string, project: string)
 		select: { cases },
 		accepts: { commit: CHANGE, repo: REPO },
 	});
+	await owner.call("work", { do: "take", run: planned.run, seconds: 86400 });
 	await agent.call("claim", {
 		lens: "adversarial-review",
 		about: "pr:482",

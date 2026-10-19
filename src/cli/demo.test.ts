@@ -430,3 +430,29 @@ test(
 	},
 	SLOW,
 );
+
+test(
+	"a repeated demo seed renews one live slot and renewal keeps its start",
+	async () => {
+		await withInstance(async ({ instance, client }) => {
+			const first = await seed(client, { project: "demo", cases: 30, days: 1 });
+			const again = await seed(client, { project: "demo", cases: 30, days: 1 });
+			expect(again.workSlot).toBe(first.workSlot);
+			const demo = client.with({ project: "demo" });
+			expect((await demo.call("get", { refs: [first.run] }))[0]).toMatchObject({ inProgress: 1 });
+			const before = (await demo.call("find", { in: "slots", run: first.run })).items.find(
+				(s) => s.id === first.workSlot,
+			);
+			const { renewDemoWork } = await import("./demo.ts");
+			await renewDemoWork(instance, "demo", first);
+			const after = (await demo.call("find", { in: "slots", run: first.run })).items.find(
+				(s) => s.id === first.workSlot,
+			);
+			expect(after?.work).toMatchObject({
+				kind: "held",
+				since: z.object({ since: z.number() }).parse(before?.work).since,
+			});
+		});
+	},
+	SLOW,
+);

@@ -11,7 +11,7 @@ Runs (<kbd>g</kbd> <kbd>r</kbd>) lists every run of the project, newest first.
 A planned run is one somebody planned, as this page describes.
 A change run is the one Mainworthy makes for each commit a report names; its name is the
 commit and the change or branch it is on, such as `58fbc1c on pr:482`.
-Each row shows the verdict, the slot count of a planned run, and how long ago the run was made.
+Each row shows the verdict, the slot count and in-progress count of a planned run, and how long ago the run was made.
 
 Choose **Planned** or **Change** to see one kind, and **Open** or **Closed** to see one state.
 Select a planned run and press <kbd>Enter</kbd> to open its cockpit.
@@ -284,3 +284,27 @@ Recording by run alone uses that run's build and environment.
 MCP's report schema omits the build target. To report through MCP, supply a planned run in `run`.
 A gate with missing evidence stays pending. Failures and sign-off use the same rules as other
 planned runs. The web and iPhone planners do not yet offer a build picker.
+
+## Take a slot while working
+
+The cockpit and iPhone run screen show each live lease's holder and when work began.
+The header counts in-progress slots. Evidence counts and the verdict stay separate.
+Updates from other producers arrive through the existing live connection.
+
+Take the next free unfinished slot with the CLI:
+
+```
+$ mainworthy work --do take --run R-2
+```
+
+Include `--slot 123` to take a named slot or renew your lease. `--seconds 900` requests
+a length between 30 and 86400 seconds, with 900 as the default. The server sets the
+start and end. You must have a method admitted by both the run and its pinned case.
+Another holder's lease refuses the take and names the holder and deadline.
+A null slot means no eligible unfinished slot is free. Two simultaneous next-slot
+requests get different slots.
+
+Give the slot back with `mainworthy work --do give-back --run R-2 --slot 123`.
+A qualifying result from any producer ends the lease. Expiry frees it without a
+background cleanup job. Closing a run also ends its leases. A lease changes neither
+the evidence a run counts nor its verdict.

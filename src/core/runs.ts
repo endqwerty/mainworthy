@@ -3,6 +3,13 @@
 import { z } from "zod";
 import { MethodKind } from "./model.ts";
 
+/** Work coordination is independent of the evidence a slot already holds. */
+export const SlotWork = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("free") }),
+	z.object({ kind: z.literal("held"), actor: z.string(), since: z.number().int(), until: z.number().int() }),
+]);
+export type SlotWork = z.infer<typeof SlotWork>;
+
 /**
  * Which targets count toward a run: one commit, an announced build's artifact, or `self`. A build label is
  * immutable. `self` counts only results typed into the run and proves nothing about a build. The server settles

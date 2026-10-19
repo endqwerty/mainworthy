@@ -21,6 +21,7 @@ import {
 import type { AnyOp } from "./registry.ts";
 import { statsOp } from "./stats.ts";
 import { trackerOp, trackerStatusOp } from "./trackers.ts";
+import { workOp } from "./work.ts";
 import { announceOp, changeOp, claimOp, decideOp, planOp, proposeOp, reportOp } from "./writes.ts";
 
 const list: AnyOp[] = [
@@ -36,6 +37,7 @@ const list: AnyOp[] = [
 	trackerOp,
 	// request evidence
 	planOp,
+	workOp,
 	// decide
 	decideOp,
 	// read

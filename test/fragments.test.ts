@@ -215,7 +215,7 @@ test("upgrading an existing database rebuilds pinned search once", () => {
 	const expected = documents();
 	// Schema 29 indexed only the pin's empty action. Restore that derived row and schema marker.
 	db.exec(
-		"UPDATE search_docs SET body = '' WHERE rowid = 2; UPDATE meta SET value = '29' WHERE key = 'schema_version'",
+		"DROP TABLE slot_leases; UPDATE search_docs SET body = '' WHERE rowid = 2; UPDATE meta SET value = '29' WHERE key = 'schema_version'",
 	);
 	expect(h.call("find", { text: "zephyrpassword", folder: "Consumers" })).toMatchObject({
 		count: 1,

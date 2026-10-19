@@ -153,7 +153,7 @@ struct RunReceiptTests {
 			try JSONDecoder().decode(
 				Wire.RunSlot.self,
 				from: Data(
-					#"{"id":1,"case":"C-1","title":"Open","version":1,"state":"missing","fills":[]}"#.utf8)))
+					#"{"id":1,"case":"C-1","title":"Open","version":1,"state":"missing","work":{"kind":"free"},"fills":[]}"#.utf8)))
 		let execution = RunExecution(run: "R-1", slot: slot, content: CaseContent(title: "Open"))
 		#expect(try await server.project("shop").report(execution, outcome: .pass) == .refused(sentence))
 	}
@@ -169,9 +169,19 @@ struct RunReceiptTests {
 			try JSONDecoder().decode(
 				Wire.RunSlot.self,
 				from: Data(
-					#"{"id":1,"case":"C-1","title":"Open","version":1,"state":"missing","fills":[]}"#.utf8)))
+					#"{"id":1,"case":"C-1","title":"Open","version":1,"state":"missing","work":{"kind":"free"},"fills":[]}"#.utf8)))
 		await #expect(throws: ClientError.unreadable) {
 			_ = try await server.project("shop").execution(of: slot, in: "R-1")
 		}
 	}
+}
+
+@Suite("Slot work") struct SlotWorkTests {
+ @Test("a held slot disappears at the exact deadline")
+ func deadline() throws {
+  let wire = try JSONDecoder().decode(Wire.SlotWork.self, from: Data(#"{"kind":"held","actor":"reviewer","since":1800000000000,"until":1800000030000}"#.utf8))
+  let work = SlotWork(wire)
+  #expect(work.holder(at: Date(timeIntervalSince1970: 1800000029))?.actor == "reviewer")
+  #expect(work.holder(at: Date(timeIntervalSince1970: 1800000030)) == nil)
+ }
 }

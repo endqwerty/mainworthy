@@ -11,6 +11,7 @@ import { age, EmptyState, KeyCap, ListRow } from "../ui/index.tsx";
 import { RunCockpit } from "./cockpit.tsx";
 import { Run, tallyText } from "./models.ts";
 import { RunPlanner } from "./planner.tsx";
+import { useWorkExpiry } from "./work.ts";
 import "./runs.css";
 
 /**
@@ -85,6 +86,8 @@ function RunListing({ opened }: { opened: Run | null }) {
 	});
 	const parsed = Run.array().safeParse(read.data?.pages.flatMap((page) => page.items));
 	const runs = parsed.success ? parsed.data : [];
+	const deadlines = runs.flatMap((run) => (run.workUntil === null ? [] : [run.workUntil]));
+	const now = useWorkExpiry(project, deadlines.length ? Math.min(...deadlines) : null);
 	// The run whose address was opened is shown even when the list has not reached it, or a filter hides it.
 	const selected =
 		runs.find((run) => run.ref === chosen) ?? (opened && opened.ref === chosen ? opened : null) ?? runs[0];
@@ -160,7 +163,11 @@ function RunListing({ opened }: { opened: Run | null }) {
 							<span className="ref">{run.ref}</span>
 							<span className="run-title">
 								<b>{run.name}</b>
-								<span className="run-list-reason">{run.reason}</span>
+								<span className="run-list-reason">
+									{run.origin === "planned" &&
+										`${run.workUntil !== null && run.workUntil <= now ? 0 : run.inProgress} in progress · `}
+									{run.reason}
+								</span>
 							</span>
 							{run.state === "closed" && <span className="run-closed">closed</span>}
 							<span className={`run-verdict v-${run.verdict}`}>{run.verdict}</span>
@@ -235,7 +242,8 @@ function RunListing({ opened }: { opened: Run | null }) {
 							/>
 						</div>
 						<p className="dim">
-							{selected.slots ?? 0} pinned cases · {selected.tally.missing} missing
+							{selected.slots ?? 0} pinned cases · {selected.tally.missing} missing ·{" "}
+							{selected.workUntil !== null && selected.workUntil <= now ? 0 : selected.inProgress} in progress
 						</p>
 						<p>
 							{"self" in selected.accepts

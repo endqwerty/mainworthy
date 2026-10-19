@@ -9,6 +9,7 @@ import api1Actors from "../../test/fixtures/cli/actor-list-api1.json";
 import { ciReport } from "../../test/helpers.ts";
 import { Policy } from "../core/kinds.ts";
 import { QuestionItem, type ReportInput } from "../core/ops.ts";
+import { SlotWork } from "../core/runs.ts";
 import { API_VERSION } from "../core/version.ts";
 import { OP_LIST } from "../server/ops/index.ts";
 import { Client, plainHttpToAnotherMachine } from "./client.ts";
@@ -1830,15 +1831,31 @@ test("seed fills a project it makes, and leaves its pipeline and agent nothing o
 	});
 });
 
-test("seed sent again writes nothing twice, and a second project is seeded beside the first", async () => {
+test("seed sent again preserves evidence, renews one lease, and permits a second project", async () => {
 	await withInstance(async ({ run, client }) => {
 		const first = outputWith(Seeded, await run(["seed", "demo", "--cases", "12", "--json"]));
 		const seq = (await projects(client)).find((project) => project.key === "demo")?.seq;
+		if (seq === undefined) throw new Error("no demo");
+		const demo = client.with({ project: "demo" });
+		const work = async () => {
+			const rows = z
+				.array(z.object({ work: SlotWork }))
+				.parse((await demo.call("find", { in: "slots", run: first.run })).items);
+			const held = rows.map((row) => row.work).filter((state) => state.kind === "held");
+			expect(held).toHaveLength(1);
+			const lease = held[0];
+			if (!lease) throw new Error("no lease");
+			return lease;
+		};
+		const before = await work();
 		const again = await run(["seed", "demo", "--cases", "12", "--json"]);
 		expect(again.code).toBe(0);
 		expect(outputWith(Seeded, again)).toEqual(first);
 		expect(await casesIn(client, "demo")).toBe(12);
-		expect((await projects(client)).find((project) => project.key === "demo")?.seq).toBe(seq);
+		expect((await projects(client)).find((project) => project.key === "demo")?.seq).toBe(seq + 1);
+		const renewed = await work();
+		expect(renewed).toMatchObject({ kind: "held", actor: "robin", since: before.since });
+		expect(renewed.until).toBeGreaterThan(before.until);
 		// Another count is another request: it is refused in words about the seed, and adds no case.
 		const other = await run(["seed", "demo", "--cases", "20"]);
 		expect(other.code).toBe(4);

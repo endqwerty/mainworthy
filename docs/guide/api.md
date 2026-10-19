@@ -628,6 +628,30 @@ Start a run: choose cases, say which results count and what completes it. Eviden
 
 </details>
 
+### work
+
+Take a named slot or the next free unfinished slot for a lease, renew it, or give it back.
+
+|  |  |
+| --- | --- |
+| HTTP | `POST /api/p/<project>/work` |
+| Command | `mainworthy work` |
+| Needs | `record` |
+| Effect | writes |
+| Agent tool | yes |
+
+<details>
+<summary>Input of <code>work</code></summary>
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `do` | `"take" \| "give-back"` | yes |  |
+| `run` | `string` | yes |  |
+| `slot` | `integer` | no | Slot id from find slots. Omit to take the next free unfinished slot. |
+| `seconds` | `integer` | no | Lease length in seconds, from 30 to 86400. Default: 900. Default: `900`. |
+
+</details>
+
 ### decide
 
 Answer a question, or withdraw a decision. Policy says whether your answer settles it, is advice, or is refused.
@@ -709,8 +733,9 @@ Read cases, questions, runs, tests or proposals by ref.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
+| `repo` | `string` | no | For commit refs: disambiguate repositories. |
 | `cursor` | `string` | no | For one proposal: the cursor from its previous page of edits. Restart without it after a project change. |
-| `refs` | `array<string>` | yes | Refs of cases (C-), questions (Q-), runs (R-), tests (T-) or proposals (P-). |
+| `refs` | `array<string>` | yes | C-, Q-, R-, T-, P-, commit:hash or change:key. |
 | `fields` | `array<string>` | no | For cases: any of title, pre, steps, methods, tags, covers, place, proof. Default: all. |
 | `as` | `"data" \| "md"` | no | `md` returns a case as canonical Markdown: fewer tokens than JSON. Default: `"data"`. |
 | `unless` | `record<string>` | no | Ref to the etag from get for the same as/fields. Unchanged: {ref, unchanged: true, etag}. |
@@ -813,7 +838,7 @@ The verdict for a commit, a change or a run: passed, failed (needs a fix), block
 | Command | `mainworthy gate` |
 | Needs | `read` or `record` |
 | Effect | reads |
-| Agent tool | yes |
+| Agent tool | no |
 
 <details>
 <summary>Input of <code>gate</code></summary>
@@ -1169,12 +1194,12 @@ guidance for commit reuse, question answers, and review filtering.
 | `propose` | Propose cases at their base version. Status: adopted=current, open=needs acceptance, conflict=resolve, rejected. |
 | `report` | Record results for `target` (commit) or `run` (planned). Identify each test by `key` or case ref. |
 | `claim` | Review cases (`reviewed`, C-311@hash) at change `about` and commit `patch`. Record findings; `known` returns prior findings and answers. |
+| `work` | Before working, take with run and no slot. Renew with slot; report or give-back releases. |
 | `decide` | Answer inbox using evidenceHash as onEvidence. Status: decided, advised=person decides, forbidden, invalid, already, reopened, conflict=evidence or decision changed. Choose from answers. Withdraw with undo and ifDecision=reply.decision. |
 | `inbox` | Open questions and evidenceHash; filter with on. |
-| `get` | Read refs; unless=etag; page proposals with cursor. |
+| `get` | Read refs; verdicts at commit:hash, change:key, R-n. unless=etag; proposals page with cursor. |
 | `find` | Search cases by text, folder or tag; list tests (`unlinked: true`), runs or slots. Page with `cursor`. |
-| `impact` | Review a change (`pr:482`) or changed `files`: affected cases, hashes, prior reviews, questions, uncovered files. Reuse `cursor` as `since`. |
-| `since` | What changed since an earlier `cursor`: changed cases (one-line diff, no bodies) and settled questions. If `more`, call again with the new cursor. |
-| `gate` | Is this commit, change or run tested? Returns passed, failed, blocked or pending with the reason and the open questions. |
+| `impact` | Review change or files: affected cases, hashes, prior reviews, questions, gaps. Reuse cursor as since. |
+| `since` | Changes after cursor: case diffs and settled questions. If more, repeat with returned cursor. |
 
 <!-- /generated -->

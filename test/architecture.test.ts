@@ -810,7 +810,7 @@ describe("the module map", () => {
 			"result_excuses",
 			"quarantines",
 		],
-		"server/runs": ["runs", "run_tests", "slots", "slot_results", "depends_on"],
+		"server/runs": ["runs", "run_tests", "slots", "slot_results", "depends_on", "slot_leases"],
 		"server/decisions": ["questions", "question_refs", "answers", "decisions"],
 		"server/trackers": ["tracker_requests", "tracker_polls"],
 		"server/statuses": ["commit_statuses", "commit_status_delivery"],
@@ -885,6 +885,7 @@ describe("the module map", () => {
 		// Change endings, scope-move audit rows and demo marks preserve the old archive version (decisions 0022, 0038
 		// and 0100). Tracker delivery must never replay after import. None of these tables holds credentials.
 		const other = [
+			"slot_leases",
 			"change_ends",
 			"tracker_requests",
 			"tracker_polls",
@@ -1183,7 +1184,7 @@ describe("the registry", () => {
 		expect(MCP_OPS.length).toBeLessThanOrEqual(10);
 	});
 
-	test("a pipeline's token reaches attach, report, change, announce and gate", () => {
+	test("a pipeline's token reaches attach, report, change, announce, work and gate", () => {
 		// `record` is all a pipeline's token holds by default, so an operation that accepts it is one more thing a
 		// secret in a CI system can do. Adding to this list is a decision (docs/decisions/0014), not a copy of the
 		// nearest operation: `change`, which says that a pull request ended, came with decision 0022, and `announce` with decision 0046.
@@ -1191,7 +1192,7 @@ describe("the registry", () => {
 		// also the one operation that accepts either of two capabilities.
 		const accepts = (capability: "record" | "read") =>
 			OP_LIST.filter((op) => needs(op.needs).includes(capability)).map((op) => op.name);
-		expect(accepts("record")).toEqual(["attach", "report", "change", "announce", "gate"]);
+		expect(accepts("record")).toEqual(["attach", "report", "change", "announce", "work", "gate"]);
 		expect(OP_LIST.filter((op) => typeof op.needs !== "string").map((op) => op.name)).toEqual(["gate"]);
 		// What a pipeline may be let do besides: the reads, and nothing that writes.
 		expect(OP_LIST.filter((op) => accepts("read").includes(op.name) && op.effect !== "read")).toEqual([]);

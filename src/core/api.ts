@@ -25,6 +25,7 @@ import type {
 	ReportInput,
 	SinceInput,
 	TimelineInput,
+	WorkInput,
 } from "./ops.ts";
 import type { CredentialInput, CredentialSummary, InvitationInput, SessionInput } from "./people.ts";
 import type { REPLIES } from "./replies.ts";
@@ -45,6 +46,7 @@ type Inputs = {
 	report: In<typeof ReportInput>;
 	claim: In<typeof ClaimInput>;
 	plan: In<typeof PlanInput>;
+	work: In<typeof WorkInput>;
 	change: In<typeof ChangeInput>;
 	decide: In<typeof DecideInput>;
 	inbox: In<typeof InboxInput>;

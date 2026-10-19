@@ -377,3 +377,25 @@
 	margin: 0;
 	padding-left: 16px;
 }
+
+.run-working {
+	color: var(--acc);
+	font-size: 11px;
+}
+.run-dot.in-progress {
+	box-shadow: 0 0 0 2px var(--acc);
+}
+.run-pane [data-working] .row {
+	display: grid;
+	grid-template-columns: 22px auto minmax(0, 1fr) auto;
+	height: 54px;
+	align-content: center;
+	row-gap: 2px;
+}
+[data-working] .run-fill {
+	grid-column: 3 / -1;
+	max-width: none;
+}
+[data-working] .run-yours {
+	display: none;
+}

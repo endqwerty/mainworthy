@@ -19,7 +19,7 @@ import {
 	Unlinked,
 } from "./kinds.ts";
 import { Automate, CaseBody, CaseKind, ConflictAddress, MethodKind } from "./model.ts";
-import { Obligation, TargetMatch, Verdict } from "./runs.ts";
+import { Obligation, SlotWork, TargetMatch, Verdict } from "./runs.ts";
 import { TeamInput } from "./teams.ts";
 
 /**
@@ -556,6 +556,37 @@ export const PlanReply = z.object({
 });
 export type PlanReply = z.infer<typeof PlanReply>;
 
+export const WorkInput = z
+	.strictObject({
+		do: z.enum(["take", "give-back"]),
+		run: z.string(),
+		slot: z
+			.number()
+			.int()
+			.positive()
+			.optional()
+			.describe("Slot id from find slots. Omit to take the next free unfinished slot."),
+		seconds: z
+			.number()
+			.int()
+			.min(30)
+			.max(86_400)
+			.default(900)
+			.describe("Lease length in seconds, from 30 to 86400. Default: 900."),
+		cmd,
+	})
+	.superRefine((input, ctx) => {
+		if (input.do === "give-back" && input.slot === undefined)
+			ctx.addIssue({ code: "custom", path: ["slot"], message: "giving back needs a slot" });
+	});
+export const WorkReply = z.object({
+	run: z.string(),
+	slot: z.number().int().nullable(),
+	case: z.string().nullable(),
+	work: SlotWork,
+});
+export type WorkReply = z.infer<typeof WorkReply>;
+
 // ── reads ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 export const InboxInput = z.object({
@@ -625,17 +656,14 @@ export const InboxReply = z.object({
 export type InboxReply = z.infer<typeof InboxReply>;
 
 export const GetInput = z.object({
+	repo: z.string().optional().describe("For commit refs: disambiguate repositories."),
 	cursor: z
 		.string()
 		.optional()
 		.describe(
 			"For one proposal: the cursor from its previous page of edits. Restart without it after a project change.",
 		),
-	refs: z
-		.array(z.string())
-		.min(1)
-		.max(200)
-		.describe("Refs of cases (C-), questions (Q-), runs (R-), tests (T-) or proposals (P-)."),
+	refs: z.array(z.string()).min(1).max(200).describe("C-, Q-, R-, T-, P-, commit:hash or change:key."),
 	fields: z
 		.array(z.string())
 		.optional()

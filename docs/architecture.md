@@ -89,7 +89,7 @@ an operation named like a shortcut (`createCase`, `closeRun`) appears.
 | | Operations |
 | --- | --- |
 | Produce evidence | `attach` (append a file to a result) · `propose` (create or change cases, folders, links, the policy) · `import-csv` (preview and confirm mapped cases) · `report` (results) · `claim` (a review and its findings) · `change` (record a change's scope and head, or end it) · `announce` (a deployment and its build) · `tracker` (queue a defect issue) |
-| Request evidence | `plan` (start a run) |
+| Request evidence | `plan` (start a run) · `work` (take, renew or give back a slot lease) |
 | Decide | `decide` (answer a question, or withdraw a decision) |
 | Read | `attachment` (list or read a result's files) · `inbox` · `get` · `find` · `impact` · `since` · `gate` · `history` · `timeline` · `check` · `stats` · `command` · `tracker-status` (delivery state and issue reference) |
 | Administer | `audit` (export retained decisions and evidence) · `admin` (projects, actors, grants, teams, tokens) |

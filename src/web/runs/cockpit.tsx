@@ -14,6 +14,7 @@ import { ResultAttachments } from "../ui/attachments.tsx";
 import { useApp } from "../ui/context.tsx";
 import { age, EmptyState, KeyCap, ListRow, ProducerGlyph } from "../ui/index.tsx";
 import { type Fill, outcomeName, Run, RunCase, type RunOutcome, Slot, tallyText } from "./models.ts";
+import { useWorkExpiry } from "./work.ts";
 
 /**
  * Notes typed for the slots of one run and not yet on the server, by slot id. Each note has its own key, so two
@@ -56,6 +57,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 	const runRead = useQueryOp({ project, op: "get", input: { refs: [runRef] } });
 	const parsedRun = Run.safeParse(runRead.data?.[0]);
 	const run = parsedRun.success && parsedRun.data.ref === runRef ? parsedRun.data : null;
+	const now = useWorkExpiry(project, run?.workUntil ?? null);
 	useEffect(() => {
 		setStatus("Each result records its pinned version. p pass · f fail · b blocked · s skip.");
 	}, [setStatus]);
@@ -69,7 +71,11 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		getNextPageParam: (page) => page.cursor ?? undefined,
 	});
 	const parsedSlots = Slot.array().safeParse(slotsRead.data?.pages.flatMap((page) => page.items));
-	const storedSlots = parsedSlots.success ? parsedSlots.data : [];
+	const storedSlots: Slot[] = parsedSlots.success
+		? parsedSlots.data.map((slot) =>
+				slot.work.kind === "held" && slot.work.until <= now ? { ...slot, work: { kind: "free" } } : slot,
+			)
+		: [];
 	const confirmedSlots = useRef(new Map<number, Slot>());
 	for (const slot of storedSlots)
 		if (slot.fills.every((fill) => fill.result > 0)) confirmedSlots.current.set(slot.id, slot);
@@ -632,7 +638,11 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 					<b className="run-title">{run?.name ?? "Run"}</b>
 					<span className="dim">
 						{slots.filter(missing).length}
-						{slotsRead.hasNextPage ? "+" : ""} left
+						{slotsRead.hasNextPage ? "+" : ""} left ·{" "}
+						{run && (run.workUntil === null || run.workUntil > now)
+							? run.inProgress
+							: storedSlots.filter((slot) => slot.work.kind === "held").length}{" "}
+						in progress
 					</span>
 				</div>
 				<div className="run-summary">
@@ -654,8 +664,8 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 						<button
 							type="button"
 							key={slot.id}
-							className={`run-dot state-${slot.state} method-${slot.fills.at(-1)?.method ?? "none"} ${current?.id === slot.id ? "on" : ""}`}
-							aria-label={`Slot ${index + 1}: ${slot.case}, ${slot.state}${slot.fills.at(-1) ? ` by ${slot.fills.at(-1)?.by}` : ""}`}
+							className={`run-dot ${slot.work.kind === "held" ? "in-progress" : ""} state-${slot.state} method-${slot.fills.at(-1)?.method ?? "none"} ${current?.id === slot.id ? "on" : ""}`}
+							aria-label={`Slot ${index + 1}: ${slot.case}, ${slot.work.kind === "held" ? `in progress by ${slot.work.actor}` : slot.state}${slot.fills.at(-1) ? ` by ${slot.fills.at(-1)?.by}` : ""}`}
 							onClick={() => {
 								setCursor(slot.id);
 								setNoting(null);
@@ -665,7 +675,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 				</section>
 				<div className="pane-scroll" role="listbox" aria-label="Run slots">
 					{slots.map((slot, index) => (
-						<div key={slot.id} data-slot={slot.id}>
+						<div key={slot.id} data-slot={slot.id} data-working={slot.work.kind === "held" || undefined}>
 							<ListRow
 								selected={current?.id === slot.id}
 								onClick={() => {
@@ -678,6 +688,11 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 								<span className="run-title">{slot.title}</span>
 								<span className="dim mono">v{slot.version}</span>
 								<span className="run-fill">
+									{slot.work.kind === "held" && (
+										<span className="run-working" title={`Until ${new Date(slot.work.until).toLocaleString()}`}>
+											In progress · {slot.work.actor} · since {new Date(slot.work.since).toLocaleTimeString()}
+										</span>
+									)}
 									{slot.fills.length ? (
 										slot.fills.map((fill) => (
 											<span

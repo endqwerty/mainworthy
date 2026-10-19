@@ -575,6 +575,7 @@ function exportedTables(db: Db): string[] {
 	return tables(db).filter(
 		(name) =>
 			![
+				"slot_leases",
 				"tokens",
 				"sessions",
 				"credentials",
@@ -835,6 +836,7 @@ describe("Mainworthy instance archives", () => {
 			INSERT INTO projects VALUES (24, 17, 'other', 'Another project', 1, 1);
 			INSERT INTO folders VALUES (44, 24, NULL, 'Kept folder', 'a0', 'active', 1);
 			INSERT INTO grants (actor, project, can) VALUES (70, 24, '["read"]');
+			INSERT INTO slot_leases VALUES (602, 71, 1, 30001);
 			INSERT INTO change_ends VALUES (503, 'merged', 1);
 			INSERT INTO demo_projects VALUES (23, 1);
 			INSERT INTO tracker_polls VALUES (401, 'poll-1', 1, 0, NULL);
@@ -854,6 +856,7 @@ describe("Mainworthy instance archives", () => {
 		// the count says so. The other project holds no rows of the tables that find their project through a parent.
 		for (const table of [
 			...exportedTables(db),
+			"slot_leases",
 			"change_ends",
 			"tracker_requests",
 			"tracker_polls",
@@ -1317,6 +1320,7 @@ describe("Mainworthy instance archives", () => {
 			"passkey_users",
 			"scope_moves",
 			"sessions",
+			"slot_leases",
 			"tokens",
 			"tracker_polls",
 			"tracker_requests",
