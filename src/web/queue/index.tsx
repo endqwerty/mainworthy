@@ -46,6 +46,7 @@ type LastAnswer = {
 	confirmed: Promise<Withdrawal[]>;
 	command?: Api["decide"]["input"] | undefined;
 };
+type QueuedAnswer = { is: string; suggested?: Record<string, unknown> | undefined; via: "key" | "button" };
 type InlineAnswer = { entries: DecisionEntry[]; field: "ref" | "reason"; value: string } & (
 	| { kind: "answer" }
 	| { kind: "withdrawal"; prior: LastAnswer }
@@ -92,9 +93,10 @@ function QueueWorkbench() {
 	const [inline, setInline] = useState<InlineAnswer | null>(null);
 	const extraInputs = useRef(new Map<string, string>());
 	const actionNo = useRef(0);
-	const undoing = useRef(new Set<LastAnswer>());
+	const undoing = useRef(new Map<LastAnswer, { next: QueuedAnswer | null }>());
+	const [readyAnswer, setReadyAnswer] = useState<{ q: string; input: QueuedAnswer } | null>(null);
 	const isUndoing = (ref: string) =>
-		[...undoing.current].some((answer) => answer.entries.some((entry) => entry.question.q === ref));
+		[...undoing.current.keys()].some((answer) => answer.entries.some((entry) => entry.question.q === ref));
 	const pendingAnswers = useRef(new Set<string>());
 	const seenRoute = useRef<string | null>(null);
 	useEffect(() => {
@@ -507,8 +509,27 @@ function QueueWorkbench() {
 			);
 		}
 	}
+	useEffect(() => {
+		if (!readyAnswer) return;
+		setReadyAnswer(null);
+		if (current?.q !== readyAnswer.q || state !== "open") {
+			setStatus("Queued answer discarded. Read the question again before answering.");
+			return;
+		}
+		answer(readyAnswer.input.is, readyAnswer.input.suggested, readyAnswer.input.via);
+	});
+
 	function answer(is: string, suggested?: Record<string, unknown>, via: "key" | "button" = "key"): void {
-		if (state !== "open" || inline) return;
+		if (inline) return;
+		const pending = [...undoing.current].find(([prior]) =>
+			prior.entries.some((entry) => entry.question.q === current?.q),
+		)?.[1];
+		if (pending) {
+			pending.next = { is, suggested, via };
+			setStatus("Answer queued until the withdrawal is confirmed.");
+			return;
+		}
+		if (state !== "open") return;
 		if (bulk && suggested) {
 			setStatus("Advice is for the question shown. Clear the selection to take it.");
 			return;
@@ -603,30 +624,25 @@ function QueueWorkbench() {
 		}
 		submit(entries);
 	}
-	function undo(
-		questions = last?.entries.map((entry) => entry.question) ?? [],
-		reason?: string,
-		extra?: InlineAnswer,
-	): void {
-		if (!questions.length) return;
+	function undoShown(question: QuestionItem): void {
+		if (!question.decision) return;
+		if (last?.command && last.entries.some((entry) => entry.question.q === question.q)) {
+			undo(last);
+			return;
+		}
+		undo({
+			entries: [{ question, answer: question.decision.answer }],
+			confirmed: Promise.resolve([{ question, decision: question.decision.id }]),
+		});
+	}
+	function undo(prior = last, reason?: string, extra?: InlineAnswer): void {
+		if (!prior) return;
+		const questions = prior.entries.map((entry) => entry.question);
+		if (!questions.length || questions.some((question) => isUndoing(question.q))) return;
 		if (questions.some((question) => question.state === "dissolved" || question.decision?.supersedes)) {
 			setStatus("This answer has ended. There is no answer to withdraw.");
 			return;
 		}
-		const prior =
-			extra?.kind === "withdrawal"
-				? extra.prior
-				: state === "decided"
-					? {
-							entries: questions.map((question) => ({ question, answer: question.decision?.answer ?? {} })),
-							confirmed: Promise.resolve(
-								questions.flatMap((question) =>
-									question.decision ? [{ question, decision: question.decision.id }] : [],
-								),
-							),
-						}
-					: last;
-		if (!prior || undoing.current.has(prior)) return;
 		if (questions.some((question) => question.kind === "adopt")) {
 			setStatus("An adopted edit stays in history. Restore the earlier case version to undo it.");
 			setLastMessage(
@@ -648,22 +664,22 @@ function QueueWorkbench() {
 			return;
 		}
 		setInline(null);
-		undoing.current.add(prior);
+		const pending: { next: QueuedAnswer | null } = { next: null };
+		undoing.current.set(prior, pending);
+		setCursor(questions[0]?.q ?? null);
+		setSelected(new Set());
 		setLast(null);
 		const reopened = new Set<string>();
 		const alreadyOpen = new Set<string>();
+		const refused = new Set<string>();
 		let receipts: Withdrawal[] = [];
 		const action = ++actionNo.current;
-		bringBack(questions.map((q) => ({ ...q, state: "open", decision: null })));
-		// Undo chooses the open list even if a pending route read still says decided.
-		seenRoute.current = route.ref;
-		setState("open");
 		setLastMessage(`${named(questions)} · withdrawing the answer`);
 		void ordered(
 			questions.map((q) => q.q),
 			async () => {
 				receipts = await prior.confirmed;
-				if (!receipts.length) return;
+				if (!receipts.length) throw new Error("No confirmed answer is available to withdraw. Read the question again.");
 				const failures: string[] = [];
 				const withdrawals = receipts.map(({ question, decision }) => ({ q: question.q, ifDecision: decision }));
 				const one = withdrawals[0];
@@ -688,8 +704,10 @@ function QueueWorkbench() {
 							)
 								alreadyOpen.add(question.q);
 						}
-						if (reply?.status !== "reopened" && !alreadyOpen.has(question.q))
+						if (reply?.status !== "reopened" && !alreadyOpen.has(question.q)) {
+							if (reply) refused.add(question.q);
 							throw new Error(reply?.needs ?? "The decision could not be withdrawn.");
+						}
 						reopened.add(question.q);
 						if (extra) {
 							const entry = extra.entries.find((entry) => entry.question.q === question.q);
@@ -697,6 +715,18 @@ function QueueWorkbench() {
 						}
 					} catch (error) {
 						failures.push(`${question.q}: ${error instanceof Error ? error.message : "Try again."}`);
+					}
+				}
+				if (reopened.size) {
+					bringBack(
+						receipts
+							.filter(({ question }) => reopened.has(question.q))
+							.map(({ question }) => ({ ...question, state: "open", decision: null })),
+						action === actionNo.current,
+					);
+					if (action === actionNo.current) {
+						seenRoute.current = route.ref;
+						setState("open");
 					}
 				}
 				if (failures.length) throw new Error(failures.join(" "));
@@ -720,42 +750,28 @@ function QueueWorkbench() {
 							!cached?.pages.some((page) => page.items.some((item) => item.q === question.q)),
 					),
 				);
+				const q = questions[0]?.q;
+				if (pending.next && q && reopened.has(q)) setReadyAnswer({ q, input: pending.next });
 			},
 		)
 			.catch((error: unknown) => {
 				if (!sessionCurrent(owner)) return;
-				const remaining = receipts.filter(({ question }) => !reopened.has(question.q));
-				const unconfirmed = new Set(remaining.map(({ question }) => question.q));
-				setRestored((previous) => previous.filter((q) => !unconfirmed.has(q.q)));
-				setHidden((previous) => {
-					const next = new Set(previous);
-					for (const question of questions) next.delete(question.q);
-					return next;
-				});
-				queryClient.setQueriesData<InfiniteData<InboxReply>>(
-					{
-						predicate: (query) =>
-							query.queryKey[0] === project &&
-							query.queryKey[1] === "inbox" &&
-							query.queryKey[3] === "pages" &&
-							z.object({ state: z.string() }).safeParse(query.queryKey[2]).data?.state === "open",
-					},
-					(previous) =>
-						previous && {
-							...previous,
-							pages: previous.pages.map((page) => ({
-								...page,
-								items: page.items.filter((q) => !unconfirmed.has(q.q)),
-							})),
-						},
+				const remaining = receipts.filter(({ question }) => !reopened.has(question.q) && !refused.has(question.q));
+				const unconfirmed = new Set(
+					questions.filter((question) => !reopened.has(question.q)).map((question) => question.q),
 				);
-				const message = `${[...unconfirmed].join(", ")}: the withdrawal failed. ${reopened.size ? `${reopened.size} confirmed open. ` : ""}${error instanceof Error ? error.message : "Try again."} Press u to retry.`;
+				const detail = error instanceof Error ? error.message : "Try again.";
+				const message = `${[...unconfirmed].join(", ")}: the withdrawal failed. ${reopened.size ? `${reopened.size} confirmed open. ` : ""}${detail}${/[.!?]$/.test(detail) ? "" : "."}${remaining.length ? " Press u to retry." : " Read the question again before withdrawing."}${pending.next ? " Queued answer discarded." : ""}`;
 				if (action === actionNo.current) {
-					setLast({
-						entries: prior.entries.filter((entry) => unconfirmed.has(entry.question.q)),
-						confirmed: Promise.resolve(remaining),
-						command: prior.command,
-					});
+					setLast(
+						remaining.length
+							? {
+									entries: prior.entries.filter((entry) => unconfirmed.has(entry.question.q)),
+									confirmed: Promise.resolve(remaining),
+									command: prior.command,
+								}
+							: null,
+					);
 					setLastMessage(message);
 					setStatus(message);
 				}
@@ -809,7 +825,7 @@ function QueueWorkbench() {
 			key,
 			label: ANSWER_LABELS[is] ?? is,
 			handler: () => answer(is),
-			applies: () => active() && state === "open" && why === null,
+			applies: () => active() && (state === "open" || Boolean(current && isUndoing(current.q))) && why === null,
 		})),
 		{
 			key: "enter",
@@ -823,7 +839,7 @@ function QueueWorkbench() {
 		{
 			key: "u",
 			label: "Undo answer",
-			handler: () => undo(state === "decided" && current ? [current] : undefined),
+			handler: () => (state === "decided" && current ? undoShown(current) : undo()),
 			applies: () =>
 				active() &&
 				Boolean(last || current?.decision) &&
@@ -1060,7 +1076,7 @@ function QueueWorkbench() {
 										</p>
 									)}
 									{state === "decided" && current.state === "decided" && !current.decision.supersedes && (
-										<button className="out" type="button" onClick={() => undo([current])}>
+										<button className="out" type="button" onClick={() => undoShown(current)}>
 											<KeyCap>u</KeyCap> Withdraw answer
 										</button>
 									)}
@@ -1070,6 +1086,7 @@ function QueueWorkbench() {
 						{state === "open" && (
 							<div className="queue-answers">
 								<div className="queue-needs">
+									{isUndoing(current.q) && <p>Withdrawing the answer. An answer key queues a replacement.</p>}
 									{settled && <p>This question was settled elsewhere. Your note is kept.</p>}
 									{bulk && selection[0]
 										? `The answer you choose goes to the ${counted(selection)} selected.${selected.has(current.q) ? "" : " The question shown is not one of them."}`
@@ -1114,11 +1131,7 @@ function QueueWorkbench() {
 						onCancel={() => setInline(null)}
 						onSubmit={(value) => {
 							if (inline.kind === "withdrawal") {
-								undo(
-									inline.entries.map((entry) => entry.question),
-									value,
-									inline,
-								);
+								undo(inline.prior, value, inline);
 								return;
 							}
 							submit(

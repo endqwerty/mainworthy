@@ -292,6 +292,206 @@ for (const mode of ["single", "bulk", "advice"])
 		30000,
 	);
 
+for (const outcome of ["confirmed", "refused", "lost reply"])
+	check(
+		`an answer typed during withdrawal stays with its question: ${outcome}`,
+		async () => {
+			const server = await startServer({ preset: "standard" });
+			await failures(server);
+			const h = await openPage(server, { path: "/p/scratch/queue" });
+			const gate = latch();
+			try {
+				const { page } = h;
+				page.setDefaultTimeout(5000);
+				await page.locator("[data-current-question]").waitFor();
+				const q = await qref(page);
+				if (!q) throw Error("No question");
+				await page.keyboard.press("f");
+				await page.locator(".queue-last").getByText("recorded", { exact: false }).waitFor();
+				const sent: string[] = [];
+				await page.route("**/decide", async (route) => {
+					const input = route.request().postDataJSON();
+					sent.push(`${input.undo ?? input.q}:${input.undo ? "undo" : input.answer.is}`);
+					if (input.undo) {
+						await gate.held;
+						if (outcome === "lost reply") return route.abort();
+						if (outcome === "refused") {
+							const row = (await server.api("inbox", { state: "decided" })).items.find((row) => row.q === q);
+							if (!row) throw Error("No decision");
+							await server.api("decide", { q, onEvidence: row.evidenceHash, answer: { is: "defect" } });
+						}
+					}
+					await route.continue();
+				});
+				await page.keyboard.press("u");
+				await page.locator(".queue-last").getByText("withdrawing the answer", { exact: false }).waitFor();
+				expect(await qref(page)).toBe(q);
+				expect(await page.locator(`[data-question="${q}"]`).count()).toBe(0);
+				await page.keyboard.press("i");
+				expect((await server.api("get", { refs: [q] }))[0]?.state).toBe("decided");
+				gate.release();
+				if (outcome === "confirmed") {
+					await page.locator(".queue-last").getByText("recorded", { exact: false }).waitFor();
+					expect(sent).toEqual([`${q}:undo`, `${q}:infra`]);
+					expect((await server.api("get", { refs: [q] }))[0]?.decision).toMatchObject({ answer: { is: "infra" } });
+				} else {
+					await page.locator(".queue-last").getByText("Queued answer discarded.", { exact: false }).waitFor();
+					expect(sent).toEqual([`${q}:undo`]);
+					expect((await server.api("get", { refs: [q] }))[0]?.decision).toMatchObject({
+						answer: { is: outcome === "refused" ? "defect" : "flaky" },
+					});
+				}
+			} finally {
+				gate.release();
+				await h.close();
+				await server.stop();
+			}
+		},
+		30000,
+	);
+
+check(
+	"Settled u withdraws the shown question after another withdrawal loses its reply",
+	async () => {
+		const server = await startServer({ preset: "standard" });
+		await failures(server);
+		const h = await openPage(server, { path: "/p/scratch/queue" });
+		try {
+			const { page } = h;
+			page.setDefaultTimeout(5000);
+			await page.locator("[data-current-question]").waitFor();
+			const first = await qref(page);
+			await page.keyboard.press("f");
+			await page.locator(".queue-last").getByText("recorded", { exact: false }).waitFor();
+			const second = await qref(page);
+			if (!first || !second) throw Error("Two answered questions are required");
+			await page.keyboard.press("f");
+			await page.locator(".queue-last").getByText("recorded", { exact: false }).waitFor();
+			const sent: string[] = [];
+			await page.route("**/decide", async (route) => {
+				sent.push(z.object({ undo: z.string() }).parse(route.request().postDataJSON()).undo);
+				if (sent.length === 1) return route.abort();
+				await route.continue();
+			});
+			await page.getByRole("button", { name: "Settled", exact: true }).click();
+			await page.locator(`[data-question="${first}"]`).click();
+			await page.getByRole("button", { name: "u Withdraw answer", exact: true }).click();
+			await page.locator(".queue-last").getByText("the withdrawal failed", { exact: false }).waitFor();
+			await page.locator(`[data-question="${second}"]`).click();
+			expect(await qref(page)).toBe(second);
+			await page.keyboard.press("u");
+			await page.locator(".queue-last").getByText("Answer withdrawn.", { exact: false }).waitFor();
+			expect(sent).toEqual([first, second]);
+			expect((await server.api("get", { refs: [first, second] })).map((row) => row.state)).toEqual(["decided", "open"]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
+
+for (const outcome of ["confirmed", "refused", "lost reply"])
+	check(
+		`Settled last-answer undo waits for the server: ${outcome}`,
+		async () => {
+			const server = await startServer({ preset: "standard" });
+			await failures(server);
+			const h = await openPage(server, { path: "/p/scratch/queue" });
+			const gate = latch();
+			try {
+				const { page } = h;
+				page.setDefaultTimeout(5000);
+				await page.setViewportSize({ width: 1280, height: 800 });
+				await page.locator("[data-current-question]").waitFor();
+				const q = await qref(page);
+				if (!q) throw Error("No current question");
+				await page.keyboard.press("f");
+				await page.locator(".queue-last").getByText("recorded", { exact: false }).waitFor();
+				const decided = z
+					.object({ evidenceHash: z.string(), decision: z.object({ id: z.number() }) })
+					.parse((await server.api("get", { refs: [q] }))[0]);
+				const sent: { undo: string; ifDecision: number; cmd: string }[] = [];
+				await page.route("**/decide", async (route) => {
+					const input = z
+						.object({ undo: z.string(), ifDecision: z.number(), cmd: z.string() })
+						.parse(route.request().postDataJSON());
+					sent.push(input);
+					await gate.held;
+					if (outcome === "refused" && sent.length === 1) {
+						await server.api("decide", { q, onEvidence: decided.evidenceHash, answer: { is: "defect" } });
+						await route.continue();
+					} else if (outcome === "lost reply" && sent.length === 1) {
+						await route.fetch();
+						await route.abort();
+					} else await route.continue();
+				});
+				await page.getByRole("button", { name: "Settled", exact: true }).click();
+				await page.locator(`[data-question="${q}"]`).click();
+				await page.locator(".queue-decision").waitFor();
+				await page.locator(".queue-last").getByRole("button", { name: "u undo", exact: true }).click();
+				await page.locator(".queue-last").getByText("withdrawing the answer", { exact: false }).waitFor();
+				if (outcome === "confirmed" && process.env.MAINWORTHY_UNDO_SCREENSHOT)
+					await page.screenshot({ path: process.env.MAINWORTHY_UNDO_SCREENSHOT });
+				expect(await page.getByRole("button", { name: "Settled", exact: true }).getAttribute("aria-pressed")).toBe(
+					"true",
+				);
+				expect((await server.api("get", { refs: [q] }))[0]).toMatchObject({
+					state: "decided",
+					decision: { id: decided.decision.id },
+				});
+				await eventually(
+					() => Promise.resolve(sent.length),
+					(count) => count === 1,
+				);
+				expect(sent[0]).toMatchObject({ undo: q, ifDecision: decided.decision.id });
+				gate.release();
+				if (outcome === "confirmed") {
+					await page.locator(".queue-last").getByText("Answer withdrawn.", { exact: false }).waitFor();
+					expect((await server.api("get", { refs: [q] }))[0]).toMatchObject({ state: "open", decision: null });
+					expect(await page.getByRole("button", { name: "Open", exact: true }).getAttribute("aria-pressed")).toBe(
+						"true",
+					);
+					await page.locator(`[data-question="${q}"]`).waitFor();
+				} else {
+					await page.locator(".queue-last").getByText("the withdrawal failed", { exact: false }).waitFor();
+					expect(await page.getByRole("button", { name: "Settled", exact: true }).getAttribute("aria-pressed")).toBe(
+						"true",
+					);
+					if (outcome === "refused") {
+						expect(await page.locator(".queue-last").textContent()).toContain(
+							"Read the question again before withdrawing.",
+						);
+						expect(await page.locator(".queue-last").textContent()).not.toContain("Press u to retry");
+						await page.getByRole("button", { name: "Open", exact: true }).click();
+						await page.locator("[data-question]").first().waitFor();
+						expect(await page.locator(`[data-question="${q}"]`).count()).toBe(0);
+						expect((await server.api("get", { refs: [q] }))[0]).toMatchObject({
+							state: "decided",
+							decision: { answer: { is: "defect" } },
+						});
+					} else {
+						expect(await page.locator(".queue-last").textContent()).toContain(". Press u to retry.");
+						await page.keyboard.press("u");
+						await eventually(
+							() => Promise.resolve(sent.length),
+							(count) => count === 2,
+						);
+						expect(sent[1]).toEqual(sent[0]);
+						await page.locator(".queue-last").getByText("Answer withdrawn.", { exact: false }).waitFor();
+						expect((await server.api("get", { refs: [q] }))[0]).toMatchObject({ state: "open", decision: null });
+						await page.locator(`[data-question="${q}"]`).waitFor();
+					}
+				}
+			} finally {
+				gate.release();
+				await h.close();
+				await server.stop();
+			}
+		},
+		30000,
+	);
+
 for (const scenario of [
 	"single replacement",
 	"settled replacement",
@@ -385,13 +585,11 @@ for (const scenario of [
 				);
 				for (const input of sent) expect(original.get(input.q)).toBe(input.ifDecision);
 				if (scenario.endsWith("replacement")) {
-					await page.keyboard.press("u");
-					await eventually(
-						() => Promise.resolve(requests.length),
-						(count) => count === 2,
+					expect(await page.locator(".queue-last").textContent()).toContain(
+						"Read the question again before withdrawing.",
 					);
-					expect(requests[1]).toEqual(requests[0]);
-					expect(sent.find((entry) => entry.q === changed)?.ifDecision).toBe(original.get(changed ?? ""));
+					expect(await page.locator(".queue-last").textContent()).not.toContain("Press u to retry");
+					expect(await page.locator(".queue-last button").count()).toBe(0);
 					const rows = await server.api("get", { refs: [changed ?? ""] });
 					expect(rows[0]?.decision).toMatchObject({ id: replacement, answer: { is: "defect" } });
 				}
@@ -523,7 +721,7 @@ for (const field of ["ref", "reason"])
 		);
 
 check(
-	"R4B-3 each withdrawal follows its answer even while the first is held",
+	"R4B-3 withdrawals follow held answers and reopen only when confirmed",
 	async () => {
 		const server = await startServer({ preset: "standard" });
 		await failures(server);
@@ -548,8 +746,18 @@ check(
 				if (sent.length === 1) await gate.held;
 				await route.continue();
 			});
-			for (const key of ["f", "u", "i", "u", "t"]) await page.keyboard.press(key);
+			await page.keyboard.press("f");
+			await page.keyboard.press("u");
+			await page.locator(".queue-last").getByText("withdrawing the answer", { exact: false }).waitFor();
+			expect(await page.locator(`[data-question="${q}"]`).count()).toBe(0);
 			gate.release();
+			await page.locator(".queue-last").getByText("Answer withdrawn.", { exact: false }).waitFor();
+			await page.locator(`[data-question="${q}"]`).click();
+			await page.keyboard.press("i");
+			await page.keyboard.press("u");
+			await page.locator(".queue-last").getByText("Answer withdrawn.", { exact: false }).waitFor();
+			await page.locator(`[data-question="${q}"]`).click();
+			await page.keyboard.press("t");
 			const saved = await eventually(
 				() => server.api("get", { refs: [q] }),
 				(rows) =>
