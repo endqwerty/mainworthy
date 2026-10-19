@@ -622,6 +622,12 @@ export const InboxReply = z.object({
 export type InboxReply = z.infer<typeof InboxReply>;
 
 export const GetInput = z.object({
+	cursor: z
+		.string()
+		.optional()
+		.describe(
+			"For one proposal: the cursor from its previous page of edits. Restart without it after a project change.",
+		),
 	refs: z
 		.array(z.string())
 		.min(1)

@@ -222,8 +222,12 @@ While a proposal waits, each edit is shown applied to the case as it is now, so 
 An edit that would be refused on its own is shown as it was proposed, and so is every edit of a decided proposal.
 A restore shows the case as it is beside the version it brings back, preconditions and fields included.
 When a case it changes moves while the proposal is open, the page reads it again, and starts its edits from the top.
-It takes no answer until it has read them.
-A page shows at most 200 edits of one proposal, so a proposal with more cannot be answered in the web app.
+The web app reads proposals in pages of at most 200 edits and loads every page before allowing an answer.
+In Queue and a case's timeline, Accept and Reject first bring the proposal into view, then show the next part of long evidence.
+Choose the answer again after reading each part. It records the answer only once every edit has been shown.
+If a step is taller than the visible area, each press shows its next unread section. The whole step must have been on screen before an answer counts.
+Jumping straight to the bottom does not skip unread edits. If resizing or zooming changes a part's height, read that part again.
+On a phone, scrolling the page shows the edits; Accept brings the first unread part into view if any remain.
 A policy edit lists each setting and clause it changes, and the order of the clauses when that changes, since the first clause that matches wins.
 It also says when the policy has changed since, which makes accepting refuse it.
 A move or reorder names the case it is asked to follow, or says it goes to the end of the folder.

@@ -191,7 +191,7 @@ async function recordedDecisions(server: Server, ref: string) {
 				const key =
 					question.kind === "failure" ? "i" : question.kind === "adopt" ? "a" : question.kind === "finding" ? "z" : "t";
 				if (question.kind === "adopt")
-					await page.locator(`[data-proposal-evidence="${question.q}"][data-proposal-read="ready"]`).waitFor();
+					await page.locator(`[data-proposal-evidence="${question.q}"][data-proposal-loaded="true"]`).waitFor();
 				await page.keyboard.press(key);
 				await page.waitForFunction((ref) => document.querySelector(`[data-question="${ref}"]`) === null, question.q);
 			}

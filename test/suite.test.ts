@@ -1058,14 +1058,35 @@ describe("editing", () => {
 		}
 	});
 
-	test("a proposal read says how many edits it has when the reply holds only the first 200", () => {
+	test("a proposal read pages all 250 edits without hiding the last 50", () => {
 		const edits = Array.from({ length: 250 }, (_, i) => ({ op: "create", outline: `Case ${i}` }));
 		const s = harness({ preset: "standard" });
 		try {
 			const agent = s.actor("writer", "agent", ["read", "produce"]);
 			const proposed = s.call<Proposed>("propose", { edits }, agent);
-			const [read] = s.call<{ count: number; edits: unknown[] }[]>("get", { refs: [proposed.proposal] });
+			type Page = { count: number; cursor: string | null; edits: { body: { title: string } }[] };
+			const [read] = s.call<Page[]>("get", { refs: [proposed.proposal] });
 			expect([read?.count, read?.edits.length]).toEqual([250, 200]);
+			expect(typeof read?.cursor).toBe("string");
+			const [last] = s.call<Page[]>("get", { refs: [proposed.proposal], cursor: read?.cursor });
+			expect([last?.count, last?.edits.length, last?.cursor]).toEqual([250, 50, null]);
+			expect([read?.edits[0]?.body.title, last?.edits[0]?.body.title, last?.edits.at(-1)?.body.title]).toEqual([
+				"Case 0",
+				"Case 200",
+				"Case 249",
+			]);
+			for (const cursor of ["bad", read?.cursor?.replace(/^\d+/, "999")]) {
+				expect(() => s.call("get", { refs: [proposed.proposal], cursor })).toThrow(
+					"that is not a cursor of this proposal",
+				);
+			}
+			expect(() => s.call("get", { refs: [proposed.proposal, proposed.proposal], cursor: read?.cursor })).toThrow(
+				"a proposal cursor needs exactly one P- ref",
+			);
+			s.call("propose", { edits: [{ op: "create", outline: "New case" }] });
+			expect(() => s.call("get", { refs: [proposed.proposal], cursor: read?.cursor })).toThrow(
+				"The project changed. Read the proposal again from its first page.",
+			);
 		} finally {
 			s.close();
 		}

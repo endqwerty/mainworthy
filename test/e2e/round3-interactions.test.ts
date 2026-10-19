@@ -545,7 +545,7 @@ check(
 			const { page } = h;
 			page.setDefaultTimeout(5000);
 			await page.setViewportSize({ width: 1280, height: 800 });
-			const edits = page.locator(`[data-proposal-evidence="${proposed.question}"][data-proposal-read="ready"]`);
+			const edits = page.locator(`[data-proposal-evidence="${proposed.question}"][data-proposal-loaded="true"]`);
 			await edits.waitFor();
 			await page.keyboard.down("a");
 			const position = await edits.evaluate((e) => e.scrollTop);

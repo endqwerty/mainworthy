@@ -291,9 +291,15 @@ export function runView(ctx: Ctx, run: RunRow): Record<string, unknown> {
  * an edit's body is the edit applied to its case as it is now, or, when `refused` says why accepting that edit on its
  * own would be refused now, the edit as it was proposed. Accepting the whole proposal applies its edits in order and checks the proposal as a whole,
  * so it can still be refused when no edit is.
- * The reply holds at most 200 edits, and `count` says how many the proposal has.
+ * The reply holds at most 200 edits. `count` says how many the proposal has; `cursor` reads the next page at the same project sequence.
  */
-function proposalView(ctx: Ctx, proposal: ProposalRow): Record<string, unknown> {
+function proposalView(ctx: Ctx, proposal: ProposalRow, cursor?: string): Record<string, unknown> {
+	const at = cursor ? /^(\d+)\.(\d+)\.(\d+)$/.exec(cursor) : null;
+	if (cursor && (!at || Number(at[1]) !== proposal.no || !Number.isSafeInteger(Number(at[3])) || Number(at[3]) < 1))
+		throw invalid("that is not a cursor of this proposal");
+	if (at && Number(at[2]) !== ctx.seq)
+		throw conflict("The project changed. Read the proposal again from its first page.");
+	const offset = at ? Number(at[3]) : 0;
 	const index = folderIndex(ctx.db, proposal.project);
 	const refOf = (id: number): string | null => {
 		const row = caseById(ctx.db, id);
@@ -305,7 +311,8 @@ function proposalView(ctx: Ctx, proposal: ProposalRow): Record<string, unknown> 
 	const resolved = resolvedOf(proposal);
 	const policy = waiting ? adoptionPolicy(ctx.db, proposal.project, resolved) : null;
 	const inForce = currentPolicy(ctx.db, proposal.project);
-	const edits = resolved.slice(0, 200).map((edit) => {
+	if (offset >= resolved.length && cursor) throw invalid("that cursor is past the proposal's edits");
+	const edits = resolved.slice(offset, offset + 200).map((edit) => {
 		switch (edit.op) {
 			case "create":
 				return {
@@ -401,8 +408,9 @@ function proposalView(ctx: Ctx, proposal: ProposalRow): Record<string, unknown> 
 		kind: label.kind,
 		reason: proposal.reason,
 		at: proposal.at,
-		// A reply holds at most 200 edits; `count` says how many the proposal has, so a reader can tell it is short.
+		// A cursor binds pages to one project sequence: accepting must not combine different versions.
 		count: resolved.length,
+		cursor: offset + edits.length < resolved.length ? `${proposal.no}.${ctx.seq}.${offset + edits.length}` : null,
 		edits,
 	};
 }
@@ -449,6 +457,8 @@ function quarantineView(ctx: Ctx, test: number) {
 		: null;
 }
 export function get(ctx: Ctx, input: GetInput): Record<string, unknown>[] {
+	if (input.cursor && (input.refs.length !== 1 || !/^P-\d+$/i.test(input.refs[0]?.trim() ?? "")))
+		throw invalid("a proposal cursor needs exactly one P- ref");
 	return input.refs.map((text) => {
 		const kind = text.trim().slice(0, 2).toUpperCase();
 		if (kind === "Q-")
@@ -482,7 +492,7 @@ export function get(ctx: Ctx, input: GetInput): Record<string, unknown>[] {
 		if (kind === "P-") {
 			const proposal = proposalByNo(ctx.db, ctx.project.id, Number(text.trim().slice(2)));
 			if (!proposal) throw notFound(`proposal ${text}`);
-			return proposalView(ctx, proposal);
+			return proposalView(ctx, proposal, input.cursor);
 		}
 		const row = mustCase(ctx.db, ctx.project.id, text);
 		const version = input.refs.length === 1 ? input.version : undefined;
@@ -512,7 +522,7 @@ export const getOp = defineOp({
 	needs: "read",
 	scope: "project",
 	effect: "read",
-	mcp: "Read refs. For cases: as, fields, unless.",
+	mcp: "Read refs; page proposals with cursor.",
 	run: get,
 });
 
@@ -1260,7 +1270,7 @@ export const impactOp = defineOp({
 	needs: "read",
 	scope: "project",
 	effect: "read",
-	mcp: "Start a review with a change (`pr:482`) or changed `files`. Returns affected cases, hashes, prior reviews, questions and uncovered files. Reuse `cursor` as `since`.",
+	mcp: "Review a change (`pr:482`) or changed `files`: affected cases, hashes, prior reviews, questions, uncovered files. Reuse `cursor` as `since`.",
 	run: impact,
 });
 

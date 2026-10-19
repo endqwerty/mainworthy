@@ -1,3 +1,5 @@
+import { useInfiniteQuery } from "@tanstack/react-query";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { z } from "zod";
 import { SameCodeEvidence } from "../../core/flaky.ts";
 import { newStepId } from "../../core/ids.ts";
@@ -6,9 +8,10 @@ import { CaseBody, ConflictAddress, conflictLabel, emptyBody } from "../../core/
 import type { QuestionItem } from "../../core/ops.ts";
 import { QuarantineEdit } from "../../core/ops.ts";
 import { parseOutline } from "../../core/outline.ts";
-import { useQueryOp } from "../lib/data.ts";
+import { call } from "../lib/api.ts";
+import { queryKey, useQueryOp } from "../lib/data.ts";
 import { policyChanges } from "../lib/policy-changes.ts";
-import { proposalReadMessage } from "../lib/proposals.ts";
+import { proposalReadMessage, watchProposalShown } from "../lib/proposals.ts";
 import { navigate, refUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { DiffView, ProducerGlyph } from "../ui/index.tsx";
@@ -116,6 +119,7 @@ const Proposal = z.object({
 	kind: z.string(),
 	reason: z.string().nullable(),
 	count: z.number(),
+	cursor: z.string().nullable(),
 	edits: z.array(ProposalEdit),
 });
 
@@ -174,42 +178,57 @@ function ProposalEvidence({ question }: { question: QuestionItem }) {
 
 /**
  * Every edit of a proposal, wherever it is answered (the Queue, a case's timeline). It is marked read only once all
- * of them are on the page, and `proposalReadMessage` refuses an answer until then.
+ * of them have been shown on screen, and `proposalReadMessage` refuses an answer until then.
  */
 export function ProposalEdits({ question }: { question: QuestionItem }) {
 	const { project } = useApp();
 	const parsed = AdoptEvidence.safeParse(question.evidence);
-	const read = useQueryOp({
-		project,
-		op: "get",
-		input: { refs: [parsed.success ? parsed.data.proposal : ""] },
+	const input = { refs: [parsed.success ? parsed.data.proposal : ""] };
+	const read = useInfiniteQuery({
+		queryKey: [...queryKey({ project, op: "get", input }), "pages"],
+		initialPageParam: "",
+		meta: { restartOnChange: true },
+		queryFn: async ({ pageParam, signal }) => {
+			const rows = await call("get", { ...input, ...(pageParam ? { cursor: pageParam } : {}) }, { project, signal });
+			return Proposal.parse(rows.find((row) => row.ref === input.refs[0]));
+		},
+		getNextPageParam: (page) => page.cursor ?? undefined,
 		enabled: parsed.success,
 	});
-	const proposal = Proposal.safeParse(read.data?.find((row) => parsed.success && row.ref === parsed.data.proposal));
-	const short = proposal.success && proposal.data.edits.length < proposal.data.count ? proposal.data : null;
+	useEffect(() => {
+		if (read.hasNextPage && !read.isFetching && !read.isError) void read.fetchNextPage();
+	}, [read.hasNextPage, read.isFetching, read.isError, read.fetchNextPage]);
+	const pages = read.data?.pages;
+	const first = pages?.[0];
+	const edits = pages?.flatMap((page) => page.edits) ?? [];
+	const short = first && !read.hasNextPage && edits.length !== first.count;
 	const error = !parsed.success
 		? "The proposal evidence could not be read."
 		: (read.error?.message ??
-			(read.data && !proposal.success
-				? "The proposal edits could not be read."
-				: short
-					? `This proposal has ${short.count} edits, and a page shows the first ${short.edits.length}. Accepting applies all of them, so it cannot be answered here.`
-					: null));
-	// While it is read again, what it shows may no longer be what accepting writes: a case it changes has moved.
-	const ready = proposal.success && !error && !read.isFetching;
+			(short
+				? `This proposal has ${first.count} edits, and a page shows the first ${edits.length}. Accepting applies all of them, so it cannot be answered here.`
+				: null));
+	const loaded = Boolean(first && !error && !read.isFetching && !read.hasNextPage);
+	const signature = JSON.stringify(edits);
+	const element = useRef<HTMLDivElement>(null);
+	useLayoutEffect(() => {
+		if (read.data && element.current && loaded) return watchProposalShown(element.current);
+	}, [loaded, read.data]);
 	return (
 		<div
 			className="proposal-edits"
 			// Edits that change while open start again from the top, so what changed is read before an answer.
-			key={proposal.success ? JSON.stringify(proposal.data.edits) : "unread"}
+			key={signature}
+			ref={element}
 			data-proposal-evidence={question.q}
-			data-proposal-read={ready ? "ready" : error ? "error" : "loading"}
+			data-proposal-loaded={loaded ? "true" : "false"}
+			data-proposal-read={loaded ? "loaded" : error ? "error" : "loading"}
 			data-proposal-error={error ?? undefined}
 		>
 			{error && <p role="status">{error}</p>}
-			{proposal.success
-				? proposal.data.edits.map((edit) => {
-						const editKey = JSON.stringify(edit);
+			{first
+				? edits.map((edit, index) => {
+						const editKey = `${index}:${JSON.stringify(edit)}`;
 						switch (edit.op) {
 							case "edit":
 								return (

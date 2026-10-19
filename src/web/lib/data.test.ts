@@ -461,3 +461,41 @@ test("refresh dependencies follow read projections and preserve unknown-event re
 		expect(affected(key, { op: "propose", touched: ["future-kind"] })).toBe(true);
 	}
 });
+
+test("proposal pages restart their snapshot on any project write, including an unrelated run", async () => {
+	type Page = { title: string; next: string | undefined };
+	const requests: { cursor: string; signal: AbortSignal; reply: (page: Page) => void }[] = [];
+	const observer = new InfiniteQueryObserver(queryClient, {
+		queryKey: ["scratch", "get", { refs: ["P-2"] }, "pages"],
+		meta: { restartOnChange: true },
+		initialPageParam: "",
+		queryFn: ({ pageParam, signal }) =>
+			new Promise<Page>((reply) => requests.push({ cursor: pageParam, signal, reply })),
+		getNextPageParam: (page) => page.next,
+	});
+	const stop = observer.subscribe(() => {});
+	try {
+		requests[0]?.reply({ title: "first, old", next: "2.4.200" });
+		await until(() => expect(observer.getCurrentResult().isFetching).toBe(false));
+		void observer.fetchNextPage();
+		expect(requests[1]?.cursor).toBe("2.4.200");
+		changed("scratch", { op: "plan", touched: ["R-1"] });
+		await until(() => expect(requests).toHaveLength(3));
+		expect(requests[1]?.signal.aborted).toBe(true);
+		expect(requests[2]?.cursor).toBe("");
+		requests[1]?.reply({ title: "second, obsolete", next: undefined });
+		requests[2]?.reply({ title: "first, current", next: "2.5.200" });
+		await until(() => expect(observer.getCurrentResult().isFetching).toBe(false));
+		void observer.fetchNextPage();
+		expect(requests[3]?.cursor).toBe("2.5.200");
+		requests[3]?.reply({ title: "second, current", next: undefined });
+		await until(() =>
+			expect(observer.getCurrentResult().data?.pages.map((page) => page.title)).toEqual([
+				"first, current",
+				"second, current",
+			]),
+		);
+	} finally {
+		stop();
+	}
+});

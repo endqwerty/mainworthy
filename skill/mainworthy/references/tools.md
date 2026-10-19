@@ -135,7 +135,7 @@ Propose cases at their base version. Status: adopted=current, open=needs accepta
 
 ## report
 
-Record test results in one batch. Give `target` (the commit tested) or `run` (a planned run). Each result names a test by `key` or a case by ref.
+Record results for `target` (commit) or `run` (planned). Identify each test by `key` or case ref.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -254,10 +254,11 @@ Open questions and evidenceHash; filter with on.
 
 ## get
 
-Read refs. For cases: as, fields, unless.
+Read refs; page proposals with cursor.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
+| `cursor` | `string` | no | For one proposal: the cursor from its previous page of edits. Restart without it after a project change. |
 | `refs` | `array<string>` | yes | Refs of cases (C-), questions (Q-), runs (R-), tests (T-) or proposals (P-). |
 | `fields` | `array<string>` | no | For cases: any of title, pre, steps, methods, tags, covers, place, proof. Default: all. |
 | `as` | `"data" \| "md"` | no | `md` returns a case as canonical Markdown: fewer tokens than JSON. Default: `"data"`. |
@@ -294,7 +295,7 @@ Search cases by text, folder or tag; list tests (`unlinked: true`), runs or slot
 
 ## impact
 
-Start a review with a change (`pr:482`) or changed `files`. Returns affected cases, hashes, prior reviews, questions and uncovered files. Reuse `cursor` as `since`.
+Review a change (`pr:482`) or changed `files`: affected cases, hashes, prior reviews, questions, uncovered files. Reuse `cursor` as `since`.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |

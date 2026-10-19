@@ -344,7 +344,7 @@ for (const rejection of ["API", "UI"])
 				if (rejection === "API")
 					await server.api("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "reject" } });
 				else {
-					await page.locator(`[data-proposal-evidence="${q.q}"][data-proposal-read="ready"]`).waitFor();
+					await page.locator(`[data-proposal-evidence="${q.q}"][data-proposal-loaded="true"]`).waitFor();
 					await page.keyboard.press("r");
 					await page.keyboard.press("r");
 				}

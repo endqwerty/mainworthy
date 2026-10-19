@@ -429,7 +429,7 @@ import { z } from "zod";
 				{ token: writer },
 			);
 			expect(renamed.status).toBe("open");
-			await page.locator(`[data-proposal-evidence="${renamed.question}"][data-proposal-read="ready"]`).waitFor();
+			await page.locator(`[data-proposal-evidence="${renamed.question}"][data-proposal-loaded="true"]`).waitFor();
 			// A person changes the case while the card is open. Accepting merges the title onto that version, and
 			// the card shows it so: before, it kept the version it first read.
 			const steps = z
@@ -491,7 +491,7 @@ import { z } from "zod";
 			page.on("request", (request) => {
 				if (request.url().endsWith("/decide")) decides.push(request.url());
 			});
-			// A reply that holds fewer edits than the proposal has (one holds 200 at most) is not answered.
+			// A reply that holds fewer edits than the proposal has (a page holds 200 at most) is not answered.
 			await page.route("**/get", async (route) => {
 				const input = z.object({ refs: z.array(z.string()) }).parse(route.request().postDataJSON());
 				if (!input.refs.includes(proposed.proposal ?? "")) return route.continue();
@@ -511,7 +511,7 @@ import { z } from "zod";
 			expect(decides).toEqual([]);
 			await page.unroute("**/get");
 			await page.reload();
-			await page.locator(`[data-proposal-evidence="${q}"][data-proposal-read="ready"]`).waitFor();
+			await page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`).waitFor();
 
 			const atEnd = () =>
 				edits.evaluate((element) => element.scrollTop + element.clientHeight >= element.scrollHeight - 2);
@@ -545,7 +545,7 @@ import { z } from "zod";
 			await pageToEnd();
 			await changeStep(0, "Newly critical result");
 			await page.locator(`[data-proposal="${q}"]`).getByText("Newly critical result").waitFor();
-			await page.locator(`[data-proposal-evidence="${q}"][data-proposal-read="ready"]`).waitFor();
+			await page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`).waitFor();
 			expect(await edits.evaluate((element) => element.scrollTop)).toBe(0);
 			await accept.click();
 			expect(decides).toEqual([]);
@@ -586,6 +586,162 @@ import { z } from "zod";
 			expect(view.errors).toEqual([]);
 		} finally {
 			await view?.page.unroute("**/get").catch(() => {});
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
+
+for (const via of ["key", "button"] as const) {
+	(browserAvailable ? test : test.skip)(
+		`Queue ${via} shows the last edits before accepting the whole proposal`,
+		async () => {
+			const server = await fixture();
+			let view: Awaited<ReturnType<typeof openPage>> | null = null;
+			try {
+				await server.api("propose", {
+					edits: [
+						{ op: "create", outline: "First case" },
+						{ op: "create", outline: "Second case" },
+					],
+				});
+				const { token } = z.object({ token: z.string() }).parse(
+					await server.api("admin", {
+						do: "token.create",
+						actor: "writer",
+						kind: "agent",
+						can: ["read", "produce"],
+						project: "scratch",
+					}),
+				);
+				const proposed = await server.api(
+					"propose",
+					{
+						edits: [
+							{
+								op: "edit",
+								case: "C-1",
+								base: 1,
+								body: {
+									steps: Array.from({ length: 45 }, (_, i) => ({
+										id: `n${i}`,
+										action: `Changed step ${i + 1}`,
+										expected: `Result ${i + 1}`,
+									})),
+								},
+							},
+							{ op: "edit", case: "C-2", base: 1, body: { title: "Last renamed case" } },
+							{ op: "state", cases: ["C-2"], to: "archived" },
+						],
+					},
+					{ token },
+				);
+				view = await openPage(server, { path: "/p/scratch/queue" });
+				const page = view.page;
+				await page.setViewportSize({ width: 1280, height: 800 });
+				await page.locator(`[data-proposal-evidence="${proposed.question}"][data-proposal-loaded="true"]`).waitFor();
+				// Reading is recorded from scroll events, so let the page record each press before checking it.
+				const press = async () => {
+					await (via === "key"
+						? page.keyboard.press("a")
+						: page.getByRole("button", { name: "Accept", exact: false }).click());
+					await page.evaluate(
+						() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))),
+					);
+				};
+				const readWhole = () =>
+					page
+						.locator(`[data-proposal-evidence="${proposed.question}"]`)
+						.getAttribute("data-proposal-read")
+						.then((read) => read === "ready");
+				const atEnd = () =>
+					page
+						.locator(".queue-evidence")
+						.evaluate((area) => area.scrollTop + area.clientHeight >= area.scrollHeight - 2);
+				expect(await atEnd()).toBe(false);
+				await press();
+				expect((await server.api("get", { refs: ["C-2"] }))[0]).toMatchObject({
+					title: "Second case",
+					state: "active",
+				});
+				// A jump to the bottom leaves a gap. The next answer returns to the first unread part.
+				await page.locator(".queue-evidence").evaluate((area) => {
+					area.scrollTop = area.scrollHeight;
+				});
+				await press();
+				expect((await server.api("inbox", { kind: "adopt" })).items.map((q) => q.q)).toEqual([proposed.question ?? ""]);
+				expect(await atEnd()).toBe(false);
+				for (let i = 0; i < 60 && !(await readWhole()); i++) {
+					await press();
+					expect((await server.api("inbox", { kind: "adopt" })).items.map((q) => q.q)).toEqual([
+						proposed.question ?? "",
+					]);
+				}
+				expect(await readWhole()).toBe(true);
+				await press();
+				const [adopted] = await eventually(
+					() => server.api("get", { refs: ["C-2"] }),
+					(rows) => rows[0]?.state === "archived",
+				);
+				expect(adopted).toMatchObject({ title: "Last renamed case", state: "archived" });
+				expect(view.errors).toEqual([]);
+			} finally {
+				await view?.close();
+				await server.stop();
+			}
+		},
+		30000,
+	);
+}
+
+(browserAvailable ? test : test.skip)(
+	"Queue reads every page of a 250-edit proposal before accepting",
+	async () => {
+		const server = await fixture();
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			const { token } = z.object({ token: z.string() }).parse(
+				await server.api("admin", {
+					do: "token.create",
+					actor: "writer",
+					kind: "agent",
+					can: ["read", "produce"],
+					project: "scratch",
+				}),
+			);
+			const proposed = await server.api(
+				"propose",
+				{
+					edits: Array.from({ length: 250 }, (_, i) => ({
+						op: "create",
+						outline: `Proposed case ${i + 1}`,
+					})),
+				},
+				{ token },
+			);
+			view = await openPage(server, { path: "/p/scratch/queue" });
+			const page = view.page;
+			await page
+				.locator(`[data-proposal-evidence="${proposed.question}"]`)
+				.getByText("Proposed case 250", { exact: true })
+				.waitFor();
+			await page.locator(`[data-proposal-evidence="${proposed.question}"][data-proposal-loaded="true"]`).waitFor();
+			const atEnd = () =>
+				page.locator(".queue-evidence").evaluate((area) => area.scrollTop + area.clientHeight >= area.scrollHeight - 2);
+			for (let i = 0; i < 150 && !(await atEnd()); i++) {
+				await page.keyboard.press("a");
+				expect((await server.api("inbox", { kind: "adopt" })).items.map((q) => q.q)).toEqual([proposed.question ?? ""]);
+			}
+			expect(await atEnd()).toBe(true);
+			await page.keyboard.press("a");
+			const [last] = await eventually(
+				() => server.api("get", { refs: ["C-250"] }).catch(() => []),
+				(rows) => rows[0]?.title === "Proposed case 250",
+			);
+			expect(last).toMatchObject({ title: "Proposed case 250", state: "active" });
+			expect(view.errors).toEqual([]);
+		} finally {
 			await view?.close();
 			await server.stop();
 		}
