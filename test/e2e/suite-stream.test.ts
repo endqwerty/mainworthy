@@ -191,7 +191,7 @@ test.skipIf(!browserAvailable)(
 			);
 			expect(saved[0]?.tags).toEqual(["alpha", "beta"]);
 			expect(saved[0]?.folder).toMatchObject({ path: "Destination" });
-			await page.waitForFunction(() => document.querySelector("#stat")?.textContent?.includes("recorded"));
+			await page.locator(".cstate .chip.ver").filter({ hasText: /^v2$/ }).waitFor();
 			await server.api("propose", { edits: [{ op: "place", cases: ["C-1"], tags: { add: ["later"] } }] });
 			await page.waitForFunction(() => document.querySelector(".ctags")?.textContent?.includes("#later"));
 			expect(await page.locator(".ctags").textContent()).toContain("#alpha");
