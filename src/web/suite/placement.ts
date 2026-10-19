@@ -4,6 +4,25 @@ import type { CaseRow, CaseView, FolderRow } from "./model.ts";
 
 export type PendingPlacement = { edits: Edit[] };
 
+/** A confirmed later move retires only the same cases' earlier folders, retaining their other edits. */
+export function supersedeMoves(earlier: Iterable<PendingPlacement>, confirmed: PendingPlacement): void {
+	for (const move of confirmed.edits) {
+		if (move.op !== "place" || move.folder === undefined) continue;
+		for (const pending of earlier) {
+			pending.edits = pending.edits.flatMap((edit): Edit[] => {
+				if (edit.op !== "place" || edit.folder === undefined) return [edit];
+				const remaining = edit.cases.filter((ref) => !move.cases.includes(ref));
+				const superseded = edit.cases.filter((ref) => move.cases.includes(ref));
+				if (!superseded.length) return [edit];
+				return [
+					...(remaining.length ? [{ ...edit, cases: remaining }] : []),
+					...(edit.tags ? [{ op: "place", cases: superseded, tags: edit.tags } satisfies Edit] : []),
+				];
+			});
+		}
+	}
+}
+
 /** Server rows stay intact; each read is displayed with the writes still awaiting confirmation applied in order. */
 export function placed<T extends CaseRow | CaseView>(
 	row: T,

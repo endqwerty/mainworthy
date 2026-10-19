@@ -56,9 +56,11 @@ import { useApp } from "../ui/context.tsx";
 import { EmptyState, ProofStrip } from "../ui/index.tsx";
 import { useSuiteBindings } from "./bindings.ts";
 import { bodyOf, CaseRow, CaseView, editDraft, FolderRow } from "./model.ts";
-import { type PendingPlacement, placed, placedDraft } from "./placement.ts";
+import { type PendingPlacement, placed, placedDraft, supersedeMoves } from "./placement.ts";
 import "./suite.css";
 import "../case/case.css";
+
+const draftRemoved = "mainworthy:suite-draft-removed";
 
 type VisibleRow =
 	| { kind: "case"; row: CaseRow }
@@ -139,6 +141,22 @@ export function SuiteScreen() {
 	const draftRef = useRef(draft);
 	const liveDrafts = useRef(new Map<string, Draft>(draft ? [[draft.id, draft]] : []));
 	const [captures, setCaptures] = useState(() => new Map(readDrafts(project).map((draft) => [draft.id, draft])));
+	useEffect(() => {
+		const prefix = draftKey({ project, id: "" });
+		const removed = (event: Event): void => {
+			if (!sessionCurrent(owner) || !(event instanceof CustomEvent) || typeof event.detail !== "string") return;
+			if (!event.detail.startsWith(prefix)) return;
+			const id = event.detail.slice(prefix.length);
+			setCaptures((previous) => {
+				if (!previous.has(id)) return previous;
+				const next = new Map(previous);
+				next.delete(id);
+				return next;
+			});
+		};
+		window.addEventListener(draftRemoved, removed);
+		return () => window.removeEventListener(draftRemoved, removed);
+	}, [project, owner]);
 	const adoptedRefs = useRef(new Map<string, string>());
 	const pending = useRef(new Map<string, Promise<void>>());
 	const [selected, setSelected] = useState<string | null>(route.ref);
@@ -181,7 +199,9 @@ export function SuiteScreen() {
 		(id: string): void => {
 			const copy = liveDrafts.current.get(id);
 			removeDraft({ project, id });
-			if (copy?.owner === windowId && !readDraft({ project, id })) forgetDraftCopy({ project, draft: copy });
+			if (readDraft({ project, id })) return;
+			if (copy?.owner === windowId) forgetDraftCopy({ project, draft: copy });
+			window.dispatchEvent(new CustomEvent(draftRemoved, { detail: draftKey({ project, id }) }));
 		},
 		[project, windowId],
 	);
@@ -1251,7 +1271,7 @@ export function SuiteScreen() {
 					adopted = bodyOf(received);
 					adoptedTags = received.tags;
 					adoptedCovers = received.covers;
-					queryClient.setQueryData([project, "get", { refs: [ref] }], [received]);
+					holdCase({ ref, rows: [received] });
 					void queryClient.cancelQueries({
 						queryKey: [project, "find"],
 						predicate: (query) => query.state.data !== undefined,
@@ -1266,7 +1286,7 @@ export function SuiteScreen() {
 									pages: cached.pages.map((page) => ({
 										...page,
 										items: page.items.map((row) =>
-											row.ref === ref
+											row.ref === ref && (typeof row.version !== "number" || row.version < received.version)
 												? {
 														...row,
 														title: received.title,
@@ -1419,14 +1439,14 @@ export function SuiteScreen() {
 		}
 	}, [recordedView, draft, windowId, followDraft, mayWrite, writeOwnedDraft]);
 	useEffect(() => {
-		const current = draftRef.current;
+		const current = draft;
 		if (
 			recordedView &&
+			current === draftRef.current &&
 			current?.ref === recordedView.ref &&
 			!current.dirty &&
 			current.submission.kind === "none" &&
-			current.base !== recordedView.version &&
-			!pending.current.has(current.id)
+			current.base < recordedView.version
 		) {
 			const original = bodyOf(recordedView);
 			const next: Draft = {
@@ -1448,7 +1468,7 @@ export function SuiteScreen() {
 			draftRef.current = next;
 			setDraftState(next);
 		}
-	}, [recordedView, stepIdFor]);
+	}, [recordedView, stepIdFor, draft]);
 	const sealRef = useRef(sealDraft);
 	sealRef.current = sealDraft;
 	const waiting = [...captures.values()].filter(
@@ -1701,6 +1721,7 @@ export function SuiteScreen() {
 	const selection = () => (picked.size ? [...picked] : selected ? [selected] : []);
 	function optimisticPlacement(edits: Edit[]) {
 		const entry: PendingPlacement = { edits };
+		const earlier = [...placements];
 		setPlacements((prior) => new Set([...prior, entry]));
 		const remove = () =>
 			setPlacements((prior) => {
@@ -1712,7 +1733,10 @@ export function SuiteScreen() {
 		return {
 			rollback: remove,
 			confirm(): void {
-				const refs = new Set(edits.flatMap((edit) => (edit.op === "place" || edit.op === "state" ? edit.cases : [])));
+				supersedeMoves(earlier, entry);
+				const refs = new Set(
+					entry.edits.flatMap((edit) => (edit.op === "place" || edit.op === "state" ? edit.cases : [])),
+				);
 				const lists = {
 					queryKey: [project, "find"],
 					predicate: (query: { queryKey: readonly unknown[] }) =>

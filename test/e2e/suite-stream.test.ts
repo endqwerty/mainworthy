@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { browserAvailable, eventually, openPage, startServer } from "./support.ts";
+import { answer, browserAvailable, eventually, fetched, openPage, startServer } from "./support.ts";
 
 for (const outcome of ["adopted", "failed"] as const) {
 	test.skipIf(!browserAvailable)(
@@ -445,6 +445,142 @@ test.skipIf(!browserAvailable)(
 			expect(h.errors).toEqual([]);
 		} finally {
 			release();
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"a late saved-version read keeps the newer case already shown",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [{ op: "create", body: { title: "Original title", pre: "Original precondition" } }],
+		});
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		const held = Promise.withResolvers<void>();
+		const arrived = Promise.withResolvers<void>();
+		try {
+			const { page } = h;
+			await page.setViewportSize({ width: 1280, height: 800 });
+			await page.getByRole("button", { name: "Original title", exact: true }).waitFor();
+			let refuseReads = false;
+			await page.route(/\/api\/p\/scratch\/(get|find)$/, async (route) => {
+				const input = route.request().postDataJSON();
+				if (!input.refs?.includes("C-1") && input.in !== "cases") return route.continue();
+				if (refuseReads)
+					return answer(route, {
+						status: 500,
+						contentType: "application/json",
+						body: JSON.stringify({ ok: false, error: { code: "internal", message: "Read unavailable" } }),
+					});
+				if (input.version !== 2) return route.continue();
+				const reply = await fetched(route);
+				if (!reply) return;
+				arrived.resolve();
+				await held.promise;
+				await answer(route, { response: reply.response });
+			});
+			await page.keyboard.press("e");
+			const title = page.getByRole("textbox", { name: "Case title", exact: true });
+			await title.fill("My saved title");
+			await title.press("Control+Enter");
+			await arrived.promise;
+			const listed = page.waitForResponse(
+				async (response) =>
+					response.url().endsWith("/find") &&
+					response.request().postDataJSON().in === "cases" &&
+					(await response.text()).includes('"New remote title"'),
+			);
+			await server.api("propose", {
+				edits: [
+					{ op: "edit", case: "C-1", base: 2, body: { title: "New remote title", pre: "New remote precondition" } },
+				],
+			});
+			await (await listed).finished();
+			await page.getByText("Others see version 3", { exact: true }).waitFor();
+			refuseReads = true;
+			held.resolve();
+			await page.locator("#stat").filter({ hasText: "Version 2, by you, just now" }).waitFor();
+			await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+			if (process.env.MAINWORTHY_LATE_SAVE_SCREENSHOT)
+				await page.screenshot({ path: process.env.MAINWORTHY_LATE_SAVE_SCREENSHOT });
+			expect(await page.getByLabel("Preconditions", { exact: true }).inputValue()).toBe("New remote precondition");
+			expect(await page.locator(".cstate .chip.ver").textContent()).toBe("v3");
+			expect(await page.getByRole("option").filter({ hasText: "C-1" }).locator(".ti").textContent()).toBe(
+				"New remote title",
+			);
+			expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({
+				version: 3,
+				pre: "New remote precondition",
+			});
+			await page.keyboard.type("gs");
+			await page.getByRole("button", { name: "New remote title", exact: true }).waitFor();
+			expect(await page.getByRole("option").filter({ hasText: "C-1" }).locator(".ti").textContent()).toBe(
+				"New remote title",
+			);
+			expect(
+				h.errors.filter(
+					(error) => !error.startsWith("Failed to load resource: the server responded with a status of 500"),
+				),
+			).toEqual([]);
+		} finally {
+			held.resolve();
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"a confirmed second move supersedes an earlier pending move",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [
+				{ op: "create", folder: "Original", body: { title: "Two moves" } },
+				{ op: "folder", name: "First" },
+				{ op: "folder", name: "Second" },
+			],
+		});
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		const held = Promise.withResolvers<void>();
+		const arrived = Promise.withResolvers<void>();
+		const answered = Promise.withResolvers<void>();
+		try {
+			const { page } = h;
+			await page.getByRole("button", { name: "Two moves", exact: true }).waitFor();
+			let first = true;
+			await page.route("**/api/p/scratch/propose", async (route) => {
+				if (!first) return route.continue();
+				first = false;
+				const reply = await fetched(route);
+				if (!reply) return;
+				arrived.resolve();
+				await held.promise;
+				await answer(route, { response: reply.response });
+				answered.resolve();
+			});
+			await page.keyboard.press("m");
+			await page.getByRole("textbox", { name: "Move selected cases to a folder" }).fill("First");
+			await page.keyboard.press("Enter");
+			await arrived.promise;
+			await page.keyboard.press("m");
+			await page.getByRole("textbox", { name: "Move selected cases to a folder" }).fill("Second");
+			await page.keyboard.press("Enter");
+			await page.locator("#stat").filter({ hasText: "1 case changed." }).waitFor();
+			expect(await page.locator(".cmeta .path").textContent()).toBe("Second");
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.folder).toMatchObject({ path: "Second" });
+			held.resolve();
+			await answered.promise;
+			await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+			expect(await page.locator(".cmeta .path").textContent()).toBe("Second");
+			expect(h.errors).toEqual([]);
+		} finally {
+			held.resolve();
 			await h.close();
 			await server.stop();
 		}
