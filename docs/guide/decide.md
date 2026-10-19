@@ -20,7 +20,10 @@ That question blocks nothing.
 
 Use <kbd>j</kbd> and <kbd>k</kbd> to move between questions.
 Press <kbd>Space</kbd> to expand the evidence.
-The "Open" view contains questions that need an answer. "Settled" contains decisions.
+The "Open" view contains questions that need an answer. "Settled" contains decisions,
+including answers that ended when their cause passed, their flaky hold expired, or their tracker issue closed.
+When you replace an inherited answer, Settled lists the answer on the ordinary cause question.
+An ended answer shows who answered, what they answered, and the rule and reason recorded for its end.
 You can filter by "Proposals", "Unlinked", "Failures", "Findings", or "Sign-offs".
 See [the keyboard guide](./keyboard.md) for the full key list.
 
@@ -287,9 +290,12 @@ They have no fixed expiry date.
 
 You do not withdraw these three answers after a fix. The answer ends by itself when the cause passes in the newest
 commit of its scope, for example the next commit of the pull request, or the next commit on trunk.
-The question leaves "Settled". The ledger keeps your answer and records its end, signed by the rule `passed`, with
+The question stays in "Settled". It shows your answer and records its end, signed by the rule `passed`, with
 the reason "Every test it named passed on `<commit>` where it had failed; the answer ended."
 See [export and verify an audit](./data.md#export-and-verify-an-audit). If the cause fails again later, it is a new question.
+The command `mainworthy get Q-1` also returns the ending and the original answer under `decision.supersedes`.
+An ended answer cannot be withdrawn. A timed expiry or tracker closure shows its own recorded rule and reason,
+without claiming that the cause passed.
 
 The answer ends only when that commit's run shows all of the following.
 

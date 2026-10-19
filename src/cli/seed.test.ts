@@ -113,11 +113,16 @@ test("a seeded project holds a suite in folders, a fortnight of history and five
 		const answered = decided.items.filter((item) => item.kind === "failure" || item.kind === "finding");
 		expect(answered.length).toBeGreaterThan(5);
 		for (const item of answered) {
-			expect(item.decision?.by).toEqual(["robin"]);
-			expect(item.decision?.at).toBeGreaterThan(item.openedAt);
-			expect((item.decision?.at ?? 0) - item.openedAt).toBeLessThan(DAY);
-			expect(item.decision?.at).toBeLessThan(before);
+			const answer = item.decision?.supersedes ?? item.decision;
+			expect(answer?.by).toEqual(["robin"]);
+			expect(answer?.at).toBeGreaterThan(item.openedAt);
+			expect((answer?.at ?? 0) - item.openedAt).toBeLessThan(DAY);
+			expect(answer?.at).toBeLessThan(before);
 		}
+		expect(answered.find((item) => item.decision?.rule === "passed")).toMatchObject({
+			state: "dissolved",
+			decision: { answer: { is: "outdated" }, by: ["policy"], supersedes: { by: ["robin"] } },
+		});
 		expect(new Set(answered.map((item) => dayOf(item.openedAt))).size).toBeGreaterThan(3);
 
 		// Today's failure carries the trace its test runner wrote.

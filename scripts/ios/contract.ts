@@ -62,13 +62,23 @@ const GivenAnswer = struct("GivenAnswer", "An answer as it was given. It carries
 	ref: [maybe(text), "For a defect: where it is tracked."],
 });
 
-const Decision = struct("Decision", "The decision that stands on a question.", {
+const decisionFields = {
 	id: whole,
 	answer: GivenAnswer,
 	by: [list(text), "Who signed it."],
 	rule: [maybe(text), "The policy clause that answered, when a rule did."],
 	reason: maybe(text),
 	at: moment,
+} satisfies Parameters<typeof struct>[2];
+
+const PriorDecision = struct(
+	"PriorDecision",
+	"The answer an ending supersedes, with its original attribution.",
+	decisionFields,
+);
+const Decision = struct("Decision", "A question's decision, or the ending of its answer.", {
+	...decisionFields,
+	supersedes: maybe(PriorDecision),
 });
 
 const Advice = struct("Advice", "An answer that was recorded as advice: somebody else decides.", {
@@ -78,7 +88,7 @@ const Advice = struct("Advice", "An answer that was recorded as advice: somebody
 	reason: maybe(text),
 });
 
-export const Question = struct("Question", "One question of the queue, open or decided.", {
+export const Question = struct("Question", "One question of the queue, open, decided or dissolved.", {
 	q: [text, "Its ref, for example Q-12."],
 	kind: [text, "adopt, map, failure, finding or signoff. The evidence is read by it."],
 	title: text,

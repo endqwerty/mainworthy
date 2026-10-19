@@ -27,6 +27,7 @@ import { emptyTally, isResultStanding, RESULT_STANDINGS } from "../../core/runs.
 import { openFailureQuestion, toItem, toItemFor } from "../decisions/decisions.ts";
 import {
 	decisionById,
+	holdEndingById,
 	ledgerPage,
 	mustQuestion,
 	openCountOn,
@@ -138,7 +139,15 @@ export function inbox(ctx: Ctx, input: InboxInput): InboxReply {
 			ctx.project.id,
 			input.on.toUpperCase().startsWith("PR:") ? input.on.toLowerCase() : input.on,
 		)
-			.filter((row) => row.state === input.state && (!input.kind || row.kind === input.kind))
+			.filter(
+				(row) =>
+					(row.state === input.state ||
+						(input.state === "decided" &&
+							row.state === "dissolved" &&
+							row.decision !== null &&
+							holdEndingById(ctx.db, row.decision) !== null)) &&
+					(!input.kind || row.kind === input.kind),
+			)
 			.slice(0, limit);
 		return { counts, items: rows.map((row) => withTrackerPollError(ctx.db, toItemFor(ctx, row))), cursor: null };
 	}

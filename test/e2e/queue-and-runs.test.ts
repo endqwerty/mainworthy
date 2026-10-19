@@ -12,6 +12,7 @@ import { jiraPort } from "../../src/server/trackers/jira.ts";
 import ui from "../../src/web/index.html";
 import { call } from "../../src/web/lib/api.ts";
 import { Slot } from "../../src/web/runs/models.ts";
+import { ciReport } from "../helpers.ts";
 import { answer, browserAvailable, eventually, fetched, openPage, type Server, startServer } from "./support.ts";
 
 const check = test.skipIf(!browserAvailable);
@@ -75,6 +76,71 @@ const qref = (page: Awaited<ReturnType<typeof openPage>>["page"]) =>
 	page.locator("[data-current-question]").getAttribute("data-current-question");
 const ready = (page: Awaited<ReturnType<typeof openPage>>["page"]) =>
 	page.locator('[data-active="true"][data-ready="true"]').waitFor();
+
+check(
+	"Settled keeps an answer and its recorded ending after the cause passes",
+	async () => {
+		const server = await startServer({ preset: "standard" });
+		const h = await openPage(server, { path: "/p/scratch/queue" });
+		try {
+			await server.api("propose", { edits: [{ op: "create", outline: "Checkout total" }] });
+			const report = (commit: string, fail: Record<number, string> = {}) => {
+				const data = ciReport({ commit, branch: "fix", pr: 408, n: 1, fail });
+				return {
+					...data,
+					results: data.results.map((result) => ({ ...result, test: { case: "C-1" } })),
+				};
+			};
+			await server.api("report", report("trace408a", { 0: "expected 90, got 100" }));
+			const question = (await server.api("inbox", { kind: "failure" })).items[0];
+			if (!question) throw new Error("expected a failure question");
+			await server.api("decide", {
+				q: question.q,
+				onEvidence: question.evidenceHash,
+				answer: { is: "test" },
+				reason: "The assertion needs a fix.",
+			});
+			await server.api("report", report("trace408b"));
+			const { page } = h;
+			page.setDefaultTimeout(5000);
+			await page.getByRole("button", { name: "Settled", exact: true }).click();
+			await page.locator(`[data-question="${question.q}"]`).click();
+			const decision = page.locator(".queue-decision");
+			await decision.getByText("The test is wrong", { exact: true }).waitFor();
+			await decision.getByText("Decided by robin", { exact: false }).waitFor();
+			await decision.getByText("The assertion needs a fix.", { exact: true }).waitFor();
+			await decision
+				.getByText("Every test it named passed on trace408b where it had failed; the answer ended.", { exact: true })
+				.waitFor();
+			expect(await decision.getByRole("button", { name: "Withdraw answer" }).count()).toBe(0);
+			expect(await page.locator(`[data-question="${question.q}"] .blk`).count()).toBe(0);
+			expect(await page.locator(".queue-heading .blk").count()).toBe(0);
+			await page.keyboard.press("u");
+			expect((await server.api("get", { refs: [question.q] }))[0]).toMatchObject({ state: "dissolved" });
+			await page.reload();
+			await decision
+				.getByText("Every test it named passed on trace408b where it had failed; the answer ended.", { exact: true })
+				.waitFor();
+			await page.goto(`${server.url}/p/scratch/changes/pr%3A408`);
+			const onChange = page.locator(".change-decision").filter({ hasText: question.q });
+			await onChange.getByText("The test is wrong", { exact: true }).waitFor();
+			await onChange
+				.getByText("Every test it named passed on trace408b where it had failed; the answer ended.", { exact: false })
+				.waitFor();
+			await page.goto(`${server.url}/p/scratch/suite/c/1`);
+			const onCase = page.locator(".question-card").filter({ hasText: question.q });
+			await onCase.getByText("test by robin", { exact: false }).waitFor();
+			await onCase
+				.getByText("Every test it named passed on trace408b where it had failed; the answer ended.", { exact: false })
+				.waitFor();
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
 
 for (const scenario of [
 	"single replacement",

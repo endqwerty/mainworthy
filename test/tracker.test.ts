@@ -14,7 +14,7 @@ import { jiraPort } from "../src/server/trackers/jira.ts";
 import type { DefectDraft, TrackerPort } from "../src/server/trackers/port.ts";
 import { deliverTrackerRequests } from "../src/server/trackers/requests.ts";
 import { exportArchive, importArchive } from "../src/server/transfer/transfer.ts";
-import { type Harness, harness } from "./helpers.ts";
+import { ciReport, type Harness, harness } from "./helpers.ts";
 
 const credential = "test-tracker-credential";
 const github = { project: "scratch", repository: "example/shop", token: credential };
@@ -528,6 +528,32 @@ test("open issues and failed reads keep holds, back off persistently, and a late
 		tally: { unexplained: 1 },
 	});
 	expect(h.call<InboxReply>("inbox").items.filter((q) => q.kind === "failure")).toHaveLength(1);
+});
+
+test("tracker closure keeps an ended defect and its reason in Settled when its change is gone", async () => {
+	h = harness();
+	h.app.config.github = github;
+	h.call(
+		"report",
+		ciReport({ commit: "tracker408a", branch: "fix", pr: 408, n: 1, fail: { 0: "expected 90, got 100" } }),
+	);
+	const question = h.call<InboxReply>("inbox", { kind: "failure" }).items[0];
+	if (!question) throw new Error("expected a failure question");
+	h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "defect", ref: item.url } });
+	h.call("change", { change: "pr:408", state: "closed" });
+	expect(await pollDefectHolds(h.app, { ...port, getItem: async () => ({ ...item, state: "closed" }) })).toBe(1);
+	const ended = {
+		q: question.q,
+		state: "dissolved",
+		decision: {
+			answer: { is: "outdated" },
+			rule: "tracker-closed",
+			reason: "Tracker issue https://github.com/example/shop/issues/42 is closed; the defect hold ended.",
+			supersedes: { answer: { is: "defect", ref: item.url }, by: ["robin"] },
+		},
+	};
+	expect(h.call("get", { refs: [question.q] })).toMatchObject([ended]);
+	expect(h.call<InboxReply>("inbox", { state: "decided", kind: "failure" }).items).toMatchObject([ended]);
 });
 
 for (const change of ["answer", "configuration", "archive"] as const) {

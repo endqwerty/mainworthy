@@ -446,29 +446,38 @@ export function CasePane({
 						)}
 						{timelineData?.questions
 							.filter((q) => q.kind !== "adopt" || q.state !== "open")
-							.map((q) => (
-								<a
-									className="question-card"
-									key={q.q}
-									href={refUrl({ project, ref: q.q })}
-									onClick={(event) => {
-										event.preventDefault();
-										navigate(refUrl({ project, ref: q.q }));
-									}}
-								>
-									<ProducerGlyph kind={q.producer} /> {q.q} · {q.title}{" "}
-									<span className="dim">
-										{q.decision
-											? `· ${String(q.decision.answer.is)} by ${q.decision.rule ? `rule ${q.decision.rule}` : q.decision.by.join(", ")}`
-											: "· open"}
-									</span>
-									{q.decision?.trackerError && (
-										<p role="status" className="hintbox">
-											{q.decision.trackerError}
-										</p>
-									)}
-								</a>
-							))}
+							.map((q) => {
+								const decision = q.decision?.supersedes ?? q.decision;
+								return (
+									<a
+										className="question-card"
+										key={q.q}
+										href={refUrl({ project, ref: q.q })}
+										onClick={(event) => {
+											event.preventDefault();
+											navigate(refUrl({ project, ref: q.q }));
+										}}
+									>
+										<ProducerGlyph kind={q.producer} /> {q.q} · {q.title}{" "}
+										<span className="dim">
+											{decision
+												? `· ${String(decision.answer.is)} by ${decision.rule ? `rule ${decision.rule}` : decision.by.join(", ")}`
+												: `· ${q.state}`}
+										</span>
+										{q.decision?.supersedes && (
+											<p>
+												Ended by {q.decision.rule ? `rule ${q.decision.rule}` : q.decision.by.join(", ")}
+												{q.decision.reason && ` · ${q.decision.reason}`}
+											</p>
+										)}
+										{q.decision?.trackerError && (
+											<p role="status" className="hintbox">
+												{q.decision.trackerError}
+											</p>
+										)}
+									</a>
+								);
+							})}
 						{entries.length === 0 && (
 							<div className="nosteps">Your first version appears here when you leave the case.</div>
 						)}

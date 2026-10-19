@@ -6,7 +6,8 @@ import { join } from "node:path";
 import { Glob } from "bun";
 import { z } from "zod";
 import api1Actors from "../../test/fixtures/cli/actor-list-api1.json";
-import type { ReportInput } from "../core/ops.ts";
+import { ciReport } from "../../test/helpers.ts";
+import { QuestionItem, type ReportInput } from "../core/ops.ts";
 import { API_VERSION } from "../core/version.ts";
 import { OP_LIST } from "../server/ops/index.ts";
 import { Client, plainHttpToAnotherMachine } from "./client.ts";
@@ -25,6 +26,38 @@ const Inbox = z.object({ items: z.array(Question) });
 const Token = z.object({ token: z.string() });
 const Created = z.object({ cases: z.array(Ref) });
 const Receipt = z.object({ batch: z.number(), fresh: z.boolean(), counts: z.object({ total: z.number() }) });
+
+test("get prints who answered a failure and the recorded reason its answer ended", async () => {
+	await withInstance(async ({ client, cli }) => {
+		await client.call(
+			"report",
+			ciReport({ commit: "cli408a", branch: "fix", pr: 408, n: 1, fail: { 0: "expected 90, got 100" } }),
+		);
+		const question = (await client.call("inbox", { kind: "failure" })).items[0];
+		if (!question) throw new Error("expected a failure question");
+		await client.call("decide", {
+			q: question.q,
+			onEvidence: question.evidenceHash,
+			answer: { is: "test" },
+			reason: "Fix the assertion.",
+		});
+		await client.call("report", ciReport({ commit: "cli408b", branch: "fix", pr: 408, n: 1 }));
+		const printed = await cli(["get", question.q]);
+		expect(printed.code).toBe(0);
+		expect(z.array(QuestionItem).parse(JSON.parse(printed.stdout))).toMatchObject([
+			{
+				q: question.q,
+				state: "dissolved",
+				decision: {
+					answer: { is: "outdated" },
+					rule: "passed",
+					reason: "Every test it named passed on cli408b where it had failed; the answer ended.",
+					supersedes: { answer: { is: "test" }, by: ["robin"], reason: "Fix the assertion." },
+				},
+			},
+		]);
+	});
+});
 
 test("git target detection stops after one Git process outside a repository or without commits", async () => {
 	await withInstance(async ({ directory }) => {

@@ -105,7 +105,7 @@ public struct Question: Identifiable, Equatable, Sendable {
 	public let advice: [Advice]
 	/// What this person's answer would be worth.
 	public let standing: Standing
-	/// The decision that stands, on a question that is decided.
+	/// The recorded answer, with its ending when it no longer stands.
 	public let decision: Decision?
 	/// What the question is about: runs, tests, cases, a change. A listing can be asked for the questions about
 	/// one of them.
@@ -232,12 +232,30 @@ public struct Decision: Equatable, Sendable {
 	public let byRule: Bool
 	public let reason: String?
 	public let at: Date
+	/// How the recorded answer ended, when it no longer stands.
+	public let ending: DecisionEnding?
 
 	init(_ wire: Wire.Decision) {
-		label = Vocabulary.answerLabels[wire.answer.is] ?? wire.answer.is.capitalized
-		reference = wire.answer.ref
+		let answer = wire.supersedes?.answer ?? wire.answer
+		label = Vocabulary.answerLabels[answer.is] ?? answer.is.capitalized
+		reference = answer.ref
+		by = wire.supersedes?.by ?? wire.by
+		byRule = wire.supersedes.map { $0.rule != nil } ?? (wire.rule != nil)
+		reason = wire.supersedes.map { $0.reason } ?? wire.reason
+		at = Date(milliseconds: wire.supersedes?.at ?? wire.at)
+		ending = wire.supersedes == nil ? nil : DecisionEnding(wire)
+	}
+}
+
+public struct DecisionEnding: Equatable, Sendable {
+	public let by: [String]
+	public let rule: String?
+	public let reason: String?
+	public let at: Date
+
+	init(_ wire: Wire.Decision) {
 		by = wire.by
-		byRule = wire.rule != nil
+		rule = wire.rule
 		reason = wire.reason
 		at = Date(milliseconds: wire.at)
 	}

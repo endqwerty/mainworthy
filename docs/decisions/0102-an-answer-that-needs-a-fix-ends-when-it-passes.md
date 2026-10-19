@@ -61,6 +61,9 @@ endings, the answer stops explaining the commits it covered: an earlier commit t
 "Infrastructure" and "Already failing on base" cover one build already. A slot's settlement and "The failure was
 a mistake" are about results already recorded. There is no policy setting.
 
+As of issue #408, Settled also lists dissolved questions that keep a decision. An answer that ended keeps its
+ending and the answer it superseded, including who answered and the recorded reason for its end.
+
 ## Turned down
 
 - **Keeping the answer on the commits it covered.** The ending would keep the excuse on the targets that rested on
@@ -86,6 +89,4 @@ a mistake" are about results already recorded. There is no policy setting.
 
 ## Not done
 
-- Settled lists decided questions only, so an answer that ended leaves it, as one that expired or whose tracker
-  issue closed does today. The ledger and the audit export keep the answer and its ending.
 - Answers given before this change end the same way, at the next passing report in their scope.

@@ -78,6 +78,12 @@ export type HoldTerm =
 
 export type Signer = { by: number; clause: string; policy: number; reason: string | null };
 
+// Only the recorded endings of a hold belong in Settled after their question dissolves.
+const HOLD_ENDING = `d.supersedes IS NOT NULL AND (
+ (json_extract(d.answer, '$.is') = 'expired' AND json_extract(d.signers, '$[0].clause') = 'hold-expired')
+ OR (json_extract(d.answer, '$.is') = 'outdated' AND json_extract(d.signers, '$[0].clause') IN ('tracker-closed', 'passed'))
+)`;
+
 const Q = {
 	inherited: sql<{ project: number }, QuestionRow>(
 		`SELECT * FROM questions WHERE project = $project AND kind = 'failure'
@@ -208,12 +214,14 @@ const Q = {
 	// Newest first. Several questions can be decided at one revision (one command), so the page is cut on the
 	// revision and the id together.
 	ledger: sql<{ project: number; rev: number; id: number; limit: number }, QuestionRow>(
-		`SELECT * FROM questions WHERE project = $project AND state = 'decided' AND (rev, id) < ($rev, $id)
-		 ORDER BY rev DESC, id DESC LIMIT $limit`,
+		`SELECT q.* FROM questions q LEFT JOIN decisions d ON d.id = q.decision
+		 WHERE q.project = $project AND (q.state = 'decided' OR (q.state = 'dissolved' AND ${HOLD_ENDING}))
+		 AND (q.rev, q.id) < ($rev, $id) ORDER BY q.rev DESC, q.id DESC LIMIT $limit`,
 	),
 	ledgerOfKind: sql<{ project: number; kind: string; rev: number; id: number; limit: number }, QuestionRow>(
-		`SELECT * FROM questions WHERE project = $project AND state = 'decided' AND kind = $kind AND (rev, id) < ($rev, $id)
-		 ORDER BY rev DESC, id DESC LIMIT $limit`,
+		`SELECT q.* FROM questions q LEFT JOIN decisions d ON d.id = q.decision
+		 WHERE q.project = $project AND (q.state = 'decided' OR (q.state = 'dissolved' AND ${HOLD_ENDING}))
+		 AND q.kind = $kind AND (q.rev, q.id) < ($rev, $id) ORDER BY q.rev DESC, q.id DESC LIMIT $limit`,
 	),
 	openIdsOfKind: sql<{ project: number; kind: string }, { id: number }>(
 		"SELECT id FROM questions WHERE project = $project AND state = 'open' AND owner = 0 AND kind = $kind ORDER BY id",
@@ -260,6 +268,7 @@ const Q = {
 	),
 	setEffects: sql<{ id: number; effects: string }>("UPDATE decisions SET effects = $effects WHERE id = $id"),
 	decisionById: sql<{ id: number }, DecisionRow>("SELECT * FROM decisions WHERE id = $id"),
+	holdEndingById: sql<{ id: number }, DecisionRow>(`SELECT d.* FROM decisions d WHERE d.id = $id AND ${HOLD_ENDING}`),
 	decisionsOf: sql<{ question: number }, DecisionRow>("SELECT * FROM decisions WHERE question = $question ORDER BY id"),
 	expired: sql<{ project: number; now: number }, DecisionRow>(
 		`SELECT d.* FROM decisions d JOIN questions q ON q.decision = d.id
@@ -531,6 +540,7 @@ export const setDecisionEffects = (ctx: Ctx, decision: number, effects: unknown)
 };
 
 export const decisionById = (db: Db, id: number): DecisionRow | null => db.get(Q.decisionById, { id });
+export const holdEndingById = (db: Db, id: number): DecisionRow | null => db.get(Q.holdEndingById, { id });
 export const decisionsOf = (db: Db, question: number): DecisionRow[] => db.all(Q.decisionsOf, { question });
 export const expiredDecisions = (db: Db, project: number, now: number): DecisionRow[] =>
 	db.all(Q.expired, { project, now });
