@@ -42,7 +42,6 @@ import { PRESETS } from "../../src/core/presets.ts";
 			const before = Policy.parse(await server.api("admin", { do: "policy.show", project: "scratch" }));
 			view = await openPage(server, { path: "/p/scratch/settings" });
 			const { page } = view;
-			page.setDefaultTimeout(3000);
 			await page.getByRole("button", { name: "Edit clauses", exact: true }).click();
 			const mapTrack = page.getByRole("row", { name: "Clause map-track", exact: true });
 			await mapTrack.getByLabel("Rule answer").fill("{");
