@@ -222,7 +222,8 @@ It raises no question in the ended scope. A landed head is now on trunk, so its 
 failures are evaluated and asked about there.
 
 When a pull request reopens, report the new state. Unexplained failures on its
-newest commit raise questions at once:
+observed head raise questions at once if that commit's run belongs to the pull request.
+An unreported landing commit supplies no evidence to re-ask about earlier failures:
 
 ```sh
 $ mainworthy change --change pr:482 --state open

@@ -5,7 +5,8 @@
 //
 // What must hold after every command, whatever came before:
 // 1. A failure a live run shows unexplained has an open question that lists its target and names the run, and the
-//    run's gate names that question. Live: an open planned run, or the run of the newest commit of a scope.
+//    run's gate names that question. Live: an open planned run, a change's observed head run in its scope, or
+//    the newest commit run on a line.
 // 2. What a commit's gate counts for a lane is the fold of that lane's history (uncorrected results, none judged
 //    a mistake) by the one lane rule.
 // 3. A run's stored tally is what its results and the excuses in force give now, for every commit, not only
@@ -129,6 +130,22 @@ function sequence(seed: number, preset: string): Problem | null {
 				const scope = String(run.scope);
 				newestInScope.set(scope, Math.max(newestInScope.get(scope) ?? 0, Number(run.id)));
 			}
+		}
+		// A change speaks through its observed head only while that run belongs to this scope.
+		for (const change of rows("SELECT id, project, repo, head_sha FROM changes")) {
+			const scope = `change:${change.id}`;
+			const head =
+				change.head_sha === null
+					? undefined
+					: runs.find(
+							(run) =>
+								run.origin === "change" &&
+								run.project === change.project &&
+								run.scope === scope &&
+								run.accepts_what === `code:${change.repo ?? ""}@${change.head_sha}`,
+						);
+			if (head) newestInScope.set(scope, Number(head.id));
+			else newestInScope.delete(scope);
 		}
 		const targets = new Map(rows("SELECT * FROM targets").map((target) => [Number(target.id), target]));
 		const open = rows<{ no: number; subject: string; evidence: string; refs: string | null }>(

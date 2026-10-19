@@ -1127,6 +1127,116 @@ describe("holds", () => {
 			}));
 	const state = (q: string) => h.call<{ state: string }[]>("get", { refs: [q] })[0]?.state;
 
+	test.each(["loose", "standard"])(
+		"an agent report preserves a PR question when its head's run belongs to another scope, preset=%s",
+		(preset) => {
+			const s = harness({ preset });
+			try {
+				s.call("propose", { edits: [{ op: "create", outline: "Checkout works" }] });
+				const ci = s.actor("pipeline", "ci", ["read", "record"]);
+				const agent = s.actor("reviewer", "agent", ["read", "produce"]);
+				const old = ciReport({
+					commit: "scope001",
+					pr: 7,
+					branch: "feature",
+					n: 1,
+					fail: { 0: "checkout total is wrong" },
+				});
+				s.call("report", old, ci);
+				// A typed result keeps this commit in its own scope when CI later names the PR.
+				s.call("report", {
+					target: { commit: "scope002", repo: "acme/web" },
+					results: [{ test: { case: "C-1" }, outcome: "pass" }],
+				});
+				s.call("report", ciReport({ commit: "scope002", pr: 7, branch: "feature", n: 1 }), ci);
+				expect(s.call<GateStatus>("gate", { change: "pr:7" })).toMatchObject({ run: "R-2", verdict: "passed" });
+				const blocked = { run: "R-1", verdict: "blocked", open: ["Q-2"], tally: { unexplained: 1 } };
+				expect(s.call<GateStatus>("gate", { commit: "scope001" })).toMatchObject(blocked);
+
+				s.call("report", ciReport({ commit: "scope001", pr: 7, branch: "feature", n: 1, attempt: 2 }), agent);
+				expect(s.call<GateStatus>("gate", { commit: "scope001" })).toMatchObject(blocked);
+				expect(s.call<{ state: string }[]>("get", { refs: ["Q-2"] })[0]?.state).toBe("open");
+				expect(s.call<InboxReply>("inbox", { kind: "failure" }).items.map((item) => item.q)).toEqual(["Q-2"]);
+			} finally {
+				s.close();
+			}
+		},
+	);
+
+	test.each([false, true])(
+		"a discarded head passing preserves the reset head's failure, defect answer=%s",
+		(answered) => {
+			const ci = h.actor("pipeline", "ci", ["read", "record"]);
+			const at = (commit: string, attempt = 1, failing = true) =>
+				ciReport({
+					commit,
+					pr: 12,
+					branch: "feature",
+					n: 1,
+					attempt,
+					...(failing ? { fail: { 0: "checkout total is wrong" } } : {}),
+				});
+			const old = at("old00001");
+			h.call("report", old, ci);
+			const asked = first(queue().items);
+			if (answered) expect(decide(asked, { is: "defect" })?.status).toBe("decided");
+			h.call("report", at("new00002"), ci);
+			h.call(
+				"report",
+				{ ...old, target: { ...old.target, head: "old00001" }, buildUrl: "https://ci.example/reset" },
+				ci,
+			);
+			const current = { run: "R-1", verdict: answered ? "failed" : "blocked", open: answered ? [] : ["Q-1"] };
+			expect(h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject(current);
+
+			h.call("report", at("new00002", 2, false), ci);
+			expect(h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject(current);
+			expect(state(asked.q)).toBe(answered ? "decided" : "open");
+			const inbox = h.call<InboxReply>("inbox", { kind: "failure" });
+			expect(inbox.counts.open).toBe(answered ? 0 : 1);
+			expect(inbox.items.map((item) => item.q)).toEqual(answered ? [] : ["Q-1"]);
+			expect(gate("new00002")).toMatchObject({ run: "R-2", verdict: "passed" });
+
+			h.call("report", at("old00001", 2, false), ci);
+			expect(h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({
+				run: "R-1",
+				verdict: "passed",
+				open: [],
+			});
+			expect(state(asked.q)).toBe("dissolved");
+			if (answered) expect(ledger(asked.q).map((entry) => entry.is)).toEqual(["defect", "outdated"]);
+		},
+	);
+
+	test.each([false, true])(
+		"a discarded head passing supplies no proof for an unreported head, defect answer=%s",
+		(answered) => {
+			const failed = ciReport({
+				commit: "old00001",
+				pr: 12,
+				branch: "feature",
+				n: 1,
+				fail: { 0: "checkout total is wrong" },
+			});
+			h.call("report", failed);
+			const asked = first(queue().items);
+			if (answered) expect(decide(asked, { is: "defect" })?.status).toBe("decided");
+			h.call("report", {
+				...failed,
+				target: { ...failed.target, head: "unseen003" },
+				buildUrl: "https://ci.example/unseen",
+			});
+			h.call("report", ciReport({ commit: "old00001", pr: 12, branch: "feature", n: 1, attempt: 2 }));
+			expect(h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({
+				run: null,
+				verdict: "pending",
+				open: [],
+			});
+			expect(state(asked.q)).toBe(answered ? "decided" : "open");
+			expect(gate("old00001")).toMatchObject({ run: "R-1", verdict: "passed" });
+		},
+	);
+
 	test("an answer that needs a fix ends when a later commit of the pull request passes, and a new failure is asked", () => {
 		const fail = { 0: "expected 90, got 100" };
 		h.call("report", ciReport({ commit: "fixed01a", branch: "fix", pr: 41, n: 3, fail }));
@@ -2456,6 +2566,32 @@ describe("a change that ends", () => {
 			ciReport({ commit: "ended0003", branch: "fix", pr: 12, n: 2, fail: { 0: "expected 90, got 100" } }),
 		);
 		expect(queue().counts.open).toBe(0);
+	});
+
+	test("reopening with an unreported landing head waits for evidence in the change's scope", () => {
+		const asked = failingPull();
+		h.call("change", { change: "pr:12", state: "merged", landing: { commit: "unseen001", branch: "main" } });
+		expect(h.call<{ state: string }[]>("get", { refs: [asked.q] })[0]?.state).toBe("dissolved");
+		expect(end("pr:12", "open")).toMatchObject({ state: "open", questions: [] });
+		expect(h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({ run: null, verdict: "pending" });
+		expect(queue().counts.open).toBe(0);
+
+		const report = ciReport({
+			commit: "ended0001",
+			branch: "fix",
+			pr: 12,
+			n: 2,
+			attempt: 2,
+			fail: { 0: "expected 90, got 100" },
+		});
+		h.call("report", { ...report, target: { ...report.target, head: "ended0001" } });
+		const again = first(queue().items);
+		expect(again).toMatchObject({ kind: "failure", state: "open", title: asked.title });
+		expect(h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({
+			run: "R-1",
+			verdict: "blocked",
+			open: [again.q],
+		});
 	});
 
 	test("a change that is open again is asked about at once, with no new report", () => {
