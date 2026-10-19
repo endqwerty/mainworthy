@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
+import type { CommandFate } from "../../src/core/ops.ts";
 import { Slot } from "../../src/web/runs/models.ts";
 import { browserAvailable, eventually, launchBrowser, openPage, startServer } from "./support.ts";
 
@@ -177,6 +178,122 @@ for (const reply of ["missing gate", "unreadable", "lost", "unsent"]) {
 	);
 }
 
+for (const failure of ["internal", "session change", "begun"] as const) {
+	for (const stage of failure === "begun" ? ["first send"] : ["first send", "replay"]) {
+		test.skipIf(!browserAvailable)(
+			`a report recovers after ${failure} on ${stage} without a second result`,
+			async () => {
+				const server = await startServer({ mode: "server" });
+				let browser: Awaited<ReturnType<typeof openPage>> | null = null;
+				try {
+					await server.api("propose", { edits: [{ op: "create", outline: "Review case\n  Open > Ready" }] });
+					const plan = await server.api("plan", { name: "Report recovery", select: {} });
+					browser = await openPage(server, { path: `/p/scratch/runs/${plan.run.slice(2)}` });
+					const { page, context } = browser;
+					await page.setViewportSize({ width: 1280, height: 800 });
+					page.setDefaultTimeout(5000);
+					await page.waitForSelector('[data-run-document="C-1"][data-active="true"][data-ready="true"]');
+					const other = failure === "session change" ? await context.newPage() : null;
+					if (other) {
+						await other.route("**/api/session", (route) =>
+							route.fulfill({
+								status: 401,
+								json: { ok: false, error: { code: "unauthenticated", message: "Sign in" } },
+							}),
+						);
+						await other.goto(`${server.url}/p/scratch/settings`);
+						await other.locator("#token").waitFor();
+						await other.unroute("**/api/session");
+					}
+					const requests: unknown[] = [];
+					const commands: string[] = [];
+					const lookups: string[] = [];
+					let readable = false;
+					await context.route("**/api/p/scratch/report", async (route) => {
+						const input: unknown = route.request().postDataJSON();
+						requests.push(input);
+						commands.push(z.object({ cmd: z.string() }).parse(input).cmd);
+						if (stage === "replay" && requests.length === 1) return route.fulfill({ json: { ok: true, result: {} } });
+						const response = await route.fetch();
+						if (requests.length === (stage === "replay" ? 2 : 1)) {
+							if (other) {
+								await other.locator("#token").fill(server.token);
+								await other.keyboard.press("Enter");
+								await other.locator("#app").waitFor();
+								await route.fulfill({ response });
+							} else if (failure === "internal")
+								await route.fulfill({
+									status: 500,
+									json: { ok: false, error: { code: "internal", message: "Report interrupted" } },
+								});
+							else await route.fulfill({ response, json: { ok: true, result: {} } });
+						} else await route.fulfill({ response });
+					});
+					await context.route("**/api/p/scratch/command", async (route) => {
+						lookups.push(z.object({ cmd: z.string() }).parse(route.request().postDataJSON()).cmd);
+						if (stage === "replay" && lookups.length === 1) return route.continue();
+						if (failure === "begun")
+							return route.fulfill({
+								json: { ok: true, result: { state: "begun", op: "report" } satisfies CommandFate },
+							});
+						if (!readable)
+							return route.fulfill({
+								status: 503,
+								json: { ok: false, error: { code: "internal", message: "Lookup unavailable" } },
+							});
+						await route.continue();
+					});
+					await page.bringToFront();
+					await page.getByRole("textbox", { name: "Result note" }).fill("Keep this evidence");
+					await page.keyboard.press("Escape");
+					await page.keyboard.press("p");
+					await eventually(
+						() => page.locator("#stat").innerText(),
+						(text) => text.includes("Its note is kept.") || text.includes("C-1 pass recorded"),
+					);
+					const evidence = process.env.MAINWORTHY_RUN_RECOVERY_EVIDENCE;
+					if (evidence && stage === "first send" && failure !== "session change")
+						await page.screenshot({
+							path: `${evidence}/${failure === "begun" ? "536" : "578"}-${process.env.MAINWORTHY_RUN_RECOVERY_REVISION}.png`,
+						});
+					if (failure !== "begun") {
+						const status = await page.locator("#stat").innerText();
+						expect(status).toContain("C-1's outcome is unknown.");
+						expect(status).not.toContain("was not recorded");
+						expect(await page.getByRole("textbox", { name: "Result note" }).inputValue()).toBe("Keep this evidence");
+						readable = true;
+						await page.keyboard.press("p");
+					}
+					const status = await eventually(
+						() => page.locator("#stat").innerText(),
+						(text) => text.includes("C-1 pass recorded on pinned version 1."),
+					);
+					expect(status).toContain("C-1 pass recorded on pinned version 1.");
+					expect(requests).toHaveLength(failure === "begun" || stage === "replay" ? 2 : 1);
+					for (const input of requests) expect(input).toEqual(requests[0]);
+					expect(new Set([...commands, ...lookups]).size).toBe(1);
+					const results = (await server.api("timeline", { ref: "C-1" })).entries.filter(
+						(entry) => entry.t === "result",
+					);
+					expect(results).toHaveLength(1);
+					expect(Slot.array().parse((await server.api("find", { in: "slots", run: plan.run })).items)[0]).toMatchObject(
+						{
+							case: "C-1",
+							state: "satisfied",
+							fills: [{ outcome: "pass", note: "Keep this evidence" }],
+						},
+					);
+					expect(await page.getByRole("textbox", { name: "Result note" }).inputValue()).toBe("");
+				} finally {
+					await browser?.close();
+					await server.stop();
+				}
+			},
+			30_000,
+		);
+	}
+}
+
 test.skipIf(!browserAvailable)(
 	"a refused report replay releases the slot and keeps its note for a fresh result",
 	async () => {
@@ -269,7 +386,7 @@ for (const first of ["fail", "pass"]) {
 					if (++requests === 1) {
 						await held;
 						await route.fulfill({
-							json: { ok: false, error: { code: "internal", message: "First result was not recorded" } },
+							json: { ok: false, error: { code: "conflict", message: "First result was not recorded" } },
 						});
 					} else await route.continue();
 				});

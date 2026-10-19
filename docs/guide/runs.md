@@ -98,6 +98,11 @@ While the note has the focus, the outcome keys type letters and <kbd>Enter</kbd>
 Type a step number before <kbd>f</kbd> to mark the failed step.
 Use <kbd>j</kbd> and <kbd>k</kbd> to move between slots.
 If browser storage is available, the run keeps unfinished notes on this device until the server records the result.
+If a report's reply is lost, unreadable, interrupted by an internal server error, or arrives after
+you sign in again, the page keeps its outcome unknown and checks the original command.
+A command that has begun but not finished is sent again under the same ID.
+If the check fails, keep the page open and press a result key on that slot to check again.
+The original result and note are recovered before another result can be recorded.
 Before recording the result, paste a screenshot into **Result note** or choose **Attach a file**.
 Pending files stay with their slot while you move between slots.
 Closing or reloading the page discards pending files. A saved result shows its images and file

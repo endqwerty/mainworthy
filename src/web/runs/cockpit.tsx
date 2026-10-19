@@ -425,7 +425,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			try {
 				receipt = await call("report", input, { project, owner });
 			} catch (error) {
-				if (error instanceof ApiError) throw error;
+				if (error instanceof ApiError && error.status !== null && error.code !== "internal") throw error;
 				const reason = error instanceof Error ? error.message : "The reply could not be read.";
 				const message = `${slot.case}'s outcome is unknown. ${reason}${/[.!?]$/.test(reason) ? "" : "."} Its note is kept. Press a result key on this slot to check the same request before recording another result.`;
 				let checking: Promise<ReportReceipt> | null = null;
@@ -433,11 +433,11 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 					if (checking) return checking;
 					checking = (async () => {
 						const fate = await call("command", { cmd }, { project, owner });
-						if (fate.state === "begun") throw new Error("The result is still being recorded.");
-						if (fate.state === "none")
+						if (fate.state !== "done")
 							return complete(
 								await call("report", input, { project, owner }).catch((error: unknown) => {
-									if (error instanceof ApiError) uncertain.current.delete(slot.id);
+									if (error instanceof ApiError && error.status !== null && error.code !== "internal")
+										uncertain.current.delete(slot.id);
 									throw error;
 								}),
 							);
