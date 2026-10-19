@@ -1,7 +1,7 @@
 import { type InfiniteData, useInfiniteQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import type { Api } from "../../core/api.ts";
-import { ATTACHMENT_LIMITS, AttachmentInput, attachmentBytes } from "../../core/attachments.ts";
+import { ATTACHMENT_LIMITS, AttachmentInput, AttachmentReply, attachmentBytes } from "../../core/attachments.ts";
 import type { ReportReceipt } from "../../core/ops.ts";
 import { REPLIES } from "../../core/replies.ts";
 import { ApiError, call, UnreadableReply } from "../lib/api.ts";
@@ -47,7 +47,8 @@ function storedNote(key: string): string {
 
 type LocalFill = { fill: Fill; questions: ReportReceipt["questions"]; pending: boolean };
 type PendingAttachment = AttachmentInput & { key: string };
-type LastResult = { slot: Slot; outcome: RunOutcome; previous: Fill | null; ready: Promise<ReportReceipt> };
+type RecordedResult = { fill: Fill; previous: Fill | null };
+type LastResult = { slot: Slot; outcome: RunOutcome; ready: Promise<RecordedResult> };
 
 export function RunCockpit({ runRef }: { runRef: string }) {
 	const { project, session, setStatus } = useApp();
@@ -148,12 +149,10 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 	}
 	const noteRef = useRef<HTMLInputElement>(null);
 	const [last, setLast] = useState<LastResult | null>(null);
-	const writes = useRef(new Map<number, Promise<ReportReceipt>>());
-	const uncertain = useRef(new Map<number, { message: string; retry: () => Promise<ReportReceipt> }>());
-	const withdrawn = useRef(new Set<Promise<ReportReceipt>>());
+	const writes = useRef(new Map<number, Promise<RecordedResult>>());
+	const uncertain = useRef(new Map<number, { message: string; retry: () => Promise<RecordedResult> }>());
+	const withdrawn = useRef(new Set<Promise<RecordedResult>>());
 	const latest = useRef(new Map<number, Fill>());
-	/** The step each result of this page was recorded at, by the id it had when sent: the cache holds that copy until the slots are read again. */
-	const recordedSteps = useRef(new Map<number, string | null>());
 	const queued = useRef(new Map<number, number>());
 	const method = session.kind === "agent" ? "agent" : "human";
 	const slots: Slot[] = storedSlots.map((slot) => {
@@ -206,7 +205,9 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		: [];
 	const documents = current ? [current, ...next.filter((slot) => slot.id !== current.id)] : [];
 	const external = (slot: Slot) =>
-		slot.fills.length > 0 && !slot.fills.some((fill) => fill.by === session.actor && fill.method === method);
+		slot.state !== "missing" &&
+		slot.fills.length > 0 &&
+		!slot.fills.some((fill) => fill.by === session.actor && fill.method === method);
 	const ownFill = current?.fills.find((fill) => fill.by === session.actor && fill.method === method);
 	const note = current ? (notes[current.id] ?? "") : "";
 	const currentRead = useQueryOp({
@@ -254,8 +255,8 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		text = slot && consumedNotes.current.get(slot.id) !== notes[slot.id] ? (notes[slot.id] ?? "") : "",
 		advance = true,
 		visibleStep = false,
-		restores: Fill | null = null,
-	): Promise<ReportReceipt> | null {
+		restores?: Promise<RecordedResult>,
+	): Promise<RecordedResult> | null {
 		if (!slot || !sessionCurrent(owner) || !session.can.includes("produce")) return null;
 		const recovery = uncertain.current.get(slot.id);
 		if (recovery) {
@@ -291,7 +292,6 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			return null;
 		}
 		for (const file of files) consumedFiles.current.add(file);
-		const previous = slot.fills.find((fill) => fill.by === session.actor && fill.method === method) ?? null;
 		const fill: Fill = {
 			result: -Date.now(),
 			by: session.actor,
@@ -300,7 +300,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			admitted: "exact",
 			at: Date.now(),
 			note: text || null,
-			atStep: outcome === "fail" ? (restores?.atStep ?? null) : null,
+			atStep: null,
 		};
 		setLocal((value) => new Map(value).set(slot.id, { fill, pending: true, questions: [] }));
 		void queryClient.cancelQueries({ queryKey: cacheKey });
@@ -336,16 +336,24 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		const priorWrite = writes.current.get(slot.id);
 		const rollback = confirmedSlots.current.get(slot.id) ?? slot;
 		queued.current.set(slot.id, fill.result);
-		const resultInput: Api["report"]["input"]["results"][number] = {
-			test: { case: slot.case },
-			outcome,
-			...(text ? { note: text } : {}),
-		};
 		const request = (async () => {
 			if (priorWrite) await priorWrite.catch(() => undefined);
 			const pending = uncertain.current.get(slot.id);
 			if (pending) await pending.retry();
+			const restoration = restores ? await restores : null;
+			if (restoration) {
+				const earlier = restoration.previous;
+				outcome = earlier?.outcome === "error" ? "fail" : (earlier?.outcome ?? "skip");
+				text = earlier?.note ?? "Withdrawn by the author";
+			}
 			if (!sessionCurrent(owner)) throw new Error("The session changed. Your note is kept.");
+			const known = confirmedSlots.current
+				.get(slot.id)
+				?.fills.find((f) => f.by === session.actor && f.method === method);
+			const recent = latest.current.get(slot.id);
+			const previous = known && (!recent || known.result > recent.result) ? known : (recent ?? null);
+			if (restoration && previous?.result !== restoration.fill.result)
+				throw new Error("This result has changed since it was recorded. No correction was recorded.");
 			const cached = RunCase.safeParse(
 				queryClient.getQueryData<Api["get"]["reply"]>(queryKey({ project, op: "get", input: pinnedInput }))?.[0],
 			);
@@ -357,47 +365,50 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 				throw new Error("The pinned case could not be read. Try again.");
 			if (!body.methods.includes(method))
 				throw new Error("This pinned case does not admit your method. Its slot needs another producer.");
-			const restoredStep =
-				restores?.outcome === "fail" ? (restores.atStep ?? recordedSteps.current.get(restores.result) ?? null) : null;
+			const restoredStep = restoration?.previous?.outcome === "fail" ? restoration.previous.atStep : null;
 			const atStep = failedStep > 0 ? body.steps[failedStep - 1]?.id : (restoredStep ?? undefined);
 			if (failedStep > 0 && !atStep) {
 				clearStep(slot.id, marked);
 				throw new Error(`The pinned case has no step ${failedStep}. The mark was cleared; your note is kept`);
 			}
-			recordedSteps.current.set(fill.result, atStep ?? null);
-			const recent = latest.current.get(slot.id);
-			const corrects =
-				previous && previous.result > 0 && (!recent || previous.at > recent.at)
-					? previous.result
-					: (recent?.result ?? previous?.result);
+			const corrects = restoration ? restoration.fill.result : previous?.result;
+			const attachments: AttachmentInput[] = files.map(({ key: _key, ...file }) => ({
+				...file,
+				...(atStep ? { at: atStep } : {}),
+			}));
+			if (restoration?.previous) {
+				const result = restoration.previous.result;
+				const listed = AttachmentReply.parse(await call("attachment", { result }, { project, owner }));
+				if (listed.kind !== "list") throw new UnreadableReply();
+				for (const item of listed.items) {
+					const file = AttachmentReply.parse(await call("attachment", { result, id: item.id }, { project, owner }));
+					if (file.kind !== "file") throw new UnreadableReply();
+					attachments.push({ name: file.attachment.name, data: file.data, ...(item.at ? { at: item.at } : {}) });
+				}
+			}
 			const cmd = randomId();
 			const input: Api["report"]["input"] = {
 				run: runRef,
 				cmd,
 				results: [
 					{
-						...resultInput,
-						...(files.length
-							? {
-									attachments: files.map(({ key: _key, ...file }) => ({
-										...file,
-										...(atStep ? { at: atStep } : {}),
-									})),
-								}
-							: {}),
+						test: { case: slot.case },
+						outcome,
+						...(text ? { note: text } : {}),
+						...(attachments.length ? { attachments } : {}),
 						...(atStep ? { steps: [{ step: atStep, outcome: "fail" }] } : {}),
 						...(corrects !== undefined && corrects > 0 ? { corrects } : {}),
 					},
 				],
 			};
-			const complete = (receipt: ReportReceipt): ReportReceipt => {
+			const complete = (receipt: ReportReceipt): RecordedResult => {
 				if (!sessionCurrent(owner)) throw new Error("The session changed. Your note is kept.");
 				uncertain.current.delete(slot.id);
 				if (receipt.rejected.length || receipt.declined?.length || !receipt.results[0])
 					throw new Error(
 						receipt.rejected[0]?.reason ?? receipt.declined?.[0]?.reason ?? "The result was not recorded.",
 					);
-				const saved = { ...fill, result: receipt.results[0], atStep: atStep ?? null };
+				const saved = { ...fill, outcome, note: text || null, result: receipt.results[0], atStep: atStep ?? null };
 				latest.current.set(slot.id, saved);
 				if (files.length) {
 					for (const file of files) consumedFiles.current.delete(file);
@@ -419,7 +430,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 					`${slot.case} ${outcome} recorded on pinned version ${slot.version}${receipt.questions[0] ? ` · ${receipt.questions[0].q}: ${receipt.questions[0].how}` : ""}.`,
 				);
 				void invalidateProject(project);
-				return receipt;
+				return { fill: saved, previous };
 			};
 			let receipt: ReportReceipt;
 			try {
@@ -428,8 +439,8 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 				if (error instanceof ApiError && error.status !== null && error.code !== "internal") throw error;
 				const reason = error instanceof Error ? error.message : "The reply could not be read.";
 				const message = `${slot.case}'s outcome is unknown. ${reason}${/[.!?]$/.test(reason) ? "" : "."} Its note is kept. Press a result key on this slot to check the same request before recording another result.`;
-				let checking: Promise<ReportReceipt> | null = null;
-				const retry = (): Promise<ReportReceipt> => {
+				let checking: Promise<RecordedResult> | null = null;
+				const retry = (): Promise<RecordedResult> => {
 					if (checking) return checking;
 					checking = (async () => {
 						const fate = await call("command", { cmd }, { project, owner });
@@ -492,7 +503,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			setNoting(null);
 			noteRef.current?.blur();
 		}
-		setLast({ slot, outcome, previous, ready: request });
+		if (!restores) setLast({ slot, outcome, ready: request });
 		return request;
 	}
 	function startFail(): void {
@@ -514,28 +525,10 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		setCursor(last.slot.id);
 		setNoting(null);
 		noteRef.current?.blur();
-		const correction = record(
-			last.previous?.outcome === "pass"
-				? "pass"
-				: last.previous?.outcome === "fail"
-					? "fail"
-					: last.previous?.outcome === "blocked"
-						? "blocked"
-						: "skip",
-			last.slot,
-			last.previous?.note ?? "Withdrawn by the author",
-			false,
-			false,
-			last.previous,
-		);
+		const correction = record("skip", last.slot, "Withdrawn by the author", false, false, last.ready);
 		if (!correction) return;
 		withdrawn.current.add(last.ready);
 		setLast(null);
-		setStatus(
-			last.previous
-				? "The earlier outcome is restored by a correction."
-				: "The result is corrected to skipped. A skipped slot counts as no proof.",
-		);
 	}
 	const active = () => !noting;
 	const bindings: Binding[] = [
