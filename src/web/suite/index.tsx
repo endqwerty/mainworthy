@@ -6,7 +6,7 @@ import { z } from "zod";
 import type { Api } from "../../core/api.ts";
 import { newStepId } from "../../core/ids.ts";
 import { mergeBodies } from "../../core/merge3.ts";
-import { CaseBody, emptyBody, TAG } from "../../core/model.ts";
+import { CaseBody, ConflictAddress, emptyBody, TAG } from "../../core/model.ts";
 import type { Edit } from "../../core/ops.ts";
 import { cleanTitle, conflictEditorStatus, firstStep, ownershipStatus } from "../case/editor.tsx";
 import { CasePane, type ConflictState } from "../case/pane.tsx";
@@ -80,7 +80,7 @@ const RecordedSave = z.object({
 	question: z.string().nullable(),
 	needs: z.string().nullable(),
 	cases: z.array(z.object({ ref: z.string(), version: z.number(), hash: z.string() })),
-	conflicts: z.array(z.object({ case: z.string(), paths: z.array(z.string()) })),
+	conflicts: z.array(z.object({ case: z.string(), addresses: z.array(ConflictAddress) })),
 });
 
 const CardQuestion = z.object({
@@ -797,7 +797,7 @@ export function SuiteScreen() {
 						mine,
 						current,
 						merged: next.merged,
-						paths: next.conflicts.map((conflict) => conflict.path),
+						addresses: next.conflicts.map((conflict) => conflict.address),
 						sentMerges: [],
 					});
 					uncertainMerges.current.delete(state.q);
@@ -1155,7 +1155,7 @@ export function SuiteScreen() {
 						mine,
 						current: currentBody,
 						merged: merged.merged,
-						paths: merged.conflicts.map((conflict) => conflict.path),
+						addresses: merged.conflicts.map((conflict) => conflict.address),
 						sentMerges: [],
 						draftId: snapshot.id,
 					};

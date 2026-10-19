@@ -1,8 +1,8 @@
 import { movedStepIds } from "./diff.ts";
 import { canonicalJson } from "./hash.ts";
-import type { CaseBody, Step } from "./model.ts";
+import type { CaseBody, ConflictAddress, Step } from "./model.ts";
 
-export type Conflict = { path: string; base: unknown; mine: unknown; theirs: unknown };
+export type Conflict = { address: ConflictAddress; base: unknown; mine: unknown; theirs: unknown };
 export type MergeResult = { merged: CaseBody; conflicts: Conflict[] };
 
 function equal({ a, b }: { a: unknown; b: unknown }): boolean {
@@ -12,13 +12,13 @@ function equal({ a, b }: { a: unknown; b: unknown }): boolean {
 }
 
 function mergeField<T>({
-	path,
+	address,
 	base,
 	mine,
 	theirs,
 	conflicts,
 }: {
-	path: string;
+	address: ConflictAddress;
 	base: T;
 	mine: T;
 	theirs: T;
@@ -26,7 +26,7 @@ function mergeField<T>({
 }): T {
 	if (equal({ a: mine, b: theirs }) || equal({ a: theirs, b: base })) return mine;
 	if (equal({ a: mine, b: base })) return theirs;
-	conflicts.push({ path, base, mine, theirs });
+	conflicts.push({ address, base, mine, theirs });
 	return mine;
 }
 
@@ -64,73 +64,73 @@ function insertionIndex({
 export function applyMergeChoice({
 	merged,
 	source,
-	path,
+	address,
 	order,
 }: {
 	merged: CaseBody;
 	source: CaseBody;
-	path: string;
+	address: ConflictAddress;
 	order?: Step[] | undefined;
 }): CaseBody {
 	let result = merged;
-	switch (path) {
-		case "title":
-			result = { ...merged, title: source.title };
+	switch (address.kind) {
+		case "field":
+			result =
+				address.name === "methods"
+					? { ...merged, methods: [...source.methods] }
+					: { ...merged, [address.name]: source[address.name] };
 			break;
-		case "pre":
-			result = { ...merged, pre: source.pre };
-			break;
-		case "methods":
-			result = { ...merged, methods: [...source.methods] };
-			break;
-		case "automate":
-			result = { ...merged, automate: source.automate };
-			break;
-		case "steps.order":
+		case "step-order":
 			order = source.steps;
 			break;
-		default: {
-			if (path.startsWith("fields.")) {
-				const key = path.slice(7);
-				const fields = { ...merged.fields };
-				if (Object.hasOwn(source.fields, key) && source.fields[key] !== undefined) fields[key] = source.fields[key];
-				else delete fields[key];
-				result = { ...merged, fields };
-				break;
+		case "custom-field": {
+			const fields = { ...merged.fields };
+			if (Object.hasOwn(source.fields, address.key) && source.fields[address.key] !== undefined)
+				Object.defineProperty(fields, address.key, {
+					value: source.fields[address.key],
+					enumerable: true,
+					configurable: true,
+					writable: true,
+				});
+			else delete fields[address.key];
+			result = { ...merged, fields };
+			break;
+		}
+		case "step": {
+			const step = source.steps.find((item) => item.id === address.id);
+			const steps = merged.steps.filter((item) => item.id !== address.id);
+			if (step) {
+				const position = merged.steps.findIndex((item) => item.id === address.id);
+				steps.splice(
+					position >= 0
+						? position
+						: insertionIndex({
+								ordered: steps.map((item) => item.id),
+								source: source.steps.map((item) => item.id),
+								index: source.steps.indexOf(step),
+								present: new Set(steps.map((item) => item.id)),
+							}),
+					0,
+					{ ...step },
+				);
 			}
-			const [kind, id, part, extra] = path.split(".");
-			if (kind !== "steps" || !id || extra !== undefined) break;
-			const step = source.steps.find((item) => item.id === id);
-			if (part === undefined) {
-				const steps = merged.steps.filter((item) => item.id !== id);
-				if (step) {
-					const position = merged.steps.findIndex((item) => item.id === id);
-					steps.splice(
-						position >= 0
-							? position
-							: insertionIndex({
-									ordered: steps.map((item) => item.id),
-									source: source.steps.map((item) => item.id),
-									index: source.steps.indexOf(step),
-									present: new Set(steps.map((item) => item.id)),
-								}),
-						0,
-						{ ...step },
-					);
-				}
-				result = { ...merged, steps };
-			} else if (step && (part === "action" || part === "expected")) {
+			result = { ...merged, steps };
+			break;
+		}
+		case "step-field": {
+			const step = source.steps.find((item) => item.id === address.id);
+			if (step)
 				result = {
 					...merged,
 					steps: merged.steps.map((item) =>
-						item.id === id
-							? part === "action"
+						item.id === address.id
+							? address.name === "action"
 								? { ...item, action: step.action }
 								: { ...item, expected: step.expected }
 							: item,
 					),
 				};
-			}
+			break;
 		}
 	}
 	if (order) {
@@ -171,7 +171,7 @@ function mergeOrder({
 		!equal({ a: mineCommon, b: theirsCommon }) && ((mineChanged && theirsChanged) || sharedAddition);
 	if (orderConflict)
 		conflicts.push({
-			path: "steps.order",
+			address: { kind: "step-order" },
 			base: baseIds,
 			mine: mine.map((s) => s.id),
 			theirs: theirs.map((s) => s.id),
@@ -191,17 +191,29 @@ function mergeOrder({
 /** Merges fields and unique step identities against base. Conflicts retain mine, including its deletion and ordering choices. */
 export function mergeBodies({ base, mine, theirs }: { base: CaseBody; mine: CaseBody; theirs: CaseBody }): MergeResult {
 	const conflicts: Conflict[] = [];
-	const title = mergeField({ path: "title", base: base.title, mine: mine.title, theirs: theirs.title, conflicts });
-	const pre = mergeField({ path: "pre", base: base.pre, mine: mine.pre, theirs: theirs.pre, conflicts });
+	const title = mergeField({
+		address: { kind: "field", name: "title" },
+		base: base.title,
+		mine: mine.title,
+		theirs: theirs.title,
+		conflicts,
+	});
+	const pre = mergeField({
+		address: { kind: "field", name: "pre" },
+		base: base.pre,
+		mine: mine.pre,
+		theirs: theirs.pre,
+		conflicts,
+	});
 	const methods = mergeField({
-		path: "methods",
+		address: { kind: "field", name: "methods" },
 		base: base.methods,
 		mine: mine.methods,
 		theirs: theirs.methods,
 		conflicts,
 	});
 	const automate = mergeField({
-		path: "automate",
+		address: { kind: "field", name: "automate" },
 		base: base.automate,
 		mine: mine.automate,
 		theirs: theirs.automate,
@@ -213,7 +225,7 @@ export function mergeBodies({ base, mine, theirs }: { base: CaseBody; mine: Case
 		const ownValue = ({ body }: { body: CaseBody }): string | undefined =>
 			Object.hasOwn(body.fields, key) ? body.fields[key] : undefined;
 		const value = mergeField({
-			path: `fields.${key}`,
+			address: { kind: "custom-field", key },
 			base: ownValue({ body: base }),
 			mine: ownValue({ body: mine }),
 			theirs: ownValue({ body: theirs }),
@@ -234,21 +246,21 @@ export function mergeBodies({ base, mine, theirs }: { base: CaseBody; mine: Case
 		const other = remote.get(id);
 		if (!ours && !other) continue;
 		if ((before?.use || ours?.use || other?.use) && ours && other) {
-			const step = mergeField({ path: `steps.${id}`, base: before, mine: ours, theirs: other, conflicts });
+			const step = mergeField({ address: { kind: "step", id }, base: before, mine: ours, theirs: other, conflicts });
 			if (step) kept.set(id, { ...step });
 			continue;
 		}
 		if (!before) {
 			if (ours && other) {
 				const action = mergeField<string | undefined>({
-					path: `steps.${id}.action`,
+					address: { kind: "step-field", id, name: "action" },
 					base: undefined,
 					mine: ours.action,
 					theirs: other.action,
 					conflicts,
 				});
 				const expected = mergeField<string | null | undefined>({
-					path: `steps.${id}.expected`,
+					address: { kind: "step-field", id, name: "expected" },
 					base: undefined,
 					mine: ours.expected,
 					theirs: other.expected,
@@ -265,7 +277,7 @@ export function mergeBodies({ base, mine, theirs }: { base: CaseBody; mine: Case
 			const survivor = ours ?? other;
 			const moved = ours ? mineMoved.has(id) : theirsMoved.has(id);
 			if (survivor && (!equal({ a: before, b: survivor }) || moved)) {
-				conflicts.push({ path: `steps.${id}`, base: before, mine: ours, theirs: other });
+				conflicts.push({ address: { kind: "step", id }, base: before, mine: ours, theirs: other });
 				if (ours) kept.set(id, { ...ours });
 			}
 			continue;
@@ -273,14 +285,14 @@ export function mergeBodies({ base, mine, theirs }: { base: CaseBody; mine: Case
 		kept.set(id, {
 			id,
 			action: mergeField({
-				path: `steps.${id}.action`,
+				address: { kind: "step-field", id, name: "action" },
 				base: before.action,
 				mine: ours.action,
 				theirs: other.action,
 				conflicts,
 			}),
 			expected: mergeField({
-				path: `steps.${id}.expected`,
+				address: { kind: "step-field", id, name: "expected" },
 				base: before.expected,
 				mine: ours.expected,
 				theirs: other.expected,

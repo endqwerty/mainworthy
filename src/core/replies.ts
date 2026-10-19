@@ -4,7 +4,7 @@ import { AuditReply } from "./audit.ts";
 import { CsvImportRow } from "./csv.ts";
 import { Quarantine, SameCodeEvidence } from "./flaky.ts";
 import { ActorKind, Policy, Unlinked } from "./kinds.ts";
-import { Automate, CaseBody, CaseKind, ExpandedStep, MethodKind, Step } from "./model.ts";
+import { Automate, CaseBody, CaseKind, ConflictAddress, ExpandedStep, MethodKind, Step } from "./model.ts";
 import {
 	AnnounceReply,
 	ArtifactCode,
@@ -198,7 +198,14 @@ const ProposalEdit = z.discriminatedUnion("op", [
 		body: Body,
 		mine: Body,
 		current: Body.nullable(),
-		conflicts: z.array(z.object({ path: text, base: z.unknown(), mine: z.unknown(), theirs: z.unknown() })),
+		conflicts: z.array(
+			z.object({
+				address: ConflictAddress,
+				base: z.unknown().optional(),
+				mine: z.unknown().optional(),
+				theirs: z.unknown().optional(),
+			}),
+		),
 		/** Why accepting this edit on its own would be refused now, while the proposal waits; else null. */
 		refused: nullableText,
 	}),

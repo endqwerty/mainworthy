@@ -682,7 +682,10 @@ describe("what the iPhone Suite reads", () => {
 		holds("propose edit", SuiteProposeReply, await op(project, "propose", edit("First title")));
 		const overlap = await op(project, "propose", edit("Second title"));
 		holds("propose overlap", SuiteProposeReply, overlap);
-		expect(overlap).toMatchObject({ status: "conflict", conflicts: [{ paths: ["title"] }] });
+		expect(overlap).toMatchObject({
+			status: "conflict",
+			conflicts: [{ addresses: [{ kind: "field", name: "title" }] }],
+		});
 		const waiting = await op(strict, "propose", { ...create, reason: "Check it before adoption." });
 		holds("propose waiting", SuiteProposeReply, waiting);
 		expect(waiting).toMatchObject({ status: "open" });

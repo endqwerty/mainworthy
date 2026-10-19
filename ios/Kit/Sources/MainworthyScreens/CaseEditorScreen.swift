@@ -72,9 +72,9 @@ public final class CaseEditorScreen {
 	}
 	public var isRetrying: Bool { (sent != nil || mergeSent != nil || (overlapQuestion != nil && conflict == nil)) && !busy }
 
-	public func chooseConflict(_ path: String, side: CaseConflict.Side) {
+	public func chooseConflict(_ address: ConflictAddress, side: CaseConflict.Side) {
 		guard !busy, mergeSent == nil, !settled, !conflictClosed else { return }
-		do { try conflict?.choose(path, side: side) } catch { notice = error.shown }
+		do { try conflict?.choose(address, side: side) } catch { notice = error.shown }
 	}
 
 	public func addStep() {

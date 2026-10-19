@@ -98,7 +98,7 @@ for (const end of ["rejection", "lost reply then reload"])
 					const edited =
 						field === "title"
 							? a.getByRole("textbox", { name: "Merged title", exact: true })
-							: card(a).locator('textarea[aria-label^="Merged steps."]').last();
+							: card(a).locator('textarea[aria-label^="Merged Step ^"]').last();
 					await edited.fill("HAND TYPED TEXT");
 					if (end === "rejection") {
 						const question = (await server.api("inbox", { on: "C-1", kind: "adopt" })).items[0];

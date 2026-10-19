@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import fc from "fast-check";
-import { mergeBodies } from "./merge3.ts";
+import { applyMergeChoice, mergeBodies } from "./merge3.ts";
 import { CaseBody } from "./model.ts";
-import { bodyArbitrary, exampleBody, nonemptyTextArbitrary, textArbitrary } from "./test-support.ts";
+import { bodyArbitrary, exampleBody, nonemptyTextArbitrary, stepArbitrary, textArbitrary } from "./test-support.ts";
 
 describe("three-way field merge", () => {
 	test("deleting a neighbour of a moved step does not conflict or resurrect the neighbour", () => {
@@ -19,7 +19,9 @@ describe("three-way field merge", () => {
 		const theirs = { ...base, title: "Theirs" };
 		const result = mergeBodies({ base, mine, theirs });
 		expect(result.merged.title).toBe("Mine");
-		expect(result.conflicts).toEqual([{ path: "title", base: base.title, mine: "Mine", theirs: "Theirs" }]);
+		expect(result.conflicts).toEqual([
+			{ address: { kind: "field", name: "title" }, base: base.title, mine: "Mine", theirs: "Theirs" },
+		]);
 	});
 	test("merges action and expectation separately on the same step", () => {
 		const base = { ...exampleBody(), steps: [{ id: "b7", action: "Apply SAVE10", expected: "90 dollars" }] };
@@ -36,7 +38,9 @@ describe("three-way field merge", () => {
 		const theirs = { ...base, steps: [{ id: "b7", action: "Act", expected: "New" }] };
 		const result = mergeBodies({ base, mine, theirs });
 		expect(result.merged.steps[0]?.expected).toBeNull();
-		expect(result.conflicts).toEqual([{ path: "steps.b7.expected", base: "Old", mine: null, theirs: "New" }]);
+		expect(result.conflicts).toEqual([
+			{ address: { kind: "step-field", id: "b7", name: "expected" }, base: "Old", mine: null, theirs: "New" },
+		]);
 	});
 	test("merges custom fields by key, including deletions and prototype-like keys", () => {
 		const base = { ...exampleBody(), fields: { old: "x", shared: "before" } };
@@ -67,7 +71,9 @@ describe("three-way field merge", () => {
 		const theirs = { ...base, fields: { a: "new" } };
 		const result = mergeBodies({ base, mine, theirs });
 		expect(result.merged.fields).toEqual({});
-		expect(result.conflicts).toEqual([{ path: "fields.a", base: "old", mine: undefined, theirs: "new" }]);
+		expect(result.conflicts).toEqual([
+			{ address: { kind: "custom-field", key: "a" }, base: "old", mine: undefined, theirs: "new" },
+		]);
 	});
 	test("delete versus edit conflicts retain mine's membership in both directions", () => {
 		const base = { ...exampleBody(), steps: [{ id: "b7", action: "Act", expected: null }] };
@@ -75,7 +81,7 @@ describe("three-way field merge", () => {
 		const edited = { ...base, steps: [{ id: "b7", action: "Different", expected: null }] };
 		const result = mergeBodies({ base, mine: removed, theirs: edited });
 		expect(result.merged.steps).toEqual([]);
-		expect(result.conflicts[0]?.path).toBe("steps.b7");
+		expect(result.conflicts[0]?.address).toEqual({ kind: "step", id: "b7" });
 		const reverse = mergeBodies({ base, mine: edited, theirs: removed });
 		expect(reverse.merged.steps).toEqual(edited.steps);
 		expect(reverse.conflicts).toHaveLength(1);
@@ -85,12 +91,16 @@ describe("three-way field merge", () => {
 		const mine = { ...base, steps: base.steps.filter((step) => step.id !== "b7") };
 		const theirs = { ...base, steps: [...base.steps].reverse() };
 		const result = mergeBodies({ base, mine, theirs });
-		expect(result.conflicts.some((c) => c.path === "steps.b7")).toBe(true);
+		expect(result.conflicts.some((c) => c.address.kind === "step" && c.address.id === "b7")).toBe(true);
 		const moved = {
 			...base,
 			steps: [base.steps[1], base.steps[0], base.steps[2]].filter((step) => step !== undefined),
 		};
-		expect(mergeBodies({ base, mine, theirs: moved }).conflicts.some((c) => c.path === "steps.b7")).toBe(true);
+		expect(
+			mergeBodies({ base, mine, theirs: moved }).conflicts.some(
+				(c) => c.address.kind === "step" && c.address.id === "b7",
+			),
+		).toBe(true);
 	});
 	test("delete versus unchanged accepts the deletion", () => {
 		const base = exampleBody();
@@ -129,7 +139,7 @@ describe("three-way field merge", () => {
 		const theirs = { ...base, steps: [...base.steps.slice(1), ...base.steps.slice(0, 1)] };
 		const result = mergeBodies({ base, mine, theirs });
 		expect(result.merged.steps).toEqual(mine.steps);
-		expect(result.conflicts.map((c) => c.path)).toEqual(["steps.order"]);
+		expect(result.conflicts.map((c) => c.address)).toEqual([{ kind: "step-order" }]);
 	});
 	test("concurrent additions with the same id merge identical fields and conflict on different fields", () => {
 		const base = { ...exampleBody(), steps: [] };
@@ -137,7 +147,29 @@ describe("three-way field merge", () => {
 		const theirs = { ...base, steps: [{ id: "b7", action: "Theirs", expected: null }] };
 		const result = mergeBodies({ base, mine, theirs });
 		expect(result.merged).toEqual(mine);
-		expect(result.conflicts).toEqual([{ path: "steps.b7.action", base: undefined, mine: "Mine", theirs: "Theirs" }]);
+		expect(result.conflicts).toEqual([
+			{ address: { kind: "step-field", id: "b7", name: "action" }, base: undefined, mine: "Mine", theirs: "Theirs" },
+		]);
+	});
+	test("choosing the surviving step keeps edits and pins for arbitrary step ids", () => {
+		fc.assert(
+			fc.property(bodyArbitrary, stepArbitrary, (template, step) => {
+				const base = { ...template, steps: [step] };
+				const mine = { ...base, steps: [] };
+				const edited = step.use
+					? { ...step, use: { ...step.use, version: step.use.version + 1 } }
+					: { ...step, action: `${step.action} changed` };
+				const current = { ...base, steps: [edited] };
+				const merge = mergeBodies({ base, mine, theirs: current });
+				expect(merge.conflicts).toEqual([
+					{ address: { kind: "step", id: step.id }, base: step, mine: undefined, theirs: edited },
+				]);
+				const conflict = merge.conflicts[0];
+				if (!conflict) throw Error("Missing step conflict");
+				expect(applyMergeChoice({ merged: merge.merged, source: current, address: conflict.address })).toEqual(current);
+			}),
+			{ numRuns: 500 },
+		);
 	});
 	test("identity laws hold for arbitrary complete bodies", () => {
 		fc.assert(

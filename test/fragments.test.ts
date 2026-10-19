@@ -7,7 +7,7 @@ import { emptyBody, Step } from "../src/core/model.ts";
 import type { PlanReply, ProposeReply } from "../src/core/ops.ts";
 import { REPLIES } from "../src/core/replies.ts";
 import { Db } from "../src/server/kernel/db.ts";
-import { migrate } from "../src/server/kernel/migrate.ts";
+import { migrate, SCHEMA_VERSION } from "../src/server/kernel/migrate.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
 import { structuralProblems } from "../src/server/suite/read.ts";
@@ -221,7 +221,7 @@ test("upgrading an existing database rebuilds pinned search once", () => {
 		count: 1,
 		items: [{ ref: "C-3" }],
 	});
-	expect(migrate(db, ":memory:")).toEqual({ from: 29, to: 30, backup: null });
+	expect(migrate(db, ":memory:")).toEqual({ from: 29, to: SCHEMA_VERSION, backup: null });
 	expect(documents()).toEqual(expected);
 	expect(h.call("find", { text: "zephyrpassword", folder: "Consumers" })).toMatchObject({ count: 2 });
 	expect(h.call("find", { text: "luminousreply", folder: "Consumers" })).toMatchObject({
@@ -234,7 +234,7 @@ test("upgrading an existing database rebuilds pinned search once", () => {
 			select: { text: "zephyrpassword", folders: ["Consumers"] },
 		}),
 	).toEqual({ run: "R-1", slots: 2, already: 0 });
-	expect(migrate(db, ":memory:")).toEqual({ from: 30, to: 30, backup: null });
+	expect(migrate(db, ":memory:")).toEqual({ from: SCHEMA_VERSION, to: SCHEMA_VERSION, backup: null });
 	expect(h.call("find", { text: "zephyrpassword", folder: "Consumers" })).toMatchObject({ count: 2 });
 });
 
@@ -568,7 +568,7 @@ test("pin updates participate in hashing, history diffs, stale merges and draft 
 	});
 	const third = { ...original, steps: [Step.parse({ id: "cd", use: { fragment: "C-1", version: 3 } })] };
 	expect(mergeBodies({ base: original, mine: next, theirs: third }).conflicts).toEqual([
-		{ path: "steps.cd", base: original.steps[0], mine: next.steps[0], theirs: third.steps[0] },
+		{ address: { kind: "step", id: "cd" }, base: original.steps[0], mine: next.steps[0], theirs: third.steps[0] },
 	]);
 	expect(recordable(original)).toEqual(original);
 	expect(holdsUnfinishedStep(original)).toBe(false);

@@ -874,7 +874,7 @@ check(
 			await card(a).waitFor();
 			await b.keyboard.press("e");
 			await card(b).waitFor();
-			const mergedStep = (page: Page) => card(page).locator('textarea[aria-label^="Merged steps."]').last();
+			const mergedStep = (page: Page) => card(page).locator('textarea[aria-label^="Merged Step ^"]').last();
 			await mergedStep(a).fill("");
 			await takeover(b);
 			expect(await mergedStep(b).inputValue()).toBe("");

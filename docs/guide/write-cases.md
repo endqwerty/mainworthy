@@ -205,6 +205,9 @@ To resolve the conflict, follow these steps.
    Steps absent from that order follow at the end.
 4. Choose "Resolve conflict".
 
+A choice for a deleted step restores that step from the chosen side, including a pinned fragment version.
+Step choices and step-order choices are separate, even when a step's id is `order`.
+
 "Use all my changes" and "Keep current version" fill the merged body from one side.
 Resolving submits a new proposal. It still follows the policy for ordinary edits.
 If someone changes the case again meanwhile, the new edit merges or opens another conflict.

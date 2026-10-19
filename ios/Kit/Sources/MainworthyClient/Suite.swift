@@ -131,7 +131,7 @@ public struct CaseStamp: Equatable, Sendable {
 public enum SaveCaseOutcome: Equatable, Sendable {
 	case adopted(CaseStamp?)
 	case waiting(question: String?, needs: String?)
-	case overlap(question: String?, paths: [String], sentence: String?)
+	case overlap(question: String?, addresses: [ConflictAddress], sentence: String?)
 	case notTaken(String)
 }
 
@@ -141,9 +141,7 @@ package struct SuiteSubmission: Sendable {
 	package init(source: CaseSource, content: CaseContent, reason: String) {
 		var body: [String: JSONValue] = [
 			"title": .string(content.title), "pre": .string(content.pre),
-			"steps": .array(content.steps.map { step in
-				["id": .string(step.id), "action": .string(step.action), "expected": step.expected.map(JSONValue.string) ?? .null]
-			}),
+			"steps": .array(content.steps.map(\.json)),
 			"methods": .array(content.methods.map(JSONValue.string)), "automate": .string(content.automate),
 		]
 		var edit: [String: JSONValue]
@@ -220,7 +218,7 @@ extension ProjectClient {
 			return .adopted(reply.cases.first.map { CaseStamp(ref: $0.ref, version: $0.version) })
 		case "open": return .waiting(question: reply.question, needs: reply.needs)
 		case "conflict":
-			return .overlap(question: reply.question, paths: reply.conflicts.flatMap(\.paths), sentence: reply.needs)
+			return .overlap(question: reply.question, addresses: reply.conflicts.flatMap(\.addresses), sentence: reply.needs)
 		default: return .notTaken(reply.needs ?? "The proposal was \(reply.status).")
 		}
 	}

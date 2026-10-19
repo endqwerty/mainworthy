@@ -3,12 +3,19 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { open } from "../src/app/start.ts";
+import { Client } from "../src/cli/client.ts";
 import { parseCase } from "../src/core/markdown.ts";
-import type { DecideReply, Edit, ProposeReply } from "../src/core/ops.ts";
+import { applyMergeChoice, type Conflict } from "../src/core/merge3.ts";
+import { CaseBody, type ConflictAddress, emptyBody } from "../src/core/model.ts";
+import { type DecideReply, type Edit, ProposeReply } from "../src/core/ops.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
 import { Db } from "../src/server/kernel/db.ts";
+import { ARCHIVE_VERSION } from "../src/server/kernel/migrate.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke, invokeAsync, type Reply } from "../src/server/ops/registry.ts";
+import { exportArchive, importArchive, linesOf, removeBootstrap } from "../src/server/transfer/transfer.ts";
+import { serve } from "../src/surfaces/http.ts";
+import legacyConflicts from "./fixtures/legacy-conflicts.json";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
@@ -22,7 +29,7 @@ type Proposed = {
 	status: string;
 	question: string | null;
 	cases: { ref: string; version: number; hash: string }[];
-	conflicts: { case: string; paths: string[] }[];
+	conflicts: { case: string; addresses: ConflictAddress[] }[];
 };
 type CaseView = {
 	ref: string;
@@ -783,7 +790,7 @@ describe("editing", () => {
 			edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }],
 		});
 		expect(reply.status).toBe("conflict");
-		expect(reply.conflicts).toEqual([{ case: "C-1", paths: ["title"] }]);
+		expect(reply.conflicts).toEqual([{ case: "C-1", addresses: [{ kind: "field", name: "title" }] }]);
 		expect(h.call<CaseView[]>("get", { refs: ["C-1"] })[0]?.title).toBe("Theirs");
 
 		const queue = h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox");
@@ -1266,4 +1273,247 @@ test("a sliced savepoint closed early rolls back and drops the after-commit work
 	expect(ran).toEqual(["before"]);
 	db.transaction(() => db.afterCommit(() => ran.push("next")));
 	expect(ran).toEqual(["before", "next"]);
+});
+
+test("choosing current restores a deleted step named order through the registry", () => {
+	const base = { ...emptyBody("Order step"), steps: [{ id: "order", action: "Before", expected: null }] };
+	const current = { ...base, steps: [{ id: "order", action: "Current change", expected: null }] };
+	const mine = { ...base, steps: [] };
+	h.call("propose", { edits: [{ op: "create", body: base }] });
+	h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: current }] });
+	const overlap = h.call<ProposeReply>("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: mine }] });
+	expect(overlap.status).toBe("conflict");
+	expect(overlap.conflicts).toEqual([{ case: "C-1", addresses: [{ kind: "step", id: "order" }] }]);
+	const [proposal] = h.call<{ edits: { body: CaseBody; current: CaseBody; conflicts: Conflict[] }[] }[]>("get", {
+		refs: [overlap.proposal],
+	});
+	const edit = proposal?.edits[0];
+	const conflict = edit?.conflicts[0];
+	if (!edit || !conflict) throw Error("Missing step conflict");
+	const chosen = applyMergeChoice({ merged: edit.body, source: edit.current, address: conflict.address });
+	const [question] = h.call<{ evidenceHash: string }[]>("get", { refs: [overlap.question] });
+	expect(
+		h.call<{ status: string }[]>("decide", {
+			q: overlap.question,
+			onEvidence: question?.evidenceHash,
+			answer: { is: "merge", body: chosen },
+		})[0]?.status,
+	).toBe("decided");
+	expect(storedBody().steps).toEqual([{ id: "order", action: "Current change", expected: null }]);
+});
+
+test("choosing current keeps the current fragment pin named order through the registry", () => {
+	const fragment = { ...emptyBody("Fragment"), steps: [{ id: "ab", action: "v1", expected: null }] };
+	h.call("propose", { edits: [{ op: "create", kind: "fragment", body: fragment }] });
+	for (const version of [2, 3])
+		h.call("propose", {
+			edits: [
+				{
+					op: "edit",
+					case: "C-1",
+					base: version - 1,
+					body: { steps: [{ id: "ab", action: `v${version}`, expected: null }] },
+				},
+			],
+		});
+	const pin = (version: number) => ({ id: "order", use: { fragment: "C-1", version }, action: "", expected: null });
+	const base = { ...emptyBody("Pinned case"), steps: [pin(1)] };
+	const current = { ...base, steps: [pin(3)] };
+	const mine = { ...base, steps: [pin(2)] };
+	h.call("propose", { edits: [{ op: "create", body: base }] });
+	h.call("propose", { edits: [{ op: "edit", case: "C-2", base: 1, body: current }] });
+	const overlap = h.call<ProposeReply>("propose", { edits: [{ op: "edit", case: "C-2", base: 1, body: mine }] });
+	expect(overlap.status).toBe("conflict");
+	expect(overlap.conflicts).toEqual([{ case: "C-2", addresses: [{ kind: "step", id: "order" }] }]);
+	const [proposal] = h.call<{ edits: { body: CaseBody; current: CaseBody; conflicts: Conflict[] }[] }[]>("get", {
+		refs: [overlap.proposal],
+	});
+	const edit = proposal?.edits[0];
+	const conflict = edit?.conflicts[0];
+	if (!edit || !conflict) throw Error("Missing pin conflict");
+	const chosen = applyMergeChoice({ merged: edit.body, source: edit.current, address: conflict.address });
+	const [question] = h.call<{ evidenceHash: string }[]>("get", { refs: [overlap.question] });
+	expect(
+		h.call<{ status: string }[]>("decide", {
+			q: overlap.question,
+			onEvidence: question?.evidenceHash,
+			answer: { is: "merge", body: chosen },
+		})[0]?.status,
+	).toBe("decided");
+	const [saved] = h.call<{ md: string }[]>("get", { refs: ["C-2"], as: "md" });
+	const parsed = parseCase(saved?.md ?? "");
+	if (!parsed.ok) throw Error("Invalid saved case");
+	expect(parsed.doc.body.steps).toEqual([
+		{ id: "order", use: { fragment: "C-1", version: 3 }, action: "", expected: null },
+	]);
+});
+
+describe("conflict storage upgrades", () => {
+	const addresses: ConflictAddress[] = [
+		{ kind: "field", name: "title" },
+		{ kind: "field", name: "pre" },
+		{ kind: "field", name: "methods" },
+		{ kind: "field", name: "automate" },
+		{ kind: "custom-field", key: 'risk.dot"x' },
+		{ kind: "custom-field", key: "gone" },
+		{ kind: "step", id: "order" },
+		{ kind: "step", id: "ds" },
+		{ kind: "step-field", id: "sf", name: "action" },
+		{ kind: "step-field", id: "sf", name: "expected" },
+		{ kind: "step", id: "pf" },
+		{ kind: "step-order" },
+	];
+
+	// Conflicts were generated by mergeBodies at b59be234, including both meanings of steps.order in one proposal.
+	const oldInstance = (sample: (typeof legacyConflicts)[number]) => {
+		const dir = mkdtempSync(join(tmpdir(), "mainworthy-conflict-upgrade-"));
+		const config = defaultConfig({ MAINWORTHY_DATA: dir, MAINWORTHY_OWNER: "robin" });
+		const instance = open({ ...config, port: 0 });
+		const call = (op: string, input: unknown) => {
+			const reply = invoke(instance.app, OPS, { op, input, project: "scratch", actor: () => instance.owner });
+			if (!reply.ok) throw new Error(JSON.stringify(reply.error));
+			return reply.result;
+		};
+		try {
+			call("propose", { edits: [{ op: "create", kind: "fragment", outline: "Shared\n  Check" }] });
+			for (const version of [1, 2]) {
+				call("propose", { edits: [{ op: "edit", case: "C-1", base: version, body: { title: `Shared ${version}` } }] });
+			}
+			call("propose", { edits: [{ op: "create", body: CaseBody.parse(sample.base) }] });
+			call("propose", {
+				edits: [
+					{ op: "create", outline: "Base" },
+					{ op: "create", outline: "Uncontested" },
+				],
+			});
+			call("propose", { edits: [{ op: "edit", case: "C-3", base: 1, body: { title: "Theirs" } }] });
+			call("propose", { edits: [{ op: "edit", case: "C-2", base: 1, body: CaseBody.parse(sample.theirs) }] });
+			const input = {
+				cmd: "legacy-conflict-command",
+				edits: [
+					{ op: "edit", case: "C-4", base: 1, body: { title: "No conflict" } },
+					{ op: "edit", case: "C-2", base: 1, body: CaseBody.parse(sample.mine) },
+					{ op: "edit", case: "C-3", base: 1, body: { title: "Mine" } },
+				],
+			};
+			const proposed = ProposeReply.parse(call("propose", input));
+			expect(proposed.status).toBe("conflict");
+			const db = instance.app.db;
+			db.raw
+				.query(
+					`UPDATE proposals SET resolved = json_set(resolved, '$[1].conflicts', json(?), '$[2].conflicts', json(?)) WHERE no = ?`,
+				)
+				.run(
+					JSON.stringify(sample.conflicts),
+					JSON.stringify([sample.conflicts[0]]),
+					Number(proposed.proposal?.slice(2)),
+				);
+			db.raw.query("UPDATE commands SET outcome = ? WHERE id = ?").run(
+				JSON.stringify({
+					...proposed,
+					conflicts: [
+						{ case: "C-2", paths: sample.conflicts.map((c) => c.path) },
+						{ case: "C-3", paths: ["title"] },
+					],
+				}),
+				input.cmd,
+			);
+			db.raw.query("UPDATE meta SET value = '30' WHERE key = 'schema_version'").run();
+			const evidence = db.raw.query("SELECT evidence, evidence_hash FROM questions ORDER BY id").all();
+			const command = db.raw
+				.query("SELECT id, project, op, actor, at, seq, touched, request FROM commands ORDER BY id")
+				.all();
+			return { dir, config: { ...config, port: 0 }, input, proposed, evidence, command };
+		} catch (error) {
+			rmSync(dir, { recursive: true, force: true });
+			throw error;
+		} finally {
+			instance.app.close();
+		}
+	};
+
+	for (const sample of legacyConflicts) {
+		for (const operation of ["get", "replay"] as const) {
+			test(`old ${sample.kind} conflicts survive upgrade and archive: ${operation}`, async () => {
+				const old = oldInstance(sample);
+				const upgraded = open(old.config);
+				const server = serve(upgraded.app, upgraded.owner);
+				const client = new Client({ url: `http://127.0.0.1:${server.port}`, project: "scratch", token: undefined });
+				const check = async (reader: Client) => {
+					if (operation === "get") {
+						const result = await reader.operation("get", { refs: [old.proposed.proposal] });
+						expect(result).toMatchObject([
+							{
+								ref: old.proposed.proposal,
+								edits: [
+									{ conflicts: [] },
+									{
+										conflicts: sample.conflicts.map(({ path: _path, ...values }, index) => ({
+											...values,
+											address: addresses[index],
+										})),
+									},
+									{
+										conflicts: [
+											{ address: { kind: "field", name: "title" }, base: "Base", mine: "Mine", theirs: "Theirs" },
+										],
+									},
+								],
+							},
+						]);
+					} else {
+						expect(await reader.operation("propose", old.input)).toEqual({
+							...old.proposed,
+							conflicts: [
+								{ case: "C-2", addresses },
+								{ case: "C-3", addresses: [{ kind: "field", name: "title" }] },
+							],
+						});
+					}
+				};
+				try {
+					await check(client);
+					expect(upgraded.app.db.raw.query("SELECT evidence, evidence_hash FROM questions ORDER BY id").all()).toEqual(
+						old.evidence,
+					);
+					expect(
+						upgraded.app.db.raw
+							.query("SELECT id, project, op, actor, at, seq, touched, request FROM commands ORDER BY id")
+							.all(),
+					).toEqual(old.command);
+					const chunks: string[] = [];
+					exportArchive(upgraded.app.db, (chunk) => chunks.push(chunk), { blobs: upgraded.app.blobs });
+					const restored = harness();
+					try {
+						removeBootstrap(restored.app.db);
+						importArchive(restored.app.db, linesOf(chunks.join("")), { blobs: restored.app.blobs });
+						const restoredServer = serve(restored.app, restored.owner);
+						try {
+							await check(
+								new Client({ url: `http://127.0.0.1:${restoredServer.port}`, project: "scratch", token: undefined }),
+							);
+						} finally {
+							await restoredServer.stop(true);
+						}
+					} finally {
+						restored.close();
+					}
+					const empty = harness();
+					try {
+						removeBootstrap(empty.app.db);
+						const legacyArchive = chunks.join("").replace(`"schema":${ARCHIVE_VERSION}`, '"schema":23');
+						expect(() => importArchive(empty.app.db, linesOf(legacyArchive), { blobs: empty.app.blobs })).toThrow(
+							`archive schema 23 is older than this build's archive schema ${ARCHIVE_VERSION}`,
+						);
+					} finally {
+						empty.close();
+					}
+				} finally {
+					await server.stop(true);
+					upgraded.app.close();
+					rmSync(old.dir, { recursive: true, force: true });
+				}
+			});
+		}
+	}
 });

@@ -195,7 +195,7 @@ enum Wire {
 	/// A case the edit cannot be merged into.
 	struct EditConflict: Decodable, Equatable, Sendable {
 		let `case`: String
-		let paths: [String]
+		let addresses: [ConflictAddress]
 	}
 
 	/// A proposed edit that waits for a person.
@@ -238,19 +238,27 @@ enum Wire {
 		let reply: [DecideReply]?
 	}
 
+	/// The exact fragment version a step pins.
+	struct FragmentPin: Decodable, Equatable, Sendable {
+		let fragment: String
+		let version: Int
+	}
+
 	/// One step of a case.
 	struct Step: Decodable, Equatable, Sendable {
 		/// Short, unique within its case and never used again, so a result or an edit can name the step.
 		let id: String
+		let use: FragmentPin?
 		let action: String
 		/// What must be true afterwards. Null where the author has not said; never left out.
 		let expected: String?
 
-		private enum CodingKeys: String, CodingKey { case id, action, expected }
+		private enum CodingKeys: String, CodingKey { case id, use, action, expected }
 
 		init(from decoder: any Decoder) throws {
 			let container = try decoder.container(keyedBy: CodingKeys.self)
 			id = try container.decode(String.self, forKey: .id)
+			use = try container.decodeIfPresent(FragmentPin.self, forKey: .use)
 			action = try container.decode(String.self, forKey: .action)
 			expected = try container.decode(String?.self, forKey: .expected)
 		}
@@ -805,7 +813,7 @@ enum Wire {
 	/// The fields where edits overlap.
 	struct SuiteConflict: Decodable, Equatable, Sendable {
 		let `case`: String
-		let paths: [String]
+		let addresses: [ConflictAddress]
 	}
 
 	/// What came of creating or editing a case.

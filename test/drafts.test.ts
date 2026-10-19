@@ -152,7 +152,7 @@ test("a losing window keeps its whole accepted draft separately from the shared 
 			current: body,
 			merged: { ...body, title: "Hand-typed merge" },
 			sentMerges: [],
-			paths: ["title"],
+			addresses: [{ kind: "field", name: "title" }],
 			draftId: "C-1",
 		},
 	});
@@ -305,7 +305,7 @@ for (const withMerge of [false, true])
 							current: body,
 							merged: { ...body, title: "Accepted typed merge" },
 							sentMerges: [],
-							paths: ["title"],
+							addresses: [{ kind: "field", name: "title" }],
 							draftId: "C-1",
 						},
 					}

@@ -10,20 +10,20 @@ struct CaseConflictView: View {
 		Section("Both edits are kept") {
 			Text("Choose each overlapping field. Changes that do not overlap are combined automatically.")
 		}
-		ForEach(conflict.paths, id: \.self) { path in
-			Section(conflict.label(path)) {
+		ForEach(conflict.addresses, id: \.self) { address in
+			Section(conflict.label(address)) {
 				VStack(alignment: .leading, spacing: 8) {
 					Text("Your draft").font(.headline)
-					Text(conflict.text(path, side: .mine)).textSelection(.enabled)
-					Button("Use my version") { editor.chooseConflict(path, side: .mine) }
-						.accessibilityIdentifier("conflict-mine-\(path)")
+					Text(conflict.text(address, side: .mine)).textSelection(.enabled)
+					Button("Use my version") { editor.chooseConflict(address, side: .mine) }
+						.accessibilityIdentifier("conflict-mine-\(address.label)")
 					Divider()
 					Text("Current version").font(.headline)
-					Text(conflict.text(path, side: .current)).textSelection(.enabled)
-					Button("Use current version") { editor.chooseConflict(path, side: .current) }
-						.accessibilityIdentifier("conflict-current-\(path)")
-					if conflict.chosen.contains(path) {
-						Label(conflict.selections[path] == .mine ? "Chosen: your draft" : "Chosen: current version", systemImage: "checkmark.circle").foregroundStyle(.secondary)
+					Text(conflict.text(address, side: .current)).textSelection(.enabled)
+					Button("Use current version") { editor.chooseConflict(address, side: .current) }
+						.accessibilityIdentifier("conflict-current-\(address.label)")
+					if conflict.chosen.contains(address) {
+						Label(conflict.selections[address] == .mine ? "Chosen: your draft" : "Chosen: current version", systemImage: "checkmark.circle").foregroundStyle(.secondary)
 					}
 				}
 				.buttonStyle(.borderless)

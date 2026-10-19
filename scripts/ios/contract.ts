@@ -10,6 +10,7 @@
 //
 // To change what the app reads: change the shape here, run `bun scripts/ios.ts gen`, and fix what no longer
 // compiles in `ios/Kit` (`bun scripts/ios.ts test`, on a Mac). `ios/README.md` says the rest.
+import { ConflictAddress } from "../../src/core/model.ts";
 import {
 	anything,
 	dictionary,
@@ -24,6 +25,9 @@ import {
 	text,
 	whole,
 } from "./shape.ts";
+
+// The Swift enum decodes the same tagged variants; the core schema checks every server reply.
+const conflictAddress: Shape = { zod: ConflictAddress, swift: "ConflictAddress", structs: [] };
 
 // ── Who is signed in ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -174,7 +178,10 @@ export const EVIDENCE = {
 		],
 		count: whole,
 		conflicts: list(
-			struct("EditConflict", "A case the edit cannot be merged into.", { case: text, paths: list(text) }),
+			struct("EditConflict", "A case the edit cannot be merged into.", {
+				case: text,
+				addresses: list(conflictAddress),
+			}),
 		),
 		facts: FACTS,
 	}),
@@ -204,6 +211,7 @@ export const AnswerCommand = struct("AnswerCommand", "The recorded reply of a sa
 
 const Step = struct("Step", "One step of a case.", {
 	id: [text, "Short, unique within its case and never used again, so a result or an edit can name the step."],
+	use: maybe(struct("FragmentPin", "The exact fragment version a step pins.", { fragment: text, version: whole })),
 	action: text,
 	expected: [nullable(text), "What must be true afterwards. Null where the author has not said; never left out."],
 });
@@ -602,7 +610,9 @@ export const SuiteProposeReply = struct("SuiteProposeReply", "What came of creat
 	question: maybe(text),
 	needs: maybe(text),
 	cases: list(struct("SuiteStamp", "A case version the proposal made.", { ref: text, version: whole })),
-	conflicts: list(struct("SuiteConflict", "The fields where edits overlap.", { case: text, paths: list(text) })),
+	conflicts: list(
+		struct("SuiteConflict", "The fields where edits overlap.", { case: text, addresses: list(conflictAddress) }),
+	),
 });
 
 /** Every shape the app decodes by name. `gen` writes one Swift type for each, and for each struct inside it. */
