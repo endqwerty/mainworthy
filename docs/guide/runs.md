@@ -37,6 +37,8 @@ The planner counts the active cases the run selects. Shared-step fragments are e
 including when a folder, tag, or search matches only fragments. A run selection is limited
 to 20,000 cases. Narrow a larger selection by folder, tag, or search.
 The API can preview the same selection with `find` and `{"in":"cases","select":{}}`.
+When `select.cases` names a case more than once, the preview and plan count it once.
+Without folder, tag, or search criteria, an explicit case list keeps the order of first appearance.
 If you open another screen while planning finishes, the run is recorded and you stay on that screen.
 "Count only results recorded in this run" accepts work explicitly reported to the run.
 "Accept results for a commit" also accepts qualifying results already reported for
