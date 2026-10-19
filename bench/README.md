@@ -1,5 +1,16 @@
 # Mainworthy budgets
 
+For folder sealing, export a baseline revision into a directory made by
+`bun scripts/work.ts scratch new folder-seal-base`, link its `node_modules` to the
+current checkout's installed dependencies, and run
+`bun bench/folder-seal.ts /path/to/baseline/export`. It alternates five fresh
+in-memory registry calls per revision for creation and rename batches of 100, 1,000, and
+5,000. Each fixture starts with as many sibling folders as edits. Setup is outside
+the timer. Standard policy keeps the agent's proposal pending, so the timer covers
+sealing without adoption. Assertions check its status, stored edits, and unchanged
+folder count. JSON lines contain every sample, CPU time, medians, and ranges.
+The final check requires less than tenfold growth for five times the edits.
+
 Run `bun bench/run.ts --quick` for 5k cases / 2k tests / 50k results.
 Run `bun bench/run.ts` for 100k cases / 20k tests / 1M results / 50k open questions.
 Use `--cases N --tests N --results N` to change scale, and `--json bench/report.json`

@@ -183,6 +183,7 @@ Creating or moving a case to an existing path uses that folder.
 The server checks the final paths of a whole proposal again when accepting it.
 Folder edits apply in order. A path that temporarily names two folders cannot be used to create a child folder during that batch.
 Reorder the edits so that the path is unique first.
+You can combine folder creations, renames, moves, and case placement in one proposal.
 
 Press <kbd>x</kbd> on each case you want to select for a bulk action.
 With no selection, the action uses the current case.

@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-10-18: **Fixed:** large folder proposals seal without rebuilding the whole folder tree after every creation, rename, or move. Collision checks and review of protected paths still include intermediate paths. No stored data or API changes (issue #581).
+
 - 2026-10-09: project created (docs only; stack undecided).
 - 2026-10-10: docs: ranked priorities (fast backend, agent access via MCP and skills, instant UI/UX) and stack selection criteria.
 - 2026-10-10: added docs/competitive-analysis.md (13 competitors, source-linked).

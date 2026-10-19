@@ -327,7 +327,7 @@ export type FolderIndex = {
 	byPath: Map<string, FolderRow>;
 };
 
-/** Every folder of a project with its path. A project has hundreds of folders at most, so this is one small read. */
+/** Every folder of a project with its path. */
 export function folderIndex(db: Db, project: number): FolderIndex {
 	return indexFolders(db.all(Q.folders, { project }));
 }
@@ -351,7 +351,7 @@ function indexFolders<T extends Pick<FolderRow, "id" | "parent" | "name">>(rows:
 		if (byPath.has(key)) ambiguous.add(key);
 		byPath.set(key, row);
 	}
-	return { byId, path, byPath, ambiguous };
+	return { byId, path, paths, byPath, ambiguous };
 }
 
 function folderTarget(index: FolderIndex, target: number | string): FolderTarget {
@@ -827,7 +827,56 @@ function* projectFoldersSteps(
 	index: FolderIndex,
 	edits: readonly Resolved[],
 ): Generator<undefined, FolderProjection, void> {
-	let after = indexFolders([...index.byId.values()].map(({ id, parent, name }) => ({ id, parent, name })));
+	const after = indexFolders([...index.byId.values()].map(({ id, parent, name }) => ({ id, parent, name })));
+	type Row = Pick<FolderRow, "id" | "parent" | "name">;
+	const children = new Map<number | null, Set<number>>();
+	const members = new Map<string, Set<number>>();
+	const keyOf = (id: number) => cleanPath(after.path(id)).join("/").toLowerCase();
+	const addPath = (row: Row) => {
+		const key = keyOf(row.id);
+		let bucket = members.get(key);
+		if (!bucket) {
+			bucket = new Set();
+			members.set(key, bucket);
+		}
+		bucket.add(row.id);
+		after.byPath.set(key, row);
+		if (bucket.size > 1) after.ambiguous.add(key);
+	};
+	const removePath = (row: Row) => {
+		const key = keyOf(row.id);
+		const bucket = members.get(key);
+		if (!bucket) return;
+		bucket.delete(row.id);
+		if (bucket.size < 2) after.ambiguous.delete(key);
+		if (bucket.size === 0) {
+			members.delete(key);
+			after.byPath.delete(key);
+		} else if (after.byPath.get(key)?.id === row.id) {
+			const id = bucket.values().next().value;
+			const remaining = id === undefined ? undefined : after.byId.get(id);
+			if (remaining) after.byPath.set(key, remaining);
+		}
+	};
+	const addChild = (row: Row) => {
+		let bucket = children.get(row.parent);
+		if (!bucket) {
+			bucket = new Set();
+			children.set(row.parent, bucket);
+		}
+		bucket.add(row.id);
+	};
+	let work = 0;
+	for (const row of after.byId.values()) {
+		addChild(row);
+		addPath(row);
+		if (++work % SLICE === 0) yield;
+	}
+	const add = (row: Row) => {
+		after.byId.set(row.id, row);
+		addChild(row);
+		addPath(row);
+	};
 	let nextId = -1;
 	const targets = new Map<Resolved, number>();
 	const placed = new Map<number, number>();
@@ -845,15 +894,13 @@ function* projectFoldersSteps(
 			if (existing) parent = existing.id;
 			else {
 				const row: Pick<FolderRow, "id" | "parent" | "name"> = { id: nextId--, parent, name };
-				after.byId.set(row.id, row);
-				after.byPath.set(walked.toLowerCase(), row);
+				add(row);
 				parent = row.id;
 			}
 		}
 		if (parent === null) throw invalid("a folder path cannot be empty");
 		return parent;
 	};
-	let work = 0;
 	for (const edit of edits) {
 		if (++work % SLICE === 0) yield;
 		if (edit.op === "create") {
@@ -884,25 +931,33 @@ function* projectFoldersSteps(
 			}
 			if (edit.id === null) {
 				const row = { id: nextId--, parent: parent ?? null, name: edit.name ?? "Untitled" };
-				after.byId.set(row.id, row);
+				add(row);
 				touched.add(row.id);
+				paths.add(after.path(row.id));
 			} else {
 				const row = after.byId.get(edit.id);
 				if (!row) throw notFound(`folder ${edit.id}`);
-				for (const child of after.byId.values()) {
-					if (!isInside(after, child.id, row.id)) continue;
-					touched.add(child.id);
-					paths.add(after.path(child.id));
+				const subtree = [row.id];
+				for (const id of subtree) {
+					for (const child of children.get(id) ?? []) subtree.push(child);
+					touched.add(id);
+					paths.add(after.path(id));
+					const child = after.byId.get(id);
+					if (child) removePath(child);
+					if (++work % SLICE === 0) yield;
 				}
-				after.byId.set(row.id, {
-					...row,
-					parent: parent === undefined ? row.parent : parent,
-					name: edit.name ?? row.name,
-				});
-				touched.add(row.id);
+				const moved = { ...row, parent: parent === undefined ? row.parent : parent, name: edit.name ?? row.name };
+				children.get(row.parent)?.delete(row.id);
+				after.byId.set(row.id, moved);
+				addChild(moved);
+				for (const id of subtree) after.paths.delete(id);
+				for (const id of subtree) {
+					const child = after.byId.get(id);
+					if (child) addPath(child);
+					paths.add(after.path(id));
+					if (++work % SLICE === 0) yield;
+				}
 			}
-			after = indexFolders([...after.byId.values()]);
-			for (const id of touched) paths.add(after.path(id));
 		}
 	}
 	return { after, targets, placed, touched, paths, ambiguousTargets, refusal: null };
