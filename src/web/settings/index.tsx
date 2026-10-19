@@ -14,7 +14,7 @@ import { ApiError, call } from "../lib/api.ts";
 import { invalidateProject, useQueryOp } from "../lib/data.ts";
 import { randomId } from "../lib/ids.ts";
 import { useBindings } from "../lib/keys.ts";
-import { navigate, projectUrl, routeUrl } from "../lib/router.ts";
+import { navigate, navigationToken, projectUrl, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { DocLink, EmptyState, KeyCap, ListRow, SectionHeading, Select } from "../ui/index.tsx";
 import { QuarantineList } from "../ui/quarantine.tsx";
@@ -695,6 +695,7 @@ function ProjectSettings({ inputRef }: { inputRef: React.RefObject<HTMLInputElem
 							event.preventDefault();
 							if (busy) return;
 							setBusy(true);
+							const navigation = navigationToken();
 							void call(
 								"admin",
 								{
@@ -708,7 +709,7 @@ function ProjectSettings({ inputRef }: { inputRef: React.RefObject<HTMLInputElem
 							)
 								.then(async () => {
 									await refreshSession();
-									navigate(routeUrl({ project: key, screen: "settings" }));
+									navigate(routeUrl({ project: key, screen: "settings" }), { ifCurrent: navigation });
 									setStatus(`Project ${key} created.`);
 								})
 								.catch((error: unknown) =>

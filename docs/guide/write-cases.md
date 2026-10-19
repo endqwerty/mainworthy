@@ -60,6 +60,7 @@ the recorded version named beside your draft.
 The editor submits a changed draft when you leave or pause for 30 seconds.
 To submit sooner, press <kbd>Cmd</kbd> <kbd>Enter</kbd> on macOS or <kbd>Ctrl</kbd> <kbd>Enter</kbd> elsewhere.
 The policy then decides whether the proposal becomes current or waits for review.
+If you open another screen while a save finishes, its reply leaves you on the screen you chose.
 There is no save button. Moving the caret or selecting text while a save finishes
 does not submit the text again. Text waiting for review stays in its proposal.
 If the case updates before you edit, your next edit starts from the newer version.

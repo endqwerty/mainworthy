@@ -4,7 +4,7 @@ import { QuarantineExit as ExitSchema, Quarantine, type QuarantineExit } from ".
 import { call } from "../lib/api.ts";
 import { invalidateProject, useQueryOp } from "../lib/data.ts";
 import { dateTime } from "../lib/people.ts";
-import { navigate, refUrl } from "../lib/router.ts";
+import { navigate, navigationToken, refUrl } from "../lib/router.ts";
 import { useApp } from "./context.tsx";
 
 const Test = z.object({ ref: z.string(), name: z.string(), quarantine: Quarantine.nullable() });
@@ -40,6 +40,7 @@ export function QuarantineList({ testRef = "" }: { testRef?: string }) {
 	});
 	const page = Page.safeParse(list.data);
 	async function propose(ref: string, exit: QuarantineExit | null, reason: string, base?: number) {
+		const navigation = navigationToken();
 		setBusy(true);
 		setError(null);
 		try {
@@ -54,7 +55,7 @@ export function QuarantineList({ testRef = "" }: { testRef?: string }) {
 			);
 			await invalidateProject(project);
 			setStatus(`Quarantine proposal ${proposal.proposal} waits for a person's decision.`);
-			if (proposal.question) navigate(refUrl({ project, ref: proposal.question }));
+			if (proposal.question) navigate(refUrl({ project, ref: proposal.question }), { ifCurrent: navigation });
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : String(cause));
 		} finally {

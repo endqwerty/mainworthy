@@ -34,6 +34,7 @@ To plan a run, follow these steps.
 7. Choose "Plan run".
 
 The planner shows the number of matching cases.
+If you open another screen while planning finishes, the run is recorded and you stay on that screen.
 "Count only results recorded in this run" accepts work explicitly reported to the run.
 "Accept results for a commit" also accepts qualifying results already reported for
 that commit and results that arrive later. Enter the tested commit's hash.

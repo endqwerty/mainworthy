@@ -19,7 +19,16 @@ import {
 } from "./lib/device.ts";
 import { resolveHome } from "./lib/home.ts";
 import { useBindings, useKeyboard, useKeyRegistry } from "./lib/keys.ts";
-import { navigate, projectUrl, readRoute, refUrl, routeUrl, type Screen, useRoute } from "./lib/router.ts";
+import {
+	navigate,
+	navigationToken,
+	projectUrl,
+	readRoute,
+	refUrl,
+	routeUrl,
+	type Screen,
+	useRoute,
+} from "./lib/router.ts";
 import { signOut } from "./lib/signin.ts";
 import { PhoneBar, usePhoneShell } from "./phone.tsx";
 import { QueueScreen } from "./queue/index.tsx";
@@ -439,15 +448,15 @@ function Workbench({
 	const inbox = useQueryOp({ project, op: "inbox", input: { state: "open", limit: 1 } });
 	const go = (screen: Screen) => navigate(routeUrl({ project, screen }));
 	const goHome = useCallback(async (): Promise<void> => {
-		const address = location.href;
+		const navigation = navigationToken();
 		const owner = deviceSession();
 		try {
 			const home = await resolveHome(project);
-			if (!sessionCurrent(owner) || location.href !== address) return;
+			if (!sessionCurrent(owner) || navigationToken() !== navigation) return;
 			navigate(home.url);
 			if (home.missing) setStatus(missingHomeStatus);
 		} catch (error) {
-			if (!sessionCurrent(owner) || location.href !== address) return;
+			if (!sessionCurrent(owner) || navigationToken() !== navigation) return;
 			setStatus(error instanceof Error ? error.message : "Cannot read your home. Try again.");
 		}
 	}, [project]);

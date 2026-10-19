@@ -50,7 +50,7 @@ import {
 	refusedStatus,
 	sameBody,
 } from "../lib/merges.ts";
-import { navigate, readRoute, refUrl, routeEntry, routeUrl, WENT } from "../lib/router.ts";
+import { navigate, navigationToken, refUrl, routeEntry, routeUrl, WENT } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { EmptyState, ProofStrip } from "../ui/index.tsx";
 import { useSuiteBindings } from "./bindings.ts";
@@ -103,6 +103,8 @@ const focusOnce = (node: HTMLElement | null): void => node?.focus();
 
 export function SuiteScreen() {
 	const { project, route, setStatus, openPalette } = useApp();
+	// Cleanup and recursive saves retain the route that owned this render.
+	const navigation = navigationToken();
 	const owner = useRef(deviceSession()).current;
 	const windowId = useRef(draftOwner()).current;
 	const ownedDraft = useCallback((saved: Draft): Draft => claimCopiedDraft({ project, draft: saved }), [project]);
@@ -1309,12 +1311,12 @@ export function SuiteScreen() {
 						flushSync(() => setDraftState(next));
 						if (keepTitleFocus) focusDraft(next);
 						setSelected(ref);
-						if (
-							readRoute().project === project &&
-							(readRoute().screen === "case" || readRoute().screen === "suite") &&
-							(route.screen === "case" || snapshot.ref === null)
-						)
-							navigate(`${refUrl({ project, ref })}${location.search}`, { replace: true, seal: false });
+						if (route.screen === "case" || snapshot.ref === null)
+							navigate(`${refUrl({ project, ref })}${location.search}`, {
+								replace: true,
+								seal: false,
+								ifCurrent: navigation,
+							});
 					}
 					moreToSend = more;
 					if (next.dirty && !writeOwnedDraft(next)) return;

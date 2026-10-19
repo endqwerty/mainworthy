@@ -4,7 +4,7 @@ import type { Api } from "../../core/api.ts";
 import { call } from "../lib/api.ts";
 import { invalidateProject, useQueryOp } from "../lib/data.ts";
 import { randomId } from "../lib/ids.ts";
-import { navigate, routeUrl } from "../lib/router.ts";
+import { navigate, navigationToken, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { KeyCap, Select } from "../ui/index.tsx";
 
@@ -57,6 +57,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 				event.preventDefault();
 				if (!name.trim() || busy || (target === "commit" && commit.trim().length < 7)) return;
 				setBusy(true);
+				const navigation = navigationToken();
 				void call(
 					"plan",
 					{
@@ -70,7 +71,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 					.then((reply) => {
 						setStatus(`${reply.run} planned with ${reply.slots} slots; ${reply.already} already filled.`);
 						void invalidateProject(project);
-						navigate(routeUrl({ project, screen: "runs", ref: reply.run }));
+						navigate(routeUrl({ project, screen: "runs", ref: reply.run }), { ifCurrent: navigation });
 					})
 					.catch((error: unknown) => {
 						setStatus(error instanceof Error ? error.message : "The run could not be planned.");

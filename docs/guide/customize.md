@@ -52,6 +52,8 @@ A policy change applies to the whole project. An admin who is a person accepts t
 
 Each project keeps its own cases, queue, runs and policy. A new project starts with the preset you choose. The first project, `scratch`, exists so you can write a case before you configure anything.
 
+If you go elsewhere while a project is being created, its confirmation leaves you in the project and screen you chose.
+
 A project key uses lower-case letters, digits and hyphens. The key starts with a letter or digit and has at most 40 characters. You cannot rename or delete a project yet. The other commands pick a project with `--project` or `MAINWORTHY_PROJECT`, or use the only one when there is one.
 
 ### Switch projects

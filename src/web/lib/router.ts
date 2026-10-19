@@ -5,6 +5,9 @@ export type Route = { project: string; screen: Screen; ref: string | null; folde
 const changed = "mainworthy:route";
 let entry: "initial" | "navigation" | "history" = "initial";
 export const routeEntry = (): typeof entry => entry;
+let navigation = Symbol();
+/** A route's ownership, lost even when somebody leaves and returns to the same address. */
+export const navigationToken = (): symbol => navigation;
 /**
  * Sent when somebody goes somewhere: a `navigate` that is not `replace`, also to the address the page is
  * already at. A phone listens, to show the pane of where they went (`phone.tsx`). A `replace` is nobody going
@@ -14,6 +17,7 @@ export const WENT = "mainworthy:went";
 function subscribe(listener: () => void): () => void {
 	const popped = () => {
 		entry = "history";
+		navigation = Symbol();
 		listener();
 	};
 	window.addEventListener("popstate", popped);
@@ -53,7 +57,7 @@ export function readRoute(): Route {
 	return { project, screen, ref, folder: new URLSearchParams(location.search).get("folder") };
 }
 export function useRoute(): Route {
-	useSyncExternalStore(subscribe, () => location.pathname + location.search);
+	useSyncExternalStore(subscribe, navigationToken);
 	return readRoute();
 }
 export function routeUrl({
@@ -93,14 +97,20 @@ export function refUrl({ project, ref }: { project: string; ref: string }): stri
 					: "changes";
 	return routeUrl({ project, screen, ref });
 }
-/** Changes selection without a document load. Editors receive a leave event before the URL changes. */
-export function navigate(path: string, options: { replace?: boolean; seal?: boolean } = {}): void {
+/** Changes selection without a document load. Delayed callers keep their route's token in `ifCurrent`. */
+export function navigate(path: string, options: { replace?: boolean; seal?: boolean; ifCurrent?: symbol } = {}): void {
+	if (options.ifCurrent !== undefined && options.ifCurrent !== navigation) return;
 	if (path === location.pathname + location.search) {
-		if (!options.replace) window.dispatchEvent(new Event(WENT));
+		if (!options.replace) {
+			navigation = Symbol();
+			window.dispatchEvent(new Event(changed));
+			window.dispatchEvent(new Event(WENT));
+		}
 		return;
 	}
 	if (options.seal !== false) window.dispatchEvent(new Event("mainworthy:leave"));
 	entry = "navigation";
+	navigation = Symbol();
 	if (options.replace) history.replaceState(null, "", path);
 	else history.pushState(null, "", path);
 	window.dispatchEvent(new Event(changed));
