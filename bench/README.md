@@ -140,3 +140,54 @@ load).
 
 JUnit loads dynamically and skips explicitly if absent. The small check catches large
 regressions, not the full-scale promise. CLI/binary wiring for B6 belongs to the CLI.
+
+## Reports with sibling pull requests
+
+`bun bench/report-siblings.ts` measures a fresh one-result report to one pull request
+with 100, 1,000 and 3,000 pull requests sharing its base and failure cause. Each
+population stays fixed during sampling. The registry completes both accept and apply
+inside the timer. Receipt parsing and checks of the stored result and gate run outside
+it. Each population warms once, then supplies seven samples in alternating population
+order. A separate SQL/CPU profile follows the samples. No wall-clock budget is added.
+This isolates the in-memory registry cost reported in [issue #599](https://github.com/endqwerty/mainworthy/issues/599);
+it does not measure HTTP transport, filesystem commits or concurrent clients.
+
+To compare a baseline revision with the current implementation, export it into a
+scratch directory and pass that directory to `--compare`:
+
+```sh
+baseline=$(bun scripts/work.ts scratch new sibling-baseline)
+git archive <before-commit> | tar -x -C "$baseline"
+ln -s "$PWD/node_modules" "$baseline/node_modules"
+bun bench/report-siblings.ts --compare "$baseline" > /path/to/comparison.json
+```
+
+Both implementations receive separate instances prepared through the current registry
+with identical report inputs. This avoids spending the benchmark setup repeatedly
+recomputing siblings through the baseline's slow path. The timed calls use each
+revision's own registry and operations. Samples alternate both implementations and
+population order. The JSON records every sample, medians, ranges, correctness counts,
+load and separate SQL profiles. A failure exits nonzero.
+
+`report-siblings-equivalence.ts` captures complete gates and open and settled questions
+at eight stages under loose and standard policies. It mixes shared and new causes,
+repositories, jobs, a planned run, a retry, a manual answer, a base correction,
+retargeting and policy changes. Copy the script into the baseline export, run it in
+both trees and compare the JSON:
+
+```sh
+cp bench/report-siblings-equivalence.ts "$baseline/bench/"
+bun "$baseline/bench/report-siblings-equivalence.ts" > /path/to/before.json
+bun bench/report-siblings-equivalence.ts > /path/to/after.json
+cmp /path/to/before.json /path/to/after.json
+bun scripts/work.ts scratch rm "$baseline"
+```
+
+The recorded run is [results-report-siblings.log](results-report-siblings.log).
+The machine was shared with other checks. The comparison alternates the implementations
+so both see that load; treat the exact latencies as observations, not a production SLA.
+The baseline was `a35af58c`. At 3,000 siblings, its profile made 21,011 run lookups for
+one report. The fix makes eight: an inherited answer covers exact results, so it no
+longer asks for every run in the project with the same cause. Cause-wide answers keep
+their existing recomputation path. Existing sequence and inherited-evidence tests cover
+base propagation, corrections, closed runs and policy changes.

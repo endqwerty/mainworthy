@@ -1,0 +1,286 @@
+{
+  "machine": {
+    "cores": 16,
+    "loadBefore": [
+      19.05,
+      38.24,
+      40.37
+    ],
+    "bun": "1.4.3",
+    "loadAfter": [
+      30.72,
+      38.56,
+      40.37
+    ]
+  },
+  "errors": 0,
+  "checked": 48,
+  "rows": [
+    {
+      "engine": "before",
+      "siblings": 100,
+      "median": 47.543084000004455,
+      "min": 39.007785999998305,
+      "max": 79.8496550000018,
+      "samples": [
+        43.219865000002756,
+        39.007785999998305,
+        79.8496550000018,
+        43.25024400000257,
+        47.543084000004455,
+        59.48189399999683,
+        52.830377999998746
+      ]
+    },
+    {
+      "engine": "after",
+      "siblings": 100,
+      "median": 3.5571519999975862,
+      "min": 3.1781689999988885,
+      "max": 3.7704949999970268,
+      "samples": [
+        3.5571519999975862,
+        3.1781689999988885,
+        3.7704949999970268,
+        3.252824999995937,
+        3.5736329999999725,
+        3.4990019999968354,
+        3.6511590000009164
+      ]
+    },
+    {
+      "engine": "before",
+      "siblings": 1000,
+      "median": 498.8304700000008,
+      "min": 347.28109100000074,
+      "max": 575.5507409999991,
+      "samples": [
+        347.28109100000074,
+        575.5507409999991,
+        522.9242669999985,
+        406.61770300000353,
+        432.6981799999994,
+        498.8304700000008,
+        511.2296070000011
+      ]
+    },
+    {
+      "engine": "after",
+      "siblings": 1000,
+      "median": 4.025645999994595,
+      "min": 2.2030610000001616,
+      "max": 4.492309000001114,
+      "samples": [
+        2.2030610000001616,
+        3.043985000000248,
+        4.492309000001114,
+        4.408064000002923,
+        4.249869999999646,
+        4.025645999994595,
+        3.81852500000241
+      ]
+    },
+    {
+      "engine": "before",
+      "siblings": 3000,
+      "median": 1433.1297600000034,
+      "min": 1345.278365000002,
+      "max": 1696.069835000002,
+      "samples": [
+        1345.278365000002,
+        1517.3688889999976,
+        1356.8824660000028,
+        1433.1297600000034,
+        1374.259831999996,
+        1667.633624999995,
+        1696.069835000002
+      ]
+    },
+    {
+      "engine": "after",
+      "siblings": 3000,
+      "median": 3.874090999997861,
+      "min": 3.3375950000008743,
+      "max": 12.641224999999395,
+      "samples": [
+        3.567897000000812,
+        3.3375950000008743,
+        3.691925999999512,
+        4.136232999997446,
+        12.641224999999395,
+        8.673175000003539,
+        3.874090999997861
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "name": "before: report with 3000 siblings",
+      "wallMs": 1487.1681029999963,
+      "cpuMs": 1318.027,
+      "fileInputs": 0,
+      "majorFaults": 0,
+      "queries": [
+        {
+          "sql": "SELECT * FROM runs WHERE id = $id",
+          "calls": 21011,
+          "ms": 197.88916199932282,
+          "max": 3.095925999994506,
+          "plan": [
+            "SEARCH runs USING INTEGER PRIMARY KEY (rowid=?)"
+          ]
+        },
+        {
+          "sql": "SELECT * FROM runs WHERE project = $project AND origin = 'change' AND accepts_what = $what",
+          "calls": 6004,
+          "ms": 91.24556000041775,
+          "max": 4.803986000006262,
+          "plan": [
+            "SEARCH runs USING INDEX runs_change (project=? AND accepts_what=?)"
+          ]
+        },
+        {
+          "sql": "SELECT * FROM targets WHERE id = $id",
+          "calls": 15008,
+          "ms": 87.86746699979267,
+          "max": 7.676424999997835,
+          "plan": [
+            "SEARCH targets USING INTEGER PRIMARY KEY (rowid=?)"
+          ]
+        },
+        {
+          "sql": "SELECT * FROM decisions WHERE id = $id",
+          "calls": 9040,
+          "ms": 71.34524199950101,
+          "max": 6.7582609999954,
+          "plan": [
+            "SEARCH decisions USING INTEGER PRIMARY KEY (rowid=?)"
+          ]
+        },
+        {
+          "sql": "SELECT test, result, target, outcome, signature FROM run_tests WHERE run = $run ORDER BY result",
+          "calls": 9004,
+          "ms": 68.17059799989511,
+          "max": 7.935572999995202,
+          "plan": [
+            "SEARCH run_tests USING PRIMARY KEY (run=?)",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ]
+        },
+        {
+          "sql": "SELECT q.* FROM question_refs r JOIN questions q ON q.id = r.question\n\t\t WHERE r.project = $project AND r.ref = $ref ORDER BY q.id",
+          "calls": 3002,
+          "ms": 59.27238300007593,
+          "max": 2.621951999994053,
+          "plan": [
+            "SEARCH r USING PRIMARY KEY (project=? AND ref=?)",
+            "SEARCH q USING INTEGER PRIMARY KEY (rowid=?)",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ]
+        },
+        {
+          "sql": "SELECT * FROM batches WHERE id = $id",
+          "calls": 6004,
+          "ms": 51.37836000000971,
+          "max": 3.977318999997806,
+          "plan": [
+            "SEARCH batches USING INTEGER PRIMARY KEY (rowid=?)"
+          ]
+        },
+        {
+          "sql": "SELECT project, version, preset, clauses, settings FROM policies WHERE project = $project ORDER BY version DESC LIMIT 1",
+          "calls": 6006,
+          "ms": 47.65085899973201,
+          "max": 1.7775560000009136,
+          "plan": [
+            "SEARCH policies USING PRIMARY KEY (project=?)"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "after: report with 3000 siblings",
+      "wallMs": 5.925405000001774,
+      "cpuMs": 6.743,
+      "fileInputs": 0,
+      "majorFaults": 0,
+      "queries": [
+        {
+          "sql": "SELECT * FROM decisions WHERE id = $id",
+          "calls": 43,
+          "ms": 0.28623000000516186,
+          "max": 0.044543999996676575,
+          "plan": [
+            "SEARCH decisions USING INTEGER PRIMARY KEY (rowid=?)"
+          ]
+        },
+        {
+          "sql": "SELECT * FROM runs WHERE project = $project AND origin = 'change' AND accepts_what = $what",
+          "calls": 6,
+          "ms": 0.1816329999928712,
+          "max": 0.0809369999988121,
+          "plan": [
+            "SEARCH runs USING INDEX runs_change (project=? AND accepts_what=?)"
+          ]
+        },
+        {
+          "sql": "SELECT q.* FROM questions q LEFT JOIN decisions d ON d.id = q.decision\n\t\t WHERE q.project = $project AND q.fingerprint = $fingerprint\n\t\t   AND (q.state = 'open' OR (q.state = 'decided' AND d.id IS NOT NULL\n\t\t        AND json_extract(d.answer, '$.is') NOT IN ('expired', 'outdated', 'withdrawn')))\n\t\t ORDER BY q.epoch DESC, q.id DESC",
+          "calls": 4,
+          "ms": 0.17945799999142764,
+          "max": 0.05607600000075763,
+          "plan": [
+            "SEARCH q USING INDEX questions_fingerprint (project=? AND fingerprint=?)",
+            "SEARCH d USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN",
+            "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+          ]
+        },
+        {
+          "sql": "SELECT q.* FROM question_refs r JOIN questions q ON q.id = r.question\n\t\t WHERE r.project = $project AND r.ref = $ref ORDER BY q.id",
+          "calls": 2,
+          "ms": 0.15921800000069197,
+          "max": 0.09324300000298535,
+          "plan": [
+            "SEARCH r USING PRIMARY KEY (project=? AND ref=?)",
+            "SEARCH q USING INTEGER PRIMARY KEY (rowid=?)",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ]
+        },
+        {
+          "sql": "SELECT * FROM signatures WHERE id = $id",
+          "calls": 2,
+          "ms": 0.10958799999207258,
+          "max": 0.09997599999769591,
+          "plan": [
+            "SEARCH signatures USING INTEGER PRIMARY KEY (rowid=?)"
+          ]
+        },
+        {
+          "sql": "UPDATE questions SET state = $state, decision = $decision, rev = $seq WHERE id = $id",
+          "calls": 2,
+          "ms": 0.0975099999923259,
+          "max": 0.06466199999704259,
+          "plan": []
+        },
+        {
+          "sql": "SELECT * FROM runs WHERE id = $id",
+          "calls": 8,
+          "ms": 0.09002499999041902,
+          "max": 0.022013000001606997,
+          "plan": [
+            "SEARCH runs USING INTEGER PRIMARY KEY (rowid=?)"
+          ]
+        },
+        {
+          "sql": "SELECT c.*, e.ended, e.at AS ended_at FROM changes c LEFT JOIN change_ends e ON e.change = c.id WHERE c.id = $id",
+          "calls": 8,
+          "ms": 0.08709999999700813,
+          "max": 0.019208999998227227,
+          "plan": [
+            "SEARCH c USING INTEGER PRIMARY KEY (rowid=?)",
+            "SEARCH e USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN"
+          ]
+        }
+      ]
+    }
+  ]
+}

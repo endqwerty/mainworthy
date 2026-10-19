@@ -151,6 +151,46 @@ for (const preset of ["standard", "loose"]) {
 	}, 120_000);
 }
 
+test("a report's inherited answer reads only its affected runs, regardless of sibling failures", () => {
+	base();
+	for (let pr = 1; pr <= 20; pr++) {
+		h.call(
+			"report",
+			ciReport({
+				commit: `sibling${String(pr).padStart(4, "0")}`,
+				pr,
+				base: "base0001",
+				n: 2,
+				fail: { 0: "same cause" },
+			}),
+		);
+	}
+	let reads = 0;
+	const all = h.app.db.all.bind(h.app.db);
+	const spy = spyOn(h.app.db, "all").mockImplementation((statement, ...params) => {
+		const rows = all(statement, ...params);
+		if (statement.text.startsWith("SELECT test, result, target, outcome, signature FROM run_tests"))
+			reads += rows.length;
+		return rows;
+	});
+	try {
+		const receipt = h.call<ReportReceipt>(
+			"report",
+			ciReport({ commit: "sibling0001", pr: 1, base: "base0001", n: 2, fail: { 0: "same cause" }, attempt: 2 }),
+		);
+		expect(receipt).toMatchObject({
+			fresh: true,
+			counts: { pass: 1, fail: 1 },
+			gate: { verdict: "passed", tally: { excused: 1, unexplained: 0 } },
+		});
+		expect(h.call<InboxReply>("inbox", { on: "pr:2", kind: "failure" }).items).toEqual([]);
+		expect(gate("sibling0002")).toMatchObject({ verdict: "passed", tally: { excused: 1, unexplained: 0 } });
+		expect(reads).toBeLessThanOrEqual(12);
+	} finally {
+		spy.mockRestore();
+	}
+});
+
 for (const dimension of ["env", "job"] as const) {
 	test(`inheritance matches the base's ${dimension} lane`, () => {
 		const report = (commit: string, fail: boolean, otherLane: boolean) => {
