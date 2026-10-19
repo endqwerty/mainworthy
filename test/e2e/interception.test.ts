@@ -5,6 +5,53 @@ import { browserAvailable, interceptionLive, openPage, startServer } from "./sup
 
 const check = test.skipIf(!browserAvailable);
 
+check(
+	"a busy page can confirm an installed route after more than ten seconds",
+	async () => {
+		const server = await startServer();
+		const h = await openPage(server);
+		try {
+			const { page } = h;
+			await page.route("**/never-requested", (route) => route.abort());
+			let started = () => {};
+			const busy = new Promise<void>((resolve) => {
+				started = resolve;
+			});
+			await page.exposeFunction("mainworthyBusy", started);
+			const blocking = page.evaluate(() => {
+				window.addEventListener("keydown", (event) => {
+					if (event.key === "F8") void fetch("/healthz?key");
+				});
+				const notify: unknown = Reflect.get(window, "mainworthyBusy");
+				if (typeof notify !== "function") throw new Error("The busy-page binding is missing");
+				void notify();
+				// Keep a real renderer busy beyond the former readiness deadline (issue #406).
+				const end = performance.now() + 11_000;
+				while (performance.now() < end);
+			});
+			await busy;
+			const intercepted: string[] = [];
+			try {
+				await page.route("**/healthz?key", (route) => {
+					intercepted.push(route.request().url());
+					return route.fulfill({ status: 204 });
+				});
+			} finally {
+				await blocking;
+			}
+			const answered = page.waitForResponse(`${server.url}/healthz?key`);
+			await page.keyboard.press("F8");
+			expect((await answered).status()).toBe(204);
+			expect(intercepted).toEqual([`${server.url}/healthz?key`]);
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	60_000,
+);
+
 // Chromium acknowledges that it will intercept before a page that is already open sends its requests through the
 // interceptor, and that page handles a key before it makes the switch. Here the page is kept busy across both, so
 // the order is forced: without the wait, the request the key sends is never paused. `page.route` cannot force it
