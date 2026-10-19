@@ -160,8 +160,11 @@ it (`created_by`) and which start-up rule made it (`source`): `env` for the valu
 token, the start revokes every `env` token that was not revoked, whoever its actor is, in the transaction that
 inserts the new one, so a changed variable retires what it held before even when the owner's name changed with
 it. A configured owner token shorter than 20 characters, or longer than the 512 a sign-in reads (`TOKEN_MAX`),
-stops the start. Each start lists in `warnings` a short one, the retired ones, a configured one that no longer
-signs the owner in (revoked, past its end, or somebody else's) and every token that ends within 14 days.
+stops the start. The configured value must contain only visible ASCII characters without spaces, so browser
+sign-in, HTTP bearer requests and the CLI can use it unchanged. The check runs before startup creates or locks
+data and before bootstrap changes any token or session. Each start lists in `warnings` a short one, the retired
+ones, a configured one that no longer signs the owner in (revoked, past its end, or somebody else's) and every
+token that ends within 14 days.
 
 Who a request is from is one question, `admit` in `src/server/identity/identity.ts`, and every surface asks it.
 The HTTP surface reads what the request carries (`factsOf` in `src/surfaces/http.ts`) and decides nothing: a

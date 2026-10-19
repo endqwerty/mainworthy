@@ -40,7 +40,7 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_MODE` | none | `server` selects server mode. |
 | `MAINWORTHY_OWNER` | `USER`, else `owner` | The name of the owner, who holds every capability on every project. |
 | `MAINWORTHY_OWNER_WAS` | none | The name the owner has now, when `MAINWORTHY_OWNER` holds a new name for the same person. The start renames them. See [rename the owner](#rename-the-owner). |
-| `MAINWORTHY_OWNER_TOKEN` | none | An optional token for the owner, 20 to 512 characters. Without it, server mode generates one when the owner has no working token. |
+| `MAINWORTHY_OWNER_TOKEN` | none | An optional token for the owner, 20 to 512 visible ASCII characters without spaces. Without it, server mode generates one when the owner has no working token. |
 | `MAINWORTHY_SESSION_IDLE` | `14d` | How long a browser stays signed in without being used. A whole number and `h`, `d` or `w`: `12h`, `14d`, `2w`. |
 | `MAINWORTHY_SESSION_MAX` | `90d` | How long a browser stays signed in at most, however much it is used. The same form. |
 | `MAINWORTHY_REQUIRE_ADMIN_MFA` | `false` | `true` requires a second factor for password sign-in by anyone with `admin` on any project. See [require a second factor for admins](#require-a-second-factor-for-admins). Other nonempty values except `false` stop startup. |
@@ -77,7 +77,7 @@ A value outside the whole numbers `0` through `8` for `MAINWORTHY_READERS` stops
 
 For `MAINWORTHY_PUBLIC_URL`, use `https` and a host name with nothing after it, or `http://localhost` with its optional port. The server refuses IP addresses and plain `http` anywhere else because browsers do not make passkeys there. Paths and queries are refused because the server needs the instance's root address.
 
-The server checks configuration before creating the data directory or taking its lock. A refused public address, owner token length or reserved owner name creates no files.
+The server checks configuration before creating the data directory or taking its lock. A refused public address, owner token length or form, or reserved owner name creates no files.
 
 The first start creates the data directory, one owner and a project named `scratch`. It does not need any variable. The server holds `server.lock` in that directory until it stops. Another server using the same directory waits up to `MAINWORTHY_LOCK_WAIT_SECONDS` before it opens the application database. It says once on standard error that it is waiting for another server on the data directory. If the lock is still held at the deadline, startup is refused with `another server is already using this data directory; stop it or choose another MAINWORTHY_DATA`. This permits a replacement to start when the previous server finishes stopping. A deployment must let the previous server stop while the replacement waits. Waiting for the replacement to become healthy first prevents that handoff. The operating system releases the lock if the process is killed. The file stays in place. Do not delete or replace it while a server runs.
 
@@ -147,7 +147,9 @@ For the first server-mode sign-in, use the owner's token. Later you can set up a
 
 To replace a lost token, set `MAINWORTHY_OWNER_TOKEN` to a new value and restart. The start revokes every token previously issued through that variable, whoever the owner was then. It ends browser sessions opened with those tokens and names each token and actor in one log line. Tokens you made yourself and tokens the server generated keep working. An older manually issued token with a label beginning `owner (from ` is an exception. The database upgrade marked those tokens as issued through the variable, so a new value revokes them too.
 
-A value shorter than 20 characters or longer than 512 stops startup. A value shorter than 32 starts with a warning each time. No bearer token or sign-in token longer than 512 characters works. If an earlier build accepted a longer owner token, replace it. `openssl rand -hex 32` makes a suitable value. Keep it out of version control.
+A value shorter than 20 characters or longer than 512 stops startup. Only visible ASCII characters are accepted: letters, digits and punctuation, with no spaces, tabs, line breaks, other control characters or non-ASCII characters. The server uses the exact value for browser sign-in and HTTP bearer authentication. An invalid value stops startup before any token is created or revoked, so a refused rotation leaves the previous token and its browser sessions working. If an earlier build accepted an invalid value, replace it. `openssl rand -hex 32` makes a suitable value. Keep it out of version control.
+
+A value shorter than 32 characters starts with a warning each time. No bearer token or sign-in token longer than 512 characters works.
 
 A value already stored as a token revokes nothing. If that token was revoked, expired or belongs to somebody else, the server leaves it unchanged and says why on standard error. Set a new value in that case.
 
