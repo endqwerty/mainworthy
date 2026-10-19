@@ -3,7 +3,7 @@
 //
 // `effect` is the only place a standing writer is called (it receives the witness). `revert` undoes exactly what
 // `effect` recorded, for a withdrawn or expired decision. `holds` says how long the decision carries forward.
-import { type AnswerOf, type AnyAnswer, failureClass, type Kind, type Policy } from "../../core/kinds.ts";
+import { ANSWERS, type AnswerOf, type AnyAnswer, failureClass, type Kind, type Policy } from "../../core/kinds.ts";
 import type { CaseBody } from "../../core/model.ts";
 import type { Edit } from "../../core/ops.ts";
 import {
@@ -44,7 +44,6 @@ import {
 	bodyOf,
 	caseById,
 	caseRef,
-	findCase,
 	mustCase,
 	proposalById,
 	resolvedOf,
@@ -278,6 +277,11 @@ const mapHandler: Handler<"map"> = {
 						"this policy has a person adopt new cases, so they cannot be created and linked in one answer: propose the cases, have them adopted, then answer this question with `link`",
 					);
 				}
+				const acceptance = ANSWERS.adopt.safeParse(adoption.answer);
+				if (!acceptance.success || acceptance.data.is !== "accept")
+					throw invalid(
+						"this policy does not accept new cases automatically: change the adoption rule, or propose the cases, have them adopted, then link",
+					);
 				const folder = answer.folder ?? folderFor(file);
 				const edits: Edit[] = tests.map((test) => ({
 					op: "create",
@@ -289,11 +293,15 @@ const mapHandler: Handler<"map"> = {
 				const raised = yield* raiseAdopt(ctx, { raise: tools.raiseSteps }, sealed);
 				if (raised.s !== "decided")
 					throw invalid("the new cases need a person to adopt them first; accept that proposal, then link");
-				const created = (raised.effects.created ?? []) as string[];
+				const created = raised.effects.created;
+				if (!Array.isArray(created) || created.length !== tests.length)
+					throw invalid("the adoption rule did not create every requested case; no tests were linked");
 				const linked: Relinked[] = [];
 				for (const [i, test] of tests.entries()) {
-					const row = created[i] ? findCase(ctx.db, ctx.project.id, created[i]) : null;
-					if (!row) continue;
+					const ref = created[i];
+					if (typeof ref !== "string")
+						throw invalid("the adoption rule did not create every requested case; no tests were linked");
+					const row = mustCase(ctx.db, ctx.project.id, ref);
 					linked.push([test.id, null, null]);
 					linkTest(ctx, witness, test, row.id);
 					if ((i + 1) % 200 === 0) yield;

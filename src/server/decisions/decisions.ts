@@ -505,11 +505,11 @@ const reply = (q: QuestionRow, status: DecideReply["status"], more: Partial<Deci
 });
 
 function answerApplicabilityProblem(kind: Kind, facts: ReadonlySet<string>, given: AnyAnswer): string | null {
-	if (kind !== "failure") return null;
+	if (kind !== "failure" && kind !== "adopt") return null;
 	const allowed = applicableAnswers(kind, facts);
 	return allowed.includes(given.is)
 		? null
-		: `one of ${allowed.join(", ")}: \`${given.is}\` does not apply to this failure`;
+		: `one of ${allowed.join(", ")}: \`${given.is}\` does not apply to this ${kind === "adopt" ? "proposal" : "failure"}`;
 }
 
 class RefusedReplacement extends Error {

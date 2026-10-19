@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ANSWER_KEYS, ANSWERS, type Ask, Clause, KINDS, type Policy, standingOf } from "../src/core/kinds.ts";
 import { parseCase } from "../src/core/markdown.ts";
+import { emptyBody } from "../src/core/model.ts";
 import type { GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
 import { missingCatchAll, PRESET_NAMES, PRESETS } from "../src/core/presets.ts";
 import { actorByName, invitedPerson } from "../src/server/identity/identity.ts";
@@ -392,6 +393,157 @@ describe("rule answers", () => {
 		});
 		expect(h.call<Policy & { version: number }>("admin", { do: "policy.show", project: "scratch" })).toEqual(policy);
 		expect(queue().items).toEqual([]);
+	});
+
+	test("automatic creation refuses a policy whose rule rejects new cases", () => {
+		const policy = h.call<CurrentPolicy>("admin", { do: "policy.show", project: "scratch" });
+		const clauses = policy.clauses.map((clause) =>
+			clause.id === "adopt-any" ? { ...clause, answer: { is: "reject" } } : clause,
+		);
+		expect(h.raw("propose", { edits: [{ op: "policy", base: 1, clauses, unlinked: "create" }] })).toMatchObject({
+			ok: false,
+			error: {
+				code: "invalid",
+				message: "tests with no case need a rule that accepts new cases automatically: choose ask or track",
+			},
+		});
+		expect(h.call<CurrentPolicy>("admin", { do: "policy.show", project: "scratch" })).toEqual(policy);
+		const receipt = h.call<ReportReceipt>("report", ciReport({ commit: "bbbb0564", n: 1 }));
+		expect(receipt).toMatchObject({ questions: [], unlinked: 1 });
+		expect(first(queue({ kind: "map", state: "decided" }).items).decision).toMatchObject({
+			answer: { is: "track" },
+		});
+	});
+
+	test("creating cases refuses a rejection rule and leaves its question open", () => {
+		const policy = h.call<CurrentPolicy>("admin", { do: "policy.show", project: "scratch" });
+		const clauses = policy.clauses.map((clause) =>
+			clause.id === "adopt-any" ? { ...clause, answer: { is: "reject" } } : clause,
+		);
+		h.call("propose", { edits: [{ op: "policy", base: 1, clauses, unlinked: "ask" }] });
+		const adopt = first(queue({ kind: "adopt" }).items);
+		expect(h.call("decide", { q: adopt.q, onEvidence: adopt.evidenceHash, answer: { is: "accept" } })).toMatchObject([
+			{ status: "decided" },
+		]);
+		h.call("report", ciReport({ commit: "bbbb0564", n: 1 }));
+		const map = first(queue({ kind: "map" }).items);
+		expect(h.call("decide", { q: map.q, onEvidence: map.evidenceHash, answer: { is: "create" } })).toMatchObject([
+			{
+				status: "invalid",
+				needs:
+					"this policy does not accept new cases automatically: change the adoption rule, or propose the cases, have them adopted, then link",
+			},
+		]);
+		expect(queue({ kind: "map" }).items.map((item) => [item.q, item.state, item.decision])).toEqual([
+			[map.q, "open", null],
+		]);
+		expect(h.call("find", { in: "cases" })).toMatchObject({ count: 0, items: [], cursor: null });
+		expect(h.call("find", { in: "tests", unlinked: true })).toMatchObject({ count: 1 });
+	});
+
+	test("automatic creation leaves its question open when a folder rule rejects the sealed cases", () => {
+		const policy = h.call<CurrentPolicy>("admin", { do: "policy.show", project: "scratch" });
+		const clauses = policy.clauses.flatMap((clause) =>
+			clause.id === "adopt-any"
+				? [{ ...clause, id: "reject-checkout", when: ["folder:checkout"], answer: { is: "reject" } }, clause]
+				: [clause],
+		);
+		h.call("propose", { edits: [{ op: "policy", base: 1, clauses, unlinked: "create" }] });
+		const adopt = first(queue({ kind: "adopt" }).items);
+		expect(h.call("decide", { q: adopt.q, onEvidence: adopt.evidenceHash, answer: { is: "accept" } })).toMatchObject([
+			{ status: "decided" },
+		]);
+		const receipt = h.call<ReportReceipt>(
+			"report",
+			ciReport({ commit: "bbbb0564", n: 1, file: "tests/checkout/coupon.spec.ts" }),
+		);
+		const map = first(queue({ kind: "map" }).items);
+		expect(receipt).toMatchObject({ questions: [], unlinked: 1 });
+		expect(map).toMatchObject({ state: "open", decision: null });
+		expect(h.call("decide", { q: map.q, onEvidence: map.evidenceHash, answer: { is: "create" } })).toMatchObject([
+			{
+				status: "invalid",
+				needs: "the adoption rule did not create every requested case; no tests were linked",
+			},
+		]);
+		expect(h.call("find", { in: "cases" })).toMatchObject({ count: 0, items: [], cursor: null });
+		expect(h.call("find", { in: "tests", unlinked: true })).toMatchObject({ count: 1 });
+	});
+
+	test("a merge rule that can match a conflict-free proposal is refused", () => {
+		h.call("propose", { edits: [{ op: "create", body: { title: "Original" } }] });
+		const policy = h.call<CurrentPolicy>("admin", { do: "policy.show", project: "scratch" });
+		const clauses = policy.clauses.map((clause) =>
+			clause.id === "adopt-any" ? { ...clause, answer: { is: "merge", body: emptyBody("Forced") } } : clause,
+		);
+		expect(h.raw("propose", { edits: [{ op: "policy", base: 1, clauses }] })).toMatchObject({
+			ok: false,
+			error: { code: "invalid", message: "Clause adopt-any: a merge rule must require conflict." },
+		});
+		expect(
+			h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Edited" } }] }),
+		).toMatchObject({
+			status: "adopted",
+		});
+		expect(title("C-1")).toBe("Edited");
+	});
+
+	test("a stored merge rule does not generate replacements for a conflict-free proposal", () => {
+		h.call("propose", { edits: [{ op: "create", body: { title: "Original" } }] });
+		const policy = h.call<CurrentPolicy>("admin", { do: "policy.show", project: "scratch" });
+		const clauses = policy.clauses.map((clause) =>
+			clause.id === "adopt-any" ? { ...clause, answer: { is: "merge", body: emptyBody("Forced") } } : clause,
+		);
+		// An already accepted policy from a release that allowed this rule.
+		h.app.db.raw.query("UPDATE policies SET clauses = ?").run(JSON.stringify(clauses));
+		// Stop the broken implementation before unbounded recursion can occupy the test worker.
+		h.app.db.raw.exec(`CREATE TEMP TRIGGER bound_merge_proposals BEFORE INSERT ON proposals
+			WHEN (SELECT count(*) FROM proposals) >= 4
+			BEGIN SELECT RAISE(ABORT, 'merge rule generated repeated proposals'); END`);
+		expect(
+			h.raw("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Edited" } }] }),
+		).toMatchObject({
+			ok: true,
+			result: { status: "open", proposal: "P-2" },
+		});
+		expect(h.app.db.raw.query("SELECT count(*) AS n FROM proposals").get()).toEqual({ n: 2 });
+		expect(title("C-1")).toBe("Original");
+		const question = first(queue({ kind: "adopt" }).items);
+		expect(
+			h.call("decide", {
+				q: question.q,
+				onEvidence: question.evidenceHash,
+				answer: { is: "merge", body: emptyBody("Forced") },
+			}),
+		).toMatchObject([{ status: "invalid", needs: "one of accept, reject: `merge` does not apply to this proposal" }]);
+		expect(
+			h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" } }),
+		).toMatchObject([{ status: "decided" }]);
+		expect(title("C-1")).toBe("Edited");
+	});
+
+	test("a conflict-only merge rule adopts its replacement once under the ordinary adoption rule", () => {
+		h.call("propose", { edits: [{ op: "create", body: { title: "Original" } }] });
+		const policy = h.call<CurrentPolicy>("admin", { do: "policy.show", project: "scratch" });
+		const clauses = policy.clauses.map((clause) =>
+			clause.id === "adopt-conflict"
+				? { ...clause, ask: { ...clause.ask, who: "rule" }, answer: { is: "merge", body: emptyBody("Resolved") } }
+				: clause,
+		);
+		h.call("propose", { edits: [{ op: "policy", base: 1, clauses }] });
+		const adopt = first(queue({ kind: "adopt" }).items);
+		expect(h.call("decide", { q: adopt.q, onEvidence: adopt.evidenceHash, answer: { is: "accept" } })).toMatchObject([
+			{ status: "decided" },
+		]);
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Head" } }] });
+		expect(h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }] })).toMatchObject(
+			{
+				status: "adopted",
+			},
+		);
+		expect(h.call("get", { refs: ["C-1"] })).toMatchObject([{ title: "Resolved", version: 3 }]);
+		expect(h.app.db.raw.query("SELECT count(*) AS n FROM proposals").get()).toEqual({ n: 5 });
+		expect(queue({ kind: "adopt" }).items).toEqual([]);
 	});
 
 	test("a proposal accepts a rule answer its question kind accepts", () => {
