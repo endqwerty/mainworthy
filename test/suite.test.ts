@@ -838,6 +838,59 @@ describe("capture", () => {
 		expect(h.call("find", { folder: "Refunds" })).toMatchObject({ count: 1, items: [{ ref: "C-1" }] });
 	});
 
+	test("a mixed folder batch preserves nested moves, a rename chain, a swap and case placement", () => {
+		h.call("propose", {
+			edits: [
+				{ op: "create", outline: "Nested", folder: "Source/Child/Leaf" },
+				{ op: "create", outline: "Left case", folder: "Left/Inside" },
+				{ op: "create", outline: "Right case", folder: "Right/Inside" },
+				{ op: "create", outline: "Moving case", folder: "Destination" },
+			],
+		});
+		expect(
+			h.call<Proposed>("propose", {
+				edits: [
+					{ op: "folder", folder: "Source", name: "Interim" },
+					{ op: "folder", folder: "Source/Child", parent: "Destination", name: "Moved" },
+					{ op: "folder", folder: "Source", name: "Final" },
+					{ op: "folder", folder: "Left", name: "Right" },
+					{ op: "folder", folder: "Right", name: "Left" },
+					{ op: "folder", name: "New", parent: "Final/Branch" },
+					{ op: "place", cases: ["C-4"], folder: "Final/Branch/New" },
+					{ op: "create", outline: "Created case", folder: "Destination/Moved/Leaf" },
+				],
+			}).status,
+		).toBe("adopted");
+		expect(
+			h
+				.call<CaseView[]>("get", { refs: ["C-1", "C-2", "C-3", "C-4", "C-5"] })
+				.map((row) => ({ title: row.title, folder: row.folder.path })),
+		).toEqual([
+			{ title: "Nested", folder: "Destination/Moved/Leaf" },
+			{ title: "Left case", folder: "Right/Inside" },
+			{ title: "Right case", folder: "Left/Inside" },
+			{ title: "Moving case", folder: "Final/Branch/New" },
+			{ title: "Created case", folder: "Destination/Moved/Leaf" },
+		]);
+		expect(
+			h
+				.call<{ items: { path: string }[] }>("find", { in: "folders" })
+				.items.map((row) => row.path)
+				.sort(),
+		).toEqual([
+			"Destination",
+			"Destination/Moved",
+			"Destination/Moved/Leaf",
+			"Final",
+			"Final/Branch",
+			"Final/Branch/New",
+			"Left",
+			"Left/Inside",
+			"Right",
+			"Right/Inside",
+		]);
+	});
+
 	test("path targets cannot pick an arbitrary folder while a batch swaps names", () => {
 		h.call("propose", {
 			edits: [
