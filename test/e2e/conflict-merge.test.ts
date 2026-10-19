@@ -149,6 +149,33 @@ async function expectTheMergeToStand(server: Server, page: Page) {
 const check = test.skipIf(!browserAvailable);
 
 check(
+	"an in-flight conflict merge preserves a decision from another client",
+	async () => {
+		const { server, page, close } = await cardWithANewerChange();
+		try {
+			const question = (await server.api("inbox", { kind: "adopt" })).items[0];
+			if (!question) throw Error("Missing conflict question");
+			await page.route("**/decide", async (route) => {
+				await server.api("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "reject" } });
+				await route.continue();
+			});
+			const replied = page.waitForResponse((response) => response.url().endsWith("/decide"));
+			await resolve(page);
+			await replied;
+			expect((await server.api("get", { refs: [question.q] }))[0]?.decision).toMatchObject({
+				answer: { is: "reject" },
+			});
+			expect((await head(server)).version).toBe(3);
+			await page.getByText("typed merge is kept", { exact: false }).first().waitFor();
+			expect(await caseTitle(page).inputValue()).toBe(MERGED);
+		} finally {
+			await close();
+		}
+	},
+	30000,
+);
+
+check(
 	"a merge typed by hand that the server combines with a colleague's newer change leaves no draft to undo it",
 	async () => {
 		const { server, h, page, close } = await cardWithANewerChange();

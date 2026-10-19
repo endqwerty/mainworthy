@@ -156,14 +156,16 @@ export function CasePane({
 		try {
 			const reply = await call(
 				"decide",
-				{ q: question.q, onEvidence: question.evidenceHash, answer: { is: answer } },
+				{ q: question.q, onEvidence: question.evidenceHash, ifOpen: true, answer: { is: answer } },
 				{ project, owner },
 			);
 			if (reply[0]?.status !== "decided" && reply[0]?.status !== "already") {
 				queryClient.setQueryData(key, before);
 				setStatus(
 					reply[0]?.status === "conflict"
-						? "The evidence changed. Read the new proposal before answering."
+						? reply[0].needs === "the question is no longer open; read it again before answering"
+							? "This proposal was settled meanwhile. Read its current decision before answering."
+							: "The evidence changed. Read the new proposal before answering."
 						: (reply[0]?.needs ?? "This proposal needs a person."),
 				);
 			} else {

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import type { Api } from "../../core/api.ts";
 import { ANSWER_HELP, ANSWER_KEYS, ANSWER_LABELS, ANSWERS, KIND_WORDS, KINDS, type Kind } from "../../core/kinds.ts";
-import { DECIDE_MAX, type InboxReply, type QuestionItem } from "../../core/ops.ts";
+import { DECIDE_MAX, type InboxReply, QuestionItem } from "../../core/ops.ts";
 import { stakes, waitingPhrase } from "../../core/stakes.ts";
 import { call } from "../lib/api.ts";
 import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
@@ -344,6 +344,7 @@ function QueueWorkbench() {
 		const all = entries.map(({ question, answer }) => ({
 			q: question.q,
 			onEvidence: question.evidenceHash,
+			ifOpen: true,
 			answer,
 			...(reason ? { reason } : {}),
 		}));
@@ -376,18 +377,38 @@ function QueueWorkbench() {
 						),
 				);
 				if (rejected.length) {
+					const conflicts = replies.filter((reply) => reply.status === "conflict");
+					const freshQuestions = conflicts.length
+						? z
+								.array(QuestionItem)
+								.parse(await call("get", { refs: conflicts.map((reply) => reply.q) }, { project, owner }))
+						: [];
+					if (!sessionCurrent(owner)) return [];
+					for (const question of freshQuestions) shown.current.set(question.q, question);
 					bringBack(
-						rejected.map((entry) => entry.question),
+						rejected.map(
+							(entry) => freshQuestions.find((question) => question.q === entry.question.q) ?? entry.question,
+						),
 						false,
 					);
 					const reply = replies.find((reply) => rejected.some((entry) => entry.question.q === reply.q));
 					const message =
 						reply?.status === "conflict"
-							? `The evidence changed. ${reply.needs ?? "Read the new evidence before answering."}`
+							? reply.needs === "the question is no longer open; read it again before answering"
+								? `${reply.q} was settled meanwhile. Read its current decision before answering.`
+								: `The evidence changed. ${reply.needs ?? "Read the new evidence before answering."}`
 							: reply?.status === "advised"
 								? `Advice recorded. Needs ${reply.needs ?? rejected[0]?.question.needs}.`
 								: `Answer not recorded. Needs ${reply?.needs ?? rejected[0]?.question.needs}.`;
 					if (action === actionNo.current) {
+						// Show the decision that settled a question meanwhile; it is no longer open, so a key sent to it
+						// records nothing. A question whose evidence changed stays where the person left it.
+						const settled = replies.find(
+							(one) =>
+								one.status === "conflict" &&
+								one.needs === "the question is no longer open; read it again before answering",
+						);
+						if (settled) setCursor(settled.q);
 						setLastMessage(message);
 						setStatus(message);
 						setLast(
@@ -1018,7 +1039,7 @@ function QueueWorkbench() {
 									{advice.reason && `: ${advice.reason}`} <KeyCap>Enter</KeyCap> takes the suggestion.
 								</div>
 							))}
-							{state === "decided" && current.decision && answered && (
+							{current.decision && answered && (
 								<div className="queue-decision">
 									<b>{ANSWER_LABELS[String(answered.answer.is)] ?? String(answered.answer.is)}</b>
 									<p className="dim">
@@ -1041,7 +1062,7 @@ function QueueWorkbench() {
 											{current.decision.trackerError}
 										</p>
 									)}
-									{current.state === "decided" && !current.decision.supersedes && (
+									{state === "decided" && current.state === "decided" && !current.decision.supersedes && (
 										<button className="out" type="button" onClick={() => undo([current])}>
 											<KeyCap>u</KeyCap> Withdraw answer
 										</button>
