@@ -203,6 +203,7 @@ public struct RunFill: Identifiable, Equatable, Sendable {
 	public var id: Int { result }
 	public let result: Int
 	public let by: String
+	public let model: String?
 	public let method: FillMethod
 	public let outcome: FilledOutcome
 	public let note: String?
@@ -210,6 +211,7 @@ public struct RunFill: Identifiable, Equatable, Sendable {
 	init(_ wire: Wire.RunFill) {
 		result = wire.result
 		by = wire.by
+		model = wire.model
 		method = FillMethod(wire.method)
 		outcome = FilledOutcome(wire.outcome)
 		note = wire.note

@@ -155,6 +155,8 @@
     "src/web/reports/format.test.ts": 4,
     "src/web/lib/browser.test.ts": 4,
     "src/core/text.test.ts": 4,
-    "src/web/lib/former-name.test.ts": 4
+    "src/web/lib/former-name.test.ts": 4,
+    "test/e2e/agent-model.test.ts": 1060,
+    "test/agent-model.test.ts": 225
   }
 }

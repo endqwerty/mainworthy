@@ -430,6 +430,7 @@ enum Wire {
 
 	/// An admitted result that fills a slot.
 	struct RunFill: Decodable, Equatable, Sendable {
+		let model: String?
 		let result: Int
 		let by: String
 		let method: String
@@ -601,6 +602,7 @@ enum Wire {
 
 	/// One test as the gate counted it.
 	struct CountedResult: Decodable, Equatable, Sendable {
+		let model: String?
 		let result: Int
 		/// The test's ref, T-9.
 		let test: String
@@ -657,6 +659,7 @@ enum Wire {
 
 	/// One of a test's latest results, newest first.
 	struct TestResult: Decodable, Equatable, Sendable {
+		let model: String?
 		let id: Int
 		let outcome: String
 		let by: String

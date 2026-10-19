@@ -41,6 +41,7 @@ const Entry = z.discriminatedUnion("t", [
 	EntryBase.extend({ t: z.literal("placement"), kind: z.string(), what: z.string() }),
 	EntryBase.extend({
 		t: z.literal("result"),
+		model: z.string().nullable(),
 		id: z.number(),
 		outcome: z.string(),
 		method: z.string(),
@@ -382,7 +383,7 @@ export function CasePane({
 									<span className="pt">
 										{method === "human" ? "person" : method === "auto" ? "pipeline" : "agent"} ·{" "}
 										{proof
-											? `${proof.outcome} on v${result?.version ?? version} · basis ${proof.basis}${result ? ` · ${result.by}${result.name ? ` · ${result.name}` : ""}` : ""}`
+											? `${proof.outcome} on v${result?.version ?? version} · basis ${proof.basis}${result ? ` · ${result.by}${result.model ? ` · ${result.model}` : ""}${result.name ? ` · ${result.name}` : ""}` : ""}`
 											: "no result yet"}
 									</span>
 									<span className="age">{proof ? age(proof.at) : ""}</span>
@@ -610,6 +611,7 @@ function TimelineRow({ entry }: { entry: Exclude<Entry, { t: "version" }> }) {
 			<div>
 				<b className={kind === "agent" ? "agentv" : ""}>
 					{entry.by}
+					{entry.t === "result" && entry.model && ` · ${entry.model}`}
 					{kind === "agent" ? " · agent" : ""}
 				</b>{" "}
 				<span className="why">{text}</span>

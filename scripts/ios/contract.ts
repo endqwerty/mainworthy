@@ -336,6 +336,7 @@ export const RunPage = struct("RunPage", "A page of runs, newest first.", {
 	cursor: maybe(text),
 });
 const RunFill = struct("RunFill", "An admitted result that fills a slot.", {
+	model: maybe(text),
 	result: whole,
 	by: text,
 	method: text,
@@ -458,6 +459,7 @@ export const CountedResults = struct("CountedResults", "`find` in results: what 
 	count: [maybe(whole), "How many rows match the filter."],
 	items: list(
 		struct("CountedResult", "One test as the gate counted it.", {
+			model: maybe(text),
 			result: whole,
 			test: [text, "The test's ref, T-9."],
 			name: text,
@@ -510,6 +512,7 @@ export const TestDetail = struct("TestDetail", "`get` with a T- ref: a test and 
 	quarantine: maybe(TestQuarantine),
 	last: list(
 		struct("TestResult", "One of a test's latest results, newest first.", {
+			model: maybe(text),
 			id: whole,
 			outcome: text,
 			by: text,

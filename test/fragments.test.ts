@@ -213,7 +213,8 @@ test("upgrading an existing database rebuilds pinned search once", () => {
 	const documents = () =>
 		db.raw.query("SELECT rowid, title, body, tags, project FROM search_docs ORDER BY rowid").all();
 	const expected = documents();
-	// Schema 29 indexed only the pin's empty action. Restore that derived row and schema marker.
+	// Restore schema 29 before replaying migrations, including columns added since the search upgrade.
+	db.exec("ALTER TABLE results DROP COLUMN model; ALTER TABLE batches DROP COLUMN model");
 	db.exec(
 		"DROP TABLE slot_leases; UPDATE search_docs SET body = '' WHERE rowid = 2; UPDATE meta SET value = '29' WHERE key = 'schema_version'",
 	);

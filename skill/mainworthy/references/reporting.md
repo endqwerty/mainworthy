@@ -1,6 +1,6 @@
 # Report results
 
-Use one `report` call for a batch. Give `target: {commit: "<the whole hash>"}` for a commit, or `run: "R-4"` for a planned run. Use the whole hash the pipeline reports: a report under an abbreviated hash is recorded as another commit. For work without a commit, use `target: {session: "checkout-review"}`. Include the tested commit, branch, environment, job, and attempt when you know them.
+Use one `report` call for a batch. Set the report's optional `model` to the model that produced all its results, for example `claude-opus-5-5`. It is trimmed and must contain 1 to 120 characters. Only an agent token may name a model; a person's or pipeline's report with one is refused. Give `target: {commit: "<the whole hash>"}` for a commit, or `run: "R-4"` for a planned run. Use the whole hash the pipeline reports: a report under an abbreviated hash is recorded as another commit. For work without a commit, use `target: {session: "checkout-review"}`. Include the tested commit, branch, environment, job, and attempt when you know them.
 
 The HTTP MCP endpoint accepts request bodies up to 4 MiB. Use the HTTP API or CLI for larger reports.
 

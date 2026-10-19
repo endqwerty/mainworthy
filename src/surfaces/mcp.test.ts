@@ -26,7 +26,7 @@ import { compactSchema, mcpRoute, mcpServer, mcpTools, TOOL_TOKEN_BUDGET } from 
 const tokens = (value: unknown): number => encode(JSON.stringify(value)).length;
 const TOKEN_COUNTS: Record<string, number> = {
 	propose: 1388,
-	report: 690,
+	report: 696,
 	claim: 390,
 	decide: 318,
 	inbox: 166,
@@ -34,7 +34,7 @@ const TOKEN_COUNTS: Record<string, number> = {
 	find: 263,
 	impact: 183,
 	since: 144,
-	work: 173,
+	work: 169,
 };
 
 function resultOf<S extends z.ZodType>(reply: unknown, schema: S): z.output<S> {
@@ -69,7 +69,7 @@ test("tools/list explains proposal statuses and how to identify reported tests",
 		"Propose cases at their base version. Status: adopted=current, open=needs acceptance, conflict=resolve, rejected.",
 	);
 	expect(tools.find((tool) => tool.name === "report")?.description).toBe(
-		"Record results for `target` (commit) or `run` (planned). Identify each test by `key` or case ref.",
+		"Report to target or run; tests by key or case.",
 	);
 });
 
@@ -375,6 +375,45 @@ test("compact output schemas describe structured results from the registry", () 
 	const validate = compile(work.outputSchema);
 	expect(validate({ result: {}, seq: 1 }).valid).toBe(false);
 	expect(validate({ result: { run: "R-1", slot: null, case: null, work: { kind: "free" } }, seq: 1 }).valid).toBe(true);
+});
+
+test("MCP report and get keep the session model beside the agent", async () => {
+	const h = harness();
+	const actor = h.actor("model-runner", "agent", ["read", "produce"]);
+	const server = mcpServer(
+		async (op, project, input) => invoke(h.app, OPS, { op, project, input, actor: () => actor }),
+		async () => ["scratch"],
+	);
+	const client = new Client({ name: "model-client", version: "1" });
+	const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+	try {
+		await server.connect(serverTransport);
+		await client.connect(clientTransport);
+		expect(
+			(await client.listTools()).tools.find((tool) => tool.name === "report")?.inputSchema.properties?.model,
+		).toEqual({ type: "string", minLength: 1, maxLength: 120, description: "Agent model." });
+		const receipt = resultOf(
+			await client.callTool({
+				name: "report",
+				arguments: {
+					target: { session: "model-check" },
+					model: "claude-opus-5-5",
+					results: [{ test: { key: "model-check" }, outcome: "pass" }],
+				},
+			}),
+			z.object({ counts: z.object({ total: z.number() }) }),
+		);
+		expect(receipt.counts.total).toBe(1);
+		const rows = resultOf(
+			await client.callTool({ name: "get", arguments: { refs: ["T-1"] } }),
+			z.array(z.object({ last: z.array(z.object({ by: z.string(), model: z.string().nullable() })) })),
+		);
+		expect(rows[0]?.last).toEqual([{ by: "model-runner", model: "claude-opus-5-5" }]);
+	} finally {
+		await client.close();
+		await server.close();
+		h.close();
+	}
 });
 
 test("MCP role approval follows the current grant and requires a reason", async () => {

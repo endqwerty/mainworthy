@@ -123,16 +123,35 @@ for (const surface of ["case", "queue"] as const)
 					});
 					await page.keyboard.press("r");
 					expect((await server.api("get", { refs: [proposed.question] }))[0]?.state).toBe("open");
-					let pages = 0;
-					while ((await evidence.getAttribute("data-proposal-read")) !== "ready" && pages++ < 40) {
+					const question = proposed.question;
+					let answered = false;
+					for (let pages = 0; pages < 40; pages++) {
+						await page.evaluate(async (q) => {
+							await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+							window.addEventListener(
+								"keydown",
+								() =>
+									Reflect.set(
+										window,
+										"mainworthyReadAtKey",
+										document.querySelector<HTMLElement>(`[data-proposal-evidence="${CSS.escape(q)}"]`)?.dataset
+											.proposalRead === "ready",
+									),
+								{ capture: true, once: true },
+							);
+						}, question);
 						await page.keyboard.press("r");
-						await page.waitForTimeout(50);
-						expect((await server.api("get", { refs: [proposed.question] }))[0]?.state).toBe("open");
+						if (z.boolean().parse(await page.evaluate(() => Reflect.get(window, "mainworthyReadAtKey")))) {
+							answered = true;
+							break;
+						}
+						expect((await server.api("get", { refs: [question] }))[0]?.state).toBe("open");
 					}
-					expect(await evidence.getAttribute("data-proposal-read")).toBe("ready");
-					const response = page.waitForResponse((reply) => reply.url().endsWith("/decide"));
-					await page.keyboard.press("r");
-					await response;
+					expect(answered).toBe(true);
+					await eventually(
+						() => server.api("get", { refs: [question] }),
+						(rows) => rows[0]?.state === "decided",
+					);
 					expect((await server.api("get", { refs: [proposed.question] }))[0]?.decision).toMatchObject({
 						answer: { is: "reject" },
 					});

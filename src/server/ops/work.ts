@@ -22,7 +22,7 @@ export const workOp = defineOp({
 	needs: "record",
 	scope: "project",
 	effect: "write",
-	mcp: "Before working, take with run and no slot. Renew with slot; report or give-back releases.",
+	mcp: "Take next slot with run; renew with slot. Report or give-back releases.",
 	run(ctx, input): WorkReply {
 		const run = mustRun(ctx.db, ctx.project.id, input.run);
 		if (input.do === "give-back") {

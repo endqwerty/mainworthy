@@ -182,7 +182,7 @@ test("the same seed writes the same suite, another seed another, and no days lea
 		// With no days there is today's run and no other, and the five questions all the same.
 		const today = on(client, "two");
 		const runs = z.array(Run).parse((await today.call("find", { in: "runs", origin: "planned", limit: 100 })).items);
-		expect(runs.map((run) => run.name)).toEqual(["Checkout regression"]);
+		expect(runs.map((run) => run.name)).toEqual(["Agent checkout check", "Checkout regression"]);
 		expect((await today.call("inbox", { limit: 50 })).items).toHaveLength(5);
 		const inherited = (await today.call("inbox", { on: "pr:482", kind: "failure" })).items;
 		expect(inherited).toHaveLength(1);

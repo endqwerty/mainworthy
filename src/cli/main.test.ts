@@ -29,6 +29,39 @@ const Token = z.object({ token: z.string() });
 const Created = z.object({ cases: z.array(Ref) });
 const Receipt = z.object({ batch: z.number(), fresh: z.boolean(), counts: z.object({ total: z.number() }) });
 
+test("an agent's JSON report and CLI reads retain its model", async () => {
+	await withInstance(async ({ client, cli, run }) => {
+		const { token } = Token.parse(
+			await client.call("admin", {
+				do: "token.create",
+				actor: "model-runner",
+				kind: "agent",
+				can: ["read", "produce"],
+				project: "scratch",
+			}),
+		);
+		const sent = await cli(
+			[
+				"report",
+				"--project",
+				"scratch",
+				"--json",
+				JSON.stringify({
+					target: { session: "model-check" },
+					model: "claude-opus-5-5",
+					results: [{ test: { key: "model-check" }, outcome: "pass" }],
+				}),
+			],
+			{ env: { MAINWORTHY_TOKEN: token } },
+		);
+		expect(sent.code).toBe(0);
+		expect(Receipt.parse(JSON.parse(sent.stdout)).counts.total).toBe(1);
+		const read = await run(["get", "T-1", "--project", "scratch", "--json"]);
+		expect(read.code).toBe(0);
+		expect(JSON.parse(read.stdout)[0].last).toMatchObject([{ by: "model-runner", model: "claude-opus-5-5" }]);
+	});
+});
+
 test("report prints a conflict for a CI correction whose result was already corrected", async () => {
 	await withInstance(async ({ client, cli }) => {
 		const { token } = Token.parse(

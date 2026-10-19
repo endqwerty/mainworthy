@@ -6,6 +6,29 @@ import Testing
 
 @Suite("Runs against a real Mainworthy", .enabled(if: Live.isRunning, "needs `bun scripts/ios.ts test`"))
 struct RunsLiveTests {
+	@Test("the demo decodes the model beside agent slot and test producers")
+	func modelAttribution() async throws {
+		var request = URLRequest(url: Live.instance.url.appending(path: "/test/project"))
+		request.httpMethod = "POST"
+		request.setValue("Bearer \(Live.token)", forHTTPHeaderField: "Authorization")
+		request.httpBody = Data(#"{"kind":"demo"}"#.utf8)
+		let (data, _) = try await URLSession.shared.data(for: request)
+		struct Reply: Decodable {
+			struct Made: Decodable { let project: String }
+			let result: Made
+		}
+		let key = try JSONDecoder().decode(Reply.self, from: data).result.project
+		let project = try await Live.signedIn(as: Live.owner).project(key)
+		let run = try #require(try await project.runs().runs.first { $0.name == "Agent checkout check" })
+		let slots = try await project.slots(of: run.ref)
+		let fills = try #require(slots.first).fills
+		#expect(fills.filter { $0.method == .agent }.map(\.model) == ["claude-opus-5-5", "claude-opus-5-5"])
+		#expect(fills.first { $0.method == .person }?.model == nil)
+		let detail = try #require(try await project.test("T-2"))
+		#expect(detail.results.first?.by == "reviewer")
+		#expect(detail.results.first?.model == "claude-opus-5-5")
+	}
+
 	@Test("a planned run reads its pinned cases and corrects a person's earlier result")
 	func reports() async throws {
 		let project = try await Live.signedIn().project(try await Live.project())

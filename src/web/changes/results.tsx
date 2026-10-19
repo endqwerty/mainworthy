@@ -12,6 +12,7 @@ import { EmptyState, SectionHeading } from "../ui/index.tsx";
 export const standingOf = (key: string): ResultStanding | null => (isResultStanding(key) ? key : null);
 
 export const Counted = z.object({
+	model: z.string().nullable(),
 	result: z.number(),
 	test: z.string(),
 	name: z.string(),
@@ -147,6 +148,7 @@ function ResultRow({ row, project }: { row: Counted; project: string }) {
 		row.attempt > 1 ? `attempt ${row.attempt}` : null,
 		duration(row.durationMs),
 		row.by,
+		row.model,
 	].filter((fact): fact is string => Boolean(fact));
 	const build = webUrl(row.build);
 	return (

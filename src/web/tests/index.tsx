@@ -20,6 +20,7 @@ const Test = z.object({
 	quarantine: Quarantine.nullable(),
 });
 const Result = z.object({
+	model: z.string().nullable(),
 	id: z.number(),
 	outcome: z.string(),
 	by: z.string(),
@@ -195,6 +196,7 @@ function TestDetail({ testRef }: { testRef: string }) {
 							result.attempt > 1 ? `attempt ${result.attempt}` : null,
 							duration(result.durationMs),
 							result.by,
+							result.model,
 							age(result.at),
 						].filter((fact): fact is string => Boolean(fact));
 						return (

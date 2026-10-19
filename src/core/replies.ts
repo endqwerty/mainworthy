@@ -90,6 +90,7 @@ const CaseSummary = z.looseObject({
 	open: whole,
 });
 const Result = z.looseObject({
+	model: nullableText,
 	id: whole,
 	test: nullableText,
 	name: nullableText,
@@ -113,6 +114,7 @@ const Result = z.looseObject({
 });
 /** A test as a commit's gate counted it: `find --in results`. */
 const CountedResult = z.looseObject({
+	model: nullableText,
 	result: whole,
 	test: text.regex(/^T-\d+$/),
 	name: text,
@@ -269,6 +271,7 @@ const Slot = z.looseObject({
 		z.looseObject({
 			result: whole,
 			by: text,
+			model: nullableText,
 			method: text,
 			outcome: text,
 			admitted: text,

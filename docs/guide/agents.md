@@ -156,8 +156,9 @@ an outline line, such as `Remove the coupon > Total shows $100.00`. The claim ke
 for acceptance. Through the API, use `decide` with `answer: { is: "accept", apply: true }` to turn
 the suggestion into a proposal.
 
-Mainworthy records and shows an agent's result. A failure can raise a question,
-but the result does not move a commit's gate. The next section explains why.
+Mainworthy records and shows an agent's result. Include [the model in the report](#name-the-model-behind-results)
+to distinguish sessions from the same agent. A failure can raise a question, but the result does not move a commit's gate.
+[Why an agent's report never moves a gate](#why-an-agents-report-never-moves-a-gate) explains the counting rule.
 
 The reply to `decide` gives the status of the agent's answer. `decided` means
 the answer counts. `advised` means Mainworthy records the answer as advice and
@@ -193,6 +194,27 @@ Only an open planned run can be taken. Closing the run ends its leases.
 
 The MCP tool list has ten tools. `gate` remains an HTTP operation and CLI command.
 MCP clients that called the former `gate` tool must use `get` as described above.
+
+## Name the model behind results
+
+Send `model` once on the `report`, alongside `run` or `target` and `results`:
+
+```json
+{
+	"run": "R-4",
+	"model": "claude-opus-5-5",
+	"results": [{ "test": { "case": "C-1" }, "outcome": "pass" }]
+}
+```
+
+The HTTP API, CLI JSON input and MCP `report` tool accept the same field.
+The name is optional, trimmed, and must contain 1 to 120 characters after trimming.
+Only an agent token can name a model. A person's or pipeline's report with `model` is refused with
+"Only an agent's report can name a model."
+
+Each result keeps the report's model beside its producer. Later reports from the same token can name a different model.
+An omitted model reads as `null`, meaning the agent did not say which model it used.
+The model is the agent's attribution, not a server-verified identity. It does not change what a gate counts.
 
 ## Why an agent's report never moves a gate
 
