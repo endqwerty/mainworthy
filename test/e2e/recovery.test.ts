@@ -3,6 +3,248 @@ import { z } from "zod";
 import { Slot } from "../../src/web/runs/models.ts";
 import { browserAvailable, eventually, launchBrowser, openPage, startServer } from "./support.ts";
 
+test.skipIf(!browserAvailable)(
+	"an unreadable operation reply shows a reload message instead of an empty suite",
+	async () => {
+		const server = await startServer();
+		let browser: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			browser = await openPage(server, {
+				path: "/p/scratch/suite",
+				setup: async (page) => {
+					await page.route("**/api/p/scratch/find", (route) =>
+						route.fulfill({ json: { ok: true, result: { items: [], cursor: null }, seq: null } }),
+					);
+				},
+			});
+			const { page } = browser;
+			const text = await eventually(
+				() => page.getByTestId("case-list").innerText(),
+				(text) => text.includes("The server answered something this page cannot read; reload."),
+			);
+			expect(text).toContain("The server answered something this page cannot read; reload.");
+			expect(text).not.toContain("No cases yet.");
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser?.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"an unreadable save reply keeps its command so retry does not create a second case",
+	async () => {
+		const server = await startServer();
+		const browser = await openPage(server);
+		try {
+			const { page } = browser;
+			const commands: string[] = [];
+			const lookups: string[] = [];
+			await browser.context.route("**/api/p/scratch/propose", async (route) => {
+				commands.push(z.object({ cmd: z.string() }).parse(route.request().postDataJSON()).cmd);
+				if (commands.length === 1) {
+					const response = await route.fetch();
+					await route.fulfill({ response, json: { ok: true, result: {}, seq: null } });
+				} else await route.continue();
+			});
+			await browser.context.route("**/api/p/scratch/command", async (route) => {
+				lookups.push(z.object({ cmd: z.string() }).parse(route.request().postDataJSON()).cmd);
+				await route.continue();
+			});
+			await page.keyboard.press("c");
+			await page.keyboard.type("Recorded once despite unreadable reply");
+			await page.keyboard.press("Enter");
+			await page.keyboard.type("Read the saved case");
+			await page.keyboard.press("Escape");
+			await page.waitForFunction(() => document.getElementById("stat")?.textContent?.includes("reload."));
+			expect((await server.api("find", { in: "cases" })).count).toBe(1);
+			await page.keyboard.press("Control+Enter");
+			await page.waitForURL("**/suite/c/*");
+			expect((await server.api("find", { in: "cases" })).count).toBe(1);
+			expect(page.url()).toEndWith("/suite/c/1");
+			expect(commands).toHaveLength(1);
+			expect(lookups).toEqual(commands);
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"an unreadable settings list shows the reload message",
+	async () => {
+		const server = await startServer();
+		const browser = await openPage(server, {
+			path: "/p/scratch/settings",
+			setup: async (page) => {
+				await page.route("**/api/credential", (route) => {
+					if (route.request().postDataJSON().do !== "list") return route.continue();
+					return route.fulfill({ json: { ok: true, result: null } });
+				});
+			},
+		});
+		try {
+			await browser.page.getByRole("option", { name: "Your sign-in", exact: true }).click();
+			await browser.page
+				.getByRole("status")
+				.filter({ hasText: "The server answered something this page cannot read; reload." })
+				.waitFor({ timeout: 5000 });
+			expect(await browser.page.locator("#detail").innerText()).not.toContain("Check the connection");
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+for (const reply of ["missing gate", "unreadable", "lost", "unsent"]) {
+	test.skipIf(!browserAvailable)(
+		`a ${reply} report reply reconciles its command before another result`,
+		async () => {
+			const server = await startServer();
+			let browser: Awaited<ReturnType<typeof openPage>> | null = null;
+			try {
+				await server.api("propose", { edits: [{ op: "create", outline: "Review case\n  Open > Ready" }] });
+				const plan = await server.api("plan", { name: "Review run", select: {} });
+				browser = await openPage(server, { path: `/p/scratch/runs/${plan.run.slice(2)}` });
+				const { page } = browser;
+				const commands: string[] = [];
+				const lookups: string[] = [];
+				let readable = false;
+				await page.waitForSelector('[data-run-document="C-1"][data-active="true"][data-ready="true"]');
+				await browser.context.route("**/api/p/scratch/report", async (route) => {
+					commands.push(z.object({ cmd: z.string() }).parse(route.request().postDataJSON()).cmd);
+					if (reply === "unsent") return commands.length === 1 ? route.abort() : route.continue();
+					const response = await route.fetch();
+					if (reply === "lost") return route.abort();
+					const envelope = z
+						.object({ result: z.record(z.string(), z.unknown()) })
+						.passthrough()
+						.parse(await response.json());
+					if (reply === "missing gate") delete envelope.result.gate;
+					else envelope.result = {};
+					await route.fulfill({ response, json: envelope });
+				});
+				await browser.context.route("**/api/p/scratch/command", async (route) => {
+					lookups.push(z.object({ cmd: z.string() }).parse(route.request().postDataJSON()).cmd);
+					if (!readable) return route.abort();
+					await route.continue();
+				});
+				await page.keyboard.press("p");
+				await eventually(
+					() => page.locator("#stat").innerText(),
+					(text) => text.includes("Its note is kept."),
+				);
+				const status = await page.locator("#stat").innerText();
+				expect(status).toContain("C-1's outcome is unknown");
+				expect(status).not.toContain("was not recorded");
+				if (reply !== "lost" && reply !== "unsent") expect(status).toContain("reload.");
+				else expect(status).toContain("Failed to fetch. Its note is kept.");
+				expect(
+					(await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "result"),
+				).toHaveLength(reply === "unsent" ? 0 : 1);
+				readable = true;
+				await page.keyboard.press("p");
+				await eventually(
+					() => page.locator("#stat").innerText(),
+					(text) => text.includes("C-1 pass recorded"),
+				);
+				expect(commands).toHaveLength(reply === "unsent" ? 2 : 1);
+				expect(new Set([...commands, ...lookups]).size).toBe(1);
+				expect(lookups).toHaveLength(2);
+				expect(
+					(await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "result"),
+				).toHaveLength(1);
+				expect(browser.errors).toEqual(
+					Array.from(
+						{ length: reply === "lost" || reply === "unsent" ? 2 : 1 },
+						() => "Failed to load resource: net::ERR_FAILED",
+					),
+				);
+			} finally {
+				await browser?.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+}
+
+test.skipIf(!browserAvailable)(
+	"a refused report replay releases the slot and keeps its note for a fresh result",
+	async () => {
+		const server = await startServer();
+		let browser: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await server.api("propose", {
+				edits: [1, 2].map((n) => ({ op: "create", outline: `Replay case ${n}\n  Open > Ready` })),
+			});
+			const plan = await server.api("plan", { name: "Refused replay", select: {} });
+			browser = await openPage(server, { path: `/p/scratch/runs/${plan.run.slice(2)}` });
+			const { page } = browser;
+			page.setDefaultTimeout(5000);
+			const commands: string[] = [];
+			let readable = false;
+			await page.waitForSelector('[data-run-document="C-1"][data-active="true"][data-ready="true"]');
+			await browser.context.route("**/api/p/scratch/report", async (route) => {
+				commands.push(z.object({ cmd: z.string() }).parse(route.request().postDataJSON()).cmd);
+				if (commands.length === 1) return route.abort();
+				if (commands.length === 2)
+					return route.fulfill({
+						status: 409,
+						json: { ok: false, error: { code: "conflict", message: "The result needs a fresh request" } },
+					});
+				await route.continue();
+			});
+			await browser.context.route("**/api/p/scratch/command", (route) => (readable ? route.continue() : route.abort()));
+			await page.keyboard.press("f");
+			await page.keyboard.type("wrong total");
+			await page.keyboard.press("Enter");
+			await eventually(
+				() => page.locator("#stat").innerText(),
+				(text) => text.includes("C-1's outcome is unknown.") && text.includes("Its note is kept."),
+			);
+			await page.getByRole("button", { name: "Slot 1: C-1, missing", exact: true }).click();
+			readable = true;
+			await page.keyboard.press("p");
+			const refused = await eventually(
+				() => page.locator("#stat").innerText(),
+				(text) => text.includes("C-1 was not recorded: The result needs a fresh request."),
+			);
+			expect(refused).toContain("Its note is kept.");
+			expect(commands).toHaveLength(2);
+			expect(commands[1]).toBe(commands[0]);
+			expect((await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "result")).toEqual(
+				[],
+			);
+			expect(await page.getByRole("textbox", { name: "Result note" }).inputValue()).toBe("wrong total");
+			await page.keyboard.press("p");
+			await eventually(
+				() => page.locator("#stat").innerText(),
+				(text) => text.includes("C-1 pass recorded"),
+			);
+			expect(commands).toHaveLength(3);
+			expect(commands[2]).not.toBe(commands[0]);
+			const slots = Slot.array().parse((await server.api("find", { in: "slots", run: plan.run })).items);
+			expect(slots[0]).toMatchObject({ case: "C-1", fills: [{ outcome: "pass", note: "wrong total" }] });
+			expect(
+				(await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "result"),
+			).toHaveLength(1);
+		} finally {
+			await browser?.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
 for (const first of ["fail", "pass"]) {
 	test.skipIf(!browserAvailable)(
 		`a late ${first} result failure keeps the next slot's note, cursor and caret`,

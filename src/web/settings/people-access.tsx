@@ -42,7 +42,7 @@ export function PersonAccess({ actor }: { actor: string }) {
 				setMessage(
 					saidOfWrite(
 						error,
-						"No answer came back, so the page cannot tell whether the credential was removed. The lists are read again.",
+						"No readable answer came back, so the page cannot tell whether the credential was removed. The lists are read again.",
 					),
 				);
 			})

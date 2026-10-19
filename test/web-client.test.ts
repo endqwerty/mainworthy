@@ -4,7 +4,7 @@
 import { expect, spyOn, test } from "bun:test";
 import { INSTANCE_OPS } from "../src/core/api.ts";
 import { OP_LIST } from "../src/server/ops/index.ts";
-import { ApiError, call, exchange, session, unauthenticatedEvent } from "../src/web/lib/api.ts";
+import { ApiError, call, exchange, session, UnreadableReply, unauthenticatedEvent } from "../src/web/lib/api.ts";
 import {
 	deviceClearKey,
 	deviceSession,
@@ -17,6 +17,28 @@ import { signOut } from "../src/web/lib/signin.ts";
 test("the client's list of instance operations is the registry's, so each is sent to the path that serves it", () => {
 	const registered: string[] = OP_LIST.filter((op) => op.scope === "instance").map((op) => op.name);
 	expect<string[]>([...INSTANCE_OPS].sort()).toEqual(registered.sort());
+});
+
+test("call rejects replies that do not match the operation before returning typed data", async () => {
+	let result: unknown = null;
+	const server = Bun.serve({
+		hostname: "127.0.0.1",
+		port: 0,
+		fetch: () => Response.json({ ok: true, result, seq: null }),
+	});
+	try {
+		const options = { url: server.url.origin, project: "scratch" };
+		for (result of [null, { items: [], cursor: null }, { items: [], cursor: null, counts: { failure: "zero" } }]) {
+			const reply = await call("inbox", {}, options).catch((error: unknown) => error);
+			expect(reply).toBeInstanceOf(UnreadableReply);
+			expect(reply).not.toBeInstanceOf(ApiError);
+			expect(reply).toMatchObject({ message: "The server answered something this page cannot read; reload." });
+		}
+		result = { items: [], cursor: null, counts: { failure: 0 } };
+		expect(await call("inbox", {}, options)).toEqual({ items: [], cursor: null, counts: { failure: 0 } });
+	} finally {
+		await server.stop(true);
+	}
 });
 
 /** Only resolves relative URLs for Bun; the request and delayed reply cross a real HTTP connection. */
@@ -175,19 +197,28 @@ test("an unsigned login refusal keeps its server error without signing out", () 
 	}));
 
 test("call sends an instance operation to /api/<op> and a project's operation to /api/p/<project>/<op>", async () => {
-	// A listener that answers with the path it was asked for, in the envelope an operation replies with.
+	const paths: string[] = [];
 	const echo = Bun.serve({
 		hostname: "127.0.0.1",
 		port: 0,
-		fetch: (req) => Response.json({ ok: true, result: new URL(req.url).pathname, seq: null }),
+		fetch: (req) => {
+			const path = new URL(req.url).pathname;
+			paths.push(path);
+			return Response.json({
+				ok: true,
+				result: path.endsWith("/inbox") ? { items: [], counts: {}, cursor: null } : [],
+				seq: null,
+			});
+		},
 	});
 	try {
 		const options = { url: `http://127.0.0.1:${echo.port}`, project: "web", token: "not-read-by-the-echo" };
-		expect<unknown>(await call("session", { do: "list" }, options)).toBe("/api/session");
-		expect<unknown>(await call("credential", { do: "list" }, options)).toBe("/api/credential");
-		expect<unknown>(await call("invitation", { do: "list" }, options)).toBe("/api/invitation");
-		expect<unknown>(await call("admin", { do: "token.list" }, options)).toBe("/api/admin");
-		expect<unknown>(await call("inbox", {}, options)).toBe("/api/p/web/inbox");
+		expect(await call("session", { do: "list" }, options)).toEqual([]);
+		expect(await call("credential", { do: "list" }, options)).toEqual([]);
+		expect(await call("invitation", { do: "list" }, options)).toEqual([]);
+		expect(await call("admin", { do: "token.list" }, options)).toEqual([]);
+		expect(await call("inbox", {}, options)).toEqual({ items: [], counts: {}, cursor: null });
+		expect(paths).toEqual(["/api/session", "/api/credential", "/api/invitation", "/api/admin", "/api/p/web/inbox"]);
 	} finally {
 		await echo.stop(true);
 	}

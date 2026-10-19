@@ -57,7 +57,7 @@ export function ForgetPerson({
 			setMessage(
 				saidOfWrite(
 					error,
-					"No answer came back, so the page cannot tell whether the person was forgotten. The lists are read again. Retrying this confirmation asks about the same request.",
+					"No readable answer came back, so the page cannot tell whether the person was forgotten. The lists are read again. Retrying this confirmation asks about the same request.",
 				),
 			);
 		} finally {
@@ -65,7 +65,7 @@ export function ForgetPerson({
 				const stillListed = await changed(target.name);
 				if (uncertain && stillListed === false) {
 					setTarget(null);
-					setMessage("No answer came back. The person is no longer listed. The confirmation was cleared.");
+					setMessage("No readable answer came back. The person is no longer listed. The confirmation was cleared.");
 				}
 			}
 			setBusy(false);

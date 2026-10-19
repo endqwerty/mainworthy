@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import type { Api } from "../../core/api.ts";
 import { ATTACHMENT_LIMITS, AttachmentInput, attachmentBytes } from "../../core/attachments.ts";
 import type { ReportReceipt } from "../../core/ops.ts";
-import { call } from "../lib/api.ts";
+import { REPLIES } from "../../core/replies.ts";
+import { ApiError, call, UnreadableReply } from "../lib/api.ts";
 import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
 import { deviceKey, deviceSession, sessionCurrent } from "../lib/device.ts";
 import { randomId } from "../lib/ids.ts";
@@ -148,6 +149,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 	const noteRef = useRef<HTMLInputElement>(null);
 	const [last, setLast] = useState<LastResult | null>(null);
 	const writes = useRef(new Map<number, Promise<ReportReceipt>>());
+	const uncertain = useRef(new Map<number, { message: string; retry: () => Promise<ReportReceipt> }>());
 	const withdrawn = useRef(new Set<Promise<ReportReceipt>>());
 	const latest = useRef(new Map<number, Fill>());
 	/** The step each result of this page was recorded at, by the id it had when sent: the cache holds that copy until the slots are read again. */
@@ -221,7 +223,9 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			(!bodyMatches || (currentBody.success && currentBody.data.methods.includes(method))),
 	);
 	const canRecord = Boolean(
-		current && !external(current) && run?.state === "open" && session.can.includes("produce") && admittedMethod,
+		current &&
+			session.can.includes("produce") &&
+			(uncertain.current.has(current.id) || (!external(current) && run?.state === "open" && admittedMethod)),
 	);
 	const allFilled = slots.length > 0 && !slots.some(missing) && !slotsRead.hasNextPage;
 	useEffect(() => {
@@ -253,6 +257,19 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		restores: Fill | null = null,
 	): Promise<ReportReceipt> | null {
 		if (!slot || !sessionCurrent(owner) || !session.can.includes("produce")) return null;
+		const recovery = uncertain.current.get(slot.id);
+		if (recovery) {
+			const recoveringSlot = slot;
+			const request = recovery.retry();
+			void request.catch((error: unknown) => {
+				if (sessionCurrent(owner))
+					setStatus(
+						uncertain.current.get(recoveringSlot.id)?.message ??
+							`${recoveringSlot.case} was not recorded: ${error instanceof Error ? error.message : "The request failed"}. Its note is kept.`,
+					);
+			});
+			return request;
+		}
 		if (run?.state !== "open") {
 			setStatus("This run is closed. No result was recorded; your note is kept.");
 			return null;
@@ -326,6 +343,8 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		};
 		const request = (async () => {
 			if (priorWrite) await priorWrite.catch(() => undefined);
+			const pending = uncertain.current.get(slot.id);
+			if (pending) await pending.retry();
 			if (!sessionCurrent(owner)) throw new Error("The session changed. Your note is kept.");
 			const cached = RunCase.safeParse(
 				queryClient.getQueryData<Api["get"]["reply"]>(queryKey({ project, op: "get", input: pinnedInput }))?.[0],
@@ -351,53 +370,90 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 				previous && previous.result > 0 && (!recent || previous.at > recent.at)
 					? previous.result
 					: (recent?.result ?? previous?.result);
-			const receipt = await call(
-				"report",
-				{
-					run: runRef,
-					cmd: randomId(),
-					results: [
-						{
-							...resultInput,
-							...(files.length
-								? {
-										attachments: files.map(({ key: _key, ...file }) => ({
-											...file,
-											...(atStep ? { at: atStep } : {}),
-										})),
-									}
-								: {}),
-							...(atStep ? { steps: [{ step: atStep, outcome: "fail" }] } : {}),
-							...(corrects !== undefined && corrects > 0 ? { corrects } : {}),
-						},
-					],
-				},
-				{ project, owner },
-			);
-			if (!sessionCurrent(owner)) throw new Error("The session changed. Your note is kept.");
-			if (receipt.rejected.length || receipt.declined?.length || !receipt.results[0])
-				throw new Error(receipt.rejected[0]?.reason ?? receipt.declined?.[0]?.reason ?? "The result was not recorded.");
-			const saved = { ...fill, result: receipt.results[0], atStep: atStep ?? null };
-			latest.current.set(slot.id, saved);
-			if (files.length) {
-				for (const file of files) consumedFiles.current.delete(file);
-				pendingFiles.current.set(
-					slot.id,
-					(pendingFiles.current.get(slot.id) ?? []).filter((file) => !files.includes(file)),
+			const cmd = randomId();
+			const input: Api["report"]["input"] = {
+				run: runRef,
+				cmd,
+				results: [
+					{
+						...resultInput,
+						...(files.length
+							? {
+									attachments: files.map(({ key: _key, ...file }) => ({
+										...file,
+										...(atStep ? { at: atStep } : {}),
+									})),
+								}
+							: {}),
+						...(atStep ? { steps: [{ step: atStep, outcome: "fail" }] } : {}),
+						...(corrects !== undefined && corrects > 0 ? { corrects } : {}),
+					},
+				],
+			};
+			const complete = (receipt: ReportReceipt): ReportReceipt => {
+				if (!sessionCurrent(owner)) throw new Error("The session changed. Your note is kept.");
+				uncertain.current.delete(slot.id);
+				if (receipt.rejected.length || receipt.declined?.length || !receipt.results[0])
+					throw new Error(
+						receipt.rejected[0]?.reason ?? receipt.declined?.[0]?.reason ?? "The result was not recorded.",
+					);
+				const saved = { ...fill, result: receipt.results[0], atStep: atStep ?? null };
+				latest.current.set(slot.id, saved);
+				if (files.length) {
+					for (const file of files) consumedFiles.current.delete(file);
+					pendingFiles.current.set(
+						slot.id,
+						(pendingFiles.current.get(slot.id) ?? []).filter((file) => !files.includes(file)),
+					);
+					refreshFiles((value) => value + 1);
+				}
+				// The server has it: the device's copy of the note has done its work. A note typed for this slot while
+				// the request was on its way is newer than what was recorded, and stays.
+				if (storedNote(`${notePrefix}${slot.id}`) === text) setNoteOf(slot.id, "");
+				if (!restores) clearStep(slot.id, marked);
+				if (queued.current.get(slot.id) === fill.result)
+					setLocal((value) =>
+						new Map(value).set(slot.id, { fill: saved, questions: receipt.questions, pending: false }),
+					);
+				setStatus(
+					`${slot.case} ${outcome} recorded on pinned version ${slot.version}${receipt.questions[0] ? ` · ${receipt.questions[0].q}: ${receipt.questions[0].how}` : ""}.`,
 				);
-				refreshFiles((value) => value + 1);
+				void invalidateProject(project);
+				return receipt;
+			};
+			let receipt: ReportReceipt;
+			try {
+				receipt = await call("report", input, { project, owner });
+			} catch (error) {
+				if (error instanceof ApiError) throw error;
+				const reason = error instanceof Error ? error.message : "The reply could not be read.";
+				const message = `${slot.case}'s outcome is unknown. ${reason}${/[.!?]$/.test(reason) ? "" : "."} Its note is kept. Press a result key on this slot to check the same request before recording another result.`;
+				let checking: Promise<ReportReceipt> | null = null;
+				const retry = (): Promise<ReportReceipt> => {
+					if (checking) return checking;
+					checking = (async () => {
+						const fate = await call("command", { cmd }, { project, owner });
+						if (fate.state === "begun") throw new Error("The result is still being recorded.");
+						if (fate.state === "none")
+							return complete(
+								await call("report", input, { project, owner }).catch((error: unknown) => {
+									if (error instanceof ApiError) uncertain.current.delete(slot.id);
+									throw error;
+								}),
+							);
+						const parsed = REPLIES.report.safeParse(fate.reply);
+						if (fate.op !== "report" || !parsed.success) throw new UnreadableReply();
+						return complete(parsed.data);
+					})().finally(() => {
+						checking = null;
+					});
+					return checking;
+				};
+				uncertain.current.set(slot.id, { message, retry });
+				setStatus(`${slot.case}'s outcome is unknown. Checking the original request; your note is kept.`);
+				return retry();
 			}
-			// The server has it: the device's copy of the note has done its work. A note typed for this slot while
-			// the request was on its way is newer than what was recorded, and stays.
-			if (storedNote(`${notePrefix}${slot.id}`) === text) setNoteOf(slot.id, "");
-			if (!restores) clearStep(slot.id, marked);
-			if (queued.current.get(slot.id) === fill.result)
-				setLocal((value) => new Map(value).set(slot.id, { fill: saved, questions: receipt.questions, pending: false }));
-			setStatus(
-				`${slot.case} ${outcome} recorded on pinned version ${slot.version}${receipt.questions[0] ? ` · ${receipt.questions[0].q}: ${receipt.questions[0].how}` : ""}.`,
-			);
-			void invalidateProject(project);
-			return receipt;
+			return complete(receipt);
 		})();
 		writes.current.set(slot.id, request);
 		void request.catch((error: unknown) => {
@@ -426,7 +482,8 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			setLast((value) => (value?.ready === request ? null : value));
 			// The person may already be typing another note. Restore the slot without changing their selection or input.
 			setStatus(
-				`${slot.case} was not recorded: ${error instanceof Error ? error.message : "The request failed"}. Its note is kept. Return to the slot to retry.`,
+				uncertain.current.get(slot.id)?.message ??
+					`${slot.case} was not recorded: ${error instanceof Error ? error.message : "The request failed"}. Its note is kept. Return to the slot to retry.`,
 			);
 			void invalidateProject(project);
 		});
@@ -440,11 +497,20 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 	}
 	function startFail(): void {
 		if (!current || !canRecord) return;
+		if (uncertain.current.has(current.id)) {
+			record("fail");
+			return;
+		}
 		setNoting(current);
 		noteRef.current?.focus();
 	}
 	function undo(): void {
 		if (!last || withdrawn.current.has(last.ready)) return;
+		const recovery = uncertain.current.get(last.slot.id);
+		if (recovery) {
+			setStatus(recovery.message);
+			return;
+		}
 		setCursor(last.slot.id);
 		setNoting(null);
 		noteRef.current?.blur();

@@ -85,9 +85,19 @@ test.skipIf(!browserAvailable)(
 			// A second device.
 			await laptop.remove();
 			await addAuthenticator(browser);
+			await page.route("**/api/credential", async (route) => {
+				if (route.request().postDataJSON().do !== "passkey.add") return route.continue();
+				const response = await route.fetch();
+				await route.fulfill({ response, json: { ok: true, result: null } });
+			});
 			await page.locator("#passkey-label").fill("Security key");
 			await page.keyboard.press("Enter");
+			await page
+				.getByRole("status")
+				.filter({ hasText: "The server answered something this page cannot read; reload." })
+				.waitFor();
 			await rows.filter({ hasText: "Security key" }).waitFor();
+			await page.unroute("**/api/credential");
 			expect(await rows.count()).toBe(2);
 			expect(await credentials()).toMatchObject([{ label: THIS_BROWSER }, { label: "Security key" }]);
 			// With two, either may go.

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { start } from "../../src/app/start.ts";
 import type { Api, OpName } from "../../src/core/api.ts";
+import { ANSWER_KEYS, type Kind } from "../../src/core/kinds.ts";
 import { defaultConfig } from "../../src/server/kernel/app.ts";
 import { jiraPort } from "../../src/server/trackers/jira.ts";
 import ui from "../../src/web/index.html";
@@ -624,7 +625,7 @@ check(
 	30000,
 );
 
-for (const kind of ["failure", "finding", "map", "signoff", "adopt"])
+for (const kind of ["failure", "finding", "map", "signoff", "adopt"] satisfies Kind[])
 	check(
 		`R4B-1 unread ${kind} evidence refuses keys and buttons`,
 		async () => {
@@ -646,7 +647,7 @@ for (const kind of ["failure", "finding", "map", "signoff", "adopt"])
 							})
 							.parse(reply.json);
 						const first = raw.result.items[0];
-						if (first) raw.result.items = [{ ...first, kind, evidence: {}, answers: undefined }];
+						if (first) raw.result.items = [{ ...first, kind, evidence: {}, answers: Object.values(ANSWER_KEYS[kind]) }];
 						await answer(route, { json: raw });
 					});
 				},

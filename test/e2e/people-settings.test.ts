@@ -169,7 +169,9 @@ test.skipIf(!browserAvailable)(
 			await page.getByRole("button", { name: "Forget forget-lost-reply", exact: true }).click();
 			await page
 				.getByRole("status")
-				.filter({ hasText: "No answer came back. The person is no longer listed. The confirmation was cleared." })
+				.filter({
+					hasText: "No readable answer came back. The person is no longer listed. The confirmation was cleared.",
+				})
 				.waitFor();
 			expect(await page.getByLabel("Person to forget", { exact: true }).inputValue()).toBe("");
 			expect(await rows(page).filter({ hasText: "forget-lost-reply" }).count()).toBe(0);
@@ -337,7 +339,7 @@ test.skipIf(!browserAvailable)(
 				.filter({ hasText: "the page cannot tell whether the password was changed" });
 			await lost.waitFor();
 			expect(await lost.innerText()).toBe(
-				"No answer came back, so the page cannot tell whether the password was changed. It may or may not have been: sign in with the new password to find out. The list below is read again.",
+				"No readable answer came back, so the page cannot tell whether the password was changed. It may or may not have been: sign in with the new password to find out. The list below is read again.",
 			);
 			await reread;
 			expect(await page.locator("#password-next").inputValue()).toBe(NEW);
@@ -540,7 +542,7 @@ test.skipIf(!browserAvailable)(
 			await page.locator("#invite-name").press("Enter");
 			await page
 				.getByRole("status")
-				.filter({ hasText: "No answer came back, so the page cannot tell whether mia was invited." })
+				.filter({ hasText: "No readable answer came back, so the page cannot tell whether mia was invited." })
 				.waitFor();
 			await rows(page).filter({ hasText: "mia" }).filter({ hasText: "to join" }).waitFor();
 			expect(await link.count()).toBe(0);

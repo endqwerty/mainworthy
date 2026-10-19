@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { TotpEnrolment } from "../../core/people.ts";
 import { ApiError } from "../lib/api.ts";
 import { beginTotp, confirmTotp } from "../lib/people.ts";
+import { saidOfWrite } from "./list.ts";
 
 type Setup = { kind: "idle" } | { kind: "enrol"; enrolment: TotpEnrolment } | { kind: "recovery"; codes: string[] };
 
@@ -12,9 +13,10 @@ export function Authenticator({ enrolled, onChanged }: { enrolled: boolean; onCh
 	const [problem, setProblem] = useState("");
 	const failed = (error: unknown): void => {
 		setProblem(
-			error instanceof ApiError
-				? error.message
-				: "No answer came back. The page cannot tell whether enrolment completed. Read the credential list again before beginning another enrolment. Recovery codes cannot be shown again.",
+			saidOfWrite(
+				error,
+				"No readable answer came back. The page cannot tell whether enrolment completed. Read the credential list again before beginning another enrolment. Recovery codes cannot be shown again.",
+			),
 		);
 		if (!(error instanceof ApiError)) void onChanged();
 	};
