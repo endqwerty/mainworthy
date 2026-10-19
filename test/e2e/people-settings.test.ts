@@ -70,6 +70,8 @@ test.skipIf(!browserAvailable)(
 			const trigger = page.getByRole("button", { name: "Forget this person", exact: true });
 			expect(await trigger.isDisabled()).toBe(true);
 			await page.getByLabel("Person to forget", { exact: true }).selectOption("forget-web");
+			await eventually(() => trigger.isEnabled(), Boolean);
+			await trigger.scrollIntoViewIfNeeded();
 			await trigger.click();
 			await page.getByText("text the person typed in cases and notes stay", { exact: false }).waitFor();
 			expect(await page.locator("#detail").innerText()).toContain("authenticator secrets and recovery-code hashes");
@@ -155,7 +157,10 @@ test.skipIf(!browserAvailable)(
 			expect(tokenNumber).toMatch(/^token \d+$/);
 			const refreshed = page.locator(".settings-token").filter({ hasText: `${tokenNumber} ·` });
 			await page.getByLabel("Person to forget", { exact: true }).selectOption("forget-lost-reply");
-			await page.getByRole("button", { name: "Forget this person", exact: true }).click();
+			const trigger = page.getByRole("button", { name: "Forget this person", exact: true });
+			await eventually(() => trigger.isEnabled(), Boolean);
+			await trigger.scrollIntoViewIfNeeded();
+			await trigger.click();
 			await page.route("**/api/admin", async (route) => {
 				if (route.request().postDataJSON().do !== "actor.forget") return route.continue();
 				await route.fetch();
@@ -200,9 +205,12 @@ test.skipIf(!browserAvailable)(
 			expect(await select.locator('option[value="forget-admin"]').innerText()).toContain("you cannot forget yourself");
 			expect(await select.locator('option[value="robin"]').isDisabled()).toBe(true);
 			expect(await select.locator('option[value="robin"]').innerText()).toContain("current owner");
-			expect(await page.getByRole("button", { name: "Forget this person", exact: true }).isDisabled()).toBe(true);
+			const trigger = page.getByRole("button", { name: "Forget this person", exact: true });
+			expect(await trigger.isDisabled()).toBe(true);
 			await select.selectOption("forget-phone");
-			await page.getByRole("button", { name: "Forget this person", exact: true }).click();
+			await eventually(() => trigger.isEnabled(), Boolean);
+			await trigger.scrollIntoViewIfNeeded();
+			await trigger.click();
 			const confirm = page.getByRole("button", { name: "Forget forget-phone", exact: true });
 			expect(await confirm.evaluate((element) => element === document.activeElement)).toBe(true);
 			const cancel = page.getByRole("button", { name: "Cancel", exact: true });
