@@ -10,6 +10,7 @@ cases reports the full count for those filters, independent of the page size.
 Suite keeps loading the rest of the list while new results and edits arrive,
 and shows live changes without a reload. A tag or move still being sent stays visible
 when live updates arrive. If the write fails, only that pending change disappears.
+A confirmed later move replaces an earlier pending move of the same case.
 
 ![Suite with cases, folders, tags, and the selected case](../ui/screenshots/suite-light.png)
 
@@ -65,6 +66,9 @@ The editor submits a changed draft when you leave or pause for 30 seconds.
 To submit sooner, press <kbd>Cmd</kbd> <kbd>Enter</kbd> on macOS or <kbd>Ctrl</kbd> <kbd>Enter</kbd> elsewhere.
 The policy then decides whether the proposal becomes current or waits for review.
 If you open another screen while a save finishes, its reply leaves you on the screen you chose.
+Returning to Suite shows the recorded case without its old draft row.
+Changing the filter while a new case saves keeps the filter and gives the case its address when the save finishes.
+A delayed save reply keeps any newer version the page has already received.
 There is no save button. Moving the caret or selecting text while a save finishes
 does not submit the text again. Text waiting for review stays in its proposal.
 When a new case proposal is accepted, its draft follows the case and version that acceptance recorded.

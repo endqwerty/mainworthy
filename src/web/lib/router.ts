@@ -6,6 +6,8 @@ const changed = "mainworthy:route";
 let entry: "initial" | "navigation" | "history" = "initial";
 export const routeEntry = (): typeof entry => entry;
 let navigation = Symbol();
+let revision = 0;
+const routeRevision = (): number => revision;
 /** A route's ownership, lost even when somebody leaves and returns to the same address. */
 export const navigationToken = (): symbol => navigation;
 /**
@@ -17,6 +19,7 @@ export const WENT = "mainworthy:went";
 function subscribe(listener: () => void): () => void {
 	const popped = () => {
 		entry = "history";
+		revision++;
 		navigation = Symbol();
 		listener();
 	};
@@ -57,7 +60,7 @@ export function readRoute(): Route {
 	return { project, screen, ref, folder: new URLSearchParams(location.search).get("folder") };
 }
 export function useRoute(): Route {
-	useSyncExternalStore(subscribe, navigationToken);
+	useSyncExternalStore(subscribe, routeRevision);
 	return readRoute();
 }
 export function routeUrl({
@@ -102,6 +105,7 @@ export function navigate(path: string, options: { replace?: boolean; seal?: bool
 	if (options.ifCurrent !== undefined && options.ifCurrent !== navigation) return;
 	if (path === location.pathname + location.search) {
 		if (!options.replace) {
+			revision++;
 			navigation = Symbol();
 			window.dispatchEvent(new Event(changed));
 			window.dispatchEvent(new Event(WENT));
@@ -110,7 +114,8 @@ export function navigate(path: string, options: { replace?: boolean; seal?: bool
 	}
 	if (options.seal !== false) window.dispatchEvent(new Event("mainworthy:leave"));
 	entry = "navigation";
-	navigation = Symbol();
+	revision++;
+	if (!options.replace || new URL(path, location.href).pathname !== location.pathname) navigation = Symbol();
 	if (options.replace) history.replaceState(null, "", path);
 	else history.pushState(null, "", path);
 	window.dispatchEvent(new Event(changed));

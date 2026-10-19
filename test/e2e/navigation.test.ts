@@ -73,6 +73,73 @@ test.skipIf(!browserAvailable)(
 	30_000,
 );
 
+for (const leaving of [false, true]) {
+	test.skipIf(!browserAvailable)(
+		leaving
+			? "a late new-case save removes its draft row from a remounted Suite"
+			: "a query-only filter change keeps the pending new-case save's navigation",
+		async () => {
+			const server = await startServer();
+			const h = await openPage(server, { path: "/p/scratch/suite" });
+			let release = () => {};
+			try {
+				const { page } = h;
+				await page.getByRole("textbox", { name: "Filter cases", exact: true }).waitFor();
+				await page.keyboard.press("c");
+				const title = page.getByRole("textbox", { name: "Case title", exact: true });
+				await title.fill("Searchable new case");
+				const pending = await holdReply(
+					page,
+					"**/api/p/scratch/get",
+					(input) => z.object({ version: z.literal(1) }).safeParse(input).success,
+				);
+				release = pending.release;
+				if (leaving) {
+					await page.keyboard.press("Control+k");
+					await page.getByRole("textbox", { name: "Jump to or run" }).fill("Reports");
+					await page.keyboard.press("Enter");
+					await eventually(
+						async () => new URL(page.url()).pathname,
+						(path) => path === "/p/scratch/reports",
+					);
+				} else await title.press("Control+Enter");
+				await pending.arrived;
+				if (leaving) {
+					await page.keyboard.type("gs");
+					await page.getByRole("textbox", { name: "Filter cases", exact: true }).waitFor();
+				} else {
+					await page.getByRole("textbox", { name: "Filter cases", exact: true }).fill("Searchable");
+					await eventually(
+						async () => new URL(page.url()).search,
+						(search) => search === "?text=Searchable",
+					);
+				}
+				release();
+				await page.locator("#stat").filter({ hasText: "Version 1, by you, just now" }).waitFor();
+				await page.getByRole("option").filter({ hasText: "C-1" }).waitFor();
+				const refs = await page.getByRole("option").locator(".id").allTextContents();
+				expect(refs).toEqual(["C-1"]);
+				expect(new URL(page.url()).pathname + new URL(page.url()).search).toBe(
+					leaving ? "/p/scratch/suite" : "/p/scratch/suite/c/1?text=Searchable",
+				);
+				expect(await page.evaluate(() => Object.keys(localStorage).filter((key) => key.includes(":draft:")))).toEqual(
+					[],
+				);
+				expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({
+					title: "Searchable new case",
+					version: 1,
+				});
+				expect(h.errors).toEqual([]);
+			} finally {
+				release();
+				await h.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+}
+
 test.skipIf(!browserAvailable)(
 	"a late run plan records its result without reopening the run",
 	async () => {
