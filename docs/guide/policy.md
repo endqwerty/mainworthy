@@ -23,7 +23,7 @@ The `when` column holds the conditions a clause tests. `always` matches every qu
 
 "Who answers" has one of these values:
 
-- A rule. Nobody is asked. The policy gives its answer at once and records it as a decision. A person with the `answer` capability can still overrule it.
+- A rule. The policy gives its answer at once and records it as a decision. If the answer does not apply to the question, a member is asked instead. A person with the `answer` capability can still overrule a rule's decision.
 - A member. A person with the `answer` capability.
 - An admin. A person with the `admin` capability.
 - A named role, written as `role:approver`. An actor with `answer` and that role on the project, subject to the clause's rules for agents.

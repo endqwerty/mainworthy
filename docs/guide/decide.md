@@ -92,6 +92,7 @@ A failure in a different environment, method, or job does not qualify.
 A newer passing attempt, a correction, a result judged a mistake, or a different base can end the excuse.
 Mainworthy updates the affected commits and planned runs immediately when that evidence changes, including reports recovered after a restart.
 Landing the change's head on trunk ends that commit's inherited excuse. Trunk answers apply, and unexplained failures are asked again.
+A rule cannot answer "Already failing on base" on trunk, even under a custom policy. The failure stays unexplained and waits for a member's answer.
 A skipped or blocked retry does not remove an earlier failure. An agent's report supplies no base evidence and receives no automatic inherited excuse.
 
 Adopting a policy that no longer allows automatic inheritance ends existing inherited excuses immediately.

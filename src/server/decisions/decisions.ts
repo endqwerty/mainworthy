@@ -422,6 +422,11 @@ function* settleByRuleSteps(
 	const parsed = ANSWERS[question.kind].safeParse(answer);
 	if (!parsed.success)
 		throw new Error(`clause ${clause} gives an answer that a ${question.kind} question does not accept`);
+	const facts = yield* factsNowSteps(ctx.db, question);
+	if (answerApplicabilityProblem(question.kind, facts, parsed.data)) {
+		setQuestionAsk(ctx, question, { ...json<Ask>(question.ask), who: "member" });
+		return { s: "open", question };
+	}
 	const policy = currentPolicy(ctx.db, ctx.project.id).version;
 	const signer: Signer = { by: ruleActor(ctx.db).id, clause, policy, reason: null };
 	try {
@@ -500,6 +505,14 @@ const reply = (q: QuestionRow, status: DecideReply["status"], more: Partial<Deci
 	...more,
 });
 
+function answerApplicabilityProblem(kind: Kind, facts: ReadonlySet<string>, given: AnyAnswer): string | null {
+	if (kind !== "failure") return null;
+	const allowed = applicableAnswers(kind, facts);
+	return allowed.includes(given.is)
+		? null
+		: `one of ${allowed.join(", ")}: \`${given.is}\` does not apply to this failure`;
+}
+
 /**
  * One actor's answer to one question. Policy decides what it is worth: it may settle the question, be recorded as
  * advice, or be refused. The same call at every strictness and from every surface.
@@ -547,11 +560,8 @@ export function* answerSteps(
 
 	const policy = currentPolicy(ctx.db, ctx.project.id);
 	const facts = yield* factsNowSteps(ctx.db, question);
-	if (question.kind === "failure" && !applicableAnswers(question.kind, facts).includes(given.is)) {
-		return reply(question, "invalid", {
-			needs: `one of ${applicableAnswers(question.kind, facts).join(", ")}: \`${given.is}\` does not apply to this failure`,
-		});
-	}
+	const problem = answerApplicabilityProblem(question.kind, facts, given);
+	if (problem) return reply(question, "invalid", { needs: problem });
 	const clause = clauseFor(policy, { kind: question.kind, facts, answer: given.is });
 	// The clause that would settle this answer. A rule clause still lets a person overrule it; then the general
 	// clause for the kind says who that person must be.
