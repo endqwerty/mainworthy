@@ -1,5 +1,13 @@
 import { printError } from "./errors.ts";
 
+/** A server address for output, without its username or password. Requests keep the original address. */
+export function displayUrl(address: string): string {
+	const url = new URL(address);
+	url.username = "";
+	url.password = "";
+	return address.endsWith("/") ? url.href : url.href.replace(/\/$/, "");
+}
+
 /** The CLI's human output. MCP never calls these functions while serving protocol messages. */
 export function line(text: string): void {
 	process.stdout.write(`${text}\n`);

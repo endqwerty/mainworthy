@@ -1,6 +1,6 @@
 import { API_VERSION, ApiHealth } from "../../core/version.ts";
 import { assertPositionals } from "../args.ts";
-import { line, printJson } from "../output.ts";
+import { displayUrl, line, printJson } from "../output.ts";
 import type { AdapterCommand } from "./types.ts";
 
 /**
@@ -35,11 +35,19 @@ export const healthCommand: AdapterCommand = {
 		} catch {}
 		if (args.has("json"))
 			printJson(
-				{ url, healthy: version !== null, version, commit, apiVersion, compatible: apiVersion === API_VERSION },
+				{
+					url: displayUrl(url),
+					healthy: version !== null,
+					version,
+					commit,
+					apiVersion,
+					compatible: apiVersion === API_VERSION,
+				},
 				args.bool("compact"),
 			);
-		else if (version === null) line(`not answering: ${url}`);
-		else line(`healthy: Mainworthy ${version}${commit ? ` (commit ${commit.slice(0, 12)})` : ""} at ${url}`);
+		else if (version === null) line(`not answering: ${displayUrl(url)}`);
+		else
+			line(`healthy: Mainworthy ${version}${commit ? ` (commit ${commit.slice(0, 12)})` : ""} at ${displayUrl(url)}`);
 		return version !== null ? 0 : 1;
 	},
 };

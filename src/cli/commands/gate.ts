@@ -2,14 +2,16 @@ import { GateInput, type GateStatus } from "../../core/ops.ts";
 import { EXIT_CODE } from "../../core/runs.ts";
 import { assertPositionals } from "../args.ts";
 import { CliError } from "../errors.ts";
-import { line, printJson } from "../output.ts";
+import { displayUrl, line, printJson } from "../output.ts";
 import { detectedTarget } from "../target.ts";
 import type { AdapterCommand } from "./types.ts";
 
 /** Gate output names what is missing and every blocking question; its verdict always determines exit 0–3. */
 export function printGate(gate: GateStatus, url: string): void {
 	const reason = gate.reason.replace(new RegExp(`^${gate.verdict}:\\s*`), "");
-	line(`mainworthy gate    ${gate.verdict}: ${reason}${gate.url ? `  ${new URL(gate.url, `${url}/`).href}` : ""}`);
+	line(
+		`mainworthy gate    ${gate.verdict}: ${reason}${gate.url ? `  ${displayUrl(new URL(gate.url, `${url}/`).href)}` : ""}`,
+	);
 	for (const q of gate.open) line(`  ${q} needs an answer`);
 }
 

@@ -2,7 +2,7 @@ import { ReportInput, type ReportReceipt, type TargetIn } from "../../core/ops.t
 import { parseReport, ReportFormat } from "../../surfaces/formats/report.ts";
 import { assertPositionals } from "../args.ts";
 import { CliError } from "../errors.ts";
-import { line, printJson, warning } from "../output.ts";
+import { displayUrl, line, printJson, warning } from "../output.ts";
 import { loadReportAttachments } from "../report-attachments.ts";
 import { detectedTarget, reportRoot, reportTarget, TARGET_FLAGS } from "../target.ts";
 import type { AdapterCommand } from "./types.ts";
@@ -69,7 +69,7 @@ export function printReceipt(input: {
 	const reason = gate?.reason.replace(new RegExp(`^${gate.verdict}:\\s*`), "");
 	line(
 		gate
-			? `mainworthy gate    ${gate.verdict}: ${reason}${gate.url ? `  ${new URL(gate.url, `${input.url}/`).href}` : ""}`
+			? `mainworthy gate    ${gate.verdict}: ${reason}${gate.url ? `  ${displayUrl(new URL(gate.url, `${input.url}/`).href)}` : ""}`
 			: report.target && "build" in report.target
 				? "mainworthy gate    pending: use gate --run with a planned release run"
 				: "mainworthy gate    pending: this session proves nothing about a build",

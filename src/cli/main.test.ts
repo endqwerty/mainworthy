@@ -6,9 +6,12 @@ import { join } from "node:path";
 import { Glob } from "bun";
 import { z } from "zod";
 import api1Actors from "../../test/fixtures/cli/actor-list-api1.json";
+import type { ReportInput } from "../core/ops.ts";
 import { API_VERSION } from "../core/version.ts";
 import { OP_LIST } from "../server/ops/index.ts";
 import { Client, plainHttpToAnotherMachine } from "./client.ts";
+import { printGate } from "./commands/gate.ts";
+import { printReceipt } from "./commands/report.ts";
 import { ADAPTER_COMMANDS, COMMAND_NAMES } from "./dispatch.ts";
 import { GENERATED_COMMANDS } from "./generated.ts";
 import { MAX_SEED_UNLINKED_FILES, seed, unitTests } from "./seed.ts";
@@ -1056,6 +1059,42 @@ test("connection and operation errors are single-line diagnostics with exit 4", 
 	});
 });
 
+test("connection diagnostics and health output omit URL credentials from flags and the environment", async () => {
+	await withInstance(async ({ cli, run }) => {
+		const url = "http://robin:synthetic-url-password@127.0.0.1:1";
+		const stderr = "connection: cannot connect to http://127.0.0.1:1; start the server with mainworthy serve\n";
+		expect(await cli(["find", "--url", url])).toEqual({ code: 4, stdout: "", stderr });
+		expect(await run(["find"], { env: { MAINWORTHY_URL: url } })).toEqual({ code: 4, stdout: "", stderr });
+		expect(await run(["health", "--url", url])).toEqual({
+			code: 1,
+			stdout: "not answering: http://127.0.0.1:1\n",
+			stderr: "",
+		});
+		const health = await run(["health", "--json"], { env: { MAINWORTHY_URL: url } });
+		expect(JSON.parse(health.stdout)).toEqual({
+			url: "http://127.0.0.1:1",
+			healthy: false,
+			version: null,
+			commit: null,
+			apiVersion: null,
+			compatible: false,
+		});
+		expect(health.code).toBe(1);
+		for (const [address, shown] of [
+			["http://robin@127.0.0.1:1", "http://127.0.0.1:1"],
+			["http://:synthetic-url-password@127.0.0.1:1", "http://127.0.0.1:1"],
+			["http://robin:p%40ss%3Aword@[::1]:1/base?x=1#anchor", "http://[::1]:1/base?x=1#anchor"],
+		] satisfies [string, string][]) {
+			const result = await run(["find", "--url", address]);
+			expect(result).toEqual({
+				code: 4,
+				stdout: "",
+				stderr: `connection: cannot connect to ${shown}; start the server with mainworthy serve\n`,
+			});
+		}
+	});
+});
+
 test("passed/failed/blocked/pending gate exit codes stay distinct", async () => {
 	await withInstance(async ({ run }) => {
 		const pending = await run(["gate", "--commit", COMMIT, "--wait", "0.02", "--json"]);
@@ -1729,6 +1768,90 @@ async function viaServer<T>(
 }
 
 const PLAIN_WARNING = `warning: the token is sent to ${PLAIN} over plain http and travels unencrypted; use an https address\n`;
+
+test("all client diagnostics omit URL credentials while requests keep the configured address", async () => {
+	await withInstance(
+		async ({ run, instance }) => {
+			const url = "http://robin:synthetic-url-password@files.example.test";
+			const base = ["find", "--url", url];
+			const checks: { options: NonNullable<Parameters<typeof viaServer>[2]>; message: string }[] = [
+				{ options: { healthResponse: new Response("unavailable", { status: 503 }) }, message: "answered 503" },
+				{ options: { healthResponse: new Response("invalid JSON") }, message: "invalid JSON" },
+				{
+					options: { healthResponse: Response.json({ ok: true, version: "0.1.0", apiVersion: 999 }) },
+					message: "does not advertise it",
+				},
+				{ options: { refuse: "authenticated" }, message: "cannot connect" },
+			];
+			for (const { options, message } of checks) {
+				const { result, asked } = await viaServer(instance, () => run(base), options);
+				expect(result.code).toBe(4);
+				expect(result.stderr).toContain(message);
+				expect(result.stderr).toContain(PLAIN);
+				expect(result.stderr).not.toContain("robin");
+				expect(result.stderr).not.toContain("synthetic-url-password");
+				expect(asked[0]?.url).toBe(`${url}/healthz`);
+			}
+			const { result } = await viaServer(instance, () => run(base));
+			expect(result.code).toBe(0);
+			expect(result.stderr).toBe(`[fetch]\n${PLAIN_WARNING}[fetch]\n[fetch]\n`);
+		},
+		{ mode: "server" },
+	);
+});
+
+test("health, open, gate, receipts and seed summaries omit URL credentials in text and JSON", async () => {
+	await withInstance(async ({ run, instance }) => {
+		const url = "http://robin:synthetic-url-password@files.example.test";
+		const invoke = async (argv: string[]) => {
+			const { result } = await viaServer(instance, () => run([...argv, "--url", url]));
+			expect(result.stderr).not.toContain("robin");
+			expect(result.stderr).not.toContain("synthetic-url-password");
+			expect(result.stdout).not.toContain("robin");
+			expect(result.stdout).not.toContain("synthetic-url-password");
+			return result;
+		};
+		expect((await invoke(["health"])).stdout).toBe(`healthy: Mainworthy 0.1.0 at ${PLAIN}\n`);
+		expect(JSON.parse((await invoke(["health", "--json"])).stdout).url).toBe(PLAIN);
+		expect((await invoke(["open"])).stdout).toBe(`${PLAIN}\n`);
+		expect(JSON.parse((await invoke(["open", "--json"])).stdout)).toEqual({ url: PLAIN });
+		const receipt = await invoke(["report", RED_XML, "--commit", COMMIT]);
+		expect(receipt.code).toBe(0);
+		expect(receipt.stdout).toContain("mainworthy gate    blocked:");
+		const gate = await invoke(["gate", "--commit", COMMIT]);
+		expect(gate.code).toBe(2);
+		expect(gate.stdout).toContain("mainworthy gate    blocked:");
+		const seed = await invoke(["seed", "demo", "--cases", "3", "--days", "1", "--unlinked-files", "0", "--json"]);
+		expect(seed.code).toBe(0);
+		expect(JSON.parse(seed.stdout).url).toBe(`${PLAIN}/p/demo/suite`);
+	});
+});
+
+test("gate and receipt links remove credentials after resolving their URLs", async () => {
+	await withInstance(async ({ client, directory }) => {
+		const report: ReportInput = {
+			target: { commit: COMMIT },
+			results: [{ test: { key: "passing" }, outcome: "pass" }],
+		};
+		const receipt = await client.call("report", report);
+		const gate = { ...(await client.call("gate", { commit: COMMIT })), url: "/p/scratch/runs/R-1" };
+		const result = await inThisProcess(
+			"print gate and receipt links",
+			async () => {
+				const url = "http://robin:synthetic-url-password@files.example.test";
+				printGate(gate, url);
+				printReceipt({ project: "scratch", report, receipt: { ...receipt, gate }, url });
+				return 0;
+			},
+			{ cwd: directory, input: "", environment: { PATH: process.env.PATH ?? "", HOME: directory } },
+		);
+		expect(result.code).toBe(0);
+		expect(result.stderr).toBe("");
+		expect(result.stdout).not.toContain("robin");
+		expect(result.stdout).not.toContain("synthetic-url-password");
+		expect(result.stdout.match(/http:\/\/files\.example\.test\/p\/scratch\/runs\/R-1/g)).toHaveLength(2);
+	});
+});
 
 test("a token bound for plain http on another machine is warned of once, on stderr, before the first authenticated request", async () => {
 	await withInstance(

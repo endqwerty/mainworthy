@@ -2,6 +2,35 @@ import { expect, test } from "bun:test";
 import { z } from "zod";
 import { withInstance } from "./test-support.ts";
 
+test("MCP connection errors omit credentials from the configured server URL", async () => {
+	await withInstance(async ({ cli }) => {
+		const messages = [
+			{
+				jsonrpc: "2.0",
+				id: 1,
+				method: "initialize",
+				params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "cli-test", version: "1" } },
+			},
+			{ jsonrpc: "2.0", method: "notifications/initialized" },
+			{
+				jsonrpc: "2.0",
+				id: 2,
+				method: "tools/call",
+				params: { name: "find", arguments: { project: "scratch", in: "cases" } },
+			},
+		];
+		const result = await cli(["mcp"], {
+			env: { MAINWORTHY_URL: "http://robin:synthetic-url-password@127.0.0.1:1" },
+			input: `${messages.map((message) => JSON.stringify(message)).join("\n")}\n`,
+		});
+		expect(result.code).toBe(0);
+		expect(result.stderr).toBe("");
+		expect(result.stdout).not.toContain("synthetic-url-password");
+		expect(result.stdout).not.toContain("robin");
+		expect(result.stdout).toContain("cannot connect to http://127.0.0.1:1; start the server with mainworthy serve");
+	});
+});
+
 test.each(["2025-11-25", "2026-07-28"])(
 	"MCP %s stdio writes only protocol messages and forwards an operation to HTTP after stdin ends",
 	async (version) => {

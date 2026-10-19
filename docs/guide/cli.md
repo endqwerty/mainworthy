@@ -49,6 +49,10 @@ from this table.
 | Token | `--token`, or `--token-file` | `MAINWORTHY_TOKEN`, or `MAINWORTHY_TOKEN_FILE` | none: a server in local mode on this machine asks for none |
 | Project | `--project` | `MAINWORTHY_PROJECT` | the only project the caller can access, when there is one |
 
+When the CLI prints a server address from `--url` or `MAINWORTHY_URL`, it removes
+the URL's username and password. This applies to diagnostics, links, and JSON
+output. Requests still use the configured address.
+
 ### Give the token in the environment or in a file
 
 `MAINWORTHY_TOKEN` avoids exposing the token as an argument. An argument appears
