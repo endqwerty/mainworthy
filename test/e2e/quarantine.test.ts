@@ -20,13 +20,16 @@ import { browserAvailable, eventually, openPage, startServer } from "./support.t
 			await session.send("Emulation.setLocaleOverride", { locale: "en-US" });
 			page.setDefaultTimeout(8000);
 			const panel = page.getByRole("region", { name: "Quarantined tests" });
+			const accept = page
+				.locator('.queue-pane:has([data-proposal-read="ready"]) .queue-answers .ans')
+				.filter({ hasText: "Accept" });
 			await panel.getByText("0 quarantined tests", { exact: true }).waitFor();
 			await panel.getByLabel("Test ref").fill("T-1");
 			await panel.getByLabel("Quarantine reason").fill("Checkout retries disagree on unchanged code");
 			await panel.getByRole("spinbutton", { name: "Passing trunk commits", exact: true }).fill("3");
 			await panel.getByRole("button", { name: "Propose quarantine", exact: true }).click();
 			await page.getByRole("heading", { name: "Quarantine T-1", exact: true }).waitFor();
-			await page.locator(".queue-answers .ans").filter({ hasText: "Accept" }).click();
+			await accept.click();
 			await page
 				.getByLabel("Reason required by policy")
 				.fill("Keep checkout failures visible while the test is repaired");
@@ -61,7 +64,7 @@ import { browserAvailable, eventually, openPage, startServer } from "./support.t
 			await panel.getByRole("button", { name: "Propose quarantine", exact: true }).click();
 			await page.getByRole("heading", { name: "Quarantine T-3", exact: true }).waitFor();
 			await page.getByText("Expires Oct 18, 2099, 9:00 AM", { exact: false }).waitFor();
-			await page.locator(".queue-answers .ans").filter({ hasText: "Accept" }).click();
+			await accept.click();
 			await page.getByLabel("Reason required by policy").fill("Temporary quarantine while the modal test is repaired");
 			await page.getByLabel("Reason required by policy").press("Enter");
 			await eventually(
@@ -145,7 +148,7 @@ import { browserAvailable, eventually, openPage, startServer } from "./support.t
 			await panel.getByLabel("Reason to end quarantine", { exact: true }).fill("The test is reliable again");
 			await panel.getByRole("button", { name: "Propose ending T-2 quarantine" }).click();
 			await page.getByRole("heading", { name: "End quarantine T-2", exact: true }).waitFor();
-			await page.locator(".queue-answers .ans").filter({ hasText: "Accept" }).click();
+			await accept.click();
 			await page.getByLabel("Reason required by policy").fill("The timeout fix has been checked");
 			await page.getByLabel("Reason required by policy").press("Enter");
 			await eventually(
