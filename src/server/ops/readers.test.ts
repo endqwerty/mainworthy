@@ -3,11 +3,11 @@ import { copyFileSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
-import { harness } from "../../test/helpers.ts";
-import { start } from "../app/start.ts";
-import { type App, type Config, openApp, SESSION_LIFETIMES } from "./kernel/app.ts";
-import { Db } from "./kernel/db.ts";
-import { Readers, readerCount } from "./ops/readers.ts";
+import { harness } from "../../../test/helpers.ts";
+import { start } from "../../app/start.ts";
+import { type App, type Config, openApp, SESSION_LIFETIMES } from "../kernel/app.ts";
+import { Db } from "../kernel/db.ts";
+import { Readers, readerCount } from "./readers.ts";
 
 const apps: App[] = [];
 const pools: Readers[] = [];
@@ -253,7 +253,7 @@ describe("reader threads", () => {
 		apps.push(openApp(settings));
 		const source = workerUrl(`
 			import { parentPort, workerData } from "node:worker_threads";
-			import { openApp } from ${JSON.stringify(new URL("./kernel/app.ts", import.meta.url).href)};
+			import { openApp } from ${JSON.stringify(new URL("../kernel/app.ts", import.meta.url).href)};
 			const app = openApp(workerData, { reader: true });
 			try {
 				app.db.exec("CREATE TABLE reader_must_not_write (value INTEGER)");

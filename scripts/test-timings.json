@@ -97,7 +97,7 @@
     "test/quarantine.test.ts": 853,
     "src/cli/demo/cases.test.ts": 816,
     "test/archive-latency.test.ts": 806,
-    "src/server/readers.test.ts": 778,
+    "src/server/ops/readers.test.ts": 778,
     "src/core/markdown.test.ts": 760,
     "test/e2e/people.test.ts": 699,
     "test/ios-contract.test.ts": 662,
