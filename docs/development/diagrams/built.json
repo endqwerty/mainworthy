@@ -1,0 +1,14 @@
+{
+	"change-to-deploy": {
+		"candidate": "670f1132aafce1d0a20d728d89564ad07557e279eafcddfcba3b0aff7ae4f2de",
+		"page": "dcd502728e2e70ef90b4cba27c68ecbcafb60ff75ca650262a8d7cc427c52dde"
+	},
+	"data-flow": {
+		"candidate": "2f07a0cc8427f1c8a28d6fc291e4db020ed8909872c0ffdc3a5e702721a809e9",
+		"page": "d67d2e663cdc28e6569b6eb5141814772908afce84218a45e89ecb2eebfe6b9a"
+	},
+	"request-path": {
+		"candidate": "c93705cc7e78909f54ef4a281aa220db49a33ad5ed62cd1a470ba9375375bc91",
+		"page": "c475b386139dee4129d2a3368e10bc5ede124e2c68011ab52a2f18aee658b39b"
+	}
+}

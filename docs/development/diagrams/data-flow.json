@@ -1,0 +1,799 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "Where the data goes: from producers to the gate",
+    "locale": "en",
+    "output": "docs/development/diagrams/data-flow.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:endqwerty/mainworthy.git",
+      "revision": "35f1b3b43de241180d1946c48853eb8a38bd2042",
+      "link_mode": "local-only"
+    },
+    "legend": {
+      "mode": "hidden"
+    },
+    "viewBox": [
+      1080,
+      696
+    ]
+  },
+  "stages": [
+    {
+      "label": "Produce"
+    },
+    {
+      "label": "Write"
+    },
+    {
+      "label": "Store by module"
+    },
+    {
+      "label": "Ask, decide, count"
+    },
+    {
+      "label": "Read and deliver"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "person",
+      "type": "frontend",
+      "label": "A person",
+      "sublabel": "Web UI \u00b7 iPhone app",
+      "stage": 0,
+      "row": 0,
+      "width": 150,
+      "height": 66,
+      "sources": [
+        {
+          "path": "src/web/lib/data.ts",
+          "line": 95,
+          "end_line": 125
+        },
+        {
+          "path": "ios/Kit/Sources/MainworthyScreens/Workspace.swift",
+          "line": 96,
+          "end_line": 118
+        }
+      ]
+    },
+    {
+      "id": "pipeline",
+      "type": "cloud",
+      "label": "A pipeline",
+      "sublabel": "mainworthy report",
+      "tag": "JUnit XML",
+      "stage": 0,
+      "row": 1,
+      "width": 150,
+      "height": 66,
+      "sources": [
+        {
+          "path": "src/cli/commands/report.ts",
+          "line": 126,
+          "end_line": 173
+        },
+        {
+          "path": "src/surfaces/formats/report.ts",
+          "line": 1,
+          "end_line": 26
+        }
+      ]
+    },
+    {
+      "id": "agent",
+      "type": "external",
+      "label": "An agent",
+      "sublabel": "MCP tools",
+      "stage": 0,
+      "row": 2,
+      "width": 150,
+      "height": 66,
+      "sources": [
+        {
+          "path": "src/server/ops/index.ts",
+          "line": 26,
+          "end_line": 65
+        }
+      ]
+    },
+    {
+      "id": "operations",
+      "type": "backend",
+      "label": "Write operations",
+      "sublabel": "HTTP \u00b7 CLI \u00b7 MCP",
+      "tag": "Permissions checked",
+      "stage": 1,
+      "row": 1,
+      "width": 150,
+      "height": 66,
+      "sources": [
+        {
+          "path": "src/server/ops/index.ts",
+          "line": 26,
+          "end_line": 41
+        },
+        {
+          "path": "src/server/ops/registry.ts",
+          "line": 186,
+          "end_line": 232
+        },
+        {
+          "path": "src/server/ops/writes.ts",
+          "line": 222,
+          "end_line": 255
+        }
+      ]
+    },
+    {
+      "id": "identity",
+      "type": "database",
+      "label": "Identity",
+      "sublabel": "actors \u00b7 tokens \u00b7 sessions",
+      "tag": "grants",
+      "stage": 1,
+      "row": 4,
+      "width": 150,
+      "height": 66,
+      "sources": [
+        {
+          "path": "src/server/identity/identity.ts",
+          "line": 125,
+          "end_line": 153
+        },
+        {
+          "path": "src/server/identity/sessions.ts",
+          "line": 36,
+          "end_line": 48
+        },
+        {
+          "path": "src/server/kernel/migrations/0002_sessions.sql",
+          "line": 2,
+          "end_line": 17
+        }
+      ],
+      "yOffset": -28
+    },
+    {
+      "id": "suite",
+      "type": "database",
+      "label": "Suite",
+      "sublabel": "cases \u00b7 versions \u00b7 proposals",
+      "tag": "folders \u00b7 placements",
+      "stage": 2,
+      "row": 0,
+      "width": 150,
+      "height": 66,
+      "sources": [
+        {
+          "path": "src/server/suite/suite.ts",
+          "line": 138,
+          "end_line": 153
+        },
+        {
+          "path": "src/server/suite/suite.ts",
+          "line": 245,
+          "end_line": 285
+        },
+        {
+          "path": "src/server/kernel/migrations/0001_init.sql",
+          "line": 88,
+          "end_line": 212
+        }
+      ]
+    },
+    {
+      "id": "evidence",
+      "type": "database",
+      "label": "Evidence",
+      "sublabel": "tests \u00b7 batches \u00b7 results",
+      "tag": "signatures \u00b7 findings \u00b7 files",
+      "stage": 2,
+      "row": 1,
+      "width": 150,
+      "height": 66,
+      "sources": [
+        {
+          "path": "src/server/evidence/evidence.ts",
+          "line": 1120,
+          "end_line": 1170
+        },
+        {
+          "path": "src/server/kernel/migrations/0001_init.sql",
+          "line": 224,
+          "end_line": 398
+        },
+        {
+          "path": "src/server/evidence/attachments.ts",
+          "line": 8,
+          "end_line": 38
+        }
+      ]
+    },
+    {
+      "id": "decisions",
+      "type": "database",
+      "label": "Decisions",
+      "sublabel": "questions \u00b7 answers \u00b7 ledger",
+      "tag": "Witness \u00b7 standing",
+      "stage": 3,
+      "row": 2,
+      "width": 150,
+      "height": 66,
+      "sources": [
+        {
+          "path": "src/server/kernel/migrations/0001_init.sql",
+          "line": 411,
+          "end_line": 490
+        },
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "line": 674,
+          "end_line": 708
+        },
+        {
+          "path": "src/server/kernel/witness.ts",
+          "line": 1,
+          "end_line": 14
+        }
+      ]
+    },
+    {
+      "id": "policy",
+      "type": "database",
+      "label": "Policy",
+      "sublabel": "policies \u00b7 clauses",
+      "stage": 2,
+      "row": 2,
+      "width": 150,
+      "height": 66,
+      "sources": [
+        {
+          "path": "src/server/policy/policy.ts",
+          "line": 1,
+          "end_line": 46
+        },
+        {
+          "path": "src/server/kernel/migrations/0001_init.sql",
+          "line": 491,
+          "end_line": 505
+        }
+      ]
+    },
+    {
+      "id": "runs",
+      "type": "database",
+      "label": "Runs",
+      "sublabel": "runs \u00b7 slots \u00b7 run_tests",
+      "tag": "slot_results \u00b7 depends_on",
+      "stage": 2,
+      "row": 3,
+      "width": 150,
+      "height": 66,
+      "sources": [
+        {
+          "path": "src/server/kernel/migrations/0001_init.sql",
+          "line": 508,
+          "end_line": 609
+        },
+        {
+          "path": "src/server/runs/runs.ts",
+          "line": 113,
+          "end_line": 130
+        },
+        {
+          "path": "src/server/runs/runs.ts",
+          "line": 235,
+          "end_line": 262
+        }
+      ],
+      "yOffset": -14
+    },
+    {
+      "id": "causes",
+      "type": "backend",
+      "label": "Failure causes",
+      "sublabel": "Group by failure signature",
+      "stage": 3,
+      "row": 1,
+      "width": 150,
+      "height": 66,
+      "sources": [
+        {
+          "path": "src/server/evidence/evidence.ts",
+          "line": 1120,
+          "end_line": 1130
+        },
+        {
+          "path": "src/server/ops/writes.ts",
+          "line": 222,
+          "end_line": 246
+        }
+      ]
+    },
+    {
+      "id": "verdict",
+      "type": "backend",
+      "label": "Gate verdict",
+      "sublabel": "Evidence + decisions",
+      "stage": 3,
+      "row": 3,
+      "width": 150,
+      "height": 66,
+      "sources": [
+        {
+          "path": "src/core/runs.ts",
+          "line": 107,
+          "end_line": 139
+        },
+        {
+          "path": "src/server/runs/runs.ts",
+          "line": 1764,
+          "end_line": 1798
+        },
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "line": 1607,
+          "end_line": 1648
+        }
+      ],
+      "yOffset": -14
+    },
+    {
+      "id": "events",
+      "type": "messagebus",
+      "label": "Committed changes",
+      "sublabel": "/api/p/:project/events",
+      "stage": 3,
+      "row": 4,
+      "width": 150,
+      "height": 66,
+      "sources": [
+        {
+          "path": "src/server/ops/registry.ts",
+          "line": 310,
+          "end_line": 350
+        },
+        {
+          "path": "src/surfaces/http.ts",
+          "line": 588,
+          "end_line": 638
+        }
+      ],
+      "yOffset": -28
+    },
+    {
+      "id": "exports",
+      "type": "external",
+      "label": "Archive and audit",
+      "sublabel": "transfer \u00b7 archive and audit",
+      "stage": 4,
+      "row": 0,
+      "width": 150,
+      "height": 66,
+      "sources": [
+        {
+          "path": "src/server/transfer/transfer.ts",
+          "line": 280,
+          "end_line": 343
+        },
+        {
+          "path": "src/server/transfer/audit.ts",
+          "line": 139,
+          "end_line": 150
+        }
+      ]
+    },
+    {
+      "id": "stats",
+      "type": "frontend",
+      "label": "Reports and stats",
+      "sublabel": "stats \u00b7 suite and evidence",
+      "stage": 4,
+      "row": 1,
+      "width": 150,
+      "height": 66,
+      "sources": [
+        {
+          "path": "src/server/ops/stats.ts",
+          "line": 1,
+          "end_line": 42
+        }
+      ],
+      "yOffset": -38
+    },
+    {
+      "id": "issues",
+      "type": "external",
+      "label": "Defect issues",
+      "sublabel": "trackers \u00b7 GitHub or Jira",
+      "stage": 4,
+      "row": 2,
+      "width": 150,
+      "height": 66,
+      "sources": [
+        {
+          "path": "src/server/trackers/config.ts",
+          "line": 15,
+          "end_line": 35
+        },
+        {
+          "path": "src/server/trackers/requests.ts",
+          "line": 57,
+          "end_line": 135
+        }
+      ]
+    },
+    {
+      "id": "statuses",
+      "type": "external",
+      "label": "Commit statuses",
+      "sublabel": "statuses \u00b7 GitHub",
+      "stage": 4,
+      "row": 2,
+      "width": 150,
+      "height": 66,
+      "sources": [
+        {
+          "path": "src/server/statuses/statuses.ts",
+          "line": 87,
+          "end_line": 113
+        },
+        {
+          "path": "src/server/statuses/statuses.ts",
+          "line": 131,
+          "end_line": 142
+        }
+      ],
+      "yOffset": -76
+    },
+    {
+      "id": "gate",
+      "type": "external",
+      "label": "mainworthy gate",
+      "sublabel": "Exit 0, 1, 2 or 3",
+      "stage": 4,
+      "row": 3,
+      "width": 150,
+      "height": 66,
+      "sources": [
+        {
+          "path": "src/cli/commands/gate.ts",
+          "line": 18,
+          "end_line": 25
+        },
+        {
+          "path": "src/core/runs.ts",
+          "line": 43,
+          "end_line": 44
+        }
+      ],
+      "yOffset": -14
+    },
+    {
+      "id": "web",
+      "type": "frontend",
+      "label": "Web UI refetch",
+      "sublabel": "Invalidate keys, refetch",
+      "stage": 4,
+      "row": 4,
+      "width": 150,
+      "height": 66,
+      "sources": [
+        {
+          "path": "src/web/lib/data.ts",
+          "line": 81,
+          "end_line": 125
+        },
+        {
+          "path": "ios/Kit/Sources/MainworthyScreens/Workspace.swift",
+          "line": 96,
+          "end_line": 118
+        }
+      ],
+      "yOffset": -28
+    }
+  ],
+  "flows": [
+    {
+      "id": "person-write",
+      "from": "person",
+      "to": "operations",
+      "label": "Edits",
+      "fromSide": "right",
+      "toSide": "top",
+      "via": [
+        [
+          315,
+          161
+        ]
+      ],
+      "labelAt": [
+        235,
+        149
+      ]
+    },
+    {
+      "id": "pipeline-write",
+      "from": "pipeline",
+      "to": "operations",
+      "label": "Reports",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "straight",
+      "labelAt": [
+        207,
+        265
+      ]
+    },
+    {
+      "id": "agent-write",
+      "from": "agent",
+      "to": "operations",
+      "label": "Findings",
+      "fromSide": "right",
+      "toSide": "bottom",
+      "via": [
+        [
+          315,
+          389
+        ]
+      ],
+      "labelAt": [
+        235,
+        377
+      ]
+    },
+    {
+      "id": "admission",
+      "from": "identity",
+      "to": "operations",
+      "label": "Caller and grants",
+      "variant": "security"
+    },
+    {
+      "id": "suite-write",
+      "from": "operations",
+      "to": "suite",
+      "label": "Proposals",
+      "fromSide": "top",
+      "toSide": "left",
+      "via": [
+        [
+          315,
+          161
+        ]
+      ],
+      "labelAt": [
+        385,
+        149
+      ]
+    },
+    {
+      "id": "evidence-write",
+      "from": "operations",
+      "to": "evidence",
+      "label": "Evidence",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "straight",
+      "labelAt": [
+        422,
+        265
+      ]
+    },
+    {
+      "id": "run-write",
+      "from": "operations",
+      "to": "runs",
+      "label": "plan",
+      "fromSide": "bottom",
+      "toSide": "left",
+      "via": [
+        [
+          315,
+          489
+        ]
+      ],
+      "labelAt": [
+        375,
+        477
+      ]
+    },
+    {
+      "id": "group-failures",
+      "from": "evidence",
+      "to": "causes",
+      "label": "Failures",
+      "labelAt": [
+        637,
+        298
+      ]
+    },
+    {
+      "id": "detect-cause",
+      "from": "causes",
+      "to": "decisions",
+      "label": "Detectors",
+      "labelAt": [
+        745,
+        335
+      ]
+    },
+    {
+      "id": "policy-read",
+      "from": "policy",
+      "to": "decisions",
+      "label": "Clauses",
+      "variant": "security"
+    },
+    {
+      "id": "count-evidence",
+      "from": "runs",
+      "to": "verdict",
+      "label": "Tally"
+    },
+    {
+      "id": "count-standing",
+      "from": "decisions",
+      "to": "verdict",
+      "label": "Standing",
+      "variant": "security",
+      "labelAt": [
+        745,
+        442
+      ]
+    },
+    {
+      "id": "read-gate",
+      "from": "verdict",
+      "to": "gate",
+      "label": "Verdict"
+    },
+    {
+      "id": "send-status",
+      "from": "verdict",
+      "to": "statuses",
+      "label": "Configured",
+      "fromSide": "bottom",
+      "toSide": "right",
+      "via": [
+        [
+          745,
+          541
+        ],
+        [
+          1060,
+          541
+        ],
+        [
+          1060,
+          313
+        ]
+      ],
+      "labelAt": [
+        938,
+        540
+      ]
+    },
+    {
+      "id": "read-stats",
+      "from": "evidence",
+      "to": "stats",
+      "label": "Stats reads",
+      "fromSide": "right",
+      "toSide": "left",
+      "via": [
+        [
+          630,
+          275
+        ],
+        [
+          630,
+          216
+        ],
+        [
+          850,
+          216
+        ],
+        [
+          850,
+          237
+        ]
+      ],
+      "labelAt": [
+        740,
+        204
+      ]
+    },
+    {
+      "id": "request-defect",
+      "from": "decisions",
+      "to": "issues",
+      "label": "Requested"
+    },
+    {
+      "id": "archive-read",
+      "from": "suite",
+      "to": "exports",
+      "label": "Archive reads"
+    },
+    {
+      "id": "refetch",
+      "from": "events",
+      "to": "web",
+      "label": "Refetch",
+      "variant": "dashed"
+    },
+    {
+      "id": "admit-results",
+      "from": "evidence",
+      "to": "runs",
+      "label": "Admit results",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "via": [
+        [
+          530,
+          328
+        ],
+        [
+          440,
+          328
+        ],
+        [
+          440,
+          436
+        ],
+        [
+          530,
+          436
+        ]
+      ],
+      "labelAt": [
+        490,
+        437
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Writes share one registry",
+      "items": [
+        "propose and import-csv seal proposals; adoption alone changes suite standing. report records batches and results; claim appends reviews and findings; attach saves files.",
+        "change records a change ending or reopening. announce records artifacts, builds and deployments. plan creates runs and slots. decide records an answer; only a counted answer settles a decision.",
+        "HTTP, CLI and MCP dispatch through src/server/ops/index.ts. MCP exposes a subset of operations. Identity supplies actors, tokens, sessions and grants; permissions apply before input validation."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "One SQLite file; six owning modules",
+      "items": [
+        "Suite: cases, versions, folders, proposals, placements, case_aliases, case_tags, requirements, covers and search_docs.",
+        "Evidence: tests, targets, changes, batches, results, signatures, flips, findings, reviews, excuses, result_excuses, quarantines, artifacts, builds, deployments and attachments. Attachment bytes live in the blobs directory, addressed by hash.",
+        "Runs: runs, slots, run_tests, slot_results and depends_on. Decisions: questions, question_refs, answers and the decisions ledger. Policy: policies stores versioned clauses. Identity: actors, tokens, sessions and grants, with credentials and teams."
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "A cause becomes a question, then a decision",
+      "items": [
+        "Results with failures share signatures. Detectors group occurrences by cause and raise or reuse its question; an answer still in force can cover a later occurrence. Proposals, unmapped tests, findings and run signoff also raise questions.",
+        "A person or permitted rule answers. The ledger row is written before a Witness reaches the effect. Only decision effects change standing: case heads, test links, excuses, run closure and policy. These effects refold affected runs.",
+        "The server admits evidence to runs and slots, then src/core/runs.ts verdict computes pending, failed, blocked or passed from the tally, blockers, missing evidence and decisions in force. Agent reports do not move a commit gate."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Consumers read the same record",
+      "items": [
+        "mainworthy gate exits 0 passed, 1 failed, 2 blocked or 3 pending. Configured statuses reread the current gate and deliver GitHub commit statuses.",
+        "Committed project events at /api/p/:project/events invalidate web query keys and trigger refetch; reconnect refreshes the project. The iPhone app follows the same stream and refreshes its screens.",
+        "Reports use stats to read evidence and suite data. Explicit tracker requests create or link defect issues through GitHub or Jira; a failure alone does not create an issue. Transfer exports eligible tables and blobs; audit exports the decision and evidence record."
+      ]
+    }
+  ]
+}

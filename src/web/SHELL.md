@@ -1,12 +1,12 @@
 # Shell contract for Builder 2
 
-The shell compiles and loads through the real Bun server. All six screens,
+The shell compiles and loads through the real Bun server. Every screen,
 router, palette, keys overlay, themes and sign-in have a Chromium check.
 
 ## Screens and routes
 
-`app.tsx` registers named exports `QueueScreen`, `RunsScreen`,
-`ChangesScreen`, `SettingsScreen` from each directory's `index.tsx`.
+`app.tsx` registers each screen's named export (`SuiteScreen`, `QueueScreen` and the rest)
+from its directory's `index.tsx`.
 A screen returns two sibling `section.pane` elements, `#list` and `#detail`.
 The frame owns the sidebar (`[` and the button in its first row collapse it), Suite-only folder tree and footer.
 A screen with its own columns starts them with `var(--side-width)` and adds `var(--side-freed)` to the pane on
@@ -20,7 +20,7 @@ Each screen imports its own CSS. Do not edit another screen or the shell.
 `route` has `screen`, `project`, `ref` and `folder`, with null for no selection.
 `navigate(path)` from `lib/router.ts` changes history without a page load.
 `routeUrl({project, screen, ref?})` and `refUrl({project, ref})` build URLs.
-Screens are `suite`, `case`, `queue`, `runs`, `changes`, `settings`.
+Screens are `Screen` in `lib/router.ts`: `suite`, `case`, `queue`, `runs`, `changes`, `tests`, `reports`, `settings`.
 Case URLs are `/p/<project>/suite/c/<no>`; other selected refs trail the screen.
 Use anchors with `href`, preventDefault and navigate for accessible links.
 

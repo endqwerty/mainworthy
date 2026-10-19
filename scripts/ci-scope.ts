@@ -84,13 +84,15 @@ export const IOS: Paths = {
 
 /**
  * Files that no code of the product, of the tests or of the scripts reads, so a test that reads one names it in
- * its text. What `/docs` serves is not among them: the server imports it.
+ * its text. What `/docs` serves is not among them: the server imports it. Neither are the repository's diagrams,
+ * which `scripts/diagrams.ts` stamps and `test/docs.test.ts` checks through it.
  */
 export const NAMED: Paths = {
 	include: ["docs/**", "*.md", ".github/**", "ios/**"],
 	exclude: [
 		"docs/guide/**",
 		"docs/diagrams/**",
+		"docs/development/diagrams/**",
 		"docs/ui/screenshots/**",
 		"THIRD-PARTY-NOTICES.md",
 		".github/workflows/check.yml",
