@@ -49,7 +49,7 @@ export function printReceipt(input: {
 			.filter(([, value]) => value > 0)
 			.map(
 				([kind, value]) =>
-					`${kind} ${plural(value, "result")}${kind === "assumed" ? " (case versions current when recorded; add a version manifest for exact)" : kind === "unresolved" ? " (no case or version when recorded)" : ""}`,
+					`${kind} ${plural(value, "result")}${kind === "assumed" ? ` (case ${value === 1 ? "version" : "versions"} current when recorded; add a version manifest for exact)` : kind === "unresolved" ? " (no case or version when recorded)" : ""}`,
 			)
 			.join(", ") || "none";
 	line(`  basis: ${basis}`);
@@ -58,10 +58,13 @@ export function printReceipt(input: {
 		for (const rejected of receipt.rejected) warning(`result ${rejected.index + 1}: ${rejected.reason}`);
 	}
 	if (receipt.declined.length > 0) {
-		line(`  ${plural(receipt.declined.length, "case/version claim")} declined; results kept without a case`);
+		line(
+			`  ${plural(receipt.declined.length, "case/version claim")} declined; ${plural(receipt.declined.length, "result")} kept without a case`,
+		);
 		for (const declined of receipt.declined) warning(`result ${declined.index + 1}: ${declined.reason}`);
 	}
-	if (receipt.skippedAttachments) line(`  ${plural(receipt.skippedAttachments, "attachment")} skipped; results kept`);
+	if (receipt.skippedAttachments)
+		line(`  ${plural(receipt.skippedAttachments, "attachment")} skipped; ${plural(counts.total, "result")} kept`);
 	const gate = receipt.gate;
 	const reason = gate?.reason.replace(new RegExp(`^${gate.verdict}:\\s*`), "");
 	line(

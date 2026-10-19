@@ -13,10 +13,13 @@ To upload results and read the verdict, follow these steps.
 
 You can pass several files or a shell glob such as `results/*.xml`.
 The receipt lists outcomes, new or existing questions, result bases,
-and the gate at the time of the upload. "1 result had no case or version when
-recorded" counts results with an unresolved basis, even if the project's policy
-has since created cases or someone has linked the tests. Several results can
-belong to the same test. See [tests with no case](./policy.md#tests-with-no-case)
+and the gate at the time of the upload. Counts use singular nouns for one result,
+claim, attachment, or assumed case version. A declined claim keeps its result
+without a case. Skipped attachments leave the report's results intact.
+
+"1 result had no case or version when recorded" counts results with an unresolved
+basis, even if the project's policy has since created cases or someone has linked
+the tests. Several results can belong to the same test. See [tests with no case](./policy.md#tests-with-no-case)
 for the policy choices.
 
 The totals and each basis count results, not distinct tests. For two passing

@@ -550,6 +550,13 @@ for (const policy of ["track", "ask", "create"] as const) {
 			});
 
 			if (policy === "track") await client.call("propose", { edits: [{ op: "create", outline: "Checkout" }] });
+			const assumed = join(directory, "assumed.xml");
+			await writeFile(assumed, '<testsuite><testcase name="single assumed @C-1" /></testsuite>');
+			const singleBasis = await run(["report", assumed, "--commit", COMMIT]);
+			expect([singleBasis.code, singleBasis.stderr]).toEqual([0, ""]);
+			expect(singleBasis.stdout).toContain(
+				"  basis: assumed 1 result (case version current when recorded; add a version manifest for exact)\n",
+			);
 			const mixed = join(directory, "mixed.xml");
 			await writeFile(
 				mixed,
@@ -1436,10 +1443,41 @@ test("a declined case annotation is visible and its failure stays in the gate", 
 		);
 		const report = await run(["report", file, "--commit", COMMIT]);
 		expect(report.code).toBe(0);
-		expect(report.stdout).toContain("1 case/version claim declined; results kept without a case");
+		expect(report.stdout).toContain("  1 case/version claim declined; 1 result kept without a case\n");
 		expect(report.stderr).toContain("C-999");
 		expect(report.stderr.trim().split("\n")).toHaveLength(1);
 		expect((await run(["gate", "--commit", COMMIT])).code).toBe(2);
+		await writeFile(
+			file,
+			'<testsuite name="unknown"><testcase name="first @C-999@v1"><failure message="failed"/></testcase><testcase name="second @C-998@v1" /></testsuite>',
+		);
+		const two = await run(["report", file, "--commit", COMMIT]);
+		expect(two.code).toBe(0);
+		expect(two.stdout).toContain("  2 case/version claims declined; 2 results kept without a case\n");
+		expect(two.stderr.trim().split("\n")).toHaveLength(2);
+	});
+});
+
+test("report receipt counts skipped attachments separately from kept results", async () => {
+	await withInstance(async ({ cli, run, directory }) => {
+		const file = join(directory, "attachments.xml");
+		const one = '<testcase name="one"><system-out>[[ATTACHMENT|missing.png]]</system-out></testcase>';
+		await writeFile(file, `<testsuite>${one}</testsuite>`);
+		const first = await cli(["report", file, "--session", "one skipped"]);
+		expect(first.code).toBe(0);
+		expect(first.stdout).toContain("  1 attachment skipped; 1 result kept\n");
+		expect(first.stderr).toContain("Attachment markers ignored");
+		await writeFile(file, `<testsuite>${one}<testcase name="two" /></testsuite>`);
+		const twoResults = await run(["report", file, "--session", "one skipped two results"]);
+		expect(twoResults.code).toBe(0);
+		expect(twoResults.stdout).toContain("  1 attachment skipped; 2 results kept\n");
+		await writeFile(file, `<testsuite>${one}${one.replace('name="one"', 'name="two"')}</testsuite>`);
+		const two = await run(["report", file, "--session", "two skipped"]);
+		expect(two.code).toBe(0);
+		expect(two.stdout).toContain("  2 attachments skipped; 2 results kept\n");
+		const machine = await run(["report", file, "--session", "two skipped", "--json"]);
+		expect(machine.code).toBe(0);
+		expect(JSON.parse(machine.stdout)).toMatchObject({ counts: { total: 2 }, skippedAttachments: 2, fresh: false });
 	});
 });
 
