@@ -11,7 +11,6 @@ import type { Api, OpName } from "../../src/core/api.ts";
 import { call } from "../../src/web/lib/api.ts";
 
 const found = findChromium();
-export const chromiumPath = found.path;
 export const browserAvailable = found.path !== null;
 if (found.path === null) console.info(`Skipping Mainworthy e2e. ${found.skipped}`);
 export type Server = {
@@ -230,8 +229,8 @@ export async function advanceClock(server: Server, ms: number): Promise<void> {
 	if (!moved.ok) throw new Error(`The e2e server's clock did not move: ${moved.status}`);
 }
 export async function launchBrowser({ args = [] }: { args?: string[] } = {}): Promise<Browser> {
-	if (!chromiumPath) throw new Error("System Chromium is missing");
-	return chromium.launch(chromiumLaunchOptions(chromiumPath, args));
+	if (found.path === null) throw new Error(found.skipped);
+	return chromium.launch(chromiumLaunchOptions(found.path, args));
 }
 /**
  * One browser connection for a test file, and for every page a test opens a context of its own: its own storage, cache

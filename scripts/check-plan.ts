@@ -243,37 +243,37 @@ export function slowest(timings: unknown, count: number): { file: string; second
 		.map(([file, ms]) => ({ file, seconds: ms / 1000 }));
 }
 
-/** Where a Linux system keeps a Chromium. The browser tests take the first that is there. */
-const SYSTEM_CHROMIUM = ["/usr/bin/chromium", "/usr/bin/google-chrome", "/usr/bin/chromium-browser"];
 /**
- * Where macOS keeps one. Named in the message and not started unasked: with the browser tests the suite took
- * 148 s on the 10-thread Mac and 30 s without (2026-10-13), and a Mac's Chrome is the browser its person uses.
+ * The Chromium playwright-core is built for: its headless shell, which `bun run browser` installs. Under load
+ * the full Chromium builds crashed, the system's and Playwright's, and the headless shell did not (decision 0114,
+ * issue #469). playwright-core names the path only in its registry, which it does not type; `test/check.test.ts`
+ * holds it to the revision in `browsers.json`, so an upgrade that moves it says so.
  */
-const MAC_CHROMIUM = [
-	"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-	"/Applications/Chromium.app/Contents/MacOS/Chromium",
-];
+export function playwrightChromium(): string | null {
+	const { registry } = require("playwright-core/lib/coreBundle") as {
+		registry?: { registry?: { findExecutable?: (name: string) => { executablePath: () => string | undefined } } };
+	};
+	return registry?.registry?.findExecutable?.("chromium-headless-shell").executablePath() ?? null;
+}
 
 /**
- * The Chromium the browser tests start: the one `MAINWORTHY_CHROMIUM` names, else the system's. With none, the
- * tests are skipped and `skipped` says what to set, in one line: each browser test file prints it, and the check
+ * The Chromium the browser tests start: the one `MAINWORTHY_CHROMIUM` names, else Playwright's. With none, the
+ * tests are skipped and `skipped` says what to do, in one line: each browser test file prints it, and the check
  * says it again at its end, where a run of nothing but skipped tests would otherwise read as a pass of them.
  */
 export function findChromium(
 	env: Readonly<Record<string, string | undefined>> = process.env,
 	exists: (path: string) => boolean = existsSync,
+	playwright: string | null = playwrightChromium(),
 ): { path: string } | { path: null; skipped: string } {
 	const named = env.MAINWORTHY_CHROMIUM;
-	const path = [named, ...SYSTEM_CHROMIUM].find((candidate) => candidate && exists(candidate));
+	const path = [named, playwright].find((candidate) => candidate && exists(candidate));
 	if (path) return { path };
-	const system = `no Chromium at ${SYSTEM_CHROMIUM.slice(0, -1).join(", ")} or ${SYSTEM_CHROMIUM.at(-1)}`;
-	const here = MAC_CHROMIUM.find(exists);
 	return {
 		path: null,
 		skipped: [
-			named ? `MAINWORTHY_CHROMIUM names ${named}, which is not there, and there is ${system}.` : `There is ${system}.`,
-			"Set MAINWORTHY_CHROMIUM to a Chromium or Chrome binary to run the browser tests.",
-			...(here ? [`This machine has one: MAINWORTHY_CHROMIUM="${here}"`] : []),
+			...(named ? [`MAINWORTHY_CHROMIUM names ${named}, which is not there.`] : []),
+			`Playwright's Chromium is not installed${playwright ? ` at ${playwright}` : ""}: run \`bun run browser\` to run the browser tests.`,
 		].join(" "),
 	};
 }

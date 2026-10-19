@@ -154,6 +154,7 @@ See [your data](docs/guide/data.md) for what an archive includes and leaves out.
 | `bun run dev` | the server on `127.0.0.1:7357`, restarted when a file changes |
 | `bun test <file>` | one test file |
 | `bun run check` | the type-check, the lint and every test, browser tests included, in about two minutes |
+| `bun run browser` | installs the Chromium the browser tests run, once and again after a playwright-core upgrade |
 | `bun run build` | one self-contained executable in `dist/` |
 
 [docs/development](docs/development/README.md) explains how to set up, how the code is organised, how to add an

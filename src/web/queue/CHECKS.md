@@ -2,7 +2,7 @@
 
 Run `bun test test/e2e/triage.test.ts test/e2e/execution.test.ts
 test/e2e/agent.test.ts test/e2e/settings.test.ts` against isolated real
-servers on ports 7450 through 7499 and system Chromium.
+servers on ports 7450 through 7499 and Playwright's Chromium.
 
 - D2 starts with twenty mixed questions under standard. Twenty answer keys
   remove all rows without a document load. Undo reopens the last question.
