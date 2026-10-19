@@ -522,7 +522,7 @@ Use a new `cmd` for a different file and reuse it for a retry. `attachment` with
 `{"result":123}` lists metadata. To read one file's base64 data, add `"id":456`.
 Both operations are available through the CLI and API. They are not additional
 MCP tools, and the MCP report schema omits attachment inputs to keep tool discovery
-within its token budget.
+small.
 
 Each file is limited to 4 MiB. A report may include at most 100 files and 16 MiB of
 decoded data. One result may hold at most 20 files and 16 MiB, including files

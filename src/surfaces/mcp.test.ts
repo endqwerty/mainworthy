@@ -21,7 +21,7 @@ import { actorByName, createToken, listTokens } from "../server/identity/identit
 import { MCP_OPS, OPS } from "../server/ops/index.ts";
 import { invoke, invokeAsync } from "../server/ops/registry.ts";
 import { serve, sessionOf, VERSION } from "./http.ts";
-import { compactSchema, mcpRoute, mcpServer, mcpTools, TOOL_TOKEN_BUDGET } from "./mcp.ts";
+import { compactSchema, mcpRoute, mcpServer, mcpTools, TOOL_TOKEN_GUIDELINE } from "./mcp.ts";
 
 const tokens = (value: unknown): number => encode(JSON.stringify(value)).length;
 const TOKEN_COUNTS: Record<string, number> = {
@@ -73,13 +73,19 @@ test("tools/list explains proposal statuses and how to identify reported tests",
 	);
 });
 
-test("tools come from the registry and stay within their measured token limits", () => {
+test("tools come from the registry, and each tool's size is recorded", () => {
 	const tools = mcpTools();
 	expect(tools.map((tool) => tool.name)).toEqual(MCP_OPS.map((op) => op.name));
 	expect(tools.length).toBeLessThanOrEqual(10);
 	const total = tokens({ tools });
-	expect(total, "Full tools/list token budget").toBeLessThanOrEqual(TOOL_TOKEN_BUDGET);
-	expect(TOOL_TOKEN_BUDGET).toBe(Math.ceil(total / 50) * 50);
+	// A guideline, not a gate (decision 0118): the recorded sizes below make every change visible in review.
+	if (total > TOOL_TOKEN_GUIDELINE.total)
+		console.warn(`tools/list is ${total} tokens, above the ${TOOL_TOKEN_GUIDELINE.total} guideline (decision 0118)`);
+	for (const tool of tools)
+		if (tokens(tool) > TOOL_TOKEN_GUIDELINE.perTool)
+			console.warn(
+				`${tool.name} is ${tokens(tool)} tokens, above the ${TOOL_TOKEN_GUIDELINE.perTool} per-tool guideline`,
+			);
 	for (const tool of tools) {
 		const expected = TOKEN_COUNTS[tool.name];
 		if (expected === undefined) throw new Error(`No token count recorded for ${tool.name}`);
@@ -97,7 +103,7 @@ test("tools come from the registry and stay within their measured token limits",
 		expect(JSON.stringify(tool.inputSchema)).not.toContain('"x-mcp-hidden"');
 		expect(tool.inputSchema.properties?.project).toMatchObject({ type: "string", minLength: 1 });
 	}
-	console.log(`tool definitions: ${total} tokens; budget ${TOOL_TOKEN_BUDGET}; o200k_base`);
+	console.log(`tool definitions: ${total} tokens; guideline ${TOOL_TOKEN_GUIDELINE.total}; o200k_base`);
 	console.table(tools.map((tool) => ({ tool: tool.name, tokens: tokens(tool) })));
 });
 
