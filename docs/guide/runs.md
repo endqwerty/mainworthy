@@ -40,6 +40,11 @@ The API can preview the same selection with `find` and `{"in":"cases","select":{
 When `select.cases` names a case more than once, the preview and plan count it once.
 Without folder, tag, or search criteria, an explicit case list keeps the order of first appearance.
 If you open another screen while planning finishes, the run is recorded and you stay on that screen.
+If the reply is lost or unreadable, the planner keeps your submitted choices and locks them.
+While the planner stays open, choose **Retry plan** or press <kbd>Enter</kbd> to resend the same request
+without creating a second run.
+The locked fields are dimmed. <kbd>Esc</kbd> still closes the planner.
+If the server refuses the plan, you can correct the choices and submit again.
 "Count only results recorded in this run" accepts work explicitly reported to the run.
 "Accept results for a commit" also accepts qualifying results already reported for
 that commit and results that arrive later. Enter the tested commit's hash.
