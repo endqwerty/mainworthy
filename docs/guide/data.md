@@ -13,7 +13,11 @@ mainworthy.db  mainworthy.db-shm  mainworthy.db-wal  blobs/  server.lock  spool/
 
 While the server runs, it also keeps a `-wal` and a `-shm` file beside the database. The three belong together. After a clean stop the `-wal` file is empty.
 
-An upgrade runs each database migration in its own transaction. If any statement fails, startup stops and rolls back that migration without advancing the schema version. Earlier successful migrations remain applied. Before upgrading existing data, Mainworthy saves a consistent copy beside the database as `mainworthy.db.v<N>.bak`, where `<N>` is the version before the upgrade.
+An upgrade runs all pending database migrations in one transaction. If any statement fails, startup stops and rolls back the entire upgrade, including its schema version. Before upgrading existing data, Mainworthy writes a consistent copy to a temporary file beside the database, syncs and closes it, then renames it to `mainworthy.db.v<N>.bak`. `<N>` is the version before the upgrade. It syncs the directory before starting the migrations.
+
+After every pending migration commits, Mainworthy keeps the copy it completed on that start and removes older copies for the same database, logging each removed filename. If the final copy already existed, Mainworthy leaves it unchecked and removes no older copies. A failed migration also removes none. A cleanup failure is logged and startup continues, so extra copies can remain until a later successful upgrade writes a new copy.
+
+Normally one upgrade copy remains. Only copies still present can restore an earlier database state. Save a separate backup before upgrading if you need an older rollback point.
 
 On `SIGTERM` or `SIGINT`, the server stops accepting connections and closes its change streams. Requests already in flight have five seconds to send their replies before the server closes the remaining connections. The server then stops the reader threads and closes the database. A request that outlasts this wait can lose its reply. If you retry a write, send the same command id, `cmd`, so the write is not applied twice. The CLI and web UI send command ids.
 

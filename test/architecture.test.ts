@@ -150,48 +150,258 @@ describe("fresh schema image", () => {
 		}
 	});
 
-	test("existing files retain upgrade backups and rollback when opening fails", () => {
-		const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-upgrade-"));
-		const path = databasePath(directory);
-		const migration = MIGRATIONS.at(-1);
-		if (!migration) throw new Error("expected a shipped migration");
-		const original = migration.sql;
-		const previous = migration.version - 1;
-		const db = new Db(path);
-		try {
-			for (const entry of MIGRATIONS.slice(0, -1)) db.exec(entry.sql);
-			db.raw.query("INSERT INTO meta VALUES ('schema_version', ?)").run(String(previous));
-			db.exec("INSERT INTO meta VALUES ('preserved', 'kept')");
-			migration.sql = `INSERT INTO meta VALUES ('before', 'temporary');
+	for (const failFirst of [false, true]) {
+		test(`existing files retain upgrade backups ${failFirst ? "after a failed open" : "on the first open"}`, () => {
+			const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-upgrade-"));
+			const path = databasePath(directory);
+			const migration = MIGRATIONS.at(-1);
+			if (!migration) throw new Error("expected a shipped migration");
+			const original = migration.sql;
+			const previous = migration.version - 1;
+			const db = new Db(path);
+			const removed = spyOn(console, "error").mockImplementation(() => {});
+			const older = [`${path}.v1.bak`, `${path}.v2.bak`];
+			const similar = join(directory, "mainworthyXdb.v1.bak");
+			const unrelated = [
+				similar,
+				`${path}.other.v1.bak`,
+				`${path}.v1.bak.extra`,
+				`${path}.v01.bak`,
+				`${path}.v0.bak`,
+				`${path}.v-1.bak`,
+				`${path}.v1.5.bak`,
+				`${path}.v1.bak\n`,
+				`${path}.v${SCHEMA_VERSION + 1}.bak`,
+			];
+			try {
+				for (const file of [...older, ...unrelated]) fs.writeFileSync(file, "untouched");
+				fs.mkdirSync(`${path}.v3.bak`);
+				fs.symlinkSync(similar, `${path}.v4.bak`);
+				for (const entry of MIGRATIONS.slice(0, -1)) db.exec(entry.sql);
+				db.raw.query("INSERT INTO meta VALUES ('schema_version', ?)").run(String(previous));
+				db.exec("INSERT INTO meta VALUES ('preserved', 'kept')");
+				if (failFirst) {
+					migration.sql = `INSERT INTO meta VALUES ('before', 'temporary');
 				INSERT INTO meta VALUES ('preserved', 'duplicate');
 				INSERT INTO meta VALUES ('after', 'must not run');`;
-			expect(() => openDatabase(path)).toThrow("UNIQUE");
-			expect(db.raw.query("SELECT * FROM meta ORDER BY key").all()).toEqual([
-				{ key: "preserved", value: "kept" },
-				{ key: "schema_version", value: String(previous) },
-			]);
-			const backup = new Db(`${path}.v${previous}.bak`, { reader: true });
-			try {
-				expect(backup.raw.query("SELECT * FROM meta ORDER BY key").all()).toEqual([
-					{ key: "preserved", value: "kept" },
-					{ key: "schema_version", value: String(previous) },
-				]);
+					expect(() => openDatabase(path)).toThrow("UNIQUE");
+					for (const file of older) expect(readFileSync(file, "utf8")).toBe("untouched");
+					expect(removed.mock.calls).toEqual([]);
+					expect(db.raw.query("SELECT * FROM meta ORDER BY key").all()).toEqual([
+						{ key: "preserved", value: "kept" },
+						{ key: "schema_version", value: String(previous) },
+					]);
+					const backup = new Db(`${path}.v${previous}.bak`, { reader: true });
+					try {
+						expect(backup.raw.query("SELECT * FROM meta ORDER BY key").all()).toEqual([
+							{ key: "preserved", value: "kept" },
+							{ key: "schema_version", value: String(previous) },
+						]);
+					} finally {
+						backup.close();
+					}
+				}
+				migration.sql = original;
+				const reopened = openDatabase(path);
+				try {
+					for (const file of older) expect(fs.existsSync(file)).toBe(failFirst);
+					for (const file of unrelated) expect(readFileSync(file, "utf8")).toBe("untouched");
+					expect(fs.lstatSync(`${path}.v3.bak`).isDirectory()).toBe(true);
+					expect(fs.lstatSync(`${path}.v4.bak`).isSymbolicLink()).toBe(true);
+					expect(removed.mock.calls.map((call) => call[0]).sort()).toEqual(
+						failFirst ? [] : older.map((file) => `[mainworthy] removed upgrade copy ${JSON.stringify(file)}`).sort(),
+					);
+					const kept = new Db(`${path}.v${previous}.bak`, { reader: true });
+					try {
+						expect(schemaVersion(kept)).toBe(previous);
+						expect(kept.raw.query("SELECT value FROM meta WHERE key = 'preserved'").get()).toEqual({ value: "kept" });
+					} finally {
+						kept.close();
+					}
+					expect(schemaVersion(reopened)).toBe(SCHEMA_VERSION);
+					expect(reopened.raw.query("SELECT value FROM meta WHERE key = 'preserved'").get()).toEqual({ value: "kept" });
+				} finally {
+					reopened.close();
+				}
+				removed.mockClear();
+				const restarted = openDatabase(path);
+				try {
+					expect(schemaVersion(restarted)).toBe(SCHEMA_VERSION);
+					expect(fs.existsSync(`${path}.v${previous}.bak`)).toBe(true);
+					expect(removed.mock.calls).toEqual([]);
+				} finally {
+					restarted.close();
+				}
+				db.raw.query("UPDATE meta SET value = ? WHERE key = 'schema_version'").run(String(SCHEMA_VERSION + 1));
+				expect(() => openDatabase(path)).toThrow("is newer than this build");
+				expect(schemaVersion(db)).toBe(SCHEMA_VERSION + 1);
 			} finally {
-				backup.close();
+				removed.mockRestore();
+				migration.sql = original;
+				db.close();
+				rmSync(directory, { recursive: true, force: true });
 			}
+		});
+	}
+
+	test("a pre-existing garbage upgrade copy keeps older copies", () => {
+		const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-garbage-copy-"));
+		const path = databasePath(directory);
+		const db = new Db(path);
+		const log = spyOn(console, "error").mockImplementation(() => {});
+		try {
+			for (const migration of MIGRATIONS.slice(0, 19)) db.exec(migration.sql);
+			db.exec("INSERT INTO meta VALUES ('schema_version', '19'), ('preserved', 'kept')");
+			db.raw.query("VACUUM INTO ?").run(`${path}.v19.bak`);
+			for (const migration of MIGRATIONS.slice(19, 20)) db.exec(migration.sql);
+			db.exec("UPDATE meta SET value = '20' WHERE key = 'schema_version'");
+			fs.writeFileSync(`${path}.v20.bak`, "partial garbage");
+			const opened = openDatabase(path);
+			try {
+				expect(schemaVersion(opened)).toBe(SCHEMA_VERSION);
+				expect(fs.existsSync(`${path}.v19.bak`)).toBe(true);
+				expect(readFileSync(`${path}.v20.bak`, "utf8")).toBe("partial garbage");
+				expect(log.mock.calls).toEqual([]);
+				const older = new Db(`${path}.v19.bak`, { reader: true });
+				try {
+					expect(schemaVersion(older)).toBe(19);
+					expect(older.raw.query("SELECT value FROM meta WHERE key = 'preserved'").get()).toEqual({ value: "kept" });
+				} finally {
+					older.close();
+				}
+			} finally {
+				opened.close();
+			}
+		} finally {
+			log.mockRestore();
+			db.close();
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
+
+	test("a later failed migration rolls back the whole upgrade before a retry", () => {
+		const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-batch-rollback-"));
+		const path = databasePath(directory);
+		const db = new Db(path);
+		const migration = MIGRATIONS.find((entry) => entry.version === 25);
+		if (!migration) throw new Error("expected migration 25");
+		const original = migration.sql;
+		const log = spyOn(console, "error").mockImplementation(() => {});
+		try {
+			for (const entry of MIGRATIONS.slice(0, 20)) db.exec(entry.sql);
+			db.exec("INSERT INTO meta VALUES ('schema_version', '20'), ('preserved', 'kept')");
+			db.raw.query("VACUUM INTO ?").run(`${path}.v19.bak`);
+			const before = contents(db);
+			migration.sql = "INSERT INTO meta VALUES ('preserved', 'duplicate')";
+			expect(() => openDatabase(path)).toThrow("UNIQUE");
+			expect(schemaVersion(db)).toBe(20);
+			expect(contents(db)).toEqual(before);
+			expect(fs.existsSync(`${path}.v19.bak`)).toBe(true);
+			expect(log.mock.calls).toEqual([]);
 			migration.sql = original;
 			const reopened = openDatabase(path);
 			try {
 				expect(schemaVersion(reopened)).toBe(SCHEMA_VERSION);
-				expect(reopened.raw.query("SELECT value FROM meta WHERE key = 'preserved'").get()).toEqual({ value: "kept" });
+				expect(fs.existsSync(`${path}.v19.bak`)).toBe(true);
+				expect(fs.existsSync(`${path}.v24.bak`)).toBe(false);
+				expect(log.mock.calls).toEqual([]);
+				const backup = new Db(`${path}.v20.bak`, { reader: true });
+				try {
+					expect(schemaVersion(backup)).toBe(20);
+					expect(backup.raw.query("SELECT value FROM meta WHERE key = 'preserved'").get()).toEqual({ value: "kept" });
+				} finally {
+					backup.close();
+				}
 			} finally {
 				reopened.close();
 			}
-			db.raw.query("UPDATE meta SET value = ? WHERE key = 'schema_version'").run(String(SCHEMA_VERSION + 1));
-			expect(() => openDatabase(path)).toThrow("is newer than this build");
-			expect(schemaVersion(db)).toBe(SCHEMA_VERSION + 1);
 		} finally {
 			migration.sql = original;
+			log.mockRestore();
+			db.close();
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
+
+	test("a failed copy sync publishes no final copy and preserves the starting database", () => {
+		const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-copy-sync-"));
+		const path = databasePath(directory);
+		const db = new Db(path);
+		const sync = spyOn(fs, "fsyncSync").mockImplementation(() => {
+			throw new Error("copy sync failed");
+		});
+		try {
+			for (const migration of MIGRATIONS.slice(0, 20)) db.exec(migration.sql);
+			db.exec("INSERT INTO meta VALUES ('schema_version', '20'), ('preserved', 'kept')");
+			fs.writeFileSync(`${path}.v19.bak`, "older copy");
+			expect(() => openDatabase(path)).toThrow("copy sync failed");
+			expect(schemaVersion(db)).toBe(20);
+			expect(fs.existsSync(`${path}.v20.bak`)).toBe(false);
+			expect(readFileSync(`${path}.v19.bak`, "utf8")).toBe("older copy");
+			expect(readdirSync(directory).filter((file) => file.endsWith(".tmp"))).toEqual([]);
+			sync.mockRestore();
+			const reopened = openDatabase(path);
+			try {
+				expect(schemaVersion(reopened)).toBe(SCHEMA_VERSION);
+				expect(fs.existsSync(`${path}.v19.bak`)).toBe(false);
+				const backup = new Db(`${path}.v20.bak`, { reader: true });
+				try {
+					expect(schemaVersion(backup)).toBe(20);
+					expect(backup.raw.query("SELECT value FROM meta WHERE key = 'preserved'").get()).toEqual({ value: "kept" });
+				} finally {
+					backup.close();
+				}
+			} finally {
+				reopened.close();
+			}
+		} finally {
+			sync.mockRestore();
+			db.close();
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
+
+	test("a failed upgrade copy deletion logs and still opens the upgraded database", () => {
+		const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-cleanup-failure-"));
+		const path = databasePath(directory);
+		const db = new Db(path);
+		const older = `${path}.v1.bak`;
+		const removable = `${path}.v2.bak`;
+		const remove = fs.rmSync;
+		const removal = spyOn(fs, "rmSync").mockImplementation((file, options) => {
+			if (file === older) throw new Error("permission denied for upgrade copy");
+			return remove(file, options);
+		});
+		const log = spyOn(console, "error").mockImplementation(() => {});
+		try {
+			for (const migration of MIGRATIONS.slice(0, 20)) db.exec(migration.sql);
+			db.exec("INSERT INTO meta VALUES ('schema_version', '20'), ('preserved', 'kept')");
+			fs.writeFileSync(older, "keep on removal failure");
+			fs.writeFileSync(removable, "remove successfully");
+			const opened = openDatabase(path);
+			try {
+				expect(schemaVersion(opened)).toBe(SCHEMA_VERSION);
+				expect(opened.raw.query("SELECT value FROM meta WHERE key = 'preserved'").get()).toEqual({ value: "kept" });
+				expect(readFileSync(older, "utf8")).toBe("keep on removal failure");
+				expect(fs.existsSync(removable)).toBe(false);
+				expect(log.mock.calls.map((call) => call[0]).sort()).toEqual(
+					[
+						`[mainworthy] could not remove upgrade copy ${JSON.stringify(older)}: permission denied for upgrade copy`,
+						`[mainworthy] removed upgrade copy ${JSON.stringify(removable)}`,
+					].sort(),
+				);
+				const backup = new Db(`${path}.v20.bak`, { reader: true });
+				try {
+					expect(schemaVersion(backup)).toBe(20);
+				} finally {
+					backup.close();
+				}
+			} finally {
+				opened.close();
+			}
+		} finally {
+			removal.mockRestore();
+			log.mockRestore();
 			db.close();
 			rmSync(directory, { recursive: true, force: true });
 		}

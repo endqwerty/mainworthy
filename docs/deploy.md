@@ -462,7 +462,7 @@ Until 2026-10-13 a browser's cookie held the token itself, for a year. A build f
 browser a session instead (decision 0017). What the first start of the new build does by itself:
 
 - It adds the table `sessions` to the database, after writing a copy of the database beside it
-  (`mainworthy.db.v1.bak`).
+  (`mainworthy.db.v1.bak` if that copy does not already exist). A later upgrade can remove this copy.
 - Tokens are untouched. The owner token, a pipeline's `MAINWORTHY_TOKEN` and an agent's token work as before.
 - An archive exported by the earlier build still imports.
 
@@ -474,8 +474,8 @@ What you do once:
 
 Nothing else changes for a browser. Drafts and run notes are kept by the page, not by the cookie.
 
-To go back, stop the container, put `mainworthy.db.v1.bak` in place of `mainworthy.db` and start the previous
-image. Sessions made since are gone with the table, and each browser signs in once more.
+If `mainworthy.db.v1.bak` is still retained, stop the container, put it in place of `mainworthy.db` and start
+the previous image. Sessions made since are gone with the table, and each browser signs in once more.
 
 `compose.coolify.yaml` does not pass the two lifetime variables, so the instance on Coolify runs with 14 and 90
 days. To change them there, add the two lines from `compose.yaml` to the service and set the variables in
@@ -547,8 +547,9 @@ refuses to revoke the last token the owner can sign in with.
 
 ### The upgrade to this build
 
-The first start adds columns to `tokens` and `sessions`, after writing a copy of the database beside it
-(`mainworthy.db.v2.bak`). Every token and every session keeps working, except a token longer than 512 characters (see below). A token made before the upgrade has no
+On an instance at schema 2, the first start adds columns to `tokens` and `sessions`, after writing a copy
+beside the database if absent (`mainworthy.db.v2.bak`). A later upgrade can remove this copy. Every token and
+every session keeps working, except a token longer than 512 characters (see below). A token made before the upgrade has no
 end and names no maker. Before you deploy, check that `MAINWORTHY_OWNER_TOKEN` has at least 20 characters and at
 most 512: a value outside that stops the start, and the message says how to make one. The schema is brought up
 to date before that check, so a start that is refused for the token's length has already migrated the database;
@@ -656,9 +657,18 @@ The data is `/data/mainworthy.db` (with `-wal` and `-shm` beside it while runnin
   into an empty instance and compares every table (`src/server/transfer/transfer.test.ts`). An archive names the
   version of what it holds, which changes only when an exported table does, so one taken before an upgrade that
   added other tables still imports (`test/sessions.test.ts` imports one from the build before sessions).
-- **Upgrade:** a new image migrates the database on start. Before it changes a database that holds data, it
-  writes a copy beside it (`mainworthy.db.v<N>.bak`); to go back, stop the container, put that copy in place of
-  `mainworthy.db`, and start the previous image.
+- **Upgrade:** a new image runs all pending migrations in one transaction on start. A failed migration rolls
+  back the entire upgrade to its starting schema and data, and removes no copies. Before changing existing
+  data, the server uses `VACUUM INTO` to write a consistent copy to a unique temporary file beside the database.
+  It syncs and closes that file, renames it to `mainworthy.db.v<N>.bak`, then syncs the directory. `N` is the
+  version before the upgrade. Only after all migrations commit, and only if this start completed that copy
+  itself, does it remove older upgrade copies and log each removed filename. Normally one copy remains.
+  If the final-name copy already exists, the server leaves it unchecked and keeps all older copies.
+  Cleanup failures are logged without failing startup; extra copies remain until a later successful upgrade
+  writes a new copy. A start with no pending migrations performs no cleanup.
+  Only copies still present are rollback points. To go back, stop the container, put a retained copy in place
+  of `mainworthy.db`, and start the image that matches that copy's schema. To preserve an older rollback point
+  across further upgrades, save a separate backup before upgrading.
 
 Nothing schedules the backup yet, and the home server's own backups do not leave the host: until that is set
 up (#59), a failed disk loses the instance.

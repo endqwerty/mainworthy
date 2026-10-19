@@ -1074,9 +1074,11 @@ describe("an upgrade", () => {
 		const dataDir = scratch();
 		const path = databasePath(dataDir);
 		writeFileSync(path, Bun.gunzipSync(readFileSync(FIXTURE.file)));
+		writeFileSync(`${path}.v1.bak`, "an older upgrade copy");
 		const clock = clockAt(FIXTURE.stoppedAt + HOUR);
 		const instance = boot({ dataDir, clock, ownerToken: FIXTURE.env });
 		expect(said(instance)).toEqual([]);
+		expect(existsSync(`${path}.v1.bak`)).toBe(false);
 		expect(existsSync(`${path}.v2.bak`)).toBe(true);
 		const versionOf = (file: string): string | undefined => {
 			const raw = new Database(file, { readonly: true });

@@ -1,5 +1,6 @@
 // Versioned migrations, run on start in every layer (decision 0002, rule 8).
-import { existsSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, openSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { Db } from "./db.ts";
 import init from "./migrations/0001_init.sql" with { type: "text" };
 import sessions from "./migrations/0002_sessions.sql" with { type: "text" };
@@ -121,9 +122,10 @@ export function schemaVersion(db: Db): number {
 }
 
 /**
- * Brings the database to the current schema. Each migration runs in its own transaction, so a failure leaves
- * the previous version intact. Before changing a database that already holds data, a consistent copy is written
- * next to it (`<file>.v<N>.bak`): that copy is the way back when an upgrade goes wrong.
+ * Brings the database to the current schema in one transaction, so a failure leaves the starting version intact.
+ * Before changing a database that already holds data, a consistent copy is synced and published next to it
+ * (`<file>.v<N>.bak`). Older copies are removed only after all migrations commit and only when this call
+ * completed the new copy itself. A pre-existing copy is left alone and never permits cleanup.
  */
 export function migrate(db: Db, path: string): { from: number; to: number; backup: string | null } {
 	const from = schemaVersion(db);
@@ -131,20 +133,67 @@ export function migrate(db: Db, path: string): { from: number; to: number; backu
 		throw new Error(`database schema ${from} is newer than this build (${SCHEMA_VERSION}); upgrade Mainworthy`);
 	}
 	let backup: string | null = null;
+	let wroteBackup = false;
 	const pending = MIGRATIONS.filter((m) => m.version > from);
 	if (pending.length > 0 && from > 0 && path !== ":memory:") {
 		backup = `${path}.v${from}.bak`;
-		if (!existsSync(backup)) db.raw.query("VACUUM INTO ?").run(backup);
+		if (!existsSync(backup)) {
+			const temporary = `${backup}.${crypto.randomUUID()}.tmp`;
+			try {
+				db.raw.query("VACUUM INTO ?").run(temporary);
+				const copy = openSync(temporary, "r+");
+				try {
+					fsyncSync(copy);
+				} finally {
+					closeSync(copy);
+				}
+				renameSync(temporary, backup);
+				const directory = openSync(dirname(path), "r");
+				try {
+					fsyncSync(directory);
+				} finally {
+					closeSync(directory);
+				}
+				wroteBackup = true;
+			} finally {
+				rmSync(temporary, { force: true });
+			}
+		}
 	}
-	for (const migration of pending) {
+	if (pending.length > 0)
 		db.transaction(() => {
-			db.exec(migration.sql);
-			db.raw
-				.query(
-					"INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-				)
-				.run(String(migration.version));
+			for (const migration of pending) {
+				db.exec(migration.sql);
+				db.raw
+					.query(
+						"INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+					)
+					.run(String(migration.version));
+			}
 		});
+	if (wroteBackup) {
+		const directory = dirname(path);
+		const prefix = `${basename(path)}.v`;
+		try {
+			for (const file of readdirSync(directory, { withFileTypes: true })) {
+				if (!file.isFile() || !file.name.startsWith(prefix)) continue;
+				const version = /^([1-9]\d*)\.bak$/.exec(file.name.slice(prefix.length))?.[1];
+				if (!version || Number(version) >= from) continue;
+				const older = join(directory, file.name);
+				try {
+					rmSync(older, { force: true });
+					console.error(`[mainworthy] removed upgrade copy ${JSON.stringify(older)}`);
+				} catch (error) {
+					console.error(
+						`[mainworthy] could not remove upgrade copy ${JSON.stringify(older)}: ${error instanceof Error ? error.message : error}`,
+					);
+				}
+			}
+		} catch (error) {
+			console.error(
+				`[mainworthy] could not list upgrade copies in ${JSON.stringify(directory)}: ${error instanceof Error ? error.message : error}`,
+			);
+		}
 	}
 	return { from, to: SCHEMA_VERSION, backup };
 }
