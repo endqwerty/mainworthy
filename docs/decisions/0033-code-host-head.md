@@ -14,6 +14,11 @@ A producer reads the code host at report time and sends `target.head` alongside 
 The hashes may differ. Results and the receipt belong to the tested commit. The change's
 gate follows the reported head, in either direction, and waits for evidence if needed.
 
+The same head supplies the change's evidence for clearing failure questions and ending
+answers whose cause passed, as decision 0091 defines. A discarded commit's passing retry
+cannot clear the current head's question or answer. An unreported head supplies no proof
+that a cause passed. Issue #534 fixes the scope selector to follow this head, like the gate.
+
 Only a pipeline or person can say where the head is. Agent evidence stays advisory.
 CI detection supplies no head observation because an old event can name an old head.
 This does not add a code host watcher.

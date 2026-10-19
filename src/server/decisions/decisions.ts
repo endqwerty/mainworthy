@@ -1207,8 +1207,9 @@ export function stopAskingAbout(ctx: Ctx, change: ChangeRow): string[] {
 }
 
 /**
- * A change that had ended is open again: what its newest commit shows unexplained is asked about now, without
- * waiting for the next report. Returns the refs of the failure questions open in its scope.
+ * A change that had ended is open again: ask about unexplained failures in its observed head's run, if that run
+ * belongs to this scope. An unreported head or a run in another scope supplies no evidence to re-ask here.
+ * Returns the refs of the failure questions open in its scope.
  */
 export function askAgainAbout(ctx: Ctx, change: ChangeRow): string[] {
 	const scope = `change:${change.id}`;

@@ -90,3 +90,14 @@ ending and the answer it superseded, including who answered and the recorded rea
 ## Not done
 
 - Answers given before this change end the same way, at the next passing report in their scope.
+
+## Scope of the observed head
+
+A change's observed head speaks for its failure questions only when that commit's run belongs to the same
+scope. A typed result can keep a commit in its own `commit:` scope even after CI names it as a pull request's
+head. Its passing results then provide no evidence that the pull request's cause stopped. Returning no current
+run for that scope keeps the earlier question open, including when an advisory agent report recomputes it.
+The head commit's own gate remains readable through the change.
+
+Reopening follows the same rule. A landing commit without a report, or a head run in another scope, supplies
+no evidence to ask about again. A subsequent report can supply or select evidence in the reopened scope.

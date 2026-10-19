@@ -174,6 +174,22 @@ export function sequence(seed: number, preset: string): Problem | null {
 				newestInScope.set(scope, Math.max(newestInScope.get(scope) ?? 0, Number(run.id)));
 			}
 		}
+		// A change speaks through its observed head only while that run belongs to this scope.
+		for (const change of rows("SELECT id, project, repo, head_sha FROM changes")) {
+			const scope = `change:${change.id}`;
+			const head =
+				change.head_sha === null
+					? undefined
+					: runs.find(
+							(run) =>
+								run.origin === "change" &&
+								run.project === change.project &&
+								run.scope === scope &&
+								run.accepts_what === `code:${change.repo ?? ""}@${change.head_sha}`,
+						);
+			if (head) newestInScope.set(scope, Number(head.id));
+			else newestInScope.delete(scope);
+		}
 		const targets = new Map(rows("SELECT * FROM targets").map((target) => [Number(target.id), target]));
 		const open = rows<{ no: number; subject: string; evidence: string; refs: string | null }>(
 			`SELECT q.no, q.subject, q.evidence, group_concat(r.ref) AS refs FROM questions q

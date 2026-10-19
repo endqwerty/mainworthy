@@ -1021,8 +1021,15 @@ type Cause = [signature: number, target: number];
 
 // ── Tally and verdict ──────────────────────────────────────────────────────────────────────────────────────
 
-/** The run of the newest commit in a change's or a line's scope: the one that speaks for the scope. */
+/** The run that speaks for a scope: its change's observed head in that scope, or the newest commit on a line. */
 export function newestInScope(db: Db, project: number, scope: string): RunRow | null {
+	if (scope.startsWith("change:")) {
+		const change = changeById(db, Number(scope.slice("change:".length)));
+		const head = change?.head_sha
+			? db.get(Q.changeRun, { project, what: codeWhat(change.repo, change.head_sha) })
+			: null;
+		return head?.scope === scope ? head : null;
+	}
 	const newest = db.get(Q.newestChangeRun, { project, scope })?.id;
 	return newest ? runById(db, newest) : null;
 }

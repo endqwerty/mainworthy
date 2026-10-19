@@ -191,6 +191,11 @@ A pipeline or person can supply the head. An agent's report cannot move it.
 Mainworthy follows an explicit head in either direction. If that commit has no counted
 results, the change's gate is pending. The receipt still shows the tested commit's gate.
 
+Only results for that current head can clear a failure question about the change or end
+an answer that needs a fix. A passing retry on a discarded commit stays recorded but
+leaves the current head's question or answer in place. A passing retry on the current
+head can still clear it.
+
 CI detection does not supply `--head`. An old workflow event can name an outdated head,
 so read the code host's current value instead of copying the event's commit.
 Without `--head`, reports keep their first-reported ordering. A commit already reported
