@@ -609,6 +609,9 @@ export const QuestionItem = z.object({
 		DecisionItem.extend({
 			/** For an ending: the answer it ended, with its original attribution. */
 			supersedes: DecisionItem.optional(),
+			effects: z
+				.record(z.string(), z.unknown())
+				.describe("The recorded effects of this decision, including adopted case refs and versions."),
 		}),
 		z.null(),
 	]),

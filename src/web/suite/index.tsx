@@ -27,6 +27,7 @@ import {
 	type Draft,
 	draftKey,
 	draftTags,
+	hasDraftText,
 	hasTypedMerge,
 	knownStepIds,
 	promoteStepIds,
@@ -89,6 +90,15 @@ const CardQuestion = z.object({
 	evidenceHash: z.string(),
 	decision: z.object({ answer: z.object({ is: z.string() }) }).nullable(),
 });
+const AdoptionQuestion = CardQuestion.extend({
+	decision: z
+		.object({
+			answer: z.object({ is: z.string() }),
+			effects: z.object({ cases: RecordedSave.shape.cases.optional(), rejected: z.boolean().optional() }),
+		})
+		.nullable(),
+});
+const SubmittedText = z.object({ body: CaseBody, tags: z.array(z.string()), covers: z.array(z.string()) });
 /** A draft's body as it is sent: tags and links typed inline are taken out, and a step with no action is left out. */
 function sentBody(draft: Draft): CaseBody {
 	return recordable(cleanTitle(draft).body);
@@ -620,11 +630,7 @@ export function SuiteScreen() {
 		} else setDraftState(changed);
 	}
 	function dropEmpty(snapshot: Draft): boolean {
-		if (
-			snapshot.ref === null &&
-			!snapshot.body.title.trim() &&
-			!snapshot.body.steps.some((step) => step.use || step.action.trim())
-		) {
+		if (snapshot.ref === null && !hasDraftText(snapshot)) {
 			removeOwnedDraft(snapshot.id);
 			setCaptures((previous) => {
 				if (!previous.has(snapshot.id)) return previous;
@@ -645,12 +651,13 @@ export function SuiteScreen() {
 			const latest = readDraft({ project, id });
 			if (!latest || !mayWrite(id)) return;
 			const cleaned = cleanTitle(latest);
-			const next = {
+			const next: Draft = {
 				...(latest.conflict && hasTypedMerge(latest.conflict)
 					? { ...cleaned, body: cardText({ draft: cleaned, conflict: latest.conflict }) }
 					: latest),
 				sent: null,
 				conflict: undefined,
+				submission: { kind: "none" },
 				cmd: randomId(),
 			};
 			liveDrafts.current.set(id, next);
@@ -1001,8 +1008,7 @@ export function SuiteScreen() {
 			covers: cleaned.covers,
 			folder: snapshot.folder,
 		});
-		if (settleOnly && !snapshot.sent) return;
-		if (snapshot.submission.kind === "waiting" && snapshot.submission.fingerprint === fingerprint) return;
+		if (settleOnly && !snapshot.sent && snapshot.submission.kind !== "waiting") return;
 		// All the draft holds beyond its version is a step still without an action, which no version can take.
 		// Nothing is sent, and the draft stays on the device as it is (issue #86).
 		if (
@@ -1017,12 +1023,24 @@ export function SuiteScreen() {
 			return;
 		const source = snapshot;
 		const recovered = snapshot.sent;
-		if (recovered) {
-			body = recovered.body;
-			cleaned = { ...cleaned, covers: recovered.covers };
+		const waitingText =
+			!recovered && snapshot.submission.kind === "waiting"
+				? SubmittedText.parse(JSON.parse(snapshot.submission.fingerprint))
+				: null;
+		const submitted = recovered ?? waitingText;
+		if (submitted) {
+			body = submitted.body;
+			cleaned = { ...cleaned, covers: submitted.covers };
 		}
-		const sentTagChanges = recovered?.tagChanges ?? cleaned.tagChanges;
-		const sentTags = recovered?.tags ?? draftTags(cleaned);
+		const sentTags = recovered?.tags ?? waitingText?.tags ?? draftTags(cleaned);
+		const sentTagChanges =
+			recovered?.tagChanges ??
+			(waitingText
+				? {
+						add: sentTags.filter((tag) => !source.originalTags.includes(tag)),
+						remove: source.originalTags.filter((tag) => !sentTags.includes(tag)),
+					}
+				: cleaned.tagChanges);
 		const tagsToPlace = {
 			add: sentTagChanges.add.filter((tag) => !source.originalTags.includes(tag)),
 			remove: sentTagChanges.remove.filter((tag) => source.originalTags.includes(tag)),
@@ -1032,10 +1050,34 @@ export function SuiteScreen() {
 			? JSON.stringify({ body, tags: sentTags, covers: cleaned.covers, folder: snapshot.folder })
 			: fingerprint;
 		let moreToSend = false;
-		// Set once the server has answered the write. From then on a failure is not a refusal of the write (issue #381).
 		let reply: Api["propose"]["reply"] | null = null;
 		const task = (async () => {
 			try {
+				let recorded = false;
+				if (snapshot.submission.kind === "waiting") {
+					const question = AdoptionQuestion.parse(
+						(await call("get", { refs: [snapshot.submission.question] }, { project, owner }))[0],
+					);
+					if (!sessionCurrent(owner) || !mayWrite(source.id, !draftStored)) return;
+					if (question.state === "open") {
+						setStatus(`Proposed, waiting for a person · ${question.q}`);
+						return;
+					}
+					if (question.decision?.answer.is !== "accept" || question.decision.effects.rejected) {
+						forgetRequest(snapshot.id);
+						setStatus("The proposal was not accepted. Your draft is kept on this device.");
+						return;
+					}
+					reply = {
+						status: "adopted",
+						proposal: null,
+						question: question.q,
+						needs: null,
+						cases: question.decision.effects.cases ?? [],
+						conflicts: [],
+					};
+					recorded = true;
+				}
 				let after = snapshot.after;
 				if (after?.startsWith("draft:")) {
 					const predecessor = after;
@@ -1091,8 +1133,7 @@ export function SuiteScreen() {
 									),
 							];
 				// The reply was given to the save of unknown fate, and is read now (`command`), not just received.
-				let recorded = false;
-				if (recovered) {
+				if (recovered && !reply) {
 					if (!sessionCurrent(owner) || !mayWrite(source.id, !draftStored)) return;
 					let fate: Api["command"]["reply"];
 					try {
@@ -1140,7 +1181,13 @@ export function SuiteScreen() {
 							if (!writeOwnedDraft(sending)) return;
 						} catch {}
 					}
-					reply = await call("propose", request, { project, keepalive, owner });
+					try {
+						reply = await call("propose", request, { project, keepalive, owner });
+					} catch (error) {
+						if (error instanceof ApiError && sessionCurrent(owner) && mayWrite(source.id, !draftStored))
+							forgetRequest(source.id);
+						throw error;
+					}
 					if (!sessionCurrent(owner) || !mayWrite(source.id, !draftStored)) return;
 				}
 				if (reply.status === "conflict" || reply.status === "rejected") forgetRequest(snapshot.id);
@@ -1174,17 +1221,14 @@ export function SuiteScreen() {
 					return;
 				}
 				if (reply.status === "open") {
-					if (reply.question && draftRef.current?.id === snapshot.id) {
-						const latest = draftRef.current;
+					if (reply.question) {
+						const latest = liveDrafts.current.get(snapshot.id) ?? snapshot;
 						const next: Draft = {
 							...latest,
 							cmd: randomId(),
-							sent: null,
 							submission: { kind: "waiting", question: reply.question, fingerprint: proposed },
 						};
-						draftRef.current = next;
-						setDraftState(next);
-						if (!writeOwnedDraft(next)) return;
+						if (!putDraft(next)) return;
 					}
 					setStatus(`Proposed, waiting for a person${reply.question ? ` · ${reply.question}` : ""}`);
 					return;
@@ -1340,9 +1384,6 @@ export function SuiteScreen() {
 				void invalidateProject(project);
 			} catch (error) {
 				if (!sessionCurrent(owner) || !mayWrite(snapshot.id, !draftStored)) return;
-				// Only a refusal of the write forgets its command. After the write, the draft keeps it, and the next save asks
-				// what the server recorded (`command`) instead of creating again.
-				if (error instanceof ApiError && !reply) forgetRequest(snapshot.id);
 				setStatus(
 					`${error instanceof Error ? error.message : "Could not record this version"}. Your draft is kept on this device.`,
 				);
@@ -1410,6 +1451,32 @@ export function SuiteScreen() {
 	}, [recordedView, stepIdFor]);
 	const sealRef = useRef(sealDraft);
 	sealRef.current = sealDraft;
+	const waiting = [...captures.values()].filter(
+		(draft) => draft.submission.kind === "waiting" && draft.owner === windowId,
+	);
+	const waitingQuestions = useQueryOp({
+		project,
+		op: "get",
+		input: {
+			refs: waiting.flatMap((draft) => (draft.submission.kind === "waiting" ? [draft.submission.question] : [])),
+		},
+		enabled: waiting.length > 0,
+	});
+	useEffect(() => {
+		for (const item of waitingQuestions.data ?? []) {
+			const question = CardQuestion.safeParse(item);
+			if (!question.success || question.data.state === "open") continue;
+			for (const draft of liveDrafts.current.values()) {
+				if (
+					draft.submission.kind === "waiting" &&
+					draft.submission.question === question.data.q &&
+					draft.owner === windowId &&
+					!pending.current.has(draft.id)
+				)
+					void sealRef.current({ saved: draft, settleOnly: true });
+			}
+		}
+	}, [waitingQuestions.data, windowId]);
 	/**
 	 * A save of the draft in the pane whose reply never came is asked about as soon as the draft is here, once for
 	 * each save: after a reload, or when a draft a closed tab left is opened (issue #73). It is settled (`settleOnly`):
@@ -1420,7 +1487,14 @@ export function SuiteScreen() {
 	const askedSaves = useRef(new Set<string>());
 	useEffect(() => {
 		const cmd = draft?.sent?.input.cmd;
-		if (!draft || !cmd || draft.owner !== windowId || pending.current.has(draft.id) || askedSaves.current.has(cmd))
+		if (
+			!draft ||
+			!cmd ||
+			draft.submission.kind === "waiting" ||
+			draft.owner !== windowId ||
+			pending.current.has(draft.id) ||
+			askedSaves.current.has(cmd)
+		)
 			return;
 		askedSaves.current.add(cmd);
 		void sealRef.current({ saved: draft, settleOnly: true });
@@ -1458,10 +1532,7 @@ export function SuiteScreen() {
 	}
 	function create(): void {
 		const previous = draftRef.current;
-		const retain =
-			previous?.ref === null &&
-			(previous.body.title.trim().length > 0 ||
-				previous.body.steps.some((step) => step.use || step.action.trim().length > 0));
+		const retain = previous?.ref === null && hasDraftText(previous);
 		if (previous && retain) setCaptures((prior) => new Map([...prior, [previous.id, previous]]));
 		void sealDraft();
 		const selectedRow = cases.find((item) => item.ref === selected);
