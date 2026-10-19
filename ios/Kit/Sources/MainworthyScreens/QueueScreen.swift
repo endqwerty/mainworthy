@@ -468,15 +468,17 @@ public final class QueueScreen: ProjectScreen {
 		defer { busy.subtract(refs) }
 		var withdrawn = 0
 		var kept: [String] = []
-		for question in questions {
-			do {
-				switch try await project.withdraw(question, reason: reason) {
+		do {
+			let outcomes = try await project.withdraw(questions, reason: reason)
+			for question in questions {
+				switch outcomes[question.ref] {
 				case .withdrawn: withdrawn += 1
 				case .notTaken(let asks): kept.append("\(question.ref): \(asks)")
+				case nil: kept.append("\(question.ref): the server did not confirm the withdrawal")
 				}
-			} catch {
-				kept.append("\(question.ref): \(error.shown)")
 			}
+		} catch {
+			kept = questions.map { "\($0.ref): \(error.shown)" }
 		}
 		if kept.isEmpty { typed[QueueScreen.withdrawing(QueueScreen.selectionTyping)] = nil }
 		let done = withdrawn == 1 ? "1 decision is withdrawn." : "\(withdrawn) decisions are withdrawn."

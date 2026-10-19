@@ -582,6 +582,80 @@ describe("a red report", () => {
 		expect(reply.ok && (reply.result as { status: string }[])[0]?.status).toBe("conflict");
 	});
 
+	test("one undo command withdraws unchanged decisions, refuses replacements, and replays without writes", () => {
+		h.call("report", ciReport({ commit: "undo-many", n: 2, fail: { 0: "first failure", 1: "second failure" } }));
+		const questions = queue().items;
+		expect(questions).toHaveLength(2);
+		const receipts = h.call<DecideReply[]>("decide", {
+			all: questions.map((q) => ({ q: q.q, onEvidence: q.evidenceHash, answer: { is: "flaky" } })),
+		});
+		const changed = first(questions);
+		const unchanged = first(questions.slice(1));
+		const replacement = first(
+			h.call<DecideReply[]>("decide", {
+				q: changed.q,
+				onEvidence: changed.evidenceHash,
+				answer: { is: "defect" },
+			}),
+		);
+		const input = {
+			undo: receipts.map((reply) => ({ q: reply.q, ifDecision: reply.decision })),
+			reason: "Taking back the selection",
+			cmd: "withdraw-selection",
+		};
+		const before = count("decisions");
+		const reply = h.call<DecideReply[]>("decide", input);
+		expect(reply.map(({ q, status }) => ({ q, status }))).toEqual([
+			{ q: changed.q, status: "conflict" },
+			{ q: unchanged.q, status: "reopened" },
+		]);
+		expect(count("decisions")).toBe(before + 1);
+		expect(first(h.call<InboxReply>("inbox", { state: "decided" }).items).decision).toMatchObject({
+			id: replacement.decision,
+		});
+		expect(
+			h.app.db.raw
+				.query("SELECT json_extract(signers, '$[0].reason') AS reason FROM decisions ORDER BY id DESC LIMIT 1")
+				.get(),
+		).toEqual({ reason: input.reason });
+		const state = h.raw("inbox");
+		if (!state.ok) throw new Error("No inbox");
+		const seq = state.seq;
+		expect(seq).toBeNumber();
+		expect(h.call<DecideReply[]>("decide", input)).toEqual(reply);
+		expect(count("decisions")).toBe(before + 1);
+		expect(h.raw("inbox")).toMatchObject({ ok: true, seq });
+	});
+
+	test("one undo accepts 500 conditional withdrawals and refuses empty, oversized or unconditional lists", () => {
+		h.call("propose", {
+			edits: Array.from({ length: 500 }, (_, i) => ({ op: "create", outline: `Reviewed case ${i}` })),
+		});
+		for (let offset = 0; offset < 500; offset += 100)
+			h.call("claim", {
+				lens: "undo-limit",
+				findings: Array.from({ length: 100 }, (_, i) => ({
+					on: `C-${offset + i + 1}`,
+					category: "ambiguous",
+					note: "Name the expected result",
+				})),
+			});
+		const questions = h.call<InboxReply>("inbox", { limit: 500 }).items;
+		expect(questions).toHaveLength(500);
+		const receipts = h.call<DecideReply[]>("decide", {
+			all: questions.map((q) => ({ q: q.q, onEvidence: q.evidenceHash, answer: { is: "defer" } })),
+		});
+		const undo = receipts.map((reply) => ({ q: reply.q, ifDecision: reply.decision }));
+		const before = count("decisions");
+		for (const invalid of [[], [...undo, undo[0]], [{ q: questions[0]?.q }]]) {
+			expect(h.raw("decide", { undo: invalid })).toMatchObject({ ok: false, error: { code: "invalid" } });
+		}
+		expect(count("decisions")).toBe(before);
+		expect(h.call<DecideReply[]>("decide", { undo }).map((reply) => reply.status)).toEqual(Array(500).fill("reopened"));
+		expect(count("decisions")).toBe(before + 500);
+		expect(queue().counts.open).toBe(500);
+	});
+
 	test("undo withdraws a decision: the gate returns, and both decisions stay in the ledger", () => {
 		h.call("report", ciReport({ commit: "fffffff1", n: 5, fail: { 1: "expected 1, got 2" } }));
 		const q = first(queue().items);

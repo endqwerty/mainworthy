@@ -219,8 +219,9 @@ enum Wire {
 		let facts: [String]
 	}
 
-	/// `decide`: what became of one answer, or of one withdrawal.
+	/// `decide`: one reply per answer or withdrawal, in request order.
 	struct DecideReply: Decodable, Equatable, Sendable {
+		/// The question this reply answers, including in a selection withdrawal.
 		let q: String
 		/// decided, advised, already, conflict, forbidden, invalid or reopened.
 		let status: String

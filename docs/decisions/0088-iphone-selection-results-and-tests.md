@@ -81,9 +81,16 @@ verdict (the verifier's third finding). A read of the page that finds another ru
 
 ## Not done
 
-- **Undo of a selection withdraws one question at a time**, as the web's `u` does: `decide` has no withdrawal of
-  several questions in one request. That changes the operation for every client and the MCP schema, so it is
-  its own change (issue #351), done once for the web and the phone.
 - A test's page lists its last twenty results, as on the web.
 - Creating cases from a selection goes through the outbox like every other answer; creating them from one
   question's page keeps its preview sheet, which needs a connection.
+
+## Selection withdrawal (2026-10-18)
+
+Issue [#351](https://github.com/endqwerty/mainworthy/issues/351) adds `decide` with
+`undo: [{q, ifDecision}]`, one shared reason, one command id and up to 500 withdrawals.
+Single-question undo becomes a list of one inside the operation, using the same withdrawal checks.
+The web queue and the iPhone send a selection as one request. Each reply says whether that
+question reopened or why it was refused. Another person's replacement decision remains in force.
+The web keeps the complete command for retries, including after a partial refusal or a lost reply.
+MCP discovery omits this form to keep its existing token budget (decision 0087).

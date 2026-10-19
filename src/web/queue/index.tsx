@@ -38,9 +38,12 @@ type DecisionEntry = { question: QuestionItem; answer: Record<string, unknown> }
 type Withdrawal = {
 	question: QuestionItem;
 	decision: number;
-	command: { id: string; reason: string | undefined } | null;
 };
-type LastAnswer = { entries: DecisionEntry[]; confirmed: Promise<Withdrawal[]> };
+type LastAnswer = {
+	entries: DecisionEntry[];
+	confirmed: Promise<Withdrawal[]>;
+	command?: Api["decide"]["input"] | undefined;
+};
 type InlineAnswer = { entries: DecisionEntry[]; field: "ref" | "reason"; value: string } & (
 	| { kind: "answer" }
 	| { kind: "withdrawal"; prior: LastAnswer }
@@ -351,7 +354,7 @@ function QueueWorkbench() {
 				const accepted = entries.flatMap(({ question }) => {
 					const reply = replies.find((reply) => reply.q === question.q);
 					return reply && (reply.status === "decided" || reply.status === "already") && reply.decision !== null
-						? [{ question, decision: reply.decision, command: null }]
+						? [{ question, decision: reply.decision }]
 						: [];
 				});
 				for (const ref of refs) if (refActions.current.get(ref) === action) pendingAnswers.current.delete(ref);
@@ -590,7 +593,7 @@ function QueueWorkbench() {
 							entries: questions.map((question) => ({ question, answer: question.decision?.answer ?? {} })),
 							confirmed: Promise.resolve(
 								questions.flatMap((question) =>
-									question.decision ? [{ question, decision: question.decision.id, command: null }] : [],
+									question.decision ? [{ question, decision: question.decision.id }] : [],
 								),
 							),
 						}
@@ -634,22 +637,18 @@ function QueueWorkbench() {
 				receipts = await prior.confirmed;
 				if (!receipts.length) return;
 				const failures: string[] = [];
-				for (const receipt of receipts) {
-					const { question, decision } = receipt;
-					receipt.command ??= { id: randomId(), reason };
-					const command = receipt.command;
+				const withdrawals = receipts.map(({ question, decision }) => ({ q: question.q, ifDecision: decision }));
+				const one = withdrawals[0];
+				if (!one) return;
+				prior.command ??= {
+					...(withdrawals.length === 1 ? { undo: one.q, ifDecision: one.ifDecision } : { undo: withdrawals }),
+					cmd: randomId(),
+					...(reason ? { reason } : {}),
+				};
+				const replies = await call("decide", prior.command, { project, owner });
+				for (const { question } of receipts) {
 					try {
-						const replies = await call(
-							"decide",
-							{
-								undo: question.q,
-								ifDecision: decision,
-								cmd: command.id,
-								...(command.reason ? { reason: command.reason } : {}),
-							},
-							{ project, owner },
-						);
-						const reply = replies[0];
+						const reply = replies.find((reply) => reply.q === question.q);
 						if (!sessionCurrent(owner)) return;
 						if (reply?.status === "conflict") {
 							const rows = await call("get", { refs: [question.q] }, { project, owner });
@@ -727,6 +726,7 @@ function QueueWorkbench() {
 					setLast({
 						entries: prior.entries.filter((entry) => unconfirmed.has(entry.question.q)),
 						confirmed: Promise.resolve(remaining),
+						command: prior.command,
 					});
 					setLastMessage(message);
 					setStatus(message);

@@ -80,7 +80,7 @@ for (const scenario of [
 	"settled replacement",
 	"bulk replacement",
 	"partial answer",
-	"partial withdrawal",
+	"lost selection reply",
 ])
 	check(
 		`undo receipts preserve other answers and partial outcomes: ${scenario}`,
@@ -93,7 +93,8 @@ for (const scenario of [
 				page.setDefaultTimeout(5000);
 				await page.locator("[data-current-question]").waitFor();
 				const original = new Map<string, number>();
-				const sent: { undo: string; ifDecision?: number | undefined }[] = [];
+				const sent: { q: string; ifDecision: number }[] = [];
+				const requests: unknown[] = [];
 				let changed: string | undefined;
 				let replacement: number | null = null;
 				await page.route("**/decide", async (route) => {
@@ -106,13 +107,24 @@ for (const scenario of [
 								?.decision ?? null;
 					};
 					if ("undo" in input) {
-						sent.push(z.object({ undo: z.string(), ifDecision: z.number().optional() }).parse(input));
+						requests.push(input);
+						const parsed = z
+							.union([
+								z
+									.object({ undo: z.string(), ifDecision: z.number() })
+									.transform(({ undo, ifDecision }) => [{ q: undo, ifDecision }]),
+								z
+									.object({ undo: z.array(z.object({ q: z.string(), ifDecision: z.number() })) })
+									.transform(({ undo }) => undo),
+							])
+							.parse(input);
+						sent.push(...parsed);
 						if (scenario === "settled replacement" && !changed) {
-							changed = input.undo;
+							changed = parsed[0]?.q;
 							await replace();
 						}
-						if (scenario === "partial withdrawal" && sent.length === 1) {
-							changed = input.undo;
+						if (scenario === "lost selection reply" && requests.length === 1) {
+							await route.fetch();
 							await route.abort();
 						} else await route.continue();
 						return;
@@ -145,35 +157,40 @@ for (const scenario of [
 					() => Promise.resolve(sent.length),
 					(count) => count === original.size,
 				);
+				expect(requests).toHaveLength(1);
 				if (scenario !== "partial answer")
 					await page.locator(".queue-last").getByText("withdrawal failed", { exact: false }).waitFor();
 				await eventually(
 					() => server.api("inbox", { state: "decided" }),
-					(reply) => reply.items.filter((q) => q.kind === "failure").length === (scenario === "partial answer" ? 0 : 1),
+					(reply) =>
+						reply.items.filter((q) => q.kind === "failure").length ===
+						(["partial answer", "lost selection reply"].includes(scenario) ? 0 : 1),
 				);
-				for (const input of sent) expect(input.ifDecision).toBe(original.get(input.undo));
+				for (const input of sent) expect(original.get(input.q)).toBe(input.ifDecision);
 				if (scenario.endsWith("replacement")) {
 					await page.keyboard.press("u");
 					await eventually(
-						() => Promise.resolve(sent.length),
-						(count) => count === original.size + 1,
+						() => Promise.resolve(requests.length),
+						(count) => count === 2,
 					);
-					expect(sent.at(-1)?.undo).toBe(changed);
-					expect(sent.at(-1)?.ifDecision).toBe(original.get(changed ?? ""));
+					expect(requests[1]).toEqual(requests[0]);
+					expect(sent.find((entry) => entry.q === changed)?.ifDecision).toBe(original.get(changed ?? ""));
 					const rows = await server.api("get", { refs: [changed ?? ""] });
 					expect(rows[0]?.decision).toMatchObject({ id: replacement, answer: { is: "defect" } });
 				}
-				if (scenario === "partial withdrawal") {
+				if (scenario === "lost selection reply") {
 					await page.keyboard.press("u");
 					await eventually(
 						() => server.api("inbox", { state: "decided" }),
 						(reply) => reply.items.filter((q) => q.kind === "failure").length === 0,
 					);
-					expect(sent).toHaveLength(original.size + 1);
-					expect(sent.at(-1)?.undo).toBe(changed);
-					expect(sent.at(-1)?.ifDecision).toBe(original.get(changed ?? ""));
+					await page.locator(".queue-last").getByText("Answer withdrawn.", { exact: false }).waitFor();
+					expect(requests).toHaveLength(2);
+					expect(requests[1]).toEqual(requests[0]);
 				}
-				expect(h.errors).toEqual(scenario === "partial withdrawal" ? ["Failed to load resource: net::ERR_FAILED"] : []);
+				expect(h.errors).toEqual(
+					scenario === "lost selection reply" ? ["Failed to load resource: net::ERR_FAILED"] : [],
+				);
 			} finally {
 				await h.close();
 				await server.stop();

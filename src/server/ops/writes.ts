@@ -567,7 +567,13 @@ export function decide(ctx: Ctx, input: DecideInput): DecideReply[] {
 }
 
 export function* decideSteps(ctx: Ctx, input: DecideInput): Generator<undefined, DecideReply[], void> {
-	if ("undo" in input) return [undo(ctx, { q: input.undo, ifDecision: input.ifDecision, reason: input.reason })];
+	if ("undo" in input) {
+		const withdrawals =
+			typeof input.undo === "string"
+				? [{ q: input.undo, ifDecision: "ifDecision" in input ? input.ifDecision : undefined }]
+				: input.undo;
+		return withdrawals.map((one) => undo(ctx, { ...one, reason: input.reason }));
+	}
 	if ("all" in input) {
 		const replies: DecideReply[] = [];
 		for (const one of input.all) replies.push(yield* answerSteps(ctx, { ...one, reason: one.reason ?? input.reason }));

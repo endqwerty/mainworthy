@@ -87,7 +87,14 @@ struct QueueSelectionTests {
 		#expect(screen.questions.filter { $0.kind == .map }.map(\.ref) == [unlinked[3].ref])
 		#expect(screen.outbox.entries.count == 1 && screen.outbox.entries.last?.status == "Recorded")
 		#expect(screen.outbox.entries.last?.questions == unlinked.prefix(3).map(\.ref))
-		#expect(await screen.withdrawAll(try #require(screen.notice?.undoesAll)))
+		let undoing = try #require(screen.notice?.undoesAll)
+		transport.commands.withLock { $0 = [] }
+		#expect(await screen.withdrawAll(undoing))
+		let withdrawals = try transport.commands.withLock { try $0.map { try JSONDecoder().decode(JSONValue.self, from: $0) } }
+		#expect(withdrawals.count == 1 && withdrawals[0]["cmd"]?.string != nil)
+		let members = try #require(withdrawals.first?["undo"]?.array)
+		#expect(members.map { $0["q"]?.string } == undoing.map { Optional($0.ref) })
+		#expect(members.map { $0["ifDecision"] } == undoing.map { $0.ifDecision.map { JSONValue.number(Double($0)) } })
 		#expect(screen.notice?.text == "3 decisions are withdrawn.")
 		#expect(screen.questions.filter { $0.kind == .map }.count == 4)
 	}

@@ -139,6 +139,13 @@ describe("what the iOS app reads", () => {
 		expect(await op(made.project, "find", { in: "cases", text: "Shipping accepts an address" })).toMatchObject({
 			items: [],
 		});
+		const receipt = z.array(z.object({ decision: z.number() })).parse(tracked)[0];
+		if (!receipt) throw new Error("the tracked answer has no receipt");
+		const withdrawal = { undo: [{ q: question.q, ifDecision: receipt.decision }], cmd: "native-selection-undo" };
+		const withdrawn = z.array(z.unknown()).parse(await op(made.project, "decide", withdrawal));
+		expect(withdrawn).toMatchObject([{ q: question.q, status: "reopened" }]);
+		for (const reply of withdrawn) holds("decide, selection withdrawal", DecideReply, reply);
+		expect(await op(made.project, "decide", withdrawal)).toEqual(withdrawn);
 	});
 
 	test("the iOS test instance publishes the real anonymous privacy route and records the opened URL", async () => {
