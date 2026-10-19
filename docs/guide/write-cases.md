@@ -166,6 +166,14 @@ To create a folder, follow these steps.
 Creating a folder while inside another folder places it below that folder.
 Select a folder in the sidebar to see its cases.
 
+Creating, renaming, or moving a folder cannot introduce a duplicate path.
+Existing duplicate paths do not block unrelated edits or a rename to a free path.
+Path comparisons ignore letter case and use the Unicode cleaning described in [scope clauses](./policy.md#limit-agent-edits-by-folder-or-tag).
+Creating or moving a case to an existing path uses that folder.
+The server checks the final paths of a whole proposal again when accepting it.
+Folder edits apply in order. A path that temporarily names two folders cannot be used to create a child folder during that batch.
+Reorder the edits so that the path is unique first.
+
 Press <kbd>x</kbd> on each case you want to select for a bulk action.
 With no selection, the action uses the current case.
 Press <kbd>m</kbd> to choose a destination folder.
