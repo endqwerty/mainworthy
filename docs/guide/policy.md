@@ -253,7 +253,7 @@ policy proposal P-2: open Q-2 needs an admin
 
 An admin finds it in Queue under "Proposals". Reading the clause table needs `admin` on every project. Switching needs `admin` only on the project being changed.
 
-A policy change rewrites nothing that is recorded. Results, decisions and cases stay as they were. What changes is who may answer, whether a reason is needed, and whether an empty declaration passes. The new policy applies to future and open questions. Each open question waits for whoever the new policy names. If the new policy has a rule for [tests with no case](#tests-with-no-case), that rule answers the open questions about them. Under `create`, the rule also makes their cases.
+A policy change rewrites nothing that is recorded. Results, decisions and cases stay as they were. What changes is who may answer, whether a reason is needed, and whether an empty declaration passes. The new policy applies to future and open questions. Each open question waits for whoever the new policy names. Automatic inherited excuses are reconsidered immediately in both directions. A switch to `standard` ends them, and a switch back to `loose` restores eligible excuses without another report. If the new policy has a rule for [tests with no case](#tests-with-no-case), that rule answers the open questions about them. Under `create`, the rule also makes their cases.
 
 ## Change single clauses
 

@@ -7,6 +7,7 @@ import { Glob } from "bun";
 import { z } from "zod";
 import api1Actors from "../../test/fixtures/cli/actor-list-api1.json";
 import { ciReport } from "../../test/helpers.ts";
+import { Policy } from "../core/kinds.ts";
 import { QuestionItem, type ReportInput } from "../core/ops.ts";
 import { API_VERSION } from "../core/version.ts";
 import { OP_LIST } from "../server/ops/index.ts";
@@ -26,6 +27,78 @@ const Inbox = z.object({ items: z.array(Question) });
 const Token = z.object({ token: z.string() });
 const Created = z.object({ cases: z.array(Ref) });
 const Receipt = z.object({ batch: z.number(), fresh: z.boolean(), counts: z.object({ total: z.number() }) });
+
+for (const refusal of ["reason", "admin"] as const) {
+	test(`decide prints a refused inherited replacement when the cause requires ${refusal}`, async () => {
+		await withInstance(async ({ client, cli }) => {
+			const policy = Policy.extend({ version: z.number() }).parse(
+				await client.call("admin", { do: "policy.show", project: "scratch" }),
+			);
+			await client.call("propose", {
+				edits: [
+					{
+						op: "policy",
+						base: policy.version,
+						clauses: policy.clauses.map((clause) =>
+							clause.kind === "failure" && clause.ask.who !== "rule"
+								? {
+										...clause,
+										ask: {
+											...clause.ask,
+											...(refusal === "reason" ? { reason: "required" as const } : { who: "admin" as const }),
+										},
+									}
+								: clause,
+						),
+					},
+				],
+			});
+			const adoption = (await client.call("inbox", { kind: "adopt" })).items[0];
+			if (!adoption) throw new Error("missing policy adoption");
+			await client.call("decide", { q: adoption.q, onEvidence: adoption.evidenceHash, answer: { is: "accept" } });
+			await client.call("report", ciReport({ commit: "clibase530", n: 1, fail: { 0: "same cause" } }));
+			await client.call(
+				"report",
+				ciReport({ commit: "clifix530", pr: 530, base: "clibase530", n: 1, fail: { 0: "same cause" } }),
+			);
+			const automatic = (await client.call("inbox", { state: "decided", kind: "failure", on: "pr:530" })).items[0];
+			if (!automatic) throw new Error("missing inherited answer");
+			const { token } = Token.parse(
+				await client.call("admin", {
+					do: "token.create",
+					actor: "member",
+					kind: "human",
+					can: ["read", "produce", "answer"],
+					project: "scratch",
+				}),
+			);
+			const result = await cli(
+				[
+					"decide",
+					"--project",
+					"scratch",
+					"--json",
+					JSON.stringify({ q: automatic.q, onEvidence: automatic.evidenceHash, answer: { is: "defect" } }),
+				],
+				refusal === "admin" ? { env: { MAINWORTHY_TOKEN: token } } : {},
+			);
+			expect(result.code).toBe(4);
+			expect(JSON.parse(result.stdout)).toMatchObject([
+				{
+					q: automatic.q,
+					status: refusal === "reason" ? "invalid" : "forbidden",
+					needs: refusal === "reason" ? "a reason" : "an admin",
+					decision: null,
+				},
+			]);
+			expect(result.stderr).toContain(refusal === "reason" ? "invalid: a reason" : "forbidden: an admin");
+			expect(await client.call("gate", { commit: "clifix530" })).toMatchObject({
+				verdict: "passed",
+				tally: { excused: 1, unexplained: 0 },
+			});
+		});
+	});
+}
 
 test("get prints who answered a failure and the recorded reason its answer ended", async () => {
 	await withInstance(async ({ client, cli }) => {

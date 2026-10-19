@@ -55,6 +55,7 @@ import {
 	failsOnBase,
 	failsWith,
 	inheritanceAffected,
+	inheritanceRuns,
 	inheritedEvidenceOf,
 	newestInScope,
 	passesAny,
@@ -86,7 +87,6 @@ import {
 	everyQuestionOn,
 	type HoldTerm,
 	holdEndingById,
-	inheritedQuestions,
 	insertAnswer,
 	insertDecision,
 	insertQuestion,
@@ -446,8 +446,7 @@ function* settleByRuleSteps(
 
 /** Reconcile existing inherited standing and let the new policy answer unlinked tests by rule. */
 function* reconsiderPolicySteps(ctx: Ctx): Generator<undefined, number, void> {
-	for (const question of inheritedQuestions(ctx.db, ctx.project.id))
-		for (const id of runsAbout(ctx, question)) ctx.recompute.add(id);
+	for (const id of inheritanceRuns(ctx.db, ctx.project.id)) ctx.recompute.add(id);
 	const policy = currentPolicy(ctx.db, ctx.project.id);
 	if (!policy.clauses.some((clause) => clause.kind === "map" && clause.ask.who === "rule")) return 0;
 	let taken = 0;
@@ -511,6 +510,12 @@ function answerApplicabilityProblem(kind: Kind, facts: ReadonlySet<string>, give
 	return allowed.includes(given.is)
 		? null
 		: `one of ${allowed.join(", ")}: \`${given.is}\` does not apply to this failure`;
+}
+
+class RefusedReplacement extends Error {
+	constructor(readonly reply: DecideReply) {
+		super(reply.needs ?? "the cause answer could not be recorded");
+	}
 }
 
 /**
@@ -604,8 +609,7 @@ export function* answerSteps(
 					q: questionRef(cause),
 					onEvidence: cause.evidence_hash,
 				});
-				if (replacement.status !== "decided")
-					throw conflict(replacement.needs ?? "the cause answer could not be recorded");
+				if (replacement.status !== "decided") throw new RefusedReplacement(replacement);
 				return { ...replacement, q: input.q, effects: { ...replacement.effects, question: replacement.q } };
 			});
 		}
@@ -639,6 +643,7 @@ export function* answerSteps(
 		});
 		return reply(question, "decided", { decision: settled.decision.id, effects: settled.effects });
 	} catch (error) {
+		if (error instanceof RefusedReplacement) return { ...error.reply, q: input.q };
 		if (error instanceof OpError)
 			return reply(question, error.code === "conflict" ? "conflict" : "invalid", { needs: error.message });
 		throw error;
