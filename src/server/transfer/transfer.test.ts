@@ -640,6 +640,18 @@ afterEach(() => {
 });
 
 describe("Mainworthy instance archives", () => {
+	test("an archive preserves legacy corrections that branch from the same result", () => {
+		const from = source();
+		insert(from, "results", { ...fixtures.results?.[1], id: 202, outcome: "blocked" });
+		const to = target();
+		importArchive(to, linesOf(archive(from)));
+		expect(to.raw.query("SELECT id, corrects, outcome FROM results ORDER BY id").all()).toEqual([
+			{ id: 200, corrects: 201, outcome: "pass" },
+			{ id: 201, corrects: null, outcome: "fail" },
+			{ id: 202, corrects: 201, outcome: "blocked" },
+		]);
+	});
+
 	test("a project archive keeps every head, decision and verdict and excludes other projects", () => {
 		const from = source();
 		const selectedSettings = JSON.stringify({

@@ -36,6 +36,12 @@ Linking the test, editing the case, or changing policy does not change a replaye
 
 A successful `report` exits `0` even when tests fail. Use `gate` for the verdict.
 An invalid input or refused command exits `4`. See [changes](./changes.md).
+
+A result's `corrects` names an earlier result of yours that has not already been corrected.
+If another report has replaced that result, the server refuses the whole report with `conflict`
+before accepting it. Read the latest results and correct the current result instead.
+Two results in one report cannot correct the same earlier result.
+
 Sending an identical report again returns the original receipt and says
 "already received; nothing was written". The receipt's gate line shows the verdict
 at the first upload. A repeat can therefore show "blocked" for a commit

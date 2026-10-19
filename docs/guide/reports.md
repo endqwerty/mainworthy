@@ -48,9 +48,9 @@ An attempt that a later attempt of the same test, job, commit and producer repea
 however many times that attempt was reported. The report adds up the time those attempts took, as their reports said
 it (of an attempt reported twice, the time of the result it counted: the worse, then the later), and lists the tests
 that cost the most. A correction counts in place of the attempt it corrects, its time included, whichever attempt
-the correction was sent with. Where a result was corrected twice, the attempt counts the worse of the corrections
-that stand, then the later. An attempt whose
-report gave no duration is counted, and its time is not: the report says how many there were.
+the correction was sent with. Where older stored history has two corrections of the same result, the attempt
+counts the worse of the corrections that stand, then the later. An attempt whose report gave no duration is
+counted, and its time is not: the report says how many there were.
 
 ## Automation
 

@@ -561,6 +561,59 @@ describe("what a result may prove", () => {
 		expect(rows("SELECT corrected FROM slot_results")).toEqual([{ corrected: 0 }]);
 	});
 
+	test.each(["human", "ci"] as const)("a %s report refuses a second correction of the same result", (kind) => {
+		seed(1, ["human", "auto"]);
+		const actor = kind === "ci" ? h.actor("pipeline", "ci", ["read", "record"]) : h.owner;
+		const planned = plan({ name: "One correction", select: {}, accepts: { commit: "correct611" } });
+		const input = { target: { commit: "correct611" } };
+		const test = kind === "ci" ? { key: "correction-test" } : { case: "C-1" };
+		const observed = { test, annotation: { case: "C-1", version: 1 } };
+		const original = first(report({ ...input, results: [{ ...observed, outcome: "pass" }] }, actor).results);
+		const correction = {
+			...input,
+			...(kind === "human" ? { cmd: crypto.randomUUID() } : {}),
+			results: [{ ...observed, outcome: "fail", note: "Still broken", corrects: original }],
+		};
+		const corrected = report(correction, actor);
+		const before = rows("SELECT count(*) AS n FROM batches");
+		expect(
+			h.raw("report", { ...input, results: [{ ...observed, outcome: "pass", corrects: original }] }, actor),
+		).toEqual({
+			ok: false,
+			error: {
+				code: "conflict",
+				message: `result ${original} was already corrected; read the latest results and correct the current result instead`,
+			},
+		});
+		expect(rows("SELECT count(*) AS n FROM batches")).toEqual(before);
+		expect(rows("SELECT outcome FROM results ORDER BY id")).toEqual([{ outcome: "pass" }, { outcome: "fail" }]);
+		expect(gate({ run: planned.run }).verdict).toBe("blocked");
+		if (kind === "ci") expect(report(correction, actor)).toMatchObject({ fresh: false, results: corrected.results });
+		else expect(report(correction, actor)).toEqual(corrected);
+		const latest = report(
+			{ ...input, results: [{ ...observed, outcome: "pass", corrects: first(corrected.results) }] },
+			actor,
+		);
+		expect(latest).toMatchObject({ counts: { total: 1, pass: 1 }, rejected: [], declined: [] });
+		expect(gate({ run: planned.run }).verdict).toBe("passed");
+	});
+
+	test("two corrections of one result in the same report refuse the whole report", () => {
+		seed();
+		const planned = plan({ name: "Duplicate corrections", select: {}, accepts: { commit: "dupe0611" } });
+		const target = { commit: "dupe0611" };
+		const original = first(report({ target, results: [{ test: { case: "C-1" }, outcome: "pass" }] }).results);
+		expect(
+			h.raw("report", {
+				target,
+				results: ["fail", "skip"].map((outcome) => ({ test: { case: "C-1" }, outcome, corrects: original })),
+			}),
+		).toMatchObject({ ok: false, error: { code: "conflict" } });
+		expect(rows("SELECT outcome FROM results")).toEqual([{ outcome: "pass" }]);
+		expect(rows("SELECT count(*) AS n FROM batches")).toEqual([{ n: 1 }]);
+		expect(gate({ run: planned.run }).verdict).toBe("passed");
+	});
+
 	test("a correction counts wherever the corrected result did: the commit's gate, and a run planned afterwards", () => {
 		seed();
 		const before = plan({ name: "Before the correction", select: {}, accepts: { commit: "correct2" } });

@@ -13,7 +13,7 @@ import type { ShardWait } from "../../core/runs.ts";
 import { normaliseFailure, signatureHash } from "../../core/signature.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { type Db, json, placeholders, type SqlValue, sql } from "../kernel/db.ts";
-import { invalid } from "../kernel/errors.ts";
+import { conflict, invalid } from "../kernel/errors.ts";
 import { decisionOf, type Witness } from "../kernel/witness.ts";
 import { type CaseRow, caseById, caseRef, findCase, versionOf } from "../suite/suite.ts";
 import { recordAttachments } from "./attachments.ts";
@@ -882,6 +882,18 @@ export function accept(
 	});
 	const existing = ctx.db.get(Q.batchByKey, { project: ctx.project.id, key });
 	if (existing) return { batch: existing, fresh: false };
+	// A refusal after acceptance would leave a durable batch pending, so check new corrections before storing it.
+	const corrected = new Set<number>();
+	for (const result of report.results) {
+		if (result.corrects === undefined) continue;
+		const earlier = ctx.db.get(Q.resultById, { id: result.corrects });
+		if (!earlier || earlier.project !== ctx.project.id || earlier.actor !== ctx.actor.id) continue;
+		if (corrected.has(earlier.id) || isWithdrawn(ctx.db, earlier.id))
+			throw conflict(
+				`result ${earlier.id} was already corrected; read the latest results and correct the current result instead`,
+			);
+		corrected.add(earlier.id);
+	}
 	if (report.shard) {
 		const other = ctx.db
 			.all(Q.shardsOf, { target: input.target.id })
