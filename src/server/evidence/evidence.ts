@@ -21,7 +21,7 @@ import { buildWhat } from "./releases.ts";
 
 /** SQL predicate for result id expressions: a correction withdraws what it names, whatever its own outcome. */
 export const uncorrectedResults = (id: string, ...others: string[]): string =>
-	`NOT EXISTS (SELECT 1 FROM results correction WHERE correction.corrects IN (${[id, ...others].join(", ")}))`;
+	`NOT EXISTS (SELECT 1 FROM results correction WHERE correction.corrects ${others.length === 0 ? `= ${id}` : `IN (${[id, ...others].join(", ")})`})`;
 
 export type TestRow = {
 	id: number;
