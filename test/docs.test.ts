@@ -3,7 +3,7 @@
 // name of what is missing; so does a table that no longer matches the code, a link that leads nowhere and a
 // diagram that was not built again after its source changed.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -216,6 +216,20 @@ describe("the diagrams", () => {
 			return !match || !names.includes(match[1] ?? "");
 		});
 		expect(strays).toEqual([]);
+	});
+
+	test("every repository diagram has its picture, which a page on GitHub shows", () => {
+		const missing = diagramNames(REPOSITORY).filter((name) => !existsSync(join(REPOSITORY.pages, `${name}.png`)));
+		expect(missing).toEqual([]);
+	});
+
+	test("drawing a picture records nothing: a stale page stays stale, and a name that has no picture is refused", () => {
+		const stamps = SETS.map((set) => readFileSync(stampPath(set), "utf8"));
+		for (const name of ["not-a-diagram", "overview"]) {
+			const run = Bun.spawnSync(["bun", "scripts/diagrams.ts", "picture", name], { stdout: "pipe", stderr: "pipe" });
+			expect(run.exitCode, name).not.toBe(0);
+		}
+		expect(SETS.map((set) => readFileSync(stampPath(set), "utf8"))).toEqual(stamps);
 	});
 
 	test("a diagram the repository keeps names no path on the machine it was built on", () => {
