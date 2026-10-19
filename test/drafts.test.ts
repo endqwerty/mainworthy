@@ -13,10 +13,13 @@ import {
 	writeCopiedDraft,
 } from "../src/web/lib/draft-copies.ts";
 import {
+	addDraftTags,
 	claimDraft,
 	type Draft,
 	draftKey,
+	draftTags,
 	readDraft,
+	remainingTagChanges,
 	removeDraft,
 	storedDraftOwners,
 	writeDraft,
@@ -51,6 +54,7 @@ const request: NonNullable<Draft["sent"]> = {
 	input: { cmd: "sent-cmd-01", edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Coupon case" } }] },
 	body,
 	tags: [],
+	tagChanges: { add: [], remove: [] },
 	covers: [],
 };
 const draft = (more: Partial<Draft>): Draft => ({
@@ -59,7 +63,7 @@ const draft = (more: Partial<Draft>): Draft => ({
 	base: 1,
 	body,
 	original: body,
-	tags: [],
+	tagChanges: { add: [], remove: [] },
 	covers: [],
 	originalTags: [],
 	originalCovers: [],
@@ -137,7 +141,7 @@ test("taking a draft over keeps the request its owner sent, as does claiming a c
 test("a losing window keeps its whole accepted draft separately from the shared draft and from other people", () => {
 	const mine = draft({
 		body: { ...body, title: "Coupon case A", steps: [{ id: "s1", action: "", expected: "Still being typed" }] },
-		tags: ["checkout"],
+		tagChanges: { add: ["checkout"], remove: [] },
 		covers: ["WEB-290"],
 		conflict: {
 			q: "Q-1",
@@ -405,4 +409,48 @@ test("data kept under a sign-in name is dropped at start, and nothing else is", 
 		"another-app:robin:draft:x": "Not ours",
 		"mainworthy:route:somewhere:else": "A key of the app's own, not a person's",
 	});
+});
+
+for (const placement of [undefined, { tags: ["alpha", "kept"] }]) {
+	test(`stored full-set drafts recover only their own tag changes, placement ${placement ? "present" : "absent"}`, () => {
+		const legacy = {
+			...draft({ originalTags: ["gone", "kept"] }),
+			tagChanges: undefined,
+			tags: ["alpha", "kept"],
+			placement,
+		};
+		kept.set(draftKey({ project, id: "C-1" }), JSON.stringify(legacy));
+		const found = stored();
+		if (!found) throw new Error("Stored draft was not recovered");
+		expect(found.tagChanges).toEqual({ add: ["alpha"], remove: ["gone"] });
+		expect(Object.hasOwn(found, "tags")).toBe(false);
+		expect(Object.hasOwn(found, "placement")).toBe(false);
+		expect(draftTags({ ...found, originalTags: ["kept", "beta"] })).toEqual(["kept", "beta", "alpha"]);
+		expect(writeDraft({ project, draft: found })).toBe(true);
+		expect(JSON.parse(kept.get(draftKey({ project, id: "C-1" })) ?? "null")).toEqual(found);
+	});
+}
+
+test("adding a draft tag owns neither a projected pending tag nor a cancelled removal", () => {
+	const edited = addDraftTags(draft({ originalTags: ["alpha", "gone"], tagChanges: { add: [], remove: ["gone"] } }), [
+		"beta",
+		"gone",
+	]);
+	expect(edited.tagChanges).toEqual({ add: ["beta"], remove: [] });
+	expect(draftTags({ ...edited, originalTags: ["alpha", "gone"] })).toEqual(["alpha", "gone", "beta"]);
+	expect(draftTags({ ...edited, originalTags: ["gone"] })).toEqual(["gone", "beta"]);
+});
+
+test("retiring an accepted save keeps later tag edits and reversals without claiming remote tags", () => {
+	const tagChanges = remainingTagChanges({
+		sent: { add: ["alpha", "reversed"], remove: ["gone", "restored"] },
+		current: { add: ["alpha", "beta"], remove: ["gone", "later"] },
+	});
+	expect(tagChanges).toEqual({ add: ["beta", "restored"], remove: ["later", "reversed"] });
+	expect(draftTags({ originalTags: ["alpha", "reversed", "gamma", "later"], tagChanges })).toEqual([
+		"alpha",
+		"gamma",
+		"beta",
+		"restored",
+	]);
 });

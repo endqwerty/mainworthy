@@ -184,7 +184,9 @@ export function allRecorded({
 	head: CaseBody;
 }): boolean {
 	const placed =
-		JSON.stringify([draft.tags, draft.covers]) !== JSON.stringify([draft.originalTags, draft.originalCovers]);
+		draft.tagChanges.add.some((tag) => !draft.originalTags.includes(tag)) ||
+		draft.tagChanges.remove.some((tag) => draft.originalTags.includes(tag)) ||
+		JSON.stringify(draft.covers) !== JSON.stringify(draft.originalCovers);
 	if (placed) return false;
 	return hasTypedMerge(conflict)
 		? !beyondCard({ draft, conflict }) && sameBody(conflict.merged, head)

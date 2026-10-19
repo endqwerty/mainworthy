@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { type DeviceSession, deviceKey, deviceSession, sessionCurrent } from "./device.ts";
-import { claimDraft, Draft, draftKey, hasTypedMerge, readDraft, writeDraft } from "./drafts.ts";
+import { claimDraft, Draft, draftKey, draftTags, hasTypedMerge, readDraft, writeDraft } from "./drafts.ts";
 import { draftOwner, randomId } from "./ids.ts";
 
 export type DraftCopy = { key: string; draft: Draft; stored: boolean };
@@ -13,7 +13,7 @@ const confirmed = new Map<string, DeviceSession>();
 export const draftCopiesChanged = "mainworthy:draft-copies";
 export const draftCopyPrefix = ({ project, id }: { project: string; id: string }): string =>
 	deviceKey("draft-copy", `${encodeURIComponent(project)}:${encodeURIComponent(id)}:`);
-const content = (draft: Draft): string => JSON.stringify([draft.body, draft.tags, draft.covers, draft.folder]);
+const content = (draft: Draft): string => JSON.stringify([draft.body, draftTags(draft), draft.covers, draft.folder]);
 function matches(copy: Draft, other: Draft): boolean {
 	return (
 		content(copy) === content(other) && JSON.stringify(copy.conflict?.merged) === JSON.stringify(other.conflict?.merged)

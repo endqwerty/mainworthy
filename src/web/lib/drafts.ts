@@ -46,6 +46,9 @@ export function hasTypedMerge(state: DraftConflict): boolean {
 	});
 }
 
+const TagChanges = z.object({ add: z.array(z.string()), remove: z.array(z.string()) });
+export type TagChanges = z.infer<typeof TagChanges>;
+
 export const Draft = z
 	.object({
 		id: z.string(),
@@ -55,15 +58,23 @@ export const Draft = z
 		body: DraftBody,
 		original: CaseBody,
 		conflict: DraftConflict.optional(),
-		tags: z.array(z.string()),
+		tags: z.array(z.string()).optional(),
+		tagChanges: TagChanges.optional(),
 		covers: z.array(z.string()),
 		originalTags: z.array(z.string()).optional(),
 		originalCovers: z.array(z.string()).optional(),
 		owner: z.string().default(""),
 		sent: z
-			.object({ input: ProposeInput, body: CaseBody, tags: z.array(z.string()), covers: z.array(z.string()) })
+			.object({
+				input: ProposeInput,
+				body: CaseBody,
+				tags: z.array(z.string()),
+				covers: z.array(z.string()),
+				tagChanges: TagChanges.optional(),
+			})
 			.nullable()
 			.default(null),
+		placement: z.object({ tags: z.array(z.string()).optional() }).optional(),
 		folder: z.string(),
 		after: z.string().nullable(),
 		caret: z.object({ field: z.string(), start: z.number(), end: z.number() }),
@@ -77,12 +88,61 @@ export const Draft = z
 			])
 			.default({ kind: "none" }),
 	})
-	.transform((draft) => ({
-		...draft,
-		originalTags: draft.originalTags ?? draft.tags,
-		originalCovers: draft.originalCovers ?? draft.covers,
-	}));
+	.transform(({ tags, placement, tagChanges, ...draft }) => {
+		const originalTags = draft.originalTags ?? (draft.ref === null ? [] : (tags ?? []));
+		const edited = placement?.tags ?? tags ?? originalTags;
+		return {
+			...draft,
+			sent: draft.sent
+				? {
+						...draft.sent,
+						tagChanges: draft.sent.tagChanges ?? {
+							add: draft.sent.input.edits.flatMap((edit) =>
+								edit.op === "create" ? (edit.tags ?? []) : edit.op === "place" ? (edit.tags?.add ?? []) : [],
+							),
+							remove: draft.sent.input.edits.flatMap((edit) => (edit.op === "place" ? (edit.tags?.remove ?? []) : [])),
+						},
+					}
+				: null,
+			originalTags,
+			originalCovers: draft.originalCovers ?? draft.covers,
+			tagChanges: tagChanges ?? {
+				add: edited.filter((tag) => !originalTags.includes(tag)),
+				remove: originalTags.filter((tag) => !edited.includes(tag)),
+			},
+		};
+	});
 export type Draft = z.infer<typeof Draft>;
+
+export function draftTags(draft: Pick<Draft, "originalTags" | "tagChanges">): string[] {
+	return [...new Set([...draft.originalTags, ...draft.tagChanges.add])].filter(
+		(tag) => !draft.tagChanges.remove.includes(tag),
+	);
+}
+
+export function addDraftTags(draft: Draft, added: string[]): Draft {
+	return {
+		...draft,
+		tagChanges: {
+			add: [...new Set([...draft.tagChanges.add, ...added.filter((tag) => !draft.originalTags.includes(tag))])],
+			remove: draft.tagChanges.remove.filter((tag) => !added.includes(tag)),
+		},
+	};
+}
+
+/** Retire only the intent that save accepted, including reversals typed while it was in flight. */
+export function remainingTagChanges({ sent, current }: { sent: TagChanges; current: TagChanges }): TagChanges {
+	return {
+		add: [
+			...current.add.filter((tag) => !sent.add.includes(tag)),
+			...sent.remove.filter((tag) => !current.remove.includes(tag)),
+		],
+		remove: [
+			...current.remove.filter((tag) => !sent.remove.includes(tag)),
+			...sent.add.filter((tag) => !current.add.includes(tag)),
+		],
+	};
+}
 export function draftKey({ project, id }: { project: string; id: string }): string {
 	return deviceKey("draft", `${project}:${id}`);
 }

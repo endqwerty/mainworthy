@@ -58,17 +58,21 @@ microtask; separate SSE messages merge while a read is in flight.
 The shell owns exactly one event stream for the current project. Streams,
 window focus and reconnect invalidate cached reads; edits also invalidate.
 
-For optimistic writes, update `queryClient.setQueryData` synchronously before
-starting the request, and keep each row's value before and after the patch, and
-the typed input. On error, undo only this write's own change against the cache as
-it is now (`undoChange` in `lib/rollback.ts`), never a snapshot from before the
-request: the stream may have shown a newer change since (issue #383). Then call
-`setStatus(error.message)`, keep the input, and invalidate.
-Cancel each affected list's active read before taking its snapshot or patching its
-cache, including a next page that would return its earlier pages too. Leave a first
-read with no cached data running: there is no patch for that reply to replace.
-Change events preserve paged reads, so they do not cancel an older reply that
-could replace the patch. Invalidate after the write to read the list afresh.
+Suite keeps pending placements outside the query cache. `suite/placement.ts`
+applies the ordered writes to every server read for the list, pane and editor.
+The write path adds an entry before sending and removes only that entry on a
+refusal. An adopted reply holds its confirmed placement in the cache, cancelling
+older reads first, then retires its entry and reads again. Failed reads keep
+that confirmed placement. Other pending writes remain projected throughout that
+read. A queued undo enters the
+same set before its original write replies. Neither refreshes nor failures
+restore a cache snapshot (issues #383 and #462).
+
+An existing draft owns its text and base version. Its `placement` object holds
+only tags explicitly changed in the outline editor. Other tags and its folder
+follow the live case, independently of its version or whether the draft is dirty.
+The editor displays pending placement too, but the stored draft keeps confirmed
+original tags. New-case drafts retain their creation placement (issue #452).
 
 ## Signing in and out
 

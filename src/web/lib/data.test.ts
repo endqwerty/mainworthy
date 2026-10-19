@@ -4,7 +4,6 @@ import { afterEach, expect, test } from "bun:test";
 import { InfiniteQueryObserver, notifyManager, QueryObserver } from "@tanstack/react-query";
 import { changed, invalidateProject, queryClient, queryKey } from "./data.ts";
 import { affected } from "./refresh.ts";
-import { undoChange } from "./rollback.ts";
 
 afterEach(() => {
 	queryClient.clear();
@@ -351,27 +350,6 @@ test("invalidateProject waits for the coalesced refresh before an answer handler
 	} finally {
 		stop();
 	}
-});
-
-test("taking back a change undoes only what it did to the row as it is now (issue #383)", () => {
-	const before = { ref: "C-1", tags: [], folder: 1, state: "active" };
-	const after = { ref: "C-1", tags: ["alpha"], folder: 2, state: "active" };
-	// The stream showed another client's tag and move in the meantime: only the tag this change added goes.
-	expect(undoChange({ ref: "C-1", tags: ["beta"], folder: 3, state: "active" }, before, after)).toEqual({
-		ref: "C-1",
-		tags: ["beta"],
-		folder: 3,
-		state: "active",
-	});
-	expect(undoChange({ ref: "C-1", tags: ["alpha", "beta"], folder: 2, state: "active" }, before, after)).toEqual({
-		ref: "C-1",
-		tags: ["beta"],
-		folder: 1,
-		state: "active",
-	});
-	// A tag the change removed comes back only if it is gone, and is not doubled.
-	expect(undoChange({ tags: ["x"] }, { tags: ["x", "y"] }, { tags: ["x"] })).toEqual({ tags: ["x", "y"] });
-	expect(undoChange({ tags: ["x", "y"] }, { tags: ["x", "y"] }, { tags: ["x"] })).toEqual({ tags: ["x", "y"] });
 });
 
 // The second verification of #461: a report read only its kind and window, so no ref of an event matched it, and
