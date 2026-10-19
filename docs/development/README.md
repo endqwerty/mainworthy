@@ -29,9 +29,15 @@ To set up a checkout, follow these steps:
 	$ bun install --frozen-lockfile
 	```
 
-3. Install Chromium if you want the browser tests to run. The check uses the browser that `MAINWORTHY_CHROMIUM`
-   names. Otherwise it tries `/usr/bin/chromium`, `/usr/bin/google-chrome` and `/usr/bin/chromium-browser`, in
-   that order. Without a browser, the check skips the browser tests and says so at the end.
+3. Install the browser the browser tests run: the Chromium headless shell that playwright-core is built for, in
+   Playwright's cache (decision 0114). Run it again after a playwright-core upgrade.
+
+	```
+	$ bun run browser
+	```
+
+   `MAINWORTHY_CHROMIUM` names another browser instead. A system Chromium is not used unless it names one.
+   Without a browser, the check skips the browser tests and says so at the end.
 4. Start the development server.
 
 	```

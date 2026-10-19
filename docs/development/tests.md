@@ -106,5 +106,5 @@ predict local elapsed time or CI shard time.
 | `--update-timings` | measures every file alone and rewrites `scripts/test-timings.json` |
 | `<file>...` | runs only those files. Needs one phase and no shard. |
 
-`MAINWORTHY_CHROMIUM` names the browser. `MAINWORTHY_E2E_SERVER` names a compiled fixture for a standalone
+The browser is Playwright's headless shell, which `bun run browser` installs; `MAINWORTHY_CHROMIUM` names another. `MAINWORTHY_E2E_SERVER` names a compiled fixture for a standalone
 `bun test test/e2e/<file>`, which otherwise starts the server from source.

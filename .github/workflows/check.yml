@@ -155,6 +155,9 @@ jobs:
         with:
           bun-version: 1.4.3
       - run: bun install --frozen-lockfile
+      - name: Install the browser
+        # The Chromium playwright-core is built for (`findChromium` in scripts/check-plan.ts), not the runner's Chrome.
+        run: bun run browser
       - name: Start the browser once
         # A guess at why the first browser test of a job is slow (scripts/warm-browser.ts). Not a test.
         continue-on-error: true

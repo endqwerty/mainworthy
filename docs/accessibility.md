@@ -41,7 +41,7 @@ exception: each dot selects the same slot as its full-size row in Run slots. The
 real case proposal and observes its message in a polite, atomic status region. These checks cannot establish
 what a screen reader actually says, whether a label makes sense, or whether the reading order is useful.
 
-To repeat the automated check, set `MAINWORTHY_CHROMIUM` to the Chromium executable on the machine and run
+To repeat the automated check, install Playwright's Chromium with `bun run browser` and run
 `bun test test/e2e/accessibility.test.ts`. With no browser, the existing helper prints a skip; a skipped run is
 not accessibility evidence. Run `bun test test/licences.test.ts` to check that the audit dependency stays out
 of the shipped build. Full-suite timing and independent review remain part of the parent change's checks.

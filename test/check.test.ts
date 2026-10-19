@@ -18,6 +18,7 @@ import {
 	parallelWorkers,
 	phaseFiles,
 	phaseReport,
+	playwrightChromium,
 	QUIET,
 	quietWorkers,
 	sharedBrowserEndpoint,
@@ -529,37 +530,36 @@ test("every way to run a test asks the machine first, and the Bun asked for is o
 		).toBe(true);
 });
 
-test("a machine with no Chromium is told what to set, and one whose MAINWORTHY_CHROMIUM names nothing is told that", () => {
-	const mac = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+test("the browser tests start Playwright's Chromium or the one MAINWORTHY_CHROMIUM names, never the system's", () => {
+	const shell = "/cache/ms-playwright/chromium_headless_shell-1/chrome-headless-shell";
 	const has =
 		(...paths: string[]) =>
 		(path: string) =>
 			paths.includes(path);
-	expect(findChromium({ MAINWORTHY_CHROMIUM: "/opt/chrome" }, has("/opt/chrome", "/usr/bin/chromium"))).toEqual({
+	expect(findChromium({ MAINWORTHY_CHROMIUM: "/opt/chrome" }, has("/opt/chrome", shell), shell)).toEqual({
 		path: "/opt/chrome",
 	});
-	expect(findChromium({}, has("/usr/bin/google-chrome"))).toEqual({ path: "/usr/bin/google-chrome" });
-	// A name that is not there falls back to the system's, as it did.
-	expect(findChromium({ MAINWORTHY_CHROMIUM: "/gone" }, has("/usr/bin/chromium"))).toEqual({
-		path: "/usr/bin/chromium",
+	expect(findChromium({}, has(shell, "/usr/bin/chromium"), shell)).toEqual({ path: shell });
+	// A name that is not there falls back to Playwright's.
+	expect(findChromium({ MAINWORTHY_CHROMIUM: "/gone" }, has(shell), shell)).toEqual({ path: shell });
+	expect(findChromium({}, has("/usr/bin/chromium", "/usr/bin/google-chrome"), shell)).toEqual({
+		path: null,
+		skipped: `Playwright's Chromium is not installed at ${shell}: run \`bun run browser\` to run the browser tests.`,
 	});
-	expect(findChromium({}, has())).toEqual({
+	expect(findChromium({ MAINWORTHY_CHROMIUM: "/gone" }, has(), null)).toEqual({
 		path: null,
 		skipped:
-			"There is no Chromium at /usr/bin/chromium, /usr/bin/google-chrome or /usr/bin/chromium-browser. Set MAINWORTHY_CHROMIUM to a Chromium or Chrome binary to run the browser tests.",
+			"MAINWORTHY_CHROMIUM names /gone, which is not there. Playwright's Chromium is not installed: run `bun run browser` to run the browser tests.",
 	});
-	expect(findChromium({ MAINWORTHY_CHROMIUM: "/gone" }, has())).toMatchObject({
-		skipped: expect.stringMatching(
-			/^MAINWORTHY_CHROMIUM names \/gone, which is not there, and there is no Chromium at /,
-		),
-	});
-	// A Mac's own Chrome is not started unasked; the line to run it with is given.
-	expect(findChromium({}, has(mac))).toMatchObject({
-		path: null,
-		skipped: expect.stringMatching(
-			/ This machine has one: MAINWORTHY_CHROMIUM="\/Applications\/Google Chrome\.app\/.*"$/,
-		),
-	});
+});
+
+test("Playwright's Chromium is the headless shell of the revision playwright-core was released with", () => {
+	const manifest = JSON.parse(readFileSync("node_modules/playwright-core/browsers.json", "utf8")) as {
+		browsers: { name: string; revision: string }[];
+	};
+	const revision = manifest.browsers.find((browser) => browser.name === "chromium-headless-shell")?.revision;
+	expect(playwrightChromium()).toContain(`/chromium_headless_shell-${revision}/`);
+	expect(playwrightChromium()).toMatch(/chrome-headless-shell(\.exe)?$/);
 });
 
 test("the failed tests of a report are listed with what each said and where", () => {

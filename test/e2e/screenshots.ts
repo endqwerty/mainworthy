@@ -2,7 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { browserAvailable, openPage, startServer } from "./support.ts";
 
 if (!browserAvailable) {
-	console.info("Screenshots skipped: system Chromium is missing.");
+	console.info("Screenshots skipped: Chromium is missing.");
 	process.exit(0);
 }
 const server = await startServer({ cases: 2000, days: 14 });

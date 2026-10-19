@@ -115,7 +115,7 @@ TypeScript candidate is a working reference for it.
    the same tools over either protocol. This replaces v1.32.1 for [issue #61](https://github.com/endqwerty/mainworthy/issues/61).
    The registry's ten tool definitions and their token budget are unchanged.
 6. **Biome** for format and lint, **`bun test`** for tests, **playwright-core** driving the system Chromium for
-   browser tests.
+   browser tests. Since decision 0114 they drive Playwright's own Chromium headless shell.
 
 ### Why TypeScript, when all three pass
 
