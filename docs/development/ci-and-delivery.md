@@ -54,8 +54,10 @@ continues on error and uploads its report.
 
 `scripts/ci-gate.ts` reads the newest attempt of each shard. It refuses a report that is missing, empty, all
 skipped or cut short, and a test file that no shard ran. Then it reports each shard to Mainworthy as a shard of
-the job `tests` and runs `mainworthy gate`. The job exits with the gate's code: 0 passed, 1 failed, 2 blocked,
-3 pending.
+the job `tests` and runs `mainworthy gate`, which exits 0 passed, 1 failed, 2 blocked or 3 pending. The reporting
+step exits 1 when a report is incomplete, even if Mainworthy passed what it received. The job's last step also
+fails when `scope`, `static`, `image`, `ios`, `description` or a shard's job failed. So a red `gate` can mean a
+lint error as well as a failing test: read the step that failed.
 
 The instance is the one `MAINWORTHY_URL` names, project `mainworthy`, reached with the `github-actions` pipeline
 token in the secret `MAINWORTHY_TOKEN` (decision 0014). That token records results and reads the gate. It cannot

@@ -11,16 +11,17 @@
 //
 //   bun scripts/diagrams.ts build <archify directory> [name...]   build the named diagrams (all without a name)
 //   bun scripts/diagrams.ts picture [name...]                       draw the repository diagrams' PNGs again
-//   bun scripts/diagrams.ts stamp                                  record the pages as they are now
+//   bun scripts/diagrams.ts stamp                                  record every page as it is now
 //
 // `build` runs archify's `finalize` (validate against the files the candidate cites, render, check in a browser),
-// then stamps. Each set's stamp, `built.json` in its candidates' directory, holds the hash of each candidate and
+// then stamps that diagram alone. `picture` stamps nothing: a picture is drawn from the page, and says nothing of
+// whether the page was built from its candidate. Each set's stamp, `built.json` in its candidates' directory, holds the hash of each candidate and
 // of its page; `test/docs.test.ts` fails when a candidate was edited and its page was not built again, or a page
 // was edited by hand. GitHub shows an HTML file as text, so `build` also draws a repository diagram as
 // `<name>.png` beside its page, which the Markdown shows and links to the page. It takes the Chromium the browser
 // tests take (`MAINWORTHY_CHROMIUM`, else the system's).
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -70,6 +71,18 @@ export function currentStamp(set: DiagramSet = SERVED): Stamp {
 			.filter((name) => existsSync(pagePath(name, set)))
 			.map((name) => [name, { candidate: sha256(candidatePath(name, set)), page: sha256(pagePath(name, set)) }]),
 	);
+}
+
+/** Record one diagram in its set's stamp as its files are now, leaving the others as they were recorded. */
+function record(name: string): void {
+	const set = setOf(name);
+	const stamp = existsSync(stampPath(set)) ? Stamp.parse(JSON.parse(readFileSync(stampPath(set), "utf8"))) : {};
+	const now = currentStamp(set)[name];
+	if (!now) throw new Error(`${name}: no page to stamp`);
+	const next = Object.fromEntries(
+		Object.entries({ ...stamp, [name]: now }).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+	);
+	writeFileSync(stampPath(set), `${JSON.stringify(next, null, "\t")}\n`);
 }
 
 /** The set a diagram belongs to. A name is in one set only, so `build <name>` means one diagram. */
@@ -142,7 +155,8 @@ async function build(archify: string, names: string[]): Promise<void> {
 			const gates = receipt.success ? JSON.stringify(receipt.data.gates ?? {}) : "no receipt";
 			if (run.exitCode !== 0 || !receipt.success || receipt.data.status !== "pass")
 				throw new Error(`${name}: archify finalize did not pass (${gates}); run it by hand to read why`);
-			console.info(`${name}: built, ${gates}`);
+			record(name);
+			console.info(`${name}: built and stamped, ${gates}`);
 		} finally {
 			rmSync(evidence, { recursive: true, force: true });
 			// And the ones it writes beside the page whatever it is told.
@@ -161,13 +175,16 @@ if (import.meta.main) {
 		await build(archify, built);
 		await picture(built.filter((name) => setOf(name) === REPOSITORY));
 	} else if (command === "picture") {
-		const drawn = diagramNames(REPOSITORY);
-		await picture(rest.length > 0 ? rest.filter((name) => drawn.includes(name)) : drawn);
-	} else if (command !== "stamp") {
+		const names = rest.length > 0 ? rest : diagramNames(REPOSITORY);
+		for (const name of names)
+			if (setOf(name) !== REPOSITORY) throw new Error(`${name}: only a repository diagram has a picture`);
+		await picture(names);
+	} else if (command === "stamp") {
+		for (const set of SETS) {
+			await Bun.write(stampPath(set), `${JSON.stringify(currentStamp(set), null, "\t")}\n`);
+			console.info(`stamped ${diagramNames(set).length} ${set.name} diagrams in ${set.sources}/built.json`);
+		}
+	} else {
 		throw new Error("usage: bun scripts/diagrams.ts build <archify directory> [name...] | picture [name...] | stamp");
-	}
-	for (const set of SETS) {
-		await Bun.write(stampPath(set), `${JSON.stringify(currentStamp(set), null, "\t")}\n`);
-		console.info(`stamped ${diagramNames(set).length} ${set.name} diagrams in ${set.sources}/built.json`);
 	}
 }

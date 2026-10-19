@@ -38,7 +38,7 @@ The sidebar lists the places of the work. Settings is in its footer.
 
 | Screen | Key | What you can do there |
 | --- | --- | --- |
-| Suite | `g s` | Write a case with `c` as an outline, edit it with `e` or Enter, and filter with `/`. Select rows with `x`, move them with `m`, tag them with `t` or `#`, and undo with `u`. Space peeks at a case's timeline. `n f` makes a folder, `z` widens the detail. A draft is kept on the device and becomes a version when you leave the case, press `⌘ Enter` or pause for 30 seconds. |
+| Suite | `g s` | Write a case with `c` as an outline, edit it with `e` or Enter, and filter with `/`. Select rows with `x`, move them with `m`, tag them with `t`, archive them with `#`, and undo with `u`. Space peeks at a case's timeline. `n f` makes a folder, `z` widens the detail. A draft is kept on the device and becomes a version when you leave the case, press `⌘ Enter` or pause for 30 seconds. |
 | Case | from Suite | Read the case with its proof grouped by person, pipeline and agent. Compare versions step by step, resolve an overlapping edit with both drafts kept, and use shared step fragments pinned at a version. |
 | Queue | `g q` | Read each open question with its evidence and answer with one key. Answer many of one kind at once (`x`, Shift, `*`), take an agent's advice, read the decided ledger and withdraw an answer with `u`. |
 | Runs | `g r` | Plan a run with `n` from all cases, a folder, a tag or a search. Work it in the cockpit: digits mark steps, `p` pass, `f` fail with a note, `b` blocked, `s` skip, `u` corrects the last result. Attach screenshots or files. |
@@ -245,7 +245,9 @@ Each table has one owning module. Other modules read the rows through the owner'
 | statuses | `commit_statuses`, `commit_status_delivery` | `report` and the delivery worker | the delivery worker |
 | kernel | `projects`, `counters`, `commands`, `demo_projects` | every write: the sequence number, references and command ids | `since`, `command` |
 
-The tables of identity, trackers and statuses do not travel in an archive.
+An archive carries every table except `tokens`, `sessions`, `credentials`, `passkey_users` and `invitations`,
+the tracker and status delivery tables, and a few that belong to one instance, such as `change_ends`. So actors,
+grants, teams and recovery contacts travel, and nobody's secrets do.
 
 Every committed write publishes an event on `/api/p/<project>/events` with the project's sequence number, the
 operation, the actor and what it touched. The web UI and the iPhone app listen there and refetch only what an

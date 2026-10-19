@@ -28,7 +28,8 @@ The share of results that passed, per day, of those that passed or failed. Skipp
 beside the rate and are not in it.
 
 - Each test counts once for each job, producer and method on each target, by its latest attempt that passed or
-  failed. A target is a commit in one repository and environment, so two environments of one commit count apart.
+  failed. A target is what was tested: a commit in one repository and environment, or a run with no commit. Two
+  environments of one commit count apart.
   A later skip or blocked attempt does not replace a pass or a failure, and of two results for one attempt the worse
   counts. A failure that a rerun of the same job then passed counts as a pass, and the failed attempt is in
   [time lost to reruns](#time-lost-to-reruns). This is the rule a gate counts with.
