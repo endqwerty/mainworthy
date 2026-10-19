@@ -1,4 +1,4 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { type InfiniteData, useInfiniteQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
@@ -26,11 +26,13 @@ import {
 	activeDraft,
 	type Draft,
 	draftKey,
+	draftTags,
 	hasTypedMerge,
 	knownStepIds,
 	promoteStepIds,
 	readDraft,
 	readDrafts,
+	remainingTagChanges,
 	removeDraft,
 } from "../lib/drafts.ts";
 import { draftOwner, draftOwnerIsLive, randomId } from "../lib/ids.ts";
@@ -48,12 +50,12 @@ import {
 	refusedStatus,
 	sameBody,
 } from "../lib/merges.ts";
-import { undoChange } from "../lib/rollback.ts";
 import { navigate, readRoute, refUrl, routeEntry, routeUrl, WENT } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { EmptyState, ProofStrip } from "../ui/index.tsx";
 import { useSuiteBindings } from "./bindings.ts";
 import { bodyOf, CaseRow, CaseView, editDraft, FolderRow } from "./model.ts";
+import { type PendingPlacement, placed, placedDraft } from "./placement.ts";
 import "./suite.css";
 import "../case/case.css";
 
@@ -386,9 +388,14 @@ export function SuiteScreen() {
 		getNextPageParam: (last) => last.cursor ?? undefined,
 		placeholderData: (previous) => previous,
 	});
+	const [placements, setPlacements] = useState<Set<PendingPlacement>>(() => new Set());
 	const cases = useMemo(
-		() => z.array(CaseRow).parse(list.data?.pages.flatMap((page) => page.items) ?? []),
-		[list.data],
+		() =>
+			z
+				.array(CaseRow)
+				.parse(list.data?.pages.flatMap((page) => page.items) ?? [])
+				.map((row) => placed(row, placements, folders)),
+		[list.data, placements, folders],
 	);
 	const current = useQueryOp({
 		project,
@@ -396,10 +403,14 @@ export function SuiteScreen() {
 		input: { refs: [selected ?? "C-0"] },
 		enabled: selected !== null && !selected.startsWith("draft:"),
 	});
-	const view = useMemo(() => {
+	const recordedView = useMemo(() => {
 		const parsed = CaseView.safeParse(current.data?.find((item) => item.ref === selected));
 		return parsed.success ? parsed.data : null;
 	}, [current.data, selected]);
+	const view = useMemo(
+		() => (recordedView ? placed(recordedView, placements, folders) : null),
+		[recordedView, placements, folders],
+	);
 	const copyCase = draft?.id ?? selected ?? "";
 	const [heldCopies, setCopies] = useState<{ id: string; copies: ReturnType<typeof readDraftCopies> }>({
 		id: "",
@@ -411,7 +422,11 @@ export function SuiteScreen() {
 			if (!sessionCurrent(owner)) return;
 			setCopies({
 				id: copyCase,
-				copies: readDraftCopies({ project, id: copyCase, ...(view ? { recorded: editDraft(view) } : {}) }),
+				copies: readDraftCopies({
+					project,
+					id: copyCase,
+					...(recordedView ? { recorded: editDraft(recordedView) } : {}),
+				}),
 			});
 		};
 		const changed = (event: StorageEvent): void => {
@@ -424,7 +439,7 @@ export function SuiteScreen() {
 			window.removeEventListener("storage", changed);
 			window.removeEventListener(draftCopiesChanged, refresh);
 		};
-	}, [project, copyCase, view, owner]);
+	}, [project, copyCase, recordedView, owner]);
 
 	useEffect(() => {
 		if (view)
@@ -535,6 +550,7 @@ export function SuiteScreen() {
 			return;
 		}
 		const prior = draftRef.current;
+		if (!selectionOnly) next = placedDraft(next, recordedView);
 		if (selectionOnly && prior?.id === next.id) next = { ...prior, caret: next.caret };
 		if (prior?.id === next.id) {
 			if (next.base < prior.base) return;
@@ -543,7 +559,7 @@ export function SuiteScreen() {
 					...prior,
 					kind: next.kind,
 					body: next.body,
-					tags: next.tags,
+					tagChanges: next.tagChanges,
 					covers: next.covers,
 					folder: next.folder,
 					caret: next.caret,
@@ -552,8 +568,8 @@ export function SuiteScreen() {
 		}
 		const contentChanged =
 			prior &&
-			JSON.stringify([prior.body, prior.tags, prior.covers, prior.folder, prior.kind]) !==
-				JSON.stringify([next.body, next.tags, next.covers, next.folder, next.kind]);
+			JSON.stringify([prior.body, prior.tagChanges, prior.covers, prior.folder, prior.kind]) !==
+				JSON.stringify([next.body, next.tagChanges, next.covers, next.folder, next.kind]);
 		const stored = readDraft({ project, id: next.id });
 		if (!mayWrite(next.id)) {
 			if (stored && (!prior || prior.id !== stored.id)) {
@@ -565,8 +581,8 @@ export function SuiteScreen() {
 		if (
 			stored?.conflict &&
 			(!sameBody(stored.body, next.body) ||
-				JSON.stringify([stored.tags, stored.covers, stored.folder]) !==
-					JSON.stringify([next.tags, next.covers, next.folder]))
+				JSON.stringify([stored.tagChanges, stored.covers, stored.folder]) !==
+					JSON.stringify([next.tagChanges, next.covers, next.folder]))
 		) {
 			draftRef.current = stored;
 			liveDrafts.current.set(stored.id, stored);
@@ -971,7 +987,12 @@ export function SuiteScreen() {
 				.filter((step) => step.use || step.action.trim())
 				.map((step) => ({ ...step, expected: step.expected || null })),
 		};
-		const fingerprint = JSON.stringify({ body, tags: cleaned.tags, covers: cleaned.covers, folder: snapshot.folder });
+		const fingerprint = JSON.stringify({
+			body,
+			tags: draftTags(cleaned),
+			covers: cleaned.covers,
+			folder: snapshot.folder,
+		});
 		if (settleOnly && !snapshot.sent) return;
 		if (snapshot.submission.kind === "waiting" && snapshot.submission.fingerprint === fingerprint) return;
 		// All the draft holds beyond its version is a step still without an action, which no version can take.
@@ -981,19 +1002,26 @@ export function SuiteScreen() {
 			!snapshot.sent &&
 			holdsUnfinishedStep(cleaned.body) &&
 			sameBody(body, snapshot.original) &&
-			JSON.stringify([cleaned.tags, cleaned.covers]) ===
-				JSON.stringify([snapshot.originalTags, snapshot.originalCovers])
+			cleaned.tagChanges.add.length === 0 &&
+			cleaned.tagChanges.remove.length === 0 &&
+			JSON.stringify(cleaned.covers) === JSON.stringify(snapshot.originalCovers)
 		)
 			return;
 		const source = snapshot;
 		const recovered = snapshot.sent;
 		if (recovered) {
 			body = recovered.body;
-			cleaned = { ...cleaned, tags: recovered.tags, covers: recovered.covers };
+			cleaned = { ...cleaned, covers: recovered.covers };
 		}
+		const sentTagChanges = recovered?.tagChanges ?? cleaned.tagChanges;
+		const sentTags = recovered?.tags ?? draftTags(cleaned);
+		const tagsToPlace = {
+			add: sentTagChanges.add.filter((tag) => !source.originalTags.includes(tag)),
+			remove: sentTagChanges.remove.filter((tag) => source.originalTags.includes(tag)),
+		};
 		// What the reply handled below was given for: the draft's text, or the save of unknown fate it is about.
 		const proposed = recovered
-			? JSON.stringify({ body, tags: cleaned.tags, covers: cleaned.covers, folder: snapshot.folder })
+			? JSON.stringify({ body, tags: sentTags, covers: cleaned.covers, folder: snapshot.folder })
 			: fingerprint;
 		let moreToSend = false;
 		// Set once the server has answered the write. From then on a failure is not a refusal of the write (issue #381).
@@ -1016,7 +1044,7 @@ export function SuiteScreen() {
 									kind: snapshot.kind ?? "case",
 									body,
 									...(snapshot.folder ? { folder: snapshot.folder } : {}),
-									tags: cleaned.tags,
+									tags: draftTags(cleaned),
 									covers: cleaned.covers,
 									...(after ? { after } : {}),
 								},
@@ -1034,16 +1062,12 @@ export function SuiteScreen() {
 										automate: body.automate,
 									},
 								},
-								...(cleaned.tags.some((tag) => !source.originalTags.includes(tag)) ||
-								source.originalTags.some((tag) => !cleaned.tags.includes(tag))
+								...(tagsToPlace.add.length || tagsToPlace.remove.length
 									? [
 											{
 												op: "place",
 												cases: [source.ref ?? ""],
-												tags: {
-													add: cleaned.tags.filter((tag) => !source.originalTags.includes(tag)),
-													remove: source.originalTags.filter((tag) => !cleaned.tags.includes(tag)),
-												},
+												tags: tagsToPlace,
 											} satisfies Edit,
 										]
 									: []),
@@ -1089,10 +1113,16 @@ export function SuiteScreen() {
 				if (!reply) {
 					const request = recovered?.input ?? { cmd: source.cmd, edits };
 					if (!sessionCurrent(owner) || !mayWrite(source.id, !draftStored)) return;
-					const sent = recovered ?? { input: request, body, tags: cleaned.tags, covers: cleaned.covers };
+					const sent = recovered ?? {
+						input: request,
+						body,
+						tags: sentTags,
+						covers: cleaned.covers,
+						tagChanges: sentTagChanges,
+					};
 					const outgoing = liveDrafts.current.get(source.id);
 					if (outgoing?.id === source.id) {
-						const sending = { ...outgoing, sent };
+						const sending = { ...cleanTitle(outgoing), sent };
 						liveDrafts.current.set(sending.id, sending);
 						if (draftRef.current?.id === sending.id) {
 							draftRef.current = sending;
@@ -1159,7 +1189,7 @@ export function SuiteScreen() {
 				const ref = stamp?.ref ?? snapshot.ref;
 				const version = stamp?.version ?? snapshot.base;
 				let adopted = body;
-				let adoptedTags = cleaned.tags;
+				let adoptedTags = sentTags;
 				let adoptedCovers = cleaned.covers;
 				if (ref) {
 					const rows = await call("get", { refs: [ref], version }, { project, owner });
@@ -1231,9 +1261,12 @@ export function SuiteScreen() {
 							.filter((step) => step.use || step.action.trim())
 							.map((step) => ({ ...step, expected: step.expected || null })),
 					};
+					const tagChanges = remainingTagChanges({ sent: sentTagChanges, current: normalized.tagChanges });
 					const more =
-						JSON.stringify({ body: normalizedBody, tags: normalized.tags, covers: normalized.covers }) !==
-						JSON.stringify({ body, tags: cleaned.tags, covers: cleaned.covers });
+						tagChanges.add.length > 0 ||
+						tagChanges.remove.length > 0 ||
+						JSON.stringify({ body: normalizedBody, covers: normalized.covers }) !==
+							JSON.stringify({ body, covers: cleaned.covers });
 					const merged = carried({ sent: body, live: normalized.body, recorded: adopted, newId: stepIdFor(ref) });
 					// A step with an expected result and no action yet is in no version. Its draft stays on the device,
 					// and is not sent again for it: `more` is only what a version can take.
@@ -1248,12 +1281,7 @@ export function SuiteScreen() {
 						body: merged,
 						original: adopted,
 						submission: { kind: "none" },
-						tags: [
-							...new Set([
-								...adoptedTags.filter((tag) => !cleaned.tags.includes(tag) || normalized.tags.includes(tag)),
-								...normalized.tags.filter((tag) => !cleaned.tags.includes(tag)),
-							]),
-						],
+						tagChanges,
 						covers: [
 							...new Set([
 								...adoptedCovers.filter((link) => !cleaned.covers.includes(link) || normalized.covers.includes(link)),
@@ -1321,32 +1349,57 @@ export function SuiteScreen() {
 		}
 	}
 	useEffect(() => {
+		const current = draft;
+		if (
+			!current ||
+			current !== draftRef.current ||
+			!recordedView ||
+			current.ref !== recordedView.ref ||
+			current.owner !== windowId ||
+			gone.current?.draft === current
+		)
+			return;
+		const next = placedDraft(current, recordedView);
+		if (JSON.stringify([next.folder, next.originalTags]) === JSON.stringify([current.folder, current.originalTags]))
+			return;
+		followDraft(next);
+		try {
+			if (next.dirty && mayWrite(next.id)) writeOwnedDraft(next);
+		} catch {
+			setDraftStored(false);
+		}
+	}, [recordedView, draft, windowId, followDraft, mayWrite, writeOwnedDraft]);
+	useEffect(() => {
 		const current = draftRef.current;
 		if (
-			view &&
-			current?.ref === view.ref &&
+			recordedView &&
+			current?.ref === recordedView.ref &&
 			!current.dirty &&
 			current.submission.kind === "none" &&
-			current.base !== view.version &&
+			current.base !== recordedView.version &&
 			!pending.current.has(current.id)
 		) {
-			const original = bodyOf(view);
+			const original = bodyOf(recordedView);
 			const next: Draft = {
 				...current,
-				base: view.version,
-				body: carried({ sent: current.original, live: current.body, recorded: original, newId: stepIdFor(view.ref) }),
+				base: recordedView.version,
+				body: carried({
+					sent: current.original,
+					live: current.body,
+					recorded: original,
+					newId: stepIdFor(recordedView.ref),
+				}),
 				original,
-				tags: view.tags,
-				covers: view.covers,
-				originalTags: view.tags,
-				originalCovers: view.covers,
-				folder: view.folder.path,
+				covers: recordedView.covers,
+				originalTags: recordedView.tags,
+				originalCovers: recordedView.covers,
+				folder: recordedView.folder.path,
 				cmd: randomId(),
 			};
 			draftRef.current = next;
 			setDraftState(next);
 		}
-	}, [view, stepIdFor]);
+	}, [recordedView, stepIdFor]);
 	const sealRef = useRef(sealDraft);
 	sealRef.current = sealDraft;
 	/**
@@ -1413,7 +1466,7 @@ export function SuiteScreen() {
 			base: 0,
 			body,
 			original: body,
-			tags: tagFilter ? tagFilter.split(",") : [],
+			tagChanges: { add: tagFilter ? tagFilter.split(",") : [], remove: [] },
 			covers: [],
 			originalTags: [],
 			originalCovers: [],
@@ -1481,7 +1534,7 @@ export function SuiteScreen() {
 			void endFollowed(ended);
 			return;
 		}
-		const shown = read ?? view;
+		const shown = read ?? recordedView;
 		if (!shown) return;
 		if (owes(shown.ref)) {
 			void readOwed(shown.ref, (fresh) => {
@@ -1498,7 +1551,7 @@ export function SuiteScreen() {
 	}
 	/** A click on a field of the read view opens the editor there. `read` is as for `edit`. */
 	function begin(field = "title", read: CaseView | null = null): void {
-		const shown = read ?? view;
+		const shown = read ?? recordedView;
 		if (!shown) return;
 		if (owes(shown.ref)) {
 			void readOwed(shown.ref, (fresh) => {
@@ -1567,120 +1620,70 @@ export function SuiteScreen() {
 		}
 	}
 	const selection = () => (picked.size ? [...picked] : selected ? [selected] : []);
-	function optimisticPlacement(edits: Edit[]): () => void {
-		const listKey = [project, "find", input, "pages"];
-		void queryClient.cancelQueries({ queryKey: listKey });
-		const detailKey = [project, "get", { refs: [selected ?? "C-0"] }];
-		const oldDraft = draftRef.current;
-		type Made = Map<string, { before: Record<string, unknown>; after: Record<string, unknown> }>;
-		const listMade: Made = new Map();
-		const detailMade: Made = new Map();
-		function patch(row: Record<string, unknown>, full: boolean): Record<string, unknown> {
-			let next = row;
-			const ref = row.ref;
-			if (typeof ref !== "string") return row;
-			for (const edit of edits) {
-				if ((edit.op !== "place" && edit.op !== "state") || !edit.cases.includes(ref)) continue;
-				if (edit.op === "state") {
-					next = { ...next, state: edit.to };
-					continue;
+	function optimisticPlacement(edits: Edit[]) {
+		const entry: PendingPlacement = { edits };
+		setPlacements((prior) => new Set([...prior, entry]));
+		const remove = () =>
+			setPlacements((prior) => {
+				if (!prior.has(entry)) return prior;
+				const next = new Set(prior);
+				next.delete(entry);
+				return next;
+			});
+		return {
+			rollback: remove,
+			confirm(): void {
+				const refs = new Set(edits.flatMap((edit) => (edit.op === "place" || edit.op === "state" ? edit.cases : [])));
+				const lists = {
+					queryKey: [project, "find"],
+					predicate: (query: { queryKey: readonly unknown[] }) =>
+						query.queryKey[3] === "pages" && z.object({ in: z.literal("cases") }).safeParse(query.queryKey[2]).success,
+				};
+				const details = {
+					queryKey: [project, "get"],
+					predicate: (query: { queryKey: readonly unknown[] }) => {
+						const input = z.object({ refs: z.array(z.string()) }).safeParse(query.queryKey[2]);
+						return input.success && input.data.refs.some((ref) => refs.has(ref));
+					},
+				};
+				// These placements are server facts now. Cancel older reads before holding them, including paged reads.
+				void queryClient.cancelQueries(lists);
+				void queryClient.cancelQueries(details);
+				queryClient.setQueriesData<InfiniteData<Api["find"]["reply"]>>(
+					lists,
+					(cached) =>
+						cached && {
+							...cached,
+							pages: cached.pages.map((page) => ({
+								...page,
+								items: page.items.map((row) => {
+									const parsed = CaseRow.safeParse(row);
+									return parsed.success ? { ...row, ...placed(parsed.data, [entry], folders) } : row;
+								}),
+							})),
+						},
+				);
+				queryClient.setQueriesData<Api["get"]["reply"]>(details, (cached) =>
+					cached?.map((row) => {
+						const parsed = CaseView.safeParse(row);
+						return parsed.success ? { ...row, ...placed(parsed.data, [entry], folders) } : row;
+					}),
+				);
+				remove();
+			},
+			async settle(read: boolean): Promise<void> {
+				try {
+					if (read && sessionCurrent(owner)) await invalidateProject(project);
+				} finally {
+					remove();
 				}
-				if (edit.tags) {
-					const existing = z.array(z.string()).safeParse(next.tags);
-					const tags = new Set(edit.tags.set ?? (existing.success ? existing.data : []));
-					for (const tag of edit.tags.add ?? []) tags.add(tag);
-					for (const tag of edit.tags.remove ?? []) tags.delete(tag);
-					next = { ...next, tags: [...tags] };
-				}
-				if (edit.folder !== undefined) {
-					const folder = folders.find((item) =>
-						typeof edit.folder === "number" ? item.id === edit.folder : item.path === edit.folder,
-					);
-					if (folder) next = { ...next, folder: full ? { id: folder.id, path: folder.path } : folder.id };
-				}
-			}
-			return next;
-		}
-		const applied = (made: Made, full: boolean) => (row: Record<string, unknown>) => {
-			const next = patch(row, full);
-			if (next !== row && typeof row.ref === "string") made.set(row.ref, { before: row, after: next });
-			return next;
+			},
 		};
-		const undone = (made: Made) => (row: Record<string, unknown>) => {
-			const own = typeof row.ref === "string" ? made.get(row.ref) : undefined;
-			return own ? undoChange(row, own.before, own.after) : row;
-		};
-		queryClient.setQueryData<typeof list.data>(listKey, (cached) =>
-			cached
-				? {
-						...cached,
-						pages: cached.pages.map((page) => ({ ...page, items: page.items.map(applied(listMade, false)) })),
-					}
-				: cached,
-		);
-		queryClient.setQueryData<Api["get"]["reply"]>(detailKey, (cached) => cached?.map(applied(detailMade, true)));
-		const tagsOf = (value: unknown): string[] => {
-			const parsed = z.array(z.string()).safeParse(value);
-			return parsed.success ? parsed.data : [];
-		};
-		// The tags each case this change touches held before it and after it, for a draft of that case: one that is
-		// open now, or one the person opens while the change is on its way (it takes its tags from the page).
-		const draftTags = new Map<string, { before: string[]; after: string[] }>();
-		for (const edit of edits) {
-			if (edit.op !== "place" && edit.op !== "state") continue;
-			for (const ref of edit.cases) {
-				const held = (detailMade.get(ref) ?? listMade.get(ref))?.before.tags;
-				const before = oldDraft?.ref === ref ? oldDraft.tags : tagsOf(held);
-				draftTags.set(ref, { before, after: tagsOf(patch({ ref, tags: before }, true).tags) });
-			}
-		}
-		const open = oldDraft?.ref ? draftTags.get(oldDraft.ref) : undefined;
-		if (oldDraft && open) change({ ...oldDraft, tags: open.after });
-		/** Takes back this change alone, from the cache and the draft as they are now (issue #383). */
-		return () => {
-			queryClient.setQueryData<typeof list.data>(listKey, (cached) =>
-				cached
-					? { ...cached, pages: cached.pages.map((page) => ({ ...page, items: page.items.map(undone(listMade)) })) }
-					: cached,
-			);
-			queryClient.setQueryData<Api["get"]["reply"]>(detailKey, (cached) => cached?.map(undone(detailMade)));
-			const current = draftRef.current;
-			const own = current?.ref ? draftTags.get(current.ref) : undefined;
-			if (!current || !own) return;
-			const undoTags = (tags: string[]): string[] =>
-				tagsOf(undoChange({ tags }, { tags: own.before }, { tags: own.after }).tags);
-			const tags = undoTags(current.tags);
-			const originalTags = undoTags(current.originalTags);
-			const same = (left: string[], right: string[]): boolean => JSON.stringify(left) === JSON.stringify(right);
-			if (!same(tags, current.tags)) change({ ...current, tags });
-			// A draft opened while the change was on its way was based on the page with the change in it.
-			const latest = draftRef.current;
-			if (latest?.id === current.id && !same(originalTags, latest.originalTags)) {
-				const based = { ...latest, originalTags };
-				followDraft(based);
-				if (based.dirty && mayWrite(based.id)) writeOwnedDraft(based);
-			}
-		};
-	}
-	/**
-	 * The placements on their way. A read of the project replaces the page's rows with the server's, and so erases
-	 * the optimistic change of every placement still on its way (issue #383). The read a settled placement owes
-	 * waits for the last one.
-	 */
-	const placing = useRef({ inFlight: 0, owed: false });
-	function settlePlacement(wantsRead: boolean): Promise<void> {
-		const state = placing.current;
-		state.inFlight -= 1;
-		if (wantsRead) state.owed = true;
-		if (state.inFlight > 0 || !state.owed) return Promise.resolve();
-		state.owed = false;
-		return invalidateProject(project);
 	}
 	async function placement(edits: Edit[], inverse: Edit[]): Promise<void> {
-		const rollback = optimisticPlacement(edits);
+		const optimistic = optimisticPlacement(edits);
 		const previous = undo.current?.queued ? null : undo.current;
 		const count = selection().length;
-		placing.current.inFlight += 1;
 		const ready = call("propose", { edits }, { project, owner });
 		const action: PlacementUndo = { edits: inverse, ready, queued: false };
 		undo.current = action;
@@ -1690,24 +1693,26 @@ export function SuiteScreen() {
 			const reply = await ready;
 			if (!sessionCurrent(owner)) return;
 			if (reply.status !== "adopted") {
-				rollback();
+				optimistic.rollback();
 				setHidden(new Set());
 				if (undo.current === action) undo.current = previous;
 				setStatus(`Proposed, waiting for a person · ${reply.question ?? ""}`);
-			} else if (!action.queued && undo.current === action) {
-				setStatus(`${count} case${count === 1 ? "" : "s"} changed. Press u to undo.`);
+			} else {
+				optimistic.confirm();
+				if (!action.queued && undo.current === action)
+					setStatus(`${count} case${count === 1 ? "" : "s"} changed. Press u to undo.`);
 			}
 			setPicked(new Set());
 			wantsRead = !action.queued || reply.status !== "adopted";
 		} catch (error) {
 			if (!sessionCurrent(owner)) return;
-			rollback();
+			optimistic.rollback();
 			setHidden(new Set());
 			if (undo.current === action) undo.current = previous;
 			setStatus(error instanceof Error ? error.message : "The change failed");
 			wantsRead = true;
 		} finally {
-			await settlePlacement(wantsRead);
+			await optimistic.settle(wantsRead);
 		}
 	}
 	function move(): void {
@@ -1770,10 +1775,8 @@ export function SuiteScreen() {
 			const action = undo.current;
 			if (action.queued) return;
 			action.queued = true;
-			const rollback = optimisticPlacement(action.edits);
-			// The inverse is on its way from now, though it is sent only after the change it undoes: counted here, a
-			// read that change owes cannot start in between and erase it.
-			placing.current.inFlight += 1;
+			const optimistic = optimisticPlacement(action.edits);
+			// The queued inverse participates in the projection before the original write replies.
 			let wantsRead = false;
 			try {
 				setHidden(new Set());
@@ -1785,27 +1788,27 @@ export function SuiteScreen() {
 					return;
 				}
 				if (original.status !== "adopted") return;
-				optimisticPlacement(action.edits);
 				wantsRead = true;
 				try {
 					const reply = action.edits.length
 						? await call("propose", { edits: action.edits }, { project, owner })
 						: original;
 					if (reply.status === "adopted") {
+						optimistic.confirm();
 						if (undo.current === action) undo.current = null;
 						setStatus("Undone. The inverse change is recorded.");
 					} else {
-						rollback();
+						optimistic.rollback();
 						action.queued = false;
 						setStatus(`Undo proposed, waiting for a person · ${reply.question ?? ""}`);
 					}
 				} catch (error) {
-					rollback();
+					optimistic.rollback();
 					action.queued = false;
 					setStatus(error instanceof Error ? error.message : "Undo failed. Press u to retry.");
 				}
 			} finally {
-				void settlePlacement(wantsRead);
+				void optimistic.settle(wantsRead);
 			}
 		} else if (view && view.version > 1) {
 			const focused = document.activeElement;
@@ -2091,7 +2094,11 @@ export function SuiteScreen() {
 					discardDraftCopy(copy.key);
 					setCopies({
 						id: copyCase,
-						copies: readDraftCopies({ project, id: copyCase, ...(view ? { recorded: editDraft(view) } : {}) }),
+						copies: readDraftCopies({
+							project,
+							id: copyCase,
+							...(recordedView ? { recorded: editDraft(recordedView) } : {}),
+						}),
 					});
 				}}
 				ownedElsewhere={ownedElsewhere}
@@ -2099,7 +2106,7 @@ export function SuiteScreen() {
 				ending={draft && gone.current?.draft === draft ? ending : null}
 				onTakeOver={takeOver}
 				view={view}
-				draft={draft}
+				draft={draft ? placedDraft(draft, recordedView, placements, folders) : null}
 				stored={draftStored}
 				change={change}
 				begin={begin}

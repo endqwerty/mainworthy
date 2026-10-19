@@ -56,7 +56,7 @@ const draft = (card: DraftConflict, text: Draft["body"] = mine): Draft => ({
 	body: text,
 	original: v1,
 	conflict: card,
-	tags: [],
+	tagChanges: { add: [], remove: [] },
 	covers: [],
 	originalTags: [],
 	originalCovers: [],
@@ -283,7 +283,23 @@ describe("the text of a card that its own merge did not end", () => {
 		const typing = { ...mine, steps: [...mine.steps, unfinished] };
 		expect(gone(typed, typed.merged, draft(typed, typing))).toBe(false);
 		expect(gone(conflict(mine), mine, draft(conflict(mine), typing))).toBe(false);
-		expect(gone(conflict(mine), mine, { ...draft(conflict(mine)), tags: ["checkout"] })).toBe(false);
+		expect(
+			gone(conflict(mine), mine, { ...draft(conflict(mine)), tagChanges: { add: ["checkout"], remove: [] } }),
+		).toBe(false);
+		expect(
+			gone(conflict(mine), mine, {
+				...draft(conflict(mine)),
+				originalTags: ["checkout"],
+				tagChanges: { add: ["checkout"], remove: ["gone"] },
+			}),
+		).toBe(true);
+		expect(
+			gone(conflict(mine), mine, {
+				...draft(conflict(mine)),
+				originalTags: ["checkout", "gone"],
+				tagChanges: { add: ["checkout"], remove: ["gone"] },
+			}),
+		).toBe(false);
 	});
 
 	test("the person's side of the next card is recordable, and keeps a step whose action they emptied", () => {

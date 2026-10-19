@@ -73,7 +73,7 @@ export function editDraft(view: CaseView): Draft {
 		base: view.version,
 		body,
 		original: body,
-		tags: view.tags,
+		tagChanges: { add: [], remove: [] },
 		covers: view.covers,
 		originalTags: view.tags,
 		originalCovers: view.covers,

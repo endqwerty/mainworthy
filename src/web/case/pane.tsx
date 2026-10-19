@@ -8,7 +8,7 @@ import { call } from "../lib/api.ts";
 import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
 import { deviceSession, sessionCurrent } from "../lib/device.ts";
 import type { DraftCopy } from "../lib/draft-copies.ts";
-import type { Draft, DraftConflict } from "../lib/drafts.ts";
+import { type Draft, type DraftConflict, draftTags } from "../lib/drafts.ts";
 import { proposalReadMessage } from "../lib/proposals.ts";
 import { navigate, refUrl } from "../lib/router.ts";
 import { ProposalEdits } from "../queue/evidence.tsx";
@@ -291,13 +291,18 @@ export function CasePane({
 							<textarea
 								aria-label="Preserved draft text"
 								readOnly
-								value={printCase({ ref: copy.ref, body: copy.body, tags: copy.tags, covers: copy.covers })}
+								value={printCase({ ref: copy.ref, body: copy.body, tags: draftTags(copy), covers: copy.covers })}
 							/>
 							{copy.conflict && (
 								<textarea
 									aria-label="Preserved merge text"
 									readOnly
-									value={printCase({ ref: copy.ref, body: copy.conflict.merged, tags: copy.tags, covers: copy.covers })}
+									value={printCase({
+										ref: copy.ref,
+										body: copy.conflict.merged,
+										tags: draftTags(copy),
+										covers: copy.covers,
+									})}
 								/>
 							)}
 							<button type="button" onClick={() => onDiscardCopy({ key, draft: copy, stored: copyStored })}>

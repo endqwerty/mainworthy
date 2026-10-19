@@ -4,7 +4,8 @@ Write cases as outlines, keep their versions, and resolve edits that overlap.
 Use folders, tags, and search to find the cases you need.
 
 Suite keeps loading the rest of the list while new results and edits arrive,
-and shows live changes without a reload.
+and shows live changes without a reload. A tag or move still being sent stays visible
+when live updates arrive. If the write fails, only that pending change disappears.
 
 ![Suite with cases, folders, tags, and the selected case](../ui/screenshots/suite-light.png)
 
@@ -62,6 +63,10 @@ The policy then decides whether the proposal becomes current or waits for review
 There is no save button. Moving the caret or selecting text while a save finishes
 does not submit the text again. Text waiting for review stays in its proposal.
 If the case updates before you edit, your next edit starts from the newer version.
+While you edit, the folder and tags follow changes made elsewhere. Tags you add in
+the editor appear alongside those live tags. Saving changes only the tags you added
+or removed, and keeps unrelated tag changes.
+Your typed text stays on the version you started from.
 
 The editor records a step once the step has an action.
 A step with an expected result but no action stays in your draft on this device, including after a reload.

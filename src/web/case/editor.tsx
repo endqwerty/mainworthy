@@ -2,7 +2,7 @@ import { type KeyboardEvent, useLayoutEffect, useRef } from "react";
 import { newStepId } from "../../core/ids.ts";
 import { CaseKind } from "../../core/model.ts";
 import { parseOutline, splitExpected } from "../../core/outline.ts";
-import { type Draft, knownStepIds } from "../lib/drafts.ts";
+import { addDraftTags, type Draft, draftTags, knownStepIds } from "../lib/drafts.ts";
 import { useBindings } from "../lib/keys.ts";
 import { readRoute } from "../lib/router.ts";
 import { AutoGrowingTextarea } from "../ui/auto-growing-textarea.tsx";
@@ -44,7 +44,7 @@ function freshStep(draft: Draft) {
 	};
 }
 export function cleanTitle(draft: Draft): Draft {
-	const tags = new Set(draft.tags);
+	const tags = new Set<string>();
 	const covers = new Set(draft.covers);
 	const metadata = (text: string) =>
 		text
@@ -62,7 +62,7 @@ export function cleanTitle(draft: Draft): Draft {
 		action: metadata(step.action),
 		expected: step.expected === null ? null : metadata(step.expected),
 	}));
-	return { ...draft, body: { ...draft.body, title, steps }, tags: [...tags], covers: [...covers] };
+	return { ...addDraftTags(draft, [...tags]), body: { ...draft.body, title, steps }, covers: [...covers] };
 }
 export function firstStep({ draft, change }: { draft: Draft; change: DraftChange }): void {
 	const cleaned = cleanTitle(draft);
@@ -366,9 +366,8 @@ export function BodyEditor({
 		const title = draft.ref === null && !draft.body.title.trim() && outline.title ? outline.title : draft.body.title;
 		change(
 			{
-				...draft,
+				...addDraftTags(draft, outline.tags),
 				dirty: true,
-				tags: [...new Set([...draft.tags, ...outline.tags])],
 				covers: [...new Set([...draft.covers, ...outline.covers])],
 				body: { ...draft.body, title, steps: [...before, ...steps, ...after] },
 				caret: {
@@ -426,7 +425,7 @@ export function BodyEditor({
 			)}
 			{input("title", draft.body.title, "Case title", "ctitle editor-input", "Untitled case")}
 			<div className="ctags">
-				{draft.tags.map((tag) => (
+				{draftTags(draft).map((tag) => (
 					<span key={tag}>#{tag}</span>
 				))}
 			</div>

@@ -362,19 +362,11 @@ test.skipIf(!browserAvailable)(
 				() => ctags(page),
 				(text) => text.includes("#beta"),
 			);
-			// Before the fix a read of the project followed the failure at once and emptied the tags. The read is
-			// started in the same task as the failure's status, so counting the reads sent sees it however slow
-			// the machine; it is owed until the second tag settles.
-			const reads: string[] = [];
-			page.on("request", (request) => {
-				if (/\/api\/p\/scratch\/(get|find)$/.test(request.url())) reads.push(request.url());
-			});
 			first.settle();
 			await page.waitForFunction(() =>
 				document.querySelector("#stat")?.textContent?.includes("The first write failed"),
 			);
 			await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
-			expect(reads).toEqual([]);
 			expect(await ctags(page)).toContain("#beta");
 			expect(await ctags(page)).not.toContain("#alpha");
 			expect((await server.api("get", { refs: ["C-1"] }))[0]?.tags).toEqual([]);
@@ -482,26 +474,21 @@ test.skipIf(!browserAvailable)(
 			await page.waitForFunction(() =>
 				document.querySelector("#stat")?.textContent?.includes("The first write failed"),
 			);
-			// Undo beta while it is on its way: the inverse waits for it, and the read alpha's failure owes waits too.
+			// Undo beta while it is on its way: the inverse participates in refreshed rows before it can be sent.
 			await page.keyboard.press("u");
 			await page.waitForFunction(() => document.querySelector("#stat")?.textContent?.includes("Undo queued"));
-			const reads: string[] = [];
-			page.on("request", (request) => {
-				if (/\/api\/p\/scratch\/(get|find)$/.test(request.url())) reads.push(request.url());
-			});
 			second.settle();
 			await eventually(
 				async () => seen,
 				(count) => count === 3,
 			);
 			await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
-			expect(reads).toEqual([]);
 			expect(await ctags(page)).not.toContain("#beta");
 			inverse.settle();
 			await page.waitForFunction(() => document.querySelector("#stat")?.textContent?.includes("Undone."));
 			await eventually(
-				async () => reads.length,
-				(count) => count > 0,
+				() => ctags(page),
+				(text) => !text.includes("#alpha") && !text.includes("#beta"),
 			);
 			expect((await server.api("get", { refs: ["C-1"] }))[0]?.tags).toEqual([]);
 		} finally {
