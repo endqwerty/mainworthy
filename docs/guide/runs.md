@@ -33,7 +33,10 @@ To plan a run, follow these steps.
 6. Choose which results the run accepts.
 7. Choose "Plan run".
 
-The planner shows the number of matching cases.
+The planner counts the active cases the run selects. Shared-step fragments are excluded,
+including when a folder, tag, or search matches only fragments. A run selection is limited
+to 20,000 cases. Narrow a larger selection by folder, tag, or search.
+The API can preview the same selection with `find` and `{"in":"cases","select":{}}`.
 If you open another screen while planning finishes, the run is recorded and you stay on that screen.
 "Count only results recorded in this run" accepts work explicitly reported to the run.
 "Accept results for a commit" also accepts qualifying results already reported for

@@ -27,29 +27,23 @@ export function RunPlanner({ close }: { close: () => void }) {
 	}, [filter]);
 	const folders = useQueryOp({ project, op: "find", input: { in: "folders" } });
 	const parsedFolders = z.array(z.object({ path: z.string() })).safeParse(folders.data?.items);
+	const selection = (value: string): Api["plan"]["input"]["select"] =>
+		mode === "folder" && value
+			? { folders: [value] }
+			: mode === "tag" && value
+				? { tags: [value.replace(/^#/, "")] }
+				: mode === "text" && value
+					? { text: value }
+					: {};
 	const found = useQueryOp({
 		project,
 		op: "find",
 		input: {
 			in: "cases",
-			...(mode === "folder" && query
-				? { folder: query, deep: true }
-				: mode === "tag" && query
-					? { tags: [query.replace(/^#/, "")] }
-					: mode === "text" && query
-						? { text: query }
-						: {}),
+			select: selection(query),
 			limit: 1,
 		},
 	});
-	const select: Api["plan"]["input"]["select"] =
-		mode === "folder" && filter
-			? { folders: [filter] }
-			: mode === "tag" && filter
-				? { tags: [filter.replace(/^#/, "")] }
-				: mode === "text" && filter
-					? { text: filter }
-					: {};
 	return (
 		<form
 			className="run-planner"
@@ -62,7 +56,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 					"plan",
 					{
 						name: name.trim(),
-						select,
+						select: selection(filter),
 						...(target === "commit" ? { accepts: { commit: commit.trim() } } : {}),
 						cmd: randomId(),
 					},
@@ -141,7 +135,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 				)
 			)}
 			<div className="dim" role="status">
-				{found.data?.count === null ? "Too many matching cases to count" : `${found.data?.count ?? 0} matching cases`}
+				{found.error ? found.error.message : `${found.data?.count ?? 0} matching cases`}
 			</div>
 			<label className="run-radio">
 				<input type="radio" name="run-target" checked={target === "self"} onChange={() => setTarget("self")} /> Count

@@ -99,6 +99,7 @@ import {
 	listCases,
 	placementsOf,
 	requirementList,
+	selectCases,
 	structuralProblems,
 	tagCounts,
 	versionAt,
@@ -711,6 +712,16 @@ export function find(ctx: Ctx, input: FindInput): Found {
 			};
 		}
 		case "cases": {
+			if (input.select) {
+				const selected = selectCases(ctx, input.select);
+				const from = input.cursor ? Number(input.cursor) : 0;
+				if (!Number.isSafeInteger(from) || from < 0) throw invalid("that is not a cursor of a selection");
+				return {
+					count: selected.length,
+					items: selected.slice(from, from + limit).map((row) => caseRow(ctx, row, true)),
+					cursor: selected.length > from + limit ? String(from + limit) : null,
+				};
+			}
 			const page = listCases(ctx, {
 				folder: input.folder,
 				deep: input.deep,
