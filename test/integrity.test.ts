@@ -1243,6 +1243,116 @@ describe("what a run and a change may count", () => {
 		expect(waiting()).toEqual({ verdict: "passed", missing: 0 });
 	});
 
+	for (const outcome of ["skip", "blocked"] as const) {
+		test(`correcting a required job's only pass to ${outcome} removes its evidence from existing and new runs`, () => {
+			seed();
+			const ci = pipeline();
+			const target = { commit: "jobsfix1", branch: "main" };
+			const input = {
+				name: "Release",
+				select: { cases: ["C-1"] },
+				accepts: { commit: target.commit },
+				require: [
+					{ id: "manual", kind: "exercise", methods: ["human"], minActors: 1, basis: "exact" },
+					{ id: "ci", kind: "jobs", jobs: ["e2e"] },
+				],
+			};
+			const planned = plan(input);
+			report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+			const pass = report({ target, job: "e2e", results: [{ test: { key: "auto-check" }, outcome: "pass" }] }, ci);
+			const approval = open("signoff", "decided");
+			expect(h.call<unknown[]>("get", { refs: [planned.run] })).toMatchObject([
+				{ state: "closed", verdict: "passed", tally: { pass: 1, missing: 0 } },
+			]);
+			const correction = report(
+				{ target, job: "e2e", results: [{ test: { key: "auto-check" }, outcome, corrects: first(pass.results) }] },
+				ci,
+			);
+			expect(correction).toMatchObject({ rejected: [], declined: [], counts: { total: 1, pass: 0 } });
+			expect(gate({ run: planned.run })).toMatchObject({ verdict: "pending", tally: { pass: 1, missing: 1 } });
+			expect(h.call<unknown[]>("get", { refs: [planned.run] })).toMatchObject([
+				{ state: "open", verdict: "pending", tally: { pass: 1, missing: 1 } },
+			]);
+			expect(h.call<InboxReply>("inbox", { kind: "signoff", state: "decided" }).items).toMatchObject([
+				{ q: approval.q, decision: { answer: { is: "outdated" } } },
+			]);
+			expect(open("signoff").evidence).toMatchObject({ verdict: "pending", tally: { missing: 1 } });
+			const next = plan(input);
+			expect(gate({ run: next.run })).toMatchObject({ verdict: "pending", tally: { pass: 1, missing: 1 } });
+		});
+	}
+
+	for (const outcome of ["fail", "error"] as const) {
+		test(`a correction to ${outcome} still meets the required job and counts its failure`, () => {
+			seed(1, ["human", "auto"]);
+			const ci = pipeline();
+			const target = { commit: "jobsfail1", branch: "main" };
+			const input = {
+				name: "Release",
+				select: { cases: ["C-1"] },
+				accepts: { commit: target.commit },
+				require: [...exercise(), { id: "ci", kind: "jobs", jobs: ["e2e"] }],
+			};
+			const planned = plan(input);
+			const pass = report({ target, job: "e2e", results: [linked("pass")] }, ci);
+			expect(gate({ run: planned.run })).toMatchObject({ verdict: "passed", tally: { pass: 1, missing: 0 } });
+			report({ target, job: "e2e", results: [{ ...linked(outcome), corrects: first(pass.results) }] }, ci);
+			expect(gate({ run: planned.run })).toMatchObject({ verdict: "blocked", tally: { unexplained: 1, missing: 0 } });
+			expect(gate({ commit: target.commit })).toMatchObject({
+				verdict: "blocked",
+				tally: { unexplained: 1, missing: 0 },
+			});
+			expect(h.call<unknown[]>("get", { refs: [planned.run] })).toMatchObject([{ state: "open", verdict: "blocked" }]);
+			const next = plan(input);
+			expect(gate({ run: next.run })).toMatchObject({ verdict: "blocked", tally: { unexplained: 1, missing: 0 } });
+		});
+	}
+
+	test("a required job keeps its other decisive results but never revives corrected ancestors", () => {
+		seed();
+		const ci = pipeline();
+		const target = { commit: "jobschain1", branch: "main" };
+		const planned = plan({
+			name: "Release",
+			select: { cases: ["C-1"] },
+			accepts: { commit: target.commit },
+			require: [...exercise(["human"]), { id: "ci", kind: "jobs", jobs: ["e2e"] }],
+		});
+		report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+		const passes = report(
+			{
+				target,
+				job: "e2e",
+				results: [
+					{ test: { key: "a" }, outcome: "pass" },
+					{ test: { key: "b" }, outcome: "pass" },
+				],
+			},
+			ci,
+		);
+		const skipped = report(
+			{ target, job: "e2e", results: [{ test: { key: "a" }, outcome: "skip", corrects: first(passes.results) }] },
+			ci,
+		);
+		expect(gate({ run: planned.run })).toMatchObject({ verdict: "passed", tally: { missing: 0 } });
+		report(
+			{ target, job: "corrections", results: [{ test: { key: "b" }, outcome: "skip", corrects: passes.results[1] }] },
+			ci,
+		);
+		expect(gate({ run: planned.run })).toMatchObject({ verdict: "pending", tally: { pass: 1, missing: 1 } });
+		const stillSkipped = report(
+			{ target, job: "e2e", results: [{ test: { key: "a" }, outcome: "skip", corrects: first(skipped.results) }] },
+			ci,
+		);
+		expect(gate({ run: planned.run })).toMatchObject({ verdict: "pending", tally: { pass: 1, missing: 1 } });
+		report(
+			{ target, job: "e2e", results: [{ test: { key: "a" }, outcome: "pass", corrects: first(stillSkipped.results) }] },
+			ci,
+		);
+		expect(gate({ run: planned.run })).toMatchObject({ verdict: "passed", tally: { pass: 1, missing: 0 } });
+		expect(h.call<unknown[]>("get", { refs: [planned.run] })).toMatchObject([{ state: "closed", verdict: "passed" }]);
+	});
+
 	test("a late correction reopens a commit run on its current evidence", () => {
 		seed(1, ["human", "auto"]);
 		const commit = "feedface00000000000000000000000000000001";

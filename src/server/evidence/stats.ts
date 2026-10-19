@@ -4,6 +4,7 @@ import type { LocalDay } from "../../core/days.ts";
 import type { MethodKind } from "../../core/model.ts";
 import type { OutcomeCounts } from "../../core/stats.ts";
 import { type Db, sql } from "../kernel/db.ts";
+import { uncorrectedResults } from "./evidence.ts";
 
 type Window = { project: number; from: number; to: number };
 type Tally = { slot: number; outcome: string; quarantined: number; n: number };
@@ -29,7 +30,7 @@ const Q = {
 		         ) AS rank
 		  FROM results r JOIN batches b ON b.id = r.batch
 		  WHERE r.project = $project AND r.at >= $from AND r.at < $to AND ($method IS NULL OR r.method = $method)
-		    AND NOT EXISTS (SELECT 1 FROM results c WHERE c.corrects = r.id)
+		    AND ${uncorrectedResults("r.id")}
 		)
 		SELECT k.at / ${SLOT} AS slot, k.outcome, k.quarantined, count(*) AS n
 		FROM ranked k WHERE k.rank = 1
@@ -41,7 +42,7 @@ const Q = {
 		SELECT f.test, count(*) AS flips, max(r.at) AS last_at
 		FROM flips f JOIN results r ON r.id = f.second_result JOIN tests t ON t.id = f.test
 		WHERE f.project = $project AND r.at >= $since AND t.kind = 'auto'
-		  AND NOT EXISTS (SELECT 1 FROM results c WHERE c.corrects IN (f.first_result, f.second_result))
+		  AND ${uncorrectedResults("f.first_result", "f.second_result")}
 		GROUP BY f.test ORDER BY flips DESC, last_at DESC, f.test
 	`),
 	// Automated is what the test is, whoever reported it: an agent can report an automated test too.
@@ -79,7 +80,7 @@ const Q = {
 		                    k.seq DESC, k.ord DESC
 		         ) AS rank
 		  FROM executions e JOIN chain k ON k.root = e.id
-		  WHERE NOT EXISTS (SELECT 1 FROM results c WHERE c.corrects = k.id)
+		  WHERE ${uncorrectedResults("k.id")}
 		)
 		SELECT a.test, count(*) AS reruns, coalesce(sum(a.duration_ms), 0) AS lost, sum(a.duration_ms IS NULL) AS unknown
 		FROM attempts a WHERE a.rank = 1
@@ -92,7 +93,7 @@ const Q = {
 		SELECT t.case_id, count(*) AS runs, sum(r.duration_ms) AS time
 		FROM results r JOIN tests t ON t.id = r.test
 		WHERE r.project = $project AND r.at >= $since AND r.method = 'human' AND t.case_id IS NOT NULL
-		  AND NOT EXISTS (SELECT 1 FROM results c WHERE c.corrects = r.id)
+		  AND ${uncorrectedResults("r.id")}
 		GROUP BY t.case_id
 	`),
 	// `+r.at` keeps each test's read on `results_test`, newest first, which stops at its first match; on
@@ -101,7 +102,7 @@ const Q = {
 		SELECT t.case_id, (
 		  SELECT r.outcome FROM results r
 		  WHERE r.project = t.project AND r.test = t.id AND +r.at >= $since
-		    AND NOT EXISTS (SELECT 1 FROM results c WHERE c.corrects = r.id)
+		    AND ${uncorrectedResults("r.id")}
 		  ORDER BY r.seq DESC, r.ord DESC LIMIT 1
 		) AS outcome
 		FROM tests t WHERE t.project = $project AND t.case_id IN (SELECT value FROM json_each($cases))

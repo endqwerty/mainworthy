@@ -131,6 +131,9 @@ Use the reporting operation if your workflow needs several producers on one slot
 Add named jobs when the run must receive reports from all parts of a pipeline.
 Each required job needs an applied pipeline report that ran something.
 A report containing only skipped or blocked results does not meet the requirement.
+Only results that their producer has not corrected count toward a required job.
+Correcting its last decisive automated result to skipped or blocked makes the job missing again,
+including in runs planned after the correction. A closed run reopens and reconsiders its sign-off.
 An agent's report under the same job name does not meet it either.
 A `nothingRequired` declaration never satisfies a required job or a case slot.
 That restriction applies even when the project's policy allows an empty commit gate to pass.
@@ -183,7 +186,7 @@ A run that accepts a commit keeps receiving qualifying results after it closes,
 including reports that name the run. While a report waits for the server to apply it, the run's gate
 is `pending`. Once the server applies all accepted reports, Mainworthy asks for sign-off
 again if a report added or corrected qualifying results in the run.
-Reports with no qualifying slot results leave the run's approval in place.
+Reports that change neither qualifying slot results nor required-job evidence leave the run's approval in place.
 That includes reports for repositories or environments the run excludes.
 The ledger keeps the replaced approval and records that it no longer holds.
 A passing run can close again under its policy.
