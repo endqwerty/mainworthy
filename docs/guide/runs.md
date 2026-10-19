@@ -122,7 +122,11 @@ a slot, and a run with missing proof stays `pending`.
 A failure opens a question. Answer it in [Queue](./decide.md).
 
 Press <kbd>u</kbd> to correct the last result while the run remains open.
-If there was no previous result, the correction is a skip. Both results stay recorded.
+Undo waits for pending reports and restores the previous recorded outcome, note, failed step,
+and attachments. A refused report cannot become the outcome restored by undo.
+If there was no previous recorded result, the correction is a skip. Both results stay recorded.
+Undo targets only the result recorded by this page. If another tab has replaced it, the page
+reports that it changed and leaves the newer result in place.
 The web app requires you to reopen a closed run before recording or correcting results.
 The reporting operation also accepts late results for closed runs that accept a commit.
 
@@ -137,9 +141,9 @@ An assumed result cannot fill a slot that requires an exact basis.
 A pass on another case version does not count just because the title is unchanged.
 See [report results](./report-results.md#read-the-results-basis).
 
-The web app leaves slots filled by another producer for that producer's evidence.
-Move to an unfilled slot to record your own work.
-Use the reporting operation if your workflow needs several producers on one slot.
+The web app leaves slots filled by another producer for that producer's evidence, unless the
+slot is still missing a required person. Another admitted person can then record their result.
+The result controls and <kbd>j</kbd>/<kbd>k</kbd> navigation include those slots.
 
 ## Require CI jobs
 
