@@ -14,12 +14,14 @@
 //   bun scripts/diagrams.ts stamp                                  record every page as it is now
 //
 // `build` runs archify's `finalize` (validate against the files the candidate cites, render, check in a browser),
-// then stamps that diagram alone. `picture` stamps nothing: a picture is drawn from the page, and says nothing of
-// whether the page was built from its candidate. Each set's stamp, `built.json` in its candidates' directory, holds the hash of each candidate and
-// of its page; `test/docs.test.ts` fails when a candidate was edited and its page was not built again, or a page
-// was edited by hand. GitHub shows an HTML file as text, so `build` also draws a repository diagram as
-// `<name>.png` beside its page, which the Markdown shows and links to the page. It takes the Chromium the browser
-// tests take (`MAINWORTHY_CHROMIUM`, else the system's).
+// draws the picture of a repository diagram, then stamps that diagram alone. `picture` stamps nothing: a picture is
+// drawn from the page, and says nothing of whether the page was built from its candidate. Each set's stamp,
+// `built.json` in its candidates' directory, holds the hash of each candidate and of its page; `test/docs.test.ts`
+// fails when a candidate was edited and its page was not built again, or a page was edited by hand.
+//
+// GitHub shows an HTML file as text, so a repository diagram has `<name>.png` beside its page, which the Markdown
+// shows and links to the page. It is drawn with the Chromium the browser tests take (`MAINWORTHY_CHROMIUM`, else
+// the system's).
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -155,6 +157,9 @@ async function build(archify: string, names: string[]): Promise<void> {
 			const gates = receipt.success ? JSON.stringify(receipt.data.gates ?? {}) : "no receipt";
 			if (run.exitCode !== 0 || !receipt.success || receipt.data.status !== "pass")
 				throw new Error(`${name}: archify finalize did not pass (${gates}); run it by hand to read why`);
+			// A repository page is recorded only with its picture drawn, so a failed drawing leaves the page unstamped
+			// and the docs test says so, instead of a new page beside an old picture.
+			if (set === REPOSITORY) await picture([name]);
 			record(name);
 			console.info(`${name}: built and stamped, ${gates}`);
 		} finally {
@@ -173,7 +178,6 @@ if (import.meta.main) {
 		if (!archify) throw new Error("usage: bun scripts/diagrams.ts build <archify directory> [name...]");
 		const built = names.length > 0 ? names : SETS.flatMap((set) => diagramNames(set));
 		await build(archify, built);
-		await picture(built.filter((name) => setOf(name) === REPOSITORY));
 	} else if (command === "picture") {
 		const names = rest.length > 0 ? rest : diagramNames(REPOSITORY);
 		for (const name of names)
