@@ -159,11 +159,35 @@ test("one data directory admits one server, releases on stop, and releases after
 });
 
 test.each([
-	{ setting: { publicUrl: "http://192.0.2.1:7357" }, error: "MAINWORTHY_PUBLIC_URL" },
-	{ setting: { ownerToken: "short" }, error: "MAINWORTHY_OWNER_TOKEN is shorter than 20" },
-	{ setting: { ownerToken: "x".repeat(513) }, error: "MAINWORTHY_OWNER_TOKEN is longer than 512" },
-	{ setting: { owner: "forgotten-9" }, error: "MAINWORTHY_OWNER names forgotten-9" },
-])("invalid startup configuration creates no data and takes no lock: $error", async ({ setting, error }) => {
+	{ setting: { publicUrl: "http://192.0.2.1:7357" }, error: "MAINWORTHY_PUBLIC_URL", form: "MAINWORTHY_PUBLIC_URL" },
+	{
+		setting: { ownerToken: "short" },
+		error: "MAINWORTHY_OWNER_TOKEN is shorter than 20",
+		form: "MAINWORTHY_OWNER_TOKEN is shorter than 20",
+	},
+	{
+		setting: { ownerToken: "x".repeat(513) },
+		error: "MAINWORTHY_OWNER_TOKEN is longer than 512",
+		form: "MAINWORTHY_OWNER_TOKEN is longer than 512",
+	},
+	{
+		setting: { ownerToken: " owner-secret-0123456789" },
+		error: "MAINWORTHY_OWNER_TOKEN must contain only visible ASCII characters without spaces",
+		form: "leading space",
+	},
+	...["trailing ", "inner space", "tab\t", "carriage\r", "newline\n", "null\0", "delete\x7f", "é", "🔑"].map(
+		(form) => ({
+			setting: { ownerToken: `owner-secret-0123456789${form}` },
+			error: "MAINWORTHY_OWNER_TOKEN must contain only visible ASCII characters without spaces",
+			form: JSON.stringify(form),
+		}),
+	),
+	{
+		setting: { owner: "forgotten-9" },
+		error: "MAINWORTHY_OWNER names forgotten-9",
+		form: "MAINWORTHY_OWNER names forgotten-9",
+	},
+])("invalid startup configuration creates no data and takes no lock: $form", async ({ setting, error }) => {
 	using directory = testDirectory("mainworthy-start-config-");
 	const parent = directory.path;
 	await using first = boot("local");

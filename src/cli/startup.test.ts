@@ -4,6 +4,7 @@ import { mkdtemp, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { type Instance, start } from "../app/start.ts";
 import { API_VERSION, VERSION } from "../core/version.ts";
 import { contentSecurityPolicy } from "../surfaces/headers.ts";
 import { CLI_ENTRY, COMMIT, withInstance } from "./test-support.ts";
@@ -16,6 +17,81 @@ const NO_PROXY_NAMED =
 	"mainworthy: MAINWORTHY_TRUSTED_PROXY and MAINWORTHY_CLIENT_ADDRESS_HEADER are not set: a failed sign-in from a loopback or private address, which behind a proxy is every visitor's, is not counted against that address, only against the first 8 characters of the token it tried. docs/deploy.md says how to set the two.\n";
 /** The two variables, for a start that is about something else and should have nothing to say about the limit. */
 const BEHIND_PROXY = { MAINWORTHY_TRUSTED_PROXY: "10.0.0.1", MAINWORTHY_CLIENT_ADDRESS_HEADER: "x-real-ip" };
+
+test.each([
+	{ form: "trailing space", replacement: "replacement-owner-secret-0123456789 " },
+	{ form: "emoji", replacement: "replacement-owner-secret-0123456789🔑" },
+])(
+	"an owner token rotation to $form refuses startup and preserves the previous token and session",
+	async ({ replacement }) => {
+		const token = "original-owner-secret-0123456789";
+		await withInstance(
+			async ({ instance, cli, run }) => {
+				const login = await fetch(`${instance.url}/api/login`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ token }),
+				});
+				expect(login.status).toBe(200);
+				const cookie = login.headers.get("set-cookie")?.split(";")[0];
+				if (!cookie) throw new Error("the sign-in returned no session cookie");
+				const before = await cli(["find", "--compact"], { env: { MAINWORTHY_TOKEN: token } });
+				expect([before.code, before.stderr, JSON.parse(before.stdout).items]).toEqual([0, "", []]);
+				const config = { ...instance.app.config };
+				await instance.stop();
+				const attempted: Instance[] = [];
+				try {
+					expect(() => {
+						attempted.push(start({ ...config, ownerToken: replacement }, () => ({ ui: null })));
+					}).toThrow("MAINWORTHY_OWNER_TOKEN must contain only visible ASCII characters without spaces");
+				} finally {
+					for (const started of attempted) await started.stop();
+				}
+				const restarted = start(config, () => ({ ui: null }));
+				try {
+					for (const headers of [{ authorization: `Bearer ${token}` }, { cookie }]) {
+						const session = await fetch(`${restarted.url}/api/session`, { headers });
+						expect(session.status).toBe(200);
+						expect(await session.json()).toMatchObject({ ok: true, result: { actor: "robin" } });
+					}
+					const after = await run(["find", "--compact"], {
+						env: { MAINWORTHY_URL: restarted.url, MAINWORTHY_TOKEN: token },
+					});
+					expect([after.code, after.stderr, JSON.parse(after.stdout).items]).toEqual([0, "", []]);
+					const refused = await fetch(`${restarted.url}/api/login`, {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify({ token: replacement }),
+					});
+					expect(refused.status).toBe(401);
+				} finally {
+					await restarted.stop();
+				}
+			},
+			{ mode: "server", env: { MAINWORTHY_OWNER_TOKEN: token } },
+		);
+	},
+);
+
+test("every visible ASCII character in a configured owner token works at login, as a bearer and through the CLI", async () => {
+	const token = Array.from({ length: 94 }, (_, index) => String.fromCharCode(index + 33)).join("");
+	await withInstance(
+		async ({ instance, cli }) => {
+			const login = await fetch(`${instance.url}/api/login`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ token }),
+			});
+			expect(login.status).toBe(200);
+			const session = await fetch(`${instance.url}/api/session`, { headers: { authorization: `Bearer ${token}` } });
+			expect(session.status).toBe(200);
+			expect(await session.json()).toMatchObject({ ok: true, result: { actor: "robin" } });
+			const found = await cli(["find", "--compact"], { env: { MAINWORTHY_TOKEN: token } });
+			expect([found.code, found.stderr, JSON.parse(found.stdout).items]).toEqual([0, "", []]);
+		},
+		{ mode: "server", env: { MAINWORTHY_OWNER_TOKEN: token } },
+	);
+});
 
 test("version loads its adapter without starting other command implementations", async () => {
 	const child = Bun.spawn(

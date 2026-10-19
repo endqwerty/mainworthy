@@ -301,6 +301,11 @@ export function validateBootstrap(config: Config): void {
 			`MAINWORTHY_OWNER_TOKEN ${why}. Make one with \`openssl rand -hex 32\`, set MAINWORTHY_OWNER_TOKEN to it and start again; ${START_REFUSED}`,
 		);
 	}
+	if (configured && /[^\x21-\x7e]/.test(configured)) {
+		throw invalid(
+			`MAINWORTHY_OWNER_TOKEN must contain only visible ASCII characters without spaces, so the same value works at sign-in and in an HTTP authorization header. Make one with \`openssl rand -hex 32\`, set MAINWORTHY_OWNER_TOKEN to it and start again; ${START_REFUSED}`,
+		);
+	}
 	if (isForgottenName(config.owner)) {
 		throw invalid(
 			`MAINWORTHY_OWNER names ${config.owner}, and a name that starts with forgotten- is what a forgotten actor is called. Set MAINWORTHY_OWNER to the owner's name and start again; ${START_REFUSED}`,
@@ -324,10 +329,10 @@ export function validateBootstrap(config: Config): void {
  * within 14 days, and a server that names no proxy, because behind one it cannot tell its visitors apart
  * (`NO_PROXY_NAMED`).
  *
- * The configured token is the one secret here that a person chose, and it opens everything. One shorter than 20
- * characters stops the start, and so does one longer than a sign-in reads, in local mode too: the value becomes a
- * token there as well. A start that is refused changes no actor and no token; the schema is another matter, and
- * the refusal says so (`START_REFUSED`).
+ * The configured token is the one secret here that a person chose, and it opens everything. It must have 20 to
+ * 512 visible ASCII characters without spaces, so both sign-in and bearer requests can use it unchanged. The
+ * rule holds in local mode too: the value becomes a token there as well. A start that is refused changes no
+ * actor and no token; the schema is another matter, and the refusal says so (`START_REFUSED`).
  */
 export function bootstrap(app: App): { owner: Actor; generatedToken: string | null; warnings: string[] } {
 	validateBootstrap(app.config);
