@@ -22,7 +22,7 @@ struct RunsView: View {
 							}
 							Text(run.name).font(.headline)
 							HStack {
-								Text(detail(run))
+								TimelineView(.periodic(from: .now, by: 1)) { clock in Text(detail(run, at: clock.date)) }
 								Spacer()
 								Text(run.createdAt, format: .relative(presentation: .named))
 							}
@@ -43,6 +43,12 @@ struct RunsView: View {
 			}
 			.holdsPlaceholder()
 			.refreshable { await screen.refresh() }
+			.task(id: workDeadline) {
+				guard let deadline = workDeadline else { return }
+				do { try await Task.sleep(for: .seconds(max(0, deadline.timeIntervalSinceNow))) }
+				catch { return }
+				await screen.refresh()
+			}
 			// The filters stay under the bar, as the Queue's do: pulling to refresh moves the runs, not them.
 			.safeAreaBar(edge: .top) { filters }
 			.navigationTitle("Runs")
@@ -108,6 +114,8 @@ struct RunsView: View {
 		.padding(.bottom, 8)
 	}
 
+	private var workDeadline: Date? { screen.runs.compactMap(\.workUntil).min() }
+
 	private var kind: Binding<RunFilter.Kind?> {
 		Binding(
 			get: { screen.filter.kind },
@@ -121,9 +129,9 @@ struct RunsView: View {
 	}
 
 	/// A planned run's cases left; a change run's change, which its name names too, so only when it has a title.
-	private func detail(_ run: Run) -> String {
+	private func detail(_ run: Run, at now: Date) -> String {
 		switch run.kind {
-		case .planned: run.left.map { "\($0) \($0 == 1 ? "case" : "cases") left" } ?? "Remaining cases unavailable"
+		case .planned: (run.left.map { "\($0) \($0 == 1 ? "case" : "cases") left" } ?? "Remaining cases unavailable") + " · \(run.workUntil.map { $0 <= now } == true ? 0 : run.inProgress) in progress"
 		case .change(let change): change?.title ?? "Change run"
 		}
 	}

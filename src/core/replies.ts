@@ -20,6 +20,7 @@ import {
 	QuarantineEdit,
 	QuestionItem,
 	ReportReceipt,
+	WorkReply,
 } from "./ops.ts";
 import {
 	CredentialRow,
@@ -31,7 +32,7 @@ import {
 	TotpConfirmed,
 	TotpEnrolment,
 } from "./people.ts";
-import { Obligation, TargetMatch, Verdict } from "./runs.ts";
+import { Obligation, SlotWork, TargetMatch, Verdict } from "./runs.ts";
 import { StatsReply } from "./stats.ts";
 import { TeamReply, TeamSource } from "./teams.ts";
 import { TrackerReceipt } from "./tracker.ts";
@@ -153,6 +154,9 @@ const Run = z.looseObject({
 	accepts: TargetMatch,
 	require: z.array(Obligation),
 	slots: whole.nullable(),
+	inProgress: whole,
+	workUntil: whole.nullable(),
+	gate: GateStatus,
 	flips: whole.nullable(),
 	failing: z
 		.array(
@@ -260,6 +264,7 @@ const Slot = z.looseObject({
 	state: text,
 	rank: number,
 	assignee: nullableText,
+	work: SlotWork,
 	fills: z.array(
 		z.looseObject({
 			result: whole,
@@ -300,6 +305,7 @@ const Deployment = z.looseObject({
 const Settled = z.looseObject({ q: text, kind: text, title: text, answer: data.nullable(), by: texts });
 
 const GetRow: z.ZodType<Record<string, unknown>> = z.union([
+	z.object({ ref: text.regex(/^(commit:|change:)/), gate: GateStatus }),
 	CaseDocument,
 	z.looseObject({ ref: text.regex(/^C-\d+$/), unchanged: z.literal(true), hash: text, etag: text }),
 	z.looseObject({ ref: text.regex(/^C-\d+$/), version: whole, hash: text, etag: text, md: text }),
@@ -530,6 +536,7 @@ export const REPLIES = {
 	report: ReportReceipt,
 	claim: ClaimReply,
 	plan: PlanReply,
+	work: WorkReply,
 	change: ChangeReply,
 	decide: z.array(DecideReply),
 	inbox: InboxReply,

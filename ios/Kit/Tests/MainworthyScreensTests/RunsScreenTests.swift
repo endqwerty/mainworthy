@@ -237,7 +237,7 @@ actor RunPages: Transport {
 		let ref = old ? "R-0" : second ? "R-1" : "R-2"
 		let cursor = second ? "null" : #""next""#
 		let row =
-			#"{"ref":"\#(ref)","name":"Run","origin":"planned","state":"open","verdict":"pending","reason":"missing","createdAt":1800000000000,"tally":{"missing":1},"accepts":{"self":true}}"#
+			#"{"ref":"\#(ref)","name":"Run","origin":"planned","inProgress":0,"workUntil":null,"state":"open","verdict":"pending","reason":"missing","createdAt":1800000000000,"tally":{"missing":1},"accepts":{"self":true}}"#
 		let body = #"{"ok":true,"result":{"items":[\#(row)],"cursor":\#(cursor)}}"#
 		return (
 			Data(body.utf8),

@@ -7,7 +7,8 @@ import { archiveRoutes } from "../../surfaces/archive.ts";
 import { docsRoutes } from "../../surfaces/docs/site.ts";
 import { mcpRoute } from "../../surfaces/mcp.ts";
 import { type Args, assertPositionals } from "../args.ts";
-import { refreshDemo } from "../demo.ts";
+import { DEMO_WORK } from "../demo/work.ts";
+import { refreshDemo, renewDemoWork } from "../demo.ts";
 import { printError } from "../errors.ts";
 import { line, warning } from "../output.ts";
 
@@ -37,13 +38,23 @@ export function serveCommand(args: Args, ui: unknown): void {
 	const demo = process.env.MAINWORTHY_DEMO || undefined;
 	const refreshController = new AbortController();
 	let refreshing: Promise<void> = Promise.resolve();
+	let workTimer: ReturnType<typeof setInterval> | undefined;
+	let renewing: Promise<void> = Promise.resolve();
 	if (demo) {
 		const began = performance.now();
 		refreshing = refreshDemo(instance, demo, undefined, { signal: refreshController.signal }).then(
-			(seeded) =>
+			(seeded) => {
+				workTimer = setInterval(() => {
+					renewing = renewing
+						.then(() => renewDemoWork(instance, demo, seeded))
+						.catch((error: unknown) =>
+							warning(`demo work renewal failed: ${error instanceof Error ? error.message : String(error)}`),
+						);
+				}, DEMO_WORK.renewEveryMs);
 				line(
 					`demo "${demo}" seeded again in ${((performance.now() - began) / 1000).toFixed(1)} s: ${seeded.cases.length} cases, ${seeded.questions.length} questions`,
-				),
+				);
+			},
 			(error: unknown) =>
 				warning(
 					`mainworthy: demo "${demo}" was not seeded again: ${error instanceof Error ? error.message : String(error)}`,
@@ -55,10 +66,15 @@ export function serveCommand(args: Args, ui: unknown): void {
 		if (stopping) return;
 		stopping = true;
 		refreshController.abort(new Error("server stopping"));
+		clearInterval(workTimer);
 		// The process ends here and not when its event loop empties: under `bun --watch` (`bun run dev`) the file
 		// watcher keeps the loop alive for good, and a server that had stopped would sit there ignoring the signal.
 		void refreshing
-			.then(() => instance.stop())
+			.then(async () => {
+				clearInterval(workTimer);
+				await renewing;
+				await instance.stop();
+			})
 			.then(
 				() => process.exit(0),
 				(error: unknown) => {

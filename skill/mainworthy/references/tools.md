@@ -212,6 +212,18 @@ Review cases (`reviewed`, C-311@hash) at change `about` and commit `patch`. Reco
 | `findings[].suggest[2].expected` | `string` | no |  |
 | `project` | `string` | no |  |
 
+## work
+
+Before working, take with run and no slot. Renew with slot; report or give-back releases.
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `do` | `"take" \| "give-back"` | yes |  |
+| `run` | `string` | yes |  |
+| `slot` | `integer` | no | Slot id from find slots. Omit to take the next free unfinished slot. |
+| `seconds` | `integer` | no | Lease length in seconds, from 30 to 86400. Default: 900. Default: `900`. |
+| `project` | `string` | no |  |
+
 ## decide
 
 Answer inbox using evidenceHash as onEvidence. Status: decided, advised=person decides, forbidden, invalid, already, reopened, conflict=evidence or decision changed. Choose from answers. Withdraw with undo and ifDecision=reply.decision.
@@ -254,12 +266,13 @@ Open questions and evidenceHash; filter with on.
 
 ## get
 
-Read refs; unless=etag; page proposals with cursor.
+Read refs; verdicts at commit:hash, change:key, R-n. unless=etag; proposals page with cursor.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
+| `repo` | `string` | no | For commit refs: disambiguate repositories. |
 | `cursor` | `string` | no | For one proposal: the cursor from its previous page of edits. Restart without it after a project change. |
-| `refs` | `array<string>` | yes | Refs of cases (C-), questions (Q-), runs (R-), tests (T-) or proposals (P-). |
+| `refs` | `array<string>` | yes | C-, Q-, R-, T-, P-, commit:hash or change:key. |
 | `fields` | `array<string>` | no | For cases: any of title, pre, steps, methods, tags, covers, place, proof. Default: all. |
 | `as` | `"data" \| "md"` | no | `md` returns a case as canonical Markdown: fewer tokens than JSON. Default: `"data"`. |
 | `unless` | `record<string>` | no | Ref to the etag from get for the same as/fields. Unchanged: {ref, unchanged: true, etag}. |
@@ -295,7 +308,7 @@ Search cases by text, folder or tag; list tests (`unlinked: true`), runs or slot
 
 ## impact
 
-Review a change (`pr:482`) or changed `files`: affected cases, hashes, prior reviews, questions, uncovered files. Reuse `cursor` as `since`.
+Review change or files: affected cases, hashes, prior reviews, questions, gaps. Reuse cursor as since.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -307,22 +320,10 @@ Review a change (`pr:482`) or changed `files`: affected cases, hashes, prior rev
 
 ## since
 
-What changed since an earlier `cursor`: changed cases (one-line diff, no bodies) and settled questions. If `more`, call again with the new cursor.
+Changes after cursor: case diffs and settled questions. If more, repeat with returned cursor.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `cursor` | `string` | yes | A cursor from any earlier read. |
 | `limit` | `integer` | no |  |
-| `project` | `string` | no |  |
-
-## gate
-
-Is this commit, change or run tested? Returns passed, failed, blocked or pending with the reason and the open questions.
-
-| Property | Type | Required | Description |
-| --- | --- | --- | --- |
-| `commit` | `string` | no |  |
-| `run` | `string` | no |  |
-| `change` | `string` | no | A change key, for example pr:482: the gate of its latest commit. |
-| `repo` | `string` | no |  |
 | `project` | `string` | no |  |

@@ -71,7 +71,8 @@ An agent gets ten tools. The following six tools read data.
 - `inbox` lists the open questions with their evidence.
 - `get` reads cases, questions, runs and tests by ref, and `find` searches.
 - `since` returns what changed after a cursor.
-- `gate` returns `passed`, `failed`, `blocked` or `pending` for a commit, change or run.
+- `get` returns the full `gate` for `commit:<hash>`, `change:<key>`, or a run ref such as `R-2`. It includes `passed`, `failed`, `blocked`, or `pending`, the reason, counts, and open questions. `repo` disambiguates a commit reported in several repositories.
+- `work` takes or gives back a planned run slot.
 
 The other four tools write data:
 
@@ -174,14 +175,32 @@ agents can settle unlinked-test questions. That permission applies only when the
 about tests with no case. An agent may also withdraw its own conflicting proposal
 without holding `answer`.
 
+## Share a run without repeating work
+
+Before working, call the MCP `work` tool with `{"do":"take","run":"R-2"}`.
+The server chooses the next free unfinished slot whose method requirements admit you.
+Several agents asking together get different slots. A null `slot` means none is available.
+Read the returned case at the version in `find` slots before working.
+To take or renew a named slot, include its numeric `slot` id. Another holder gets a
+refusal naming the holder and the lease deadline. The default lease is 900 seconds.
+You can request `seconds` from 30 to 86400. The server supplies both timestamps.
+
+Report results with `report`. Any qualifying result ends the slot's lease, even from
+another producer. A lease does not reserve the right to report evidence.
+If you stop without reporting, send `{"do":"give-back","run":"R-2","slot":123}`.
+An expired lease neither blocks another taker nor shows as in progress.
+Only an open planned run can be taken. Closing the run ends its leases.
+
+The MCP tool list has ten tools. `gate` remains an HTTP operation and CLI command.
+MCP clients that called the former `gate` tool must use `get` as described above.
+
 ## Why an agent's report never moves a gate
 
 A commit gate counts results from people and pipelines. If only an agent has
 reported a commit, its gate reads `pending` with nothing counted:
 
 ```
-$ mainworthy gate --commit 3333333333333333333333333333333333333333
-mainworthy gate    pending: nothing a gate counts has been reported for this commit
+$ mainworthy get commit:3333333333333333333333333333333333333333 --json
 ```
 
 The agent's failure still raises a question for a person, who can read the evidence and answer it. An agent's report also cannot name a branch or a pull request for a commit, and it cannot move a change's head. A pipeline's later pass does not close a failure that only an agent showed. That question stays open until a person answers it.
@@ -206,7 +225,7 @@ $ mainworthy plan --json '{"name":"Agent smoke","select":{"cases":["C-2"]},"requ
 
 The web planner does not offer this requirement yet, so use the command line or
 the API. After planning the run, have the agent report to it with `run` set to `R-2`. Its pass
-fills the slot, and `mainworthy gate --run R-2` reads `passed`. A run that does
+fills the slot, and `get` with `refs: ["R-2"]` returns `gate.verdict: "passed"`. A run that does
 not name the agent method ignores agent results, even on a case that admits agents.
 
 ## Skip unchanged case documents

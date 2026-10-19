@@ -7,6 +7,10 @@ struct RunView: View {
 	@State private var executing = false
 
 	var body: some View {
+		TimelineView(.periodic(from: .now, by: 1)) { clock in content(at: clock.date) }
+	}
+
+	private func content(at now: Date) -> some View {
 		List {
 			Section {
 				Text(screen.run.name).font(.title2.weight(.semibold))
@@ -15,6 +19,8 @@ struct RunView: View {
 					Tag(text: screen.run.verdict.word, tint: screen.run.verdict.tint)
 				}
 				Text(screen.run.reason)
+				Text("\(screen.slots.filter { $0.work.holder(at: now) != nil }.count) in progress")
+					.accessibilityIdentifier("run-in-progress")
 				Text(screen.run.tallyText).font(.subheadline).foregroundStyle(.secondary)
 				Text(screen.run.accepts.sentence).font(.subheadline)
 				if screen.run.state == .closed {
@@ -35,12 +41,12 @@ struct RunView: View {
 				ForEach(Array(screen.slots.enumerated()), id: \.element.id) { index, slot in
 					// A slot another producer filled is left to that result, as the web app leaves it: it does not open.
 					if screen.isLeftToOthers(slot) {
-						row(index, slot).accessibilityIdentifier("run-slot-\(index + 1)")
+						row(index, slot, at: now).accessibilityIdentifier("run-slot-\(index + 1)")
 					} else {
 						Button {
 							open(slot)
 						} label: {
-							row(index, slot)
+							row(index, slot, at: now)
 						}
 						.buttonStyle(.plain)
 						.accessibilityIdentifier("run-slot-\(index + 1)")
@@ -67,7 +73,7 @@ struct RunView: View {
 		.navigationDestination(isPresented: $executing) { RunSlotView(screen: screen) }
 	}
 
-	private func row(_ index: Int, _ slot: RunSlot) -> some View {
+	private func row(_ index: Int, _ slot: RunSlot, at now: Date) -> some View {
 		VStack(alignment: .leading, spacing: 6) {
 			HStack {
 				Text("\(index + 1).").foregroundStyle(.secondary)
@@ -77,6 +83,10 @@ struct RunView: View {
 				Tag(text: slot.state.word, tint: slot.state.tint)
 			}
 			Text(slot.title ?? "Case unavailable").foregroundStyle(.primary)
+			if let held = slot.work.holder(at: now) {
+				Text("In progress · \(held.actor) · since \(held.since.formatted(date: .omitted, time: .shortened))")
+					.font(.caption).foregroundStyle(.secondary)
+			}
 			ForEach(slot.fills) { fill in
 				Text("\(fill.method.name.capitalized) \(fill.by) · \(fill.outcome.word)")
 					.font(.caption).foregroundStyle(.secondary)

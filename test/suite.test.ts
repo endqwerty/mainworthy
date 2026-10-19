@@ -1825,6 +1825,7 @@ describe("conflict storage upgrades", () => {
 				}),
 				input.cmd,
 			);
+			db.exec("DROP TABLE slot_leases");
 			db.raw.query("UPDATE meta SET value = '30' WHERE key = 'schema_version'").run();
 			const evidence = db.raw.query("SELECT evidence, evidence_hash FROM questions ORDER BY id").all();
 			const command = db.raw

@@ -10,9 +10,16 @@ import type { Client } from "./client.ts";
 import { automateOf, type DemoCase, demoCases, random, requirementOf } from "./demo/cases.ts";
 import { DEMO_FIELDS, demoAliases, demoFields } from "./demo/fields.ts";
 import { dayStart, demoHistory, type Failure, hex, REPO } from "./demo/history.ts";
+import { DEMO_WORK } from "./demo/work.ts";
 import { CliError } from "./errors.ts";
 
-export type SeedResult = { cases: string[]; run: string; proposal: string | null; questions: string[] };
+export type SeedResult = {
+	cases: string[];
+	run: string;
+	proposal: string | null;
+	questions: string[];
+	workSlot: number | null;
+};
 
 /** The most cases one seed writes: the size the benchmark measures (`bench/`). */
 export const MAX_SEED_CASES = 100_000;
@@ -575,7 +582,15 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 		if (!page.cursor) break;
 		cursor = page.cursor;
 	}
-	return { cases: refs, run: planned.run, proposal: proposal.proposal, questions };
+	const candidates = z
+		.array(z.object({ id: z.number(), state: z.string() }))
+		.parse((await owner.call("find", { in: "slots", run: planned.run, limit: 200 })).items);
+	const workSlot = candidates.find((slot) => slot.state === "missing" || slot.state === "skipped")?.id;
+	const working =
+		workSlot === undefined
+			? null
+			: await owner.call("work", { do: "take", run: planned.run, slot: workSlot, seconds: DEMO_WORK.seconds });
+	return { cases: refs, run: planned.run, proposal: proposal.proposal, questions, workSlot: working?.slot ?? null };
 }
 
 /**

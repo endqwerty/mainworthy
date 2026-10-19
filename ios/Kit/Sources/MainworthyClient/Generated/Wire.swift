@@ -415,6 +415,8 @@ enum Wire {
 		let createdAt: Int
 		/// A planned run's pinned cases.
 		let slots: Int?
+		let inProgress: Int
+		let workUntil: Int?
 		let change: RunChange?
 		let tally: [String: Int]
 		let accepts: RunTarget
@@ -436,6 +438,14 @@ enum Wire {
 		let atStep: String?
 	}
 
+	/// Free or held until the server deadline.
+	struct SlotWork: Decodable, Equatable, Sendable {
+		let kind: String
+		let actor: String?
+		let since: Int?
+		let until: Int?
+	}
+
 	/// One case pinned at a version in a run, in order.
 	struct RunSlot: Decodable, Equatable, Sendable {
 		let id: Int
@@ -444,6 +454,7 @@ enum Wire {
 		let version: Int
 		let state: String
 		let fills: [RunFill]
+		let work: SlotWork
 	}
 
 	/// A page of slots in their planned order.

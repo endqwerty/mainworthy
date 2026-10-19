@@ -82,6 +82,7 @@ import {
 	gate,
 	gateOf,
 	gateRun,
+	leaseOf,
 	mustRun,
 	type RunRow,
 	recentRuns,
@@ -90,6 +91,7 @@ import {
 	type SlotRow,
 	slotCount,
 	slotsPage,
+	workIn,
 } from "../runs/runs.ts";
 import {
 	archivedCases,
@@ -238,6 +240,7 @@ export function caseView(
 
 export function runView(ctx: Ctx, run: RunRow): Record<string, unknown> {
 	const status = gateOf(ctx, run);
+	const work = workIn(ctx, run.id);
 	const change = run.change !== null ? changeById(ctx.db, run.change) : null;
 	return {
 		ref: runRef(run),
@@ -252,7 +255,10 @@ export function runView(ctx: Ctx, run: RunRow): Record<string, unknown> {
 		open: status.open,
 		accepts: json(run.accepts),
 		require: json(run.require),
+		gate: status,
 		slots: run.origin === "planned" ? slotCount(ctx.db, run.id) : null,
+		inProgress: work.n,
+		workUntil: work.until,
 		flips: run.origin === "change" ? flippedIn(ctx.db, run.id) : null,
 		failing:
 			run.origin === "change"
@@ -460,6 +466,9 @@ export function get(ctx: Ctx, input: GetInput): Record<string, unknown>[] {
 	if (input.cursor && (input.refs.length !== 1 || !/^P-\d+$/i.test(input.refs[0]?.trim() ?? "")))
 		throw invalid("a proposal cursor needs exactly one P- ref");
 	return input.refs.map((text) => {
+		if (text.startsWith("commit:"))
+			return { ref: text, gate: gate(ctx, { commit: text.slice(7), ...(input.repo ? { repo: input.repo } : {}) }) };
+		if (text.startsWith("change:")) return { ref: text, gate: gate(ctx, { change: text.slice(7) }) };
 		const kind = text.trim().slice(0, 2).toUpperCase();
 		if (kind === "Q-")
 			return withTrackerPollError(
@@ -526,7 +535,7 @@ export const getOp = defineOp({
 	needs: "read",
 	scope: "project",
 	effect: "read",
-	mcp: "Read refs; unless=etag; page proposals with cursor.",
+	mcp: "Read refs; verdicts at commit:hash, change:key, R-n. unless=etag; proposals page with cursor.",
 	run: get,
 });
 
@@ -677,6 +686,7 @@ function caseRow(ctx: Ctx, row: CaseRow, rich: boolean): Record<string, unknown>
 function slotRow(ctx: Ctx, slot: SlotRow): Record<string, unknown> {
 	const row = caseById(ctx.db, slot.case_id);
 	const fills = fillsOf(ctx.db, slot.id);
+	const lease = leaseOf(ctx, slot.id);
 	return {
 		id: slot.id,
 		case: row ? caseRef(row) : null,
@@ -686,6 +696,9 @@ function slotRow(ctx: Ctx, slot: SlotRow): Record<string, unknown> {
 		state: slot.state,
 		rank: slot.rank,
 		assignee: slot.assignee !== null ? who(ctx, slot.assignee).name : null,
+		work: lease
+			? { kind: "held", actor: who(ctx, lease.actor).name, since: lease.since, until: lease.until }
+			: { kind: "free" },
 		fills: fills.map((fill) => ({
 			result: fill.id,
 			by: who(ctx, fill.actor).name,
@@ -1013,7 +1026,7 @@ export const gateOp = defineOp({
 	needs: ["read", "record"],
 	scope: "project",
 	effect: "read",
-	mcp: "Is this commit, change or run tested? Returns passed, failed, blocked or pending with the reason and the open questions.",
+	mcp: null,
 	run: (ctx: Ctx, input: GateInput): GateStatus => gate(ctx, input),
 });
 
@@ -1103,7 +1116,7 @@ export const sinceOp = defineOp({
 	needs: "read",
 	scope: "project",
 	effect: "read",
-	mcp: "What changed since an earlier `cursor`: changed cases (one-line diff, no bodies) and settled questions. If `more`, call again with the new cursor.",
+	mcp: "Changes after cursor: case diffs and settled questions. If more, repeat with returned cursor.",
 	run: since,
 });
 
@@ -1274,7 +1287,7 @@ export const impactOp = defineOp({
 	needs: "read",
 	scope: "project",
 	effect: "read",
-	mcp: "Review a change (`pr:482`) or changed `files`: affected cases, hashes, prior reviews, questions, uncovered files. Reuse `cursor` as `since`.",
+	mcp: "Review change or files: affected cases, hashes, prior reviews, questions, gaps. Reuse cursor as since.",
 	run: impact,
 });
 

@@ -26,4 +26,4 @@ When the server cannot name a case for the result, its basis is `unresolved`. Th
 
 For a wrong result of yours, report a replacement with `corrects` set to the earlier result id. Small-report receipts return these ids in `results`. Keep the test and target clear and explain the correction in `note`. The earlier result stays in the record; the replacement changes which result counts.
 
-Use `inbox` to read any failure question before `decide`. Pass its `evidenceHash` as `onEvidence`. With only `read` and `produce`, your answer is advice, so check `gate` for the verdict that counts.
+Use `inbox` to read any failure question before `decide`. Pass its `evidenceHash` as `onEvidence`. With only `read` and `produce`, your answer is advice, so read `get` with `commit:<hash>`, `change:<key>`, or the run ref for the verdict that counts.

@@ -26,15 +26,15 @@ import { compactSchema, mcpRoute, mcpServer, mcpTools, TOOL_TOKEN_BUDGET } from 
 const tokens = (value: unknown): number => encode(JSON.stringify(value)).length;
 const TOKEN_COUNTS: Record<string, number> = {
 	propose: 1388,
-	report: 697,
+	report: 690,
 	claim: 390,
 	decide: 318,
 	inbox: 166,
-	get: 209,
+	get: 229,
 	find: 263,
-	impact: 196,
-	since: 158,
-	gate: 160,
+	impact: 183,
+	since: 144,
+	work: 173,
 };
 
 function resultOf<S extends z.ZodType>(reply: unknown, schema: S): z.output<S> {
@@ -330,7 +330,13 @@ test("schema trims preserve the registry's constraints and union choices", () =>
 		find: [{}, { folder: 4, deep: true }, { in: "tests", unlinked: true }, { in: "wrong" }, { unlinked: "true" }],
 		impact: [{}, { files: ["checkout.ts"] }, { files: [4] }, { ledger: false }, { ledger: "false" }, { since: 2 }],
 		since: [{}, { cursor: "s:1" }, { cursor: 3 }, { cursor: "s:1", limit: 0 }, { cursor: "s:1", limit: 501 }],
-		gate: [{}, { commit: "9f3c2ab" }, { run: "R-1" }, { commit: 4 }, { env: false }],
+		work: [
+			{},
+			{ do: "take", run: "R-1" },
+			{ do: "take", run: "R-1", slot: 1, seconds: 60 },
+			{ do: "take", run: "R-1", seconds: 2 },
+			{ do: "give-back", run: "R-1", slot: 1 },
+		],
 	};
 	for (const tool of mcpTools()) {
 		const op = MCP_OPS.find((entry) => entry.name === tool.name);
@@ -364,16 +370,11 @@ test("compact output schemas describe structured results from the registry", () 
 		expect(validate({ result: null, seq: 1 }).valid, `${tool.name}: wrong result type`).toBe(false);
 		expect(validate({ result: {}, seq: "one" }).valid, `${tool.name}: wrong sequence`).toBe(false);
 	}
-	const gate = mcpTools().find((tool) => tool.name === "gate");
-	if (!gate?.outputSchema) throw new Error("No gate output");
-	const validate = compile(gate.outputSchema);
+	const work = mcpTools().find((tool) => tool.name === "work");
+	if (!work?.outputSchema) throw new Error("No work output");
+	const validate = compile(work.outputSchema);
 	expect(validate({ result: {}, seq: 1 }).valid).toBe(false);
-	expect(
-		validate({
-			result: { run: null, verdict: "pending", reason: "No run", tally: {}, open: [], url: null, stale: false },
-			seq: 1,
-		}).valid,
-	).toBe(true);
+	expect(validate({ result: { run: "R-1", slot: null, case: null, work: { kind: "free" } }, seq: 1 }).valid).toBe(true);
 });
 
 test("MCP role approval follows the current grant and requires a reason", async () => {
@@ -591,8 +592,8 @@ test.each(["2025-11-25", "2026-07-28"])(
 				z.object({ changed: z.array(z.unknown()).length(0), settled: z.array(z.unknown()).length(0) }),
 			);
 			const gate = resultOf(
-				await call("gate", { commit: "9f3c2ab" }),
-				z.object({ verdict: z.enum(["passed", "failed", "blocked", "pending"]), open: z.array(z.string()) }),
+				await call("get", { refs: ["commit:9f3c2ab"] }),
+				z.tuple([z.object({ gate: REPLIES.gate })]).transform(([row]) => row.gate),
 			);
 			// What an agent reports is put to a person as a question, and never moves a commit's gate (decision 0009):
 			// the gate reads what the pipeline reported, a pass, whatever the agent found.
@@ -1019,4 +1020,85 @@ test("the shipped skill stays short and its tool reference matches the registry"
 	expect(encode(skill).length, "Whole SKILL.md token budget").toBeLessThanOrEqual(400);
 	const committed = await Bun.file(new URL("../../skill/mainworthy/references/tools.md", import.meta.url)).text();
 	expect(committed, "Run bun scripts/gen-skill.ts after a registry change").toBe(generateToolReference());
+});
+
+for (const target of ["commit", "change", "run"] as const) {
+	test(`MCP get preserves the complete gate verdict for a ${target}`, async () => {
+		const h = harness();
+		h.call("report", {
+			target: { commit: "abcdef123", pr: 482, branch: "feature" },
+			results: [{ test: { key: "works" }, outcome: "pass" }],
+		});
+		const agent = h.actor("slot-reader", "agent", ["read", "produce"]);
+		const server = mcpServer(
+			async (op, project, input) => invoke(h.app, OPS, { op, project, input, actor: () => agent }),
+			async () => ["scratch"],
+		);
+		const client = new Client({ name: "slot-reader", version: "1" });
+		const [left, right] = InMemoryTransport.createLinkedPair();
+		try {
+			await server.connect(right);
+			await client.connect(left);
+			const input =
+				target === "commit" ? { commit: "abcdef123" } : target === "change" ? { change: "pr:482" } : { run: "R-1" };
+			const ref = target === "commit" ? "commit:abcdef123" : target === "change" ? "change:pr:482" : "R-1";
+			const expected = REPLIES.gate.parse(h.call("gate", input));
+			const rows = resultOf(
+				await client.callTool({ name: "get", arguments: { project: "scratch", refs: [ref] } }),
+				z.array(z.object({ gate: REPLIES.gate })),
+			);
+			expect(rows[0]?.gate).toEqual(expected);
+			expect(rows[0]?.gate).toMatchObject({ verdict: "passed", run: "R-1", open: [] });
+			const listed = await client.listTools();
+			expect(listed.tools.map((tool) => tool.name)).not.toContain("gate");
+			expect(listed.tools.map((tool) => tool.name)).toContain("work");
+			expect(listed.tools.length).toBe(10);
+		} finally {
+			await client.close();
+			await server.close();
+			h.close();
+		}
+	});
+}
+
+test("two MCP producers taking next concurrently receive different slots", async () => {
+	const h = harness();
+	h.call("propose", { edits: [1, 2].map((n) => ({ op: "create", body: { title: `Case ${n}`, methods: ["agent"] } })) });
+	h.call("plan", {
+		name: "Shared",
+		select: { cases: ["C-1", "C-2"] },
+		require: [{ id: "exercise", kind: "exercise", methods: ["agent"], minActors: 1, basis: "exact" }],
+	});
+	const peers = await Promise.all(
+		["first", "second"].map(async (name) => {
+			const actor = h.actor(name, "agent", ["read", "produce"]);
+			const server = mcpServer(
+				(op, project, input) => invokeAsync(h.app, OPS, { op, project, input, actor: () => actor }),
+				async () => ["scratch"],
+			);
+			const client = new Client({ name, version: "1" });
+			const [left, right] = InMemoryTransport.createLinkedPair();
+			await server.connect(right);
+			await client.connect(left);
+			return { server, client };
+		}),
+	);
+	try {
+		const taken = await Promise.all(
+			peers.map(async ({ client }) =>
+				resultOf(
+					await client.callTool({ name: "work", arguments: { project: "scratch", do: "take", run: "R-1" } }),
+					REPLIES.work,
+				),
+			),
+		);
+		expect(taken.map((t) => t.case).sort()).toEqual(["C-1", "C-2"]);
+		expect(taken.map((t) => (t.work.kind === "held" ? t.work.actor : "free")).sort()).toEqual(["first", "second"]);
+	} finally {
+		for (const p of peers) {
+			await p.client.close();
+			await p.server.close();
+		}
+		h.close();
+	}
 });

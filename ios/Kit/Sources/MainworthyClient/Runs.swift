@@ -136,6 +136,8 @@ public struct Run: Identifiable, Equatable, Sendable {
 	public let verdict: RunVerdict
 	public let reason: String
 	public let tally: [String: Int]
+	public let inProgress: Int
+	public let workUntil: Date?
 	public let accepts: AcceptedResults
 	public let createdAt: Date
 	public var isPlanned: Bool { if case .planned = kind { true } else { false } }
@@ -167,6 +169,8 @@ public struct Run: Identifiable, Equatable, Sendable {
 		verdict = RunVerdict(wire.verdict)
 		reason = wire.reason
 		tally = wire.tally
+		inProgress = wire.inProgress
+		workUntil = wire.workUntil.map { Date(timeIntervalSince1970: Double($0) / 1000) }
 		createdAt = Date(timeIntervalSince1970: Double(wire.createdAt) / 1000)
 		kind =
 			wire.origin == "change"
@@ -213,6 +217,20 @@ public struct RunFill: Identifiable, Equatable, Sendable {
 	}
 }
 
+public enum SlotWork: Equatable, Sendable {
+ case free
+ case held(actor: String, since: Date, until: Date)
+ public func holder(at now: Date = .now) -> (actor: String, since: Date)? {
+  if case .held(let actor, let since, let until) = self, until > now { return (actor, since) }
+  return nil
+ }
+ init(_ wire: Wire.SlotWork) {
+  if wire.kind == "held", let actor = wire.actor, let since = wire.since, let until = wire.until {
+   self = .held(actor: actor, since: Date(timeIntervalSince1970: Double(since) / 1000), until: Date(timeIntervalSince1970: Double(until) / 1000))
+  } else { self = .free }
+ }
+}
+
 public struct RunSlot: Identifiable, Equatable, Sendable {
 	public let id: Int
 	public let caseRef: String?
@@ -220,6 +238,7 @@ public struct RunSlot: Identifiable, Equatable, Sendable {
 	public let version: Int
 	public let state: SlotState
 	public let fills: [RunFill]
+	public let work: SlotWork
 	public func ownFill(by person: String) -> RunFill? {
 		fills.filter { $0.by == person && $0.method == .person }.max { $0.result < $1.result }
 	}
@@ -230,6 +249,7 @@ public struct RunSlot: Identifiable, Equatable, Sendable {
 		version = wire.version
 		state = SlotState(wire.state)
 		fills = wire.fills.map(RunFill.init)
+		work = SlotWork(wire.work)
 	}
 }
 

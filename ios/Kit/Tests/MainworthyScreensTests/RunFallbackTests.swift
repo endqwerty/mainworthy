@@ -16,12 +16,12 @@ actor OvertakenSlotsTransport: Transport {
 	func waitFallback() async { for await _ in sawFallback.stream { break } }
 	func releaseFallback() { fallback.continuation.yield() }
 	func runJSON() -> String {
-		#"{"ref":"R-1","name":"Review","origin":"planned","state":"open","verdict":"pending","reason":"missing","createdAt":1800000000000,"slots":2,"tally":{"missing":1,"pass":1},"accepts":{"self":true}}"#
+		#"{"ref":"R-1","name":"Review","origin":"planned","inProgress":0,"workUntil":null,"state":"open","verdict":"pending","reason":"missing","createdAt":1800000000000,"slots":2,"tally":{"missing":1,"pass":1},"accepts":{"self":true}}"#
 	}
 	func slotJSON(_ n: Int, filled: Bool) -> String {
 		let fills = filled ? #"[{"result":\#(n),"by":"robin","method":"human","outcome":"pass"}]"# : "[]"
 		return
-			#"{"id":\#(n),"case":"C-\#(n)","title":"Case \#(n)","version":1,"state":"\#(filled ? "satisfied" : "missing")","fills":\#(fills)}"#
+			#"{"id":\#(n),"case":"C-\#(n)","title":"Case \#(n)","version":1,"state":"\#(filled ? "satisfied" : "missing")","work":{"kind":"free"},"fills":\#(fills)}"#
 	}
 	func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
 		let input = try JSONDecoder().decode(JSONValue.self, from: request.httpBody ?? Data())

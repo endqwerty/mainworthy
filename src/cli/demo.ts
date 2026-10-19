@@ -8,8 +8,11 @@ import { createToken, manageTeams, orgId, revokeToken, setGrant } from "../serve
 import type { App, Config } from "../server/kernel/app.ts";
 import { type Actor, demoSince, findProject, markDemo } from "../server/kernel/ctx.ts";
 import { actorsWithGrants, createProject } from "../server/ops/admin.ts";
+import { OPS } from "../server/ops/index.ts";
+import { invokeAsync } from "../server/ops/registry.ts";
 import { firstWrite, removeProject } from "../server/transfer/transfer.ts";
 import { Client } from "./client.ts";
+import { DEMO_WORK } from "./demo/work.ts";
 import { CliError } from "./errors.ts";
 import { warning } from "./output.ts";
 import { DEFAULT_SEED_CASES, DEMO_ACTORS, refuseProducers, type SeedResult, seed } from "./seed.ts";
@@ -220,4 +223,29 @@ function grantsOn(app: App, owner: Actor, project: string): Grant[] {
 		for (const grant of team.grants.filter((grant) => grant.project === project))
 			held.push({ holder: "team", name: team.name, can: grant.can });
 	return held;
+}
+
+/** Renews only the configured demo's featured slot, through the same registry as a producer. */
+export async function renewDemoWork(
+	instance: Instance,
+	project: string,
+	seeded: Pick<SeedResult, "run" | "workSlot">,
+): Promise<void> {
+	if (seeded.workSlot === null) return;
+	const read = await invokeAsync(instance.app, OPS, {
+		op: "find",
+		project,
+		input: { in: "slots", run: seeded.run, limit: 200 },
+		actor: () => instance.owner,
+	});
+	if (!read.ok) return;
+	const slots = z.object({ items: z.array(z.object({ id: z.number(), state: z.string() })) }).parse(read.result).items;
+	const slot = slots.find((slot) => slot.id === seeded.workSlot);
+	if (!slot || !["missing", "skipped"].includes(slot.state)) return;
+	await invokeAsync(instance.app, OPS, {
+		op: "work",
+		project,
+		input: { do: "take", run: seeded.run, slot: seeded.workSlot, seconds: DEMO_WORK.seconds },
+		actor: () => instance.owner,
+	});
 }

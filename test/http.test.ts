@@ -1754,7 +1754,7 @@ describe("a pipeline's token", () => {
 			).toMatchObject({ ok: true, result: { build: "pipeline-build", by: `pipeline-${preset}` } });
 			// Every other operation of the registry, whatever it is: one added later is refused here too.
 			for (const op of OP_LIST) {
-				if (["attach", "report", "gate", "change", "announce"].includes(op.name)) continue;
+				if (["attach", "report", "gate", "change", "announce", "work"].includes(op.name)) continue;
 				const path = op.scope === "project" ? `/api/p/${preset}/${op.name}` : `/api/${op.name}`;
 				const reply = await post(instance, path, op.name === "propose" ? create : {}, ci);
 				expect(`${preset} ${op.name}: ${reply.status}`).toBe(`${preset} ${op.name}: 403`);
@@ -2561,7 +2561,12 @@ describe("the surface", () => {
 				},
 			],
 		});
-		await checked("plan", { name: "Schema run", select: { cases: ["C-1"] } });
+		const workRun = z
+			.object({ run: z.string() })
+			.parse(await checked("plan", { name: "Schema run", select: { cases: ["C-1"] } }));
+		const takenSlot = z.object({ slot: z.number() }).parse(await checked("work", { do: "take", run: workRun.run }));
+		await checked("work", { do: "give-back", run: workRun.run, slot: takenSlot.slot });
+		await checked("get", { refs: ["commit:9f3c2ab"] });
 		await checked("report", { run: "R-1", results: [{ test: { case: "C-1" }, outcome: "pass" }] });
 		const producer = z.object({ token: z.string() }).parse(
 			await checked("admin", {
@@ -2845,7 +2850,12 @@ describe("the surface", () => {
 			}
 		}
 		await checked("history", { ref: "C-1", from: 1, to: 2 });
-		await checked("plan", { name: "Sweep plan", select: { cases: ["C-1"] } });
+		const workRun = z
+			.object({ run: z.string() })
+			.parse(await checked("plan", { name: "Sweep plan", select: { cases: ["C-1"] } }));
+		const takenSlot = z.object({ slot: z.number() }).parse(await checked("work", { do: "take", run: workRun.run }));
+		await checked("work", { do: "give-back", run: workRun.run, slot: takenSlot.slot });
+		await checked("get", { refs: ["commit:9f3c2ab"] });
 		const report = {
 			cmd: "reply-sweep-report",
 			target: { session: "sweep" },

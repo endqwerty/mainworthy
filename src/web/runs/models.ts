@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { CaseBody, ExpandedStep, MethodKind } from "../../core/model.ts";
-import { Obligation, SlotState, Tally, TargetMatch, Verdict } from "../../core/runs.ts";
+import { Obligation, SlotState, SlotWork, Tally, TargetMatch, Verdict } from "../../core/runs.ts";
 
 export const Run = z.object({
 	ref: z.string(),
@@ -13,6 +13,8 @@ export const Run = z.object({
 	accepts: TargetMatch,
 	require: z.array(Obligation),
 	slots: z.number().nullable(),
+	inProgress: z.number(),
+	workUntil: z.number().nullable(),
 	/** The change a change run's commit belongs to. A planned run has none. */
 	change: z.object({ key: z.string(), title: z.string().nullable() }).nullable(),
 	createdAt: z.number(),
@@ -40,6 +42,7 @@ export const Slot = z.object({
 	state: SlotState,
 	rank: z.number(),
 	assignee: z.string().nullable(),
+	work: SlotWork,
 	fills: z.array(Fill),
 });
 export type Slot = z.infer<typeof Slot>;

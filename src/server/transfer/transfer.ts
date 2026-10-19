@@ -74,6 +74,7 @@ type Table = {
  * `commit_statuses` holds GitHub commit status enrollment and delivery state. An import must not enroll historical commits.
  */
 export const UNEXPORTED: readonly string[] = [
+	"slot_leases",
 	"sessions",
 	"credentials",
 	"invitations",
@@ -166,6 +167,7 @@ const PROJECT_PARENT: Readonly<Record<string, { column: string; table: string }>
 	covers: { column: "requirement", table: "requirements" },
 	run_tests: { column: "run", table: "runs" },
 	slots: { column: "run", table: "runs" },
+	slot_leases: { column: "slot", table: "slots" },
 	slot_results: { column: "run", table: "runs" },
 	depends_on: { column: "run", table: "runs" },
 	result_excuses: { column: "result", table: "results" },
@@ -215,7 +217,10 @@ function ownedBy(table: { name: string; columns: string[] }, id: string, what: s
 	if (table.columns.includes("project")) return `WHERE project = ${id}`;
 	const parent = PROJECT_PARENT[table.name];
 	if (!parent) throw invalid(`${what} has no ownership rule for table ${table.name}`);
-	return `WHERE ${identifier(parent.column)} IN (SELECT id FROM ${identifier(parent.table)} WHERE project = ${id})`;
+	const filter = PROJECT_PARENT[parent.table]
+		? ownedBy({ name: parent.table, columns: [] }, id, what)
+		: `WHERE project = ${id}`;
+	return `WHERE ${identifier(parent.column)} IN (SELECT id FROM ${identifier(parent.table)} ${filter})`;
 }
 
 function projectFilters(db: Db, metadata: readonly Table[], key: string): Map<string, string> {

@@ -320,6 +320,8 @@ export const Run = struct("Run", "A planned run or a change run, with the server
 	reason: text,
 	createdAt: [whole, "Milliseconds since 1970."],
 	slots: [maybe(whole), "A planned run's pinned cases."],
+	inProgress: whole,
+	workUntil: maybe(whole),
 	change: maybe(struct("RunChange", "The change a change run's commit belongs to.", { key: text, title: maybe(text) })),
 	tally: dictionary(whole),
 	accepts: struct("RunTarget", "Only this run, or a commit's results.", {
@@ -348,6 +350,12 @@ export const RunSlot = struct("RunSlot", "One case pinned at a version in a run,
 	version: whole,
 	state: text,
 	fills: list(RunFill),
+	work: struct("SlotWork", "Free or held until the server deadline.", {
+		kind: text,
+		actor: maybe(text),
+		since: maybe(whole),
+		until: maybe(whole),
+	}),
 });
 export const SlotPage = struct("SlotPage", "A page of slots in their planned order.", {
 	items: list(RunSlot),

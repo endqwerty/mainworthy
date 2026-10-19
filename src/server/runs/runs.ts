@@ -59,7 +59,7 @@ import { quarantineLookup } from "../evidence/quarantine.ts";
 import { buildWhat } from "../evidence/releases.ts";
 import { type Ctx, ref } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
-import { invalid, notFound } from "../kernel/errors.ts";
+import { forbidden, invalid, notFound } from "../kernel/errors.ts";
 import { decisionOf, type Witness } from "../kernel/witness.ts";
 import { type CaseRow, versionOf } from "../suite/suite.ts";
 
@@ -108,7 +108,23 @@ export type SlotRow = {
 	rev: number;
 };
 
+export type SlotLease = { slot: number; actor: number; since: number; until: number };
+
 const Q = {
+	lease: sql<{ slot: number; now: number }, SlotLease>(
+		"SELECT l.* FROM slot_leases l JOIN slots s ON s.id = l.slot JOIN runs r ON r.id = s.run WHERE l.slot = $slot AND l.until > $now AND r.state = 'open'",
+	),
+	liveWork: sql<{ run: number; now: number }, { n: number; until: number | null }>(
+		"SELECT count(*) AS n, min(l.until) AS until FROM slot_leases l JOIN slots s ON s.id = l.slot JOIN runs r ON r.id = s.run WHERE s.run = $run AND r.state = 'open' AND l.until > $now",
+	),
+	take: sql<SlotLease>(
+		"INSERT INTO slot_leases (slot, actor, since, until) VALUES ($slot, $actor, $since, $until) ON CONFLICT (slot) DO UPDATE SET actor = excluded.actor, since = excluded.since, until = excluded.until",
+	),
+	release: sql<{ slot: number }>("DELETE FROM slot_leases WHERE slot = $slot"),
+	releaseRun: sql<{ run: number }>("DELETE FROM slot_leases WHERE slot IN (SELECT id FROM slots WHERE run = $run)"),
+	nextWork: sql<{ run: number; now: number }, SlotRow>(
+		"SELECT s.* FROM slots s LEFT JOIN slot_leases l ON l.slot = s.id AND l.until > $now WHERE s.run = $run AND s.state IN ('missing', 'skipped') AND l.slot IS NULL ORDER BY s.rank",
+	),
 	emptyChangeRuns: sql<{ project: number }, { id: number }>(
 		`SELECT id FROM runs WHERE project = $project AND origin = 'change'
 		 AND json_extract(tally, '$.pass') + json_extract(tally, '$.excused') = 0`,
@@ -369,6 +385,55 @@ export const recentRuns = (
 export const slotById = (db: Db, id: number): SlotRow | null => db.get(Q.slotById, { id });
 export const slotsPage = (db: Db, run: number, after: number, limit: number): SlotRow[] =>
 	db.all(Q.slotsOfRun, { run, after, limit });
+export const leaseOf = (ctx: Ctx, slot: number): SlotLease | null => ctx.db.get(Q.lease, { slot, now: ctx.app.now() });
+export const workIn = (ctx: Ctx, run: number) =>
+	ctx.db.get(Q.liveWork, { run, now: ctx.app.now() }) ?? { n: 0, until: null };
+
+export function workSlot(ctx: Ctx, run: RunRow, id: number): SlotRow {
+	const slot = slotById(ctx.db, id);
+	if (!slot || slot.run !== run.id) throw notFound(`slot ${id} in ${runRef(run)}`);
+	return slot;
+}
+function canWork(ctx: Ctx, run: RunRow, slot: SlotRow): boolean {
+	const method = ctx.actor.kind === "ci" ? "auto" : ctx.actor.kind;
+	if (method === "rule") return false;
+	const obligation = obligationsOf(run).find((o) => o.id === slot.obligation);
+	const version = versionOf(ctx.db, slot.case_id, slot.version);
+	return (
+		obligation?.kind === "exercise" &&
+		obligation.methods.includes(method) &&
+		version !== null &&
+		json<CaseBody>(version.body).methods.includes(method)
+	);
+}
+
+export function takeWork(
+	ctx: Ctx,
+	run: RunRow,
+	input: { slot?: number | undefined; seconds: number },
+): { kind: "empty" } | { kind: "busy"; lease: SlotLease } | { kind: "taken"; slot: SlotRow; lease: SlotLease } {
+	if (run.origin !== "planned" || run.state !== "open") throw invalid("only an open planned run has slots to take");
+	const slot =
+		input.slot === undefined
+			? ctx.db
+					.all(Q.nextWork, { run: run.id, now: ctx.app.now() })
+					.find((s) => canWork(ctx, run, s) && !effectiveFillsOf(ctx.db, s.id).some((f) => f.actor === ctx.actor.id))
+			: workSlot(ctx, run, input.slot);
+	if (!slot) return { kind: "empty" };
+	if (!canWork(ctx, run, slot)) throw forbidden("your method is not admitted by this slot's run and pinned case");
+	const held = leaseOf(ctx, slot.id);
+	if (held && held.actor !== ctx.actor.id) return { kind: "busy", lease: held };
+	const now = ctx.app.now();
+	const lease = { slot: slot.id, actor: ctx.actor.id, since: held?.since ?? now, until: now + input.seconds * 1000 };
+	ctx.db.run(Q.take, lease);
+	ctx.touched.add(runRef(run));
+	return { kind: "taken", slot, lease };
+}
+export function releaseWork(ctx: Ctx, run: RunRow, slot: SlotRow): void {
+	ctx.db.run(Q.release, { slot: slot.id });
+	ctx.touched.add(runRef(run));
+}
+
 export const slotCount = (db: Db, run: number): number => db.get(Q.slotCount, { run })?.n ?? 0;
 export type Fill = {
 	id: number;
@@ -686,8 +751,10 @@ export function* applyBatchSteps(
 					caseMethods: methodsOf(ctx.db, slot, result, declared),
 				});
 				if (!admitted) continue;
-				if (ctx.db.run(Q.admit, { slot: slot.id, result: result.id, run: run.id, admitted }).changes > 0)
+				if (ctx.db.run(Q.admit, { slot: slot.id, result: result.id, run: run.id, admitted }).changes > 0) {
+					releaseWork(ctx, run, slot);
 					touchedSlots.set(slot.id, slot);
+				}
 			}
 		}
 		if (result.signature && (result.outcome === "fail" || result.outcome === "error")) {
@@ -1571,6 +1638,7 @@ function fillFromPrior(
 /** Closes a run. Standing: only by a `signoff` decision, which a rule may make. */
 export function closeRun(ctx: Ctx, witness: Witness, run: RunRow): void {
 	ctx.db.run(Q.setState, { id: run.id, state: "closed", signoff: decisionOf(witness, "signoff"), rev: ctx.seq });
+	ctx.db.run(Q.releaseRun, { run: run.id });
 	ctx.touched.add(runRef(run));
 }
 

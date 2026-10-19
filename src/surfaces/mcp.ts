@@ -27,6 +27,11 @@ export const TOOL_TOKEN_BUDGET = 3950;
 const INSTRUCTIONS =
 	"Start with impact for a change or inbox for questions, and omit project only when the instance has exactly one project. Pass etag back with unless and hashes with onEvidence, and reuse cursors with since. Your answers may be advice; check the reply status, and with admin, read base for policy clauses or settings through CLI policy show --json or HTTP admin policy.show.";
 const DESCRIPTIONS = new Map([
+	["Current code host head.", ""],
+	["C-, Q-, R-, T-, P-, commit:hash or change:key.", ""],
+	["For commit refs: disambiguate repositories.", ""],
+	["Slot id from find slots. Omit to take the next free unfinished slot.", ""],
+	["Lease length in seconds, from 30 to 86400. Default: 900.", ""],
 	["The case, for example C-311.", ""],
 	["The version this edit was made on. A stale base is merged or reported, never overwritten.", ""],
 	["Required with clauses or settings.", ""],
