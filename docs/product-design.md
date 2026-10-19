@@ -239,14 +239,14 @@ steps:
 
 ```
 mainworthy report  acme/web @ 9f3c2ab  pr #482  attempt 2  job e2e
-  4,812 results   4,790 pass   19 fail   3 skip                         (R-507)
-  11 excused   failing on base 41d07e1 (main), excused by rule          not this change
-   5 excused   Q-2104 flaky, decided by mira 6 days ago, holds 8 more   not this change
-   3 new       Q-2291 "expected 90.00, got 100.00" in coupon.ts:41      3 tests, C-311 C-314 C-318
-   7 tests have no case (tracked)
-   basis: assumed (cases at their current version; add a version manifest for exact)
-mainworthy gate    blocked: 1 question needs an answer    https://mainworthy.acme.example/acme/web/pr/482
-exit 2
+  4,812 results   4,790 pass   19 fail   3 skip  (R-507)
+  11 decided by rule policy: base   Q-2103 "failing on base 41d07e1"   (11 tests)
+  5 already decided by mira: flaky   Q-2104 "intermittent timeout"   (5 tests)
+  3 new   Q-2291 "expected 90.00, got 100.00"   (3 tests)
+  7 results had no case or version when recorded
+  basis: assumed 4,805 results (case versions current when recorded; add a version manifest for exact), unresolved 7 results (no case or version when recorded)
+mainworthy gate    blocked: 3 failures unexplained, 1 question open
+exit 0
 ```
 
 Properties the call site relies on:
