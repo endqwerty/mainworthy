@@ -1,7 +1,7 @@
 // Three producers, one run: planned runs, slots and what may fill them (fixtures E1, E3, E5, E7 in the design).
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { AnnounceReply, DecideReply, GateStatus, InboxReply, PlanReply, ReportReceipt } from "../src/core/ops.ts";
-import { mustTarget } from "../src/server/evidence/evidence.ts";
+import { mustTarget, uncorrectedResults } from "../src/server/evidence/evidence.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
 import { Db, declaredSql } from "../src/server/kernel/db.ts";
 import { migrate } from "../src/server/kernel/migrate.ts";
@@ -336,6 +336,20 @@ describe("planned lookups beside change history", () => {
 				text,
 			).toBe(true);
 		}
+	});
+
+	test("checking one result for corrections uses its index without a temporary index", () => {
+		const query = `SELECT count(*) FROM results r WHERE ${uncorrectedResults("r.id")}`;
+		const details = h.app.db.raw
+			.query<{ detail: string }, []>(`EXPLAIN QUERY PLAN ${query}`)
+			.all()
+			.map((row) => row.detail);
+		expect(details).toContain("SEARCH correction USING COVERING INDEX results_corrects (corrects=?)");
+		const opcodes = h.app.db.raw
+			.query<{ opcode: string }, []>(`EXPLAIN ${query}`)
+			.all()
+			.map((row) => row.opcode);
+		expect(opcodes).not.toContain("OpenEphemeral");
 	});
 });
 

@@ -20,7 +20,7 @@
 // 15. No result of an agent is ever counted in a commit's gate.
 // Added by the second hunt (Claude Fable 5.1):
 // 13'. A required job is met only by a batch holding a decisive result whose own method is `auto` (a pipeline's,
-//      or a results file a person passed on): a person's typed pass sent under the job's name is not the job.
+//      or a results file a person passed on) that no correction names: a person's typed pass is not the job.
 // 16. A commit's line, branch and change are those of the first report a gate counts (a pipeline's or a person's),
 //     not of an earlier report by an agent. Checked against what the generator sent.
 // New actions: a person's typed result into a run sometimes carries a job name and a skipped automated key; an
@@ -31,6 +31,7 @@
 // More seeds: MAINWORTHY_SEQUENCE_SEEDS=500 bun test test/sequences-extended-
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
+import type { GateStatus, InboxReply, PlanReply, ReportReceipt } from "../src/core/ops.ts";
 import { type Actor, findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
 import { recoverAccepted, sweep } from "../src/server/ops/jobs.ts";
 import { acceptReport } from "../src/server/ops/writes.ts";
@@ -40,6 +41,17 @@ import { failingSlotResults, invalidInherited, slotSettlement } from "./inherite
 const SEEDS = Number(process.env.MAINWORTHY_SEQUENCE_SEEDS ?? 40);
 const STEPS = Number(process.env.MAINWORTHY_SEQUENCE_STEPS ?? 100);
 const FIRST = Number(process.env.MAINWORTHY_SEQUENCE_FIRST ?? 1);
+
+function auditJobs(db: Database): { job: string; target: number }[] {
+	return db
+		.query<{ job: string; target: number }, []>(
+			`SELECT job, target FROM batches b WHERE state = 'processed'
+			 AND EXISTS (SELECT 1 FROM results r WHERE r.batch = b.id AND r.method = 'auto'
+			             AND r.outcome IN ('pass', 'fail', 'error')
+			             AND r.id NOT IN (SELECT corrects FROM results WHERE corrects IS NOT NULL))`,
+		)
+		.all();
+}
 
 type AuditExcuse = { class: string; decision: number };
 
@@ -521,11 +533,7 @@ export function sequence(seed: number, preset: string): Problem | null {
 			const jobs = obligations.flatMap((o) => (o.kind === "jobs" ? (o.jobs ?? []) : []));
 			if (jobs.length > 0) {
 				const reported = new Set<string>();
-				for (const batch of rows<{ job: string; target: number }>(
-					`SELECT job, target FROM batches b WHERE state = 'processed'
-					 AND EXISTS (SELECT 1 FROM results r WHERE r.batch = b.id AND r.method = 'auto'
-					             AND r.outcome IN ('pass', 'fail', 'error'))`,
-				)) {
+				for (const batch of auditJobs(h.app.db.raw)) {
 					const target = targets.get(batch.target);
 					if (target && accepted(target, null)) reported.add(batch.job);
 				}
@@ -906,6 +914,61 @@ export function sequence(seed: number, preset: string): Problem | null {
 
 /** The test of one policy preset. Each preset has a file of its own, so the three run side by side. */
 export function extendedSequences(preset: "loose" | "standard" | "strict"): void {
+	test(`the ${preset} job audit excludes corrected-only evidence in a fixed sequence`, () => {
+		const h = harness({ preset });
+		try {
+			h.call("propose", { edits: [{ op: "create", body: { title: "Release check", methods: ["human"] } }] });
+			for (const q of h.call<InboxReply>("inbox", { kind: "adopt" }).items)
+				h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" }, reason: "fixture" });
+			const target = { commit: "fixedjob01", branch: "main" };
+			const planned = h.call<PlanReply>("plan", {
+				name: "Release",
+				select: { cases: ["C-1"] },
+				accepts: { commit: target.commit },
+				require: [
+					{ id: "manual", kind: "exercise", methods: ["human"], basis: "exact", minActors: 1 },
+					{ id: "ci", kind: "jobs", jobs: ["e2e"] },
+				],
+			});
+			h.call("report", { run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+			const ci = h.actor("pipeline", "ci", ["read", "record"]);
+			const send = (outcome: "pass" | "skip" | "blocked", job = "e2e", corrects?: number) => {
+				const receipt = h.call<ReportReceipt>(
+					"report",
+					{
+						target,
+						job,
+						results: [{ test: { key: "check" }, outcome, ...(corrects === undefined ? {} : { corrects }) }],
+					},
+					ci,
+				);
+				expect(receipt).toMatchObject({ rejected: [], declined: [], counts: { total: 1 } });
+				const id = receipt.results[0];
+				if (id === undefined) throw new Error("expected a recorded result");
+				return id;
+			};
+			const snapshot = () => {
+				const gate = h.call<GateStatus>("gate", { run: planned.run });
+				return {
+					verdict: gate.verdict,
+					missing: gate.tally.missing,
+					jobs: [...new Set(auditJobs(h.app.db.raw).map((b) => b.job))],
+				};
+			};
+			expect(snapshot()).toEqual({ verdict: "pending", missing: 1, jobs: [] });
+			const pass = send("pass");
+			expect(snapshot()).toEqual({ verdict: "passed", missing: 0, jobs: ["e2e"] });
+			const skip = send("skip", "corrections", pass);
+			expect(snapshot()).toEqual({ verdict: "pending", missing: 1, jobs: [] });
+			const blocked = send("blocked", "corrections", skip);
+			expect(snapshot()).toEqual({ verdict: "pending", missing: 1, jobs: [] });
+			send("pass", "e2e", blocked);
+			expect(snapshot()).toEqual({ verdict: "passed", missing: 0, jobs: ["e2e"] });
+		} finally {
+			h.close();
+		}
+	});
+
 	test(`the ${preset} audit resolves broad and exact-result standing independently`, () => {
 		using db = new Database(":memory:");
 		db.exec(`CREATE TABLE excuses (project INTEGER, signature INTEGER, scope TEXT, target INTEGER, class TEXT, decision INTEGER);
