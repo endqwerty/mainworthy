@@ -34,47 +34,105 @@ test.skipIf(!browserAvailable)(
 	30_000,
 );
 
-test.skipIf(!browserAvailable)(
-	"an unreadable save reply keeps its command so retry does not create a second case",
-	async () => {
-		const server = await startServer();
-		const browser = await openPage(server);
-		try {
-			const { page } = browser;
-			const commands: string[] = [];
-			const lookups: string[] = [];
-			await browser.context.route("**/api/p/scratch/propose", async (route) => {
-				commands.push(z.object({ cmd: z.string() }).parse(route.request().postDataJSON()).cmd);
-				if (commands.length === 1) {
-					const response = await route.fetch();
-					await route.fulfill({ response, json: { ok: true, result: {}, seq: null } });
-				} else await route.continue();
-			});
-			await browser.context.route("**/api/p/scratch/command", async (route) => {
-				lookups.push(z.object({ cmd: z.string() }).parse(route.request().postDataJSON()).cmd);
-				await route.continue();
-			});
-			await page.keyboard.press("c");
-			await page.keyboard.type("Recorded once despite unreadable reply");
-			await page.keyboard.press("Enter");
-			await page.keyboard.type("Read the saved case");
-			await page.keyboard.press("Escape");
-			await page.waitForFunction(() => document.getElementById("stat")?.textContent?.includes("reload."));
-			expect((await server.api("find", { in: "cases" })).count).toBe(1);
-			await page.keyboard.press("Control+Enter");
-			await page.waitForURL("**/suite/c/*");
-			expect((await server.api("find", { in: "cases" })).count).toBe(1);
-			expect(page.url()).toEndWith("/suite/c/1");
-			expect(commands).toHaveLength(1);
-			expect(lookups).toEqual(commands);
-			expect(browser.errors).toEqual([]);
-		} finally {
-			await browser.close();
-			await server.stop();
-		}
-	},
-	30_000,
-);
+for (const failure of ["unreadable", "internal", "session change", "internal before recording"] as const) {
+	for (const stage of failure === "internal" || failure === "session change"
+		? ["first send", "replay"]
+		: ["first send"]) {
+		test.skipIf(!browserAvailable)(
+			`a Suite save recovers after ${failure} on ${stage} without a second case`,
+			async () => {
+				const server = await startServer({ mode: "server" });
+				const browser = await openPage(server);
+				try {
+					const { page, context } = browser;
+					page.setDefaultTimeout(5000);
+					const other = failure === "session change" ? await context.newPage() : null;
+					if (other) {
+						await other.route("**/api/session", (route) =>
+							route.fulfill({
+								status: 401,
+								json: { ok: false, error: { code: "unauthenticated", message: "Sign in" } },
+							}),
+						);
+						await other.goto(`${server.url}/p/scratch/settings`);
+						await other.locator("#token").waitFor();
+						await other.unroute("**/api/session");
+					}
+					const requests: unknown[] = [];
+					const commands: string[] = [];
+					const lookups: string[] = [];
+					await context.route("**/api/p/scratch/propose", async (route) => {
+						const input: unknown = route.request().postDataJSON();
+						requests.push(input);
+						commands.push(z.object({ cmd: z.string() }).parse(input).cmd);
+						if (stage === "replay" && requests.length === 1) return route.abort();
+						if (requests.length !== (stage === "replay" ? 2 : 1)) return route.continue();
+						if (failure === "internal before recording")
+							return route.fulfill({
+								status: 500,
+								json: { ok: false, error: { code: "internal", message: "Save interrupted" } },
+							});
+						const response = await route.fetch();
+						if (other) {
+							await other.locator("#token").fill(server.token);
+							await other.keyboard.press("Enter");
+							await other.locator("#app").waitFor();
+							await route.fulfill({ response });
+						} else if (failure === "internal")
+							await route.fulfill({
+								status: 500,
+								json: { ok: false, error: { code: "internal", message: "Save interrupted" } },
+							});
+						else await route.fulfill({ response, json: { ok: true, result: {}, seq: null } });
+					});
+					await context.route("**/api/p/scratch/command", async (route) => {
+						lookups.push(z.object({ cmd: z.string() }).parse(route.request().postDataJSON()).cmd);
+						await route.continue();
+					});
+					await page.bringToFront();
+					await page.keyboard.press("c");
+					await page.keyboard.type("Recorded once despite uncertain reply");
+					await page.keyboard.press("Enter");
+					await page.keyboard.type("Read the saved case");
+					await page.keyboard.press("Escape");
+					await page.locator("#stat").filter({ hasText: "Your draft is kept on this device." }).waitFor();
+					if (stage === "replay") {
+						await page.keyboard.press("Control+Enter");
+						await page
+							.locator("#stat")
+							.filter({ hasText: failure === "internal" ? "Save interrupted" : "The session changed." })
+							.waitFor();
+					}
+					const status = await page.locator("#stat").innerText();
+					const evidence = process.env.MAINWORTHY_SUITE_SAVE_EVIDENCE;
+					if (evidence && failure === "session change" && stage === "first send")
+						await page.screenshot({ path: evidence });
+					expect((await server.api("find", { in: "cases" })).count).toBe(
+						failure === "internal before recording" ? 0 : 1,
+					);
+					await page.keyboard.press("Control+Enter");
+					await page.waitForURL("**/suite/c/*");
+					expect((await server.api("find", { in: "cases" })).count).toBe(1);
+					expect(page.url()).toEndWith("/suite/c/1");
+					expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({
+						title: "Recorded once despite uncertain reply",
+						version: 1,
+						steps: [{ action: "Read the saved case" }],
+					});
+					expect(commands).toHaveLength(stage === "replay" || failure === "internal before recording" ? 2 : 1);
+					for (const input of requests) expect(input).toEqual(requests[0]);
+					expect(lookups).toEqual(Array.from({ length: stage === "replay" ? 2 : 1 }, () => commands[0] ?? ""));
+					expect(status).not.toContain(".. Your draft");
+					if (failure === "unreadable") expect(browser.errors).toEqual([]);
+				} finally {
+					await browser.close();
+					await server.stop();
+				}
+			},
+			30_000,
+		);
+	}
+}
 
 test.skipIf(!browserAvailable)(
 	"an unreadable settings list shows the reload message",
@@ -505,7 +563,7 @@ test.skipIf(!browserAvailable)(
 			const { page } = browser;
 			page.setDefaultTimeout(5000);
 			await browser.context.route("**/api/p/scratch/propose", (route) =>
-				route.fulfill({ json: { ok: false, error: { code: "internal", message: "Capture unavailable" } } }),
+				route.fulfill({ json: { ok: false, error: { code: "limited", message: "Capture unavailable" } } }),
 			);
 			for (const ordinal of ["First", "Second"]) {
 				await page.keyboard.press("c");

@@ -96,8 +96,9 @@ Its expected result, if it has one, stays in your draft in the same way.
 If someone else records that step again while yours still has no action, their step replaces the step in your draft.
 If your expected result differs from theirs, your expected result stays in your draft as a new step.
 
-If a reload, a closed tab, or a lost connection interrupts a save's reply, the page asks the
-server about that save when you next open the draft. If the save made a version, the status line
+If a reload, a closed tab, a lost connection, an internal server error, or signing in again
+interrupts a save's reply, the page keeps that save's command. Submitting again or reopening
+the draft asks the server about the same save. If the save made a version, the status line
 says "Your last save is recorded as version N". The page does not send that save again.
 If the server has not recorded it yet, the save may still be on its way. The page sends the same
 save again, and the server records it once, however many copies arrive.

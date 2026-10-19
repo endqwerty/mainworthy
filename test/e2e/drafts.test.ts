@@ -63,9 +63,9 @@ test.skipIf(!browserAvailable)(
 				commands.push(z.object({ cmd: z.string() }).parse(route.request().postDataJSON()).cmd);
 				if (refused)
 					await route.fulfill({
-						status: 200,
+						status: 429,
 						contentType: "application/json",
-						body: JSON.stringify({ ok: false, error: { code: "internal", message: "Temporarily unavailable" } }),
+						body: JSON.stringify({ ok: false, error: { code: "limited", message: "Temporarily unavailable" } }),
 					});
 				else await route.continue();
 			});

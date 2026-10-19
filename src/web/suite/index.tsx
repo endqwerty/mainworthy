@@ -1160,10 +1160,10 @@ export function SuiteScreen() {
 						fate = await call("command", { cmd: recovered.input.cmd ?? "" }, { project, owner });
 					} catch (error) {
 						// Nothing is known, so nothing is sent. The draft keeps the save, and the next leave asks again.
-						if (sessionCurrent(owner) && mayWrite(source.id, !draftStored))
-							setStatus(
-								`${error instanceof Error ? error.message : "Could not ask what became of the last save"}. Your draft is kept on this device.`,
-							);
+						if (sessionCurrent(owner) && mayWrite(source.id, !draftStored)) {
+							const reason = error instanceof Error ? error.message : "Could not ask what became of the last save";
+							setStatus(`${reason}${/[.!?]$/.test(reason) ? "" : "."} Your draft is kept on this device.`);
+						}
 						return;
 					}
 					if (!sessionCurrent(owner) || !mayWrite(source.id, !draftStored)) return;
@@ -1204,7 +1204,13 @@ export function SuiteScreen() {
 					try {
 						reply = await call("propose", request, { project, keepalive, owner });
 					} catch (error) {
-						if (error instanceof ApiError && sessionCurrent(owner) && mayWrite(source.id, !draftStored))
+						if (
+							error instanceof ApiError &&
+							error.status !== null &&
+							error.code !== "internal" &&
+							sessionCurrent(owner) &&
+							mayWrite(source.id, !draftStored)
+						)
 							forgetRequest(source.id);
 						throw error;
 					}
@@ -1404,9 +1410,8 @@ export function SuiteScreen() {
 				void invalidateProject(project);
 			} catch (error) {
 				if (!sessionCurrent(owner) || !mayWrite(snapshot.id, !draftStored)) return;
-				setStatus(
-					`${error instanceof Error ? error.message : "Could not record this version"}. Your draft is kept on this device.`,
-				);
+				const reason = error instanceof Error ? error.message : "Could not record this version";
+				setStatus(`${reason}${/[.!?]$/.test(reason) ? "" : "."} Your draft is kept on this device.`);
 			}
 		})();
 		pending.current.set(snapshot.id, task);
