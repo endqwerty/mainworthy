@@ -45,6 +45,8 @@ export async function testInstance(): Promise<TestInstance> {
 	let elsewhere: ReturnType<typeof Bun.serve> | null = null;
 	let answerProxy: ReturnType<typeof Bun.serve> | null = null;
 	let planProxy: ReturnType<typeof Bun.serve> | null = null;
+	let questionProxy: ReturnType<typeof Bun.serve> | null = null;
+	const questions = new Map<string, { arrived: boolean; wait: Promise<void>; release: () => void }>();
 	type PlanDelivery =
 		| { kind: "unreadable" }
 		| { kind: "hold"; arrived: boolean; wait: Promise<void>; release: () => void };
@@ -52,6 +54,8 @@ export async function testInstance(): Promise<TestInstance> {
 	const unavailable = new Map<string, "rejected" | "uncertain">();
 	const stop = async (): Promise<void> => {
 		for (const delivery of plans.values()) if (delivery.kind === "hold") delivery.release();
+		for (const delivery of questions.values()) delivery.release();
+		await questionProxy?.stop(true);
 		await planProxy?.stop(true);
 		await answerProxy?.stop(true);
 		await elsewhere?.stop(true);
@@ -175,6 +179,52 @@ export async function testInstance(): Promise<TestInstance> {
 								url: `http://127.0.0.1:${planProxy.port}`,
 								committed: delivery?.kind === "hold" && delivery.arrived,
 							},
+						});
+					},
+					"/test/question-connection": async (req) => {
+						const parsed = z
+							.object({ project: z.string(), question: z.string(), mode: z.enum(["hold", "normal", "status"]) })
+							.safeParse(await req.json());
+						if (!parsed.success) return Response.json({ ok: false }, { status: 400 });
+						const path = `/api/p/${encodeURIComponent(parsed.data.project)}/get`;
+						const key = `${path}:${parsed.data.question}`;
+						if (parsed.data.mode !== "status") {
+							questions.get(key)?.release();
+							questions.delete(key);
+							if (parsed.data.mode === "hold") {
+								const gate = Promise.withResolvers<void>();
+								questions.set(key, { arrived: false, wait: gate.promise, release: () => gate.resolve() });
+							}
+						}
+						questionProxy ??= Bun.serve({
+							hostname: "127.0.0.1",
+							port: 0,
+							idleTimeout: 0,
+							fetch: async (request) => {
+								const url = new URL(request.url);
+								const input = z.object({ refs: z.array(z.string()) }).safeParse(
+									await request
+										.clone()
+										.json()
+										.catch(() => null),
+								);
+								const delivery =
+									input.success && input.data.refs.length === 1
+										? questions.get(`${url.pathname}:${input.data.refs[0]}`)
+										: undefined;
+								const reply = await fetch(new Request(`${made.url}${url.pathname}${url.search}`, request), {
+									redirect: "manual",
+								});
+								if (delivery) {
+									delivery.arrived = true;
+									await delivery.wait;
+								}
+								return reply;
+							},
+						});
+						return Response.json({
+							ok: true,
+							result: { url: `http://127.0.0.1:${questionProxy.port}`, arrived: questions.get(key)?.arrived ?? false },
 						});
 					},
 					"/test/answer-connection": async (req) => {
