@@ -328,7 +328,8 @@ If another edit overlaps, **Both edits are kept** shows each overlapping field w
 
 1. For each field, choose **Use my version** or **Use current version**.
 2. Review **Merged case**.
-3. If **Reason required** appears, enter a reason. **Record merge** stays disabled until you do.
+3. If **Reason required** appears, give a reason. The reason you gave for the save is already filled in; change it if
+   it does not fit the merge. **Record merge** stays disabled while the reason is empty.
 4. Press **Record merge**.
 
 You can make these choices:
