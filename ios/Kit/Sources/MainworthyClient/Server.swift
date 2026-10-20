@@ -6,12 +6,12 @@ package enum Proof: Sendable {
 	case password(name: String, password: String)
 }
 
-/// Evidence about all attempts in one write, including a lost reply before a later rejection.
+/// Evidence about every attempt of a command, including an uncertain reply before a later rejection.
 package final class WriteDelivery: Sendable {
 	private let attempts = Mutex((uncertain: false, rejected: false))
 	package init() {}
 	package var definitelyRejected: Bool { attempts.withLock { $0.rejected && !$0.uncertain } }
-	fileprivate func lostReply() { attempts.withLock { $0.uncertain = true } }
+	package func uncertain() { attempts.withLock { $0.uncertain = true } }
 	fileprivate func rejected() { attempts.withLock { $0.rejected = true } }
 }
 
@@ -261,7 +261,7 @@ package final class Server: Sendable {
 			do {
 				(data, response) = try await transport.send(request)
 			} catch {
-				delivery?.lostReply()
+				delivery?.uncertain()
 				// A task that was cancelled is not a server that could not be reached.
 				if Task.isCancelled || (error as? URLError)?.code == .cancelled { throw CancellationError() }
 				failure = error.localizedDescription

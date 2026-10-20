@@ -713,8 +713,12 @@ struct CaseSaveDeliveryTests {
 	actor Replies: Transport {
 		let real = URLSessionTransport()
 		let fault: Fault
+		let refuseRetry: Bool
 		private(set) var inputs: [JSONValue] = []
-		init(_ fault: Fault) { self.fault = fault }
+		init(_ fault: Fault, refuseRetry: Bool = false) {
+			self.fault = fault
+			self.refuseRetry = refuseRetry
+		}
 
 		func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
 			guard request.url?.path.hasSuffix("/propose") == true else { return try await real.send(request) }
@@ -723,7 +727,8 @@ struct CaseSaveDeliveryTests {
 			func reply(_ body: String, status: Int) -> (Data, HTTPURLResponse) {
 				(Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
 			}
-			if (fault == .refused && attempt == 1) || (fault == .lostThenRefused && attempt == 2) {
+			if (fault == .refused && attempt == 1) || (fault == .lostThenRefused && attempt == 2)
+				|| (refuseRetry && attempt == (fault == .lost ? 3 : 2)) {
 				return reply(#"{"ok":false,"error":{"code":"forbidden","message":"Save refused."}}"#, status: 403)
 			}
 			let saved = try await real.send(request)
@@ -752,6 +757,39 @@ struct CaseSaveDeliveryTests {
 	@Test("uncertain delivery keeps the same save and input",
 		arguments: [Fault.lost, .unreadable, .statusless, .lostThenRefused])
 	func uncertain(_ fault: Fault) async throws { try await retry(fault) }
+
+	@Test("a later Save refusal cannot forget an earlier uncertain save",
+		arguments: [Fault.lost, .internalReply, .unreadable, .statusless])
+	func refusedAfterUncertainPress(_ fault: Fault) async throws {
+		let key = try await Live.project()
+		let transport = Replies(fault, refuseRetry: true)
+		let client = try await Live.signedIn(transport: transport).project(key)
+		let editor = CaseEditorScreen(project: client, source: .create(folder: nil))
+		editor.content.title = "Save across separate presses"
+		let typed = editor.content
+		#expect(await editor.save() == nil)
+		#expect(editor.isRetrying && editor.locked && editor.maySave && !editor.settled)
+		#expect(editor.notice?.contains("Retry will send the same save.") == true)
+		#expect(await editor.save() == nil)
+		#expect(editor.isRetrying && editor.locked && editor.maySave && !editor.settled)
+		#expect(editor.notice == "Save refused. Retry will send the same save.")
+		if !editor.locked { editor.content.title = "Save across separate presses edited" }
+		guard case .adopted(let stamp) = await editor.save(), let stamp else {
+			Issue.record("Retry did not recover the original save: \(editor.notice ?? "no notice")"); return
+		}
+		let requests = await transport.inputs
+		#expect(requests.count == (fault == .lost ? 4 : 3))
+		let first = try #require(requests.first)
+		for request in requests { #expect(request == first) }
+		let cases = try await client.cases(text: typed.title).items
+		let allCases = try await client.cases().items
+		let saved = try await client.caseDocument(stamp.ref)
+		#expect(cases.map(\.ref) == [stamp.ref])
+		#expect(allCases.count == 7)
+		#expect(saved.content == typed)
+		#expect(try await client.caseHistory(stamp.ref).map(\.version) == [1])
+		#expect(editor.savedDocument?.content == typed && editor.settled && !editor.maySave)
+	}
 
 	private func retry(_ fault: Fault) async throws {
 		let key = try await Live.project()
