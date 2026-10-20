@@ -1,5 +1,6 @@
 # Changelog
 
+- 2026-10-20: **Added:** the iPhone offers **Forget** for a Dropped saved answer after 24 hours on the device's clock. Confirmation warns that the answer may still have been recorded and its outcome will no longer show here. Older Dropped entries without a drop time start the wait when this build first reads and saves them (issue #340).
 - 2026-10-20: **Fixed:** cleared iPhone saved answers stay cleared after an interrupted file cleanup or a late reply to a retired project's send. Cleanup preserves other instances, people and project keys, and unreadable earlier files (issue #656).
 - 2026-10-20: **Fixed:** a caller with `produce` but without `read` can send only its own failed results to the configured tracker. Sending another actor's case and failure details now also requires `read`.
 - 2026-10-20: **Fixed:** a reader-thread reply is checked again before the server sends it. A removed project returns no data, a replacement project is read again, and a caller that lost its grant or required capability receives the current refusal.

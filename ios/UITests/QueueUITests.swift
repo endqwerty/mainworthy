@@ -266,13 +266,34 @@ final class QueueUITests: XCTestCase {
 		dropConfirmation(in: app).tap()
 		XCTAssertTrue(app.staticTexts["Dropped"].waitForExistence(timeout: 10))
 		XCTAssertFalse(app.staticTexts["Waiting to send"].exists)
+		XCTAssertFalse(app.buttons["forget-saved-answer"].exists)
 		shot("321-dropped-answer")
 		app.terminate()
+		app.launchArguments = ["-instance", proxy, "-answer-clock-offset", "86400"]
 		app.launch()
 		if app.textFields["name"].waitForExistence(timeout: 3) { try signIn(app) }
 		XCTAssertTrue(app.navigationBars["Queue"].waitForExistence(timeout: 20))
 		app.buttons["unsent-answers"].tap()
 		XCTAssertTrue(app.staticTexts["Dropped"].waitForExistence(timeout: 10))
+		let forget = app.buttons["forget-saved-answer"]
+		XCTAssertTrue(forget.waitForExistence(timeout: 5))
+		let canForget = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: forget)
+		XCTAssertEqual(XCTWaiter.wait(for: [canForget], timeout: 10), .completed)
+		shot("340-eligible")
+		forget.tap()
+		let confirmation = app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", "Forget", "forget-saved-answer")).firstMatch
+		XCTAssertTrue(confirmation.waitForExistence(timeout: 5))
+		XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == %@", "This answer may still have been recorded. If you forget it, its outcome will no longer show here. This removes the saved entry from this device.")).firstMatch.exists)
+		shot("340-confirmation")
+		if app.buttons["Cancel"].exists {
+			app.buttons["Cancel"].tap()
+		} else {
+			let dismiss = app.otherElements["PopoverDismissRegion"]
+			XCTAssertTrue(dismiss.exists)
+			dismiss.tap()
+		}
+		XCTAssertTrue(app.staticTexts["Dropped"].exists)
+		XCTAssertTrue(forget.exists)
 		XCTAssertTrue(app.buttons["send-waiting-answers"].isEnabled)
 		_ = try await connection(unavailable: false)
 		app.navigationBars.buttons.element(boundBy: 0).tap()
@@ -290,6 +311,23 @@ final class QueueUITests: XCTestCase {
 		XCTAssertTrue(recorded.exists)
 		XCTAssertTrue(app.staticTexts["replied-header"].exists)
 		shot("206-recorded-answer")
+		for _ in 0..<3 where !forget.isHittable { app.swipeDown() }
+		XCTAssertTrue(forget.isHittable)
+		forget.tap()
+		XCTAssertTrue(confirmation.waitForExistence(timeout: 5))
+		confirmation.tap()
+		let forgotten = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.staticTexts["Dropped"])
+		XCTAssertEqual(XCTWaiter.wait(for: [forgotten], timeout: 5), .completed)
+		XCTAssertFalse(forget.exists)
+		shot("340-forgotten")
+		app.terminate()
+		app.launch()
+		if app.textFields["name"].waitForExistence(timeout: 3) { try signIn(app) }
+		XCTAssertTrue(app.navigationBars["Queue"].waitForExistence(timeout: 20))
+		app.buttons["unsent-answers"].tap()
+		XCTAssertTrue(app.staticTexts["Recorded"].waitForExistence(timeout: 10))
+		XCTAssertFalse(app.staticTexts["Dropped"].exists)
+		XCTAssertFalse(app.buttons["forget-saved-answer"].exists)
 	}
 
 	@MainActor func testPrivacyIsReachableBeforeAndAfterSignIn() async throws {

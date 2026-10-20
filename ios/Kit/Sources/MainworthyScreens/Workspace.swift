@@ -120,7 +120,17 @@ public final class Workspace {
 	private func makeOutbox(_ project: Project) -> AnswerOutbox {
 		AnswerOutbox(
 			project: server.project(project.key, identity: project.id),
-			store: FileAnswerStore(instance: server.instance, person: account.actorId, project: project.key, identity: project.id)
+			store: FileAnswerStore(instance: server.instance, person: account.actorId, project: project.key, identity: project.id),
+			now: {
+				#if DEBUG
+				let arguments = ProcessInfo.processInfo.arguments
+				if let index = arguments.firstIndex(of: "-answer-clock-offset"), arguments.indices.contains(index + 1),
+					let offset = TimeInterval(arguments[index + 1]), offset.isFinite {
+					return Date().addingTimeInterval(offset)
+				}
+				#endif
+				return Date()
+			}
 		)
 	}
 
