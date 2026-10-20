@@ -42,8 +42,15 @@ export async function testInstance(): Promise<TestInstance> {
 	const privacyOpenings: string[] = [];
 	let elsewhere: ReturnType<typeof Bun.serve> | null = null;
 	let answerProxy: ReturnType<typeof Bun.serve> | null = null;
+	let planProxy: ReturnType<typeof Bun.serve> | null = null;
+	type PlanDelivery =
+		| { kind: "unreadable" }
+		| { kind: "hold"; arrived: boolean; wait: Promise<void>; release: () => void };
+	const plans = new Map<string, PlanDelivery>();
 	const unavailable = new Map<string, "rejected" | "uncertain">();
 	const stop = async (): Promise<void> => {
+		for (const delivery of plans.values()) if (delivery.kind === "hold") delivery.release();
+		await planProxy?.stop(true);
 		await answerProxy?.stop(true);
 		await elsewhere?.stop(true);
 		await instance?.stop();
@@ -117,6 +124,48 @@ export async function testInstance(): Promise<TestInstance> {
 						return Response.json({
 							ok: true,
 							result: await scenario(made.url, token, project, `${project}-${randomBytes(5).toString("hex")}`),
+						});
+					},
+					"/test/plan-connection": async (req) => {
+						const parsed = z
+							.object({ project: z.string(), mode: z.enum(["hold", "unreadable", "normal", "status"]) })
+							.safeParse(await req.json());
+						if (!parsed.success) return Response.json({ ok: false }, { status: 400 });
+						const path = `/api/p/${encodeURIComponent(parsed.data.project)}/plan`;
+						if (parsed.data.mode !== "status") {
+							const previous = plans.get(path);
+							if (previous?.kind === "hold") previous.release();
+							plans.delete(path);
+							if (parsed.data.mode === "hold") {
+								const gate = Promise.withResolvers<void>();
+								plans.set(path, { kind: "hold", arrived: false, wait: gate.promise, release: () => gate.resolve() });
+							} else if (parsed.data.mode === "unreadable") plans.set(path, { kind: "unreadable" });
+						}
+						planProxy ??= Bun.serve({
+							hostname: "127.0.0.1",
+							port: 0,
+							idleTimeout: 0,
+							fetch: async (request) => {
+								const url = new URL(request.url);
+								const delivery = plans.get(url.pathname);
+								const reply = await fetch(new Request(`${made.url}${url.pathname}${url.search}`, request), {
+									redirect: "manual",
+								});
+								if (delivery?.kind === "unreadable") return new Response("unreadable plan receipt");
+								if (delivery?.kind === "hold") {
+									delivery.arrived = true;
+									await delivery.wait;
+								}
+								return reply;
+							},
+						});
+						const delivery = plans.get(path);
+						return Response.json({
+							ok: true,
+							result: {
+								url: `http://127.0.0.1:${planProxy.port}`,
+								committed: delivery?.kind === "hold" && delivery.arrived,
+							},
 						});
 					},
 					"/test/answer-connection": async (req) => {

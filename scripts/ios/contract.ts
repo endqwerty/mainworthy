@@ -407,6 +407,13 @@ export const RunPlanReply = struct("RunPlanReply", "The run made by a plan.", {
 	slots: whole,
 	already: whole,
 });
+export const RunPlanCommand = struct("RunPlanCommand", "The recorded reply of a captured plan's command.", {
+	state: text,
+	reply: maybe(RunPlanReply),
+});
+export const RunCaseCount = struct("RunCaseCount", "The runnable case count for a plan selection.", {
+	count: whole,
+});
 const ReportRefusal = struct("ReportRefusal", "Why one result was not recorded.", { reason: text });
 export const RunReportReply = struct("RunReportReply", "What became of a small manual report.", {
 	rejected: list(ReportRefusal),
@@ -690,6 +697,8 @@ export const SHAPES: readonly Shape[] = [
 	PinnedCase,
 	RunFolders,
 	RunPlanReply,
+	RunPlanCommand,
+	RunCaseCount,
 	RunReportReply,
 	ChangeList,
 	ChangeGate,

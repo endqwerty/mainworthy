@@ -467,17 +467,36 @@ describe("the Swift that is written from this repository", () => {
 // Each Runs shape is held to replies of a project made for this test alone.
 describe("what Runs reads", () => {
 	test("planning, ordered slots, pinned cases, reports and corrections", async () => {
-		const { Run, RunPage, SlotPage, PinnedCase, RunFolders, RunPlanReply, RunReportReply } = await import(
-			"../scripts/ios/contract.ts"
-		);
+		const {
+			Run,
+			RunPage,
+			SlotPage,
+			PinnedCase,
+			RunFolders,
+			RunPlanReply,
+			RunPlanCommand,
+			RunCaseCount,
+			RunReportReply,
+		} = await import("../scripts/ios/contract.ts");
 		const made = z
 			.object({ result: z.object({ project: z.string() }) })
 			.parse(await send("POST", "/test/project", { kind: "standard" }));
 		const key = made.result.project;
 		holds("find runs", RunPage, await op(key, "find", { in: "runs", limit: 1 }));
 		holds("find folders", RunFolders, await op(key, "find", { in: "folders" }));
-		const planned = await op(key, "plan", { name: "Manual check", select: { tags: ["regression"] } });
+		const select = { tags: ["regression"] };
+		const count = await op(key, "find", { in: "cases", select, limit: 1 });
+		holds("runnable case count", RunCaseCount, count);
+		expect(z.object({ count: z.number() }).parse(count).count).toBe(3);
+		const cmd = crypto.randomUUID();
+		const planned = await op(key, "plan", { name: "Manual check", select, cmd });
 		holds("plan", RunPlanReply, planned);
+		const command = await op(key, "command", { cmd });
+		holds("plan command", RunPlanCommand, command);
+		expect(z.object({ state: z.string(), reply: z.unknown() }).parse(command)).toMatchObject({
+			state: "done",
+			reply: planned,
+		});
 		const run = z.object({ run: z.string() }).parse(planned).run;
 		const rows = z.array(z.unknown()).parse(await op(key, "get", { refs: [run] }));
 		holds("get run", Run, rows[0]);
