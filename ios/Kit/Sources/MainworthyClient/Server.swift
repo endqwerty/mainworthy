@@ -152,9 +152,9 @@ package final class Server: Sendable {
 
 	/// An operation that changes nothing. `project` is nil for one that is the instance's.
 	package func read<Reply: Decodable>(
-		_ operation: String, in project: String?, _ input: JSONValue, attempts: Int = 2
+		_ operation: String, in project: String?, _ input: JSONValue, attempts: Int = 2, delivery: WriteDelivery? = nil
 	) async throws -> Reply {
-		try await exchange("POST", Server.path(operation, project), body: input, attempts: attempts)
+		try await exchange("POST", Server.path(operation, project), body: input, attempts: attempts, delivery: delivery)
 	}
 
 	/// An operation that writes. A saved command keeps its id across restarts; other writes get a new one.

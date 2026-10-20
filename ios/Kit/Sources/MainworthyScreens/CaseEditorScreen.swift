@@ -113,10 +113,11 @@ public final class CaseEditorScreen {
 		if conflict != nil || overlapQuestion != nil || mergeSent != nil { return await resolveConflict() }
 		if sent == nil { sent = SuiteSubmission(source: source, content: content, reason: reason) }
 		guard let sent else { return nil }
+		let delivery = WriteDelivery()
 		do {
 			let outcome: SaveCaseOutcome
 			if let adopted { outcome = .adopted(adopted) }
-			else { outcome = try await project.saveCase(sent) }
+			else { outcome = try await project.saveCase(sent, delivery: delivery) }
 			switch outcome {
 			case .adopted(let stamp):
 				guard let stamp else {
@@ -151,9 +152,11 @@ public final class CaseEditorScreen {
 			self.sent = nil
 			return outcome
 		} catch {
-			// A refusal is definite. A lost or unreadable reply could have written: retry the same command.
-			if case ClientError.refused = error, adopted == nil { self.sent = nil }
-			notice = error.shown
+			if case ClientError.refused(let code, _) = error,
+				code != "internal", delivery.definitelyRejected, adopted == nil { self.sent = nil }
+			let why = error.shown
+			let stop = why.last.map { ".!?".contains($0) } == true ? "" : "."
+			notice = self.sent != nil && adopted == nil ? "\(why)\(stop) Retry will send the same save." : why
 			return nil
 		}
 	}
