@@ -40,11 +40,7 @@ public final class QueueScreen: ProjectScreen {
 	public var counts: QueueCounts { list.last?.counts ?? QueueCounts() }
 	public var loading: ListLoading { list.loading }
 	public var hasMore: Bool { list.hasMore }
-	private var actionNotice: Notice?
-	public private(set) var notice: Notice? {
-		get { list.notice.map { Notice(text: $0, isProblem: true, undoes: nil) } ?? actionNotice }
-		set { list.notice = nil; actionNotice = newValue }
-	}
+	public private(set) var notice: Notice?
 	/// What was typed for an answer, by the question: where a defect is tracked, and the reason. It is kept
 	/// until an answer to that question is taken, so a sheet that closed on a refusal opens with it again.
 	public struct Typed: Equatable, Sendable {
@@ -100,6 +96,9 @@ public final class QueueScreen: ProjectScreen {
 		self.outbox = outbox ?? AnswerOutbox(project: project)
 		list = PagedList(query: Query()) { query, cursor in
 			try await project.questions(open: query.showing == .open, kind: query.filter, after: cursor)
+		}
+		list.onProblem = { [weak self] why in
+			self?.notice = Notice(text: why, isProblem: true, undoes: nil)
 		}
 	}
 

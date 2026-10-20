@@ -17,11 +17,7 @@ public final class RunsScreen: ProjectScreen {
 	public var filter: RunFilter { list.query }
 	public var loading: ListLoading { list.loading }
 	public var hasMore: Bool { list.hasMore }
-	private var actionNotice: String?
-	public private(set) var notice: String? {
-		get { list.notice ?? actionNotice }
-		set { list.notice = nil; actionNotice = newValue }
-	}
+	public private(set) var notice: String?
 	public private(set) var folders: [String] = []
 	public private(set) var planning = false
 	public enum CaseCount: Equatable {
@@ -57,6 +53,7 @@ public final class RunsScreen: ProjectScreen {
 		list = PagedList(query: RunFilter()) { filter, cursor in
 			try await project.runs(filter, after: cursor)
 		}
+		list.onProblem = { [weak self] why in self?.notice = why }
 	}
 
 	/// What the person may do, and their name, as the account says now: a rename of the owner keeps the session.
