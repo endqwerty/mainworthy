@@ -16,6 +16,12 @@ protocol ListPage: Sendable {
 
 extension CountedPage: ListPage {}
 extension TestPage: ListPage {}
+extension QuestionPage: ListPage {
+	var rows: [Question] { questions }
+}
+extension RunPage: ListPage {
+	var rows: [Run] { runs }
+}
 
 /// The rows of one query, read a page at a time. It owns the query its rows answer, the cursor of their next page
 /// and which read may still change them, so a page of one query is never appended to the rows of another, a
@@ -29,9 +35,11 @@ final class PagedList<Query: Equatable & Sendable, Page: ListPage> {
 	private(set) var rows: [Page.Row] = []
 	/// The first page of the latest read: what the server says of the whole list beside its rows.
 	private(set) var first: Page?
+	/// The latest accepted page, including metadata that may change while the person asks for more.
+	private(set) var last: Page?
 	private(set) var loading = ListLoading.first
 	/// A later read that failed, while the rows read before stay.
-	private(set) var notice: String?
+	var notice: String?
 	/// The next page was refused because the list changed since its first page (`moved`).
 	private(set) var moved = false
 	var hasMore: Bool { next != nil }
@@ -40,6 +48,9 @@ final class PagedList<Query: Equatable & Sendable, Page: ListPage> {
 	/// Counts the reads of the list from its start. One that was overtaken changes nothing, and neither does a
 	/// page that was asked for before it.
 	private var generation = 0
+	private var reloading: Int?
+	private var paging: (generation: Int, cursor: String)?
+	private var waiters: [UUID: AsyncStream<Void>.Continuation] = [:]
 	private let read: Read
 	/// Whether an error says the list changed between its pages.
 	private let isMoved: (any Error) -> Bool
@@ -51,49 +62,63 @@ final class PagedList<Query: Equatable & Sendable, Page: ListPage> {
 	}
 
 	/// Shows another query from its first page; the same query is left as it is.
-	func show(_ query: Query) async {
-		guard query != self.query || loading != .done else { return }
+	@discardableResult
+	func show(_ query: Query) async -> Bool {
+		guard query != self.query || loading != .done else { return false }
 		if query != self.query {
 			self.query = query
 			rows = []
 			next = nil
+			loading = .first
 		}
-		await reload()
+		return await reload()
 	}
 
 	/// Reads the list again from its start, as far down as it was read, keeping the rows until the reply.
-	func reload() async {
+	/// Returns whether this read supplied the rows, so a screen can update what depends on them.
+	@discardableResult
+	func reload() async -> Bool {
 		generation += 1
 		let mine = generation
+		reloading = mine
+		defer {
+			if reloading == mine { reloading = nil }
+			wakeWaiters()
+		}
 		let query = query
 		let wanted = rows.count
 		do {
 			let page = try await read(query, nil)
+			try Task.checkCancellation()
+			guard mine == generation else { return false }
 			var rows = page.rows
-			var cursor = page.next
-			while let after = cursor, rows.count < wanted {
-				let more = try await read(query, after)
-				rows += more.rows
-				cursor = more.next
+			var latest = page
+			while let after = latest.next, rows.count < wanted {
+				latest = try await read(query, after)
+				try Task.checkCancellation()
+				guard mine == generation else { return false }
+				rows += latest.rows
 			}
-			guard mine == generation else { return }
 			self.rows = rows
 			first = page
-			next = cursor
+			last = latest
+			next = latest.next
 			moved = false
 			notice = nil
 			loading = .done
+			return true
 		} catch is CancellationError {
 		} catch where isMoved(error) {
 			// The list changed while it was read past its first page: its first page alone is read again.
-			guard mine == generation else { return }
+			guard mine == generation else { return false }
 			rows = []
 			next = nil
-			await reload()
+			return await reload()
 		} catch {
-			guard mine == generation else { return }
+			guard mine == generation else { return false }
 			if loading == .done { notice = error.shown } else { loading = .failed(error.shown) }
 		}
+		return false
 	}
 
 	/// Reads the first page alone, after the server refused a later page because the list changed.
@@ -103,17 +128,41 @@ final class PagedList<Query: Equatable & Sendable, Page: ListPage> {
 		await reload()
 	}
 
-	/// Reads the next page of the query the rows answer.
+	/// Includes a row just read on its own, even when the following list read failed or did not yet contain it.
+	func include(_ row: Page.Row) {
+		if !rows.contains(where: { $0.id == row.id }) { rows.insert(row, at: 0) }
+		loading = .done
+	}
+
+	/// Reads the next page of the query the rows answer, after any active read from its start finishes.
 	func more() async {
-		guard let cursor = next else { return }
+		while reloading != nil {
+			await waitForRead()
+			if Task.isCancelled { return }
+		}
+		guard !Task.isCancelled, let cursor = next else { return }
 		let mine = generation
+		if paging?.generation == mine, paging?.cursor == cursor {
+			repeat {
+				await waitForRead()
+				if Task.isCancelled { return }
+			} while paging?.generation == mine && paging?.cursor == cursor
+			return
+		}
+		paging = (mine, cursor)
+		defer {
+			if paging?.generation == mine, paging?.cursor == cursor { paging = nil }
+			wakeWaiters()
+		}
 		let query = query
 		do {
 			let page = try await read(query, cursor)
+			try Task.checkCancellation()
 			// A read of the list again, or another page, came first: this page belongs to neither.
 			guard mine == generation, cursor == next else { return }
 			let known = Set(rows.map(\.id))
 			rows += page.rows.filter { !known.contains($0.id) }
+			last = page
 			next = page.next
 		} catch is CancellationError {
 		} catch where isMoved(error) {
@@ -124,6 +173,20 @@ final class PagedList<Query: Equatable & Sendable, Page: ListPage> {
 			guard mine == generation, cursor == next else { return }
 			notice = error.shown
 		}
+	}
+
+	/// AsyncStream ends a canceled wait without moving the read into a task of its own.
+	private func waitForRead() async {
+		let id = UUID()
+		let (events, continuation) = AsyncStream<Void>.makeStream()
+		waiters[id] = continuation
+		defer { waiters[id] = nil }
+		for await _ in events {}
+	}
+
+	private func wakeWaiters() {
+		for waiter in waiters.values { waiter.finish() }
+		waiters = [:]
 	}
 }
 

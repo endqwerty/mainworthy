@@ -14,7 +14,7 @@ public final class OpenRunScreen: ProjectScreen {
 	}
 	public private(set) var run: Run
 	public private(set) var slots: [RunSlot] = []
-	public private(set) var loading = RunsScreen.Loading.first
+	public private(set) var loading = ListLoading.first
 	public private(set) var document = Document.none
 	public private(set) var busy = false
 	public private(set) var notice: String?
