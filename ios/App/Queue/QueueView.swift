@@ -438,6 +438,7 @@ extension String {
 private struct UnsentAnswersView: View {
 	let screen: QueueScreen
 	@State private var chosen: AnswerOutbox.Entry?
+	@State private var forgetting = false
 	private var confirming: Binding<Bool> {
 		Binding(get: { chosen != nil }, set: { if !$0 { chosen = nil } })
 	}
@@ -470,16 +471,30 @@ private struct UnsentAnswersView: View {
 				.disabled(screen.outbox.sending)
 				.accessibilityIdentifier("retry-saved-answer")
 			Button("Drop saved answer", role: .destructive) {
+				forgetting = false
 				chosen = entry
 			}
 			.disabled(screen.outbox.sending)
 			.accessibilityIdentifier("drop-saved-answer")
-			Text("Drop checks the server first. Only definite rejections can be removed now. An answer that may still arrive stays as Dropped, never sends again, and is checked on each send pass until its recorded outcome can be cleared. Later answers resume in order.")
+			Text("Drop checks the server first. Only definite rejections can be removed now. An answer that may still arrive stays as Dropped, never sends again, and is checked on each send pass. After 24 hours you can forget it with confirmation. Later answers resume in order.")
 				.font(.footnote).foregroundStyle(.secondary)
+		}
+
+		if screen.outbox.canForget(entry.id) {
+			Button("Forget", role: .destructive) {
+				forgetting = true
+				chosen = entry
+			}
+			.disabled(screen.outbox.sending)
+			.accessibilityIdentifier("forget-saved-answer")
 		}
 	}
 
 	var body: some View {
+		TimelineView(.periodic(from: .now, by: 1)) { _ in answers }
+	}
+
+	@ViewBuilder private var answers: some View {
 		let outbox = screen.outbox
 		let waiting = outbox.entries.filter { !$0.finished }
 		let replied = outbox.entries.filter(\.finished)
@@ -522,18 +537,31 @@ private struct UnsentAnswersView: View {
 		.navigationBarTitleDisplayMode(.inline)
 		.toolbar(.hidden, for: .tabBar)
 		.confirmationDialog(
-			chosen.map { $0.questions.count == 1 ? "Drop saved answer for \($0.question)?" : "Drop the saved answer for \($0.questions.count) questions?" }
-				?? "Drop saved answer?",
+			chosen.map { entry in
+				let action = forgetting ? "Forget" : "Drop"
+				return entry.questions.count == 1 ? "\(action) saved answer for \(entry.question)?" : "\(action) the saved answer for \(entry.questions.count) questions?"
+			} ?? "Saved answer?",
 			isPresented: confirming,
 			titleVisibility: .visible, presenting: chosen
 		) { entry in
-			Button("Drop saved answer", role: .destructive) {
-				chosen = nil
-				Task { await screen.outbox.drop(entry.id) }
+			if forgetting {
+				Button("Forget", role: .destructive) {
+					chosen = nil
+					screen.outbox.forget(entry.id, confirmed: true)
+				}
+			} else {
+				Button("Drop saved answer", role: .destructive) {
+					chosen = nil
+					Task { await screen.outbox.drop(entry.id) }
+				}
 			}
 			Button("Cancel", role: .cancel) { chosen = nil }
 		} message: { _ in
-			Text("This stops retrying the answer and lets later answers send. A request already on its way may still be recorded. If any request may still arrive, a Dropped entry stays until the server reports an outcome.")
+			if forgetting {
+				Text("This answer may still have been recorded. If you forget it, its outcome will no longer show here. This removes the saved entry from this device.")
+			} else {
+				Text("This stops retrying the answer and lets later answers send. A request already on its way may still be recorded. If any request may still arrive, a Dropped entry stays until the server reports an outcome or you confirm Forget after 24 hours.")
+			}
 		}
 	}
 }

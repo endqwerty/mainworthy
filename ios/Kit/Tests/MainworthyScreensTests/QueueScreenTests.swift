@@ -173,6 +173,154 @@ struct QueueScreenTests {
 		#expect(AnswerOutbox(project: project, store: store).entries.isEmpty)
 	}
 
+	private func droppedAnswer(store: any AnswerStore, now: @escaping () -> Date) async throws -> (AnswerOutbox, ProjectClient, LateAnswerTransport) {
+		let transport = LateAnswerTransport()
+		let server = try await Live.signedIn(transport: transport)
+		let project = try await server.project(try await Live.project())
+		let question = try #require(try await project.questions(open: true, kind: .failure).questions.first)
+		let choice = try #require(question.choices.first { $0.answer == "flaky" })
+		let answer = try #require(project.prepareAnswer(question, with: choice))
+		let outbox = AnswerOutbox(project: project, store: store, now: now)
+		_ = try outbox.enqueue(answer)
+		#expect(!outbox.canForget(answer.command))
+		outbox.forget(answer.command, confirmed: true)
+		#expect(outbox.entries.map(\.status) == ["Waiting to send"])
+		await outbox.send()
+		transport.holding.withLock { $0 = false }
+		await outbox.drop(answer.command)
+		#expect(outbox.entries.map(\.status) == ["Dropped"])
+		return (outbox, project, transport)
+	}
+
+	@Test("Forget waits a full day, requires confirmation, and saves removal")
+	func forgetDropped() async throws {
+		var clock = Date(timeIntervalSince1970: 1_800_000_000)
+		let store = MemoryAnswerStore()
+		let (outbox, project, transport) = try await droppedAnswer(store: store, now: { clock })
+		let entry = try #require(outbox.entries.first)
+		#expect(entry.droppedAt == Date(timeIntervalSince1970: 1_800_000_000))
+		for elapsed: TimeInterval in [0, 86_399, -86_400] {
+			clock = Date(timeIntervalSince1970: 1_800_000_000 + elapsed)
+			#expect(!outbox.canForget(entry.id))
+			outbox.forget(entry.id, confirmed: true)
+			#expect(outbox.entries.map(\.status) == ["Dropped"])
+		}
+		clock = Date(timeIntervalSince1970: 1_800_086_400)
+		#expect(outbox.canForget(entry.id))
+		clock = Date(timeIntervalSince1970: 1_800_000_001)
+		outbox.forget(entry.id, confirmed: true)
+		#expect(outbox.entries.map(\.status) == ["Dropped"])
+		clock = Date(timeIntervalSince1970: 1_800_086_400)
+		outbox.forget(entry.id)
+		#expect(outbox.entries.map(\.status) == ["Dropped"])
+		let reopened = AnswerOutbox(project: project, store: store, now: { clock })
+		#expect(reopened.canForget(entry.id))
+		reopened.forget(entry.id, confirmed: true)
+		#expect(reopened.entries.isEmpty)
+		#expect(String(data: try #require(store.data), encoding: .utf8) == "[]")
+		#expect(AnswerOutbox(project: project, store: store).entries.isEmpty)
+		try await transport.deliverHeld()
+		await reopened.send()
+		#expect(try await project.question(entry.question)?.isOpen == false)
+		#expect(reopened.entries.isEmpty)
+		#expect(AnswerOutbox(project: project, store: store).entries.isEmpty)
+	}
+
+	@Test("an older Dropped file starts a persisted full-day wait when first read")
+	func forgetOlderDropped() async throws {
+		var clock = Date(timeIntervalSince1970: 1_800_000_000)
+		let store = MemoryAnswerStore()
+		let (outbox, project, _) = try await droppedAnswer(store: store, now: { clock })
+		let id = try #require(outbox.entries.first?.id)
+		let data = try #require(store.data)
+		var json = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+		json[0].removeValue(forKey: "droppedAt")
+		store.data = try JSONSerialization.data(withJSONObject: json)
+		clock = Date(timeIntervalSince1970: 1_800_086_400)
+		let older = AnswerOutbox(project: project, store: store, now: { clock })
+		#expect(older.entries.first?.droppedAt == Date(timeIntervalSince1970: 1_800_086_400))
+		#expect(!older.canForget(id))
+		older.forget(id, confirmed: true)
+		#expect(older.entries.map(\.status) == ["Dropped"])
+		clock = Date(timeIntervalSince1970: 1_800_172_799)
+		let reopened = AnswerOutbox(project: project, store: store, now: { clock })
+		#expect(reopened.entries.first?.droppedAt == Date(timeIntervalSince1970: 1_800_086_400))
+		#expect(!reopened.canForget(id))
+		clock = Date(timeIntervalSince1970: 1_800_172_800)
+		#expect(reopened.canForget(id))
+		reopened.forget(id, confirmed: true)
+		#expect(AnswerOutbox(project: project, store: store).entries.isEmpty)
+	}
+
+	@Test("Forget retains an answer when saving fails and rejects a recovered outcome")
+	func forgetDroppedFailure() async throws {
+		var clock = Date(timeIntervalSince1970: 1_800_000_000)
+		let store = SwitchableAnswerStore()
+		let (outbox, project, transport) = try await droppedAnswer(store: store, now: { clock })
+		let id = try #require(outbox.entries.first?.id)
+		clock = clock.addingTimeInterval(86_400)
+		store.fail = true
+		outbox.forget(id, confirmed: true)
+		#expect(outbox.entries.map(\.status) == ["Dropped"])
+		#expect(outbox.storageProblem?.hasPrefix("The saved answer could not be forgotten on this device. It was kept.") == true)
+		#expect(AnswerOutbox(project: project, store: store).entries.map(\.status) == ["Dropped"])
+		store.fail = false
+		try await transport.deliverHeld()
+		await outbox.send()
+		#expect(outbox.entries.map(\.status) == ["Recorded"])
+		#expect(!outbox.canForget(id))
+		outbox.forget(id, confirmed: true)
+		#expect(outbox.entries.map(\.status) == ["Recorded"])
+	}
+
+	@Test("a missing drop time cannot become eligible if saving its new time fails")
+	func forgetOlderDroppedSaveFailure() async throws {
+		var clock = Date(timeIntervalSince1970: 1_800_000_000)
+		let store = SwitchableAnswerStore()
+		let (outbox, project, _) = try await droppedAnswer(store: store, now: { clock })
+		let id = try #require(outbox.entries.first?.id)
+		let data = try #require(store.data)
+		var json = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+		json[0].removeValue(forKey: "droppedAt")
+		store.data = try JSONSerialization.data(withJSONObject: json)
+		store.fail = true
+		let reopened = AnswerOutbox(project: project, store: store, now: { clock })
+		#expect(reopened.storageProblem?.hasPrefix("The drop time could not be saved on this device.") == true)
+		clock = clock.addingTimeInterval(172_800)
+		#expect(!reopened.canForget(id))
+		reopened.forget(id, confirmed: true)
+		#expect(reopened.entries.map(\.status) == ["Dropped"])
+		store.fail = false
+		let saved = AnswerOutbox(project: project, store: store, now: { clock })
+		#expect(saved.entries.first?.droppedAt == Date(timeIntervalSince1970: 1_800_172_800))
+		#expect(!saved.canForget(id))
+	}
+
+	@Test("Forget writes the shortened answer file on disk")
+	func forgetDroppedFile() async throws {
+		var clock = Date(timeIntervalSince1970: 1_800_000_000)
+		let memory = MemoryAnswerStore()
+		let (outbox, project, _) = try await droppedAnswer(store: memory, now: { clock })
+		let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+		defer { try? FileManager.default.removeItem(at: directory) }
+		let store = FileAnswerStore(instance: try #require(Instance(address: "mainworthy.example")), person: 1, project: project.key, identity: project.identity, directory: directory)
+		try store.save(try #require(memory.data))
+		clock = clock.addingTimeInterval(86_400)
+		let fileOutbox = AnswerOutbox(project: project, store: store, now: { clock })
+		fileOutbox.forget(try #require(outbox.entries.first?.id), confirmed: true)
+		#expect(fileOutbox.entries.isEmpty)
+		#expect(try String(contentsOf: store.file, encoding: .utf8) == "[]")
+		#expect(AnswerOutbox(project: project, store: store).entries.isEmpty)
+	}
+
+	@Test("a Dropped answer explains how to forget it after a day")
+	func droppedForgetGuidance() async throws {
+		let (outbox, _, _) = try await droppedAnswer(store: MemoryAnswerStore(), now: Date.init)
+		let entry = try #require(outbox.entries.first)
+		#expect(entry.status == "Dropped")
+		#expect(entry.detail == "This answer is never sent again and does not hold up later answers. Each send pass checks for an outcome. If the server records it, its outcome appears here. After 24 hours you can forget this entry with confirmation.")
+	}
+
 	@Test("waiting answers record before dropped checks, which stop after a network failure", arguments: [false, true])
 	func waitingBeforeDroppedChecks(lookupFails: Bool) async throws {
 		let transport = SwitchableQueueTransport()

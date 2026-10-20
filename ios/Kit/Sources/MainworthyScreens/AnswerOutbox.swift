@@ -20,6 +20,7 @@ public final class AnswerOutbox {
 		fileprivate enum Delivery: String, Codable, Sendable { case unsent, rejected, uncertain, dropped, obsolete }
 		package let answer: PreparedAnswer
 		fileprivate var delivery: Delivery?
+		public fileprivate(set) var droppedAt: Date?
 		/// What became of each question, once the server's reply to the whole command was read.
 		public fileprivate(set) var outcomes: [String: AnswerOutcome]?
 		public fileprivate(set) var problem: String?
@@ -50,7 +51,7 @@ public final class AnswerOutbox {
 		}
 
 		private enum Keys: String, CodingKey {
-			case answer, delivery, outcomes, problem
+			case answer, delivery, outcomes, problem, droppedAt
 			/// An entry an earlier build saved: the outcome of its one question.
 			case outcome
 		}
@@ -60,6 +61,7 @@ public final class AnswerOutbox {
 			answer = try container.decode(PreparedAnswer.self, forKey: .answer)
 			delivery = try container.decodeIfPresent(Delivery.self, forKey: .delivery)
 			problem = try container.decodeIfPresent(String.self, forKey: .problem)
+			droppedAt = try container.decodeIfPresent(Date.self, forKey: .droppedAt)
 			if let outcomes = try container.decodeIfPresent([String: AnswerOutcome].self, forKey: .outcomes) {
 				self.outcomes = outcomes
 			} else if let outcome = try container.decodeIfPresent(AnswerOutcome.self, forKey: .outcome) {
@@ -74,6 +76,7 @@ public final class AnswerOutbox {
 			try container.encodeIfPresent(delivery, forKey: .delivery)
 			try container.encodeIfPresent(outcomes, forKey: .outcomes)
 			try container.encodeIfPresent(problem, forKey: .problem)
+			try container.encodeIfPresent(droppedAt, forKey: .droppedAt)
 		}
 
 		public var status: String {
@@ -89,7 +92,7 @@ public final class AnswerOutbox {
 			guard let outcomes else {
 				let all = answer.members.count == 1 ? "" : " All \(answer.members.count) answers go together."
 				return dropped
-					? "This answer is never sent again and does not hold up later answers. Each send pass checks for an outcome. If the server records it, its outcome appears here. If it never does, this entry stays.\(all)"
+					? "This answer is never sent again and does not hold up later answers. Each send pass checks for an outcome. If the server records it, its outcome appears here. After 24 hours you can forget this entry with confirmation.\(all)"
 					: (problem ?? "Saved on this device. Sends when the app can reach the server.") + all
 			}
 			if answer.members.count == 1, let outcome = outcomes[question] { return Entry.detail(of: outcome) }
@@ -132,13 +135,15 @@ public final class AnswerOutbox {
 	}
 	private let project: ProjectClient
 	private let store: any AnswerStore
+	private let now: () -> Date
 	private var readable = true
 	private var active = true
 	private var sendWaiters: [String: [CheckedContinuation<Void, Never>]] = [:]
 
-	package init(project: ProjectClient, store: any AnswerStore = MemoryAnswerStore()) {
+	package init(project: ProjectClient, store: any AnswerStore = MemoryAnswerStore(), now: @escaping () -> Date = Date.init) {
 		self.project = project
 		self.store = store
+		self.now = now
 		do {
 			if let data = try store.load() {
 				let saved = try JSONDecoder().decode([Entry].self, from: data)
@@ -153,6 +158,14 @@ public final class AnswerOutbox {
 				}
 			}
 			storageProblem = store.loadWarning
+			var dated = entries
+			for index in dated.indices where dated[index].dropped && dated[index].droppedAt == nil {
+				dated[index].droppedAt = now()
+			}
+			if dated != entries {
+				do { try save(dated); entries = dated; storageProblem = store.loadWarning }
+				catch { storageProblem = "The drop time could not be saved on this device. The saved answer was kept. \(error.shown)" }
+			}
 		} catch {
 			readable = false
 			storageProblem = "Saved answers could not be read. They have not been replaced. \(error.shown)"
@@ -224,6 +237,7 @@ public final class AnswerOutbox {
 				if entry.delivery == .rejected || entry.delivery == .unsent { updated.remove(at: index) }
 				else {
 					updated[index].delivery = .dropped
+					updated[index].droppedAt = now()
 					updated[index].problem = nil
 				}
 			case .recorded(let outcomes):
@@ -242,6 +256,19 @@ public final class AnswerOutbox {
 			}
 		}
 		await send()
+	}
+
+	/// Device-clock eligibility only. Forget always requires the person's confirmation.
+	public func canForget(_ id: String) -> Bool {
+		guard let entry = entries.first(where: { $0.id == id }), entry.dropped, let droppedAt = entry.droppedAt else { return false }
+		return now().timeIntervalSince(droppedAt) >= 24 * 60 * 60
+	}
+
+	public func forget(_ id: String, confirmed: Bool = false) {
+		guard confirmed, active, readable, !sending, canForget(id) else { return }
+		let kept = entries.filter { $0.id != id }
+		do { try save(kept); entries = kept }
+		catch { storageProblem = "The saved answer could not be forgotten on this device. It was kept. \(error.shown)" }
 	}
 
 	/// Sends in saved order. An uncertain reply pauses the queue; its original command is safe to retry.

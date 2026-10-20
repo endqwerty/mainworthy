@@ -419,7 +419,11 @@ The screen confirms a sent answer without waiting for Dropped checks.
 To start a pass immediately, press **Send waiting answers and check dropped**.
 
 If the server records the dropped command, its outcome appears here. **Clear outcomes** can then remove that entry.
-If the server never records the command, the entry stays. There is no time limit that proves a request cannot still arrive.
+After 24 hours, **Forget** appears on a Dropped entry. It asks you to confirm that the answer may still have been recorded and its outcome will no longer show here. Confirm **Forget** to remove the entry from this device.
+
+The wait uses the device's clock. Setting it back delays Forget; setting it forward can make Forget appear sooner. Nothing is removed without your confirmation.
+For an older saved entry without a drop time, the 24-hour wait starts when this build first reads and saves it.
+
 If the server is still recording the command, cannot be reached, or gives an unreadable command reply,
 the app keeps the waiting answer and explains why you cannot drop it.
 
