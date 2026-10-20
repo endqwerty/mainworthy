@@ -3,6 +3,7 @@
 // configuration differs (decision 0002).
 
 import { attachmentHashes } from "../server/evidence/attachments.ts";
+import { deliverHandoffs, recoverHandoffs, stopHandoffs, waitHandoffs } from "../server/handoffs/handoffs.ts";
 import {
 	bootstrap,
 	flushUses,
@@ -101,6 +102,7 @@ export function start(
 		app.blobs.prune(attachmentHashes(app.db));
 		recoverAccepted(app);
 		recoverDisputes(app);
+		recoverHandoffs(app);
 		server = serve(app, owner, extra(app, owner), options.patience);
 	} catch (error) {
 		app.close();
@@ -125,6 +127,7 @@ export function start(
 			["ending expired sessions", app.gate.run(() => sweepSessions(app))],
 			["deleting old sign-in records", app.gate.run(() => sweepSignInRecords(app))],
 			["sending tracker requests", deliverTrackerRequests(app, options.trackerPort)],
+			["sending hand-offs", deliverHandoffs(app)],
 			["checking defect holds", pollDefectHolds(app, options.trackerPort)],
 			["posting GitHub commit statuses", deliverCommitStatuses(app, options.statusPort)],
 		] as const;
@@ -144,12 +147,14 @@ export function start(
 			stopping ??= (async () => {
 				clearInterval(timer);
 				stopTrackerRequests(app);
+				stopHandoffs(app);
 				stopTrackerPolls(app);
 				stopCommitStatuses(app);
 				await server.stop();
 				stopMail(app);
 				await waitMail(app);
 				await waitTrackerRequests(app);
+				await waitHandoffs(app);
 				await waitTrackerPolls(app);
 				await waitCommitStatuses(app);
 				await app.readers?.stop();

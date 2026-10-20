@@ -262,6 +262,7 @@ Every operation of the API is also a command with the same name. Give its input 
 | `mainworthy plan` | Start a run: choose cases, say which results count and what completes it. Evidence already recorded fills it at once. |
 | `mainworthy work` | Take a named slot or the next free unfinished slot for a lease, renew it, or give it back. |
 | `mainworthy decide` | Answer a question, or withdraw a decision. Policy says whether your answer settles it, is advice, or is refused. |
+| `mainworthy handoff` | Hand a failure question to the coding agent this instance is configured to start, with its evidence. |
 | `mainworthy inbox` | The queue: every question that needs an answer, most blocking first. With state=decided: the ledger. |
 | `mainworthy get` | Read cases, questions, runs, tests or proposals by ref. |
 | `mainworthy find` | Search and list: cases (by text, folder, tag), tests, runs, slots of a run, folders, requirements, changes. |
@@ -274,6 +275,7 @@ Every operation of the API is also a command with the same name. Give its input 
 | `mainworthy stats` | Reports over the last days: pass rate per day, flaky tests, time lost to reruns, automation and its backlog, coverage by requirement. |
 | `mainworthy command` | What became of a command you sent under an idempotency key: not recorded, begun, or done with its reply. |
 | `mainworthy tracker-status` | Read a tracker request's delivery state and its verified issue reference. |
+| `mainworthy handoff-status` | Read whether a failure question's latest hand-off to an agent was sent, or why it failed. |
 | `mainworthy audit` | Export a project's retained decisions, answers, policy changes and case versions as a verifiable audit file. |
 | `mainworthy admin` | Projects, actors, teams, grants and tokens. There are no seats: an actor is free, and a token carries what its actor may do. |
 | `mainworthy session` | Your browser sessions: list them, and end one. An admin who is a person lists and ends anyone's. |

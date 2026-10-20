@@ -67,6 +67,11 @@ export type Config = {
 	github?: { project: string; repository: string; token: string };
 	githubStatuses?: boolean;
 	jira?: { project: string; site: string; projectKey: string; issueType: string; email: string; token: string };
+	/**
+	 * Where a person may hand a failure to a coding agent (`handoffOf`): an endpoint that takes a signed JSON post,
+	 * such as a T3 Code webhook task that starts a thread for each request.
+	 */
+	handoff?: { project: string; url: string; secret: string };
 	mail?: MailConfig | undefined;
 	/** The identity provider people may sign in through, when the operator named one (`oidcOf`). */
 	oidc?: OidcConfig;
@@ -294,6 +299,7 @@ export function defaultConfig(env: Record<string, string | undefined>): Config {
 		requireAdminMfa: adminMfaOf(env),
 		...githubOf(env),
 		...jiraOf(env),
+		...handoffOf(env),
 		mail: mailConfig(env),
 		...oidcOf(env),
 	};
@@ -385,6 +391,23 @@ function githubOf(env: Record<string, string | undefined>): Pick<Config, "github
 		throw new Error("MAINWORTHY_GITHUB_REPOSITORY must be owner/repository on github.com.");
 	if (!/^[!-~]{1,512}$/.test(token)) throw new Error("MAINWORTHY_GITHUB_TOKEN must be a token without whitespace.");
 	return { github: { project, repository, token }, ...(statuses === "1" ? { githubStatuses: true } : {}) };
+}
+
+function handoffOf(env: Record<string, string | undefined>): Pick<Config, "handoff"> {
+	const project = env.MAINWORTHY_HANDOFF_PROJECT?.trim();
+	const url = env.MAINWORTHY_HANDOFF_URL?.trim();
+	const secret = env.MAINWORTHY_HANDOFF_SECRET?.trim();
+	if (!project && !url && !secret) return {};
+	if (!project || !url || !secret)
+		throw new Error("Set MAINWORTHY_HANDOFF_PROJECT, MAINWORTHY_HANDOFF_URL and MAINWORTHY_HANDOFF_SECRET together.");
+	if (!/^[A-Za-z0-9_-]{1,80}$/.test(project)) throw new Error("MAINWORTHY_HANDOFF_PROJECT must be a project key.");
+	const parsed = URL.canParse(url) ? new URL(url) : null;
+	const loopback = parsed?.hostname === "127.0.0.1" || parsed?.hostname === "localhost";
+	if (!parsed || !(parsed.protocol === "https:" || (parsed.protocol === "http:" && loopback)) || parsed.username)
+		throw new Error("MAINWORTHY_HANDOFF_URL must be an https address (http only on this machine).");
+	if (!/^[!-~]{16,512}$/.test(secret))
+		throw new Error("MAINWORTHY_HANDOFF_SECRET must be at least 16 characters without whitespace.");
+	return { handoff: { project, url, secret } };
 }
 
 function adminMfaOf(env: Record<string, string | undefined>): boolean {

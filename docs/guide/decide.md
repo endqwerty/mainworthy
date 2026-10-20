@@ -518,6 +518,38 @@ Answer the failure again with the new key's canonical issue URL or tracker refer
 If Jira returns status category `undefined`, set the issue's status category to `new`, `indeterminate`, or `done` in Jira.
 The hold stays until a successful check finds the referenced issue closed, or you withdraw or replace the answer.
 
+## Hand a failure to a coding agent
+
+A failure question offers two buttons under its evidence.
+
+- **Copy for an agent** (<kbd>y</kbd>) copies a brief: the question and its link, the failing tests, the commit and branch, the failure message, and a request to find and fix the cause. Paste it into whichever agent you use.
+- **Hand to the agent** (<kbd>h</kbd>) asks the server to post that brief to the agent the instance is configured to start. It appears only on the project an operator [configured](./configuration.md#variables-the-server-reads) with `MAINWORTHY_HANDOFF_PROJECT`, `MAINWORTHY_HANDOFF_URL` and `MAINWORTHY_HANDOFF_SECRET`. The server's brief also carries the build link and the sample result's further output, which the copy leaves out.
+
+After a hand-off, the question says whether it was sent or why not. The server sends it right after the request and does not try again on its own: "sent" means the endpoint answered with a 2xx status, not that the agent fixed anything. A hand-off the server was sending when it stopped is marked failed at the next start, because it may have arrived. Look for the agent's work before handing the question off again.
+
+Handing off needs `answer`, the capability that settles questions. Reading the latest hand-off's state needs `read`:
+
+```
+mainworthy handoff --json '{"question":"Q-70","cmd":"handoff-q70-1"}'
+mainworthy handoff-status --question Q-70
+```
+
+The server posts JSON with these fields: `id` (the request's `cmd`), `project`, `question`, `title`, `url` (the question on this instance, when `MAINWORTHY_PUBLIC_URL` is set), `brief`, `message`, `tests`, `target`, `branch` and `build`. The header `X-Mainworthy-Signature` holds `sha256=` and the hex HMAC-SHA256 of the body under the secret. `X-Mainworthy-Delivery` repeats `id`.
+
+### Start a T3 Code thread for each hand-off
+
+In T3 Code, make a scheduled task in the repository's project with a webhook trigger that starts a new thread for each request. Check its signature with header `x-mainworthy-signature`, hex encoding and prefix `sha256=`, under the same secret as `MAINWORTHY_HANDOFF_SECRET`. Its prompt takes the brief from the body, for example:
+
+```
+Mainworthy handed you a failing test. Fix it in a worktree of its own and open a pull request.
+
+{{body.brief}}
+```
+
+Set `MAINWORTHY_HANDOFF_URL` to the task's webhook address. T3 Code reaches it through T3 Connect, so the machine running T3 Code must be on for a hand-off to start a thread.
+
+Hand-offs stay on this instance. Archives leave them out, and a restored instance does not send them again.
+
 ## Check who may answer
 
 The question says whom it needs. Your token's capabilities and the project's policy

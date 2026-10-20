@@ -23,6 +23,7 @@ import {
 	questionReadMessage,
 	readOnScreen,
 } from "./evidence.tsx";
+import { Handoff } from "./handoff.tsx";
 import {
 	allOfKind,
 	capped,
@@ -1040,6 +1041,7 @@ function QueueWorkbench() {
 								</button>
 							</div>
 							<QuestionEvidence question={current} full={full} />
+							{current.kind === "failure" && <Handoff question={current} active={active} />}
 							{current.state === "open" && current.seen.carried > 0 && (
 								<p className="hintbox">
 									An earlier answer carried to {current.seen.carried} occurrences. This evidence is awaiting a fresh

@@ -713,6 +713,28 @@ Answer a question, or withdraw a decision. Policy says whether your answer settl
 
 </details>
 
+### handoff
+
+Hand a failure question to the coding agent this instance is configured to start, with its evidence.
+
+|  |  |
+| --- | --- |
+| HTTP | `POST /api/p/<project>/handoff` |
+| Command | `mainworthy handoff` |
+| Needs | `answer` |
+| Effect | writes |
+| Agent tool | no |
+
+<details>
+<summary>Input of <code>handoff</code></summary>
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `question` | `string` | yes | The failure question, `Q-70` or `70`. |
+| `projectIdentity` | `string` | no | Only write if the project key still names this identity. |
+
+</details>
+
 ### inbox
 
 The queue: every question that needs an answer, most blocking first. With state=decided: the ledger.
@@ -1006,6 +1028,27 @@ Read a tracker request's delivery state and its verified issue reference.
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `id` | `string` | yes |  |
+
+</details>
+
+### handoff-status
+
+Read whether a failure question's latest hand-off to an agent was sent, or why it failed.
+
+|  |  |
+| --- | --- |
+| HTTP | `POST /api/p/<project>/handoff-status` |
+| Command | `mainworthy handoff-status` |
+| Needs | `read` |
+| Effect | reads |
+| Agent tool | no |
+
+<details>
+<summary>Input of <code>handoff-status</code></summary>
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `question` | `string` | yes | The failure question, `Q-70` or `70`. |
 
 </details>
 

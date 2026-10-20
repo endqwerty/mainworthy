@@ -26,3 +26,32 @@ export async function copySecret(field: HTMLInputElement | null, text: string): 
 		if (focused instanceof HTMLElement) focused.focus();
 	}
 }
+
+/**
+ * Copies text that is no secret. Where the page has no `navigator.clipboard` (plain http, as above), a field
+ * outside the view holds the text for one synchronous copy. It answers whether the copy was made.
+ */
+export async function copyText(text: string): Promise<boolean> {
+	if (navigator.clipboard) {
+		return navigator.clipboard.writeText(text).then(
+			() => true,
+			() => false,
+		);
+	}
+	const field = document.createElement("textarea");
+	const focused = document.activeElement;
+	field.value = text;
+	field.setAttribute("readonly", "");
+	field.style.position = "fixed";
+	field.style.top = "-1000px";
+	document.body.append(field);
+	try {
+		field.select();
+		return document.execCommand("copy");
+	} catch {
+		return false;
+	} finally {
+		field.remove();
+		if (focused instanceof HTMLElement) focused.focus();
+	}
+}

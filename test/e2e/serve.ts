@@ -23,6 +23,7 @@ const instance = start(
 		proxy: null,
 		mail: defaultConfig(process.env).mail,
 		...(defaultConfig(process.env).oidc ? { oidc: defaultConfig(process.env).oidc } : {}),
+		...(defaultConfig(process.env).handoff ? { handoff: defaultConfig(process.env).handoff } : {}),
 		// The browser tests hash a password for every person they make and every sign-in. At what the build
 		// ships with, that is most of their time; the hashing itself is tested where it is written.
 		passwordCost: { memoryCost: 8, timeCost: 1 },

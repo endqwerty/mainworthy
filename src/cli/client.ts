@@ -42,6 +42,7 @@ const SessionSchema = z.object({
 			unlinked: Unlinked.optional(),
 			demo: z.boolean(),
 			can: z.array(z.string()).default([]),
+			handoff: z.boolean().default(false),
 		}),
 	),
 }) satisfies z.ZodType<SessionInfo>;
