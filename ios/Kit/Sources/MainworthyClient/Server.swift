@@ -5,6 +5,7 @@ import Synchronization
 package enum Proof: Sendable {
 	case password(name: String, password: String)
 	case provider(code: String, verifier: String)
+	case passkey(PasskeyAssertion, ceremony: String)
 }
 
 /// Evidence about every attempt of a command, including an uncertain reply before a later rejection.
@@ -20,10 +21,10 @@ package final class WriteDelivery: Sendable {
 /// request takes: the address of an operation, the envelope around a reply, the session cookie and where it
 /// is kept, the id that makes a write safe to send twice, and what a refusal means.
 ///
-/// A person signs in with a password or through the identity provider. That opens a session on the server,
-/// and the reply sets a cookie (`POST /api/login`). The app keeps only that cookie. A provider attempt holds
-/// its verifier until it finishes and stores no provider tokens. A token is for a script or a pipeline,
-/// and the app takes none. The server lists the session under "Your sessions", where it
+/// A person signs in with a password, the identity provider or a passkey. That opens a session on the server,
+/// and the reply sets a cookie (`POST /api/login`). The app keeps only that cookie. Provider and passkey
+/// proofs live only for their attempt; the app stores no password or provider tokens. A token is for a
+/// script or a pipeline, and the app takes none. The server lists the session under "Your sessions", where it
 /// can be ended from anywhere.
 package final class Server: Sendable {
 	package let instance: Instance
@@ -96,8 +97,11 @@ package final class Server: Sendable {
 				"code": .string(code), "verifier": .string(verifier),
 				"callback": .string(ProviderSignIn.callback), "instance": .string(instance.url.absoluteString)
 			]]
+			case .passkey(let assertion, _): ["passkey": assertion.answer]
 			}
-		let (data, response) = try await send("POST", "/api/login", body: body, attempts: 1, asSignedIn: false)
+		let ceremony: String?
+		if case .passkey(_, let held) = proof { ceremony = held } else { ceremony = nil }
+		let (data, response) = try await send("POST", "/api/login", body: body, attempts: 1, asSignedIn: false, ceremony: ceremony)
 		guard let reply = try? JSONDecoder().decode(Body<Wire.SignInReply>.self, from: data) else { throw ClientError.unreadable }
 		guard reply.result.signedIn else { throw ClientError.secondFactorUnsupported }
 		guard let given = Server.sessionCookie(in: response) else { throw ClientError.unreadable }
@@ -128,6 +132,12 @@ package final class Server: Sendable {
 
 	package func finishProviderSignIn(_ attempt: ProviderSignIn, callback: URL) async throws -> Account {
 		try await signIn(.provider(code: attempt.code(from: callback), verifier: attempt.proof.verifier))
+	}
+
+	package func beginPasskeySignIn() async throws -> PasskeySignIn {
+		let (data, response) = try await send("POST", "/api/login/challenge", body: ["native": true], attempts: 1, asSignedIn: false)
+		guard let reply = try? JSONDecoder().decode(Body<Wire.PasskeyChallenge>.self, from: data) else { throw ClientError.unreadable }
+		return try PasskeySignIn(reply.result, response: response, instance: instance)
 	}
 
 	/// Who is signed in, and the projects they may read.
@@ -277,11 +287,13 @@ package final class Server: Sendable {
 	/// A no is thrown as what it means. `asSignedIn` says a 401 means the session ended, as it does everywhere
 	/// but at sign-in, where it means the proof was not accepted.
 	private func send(
-		_ method: String, _ path: String, body: JSONValue?, attempts: Int, asSignedIn: Bool, delivery: WriteDelivery? = nil
+		_ method: String, _ path: String, body: JSONValue?, attempts: Int, asSignedIn: Bool, delivery: WriteDelivery? = nil,
+		ceremony: String? = nil
 	) async throws -> (Data, HTTPURLResponse) {
 		// The session the request goes out under. A 401 that comes back ends that one, and no other.
 		let session = cookie.withLock { $0 }
-		let request = self.request(method, path, body: body, as: session)
+		var request = self.request(method, path, body: body, as: session)
+		if let ceremony { request.setValue(ceremony, forHTTPHeaderField: "Cookie") }
 		var failure = ""
 		for attempt in 1...attempts {
 			let data: Data

@@ -502,15 +502,20 @@ export async function changePassword(
  */
 export function passkeySignInOptions(
 	app: App,
+	client: "web" | "native" = "web",
 ): { options: AssertionOptions; ceremony: string; lastsMs: number } | null {
 	const address = publicAddress(app.config);
 	if (!address) return null;
+	if (client === "native" && !address.url.startsWith("https://")) return null;
+	// Native AuthenticationServices uses the HTTPS RP ID as its origin, without a port.
+	// Record it in this challenge, leaving browser challenges bound to the configured web origin.
+	const party = client === "native" ? { ...address.party, origin: `https://${address.party.id}` } : address.party;
 	const ceremony = newSessionSecret();
 	const context = CONTEXT.browser(hashOf(ceremony));
 	return {
 		options: assertionOptions({
 			rpId: address.party.id,
-			challenge: issueChallenge(app, { purpose: "sign-in", context }, address.party),
+			challenge: issueChallenge(app, { purpose: "sign-in", context }, party),
 			allow: [],
 		}),
 		ceremony,

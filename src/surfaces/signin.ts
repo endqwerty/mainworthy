@@ -125,7 +125,11 @@ const WithInvitation = z.strictObject({
  * names nobody could end the session of somebody the page never asked about, so it is not taken.
  */
 const Replace = z.string().min(1).max(64);
-const Challenge = z.union([z.strictObject({}), z.strictObject({ invitation: z.string().min(1).max(128) })]);
+const Challenge = z.union([
+	z.strictObject({}),
+	z.strictObject({ native: z.literal(true) }),
+	z.strictObject({ invitation: z.string().min(1).max(128) }),
+]);
 /** What the page begins with the provider: a sign-in, an invitation's acceptance, or linking a signed-in person. */
 const OidcBegin = z.union([
 	z.strictObject({}),
@@ -295,8 +299,9 @@ export function signInRoutes(app: App, tools: Tools) {
 	}
 
 	/**
-	 * `POST /api/login/challenge`. `{}`: the options for signing in with a passkey. `{ invitation }`: who the
-	 * invitation is for, and the options for registering a passkey with it. It writes no row, so a page that
+	 * `POST /api/login/challenge`. `{}`: web passkey options. `{ native: true }`: native assertion options.
+	 * `{ invitation }`: who the invitation is for, and the options for registering a passkey with it.
+	 * It writes no row, so a page that
 	 * is reloaded, or a preview that fetches it, changes nothing that is stored. Each asking does add a challenge
 	 * to the map in memory, which is bounded and drops its oldest entry when it is full.
 	 */
@@ -306,14 +311,20 @@ export function signInRoutes(app: App, tools: Tools) {
 		if (read instanceof Response) return read;
 		const body = Challenge.safeParse(read.input);
 		if (!body.success)
-			return failed("invalid", "send {} to sign in with a passkey, or { invitation } to look at an invitation");
+			return failed(
+				"invalid",
+				"send {} for a web passkey, { native: true } for a native passkey, or { invitation } to look at an invitation",
+			);
 		if ("invitation" in body.data) {
 			const looked = showInvitation(app, body.data.invitation, tools.address(req, server));
 			if (looked.ok) return answered(looked.shown);
 			return looked.why === "limited" ? tools.limited(looked.retryAfter) : failed("not_found", NO_INVITATION);
 		}
-		const begun = passkeySignInOptions(app);
-		if (!begun) return passkeysOff();
+		const begun = passkeySignInOptions(app, "native" in body.data ? "native" : "web");
+		if (!begun)
+			return "native" in body.data
+				? failed("invalid", "native passkey sign-in needs an HTTPS public address and an associated app domain")
+				: passkeysOff();
 		// The browser that asked is handed a cookie it cannot read, for as long as the challenge lasts. Only that
 		// browser can answer: the challenge keeps the cookie's hash, and the answer is taken with the cookie.
 		const headers = new Headers();

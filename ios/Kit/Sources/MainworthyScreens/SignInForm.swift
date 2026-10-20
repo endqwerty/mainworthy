@@ -2,7 +2,7 @@ import Foundation
 import MainworthyClient
 import Observation
 
-/// The sign-in form: a password or the configured provider, for the instance the app was built for. It does not ask which
+/// The sign-in form: a password, the configured provider or a passkey, for the instance the app was built for. It does not ask which
 /// instance (issue #233).
 @MainActor @Observable
 public final class SignInForm {
@@ -50,6 +50,27 @@ public final class SignInForm {
 			onSignedIn(server, account)
 		} catch is CancellationError {
 			return
+		} catch {
+			notice = error.shown
+		}
+	}
+
+	public func signInWithPasskey(using authorization: any PasskeyAuthorizing) async {
+		guard !isWorking else { return }
+		isWorking = true
+		defer { isWorking = false }
+		let server = connect(instance)
+		do {
+			let attempt = try await server.beginPasskeySignIn()
+			let assertion = try await authorization.authorize(attempt.request)
+			try Task.checkCancellation()
+			let account = try await server.signIn(.passkey(assertion, ceremony: attempt.ceremony))
+			password = ""
+			onSignedIn(server, account)
+		} catch is CancellationError {
+			return
+		} catch ClientError.refused(code: "unauthenticated", _) {
+			notice = "That passkey did not sign you in. Try again for a new challenge, or use your password."
 		} catch {
 			notice = error.shown
 		}
