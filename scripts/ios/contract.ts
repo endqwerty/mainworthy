@@ -355,6 +355,7 @@ const Attachment = struct("Attachment", "A result's attachment metadata.", {
 	result: whole,
 	name: text,
 	type: text,
+	at: maybe(text),
 });
 export const AttachmentList = struct("AttachmentList", "The attachment operation's ordered list.", {
 	kind: text,
@@ -419,6 +420,11 @@ export const RunReportReply = struct("RunReportReply", "What became of a small m
 	rejected: list(ReportRefusal),
 	declined: list(ReportRefusal),
 	results: list(whole),
+});
+
+export const RunReportCommand = struct("RunReportCommand", "The recorded reply of a captured report's command.", {
+	state: text,
+	reply: maybe(RunReportReply),
 });
 
 // ── Changes and the person's sessions ──────────────────────────────────────────────────────────────────────
@@ -700,6 +706,7 @@ export const SHAPES: readonly Shape[] = [
 	RunPlanCommand,
 	RunCaseCount,
 	RunReportReply,
+	RunReportCommand,
 	ChangeList,
 	ChangeGate,
 	ChangeImpact,

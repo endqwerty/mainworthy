@@ -51,17 +51,16 @@ final class RunsUITests: XCTestCase {
 		XCTAssertTrue(start.waitForExistence(timeout: 10))
 		XCTAssertTrue(app.staticTexts["1 in progress"].waitForExistence(timeout: 10))
 		shot("2-run")
-		// The pipeline filled the first four slots: each is left to that result, so its row does not open, and the
-		// list says why. The fifth, which nobody filled, opens.
-		XCTAssertFalse(app.buttons["run-slot-1"].exists)
+		// Filled slots open for reading; only an eligible slot offers recording.
+		XCTAssertTrue(app.buttons["run-slot-1"].exists)
 		app.swipeUp()
 		XCTAssertTrue(app.buttons["run-slot-5"].waitForExistence(timeout: 5))
-		XCTAssertFalse(app.buttons["run-slot-4"].exists)
+		XCTAssertTrue(app.buttons["run-slot-4"].exists)
 		XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "In progress · robin · since")).firstMatch.waitForExistence(timeout: 10))
 		shot("2b-left-to-others")
 		XCTAssertTrue(
 			app.staticTexts[
-				"A slot that a pipeline, an agent or another person filled, and you have not, is left to that result and does not open."
+				"Open any slot to read its results. A slot filled only by another producer is read-only."
 			].waitForExistence(timeout: 5))
 		app.swipeDown()
 		start.tap()
@@ -273,6 +272,51 @@ final class RunsUITests: XCTestCase {
 		app.navigationBars.buttons["Runs"].tap()
 		XCTAssertEqual(app.staticTexts.matching(identifier: "Keep the phone plan").count, 1)
 		shot("planner-retry-opened")
+	}
+
+	@MainActor func testRetryKeepsTheSubmittedReport() async throws {
+		let project = try await makeProject()
+		let address = try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])
+		func connection(_ mode: String) async throws -> String {
+			var request = URLRequest(url: try XCTUnwrap(URL(string: "\(address)/test/plan-connection")))
+			request.httpMethod = "POST"
+			request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+			request.setValue("Bearer \(environment["MAINWORTHY_TEST_TOKEN"] ?? "")", forHTTPHeaderField: "Authorization")
+			request.httpBody = try JSONSerialization.data(withJSONObject: ["project": project, "mode": mode, "operation": "report"])
+			let (data, response) = try await URLSession.shared.data(for: request)
+			XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+			return try JSONDecoder().decode(PlanConnection.self, from: data).result.url
+		}
+		let proxy = try await connection("unreadable")
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", proxy]
+		app.launch()
+		try signIn(app)
+		app.openProject(project)
+		app.openTab("Runs")
+		XCTAssertTrue(app.staticTexts["Checkout regression"].waitForExistence(timeout: 15))
+		app.staticTexts["Checkout regression"].tap()
+		XCTAssertTrue(app.buttons["start-run"].waitForExistence(timeout: 10))
+		app.buttons["start-run"].tap()
+		XCTAssertTrue(app.staticTexts["executing-case"].waitForExistence(timeout: 10))
+		let note = app.textFields["run-note"]
+		note.tap()
+		note.typeText("Keep this reported observation")
+		app.buttons["Done"].tap()
+		app.buttons["record-fail"].tap()
+		XCTAssertTrue(app.buttons["retry-report"].waitForExistence(timeout: 10))
+		XCTAssertTrue(app.staticTexts["run-notice"].label.contains("outcome is unknown"))
+		XCTAssertFalse(app.buttons["record-pass"].exists)
+		shot("report-uncertain")
+		_ = try await connection("normal")
+		app.buttons["retry-report"].tap()
+		XCTAssertTrue(app.staticTexts["Catalog keeps the selected filters"].waitForExistence(timeout: 10))
+		XCTAssertFalse(app.buttons["retry-report"].exists)
+		XCTAssertTrue(app.staticTexts["run-notice"].label.contains("Fail recorded"))
+		shot("report-recovered")
+		app.buttons["Undo"].tap()
+		XCTAssertTrue(app.staticTexts["Order total includes shipping"].waitForExistence(timeout: 10))
+		XCTAssertTrue(app.staticTexts["run-notice"].label.contains("corrected to skipped"))
 	}
 
 	@MainActor func testChangeRunsAndTheirResults() async throws {

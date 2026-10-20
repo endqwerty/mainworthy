@@ -188,15 +188,20 @@ To record results for a planned run, follow these steps:
 2. Open a run. Its page shows the server's verdict, the results it accepts and its cases in order.
 3. Press **Start** to open the first case with no result, or press a slot to open it.
    The case is shown at the version pinned when the run was planned.
-   A slot that a pipeline, an agent or another person filled, and you have not, does not open: it is left to
-   that result, as in the web app. Its row shows who filled it and with what outcome.
+   Every slot opens, including one filled only by another producer. That slot is read-only.
+   Its recorded results show the latest fills, step trails and screenshots.
 4. If a step failed, press that step to mark it. Press the step again to clear the mark.
 5. If needed, add a note.
 6. Press **Pass**, **Fail**, **Blocked** or **Skip**. **Fail** records the marked step.
    After the server confirms the result and the app reads the slots again, it opens the next slot with no result.
 
-**Undo** corrects the result to your earlier outcome, including its note and failed step, or to skipped if there was none.
-It does not delete the result. You can return to any slot and record again to correct your own earlier result.
+**Undo** corrects the result to your earlier outcome, including its note, failed step, step trail and attachments, or to skipped if there was none.
+It disappears when a refresh shows that result was already replaced. It does not delete the result.
+You can return to any eligible slot and record again to correct your own earlier result.
+
+If a Record or Undo reply is lost or unreadable, **Retry report** checks the original command before another result on that slot.
+The app keeps the submitted outcome, note and evidence while the outcome is uncertain. Keep the workspace open until it recovers the receipt.
+Closing the app loses an uncertain report; reports are not saved in **Unsent answers**.
 
 Notes and step marks you have not recorded stay with their slot while the run is open, including when you use **Undo**.
 

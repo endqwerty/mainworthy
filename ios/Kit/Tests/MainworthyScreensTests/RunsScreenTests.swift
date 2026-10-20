@@ -112,15 +112,15 @@ struct RunsScreenTests {
 		let other = try await Live.signedIn().project(screen.permission.key)
 		let external = try #require(run.firstUnfilled)
 		let externallyShown = try await other.execution(of: external, in: run.run.ref)
-		_ = try await other.report(externallyShown, outcome: .skip)
+		_ = try await other.report(try await other.prepareReport(externallyShown, outcome: .skip))
 		#expect(run.slots.first { $0.id == external.id }?.fills.isEmpty == true)
 		await screen.refresh()
 		#expect(run.slots.first { $0.id == external.id }?.ownFill(by: Live.name)?.outcome == .manual(.skip))
 		#expect(screen.open(screen.runs[0]) === run)
 	}
 
-	@Test("Undo uses the result that was shown, even when the slot refreshed behind a typed note")
-	func undoUsesShownSlot() async throws {
+	@Test("Undo restores the latest fill, even when the slot refreshed behind a typed note")
+	func undoUsesLatestSlot() async throws {
 		let screen = try await screen()
 		let run = screen.open(try #require(screen.runs.first))
 		await run.refresh()
@@ -130,12 +130,13 @@ struct RunsScreenTests {
 			return
 		}
 		let other = try await Live.signedIn().project(screen.permission.key)
-		_ = try await other.report(shown, outcome: .skip, note: "From another device")
+		_ = try await other.report(try await other.prepareReport(shown, outcome: .skip, note: "From another device"))
 		await run.refresh()
 		run.note = "My own observation"
 		#expect(await run.record(shown, outcome: .blocked))
 		await run.undo()
-		#expect(run.notice == "The result is corrected to skipped. A skipped slot counts as no proof.")
+		#expect(run.notice == "The earlier outcome is restored by a correction.")
+		#expect(run.slots.first { $0.id == shown.slot.id }?.ownFill(by: Live.name)?.note == "From another device")
 	}
 
 	@Test("without produce slots are read-only, and without plan a plan is not sent")
@@ -152,6 +153,12 @@ struct RunsScreenTests {
 		#expect(await run.record(execution, outcome: .pass) == false)
 		#expect(await screen.plan(name: "Forbidden", selection: .all) == nil)
 		#expect(run.firstUnfilled?.id == execution.slot.id)
+		let external = try #require(run.slots.first { !$0.fills.isEmpty })
+		await run.execute(external)
+		guard case .read(let filled) = run.document else { throw ClientError.unreadable }
+		#expect(run.latestSlot(filled).fills == external.fills)
+		#expect(run.isReadOnly && !run.mayRecord(filled))
+		#expect(await run.record(filled, outcome: .pass) == false)
 	}
 
 	@Test("a closed run stays readable and rejects recording until its sign-off is withdrawn")

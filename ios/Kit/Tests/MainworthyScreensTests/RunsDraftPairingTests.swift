@@ -130,7 +130,9 @@ actor ReviewFailPinnedRead: Transport {
         let slot = try #require(run.firstUnfilled)
         await run.execute(slot)
         guard case .read(let shown) = run.document else { Issue.record("no slot"); return }
-        _ = try await server.project(key).report(shown,outcome:.pass,note:"",failedStep:nil,corrects:nil)
+        let client = try await server.project(key)
+        let submission = try await client.prepareReport(shown, outcome: .pass)
+        _ = try await client.report(submission)
         await run.refresh()
         #expect(run.isLeftToOthers(slot))
         await workspace.refreshAccount()
