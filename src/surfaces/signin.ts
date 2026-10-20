@@ -20,9 +20,13 @@ import { EmailAddress, whyNotPassword } from "../core/people.ts";
 import {
 	type Accepted,
 	acceptInvitation,
+	beginNativeOidc,
 	beginOidcSignIn,
 	changePassword,
+	exchangeNativeOidc,
+	finishNativeOidc,
 	finishOidcSignIn,
+	NATIVE_OIDC_CALLBACK,
 	OIDC_OFF,
 	type OidcStart,
 	PASSKEYS_OFF,
@@ -94,6 +98,20 @@ const ResetPassword = z.strictObject({ reset: z.string().min(1).max(128), passwo
 const WithPasskey = z.strictObject({ passkey: z.record(z.string(), z.unknown()) });
 /** The query the identity provider sent the browser back to `/signin/oidc` with, as the page found it. */
 const WithOidc = z.strictObject({ oidc: z.string().min(1).max(4096) });
+const NativeRequest = z.strictObject({
+	challenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+	state: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+	callback: z.literal(NATIVE_OIDC_CALLBACK),
+	instance: z.string().max(256),
+});
+const WithNativeOidc = z.strictObject({
+	nativeOidc: z.strictObject({
+		code: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+		verifier: z.string().regex(/^[A-Za-z0-9._~-]{43,128}$/),
+		callback: z.literal(NATIVE_OIDC_CALLBACK),
+		instance: z.string().max(256),
+	}),
+});
 const WithInvitation = z.strictObject({
 	invitation: z.string().min(1).max(128),
 	password: z.string().max(4096).optional(),
@@ -197,8 +215,11 @@ export function signInRoutes(app: App, tools: Tools) {
 		const withTotp = WithTotp.safeParse(input);
 		const withInvitation = WithInvitation.safeParse(input);
 		const withOidc = WithOidc.safeParse(input);
+		const native = WithNativeOidc.safeParse(input);
 		let entry: Accepted;
-		if (withOidc.success) {
+		if (native.success) {
+			entry = await exchangeNativeOidc(app, native.data.nativeOidc, about);
+		} else if (withOidc.success) {
 			if (!app.config.oidc) return failed("invalid", OIDC_OFF);
 			const finished = await finishOidcSignIn(
 				app,
@@ -399,11 +420,39 @@ export function signInRoutes(app: App, tools: Tools) {
 		return failed(code, message);
 	}
 
+	async function nativeOidc(req: Request): Promise<Response> {
+		if (!app.config.oidc) return failed("invalid", OIDC_OFF);
+		if (!tools.sameOrigin(req)) return failed("unauthenticated", NOT_SIGNED_IN);
+		const read = await tools.read(req, CHALLENGE_BODY_LIMIT);
+		if (read instanceof Response) return read;
+		const parsed = NativeRequest.safeParse(read.input);
+		if (!parsed.success) return failed("invalid", "send the native sign-in challenge, state, callback and instance");
+		const url = await beginNativeOidc(app, parsed.data);
+		return url
+			? answered({ url })
+			: failed("invalid", "provider sign-in could not start; use this instance's public address and try again");
+	}
+	async function nativeCallback(req: Request, server: Listener): Promise<Response> {
+		if (!app.config.oidc) return failed("invalid", OIDC_OFF);
+		const query = new URL(req.url).search;
+		if (query.length > 4096) return refused("input");
+		const back = await finishNativeOidc(app, query, tools.address(req, server));
+		if (back && typeof back !== "string") return tools.limited(back.retryAfter);
+		return back
+			? new Response(null, {
+					status: 302,
+					headers: { location: back, "cache-control": "no-store", "referrer-policy": "no-referrer" },
+				})
+			: refused("provider");
+	}
+
 	return {
 		signIn,
 		routes: {
 			"/api/login/methods": { GET: () => answered(signInMethods(app)) },
 			"/api/login/challenge": { POST: (req: Request, server: Listener) => challenge(req, server) },
+			"/api/login/oidc/native": { POST: (req: Request) => nativeOidc(req) },
+			"/api/login/oidc/native/callback": { GET: (req: Request, server: Listener) => nativeCallback(req, server) },
 			"/api/login/oidc": { POST: (req: Request, server: Listener) => oidc(req, server) },
 			"/api/account/password": { POST: (req: Request, server: Listener) => password(req, server) },
 		},

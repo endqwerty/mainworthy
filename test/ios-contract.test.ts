@@ -21,10 +21,12 @@ import {
 	EVIDENCE,
 	Inbox,
 	Proposal,
+	ProviderStart,
 	Question,
 	SessionEnd,
 	SessionInfo,
 	SessionRow,
+	SignInMethods,
 	SignInReply,
 	TestDetail,
 	TestList,
@@ -198,6 +200,38 @@ describe("what the iOS app reads", () => {
 		expect(await openings()).toEqual({ urls: [`${server.url}/privacy`] });
 		const anonymous = await fetch(`${server.url}/test/privacy-openings`);
 		expect(anonymous.status).toBe(401);
+	});
+
+	test("native provider discovery, authorization and session use the generated contract", async () => {
+		holds("GET /api/login/methods", SignInMethods, await result("GET", "/api/login/methods"));
+		const verifier = "v".repeat(43);
+		const request = {
+			challenge: new Bun.CryptoHasher("sha256").update(verifier).digest("base64url"),
+			state: "s".repeat(43),
+			callback: "com.mainworthy.app://signin/oidc",
+			instance: server.url,
+		};
+		const begun = await result("POST", "/api/login/oidc/native", request);
+		holds("POST /api/login/oidc/native", ProviderStart, begun);
+		const { url } = z.object({ url: z.string() }).parse(begun);
+		const authorized = await fetch(url, { redirect: "manual" });
+		const back = authorized.headers.get("location") ?? "";
+		const done = await fetch(back, { redirect: "manual" });
+		const native = new URL(done.headers.get("location") ?? "");
+		const exchanged = await fetch(`${server.url}/api/login`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				nativeOidc: {
+					code: native.searchParams.get("code"),
+					verifier,
+					callback: request.callback,
+					instance: server.url,
+				},
+			}),
+		});
+		expect(exchanged.status).toBe(200);
+		holds("POST /api/login, native", SignInReply, (await exchanged.json()).result);
 	});
 
 	test("who is signed in, with a token and with the session a password opens", async () => {

@@ -390,6 +390,11 @@ An identity belongs to one person at a time. Linking one that somebody already h
 
 An identity the provider vouches for that nobody here has linked does not sign in. The page says "That did not sign you in." An admin invites the person, or the person links the provider from a session they have.
 
+The [iPhone app](./iphone.md#sign-in) also offers the configured provider. Its system browser sheet returns
+a one-time code to the app, which exchanges it for a session of its own. The provider identity must already
+be linked to your person. Operators register the additional callback
+`MAINWORTHY_PUBLIC_URL/api/login/oidc/native/callback` at their provider, alongside the web callback.
+
 ### A lost password or passkey
 
 With mail enabled, **Forgot your password?** on the sign-in page opens a reset request. Enter your verified email address. The page gives the same answer for known, unknown and unverified addresses. Requests are counted per email address and client address by the failed-attempt limiter, including its exemption for private and loopback client addresses. The sixth request inside the counting window waits one second, and later requests increase the wait. A public client's count is shared with failed sign-ins. [Configuration](./configuration.md#run-behind-a-proxy-that-ends-tls) describes how a proxy supplies the client address.

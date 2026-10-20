@@ -14,6 +14,7 @@ import { Client } from "../../src/cli/client.ts";
 import { seed } from "../../src/cli/seed.ts";
 import { removeProject } from "../../src/server/transfer/transfer.ts";
 import { docsRoutes } from "../../src/surfaces/docs/site.ts";
+import { type Provider, provider } from "../../test/oidc-support.ts";
 import { passedRun, scenario } from "./scenario.ts";
 
 export const OWNER = "robin";
@@ -37,6 +38,7 @@ export async function testInstance(): Promise<TestInstance> {
 	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-ios-"));
 	let token = TOKEN;
 	let instance: Instance | null = null;
+	let idp: Provider | null = null;
 	// Another origin, which only counts what reaches it: a client that follows a redirect there is seen.
 	let reached = 0;
 	const privacyOpenings: string[] = [];
@@ -54,11 +56,13 @@ export async function testInstance(): Promise<TestInstance> {
 		await answerProxy?.stop(true);
 		await elsewhere?.stop(true);
 		await instance?.stop();
+		idp?.stop();
 		rmSync(dataDir, { recursive: true, force: true });
 	};
 	// A server that could not be started or set up is handed to nobody, so nobody else would stop it or remove
 	// what it wrote: that is done here.
 	try {
+		idp = await provider({ subject: "ios-sam" });
 		const other = Bun.serve({
 			hostname: "127.0.0.1",
 			port: 0,
@@ -71,6 +75,7 @@ export async function testInstance(): Promise<TestInstance> {
 		const made = start(
 			{
 				dataDir,
+				oidc: idp.config(),
 				host: "127.0.0.1",
 				port: 0,
 				mode: "server",
@@ -208,6 +213,8 @@ export async function testInstance(): Promise<TestInstance> {
 			{ readers: 0 },
 		);
 		instance = made;
+		const publicUrl = made.url.replace("127.0.0.1", "localhost");
+		made.app.config.publicUrl = publicUrl;
 		const post = (path: string, body: unknown, token?: string) =>
 			fetch(`${made.url}${path}`, {
 				method: "POST",
@@ -223,6 +230,26 @@ export async function testInstance(): Promise<TestInstance> {
 			const invited = Invited.parse(await (await post("/api/invitation", { do: "create", name }, token)).json());
 			const joined = await post("/api/login", { invitation: invited.result.code, password });
 			if (!joined.ok) throw new Error(`${name} could not join: ${joined.status} ${await joined.text()}`);
+			if (name === PERSON.name) {
+				const cookie = (joined.headers.getSetCookie()[0] ?? "").split(";")[0] ?? "";
+				const begun = await fetch(`${made.url}/api/login/oidc`, {
+					method: "POST",
+					headers: { "content-type": "application/json", cookie },
+					body: JSON.stringify({ link: true }),
+				});
+				const { result } = z.object({ result: z.object({ url: z.string() }) }).parse(await begun.json());
+				const authorization = await fetch(result.url, { redirect: "manual" });
+				const back = new URL(authorization.headers.get("location") ?? "");
+				const linked = await fetch(`${made.url}/api/login`, {
+					method: "POST",
+					headers: {
+						"content-type": "application/json",
+						cookie: `${cookie}; ${(begun.headers.getSetCookie()[0] ?? "").split(";")[0]}`,
+					},
+					body: JSON.stringify({ oidc: back.search }),
+				});
+				if (!linked.ok) throw new Error(`test provider could not be linked: ${linked.status}`);
+			}
 			if (name === OWNER) {
 				const issued = await fetch(`${made.url}/api/admin`, {
 					method: "POST",
@@ -235,7 +262,7 @@ export async function testInstance(): Promise<TestInstance> {
 				token = Issued.parse(await issued.json()).result.token;
 			}
 		}
-		return { url: made.url, token, person: PERSON, owner: { name: OWNER, password: OWNER_PASSWORD }, stop };
+		return { url: publicUrl, token, person: PERSON, owner: { name: OWNER, password: OWNER_PASSWORD }, stop };
 	} catch (error) {
 		await stop();
 		throw error;

@@ -1,9 +1,10 @@
 import Foundation
 import Synchronization
 
-/// A way of proving who one is at sign-in. A passkey would be the second.
+/// A way of proving who one is at sign-in.
 package enum Proof: Sendable {
 	case password(name: String, password: String)
+	case provider(code: String, verifier: String)
 }
 
 /// Evidence about every attempt of a command, including an uncertain reply before a later rejection.
@@ -19,9 +20,10 @@ package final class WriteDelivery: Sendable {
 /// request takes: the address of an operation, the envelope around a reply, the session cookie and where it
 /// is kept, the id that makes a write safe to send twice, and what a refusal means.
 ///
-/// A person signs in with a name and a password. That opens a session on the server and the reply sets a
-/// cookie (`POST /api/login`). The app holds that cookie and nothing else, not the password. A token is for a
-/// script or a pipeline, and the app takes none. The server lists the session under "Your sessions", where it
+/// A person signs in with a password or through the identity provider. That opens a session on the server,
+/// and the reply sets a cookie (`POST /api/login`). The app keeps only that cookie. A provider attempt holds
+/// its verifier until it finishes and stores no provider tokens. A token is for a script or a pipeline,
+/// and the app takes none. The server lists the session under "Your sessions", where it
 /// can be ended from anywhere.
 package final class Server: Sendable {
 	package let instance: Instance
@@ -90,6 +92,10 @@ package final class Server: Sendable {
 		let body: JSONValue =
 			switch proof {
 			case .password(let name, let password): ["name": .string(name), "password": .string(password)]
+			case .provider(let code, let verifier): ["nativeOidc": [
+				"code": .string(code), "verifier": .string(verifier),
+				"callback": .string(ProviderSignIn.callback), "instance": .string(instance.url.absoluteString)
+			]]
 			}
 		let (data, response) = try await send("POST", "/api/login", body: body, attempts: 1, asSignedIn: false)
 		guard let reply = try? JSONDecoder().decode(Body<Wire.SignInReply>.self, from: data) else { throw ClientError.unreadable }
@@ -100,6 +106,28 @@ package final class Server: Sendable {
 			secrets.save(try? JSONEncoder().encode(Kept(instance: instance, cookie: given)))
 		}
 		return try await account()
+	}
+
+	package func providerName() async throws -> String? {
+		let methods: Wire.SignInMethods = try await exchange("GET", "/api/login/methods", attempts: 2)
+		return methods.oidc?.name
+	}
+
+	package func beginProviderSignIn() async throws -> ProviderSignIn {
+		let proof = ProviderSignIn.Proof()
+		let (data, _) = try await send("POST", "/api/login/oidc/native", body: [
+			"challenge": .string(proof.challenge), "state": .string(proof.state),
+			"callback": .string(ProviderSignIn.callback), "instance": .string(instance.url.absoluteString)
+		], attempts: 1, asSignedIn: false)
+		guard let reply = try? JSONDecoder().decode(Body<Wire.ProviderStart>.self, from: data),
+			let url = URL(string: reply.result.url),
+			url.scheme == "https" || (url.scheme == "http" && ["localhost", "127.0.0.1", "::1"].contains(url.host ?? ""))
+		else { throw ClientError.unreadable }
+		return ProviderSignIn(url: url, proof: proof)
+	}
+
+	package func finishProviderSignIn(_ attempt: ProviderSignIn, callback: URL) async throws -> Account {
+		try await signIn(.provider(code: attempt.code(from: callback), verifier: attempt.proof.verifier))
 	}
 
 	/// Who is signed in, and the projects they may read.

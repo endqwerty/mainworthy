@@ -52,7 +52,18 @@ import {
 	spendInvitation,
 } from "./invitations.ts";
 import { accountKey, addressKey, type LimiterAnswer } from "./limiter.ts";
-import { beginOidc, finishOidc, type Identity, type OidcPurpose, type OidcRefusal } from "./oidc.ts";
+import {
+	beginOidc,
+	findNativeOidc,
+	finishOidc,
+	type Identity,
+	issueNativeOidc,
+	type NativeOidcExchange,
+	type NativeOidcRequest,
+	type OidcPurpose,
+	type OidcRefusal,
+	takeNativeOidc,
+} from "./oidc.ts";
 import { dummyHash, hashPassword, type PasswordMatch, PasswordWorkBusy, verifyPassword } from "./passwords.ts";
 import {
 	endOtherSessions,
@@ -1074,6 +1085,7 @@ export async function finishOidcSignIn(
 	});
 	if (!judged.ok) return attempt.wrong(no(judged.why));
 	const { purpose, identity } = judged;
+	if (purpose.purpose === "native") return no("context");
 	const handle = oidcHandle(identity);
 	const label = identityLabel(app, identity);
 	if (purpose.purpose === "join") {
@@ -1104,10 +1116,27 @@ export async function finishOidcSignIn(
 			return { ok: true, linked: true };
 		});
 	}
+	return openOidcSession(app, { identity }, about);
+}
+
+async function openOidcSession(
+	app: App,
+	input: { identity: Identity } | { native: NativeOidcExchange },
+	about: About,
+): Promise<Entry> {
+	const attempt = byAddress(app, about.address);
+	if ("native" in input && !findNativeOidc(app, input.native)) return attempt.wrong(no("challenge"));
 	about.proven?.();
 	const cookie = newSessionSecret();
 	const entry = await commit(app, (): Entry => {
-		const row = oidcByHandle(app.db, handle);
+		const handoff = "native" in input ? takeNativeOidc(app, input.native) : null;
+		const identity = "identity" in input ? input.identity : handoff?.identity;
+		if (!identity) return no("challenge");
+		if ("native" in input && input.native.instance !== publicAddress(app.config)?.url) return no("context");
+		if (!app.config.oidc || identity.issuer !== app.config.oidc.issuer) return no("changed-meanwhile");
+		const row = oidcByHandle(app.db, oidcHandle(identity));
+		if (handoff && (!row || row.id !== handoff.credential || row.actor !== handoff.actor))
+			return no("changed-meanwhile");
 		const person = row ? app.db.get(Q.personById, { id: row.actor }) : null;
 		if (!row || !person) return no("unknown-identity");
 		if (app.config.requireAdminMfa && hasAdminGrant(app.db, person.id) && !providerVouches(app))
@@ -1215,3 +1244,45 @@ export function confirmTotp(
 	attempt.limiter.succeeded([attempt.account]);
 	return { id, recoveryCodes: recovery.codes, sessionsEnded };
 }
+
+export async function beginNativeOidc(app: App, request: NativeOidcRequest): Promise<string | null> {
+	const redirect = oidcRedirect(app).replace("/signin/oidc", "/api/login/oidc/native/callback");
+	if (request.instance !== publicAddress(app.config)?.url) return null;
+	return beginOidc(app, { purpose: { purpose: "native", ...request }, browser: null, redirect });
+}
+
+export async function finishNativeOidc(
+	app: App,
+	query: string,
+	address: string | null,
+): Promise<string | Limited | null> {
+	const attempt = byAddress(app, address);
+	const judged = await finishOidc(app, {
+		query,
+		browser: null,
+		native: true,
+		redirect: oidcRedirect(app).replace("/signin/oidc", "/api/login/oidc/native/callback"),
+	});
+	const refused = (request: NativeOidcRequest | undefined, why: WhyNot): string | Limited | null => {
+		const answer = attempt.wrong(no(why));
+		if (!request) return answer.why === "limited" ? answer : null;
+		const back = new URL(request.callback);
+		back.searchParams.set("state", request.state);
+		back.searchParams.set("error", answer.why === "limited" ? "limited" : "unauthenticated");
+		if (answer.why === "limited") back.searchParams.set("retryAfter", String(answer.retryAfter));
+		return back.href;
+	};
+	if (!judged.ok) return refused(judged.native, judged.why);
+	if (judged.purpose.purpose !== "native") return null;
+	if (judged.identity.issuer !== app.config.oidc?.issuer) return null;
+	const row = oidcByHandle(app.reader, oidcHandle(judged.identity));
+	if (!row) return refused(judged.purpose, "unknown-identity");
+	return issueNativeOidc(
+		app,
+		{ ...judged.purpose, identity: judged.identity, credential: row.id, actor: row.actor },
+		judged.generation,
+	);
+}
+
+export const exchangeNativeOidc = (app: App, input: NativeOidcExchange, about: About): Promise<Entry> =>
+	openOidcSession(app, { native: input }, about);

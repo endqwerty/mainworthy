@@ -43,17 +43,25 @@ TestFlight opens for 90 days, and the TestFlight app shows when it ends.
 **Privacy** on the sign-in screen opens the instance's [privacy policy](./privacy.md) in your browser, without
 signing in. The same link is under **You**, **About**. A build for another instance opens that instance's `/privacy` page.
 
-The app signs in to `mainworthy.com`. It does not ask for an address. Before signing in, set a password in
+The app signs in to `mainworthy.com`. It does not ask for an address. For password sign-in, set a password in
 the web app under Settings, **Your sign-in**. The app does not accept tokens. Use tokens for scripts or pipelines.
 To sign in, follow these steps:
 
 1. Type your name and your password.
 2. Press **Sign in**.
 
-An account with an enrolled authenticator requires a second sign-in step. The app cannot complete that step. After accepting your password, the app says that you need the web app and keeps no session. Sign in to that account in the web app. An instance that requires a second factor for admins also refuses password-only admin sign-in in the app.
+When the instance offers an identity provider, press **Sign in with** and the provider's name instead. Complete the sign-in
+in the system browser sheet. The app returns signed in as the person linked to that provider identity. You
+need no Mainworthy password. Link the identity in the web app first, under Settings, **Your sign-in**, or
+accept an invitation there through the provider. Cancelling the sheet leaves you signed out.
+Repeated refused provider callbacks count toward the instance's sign-in limit for that address, shared
+with web sign-in. If a refusal reaches that limit, the sheet closes and the app tells you how many seconds
+to wait before trying again. A valid provider answer still passes that limit.
+
+An account with an enrolled authenticator requires a second step for password sign-in. The app cannot complete that step. After accepting your password, the app says that you need the web app and keeps no session. Sign in to that account in the web app. An instance that requires a second factor for admins also refuses password-only admin sign-in in the app.
 
 After sign-in completes, the app opens a session, as a browser does, and keeps that session in the phone's keychain. It does not keep
-the password. The session appears in the web app under Settings, **Your sessions**, as "Mainworthy for
+the password or the provider's tokens. The session appears in the web app under Settings, **Your sessions**, as "Mainworthy for
 iPhone", and you can end it there.
 
 ### Fill the password from 1Password or the phone's passwords
@@ -284,7 +292,7 @@ Being an admin of one project is not enough. To revoke a token, follow these ste
 4. Press **Revoke token**. The confirmation names the token's label and number.
 5. Review the label and number.
 6. Confirm.
-   Revocation stops the token and ends sessions opened with it. The app signs in with a password, so its own
+   Revocation stops the token and ends sessions opened with it. The app signs in with a password or the identity provider, so its own
    session stays signed in.
    The screen says **Revoked**, **Already revoked**, or shows the server's refusal reason.
    If the reply is lost or unreadable, the screen says **Outcome unknown** and pauses further revocations.

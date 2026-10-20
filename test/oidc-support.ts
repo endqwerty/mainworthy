@@ -46,7 +46,7 @@ export function stopProviders(): void {
 	for (const provider of providers.splice(0)) provider.stop();
 }
 
-export async function provider(): Promise<Provider> {
+export async function provider(defaultIdentity?: Next): Promise<Provider> {
 	const { publicKey, privateKey } = await generateKeyPair("ES256");
 	const other = (await generateKeyPair("ES256")).privateKey;
 	const jwk: JWK = { ...(await exportJWK(publicKey)), kid: "k1", alg: "ES256", use: "sig" };
@@ -77,7 +77,7 @@ export async function provider(): Promise<Provider> {
 				asked.push(url.searchParams);
 				const redirect = url.searchParams.get("redirect_uri") ?? "";
 				const state = url.searchParams.get("state") ?? "";
-				const next = who;
+				const next = who ?? defaultIdentity;
 				who = null;
 				const back = new URL(redirect);
 				if (!next) return new Response("nobody is signing in", { status: 400 });

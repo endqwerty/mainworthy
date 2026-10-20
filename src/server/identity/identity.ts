@@ -51,11 +51,13 @@ import { clearUses, flushUses, forgetNotedAddresses, lastAddress, notedUse, note
 
 export { getEmail, requestReset, resetPassword, setEmail, verifyEmail } from "./contacts.ts";
 export { queueMail, requireMail, stopMail, waitMail } from "./mail.ts";
+export { NATIVE_OIDC_CALLBACK } from "./oidc.ts";
 // What the sign-in routes and the operations of a signed-in person need of them.
 export {
 	type Accepted,
 	acceptInvitation,
 	addPasskey,
+	beginNativeOidc,
 	beginOidcSignIn,
 	beginPasskey,
 	beginTotp,
@@ -63,6 +65,8 @@ export {
 	confirmTotp,
 	createInvitation,
 	credentialOwner,
+	exchangeNativeOidc,
+	finishNativeOidc,
 	finishOidcSignIn,
 	listCredentials,
 	OIDC_OFF,
