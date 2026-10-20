@@ -328,7 +328,8 @@ If another edit overlaps, **Both edits are kept** shows each overlapping field w
 
 1. For each field, choose **Use my version** or **Use current version**.
 2. Review **Merged case**.
-3. Press **Record merge**.
+3. If **Reason required** appears, enter a reason. **Record merge** stays disabled until you do.
+4. Press **Record merge**.
 
 You can make these choices:
 
@@ -346,7 +347,8 @@ An order you explicitly choose takes precedence. Steps absent from that order fo
 What you type stays while the app goes to the background. Your draft also stays when your session ends
 and you sign in again as yourself on the same server. **Cancel** asks before discarding a changed draft.
 A lost save reply offers **Retry**, which sends the same command. For a merge, **Retry** first asks what the
-server recorded for that command. Choices stay locked until the command's outcome is known.
+server recorded for that command. The merge keeps its first body, reason, and command on retries.
+Choices and the reason stay locked until the command's outcome is known.
 Drafts do not survive closing the app.
 
 The editor keeps custom field values without editing them.

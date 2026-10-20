@@ -47,6 +47,7 @@ public enum ConflictAddress: Hashable, Decodable, Sendable {
 public struct CaseConflict: Equatable, Sendable {
 	public let question: String
 	public let evidence: String
+	public let wantsReason: Bool
 	public let ref: String
 	public let current: CaseContent
 	public let mine: CaseContent
@@ -55,9 +56,9 @@ public struct CaseConflict: Equatable, Sendable {
 	public private(set) var selections: [ConflictAddress: Side] = [:]
 	public var chosen: Set<ConflictAddress> { Set(selections.keys) }
 
-	package init(question: String, evidence: String, ref: String, base: CaseContent,
+	package init(question: String, evidence: String, wantsReason: Bool = false, ref: String, base: CaseContent,
 		mine: CaseContent, current: CaseContent) throws {
-		self.question = question; self.evidence = evidence; self.ref = ref
+		self.question = question; self.evidence = evidence; self.wantsReason = wantsReason; self.ref = ref
 		self.current = current; self.mine = mine
 		let input: JSONValue = ["base": base.json, "mine": mine.json, "theirs": current.json]
 		struct Result: Decodable {
@@ -144,10 +145,12 @@ package struct MergeSubmission: Sendable {
 	let input: JSONValue
 	let ref: String
 	let command = UUID().uuidString.lowercased()
-	package init(_ conflict: CaseConflict) {
+	package init(_ conflict: CaseConflict, reason: String) {
 		ref = conflict.ref
-		input = ["q": .string(conflict.question), "onEvidence": .string(conflict.evidence),
-			"answer": ["is": "merge", "body": conflict.merged.json], "cmd": .string(command)]
+		var input: [String: JSONValue] = ["q": .string(conflict.question), "onEvidence": .string(conflict.evidence),
+			"ifOpen": true, "answer": ["is": "merge", "body": conflict.merged.json], "cmd": .string(command)]
+		if !reason.isEmpty { input["reason"] = .string(reason) }
+		self.input = .object(input)
 	}
 }
 
@@ -172,7 +175,7 @@ extension ProjectClient {
 			["ref": .string(ref), "from": .number(Double(edit.base)), "to": .number(Double(edit.base))])
 		guard fields.ref == ref, fields.from == edit.base, fields.to == edit.base else { throw ClientError.unreadable }
 		base.fields = fields.diff.fields.before
-		return try CaseConflict(question: question, evidence: q.evidenceHash, ref: ref, base: base,
+		return try CaseConflict(question: question, evidence: q.evidenceHash, wantsReason: Question(q).wantsReason, ref: ref, base: base,
 			mine: CaseContent(edit.mine), current: CaseContent(edit.current))
 	}
 

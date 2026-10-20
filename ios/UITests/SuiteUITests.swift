@@ -177,7 +177,8 @@ final class SuiteUITests: XCTestCase {
 	}
 	@MainActor private func operation(_ project: String, _ name: String, _ input: [String: Any]) async throws -> Any {
 		let address = try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])
-		var request = URLRequest(url: try XCTUnwrap(URL(string: "\(address)/api/p/\(project)/\(name)")))
+		let path = name == "admin" ? "/api/admin" : "/api/p/\(project)/\(name)"
+		var request = URLRequest(url: try XCTUnwrap(URL(string: "\(address)\(path)")))
 		request.httpMethod = "POST"
 		request.setValue("Bearer \(environment["MAINWORTHY_TEST_TOKEN"] ?? "")", forHTTPHeaderField: "Authorization")
 		request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -197,6 +198,21 @@ final class SuiteUITests: XCTestCase {
 	@MainActor func testResolveOverlappingEdit() async throws {
 		XCUIDevice.shared.orientation = .portrait
 		let project = try await makeProject()
+		let rawPolicy = try await operation(project, "admin", ["do": "policy.show", "project": project])
+		let policy = try XCTUnwrap(rawPolicy as? [String: Any])
+		var clauses = try XCTUnwrap(policy["clauses"] as? [[String: Any]])
+		let conflictClause = try XCTUnwrap(clauses.firstIndex { $0["id"] as? String == "adopt-conflict" })
+		var ask = try XCTUnwrap(clauses[conflictClause]["ask"] as? [String: Any])
+		ask["reason"] = "required"; clauses[conflictClause]["ask"] = ask
+		let rawProposal = try await operation(project, "propose", ["edits": [["op": "policy",
+			"base": try XCTUnwrap(policy["version"] as? Int), "clauses": clauses]]])
+		let proposal = try XCTUnwrap(rawProposal as? [String: Any])
+		let policyQuestion = try XCTUnwrap(proposal["question"] as? String)
+		let rawQuestion = try await operation(project, "get", ["refs": [policyQuestion]])
+		let question = try XCTUnwrap((rawQuestion as? [[String: Any]])?.first)
+		let rawAdopted = try await operation(project, "decide", ["q": policyQuestion,
+			"onEvidence": try XCTUnwrap(question["evidenceHash"] as? String), "answer": ["is": "accept"]])
+		XCTAssertEqual((rawAdopted as? [[String: Any]])?.first?["status"] as? String, "decided")
 		let rawFound = try await operation(project, "find", ["in": "cases", "text": "Expired coupon"])
 		let found = try XCTUnwrap(rawFound as? [String: Any])
 		let item = try XCTUnwrap((found["items"] as? [[String: Any]])?.first)
@@ -232,11 +248,20 @@ final class SuiteUITests: XCTestCase {
 		XCTAssertFalse(app.buttons["editor-save"].isEnabled)
 		shot("conflict")
 		myTitle.tap()
-		let theirAction = app.buttons["conflict-current-steps.\(step).action"]
+		let theirAction = app.buttons["conflict-current-Step ^\(step) action"]
 		for _ in 0..<5 where !theirAction.isHittable { app.swipeUp() }
 		XCTAssertTrue(theirAction.exists)
 		theirAction.tap()
+		XCTAssertFalse(app.buttons["editor-save"].isEnabled)
+		let reason = app.textFields["conflict-reason"]
+		for _ in 0..<5 where !reason.isHittable { app.swipeUp() }
+		XCTAssertTrue(reason.exists)
+		XCTAssertTrue(app.staticTexts["Reason required"].exists)
+		shot("conflict-reason-required")
+		reason.tap()
+		reason.typeText("I combined my title with the current action")
 		XCUIDevice.shared.press(.home); app.activate()
+		XCTAssertEqual(reason.value as? String, "I combined my title with the current action")
 		XCTAssertTrue(app.buttons["editor-save"].isEnabled)
 		shot("conflict-chosen")
 		app.buttons["editor-save"].tap()

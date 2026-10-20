@@ -3,7 +3,7 @@ import MainworthyScreens
 import SwiftUI
 
 struct CaseConflictView: View {
-	let editor: CaseEditorScreen
+	@Bindable var editor: CaseEditorScreen
 	let conflict: CaseConflict
 
 	var body: some View {
@@ -28,6 +28,14 @@ struct CaseConflictView: View {
 				}
 				.buttonStyle(.borderless)
 				.disabled(editor.busy || editor.isRetrying || editor.settled || editor.conflictClosed)
+			}
+		}
+		Section(conflict.wantsReason ? "Reason required" : "Reason (optional)") {
+			TextField("Why this merge?", text: $editor.reason, axis: .vertical)
+				.accessibilityIdentifier("conflict-reason")
+				.disabled(editor.busy || editor.isRetrying || editor.settled || editor.conflictClosed)
+			if editor.reason.utf16.count > 500 {
+				Text("Reason: use at most 500 UTF-16 units.").foregroundStyle(.red)
 			}
 		}
 		Section("Merged case") {
