@@ -75,12 +75,13 @@ struct PagedListTests {
 		let again = Task { await list.reload() }
 		await reads.until(2)
 		let more = Task { await list.more() }
-		await reads.until(3)
-		reads.answer(2, ["stale"], next: nil)
-		await more.value
-		reads.answer(1, ["a", "new"], next: nil)
+		reads.answer(1, ["a", "new"], next: "fresh-page")
 		await again.value
-		#expect(list.rows.map(\.id) == ["a", "new"] && !list.hasMore)
+		await reads.until(3)
+		#expect(reads.asked[2].cursor == "fresh-page")
+		reads.answer(2, ["last"], next: nil)
+		await more.value
+		#expect(list.rows.map(\.id) == ["a", "new", "last"] && !list.hasMore)
 	}
 
 	@Test("a page is read for the query its rows answer, not for words typed since")
@@ -117,5 +118,48 @@ struct PagedListTests {
 		reads.answer(0, ["old"], next: nil)
 		await older.value
 		#expect(list.rows.map(\.id) == ["new"])
+	}
+
+	@Test("canceling More while a refresh is pending stops the wait without another request")
+	func canceledWaiter() async {
+		let reads = Reads()
+		let list = list(reads)
+		let first = Task { await list.reload() }
+		await reads.until(1)
+		reads.answer(0, ["old"], next: "p2")
+		await first.value
+		let refresh = Task { await list.reload() }
+		await reads.until(2)
+		var entered = false
+		let more = Task { entered = true; await list.more() }
+		while !entered { await Task.yield() }
+		more.cancel()
+		await more.value
+		#expect(reads.asked.count == 2)
+		reads.answer(1, ["fresh"], next: "fresh-page")
+		await refresh.value
+		#expect(list.rows.map(\.id) == ["fresh"] && list.hasMore)
+	}
+
+	@Test("a canceled read cannot publish a reply even if its reader ignores cancellation")
+	func canceledReply() async {
+		let reads = Reads()
+		let list = list(reads)
+		let first = Task { await list.reload() }
+		await reads.until(1)
+		reads.answer(0, ["kept"], next: "p2")
+		await first.value
+		let refresh = Task { await list.reload() }
+		await reads.until(2)
+		refresh.cancel()
+		reads.answer(1, ["canceled"], next: nil)
+		await refresh.value
+		#expect(list.rows.map(\.id) == ["kept"] && list.hasMore)
+		let more = Task { await list.more() }
+		await reads.until(3)
+		more.cancel()
+		reads.answer(2, ["canceled page"], next: nil)
+		await more.value
+		#expect(list.rows.map(\.id) == ["kept"] && list.hasMore)
 	}
 }

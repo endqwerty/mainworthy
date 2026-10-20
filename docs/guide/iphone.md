@@ -147,6 +147,9 @@ it to open another.
 
 Failures, test results and commit runs name the reported change and its title. On `main`, they name the merged pull request when the server records its exact landed commit; otherwise they show `main`. Earlier merged changes need their landing reported again before they can name a pull request. The short commit stays underneath. Tap a named change to open it.
 
+Queue and Runs read the next page when you scroll to the end. If a refresh is still running, the next page
+waits for it. Refreshing reads as far down as you already loaded.
+
 ## Answer several questions at once
 
 To give one answer to several questions of one kind, follow these steps:

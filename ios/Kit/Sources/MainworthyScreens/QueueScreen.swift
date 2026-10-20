@@ -12,14 +12,6 @@ public final class QueueScreen: ProjectScreen {
 		case open, decided
 	}
 
-	public enum Loading: Equatable, Sendable {
-		/// Nothing was read yet.
-		case first
-		case done
-		/// The first read failed: the sentence. A later read that fails leaves what is shown and says so in `notice`.
-		case failed(String)
-	}
-
 	/// What the screen says about the last thing that happened, under the list.
 	public struct Notice: Equatable, Sendable {
 		public let text: String
@@ -37,13 +29,22 @@ public final class QueueScreen: ProjectScreen {
 		case failed(String)
 	}
 
-	public private(set) var showing = Showing.open
-	public private(set) var filter: Kind?
-	public private(set) var questions: [Question] = []
-	public private(set) var counts = QueueCounts()
-	public private(set) var loading = Loading.first
-	public private(set) var hasMore = false
-	public private(set) var notice: Notice?
+	private struct Query: Equatable, Sendable {
+		var showing = Showing.open
+		var filter: Kind?
+	}
+	private let list: PagedList<Query, QuestionPage>
+	public var showing: Showing { list.query.showing }
+	public var filter: Kind? { list.query.filter }
+	public var questions: [Question] { list.rows }
+	public var counts: QueueCounts { list.last?.counts ?? QueueCounts() }
+	public var loading: ListLoading { list.loading }
+	public var hasMore: Bool { list.hasMore }
+	private var actionNotice: Notice?
+	public private(set) var notice: Notice? {
+		get { list.notice.map { Notice(text: $0, isProblem: true, undoes: nil) } ?? actionNotice }
+		set { list.notice = nil; actionNotice = newValue }
+	}
 	/// What was typed for an answer, by the question: where a defect is tracked, and the reason. It is kept
 	/// until an answer to that question is taken, so a sheet that closed on a refusal opens with it again.
 	public struct Typed: Equatable, Sendable {
@@ -93,13 +94,13 @@ public final class QueueScreen: ProjectScreen {
 	public private(set) var isOpening = false
 	public let outbox: AnswerOutbox
 	private let project: ProjectClient
-	private var next: String?
-	/// Counts every read that was started, so that a slow one that was overtaken does not replace a newer one.
-	private var reads = 0
 
 	package init(project: ProjectClient, outbox: AnswerOutbox? = nil) {
 		self.project = project
 		self.outbox = outbox ?? AnswerOutbox(project: project)
+		list = PagedList(query: Query()) { query, cursor in
+			try await project.questions(open: query.showing == .open, kind: query.filter, after: cursor)
+		}
 	}
 
 	/// The question as it is now: as the list holds it, or, for the one whose page is open, as it was read by
@@ -141,11 +142,10 @@ public final class QueueScreen: ProjectScreen {
 		guard showing != self.showing || filter != self.filter || loading != .done else { return }
 		if showing != self.showing || filter != self.filter { selected = [] }
 		if showing != .open { isSelecting = false }
-		self.showing = showing
-		self.filter = filter
-		questions = []
-		loading = .first
-		await read()
+		if await list.show(Query(showing: showing, filter: filter)) {
+			dropUnlisted()
+			await readOpened()
+		}
 	}
 
 	/// Reads the list again and keeps what is shown until the reply is there.
@@ -158,50 +158,12 @@ public final class QueueScreen: ProjectScreen {
 	}
 
 	/// Reads the next page, when the list was scrolled to its end.
-	public func more() async {
-		guard hasMore, let cursor = next else { return }
-		reads += 1
-		let mine = reads
-		guard let page = try? await project.questions(open: showing == .open, kind: filter, after: cursor),
-			mine == reads
-		else { return }
-		let known = Set(questions.map(\.ref))
-		questions += page.questions.filter { !known.contains($0.ref) }
-		counts = page.counts
-		next = page.next
-		hasMore = page.next != nil
-	}
+	public func more() async { await list.more() }
 
 	private func read() async {
-		reads += 1
-		let mine = reads
-		do {
-			// As far down as the list was read before, so that a question further down than the first page,
-			// which may be the one that is open, stays in it.
-			let wanted = questions.count
-			var page = try await project.questions(open: showing == .open, kind: filter)
-			var read = page.questions
-			while let cursor = page.next, read.count < wanted {
-				page = try await project.questions(open: showing == .open, kind: filter, after: cursor)
-				read += page.questions
-			}
-			guard mine == reads else { return }
-			questions = read
-			counts = page.counts
-			next = page.next
-			hasMore = page.next != nil
-			loading = .done
-			dropUnlisted()
-			await readOpened()
-		} catch is CancellationError {
-		} catch {
-			guard mine == reads else { return }
-			if loading == .done {
-				notice = Notice(text: error.shown, isProblem: true, undoes: nil)
-			} else {
-				loading = .failed(error.shown)
-			}
-		}
+		guard await list.reload() else { return }
+		dropUnlisted()
+		await readOpened()
 	}
 
 	/// Answers a question. Returns whether the answer settled it, so the view can leave the question.

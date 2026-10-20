@@ -202,8 +202,8 @@ Four things the queue does that a copy must keep:
   lists them in `screens`, which is what the change stream reads again. A view takes its screen from the
   workspace and is given `.id(workspace.project?.key)`, so nothing typed or opened in one project is shown in
   another.
-- **A read that was overtaken is dropped** (`reads` in `QueueScreen`), and a list that was read past its first
-  page is read as far again. What a page shows does not depend on the list holding it: a question whose page
+- **A read that was overtaken is dropped** (`PagedList` in `ResultsScreens.swift`), and a list read past its
+  first page is read as far again. What a page shows does not depend on the list holding it: a question whose page
   is open is read by itself where the list does not have it (`open` in `QueueScreen`).
 - **What is typed is kept by the screen's class**, not by a view's state: the workspace, with its screens, is
   kept while a session that the server ended is renewed by the same person (`AppModel.sessionEnded`), and a

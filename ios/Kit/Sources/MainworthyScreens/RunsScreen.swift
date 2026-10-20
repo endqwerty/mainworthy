@@ -6,21 +6,22 @@ import Observation
 /// already read, every open run and every change run's results up to date.
 @MainActor @Observable
 public final class RunsScreen: ProjectScreen {
-	public enum Loading: Equatable {
-		case first, done
-		case failed(String)
-	}
 	public struct SavedPlan: Equatable {
 		public let ref: String
 		public let slots: Int
 		public let already: Int
 		public var sentence: String { "\(ref) planned with \(slots) slots; \(already) already filled." }
 	}
-	public private(set) var runs: [Run] = []
-	public private(set) var filter = RunFilter()
-	public private(set) var loading = Loading.first
-	public private(set) var hasMore = false
-	public private(set) var notice: String?
+	private let list: PagedList<RunFilter, RunPage>
+	public var runs: [Run] { list.rows }
+	public var filter: RunFilter { list.query }
+	public var loading: ListLoading { list.loading }
+	public var hasMore: Bool { list.hasMore }
+	private var actionNotice: String?
+	public private(set) var notice: String? {
+		get { list.notice ?? actionNotice }
+		set { list.notice = nil; actionNotice = newValue }
+	}
 	public private(set) var folders: [String] = []
 	public private(set) var planning = false
 	public enum CaseCount: Equatable {
@@ -45,8 +46,7 @@ public final class RunsScreen: ProjectScreen {
 	public private(set) var permission: Project
 	private let project: ProjectClient
 	private var person: String
-	private var next: String?
-	private var reads = 0
+
 	private var opened: [String: OpenRunScreen] = [:]
 	private var counted: [String: ChangeResults] = [:]
 
@@ -54,6 +54,9 @@ public final class RunsScreen: ProjectScreen {
 		self.project = project
 		self.permission = permission
 		self.person = person
+		list = PagedList(query: RunFilter()) { filter, cursor in
+			try await project.runs(filter, after: cursor)
+		}
 	}
 
 	/// What the person may do, and their name, as the account says now: a rename of the owner keeps the session.
@@ -75,12 +78,9 @@ public final class RunsScreen: ProjectScreen {
 	/// Shows the runs this filter chooses, read again from the first page.
 	public func show(_ filter: RunFilter) async {
 		guard filter != self.filter else { return }
-		self.filter = filter
-		runs = []
-		next = nil
-		hasMore = false
-		loading = .first
-		await refresh()
+		await list.show(filter)
+		guard !Task.isCancelled else { return }
+		await refreshOpened()
 	}
 
 	public func open(_ run: Run) -> OpenRunScreen {
@@ -91,44 +91,17 @@ public final class RunsScreen: ProjectScreen {
 	}
 
 	public func refresh() async {
-		reads += 1
-		let mine = reads
-		let filter = filter
-		do {
-			let wanted = runs.count
-			var page = try await project.runs(filter)
-			var found = page.runs
-			while let cursor = page.next, found.count < wanted {
-				page = try await project.runs(filter, after: cursor)
-				found += page.runs
-			}
-			guard mine == reads else { return }
-			runs = found
-			next = page.next
-			hasMore = next != nil
-			loading = .done
-		} catch is CancellationError {
-		} catch {
-			guard mine == reads else { return }
-			if loading == .done { notice = error.shown } else { loading = .failed(error.shown) }
-		}
+		await list.reload()
+		guard !Task.isCancelled else { return }
+		await refreshOpened()
+	}
+
+	private func refreshOpened() async {
 		for screen in opened.values { await screen.refresh() }
 		for results in counted.values { await results.refresh() }
 	}
 
-	public func more() async {
-		guard let cursor = next else { return }
-		reads += 1
-		let mine = reads
-		do {
-			let page = try await project.runs(filter, after: cursor)
-			guard mine == reads else { return }
-			let known = Set(runs.map(\.ref))
-			runs += page.runs.filter { !known.contains($0.ref) }
-			next = page.next
-			hasMore = next != nil
-		} catch { if mine == reads { notice = error.shown } }
-	}
+	public func more() async { await list.more() }
 
 	public func readFolders() async {
 		do { folders = try await project.runFolders() } catch { notice = error.shown }
@@ -190,13 +163,11 @@ public final class RunsScreen: ProjectScreen {
 			let run = try await project.run(saved.ref)
 			// The new run opens from the list, so a filter that leaves it out is set aside.
 			if !filter.admits(run) {
-				filter = RunFilter()
-				runs = []
-				next = nil
+				await show(RunFilter())
+			} else {
+				await refresh()
 			}
-			await refresh()
-			if !runs.contains(where: { $0.ref == run.ref }) { runs.insert(run, at: 0) }
-			loading = .done
+			list.include(run)
 			notice = saved.sentence
 			open(run).planned(saved.sentence)
 			planState = nil
