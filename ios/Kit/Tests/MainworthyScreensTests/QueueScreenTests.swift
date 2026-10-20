@@ -910,7 +910,8 @@ struct QueueScreenFailureTests {
 		#expect(screen.current("Q-9") == nil)
 	}
 
-	@Test("a proposal that is decided is read again, so it no longer says that accepting is refused")
+	@Test("a proposal that is decided is read again, so it no longer says that accepting is refused",
+		.enabled(if: Live.isRunning, "needs `bun scripts/ios.ts test`"))
 	func decidedProposalIsReadAgain() async throws {
 		let key = try await Live.project()
 		let owner = try await Live.signedIn(as: Live.owner)
