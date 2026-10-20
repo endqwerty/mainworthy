@@ -26,9 +26,6 @@ public final class RunsScreen: ProjectScreen {
 	public enum CaseCount: Equatable {
 		case idle, loading, counted(Int), failed(String)
 	}
-	public struct PlannerPresentation: Identifiable, Equatable {
-		public let id = UUID()
-	}
 	private enum PlanState {
 		case pending(RunPlanSubmission)
 		case confirmed(RunPlanSubmission, SavedPlan)
@@ -44,7 +41,6 @@ public final class RunsScreen: ProjectScreen {
 	}
 	public private(set) var caseCount = CaseCount.idle
 	private var planState: PlanState?
-	private var planner: PlannerPresentation?
 	private var countReads = 0
 	public private(set) var permission: Project
 	private let project: ProjectClient
@@ -138,24 +134,6 @@ public final class RunsScreen: ProjectScreen {
 		do { folders = try await project.runFolders() } catch { notice = error.shown }
 	}
 
-	public func presentPlanner() -> PlannerPresentation {
-		let presentation = PlannerPresentation()
-		planner = presentation
-		return presentation
-	}
-
-	public func cancelPlanner(_ presentation: PlannerPresentation) {
-		if planner == presentation { planner = nil }
-	}
-
-	/// Only the presentation that still owns this result may open it and forget its receipt.
-	public func openedPlan(in presentation: PlannerPresentation) -> Bool {
-		guard planner == presentation, savedPlan != nil else { return false }
-		planState = nil
-		planner = nil
-		return true
-	}
-
 	public func countCases(_ selection: RunSelection?) async {
 		countReads += 1
 		let mine = countReads
@@ -217,6 +195,7 @@ public final class RunsScreen: ProjectScreen {
 			loading = .done
 			notice = saved.sentence
 			open(run).planned(saved.sentence)
+			planState = nil
 			return run
 		} catch {
 			notice = saved.sentence + " It could not be opened. Read the run again. " + error.shown
