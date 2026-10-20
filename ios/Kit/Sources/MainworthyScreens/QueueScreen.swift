@@ -229,6 +229,10 @@ public final class QueueScreen: ProjectScreen {
 		defer { busy.remove(question.ref) }
 		do {
 			let saved = try await outbox.record([question], with: choice, reference: reference, reason: reason)
+			if saved.obsolete {
+				notice = Notice(text: "\(question.ref): Obsolete. \(saved.detail)", isProblem: true, undoes: nil)
+				return false
+			}
 			guard let outcome = saved.outcomes?[question.ref] else {
 				let state = outbox.sending ? "sending" : "saved on this device, waiting to send"
 				notice = Notice(
@@ -422,6 +426,10 @@ public final class QueueScreen: ProjectScreen {
 			return false
 		}
 		selected = []
+		if saved.obsolete {
+			notice = Notice(text: "Obsolete. \(saved.detail)", isProblem: true, undoes: nil)
+			return false
+		}
 		guard let outcomes = saved.outcomes else {
 			// The whole answer waits on the device: nothing is claimed of any question.
 			let state = outbox.sending ? "sending" : "saved on this device, waiting to send"

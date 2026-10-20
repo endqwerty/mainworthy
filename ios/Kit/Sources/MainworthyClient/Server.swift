@@ -212,6 +212,7 @@ package final class Server: Sendable {
 	}
 
 	private struct Refusal: Decodable {
+		var details: [String: JSONValue]? = nil
 		var code: String
 		var message: String
 	}
@@ -278,7 +279,10 @@ package final class Server: Sendable {
 			case "limited":
 				throw ClientError.limited(seconds: response.value(forHTTPHeaderField: "Retry-After").flatMap(Int.init))
 			default:
-				throw ClientError.refused(code: refusal.code, message: refusal.message)
+				throw ClientError.refused(
+					code: refusal.details?["projectIdentity"]?.string == "obsolete" ? "obsolete_project" : refusal.code,
+					message: refusal.message
+				)
 			}
 		}
 		throw ClientError.unreachable(failure)

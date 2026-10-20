@@ -449,6 +449,7 @@ export const CheckReply = z.looseObject({ problems: z.array(Problem), counts });
 const Grant = z.looseObject({ project: text, can: texts, roles: texts.default([]) });
 const Project = z.looseObject({
 	key: text,
+	identity: text,
 	name: text,
 	seq: whole,
 	createdAt: number,
@@ -459,7 +460,7 @@ const Project = z.looseObject({
 export const AdminReply = z.union([
 	z.looseObject({ key: text, since: number }),
 	TeamReply,
-	z.looseObject({ key: text, name: text, policy: text }),
+	z.looseObject({ key: text, identity: text, name: text, policy: text }),
 	z.array(Project),
 	z.looseObject({ id: whole, actor: text, token: text, can: texts, expiresAt: number.nullable(), note: text }),
 	z.array(

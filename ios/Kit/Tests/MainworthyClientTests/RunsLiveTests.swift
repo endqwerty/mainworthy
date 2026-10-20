@@ -182,7 +182,7 @@ struct RunReceiptTests {
 				from: Data(
 					#"{"id":1,"case":"C-1","title":"Open","version":1,"state":"missing","work":{"kind":"free"},"fills":[]}"#.utf8)))
 		let execution = RunExecution(run: "R-1", slot: slot, content: CaseContent(title: "Open"))
-		#expect(try await server.project("shop").report(execution, outcome: .pass) == .refused(sentence))
+		#expect(try await server.project("shop", identity: "shop-identity").report(execution, outcome: .pass) == .refused(sentence))
 	}
 
 	@Test("a reply for a different version is never offered as the pinned case")
@@ -198,7 +198,7 @@ struct RunReceiptTests {
 				from: Data(
 					#"{"id":1,"case":"C-1","title":"Open","version":1,"state":"missing","work":{"kind":"free"},"fills":[]}"#.utf8)))
 		await #expect(throws: ClientError.unreadable) {
-			_ = try await server.project("shop").execution(of: slot, in: "R-1")
+			_ = try await server.project("shop", identity: "shop-identity").execution(of: slot, in: "R-1")
 		}
 	}
 }

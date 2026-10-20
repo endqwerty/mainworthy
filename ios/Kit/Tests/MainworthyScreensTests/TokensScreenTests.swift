@@ -58,7 +58,7 @@ struct TokensScreenTests {
 		_ = try await ordinary.signIn(.password(name: name, password: "Viewer test password"))
 		let account = try await ordinary.account()
 		#expect(!account.mayAdministerTokens && account.projects.first { $0.key == key }?.may(.admin) == true)
-		let projectAdmin = Account(name: "project-admin", projects: [Project(key: "shop", name: "Shop", can: ["read", "admin"])])
+		let projectAdmin = Account(name: "project-admin", projects: [Project(key: "shop", identity: "shop-identity", name: "Shop", can: ["read", "admin"])])
 		#expect(!projectAdmin.mayAdministerTokens)
 		let token = try await make(server)
 		let screen = TokensScreen(server: ordinary)
@@ -165,7 +165,7 @@ struct TokensScreenTests {
 		let workspace = Workspace(server: server, account: account,
 			remembered: Remembered(UserDefaults(suiteName: UUID().uuidString)!), onSignedOut: {})
 		let screen = workspace.tokens
-		workspace.open(Project(key: "other", name: "Other"))
+		workspace.open(Project(key: "other", identity: "other-identity", name: "Other"))
 		#expect(workspace.tokens === screen)
 	}
 

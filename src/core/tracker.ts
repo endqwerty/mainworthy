@@ -1,11 +1,12 @@
 import { z } from "zod";
+import { projectCommand } from "./commands.ts";
 
 const request = z.string().min(8).max(64);
 const result = z.number().int().positive();
 
 export const TrackerInput = z.discriminatedUnion("do", [
-	z.strictObject({ do: z.literal("create"), result, cmd: request }),
-	z.strictObject({ do: z.literal("link"), result, key: z.string().min(1).max(100), cmd: request }),
+	z.strictObject({ do: z.literal("create"), result, ...projectCommand, cmd: request }),
+	z.strictObject({ do: z.literal("link"), result, key: z.string().min(1).max(100), ...projectCommand, cmd: request }),
 ]);
 export type TrackerInput = z.infer<typeof TrackerInput>;
 export const TrackerStatusInput = z.strictObject({ id: request });

@@ -42,7 +42,7 @@ public final class Workspace {
 		self.remembered = remembered
 		self.onSignedOut = onSignedOut
 		instanceName = server.instance.name
-		for project in account.projects { outboxes[project.key] = makeOutbox(project.key) }
+		for project in account.projects { outboxes[project.id] = makeOutbox(project) }
 		let last = account.projects.first { $0.key == remembered.project }
 		if let first = last ?? account.projects.first { open(first) }
 	}
@@ -51,17 +51,17 @@ public final class Workspace {
 		guard project != self.project else { return }
 		self.project = project
 		remembered.project = project.key
-		let outbox = outboxes[project.key] ?? makeOutbox(project.key)
-		outboxes[project.key] = outbox
-		let queue = QueueScreen(project: server.project(project.key), outbox: outbox)
+		let outbox = outboxes[project.id] ?? makeOutbox(project)
+		outboxes[project.id] = outbox
+		let queue = QueueScreen(project: server.project(project.key, identity: project.id), outbox: outbox)
 		self.queue = queue
-		let runs = RunsScreen(project: server.project(project.key), permission: project, person: account.name)
+		let runs = RunsScreen(project: server.project(project.key, identity: project.id), permission: project, person: account.name)
 		self.runs = runs
-		let changes = ChangesScreen(project: server.project(project.key))
+		let changes = ChangesScreen(project: server.project(project.key, identity: project.id))
 		self.changes = changes
-		let suite = SuiteScreen(project: server.project(project.key))
+		let suite = SuiteScreen(project: server.project(project.key, identity: project.id))
 		self.suite = suite
-		let tests = TestsScreen(project: server.project(project.key))
+		let tests = TestsScreen(project: server.project(project.key, identity: project.id))
 		self.tests = tests
 		screens = [queue, runs, suite, changes, tests]
 	}
@@ -70,16 +70,19 @@ public final class Workspace {
 	/// taken away, or renamed, while the app was in the background.
 	public func refreshAccount() async {
 		guard let fresh = try? await server.account() else { return }
-		for key in Array(outboxes.keys) where !fresh.projects.contains(where: { $0.key == key }) {
-			outboxes.removeValue(forKey: key)?.stop()
+		for key in Array(outboxes.keys) where !fresh.projects.contains(where: { $0.id == key }) {
+			let outbox = outboxes.removeValue(forKey: key)
+			let previous = account.projects.first { $0.id == key }
+			if let previous, fresh.projects.contains(where: { $0.key == previous.key && $0.id != key }) { outbox?.retire() }
+			else { outbox?.stop() }
 		}
-		for project in fresh.projects where outboxes[project.key] == nil {
-			outboxes[project.key] = makeOutbox(project.key)
+		for project in fresh.projects where outboxes[project.id] == nil {
+			outboxes[project.id] = makeOutbox(project)
 		}
 		account = fresh
 		if let open = project, let now = fresh.projects.first(where: { $0.key == open.key }) {
-			project = now
-			runs?.updateSignedIn(now, as: fresh.name)
+			if now.id != open.id { self.open(now) }
+			else { project = now; runs?.updateSignedIn(now, as: fresh.name) }
 		} else if let first = fresh.projects.first {
 			open(first)
 		} else {
@@ -99,11 +102,11 @@ public final class Workspace {
 	/// A stream that breaks, or does not open, is opened again after a pause that grows to half a minute, and
 	/// the screens are read at each try, so that a server whose stream does not work is still followed.
 	public func follow() async {
-		guard let key = project?.key else { return }
+		guard let project else { return }
 		var failures = 0
 		while !Task.isCancelled {
 			do {
-				for try await _ in server.project(key).changes() {
+				for try await _ in server.project(project.key, identity: project.id).changes() {
 					failures = 0
 					await refreshScreens()
 				}
@@ -114,10 +117,10 @@ public final class Workspace {
 		}
 	}
 
-	private func makeOutbox(_ key: String) -> AnswerOutbox {
+	private func makeOutbox(_ project: Project) -> AnswerOutbox {
 		AnswerOutbox(
-			project: server.project(key),
-			store: FileAnswerStore(instance: server.instance, person: account.actorId, project: key)
+			project: server.project(project.key, identity: project.id),
+			store: FileAnswerStore(instance: server.instance, person: account.actorId, project: project.key, identity: project.id)
 		)
 	}
 

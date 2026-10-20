@@ -33,7 +33,7 @@ struct ChangesLiveTests {
 	func headMoves() async throws {
 		let server = Live.server()
 		_ = try await server.signIn(Live.owner)
-		let client = server.project(try await Live.project())
+		let client = try await server.project(try await Live.project())
 		let shown = try #require(try await client.reportedChanges().first)
 		let before = try await client.details(of: shown)
 		let head = String(format: "%040x", 4)
@@ -81,7 +81,7 @@ struct ChangesLiveTests {
 	func inFlightMoves(_ moves: Int) async throws {
 		let writer = Live.server()
 		_ = try await writer.signIn(Live.owner)
-		let client = writer.project(try await Live.project())
+		let client = try await writer.project(try await Live.project())
 		let shown = try #require(try await client.reportedChanges().first)
 		let reader = Server(
 			instance: Live.instance, secrets: MemoryStore(), transport: MovingHead(client: client, moves: moves)

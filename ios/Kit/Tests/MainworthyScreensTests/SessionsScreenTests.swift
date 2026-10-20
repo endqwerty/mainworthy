@@ -55,7 +55,8 @@ struct SessionsScreenTests {
 			onSignedOut: { signedOut = true }
 		)
 		let sessions = workspace.sessions
-		workspace.open(Project(key: try await Live.project(), name: "Other"))
+		let key = try await Live.project()
+		workspace.open(try #require(try await server.account().projects.first { $0.key == key }))
 		#expect(workspace.sessions === sessions)
 		await sessions.refresh()
 		await sessions.end(try #require(sessions.sessions.first { $0.current }))

@@ -10,9 +10,10 @@ import Testing
 struct RunsScreenTests {
 	func screen(can: [String] = ["read", "produce", "plan"]) async throws -> RunsScreen {
 		let key = try await Live.project()
+		let client = try await Live.signedIn().project(key)
 		let screen = RunsScreen(
-			project: try await Live.signedIn().project(key),
-			permission: Project(key: key, name: key, can: can), person: Live.name)
+			project: client,
+			permission: Project(key: key, identity: client.identity, name: key, can: can), person: Live.name)
 		await screen.refresh()
 		return screen
 	}
@@ -160,7 +161,7 @@ struct RunsScreenTests {
 		// The run's one slot is the owner's result, so the owner's screen may record on it while the run is open.
 		let screen = RunsScreen(
 			project: try await Live.signedIn(as: Live.owner).project(key),
-			permission: Project(key: key, name: key, can: ["read", "produce"]), person: Live.ownerName)
+			permission: Project(key: key, identity: client.identity, name: key, can: ["read", "produce"]), person: Live.ownerName)
 		await screen.refresh()
 		let run = screen.open(try #require(screen.runs.first))
 		await run.refresh()
@@ -257,7 +258,7 @@ struct RunsReadTests {
 			instance: try #require(Instance(address: "mainworthy.example")), secrets: MemoryStore(),
 			transport: transport)
 		return RunsScreen(
-			project: server.project("shop"), permission: Project(key: "shop", name: "Shop"), person: "robin")
+			project: server.project("shop", identity: "shop-identity"), permission: Project(key: "shop", identity: "shop-identity", name: "Shop"), person: "robin")
 	}
 	@Test("refresh rereads as many pages as the list already showed")
 	func pagination() async throws {

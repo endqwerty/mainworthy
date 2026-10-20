@@ -202,6 +202,15 @@ describe("what the iOS app reads", () => {
 
 	test("who is signed in, with a token and with the session a password opens", async () => {
 		holds("GET /api/session", SessionInfo, await result("GET", "/api/session"));
+		const session = z
+			.object({ projects: z.array(z.object({ key: z.string(), identity: z.string().min(1) })) })
+			.parse(await result("GET", "/api/session"));
+		const projects = z
+			.array(z.object({ key: z.string(), identity: z.string().min(1) }))
+			.parse(await result("POST", "/api/admin", { do: "project.list" }));
+		expect(session.projects.find((row) => row.key === project)?.identity).toBe(
+			projects.find((row) => row.key === project)?.identity,
+		);
 		// The app holds a session cookie, never a token, so this is the reply it reads.
 		const signedIn = await fetch(`${server.url}/api/login`, {
 			method: "POST",

@@ -19,7 +19,7 @@ struct QueueScreenTests {
 	func offlineAnswer() async throws {
 		let transport = SwitchableQueueTransport()
 		let server = try await Live.signedIn(transport: transport)
-		let screen = QueueScreen(project: server.project(try await Live.project()))
+		let screen = QueueScreen(project: try await server.project(try await Live.project()))
 		await screen.show(.open, filter: nil)
 		let question = try #require(screen.questions.first { $0.kind == .failure })
 		let choice = try #require(question.choices.first { $0.answer == "flaky" })
@@ -33,10 +33,10 @@ struct QueueScreenTests {
 	func durableFIFO() async throws {
 		let transport = SwitchableQueueTransport()
 		let server = try await Live.signedIn(transport: transport)
-		let project = server.project(try await Live.project())
+		let project = try await server.project(try await Live.project())
 		let directory = URL.cachesDirectory.appending(path: "mainworthy-outbox-\(UUID().uuidString)")
 		defer { try? FileManager.default.removeItem(at: directory) }
-		let store = FileAnswerStore(instance: Live.instance, person: 1, project: project.key, directory: directory)
+		let store = FileAnswerStore(instance: Live.instance, person: 1, project: project.key, identity: "test-identity", directory: directory)
 		let outbox = AnswerOutbox(project: project, store: store)
 		let screen = QueueScreen(project: project, outbox: outbox)
 		await screen.show(.open, filter: nil)
@@ -84,7 +84,7 @@ struct QueueScreenTests {
 	func dropStuckAnswer(recorded: Bool) async throws {
 		let transport = SwitchableQueueTransport()
 		let server = try await Live.signedIn(transport: transport)
-		let project = server.project(try await Live.project())
+		let project = try await server.project(try await Live.project())
 		let questions = try await project.questions(open: true).questions
 		let failure = try #require(questions.first { $0.kind == .failure })
 		let finding = try #require(questions.first { $0.kind == .finding })
@@ -129,7 +129,7 @@ struct QueueScreenTests {
 	func lateDroppedAnswer(failure: String) async throws {
 		let transport = LateAnswerTransport()
 		let server = try await Live.signedIn(transport: transport)
-		let project = server.project(try await Live.project())
+		let project = try await server.project(try await Live.project())
 		let questions = try await project.questions(open: true).questions
 		let question = try #require(questions.first { $0.kind == .failure })
 		let finding = try #require(questions.first { $0.kind == .finding })
@@ -177,7 +177,7 @@ struct QueueScreenTests {
 	func waitingBeforeDroppedChecks(lookupFails: Bool) async throws {
 		let transport = SwitchableQueueTransport()
 		let server = try await Live.signedIn(transport: transport)
-		let project = server.project(try await Live.project())
+		let project = try await server.project(try await Live.project())
 		let questions = try await project.questions(open: true).questions
 		let failure = try #require(questions.first { $0.kind == .failure })
 		let finding = try #require(questions.first { $0.kind == .finding })
@@ -332,7 +332,7 @@ struct QueueScreenTests {
 	func stuckAnswer() async throws -> (AnswerOutbox, ProjectClient, SwitchableQueueTransport, SwitchableAnswerStore) {
 		let transport = SwitchableQueueTransport()
 		let server = try await Live.signedIn(transport: transport)
-		let project = server.project(try await Live.project())
+		let project = try await server.project(try await Live.project())
 		let question = try #require(try await project.questions(open: true, kind: .failure).questions.first)
 		let choice = try #require(question.choices.first { $0.answer == "flaky" })
 		let store = SwitchableAnswerStore()
@@ -443,7 +443,7 @@ struct QueueScreenTests {
 	func decidedWhileOffline() async throws {
 		let transport = SwitchableQueueTransport()
 		let server = try await Live.signedIn(transport: transport)
-		let project = server.project(try await Live.project())
+		let project = try await server.project(try await Live.project())
 		let screen = QueueScreen(project: project)
 		await screen.show(.open, filter: nil)
 		let question = try #require(screen.questions.first { $0.kind == .failure })
@@ -453,7 +453,7 @@ struct QueueScreenTests {
 		#expect(await screen.answer(question, with: flaky) == false)
 		#expect(screen.outbox.pendingCount == 1)
 		let owner = try await Live.signedIn(as: Live.owner)
-		let other = owner.project(project.key)
+		let other = try await owner.project(project.key)
 		guard case .decided(let decision) = try await other.answer(question, with: defect, reference: "SHOP-1", reason: "Checked by another person") else {
 			Issue.record("the other person's answer was not recorded")
 			return
@@ -476,7 +476,7 @@ struct QueueScreenTests {
 	func answerDuringSend() async throws {
 		let transport = SwitchableQueueTransport()
 		let server = try await Live.signedIn(transport: transport)
-		let screen = QueueScreen(project: server.project(try await Live.project()))
+		let screen = QueueScreen(project: try await server.project(try await Live.project()))
 		await screen.show(.open, filter: nil)
 		let failure = try #require(screen.questions.first { $0.kind == .failure })
 		let finding = try #require(screen.questions.first { $0.kind == .finding })
@@ -499,7 +499,7 @@ struct QueueScreenTests {
 	func waitingErrorSentence(message: String) async throws {
 		let transport = SwitchableQueueTransport()
 		let server = try await Live.signedIn(transport: transport)
-		let screen = QueueScreen(project: server.project(try await Live.project()))
+		let screen = QueueScreen(project: try await server.project(try await Live.project()))
 		await screen.show(.open, filter: nil)
 		let question = try #require(screen.questions.first { $0.kind == .failure })
 		let flaky = try #require(question.choices.first { $0.answer == "flaky" })
@@ -512,7 +512,7 @@ struct QueueScreenTests {
 	func lostReply() async throws {
 		let transport = SwitchableQueueTransport()
 		let server = try await Live.signedIn(transport: transport)
-		let project = server.project(try await Live.project())
+		let project = try await server.project(try await Live.project())
 		let question = try #require(try await project.questions(open: true, kind: .failure).questions.first)
 		let store = MemoryAnswerStore()
 		let outbox = AnswerOutbox(project: project, store: store)
@@ -577,14 +577,14 @@ struct QueueScreenTests {
 		let answer = try #require(project.prepareAnswer(question, with: flaky))
 		let directory = URL.cachesDirectory.appending(path: "mainworthy-outbox-\(UUID().uuidString)")
 		defer { try? FileManager.default.removeItem(at: directory) }
-		let store = FileAnswerStore(instance: Live.instance, person: 1, project: project.key, directory: directory)
+		let store = FileAnswerStore(instance: Live.instance, person: 1, project: project.key, identity: "test-identity", directory: directory)
 		_ = try AnswerOutbox(project: project, store: store).enqueue(answer)
 		let same = AnswerOutbox(project: project, store: store)
 		#expect(same.entries.map(\.label) == ["Flaky"])
 		for other in [
-			FileAnswerStore(instance: Live.instance, person: 2, project: project.key, directory: directory),
-			FileAnswerStore(instance: Live.instance, person: 1, project: "other", directory: directory),
-			FileAnswerStore(instance: try #require(Instance(address: "mainworthy.example")), person: 1, project: project.key, directory: directory)
+			FileAnswerStore(instance: Live.instance, person: 2, project: project.key, identity: "test-identity", directory: directory),
+			FileAnswerStore(instance: Live.instance, person: 1, project: "other", identity: "test-identity", directory: directory),
+			FileAnswerStore(instance: try #require(Instance(address: "mainworthy.example")), person: 1, project: project.key, identity: "test-identity", directory: directory)
 		] { #expect(AnswerOutbox(project: project, store: other).entries.isEmpty) }
 		same.stop()
 		await same.send()
@@ -596,7 +596,7 @@ struct QueueScreenTests {
 	func concurrentSave(stopped: Bool) async throws {
 		let transport = SwitchableQueueTransport()
 		let server = try await Live.signedIn(transport: transport)
-		let project = server.project(try await Live.project())
+		let project = try await server.project(try await Live.project())
 		let questions = try await project.questions(open: true).questions
 		let failure = try #require(questions.first { $0.kind == .failure })
 		let finding = try #require(questions.first { $0.kind == .finding })
@@ -634,7 +634,7 @@ struct QueueScreenTests {
 		let workspace = Workspace(server: server, account: account, remembered: Remembered(defaults), onSignedOut: {})
 		workspace.open(try #require(account.projects.first { $0.key == firstKey }))
 		let queue = try #require(workspace.queue)
-		let file = FileAnswerStore(instance: Live.instance, person: account.actorId, project: firstKey).file
+		let file = FileAnswerStore(instance: Live.instance, person: account.actorId, project: firstKey, identity: try #require(account.projects.first { $0.key == firstKey }).id).file
 		defer { try? FileManager.default.removeItem(at: file) }
 		await queue.show(.open, filter: nil)
 		let question = try #require(queue.questions.first { $0.kind == .failure })
@@ -701,7 +701,7 @@ struct QueueScreenTests {
 			undo = try #require(screen.notice?.undoes)
 		}
 		let otherServer = try await Live.signedIn()
-		let other = otherServer.project(key)
+		let other = try await otherServer.project(key)
 		// A separate API client deliberately replaces the decision, which the phone queue cannot do.
 		let replacement: [JSONValue] = try await otherServer.write("decide", in: key, [
 			"q": .string(failure.ref), "onEvidence": .string(failure.evidenceHash), "answer": ["is": "defect"],
@@ -794,7 +794,7 @@ struct QueueScreenTests {
 	func refresh() async throws {
 		let server = try await Live.signedIn()
 		let key = try await Live.project()
-		let screen = QueueScreen(project: server.project(key))
+		let screen = QueueScreen(project: try await server.project(key))
 		await screen.show(.open, filter: nil)
 		// Somebody else answers: the same project, another connection.
 		let other = try await Live.signedIn().project(key)
@@ -856,7 +856,7 @@ struct QueueScreenFailureTests {
 	@Test("unreadable saved answers and a failed save never send or overwrite the file")
 	func storageFailure() async throws {
 		let server = Server(instance: try #require(Instance(address: "mainworthy.example")), secrets: MemoryStore(), transport: TwoPages())
-		let project = server.project("shop")
+		let project = server.project("shop", identity: "shop-identity")
 		let question = try #require(try await project.questions(open: true).questions.first)
 		let choice = try #require(question.choices.first)
 		let prepared = try #require(project.prepareAnswer(question, with: choice))
@@ -881,7 +881,7 @@ struct QueueScreenFailureTests {
 	@Test("a list that was read past its first page is read as far again, so an open question stays in it")
 	func refreshKeepsPages() async throws {
 		let server = Server(instance: try #require(Instance(address: "mainworthy.example")), secrets: MemoryStore(), transport: TwoPages())
-		let screen = QueueScreen(project: server.project("shop"))
+		let screen = QueueScreen(project: server.project("shop", identity: "shop-identity"))
 		await screen.show(.open, filter: nil)
 		#expect(screen.questions.map(\.ref) == ["Q-1", "Q-2"] && screen.hasMore)
 		await screen.more()
@@ -895,7 +895,7 @@ struct QueueScreenFailureTests {
 	@Test("a question whose page is open is read by itself where the list does not hold it")
 	func openedBeyondTheList() async throws {
 		let server = Server(instance: try #require(Instance(address: "mainworthy.example")), secrets: MemoryStore(), transport: TwoPages())
-		let screen = QueueScreen(project: server.project("shop"))
+		let screen = QueueScreen(project: server.project("shop", identity: "shop-identity"))
 		await screen.show(.open, filter: nil)
 		// The list was read as far as Q-2. Q-3 is opened from another screen, or pushed down by a new question.
 		#expect(screen.current("Q-3") == nil)
@@ -949,7 +949,7 @@ struct QueueScreenFailureTests {
 	@Test("the first read that fails says why, in place of the list")
 	func firstReadFails() async throws {
 		let server = Server(instance: try #require(Instance(address: "mainworthy.example")), secrets: MemoryStore(), transport: Down())
-		let screen = QueueScreen(project: server.project("shop"))
+		let screen = QueueScreen(project: server.project("shop", identity: "shop-identity"))
 		await screen.show(.open, filter: nil)
 		guard case .failed(let why) = screen.loading else {
 			Issue.record("the screen did not say the read failed")

@@ -11,7 +11,7 @@ import Testing
 		let key = try await Live.project()
 		let client = try await Live.signedIn().project(key)
 		let runs = RunsScreen(
-			project: client, permission: Project(key: key, name: key, can: ["read", "produce", "plan"]),
+			project: client, permission: Project(key: key, identity: client.identity, name: key, can: ["read", "produce", "plan"]),
 			person: Live.name)
 		await runs.refresh()
 		let run = runs.open(try #require(runs.runs.first))
@@ -123,8 +123,9 @@ actor FailAfterPlanTransport: Transport {
 		let transport = FailAfterPlanTransport()
 		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
 		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
+		let client = try await server.project(key)
 		let runs = RunsScreen(
-			project: server.project(key), permission: Project(key: key, name: key, can: ["read", "plan"]),
+			project: client, permission: Project(key: key, identity: client.identity, name: key, can: ["read", "plan"]),
 			person: Live.name)
 		let returned = await runs.plan(name: "Saved before read failed", selection: .all)
 		let savedRef = try #require(await transport.planned)

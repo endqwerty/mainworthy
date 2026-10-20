@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { projectCommand } from "./commands.ts";
 
 export const ATTACHMENT_LIMITS = {
 	file: 4 * 1024 ** 2,
@@ -47,7 +48,7 @@ export type Attachment = z.infer<typeof Attachment>;
 export const AttachInput = z.object({
 	result: z.number().int().positive(),
 	attachment: AttachmentInput,
-	cmd: z.string().min(8).max(64).optional(),
+	...projectCommand,
 });
 export const AttachmentReadInput = z.object({
 	result: z.number().int().positive(),

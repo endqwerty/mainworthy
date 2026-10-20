@@ -40,7 +40,7 @@ struct ResultsScreensTests {
 	func moved() async throws {
 		let server = Live.server()
 		_ = try await server.signIn(Live.owner)
-		let client = server.project(try await Live.project())
+		let client = try await server.project(try await Live.project())
 		let _: JSONValue = try await server.write("report", in: client.key, [
 			"target": ["commit": .string(String(repeating: "3", count: 40)), "repo": "acme/shop", "pr": 482],
 			"job": "bulk",

@@ -283,7 +283,7 @@ struct ConflictRecoveryTests {
 		let transport = LosingReply()
 		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
 		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
-		let project = server.project(try await Live.project())
+		let project = try await server.project(try await Live.project())
 		let (opened, editor) = try await setup(project)
 		await transport.lose()
 		#expect(await editor.save() == nil)
@@ -330,7 +330,7 @@ struct ConflictRecoveryTests {
 	@Test("the exact historical base keeps custom fields that the ordinary case read omits")
 	func customFields() async throws {
 		let server = try await Live.signedIn()
-		let project = server.project(try await Live.project())
+		let project = try await server.project(try await Live.project())
 		let made = try await project.saveCase(SuiteSubmission(source: .create(folder: nil),
 			content: CaseContent(title: "Base", fields: ["priority": "high"]), reason: "Create"))
 		guard case .adopted(let stamp) = made, let stamp else { Issue.record("not created"); return }

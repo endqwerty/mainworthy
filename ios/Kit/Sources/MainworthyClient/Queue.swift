@@ -56,7 +56,7 @@ extension ProjectClient {
 		if !reason.isEmpty { input["reason"] = .string(reason) }
 		return PreparedAnswer(
 			members: questions.map { .init(question: $0.ref, title: $0.title) }, label: choice.label,
-			input: .object(input)
+			input: .object(input), projectIdentity: identity
 		)
 	}
 
@@ -69,14 +69,22 @@ extension ProjectClient {
 
 	/// Sends a saved answer as it was saved, under its command id, and returns what became of each question.
 	package func send(_ answer: PreparedAnswer, delivery: WriteDelivery? = nil) async throws -> [String: AnswerOutcome] {
+		guard let savedIdentity = answer.projectIdentity, savedIdentity == identity else {
+			throw ClientError.refused(code: "obsolete_project", message: "This saved answer belongs to an obsolete project.")
+		}
+		var input = answer.input.object ?? [:]
+		input["projectIdentity"] = .string(savedIdentity)
 		let replies: [Wire.DecideReply] = try await server.write(
-			"decide", in: key, answer.input, command: answer.command, delivery: delivery
+			"decide", in: key, .object(input), command: answer.command, delivery: delivery
 		)
 		return try answer.outcomes(replies)
 	}
 
 	/// Asks what became of this exact command without sending the saved answer again.
 	package func answerCommand(_ answer: PreparedAnswer) async throws -> AnswerCommand {
+		guard let savedIdentity = answer.projectIdentity, savedIdentity == identity else {
+			throw ClientError.refused(code: "obsolete_project", message: "This saved answer belongs to an obsolete project.")
+		}
 		let command: Wire.AnswerCommand = try await server.read("command", in: key, ["cmd": .string(answer.command)])
 		switch command.state {
 		case "none": return .notRecorded
@@ -201,15 +209,14 @@ extension AnswerOutcome {
 /// An answer to one or more questions, captured once: one command, sent as it was saved. Replaying it changes
 /// neither the evidence nor the command id.
 ///
-/// An answer saved by an earlier build answers one question with a `decide` input of that question alone. It is
-/// read as an answer of one member and sent as it was saved: the server ties a command id to its request, so the
-/// same id with the request written another way would be refused as another command.
+/// Answers without a project identity are readable only to display an obsolete outcome.
 package struct PreparedAnswer: Codable, Equatable, Sendable {
 	package struct Member: Codable, Equatable, Sendable {
 		package let question: String
 		package let title: String
 	}
 
+	package let projectIdentity: String?
 	package let command: String
 	/// What the answer is called: "Flaky".
 	package let label: String
@@ -217,7 +224,8 @@ package struct PreparedAnswer: Codable, Equatable, Sendable {
 	package let members: [Member]
 	let input: JSONValue
 
-	init(members: [Member], label: String, input: JSONValue) {
+	init(members: [Member], label: String, input: JSONValue, projectIdentity: String) {
+		self.projectIdentity = projectIdentity
 		command = UUID().uuidString.lowercased()
 		self.members = members
 		self.label = label
@@ -225,13 +233,14 @@ package struct PreparedAnswer: Codable, Equatable, Sendable {
 	}
 
 	private enum Keys: String, CodingKey {
-		case command, label, members, input
+		case command, label, members, input, projectIdentity
 		/// An answer an earlier build saved names its one question here.
 		case question, title
 	}
 
 	package init(from decoder: any Decoder) throws {
 		let container = try decoder.container(keyedBy: Keys.self)
+		projectIdentity = try container.decodeIfPresent(String.self, forKey: .projectIdentity)
 		command = try container.decode(String.self, forKey: .command)
 		label = try container.decode(String.self, forKey: .label)
 		input = try container.decode(JSONValue.self, forKey: .input)
@@ -250,6 +259,7 @@ package struct PreparedAnswer: Codable, Equatable, Sendable {
 
 	package func encode(to encoder: any Encoder) throws {
 		var container = encoder.container(keyedBy: Keys.self)
+		try container.encodeIfPresent(projectIdentity, forKey: .projectIdentity)
 		try container.encode(command, forKey: .command)
 		try container.encode(label, forKey: .label)
 		try container.encode(members, forKey: .members)

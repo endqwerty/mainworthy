@@ -37,7 +37,7 @@ public enum Capability: String, Sendable {
 }
 
 public struct Project: Identifiable, Hashable, Sendable {
-	public var id: String { key }
+	public let id: String
 	/// The short name in addresses: `scratch`.
 	public let key: String
 	public let name: String
@@ -46,10 +46,11 @@ public struct Project: Identifiable, Hashable, Sendable {
 	private let can: Set<String>
 
 	init(_ wire: Wire.Project) {
-		self.init(key: wire.key, name: wire.name, policy: wire.policy, can: wire.can)
+		self.init(key: wire.key, identity: wire.identity, name: wire.name, policy: wire.policy, can: wire.can)
 	}
 
-	public init(key: String, name: String, policy: String = "loose", can: [String] = ["read"]) {
+	public init(key: String, identity: String, name: String, policy: String = "loose", can: [String] = ["read"]) {
+		self.id = identity
 		self.key = key
 		self.name = name
 		self.policy = policy

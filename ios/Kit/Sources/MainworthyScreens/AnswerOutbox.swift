@@ -17,7 +17,7 @@ public final class AnswerOutbox {
 	}
 
 	public struct Entry: Codable, Identifiable, Equatable, Sendable {
-		fileprivate enum Delivery: String, Codable, Sendable { case unsent, rejected, uncertain, dropped }
+		fileprivate enum Delivery: String, Codable, Sendable { case unsent, rejected, uncertain, dropped, obsolete }
 		package let answer: PreparedAnswer
 		fileprivate var delivery: Delivery?
 		/// What became of each question, once the server's reply to the whole command was read.
@@ -33,14 +33,15 @@ public final class AnswerOutbox {
 		}
 		public var label: String { answer.label }
 		public var members: [SavedQuestion] {
-			answer.members.map { SavedQuestion(question: $0.question, title: $0.title, outcome: outcomes?[$0.question]) }
+			answer.members.map { SavedQuestion(question: $0.question, title: $0.title, outcome: obsolete ? nil : outcomes?[$0.question]) }
 		}
-		/// Whether the server's reply to the whole command was read: each question has its outcome.
-		public var finished: Bool { outcomes != nil }
+		/// Whether this answer has an outcome or belongs to an obsolete project.
+		public var finished: Bool { outcomes != nil || obsolete }
+		public var obsolete: Bool { delivery == .obsolete }
 		/// What became of an answer to one question, for tests. A screen asks `finished`, or each member: this is
 		/// nil for an answer to several questions, finished or not (the verifier's finding of 2026-10-16).
-		package var outcome: AnswerOutcome? { answer.members.count == 1 ? outcomes?[question] : nil }
-		public var waiting: Bool { outcomes == nil && delivery != .dropped }
+		package var outcome: AnswerOutcome? { !obsolete && answer.members.count == 1 ? outcomes?[question] : nil }
+		public var waiting: Bool { !finished && delivery != .dropped }
 		public var dropped: Bool { outcomes == nil && delivery == .dropped }
 
 		fileprivate init(answer: PreparedAnswer, delivery: Delivery) {
@@ -76,6 +77,7 @@ public final class AnswerOutbox {
 		}
 
 		public var status: String {
+			if obsolete { return "Obsolete" }
 			guard let outcomes else { return dropped ? "Dropped" : "Waiting to send" }
 			if answer.members.count == 1, let outcome = outcomes[question] { return Entry.status(of: outcome) }
 			let decided = outcomes.values.filter(\.isDecided).count
@@ -83,6 +85,7 @@ public final class AnswerOutbox {
 		}
 
 		public var detail: String {
+			if obsolete { return "This answer belongs to an earlier project or has no project identity. It will never be sent. Read the current project before answering again." }
 			guard let outcomes else {
 				let all = answer.members.count == 1 ? "" : " All \(answer.members.count) answers go together."
 				return dropped
@@ -140,7 +143,14 @@ public final class AnswerOutbox {
 			if let data = try store.load() {
 				let saved = try JSONDecoder().decode([Entry].self, from: data)
 				guard Set(saved.map(\.id)).count == saved.count else { throw ClientError.unreadable }
-				entries = saved
+				entries = saved.map { entry in
+					var entry = entry
+					if entry.answer.projectIdentity != project.identity {
+						entry.delivery = .obsolete
+						entry.problem = nil
+					}
+					return entry
+				}
 			}
 		} catch {
 			readable = false
@@ -166,6 +176,9 @@ public final class AnswerOutbox {
 	/// not answered again, and the same command saved twice is saved once.
 	package func enqueue(_ answer: PreparedAnswer) throws -> String {
 		guard active, readable else { throw ClientError.refused(code: "local", message: storageProblem ?? "This workspace is signed out.") }
+		guard answer.projectIdentity == project.identity else {
+			throw ClientError.refused(code: "obsolete_project", message: "This answer belongs to an obsolete project.")
+		}
 		if let existing = entries.first(where: { $0.id == answer.command }) { return existing.id }
 		let asked = Set(answer.members.map(\.question))
 		if let waiting = entries.first(where: { $0.waiting && !asked.isDisjoint(with: $0.questions) }) {
@@ -180,6 +193,11 @@ public final class AnswerOutbox {
 
 	/// Stops new sends when the person signs out or loses the project. A reply already in flight may still arrive.
 	package func stop() { active = false; finishWaiting() }
+	package func retire() {
+		stop()
+		for index in entries.indices { entries[index].delivery = .obsolete; entries[index].problem = nil }
+		try? save(entries)
+	}
 	package func resume() { active = true }
 
 	/// Stops replaying the head answer, retaining its command whenever an earlier send may still arrive.
@@ -280,6 +298,16 @@ public final class AnswerOutbox {
 			do {
 				outcomes = try await project.send(entry.answer, delivery: delivery)
 				problem = nil
+			} catch ClientError.refused(let code, _) where code == "obsolete_project" {
+				var updated = entries
+				if let index = updated.firstIndex(where: { $0.id == entry.id }) {
+					updated[index].delivery = .obsolete
+					updated[index].problem = nil
+					do { try save(updated); entries = updated }
+					catch { storageProblem = error.shown; return false }
+				}
+				finishWaiting(for: entry.id)
+				continue
 			} catch ClientError.refused(let code, let why) where code != "internal" && delivery.definitelyRejected && (entry.delivery == .unsent || entry.delivery == .rejected) {
 				// The whole request was refused: no question of it was answered.
 				outcomes = Dictionary(uniqueKeysWithValues: entry.questions.map { ($0, AnswerOutcome.notTaken(why)) })
@@ -315,7 +343,7 @@ public final class AnswerOutbox {
 
 	public func clearOutcomes() {
 		guard readable else { return }
-		let waiting = entries.filter { $0.outcomes == nil }
+		let waiting = entries.filter { !$0.finished }
 		do {
 			try save(waiting)
 			entries = waiting
@@ -345,16 +373,37 @@ package final class MemoryAnswerStore: AnswerStore {
 @MainActor
 package struct FileAnswerStore: AnswerStore {
 	let file: URL
+	private let legacy: URL
+	private let prefix: String
 
-	package init(instance: Instance, person: Int, project: String, directory: URL? = nil) {
+	package init(instance: Instance, person: Int, project: String, identity: String, directory: URL? = nil) {
 		let root = directory ?? URL.applicationSupportDirectory.appending(path: "Mainworthy/Answers", directoryHint: .isDirectory)
 		let scope = [instance.url.absoluteString, String(person), project]
 		let name = SHA256.hash(data: try! JSONEncoder().encode(scope)).map { String(format: "%02x", $0) }.joined()
-		file = root.appendingPathComponent(name + ".json")
+		legacy = root.appendingPathComponent(name + ".json")
+		prefix = name + "."
+		let incarnation = SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined()
+		file = root.appendingPathComponent(prefix + incarnation + ".json")
 	}
 
 	package func load() throws -> Data? {
-		guard FileManager.default.fileExists(atPath: file.path) else { return nil }
+		guard FileManager.default.fileExists(atPath: file.path) else {
+			let root = file.deletingLastPathComponent()
+			guard FileManager.default.fileExists(atPath: root.path) else { return nil }
+			let older = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+				.filter { $0 == legacy || ($0.lastPathComponent.hasPrefix(prefix) && $0.pathExtension == "json") }
+			guard !older.isEmpty else { return nil }
+			var seen = Set<String>()
+			var entries: [AnswerOutbox.Entry] = []
+			for url in older.sorted(by: { $0.path < $1.path }) {
+				try excludeFromBackup(root)
+				try excludeFromBackup(url)
+				for entry in try JSONDecoder().decode([AnswerOutbox.Entry].self, from: Data(contentsOf: url)) where seen.insert(entry.id).inserted {
+					entries.append(entry)
+				}
+			}
+			return try JSONEncoder().encode(entries)
+		}
 		try excludeFromBackup(file.deletingLastPathComponent())
 		try excludeFromBackup(file)
 		return try Data(contentsOf: file)

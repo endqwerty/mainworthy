@@ -9,7 +9,7 @@ struct ResultTrailLiveTests {
 	@Test("a report preserves step IDs, actions, omissions and the screenshot's ordered attachment")
 	func roundTrip() async throws {
 		let server = try await Live.signedIn(as: Live.owner)
-		let project = server.project(try await Live.project())
+		let project = try await server.project(try await Live.project())
 		let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="
 		let trail: JSONValue = [
 			["step": "a1.b2", "outcome": "pass", "durationMs": 0,

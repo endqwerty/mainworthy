@@ -10,7 +10,7 @@ import Testing
 struct MappingScreenTests {
 	func setup() async throws -> (Server, ProjectClient, QueueScreen, Question) {
 		let server = try await Live.signedIn()
-		let project = server.project(try await Live.project())
+		let project = try await server.project(try await Live.project())
 		let queue = QueueScreen(project: project)
 		await queue.refresh()
 		return (server, project, queue, try #require(queue.questions.first { $0.kind == .map }))
@@ -21,7 +21,7 @@ struct MappingScreenTests {
 		let transport = SwitchableQueueTransport()
 		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
 		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
-		let project = server.project(try await Live.project())
+		let project = try await server.project(try await Live.project())
 		let queue = QueueScreen(project: project)
 		await queue.refresh()
 		let question = try #require(queue.questions.first { $0.kind == .map })
@@ -45,7 +45,7 @@ struct MappingScreenTests {
 		let transport = SwitchableQueueTransport()
 		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
 		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
-		let queue = QueueScreen(project: server.project(try await Live.project()))
+		let queue = QueueScreen(project: try await server.project(try await Live.project()))
 		await queue.refresh()
 		let question = try #require(queue.questions.first { $0.kind == .map })
 		let draft = queue.mapping(question, creating: true)
@@ -170,7 +170,7 @@ struct MappingScreenTests {
 		draft.reason = "Keep this work"
 		let owner = Live.server()
 		_ = try await owner.signIn(Live.owner)
-		let owned = owner.project(project.key)
+		let owned = try await owner.project(project.key)
 		let proposed: JSONValue = try await owner.write("propose", in: project.key, [
 			"edits": [["op": "policy", "preset": "strict", "unlinked": "ask"]],
 		])
@@ -226,7 +226,7 @@ struct MappingScreenTests {
 		let transport = LoseReplies()
 		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
 		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
-		let project = server.project(try await Live.project())
+		let project = try await server.project(try await Live.project())
 		let queue = QueueScreen(project: project)
 		await queue.refresh()
 		let question = try #require(queue.questions.first { $0.kind == .map })

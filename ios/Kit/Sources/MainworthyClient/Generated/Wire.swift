@@ -11,6 +11,8 @@ enum Wire {
 
 	/// A project the caller holds a grant on.
 	struct Project: Decodable, Equatable, Sendable {
+		/// The opaque identity of this project, retained across export and import.
+		let identity: String
 		let key: String
 		let name: String
 		/// The name of the policy's preset: loose, standard, strict, or custom.

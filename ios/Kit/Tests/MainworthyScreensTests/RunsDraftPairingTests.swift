@@ -26,7 +26,7 @@ actor ReviewFailPinnedRead: Transport {
     func setup() async throws -> (RunsScreen, OpenRunScreen, ProjectClient) {
         let key = try await Live.project()
         let client = try await Live.signedIn().project(key)
-        let list = RunsScreen(project: client, permission: Project(key:key,name:key,can:["read","produce","plan"]),person:Live.name)
+        let list = RunsScreen(project: client, permission: Project(key:key,identity:client.identity,name:key,can:["read","produce","plan"]),person:Live.name)
         await list.refresh()
         let run = list.open(try #require(list.runs.first)); await run.refresh()
         return (list,run,client)
@@ -37,8 +37,8 @@ actor ReviewFailPinnedRead: Transport {
         let transport = ReviewFailPinnedRead()
         let server = Server(instance:Live.instance,secrets:MemoryStore(),transport:transport)
         _ = try await server.signIn(.password(name:Live.name,password:Live.password))
-        let client = server.project(key)
-        let list = RunsScreen(project:client,permission:Project(key:key,name:key,can:["read","produce","plan"]),person:Live.name)
+        let client = try await server.project(key)
+        let list = RunsScreen(project:client,permission:Project(key:key,identity:client.identity,name:key,can:["read","produce","plan"]),person:Live.name)
         await list.refresh()
         let run = list.open(try #require(list.runs.first)); await run.refresh()
         await run.execute(try #require(run.firstUnfilled))
@@ -117,7 +117,8 @@ actor ReviewFailPinnedRead: Transport {
     func renamedPersonKeepsOwnSlots() async throws {
         let key = try await Live.project()
         let server = try await Live.signedIn()
-        let project = Project(key:key,name:key,can:["read","produce","plan"])
+        let identity = try #require(try await server.account().projects.first { $0.key == key }).id
+        let project = Project(key:key,identity:identity,name:key,can:["read","produce","plan"])
         let defaultsName = "renamed-person-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName:defaultsName))
         defer { defaults.removePersistentDomain(forName:defaultsName) }
@@ -164,8 +165,8 @@ actor ReviewFailPinnedRead: Transport {
         let transport = FailAfterPlanTransport()
         let server = Server(instance:Live.instance,secrets:MemoryStore(),transport:transport)
         let account = try await server.signIn(.password(name:Live.name,password:Live.password))
-        let pa = Project(key:a,name:a,can:["read","produce","plan"])
-        let pb = Project(key:b,name:b,can:["read","produce","plan"])
+        let pa = Project(key:a,identity:try #require(account.projects.first { $0.key == a }).id,name:a,can:["read","produce","plan"])
+        let pb = Project(key:b,identity:try #require(account.projects.first { $0.key == b }).id,name:b,can:["read","produce","plan"])
         let defaultsName = "review-saved-plan-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName:defaultsName))
         defer { defaults.removePersistentDomain(forName:defaultsName) }

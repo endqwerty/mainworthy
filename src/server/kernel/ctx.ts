@@ -5,7 +5,15 @@ import { type Db, sql } from "./db.ts";
 
 export type Actor = { id: number; kind: ActorKind; name: string; can: readonly Capability[]; roles?: readonly Role[] };
 
-export type ProjectRow = { id: number; org: number; key: string; name: string; seq: number; created_at: number };
+export type ProjectRow = {
+	id: number;
+	org: number;
+	key: string;
+	identity: string;
+	name: string;
+	seq: number;
+	created_at: number;
+};
 
 /** The kinds of ref a project numbers. `C-311` is counter `case`, value 311. */
 export type CounterName = "case" | "question" | "run" | "test" | "proposal";
@@ -57,8 +65,8 @@ const Q = {
 	),
 	setSeq: sql<{ id: number; seq: number }>("UPDATE projects SET seq = $seq WHERE id = $id"),
 	projects: sql<readonly [], ProjectRow>("SELECT * FROM projects ORDER BY id"),
-	insertProject: sql<{ org: number; key: string; name: string; at: number }>(
-		"INSERT INTO projects (org, key, name, created_at) VALUES ($org, $key, $name, $at)",
+	insertProject: sql<{ org: number; key: string; identity: string; name: string; at: number }>(
+		"INSERT INTO projects (org, key, identity, name, created_at) VALUES ($org, $key, $identity, $name, $at)",
 	),
 	demoSince: sql<{ project: number }, { since: number }>("SELECT since FROM demo_projects WHERE project = $project"),
 	markDemo: sql<{ project: number; since: number }>(
@@ -99,7 +107,7 @@ export const projectById = (db: Db, id: number): ProjectRow | null => db.get(Q.p
 export const allProjects = (db: Db): ProjectRow[] => db.all(Q.projects);
 
 export function insertProject(db: Db, input: { org: number; key: string; name: string; at: number }): ProjectRow {
-	db.run(Q.insertProject, input);
+	db.run(Q.insertProject, { ...input, identity: crypto.randomUUID() });
 	const row = db.get(Q.project, { key: input.key });
 	if (!row) throw new Error("project was not stored");
 	return row;

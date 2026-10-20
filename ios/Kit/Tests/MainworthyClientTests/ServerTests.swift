@@ -43,8 +43,8 @@ private let signedIn = #"{"ok":true,"result":{"signedIn":true}}"#
 private let session = """
 	{"ok":true,"result":{"actor":"robin","actorId":1,"kind":"human","can":[],"mode":"server","via":"cookie","session":7,
 	"owner":true,"version":"0.1.0","projects":[
-	{"key":"shop","name":"Shop","policy":"standard","can":["read","produce","answer"]},
-	{"key":"sealed","name":"Sealed","policy":"strict","can":["record"]}]}}
+	{"key":"shop","identity":"shop-identity","name":"Shop","policy":"standard","can":["read","produce","answer"]},
+	{"key":"sealed","identity":"sealed-identity","name":"Sealed","policy":"strict","can":["record"]}]}}
 	"""
 private let cookie = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ"
 
@@ -196,7 +196,7 @@ struct ServerTests {
 	])
 	func unreadable(body: String) async {
 		await #expect(throws: ClientError.unreadable) {
-			_ = try await server(Script(.json(body))).project("shop").questions(open: true)
+			_ = try await server(Script(.json(body))).project("shop", identity: "shop-identity").questions(open: true)
 		}
 	}
 
@@ -216,7 +216,7 @@ struct ServerTests {
 			\(question("Q-3", kind: "failure", evidence: #"{"message":null,"scope":"trunk","tests":[],"count":0,"target":"abc","hints":[],"facts":[]}"#, answers: #"["flaky","quarantine"]"#))]}}
 			"""
 		let script = Script(.json(inbox))
-		let project = server(script).project("shop")
+		let project = server(script).project("shop", identity: "shop-identity")
 		let questions = try await project.questions(open: true).questions
 		#expect(questions.map(\.evidence) == [.unreadable, .unreadable, questions[2].evidence])
 		#expect(questions[1].kind == .other("waiver") && questions[1].stakes.isEmpty)
@@ -252,7 +252,7 @@ struct ServerTests {
 			\(adopt("Q-4", edits: #"[{"op":"create","title":"A new case","steps":2}]"#, count: 1)),
 			\(adopt("Q-5", edits: #"[{"op":"restore","case":"C-1","title":"A case"}]"#, count: 1))]}}
 			"""
-		let questions = try await server(Script(.json(inbox))).project("shop").questions(open: true).questions
+		let questions = try await server(Script(.json(inbox))).project("shop", identity: "shop-identity").questions(open: true).questions
 		// An edit and a new case are shown whole. A move beside the edit, more edits than the question lists,
 		// and a restore (whose reply does not say what the case is now) are not.
 		#expect(questions.map { $0.choices.map(\.takes) } == [
@@ -281,7 +281,7 @@ struct ServerTests {
 		let created = #"{"op":"create","body":\#(body),"folder":"Checkout","tags":["checkout"],"covers":[]}"#
 		func documents(_ edits: String) async throws -> [EditedCase] {
 			let reply = #"{"ok":true,"seq":3,"result":[{"ref":"P-1","edits":[\#(edits)]}]}"#
-			let project = server(Script(.json(inbox), .json(reply))).project("shop")
+			let project = server(Script(.json(inbox), .json(reply))).project("shop", identity: "shop-identity")
 			let question = try #require(try await project.questions(open: true).questions.first)
 			guard case .proposal(let edit) = question.evidence else { throw ClientError.unreadable }
 			return try await project.documents(of: edit)
@@ -315,7 +315,7 @@ struct ServerTests {
 			"""
 		}
 		func suggestion(_ suggest: String) async throws -> Finding.Suggestion? {
-			let questions = try await server(Script(.json(finding(suggest)))).project("shop").questions(open: true)
+			let questions = try await server(Script(.json(finding(suggest)))).project("shop", identity: "shop-identity").questions(open: true)
 			guard case .finding(let found) = questions.questions.first?.evidence else { throw ClientError.unreadable }
 			return found.suggestion
 		}
@@ -332,7 +332,7 @@ struct ServerTests {
 	func refused() async {
 		let body = #"{"ok":false,"error":{"code":"forbidden","message":"inbox needs the read capability on shop"}}"#
 		await #expect(throws: ClientError.refused(code: "forbidden", message: "inbox needs the read capability on shop")) {
-			_ = try await server(Script(.json(status: 403, body))).project("shop").questions(open: true)
+			_ = try await server(Script(.json(status: 403, body))).project("shop", identity: "shop-identity").questions(open: true)
 		}
 		#expect(
 			ClientError.refused(code: "forbidden", message: "inbox needs the read capability on shop").message
