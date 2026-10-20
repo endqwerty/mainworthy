@@ -5,23 +5,33 @@ import Observation
 /// A draft on the document the person opened. It belongs to the screen, so backgrounding loses no typing.
 @MainActor @Observable
 public final class CaseEditorScreen {
-	public let source: CaseSource
+	public private(set) var source: CaseSource
 	public var content: CaseContent
 	public var reason = ""
 	public private(set) var busy = false
 	public private(set) var notice: String?
-	public private(set) var settled = false
+	private struct WaitingProposal {
+		let question: String
+		let content: CaseContent
+		let needs: String?
+	}
+	private enum SaveState {
+		case editing
+		case submitting(SuiteSubmission, adopted: CaseStamp?)
+		case waiting(WaitingProposal)
+		case settled
+	}
+	private var state = SaveState.editing
+	public var settled: Bool { if case .settled = state { true } else { false } }
+	public var isWaiting: Bool { if case .waiting = state { true } else { false } }
 	public private(set) var savedDocument: CaseDocument?
 	public private(set) var conflict: CaseConflict?
 	public private(set) var conflictClosed = false
 	private var overlapQuestion: String?
 	private var mergeSent: MergeSubmission?
-	private let original: CaseContent
+	private var original: CaseContent
 	private var used: Set<String>
 	private let project: ProjectClient
-	/// A request whose reply was lost stays unchanged. Editing is paused until it has a reply.
-	private var sent: SuiteSubmission?
-	private var adopted: CaseStamp?
 	private static let whitespace = #"[\u0009-\u000D\u0020\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]"#
 	private func trimmed(_ text: String) -> String {
 		text.replacingOccurrences(of: "^\(Self.whitespace)+|\(Self.whitespace)+$",
@@ -38,7 +48,10 @@ public final class CaseEditorScreen {
 	}
 
 	public var dirty: Bool { content != original || !reason.isEmpty }
-	public var locked: Bool { busy || sent != nil || settled || conflict != nil || overlapQuestion != nil }
+	public var locked: Bool {
+		if case .editing = state { return busy || conflict != nil || overlapQuestion != nil }
+		return true
+	}
 	/// Lengths use UTF-16, as the server's JavaScript strings do. Other text and step counts have no cap.
 	public var validation: [String] {
 		var issues: [String] = []
@@ -73,9 +86,20 @@ public final class CaseEditorScreen {
 		if let conflict {
 			return conflict.complete && reason.utf16.count <= 500 && (!conflict.wantsReason || !trimmed(reason).isEmpty)
 		}
-		return sent != nil || validation.isEmpty
+		switch state {
+		case .submitting, .waiting: return true
+		case .editing: return validation.isEmpty
+		case .settled: return false
+		}
 	}
-	public var isRetrying: Bool { (sent != nil || mergeSent != nil || (overlapQuestion != nil && conflict == nil)) && !busy }
+	public var isRetrying: Bool {
+		guard !busy else { return false }
+		switch state {
+		case .submitting, .waiting: return true
+		case .editing: return mergeSent != nil || (overlapQuestion != nil && conflict == nil)
+		case .settled: return false
+		}
+	}
 
 	public func chooseConflict(_ address: ConflictAddress, side: CaseConflict.Side) {
 		guard !busy, mergeSent == nil, !settled, !conflictClosed else { return }
@@ -104,15 +128,17 @@ public final class CaseEditorScreen {
 		content.steps = Array(rest.prefix(target)) + picked + Array(rest.dropFirst(target))
 	}
 
-	/// Returns an adopted version for the suite to open. Waiting and overlapping proposals stay on this page
-	/// with the server's sentence, and cannot be sent a second time as another proposal.
+	/// Waiting retries only read the recorded decision. An uncertain save keeps its original command.
 	package func save() async -> SaveCaseOutcome? {
 		guard maySave else { return nil }
+		if isWaiting { await refreshWaiting(); return nil }
 		busy = true
 		defer { busy = false }
 		if conflict != nil || overlapQuestion != nil || mergeSent != nil { return await resolveConflict() }
-		if sent == nil { sent = SuiteSubmission(source: source, content: content, reason: reason) }
-		guard let sent else { return nil }
+		if case .editing = state {
+			state = .submitting(SuiteSubmission(source: source, content: content, reason: reason), adopted: nil)
+		}
+		guard case .submitting(let sent, let adopted) = state else { return nil }
 		do {
 			let outcome: SaveCaseOutcome
 			if let adopted { outcome = .adopted(adopted) }
@@ -120,46 +146,86 @@ public final class CaseEditorScreen {
 			switch outcome {
 			case .adopted(let stamp):
 				guard let stamp else {
-					self.sent = nil
-					settled = true
+					state = .settled
 					notice = "The server adopted the proposal without naming a saved version. Your draft is kept here."
 					return .notTaken(notice ?? "Your draft is kept here.")
 				}
-				adopted = stamp
+				state = .submitting(sent, adopted: stamp)
 				let document = try await project.caseDocument(stamp.ref, version: stamp.version)
-				settled = true
-				self.sent = nil
-				guard document.content.title == content.title, document.content.pre == content.pre,
-					document.content.steps == content.steps else {
+				state = .settled
+				guard matches(document, sent.content) else {
 					notice = "The saved version differs from what you typed. Your draft is kept here. Read the case in the web app."
 					return .notTaken(notice ?? "Your draft is kept here.")
 				}
 				savedDocument = document
 			case .waiting(let question, let needs):
-				settled = true
-				notice = "The edit waits for a person's answer in the Queue\(question.map { " (\($0))" } ?? "")."
-				if let needs { notice = "\(notice ?? "") The server asks for \(needs)." }
+				guard let question else { throw ClientError.unreadable }
+				let waiting = WaitingProposal(question: question, content: sent.content, needs: needs)
+				state = .waiting(waiting)
+				notice = waitingNotice(waiting)
 			case .overlap(let question, _, _):
 				guard let question, case .edit(let opened) = source else { throw ClientError.unreadable }
 				overlapQuestion = question
-				self.sent = nil
+				state = .editing
 				conflict = try await project.conflict(question, ref: opened.ref)
 				notice = "Both edits are kept. Choose each overlapping field, then record the merge."
-
-			case .notTaken(let sentence): notice = sentence
+			case .notTaken(let sentence):
+				state = .editing
+				notice = sentence
 			}
-			self.sent = nil
 			return outcome
 		} catch {
-			if case ClientError.refused(let code, _) = error,
-				code != "internal", sent.delivery.definitelyRejected, adopted == nil { self.sent = nil }
-			else { sent.delivery.uncertain() }
+			if case .submitting(_, let stamp) = state {
+				if case ClientError.refused(let code, _) = error,
+					code != "internal", sent.delivery.definitelyRejected, stamp == nil { state = .editing }
+				else { sent.delivery.uncertain() }
+			}
 			let why = error.shown
 			let stop = why.last.map { ".!?".contains($0) } == true ? "" : "."
-			notice = self.sent != nil && adopted == nil ? "\(why)\(stop) Retry will send the same save." : why
+			if case .submitting(_, nil) = state { notice = "\(why)\(stop) Retry will send the same save." }
+			else { notice = why }
 			return nil
 		}
 	}
+
+	package func refreshWaiting() async {
+		guard !busy, case .waiting(let waiting) = state else { return }
+		busy = true
+		defer { busy = false }
+		do {
+			switch try await project.caseProposal(waiting.question) {
+			case .waiting: notice = waitingNotice(waiting)
+			case .rejected:
+				state = .editing
+				notice = "The proposal was rejected. Your draft is kept here."
+			case .adopted(let stamp):
+				let document = try await project.caseDocument(stamp.ref, version: stamp.version)
+				guard matches(document, waiting.content) else {
+					notice = "The saved version differs from what you submitted. Your draft is kept here. Read the case in the web app."
+					return
+				}
+				let ids = try await project.usedStepIds(of: document)
+				source = .edit(document)
+				original = waiting.content
+				used.formUnion(ids)
+				reason = ""
+				state = .editing
+				notice = "Proposal accepted. Continue editing \(stamp.ref), version \(stamp.version)."
+			}
+		} catch {
+			notice = "Still waiting to read the proposal's outcome. \(error.shown) Your draft is kept here. Retry to check again."
+		}
+	}
+
+	private func matches(_ document: CaseDocument, _ submitted: CaseContent) -> Bool {
+		document.content.title == submitted.title && document.content.pre == submitted.pre && document.content.steps == submitted.steps
+	}
+
+	private func waitingNotice(_ waiting: WaitingProposal) -> String {
+		let sentence = "The edit waits for a person's answer in the Queue (\(waiting.question))."
+		return sentence + (waiting.needs.map { " The server asks for \($0)." } ?? "")
+	}
+
 	private func resolveConflict() async -> SaveCaseOutcome? {
 		do {
 			if conflict == nil, let question = overlapQuestion, case .edit(let opened) = source {
@@ -176,13 +242,13 @@ public final class CaseEditorScreen {
 			case .adopted(let stamp):
 				let document = try await project.caseDocument(stamp.ref, version: stamp.version)
 				savedDocument = document
-				settled = true; mergeSent = nil
+				state = .settled; mergeSent = nil
 				return .adopted(stamp)
 			case .unchanged:
-				settled = true; mergeSent = nil
+				state = .settled; mergeSent = nil
 				notice = "Conflict resolved. The recorded version already holds this text."
 			case .waiting(let question):
-				settled = true; mergeSent = nil
+				state = .settled; mergeSent = nil
 				notice = "Your merge is proposed and waits for a person's answer in the Queue (\(question))."
 			case .moved(let question):
 				// Do not drop the pending command until its replacement has been read. A failed read recovers

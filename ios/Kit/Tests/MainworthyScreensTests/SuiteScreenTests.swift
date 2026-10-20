@@ -301,7 +301,7 @@ struct SuiteScreenTests {
 		editor.reason = "Please review"
 		await screen.saveEditor()
 		#expect(editor.notice?.contains("waits for a person's answer in the Queue") == true)
-		#expect(editor.settled && screen.saved == nil)
+		#expect(editor.isWaiting && !editor.settled && editor.locked && editor.isRetrying && screen.saved == nil)
 	}
 
 	@Test("another project gets a new Suite screen and no draft from the first")

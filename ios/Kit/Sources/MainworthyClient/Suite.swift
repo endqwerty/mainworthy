@@ -137,9 +137,11 @@ public enum SaveCaseOutcome: Equatable, Sendable {
 
 package struct SuiteSubmission: Sendable {
 	let input: JSONValue
+	package let content: CaseContent
 	package let delivery = WriteDelivery()
 
 	package init(source: CaseSource, content: CaseContent, reason: String) {
+		self.content = content
 		var body: [String: JSONValue] = [
 			"title": .string(content.title), "pre": .string(content.pre),
 			"steps": .array(content.steps.map(\.json)),
@@ -161,7 +163,22 @@ package struct SuiteSubmission: Sendable {
 	}
 }
 
+package enum CaseProposalOutcome: Equatable, Sendable {
+	case waiting, rejected
+	case adopted(CaseStamp)
+}
+
 extension ProjectClient {
+	package func caseProposal(_ ref: String) async throws -> CaseProposalOutcome {
+		let rows: [Wire.SuiteProposalQuestion] = try await server.read("get", in: key, ["refs": [.string(ref)]])
+		guard let question = rows.first, question.q == ref else { throw ClientError.unreadable }
+		guard let decision = question.decision else { return .waiting }
+		if decision.answer.is == "reject", decision.effects.rejected == true { return .rejected }
+		guard decision.answer.is == "accept", let cases = decision.effects.cases, cases.count == 1,
+			let stamp = cases.first else { throw ClientError.unreadable }
+		return .adopted(CaseStamp(ref: stamp.ref, version: stamp.version))
+	}
+
 	package func cases(folder: String? = nil, deep: Bool = false, text: String = "", tag: String? = nil,
 		after: String? = nil, limit: Int = 100
 	) async throws -> (items: [SuiteCase], next: String?) {

@@ -1002,4 +1002,41 @@ enum Wire {
 		let cases: [SuiteStamp]
 		let conflicts: [SuiteConflict]
 	}
+
+	/// Whether the proposal was accepted or rejected.
+	struct SuiteProposalAnswer: Decodable, Equatable, Sendable {
+		let `is`: String
+	}
+
+	/// An adopted case version.
+	struct SuiteProposalStamp: Decodable, Equatable, Sendable {
+		let ref: String
+		let version: Int
+	}
+
+	/// The versions adopted by this decision, or its rejection.
+	struct SuiteProposalEffects: Decodable, Equatable, Sendable {
+		let cases: [SuiteProposalStamp]?
+		let rejected: Bool?
+	}
+
+	/// The answer and its recorded case versions.
+	struct SuiteProposalDecision: Decodable, Equatable, Sendable {
+		let answer: SuiteProposalAnswer
+		let effects: SuiteProposalEffects
+	}
+
+	/// A saved proposal's recorded outcome from get.
+	struct SuiteProposalQuestion: Decodable, Equatable, Sendable {
+		let q: String
+		let decision: SuiteProposalDecision?
+
+		private enum CodingKeys: String, CodingKey { case q, decision }
+
+		init(from decoder: any Decoder) throws {
+			let container = try decoder.container(keyedBy: CodingKeys.self)
+			q = try container.decode(String.self, forKey: .q)
+			decision = try container.decode(SuiteProposalDecision?.self, forKey: .decision)
+		}
+	}
 }

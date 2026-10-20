@@ -700,6 +700,19 @@ export const SuiteProposeReply = struct("SuiteProposeReply", "What came of creat
 	),
 });
 
+export const SuiteProposalQuestion = struct("SuiteProposalQuestion", "A saved proposal's recorded outcome from get.", {
+	q: text,
+	decision: nullable(
+		struct("SuiteProposalDecision", "The answer and its recorded case versions.", {
+			answer: struct("SuiteProposalAnswer", "Whether the proposal was accepted or rejected.", { is: text }),
+			effects: struct("SuiteProposalEffects", "The versions adopted by this decision, or its rejection.", {
+				cases: maybe(list(struct("SuiteProposalStamp", "An adopted case version.", { ref: text, version: whole }))),
+				rejected: maybe(flag),
+			}),
+		}),
+	),
+});
+
 /** Every shape the app decodes by name. `gen` writes one Swift type for each, and for each struct inside it. */
 export const SHAPES: readonly Shape[] = [
 	SignInReply,
@@ -747,4 +760,5 @@ export const SHAPES: readonly Shape[] = [
 	SuiteDocument,
 	SuiteHistory,
 	SuiteProposeReply,
+	SuiteProposalQuestion,
 ];

@@ -336,7 +336,7 @@ To browse cases and write a new case or an edit, follow these steps:
 5. Type a title, preconditions and steps. Each step has an action and an optional expected result.
    **Add step** adds a step. **Edit** lets you remove or reorder steps.
 6. Press **Save**. An adopted proposal opens the saved version. Where the policy asks for acceptance,
-   the app says the proposal waits in the Queue. An edit uses the version you opened.
+   the editor keeps the submitted text and waits for the proposal's answer in the Queue. An edit uses the version you opened.
 
 A folder opens as its own page with its subfolders above its own cases. To go up, swipe from the left edge
 of the screen or press the back button. To read the next page, scroll to the end of a list.
@@ -366,6 +366,12 @@ Save stays disabled until the limits and whitespace warnings are resolved.
 The server sets no separate limit on preconditions, step text or the number of steps.
 
 If the saved document differs from what you typed, or cannot be read, the editor keeps your draft and says why.
+
+While a proposal waits, editing pauses. **Retry** reads its answer without sending another proposal.
+The editor also checks after a project change arrives. If somebody accepts the proposal, the editor follows
+the case and version named by that decision and unlocks. Continue editing there to propose a new version of
+the same case. If somebody rejects the proposal, your draft and reason remain editable. If the answer cannot
+be read, the editor keeps waiting and says so. Keep the editor open to follow the proposal.
 If another edit overlaps, **Both edits are kept** shows each overlapping field with **Your draft** above
 **Current version**. To resolve the overlap, follow these steps:
 
