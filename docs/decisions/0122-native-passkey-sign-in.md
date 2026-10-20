@@ -39,6 +39,9 @@ an eligible paid team, and have that instance list the printed application ident
 `MAINWORTHY_PUBLIC_URL` with its HTTPS address. Serve the association file over public HTTPS at the domain's
 standard port without authentication or redirects so Apple can fetch it. An app connecting on a non-default
 port still uses that host's standard HTTPS association endpoint and the portless native origin.
+When the web address includes a port, a native challenge accepts an assertion made at `https://<host>` on port 443.
+Whoever serves that origin could relay a person's assertion. The instance's owner controls that origin because
+the association file must be served there.
 Rebuild and reinstall when the entitlement changes. Selecting a server address cannot add an associated
 domain at runtime. A distributed build supports only domains included in its signed entitlement.
 A free-team build or an unassociated instance retains password sign-in.
