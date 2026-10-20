@@ -35,7 +35,7 @@ struct RunSlotView: View {
 		.safeAreaBar(edge: .bottom) {
 			VStack(spacing: 10) {
 				if case .read(let execution) = screen.document {
-					if screen.mayRecord(execution) {
+					if screen.mayRecord(execution), !screen.hasPendingReport(for: execution) {
 						TextField("Optional note", text: $screen.note, axis: .vertical)
 							.lineLimit(1...3).textFieldStyle(.roundedBorder).focused($noting)
 							.accessibilityIdentifier("run-note").disabled(screen.busy)
@@ -52,7 +52,7 @@ struct RunSlotView: View {
 								.accessibilityIdentifier("record-\(outcome.rawValue)")
 							}
 						}
-					} else {
+					} else if !screen.hasPendingReport(for: execution) {
 						Text(
 							screen.isReadOnly
 								? "Slots are read-only. Recording results needs the produce capability."
@@ -69,7 +69,10 @@ struct RunSlotView: View {
 					HStack(alignment: .firstTextBaseline) {
 						Text(notice).font(.subheadline).frame(maxWidth: .infinity, alignment: .leading)
 							.accessibilityIdentifier("run-notice")
-						if screen.canUndo, screen.permission.may(.produce), screen.run.state == .open {
+						if screen.hasPendingReport {
+							Button("Retry report") { Task { await screen.retryReport() } }
+								.disabled(screen.busy).accessibilityIdentifier("retry-report")
+						} else if screen.canUndo, screen.permission.may(.produce), screen.run.state == .open {
 							Button("Undo") {
 								noting = false
 								Task { await screen.undo() }
@@ -93,7 +96,7 @@ struct RunSlotView: View {
 			}
 			Text(execution.content.title).font(.title2.weight(.semibold)).accessibilityIdentifier("executing-case")
 			if !execution.content.pre.isEmpty { Panel("Preconditions") { Text(execution.content.pre) } }
-			if screen.mayRecord(execution) {
+			if screen.mayRecord(execution), !screen.hasPendingReport(for: execution) {
 				Text("Tap the step that failed. Tap it again to clear the mark.").font(.subheadline)
 					.foregroundStyle(.secondary)
 			}
@@ -120,16 +123,16 @@ struct RunSlotView: View {
 						RoundedRectangle(cornerRadius: 12).stroke(
 							screen.failedStep == step.id ? Color.fail : .clear, lineWidth: 2))
 				}
-				.buttonStyle(.plain).disabled(screen.busy || !screen.mayRecord(execution))
+				.buttonStyle(.plain).disabled(screen.busy || !screen.mayRecord(execution) || screen.hasPendingReport(for: execution))
 				.accessibilityIdentifier("run-step-\(index + 1)")
 				.accessibilityAddTraits(screen.failedStep == step.id ? .isSelected : [])
 			}
 			if execution.content.steps.isEmpty {
 				Text("This pinned case has no steps.").foregroundStyle(.secondary)
 			}
-			if !execution.slot.fills.isEmpty {
+			if !screen.latestSlot(execution).fills.isEmpty {
 				Panel("Recorded results") {
-					ForEach(execution.slot.fills) { fill in
+					ForEach(screen.latestSlot(execution).fills) { fill in
 						Text("\(fill.method.name.capitalized) \(fill.by)\(fill.model.map { " · \($0)" } ?? "") · \(fill.outcome.word)")
 						if let note = fill.note { Text(note).font(.subheadline) }
 						if let steps = fill.steps {

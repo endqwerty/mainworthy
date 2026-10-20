@@ -39,24 +39,19 @@ struct RunView: View {
 			if let notice = screen.notice { Section { Text(notice).font(.subheadline) } }
 			Section {
 				ForEach(Array(screen.slots.enumerated()), id: \.element.id) { index, slot in
-					// A slot another producer filled is left to that result, as the web app leaves it: it does not open.
-					if screen.isLeftToOthers(slot) {
-						row(index, slot, at: now).accessibilityIdentifier("run-slot-\(index + 1)")
-					} else {
-						Button {
-							open(slot)
-						} label: {
-							row(index, slot, at: now)
-						}
-						.buttonStyle(.plain)
-						.accessibilityIdentifier("run-slot-\(index + 1)")
+					Button {
+						open(slot)
+					} label: {
+						row(index, slot, at: now)
 					}
+					.buttonStyle(.plain)
+					.accessibilityIdentifier("run-slot-\(index + 1)")
 				}
 			} header: {
 				Text("Cases in order")
 			} footer: {
 				if screen.slots.contains(where: screen.isLeftToOthers) {
-					Text("A slot that a pipeline, an agent or another person filled, and you have not, is left to that result and does not open.")
+					Text("Open any slot to read its results. A slot filled only by another producer is read-only.")
 				}
 			}
 			if case .failed(let why) = screen.loading {

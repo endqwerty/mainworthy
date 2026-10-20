@@ -45,8 +45,8 @@ struct RunsLiveTests {
 		let slot = try #require(slots.first { $0.fills.isEmpty })
 		let execution = try await project.execution(of: slot, in: run.ref)
 		#expect(execution.slot.version == 1 && !execution.content.steps.isEmpty)
-		let saved = try await project.report(
-			execution, outcome: .fail, note: "Shipping did not arrive", failedStep: execution.content.steps[0].id)
+		let saved = try await project.report(try await project.prepareReport(
+			execution, outcome: .fail, note: "Shipping did not arrive", failedStep: execution.content.steps[0].id))
 		guard case .recorded(let id) = saved else {
 			Issue.record("the failure was refused")
 			return
@@ -59,8 +59,8 @@ struct RunsLiveTests {
 		let failed = try #require(try await project.slots(of: run.ref).first { $0.id == slot.id })
 		#expect(failed.state == .failing)
 		#expect(failed.ownFill(by: Live.name)?.note == "Shipping did not arrive")
-		let corrected = try await project.report(
-			execution, outcome: .blocked, note: "Carrier unavailable", corrects: id)
+		let corrected = try await project.report(try await project.prepareReport(
+			execution, outcome: .blocked, note: "Carrier unavailable", corrects: id))
 		guard case .recorded = corrected else {
 			Issue.record("the correction was refused")
 			return
@@ -184,7 +184,9 @@ struct RunReceiptTests {
 				from: Data(
 					#"{"id":1,"case":"C-1","title":"Open","version":1,"state":"missing","work":{"kind":"free"},"fills":[]}"#.utf8)))
 		let execution = RunExecution(run: "R-1", slot: slot, content: CaseContent(title: "Open"))
-		#expect(try await server.project("shop", identity: "shop-identity").report(execution, outcome: .pass) == .refused(sentence))
+		let client = server.project("shop", identity: "shop-identity")
+		let submission = try await client.prepareReport(execution, outcome: .pass)
+		#expect(try await client.report(submission) == .refused(sentence))
 	}
 
 	@Test("a reply for a different version is never offered as the pinned case")

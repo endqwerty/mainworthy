@@ -554,6 +554,12 @@ enum Wire {
 		let results: [Int]
 	}
 
+	/// The recorded reply of a captured report's command.
+	struct RunReportCommand: Decodable, Equatable, Sendable {
+		let state: String
+		let reply: RunReportReply?
+	}
+
 	/// A reported branch or pull request.
 	struct ChangeSummary: Decodable, Equatable, Sendable {
 		let key: String
@@ -710,6 +716,7 @@ enum Wire {
 		let result: Int
 		let name: String
 		let type: String
+		let at: String?
 	}
 
 	/// The attachment operation's ordered list.

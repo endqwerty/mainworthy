@@ -301,6 +301,30 @@ public struct RunPlanSubmission: Sendable {
 	}
 }
 
+/// A report's identity and evidence are fixed before its first send, including an Undo correction.
+public struct RunReportSubmission: Sendable {
+	public let execution: RunExecution
+	public let outcome: ManualOutcome
+	public let note: String
+	public let failedStep: String?
+	public let corrects: Int?
+	package let steps: [ResultStep]?
+	package let input: JSONValue
+	package let command = UUID().uuidString.lowercased()
+	package let delivery = WriteDelivery()
+
+	package init(execution: RunExecution, outcome: ManualOutcome, note: String, failedStep: String?,
+		corrects: Int?, steps: [ResultStep]?, input: JSONValue) {
+		self.execution = execution
+		self.outcome = outcome
+		self.note = note
+		self.failedStep = failedStep
+		self.corrects = corrects
+		self.steps = steps
+		self.input = input
+	}
+}
+
 public enum RunReportOutcome: Equatable, Sendable {
 	case recorded(Int), refused(String)
 }
@@ -397,31 +421,61 @@ extension ProjectClient {
 				)))
 	}
 
-	package func report(
+	package func prepareReport(
 		_ execution: RunExecution, outcome: ManualOutcome, note: String = "", failedStep: String? = nil,
-		corrects: Int? = nil
-	) async throws -> RunReportOutcome {
+		corrects: Int? = nil, steps: [ResultStep]? = nil, restoring: Int? = nil
+	) async throws -> RunReportSubmission {
 		guard let ref = execution.slot.caseRef, execution.content.methods.contains("human") else {
-			return .refused("This pinned case does not admit a person's results.")
+			throw ClientError.refused(code: "invalid", message: "This pinned case does not admit a person's results.")
 		}
 		var result: [String: JSONValue] = ["test": ["case": .string(ref)], "outcome": .string(outcome.rawValue)]
-		let note = note.trimmingCharacters(in: .whitespacesAndNewlines)
-		if !note.isEmpty { result["note"] = .string(note) }
-		if outcome == .fail, let failedStep {
+		let text = restoring == nil ? note.trimmingCharacters(in: .whitespacesAndNewlines) : note
+		if !text.isEmpty { result["note"] = .string(text) }
+		if let steps {
+			result["steps"] = .array(steps.map(\.json))
+		} else if outcome == .fail, let failedStep {
 			guard execution.content.steps.contains(where: { $0.id == failedStep }) else {
-				return .refused("The marked step is not in this pinned case.")
+				throw ClientError.refused(code: "invalid", message: "The marked step is not in this pinned case.")
 			}
 			result["steps"] = [["step": .string(failedStep), "outcome": "fail"]]
 		}
 		if let corrects { result["corrects"] = .number(Double(corrects)) }
-		let reply: Wire.RunReportReply = try await server.write(
-			"report", in: key,
-			[
-				"run": .string(execution.run), "results": [.object(result)]
-			])
-		if let why = reply.rejected.first?.reason ?? reply.declined.first?.reason { return .refused(why) }
-		guard let saved = reply.results.first, saved > 0 else { return .refused("The result was not recorded.") }
-		return .recorded(saved)
+		if let restoring { result["attachments"] = .array(try await reportAttachments(result: restoring)) }
+		return RunReportSubmission(execution: execution, outcome: outcome, note: note,
+			failedStep: failedStep, corrects: corrects, steps: steps,
+			input: ["run": .string(execution.run), "results": [.object(result)]])
+	}
+
+	package func report(_ submission: RunReportSubmission, recovering: Bool = false) async throws -> RunReportOutcome {
+		do {
+			let reply: Wire.RunReportReply
+			if recovering {
+				let command: Wire.RunReportCommand = try await server.read("command", in: key,
+					["cmd": .string(submission.command)])
+				switch command.state {
+				case "done":
+					guard let recorded = command.reply else { throw ClientError.unreadable }
+					reply = recorded
+				case "none":
+					reply = try await server.write("report", in: key, submission.input,
+						command: submission.command, delivery: submission.delivery)
+				case "begun":
+					throw ClientError.unreachable("The report is still being recorded. Retry to ask again.")
+				default: throw ClientError.unreadable
+				}
+			} else {
+				reply = try await server.write("report", in: key, submission.input,
+					command: submission.command, delivery: submission.delivery)
+			}
+			if let why = reply.rejected.first?.reason ?? reply.declined.first?.reason { return .refused(why) }
+			guard let saved = reply.results.first, saved > 0 else { return .refused("The result was not recorded.") }
+			return .recorded(saved)
+		} catch {
+			if case ClientError.refused(let code, _) = error, code != "internal",
+				submission.delivery.definitelyRejected { return .refused(error.shown) }
+			submission.delivery.uncertain()
+			throw error
+		}
 	}
 
 	package func runFolders() async throws -> [String] {

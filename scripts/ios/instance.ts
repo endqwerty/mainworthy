@@ -128,10 +128,14 @@ export async function testInstance(): Promise<TestInstance> {
 					},
 					"/test/plan-connection": async (req) => {
 						const parsed = z
-							.object({ project: z.string(), mode: z.enum(["hold", "unreadable", "normal", "status"]) })
+							.object({
+								project: z.string(),
+								mode: z.enum(["hold", "unreadable", "normal", "status"]),
+								operation: z.enum(["plan", "report"]).default("plan"),
+							})
 							.safeParse(await req.json());
 						if (!parsed.success) return Response.json({ ok: false }, { status: 400 });
-						const path = `/api/p/${encodeURIComponent(parsed.data.project)}/plan`;
+						const path = `/api/p/${encodeURIComponent(parsed.data.project)}/${parsed.data.operation}`;
 						if (parsed.data.mode !== "status") {
 							const previous = plans.get(path);
 							if (previous?.kind === "hold") previous.release();
@@ -151,7 +155,7 @@ export async function testInstance(): Promise<TestInstance> {
 								const reply = await fetch(new Request(`${made.url}${url.pathname}${url.search}`, request), {
 									redirect: "manual",
 								});
-								if (delivery?.kind === "unreadable") return new Response("unreadable plan receipt");
+								if (delivery?.kind === "unreadable") return new Response("unreadable write receipt");
 								if (delivery?.kind === "hold") {
 									delivery.arrived = true;
 									await delivery.wait;

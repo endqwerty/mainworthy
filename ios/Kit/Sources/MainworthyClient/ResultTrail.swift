@@ -33,6 +33,21 @@ public struct ResultStep: Equatable, Sendable {
 		attachment = wire.attachment
 	}
 
+	package var json: JSONValue {
+		var value: [String: JSONValue] = ["step": .string(step), "outcome": .string(outcome.rawValue)]
+		if let durationMs { value["durationMs"] = .number(Double(durationMs)) }
+		if let attachment { value["attachment"] = .number(Double(attachment)) }
+		if let actions {
+			value["actions"] = .array(actions.map { action in
+				var item: [String: JSONValue] = ["text": .string(action.text)]
+				if let outcome = action.outcome { item["outcome"] = .string(outcome.rawValue) }
+				if let duration = action.durationMs { item["durationMs"] = .number(Double(duration)) }
+				return .object(item)
+			})
+		}
+		return .object(value)
+	}
+
 	/// Missing and zero durations have no heat. Equal durations have equal heat.
 	public func heat(in steps: [ResultStep]) -> Double {
 		let maximum = steps.compactMap(\.durationMs).max() ?? 0
@@ -62,4 +77,23 @@ extension ProjectClient {
 		}
 		return ResultScreenshot(name: selected.name, type: selected.type, data: data)
 	}
+	/// Keep every file in the server's order so trail attachment indices remain valid on restoration.
+	package func reportAttachments(result: Int) async throws -> [JSONValue] {
+		let list: Wire.AttachmentList = try await server.read("attachment", in: key, ["result": .number(Double(result))])
+		guard list.kind == "list" else { throw ClientError.unreadable }
+		var attachments: [JSONValue] = []
+		for selected in list.items {
+			guard selected.result == result else { throw ClientError.unreadable }
+			let file: Wire.AttachmentFile = try await server.read("attachment", in: key, [
+				"result": .number(Double(result)), "id": .number(Double(selected.id)),
+			])
+			guard file.kind == "file", file.attachment == selected,
+				Data(base64Encoded: file.data) != nil else { throw ClientError.unreadable }
+			var input: [String: JSONValue] = ["name": .string(selected.name), "data": .string(file.data)]
+			if let at = selected.at { input["at"] = .string(at) }
+			attachments.append(.object(input))
+		}
+		return attachments
+	}
+
 }

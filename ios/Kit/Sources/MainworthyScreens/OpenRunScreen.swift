@@ -18,7 +18,12 @@ public final class OpenRunScreen: ProjectScreen {
 	public private(set) var document = Document.none
 	public private(set) var busy = false
 	public private(set) var notice: String?
-	public private(set) var canUndo = false
+	public var canUndo: Bool { last != nil }
+	public var hasPendingReport: Bool { !pending.isEmpty }
+	public func hasPendingReport(for execution: RunExecution) -> Bool { pending[execution.slot.id] != nil }
+	public func latestSlot(_ execution: RunExecution) -> RunSlot {
+		slots.first { $0.id == execution.slot.id } ?? execution.slot
+	}
 	public var note: String {
 		get { draftSlot.flatMap { drafts[$0]?.note } ?? "" }
 		set { if let draftSlot { drafts[draftSlot, default: Draft()].note = newValue } }
@@ -35,6 +40,12 @@ public final class OpenRunScreen: ProjectScreen {
 	private var own: [Int: OwnResult] = [:]
 	private var draftSlot: Int?
 	private var drafts: [Int: Draft] = [:]
+	private var pending: [Int: Pending] = [:]
+	private struct Pending {
+		let submission: RunReportSubmission
+		let previous: OwnResult?
+		let isUndo: Bool
+	}
 
 	private struct Draft {
 		var note = ""
@@ -46,16 +57,18 @@ public final class OpenRunScreen: ProjectScreen {
 		let outcome: FilledOutcome
 		let note: String?
 		let atStep: String?
+		let steps: [ResultStep]?
 
-		init(result: Int, outcome: FilledOutcome, note: String?, atStep: String?) {
+		init(result: Int, outcome: FilledOutcome, note: String?, atStep: String?, steps: [ResultStep]?) {
 			self.result = result
 			self.outcome = outcome
 			self.note = note
 			self.atStep = atStep
+			self.steps = steps
 		}
 
 		init(_ fill: RunFill) {
-			self.init(result: fill.result, outcome: fill.outcome, note: fill.note, atStep: fill.atStep)
+			self.init(result: fill.result, outcome: fill.outcome, note: fill.note, atStep: fill.atStep, steps: fill.steps)
 		}
 	}
 
@@ -81,7 +94,7 @@ public final class OpenRunScreen: ProjectScreen {
 	public var firstUnfilled: RunSlot? { slots.first { $0.fills.isEmpty && $0.caseRef != nil } }
 	public var isReadOnly: Bool { !permission.may(.produce) }
 	/// Whether a pipeline, an agent or another person filled this slot and this person has not: the slot is left
-	/// to that evidence, as the web app leaves it. Read from the latest slots, so a fill that arrives counts.
+	/// to that evidence for recording. Read from the latest slots, so a fill that arrives counts.
 	public func isLeftToOthers(_ slot: RunSlot) -> Bool {
 		let latest = slots.first { $0.id == slot.id } ?? slot
 		return !latest.fills.isEmpty && latest.ownFill(by: person) == nil
@@ -103,6 +116,10 @@ public final class OpenRunScreen: ProjectScreen {
 				guard mine == reads else { return false }
 				if let fresh { run = fresh }
 				self.slots = slots
+				if let saved = last, pending[saved.execution.slot.id] == nil,
+					slots.first(where: { $0.id == saved.execution.slot.id })?.ownFill(by: person)?.result != saved.result {
+					last = nil
+				}
 				acceptedRead = mine
 				loading = .done
 				return true
@@ -136,7 +153,7 @@ public final class OpenRunScreen: ProjectScreen {
 	}
 
 	public func mark(_ step: Step) {
-		guard !busy, case .read(let execution) = document, mayRecord(execution),
+		guard !busy, case .read(let execution) = document, mayRecord(execution), !hasPendingReport(for: execution),
 			execution.content.steps.contains(where: { $0.id == step.id })
 		else { return }
 		drafts[execution.slot.id, default: Draft()].failedStep = failedStep == step.id ? nil : step.id
@@ -144,49 +161,78 @@ public final class OpenRunScreen: ProjectScreen {
 
 	@discardableResult
 	public func record(_ execution: RunExecution, outcome: ManualOutcome) async -> Bool {
-		guard !busy, mayRecord(execution), case .read(let shown) = document, shown == execution else {
-			return false
-		}
+		guard !busy else { return false }
+		if let waiting = pending[execution.slot.id] { return await send(waiting, recovering: true) }
+		guard mayRecord(execution), case .read(let shown) = document, shown == execution else { return false }
 		busy = true
 		defer { busy = false }
-		let sentNote = note
-		let sentStep = failedStep
-		let shownPrevious = execution.slot.ownFill(by: person).map(OwnResult.init)
+		let known = latestSlot(execution).ownFill(by: person).map(OwnResult.init)
 		let local = own[execution.slot.id]
-		let previous = (local?.result ?? 0) > (shownPrevious?.result ?? 0) ? local : shownPrevious
-		let corrects = previous?.result
+		let previous = (local?.result ?? 0) > (known?.result ?? 0) ? local : known
 		do {
-			switch try await project.report(
-				execution, outcome: outcome, note: sentNote, failedStep: sentStep, corrects: corrects)
-			{
+			let submission = try await project.prepareReport(execution, outcome: outcome, note: note,
+				failedStep: failedStep, corrects: previous?.result)
+			let waiting = Pending(submission: submission, previous: previous, isUndo: false)
+			pending[execution.slot.id] = waiting
+			return await deliver(waiting, recovering: false)
+		} catch { notice = error.shown; return false }
+	}
+
+	public func retryReport() async {
+		guard !busy else { return }
+		let selected = draftSlot.flatMap { pending[$0] } ?? pending.sorted { $0.key < $1.key }.first?.value
+		if let selected { _ = await send(selected, recovering: true) }
+	}
+
+	private func send(_ waiting: Pending, recovering: Bool) async -> Bool {
+		busy = true
+		defer { busy = false }
+		return await deliver(waiting, recovering: recovering)
+	}
+
+	private func deliver(_ waiting: Pending, recovering: Bool) async -> Bool {
+		let submission = waiting.submission
+		let execution = submission.execution
+		do {
+			switch try await project.report(submission, recovering: recovering) {
 			case .refused(let why):
+				pending[execution.slot.id] = nil
 				notice = why
 				return false
 			case .recorded(let result):
-				own[execution.slot.id] = OwnResult(
-					result: result, outcome: .manual(outcome), note: sentNote,
-					atStep: outcome == .fail ? sentStep : nil)
-				last = Saved(execution: execution, result: result, previous: previous)
-				canUndo = true
-				notice =
-					"\(execution.slot.caseRef ?? "Case") · \(outcome.label) recorded on pinned v\(execution.slot.version)."
-				if note == sentNote { note = "" }
-				if failedStep == sentStep { drafts[execution.slot.id, default: Draft()].failedStep = nil }
-				// Every read, including this fallback, drops a reply that another read overtook.
-				let before = reads
-				if !(await read()) { _ = await read(slotsOnly: true) }
-				// If the fallback was overtaken too, wait for that reader instead of using old slots.
-				while acceptedRead <= before {
-					let waitingFor = reads
-					guard let latestRead else { return true }
-					_ = await latestRead.value
-					if waitingFor == reads && acceptedRead <= before { return true }
+				pending[execution.slot.id] = nil
+				own[execution.slot.id] = OwnResult(result: result, outcome: .manual(submission.outcome),
+					note: submission.note, atStep: submission.outcome == .fail ? submission.failedStep : nil, steps: submission.steps)
+				if waiting.isUndo {
+					if last?.result == submission.corrects { last = nil }
+					notice = waiting.previous == nil
+						? "The result is corrected to skipped. A skipped slot counts as no proof."
+						: "The earlier outcome is restored by a correction."
+					await refresh()
+					await showCorrected(execution)
+				} else {
+					if result > (last?.result ?? 0) {
+						last = Saved(execution: execution, result: result, previous: waiting.previous)
+					}
+					notice = "\(execution.slot.caseRef ?? "Case") · \(submission.outcome.label) recorded on pinned v\(execution.slot.version)."
+					if drafts[execution.slot.id]?.note == submission.note { drafts[execution.slot.id]?.note = "" }
+					if drafts[execution.slot.id]?.failedStep == submission.failedStep {
+						drafts[execution.slot.id]?.failedStep = nil
+					}
+					let before = reads
+					if !(await read()) { _ = await read(slotsOnly: true) }
+					while acceptedRead <= before {
+						let waitingFor = reads
+						guard let latestRead else { return true }
+						_ = await latestRead.value
+						if waitingFor == reads && acceptedRead <= before { return true }
+					}
+					await advance()
 				}
-				await advance()
 				return true
 			}
 		} catch {
-			notice = error.shown
+			notice = "This report's outcome is unknown. Retry checks the same command before another result. " + error.shown
 			return false
 		}
 	}
@@ -215,7 +261,17 @@ public final class OpenRunScreen: ProjectScreen {
 	}
 
 	public func undo() async {
-		guard !busy, let saved = last, mayRecord(saved.execution) else { return }
+		guard !busy, let saved = last else { return }
+		if let waiting = pending[saved.execution.slot.id] {
+			_ = await send(waiting, recovering: true)
+			return
+		}
+		guard mayRecord(saved.execution) else { return }
+		busy = true
+		defer { busy = false }
+		// Undo must still name the standing result, even if the stream has not refreshed this screen yet.
+		guard await read() else { return }
+		guard let current = last, current.result == saved.result else { return }
 		let outcome: ManualOutcome
 		if let previous = saved.previous {
 			guard case .manual(let prior) = previous.outcome else {
@@ -223,44 +279,28 @@ public final class OpenRunScreen: ProjectScreen {
 				return
 			}
 			outcome = prior
-		} else {
-			outcome = .skip
-		}
-		busy = true
-		defer { busy = false }
+		} else { outcome = .skip }
 		do {
-			switch try await project.report(
-				saved.execution, outcome: outcome, note: saved.previous?.note ?? "Withdrawn by the author",
-				failedStep: saved.previous?.atStep, corrects: saved.result
-			) {
-			case .refused(let why): notice = why
-			case .recorded(let result):
-				own[saved.execution.slot.id] = OwnResult(
-					result: result, outcome: .manual(outcome),
-					note: saved.previous?.note ?? "Withdrawn by the author", atStep: saved.previous?.atStep
-				)
-				last = nil
-				canUndo = false
-				notice =
-					saved.previous == nil
-					? "The result is corrected to skipped. A skipped slot counts as no proof."
-					: "The earlier outcome is restored by a correction."
-				await refresh()
-				let slot = slots.first { $0.id == saved.execution.slot.id } ?? saved.execution.slot
-				// The page and its draft move to the corrected slot together, as `execute` moves them: a case on
-				// the screen is never paired with another case's note, also when its pinned case cannot be read.
-				documents += 1
-				let mine = documents
-				document = .reading(slot.id)
-				draftSlot = slot.id
-				do {
-					let execution = try await project.execution(of: slot, in: run.ref)
-					if mine == documents { document = .read(execution) }
-				} catch is CancellationError {
-				} catch {
-					if mine == documents { document = .failed(slot, error.shown) }
-				}
-			}
+			let submission = try await project.prepareReport(saved.execution, outcome: outcome,
+				note: saved.previous == nil ? "Withdrawn by the author" : (saved.previous?.note ?? ""),
+				failedStep: saved.previous?.atStep,
+				corrects: saved.result, steps: saved.previous?.steps, restoring: saved.previous?.result)
+			let waiting = Pending(submission: submission, previous: saved.previous, isUndo: true)
+			pending[saved.execution.slot.id] = waiting
+			_ = await deliver(waiting, recovering: false)
 		} catch { notice = error.shown }
+	}
+
+	private func showCorrected(_ prior: RunExecution) async {
+		let slot = latestSlot(prior)
+		documents += 1
+		let mine = documents
+		document = .reading(slot.id)
+		draftSlot = slot.id
+		do {
+			let execution = try await project.execution(of: slot, in: run.ref)
+			if mine == documents { document = .read(execution) }
+		} catch is CancellationError {
+		} catch { if mine == documents { document = .failed(slot, error.shown) } }
 	}
 }
