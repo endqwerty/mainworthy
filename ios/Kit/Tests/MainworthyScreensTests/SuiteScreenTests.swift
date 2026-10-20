@@ -703,6 +703,110 @@ struct SuiteEditorRetryTests {
 	}
 }
 
+@Suite("Case saves with uncertain delivery", .enabled(if: Live.isRunning, "needs `bun scripts/ios.ts test`"))
+@MainActor
+struct CaseSaveDeliveryTests {
+	enum Fault: Sendable {
+		case internalReply, lost, unreadable, statusless, lostThenRefused, refused
+	}
+
+	actor Replies: Transport {
+		let real = URLSessionTransport()
+		let fault: Fault
+		private(set) var inputs: [JSONValue] = []
+		init(_ fault: Fault) { self.fault = fault }
+
+		func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+			guard request.url?.path.hasSuffix("/propose") == true else { return try await real.send(request) }
+			inputs.append(try JSONDecoder().decode(JSONValue.self, from: request.httpBody ?? Data()))
+			let attempt = inputs.count
+			func reply(_ body: String, status: Int) -> (Data, HTTPURLResponse) {
+				(Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
+			}
+			if (fault == .refused && attempt == 1) || (fault == .lostThenRefused && attempt == 2) {
+				return reply(#"{"ok":false,"error":{"code":"forbidden","message":"Save refused."}}"#, status: 403)
+			}
+			let saved = try await real.send(request)
+			if fault == .lost && attempt <= 2 || fault == .lostThenRefused && attempt == 1 {
+				throw URLError(.networkConnectionLost)
+			}
+			guard attempt == 1 else { return saved }
+			switch fault {
+			case .internalReply:
+				return reply(#"{"ok":false,"error":{"code":"internal","message":"Receipt unavailable."}}"#, status: 500)
+			case .unreadable: return reply(#"{"ok":true,"result":{}}"#, status: 200)
+			case .statusless:
+				return reply(#"{"ok":false,"error":{"code":"conflict","message":"Receipt unavailable."}}"#, status: 200)
+			default: return saved
+			}
+		}
+
+		func lines(_ request: URLRequest) async throws -> (AsyncThrowingStream<String, any Error>, HTTPURLResponse) {
+			try await real.lines(request)
+		}
+	}
+
+	@Test("a create committed before an internal reply is saved exactly once on Retry")
+	func committedInternal() async throws { try await retry(.internalReply) }
+
+	@Test("uncertain delivery keeps the same save and input",
+		arguments: [Fault.lost, .unreadable, .statusless, .lostThenRefused])
+	func uncertain(_ fault: Fault) async throws { try await retry(fault) }
+
+	private func retry(_ fault: Fault) async throws {
+		let key = try await Live.project()
+		let transport = Replies(fault)
+		let client = try await Live.signedIn(transport: transport).project(key)
+		let editor = CaseEditorScreen(project: client, source: .create(folder: "Checkout/Coupons"))
+		editor.content = CaseContent(title: "Saved once despite uncertain delivery", pre: "Open the shop",
+			steps: [Step(id: "a0", action: "Read the saved case", expected: "One case")])
+		editor.reason = "Keep this exact save"
+		let typed = editor.content
+		#expect(await editor.save() == nil)
+		#expect(editor.isRetrying && editor.locked && editor.maySave && !editor.settled)
+		#expect(editor.notice?.contains("Retry will send the same save.") == true)
+		#expect(try await client.cases(text: typed.title).items.count == 1)
+		#expect(editor.content == typed && editor.reason == "Keep this exact save")
+		guard case .adopted(let stamp) = await editor.save(), let stamp else {
+			Issue.record("Retry did not recover the saved case: \(editor.notice ?? "no notice")"); return
+		}
+		let requests = await transport.inputs
+		#expect(requests.count == (fault == .lost || fault == .lostThenRefused ? 3 : 2))
+		let first = try #require(requests.first)
+		#expect(first["cmd"]?.string?.count == 36)
+		for request in requests { #expect(request == first) }
+		let cases = try await client.cases(text: typed.title).items
+		#expect(cases.map(\.ref) == [stamp.ref])
+		#expect(try await client.caseDocument(stamp.ref).content == typed)
+		#expect(try await client.caseHistory(stamp.ref).map(\.version) == [1])
+		#expect(editor.savedDocument?.ref == stamp.ref && editor.settled && !editor.maySave)
+	}
+
+	@Test("a definite 4xx refusal permits changes and a new save command")
+	func definiteRefusal() async throws {
+		let key = try await Live.project()
+		let transport = Replies(.refused)
+		let client = try await Live.signedIn(transport: transport).project(key)
+		let editor = CaseEditorScreen(project: client, source: .create(folder: nil))
+		editor.content.title = "Refused draft"
+		#expect(await editor.save() == nil)
+		#expect(!editor.isRetrying && !editor.locked && editor.maySave)
+		#expect(editor.notice == "Save refused.")
+		#expect(try await client.cases(text: "Refused draft").items.isEmpty)
+		editor.content.title = "Corrected draft"
+		guard case .adopted(let stamp) = await editor.save(), let stamp else {
+			Issue.record("the corrected draft was not saved"); return
+		}
+		let requests = await transport.inputs
+		#expect(requests.count == 2)
+		#expect(requests.first?["cmd"]?.string?.count == 36)
+		#expect(requests.last?["cmd"]?.string?.count == 36)
+		#expect(requests.first?["cmd"] != requests.last?["cmd"])
+		#expect(try await client.cases(text: "Corrected draft").items.map(\.ref) == [stamp.ref])
+		#expect(editor.savedDocument?.content.title == "Corrected draft")
+	}
+}
+
 @Suite("The Suite's other reads")
 @MainActor
 struct SuiteOtherReadTests {
