@@ -912,6 +912,48 @@ test("request validation, project permissions and result ownership are checked b
 	expect(h.app.db.raw.query("SELECT count(*) AS n FROM tracker_requests").get()).toEqual({ n: 0 });
 });
 
+test("a producer exports only its own result unless it can read the project", () => {
+	const ownerResult = failure();
+	const producer = h.actor("producer", "agent", ["produce"]);
+	const foreign = h.raw("tracker", { do: "create", result: ownerResult, cmd: "tracker-foreign-result" }, producer);
+	expect(foreign).toMatchObject({
+		ok: false,
+		error: { code: "forbidden" },
+	});
+	const absent = h.raw(
+		"tracker",
+		{ do: "create", result: ownerResult + 1_000_000, cmd: "tracker-absent-result" },
+		producer,
+	);
+	expect(absent).toEqual(foreign);
+	expect(h.app.db.raw.query("SELECT count(*) AS n FROM tracker_requests").get()).toEqual({ n: 0 });
+
+	h.call(
+		"report",
+		{
+			target: { session: "producer-result" },
+			results: [{ test: { key: "producer-result" }, outcome: "fail", failure: { message: "Producer failure" } }],
+		},
+		producer,
+	);
+	const ownResult = h.app.db.raw
+		.query<{ id: number }, [number]>("SELECT id FROM results WHERE actor = ?")
+		.get(producer.id)?.id;
+	if (!ownResult) throw new Error("expected the producer's result");
+	expect(
+		h.call<TrackerReceipt>("tracker", { do: "create", result: ownResult, cmd: "tracker-own-result" }, producer).state,
+	).toBe("queued");
+
+	const readerProducer = h.actor("reader-producer", "agent", ["read", "produce"]);
+	expect(
+		h.call<TrackerReceipt>(
+			"tracker",
+			{ do: "create", result: ownerResult, cmd: "tracker-readable-result" },
+			readerProducer,
+		).state,
+	).toBe("queued");
+});
+
 test("delivery releases the writer while waiting and overlapping jobs send only once", async () => {
 	const result = failure();
 	h.call("tracker", { do: "create", result, cmd: "tracker-wait-001" });

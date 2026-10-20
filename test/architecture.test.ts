@@ -162,6 +162,8 @@ describe("fresh schema image", () => {
 			const removed = spyOn(console, "error").mockImplementation(() => {});
 			const older = [`${path}.v1.bak`, `${path}.v2.bak`];
 			const similar = join(directory, "mainworthyXdb.v1.bak");
+			const unrelatedDirectory = `${path}.v3.bak.dir`;
+			const unrelatedLink = `${path}.v4.bak.link`;
 			const unrelated = [
 				similar,
 				`${path}.other.v1.bak`,
@@ -175,8 +177,8 @@ describe("fresh schema image", () => {
 			];
 			try {
 				for (const file of [...older, ...unrelated]) fs.writeFileSync(file, "untouched");
-				fs.mkdirSync(`${path}.v3.bak`);
-				fs.symlinkSync(similar, `${path}.v4.bak`);
+				fs.mkdirSync(unrelatedDirectory);
+				fs.symlinkSync(similar, unrelatedLink);
 				for (const entry of MIGRATIONS.slice(0, -1)) db.exec(entry.sql);
 				db.raw.query("INSERT INTO meta VALUES ('schema_version', ?)").run(String(previous));
 				db.exec("INSERT INTO meta VALUES ('preserved', 'kept')");
@@ -206,8 +208,8 @@ describe("fresh schema image", () => {
 				try {
 					for (const file of older) expect(fs.existsSync(file)).toBe(failFirst);
 					for (const file of unrelated) expect(readFileSync(file, "utf8")).toBe("untouched");
-					expect(fs.lstatSync(`${path}.v3.bak`).isDirectory()).toBe(true);
-					expect(fs.lstatSync(`${path}.v4.bak`).isSymbolicLink()).toBe(true);
+					expect(fs.lstatSync(unrelatedDirectory).isDirectory()).toBe(true);
+					expect(fs.lstatSync(unrelatedLink).isSymbolicLink()).toBe(true);
 					expect(removed.mock.calls.map((call) => call[0]).sort()).toEqual(
 						failFirst ? [] : older.map((file) => `[mainworthy] removed upgrade copy ${JSON.stringify(file)}`).sort(),
 					);

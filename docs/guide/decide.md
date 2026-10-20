@@ -458,7 +458,7 @@ mainworthy tracker --json '{"do":"create","result":123,"cmd":"defect-result-123"
 mainworthy tracker-status --id defect-result-123
 ```
 
-The request needs `produce`. Reading its status needs `read`.
+The request needs `produce`. Without `read`, an actor can send only a result that it recorded itself. Sending another actor's result also needs `read`, because the tracker request contains that result's failure and case details. Reading a request's status needs `read`.
 The server sends up to twenty queued requests once a minute.
 When stopping, it waits for the request already in flight and leaves queued requests for the next start.
 If saving that reply fails, the server logs the error once and finishes shutting down.

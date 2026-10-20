@@ -1,13 +1,62 @@
 // The only module that talks to SQLite. Everything above it calls `get`, `all`, `run` and `transaction`.
 import { Database, type Statement as PreparedStatement, type SQLQueryBindings } from "bun:sqlite";
-import { mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync, readdirSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 
 export type SqlValue = string | number | bigint | boolean | null | Uint8Array;
 export type Params = Record<string, SqlValue> | readonly SqlValue[];
 
 /** The one database file of an instance. */
 export const databasePath = (dataDir: string): string => join(dataDir, "mainworthy.db");
+
+/** Protect a database before SQLite reads or writes it; an existing file is never truncated. */
+export function prepareDatabaseFile(path: string, access: "create" | "existing" | "exclusive"): void {
+	const protect = (file: string, flags: number): void => {
+		const fd = openSync(file, flags | constants.O_NOFOLLOW | constants.O_NONBLOCK, 0o600);
+		try {
+			const stat = fstatSync(fd);
+			if (!stat.isFile()) throw new Error("a database must be a regular file");
+			if (process.platform !== "win32" && typeof process.geteuid === "function" && stat.uid !== process.geteuid()) {
+				throw new Error("a database must be owned by the server user");
+			}
+			fchmodSync(fd, 0o600);
+		} finally {
+			closeSync(fd);
+		}
+	};
+	protect(
+		path,
+		constants.O_RDONLY |
+			(access === "existing" ? 0 : constants.O_CREAT) |
+			(access === "exclusive" ? constants.O_EXCL : 0),
+	);
+	for (const suffix of ["-wal", "-shm", "-journal"]) {
+		try {
+			protect(`${path}${suffix}`, constants.O_RDONLY);
+		} catch (error) {
+			if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+		}
+	}
+}
+
+/** Create a new private database file before any callback can write sensitive bytes to it. */
+export function createPrivateDatabaseFile<T>(path: string, write: (privatePath: string) => T): T {
+	prepareDatabaseFile(path, "exclusive");
+	return write(path);
+}
+
+/** Retained upgrade copies and interrupted copies carry the same private data as the live file. */
+export function protectDatabaseCopies(path: string): void {
+	const prefix = `${basename(path)}.v`;
+	for (const file of readdirSync(dirname(path))) {
+		if (
+			file.startsWith(prefix) &&
+			/^[1-9]\d*\.bak(?:\.[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\.tmp)?$/.test(file.slice(prefix.length))
+		) {
+			prepareDatabaseFile(join(dirname(path), file), "existing");
+		}
+	}
+}
 
 /** Every SQL text the server can run, collected at module load so a test can prepare each against the schema. */
 const DECLARED = new Set<string>();
@@ -34,6 +83,8 @@ export type RunResult = { changes: number; lastId: number };
  * file: false means another connection has it open, and nothing was changed.
  */
 export function foldLog(path: string): boolean {
+	protectDatabaseCopies(path);
+	prepareDatabaseFile(path, "existing");
 	const raw = new Database(path, { strict: true });
 	try {
 		raw.exec("PRAGMA busy_timeout = 0");
@@ -64,7 +115,11 @@ export class Db {
 	 * committed, however long a write on another connection is taking.
 	 */
 	constructor(source: string | Buffer, options: { reader?: boolean } = {}) {
-		if (typeof source === "string" && source !== ":memory:") mkdirSync(dirname(source), { recursive: true });
+		if (typeof source === "string" && source !== ":memory:") {
+			mkdirSync(dirname(source), { recursive: true });
+			protectDatabaseCopies(source);
+			prepareDatabaseFile(source, "create");
+		}
 		this.raw =
 			typeof source === "string"
 				? new Database(source, { create: true, strict: true })
