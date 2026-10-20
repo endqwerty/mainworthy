@@ -215,8 +215,10 @@ Planning needs the project's `plan` capability. To plan a run, follow these step
 If the reply is lost or cannot be read, the app keeps the submitted plan and locks its choices.
 **Retry plan** recovers the original command or sends the same request, so retrying does not plan another run.
 If the run was planned but cannot be read, the app keeps its reference and offers **Read run again**.
-**Cancel** closes the planner. A late reply does not open the run; reopen the planner to recover or open it.
-The saved plan stays here while this project's screen is open. It is not kept after the app closes.
+**Cancel** closes the planner. A late successful reply adds the run to the list without opening it.
+Open it from **Runs**. Reopen the planner to recover an uncertain outcome or retry a failed run read.
+Once the run is read successfully, the planner forgets the submitted plan so **+** starts a fresh one.
+An unresolved plan stays while this project's screen is open. It is not kept after the app closes.
 A selection with no cases is refused with the server's sentence.
 
 ## Read a change's gate

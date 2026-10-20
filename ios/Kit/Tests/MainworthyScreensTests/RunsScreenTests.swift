@@ -209,11 +209,10 @@ struct RunsScreenTests {
 		let screen = try await screen()
 		await screen.readFolders()
 		#expect(screen.folders.contains("Checkout"))
-		let presentation = screen.presentPlanner()
 		let planned = try #require(await screen.plan(name: "Regression on phone", selection: .tag("regression")))
 		#expect(screen.notice == "\(planned.ref) planned with 3 slots; 0 already filled.")
 		#expect(screen.runs.first?.ref == planned.ref)
-		#expect(screen.openedPlan(in: presentation))
+		#expect(screen.savedPlan == nil && screen.planSubmission == nil)
 		#expect(await screen.plan(name: "Nobody", selection: .text("nonexistent selection")) == nil)
 		#expect(screen.notice?.lowercased().contains("no active case") == true)
 	}

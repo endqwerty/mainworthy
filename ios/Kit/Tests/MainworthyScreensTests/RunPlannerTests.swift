@@ -121,27 +121,22 @@ struct RunPlannerTests {
 		#expect(receipt.slots == 6)
 		await transport.reconnect()
 		#expect(await screen.readPlannedRun()?.ref == receipt.ref)
+		#expect(screen.savedPlan == nil && screen.planSubmission == nil)
 		#expect(await transport.inputs.count == 1)
 		#expect(await transport.lookups == 0)
 	}
 
-	@Test("Cancel prevents a late success from opening and keeps its receipt for a new presentation")
-	func cancelled() async throws {
+	@Test("a late successful plan refreshes the list and clears its submitted choices")
+	func lateSuccess() async throws {
 		let transport = PlanReplies(.held)
 		let (screen, _) = try await screen(transport)
-		let cancelled = screen.presentPlanner()
 		let planning = Task { await screen.plan(name: "Late plan", selection: .all) }
 		await transport.wasAsked()
 		#expect(screen.planning && screen.planSubmission?.name == "Late plan")
-		screen.cancelPlanner(cancelled)
 		await transport.release()
 		let run = try #require(await planning.value)
-		#expect(!screen.openedPlan(in: cancelled))
-		#expect(screen.savedPlan?.ref == run.ref)
-		let reopened = screen.presentPlanner()
-		#expect(await screen.readPlannedRun()?.ref == run.ref)
-		#expect(!screen.openedPlan(in: cancelled))
-		#expect(screen.openedPlan(in: reopened))
+		#expect(run.name == "Late plan")
+		#expect(screen.runs.first?.ref == run.ref)
 		#expect(screen.savedPlan == nil && screen.planSubmission == nil)
 		#expect(await transport.inputs.count == 1)
 	}

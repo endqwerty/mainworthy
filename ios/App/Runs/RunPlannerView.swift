@@ -133,7 +133,7 @@ struct RunPlannerView: View {
 		switch screen.caseCount {
 		case .idle: Text("Choose cases to count.")
 		case .loading: Text("Counting matching cases…")
-		case .counted(let count): Text("\(count) matching cases").accessibilityIdentifier("run-case-count")
+		case .counted(let count): Text("\(count) matching \(count == 1 ? "case" : "cases")").accessibilityIdentifier("run-case-count")
 		case .failed(let why): Text("Cases could not be counted. " + why).accessibilityIdentifier("run-count-error")
 		}
 	}
