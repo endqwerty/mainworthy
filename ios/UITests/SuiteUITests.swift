@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 final class SuiteUITests: XCTestCase {
 	private let environment = ProcessInfo.processInfo.environment
@@ -203,6 +204,94 @@ final class SuiteUITests: XCTestCase {
 		let replaced = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", text), object: field)
 		XCTAssertEqual(XCTWaiter.wait(for: [replaced], timeout: 5), .completed,
 			"Expected \(field.identifier) to contain \(text); its value is \(String(describing: field.value))")
+	}
+
+	@MainActor func testMethodBadges() async throws {
+		try await checkMethodBadges(category: .large, name: "default")
+		try await checkMethodBadges(category: .accessibilityLarge, name: "accessibility")
+	}
+
+	@MainActor private func checkMethodBadges(category: UIContentSizeCategory, name: String) async throws {
+		XCUIDevice.shared.orientation = .portrait
+		let project = try await makeProject()
+		let rawFound = try await operation(project, "find", ["in": "cases", "text": "Expired coupon"])
+		let found = try XCTUnwrap(rawFound as? [String: Any])
+		let item = try XCTUnwrap((found["items"] as? [[String: Any]])?.first)
+		let ref = try XCTUnwrap(item["ref"] as? String)
+		let body: [String: Any] = ["title": "Expired coupon is rejected", "pre": "",
+			"steps": [["id": "s1", "action": "Open cart", "expected": NSNull()]],
+			"methods": ["human", "auto"], "automate": "none"]
+		_ = try await operation(project, "propose", ["edits": [["op": "edit", "case": ref, "base": 1, "body": body]]])
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", try XCTUnwrap(environment["MAINWORTHY_TEST_URL"]),
+			"-UIPreferredContentSizeCategoryName", category.rawValue]
+		app.launch()
+		try signIn(app)
+		app.openProject(project)
+		app.openTab("Cases")
+		XCTAssertTrue(app.buttons["folder-Checkout"].waitForExistence(timeout: 10))
+		app.buttons["folder-Checkout"].tap()
+		app.buttons["folder-Checkout/Coupons"].tap()
+		let title = app.staticTexts["Expired coupon is rejected"]
+		XCTAssertTrue(title.waitForExistence(timeout: 10))
+		title.tap()
+		let caseFrames = methodBadgeFrames(app)
+		shot("methods-case-\(name)")
+		let edit = app.buttons["case-edit"]
+		for _ in 0..<6 where !edit.isHittable { app.swipeUp() }
+		XCTAssertTrue(edit.isHittable)
+		edit.tap()
+		let field = app.textFields["editor-title"]
+		XCTAssertTrue(field.waitForExistence(timeout: 10))
+		replaceParagraph(field, with: "My phone title")
+		var current = body
+		current["title"] = "Current phone title"
+		_ = try await operation(project, "propose", ["edits": [["op": "edit", "case": ref, "base": 2, "body": current]]])
+		app.buttons["editor-save"].tap()
+		let mine = app.buttons["conflict-mine-title"]
+		XCTAssertTrue(mine.waitForExistence(timeout: 10))
+		mine.tap()
+		let conflictFrames = methodBadgeFrames(app)
+		shot("methods-conflict-\(name)")
+		let font = UIFont.preferredFont(forTextStyle: .subheadline,
+			compatibleWith: UITraitCollection(preferredContentSizeCategory: category))
+		continueAfterFailure = true
+		defer { continueAfterFailure = false }
+		for (page, frames) in [("case", caseFrames), ("conflict", conflictFrames)] {
+			for (method, frame) in frames {
+				let (label, symbol) = ["human": ("Person", "person.fill"), "auto": ("Pipeline", "gearshape.2.fill"),
+					"agent": ("Agent", "sparkles")][method]!
+				let textWidth = (label as NSString).size(withAttributes: [.font: font]).width
+				XCTAssertGreaterThanOrEqual(frame.width, ceil(textWidth) + 16,
+					"\(page) \(method) must have room for its visible label at \(name)")
+				// Selectable case text exposes expanded accessibility frames. Form chips expose their visual bounds.
+				if page == "conflict" {
+					let configuration = UIImage.SymbolConfiguration(pointSize: font.pointSize,
+						weight: method == "agent" ? .regular : .semibold, scale: .medium)
+					let icon = try XCTUnwrap(UIImage(systemName: symbol, withConfiguration: configuration))
+					let singleLineHeight = ceil(max(font.lineHeight, icon.size.height)) + 8 + 1
+					print("method-badge \(name) \(method): \(frame.width)x\(frame.height), one-line limit \(singleLineHeight)")
+					XCTAssertLessThanOrEqual(frame.height, singleLineHeight,
+						"\(page) \(method) must fit one text/icon line plus vertical padding at \(name)")
+				}
+				XCTAssertGreaterThanOrEqual(frame.minX, 0)
+				XCTAssertLessThanOrEqual(frame.maxX, app.frame.maxX)
+			}
+		}
+	}
+
+	@MainActor private func methodBadgeFrames(_ app: XCUIApplication) -> [(String, CGRect)] {
+		let agent = app.descendants(matching: .any)["method-agent"].firstMatch
+		for _ in 0..<8 where !agent.isHittable { app.swipeUp() }
+		app.swipeUp()
+		return [("human", "A person may run it"), ("auto", "A pipeline may run it"),
+			("agent", "An agent may not run it")].map { method, label in
+			let chip = app.descendants(matching: .any)["method-\(method)"].firstMatch
+			XCTAssertTrue(chip.exists)
+			XCTAssertTrue(chip.isHittable)
+			XCTAssertEqual(chip.label, label)
+			return (method, chip.frame)
+		}
 	}
 
 	@MainActor func testResolveOverlappingEdit() async throws {
