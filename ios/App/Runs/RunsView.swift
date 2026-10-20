@@ -6,10 +6,7 @@ struct RunsView: View {
 	let screen: RunsScreen
 	let workspace: Workspace
 	@State private var path = NavigationPath()
-	@State private var planning: PlannerPresentation?
-	private struct PlannerPresentation: Identifiable, Equatable {
-		let id = UUID()
-	}
+	@State private var planning = false
 
 	var body: some View {
 		NavigationStack(path: $path) {
@@ -60,7 +57,10 @@ struct RunsView: View {
 				ProjectMenu(workspace: workspace)
 				if workspace.project?.may(.plan) == true {
 					ToolbarItem(placement: .topBarTrailing) {
-						Button("Plan a run", systemImage: "plus") { planning = PlannerPresentation() }
+						Button("Plan a run", systemImage: "plus") {
+							screen.preparePlanner()
+							planning = true
+						}
 							.accessibilityIdentifier("plan-run")
 					}
 				}
@@ -86,17 +86,17 @@ struct RunsView: View {
 					}
 				}
 			}
-			.sheet(item: $planning) { owner in
+			.sheet(isPresented: $planning) {
 				RunPlannerView(screen: screen, planned: { run in
-					guard planning == owner else { return }
-					planning = nil
+					guard planning else { return }
+					planning = false
 					path.append(run.ref)
 				}, cancel: {
-					planning = nil
+					planning = false
 				})
 			}
 			.onDisappear {
-				planning = nil
+				planning = false
 			}
 		}
 		.task { if screen.loading == .first { await screen.refresh() } }

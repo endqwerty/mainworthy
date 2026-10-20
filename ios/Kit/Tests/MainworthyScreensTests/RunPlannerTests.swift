@@ -24,6 +24,10 @@ struct RunPlannerTests {
 		#expect(screen.planSubmission?.name == "Keep this plan")
 		#expect(screen.savedPlan == nil)
 		#expect(screen.notice?.contains("outcome is unknown") == true)
+		let notice = screen.notice
+		screen.preparePlanner()
+		#expect(screen.notice == notice)
+		#expect(screen.planSubmission?.name == "Keep this plan")
 		await transport.reconnect()
 		let run = try #require(await screen.plan(name: "Changed while uncertain", selection: .all))
 		#expect(run.name == "Keep this plan")
@@ -119,6 +123,11 @@ struct RunPlannerTests {
 		#expect(await screen.plan(name: "Read again", selection: .all) == nil)
 		let receipt = try #require(screen.savedPlan)
 		#expect(receipt.slots == 6)
+		let notice = screen.notice
+		screen.preparePlanner()
+		#expect(screen.savedPlan == receipt)
+		#expect(screen.notice == notice)
+		#expect(screen.notice?.contains("It could not be opened") == true)
 		await transport.reconnect()
 		#expect(await screen.readPlannedRun()?.ref == receipt.ref)
 		#expect(screen.savedPlan == nil && screen.planSubmission == nil)
@@ -138,6 +147,10 @@ struct RunPlannerTests {
 		#expect(run.name == "Late plan")
 		#expect(screen.runs.first?.ref == run.ref)
 		#expect(screen.savedPlan == nil && screen.planSubmission == nil)
+		#expect(screen.notice == "\(run.ref) planned with 6 slots; 0 already filled.")
+		screen.preparePlanner()
+		#expect(screen.notice == nil)
+		#expect(screen.runs.first?.ref == run.ref)
 		#expect(await transport.inputs.count == 1)
 	}
 

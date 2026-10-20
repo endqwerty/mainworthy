@@ -183,6 +183,7 @@ final class RunsUITests: XCTestCase {
 		XCTAssertEqual(name.value as? String, "Run name")
 		XCTAssertTrue(name.isEnabled)
 		XCTAssertFalse(app.buttons["Read run again"].exists)
+		XCTAssertFalse(app.staticTexts["plan-notice"].exists)
 		name.tap()
 		name.typeText("A fresh phone plan")
 		app.buttons["Done"].tap()
@@ -190,6 +191,53 @@ final class RunsUITests: XCTestCase {
 		app.buttons["submit-run-plan"].tap()
 		XCTAssertTrue(app.buttons["start-run"].waitForExistence(timeout: 10))
 		XCTAssertTrue(app.staticTexts["A fresh phone plan"].exists)
+	}
+
+	@MainActor func testReopenedPlannerOpensTheLatePlan() async throws {
+		let project = try await makeProject()
+		let proxy = try await planConnection(project, mode: "hold")
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", proxy.url]
+		app.launch()
+		try signIn(app)
+		app.openProject(project)
+		app.openTab("Runs")
+		XCTAssertTrue(app.buttons["plan-run"].waitForExistence(timeout: 10))
+		app.buttons["plan-run"].tap()
+		let name = app.textFields["run-name"]
+		XCTAssertTrue(name.waitForExistence(timeout: 5))
+		name.tap()
+		name.typeText("Reopened late plan")
+		app.buttons["Done"].tap()
+		app.buttons["submit-run-plan"].tap()
+		var committed = false
+		for _ in 0..<100 {
+			if try await planConnection(project, mode: "status").committed { committed = true; break }
+			try await Task.sleep(for: .milliseconds(50))
+		}
+		XCTAssertTrue(committed, "The server must commit before Cancel and reopening the planner")
+		app.buttons["Cancel"].tap()
+		XCTAssertTrue(app.buttons["plan-run"].waitForExistence(timeout: 5))
+		app.buttons["plan-run"].tap()
+		XCTAssertTrue(app.buttons["Retry plan"].waitForExistence(timeout: 10))
+		XCTAssertEqual(name.value as? String, "Reopened late plan")
+		XCTAssertFalse(name.isEnabled)
+		shot("planner-reopened-pending")
+		_ = try await planConnection(project, mode: "normal")
+		let opened = app.buttons["start-run"].waitForExistence(timeout: 10)
+		shot("planner-reopened-late-reply")
+		XCTAssertTrue(opened)
+		XCTAssertTrue(app.staticTexts["Reopened late plan"].exists)
+		XCTAssertFalse(name.exists)
+		app.navigationBars.buttons["Runs"].tap()
+		XCTAssertEqual(app.staticTexts.matching(identifier: "Reopened late plan").count, 1)
+		app.buttons["plan-run"].tap()
+		XCTAssertTrue(name.waitForExistence(timeout: 5))
+		XCTAssertEqual(name.value as? String, "Run name")
+		XCTAssertTrue(name.isEnabled)
+		XCTAssertFalse(app.buttons["submit-run-plan"].isEnabled)
+		XCTAssertFalse(app.staticTexts["plan-notice"].exists)
+		shot("planner-fresh-after-reopened-success")
 	}
 
 	@MainActor func testRetryKeepsTheSubmittedPlan() async throws {
