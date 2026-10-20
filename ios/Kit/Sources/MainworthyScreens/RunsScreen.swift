@@ -149,6 +149,10 @@ public final class RunsScreen: ProjectScreen {
 		}
 	}
 
+	public func preparePlanner() {
+		if planSubmission == nil { notice = nil }
+	}
+
 	public func plan(name: String, selection: RunSelection, commit: String = "") async -> Run? {
 		guard !planning else { return nil }
 		if savedPlan != nil { return await readPlannedRun() }
