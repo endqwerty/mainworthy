@@ -1827,7 +1827,7 @@ describe("conflict storage upgrades", () => {
 			);
 			db.exec("DROP TABLE slot_leases");
 			db.exec(
-				"ALTER TABLE results RENAME COLUMN trail TO steps; ALTER TABLE results DROP COLUMN model; ALTER TABLE batches DROP COLUMN model",
+				"DROP INDEX projects_identity; ALTER TABLE projects DROP COLUMN identity; ALTER TABLE results RENAME COLUMN trail TO steps; ALTER TABLE results DROP COLUMN model; ALTER TABLE batches DROP COLUMN model",
 			);
 			db.raw.query("UPDATE meta SET value = '30' WHERE key = 'schema_version'").run();
 			const evidence = db.raw.query("SELECT evidence, evidence_hash FROM questions ORDER BY id").all();
