@@ -195,6 +195,7 @@ public final class AnswerOutbox {
 	/// Stops new sends when the person signs out or loses the project. A reply already in flight may still arrive.
 	package func stop() { active = false; finishWaiting() }
 	package func retire() {
+		guard active else { return }
 		stop()
 		for index in entries.indices where entries[index].outcomes == nil { entries[index].delivery = .obsolete; entries[index].problem = nil }
 		try? save(entries)
@@ -300,6 +301,7 @@ public final class AnswerOutbox {
 				outcomes = try await project.send(entry.answer, delivery: delivery)
 				problem = nil
 			} catch ClientError.refused(let code, _) where code == "obsolete_project" {
+				guard active else { return false }
 				var updated = entries
 				if let index = updated.firstIndex(where: { $0.id == entry.id }) {
 					updated[index].delivery = .obsolete
@@ -343,7 +345,7 @@ public final class AnswerOutbox {
 	}
 
 	public func clearOutcomes() {
-		guard readable else { return }
+		guard active, readable else { return }
 		let waiting = entries.filter { !$0.finished }
 		do {
 			try save(waiting)
@@ -396,30 +398,44 @@ package final class FileAnswerStore: AnswerStore {
 
 	package func load() throws -> Data? {
 		loadWarning = nil
-		guard FileManager.default.fileExists(atPath: file.path) else {
-			let root = file.deletingLastPathComponent()
-			guard FileManager.default.fileExists(atPath: root.path) else { return nil }
-			let older = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
-				.filter { $0 == legacy || ($0.lastPathComponent.hasPrefix(prefix) && $0.pathExtension == "json") }
-			guard !older.isEmpty else { return nil }
-			var seen = Set<String>()
-			var entries: [AnswerOutbox.Entry] = []
-			for url in older.sorted(by: { $0.path < $1.path }) {
-				do {
-					try excludeFromBackup(root)
-					try excludeFromBackup(url)
-					let saved = try JSONDecoder().decode([AnswerOutbox.Entry].self, from: Data(contentsOf: url))
+		let root = file.deletingLastPathComponent()
+		let current: Data?
+		if FileManager.default.fileExists(atPath: file.path) {
+			try excludeFromBackup(root)
+			try excludeFromBackup(file)
+			let data = try Data(contentsOf: file)
+			let saved = try JSONDecoder().decode([AnswerOutbox.Entry].self, from: data)
+			guard Set(saved.map(\.id)).count == saved.count else { throw ClientError.unreadable }
+			current = data
+		} else { current = nil }
+		guard FileManager.default.fileExists(atPath: root.path) else { return nil }
+		let older = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+			.filter {
+				let name = $0.lastPathComponent
+				return name != file.lastPathComponent
+					&& (name == legacy.lastPathComponent || (name.hasPrefix(prefix) && $0.pathExtension == "json"))
+			}
+		guard !older.isEmpty else { return current }
+		var seen = Set<String>()
+		var entries: [AnswerOutbox.Entry] = []
+		for url in older.sorted(by: { $0.path < $1.path }) {
+			do {
+				try excludeFromBackup(root)
+				try excludeFromBackup(url)
+				let saved = try JSONDecoder().decode([AnswerOutbox.Entry].self, from: Data(contentsOf: url))
+				if current != nil {
+					try FileManager.default.removeItem(at: url)
+				} else {
 					for entry in saved where seen.insert(entry.id).inserted { entries.append(entry) }
 					imported.append(url)
-				} catch {
+				}
+			} catch {
+				if current == nil {
 					loadWarning = "Some earlier saved answers could not be read and were skipped. You can still save answers for this project."
 				}
 			}
-			return try JSONEncoder().encode(entries)
 		}
-		try excludeFromBackup(file.deletingLastPathComponent())
-		try excludeFromBackup(file)
-		return try Data(contentsOf: file)
+		return try current ?? JSONEncoder().encode(entries)
 	}
 
 	package func save(_ data: Data) throws {

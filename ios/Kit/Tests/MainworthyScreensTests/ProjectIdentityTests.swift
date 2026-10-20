@@ -97,6 +97,89 @@ struct ProjectIdentityTests {
 		#expect(!FileManager.default.fileExists(atPath: old.file.path))
 	}
 
+	@Test("reopening a current file completes interrupted cleanup without touching other scopes", arguments: [false, true])
+	func interruptedCleanup(legacy: Bool) async throws {
+		let server = try await Live.signedIn()
+		let project = try await server.project(try await Live.project())
+		let question = try #require(try await project.questions(open: true, kind: .failure).questions.first)
+		let choice = try #require(question.choices.first { $0.answer == "flaky" })
+		let answer = try #require(project.prepareAnswer(question, with: choice))
+		let directory = FileManager.default.temporaryDirectory.appending(path: "mw-interrupted-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: directory) }
+		let old = FileAnswerStore(instance: Live.instance, person: 1, project: project.key, identity: project.identity, directory: directory)
+		_ = try AnswerOutbox(project: project, store: old).enqueue(answer)
+		let oldData = try Data(contentsOf: old.file)
+		let earlierFile = legacy
+			? directory.appendingPathComponent(String(old.file.lastPathComponent.split(separator: ".")[0]) + ".json")
+			: old.file
+		if legacy { try FileManager.default.moveItem(at: old.file, to: earlierFile) }
+		let replacement = server.project(project.key, identity: "replacement")
+		let store = FileAnswerStore(instance: Live.instance, person: 1, project: project.key, identity: replacement.identity, directory: directory)
+		let current = AnswerOutbox(project: replacement, store: store)
+		#expect(current.entries.map(\.status) == ["Obsolete"])
+		current.clearOutcomes()
+		#expect(!FileManager.default.fileExists(atPath: earlierFile.path))
+		let currentData = try Data(contentsOf: store.file)
+		// Restore the state left by an app stopping after its atomic write, before removing earlier files.
+		try oldData.write(to: earlierFile)
+		let otherStores = [
+			FileAnswerStore(instance: Live.instance, person: 2, project: project.key, identity: project.identity, directory: directory),
+			FileAnswerStore(instance: Live.instance, person: 1, project: "other", identity: project.identity, directory: directory),
+			FileAnswerStore(instance: try #require(Instance(address: "mainworthy.example")), person: 1, project: project.key, identity: project.identity, directory: directory)
+		]
+		for other in otherStores { try other.save(oldData) }
+		let unreadable = FileAnswerStore(instance: Live.instance, person: 1, project: project.key, identity: "unreadable", directory: directory)
+		try unreadable.save(Data("broken".utf8))
+		let reopenedStore = FileAnswerStore(instance: Live.instance, person: 1, project: project.key, identity: replacement.identity, directory: directory)
+		let reopened = AnswerOutbox(project: replacement, store: reopenedStore)
+		#expect(reopened.entries.isEmpty)
+		#expect(try Data(contentsOf: store.file) == currentData)
+		#expect(reopened.storageProblem == nil)
+		#expect(!FileManager.default.fileExists(atPath: earlierFile.path))
+		for other in otherStores { #expect(try Data(contentsOf: other.file) == oldData) }
+		#expect(try Data(contentsOf: unreadable.file) == Data("broken".utf8))
+		let third = server.project(project.key, identity: "third")
+		let thirdStore = FileAnswerStore(instance: Live.instance, person: 1, project: project.key, identity: third.identity, directory: directory)
+		#expect(AnswerOutbox(project: third, store: thirdStore).entries.isEmpty)
+	}
+
+	@Test("a retired outbox cannot recreate its file after a late obsolete refusal")
+	func retiredSend() async throws {
+		let transport = SwitchableQueueTransport()
+		let server = try await Live.signedIn(transport: transport)
+		let project = try await server.project(try await Live.project())
+		let question = try #require(try await project.questions(open: true, kind: .failure).questions.first)
+		let choice = try #require(question.choices.first { $0.answer == "flaky" })
+		let directory = FileManager.default.temporaryDirectory.appending(path: "mw-retired-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: directory) }
+		let store = FileAnswerStore(instance: Live.instance, person: 1, project: project.key, identity: project.identity, directory: directory)
+		let outbox = AnswerOutbox(project: project, store: store)
+		_ = try outbox.enqueue(try #require(project.prepareAnswer(question, with: choice)))
+		await transport.gate.holdNext()
+		let sending = Task { await outbox.send() }
+		try await transport.gate.waitUntilPaused()
+		try await replace(project.key)
+		outbox.retire()
+		let replacement = try await server.project(project.key)
+		let replacementStore = FileAnswerStore(instance: Live.instance, person: 1, project: project.key, identity: replacement.identity, directory: directory)
+		let current = AnswerOutbox(project: replacement, store: replacementStore)
+		#expect(current.entries.map(\.status) == ["Obsolete"])
+		current.clearOutcomes()
+		#expect(!FileManager.default.fileExists(atPath: store.file.path))
+		await transport.gate.release()
+		await sending.value
+		#expect(!FileManager.default.fileExists(atPath: store.file.path))
+		outbox.clearOutcomes()
+		#expect(!FileManager.default.fileExists(atPath: store.file.path))
+		outbox.retire()
+		#expect(!FileManager.default.fileExists(atPath: store.file.path))
+		#expect(try await replacement.question(question.ref)?.isOpen == true)
+		#expect(AnswerOutbox(project: replacement, store: replacementStore).entries.isEmpty)
+		let third = server.project(project.key, identity: "third")
+		let thirdStore = FileAnswerStore(instance: Live.instance, person: 1, project: project.key, identity: third.identity, directory: directory)
+		#expect(AnswerOutbox(project: third, store: thirdStore).entries.isEmpty)
+	}
+
 	@Test("recorded outcomes survive retirement and replacement without clearing current drafts")
 	func recordedHistory() async throws {
 		let server = try await Live.signedIn()
