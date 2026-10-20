@@ -191,7 +191,7 @@ struct ConflictRecoveryTests {
 		}
 		let proposed: Wire.SuiteProposeReply = try await owner.read("propose", in: key,
 			["edits": [["op": "policy", "base": try #require(policy["version"]), "clauses": .array(clauses)]]])
-		let project = owner.project(key)
+		let project = try await owner.project(key)
 		let ref = try #require(proposed.question)
 		let question = try #require(try await project.question(ref))
 		let replies: JSONValue = try await owner.read("decide", in: key,
@@ -204,7 +204,7 @@ struct ConflictRecoveryTests {
 		let transport = LosingReply()
 		let server = try await Live.signedIn(transport: transport)
 		let key = try await Live.project()
-		let project = server.project(key)
+		let project = try await server.project(key)
 		let (opened, editor) = try await setup(project)
 		let question = try #require(editor.conflict?.question)
 		let colleague = try await Live.signedIn().project(key)
@@ -239,7 +239,7 @@ struct ConflictRecoveryTests {
 		let server = try await Live.signedIn(transport: transport)
 		let key = try await Live.project()
 		try await requireMergeReason(key)
-		let project = server.project(key)
+		let project = try await server.project(key)
 		let (opened, editor) = try await setup(project)
 		let question = try #require(editor.conflict?.question)
 		#expect(try await project.question(question)?.wantsReason == true)
