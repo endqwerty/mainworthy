@@ -11,6 +11,8 @@ import { defaultConfig } from "../src/server/kernel/app.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 const secret = "test-handoff-signing-secret";
+const unanswered =
+	"The agent's endpoint gave no answer the server could read. It may have started anyway: look for the agent's work before sending again.";
 type Received = { body: string; signature: string | null; delivery: string | null };
 
 let h: Harness | undefined;
@@ -123,7 +125,20 @@ test("an endpoint that refuses, or cannot be reached, leaves a failed hand-off t
 	expect(h.call<HandoffReceipt>("handoff-status", { question: q })).toMatchObject({
 		id: "handoff-cmd-03",
 		state: "failed",
-		error: "The agent's endpoint could not be reached; check that it is running before sending again.",
+		error: unanswered,
+	});
+});
+
+test("an endpoint that took the post but gave no answer the server can use may have started the agent", async () => {
+	// A redirect is refused after the endpoint has read the post, as a reply that comes after the time limit is.
+	const { url, received } = agent(302);
+	const { h, q } = failing(url);
+	h.call("handoff", { question: q, cmd: "handoff-cmd-09" });
+	await deliverHandoffs(h.app);
+	expect(received).toHaveLength(1);
+	expect(h.call<HandoffReceipt>("handoff-status", { question: q })).toMatchObject({
+		state: "failed",
+		error: unanswered,
 	});
 });
 
