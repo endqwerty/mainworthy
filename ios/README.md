@@ -50,6 +50,20 @@ Write the host and its port with no scheme: `//` starts a comment in that file. 
 wins over the setting, `-instance <address>`, which is how the screen tests point the app at the server they
 start. Saved logins are offered only for `mainworthy.com`, the site the app's entitlements name.
 
+### Identity provider sign-in
+
+`ASWebAuthenticationSession` presents the provider and receives the fixed OIDC return URL
+`com.mainworthy.app://signin/oidc` through its completion handler. It takes `com.mainworthy.app` as its
+`callbackURLScheme`; no `CFBundleURLTypes` registration or opened-URL handler is needed. No signing-team
+setting is needed for the custom scheme. The app exchanges a one-minute, verifier-bound code
+with its instance and keeps only the session cookie. Configure OIDC as for the web app and register an
+additional provider redirect URI, `MAINWORTHY_PUBLIC_URL/api/login/oidc/native/callback`.
+
+A universal link would also need an associated-domains entitlement, a paid signing team and an `applinks`
+entry for the app and callback path in the instance's `apple-app-site-association`. The current
+`webcredentials` entry only provides password AutoFill. Decision 0121 records the handoff and threat model.
+Real-device provider sign-in remains open in issue #421.
+
 ## Send it to TestFlight
 
 A paid team can send the app to App Store Connect, and TestFlight installs it on the team's phones with no cable.

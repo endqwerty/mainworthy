@@ -12,11 +12,13 @@ import {
 	bearer,
 	cleanUp,
 	clockAt,
+	from,
 	invite,
 	joined,
 	must,
 	PUBLIC,
 	type Sent,
+	said,
 	signIn,
 	TOKEN,
 	type World,
@@ -505,5 +507,216 @@ describe("an import", () => {
 			expect((await finish(w, query, jar(begun.ceremony))).text).toBe(REFUSED);
 		});
 		expect(lines).toEqual(["[mainworthy] sign-in refused: challenge"]);
+	});
+});
+
+describe("native provider sign-in", () => {
+	const callback = "com.mainworthy.app://signin/oidc";
+	const verifier = "a".repeat(43);
+	const state = "s".repeat(43);
+	const challenge = () => new Bun.CryptoHasher("sha256").update(verifier).digest("base64url");
+	async function handoff(w: World, idp: Provider, headers: Sent = {}) {
+		const begun = must(
+			await w.post<{ url: string }>("/api/login/oidc/native", {
+				challenge: challenge(),
+				state,
+				callback,
+				instance: PUBLIC,
+			}),
+		);
+		idp.next({ subject: "native-robin" });
+		const authorized = await fetch(begun.url, { redirect: "manual" });
+		const back = new URL(authorized.headers.get("location") ?? "");
+		expect(back.origin + back.pathname).toBe(`${PUBLIC}/api/login/oidc/native/callback`);
+		const done = await fetch(`${w.instance.url}${back.pathname}${back.search}`, { headers, redirect: "manual" });
+		expect(done.status).toBe(302);
+		expect(done.headers.has("set-cookie")).toBe(false);
+		const native = new URL(done.headers.get("location") ?? "");
+		expect(native.origin + native.pathname).toBe("null/oidc");
+		expect(native.searchParams.get("state")).toBe(state);
+		return native.searchParams.get("code") ?? "";
+	}
+	const exchange = (w: World, code: string, more = {}) =>
+		w.post("/api/login", {
+			nativeOidc: { code, verifier, callback, instance: PUBLIC, ...more },
+		});
+	test("exchanges a code once for an ordinary credential-backed session, with no browser cookie", async () => {
+		const idp = await provider();
+		const w = world({ oidc: idp.config() });
+		const robin = await linked(w, idp, "robin", "native-robin");
+		const code = await handoff(w, idp);
+		const reply = await exchange(w, code);
+		expect(must(reply)).toEqual({ signedIn: true });
+		expect(must(await w.get("/api/session", jar(sessionOf(reply))))).toMatchObject({ actor: "robin", via: "cookie" });
+		expect((await exchange(w, code)).text).toBe(REFUSED);
+		const credentials = must(await w.op<{ id: number; kind: string }[]>("credential", { do: "list" }, jar(robin)));
+		const identity = credentials.find((c) => c.kind === "oidc");
+		expect((await w.op("credential", { do: "remove", id: identity?.id }, jar(robin))).status).toBe(200);
+		expect((await w.get("/api/session", jar(sessionOf(reply)))).status).toBe(401);
+	});
+
+	test("rejects interception, another request's verifier, wrong instance and callback without spending the code", async () => {
+		const idp = await provider();
+		const w = world({ oidc: idp.config() });
+		await linked(w, idp, "robin", "native-robin");
+		const code = await handoff(w, idp);
+		for (const more of [
+			{ verifier: "b".repeat(43) },
+			{ instance: "https://elsewhere.example" },
+			{ callback: "other://signin/oidc" },
+		]) {
+			expect((await exchange(w, code, more)).status).toBeOneOf([400, 401]);
+		}
+		const other = world({ oidc: idp.config() });
+		expect((await exchange(other, code)).text).toBe(REFUSED);
+		expect(must(await exchange(w, code))).toEqual({ signedIn: true });
+	});
+
+	test("expires at one minute and is cancelled by an import", async () => {
+		const idp = await provider();
+		const clock = clockAt();
+		const w = world({ clock, oidc: idp.config() });
+		await linked(w, idp, "robin", "native-robin");
+		const expired = await handoff(w, idp);
+		clock.advance(60_000);
+		expect((await exchange(w, expired)).text).toBe(REFUSED);
+		const cleared = await handoff(w, idp);
+		clearChallenges(w.instance.app);
+		expect((await exchange(w, cleared)).text).toBe(REFUSED);
+	});
+
+	test("refuses an arbitrary redirect and an instance other than the public origin at begin", async () => {
+		const idp = await provider();
+		const w = world({ oidc: idp.config() });
+		for (const more of [{ callback: "https://elsewhere.example" }, { instance: "https://elsewhere.example" }]) {
+			expect(
+				(await w.post("/api/login/oidc/native", { challenge: challenge(), state, callback, instance: PUBLIC, ...more }))
+					.status,
+			).toBe(400);
+		}
+	});
+	test("concurrent exchanges open exactly one session and an unrelated browser cookie cannot change its person", async () => {
+		const idp = await provider();
+		const w = world({ oidc: idp.config() });
+		await linked(w, idp, "robin", "native-robin");
+		const sam = await joined(w, "sam", PASSWORD);
+		const code = await handoff(w, idp);
+		const answers = await Promise.all([
+			w.post("/api/login", { nativeOidc: { code, verifier, callback, instance: PUBLIC } }, jar(sam)),
+			exchange(w, code),
+		]);
+		expect(answers.map((a) => a.status).sort()).toEqual([200, 401]);
+		const accepted = answers.find((a) => a.status === 200);
+		if (!accepted) throw new Error("no session opened");
+		expect(must(await w.get("/api/session", jar(sessionOf(accepted))))).toMatchObject({ actor: "robin" });
+		expect(must(await w.get("/api/session", jar(sam)))).toMatchObject({ actor: "sam" });
+	});
+
+	test("a revoked credential or changed provider cannot open a session from a pending code", async () => {
+		const idp = await provider();
+		const w = world({ oidc: idp.config() });
+		const robin = await linked(w, idp, "robin", "native-robin");
+		const code = await handoff(w, idp);
+		const credentials = must(await w.op<{ id: number; kind: string }[]>("credential", { do: "list" }, jar(robin)));
+		const credential = credentials.find((c) => c.kind === "oidc");
+		expect((await w.op("credential", { do: "remove", id: credential?.id }, jar(robin))).status).toBe(200);
+		expect((await exchange(w, code)).text).toBe(REFUSED);
+		const relink = await begin(w, { link: true }, jar(robin));
+		const query = await authorize(idp, relink, { subject: "native-robin" });
+		expect(must(await finish(w, query, jar(robin, relink.ceremony)))).toEqual({ linked: true });
+		const changed = await handoff(w, idp);
+		delete w.instance.app.config.oidc;
+		expect((await exchange(w, changed)).text).toBe(REFUSED);
+	});
+
+	test("admin MFA is checked again when the native session is opened", async () => {
+		const idp = await provider();
+		const w = world({ oidc: idp.config() });
+		await linked(w, idp, "robin", "native-robin");
+		const code = await handoff(w, idp);
+		await w.ok("admin", { do: "grant.set", actor: "robin", project: "scratch", can: ["read", "admin"] });
+		w.instance.app.config.requireAdminMfa = true;
+		expect((await exchange(w, code)).status).toBe(403);
+		w.instance.app.config.oidc = idp.config({ mfa: true });
+		expect(must(await exchange(w, await handoff(w, idp)))).toEqual({ signedIn: true });
+	});
+
+	test.each(["unknown-identity", "refused", "unknown-ceremony"])(
+		"refused native callbacks count toward the shared address limit: %s",
+		async (subject) => {
+			const idp = await provider();
+			const w = world({ oidc: idp.config(), proxied: true });
+			await linked(w, idp, "robin", "native-robin");
+			const address = from("203.0.113.10");
+			const finishNative = async () => {
+				let query = "?state=unknown";
+				if (subject !== "unknown-ceremony") {
+					const begun = must(
+						await w.post<{ url: string }>("/api/login/oidc/native", {
+							challenge: challenge(),
+							state,
+							callback,
+							instance: PUBLIC,
+						}),
+					);
+					idp.next({ subject, ...(subject === "refused" ? { twist: { error: "access_denied" } } : {}) });
+					const authorized = await fetch(begun.url, { redirect: "manual" });
+					query = new URL(authorized.headers.get("location") ?? "").search;
+				}
+				return fetch(`${w.instance.url}/api/login/oidc/native/callback${query}`, {
+					headers: address,
+					redirect: "manual",
+				});
+			};
+			for (let count = 0; count < 5; count++) {
+				const reply = await finishNative();
+				expect(reply.status).toBe(subject === "unknown-ceremony" ? 401 : 302);
+				await reply.text();
+			}
+			const limited = await finishNative();
+			if (subject === "unknown-ceremony") {
+				expect(limited.status).toBe(429);
+				expect(limited.headers.get("retry-after")).toBe("1");
+				expect(await limited.json()).toMatchObject({ ok: false, error: { code: "limited" } });
+			} else {
+				expect(limited.status).toBe(302);
+				expect(limited.headers.has("set-cookie")).toBe(false);
+				expect(limited.headers.get("location")).toBe(`${callback}?state=${state}&error=limited&retryAfter=1`);
+				await limited.text();
+			}
+			expect(said(await finish(w, "?state=unknown", address))).toBe("429 limited, retry after 1");
+			expect(said(await finish(w, "?state=unknown", from("203.0.113.11")))).toBe("401 unauthenticated");
+			expect(must(await exchange(w, await handoff(w, idp, address)))).toEqual({ signedIn: true });
+		},
+	);
+
+	test("the native callback cannot complete a browser ceremony, and provider refusal returns no code", async () => {
+		const idp = await provider();
+		const w = world({ oidc: idp.config() });
+		await linked(w, idp, "robin", "native-robin");
+		const browser = await begin(w);
+		const query = await authorize(idp, browser, { subject: "native-robin" });
+		const wrong = await fetch(`${w.instance.url}/api/login/oidc/native/callback${query}`, { redirect: "manual" });
+		expect(wrong.status).toBe(401);
+		expect(must(await finish(w, query, jar(browser.ceremony)))).toEqual({ signedIn: true });
+		for (const subject of ["unknown-identity", "refused"]) {
+			const begun = must(
+				await w.post<{ url: string }>("/api/login/oidc/native", {
+					challenge: challenge(),
+					state,
+					callback,
+					instance: PUBLIC,
+				}),
+			);
+			idp.next({ subject, ...(subject === "refused" ? { twist: { error: "access_denied" } } : {}) });
+			const authorized = await fetch(begun.url, { redirect: "manual" });
+			const back = new URL(authorized.headers.get("location") ?? "");
+			const done = await fetch(`${w.instance.url}${back.pathname}${back.search}`, { redirect: "manual" });
+			expect(done.status).toBe(302);
+			const native = new URL(done.headers.get("location") ?? "");
+			expect(native.searchParams.get("code")).toBe(null);
+			expect(native.searchParams.get("state")).toBe(state);
+			expect(native.searchParams.get("error")).toBe("unauthenticated");
+		}
 	});
 });

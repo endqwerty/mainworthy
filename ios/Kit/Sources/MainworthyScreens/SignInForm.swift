@@ -2,7 +2,7 @@ import Foundation
 import MainworthyClient
 import Observation
 
-/// The sign-in form: a name with a password, for the instance the app was built for. It does not ask which
+/// The sign-in form: a password or the configured provider, for the instance the app was built for. It does not ask which
 /// instance (issue #233).
 @MainActor @Observable
 public final class SignInForm {
@@ -12,6 +12,7 @@ public final class SignInForm {
 	/// What the form says above its fields: why the person is here again, or why the last attempt failed.
 	public private(set) var notice: String?
 	public private(set) var isWorking = false
+	public private(set) var providerName: String?
 
 	private let connect: (Instance) -> Server
 	private let onSignedIn: (Server, Account) -> Void
@@ -30,6 +31,28 @@ public final class SignInForm {
 
 	public var canSubmit: Bool {
 		!isWorking && !name.trimmingCharacters(in: .whitespaces).isEmpty && !password.isEmpty
+	}
+
+	public func loadMethods() async {
+		providerName = try? await connect(instance).providerName()
+	}
+
+	public func signInWithProvider(using authenticate: @MainActor (URL, String) async throws -> URL) async {
+		guard providerName != nil, !isWorking else { return }
+		isWorking = true
+		defer { isWorking = false }
+		let server = connect(instance)
+		do {
+			let attempt = try await server.beginProviderSignIn()
+			let back = try await authenticate(attempt.url, "com.mainworthy.app")
+			let account = try await server.finishProviderSignIn(attempt, callback: back)
+			password = ""
+			onSignedIn(server, account)
+		} catch is CancellationError {
+			return
+		} catch {
+			notice = error.shown
+		}
 	}
 
 	public func submit() async {

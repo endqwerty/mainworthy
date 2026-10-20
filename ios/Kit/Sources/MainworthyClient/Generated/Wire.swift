@@ -9,6 +9,28 @@ enum Wire {
 		let signedIn: Bool
 	}
 
+	/// The name offered on the sign-in button.
+	struct Provider: Decodable, Equatable, Sendable {
+		let name: String
+	}
+
+	/// The configured identity provider, if any.
+	struct SignInMethods: Decodable, Equatable, Sendable {
+		let oidc: Provider?
+
+		private enum CodingKeys: String, CodingKey { case oidc }
+
+		init(from decoder: any Decoder) throws {
+			let container = try decoder.container(keyedBy: CodingKeys.self)
+			oidc = try container.decode(Provider?.self, forKey: .oidc)
+		}
+	}
+
+	/// The provider authorization URL for a native sign-in.
+	struct ProviderStart: Decodable, Equatable, Sendable {
+		let url: String
+	}
+
 	/// A project the caller holds a grant on.
 	struct Project: Decodable, Equatable, Sendable {
 		/// The opaque identity of this project, retained across export and import.

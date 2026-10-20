@@ -44,6 +44,13 @@ export const SignInReply = struct("SignInReply", "Whether a password completed s
 	signedIn: flag,
 });
 
+export const SignInMethods = struct("SignInMethods", "The configured identity provider, if any.", {
+	oidc: nullable(struct("Provider", "The name offered on the sign-in button.", { name: text })),
+});
+export const ProviderStart = struct("ProviderStart", "The provider authorization URL for a native sign-in.", {
+	url: text,
+});
+
 export const SessionInfo = struct("SessionInfo", "`GET /api/session`: who the caller is and what they may open.", {
 	actor: [text, "The caller's name."],
 	actorId: [whole, "The caller's stable actor id. A new person reusing a forgotten name has another id."],
@@ -685,6 +692,8 @@ export const SuiteProposeReply = struct("SuiteProposeReply", "What came of creat
 /** Every shape the app decodes by name. `gen` writes one Swift type for each, and for each struct inside it. */
 export const SHAPES: readonly Shape[] = [
 	SignInReply,
+	SignInMethods,
+	ProviderStart,
 	SessionInfo,
 	Inbox,
 	...Object.values(EVIDENCE),

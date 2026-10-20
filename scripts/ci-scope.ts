@@ -73,6 +73,7 @@ export const IOS: Paths = {
 		"ios/**",
 		"scripts/ios.ts",
 		"scripts/ios/**",
+		"test/oidc-support.ts",
 		"src/**",
 		"package.json",
 		"bun.lock",

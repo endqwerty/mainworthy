@@ -269,7 +269,8 @@ Mainworthy signs people in through one OpenID Connect provider. It uses the auth
 
 1. At the provider, register a web application (a "confidential client"). Set its redirect address, also called the callback URL, to the instance's public address followed by `/signin/oidc`, for example `https://mainworthy.example/signin/oidc`. Allow the scopes `openid`, `email` and `profile`.
 2. Set `MAINWORTHY_OIDC_ISSUER` to the provider's issuer address. It is the address whose `/.well-known/openid-configuration` the provider publishes, exactly as that document's `issuer` writes it. Set `MAINWORTHY_OIDC_CLIENT_ID` and `MAINWORTHY_OIDC_CLIENT_SECRET` to what the provider gave you, and `MAINWORTHY_OIDC_NAME` to the name the button shows.
-3. Make sure `MAINWORTHY_PUBLIC_URL` is set, then restart the instance.
+3. For iPhone provider sign-in, also register the instance's public address followed by `/api/login/oidc/native/callback`, for example `https://mainworthy.example/api/login/oidc/native/callback`. Keep the web callback registered too. The provider returns to the server over HTTPS, and the server hands the app a verifier-bound code.
+4. Make sure `MAINWORTHY_PUBLIC_URL` is set, then restart the instance.
 
 The four variables are set together or not at all. Startup stops when only some are set, when `MAINWORTHY_PUBLIC_URL` is missing, or when the issuer is not `https`. Plain `http` is accepted only on the loopback address, for a provider on the same machine.
 
