@@ -320,6 +320,8 @@ To search the whole project, press **Everywhere**.
 A case number finds that case only inside the folder or tag you search. Closing the search clears the search.
 
 A case's badges show **Person**, **Pipeline** and **Agent**, struck through where the case does not allow that way.
+Each label stays on one line. Whole badges move to another row when needed, including at larger text sizes,
+in cases, merged-case previews and proposal evidence.
 **History** lists who wrote each version, when and why. Saved versions are read-only.
 **Open current case** opens the editable page. Folder and tags show the current placement.
 

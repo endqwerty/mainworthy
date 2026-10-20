@@ -137,11 +137,14 @@ struct MethodBadges: View {
 	let methods: [String]
 
 	var body: some View {
-		HStack(spacing: 8) {
+		MethodBadgeLayout() {
 			ForEach(CaseMethod.allCases, id: \.self) { method in
 				let allowed = methods.contains(method.rawValue)
 				Label(method.label, systemImage: method.producer.symbol)
+					.labelStyle(.titleAndIcon)
 					.font(.subheadline.weight(allowed ? .semibold : .regular))
+					.lineLimit(1)
+					.fixedSize()
 					.strikethrough(!allowed)
 					.foregroundStyle(allowed ? method.producer.tint : Color.secondary.opacity(0.6))
 					.padding(.horizontal, 8)
@@ -153,6 +156,42 @@ struct MethodBadges: View {
 					.accessibilityIdentifier("method-\(method.rawValue)")
 			}
 		}
+	}
+}
+
+private struct MethodBadgeLayout: Layout {
+	func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+		arrange(subviews, width: proposal.width ?? .infinity).size
+	}
+
+	func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+		let frames = arrange(subviews, width: bounds.width).frames
+		for (subview, frame) in zip(subviews, frames) {
+			subview.place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
+				anchor: .topLeading, proposal: ProposedViewSize(frame.size))
+		}
+	}
+
+	private func arrange(_ subviews: Subviews, width: CGFloat) -> (size: CGSize, frames: [CGRect]) {
+		var frames: [CGRect] = []
+		var x: CGFloat = 0
+		var y: CGFloat = 0
+		var rowHeight: CGFloat = 0
+		var usedWidth: CGFloat = 0
+		for subview in subviews {
+			let size = subview.sizeThatFits(.unspecified)
+			if x > 0 && x + size.width > width {
+				x = 0
+				y += rowHeight + 8
+				rowHeight = 0
+			}
+			let frame = CGRect(origin: CGPoint(x: x, y: y), size: size)
+			frames.append(frame)
+			usedWidth = max(usedWidth, frame.maxX)
+			x = frame.maxX + 8
+			rowHeight = max(rowHeight, size.height)
+		}
+		return (CGSize(width: usedWidth, height: y + rowHeight), frames)
 	}
 }
 
