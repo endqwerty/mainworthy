@@ -12,7 +12,7 @@ struct RunPlannerTests {
 		let key = try await Live.project()
 		let client = try await Live.signedIn(transport: transport).project(key)
 		return (RunsScreen(project: client,
-			permission: Project(key: key, name: key, can: ["read", "plan"]), person: Live.name), client)
+			permission: Project(key: key, identity: client.identity, name: key, can: ["read", "plan"]), person: Live.name), client)
 	}
 
 	@Test("a committed plan with lost replies retries one command and creates one run")
