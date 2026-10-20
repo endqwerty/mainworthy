@@ -150,7 +150,7 @@ public final class QueueScreen: ProjectScreen {
 	/// Reads the list again and keeps what is shown until the reply is there.
 	public func refresh() async {
 		await outbox.send()
-		for entry in outbox.entries {
+		for entry in outbox.entries where entry.answer.projectIdentity == project.identity {
 			for member in entry.members where member.outcome?.isDecided == true { typed[member.question] = nil }
 		}
 		await read()

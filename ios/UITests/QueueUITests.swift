@@ -176,7 +176,7 @@ final class QueueUITests: XCTestCase {
 		let entry = app.staticTexts.matching(NSPredicate(format: "label == %@", "Track without a case for 4 questions")).firstMatch
 		XCTAssertTrue(entry.waitForExistence(timeout: 5))
 		XCTAssertTrue(app.staticTexts["Recorded"].exists)
-		// A recorded answer is listed under Replied, and with nothing waiting there is no button to send.
+		// A recorded answer is listed under Finished, and with nothing waiting there is no button to send.
 		XCTAssertTrue(app.staticTexts["nothing-waiting"].exists)
 		XCTAssertFalse(app.buttons["send-waiting-answers"].exists)
 		XCTAssertTrue(app.staticTexts["replied-header"].exists)
@@ -281,7 +281,7 @@ final class QueueUITests: XCTestCase {
 		app.buttons["answer-flaky"].tap()
 		XCTAssertTrue(app.staticTexts["notice"].waitForExistence(timeout: 15))
 		app.buttons["unsent-answers"].tap()
-		// The Dropped answer has no reply and comes first; the recorded one is under Replied, below it.
+		// The Dropped answer has no reply and comes first; the recorded one is under Finished, below it.
 		XCTAssertTrue(app.staticTexts["Dropped"].waitForExistence(timeout: 15))
 		XCTAssertTrue(app.staticTexts["No reply yet"].exists)
 		XCTAssertFalse(app.staticTexts["Waiting to send"].exists)

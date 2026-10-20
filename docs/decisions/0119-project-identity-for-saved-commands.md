@@ -24,11 +24,19 @@ project's screens and outbox. A delayed send still carries the old identity, so
 replacement after the last project-list read cannot send it to the new project.
 A refusal for obsolete identity is terminal, even after uncertain delivery.
 
-Earlier saved answers without identity are displayed as Obsolete and never sent
-or recovered against the current project. New files can read older files only to
-show obsolete outcomes. Clearing those outcomes writes the current identity's
-file, so old answers do not reappear. There is no client migration that attaches
-an old answer to today's project.
+An unfinished saved answer from an earlier identity, or without identity, becomes
+Obsolete and is never sent or recovered against the current project. Its outcome
+is unknown. A completed entry keeps its recorded outcome and status, including
+when read from an earlier build. Historical outcomes do not clear current drafts.
+There is no client migration that attaches an old answer to today's project.
+
+When the current identity has no answer file, its outbox reads earlier files for
+the same instance, person and project key. Its first successful write saves the
+current file atomically, then removes the readable files it imported. Clearing
+outcomes therefore keeps them cleared across later project replacements.
+Unreadable earlier files stay on disk and are skipped with one notice per import,
+without blocking new saved answers. An unreadable current file still blocks writes
+to preserve its saved answers.
 
 A decide-only precondition would protect answers but leave the same fault in
 other saved commands. The shared command envelope adds one admission check and

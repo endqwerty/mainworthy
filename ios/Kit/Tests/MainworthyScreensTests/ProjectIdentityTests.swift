@@ -73,7 +73,7 @@ struct ProjectIdentityTests {
 		#expect(try await replacement.answer(same, with: try #require(same.choices.first { $0.answer == "flaky" })).isDecided)
 	}
 
-	@Test("replacement files are separate and display earlier answers as obsolete")
+	@Test("cleared earlier answers stay cleared after a second replacement")
 	func fileScopes() async throws {
 		let server = try await Live.signedIn()
 		let project = try await server.project(try await Live.project())
@@ -91,7 +91,88 @@ struct ProjectIdentityTests {
 		#expect(current.pendingCount == 0)
 		current.clearOutcomes()
 		#expect(AnswerOutbox(project: server.project(project.key, identity: "replacement"), store: replacement).entries.isEmpty)
-		#expect(AnswerOutbox(project: project, store: old).pendingCount == 1)
+		let third = FileAnswerStore(instance: Live.instance, person: 1, project: project.key, identity: "third", directory: directory)
+		let latest = AnswerOutbox(project: server.project(project.key, identity: "third"), store: third)
+		#expect(latest.entries.isEmpty)
+		#expect(!FileManager.default.fileExists(atPath: old.file.path))
+	}
+
+	@Test("recorded outcomes survive retirement and replacement without clearing current drafts")
+	func recordedHistory() async throws {
+		let server = try await Live.signedIn()
+		let project = try await server.project(try await Live.project())
+		let question = try #require(try await project.questions(open: true, kind: .failure).questions.first)
+		let choice = try #require(question.choices.first { $0.answer == "flaky" })
+		let directory = FileManager.default.temporaryDirectory.appending(path: "mw-recorded-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: directory) }
+		let store = FileAnswerStore(instance: Live.instance, person: 1, project: project.key, identity: project.identity, directory: directory)
+		let outbox = AnswerOutbox(project: project, store: store)
+		let recorded = try await outbox.record([question], with: choice)
+		#expect(recorded.status == "Recorded")
+		let outcomes = try #require(recorded.outcomes)
+		outbox.retire()
+		#expect(outbox.entries[0].status == "Recorded")
+		#expect(outbox.entries[0].outcomes == outcomes)
+		#expect(outbox.entries[0].members[0].outcome?.isDecided == true)
+		#expect(outbox.entries[0].detail == "The server recorded this answer.")
+		let replacement = server.project(project.key, identity: "replacement")
+		let replacementStore = FileAnswerStore(instance: Live.instance, person: 1, project: project.key, identity: replacement.identity, directory: directory)
+		let current = AnswerOutbox(project: replacement, store: replacementStore)
+		#expect(current.entries[0].status == "Recorded")
+		#expect(current.entries[0].outcome == recorded.outcome)
+		let screen = QueueScreen(project: replacement, outbox: current)
+		screen.typed[question.ref, default: .init()].reference = "NEW-1"
+		await screen.refresh()
+		#expect(screen.typed[question.ref]?.reference == "NEW-1")
+	}
+
+	@Test("an unreadable earlier file is skipped without blocking new saved answers", arguments: [false, true])
+	func unreadableEarlierFile(legacy: Bool) async throws {
+		let server = try await Live.signedIn()
+		let project = try await server.project(try await Live.project())
+		let question = try #require(try await project.questions(open: true, kind: .failure).questions.first)
+		let choice = try #require(question.choices.first { $0.answer == "flaky" })
+		let directory = FileManager.default.temporaryDirectory.appending(path: "mw-unreadable-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: directory) }
+		let old = FileAnswerStore(instance: Live.instance, person: 1, project: project.key, identity: project.identity, directory: directory)
+		_ = try AnswerOutbox(project: project, store: old).enqueue(try #require(project.prepareAnswer(question, with: choice)))
+		let corrupt = FileAnswerStore(instance: Live.instance, person: 1, project: project.key, identity: "unreadable", directory: directory)
+		let corruptFile = legacy
+			? directory.appendingPathComponent(String(old.file.lastPathComponent.split(separator: ".")[0]) + ".json")
+			: corrupt.file
+		try Data("broken".utf8).write(to: corruptFile)
+		let replacement = server.project(project.key, identity: "replacement")
+		let store = FileAnswerStore(instance: Live.instance, person: 1, project: project.key, identity: replacement.identity, directory: directory)
+		let outbox = AnswerOutbox(project: replacement, store: store)
+		#expect(outbox.entries.map(\.status) == ["Obsolete"])
+		#expect(outbox.storageProblem == "Some earlier saved answers could not be read and were skipped. You can still save answers for this project.")
+		let answer = try #require(replacement.prepareAnswer(question, with: choice))
+		let id = try outbox.enqueue(answer)
+		#expect(outbox.entries.map(\.status) == ["Obsolete", "Waiting to send"])
+		#expect(outbox.storageProblem == nil)
+		let reopenedStore = FileAnswerStore(instance: Live.instance, person: 1, project: project.key, identity: replacement.identity, directory: directory)
+		let reopened = AnswerOutbox(project: replacement, store: reopenedStore)
+		#expect(reopened.entries.last?.id == id)
+		#expect(reopened.pendingCount == 1)
+		#expect(reopened.storageProblem == nil)
+		#expect(AnswerOutbox(project: replacement, store: store).storageProblem == nil)
+		#expect(try Data(contentsOf: corruptFile) == Data("broken".utf8))
+	}
+
+	@Test("an unreadable current file is kept and blocks new saved answers")
+	func unreadableCurrentFile() async throws {
+		let project = try await Live.signedIn().project(try await Live.project())
+		let question = try #require(try await project.questions(open: true, kind: .failure).questions.first)
+		let choice = try #require(question.choices.first { $0.answer == "flaky" })
+		let answer = try #require(project.prepareAnswer(question, with: choice))
+		let directory = FileManager.default.temporaryDirectory.appending(path: "mw-current-\(UUID().uuidString)")
+		defer { try? FileManager.default.removeItem(at: directory) }
+		let store = FileAnswerStore(instance: Live.instance, person: 1, project: project.key, identity: project.identity, directory: directory)
+		try store.save(Data("broken".utf8))
+		let outbox = AnswerOutbox(project: project, store: store)
+		#expect(outbox.storageProblem?.hasPrefix("Saved answers could not be read. They have not been replaced.") == true)
+		#expect(throws: (any Error).self) { try outbox.enqueue(answer) }
+		#expect(try Data(contentsOf: store.file) == Data("broken".utf8))
 	}
 
 	@Test("a legacy file without an identity is obsolete on disk and never sent")
@@ -111,7 +192,7 @@ struct ProjectIdentityTests {
 		let outbox = AnswerOutbox(project: project, store: store)
 		await outbox.send()
 		#expect(outbox.entries.map(\.status) == ["Obsolete"])
-		#expect(outbox.entries[0].detail.contains("never be sent"))
+		#expect(outbox.entries[0].detail.contains("This app will not send it again."))
 		#expect(transport.commands.withLock { $0.count } == 0)
 		#expect(try await project.question(question.ref)?.isOpen == true)
 		outbox.clearOutcomes()

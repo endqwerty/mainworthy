@@ -507,11 +507,11 @@ private struct UnsentAnswersView: View {
 			}
 			if !replied.isEmpty {
 				Section {
-					Text("Each says what the server did with it. Clearing them removes them from this device.")
+					Text("Completed and obsolete answers stay here until you clear them from this device.")
 						.font(.subheadline).foregroundStyle(.secondary)
 					Button("Clear outcomes") { outbox.clearOutcomes() }
 				} header: {
-					Text("Replied").accessibilityIdentifier("replied-header")
+					Text("Finished").accessibilityIdentifier("replied-header")
 				}
 				ForEach(replied) { entry in
 					Section { entryRows(entry) }

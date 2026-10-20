@@ -385,12 +385,13 @@ While an answer is waiting to send, another answer to that question waits until 
 To check saved answers and send them when the connection returns, follow these steps:
 
 1. Open **Unsent answers** at the top right of Queue. Answers the server has not replied to are under
-   **No reply yet**, each marked **Waiting to send** or **Dropped**. Answers it replied to are under **Replied**,
-   each marked **Recorded**, **Recorded as advice**, **Overtaken**, or **Refused**, with the server's reason.
+   **No reply yet**, each marked **Waiting to send** or **Dropped**. Completed and obsolete answers are under **Finished**.
+   A completed answer shows **Recorded**, **Recorded as advice**, **Overtaken**, or **Refused**, with the server's reason.
+   An **Obsolete** entry has no confirmed outcome and the app never sends it again.
    When nothing waits, the page says **Nothing is waiting to send**.
 2. Keep the app open. Waiting answers send in order when the connection returns, including answers in other projects.
 3. To try again immediately, press **Send waiting answers**. It is there only while an answer has no reply.
-4. To remove the answers the server replied to, press **Clear outcomes** at the top of **Replied**.
+4. To remove completed and obsolete answers, press **Clear outcomes** at the top of **Finished**.
 
 If an uncertain reply holds later answers in that project, the first waiting entry shows the problem and two choices. **Keep trying** sends the same answer and command again. **Drop saved answer** asks for confirmation, then checks that command with the server. A recorded answer shows its outcome. If every send attempt got a definite HTTP error reply and the command is still unrecorded, the app removes that entry.
 
@@ -418,7 +419,9 @@ The saved answer will not be sent again. To review an **Overtaken** answer, foll
 For **Refused**, read the reason and the question before giving another answer.
 A lost reply keeps the same command id when retried, so the retry cannot record the answer twice.
 
-An answer belongs to the project that existed when you saved it. If that project is deleted and another takes its address, its saved answers show **Obsolete** and never send to the replacement. Answers saved by an earlier app build without a project identity also show **Obsolete**. Read the current project before answering again. **Clear outcomes** removes obsolete entries.
+An answer belongs to the project that existed when you saved it. If another project takes its address, unfinished saved answers show **Obsolete** and the app never sends them to the replacement. The app does not know their outcomes. Unfinished answers saved by an earlier build without a project identity also show **Obsolete**. Completed answers keep their recorded outcomes and statuses. Read the current project before answering again. **Clear outcomes** removes obsolete and completed entries, and they stay cleared after later project replacements.
+
+If an earlier project's saved-answer file cannot be read, the app skips it and shows a notice. You can still save new answers for the current project. An unreadable file for the current project blocks new saves to protect its existing answers.
 
 Saved answers and their outcomes survive closing the app and are excluded from device backups. Signing out keeps them for you on the same instance and stops new sends from that workspace. A request already sent may complete. Other people signing in on the device have separate saved answers. Removing the app deletes them. **Clear outcomes** removes completed entries and keeps waiting and Dropped answers.
 
