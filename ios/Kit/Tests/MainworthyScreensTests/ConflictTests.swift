@@ -132,14 +132,31 @@ struct ConflictRecoveryTests {
 	actor LosingReply: Transport {
 		let live = URLSessionTransport()
 		var losing = false
+		var pausing = false
+		var held: CheckedContinuation<Void, Never>?
+		var waiting: CheckedContinuation<Void, Never>?
+		var arrived = false
+		func pause() { pausing = true }
+		func waitForMerge() async {
+			if arrived { return }
+			await withCheckedContinuation { waiting = $0 }
+		}
+		func release() { pausing = false; held?.resume(); held = nil }
 		private(set) var merges: [Data] = []
+		private(set) var mergeReplies: [Data] = []
 		private(set) var commands = 0
 		func lose() { losing = true }
 		func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
 			if request.url?.path.hasSuffix("/command") == true { commands += 1 }
+			if pausing, request.url?.path.hasSuffix("/decide") == true {
+				await withCheckedContinuation {
+					held = $0; arrived = true; waiting?.resume(); waiting = nil
+				}
+			}
 			let reply = try await live.send(request)
 			if request.url?.path.hasSuffix("/decide") == true {
 				merges.append(request.httpBody ?? Data())
+				mergeReplies.append(reply.0)
 				if losing { throw URLError(.networkConnectionLost) }
 			}
 			return reply
@@ -160,6 +177,105 @@ struct ConflictRecoveryTests {
 		#expect(editor.conflict?.addresses == [.field(.title)])
 		editor.chooseConflict(.field(.title), side: .mine)
 		return (opened, editor)
+	}
+
+	private func requireMergeReason(_ key: String) async throws {
+		let owner = try await Live.signedIn(as: Live.owner)
+		let policy: JSONValue = try await owner.read("admin", in: nil,
+			["do": "policy.show", "project": .string(key)])
+		let clauses = try #require(policy["clauses"]?.array).map { clause -> JSONValue in
+			guard clause["id"]?.string == "adopt-conflict", var row = clause.object,
+				var ask = clause["ask"]?.object else { return clause }
+			ask["reason"] = "required"; row["ask"] = .object(ask)
+			return .object(row)
+		}
+		let proposed: Wire.SuiteProposeReply = try await owner.read("propose", in: key,
+			["edits": [["op": "policy", "base": try #require(policy["version"]), "clauses": .array(clauses)]]])
+		let project = owner.project(key)
+		let ref = try #require(proposed.question)
+		let question = try #require(try await project.question(ref))
+		let replies: JSONValue = try await owner.read("decide", in: key,
+			["q": .string(question.ref), "onEvidence": .string(question.evidenceHash), "answer": ["is": "accept"]])
+		#expect(replies.array?.first?["status"]?.string == "decided")
+	}
+
+	@Test("a merge paused in flight preserves another client's decision")
+	func pausedMerge() async throws {
+		let transport = LosingReply()
+		let server = try await Live.signedIn(transport: transport)
+		let key = try await Live.project()
+		let project = server.project(key)
+		let (opened, editor) = try await setup(project)
+		let question = try #require(editor.conflict?.question)
+		let colleague = try await Live.signedIn().project(key)
+		let q = try #require(try await colleague.question(question))
+		let reject = try #require(q.choices.first { $0.answer == "reject" })
+		await transport.pause()
+		defer { Task { await transport.release() } }
+		let saving = Task { await editor.save() }
+		await transport.waitForMerge()
+		_ = try await colleague.answer(q, with: reject)
+		let before = try #require(try await colleague.question(question)?.ifDecision)
+		await transport.release()
+		#expect(await saving.value == nil)
+		let replies = await transport.mergeReplies
+		let reply = try JSONDecoder().decode(JSONValue.self, from: #require(replies.first))
+		#expect(reply["result"]?.array?.first?["status"]?.string == "conflict")
+		#expect(reply["result"]?.array?.first?["needs"]?.string == "the question is no longer open; read it again before answering")
+		let requests = await transport.merges
+		let input = try JSONDecoder().decode(JSONValue.self, from: #require(requests.first))
+		#expect(input["ifOpen"]?.bool == true)
+		#expect(try await colleague.question(question)?.ifDecision == before)
+		#expect(editor.conflictClosed && !editor.maySave)
+		#expect(editor.notice?.contains("answered elsewhere") == true)
+		#expect(editor.conflict?.merged.title == "My title" && editor.content.title == "My title")
+		#expect(try await project.caseDocument(opened.ref).content.title == "Their title")
+		#expect(try await project.caseHistory(opened.ref).map(\.version) == [2, 1])
+	}
+
+	@Test("a required conflict reason blocks an empty answer and records the typed reason on retry")
+	func requiredReason() async throws {
+		let transport = LosingReply()
+		let server = try await Live.signedIn(transport: transport)
+		let key = try await Live.project()
+		try await requireMergeReason(key)
+		let project = server.project(key)
+		let (opened, editor) = try await setup(project)
+		let question = try #require(editor.conflict?.question)
+		#expect(try await project.question(question)?.wantsReason == true)
+		#expect(!editor.maySave)
+		#expect(await editor.save() == nil)
+		#expect(await transport.merges.isEmpty)
+		editor.reason = " \t\n\u{FEFF}"
+		#expect(!editor.maySave)
+		editor.reason = String(repeating: "r", count: 501)
+		#expect(!editor.maySave)
+		editor.reason = "I kept my title after reading both edits"
+		#expect(editor.maySave)
+		await transport.lose()
+		#expect(await editor.save() == nil)
+		#expect(editor.isRetrying)
+		let merges = await transport.merges
+		let sent = try JSONDecoder().decode(JSONValue.self, from: #require(merges.first))
+		#expect(sent["reason"]?.string == "I kept my title after reading both edits")
+		#expect(sent["ifOpen"]?.bool == true)
+		#expect(try #require(sent["cmd"]?.string).isEmpty == false)
+		#expect(try merges.allSatisfy { try JSONDecoder().decode(JSONValue.self, from: $0) == sent })
+		for data in await transport.mergeReplies {
+			let reply = try JSONDecoder().decode(JSONValue.self, from: data)
+			#expect(reply["result"]?.array?.first?["status"]?.string == "decided")
+		}
+		editor.reason = ""
+		#expect(editor.maySave)
+		guard case .adopted(let stamp) = await editor.save(), let stamp else {
+			Issue.record("\(editor.notice ?? "reasoned merge did not recover")"); return
+		}
+		#expect(stamp.version == 3 && editor.savedDocument?.content.title == "My title")
+		let decided = try #require(try await project.question(question)?.decision)
+		#expect(decided.reason == "I kept my title after reading both edits")
+		#expect(await transport.commands == 1)
+		#expect(await transport.merges.count == merges.count)
+		#expect(try await project.caseHistory(opened.ref).map(\.version) == [3, 2, 1])
 	}
 
 	@Test("a lost merge reply is recovered by command with no further merge writes")

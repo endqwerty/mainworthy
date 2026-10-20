@@ -68,7 +68,12 @@ public final class CaseEditorScreen {
 		return issues
 	}
 	public var maySave: Bool {
-		!busy && !settled && !conflictClosed && (mergeSent != nil || (conflict.map(\.complete) ?? (sent != nil || validation.isEmpty)))
+		guard !busy, !settled, !conflictClosed else { return false }
+		if mergeSent != nil { return true }
+		if let conflict {
+			return conflict.complete && reason.utf16.count <= 500 && (!conflict.wantsReason || !trimmed(reason).isEmpty)
+		}
+		return sent != nil || validation.isEmpty
 	}
 	public var isRetrying: Bool { (sent != nil || mergeSent != nil || (overlapQuestion != nil && conflict == nil)) && !busy }
 
@@ -161,7 +166,7 @@ public final class CaseEditorScreen {
 			}
 			guard let conflict else { throw ClientError.unreadable }
 			let recovering = mergeSent != nil
-			if mergeSent == nil { mergeSent = MergeSubmission(conflict) }
+			if mergeSent == nil { mergeSent = MergeSubmission(conflict, reason: reason) }
 			guard let submission = mergeSent else { return nil }
 			let outcome = try await project.resolve(submission, recovering: recovering)
 			switch outcome {
