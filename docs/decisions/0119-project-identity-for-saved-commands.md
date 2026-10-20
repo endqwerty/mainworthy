@@ -23,6 +23,7 @@ and answer files belong to that identity. Account refresh retires a replaced
 project's screens and outbox. A delayed send still carries the old identity, so
 replacement after the last project-list read cannot send it to the new project.
 A refusal for obsolete identity is terminal, even after uncertain delivery.
+After retirement, late replies and stale screen actions cannot write the old file.
 
 An unfinished saved answer from an earlier identity, or without identity, becomes
 Obsolete and is never sent or recovered against the current project. Its outcome
@@ -32,8 +33,10 @@ There is no client migration that attaches an old answer to today's project.
 
 When the current identity has no answer file, its outbox reads earlier files for
 the same instance, person and project key. Its first successful write saves the
-current file atomically, then removes the readable files it imported. Clearing
-outcomes therefore keeps them cleared across later project replacements.
+current file atomically, then removes the readable files it imported. Loading a
+readable current file also removes readable earlier files in that scope, completing
+cleanup if the app stopped after the atomic write. Clearing outcomes therefore
+keeps them cleared across later project replacements.
 Unreadable earlier files stay on disk and are skipped with one notice per import,
 without blocking new saved answers. An unreadable current file still blocks writes
 to preserve its saved answers.

@@ -428,7 +428,7 @@ The saved answer will not be sent again. To review an **Overtaken** answer, foll
 For **Refused**, read the reason and the question before giving another answer.
 A lost reply keeps the same command id when retried, so the retry cannot record the answer twice.
 
-An answer belongs to the project that existed when you saved it. If another project takes its address, unfinished saved answers show **Obsolete** and the app never sends them to the replacement. The app does not know their outcomes. Unfinished answers saved by an earlier build without a project identity also show **Obsolete**. Completed answers keep their recorded outcomes and statuses. Read the current project before answering again. **Clear outcomes** removes obsolete and completed entries, and they stay cleared after later project replacements.
+An answer belongs to the project that existed when you saved it. If another project takes its address, unfinished saved answers show **Obsolete** and the app never sends them to the replacement. The app does not know their outcomes. Unfinished answers saved by an earlier build without a project identity also show **Obsolete**. Completed answers keep their recorded outcomes and statuses. Read the current project before answering again. **Clear outcomes** removes obsolete and completed entries, and they stay cleared after later project replacements. An app restart or a late reply from an earlier project's send does not bring cleared answers back.
 
 If an earlier project's saved-answer file cannot be read, the app skips it and shows a notice. You can still save new answers for the current project. An unreadable file for the current project blocks new saves to protect its existing answers.
 
