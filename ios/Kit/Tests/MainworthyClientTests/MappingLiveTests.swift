@@ -10,7 +10,7 @@ struct MappingLiveTests {
 	func mapping(creating: Bool) async throws {
 		let server = try await Live.signedIn()
 		let key = try await Live.project()
-		let project = server.project(key)
+		let project = try await server.project(key)
 		let question = try #require(try await project.questions(open: true, kind: .map).questions.first)
 		guard case .unlinked(let evidence) = question.evidence else { Issue.record("no tests"); return }
 		let test = try #require(evidence.tests.first)

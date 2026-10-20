@@ -90,13 +90,13 @@ const CASES: { folder: string; tags: string[]; title: string; pre: string; steps
  * an agent's edit and about a test with no case (`standard`, `ask`), so every kind of question but a sign-off
  * is open in it when this returns.
  */
-export async function scenario(url: string, ownerToken: string, project: string): Promise<World> {
+export async function scenario(url: string, ownerToken: string, project: string, actorScope = project): Promise<World> {
 	const as = (token: string) => new Client({ url, token, project });
 	const owner = as(ownerToken);
 	await owner.call("admin", { do: "project.create", key: project, preset: "standard", unlinked: "ask" });
 	// Each project gets its own pipeline and agent: an actor that exists is not given a second grant by a token.
 	const tokenFor = async (actor: string, kind: "ci" | "agent", can: Capability[]) => {
-		const made = await owner.call("admin", { do: "token.create", actor: `${actor}-${project}`, kind, can, project });
+		const made = await owner.call("admin", { do: "token.create", actor: `${actor}-${actorScope}`, kind, can, project });
 		return as(Token.parse(made).token);
 	};
 	const ci = await tokenFor("pipeline", "ci", ["read", "record"]);

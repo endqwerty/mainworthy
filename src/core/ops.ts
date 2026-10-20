@@ -2,6 +2,7 @@
 // document, the MCP tools, the CLI and the web client are all derived from these, so a shape is declared once.
 import { z } from "zod";
 import { ATTACHMENT_LIMITS, AttachmentInput, attachmentBytes } from "./attachments.ts";
+import { cmd, projectCommand } from "./commands.ts";
 import { DURATION_FORMAT, DURATION_PATTERN } from "./duration.ts";
 import { QuarantineExit } from "./flaky.ts";
 import {
@@ -23,16 +24,8 @@ import { Outcome, ResultTrail, TRAIL_LIMITS, trailBytes } from "./results.ts";
 import { Obligation, SlotWork, TargetMatch, Verdict } from "./runs.ts";
 import { TeamInput } from "./teams.ts";
 
-/**
- * A client-generated id that names one request. Sent again unchanged, it returns the first reply and writes
- * nothing; sent again with other content, it is refused with `conflict`.
- */
-export const cmd = z
-	.string()
-	.min(8)
-	.max(64)
-	.optional()
-	.describe("Idempotency key. A retry with the same value writes nothing.");
+export { cmd } from "./commands.ts";
+
 const ref = (what: string) => z.string().describe(what);
 const limit = z.number().int().min(1).max(500).optional();
 const cursor = z.string().optional().describe("The cursor from the previous page.");
@@ -144,7 +137,7 @@ export type Edit = z.infer<typeof Edit>;
 export const ProposeInput = z.object({
 	edits: z.array(Edit).min(1).max(5000),
 	reason: z.string().max(500).optional().describe("Why. Shown in the case history."),
-	cmd,
+	...projectCommand,
 });
 export type ProposeInput = z.infer<typeof ProposeInput>;
 
@@ -258,7 +251,7 @@ export const ReportInput = z
 			.optional()
 			.meta({ "x-mcp-hidden": true })
 			.describe("CI-only empty declaration; requires policy permission."),
-		cmd,
+		...projectCommand,
 	})
 	.refine((report) => (report.nothingRequired ? report.results.length === 0 : report.results.length > 0), {
 		message: "send results, or an empty results array with nothingRequired: true, never both",
@@ -421,7 +414,7 @@ export const ClaimInput = z.object({
 		.optional()
 		.describe("Cases read, each as C-311@<hash>. Recorded even with no findings."),
 	findings: z.array(FindingIn).max(200).default([]),
-	cmd,
+	...projectCommand,
 });
 export type ClaimInput = z.infer<typeof ClaimInput>;
 export const ClaimReply = z.object({
@@ -458,13 +451,17 @@ const OneDecision = z.object({
 /** The most answers or withdrawals one `decide` request carries, and so the Queue selection limit. */
 export const DECIDE_MAX = 500;
 export const DecideInput = z.union([
-	OneDecision.extend({ cmd }),
-	z.object({ all: z.array(OneDecision).min(1).max(DECIDE_MAX), reason: z.string().max(1000).optional(), cmd }),
+	OneDecision.extend(projectCommand),
+	z.object({
+		all: z.array(OneDecision).min(1).max(DECIDE_MAX),
+		reason: z.string().max(1000).optional(),
+		...projectCommand,
+	}),
 	z.object({
 		undo: ref("The question whose decision to withdraw."),
 		ifDecision: z.number().int().positive().optional(),
 		reason: z.string().max(1000).optional(),
-		cmd,
+		...projectCommand,
 	}),
 	z
 		.object({
@@ -475,7 +472,7 @@ export const DecideInput = z.union([
 				.min(1)
 				.max(DECIDE_MAX),
 			reason: z.string().max(1000).optional(),
-			cmd,
+			...projectCommand,
 		})
 		.meta({ "x-mcp-hidden": true }),
 ]);
@@ -513,7 +510,7 @@ export const ChangeInput = z.object({
 		.describe(
 			"For merged: the exact commit that reached trunk and its branch. That commit becomes the change's head and moves to trunk; its failures are judged there again.",
 		),
-	cmd,
+	...projectCommand,
 });
 export type ChangeInput = z.infer<typeof ChangeInput>;
 export const ChangeReply = z.object({
@@ -546,7 +543,7 @@ export const AnnounceInput = z.object({
 		.optional()
 		.describe("Artifact digest. Required for a new build label."),
 	code: ArtifactCode.optional().describe("Source repositories and full commits. Required with a new artifact."),
-	cmd,
+	...projectCommand,
 });
 export type AnnounceInput = z.infer<typeof AnnounceInput>;
 export const AnnounceReply = z.object({
@@ -576,7 +573,7 @@ export const PlanInput = z.object({
 	accepts: TargetMatch.optional().describe("Which results count. Default: only results recorded in this run."),
 	require: z.array(Obligation).optional(),
 	assign: z.array(z.string()).optional().describe("Actor names to split the slots between."),
-	cmd,
+	...projectCommand,
 });
 export type PlanInput = z.infer<typeof PlanInput>;
 export const PlanReply = z.object({
@@ -603,7 +600,7 @@ export const WorkInput = z
 			.max(86_400)
 			.default(900)
 			.describe("Lease length in seconds, from 30 to 86400. Default: 900."),
-		cmd,
+		...projectCommand,
 	})
 	.superRefine((input, ctx) => {
 		if (input.do === "give-back" && input.slot === undefined)

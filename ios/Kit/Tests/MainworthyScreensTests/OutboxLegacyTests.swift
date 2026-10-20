@@ -9,7 +9,7 @@ import Testing
 @Suite("Saved answers across builds", .enabled(if: Live.isRunning, "needs the server `bun scripts/ios.ts test` starts"))
 @MainActor
 struct OutboxLegacyTests {
-	@Test("an answer an earlier build saved is sent as it was saved, and its recorded outcome is read back")
+	@Test("answers without a project identity become obsolete and are never sent")
 	func earlierBuild() async throws {
 		let transport = SwitchableQueueTransport()
 		let project = try await Live.signedIn(transport: transport).project(try await Live.project())
@@ -32,15 +32,15 @@ struct OutboxLegacyTests {
 		let outbox = AnswerOutbox(project: project, store: store)
 		#expect(outbox.storageProblem == nil)
 		#expect(outbox.entries.map(\.questions) == [[finding.ref], [failure.ref]])
-		#expect(outbox.entries[0].outcome == .decided(12) && outbox.entries[0].status == "Recorded")
-		#expect(outbox.pendingCount == 1)
+		#expect(outbox.entries[0].outcome == nil && outbox.entries[0].status == "Obsolete")
+		#expect(outbox.pendingCount == 0)
 		transport.commands.withLock { $0 = [] }
 		await outbox.send()
-		#expect(outbox.entries.map(\.status) == ["Recorded", "Recorded"])
+		#expect(outbox.entries.map(\.status) == ["Obsolete", "Obsolete"])
 		// Sent as the earlier build wrote it: the server ties the command id to that request.
 		let sent = try transport.commands.withLock { try $0.map { try JSONDecoder().decode(JSONValue.self, from: $0) } }
-		#expect(sent.count == 1 && sent[0]["q"]?.string == failure.ref && sent[0]["all"] == nil)
-		#expect(try await project.question(failure.ref)?.isOpen == false)
+		#expect(sent.isEmpty)
+		#expect(try await project.question(failure.ref)?.isOpen == true)
 		// Saved again in this build's form, it reads back the same.
 		#expect(AnswerOutbox(project: project, store: store).entries == outbox.entries)
 	}

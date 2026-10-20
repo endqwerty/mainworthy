@@ -38,6 +38,7 @@ const Session = z.object({
 	projects: z.array(
 		z.object({
 			key: z.string(),
+			identity: z.string(),
 			name: z.string(),
 			seq: z.number(),
 			createdAt: z.number(),

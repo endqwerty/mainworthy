@@ -12,6 +12,7 @@ import { z } from "zod";
 import { type Instance, start, VERSION } from "../../src/app/start.ts";
 import { Client } from "../../src/cli/client.ts";
 import { seed } from "../../src/cli/seed.ts";
+import { removeProject } from "../../src/server/transfer/transfer.ts";
 import { docsRoutes } from "../../src/surfaces/docs/site.ts";
 import { passedRun, scenario } from "./scenario.ts";
 
@@ -107,6 +108,16 @@ export async function testInstance(): Promise<TestInstance> {
 										}
 									: await scenario(made.url, token, key);
 						return Response.json({ ok: true, result });
+					},
+					"/test/replace-project": async (req) => {
+						const { project } = z.object({ project: z.string() }).parse(await req.json());
+						await made.app.gate.run(() => {
+							removeProject(made.app.db, project);
+						});
+						return Response.json({
+							ok: true,
+							result: await scenario(made.url, token, project, `${project}-${randomBytes(5).toString("hex")}`),
+						});
 					},
 					"/test/answer-connection": async (req) => {
 						const parsed = z

@@ -2,8 +2,8 @@ import Foundation
 
 extension Server {
 	/// One project of this server.
-	package func project(_ key: String) -> ProjectClient {
-		ProjectClient(server: self, key: key)
+	package func project(_ key: String, identity: String) -> ProjectClient {
+		ProjectClient(server: self, key: key, identity: identity)
 	}
 }
 
@@ -13,6 +13,13 @@ extension Server {
 package struct ProjectClient: Sendable {
 	let server: Server
 	package let key: String
+	package let identity: String
+
+	init(server: Server, key: String, identity: String) {
+		self.server = server
+		self.key = key
+		self.identity = identity
+	}
 
 	/// What changes in the project, as it happens (`Server.changes`).
 	package func changes() -> AsyncThrowingStream<Change, any Error> {

@@ -212,6 +212,7 @@ Append a screenshot or small file to a result you recorded. Supply the file as b
 | `attachment.name` | `string` | yes |  |
 | `attachment.data` | `string` | yes |  |
 | `attachment.at` | `string` | no |  |
+| `projectIdentity` | `string` | no | Only write if the project key still names this identity. |
 
 </details>
 
@@ -371,6 +372,7 @@ Create or change cases, folders, links or the policy. Saving and proposing are t
 | `edits[][policy].unlinked` | `"ask" \| "track" \| "create"` | no |  |
 | `edits[][policy].emptyReports` | `"pending" \| "nothing-required"` | no |  |
 | `reason` | `string` | no | Why. Shown in the case history. |
+| `projectIdentity` | `string` | no | Only write if the project key still names this identity. |
 
 </details>
 
@@ -403,6 +405,7 @@ Preview mapped CSV cases, then confirm one import proposal. Existing foreign ali
 | `mapping.fields` | `record<string>` | no |  |
 | `preset` | `"testrail"` | no |  |
 | `confirm` | `string` | no | The confirmation from the dry run. Omit to preview. |
+| `projectIdentity` | `string` | no | Only write if the project key still names this identity. |
 
 </details>
 
@@ -476,6 +479,7 @@ Record results: a parsed CI report, one manual result, or an agent's batch. The 
 | `results[].annotation.version` | `integer` | no |  |
 | `results[].corrects` | `integer` | no | The id of an earlier result of yours that this one replaces. |
 | `nothingRequired` | `true` | no | CI-only empty declaration; requires policy permission. |
+| `projectIdentity` | `string` | no | Only write if the project key still names this identity. |
 
 </details>
 
@@ -513,6 +517,7 @@ Record a review and what it found. A review with no findings is still recorded.
 | `findings[].suggest[2].step` | `string` | no |  |
 | `findings[].suggest[2].action` | `string` | no |  |
 | `findings[].suggest[2].expected` | `string` | no |  |
+| `projectIdentity` | `string` | no | Only write if the project key still names this identity. |
 
 </details>
 
@@ -538,6 +543,7 @@ Say that a change ended (merged, or closed without merging) or is open again. An
 | `landing` | `object` | no | For merged: the exact commit that reached trunk and its branch. That commit becomes the change's head and moves to trunk; its failures are judged there again. |
 | `landing.commit` | `string` | yes |  |
 | `landing.branch` | `"main" \| "master" \| "trunk"` | yes |  |
+| `projectIdentity` | `string` | no | Only write if the project key still names this identity. |
 
 </details>
 
@@ -564,6 +570,7 @@ Announce a deployment and bind its build label to an attested artifact. Pipeline
 | `code` | `array<object>` | no | Source repositories and full commits. Required with a new artifact. |
 | `code[].repo` | `string` | yes |  |
 | `code[].commit` | `string` | yes |  |
+| `projectIdentity` | `string` | no | Only write if the project key still names this identity. |
 
 </details>
 
@@ -586,9 +593,11 @@ Queue a defect from a failed result: create a tracker issue or validate an exist
 | --- | --- | --- | --- |
 | `[1].do` | `"create"` | yes |  |
 | `[1].result` | `integer` | yes |  |
+| `[1].projectIdentity` | `string` | no | Only write if the project key still names this identity. |
 | `[2].do` | `"link"` | yes |  |
 | `[2].result` | `integer` | yes |  |
 | `[2].key` | `string` | yes |  |
+| `[2].projectIdentity` | `string` | no | Only write if the project key still names this identity. |
 
 </details>
 
@@ -632,6 +641,7 @@ Start a run: choose cases, say which results count and what completes it. Eviden
 | `require[][2].kind` | `"jobs"` | yes |  |
 | `require[][2].jobs` | `array<string>` | yes |  |
 | `assign` | `array<string>` | no | Actor names to split the slots between. |
+| `projectIdentity` | `string` | no | Only write if the project key still names this identity. |
 
 </details>
 
@@ -656,6 +666,7 @@ Take a named slot or the next free unfinished slot for a lease, renew it, or giv
 | `run` | `string` | yes |  |
 | `slot` | `integer` | no | Slot id from find slots. Omit to take the next free unfinished slot. |
 | `seconds` | `integer` | no | Lease length in seconds, from 30 to 86400. Default: 900. Default: `900`. |
+| `projectIdentity` | `string` | no | Only write if the project key still names this identity. |
 
 </details>
 
@@ -681,6 +692,7 @@ Answer a question, or withdraw a decision. Policy says whether your answer settl
 | `[1].onEvidence` | `string` | yes | The evidence hash you saw. If the evidence changed since, the reply is a conflict with the new evidence. |
 | `[1].answer` | `record<unknown>` | yes | The answer, for example {"is":"defect"}. The allowed answers depend on the question kind. |
 | `[1].reason` | `string` | no |  |
+| `[1].projectIdentity` | `string` | no | Only write if the project key still names this identity. |
 | `[2].all` | `array<object>` | yes |  |
 | `[2].all[].q` | `string` | yes | The question, for example Q-12. |
 | `[2].all[].ifOpen` | `boolean` | no | Refuse if the question is no longer open. |
@@ -688,13 +700,16 @@ Answer a question, or withdraw a decision. Policy says whether your answer settl
 | `[2].all[].answer` | `record<unknown>` | yes | The answer, for example {"is":"defect"}. The allowed answers depend on the question kind. |
 | `[2].all[].reason` | `string` | no |  |
 | `[2].reason` | `string` | no |  |
+| `[2].projectIdentity` | `string` | no | Only write if the project key still names this identity. |
 | `[3].undo` | `string` | yes | The question whose decision to withdraw. |
 | `[3].ifDecision` | `integer` | no |  |
 | `[3].reason` | `string` | no |  |
+| `[3].projectIdentity` | `string` | no | Only write if the project key still names this identity. |
 | `[4].undo` | `array<object>` | yes |  |
 | `[4].undo[].q` | `string` | yes | The question whose decision to withdraw. |
 | `[4].undo[].ifDecision` | `integer` | yes |  |
 | `[4].reason` | `string` | no |  |
+| `[4].projectIdentity` | `string` | no | Only write if the project key still names this identity. |
 
 </details>
 

@@ -52,7 +52,7 @@ struct ResultsLiveTests {
 	func moved() async throws {
 		let server = Live.server()
 		_ = try await server.signIn(Live.owner)
-		let client = server.project(try await Live.project())
+		let client = try await server.project(try await Live.project())
 		let _: JSONValue = try await server.write("report", in: client.key, [
 			"target": ["commit": .string(String(repeating: "3", count: 40)), "repo": "acme/shop", "pr": 482],
 			"job": "bulk",
@@ -75,7 +75,7 @@ struct ResultsLiveTests {
 	func buildLinks() async throws {
 		let server = Live.server()
 		_ = try await server.signIn(Live.owner)
-		let client = server.project(try await Live.project())
+		let client = try await server.project(try await Live.project())
 		for (job, build) in [("web", "https://ci.example.com/run/7"), ("file", "file:///etc/passwd")] {
 			let _: JSONValue = try await server.write("report", in: client.key, [
 				"target": ["commit": .string(String(repeating: "3", count: 40)), "repo": "acme/shop", "pr": 482],
@@ -92,7 +92,7 @@ struct ResultsLiveTests {
 	func olderRun() async throws {
 		let server = Live.server()
 		_ = try await server.signIn(Live.owner)
-		let client = server.project(try await Live.project())
+		let client = try await server.project(try await Live.project())
 		let shown = try await run(client)
 		let _: JSONValue = try await server.write("report", in: client.key, [
 			"target": ["commit": .string(String(repeating: "9", count: 40)), "repo": "acme/shop", "pr": 482],

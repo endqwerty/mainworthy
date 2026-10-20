@@ -20,7 +20,7 @@ struct SuiteScreenTests {
 			"op": "create", "body": ["title": "Uses sign in", "steps": [["id": "cd", "use": ["fragment": .string(fragmentRef), "version": 1]]]],
 		]]])
 		let userRef = try #require(user["cases"]?.array?.first?["ref"]?.string)
-		let client = server.project(key)
+		let client = try await server.project(key)
 		for ref in [fragmentRef, userRef] {
 			let opened = try await client.caseDocument(ref)
 			#expect(opened.content.steps.first?.action == "Open sign in")
@@ -38,7 +38,7 @@ struct SuiteScreenTests {
 		let key = try await Live.project()
 		let server = Live.server()
 		_ = try await server.signIn(Live.owner)
-		let client = server.project(key)
+		let client = try await server.project(key)
 		let opened = try await client.caseDocument("C-1")
 		let policy: JSONValue = try await server.read("admin", in: nil, ["do": "policy.show", "project": .string(key)])
 		var settings = try #require(policy["settings"]?.object)
@@ -177,7 +177,7 @@ struct SuiteScreenTests {
 		let transport = DelayedSavedRead()
 		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
 		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
-		let screen = SuiteScreen(project: server.project(key))
+		let screen = SuiteScreen(project: try await server.project(key))
 		screen.newCase()
 		screen.editor?.content.title = "My saved title"
 		let saving = Task { await screen.saveEditor() }
@@ -432,7 +432,7 @@ struct SuiteReadOrderingTests {
 		let transport = Paging()
 		let server = Server(instance: try #require(Instance(address: "mainworthy.example")),
 			secrets: MemoryStore(), transport: transport)
-		let screen = SuiteScreen(project: server.project("shop"))
+		let screen = SuiteScreen(project: server.project("shop", identity: "shop-identity"))
 		await screen.load(.all)
 		#expect(screen.listing(.all)?.hasMore == true)
 		let query = switch selection {
@@ -456,7 +456,7 @@ struct SuiteReadOrderingTests {
 		let transport = Paging(holdCursor: true)
 		let server = Server(instance: try #require(Instance(address: "mainworthy.example")),
 			secrets: MemoryStore(), transport: transport)
-		let screen = SuiteScreen(project: server.project("shop"))
+		let screen = SuiteScreen(project: server.project("shop", identity: "shop-identity"))
 		screen.appear(.all)
 		await screen.load(.all)
 		let page = Task { await screen.more(.all) }
@@ -475,7 +475,7 @@ struct SuiteReadOrderingTests {
 		let transport = Delayed()
 		let server = Server(instance: try #require(Instance(address: "mainworthy.example")),
 			secrets: MemoryStore(), transport: transport)
-		let screen = SuiteScreen(project: server.project("shop"))
+		let screen = SuiteScreen(project: server.project("shop", identity: "shop-identity"))
 		let query = CaseQuery(text: "old")
 		screen.appear(query)
 		let old = Task { await screen.load(query) }
@@ -534,7 +534,7 @@ struct SuiteCacheTests {
 	private func screen(_ transport: Counting) throws -> SuiteScreen {
 		let server = Server(instance: try #require(Instance(address: "mainworthy.example")),
 			secrets: MemoryStore(), transport: transport)
-		return SuiteScreen(project: server.project("shop"))
+		return SuiteScreen(project: server.project("shop", identity: "shop-identity"))
 	}
 
 	@Test("a folder opened again shows what was read without reading it, until a change is told of")
@@ -633,7 +633,7 @@ struct SuiteCacheTests {
 		let transport = HeldTree()
 		let server = Server(instance: try #require(Instance(address: "mainworthy.example")),
 			secrets: MemoryStore(), transport: transport)
-		let screen = SuiteScreen(project: server.project("shop"))
+		let screen = SuiteScreen(project: server.project("shop", identity: "shop-identity"))
 		screen.appear(.all)
 		await screen.load(.all)
 		await transport.hold()
@@ -688,7 +688,7 @@ struct SuiteEditorRetryTests {
 		let transport = Lost()
 		let server = Server(instance: try #require(Instance(address: "mainworthy.example")),
 			secrets: MemoryStore(), transport: transport)
-		let editor = CaseEditorScreen(project: server.project("shop"), source: .create(folder: "Checkout/Coupons"))
+		let editor = CaseEditorScreen(project: server.project("shop", identity: "shop-identity"), source: .create(folder: "Checkout/Coupons"))
 		editor.content.title = "One case"
 		#expect(await editor.save() == nil)
 		#expect(editor.isRetrying && editor.locked && editor.maySave)
@@ -747,7 +747,7 @@ struct SuiteOtherReadTests {
 		let transport = Ordered(path)
 		let server = Server(instance: try #require(Instance(address: "mainworthy.example")),
 			secrets: MemoryStore(), transport: transport)
-		let screen = SuiteScreen(project: server.project("shop"))
+		let screen = SuiteScreen(project: server.project("shop", identity: "shop-identity"))
 		let first = Task {
 			if path == "get" { await screen.openCase("C-1") } else { await screen.readHistory("C-1") }
 		}
@@ -769,7 +769,7 @@ struct SuiteOtherReadTests {
 		let transport = Ordered("history")
 		let server = Server(instance: try #require(Instance(address: "mainworthy.example")),
 			secrets: MemoryStore(), transport: transport)
-		let client = server.project("shop")
+		let client = server.project("shop", identity: "shop-identity")
 		let screen = SuiteScreen(project: client)
 		let document = try await client.caseDocument("C-1")
 		let preparing = Task { await screen.edit(document) }
@@ -817,7 +817,7 @@ struct SuiteAcceptanceTests {
 		let transport = Replies(kind)
 		let server = Server(instance: try #require(Instance(address: "mainworthy.example")),
 			secrets: MemoryStore(), transport: transport)
-		let screen = SuiteScreen(project: server.project("shop"))
+		let screen = SuiteScreen(project: server.project("shop", identity: "shop-identity"))
 		screen.newCase()
 		let draft = try #require(screen.editor)
 		draft.content.title = "Typed title"

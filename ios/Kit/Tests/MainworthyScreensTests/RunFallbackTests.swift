@@ -68,10 +68,10 @@ actor OvertakenSlotsTransport: Transport {
 		let server = Server(
 			instance: try #require(Instance(address: "mainworthy.example")), secrets: MemoryStore(),
 			transport: transport)
-		let client = server.project("review")
+		let client = server.project("review", identity: "review-identity")
 		let screen = OpenRunScreen(
 			project: client, run: try await client.run("R-1"),
-			permission: Project(key: "review", name: "Review", can: ["read", "produce"]), person: "robin")
+			permission: Project(key: "review", identity: "review-identity", name: "Review", can: ["read", "produce"]), person: "robin")
 		// Read the starting slot directly so the held run read belongs to recording.
 		let slot = try #require(try await client.slots(of: "R-1").first)
 		await screen.execute(slot)

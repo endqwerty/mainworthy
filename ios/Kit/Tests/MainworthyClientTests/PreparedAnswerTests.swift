@@ -10,7 +10,7 @@ struct PreparedAnswerTests {
 	let project = Server(
 		instance: Instance(address: "mainworthy.example")!, secrets: MemoryStore(), transport: URLSessionTransport(),
 		userAgent: "Mainworthy tests"
-	).project("demo")
+	).project("demo", identity: "demo-identity")
 
 	/// An unlinked question as a listing gives it.
 	func question(_ number: Int) throws -> Question {
@@ -71,10 +71,11 @@ struct PreparedAnswerTests {
 		}
 	}
 
-	@Test("an answer an earlier build saved is read as one member and sent as it was saved")
+	@Test("an answer an earlier build saved is read without an identity for an obsolete outcome")
 	func legacy() throws {
 		let saved = #"{"command":"c-1","question":"Q-4","title":"Flaky test","label":"Flaky","input":{"q":"Q-4","onEvidence":"h","answer":{"is":"flaky"},"ifOpen":true}}"#
 		let answer = try JSONDecoder().decode(PreparedAnswer.self, from: Data(saved.utf8))
+		#expect(answer.projectIdentity == nil)
 		#expect(answer.command == "c-1" && answer.members == [.init(question: "Q-4", title: "Flaky test")])
 		#expect(answer.input["q"]?.string == "Q-4" && answer.input["all"] == nil)
 		let again = try JSONDecoder().decode(PreparedAnswer.self, from: JSONEncoder().encode(answer))

@@ -97,7 +97,17 @@ const fixtures: Record<string, Row[]> = {
 			can: '[ "read", "produce" ]',
 		},
 	],
-	projects: [{ id: 23, org: 17, key: "qa", name: "雪 project", seq: Number.MAX_SAFE_INTEGER, created_at: time }],
+	projects: [
+		{
+			identity: "identity-qa",
+			id: 23,
+			org: 17,
+			key: "qa",
+			name: "雪 project",
+			seq: Number.MAX_SAFE_INTEGER,
+			created_at: time,
+		},
+	],
 	counters: [
 		{ project: 23, name: "version", value: 9_223_372_036_854_775_807n },
 		{ project: 23, name: "case", value: -9_223_372_036_854_775_808n },
@@ -665,7 +675,7 @@ describe("Mainworthy instance archives", () => {
 		from.exec(`
 			INSERT INTO orgs VALUES (18, 'Unrelated organisation', 1);
 			INSERT INTO actors VALUES (80, 18, 'human', 'Unrelated person', NULL, 1, NULL);
-			INSERT INTO projects VALUES (24, 18, 'other', 'Unrelated project', 1, 1);
+			INSERT INTO projects VALUES (24, 18, 'other', 'Unrelated project', 1, 1, 'identity-other');
 			INSERT INTO folders VALUES (44, 24, NULL, 'Private folder', 'a0', 'active', 1);
 			INSERT INTO grants (actor, project, can) VALUES (80, 24, '["admin"]');
 			INSERT INTO mail_contacts VALUES (80, 'unrelated@example.com', NULL, 'other-revision');
@@ -833,7 +843,7 @@ describe("Mainworthy instance archives", () => {
 	test("removing a project deletes every row it owns and leaves people and another project as they were", () => {
 		const db = source();
 		db.exec(`
-			INSERT INTO projects VALUES (24, 17, 'other', 'Another project', 1, 1);
+			INSERT INTO projects VALUES (24, 17, 'other', 'Another project', 1, 1, 'identity-other');
 			INSERT INTO folders VALUES (44, 24, NULL, 'Kept folder', 'a0', 'active', 1);
 			INSERT INTO grants (actor, project, can) VALUES (70, 24, '["read"]');
 			INSERT INTO slot_leases VALUES (602, 71, 1, 30001);

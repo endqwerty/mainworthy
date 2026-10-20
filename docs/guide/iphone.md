@@ -418,6 +418,8 @@ The saved answer will not be sent again. To review an **Overtaken** answer, foll
 For **Refused**, read the reason and the question before giving another answer.
 A lost reply keeps the same command id when retried, so the retry cannot record the answer twice.
 
+An answer belongs to the project that existed when you saved it. If that project is deleted and another takes its address, its saved answers show **Obsolete** and never send to the replacement. Answers saved by an earlier app build without a project identity also show **Obsolete**. Read the current project before answering again. **Clear outcomes** removes obsolete entries.
+
 Saved answers and their outcomes survive closing the app and are excluded from device backups. Signing out keeps them for you on the same instance and stops new sends from that workspace. A request already sent may complete. Other people signing in on the device have separate saved answers. Removing the app deletes them. **Clear outcomes** removes completed entries and keeps waiting and Dropped answers.
 
 The app needs a connection to identify you after reopening. It sends no answers while closed. Case drafts still do not survive closing.

@@ -279,6 +279,19 @@ function* executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>, call
 			return { ok: true, result: op.run(makeCtx(app, found, actor, false), input), seq: found.seq };
 		}
 
+		if (
+			typeof input === "object" &&
+			input !== null &&
+			"projectIdentity" in input &&
+			input.projectIdentity !== undefined &&
+			input.projectIdentity !== found.identity
+		)
+			return fail(
+				"conflict",
+				"This saved command belongs to an obsolete project. Read the current project before writing again.",
+				{ projectIdentity: "obsolete" },
+			);
+
 		try {
 			// True once the command id is bound to this request: by an earlier attempt that committed its first
 			// transaction and never finished (the server stopped), or by this one when it commits its own.

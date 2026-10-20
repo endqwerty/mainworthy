@@ -1,6 +1,7 @@
 import { z } from "zod";
+import { projectCommand } from "./commands.ts";
 import { CaseBody, cleanPath, emptyBody, type FieldDefinitions, fieldErrors } from "./model.ts";
-import { CaseAlias, cmd } from "./ops.ts";
+import { CaseAlias } from "./ops.ts";
 
 /** RFC 4180 records, including doubled quotes and multiline cells. No delimiter or encoding guesses. */
 export function parseCsv(text: string): string[][] {
@@ -91,7 +92,7 @@ export const CsvImportInput = z
 			.regex(/^[a-f0-9]{12}$/)
 			.optional()
 			.describe("The confirmation from the dry run. Omit to preview."),
-		cmd,
+		...projectCommand,
 	})
 	.refine(
 		(input) => input.mapping !== undefined || input.preset !== undefined,

@@ -33,6 +33,7 @@ const conflictAddress: Shape = { zod: ConflictAddress, swift: "ConflictAddress",
 // ── Who is signed in ───────────────────────────────────────────────────────────────────────────────────────
 
 const Project = struct("Project", "A project the caller holds a grant on.", {
+	identity: [text, "The opaque identity of this project, retained across export and import."],
 	key: text,
 	name: text,
 	policy: [text, "The name of the policy's preset: loose, standard, strict, or custom."],

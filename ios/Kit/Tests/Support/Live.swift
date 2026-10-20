@@ -80,3 +80,12 @@ package enum Live {
 		return try JSONDecoder().decode(Reply.self, from: data).result.project
 	}
 }
+
+// Live tests resolve a key before constructing a client, just as Workspace uses its account's Project.
+extension Server {
+	package func project(_ key: String) async throws -> ProjectClient {
+		let account = try await account()
+		guard let project = account.projects.first(where: { $0.key == key }) else { throw ClientError.unreadable }
+		return self.project(key, identity: project.id)
+	}
+}

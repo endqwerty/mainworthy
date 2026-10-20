@@ -26,7 +26,7 @@ struct ChangesScreenTests {
 	func runs() async throws {
 		let server = Live.server()
 		_ = try await server.signIn(Live.owner)
-		let client = server.project(try await Live.project())
+		let client = try await server.project(try await Live.project())
 		let screen = ChangesScreen(project: client)
 		await screen.refresh()
 		await screen.open("pr:482")
@@ -54,7 +54,7 @@ struct ChangesScreenTests {
 	func capEvictsDetail() async throws {
 		let server = Live.server()
 		_ = try await server.signIn(Live.owner)
-		let client = server.project(try await Live.project())
+		let client = try await server.project(try await Live.project())
 		let screen = ChangesScreen(project: client)
 		await screen.refresh()
 		await screen.open("pr:482")
@@ -153,7 +153,7 @@ struct ChangesReadTests {
 		let server = Server(
 			instance: try #require(Instance(address: "mainworthy.example")), secrets: MemoryStore(), transport: transport
 		)
-		let screen = ChangesScreen(project: server.project("shop"))
+		let screen = ChangesScreen(project: server.project("shop", identity: "shop-identity"))
 		let first = Task { await screen.refresh() }
 		for await _ in transport.began { break }
 		await screen.refresh()
@@ -167,7 +167,7 @@ struct ChangesReadTests {
 		let server = Server(
 			instance: try #require(Instance(address: "mainworthy.example")), secrets: MemoryStore(), transport: QueueScreenFailureTests.Down()
 		)
-		let screen = ChangesScreen(project: server.project("shop"))
+		let screen = ChangesScreen(project: server.project("shop", identity: "shop-identity"))
 		await screen.refresh()
 		guard case .failed(let why) = screen.loading else { Issue.record("the failed read was not shown"); return }
 		#expect(why.hasPrefix("The server could not be reached."))
@@ -183,7 +183,7 @@ struct ChangesReadTests {
 		let server = Server(
 			instance: try #require(Instance(address: "mainworthy.example")), secrets: MemoryStore(), transport: QueueScreenFailureTests.TwoPages()
 		)
-		let queue = QueueScreen(project: server.project("shop"))
+		let queue = QueueScreen(project: server.project("shop", identity: "shop-identity"))
 		await queue.show(.open, filter: nil)
 		#expect(queue.current("Q-3") == nil)
 		await queue.open("Q-3")

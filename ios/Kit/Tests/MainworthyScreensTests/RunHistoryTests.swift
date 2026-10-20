@@ -49,7 +49,7 @@ struct RunHistoryTests {
 		let transport = HeldRunList(match: "pr:482")
 		let server = Live.server(transport: transport)
 		_ = try await server.signIn(Live.owner)
-		let client = server.project(try await Live.project())
+		let client = try await server.project(try await Live.project())
 		try await report(server, in: client.key, commit: String(repeating: "6", count: 40), pr: 483)
 		let screen = ChangesScreen(project: client)
 		let old = Task { await screen.open("pr:482") }
@@ -66,9 +66,9 @@ struct RunHistoryTests {
 		let transport = HeldRunList(match: "planned")
 		let server = Live.server(transport: transport)
 		_ = try await server.signIn(Live.owner)
-		let client = server.project(try await Live.project())
+		let client = try await server.project(try await Live.project())
 		let screen = RunsScreen(
-			project: client, permission: Project(key: client.key, name: client.key, can: ["read", "plan"]),
+			project: client, permission: Project(key: client.key, identity: client.identity, name: client.key, can: ["read", "plan"]),
 			person: Live.ownerName)
 		let old = Task { await screen.show(RunFilter(kind: .planned)) }
 		await transport.wasAsked()
@@ -82,9 +82,9 @@ struct RunHistoryTests {
 	func planUnderChangeFilter() async throws {
 		let server = Live.server()
 		_ = try await server.signIn(Live.owner)
-		let client = server.project(try await Live.project())
+		let client = try await server.project(try await Live.project())
 		let screen = RunsScreen(
-			project: client, permission: Project(key: client.key, name: client.key, can: ["read", "produce", "plan"]),
+			project: client, permission: Project(key: client.key, identity: client.identity, name: client.key, can: ["read", "produce", "plan"]),
 			person: Live.ownerName)
 		await screen.show(RunFilter(kind: .change))
 		let run = try #require(await screen.plan(name: "Planned under Change", selection: .tag("regression")))
@@ -95,7 +95,7 @@ struct RunHistoryTests {
 	func moreThanAPage() async throws {
 		let server = Live.server()
 		_ = try await server.signIn(Live.owner)
-		let client = server.project(try await Live.project())
+		let client = try await server.project(try await Live.project())
 		for number in 0..<2 { try await report(server, in: client.key, commit: String(format: "%040x", 7000 + number), pr: 482) }
 		let screen = ChangesScreen(project: client, runsPerPage: 2)
 		await screen.refresh()

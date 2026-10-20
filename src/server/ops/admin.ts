@@ -35,11 +35,19 @@ import { currentPolicy, isPreset, policySummary, seedPolicy } from "../policy/po
 import { defineInstanceOp, type InstanceCtx } from "./registry.ts";
 
 /** Every project with the policy in force. A plain read, so the session endpoint can call it during a long write. */
-export function listProjects(
-	db: Db,
-): { key: string; name: string; seq: number; createdAt: number; policy: string; unlinked: Unlinked; demo: boolean }[] {
+export function listProjects(db: Db): {
+	key: string;
+	identity: string;
+	name: string;
+	seq: number;
+	createdAt: number;
+	policy: string;
+	unlinked: Unlinked;
+	demo: boolean;
+}[] {
 	return allProjects(db).map((row) => ({
 		key: row.key,
+		identity: row.identity,
 		name: row.name,
 		seq: row.seq,
 		createdAt: row.created_at,
@@ -65,7 +73,7 @@ export function createProject(
 	const ctx = makeCtx(env.app, project, env.actor, true);
 	seedPolicy(ctx, preset, input.unlinked);
 	stampSeq(ctx);
-	return { key: project.key, name: project.name, policy: preset };
+	return { key: project.key, identity: project.identity, name: project.name, policy: preset };
 }
 
 /** The id of the project a grant names, or 0 when it names none: every project. */
