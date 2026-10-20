@@ -39,7 +39,9 @@ final class PagedList<Query: Equatable & Sendable, Page: ListPage> {
 	private(set) var last: Page?
 	private(set) var loading = ListLoading.first
 	/// A later read that failed, while the rows read before stay.
-	var notice: String?
+	private(set) var notice: String?
+	/// A screen with its own notice receives list problems in that same value.
+	var onProblem: ((String) -> Void)?
 	/// The next page was refused because the list changed since its first page (`moved`).
 	private(set) var moved = false
 	var hasMore: Bool { next != nil }
@@ -69,7 +71,6 @@ final class PagedList<Query: Equatable & Sendable, Page: ListPage> {
 			self.query = query
 			rows = []
 			next = nil
-			loading = .first
 		}
 		return await reload()
 	}
@@ -116,7 +117,7 @@ final class PagedList<Query: Equatable & Sendable, Page: ListPage> {
 			return await reload()
 		} catch {
 			guard mine == generation else { return false }
-			if loading == .done { notice = error.shown } else { loading = .failed(error.shown) }
+			if loading == .done { report(error) } else { loading = .failed(error.shown) }
 		}
 		return false
 	}
@@ -140,15 +141,14 @@ final class PagedList<Query: Equatable & Sendable, Page: ListPage> {
 			await waitForRead()
 			if Task.isCancelled { return }
 		}
+		while let active = paging, active.generation == generation, active.cursor == next {
+			await waitForRead()
+			guard !Task.isCancelled else { return }
+			// A completed page or a newer query already supplied what this caller waited for.
+			guard active.generation == generation, active.cursor == next else { return }
+		}
 		guard !Task.isCancelled, let cursor = next else { return }
 		let mine = generation
-		if paging?.generation == mine, paging?.cursor == cursor {
-			repeat {
-				await waitForRead()
-				if Task.isCancelled { return }
-			} while paging?.generation == mine && paging?.cursor == cursor
-			return
-		}
 		paging = (mine, cursor)
 		defer {
 			if paging?.generation == mine, paging?.cursor == cursor { paging = nil }
@@ -171,8 +171,12 @@ final class PagedList<Query: Equatable & Sendable, Page: ListPage> {
 			next = nil
 		} catch {
 			guard mine == generation, cursor == next else { return }
-			notice = error.shown
+			report(error)
 		}
+	}
+
+	private func report(_ error: any Error) {
+		if let onProblem { onProblem(error.shown) } else { notice = error.shown }
 	}
 
 	/// AsyncStream ends a canceled wait without moving the read into a task of its own.

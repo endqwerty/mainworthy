@@ -141,6 +141,57 @@ struct PagedListTests {
 		#expect(list.rows.map(\.id) == ["fresh"] && list.hasMore)
 	}
 
+	@Test("a waiting More does not read a further page after its owner succeeds")
+	func completedPageOwner() async {
+		let reads = Reads()
+		var cursors: [String?] = []
+		let list = PagedList<String, Page>(query: "") { query, cursor in
+			cursors.append(cursor)
+			if cursors.count == 3 { return Page(rows: [Row(id: "unasked")], next: nil) }
+			return try await reads.read(query, cursor)
+		}
+		let first = Task { await list.reload() }
+		await reads.until(1)
+		reads.answer(0, ["first"], next: "p2")
+		_ = await first.value
+		let owner = Task { await list.more() }
+		await reads.until(2)
+		var entered = false
+		let waiter = Task { entered = true; await list.more() }
+		while !entered { await Task.yield() }
+		reads.answer(1, ["second"], next: "p3")
+		await owner.value
+		await waiter.value
+		#expect(cursors == [nil, "p2"])
+		#expect(list.rows.map(\.id) == ["first", "second"] && list.hasMore)
+	}
+
+	@Test("a waiting More retries the page when its first reader was canceled")
+	func canceledPageOwner() async {
+		let reads = Reads()
+		var cursors: [String?] = []
+		let list = PagedList<String, Page>(query: "") { query, cursor in
+			cursors.append(cursor)
+			if cursors.count == 3 { return Page(rows: [Row(id: "retried")], next: nil) }
+			return try await reads.read(query, cursor)
+		}
+		let first = Task { await list.reload() }
+		await reads.until(1)
+		reads.answer(0, ["first"], next: "p2")
+		_ = await first.value
+		let owner = Task { await list.more() }
+		await reads.until(2)
+		var entered = false
+		let waiter = Task { entered = true; await list.more() }
+		while !entered { await Task.yield() }
+		owner.cancel()
+		reads.answer(1, ["canceled"], next: nil)
+		await owner.value
+		await waiter.value
+		#expect(cursors == [nil, "p2", "p2"])
+		#expect(list.rows.map(\.id) == ["first", "retried"] && !list.hasMore)
+	}
+
 	@Test("a canceled read cannot publish a reply even if its reader ignores cancellation")
 	func canceledReply() async {
 		let reads = Reads()
