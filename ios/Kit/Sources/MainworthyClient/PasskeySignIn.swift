@@ -37,7 +37,7 @@ public struct PasskeyAssertion: Sendable {
 public enum PasskeyAuthorizationError: Error, LocalizedError {
 	case unavailable
 	public var errorDescription: String? {
-		"No passkey was available for this instance. Try again or sign in with your password."
+		"This app could not use a passkey for this instance. Sign in with your password."
 	}
 }
 

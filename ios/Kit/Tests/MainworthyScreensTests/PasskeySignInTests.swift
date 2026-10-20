@@ -72,7 +72,7 @@ struct PasskeySignInTests {
 		#expect(kept.contains(sessionCookie) && !kept.contains(ceremonyCookie) && !kept.contains("fallback"))
 	}
 
-	@Test("cancel and unavailable credentials preserve the password fallback", arguments: [false, true])
+	@Test("cancel stays silent and an authorization failure preserves the password fallback", arguments: [false, true])
 	func unavailable(_ cancel: Bool) async {
 		let transport = PasskeyTransport([start()] + success)
 		let store = MemoryStore()
@@ -83,8 +83,25 @@ struct PasskeySignInTests {
 		form.name = "robin"; form.password = "fallback"
 		await form.signInWithPasskey(using: authorization)
 		#expect(form.canSubmit && form.name == "robin" && form.password == "fallback")
-		#expect(form.notice == (cancel ? nil : "No passkey was available for this instance. Try again or sign in with your password."))
+		#expect(form.notice == (cancel ? nil : "This app could not use a passkey for this instance. Sign in with your password."))
 		#expect(store.load() == nil && name.isEmpty && transport.requests.count == 1)
+		await form.submit()
+		#expect(name == "robin")
+	}
+
+	@Test("an instance without native passkey support points to password sign-in")
+	func unsupportedInstance() async {
+		let refusal = PasskeyTransport.Reply(body: #"{"ok":false,"error":{"code":"invalid","message":"native passkey sign-in needs an HTTPS public address and an associated app domain"}}"#, status: 400)
+		let transport = PasskeyTransport([refusal] + success)
+		let store = MemoryStore()
+		var name = ""
+		let form = form(transport, store: store) { name = $0.name }
+		let authorization = FakePasskey()
+		form.name = "robin"; form.password = "fallback"
+		await form.signInWithPasskey(using: authorization)
+		#expect(form.notice == "Passkey sign-in is not available for this instance in this app. Sign in with your password.")
+		#expect(form.canSubmit && form.name == "robin" && form.password == "fallback")
+		#expect(authorization.asked == nil && store.load() == nil && transport.requests.count == 1)
 		await form.submit()
 		#expect(name == "robin")
 	}

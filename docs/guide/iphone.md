@@ -54,6 +54,7 @@ When the instance offers an identity provider, press **Sign in with** and the pr
 in the system browser sheet. The app returns signed in as the person linked to that provider identity. You
 need no Mainworthy password. Link the identity in the web app first, under Settings, **Your sign-in**, or
 accept an invitation there through the provider. Cancelling the sheet leaves you signed out.
+If the provider does not sign you in, the app offers a retry or password sign-in and keeps any name and password you entered.
 Repeated refused provider callbacks count toward the instance's sign-in limit for that address, shared
 with web sign-in. If a refusal reaches that limit, the sheet closes and the app tells you how many seconds
 to wait before trying again. A valid provider answer still passes that limit.
@@ -62,7 +63,8 @@ To use a passkey, press **Sign in with a passkey** and choose a credential in th
 The app needs an HTTPS instance associated with its signed build, using the same paid-team setup as
 [password AutoFill](#fill-the-password-from-1password-or-the-phones-passwords). For another instance, the
 repository's `ios/README.md` explains how to build with its domain and configure the instance.
-If you cancel, no credential is available, or the server refuses the assertion, you can still enter a password.
+If you cancel, the app adds no message. If the app cannot use a passkey for this instance, it says so and
+points you to password sign-in. A failed passkey attempt keeps the name and password you entered.
 If the challenge has expired, press **Sign in with a passkey** again to get a new one.
 Physical-device checks, including an external credential provider, remain open in
 [issue #205](https://github.com/endqwerty/mainworthy/issues/205).

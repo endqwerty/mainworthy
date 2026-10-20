@@ -2,8 +2,8 @@ import Foundation
 import MainworthyClient
 import Observation
 
-/// The sign-in form: a password, the configured provider or a passkey, for the instance the app was built for. It does not ask which
-/// instance (issue #233).
+/// The sign-in form: a password, the configured provider or a passkey, for the instance the app was built for.
+/// It does not ask which instance (issue #233).
 @MainActor @Observable
 public final class SignInForm {
 	public let instance: Instance
@@ -50,6 +50,8 @@ public final class SignInForm {
 			onSignedIn(server, account)
 		} catch is CancellationError {
 			return
+		} catch ClientError.refused(code: "unauthenticated", _) {
+			notice = "That did not sign you in through the identity provider. Try again, or use your password."
 		} catch {
 			notice = error.shown
 		}
@@ -69,6 +71,8 @@ public final class SignInForm {
 			onSignedIn(server, account)
 		} catch is CancellationError {
 			return
+		} catch ClientError.refused(code: "invalid", message: "native passkey sign-in needs an HTTPS public address and an associated app domain") {
+			notice = "Passkey sign-in is not available for this instance in this app. Sign in with your password."
 		} catch ClientError.refused(code: "unauthenticated", _) {
 			notice = "That passkey did not sign you in. Try again for a new challenge, or use your password."
 		} catch {

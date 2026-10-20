@@ -34,6 +34,26 @@ struct ProviderSignInTests {
 		}
 	}
 
+	@Test func aRefusedProviderKeepsThePasswordAndPointsToPasswordSignIn() async {
+		let store = MemoryStore()
+		var signedIn = false
+		let form = SignInForm(instance: Live.instance, notice: nil, connect: { instance in
+			Server(instance: instance, secrets: store)
+		}, onSignedIn: { _, account in signedIn = account.name == Live.name })
+		await form.loadMethods()
+		#expect(form.providerName == "Example ID")
+		form.name = Live.name
+		form.password = Live.password
+		await form.signInWithProvider { _, _ in
+			throw ClientError.refused(code: "unauthenticated", message: "That did not sign you in through the identity provider.")
+		}
+		#expect(form.notice == "That did not sign you in through the identity provider. Try again, or use your password.")
+		#expect(form.canSubmit && form.name == Live.name && form.password == Live.password)
+		#expect(!signedIn && store.load() == nil)
+		await form.submit()
+		#expect(signedIn && form.password.isEmpty && store.load() != nil)
+	}
+
 	@Test func cancellingTheProviderLeavesTheFormSignedOutAndReadyToRetry() async {
 		let store = MemoryStore()
 		var signedIn = false
