@@ -215,7 +215,7 @@ test("upgrading an existing database rebuilds pinned search once", () => {
 	const expected = documents();
 	// Restore schema 29 before replaying migrations, including columns added since the search upgrade.
 	db.exec(
-		"ALTER TABLE results RENAME COLUMN trail TO steps; ALTER TABLE results DROP COLUMN model; ALTER TABLE batches DROP COLUMN model",
+		"DROP INDEX projects_identity; ALTER TABLE projects DROP COLUMN identity; ALTER TABLE results RENAME COLUMN trail TO steps; ALTER TABLE results DROP COLUMN model; ALTER TABLE batches DROP COLUMN model",
 	);
 	db.exec(
 		"DROP TABLE slot_leases; UPDATE search_docs SET body = '' WHERE rowid = 2; UPDATE meta SET value = '29' WHERE key = 'schema_version'",

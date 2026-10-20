@@ -103,7 +103,7 @@ test("schema 32 evidence upgrades with an unspecified model and keeps working", 
 	const agent = h.actor("runner", "agent", ["read", "produce"]);
 	h.call("report", ciReport({ commit: "legacy638", n: 1 }), agent);
 	h.app.db.exec(
-		"ALTER TABLE results RENAME COLUMN trail TO steps; ALTER TABLE results DROP COLUMN model; ALTER TABLE batches DROP COLUMN model; UPDATE meta SET value = '32' WHERE key = 'schema_version'",
+		"DROP INDEX projects_identity; ALTER TABLE projects DROP COLUMN identity; ALTER TABLE results RENAME COLUMN trail TO steps; ALTER TABLE results DROP COLUMN model; ALTER TABLE batches DROP COLUMN model; UPDATE meta SET value = '32' WHERE key = 'schema_version'",
 	);
 	const { migrate, SCHEMA_VERSION } = await import("../src/server/kernel/migrate.ts");
 	expect(migrate(h.app.db, ":memory:")).toEqual({ from: 32, to: SCHEMA_VERSION, backup: null });
