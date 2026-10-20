@@ -131,6 +131,77 @@ final class QueueUITests: XCTestCase {
 		shot("u8-proposal-enabled")
 	}
 
+	@MainActor private func questionConnection(project: String, question: String, mode: String) async throws -> (url: String, arrived: Bool) {
+		let address = try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])
+		var request = URLRequest(url: try XCTUnwrap(URL(string: "\(address)/test/question-connection")))
+		request.httpMethod = "POST"
+		request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+		request.setValue("Bearer \(environment["MAINWORTHY_TEST_TOKEN"] ?? "")", forHTTPHeaderField: "Authorization")
+		request.httpBody = try JSONSerialization.data(withJSONObject: ["project": project, "question": question, "mode": mode])
+		let (data, response) = try await URLSession.shared.data(for: request)
+		XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+		let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+		let result = try XCTUnwrap(envelope["result"] as? [String: Any])
+		return (try XCTUnwrap(result["url"] as? String), try XCTUnwrap(result["arrived"] as? Bool))
+	}
+
+	@MainActor func testAcceptReasonSheetSurvivesQuestionMissingDuringRefresh() async throws {
+		let project = try await makeProject(strict: true)
+		let made = try await call("propose", project: project, input: [
+			"reason": "Review the title.",
+			"edits": [["op": "edit", "case": "C-1", "base": 1, "body": ["title": "The storefront opens"]]],
+		])
+		let question = try XCTUnwrap(made["question"] as? String)
+		let proxy = try await questionConnection(project: project, question: question, mode: "normal")
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", proxy.url]
+		app.launch()
+		try signIn(app)
+		app.openProject(project)
+		let row = app.staticTexts["Edit: The shop opens"]
+		XCTAssertTrue(row.waitForExistence(timeout: 10))
+		row.tap()
+		XCTAssertTrue(app.staticTexts["edit-summary"].waitForExistence(timeout: 10))
+		app.swipeUp()
+		app.swipeDown()
+		app.swipeUp()
+		XCTAssertTrue(app.buttons["answer-accept"].isEnabled)
+		app.buttons["answer-accept"].tap()
+		let reason = app.descendants(matching: .any)["reason"].firstMatch
+		XCTAssertTrue(reason.waitForExistence(timeout: 5))
+		reason.tap()
+		reason.typeText("Keep this reason")
+		_ = try await questionConnection(project: project, question: question, mode: "hold")
+		// Failures sort ahead of proposals, pushing this still-open question past the loaded first page.
+		let results: [[String: Any]] = (1...101).map { index in [
+			"test": ["key": "refresh-\(index)", "name": "Refresh failure \(index)", "file": "refresh.spec.ts"],
+			"outcome": "fail", "message": "Refresh failure \(index)",
+		] }
+		_ = try await call("report", project: project, input: [
+			"target": ["commit": String(repeating: "6", count: 40), "repo": "acme/shop", "branch": "main"],
+			"job": "refresh", "results": results,
+		])
+		var arrived = false
+		for _ in 0..<100 {
+			arrived = try await questionConnection(project: project, question: question, mode: "status").arrived
+			if arrived { break }
+			try await Task.sleep(for: .milliseconds(100))
+		}
+		XCTAssertTrue(arrived, "The list refresh must request the open question separately")
+		let current = try await call("get", project: project, input: ["refs": [question]])
+		let rows = try XCTUnwrap(current["items"] as? [[String: Any]])
+		XCTAssertEqual(rows.first?["state"] as? String, "open")
+		shot("u8-r2-missing-question")
+		XCTAssertTrue(app.buttons["submit-answer"].exists, "A temporarily missing question must keep its open reason sheet")
+		XCTAssertEqual(reason.value as? String, "Keep this reason")
+		XCTAssertFalse(app.staticTexts["question-settled"].exists)
+		_ = try await questionConnection(project: project, question: question, mode: "normal")
+		app.buttons["Cancel"].tap()
+		XCTAssertTrue(app.buttons["answer-accept"].wait(for: \.isEnabled, toEqual: true, timeout: 10))
+		XCTAssertFalse(app.staticTexts["question-settled"].exists)
+		shot("u8-r2-open-question")
+	}
+
 	@MainActor func testAcceptReasonSheetClosesWhenSettledElsewhere() async throws {
 		let project = try await makeProject(strict: true)
 		let made = try await call("propose", project: project, input: [
@@ -169,6 +240,42 @@ final class QueueUITests: XCTestCase {
 		XCTAssertTrue(app.staticTexts["This question was settled elsewhere."].waitForExistence(timeout: 5))
 		XCTAssertTrue(app.staticTexts["Reject"].exists)
 		shot("u8-settled-elsewhere")
+	}
+
+	@MainActor func testSettlementNoticeClearsWhenQuestionReopens() async throws {
+		let project = try await makeProject()
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])]
+		app.launch()
+		try signIn(app)
+		app.openProject(project)
+		let row = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'expected $90.00'")).firstMatch
+		XCTAssertTrue(row.waitForExistence(timeout: 10))
+		row.tap()
+		let defect = app.buttons["answer-defect"]
+		for _ in 0..<5 where !defect.isHittable { app.swipeUp() }
+		XCTAssertTrue(defect.isEnabled)
+		defect.tap()
+		XCTAssertTrue(app.textFields["reference"].waitForExistence(timeout: 5))
+		let inbox = try await call("inbox", project: project, input: ["kind": "failure"])
+		let items = try XCTUnwrap(inbox["items"] as? [[String: Any]])
+		let live = try XCTUnwrap(items.first)
+		let question = try XCTUnwrap(live["q"] as? String)
+		let decided = try await call("decide", project: project, input: [
+			"q": question, "onEvidence": try XCTUnwrap(live["evidenceHash"] as? String),
+			"answer": ["is": "infra"],
+		])
+		XCTAssertEqual((decided["items"] as? [[String: Any]])?.first?["status"] as? String, "decided")
+		XCTAssertTrue(app.staticTexts["question-settled"].waitForExistence(timeout: 15))
+		XCTAssertFalse(app.buttons["submit-answer"].exists)
+		let undone = try await call("decide", project: project, input: ["undo": question])
+		XCTAssertEqual((undone["items"] as? [[String: Any]])?.first?["status"] as? String, "reopened")
+		XCTAssertTrue(defect.waitForExistence(timeout: 15))
+		let noticeGone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.staticTexts["question-settled"])
+		let cleared = await XCTWaiter.fulfillment(of: [noticeGone], timeout: 5)
+		shot("u8-r2-reopened-question")
+		XCTAssertEqual(cleared, .completed, "An open question must not claim it was settled elsewhere")
+		XCTAssertTrue(defect.isEnabled)
 	}
 
 	@MainActor func testAcceptConfirmationClosesWhenSettledElsewhere() async throws {

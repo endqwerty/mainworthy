@@ -76,7 +76,8 @@ struct QuestionView: View {
 		}
 		.onChange(of: current, initial: true) { _, now in
 			if let now { last = now }
-			if now?.isOpen != true {
+			if now?.isOpen == true { settledElsewhere = false }
+			if now?.isOpen == false {
 				switch asking {
 				case .answer:
 					asking = nil
@@ -217,7 +218,7 @@ struct QuestionView: View {
 				.font(.subheadline)
 				.foregroundStyle(.secondary)
 			if case .proposal(let edit) = question.evidence, edit.isShownWhole, !screen.isShown(question) {
-				Text("Read every part of each edit in Changes, or the full case for a new case, before answering.")
+				Text("Scroll through every part on the Changes side of each edit, or the full case for a new case, before answering. With VoiceOver, scroll page by page with a three-finger swipe.")
 					.font(.subheadline).foregroundStyle(.secondary)
 			}
 			ForEach(question.choices) { choice in
