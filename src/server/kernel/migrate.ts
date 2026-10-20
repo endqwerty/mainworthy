@@ -1,7 +1,7 @@
 // Versioned migrations, run on start in every layer (decision 0002, rule 8).
 import { closeSync, existsSync, fsyncSync, openSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { Db } from "./db.ts";
+import { createPrivateDatabaseFile, Db, protectDatabaseCopies } from "./db.ts";
 import init from "./migrations/0001_init.sql" with { type: "text" };
 import sessions from "./migrations/0002_sessions.sql" with { type: "text" };
 import tokenLimits from "./migrations/0003_token_limits.sql" with { type: "text" };
@@ -138,6 +138,7 @@ export function schemaVersion(db: Db): number {
  * completed the new copy itself. A pre-existing copy is left alone and never permits cleanup.
  */
 export function migrate(db: Db, path: string): { from: number; to: number; backup: string | null } {
+	if (path !== ":memory:") protectDatabaseCopies(path);
 	const from = schemaVersion(db);
 	if (from > SCHEMA_VERSION) {
 		throw new Error(`database schema ${from} is newer than this build (${SCHEMA_VERSION}); upgrade Mainworthy`);
@@ -150,7 +151,7 @@ export function migrate(db: Db, path: string): { from: number; to: number; backu
 		if (!existsSync(backup)) {
 			const temporary = `${backup}.${crypto.randomUUID()}.tmp`;
 			try {
-				db.raw.query("VACUUM INTO ?").run(temporary);
+				createPrivateDatabaseFile(temporary, (privatePath) => db.raw.query("VACUUM INTO ?").run(privatePath));
 				const copy = openSync(temporary, "r+");
 				try {
 					fsyncSync(copy);

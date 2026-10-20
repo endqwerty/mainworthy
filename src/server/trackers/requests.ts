@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { mayRun } from "../../core/kinds.ts";
 import { printCase } from "../../core/markdown.ts";
 import type { CaseBody } from "../../core/model.ts";
 import { type TrackerInput, TrackerItem, type TrackerReceipt } from "../../core/tracker.ts";
@@ -6,7 +7,7 @@ import { batchById, mustTarget, resultById, testById, testRef } from "../evidenc
 import type { App } from "../kernel/app.ts";
 import { type Ctx, projectById } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
-import { invalid, notFound } from "../kernel/errors.ts";
+import { forbidden, invalid, notFound } from "../kernel/errors.ts";
 import { caseById, caseRef, versionOf } from "../suite/suite.ts";
 import { configuredTrackers } from "./config.ts";
 import { TrackerError, type TrackerPort } from "./port.ts";
@@ -66,6 +67,8 @@ export function queueDefect(ctx: Ctx, input: TrackerInput): TrackerReceipt {
 	if (input.do === "link" && !config.validKey(input.key))
 		throw invalid("The issue key must name an issue in the configured tracker project.");
 	const result = resultById(ctx.db, input.result);
+	if (!mayRun(ctx.actor, "read") && result?.actor !== ctx.actor.id)
+		throw forbidden("tracker needs the read capability to queue a result this actor did not record");
 	if (!result || result.project !== ctx.project.id) throw notFound("result");
 	if (result.outcome !== "fail" && result.outcome !== "error")
 		throw invalid("A defect needs a failed or errored result.");

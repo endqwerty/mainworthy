@@ -14,7 +14,7 @@ import { type Config, defaultConfig, openApp, type ReadCall, type ReadPool } fro
 import { databasePath } from "../src/server/kernel/db.ts";
 import { ARCHIVE_VERSION, SCHEMA_VERSION } from "../src/server/kernel/migrate.ts";
 import { Readers } from "../src/server/ops/readers.ts";
-import { exportArchive } from "../src/server/transfer/transfer.ts";
+import { exportArchive, removeProject } from "../src/server/transfer/transfer.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
 
 const TOKEN = "owner-secret-0123456789";
@@ -748,6 +748,79 @@ describe("what ends a session", () => {
 		expect(answered.body.ok && answered.body.result.count).toBe(1);
 		instance.app.readers = pool;
 	});
+
+	test("a read whose worker answered before its project grant was removed carries no data", async () => {
+		const instance = boot({ readers: 1 });
+		const pool = instance.app.readers;
+		if (!(pool instanceof Readers)) throw new Error("the reader pool did not start");
+		await pool.ready();
+		await create(instance, "Removed grant payload");
+		const sam = await person(instance, "sam");
+		const answered = Promise.withResolvers<void>();
+		const resume = Promise.withResolvers<void>();
+		instance.app.readers = {
+			run: async (call, fallback) => {
+				const reply = await pool.run(call, fallback);
+				answered.resolve();
+				await resume.promise;
+				return reply;
+			},
+			refresh: () => pool.refresh(),
+			stop: () => pool.stop(),
+		};
+		const reading = post(instance, "/api/p/scratch/find", {}, bearer(sam.token));
+		try {
+			await answered.promise;
+			expect((await admin(instance, { do: "grant.remove", actor: "sam", project: "scratch" })).status).toBe(200);
+			resume.resolve();
+			const refused = await reading;
+			expect(refused.status).toBe(404);
+			expect(refused.text).not.toContain("Removed grant payload");
+		} finally {
+			resume.resolve();
+			await reading;
+			instance.app.readers = pool;
+		}
+	});
+
+	for (const replacement of [false, true]) {
+		test(`a completed read carries no data after its project is ${replacement ? "replaced" : "removed"}`, async () => {
+			const instance = boot({ readers: 1 });
+			const pool = instance.app.readers;
+			if (!(pool instanceof Readers)) throw new Error("the reader pool did not start");
+			await pool.ready();
+			await create(instance, "Deleted project secret");
+			const answered = Promise.withResolvers<void>();
+			const resume = Promise.withResolvers<void>();
+			instance.app.readers = {
+				run: async (call, fallback) => {
+					const reply = await pool.run(call, fallback);
+					answered.resolve();
+					await resume.promise;
+					return reply;
+				},
+				refresh: () => pool.refresh(),
+				stop: () => pool.stop(),
+			};
+			const reading = post(instance, "/api/p/scratch/find", {}, bearer(TOKEN));
+			try {
+				await answered.promise;
+				removeProject(instance.app.db, "scratch");
+				if (replacement) expect((await admin(instance, { do: "project.create", key: "scratch" })).status).toBe(200);
+				resume.resolve();
+				const response = await reading;
+				expect(response.status).toBe(replacement ? 200 : 404);
+				expect(response.text).not.toContain("Deleted project secret");
+				const current = await post(instance, "/api/p/scratch/find", {}, bearer(TOKEN));
+				expect(response.body).toEqual(current.body);
+				expect(current.text).not.toContain("Deleted project secret");
+			} finally {
+				resume.resolve();
+				await reading;
+				instance.app.readers = pool;
+			}
+		});
+	}
 });
 
 describe("what is written of a use", () => {

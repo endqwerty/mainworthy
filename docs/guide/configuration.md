@@ -35,7 +35,7 @@ project "scratch" · you are robin@this-machine · policy: loose
 | --- | --- | --- |
 | `MAINWORTHY_HOST` | `127.0.0.1` | The address to listen on. Use `0.0.0.0` to listen on every interface. A value that is not loopback selects server mode. |
 | `MAINWORTHY_PORT` | `PORT`, else `7357` | The port to listen on. |
-| `MAINWORTHY_DATA` | `~/.mainworthy` | The data directory. It holds `mainworthy.db`, its WAL and shared-memory files while running, `server.lock` (with `server.lock-journal` while a server holds it), `blobs/` for result attachments, and `spool/` for archive transfers. |
+| `MAINWORTHY_DATA` | `~/.mainworthy` | The data directory. It holds `mainworthy.db`, its WAL and shared-memory files while running, `server.lock` (with `server.lock-journal` while a server holds it), `blobs/` for result attachments, and `spool/` for archive transfers. On POSIX hosts, the database files and upgrade copies are limited to the server's operating-system user; the directory and unrelated files keep their existing permissions. See [your data](./data.md#where-the-data-lives) for the host boundary. |
 | `MAINWORTHY_LOCK_WAIT_SECONDS` | `30` | Seconds to wait for another server to release the data directory. A finite nonnegative number, including fractions. `0` refuses immediately. |
 | `MAINWORTHY_MODE` | none | `server` selects server mode. |
 | `MAINWORTHY_OWNER` | `USER`, else `owner` | The name of the owner, who holds every capability on every project. |

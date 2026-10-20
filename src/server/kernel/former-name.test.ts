@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Config, defaultConfig } from "./app.ts";
@@ -19,7 +19,11 @@ function formerInstall(dir: string): { home: string; data: string } {
 	db.exec("INSERT INTO kept VALUES ('from the log')");
 	const data = join(home, dir);
 	mkdirSync(data, { recursive: true });
-	for (const file of readdirSync(live)) cpSync(join(live, file), join(data, file));
+	for (const file of readdirSync(live)) {
+		const copy = join(data, file);
+		cpSync(join(live, file), copy);
+		chmodSync(copy, 0o644);
+	}
 	db.close();
 	rmSync(live, { recursive: true });
 	expect(existsSync(join(data, "casebook.db-wal"))).toBe(true);
@@ -46,6 +50,7 @@ test("the default data directory and its database move to the new name, with wha
 		]);
 		expect(readdirSync(home)).toEqual([".mainworthy"]);
 		expect(readdirSync(join(home, ".mainworthy"))).toEqual(["mainworthy.db"]);
+		expect(statSync(databasePath(join(home, ".mainworthy"))).mode & 0o777).toBe(0o600);
 		expect(kept(databasePath(join(home, ".mainworthy")))).toEqual([{ value: "from the log" }]);
 		// A second start finds nothing to do.
 		expect(adoptFormerInstall(config({ HOME: home }), { HOME: home })).toEqual([]);

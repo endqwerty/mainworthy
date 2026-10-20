@@ -13,6 +13,10 @@ mainworthy.db  mainworthy.db-shm  mainworthy.db-wal  blobs/  server.lock  spool/
 
 While the server runs, it also keeps a `-wal` and a `-shm` file beside the database. The three belong together. After a clean stop the `-wal` file is empty.
 
+On a POSIX filesystem, Mainworthy makes the database, its live sidecars and upgrade copies readable and writable only by the operating-system user that runs the server. It repairs broader permissions before opening an existing file and refuses a database file owned by another user. The data directory can also contain files managed by the operator, so Mainworthy does not change the directory or those unrelated files.
+
+This file boundary assumes an untrusted operating-system user cannot add, remove or replace entries in the data directory. The directory may permit traversal, as `0755` does, because the sensitive files are private. Secure a Windows deployment and any shared writable directory at the operating-system or volume boundary. [Issue #659](https://github.com/endqwerty/mainworthy/issues/659) tracks a supported Windows ACL and writable-directory design.
+
 An upgrade runs all pending database migrations in one transaction. If any statement fails, startup stops and rolls back the entire upgrade, including its schema version. Before upgrading existing data, Mainworthy writes a consistent copy to a temporary file beside the database, syncs and closes it, then renames it to `mainworthy.db.v<N>.bak`. `<N>` is the version before the upgrade. It syncs the directory before starting the migrations.
 
 After every pending migration commits, Mainworthy keeps the copy it completed on that start and removes older copies for the same database, logging each removed filename. If the final copy already existed, Mainworthy leaves it unchecked and removes no older copies. A failed migration also removes none. A cleanup failure is logged and startup continues, so extra copies can remain until a later successful upgrade writes a new copy.

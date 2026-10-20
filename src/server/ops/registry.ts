@@ -160,6 +160,30 @@ function misplacedTime(op: AnyOp | undefined, call: Call): Reply | null {
 	return null;
 }
 
+/** The current caller, or the reply when it no longer stands or lacks this operation's project capability. */
+function admitCaller(
+	call: Call,
+	op: AnyOp,
+	actor: Actor | null,
+	project: string | null,
+): { actor: Actor } | { reply: Reply } {
+	if (!actor) return { reply: fail("unauthenticated", "a token is required") };
+	if (project !== null && actor.can.length === 0) {
+		const { code, message } = noProject(call.project);
+		return { reply: fail(code, message) };
+	}
+	if (!mayRun(actor, op.needs))
+		return {
+			reply: fail(
+				"forbidden",
+				op.needs === "self"
+					? `${op.name} is for a person or an agent that is signed in, and ${actor.name} is neither`
+					: `${op.name} needs the ${needed(op.needs)} capability${project === null ? "" : ` on ${project}`}`,
+			),
+		};
+	return { actor };
+}
+
 /**
  * Runs one operation: validates the input at the boundary, checks the capability, and for a write wraps the work
  * in a transaction that is idempotent on the command id and stamped with one sequence number (a report commits
@@ -206,19 +230,17 @@ function* executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>, call
 		if (!found) return noSuchProject();
 	}
 	const caller = call.reference ? resolveCaller(app, db, call.reference, found?.id ?? 0) : null;
-	const actor = call.reference ? caller?.actor : call.actor(found?.id ?? 0);
-	if (!actor) return fail("unauthenticated", "a token is required");
+	const admitted = admitCaller(
+		call,
+		op,
+		call.reference ? (caller?.actor ?? null) : call.actor(found?.id ?? 0),
+		found?.key ?? null,
+	);
 	// A caller that holds no grant on a project is told what it would be told of a project that does not exist,
 	// word for word. A refusal that named the capability it lacks would confirm the key to any token, a
 	// pipeline's for another project included. One that holds a grant there is told which capability it lacks.
-	if (found && actor.can.length === 0) return noSuchProject();
-	if (!mayRun(actor, op.needs))
-		return fail(
-			"forbidden",
-			op.needs === "self"
-				? `${op.name} is for a person or an agent that is signed in, and ${actor.name} is neither`
-				: `${op.name} needs the ${needed(op.needs)} capability${found ? ` on ${found.key}` : ""}`,
-		);
+	if ("reply" in admitted) return admitted.reply;
+	const { actor } = admitted;
 
 	const parsed = op.input.safeParse(call.input ?? {});
 	if (!parsed.success) {
@@ -413,9 +435,16 @@ export function invokeAsync(app: App, ops: Readonly<Record<string, AnyOp>>, call
 				() => invoke(app, ops, call),
 			)
 			.then((reply) => {
-				// Also refuse a credential that ended while the reader was answering. The read itself resolved the
-				// caller and grants in its own snapshot; an inline replay does the same.
-				if (!call.actor(project?.id ?? 0)) return fail("unauthenticated", "a token is required");
+				// Also refuse a project, credential or capability that ended while the reader was answering. The read
+				// itself resolved these in its snapshot; an inline replay does the same.
+				const current = op.scope === "project" && call.project ? findProject(app.reader, call.project) : null;
+				if (op.scope === "project" && !current) {
+					const { code, message } = noProject(call.project);
+					return fail(code, message);
+				}
+				if (current?.identity !== project?.identity) return invoke(app, ops, call);
+				const admitted = admitCaller(call, op, call.actor(current?.id ?? 0), current?.key ?? null);
+				if ("reply" in admitted) return admitted.reply;
 				return reply.ok ? reply : fail(reply.error.code, reply.error.message, reply.error.details);
 			});
 	}
