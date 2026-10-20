@@ -190,9 +190,19 @@ final class SuiteUITests: XCTestCase {
 	}
 
 	@MainActor private func replaceParagraph(_ field: XCUIElement, with text: String) {
-		field.tap(withNumberOfTaps: 3, numberOfTouches: 1)
+		field.tap()
+		field.typeKey("a", modifierFlags: .command)
+		field.typeText(XCUIKeyboardKey.delete.rawValue)
+		// An empty field reports its placeholder as its value.
+		let empty = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == '' OR value == placeholderValue"), object: field)
+		guard XCTWaiter.wait(for: [empty], timeout: 5) == .completed else {
+			XCTFail("Could not clear \(field.identifier); its value is \(String(describing: field.value))")
+			return
+		}
 		field.typeText(text)
-		XCTAssertEqual(field.value as? String, text)
+		let replaced = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", text), object: field)
+		XCTAssertEqual(XCTWaiter.wait(for: [replaced], timeout: 5), .completed,
+			"Expected \(field.identifier) to contain \(text); its value is \(String(describing: field.value))")
 	}
 
 	@MainActor func testResolveOverlappingEdit() async throws {

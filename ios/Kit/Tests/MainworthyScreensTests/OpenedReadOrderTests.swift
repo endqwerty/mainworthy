@@ -24,7 +24,7 @@ final class DelayedQuestion:Transport {
  }
  func lines(_ request:URLRequest) async throws ->(AsyncThrowingStream<String,any Error>,HTTPURLResponse){try await inner.lines(request)}
 }
-@Suite("A question read by itself is not replaced by an older read of it") @MainActor
+@Suite("A question read by itself is not replaced by an older read of it", .enabled(if: Live.isRunning, "needs `bun scripts/ios.ts test`")) @MainActor
 struct ReviewReadRace {
  @Test func delayedOldQuestion() async throws {
   for n in 0..<2 {

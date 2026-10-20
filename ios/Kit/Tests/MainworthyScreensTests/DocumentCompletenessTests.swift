@@ -33,7 +33,7 @@ final class IncompletePart: Transport {
  }
  func lines(_ request:URLRequest) async throws -> (AsyncThrowingStream<String,any Error>,HTTPURLResponse){try await inner.lines(request)}
 }
-@Suite("A document that lacks a part, or holds a part of another type, is not shown") @MainActor
+@Suite("A document that lacks a part, or holds a part of another type, is not shown", .enabled(if: Live.isRunning, "needs `bun scripts/ios.ts test`")) @MainActor
 struct ReviewFifth {
  @Test func everyPart() async throws {
   for attempt in 0..<2 {
