@@ -210,6 +210,8 @@ async function send(config: Config, project: string | undefined, row: HandoffRow
 			? null
 			: `The agent's endpoint answered HTTP ${response.status}. It may have started anyway: look for the agent's work before sending again.`;
 	} catch {
-		return "The agent's endpoint could not be reached; check that it is running before sending again.";
+		// A refused connection, a timeout and a refused redirect look alike here, and in the last two the endpoint
+		// has the post. So none of them says the agent did not start.
+		return "The agent's endpoint gave no answer the server could read. It may have started anyway: look for the agent's work before sending again.";
 	}
 }
