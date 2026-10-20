@@ -102,9 +102,16 @@ To answer from a question's page, follow these steps:
    While the proposal waits, **Proposed** shows the case with the edit applied to it as it is now, so a change made after the edit was proposed is kept.
    If the edit on its own would be refused now, for example because someone changed a field it changes too, the page says why.
    **Proposed** then shows the edit as it was proposed, as it does for a decided proposal.
+   Proposal answers stay disabled until every part of every edit has appeared on screen in **Changes**,
+   or in the full case for a new case. Scroll through tall edits, including their middle. Fetching the documents
+   or jumping to the bottom does not enable answering. If the evidence changes, read the edits again.
+   Proposals with more than twenty edits or changes this build cannot show are still answered in the web app.
 3. Press an answer. Each answer has a sentence that says what it does.
 4. If the project's policy asks for a reason, enter the reason before the app records the answer.
    **Defect in the product** asks where the defect is tracked. You can leave that field empty.
+
+If the question settles elsewhere while an answer sheet or Accept confirmation is open, the app closes it and
+says the question was settled elsewhere. A mapping submission with an uncertain reply stays available to retry.
 
 Back in the list, a bar says what was recorded. **Undo** withdraws the answer, with a reason where the policy
 asks for one. Both decisions stay in the ledger. Undo sends the decision id returned by your answer.

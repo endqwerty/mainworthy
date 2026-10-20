@@ -79,6 +79,7 @@ public final class QueueScreen: ProjectScreen {
 
 	/// What each proposed edit changes, by its question and that question's evidence, once it was opened.
 	private var documents: [String: Documents] = [:]
+	private var shownProposals: [String: ProposalCoverage] = [:]
 	/// The questions with an answer or a withdrawal on its way. A second one is not sent meanwhile.
 	public private(set) var busy: Set<String> = []
 
@@ -521,25 +522,77 @@ public final class QueueScreen: ProjectScreen {
 	}
 
 	/// Whether the person was shown what the question asks about, which is what lets them answer it. Evidence
-	/// this build cannot read was not shown, and neither was an edit whose documents have not been read.
+	/// this build cannot read was not shown. Every range of every proposal document must have appeared.
 	public func isShown(_ question: Question) -> Bool {
 		switch question.evidence {
 		case .unreadable: false
-		case .proposal(let edit): if case .read = documents(of: question) { edit.isShownWhole } else { false }
+		case .proposal(let edit):
+			if edit.isShownWhole, current(question.ref).map(QueueScreen.proposalSnapshot) == QueueScreen.proposalSnapshot(question),
+				case .read(let documents) = documents(of: question), !documents.isEmpty,
+				let shown = shownProposals[question.ref], shown.key == QueueScreen.proposalSnapshot(question)
+			{
+				documents.allSatisfy { shown.documents[$0.id]?.isWhole == true }
+			} else { false }
 		case .failure, .unlinked, .finding, .signoff: true
+		}
+	}
+
+	/// Records only the intersection with the viewport, in the default document's own vertical coordinates.
+	/// A fast scroll can leave disjoint ranges; seeing its bottom never fills the unseen middle.
+	public func showProposalRange(of question: Question, document: Int, height: Double, top: Double, bottom: Double) {
+		guard current(question.ref).map(QueueScreen.proposalSnapshot) == QueueScreen.proposalSnapshot(question),
+			case .read(let documents) = documents(of: question), documents.contains(where: { $0.id == document })
+		else { return }
+		let key = QueueScreen.proposalSnapshot(question)
+		var shown = shownProposals[question.ref] ?? ProposalCoverage(key: key)
+		if shown.key != key { shown = ProposalCoverage(key: key) }
+		var part = shown.documents[document] ?? ShownProposalPart(height: height)
+		part.show(height: height, top: top, bottom: bottom)
+		shown.documents[document] = part
+		shownProposals[question.ref] = shown
+	}
+
+	private struct ProposalCoverage {
+		let key: String
+		var documents: [Int: ShownProposalPart] = [:]
+	}
+
+	private struct ShownProposalPart {
+		var height: Double
+		var ranges: [ClosedRange<Double>] = []
+
+		var isWhole: Bool {
+			height > 0 && ranges.first.map { $0.lowerBound <= 1 && $0.upperBound >= height - 1 } == true
+		}
+
+		mutating func show(height: Double, top: Double, bottom: Double) {
+			guard height.isFinite, top.isFinite, bottom.isFinite, height > 0 else { return }
+			if self.height != height { self.height = height; ranges = [] }
+			let start = max(0, top), end = min(height, bottom)
+			guard end > start else { return }
+			var merged: [ClosedRange<Double>] = []
+			for range in (ranges + [start...end]).sorted(by: { $0.lowerBound < $1.lowerBound }) {
+				if let last = merged.last, range.lowerBound <= last.upperBound + 1 {
+					merged[merged.count - 1] = last.lowerBound...max(last.upperBound, range.upperBound)
+				} else { merged.append(range) }
+			}
+			ranges = merged
 		}
 	}
 
 	/// What the edit a question asks about changes, as far as it was read for the evidence the question has
 	/// now, open or decided. An edit whose case changed since is another piece of evidence, and is read again.
 	public func documents(of question: Question) -> Documents? {
-		documents[QueueScreen.key(question)]
+		documents[QueueScreen.proposalSnapshot(question)]
 	}
 
 	/// Reads what a proposed edit changes, when a question about it is opened and when the person asks again.
 	public func readDocuments(of question: Question) async {
 		guard case .proposal(let edit) = question.evidence else { return }
-		let key = QueueScreen.key(question)
+		let key = QueueScreen.proposalSnapshot(question)
+		if current(question.ref).map(QueueScreen.proposalSnapshot) == key, shownProposals[question.ref]?.key != key {
+			shownProposals[question.ref] = ProposalCoverage(key: key)
+		}
 		if case .read = documents[key] { return }
 		documents[key] = .reading
 		do {
@@ -553,9 +606,10 @@ public final class QueueScreen: ProjectScreen {
 		}
 	}
 
-	/// What the documents were read for. Deciding a question keeps its evidence, but a decided proposal reads as it
-	/// was proposed, and one that waits as what accepting does now, so the two are read apart.
-	private static func key(_ question: Question) -> String {
-		"\(question.ref) \(question.evidenceHash) \(question.isOpen ? "open" : "decided")"
+	/// The identity of both the document views and their viewport coverage. A decided proposal reads as it was
+	/// proposed, and one that waits as what accepting does now, so the two are read apart.
+	public static func proposalSnapshot(_ question: Question) -> String {
+		let proposal = if case .proposal(let edit) = question.evidence { edit.proposal } else { "" }
+		return "\(question.ref) \(question.evidenceHash) \(proposal) \(question.isOpen ? "open" : "decided")"
 	}
 }

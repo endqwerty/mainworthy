@@ -1,13 +1,13 @@
 import XCTest
 
 /// A project of a test's own, filled by `scripts/ios/scenario.ts`. Its key is also its name.
-private func makeProject() async throws -> String {
+private func makeProject(strict: Bool = false) async throws -> String {
 	let environment = ProcessInfo.processInfo.environment
 	let address = try XCTUnwrap(environment["MAINWORTHY_TEST_URL"], "run this with `bun scripts/ios.ts uitest`")
 	var request = URLRequest(url: try XCTUnwrap(URL(string: "\(address)/test/project")))
 	request.httpMethod = "POST"
 	request.setValue("Bearer \(environment["MAINWORTHY_TEST_TOKEN"] ?? "")", forHTTPHeaderField: "Authorization")
-	request.httpBody = Data("{}".utf8)
+	request.httpBody = Data((strict ? #"{"kind":"strict"}"# : "{}").utf8)
 	let (data, _) = try await URLSession.shared.data(for: request)
 	struct Reply: Decodable {
 		struct Made: Decodable { var project: String }
@@ -71,6 +71,136 @@ final class QueueUITests: XCTestCase {
 		).firstMatch
 		XCTAssertTrue(confirm.waitForExistence(timeout: 5))
 		return confirm
+	}
+
+	@MainActor private func call(_ operation: String, project: String, input: [String: Any]) async throws -> [String: Any] {
+		let address = try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])
+		var request = URLRequest(url: try XCTUnwrap(URL(string: "\(address)/api/p/\(project)/\(operation)")))
+		request.httpMethod = "POST"
+		request.setValue("Bearer \(environment["MAINWORTHY_TEST_TOKEN"] ?? "")", forHTTPHeaderField: "Authorization")
+		request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+		request.httpBody = try JSONSerialization.data(withJSONObject: input)
+		let (data, response) = try await URLSession.shared.data(for: request)
+		XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200, String(decoding: data, as: UTF8.self))
+		let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+		if let result = envelope["result"] as? [String: Any] { return result }
+		return ["items": try XCTUnwrap(envelope["result"] as? [Any])]
+	}
+
+	@MainActor func testProposalViewportCoverage() async throws {
+		let project = try await makeProject(strict: true)
+		let lines = (1...140).map { "Prerequisite \($0). Read this line before reviewing the proposed case." }.joined(separator: "\n")
+		_ = try await call("propose", project: project, input: [
+			"reason": "Review the complete tall edit.",
+			"edits": [["op": "edit", "case": "C-1", "base": 1, "body": ["pre": lines]]],
+		])
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])]
+		app.launch()
+		try signIn(app)
+		app.openProject(project)
+		let row = app.staticTexts["Edit: The shop opens"]
+		XCTAssertTrue(row.waitForExistence(timeout: 10))
+		row.tap()
+		XCTAssertTrue(app.staticTexts["edit-summary"].waitForExistence(timeout: 10))
+		let scroll = app.scrollViews.firstMatch
+		let accept = app.buttons["answer-accept"]
+		// Drag the scroll indicator to jump past the middle of this single tall edit.
+		scroll.swipeUp()
+		let bar = scroll.otherElements.matching(NSPredicate(format: "label BEGINSWITH 'Vertical scroll bar'")).firstMatch
+		XCTAssertTrue(bar.exists)
+		let pages = try XCTUnwrap(bar.label.components(separatedBy: CharacterSet.decimalDigits.inverted).compactMap(Int.init).first)
+		let percent = try XCTUnwrap(bar.value as? String).replacingOccurrences(of: "%", with: "")
+		let progress = try XCTUnwrap(Double(percent)) / 100
+		let thumb = bar.frame.height / Double(pages)
+		let position = ((bar.frame.height - thumb) * progress + thumb / 2) / bar.frame.height
+		let edge = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: position))
+		edge.press(forDuration: 0.6, thenDragTo: bar.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 1)), withVelocity: XCUIGestureVelocity(rawValue: 100_000), thenHoldForDuration: 0.1)
+		XCTAssertTrue(scroll.frame.contains(accept.frame), "The indicator drag must jump directly to the answer buttons")
+		shot("u8-proposal-disabled")
+		XCTAssertFalse(accept.isEnabled, "Fetching a tall edit and showing its bottom must leave its unseen middle unread")
+		for _ in 0..<30 where !app.staticTexts["edit-summary"].isHittable { scroll.swipeDown(velocity: .fast) }
+		// Page through with overlap so every vertical range actually appears.
+		for _ in 0..<45 where !scroll.frame.contains(accept.frame) {
+			let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+			start.press(forDuration: 0.02, thenDragTo: scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)), withVelocity: .slow, thenHoldForDuration: 0.05)
+		}
+		XCTAssertTrue(scroll.frame.contains(accept.frame))
+		XCTAssertTrue(accept.isEnabled)
+		scroll.swipeUp()
+		shot("u8-proposal-enabled")
+	}
+
+	@MainActor func testAcceptReasonSheetClosesWhenSettledElsewhere() async throws {
+		let project = try await makeProject(strict: true)
+		let made = try await call("propose", project: project, input: [
+			"reason": "Review the title.",
+			"edits": [["op": "edit", "case": "C-1", "base": 1, "body": ["title": "The storefront opens"]]],
+		])
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])]
+		app.launch()
+		try signIn(app)
+		app.openProject(project)
+		let row = app.staticTexts["Edit: The shop opens"]
+		XCTAssertTrue(row.waitForExistence(timeout: 10))
+		row.tap()
+		XCTAssertTrue(app.staticTexts["edit-summary"].waitForExistence(timeout: 10))
+		app.swipeUp()
+		app.swipeDown()
+		app.swipeUp()
+		XCTAssertTrue(app.buttons["answer-accept"].isEnabled)
+		shot("u8-before-accept")
+		app.buttons["answer-accept"].tap()
+		let reason = app.descendants(matching: .any)["reason"].firstMatch
+		XCTAssertTrue(reason.waitForExistence(timeout: 5))
+		reason.tap()
+		reason.typeText("Reviewed here")
+		let question = try XCTUnwrap(made["question"] as? String)
+		let inbox = try await call("inbox", project: project, input: ["kind": "adopt"])
+		let items = try XCTUnwrap(inbox["items"] as? [[String: Any]])
+		let live = try XCTUnwrap(items.first { $0["q"] as? String == question })
+		_ = try await call("decide", project: project, input: [
+			"q": question, "onEvidence": try XCTUnwrap(live["evidenceHash"] as? String),
+			"answer": ["is": "reject"], "reason": "Decided by another client",
+		])
+		let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.buttons["submit-answer"])
+		XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 15), .completed)
+		XCTAssertTrue(app.staticTexts["This question was settled elsewhere."].waitForExistence(timeout: 5))
+		XCTAssertTrue(app.staticTexts["Reject"].exists)
+		shot("u8-settled-elsewhere")
+	}
+
+	@MainActor func testAcceptConfirmationClosesWhenSettledElsewhere() async throws {
+		let project = try await makeProject()
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])]
+		app.launch()
+		try signIn(app)
+		app.openProject(project)
+		let row = app.staticTexts["Edit: A percentage coupon lowers the total"]
+		XCTAssertTrue(row.waitForExistence(timeout: 10))
+		row.tap()
+		XCTAssertTrue(app.staticTexts["edit-summary"].waitForExistence(timeout: 10))
+		app.swipeUp()
+		app.swipeDown()
+		app.swipeUp()
+		XCTAssertTrue(app.buttons["answer-accept"].isEnabled)
+		shot("u8-before-accept")
+		app.buttons["answer-accept"].tap()
+		shot("u8-confirmation-open")
+		XCTAssertTrue(app.staticTexts["Accept this edit?"].waitForExistence(timeout: 5))
+		let inbox = try await call("inbox", project: project, input: ["kind": "adopt"])
+		let items = try XCTUnwrap(inbox["items"] as? [[String: Any]])
+		let live = try XCTUnwrap(items.first)
+		_ = try await call("decide", project: project, input: [
+			"q": try XCTUnwrap(live["q"] as? String), "onEvidence": try XCTUnwrap(live["evidenceHash"] as? String),
+			"answer": ["is": "reject"],
+		])
+		let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.staticTexts["Accept this edit?"])
+		XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 15), .completed)
+		XCTAssertTrue(app.staticTexts["This question was settled elsewhere."].waitForExistence(timeout: 5))
+		shot("u8-confirmation-settled")
 	}
 
 	@MainActor func testLinkAnUnlinkedTestAndCreateACase() async throws {
@@ -427,6 +557,9 @@ final class QueueUITests: XCTestCase {
 		XCTAssertTrue(app.staticTexts["Added"].exists && app.staticTexts["Remove the coupon"].exists)
 		XCTAssertTrue(app.staticTexts["Expected: Total returns to $100.00"].exists)
 		shot("5-proposal")
+		// Read the rest of Changes before switching to the alternative renderings.
+		app.swipeUp()
+		app.swipeDown()
 		// The case as it is, which rejecting keeps, and with the edit applied to it.
 		app.segmentedControls["edit-side"].buttons["Current"].tap()
 		XCTAssertTrue(app.staticTexts["Apply the coupon SAVE10"].waitForExistence(timeout: 5))

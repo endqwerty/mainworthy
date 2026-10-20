@@ -6,13 +6,14 @@ import SwiftUI
 struct EvidenceView: View {
 	let question: Question
 	let screen: QueueScreen
+	let viewport: CGRect
 
 	var body: some View {
 		switch question.evidence {
 		case .failure(let failed): FailureEvidence(failed: failed, timesSeen: question.timesSeen)
 		case .unlinked(let tests): UnlinkedEvidence(tests: tests)
 		case .finding(let finding): FindingEvidence(finding: finding)
-		case .proposal(let edit): ProposalEvidence(question: question, edit: edit, screen: screen)
+		case .proposal(let edit): ProposalEvidence(question: question, edit: edit, screen: screen, viewport: viewport)
 		case .signoff(let run): SignoffEvidence(run: run)
 		case .unreadable:
 			Panel {
@@ -156,6 +157,7 @@ private struct ProposalEvidence: View {
 	let question: Question
 	let edit: ProposedEdit
 	let screen: QueueScreen
+	let viewport: CGRect
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 12) {
@@ -195,10 +197,15 @@ private struct ProposalEvidence: View {
 				.font(.subheadline)
 				.foregroundStyle(.secondary)
 			}
-			// The answers stay off until this is read: nobody accepts an edit they were not shown.
+			// Fetching supplies the documents; their visible ranges unlock the answers.
 			switch screen.documents(of: question) {
 			case .read(let documents):
-				ForEach(documents) { document in EditedCaseView(document: document, waits: question.isOpen) }
+				ForEach(documents) { document in
+					EditedCaseView(document: document, waits: question.isOpen, viewport: viewport) { height, top, bottom in
+						screen.showProposalRange(of: question, document: document.id, height: height, top: top, bottom: bottom)
+					}
+					.id("\(QueueScreen.proposalSnapshot(question)) \(document.id)")
+				}
 			case .failed(let why):
 				Panel {
 					Label("What the edit changes could not be read. \(why)", systemImage: "exclamationmark.triangle")
@@ -225,6 +232,8 @@ private struct EditedCaseView: View {
 	let document: EditedCase
 	/// Whether the proposal still waits for an answer. A decided one is set against the case as it is now.
 	let waits: Bool
+	let viewport: CGRect
+	let shown: (_ height: Double, _ top: Double, _ bottom: Double) -> Void
 	@State private var side = Side.changes
 
 	private enum Side: Hashable {
@@ -232,6 +241,29 @@ private struct EditedCaseView: View {
 	}
 
 	var body: some View {
+		let changes = side == .changes
+		let viewport = viewport
+		return content
+			.onGeometryChange(for: VisibleRange.self) { proxy in
+				let frame = proxy.frame(in: .global)
+				let visible = frame.intersection(viewport)
+				return VisibleRange(
+					height: proxy.size.height, top: visible.isNull ? 0 : visible.minY - frame.minY,
+					bottom: visible.isNull ? 0 : visible.maxY - frame.minY, changes: changes
+				)
+			} action: { range in
+				if range.changes { shown(range.height, range.top, range.bottom) }
+			}
+	}
+
+	private struct VisibleRange: Equatable {
+		let height: Double
+		let top: Double
+		let bottom: Double
+		let changes: Bool
+	}
+
+	@ViewBuilder private var content: some View {
 		if let before = document.before, let ref = document.caseRef {
 			Panel {
 				HStack(spacing: 6) {
