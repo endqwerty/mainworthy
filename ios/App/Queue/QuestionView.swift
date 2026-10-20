@@ -14,6 +14,8 @@ struct QuestionView: View {
 	@State private var last: Question?
 	@State private var asking: Asking?
 	@State private var confirming: Chosen?
+	@State private var settledElsewhere = false
+	@State private var viewport = CGRect.zero
 
 	/// An answer with the question as it was when the person chose it. What is sent later, from a sheet or a
 	/// dialog, is sent on that question: the list may have read newer evidence behind the sheet, and an answer
@@ -74,6 +76,21 @@ struct QuestionView: View {
 		}
 		.onChange(of: current, initial: true) { _, now in
 			if let now { last = now }
+			if now?.isOpen != true {
+				switch asking {
+				case .answer:
+					asking = nil
+					settledElsewhere = true
+				case .mapping(let question, let creating):
+					// An in-flight or uncertain submission keeps its recovery screen and command.
+					if !screen.mapping(question, creating: creating).locked {
+						asking = nil
+						settledElsewhere = true
+					}
+				case .withdrawal, nil: break
+				}
+				if confirming != nil { confirming = nil; settledElsewhere = true }
+			}
 		}
 		// The list may not hold this question: it is read by itself for as long as its page is open.
 		.task(id: ref) { await screen.open(ref) }
@@ -104,7 +121,10 @@ struct QuestionView: View {
 					.font(.subheadline)
 					.foregroundStyle(.secondary)
 				}
-				EvidenceView(question: question, screen: screen)
+				EvidenceView(
+					question: question, screen: screen,
+					viewport: asking == nil && confirming == nil ? viewport : .zero
+				)
 				if !question.advice.isEmpty { advice(question.advice) }
 				if let decision = question.decision {
 					decided(decision, on: question)
@@ -115,15 +135,35 @@ struct QuestionView: View {
 			.padding(16)
 		}
 		.background(Color(.systemGroupedBackground))
+		.onGeometryChange(for: CGRect.self) { proxy in
+			let frame = proxy.frame(in: .global), insets = proxy.safeAreaInsets
+			return CGRect(
+				x: frame.minX + insets.leading, y: frame.minY + insets.top,
+				width: max(0, frame.width - insets.leading - insets.trailing),
+				height: max(0, frame.height - insets.top - insets.bottom)
+			)
+		} action: { viewport = $0 }
 		.safeAreaBar(edge: .bottom) {
-			// A refusal is said where the answer was given: the list's own bar is under this page.
-			if let notice = screen.notice, notice.isProblem || screen.hasPendingAnswer(question.ref) {
-				Text(notice.text)
-					.font(.subheadline)
-					.foregroundStyle(Color.fail)
-					.frame(maxWidth: .infinity, alignment: .leading)
-					.floatingBar()
-					.accessibilityIdentifier("question-notice")
+			let notice = screen.notice.flatMap { $0.isProblem || screen.hasPendingAnswer(question.ref) ? $0 : nil }
+			if settledElsewhere || notice != nil {
+				VStack(alignment: .leading, spacing: 8) {
+					if settledElsewhere {
+						Text("This question was settled elsewhere.")
+							.font(.subheadline).foregroundStyle(.secondary)
+							.frame(maxWidth: .infinity, alignment: .leading)
+							.floatingBar()
+							.accessibilityIdentifier("question-settled")
+					}
+					// A refusal is said where the answer was given: the list's own bar is under this page.
+					if let notice {
+						Text(notice.text)
+							.font(.subheadline)
+							.foregroundStyle(Color.fail)
+							.frame(maxWidth: .infinity, alignment: .leading)
+							.floatingBar()
+							.accessibilityIdentifier("question-notice")
+					}
+				}
 			}
 		}
 	}
@@ -176,6 +216,10 @@ struct QuestionView: View {
 			Text([needs(question), readOnlyNote].compactMap { $0 }.joined(separator: " "))
 				.font(.subheadline)
 				.foregroundStyle(.secondary)
+			if case .proposal(let edit) = question.evidence, edit.isShownWhole, !screen.isShown(question) {
+				Text("Read every part of each edit in Changes, or the full case for a new case, before answering.")
+					.font(.subheadline).foregroundStyle(.secondary)
+			}
 			ForEach(question.choices) { choice in
 				Button {
 					choose(choice, for: question)

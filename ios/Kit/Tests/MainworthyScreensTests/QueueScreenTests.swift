@@ -891,10 +891,93 @@ struct QueueScreenTests {
 			Issue.record("what the edit changes was not read")
 			return
 		}
-		#expect(documents.count == 1 && screen.isShown(adopt))
+		#expect(documents.count == 1)
+		#expect(!screen.isShown(adopt))
+		#expect(await screen.answer(adopt, with: accept) == false)
+		#expect(screen.current(adopt.ref)?.isOpen == true)
+		let document = try #require(documents.first)
+		screen.showProposalRange(of: adopt, document: document.id, height: 1000, top: 0, bottom: 200)
+		screen.showProposalRange(of: adopt, document: document.id, height: 1000, top: 800, bottom: 1000)
+		#expect(!screen.isShown(adopt))
+		#expect(await screen.answer(adopt, with: accept) == false)
+		screen.showProposalRange(of: adopt, document: document.id, height: 1000, top: 200, bottom: 800)
+		#expect(screen.isShown(adopt))
 		#expect(await screen.answer(adopt, with: accept))
 		#expect(screen.notice?.text == "\(adopt.ref): Accept.")
 		#expect(screen.notice?.undoes == nil)
+	}
+
+	@Test("proposal coverage resets for changed evidence and layout, and ignores old viewport callbacks")
+	func proposalCoverageRefresh() async throws {
+		let key = try await Live.project()
+		let transport = ChangedProposalEvidenceTransport()
+		let server = try await Live.signedIn(transport: transport)
+		let screen = QueueScreen(project: try await server.project(key))
+		await screen.show(.open, filter: nil)
+		let original = try #require(screen.questions.first { $0.kind == .adopt })
+		await screen.readDocuments(of: original)
+		guard case .read(let documents) = screen.documents(of: original) else {
+			Issue.record("proposal documents were not fetched"); return
+		}
+		let document = try #require(documents.first)
+		screen.showProposalRange(of: original, document: document.id, height: 1000, top: 0, bottom: 1000)
+		#expect(screen.isShown(original))
+		screen.showProposalRange(of: original, document: document.id, height: 1200, top: 900, bottom: 1200)
+		#expect(!screen.isShown(original))
+		screen.showProposalRange(of: original, document: document.id, height: 1200, top: 0, bottom: 900)
+		#expect(screen.isShown(original))
+		transport.changed.withLock { $0 = true }
+		await screen.refresh()
+		let changed = try #require(screen.current(original.ref))
+		#expect(changed.evidenceHash != original.evidenceHash)
+		#expect(!screen.isShown(original))
+		await screen.readDocuments(of: changed)
+		screen.showProposalRange(of: original, document: document.id, height: 1200, top: 0, bottom: 1200)
+		#expect(!screen.isShown(changed))
+		let accept = try #require(changed.choices.first { $0.answer == "accept" })
+		#expect(await screen.answer(changed, with: accept) == false)
+		guard case .read(let updated) = screen.documents(of: changed) else {
+			Issue.record("new evidence was not fetched"); return
+		}
+		for document in updated {
+			screen.showProposalRange(of: changed, document: document.id, height: 1200, top: 0, bottom: 1200)
+		}
+		#expect(screen.isShown(changed))
+		// Returning to a cached snapshot still needs fresh viewport coverage, before or after its read task.
+		transport.changed.withLock { $0 = false }
+		await screen.refresh()
+		let returned = try #require(screen.current(original.ref))
+		#expect(!screen.isShown(returned))
+		screen.showProposalRange(of: returned, document: document.id, height: 1200, top: 900, bottom: 1200)
+		#expect(!screen.isShown(returned))
+		screen.showProposalRange(of: returned, document: document.id, height: 1200, top: 0, bottom: 900)
+		#expect(screen.isShown(returned))
+		await screen.readDocuments(of: changed)
+		#expect(screen.isShown(returned))
+	}
+
+	@Test("every document of a proposal needs viewport coverage")
+	func everyProposalDocumentShown() async throws {
+		let key = try await Live.project(strict: true)
+		let owner = try await Live.signedIn(as: Live.owner)
+		let made: JSONValue = try await owner.write("propose", in: key, ["reason": "Review both cases", "edits": [
+			["op": "create", "outline": "First case"], ["op": "create", "outline": "Second case"],
+		]])
+		let screen = QueueScreen(project: try await owner.project(key))
+		await screen.show(.open, filter: nil)
+		let question = try #require(screen.questions.first { $0.ref == made["question"]?.string })
+		await screen.readDocuments(of: question)
+		guard case .read(let documents) = screen.documents(of: question) else {
+			Issue.record("proposal documents were not fetched"); return
+		}
+		#expect(documents.count == 2)
+		let first = try #require(documents.first), last = try #require(documents.last)
+		screen.showProposalRange(of: question, document: first.id, height: 100, top: 0, bottom: 100)
+		#expect(!screen.isShown(question))
+		screen.showProposalRange(of: question, document: last.id, height: 100, top: 50, bottom: 100)
+		#expect(!screen.isShown(question))
+		screen.showProposalRange(of: question, document: last.id, height: 100, top: 0, bottom: 50)
+		#expect(screen.isShown(question))
 	}
 
 	@Test("an answer the policy does not take is said so, in the server's words, and the question stays")
@@ -1083,6 +1166,9 @@ struct QueueScreenFailureTests {
 			return
 		}
 		#expect(waiting.first?.refused?.hasPrefix("C-2 changed after this proposal was made") == true)
+		for document in waiting {
+			screen.showProposalRange(of: open, document: document.id, height: 100, top: 0, bottom: 100)
+		}
 		#expect(await screen.answer(open, with: try #require(open.choices.first { $0.answer == "reject" })))
 		await screen.show(.decided, filter: .adopt)
 		let decided = try #require(screen.questions.first { $0.ref == open.ref })
@@ -1211,4 +1297,30 @@ private final class LateAnswerTransport: Transport, Sendable {
 /// The answers a `decide` request carried: each of an `all`, or the one of an earlier build's request.
 func decisions(_ request: JSONValue) -> [JSONValue] {
 	request["all"]?.array ?? [request]
+}
+
+/// Delivers a fresh evidence snapshot on the next read, without replacing the screen or its cached documents.
+private final class ChangedProposalEvidenceTransport: Transport {
+	let changed = Mutex(false)
+	private let inner = URLSessionTransport()
+
+	func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+		let (data, response) = try await inner.send(request)
+		guard changed.withLock({ $0 }), ["inbox", "get"].contains(request.url?.lastPathComponent ?? "") else {
+			return (data, response)
+		}
+		func replace(_ value: JSONValue) -> JSONValue {
+			if var object = value.object {
+				if let hash = object["evidenceHash"]?.string { object["evidenceHash"] = .string(hash + "-changed") }
+				return .object(object.mapValues(replace))
+			}
+			if let array = value.array { return .array(array.map(replace)) }
+			return value
+		}
+		return (try JSONEncoder().encode(replace(try JSONDecoder().decode(JSONValue.self, from: data))), response)
+	}
+
+	func lines(_ request: URLRequest) async throws -> (AsyncThrowingStream<String, any Error>, HTTPURLResponse) {
+		try await inner.lines(request)
+	}
 }
