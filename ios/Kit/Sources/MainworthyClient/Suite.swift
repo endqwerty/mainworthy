@@ -137,6 +137,7 @@ public enum SaveCaseOutcome: Equatable, Sendable {
 
 package struct SuiteSubmission: Sendable {
 	let input: JSONValue
+	package let delivery = WriteDelivery()
 
 	package init(source: CaseSource, content: CaseContent, reason: String) {
 		var body: [String: JSONValue] = [
@@ -211,8 +212,8 @@ extension ProjectClient {
 
 	/// The submission keeps its command and body across retries. Server.write makes a new id, so use the
 	/// exchange that leaves this already named command intact, including on its own connection retry.
-	package func saveCase(_ submission: SuiteSubmission, delivery: WriteDelivery? = nil) async throws -> SaveCaseOutcome {
-		let reply: Wire.SuiteProposeReply = try await server.read("propose", in: key, submission.input, delivery: delivery)
+	package func saveCase(_ submission: SuiteSubmission) async throws -> SaveCaseOutcome {
+		let reply: Wire.SuiteProposeReply = try await server.read("propose", in: key, submission.input, delivery: submission.delivery)
 		switch reply.status {
 		case "adopted":
 			return .adopted(reply.cases.first.map { CaseStamp(ref: $0.ref, version: $0.version) })

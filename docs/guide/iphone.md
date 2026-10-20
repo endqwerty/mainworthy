@@ -348,7 +348,9 @@ An order you explicitly choose takes precedence. Steps absent from that order fo
 What you type stays while the app goes to the background. Your draft also stays when your session ends
 and you sign in again as yourself on the same server. **Cancel** asks before discarding a changed draft.
 A lost or unreadable save reply, or an internal server error, offers **Retry**, which sends the same save and command.
-The editor says it will retry the same save and pauses editing. A definite refusal for another reason lets you edit and save again.
+The editor says it will retry the same save and pauses editing, even if a later retry is refused.
+You can edit and save again after a definite refusal, such as missing permission, only if no earlier attempt was uncertain.
+Internal errors, rate limits, and ended sessions keep the same save for **Retry**.
 For a merge, **Retry** first asks what the server recorded for that command. The merge keeps its first body, reason, and command on retries.
 Choices and the reason stay locked until the command's outcome is known.
 Drafts do not survive closing the app.
