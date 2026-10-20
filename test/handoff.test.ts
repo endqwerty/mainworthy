@@ -114,7 +114,8 @@ test("an endpoint that refuses, or cannot be reached, leaves a failed hand-off t
 	await deliverHandoffs(h.app);
 	expect(h.call<HandoffReceipt>("handoff-status", { question: q })).toMatchObject({
 		state: "failed",
-		error: "The agent's endpoint answered HTTP 500; it was not started.",
+		error:
+			"The agent's endpoint answered HTTP 500. It may have started anyway: look for the agent's work before sending again.",
 	});
 	await endpoint?.stop(true);
 	h.call("handoff", { question: q, cmd: "handoff-cmd-03" });
@@ -136,7 +137,8 @@ test("a hand-off the server was sending when it stopped is failed at start, not 
 	expect(received).toHaveLength(0);
 	expect(h.call<HandoffReceipt>("handoff-status", { question: q })).toMatchObject({
 		state: "failed",
-		error: "The server stopped while sending this. It may have arrived: look for the agent's thread before sending again.",
+		error:
+			"The server stopped while sending this. It may have arrived: look for the agent's thread before sending again.",
 	});
 });
 
@@ -207,9 +209,13 @@ test("the configuration takes all three settings or none, and never repeats the 
 test("the session tells a page which projects hand failures to an agent", async () => {
 	directory = mkdtempSync(join(tmpdir(), "mainworthy-handoff-"));
 	const handoff = { project: "scratch", url: "https://agent.example/hooks/abc", secret };
-	instance = start({ ...defaultConfig({}), owner: "robin", dataDir: directory, port: 0, handoff }, () => ({ ui: null }), {
-		readers: 0,
-	});
+	instance = start(
+		{ ...defaultConfig({}), owner: "robin", dataDir: directory, port: 0, handoff },
+		() => ({ ui: null }),
+		{
+			readers: 0,
+		},
+	);
 	// A local instance starts with the project `scratch`.
 	const response = await fetch(`${instance.url}/api/admin`, {
 		method: "POST",

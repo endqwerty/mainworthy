@@ -206,7 +206,9 @@ async function send(config: Config, project: string | undefined, row: HandoffRow
 			redirect: "error",
 		});
 		await response.body?.cancel();
-		return response.ok ? null : `The agent's endpoint answered HTTP ${response.status}; it was not started.`;
+		return response.ok
+			? null
+			: `The agent's endpoint answered HTTP ${response.status}. It may have started anyway: look for the agent's work before sending again.`;
 	} catch {
 		return "The agent's endpoint could not be reached; check that it is running before sending again.";
 	}

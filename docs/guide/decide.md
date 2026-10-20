@@ -525,7 +525,7 @@ A failure question offers two buttons under its evidence.
 - **Copy for an agent** (<kbd>y</kbd>) copies a brief: the question and its link, the failing tests, the commit and branch, the failure message, and a request to find and fix the cause. Paste it into whichever agent you use.
 - **Hand to the agent** (<kbd>h</kbd>) asks the server to post that brief to the agent the instance is configured to start. It appears only on the project an operator [configured](./configuration.md#variables-the-server-reads) with `MAINWORTHY_HANDOFF_PROJECT`, `MAINWORTHY_HANDOFF_URL` and `MAINWORTHY_HANDOFF_SECRET`. The server's brief also carries the build link and the sample result's further output, which the copy leaves out.
 
-After a hand-off, the question says whether it was sent or why not. The server sends it right after the request and does not try again on its own: "sent" means the endpoint answered with a 2xx status, not that the agent fixed anything. A hand-off the server was sending when it stopped is marked failed at the next start, because it may have arrived. Look for the agent's work before handing the question off again.
+After a hand-off, the question says whether it was sent or why not. The server sends it right after the request and does not try again on its own: "sent" means the endpoint answered with a 2xx status, not that the agent fixed anything. An endpoint that answered with an error may still have started the agent. A hand-off the server was sending when it stopped is marked failed at the next start, because it may have arrived. Look for the agent's work before handing the question off again.
 
 Handing off needs `answer`, the capability that settles questions. Reading the latest hand-off's state needs `read`:
 
