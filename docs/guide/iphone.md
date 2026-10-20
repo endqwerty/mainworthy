@@ -43,7 +43,7 @@ TestFlight opens for 90 days, and the TestFlight app shows when it ends.
 **Privacy** on the sign-in screen opens the instance's [privacy policy](./privacy.md) in your browser, without
 signing in. The same link is under **You**, **About**. A build for another instance opens that instance's `/privacy` page.
 
-The app signs in to `mainworthy.com`. It does not ask for an address. For password sign-in, set a password in
+The app signs in to `mainworthy.com`. It does not ask for an address. Set a password or add a passkey in
 the web app under Settings, **Your sign-in**. The app does not accept tokens. Use tokens for scripts or pipelines.
 To sign in, follow these steps:
 
@@ -58,7 +58,18 @@ Repeated refused provider callbacks count toward the instance's sign-in limit fo
 with web sign-in. If a refusal reaches that limit, the sheet closes and the app tells you how many seconds
 to wait before trying again. A valid provider answer still passes that limit.
 
-An account with an enrolled authenticator requires a second step for password sign-in. The app cannot complete that step. After accepting your password, the app says that you need the web app and keeps no session. Sign in to that account in the web app. An instance that requires a second factor for admins also refuses password-only admin sign-in in the app.
+To use a passkey, press **Sign in with a passkey** and choose a credential in the phone's sign-in sheet.
+The app needs an HTTPS instance associated with its signed build, using the same paid-team setup as
+[password AutoFill](#fill-the-password-from-1password-or-the-phones-passwords). For another instance, the
+repository's `ios/README.md` explains how to build with its domain and configure the instance.
+If you cancel, no credential is available, or the server refuses the assertion, you can still enter a password.
+If the challenge has expired, press **Sign in with a passkey** again to get a new one.
+Physical-device checks, including an external credential provider, remain open in
+[issue #205](https://github.com/endqwerty/mainworthy/issues/205).
+
+Password sign-in for an account with an enrolled authenticator requires a second step. The app cannot complete
+that step and keeps no session after accepting the password. Use a passkey, or sign in through the web app.
+An instance that requires a second factor for admins also refuses password-only admin sign-in in the app.
 
 After sign-in completes, the app opens a session, as a browser does, and keeps that session in the phone's keychain. It does not keep
 the password or the provider's tokens. The session appears in the web app under Settings, **Your sessions**, as "Mainworthy for
@@ -84,7 +95,6 @@ With a paid membership, follow these steps to enable AutoFill:
 The phone then offers the login saved for `mainworthy.com` on the sign-in screen, and offers to save one after a
 sign-in.
 
-A passkey does not work in the app.
 
 ## Answer a question
 
@@ -292,7 +302,7 @@ Being an admin of one project is not enough. To revoke a token, follow these ste
 4. Press **Revoke token**. The confirmation names the token's label and number.
 5. Review the label and number.
 6. Confirm.
-   Revocation stops the token and ends sessions opened with it. The app signs in with a password or the identity provider, so its own
+   Revocation stops the token and ends sessions opened with it. The app signs in with a password, the identity provider or a passkey, so its own
    session stays signed in.
    The screen says **Revoked**, **Already revoked**, or shows the server's refusal reason.
    If the reply is lost or unreadable, the screen says **Outcome unknown** and pauses further revocations.

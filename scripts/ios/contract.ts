@@ -50,6 +50,17 @@ export const SignInMethods = struct("SignInMethods", "The configured identity pr
 export const ProviderStart = struct("ProviderStart", "The provider authorization URL for a native sign-in.", {
 	url: text,
 });
+export const PasskeyChallenge = struct(
+	"PasskeyChallenge",
+	"The native sign-in challenge issued with a ceremony cookie.",
+	{
+		passkey: struct("PasskeyOptions", "The relying party and challenge for an AuthenticationServices assertion.", {
+			rpId: text,
+			challenge: text,
+			userVerification: text,
+		}),
+	},
+);
 
 export const SessionInfo = struct("SessionInfo", "`GET /api/session`: who the caller is and what they may open.", {
 	actor: [text, "The caller's name."],
@@ -694,6 +705,7 @@ export const SHAPES: readonly Shape[] = [
 	SignInReply,
 	SignInMethods,
 	ProviderStart,
+	PasskeyChallenge,
 	SessionInfo,
 	Inbox,
 	...Object.values(EVIDENCE),

@@ -4,6 +4,7 @@ import SwiftUI
 struct SignInView: View {
 	@Bindable var form: SignInForm
 	@State private var authentication = ProviderAuthentication()
+	@State private var passkeys = PasskeyAuthentication()
 	@FocusState private var focus: Field?
 
 	private enum Field {
@@ -38,9 +39,7 @@ struct SignInView: View {
 						.onSubmit(submit)
 						.accessibilityIdentifier("password")
 				} footer: {
-					Text(form.providerName == nil
-						? "Set a password in the web app, under Settings, Your sign-in. A passkey does not work in this build."
-						: "Use your password or the identity provider offered below. A passkey does not work in this build.")
+					Text("Set a password or add a passkey in the web app, under Settings, Your sign-in.")
 				}
 				Section {
 					Button(action: submit) {
@@ -66,13 +65,24 @@ struct SignInView: View {
 					}
 				}
 				Section {
+					Button("Sign in with a passkey") {
+						focus = nil
+						Task { await form.signInWithPasskey(using: passkeys) }
+					}
+					.disabled(form.isWorking)
+					.accessibilityIdentifier("passkey-sign-in")
+				}
+				Section {
 					Link("Privacy", destination: form.privacyAddress)
 						.accessibilityIdentifier("privacy")
 				}
 			}
 			.navigationTitle("Mainworthy")
 			.task { await form.loadMethods() }
-			.onDisappear { authentication.cancel() }
+			.onDisappear {
+				authentication.cancel()
+				passkeys.cancel()
+			}
 		}
 	}
 

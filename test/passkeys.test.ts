@@ -106,6 +106,58 @@ async function logged(run: () => Promise<void>): Promise<string[]> {
 	}
 }
 
+describe("native passkey sign-in", () => {
+	test("native challenges use the HTTPS RP origin while web challenges keep the configured port", async () => {
+		const w = world({ publicUrl: "https://mainworthy.example:8443" });
+		const cookie = await joined(w, "robin", PASSWORD);
+		const device = authenticator("https://mainworthy.example:8443");
+		await addPasskey(w, cookie, device);
+		const start = async (native: boolean) => {
+			const reply = await w.post<{ passkey: AssertionOptions }>("/api/login/challenge", native ? { native: true } : {});
+			expect(reply.status).toBe(200);
+			if (!reply.body.ok) throw new Error(reply.text);
+			return { options: reply.body.result.passkey, cookie: reply.cookie };
+		};
+		const complete = (attempt: Awaited<ReturnType<typeof start>>, origin: string, held = attempt.cookie) =>
+			w.post("/api/login", { passkey: device.assert(attempt.options, { origin }) }, { cookie: held });
+		const native = await start(true);
+		expect(native.options.rpId).toBe("mainworthy.example");
+		const answer = device.assert(native.options, { origin: "https://mainworthy.example" });
+		const signed = await w.post("/api/login", { passkey: answer }, { cookie: native.cookie });
+		expect(signed.status).toBe(200);
+		expect(signed.body).toEqual({ ok: true, result: { signedIn: true } });
+		expect((await w.post("/api/login", { passkey: answer }, { cookie: native.cookie })).text).toBe(REFUSED);
+		expect((await complete(await start(false), "https://mainworthy.example")).text).toBe(REFUSED);
+		expect((await complete(await start(false), "https://mainworthy.example:8443")).status).toBe(200);
+		expect((await complete(await start(true), "https://evil.example")).text).toBe(REFUSED);
+		expect((await complete(await start(true), "https://mainworthy.example", "")).text).toBe(REFUSED);
+		expect((await signIn(w, "robin", PASSWORD)).status).toBe(200);
+	});
+
+	test("native challenges expire and HTTP localhost cannot start one", async () => {
+		const clock = clockAt(1800000000000);
+		const w = world({ clock });
+		const { device } = await person(w, "robin");
+		const reply = await w.post<{ passkey: AssertionOptions }>("/api/login/challenge", { native: true });
+		expect(reply.status).toBe(200);
+		if (!reply.body.ok) throw new Error(reply.text);
+		const answer = device.assert(reply.body.result.passkey);
+		clock.advance(CEREMONY_MS + 1);
+		expect((await w.post("/api/login", { passkey: answer }, { cookie: reply.cookie })).text).toBe(REFUSED);
+		const local = world({ publicUrl: "http://localhost:7357" });
+		const unavailable = await local.post("/api/login/challenge", { native: true });
+		expect(unavailable.status).toBe(400);
+		expect(unavailable.body).toEqual({
+			ok: false,
+			error: {
+				code: "invalid",
+				message: "native passkey sign-in needs an HTTPS public address and an associated app domain",
+			},
+		});
+		expect((await local.post("/api/login/challenge", {})).status).toBe(200);
+	});
+});
+
 describe("registering a passkey", () => {
 	test("a signed-in person registers a passkey and signs in with it; the session rests on the passkey", async () => {
 		const w = world();

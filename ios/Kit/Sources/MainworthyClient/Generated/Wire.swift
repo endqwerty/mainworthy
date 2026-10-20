@@ -31,6 +31,18 @@ enum Wire {
 		let url: String
 	}
 
+	/// The relying party and challenge for an AuthenticationServices assertion.
+	struct PasskeyOptions: Decodable, Equatable, Sendable {
+		let rpId: String
+		let challenge: String
+		let userVerification: String
+	}
+
+	/// The native sign-in challenge issued with a ceremony cookie.
+	struct PasskeyChallenge: Decodable, Equatable, Sendable {
+		let passkey: PasskeyOptions
+	}
+
 	/// A project the caller holds a grant on.
 	struct Project: Decodable, Equatable, Sendable {
 		/// The opaque identity of this project, retained across export and import.

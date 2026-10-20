@@ -25,9 +25,9 @@ Accounts. A free Apple ID will do.
 The command reads the team from the development certificate on the Mac and writes it to
 `ios/Config/Local.xcconfig`, which is not committed. To sign with another team, edit that file.
 
-A paid team can tie the app to `mainworthy.com`, so the phone's AutoFill (and 1Password through it) offers the
-login saved for that site on the sign-in screen: uncomment `CODE_SIGN_ENTITLEMENTS` in that file
-(`App/Mainworthy.entitlements`), install, and have the instance list the name the command prints in
+A paid team can tie the app to `mainworthy.com` for native passkey sign-in and password AutoFill, including
+1Password. Uncomment `CODE_SIGN_ENTITLEMENTS` in that file (`App/Mainworthy.entitlements`), install,
+and have the instance list the name the command prints in
 `MAINWORTHY_APPLE_APPS` (`docs/deploy.md`). A personal team's build fails with that line: Apple signs an associated
 domain for a paid membership only.
 
@@ -48,7 +48,30 @@ MAINWORTHY_INSTANCE = 192.168.1.20:7357
 Write the host and its port with no scheme: `//` starts a comment in that file. A host on the phone's own network
 (a private address, `localhost`, a `.local` name) is reached over http, any other over https. A launch argument
 wins over the setting, `-instance <address>`, which is how the screen tests point the app at the server they
-start. Saved logins are offered only for `mainworthy.com`, the site the app's entitlements name.
+start. For native passkeys and saved-password AutoFill at another HTTPS instance, also set
+`MAINWORTHY_WEBCREDENTIALS_DOMAIN = mainworthy.example` to its host without a scheme or port.
+Enable `CODE_SIGN_ENTITLEMENTS = App/Mainworthy.entitlements` and sign with a paid team.
+Set the instance's `MAINWORTHY_PUBLIC_URL` to its HTTPS address and `MAINWORTHY_APPLE_APPS` to the team and
+bundle identifier printed by the install command. Its public
+`https://mainworthy.example/.well-known/apple-app-site-association` must return that identifier under
+`webcredentials.apps`, without authentication or a redirect. Apple must be able to fetch it over HTTPS on
+the domain's standard port, even if the app reaches the instance on another port. Rebuild and reinstall after
+changing the entitlement. The distributed app cannot add arbitrary associated domains at runtime.
+[Decision 0122](../docs/decisions/0122-native-passkey-sign-in.md) records this limit.
+
+## Check passkey sign-in
+
+`PasskeySignInTests` puts a fake `PasskeyAuthorizing` in place of AuthenticationServices. It checks the
+challenge, RP ID, assertion bytes, ceremony cookie, saved session, cancel, unavailable credentials, refusal,
+stale-attempt retry and password fallback. Server tests keep native and web origins separate and check
+expiry, replay and cookie binding.
+
+The iOS test instance uses HTTP loopback and has no configured public RP address.
+`POST /api/login/challenge` with `{ "native": true }` returns 400, asking for an HTTPS public address and an associated app domain.
+A separately configured HTTP localhost instance also refuses native challenges, while allowing web challenges.
+The simulator build uses `CODE_SIGNING_ALLOWED=NO` and has no signed associated-domain entitlement. It cannot complete this native ceremony against that test instance.
+A simulator passkey assertion is not covered by a UI test. Physical-device sign-in, including an external
+credential provider, remains open in [issue #205](https://github.com/endqwerty/mainworthy/issues/205).
 
 ### Identity provider sign-in
 

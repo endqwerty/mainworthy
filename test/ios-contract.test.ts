@@ -20,6 +20,7 @@ import {
 	DecideReply,
 	EVIDENCE,
 	Inbox,
+	PasskeyChallenge,
 	Proposal,
 	ProviderStart,
 	Question,
@@ -39,6 +40,7 @@ import { generated } from "../scripts/ios/swift.ts";
 import { KINDS } from "../src/core/kinds.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { ciReport } from "./helpers.ts";
+import { cleanUp as cleanUpPeople, world } from "./people-support.ts";
 
 const WHAT_TO_DO =
 	"The iOS app reads this (scripts/ios/contract.ts). If the change is meant, change the contract, run `bun scripts/ios.ts gen` and see ios/README.md.";
@@ -82,6 +84,18 @@ async function result(method: "GET" | "POST", path: string, body?: unknown): Pro
 	return reply.result;
 }
 const op = (key: string, name: string, input: unknown) => result("POST", `/api/p/${key}/${name}`, input);
+
+test("the iPhone reads a native passkey challenge from the configured instance", async () => {
+	const instance = world({ publicUrl: "https://mainworthy.example:8443" });
+	try {
+		const reply = await instance.post("/api/login/challenge", { native: true });
+		expect(reply.status).toBe(200);
+		if (!reply.body.ok) throw new Error(reply.text);
+		holds("POST /api/login/challenge", PasskeyChallenge, reply.body.result);
+	} finally {
+		cleanUpPeople();
+	}
+});
 
 test("the iPhone token list and replayed revocation read real admin replies", async () => {
 	const made = z.object({ actor: z.string(), token: z.string() }).parse(
