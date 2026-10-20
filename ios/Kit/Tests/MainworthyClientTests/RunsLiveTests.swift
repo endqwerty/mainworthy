@@ -78,7 +78,9 @@ struct RunsLiveTests {
 			(.all, 6), (.folder("Checkout"), 3), (.tag("#regression"), 3), (.text("coupon"), 2)
 		]
 		for (selection, count) in selections {
-			let outcome = try await project.planRun(name: "Phone check", selection: selection)
+			let preview = try await project.countRunCases(selection)
+			#expect(preview == count)
+			let outcome = try await project.planRun(RunPlanSubmission(name: "Phone check", selection: selection))
 			guard case .planned(let ref, let slots, _) = outcome else {
 				Issue.record("the plan was refused")
 				continue
@@ -89,7 +91,7 @@ struct RunsLiveTests {
 		let commit = "3333333333333333333333333333333333333333"
 		guard
 			case .planned(let ref, _, let already) = try await project.planRun(
-				name: "Build check", selection: .all, commit: commit)
+				RunPlanSubmission(name: "Build check", selection: .all, commit: commit))
 		else {
 			Issue.record("commit plan was refused")
 			return
@@ -97,7 +99,7 @@ struct RunsLiveTests {
 		#expect(already == 3)
 		#expect(try await project.run(ref).accepts == .commit(commit, repo: nil, environment: nil))
 		#expect(
-			try await project.planRun(name: "Empty", selection: .tag("absent"))
+			try await project.planRun(RunPlanSubmission(name: "Empty", selection: .tag("absent")))
 				== .refused("The selection matches no active case"))
 	}
 

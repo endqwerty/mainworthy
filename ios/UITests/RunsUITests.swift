@@ -96,6 +96,7 @@ final class RunsUITests: XCTestCase {
 		app.buttons["plan-run"].tap()
 		let name = app.textFields["run-name"]
 		XCTAssertTrue(name.waitForExistence(timeout: 5))
+		XCTAssertTrue(app.staticTexts["6 matching cases"].waitForExistence(timeout: 10))
 		name.tap()
 		name.typeText("Phone regression")
 		app.buttons["run-selection"].tap()
@@ -104,12 +105,108 @@ final class RunsUITests: XCTestCase {
 		filter.tap()
 		filter.typeText("regression")
 		app.buttons["Done"].tap()
+		XCTAssertTrue(app.staticTexts["3 matching cases"].waitForExistence(timeout: 10))
 		shot("5-plan")
 		app.buttons["submit-run-plan"].tap()
 		XCTAssertTrue(app.staticTexts["Phone regression"].waitForExistence(timeout: 10))
 		app.navigationBars.buttons["Runs"].tap()
 		XCTAssertTrue(app.staticTexts["Phone regression"].waitForExistence(timeout: 10))
 		shot("6-planned-list")
+	}
+
+	private struct PlanConnection: Decodable {
+		struct Result: Decodable { let url: String; let committed: Bool }
+		let result: Result
+	}
+
+	@MainActor private func planConnection(_ project: String, mode: String) async throws -> PlanConnection.Result {
+		let address = try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])
+		var request = URLRequest(url: try XCTUnwrap(URL(string: "\(address)/test/plan-connection")))
+		request.httpMethod = "POST"
+		request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+		request.setValue("Bearer \(environment["MAINWORTHY_TEST_TOKEN"] ?? "")", forHTTPHeaderField: "Authorization")
+		request.httpBody = try JSONSerialization.data(withJSONObject: ["project": project, "mode": mode])
+		let (data, response) = try await URLSession.shared.data(for: request)
+		XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+		return try JSONDecoder().decode(PlanConnection.self, from: data).result
+	}
+
+	@MainActor func testCancelDoesNotOpenALatePlan() async throws {
+		let project = try await makeProject()
+		let proxy = try await planConnection(project, mode: "hold")
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", proxy.url]
+		app.launch()
+		try signIn(app)
+		app.openProject(project)
+		app.openTab("Runs")
+		XCTAssertTrue(app.buttons["plan-run"].waitForExistence(timeout: 10))
+		app.buttons["plan-run"].tap()
+		let name = app.textFields["run-name"]
+		XCTAssertTrue(name.waitForExistence(timeout: 5))
+		XCTAssertTrue(app.staticTexts["6 matching cases"].waitForExistence(timeout: 10))
+		name.tap()
+		name.typeText("A late phone plan")
+		app.buttons["Done"].tap()
+		app.buttons["submit-run-plan"].tap()
+		var committed = false
+		for _ in 0..<100 {
+			if try await planConnection(project, mode: "status").committed { committed = true; break }
+			try await Task.sleep(for: .milliseconds(50))
+		}
+		XCTAssertTrue(committed, "The server must commit before Cancel and before releasing its reply")
+		XCTAssertFalse(name.isEnabled)
+		shot("planner-sending")
+		app.buttons["Cancel"].tap()
+		XCTAssertTrue(app.buttons["plan-run"].waitForExistence(timeout: 5))
+		_ = try await planConnection(project, mode: "normal")
+		XCTAssertTrue(app.staticTexts["A late phone plan"].waitForExistence(timeout: 10))
+		XCTAssertTrue(app.navigationBars["Runs"].exists)
+		XCTAssertFalse(app.buttons["start-run"].exists)
+		shot("planner-cancelled-late")
+		app.buttons["plan-run"].tap()
+		XCTAssertTrue(app.buttons["Read run again"].waitForExistence(timeout: 10))
+		XCTAssertEqual(name.value as? String, "A late phone plan")
+		XCTAssertFalse(name.isEnabled)
+		shot("planner-recovered")
+		app.buttons["submit-run-plan"].tap()
+		XCTAssertTrue(app.buttons["start-run"].waitForExistence(timeout: 10))
+		XCTAssertTrue(app.staticTexts["A late phone plan"].exists)
+	}
+
+	@MainActor func testRetryKeepsTheSubmittedPlan() async throws {
+		let project = try await makeProject()
+		let proxy = try await planConnection(project, mode: "unreadable")
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", proxy.url]
+		app.launch()
+		try signIn(app)
+		app.openProject(project)
+		app.openTab("Runs")
+		XCTAssertTrue(app.buttons["plan-run"].waitForExistence(timeout: 10))
+		app.buttons["plan-run"].tap()
+		let name = app.textFields["run-name"]
+		XCTAssertTrue(name.waitForExistence(timeout: 5))
+		name.tap()
+		name.typeText("Keep the phone plan")
+		app.buttons["Done"].tap()
+		app.buttons["submit-run-plan"].tap()
+		XCTAssertTrue(app.buttons["Retry plan"].waitForExistence(timeout: 10))
+		XCTAssertTrue(app.staticTexts["plan-notice"].label.contains("outcome is unknown"))
+		XCTAssertFalse(name.isEnabled)
+		XCTAssertFalse(app.buttons["run-selection"].isEnabled)
+		shot("planner-uncertain")
+		app.buttons["Cancel"].tap()
+		app.buttons["plan-run"].tap()
+		XCTAssertTrue(app.buttons["Retry plan"].waitForExistence(timeout: 10))
+		XCTAssertEqual(name.value as? String, "Keep the phone plan")
+		_ = try await planConnection(project, mode: "normal")
+		app.buttons["submit-run-plan"].tap()
+		XCTAssertTrue(app.buttons["start-run"].waitForExistence(timeout: 10))
+		XCTAssertTrue(app.staticTexts["Keep the phone plan"].exists)
+		app.navigationBars.buttons["Runs"].tap()
+		XCTAssertEqual(app.staticTexts.matching(identifier: "Keep the phone plan").count, 1)
+		shot("planner-retry-opened")
 	}
 
 	@MainActor func testChangeRunsAndTheirResults() async throws {

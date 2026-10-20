@@ -208,12 +208,15 @@ Planning needs the project's `plan` capability. To plan a run, follow these step
 
 1. In **Runs**, press **+**.
 2. Give the run a name.
-3. Choose all cases, a folder, a tag or search text.
+3. Choose all cases, a folder, a tag or search text. The planner shows how many runnable cases match.
 4. If needed, enter a commit whose results the run accepts.
 5. Press **Plan**. The app says how many slots it made and opens the new run.
 
+If the reply is lost or cannot be read, the app keeps the submitted plan and locks its choices.
+**Retry plan** recovers the original command or sends the same request, so retrying does not plan another run.
 If the run was planned but cannot be read, the app keeps its reference and offers **Read run again**.
-This reads the saved run without planning another.
+**Cancel** closes the planner. A late reply does not open the run; reopen the planner to recover or open it.
+The saved plan stays here while this project's screen is open. It is not kept after the app closes.
 A selection with no cases is refused with the server's sentence.
 
 ## Read a change's gate

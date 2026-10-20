@@ -23,7 +23,29 @@ public final class RunsScreen: ProjectScreen {
 	public private(set) var notice: String?
 	public private(set) var folders: [String] = []
 	public private(set) var planning = false
-	public private(set) var savedPlan: SavedPlan?
+	public enum CaseCount: Equatable {
+		case idle, loading, counted(Int), failed(String)
+	}
+	public struct PlannerPresentation: Identifiable, Equatable {
+		public let id = UUID()
+	}
+	private enum PlanState {
+		case pending(RunPlanSubmission)
+		case confirmed(RunPlanSubmission, SavedPlan)
+		var submission: RunPlanSubmission {
+			switch self {
+			case .pending(let submission), .confirmed(let submission, _): submission
+			}
+		}
+	}
+	public var planSubmission: RunPlanSubmission? { planState?.submission }
+	public var savedPlan: SavedPlan? {
+		if case .confirmed(_, let receipt) = planState { receipt } else { nil }
+	}
+	public private(set) var caseCount = CaseCount.idle
+	private var planState: PlanState?
+	private var planner: PlannerPresentation?
+	private var countReads = 0
 	public private(set) var permission: Project
 	private let project: ProjectClient
 	private var person: String
@@ -116,19 +138,60 @@ public final class RunsScreen: ProjectScreen {
 		do { folders = try await project.runFolders() } catch { notice = error.shown }
 	}
 
+	public func presentPlanner() -> PlannerPresentation {
+		let presentation = PlannerPresentation()
+		planner = presentation
+		return presentation
+	}
+
+	public func cancelPlanner(_ presentation: PlannerPresentation) {
+		if planner == presentation { planner = nil }
+	}
+
+	/// Only the presentation that still owns this result may open it and forget its receipt.
+	public func openedPlan(in presentation: PlannerPresentation) -> Bool {
+		guard planner == presentation, savedPlan != nil else { return false }
+		planState = nil
+		planner = nil
+		return true
+	}
+
+	public func countCases(_ selection: RunSelection?) async {
+		countReads += 1
+		let mine = countReads
+		guard let selection else { caseCount = .idle; return }
+		caseCount = .loading
+		do {
+			let count = try await project.countRunCases(selection)
+			guard mine == countReads else { return }
+			caseCount = .counted(count)
+		} catch {
+			guard mine == countReads else { return }
+			caseCount = .failed(error.shown)
+		}
+	}
+
 	public func plan(name: String, selection: RunSelection, commit: String = "") async -> Run? {
+		guard !planning else { return nil }
 		if savedPlan != nil { return await readPlannedRun() }
-		guard permission.may(.plan), !planning else { return nil }
+		guard planSubmission != nil || permission.may(.plan) else { return nil }
+		let recovering = planSubmission != nil
+		let submission = planSubmission ?? RunPlanSubmission(name: name, selection: selection, commit: commit)
+		planState = .pending(submission)
 		planning = true
 		defer { planning = false }
 		do {
-			switch try await project.planRun(name: name, selection: selection, commit: commit) {
+			switch try await project.planRun(submission, recovering: recovering) {
 			case .planned(let ref, let slots, let already):
-				savedPlan = SavedPlan(ref: ref, slots: slots, already: already)
+				planState = .confirmed(submission, SavedPlan(ref: ref, slots: slots, already: already))
 				return await readSavedPlan()
-			case .refused(let why): notice = why
+			case .refused(let why):
+				planState = nil
+				notice = why
 			}
-		} catch { notice = error.shown }
+		} catch {
+			notice = "The run's outcome is unknown. Retry plan keeps your submitted choices and sends the same command. " + error.shown
+		}
 		return nil
 	}
 
@@ -154,7 +217,6 @@ public final class RunsScreen: ProjectScreen {
 			loading = .done
 			notice = saved.sentence
 			open(run).planned(saved.sentence)
-			savedPlan = nil
 			return run
 		} catch {
 			notice = saved.sentence + " It could not be opened. Read the run again. " + error.shown

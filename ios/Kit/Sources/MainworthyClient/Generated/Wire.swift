@@ -531,6 +531,17 @@ enum Wire {
 		let already: Int
 	}
 
+	/// The recorded reply of a captured plan's command.
+	struct RunPlanCommand: Decodable, Equatable, Sendable {
+		let state: String
+		let reply: RunPlanReply?
+	}
+
+	/// The runnable case count for a plan selection.
+	struct RunCaseCount: Decodable, Equatable, Sendable {
+		let count: Int
+	}
+
 	/// Why one result was not recorded.
 	struct ReportRefusal: Decodable, Equatable, Sendable {
 		let reason: String

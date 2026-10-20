@@ -269,8 +269,36 @@ public struct RunExecution: Equatable, Sendable {
 	}
 }
 
-public enum RunSelection: Equatable, Sendable {
+public enum RunSelection: Hashable, Sendable {
 	case all, folder(String), tag(String), text(String)
+
+	package var select: JSONValue {
+		switch self {
+		case .all: [:]
+		case .folder(let path): ["folders": [.string(path)]]
+		case .tag(let tag): ["tags": [.string(tag.hasPrefix("#") ? String(tag.dropFirst()) : tag)]]
+		case .text(let query): ["text": .string(query)]
+		}
+	}
+}
+
+/// A plan's choices and command, captured before the first request and kept through uncertain replies.
+public struct RunPlanSubmission: Sendable {
+	public let name: String
+	public let selection: RunSelection
+	public let commit: String
+	package let command = UUID().uuidString.lowercased()
+	package let delivery = WriteDelivery()
+	package let input: JSONValue
+
+	package init(name: String, selection: RunSelection, commit: String = "") {
+		self.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+		self.selection = selection
+		self.commit = commit.trimmingCharacters(in: .whitespacesAndNewlines)
+		var input: [String: JSONValue] = ["name": .string(self.name), "select": selection.select]
+		if !self.commit.isEmpty { input["accepts"] = ["commit": .string(self.commit)] }
+		self.input = .object(input)
+	}
 }
 
 public enum RunReportOutcome: Equatable, Sendable {
@@ -401,25 +429,38 @@ extension ProjectClient {
 		return reply.items.map(\.path)
 	}
 
-	package func planRun(name: String, selection: RunSelection, commit: String = "") async throws -> RunPlanOutcome
-	{
-		let select: JSONValue =
-			switch selection {
-			case .all: [:]
-			case .folder(let path): ["folders": [.string(path)]]
-			case .tag(let tag): ["tags": [.string(tag.hasPrefix("#") ? String(tag.dropFirst()) : tag)]]
-			case .text(let query): ["text": .string(query)]
-			}
-		var input: [String: JSONValue] = [
-			"name": .string(name.trimmingCharacters(in: .whitespacesAndNewlines)), "select": select
-		]
-		let commit = commit.trimmingCharacters(in: .whitespacesAndNewlines)
-		if !commit.isEmpty { input["accepts"] = ["commit": .string(commit)] }
+	package func countRunCases(_ selection: RunSelection) async throws -> Int {
+		let reply: Wire.RunCaseCount = try await server.read("find", in: key,
+			["in": "cases", "select": selection.select, "limit": 1])
+		return reply.count
+	}
+
+	package func planRun(_ submission: RunPlanSubmission, recovering: Bool = false) async throws -> RunPlanOutcome {
 		do {
-			let reply: Wire.RunPlanReply = try await server.write("plan", in: key, .object(input))
+			let reply: Wire.RunPlanReply
+			if recovering {
+				let command: Wire.RunPlanCommand = try await server.read("command", in: key,
+					["cmd": .string(submission.command)])
+				switch command.state {
+				case "done":
+					guard let recorded = command.reply else { throw ClientError.unreadable }
+					reply = recorded
+				case "none":
+					reply = try await server.write("plan", in: key, submission.input,
+						command: submission.command, delivery: submission.delivery)
+				case "begun":
+					throw ClientError.unreachable("The plan is still being recorded. Retry to ask again.")
+				default: throw ClientError.unreadable
+				}
+			} else {
+				reply = try await server.write("plan", in: key, submission.input,
+					command: submission.command, delivery: submission.delivery)
+			}
 			return .planned(ref: reply.run, slots: reply.slots, already: reply.already)
-		} catch let error as ClientError {
-			if case .refused = error { return .refused(error.message) }
+		} catch {
+			if case ClientError.refused(let code, _) = error, code != "internal",
+				submission.delivery.definitelyRejected { return .refused(error.shown) }
+			submission.delivery.uncertain()
 			throw error
 		}
 	}

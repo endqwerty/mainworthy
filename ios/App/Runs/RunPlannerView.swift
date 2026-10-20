@@ -5,7 +5,7 @@ import SwiftUI
 struct RunPlannerView: View {
 	let screen: RunsScreen
 	let planned: (Run) -> Void
-	@Environment(\.dismiss) private var dismiss
+	let cancel: () -> Void
 	@State private var name = ""
 	@State private var mode = Selection.all
 	@State private var filter = ""
@@ -19,6 +19,29 @@ struct RunPlannerView: View {
 		case folder = "Folder"
 		case tag = "Tag"
 		case text = "Search"
+	}
+
+	init(screen: RunsScreen, planned: @escaping (Run) -> Void, cancel: @escaping () -> Void) {
+		self.screen = screen
+		self.planned = planned
+		self.cancel = cancel
+		if let submission = screen.planSubmission {
+			_name = State(initialValue: submission.name)
+			_commit = State(initialValue: submission.commit)
+			_acceptsCommit = State(initialValue: !submission.commit.isEmpty)
+			switch submission.selection {
+			case .all: break
+			case .folder(let path):
+				_mode = State(initialValue: .folder)
+				_folder = State(initialValue: path)
+			case .tag(let tag):
+				_mode = State(initialValue: .tag)
+				_filter = State(initialValue: tag)
+			case .text(let text):
+				_mode = State(initialValue: .text)
+				_filter = State(initialValue: text)
+			}
+		}
 	}
 
 	var body: some View {
@@ -45,6 +68,7 @@ struct RunPlannerView: View {
 								.accessibilityIdentifier("run-filter").textInputAutocapitalization(.never).focused(
 									$typing, equals: .filter)
 						}
+						caseCount
 					}
 					Section {
 						Toggle("Accept results for a commit", isOn: $acceptsCommit)
@@ -59,7 +83,7 @@ struct RunPlannerView: View {
 								? "The server resolves an abbreviated commit."
 								: "Counts only results recorded in this run.")
 					}
-				}.disabled(screen.savedPlan != nil || screen.planning)
+				}.disabled(screen.planSubmission != nil || screen.planning)
 				if let notice = screen.notice { Section { Text(notice).accessibilityIdentifier("plan-notice") } }
 			}
 			.navigationTitle(screen.savedPlan == nil ? "Plan a run" : "Run planned").navigationBarTitleDisplayMode(
@@ -67,23 +91,16 @@ struct RunPlannerView: View {
 			)
 			.toolbar {
 				ToolbarItem(placement: .keyboard) { Button("Done") { typing = nil } }
-				ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+				ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: cancel) }
 				ToolbarItem(placement: .confirmationAction) {
-					Button(screen.savedPlan == nil ? "Plan" : "Read run again") {
-						let selection: RunSelection =
-							switch mode {
-							case .all: .all
-							case .folder: .folder(folder ?? "")
-							case .tag: .tag(filter.trimmingCharacters(in: .whitespacesAndNewlines))
-							case .text: .text(filter.trimmingCharacters(in: .whitespacesAndNewlines))
-							}
+					Button(screen.savedPlan != nil ? "Read run again" : screen.planSubmission != nil ? "Retry plan" : "Plan") {
 						Task {
 							let run =
 								if screen.savedPlan != nil {
 									await screen.readPlannedRun()
 								} else {
 									await screen.plan(
-										name: name, selection: selection, commit: acceptsCommit ? commit : "")
+										name: name, selection: selection ?? .all, commit: acceptsCommit ? commit : "")
 								}
 							if let run {
 								planned(run)
@@ -91,12 +108,33 @@ struct RunPlannerView: View {
 						}
 					}
 					.disabled(
-						screen.planning || (screen.savedPlan == nil && (!valid || !screen.permission.may(.plan)))
+						screen.planning || (screen.planSubmission == nil && (!valid || !screen.permission.may(.plan)))
 					)
 					.accessibilityIdentifier("submit-run-plan")
 				}
 			}
 			.task { await screen.readFolders() }
+			.task(id: selection) { await screen.countCases(selection) }
+		}
+	}
+
+	private var selection: RunSelection? {
+		if let submitted = screen.planSubmission { return submitted.selection }
+		let query = filter.trimmingCharacters(in: .whitespacesAndNewlines)
+		switch mode {
+		case .all: return .all
+		case .folder: return folder.map(RunSelection.folder)
+		case .tag: return query.isEmpty ? nil : .tag(query)
+		case .text: return query.isEmpty ? nil : .text(query)
+		}
+	}
+
+	@ViewBuilder private var caseCount: some View {
+		switch screen.caseCount {
+		case .idle: Text("Choose cases to count.")
+		case .loading: Text("Counting matching cases…")
+		case .counted(let count): Text("\(count) matching cases").accessibilityIdentifier("run-case-count")
+		case .failed(let why): Text("Cases could not be counted. " + why).accessibilityIdentifier("run-count-error")
 		}
 	}
 
