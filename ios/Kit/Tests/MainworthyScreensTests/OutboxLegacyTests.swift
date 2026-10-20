@@ -9,8 +9,8 @@ import Testing
 @Suite("Saved answers across builds", .enabled(if: Live.isRunning, "needs the server `bun scripts/ios.ts test` starts"))
 @MainActor
 struct OutboxLegacyTests {
-	@Test("answers without a project identity become obsolete and are never sent")
-	func earlierBuild() async throws {
+	@Test("unfinished legacy answers become obsolete while recorded outcomes stay visible", arguments: ["uncertain", "obsolete"])
+	func earlierBuild(delivery: String) async throws {
 		let transport = SwitchableQueueTransport()
 		let project = try await Live.signedIn(transport: transport).project(try await Live.project())
 		let questions = try await project.questions(open: true).questions
@@ -25,18 +25,21 @@ struct OutboxLegacyTests {
 		let recorded = """
 			{"answer":{"command":"legacy-done","question":"\(finding.ref)","title":"A finding","label":"Defer",
 			"input":{"q":"\(finding.ref)","onEvidence":"h","answer":{"is":"defer"},"ifOpen":true}},
-			"delivery":"uncertain","outcome":{"decided":{"_0":12}}}
+			"delivery":"\(delivery)","outcome":{"decided":{"_0":12}}}
 			"""
 		let store = MemoryAnswerStore()
 		store.data = Data("[\(recorded),\(waiting)]".utf8)
 		let outbox = AnswerOutbox(project: project, store: store)
 		#expect(outbox.storageProblem == nil)
 		#expect(outbox.entries.map(\.questions) == [[finding.ref], [failure.ref]])
-		#expect(outbox.entries[0].outcome == nil && outbox.entries[0].status == "Obsolete")
+		#expect(outbox.entries[0].outcome == .decided(12))
+		#expect(outbox.entries[0].status == "Recorded")
+		#expect(outbox.entries[0].members[0].outcome == .decided(12))
+		#expect(outbox.entries[0].detail == "The server recorded this answer.")
 		#expect(outbox.pendingCount == 0)
 		transport.commands.withLock { $0 = [] }
 		await outbox.send()
-		#expect(outbox.entries.map(\.status) == ["Obsolete", "Obsolete"])
+		#expect(outbox.entries.map(\.status) == ["Recorded", "Obsolete"])
 		// Sent as the earlier build wrote it: the server ties the command id to that request.
 		let sent = try transport.commands.withLock { try $0.map { try JSONDecoder().decode(JSONValue.self, from: $0) } }
 		#expect(sent.isEmpty)

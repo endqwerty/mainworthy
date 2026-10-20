@@ -33,14 +33,14 @@ public final class AnswerOutbox {
 		}
 		public var label: String { answer.label }
 		public var members: [SavedQuestion] {
-			answer.members.map { SavedQuestion(question: $0.question, title: $0.title, outcome: obsolete ? nil : outcomes?[$0.question]) }
+			answer.members.map { SavedQuestion(question: $0.question, title: $0.title, outcome: outcomes?[$0.question]) }
 		}
 		/// Whether this answer has an outcome or belongs to an obsolete project.
 		public var finished: Bool { outcomes != nil || obsolete }
-		public var obsolete: Bool { delivery == .obsolete }
+		public var obsolete: Bool { outcomes == nil && delivery == .obsolete }
 		/// What became of an answer to one question, for tests. A screen asks `finished`, or each member: this is
 		/// nil for an answer to several questions, finished or not (the verifier's finding of 2026-10-16).
-		package var outcome: AnswerOutcome? { !obsolete && answer.members.count == 1 ? outcomes?[question] : nil }
+		package var outcome: AnswerOutcome? { answer.members.count == 1 ? outcomes?[question] : nil }
 		public var waiting: Bool { !finished && delivery != .dropped }
 		public var dropped: Bool { outcomes == nil && delivery == .dropped }
 
@@ -85,7 +85,7 @@ public final class AnswerOutbox {
 		}
 
 		public var detail: String {
-			if obsolete { return "This answer belongs to an earlier project or has no project identity. It will never be sent. Read the current project before answering again." }
+			if obsolete { return "This answer belongs to an earlier project or has no project identity. Its outcome is unknown. This app will not send it again. Read the current project before answering again." }
 			guard let outcomes else {
 				let all = answer.members.count == 1 ? "" : " All \(answer.members.count) answers go together."
 				return dropped
@@ -145,13 +145,14 @@ public final class AnswerOutbox {
 				guard Set(saved.map(\.id)).count == saved.count else { throw ClientError.unreadable }
 				entries = saved.map { entry in
 					var entry = entry
-					if entry.answer.projectIdentity != project.identity {
+					if entry.outcomes == nil, entry.answer.projectIdentity != project.identity {
 						entry.delivery = .obsolete
 						entry.problem = nil
 					}
 					return entry
 				}
 			}
+			storageProblem = store.loadWarning
 		} catch {
 			readable = false
 			storageProblem = "Saved answers could not be read. They have not been replaced. \(error.shown)"
@@ -195,7 +196,7 @@ public final class AnswerOutbox {
 	package func stop() { active = false; finishWaiting() }
 	package func retire() {
 		stop()
-		for index in entries.indices { entries[index].delivery = .obsolete; entries[index].problem = nil }
+		for index in entries.indices where entries[index].outcomes == nil { entries[index].delivery = .obsolete; entries[index].problem = nil }
 		try? save(entries)
 	}
 	package func resume() { active = true }
@@ -358,8 +359,13 @@ public final class AnswerOutbox {
 
 @MainActor
 package protocol AnswerStore {
+	var loadWarning: String? { get }
 	func load() throws -> Data?
 	func save(_ data: Data) throws
+}
+
+extension AnswerStore {
+	package var loadWarning: String? { nil }
 }
 
 @MainActor
@@ -371,10 +377,12 @@ package final class MemoryAnswerStore: AnswerStore {
 }
 
 @MainActor
-package struct FileAnswerStore: AnswerStore {
+package final class FileAnswerStore: AnswerStore {
 	let file: URL
 	private let legacy: URL
 	private let prefix: String
+	private var imported: [URL] = []
+	package private(set) var loadWarning: String?
 
 	package init(instance: Instance, person: Int, project: String, identity: String, directory: URL? = nil) {
 		let root = directory ?? URL.applicationSupportDirectory.appending(path: "Mainworthy/Answers", directoryHint: .isDirectory)
@@ -387,6 +395,7 @@ package struct FileAnswerStore: AnswerStore {
 	}
 
 	package func load() throws -> Data? {
+		loadWarning = nil
 		guard FileManager.default.fileExists(atPath: file.path) else {
 			let root = file.deletingLastPathComponent()
 			guard FileManager.default.fileExists(atPath: root.path) else { return nil }
@@ -396,10 +405,14 @@ package struct FileAnswerStore: AnswerStore {
 			var seen = Set<String>()
 			var entries: [AnswerOutbox.Entry] = []
 			for url in older.sorted(by: { $0.path < $1.path }) {
-				try excludeFromBackup(root)
-				try excludeFromBackup(url)
-				for entry in try JSONDecoder().decode([AnswerOutbox.Entry].self, from: Data(contentsOf: url)) where seen.insert(entry.id).inserted {
-					entries.append(entry)
+				do {
+					try excludeFromBackup(root)
+					try excludeFromBackup(url)
+					let saved = try JSONDecoder().decode([AnswerOutbox.Entry].self, from: Data(contentsOf: url))
+					for entry in saved where seen.insert(entry.id).inserted { entries.append(entry) }
+					imported.append(url)
+				} catch {
+					loadWarning = "Some earlier saved answers could not be read and were skipped. You can still save answers for this project."
 				}
 			}
 			return try JSONEncoder().encode(entries)
@@ -414,6 +427,10 @@ package struct FileAnswerStore: AnswerStore {
 		try excludeFromBackup(file.deletingLastPathComponent())
 		try data.write(to: file, options: .atomic)
 		try excludeFromBackup(file)
+		for url in imported where FileManager.default.fileExists(atPath: url.path) {
+			try FileManager.default.removeItem(at: url)
+		}
+		imported = []
 	}
 
 	private func excludeFromBackup(_ url: URL) throws {
