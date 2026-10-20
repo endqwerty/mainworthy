@@ -796,7 +796,7 @@ describe("what the iPhone Suite reads", () => {
 	});
 
 	test("adopted, waiting and overlapping proposals", async () => {
-		const { SuiteProposeReply } = await import("../scripts/ios/contract.ts");
+		const { SuiteProposeReply, SuiteProposalQuestion } = await import("../scripts/ios/contract.ts");
 		const create = {
 			edits: [
 				{ op: "create", body: { title: "A native case", steps: [{ id: "a0", action: "Open", expected: null }] } },
@@ -817,6 +817,23 @@ describe("what the iPhone Suite reads", () => {
 		const waiting = await op(strict, "propose", { ...create, reason: "Check it before adoption." });
 		holds("propose waiting", SuiteProposeReply, waiting);
 		expect(waiting).toMatchObject({ status: "open" });
+		const question = z.object({ question: z.string() }).parse(waiting).question;
+		const [open] = z.array(z.unknown()).parse(await op(strict, "get", { refs: [question] }));
+		holds("get waiting proposal question", SuiteProposalQuestion, open);
+		expect(open).toMatchObject({ q: question, decision: null });
+		const evidenceHash = z.object({ evidenceHash: z.string() }).parse(open).evidenceHash;
+		const decided = await op(strict, "decide", {
+			q: question,
+			onEvidence: evidenceHash,
+			answer: { is: "accept" },
+			reason: "Reviewed the native case.",
+		});
+		const [accepted] = z.array(z.unknown()).parse(await op(strict, "get", { refs: [question] }));
+		holds("get accepted proposal question", SuiteProposalQuestion, accepted);
+		const cases = z
+			.array(z.object({ effects: z.object({ cases: z.array(z.object({ ref: z.string(), version: z.number() })) }) }))
+			.parse(decided)[0]?.effects.cases;
+		expect(accepted).toMatchObject({ q: question, decision: { answer: { is: "accept" }, effects: { cases } } });
 	});
 });
 

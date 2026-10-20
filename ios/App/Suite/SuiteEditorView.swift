@@ -54,7 +54,13 @@ struct SuiteEditorView: View {
 					}.disabled(editor.locked)
 				}
 				if let notice = editor.notice {
-					Section { Text(notice).accessibilityIdentifier("editor-notice") }
+					Section {
+						Text(notice).accessibilityIdentifier("editor-notice")
+						if editor.isWaiting {
+							Text("Editing pauses while the proposal waits. Retry checks its answer.")
+								.font(.caption).foregroundStyle(.secondary)
+						}
+					}
 				}
 			}
 			.scrollDismissesKeyboard(.interactively)

@@ -206,6 +206,77 @@ final class SuiteUITests: XCTestCase {
 			"Expected \(field.identifier) to contain \(text); its value is \(String(describing: field.value))")
 	}
 
+	@MainActor func testFollowAcceptedCaseProposal() async throws {
+		XCUIDevice.shared.orientation = .portrait
+		let project = try await makeProject()
+		let rawPolicy = try await operation(project, "propose", ["edits": [["op": "policy", "preset": "strict", "unlinked": "ask"]]])
+		let policyRef = try XCTUnwrap((rawPolicy as? [String: Any])?["question"] as? String)
+		func decide(_ ref: String) async throws -> [[String: Any]] {
+			let raw = try await operation(project, "get", ["refs": [ref]])
+			let question = try XCTUnwrap((raw as? [[String: Any]])?.first)
+			let result = try await operation(project, "decide", ["q": ref,
+				"onEvidence": try XCTUnwrap(question["evidenceHash"] as? String),
+				"answer": ["is": "accept"], "reason": "Reviewed the submitted case"])
+			let rows = try XCTUnwrap(result as? [[String: Any]])
+			XCTAssertEqual(rows.first?["status"] as? String, "decided")
+			return rows
+		}
+		_ = try await decide(policyRef)
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])]
+		app.launch()
+		try signIn(app)
+		app.openProject(project)
+		app.openTab("Cases")
+		XCTAssertTrue(app.buttons["folder-Checkout"].waitForExistence(timeout: 10))
+		app.buttons["folder-Checkout"].tap()
+		app.buttons["folder-Checkout/Coupons"].tap()
+		XCTAssertTrue(app.buttons["suite-new"].waitForExistence(timeout: 10))
+		app.buttons["suite-new"].tap()
+		let title = app.textFields["editor-title"]
+		XCTAssertTrue(title.waitForExistence(timeout: 10))
+		title.tap(); title.typeText("Continue the accepted phone case")
+		app.buttons["editor-save"].tap()
+		let notice = app.staticTexts["editor-notice"]
+		XCTAssertTrue(notice.waitForExistence(timeout: 10))
+		shot("proposal-waiting")
+		let rawInbox = try await operation(project, "inbox", ["kind": "adopt", "state": "open"])
+		let inbox = try XCTUnwrap(rawInbox as? [String: Any])
+		let question = try XCTUnwrap((inbox["items"] as? [[String: Any]])?.first)
+		let questionRef = try XCTUnwrap(question["q"] as? String)
+		let decided = try await decide(questionRef)
+		let effects = try XCTUnwrap(decided.first?["effects"] as? [String: Any])
+		let saved = try XCTUnwrap((effects["cases"] as? [[String: Any]])?.first)
+		let ref = try XCTUnwrap(saved["ref"] as? String)
+		let followed = app.navigationBars["Edit \(ref)"]
+		let didFollow = followed.waitForExistence(timeout: 10)
+		shot("proposal-followed")
+		XCTAssertTrue(didFollow)
+		XCTAssertEqual(title.value as? String, "Continue the accepted phone case")
+		XCTAssertTrue(title.isEnabled)
+		replaceParagraph(title, with: "Continue with phone version two")
+		app.buttons["editor-save"].tap()
+		let waiting = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS 'waits for a person'"), object: notice)
+		XCTAssertEqual(XCTWaiter.wait(for: [waiting], timeout: 10), .completed)
+		let rawNext = try await operation(project, "inbox", ["kind": "adopt", "state": "open"])
+		let next = try XCTUnwrap(((rawNext as? [String: Any])?["items"] as? [[String: Any]])?.first?["q"] as? String)
+		let edited = try await decide(next)
+		let editedEffects = try XCTUnwrap(edited.first?["effects"] as? [String: Any])
+		let version = try XCTUnwrap((editedEffects["cases"] as? [[String: Any]])?.first)
+		XCTAssertEqual(version["ref"] as? String, ref)
+		XCTAssertEqual(version["version"] as? Int, 2)
+		let refreshed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS 'version 2'"), object: notice)
+		XCTAssertEqual(XCTWaiter.wait(for: [refreshed], timeout: 10), .completed)
+		app.buttons["editor-cancel"].tap()
+		XCTAssertTrue(app.staticTexts["Continue with phone version two"].waitForExistence(timeout: 10))
+		app.staticTexts["Continue with phone version two"].tap()
+		XCTAssertTrue(app.staticTexts["case-version"].waitForExistence(timeout: 10))
+		shot("proposal-case-version-two")
+		let rawCases = try await operation(project, "find", ["in": "cases", "text": "Continue"])
+		let cases = try XCTUnwrap((rawCases as? [String: Any])?["items"] as? [[String: Any]])
+		XCTAssertEqual(cases.compactMap { $0["ref"] as? String }, [ref])
+	}
+
 	@MainActor func testMethodBadges() async throws {
 		try await checkMethodBadges(category: .large, name: "default")
 		try await checkMethodBadges(category: .accessibilityLarge, name: "accessibility")

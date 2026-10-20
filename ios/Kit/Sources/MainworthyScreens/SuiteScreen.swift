@@ -144,8 +144,9 @@ public final class SuiteScreen: ProjectScreen {
 
 	/// What the change stream asks for: every listing becomes stale, and the ones on screen are read again.
 	public func refresh() async {
+		await editor?.refreshWaiting()
 		await rereadLists()
-		// Latest pages follow the stream. An explicit historic version, and an editor's source, stay as opened.
+		// Latest pages follow the stream. Historic pages and ordinary edits stay on the version opened.
 		for key in Array(documents.keys) where !key.contains("@") { await openCase(key) }
 		for ref in Array(histories.keys) { await readHistory(ref) }
 	}
