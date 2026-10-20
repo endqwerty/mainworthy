@@ -49,7 +49,11 @@ const secret = "e2e-handoff-signing-secret";
 			await phone.page.getByRole("button", { name: "Hand to the agent again" }).waitFor();
 			expect(received).toHaveLength(1);
 			const [post] = received;
-			expect(post?.signature).toBe(`sha256=${createHmac("sha256", secret).update(post?.body ?? "").digest("hex")}`);
+			expect(post?.signature).toBe(
+				`sha256=${createHmac("sha256", secret)
+					.update(post?.body ?? "")
+					.digest("hex")}`,
+			);
 			expect(JSON.parse(post?.body ?? "{}")).toMatchObject({
 				project: "scratch",
 				question: q,
