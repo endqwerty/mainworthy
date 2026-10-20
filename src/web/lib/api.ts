@@ -46,6 +46,7 @@ const Session = z.object({
 			unlinked: Unlinked,
 			demo: z.boolean(),
 			can: z.array(z.string()),
+			handoff: z.boolean(),
 		}),
 	),
 });

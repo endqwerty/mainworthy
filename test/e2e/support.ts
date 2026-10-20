@@ -113,6 +113,7 @@ export async function startServer({
 	passkeys = false,
 	mail,
 	oidc,
+	handoff,
 }: {
 	/** Exercise Bun's source bundler even when the check supplies a compiled fixture. */
 	source?: boolean;
@@ -133,6 +134,8 @@ export async function startServer({
 	mail?: { port: number };
 	/** An identity provider (`test/oidc-support.ts`). People open the pages at `localhost`, as with passkeys. */
 	oidc?: { issuer: string; clientId: string; clientSecret: string; name: string };
+	/** Where failures of the first project are handed to an agent (`MAINWORTHY_HANDOFF_*`). */
+	handoff?: { url: string; secret: string };
 } = {}): Promise<Server> {
 	const dataDir = await mkdtemp(join(tmpdir(), `mainworthy-e2e-${process.pid}-`));
 	ownedDirectories.add(dataDir);
@@ -164,6 +167,9 @@ export async function startServer({
 				MAINWORTHY_SMTP_USER: "",
 				MAINWORTHY_SMTP_PASSWORD: "",
 				MAINWORTHY_MAIL_FROM: mail ? "mainworthy@example.com" : "",
+				MAINWORTHY_HANDOFF_PROJECT: handoff ? firstProject : "",
+				MAINWORTHY_HANDOFF_URL: handoff?.url ?? "",
+				MAINWORTHY_HANDOFF_SECRET: handoff?.secret ?? "",
 				MAINWORTHY_READERS: process.env.MAINWORTHY_READERS ?? testReaders(),
 			},
 			stdout: "ignore",

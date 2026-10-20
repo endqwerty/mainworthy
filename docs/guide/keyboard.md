@@ -127,6 +127,8 @@ A tablet whose window is wider than 900 px and taller than 500 px also keeps the
 | <kbd>Esc</kbd> | Clear selection |
 | <kbd>↵</kbd> | Take advice. Gives the answer an agent advised |
 | <kbd>u</kbd> | Undo answer |
+| <kbd>y</kbd> | Copy for an agent. On a failure: copies a brief with the failure, its tests, where it ran and a request to fix the cause |
+| <kbd>h</kbd> | Hand to the agent. On a failure: has the server send that brief to the agent the instance is configured to start. Shown only when one is configured |
 
 The answer keys depend on the kind of question. The queue shows the ones that apply to the question you are on, each with what it does.
 

@@ -301,3 +301,8 @@
 		grid-template-columns: 24px 100px minmax(0, 1fr);
 	}
 }
+/* Copy a failure for an agent, or hand it to the configured one: two buttons under the evidence, and how the last
+   hand-off went. */
+.queue-handoff .outs {
+	margin: 10px 0 4px;
+}

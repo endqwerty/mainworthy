@@ -3,6 +3,7 @@ import { Attachment, AttachmentReply } from "./attachments.ts";
 import { AuditReply } from "./audit.ts";
 import { CsvImportRow } from "./csv.ts";
 import { Quarantine, SameCodeEvidence } from "./flaky.ts";
+import { HandoffReceipt, HandoffStatus } from "./handoff.ts";
 import { ActorKind, Policy, Unlinked } from "./kinds.ts";
 import { Automate, CaseBody, CaseKind, ConflictAddress, ExpandedStep, MethodKind, Step } from "./model.ts";
 import {
@@ -542,6 +543,8 @@ export const REPLIES = {
 	audit: AuditReply,
 	tracker: TrackerReceipt,
 	"tracker-status": TrackerReceipt,
+	handoff: HandoffReceipt,
+	"handoff-status": HandoffStatus,
 	announce: AnnounceReply,
 	propose: ProposeReply,
 	"import-csv": CsvImportReply,

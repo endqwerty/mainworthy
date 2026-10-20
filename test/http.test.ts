@@ -26,6 +26,7 @@ import { type Config, defaultConfig, SESSION_LIFETIMES } from "../src/server/ker
 import { OP_LIST, OPS } from "../src/server/ops/index.ts";
 import { Readers } from "../src/server/ops/readers.ts";
 import { invoke } from "../src/server/ops/registry.ts";
+import { deliverHandoffs } from "../src/server/handoffs/handoffs.ts";
 import { pollDefectHolds } from "../src/server/ops/tracker-holds.ts";
 import type { TrackerPort } from "../src/server/trackers/port.ts";
 import { deliverTrackerRequests } from "../src/server/trackers/requests.ts";
@@ -430,6 +431,34 @@ async function sweepCsvImportReplies(checked: Awaited<ReturnType<typeof replySwe
 	const mapping = { id: "ID", title: "Title", steps: "Steps", expected: "Expected" };
 	const preview = z.object({ confirmation: z.string() }).parse(await checked("import-csv", { csv, mapping }));
 	await checked("import-csv", { csv, mapping, confirm: preview.confirmation });
+}
+
+async function sweepHandoffReplies(
+	instance: Instance,
+	checked: Awaited<ReturnType<typeof replySweep>>["checked"],
+	project: string,
+) {
+	// Nothing listens on the discard port, so the hand-off fails to send and its status says so.
+	instance.app.config.handoff = { project, url: "http://127.0.0.1:9/hook", secret: "schema-handoff-secret" };
+	const report = ReportReceipt.parse(
+		await checked("report", {
+			target: { session: "handoff-schema" },
+			results: [{ test: { key: "handoff-schema" }, outcome: "fail", failure: { message: "Hand-off schema failure" } }],
+		}),
+	);
+	const question = report.questions[0]?.q;
+	if (!question) throw new Error("No handoff-schema failure question");
+	expect(await checked("handoff-status", { question })).toBeNull();
+	expect(await checked("handoff", { question, cmd: "schema-handoff-01" })).toMatchObject({
+		id: "schema-handoff-01",
+		question,
+		state: "queued",
+	});
+	await deliverHandoffs(instance.app);
+	expect(await checked("handoff-status", { question })).toMatchObject({ state: "failed" });
+	await checked("handoff-status", { question: "Q-99999" }, {}, "not_found");
+	delete instance.app.config.handoff;
+	await checked("handoff", { question, cmd: "schema-handoff-02" }, {}, "invalid");
 }
 
 async function sweepTrackerReplies(
@@ -1072,6 +1101,7 @@ describe("reads on other cores through HTTP", () => {
 			],
 			command: [{ cmd: "edit-0001" }, { cmd: "never-sent" }],
 			"tracker-status": [{ id: "tracker-read-01" }, { id: "not-a-request" }, {}],
+			"handoff-status": [{ question: "Q-1" }, { question: "Q-999" }, {}],
 		};
 		const reads = OP_LIST.filter((op) => op.effect === "read");
 		expect(Object.keys(inputs).sort()).toEqual(reads.map((op) => op.name).sort());
@@ -2759,6 +2789,7 @@ describe("the surface", () => {
 		await checked("admin", { do: "team.grant.remove", team: "Schema team", project: "scratch" });
 		await sweepCsvImportReplies(checked, "SWEEP-CSV-1");
 		await sweepTrackerReplies(instance, checked, "scratch");
+		await sweepHandoffReplies(instance, checked, "scratch");
 		await sweepAttachmentReplies(checked);
 		verifyAudit(AuditReply.parse(await checked("audit", {})).ndjson);
 		await sweepQuarantineReplies(checked);
@@ -3034,6 +3065,7 @@ describe("the surface", () => {
 		await checked("get", { refs: ["C-1"] }, bearer("wrong-token"), "unauthenticated");
 		await sweepCsvImportReplies(checked, "SWEEP-CSV-2");
 		await sweepTrackerReplies(instance, checked, "demo");
+		await sweepHandoffReplies(instance, checked, "demo");
 		await sweepAttachmentReplies(checked);
 		verifyAudit(AuditReply.parse(await checked("audit", {})).ndjson);
 		await checked("audit", { from: 10, to: 5 }, {}, "invalid");

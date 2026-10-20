@@ -598,6 +598,7 @@ function exportedTables(db: Db): string[] {
 				"demo_projects",
 				"commit_statuses",
 				"commit_status_delivery",
+				"handoffs",
 			].includes(name) &&
 			!name.startsWith("search_docs") &&
 			!name.startsWith("sqlite_"),
@@ -852,6 +853,8 @@ describe("Mainworthy instance archives", () => {
 			INSERT INTO tracker_polls VALUES (401, 'poll-1', 1, 0, NULL);
 			INSERT INTO tracker_requests (id, nonce, project, result, repository, action, item_key, title, body, state, at)
 				VALUES ('request-1', 'nonce-1', 23, 200, 'demo/shop', 'create', 'key-1', 'Title', 'Body', 'queued', 1);
+			INSERT INTO handoffs (id, nonce, project, question, body, state, at)
+				VALUES ('handoff-1', 'nonce-1', 23, 402, '{}', 'sent', 1);
 		`);
 		insert(db, "policies", { ...fixtures.policies?.[0], project: 24, actor: 71 });
 		const other = (): string => {
@@ -870,6 +873,7 @@ describe("Mainworthy instance archives", () => {
 			"change_ends",
 			"tracker_requests",
 			"tracker_polls",
+			"handoffs",
 			"demo_projects",
 			"search_docs",
 		]) {
@@ -1326,6 +1330,7 @@ describe("Mainworthy instance archives", () => {
 			"commit_statuses",
 			"credentials",
 			"demo_projects",
+			"handoffs",
 			"invitations",
 			"passkey_users",
 			"scope_moves",

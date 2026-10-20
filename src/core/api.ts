@@ -5,6 +5,7 @@ import type { z } from "zod";
 import type { AttachInput, AttachmentReadInput } from "./attachments.ts";
 import type { AuditInput } from "./audit.ts";
 import type { CsvImportInput } from "./csv.ts";
+import type { HandoffInput, HandoffStatusInput } from "./handoff.ts";
 import type { Unlinked } from "./kinds.ts";
 import type {
 	AdminInput,
@@ -40,6 +41,8 @@ type Inputs = {
 	audit: In<typeof AuditInput>;
 	tracker: In<typeof TrackerInput>;
 	"tracker-status": In<typeof TrackerStatusInput>;
+	handoff: In<typeof HandoffInput>;
+	"handoff-status": In<typeof HandoffStatusInput>;
 	announce: In<typeof AnnounceInput>;
 	propose: In<typeof ProposeInput>;
 	"import-csv": In<typeof CsvImportInput>;
@@ -155,5 +158,7 @@ export type SessionInfo = {
 		unlinked?: Unlinked | undefined;
 		demo: boolean;
 		can?: string[];
+		/** Whether a failure question can be handed to a coding agent (`MAINWORTHY_HANDOFF_*`). */
+		handoff: boolean;
 	}[];
 };

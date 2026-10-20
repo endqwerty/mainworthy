@@ -72,6 +72,9 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_JIRA_ISSUE_TYPE` | none | The issue type name available on that project's create screen, for example `Bug`. |
 | `MAINWORTHY_JIRA_EMAIL` | none | The Jira account email. Keep it in process configuration. It is never stored in the database or an archive. |
 | `MAINWORTHY_JIRA_TOKEN` | none | An API token for that account with Browse projects and Create issues permission. Keep it in the server's secret environment. It is never stored in the database or an archive. |
+| `MAINWORTHY_HANDOFF_PROJECT` | none | The project whose failure questions can be handed to a coding agent. Set the project, address and secret together. See [hand a failure to a coding agent](./decide.md#hand-a-failure-to-a-coding-agent). |
+| `MAINWORTHY_HANDOFF_URL` | none | The address the server posts a hand-off to, for example a T3 Code webhook. It must be `https`, or `http` on `127.0.0.1` or `localhost`. Treat it as a secret when it carries a token, as a T3 Code webhook address does. It is never stored in the database or an archive. |
+| `MAINWORTHY_HANDOFF_SECRET` | none | At least 16 characters without whitespace. The server signs each post with it (HMAC-SHA256, hex, in `X-Mainworthy-Signature: sha256=<digest>`). Give the receiver the same secret. Keep it in the server's secret environment. |
 
 A value outside the whole numbers `0` through `8` for `MAINWORTHY_READERS` stops startup with `invalid: MAINWORTHY_READERS must be an integer between 0 and 8`. An invalid session duration also stops startup with a line that names the variable. Each entry in `MAINWORTHY_APPLE_APPS` must have a team id and bundle identifier.
 

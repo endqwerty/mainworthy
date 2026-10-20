@@ -5,6 +5,7 @@ import { adminOp } from "./admin.ts";
 import { attachmentOp, attachOp } from "./attachments.ts";
 import { auditOp } from "./audit.ts";
 import { csvImportOp } from "./csv.ts";
+import { handoffOp, handoffStatusOp } from "./handoffs.ts";
 import { credentialOp, invitationOp, sessionOp } from "./people.ts";
 import {
 	checkOp,
@@ -40,6 +41,7 @@ const list: AnyOp[] = [
 	workOp,
 	// decide
 	decideOp,
+	handoffOp,
 	// read
 	inboxOp,
 	getOp,
@@ -53,6 +55,7 @@ const list: AnyOp[] = [
 	statsOp,
 	commandOp,
 	trackerStatusOp,
+	handoffStatusOp,
 	// administer
 	auditOp,
 	adminOp,

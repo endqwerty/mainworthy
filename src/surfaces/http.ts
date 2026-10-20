@@ -464,13 +464,14 @@ export async function handleOp(
 /**
  * The projects a session holds a grant on, each with what the caller may do there. One it holds none on is not
  * named. A pipeline's project is named though it cannot read it: that is how it checks its own credential.
+ * `handoff` says whether a failure there can be handed to an agent (`MAINWORTHY_HANDOFF_*`).
  */
 export function grantedProjects(app: App, session: Session) {
 	return app.reader.snapshot(() =>
 		listProjects(app.reader).flatMap((project) => {
 			const id = findProject(app.reader, project.key)?.id;
 			const can = id === undefined ? [] : (session.actor(id)?.can ?? []);
-			return can.length > 0 ? [{ ...project, can }] : [];
+			return can.length > 0 ? [{ ...project, can, handoff: app.config.handoff?.project === project.key }] : [];
 		}),
 	);
 }
