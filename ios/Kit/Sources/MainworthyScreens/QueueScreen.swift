@@ -26,6 +26,8 @@ public final class QueueScreen: ProjectScreen {
 	public enum Documents: Equatable, Sendable {
 		case reading
 		case read([EditedCase])
+		/// The proposal holds an edit this build cannot show; it is answered in the web app.
+		case notShown(String)
 		case failed(String)
 	}
 
@@ -559,7 +561,9 @@ public final class QueueScreen: ProjectScreen {
 		do {
 			let read = try await project.documents(of: edit)
 			try Task.checkCancellation()
-			guard current(question.ref).map(QueueScreen.proposalSnapshot) == key else {
+			// A read for evidence the question no longer has is dropped. One for a question gone from the list is kept:
+			// its page still shows that question.
+			if let now = current(question.ref), QueueScreen.proposalSnapshot(now) != key {
 				if case .reading = documents[key] { documents[key] = nil }
 				return
 			}
@@ -567,6 +571,8 @@ public final class QueueScreen: ProjectScreen {
 		} catch is CancellationError {
 			// The view that asked went away. What another read of the same documents brought stays.
 			if case .reading = documents[key] { documents[key] = nil }
+		} catch ProposalReadError.notShownHere {
+			documents[key] = .notShown(ProposalReadError.notShownHere.message)
 		} catch {
 			if case .read = documents[key] { return }
 			documents[key] = .failed(error.shown)

@@ -121,7 +121,7 @@ To answer from a question's page, follow these steps:
    does not show its middle on screen. Fetching the documents or jumping to the bottom does not enable answering.
    If the evidence changes, read the edits again.
    The app reads every page of a large content proposal before showing its edits. If a write changes the project
-   between pages, it starts the read again. Changes this build cannot show are answered in the web app.
+   between pages, it starts the read again, up to three times; if the project keeps changing, it says so, and you can try again. Changes this build cannot show are answered in the web app.
 3. Press an answer. Each answer has a sentence that says what it does.
 4. If the project's policy asks for a reason, enter the reason before the app records the answer.
    **Defect in the product** asks where the defect is tracked. You can leave that field empty.
