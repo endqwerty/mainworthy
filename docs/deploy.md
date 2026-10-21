@@ -235,28 +235,37 @@ The project `demo` on this instance is seeded again on every start (`MAINWORTHY_
 `demo "demo" seeded again in <n> s: 2000 cases, 65 questions`, or a line that says why it was not. What anyone
 changed in `demo` is gone after the next deploy; keep work in another project.
 
-The reset holds the write gate on a worker thread. `/healthz` and ordinary reads keep answering, with reads seeing the
-old committed demo until the reset commits. Removal, recreation, the demo mark, and retained grants share one
-transaction. A stop before commit preserves the old demo and grants; a stop afterwards leaves the empty demo
-and grants for the next start to fill. Writes, including administration lists and sign-in, wait for that
-transaction, then proceed alongside the seed's API requests. After ten minutes the reset requests its worker
-to stop. It stops only between SQLite statements: a running statement must finish before rollback releases
-waiting writes. The seed gets a fresh fifteen-minute token after removal, which is revoked when seeding ends.
-A graceful stop during reset skips that token. If seeding has begun, the stop waits for the seed to finish
-and its token cleanup before closing the database.
+The worker first audits foreign keys without holding the write gate, so writes can continue during that scan.
+It records the connection's database generation before the audit. After taking the gate and beginning a write
+transaction, it compares the generation again. An intervening commit makes it roll back the empty transaction,
+release the gate, and repeat the audit. An existing dangling reference refuses the reset before removal.
+
+Removal, recreation, the demo mark, and retained grants share one transaction on the worker. `/healthz` and
+ordinary reads keep answering and see the old committed demo until commit. Writes, including administration
+lists and sign-in, wait for this transaction, then proceed alongside the seed's API requests. A stop before
+commit preserves the old demo and grants; a stop afterwards leaves the empty demo and grants for the next seed.
+The worker keeps foreign-key enforcement enabled and defers constraints until commit. SQLite checks outgoing
+references on changed rows and uses child indexes to find incoming references to deleted parent keys, including
+rows in other projects and changes made by triggers. Commit refuses any unresolved reference and rolls back the
+whole reset. The reset performs no whole-database validation inside that transaction. Archive import and
+standalone project removal retain their bulk audits.
+
+Migration 37 adds the 28 missing incoming-reference indexes, using non-null partial indexes for nullable columns.
+The schema test checks all 81 incoming references into tables removal touches, including SQLite's generated
+DELETE programs. These indexes cost storage and maintenance on reports; decision 0087 records that tradeoff.
+The migration changes no archive data or version.
 
 Step timings go to stderr, for example `[mainworthy] demo "demo": delete results took 12.3 ms`. The log names
-database opening and closing, owner lookup, transaction setup, the provenance check, grant capture, foreign-key deferral,
-the pending-key check, table discovery, every table count and delete, foreign-key check, recreation with grants,
-transaction completion after removal and recreation, the whole reset transaction, and the seed.
-The worker disables per-row foreign-key enforcement before its reset transaction and enables deferral before
-removal. The fresh reset transaction has no pending changes to check, so removal skips the initial whole-database
-foreign-key scan. `finish transfer transaction` includes the bulk validation after removal; `finish reset
-transaction` includes validation after recreation and commit. These checks still cover all foreign keys in the
-database. A violation rolls the whole reset back.
-Migration 25 removes indexes needed only for removal, so reports no longer maintain them.
-It changes no archive data or version.
-[Decision 0087](decisions/0087-responsive-demo-refresh.md) records the tradeoff.
+database opening and closing, owner lookup, `preflight foreign keys`, transaction setup, provenance, grant capture,
+foreign-key deferral, table discovery, every table count and delete, recreation with grants, `finish reset transaction`,
+the whole reset worker, and the seed. Incremental constraint checks run with each delete and recreation statement;
+`finish reset transaction` includes the final constraint decision and commit or rollback.
+
+After ten minutes the reset requests its worker to stop. It stops only between SQLite statements. A running
+statement must finish before rollback releases waiting writes. The seed gets a fresh fifteen-minute token after
+removal, revoked when seeding ends. A graceful stop during reset skips that token. If seeding has begun, the stop
+waits for the seed and its token cleanup before closing the database.
+[Decision 0087](decisions/0087-responsive-demo-refresh.md) records the design.
 
 ## This repository's CI reporting to the instance
 

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { ReportReceipt, WorkReply } from "../src/core/ops.ts";
+import { dropResetIndexes } from "./demo-removal-fixture.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
@@ -102,6 +103,7 @@ test("schema 32 evidence upgrades with an unspecified model and keeps working", 
 	h = harness();
 	const agent = h.actor("runner", "agent", ["read", "produce"]);
 	h.call("report", ciReport({ commit: "legacy638", n: 1 }), agent);
+	dropResetIndexes(h.app.db);
 	h.app.db.exec(
 		"DROP INDEX change_ends_landing; ALTER TABLE change_ends DROP COLUMN landing_branch; ALTER TABLE change_ends DROP COLUMN landing_repo; ALTER TABLE change_ends DROP COLUMN landing_commit; DROP INDEX projects_identity; ALTER TABLE projects DROP COLUMN identity; ALTER TABLE results RENAME COLUMN trail TO steps; ALTER TABLE results DROP COLUMN model; ALTER TABLE batches DROP COLUMN model; UPDATE meta SET value = '32' WHERE key = 'schema_version'",
 	);

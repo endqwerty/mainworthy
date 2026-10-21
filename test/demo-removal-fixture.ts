@@ -1,7 +1,7 @@
 import type { Db } from "../src/server/kernel/db.ts";
 
 /** Two projects with independent results: only the retained project has excuses. */
-export function removalFixture(db: Db, size: number): void {
+export function removalFixture(db: Db, size: number, retainedSize = size): void {
 	db.transaction(() => {
 		db.exec(`
 			INSERT INTO orgs (id, name, created_at) VALUES (900, 'Removal fixture', 1);
@@ -29,8 +29,8 @@ export function removalFixture(db: Db, size: number): void {
 		`);
 		const excuse = db.raw.prepare("INSERT INTO result_excuses (result, decision, class) VALUES (?, 900, 'excused')");
 		try {
-			for (let i = 1; i <= size; i++) {
-				insert.run(i, 900, 900, i, 900, 900);
+			for (let i = 1; i <= size; i++) insert.run(i, 900, 900, i, 900, 900);
+			for (let i = 1; i <= retainedSize; i++) {
 				insert.run(size + i, 901, 901, i, 901, 901);
 				excuse.run(size + i);
 			}
@@ -39,4 +39,12 @@ export function removalFixture(db: Db, size: number): void {
 			excuse.finalize();
 		}
 	});
+}
+
+/** Undo migration 37 when an upgrade fixture reconstructs a schema from before it. */
+export function dropResetIndexes(db: Db): void {
+	const indexes = db.raw
+		.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'index' AND name GLOB '*_reset'")
+		.all();
+	for (const { name } of indexes) db.exec(`DROP INDEX "${name.replaceAll('"', '""')}"`);
 }

@@ -35,7 +35,7 @@ test("ordinary lookups use the existing non-null partial indexes after dropping 
 	}
 });
 
-test("removal adds no index maintenance unless an ordinary statement uses it", () => {
+test("the retained migration-24 indexes support ordinary statements", () => {
 	const db = new Db(":memory:");
 	try {
 		migrate(db, ":memory:");
@@ -118,3 +118,48 @@ for (const action of ["finish", "cancel", "violate"] as const) {
 		}
 	});
 }
+
+test("every incoming reset reference uses an index, including SQLite's own DELETE checks", () => {
+	const db = new Db(":memory:");
+	try {
+		migrate(db, ":memory:");
+		removalFixture(db, 2, 20_000);
+		const parents = new Set<string>();
+		removeProject(db, "removing", (step) => {
+			if (step.startsWith("delete ")) parents.add(step.slice(7));
+		});
+		const tables = db.raw
+			.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+			.all();
+		let probes = 0;
+		for (const { name } of tables) {
+			for (const fk of db.raw
+				.query<{ table: string; from: string; to: string }, []>(`PRAGMA foreign_key_list("${name}")`)
+				.all()) {
+				if (!parents.has(fk.table)) continue;
+				const indexes = db.raw.query<{ name: string }, []>(`PRAGMA index_list("${name}")`).all();
+				const plan = db.raw
+					.query<{ detail: string }, []>(`EXPLAIN QUERY PLAN SELECT 1 FROM "${name}" WHERE "${fk.from}" = -1`)
+					.all();
+				expect(
+					plan.some((row) => row.detail.startsWith("SEARCH ")),
+					`${name}.${fk.from} -> ${fk.table}: ${JSON.stringify(indexes)}`,
+				).toBe(true);
+				// Inspect the actual constraint program, not only an equivalent SELECT's planner.
+				const program = db.raw
+					.query<{ opcode: string; p1: number; p2: number }, []>(
+						`EXPLAIN DELETE FROM "${fk.table}" WHERE "${fk.to}" = -1`,
+					)
+					.all();
+				expect(
+					program.filter((op) => op.opcode === "Rewind"),
+					`${fk.table} DELETE must use key seeks`,
+				).toEqual([]);
+				probes++;
+			}
+		}
+		expect(probes).toBe(81);
+	} finally {
+		db.close();
+	}
+});
