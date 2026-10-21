@@ -1,4 +1,4 @@
-// What `.github/workflows/rerun.yml` runs again after the check failed (`scripts/ci-rerun.ts`, decision 0127): the
+// What `.github/workflows/rerun.yml` runs again after the check failed (`scripts/ci-rerun.ts`, decision 0128): the
 // jobs a test failing by chance could have failed, once, one after the other.
 import { expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";

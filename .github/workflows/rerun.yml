@@ -1,5 +1,5 @@
 # When the check fails, the jobs a test failing by chance could have failed run once more, so that Mainworthy can tell
-# a flaky test from a broken commit: a test that passes on the retry has flipped, and reads as flaky (decision 0127).
+# a flaky test from a broken commit: a test that passes on the retry has flipped, and reads as flaky (decision 0128).
 # scripts/ci-rerun.ts chooses the jobs and runs them again one after the other; the run's summary says what it chose.
 #
 # GitHub runs this from the default branch's copy, whatever branch the check ran on, so what runs here is code that

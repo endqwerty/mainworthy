@@ -129,7 +129,7 @@ const NEXT: Record<GateStatus["verdict"], (gate: GateStatus) => string> = {
 	failed: () =>
 		"Fix them and push. The gate passes when a commit passes these tests; nobody else is asked. " +
 		"After a first attempt fails, the rerun workflow may run the failing shards' jobs again once by itself: not " +
-		"when the lint, type-check, scope or description failed, nor when more than three jobs did (decision 0127). " +
+		"when the lint, type-check, scope or description failed, nor when more than three jobs did (decision 0128). " +
 		"Its run's summary says which. A test that then passes is flaky, a defect too, to file as flaky-test.",
 	blocked: (gate) =>
 		gate.open.length > 0
