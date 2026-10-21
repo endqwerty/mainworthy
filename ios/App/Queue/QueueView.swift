@@ -176,31 +176,47 @@ private struct Filters: View {
 
 private struct QuestionRow: View {
 	let question: Question
+	@Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+	@ViewBuilder private var source: some View {
+		Image(systemName: question.producer.symbol)
+			.font(.caption)
+			.foregroundStyle(question.producer.tint)
+			.accessibilityLabel("From \(question.producer.name)")
+		RefText(question.ref)
+	}
 
 	var body: some View {
+		let stacked = dynamicTypeSize >= .xxxLarge
+		let layout = stacked
+			? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+			: AnyLayout(HStackLayout(spacing: 6))
 		VStack(alignment: .leading, spacing: 4) {
-			HStack(spacing: 6) {
-				Image(systemName: question.producer.symbol)
-					.font(.caption)
-					.foregroundStyle(question.producer.tint)
-					.accessibilityLabel("From \(question.producer.name)")
-				RefText(question.ref)
+			layout {
+				if stacked {
+					HStack(spacing: 6) { source }
+				} else {
+					source
+				}
 				Tag(text: question.kind.name, tint: question.kind.tint)
 				if question.isOpen && !question.blocks.isEmpty { Tag(text: "blocks \(question.blocks.joined(separator: ", "))", tint: .fail) }
-				Spacer()
+				if !stacked { Spacer() }
 				Text(question.decision?.at ?? question.openedAt, format: .relative(presentation: .named))
+					.fixedSize(horizontal: false, vertical: stacked)
 					.font(.caption)
 					.foregroundStyle(.secondary)
 			}
 			Text(question.title)
 				.font(.body)
-				.lineLimit(2)
+				.lineLimit(stacked ? nil : 2)
+				.fixedSize(horizontal: false, vertical: stacked)
 			if let decision = question.decision {
 				Text("\(decision.label) · \(decision.byRule ? "by rule" : decision.by.joined(separator: ", "))\(decision.ending == nil ? "" : " · ended")")
 					.font(.footnote)
 					.foregroundStyle(.secondary)
 			}
 		}
+		.frame(maxWidth: stacked ? .infinity : nil, alignment: .leading)
 		.padding(.vertical, 2)
 	}
 }

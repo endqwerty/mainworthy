@@ -5,6 +5,7 @@ import SwiftUI
 struct ChangesView: View {
 	let screen: ChangesScreen
 	let workspace: Workspace
+	@Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
 	var body: some View {
 		NavigationStack {
@@ -29,6 +30,10 @@ struct ChangesView: View {
 				Button("Try again") { Task { await screen.refresh() } }
 			}
 		case .done:
+			let stacked = dynamicTypeSize.isAccessibilitySize
+			let layout = stacked
+				? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+				: AnyLayout(HStackLayout())
 			List {
 				if screen.changes.count == 500 {
 					Text("Showing the newest 500 changes. A change already open stays available.").font(.footnote)
@@ -37,12 +42,13 @@ struct ChangesView: View {
 				ForEach(screen.changes) { change in
 					NavigationLink(value: change.key) {
 						VStack(alignment: .leading, spacing: 6) {
-							HStack {
+							layout {
 								Text(change.title).font(.body.weight(.medium))
-								Spacer()
+									.fixedSize(horizontal: false, vertical: stacked)
+								if !stacked { Spacer() }
 								Tag(text: change.verdict.name, tint: change.verdict.tint)
 							}
-							HStack {
+							layout {
 								RefText(change.key)
 								if change.state != .open { Tag(text: change.state.name, tint: .secondary) }
 							}
@@ -51,6 +57,7 @@ struct ChangesView: View {
 								.font(.footnote.monospaced()).foregroundStyle(.secondary)
 						}
 					}
+					.listRowInsets(.horizontal, stacked ? 8 : nil)
 					.accessibilityIdentifier("change-\(change.key)")
 				}
 				if screen.changes.isEmpty {

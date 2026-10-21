@@ -111,6 +111,153 @@ final class QueueUITests: XCTestCase {
 		XCTAssertLessThanOrEqual(text.frame.maxX, window.maxX, file: file, line: line)
 	}
 
+	@MainActor private func listRows(at size: UIContentSizeCategory, name: String) async throws {
+		let project = try await makeProject()
+		let inbox = try await call("inbox", project: project, input: ["kind": "failure"])
+		let question = try XCTUnwrap((inbox["items"] as? [[String: Any]])?.first)
+		let ref = try XCTUnwrap(question["q"] as? String)
+		let app = try launchAtTextSize(size, project: project)
+		let window = app.windows.firstMatch.frame
+		let queue = app.buttons["question-\(ref)"]
+		XCTAssertTrue(queue.waitForExistence(timeout: 10))
+		continueAfterFailure = true
+		defer { continueAfterFailure = false }
+
+		func fits(_ row: XCUIElement) {
+			XCTAssertGreaterThanOrEqual(row.frame.minX, window.minX)
+			XCTAssertLessThanOrEqual(row.frame.maxX, window.maxX)
+			for text in row.staticTexts.allElementsBoundByIndex {
+				print("u714 \(name) \(text.label): \(text.frame)")
+				XCTAssertGreaterThanOrEqual(text.frame.minX, window.minX, text.label)
+				XCTAssertLessThanOrEqual(text.frame.maxX, window.maxX, text.label)
+			}
+		}
+		func time(in row: XCUIElement) -> XCUIElement {
+			let text = row.staticTexts.matching(NSPredicate(format: "label CONTAINS 'ago' OR label CONTAINS 'now'")).firstMatch
+			XCTAssertTrue(text.exists, row.debugDescription)
+			return text
+		}
+		func completeLines(_ count: Int, in text: XCUIElement, style: UIFont.TextStyle) {
+			let font = UIFont.preferredFont(forTextStyle: style,
+				compatibleWith: UITraitCollection(preferredContentSizeCategory: size))
+			XCTAssertGreaterThanOrEqual(text.frame.height, CGFloat(count) * font.pointSize,
+				"The complete \(text.label) needs \(count) lines at AX5")
+		}
+		func wholeTime(_ text: XCUIElement, style: UIFont.TextStyle) {
+			for word in text.label.split(separator: " ") {
+				assertWholeWord(String(word), in: text, style: style, size: size, window: window)
+			}
+		}
+
+		shot("u714-\(name)-queue")
+		let kind = queue.staticTexts["failure"]
+		let timestamp = time(in: queue)
+		assertWholeWord("failure", in: kind, style: .caption1, size: size, weight: .semibold, window: window)
+		let blocking = queue.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'blocks '")).firstMatch
+		XCTAssertTrue(blocking.exists)
+		assertWholeWord("blocks", in: blocking, style: .caption1, size: size, weight: .semibold, window: window)
+		wholeTime(timestamp, style: .caption1)
+		assertWholeWord("expected", in: queue.staticTexts[try XCTUnwrap(question["title"] as? String)],
+			style: .body, size: size, window: window)
+		fits(queue)
+		if size == .large {
+			XCTAssertEqual(kind.frame.midY, timestamp.frame.midY, accuracy: 3)
+			XCTAssertLessThan(kind.frame.maxX, blocking.frame.minX)
+			XCTAssertLessThan(blocking.frame.maxX, timestamp.frame.minX)
+		}
+
+		app.buttons["queue-select"].tap()
+		let selection = app.buttons["select-\(ref)"]
+		XCTAssertTrue(selection.waitForExistence(timeout: 5))
+		shot("u714-\(name)-queue-selection")
+		assertWholeWord("failure", in: selection.staticTexts["failure"], style: .caption1, size: size, weight: .semibold, window: window)
+		let selectedTime = time(in: selection)
+		wholeTime(selectedTime, style: .caption1)
+		if size == .accessibilityExtraExtraExtraLarge,
+			selectedTime.label.range(of: "^[0-9]{2} seconds ago$", options: .regularExpression) != nil {
+			let font = UIFont.preferredFont(forTextStyle: .caption1,
+				compatibleWith: UITraitCollection(preferredContentSizeCategory: size))
+			XCTAssertGreaterThanOrEqual(selectedTime.frame.height, 2 * font.lineHeight - 1,
+				"The selected row's time must wrap instead of truncating its last word")
+		}
+		assertWholeWord("expected", in: selection.staticTexts[try XCTUnwrap(question["title"] as? String)],
+			style: .body, size: size, window: window)
+		fits(selection)
+		app.buttons["queue-select"].tap()
+
+		app.openTab("Runs")
+		let run = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Checkout regression'")).firstMatch
+		XCTAssertTrue(run.waitForExistence(timeout: 10))
+		shot("u714-\(name)-runs")
+		let verdict = run.staticTexts["blocked"]
+		assertWholeWord("blocked", in: verdict, style: .caption1, size: size, weight: .semibold, window: window)
+		let state = run.staticTexts["open"]
+		assertWholeWord("open", in: state, style: .caption1, size: size, window: window)
+		wholeTime(time(in: run), style: .subheadline)
+		let detail = run.staticTexts.matching(NSPredicate(format: "label CONTAINS 'in progress'")).firstMatch
+		assertWholeWord("progress", in: detail, style: .subheadline, size: size, window: window)
+		fits(run)
+		if size == .large {
+			XCTAssertEqual(verdict.frame.midY, state.frame.midY, accuracy: 3)
+			XCTAssertEqual(detail.frame.midY, time(in: run).frame.midY, accuracy: 3)
+		}
+
+		if size == .accessibilityExtraExtraExtraLarge {
+			func reveal(_ text: XCUIElement) {
+				for _ in 0..<8 where text.frame.maxY > window.maxY - 100 {
+					app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))
+						.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55)))
+				}
+				XCTAssertTrue(text.isHittable)
+			}
+			let timestamp = time(in: run)
+			reveal(timestamp)
+			shot("u714-\(name)-runs-time")
+			let changeRun = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Apply a percentage coupon'")).firstMatch
+			XCTAssertTrue(changeRun.exists)
+			let heading = changeRun.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'pr:482'")).firstMatch
+			XCTAssertTrue(heading.label.contains("percentage"), heading.label)
+			assertWholeWord("percentage", in: heading,
+				style: .headline, size: size, weight: .semibold, window: window)
+			completeLines(4, in: heading, style: .headline)
+			let detail = changeRun.staticTexts["Apply a percentage coupon"]
+			assertWholeWord("percentage", in: detail, style: .subheadline, size: size, window: window)
+			completeLines(3, in: detail, style: .subheadline)
+			fits(changeRun)
+			reveal(heading)
+			shot("u714-\(name)-runs-change")
+			reveal(detail)
+			shot("u714-\(name)-runs-detail")
+		}
+
+		app.openTab("Changes")
+		let change = app.buttons["change-pr:482"]
+		XCTAssertTrue(change.waitForExistence(timeout: 10))
+		shot("u714-\(name)-changes")
+		let title = change.staticTexts["Apply a percentage coupon"]
+		assertWholeWord("percentage", in: title, style: .body, size: size, weight: .medium, window: window)
+		assertWholeWord("blocked", in: change.staticTexts["blocked"], style: .caption1, size: size, weight: .semibold, window: window)
+		fits(change)
+		if size == .accessibilityExtraExtraExtraLarge {
+			completeLines(3, in: title, style: .body)
+		}
+		if size == .large {
+			XCTAssertEqual(title.frame.midY, change.staticTexts["blocked"].frame.midY, accuracy: 3)
+		}
+	}
+
+	@MainActor func testListRowsKeepWordsWholeAtLargestTextSize() async throws {
+		try await listRows(at: .accessibilityExtraExtraExtraLarge, name: "ax5")
+	}
+
+	@MainActor func testListRowsKeepWordsWholeAtXXXLarge() async throws {
+		try await listRows(at: .extraExtraExtraLarge, name: "xxxl")
+	}
+
+	@MainActor func testListRowsKeepDefaultLayout() async throws {
+		try await listRows(at: .large, name: "default")
+	}
+
 	@MainActor private func proposalSource(at size: UIContentSizeCategory, name: String) async throws {
 		let project = try await makeProject()
 		let app = try launchAtTextSize(size, project: project)
