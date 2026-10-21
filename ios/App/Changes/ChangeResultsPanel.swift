@@ -11,10 +11,10 @@ struct ChangeResultsPanel: View {
 		Panel("Results") {
 			switch results.loading {
 			case .first: ProgressView().frame(maxWidth: .infinity)
-			case .failed(let why):
+			case .failed(let why) where !results.hasRead:
 				Text(why).foregroundStyle(Color.fail)
 				Button("Try again") { Task { await results.read() } }
-			case .reading, .done: list
+			case .reading, .done, .failed: list
 			}
 		}
 		.resultAttachments(results.attachments)
@@ -44,7 +44,10 @@ struct ChangeResultsPanel: View {
 				.accessibilityIdentifier("results-filter")
 		}
 		if let notice = results.notice { Text(notice).font(.subheadline).foregroundStyle(Color.fail) }
-		if results.loading == .reading {
+		if case .failed(let why) = results.loading {
+			Text(why).foregroundStyle(Color.fail)
+			Button("Try again") { Task { await results.read() } }
+		} else if results.loading == .reading {
 			ProgressView().frame(maxWidth: .infinity)
 		} else if results.loading == .done, results.rows.isEmpty {
 			Text(results.total == 0 ? "No results counted for the latest commit." : "No result matches.")

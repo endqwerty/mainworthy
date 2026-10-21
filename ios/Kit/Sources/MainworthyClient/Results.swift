@@ -157,7 +157,7 @@ extension ProjectClient {
 	) async throws -> CountedPage {
 		var input: [String: JSONValue] = ["in": "results", "run": .string(run), "limit": 100]
 		if let standing { input["state"] = .string(standing.rawValue) }
-		let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+		let words = findText(text)
 		if !words.isEmpty { input["text"] = .string(words) }
 		if let cursor { input["cursor"] = .string(cursor) }
 		let wire: Wire.CountedResults
@@ -176,7 +176,7 @@ extension ProjectClient {
 	/// A page of the automated tests, newest first.
 	package func tests(text: String = "", unlinked: Bool = false, after cursor: String? = nil) async throws -> TestPage {
 		var input: [String: JSONValue] = ["in": "tests", "limit": 100]
-		let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+		let words = findText(text)
 		if !words.isEmpty { input["text"] = .string(words) }
 		if unlinked { input["unlinked"] = true }
 		if let cursor { input["cursor"] = .string(cursor) }
@@ -196,4 +196,13 @@ extension ProjectClient {
 		guard rows.count == 1, row.ref == ref else { throw ClientError.unreadable }
 		return TestDetail(row)
 	}
+}
+
+/// `find.text` accepts 200 JavaScript UTF-16 units. Keep whole characters when a paste crosses that boundary.
+private func findText(_ text: String) -> String {
+	var units = 0
+	return String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix { character in
+		units += String(character).utf16.count
+		return units <= 200
+	})
 }

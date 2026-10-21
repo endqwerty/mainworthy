@@ -280,7 +280,8 @@ To inspect a change and the results its gate counted, follow these steps:
    shows how the gate counted the test: unexplained, needs a fix, excused, could not run, skipped, or passed. The row also shows its case or
    **no case**, its file, job, attempt, duration, who reported it and the failure message. The counts above the list
    choose which results appear. The field under the counts filters by test name or file. The counts and field
-   stay available while the list reads your selection. A row's question opens that question, and
+   stay available while the list reads your selection and if that read fails. Press **Try again** or change
+   the selection after a failure. Search uses the first 200 UTF-16 units of text, without cutting a character in half. A row's question opens that question, and
    **Open the build** opens the CI build when the report named one. Press a row to open its test.
    **Show more** reads the next hundred. If the results changed since the first page, the app says so.
    **Read them again** starts from the top.
@@ -432,7 +433,8 @@ To browse reported tests, follow these steps:
 2. Open **Automated tests**. The list shows every test a pipeline has reported, newest first,
    with its case or **no case**, and **quarantined** while its quarantine is active.
 3. To find a test, search by name or file. You can keep typing while a search is reading.
-   When it finishes, the list shows the latest words.
+   When it finishes, the list shows the latest words. Search uses the first 200 UTF-16 units,
+   without cutting a character in half. After a failed read, you can change the search or press **Try again**.
 4. To see tests tracked without a case, turn on **Only tests with no case**.
 5. Open a test to read its file, key, linked case and quarantine.
 
