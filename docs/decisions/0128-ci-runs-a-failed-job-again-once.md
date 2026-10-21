@@ -38,9 +38,12 @@ failure it is; it does not excuse the test.
 
 ## Turned down
 
-- **Retrying failing tests inside the shard**, with Bun or a loop in `scripts/check.ts`. That is faster, but
-  Mainworthy would see one attempt with a pass, the flip would never be recorded, and the flaky test would be
-  hidden instead of named.
+- **Retrying failing tests inside the shard**, with `bun test --retry` or a loop in `scripts/check.ts`. That is
+  faster, but Bun's JUnit report (1.4.3) writes a test that failed and then passed on a retry as one passing
+  testcase, with no trace of the failure. Mainworthy would see one pass, record no flip, and the flaky test would
+  be hidden instead of named. A runner whose report keeps its tries, such as Playwright's JSON or JUnit's
+  `<flakyFailure>`, is a different case: Mainworthy reads those tries, and recording them as a flip is separate
+  work.
 - **Re-running the whole run.** It runs every job again, the seven test runners, the iPhone app and the image
   included, and gives every test that passed a fresh chance to fail.
 - **Failing a shard's job when its tests fail**, so that "Re-run failed jobs" finds it. The gate's last step reads a
