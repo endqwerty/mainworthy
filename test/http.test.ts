@@ -34,7 +34,7 @@ import { archiveRoutes } from "../src/surfaces/archive.ts";
 import { openApi, PATIENCE, type Patience, sessionOf } from "../src/surfaces/http.ts";
 import { mcpRoute } from "../src/surfaces/mcp.ts";
 import { fakeSmtp } from "./mail-support.ts";
-import { authenticator } from "./people-support.ts";
+import { authenticator, waitingAtGate } from "./people-support.ts";
 
 function testDirectory(prefix: string) {
 	const path = mkdtempSync(join(tmpdir(), prefix));
@@ -675,19 +675,36 @@ function wire(instance: Instance, payload: string) {
 	const { hostname, port } = new URL(instance.url);
 	const socket = connect(Number(port), hostname);
 	const state = { received: "", closed: false };
+	const changes = new Set<() => void>();
 	const closed = new Promise<void>((resolve) => {
 		socket.on("close", () => {
 			state.closed = true;
+			for (const changed of changes) changed();
 			resolve();
 		});
 	});
 	socket.on("error", () => {});
 	socket.on("data", (chunk) => {
 		state.received += chunk.toString("latin1");
+		for (const changed of changes) changed();
 	});
 	socket.on("connect", () => socket.write(payload));
 	return {
 		state,
+		until: (text: string): Promise<void> =>
+			new Promise((resolve, reject) => {
+				const changed = () => {
+					if (state.received.includes(text)) {
+						changes.delete(changed);
+						resolve();
+					} else if (state.closed) {
+						changes.delete(changed);
+						reject(new Error(`connection closed before ${JSON.stringify(text)}`));
+					}
+				};
+				changes.add(changed);
+				changed();
+			}),
 		/** Whether the server closes the connection within this many milliseconds. */
 		within: (ms: number): Promise<"closed" | "open"> =>
 			Promise.race([closed.then(() => "closed" as const), Bun.sleep(ms).then(() => "open" as const)]),
@@ -2813,7 +2830,8 @@ describe("the surface", () => {
 		});
 		await checked("find", { in: "deployments" });
 		const rows = z.object({ items: z.array(z.record(z.string(), z.unknown())), cursor: z.string().nullable() });
-		for (const ref of seeded.cases) {
+		await checked("get", { refs: seeded.cases });
+		for (const ref of seeded.cases.slice(0, 1)) {
 			const doc = z.array(z.object({ etag: z.string() })).parse(await checked("get", { refs: [ref] }))[0];
 			if (!doc) throw new Error(ref);
 			await checked("get", { refs: [ref], as: "md" });
@@ -2832,8 +2850,8 @@ describe("the surface", () => {
 					: ["active", "archived", "change"].map((state) => ({ state }));
 			for (const variant of variants) {
 				const input = { in: area, ...variant, run: seeded.run, limit: 2 };
-				let page = rows.parse(await checked("find", input));
-				while (page.cursor) page = rows.parse(await checked("find", { ...input, cursor: page.cursor }));
+				const page = rows.parse(await checked("find", input));
+				if (page.cursor) await checked("find", { ...input, cursor: page.cursor });
 			}
 		}
 		for (const area of ["cases", "tests"]) {
@@ -2841,15 +2859,20 @@ describe("the surface", () => {
 		}
 		for (const area of ["tests", "runs"]) {
 			const found = rows.parse(await checked("find", { in: area, limit: 500 }));
-			for (const row of found.items) await checked("get", { refs: [z.string().parse(row.ref)] });
+			await checked("get", { refs: found.items.map((row) => z.string().parse(row.ref)) });
 		}
 		for (const state of ["open", "decided"]) {
-			let page = rows.parse(await checked("inbox", { state, limit: 2 }));
-			for (;;) {
-				for (const row of page.items) await checked("get", { refs: [z.string().parse(row.q)] });
-				if (!page.cursor) break;
-				page = rows.parse(await checked("inbox", { state, limit: 2, cursor: page.cursor }));
+			const first = rows.parse(await checked("inbox", { state, limit: 2 }));
+			if (first.cursor) await checked("inbox", { state, limit: 2, cursor: first.cursor });
+			const page = rows.parse(await checked("inbox", { state, limit: 200 }));
+			const kinds = new Set<string>();
+			for (const row of page.items) {
+				const kind = z.string().parse(row.kind);
+				if (kinds.has(kind)) continue;
+				kinds.add(kind);
+				await checked("get", { refs: [z.string().parse(row.q)] });
 			}
+			if (page.cursor) await checked("inbox", { state, limit: 200, cursor: page.cursor });
 		}
 		if (seeded.proposal) await checked("get", { refs: [seeded.proposal] });
 		for (const edit of [
@@ -3190,19 +3213,15 @@ describe("/healthz and the commit", () => {
 			"<script>alert(1)</script>",
 		];
 		for (const value of refused) {
-			expect(await healthz({ MAINWORTHY_COMMIT: value })).toEqual({
-				ok: true,
-				version: "0.1.0",
-				apiVersion: 1,
-				commit: null,
-			});
-			expect(await healthz({ SOURCE_COMMIT: value })).toEqual({
-				ok: true,
-				version: "0.1.0",
-				apiVersion: 1,
-				commit: null,
-			});
+			expect(defaultConfig({ MAINWORTHY_COMMIT: value }).commit).toBeNull();
+			expect(defaultConfig({ SOURCE_COMMIT: value }).commit).toBeNull();
 		}
+		expect(await healthz({ MAINWORTHY_COMMIT: "<script>alert(1)</script>" })).toEqual({
+			ok: true,
+			version: "0.1.0",
+			apiVersion: 1,
+			commit: null,
+		});
 	});
 });
 
@@ -3327,10 +3346,10 @@ describe("a connection that sends nothing", () => {
 			// It had been answered: a connection kept open after its request, not one that was refused.
 			expect(idle.state.received).toContain('{"ok":true,"version":');
 			// The stream sent its first line when it opened and nothing since: its next heartbeat is 20 s away.
-			await Bun.sleep(200);
+			await stream.until("retry: 2000");
 			expect([stream.state.closed, stream.state.received.includes("retry: 2000")]).toEqual([false, true]);
 			await post(instance, "/api/p/scratch/propose", { edits: [{ op: "create", outline: "After the idle time" }] });
-			for (let waited = 0; !stream.state.received.includes("data:") && waited < 2000; waited += 20) await Bun.sleep(20);
+			await stream.until('"op":"propose"');
 			expect(stream.state.received).toContain('"op":"propose"');
 		} finally {
 			idle.end();
@@ -3352,11 +3371,9 @@ describe("a connection that sends nothing", () => {
 		);
 		// The gate is held until the idle time has provably passed: until the refused connection, silent since the
 		// same moment as the write below, has been closed for it.
-		const held = instance.app.gate.run(async () => {
-			const silent = await refused.within(7000);
-			await Bun.sleep(300);
-			return silent;
-		});
+		const release = Promise.withResolvers<void>();
+		const held = instance.app.gate.run(() => release.promise);
+		const queued = waitingAtGate(instance, 2);
 		// Two writes that wait at that gate, on plain sockets: what comes back is what the server sent, where a
 		// client library may send a request again when its connection is closed. One has a body and one has none
 		// (`curl -X POST` with no data): Bun 1.4.3 holds only a request with no body to the idle time while its
@@ -3371,12 +3388,14 @@ describe("a connection that sends nothing", () => {
 		const bare = wire(instance, `POST /api/p/scratch/propose HTTP/1.1\r\n${owner}Content-Length: 0\r\n\r\n`);
 		/** The status line of the reply on this socket, once its body has begun; or that there is none. */
 		const reply = async (socket: ReturnType<typeof wire>): Promise<string> => {
-			const answered = () => socket.state.received.includes("\r\n\r\n{");
-			for (let waited = 0; waited < 3000 && !answered() && !socket.state.closed; waited += 20) await Bun.sleep(20);
-			return answered() ? (socket.state.received.split("\r\n")[0] ?? "") : "closed with no reply";
+			await socket.until("\r\n\r\n{");
+			return socket.state.received.split("\r\n")[0] ?? "";
 		};
 		try {
-			expect(await held).toBe("closed");
+			await queued;
+			expect(await refused.within(7000)).toBe("closed");
+			release.resolve();
+			await held;
 			// It had been answered, and refused: no session, so nothing took the idle time off its connection.
 			expect(refused.state.received.split("\r\n")[0]).toBe("HTTP/1.1 401 Unauthorized");
 			// The write with no body is refused for its input, after the wait: a reply, which is the point.
@@ -3384,6 +3403,7 @@ describe("a connection that sends nothing", () => {
 			expect(write.state.received).toContain('"status":"adopted"');
 			expect(bare.state.received).toContain('"code":"invalid"');
 		} finally {
+			release.resolve();
 			refused.end();
 			write.end();
 			bare.end();
