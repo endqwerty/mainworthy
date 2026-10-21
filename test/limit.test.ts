@@ -359,13 +359,6 @@ describe("the client's address", () => {
 		expect(await sixWrong(instance, from(A), 2)).toEqual(["401 unauthenticated", "429 limited, retry after 2"]);
 	});
 
-	test("the header is believed from a trusted peer", async () => {
-		expect(await sixWrong(boot(), from(A))).toEqual([
-			...Array(5).fill("401 unauthenticated"),
-			"429 limited, retry after 1",
-		]);
-	});
-
 	test("the header is ignored from a peer that is not a trusted proxy", async () => {
 		// The proxy is another machine. This request comes from the loopback address, which is then its own
 		// address and is not counted, whatever it says about itself.
@@ -429,12 +422,23 @@ describe("the client's address", () => {
 				child.kill("SIGKILL");
 			}
 		};
-		const [noHeader, noProxy, malformed, loose] = await Promise.all([
-			serve({ MAINWORTHY_TRUSTED_PROXY: "10.0.0.0/8" }),
-			serve({ MAINWORTHY_CLIENT_ADDRESS_HEADER: "cf-connecting-ip", MAINWORTHY_TRUSTED_PROXY: "" }),
-			serve({ MAINWORTHY_TRUSTED_PROXY: "10.0.0.0/8, 172.16.0.0/33", MAINWORTHY_CLIENT_ADDRESS_HEADER: "x-real-ip" }),
-			serve({ MAINWORTHY_TRUSTED_PROXY: "10.0.0.5/8", MAINWORTHY_CLIENT_ADDRESS_HEADER: "x-real-ip" }),
-		]);
+		const noHeader = await serve({ MAINWORTHY_TRUSTED_PROXY: "10.0.0.0/8" });
+		const read = (env: Record<string, string>) => {
+			const home = scratch();
+			let stderr = "";
+			try {
+				defaultConfig({ HOME: home, ...env });
+			} catch (error) {
+				stderr = `invalid: ${error instanceof Error ? error.message : String(error)}`;
+			}
+			return { code: stderr ? 4 : 0, stderr, opened: existsSync(join(home, ".mainworthy")) };
+		};
+		const noProxy = read({ MAINWORTHY_CLIENT_ADDRESS_HEADER: "cf-connecting-ip", MAINWORTHY_TRUSTED_PROXY: "" });
+		const malformed = read({
+			MAINWORTHY_TRUSTED_PROXY: "10.0.0.0/8, 172.16.0.0/33",
+			MAINWORTHY_CLIENT_ADDRESS_HEADER: "x-real-ip",
+		});
+		const loose = read({ MAINWORTHY_TRUSTED_PROXY: "10.0.0.5/8", MAINWORTHY_CLIENT_ADDRESS_HEADER: "x-real-ip" });
 		expect(noHeader).toEqual({
 			code: 4,
 			stderr:

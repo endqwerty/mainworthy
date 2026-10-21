@@ -471,10 +471,16 @@ test("shutdown records the in-flight reply and restart preserves accepted status
 	const minute = instance.minute();
 	await entered.promise;
 	if (!pending) throw new Error("expected a pending status post");
+	let stopped = false;
 	const stopping = instance.stop();
+	void stopping.then(() => {
+		stopped = true;
+	});
 	try {
 		expect(instance.stop()).toBe(stopping);
-		expect(await Promise.race([stopping.then(() => "stopped"), Bun.sleep(10).then(() => "waiting")])).toBe("waiting");
+		// Refusing a new connection proves shutdown has stopped the HTTP listener while the status reply is held.
+		await expect(fetch(`${instance.url}/healthz`, { keepalive: false })).rejects.toThrow();
+		expect(stopped).toBe(false);
 	} finally {
 		finish.resolve(response());
 		await minute;
