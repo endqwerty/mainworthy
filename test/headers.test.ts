@@ -720,19 +720,19 @@ describe("the web UI from source: Bun's development bundle, passed on with the h
 		const socket = new WebSocket(`${instance.url.replace("http", "ws")}/_bun/hmr`);
 		socket.binaryType = "arraybuffer";
 		try {
-			const first = await new Promise<number>((resolve, reject) => {
-				socket.onmessage = (event: MessageEvent<ArrayBuffer>) => resolve(event.data.byteLength);
+			const first = await new Promise<string>((resolve, reject) => {
+				socket.onmessage = (event: MessageEvent<ArrayBuffer>) => resolve(new TextDecoder().decode(event.data));
 				socket.onerror = () => reject(new Error("the reload socket did not open"));
 				socket.onclose = () => reject(new Error("the reload socket closed before it said anything"));
 			});
 			// The development server greets a page with its version before anything else.
-			expect(first).toBeGreaterThan(0);
+			expect(first).toMatch(/^V[0-9a-f]{16}$/);
 		} finally {
 			socket.onclose = null;
 			socket.close();
 		}
 		const posted = await fetch(`${instance.url}/_bun/unref`, { method: "POST", body: "00000000" });
-		expect(posted.status).not.toBe(405);
+		expect(posted.status).toBe(204);
 		expect(carried(posted)).toEqual(expected(OTHER, false));
 	});
 
