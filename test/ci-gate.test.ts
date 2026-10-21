@@ -724,3 +724,184 @@ test("the change workflow refuses unknown operations and incompatible servers, a
 		await rm(directory, { recursive: true, force: true });
 	}
 });
+
+test("the change workflow retries deployment outages and replays GitHub landing metadata", async () => {
+	const workflow = z
+		.object({
+			on: z.object({
+				workflow_dispatch: z.object({ inputs: z.object({ state: z.object({ required: z.boolean() }) }) }),
+			}),
+			jobs: z.object({
+				tell: z.object({
+					permissions: z.object({ "pull-requests": z.literal("read") }).optional(),
+					steps: z.array(z.object({ run: z.string().optional() })),
+				}),
+			}),
+		})
+		.parse(Bun.YAML.parse(await Bun.file(".github/workflows/change.yml").text()));
+	const script = workflow.jobs.tell.steps.find((step) => step.run)?.run;
+	if (!script) throw new Error("change workflow has no request step");
+	const directory = await mkdtemp(join(tmpdir(), "mainworthy-change-replay-"));
+	try {
+		await writeFile(join(directory, "sleep"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+		await writeFile(join(directory, "gh"), '#!/bin/sh\nprintf "%s\\n" "$*" > gh-args\ncat "$PULL_FIXTURE"\n', {
+			mode: 0o755,
+		});
+		const realCurl = Bun.which("curl");
+		if (!realCurl) throw new Error("curl is required to run the change workflow");
+		await writeFile(
+			join(directory, "curl"),
+			`#!/bin/sh
+n=$(cat curl-calls)
+n=$((n + 1))
+printf '%s' "$n" > curl-calls
+case ",$CURL_FAIL_AT," in *",$n,"*) printf '000'; exit 7 ;; esac
+exec "$REAL_CURL" "$@"
+`,
+			{ mode: 0o755 },
+		);
+		const commit = "14926b3300000000000000000000000000000000";
+		await writeFile(
+			join(directory, "github.json"),
+			JSON.stringify({ state: "closed", merged: true, merge_commit_sha: commit, base: { ref: "main" } }),
+		);
+		const run = async (
+			health: [number, ...number[]],
+			report: [number, ...number[]],
+			env: Record<string, string> = {},
+		) => {
+			await writeFile(join(directory, "curl-calls"), "0");
+			const received: { path: string; payload: unknown }[] = [];
+			let healthCalls = 0;
+			let reportCalls = 0;
+			const server = Bun.serve({
+				hostname: "127.0.0.1",
+				port: 0,
+				async fetch(req) {
+					const path = new URL(req.url).pathname;
+					received.push({ path, payload: path === "/healthz" ? null : await req.json() });
+					const statuses = path === "/healthz" ? health : report;
+					const call = path === "/healthz" ? healthCalls++ : reportCalls++;
+					return Response.json(
+						{ ok: true, apiVersion: 1 },
+						{ status: statuses[Math.min(call, statuses.length - 1)] ?? statuses[0] },
+					);
+				},
+			});
+			try {
+				const child = Bun.spawn(["bash", "-e", "-o", "pipefail", "-c", script], {
+					cwd: directory,
+					env: {
+						PATH: `${directory}:${process.env.PATH}`,
+						MAINWORTHY_URL: server.url.origin,
+						MAINWORTHY_PROJECT: "scratch",
+						MAINWORTHY_TOKEN: "test-token",
+						PULL: "482",
+						STATE: "merged",
+						MERGED_COMMIT: commit,
+						BASE_BRANCH: "main",
+						EVENT_NAME: "pull_request",
+						GITHUB_REPOSITORY: "example/mainworthy",
+						PULL_FIXTURE: join(directory, "github.json"),
+						REAL_CURL: realCurl,
+						...env,
+					},
+					stdout: "pipe",
+					stderr: "pipe",
+				});
+				const [code, stdout, stderr] = await Promise.all([
+					child.exited,
+					new Response(child.stdout).text(),
+					new Response(child.stderr).text(),
+				]);
+				return { code, output: stdout + stderr, received, healthCalls, reportCalls };
+			} finally {
+				await server.stop(true);
+			}
+		};
+		const recovered = await run([502, 503, 504, 200], [502, 503, 504, 200]);
+		expect([recovered.code, recovered.healthCalls, recovered.reportCalls]).toEqual([0, 4, 4]);
+		expect(workflow.on.workflow_dispatch.inputs.state.required).toBe(false);
+		expect(workflow.jobs.tell.permissions).toEqual({ "pull-requests": "read" });
+		expect(recovered.received.filter((req) => req.payload).map((req) => req.payload)).toEqual(
+			Array(4).fill({ change: "pr:482", state: "merged", landing: { commit, branch: "main" } }),
+		);
+		for (const status of [400, 401, 403, 404, 429, 500]) {
+			const refused = await run([200], [status, 200]);
+			expect([status, refused.code, refused.reportCalls]).toEqual([status, 1, 1]);
+		}
+		for (const health of [true, false]) {
+			const outage = await run(health ? [503] : [200], [503]);
+			expect([outage.code, outage.healthCalls, outage.reportCalls]).toEqual(health ? [1, 12, 0] : [1, 1, 12]);
+			expect(outage.output).toContain("replay this event with workflow_dispatch");
+		}
+		const connectionRecovered = await run([200], [200], { CURL_FAIL_AT: "1,3" });
+		expect([connectionRecovered.code, connectionRecovered.healthCalls, connectionRecovered.reportCalls]).toEqual([
+			0, 1, 1,
+		]);
+		expect(await readFile(join(directory, "curl-calls"), "utf8")).toBe("4");
+		await rm(join(directory, "reply.json"), { force: true });
+		const reportUnreachable = await run([200], [200], { CURL_FAIL_AT: "2,3,4,5,6,7,8,9,10,11,12,13" });
+		expect([reportUnreachable.code, reportUnreachable.reportCalls]).toEqual([1, 0]);
+		expect(reportUnreachable.output).toContain("Mainworthy answered 000. Fix the cause, then replay");
+		const unreachable = await run([200], [200], { MAINWORTHY_URL: "http://127.0.0.1:0" });
+		expect([unreachable.code, unreachable.received]).toEqual([1, []]);
+		expect(unreachable.output).toContain("replay this event with workflow_dispatch");
+		for (const [override, expected] of [
+			["", "merged"],
+			["closed", "closed"],
+			["open", "open"],
+		]) {
+			const replay = await run([200], [200], {
+				EVENT_NAME: "workflow_dispatch",
+				STATE: override ?? "",
+				MERGED_COMMIT: "",
+				BASE_BRANCH: "",
+			});
+			expect(replay.code, replay.output).toBe(0);
+			expect(replay.received[1]?.payload).toEqual({
+				change: "pr:482",
+				state: expected,
+				...(expected === "merged" ? { landing: { commit, branch: "main" } } : {}),
+			});
+			expect(await readFile(join(directory, "gh-args"), "utf8")).toBe("api repos/example/mainworthy/pulls/482\n");
+		}
+		for (const [state, branch] of [
+			["open", "main"],
+			["closed", "main"],
+			["merged", "feature"],
+		]) {
+			await writeFile(
+				join(directory, "github.json"),
+				JSON.stringify({
+					state: state === "merged" ? "closed" : state,
+					merged: state === "merged",
+					merge_commit_sha: state === "merged" ? commit : null,
+					base: { ref: branch },
+				}),
+			);
+			const replay = await run([200], [200], {
+				EVENT_NAME: "workflow_dispatch",
+				STATE: "",
+				MERGED_COMMIT: "",
+				BASE_BRANCH: "",
+			});
+			expect(replay.code, replay.output).toBe(0);
+			expect(replay.received[1]?.payload).toEqual({ change: "pr:482", state });
+		}
+		await writeFile(
+			join(directory, "github.json"),
+			JSON.stringify({ state: "closed", merged: false, merge_commit_sha: commit, base: { ref: "main" } }),
+		);
+		const override = await run([200], [200], {
+			EVENT_NAME: "workflow_dispatch",
+			STATE: "merged",
+			MERGED_COMMIT: "",
+			BASE_BRANCH: "",
+		});
+		expect(override.code, override.output).toBe(0);
+		expect(override.received[1]?.payload).toEqual({ change: "pr:482", state: "merged" });
+	} finally {
+		await rm(directory, { recursive: true, force: true });
+	}
+}, 20_000);
