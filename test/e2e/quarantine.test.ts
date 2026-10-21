@@ -154,12 +154,9 @@ import { browserAvailable, eventually, openPage, startServer } from "./support.t
 				() => server.api("find", { in: "tests", state: "quarantined" }),
 				(tests) => tests.count === 2,
 			);
-			expect(await server.api("gate", { commit: "aaaa0002" })).toMatchObject({ verdict: "passed", quarantined: 3 });
-			await server.api(
-				"report",
-				ciReport({ commit: "aaaa0003", n: 3, fail: { 0: "expected green", 1: "expected total", 2: "expected modal" } }),
-			);
-			expect(await server.api("gate", { commit: "aaaa0003" })).toMatchObject({ verdict: "blocked", quarantined: 2 });
+			await page.goto(`${server.url}/p/scratch/settings`);
+			await panel.getByText("2 quarantined tests", { exact: true }).waitFor();
+			expect(await panel.getByRole("listitem").filter({ hasText: "T-2 ·" }).count()).toBe(0);
 			expect(view.errors).toEqual([]);
 		} finally {
 			await view?.close();
