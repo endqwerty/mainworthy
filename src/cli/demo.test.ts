@@ -228,6 +228,7 @@ test(
 	async () => {
 		await withInstance(
 			async ({ instance, client }) => {
+				instance.app.config.passwordCost = { memoryCost: 8, timeCost: 1 };
 				await refreshDemo(instance, "demo", small);
 				const invitation = z.object({ code: z.string() }).parse(
 					await client.call("invitation", {
@@ -632,9 +633,15 @@ test(
 				(s) => s.id === first.workSlot,
 			);
 			const { renewDemoWork } = await import("./demo.ts");
+			const now = instance.app.now();
+			instance.app.now = () => now + 60_000;
 			await renewDemoWork(instance, "demo", first);
 			const after = (await demo.call("find", { in: "slots", run: first.run })).items.find(
 				(s) => s.id === first.workSlot,
+			);
+			expect((await demo.call("get", { refs: [first.run] }))[0]).toMatchObject({ inProgress: 1 });
+			expect(z.object({ until: z.number() }).parse(after?.work).until).toBeGreaterThan(
+				z.object({ until: z.number() }).parse(before?.work).until,
 			);
 			expect(after?.work).toMatchObject({
 				kind: "held",

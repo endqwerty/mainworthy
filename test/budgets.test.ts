@@ -164,7 +164,7 @@ test("a report that makes many failures go away recomputes each run once, not on
 });
 
 /** A report reuses its tally and reads each target's scope once per discovery pass, however many tests fail. */
-test.each(["scans", "targets"] as const)("a report with existing failures bounds repeated %s reads", (metric) => {
+test("a report with existing failures bounds repeated scans and targets reads", () => {
 	const work = (failures: number) => {
 		const h = harness({ unlinked: "track" });
 		try {
@@ -222,11 +222,10 @@ test.each(["scans", "targets"] as const)("a report with existing failures bounds
 	};
 	const small = work(3);
 	const large = work(30);
-	if (metric === "scans") {
-		// One tally and one question-discovery pass. Stale handling already has the tally's failing set.
-		expect(small.scans).toBe(2);
-		expect(large.scans).toBe(2);
-	} else expect(large.targets).toBe(small.targets);
+	// One tally and one question-discovery pass. Stale handling already has the tally's failing set.
+	expect(small.scans).toBe(2);
+	expect(large.scans).toBe(2);
+	expect(large.targets).toBe(small.targets);
 });
 
 test("a 500-result trunk page batches landing reads beside 8000 changes", async () => {
