@@ -169,6 +169,7 @@ The list of runs has these keys.
 | <kbd>j</kbd> | Next run |
 | <kbd>k</kbd> | Previous run |
 | <kbd>↵</kbd> | Open cockpit: the run with its slots |
+| <kbd>↵</kbd> | Open change: for a change's run, the change it belongs to |
 
 The run view has these keys.
 
