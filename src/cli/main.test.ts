@@ -1086,11 +1086,15 @@ test("run in the test's process gives what the executable gives", async () => {
 			[["find", "--url", "http://127.0.0.1:1"]],
 			[["frobnicate"]],
 		];
-		const parity = ["fmt", "invalid.md"];
-		const options = { cwd: join(directory, "cases") };
-		expect(await run(parity, options)).toEqual(await cli(parity, options));
-		const results = await Promise.all(cases.map(([argv, options]) => run(argv, options)));
-		expect(results.map((result) => result.code)).toEqual([0, 0, 0, 4, 4, 4, 0, 4, 4, 3, 4, 4]);
+		const both = await Promise.all(
+			cases.map(async ([argv, options]) => ({
+				argv: argv.join(" "),
+				executable: await cli(argv, options),
+				here: await run(argv, options),
+			})),
+		);
+		for (const { argv, executable, here } of both) expect({ argv, ...here }).toEqual({ argv, ...executable });
+		expect(both.map((result) => result.here.code)).toEqual([0, 0, 0, 4, 4, 4, 0, 4, 4, 3, 4, 4]);
 		expect(process.env.MAINWORTHY_URL).toBeUndefined();
 	});
 });

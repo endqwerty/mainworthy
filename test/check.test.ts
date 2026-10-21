@@ -644,18 +644,10 @@ test("a run ends with the tests that failed, and says so when a file did not loa
 	expect(failed.end).toContain(
 		"\nFAILED: tests: parallel\n\n1 test failed:\n  test/b.test.ts: one is two\n      expect(received).toBe(expected) (test/b.test.ts:3:12)\n",
 	);
-	const unloaded = failureLines([
-		phaseReport(
-			"tests: parallel",
-			parseJUnit(
-				'<testsuites><testsuite file="test/a.test.ts"><testcase name="passes" file="test/a.test.ts" /></testsuite></testsuites>',
-				{},
-			).results,
-			["test/a.test.ts", "test/c.test.ts"],
-		),
-	]).join("\n");
-	expect(unloaded).toContain(
-		"1 test file gave no result, so no test of it ran:\n  test/c.test.ts\nIt did not load, or the runner stopped in it",
+	const unloaded = await run({ "a.test.ts": passes, "c.test.ts": `import "./not-there.ts";\n${passes}` });
+	expect(unloaded.exit).toBe(1);
+	expect(unloaded.end).toContain(
+		"\n1 test file gave no result, so no test of it ran:\n  test/c.test.ts\nIt did not load, or the runner stopped in it",
 	);
-	expect(unloaded).not.toContain("test/a.test.ts");
+	expect(unloaded.end).not.toContain("test/a.test.ts");
 });
