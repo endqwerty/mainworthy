@@ -546,11 +546,6 @@ describe("rule answers", () => {
 		expect(queue({ kind: "adopt" }).items).toEqual([]);
 	});
 
-	test("a proposal accepts a rule answer its question kind accepts", () => {
-		const { edit } = edited({ is: "create", folder: "Imported" });
-		expect(h.raw("propose", { edits: [edit] })).toMatchObject({ ok: true, result: { status: "open" } });
-	});
-
 	// The rows an older release could store: a policy whose map-track clause answers `approve`.
 	const bad = (clauses: string): string =>
 		JSON.stringify(
@@ -559,7 +554,7 @@ describe("rule answers", () => {
 
 	test("a pending proposal holding such a clause is refused when decided, and the policy stays", () => {
 		const { policy, edit } = edited({ is: "create", folder: "Imported" });
-		expect(h.raw("propose", { edits: [edit] })).toMatchObject({ ok: true });
+		expect(h.raw("propose", { edits: [edit] })).toMatchObject({ ok: true, result: { status: "open" } });
 		const stored = h.app.db.raw.query<{ id: number; resolved: string }, []>("SELECT id, resolved FROM proposals").all();
 		expect(stored).toHaveLength(1);
 		const [row] = stored;

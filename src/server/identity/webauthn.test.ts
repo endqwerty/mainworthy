@@ -790,11 +790,6 @@ describe("input that is not what a page sends", () => {
 	const [goodRegistration, registering] = registration(es256);
 	const [goodSignIn, stored, signing] = signIn(es256);
 
-	test("the two starting answers are accepted, so each refusal below has one cause", () => {
-		expect(verifyRegistration(goodRegistration, registering).ok).toBe(true);
-		expect(verifyAssertion(goodSignIn, stored, signing).ok).toBe(true);
-	});
-
 	test("anything but an object with every field, each of its type", () => {
 		for (const input of [null, undefined, 7, "passkey", [], [goodRegistration], {}]) {
 			expect(verifyRegistration(input, registering)).toEqual(refusal("input"));

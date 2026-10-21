@@ -141,6 +141,23 @@ describe("the results behind a gate", () => {
 	test("a change reads its head's rows, and a commit nobody reported has none", () => {
 		seed();
 		expect(results({ change: "pr:7" }).count).toBe(8);
+		const head = "c0ffee0000000000000000000000000000000002";
+		h.call("report", { target: { ...target, commit: head }, job: "e2e", results: [result("new head check", "pass")] });
+		expect(results({ change: "pr:7" })).toMatchObject({ count: 1, items: [{ name: "new head check", commit: head }] });
+		expect(
+			results({ commit: COMMIT })
+				.items.map((row) => row.name)
+				.sort(),
+		).toEqual([
+			"cart adds",
+			"cart breaks",
+			"cart flakes",
+			"cart is slow",
+			"cart needs stock",
+			"cart removes",
+			"cart total",
+			"coupon",
+		]);
 		const none = results({ commit: "dead000000000000000000000000000000000000" });
 		expect(none).toMatchObject({ count: 0, cursor: null, items: [] });
 		expect(() => results({})).toThrow(/invalid/);

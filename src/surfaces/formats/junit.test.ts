@@ -432,7 +432,7 @@ describe("parseJUnit recovery and boundaries", () => {
 			'<testsuites><testsuite name="one"><properties><property name="broken" value="missing/></properties><testcase name="x"><failure message="bad"/></testcase></testsuite><testsuite name="two"><properties><property name="valid" value="/>"/></properties><testcase name="y"/></testsuite></testsuites>',
 		);
 		expect(parsed.warnings.length).toBeGreaterThan(0);
-		expect(parsed.results.every((item) => item.outcome !== "pass")).toBe(true);
+		expect(parsed.results).toEqual([result("one::y", "y", "error", { failure: { message: "Malformed JUnit suite" } })]);
 	});
 
 	test.each([
@@ -517,6 +517,8 @@ describe("parseJUnit recovery and boundaries", () => {
 		for (let end = 0; end <= xml.length; end++) {
 			const parsed = parseJUnit(xml.slice(0, end));
 			for (const item of parsed.results) expect(ResultIn.safeParse(item).success).toBe(true);
+			if (end >= xml.indexOf("</testcase>") + "</testcase>".length)
+				expect(parsed.results).toEqual([result("s::a", "a", "fail", { failure: { message: "m", detail: "é&🦊" } })]);
 		}
 	});
 
