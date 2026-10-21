@@ -44,7 +44,7 @@ struct PagingSearchTests {
 		#expect(results ? counted.loading == .done : tests.loading == .done)
 	}
 
-	@Test("long pasted searches fit the server's UTF-16 limit", arguments: [false, true])
+	@Test("long pasted searches are cut to 200 UTF-16 units, inside the server's limit", arguments: [false, true])
 	func longPaste(results: Bool) async throws {
 		let transport = SearchReplies(results: results)
 		let server = Server(
