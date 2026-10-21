@@ -47,12 +47,14 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           GH_TOKEN: ${{ github.token }}
           STATE: ${{ inputs.state || (github.event_name == 'pull_request' && (github.event.pull_request.merged && 'merged' || github.event.pull_request.state)) || '' }}
+          HEAD_COMMIT: ${{ github.event.pull_request.head.sha }}
           MERGED_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
           BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
         run: |
           if [ "$EVENT_NAME" = workflow_dispatch ]; then
             gh api "repos/$GITHUB_REPOSITORY/pulls/$PULL" > pull.json
             STATE=${STATE:-$(jq -r 'if .merged then "merged" else .state end' pull.json)}
+            HEAD_COMMIT=$(jq -r '.head.sha // ""' pull.json)
             MERGED_COMMIT=$(jq -r 'if .merged then .merge_commit_sha // "" else "" end' pull.json)
             BASE_BRANCH=$(jq -r '.base.ref' pull.json)
           fi
@@ -90,8 +92,11 @@ jobs:
             echo "::error::The instance does not advertise API 1 or a health reply from before API versions. Upgrade it, then replay this event with workflow_dispatch."
             exit 1
           fi
-          payload=$(jq -nc --arg change "pr:$PULL" --arg state "$STATE" --arg commit "$MERGED_COMMIT" --arg branch "$BASE_BRANCH" '
+          # The head is the pull request's own last commit, whose gate is the change's. A rebase or squash merge
+          # lands another commit on trunk, which is the landing and has a gate of its own.
+          payload=$(jq -nc --arg change "pr:$PULL" --arg state "$STATE" --arg head "$HEAD_COMMIT" --arg commit "$MERGED_COMMIT" --arg branch "$BASE_BRANCH" '
             {change: $change, state: $state} +
+            (if $head != "" then {head: $head} else {} end) +
             (if $state == "merged" and $commit != "" and (["main", "master", "trunk"] | index($branch)) != null
              then {landing: {commit: $commit, branch: $branch}} else {} end)')
           status=$(request -o reply.json -w '%{http_code}' -X POST "$MAINWORTHY_URL/api/p/$MAINWORTHY_PROJECT/change" \

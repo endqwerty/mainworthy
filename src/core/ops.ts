@@ -502,6 +502,14 @@ export const ChangeInput = z.object({
 	state: z
 		.enum(["merged", "closed", "open"])
 		.describe("How the change ended: merged, or closed without merging. open: it is open again."),
+	head: z
+		.string()
+		.min(7)
+		.max(64)
+		.optional()
+		.describe(
+			"The change's head commit as the code host says it is now: for merged, the head that merged. The change's gate is this commit's.",
+		),
 	landing: z
 		.object({
 			commit: z.string().min(1).max(300),
@@ -509,7 +517,7 @@ export const ChangeInput = z.object({
 		})
 		.optional()
 		.describe(
-			"For merged: the exact commit that reached trunk and its branch. That commit becomes the change's head and moves to trunk; its failures are judged there again.",
+			"For merged: the exact commit that reached trunk and its branch. It moves to trunk and its failures are judged there; it has a gate of its own, which is the change's only when it is the head.",
 		),
 	...projectCommand,
 });

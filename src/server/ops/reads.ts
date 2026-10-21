@@ -45,12 +45,14 @@ import {
 } from "../decisions/questions.ts";
 import {
 	batchById,
+	type ChangeRow,
 	caseIdsOfFile,
 	changeById,
 	changeByKey,
 	findTest,
 	flipCount,
 	flippedLanes,
+	landingOf,
 	lastResultsOfCase,
 	lastResultsOfTest,
 	listTests,
@@ -944,7 +946,7 @@ export function find(ctx: Ctx, input: FindInput): Found {
 		}
 		case "changes": {
 			const items = recentChanges(ctx.db, project, limit).map((change) => {
-				const status = change.head_sha ? gate(ctx, { commit: change.head_sha }) : null;
+				const status = change.head_sha ? gate(ctx, { change: change.key }) : null;
 				return {
 					key: change.key,
 					title: change.title,
@@ -955,6 +957,7 @@ export function find(ctx: Ctx, input: FindInput): Found {
 					run: status?.run ?? null,
 					verdict: status?.verdict ?? null,
 					reason: status?.reason ?? null,
+					landing: landingView(ctx, change),
 				};
 			});
 			return { count: null, items, cursor: null };
@@ -1256,6 +1259,18 @@ export const checkOp = defineOp({
 // ── impact ─────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
+ * The commit a merged change landed as on trunk and that commit's own gate. A rebase or a squash lands a commit the
+ * pull request never had, so this is not the change's gate unless it is the head. `run` is null when nothing a gate
+ * counts has been reported for it.
+ */
+function landingView(ctx: Ctx, change: ChangeRow) {
+	const landing = landingOf(change);
+	if (!landing) return null;
+	const status = gate(ctx, { commit: landing.commit, ...(change.repo === null ? {} : { repo: change.repo }) });
+	return { ...landing, run: status.run, verdict: status.verdict, reason: status.reason };
+}
+
+/**
  * Where to look for a change: the cases it touches, why each is in the set, its last result, whether this caller
  * already reviewed it at this version and change head, and the questions already open or decided. Counts first, bounded.
  */
@@ -1359,6 +1374,7 @@ export function impact(ctx: Ctx, input: ImpactInput): Record<string, unknown> {
 					files: files.length,
 					title: change.title,
 					state: change.ended ?? "open",
+					landing: landingView(ctx, change),
 				}
 			: { files: files.length },
 		gate: run ? { verdict: run.verdict, reason: run.reason, run: run.run } : null,

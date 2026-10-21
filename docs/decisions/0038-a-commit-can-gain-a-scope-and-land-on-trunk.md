@@ -1,7 +1,7 @@
 # 0038: A commit can gain a scope and land on trunk
 
 - Date: 2026-10-14
-- Status: proposed
+- Status: proposed; decision 0127 replaces the part that makes the landing commit the change's head
 - Issue: [#68](https://github.com/endqwerty/mainworthy/issues/68)
 
 ## Problem

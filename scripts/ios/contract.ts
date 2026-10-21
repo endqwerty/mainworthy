@@ -472,6 +472,18 @@ export const RunReportCommand = struct("RunReportCommand", "The recorded reply o
 
 // ── Changes and the person's sessions ──────────────────────────────────────────────────────────────────────
 
+const ChangeLanding = struct(
+	"ChangeLanding",
+	"The commit a merged change landed as on trunk, and that commit's own gate: the change's only when it is the head.",
+	{
+		commit: text,
+		branch: text,
+		run: [maybe(text), "None: nothing a gate counts has been reported for this commit."],
+		verdict: text,
+		reason: text,
+	},
+);
+
 export const ChangeList = struct("ChangeList", "`find` in changes: newest first, with the head's gate.", {
 	items: list(
 		struct("ChangeSummary", "A reported branch or pull request.", {
@@ -482,6 +494,7 @@ export const ChangeList = struct("ChangeList", "`find` in changes: newest first,
 			url: maybe(text),
 			state: text,
 			verdict: maybe(text),
+			landing: maybe(ChangeLanding),
 		}),
 	),
 });
@@ -501,6 +514,7 @@ export const ChangeImpact = struct("ChangeImpact", "`impact` of a change: its ba
 		base: maybe(text),
 		title: maybe(text),
 		state: [text, "Open, merged or closed, as it is now: a change older than the list's newest is read here."],
+		landing: maybe(ChangeLanding),
 	}),
 	gate: maybe(struct("ChangeImpactGate", "The run counted for this head, if any.", { run: maybe(text) })),
 	counts: struct("ChangeImpactCounts", "The complete number of affected cases.", { cases: whole }),

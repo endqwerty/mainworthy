@@ -480,11 +480,12 @@ jobs:
           MAINWORTHY_TOKEN: ${{ secrets.MAINWORTHY_TOKEN }}
           PULL: ${{ github.event.pull_request.number }}
           STATE: ${{ github.event.action == 'reopened' && 'open' || (github.event.pull_request.merged && 'merged' || 'closed') }}
+          HEAD_COMMIT: ${{ github.event.pull_request.head.sha }}
           MERGED_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
           BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
         run: |
-          payload=$(jq -nc --arg change "pr:$PULL" --arg state "$STATE" --arg commit "$MERGED_COMMIT" --arg branch "$BASE_BRANCH" '
-            {change: $change, state: $state} +
+          payload=$(jq -nc --arg change "pr:$PULL" --arg state "$STATE" --arg head "$HEAD_COMMIT" --arg commit "$MERGED_COMMIT" --arg branch "$BASE_BRANCH" '
+            {change: $change, state: $state, head: $head} +
             (if $state == "merged" and $commit != "" and (["main", "master", "trunk"] | index($branch)) != null
              then {landing: {commit: $commit, branch: $branch}} else {} end)')
           curl -fsS -X POST "$MAINWORTHY_URL/api/p/$MAINWORTHY_PROJECT/change" \
@@ -494,9 +495,11 @@ jobs:
 
 With `mainworthy` on the job's path, the step is `mainworthy change --change "pr:$PULL" --state "$STATE"`.
 To include the landed commit, use `change --json` with the same payload as the workflow.
-The workflow sends GitHub's merged hash and base branch. Mainworthy sets that commit
-as the change's head and evaluates its failures on trunk. If the merge or rebase
-produced a different hash, the original commit keeps its scope.
+The workflow sends the pull request's head, GitHub's merged hash and the base branch.
+The head is the commit whose gate the change shows. The merged hash is the landing:
+Mainworthy places it on trunk and evaluates its failures there. A rebase or squash
+merge writes a new commit, so the landing has a gate of its own, which Changes shows
+beside the head's. A fast-forward lands the head itself.
 The call is answered `not_found` for a pull request that never sent a report.
 [Changes and the gate](./changes.md#when-a-change-ends) says what ending a change does.
 

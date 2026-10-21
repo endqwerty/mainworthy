@@ -36,6 +36,65 @@ final class ChangesUITests: XCTestCase {
 		XCTAssertTrue(app.navigationBars["Queue"].waitForExistence(timeout: 20))
 	}
 
+	/// A pull request merged by rebase: its head passed, and `main` holds a rewritten commit no report has named yet,
+	/// then one that fails. The head's gate stays the change's; the landed commit's gate is shown apart.
+	@MainActor func testARebasedLandingKeepsTheHeadsGateAndShowsItsOwn() async throws {
+		let address = try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])
+		func post(_ path: String, _ body: [String: Any]) async throws {
+			var request = URLRequest(url: try XCTUnwrap(URL(string: "\(address)\(path)")))
+			request.httpMethod = "POST"
+			request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+			request.setValue("Bearer \(environment["MAINWORTHY_TEST_TOKEN"] ?? "")", forHTTPHeaderField: "Authorization")
+			request.httpBody = try JSONSerialization.data(withJSONObject: body)
+			let (_, response) = try await URLSession.shared.data(for: request)
+			XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+		}
+		let project = try await makeProject()
+		let head = "18af80ce87f2026906aac60a5983edf403ffdec2"
+		let landed = "3cc3a1e8af977afe91c871a7b0ded80519669240"
+		let test: [String: Any] = ["key": "picker-scroll", "name": "Picker scrolls to the choice"]
+		_ = try await post("/api/p/\(project)/report", [
+			"target": ["repo": "acme/shop", "commit": head, "branch": "picker", "pr": 677, "title": "Fix picker scrolling"],
+			"results": [["test": test, "outcome": "pass"]],
+		])
+		_ = try await post("/api/p/\(project)/change", [
+			"change": "pr:677", "state": "merged", "head": head, "landing": ["commit": landed, "branch": "main"],
+		])
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", address]
+		app.launch()
+		try signIn(app)
+		app.openProject(project)
+		app.openTab("Changes")
+		let row = app.buttons["change-pr:677"]
+		XCTAssertTrue(row.waitForExistence(timeout: 10))
+		row.tap()
+		let verdict = app.staticTexts["change-verdict"]
+		XCTAssertTrue(verdict.waitForExistence(timeout: 10))
+		shot("change-rebased-unreported")
+		XCTAssertEqual(verdict.label, "passed")
+		XCTAssertEqual(
+			app.staticTexts["change-ending"].label,
+			"Merged. It landed on main as another commit, which has a gate of its own."
+		)
+		XCTAssertEqual(app.staticTexts["change-landing-verdict"].label, "pending")
+		XCTAssertEqual(
+			app.staticTexts["change-landing-reason"].label,
+			"pending: nothing a gate counts has been reported for this commit"
+		)
+		_ = try await post("/api/p/\(project)/report", [
+			"target": ["repo": "acme/shop", "commit": landed, "branch": "main"],
+			"results": [["test": test, "outcome": "fail", "failure": ["message": "Picker lost its place on main"]]],
+		])
+		app.swipeDown()
+		let blocked = NSPredicate(format: "label == %@", "blocked")
+		let landedBlocked = expectation(for: blocked, evaluatedWith: app.staticTexts["change-landing-verdict"])
+		let shown = await XCTWaiter.fulfillment(of: [landedBlocked], timeout: 10)
+		shot("change-rebased-blocked-on-main")
+		XCTAssertEqual(shown, .completed)
+		XCTAssertEqual(verdict.label, "passed")
+	}
+
 	@MainActor func testAChangeUnblocksAndThisDevicesSessionIsMarked() async throws {
 		// The chosen project is beyond the first page of the picker.
 		var project = try await makeProject()

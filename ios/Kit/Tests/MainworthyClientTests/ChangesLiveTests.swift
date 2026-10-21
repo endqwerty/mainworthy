@@ -114,11 +114,41 @@ struct ChangesLiveTests {
 	}
 }
 
+@Suite("Change landings against the server", .enabled(if: Live.isRunning, "needs `bun scripts/ios.ts test`"))
+struct ChangeLandingLiveTests {
+	@Test("a landing that is another commit has its own gate; the change's gate stays the head's")
+	func rebased() async throws {
+		let client = try await Live.signedIn().project(try await Live.project())
+		let head = String(repeating: "3", count: 40)
+		let landed = String(format: "%040x", 9)
+		let _: JSONValue = try await client.server.write("change", in: client.key, [
+			"change": "pr:482", "state": "merged", "head": .string(head),
+			"landing": ["commit": .string(landed), "branch": "main"],
+		])
+		let change = try #require(try await client.reportedChanges().first)
+		let expected = LandedCommit(Wire.ChangeLanding(
+			commit: landed, branch: "main", run: nil, verdict: "pending",
+			reason: "pending: nothing a gate counts has been reported for this commit"
+		))
+		#expect(change.head == head && change.verdict == .blocked && change.landing == .asCommit(expected))
+		let detail = try await client.details(of: change)
+		#expect(detail.change.landing == .asCommit(expected) && detail.gate.verdict == .blocked)
+	}
+}
+
 @Suite("Change values")
 struct ChangeValueTests {
 	@Test("new words stay visible")
 	func unknown() {
 		#expect(ChangeState("paused") == .other("paused") && ChangeState("paused").name == "paused")
 		#expect(ChangeVerdict("waiting") == .other("waiting") && ChangeVerdict("waiting").name == "waiting")
+	}
+
+	@Test("a landing on the head is the head; another commit keeps its own gate")
+	func landing() {
+		let wire = Wire.ChangeLanding(commit: "abc1234", branch: "main", run: "R-2", verdict: "blocked", reason: "blocked")
+		#expect(ChangeLanding(wire, head: "abc1234") == .asHead(branch: "main"))
+		#expect(ChangeLanding(wire, head: "def5678") == .asCommit(LandedCommit(wire)))
+		#expect(ChangeLanding(nil, head: "abc1234") == nil)
 	}
 }

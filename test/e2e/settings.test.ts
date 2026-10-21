@@ -669,13 +669,21 @@ import { PRESETS } from "../../src/core/presets.ts";
 			expect((await server.api("inbox", { state: "decided", on: "pr:482" })).items[0]?.decision?.answer.is).toBe(
 				"infra",
 			);
-			// The pull request is merged: the list and the detail say so, without a reload, and the answer stays.
+			// The pull request is merged by rebase: the list and the detail say so, without a reload, and the answer
+			// stays. The gate stays the head's; the commit that landed on main has its own, with nothing reported yet.
 			expect(await view.page.locator(".change-ended").count()).toBe(0);
-			expect(await server.api("change", { change: "pr:482", state: "merged" })).toMatchObject({ state: "merged" });
+			const landing = { commit: "rebased0001", branch: "main" } as const;
+			expect(
+				await server.api("change", { change: "pr:482", state: "merged", head: "change0001", landing }),
+			).toMatchObject({ state: "merged" });
 			await view.page.locator("#list .change-ended").getByText("merged", { exact: true }).waitFor();
 			await view.page
-				.getByText("Merged. The verdict above is the last one its commits had.", { exact: false })
+				.getByText("Merged. It landed on main as another commit, which has a gate of its own.", { exact: true })
 				.waitFor();
+			expect(await view.page.locator(".change-gate").innerText()).toContain(gate.reason);
+			expect(await view.page.locator(".change-landing-gate").innerText()).toBe(
+				"Gate of rebased0001 on main\npending\npending: nothing a gate counts has been reported for this commit",
+			);
 			await view.page.getByText("Infrastructure", { exact: true }).waitFor();
 			expect(view.errors).toEqual([]);
 		} finally {

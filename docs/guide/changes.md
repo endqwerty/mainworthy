@@ -32,8 +32,9 @@ Typed results keep their scope, question ids and answers. Otherwise, former answ
 stay in the ledger as outdated and failures are evaluated in the named scope.
 Every environment shares the same commit gate.
 
-The list says "Latest commit's verdict". The detail shows the gate's reason and
-nonzero counts, followed by "Open questions", "Settled and excused", and "Results".
+The list says "Each head's verdict". The detail shows the head's gate, its reason and
+nonzero counts, how the change ended if it did, and then "Open questions", "Settled and
+excused", and "Results".
 Once impact loads, "Impact" and "Uncovered files" show the related cases and paths,
 or say that there are none.
 Impact lists related cases and review information. It is not a code coverage measurement.
@@ -183,16 +184,28 @@ $ mainworthy change --change pr:482 --state merged --compact
 about the change and are no longer asked. Nobody will act on an answer about a pull request that has ended. A failure
 introduced by the merge also appears on trunk and raises its own question there.
 
-Include the exact commit that landed and its trunk branch:
+Include the pull request's head, and the exact commit that landed and its trunk branch:
 
 ```sh
-$ mainworthy change --json '{"change":"pr:482","state":"merged","landing":{"commit":"1111111111111111111111111111111111111111","branch":"main"}}'
+$ mainworthy change --json '{"change":"pr:482","state":"merged","head":"2222222222222222222222222222222222222222","landing":{"commit":"1111111111111111111111111111111111111111","branch":"main"}}'
 ```
 
-`landing.commit` sets the change's head, even if that commit is older than the recorded
-head or CI has not reported it yet. Its gate is pending until results arrive. All its
+`head` is the commit the code host merged, the pull request's last commit. It becomes
+the change's head even if CI has not reported it yet, and the change's gate is its gate.
+Its gate is pending until results arrive. Without `head`, the change keeps the head its
+reports recorded.
+
+`landing.commit` is the commit on trunk. A rebase or squash merge writes a commit the
+pull request never had, so the landing is not the head and has a gate of its own.
+Changes shows it below the head's gate: "Merged. It landed on main as another commit,
+which has a gate of its own", with that commit's verdict. Until a report names that
+exact commit, its gate is pending. A pipeline that tests only the newest commit of a
+push leaves a landing inside a stack without a report.
+
+A fast-forward lands the head itself. Then the page says "Merged as its head", and the
+head's gate is judged on trunk. All the landed commit's
 environments belong to trunk, including environments reported later. Reports that
-still name the pull request count for this head and raise unexplained failures on trunk.
+still name the pull request count for this commit and raise unexplained failures on trunk.
 The commit keeps its one gate, and planned runs that count it are recomputed.
 Pull request answers remain attributable in history and still cover its older commits.
 They do not carry to trunk. A landed commit's automatic inherited answer ends because the commit no longer
@@ -206,7 +219,7 @@ Archives keep the resulting target and run scopes but omit the history of scope 
 To transfer older data, upgrade the source database and export it again as described
 in [data](./data.md).
 
-A different merge or rebased hash leaves the original commit in its existing scope.
+A different merge or rebased hash leaves the head in its existing scope.
 Omitting `landing` ends the change and keeps its recorded head. You can supply the
 landing later by repeating `merged` with the metadata.
 Only that received landing, matched by repository, branch and exact commit, names a merged change beside a
@@ -218,10 +231,9 @@ trunk results name no landing.
 commit back from trunk.
 
 A merged change keeps its recorded head. Neither an ordinary report for another commit
-nor a report with `target.head` can replace it. Without landing metadata, the head stays
-on the commit recorded when the change ended. Reports still count evidence, so late
-results for that head can change its verdict. A landing sent later selects its commit
-as the head and places it on trunk.
+nor a report with `target.head` can replace it; only `change` with `head` can. Reports
+still count evidence, so late results for that head can change its verdict. A landing
+sent later places its commit on trunk and leaves the head alone.
 
 A change closed without merging continues to follow reports and code-host head
 observations. Explicitly reopening a merged change lets it follow reports again.
@@ -230,16 +242,16 @@ A landed commit keeps its trunk scope.
 The following records remain after a change ends.
 
 - The merged change's head. Its row and `gate --change` keep showing that commit's gate.
-  Without new landing metadata or evidence, an unexplained failure still reads
-  `blocked`, with no open question behind it.
+  Without new evidence, an unexplained failure still reads `blocked`, with no open
+  question behind it.
 - Answers already given. They stay under "Settled and excused".
 - Findings about the change. A finding is about a case, and is still worth an answer.
 - A question that an open planned run shows unexplained. That run waits for the answer
   whatever became of the change.
 
 A report that arrives after the end, from a job that finished late, is recorded and counted.
-It raises no question in the ended scope. A landed head is now on trunk, so its late
-failures are evaluated and asked about there.
+It raises no question in the ended scope. A head that landed by fast-forward is on trunk,
+so its late failures are evaluated and asked about there.
 
 When a pull request reopens, report the new state. Unexplained failures on its
 observed head raise questions at once if that commit's run belongs to the pull request.

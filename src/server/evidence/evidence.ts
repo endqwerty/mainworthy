@@ -67,6 +67,9 @@ export type ChangeRow = {
 	/** How the change ended, or null while it is open: read from `change_ends`. An ended change is not asked about. */
 	ended: "merged" | "closed" | null;
 	ended_at: number | null;
+	/** The commit a merged change landed as on trunk, and that branch (decision 0123): its own commit, with its own gate. */
+	landing_commit: string | null;
+	landing_branch: string | null;
 };
 export type BatchRow = {
 	id: number;
@@ -220,7 +223,7 @@ const Q = {
 	),
 	// A change is read with how it ended, which is a row of `change_ends` or none.
 	change: sql<{ project: number; key: string }, ChangeRow>(
-		`SELECT c.*, e.ended, e.at AS ended_at FROM changes c LEFT JOIN change_ends e ON e.change = c.id
+		`SELECT c.*, e.ended, e.at AS ended_at, e.landing_commit, e.landing_branch FROM changes c LEFT JOIN change_ends e ON e.change = c.id
 		 WHERE c.project = $project AND c.key = $key`,
 	),
 	locationChanges: sql<{ targets: string }, { target: number; key: string | null; title: string | null }>(
@@ -231,10 +234,10 @@ const Q = {
 		 JOIN changes c ON c.id = coalesce(t.change, e.change) AND c.project = t.project`,
 	),
 	changeById: sql<{ id: number }, ChangeRow>(
-		"SELECT c.*, e.ended, e.at AS ended_at FROM changes c LEFT JOIN change_ends e ON e.change = c.id WHERE c.id = $id",
+		"SELECT c.*, e.ended, e.at AS ended_at, e.landing_commit, e.landing_branch FROM changes c LEFT JOIN change_ends e ON e.change = c.id WHERE c.id = $id",
 	),
 	changes: sql<{ project: number; limit: number }, ChangeRow>(
-		`SELECT c.*, e.ended, e.at AS ended_at FROM changes c LEFT JOIN change_ends e ON e.change = c.id
+		`SELECT c.*, e.ended, e.at AS ended_at, e.landing_commit, e.landing_branch FROM changes c LEFT JOIN change_ends e ON e.change = c.id
 		 WHERE c.project = $project ORDER BY c.rev DESC LIMIT $limit`,
 	),
 	insertChange: sql<{
@@ -789,6 +792,12 @@ export function resultLocations(db: Db, targets: TargetRow[]): (target: TargetRo
 	};
 }
 
+/** The commit a merged change landed as on trunk, when one was reported. */
+export const landingOf = (change: ChangeRow): { commit: string; branch: string } | null =>
+	change.landing_commit !== null && change.landing_branch !== null
+		? { commit: change.landing_commit, branch: change.landing_branch }
+		: null;
+
 export const changeByKey = (db: Db, project: number, key: string): ChangeRow | null =>
 	db.get(Q.change, { project, key });
 export const changeById = (db: Db, id: number): ChangeRow | null => db.get(Q.changeById, { id });
@@ -802,11 +811,42 @@ export function setChangeEnded(ctx: Ctx, change: ChangeRow, ended: ChangeRow["en
 	else ctx.db.run(Q.endChange, { id: change.id, ended, at: ctx.now });
 	ctx.db.run(Q.touchChange, { id: change.id, rev: ctx.seq });
 	ctx.touched.add(change.key);
-	return { ...change, ended, ended_at: ended === null ? null : ctx.now, rev: ctx.seq };
+	// A new end, or none, has no landing yet: `endChange` and `reopenChange` clear it.
+	return {
+		...change,
+		ended,
+		ended_at: ended === null ? null : ctx.now,
+		landing_commit: null,
+		landing_branch: null,
+		rev: ctx.seq,
+	};
 }
 
-/** A landing identifies the merged head and places its commit on trunk, even before evidence arrives. */
-export function landChangeHead(
+/**
+ * Where a change's head is, as the code host said when it reported how the change ended. It is taken even from a
+ * merged change, whose head reports cannot move: the merge is what says which head merged.
+ */
+export function observeEndingHead(ctx: Ctx, change: ChangeRow, head: string): ChangeRow {
+	if (change.head_sha === head) return change;
+	ctx.db.run(Q.updateChange, {
+		id: change.id,
+		base: change.base_sha,
+		head,
+		observed: ctx.seq,
+		title: change.title,
+		url: change.url,
+		files: change.files,
+		rev: ctx.seq,
+	});
+	ctx.touched.add(change.key);
+	return { ...change, head_sha: head, head_observed_seq: ctx.seq, rev: ctx.seq };
+}
+
+/**
+ * A landing records the commit that reached trunk and places it there, even before evidence arrives. It is not the
+ * change's head: a rebase or a squash writes a commit the pull request never had, with a gate of its own.
+ */
+export function landChange(
 	ctx: Ctx,
 	change: ChangeRow,
 	landing: NonNullable<ChangeInput["landing"]>,
@@ -822,22 +862,10 @@ export function landChangeHead(
 		ctx.db.run(Q.touchChange, { id: change.id, rev: ctx.seq });
 		ctx.touched.add(change.key);
 	}
-	const headChanged = change.head_sha !== landing.commit;
-	if (headChanged)
-		ctx.db.run(Q.updateChange, {
-			id: change.id,
-			base: change.base_sha,
-			head: landing.commit,
-			observed: ctx.seq,
-			title: change.title,
-			url: change.url,
-			files: change.files,
-			rev: ctx.seq,
-		});
 	const what = codeWhat(change.repo, landing.commit);
 	const existing = targetsOfCommit(ctx.db, ctx.project.id, what)[0];
 	if (existing && existing.line === "trunk" && existing.branch === landing.branch && existing.change === null) {
-		if (!headChanged && !landingChanged) return null;
+		if (!landingChanged) return null;
 		ctx.touched.add(change.key);
 		return existing;
 	}
