@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ciPolicy } from "../scripts/work/ci.ts";
 import { type Instance, start } from "../src/app/start.ts";
 import type { HandoffReceipt } from "../src/core/handoff.ts";
 import type { InboxReply } from "../src/core/ops.ts";
@@ -140,6 +141,26 @@ test("an endpoint that took the post but gave no answer the server can use may h
 		state: "failed",
 		error: unanswered,
 	});
+});
+
+test("a failure the policy answered by rule, as this repository's CI policy does, can still be handed off", async () => {
+	const { url, received } = agent();
+	const harnessed = harness({ preset: "standard", unlinked: "create" });
+	h = harnessed;
+	harnessed.app.config.handoff = { project: "scratch", url, secret };
+	await ciPolicy(async (op, input) => harnessed.call(op, input), "scratch");
+	harnessed.call("report", ciReport({ commit: "main0001", n: 2 }));
+	harnessed.call(
+		"report",
+		ciReport({ commit: "change01", branch: "feature", pr: 69, base: "main0001", n: 2, fail: { 1: "Expected: 9" } }),
+	);
+	expect(harnessed.call<InboxReply>("inbox", { kind: "failure" }).items).toEqual([]);
+	const [settled] = harnessed.call<InboxReply>("inbox", { kind: "failure", state: "decided" }).items;
+	if (!settled) throw new Error("expected a failure answered by rule");
+	harnessed.call("handoff", { question: settled.q, cmd: "handoff-cmd-10" });
+	await deliverHandoffs(harnessed.app);
+	expect(received).toHaveLength(1);
+	expect(harnessed.call<HandoffReceipt>("handoff-status", { question: settled.q })).toMatchObject({ state: "sent" });
 });
 
 test("a hand-off the server was sending when it stopped is failed at start, not sent again", async () => {

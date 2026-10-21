@@ -10,7 +10,7 @@ import { invalid } from "../kernel/errors.ts";
 
 /**
  * A hand-off sends one failure question to a coding agent: a JSON post, signed with the configured secret, to the
- * configured endpoint (decision 0122). The row keeps what was sent and how it went. It never keeps the endpoint,
+ * configured endpoint (decision 0125). The row keeps what was sent and how it went. It never keeps the endpoint,
  * whose address is itself a credential for a T3 Code webhook.
  */
 type HandoffRow = {
