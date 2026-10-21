@@ -6,11 +6,18 @@ extension XCUIApplication {
 	@MainActor func openProject(_ project: String) {
 		let projectMenu = buttons["project-menu"]
 		let existing = collectionViews.allElementsBoundByAccessibilityElement.map(\.frame)
+		let pageWidth = frame.width
+		func openedMenus() -> [XCUIElement] {
+			collectionViews.allElementsBoundByAccessibilityElement.filter {
+				let bounds = $0.frame
+				return bounds.width < pageWidth && !existing.contains(bounds)
+			}
+		}
 		projectMenu.tap()
-		let appeared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "count > %d", existing.count), object: collectionViews)
+		let appeared = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in openedMenus().count == 1 }, object: nil)
 		XCTAssertEqual(XCTWaiter.wait(for: [appeared], timeout: 10), .completed)
 		// The popup adds a container; its bounds do not depend on which lazy rows currently exist.
-		let menus = collectionViews.allElementsBoundByAccessibilityElement.filter { !existing.contains($0.frame) }
+		let menus = openedMenus()
 		guard menus.count == 1, let menu = menus.first else {
 			XCTFail("Expected one new project menu, found \(menus.count)")
 			return
