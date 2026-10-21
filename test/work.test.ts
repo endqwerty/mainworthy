@@ -31,7 +31,7 @@ import {
 	waitForTests,
 	within,
 } from "../scripts/work/processes.ts";
-import { closing, type Facts, problems } from "../scripts/work/pull-request.ts";
+import { closing, type Facts, principles, problems } from "../scripts/work/pull-request.ts";
 import { RELEASED, release } from "../scripts/work/release.ts";
 import { run } from "../scripts/work/run.ts";
 import { MARKER, make, refusal, remove } from "../scripts/work/scratch.ts";
@@ -424,8 +424,9 @@ test("`board check` names the id that no longer fits the board", () => {
 	expect(drift("PVT_other", [])).toHaveLength(2);
 });
 
+const NOTE = "\nPrinciples: Model the Domain (one tagged status)\n";
 const facts = (over: Partial<Facts> = {}): Facts => ({
-	body: "## Why\n\nCloses #12\n",
+	body: `## Why\n\nCloses #12\n${NOTE}`,
 	base: "main",
 	milestone: "M3",
 	linked: [12],
@@ -436,23 +437,42 @@ const facts = (over: Partial<Facts> = {}): Facts => ({
 test("a closing word is allowed on a line of its own, and nowhere else", () => {
 	expect(problems(facts())).toEqual([]);
 	// Pull request #172: "the closed #88" linked issue #88, which nobody meant.
-	const stray = problems(facts({ body: "Closes #12\n\nThe closed #88 is why.\n", linked: [12, 88] }));
+	const stray = problems(facts({ body: `Closes #12\n\nThe closed #88 is why.\n${NOTE}`, linked: [12, 88] }));
 	expect(stray[0]).toContain('"closed #88" makes GitHub close that issue');
 	expect(stray[1]).toBe("GitHub links #12, #88; the description closes #12.");
-	expect(problems(facts({ body: "Closes #12\n\nIssue #88, which is closed, and `fixes #3` in code.\n" }))).toEqual([]);
+	expect(
+		problems(facts({ body: `Closes #12\n\nIssue #88, which is closed, and \`fixes #3\` in code.\n${NOTE}` })),
+	).toEqual([]);
 	expect(closing("Fixed: #7 and\nResolves #8\n```\ncloses #9\n```\n")).toEqual({ closes: [8], stray: ["Fixed: #7"] });
 	// Fenced code in tildes is code too; an indented line is read, and is not a line of its own.
 	expect(closing("~~~text\nCloses #12\n~~~\n")).toEqual({ closes: [], stray: [] });
 	expect(closing("    Closes #12\n").closes).toEqual([]);
 });
 
+test("the description names the principles that changed a choice, or says why none did", () => {
+	// 166 of 169 pull requests from 2026-10-16 to 10-21 named no principle, though the design step asks for them.
+	const missing = problems(facts({ body: "## Why\n\nCloses #12\n" }));
+	expect(missing).toHaveLength(1);
+	expect(missing[0]).toContain("Principles:");
+	expect(
+		principles("Principles: Model the Domain (one tagged status); Subtract Before You Add (columns dropped)\n"),
+	).toEqual([]);
+	expect(principles("**Principles:** model the domain\n")).toEqual([]);
+	expect(principles("- Principles: n/a: a typo in a guide page changes no choice\n")).toEqual([]);
+	expect(principles("Principles: n/a\n")[0]).toContain("reason");
+	expect(principles("Principles: good design\n")[0]).toContain('"good design"');
+	expect(principles("Principles: Model the Domain; clean code\n")).toHaveLength(1);
+	// A line in fenced code is an example, not the description's own line.
+	expect(principles("```\nPrinciples: Model the Domain\n```\n")).toHaveLength(1);
+});
+
 test("the milestone of the pull request is the milestone of its issue; in a stack nothing is linked yet", () => {
 	expect(problems(facts({ milestone: null }))).toEqual(['The pull request has no milestone; its issue has "M3".']);
 	expect(problems(facts({ milestone: "M1" }))[0]).toContain('milestone "M1"; its issue has "M3"');
-	expect(problems(facts({ body: "Part of #12\n", linked: [], milestone: "M1" }))).toHaveLength(1);
-	expect(problems(facts({ body: "No issue: the owner asked in a thread.\n", linked: [], milestone: null }))).toEqual(
-		[],
-	);
+	expect(problems(facts({ body: `Part of #12\n${NOTE}`, linked: [], milestone: "M1" }))).toHaveLength(1);
+	expect(
+		problems(facts({ body: `No issue: the owner asked in a thread.\n${NOTE}`, linked: [], milestone: null })),
+	).toEqual([]);
 	expect(problems(facts({ base: "feature/below", linked: [] }))).toEqual([]);
 });
 
