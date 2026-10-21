@@ -159,7 +159,7 @@ public struct ProposedEdit: Equatable, Sendable {
 	public let count: Int
 	/// The cases the edit cannot be merged into, each with the fields that are in the way.
 	public let conflicts: [Conflict]
-	/// Whether this build shows everything the proposal changes: it does for a new case and for an edit to
+	/// Whether this build can show everything the proposal changes, once its full read succeeds: a new case or an edit to
 	/// what a case says, whose documents it sets side by side. A proposal that restores an earlier version,
 	/// moves, tags, archives or re-covers cases, makes a folder or changes the policy is answered in the web
 	/// app.
@@ -171,8 +171,6 @@ public struct ProposedEdit: Equatable, Sendable {
 		/// It does something this build has no page for: it restores, moves, tags, archives or re-covers cases,
 		/// makes a folder or changes the policy.
 		case otherThanContent
-		/// It has more edits than a question lists (twenty).
-		case tooManyEdits
 	}
 
 	public struct Conflict: Equatable, Sendable {
@@ -187,11 +185,9 @@ public struct ProposedEdit: Equatable, Sendable {
 		summaries = wire.edits.map(ProposedEdit.summary)
 		count = wire.count
 		conflicts = wire.conflicts.map { Conflict(caseRef: $0.case, addresses: $0.addresses) }
-		// The summaries are the first twenty edits. A longer proposal is not known to be shown whole.
+		// Summaries can rule out unsupported edits. The full read checks every edit, including later pages.
 		if !wire.edits.allSatisfy({ ["create", "edit"].contains($0.op) }) {
 			notShown = .otherThanContent
-		} else if wire.count != wire.edits.count {
-			notShown = .tooManyEdits
 		} else {
 			notShown = nil
 		}

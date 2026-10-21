@@ -1024,6 +1024,56 @@ struct QueueScreenTests {
 		#expect(screen.isShown(returned))
 	}
 
+	@Test("a late proposal read cannot publish into a replaced evidence snapshot")
+	func staleProposalRead() async throws {
+		let key = try await Live.project()
+		let transport = ChangedProposalEvidenceTransport()
+		let screen = QueueScreen(project: try await Live.signedIn(transport: transport).project(key))
+		await screen.show(.open, filter: nil)
+		let original = try #require(screen.questions.first { $0.kind == .adopt })
+		await transport.gate.holdNext()
+		let reading = Task { await screen.readDocuments(of: original) }
+		try await transport.gate.waitUntilPaused()
+		transport.changed.withLock { $0 = true }
+		await screen.refresh()
+		let changed = try #require(screen.current(original.ref))
+		await screen.readDocuments(of: changed)
+		guard case .read(let documents) = screen.documents(of: changed) else {
+			Issue.record("current proposal documents were not fetched"); return
+		}
+		for document in documents {
+			screen.showProposalRange(of: changed, document: document.id, height: 100, top: 0, bottom: 100)
+		}
+		#expect(screen.isShown(changed))
+		await transport.gate.release()
+		await reading.value
+		if case .read = screen.documents(of: original) { Issue.record("replaced evidence received the late documents") }
+		#expect(screen.isShown(changed))
+	}
+
+	@Test("an unsupported edit beyond the summaries and first page still blocks every answer")
+	func unsupportedLaterProposalEdit() async throws {
+		let key = try await Live.project(strict: true)
+		let owner = try await Live.signedIn(as: Live.owner)
+		var edits: [JSONValue] = (1...200).map { index in
+			["op": "create", "outline": .string("Supported case \(index)")]
+		}
+		edits.append(["op": "state", "cases": ["C-1"], "to": "archived"])
+		let made: JSONValue = try await owner.write("propose", in: key, ["edits": .array(edits)])
+		let project = try await owner.project(key)
+		let screen = QueueScreen(project: project)
+		await screen.show(.open, filter: nil)
+		let question = try #require(screen.questions.first { $0.ref == made["question"]?.string })
+		await screen.readDocuments(of: question)
+		guard case .failed = screen.documents(of: question) else {
+			Issue.record("unsupported edit was not refused"); return
+		}
+		#expect(!screen.isShown(question))
+		let accept = try #require(question.choices.first { $0.answer == "accept" })
+		#expect(await screen.answer(question, with: accept, reason: "Only content can be read") == false)
+		#expect(try await project.question(question.ref)?.isOpen == true)
+	}
+
 	@Test("every document of a proposal needs viewport coverage")
 	func everyProposalDocumentShown() async throws {
 		let key = try await Live.project(strict: true)
@@ -1371,11 +1421,13 @@ func decisions(_ request: JSONValue) -> [JSONValue] {
 
 /// Delivers a fresh evidence snapshot on the next read, without replacing the screen or its cached documents.
 private final class ChangedProposalEvidenceTransport: Transport {
+	let gate = QueueSendGate()
 	let changed = Mutex(false)
 	private let inner = URLSessionTransport()
 
 	func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
 		let (data, response) = try await inner.send(request)
+		if request.url?.lastPathComponent == "get" { await gate.pauseIfNeeded() }
 		guard changed.withLock({ $0 }), ["inbox", "get"].contains(request.url?.lastPathComponent ?? "") else {
 			return (data, response)
 		}

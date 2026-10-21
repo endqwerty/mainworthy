@@ -513,7 +513,8 @@ test(
 				.object({ settings: z.object({ fields: z.record(z.string(), z.unknown()).optional() }) })
 				.parse(await client.call("admin", { do: "policy.show", project: "demo" }));
 			expect(Object.keys(policy.settings.fields ?? {})).toEqual(["priority", "team"]);
-			expect((await client.with({ project: "demo" }).call("inbox", { kind: "adopt" })).items).toHaveLength(1);
+			const proposals = (await client.with({ project: "demo" }).call("inbox", { kind: "adopt" })).items;
+			expect(proposals.map((item) => item.evidence.count).sort()).toEqual([1, 30]);
 		});
 	},
 	SLOW,

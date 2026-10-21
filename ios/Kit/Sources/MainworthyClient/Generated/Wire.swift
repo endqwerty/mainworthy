@@ -372,6 +372,10 @@ enum Wire {
 	/// `get` with a P- ref: a proposed edit with the documents it would change.
 	struct Proposal: Decodable, Equatable, Sendable {
 		let ref: String
+		/// The total number of edits across every page.
+		let count: Int
+		/// The next page at this project snapshot. Null when every edit has been read.
+		let cursor: String?
 		let edits: [ProposalEdit]
 	}
 

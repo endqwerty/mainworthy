@@ -226,6 +226,50 @@ final class QueueUITests: XCTestCase {
 		}
 	}
 
+	@MainActor func testLargeContentProposalCanBeReadAndAnswered() async throws {
+		let project = try await makeProject(strict: true)
+		let edits: [[String: Any]] = (1...21).map { index in
+			["op": "create", "body": ["title": "Large proposal case \(index)", "steps": []]]
+		}
+		let proposed = try await call("propose", project: project, input: [
+			"reason": "Review all twenty-one cases.", "edits": edits,
+		])
+		let question = try XCTUnwrap(proposed["question"] as? String)
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])]
+		app.launch()
+		try signIn(app)
+		app.openProject(project)
+		let row = app.buttons["question-\(question)"]
+		XCTAssertTrue(row.waitForExistence(timeout: 10))
+		row.tap()
+		XCTAssertTrue(app.staticTexts.matching(identifier: "Large proposal case 1").firstMatch.waitForExistence(timeout: 10))
+		let scroll = app.scrollViews.firstMatch
+		let reject = app.buttons["answer-reject"]
+		XCTAssertFalse(reject.isEnabled)
+		shot("u696-large-proposal-unread")
+		for _ in 0..<80 where !scroll.frame.contains(reject.frame) {
+			let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+			start.press(forDuration: 0.02, thenDragTo: scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)), withVelocity: .slow, thenHoldForDuration: 0.05)
+		}
+		XCTAssertTrue(scroll.frame.contains(reject.frame))
+		XCTAssertTrue(app.staticTexts.matching(identifier: "Large proposal case 21").firstMatch.exists)
+		XCTAssertTrue(reject.isEnabled)
+		shot("u696-large-proposal-read")
+		reject.tap()
+		// Strict projects require a reason for the answer.
+		if app.textFields["reason"].waitForExistence(timeout: 2) {
+			app.textFields["reason"].tap()
+			app.textFields["reason"].typeText("Read all twenty-one cases.")
+			app.buttons["submit-answer"].tap()
+		}
+		XCTAssertTrue(app.staticTexts["notice"].waitForExistence(timeout: 10))
+		XCTAssertTrue(app.staticTexts["notice"].label.hasSuffix(": Reject."))
+		let result = try await call("get", project: project, input: ["refs": [question]])
+		let settled = try XCTUnwrap((result["items"] as? [[String: Any]])?.first)
+		XCTAssertEqual(settled["state"] as? String, "decided")
+	}
+
 	@MainActor func testProposalViewportCoverage() async throws {
 		let project = try await makeProject(strict: true)
 		let lines = (1...140).map { "Prerequisite \($0). Read this line before reviewing the proposed case." }.joined(separator: "\n")

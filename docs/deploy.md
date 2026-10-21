@@ -232,7 +232,7 @@ required check reads are under "Checks a deployment must wait for" below.
 
 The project `demo` on this instance is seeded again on every start (`MAINWORTHY_DEMO=demo` in
 `compose.coolify.yaml`), so each deploy leaves the demo of the code it runs. The start logs
-`demo "demo" seeded again in <n> s: 2000 cases, 65 questions`, or a line that says why it was not. What anyone
+`demo "demo" seeded again in <n> s: 2000 cases, 66 questions`, or a line that says why it was not. What anyone
 changed in `demo` is gone after the next deploy; keep work in another project.
 
 The worker first audits foreign keys without holding the write gate, so writes can continue during that scan.

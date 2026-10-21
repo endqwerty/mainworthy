@@ -129,14 +129,44 @@ extension ProjectClient {
 		})
 	}
 
-	/// The cases a proposal would make or change, each as it is and as it would be. Only a proposal that is
-	/// shown whole (`ProposedEdit.isShownWhole`) has all its documents: for such a one, a reply that lacks a
-	/// document, or the case an edit changes as it is now, is not read as fewer changes. It is unreadable,
-	/// and nothing of it is shown as the whole.
+	/// The cases a proposal would make or change, each as it is and as it would be, read across every page at one
+	/// project snapshot. For a proposal shown whole (`ProposedEdit.isShownWhole`) a reply that lacks a document,
+	/// or the case an edit changes as it is now, is not read as fewer changes: it is unreadable. For one that is
+	/// not, the edits this build has no page for are left out of what is shown.
 	package func documents(of edit: ProposedEdit) async throws -> [EditedCase] {
-		let rows: [Wire.Proposal] = try await server.read("get", in: key, ["refs": [.string(edit.proposal)]])
-		guard let found = rows.first, found.ref == edit.proposal else { throw ClientError.unreadable }
-		let documents = try found.edits.enumerated().compactMap { index, part -> EditedCase? in
+		var parts: [Wire.ProposalEdit] = []
+		var cursor: String?
+		var cursors: Set<String> = []
+		var restarts = 0
+		repeat {
+			try Task.checkCancellation()
+			var input: [String: JSONValue] = ["refs": [.string(edit.proposal)]]
+			if let cursor { input["cursor"] = .string(cursor) }
+			let rows: [Wire.Proposal]
+			do {
+				rows = try await server.read("get", in: key, .object(input))
+			} catch ClientError.refused(let code, _) where code == "conflict" && cursor != nil {
+				// A write invalidates every page of this attempt, including the current bodies on its first page. A
+				// project written to faster than the proposal can be read is not read at all.
+				restarts += 1
+				guard restarts <= 3 else { throw ClientError.unreadable }
+				parts = []
+				cursor = nil
+				cursors = []
+				continue
+			}
+			guard rows.count == 1, let found = rows.first, found.ref == edit.proposal,
+				found.count == edit.count, !found.edits.isEmpty,
+				parts.count + found.edits.count <= found.count else { throw ClientError.unreadable }
+			parts += found.edits
+			cursor = found.cursor
+			if let cursor {
+				guard parts.count < found.count, cursors.insert(cursor).inserted else { throw ClientError.unreadable }
+			}
+		} while cursor != nil || parts.isEmpty
+		try Task.checkCancellation()
+		guard parts.count == edit.count else { throw ClientError.unreadable }
+		let documents = try parts.enumerated().compactMap { index, part -> EditedCase? in
 			switch part.op {
 			case "create":
 				guard let body = part.body, let folder = part.folder, let tags = part.tags?.array, let covers = part.covers
