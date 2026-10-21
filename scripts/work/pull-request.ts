@@ -97,16 +97,31 @@ function entries(line: string): { names: string[]; unclosed: boolean } {
 	return { names: names.filter((entry) => entry !== ""), unclosed: depth > 0 };
 }
 
-/** The text without HTML comments, which are not shown. A "<!--" inside inline code opens no comment. */
+const INLINE_CODE = /`[^`\n]*`/y;
+
+/**
+ * The text without HTML comments, which are not shown. Outside a comment, "<!--" inside inline code opens none; inside
+ * one, only "-->" ends it, backticks or not. A comment left open runs to the end.
+ */
 function withoutComments(text: string): string {
-	const masked = text.replace(/`[^`\n]*`/g, (code) => " ".repeat(code.length));
 	let shown = "";
-	let from = 0;
-	for (const comment of masked.matchAll(/<!--[\s\S]*?(?:-->|$(?![\s\S]))/g)) {
-		shown += text.slice(from, comment.index);
-		from = comment.index + comment[0].length;
+	let at = 0;
+	while (at < text.length) {
+		INLINE_CODE.lastIndex = at;
+		const code = INLINE_CODE.exec(text);
+		if (code) {
+			shown += code[0];
+			at += code[0].length;
+		} else if (text.startsWith("<!--", at)) {
+			const end = text.indexOf("-->", at + 4);
+			if (end === -1) break;
+			at = end + 3;
+		} else {
+			shown += text[at];
+			at++;
+		}
 	}
-	return shown + text.slice(from);
+	return shown;
 }
 
 /** What is wrong with the description's `Principles:` lines; empty when each names principles or says why none. */
