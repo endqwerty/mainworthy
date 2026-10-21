@@ -174,7 +174,7 @@ extension ProjectClient {
 		guard let question = rows.first, question.q == ref else { throw ClientError.unreadable }
 		guard let decision = question.decision else { return .waiting }
 		if decision.answer.is == "reject", decision.effects.rejected == true { return .rejected }
-		guard decision.answer.is == "accept", let cases = decision.effects.cases, cases.count == 1,
+		guard ["accept", "merge"].contains(decision.answer.is), let cases = decision.effects.cases, cases.count == 1,
 			let stamp = cases.first else { throw ClientError.unreadable }
 		return .adopted(CaseStamp(ref: stamp.ref, version: stamp.version))
 	}
@@ -202,11 +202,13 @@ extension ProjectClient {
 		return reply.items.map(SuiteTag.init)
 	}
 
-	package func caseDocument(_ ref: String, version: Int? = nil) async throws -> CaseDocument {
+	package func caseDocument(_ ref: String, version: Int? = nil, includingCustomFields: Bool = false) async throws -> CaseDocument {
 		var input: [String: JSONValue] = ["refs": [.string(ref)]]
 		if let version { input["version"] = .number(Double(version)) }
+		if includingCustomFields { input["fields"] = ["title", "pre", "steps", "methods", "fields", "tags", "place"] }
 		let reply: [Wire.SuiteDocument] = try await server.read("get", in: key, .object(input))
-		guard let found = reply.first, found.ref == ref, version == nil || found.version == version else {
+		guard let found = reply.first, found.ref == ref, version == nil || found.version == version,
+			!includingCustomFields || found.fields != nil else {
 			throw ClientError.unreadable
 		}
 		return CaseDocument(found, isHistorical: version != nil)

@@ -199,18 +199,17 @@ public final class CaseEditorScreen {
 				state = .editing
 				notice = "The proposal was rejected. Your draft is kept here."
 			case .adopted(let stamp):
-				let document = try await project.caseDocument(stamp.ref, version: stamp.version)
-				guard matches(document, waiting.content) else {
-					notice = "The saved version differs from what you submitted. Your draft is kept here. Read the case in the web app."
-					return
-				}
+				let document = try await project.caseDocument(stamp.ref, version: stamp.version, includingCustomFields: true)
 				let ids = try await project.usedStepIds(of: document)
+				let differs = document.content != waiting.content
 				source = .edit(document)
-				original = waiting.content
+				content = document.content
+				original = document.content
 				used.formUnion(ids)
 				reason = ""
 				state = .editing
 				notice = "Proposal accepted. Continue editing \(stamp.ref), version \(stamp.version)."
+				if differs { notice? += " The saved case includes changes you did not make. Read it before editing again." }
 			}
 		} catch {
 			notice = "Still waiting to read the proposal's outcome. \(error.shown) Your draft is kept here. Retry to check again."

@@ -839,7 +839,7 @@ describe("what the iPhone Suite reads", () => {
 
 describe("what the iPhone conflict resolver reads", () => {
 	test("a full conflict, its merge effects and its recorded command reply", async () => {
-		const { ConflictProposal, ConflictBaseFields, MergeReply, MergeCommand } = await import(
+		const { ConflictProposal, ConflictBaseFields, MergeReply, MergeCommand, SuiteProposalQuestion } = await import(
 			"../scripts/ios/contract.ts"
 		);
 		const key = z.object({ project: z.string() }).parse(await result("POST", "/test/project", {})).project;
@@ -879,6 +879,11 @@ describe("what the iPhone conflict resolver reads", () => {
 		);
 		holds("merge effects", MergeReply, reply);
 		expect(reply).toMatchObject({ status: "decided", effects: { status: "adopted", cases: [{ ref, version: 3 }] } });
+		const [mergedQuestion] = z.array(z.unknown()).parse(await op(key, "get", { refs: [overlap.question] }));
+		holds("get immediately adopted merge question", SuiteProposalQuestion, mergedQuestion);
+		expect(mergedQuestion).toMatchObject({
+			decision: { answer: { is: "merge" }, effects: { cases: [{ ref, version: 3 }] } },
+		});
 		const recorded = await op(key, "command", { cmd });
 		holds("recorded merge", MergeCommand, recorded);
 		expect(recorded).toMatchObject({ state: "done", reply: [reply] });

@@ -26,13 +26,15 @@ struct CaseProposalFollowTests {
 		}
 	}
 
-	private func decide(_ key: String, question ref: String, answer: String) async throws -> CaseStamp? {
+	private func decide(_ key: String, question ref: String, answer: String, body: CaseContent? = nil) async throws -> CaseStamp? {
 		let owner = try await Live.signedIn(as: Live.owner)
 		let project = try await owner.project(key)
 		let question = try #require(try await project.question(ref))
+		var choice: JSONValue = ["is": .string(answer)]
+		if let body { choice = ["is": .string(answer), "body": body.json] }
 		let reply: [JSONValue] = try await owner.write("decide", in: key, [
 			"q": .string(ref), "onEvidence": .string(question.evidenceHash),
-			"answer": ["is": .string(answer)], "reason": "Reviewed this case",
+			"answer": choice, "reason": "Reviewed this case",
 		])
 		#expect(reply.first?["status"]?.string == "decided")
 		guard let saved = reply.first?["effects"]?["cases"]?.array?.first,
@@ -69,6 +71,106 @@ struct CaseProposalFollowTests {
 		#expect(try await client.caseHistory(stamp.ref).map(\.version) == [2, 1])
 		#expect(try await client.cases(text: "Continue").items.map(\.ref) == [stamp.ref])
 		#expect(try await client.cases().items.count == 2)
+	}
+
+	private func otherEdit(_ key: String, opened: CaseDocument, body: JSONValue) async throws {
+		let owner = try await Live.signedIn(as: Live.owner)
+		let reply: Wire.SuiteProposeReply = try await owner.read("propose", in: key, ["edits": [[
+			"op": "edit", "case": .string(opened.ref), "base": .number(Double(opened.version)), "body": body,
+		]]])
+		let question = try #require(reply.question)
+		#expect(try await decide(key, question: question, answer: "accept") == CaseStamp(ref: opened.ref, version: 2))
+	}
+
+	@Test("following a merged edit preserves recorded methods, automation and custom fields on the next save")
+	func mergedMethods() async throws {
+		let key = try await Live.project(strict: true)
+		let client = try await Live.signedIn().project(key)
+		let ref = try #require(try await client.cases().items.first?.ref)
+		let opened = try await client.caseDocument(ref)
+		let screen = SuiteScreen(project: client)
+		await screen.edit(opened)
+		let editor = try #require(screen.editor)
+		#expect(editor.content.methods == ["human"] && editor.content.automate == "none")
+		editor.content.title = "My proposed title"
+		guard case .waiting(let question, _) = await editor.save(), let question else { Issue.record("did not wait"); return }
+		try await otherEdit(key, opened: opened, body: [
+			"methods": ["human", "agent"], "automate": "wanted", "fields": ["priority": "high"],
+		])
+		#expect(try await decide(key, question: question, answer: "accept") == CaseStamp(ref: ref, version: 3))
+		await screen.refresh()
+		#expect(!editor.locked && !editor.dirty)
+		#expect(editor.content.title == "My proposed title")
+		#expect(editor.content.methods == ["human", "agent"])
+		#expect(editor.content.automate == "wanted")
+		#expect(editor.content.fields == ["priority": "high"])
+		#expect(editor.notice == "Proposal accepted. Continue editing \(ref), version 3. The saved case includes changes you did not make. Read it before editing again.")
+		guard case .edit(let followed) = editor.source else { Issue.record("did not follow merged edit"); return }
+		#expect(followed.version == 3 && followed.content == editor.content)
+		editor.content.title = "My next title"
+		guard case .waiting(let next, _) = await editor.save(), let next else { Issue.record("next edit did not wait"); return }
+		#expect(try await decide(key, question: next, answer: "accept") == CaseStamp(ref: ref, version: 4))
+		let saved = try await client.caseDocument(ref)
+		#expect(saved.content.title == "My next title")
+		#expect(saved.content.methods == ["human", "agent"] && saved.content.automate == "wanted")
+		let fields: Wire.ConflictBaseFields = try await Live.signedIn(as: Live.owner).read("history", in: key,
+			["ref": .string(ref), "from": 4, "to": 4])
+		#expect(fields.diff.fields.before == ["priority": "high"])
+		#expect(try await client.caseHistory(ref).map(\.version) == [4, 3, 2, 1])
+		#expect(try await client.cases().items.map(\.ref) == [ref])
+	}
+
+	@Test("following a merged precondition unlocks on the recorded text even after head advances")
+	func mergedPreconditions() async throws {
+		let key = try await Live.project(strict: true)
+		let client = try await Live.signedIn().project(key)
+		let ref = try #require(try await client.cases().items.first?.ref)
+		let opened = try await client.caseDocument(ref)
+		let screen = SuiteScreen(project: client)
+		await screen.edit(opened)
+		let editor = try #require(screen.editor)
+		editor.content.title = "My title with their precondition"
+		guard case .waiting(let question, _) = await editor.save(), let question else { Issue.record("did not wait"); return }
+		try await otherEdit(key, opened: opened, body: ["pre": "Their accepted precondition"])
+		#expect(try await decide(key, question: question, answer: "accept") == CaseStamp(ref: ref, version: 3))
+		let current = try await client.caseDocument(ref)
+		var later = current.content; later.pre = "A still newer precondition"
+		guard case .waiting(let newest, _) = try await client.saveCase(SuiteSubmission(source: .edit(current), content: later, reason: "Later")),
+			let newest else { Issue.record("later edit did not wait"); return }
+		#expect(try await decide(key, question: newest, answer: "accept") == CaseStamp(ref: ref, version: 4))
+		await screen.saveEditor()
+		#expect(!editor.locked && !editor.isWaiting && !editor.isRetrying && !editor.dirty && editor.maySave)
+		#expect(editor.content.title == "My title with their precondition")
+		#expect(editor.content.pre == "Their accepted precondition")
+		guard case .edit(let followed) = editor.source else { Issue.record("did not follow recorded version"); return }
+		#expect(followed.ref == ref && followed.version == 3 && followed.content == editor.content)
+		#expect(editor.notice?.contains("includes changes you did not make. Read it before editing again.") == true)
+		#expect(try await client.caseHistory(ref).map(\.version) == [4, 3, 2, 1])
+	}
+
+	@Test("a merge answer reads the exact version recorded by its decision")
+	func mergedAnswer() async throws {
+		let key = try await Live.project()
+		let client = try await Live.signedIn().project(key)
+		let ref = try #require(try await client.cases().items.first?.ref)
+		let opened = try await client.caseDocument(ref)
+		var other = opened.content; other.title = "Their overlapping title"
+		#expect(try await client.saveCase(SuiteSubmission(source: .edit(opened), content: other, reason: "Other edit")) == .adopted(CaseStamp(ref: ref, version: 2)))
+		var mine = opened.content; mine.title = "My overlapping title"
+		guard case .overlap(let question, _, _) = try await client.saveCase(SuiteSubmission(source: .edit(opened), content: mine, reason: "My edit")),
+			let question else { Issue.record("did not create a conflict"); return }
+		var merged = opened.content
+		merged.title = "The reviewed merge title"
+		merged.pre = "The reviewed merge precondition"
+		merged.methods = ["human", "agent"]
+		merged.automate = "wanted"
+		merged.fields = ["priority": "normal"]
+		let stamp = CaseStamp(ref: ref, version: 3)
+		#expect(try await decide(key, question: question, answer: "merge", body: merged) == stamp)
+		#expect(try await client.caseProposal(question) == .adopted(stamp))
+		let recorded = try await client.caseDocument(ref, version: 3)
+		#expect(recorded.content.title == "The reviewed merge title" && recorded.content.pre == "The reviewed merge precondition")
+		#expect(recorded.content.methods == ["human", "agent"] && recorded.content.automate == "wanted")
 	}
 
 	@Test("a rejected proposal keeps the editable draft and its reason")
