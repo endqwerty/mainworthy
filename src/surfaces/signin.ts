@@ -323,7 +323,9 @@ export function signInRoutes(app: App, tools: Tools) {
 		const begun = passkeySignInOptions(app, "native" in body.data ? "native" : "web");
 		if (!begun)
 			return "native" in body.data
-				? failed("invalid", "native passkey sign-in needs an HTTPS public address and an associated app domain")
+				? failed("invalid", "native passkey sign-in needs an HTTPS public address and an associated app domain", {
+						passkey: "native-unavailable",
+					})
 				: passkeysOff();
 		// The browser that asked is handed a cookie it cannot read, for as long as the challenge lasts. Only that
 		// browser can answer: the challenge keeps the cookie's hash, and the answer is taken with the cookie.

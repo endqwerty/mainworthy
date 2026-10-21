@@ -91,7 +91,7 @@ struct PasskeySignInTests {
 
 	@Test("an instance without native passkey support points to password sign-in")
 	func unsupportedInstance() async {
-		let refusal = PasskeyTransport.Reply(body: #"{"ok":false,"error":{"code":"invalid","message":"native passkey sign-in needs an HTTPS public address and an associated app domain"}}"#, status: 400)
+		let refusal = PasskeyTransport.Reply(body: #"{"ok":false,"error":{"code":"invalid","message":"Native challenges are disabled by this instance configuration.","details":{"passkey":"native-unavailable"}}}"#, status: 400)
 		let transport = PasskeyTransport([refusal] + success)
 		let store = MemoryStore()
 		var name = ""

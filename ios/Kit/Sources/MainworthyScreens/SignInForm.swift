@@ -71,7 +71,7 @@ public final class SignInForm {
 			onSignedIn(server, account)
 		} catch is CancellationError {
 			return
-		} catch ClientError.refused(code: "invalid", message: "native passkey sign-in needs an HTTPS public address and an associated app domain") {
+		} catch ClientError.refused(code: "native_passkey_unavailable", _) {
 			notice = "Passkey sign-in is not available for this instance in this app. Sign in with your password."
 		} catch ClientError.refused(code: "unauthenticated", _) {
 			notice = "That passkey did not sign you in. Try again for a new challenge, or use your password."

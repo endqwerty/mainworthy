@@ -152,6 +152,7 @@ describe("native passkey sign-in", () => {
 			error: {
 				code: "invalid",
 				message: "native passkey sign-in needs an HTTPS public address and an associated app domain",
+				details: { passkey: "native-unavailable" },
 			},
 		});
 		expect((await local.post("/api/login/challenge", {})).status).toBe(200);

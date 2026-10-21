@@ -246,13 +246,7 @@ package final class Server: Sendable {
 
 	private struct Head: Decodable {
 		var ok: Bool
-		var error: Refusal?
-	}
-
-	private struct Refusal: Decodable {
-		var details: [String: JSONValue]? = nil
-		var code: String
-		var message: String
+		var error: Wire.Refusal?
 	}
 
 	private struct Body<Result: Decodable>: Decodable {
@@ -311,7 +305,7 @@ package final class Server: Sendable {
 			guard let head = try? JSONDecoder().decode(Head.self, from: data) else { throw ClientError.unreadable }
 			if head.ok { return (data, response) }
 			if (400...599).contains(response.statusCode), head.error != nil { delivery?.rejected() }
-			let refusal = head.error ?? Refusal(code: "internal", message: "the server refused without saying why")
+			let refusal = head.error ?? Wire.Refusal(code: "internal", message: "the server refused without saying why", details: nil)
 			switch refusal.code {
 			case "unauthenticated" where asSignedIn:
 				if let session, forget(session) { ended.continuation.yield() }
@@ -319,10 +313,14 @@ package final class Server: Sendable {
 			case "limited":
 				throw ClientError.limited(seconds: response.value(forHTTPHeaderField: "Retry-After").flatMap(Int.init))
 			default:
-				throw ClientError.refused(
-					code: refusal.details?["projectIdentity"]?.string == "obsolete" ? "obsolete_project" : refusal.code,
-					message: refusal.message
-				)
+				let code = if refusal.details?.projectIdentity == "obsolete" {
+					"obsolete_project"
+				} else if refusal.details?.passkey == "native-unavailable" {
+					"native_passkey_unavailable"
+				} else {
+					refusal.code
+				}
+				throw ClientError.refused(code: code, message: refusal.message)
 			}
 		}
 		throw ClientError.unreachable(failure)
