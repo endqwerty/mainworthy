@@ -123,7 +123,8 @@ The owner's Mac sends the app without being asked: a job there (the homelab repo
 `services/mainworthy-testflight/`) reads `https://mainworthy.com/healthz` every five minutes. When the commit
 that instance runs passed the `gate` job of its push run on `main`, and `ios/`, `scripts/ios.ts` or
 `scripts/ios/` changed since the commit it last sent, it runs `bun scripts/ios.ts upload` in a checkout of that
-commit. So TestFlight gets the app of the server it talks to, and never an app whose commit failed CI. A change
+commit, after reading both again. So TestFlight gets the app of the server it talks to, and never an app whose
+commit failed CI. A change
 that touches none of those paths sends nothing. The job keeps its builds off the SSD with
 `MAINWORTHY_IOS_CACHE`, because a job launchd starts may not read a removable volume.
 
