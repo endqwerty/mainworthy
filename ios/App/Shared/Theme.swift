@@ -70,8 +70,8 @@ struct RefText: View {
 	}
 }
 
-/// A length of time in the largest unit that keeps it readable, in the web's units and rounding half up as the web
-/// does: "88 ms", "4.2 s", "12 s", "3 min", "1 h 5 min".
+/// A length of time in the largest unit that keeps it readable, in the units the web's `spent` uses, rounded half up:
+/// "88 ms", "4.2 s", "12 s", "3 min", "1 h 5 min".
 func spent(_ ms: Int) -> String {
 	if ms < 1000 { return "\(ms) ms" }
 	if ms < 10_000 {
