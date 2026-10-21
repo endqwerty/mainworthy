@@ -1,6 +1,6 @@
 // The only module that talks to SQLite. Everything above it calls `get`, `all`, `run` and `transaction`.
 import { Database, type Statement as PreparedStatement, type SQLQueryBindings } from "bun:sqlite";
-import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync, readdirSync } from "node:fs";
+import { chmodSync, closeSync, constants, lstatSync, mkdirSync, openSync, readdirSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
 export type SqlValue = string | number | bigint | boolean | null | Uint8Array;
@@ -9,35 +9,52 @@ export type Params = Record<string, SqlValue> | readonly SqlValue[];
 /** The one database file of an instance. */
 export const databasePath = (dataDir: string): string => join(dataDir, "mainworthy.db");
 
-/** Protect a database before SQLite reads or writes it; an existing file is never truncated. */
+/**
+ * Protect a database before SQLite reads or writes it; an existing file is never truncated. An existing file is
+ * checked and repaired by its path, never through a descriptor: closing any descriptor on a file drops every POSIX
+ * lock this process holds on it, SQLite's included, so a reader or worker thread opening the database would let
+ * another process write beside the writer and rebuild the log's index under it (#689, decision 0125). Only a file
+ * that does not exist yet, which no connection can hold, is created through a descriptor.
+ */
 export function prepareDatabaseFile(path: string, access: "create" | "existing" | "exclusive"): void {
-	const protect = (file: string, flags: number): void => {
-		const fd = openSync(file, flags | constants.O_NOFOLLOW | constants.O_NONBLOCK, 0o600);
+	const protect = (file: string): void => {
+		const stat = lstatSync(file);
+		if (!stat.isFile()) throw new Error("a database must be a regular file");
+		if (process.platform !== "win32" && typeof process.geteuid === "function" && stat.uid !== process.geteuid()) {
+			throw new Error("a database must be owned by the server user");
+		}
+		if ((stat.mode & 0o777) !== 0o600) chmodSync(file, 0o600);
+	};
+	const create = (): void => {
 		try {
-			const stat = fstatSync(fd);
-			if (!stat.isFile()) throw new Error("a database must be a regular file");
-			if (process.platform !== "win32" && typeof process.geteuid === "function" && stat.uid !== process.geteuid()) {
-				throw new Error("a database must be owned by the server user");
-			}
-			fchmodSync(fd, 0o600);
-		} finally {
-			closeSync(fd);
+			closeSync(
+				openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600),
+			);
+		} catch (error) {
+			// Made by somebody else meanwhile: it is checked below like any existing file.
+			if (!(access === "create" && error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
 		}
 	};
-	protect(
-		path,
-		constants.O_RDONLY |
-			(access === "existing" ? 0 : constants.O_CREAT) |
-			(access === "exclusive" ? constants.O_EXCL : 0),
-	);
+	if (access === "exclusive" || (access === "create" && !existsWithoutFollowing(path))) create();
+	protect(path);
 	for (const suffix of ["-wal", "-shm", "-journal"]) {
 		try {
-			protect(`${path}${suffix}`, constants.O_RDONLY);
+			protect(`${path}${suffix}`);
 		} catch (error) {
 			if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
 		}
 	}
 }
+
+const existsWithoutFollowing = (path: string): boolean => {
+	try {
+		lstatSync(path);
+		return true;
+	} catch (error) {
+		if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
+		throw error;
+	}
+};
 
 /** Create a new private database file before any callback can write sensitive bytes to it. */
 export function createPrivateDatabaseFile<T>(path: string, write: (privatePath: string) => T): T {

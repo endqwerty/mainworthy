@@ -1,5 +1,6 @@
 # Changelog
 
+- 2026-10-21: **Fixed:** opening the database from a reader thread, the checkpoint thread or the demo reset no longer drops the writer's file locks. Since the files were made private (decision 0120), each such open let another process write beside the server or rebuild the log's index under it, and the checkpoint thread could fail with `database disk image is malformed` (issue #689, decision 0125). To know whether an instance that ran since then was harmed, run `PRAGMA integrity_check` on a copy of its database. No stored data or API changes.
 - 2026-10-21: **Fixed:** a demo seeded in the first hours of a UTC day dates today's runs, reports and questions today. They were written up to four and a half hours before the moment the project became a demo, so before about 04:30 UTC some fell on yesterday, beside yesterday's run. No stored data or API changes.
 - 2026-10-21: **Fixed:** an attachment image that leaves the page while it still loads no longer fails that load; its object URL is released once the image has read it.
 - 2026-10-20: **Fixed:** startup demo resets skip the whole-database foreign-key scan before removal, while retaining every final foreign-key check. Reset logs name transaction setup, the pending-key check, and validation and commit after removal and recreation, so their elapsed time is visible (issue #707).
