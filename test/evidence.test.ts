@@ -2325,6 +2325,54 @@ describe("a change that ends", () => {
 		expect(queue().items).toEqual([]);
 	});
 
+	test("a landing's gate is read in the change's repository, even when that is none", () => {
+		const { repo: _repo, ...target } = ciReport({ commit: "head0079", branch: "feature", pr: 79, n: 1 }).target;
+		h.call("report", { ...ciReport({ commit: "head0079", branch: "feature", pr: 79, n: 1 }), target });
+		h.call("change", {
+			change: "pr:79",
+			state: "merged",
+			head: "head0079",
+			landing: { commit: "land0079", branch: "main" },
+		});
+		// Another repository reports the same hash: it is not this landing, and does not make it ambiguous.
+		h.call("report", {
+			...ciReport({ commit: "land0079", n: 1, fail: { 0: "other repo" } }),
+			target: { repo: "acme/other", commit: "land0079", branch: "main" },
+		});
+		expect(changes()).toMatchObject([
+			{
+				key: "pr:79",
+				head: "head0079",
+				verdict: "passed",
+				landing: { commit: "land0079", run: null, verdict: "pending" },
+			},
+		]);
+		expect(h.call<{ change: { landing: unknown } }>("impact", { change: "pr:79" }).change.landing).toMatchObject({
+			commit: "land0079",
+			verdict: "pending",
+		});
+	});
+
+	test("a head the code host names on an open change is asked about, and the old head's question leaves", () => {
+		h.call("report", ciReport({ commit: "first080", branch: "feature", pr: 80, n: 1, fail: { 0: "first fails" } }));
+		const asked = first(queue().items);
+		h.call("report", ciReport({ commit: "second80", branch: "feature", pr: 80, n: 1 }));
+		expect(queue().items).toEqual([]);
+		const moved = h.call<{ questions: string[]; already: boolean }>("change", {
+			change: "pr:80",
+			state: "open",
+			head: "first080",
+		});
+		const again = first(queue().items);
+		expect(moved).toMatchObject({ questions: [again.q], already: false });
+		expect(again).toMatchObject({ kind: "failure", state: "open", title: asked.title });
+		expect(h.call<GateStatus>("gate", { change: "pr:80" })).toMatchObject({ verdict: "blocked", open: [again.q] });
+		expect(h.call("change", { change: "pr:80", state: "open", head: "first080" })).toMatchObject({ already: true });
+		h.call("change", { change: "pr:80", state: "open", head: "second80" });
+		expect(queue().items).toEqual([]);
+		expect(h.call<GateStatus>("gate", { change: "pr:80" }).verdict).toBe("passed");
+	});
+
 	test("a landing received after the end still moves its commit to trunk, and reopening does not move it back", () => {
 		h.call("report", ciReport({ commit: "landed003", branch: "feature", pr: 68, n: 1, fail: { 0: "same cause" } }));
 		h.call("change", { change: "pr:68", state: "merged" });
