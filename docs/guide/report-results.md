@@ -355,7 +355,8 @@ add no flip.
 
 When the pipeline also runs the job again, the earlier attempt meets the new attempt's first
 decisive try, so one recovery is one flip whichever retried first. A correction of a result
-withdraws the flips of its tries too. A report keeps at most ten tries of a result. In the API,
+withdraws the flips of its tries too. A result keeps at most a hundred tries; a report with more is
+refused rather than cut, because the try that was dropped could be the one that passed. In the API,
 a result's `tries` lists them, each with an `outcome`, an optional `durationMs` and an
 optional `failure`; `mainworthy get T-1 --json` returns each recent result's `tries`, and a
 detector sample names the runner's `try` at either end.
@@ -392,7 +393,8 @@ counts as a pass. An unexpected pass counts as a failure, for a try as for the r
 In JUnit, Surefire's `flakyFailure`, `flakyError`, `rerunFailure` and `rerunError`
 elements become failed tries with their `message`. A testcase with only flaky elements
 passed after them, so it is a flip. A testcase with a `failure` and rerun elements failed
-every time and keeps the `failure` as its own message. Duplicate testcases named
+every time. Surefire writes the first run as the `failure` and the later runs after it, so the
+last rerun is the result and the `failure` is the oldest try. Duplicate testcases named
 `(retry #1)` and so on are not yet read as tries of one test.
 
 Jest and Vitest JSON contain the final assertion outcome and duration, but their

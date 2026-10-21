@@ -203,7 +203,7 @@ export const ResultIn = z.object({
 				failure: z.object({ message: z.string().max(4000), detail: z.string().max(20_000).optional() }).optional(),
 			}),
 		)
-		.max(10)
+		.max(100)
 		.optional()
 		.meta({ "x-mcp-hidden": true }),
 });

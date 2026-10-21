@@ -94,12 +94,26 @@ test("a correction withdraws the flips of the result it corrects", () => {
 	expect(flaky()).toBe(0);
 });
 
-test("a report holds at most ten tries of a result", () => {
+test("an earlier attempt that the runner's retry recovered reads as passed on that attempt", () => {
+	report("abab0001", "fail");
+	report("abab0001", "pass", [failed("expected 2, got 1")], 2);
+	const retried = h.call<{ last: { attempt: number; outcome: string; passedOnRetry: number | null }[] }[]>("get", {
+		refs: ["T-1"],
+	})[0]?.last;
+	expect(retried?.map((row) => [row.attempt, row.outcome, row.passedOnRetry])).toEqual([
+		[2, "pass", null],
+		[1, "fail", 2],
+	]);
+});
+
+test("a report holds at most a hundred tries of a result", () => {
+	report("ffff0001", "fail", [{ outcome: "pass" }, ...Array.from({ length: 99 }, () => failed())]);
+	expect(page()?.flips).toBe(1);
 	expect(() =>
 		report(
-			"ffff0001",
+			"ffff0002",
 			"pass",
-			Array.from({ length: 11 }, () => failed()),
+			Array.from({ length: 101 }, () => failed()),
 		),
 	).toThrow();
 });
