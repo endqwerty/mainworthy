@@ -349,8 +349,9 @@ the steps are kept below for an instance that has none.
   by a browser test that fails now and then (#94), and green after a re-run of shard `tests-4`. GitHub's "Re-run
   failed jobs" re-runs only `gate`, because a shard with a failing test ends as a success and leaves the verdict
   to the gate. Re-run the shard's own job (`gh run rerun <run> --job <id>`): `gate` runs again after it and reads
-  the other shards' reports from the earlier attempt. A test that fails now and then is still a defect to fix,
-  not to retry (`AGENTS.md`).
+  the other shards' reports from the earlier attempt. Since 2026-10-21 the `rerun` workflow does this by itself,
+  once, after a run's first attempt fails (decision 0127); its run's summary says which jobs it ran again and why.
+  A test that fails now and then is still a defect to fix, not to retry (`AGENTS.md`).
 - **A change that touches no code reports fewer tests.** The `scope` job runs only what a change needs
   (decision 0090). For a change to prose, another workflow or the iPhone app, one shard named `tests` reports the
   test files it chose, and the gate on the instance judges those. The job's summary page lists them.

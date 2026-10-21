@@ -128,7 +128,8 @@ const NEXT: Record<GateStatus["verdict"], (gate: GateStatus) => string> = {
 	passed: () => "Nothing to do.",
 	failed: () =>
 		"Fix them and push. The gate passes when a commit passes these tests; nobody else is asked. " +
-		"A test that fails now and then is a defect too: re-run its shard's job to unblock, and file it as flaky-test.",
+		"After a first attempt fails, the rerun workflow runs the failing shards' jobs again once by itself " +
+		"(decision 0127): a test that then passes is flaky, a defect too, to file as flaky-test.",
 	blocked: (gate) =>
 		gate.open.length > 0
 			? `A person is asked (${gate.open.join(", ")}). If that is a CI failure, the project's policy no longer ` +
