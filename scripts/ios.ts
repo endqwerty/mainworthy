@@ -22,8 +22,14 @@ const IOS = join(ROOT, "ios");
 const KIT = join(IOS, "Kit");
 const PROJECT = join(IOS, "Mainworthy.xcodeproj");
 const LOCAL = join(IOS, "Config", "Local.xcconfig");
-/** Where builds go. One directory for each checkout, so two of them do not build over each other. */
-const CACHE = join(homedir(), ".cache", "mainworthy-ios", Bun.hash(ROOT).toString(16));
+/**
+ * Where builds go. One directory for each checkout, so two of them do not build over each other. A job that
+ * launchd starts cannot read a removable volume, so `MAINWORTHY_IOS_CACHE` can move them off one.
+ */
+const CACHE = join(
+	process.env.MAINWORTHY_IOS_CACHE || join(homedir(), ".cache", "mainworthy-ios"),
+	Bun.hash(ROOT).toString(16),
+);
 /** The simulator the screens are tested in. It is this project's own, so no other project's test finds it busy. */
 const SIMULATOR = "Mainworthy";
 /** The port whose holder has the simulator (`alone`). */

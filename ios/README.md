@@ -117,6 +117,16 @@ privacy policy is `https://mainworthy.com/privacy` (`docs/guide/privacy.md`).
 sending it. Testers outside the team need Apple's beta review first, and issue #210 says what else is left before the
 app suits people who do not run their own instance.
 
+### Sent on its own after a deploy
+
+The owner's Mac sends the app without being asked: a job there (the homelab repository,
+`services/mainworthy-testflight/`) reads `https://mainworthy.com/healthz` every five minutes. When the commit
+that instance runs passed the `gate` job of its push run on `main`, and `ios/`, `scripts/ios.ts` or
+`scripts/ios/` changed since the commit it last sent, it runs `bun scripts/ios.ts upload` in a checkout of that
+commit. So TestFlight gets the app of the server it talks to, and never an app whose commit failed CI. A change
+that touches none of those paths sends nothing. The job keeps its builds off the SSD with
+`MAINWORTHY_IOS_CACHE`, because a job launchd starts may not read a removable volume.
+
 ## Licence and the App Store
 
 The app is under the Apache License 2.0 like the rest of the repository, copyright held by the owner
@@ -145,7 +155,7 @@ What App Store Connect asks about the licence, and what to answer:
 | `bun scripts/ios.ts project` | Writes `ios/Mainworthy.xcodeproj`, to open in Xcode | 1 s |
 | `bun scripts/ios.ts upload [--dry-run]` | Builds for release and sends it to TestFlight ([above](#send-it-to-testflight)) | 35 s and the upload |
 
-Builds go to `~/.cache/mainworthy-ios`, never into the repository: `test/architecture.test.ts` reads every file
+Builds go to `~/.cache/mainworthy-ios` (or `$MAINWORTHY_IOS_CACHE`), never into the repository: `test/architecture.test.ts` reads every file
 here. There is one simulator, named Mainworthy, so one `uitest` runs at a time on a machine: a second one,
 from any checkout, waits for the first.
 
