@@ -96,8 +96,8 @@ test.skipIf(!browserAvailable)(
 			// A defect reference asked for a selection stays open while the question shown is not in it.
 			await page.keyboard.press("d");
 			await page.locator("#answer-extra").fill("BUG-7");
-			await page.waitForTimeout(100);
-			expect(await page.locator("#answer-extra").count()).toBe(1);
+			expect(await page.locator("#answer-extra").inputValue()).toBe("BUG-7");
+			await bar.getByText("2 failures selected").waitFor();
 			// While it is open the selection is what the answer goes to, so it does not change.
 			await box(f3).click();
 			await page
@@ -179,13 +179,21 @@ test.skipIf(!browserAvailable)(
 	"a phone shows no box: the palette selects, as it lists every key (decision 0018)",
 	async () => {
 		const server = await startServer({ preset: "standard", unlinked: "ask" });
-		await questions(server);
+		const { failures } = await questions(server);
 		const phone = await openPage(server, { path: "/p/scratch/queue", device: "phone" });
 		try {
 			const { page } = phone;
 			await page.locator("#list [role=option]").first().waitFor();
 			expect(await page.locator(".queue-check").count()).toBeGreaterThan(0);
 			expect(await page.locator(".queue-check").first().isVisible()).toBe(false);
+			const failure = failures[0];
+			if (!failure) throw new Error("Missing failure question");
+			await page.locator(`[data-question="${failure}"] [role=option]`).tap();
+			await page.getByRole("button", { name: "Actions", exact: true }).tap();
+			await page.getByRole("option", { name: /Select question/ }).tap();
+			await page.locator(".queue-bulk").getByText("1 failure selected", { exact: true }).waitFor();
+			expect(await page.locator(`[data-question="${failure}"] .queue-check`).getAttribute("data-checked")).toBe("true");
+			expect(await page.locator(".queue-answers .ans b").allInnerTexts()).toContain("Flaky");
 			expect(phone.errors).toEqual([]);
 		} finally {
 			await phone.close();
