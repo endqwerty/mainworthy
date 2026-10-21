@@ -112,7 +112,8 @@ test.skipIf(!browserAvailable)(
 			expect(shown.invitation).toMatchObject({ name: "sam", purpose: "join" });
 			const made = await register(page, shown.passkey);
 			const accepted = await send(page, "/api/login", { invitation: code, passkey: made, label: "this browser" });
-			expect(`${accepted.status} ${JSON.stringify(accepted.body)}`).toBe('200 {"ok":true,"result":{"signedIn":true}}');
+			expect(accepted.status).toBe(200);
+			expect(accepted.body).toEqual({ ok: true, result: { signedIn: true } });
 			// The cookie is the browser's: the page cannot read it, and the next request carries it.
 			expect(await page.evaluate(() => document.cookie)).not.toContain("mainworthy_sid");
 			const first = resultOf<{ actor: string; via: string; session: number; credentials: unknown }>(
