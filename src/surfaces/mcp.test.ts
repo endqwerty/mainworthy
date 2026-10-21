@@ -48,6 +48,18 @@ function resultOf<S extends z.ZodType>(reply: unknown, schema: S): z.output<S> {
 	return schema.parse(envelope.result);
 }
 
+test("tools/list names every proposal and decision reply status", () => {
+	const tools = mcpTools();
+	for (const [name, statuses] of [
+		["propose", REPLIES.propose.shape.status.options],
+		["decide", REPLIES.decide.element.shape.status.options],
+	] as const) {
+		const tool = tools.find((entry) => entry.name === name);
+		if (!tool) throw new Error(name);
+		for (const status of statuses) expect(tool.description).toContain(status);
+	}
+});
+
 test("tools/list accepts a get cursor", () => {
 	const tools = mcpTools();
 	expect(tools.find((tool) => tool.name === "get")?.inputSchema.properties?.cursor).toMatchObject({

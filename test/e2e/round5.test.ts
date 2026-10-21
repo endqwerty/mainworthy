@@ -101,8 +101,10 @@ check(
 				await page.getByRole("textbox", { name: "Step 2", exact: true }).click();
 				await page.keyboard.type(text);
 				expect(await page.getByRole("textbox", { name: "Step 2", exact: true }).inputValue()).toBe("Apply the coupon");
-				await page.keyboard.press("Escape");
 				await page.getByText("Resolve the conflict first", { exact: false }).first().waitFor();
+				await page.keyboard.press("Escape");
+				// A proposal that Escape sent would leave the page before this request does, and be counted first.
+				await page.evaluate(() => fetch("/healthz").then(() => undefined));
 			}
 			expect(sent).toBe(0);
 			await page.getByRole("button", { name: "Resolve conflict", exact: true }).click();

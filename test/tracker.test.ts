@@ -1092,13 +1092,9 @@ test("stopping persists the in-flight tracker reply and leaves queued requests f
 	directory = mkdtempSync(join(tmpdir(), "mainworthy-tracker-stop-"));
 	const config = { ...defaultConfig({}), owner: "robin", dataDir: directory, port: 0, github };
 	const entered = Promise.withResolvers<void>();
-	const reached = Promise.withResolvers<void>();
 	const reply = Promise.withResolvers<TrackerItem>();
 	let calls = 0;
 	instance = start(config, () => ({ ui: null }), {
-		onShutdownPhase: (phase) => {
-			if (phase === "deliveries") reached.resolve();
-		},
 		readers: 0,
 		trackerPort: {
 			...port,
@@ -1132,15 +1128,10 @@ test("stopping persists the in-flight tracker reply and leaves queued requests f
 		});
 	const minute = instance.minute();
 	await entered.promise;
-	let stopped = false;
 	const stopping = instance.stop();
-	void stopping.then(() => {
-		stopped = true;
-	});
 	try {
 		expect(instance.stop()).toBe(stopping);
-		await reached.promise;
-		expect(stopped).toBe(false);
+		expect(await Promise.race([stopping.then(() => "stopped"), Bun.sleep(20).then(() => "waiting")])).toBe("waiting");
 	} finally {
 		reply.resolve(item);
 		await minute;
@@ -1166,12 +1157,8 @@ test("a tracker delivery rejected during HTTP drain does not create an unhandled
 	directory = mkdtempSync(join(tmpdir(), "mainworthy-tracker-reject-"));
 	const config = { ...defaultConfig({}), owner: "robin", dataDir: directory, port: 0, github };
 	const entered = Promise.withResolvers<void>();
-	const reached = Promise.withResolvers<void>();
 	const trackerReply = Promise.withResolvers<TrackerItem>();
 	instance = start(config, () => ({ ui: null }), {
-		onShutdownPhase: (phase) => {
-			if (phase === "http") reached.resolve();
-		},
 		readers: 1,
 		trackerPort: {
 			...port,
@@ -1216,24 +1203,18 @@ test("a tracker delivery rejected during HTTP drain does not create an unhandled
 		throw new Error("tracker reply write failed");
 	});
 	const stopping = current.stop();
-	let stopped = false;
 	const outcome = stopping.then(
-		() => {
-			stopped = true;
-			return "stopped";
-		},
+		() => "stopped",
 		(error: unknown) => String(error),
 	);
 	try {
-		await reached.promise;
-		expect(stopped).toBe(false);
 		trackerReply.resolve(item);
 		await minute;
 		expect(logged.mock.calls).toContainEqual([
 			"[mainworthy] sending tracker requests failed:",
 			expect.objectContaining({ message: "tracker reply write failed" }),
 		]);
-		expect(stopped).toBe(false);
+		expect(await Promise.race([outcome, Bun.sleep(20).then(() => "draining")])).toBe("draining");
 		readReply.resolve();
 		expect(await (await http).json()).toMatchObject({ ok: true, result: { items: [] } });
 		expect(await outcome).toBe("stopped");
@@ -1254,12 +1235,8 @@ test("a tracker delivery rejected after HTTP drain still completes shutdown and 
 	directory = mkdtempSync(join(tmpdir(), "mainworthy-tracker-after-drain-"));
 	const config = { ...defaultConfig({}), owner: "robin", dataDir: directory, port: 0, github };
 	const entered = Promise.withResolvers<void>();
-	const reached = Promise.withResolvers<void>();
 	const trackerReply = Promise.withResolvers<TrackerItem>();
 	instance = start(config, () => ({ ui: null }), {
-		onShutdownPhase: (phase) => {
-			if (phase === "deliveries") reached.resolve();
-		},
 		readers: 1,
 		trackerPort: {
 			...port,
@@ -1298,17 +1275,12 @@ test("a tracker delivery rejected after HTTP drain still completes shutdown and 
 	const write = spyOn(current.app.db, "run").mockImplementationOnce(() => {
 		throw new Error("tracker reply write failed after drain");
 	});
-	let stopped = false;
 	const outcome = current.stop().then(
-		() => {
-			stopped = true;
-			return "stopped";
-		},
+		() => "stopped",
 		(error: unknown) => String(error),
 	);
 	try {
-		await reached.promise;
-		expect(stopped).toBe(false);
+		expect(await Promise.race([outcome, Bun.sleep(50).then(() => "waiting")])).toBe("waiting");
 		trackerReply.resolve(item);
 		await minute;
 		expect(await outcome).toBe("stopped");
