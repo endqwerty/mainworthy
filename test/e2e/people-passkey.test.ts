@@ -236,29 +236,32 @@ test.skipIf(!browserAvailable)(
 	30_000,
 );
 
-/**
- * A slow server on the way back from the provider: the sign-in reaches it a moment after the page's first look at
- * the session, and the refusal that look drew is delivered once the sign-in has been answered. A busy machine does
- * this by chance; here it is every time.
- */
-async function slowReturn(page: Page): Promise<void> {
-	let answered: Promise<void> | null = null;
+/** Holds each provider sign-in to check that the page waits before asking who is signed in. */
+async function slowReturn(page: Page): Promise<() => Promise<void>> {
+	await page.addInitScript(() => {
+		let reads = 0;
+		Reflect.set(window, "mainworthySessionReads", reads);
+		const send = window.fetch.bind(window);
+		const sending = (input: RequestInfo | URL, init?: RequestInit) => {
+			if (String(input).endsWith("/api/session")) Reflect.set(window, "mainworthySessionReads", ++reads);
+			return send(input, init);
+		};
+		window.fetch = Object.assign(sending, { preconnect: window.fetch.preconnect });
+	});
+	let arrived = Promise.withResolvers<() => void>();
 	await page.route("**/api/login", async (route) => {
 		if (!route.request().postData()?.includes('"oidc"')) return route.fallback();
-		let done = (): void => {};
-		answered = new Promise((resolve) => {
-			done = resolve;
-		});
-		await new Promise((resolve) => setTimeout(resolve, 300));
-		const response = await route.fetch();
-		await route.fulfill({ response });
-		done();
+		const held = Promise.withResolvers<void>();
+		arrived.resolve(() => held.resolve());
+		await held.promise;
+		await route.continue();
 	});
-	await page.route("**/api/session", async (route) => {
-		const response = await route.fetch();
-		if (response.status() === 401) await answered;
-		await route.fulfill({ response });
-	});
+	return async () => {
+		const release = await arrived.promise;
+		expect(await page.evaluate(() => Reflect.get(window, "mainworthySessionReads"))).toBe(0);
+		arrived = Promise.withResolvers<() => void>();
+		release();
+	};
 }
 
 test.skipIf(!browserAvailable)(
@@ -270,10 +273,11 @@ test.skipIf(!browserAvailable)(
 		try {
 			browser = await openPage(server, { signedIn: false, path: `/invite#${made.code}`, ready: "h1" });
 			const { page } = browser;
-			await slowReturn(page);
+			const finishReturn = await slowReturn(page);
 			await page.getByRole("heading", { name: "You are invited as noor" }).waitFor();
 			idp.next({ subject: "sub-noor", email: "noor@example.com" });
 			await page.getByRole("button", { name: "Accept with Example ID" }).click();
+			await finishReturn();
 			await page.locator("#app").waitFor();
 			expect(await page.locator(".sfoot .me").textContent()).toContain("noor");
 			// The provider's code and state are not left in the address bar.
@@ -286,6 +290,7 @@ test.skipIf(!browserAvailable)(
 			await page.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
 			idp.next({ subject: "sub-noor" });
 			await page.getByRole("button", { name: "Sign in with Example ID" }).click();
+			await finishReturn();
 			await page.locator("#app").waitFor();
 			expect(await page.locator(".sfoot .me").textContent()).toContain("noor");
 			expect(browser.errors).toEqual([]);
