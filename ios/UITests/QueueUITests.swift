@@ -950,7 +950,10 @@ final class QueueUITests: XCTestCase {
 		app.launch()
 		try signIn(app)
 
-		// The instance's first project is empty. The test's own is opened from the menu.
+		// The instance's first project is empty: Select is in its place, with nothing to select.
+		XCTAssertTrue(app.staticTexts["Nothing needs an answer"].waitForExistence(timeout: 10))
+		XCTAssertFalse(app.buttons["queue-select"].isEnabled)
+		// The test's own is opened from the menu.
 		app.openProject(project)
 		let failure = app.staticTexts["expected $90.00, got $100.00"]
 		XCTAssertTrue(failure.waitForExistence(timeout: 10))
@@ -1007,9 +1010,16 @@ final class QueueUITests: XCTestCase {
 		XCTAssertTrue(notice.waitForExistence(timeout: 10))
 		XCTAssertTrue(notice.label.hasSuffix(": Reject."), notice.label)
 
-		// What was decided, and by whom.
+		// What was decided, and by whom. The bar stays as it was: Select stays in its place, unavailable, and
+		// Unsent answers beside it does not move.
+		let unsent = app.buttons["unsent-answers"].frame
+		let select = app.buttons["queue-select"]
+		XCTAssertTrue(select.isEnabled)
 		app.buttons["Decided"].tap()
 		XCTAssertTrue(app.staticTexts["Reject · \(environment["MAINWORTHY_TEST_NAME"] ?? "")"].waitForExistence(timeout: 10))
+		XCTAssertTrue(select.exists)
+		XCTAssertFalse(select.isEnabled)
+		XCTAssertEqual(app.buttons["unsent-answers"].frame, unsent)
 		shot("6-decided")
 
 		app.tabBars.buttons["You"].tap()

@@ -9,8 +9,9 @@ struct QueueView: View {
 	let workspace: Workspace
 	@State private var path: [String] = []
 
-	/// Whether Select is offered: on the open questions, to a person who may answer.
-	private var canSelect: Bool { screen.showing == .open && workspace.project?.may(.produce) == true }
+	/// Whether Select is in the bar: for a person who may answer. It stays there on either list, so switching
+	/// lists moves nothing in the bar; only open questions can be selected.
+	private var mayAnswer: Bool { workspace.project?.may(.produce) == true }
 
 	@ViewBuilder private var selectButton: some View {
 		if screen.isSelecting {
@@ -18,7 +19,9 @@ struct QueueView: View {
 				.buttonStyle(.glassProminent)
 				.accessibilityIdentifier("queue-select")
 		} else {
-			Button("Select") { screen.select(true) }.accessibilityIdentifier("queue-select")
+			Button("Select") { screen.select(true) }
+				.disabled(screen.showing != .open || screen.questions.isEmpty)
+				.accessibilityIdentifier("queue-select")
 		}
 	}
 
@@ -54,7 +57,7 @@ struct QueueView: View {
 						ProjectMenu(workspace: workspace)
 						ToolbarItem(placement: .topBarTrailing) { unsentLink }
 					}
-					if canSelect {
+					if mayAnswer {
 						// A text action stands apart from the symbol beside it, so the two do not read as one button.
 						ToolbarSpacer(.fixed, placement: .topBarTrailing)
 						ToolbarItem(placement: .topBarTrailing) { selectButton }
