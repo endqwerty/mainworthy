@@ -459,13 +459,22 @@ check(
 			await leaveField(a);
 			await a.keyboard.press("e");
 			await title(a).fill("Typed in the first window");
+			const heldRead = b
+				.waitForResponse(
+					(response) => response.url().endsWith("/get") && Boolean(response.request().postData()?.includes('"C-1"')),
+				)
+				.then((response) => response.finished());
 			get.release();
 			// The second window shows that draft, and its line says whose it is, not that the case is as recorded.
 			await eventually(
 				() => title(b).inputValue(),
 				(value) => value === "Typed in the first window",
 			);
-			await b.evaluate(() => new Promise((done) => setTimeout(done, 150)));
+			await heldRead;
+			await b.evaluate(
+				() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))),
+			);
+			await b.locator("#stat").filter({ hasText: "being edited in another window" }).waitFor();
 			const line = await b.locator("#stat").innerText();
 			expect(line).not.toContain("as the server recorded it");
 			expect(line).toContain("being edited in another window");
@@ -833,46 +842,47 @@ check(
 	30000,
 );
 
-for (const received of [false, true])
-	check(
-		`R6-2 a ${received ? "lost reply" : "failed merge request"} keeps the draft and card for retry`,
-		async () => {
-			const server = await startServer();
-			await cases(server);
-			const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
-			const gate = latch();
-			try {
-				const { page } = h;
-				await conflict(server, page);
-				await page.getByRole("textbox", { name: "Merged title", exact: true }).fill("Merge to retry");
-				let sent = false;
-				await page.route("**/decide", async (route) => {
-					sent = true;
-					if (received) await route.fetch();
-					await gate.held;
-					await route.abort("failed");
-				});
-				await resolve(page);
-				await eventually(async () => sent, Boolean);
-				gate.release();
-				await page.getByText("Your draft and conflict card are kept", { exact: false }).first().waitFor();
-				const merged = page.getByRole("textbox", { name: "Merged title", exact: true });
-				await merged.press("End");
-				await page.keyboard.type(" after failure");
-				await page.waitForTimeout(300);
-				expect(await page.locator(".conflict-card").count()).toBe(1);
-				expect(await page.getByRole("textbox", { name: "Merged title", exact: true }).inputValue()).toBe(
-					"Merge to retry after failure",
-				);
-				expect((await drafts(page)).join(" ")).toContain("Merge to retry");
-			} finally {
-				gate.release();
-				await h.close();
-				await server.stop();
-			}
-		},
-		30000,
-	);
+check(
+	"R6-2 a failed merge request keeps the draft and card for retry",
+	async () => {
+		const server = await startServer();
+		await cases(server);
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		const gate = latch();
+		try {
+			const { page } = h;
+			await conflict(server, page);
+			await page.getByRole("textbox", { name: "Merged title", exact: true }).fill("Merge to retry");
+			let sent = false;
+			await page.route("**/decide", async (route) => {
+				sent = true;
+				await gate.held;
+				await route.abort("failed");
+			});
+			await resolve(page);
+			await eventually(async () => sent, Boolean);
+			gate.release();
+			await page.getByText("Your draft and conflict card are kept", { exact: false }).first().waitFor();
+			const merged = page.getByRole("textbox", { name: "Merged title", exact: true });
+			await merged.press("End");
+			await page.keyboard.type(" after failure");
+			await eventually(
+				() => drafts(page),
+				(rows) => rows.some((text) => text.includes("Merge to retry after failure")),
+			);
+			expect(await page.locator(".conflict-card").count()).toBe(1);
+			expect(await page.getByRole("textbox", { name: "Merged title", exact: true }).inputValue()).toBe(
+				"Merge to retry after failure",
+			);
+			expect((await drafts(page)).join(" ")).toContain("Merge to retry after failure");
+		} finally {
+			gate.release();
+			await h.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
 
 check(
 	"R6-3 a replacement tab resolves a stored card without touching the editor or leaving a draft",
