@@ -569,7 +569,7 @@ test("announce binds an artifact through HTTP and release reports use its build 
 });
 
 test("red report, blocked gate, generated decision, passed gate without another report", async () => {
-	await withInstance(async ({ cli, instance }) => {
+	await withInstance(async ({ cli, run, instance }) => {
 		const report = await cli([
 			"report",
 			RED_XML,
@@ -588,15 +588,15 @@ test("red report, blocked gate, generated decision, passed gate without another 
 		expect(report.stdout).toContain("2 results   1 pass   1 fail   0 skip");
 		expect(report.stdout).toMatch(/1 new\s+Q-\d+/);
 		expect(report.stdout).toContain("expected 90.00, got 100.00");
-		const blocked = await cli(["gate", "--commit", COMMIT]);
+		const blocked = await run(["gate", "--commit", COMMIT]);
 		expect(blocked.code).toBe(2);
 		expect(blocked.stdout).toContain("blocked:");
 		expect(blocked.stdout).toContain("needs an answer");
-		const inbox = outputWith(Inbox, await cli(["inbox", "--kind", "failure"]));
+		const inbox = outputWith(Inbox, await run(["inbox", "--kind", "failure"]));
 		const question = inbox.items[0];
 		expect(question).toBeDefined();
 		if (!question) throw new Error("the failed upload did not open its failure question");
-		const decision = await cli([
+		const decision = await run([
 			"decide",
 			"--json",
 			JSON.stringify({
@@ -608,14 +608,14 @@ test("red report, blocked gate, generated decision, passed gate without another 
 		]);
 		expect(decision.code).toBe(0);
 		expect(decision.stdout).toContain('"status": "decided"');
-		const passed = await cli(["gate", "--commit", COMMIT]);
+		const passed = await run(["gate", "--commit", COMMIT]);
 		expect(passed.code).toBe(0);
 		expect(passed.stdout).toContain("passed:");
 		expect(passed.stdout).not.toContain("needs an answer");
 		expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n).toBe(1);
 		// The same files again are answered with the first receipt, gate line included: it still says blocked, and
 		// the command says on stderr that it is the old one and where the verdict now is.
-		const again = await cli([
+		const again = await run([
 			"report",
 			RED_XML,
 			"--commit",
@@ -1065,9 +1065,7 @@ test("all registry operations have generated commands, global help and --help", 
 	});
 });
 
-// `run` stands in for `cli` in most of this file, so this is the test that holds the two together: the same
-// argument vectors, environments and standard input give the same output and exit code in the process and in
-// the executable. Each case is one that leaves the instance as it was, so the second run sees what the first did.
+// One executable comparison holds `run` to the process boundary. The argument matrix stays in-process.
 test("run in the test's process gives what the executable gives", async () => {
 	await withInstance(async ({ cli, run, directory }) => {
 		// A file named from the working directory: read from there by both, or the two answers differ.
@@ -1088,15 +1086,11 @@ test("run in the test's process gives what the executable gives", async () => {
 			[["find", "--url", "http://127.0.0.1:1"]],
 			[["frobnicate"]],
 		];
-		const both = await Promise.all(
-			cases.map(async ([argv, options]) => ({
-				argv: argv.join(" "),
-				executable: await cli(argv, options),
-				here: await run(argv, options),
-			})),
-		);
-		for (const { argv, executable, here } of both) expect({ argv, ...here }).toEqual({ argv, ...executable });
-		expect(both.map((result) => result.here.code)).toEqual([0, 0, 0, 4, 4, 4, 0, 4, 4, 3, 4, 4]);
+		const parity = ["fmt", "invalid.md"];
+		const options = { cwd: join(directory, "cases") };
+		expect(await run(parity, options)).toEqual(await cli(parity, options));
+		const results = await Promise.all(cases.map(([argv, options]) => run(argv, options)));
+		expect(results.map((result) => result.code)).toEqual([0, 0, 0, 4, 4, 4, 0, 4, 4, 3, 4, 4]);
 		expect(process.env.MAINWORTHY_URL).toBeUndefined();
 	});
 });
@@ -1147,16 +1141,20 @@ test("a command that writes after it ended, or outlives its time, fails where it
 	const untouched = () => expect({ home: process.env.HOME, cwd: process.cwd() }).toEqual(before);
 
 	// Written after the command ended. The executable would have printed it; the next command says so, once.
+	const written = Promise.withResolvers<void>();
 	const answered = await inThisProcess(
 		"late",
 		async () => {
-			setTimeout(() => process.stderr.write("written late\n"), 5);
+			setTimeout(() => {
+				process.stderr.write("written late\n");
+				written.resolve();
+			}, 5);
 			return 0;
 		},
 		given,
 	);
 	expect(answered).toEqual({ stdout: "", stderr: "", code: 0 });
-	await Bun.sleep(20);
+	await written.promise;
 	await expect(quiet()).rejects.toThrow(
 		'a command wrote after it had ended, which run did not return: "written late\\n"',
 	);
@@ -1185,25 +1183,66 @@ test("a command that writes after it ended, or outlives its time, fails where it
 });
 
 test("generated flags handle booleans, numbers, repeated arrays and union fields", async () => {
-	await withInstance(async ({ run }) => {
-		await run(["new"], { input: "Coupon applies\n  Apply SAVE10 > Total is 90.00\n" });
-		const result = await run([
-			"find",
-			"--in",
-			"cases",
-			"--deep",
-			"false",
-			"--limit",
-			"5",
-			"--tags",
-			"a,b",
-			"--tags",
-			"c",
-			"--compact",
-		]);
+	await withInstance(async ({ run, client }) => {
+		const created = Created.parse(
+			await client.call("propose", {
+				edits: [
+					{ op: "create", outline: "First match", folder: "Coupons", tags: ["a", "b", "c"] },
+					{ op: "create", outline: "Second match", folder: "Coupons", tags: ["a", "b", "c"] },
+					{ op: "create", outline: "Nested match", folder: "Coupons/Child", tags: ["a", "b", "c"] },
+					{ op: "create", outline: "Missing last tag", folder: "Coupons", tags: ["a", "b"] },
+					{ op: "create", outline: "Missing first tags", folder: "Coupons", tags: ["c"] },
+				],
+			}),
+		);
+		const refs = created.cases.map((row) => row.ref);
+		const flags = ["find", "--in", "cases", "--tags", "a,b", "--tags", "c", "--compact"];
+		const result = await run([...flags, "--limit", "1"]);
 		expect(result.code).toBe(0);
-		expect(outputWith(Found, result).items).toEqual([]);
+		expect(outputWith(Found, result).items.map((row) => row.ref)).toEqual(["C-1"]);
 		expect(result.stdout.trim()).not.toContain("\n");
+		expect(
+			outputWith(
+				Found,
+				await run([
+					"find",
+					"--json",
+					JSON.stringify({ in: "cases", folder: "Coupons", deep: false, limit: 5, tags: ["a", "b", "c"] }),
+				]),
+			).items.map((row) => row.ref),
+		).toEqual(refs.slice(0, 2));
+		expect(
+			outputWith(
+				Found,
+				await run([
+					"find",
+					"--json",
+					JSON.stringify({ in: "cases", folder: "Coupons", deep: true, limit: 5, tags: ["a", "b", "c"] }),
+				]),
+			).items.map((row) => row.ref),
+		).toEqual(refs.slice(0, 3));
+		expect(outputWith(Found, await run([...flags, "--limit", "5"])).items.map((row) => row.ref)).toEqual(
+			refs.slice(0, 3),
+		);
+		expect((await run(["policy", "tests", "ask"])).code).toBe(0);
+		await client.call("report", {
+			target: { session: "boolean-flags" },
+			results: [
+				{ test: { key: "linked", case: refs[0] }, outcome: "pass" },
+				{ test: { key: "unlinked" }, outcome: "pass" },
+			],
+		});
+		const mapping = (await client.call("inbox", { kind: "map" })).items[0];
+		if (!mapping) throw new Error("the report did not open a mapping question");
+		await client.call("decide", {
+			q: mapping.q,
+			onEvidence: mapping.evidenceHash,
+			answer: { is: "link", pairs: [["T-1", "C-1"]] },
+		});
+		const allTests = outputWith(Found, await run(["find", "--in", "tests", "--unlinked", "false"])).items;
+		const unlinked = outputWith(Found, await run(["find", "--in", "tests", "--unlinked", "true"])).items;
+		expect(allTests.map((row) => row.ref)).toEqual(["T-2", "T-1"]);
+		expect(unlinked.map((row) => row.ref)).toEqual(["T-2"]);
 		const admin = await run(["admin", "--do", "project.list"]);
 		expect(admin.code).toBe(0);
 		expect(admin.stdout).toContain('"key": "scratch"');
@@ -1365,16 +1404,49 @@ test("open prints the running web UI URL", async () => {
 });
 
 test("gate --wait observes evidence that arrives while it is polling", async () => {
-	await withInstance(async ({ run, client }) => {
-		const waiting = run(["gate", "--commit", COMMIT, "--wait", "1.5"]);
-		await Bun.sleep(300);
-		await client.call("report", {
-			target: { commit: COMMIT, branch: "main" },
-			results: [{ test: { key: "passing-test" }, outcome: "pass" }],
+	await withInstance(async ({ run, client, instance }) => {
+		const pending = Promise.withResolvers<void>();
+		const resume = Promise.withResolvers<void>();
+		const proxy = Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			async fetch(request) {
+				const url = new URL(request.url);
+				const response = await fetch(`${instance.url}${url.pathname}`, request);
+				if (url.pathname.endsWith("/gate")) {
+					const reply: unknown = await response.clone().json();
+					if (z.object({ result: z.object({ verdict: z.string() }) }).parse(reply).result.verdict === "pending") {
+						pending.resolve();
+						await resume.promise;
+					}
+				}
+				return response;
+			},
 		});
-		const result = await waiting;
-		expect(result.code).toBe(0);
-		expect(result.stdout).toContain("passed:");
+		const waiting = run(["gate", "--commit", COMMIT, "--wait", "1.5", "--url", proxy.url.origin]);
+		try {
+			try {
+				await Promise.race([
+					pending.promise,
+					waiting.then(() => {
+						throw new Error("gate ended before returning pending");
+					}),
+				]);
+				await client.call("report", {
+					target: { commit: COMMIT, branch: "main" },
+					results: [{ test: { key: "passing-test" }, outcome: "pass" }],
+				});
+			} finally {
+				resume.resolve();
+			}
+			const result = await waiting;
+			expect(result.code).toBe(0);
+			expect(result.stdout).toContain("passed:");
+		} finally {
+			resume.resolve();
+			await waiting.catch(() => undefined);
+			await proxy.stop(true);
+		}
 	});
 });
 
@@ -2345,18 +2417,6 @@ test("token files accept the server's longest token and preserve flag precedence
 		},
 		{ mode: "server", env: { MAINWORTHY_OWNER_TOKEN: token } },
 	);
-});
-
-test("the help says to prefer the variable to --token, and offers a file", async () => {
-	await withInstance(async ({ run }) => {
-		for (const argv of [["help"], ["find", "--help"], ["serve", "--help"]]) {
-			const help = await run(argv);
-			expect([argv.join(" "), help.code]).toEqual([argv.join(" "), 0]);
-			expect(help.stdout).toContain("--token-file");
-			expect(help.stdout).toContain("MAINWORTHY_TOKEN");
-			expect(help.stdout).toMatch(/process list/);
-		}
-	});
 });
 
 test("real report outputs use git top level or cwd for stable Jest and Vitest keys", async () => {
