@@ -90,7 +90,7 @@ struct QueueView: View {
 
 	@ViewBuilder private var list: some View {
 		switch screen.loading {
-		case .first:
+		case .first, .reading:
 			ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
 		case .failed(let why):
 			ContentUnavailableView {

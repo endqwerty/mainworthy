@@ -32,7 +32,7 @@ struct TestsListView: View {
 					ProgressView().frame(maxWidth: .infinity).task { await screen.more() }
 				}
 			}
-			if screen.loading == .first {
+			if screen.loading == .first || screen.loading == .reading {
 				ListPlaceholder { ProgressView() }
 			} else if screen.loading == .done, screen.tests.isEmpty {
 				ListPlaceholder {

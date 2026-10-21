@@ -2,9 +2,15 @@ import Foundation
 import MainworthyClient
 import Observation
 
-/// Whether a list was read: not yet, read, or its first read failed with this sentence.
+/// Whether this query has been read. A new query can be replaced while its first reply is pending.
 public enum ListLoading: Equatable, Sendable {
-	case first, done, failed(String)
+	/// The initial list has not been read yet.
+	case first
+	/// A new query is being read; search and filter controls remain available.
+	case reading
+	case done
+	/// This query has no completed read to show.
+	case failed(String)
 }
 
 /// A page of a list the server reads a hundred rows at a time.
@@ -69,6 +75,7 @@ final class PagedList<Query: Equatable & Sendable, Page: ListPage> {
 		guard query != self.query || loading != .done else { return false }
 		if query != self.query {
 			self.query = query
+			if loading != .first { loading = .reading }
 			rows = []
 			next = nil
 		}
@@ -79,6 +86,7 @@ final class PagedList<Query: Equatable & Sendable, Page: ListPage> {
 	/// Returns whether this read supplied the rows, so a screen can update what depends on them.
 	@discardableResult
 	func reload() async -> Bool {
+		if case .failed = loading { loading = first == nil ? .first : .reading }
 		generation += 1
 		let mine = generation
 		reloading = mine
@@ -114,6 +122,7 @@ final class PagedList<Query: Equatable & Sendable, Page: ListPage> {
 			guard mine == generation else { return false }
 			rows = []
 			next = nil
+			loading = .reading
 			return await reload()
 		} catch {
 			guard mine == generation else { return false }
@@ -124,6 +133,7 @@ final class PagedList<Query: Equatable & Sendable, Page: ListPage> {
 
 	/// Reads the first page alone, after the server refused a later page because the list changed.
 	func restart() async {
+		loading = .reading
 		rows = []
 		next = nil
 		await reload()

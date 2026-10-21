@@ -14,13 +14,13 @@ struct ChangeResultsPanel: View {
 			case .failed(let why):
 				Text(why).foregroundStyle(Color.fail)
 				Button("Try again") { Task { await results.read() } }
-			case .done: list
+			case .reading, .done: list
 			}
 		}
 		.resultAttachments(results.attachments)
 		.task { await results.load() }
 		.task(id: results.text) {
-			guard results.loading == .done else { return }
+			guard results.loading != .first else { return }
 			do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
 			await results.search()
 		}
@@ -44,7 +44,9 @@ struct ChangeResultsPanel: View {
 				.accessibilityIdentifier("results-filter")
 		}
 		if let notice = results.notice { Text(notice).font(.subheadline).foregroundStyle(Color.fail) }
-		if results.rows.isEmpty {
+		if results.loading == .reading {
+			ProgressView().frame(maxWidth: .infinity)
+		} else if results.loading == .done, results.rows.isEmpty {
 			Text(results.total == 0 ? "No results counted for the latest commit." : "No result matches.")
 				.foregroundStyle(.secondary)
 		}

@@ -151,14 +151,14 @@ struct RunsView: View {
 	/// Whether the list says something in place of its runs. Under a filter, a row says that no run matches.
 	private var showsEmpty: Bool {
 		switch screen.loading {
-		case .first, .failed: true
+		case .first, .reading, .failed: true
 		case .done: screen.runs.isEmpty && screen.filter == RunFilter()
 		}
 	}
 
 	@ViewBuilder private var empty: some View {
 		switch screen.loading {
-		case .first: ProgressView()
+		case .first, .reading: ProgressView()
 		case .failed(let why):
 			ContentUnavailableView {
 				Label("Runs could not be read", systemImage: "exclamationmark.triangle")
