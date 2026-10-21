@@ -5,7 +5,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, w
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Glob } from "bun";
-import { QUIET, testArgs } from "../scripts/check-plan.ts";
+import { parseCheckArgs, QUIET, testArgs } from "../scripts/check-plan.ts";
 import {
 	changedFiles,
 	IMAGE,
@@ -295,7 +295,13 @@ test("the check refuses files it would not run as named, before it runs anything
 		exit: 4,
 		said: "check: not a file of the quiet phase (QUIET in scripts/check-plan.ts): test/docs.test.ts\n",
 	});
-	expect(refused(["test/docs.test.ts"]).exit).toBe(4);
-	expect(refused(["--only=parallel", "--shard=1/6", "test/docs.test.ts"]).exit).toBe(4);
-	expect(refused(["--only=parallel", "docs/roadmap.md"]).said).toContain("not a test file of this checkout");
+	expect(() => parseCheckArgs(["test", "test/docs.test.ts"])).toThrow(
+		"test files are named with --only and without --shard",
+	);
+	expect(() => parseCheckArgs(["test", "--only=parallel", "--shard=1/6", "test/docs.test.ts"])).toThrow(
+		"test files are named with --only and without --shard",
+	);
+	expect(() => parseCheckArgs(["test", "--only=parallel", "docs/roadmap.md"])).toThrow(
+		"not a test file of this checkout",
+	);
 });
