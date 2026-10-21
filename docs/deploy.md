@@ -309,9 +309,10 @@ the steps are kept below for an instance that has none.
   (no argument: the branch's pull request; a commit, for `main`; `--wait=900` waits for a pending gate). It lists
   each failing test with its message and build, and exits as `mainworthy gate` does. The answer carries to later
   commits of the pull request and ends when a commit passes the test (decision 0102). A person can still overrule
-  it; an agent and the pipeline cannot. When `ci` reads `blocked`, a person is asked again: if that is a CI
-  failure, the policy was changed back, and `MAINWORTHY_TOKEN=<owner token> bun scripts/work.ts ci-policy` sets it
-  again (run twice, it changes nothing). Until 2026-10-20 a failure was a question for a member and the gate
+  it; an agent and the pipeline cannot. An older commit whose answer ended that way reads `blocked` with no
+  question open, and `ci` says nobody is asked. When `ci` reads `blocked` with a question open, a person is asked:
+  if that is a CI failure, the policy was changed back, and `MAINWORTHY_TOKEN=<owner token> bun scripts/work.ts
+  ci-policy` sets it again (run twice, it changes nothing). Until 2026-10-20 a failure was a question for a member and the gate
   stayed `blocked` until a later commit passed or a person answered: the owner's queue filled with failures the
   sessions were about to fix.
 
