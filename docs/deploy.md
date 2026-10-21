@@ -363,8 +363,14 @@ the steps are kept below for an instance that has none.
 - **A pull request that is merged or closed tells the instance** (`.github/workflows/change.yml`, decision
   0022, since 2026-10-13). A failure nobody explained on it is then no longer asked about. Before this, such a
   question stayed in the queue until a person answered it: the one about pull request 150 outlived its merge.
-  For a pull request that ended earlier, or whose event was missed: `gh workflow run change.yml -f pull=150
-  -f state=merged`. The workflow checks the instance's API version first. While the first build with API
+  For a pull request that ended earlier, or whose event was missed: `gh workflow run change.yml -f pull=150`.
+  A replay reads the pull request's state, merge commit and base branch from GitHub, so a merged trunk change
+  keeps its landing commit. Add `-f state=merged`, `closed` or `open` only to override GitHub's state.
+  The health check and lifecycle request each retry connection failures and HTTP 502, 503 or 504 up to twelve
+  times, with ten seconds per attempt and ten seconds between attempts. Each can take up to 230 seconds,
+  within the nine-minute job, while the instance restarts to follow `main`. A 4xx refusal fails immediately,
+  except for the missing-change reply below. After retries run out, fix the cause and replay the event.
+  The workflow checks the instance's API version first. While the first build with API
   versions waits to deploy (the tip of `main` must stand still for ten minutes), the running instance still
   answers `/healthz` without `apiVersion`. The workflow warns and sends the lifecycle request without the
   version header, as before, so pull requests closed in that window need no manual replay when the request

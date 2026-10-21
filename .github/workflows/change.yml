@@ -6,7 +6,7 @@
 # `mainworthy change --change pr:482 --state merged`. Nothing runs when the repository names no instance.
 #
 # Run it by hand for a pull request that ended before this workflow existed, or whose event was missed:
-# `gh workflow run change.yml -f pull=150 -f state=merged`.
+# `gh workflow run change.yml -f pull=150`.
 name: change
 
 on:
@@ -19,10 +19,9 @@ on:
         required: true
         type: number
       state:
-        description: How it ended, or open if it is open again
-        required: true
-        type: choice
-        options: [merged, closed, open]
+        description: Optional override (merged, closed, open); defaults to GitHub
+        required: false
+        type: string
 
 permissions: {}
 
@@ -31,7 +30,9 @@ jobs:
     # A pull request from a fork is given no secret, so nothing is said about it.
     if: ${{ vars.MAINWORTHY_URL != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 9
+    permissions:
+      pull-requests: read
     steps:
       - name: Say how the pull request ended
         env:
@@ -39,11 +40,39 @@ jobs:
           MAINWORTHY_PROJECT: ${{ vars.MAINWORTHY_PROJECT }}
           MAINWORTHY_TOKEN: ${{ secrets.MAINWORTHY_TOKEN }}
           PULL: ${{ inputs.pull || github.event.pull_request.number }}
-          STATE: ${{ inputs.state || (github.event.action == 'reopened' && 'open' || (github.event.pull_request.merged && 'merged' || 'closed')) }}
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          STATE: ${{ inputs.state || (github.event_name == 'pull_request' && (github.event.pull_request.merged && 'merged' || github.event.pull_request.state)) || '' }}
           MERGED_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
           BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
         run: |
-          health_status=$(curl --silent --show-error --max-time 10 -o health.json -w '%{http_code}' "$MAINWORTHY_URL/healthz")
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            gh api "repos/$GITHUB_REPOSITORY/pulls/$PULL" > pull.json
+            STATE=${STATE:-$(jq -r 'if .merged then "merged" else .state end' pull.json)}
+            MERGED_COMMIT=$(jq -r 'if .merged then .merge_commit_sha // "" else "" end' pull.json)
+            BASE_BRANCH=$(jq -r '.base.ref' pull.json)
+          fi
+          case "$STATE" in
+            merged|closed|open) ;;
+            *) echo "::error::State must be merged, closed or open."; exit 1 ;;
+          esac
+          request() {
+            local attempt status code
+            # At most 230 seconds per request, including connection timeouts and pauses.
+            for attempt in {1..12}; do
+              code=0
+              status=$(curl --silent --show-error --max-time 10 "$@") || code=$?
+              case "$status" in 4??) break ;; esac
+              if [ "$code" = 0 ]; then
+                case "$status" in 502|503|504) ;; *) break ;; esac
+              fi
+              if [ "$attempt" = 12 ]; then break; fi
+              echo "::warning::The instance is unavailable ($status). Retrying in 10 seconds ($attempt/12)." >&2
+              sleep 10
+            done
+            printf '%s' "$status"
+          }
+          health_status=$(request -o health.json -w '%{http_code}' "$MAINWORTHY_URL/healthz")
           if [ "$health_status" != 200 ]; then
             echo "::error::The server answered $health_status to /healthz. Fix the cause, then replay this event with workflow_dispatch."
             exit 1
@@ -61,11 +90,10 @@ jobs:
             {change: $change, state: $state} +
             (if $state == "merged" and $commit != "" and (["main", "master", "trunk"] | index($branch)) != null
              then {landing: {commit: $commit, branch: $branch}} else {} end)')
-          status=$(curl -sS -o reply.json -w '%{http_code}' -X POST "$MAINWORTHY_URL/api/p/$MAINWORTHY_PROJECT/change" \
+          status=$(request -o reply.json -w '%{http_code}' -X POST "$MAINWORTHY_URL/api/p/$MAINWORTHY_PROJECT/change" \
             -H "authorization: Bearer $MAINWORTHY_TOKEN" -H 'content-type: application/json' "${api_header[@]}" \
             -d "$payload")
-          cat reply.json
-          echo
+          if [ -f reply.json ]; then cat reply.json; echo; fi
           if [ "$status" = 200 ] && jq -e '.ok == true' reply.json > /dev/null; then
             exit 0
           fi
