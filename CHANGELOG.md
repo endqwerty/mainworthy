@@ -1,5 +1,6 @@
 # Changelog
 
+- 2026-10-20: **Fixed:** iPhone question headers stack the kind, source and time at accessibility text sizes, keeping proposal evidence and method badges inside the screen (issue #667).
 - 2026-10-20: **Fixed:** the iPhone recognizes unavailable native passkey sign-in from a structured server detail, so rewording the server's message keeps the app's password fallback notice (issue #680).
 - 2026-10-20: **Fixed:** opening or cancelling the iPhone run planner keeps the Runs list's read errors. Planning errors and uncertain outcomes kept for **Retry plan** stay in the planner, and list errors do not appear there; a failure to read the folders shows in the planner, where they are chosen. A plan refused or left uncertain after the planner was cancelled is said in the list (issue #661).
 - 2026-10-20: **Added:** failure evidence, test results and commit runs on the web and iPhone name the recorded change and title. A trunk commit names its branch and the merged pull request that landed that exact commit when known, with the short hash secondary; named changes open their details. Received landings are stored separately from pull request heads. Older merges without a recorded landing name no pull request until that landing is reported again.
