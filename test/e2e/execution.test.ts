@@ -596,13 +596,15 @@ async function cases(server: Server, count: number) {
 			await ready(a, "C-1");
 			await a.keyboard.press("f");
 			await noteOf(a).fill("Newer note, not sent yet");
+			const answered = a.waitForResponse((response) => response.url().endsWith("/report"));
 			release();
+			await answered;
+			await a.locator("#bar").filter({ hasText: "C-1 fail recorded on pinned version 1" }).waitFor();
 			await eventually(
 				async () => Slot.array().parse((await server.api("find", { in: "slots", run: planned.run })).items),
 				(slots) => slots[0]?.fills[0]?.note === "Submitted first note",
 			);
 			await a.unroute("**/api/p/*/report");
-			await a.waitForTimeout(300);
 			expect(await noteOf(a).inputValue()).toBe("Newer note, not sent yet");
 			// And it is still on the device after a reload (the cursor now rests on the next slot that needs a result).
 			await a.reload();
