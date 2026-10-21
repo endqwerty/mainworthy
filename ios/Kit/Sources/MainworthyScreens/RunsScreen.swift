@@ -18,6 +18,7 @@ public final class RunsScreen: ProjectScreen {
 	public var loading: ListLoading { list.loading }
 	public var hasMore: Bool { list.hasMore }
 	public private(set) var notice: String?
+	public private(set) var plannerNotice: String?
 	public private(set) var folders: [String] = []
 	public private(set) var planning = false
 	public enum CaseCount: Equatable {
@@ -101,7 +102,7 @@ public final class RunsScreen: ProjectScreen {
 	public func more() async { await list.more() }
 
 	public func readFolders() async {
-		do { folders = try await project.runFolders() } catch { notice = error.shown }
+		do { folders = try await project.runFolders() } catch { plannerNotice = error.shown }
 	}
 
 	public func countCases(_ selection: RunSelection?) async {
@@ -120,7 +121,7 @@ public final class RunsScreen: ProjectScreen {
 	}
 
 	public func preparePlanner() {
-		if planSubmission == nil { notice = nil }
+		if planSubmission == nil { plannerNotice = nil }
 	}
 
 	public func plan(name: String, selection: RunSelection, commit: String = "") async -> Run? {
@@ -139,10 +140,10 @@ public final class RunsScreen: ProjectScreen {
 				return await readSavedPlan()
 			case .refused(let why):
 				planState = nil
-				notice = why
+				plannerNotice = why
 			}
 		} catch {
-			notice = "The run's outcome is unknown. Retry plan keeps your submitted choices and sends the same command. " + error.shown
+			plannerNotice = "The run's outcome is unknown. Retry plan keeps your submitted choices and sends the same command. " + error.shown
 		}
 		return nil
 	}
@@ -166,11 +167,12 @@ public final class RunsScreen: ProjectScreen {
 			}
 			list.include(run)
 			notice = saved.sentence
+			plannerNotice = nil
 			open(run).planned(saved.sentence)
 			planState = nil
 			return run
 		} catch {
-			notice = saved.sentence + " It could not be opened. Read the run again. " + error.shown
+			plannerNotice = saved.sentence + " It could not be opened. Read the run again. " + error.shown
 			return nil
 		}
 	}

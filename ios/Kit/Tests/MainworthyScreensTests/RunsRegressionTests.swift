@@ -131,10 +131,10 @@ actor FailAfterPlanTransport: Transport {
 		let savedRef = try #require(await transport.planned)
 		let actual = try await Live.signedIn().project(key).run(savedRef)
 		print(
-			"plan exists on server: \(actual.ref) '\(actual.name)'; returned: \(String(describing:returned)); notice: \(runs.notice ?? "nil")"
+			"plan exists on server: \(actual.ref) '\(actual.name)'; returned: \(String(describing:returned)); notice: \(runs.plannerNotice ?? "nil")"
 		)
 		#expect(actual.name == "Saved before read failed")
-		#expect(runs.notice?.contains(savedRef) == true)
+		#expect(runs.plannerNotice?.contains(savedRef) == true)
 		_ = await runs.plan(name: "Saved before read failed", selection: .all)
 		let actualRuns = try await Live.signedIn().project(key).runs().runs
 		let duplicates = actualRuns.filter { $0.name == "Saved before read failed" }

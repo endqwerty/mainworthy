@@ -84,7 +84,7 @@ struct RunPlannerView: View {
 								: "Counts only results recorded in this run.")
 					}
 				}.disabled(screen.planSubmission != nil || screen.planning)
-				if let notice = screen.notice { Section { Text(notice).accessibilityIdentifier("plan-notice") } }
+				if let notice = screen.plannerNotice { Section { Text(notice).accessibilityIdentifier("plan-notice") } }
 			}
 			.navigationTitle(screen.savedPlan == nil ? "Plan a run" : "Run planned").navigationBarTitleDisplayMode(
 				.inline

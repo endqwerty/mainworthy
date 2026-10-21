@@ -19,14 +19,20 @@ struct RunPlannerTests {
 	func lostPlan() async throws {
 		let transport = PlanReplies(.lost)
 		let (screen, client) = try await screen(transport)
+		await screen.refresh()
 		let commit = "3333333333333333333333333333333333333333"
 		#expect(await screen.plan(name: "Keep this plan", selection: .tag("regression"), commit: commit) == nil)
 		#expect(screen.planSubmission?.name == "Keep this plan")
 		#expect(screen.savedPlan == nil)
-		#expect(screen.notice?.contains("outcome is unknown") == true)
-		let notice = screen.notice
+		#expect(screen.plannerNotice?.contains("outcome is unknown") == true)
+		let notice = screen.plannerNotice
+		#expect(screen.notice == nil)
+		await transport.failListReads()
+		await screen.refresh()
+		#expect(screen.notice == "Runs could not be read.")
 		screen.preparePlanner()
-		#expect(screen.notice == notice)
+		#expect(screen.plannerNotice == notice)
+		#expect(screen.notice == "Runs could not be read.")
 		#expect(screen.planSubmission?.name == "Keep this plan")
 		await transport.reconnect()
 		let run = try #require(await screen.plan(name: "Changed while uncertain", selection: .all))
@@ -90,7 +96,7 @@ struct RunPlannerTests {
 		let (screen, client) = try await screen(transport)
 		#expect(await screen.plan(name: "Refused plan", selection: .all) == nil)
 		#expect(screen.planSubmission == nil && screen.savedPlan == nil)
-		#expect(screen.notice == "This plan was refused.")
+		#expect(screen.plannerNotice == "This plan was refused.")
 		await transport.reconnect()
 		#expect(await screen.plan(name: "New plan", selection: .all)?.name == "New plan")
 		let inputs = await transport.inputs
@@ -123,11 +129,11 @@ struct RunPlannerTests {
 		#expect(await screen.plan(name: "Read again", selection: .all) == nil)
 		let receipt = try #require(screen.savedPlan)
 		#expect(receipt.slots == 6)
-		let notice = screen.notice
+		let notice = screen.plannerNotice
 		screen.preparePlanner()
 		#expect(screen.savedPlan == receipt)
-		#expect(screen.notice == notice)
-		#expect(screen.notice?.contains("It could not be opened") == true)
+		#expect(screen.plannerNotice == notice)
+		#expect(screen.plannerNotice?.contains("It could not be opened") == true)
 		await transport.reconnect()
 		#expect(await screen.readPlannedRun()?.ref == receipt.ref)
 		#expect(screen.savedPlan == nil && screen.planSubmission == nil)
@@ -148,8 +154,10 @@ struct RunPlannerTests {
 		#expect(screen.runs.first?.ref == run.ref)
 		#expect(screen.savedPlan == nil && screen.planSubmission == nil)
 		#expect(screen.notice == "\(run.ref) planned with 6 slots; 0 already filled.")
+		#expect(screen.plannerNotice == nil)
 		screen.preparePlanner()
-		#expect(screen.notice == nil)
+		#expect(screen.plannerNotice == nil)
+		#expect(screen.notice == "\(run.ref) planned with 6 slots; 0 already filled.")
 		#expect(screen.runs.first?.ref == run.ref)
 		#expect(await transport.inputs.count == 1)
 	}
@@ -185,6 +193,7 @@ actor PlanReplies: Transport {
 	var failing = true
 	var refusesReplay = false
 	var countFails = false
+	var listFails = false
 	var command: String?
 	private var countReads = 0
 	private let asked = AsyncStream.makeStream(of: Void.self)
@@ -192,10 +201,11 @@ actor PlanReplies: Transport {
 	private(set) var inputs: [JSONValue] = []
 	private(set) var lookups = 0
 	init(_ fault: Fault, command: String? = nil) { self.fault = fault; self.command = command }
-	func reconnect() { failing = false; refusesReplay = false; countFails = false }
+	func reconnect() { failing = false; refusesReplay = false; countFails = false; listFails = false }
 	func refuseReplay() { refusesReplay = true }
 	func recordedCommand() { command = nil }
 	func failCount() { countFails = true }
+	func failListReads() { listFails = true }
 	func wasAsked() async { for await _ in asked.stream { return } }
 	func release() { gate.continuation.yield() }
 	func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
@@ -204,6 +214,9 @@ actor PlanReplies: Transport {
 		}
 		let operation = request.url?.lastPathComponent
 		let input = try JSONDecoder().decode(JSONValue.self, from: request.httpBody ?? Data("{}".utf8))
+		if operation == "find", input["in"]?.string == "runs", listFails {
+			return reply(#"{"ok":false,"error":{"code":"invalid","message":"Runs could not be read."}}"#, status: 400)
+		}
 		let refusal = #"{"ok":false,"error":{"code":"invalid","message":"this plan was refused."}}"#
 		if operation == "command" {
 			lookups += 1

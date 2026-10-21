@@ -261,7 +261,8 @@ If the run was planned but cannot be read, the app keeps its reference and offer
 **Cancel** closes the planner. A late successful reply adds the run to the list.
 If you reopen the planner before that reply arrives, success closes the planner and opens the run.
 Otherwise, open the run from **Runs**. Reopen the planner to recover an uncertain outcome or retry a failed run read.
-Once the run is read successfully, **+** starts a fresh planner with no submitted choices or previous notice.
+Once the run is read successfully, **+** starts a fresh planner with no submitted choices or previous planner notice.
+Opening or cancelling the planner keeps any read error in the Runs list. List errors do not appear in the planner; if the folders cannot be read, the planner says so.
 An unresolved plan stays while this project's screen is open. It is not kept after the app closes.
 A selection with no cases is refused with the server's sentence.
 
