@@ -42,13 +42,18 @@ final class SuiteUITests: XCTestCase {
 	}
 
 	@MainActor private func addStep(_ app: XCUIApplication, action: String, expected: String) {
-		app.buttons["editor-add-step"].tap()
 		let actions = app.textFields.matching(NSPredicate(format: "identifier BEGINSWITH 'editor-action-'"))
-		let results = app.textFields.matching(NSPredicate(format: "identifier BEGINSWITH 'editor-expected-'"))
-		let field = actions.element(boundBy: actions.count - 1)
+		let before = actions.allElementsBoundByIndex.map(\.identifier)
+		app.buttons["editor-add-step"].tap()
+		let added = actions.matching(NSPredicate(format: "NOT (identifier IN %@)", before as NSArray))
+		for _ in 0..<6 where !added.firstMatch.exists { app.collectionViews.firstMatch.swipeUp() }
+		XCTAssertEqual(added.count, 1)
+		let identifier = added.firstMatch.identifier
+		let field = app.textFields[identifier]
 		field.tap()
 		field.typeText(action)
-		let result = results.element(boundBy: results.count - 1)
+		let step = String(identifier.dropFirst("editor-action-".count))
+		let result = app.textFields["editor-expected-\(step)"]
 		result.tap()
 		result.typeText(expected)
 	}
