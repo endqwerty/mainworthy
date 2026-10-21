@@ -1,4 +1,4 @@
-# 0121: A failure is handed to an agent by a signed post
+# 0122: A failure is handed to an agent by a signed post
 
 Date: 2026-10-20. Status: accepted.
 
