@@ -5,12 +5,29 @@ import Testing
 @testable import MainworthyClient
 @testable import MainworthyScreens
 
+actor HeldReportRead {
+	private let asked = AsyncStream.makeStream(of: Void.self)
+	private let released = AsyncStream.makeStream(of: Void.self)
+	func waitUntilAsked() async { for await _ in asked.stream { break } }
+	func release() { released.continuation.yield() }
+	func hold() async {
+		asked.continuation.yield()
+		for await _ in released.stream { break }
+	}
+}
+
 actor ReportReplies: Transport {
 	enum Fault: Sendable { case lost, unreadable, internalError, refused, statuslessRefusal, lostThenRefused }
 	var fault: Fault?
 	var commandState: String?
 	var failReads = false
 	func refuseReads(_ value: Bool) { failReads = value }
+	private var heldReads: [HeldReportRead] = []
+	func holdNextRead() -> HeldReportRead {
+		let held = HeldReportRead()
+		heldReads.append(held)
+		return held
+	}
 	private(set) var inputs: [JSONValue] = []
 	private(set) var lookups = 0
 	func fail(_ fault: Fault, command: String? = nil) { self.fault = fault; commandState = command }
@@ -21,7 +38,10 @@ actor ReportReplies: Transport {
 		func reply(_ body: String, _ status: Int = 200) -> (Data, HTTPURLResponse) {
 			(Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
 		}
-		if op == "get", failReads { throw URLError(.cannotConnectToHost) }
+		if op == "get" {
+			if !heldReads.isEmpty { await heldReads.removeFirst().hold() }
+			if failReads { throw URLError(.cannotConnectToHost) }
+		}
 		if op == "command" {
 			lookups += 1
 			if let commandState { return reply(#"{"ok":true,"result":{"state":"\#(commandState)"}}"#) }
@@ -166,6 +186,44 @@ actor ReportReplies: Transport {
 		#expect(await screen.record(fresh, outcome: .fail))
 		#expect(try await results(client, fresh).count == 3)
 		#expect(screen.slots.first { $0.id == fresh.slot.id }?.ownFill(by: Live.name)?.outcome == .manual(.fail))
+	}
+
+	@Test("a refresh overtaking Set report aside keeps the report without a false read failure", arguments: [false, true])
+	func overtakenSetAsideRead(_ refreshFinishesFirst: Bool) async throws {
+		let (screen, client, transport, execution) = try await setup()
+		await transport.fail(.unreadable)
+		#expect(await screen.record(execution, outcome: .fail) == false)
+		await transport.fail(.refused, command: "none")
+		await screen.retryReport()
+		#expect(screen.canSetAsideReport(execution))
+		let refusal = "The server refused this report's resend. Report refused.\nThe earlier attempt may still have been recorded. Retry the same report or set it aside for this slot."
+		#expect(screen.notice == refusal)
+		let older = await transport.holdNextRead()
+		let newer = await transport.holdNextRead()
+		let settingAside = Task { await screen.setAsideReport(execution) }
+		await older.waitUntilAsked()
+		let refreshing = Task { await screen.refresh() }
+		await newer.waitUntilAsked()
+		if refreshFinishesFirst {
+			await newer.release()
+			await refreshing.value
+		}
+		await older.release()
+		await settingAside.value
+		#expect(screen.hasPendingReport(for: execution))
+		#expect(screen.canSetAsideReport(execution))
+		#expect(screen.notice == refusal)
+		if !refreshFinishesFirst {
+			await newer.release()
+			await refreshing.value
+		}
+		#expect(screen.hasPendingReport(for: execution))
+		#expect(screen.notice == refusal)
+		#expect(screen.latestSlot(execution).ownFill(by: Live.name)?.outcome == .manual(.fail))
+		await screen.setAsideReport(execution)
+		#expect(!screen.hasPendingReport(for: execution))
+		#expect(screen.notice == "The report is set aside on this device. It may still have been recorded. The slot shows the latest results read from the server.")
+		#expect(try await results(client, execution).count == 1)
 	}
 
 	@Test("an unproven resend refusal keeps the report uncertain", arguments: [
