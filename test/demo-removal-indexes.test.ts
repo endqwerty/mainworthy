@@ -158,7 +158,7 @@ test("every incoming reset reference uses an index, including SQLite's own DELET
 				probes++;
 			}
 		}
-		expect(probes).toBe(83);
+		expect(probes).toBe(85);
 	} finally {
 		db.close();
 	}

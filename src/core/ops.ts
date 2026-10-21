@@ -191,6 +191,21 @@ export const ResultIn = z.object({
 	/** A claim by the producer that this result exercised this version of this case (`@C-311@v7` in a test name). */
 	annotation: z.object({ case: z.string(), version: z.number().int().optional() }).optional(),
 	corrects: z.number().int().optional().describe("The id of an earlier result of yours that this one replaces."),
+	/**
+	 * The test runner's earlier tries of this test in this run, oldest first; the result is its last word (decision
+	 * 0129). Evidence only: a try that disagrees with the next is a flip, and the gate counts the result.
+	 */
+	tries: z
+		.array(
+			z.object({
+				outcome: Outcome,
+				durationMs: z.number().int().min(0).optional(),
+				failure: z.object({ message: z.string().max(4000), detail: z.string().max(20_000).optional() }).optional(),
+			}),
+		)
+		.max(10)
+		.optional()
+		.meta({ "x-mcp-hidden": true }),
 });
 export type ResultIn = z.infer<typeof ResultIn>;
 

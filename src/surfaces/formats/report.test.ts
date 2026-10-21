@@ -247,6 +247,28 @@ test("Playwright chooses the last decisive retry and keeps project identities se
 		outcome: "pass",
 		durationMs: 5,
 		note: "passed after 1 retries",
+		// The try it failed first, kept beside the pass; the skip after it ended nothing (decision 0129).
+		tries: [{ outcome: "fail", durationMs: 2, failure: { message: "Test failed", detail: "Test failed" } }],
+	});
+	// A test expected to fail judges its tries as it judges its result.
+	expect(
+		parse(
+			playwrightReport(
+				[
+					{ status: "passed", duration: 1, retry: 0 },
+					{ status: "failed", duration: 1, retry: 1, error: { message: "boom" } },
+				],
+				"failed",
+			),
+		).results[0],
+	).toMatchObject({
+		outcome: "pass",
+		tries: [
+			{
+				outcome: "fail",
+				failure: { message: "Expected test to fail, but it passed", detail: "Expected test to fail, but it passed" },
+			},
+		],
 	});
 	expect(
 		parse(

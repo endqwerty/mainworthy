@@ -19,6 +19,10 @@ import { QuarantineList, quarantineExitText } from "../ui/quarantine.tsx";
 import { ResultLocation } from "../ui/result-location.tsx";
 
 /** Only a recognisable assertion gets a comparison; an arbitrary log stays verbatim. */
+/** One end of a flip as the detector saw it: a result's attempt, or a runner's try inside it (decision 0129). */
+const observed = (end: { outcome: string; attempt: number; try?: number | undefined }): string =>
+	`${end.outcome}, attempt ${end.attempt}${end.try === undefined ? "" : `, runner's try ${end.try}`}`;
+
 export function assertionComparison(message: string): { expected: string; observed: string } | null {
 	const got = /\bexpected\s+(.+?),?\s+(?:but\s+)?(?:got|received)\s+(.+)/i.exec(message);
 	if (got?.[1] && got[2]) return { expected: got[1].trim().replace(/,$/, ""), observed: got[2].trim() };
@@ -466,11 +470,10 @@ function SameCodeSignals({ evidence }: { evidence: SameCodeEvidence }) {
 			<p>This evidence alone excuses no failure. Most recent examples:</p>
 			<ul>
 				{signal.samples.map((sample) => (
-					<li key={sample.second.id}>
+					<li key={`${sample.first.id}:${sample.first.try ?? ""}:${sample.second.id}:${sample.second.try ?? ""}`}>
 						{sample.location ? <ResultLocation location={sample.location} /> : sample.commit.slice(0, 12)} ·{" "}
 						{sample.job || "unnamed job"} · {sample.env || "default environment"} · producer {sample.actor}: result{" "}
-						{sample.first.id} ({sample.first.outcome}, attempt {sample.first.attempt}) to result {sample.second.id} (
-						{sample.second.outcome}, attempt {sample.second.attempt})
+						{sample.first.id} ({observed(sample.first)}) to result {sample.second.id} ({observed(sample.second)})
 					</li>
 				))}
 			</ul>

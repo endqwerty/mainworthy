@@ -17,6 +17,8 @@ export function nativeResult(input: {
 	detail?: string | undefined;
 	message?: string | undefined;
 	retries?: number;
+	/** The runner's earlier tries, oldest first (decision 0129). */
+	tries?: NonNullable<ResultIn["tries"]>;
 	annotation?: ResultIn["annotation"];
 }): ResultIn {
 	const withoutRetry = input.name.replace(/(?:\s*\(retry\s*#?\s*\d+\)|\s*\[retry\s*#?\s*\d+\])+\s*$/i, "");
@@ -54,5 +56,6 @@ export function nativeResult(input: {
 	const claim = input.annotation;
 	if (claim !== undefined) result.annotation = claim;
 	if (input.retries && input.outcome === "pass") result.note = `passed after ${input.retries} retries`;
+	if (input.tries?.length) result.tries = input.tries;
 	return result;
 }

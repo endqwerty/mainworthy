@@ -10,7 +10,13 @@ export const FlakyDetectionSettings = z
 	.default({ enabled: true, windowDays: 14, minFlips: 2 });
 export type FlakyDetectionSettings = z.infer<typeof FlakyDetectionSettings>;
 
-const Observation = z.object({ id: z.number(), outcome: z.enum(["pass", "fail", "error"]), attempt: z.number() });
+/** One end of a flip: a result, or the runner's try `try` of it (decision 0129). */
+const Observation = z.object({
+	id: z.number(),
+	outcome: z.enum(["pass", "fail", "error"]),
+	attempt: z.number(),
+	try: z.number().optional(),
+});
 export const SameCodeEvidence = z.object({
 	...FlakyDetectionSettings.removeDefault().shape,
 	signals: z.array(

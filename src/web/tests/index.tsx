@@ -42,9 +42,25 @@ const Result = z.object({
 const Detail = Test.extend({
 	key: z.string(),
 	flips: z.number(),
-	/** `passedOnRetry`: the attempt of the same lane that passed where this one failed, which makes it a flake. */
-	last: z.array(Result.extend({ passedOnRetry: z.number().nullable() })),
+	/**
+	 * `passedOnRetry`: the attempt of the same lane that passed where this one failed, which makes it a flake.
+	 * `tries`: the runner's earlier tries of the result in its run, oldest first (decision 0129).
+	 */
+	last: z.array(
+		Result.extend({
+			passedOnRetry: z.number().nullable(),
+			tries: z.array(
+				z.object({ outcome: z.string(), message: z.string().nullable(), durationMs: z.number().nullable() }),
+			),
+		}),
+	),
 });
+
+const decisive = (outcome: string): "pass" | "fail" | null =>
+	outcome === "pass" ? "pass" : outcome === "fail" || outcome === "error" ? "fail" : null;
+/** Whether the runner's tries and the result it ended on disagree: it both passed and failed in one run. */
+const flakedInRun = (result: { outcome: string; tries: { outcome: string }[] }): boolean =>
+	new Set([...result.tries.map((tried) => tried.outcome), result.outcome].map(decisive).filter(Boolean)).size > 1;
 
 export function TestsScreen() {
 	const { project } = useApp();
@@ -203,22 +219,31 @@ function TestDetail({ testRef }: { testRef: string }) {
 					{test.last.map((result) => {
 						const build = webUrl(result.build);
 						const retry = result.passedOnRetry;
+						const inRun = flakedInRun(result);
+						const flaky = retry !== null || inRun;
+						const firstFailure = result.tries.find((tried) => tried.message !== null)?.message ?? null;
 						const facts = [
 							result.job,
 							result.attempt > 1 ? `attempt ${result.attempt}` : null,
 							retry !== null ? `passed on attempt ${retry}` : null,
+							result.tries.length > 0
+								? `the runner's tries: ${[...result.tries.map((tried) => tried.outcome), result.outcome].join(", ")}`
+								: null,
 							duration(result.durationMs),
 							result.by,
 							result.model,
 							age(result.at),
 						].filter((fact): fact is string => Boolean(fact));
 						return (
-							<li key={result.id} className={`test-result o-${retry !== null ? "flaky" : result.outcome}`}>
-								<span className="result-outcome">{retry !== null ? "flaky" : result.outcome}</span>
+							<li key={result.id} className={`test-result o-${flaky ? "flaky" : result.outcome}`}>
+								<span className="result-outcome">{flaky ? "flaky" : result.outcome}</span>
 								<div className="result-body">
 									<ResultLocation location={result.location} />
 									<small className="dim">{facts.join(" · ")}</small>
 									{result.message && <small className="result-message">{result.message}</small>}
+									{inRun && !result.message && firstFailure && (
+										<small className="result-message">An earlier try: {firstFailure}</small>
+									)}
 									<ResultTrail result={result.id} steps={result.steps} />
 								</div>
 								{build && (

@@ -192,6 +192,12 @@ Report to target or run; tests by key or case.
 | `results[].annotation.case` | `string` | yes |  |
 | `results[].annotation.version` | `integer` | no |  |
 | `results[].corrects` | `integer` | no | The id of an earlier result of yours that this one replaces. |
+| `results[].tries` | `array<object>` | no |  |
+| `results[].tries[].outcome` | `"pass" \| "fail" \| "skip" \| "blocked" \| "error"` | yes |  |
+| `results[].tries[].durationMs` | `integer` | no |  |
+| `results[].tries[].failure` | `object` | no |  |
+| `results[].tries[].failure.message` | `string` | yes |  |
+| `results[].tries[].failure.detail` | `string` | no |  |
 | `nothingRequired` | `true` | no | CI-only empty declaration; requires policy permission. |
 | `projectIdentity` | `string` | no | Only write if the project key still names this identity. |
 | `project` | `string` | no |  |

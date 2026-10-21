@@ -428,8 +428,38 @@ const Q = {
 		   AND ${uncorrectedResults("r.id")}
 		 ORDER BY r.attempt DESC, CASE WHEN r.outcome = 'pass' THEN 0 ELSE 1 END DESC, r.id DESC LIMIT 1`,
 	),
-	insertFlip: sql<{ project: number; test: number; target: number; first: number; second: number; seq: number }>(
-		"INSERT INTO flips (project, test, target, first_result, second_result, seq) VALUES ($project, $test, $target, $first, $second, $seq)",
+	insertFlip: sql<{
+		project: number;
+		test: number;
+		target: number;
+		first: number;
+		second: number;
+		firstTry: number | null;
+		secondTry: number | null;
+		seq: number;
+	}>(
+		`INSERT INTO flips (project, test, target, first_result, second_result, first_try, second_try, seq)
+		 VALUES ($project, $test, $target, $first, $second, $firstTry, $secondTry, $seq)`,
+	),
+	insertTry: sql<{
+		project: number;
+		result: number;
+		try: number;
+		outcome: Outcome;
+		duration: number | null;
+		signature: number | null;
+		message: string | null;
+		detail: string | null;
+	}>(
+		`INSERT INTO result_tries (project, result, try, outcome, duration_ms, signature, message, detail)
+		 VALUES ($project, $result, $try, $outcome, $duration, $signature, $message, $detail)`,
+	),
+	triesOf: sql<
+		{ results: string },
+		{ result: number; outcome: Outcome; duration_ms: number | null; message: string | null }
+	>(
+		`SELECT t.result, t.outcome, t.duration_ms, t.message
+		 FROM json_each($results) asked CROSS JOIN result_tries t ON t.result = asked.value ORDER BY t.result, t.try`,
 	),
 	// A flip one of whose results its producer corrected is not counted: the pass and the failure were not both what
 	// happened (issue #630).
@@ -1314,25 +1344,65 @@ export function* applySteps(
 			at: ctx.now,
 		});
 		recordAttachments(ctx, lastId, input.attachments ?? []);
+		// What the runner saw, in order: its earlier tries, then the result (decision 0129).
+		const seen: { outcome: Outcome; try: number | null }[] = (input.tries ?? []).map((tried, index) => {
+			const message = tried.failure?.message.trim() || null;
+			const cause =
+				tried.outcome === "fail" || tried.outcome === "error"
+					? ensureSignature(ctx, {
+							message: message ?? `no failure message (${test.name})`,
+							...(tried.failure?.detail ? { detail: tried.failure.detail } : {}),
+						})
+					: null;
+			const { lastId: tryId } = ctx.db.run(Q.insertTry, {
+				project,
+				result: lastId,
+				try: index + 1,
+				outcome: tried.outcome,
+				duration: tried.durationMs ?? null,
+				signature: cause?.id ?? null,
+				message,
+				detail: tried.failure?.detail ?? null,
+			});
+			return { outcome: tried.outcome, try: tryId };
+		});
+		seen.push({ outcome: input.outcome, try: null });
 		const decisive = (o: Outcome) => (o === "pass" ? "pass" : o === "fail" || o === "error" ? "fail" : null);
-		const flipped =
-			previous !== null &&
-			previous.attempt < attempt &&
-			corrects === null &&
-			decisive(previous.outcome) !== null &&
-			decisive(input.outcome) !== null &&
-			decisive(previous.outcome) !== decisive(input.outcome);
-		if (flipped && previous) {
+		const flip = (first: number, firstTry: number | null, secondTry: number | null) => {
 			ctx.db.run(Q.insertFlip, {
 				project,
 				test: test.id,
 				target: batch.target,
-				first: previous.id,
+				first,
 				second: lastId,
+				firstTry,
+				secondTry,
 				seq: ctx.seq,
 			});
 			out.flips++;
+		};
+		const decided = seen.filter((observed) => decisive(observed.outcome) !== null);
+		// Across attempts, the earlier result meets this run's first decisive try, so a recovery is one flip whether
+		// the pipeline or the runner retried first.
+		const opening = decided[0];
+		const across =
+			previous !== null &&
+			opening !== undefined &&
+			previous.attempt < attempt &&
+			corrects === null &&
+			decisive(previous.outcome) !== null &&
+			decisive(previous.outcome) !== decisive(opening.outcome);
+		if (across && previous && opening) flip(previous.id, null, opening.try);
+		let within = false;
+		for (let index = 1; index < decided.length; index++) {
+			const before = decided[index - 1];
+			const after = decided[index];
+			if (before && after && decisive(before.outcome) !== decisive(after.outcome)) {
+				flip(lastId, before.try, after.try);
+				within = true;
+			}
 		}
+		const flipped = across || within;
 		if (!fresh) ctx.db.run(Q.touchTest, { id: test.id, seq: ctx.seq });
 		out.basis[basis]++;
 		out.results.push({
@@ -1585,6 +1655,20 @@ export function lastResultsOfCase(db: Db, caseId: number, limit: number): Result
 }
 export const resultsOfBatch = (db: Db, batch: number, limit: number): ResultRow[] =>
 	db.all(Q.ofBatch, { batch, limit });
+/** A runner's earlier tries of each of these results, oldest first (decision 0129). */
+export function triesOf(
+	db: Db,
+	results: readonly number[],
+): Map<number, { outcome: Outcome; message: string | null; durationMs: number | null }[]> {
+	const out = new Map<number, { outcome: Outcome; message: string | null; durationMs: number | null }[]>();
+	if (results.length === 0) return out;
+	for (const row of db.all(Q.triesOf, { results: JSON.stringify(results) })) {
+		const list = out.get(row.result) ?? [];
+		list.push({ outcome: row.outcome, message: row.message, durationMs: row.duration_ms });
+		out.set(row.result, list);
+	}
+	return out;
+}
 export const flipCount = (db: Db, project: number, test: number): number =>
 	db.get(Q.flipCount, { project, test })?.n ?? 0;
 /** Which of these results stand in a lane whose test both passed and failed on their target, as reported. */

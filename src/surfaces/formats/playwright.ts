@@ -3,6 +3,7 @@ import { z } from "zod";
 import { caseAnnotation } from "../../core/case-annotation.ts";
 import type { Outcome } from "../../core/ops.ts";
 import { ResultTrail, TRAIL_LIMITS } from "../../core/results.ts";
+import { clip } from "../../core/text.ts";
 import { nativeResult, type ParsedReport } from "./native.ts";
 
 const ErrorInfo = z.object({ message: z.string().optional(), stack: z.string().optional() });
@@ -71,26 +72,53 @@ export function parsePlaywright(value: unknown): ParsedReport {
 						? attempt
 						: latest,
 				);
-				const detail = [
-					final.error?.stack ?? final.error?.message,
-					...(final.errors ?? []).map((error) => error.stack ?? error.message),
-				]
-					.filter(Boolean)
-					.join("\n");
-				const unexpectedPass = test.expectedStatus === "failed" && final.status === "passed";
-				const expectedFailure = test.expectedStatus === "failed" && final.status === "failed";
+				// Every try is judged as the result is: a test expected to fail passes when it fails.
+				const judged = (attempt: z.infer<typeof Attempt>): Outcome =>
+					test.expectedStatus === "failed" && attempt.status === "passed"
+						? "fail"
+						: test.expectedStatus === "failed" && attempt.status === "failed"
+							? "pass"
+							: outcomes[attempt.status];
+				const detailOf = (attempt: z.infer<typeof Attempt>): string =>
+					test.expectedStatus === "failed" && attempt.status === "passed"
+						? "Expected test to fail, but it passed"
+						: stripVTControlCharacters(
+								[
+									attempt.error?.stack ?? attempt.error?.message,
+									...(attempt.errors ?? []).map((error) => error.stack ?? error.message),
+								]
+									.filter(Boolean)
+									.join("\n"),
+							);
+				// The runner's earlier tries, oldest first: the ones before the try it ended on (decision 0129).
+				const tries = test.results
+					.filter((attempt) => attempt !== final && attempt.retry < final.retry)
+					.toSorted((a, b) => a.retry - b.retry)
+					.slice(-10)
+					.map((attempt) => {
+						const outcome = judged(attempt);
+						const detail = detailOf(attempt).trim() || `Test ${outcome === "fail" ? "failed" : "errored"}`;
+						return {
+							outcome,
+							durationMs: Math.round(attempt.duration),
+							...(outcome === "fail" || outcome === "error"
+								? { failure: { message: clip(detail.split(/\r?\n/)[0] ?? detail, 4000), detail: clip(detail, 20_000) } }
+								: {}),
+						};
+					});
 				const result = nativeResult({
 					name: spec.title,
 					file: spec.file || suite.file,
 					suites: [test.projectName, ...path],
-					outcome: unexpectedPass ? "fail" : expectedFailure ? "pass" : outcomes[final.status],
+					outcome: judged(final),
 					durationMs: test.results.reduce((sum, attempt) => sum + attempt.duration, 0),
 					retries: final.retry,
+					tries,
 					annotation: test.annotations
 						?.filter((item) => item.type === "mainworthy")
 						.map((item) => caseAnnotation(item.description ?? ""))
 						.findLast((claim) => claim !== undefined),
-					detail: unexpectedPass ? "Expected test to fail, but it passed" : stripVTControlCharacters(detail),
+					detail: detailOf(final),
 				});
 				if (final.steps)
 					result.steps = ResultTrail.parse(

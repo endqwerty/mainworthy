@@ -46,6 +46,9 @@ rules are ready, and would expand the question vocabulary across every client.
 Reading the existing facts is the smaller complete first step. It keeps SQL in the
 evidence module and the existing witness requirement at every standing writer.
 
+Decision 0129 adds flips between a test runner's tries inside one result. The detector reads an end's outcome and
+cause from its try, and a sample names the try.
+
 ## Limits and follow-up
 
 This slice does not detect alternation across different trunk commits, create a

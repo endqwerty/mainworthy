@@ -289,10 +289,12 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 		jitter: number,
 		attach = false,
 		only: readonly number[] | null = null,
+		retried: readonly Failure[] = [],
 	): Result[] =>
 		tests.flatMap(({ index, test }, n) => {
 			if (only && !only.includes(index)) return [];
 			const failure = failures.find((item) => item.case === index);
+			const tried = failure ? undefined : retried.find((item) => item.case === index);
 			const result = {
 				test,
 				outcome: failure ? "fail" : "pass",
@@ -304,6 +306,8 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 					? { steps: demoTrail(caseOf(index).steps, Boolean(failure), failure ? 1 : undefined) }
 					: {}),
 				annotation: { case: refOf(index), version: 1 },
+				// The runner failed it once and passed it on its own retry, inside this run (decision 0129).
+				...(tried ? { tries: [{ outcome: "fail" as const, failure: { message: tried.message } }] } : {}),
 			} satisfies Result;
 			return [result];
 		});
@@ -347,7 +351,13 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 					target: { ...event.target, repo: REPO },
 					job: "shop",
 					...(event.rerun ? { attempt: event.rerun.attempt } : {}),
-					results: pipelineResults(event.failures, event.jitter, false, event.rerun?.cases ?? null),
+					results: pipelineResults(
+						event.failures,
+						event.jitter,
+						false,
+						event.rerun?.cases ?? null,
+						event.retried ?? [],
+					),
 				});
 				opened.set(event.step, stillOpen(receipt.questions));
 				break;

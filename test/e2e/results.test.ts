@@ -106,3 +106,46 @@ import { browserAvailable, openPage, startServer } from "./support.ts";
 	},
 	60_000,
 );
+
+// A runner that retried a test inside one run reports the tries with the result (decision 0129): the change shows the
+// test flaky, and its page lists what the runner saw.
+(browserAvailable ? test : test.skip)(
+	"a test the runner retried reads as flaky on the change and lists its tries on its page",
+	async () => {
+		const server = await startServer({ preset: "loose" });
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			const commit = "a1b2000000000000000000000000000000000001";
+			const sent = ciReport({ commit, branch: "cart", pr: 21, n: 2 });
+			await server.api("report", {
+				...sent,
+				results: sent.results.map((result, index) =>
+					index === 0
+						? {
+								...result,
+								tries: [{ outcome: "fail", failure: { message: "locator.click: Timeout 5000ms exceeded." } }],
+							}
+						: result,
+				),
+			});
+			view = await openPage(server, { path: "/p/scratch/changes/pr%3A21" });
+			const page = view.page;
+			await page.getByRole("note").getByText("1 test both passed and failed on this commit, so it is flaky.").waitFor();
+			const row = page
+				.getByRole("list", { name: "Results the gate counted" })
+				.getByRole("listitem")
+				.filter({ hasText: "passed and failed on this commit" });
+			await expect(row.locator(".result-flaky").textContent()).resolves.toBe("flaky");
+
+			await row.getByRole("link", { name: "test 0" }).click();
+			const latest = page.getByRole("list", { name: "Latest results" }).getByRole("listitem").first();
+			await latest.getByText("the runner's tries: fail, pass", { exact: false }).waitFor();
+			await expect(latest.locator(".result-outcome").textContent()).resolves.toBe("flaky");
+			await latest.getByText("An earlier try: locator.click: Timeout 5000ms exceeded.").waitFor();
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	60_000,
+);

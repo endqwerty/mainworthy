@@ -162,6 +162,17 @@ describe("the demo's history", () => {
 			expect(night?.at).toBeLessThan(rerun.at);
 		}
 	});
+	test("the runner tries the flaky test again inside some pull requests' runs, and it passes there", () => {
+		const events = of(history(), "pipeline");
+		const flaky = events.find((event) => event.rerun)?.rerun?.cases[0];
+		const retried = events.filter((event) => event.retried);
+		expect(retried.length).toBeGreaterThanOrEqual(2);
+		for (const event of retried) {
+			expect(event.target.pr).toBeDefined();
+			expect(event.retried?.map((item) => item.case)).toEqual([flaky ?? -1]);
+			expect(event.failures.map((failure) => failure.case)).not.toContain(flaky);
+		}
+	});
 
 	test("a quarantine covers a report before a person ends it", () => {
 		const events = history();

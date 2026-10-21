@@ -338,7 +338,32 @@ const fixtures: Record<string, Row[]> = {
 			at: time + 1,
 		},
 	],
-	flips: [{ id: 506, project: 23, test: 501, target: 502, first_result: 201, second_result: 200, seq: 2 }],
+	result_tries: [
+		{
+			id: 513,
+			project: 23,
+			result: 200,
+			try: 1,
+			outcome: "fail",
+			duration_ms: 3,
+			signature: 505,
+			message: "雪 expected",
+			detail: null,
+		},
+	],
+	flips: [
+		{
+			id: 506,
+			project: 23,
+			test: 501,
+			target: 502,
+			first_result: 201,
+			second_result: 200,
+			first_try: null,
+			second_try: 513,
+			seq: 2,
+		},
+	],
 	findings: [
 		{
 			id: 507,

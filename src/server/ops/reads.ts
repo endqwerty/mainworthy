@@ -73,6 +73,7 @@ import {
 	testRef,
 	testsOfCase,
 	testTime,
+	triesOf,
 	unlinkedCount,
 } from "../evidence/evidence.ts";
 import { findingsOfCase, reviewBasis, reviewsAtVersion, reviewsOfCase } from "../evidence/findings.ts";
@@ -521,6 +522,10 @@ export function get(ctx: Ctx, input: GetInput): Record<string, unknown>[] {
 				ctx.db,
 				last.map((row) => row.id),
 			);
+			const tried = triesOf(
+				ctx.db,
+				last.map((row) => row.id),
+			);
 			const locationOf = resultLocations(
 				ctx.db,
 				last.map((row) => mustTarget(ctx.db, row.target)),
@@ -543,6 +548,7 @@ export function get(ctx: Ctx, input: GetInput): Record<string, unknown>[] {
 				last: last.map((row) => ({
 					...resultView(ctx, row, locationOf),
 					passedOnRetry: retried.get(row.id) ?? null,
+					tries: tried.get(row.id) ?? [],
 				})),
 			};
 		}
