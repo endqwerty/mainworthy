@@ -41,6 +41,7 @@ test.skipIf(!browserAvailable)(
 			);
 			expect(rows[0]?.pre).toBe("Remote prerequisite");
 			expect(rows[0]?.title).toBe("My title");
+			expect(rows[0]?.steps).toMatchObject([{ action: "Open cart and check quantity" }]);
 			expect(browser.errors).toEqual([]);
 		} finally {
 			await browser.close();
