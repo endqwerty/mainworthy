@@ -20,6 +20,7 @@ struct RunPlannerTests {
 		let transport = PlanReplies(.lost)
 		let (screen, client) = try await screen(transport)
 		await screen.refresh()
+		screen.preparePlanner()
 		let commit = "3333333333333333333333333333333333333333"
 		#expect(await screen.plan(name: "Keep this plan", selection: .tag("regression"), commit: commit) == nil)
 		#expect(screen.planSubmission?.name == "Keep this plan")
@@ -139,6 +140,21 @@ struct RunPlannerTests {
 		#expect(screen.savedPlan == nil && screen.planSubmission == nil)
 		#expect(await transport.inputs.count == 1)
 		#expect(await transport.lookups == 0)
+	}
+
+	@Test("a plan refused or left uncertain after the planner closed is said in the list", arguments: [PlanReplies.Fault.refused, .lost])
+	func lateOutcomeAfterCancel(_ fault: PlanReplies.Fault) async throws {
+		let transport = PlanReplies(fault)
+		let (screen, _) = try await screen(transport)
+		screen.preparePlanner()
+		screen.closePlanner()
+		#expect(await screen.plan(name: "Planned, then cancelled", selection: .all) == nil)
+		let said = try #require(screen.notice)
+		#expect(said == screen.plannerNotice)
+		#expect(said.contains(fault == .refused ? "This plan was refused." : "outcome is unknown"))
+		screen.preparePlanner()
+		// Opening the planner again does not take the sentence from the list.
+		#expect(screen.notice == said)
 	}
 
 	@Test("a late successful plan refreshes the list and clears its submitted choices")

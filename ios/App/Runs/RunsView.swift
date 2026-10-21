@@ -89,7 +89,7 @@ struct RunsView: View {
 					}
 				}
 			}
-			.sheet(isPresented: $planning) {
+			.sheet(isPresented: $planning, onDismiss: { screen.closePlanner() }) {
 				RunPlannerView(screen: screen, planned: { run in
 					guard planning else { return }
 					planning = false
