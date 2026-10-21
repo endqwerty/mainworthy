@@ -62,8 +62,8 @@ type Table = {
  * `test/architecture.test.ts` holds it to the schema: a table of identity that is neither listed here nor one
  * of the tables an archive is meant to hold fails there.
  *
- * `change_ends` says which changes have ended (decision 0022), and it does not travel either: a change that
- * arrives in an archive is open, and the questions that were closed when it ended stay closed.
+ * `change_ends` says which changes have ended and records received landings (decision 0022). Neither travels:
+ * a change that arrives in an archive is open, and the questions that were closed when it ended stay closed.
  * `demo_projects` is the leave to date a write (decision 0100), and it does not travel either: a project that
  * arrives in an archive takes the server's clock from then on, whatever it was where it came from. Exported, either
  * table would raise the archive version and refuse every archive taken before it.

@@ -847,7 +847,7 @@ describe("Mainworthy instance archives", () => {
 			INSERT INTO folders VALUES (44, 24, NULL, 'Kept folder', 'a0', 'active', 1);
 			INSERT INTO grants (actor, project, can) VALUES (70, 24, '["read"]');
 			INSERT INTO slot_leases VALUES (602, 71, 1, 30001);
-			INSERT INTO change_ends VALUES (503, 'merged', 1);
+			INSERT INTO change_ends (change, ended, at) VALUES (503, 'merged', 1);
 			INSERT INTO demo_projects VALUES (23, 1);
 			INSERT INTO tracker_polls VALUES (401, 'poll-1', 1, 0, NULL);
 			INSERT INTO tracker_requests (id, nonce, project, result, repository, action, item_key, title, body, state, at)
@@ -1527,4 +1527,37 @@ describe("archive line helpers", () => {
 		await expect(read()).rejects.toThrow();
 		expect(stream.locked).toBe(false);
 	});
+});
+
+test("archive import leaves a landed change open without naming its landing on trunk", () => {
+	const from = harness();
+	const to = harness();
+	try {
+		const commit = "1234567890abcdef1234567890abcdef12345678";
+		from.call("report", {
+			target: { repo: "acme/shop", commit: "feature0001", branch: "feature", pr: 8, title: "Keep coupons" },
+			results: [{ test: { key: "checkout" }, outcome: "pass" }],
+		});
+		from.call("change", { change: "pr:8", state: "merged", landing: { commit, branch: "main" } });
+		from.call("report", {
+			target: { repo: "acme/shop", commit, branch: "main" },
+			results: [{ test: { key: "checkout" }, outcome: "pass" }],
+		});
+		const history = (h: typeof from) => h.call<{ last: unknown[] }[]>("get", { refs: ["T-1"] })[0]?.last[0];
+		expect(history(from)).toMatchObject({ location: { label: "main · pr:8 Keep coupons", commit, change: "pr:8" } });
+		const chunks: string[] = [];
+		exportArchive(from.app.db, (chunk) => chunks.push(chunk), { project: "scratch" });
+		const archive = chunks.join("");
+		expect(archive).not.toContain('"t":"change_ends"');
+		to.app.db.transaction(() => {
+			to.app.db.exec("DELETE FROM commands");
+			removeBootstrap(to.app.db);
+			importArchive(to.app.db, linesOf(archive));
+		});
+		expect(history(to)).toMatchObject({ location: { label: "main", commit, change: null } });
+		expect(to.call("find", { in: "changes" })).toMatchObject({ items: [{ key: "pr:8", state: "open" }] });
+	} finally {
+		from.close();
+		to.close();
+	}
 });
