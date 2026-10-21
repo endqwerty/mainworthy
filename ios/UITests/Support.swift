@@ -39,17 +39,24 @@ extension XCUIApplication {
 }
 
 extension XCUIElement {
+	/// Scrolls toward controls below the current viewport, stopping when the list no longer moves.
 	@MainActor func scrollUpTo(_ target: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
 		var previous: (label: String, frame: CGRect)?
-		while !(target.exists && target.isHittable) {
+		var unchanged = 0
+		var swipes = 0
+		while swipes < 100 && !(target.exists && target.isHittable) {
 			guard let last = buttons.allElementsBoundByAccessibilityElement.last else { break }
 			let position = (label: last.label, frame: last.frame)
 			if let previous, previous.label == position.label,
 				abs(previous.frame.minY - position.frame.minY) < 1,
-				abs(previous.frame.maxY - position.frame.maxY) < 1 { break }
+				abs(previous.frame.maxY - position.frame.maxY) < 1 {
+				unchanged += 1
+			} else { unchanged = 0 }
+			if unchanged == 2 { break }
 			previous = position
 			swipeUp()
+			swipes += 1
 		}
-		XCTAssertTrue(target.exists && target.isHittable, target.debugDescription, file: file, line: line)
+		XCTAssertTrue(target.exists && target.isHittable, "After \(swipes) upward swipes: \(target.debugDescription)", file: file, line: line)
 	}
 }
