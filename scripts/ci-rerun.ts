@@ -110,7 +110,12 @@ export async function rerunFailed(
 	const directory = await mkdtemp(join(tmpdir(), "ci-rerun-"));
 	let chosen: { rerun: string[]; why: string };
 	try {
-		await gh(["run", "download", runId, "--pattern", "results-*", "--dir", directory]);
+		try {
+			await gh(["run", "download", runId, "--pattern", "results-*", "--dir", directory]);
+		} catch (error) {
+			// A run whose shards all failed before they uploaded a report has none: its jobs still say what failed.
+			if (!(error instanceof Error && /no artifact matches/.test(error.message))) throw error;
+		}
 		chosen = chooseRerun(readShards(directory), await jobs());
 	} finally {
 		await rm(directory, { recursive: true, force: true });
