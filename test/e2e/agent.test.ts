@@ -437,8 +437,27 @@ for (const surface of ["case", "queue"] as const)
 				for (; presses < 40; presses++) {
 					const before = await state();
 					if (before.whole && before.atEnd) break;
+					const position = await card.evaluate((element) => [
+						element.querySelector(".proposal-edits")?.scrollTop ?? 0,
+						element.closest(".pane-scroll")?.scrollTop ?? 0,
+					]);
 					await page.keyboard.press("r");
-					await page.waitForTimeout(60);
+					await page.waitForFunction(
+						({ q, position }) => {
+							const card = document.querySelector(`[data-proposal="${q}"]`);
+							return (
+								card &&
+								(card.querySelector(".proposal-edits")?.scrollTop !== position[0] ||
+									card.closest(".pane-scroll")?.scrollTop !== position[1])
+							);
+						},
+						{ q: proposed.question, position },
+					);
+					await page.waitForFunction((q) => {
+						const evidence = document.querySelector(`[data-proposal-evidence="${q}"]`);
+						return evidence?.getAttribute("data-proposal-loaded") === "true";
+					}, proposed.question);
+					await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
 					expect(await open()).toEqual([proposed.question ?? ""]);
 				}
 				expect(presses).toBeGreaterThan(1);
@@ -551,8 +570,23 @@ for (const surface of ["case", "queue"] as const)
 			const accept = card.getByRole("button", { name: "Accept" });
 			let clicks = 0;
 			for (; clicks < 30 && !(await atEnd()); clicks++) {
+				const before = await card.evaluate((element) => [
+					element.querySelector(".proposal-edits")?.scrollTop ?? 0,
+					element.closest(".pane-scroll")?.scrollTop ?? 0,
+				]);
 				await accept.click();
-				await page.waitForTimeout(60);
+				await page.waitForFunction(
+					({ q, before }) => {
+						const card = document.querySelector(`[data-proposal="${q}"]`);
+						return (
+							card &&
+							(card.querySelector(".proposal-edits")?.scrollTop !== before[0] ||
+								card.closest(".pane-scroll")?.scrollTop !== before[1])
+						);
+					},
+					{ q: proposed.question, before },
+				);
+				await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
 				expect(await open()).toEqual([proposed.question ?? ""]);
 			}
 			expect(clicks).toBeGreaterThan(1);
@@ -717,8 +751,19 @@ for (const surface of ["case", "queue"] as const)
 				edits.evaluate((element) => element.scrollTop + element.clientHeight >= element.scrollHeight - 2);
 			const pageToEnd = async () => {
 				for (let clicks = 0; clicks < 30 && !(await atEnd()); clicks++) {
+					const before = await edits.evaluate((element) => [
+						element.scrollTop,
+						element.closest(".pane-scroll")?.scrollTop ?? 0,
+					]);
 					await accept.click();
-					await page.waitForTimeout(60);
+					await page.waitForFunction(
+						({ q, before }) => {
+							const edits = document.querySelector(`[data-proposal-evidence="${q}"]`);
+							return edits && (edits.scrollTop !== before[0] || edits.closest(".pane-scroll")?.scrollTop !== before[1]);
+						},
+						{ q, before },
+					);
+					await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
 				}
 				expect(await atEnd()).toBe(true);
 			};
