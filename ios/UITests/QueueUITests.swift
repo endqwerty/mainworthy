@@ -935,16 +935,22 @@ final class QueueUITests: XCTestCase {
 		try await openPrivacy(privacy)
 		safari.terminate()
 		app.activate()
+		XCTAssertTrue(app.wait(for: .runningForeground, timeout: 20))
 		try signIn(app)
-		app.tabBars.buttons["You"].tap()
-		XCTAssertTrue(app.staticTexts["Signed in"].waitForExistence(timeout: 5))
-		if !privacy.isHittable { app.swipeUp() }
-		XCTAssertTrue(privacy.waitForExistence(timeout: 5))
+		app.openTab("You")
+		let signedInHeading = app.staticTexts["Signed in"]
+		XCTAssertTrue(signedInHeading.wait(for: \.isHittable, toEqual: true, timeout: 5))
+		let accountList = app.collectionViews.firstMatch
+		XCTAssertTrue(accountList.waitForExistence(timeout: 5))
+		for _ in 0..<10 where !privacy.isHittable { accountList.swipeUp() }
+		XCTAssertTrue(privacy.wait(for: \.isHittable, toEqual: true, timeout: 5),
+			"The Privacy link in the You list must be visible and tappable")
 		XCTAssertEqual(privacy.label, "Privacy")
 		shot("privacy-you")
 		try await openPrivacy(privacy)
 		safari.terminate()
 		app.activate()
+		XCTAssertTrue(app.wait(for: .runningForeground, timeout: 20))
 	}
 
 	@MainActor func testAPersonSignsInAnswersAQuestionAndTakesItBack() async throws {
