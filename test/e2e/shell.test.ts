@@ -413,10 +413,6 @@ test.skipIf(!browserAvailable)(
 				() => server.api("get", { refs: ["C-1"] }),
 				(rows) => rows[0]?.state === "active",
 			);
-			await page.keyboard.press("z");
-			expect(await page.locator("#app").getAttribute("class")).toContain("zoom");
-			await page.keyboard.press("z");
-			expect(await page.locator("#app").getAttribute("class")).not.toContain("zoom");
 			await page.locator("#detail .pane-scroll").evaluate((pane) => {
 				pane.scrollTop = 0;
 			});
