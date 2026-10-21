@@ -7,6 +7,7 @@ extension XCUIApplication {
 		let projectMenu = buttons["project-menu"]
 		projectMenu.tap()
 		let option = collectionViews.buttons[project]
+		for _ in 0..<10 where !option.isHittable { collectionViews.firstMatch.swipeUp() }
 		XCTAssertTrue(option.wait(for: \.isHittable, toEqual: true, timeout: 10))
 		option.tap()
 		let named = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", project), object: projectMenu)

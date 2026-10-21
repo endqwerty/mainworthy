@@ -173,7 +173,8 @@ struct QuestionView: View {
 
 	private func header(_ question: Question) -> some View {
 		VStack(alignment: .leading, spacing: 8) {
-			let layout = dynamicTypeSize.isAccessibilitySize
+			let stacked = dynamicTypeSize >= .xxxLarge
+			let layout = stacked
 				? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
 				: AnyLayout(HStackLayout(spacing: 6))
 			layout {
@@ -181,14 +182,14 @@ struct QuestionView: View {
 				Label("from \(question.producer.name)", systemImage: question.producer.symbol)
 					.font(.caption)
 					.foregroundStyle(question.producer.tint)
-					.lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
-				if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 4) }
+					.lineLimit(stacked ? nil : 1)
+				if !stacked { Spacer(minLength: 4) }
 				// The time keeps its width in the row; the stacked layout can wrap it.
 				Text(question.openedAt, format: .relative(presentation: .named))
 					.font(.caption)
 					.foregroundStyle(.secondary)
-					.lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
-					.fixedSize(horizontal: !dynamicTypeSize.isAccessibilitySize, vertical: true)
+					.lineLimit(stacked ? nil : 1)
+					.fixedSize(horizontal: !stacked, vertical: true)
 			}
 			Text(question.title)
 				.font(.title3.weight(.semibold))
@@ -277,7 +278,7 @@ struct QuestionView: View {
 	}
 
 	private func decided(_ decision: Decision, on question: Question) -> some View {
-		Panel("Decided") {
+		Panel("Decided", horizontalPadding: dynamicTypeSize.isAccessibilitySize ? 8 : 12) {
 			Text(decision.label).font(.body.weight(.semibold))
 			Text(
 				"\(decision.byRule ? "By the policy's rule" : "By \(decision.by.joined(separator: ", "))") · \(decision.at.formatted(date: .abbreviated, time: .shortened))"

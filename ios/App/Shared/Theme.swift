@@ -88,10 +88,12 @@ struct Tag: View {
 /// A block of evidence: a heading and what it holds, on the grouped ground.
 struct Panel<Content: View>: View {
 	let title: String?
+	let horizontalPadding: CGFloat
 	@ViewBuilder let content: Content
 
-	init(_ title: String? = nil, @ViewBuilder content: () -> Content) {
+	init(_ title: String? = nil, horizontalPadding: CGFloat = 12, @ViewBuilder content: () -> Content) {
 		self.title = title
+		self.horizontalPadding = horizontalPadding
 		self.content = content()
 	}
 
@@ -106,7 +108,8 @@ struct Panel<Content: View>: View {
 			content
 		}
 		.frame(maxWidth: .infinity, alignment: .leading)
-		.padding(12)
+		.padding(.horizontal, horizontalPadding)
+		.padding(.vertical, 12)
 		.background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 12))
 	}
 }
