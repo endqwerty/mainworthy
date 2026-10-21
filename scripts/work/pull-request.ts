@@ -62,7 +62,7 @@ const PRINCIPLES = [
 	"Separate Before Serializing Shared State",
 	"Fix Root Causes",
 	"Sequence work into verifiable units",
-	"Sequence verifiable units",
+	"Sequence verifiable units", // the name of its reference file, sequence-verifiable-units.md
 	"Test Behavior, Not Implementation",
 	"Explain the Number",
 	"Guard the Context Window",
@@ -75,12 +75,30 @@ const words = (text: string): string =>
 		.replace(/[^a-z0-9]+/g, " ")
 		.trim();
 const NAMES = PRINCIPLES.map(words);
-const LINE = /^ {0,3}(?:[-*+] +)?(?:\*\*|__)?Principles:(?:\*\*|__)?[ \t]*(.*)$/gim;
+const LINE = /^ {0,3}(?:[-*+] +)?(?:\*\*|__)?Principles(?:\*\*|__)?:(?:\*\*|__)?[ \t]*(.*)$/gim;
 const FORMAT = "`Principles: <name> (<the choice it changed>); ...` or `Principles: n/a: <reason>`";
+
+/** The entries of a `Principles:` line: split at each ";" outside parentheses, each without its "(<choice>)". */
+function entries(line: string): string[] {
+	const found: string[] = [];
+	let depth = 0;
+	let name = "";
+	for (const char of `${line};`) {
+		if (char === "(") depth++;
+		else if (char === ")") depth = Math.max(0, depth - 1);
+		else if (char === ";" && depth === 0) {
+			found.push(name.replace(/[*_`]/g, "").trim());
+			name = "";
+		} else if (depth === 0) name += char;
+	}
+	return found.filter((entry) => entry !== "");
+}
 
 /** What is wrong with the description's `Principles:` lines; empty when each names principles or says why none. */
 export function principles(body: string): string[] {
-	const lines = [...unfenced(body).matchAll(LINE)].map((match) => (match[1] ?? "").trim());
+	// An HTML comment is not shown, so a line in one is not the description's.
+	const shown = unfenced(body).replace(/<!--[\s\S]*?(?:-->|$(?![\s\S]))/g, "");
+	const lines = [...shown.matchAll(LINE)].map((match) => (match[1] ?? "").trim());
 	if (lines.length === 0)
 		return [
 			`The description has no \`Principles:\` line. End "why this approach" with ${FORMAT} (the build skill's design note).`,
@@ -88,16 +106,13 @@ export function principles(body: string): string[] {
 	return lines.flatMap((line) => {
 		const notApplicable = /^n\/a\b[\s:.-]*(.*)$/i.exec(line);
 		if (notApplicable)
-			return words(notApplicable[1] ?? "").length < 8
+			return words(notApplicable[1] ?? "") === ""
 				? ["`Principles: n/a` needs a reason: `Principles: n/a: <why no principle changed a choice>`."]
 				: [];
-		const items = line
-			.split(";")
-			.map((item) => item.split("(")[0]?.replace(/[*_`]/g, "").trim() ?? "")
-			.filter((item) => item !== "");
+		const items = entries(line);
 		if (items.length === 0) return [`The \`Principles:\` line is empty. Write ${FORMAT}.`];
 		return items
-			.filter((item) => !NAMES.some((name) => `${words(item)} `.startsWith(`${name} `)))
+			.filter((item) => !NAMES.includes(words(item)))
 			.map(
 				(item) =>
 					`"${item}" in the \`Principles:\` line is not in the principles index. Name one, such as Model the Domain, or write \`n/a: <reason>\`.`,
