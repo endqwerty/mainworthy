@@ -221,7 +221,7 @@ struct RunsScreenTests {
 		#expect(screen.runs.first?.ref == planned.ref)
 		#expect(screen.savedPlan == nil && screen.planSubmission == nil)
 		#expect(await screen.plan(name: "Nobody", selection: .text("nonexistent selection")) == nil)
-		#expect(screen.notice?.lowercased().contains("no active case") == true)
+		#expect(screen.plannerNotice?.lowercased().contains("no active case") == true)
 	}
 }
 
@@ -230,11 +230,17 @@ actor RunPages: Transport {
 	private let gate = AsyncStream.makeStream(of: Void.self)
 	private let asked = AsyncStream.makeStream(of: Void.self)
 	private var holdFirst: Bool
+	private var failing = false
 	private var calls = 0
 	init(holdFirst: Bool = false) { self.holdFirst = holdFirst }
 	func wasAsked() async { for await _ in asked.stream { return } }
 	func release() { gate.continuation.yield() }
+	func failReads() { failing = true }
 	func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+		if failing {
+			let body = #"{"ok":false,"error":{"code":"invalid","message":"Runs could not be read."}}"#
+			return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 400, httpVersion: nil, headerFields: nil)!)
+		}
 		calls += 1
 		let old = calls == 1 && holdFirst
 		if old {
@@ -261,6 +267,8 @@ actor RunPages: Transport {
 @Suite("Runs when reads overlap")
 @MainActor
 struct RunsReadTests {
+	enum FailedRead: CaseIterable { case refresh, more }
+
 	func screen(_ transport: RunPages) throws -> RunsScreen {
 		let server = Server(
 			instance: try #require(Instance(address: "mainworthy.example")), secrets: MemoryStore(),
@@ -268,6 +276,51 @@ struct RunsReadTests {
 		return RunsScreen(
 			project: server.project("shop", identity: "shop-identity"), permission: Project(key: "shop", identity: "shop-identity", name: "Shop"), person: "robin")
 	}
+
+	private func failedRead(_ read: FailedRead) async throws -> RunsScreen {
+		let transport = RunPages()
+		let screen = try screen(transport)
+		await screen.refresh()
+		#expect(screen.runs.map(\.ref) == ["R-2"] && screen.hasMore)
+		await transport.failReads()
+		switch read {
+		case .refresh: await screen.refresh()
+		case .more: await screen.more()
+		}
+		#expect(screen.notice == "Runs could not be read.")
+		return screen
+	}
+
+	@Test("preparing and dismissing a planner keeps the list's read error", arguments: FailedRead.allCases)
+	func listNoticeSurvivesPlanner(_ read: FailedRead) async throws {
+		let screen = try await failedRead(read)
+		screen.preparePlanner()
+		// Cancel only dismisses the sheet; opening it again still must not erase the list's error.
+		screen.preparePlanner()
+		#expect(screen.notice == "Runs could not be read.")
+		#expect(screen.runs.map(\.ref) == ["R-2"])
+	}
+
+	@Test("a list read error is not a planner notice", arguments: FailedRead.allCases)
+	func listFailureIsNotPlannerNotice(_ read: FailedRead) async throws {
+		let screen = try await failedRead(read)
+		#expect(screen.plannerNotice == nil)
+		#expect(screen.notice == "Runs could not be read.")
+	}
+
+	@Test("the planner's folders that cannot be read are the planner's notice, not the list's")
+	func folderFailureIsPlannerNotice() async throws {
+		let transport = RunPages()
+		let screen = try screen(transport)
+		await screen.refresh()
+		screen.preparePlanner()
+		await transport.failReads()
+		await screen.readFolders()
+		#expect(screen.plannerNotice == "Runs could not be read.")
+		#expect(screen.notice == nil)
+		#expect(screen.runs.map(\.ref) == ["R-2"])
+	}
+
 	@Test("refresh rereads as many pages as the list already showed")
 	func pagination() async throws {
 		let screen = try screen(RunPages())
