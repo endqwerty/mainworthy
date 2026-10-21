@@ -595,19 +595,40 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 			edits: bulkEdits,
 		});
 	}
+	const shippingAddress = {
+		key: "tests/shipping.spec.ts::shipping::address",
+		name: "Shipping accepts an address",
+		file: "tests/shipping.spec.ts",
+	};
+	// A pull request merged by rebase: its head passed, and `main` holds a rewritten commit no report has named, as
+	// when a stack lands in one push and the pipeline tests only its newest commit. Changes shows the head's gate and,
+	// apart, the landed commit's (decision 0127). Both commits come from a stream of their own.
+	const rebased = random(seedNumber ^ 0x165667b1);
+	const [rebasedHead, rebasedLanding] = [hex(rebased), hex(rebased)];
+	await write(ci, "report", "rebased-head", before(23 * MINUTE), {
+		target: {
+			commit: rebasedHead,
+			repo: REPO,
+			branch: "refund-currency",
+			pr: 484,
+			base: red,
+			title: "Keep the currency on refunds",
+			files: ["src/refunds.ts"],
+		},
+		job: "misc",
+		// The test the unlinked report below names, so no other test's latest result moves.
+		results: [{ test: shippingAddress, outcome: "pass" }],
+	});
+	await write(ci, "change", "rebased-merge", before(22 * MINUTE), {
+		change: "pr:484",
+		state: "merged",
+		head: rebasedHead,
+		landing: { commit: rebasedLanding, branch: "main" },
+	});
 	await write(ci, "report", "unlinked", before(20 * MINUTE), {
 		target: { commit: change, repo: REPO, branch: "coupon-total", pr: 482 },
 		job: "misc",
-		results: [
-			{
-				test: {
-					key: "tests/shipping.spec.ts::shipping::address",
-					name: "Shipping accepts an address",
-					file: "tests/shipping.spec.ts",
-				},
-				outcome: "pass",
-			},
-		],
+		results: [{ test: shippingAddress, outcome: "pass" }],
 	});
 	// The shop's unit tests on the pull request, in a job of their own: one more open question for each file.
 	if (unlinkedFiles > 0) {

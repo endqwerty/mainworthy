@@ -305,8 +305,15 @@ The head, gate, failing tests and affected cases are checked against the commits
 head moves during a read, the app tries again once. If the head moves again, the app says so and keeps any
 previous page it read. Pull down to try again.
 
-A merged or closed change is marked as ended. Its gate keeps the last verdict its head had. The app does not
-end a change or run tests again.
+A merged or closed change is marked as ended. **Gate of the head** is always the gate of the commit shown as
+**Head**, the pull request's own last commit. A merged change says how it landed:
+
+- "Merged as its head": that commit is on the trunk branch now, and the trunk's decisions judge its gate.
+- "It landed on main as another commit, which has a gate of its own": a rebase or squash merge wrote a new
+  commit. **Landed on main** shows that commit and its gate, which is pending until a report names it.
+- "No commit on a trunk branch was reported for it": the server was not told where it landed.
+
+The app does not end a change or run tests again.
 
 ## End a session
 

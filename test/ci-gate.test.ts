@@ -913,7 +913,7 @@ test("the change workflow refuses unknown operations and incompatible servers, a
 	}
 });
 
-test("the change workflow retries deployment outages and replays GitHub landing metadata", async () => {
+test("the change workflow retries deployment outages and replays GitHub head and landing metadata", async () => {
 	const workflow = z
 		.object({
 			on: z.object({
@@ -949,9 +949,17 @@ exec "$REAL_CURL" "$@"
 			{ mode: 0o755 },
 		);
 		const commit = "14926b3300000000000000000000000000000000";
+		// A rebase merge: the pull request's head is not the commit that landed.
+		const head = "d6e2cd8400000000000000000000000000000000";
 		await writeFile(
 			join(directory, "github.json"),
-			JSON.stringify({ state: "closed", merged: true, merge_commit_sha: commit, base: { ref: "main" } }),
+			JSON.stringify({
+				state: "closed",
+				merged: true,
+				merge_commit_sha: commit,
+				head: { sha: head },
+				base: { ref: "main" },
+			}),
 		);
 		const run = async (
 			health: [number, ...number[]],
@@ -986,6 +994,7 @@ exec "$REAL_CURL" "$@"
 						MAINWORTHY_TOKEN: "test-token",
 						PULL: "482",
 						STATE: "merged",
+						HEAD_COMMIT: head,
 						MERGED_COMMIT: commit,
 						BASE_BRANCH: "main",
 						EVENT_NAME: "pull_request",
@@ -1012,7 +1021,7 @@ exec "$REAL_CURL" "$@"
 		expect(workflow.on.workflow_dispatch.inputs.state.required).toBe(false);
 		expect(workflow.jobs.tell.permissions).toEqual({ "pull-requests": "read" });
 		expect(recovered.received.filter((req) => req.payload).map((req) => req.payload)).toEqual(
-			Array(4).fill({ change: "pr:482", state: "merged", landing: { commit, branch: "main" } }),
+			Array(4).fill({ change: "pr:482", state: "merged", head, landing: { commit, branch: "main" } }),
 		);
 		for (const status of [400, 401, 403, 404, 429, 500]) {
 			const refused = await run([200], [status, 200]);
@@ -1043,6 +1052,7 @@ exec "$REAL_CURL" "$@"
 			const replay = await run([200], [200], {
 				EVENT_NAME: "workflow_dispatch",
 				STATE: override ?? "",
+				HEAD_COMMIT: "",
 				MERGED_COMMIT: "",
 				BASE_BRANCH: "",
 			});
@@ -1050,6 +1060,7 @@ exec "$REAL_CURL" "$@"
 			expect(replay.received[1]?.payload).toEqual({
 				change: "pr:482",
 				state: expected,
+				head,
 				...(expected === "merged" ? { landing: { commit, branch: "main" } } : {}),
 			});
 			expect(await readFile(join(directory, "gh-args"), "utf8")).toBe("api repos/example/mainworthy/pulls/482\n");
@@ -1065,17 +1076,19 @@ exec "$REAL_CURL" "$@"
 					state: state === "merged" ? "closed" : state,
 					merged: state === "merged",
 					merge_commit_sha: state === "merged" ? commit : null,
+					head: { sha: head },
 					base: { ref: branch },
 				}),
 			);
 			const replay = await run([200], [200], {
 				EVENT_NAME: "workflow_dispatch",
 				STATE: "",
+				HEAD_COMMIT: "",
 				MERGED_COMMIT: "",
 				BASE_BRANCH: "",
 			});
 			expect(replay.code, replay.output).toBe(0);
-			expect(replay.received[1]?.payload).toEqual({ change: "pr:482", state });
+			expect(replay.received[1]?.payload).toEqual({ change: "pr:482", state, head });
 		}
 		await writeFile(
 			join(directory, "github.json"),
@@ -1084,6 +1097,7 @@ exec "$REAL_CURL" "$@"
 		const override = await run([200], [200], {
 			EVENT_NAME: "workflow_dispatch",
 			STATE: "merged",
+			HEAD_COMMIT: "",
 			MERGED_COMMIT: "",
 			BASE_BRANCH: "",
 		});

@@ -46,6 +46,13 @@
 	color: var(--dim);
 	max-width: 78ch;
 }
+.change-landing-gate {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 4px 10px;
+	margin: 6px 0 0;
+}
 .change-gate h2 {
 	font-size: 25px;
 	margin: 5px 0;

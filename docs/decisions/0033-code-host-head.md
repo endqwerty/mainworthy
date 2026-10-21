@@ -1,6 +1,6 @@
 # 0033. A report can carry the code host's current head
 
-Date: 2026-10-14. Issue #62.
+Date: 2026-10-14. Issue #62. Decision 0127 replaces the paragraph on landings: a landing no longer sets the head.
 
 ## Problem
 

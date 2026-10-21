@@ -620,6 +620,17 @@ enum Wire {
 		let reply: RunReportReply?
 	}
 
+	/// The commit a merged change landed as on trunk, and that commit's own gate: the change's only when it is the
+	/// head.
+	struct ChangeLanding: Decodable, Equatable, Sendable {
+		let commit: String
+		let branch: String
+		/// None: nothing a gate counts has been reported for this commit.
+		let run: String?
+		let verdict: String
+		let reason: String
+	}
+
 	/// A reported branch or pull request.
 	struct ChangeSummary: Decodable, Equatable, Sendable {
 		let key: String
@@ -629,6 +640,7 @@ enum Wire {
 		let url: String?
 		let state: String
 		let verdict: String?
+		let landing: ChangeLanding?
 	}
 
 	/// `find` in changes: newest first, with the head's gate.
@@ -653,6 +665,7 @@ enum Wire {
 		let title: String?
 		/// Open, merged or closed, as it is now: a change older than the list's newest is read here.
 		let state: String
+		let landing: ChangeLanding?
 	}
 
 	/// The run counted for this head, if any.

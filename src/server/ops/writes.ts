@@ -47,10 +47,11 @@ import {
 	ensureTarget,
 	firstCountedReport,
 	keepReceipt,
-	landChangeHead,
+	landChange,
 	markProcessed,
 	mustTarget,
 	NO_FILE,
+	observeEndingHead,
 	scopeEnded,
 	setChangeEnded,
 	type TargetRow,
@@ -497,11 +498,12 @@ export function changeEnds(ctx: Ctx, input: ChangeInput): ChangeReply {
 	if (!change) throw notFound(`change ${input.change}`);
 	const ended = input.state === "open" ? null : input.state;
 	const same = change.ended === ended;
-	const now = same ? change : setChangeEnded(ctx, change, ended);
+	const headed = input.head ? observeEndingHead(ctx, change, input.head) : change;
+	const now = same ? headed : setChangeEnded(ctx, headed, ended);
 	const questions = same ? [] : ended === null ? askAgainAbout(ctx, now) : stopAskingAbout(ctx, now);
-	const landed = input.landing ? landChangeHead(ctx, now, input.landing) : null;
+	const landed = input.landing ? landChange(ctx, now, input.landing) : null;
 	if (landed) refreshCommitScope(ctx, landed);
-	return { change: now.key, state: input.state, questions, already: same && landed === null };
+	return { change: now.key, state: input.state, questions, already: same && headed === change && landed === null };
 }
 
 export const changeOp = defineOp({

@@ -2190,10 +2190,15 @@ describe("a change that ends", () => {
 	});
 
 	test.each([undefined, "linux"])(
-		"a landing selects an unreported head before its failing CI arrives, env=%s",
+		"a fast-forward of a head no report has named waits for its failing CI, env=%s",
 		(env) => {
 			h.call("report", ciReport({ commit: "headX0001", branch: "feature", pr: 12, n: 1 }));
-			const merge = { change: "pr:12", state: "merged", landing: { commit: "headY0001", branch: "main" } };
+			const merge = {
+				change: "pr:12",
+				state: "merged",
+				head: "headY0001",
+				landing: { commit: "headY0001", branch: "main" },
+			};
 			h.call("change", merge);
 			expect(h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({ verdict: "pending", run: null });
 			expect(changes()).toMatchObject([{ key: "pr:12", head: "headY0001", state: "merged", verdict: "pending" }]);
@@ -2222,11 +2227,16 @@ describe("a change that ends", () => {
 		},
 	);
 
-	test("a landing selects an older commit than the recorded head", () => {
+	test("the merge's head can be older than the recorded head", () => {
 		h.call("report", ciReport({ commit: "older0012", branch: "feature", pr: 12, n: 1, fail: { 0: "older failure" } }));
 		h.call("report", ciReport({ commit: "newer0012", branch: "feature", pr: 12, n: 1 }));
 		expect(h.call<GateStatus>("gate", { change: "pr:12" }).verdict).toBe("passed");
-		h.call("change", { change: "pr:12", state: "merged", landing: { commit: "older0012", branch: "main" } });
+		h.call("change", {
+			change: "pr:12",
+			state: "merged",
+			head: "older0012",
+			landing: { commit: "older0012", branch: "main" },
+		});
 		expect(changes()).toMatchObject([{ key: "pr:12", head: "older0012", state: "merged", verdict: "blocked" }]);
 		expect(h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({
 			run: gate("older0012").run,
@@ -2248,11 +2258,74 @@ describe("a change that ends", () => {
 		expect(h.app.db.raw.query("SELECT DISTINCT line FROM targets WHERE commit_sha = 'landed002'").all()).toEqual([
 			{ line: "change" },
 		]);
-		expect(changes()).toMatchObject([{ key: "pr:68", head: "merge0002", state: "merged", verdict: "pending" }]);
-		expect(gate("merge0002")).toMatchObject({ verdict: "pending", run: null });
+		expect(changes()).toMatchObject([
+			{
+				key: "pr:68",
+				head: "landed002",
+				state: "merged",
+				verdict: "passed",
+				landing: { commit: "merge0002", branch: "main", run: null, verdict: "pending" },
+			},
+		]);
+		expect(h.call<GateStatus>("gate", { change: "pr:68" })).toMatchObject({
+			run: gate("landed002").run,
+			verdict: "passed",
+		});
 	});
 
-	test("a landing received after the end still moves the head, and reopening does not move it back", () => {
+	test("a rebased landing keeps the pull request's gate, and the landed commit's gate is its own", () => {
+		h.call("report", ciReport({ commit: "prhead077", branch: "feature", pr: 77, n: 2 }));
+		h.call("change", {
+			change: "pr:77",
+			state: "merged",
+			head: "prhead077",
+			landing: { commit: "rebase077", branch: "main" },
+		});
+		const landed = { commit: "rebase077", branch: "main", run: null, verdict: "pending" };
+		expect(h.call<GateStatus>("gate", { change: "pr:77" })).toMatchObject({
+			run: gate("prhead077").run,
+			verdict: "passed",
+		});
+		expect(changes()).toMatchObject([
+			{ key: "pr:77", head: "prhead077", state: "merged", verdict: "passed", landing: landed },
+		]);
+		h.call("report", ciReport({ commit: "rebase077", n: 2, fail: { 1: "broke on main" } }));
+		expect(h.call<GateStatus>("gate", { change: "pr:77" }).verdict).toBe("passed");
+		expect(changes()).toMatchObject([
+			{
+				head: "prhead077",
+				verdict: "passed",
+				landing: {
+					...landed,
+					run: gate("rebase077").run,
+					verdict: "blocked",
+					reason: "blocked: 1 failure unexplained, 1 question open",
+				},
+			},
+		]);
+		expect(queue().items.map((q) => q.evidence.scope)).toEqual(["line:trunk@acme/web"]);
+	});
+
+	test("the merge names the head that merged, even one no report has named yet", () => {
+		h.call("report", ciReport({ commit: "first0078", branch: "feature", pr: 78, n: 1 }));
+		h.call("change", {
+			change: "pr:78",
+			state: "merged",
+			head: "final0078",
+			landing: { commit: "rebase078", branch: "main" },
+		});
+		expect(changes()).toMatchObject([{ key: "pr:78", head: "final0078", verdict: "pending" }]);
+		expect(h.call<GateStatus>("gate", { change: "pr:78" })).toMatchObject({ run: null, verdict: "pending" });
+		h.call("report", ciReport({ commit: "final0078", branch: "feature", pr: 78, n: 1, fail: { 0: "late failure" } }));
+		expect(h.call<GateStatus>("gate", { change: "pr:78" })).toMatchObject({
+			run: gate("final0078").run,
+			verdict: "blocked",
+		});
+		// An ended change is not asked about (decision 0022): the failure is there to read, not to answer.
+		expect(queue().items).toEqual([]);
+	});
+
+	test("a landing received after the end still moves its commit to trunk, and reopening does not move it back", () => {
 		h.call("report", ciReport({ commit: "landed003", branch: "feature", pr: 68, n: 1, fail: { 0: "same cause" } }));
 		h.call("change", { change: "pr:68", state: "merged" });
 		h.call("change", { change: "pr:68", state: "merged", landing: { commit: "landed003", branch: "main" } });
@@ -2568,9 +2641,14 @@ describe("a change that ends", () => {
 		expect(queue().counts.open).toBe(0);
 	});
 
-	test("reopening with an unreported landing head waits for evidence in the change's scope", () => {
+	test("reopening with an unreported merged head waits for evidence in the change's scope", () => {
 		const asked = failingPull();
-		h.call("change", { change: "pr:12", state: "merged", landing: { commit: "unseen001", branch: "main" } });
+		h.call("change", {
+			change: "pr:12",
+			state: "merged",
+			head: "unseen001",
+			landing: { commit: "unseen001", branch: "main" },
+		});
 		expect(h.call<{ state: string }[]>("get", { refs: [asked.q] })[0]?.state).toBe("dissolved");
 		expect(end("pr:12", "open")).toMatchObject({ state: "open", questions: [] });
 		expect(h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({ run: null, verdict: "pending" });

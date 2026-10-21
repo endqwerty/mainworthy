@@ -23,7 +23,17 @@ const Change = z.object({
 	state: z.enum(["merged", "closed", "open"]),
 	verdict: Verdict.nullable(),
 	reason: z.string().nullable(),
+	landing: z
+		.object({
+			commit: z.string(),
+			branch: z.string(),
+			run: z.string().nullable(),
+			verdict: Verdict,
+			reason: z.string(),
+		})
+		.nullable(),
 });
+type Change = z.infer<typeof Change>;
 const Impact = z.object({
 	counts: z.object({ cases: z.number(), unreviewed: z.number(), failing: z.number(), uncovered: z.number() }),
 	cases: z.array(
@@ -99,7 +109,7 @@ function ChangesWorkbench() {
 			<section className="pane changes-pane" id="list">
 				<div className="phead">
 					<b>Changes</b>
-					<span className="dim">Latest commit's verdict</span>
+					<span className="dim">Each head's verdict</span>
 				</div>
 				<div className="pane-scroll" role="listbox" aria-label="Changes">
 					{changes.map((change) => (
@@ -136,18 +146,11 @@ function ChangesWorkbench() {
 						</div>
 						<div className="pane-scroll detail-body">
 							<div className={`change-gate v-${gateData?.verdict ?? "pending"}`}>
-								<span className="dim">Gate of {current?.head?.slice(0, 12) ?? "the latest commit"}</span>
+								<span className="dim">Gate of the head{current?.head ? `, ${current.head.slice(0, 12)}` : ""}</span>
 								<h2>{gateData?.verdict ?? (gate.error ? "Gate unavailable" : "Reading gate…")}</h2>
 								<p>{gateData?.reason ?? gate.error?.message}</p>
 								{gateData?.stale && <p>The verdict awaits new evidence or a fresh decision.</p>}
 							</div>
-							{current && current.state !== "open" && (
-								<p className="change-ended-note">
-									{current.state === "merged" ? "Merged." : "Closed without merging."} The verdict above is the last one
-									its commits had. A failure nobody explained is no longer asked about here: if it came with the change,
-									the line fails and asks.
-								</p>
-							)}
 							{gateData && (
 								<div className="change-tally">
 									{Object.entries(gateData.tally)
@@ -174,6 +177,7 @@ function ChangesWorkbench() {
 										})}
 								</div>
 							)}
+							{current && <ChangeEnding change={current} />}
 							<SectionHeading>Open questions</SectionHeading>
 							{open.error && <p role="status">{open.error.message}</p>}
 							{openData?.items.map((q) => (
@@ -291,6 +295,48 @@ function ChangesWorkbench() {
 				)}
 			</section>
 		</>
+	);
+}
+
+/** How a change ended, naming which commit each gate on the page is about. An open change says nothing here. */
+function ChangeEnding({ change }: { change: Change }) {
+	const { project } = useApp();
+	if (change.state === "open") return null;
+	if (change.state === "closed") return <p className="change-ended-note">Closed without merging.</p>;
+	const landing = change.landing;
+	if (!landing) return <p className="change-ended-note">Merged. No commit on a trunk branch was reported for it.</p>;
+	if (landing.commit === change.head)
+		return (
+			<p className="change-ended-note">
+				Merged as its head. That commit is on {landing.branch} now, so {landing.branch}'s decisions judge the gate
+				above.
+			</p>
+		);
+	return (
+		<div className="change-landing">
+			<p className="change-ended-note">
+				Merged. It landed on {landing.branch} as another commit, which has a gate of its own.
+			</p>
+			<div className={`change-landing-gate v-${landing.verdict}`}>
+				<span className="dim">
+					Gate of <span className="mono">{landing.commit.slice(0, 12)}</span> on {landing.branch}
+				</span>
+				<b className="change-verdict">{landing.verdict}</b>
+				{landing.run ? (
+					<a
+						href={routeUrl({ project, screen: "runs", ref: landing.run })}
+						onClick={(event) => {
+							event.preventDefault();
+							if (landing.run) navigate(routeUrl({ project, screen: "runs", ref: landing.run }));
+						}}
+					>
+						{landing.reason}
+					</a>
+				) : (
+					<span>{landing.reason}</span>
+				)}
+			</div>
+		</div>
 	);
 }
 

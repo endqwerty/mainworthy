@@ -59,12 +59,12 @@ struct ChangeView: View {
 					if detail.change.state != .open {
 						Tag(text: detail.change.state.name, tint: .secondary)
 					}
-					if detail.change.state.isEnded {
-						Text("This change has ended. The gate is the last verdict its head had.")
-							.font(.subheadline).foregroundStyle(.secondary)
+					if let ending = ending(detail.change) {
+						Text(ending).font(.subheadline).foregroundStyle(.secondary)
+							.accessibilityIdentifier("change-ending")
 					}
 				}
-				Panel("Gate") {
+				Panel("Gate of the head") {
 					Tag(text: detail.gate.verdict.name, tint: detail.gate.verdict.tint)
 						.accessibilityIdentifier("change-verdict")
 					Text(detail.gate.reason).accessibilityIdentifier("change-reason")
@@ -72,6 +72,14 @@ struct ChangeView: View {
 					if detail.gate.stale {
 						Text("The stored verdict has not caught up with the current evidence.")
 							.font(.subheadline).foregroundStyle(Color.warn)
+					}
+				}
+				if case .asCommit(let landed) = detail.change.landing {
+					Panel("Landed on \(landed.branch)") {
+						commit("Commit", landed.commit)
+						Tag(text: landed.verdict.name, tint: landed.verdict.tint)
+							.accessibilityIdentifier("change-landing-verdict")
+						Text(landed.reason).accessibilityIdentifier("change-landing-reason")
 					}
 				}
 				if let notice = screen.notice { Text(notice).foregroundStyle(Color.fail) }
@@ -157,6 +165,22 @@ struct ChangeView: View {
 		}
 		.background(Color(.systemGroupedBackground))
 		.refreshable { await screen.refresh() }
+	}
+
+	/// How the change ended, in words that name which commit each gate on the page is about.
+	private func ending(_ change: ChangeSummary) -> String? {
+		switch (change.state, change.landing) {
+		case (.merged, .asHead(let branch)?):
+			"Merged as its head. That commit is on \(branch) now, so \(branch)'s decisions judge the gate below."
+		case (.merged, .asCommit(let landed)?):
+			"Merged. It landed on \(landed.branch) as another commit, which has a gate of its own."
+		case (.merged, nil):
+			"Merged. No commit on a trunk branch was reported for it."
+		case (.closed, _):
+			"Closed without merging."
+		case (.open, _), (.other, _):
+			nil
+		}
 	}
 
 	private func commit(_ label: String, _ value: String?) -> some View {

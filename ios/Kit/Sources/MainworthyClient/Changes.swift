@@ -50,6 +50,37 @@ public enum ChangeState: Equatable, Sendable {
 	public var isEnded: Bool { self == .merged || self == .closed }
 }
 
+/// Where a merged change landed on trunk, when the server was told.
+public enum ChangeLanding: Equatable, Sendable {
+	/// It landed as its head: that commit is on trunk now, and the change's gate is that commit's, judged there.
+	case asHead(branch: String)
+	/// It landed as another commit, which has a gate of its own.
+	case asCommit(LandedCommit)
+
+	init?(_ wire: Wire.ChangeLanding?, head: String?) {
+		guard let wire else { return nil }
+		self = wire.commit == head ? .asHead(branch: wire.branch) : .asCommit(LandedCommit(wire))
+	}
+}
+
+/// A commit a merge wrote on trunk, and its own gate.
+public struct LandedCommit: Equatable, Sendable {
+	public let commit: String
+	public let branch: String
+	public let verdict: ChangeVerdict
+	public let reason: String
+	/// The run whose verdict this is. None: nothing a gate counts was reported for this commit.
+	public let run: String?
+
+	init(_ wire: Wire.ChangeLanding) {
+		commit = wire.commit
+		branch = wire.branch
+		verdict = ChangeVerdict(wire.verdict)
+		reason = wire.reason
+		run = wire.run
+	}
+}
+
 /// A branch or pull request for which a pipeline has reported results.
 public struct ChangeSummary: Identifiable, Equatable, Sendable {
 	public var id: String { key }
@@ -59,7 +90,9 @@ public struct ChangeSummary: Identifiable, Equatable, Sendable {
 	public let head: String?
 	public let address: URL?
 	public let state: ChangeState
+	/// The head's verdict.
 	public let verdict: ChangeVerdict
+	public let landing: ChangeLanding?
 
 	init(_ wire: Wire.ChangeSummary) {
 		key = wire.key
@@ -69,6 +102,7 @@ public struct ChangeSummary: Identifiable, Equatable, Sendable {
 		address = wire.url.flatMap(URL.init(string:))
 		state = ChangeState(wire.state)
 		verdict = ChangeVerdict(wire.verdict ?? "pending")
+		landing = ChangeLanding(wire.landing, head: wire.head)
 	}
 
 	init(
@@ -78,7 +112,7 @@ public struct ChangeSummary: Identifiable, Equatable, Sendable {
 		self.init(Wire.ChangeSummary(
 			key: key, title: basis.title, branch: header?.branch ?? known?.branch, head: basis.head,
 			url: header?.url ?? known?.address?.absoluteString,
-			state: basis.state, verdict: gate.verdict
+			state: basis.state, verdict: gate.verdict, landing: basis.landing
 		))
 	}
 }
@@ -196,6 +230,7 @@ extension ProjectClient {
 		let confirmed: Wire.ChangeImpact = try await server.read("impact", in: key, ["change": .string(change)])
 		guard confirmed.change.key == change, confirmed.change.head == affected.change.head,
 			confirmed.change.base == affected.change.base, confirmed.change.state == affected.change.state,
+			confirmed.change.landing == affected.change.landing,
 			confirmed.gate?.run == status.run else { return nil }
 		return ChangeDetails(
 			change: ChangeSummary(key: change, basis: affected.change, gate: status, header: header, known: known),
