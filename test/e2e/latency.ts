@@ -5,15 +5,17 @@ import { browserAvailable, openPage, type PageHarness, startServer } from "./sup
 
 /**
  * Waits for the suite page to hold every case. A page that does not get there says what it showed: the number of
- * cases loaded and the total it was told, and the errors it logged. The
- * 30 s wait itself is the library's default (issue #146: one CI run timed out here and could not say why).
+ * cases loaded and the total it was told, and the errors it logged (issue #146: one CI run timed out here and could
+ * not say why). Thousands of cases take longer to arrive than the suite's `SETTLES`, so the wait is its own.
  */
+const ALL_CASES_WITHIN = 30_000;
 async function waitForAllCases(browser: PageHarness, cases: number): Promise<void> {
 	try {
 		await browser.page.waitForFunction(
 			(expected) =>
 				Number(document.querySelector('[data-testid="case-list"]')?.getAttribute("data-loaded")) >= expected,
 			cases,
+			{ timeout: ALL_CASES_WITHIN },
 		);
 	} catch (error) {
 		if (!(error instanceof errors.TimeoutError)) throw error;
@@ -28,7 +30,7 @@ async function waitForAllCases(browser: PageHarness, cases: number): Promise<voi
 		]);
 		throw new Error(
 			[
-				`The suite page did not load ${cases} cases in 30 s: ${shown}.`,
+				`The suite page did not load ${cases} cases in ${ALL_CASES_WITHIN / 1000} s: ${shown}.`,
 				`Page errors: ${browser.errors.length ? JSON.stringify(browser.errors) : "none"}.`,
 			].join("\n"),
 			{ cause: error },
