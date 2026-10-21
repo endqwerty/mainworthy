@@ -1,5 +1,6 @@
 # Changelog
 
+- 2026-10-20: **Fixed:** startup demo resets skip the whole-database foreign-key scan before removal, while retaining every final foreign-key check. Reset logs name transaction setup, the pending-key check, and validation and commit after removal and recreation, so their elapsed time is visible (issue #707).
 - 2026-10-20: **Fixed:** iPhone question headers stack the kind, source and time at accessibility text sizes, keeping proposal evidence and method badges inside the screen (issue #667).
 - 2026-10-20: **Fixed:** confirming Forget while the iPhone sends saved answers says that the entry was kept because answers were being sent, so you can try again. A recovered outcome shows instead. The saved-answers list schedules its next 24-hour eligibility update instead of refreshing every second (issue #674).
 - 2026-10-20: **Fixed:** the iPhone recognizes unavailable native passkey sign-in from a structured server detail, so rewording the server's message keeps the app's password fallback notice (issue #680).

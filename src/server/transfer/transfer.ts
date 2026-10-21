@@ -401,23 +401,36 @@ function readHeader(line: string, metadata: readonly Table[]): Header {
 	return header;
 }
 
-function importTransaction<T>(db: Db, fn: () => T): T {
+function importTransaction<T>(db: Db, fn: () => T, progress: (step: string, ms: number) => void = () => {}): T {
+	const checking = performance.now();
 	const deferred =
 		db.raw.query<{ defer_foreign_keys: number }, []>("PRAGMA defer_foreign_keys").get()?.defer_foreign_keys ?? 0;
-	if (db.raw.inTransaction && deferred === 0 && db.raw.query("PRAGMA foreign_key_check").get()) {
-		throw new OpError(
-			"conflict",
-			"the caller has pending foreign key violations; resolve them before importing or removing a project",
-		);
-	}
 	try {
-		return db.checkedBulk(fn);
+		if (db.raw.inTransaction && deferred === 0 && db.raw.query("PRAGMA foreign_key_check").get()) {
+			throw new OpError(
+				"conflict",
+				"the caller has pending foreign key violations; resolve them before importing or removing a project",
+			);
+		}
+	} finally {
+		progress("check pending foreign keys", performance.now() - checking);
+	}
+	let finishing = performance.now();
+	try {
+		return db.checkedBulk(() => {
+			try {
+				return fn();
+			} finally {
+				finishing = performance.now();
+			}
+		});
 	} finally {
 		// Restore only after a failing savepoint has rolled back its pending references.
 		if (db.raw.inTransaction) {
 			const current = db.raw.query<{ defer_foreign_keys: number }, []>("PRAGMA defer_foreign_keys").get();
 			if (current?.defer_foreign_keys !== deferred) db.raw.exec(`PRAGMA defer_foreign_keys = ${deferred}`);
 		}
+		progress("finish transfer transaction", performance.now() - finishing);
 	}
 }
 
@@ -625,73 +638,77 @@ export function removeProject(
 	key: string,
 	progress: (step: string, ms: number) => void = () => {},
 ): ArchiveCounts {
-	return importTransaction(db, () => {
-		const began = performance.now();
-		const id = projectLiteral(db, key);
-		const shadow = new Set(
-			TableKind.array()
-				.parse(db.raw.query("PRAGMA table_list").all())
-				.filter((table) => table.type === "shadow")
-				.map((table) => table.name),
-		);
-		const statements = TableName.array()
-			.parse(db.raw.query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all())
-			.map((table) => table.name)
-			.filter((name) => !name.startsWith("sqlite_") && !shadow.has(name) && !INSTANCE_TABLES.includes(name))
-			.map((name) => {
-				const columns = Column.array()
-					.parse(db.raw.query(`PRAGMA table_info(${identifier(name)})`).all())
-					.map((column) => column.name);
-				const parents = ForeignKey.array()
-					.parse(db.raw.query(`PRAGMA foreign_key_list(${identifier(name)})`).all())
-					.map((key) => key.table);
-				return {
-					name,
-					parents,
-					parentOwned: name in PROJECT_PARENT,
-					rows: `FROM ${identifier(name)} ${ownedBy({ name, columns }, id, "removing a project")}`,
-				};
-			})
-			// A table that finds its rows through a parent goes first, while the parent's rows are still there.
-			.sort((a, b) => Number(!a.parentOwned) - Number(!b.parentOwned));
-		const remaining = new Map(statements.map((statement) => [statement.name, statement]));
-		const ordered: typeof statements = [];
-		const visit = (statement: (typeof statements)[number]): void => {
-			if (!remaining.delete(statement.name)) return;
-			for (const child of remaining.values()) {
-				// Ownership filters still need their parents. Within each group, children precede parents;
-				// self references and cycles are covered by the final foreign-key check.
-				if (child.parentOwned === statement.parentOwned && child.parents.includes(statement.name)) visit(child);
-			}
-			ordered.push(statement);
-		};
-		for (const statement of statements) visit(statement);
-		progress("discover tables", performance.now() - began);
-		// Counted before any row goes: a delete can take rows of another table with it (ON DELETE CASCADE).
-		const tables = Object.fromEntries(
-			statements.map(({ name, rows }) => {
-				const start = performance.now();
-				const n = db.raw.query<{ n: number }, []>(`SELECT count(*) AS n ${rows}`).get()?.n ?? 0;
-				progress(`count ${name}`, performance.now() - start);
-				return [name, n];
-			}),
-		);
-		db.raw.exec("PRAGMA defer_foreign_keys = ON");
-		for (const { name, rows } of ordered) {
-			const start = performance.now();
-			db.raw.exec(`DELETE ${rows}`);
-			progress(`delete ${name}`, performance.now() - start);
-		}
-		const checking = performance.now();
-		const foreign = db.raw.query<{ table: string; parent: string }, []>("PRAGMA foreign_key_check").get();
-		progress("check foreign keys", performance.now() - checking);
-		if (foreign)
-			throw new OpError(
-				"internal",
-				`removing project ${key} left rows in ${foreign.table} that refer to ${foreign.parent}`,
+	return importTransaction(
+		db,
+		() => {
+			const began = performance.now();
+			const id = projectLiteral(db, key);
+			const shadow = new Set(
+				TableKind.array()
+					.parse(db.raw.query("PRAGMA table_list").all())
+					.filter((table) => table.type === "shadow")
+					.map((table) => table.name),
 			);
-		return { rows: Object.values(tables).reduce((sum, count) => sum + count, 0), tables };
-	});
+			const statements = TableName.array()
+				.parse(db.raw.query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all())
+				.map((table) => table.name)
+				.filter((name) => !name.startsWith("sqlite_") && !shadow.has(name) && !INSTANCE_TABLES.includes(name))
+				.map((name) => {
+					const columns = Column.array()
+						.parse(db.raw.query(`PRAGMA table_info(${identifier(name)})`).all())
+						.map((column) => column.name);
+					const parents = ForeignKey.array()
+						.parse(db.raw.query(`PRAGMA foreign_key_list(${identifier(name)})`).all())
+						.map((key) => key.table);
+					return {
+						name,
+						parents,
+						parentOwned: name in PROJECT_PARENT,
+						rows: `FROM ${identifier(name)} ${ownedBy({ name, columns }, id, "removing a project")}`,
+					};
+				})
+				// A table that finds its rows through a parent goes first, while the parent's rows are still there.
+				.sort((a, b) => Number(!a.parentOwned) - Number(!b.parentOwned));
+			const remaining = new Map(statements.map((statement) => [statement.name, statement]));
+			const ordered: typeof statements = [];
+			const visit = (statement: (typeof statements)[number]): void => {
+				if (!remaining.delete(statement.name)) return;
+				for (const child of remaining.values()) {
+					// Ownership filters still need their parents. Within each group, children precede parents;
+					// self references and cycles are covered by the final foreign-key check.
+					if (child.parentOwned === statement.parentOwned && child.parents.includes(statement.name)) visit(child);
+				}
+				ordered.push(statement);
+			};
+			for (const statement of statements) visit(statement);
+			progress("discover tables", performance.now() - began);
+			// Counted before any row goes: a delete can take rows of another table with it (ON DELETE CASCADE).
+			const tables = Object.fromEntries(
+				statements.map(({ name, rows }) => {
+					const start = performance.now();
+					const n = db.raw.query<{ n: number }, []>(`SELECT count(*) AS n ${rows}`).get()?.n ?? 0;
+					progress(`count ${name}`, performance.now() - start);
+					return [name, n];
+				}),
+			);
+			db.raw.exec("PRAGMA defer_foreign_keys = ON");
+			for (const { name, rows } of ordered) {
+				const start = performance.now();
+				db.raw.exec(`DELETE ${rows}`);
+				progress(`delete ${name}`, performance.now() - start);
+			}
+			const checking = performance.now();
+			const foreign = db.raw.query<{ table: string; parent: string }, []>("PRAGMA foreign_key_check").get();
+			progress("check foreign keys", performance.now() - checking);
+			if (foreign)
+				throw new OpError(
+					"internal",
+					`removing project ${key} left rows in ${foreign.table} that refer to ${foreign.parent}`,
+				);
+			return { rows: Object.values(tables).reduce((sum, count) => sum + count, 0), tables };
+		},
+		progress,
+	);
 }
 
 /**

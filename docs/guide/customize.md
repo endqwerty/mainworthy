@@ -121,6 +121,8 @@ Personal and team grants on the demo stay. The seed sets its own `pipeline` and 
 
 The reset runs on a worker thread, so `/healthz` and ordinary reads keep answering. Writes, including administration lists and sign-in, wait for its transaction to finish. Reads see the old demo until the empty demo and its grants commit together. Before committing, the reset checks all foreign keys. If any reference is invalid, the reset rolls back.
 
+The reset skips the whole-database foreign-key scan before removal. Its final checks still cover references in every project. Logs name the pending-key check and transaction completion after removal and recreation, including their validation time.
+
 The seed then fills the project through the API, so readers can see it partly filled. The server creates the seed's fifteen-minute token after the reset and revokes it when seeding ends. A graceful stop during reset skips that token. A stop during seeding waits for the seed to finish and revoke its token.
 
 After ten minutes, the reset requests its worker to stop. The worker can stop only between SQLite statements. A running statement must finish before rollback releases waiting writes. Each reset step and the seed log their elapsed time. See [configuration](./configuration.md).

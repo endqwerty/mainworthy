@@ -136,3 +136,16 @@ the removal-only indexes, so import does not need them either.
 
 A graceful stop during seeding waits for the seed to finish and then revokes its token. During reset it
 still skips making that seed token. Both the deployment notes and the user guide now say this.
+
+## Amendment, 2026-10-20: defer the reset before removal
+
+[Issue #707](https://github.com/endqwerty/mainworthy/issues/707) found that `importTransaction` scanned all
+foreign keys before removal inside the reset's fresh transaction. That scan protects callers with pending
+deferred constraints when global deferral is off: restoring that setting can discard SQLite's pending checks.
+The reset has made no changes yet, so it enables deferral before removal and retains it until commit.
+Other transfer callers keep the pre-check and their original deferral setting.
+
+Keep the full final checks after removal and after recreation with grants. Retained rows can reference removed
+parents, so a project filter cannot prove safety. Limiting tables would also require accounting for every
+referencing table and trigger effect. Log the pending-key check, even when skipped, and time transaction setup
+and completion after removal and recreation. Completion includes each bulk validation and commit or rollback.

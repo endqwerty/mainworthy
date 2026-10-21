@@ -159,51 +159,66 @@ async function resetInWorker(
 }
 
 /** The worker holds the write gate and one transaction across removal, recreation and grant restoration. */
-export function resetDemoSteps(
+export function* resetDemoSteps(
 	app: App,
 	owner: Actor,
 	project: string,
 	legacySeq: number | null,
 	progress: (step: string, ms: number) => void,
 ): Generator<undefined, void, void> {
-	return app.db.checkedBulkSteps(function* () {
-		const began = performance.now();
-		const found = findProject(app.db, project);
-		const marked = found !== null && demoSince(app.db, found.id) !== null;
-		// Only an unmarked legacy demo needs the expensive provenance scan.
-		const seededBefore = !marked && legacySeq !== null && firstWrite(app.db, project) === legacySeq;
-		progress("check demo provenance", performance.now() - began);
-		if (!marked && !seededBefore)
-			throw new CliError(
-				"conflict",
-				`MAINWORTHY_DEMO names project ${project}, which is not a demo; it is left as it is`,
-			);
-		const grantsSince = performance.now();
-		const held = grantsOn(app, owner, project);
-		progress("save grants", performance.now() - grantsSince);
-		removeProject(app.db, project, progress);
-		yield;
-		const recreating = performance.now();
-		// A start stopped before commit keeps the old demo and grants. After commit it keeps an empty demo
-		// and those same grants, so the next start can fill it again.
-		createProject({ app, actor: owner, now: app.now(), session: null, context: null }, { key: project });
-		const made = findProject(app.db, project);
-		if (!made || markDemo(app.db, made, app.now()) === null)
-			throw new CliError("internal", `project ${project} was made again and could not be marked a demo`);
-		for (const grant of held) {
-			const can = Capabilities.parse(grant.can);
-			if (grant.holder === "team")
-				manageTeams(app, owner, orgId(app.db), { do: "team.grant.set", team: grant.name, project, can });
-			else
-				setGrant(app, {
-					actor: grant.name,
-					project: made.id,
-					can,
-					...(grant.roles ? { roles: grant.roles } : {}),
-				});
-		}
-		progress("recreate demo and grants", performance.now() - recreating);
-	});
+	const starting = performance.now();
+	let finishing = starting;
+	try {
+		yield* app.db.checkedBulkSteps(function* () {
+			progress("begin reset transaction", performance.now() - starting);
+			try {
+				const began = performance.now();
+				const found = findProject(app.db, project);
+				const marked = found !== null && demoSince(app.db, found.id) !== null;
+				// Only an unmarked legacy demo needs the expensive provenance scan.
+				const seededBefore = !marked && legacySeq !== null && firstWrite(app.db, project) === legacySeq;
+				progress("check demo provenance", performance.now() - began);
+				if (!marked && !seededBefore)
+					throw new CliError(
+						"conflict",
+						`MAINWORTHY_DEMO names project ${project}, which is not a demo; it is left as it is`,
+					);
+				const grantsSince = performance.now();
+				const held = grantsOn(app, owner, project);
+				progress("save grants", performance.now() - grantsSince);
+				const deferring = performance.now();
+				// This bulk transaction has made no changes yet; keep deferral on until its final check and commit.
+				app.db.exec("PRAGMA defer_foreign_keys = ON");
+				progress("defer reset foreign keys", performance.now() - deferring);
+				removeProject(app.db, project, progress);
+				yield;
+				const recreating = performance.now();
+				// A start stopped before commit keeps the old demo and grants. After commit it keeps an empty demo
+				// and those same grants, so the next start can fill it again.
+				createProject({ app, actor: owner, now: app.now(), session: null, context: null }, { key: project });
+				const made = findProject(app.db, project);
+				if (!made || markDemo(app.db, made, app.now()) === null)
+					throw new CliError("internal", `project ${project} was made again and could not be marked a demo`);
+				for (const grant of held) {
+					const can = Capabilities.parse(grant.can);
+					if (grant.holder === "team")
+						manageTeams(app, owner, orgId(app.db), { do: "team.grant.set", team: grant.name, project, can });
+					else
+						setGrant(app, {
+							actor: grant.name,
+							project: made.id,
+							can,
+							...(grant.roles ? { roles: grant.roles } : {}),
+						});
+				}
+				progress("recreate demo and grants", performance.now() - recreating);
+			} finally {
+				finishing = performance.now();
+			}
+		});
+	} finally {
+		progress("finish reset transaction", performance.now() - finishing);
+	}
 }
 
 /**
