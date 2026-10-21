@@ -327,15 +327,7 @@ final class QueueUITests: XCTestCase {
 			"-UIPreferredContentSizeCategoryName", UIContentSizeCategory.accessibilityExtraExtraExtraLarge.rawValue]
 		app.launch()
 		try signIn(app)
-		let projectMenu = app.buttons["project-menu"]
-		projectMenu.tap()
-		let option = app.collectionViews.buttons[project]
-		for _ in 0..<10 where !option.isHittable { app.collectionViews.firstMatch.swipeUp() }
-		XCTAssertTrue(option.wait(for: \.isHittable, toEqual: true, timeout: 10))
-		option.tap()
-		let selected = XCTNSPredicateExpectation(
-			predicate: NSPredicate(format: "label CONTAINS %@", project), object: projectMenu)
-		XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 10), .completed)
+		app.openProject(project)
 		let proposal = app.staticTexts["Edit: A percentage coupon lowers the total"]
 		for _ in 0..<6 where !proposal.isHittable { app.swipeUp() }
 		XCTAssertTrue(proposal.wait(for: \.isHittable, toEqual: true, timeout: 10))
