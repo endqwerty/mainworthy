@@ -21,7 +21,7 @@ import {
 } from "./kinds.ts";
 import { Automate, CaseBody, CaseKind, ConflictAddress, MethodKind } from "./model.ts";
 import { Outcome, ResultTrail, TRAIL_LIMITS, trailBytes } from "./results.ts";
-import { Obligation, SlotWork, TargetMatch, Verdict } from "./runs.ts";
+import { Obligation, ShardWait, SlotWork, TargetMatch, Verdict } from "./runs.ts";
 import { TeamInput } from "./teams.ts";
 
 export { cmd } from "./commands.ts";
@@ -320,9 +320,7 @@ export const GateStatus = z.object({
 	/** True when the stored verdict was overridden because an upload is unapplied or a hold expired. */
 	stale: z.boolean(),
 	/** Jobs of the commit that reported in shards and are missing some: the gate is pending until they report. */
-	waiting: z
-		.array(z.object({ job: z.string(), env: z.string(), missing: z.array(z.number().int()), of: z.number().int() }))
-		.optional(),
+	waiting: z.array(ShardWait).optional(),
 });
 export type GateStatus = z.infer<typeof GateStatus>;
 export const ReportReceipt = z.object({

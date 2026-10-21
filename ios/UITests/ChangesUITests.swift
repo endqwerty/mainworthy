@@ -95,6 +95,49 @@ final class ChangesUITests: XCTestCase {
 		XCTAssertEqual(verdict.label, "passed")
 	}
 
+	/// A pull request whose job reports in six shards, three of them in: the gate counts the shards it waits for and
+	/// draws them, and a tap on the strip spells them out, on the change and on its run.
+	@MainActor func testAGateWaitingForShardsDrawsThem() async throws {
+		let address = try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])
+		let project = try await makeProject()
+		for index in 1...3 {
+			var request = URLRequest(url: try XCTUnwrap(URL(string: "\(address)/api/p/\(project)/report")))
+			request.httpMethod = "POST"
+			request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+			request.setValue("Bearer \(environment["MAINWORTHY_TEST_TOKEN"] ?? "")", forHTTPHeaderField: "Authorization")
+			request.httpBody = try JSONSerialization.data(withJSONObject: [
+				"target": [
+					"repo": "acme/shop", "commit": "5ba4d0000000000000000000000000000000000a", "branch": "estimate",
+					"pr": 684, "title": "Show the shipping estimate",
+				],
+				"job": "tests", "shard": ["index": index, "of": 6],
+				"results": [["test": ["key": "estimate-\(index)", "name": "Estimate \(index)"], "outcome": "pass"]],
+			] as [String: Any])
+			let (_, response) = try await URLSession.shared.data(for: request)
+			XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+		}
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", address]
+		app.launch()
+		try signIn(app)
+		app.openProject(project)
+		app.openTab("Changes")
+		let row = app.buttons["change-pr:684"]
+		XCTAssertTrue(row.waitForExistence(timeout: 10))
+		row.tap()
+		let reason = app.staticTexts["change-reason"]
+		XCTAssertTrue(reason.waitForExistence(timeout: 10))
+		XCTAssertEqual(reason.label, "pending: waiting for 3 shards")
+		let said = "Job tests: 3 of 6 shards reported (1, 2 and 3). Waiting for shards 4, 5 and 6."
+		let strip = app.descendants(matching: .any).matching(identifier: "shard-strip").firstMatch
+		shot("change-waiting-for-shards")
+		XCTAssertTrue(strip.waitForExistence(timeout: 5))
+		XCTAssertEqual(strip.label, said)
+		strip.tap()
+		XCTAssertTrue(app.staticTexts[said].waitForExistence(timeout: 5))
+		shot("change-waiting-for-shards-explained")
+	}
+
 	@MainActor func testAChangeUnblocksAndThisDevicesSessionIsMarked() async throws {
 		// The chosen project is beyond the first page of the picker.
 		var project = try await makeProject()

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { CaseBody, ExpandedStep, MethodKind } from "../../core/model.ts";
 import { ResultLocation } from "../../core/ops.ts";
 import { ResultTrail } from "../../core/results.ts";
-import { Obligation, SlotState, SlotWork, Tally, TargetMatch, Verdict } from "../../core/runs.ts";
+import { Obligation, ShardWait, SlotState, SlotWork, Tally, TargetMatch, Verdict } from "../../core/runs.ts";
 
 export const Run = z.object({
 	location: ResultLocation.nullable(),
@@ -12,6 +12,8 @@ export const Run = z.object({
 	state: z.enum(["open", "closed"]),
 	verdict: Verdict,
 	reason: z.string(),
+	/** Of a change run: the jobs that reported in shards and are missing some. */
+	waiting: z.array(ShardWait).optional(),
 	tally: Tally,
 	accepts: TargetMatch,
 	require: z.array(Obligation),

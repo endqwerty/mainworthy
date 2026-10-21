@@ -2,7 +2,7 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { z } from "zod";
 import { ANSWER_LABELS } from "../../core/kinds.ts";
-import { RESULT_STANDING_LABELS, type ResultStanding, Verdict } from "../../core/runs.ts";
+import { RESULT_STANDING_LABELS, type ResultStanding, ShardWait, Verdict } from "../../core/runs.ts";
 import { call } from "../lib/api.ts";
 import { queryKey, useQueryOp } from "../lib/data.ts";
 import { useBindings } from "../lib/keys.ts";
@@ -11,6 +11,7 @@ import { openRun } from "../runs/index.tsx";
 import { Run } from "../runs/models.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, EmptyState, ListRow, ProducerGlyph, SectionHeading } from "../ui/index.tsx";
+import { GateReason } from "../ui/shards.tsx";
 import { ChangeResults, standingOf } from "./results.tsx";
 import "./changes.css";
 
@@ -23,6 +24,7 @@ const Change = z.object({
 	state: z.enum(["merged", "closed", "open"]),
 	verdict: Verdict.nullable(),
 	reason: z.string().nullable(),
+	waiting: z.array(ShardWait).optional(),
 	landing: z
 		.object({
 			commit: z.string(),
@@ -30,6 +32,7 @@ const Change = z.object({
 			run: z.string().nullable(),
 			verdict: Verdict,
 			reason: z.string(),
+			waiting: z.array(ShardWait).optional(),
 		})
 		.nullable(),
 });
@@ -117,7 +120,13 @@ function ChangesWorkbench() {
 							<span className="ref">{change.key}</span>
 							<span className="change-title">
 								<b>{change.title ?? change.branch ?? change.key}</b>
-								<span className="dim">{change.reason ?? "No evidence for the latest commit"}</span>
+								<span className="dim">
+									{change.reason ? (
+										<GateReason reason={change.reason} waiting={change.waiting} compact />
+									) : (
+										"No evidence for the latest commit"
+									)}
+								</span>
 							</span>
 							{change.state !== "open" && <span className="change-ended">{change.state}</span>}
 							<span className={`change-verdict v-${change.verdict ?? "pending"}`}>{change.verdict ?? "pending"}</span>
@@ -148,7 +157,9 @@ function ChangesWorkbench() {
 							<div className={`change-gate v-${gateData?.verdict ?? "pending"}`}>
 								<span className="dim">Gate of the head{current?.head ? `, ${current.head.slice(0, 12)}` : ""}</span>
 								<h2>{gateData?.verdict ?? (gate.error ? "Gate unavailable" : "Reading gate…")}</h2>
-								<p>{gateData?.reason ?? gate.error?.message}</p>
+								<p>
+									{gateData ? <GateReason reason={gateData.reason} waiting={gateData.waiting} /> : gate.error?.message}
+								</p>
 								{gateData?.stale && <p>The verdict awaits new evidence or a fresh decision.</p>}
 							</div>
 							{gateData && (
@@ -330,10 +341,12 @@ function ChangeEnding({ change }: { change: Change }) {
 							if (landing.run) navigate(routeUrl({ project, screen: "runs", ref: landing.run }));
 						}}
 					>
-						{landing.reason}
+						<GateReason reason={landing.reason} waiting={landing.waiting} compact />
 					</a>
 				) : (
-					<span>{landing.reason}</span>
+					<span>
+						<GateReason reason={landing.reason} waiting={landing.waiting} compact />
+					</span>
 				)}
 			</div>
 		</div>
@@ -373,7 +386,9 @@ function ChangeRuns({ change }: { change: string }) {
 								{"commit" in run.accepts && <small className="mono dim">{run.accepts.commit.slice(0, 12)}</small>}
 							</span>
 							<span className={`change-verdict v-${run.verdict}`}>{run.verdict}</span>
-							<span className="change-run-reason dim">{run.reason}</span>
+							<span className="change-run-reason dim">
+								<GateReason reason={run.reason} waiting={run.waiting} compact />
+							</span>
 							<time dateTime={new Date(run.createdAt).toISOString()} title={new Date(run.createdAt).toLocaleString()}>
 								{age(run.createdAt)}
 							</time>

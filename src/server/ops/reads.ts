@@ -279,6 +279,7 @@ export function runView(
 		state: run.state,
 		verdict: status.verdict,
 		reason: status.reason,
+		...(status.waiting ? { waiting: status.waiting } : {}),
 		stale: status.stale,
 		tally: status.tally,
 		...(status.quarantined ? { quarantined: status.quarantined } : {}),
@@ -958,6 +959,7 @@ export function find(ctx: Ctx, input: FindInput): Found {
 					run: status?.run ?? null,
 					verdict: status?.verdict ?? null,
 					reason: status?.reason ?? null,
+					...(status?.waiting ? { waiting: status.waiting } : {}),
 					landing: landingView(ctx, change),
 				};
 			});
@@ -1268,7 +1270,13 @@ function landingView(ctx: Ctx, change: ChangeRow) {
 	const landing = landingOf(change);
 	if (!landing) return null;
 	const status = gateOfCommitIn(ctx, change.repo, landing.commit);
-	return { ...landing, run: status.run, verdict: status.verdict, reason: status.reason };
+	return {
+		...landing,
+		run: status.run,
+		verdict: status.verdict,
+		reason: status.reason,
+		...(status.waiting ? { waiting: status.waiting } : {}),
+	};
 }
 
 /**

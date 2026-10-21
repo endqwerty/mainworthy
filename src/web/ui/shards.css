@@ -1,0 +1,89 @@
+.shard-waits {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin-top: 8px;
+}
+.shard-waits.compact {
+	display: inline-flex;
+	flex-direction: row;
+	vertical-align: middle;
+	gap: 6px;
+	margin: 0 6px 0 0;
+}
+.shard-strip {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 4px 8px;
+	cursor: help;
+}
+.shard-job {
+	font: 12px var(--mono);
+	color: var(--ink);
+}
+.shard-cells {
+	display: inline-flex;
+	flex-wrap: wrap;
+	gap: 3px;
+}
+.shard-cells span {
+	display: inline-grid;
+	place-items: center;
+	min-width: 20px;
+	height: 20px;
+	padding: 0 3px;
+	border-radius: 4px;
+	font: 600 11px var(--mono);
+}
+.shard-cells .shard-reported {
+	background: var(--line);
+	color: var(--dim);
+}
+.shard-cells .shard-missing {
+	border: 1.5px dashed var(--warn);
+	background: var(--warn-soft);
+	color: var(--warn);
+}
+.shard-cells span:empty {
+	min-width: 7px;
+	width: 7px;
+	height: 12px;
+	padding: 0;
+	border-radius: 2px;
+}
+.compact .shard-cells {
+	gap: 2px;
+	flex-wrap: nowrap;
+}
+.compact .shard-cells span {
+	flex: none;
+	width: 8px;
+	min-width: 8px;
+	height: 12px;
+}
+/* A dash does not read at the size of a cell in a row: there the missing ones are outlined whole. */
+.compact .shard-cells .shard-missing {
+	border-style: solid;
+}
+.shard-count {
+	font: 11px var(--mono);
+	color: var(--dim);
+}
+.shard-said {
+	display: none;
+}
+.shard-bar {
+	display: inline-block;
+	width: 60px;
+	height: 8px;
+	border: 1px dashed var(--warn);
+	border-radius: 2px;
+	background: var(--warn-soft);
+	overflow: hidden;
+}
+.shard-bar-fill {
+	display: block;
+	height: 100%;
+	background: var(--line);
+}

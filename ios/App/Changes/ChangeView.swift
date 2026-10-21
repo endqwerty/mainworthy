@@ -67,7 +67,9 @@ struct ChangeView: View {
 				Panel("Gate of the head") {
 					Tag(text: detail.gate.verdict.name, tint: detail.gate.verdict.tint)
 						.accessibilityIdentifier("change-verdict")
-					Text(detail.gate.reason).accessibilityIdentifier("change-reason")
+					Text(ShardWait.reason(detail.gate.reason, beside: detail.gate.waiting))
+						.accessibilityIdentifier("change-reason")
+					ShardStrips(waiting: detail.gate.waiting)
 					Text(detail.gate.phrase).font(.subheadline).foregroundStyle(.secondary)
 					if detail.gate.stale {
 						Text("The stored verdict has not caught up with the current evidence.")
@@ -79,7 +81,9 @@ struct ChangeView: View {
 						commit("Commit", landed.commit)
 						Tag(text: landed.verdict.name, tint: landed.verdict.tint)
 							.accessibilityIdentifier("change-landing-verdict")
-						Text(landed.reason).accessibilityIdentifier("change-landing-reason")
+						Text(ShardWait.reason(landed.reason, beside: landed.waiting))
+							.accessibilityIdentifier("change-landing-reason")
+						ShardStrips(waiting: landed.waiting)
 					}
 				}
 				if let notice = screen.notice { Text(notice).foregroundStyle(Color.fail) }

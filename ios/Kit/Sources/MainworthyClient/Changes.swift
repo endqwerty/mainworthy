@@ -69,6 +69,8 @@ public struct LandedCommit: Equatable, Sendable {
 	public let branch: String
 	public let verdict: ChangeVerdict
 	public let reason: String
+	/// The jobs that reported in shards and are missing some.
+	public let waiting: [ShardWait]
 	/// The run whose verdict this is. None: nothing a gate counts was reported for this commit.
 	public let run: String?
 
@@ -77,6 +79,7 @@ public struct LandedCommit: Equatable, Sendable {
 		branch = wire.branch
 		verdict = ChangeVerdict(wire.verdict)
 		reason = wire.reason
+		waiting = (wire.waiting ?? []).map(ShardWait.init)
 		run = wire.run
 	}
 }
@@ -120,6 +123,8 @@ public struct ChangeSummary: Identifiable, Equatable, Sendable {
 public struct ChangeGate: Equatable, Sendable {
 	public let verdict: ChangeVerdict
 	public let reason: String
+	/// The jobs that reported in shards and are missing some.
+	public let waiting: [ShardWait]
 	public let stale: Bool
 	public let tally: [String: Int]
 	/// The run whose verdict this is. None: nothing a gate counts was reported for the head.
@@ -128,6 +133,7 @@ public struct ChangeGate: Equatable, Sendable {
 	init(_ wire: Wire.ChangeGate) {
 		verdict = ChangeVerdict(wire.verdict)
 		reason = wire.reason
+		waiting = (wire.waiting ?? []).map(ShardWait.init)
 		stale = wire.stale
 		tally = wire.tally
 		run = wire.run

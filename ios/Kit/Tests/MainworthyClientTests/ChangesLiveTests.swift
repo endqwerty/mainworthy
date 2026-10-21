@@ -128,7 +128,7 @@ struct ChangeLandingLiveTests {
 		let change = try #require(try await client.reportedChanges().first)
 		let expected = LandedCommit(Wire.ChangeLanding(
 			commit: landed, branch: "main", run: nil, verdict: "pending",
-			reason: "pending: nothing a gate counts has been reported for this commit"
+			reason: "pending: nothing a gate counts has been reported for this commit", waiting: nil
 		))
 		#expect(change.head == head && change.verdict == .blocked && change.landing == .asCommit(expected))
 		let detail = try await client.details(of: change)
@@ -146,7 +146,7 @@ struct ChangeValueTests {
 
 	@Test("a landing on the head is the head; another commit keeps its own gate")
 	func landing() {
-		let wire = Wire.ChangeLanding(commit: "abc1234", branch: "main", run: "R-2", verdict: "blocked", reason: "blocked")
+		let wire = Wire.ChangeLanding(commit: "abc1234", branch: "main", run: "R-2", verdict: "blocked", reason: "blocked", waiting: nil)
 		#expect(ChangeLanding(wire, head: "abc1234") == .asHead(branch: "main"))
 		#expect(ChangeLanding(wire, head: "def5678") == .asCommit(LandedCommit(wire)))
 		#expect(ChangeLanding(nil, head: "abc1234") == nil)

@@ -136,6 +136,8 @@ public struct Run: Identifiable, Equatable, Sendable {
 	public let state: RunState
 	public let verdict: RunVerdict
 	public let reason: String
+	/// Of a change run: the jobs that reported in shards and are missing some.
+	public let waiting: [ShardWait]
 	public let tally: [String: Int]
 	public let inProgress: Int
 	public let workUntil: Date?
@@ -170,6 +172,7 @@ public struct Run: Identifiable, Equatable, Sendable {
 		state = RunState(wire.state)
 		verdict = RunVerdict(wire.verdict)
 		reason = wire.reason
+		waiting = (wire.waiting ?? []).map(ShardWait.init)
 		tally = wire.tally
 		inProgress = wire.inProgress
 		workUntil = wire.workUntil.map { Date(timeIntervalSince1970: Double($0) / 1000) }

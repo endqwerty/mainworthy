@@ -449,6 +449,16 @@ enum Wire {
 		let touched: [String]
 	}
 
+	/// A job of a commit that reported in shards and is missing some.
+	struct ShardWait: Decodable, Equatable, Sendable {
+		let job: String
+		let env: String
+		/// The shards that have not reported, ascending.
+		let missing: [Int]
+		/// How many shards the job has.
+		let of: Int
+	}
+
 	/// The change a change run's commit belongs to.
 	struct RunChange: Decodable, Equatable, Sendable {
 		let key: String
@@ -473,6 +483,8 @@ enum Wire {
 		let state: String
 		let verdict: String
 		let reason: String
+		/// None: the gate waits for no shard.
+		let waiting: [ShardWait]?
 		/// Milliseconds since 1970.
 		let createdAt: Int
 		/// A planned run's pinned cases.
@@ -629,6 +641,8 @@ enum Wire {
 		let run: String?
 		let verdict: String
 		let reason: String
+		/// None: the gate waits for no shard.
+		let waiting: [ShardWait]?
 	}
 
 	/// A reported branch or pull request.
@@ -653,6 +667,8 @@ enum Wire {
 		let run: String?
 		let verdict: String
 		let reason: String
+		/// None: the gate waits for no shard.
+		let waiting: [ShardWait]?
 		let tally: [String: Int]
 		let stale: Bool
 	}
