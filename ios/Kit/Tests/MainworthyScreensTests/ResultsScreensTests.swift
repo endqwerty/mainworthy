@@ -25,6 +25,7 @@ struct ResultsScreensTests {
 		results.text = "shipping"
 		await results.search()
 		#expect(results.rows.map(\.caseRef) == [nil])
+		#expect(results.rows.map(\.name) == ["Shipping accepts an address"])
 		results.text = ""
 		await results.search()
 		let failure = try #require(screen.detail?.questions.first { $0.kind == .failure })

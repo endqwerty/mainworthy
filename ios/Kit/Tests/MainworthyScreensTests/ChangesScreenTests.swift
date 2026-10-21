@@ -47,7 +47,10 @@ struct ChangesScreenTests {
 		#expect(commit == String(repeating: "5", count: 40))
 		let older = screen.results(of: first)
 		await older.load()
-		#expect(older.loading == .done && older.total > 0 && older.run == first.ref)
+		#expect(older.loading == .done && older.total == 5 && older.run == first.ref)
+		#expect(older.rows.map(\.name).sorted() == [
+			"Shipping accepts an address", "Shop check 1", "Shop check 2", "Shop check 3", "Shop check 4",
+		])
 	}
 
 	@Test("a change remains readable outside the newest 500, with its new head and its end")

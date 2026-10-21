@@ -63,10 +63,14 @@ struct ServerTests {
 		let reply: Planned = try await server(script).write("plan", in: "shop", ["name": "Smoke"])
 		#expect(reply.run == "R-1")
 		let bodies = script.asked.map { try? JSONDecoder().decode(JSONValue.self, from: $0.httpBody ?? Data()) }
-		#expect(bodies.count == 2)
+		try #require(bodies.count == 2)
+		#expect(bodies.map { $0?["name"]?.string } == ["Smoke", "Smoke"])
+		#expect(script.asked.map(\.httpMethod) == ["POST", "POST"])
 		#expect(bodies[0] == bodies[1])
 		#expect((bodies[0]?["cmd"]?.string ?? "").count >= 8)
-		#expect(script.asked[0].url?.absoluteString == "https://mainworthy.example/api/p/shop/plan")
+		#expect(script.asked.map { $0.url?.absoluteString } == [
+			"https://mainworthy.example/api/p/shop/plan", "https://mainworthy.example/api/p/shop/plan",
+		])
 	}
 
 	@Test("two writes are two commands")
@@ -76,8 +80,16 @@ struct ServerTests {
 		let server = server(script)
 		let _: JSONValue = try await server.write("plan", in: "shop", ["name": "Smoke"])
 		let _: JSONValue = try await server.write("plan", in: "shop", ["name": "Smoke"])
-		let ids = script.asked.map { (try? JSONDecoder().decode(JSONValue.self, from: $0.httpBody ?? Data()))?["cmd"] }
-		#expect(ids[0] != nil && ids[0] != ids[1])
+		let bodies = try script.asked.map { try JSONDecoder().decode(JSONValue.self, from: $0.httpBody ?? Data()) }
+		#expect(bodies.map { $0["name"]?.string } == ["Smoke", "Smoke"])
+		#expect(script.asked.map(\.httpMethod) == ["POST", "POST"])
+		#expect(script.asked.map { $0.url?.absoluteString } == [
+			"https://mainworthy.example/api/p/shop/plan", "https://mainworthy.example/api/p/shop/plan",
+		])
+		let ids = try bodies.map { try #require($0["cmd"]?.string) }
+		try #require(ids.count == 2)
+		#expect(ids.allSatisfy { $0.count >= 8 })
+		#expect(ids[0] != ids[1])
 	}
 
 	@Test("a server that never answers is unreachable, after as many tries as the call allows")
@@ -140,7 +152,7 @@ struct ServerTests {
 		#expect(script.asked.count == 1)
 	}
 
-	@Test("a 401 on any other request ends the session: the cookie is forgotten and whoever listens is told")
+	@Test("a 401 on any other request ends the session: the cookie is forgotten and whoever listens is told", .timeLimit(.minutes(1)))
 	func sessionEnds() async throws {
 		let script = Script(
 			.json(signedIn, headers: ["Set-Cookie": "mainworthy_sid=\(cookie); Path=/; HttpOnly"]), .json(session),
@@ -155,7 +167,7 @@ struct ServerTests {
 		}
 		#expect(secrets.load() == nil)
 		var told = server.sessionEnded.makeAsyncIterator()
-		await told.next()
+		_ = try #require(await told.next())
 	}
 
 	@Test("a late 401 for a session that was replaced does not take the new session with it")
@@ -218,7 +230,13 @@ struct ServerTests {
 		let script = Script(.json(inbox))
 		let project = server(script).project("shop", identity: "shop-identity")
 		let questions = try await project.questions(open: true).questions
-		#expect(questions.map(\.evidence) == [.unreadable, .unreadable, questions[2].evidence])
+		try #require(questions.count == 3)
+		#expect(questions.prefix(2).map(\.evidence) == [.unreadable, .unreadable])
+		guard case .failure(let failure) = questions[2].evidence else {
+			Issue.record("the supported failure evidence was not decoded")
+			return
+		}
+		#expect(failure.target == "abc" && failure.count == 0 && failure.tests.isEmpty && failure.message == nil)
 		#expect(questions[1].kind == .other("waiver") && questions[1].stakes.isEmpty)
 		#expect(questions[0].choices.map(\.takes) == [.more, .more])
 		#expect(questions[1].choices.map(\.takes) == [.more])

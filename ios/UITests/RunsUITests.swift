@@ -459,7 +459,7 @@ final class RunsUITests: XCTestCase {
 		shot("7-every-kind")
 		app.segmentedControls.buttons["Change"].tap()
 		XCTAssertTrue(changeRun.waitForExistence(timeout: 10))
-		XCTAssertFalse(app.staticTexts["Checkout regression"].waitForExistence(timeout: 2))
+		XCTAssertTrue(app.staticTexts["Checkout regression"].waitForNonExistence(timeout: 5))
 		shot("8-change-runs")
 		changeRun.tap()
 		XCTAssertTrue(app.staticTexts["Results"].waitForExistence(timeout: 10))

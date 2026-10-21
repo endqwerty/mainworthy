@@ -209,29 +209,65 @@ struct QueueSelectionTests {
 		#expect(cases["items"]?.array?.count == 60)
 	}
 
-	@Test("a selection holds what one request carries, and an answer to more is not prepared")
+	struct SelectionPages: Transport {
+		func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+			let input = try JSONDecoder().decode(JSONValue.self, from: request.httpBody ?? Data())
+			let start = Int(input["cursor"]?.string ?? "0") ?? 0
+			let end = min(start + 100, 501)
+			let items = (start..<end).map { index in
+				"""
+				{"q":"Q-\(index + 1)","kind":"map","title":"Tests with no case","producer":"ci","state":"open",
+				"evidenceHash":"hash-\(index)","evidence":{"file":"\(index).spec.ts","tests":[],"count":0,"facts":[]},
+				"seen":{"count":1,"carried":0},"needs":"one member","answers":["track"],"blocks":[],"about":[],
+				"openedAt":1800000000000,"advice":[],"decision":null,"you":"counts"}
+				"""
+			}
+			let cursor = end < 501 ? "\"\(end)\"" : "null"
+			let body = """
+			{"ok":true,"seq":1,"result":{"counts":{"open":501,"map":501},"cursor":\(cursor),"items":[\(items.joined(separator: ","))]}}
+			"""
+			return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+		}
+		func lines(_ request: URLRequest) async throws -> (AsyncThrowingStream<String, any Error>, HTTPURLResponse) {
+			throw URLError(.unsupportedURL)
+		}
+	}
+
+	@Test("a selection refuses a 501st question and lets another join after one is removed")
 	func limit() async throws {
-		let screen = try await screen(try await project())
-		#expect(QueueScreen.selectionLimit == 500)
-		let question = try #require(screen.questions.first { $0.kind == .map })
-		let track = try #require(question.choices.first { $0.answer == "track" })
-		let project = try await Live.signedIn().project(try await Live.project())
-		#expect(project.prepareAnswer([question, question], with: track) == nil, "a question twice is not one answer")
-		#expect(project.prepareAnswer([], with: track) == nil)
+		let server = Server(instance: try #require(Instance(address: "mainworthy.example")), secrets: MemoryStore(), transport: SelectionPages())
+		let screen = QueueScreen(project: server.project("shop", identity: "shop-identity"))
+		await screen.show(.open, filter: .map)
+		for _ in 0..<5 { await screen.more() }
+		#expect(screen.questions.count == 501 && !screen.hasMore)
+		screen.select(true)
+		screen.selectAll()
+		#expect(screen.selected == (1...500).map { "Q-\($0)" })
+		let extra = try #require(screen.questions.last)
+		screen.toggle(extra)
+		#expect(screen.selected == (1...500).map { "Q-\($0)" })
+		#expect(screen.notice?.text == "A selection holds at most 500 questions. Answer these first.")
+		screen.toggle(try #require(screen.questions.first))
+		screen.toggle(extra)
+		#expect(screen.selected == (2...501).map { "Q-\($0)" })
 	}
 
 	@Test("a reason the policy asks for is asked before anything is sent")
 	func reason() async throws {
-		let screen = try await screen(try await project())
-		let failure = try #require(screen.questions.first { $0.kind == .failure })
+		let key = try await Live.project(strict: true)
+		let transport = SwitchableQueueTransport()
+		let screen = try await screen(key, transport: transport)
+		let signoff = try #require(screen.questions.first { $0.kind == .signoff })
+		#expect(signoff.wantsReason)
 		screen.select(true)
-		screen.toggle(failure)
-		let flaky = try #require(screen.sharedChoices.first { $0.answer == "flaky" })
-		guard failure.wantsReason else {
-			#expect(await screen.answerAll(screen.selection, with: flaky))
-			return
-		}
-		#expect(await screen.answerAll(screen.selection, with: flaky) == false)
+		screen.toggle(signoff)
+		let approve = try #require(screen.sharedChoices.first { $0.answer == "approve" })
+		transport.commands.withLock { $0 = [] }
+		#expect(await screen.answerAll(screen.selection, with: approve) == false)
 		#expect(screen.notice?.text == "Nothing was recorded: the policy asks for a reason.")
+		#expect(transport.commands.withLock { $0.isEmpty })
+		#expect(await screen.answerAll(screen.selection, with: approve, reason: "Checked the release build"))
+		let project = try await Live.signedIn().project(key)
+		#expect(try await project.question(signoff.ref)?.decision?.reason == "Checked the release build")
 	}
 }

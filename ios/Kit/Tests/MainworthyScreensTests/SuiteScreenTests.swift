@@ -139,12 +139,20 @@ struct SuiteScreenTests {
 	@Test("a historical document cannot open an editor")
 	func historicalEditor() async throws {
 		let client = try await Live.signedIn().project(try await Live.project())
-		let ref = try #require(try await client.cases().items.first?.ref)
+		let ref = "C-1"
 		let screen = SuiteScreen(project: client)
 		await screen.openCase(ref, version: 1)
 		guard case .read(let old) = screen.document(ref, version: 1) else { Issue.record("not read"); return }
 		await screen.edit(old)
 		#expect(screen.editor == nil)
+		await screen.openCase(ref)
+		guard case .read(let current) = screen.document(ref) else { Issue.record("current document not read"); return }
+		await screen.edit(current)
+		let editor = try #require(screen.editor)
+		#expect(editor.source == .edit(current))
+		guard case .edit(let source) = editor.source else { Issue.record("not editing the current case"); return }
+		#expect(source.ref == "C-1" && !source.isHistorical)
+		#expect(editor.content.title == "Expired coupon is rejected")
 	}
 
 	actor DelayedSavedRead: Transport {
@@ -259,7 +267,8 @@ struct SuiteScreenTests {
 		await screen.saveEditor()
 		#expect(screen.saved?.version == 2)
 		await screen.readHistory(stamp.ref)
-		#expect(screen.history(stamp.ref) != nil)
+		guard case .read(let versions) = screen.history(stamp.ref) else { Issue.record("history not read"); return }
+		#expect(versions.map(\.version) == [2, 1])
 		await screen.openCase(stamp.ref, version: 1)
 		guard case .read(let old) = screen.document(stamp.ref, version: 1) else { Issue.record("no old version"); return }
 		#expect(old.content.title == "A native draft")
@@ -549,15 +558,19 @@ struct SuiteCacheTests {
 		await screen.load(folder)
 		#expect(await transport.count("cases Top/F1") == 1)
 		#expect(screen.listing(folder)?.loading == .done)
+		#expect(screen.listing(folder)?.cases.map(\.title) == ["Top/F1 "])
 		// A change: the folder on screen is read again, one that was left is kept and read when it is opened.
 		let other = CaseQuery(folder: "Top/F2")
 		await screen.load(other)
 		await screen.refresh()
 		#expect(await transport.count("cases Top/F1") == 2)
 		#expect(await transport.count("cases Top/F2") == 1)
-		#expect(screen.listing(other)?.cases.count == 1)
+		#expect(screen.listing(other)?.loading == .done)
+		#expect(screen.listing(other)?.cases.map(\.title) == ["Top/F2 "])
 		await screen.load(other)
 		#expect(await transport.count("cases Top/F2") == 2)
+		#expect(screen.listing(other)?.loading == .done)
+		#expect(screen.listing(other)?.cases.map(\.title) == ["Top/F2 "])
 		// The refresh read the tree, which is current until the next change.
 		await screen.loadTree()
 		#expect(await transport.count("folders") == 1)
@@ -578,6 +591,7 @@ struct SuiteCacheTests {
 		await second.value
 		#expect(await transport.count("cases Top/F1") == 1)
 		#expect(screen.listing(folder)?.loading == .done)
+		#expect(screen.listing(folder)?.cases.map(\.title) == ["Top/F1 "])
 	}
 
 	@Test("a folder's subfolders with cases are read ahead, a few of them, and an empty one is not")
@@ -589,13 +603,22 @@ struct SuiteCacheTests {
 		let children = screen.children(of: top)
 		#expect(children.count == 11)
 		await screen.readAhead(children)?.value
-		#expect(await transport.count("cases") == SuiteScreen.readAhead)
+		let firstReads = await transport.reads.filter { $0.hasPrefix("cases ") }
+		#expect(firstReads.count == 8)
+		#expect(Set(firstReads) == Set([
+			"cases Top/F1 ", "cases Top/F2 ", "cases Top/F3 ", "cases Top/F4 ",
+			"cases Top/F5 ", "cases Top/F6 ", "cases Top/F7 ", "cases Top/F8 ",
+		]))
 		#expect(screen.listing(CaseQuery(folder: "Top/F1"))?.loading == .done)
+		#expect(screen.listing(CaseQuery(folder: "Top/F1"))?.cases.map(\.title) == ["Top/F1 "])
 		#expect(screen.listing(CaseQuery(folder: "Top/F11")) == nil)
 		// What was read ahead is not read again.
 		await screen.readAhead(children)?.value
 		await screen.load(CaseQuery(folder: "Top/F1"))
-		#expect(await transport.count("cases") == 10)
+		let allReads = await transport.reads.filter { $0.hasPrefix("cases ") }
+		#expect(allReads.count == 10)
+		#expect(Set(allReads).subtracting(firstReads) == Set(["cases Top/F9 ", "cases Top/F10 "]))
+		#expect(screen.listing(CaseQuery(folder: "Top/F11")) == nil)
 	}
 
 	/// Every case read has a next page; the tree's read is held when asked.
@@ -698,7 +721,12 @@ struct SuiteEditorRetryTests {
 		let requests = await transport.bodies
 		let inputs = try requests.map { try JSONDecoder().decode(JSONValue.self, from: $0) }
 		#expect(inputs.count == 3 && Set(inputs).count == 1)
-		#expect(inputs.first?["cmd"]?.string?.count == 36)
+		let first = try #require(inputs.first)
+		let expectedEdits: JSONValue = [["op": "create", "folder": "Checkout/Coupons", "body": [
+			"title": "One case", "pre": "", "steps": [], "methods": ["human"], "automate": "none", "fields": [:],
+		]]]
+		#expect(first["edits"] == expectedEdits)
+		#expect(first["cmd"]?.string?.count == 36)
 		#expect(editor.settled && !editor.maySave)
 	}
 }
@@ -964,12 +992,22 @@ struct SuiteAcceptanceTests {
 		let draft = try #require(screen.editor)
 		draft.content.title = "Typed title"
 		await screen.saveEditor()
-		#expect(screen.editor === draft && draft.content.title == "Typed title" && draft.notice != nil)
+		#expect(screen.editor === draft && draft.content.title == "Typed title")
+		switch kind {
+		case "different text":
+			#expect(draft.notice == "The saved version differs from what you typed. Your draft is kept here. Read the case in the web app.")
+			#expect(draft.settled && !draft.maySave)
+		case "no version":
+			#expect(draft.notice == "The server adopted the proposal without naming a saved version. Your draft is kept here.")
+			#expect(draft.settled && !draft.maySave)
+		default: break
+		}
 		#expect(screen.saved == nil)
 		if kind == "read fails" {
 			#expect(draft.isRetrying && draft.maySave)
 			await screen.saveEditor()
 			#expect(screen.editor == nil && screen.saved?.version == 1)
+			#expect(draft.savedDocument?.content.title == "Typed title")
 			#expect(await transport.writes == 1)
 		}
 	}

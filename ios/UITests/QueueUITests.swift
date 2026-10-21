@@ -744,7 +744,7 @@ final class QueueUITests: XCTestCase {
 		let clear = app.buttons["Clear outcomes"]
 		XCTAssertTrue(clear.isHittable, "Clear outcomes sits above the answers it clears, not under them")
 		clear.tap()
-		XCTAssertFalse(entry.waitForExistence(timeout: 2))
+		XCTAssertTrue(entry.waitForNonExistence(timeout: 5))
 		XCTAssertFalse(app.staticTexts["replied-header"].exists)
 	}
 

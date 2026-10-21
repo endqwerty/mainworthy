@@ -1,7 +1,6 @@
 import XCTest
 
-/// The results a change's gate counted, the tests with and without a case, and what a case's row and page say
-/// about who ran it and who may.
+/// The results a change's gate counted, the tests with and without a case, and who ran a case.
 final class ResultsUITests: XCTestCase {
 	private let environment = ProcessInfo.processInfo.environment
 
@@ -206,7 +205,7 @@ final class ResultsUITests: XCTestCase {
 		XCTAssertTrue(app.switches["tests-unlinked"].waitForExistence(timeout: 10))
 		app.navigationBars.buttons.element(boundBy: 0).tap()
 
-		// A case's row says who ran it and what came of it; its page, who may run it.
+		// A case's row says who ran it and what came of it.
 		XCTAssertTrue(app.buttons["folder-Checkout"].waitForExistence(timeout: 10))
 		app.buttons["folder-Checkout"].tap()
 		app.buttons["folder-Checkout/Coupons"].tap()
@@ -214,11 +213,5 @@ final class ResultsUITests: XCTestCase {
 		XCTAssertTrue(row.waitForExistence(timeout: 10))
 		XCTAssertTrue(row.label.contains("Pipeline: failed"), row.label)
 		shot("case-row-proof")
-		row.tap()
-		let person = app.descendants(matching: .any)["method-human"]
-		scrollTo(person, in: app)
-		XCTAssertEqual(person.label, "A person may run it")
-		XCTAssertEqual(app.descendants(matching: .any)["method-auto"].label, "A pipeline may run it")
-		shot("case-who-may-run")
 	}
 }
