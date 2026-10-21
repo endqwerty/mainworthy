@@ -194,6 +194,11 @@ in [data](./data.md).
 A different merge or rebased hash leaves the original commit in its existing scope.
 Omitting `landing` ends the change and keeps its recorded head. You can supply the
 landing later by repeating `merged` with the metadata.
+Only that received landing, matched by repository, branch and exact commit, names a merged change beside a
+trunk result. A recorded pull request head alone does not. Older merges without a stored landing show only
+the branch and commit until the landing is reported again. Repeating `merged` without metadata preserves an
+already recorded landing. Archives omit the landing with the change's end, so imported changes are open and
+trunk results name no landing.
 `landing.branch` takes `main`, `master` or `trunk`. Reopening a change does not move a
 commit back from trunk.
 

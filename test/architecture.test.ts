@@ -11,6 +11,7 @@ import { z } from "zod";
 import { ERROR_CODES, HTTP_STATUS } from "../src/core/api.ts";
 import { needs } from "../src/core/kinds.ts";
 import { REPLIES } from "../src/core/replies.ts";
+import { mustTarget, resultLocation } from "../src/server/evidence/evidence.ts";
 import { defaultConfig, openApp } from "../src/server/kernel/app.ts";
 import { Db, databasePath, declaredSql, sql } from "../src/server/kernel/db.ts";
 import { MIGRATIONS, migrate, openDatabase, SCHEMA_VERSION, schemaVersion } from "../src/server/kernel/migrate.ts";
@@ -955,6 +956,55 @@ describe("the module map", () => {
 			}
 		});
 	}
+
+	test("change landing migration never guesses old heads and indexes only received exact landings", () => {
+		const db = new Db(":memory:");
+		try {
+			const migration = MIGRATIONS.find((entry) => entry.name === "change_landings");
+			if (!migration) throw new Error("missing landing migration");
+			for (const earlier of MIGRATIONS.filter((entry) => entry.version < migration.version)) db.exec(earlier.sql);
+			db.exec(`INSERT INTO meta VALUES ('schema_version', '${migration.version - 1}');
+				INSERT INTO orgs VALUES (1, 'Example', 1);
+				INSERT INTO projects (id, org, key, name, created_at, identity) VALUES (1, 1, 'shop', 'Shop', 1, 'shop-identity');
+				INSERT INTO changes (id, project, key, repo, head_sha, title, rev) VALUES (1, 1, 'pr:8', 'acme/shop', 'landed123', 'Keep coupons', 1);
+				INSERT INTO change_ends VALUES (1, 'merged', 1);
+				INSERT INTO targets (id, project, what, repo, commit_sha, branch, line, first_seq)
+				VALUES (1, 1, 'code:acme/shop@landed123', 'acme/shop', 'landed123', 'main', 'trunk', 1);`);
+			expect(migrate(db, ":memory:").to).toBe(SCHEMA_VERSION);
+			const location = () => resultLocation(db, mustTarget(db, 1));
+			expect(location()).toEqual({ label: "main", commit: "landed123", change: null });
+			expect(db.raw.query("SELECT landing_commit, landing_repo, landing_branch FROM change_ends").all()).toEqual([
+				{ landing_commit: null, landing_repo: null, landing_branch: null },
+			]);
+			db.exec(
+				"UPDATE change_ends SET landing_commit = 'landed123', landing_repo = 'acme/shop', landing_branch = 'master'",
+			);
+			expect(location()).toEqual({ label: "main", commit: "landed123", change: null });
+			db.exec("UPDATE change_ends SET landing_branch = 'main'");
+			expect(location()).toEqual({ label: "main · pr:8 Keep coupons", commit: "landed123", change: "pr:8" });
+			const query = declaredSql().find(
+				(text) => text.includes("json_each($targets)") && text.includes("e.landing_commit"),
+			);
+			if (!query) throw new Error("missing batched landing query");
+			const plan = db.raw
+				.query<{ detail: string }, { targets: string }>(`EXPLAIN QUERY PLAN ${query}`)
+				.all({ targets: "[1]" });
+			expect(
+				plan.some((row) =>
+					row.detail.includes("change_ends_landing (landing_commit=? AND landing_repo=? AND landing_branch=?)"),
+				),
+			).toBe(true);
+			for (const update of [
+				"landing_branch = NULL",
+				"ended = 'closed'",
+				"landing_commit = NULL",
+				"landing_branch = 'release'",
+			])
+				expect(() => db.exec(`UPDATE change_ends SET ${update}`)).toThrow("CHECK");
+		} finally {
+			db.close();
+		}
+	});
 
 	test("every older schema upgrades to the same fresh schema", () => {
 		const fresh = new Db(":memory:");

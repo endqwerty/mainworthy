@@ -223,9 +223,12 @@ const Q = {
 		`SELECT c.*, e.ended, e.at AS ended_at FROM changes c LEFT JOIN change_ends e ON e.change = c.id
 		 WHERE c.project = $project AND c.key = $key`,
 	),
-	landedChanges: sql<{ project: number; repo: string | null; commit: string }, { key: string; title: string | null }>(
-		`SELECT c.key, c.title FROM changes c JOIN change_ends e ON e.change = c.id
-		 WHERE c.project = $project AND c.repo IS $repo AND c.head_sha = $commit AND e.ended = 'merged' LIMIT 2`,
+	locationChanges: sql<{ targets: string }, { target: number; key: string | null; title: string | null }>(
+		`SELECT t.id AS target, c.key, c.title FROM json_each($targets) requested
+		 JOIN targets t ON t.id = requested.value
+		 LEFT JOIN change_ends e ON t.change IS NULL AND t.line = 'trunk' AND e.ended = 'merged'
+		   AND e.landing_commit = t.commit_sha AND e.landing_repo IS t.repo AND e.landing_branch = t.branch
+		 JOIN changes c ON c.id = coalesce(t.change, e.change) AND c.project = t.project`,
 	),
 	changeById: sql<{ id: number }, ChangeRow>(
 		"SELECT c.*, e.ended, e.at AS ended_at FROM changes c LEFT JOIN change_ends e ON e.change = c.id WHERE c.id = $id",
@@ -255,7 +258,13 @@ const Q = {
 	),
 	endChange: sql<{ id: number; ended: string; at: number }>(
 		`INSERT INTO change_ends (change, ended, at) VALUES ($id, $ended, $at)
-		 ON CONFLICT (change) DO UPDATE SET ended = excluded.ended, at = excluded.at`,
+		 ON CONFLICT (change) DO UPDATE SET ended = excluded.ended, at = excluded.at,
+		 landing_commit = NULL, landing_repo = NULL, landing_branch = NULL`,
+	),
+	landChange: sql<{ id: number; commit: string; repo: string | null; branch: string }>(
+		`UPDATE change_ends SET landing_commit = $commit, landing_repo = $repo, landing_branch = $branch
+		 WHERE change = $id AND ended = 'merged'
+		 AND (landing_commit IS NOT $commit OR landing_repo IS NOT $repo OR landing_branch IS NOT $branch)`,
 	),
 	reopenChange: sql<{ id: number }>("DELETE FROM change_ends WHERE change = $id"),
 	touchChange: sql<{ id: number; rev: number }>("UPDATE changes SET rev = $rev WHERE id = $id"),
@@ -718,20 +727,27 @@ export const targetsOfCommit = (db: Db, project: number, what: string): TargetRo
 	db.all(Q.targetsOfCommit, { project, what });
 /** Presentation only: a landing does not put trunk evidence back in a change's decision scope. */
 export function resultLocation(db: Db, target: TargetRow): ResultLocation {
-	const landed =
-		target.line === "trunk" && target.commit_sha !== null
-			? db.all(Q.landedChanges, { project: target.project, repo: target.repo, commit: target.commit_sha })
-			: [];
-	const change = target.change !== null ? changeById(db, target.change) : landed.length === 1 ? landed[0] : null;
-	const named = change && !change.key.startsWith("commit:") ? change : null;
-	const name = named ? [named.key, named.title].filter(Boolean).join(" ") : null;
-	return {
-		label:
-			[target.line === "trunk" ? (target.branch ?? "trunk") : null, name].filter(Boolean).join(" · ") ||
-			target.branch ||
-			(target.commit_sha ? "Commit" : target.what),
-		commit: target.commit_sha,
-		change: named?.key ?? null,
+	return resultLocations(db, [target])(target);
+}
+
+/** One indexed lookup for all targets on a result page, including direct change names. */
+export function resultLocations(db: Db, targets: TargetRow[]): (target: TargetRow) => ResultLocation {
+	const names = new Map<number, { key: string | null; title: string | null } | null>();
+	if (targets.length > 0)
+		for (const row of db.all(Q.locationChanges, { targets: JSON.stringify([...new Set(targets.map((t) => t.id))]) }))
+			names.set(row.target, names.has(row.target) ? null : row);
+	return (target) => {
+		const change = names.get(target.id);
+		const named = change?.key && !change.key.startsWith("commit:") ? change : null;
+		const name = named ? [named.key, named.title].filter(Boolean).join(" ") : null;
+		return {
+			label:
+				[target.line === "trunk" ? (target.branch ?? "trunk") : null, name].filter(Boolean).join(" · ") ||
+				target.branch ||
+				(target.commit_sha ? "Commit" : target.what),
+			commit: target.commit_sha,
+			change: named?.key ?? null,
+		};
 	};
 }
 
@@ -757,6 +773,17 @@ export function landChangeHead(
 	change: ChangeRow,
 	landing: NonNullable<ChangeInput["landing"]>,
 ): TargetRow | null {
+	const landingChanged =
+		ctx.db.run(Q.landChange, {
+			id: change.id,
+			commit: landing.commit,
+			repo: change.repo,
+			branch: landing.branch,
+		}).changes > 0;
+	if (landingChanged) {
+		ctx.db.run(Q.touchChange, { id: change.id, rev: ctx.seq });
+		ctx.touched.add(change.key);
+	}
 	const headChanged = change.head_sha !== landing.commit;
 	if (headChanged)
 		ctx.db.run(Q.updateChange, {
@@ -772,7 +799,7 @@ export function landChangeHead(
 	const what = codeWhat(change.repo, landing.commit);
 	const existing = targetsOfCommit(ctx.db, ctx.project.id, what)[0];
 	if (existing && existing.line === "trunk" && existing.branch === landing.branch && existing.change === null) {
-		if (!headChanged) return null;
+		if (!headChanged && !landingChanged) return null;
 		ctx.touched.add(change.key);
 		return existing;
 	}

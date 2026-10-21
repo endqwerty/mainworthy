@@ -136,4 +136,77 @@ test("a merged head in another project is not the source of a trunk commit here"
 	expect(h.call<InboxReply>("inbox").items[0]?.evidence).toMatchObject({
 		location: { label: "main", commit, change: null },
 	});
+	h.call("report", {
+		target: { repo: "acme/shop", commit: "feature0002", pr: 654, branch: "coupon", title: "This project" },
+		results: [{ test: { key: "checkout" }, outcome: "pass" }],
+	});
+	h.call("change", { change: "pr:654", state: "merged", landing: { commit, branch: "main" } });
+	expect(h.call<InboxReply>("inbox").items[0]?.evidence).toMatchObject({
+		location: { label: "main · pr:654 This project", commit, change: "pr:654" },
+	});
+});
+
+for (const [title, branch] of [
+	["Release to production", "main"],
+	["Replayed merge", "feature"],
+]) {
+	test(`a merged ${title} head without a landing cannot name an existing trunk failure`, () => {
+		const commit = "1234567890abcdef1234567890abcdef12345678";
+		h.call("report", {
+			target: { repo: "acme/shop", commit, branch: "main" },
+			results: [{ test: { key: "checkout" }, outcome: "fail", failure: { message: "Coupon lost" } }],
+		});
+		h.call("report", {
+			target: { repo: "acme/shop", commit, branch, pr: 8, title },
+			results: [{ test: { key: "checkout" }, outcome: "pass" }],
+		});
+		const evidence = () => h.call<InboxReply>("inbox", { kind: "failure" }).items[0]?.evidence;
+		h.call("change", { change: "pr:8", state: "merged" });
+		expect(evidence()).toMatchObject({ location: { label: "main", commit, change: null } });
+		h.call("change", { change: "pr:8", state: "merged", landing: { commit, branch: "main" } });
+		expect(evidence()).toMatchObject({ location: { label: `main · pr:8 ${title}`, commit, change: "pr:8" } });
+	});
+}
+
+test("a recorded landing survives replay, is replaced by a correction and ends on reopening or closing", () => {
+	const commit = "1234567890abcdef1234567890abcdef12345678";
+	const corrected = "abcdef1234567890abcdef1234567890abcdef12";
+	for (const sha of [commit, corrected])
+		h.call("report", {
+			target: { repo: "acme/shop", commit: sha, branch: "main" },
+			results: [{ test: { key: "checkout" }, outcome: "pass" }],
+		});
+	h.call("report", {
+		target: { repo: "acme/shop", commit, pr: 8, branch: "feature", title: "Keep coupons" },
+		results: [{ test: { key: "checkout" }, outcome: "pass" }],
+	});
+	const history = () => h.call<{ last: { commit: string; location: unknown }[] }[]>("get", { refs: ["T-1"] })[0]?.last;
+	const plain = (sha: string) =>
+		expect.objectContaining({ commit: sha, location: { label: "main", commit: sha, change: null } });
+	const named = (sha: string) =>
+		expect.objectContaining({
+			commit: sha,
+			location: { label: "main · pr:8 Keep coupons", commit: sha, change: "pr:8" },
+		});
+	h.call("change", { change: "pr:8", state: "merged" });
+	// Even when head and target already match, receiving the landing is a new fact.
+	expect(h.call("change", { change: "pr:8", state: "merged", landing: { commit, branch: "main" } })).toMatchObject({
+		already: false,
+	});
+	expect(h.call("change", { change: "pr:8", state: "merged", landing: { commit, branch: "main" } })).toMatchObject({
+		already: true,
+	});
+	h.call("change", { change: "pr:8", state: "merged" });
+	expect(history()).toContainEqual(named(commit));
+	h.call("change", { change: "pr:8", state: "merged", landing: { commit: corrected, branch: "main" } });
+	expect(history()).toContainEqual(plain(commit));
+	expect(history()).toContainEqual(named(corrected));
+	h.call("change", { change: "pr:8", state: "open" });
+	expect(history()).toContainEqual(plain(corrected));
+	h.call("change", { change: "pr:8", state: "merged" });
+	expect(history()).toContainEqual(plain(corrected));
+	h.call("change", { change: "pr:8", state: "merged", landing: { commit: corrected, branch: "main" } });
+	expect(history()).toContainEqual(named(corrected));
+	h.call("change", { change: "pr:8", state: "closed" });
+	expect(history()).toContainEqual(plain(corrected));
 });

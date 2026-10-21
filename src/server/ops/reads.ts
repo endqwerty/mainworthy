@@ -60,8 +60,10 @@ import {
 	resultById,
 	resultFailedStep,
 	resultLocation,
+	resultLocations,
 	resultTrail,
 	signatureById,
+	type TargetRow,
 	targetByCommit,
 	testById,
 	testRef,
@@ -242,15 +244,23 @@ export function caseView(
 	return out;
 }
 
-export function runView(ctx: Ctx, run: RunRow): Record<string, unknown> {
+function runTarget(ctx: Ctx, run: RunRow): TargetRow | null {
+	const accepts = json<{ commit?: string; repo?: string }>(run.accepts);
+	return accepts.commit ? targetByCommit(ctx.db, ctx.project.id, accepts.commit, accepts.repo ?? null) : null;
+}
+
+export function runView(
+	ctx: Ctx,
+	run: RunRow,
+	locationOf = (target: TargetRow) => resultLocation(ctx.db, target),
+): Record<string, unknown> {
 	const status = gateOf(ctx, run);
 	const work = workIn(ctx, run.id);
 	const change = run.change !== null ? changeById(ctx.db, run.change) : null;
-	const accepts = json<{ commit?: string; repo?: string }>(run.accepts);
-	const target = accepts.commit ? targetByCommit(ctx.db, ctx.project.id, accepts.commit, accepts.repo ?? null) : null;
+	const target = runTarget(ctx, run);
 	return {
 		ref: runRef(run),
-		location: target ? resultLocation(ctx.db, target) : null,
+		location: target ? locationOf(target) : null,
 		name: run.name,
 		origin: run.origin,
 		state: run.state,
@@ -428,7 +438,11 @@ function proposalView(ctx: Ctx, proposal: ProposalRow, cursor?: string): Record<
 	};
 }
 
-function resultView(ctx: Ctx, row: ResultRow): Record<string, unknown> {
+function resultView(
+	ctx: Ctx,
+	row: ResultRow,
+	locationOf = (target: TargetRow) => resultLocation(ctx.db, target),
+): Record<string, unknown> {
 	const test = testById(ctx.db, row.test);
 	const target = mustTarget(ctx.db, row.target);
 	const batch = batchById(ctx.db, row.batch);
@@ -451,7 +465,7 @@ function resultView(ctx: Ctx, row: ResultRow): Record<string, unknown> {
 		steps: resultTrail(row),
 		signature: row.signature !== null ? (signatureById(ctx.db, row.signature)?.text ?? null) : null,
 		corrects: row.corrects,
-		location: resultLocation(ctx.db, target),
+		location: locationOf(target),
 		commit: target.commit_sha,
 		change: target.change !== null ? (changeById(ctx.db, target.change)?.key ?? null) : null,
 		job: batch?.job ?? "",
@@ -490,6 +504,11 @@ export function get(ctx: Ctx, input: GetInput): Record<string, unknown>[] {
 			const test = findTest(ctx.db, ctx.project.id, text);
 			if (!test) throw notFound(`test ${text}`);
 			const linked = test.case_id !== null ? caseById(ctx.db, test.case_id) : null;
+			const last = lastResultsOfTest(ctx.db, test.project, test.id, 20);
+			const locationOf = resultLocations(
+				ctx.db,
+				last.map((row) => mustTarget(ctx.db, row.target)),
+			);
 			return {
 				ref: testRef(test),
 				kind: test.kind,
@@ -505,7 +524,7 @@ export function get(ctx: Ctx, input: GetInput): Record<string, unknown>[] {
 					now: ctx.now,
 					settings: currentPolicy(ctx.db, test.project).settings.flakyDetection,
 				}),
-				last: lastResultsOfTest(ctx.db, test.project, test.id, 20).map((row) => resultView(ctx, row)),
+				last: last.map((row) => resultView(ctx, row, locationOf)),
 			};
 		}
 		if (kind === "P-") {
@@ -605,9 +624,13 @@ function countedResults(ctx: Ctx, input: FindInput, limit: number): Found {
 		: matching;
 	const page = rest.slice(0, limit);
 	const last = page.at(-1);
+	const locationOf = resultLocations(
+		ctx.db,
+		page.map((row) => mustTarget(ctx.db, row.target)),
+	);
 	return {
 		count: matching.length,
-		items: page.map((row) => countedView(ctx, row)),
+		items: page.map((row) => countedView(ctx, row, locationOf)),
 		cursor: rest.length > limit && last ? `${rank(last)}.${last.result}.${version}` : null,
 		tally,
 	};
@@ -619,12 +642,16 @@ function parseResultCursor(cursor: string): { rank: number; result: number; vers
 	return { rank: Number(match[1]), result: Number(match[2]), version: match[3] ?? "" };
 }
 
-function countedView(ctx: Ctx, row: CountedTest): Record<string, unknown> {
+function countedView(
+	ctx: Ctx,
+	row: CountedTest,
+	locationOf: (target: TargetRow) => ReturnType<typeof resultLocation>,
+): Record<string, unknown> {
 	const result = resultById(ctx.db, row.result);
 	const test = testById(ctx.db, row.test);
 	if (!result || !test) throw new Error(`result ${row.result} of a counted test is missing`);
 	const linked = caseOfCount(ctx, row, test);
-	const view = resultView(ctx, result);
+	const view = resultView(ctx, result, locationOf);
 	return {
 		result: result.id,
 		test: testRef(test),
@@ -794,9 +821,14 @@ export function find(ctx: Ctx, input: FindInput): Found {
 			const filter = { origin: input.origin ?? null, state, change: change?.id ?? null };
 			const rows = recentRuns(ctx.db, project, filter, before, limit + 1);
 			const page = rows.slice(0, limit);
+			const targets = page.flatMap((run) => {
+				const target = runTarget(ctx, run);
+				return target ? [target] : [];
+			});
+			const locationOf = resultLocations(ctx.db, targets);
 			return {
 				count: null,
-				items: page.map((run) => runView(ctx, run)),
+				items: page.map((run) => runView(ctx, run, locationOf)),
 				cursor: rows.length > limit ? String(page.at(-1)?.id ?? "") : null,
 			};
 		}
@@ -981,8 +1013,13 @@ export function timeline(ctx: Ctx, input: z.infer<typeof TimelineInput>): Record
 			what: what.join("; ") || "reordered",
 		});
 	}
-	for (const r of lastResultsOfCase(ctx.db, row.id, limit))
-		entries.push({ ...resultView(ctx, r), t: "result", seq: r.seq, at: r.at, ord: r.ord });
+	const results = lastResultsOfCase(ctx.db, row.id, limit);
+	const locationOf = resultLocations(
+		ctx.db,
+		results.map((result) => mustTarget(ctx.db, result.target)),
+	);
+	for (const r of results)
+		entries.push({ ...resultView(ctx, r, locationOf), t: "result", seq: r.seq, at: r.at, ord: r.ord });
 	for (const f of findingsOfCase(ctx.db, row.id, limit)) {
 		entries.push({
 			t: "finding",

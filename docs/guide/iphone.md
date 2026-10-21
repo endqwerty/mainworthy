@@ -145,7 +145,7 @@ An unconfirmed withdrawal shows the server's response without claiming that the 
 The chips over the list show one kind of question. The name at the top left is the project that is open. Press
 it to open another.
 
-Failures, test results and commit runs name the reported change and its title. On `main`, they name the merged pull request when the server records its exact landed commit; otherwise they show `main`. The short commit stays underneath. Tap a named change to open it.
+Failures, test results and commit runs name the reported change and its title. On `main`, they name the merged pull request when the server records its exact landed commit; otherwise they show `main`. Earlier merged changes need their landing reported again before they can name a pull request. The short commit stays underneath. Tap a named change to open it.
 
 ## Answer several questions at once
 

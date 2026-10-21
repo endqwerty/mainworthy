@@ -5,6 +5,7 @@
 import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { z } from "zod";
 import { BUDGETS } from "../bench/contracts.ts";
 import { buildDataset, openDataset, Parameters } from "../bench/dataset.ts";
 import { measure, table } from "../bench/measure.ts";
@@ -223,4 +224,76 @@ test.each(["scans", "targets"] as const)("a report with existing failures bounds
 		expect(small.scans).toBe(2);
 		expect(large.scans).toBe(2);
 	} else expect(large.targets).toBe(small.targets);
+});
+
+test("a 500-result trunk page batches landing reads beside 8000 changes", async () => {
+	const h = harness({ unlinked: "track" });
+	try {
+		const ci = h.actor("pipeline", "ci", ["read", "record"]);
+		const commit = "1234567890abcdef1234567890abcdef12345678";
+		h.call(
+			"report",
+			{
+				target: { repo: "acme/shop", commit: "feature0001", pr: 8, branch: "feature", title: "Keep coupons" },
+				results: [{ test: { key: "setup" }, outcome: "pass" }],
+			},
+			ci,
+		);
+		h.call("change", { change: "pr:8", state: "merged", landing: { commit, branch: "main" } });
+		const receipt = h.call<ReportReceipt>(
+			"report",
+			{
+				target: { repo: "acme/shop", commit, branch: "main" },
+				results: Array.from({ length: 500 }, (_, i) => ({ test: { key: `page-${i}` }, outcome: "pass" })),
+			},
+			ci,
+		);
+		h.app.db.exec(`WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i + 1 FROM n WHERE i < 8000)
+			INSERT INTO changes (project, key, repo, head_sha, branch, title, rev)
+			SELECT project, 'old:' || i, repo, 'old-commit-' || i, 'feature', 'Old change', 1 FROM changes, n WHERE key = 'pr:8'`);
+		const db = h.app.db;
+		const all = db.all.bind(db);
+		let landingReads = 0;
+		db.all = (statement, ...params) => {
+			if (/JOIN change_ends/.test(statement.text)) landingReads++;
+			return all(statement, ...params);
+		};
+		try {
+			const measured = await measure({
+				name: "500 trunk results beside 8000 changes",
+				budget: BUDGETS.search,
+				iterations: 10,
+				correctness: "all 500 results name only the recorded landing, using one landing query per page",
+				prepare: () => () => {
+					landingReads = 0;
+					return h.call("find", { in: "results", run: receipt.gate?.run, limit: 500 });
+				},
+				check: (reply) => {
+					const pageReply = z
+						.object({
+							count: z.number(),
+							cursor: z.string().nullable(),
+							items: z.array(z.object({ location: z.unknown() })),
+						})
+						.parse(reply);
+					expect(pageReply.count).toBe(500);
+					expect(pageReply.cursor).toBeNull();
+					const page = pageReply.items;
+					expect(page).toHaveLength(500);
+					for (const item of page)
+						expect(item.location).toEqual({ label: "main · pr:8 Keep coupons", commit, change: "pr:8" });
+					expect(landingReads).toBe(1);
+				},
+			});
+			console.log(`\nTrunk result-page regression tripwire, milliseconds:\n${table([measured])}`);
+			expect(measured.errors, measured.errorMessages.join("; ")).toBe(0);
+			expect(measured.warmupErrors).toEqual([]);
+			expect(measured.checked).toBe(10);
+			expect(measured.p95).toBeLessThan(BUDGETS.search);
+		} finally {
+			db.all = all;
+		}
+	} finally {
+		h.close();
+	}
 });

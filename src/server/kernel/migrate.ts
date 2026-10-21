@@ -38,6 +38,7 @@ import slotLeases from "./migrations/0032_slot_leases.sql" with { type: "text" }
 import resultModel from "./migrations/0033_result_model.sql" with { type: "text" };
 import resultTrail from "./migrations/0034_result_trail.sql" with { type: "text" };
 import projectIdentity from "./migrations/0035_project_identity.sql" with { type: "text" };
+import changeLandings from "./migrations/0036_change_landings.sql" with { type: "text" };
 
 /**
  * In order. A migration is never edited after it ships; a change is a new entry.
@@ -84,6 +85,7 @@ export const MIGRATIONS: readonly { version: number; name: string; sql: string; 
 	{ version: 33, name: "result_model", sql: resultModel, archive: false },
 	{ version: 34, name: "result_trail", sql: resultTrail, archive: true },
 	{ version: 35, name: "project_identity", sql: projectIdentity, archive: true },
+	{ version: 36, name: "change_landings", sql: changeLandings, archive: false },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;
