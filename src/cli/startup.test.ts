@@ -6,8 +6,10 @@ import { join } from "node:path";
 import { z } from "zod";
 import { type Instance, start } from "../app/start.ts";
 import { API_VERSION, VERSION } from "../core/version.ts";
+import { defaultConfig } from "../server/kernel/app.ts";
 import { contentSecurityPolicy } from "../surfaces/headers.ts";
-import { CLI_ENTRY, COMMIT, withInstance } from "./test-support.ts";
+import { Client } from "./client.ts";
+import { CLI_ENTRY, COMMIT, inThisProcess, withInstance } from "./test-support.ts";
 
 /**
  * What a start in server mode says when the environment names no proxy: one line on stderr, once. A start in
@@ -336,10 +338,20 @@ test("an install under the former name is carried over on the next start, and it
 		};
 	};
 	try {
-		const first = await (await serve()).stop();
-		expect(first.code).toBe(0);
-		const token = /owner token \(shown once\): (\S+)/.exec(first.stdout)?.[1];
-		if (!token) throw new Error(`the first start printed no owner token: ${first.stdout}`);
+		const initial = start(
+			defaultConfig({
+				HOME: home,
+				MAINWORTHY_OWNER: "robin",
+				MAINWORTHY_PORT: "0",
+				MAINWORTHY_MODE: "server",
+				...BEHIND_PROXY,
+			}),
+			() => ({ ui: null }),
+			{ readers: 0 },
+		);
+		const token = initial.generatedToken;
+		await initial.stop();
+		if (!token) throw new Error("the first start generated no owner token");
 		// The same files under the names the project used before 2026-10-13.
 		await rename(join(home, ".mainworthy", "mainworthy.db"), join(home, ".mainworthy", "casebook.db"));
 		await rename(join(home, ".mainworthy"), join(home, ".casebook"));
@@ -416,17 +428,24 @@ test("a start says when the configured owner token is not the owner's, and refus
 		}
 	};
 	try {
-		let helper = "";
-		const first = await serve({ MAINWORTHY_OWNER_TOKEN: OWNER }, async (url) => {
-			const made = await fetch(`${url}/api/admin`, {
-				method: "POST",
-				headers: { "content-type": "application/json", authorization: `Bearer ${OWNER}` },
-				body: JSON.stringify({ do: "token.create", actor: "helper", kind: "agent" }),
-			});
-			helper = z.object({ result: z.object({ token: z.string() }) }).parse(await made.json()).result.token;
+		const config = defaultConfig({
+			HOME: home,
+			MAINWORTHY_OWNER: "robin",
+			MAINWORTHY_OWNER_TOKEN: OWNER,
+			MAINWORTHY_PORT: "0",
+			MAINWORTHY_MODE: "server",
+			...BEHIND_PROXY,
 		});
-		expect([first.code, first.stderr]).toEqual([0, ""]);
-
+		const initial = start(config, () => ({ ui: null }), { readers: 0 });
+		let helper: string;
+		try {
+			const client = new Client({ url: initial.url, token: OWNER, project: "scratch" });
+			helper = z
+				.object({ token: z.string() })
+				.parse(await client.call("admin", { do: "token.create", actor: "helper", kind: "agent" })).token;
+		} finally {
+			await initial.stop();
+		}
 		// The variable now holds a token that is the agent's. The server starts, and says what is wrong with it.
 		let owner = 0;
 		const second = await serve({ MAINWORTHY_OWNER_TOKEN: helper }, async (url) => {
@@ -440,7 +459,15 @@ test("a start says when the configured owner token is not the owner's, and refus
 		expect(second.stderr).not.toContain(helper);
 
 		// The owner's name now names the agent. Nothing is granted and nothing listens.
-		const third = await serve({ MAINWORTHY_OWNER_TOKEN: OWNER, MAINWORTHY_OWNER: "helper" });
+		const third = await inThisProcess(
+			"invalid owner",
+			async () => {
+				const invalid = start({ ...config, owner: "helper" }, () => ({ ui: null }), { readers: 0 });
+				await invalid.stop();
+				return 0;
+			},
+			{ environment: { PATH: process.env.PATH ?? "" }, cwd: home, input: "" },
+		);
 		expect([third.code, third.stdout]).toEqual([4, ""]);
 		expect(third.stderr).toBe(
 			"invalid: MAINWORTHY_OWNER names helper, which is an agent on this instance and not a person. Set MAINWORTHY_OWNER to the owner's name and start again; no actor and no token was changed (the database may have been brought to this build's schema first, with a copy of it as it was beside it)\n",
