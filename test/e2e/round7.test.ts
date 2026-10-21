@@ -92,8 +92,6 @@ for (const order of ["resolve then reload", "reload then resolve"])
 			try {
 				const a = h.page;
 				const b = await h.context.newPage();
-				a.setDefaultTimeout(5000);
-				b.setDefaultTimeout(5000);
 				await b.goto(`${server.url}/p/scratch/suite/c/1`);
 				await b.getByRole("button", { name: "Case 1", exact: true }).waitFor();
 				await conflict(server, a);
@@ -142,7 +140,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await conflict(server, page);
 			const q = await question(server);
 			await page.goto(`${server.url}/p/scratch/suite/c/2`);
@@ -195,8 +192,6 @@ check(
 		try {
 			const a = h.page;
 			const b = await h.context.newPage();
-			a.setDefaultTimeout(5000);
-			b.setDefaultTimeout(5000);
 			await b.goto(`${server.url}/p/scratch/suite/c/1`);
 			await b.getByRole("button", { name: "Case 1", exact: true }).waitFor();
 			await b.keyboard.press("e");
@@ -232,14 +227,12 @@ for (const choice of ["Keep current version", "Use current title"])
 			const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 			try {
 				const { page } = h;
-				page.setDefaultTimeout(5000);
 				await conflict(server, page);
 				await page.getByRole("button", { name: choice, exact: true }).click();
 				const q = await question(server);
 				await page.close();
 				await server.api("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "reject" } });
 				const returned = await h.context.newPage();
-				returned.setDefaultTimeout(5000);
 				await returned.goto(`${server.url}/p/scratch/suite/c/1`);
 				await title(returned).waitFor();
 				await card(returned).waitFor({ state: "detached" });
@@ -263,7 +256,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await conflict(server, page);
 			const stored = (await drafts(page))[0]?.conflict;
 			if (!stored) throw Error("Missing stored conflict");
@@ -271,7 +263,6 @@ check(
 			await page.close();
 			await server.api("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "merge", body: stored.mine } });
 			const returned = await h.context.newPage();
-			returned.setDefaultTimeout(5000);
 			let sent = 0;
 			await returned.route("**/propose", async (route) => {
 				sent++;
@@ -306,7 +297,6 @@ check(
 		const gate = latch();
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await conflict(server, page);
 			await page.getByRole("textbox", { name: "Merged title", exact: true }).fill("Recorded merge");
 			let received = false;
@@ -351,7 +341,6 @@ check(
 		const gate = latch();
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await conflict(server, page);
 			let received = false;
 			await page.route("**/decide", async (route) => {
@@ -390,7 +379,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await conflict(server, page);
 			const stored = (await drafts(page))[0]?.conflict;
 			if (!stored) throw Error("Missing conflict");
@@ -432,10 +420,8 @@ check(
 		const gate = latch();
 		try {
 			const a = h.page;
-			a.setDefaultTimeout(5000);
 			await conflict(server, a);
 			const b = await h.context.newPage();
-			b.setDefaultTimeout(5000);
 			await b.goto(`${server.url}/p/scratch/suite/c/1`);
 			await card(b).waitFor();
 			await a.getByRole("textbox", { name: "Merged title", exact: true }).fill("Recorded choice");
@@ -481,7 +467,6 @@ check(
 		const gate = latch();
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await conflict(server, page);
 			const merged = page.getByRole("textbox", { name: "Merged title", exact: true });
 			await merged.fill("Recorded merge");

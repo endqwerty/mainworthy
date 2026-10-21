@@ -46,7 +46,6 @@ test.skipIf(!browserAvailable)(
 		try {
 			browser = await openPage(server, { signedIn: false, path: "/invite#not-a-code-anybody-made", ready: "h1" });
 			const { page } = browser;
-			page.setDefaultTimeout(8000);
 			const gone = page.getByRole("status").filter({ hasText: GONE });
 			await gone.waitFor();
 			// The code is read and taken out of the address at once, whatever comes of it.
@@ -103,7 +102,6 @@ test.skipIf(!browserAvailable)(
 			// The owner is signed in here, and opens a link that is for kai.
 			browser = await openPage(server, { path: `/invite#${code}`, ready: "h1" });
 			const { page } = browser;
-			page.setDefaultTimeout(8000);
 			await page.getByRole("heading", { name: "You are invited as kai" }).waitFor();
 			await page.getByText("You are signed in as robin. This invitation is for kai.", { exact: false }).waitFor();
 			// Nothing is accepted before the answer: the fields wait.
@@ -139,7 +137,6 @@ test.skipIf(!browserAvailable)(
 		try {
 			browser = await openPage(server, { signedIn: false, path: `/invite#${code}`, ready: "h1" });
 			const { page } = browser;
-			page.setDefaultTimeout(8000);
 			await page.getByRole("heading", { name: "You are invited as lou" }).waitFor();
 			await page.locator("#invite-password").fill(PASSWORD);
 			await page.locator("#invite-password-again").fill(PASSWORD);
@@ -179,7 +176,6 @@ test.skipIf(!browserAvailable)(
 		try {
 			browser = await openPage(server, { signedIn: false, path: `/invite#${code}`, ready: "h1" });
 			const { page } = browser;
-			page.setDefaultTimeout(8000);
 			await page.getByRole("heading", { name: "You are invited as pat" }).waitFor();
 			await page
 				.getByText(
@@ -224,7 +220,6 @@ test.skipIf(!browserAvailable)(
 			});
 			browser = await openPage(server, { signedIn: false, path: "/invite", ready: "h1" });
 			const { page } = browser;
-			page.setDefaultTimeout(8000);
 			// Looking at the invitation is refused: the page says the wait and offers to ask again, with the code
 			// still in its memory though it has left the address.
 			await page.route("**/api/login/challenge", (route) => route.fulfill(wait(3)));
@@ -275,13 +270,11 @@ test.skipIf(!browserAvailable)(
 			// The owner is signed in, opens a link that is for vera, and says that robin may be signed out.
 			browser = await openPage(server, { path: `/invite#${code}`, ready: "h1" });
 			const { page, context } = browser;
-			page.setDefaultTimeout(8000);
 			await page.getByText("You are signed in as robin. This invitation is for vera.", { exact: false }).waitFor();
 			await page.getByRole("button", { name: "Continue as vera" }).click();
 
 			// In another tab of the same browser robin signs out and tom signs in, through the pages.
 			const tab = await context.newPage();
-			tab.setDefaultTimeout(8000);
 			await tab.goto(`${server.url}/p/scratch/suite`);
 			await tab.getByRole("button", { name: "Sign out" }).click();
 			await tab.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
@@ -339,7 +332,6 @@ test.skipIf(!browserAvailable)(
 			// The owner is signed in. The page is opened afresh with the answer to "who is signed in" held back.
 			browser = await openPage(server, { path: "/invite", ready: "h1" });
 			const { page } = browser;
-			page.setDefaultTimeout(8000);
 			await page.goto("about:blank");
 			let release = (): void => {};
 			const held = new Promise<void>((resolve) => {
@@ -384,7 +376,6 @@ for (const failure of ["is refused by the network", "never arrives"] as const)
 				// gets no answer; the second one is let through.
 				browser = await openPage(server, { path: "/invite", ready: "h1" });
 				const { page } = browser;
-				page.setDefaultTimeout(8000);
 				await page.goto("about:blank");
 				if (failure === "never arrives") await page.clock.install();
 				let asked = 0;

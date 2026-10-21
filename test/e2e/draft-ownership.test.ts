@@ -33,7 +33,6 @@ async function windows() {
 	const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 	const a = h.page;
 	const b = await h.context.newPage();
-	for (const page of [a, b]) page.setDefaultTimeout(5000);
 	await b.goto(`${server.url}/p/scratch/suite/c/1`);
 	for (const page of [a, b]) await page.getByRole("button", { name: "Coupon case", exact: true }).waitFor();
 	return {
@@ -62,7 +61,6 @@ for (const locks of ["available", "unavailable", "query fails"])
 				await title(a).fill("Coupon case owned by A");
 				const owner = (await stored(a)).owner;
 				const b = await h.context.newPage();
-				b.setDefaultTimeout(5000);
 				b.on("pageerror", (error) => h.errors.push(error.message));
 				await b.addInitScript((locks) => {
 					if (locks === "unavailable") Object.defineProperty(navigator, "locks", { value: undefined });
@@ -106,7 +104,6 @@ check(
 		const h = await openPage(server);
 		try {
 			const b = await h.context.newPage();
-			b.setDefaultTimeout(5000);
 			b.on("pageerror", (error) => h.errors.push(error.message));
 			await b.addInitScript(() => {
 				const timeout = window.setTimeout.bind(window);
@@ -135,7 +132,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const a = h.page;
-			a.setDefaultTimeout(10_000);
 			await a.getByRole("button", { name: "Coupon case", exact: true }).waitFor();
 			await h.context.route("**/api/p/scratch/propose", (route) =>
 				route.fulfill({ json: { ok: false, error: { code: "internal", message: "Capture unavailable" } } }),
@@ -165,7 +161,6 @@ check(
 				});
 			});
 			const b = await h.context.newPage();
-			b.setDefaultTimeout(10_000);
 			b.on("pageerror", (error) => h.errors.push(error.message));
 			await b.addInitScript((owner) => {
 				const timeout = window.setTimeout.bind(window);
@@ -523,7 +518,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const a = h.page;
-			a.setDefaultTimeout(5000);
 			await a.getByRole("button", { name: "Coupon case", exact: true }).waitFor();
 			await a.keyboard.press("e");
 			await title(a).fill("Coupon case mine");
@@ -548,7 +542,6 @@ check(
 			await merged.fill("Typed where nothing could store it");
 			await a.getByText("Device storage is full", { exact: false }).first().waitFor();
 			const b = await h.context.newPage();
-			b.setDefaultTimeout(5000);
 			await b.goto(`${server.url}/p/scratch/suite/c/2`);
 			await b.getByRole("button", { name: "Other case", exact: true }).waitFor();
 			await b.locator('[data-testid="case-list"] [role="option"]').filter({ hasText: "C-1" }).click();
@@ -902,7 +895,6 @@ for (const fate of ["recorded", "in flight", "lost reconciliation reply"]) {
 			});
 			try {
 				const a = h.page;
-				a.setDefaultTimeout(5000);
 				await a.locator("#list").waitFor();
 				const requests: { cmd: string; edits: unknown[] }[] = [];
 				let originalReady = false;
@@ -926,7 +918,6 @@ for (const fate of ["recorded", "in flight", "lost reconciliation reply"]) {
 				await title(a).fill("First phrase with the rest");
 
 				const b = await h.context.newPage();
-				b.setDefaultTimeout(5000);
 				let asked = 0;
 				await b.route("**/command", async (route) => {
 					asked++;

@@ -21,7 +21,6 @@ for (const failure of ["lost reply", "repeated lost replies", "unreadable reply"
 				});
 				view = await openPage(server, { path: "/p/scratch/runs" });
 				const { page } = view;
-				page.setDefaultTimeout(5000);
 				const sent: Api["plan"]["input"][] = [];
 				const losses = failure === "repeated lost replies" ? 2 : 1;
 				await page.route("**/plan", async (route) => {
@@ -108,7 +107,6 @@ check(
 			await server.api("propose", { edits: [{ op: "create", outline: "Checkout opens\n  Open checkout > Ready" }] });
 			view = await openPage(server, { path: "/p/scratch/runs" });
 			const { page } = view;
-			page.setDefaultTimeout(5000);
 			const sent: Api["plan"]["input"][] = [];
 			page.on("request", (request) => {
 				if (request.url().endsWith("/plan")) sent.push(request.postDataJSON());
@@ -151,7 +149,6 @@ for (const control of ["name", "radio", "submit"])
 				await server.api("propose", { edits: [{ op: "create", outline: "Checkout opens\n  Open checkout > Ready" }] });
 				view = await openPage(server, { path: "/p/scratch/runs" });
 				const { page } = view;
-				page.setDefaultTimeout(5000);
 				const sent: Api["plan"]["input"][] = [];
 				await page.route("**/plan", async (route) => {
 					sent.push(route.request().postDataJSON());

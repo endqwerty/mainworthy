@@ -21,7 +21,6 @@ test.skipIf(!browserAvailable)(
 		try {
 			view = await openPage(server, { path: "/p/scratch/settings" });
 			const { page } = view;
-			page.setDefaultTimeout(8000);
 			await page.getByRole("option", { name: "Tokens", exact: true }).click();
 			await page.route("**/api/admin", async (route) => {
 				if (route.request().postDataJSON().do !== "token.list") return route.continue();

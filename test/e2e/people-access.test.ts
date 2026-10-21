@@ -72,7 +72,6 @@ test.skipIf(!browserAvailable)(
 		try {
 			await passkey(sam, "Sam security key");
 			const { page } = admin;
-			page.setDefaultTimeout(3000);
 			await page.getByRole("option", { name: "People", exact: true }).click();
 			await page.getByRole("button", { name: "Sign-in details for sam", exact: true }).click();
 			const details = page.getByRole("region", { name: "Sign-in details for sam", exact: true });
@@ -161,7 +160,6 @@ test.skipIf(!browserAvailable)(
 		try {
 			await passkey(other, "Phone security key");
 			const { page } = admin;
-			page.setDefaultTimeout(3000);
 			await page.getByRole("option", { name: "People", exact: true }).tap();
 			await page.getByRole("button", { name: "Sign-in details for phone-person", exact: true }).tap();
 			const details = page.getByRole("region", { name: "Sign-in details for phone-person", exact: true });
@@ -212,7 +210,6 @@ for (const device of ["desktop", "phone"] as const) {
 			try {
 				await passkey(other, `${actor} key`);
 				const { page } = admin;
-				page.setDefaultTimeout(3000);
 				await page.getByRole("option", { name: "People", exact: true }).click();
 				await page.getByRole("button", { name: `Sign-in details for ${actor}`, exact: true }).click();
 				const details = page.getByRole("region", { name: `Sign-in details for ${actor}`, exact: true });

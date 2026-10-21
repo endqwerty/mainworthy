@@ -10,7 +10,6 @@ test.skipIf(!browserAvailable)(
 		const browser = await openPage(server, { signedIn: false });
 		try {
 			const { page } = browser;
-			page.setDefaultTimeout(5000);
 			await page.getByRole("link", { name: "Forgot your password?" }).click();
 			await page.getByRole("heading", { name: "Reset your password" }).waitFor();
 			if (process.env.MAINWORTHY_MAIL_SCREENSHOT)

@@ -24,7 +24,6 @@ test.skipIf(!browserAvailable)(
 			});
 			view = await openPage(server, { path: "/p/scratch/runs" });
 			const { page } = view;
-			page.setDefaultTimeout(3000);
 			await page.keyboard.press("n");
 			await page.getByLabel("Run name").fill("Checkout plan");
 			await page
@@ -86,7 +85,6 @@ test.skipIf(!browserAvailable)(
 		const h = await openPage(server, { path: "/p/scratch/suite/c/2" });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(3000);
 			await page.getByRole("button", { name: "Checkout", exact: true }).click();
 			await page.getByText("Insert fragment", { exact: true }).click();
 			await page.getByLabel("Fragment ref", { exact: true }).fill("C-1");
@@ -151,10 +149,10 @@ test.skipIf(!browserAvailable)(
 		try {
 			await h.page.getByTestId("case-list").waitFor();
 			await h.page.keyboard.press("c");
-			await h.page.getByLabel("Case kind", { exact: true }).selectOption("fragment", { timeout: 3000 });
-			await h.page.getByLabel("Case title", { exact: true }).fill("Shared setup", { timeout: 3000 });
+			await h.page.getByLabel("Case kind", { exact: true }).selectOption("fragment");
+			await h.page.getByLabel("Case title", { exact: true }).fill("Shared setup");
 			await h.page.getByLabel("Case title", { exact: true }).press("Enter");
-			await h.page.getByLabel("Step 1", { exact: true }).fill("Open the application", { timeout: 3000 });
+			await h.page.getByLabel("Step 1", { exact: true }).fill("Open the application");
 			await h.page.getByLabel("Step 1", { exact: true }).press("Escape");
 			const view = await eventually(
 				async () => CaseView.safeParse((await server.api("get", { refs: ["C-1"] }))[0]),
@@ -191,7 +189,6 @@ test.skipIf(!browserAvailable)(
 		});
 		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
-			h.page.setDefaultTimeout(3000);
 			await h.page.getByRole("heading", { name: "Fragment users", exact: true }).waitFor();
 			expect(await h.page.getByRole("button", { name: "Update selected to v2" }).count()).toBe(0);
 			await server.api("propose", {
@@ -243,7 +240,6 @@ test.skipIf(!browserAvailable)(
 		const h = await openPage(server, { path: "/p/scratch/suite/c/3" });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(3000);
 			await page.getByRole("button", { name: "Checkout", exact: true }).click();
 			await page.getByText("Insert fragment", { exact: true }).click();
 			const insert = page.getByRole("button", { name: "Insert pinned fragment", exact: true });

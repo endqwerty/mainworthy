@@ -59,7 +59,6 @@ test.skipIf(!browserAvailable)(
 		const other = await openPage(server, { as: { name: "forget-web", password: OLD } });
 		try {
 			const { page } = admin;
-			page.setDefaultTimeout(3000);
 			await section(page, "People");
 			const issued = page.locator(".settings-token").filter({ hasText: "forget-web-token" });
 			await issued.getByText("Active", { exact: true }).waitFor();
@@ -149,7 +148,6 @@ test.skipIf(!browserAvailable)(
 		const admin = await openPage(server, { path: "/p/scratch/settings" });
 		try {
 			const { page } = admin;
-			page.setDefaultTimeout(3000);
 			await section(page, "People");
 			const issued = page.locator(".settings-token").filter({ hasText: "lost-reply-token" });
 			await issued.getByText("Active", { exact: true }).waitFor();
@@ -199,7 +197,6 @@ test.skipIf(!browserAvailable)(
 		});
 		try {
 			const { page } = admin;
-			page.setDefaultTimeout(3000);
 			await section(page, "People");
 			const select = page.getByLabel("Person to forget", { exact: true });
 			await select.locator('option[value="forget-admin"]').waitFor({ state: "attached" });
@@ -245,7 +242,6 @@ test.skipIf(!browserAvailable)(
 		const admin = await openPage(server, { path: "/p/scratch/settings" });
 		try {
 			const { page } = admin;
-			page.setDefaultTimeout(3000);
 			await page.route("**/api/admin", async (route) => {
 				if (route.request().postDataJSON().do !== "actor.list") return route.continue();
 				const response = await route.fetch();
@@ -281,7 +277,6 @@ test.skipIf(!browserAvailable)(
 			one = await openPage(server, { as: { name: "sam", password: OLD }, path: "/p/scratch/settings" });
 			two = await openPage(server, { as: { name: "sam", password: OLD } });
 			const { page } = one;
-			page.setDefaultTimeout(8000);
 
 			await section(page, "Your sessions");
 			await rows(page).nth(1).waitFor();
@@ -408,7 +403,6 @@ test.skipIf(!browserAvailable)(
 		try {
 			browser = await openPage(server, { path: "/p/scratch/settings" });
 			const { page } = browser;
-			page.setDefaultTimeout(8000);
 			await browser.context.grantPermissions(["clipboard-read", "clipboard-write"]);
 			/** The newest invitation for a name, of one purpose, as the server lists it. */
 			const invitation = async (name: string, purpose: "join" | "recover") => {
@@ -583,7 +577,6 @@ test.skipIf(!browserAvailable)(
 
 			admin = await openPage(server, { as: { name: "ada", password: OLD }, path: "/p/scratch/settings" });
 			const { page } = admin;
-			page.setDefaultTimeout(8000);
 			await section(page, "People");
 			// ada administers and does not own the instance. The server lets ada make a recovery link for ada and
 			// for nobody else, and that is what the page offers: no button that would be answered 403.
@@ -621,7 +614,6 @@ test.skipIf(!browserAvailable)(
 		});
 		try {
 			const { page } = browser;
-			page.setDefaultTimeout(8000);
 			await browser.context.grantPermissions(["clipboard-read", "clipboard-write"]);
 			await section(page, "Your sign-in");
 			await page.getByLabel("Token label", { exact: true }).fill("Laptop CLI");

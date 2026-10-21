@@ -275,6 +275,13 @@ export type PageHarness = {
 	keys: () => Promise<number>;
 	close: () => Promise<void>;
 };
+/**
+ * How long the page, or the server behind it, is given to reach a state a test waits for: every action and wait
+ * of a page from `openPage`, and `eventually`. One number for the whole suite. A test sets no deadline of its own:
+ * one per file, from 3 to 8 s, measured how busy the machine was beside the other tests, and was half of all the
+ * flaky-test issues. A state that never arrives still fails here, before the test's own guard, naming the wait.
+ */
+export const SETTLES = 10_000;
 /** Trusted browser input, isolated storage, and observable errors for each journey. */
 export async function openPage(
 	server: Server,
@@ -311,6 +318,7 @@ export async function openPage(
 			: { viewport: { width: 1440, height: 900 } }),
 		colorScheme: "light",
 	});
+	context.setDefaultTimeout(SETTLES);
 	routesWaitForInterception(context);
 	throttleRenderers(context);
 	if (signedIn) {
@@ -335,7 +343,7 @@ export async function openPage(
 			message.type() === "error" &&
 			!/^Failed to load resource: the server responded with a status of 401/.test(message.text())
 		)
-			errors.push(message.text());
+			errors.push(withResource(message.text(), message.location().url));
 	});
 	page.on("dialog", (dialog) => {
 		dialogs.push(dialog.message());
@@ -364,6 +372,17 @@ export async function openPage(
 			if (!lent) await ownedBrowser.close();
 		},
 	};
+}
+/**
+ * A resource that failed to load unexpectedly, named: the console says only how it failed (#654 was a
+ * `net::ERR_FILE_NOT_FOUND` with no way to tell what). A test makes a load fail with a status from the server or
+ * with `route.abort()` (`net::ERR_FAILED`), and asserts those as the console words them. A path of the page's own
+ * server is written without its address, which changes per run.
+ */
+function withResource(text: string, url: string): string {
+	if (!/^Failed to load resource: net::ERR_(?!FAILED$)/.test(text) || !url) return text;
+	const resource = /^https?:\/\/(127\.0\.0\.1|localhost):\d+(\/.*)$/.exec(url)?.[2] ?? url;
+	return `${text} (${resource})`;
 }
 /**
  * `MAINWORTHY_E2E_CPU_THROTTLE=n` runs every page of a test n times slower, as a loaded machine does, so that a
@@ -510,14 +529,16 @@ function abandoned(route: Route, error: unknown): boolean {
 	return closing || route.request().frame().page().isClosed();
 }
 export async function eventually<T>(read: () => Promise<T>, accepts: (value: T) => boolean): Promise<T> {
-	const end = Date.now() + 10_000;
+	const end = Date.now() + SETTLES;
 	let value = await read();
 	while (!accepts(value) && Date.now() < end) {
 		await Bun.sleep(40);
 		value = await read();
 	}
 	if (!accepts(value))
-		throw new Error(`The expected server state did not arrive within 10 s. The last read was ${shown(value)}`);
+		throw new Error(
+			`The expected server state did not arrive within ${SETTLES / 1000} s. The last read was ${shown(value)}`,
+		);
 	return value;
 }
 /** A value in an error message: short enough to read, long enough to say what the state was. */

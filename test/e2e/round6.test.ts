@@ -55,7 +55,6 @@ for (const choice of ["Use my title", "Use all my changes"])
 			const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 			try {
 				const { page } = h;
-				page.setDefaultTimeout(5000);
 				await conflict(server, page);
 				await page.getByRole("button", { name: choice, exact: true }).click();
 				const field = choice === "Use my title" ? title(page) : step(page);
@@ -98,7 +97,6 @@ check(
 		const gate = latch();
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await conflict(server, page);
 			await page.getByText("Others see version 2", { exact: true }).waitFor();
 			await page.getByRole("textbox", { name: "Merged title", exact: true }).fill("Merged in the card");
@@ -141,7 +139,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await conflict(server, page);
 			await page.getByRole("textbox", { name: "Merged title", exact: true }).fill("Merged in the card");
 			let failing = true;
@@ -180,7 +177,6 @@ check(
 		const gate = latch();
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await conflict(server, page);
 			await page.getByText("Others see version 2", { exact: true }).waitFor();
 			let answered = false;
@@ -229,7 +225,6 @@ check(
 // is gone before it has read what became of the case.
 async function follower(server: Server, h: Awaited<ReturnType<typeof openPage>>): Promise<Page> {
 	const page = await h.context.newPage();
-	page.setDefaultTimeout(5000);
 	await page.goto(`${server.url}/p/scratch/suite/c/1`);
 	await page.getByRole("button", { name: "Case 1", exact: true }).waitFor();
 	await page.keyboard.press("e");
@@ -250,7 +245,6 @@ for (const first of ["resolves the conflict", "records the edit"])
 			const gate = latch();
 			try {
 				const a = h.page;
-				a.setDefaultTimeout(5000);
 				const b = await follower(server, h);
 				const merge = first === "resolves the conflict";
 				if (merge) {
@@ -337,7 +331,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const a = h.page;
-			a.setDefaultTimeout(5000);
 			const b = await follower(server, h);
 			await conflict(server, a);
 			await b.locator(".conflict-card").waitFor();
@@ -380,7 +373,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const a = h.page;
-			a.setDefaultTimeout(5000);
 			const b = await follower(server, h);
 			await conflict(server, a);
 			await b.locator(".conflict-card").waitFor();
@@ -443,7 +435,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const a = h.page;
-			a.setDefaultTimeout(5000);
 			const b = await follower(server, h);
 			await conflict(server, a);
 			await b.locator(".conflict-card").waitFor();
@@ -496,7 +487,6 @@ check(
 		const gate = latch();
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.getByRole("button", { name: "Case 1", exact: true }).waitFor();
 			await page.keyboard.press("e");
 			await title(page).fill("My title");
@@ -542,7 +532,6 @@ check(
 		const gate = latch();
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await conflict(server, page);
 			const first = (await server.api("inbox", { on: "C-1", kind: "adopt" })).items[0];
 			await server.api("propose", {
@@ -593,7 +582,6 @@ for (const mode of ["reload", "new tab"])
 			const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 			try {
 				let page = h.page;
-				page.setDefaultTimeout(5000);
 				await conflict(server, page);
 				const question = (await server.api("inbox", { on: "C-1", kind: "adopt" })).items[0];
 				if (!question) throw Error("Missing conflict");
@@ -606,7 +594,6 @@ for (const mode of ["reload", "new tab"])
 				if (mode === "reload") await page.reload();
 				else {
 					page = await h.context.newPage();
-					page.setDefaultTimeout(5000);
 					await page.goto(`${server.url}/p/scratch/suite/c/1`);
 				}
 				await title(page).waitFor();
@@ -645,7 +632,6 @@ for (const answer of ["reject", "merge"] satisfies ("reject" | "merge")[])
 			const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 			try {
 				const { page } = h;
-				page.setDefaultTimeout(5000);
 				await conflict(server, page);
 				const q = (await server.api("inbox", { on: "C-1", kind: "adopt" })).items[0];
 				if (!q) throw Error("Missing conflict");
@@ -658,7 +644,6 @@ for (const answer of ["reject", "merge"] satisfies ("reject" | "merge")[])
 				});
 				expect(decision[0]?.status).toBe("decided");
 				const returned = await h.context.newPage();
-				returned.setDefaultTimeout(5000);
 				await returned.goto(`${server.url}/p/scratch/suite/c/1`);
 				await title(returned).waitFor();
 				await returned.locator(".conflict-card").waitFor({ state: "detached" });
@@ -687,7 +672,6 @@ check(
 		const gate = latch();
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.locator('[data-active="true"][data-ready="true"]').waitFor();
 			const requests: unknown[] = [];
 			await page.route("**/report", async (route) => {
@@ -741,7 +725,6 @@ check(
 		const second = latch();
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.locator('[data-active="true"][data-ready="true"]').waitFor();
 			const requests: z.infer<typeof ReportInput>[] = [];
 			await page.route("**/report", async (route) => {
@@ -821,7 +804,6 @@ check(
 		const gate = latch();
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await conflict(server, page);
 			await page.getByRole("button", { name: "Use my title", exact: true }).click();
 			let sent = false;
@@ -861,7 +843,6 @@ for (const received of [false, true])
 			const gate = latch();
 			try {
 				const { page } = h;
-				page.setDefaultTimeout(5000);
 				await conflict(server, page);
 				await page.getByRole("textbox", { name: "Merged title", exact: true }).fill("Merge to retry");
 				let sent = false;
@@ -901,12 +882,10 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const first = h.page;
-			first.setDefaultTimeout(5000);
 			await conflict(server, first);
 			await first.getByRole("button", { name: "Use my title", exact: true }).click();
 			await first.close();
 			const page = await h.context.newPage();
-			page.setDefaultTimeout(5000);
 			await page.goto(`${server.url}/p/scratch/suite/c/1`);
 			await page.locator(".conflict-card").waitFor();
 			await resolve(page);

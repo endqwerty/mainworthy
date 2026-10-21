@@ -29,7 +29,6 @@ test.skipIf(!browserAvailable)(
 		const browser = await openPage(server, { signedIn: false, path: "/p/scratch/suite" });
 		try {
 			const { page } = browser;
-			page.setDefaultTimeout(10_000);
 			const violations = () => page.evaluate((name): unknown => Reflect.get(window, name), VIOLATIONS);
 			// The sign-in page is loaded once more with the recorder in place, so the first load is recorded too.
 			await page.addInitScript(recordViolations, VIOLATIONS);

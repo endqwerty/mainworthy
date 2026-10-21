@@ -57,7 +57,7 @@ for (const surface of ["case draft", "run note"]) {
 				);
 				await page.keyboard.press(surface === "case draft" ? "Escape" : "Enter");
 				await refused;
-				await page.locator("#token").waitFor({ timeout: 4000 });
+				await page.locator("#token").waitFor();
 				expect(await page.locator("#app").count()).toBe(0);
 				expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(1);
 				// Somebody else signs in on this browser. What the writer typed is not shown to them.
@@ -170,7 +170,6 @@ for (const request of ["session", "password"])
 			const held = Promise.withResolvers<void>();
 			try {
 				const { page } = browser;
-				page.setDefaultTimeout(5000);
 				await page.getByRole("option", { name: "Your sign-in", exact: true }).click();
 				await page.locator("#password-next").fill("a password for the old session");
 				await page.locator("#password-again").fill("a password for the old session");
@@ -240,7 +239,6 @@ for (const request of ["session", "password", "operation", "round-trip", "differ
 			const otherChecks = Promise.withResolvers<void>();
 			try {
 				const { page, context } = browser;
-				page.setDefaultTimeout(5000);
 				if (request === "round-trip" || request === "different actor") {
 					await page.addInitScript(() => {
 						window.addEventListener("storage", (event) => event.stopImmediatePropagation(), true);
@@ -277,7 +275,6 @@ for (const request of ["session", "password", "operation", "round-trip", "differ
 				expect(await arrived.promise).toBe(401);
 				const generation = await page.evaluate(() => localStorage.getItem("mainworthy:auth-generation"));
 				const other = await context.newPage();
-				other.setDefaultTimeout(5000);
 				await other.goto(`${server.url}/p/scratch/settings`);
 				await other.locator("#app").waitFor();
 				// A new tab and ordinary refresh must not publish a new authentication generation.
@@ -386,7 +383,6 @@ test.skipIf(!browserAvailable)(
 		const held = Promise.withResolvers<void>();
 		try {
 			const { page, context } = browser;
-			page.setDefaultTimeout(5000);
 			const other = await context.newPage();
 			await other.goto(`${server.url}/p/scratch/settings`);
 			await other.locator("#app").waitFor();
@@ -462,7 +458,6 @@ for (const replacements of [1, 2])
 			}));
 			try {
 				const first = await browser.context.newPage();
-				first.setDefaultTimeout(5000);
 				let reads = 0;
 				await first.route("**/api/session", async (route) => {
 					const gate = gates[reads++];
@@ -508,7 +503,6 @@ test.skipIf(!browserAvailable)(
 		const held = Promise.withResolvers<void>();
 		try {
 			const first = await browser.context.newPage();
-			first.setDefaultTimeout(5000);
 			let intercepted = false;
 			await first.route("**/api/session", async (route) => {
 				if (intercepted) return route.continue();
@@ -556,7 +550,6 @@ for (const cookie of ["ended", "valid"] as const)
 			const browser = await openPage(server, { path: `/p/scratch/runs/${run.run.slice(2)}` });
 			try {
 				const { page, context } = browser;
-				page.setDefaultTimeout(5000);
 				await page.getByRole("textbox", { name: "Result note" }).fill("Discarded startup sentence");
 				const { result } = z
 					.object({ result: z.object({ actorId: z.number() }) })

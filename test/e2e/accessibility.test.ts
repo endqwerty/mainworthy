@@ -92,7 +92,6 @@ test.skipIf(!browserAvailable)(
 		const server = await startServer({ mode: "server", cases: 8, passkeys: true });
 		const h = await openPage(server, { signedIn: false, path: "/" });
 		const { page } = h;
-		page.setDefaultTimeout(5000);
 		const findings: string[] = [];
 		const scanned: string[] = [];
 		const manual: string[] = [];

@@ -117,7 +117,6 @@ for (const kind of ["new", "edit"]) {
 			const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 			try {
 				const { page } = h;
-				page.setDefaultTimeout(5000);
 				await page.getByRole("button", { name: "Original", exact: true }).waitFor();
 				let first = true;
 				const requests: { cmd: string; edits: unknown[] }[] = [];
@@ -188,7 +187,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const a = h.page;
-			a.setDefaultTimeout(5000);
 			await a.getByRole("button", { name: "Case 1", exact: true }).waitFor();
 			await a.keyboard.press("e");
 			await titleOf(a).fill("Case 1 for return");
@@ -198,7 +196,6 @@ check(
 				(rows) => rows[0]?.title === "Case 1 for return",
 			);
 			const b = await h.context.newPage();
-			b.setDefaultTimeout(5000);
 			await b.goto(`${server.url}/p/scratch/suite/c/1`);
 			await b.locator("#stat").filter({ hasText: "Your last save is recorded as version 2" }).waitFor();
 			await titleOf(b).press("End");
@@ -236,7 +233,6 @@ for (const kind of ["new", "edit"]) {
 			});
 			try {
 				const { page } = h;
-				page.setDefaultTimeout(5000);
 				await page.locator("#list").waitFor();
 				if (kind === "edit") await page.getByRole("button", { name: "Original", exact: true }).waitFor();
 				const requests: { cmd: string; edits: unknown[] }[] = [];
@@ -340,7 +336,6 @@ for (const same of [false, true]) {
 			try {
 				const a = h.page;
 				const b = await h.context.newPage();
-				for (const p of [a, b]) p.setDefaultTimeout(5000);
 				await b.goto(`${server.url}/p/scratch/suite/c/1`);
 				for (const p of [a, b]) await p.getByRole("button", { name: "Shared case", exact: true }).waitFor();
 				const ids: string[] = [];
@@ -399,7 +394,6 @@ for (const dirty of [false, true]) {
 			const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 			try {
 				const { page } = h;
-				page.setDefaultTimeout(5000);
 				await page.getByRole("button", { name: "Placement case", exact: true }).waitFor();
 				await page.keyboard.press("e");
 				if (dirty) await titleOf(page).fill("Placement case revised");
@@ -443,7 +437,6 @@ check(
 		const h = await openPage(server);
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.getByRole("button", { name: "Existing", exact: true }).waitFor();
 			await page.route("**/propose", (route) =>
 				route.fulfill({ json: { ok: false, error: { code: "internal", message: "Offline" } } }),
@@ -476,7 +469,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.locator(".proof-block").getByText("person · pass", { exact: false }).waitFor();
 			const second = await server.api("plan", { name: "Second proof", select: {} });
 			await server.api("report", {
@@ -509,7 +501,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.getByRole("button", { name: "Open Settings > Billing", exact: true }).click();
 			await page.keyboard.press("End");
 			await page.keyboard.type("!");
@@ -547,7 +538,6 @@ check(
 		});
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page
 				.getByRole("option")
 				.filter({ hasText: "C-1" })
@@ -612,9 +602,7 @@ check(
 		});
 		try {
 			const a = h.page;
-			a.setDefaultTimeout(5000);
 			const b = await h.context.newPage();
-			b.setDefaultTimeout(5000);
 			await b.goto(`${server.url}/p/scratch/suite/c/1`);
 			for (const page of [a, b]) await page.getByRole("button", { name: "Pending windows", exact: true }).waitFor();
 			let replies = 0;

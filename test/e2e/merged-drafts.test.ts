@@ -28,7 +28,6 @@ async function windows() {
 	});
 	const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 	const a = h.page;
-	a.setDefaultTimeout(5000);
 	await a.getByRole("button", { name: "Coupon case", exact: true }).waitFor();
 	return {
 		server,
@@ -36,7 +35,6 @@ async function windows() {
 		a,
 		openFollower: async () => {
 			const b = await h.context.newPage();
-			b.setDefaultTimeout(5000);
 			await b.goto(`${server.url}/p/scratch/suite/c/1`);
 			await b.getByRole("button", { name: "Coupon case", exact: true }).waitFor();
 			return b;

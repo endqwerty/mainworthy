@@ -61,6 +61,18 @@ test.skipIf(!browserAvailable)(
 					(ready) => ready,
 				),
 			).toBe(true);
+			// Read, the image lets its object URL go: the bytes are not kept twice for as long as the page is open.
+			expect(
+				await screenshot.evaluate(
+					(image) =>
+						new Promise((settled) => {
+							const probe = new Image();
+							probe.onload = () => settled("still held");
+							probe.onerror = () => settled("released");
+							probe.src = (image as HTMLImageElement).src;
+						}),
+				),
+			).toBe("released");
 			expect(await page.locator("iframe,object,embed").count()).toBe(0);
 			const download = page.waitForEvent("download");
 			await page.getByRole("button", { name: "Download page.html" }).click();

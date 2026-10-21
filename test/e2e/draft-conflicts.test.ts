@@ -37,7 +37,6 @@ for (const kind of ["edit", "new"])
 				const gate = latch();
 				try {
 					const { page } = h;
-					page.setDefaultTimeout(5000);
 					await page.getByRole("button", { name: "Case 1", exact: true }).waitFor();
 					let seen = 0;
 					await page.route("**/propose", async (route) => {
@@ -91,7 +90,6 @@ for (const same of [false, true])
 				const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 				try {
 					const { page } = h;
-					page.setDefaultTimeout(5000);
 					await page.getByRole("button", { name: "Case 1", exact: true }).waitFor();
 					await page.keyboard.press("e");
 					await title(page).fill("My title");
@@ -148,7 +146,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const a = h.page;
-			a.setDefaultTimeout(5000);
 			await a.getByRole("button", { name: "Case 1", exact: true }).waitFor();
 			await a.keyboard.press("e");
 			await title(a).fill("From A");
@@ -156,7 +153,6 @@ check(
 				h.context.waitForEvent("page"),
 				a.evaluate(() => void window.open(location.href)),
 			]);
-			b.setDefaultTimeout(5000);
 			await title(b).waitFor();
 			expect(await a.evaluate(() => sessionStorage.getItem("mainworthy:draft-window"))).not.toBe(
 				await b.evaluate(() => sessionStorage.getItem("mainworthy:draft-window")),
@@ -192,7 +188,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.getByRole("button", { name: "Case 1", exact: true }).waitFor();
 			const sent: { cmd: string; edits: unknown[] }[] = [];
 			await page.route("**/propose", async (route) => {
@@ -236,11 +231,9 @@ for (const busy of [false, true])
 			const h = await openPage(server);
 			try {
 				const a = h.page;
-				a.setDefaultTimeout(5000);
 				await a.keyboard.press("c");
 				await title(a).fill("Refund to the original pay");
 				const b = await h.context.newPage();
-				b.setDefaultTimeout(5000);
 				if (busy)
 					void a.evaluate(() => {
 						const end = performance.now() + 3000;
@@ -281,7 +274,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.getByRole("button", { name: "Case 1", exact: true }).waitFor();
 			let fail = true;
 			const sent: { cmd: string; edits: unknown[] }[] = [];
@@ -332,7 +324,6 @@ for (const rejection of ["API", "UI"])
 			const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 			try {
 				const { page } = h;
-				page.setDefaultTimeout(5000);
 				await page.getByRole("button", { name: "Case 1", exact: true }).waitFor();
 				await page.keyboard.press("e");
 				await title(page).fill("My title");

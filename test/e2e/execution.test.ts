@@ -92,7 +92,6 @@ async function cases(server: Server, count: number) {
 			expect(planned.slots).toBe(10);
 			view = await openPage(server, { path: `/p/scratch/runs/${planned.run.slice(2)}` });
 			const { page } = view;
-			page.setDefaultTimeout(8000);
 			await page.setViewportSize({ width: 1280, height: 800 });
 			await page.waitForSelector('[data-run-document="C-2"][data-ready="true"]', { state: "attached" });
 			await page.evaluate(() =>
@@ -329,7 +328,6 @@ async function cases(server: Server, count: number) {
 				select: { cases: created.cases.map((c) => c.ref) },
 			});
 			view = await openPage(server, { path: "/p/scratch/runs" });
-			view.page.setDefaultTimeout(8000);
 			await view.page.route("**/get", async (route) => {
 				const input = z
 					.object({ refs: z.array(z.string()), version: z.number().optional() })
@@ -391,7 +389,6 @@ async function cases(server: Server, count: number) {
 			).token;
 			const executorPrefix = await devicePrefix(server, token);
 			view = await openPage({ ...server, token }, { path: `/p/scratch/runs/${planned.run.slice(2)}` });
-			view.page.setDefaultTimeout(3000);
 			await view.page.waitForSelector('[data-run-document="C-1"][data-active="true"][data-ready="true"]');
 			await view.page.keyboard.press("f");
 			await view.page.keyboard.type("Keep this failure note");
@@ -460,7 +457,6 @@ async function cases(server: Server, count: number) {
 			});
 			view = await openPage(server, { path: `/p/scratch/runs/${planned.run.slice(2)}` });
 			const page = view.page;
-			page.setDefaultTimeout(5000);
 			const note = page.getByRole("textbox", { name: "Result note" });
 			await page.waitForSelector('[data-run-document="C-1"][data-active="true"][data-ready="true"]');
 
@@ -559,12 +555,10 @@ async function cases(server: Server, count: number) {
 			const path = `/p/scratch/runs/${planned.run.slice(2)}`;
 			view = await openPage(server, { path });
 			const a = view.page;
-			a.setDefaultTimeout(5000);
 			const ready = (page: typeof a, ref: string) =>
 				page.waitForSelector(`[data-run-document="${ref}"][data-active="true"][data-ready="true"]`);
 			await ready(a, "C-1");
 			const b = await view.context.newPage();
-			b.setDefaultTimeout(5000);
 			await b.goto(`${server.url}${path}`);
 			await ready(b, "C-1");
 			const noteOf = (page: typeof a) => page.getByRole("textbox", { name: "Result note" });
@@ -648,7 +642,6 @@ async function cases(server: Server, count: number) {
 				],
 			});
 			view = await openPage(server, { path: "/p/scratch/runs" });
-			view.page.setDefaultTimeout(8000);
 			const list = view.page.getByRole("listbox", { name: "Runs", exact: true });
 			const rows = () => list.getByRole("option").allInnerTexts();
 			await list.getByRole("option").nth(1).waitFor();

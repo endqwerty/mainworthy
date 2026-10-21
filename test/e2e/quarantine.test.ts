@@ -18,7 +18,6 @@ import { browserAvailable, eventually, openPage, startServer } from "./support.t
 			const session = await view.context.newCDPSession(page);
 			await session.send("Emulation.setTimezoneOverride", { timezoneId: "America/Los_Angeles" });
 			await session.send("Emulation.setLocaleOverride", { locale: "en-US" });
-			page.setDefaultTimeout(8000);
 			const panel = page.getByRole("region", { name: "Quarantined tests" });
 			const accept = page
 				.locator('.queue-pane:has([data-proposal-read="ready"]) .queue-answers .ans')

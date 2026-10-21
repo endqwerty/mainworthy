@@ -155,7 +155,6 @@ test.skipIf(!browserAvailable)(
 		const browser = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const { page } = browser;
-			page.setDefaultTimeout(5000);
 			const head = async () =>
 				z
 					.object({
@@ -229,7 +228,6 @@ test.skipIf(!browserAvailable)(
 		const browser = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const { page } = browser;
-			page.setDefaultTimeout(5000);
 			const head = async () =>
 				z
 					.object({ version: z.number(), title: z.string(), steps: z.array(z.object({ action: z.string() })) })
@@ -325,7 +323,7 @@ test.skipIf(!browserAvailable)(
 						.map((key) => JSON.parse(localStorage.getItem(key) ?? "null")),
 				),
 			).toMatchObject([{ body: { title: "Idle case revised" } }]);
-			const recorded = page.waitForResponse((response) => response.url().endsWith("/propose"), { timeout: 5000 });
+			const recorded = page.waitForResponse((response) => response.url().endsWith("/propose"));
 			await page.clock.fastForward(2);
 			await recorded;
 			expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(2);

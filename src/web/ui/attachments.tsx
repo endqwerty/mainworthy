@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Attachment } from "../../core/attachments.ts";
 import { AttachmentReply } from "../../core/attachments.ts";
 import { call } from "../lib/api.ts";
@@ -6,9 +6,29 @@ import { useQueryOp } from "../lib/data.ts";
 import { deviceSession, sessionCurrent } from "../lib/device.ts";
 import { useApp } from "./context.tsx";
 
+/**
+ * An image of bytes the page holds. Its object URL is made for the element and revoked once the element has read
+ * it, loaded or not, even when the element was taken off the page meanwhile: revoked any earlier, the read fails
+ * (#654). Keyed by its file, it is a new element for other bytes rather than this one pointed elsewhere.
+ */
+function BytesImage({ blob, alt }: { blob: Blob; alt: string }) {
+	const show = useCallback(
+		(element: HTMLImageElement | null) => {
+			if (!element) return;
+			const url = URL.createObjectURL(blob);
+			const release = () => URL.revokeObjectURL(url);
+			element.addEventListener("load", release, { once: true });
+			element.addEventListener("error", release, { once: true });
+			element.src = url;
+		},
+		[blob],
+	);
+	return <img className="result-attachment-image" ref={show} alt={alt} />;
+}
+
 function FileAttachment({ result, item }: { result: number; item: Attachment }) {
 	const { project } = useApp();
-	const [url, setUrl] = useState<string | null>(null);
+	const [blob, setBlob] = useState<Blob | null>(null);
 	const [error, setError] = useState("");
 	const [busy, setBusy] = useState(false);
 	const image = item.type.startsWith("image/");
@@ -16,21 +36,18 @@ function FileAttachment({ result, item }: { result: number; item: Attachment }) 
 		if (!image) return;
 		const owner = deviceSession();
 		let gone = false;
-		let objectUrl: string | null = null;
 		void call("attachment", { result, id: item.id }, { project, owner })
 			.then((reply) => {
 				const file = AttachmentReply.parse(reply);
 				if (file.kind !== "file" || gone || !sessionCurrent(owner)) return;
 				const bytes = Uint8Array.from(atob(file.data), (char) => char.charCodeAt(0));
-				objectUrl = URL.createObjectURL(new Blob([bytes], { type: file.attachment.type }));
-				setUrl(objectUrl);
+				setBlob(new Blob([bytes], { type: file.attachment.type }));
 			})
 			.catch(() => {
 				if (!gone) setError("Could not read this attachment.");
 			});
 		return () => {
 			gone = true;
-			if (objectUrl) URL.revokeObjectURL(objectUrl);
 		};
 	}, [image, project, result, item.id]);
 	async function download() {
@@ -56,7 +73,7 @@ function FileAttachment({ result, item }: { result: number; item: Attachment }) 
 	}
 	return (
 		<li className="result-attachment">
-			{image && url && <img className="result-attachment-image" src={url} alt={item.name} />}
+			{image && blob && <BytesImage key={`${project}/${result}/${item.id}`} blob={blob} alt={item.name} />}
 			<button type="button" disabled={busy} onClick={() => void download()}>
 				Download {item.name}
 			</button>{" "}

@@ -68,7 +68,6 @@ for (const row of scenarios)
 			const browser = await openPage(server, { path: "/p/scratch/suite/c/1" });
 			try {
 				const { page } = browser;
-				page.setDefaultTimeout(3000);
 				await page.getByRole("button", { name: row.base.title, exact: true }).waitFor();
 				await page.keyboard.press("e");
 				await page.getByRole("textbox", { name: "Case title", exact: true }).fill("Fixture draft");

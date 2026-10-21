@@ -194,7 +194,6 @@ for (const surface of ["case", "queue"] as const)
 		const view = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const { page } = view;
-			page.setDefaultTimeout(5000);
 			await page.locator(`[data-proposal-evidence="${question.q}"][data-proposal-read="ready"]`).waitFor();
 			await page.route("**/decide", async (route) => {
 				await server.api("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "reject" } });
@@ -334,7 +333,7 @@ for (const surface of ["case", "queue"] as const)
 			view = await openPage(server, { path: "/p/scratch/suite/c/1" });
 			await view.page.setViewportSize({ width: 1280, height: 800 });
 			const card = view.page.locator(`[data-proposal="${proposed.question}"]`);
-			await card.waitFor({ state: "attached" });
+			await card.locator('[data-proposal-loaded="true"]').waitFor({ state: "attached" });
 			await view.page.locator(".pane-scroll").evaluate((pane) => {
 				pane.scrollTop = 0;
 			});
@@ -413,7 +412,8 @@ for (const surface of ["case", "queue"] as const)
 				const page = view.page;
 				await page.setViewportSize(size);
 				const card = page.locator(`[data-proposal="${proposed.question}"]`);
-				await card.waitFor({ state: "attached" });
+				// Measured before its edits have been read, the card is short and already "shown" whole.
+				await card.locator('[data-proposal-loaded="true"]').waitFor({ state: "attached" });
 				const state = () =>
 					card.evaluate((element) => {
 						const box = element.getBoundingClientRect();
@@ -515,7 +515,6 @@ for (const surface of ["case", "queue"] as const)
 			view = await openPage(server, { path: "/p/scratch/suite/c/2" });
 			const page = view.page;
 			await page.setViewportSize({ width: 1280, height: 800 });
-			page.setDefaultTimeout(5000);
 			const card = page.locator(`[data-proposal="${proposed.question}"]`);
 			await card.waitFor();
 			// What the card says the proposal leaves: its text without the words a diff strikes out.
@@ -608,7 +607,6 @@ for (const surface of ["case", "queue"] as const)
 			expect(restore.status).toBe("open");
 			view = await openPage(server, { path: "/p/scratch/suite/c/1" });
 			const page = view.page;
-			page.setDefaultTimeout(5000);
 			const proposedText = (q: string) => () =>
 				page.locator(`[data-proposal="${q}"]`).evaluate((element) => {
 					const copy = element.cloneNode(true) as HTMLElement;
@@ -688,7 +686,6 @@ for (const surface of ["case", "queue"] as const)
 			const q = proposed.question;
 			view = await openPage(server);
 			const page = view.page;
-			page.setDefaultTimeout(5000);
 			await page.setViewportSize({ width: 1280, height: 800 });
 			const decides: string[] = [];
 			page.on("request", (request) => {

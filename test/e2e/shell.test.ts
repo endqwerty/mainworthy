@@ -337,7 +337,6 @@ test.skipIf(!browserAvailable)(
 		const browser = await openPage(server, { path: "/p/scratch/suite?folder=Original" });
 		try {
 			const { page } = browser;
-			page.setDefaultTimeout(5000);
 			await page.getByRole("option").filter({ hasText: "C-1" }).waitFor();
 			for (const [key, ref] of [
 				["j", "C-2"],

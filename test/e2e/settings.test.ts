@@ -30,7 +30,6 @@ import { PRESETS } from "../../src/core/presets.ts";
 		const view = await openPage(server, { path: "/p/scratch/settings" });
 		try {
 			const { page } = view;
-			page.setDefaultTimeout(5000);
 			let q = "";
 			await page.route("**/decide", async (route) => {
 				const input = z.object({ q: z.string(), onEvidence: z.string() }).parse(route.request().postDataJSON());
@@ -311,7 +310,6 @@ import { PRESETS } from "../../src/core/presets.ts";
 		try {
 			view = await openPage(server, { path: "/p/scratch/settings" });
 			const { page } = view;
-			page.setDefaultTimeout(3000);
 			await page.getByRole("button", { name: "Edit clauses", exact: true }).click();
 			await page.getByLabel("Flaky hold in days").fill("9");
 			await page.getByLabel("Policy change reason").fill("Keep this on conflict.");
@@ -401,7 +399,6 @@ import { PRESETS } from "../../src/core/presets.ts";
 			);
 			view = await openPage(server, { path: "/p/scratch/settings" });
 			const { page } = view;
-			page.setDefaultTimeout(8000);
 			// The policy in force is explained where it is read, and the comparison marks it.
 			const inForce = page.locator("#detail .settings-preset-summary");
 			expect(await inForce.innerText()).toBe(PRESET_SUMMARY.loose);
@@ -663,7 +660,6 @@ import { PRESETS } from "../../src/core/presets.ts";
 			if (!q) throw new Error("Change failure missing");
 			await server.api("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "infra" } });
 			view = await openPage(server, { path: "/p/scratch/changes/pr%3A482" });
-			view.page.setDefaultTimeout(8000);
 			await view.page.locator(".change-gate h2").waitFor();
 			await view.page.getByText("Infrastructure", { exact: true }).waitFor();
 			await view.page.getByText("src/tax.ts", { exact: true }).waitFor();
@@ -714,7 +710,6 @@ import { PRESETS } from "../../src/core/presets.ts";
 			});
 			view = await openPage(server, { path: "/p/scratch/settings" });
 			const { page } = view;
-			page.setDefaultTimeout(6000);
 			await page.getByRole("button", { name: "Add custom field", exact: true }).click();
 			await page.getByLabel("Field key 1", { exact: true }).fill("risk");
 			await page.getByLabel("Field label 1", { exact: true }).fill("Risk");
@@ -804,7 +799,6 @@ test.skipIf(!browserAvailable)(
 		const browser = await openPage(server, { path: "/p/scratch/settings" });
 		try {
 			const { page } = browser;
-			page.setDefaultTimeout(4000);
 			await page.getByRole("option", { name: "Your home", exact: true }).click();
 			await page.getByLabel("Home screen", { exact: true }).selectOption("queue");
 			await page.getByRole("button", { name: "Save home", exact: true }).click();
@@ -943,7 +937,6 @@ for (const secondProject of [true, false])
 			const browser = await openPage(server, { path: `/p/${project}/settings` });
 			try {
 				const { page } = browser;
-				page.setDefaultTimeout(4000);
 				await page.getByRole("option", { name: "Your home", exact: true }).click();
 				await page.getByLabel("Home screen", { exact: true }).selectOption("run");
 				await page.getByLabel("Home run", { exact: true }).fill(planned.run);
@@ -970,7 +963,6 @@ test.skipIf(!browserAvailable)(
 		const browser = await openPage(server, { path: "/p/scratch/settings" });
 		try {
 			const { page } = browser;
-			page.setDefaultTimeout(4000);
 			await page.getByRole("option", { name: "Your home", exact: true }).click();
 			await page.getByLabel("Home screen", { exact: true }).selectOption("run");
 			await page.getByLabel("Home run", { exact: true }).fill(planned.run);
@@ -1009,7 +1001,6 @@ test.skipIf(!browserAvailable)(
 		const phone = await openPage(server, { device: "phone", path: "/p/scratch/settings" });
 		try {
 			const { page } = phone;
-			page.setDefaultTimeout(4000);
 			await page.getByRole("option", { name: "Your home", exact: true }).tap();
 			await page.getByLabel("Home screen", { exact: true }).selectOption("run");
 			await page.getByLabel("Home run", { exact: true }).fill(planned.run);
@@ -1049,7 +1040,6 @@ test.skipIf(!browserAvailable)(
 		const browser = await openPage(server, { path: "/p/scratch/settings" });
 		try {
 			const { page } = browser;
-			page.setDefaultTimeout(4000);
 			await page.getByRole("option", { name: "Your home", exact: true }).click();
 			await page.getByLabel("Home screen", { exact: true }).selectOption("queue");
 			await page.getByRole("button", { name: "Save home", exact: true }).click();
@@ -1126,7 +1116,6 @@ test.skipIf(!browserAvailable)(
 		const browser = await openPage(server);
 		try {
 			const { page } = browser;
-			page.setDefaultTimeout(4000);
 			await page.keyboard.press("c");
 			await page.keyboard.type("Home capture");
 			await page.keyboard.press("Enter");
@@ -1157,7 +1146,6 @@ for (const home of [
 			const browser = await openPage(server, { path: "/p/scratch/settings" });
 			try {
 				const { page } = browser;
-				page.setDefaultTimeout(4000);
 				await page.getByRole("option", { name: "Your home", exact: true }).click();
 				await page.getByRole("button", { name: "Save home", exact: true }).click();
 				await page.getByRole("status").filter({ hasText: "Home saved" }).waitFor();
@@ -1211,7 +1199,6 @@ test.skipIf(!browserAvailable)(
 		const browser = await openPage(server);
 		try {
 			const { page } = browser;
-			page.setDefaultTimeout(4000);
 			const filter = page.getByRole("textbox", { name: "Filter cases", exact: true });
 			await filter.fill("alpha");
 			await page.waitForURL("**/suite?text=alpha");
@@ -1287,7 +1274,6 @@ for (const restricted of [true, false]) {
 					...(restricted ? { as: { name: "pat", password } } : {}),
 				});
 				const { page } = browser;
-				page.setDefaultTimeout(4000);
 				await page.getByRole("option", { name: "Your home", exact: true }).click();
 				await page.getByLabel("Home screen", { exact: true }).selectOption("queue");
 				await page.getByRole("button", { name: "Save home", exact: true }).click();
@@ -1327,7 +1313,6 @@ for (const control of ["Policy preset", "Tests with no case"] as const)
 				try {
 					view = await openPage(server, { path: "/p/scratch/settings" });
 					const { page } = view;
-					page.setDefaultTimeout(3000);
 					await page.getByRole("button", { name: "Edit clauses", exact: true }).waitFor();
 					await page.route(`**/api/p/scratch/${stage}`, async (route) => {
 						const before = Policy.extend({ version: z.number() }).parse(
@@ -1375,7 +1360,6 @@ for (const control of ["Policy preset", "Tests with no case"] as const)
 			try {
 				view = await openPage(server, { path: "/p/scratch/settings" });
 				const { page } = view;
-				page.setDefaultTimeout(3000);
 				await page.getByRole("button", { name: "Add custom field", exact: true }).click();
 				await page.getByLabel("Field key 1", { exact: true }).fill("notes");
 				await page.getByLabel("Field label 1", { exact: true }).fill("Keep this draft");
@@ -1428,7 +1412,6 @@ for (const control of ["Policy preset", "Tests with no case"] as const)
 		try {
 			view = await openPage(server, { path: "/p/scratch/settings" });
 			const { page } = view;
-			page.setDefaultTimeout(3000);
 			const sections = page.getByRole("listbox", { name: "Settings sections" });
 			const palette = page.getByRole("region", { name: "Command palette", exact: true });
 			for (const [section, command, field] of [

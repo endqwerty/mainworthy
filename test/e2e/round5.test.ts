@@ -46,7 +46,6 @@ for (const choice of ["current", "typed", "mine", "all"])
 			const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 			try {
 				const { page } = h;
-				page.setDefaultTimeout(5000);
 				await conflict(server, page);
 				const expected = choice === "typed" ? "Merged by hand" : choice === "mine" ? "My title" : "Their title";
 				if (choice === "typed") await page.getByRole("textbox", { name: "Merged title", exact: true }).fill(expected);
@@ -92,7 +91,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await conflict(server, page);
 			let sent = 0;
 			await page.route("**/propose", async (route) => {
@@ -132,7 +130,6 @@ for (const selectDuringRecovery of [false, true])
 			const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 			try {
 				const a = h.page;
-				a.setDefaultTimeout(5000);
 				await a.getByRole("button", { name: "Case 1", exact: true }).waitFor();
 				await a.keyboard.press("e");
 				await title(a).fill("Case 1 for returning cust");
@@ -143,7 +140,6 @@ for (const selectDuringRecovery of [false, true])
 					(rows) => rows[0]?.version === 2,
 				);
 				const b = await h.context.newPage();
-				b.setDefaultTimeout(5000);
 				if (selectDuringRecovery)
 					await b.addInitScript(() => {
 						const removeItem = Storage.prototype.removeItem;
@@ -200,7 +196,6 @@ for (const missingReply of [false, true])
 			const gate = latch();
 			try {
 				const { page } = h;
-				page.setDefaultTimeout(5000);
 				await ready(page);
 				const requests: z.infer<typeof ReportInput>[] = [];
 				await page.route("**/report", async (route) => {
@@ -276,7 +271,6 @@ check(
 		const h = await openPage(server, { path: `/p/scratch/runs/${run.run.slice(2)}` });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await ready(page);
 			await page.keyboard.press("p");
 			await eventually(
@@ -331,7 +325,6 @@ for (const key of ["Enter", "Escape"])
 			const h = await openPage(server, { path: "/p/scratch/queue" });
 			try {
 				const { page } = h;
-				page.setDefaultTimeout(5000);
 				await page.locator("[data-current-question]").waitFor();
 				const first = await page.locator("[data-current-question]").getAttribute("data-current-question");
 				await page.keyboard.press("x");
@@ -375,7 +368,6 @@ check(
 		const h = await openPage(server, { path: `/p/scratch/runs/${run.run.slice(2)}` });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await ready(page);
 			await page.keyboard.press("2");
 			await page.keyboard.press("f");
@@ -428,7 +420,6 @@ check(
 		const gate = latch();
 		try {
 			const a = h.page;
-			a.setDefaultTimeout(5000);
 			await a.getByRole("button", { name: "Case 1", exact: true }).waitFor();
 			let firstCommand: string | null = null;
 			await a.route("**/propose", async (route) => {
@@ -445,7 +436,6 @@ check(
 				(rows) => rows[0]?.version === 2,
 			);
 			const b = await h.context.newPage();
-			b.setDefaultTimeout(5000);
 			await b.goto(`${server.url}/p/scratch/suite/c/1`);
 			await title(b).waitFor();
 			const secondCommands: string[] = [];

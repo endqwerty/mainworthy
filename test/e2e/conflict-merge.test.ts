@@ -61,7 +61,6 @@ async function card1({
 	});
 	const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 	const { page } = h;
-	page.setDefaultTimeout(5000);
 	await page.getByRole("button", { name: "Coupon case", exact: true }).waitFor();
 	await page.keyboard.press("e");
 	await caseTitle(page).fill("Coupon case mine");

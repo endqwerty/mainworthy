@@ -102,7 +102,6 @@ for (const is of ["accept", "reject"] as const)
 			const h = await openPage(server, { path: "/p/scratch/queue" });
 			try {
 				const { page } = h;
-				page.setDefaultTimeout(5000);
 				await answerWhenRead(page, proposed.question, is === "accept" ? "a" : "r");
 				await page.locator(".queue-last").getByText("recorded", { exact: false }).waitFor();
 				expect(await page.locator("#bar [role=status]").innerText()).toBe(
@@ -150,7 +149,6 @@ check(
 				reason: "The assertion needs a fix.",
 			});
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.getByRole("button", { name: "Settled", exact: true }).click();
 			await page.locator(`[data-question="${question.q}"]`).click();
 			const decision = page.locator(".queue-decision");
@@ -235,7 +233,6 @@ for (const mode of ["single", "bulk", "advice"])
 			let sent: unknown;
 			try {
 				const { page } = h;
-				page.setDefaultTimeout(5000);
 				await page.locator("[data-current-question]").waitFor();
 				const q = await qref(page);
 				const question = (await server.api("inbox", { kind: "failure" })).items.find((one) => one.q === q);
@@ -302,7 +299,6 @@ for (const outcome of ["confirmed", "refused", "lost reply"])
 			const gate = latch();
 			try {
 				const { page } = h;
-				page.setDefaultTimeout(5000);
 				await page.locator("[data-current-question]").waitFor();
 				const q = await qref(page);
 				if (!q) throw Error("No question");
@@ -358,7 +354,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/queue" });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.locator("[data-current-question]").waitFor();
 			const first = await qref(page);
 			await page.keyboard.press("f");
@@ -401,7 +396,6 @@ for (const outcome of ["confirmed", "refused", "lost reply"])
 			const gate = latch();
 			try {
 				const { page } = h;
-				page.setDefaultTimeout(5000);
 				await page.setViewportSize({ width: 1280, height: 800 });
 				await page.locator("[data-current-question]").waitFor();
 				const q = await qref(page);
@@ -507,7 +501,6 @@ for (const scenario of [
 			const h = await openPage(server, { path: "/p/scratch/queue" });
 			try {
 				const { page } = h;
-				page.setDefaultTimeout(5000);
 				await page.locator("[data-current-question]").waitFor();
 				const original = new Map<string, number>();
 				const sent: { q: string; ifDecision: number }[] = [];
@@ -624,7 +617,6 @@ for (const scenario of ["lost reply", "withdrawn by someone else"])
 			const h = await openPage(server, { path: "/p/scratch/queue" });
 			try {
 				const { page } = h;
-				page.setDefaultTimeout(5000);
 				await page.locator("[data-current-question]").waitFor();
 				const q = await qref(page);
 				if (!q) throw Error("No current question");
@@ -684,7 +676,6 @@ for (const field of ["ref", "reason"])
 				const h = await openPage(server, { path: "/p/scratch/queue" });
 				try {
 					const { page } = h;
-					page.setDefaultTimeout(5000);
 					await page.locator("[data-current-question]").waitFor();
 					const q = await qref(page);
 					if (!q) throw Error("No question");
@@ -729,7 +720,6 @@ check(
 		const gate = latch();
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.locator("[data-current-question]").waitFor();
 			const q = await qref(page);
 			if (!q) throw Error("No question");
@@ -782,7 +772,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/queue" });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.locator("[data-current-question]").waitFor();
 			const q = await qref(page);
 			const qs = (await server.api("inbox", { kind: "failure" })).items;
@@ -815,7 +804,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/queue" });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.locator("[data-current-question]").waitFor();
 			const q = await qref(page);
 			if (!q) throw Error("No question");
@@ -902,7 +890,6 @@ for (const action of ["Escape", "Backspace", "pause", "key", "pass", "invalid"])
 			const h = await openPage(server, { path: `/p/scratch/runs/${run.run.slice(2)}` });
 			try {
 				const { page } = h;
-				page.setDefaultTimeout(5000);
 				await ready(page);
 				await page.keyboard.press("2");
 				if (action === "pause") {
@@ -984,7 +971,6 @@ check(
 		const gate = latch();
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await ready(page);
 			await page.route("**/report", async (route) => {
 				await gate.held;
@@ -1024,7 +1010,6 @@ check(
 		const gate = latch();
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await ready(page);
 			let reports = 0;
 			await page.route("**/report", async (route) => {
@@ -1078,7 +1063,6 @@ for (const kind of ["failure", "finding", "map", "signoff", "adopt"] satisfies K
 			});
 			try {
 				const { page } = h;
-				page.setDefaultTimeout(5000);
 				await eventually(
 					async () => reads,
 					(n) => n > 0,
@@ -1119,7 +1103,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/queue" });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.getByText("expected 10, got 12", { exact: true }).first().waitFor();
 			await server.api(
 				"report",
@@ -1199,7 +1182,6 @@ check(
 		});
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await eventually(
 				async () => reads,
 				(n) => n > 0,
@@ -1255,7 +1237,6 @@ for (const read of ["held", "failed"])
 			});
 			try {
 				const { page } = h;
-				page.setDefaultTimeout(5000);
 				await eventually(
 					async () => reads,
 					(n) => n > 0,
@@ -1304,7 +1285,6 @@ check("a broad assertion shows its file split in the queue", async () => {
 		expect(receipt.questions).toHaveLength(6);
 		const h = await openPage(server, { path: "/p/scratch/queue" });
 		try {
-			h.page.setDefaultTimeout(5000);
 			await h.page.locator("[data-current-question]").waitFor();
 			expect(await h.page.locator(".queue-pane h2").textContent()).toMatch(
 				/^Split by file \(file-[0-5]\.test\.ts\): assertion failed$/,
@@ -1365,7 +1345,6 @@ check(
 			});
 			const h = await openPage(server, { path: `/p/scratch/queue/${question.q.replace(/^Q-/, "")}` });
 			try {
-				h.page.setDefaultTimeout(5000);
 				await h.page.locator(".queue-decision").waitFor();
 				await instance.minute();
 				await h.page

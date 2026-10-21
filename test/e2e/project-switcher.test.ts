@@ -19,7 +19,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/queue" });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			const button = page.getByRole("button", { name: "Project: scratch. Switch project", exact: true });
 			const picker = page.getByRole("region", { name: "Switch project", exact: true });
 			const projects = () => picker.getByRole("option").allInnerTexts();
@@ -174,7 +173,6 @@ check(
 		const h = await openPage(server);
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			expect(await page.locator(".project").innerText()).toMatch(/^Project\s+scratch$/i);
 			expect(await page.getByRole("button", { name: /Switch project/ }).count()).toBe(0);
 			// Collapsed, the line shows the first letter, and what is read out is still the whole name.
@@ -214,7 +212,6 @@ check(
 		const h = await openPage(server, { device: "phone", path: "/p/scratch/queue" });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			const button = page.getByRole("button", { name: "Project: scratch. Switch project", exact: true });
 			const picker = page.getByRole("region", { name: "Switch project", exact: true });
 			expect(await button.isVisible()).toBe(false);

@@ -97,7 +97,6 @@ for (const surface of ["case", "run", "queue"])
 			);
 			try {
 				const { page } = h;
-				page.setDefaultTimeout(5000);
 				if (surface === "case") {
 					await page.getByRole("button", { name: "Case 1", exact: true }).waitFor();
 					await page.keyboard.press("e");
@@ -164,7 +163,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/queue" });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.locator("[data-current-question]").waitFor();
 			const q = await qref(page);
 			if (!q) throw Error("No question");
@@ -208,7 +206,6 @@ for (const surface of ["capture", "edit", "run", "planner", "queue", "settings"]
 			const h = await openPage(server, { path });
 			try {
 				const { page } = h;
-				page.setDefaultTimeout(5000);
 				const key =
 					surface === "capture"
 						? "c"
@@ -257,7 +254,6 @@ for (const action of ["close", "reload"])
 			const h = await openPage(server);
 			try {
 				const { page } = h;
-				page.setDefaultTimeout(5000);
 				await page.keyboard.press("c");
 				await title(page).fill("Closing capture");
 				await page.keyboard.press("Enter");
@@ -269,7 +265,6 @@ for (const action of ["close", "reload"])
 					(rows) => rows.items.some((row) => row.title === "Closing capture"),
 				);
 				const returning = action === "close" ? await h.context.newPage() : page;
-				returning.setDefaultTimeout(5000);
 				if (action === "close") await returning.goto(`${server.url}/p/scratch/suite`);
 				await returning.locator("#app").waitFor();
 				await returning.keyboard.press("Control+Enter");
@@ -300,7 +295,6 @@ for (const refusal of ["401", "502"])
 			const gate = latch();
 			try {
 				const { page } = h;
-				page.setDefaultTimeout(5000);
 				let streams = 0;
 				await page.route("**/events", async (route) => {
 					if (++streams === 1) {

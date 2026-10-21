@@ -46,7 +46,6 @@ check(
 		const gate = latch();
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.locator("[data-current-question]").waitFor();
 			const q = await currentQ(page);
 			if (!q) throw new Error("No question");
@@ -91,7 +90,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/queue" });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.locator("[data-current-question]").waitFor();
 			const q = await currentQ(page);
 			if (!q) throw new Error("No question");
@@ -138,7 +136,6 @@ check(
 		const told = latch();
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.locator("[data-current-question]").waitFor();
 			const q = await currentQ(page);
 			if (!q) throw new Error("No question");
@@ -206,7 +203,6 @@ check(
 		const h = await openPage(server, { path: `/p/scratch/runs/${run.run.slice(2)}` });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.locator('[data-run-document="C-1"][data-active="true"][data-ready="true"]').waitFor();
 			await page.keyboard.press("f");
 			await page.keyboard.type("The total is wr");
@@ -248,7 +244,6 @@ check(
 		const gate = latch();
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.locator('[data-run-document="C-1"][data-active="true"][data-ready="true"]').waitFor();
 			let count = 0;
 			await page.route("**/report", async (route) => {
@@ -298,7 +293,6 @@ check(
 		const h = await openPage(server, { path: `/p/scratch/runs/${run.run.slice(2)}` });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.locator('[data-active="true"][data-ready="true"]').waitFor();
 			let refuse = true;
 			await page.route("**/report", async (route) => {
@@ -351,7 +345,6 @@ for (const surface of ["case", "run", "queue"])
 				});
 				try {
 					const { page } = h;
-					page.setDefaultTimeout(5000);
 					let field = page.locator("#answer-extra");
 					if (surface === "case") {
 						await page.getByRole("button", { name: "Case 1", exact: true }).waitFor();
@@ -428,7 +421,6 @@ for (const surface of ["case", "queue"])
 					});
 					try {
 						const { page } = h;
-						page.setDefaultTimeout(5000);
 						await page
 							.locator(surface === "case" ? `[data-proposal="${proposed.question}"]` : "[data-current-question]")
 							.waitFor();
@@ -478,7 +470,6 @@ check(
 		const h = await openPage(server, { path: `/p/scratch/runs/${run.run.slice(2)}` });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.locator('[data-active="true"][data-ready="true"]').waitFor();
 			await page.keyboard.down("p");
 			for (let i = 0; i < 3; i++) await page.keyboard.down("p");
@@ -543,7 +534,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.setViewportSize({ width: 1280, height: 800 });
 			const edits = page.locator(`[data-proposal-evidence="${proposed.question}"][data-proposal-loaded="true"]`);
 			await edits.waitFor();
@@ -576,7 +566,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/runs" });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.getByRole("option").first().waitFor();
 			const plan = page.locator(".run-plan-button");
 			const name = page.locator("#run-name");
