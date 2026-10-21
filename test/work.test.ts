@@ -473,6 +473,8 @@ test("the description names the principles that changed a choice, or says why no
 	// Review of a3a7d0a: an unclosed "(" hid the name after it; "<!--" in inline code hid the line after it.
 	expect(principles("Principles: Model the Domain (one state); good design (one state\n")[0]).toContain('"("');
 	expect(principles("Write `<!--` to hide a note.\n\nPrinciples: Model the Domain (one state)\n")).toEqual([]);
+	// Review of 942f9fa: inside a comment, backticks do not hide its "-->".
+	expect(principles("<!-- Example: `-->`\nPrinciples: Model the Domain (one state)\n")).toEqual([]);
 	// A line in fenced code is an example, not the description's own line.
 	expect(principles("```\nPrinciples: Model the Domain\n```\n")).toHaveLength(1);
 });
