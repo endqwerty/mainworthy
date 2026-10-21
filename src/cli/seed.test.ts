@@ -84,7 +84,7 @@ test("a seeded project holds a suite in folders, a fortnight of history and five
 		expect(inherited).toHaveLength(1);
 		expect(inherited[0]?.evidence).toMatchObject({ hints: ["fails-on-base"] });
 		expect(seeded.questions.toSorted()).toEqual(open.items.map((item) => item.q).sort());
-		for (const item of open.items) expect(dayOf(item.openedAt)).toBeGreaterThanOrEqual(today - 1);
+		for (const item of open.items) expect(dayOf(item.openedAt)).toBe(today);
 
 		// The days before: the automated test of the first case has a result on each of the fourteen days and today.
 		const timeline = z.array(Entry).parse((await demo.call("timeline", { ref: "C-1", limit: 500 })).entries);

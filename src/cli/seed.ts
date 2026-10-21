@@ -9,7 +9,7 @@ import { ProposeReply } from "../core/ops.ts";
 import type { Client } from "./client.ts";
 import { automateOf, type DemoCase, demoCases, random, requirementOf } from "./demo/cases.ts";
 import { DEMO_FIELDS, demoAliases, demoFields } from "./demo/fields.ts";
-import { AGENT_MODEL, dayStart, demoHistory, type Failure, hex, LANDED_CHANGE, REPO } from "./demo/history.ts";
+import { AGENT_MODEL, dayStart, demoHistory, type Failure, hex, LANDED_CHANGE, REPO, todayAt } from "./demo/history.ts";
 import { demoAgentScreenshot, demoScreenshot, demoTrail } from "./demo/trails.ts";
 import { DEMO_WORK } from "./demo/work.ts";
 import { CliError } from "./errors.ts";
@@ -479,24 +479,25 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 	const today = random(seedNumber ^ 0x5bd1e995);
 	const [green, red, change] = [hex(today), hex(today), hex(today)];
 	const broken: Failure[] = [{ case: 0, message: "expected $90.00, got $100.00" }];
-	await write(ci, "report", "green", since - 4.5 * HOUR, {
+	const before = (ago: number): number => todayAt(since, ago);
+	await write(ci, "report", "green", before(4.5 * HOUR), {
 		target: { commit: green, repo: REPO, branch: "main" },
 		job: "shop",
 		results: pipelineResults([], 0.5),
 	});
 	// A demo with no history links its tests now, on the first report there is.
-	if (days === 0) await linkTests(since - 4 * HOUR);
-	await write(ci, "report", "red", since - 3 * HOUR, {
+	if (days === 0) await linkTests(before(4 * HOUR));
+	await write(ci, "report", "red", before(3 * HOUR), {
 		target: { commit: red, repo: REPO, ...LANDED_CHANGE },
 		job: "shop",
 		results: pipelineResults(broken, 0.4, true),
 	});
-	await write(ci, "change", "red-landing", since - 3 * HOUR + MINUTE, {
+	await write(ci, "change", "red-landing", before(3 * HOUR - MINUTE), {
 		change: `pr:${LANDED_CHANGE.pr}`,
 		state: "merged",
 		landing: { commit: red, branch: "main" },
 	});
-	await write(ci, "report", "pr", since - 2 * HOUR, {
+	await write(ci, "report", "pr", before(2 * HOUR), {
 		target: {
 			commit: change,
 			repo: REPO,
@@ -515,7 +516,7 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 	const shardResults = pipelineResults([], 0.55);
 	// A demo with fewer than two automated cases has nothing to put in the second shard, and leaves it out.
 	for (const index of shardResults.length >= 2 ? [1, 2] : []) {
-		await write(ci, "report", `shard-${index}`, since - (80 - index * 5) * MINUTE, {
+		await write(ci, "report", `shard-${index}`, before((80 - index * 5) * MINUTE), {
 			target: {
 				commit: sharded,
 				repo: REPO,
@@ -531,23 +532,23 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 		});
 	}
 	const checkout = suite.flatMap((item, index) => (item.folder.startsWith("Checkout") ? [refOf(index)] : []));
-	const planned = await write(owner, "plan", "run", since - 90 * MINUTE, {
+	const planned = await write(owner, "plan", "run", before(90 * MINUTE), {
 		name: "Checkout regression",
 		select: { cases: checkout.slice(0, 40) },
 		accepts: { commit: change, repo: REPO },
 	});
 	const agentCase = refs[1] ?? first;
-	const agentRun = await write(owner, "plan", "agent-run", since - 85 * MINUTE, {
+	const agentRun = await write(owner, "plan", "agent-run", before(85 * MINUTE), {
 		name: "Agent checkout check",
 		select: { cases: [agentCase] },
 		accepts: { commit: change, repo: REPO },
 		require: [{ id: "agent", kind: "exercise", methods: ["human", "agent"], minActors: 1, basis: "exact" }],
 	});
-	await write(owner, "report", "agent-person-result", since - 82 * MINUTE, {
+	await write(owner, "report", "agent-person-result", before(82 * MINUTE), {
 		run: agentRun.run,
 		results: [{ test: { case: agentCase }, outcome: "pass" }],
 	});
-	await write(agent, "report", "agent-results", since - 80 * MINUTE, {
+	await write(agent, "report", "agent-results", before(80 * MINUTE), {
 		run: agentRun.run,
 		model: AGENT_MODEL,
 		results: [
@@ -562,7 +563,7 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 		],
 	});
 	const featured = caseOf(0).steps;
-	await write(agent, "claim", "finding", since - 40 * MINUTE, {
+	await write(agent, "claim", "finding", before(40 * MINUTE), {
 		lens: "adversarial-review",
 		about: "pr:482",
 		findings: [
@@ -574,7 +575,7 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 			},
 		],
 	});
-	const proposal = await write(agent, "propose", "agent", since - 30 * MINUTE, {
+	const proposal = await write(agent, "propose", "agent", before(30 * MINUTE), {
 		reason: "Check removing the coupon as well as adding it.",
 		edits: [
 			{
@@ -587,7 +588,7 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 			},
 		],
 	});
-	await write(ci, "report", "unlinked", since - 20 * MINUTE, {
+	await write(ci, "report", "unlinked", before(20 * MINUTE), {
 		target: { commit: change, repo: REPO, branch: "coupon-total", pr: 482 },
 		job: "misc",
 		results: [
@@ -603,7 +604,7 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 	});
 	// The shop's unit tests on the pull request, in a job of their own: one more open question for each file.
 	if (unlinkedFiles > 0) {
-		await write(ci, "report", `unit-${unlinkedFiles}`, since - 10 * MINUTE, {
+		await write(ci, "report", `unit-${unlinkedFiles}`, before(10 * MINUTE), {
 			target: { commit: change, repo: REPO, branch: "coupon-total", pr: 482 },
 			job: "unit",
 			results: unitTests(unlinkedFiles),

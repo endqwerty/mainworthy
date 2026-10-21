@@ -65,7 +65,7 @@ test.skipIf(!browserAvailable)(
 			expect(
 				await screenshot.evaluate(
 					(image) =>
-						new Promise((settled) => {
+						new Promise<string>((settled) => {
 							const probe = new Image();
 							probe.onload = () => settled("still held");
 							probe.onerror = () => settled("released");
