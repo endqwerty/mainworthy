@@ -1817,6 +1817,15 @@ type GateTarget = {
 	repo?: string | undefined;
 };
 
+/**
+ * The gate of one commit in one repository, `null` being the commit reported with none. Unlike `gate` by commit, it
+ * never weighs other repositories that reported the same hash: the caller already knows which one it means.
+ */
+export function gateOfCommitIn(ctx: Ctx, repo: string | null, commit: string): GateStatus {
+	const run = ctx.db.get(Q.changeRun, { project: ctx.project.id, what: codeWhat(repo, commit) });
+	return run ? gateOf(ctx, run) : nothingCounted();
+}
+
 /** The run whose gate a commit, a run or a change has. Null for a commit nothing a gate counts was reported for. */
 export function gateRun(ctx: Ctx, input: GateTarget): RunRow | null {
 	if (input.run) return mustRun(ctx.db, ctx.project.id, input.run);

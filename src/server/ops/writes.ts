@@ -69,6 +69,7 @@ import { complete } from "../kernel/steps.ts";
 import { currentPolicy } from "../policy/policy.ts";
 import {
 	applyBatchSteps,
+	changeRunsOf,
 	defaultObligations,
 	describeAccepts,
 	ensureChangeRun,
@@ -499,11 +500,16 @@ export function changeEnds(ctx: Ctx, input: ChangeInput): ChangeReply {
 	const ended = input.state === "open" ? null : input.state;
 	const same = change.ended === ended;
 	const headed = input.head ? observeEndingHead(ctx, change, input.head) : change;
+	const moved = headed !== change;
 	const now = same ? headed : setChangeEnded(ctx, headed, ended);
-	const questions = same ? [] : ended === null ? askAgainAbout(ctx, now) : stopAskingAbout(ctx, now);
+	// An open change whose head moved is asked about as a report that moved it would be: the old head's questions
+	// dissolve, and the new head's unexplained failures are asked about.
+	if (ended === null && moved) refold(ctx, changeRunsOf(ctx.db, now.id), { dissolveStale: true });
+	const questions =
+		ended === null ? (same && !moved ? [] : askAgainAbout(ctx, now)) : same ? [] : stopAskingAbout(ctx, now);
 	const landed = input.landing ? landChange(ctx, now, input.landing) : null;
 	if (landed) refreshCommitScope(ctx, landed);
-	return { change: now.key, state: input.state, questions, already: same && headed === change && landed === null };
+	return { change: now.key, state: input.state, questions, already: same && !moved && landed === null };
 }
 
 export const changeOp = defineOp({

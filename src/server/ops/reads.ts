@@ -93,6 +93,7 @@ import {
 	flippedIn,
 	gate,
 	gateOf,
+	gateOfCommitIn,
 	gateRun,
 	leaseOf,
 	mustRun,
@@ -1266,7 +1267,7 @@ export const checkOp = defineOp({
 function landingView(ctx: Ctx, change: ChangeRow) {
 	const landing = landingOf(change);
 	if (!landing) return null;
-	const status = gate(ctx, { commit: landing.commit, ...(change.repo === null ? {} : { repo: change.repo }) });
+	const status = gateOfCommitIn(ctx, change.repo, landing.commit);
 	return { ...landing, run: status.run, verdict: status.verdict, reason: status.reason };
 }
 
