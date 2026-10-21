@@ -46,7 +46,13 @@ const SessionSchema = z.object({
 	),
 }) satisfies z.ZodType<SessionInfo>;
 
-export type ClientOptions = { url: string; token: string | undefined; project: string | undefined };
+export type ClientOptions = {
+	url: string;
+	token: string | undefined;
+	project: string | undefined;
+	/** CI may supply a transport that waits out a deploy and owns its request timeouts. */
+	request?: (url: string, init?: RequestInit) => Promise<Response>;
+};
 
 const TOKEN_FILE_MAX = 4096;
 
@@ -176,7 +182,10 @@ export class Client {
 	private async compatible(): Promise<void> {
 		let response: Response;
 		try {
-			response = await fetch(`${this.url}/healthz`, { redirect: "manual", signal: AbortSignal.timeout(5000) });
+			response = await (this.options.request ?? fetch)(`${this.url}/healthz`, {
+				redirect: "manual",
+				...(this.options.request ? {} : { signal: AbortSignal.timeout(5000) }),
+			});
 		} catch {
 			throw new CliError(
 				"connection",
@@ -221,7 +230,7 @@ export class Client {
 			this.warnOfPlainHttp();
 		}
 		try {
-			return await fetch(`${this.url}${path}`, { ...init, headers });
+			return await (this.options.request ?? fetch)(`${this.url}${path}`, { ...init, headers });
 		} catch {
 			throw new CliError(
 				"connection",

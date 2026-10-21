@@ -311,6 +311,14 @@ the steps are kept below for an instance that has none.
   240-second failure limit. Failed tests, incomplete reports and skipped test files still block the gate.
   Decision 0097 records the owner's suspension; [issue #77](https://github.com/endqwerty/mainworthy/issues/77)
   tracks a future timing gate. Job timeouts still stop hung jobs.
+- **Reporting waits out a deploy after choosing the instance.** The gate's CLI health checks, shard reports
+  and verdict requests retry connection failures and HTTP 502, 503 or 504 up to twelve times. Each attempt
+  has ten seconds, with ten seconds between attempts. All commands share a 230-second retry window within
+  the nine-minute job, so each shard cannot start another full wait. A 4xx or other definite refusal returns
+  immediately. A lasting outage still fails the job. A retry sends the same report body, whose batch key
+  recovers the original receipt without recording results twice, including after a lost reply. Interactive
+  CLI commands keep their existing behavior. Initial instance selection keeps its short probe and fallback
+  to the job's own Mainworthy when the deployed instance cannot be used.
 - **A newer attempt of a shard replaces the older one.** When the test passes in it, the gate passes and the
   question leaves the queue with no answer. Seen on this instance on 2026-10-13: `main` at `89d431a` was blocked
   by a browser test that fails now and then (#94), and green after a re-run of shard `tests-4`. GitHub's "Re-run

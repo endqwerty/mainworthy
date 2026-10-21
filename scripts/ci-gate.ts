@@ -27,7 +27,14 @@ import { printError } from "../src/cli/errors.ts";
 import { installOutputHandlers } from "../src/cli/output.ts";
 import { parseJUnit, TEST_FILE_LIMIT } from "../src/surfaces/formats/junit.ts";
 import { CI_SHARD_WARNING_SECONDS, newestAttempt, type Outcome, readOutcome, seconds } from "./check-plan.ts";
-import { chooseInstance, describeChoice, type Environment, type Own, startOwn } from "./ci-instance.ts";
+import {
+	chooseInstance,
+	deploymentFetch,
+	describeChoice,
+	type Environment,
+	type Own,
+	startOwn,
+} from "./ci-instance.ts";
 
 installOutputHandlers();
 
@@ -65,15 +72,21 @@ console.log(
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${chosen}\n`);
 if (choice.use === "none") process.exit(4);
 
+const request = deploymentFetch();
 const cli = async (argv: string[]): Promise<number> => {
 	console.log(`\n$ mainworthy ${argv.join(" ")}`);
 	try {
-		return await runCli(argv, undefined, {
-			...process.env,
-			// The project the choice settled on, also when none was named: the CLI is not left to pick one.
-			...(choice.use === "deployed" ? { MAINWORTHY_PROJECT: choice.project } : {}),
-			...ownEnv,
-		});
+		return await runCli(
+			argv,
+			undefined,
+			{
+				...process.env,
+				// The project the choice settled on, also when none was named: the CLI is not left to pick one.
+				...(choice.use === "deployed" ? { MAINWORTHY_PROJECT: choice.project } : {}),
+				...ownEnv,
+			},
+			request,
+		);
 	} catch (error) {
 		printError(error);
 		return 4;
