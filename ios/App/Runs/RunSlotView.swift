@@ -5,6 +5,7 @@ import SwiftUI
 struct RunSlotView: View {
 	@Bindable var screen: OpenRunScreen
 	@FocusState private var noting: Bool
+	@State private var settingAside: RunExecution?
 
 	var body: some View {
 		ScrollView {
@@ -64,6 +65,22 @@ struct RunSlotView: View {
 						)
 						.font(.subheadline)
 					}
+				}
+				if case .read(let execution) = screen.document, screen.canSetAsideReport(execution) {
+					Button("Set report aside") { settingAside = execution }
+						.disabled(screen.busy).accessibilityIdentifier("set-report-aside")
+						.confirmationDialog("Set this report aside?", isPresented: Binding(
+							get: { settingAside != nil }, set: { if !$0 { settingAside = nil } }
+						), titleVisibility: .visible, presenting: settingAside) { chosen in
+							Button("Set report aside", role: .destructive) {
+								settingAside = nil
+								Task { await screen.setAsideReport(chosen) }
+							}
+							.accessibilityIdentifier("confirm-set-report-aside")
+							Button("Cancel", role: .cancel) { settingAside = nil }
+						} message: { _ in
+							Text("The earlier report may still have been recorded, or may arrive later. Setting it aside stops retries on this device and reads this slot again. It does not cancel or undo the report.")
+						}
 				}
 				if let notice = screen.notice {
 					HStack(alignment: .firstTextBaseline) {

@@ -328,7 +328,7 @@ public struct RunReportSubmission: Sendable {
 }
 
 public enum RunReportOutcome: Equatable, Sendable {
-	case recorded(Int), refused(String)
+	case recorded(Int), refused(String), resendRefused(String)
 }
 
 public enum RunPlanOutcome: Equatable, Sendable {
@@ -449,6 +449,7 @@ extension ProjectClient {
 	}
 
 	package func report(_ submission: RunReportSubmission, recovering: Bool = false) async throws -> RunReportOutcome {
+		let delivery = recovering ? WriteDelivery() : submission.delivery
 		do {
 			let reply: Wire.RunReportReply
 			if recovering {
@@ -460,21 +461,23 @@ extension ProjectClient {
 					reply = recorded
 				case "none":
 					reply = try await server.write("report", in: key, submission.input,
-						command: submission.command, delivery: submission.delivery)
+						command: submission.command, delivery: delivery)
 				case "begun":
 					throw ClientError.unreachable("The report is still being recorded. Retry to ask again.")
 				default: throw ClientError.unreadable
 				}
 			} else {
 				reply = try await server.write("report", in: key, submission.input,
-					command: submission.command, delivery: submission.delivery)
+					command: submission.command, delivery: delivery)
 			}
 			if let why = reply.rejected.first?.reason ?? reply.declined.first?.reason { return .refused(why) }
 			guard let saved = reply.results.first, saved > 0 else { return .refused("The result was not recorded.") }
 			return .recorded(saved)
 		} catch {
 			if case ClientError.refused(let code, _) = error, code != "internal",
-				submission.delivery.definitelyRejected { return .refused(error.shown) }
+				delivery.definitelyRejected {
+				return recovering ? .resendRefused(error.shown) : .refused(error.shown)
+			}
 			submission.delivery.uncertain()
 			throw error
 		}
