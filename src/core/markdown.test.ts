@@ -135,22 +135,16 @@ describe("canonical case Markdown", () => {
 		fc.assert(
 			fc.property(docArbitrary, (doc) => {
 				expect(CaseDoc.safeParse(doc).success).toBe(true);
-				expect(parseCase(printCase(doc))).toEqual({ ok: true, doc });
+				const canonical = printCase(doc);
+				const parsed = parseCase(canonical);
+				expect(parsed).toEqual({ ok: true, doc });
+				if (!parsed.ok) throw new Error(JSON.stringify(parsed.errors));
+				expect(printCase(parsed.doc)).toBe(canonical);
 			}),
 			{ numRuns: 1_000 },
 		);
 	});
-	test("printing a parsed canonical document is byte-for-byte stable", () => {
-		fc.assert(
-			fc.property(docArbitrary, (doc) => {
-				const text = printCase(doc);
-				const result = parseCase(text);
-				if (!result.ok) throw new Error(JSON.stringify(result.errors));
-				expect(printCase(result.doc)).toBe(text);
-			}),
-			{ numRuns: 1_000 },
-		);
-	});
+
 	test("malformed arbitrary input never throws", () => {
 		fc.assert(
 			fc.property(fc.string({ unit: "binary", maxLength: 500 }), (text) => {
