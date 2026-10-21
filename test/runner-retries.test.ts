@@ -106,6 +106,17 @@ test("an earlier attempt that the runner's retry recovered reads as passed on th
 	]);
 });
 
+test("a later attempt that passed on its first try and ended passing recovered the failure", () => {
+	report("adad0001", "fail");
+	report("adad0001", "pass", [{ outcome: "pass" }], 2);
+	const rows = h.call<{ last: { attempt: number; passedOnRetry: number | null }[] }[]>("get", { refs: ["T-1"] })[0]
+		?.last;
+	expect(rows?.map((row) => [row.attempt, row.passedOnRetry])).toEqual([
+		[2, null],
+		[1, 2],
+	]);
+});
+
 test("an attempt that passed only on a try and ended failing recovered nothing", () => {
 	report("acac0001", "fail");
 	report("acac0001", "fail", [failed(), { outcome: "pass" }], 2);
