@@ -483,8 +483,9 @@ const Q = {
 	// Of these results, each failure a later attempt of its lane passed: the first attempt that passed. A flip is
 	// recorded between the last failure and the pass, so a failure before it is matched by its lane and attempt, not
 	// by being the flip's first result. Its failing end may be a runner's try (decision 0129): a later attempt that
-	// failed and then passed inside the runner recovered this failure too. Its passing end is the attempt's result: an
-	// attempt that passed on a try and ended failing recovered nothing. Nothing of it corrected.
+	// failed and then passed inside the runner recovered this failure too. Its passing end may be a try, but the
+	// attempt it belongs to must have ended passing: one that passed on a try and ended failing recovered nothing.
+	// Nothing of it corrected.
 	passedOnRetry: sql<{ results: string }, { result: number; attempt: number }>(`
 		SELECT a.id AS result, min(s.attempt) AS attempt
 		FROM json_each($results) asked
@@ -497,7 +498,7 @@ const Q = {
 		JOIN batches sb ON sb.id = s.batch
 		WHERE f.target = a.target AND s.actor = a.actor AND s.method = a.method AND sb.job = ab.job
 		  AND a.outcome IN ('fail', 'error') AND coalesce(pt.outcome, p.outcome) IN ('fail', 'error')
-		  AND f.second_try IS NULL AND s.outcome = 'pass'
+		  AND s.outcome = 'pass'
 		  AND p.attempt >= a.attempt AND s.attempt > a.attempt
 		  AND ${uncorrectedResults("a.id", "f.first_result", "f.second_result")}
 		GROUP BY a.id

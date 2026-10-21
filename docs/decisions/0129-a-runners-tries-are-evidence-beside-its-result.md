@@ -43,8 +43,10 @@ oldest, because the try it dropped could be the only pass, and the flip with it.
 parser keeps the first run and the last 99, which decide every flip and the cause a flip from an earlier attempt names,
 and says so in a warning.
 
-**"Passed on attempt N" needs that attempt's result to pass.** A failure is recovered by a later attempt that failed
-inside the runner and then passed, but not by one that passed on a try and ended failing.
+**"Passed on attempt N" needs that attempt's result to pass.** A failure is recovered by a later attempt that ended
+passing, whether its flip from the failure ends at a try or at the result: one that failed inside the runner and then
+passed, or one that passed on its first try. It is not recovered by an attempt that passed on a try and ended
+failing.
 
 ## Turned down
 
