@@ -388,7 +388,15 @@ check(
 			await b.close();
 			await a.keyboard.press("e");
 			await title(a).fill("Coupon case warm");
-			await a.waitForTimeout(50);
+			await a.waitForFunction(() => {
+				const owner = sessionStorage.getItem("mainworthy:draft-window");
+				const key = Object.keys(localStorage).find((key) => key.includes(":draft:") && key.endsWith(":C-1"));
+				return (
+					key &&
+					JSON.parse(localStorage.getItem(key) ?? "null")?.owner === owner &&
+					!Object.keys(localStorage).some((key) => key.includes(":draft-copy:"))
+				);
+			});
 			await title(a).press("End");
 			await a.evaluate(() => {
 				for (let index = 0; index < 100; index++) localStorage.setItem(`unrelated:${index}`, "other data");
@@ -713,10 +721,16 @@ check(
 			expect(await readOnly(other)).toBe(true);
 			expect(draft.body.title).toBe(`Coupon case${winner === a ? "A" : "B"}`);
 			expect(await title(other).inputValue()).toBe(draft.body.title);
-			// Nothing moves after that: the draft is still the winner's.
-			await Promise.all([a, b].map((page) => page.evaluate(() => new Promise((done) => setTimeout(done, 300)))));
-			expect((await stored(a)).owner).toBe(draft.owner);
+			await title(winner).press("End");
+			await winner.keyboard.type(" keeps editing");
+			const continued = `${draft.body.title} keeps editing`;
+			await eventually(
+				() => title(other).inputValue(),
+				(value) => value === continued,
+			);
+			expect(await stored(a)).toMatchObject({ owner: draft.owner, body: { title: continued } });
 			expect(await readOnly(winner)).toBe(false);
+			expect(await readOnly(other)).toBe(true);
 		} finally {
 			await w.close();
 		}
