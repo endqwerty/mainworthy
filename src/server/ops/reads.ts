@@ -50,10 +50,12 @@ import {
 	changeByKey,
 	findTest,
 	flipCount,
+	flippedLanes,
 	lastResultsOfCase,
 	lastResultsOfTest,
 	listTests,
 	mustTarget,
+	passedOnRetry,
 	proofOf,
 	type ResultRow,
 	recentChanges,
@@ -260,6 +262,12 @@ export function runView(
 	const work = workIn(ctx, run.id);
 	const change = run.change !== null ? changeById(ctx.db, run.change) : null;
 	const target = runTarget(ctx, run);
+	const failing = run.origin === "change" ? failingTestsOf(ctx.db, run.id, 50) : null;
+	// A lane stays marked flipped after a correction withdrew its flip (#630); the flips say whether it still stands.
+	const flipped = flippedLanes(
+		ctx.db,
+		(failing ?? []).filter((row) => row.flipped === 1).map((row) => row.result),
+	);
 	return {
 		ref: runRef(run),
 		location: target ? locationOf(target) : null,
@@ -280,21 +288,19 @@ export function runView(
 		workUntil: work.until,
 		flips: run.origin === "change" ? flippedIn(ctx.db, run.id) : null,
 		failing:
-			run.origin === "change"
-				? failingTestsOf(ctx.db, run.id, 50).map((row) => {
-						const test = testById(ctx.db, row.test);
-						const linked = test?.case_id != null ? caseById(ctx.db, test.case_id) : null;
-						return {
-							test: test ? testRef(test) : null,
-							name: test?.name ?? null,
-							file: test?.file ?? null,
-							case: linked ? caseRef(linked) : null,
-							quarantine: test ? quarantineView(ctx, test.id) : null,
-							cause: row.signature !== null ? (signatureById(ctx.db, row.signature)?.text ?? null) : null,
-							flipped: row.flipped === 1,
-						};
-					})
-				: null,
+			failing?.map((row) => {
+				const test = testById(ctx.db, row.test);
+				const linked = test?.case_id != null ? caseById(ctx.db, test.case_id) : null;
+				return {
+					test: test ? testRef(test) : null,
+					name: test?.name ?? null,
+					file: test?.file ?? null,
+					case: linked ? caseRef(linked) : null,
+					quarantine: test ? quarantineView(ctx, test.id) : null,
+					cause: row.signature !== null ? (signatureById(ctx.db, row.signature)?.text ?? null) : null,
+					flipped: flipped.has(row.result),
+				};
+			}) ?? null,
 		change: change
 			? {
 					key: change.key,
@@ -507,6 +513,10 @@ export function get(ctx: Ctx, input: GetInput): Record<string, unknown>[] {
 			if (!test) throw notFound(`test ${text}`);
 			const linked = test.case_id !== null ? caseById(ctx.db, test.case_id) : null;
 			const last = lastResultsOfTest(ctx.db, test.project, test.id, 20);
+			const retried = passedOnRetry(
+				ctx.db,
+				last.map((row) => row.id),
+			);
 			const locationOf = resultLocations(
 				ctx.db,
 				last.map((row) => mustTarget(ctx.db, row.target)),
@@ -526,7 +536,10 @@ export function get(ctx: Ctx, input: GetInput): Record<string, unknown>[] {
 					now: ctx.now,
 					settings: currentPolicy(ctx.db, test.project).settings.flakyDetection,
 				}),
-				last: last.map((row) => resultView(ctx, row, locationOf)),
+				last: last.map((row) => ({
+					...resultView(ctx, row, locationOf),
+					passedOnRetry: retried.get(row.id) ?? null,
+				})),
 			};
 		}
 		if (kind === "P-") {

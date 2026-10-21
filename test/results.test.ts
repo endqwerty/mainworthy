@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { GateStatus, InboxReply } from "../src/core/ops.ts";
+import { declaredSql } from "../src/server/kernel/db.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 // What a gate counted, test by test (issue #343): every row a commit's gate counts can be read back, and the
@@ -341,5 +342,61 @@ describe("the results behind a gate", () => {
 		expect(names({})).toEqual(["needle pays"]);
 		expect(names({ text: "Needle" })).toEqual(["needle pays"]);
 		expect(names({ unlinked: true })).toEqual(["needle pays"]);
+	});
+});
+
+describe("what reads as flaky", () => {
+	type Last = { id: number; outcome: string; attempt: number; passedOnRetry: number | null };
+	const testPage = (ref: string) =>
+		h.call<{ flips: number; last: Last[] }[]>("get", { refs: [ref] })[0] ?? { flips: -1, last: [] };
+	const report = (commit: string, input: Partial<Parameters<typeof ciReport>[0]> = {}, env?: string) => {
+		const sent = ciReport({ commit, n: 2, ...input });
+		h.call("report", env ? { ...sent, target: { ...sent.target, env } } : sent);
+	};
+
+	test("a flip whose failure its producer corrected is no flake anywhere (issue #630)", () => {
+		report("aaaa0001", { fail: { 1: "socket hang up" } });
+		const failed = testPage("T-2").last[0]?.id;
+		report("aaaa0001", { attempt: 2, only: [1] });
+		expect(results({ commit: "aaaa0001" }).flaky).toEqual({ flipped: 1, failing: 0, days: 14 });
+		expect(testPage("T-2").last.find((row) => row.id === failed)?.passedOnRetry).toBe(2);
+
+		const fixed = ciReport({ commit: "aaaa0001", n: 2, attempt: 3, only: [1] });
+		h.call("report", { ...fixed, results: fixed.results.map((r) => ({ ...r, corrects: failed })) });
+		const read = results({ commit: "aaaa0001" });
+		expect(read.flaky).toEqual({ flipped: 0, failing: 0, days: 14 });
+		expect(read.items.find((row) => row.test === "T-2")).toMatchObject({ flipped: false, recentFlips: 0 });
+		const [run] = h.call<{ flips: number }[]>("get", { refs: ["R-1"] });
+		expect(run?.flips).toBe(0);
+		const page = testPage("T-2");
+		expect(page.flips).toBe(0);
+		expect(page.last.find((row) => row.id === failed)?.passedOnRetry).toBeNull();
+	});
+
+	test("a pass in another environment does not make a failure flaky", () => {
+		report("bbbb0001", { fail: { 1: "boom" } }, "linux");
+		report("bbbb0001", { attempt: 2, only: [1] }, "windows");
+		const page = testPage("T-2");
+		expect(page.flips).toBe(0);
+		expect(page.last.find((row) => row.outcome === "fail")?.passedOnRetry).toBeNull();
+		expect(results({ commit: "bbbb0001" }).flaky).toEqual({ flipped: 0, failing: 0, days: 14 });
+
+		report("bbbb0001", { attempt: 3, only: [1] }, "linux");
+		expect(testPage("T-2").last.find((row) => row.outcome === "fail")?.passedOnRetry).toBe(3);
+	});
+
+	test("the flips of a page are read from each test's own flips, however many the project has", () => {
+		const reads = declaredSql().filter((text) => text.includes("json_each") && text.includes("JOIN flips f"));
+		expect(reads.length).toBeGreaterThanOrEqual(3);
+		for (const text of reads) {
+			const details = h.app.db.raw
+				.query<{ detail: string }, [Record<string, string | number>]>(`EXPLAIN QUERY PLAN ${text}`)
+				.all({ project: 1, since: 0, tests: "[1]", results: "[1]" })
+				.map((row) => row.detail);
+			expect([
+				text.slice(0, 80),
+				details.some((detail) => detail.includes("flips_test (project=? AND test=?)")),
+			]).toEqual([text.slice(0, 80), true]);
+		}
 	});
 });

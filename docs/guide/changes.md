@@ -72,8 +72,10 @@ by default) also says "flaky", with how many times it flipped. The count is the 
 [Reports](./reports.md) shows for the same days.
 
 A note above the list counts both, for the whole commit, whatever the filter. When a failing
-test may be flaky, run its job again before you fix it: the gate counts the retry's result
-instead. A flaky failure still fails the gate until a retry passes or somebody answers it.
+test may be flaky, run its job again before you fix it: a retry that passes or fails counts
+instead of the failure, and one that is skipped or blocked does not. A flaky failure still
+fails the gate until a retry passes or somebody answers it, and the gate passes only once no
+other failure is left. A flip whose failure or pass its producer corrected is not counted.
 In Runs, a change run's row says how many of its tests were flaky.
 
 The command line and the API return the same rows. For example, these commands

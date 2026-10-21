@@ -34,6 +34,7 @@ import {
 	excuseForDisputedSlot,
 	excuseForResult,
 	firstCountedReport,
+	flippedLanes,
 	isWithdrawn,
 	laneHistory,
 	mustTarget,
@@ -260,8 +261,8 @@ const Q = {
 		`SELECT test, result FROM run_tests
 		 WHERE run = $run AND signature = $signature AND target = $target AND outcome IN ('fail', 'error') LIMIT 200`,
 	),
-	flippedCount: sql<{ run: number }, { n: number }>(
-		"SELECT count(*) AS n FROM run_tests WHERE run = $run AND flipped = 1",
+	flippedRows: sql<{ run: number }, { result: number }>(
+		"SELECT result FROM run_tests WHERE run = $run AND flipped = 1",
 	),
 	laneRow: sql<{ run: number; test: number; lane: string }, { result: number; flipped: number }>(
 		"SELECT result, flipped FROM run_tests WHERE run = $run AND test = $test AND lane = $lane",
@@ -500,7 +501,12 @@ export function fillsOf(db: Db, slot: number): Fill[] {
 export const failingTestsOf = (db: Db, run: number, limit: number) => db.all(Q.failingRunTests, { run, limit });
 export const runTestsWith = (db: Db, run: number, outcome: string, limit: number) =>
 	db.all(Q.runTests, { run, outcome, limit });
-export const flippedIn = (db: Db, run: number): number => db.get(Q.flippedCount, { run })?.n ?? 0;
+/** How many of a run's tests both passed and failed on its commit, leaving out a flip a correction withdrew (#630). */
+export const flippedIn = (db: Db, run: number): number =>
+	flippedLanes(
+		db,
+		db.all(Q.flippedRows, { run }).map((row) => row.result),
+	).size;
 /** Whether a change run holds a passing result for any of these tests: the evidence that a failure stopped. */
 export function passesAny(db: Db, run: number, tests: readonly number[]): boolean {
 	if (tests.length === 0) return false;
@@ -1353,7 +1359,13 @@ function standingOf(
 export function countedTests(db: Db, run: RunRow): CountedTest[] {
 	if (run.origin !== "change") return [];
 	const context = counting(db, run);
-	return countedTestsOf(db, run.id).map((row) => standingOf(db, run, context, row));
+	const rows = countedTestsOf(db, run.id);
+	// `run_tests.flipped` stays set once a lane flipped; a correction can withdraw the flip (#630).
+	const flipped = flippedLanes(
+		db,
+		rows.filter((row) => row.flipped === 1).map((row) => row.result),
+	);
+	return rows.map((row) => standingOf(db, run, context, { ...row, flipped: flipped.has(row.result) ? 1 : 0 }));
 }
 
 /**

@@ -48,7 +48,7 @@ const Q = {
 	// The same flips, for the tests asked about: what a gate's list says of each row.
 	flipsOf: sql<{ project: number; since: number; tests: string }, { test: number; flips: number }>(`
 		SELECT f.test, count(*) AS flips
-		FROM json_each($tests) asked JOIN flips f ON f.project = $project AND f.test = asked.value
+		FROM json_each($tests) asked CROSS JOIN flips f ON f.project = $project AND f.test = asked.value
 		JOIN results r ON r.id = f.second_result JOIN tests t ON t.id = f.test
 		WHERE r.at >= $since AND t.kind = 'auto' AND ${uncorrectedResults("f.first_result", "f.second_result")}
 		GROUP BY f.test

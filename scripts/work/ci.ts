@@ -118,7 +118,7 @@ export async function readCi(
 		lines.push(
 			"",
 			`${flaky.failing} of these flipped between passing and failing in the last ${flaky.days} days, so they may be ` +
-				"flaky: re-run their shard's job first. A pass on the retry passes the gate; file each one as flaky-test.",
+				"flaky: re-run their shard's job first. A pass on the retry clears that test's failure, and the gate passes once no other failure is left; file each one as flaky-test.",
 		);
 	lines.push("", NEXT[gate.verdict](gate));
 	return { text: lines.join("\n"), exit: EXIT_CODE[gate.verdict] };

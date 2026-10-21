@@ -428,9 +428,36 @@ const Q = {
 	insertFlip: sql<{ project: number; test: number; target: number; first: number; second: number; seq: number }>(
 		"INSERT INTO flips (project, test, target, first_result, second_result, seq) VALUES ($project, $test, $target, $first, $second, $seq)",
 	),
+	// A flip one of whose results its producer corrected is not counted: the pass and the failure were not both what
+	// happened (issue #630).
 	flipCount: sql<{ project: number; test: number }, { n: number }>(
-		"SELECT count(*) AS n FROM flips WHERE project = $project AND test = $test",
+		`SELECT count(*) AS n FROM flips f WHERE f.project = $project AND f.test = $test
+		   AND ${uncorrectedResults("f.first_result", "f.second_result")}`,
 	),
+	// Of these results, those in a lane with a flip on their target that no correction withdrew. The flips are read
+	// test by test (`flips_test`), however many the project has.
+	flippedLanes: sql<{ results: string }, { result: number }>(`
+		SELECT DISTINCT c.id AS result
+		FROM json_each($results) asked
+		CROSS JOIN results c ON c.id = asked.value
+		JOIN batches cb ON cb.id = c.batch
+		JOIN flips f ON f.project = c.project AND f.test = c.test
+		JOIN results s ON s.id = f.second_result
+		JOIN batches sb ON sb.id = s.batch
+		WHERE f.target = c.target AND s.actor = c.actor AND s.method = c.method AND sb.job = cb.job
+		  AND ${uncorrectedResults("f.first_result", "f.second_result")}
+	`),
+	// Of these results, each failure a later attempt of its lane passed, neither corrected: the attempt that passed.
+	passedOnRetry: sql<{ results: string }, { result: number; attempt: number }>(`
+		SELECT a.id AS result, max(s.attempt) AS attempt
+		FROM json_each($results) asked
+		CROSS JOIN results a ON a.id = asked.value
+		JOIN flips f ON f.project = a.project AND f.test = a.test
+		JOIN results s ON s.id = f.second_result
+		WHERE f.first_result = a.id AND a.outcome IN ('fail', 'error') AND s.outcome = 'pass'
+		  AND ${uncorrectedResults("a.id", "s.id")}
+		GROUP BY a.id
+	`),
 	lastOfTest: sql<{ project: number; test: number; limit: number }, ResultRow>(
 		"SELECT * FROM results WHERE project = $project AND test = $test ORDER BY seq DESC, ord DESC LIMIT $limit",
 	),
@@ -1525,6 +1552,16 @@ export const resultsOfBatch = (db: Db, batch: number, limit: number): ResultRow[
 	db.all(Q.ofBatch, { batch, limit });
 export const flipCount = (db: Db, project: number, test: number): number =>
 	db.get(Q.flipCount, { project, test })?.n ?? 0;
+/** Which of these results stand in a lane whose test both passed and failed on their target, as reported. */
+export function flippedLanes(db: Db, results: readonly number[]): Set<number> {
+	if (results.length === 0) return new Set();
+	return new Set(db.all(Q.flippedLanes, { results: JSON.stringify(results) }).map((row) => row.result));
+}
+/** Of these results, each failure that a later attempt of the same lane passed, with the attempt that passed. */
+export function passedOnRetry(db: Db, results: readonly number[]): Map<number, number> {
+	if (results.length === 0) return new Map();
+	return new Map(db.all(Q.passedOnRetry, { results: JSON.stringify(results) }).map((row) => [row.result, row.attempt]));
+}
 
 /**
  * Every target reported for a commit, named by its full hash or by a prefix of at least seven characters that

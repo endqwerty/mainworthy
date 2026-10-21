@@ -298,8 +298,9 @@ between passing and failing on the same code, and any quarantine in force.
 "Latest results" lists its last twenty results, newest first. Each row shows the
 outcome, any commit and change reported with it, the job, duration, producer, and
 failure message when present. Attempts after the first show their number.
-A failure that a later attempt of the same job passed on the same commit says "flaky",
-and "passed on attempt" with the attempt that passed.
+A failure that a later attempt of the same job, producer and environment passed on the same
+commit says "flaky", and "passed on attempt" with the attempt that passed. The flip count leaves
+out a flip whose failure or pass its producer corrected.
 "build" opens the CI build when the report supplied an HTTP or HTTPS URL.
 
 To see every result of one commit, open its change in [Changes](./changes.md#read-the-results-behind-the-verdict).
