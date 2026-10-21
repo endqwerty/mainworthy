@@ -891,9 +891,10 @@ for (const action of ["Escape", "Backspace", "pause", "key", "pass", "invalid"])
 			try {
 				const { page } = h;
 				await ready(page);
+				if (action === "pause") await page.clock.install();
 				await page.keyboard.press("2");
 				if (action === "pause") {
-					await page.waitForTimeout(800);
+					await page.clock.fastForward(800);
 					await page.keyboard.press("3");
 				} else if (action === "key") {
 					await page.keyboard.press("j");
@@ -1187,8 +1188,25 @@ check(
 				(n) => n > 0,
 			);
 			await page.locator("[data-current-question]").waitFor();
-			expect(await page.locator(".queue-evidence").textContent()).not.toContain("could not be read");
-			expect(await page.locator(".queue-answers button:enabled").count()).toBeGreaterThan(0);
+			const q = await page.locator("[data-current-question]").getAttribute("data-current-question");
+			if (!q) throw new Error("Missing failure question");
+			expect(await page.getByRole("heading", { level: 2 }).innerText()).toBe(
+				"Refund failure: expected ready, got broken",
+			);
+			expect(await page.locator(".queue-log").innerText()).toBe("Refund failure: expected ready, got broken");
+			expect(await page.locator(".queue-answers button:enabled b").allInnerTexts()).toEqual([
+				"Defect in the product",
+				"The test is wrong",
+				"Expected: behaviour changed",
+				"Flaky",
+				"Infrastructure",
+			]);
+			await page.getByRole("button", { name: /Infrastructure/ }).click();
+			const settled = await eventually(
+				() => server.api("get", { refs: [q] }),
+				(rows) => rows[0]?.state === "decided",
+			);
+			expect(settled[0]?.decision).toMatchObject({ answer: { is: "infra" } });
 		} finally {
 			await h.close();
 			await server.stop();
