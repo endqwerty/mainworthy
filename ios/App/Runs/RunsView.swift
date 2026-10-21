@@ -5,34 +5,45 @@ import SwiftUI
 struct RunsView: View {
 	let screen: RunsScreen
 	let workspace: Workspace
+	@Environment(\.dynamicTypeSize) private var dynamicTypeSize
 	@State private var path = NavigationPath()
 	@State private var planning = false
 
 	var body: some View {
+		let stacked = dynamicTypeSize.isAccessibilitySize
+		let layout = stacked
+			? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+			: AnyLayout(HStackLayout())
 		NavigationStack(path: $path) {
 			List {
 				ForEach(screen.runs) { run in
 					NavigationLink(value: run.ref) {
 						VStack(alignment: .leading, spacing: 6) {
-							HStack {
+							layout {
 								RefText(run.ref)
 								Tag(text: run.verdict.word, tint: run.verdict.tint)
-								Spacer()
+								if !stacked { Spacer() }
 								Text(run.state.word).font(.caption).foregroundStyle(.secondary)
 							}
-							Text(run.isPlanned ? run.name : (run.location?.label ?? run.name)).font(.headline)
+							Text(run.isPlanned ? run.name : (run.location?.label ?? run.name))
+								.font(.headline)
+								.fixedSize(horizontal: false, vertical: stacked)
 							if let commit = run.location?.commit {
 								Text(commit.prefix(12)).font(.caption.monospaced()).foregroundStyle(.secondary)
 							}
-							HStack {
-								TimelineView(.periodic(from: .now, by: 1)) { clock in Text(detail(run, at: clock.date)) }
-								Spacer()
+							layout {
+								TimelineView(.periodic(from: .now, by: 1)) { clock in
+									Text(detail(run, at: clock.date)).fixedSize(horizontal: false, vertical: stacked)
+								}
+								if !stacked { Spacer() }
 								Text(run.createdAt, format: .relative(presentation: .named))
+									.fixedSize(horizontal: false, vertical: stacked)
 							}
 							.font(.subheadline).foregroundStyle(.secondary)
 						}
 						.padding(.vertical, 4)
 					}
+					.listRowInsets(.horizontal, stacked ? 8 : nil)
 				}
 				if screen.loading == .done, screen.runs.isEmpty, screen.filter != RunFilter() {
 					// A row where the runs would be: the empty list's placeholder is for a project with no runs at all.
