@@ -30,6 +30,17 @@ import {
 // The Swift enum decodes the same tagged variants; the core schema checks every server reply.
 const conflictAddress: Shape = { zod: ConflictAddress, swift: "ConflictAddress", structs: [] };
 
+export const Refusal = struct("Refusal", "Why the server refused a request.", {
+	code: text,
+	message: text,
+	details: maybe(
+		struct("RefusalDetails", "Machine-readable reasons the app handles separately.", {
+			projectIdentity: maybe(text),
+			passkey: maybe(text),
+		}),
+	),
+});
+
 // ── Who is signed in ───────────────────────────────────────────────────────────────────────────────────────
 
 const Project = struct("Project", "A project the caller holds a grant on.", {
@@ -729,6 +740,7 @@ export const SuiteProposalQuestion = struct("SuiteProposalQuestion", "A saved pr
 
 /** Every shape the app decodes by name. `gen` writes one Swift type for each, and for each struct inside it. */
 export const SHAPES: readonly Shape[] = [
+	Refusal,
 	SignInReply,
 	SignInMethods,
 	ProviderStart,

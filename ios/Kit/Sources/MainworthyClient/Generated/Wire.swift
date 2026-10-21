@@ -4,6 +4,19 @@
 /// not here. Nothing outside this module sees these types: each is turned into one of the app's own where
 /// it is decoded.
 enum Wire {
+	/// Machine-readable reasons the app handles separately.
+	struct RefusalDetails: Decodable, Equatable, Sendable {
+		let projectIdentity: String?
+		let passkey: String?
+	}
+
+	/// Why the server refused a request.
+	struct Refusal: Decodable, Equatable, Sendable {
+		let code: String
+		let message: String
+		let details: RefusalDetails?
+	}
+
 	/// Whether a password completed sign-in or needs a second step.
 	struct SignInReply: Decodable, Equatable, Sendable {
 		let signedIn: Bool

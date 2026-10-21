@@ -24,6 +24,7 @@ import {
 	Proposal,
 	ProviderStart,
 	Question,
+	Refusal,
 	SessionEnd,
 	SessionInfo,
 	SessionRow,
@@ -92,6 +93,19 @@ test("the iPhone reads a native passkey challenge from the configured instance",
 		expect(reply.status).toBe(200);
 		if (!reply.body.ok) throw new Error(reply.text);
 		holds("POST /api/login/challenge", PasskeyChallenge, reply.body.result);
+	} finally {
+		cleanUpPeople();
+	}
+});
+
+test("the iPhone reads why native passkey sign-in is unavailable", async () => {
+	const instance = world({ publicUrl: "http://localhost:7357" });
+	try {
+		const reply = await instance.post("/api/login/challenge", { native: true });
+		expect(reply.status).toBe(400);
+		if (reply.body.ok) throw new Error("expected native passkey sign-in to be unavailable");
+		holds("POST /api/login/challenge refusal", Refusal, reply.body.error);
+		expect(reply.body.error).toMatchObject({ code: "invalid", details: { passkey: "native-unavailable" } });
 	} finally {
 		cleanUpPeople();
 	}
