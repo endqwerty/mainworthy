@@ -38,8 +38,13 @@ Surefire writes an exhausted test's first run as the testcase's `failure` and th
 rerun is the result and the `failure` the oldest try. Their causes differ, and a flip from an earlier attempt is to
 the first.
 
-**A result keeps at most a hundred tries, whole.** A parser refuses a test with more rather than dropping the oldest,
-because the try it dropped could be the only pass, and the flip with it.
+**A result keeps at most a hundred tries.** The Playwright parser refuses a test with more rather than dropping the
+oldest, because the try it dropped could be the only pass, and the flip with it. Every Surefire try failed, so its
+parser keeps the first run and the last 99, which decide every flip and the cause a flip from an earlier attempt names,
+and says so in a warning.
+
+**"Passed on attempt N" needs that attempt's result to pass.** A failure is recovered by a later attempt that failed
+inside the runner and then passed, but not by one that passed on a try and ended failing.
 
 ## Turned down
 

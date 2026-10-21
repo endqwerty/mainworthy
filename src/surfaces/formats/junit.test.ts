@@ -252,6 +252,22 @@ describe("parseJUnit recovery and boundaries", () => {
 		expect(parsed.results[1]).toEqual(result("works", "works (retry 1) [retry #2]"));
 	});
 
+	test("more than a hundred Surefire runs keep the first and the last ones, which decide every flip", () => {
+		const reruns = Array.from({ length: 120 }, (_, i) => `<rerunFailure message="run ${i + 2}"/>`).join("");
+		const parsed = parseJUnit(
+			`<testsuite><testcase name="one"><failure message="run 1">first</failure>${reruns}</testcase></testsuite>`,
+		);
+		const tries = parsed.results[0]?.tries ?? [];
+		expect(parsed.results[0]?.failure).toEqual({ message: "run 121" });
+		expect(tries).toHaveLength(100);
+		expect(tries[0]).toEqual({ outcome: "fail", failure: { message: "run 1", detail: "first" } });
+		expect(tries[1]?.failure?.message).toBe("run 22");
+		expect(tries.at(-1)?.failure?.message).toBe("run 120");
+		expect(parsed.warnings).toContain(
+			"Testcase one: kept the first and the last 99 of its 120 earlier runs; every one failed",
+		);
+	});
+
 	test("Surefire retry errors are flaky signals, too", () => {
 		expect(parseJUnit('<testsuite><testcase name="one"><flakyError/><rerunError/></testcase></testsuite>')).toEqual({
 			results: [
