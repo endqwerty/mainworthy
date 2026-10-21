@@ -355,8 +355,10 @@ add no flip.
 
 When the pipeline also runs the job again, the earlier attempt meets the new attempt's first
 decisive try, so one recovery is one flip whichever retried first. A correction of a result
-withdraws the flips of its tries too. A result keeps at most a hundred tries; a report with more is
-refused rather than cut, because the try that was dropped could be the one that passed. In the API,
+withdraws the flips of its tries too. A result keeps at most a hundred tries. A Playwright report with more is
+refused rather than cut, because the try that was dropped could be the one that passed. A
+Surefire testcase with more keeps its first run and its last 99, with a warning: every one
+failed, so those decide every flip. In the API,
 a result's `tries` lists them, each with an `outcome`, an optional `durationMs` and an
 optional `failure`; `mainworthy get T-1 --json` returns each recent result's `tries`, and a
 detector sample names the runner's `try` at either end.

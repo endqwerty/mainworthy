@@ -106,6 +106,17 @@ test("an earlier attempt that the runner's retry recovered reads as passed on th
 	]);
 });
 
+test("an attempt that passed only on a try and ended failing recovered nothing", () => {
+	report("acac0001", "fail");
+	report("acac0001", "fail", [failed(), { outcome: "pass" }], 2);
+	const rows = h.call<{ last: { attempt: number; passedOnRetry: number | null }[] }[]>("get", { refs: ["T-1"] })[0]
+		?.last;
+	expect(rows?.map((row) => [row.attempt, row.passedOnRetry])).toEqual([
+		[2, null],
+		[1, null],
+	]);
+});
+
 test("a report holds at most a hundred tries of a result", () => {
 	report("ffff0001", "fail", [{ outcome: "pass" }, ...Array.from({ length: 99 }, () => failed())]);
 	expect(page()?.flips).toBe(1);

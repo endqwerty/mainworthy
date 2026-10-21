@@ -415,7 +415,16 @@ export function parseJUnit(
 						element.result.failure = last.failure ?? { message: "Test failed" };
 					}
 				}
-				if (element.tries.length > 0) element.result.tries = element.tries.slice(-100);
+				// Every Surefire try failed, so the first and the last decide every flip and the cause a flip from an
+				// earlier attempt names: past a hundred, the runs between them go, and the report says so.
+				if (element.tries.length > 100) {
+					if (warnings.length < 1000)
+						warnings.push(
+							`${options?.file ? `${options.file}: ` : ""}Testcase ${element.result.test && "name" in element.result.test ? element.result.test.name : "?"}: kept the first and the last 99 of its ${element.tries.length} earlier runs; every one failed`,
+						);
+					element.tries = [...element.tries.slice(0, 1), ...element.tries.slice(-99)];
+				}
+				if (element.tries.length > 0) element.result.tries = element.tries;
 				currentCase = element.previous;
 				break;
 			case "failure":
