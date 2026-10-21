@@ -73,7 +73,8 @@
 .o-error .result-outcome {
 	color: var(--fail);
 }
-.o-blocked .result-outcome {
+.o-blocked .result-outcome,
+.o-flaky .result-outcome {
 	color: var(--warn);
 }
 @media (max-width: 1100px) {

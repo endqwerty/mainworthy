@@ -20,6 +20,8 @@ type Row = {
 	build: string | null;
 	commit: string | null;
 	question: string | null;
+	flipped: boolean;
+	recentFlips: number;
 };
 type Results = {
 	count: number;
@@ -27,6 +29,7 @@ type Results = {
 	items: Row[];
 	tally: Record<string, number>;
 	testTime: { ms: number; timed: number };
+	flaky: { flipped: number; failing: number; days: number };
 };
 
 let h: Harness;
@@ -207,6 +210,36 @@ describe("the results behind a gate", () => {
 		const all = results({ commit: COMMIT });
 		expect(all.tally).toEqual(gate().tally);
 		expect(all.items.find((row) => row.test === total)).toMatchObject({ standing: "excused", quarantined: true });
+	});
+
+	test("a test that failed and passed on the same commit is flaky, and its next failure says it flipped before", () => {
+		seed();
+		const first = results({ commit: COMMIT, limit: 500 });
+		const by = (rows: Row[], name: string) => rows.find((row) => row.name === name);
+		// It failed, then passed on a retry: the gate counts the pass, and the row says the commit saw both.
+		expect(by(first.items, "cart removes")).toMatchObject({ standing: "pass", flipped: true, recentFlips: 1 });
+		expect(by(first.items, "cart total")).toMatchObject({ standing: "unexplained", flipped: false, recentFlips: 0 });
+		expect(first.flaky).toEqual({ flipped: 1, failing: 0, days: 14 });
+		// Among the passes, the flaky one comes first, though its retry arrived last.
+		expect(first.items.filter((row) => row.standing === "pass").map((row) => row.name)).toEqual([
+			"cart removes",
+			"coupon",
+			"cart adds",
+		]);
+
+		// The next commit fails it again: nothing has passed it there, and the row says how often it flipped lately.
+		const NEXT = "c0ffee0000000000000000000000000000000002";
+		h.call("report", {
+			target: { ...target, commit: NEXT },
+			job: "e2e",
+			results: [result("cart removes", "fail", "retried away"), result("cart total", "fail", "expected $90, got $100")],
+		});
+		const next = results({ commit: NEXT });
+		expect(by(next.items, "cart removes")).toMatchObject({ standing: "unexplained", flipped: false, recentFlips: 1 });
+		expect(by(next.items, "cart total")).toMatchObject({ standing: "unexplained", flipped: false, recentFlips: 0 });
+		expect(next.flaky).toEqual({ flipped: 0, failing: 1, days: 14 });
+		// A filter changes the rows, not what the commit as a whole shows.
+		expect(results({ commit: NEXT, text: "cart total" }).flaky).toEqual({ flipped: 0, failing: 1, days: 14 });
 	});
 
 	test("a test's page names the commit, change and job of each result", () => {

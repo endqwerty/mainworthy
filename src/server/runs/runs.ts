@@ -139,8 +139,8 @@ const Q = {
 	),
 	allRunTests: sql<
 		{ run: number },
-		{ test: number; result: number; target: number; outcome: string; signature: number | null }
-	>("SELECT test, result, target, outcome, signature FROM run_tests WHERE run = $run ORDER BY result"),
+		{ test: number; result: number; target: number; outcome: string; signature: number | null; flipped: number }
+	>("SELECT test, result, target, outcome, signature, flipped FROM run_tests WHERE run = $run ORDER BY result"),
 	failsWith: sql<{ run: number; signature: number }, { n: number }>(
 		"SELECT 1 AS n FROM run_tests WHERE run = $run AND outcome IN ('fail', 'error') AND signature = $signature LIMIT 1",
 	),
@@ -1208,6 +1208,7 @@ export function inheritedResultsOf(db: Db, run: RunRow) {
 					target: fill.target,
 					signature: fill.signature,
 					outcome: fill.outcome,
+					flipped: 0,
 				});
 			}
 		}
@@ -1282,6 +1283,8 @@ export type CountedTest = {
 	target: number;
 	outcome: string;
 	signature: number | null;
+	/** Whether the test both passed and failed in this lane: a retry that changed its outcome on the same code. */
+	flipped: boolean;
 	standing: Exclude<keyof Tally, "disputed">;
 	/** The decision that excuses or attributes a failure: an answer about its cause or this result, or a quarantine. */
 	excuse: { decision: number; expires: number | null; quarantined: boolean } | null;
@@ -1321,6 +1324,7 @@ function standingOf(
 	const scope = scopeFor(row.target);
 	const counted = (standing: CountedTest["standing"], excuse: CountedTest["excuse"] = null): CountedTest => ({
 		...row,
+		flipped: row.flipped === 1,
 		standing,
 		excuse,
 		scope,

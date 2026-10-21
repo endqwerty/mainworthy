@@ -132,6 +132,20 @@
 	color: var(--standing);
 	font: 600 11px var(--mono);
 }
+.result-flaky {
+	display: block;
+	color: var(--warn);
+}
+.change-flaky {
+	margin: 0 0 8px;
+	padding: 6px 10px;
+	border-radius: 6px;
+	background: var(--warn-soft);
+	color: var(--ink);
+}
+.change-flaky p {
+	margin: 2px 0;
+}
 .result-body {
 	min-width: 0;
 	overflow-wrap: anywhere;

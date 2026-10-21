@@ -141,7 +141,7 @@ test("a report that makes many failures go away recomputes each run once, not on
 		db.all = ((statement: { text: string }, ...args: unknown[]) => {
 			if (
 				statement.text ===
-				"SELECT test, result, target, outcome, signature FROM run_tests WHERE run = $run ORDER BY result"
+				"SELECT test, result, target, outcome, signature, flipped FROM run_tests WHERE run = $run ORDER BY result"
 			)
 				tallies++;
 			return (all as (...rest: unknown[]) => unknown[])(statement, ...args);
@@ -185,7 +185,7 @@ test("a report with existing failures bounds repeated scans and targets reads", 
 			db.all = (statement, ...params) => {
 				if (
 					statement.text ===
-					"SELECT test, result, target, outcome, signature FROM run_tests WHERE run = $run ORDER BY result"
+					"SELECT test, result, target, outcome, signature, flipped FROM run_tests WHERE run = $run ORDER BY result"
 				)
 					reads.scans++;
 				return all(statement, ...params);

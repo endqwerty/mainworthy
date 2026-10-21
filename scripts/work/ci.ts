@@ -57,8 +57,16 @@ export async function ciPolicy(call: Call, project: string): Promise<string> {
 
 export type Target = { change: string } | { commit: string };
 
-type Row = { test: string; name: string; file: string | null; message: string | null; build: string | null };
-type Rows = { count: number; items: Row[]; cursor: string | null };
+type Row = {
+	test: string;
+	name: string;
+	file: string | null;
+	message: string | null;
+	build: string | null;
+	recentFlips: number;
+};
+type Flaky = { flipped: number; failing: number; days: number };
+type Rows = { count: number; items: Row[]; cursor: string | null; flaky: Flaky };
 
 /**
  * The gate of a pull request or a commit, and the tests behind a verdict that is not `passed`, as text and the exit
@@ -78,6 +86,7 @@ export async function readCi(
 	}
 	const what = "change" in target ? target.change : target.commit.slice(0, 12);
 	const lines = [`${what}: ${gate.verdict}: ${gate.reason.replace(new RegExp(`^${gate.verdict}:\\s*`), "")}`];
+	let flaky: Flaky | null = null;
 	for (const state of ["attributed", "unexplained"] as const) {
 		if (gate.verdict === "passed" || !gate.tally[state]) continue;
 		const rows: Row[] = [];
@@ -91,15 +100,26 @@ export async function readCi(
 				...(cursor ? { cursor } : {}),
 			})) as Rows;
 			rows.push(...page.items);
+			flaky = page.flaky;
 			cursor = page.cursor;
 		} while (cursor);
 		lines.push("", `${state === "attributed" ? "needs a fix" : "not explained yet"} (${rows.length}):`);
 		for (const row of rows) {
-			lines.push(`  ${row.test} ${row.file ?? "?"}: ${row.name}`);
+			const flips =
+				row.recentFlips > 0
+					? ` (flipped ${row.recentFlips} ${row.recentFlips === 1 ? "time" : "times"} in the last ${flaky?.days} days)`
+					: "";
+			lines.push(`  ${row.test} ${row.file ?? "?"}: ${row.name}${flips}`);
 			for (const text of (row.message ?? "").split("\n").filter(Boolean).slice(0, 4)) lines.push(`    ${text}`);
 			if (row.build) lines.push(`    ${row.build}`);
 		}
 	}
+	if (flaky && flaky.failing > 0)
+		lines.push(
+			"",
+			`${flaky.failing} of these flipped between passing and failing in the last ${flaky.days} days, so they may be ` +
+				"flaky: re-run their shard's job first. A pass on the retry passes the gate; file each one as flaky-test.",
+		);
 	lines.push("", NEXT[gate.verdict](gate));
 	return { text: lines.join("\n"), exit: EXIT_CODE[gate.verdict] };
 }

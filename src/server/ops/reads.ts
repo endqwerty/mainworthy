@@ -75,6 +75,7 @@ import { findingsOfCase, reviewBasis, reviewsAtVersion, reviewsOfCase } from "..
 import { sameCodeEvidence } from "../evidence/flaky.ts";
 import { effectiveQuarantine, quarantineEntries, quarantineEntry } from "../evidence/quarantine.ts";
 import { deployments } from "../evidence/releases.ts";
+import { flipsOf } from "../evidence/stats.ts";
 import { actorLabel } from "../identity/identity.ts";
 import { type Ctx, findCommand, UNFINISHED } from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
@@ -577,14 +578,19 @@ type Found = {
 	cursor: string | null;
 	tally?: Record<string, number>;
 	testTime?: { ms: number; timed: number };
+	flaky?: { flipped: number; failing: number; days: number };
 };
+
+/** The rows that fail a gate: a failure nothing excuses, or one an answer says needs a fix. */
+const FAILS_GATE: ReadonlySet<string> = new Set(["unexplained", "attributed"]);
 
 /**
  * The tests a commit's gate counted, each as it counts it: one row per test and lane, so the rows add up to the
- * gate's tally. Ordered problems first, then by when the result arrived. A retry, a decision or a link moves a row
- * in that order or in and out of a filter, so the cursor also carries a hash of the list it was taken from: a page
- * asked for after that list changed is refused, and the list is read again from the start, instead of skipping or
- * repeating the row that moved.
+ * gate's tally. Ordered problems first, a flaky row first among its own, so a pass that a failure preceded is not
+ * the last of hundreds, then by when the result arrived. A retry, a decision or a link moves a row in that order or
+ * in and out of a filter, so the cursor also carries a hash of the list it was taken from: a page asked for after
+ * that list changed is refused, and the list is read again from the start, instead of skipping or repeating the row
+ * that moved.
  */
 function countedResults(ctx: Ctx, input: FindInput, limit: number): Found {
 	if (!input.commit && !input.change && !input.run) throw invalid("results need a commit, a change or a run");
@@ -604,7 +610,7 @@ function countedResults(ctx: Ctx, input: FindInput, limit: number): Found {
 		counted.map((row) => row.result),
 	);
 
-	const rank = (row: CountedTest): number => RESULT_STANDINGS.indexOf(row.standing);
+	const rank = (row: CountedTest): number => 2 * RESULT_STANDINGS.indexOf(row.standing) + (row.flipped ? 0 : 1);
 	const text = input.text?.toLowerCase();
 	const matching = counted
 		.filter((row) => {
@@ -620,7 +626,7 @@ function countedResults(ctx: Ctx, input: FindInput, limit: number): Found {
 	// makes a different version, and so does the same cursor sent with another filter.
 	const version = contentHash({
 		query: { state: wanted ?? null, unlinked: input.unlinked ?? false, text: text ?? null },
-		rows: matching.map((row) => [row.result, row.standing]),
+		rows: matching.map((row) => [row.result, row.standing, row.flipped]),
 	}).slice(0, 12);
 	const after = input.cursor ? parseResultCursor(input.cursor) : null;
 	if (after && after.version !== version)
@@ -634,12 +640,26 @@ function countedResults(ctx: Ctx, input: FindInput, limit: number): Found {
 		ctx.db,
 		page.map((row) => mustTarget(ctx.db, row.target)),
 	);
+	// Flips over the same days the flaky report and the detector read, so a row and those agree on a test.
+	const days = currentPolicy(ctx.db, ctx.project.id).settings.flakyDetection.windowDays;
+	const failing = counted.filter((row) => FAILS_GATE.has(row.standing));
+	const flips = flipsOf(
+		ctx.db,
+		ctx.project.id,
+		[...failing, ...page].map((row) => row.test),
+		ctx.now - days * 86_400_000,
+	);
 	return {
 		count: matching.length,
-		items: page.map((row) => countedView(ctx, row, locationOf)),
+		items: page.map((row) => ({ ...countedView(ctx, row, locationOf), recentFlips: flips.get(row.test) ?? 0 })),
 		cursor: rest.length > limit && last ? `${rank(last)}.${last.result}.${version}` : null,
 		tally,
 		testTime: time,
+		flaky: {
+			flipped: counted.filter((row) => row.flipped).length,
+			failing: failing.filter((row) => flips.has(row.test)).length,
+			days,
+		},
 	};
 }
 
@@ -668,6 +688,7 @@ function countedView(
 		outcome: result.outcome,
 		standing: row.standing,
 		quarantined: row.excuse?.quarantined ?? false,
+		flipped: row.flipped,
 		question: questionOfCount(ctx, row),
 		attempt: result.attempt,
 		durationMs: result.duration_ms,

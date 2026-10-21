@@ -18,6 +18,8 @@ export const Run = z.object({
 	slots: z.number().nullable(),
 	inProgress: z.number(),
 	workUntil: z.number().nullable(),
+	/** Of a change run: how many of its tests both passed and failed on its commit. A planned run has none. */
+	flips: z.number().nullable(),
 	/** The change a change run's commit belongs to. A planned run has none. */
 	change: z.object({ key: z.string(), title: z.string().nullable() }).nullable(),
 	createdAt: z.number(),

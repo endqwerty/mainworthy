@@ -45,6 +45,14 @@ const Q = {
 		  AND ${uncorrectedResults("f.first_result", "f.second_result")}
 		GROUP BY f.test ORDER BY flips DESC, last_at DESC, f.test
 	`),
+	// The same flips, for the tests asked about: what a gate's list says of each row.
+	flipsOf: sql<{ project: number; since: number; tests: string }, { test: number; flips: number }>(`
+		SELECT f.test, count(*) AS flips
+		FROM json_each($tests) asked JOIN flips f ON f.project = $project AND f.test = asked.value
+		JOIN results r ON r.id = f.second_result JOIN tests t ON t.id = f.test
+		WHERE r.at >= $since AND t.kind = 'auto' AND ${uncorrectedResults("f.first_result", "f.second_result")}
+		GROUP BY f.test
+	`),
 	// Automated is what the test is, whoever reported it: an agent can report an automated test too.
 	reporting: sql<{ project: number; since: number }, { n: number }>(`
 		SELECT count(DISTINCT r.test) AS n FROM results r JOIN tests t ON t.id = r.test
@@ -157,6 +165,12 @@ export function totalOf(days: readonly OutcomeCounts[]): OutcomeCounts {
 
 /** Tests with a flip (a pass and a failure on the same code) since a moment, the most flips first. */
 export const flakyTests = (db: Db, project: number, since: number) => db.all(Q.flaky, { project, since });
+/** How often each of these tests flipped since a moment, counted as the flaky report counts; a test with none is absent. */
+export function flipsOf(db: Db, project: number, tests: readonly number[], since: number): Map<number, number> {
+	if (tests.length === 0) return new Map();
+	const rows = db.all(Q.flipsOf, { project, since, tests: JSON.stringify([...new Set(tests)]) });
+	return new Map(rows.map((row) => [row.test, row.flips]));
+}
 /** How many automated tests reported a result since a moment. */
 export const testsReporting = (db: Db, project: number, since: number): number =>
 	db.get(Q.reporting, { project, since })?.n ?? 0;
