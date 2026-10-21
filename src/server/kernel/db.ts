@@ -325,6 +325,37 @@ export class Db {
 		for (let step = steps.next(); ; step = steps.next()) if (step.done) return step.value;
 	}
 
+	/** A full integrity audit outside the write transaction, tied to this connection's commit generation. */
+	foreignKeySnapshot(): number {
+		if (this.raw.inTransaction) throw new Error("foreign-key preflight needs no transaction");
+		const version = this.raw.query<{ data_version: number }, []>("PRAGMA data_version").get()?.data_version;
+		if (version === undefined) throw new Error("missing database generation");
+		const foreign = this.raw.query<{ table: string; parent: string }, []>("PRAGMA foreign_key_check").get();
+		if (foreign) throw new Error(`existing foreign key violation in ${foreign.table}, referencing ${foreign.parent}`);
+		return version;
+	}
+
+	/** True only if no other connection committed since the preflight began. Call after BEGIN IMMEDIATE. */
+	foreignKeySnapshotMatches(version: number): boolean {
+		if (!this.raw.inTransaction) throw new Error("foreign-key generation comparison needs a write transaction");
+		return this.raw.query<{ data_version: number }, []>("PRAGMA data_version").get()?.data_version === version;
+	}
+
+	/** An enforced transaction defers constraints until COMMIT, including writes made by triggers. */
+	*deferredSteps<T>(fn: () => Generator<undefined, T, void>): Generator<undefined, T, void> {
+		if (
+			this.raw.inTransaction ||
+			this.raw.query<{ foreign_keys: number }, []>("PRAGMA foreign_keys").get()?.foreign_keys !== 1
+		)
+			throw new Error("a deferred transaction needs an idle connection with foreign keys enabled");
+		return yield* this.savepointSteps(
+			function* (this: Db) {
+				this.raw.exec("PRAGMA defer_foreign_keys = ON");
+				return yield* fn();
+			}.bind(this),
+		);
+	}
+
 	/**
 	 * Checks a bulk replacement's foreign keys before commit. Only an outer transaction may turn off
 	 * per-row enforcement; nested calls preserve their caller's settings. Rollback and cancellation restore it.

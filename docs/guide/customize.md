@@ -119,9 +119,9 @@ You cannot delete a project yet, so the demo stays until you start with a new da
 
 Personal and team grants on the demo stay. The seed sets its own `pipeline` and `reviewer` grants again. The reset empties and recreates the project with its grants in one transaction. A stop before commit preserves the old demo and grants. A stop after commit leaves an empty demo that the next start fills.
 
-The reset runs on a worker thread, so `/healthz` and ordinary reads keep answering. Writes, including administration lists and sign-in, wait for its transaction to finish. Reads see the old demo until the empty demo and its grants commit together. Before committing, the reset checks all foreign keys. If any reference is invalid, the reset rolls back.
+The reset runs on a worker thread, so `/healthz` and ordinary reads keep answering. It first audits existing references while writes continue. If a write commits during that audit, it repeats the audit before removal. An existing invalid reference refuses the reset.
 
-The reset skips the whole-database foreign-key scan before removal. Its final checks still cover references in every project. Logs name the pending-key check and transaction completion after removal and recreation, including their validation time.
+Writes, including administration lists and sign-in, wait during removal and recreation. Reads see the old demo until the empty demo and its grants commit together. Foreign-key enforcement remains enabled with indexed checks on changed rows and references to deleted rows, including other projects' references. An unresolved reference rolls the whole reset back. Logs distinguish the audit before the write gate from deletion, recreation, and commit.
 
 The seed then fills the project through the API, so readers can see it partly filled. The server creates the seed's fifteen-minute token after the reset and revokes it when seeding ends. A graceful stop during reset skips that token. A stop during seeding waits for the seed to finish and revoke its token.
 

@@ -149,3 +149,34 @@ Keep the full final checks after removal and after recreation with grants. Retai
 parents, so a project filter cannot prove safety. Limiting tables would also require accounting for every
 referencing table and trigger effect. Log the pending-key check, even when skipped, and time transaction setup
 and completion after removal and recreation. Completion includes each bulk validation and commit or rollback.
+
+
+## Amendment, 2026-10-20: incremental reset constraints
+
+[Issue #712](https://github.com/endqwerty/mainworthy/issues/712) measured 203 seconds for the first post-removal
+whole-database audit on the instance's cold cache. Two more bulk audits followed under the write gate.
+Table-scoped audits would still read millions of unrelated result and excuse rows.
+
+The worker now audits the existing database before taking the gate. It captures `PRAGMA data_version` before
+the audit and compares it after acquiring the gate and `BEGIN IMMEDIATE`. An intervening commit invalidates
+the proof. The worker rolls back that empty transaction, releases the gate, and repeats the audit. This keeps
+pre-existing dangling-reference detection without charging the write gate for a database scan. A busy instance
+can require several audits; each runs without the gate. The ten-minute worker deadline still bounds the reset.
+
+During the reset, keep `foreign_keys` enabled and defer constraints until commit. SQLite checks changed child
+rows and probes incoming references to deleted parents through child indexes. This covers references from
+other projects and trigger effects in removal and recreation. The deferred constraint counter decides commit,
+so there is one proof across the whole replacement and no bulk audit inside its transaction. Other transfer
+callers keep their original audits and restoration of caller settings.
+
+Migration 37 restores 28 missing incoming indexes, with non-null partial indexes for nullable columns.
+`PRAGMA index_list`, equality lookup plans, and the actual SQLite DELETE programs confirm indexed checks for
+all 81 incoming references into tables removal touches. No incoming table falls back to a scan. The migration
+changes indexes only, with `archive: false`. This revisits migration 25's choice: maintaining these indexes
+costs report writes and storage, but whole-database audits under the gate held every write for minutes.
+The ingestion budget remains unchanged and is checked with the reset budget.
+
+Rejected: a project-filtered final audit misses other projects' references. Auditing only referencing tables
+still scans unrelated rows. A preflight without the generation comparison can become stale before the gate.
+Capturing deleted parent keys and changed child keys with temporary triggers would duplicate SQLite's
+constraint engine and still require incoming indexes or a large temporary reverse-reference map.

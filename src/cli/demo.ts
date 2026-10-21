@@ -50,7 +50,7 @@ export async function refreshDemo(
 	instance: Instance,
 	project: string,
 	size: { cases: number; unlinkedFiles: number; days?: number } = { cases: DEFAULT_SEED_CASES, unlinkedFiles: 60 },
-	options: { step?: (name: string) => Promise<void>; signal?: AbortSignal } = {},
+	options: { step?: (name: string) => Promise<void>; preflight?: () => Promise<void>; signal?: AbortSignal } = {},
 ): Promise<SeedResult> {
 	const { app, owner } = instance;
 	const token = (label: string) =>
@@ -85,11 +85,7 @@ export async function refreshDemo(
 		await revoke(preflight.id);
 		logStep(project, "preflight", performance.now() - began);
 	}
-	if (exists)
-		await app.gate.run(() => {
-			options.signal?.throwIfAborted();
-			return resetInWorker(instance, project, legacySeq, options);
-		});
+	if (exists) await resetInWorker(instance, project, legacySeq, options);
 	// Emptying can take longer than a token's lifetime. Make the seed's token only once it has ended.
 	const seeding = await token(`demo seed of ${project}`);
 	const since = performance.now();
@@ -105,6 +101,8 @@ const DemoMessage = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("progress"), step: z.string(), ms: z.number() }),
 	z.object({ kind: z.literal("pause"), step: z.literal("removed") }),
 	z.object({ kind: z.literal("done") }),
+	z.object({ kind: z.literal("ready") }),
+	z.object({ kind: z.literal("retry") }),
 ]);
 
 function logStep(project: string, step: string, ms: number): void {
@@ -115,7 +113,7 @@ async function resetInWorker(
 	instance: Instance,
 	project: string,
 	legacySeq: number | null,
-	options: { step?: (name: string) => Promise<void> },
+	options: { step?: (name: string) => Promise<void>; preflight?: () => Promise<void>; signal?: AbortSignal },
 ): Promise<void> {
 	const worker = new Worker(
 		new URL(Bun.isStandaloneExecutable ? "./cli/demo-worker.js" : "./demo-worker.ts", import.meta.url),
@@ -133,6 +131,9 @@ async function resetInWorker(
 	);
 	const began = performance.now();
 	let timer: ReturnType<typeof setTimeout> | undefined;
+	let unlock: (() => void) | undefined;
+	let gateWork: Promise<void> | undefined;
+	let stopped = false;
 	try {
 		await new Promise<void>((resolve, reject) => {
 			timer = setTimeout(() => reject(new Error("demo reset exceeded ten minutes; worker stopped")), 10 * 60_000);
@@ -140,7 +141,30 @@ async function resetInWorker(
 				const parsed = DemoMessage.safeParse(message);
 				if (!parsed.success) return reject(new Error("invalid demo reset worker reply"));
 				const reply = parsed.data;
-				if (reply.kind === "done") return resolve();
+				if (reply.kind === "done") {
+					unlock?.();
+					return resolve();
+				}
+				if (reply.kind === "retry") {
+					unlock?.();
+					return;
+				}
+				if (reply.kind === "ready") {
+					gateWork = Promise.resolve()
+						.then(() => options.preflight?.())
+						.then(() =>
+							instance.app.gate.run(async () => {
+								if (stopped) return;
+								options.signal?.throwIfAborted();
+								await new Promise<void>((release) => {
+									unlock = release;
+									worker.postMessage("continue");
+								});
+							}),
+						);
+					void gateWork.catch(reject);
+					return;
+				}
 				if (reply.kind === "progress") return logStep(project, reply.step, reply.ms);
 				void Promise.resolve()
 					.then(() => options.step?.(reply.step))
@@ -152,8 +176,11 @@ async function resetInWorker(
 			worker.once("exit", (code) => reject(new Error(`demo reset worker exited with code ${code}`)));
 		});
 	} finally {
+		stopped = true;
 		clearTimeout(timer);
 		await worker.terminate();
+		unlock?.();
+		await gateWork;
 		logStep(project, "reset transaction", performance.now() - began);
 	}
 }
@@ -165,11 +192,16 @@ export function* resetDemoSteps(
 	project: string,
 	legacySeq: number | null,
 	progress: (step: string, ms: number) => void,
-): Generator<undefined, void, void> {
+	checkedVersion?: number,
+): Generator<undefined, "stale" | undefined, void> {
+	const checking = performance.now();
+	const version = checkedVersion ?? app.db.foreignKeySnapshot();
+	if (checkedVersion === undefined) progress("preflight foreign keys", performance.now() - checking);
 	const starting = performance.now();
 	let finishing = starting;
 	try {
-		yield* app.db.checkedBulkSteps(function* () {
+		return yield* app.db.deferredSteps(function* () {
+			if (!app.db.foreignKeySnapshotMatches(version)) return "stale";
 			progress("begin reset transaction", performance.now() - starting);
 			try {
 				const began = performance.now();
@@ -190,7 +222,7 @@ export function* resetDemoSteps(
 				// This bulk transaction has made no changes yet; keep deferral on until its final check and commit.
 				app.db.exec("PRAGMA defer_foreign_keys = ON");
 				progress("defer reset foreign keys", performance.now() - deferring);
-				removeProject(app.db, project, progress);
+				removeProject(app.db, project, progress, "deferred");
 				yield;
 				const recreating = performance.now();
 				// A start stopped before commit keeps the old demo and grants. After commit it keeps an empty demo
@@ -212,6 +244,7 @@ export function* resetDemoSteps(
 						});
 				}
 				progress("recreate demo and grants", performance.now() - recreating);
+				return undefined;
 			} finally {
 				finishing = performance.now();
 			}

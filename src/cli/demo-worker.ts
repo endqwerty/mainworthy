@@ -17,18 +17,37 @@ try {
 	const owner = actorByName(app.db, data.owner, 0);
 	progress("find demo owner", performance.now() - finding);
 	if (!owner) throw new Error("the demo owner no longer exists");
-	const steps = resetDemoSteps(app, owner, data.project, data.legacySeq, progress);
-	try {
-		for (let step = steps.next(); !step.done; step = steps.next()) {
-			await new Promise<void>((resolve, reject) => {
-				port.once("message", (message: unknown) =>
-					message === "continue" ? resolve() : reject(new Error("invalid demo reset continuation")),
-				);
+	const resume = () =>
+		new Promise<void>((resolve, reject) => {
+			port.once("message", (message: unknown) =>
+				message === "continue" ? resolve() : reject(new Error("invalid demo reset continuation")),
+			);
+		});
+	for (;;) {
+		const checking = performance.now();
+		const version = app.db.foreignKeySnapshot();
+		progress("preflight foreign keys", performance.now() - checking);
+		const ready = resume();
+		port.postMessage({ kind: "ready" });
+		await ready;
+		const steps = resetDemoSteps(app, owner, data.project, data.legacySeq, progress, version);
+		let stale = false;
+		try {
+			for (;;) {
+				const step = steps.next();
+				if (step.done) {
+					stale = step.value === "stale";
+					break;
+				}
+				const continued = resume();
 				port.postMessage({ kind: "pause", step: "removed" });
-			});
+				await continued;
+			}
+		} finally {
+			steps.return(undefined);
 		}
-	} finally {
-		steps.return();
+		if (!stale) break;
+		port.postMessage({ kind: "retry" });
 	}
 } finally {
 	const closing = performance.now();

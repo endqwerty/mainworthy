@@ -40,6 +40,8 @@ import resultTrail from "./migrations/0034_result_trail.sql" with { type: "text"
 import projectIdentity from "./migrations/0035_project_identity.sql" with { type: "text" };
 import changeLandings from "./migrations/0036_change_landings.sql" with { type: "text" };
 
+import resetConstraints from "./migrations/0037_reset_constraints.sql" with { type: "text" };
+
 /**
  * In order. A migration is never edited after it ships; a change is a new entry.
  * Versions are contiguous from 1, and a branch takes the next free number when it lands.
@@ -86,6 +88,7 @@ export const MIGRATIONS: readonly { version: number; name: string; sql: string; 
 	{ version: 34, name: "result_trail", sql: resultTrail, archive: true },
 	{ version: 35, name: "project_identity", sql: projectIdentity, archive: true },
 	{ version: 36, name: "change_landings", sql: changeLandings, archive: false },
+	{ version: 37, name: "reset_constraints", sql: resetConstraints, archive: false },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

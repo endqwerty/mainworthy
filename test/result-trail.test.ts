@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { z } from "zod";
 import type { ResultStep } from "../src/core/results.ts";
+import { dropResetIndexes } from "./demo-removal-fixture.ts";
 import { type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
@@ -142,6 +143,7 @@ test("migration preserves old simple trails and recovery preserves accepted rich
 		target: { session: "old" },
 		results: [{ test: { key: "old" }, outcome: "fail", steps: [{ step: "a1.b2", outcome: "fail" }] }],
 	});
+	dropResetIndexes(h.app.db);
 	h.app.db.exec(
 		"DROP INDEX change_ends_landing; ALTER TABLE change_ends DROP COLUMN landing_branch; ALTER TABLE change_ends DROP COLUMN landing_repo; ALTER TABLE change_ends DROP COLUMN landing_commit; DROP INDEX projects_identity; ALTER TABLE projects DROP COLUMN identity; ALTER TABLE results RENAME COLUMN trail TO steps; UPDATE meta SET value = '33' WHERE key = 'schema_version'",
 	);

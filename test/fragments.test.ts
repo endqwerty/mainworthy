@@ -15,6 +15,7 @@ import { bodyOf, expandSteps, fragmentUsers, mustCase } from "../src/server/suit
 import { exportArchive, importArchive, linesOf } from "../src/server/transfer/transfer.ts";
 import { DraftBody } from "../src/web/lib/drafts.ts";
 import { holdsUnfinishedStep, recordable } from "../src/web/lib/merges.ts";
+import { dropResetIndexes } from "./demo-removal-fixture.ts";
 import { type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
@@ -213,6 +214,7 @@ test("upgrading an existing database rebuilds pinned search once", () => {
 	const documents = () =>
 		db.raw.query("SELECT rowid, title, body, tags, project FROM search_docs ORDER BY rowid").all();
 	const expected = documents();
+	dropResetIndexes(db);
 	// Restore schema 29 before replaying migrations, including columns added since the search upgrade.
 	db.exec(
 		"DROP INDEX change_ends_landing; ALTER TABLE change_ends DROP COLUMN landing_branch; ALTER TABLE change_ends DROP COLUMN landing_repo; ALTER TABLE change_ends DROP COLUMN landing_commit; DROP INDEX projects_identity; ALTER TABLE projects DROP COLUMN identity; ALTER TABLE results RENAME COLUMN trail TO steps; ALTER TABLE results DROP COLUMN model; ALTER TABLE batches DROP COLUMN model",

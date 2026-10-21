@@ -10,8 +10,11 @@ import { BUDGETS } from "../bench/contracts.ts";
 import { buildDataset, openDataset, Parameters } from "../bench/dataset.ts";
 import { measure, table } from "../bench/measure.ts";
 import { ingestWorkload, prepareRecentChanges, readWorkloads, saveWorkload } from "../bench/workloads.ts";
+import { resetDemoSteps } from "../src/cli/demo.ts";
+import { withInstance } from "../src/cli/test-support.ts";
 import type { Quarantine } from "../src/core/flaky.ts";
 import type { GateStatus, InboxReply, ProposeReply, ReportReceipt } from "../src/core/ops.ts";
+import { removalFixture } from "./demo-removal-fixture.ts";
 import { ciReport, harness } from "./helpers.ts";
 
 test("on-disk hot paths stay inside the design budgets", async () => {
@@ -296,4 +299,27 @@ test("a 500-result trunk page batches landing reads beside 8000 changes", async 
 	} finally {
 		h.close();
 	}
+});
+
+test("the reset's indexed constraint work stays within the removal budget", async () => {
+	await withInstance(async ({ instance }) => {
+		const { app, owner } = instance;
+		removalFixture(app.db, 5_000, 20_000);
+		let began = 0;
+		const steps = resetDemoSteps(app, owner, "removing", null, (step, ms) => {
+			if (step === "begin reset transaction") began = performance.now() - ms;
+		});
+		for (const _ of steps) {
+		}
+		const lockedMs = performance.now() - began;
+		expect(app.db.raw.query("SELECT project, count(*) AS n FROM results GROUP BY project").all()).toEqual([
+			{ project: 901, n: 20_000 },
+		]);
+		expect(app.db.raw.query("SELECT count(*) AS n FROM result_excuses").get()).toEqual({ n: 20_000 });
+		expect(app.db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
+		expect(lockedMs).toBeLessThan(250);
+		console.log(
+			`reset constraints and writes: ${lockedMs.toFixed(1)} ms; 5000 removed, 20000 unrelated results retained`,
+		);
+	});
 });
