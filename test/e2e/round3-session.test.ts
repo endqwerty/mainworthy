@@ -38,7 +38,28 @@ check(
 		const alice = await grant(server, "alice"),
 			bob = await grant(server, "bob");
 		const [alicePrefix, bobPrefix] = [await devicePrefix(server, alice), await devicePrefix(server, bob)];
-		const h = await openPage({ ...server, token: alice }, { path: "/p/scratch/suite/c/1" });
+		const h = await openPage(
+			{ ...server, token: alice },
+			{
+				path: "/p/scratch/suite/c/1",
+				setup: async (page) => {
+					await page.addInitScript(() => {
+						const fetch = window.fetch;
+						Reflect.set(window, "fetch", async (...args: Parameters<typeof fetch>) => {
+							const response = await fetch(...args);
+							if (!response.url.endsWith("/propose")) return response;
+							const json = response.json.bind(response);
+							response.json = async () => {
+								const body: unknown = await json();
+								requestAnimationFrame(() => requestAnimationFrame(() => Reflect.set(window, "oldSealConsumed", true)));
+								return body;
+							};
+							return response;
+						});
+					});
+				},
+			},
+		);
 		let release = () => {};
 		const held = new Promise<void>((resolve) => {
 			release = resolve;
@@ -88,7 +109,7 @@ check(
 			await page.keyboard.press("e");
 			await step.fill("Bob private text");
 			release();
-			await page.waitForTimeout(500);
+			await page.waitForFunction(() => Reflect.get(window, "oldSealConsumed") === true);
 			expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(2);
 			expect(
 				await page.evaluate(
