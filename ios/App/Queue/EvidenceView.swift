@@ -86,13 +86,21 @@ private struct FailureEvidence: View {
 private struct TestList: View {
 	let tests: [TestRef]
 	let count: Int
+	@Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
 	var body: some View {
 		ForEach(tests) { test in
-			HStack(alignment: .firstTextBaseline, spacing: 8) {
-				RefText(test.ref)
+			let stacked = dynamicTypeSize.isAccessibilitySize
+			let layout = stacked
+				? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+				: AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+			layout {
+				HStack(spacing: 8) {
+					RefText(test.ref)
+					if stacked, let caseRef = test.caseRef { RefText(caseRef) }
+				}
 				Text(test.name).font(.subheadline)
-				if let caseRef = test.caseRef {
+				if !stacked, let caseRef = test.caseRef {
 					Spacer()
 					RefText(caseRef)
 				}

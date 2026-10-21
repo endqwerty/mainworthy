@@ -87,6 +87,91 @@ final class QueueUITests: XCTestCase {
 		return ["items": try XCTUnwrap(envelope["result"] as? [Any])]
 	}
 
+	@MainActor private func launchAtTextSize(_ size: UIContentSizeCategory, project: String) throws -> XCUIApplication {
+		XCUIDevice.shared.orientation = .portrait
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", try XCTUnwrap(environment["MAINWORTHY_TEST_URL"]),
+			"-UIPreferredContentSizeCategoryName", size.rawValue]
+		app.launch()
+		try signIn(app)
+		app.openProject(project)
+		return app
+	}
+
+	@MainActor private func assertWholeWord(_ word: String, in text: XCUIElement,
+		style: UIFont.TextStyle, size: UIContentSizeCategory, weight: UIFont.Weight = .regular,
+		window: CGRect, file: StaticString = #filePath, line: UInt = #line) {
+		let traits = UITraitCollection(preferredContentSizeCategory: size)
+		let preferred = UIFont.preferredFont(forTextStyle: style, compatibleWith: traits)
+		let font = UIFont.systemFont(ofSize: preferred.pointSize, weight: weight)
+		let width = (word as NSString).size(withAttributes: [.font: font]).width
+		print("u706 \(word): frame=\(text.frame), whole-word width=\(width), font=\(font.pointSize), window=\(window)")
+		XCTAssertGreaterThanOrEqual(text.frame.width, width - 1, "\(word) must fit without truncation or a mid-word break", file: file, line: line)
+		XCTAssertGreaterThanOrEqual(text.frame.minX, window.minX, file: file, line: line)
+		XCTAssertLessThanOrEqual(text.frame.maxX, window.maxX, file: file, line: line)
+	}
+
+	@MainActor private func proposalSource(at size: UIContentSizeCategory, name: String) async throws {
+		let project = try await makeProject()
+		let app = try launchAtTextSize(size, project: project)
+		let proposal = app.staticTexts["Edit: A percentage coupon lowers the total"]
+		for _ in 0..<10 where !proposal.isHittable { app.swipeUp() }
+		XCTAssertTrue(proposal.isHittable)
+		proposal.tap()
+		XCTAssertTrue(app.staticTexts["edit-summary"].waitForExistence(timeout: 10))
+		let source = app.staticTexts["from an agent"]
+		XCTAssertTrue(source.exists)
+		shot("u706-\(name)-header")
+		assertWholeWord("from an agent", in: source, style: .caption1, size: size, window: app.windows.firstMatch.frame)
+		if size == .large {
+			XCTAssertEqual(source.frame.midY, app.staticTexts["proposal"].frame.midY, accuracy: 3)
+		}
+	}
+
+	@MainActor func testProposalSourceIsWholeAtXXXLarge() async throws {
+		try await proposalSource(at: .extraExtraExtraLarge, name: "xxxl")
+	}
+
+	@MainActor func testProposalHeaderKeepsDefaultRow() async throws {
+		try await proposalSource(at: .large, name: "default")
+	}
+
+	@MainActor func testDecidedAndTestWordsFitAtLargestTextSize() async throws {
+		let project = try await makeProject()
+		let inbox = try await call("inbox", project: project, input: ["kind": "failure"])
+		let question = try XCTUnwrap((inbox["items"] as? [[String: Any]])?.first)
+		_ = try await call("decide", project: project, input: [
+			"q": try XCTUnwrap(question["q"]), "onEvidence": try XCTUnwrap(question["evidenceHash"]),
+			"answer": ["is": "infra"],
+		])
+		let size = UIContentSizeCategory.accessibilityExtraExtraExtraLarge
+		let app = try launchAtTextSize(size, project: project)
+		app.buttons["Decided"].tap()
+		let row = app.staticTexts[try XCTUnwrap(question["title"] as? String)]
+		XCTAssertTrue(row.waitForExistence(timeout: 10))
+		row.tap()
+		let test = app.staticTexts["Shop check 1"]
+		for _ in 0..<15 where !test.isHittable { app.swipeUp() }
+		XCTAssertTrue(test.isHittable)
+		shot("u706-ax5-tests")
+		let testFrame = test.frame
+		let decision = app.staticTexts["Infrastructure"]
+		for _ in 0..<10 where !decision.isHittable { app.swipeUp() }
+		XCTAssertTrue(decision.isHittable)
+		shot("u706-ax5-decided")
+		continueAfterFailure = true
+		defer { continueAfterFailure = false }
+		let window = app.windows.firstMatch.frame
+		assertWholeWord("Infrastructure", in: decision, style: .body, size: size, weight: .semibold, window: window)
+		// The text may scroll out of view; its original rendered frame still establishes available word width.
+		let font = UIFont.preferredFont(forTextStyle: .subheadline, compatibleWith: UITraitCollection(preferredContentSizeCategory: size))
+		let wordWidth = ("check" as NSString).size(withAttributes: [.font: font]).width
+		print("u706 check: frame=\(testFrame), whole-word width=\(wordWidth)")
+		XCTAssertGreaterThanOrEqual(testFrame.width, wordWidth - 1, "check must fit without a mid-word break")
+		XCTAssertGreaterThanOrEqual(testFrame.minX, window.minX)
+		XCTAssertLessThanOrEqual(testFrame.maxX, window.maxX)
+	}
+
 	@MainActor func testProposalFitsScreenAtLargestTextSize() async throws {
 		XCUIDevice.shared.orientation = .portrait
 		let project = try await makeProject()
