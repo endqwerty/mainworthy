@@ -44,7 +44,7 @@ struct PagingSearchTests {
 		#expect(results ? counted.loading == .done : tests.loading == .done)
 	}
 
-	@Test("long pasted searches are cut to 200 UTF-16 units, inside the server's limit", arguments: [false, true])
+	@Test("long pasted searches say on screen that only their beginning is searched", arguments: [false, true])
 	func longPaste(results: Bool) async throws {
 		let transport = SearchReplies(results: results)
 		let server = Server(
@@ -53,20 +53,37 @@ struct PagingSearchTests {
 		let tests = TestsScreen(project: project)
 		let counted = ChangeResults(project: project, change: "pr:1", run: "R-1")
 		if results { await counted.load() } else { await tests.load() }
-		let pastes = [
+		let pastes: [(String, String)] = [
 			(String(repeating: "x", count: 201), String(repeating: "x", count: 200)),
 			(String(repeating: "🧪", count: 101), String(repeating: "🧪", count: 100)),
 			(String(repeating: "x", count: 199) + "🧪tail", String(repeating: "x", count: 199)),
 			(String(repeating: "e\u{301}", count: 101), String(repeating: "e\u{301}", count: 100)),
+			("  " + String(repeating: "x", count: 201) + "  ", String(repeating: "x", count: 200)),
+			(String(repeating: "x", count: 195) + "👨‍👩‍👧‍👦tail", String(repeating: "x", count: 195)),
 		]
 		for (paste, expected) in pastes {
 			if results { counted.text = paste } else { tests.text = paste }
 			#expect(results ? counted.text == paste : tests.text == paste)
 			if results { await counted.search() } else { await tests.search() }
+			#expect((results ? counted.searchNote : tests.searchNote) == "Only the beginning of this text is searched.")
 			#expect(await transport.texts.last == expected)
 			#expect(results ? counted.rows.map(\.name) == [expected] : tests.tests.map(\.name) == [expected])
 			#expect(results ? counted.loading == .done : tests.loading == .done)
 		}
+		await transport.refuse(true)
+		if results { await counted.read() } else { await tests.read() }
+		#expect((results ? counted.notice : tests.notice) == "Search refused.")
+		#expect((results ? counted.searchNote : tests.searchNote) == "Only the beginning of this text is searched.")
+		await transport.refuse(false)
+		let boundary = String(repeating: "x", count: 200)
+		if results { counted.text = "  " + boundary + "  "; await counted.search() }
+		else { tests.text = "  " + boundary + "  "; await tests.search() }
+		#expect(await transport.texts.last == boundary)
+		#expect((results ? counted.searchNote : tests.searchNote) == nil)
+		if results { counted.text = "  shipping  "; await counted.search() }
+		else { tests.text = "  shipping  "; await tests.search() }
+		#expect(await transport.texts.last == "shipping")
+		#expect((results ? counted.searchNote : tests.searchNote) == nil)
 	}
 
 	@Test("a refused search or chip can be replaced", arguments: [false, true])
@@ -129,6 +146,7 @@ struct PagingSearchTests {
 			query: .init(text: String(repeating: "🧪", count: 101)))
 		await results.load()
 		#expect(results.text == String(repeating: "🧪", count: 101))
+		#expect(results.searchNote == "Only the beginning of this text is searched.")
 		#expect(await transport.texts == [String(repeating: "🧪", count: 100)])
 		#expect(results.loading == .done)
 	}

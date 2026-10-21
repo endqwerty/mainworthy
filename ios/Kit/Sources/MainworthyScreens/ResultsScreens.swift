@@ -236,6 +236,8 @@ public final class ChangeResults {
 	/// Whether an earlier read supplied the counts and filter controls, even if the current query failed.
 	public var hasRead: Bool { list.first != nil }
 	public var notice: String? { list.notice }
+	/// Says, beside the field, when the search sends only the beginning of what was typed or pasted.
+	public var searchNote: String? { cutSearchNote(text) }
 	/// The next page was refused because the results changed since the first.
 	public var moved: Bool { list.moved }
 	public var hasMore: Bool { list.hasMore }
@@ -311,6 +313,8 @@ public final class TestsScreen: ProjectScreen {
 	public var tests: [TestSummary] { list.rows }
 	public var loading: ListLoading { list.loading }
 	public var notice: String? { list.notice }
+	/// Says, beside the field, when the search sends only the beginning of what was typed or pasted.
+	public var searchNote: String? { cutSearchNote(text) }
 	public var hasMore: Bool { list.hasMore }
 
 	/// Each test as it was last read. A test whose page is not open is read again when it is opened.
@@ -387,4 +391,8 @@ public final class TestsScreen: ProjectScreen {
 		if list.loading != .first { await list.reload() }
 		for ref in shown.keys.sorted() { await readDetail(ref) }
 	}
+}
+
+private func cutSearchNote(_ text: String) -> String? {
+	findText(text) == text.trimmingCharacters(in: .whitespacesAndNewlines) ? nil : "Only the beginning of this text is searched."
 }

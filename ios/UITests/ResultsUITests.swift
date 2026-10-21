@@ -123,11 +123,13 @@ final class ResultsUITests: XCTestCase {
 		let app = try openResults(project, address: XCTUnwrap(environment["MAINWORTHY_TEST_URL"]))
 		let field = app.textFields["results-filter"]
 		let expected = String(repeating: "x", count: 200)
+		let notice = "Only the beginning of this text is searched."
 		paste(expected + "overflow", into: field, in: app)
 		XCTAssertEqual(field.value as? String, expected + "overflow")
 		XCTAssertTrue(app.staticTexts["No result matches."].waitForExistence(timeout: 10))
 		XCTAssertTrue(app.buttons["results-all"].exists)
 		XCTAssertFalse(app.buttons["Try again"].exists)
+		let resultsNoticeVisible = app.staticTexts[notice].waitForExistence(timeout: 10)
 		shot("results-long-paste")
 		field.typeText("\n")
 		app.openTab("Cases")
@@ -138,7 +140,10 @@ final class ResultsUITests: XCTestCase {
 		XCTAssertEqual(search.value as? String, expected + "overflow")
 		XCTAssertTrue(app.staticTexts["No test matches."].waitForExistence(timeout: 10))
 		XCTAssertFalse(app.buttons["Try again"].exists)
+		let testsNoticeVisible = app.staticTexts[notice].waitForExistence(timeout: 10)
 		shot("tests-long-paste")
+		XCTAssertTrue(resultsNoticeVisible, "Results must say when only the beginning of a search is used")
+		XCTAssertTrue(testsNoticeVisible, "Tests must say when only the beginning of a search is used")
 	}
 
 	@MainActor func testResultsTestsAndWhoRanACase() async throws {

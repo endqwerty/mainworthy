@@ -22,6 +22,7 @@ struct TestsListView: View {
 					Button("Try again") { Task { await screen.read() } }
 				}
 			}
+			if let note = screen.searchNote { Text(note).font(.subheadline).foregroundStyle(.secondary) }
 			if let notice = screen.notice { Text(notice).foregroundStyle(Color.fail) }
 			Section {
 				ForEach(screen.tests) { test in

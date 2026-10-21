@@ -43,6 +43,7 @@ struct ChangeResultsPanel: View {
 				.textInputAutocapitalization(.never)
 				.accessibilityIdentifier("results-filter")
 		}
+		if let note = results.searchNote { Text(note).font(.subheadline).foregroundStyle(.secondary) }
 		if let notice = results.notice { Text(notice).font(.subheadline).foregroundStyle(Color.fail) }
 		if case .failed(let why) = results.loading {
 			Text(why).foregroundStyle(Color.fail)
