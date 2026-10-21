@@ -106,7 +106,9 @@ for (const same of [false, true])
 					await page.getByText("Resolve the conflict first", { exact: false }).first().waitFor();
 					if (seal) {
 						await page.keyboard.press("Escape");
-						await page.waitForTimeout(200);
+						await page.locator("#bar").filter({ hasText: "Resolve the conflict first" }).waitFor();
+						expect(await page.locator(".conflict-card").isVisible()).toBe(true);
+						expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(2);
 					}
 					await page.getByRole("button", { name: "Use my title", exact: true }).click();
 					await page.getByRole("button", { name: "Resolve conflict", exact: true }).click();
