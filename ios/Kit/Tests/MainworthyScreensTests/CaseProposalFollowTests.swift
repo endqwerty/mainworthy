@@ -82,6 +82,68 @@ struct CaseProposalFollowTests {
 		#expect(try await decide(key, question: question, answer: "accept") == CaseStamp(ref: opened.ref, version: 2))
 	}
 
+	@Test("unchanged custom fields do not claim another person's changes", arguments: [false, true])
+	func unchangedFields(throughScreen: Bool) async throws {
+		let key = try await Live.project(strict: true)
+		let client = try await Live.signedIn().project(key)
+		let ref = try #require(try await client.cases().items.first?.ref)
+		try await otherEdit(key, opened: client.caseDocument(ref), body: ["fields": ["priority": "high"]])
+		let screen = SuiteScreen(project: client)
+		let opened: CaseDocument
+		if throughScreen {
+			await screen.openCase(ref)
+			guard case .read(let document) = screen.document(ref) else { Issue.record("case did not open"); return }
+			opened = document
+		} else { opened = try await client.caseDocument(ref) }
+		await screen.edit(opened)
+		let editor = try #require(screen.editor)
+		#expect(editor.content.fields == ["priority": "high"])
+		editor.content.title = "Only my title changes"
+		guard case .waiting(let question, _) = await editor.save(), let question else { Issue.record("did not wait"); return }
+		#expect(try await decide(key, question: question, answer: "accept") == CaseStamp(ref: ref, version: 3))
+		await screen.refresh()
+		#expect(!editor.locked && !editor.dirty)
+		#expect(editor.content.title == "Only my title changes" && editor.content.fields == ["priority": "high"])
+		#expect(editor.notice == "Proposal accepted. Continue editing \(ref), version 3.")
+		editor.content.title = "My next title keeps the field"
+		guard case .waiting(let next, _) = await editor.save(), let next else { Issue.record("next edit did not wait"); return }
+		#expect(try await decide(key, question: next, answer: "accept") == CaseStamp(ref: ref, version: 4))
+		let saved = try await client.caseDocument(ref, includingCustomFields: true)
+		#expect(saved.content.title == "My next title keeps the field" && saved.content.fields == ["priority": "high"])
+	}
+
+	@Test("a configured custom field does not invent another person's changes on create")
+	func createWithFieldDefinition() async throws {
+		let key = try await Live.project(strict: true)
+		let owner = try await Live.signedIn(as: Live.owner)
+		let policy: JSONValue = try await owner.read("admin", in: nil, ["do": "policy.show", "project": .string(key)])
+		var settings = try #require(policy["settings"]?.object)
+		settings["fields"] = ["priority": [
+			"kind": "choice", "label": "Priority", "required": false, "choices": ["low", "high"], "default": "high",
+		]]
+		let proposed: Wire.SuiteProposeReply = try await owner.write("propose", in: key, ["edits": [[
+			"op": "policy", "base": try #require(policy["version"]), "settings": .object(settings),
+		]]])
+		_ = try await decide(key, question: #require(proposed.question), answer: "accept")
+		let configured: JSONValue = try await owner.read("admin", in: nil, ["do": "policy.show", "project": .string(key)])
+		#expect(configured["settings"]?["fields"]?["priority"] == [
+			"kind": "choice", "label": "Priority", "required": false, "choices": ["low", "high"],
+		])
+		let client = try await Live.signedIn().project(key)
+		let screen = SuiteScreen(project: client)
+		screen.newCase()
+		let editor = try #require(screen.editor)
+		editor.content.title = "Create with a configured field"
+		guard case .waiting(let question, _) = await editor.save(), let question else { Issue.record("did not wait"); return }
+		let stamp = try #require(try await decide(key, question: question, answer: "accept"))
+		await screen.refresh()
+		#expect(!editor.locked && !editor.dirty)
+		#expect(editor.notice == "Proposal accepted. Continue editing \(stamp.ref), version 1.")
+		let saved = try await client.caseDocument(stamp.ref, includingCustomFields: true)
+		#expect(saved.content.title == "Create with a configured field" && saved.content.fields == [:])
+		#expect(editor.content == saved.content)
+	}
+
 	@Test("following a merged edit preserves recorded methods, automation and custom fields on the next save")
 	func mergedMethods() async throws {
 		let key = try await Live.project(strict: true)

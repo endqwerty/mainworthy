@@ -669,7 +669,7 @@ struct SuiteEditorRetryTests {
 		private(set) var bodies: [Data] = []
 		func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
 			if request.url?.path.hasSuffix("/get") == true {
-				let reply = #"{"ok":true,"result":[{"ref":"C-7","version":1,"title":"One case","pre":"","steps":[],"methods":["human"],"automate":"none","tags":[],"folder":{"path":"Checkout/Coupons"}}]}"#
+				let reply = #"{"ok":true,"result":[{"ref":"C-7","version":1,"title":"One case","pre":"","steps":[],"methods":["human"],"automate":"none","fields":{},"tags":[],"folder":{"path":"Checkout/Coupons"}}]}"#
 				return (Data(reply.utf8), HTTPURLResponse(url: request.url!, statusCode: 200,
 					httpVersion: nil, headerFields: nil)!)
 			}
@@ -872,7 +872,7 @@ struct SuiteOtherReadTests {
 			let title = mine == 1 ? "old" : "new"
 			let result: String
 			if request.url?.path.hasSuffix("/get") == true {
-				result = #"[{"ref":"C-1","version":1,"title":"\#(title)","pre":"","steps":[],"methods":["human"],"automate":"none","tags":[],"folder":{"path":""}}]"#
+				result = #"[{"ref":"C-1","version":1,"title":"\#(title)","pre":"","steps":[],"methods":["human"],"automate":"none","fields":{},"tags":[],"folder":{"path":""}}]"#
 			} else {
 				result = #"{"versions":[{"version":1,"by":"robin","at":0,"reason":null,"summary":"\#(title)"}]}"#
 			}
@@ -944,7 +944,7 @@ struct SuiteAcceptanceTests {
 				gets += 1
 				if kind == "read fails" && gets <= 2 { throw URLError(.networkConnectionLost) }
 				let title = kind == "different text" ? "Changed by server" : "Typed title"
-				result = #"[{"ref":"C-1","version":1,"title":"\#(title)","pre":"","steps":[],"methods":["human"],"automate":"none","tags":[],"folder":{"path":""}}]"#
+				result = #"[{"ref":"C-1","version":1,"title":"\#(title)","pre":"","steps":[],"methods":["human"],"automate":"none","fields":{},"tags":[],"folder":{"path":""}}]"#
 			}
 			return (Data("{\"ok\":true,\"result\":\(result)}".utf8),
 				HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)

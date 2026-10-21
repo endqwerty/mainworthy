@@ -327,14 +327,14 @@ struct ConflictRecoveryTests {
 		#expect(editor.content.title == "My title")
 	}
 
-	@Test("the exact historical base keeps custom fields that the ordinary case read omits")
+	@Test("the exact historical base keeps custom fields that a partial case read omits")
 	func customFields() async throws {
 		let server = try await Live.signedIn()
 		let project = try await server.project(try await Live.project())
 		let made = try await project.saveCase(SuiteSubmission(source: .create(folder: nil),
 			content: CaseContent(title: "Base", fields: ["priority": "high"]), reason: "Create"))
 		guard case .adopted(let stamp) = made, let stamp else { Issue.record("not created"); return }
-		let opened = try await project.caseDocument(stamp.ref)
+		let opened = try await project.caseDocument(stamp.ref, includingCustomFields: false)
 		#expect(opened.readFields == nil)
 		let editor = CaseEditorScreen(project: project, source: .edit(opened))
 		editor.content.title = "My custom case"
