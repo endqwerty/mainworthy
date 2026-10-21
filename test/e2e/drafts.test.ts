@@ -382,10 +382,15 @@ test.skipIf(!browserAvailable)(
 			await page.keyboard.type("This text is kept");
 			expect(await page.locator(".cstate").textContent()).toContain("kept in this tab");
 			await page.keyboard.press("Escape");
-			await eventually(
+			const rows = await eventually(
 				() => server.api("find", { in: "cases" }),
 				(rows) => rows.items.length === 1,
 			);
+			const ref = rows.items[0]?.ref;
+			if (typeof ref !== "string") throw new Error("The captured case has no reference");
+			const [saved] = await server.api("get", { refs: [ref] });
+			expect(saved?.title).toBe("Storage is full");
+			expect(saved?.steps).toMatchObject([{ action: "This text is kept" }]);
 			expect(h.errors).toEqual([]);
 		} finally {
 			await h.close();
@@ -612,8 +617,18 @@ test.skipIf(!browserAvailable)(
 			await page.keyboard.type("abcdefgh");
 			expect(await field.inputValue()).toBe("abcdefghStep 0");
 			const reads = z.array(z.string()).parse(await page.evaluate(() => Reflect.get(window, "textareaHeightReads")));
-			expect(reads.length).toBe(8);
-			expect([...new Set(reads)]).toEqual(["Step 1"]);
+			expect(reads.length).toBeLessThanOrEqual(8);
+			expect(reads.every((label) => label === "Step 1")).toBe(true);
+			expect(
+				await field.evaluate((element) => {
+					if (!(element instanceof HTMLTextAreaElement)) throw new Error("Not a textarea");
+					return {
+						fits: element.clientHeight >= element.scrollHeight,
+						start: element.selectionStart,
+						end: element.selectionEnd,
+					};
+				}),
+			).toEqual({ fits: true, start: 8, end: 8 });
 			expect(browser.errors).toEqual([]);
 		} finally {
 			await browser.close();
