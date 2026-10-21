@@ -223,7 +223,7 @@ struct QuestionView: View {
 			Text([needs(question), readOnlyNote].compactMap { $0 }.joined(separator: " "))
 				.font(.subheadline)
 				.foregroundStyle(.secondary)
-			if case .proposal(let edit) = question.evidence, edit.isShownWhole, !screen.isShown(question) {
+			if screen.awaitsScrolling(question) {
 				Text("Scroll through every part on the Changes side of each edit, or the full case for a new case, before answering. With VoiceOver, scroll page by page with a three-finger swipe.")
 					.font(.subheadline).foregroundStyle(.secondary)
 			}
