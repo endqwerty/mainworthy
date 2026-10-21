@@ -489,14 +489,15 @@ final class RunsUITests: XCTestCase {
 		let data = try await request("find", #"{"in":"slots","run":"R-3"}"#)
 		let slots = try JSONDecoder().decode(Slots.self, from: data).result.items.filter { $0.state == "missing" }
 		XCTAssertEqual(slots.count, 2)
-		_ = try await request("work", #"{"do":"take","run":"R-3","slot":\#(slots[0].id),"seconds":30}"#)
-		_ = try await request("work", #"{"do":"take","run":"R-3","slot":\#(slots[1].id),"seconds":3600}"#)
 		let app = XCUIApplication()
 		app.launchArguments = ["-forget", "-instance", address]
 		app.launch()
 		try signIn(app)
 		app.openProject(project)
 		app.openTab("Runs")
+		XCTAssertTrue(app.staticTexts["Checkout regression"].waitForExistence(timeout: 15))
+		_ = try await request("work", #"{"do":"take","run":"R-3","slot":\#(slots[0].id),"seconds":30}"#)
+		_ = try await request("work", #"{"do":"take","run":"R-3","slot":\#(slots[1].id),"seconds":3600}"#)
 		XCTAssertTrue(app.staticTexts["2 cases left · 2 in progress"].waitForExistence(timeout: 10))
 		XCTAssertTrue(app.staticTexts["2 cases left · 1 in progress"].waitForExistence(timeout: 45))
 	}
