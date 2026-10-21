@@ -200,7 +200,7 @@ extension ProjectClient {
 
 /// `find.text` accepts 200 characters, counted as code points. Sending at most 200 UTF-16 units stays inside that
 /// for any text; keep whole characters when a paste crosses the boundary.
-private func findText(_ text: String) -> String {
+package func findText(_ text: String) -> String {
 	var units = 0
 	return String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix { character in
 		units += String(character).utf16.count
