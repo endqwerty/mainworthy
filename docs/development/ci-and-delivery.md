@@ -89,8 +89,10 @@ To clear the gate, do one of these:
   replaces the older one, and if the test passes, so does the gate. GitHub's "Re-run failed jobs" re-runs only
   `gate`, because the shard itself succeeded.
 
-`ci` reads `blocked` when a person is asked. For a CI failure that means the policy was changed back; it says how to
-set it again. Never overrule the rule's answer with the owner token.
+`ci` reads `blocked` with a question open when a person is asked. For a CI failure that means the policy was changed
+back, and it says how to set it again. An older commit reads `blocked` with no question once a later commit passed
+its failing tests, which ends the answer (decision 0102); nobody is asked about it. Never overrule the rule's answer
+with the owner token.
 
 A test that fails by chance is still a defect. File it with the `flaky-test` label in milestone M1.
 

@@ -58,9 +58,7 @@ export async function ciPolicy(call: Call, project: string): Promise<string> {
 export type Target = { change: string } | { commit: string };
 
 type Row = { test: string; name: string; file: string | null; message: string | null; build: string | null };
-type Rows = { count: number; items: Row[] };
-
-const SHOWN = 20;
+type Rows = { count: number; items: Row[]; cursor: string | null };
 
 /**
  * The gate of a pull request or a commit, and the tests behind a verdict that is not `passed`, as text and the exit
@@ -82,14 +80,25 @@ export async function readCi(
 	const lines = [`${what}: ${gate.verdict}: ${gate.reason.replace(new RegExp(`^${gate.verdict}:\\s*`), "")}`];
 	for (const state of ["attributed", "unexplained"] as const) {
 		if (gate.verdict === "passed" || !gate.tally[state]) continue;
-		const rows = (await call("find", { in: "results", ...target, state, limit: SHOWN })) as Rows;
-		lines.push("", `${state === "attributed" ? "needs a fix" : "not explained yet"} (${rows.count}):`);
-		for (const row of rows.items) {
+		const rows: Row[] = [];
+		let cursor: string | null = null;
+		do {
+			const page = (await call("find", {
+				in: "results",
+				...target,
+				state,
+				limit: 500,
+				...(cursor ? { cursor } : {}),
+			})) as Rows;
+			rows.push(...page.items);
+			cursor = page.cursor;
+		} while (cursor);
+		lines.push("", `${state === "attributed" ? "needs a fix" : "not explained yet"} (${rows.length}):`);
+		for (const row of rows) {
 			lines.push(`  ${row.test} ${row.file ?? "?"}: ${row.name}`);
 			for (const text of (row.message ?? "").split("\n").filter(Boolean).slice(0, 4)) lines.push(`    ${text}`);
 			if (row.build) lines.push(`    ${row.build}`);
 		}
-		if (rows.count > rows.items.length) lines.push(`  and ${rows.count - rows.items.length} more`);
 	}
 	lines.push("", NEXT[gate.verdict](gate));
 	return { text: lines.join("\n"), exit: EXIT_CODE[gate.verdict] };
@@ -101,7 +110,10 @@ const NEXT: Record<GateStatus["verdict"], (gate: GateStatus) => string> = {
 		"Fix them and push. The gate passes when a commit passes these tests; nobody else is asked. " +
 		"A test that fails now and then is a defect too: re-run its shard's job to unblock, and file it as flaky-test.",
 	blocked: (gate) =>
-		`A person is asked (${gate.open.join(", ") || "see the queue"}). If that is a CI failure, the project's policy ` +
-		"no longer answers failures by rule: `bun scripts/work.ts ci-policy` with the owner token sets it again.",
+		gate.open.length > 0
+			? `A person is asked (${gate.open.join(", ")}). If that is a CI failure, the project's policy no longer ` +
+				"answers failures by rule: `bun scripts/work.ts ci-policy` with the owner token sets it again."
+			: // Decision 0102: an answer that ended when a later commit passed stops explaining the commits it covered.
+				"Nobody is asked: a later commit passed these tests, which ended the answer on this one. Read the newest commit.",
 	pending: () => "Results are still coming: run it again with --wait=<seconds>.",
 };

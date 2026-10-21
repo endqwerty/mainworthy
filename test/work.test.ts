@@ -656,10 +656,21 @@ test("under the CI policy a failure needs a fix, asks nobody, and is over when a
 			text: expect.stringContaining("Nothing to do."),
 		});
 
-		// A failure on main is the same.
-		h.call("report", ciReport({ commit: "main0002", n: 2, fail: { 0: "boom" } }));
+		// A failure on main is the same, and every failing test is listed, past a page of them.
+		const many = Object.fromEntries(Array.from({ length: 503 }, (_, i) => [i, `boom ${i}`]));
+		h.call("report", ciReport({ commit: "main0002", n: 503, fail: many }));
 		expect(gate("main0002")).toMatchObject({ verdict: "failed", open: [] });
 		expect(open()).toEqual([]);
+		const all = await readCi(call, { commit: "main0002" });
+		expect(all.text).toContain("needs a fix (503):");
+		expect(all.text).toContain("tests/checkout.spec.ts: test 502\n    boom 502\n");
+
+		// Once main passes, the commit that failed has no answer left and nobody is asked about it (decision 0102).
+		h.call("report", ciReport({ commit: "main0003", n: 503 }));
+		const old = await readCi(call, { commit: "main0002" });
+		expect(old.exit).toBe(2);
+		expect(old.text).toContain("Nobody is asked: a later commit passed these tests");
+		expect(old.text).not.toContain("ci-policy");
 	} finally {
 		h.close();
 	}
