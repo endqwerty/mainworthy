@@ -1065,7 +1065,9 @@ test("all registry operations have generated commands, global help and --help", 
 	});
 });
 
-// One executable comparison holds `run` to the process boundary. The argument matrix stays in-process.
+// `run` stands in for `cli` in most of this file, so this is the test that holds the two together: the same
+// argument vectors, environments and standard input give the same output and exit code in the process and in
+// the executable. Each case is one that leaves the instance as it was, so the second run sees what the first did.
 test("run in the test's process gives what the executable gives", async () => {
 	await withInstance(async ({ cli, run, directory }) => {
 		// A file named from the working directory: read from there by both, or the two answers differ.

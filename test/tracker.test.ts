@@ -218,6 +218,7 @@ test("Jira queues through the existing registry and neither credentials nor deli
 		MAINWORTHY_JIRA_TOKEN: credential,
 	}).jira;
 	if (!configured) throw new Error("Jira configuration was not read");
+	expect(configured).toMatchObject({ issueType: "Bug", email: "robin@example.com", token: credential });
 	h.app.config.jira = configured;
 	h.call("tracker", { do: "create", result, cmd: "jira-create-001" });
 	expect(
