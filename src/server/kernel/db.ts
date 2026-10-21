@@ -124,13 +124,15 @@ export class Db {
 			typeof source === "string"
 				? new Database(source, { create: true, strict: true })
 				: Database.deserialize(source, { strict: true });
+		// The wait comes first: the statements after it read the database, and a connection that opens while another
+		// holds a lock, or recovers the log, would be refused at once (#689: the checkpoint thread died that way).
 		// WAL keeps readers and the writer out of each other's way; NORMAL syncs at checkpoints, which is the
 		// durability SQLite documents as safe against application crashes in WAL mode.
 		this.exec(`
+			PRAGMA busy_timeout = 5000;
 			PRAGMA journal_mode = WAL;
 			PRAGMA synchronous = NORMAL;
 			PRAGMA foreign_keys = ON;
-			PRAGMA busy_timeout = 5000;
 			PRAGMA cache_size = -65536;
 			PRAGMA temp_store = MEMORY;
 			PRAGMA mmap_size = 268435456;
