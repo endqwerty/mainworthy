@@ -78,27 +78,40 @@ const NAMES = PRINCIPLES.map(words);
 const LINE = /^ {0,3}(?:[-*+] +)?(?:\*\*|__)?Principles(?:\*\*|__)?:(?:\*\*|__)?[ \t]*(.*)$/gim;
 const FORMAT = "`Principles: <name> (<the choice it changed>); ...` or `Principles: n/a: <reason>`";
 
-/** The entries of a `Principles:` line: split at each ";" outside parentheses, each without its "(<choice>)". */
-function entries(line: string): string[] {
-	const found: string[] = [];
+/**
+ * The entries of a `Principles:` line: split at each ";" outside parentheses, each without its "(<choice>)". A "("
+ * left open would hide every name after it, so it is reported instead.
+ */
+function entries(line: string): { names: string[]; unclosed: boolean } {
+	const names: string[] = [];
 	let depth = 0;
 	let name = "";
 	for (const char of `${line};`) {
 		if (char === "(") depth++;
 		else if (char === ")") depth = Math.max(0, depth - 1);
 		else if (char === ";" && depth === 0) {
-			found.push(name.replace(/[*_`]/g, "").trim());
+			names.push(name.replace(/[*_`]/g, "").trim());
 			name = "";
 		} else if (depth === 0) name += char;
 	}
-	return found.filter((entry) => entry !== "");
+	return { names: names.filter((entry) => entry !== ""), unclosed: depth > 0 };
+}
+
+/** The text without HTML comments, which are not shown. A "<!--" inside inline code opens no comment. */
+function withoutComments(text: string): string {
+	const masked = text.replace(/`[^`\n]*`/g, (code) => " ".repeat(code.length));
+	let shown = "";
+	let from = 0;
+	for (const comment of masked.matchAll(/<!--[\s\S]*?(?:-->|$(?![\s\S]))/g)) {
+		shown += text.slice(from, comment.index);
+		from = comment.index + comment[0].length;
+	}
+	return shown + text.slice(from);
 }
 
 /** What is wrong with the description's `Principles:` lines; empty when each names principles or says why none. */
 export function principles(body: string): string[] {
-	// An HTML comment is not shown, so a line in one is not the description's.
-	const shown = unfenced(body).replace(/<!--[\s\S]*?(?:-->|$(?![\s\S]))/g, "");
-	const lines = [...shown.matchAll(LINE)].map((match) => (match[1] ?? "").trim());
+	const lines = [...withoutComments(unfenced(body)).matchAll(LINE)].map((match) => (match[1] ?? "").trim());
 	if (lines.length === 0)
 		return [
 			`The description has no \`Principles:\` line. End "why this approach" with ${FORMAT} (the build skill's design note).`,
@@ -109,7 +122,9 @@ export function principles(body: string): string[] {
 			return words(notApplicable[1] ?? "") === ""
 				? ["`Principles: n/a` needs a reason: `Principles: n/a: <why no principle changed a choice>`."]
 				: [];
-		const items = entries(line);
+		const { names: items, unclosed } = entries(line);
+		if (unclosed)
+			return ['The `Principles:` line leaves a "(" open. Close each choice: `<name> (<the choice it changed>)`.'];
 		if (items.length === 0) return [`The \`Principles:\` line is empty. Write ${FORMAT}.`];
 		return items
 			.filter((item) => !NAMES.includes(words(item)))
