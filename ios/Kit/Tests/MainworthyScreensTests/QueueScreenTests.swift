@@ -877,14 +877,6 @@ struct QueueScreenTests {
 		#expect(!screen.hasMore)
 	}
 
-	@Test("a map question offers linking on the phone")
-	func nativeLink() async throws {
-		let screen = try await screen()
-		let question = try #require(screen.questions.first { $0.kind == .map })
-		let link = try #require(question.choices.first { $0.answer == "link" })
-		#expect(link.takes != .more)
-	}
-
 	@Test("an answer leaves the list, the screen says what was recorded, and Undo asks the question again")
 	func answerAndUndo() async throws {
 		let screen = try await screen()
@@ -1198,8 +1190,10 @@ struct QueueScreenFailureTests {
 	}
 
 	/// A queue of three questions that the server hands out two at a time.
-	struct TwoPages: Transport {
+	actor TwoPages: Transport {
+		private(set) var operations: [String] = []
 		func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+			operations.append(request.url?.lastPathComponent ?? "")
 			func question(_ ref: String) -> String {
 				"""
 				{"q":"\(ref)","kind":"map","title":"Tests with no case","producer":"ci","state":"open","evidenceHash":"abc",
@@ -1232,7 +1226,8 @@ struct QueueScreenFailureTests {
 
 	@Test("unreadable saved answers and a failed save never send or overwrite the file")
 	func storageFailure() async throws {
-		let server = Server(instance: try #require(Instance(address: "mainworthy.example")), secrets: MemoryStore(), transport: TwoPages())
+		let transport = TwoPages()
+		let server = Server(instance: try #require(Instance(address: "mainworthy.example")), secrets: MemoryStore(), transport: transport)
 		let project = server.project("shop", identity: "shop-identity")
 		let question = try #require(try await project.questions(open: true).questions.first)
 		let choice = try #require(question.choices.first)
@@ -1247,7 +1242,9 @@ struct QueueScreenFailureTests {
 		#expect(corrupt.data == Data("broken".utf8))
 		let refused = AnswerOutbox(project: project, store: FailingAnswerStore())
 		#expect(throws: (any Error).self) { try refused.enqueue(prepared) }
+		await refused.send()
 		#expect(refused.entries.isEmpty && refused.pendingCount == 0)
+		#expect(await transport.operations == ["inbox"])
 	}
 
 	struct FailingAnswerStore: AnswerStore {

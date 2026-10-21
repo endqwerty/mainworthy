@@ -23,7 +23,8 @@ struct RunsLiveTests {
 		let slots = try await project.slots(of: run.ref)
 		let fills = try #require(slots.first).fills
 		#expect(fills.filter { $0.method == .agent }.map(\.model) == ["claude-opus-5-5", "claude-opus-5-5"])
-		#expect(fills.first { $0.method == .person }?.model == nil)
+		let person = try #require(fills.first { $0.method == .person })
+		#expect(person.model == nil)
 		let agentTrail = try #require(fills.first { $0.method == .agent && $0.note != nil }?.steps)
 		#expect(agentTrail.map(\.step) == ["a1", "b2", "c3"])
 		#expect(agentTrail.map(\.durationMs) == [100, 700, 200])
@@ -130,7 +131,11 @@ struct RunsLiveTests {
 		let run = try #require(try await project.runs().runs.first)
 		let before = try await project.slots(of: run.ref)
 		let adopt = try #require(try await project.questions(open: true, kind: .adopt).questions.first)
-		_ = try await project.answer(adopt, with: try #require(adopt.choices.first { $0.answer == "accept" }))
+		#expect(try await project.answer(adopt, with: try #require(adopt.choices.first { $0.answer == "accept" })).isDecided)
+		let current = try await project.caseDocument("C-2")
+		#expect(current.version == 2 && current.content.steps.map(\.action) == [
+			"Open the cart with one $100.00 item", "Apply the coupon SAVE10", "Remove the coupon",
+		])
 		let slot = try #require(before.first { $0.title == "A percentage coupon lowers the total" })
 		let execution = try await project.execution(of: slot, in: run.ref)
 		#expect(execution.slot.version == 1 && execution.content.steps.count == 2)

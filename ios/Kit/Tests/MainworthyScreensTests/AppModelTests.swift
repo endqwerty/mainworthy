@@ -32,6 +32,14 @@ struct AppModelTests {
 		return form
 	}
 
+	func waitForSignOut(_ app: AppModel) async throws -> SignInForm {
+		let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+		while case .signedIn = app.phase, ContinuousClock.now < deadline {
+			await Task.yield()
+		}
+		return try form(app)
+	}
+
 	func workspace(_ app: AppModel) throws -> Workspace {
 		guard case .signedIn(let workspace) = app.phase else { throw Unexpected(app.phase) }
 		return workspace
@@ -149,8 +157,8 @@ struct AppModelTests {
 		// The session is ended from another place: here, by a second holder of the same cookie.
 		await Server.kept(in: device.secrets)?.signOut()
 		await workspace.refreshAccount()
-		try await Task.sleep(for: .milliseconds(50))
-		#expect(try self.form(app).notice == "Your session ended. Sign in again.")
+		let ended = try await waitForSignOut(app)
+		#expect(ended.notice == "Your session ended. Sign in again.")
 	}
 
 	@Test("when the server ends the session, signing in again as the same person gives back the same screens")
@@ -167,8 +175,7 @@ struct AppModelTests {
 		// The session is ended elsewhere, and the app hears of it at its next request.
 		await Server.kept(in: device.secrets)?.signOut()
 		await workspace.refreshAccount()
-		try await Task.sleep(for: .milliseconds(50))
-		let again = try self.form(app)
+		let again = try await waitForSignOut(app)
 		#expect(again.notice == "Your session ended. Sign in again.")
 		again.name = Live.name
 		again.password = Live.password
@@ -181,8 +188,7 @@ struct AppModelTests {
 		#expect(try self.workspace(app) === workspace)
 		await Server.kept(in: device.secrets)?.signOut()
 		await workspace.refreshAccount()
-		try await Task.sleep(for: .milliseconds(50))
-		_ = try self.form(app)
+		_ = try await waitForSignOut(app)
 	}
 
 	@Test("a case being written when the session ends is still there after the same person signs in again")
@@ -202,8 +208,7 @@ struct AppModelTests {
 		suite.editor?.content.title = "Typed before the session ended"
 		await Server.kept(in: device.secrets)?.signOut()
 		await workspace.refreshAccount()
-		try await Task.sleep(for: .milliseconds(50))
-		let again = try self.form(app)
+		let again = try await waitForSignOut(app)
 		again.name = Live.name
 		again.password = Live.password
 		await again.submit()
@@ -224,8 +229,7 @@ struct AppModelTests {
 		let workspace = try workspace(app)
 		await Server.kept(in: device.secrets)?.signOut()
 		await workspace.refreshAccount()
-		try await Task.sleep(for: .milliseconds(50))
-		let again = try self.form(app)
+		let again = try await waitForSignOut(app)
 		again.name = Live.ownerName
 		again.password = Live.ownerPassword
 		await again.submit()
@@ -261,8 +265,7 @@ struct AppModelTests {
 		let workspace = try workspace(app)
 		await Server.kept(in: device.secrets)?.signOut()
 		await workspace.refreshAccount()
-		try await Task.sleep(for: .milliseconds(50))
-		let again = try self.form(app)
+		let again = try await waitForSignOut(app)
 		#expect(again.instance == Live.instance)
 		#expect(again.privacyAddress.absoluteString == "\(Live.address)/privacy")
 		#expect(workspace.privacyAddress.absoluteString == "\(Live.address)/privacy")

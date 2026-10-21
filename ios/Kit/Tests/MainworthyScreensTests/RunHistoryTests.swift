@@ -58,7 +58,14 @@ struct RunHistoryTests {
 		await transport.release()
 		await old.value
 		#expect(screen.detail?.change.key == "pr:483" && screen.results?.change == "pr:483")
-		#expect(screen.runs.allSatisfy { if case .change(let change) = $0.kind { change?.key == "pr:483" } else { false } })
+		#expect(screen.runs.count == 1)
+		let run = try #require(screen.runs.first)
+		guard case .change(let change?) = run.kind,
+			case .commit(let commit, _, _) = run.accepts else {
+			Issue.record("the new change's run lost its change or commit")
+			return
+		}
+		#expect(change.key == "pr:483" && commit == String(repeating: "6", count: 40))
 	}
 
 	@Test("a list read for an earlier filter does not replace the list of the newer one")

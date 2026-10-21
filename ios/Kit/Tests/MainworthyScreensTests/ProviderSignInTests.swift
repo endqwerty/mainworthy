@@ -54,22 +54,33 @@ struct ProviderSignInTests {
 		#expect(signedIn && form.password.isEmpty && store.load() != nil)
 	}
 
-	@Test func cancellingTheProviderLeavesTheFormSignedOutAndReadyToRetry() async {
+	@Test func cancellingTheProviderLeavesTheFormSignedOutAndReadyToRetry() async throws {
 		let store = MemoryStore()
-		var signedIn = false
+		var signedInAs: String?
+		var opened: (path: String, scheme: String)?
 		let form = SignInForm(instance: Live.instance, notice: nil, connect: { instance in
 			Server(instance: instance, secrets: store)
-		}, onSignedIn: { _, _ in signedIn = true })
+		}, onSignedIn: { _, account in signedInAs = account.name })
 		await form.loadMethods()
 		#expect(form.providerName == "Example ID")
 		await form.signInWithProvider { url, scheme in
-			#expect(url.path == "/authorize")
-			#expect(scheme == "com.mainworthy.app")
+			opened = (url.path, scheme)
 			throw CancellationError()
 		}
-		#expect(!signedIn)
+		#expect(opened?.path == "/authorize" && opened?.scheme == "com.mainworthy.app")
+		#expect(signedInAs == nil)
 		#expect(!form.isWorking)
 		#expect(form.notice == nil)
 		#expect(store.load() == nil)
+		await form.signInWithProvider { url, _ in
+			let transport = URLSessionTransport()
+			let (_, authorized) = try await transport.send(URLRequest(url: url))
+			let back = try #require(authorized.value(forHTTPHeaderField: "Location").flatMap(URL.init(string:)))
+			let (_, done) = try await transport.send(URLRequest(url: back))
+			return try #require(done.value(forHTTPHeaderField: "Location").flatMap(URL.init(string:)))
+		}
+		#expect(signedInAs == Live.name)
+		let kept = try #require(Server.kept(in: store))
+		#expect(try await kept.account().name == Live.name)
 	}
 }

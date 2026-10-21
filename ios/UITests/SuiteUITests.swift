@@ -118,7 +118,9 @@ final class SuiteUITests: XCTestCase {
 		XCTAssertTrue(app.navigationBars["Coupons"].exists)
 		app.buttons["suite-search"].tap()
 		XCTAssertTrue(search.waitForExistence(timeout: 5))
-		XCTAssertNotEqual(search.value as? String, "password")
+		let emptySearch = try XCTUnwrap(search.value as? String)
+		XCTAssertTrue(emptySearch.isEmpty || emptySearch == search.placeholderValue)
+		XCTAssertTrue(app.staticTexts["Type words from a case, or its number such as C-12."].exists)
 		app.buttons["Close"].tap()
 		XCTAssertTrue(app.buttons["suite-search"].waitForExistence(timeout: 5))
 		// A tag is browsed from the top of the tab.

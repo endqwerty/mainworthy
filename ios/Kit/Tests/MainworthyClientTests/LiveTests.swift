@@ -45,6 +45,9 @@ struct LiveTests {
 		let secrets = MemoryStore()
 		let account = try await Live.server(secrets: secrets).signIn(Live.owner)
 		#expect(account.isOwner)
+		let kept = try #require(Server.kept(in: secrets))
+		let restored = try await kept.account()
+		#expect(restored.name == Live.ownerName && restored.isOwner)
 		#expect(!String(decoding: secrets.load() ?? Data(), as: UTF8.self).contains(Live.ownerPassword))
 	}
 
@@ -227,7 +230,7 @@ struct LiveTests {
 		#expect(try JSONDecoder().decode(Seen.self, from: data).result.requests == 0)
 	}
 
-	@Test("one question is read by its ref, and a ref the project does not have is none")
+	@Test("one question is read by its ref, and an unknown ref is refused")
 	func oneQuestion() async throws {
 		let project = try await Live.signedIn().project(try await Live.project())
 		let listed = try #require(try await project.questions(open: true, kind: .failure).questions.first)
@@ -239,5 +242,8 @@ struct LiveTests {
 		// What was read alone is answered like what was read in the list.
 		#expect((try await project.answer(alone, with: try #require(alone.choices.first { $0.answer == "infra" }))).isDecided)
 		#expect(try await project.question(listed.ref)?.isOpen == false)
+		await #expect(throws: ClientError.refused(code: "not_found", message: "question Q-999999 not found")) {
+			_ = try await project.question("Q-999999")
+		}
 	}
 }

@@ -204,7 +204,10 @@ struct RunsScreenTests {
 		let results = screen.results(of: change)
 		#expect(results === screen.results(of: change))
 		await results.load()
-		#expect(results.loading == .done && results.total > 0 && results.run == change.ref)
+		#expect(results.loading == .done && results.total == 5 && results.run == change.ref)
+		#expect(results.rows.map(\.name).sorted() == [
+			"Shipping accepts an address", "Shop check 1", "Shop check 2", "Shop check 3", "Shop check 4",
+		])
 		await screen.show(RunFilter(kind: .planned, state: .closed))
 		#expect(screen.loading == .done && screen.runs.isEmpty)
 		await screen.show(RunFilter(kind: .planned))

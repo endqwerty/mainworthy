@@ -85,13 +85,17 @@ actor OvertakenSlotsTransport: Transport {
 		await transport.releaseOld()
 		await transport.waitFallback()
 		await screen.refresh()
-		#expect(screen.slots.allSatisfy { !$0.fills.isEmpty })
+		#expect(screen.slots.map(\.id) == [1, 2])
+		#expect(screen.slots.map { $0.fills.map(\.result) } == [[1], [2]])
+		#expect(screen.slots.map { $0.fills.map(\.outcome) } == [[.manual(.pass)], [.manual(.pass)]])
 		await transport.releaseFallback()
 		#expect(await record.value)
 		print(
 			"slots after overtaken fallback: \(screen.slots.map { ($0.id, $0.fills.count) }); document: \(screen.document)"
 		)
-		#expect(screen.slots.allSatisfy { !$0.fills.isEmpty })
+		#expect(screen.slots.map(\.id) == [1, 2])
+		#expect(screen.slots.map { $0.fills.map(\.result) } == [[1], [2]])
+		#expect(screen.slots.map { $0.fills.map(\.outcome) } == [[.manual(.pass)], [.manual(.pass)]])
 		#expect(screen.document == .none)
 	}
 }
