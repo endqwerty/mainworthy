@@ -140,7 +140,7 @@ export async function testInstance(): Promise<TestInstance> {
 							.object({
 								project: z.string(),
 								mode: z.enum(["hold", "unreadable", "normal", "status"]),
-								operation: z.enum(["plan", "report"]).default("plan"),
+								operation: z.enum(["plan", "report", "find"]).default("plan"),
 							})
 							.safeParse(await req.json());
 						if (!parsed.success) return Response.json({ ok: false }, { status: 400 });

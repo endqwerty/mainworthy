@@ -233,6 +233,8 @@ public final class ChangeResults {
 	/// How many rows match what is shown, when the server said.
 	public var count: Int? { list.first?.count }
 	public var loading: ListLoading { list.loading }
+	/// Whether an earlier read supplied the counts and filter controls, even if the current query failed.
+	public var hasRead: Bool { list.first != nil }
 	public var notice: String? { list.notice }
 	/// The next page was refused because the results changed since the first.
 	public var moved: Bool { list.moved }

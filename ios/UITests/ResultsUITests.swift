@@ -43,6 +43,104 @@ final class ResultsUITests: XCTestCase {
 		XCTAssertTrue(element.waitForExistence(timeout: 5))
 	}
 
+	@MainActor private func connection(_ project: String, mode: String) async throws -> String {
+		let address = try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])
+		var request = URLRequest(url: try XCTUnwrap(URL(string: "\(address)/test/plan-connection")))
+		request.httpMethod = "POST"
+		request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+		request.setValue("Bearer \(environment["MAINWORTHY_TEST_TOKEN"] ?? "")", forHTTPHeaderField: "Authorization")
+		request.httpBody = try JSONSerialization.data(withJSONObject: ["project": project, "mode": mode, "operation": "find"])
+		let (data, response) = try await URLSession.shared.data(for: request)
+		XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+		struct Reply: Decodable {
+			struct Result: Decodable { let url: String }
+			let result: Result
+		}
+		return try JSONDecoder().decode(Reply.self, from: data).result.url
+	}
+
+	@MainActor private func openResults(_ project: String, address: String) throws -> XCUIApplication {
+		XCUIDevice.shared.orientation = .portrait
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", address]
+		app.launch()
+		try signIn(app)
+		app.openProject(project)
+		app.openTab("Changes")
+		XCTAssertTrue(app.buttons["change-pr:482"].waitForExistence(timeout: 10))
+		app.buttons["change-pr:482"].tap()
+		scrollTo(app.buttons["results-all"], in: app)
+		XCTAssertTrue(app.textFields["results-filter"].waitForExistence(timeout: 10))
+		return app
+	}
+
+	@MainActor func testRefusedSearchAndChipKeepTheirControls() async throws {
+		let project = try await makeProject()
+		let address = try await connection(project, mode: "normal")
+		let app = try openResults(project, address: address)
+		let field = app.textFields["results-filter"]
+		_ = try await connection(project, mode: "unreadable")
+		field.tap()
+		field.typeText("coupon\n")
+		let retry = app.buttons["Try again"].firstMatch
+		XCTAssertTrue(retry.waitForExistence(timeout: 10))
+		shot("results-refused-search")
+		XCTAssertTrue(field.exists, "A refused search must keep its field")
+		XCTAssertTrue(app.buttons["results-all"].exists, "A refused search must keep its chips")
+		retry.tap()
+		XCTAssertTrue(retry.waitForExistence(timeout: 10))
+		XCTAssertTrue(field.exists)
+		_ = try await connection(project, mode: "normal")
+		field.tap()
+		field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 6) + "Shipping\n")
+		XCTAssertTrue(app.buttons["result-T-5"].waitForExistence(timeout: 10))
+		XCTAssertFalse(retry.exists)
+		shot("results-recovered-search")
+
+		_ = try await connection(project, mode: "unreadable")
+		app.buttons["results-unexplained"].tap()
+		XCTAssertTrue(retry.waitForExistence(timeout: 10))
+		XCTAssertTrue(field.exists)
+		XCTAssertTrue(app.buttons["results-all"].exists)
+		shot("results-refused-chip")
+		_ = try await connection(project, mode: "normal")
+		app.buttons["results-all"].tap()
+		XCTAssertTrue(app.buttons["result-T-5"].waitForExistence(timeout: 10))
+		XCTAssertFalse(retry.exists)
+	}
+
+	@MainActor private func paste(_ text: String, into field: XCUIElement, in app: XCUIApplication) {
+		UIPasteboard.general.string = text
+		field.tap()
+		field.press(forDuration: 1)
+		let paste = app.menuItems["Paste"]
+		if paste.waitForExistence(timeout: 3) { paste.tap() }
+		else { app.buttons["Paste"].tap() }
+	}
+
+	@MainActor func testLongPastesInBothSearchFields() async throws {
+		let project = try await makeProject()
+		let app = try openResults(project, address: XCTUnwrap(environment["MAINWORTHY_TEST_URL"]))
+		let field = app.textFields["results-filter"]
+		let expected = String(repeating: "x", count: 200)
+		paste(expected + "overflow", into: field, in: app)
+		XCTAssertEqual(field.value as? String, expected + "overflow")
+		XCTAssertTrue(app.staticTexts["No result matches."].waitForExistence(timeout: 10))
+		XCTAssertTrue(app.buttons["results-all"].exists)
+		XCTAssertFalse(app.buttons["Try again"].exists)
+		shot("results-long-paste")
+		field.typeText("\n")
+		app.openTab("Cases")
+		app.buttons["suite-tests"].tap()
+		let search = app.searchFields.firstMatch
+		XCTAssertTrue(search.waitForExistence(timeout: 10))
+		paste(expected + "overflow", into: search, in: app)
+		XCTAssertEqual(search.value as? String, expected + "overflow")
+		XCTAssertTrue(app.staticTexts["No test matches."].waitForExistence(timeout: 10))
+		XCTAssertFalse(app.buttons["Try again"].exists)
+		shot("tests-long-paste")
+	}
+
 	@MainActor func testResultsTestsAndWhoRanACase() async throws {
 		XCUIDevice.shared.orientation = .portrait
 		let project = try await makeProject()
