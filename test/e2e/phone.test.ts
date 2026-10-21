@@ -279,7 +279,12 @@ test.skipIf(!browserAvailable)(
 			await page.locator("#list [role=option]").first().waitFor();
 			await actions(page).tap();
 			expect(await inView(page)).toBe("overlay");
-			expect(await page.evaluate(() => document.activeElement?.className)).not.toBe("palette-input");
+			expect(
+				await page
+					.locator("[data-overlay=palette]")
+					.getByRole("textbox")
+					.evaluate((field) => field === document.activeElement),
+			).toBe(false);
 			expect(await offered(/Collapse/)).toBe(0);
 			expect(await page.getByRole("button", { name: /sidebar/i }).count()).toBe(0);
 			// Over the list of cases: New case and the filter, and nothing that acts on the case not shown.
@@ -757,7 +762,7 @@ test.skipIf(!browserAvailable)(
 		try {
 			const { page } = phone;
 			const palette = page.locator("[data-overlay=palette]");
-			const fieldHasFocus = () => page.evaluate(() => document.activeElement?.className === "palette-input");
+			const fieldHasFocus = () => palette.getByRole("textbox").evaluate((field) => field === document.activeElement);
 			// g p lists the projects and starts on the first other one: scratch, from checkout.
 			await page.keyboard.type("gp");
 			await palette.waitFor();
