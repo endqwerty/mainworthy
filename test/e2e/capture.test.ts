@@ -191,33 +191,24 @@ test.skipIf(!browserAvailable)(
 			path: "/p/scratch/suite",
 			setup: async (page) => {
 				await page.addInitScript(() => {
-					let changes = 0;
 					let reads = 0;
 					let eventfulReads = 0;
+					const streams: EventSource[] = [];
 					const Native = window.EventSource;
 					window.EventSource = class extends Native {
-						private timer: ReturnType<typeof setInterval>;
 						constructor(url: string | URL, init?: EventSourceInit) {
 							super(url, init);
-							this.timer = setInterval(() => {
-								if (this.onmessage) {
-									this.onmessage(new MessageEvent("message", { data: '{"op":"propose","touched":[]}' }));
-									changes++;
-								}
-							}, 10);
-						}
-						override close() {
-							clearInterval(this.timer);
-							super.close();
+							streams.push(this);
 						}
 					};
 					const send = window.fetch.bind(window);
 					const sending = async (input: RequestInfo | URL, init?: RequestInit) => {
 						const reply = await send(input, init);
 						if (String(input).endsWith("/find") && typeof init?.body === "string" && init.body.includes('"cases"')) {
-							const before = changes;
-							await new Promise((resolve) => setTimeout(resolve, 60));
-							if (changes > before) eventfulReads++;
+							const stream = streams.find((stream) => stream.onmessage !== null);
+							if (!stream?.onmessage) throw new Error("No change-stream handler for the held case read");
+							stream.onmessage(new MessageEvent("message", { data: '{"op":"propose","touched":[]}' }));
+							eventfulReads++;
 							document.documentElement.dataset.caseReads = String(++reads);
 							document.documentElement.dataset.eventfulReads = String(eventfulReads);
 						}
@@ -386,10 +377,6 @@ test.skipIf(!browserAvailable)(
 		const browser = await openPage(server);
 		try {
 			const { page } = browser;
-			await page.route("**/propose", async (route) => {
-				await Bun.sleep(500);
-				await route.continue();
-			});
 			let textKeys = 0;
 			const type = async (text: string) => {
 				textKeys += text.length;
@@ -496,18 +483,34 @@ test.skipIf(!browserAvailable)(
 		const server = await startServer();
 		await server.api("propose", { edits: [{ op: "create", folder: "Checkout", body: { title: "Anchor case" } }] });
 		const browser = await openPage(server, { path: "/p/scratch/suite?folder=Checkout" });
+		let release = () => {};
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
 		try {
 			const { page } = browser;
 			await page.getByRole("option").filter({ hasText: "Anchor case" }).waitFor();
+			let first = true;
+			let requested = () => {};
+			const pending = new Promise<void>((resolve) => {
+				requested = resolve;
+			});
 			await page.route("**/api/p/scratch/propose", async (route) => {
-				await Bun.sleep(250);
+				if (first) {
+					first = false;
+					requested();
+					await held;
+				}
 				await route.continue();
 			});
 			await page.keyboard.press("c");
 			await page.keyboard.type("First captured case");
 			await page.keyboard.press("Shift+Enter");
+			await pending;
 			await page.keyboard.type("Second captured case");
+			expect(await page.getByRole("textbox", { name: "Case title" }).inputValue()).toBe("Second captured case");
 			await page.keyboard.press("Escape");
+			release();
 			const rows = await eventually(
 				() => server.api("find", { in: "cases", folder: "Checkout" }),
 				(value) => value.items.length === 3,
@@ -530,6 +533,7 @@ test.skipIf(!browserAvailable)(
 			]);
 			expect(browser.errors).toEqual([]);
 		} finally {
+			release();
 			await browser.close();
 			await server.stop();
 		}
@@ -588,17 +592,20 @@ test.skipIf(!browserAvailable)(
 			],
 		});
 		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		let release = () => {};
 		try {
 			const { page } = h;
+			let held = Promise.resolve();
 			await page.route("**/api/p/scratch/propose", async (route) => {
 				const response = await route.fetch();
-				await Bun.sleep(500);
+				await held;
 				await route.fulfill({ response });
 			});
-			for (const [version, id] of [
-				[2, "a1"],
-				[3, "a2"],
-			]) {
+			const used = new Set(["a0"]);
+			for (const version of [2, 3]) {
+				held = new Promise<void>((resolve) => {
+					release = resolve;
+				});
 				await page.getByRole("button", { name: "Stable step identity", exact: true }).waitFor();
 				await page.evaluate(() => {
 					Math.random = () => 0;
@@ -614,8 +621,14 @@ test.skipIf(!browserAvailable)(
 					() => server.api("get", { refs: ["C-1"] }),
 					(value) => value[0]?.version === version,
 				);
-				expect(rows[0]?.steps).toMatchObject([{ id, action: `Replacement ${version}` }]);
-				expect(await page.locator(".cstate").textContent()).toContain("Draft");
+				const steps = z.array(z.object({ id: z.string(), action: z.string() })).parse(rows[0]?.steps);
+				expect(steps.map((step) => step.action)).toEqual([`Replacement ${version}`]);
+				for (const step of steps) {
+					expect(used.has(step.id)).toBe(false);
+					used.add(step.id);
+				}
+				await page.locator(".cstate").filter({ hasText: "Draft" }).waitFor();
+				release();
 				await page.waitForFunction(
 					(value) =>
 						document.querySelector(".cstate .chip")?.textContent === `v${value}` &&
@@ -629,6 +642,7 @@ test.skipIf(!browserAvailable)(
 			}
 			expect(h.errors).toEqual([]);
 		} finally {
+			release();
 			await h.close();
 			await server.stop();
 		}
