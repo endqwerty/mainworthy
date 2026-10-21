@@ -571,6 +571,10 @@ export const CountedResults = struct("CountedResults", "`find` in results: what 
 	),
 	cursor: maybe(text),
 	tally: [dictionary(whole), "Every row the gate counts, by standing, whatever the filter."],
+	testTime: struct("TestTime", "The summed duration of every row the gate counts, whatever the filter.", {
+		ms: whole,
+		timed: [whole, "How many of the rows named a duration."],
+	}),
 });
 
 const TestQuarantine = struct("TestQuarantine", "A quarantine a test is or was in.", {

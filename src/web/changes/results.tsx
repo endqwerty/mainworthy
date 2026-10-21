@@ -6,6 +6,7 @@ import { isResultStanding, RESULT_STANDING_LABELS, RESULT_STANDINGS, type Result
 import { call } from "../lib/api.ts";
 import { queryKey } from "../lib/data.ts";
 import { navigate, refUrl } from "../lib/router.ts";
+import { spent } from "../reports/format.ts";
 import { useApp } from "../ui/context.tsx";
 import { EmptyState, SectionHeading } from "../ui/index.tsx";
 import { ResultTrail } from "../ui/result-trail.tsx";
@@ -37,8 +38,38 @@ type Counted = z.infer<typeof Counted>;
 /** A report names its build's address, and only a web address is offered as a link. */
 export const webUrl = (url: string | null): string | null => (url && /^https?:\/\//i.test(url) ? url : null);
 
-export const duration = (ms: number | null): string | null =>
-	ms === null ? null : ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
+export const duration = (ms: number | null): string | null => (ms === null ? null : spent(ms));
+
+/** What the results a gate counts took, summed: null when none of them said, and how many did when some did not. */
+export function testTimeText(time: { ms: number; timed: number } | undefined, total: number): string | null {
+	if (!time || time.timed === 0) return null;
+	const some = time.timed < total ? ` (${time.timed} of ${total} results timed)` : "";
+	return `${spent(time.ms)} of test time${some}`;
+}
+
+type Of = { change: string } | { run: string };
+
+/**
+ * The pages of what a gate counted under one filter. The tally and the test time come with every first page,
+ * whatever the filter, so a reader that needs only those reads the unfiltered one, which the list shares.
+ */
+export function useCounted(of: Of, standing: ResultStanding | null, text: string) {
+	const { project } = useApp();
+	const input = {
+		in: "results",
+		...of,
+		limit: 100,
+		...(standing ? { state: standing } : {}),
+		...(text ? { text } : {}),
+	} satisfies Parameters<typeof call<"find">>[1];
+	return useInfiniteQuery({
+		queryKey: [...queryKey({ project, op: "find", input }), "pages"],
+		initialPageParam: "",
+		queryFn: ({ pageParam, signal }) =>
+			call("find", { ...input, ...(pageParam ? { cursor: pageParam } : {}) }, { project, signal }),
+		getNextPageParam: (page) => page.cursor ?? undefined,
+	});
+}
 
 /**
  * Every test a gate counted, as it counted it: the evidence behind the verdict. Of a change, the gate of its newest
@@ -49,27 +80,14 @@ export function ChangeResults({
 	standing,
 	choose,
 }: {
-	of: { change: string } | { run: string };
+	of: Of;
 	standing: ResultStanding | null;
 	choose: (standing: ResultStanding | null) => void;
 }) {
 	const { project } = useApp();
 	const [typed, setTyped] = useState("");
 	const text = useDeferredValue(typed.trim());
-	const input = {
-		in: "results",
-		...of,
-		limit: 100,
-		...(standing ? { state: standing } : {}),
-		...(text ? { text } : {}),
-	} satisfies Parameters<typeof call<"find">>[1];
-	const read = useInfiniteQuery({
-		queryKey: [...queryKey({ project, op: "find", input }), "pages"],
-		initialPageParam: "",
-		queryFn: ({ pageParam, signal }) =>
-			call("find", { ...input, ...(pageParam ? { cursor: pageParam } : {}) }, { project, signal }),
-		getNextPageParam: (page) => page.cursor ?? undefined,
-	});
+	const read = useCounted(of, standing, text);
 	const pages = read.data?.pages ?? [];
 	const parsed = Counted.array().safeParse(pages.flatMap((page) => page.items));
 	const rows = parsed.success ? parsed.data : [];

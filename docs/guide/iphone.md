@@ -217,7 +217,9 @@ Choose **Planned** or **Change** to see one kind, and **Open** or **Closed** to 
 Queue and Runs show a spinner while reading a new filter. If that read fails, press **Try again**.
 An empty-list message appears only after the selected list has been read.
 
-Open a change run to see its commit, its change and every result its gate counted.
+Open a change run to see its verdict, then its commit, change, first report, state and test time, and every result
+its gate counted. The test time is the sum of the durations its counted results reported, not how long the build
+took.
 Press a standing above the results to see only those results, or type part of a test's name or file.
 
 ## Execute a planned run

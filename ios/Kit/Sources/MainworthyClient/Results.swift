@@ -50,6 +50,14 @@ public struct CountedResult: Identifiable, Equatable, Sendable {
 	}
 }
 
+/// How long the results a gate counts took, as their reports said. Results that ran side by side add up, so this
+/// is the time spent testing, not how long a build took.
+public struct TestTime: Equatable, Sendable {
+	public let ms: Int
+	/// How many of the results named a duration.
+	public let timed: Int
+}
+
 /// A page of what a change's gate counted, with the whole tally whatever the page holds.
 package struct CountedPage: Equatable, Sendable {
 	package let rows: [CountedResult]
@@ -57,10 +65,12 @@ package struct CountedPage: Equatable, Sendable {
 	package let count: Int?
 	/// Every row the gate counts, by standing.
 	package let tally: [ResultStanding: Int]
+	/// The summed duration of every row the gate counts.
+	package let testTime: TestTime
 	package let next: String?
 
 	/// The results of a commit nothing a gate counts was reported for.
-	package static let none = CountedPage(rows: [], count: 0, tally: [:], next: nil)
+	package static let none = CountedPage(rows: [], count: 0, tally: [:], testTime: TestTime(ms: 0, timed: 0), next: nil)
 }
 
 /// An automated test the project has seen, with a case or without one.
@@ -170,7 +180,10 @@ extension ProjectClient {
 		for (word, count) in wire.tally {
 			if let standing = ResultStanding(rawValue: word) { tally[standing] = count }
 		}
-		return CountedPage(rows: wire.items.map(CountedResult.init), count: wire.count, tally: tally, next: wire.cursor)
+		return CountedPage(
+			rows: wire.items.map(CountedResult.init), count: wire.count, tally: tally,
+			testTime: TestTime(ms: wire.testTime.ms, timed: wire.testTime.timed), next: wire.cursor
+		)
 	}
 
 	/// A page of the automated tests, newest first.

@@ -210,11 +210,9 @@ func outcomeTint(_ outcome: String) -> Color {
 
 /// "shop · attempt 2 · 1.4 s · robin": where a result came from, as one line.
 func facts(job: String, attempt: Int, duration: Double?, by: String, model: String? = nil) -> String {
-	var parts = [job]
+	var parts = job.isEmpty ? [] : [job]
 	if attempt > 1 { parts.append("attempt \(attempt)") }
-	if let duration {
-		parts.append(duration < 1000 ? "\(Int(duration)) ms" : String(format: duration < 10_000 ? "%.1f s" : "%.0f s", duration / 1000))
-	}
+	if let duration { parts.append(spent(Int(duration))) }
 	parts.append(by)
 	if let model { parts.append(model) }
 	return parts.joined(separator: " · ")

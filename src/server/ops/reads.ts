@@ -68,6 +68,7 @@ import {
 	testById,
 	testRef,
 	testsOfCase,
+	testTime,
 	unlinkedCount,
 } from "../evidence/evidence.ts";
 import { findingsOfCase, reviewBasis, reviewsAtVersion, reviewsOfCase } from "../evidence/findings.ts";
@@ -575,6 +576,7 @@ type Found = {
 	items: Record<string, unknown>[];
 	cursor: string | null;
 	tally?: Record<string, number>;
+	testTime?: { ms: number; timed: number };
 };
 
 /**
@@ -597,6 +599,10 @@ function countedResults(ctx: Ctx, input: FindInput, limit: number): Found {
 	const counted = run ? countedTests(ctx.db, run) : [];
 	const tally: Record<string, number> = { ...emptyTally() };
 	for (const row of counted) tally[row.standing] = (tally[row.standing] ?? 0) + 1;
+	const time = testTime(
+		ctx.db,
+		counted.map((row) => row.result),
+	);
 
 	const rank = (row: CountedTest): number => RESULT_STANDINGS.indexOf(row.standing);
 	const text = input.text?.toLowerCase();
@@ -633,6 +639,7 @@ function countedResults(ctx: Ctx, input: FindInput, limit: number): Found {
 		items: page.map((row) => countedView(ctx, row, locationOf)),
 		cursor: rest.length > limit && last ? `${rank(last)}.${last.result}.${version}` : null,
 		tally,
+		testTime: time,
 	};
 }
 

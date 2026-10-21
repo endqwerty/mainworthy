@@ -230,6 +230,8 @@ public final class ChangeResults {
 	/// Every row the gate counts, by standing, whatever is shown.
 	public var tally: [ResultStanding: Int] { list.first?.tally ?? [:] }
 	public var total: Int { tally.values.reduce(0, +) }
+	/// The summed duration of every row the gate counts, whatever is shown. None until the first read.
+	public var testTime: TestTime? { list.first?.testTime }
 	/// How many rows match what is shown, when the server said.
 	public var count: Int? { list.first?.count }
 	public var loading: ListLoading { list.loading }

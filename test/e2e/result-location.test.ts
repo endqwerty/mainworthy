@@ -14,6 +14,7 @@ import { browserAvailable, openPage, startServer } from "./support.ts";
 				{
 					test: { key: "landed-coupon", name: "Landed coupon" },
 					outcome: "fail",
+					durationMs: 1400,
 					failure: { message: "Coupon lost after merge" },
 				},
 			];
@@ -48,6 +49,8 @@ import { browserAvailable, openPage, startServer } from "./support.ts";
 			await shot("change");
 			await page.goto(`${server.url}/p/scratch/runs/${trunk.gate?.run?.slice(2)}`);
 			await page.locator(".run-verdict").first().waitFor();
+			// The run's header sums what its results reported: one result, 1.4 s.
+			await page.getByText("1 unexplained failure · 1.4 s of test time", { exact: true }).waitFor();
 			await shot("trunk-run");
 			await page.goto(`${server.url}/p/scratch/tests/1`);
 			const latest = page.getByRole("list", { name: "Latest results" });
