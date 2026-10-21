@@ -49,6 +49,10 @@ struct ReviewFifth {
     let screen=QueueScreen(project:try await server.project(key));await screen.show(.open,filter:nil)
     let q=try #require(screen.questions.first {$0.ref==made["question"]?.string});await screen.readDocuments(of:q)
     let complete=field=="unused"
+    #expect(!screen.isShown(q))
+    if case .read(let docs)=screen.documents(of:q) {
+     for doc in docs {screen.showProposalRange(of:q,document:doc.id,height:100,top:0,bottom:100)}
+    }
     #expect(screen.isShown(q) == complete)
     if complete {
      guard case .read(let docs)=screen.documents(of:q) else {Issue.record("complete document not read");return}
@@ -73,6 +77,9 @@ struct ReviewFifth {
    let server=Server(instance:Live.instance,secrets:MemoryStore(),transport:IncompletePart(field));_=try await server.signIn(Live.owner)
    let screen=QueueScreen(project:try await server.project(key));await screen.show(.open,filter:nil)
    let q=try #require(screen.questions.first {$0.ref==made["question"]?.string});await screen.readDocuments(of:q)
+   if case .read(let docs)=screen.documents(of:q) {
+    for doc in docs {screen.showProposalRange(of:q,document:doc.id,height:100,top:0,bottom:100)}
+   }
    let shown=screen.isShown(q)
    let accepted=await screen.answer(q,with:try #require(q.choices.first {$0.answer=="accept"}),reason:"Reviewed visible content")
    #expect(!shown && !accepted)
