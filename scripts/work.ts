@@ -6,7 +6,7 @@
 //   bun scripts/work.ts wait-tests [--timeout=<s>]    waits until no other test run has workers (default 1800 s)
 //   bun scripts/work.ts board start|todo|done <n>     moves an issue's or a pull request's card on the board
 //   bun scripts/work.ts board check                   says which of the board's ids in the code no longer fit
-//   bun scripts/work.ts pr-body <n>                   checks a pull request's description and milestone
+//   bun scripts/work.ts pr-body <n>                   checks a pull request's description, milestone and principles
 //   bun scripts/work.ts sync-branch                   after the owner merged: moves the branch onto origin/main, if nothing on it is unmerged
 //   bun scripts/work.ts release                       gives back the worktree's disk (node_modules and the rest); refuses while it is in use
 //   bun scripts/work.ts check-time <base> <head> [--rounds=2] [--no-install] [-- <command...>]
@@ -122,7 +122,7 @@ async function main(args: string[]): Promise<void> {
 			if (!Number.isInteger(number) || number < 1) return fail(USAGE, 4);
 			const found = problems(await gather(number));
 			if (found.length > 0) fail(`pull request #${number}:\n- ${found.join("\n- ")}`);
-			console.log(`pull request #${number}: closing words, linked issues and milestone agree`);
+			console.log(`pull request #${number}: closing words, linked issues, milestone and principles agree`);
 			return;
 		}
 		case "sync-branch":
