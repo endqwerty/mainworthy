@@ -702,6 +702,14 @@ test("under the CI policy a failure needs a fix, asks nobody, and is over when a
 			text: expect.stringContaining("Nothing to do."),
 		});
 
+		// The test the retry passed fails again: the session is told it flipped lately, so it re-runs before fixing.
+		change("change04", { 1: "Expected: 9\nReceived: 8" });
+		const flaky = await readCi(call, { change: "pr:69" });
+		expect(flaky.exit).toBe(1);
+		expect(flaky.text).toContain("tests/checkout.spec.ts: test 1 (flipped 1 time in the last 14 days)\n");
+		expect(flaky.text).toContain("1 of these flipped between passing and failing in the last 14 days");
+		change("change05");
+
 		// A failure on main is the same, and every failing test is listed, past a page of them.
 		const many = Object.fromEntries(Array.from({ length: 503 }, (_, i) => [i, `boom ${i}`]));
 		h.call("report", ciReport({ commit: "main0002", n: 503, fail: many }));

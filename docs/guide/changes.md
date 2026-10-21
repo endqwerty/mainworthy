@@ -63,6 +63,19 @@ button above the list. To find a test by name or file, type in the filter.
 The rows add up to the counts. Results from different producers, jobs, or environments
 have separate rows, even for the same test. A retried test shows the attempt the gate counts.
 
+### Flaky tests
+
+A test that both passed and failed on the same commit, in the same job, is flaky. Its row
+says "flaky" under its label and "passed and failed on this commit". A failing test that
+flipped between passing and failing on any commit in the policy's detection window (14 days
+by default) also says "flaky", with how many times it flipped. The count is the one
+[Reports](./reports.md) shows for the same days.
+
+A note above the list counts both, for the whole commit, whatever the filter. When a failing
+test may be flaky, run its job again before you fix it: the gate counts the retry's result
+instead. A flaky failure still fails the gate until a retry passes or somebody answers it.
+In Runs, a change run's row says how many of its tests were flaky.
+
 The command line and the API return the same rows. For example, these commands
 list results for a change or unexplained results for a commit:
 

@@ -40,6 +40,21 @@ const Result = z.object({
 	build: z.string().nullable(),
 });
 const Detail = Test.extend({ key: z.string(), flips: z.number(), last: z.array(Result) });
+type Result = z.infer<typeof Result>;
+
+/** The later attempt that passed where this one failed: the same commit, job and producer. The failure was a flake. */
+const passedOnRetry = (result: Result, all: readonly Result[]): Result | undefined =>
+	result.outcome === "fail" || result.outcome === "error"
+		? all.find(
+				(other) =>
+					other.outcome === "pass" &&
+					other.commit !== null &&
+					other.commit === result.commit &&
+					other.job === result.job &&
+					other.by === result.by &&
+					other.attempt > result.attempt,
+			)
+		: undefined;
 
 export function TestsScreen() {
 	const { project } = useApp();
@@ -197,17 +212,19 @@ function TestDetail({ testRef }: { testRef: string }) {
 				<ul className="test-results" aria-label="Latest results">
 					{test.last.map((result) => {
 						const build = webUrl(result.build);
+						const retry = passedOnRetry(result, test.last);
 						const facts = [
 							result.job,
 							result.attempt > 1 ? `attempt ${result.attempt}` : null,
+							retry ? `passed on attempt ${retry.attempt}` : null,
 							duration(result.durationMs),
 							result.by,
 							result.model,
 							age(result.at),
 						].filter((fact): fact is string => Boolean(fact));
 						return (
-							<li key={result.id} className={`test-result o-${result.outcome}`}>
-								<span className="result-outcome">{result.outcome}</span>
+							<li key={result.id} className={`test-result o-${retry ? "flaky" : result.outcome}`}>
+								<span className="result-outcome">{retry ? "flaky" : result.outcome}</span>
 								<div className="result-body">
 									<ResultLocation location={result.location} />
 									<small className="dim">{facts.join(" · ")}</small>

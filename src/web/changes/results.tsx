@@ -25,6 +25,8 @@ export const Counted = z.object({
 	outcome: z.string(),
 	standing: z.enum(RESULT_STANDINGS),
 	quarantined: z.boolean(),
+	flipped: z.boolean(),
+	recentFlips: z.number(),
 	question: z.string().nullable(),
 	attempt: z.number(),
 	durationMs: z.number().nullable(),
@@ -93,6 +95,7 @@ export function ChangeResults({
 	const parsed = Counted.array().safeParse(pages.flatMap((page) => page.items));
 	const rows = parsed.success ? parsed.data : [];
 	const tally = pages[0]?.tally ?? {};
+	const flaky = pages[0]?.flaky;
 	const total = Object.values(tally).reduce((sum, n) => sum + n, 0);
 	const matching = pages[0]?.count ?? 0;
 	return (
@@ -126,11 +129,12 @@ export function ChangeResults({
 					onChange={(event) => setTyped(event.target.value)}
 				/>
 			)}
+			{flaky && <FlakyNote flaky={flaky} />}
 			{read.error && <p role="status">{read.error.message}</p>}
 			{!parsed.success && <p role="status">The results could not be read.</p>}
 			<ul className="change-results" aria-label="Results the gate counted">
 				{rows.map((row) => (
-					<ResultRow key={`${row.result}:${row.job}`} row={row} project={project} />
+					<ResultRow key={`${row.result}:${row.job}`} row={row} project={project} days={flaky?.days ?? null} />
 				))}
 			</ul>
 			{rows.length === 0 && !read.isPending && !read.error && (
@@ -159,7 +163,38 @@ export function ChangeResults({
 	);
 }
 
-function ResultRow({ row, project }: { row: Counted; project: string }) {
+const times = (n: number, what: string): string => `${n} ${what}${n === 1 ? "" : "s"}`;
+
+/**
+ * A failure that a retry may pass is not a reason to stop everything, and a pass that a failure preceded is not a
+ * clean pass: both are said above the list, from what the whole commit shows, whatever the filter.
+ */
+function FlakyNote({ flaky }: { flaky: { flipped: number; failing: number; days: number } }) {
+	if (flaky.failing === 0 && flaky.flipped === 0) return null;
+	const one = flaky.failing === 1;
+	return (
+		<div className="change-flaky" role="note">
+			{flaky.failing > 0 && (
+				<p>
+					{one ? "1 failing test" : `${flaky.failing} failing tests`} flipped between passing and failing in the last{" "}
+					{times(flaky.days, "day")}, so {one ? "it" : "they"} may be flaky rather than broken. Run{" "}
+					{one ? "its job" : "their jobs"} again before fixing {one ? "it" : "them"}: the gate counts a retry's result
+					instead.
+				</p>
+			)}
+			{flaky.flipped > 0 && (
+				<p>
+					{flaky.flipped === 1
+						? "1 test both passed and failed on this commit, so it is flaky."
+						: `${flaky.flipped} tests both passed and failed on this commit, so they are flaky.`}{" "}
+					The gate counts the latest attempt.
+				</p>
+			)}
+		</div>
+	);
+}
+
+function ResultRow({ row, project, days }: { row: Counted; project: string; days: number | null }) {
 	const go = (ref: string) => (event: { preventDefault: () => void }) => {
 		event.preventDefault();
 		navigate(refUrl({ project, ref }));
@@ -168,16 +203,23 @@ function ResultRow({ row, project }: { row: Counted; project: string }) {
 		row.file,
 		row.job,
 		row.attempt > 1 ? `attempt ${row.attempt}` : null,
+		row.flipped
+			? "passed and failed on this commit"
+			: row.recentFlips > 0 && days !== null
+				? `flipped ${times(row.recentFlips, "time")} in the last ${times(days, "day")}`
+				: null,
 		duration(row.durationMs),
 		row.by,
 		row.model,
 	].filter((fact): fact is string => Boolean(fact));
 	const build = webUrl(row.build);
+	const flaky = row.flipped || row.recentFlips > 0;
 	return (
 		<li className={`change-result s-${row.standing}`}>
 			<span className="result-standing">
 				{row.quarantined ? "quarantined" : RESULT_STANDING_LABELS[row.standing]}
 				{row.outcome === "error" && " (error)"}
+				{flaky && <span className="result-flaky">flaky</span>}
 			</span>
 			<div className="result-body">
 				<a href={refUrl({ project, ref: row.test })} onClick={go(row.test)}>

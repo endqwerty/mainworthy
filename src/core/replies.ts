@@ -130,6 +130,10 @@ const CountedResult = z.looseObject({
 	outcome: text,
 	standing: text,
 	quarantined: flag,
+	/** Whether the test both passed and failed on this commit, in this job: a retry changed its outcome. */
+	flipped: flag,
+	/** How often the test flipped between passing and failing on the same code lately (`flaky.days`). */
+	recentFlips: whole,
 	question: nullableText,
 	attempt: whole,
 	durationMs: number.nullable(),
@@ -347,6 +351,11 @@ export const FindReply = z.looseObject({
 	tally: counts.optional(),
 	/** For results: the summed duration of every row the gate counts, and how many named one, whatever the filter. */
 	testTime: z.strictObject({ ms: whole, timed: whole }).optional(),
+	/**
+	 * For results, whatever the filter: how many counted tests flipped on this commit, and how many of those that
+	 * fail its gate flipped on some commit in the last `days` days.
+	 */
+	flaky: z.strictObject({ flipped: whole, failing: whole, days: whole }).optional(),
 });
 export const ImpactReply = z.looseObject({
 	change: z.union([

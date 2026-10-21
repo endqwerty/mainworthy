@@ -174,6 +174,7 @@ function RunListing({ opened }: { opened: Run | null }) {
 									{run.origin === "planned" &&
 										`${run.workUntil !== null && run.workUntil <= now ? 0 : run.inProgress} in progress · `}
 									{run.reason}
+									{run.flips ? ` · ${run.flips} flaky` : ""}
 								</span>
 							</span>
 							{run.state === "closed" && <span className="run-closed">closed</span>}
