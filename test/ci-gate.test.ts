@@ -1,14 +1,15 @@
 // The last job of the check workflow (`scripts/ci-gate.ts`), run as the workflow runs it against a real
 // Mainworthy: the result is Mainworthy's gate, and a report that is missing or says less than happened is not a pass.
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
+import { runCiGate } from "../scripts/ci-gate.ts";
 import { chooseInstance, contractDifferences, deploymentFetch, type Probe } from "../scripts/ci-instance.ts";
 import { Client } from "../src/cli/client.ts";
 import { runCli } from "../src/cli/dispatch.ts";
-import { type Running, withInstance } from "../src/cli/test-support.ts";
+import { inThisProcess, type Running, withInstance } from "../src/cli/test-support.ts";
 import { API_VERSION } from "../src/core/version.ts";
 import { openApi } from "../src/surfaces/http.ts";
 
@@ -62,6 +63,7 @@ function junit(files: Shard["files"]): string {
 async function gate(
 	shards: Shard[],
 	options: {
+		inProcess?: boolean;
 		repository?: string[];
 		missing?: string[];
 		/** Shards whose report is there and cannot be read (a directory of that name). */
@@ -102,43 +104,62 @@ async function gate(
 					else await writeFile(join(directory, `${shard.name}.xml`), shard.xml ?? junit(shard.files));
 					await writeFile(join(directory, `${shard.name}.json`), JSON.stringify(outcome));
 				}
-				const child = Bun.spawn(
-					[
-						process.execPath,
-						resolve("scripts/ci-gate.ts"),
-						"test-results",
-						...new Set(shards.map((shard) => shard.name)),
-						...(options.files ? [`--files=${options.files.join(",")}`] : []),
-					],
-					{
-						cwd: root,
-						env: {
-							PATH: process.env.PATH ?? "",
-							HOME: root,
-							// What the job leaves in the temporary directory is this test's to count.
-							TMPDIR: join(root, "tmp"),
-							MAINWORTHY_URL: instance.url,
-							MAINWORTHY_TOKEN: "",
-							MAINWORTHY_PROJECT: "",
-							...(process.env.MAINWORTHY_READERS !== undefined
-								? { MAINWORTHY_READERS: process.env.MAINWORTHY_READERS }
-								: {}),
-							GITHUB_ACTIONS: "true",
-							GITHUB_EVENT_NAME: "pull_request",
-							GITHUB_REF: "refs/pull/77/merge",
-							GITHUB_HEAD_REF: "dx/fast-check",
-							GITHUB_SHA: "c0ffee0123456789012345678901234567890123",
-							GITHUB_REPOSITORY: "endqwerty/mainworthy",
-							GITHUB_RUN_ID: "1",
-							GITHUB_RUN_ATTEMPT: "1",
-							GITHUB_JOB: "gate",
-							GITHUB_STEP_SUMMARY: join(root, "summary.md"),
-							...configured,
-						},
-						stdout: "pipe",
-						stderr: "pipe",
-					},
-				);
+				const argv = [
+					"test-results",
+					...new Set(shards.map((shard) => shard.name)),
+					...(options.files ? [`--files=${options.files.join(",")}`] : []),
+				];
+				const env = {
+					PATH: process.env.PATH ?? "",
+					HOME: root,
+					// What the job leaves in the temporary directory is this test's to count.
+					TMPDIR: join(root, "tmp"),
+					MAINWORTHY_URL: instance.url,
+					MAINWORTHY_TOKEN: "",
+					MAINWORTHY_PROJECT: "",
+					...(process.env.MAINWORTHY_READERS !== undefined
+						? { MAINWORTHY_READERS: process.env.MAINWORTHY_READERS }
+						: {}),
+					GITHUB_ACTIONS: "true",
+					GITHUB_EVENT_NAME: "pull_request",
+					GITHUB_REF: "refs/pull/77/merge",
+					GITHUB_HEAD_REF: "dx/fast-check",
+					GITHUB_SHA: "c0ffee0123456789012345678901234567890123",
+					GITHUB_REPOSITORY: "endqwerty/mainworthy",
+					GITHUB_RUN_ID: "1",
+					GITHUB_RUN_ATTEMPT: "1",
+					GITHUB_JOB: "gate",
+					GITHUB_STEP_SUMMARY: join(root, "summary.md"),
+					...configured,
+				};
+				if (options.inProcess) {
+					const printed = spyOn(console, "log").mockImplementation((text: unknown) => {
+						process.stdout.write(`${String(text)}\n`);
+					});
+					let result: Awaited<ReturnType<typeof inThisProcess>>;
+					try {
+						result = await inThisProcess("ci-gate", () => runCiGate(argv, env), {
+							environment: env,
+							cwd: root,
+							input: "",
+						});
+					} finally {
+						printed.mockRestore();
+					}
+					return {
+						code: result.code,
+						output: result.stdout + result.stderr,
+						summary: await readFile(join(root, "summary.md"), "utf8").catch(() => ""),
+						left: [...(await readdir(join(root, "tmp"))), ...(await stillRunning(result.stdout))],
+						batches: instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n,
+					};
+				}
+				const child = Bun.spawn([process.execPath, resolve("scripts/ci-gate.ts"), ...argv], {
+					cwd: root,
+					env,
+					stdout: "pipe",
+					stderr: "pipe",
+				});
 				const printed = async (): Promise<string> => {
 					let text = "";
 					let signalled = false;
@@ -329,6 +350,16 @@ test("CI stops retrying unreachable requests and shares its deadline across comm
 // Which Mainworthy the job reports to is `scripts/ci-instance.ts`. The first three tests are each on one of its
 // three ways through; the others use the instance of the test with no token, as a job on one machine does.
 
+/** Run one executable smoke, then the remaining report variants in this process. */
+function gateVariants(): typeof gate {
+	let first = true;
+	return (shards, options = {}) => {
+		const inProcess = !first;
+		first = false;
+		return gate(shards, { ...options, inProcess });
+	};
+}
+
 /** The Mainworthy the job said it started, if its process is still there a moment after the job ended. */
 async function stillRunning(output: string): Promise<string[]> {
 	const pid = Number(/^Started a Mainworthy for this job: \S+ \(process (\d+)\)$/m.exec(output)?.[1]);
@@ -447,7 +478,8 @@ test("a shard that ran again is read from its newest attempt, and the others fro
 }, 20_000);
 
 test("the newest attempt of a shard is its report also when it failed, or left an artifact with no report in it", async () => {
-	const failedAgain = await gate(
+	const check = gateVariants();
+	const failedAgain = await check(
 		[
 			...green.filter((shard) => shard.name !== "tests-2").map((shard) => ({ ...shard, attempt: 1 })),
 			{ name: "tests-2", files: { "test/c.test.ts": null }, attempt: 1 },
@@ -458,7 +490,7 @@ test("the newest attempt of a shard is its report also when it failed, or left a
 	expect(failedAgain.output).toMatch(/mainworthy gate\s+blocked/);
 	expect(failedAgain.code).toBe(2);
 	// An older attempt that passed does not stand in for a newer one that says nothing.
-	const empty = await gate(
+	const empty = await check(
 		[
 			...green.filter((shard) => shard.name !== "tests-2").map((shard) => ({ ...shard, attempt: 1 })),
 			{ name: "tests-2", files: { "test/c.test.ts": null }, attempt: 1 },
@@ -466,6 +498,8 @@ test("the newest attempt of a shard is its report also when it failed, or left a
 		],
 		{ configure: async () => ({ MAINWORTHY_URL: "" }) },
 	);
+	expect(empty.output).toMatch(/^Started a Mainworthy for this job: /m);
+	expect(empty.left).toEqual([]);
 	expect(empty.output).toContain(
 		"::error::tests-2: no report (test-results/results-tests-2-attempt-2/tests-2.xml is missing or empty)",
 	);
@@ -487,12 +521,13 @@ test("a test file whose tests were all skipped fails the job, though the gate pa
 }, 20_000);
 
 test("a test file whose name the reader cuts short fails the job, so a skipped file cannot be counted with one that ran", async () => {
+	const check = gateVariants();
 	// Issue #82. The reader keeps the first 500 characters of a file's name, and the two names below share them:
 	// counted by that name they are one file with two tests and one skip, and the skipped file goes unreported.
 	const deep = `test/${Array.from({ length: 5 }, () => "a".repeat(99)).join("/")}`;
 	const [ran, skipped] = [`${deep}/pass.test.ts`, `${deep}/skip.test.ts`];
 	expect([ran.length, skipped.length, ran.slice(0, 500) === skipped.slice(0, 500)]).toEqual([517, 517, true]);
-	const result = await gate(
+	const result = await check(
 		green.map((shard) =>
 			shard.name === "tests-2" ? { ...shard, files: { [ran]: null, [skipped]: SKIPPED }, exit: 0 } : shard,
 		),
@@ -505,7 +540,7 @@ test("a test file whose name the reader cuts short fails the job, so a skipped f
 	// A name one character short of the limit is whole, and is counted as itself.
 	const whole = `test/${"b".repeat(99)}/${"c".repeat(99)}/${"d".repeat(99)}/${"e".repeat(99)}/${"f".repeat(86)}.test.ts`;
 	expect(whole.length).toBe(499);
-	const fits = await gate(
+	const fits = await check(
 		green.map((shard) => (shard.name === "tests-2" ? { ...shard, files: { [whole]: null }, exit: 0 } : shard)),
 	);
 	expect(fits.output).not.toContain("::error::");
@@ -513,27 +548,29 @@ test("a test file whose name the reader cuts short fails the job, so a skipped f
 }, 40_000);
 
 test("a test that takes its file from its suite is counted for that file", async () => {
+	const check = gateVariants();
 	// Other producers of JUnit put the file on the suite only. Bun puts it on every test.
 	const inherited = junit({ "test/c.test.ts": null }).replace(/(<testcase\b[^>]*?) file="[^"]+"/g, "$1");
 	expect(inherited).not.toMatch(/<testcase\b[^>]* file=/);
 	const withReport = (xml: string): Shard[] =>
 		green.map((shard) => (shard.name === "tests-2" ? { ...shard, xml, exit: 0 } : shard));
-	const ran = await gate(withReport(inherited));
+	const ran = await check(withReport(inherited));
 	expect(ran.output).not.toContain("::error::");
 	expect(ran.code).toBe(0);
 	const skipped = inherited.replace(/<testcase\b([^>]*?)\s*\/>/g, "<testcase$1>\n      <skipped />\n    </testcase>");
-	const none = await gate(withReport(skipped));
+	const none = await check(withReport(skipped));
 	expect(none.output).toContain("::error::tests-2: every test of test/c.test.ts was skipped");
 	expect(none.code).toBe(1);
 }, 40_000);
 
 test("text inside a test's output is not counted as a test or as a skip", async () => {
+	const check = gateVariants();
 	const withReport = (xml: string): Shard[] =>
 		green.map((shard) => (shard.name === "tests-2" ? { ...shard, xml, exit: 0 } : shard));
 	const report = (body: string) =>
 		`<?xml version="1.0" encoding="UTF-8"?>\n<testsuites name="bun test" tests="1" failures="0" skipped="0" time="0.1">\n  <testsuite name="test/c.test.ts" file="test/c.test.ts" tests="1" failures="0" skipped="0" time="0.1" hostname="runner">\n${body}\n  </testsuite>\n</testsuites>\n`;
 	// A file whose one test was skipped, with a passing test's markup quoted in its output: still not tested.
-	const fake = await gate(
+	const fake = await check(
 		withReport(
 			report(
 				'    <testcase name="skips" file="test/c.test.ts"><skipped /></testcase>\n    <system-out><![CDATA[<testcase name="example" />]]></system-out>',
@@ -543,7 +580,7 @@ test("text inside a test's output is not counted as a test or as a skip", async 
 	expect(fake.output).toContain("::error::tests-2: every test of test/c.test.ts was skipped");
 	expect(fake.code).toBe(1);
 	// A test that passed, with the word for a skip quoted in its output: tested.
-	const quoted = await gate(
+	const quoted = await check(
 		withReport(report('    <testcase name="passes"><system-out><![CDATA[<skipped />]]></system-out></testcase>')),
 	);
 	expect(quoted.output).not.toContain("::error::");
@@ -572,27 +609,29 @@ test("a test file that is in no shard's report fails the job", async () => {
 
 // Decision 0090: a change that needs only some test files runs those, and the gate expects those in a report.
 test("given the files the change needed, the job expects those in a report and no other", async () => {
+	const check = gateVariants();
 	const chosen: Shard[] = [
 		{ name: "tests", files: { "test/architecture.test.ts": null, "test/licences.test.ts": null } },
 	];
 	const repository = ["test/architecture.test.ts", "test/licences.test.ts", "test/e2e/browser.test.ts"];
-	const narrowed = await gate(chosen, { repository, files: ["test/architecture.test.ts", "test/licences.test.ts"] });
+	const narrowed = await check(chosen, { repository, files: ["test/architecture.test.ts", "test/licences.test.ts"] });
 	expect(narrowed.output).not.toContain("in no shard's report");
 	expect(narrowed.code).toBe(0);
-	const short = await gate(chosen, { repository, files: ["test/architecture.test.ts", "test/docs.test.ts"] });
+	const short = await check(chosen, { repository, files: ["test/architecture.test.ts", "test/docs.test.ts"] });
 	expect(short.output).toContain("::error::in no shard's report: test/docs.test.ts");
 	expect(short.code).toBe(1);
 }, 20_000);
 
 test("a slow shard only warns, and a slow failed test still blocks", async () => {
+	const check = gateVariants();
 	const taking = (shards: Shard[], seconds: number): Shard[] =>
 		shards.map((shard) => (shard.name === "quiet" ? { ...shard, seconds } : shard));
 	for (const seconds of [181, 241]) {
-		const result = await gate(taking(green, seconds));
+		const result = await check(taking(green, seconds));
 		expect(result.output).toContain(`::warning::the slowest shard's tests took ${seconds.toFixed(1)} s`);
 		expect(result.code).toBe(0);
 	}
-	const failed = await gate(taking(withFailure("one is two"), 241));
+	const failed = await check(taking(withFailure("one is two"), 241));
 	expect(failed.output).toContain("::warning::the slowest shard's tests took 241.0 s");
 	expect(failed.code).toBe(2);
 }, 30_000);
