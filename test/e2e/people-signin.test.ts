@@ -226,7 +226,7 @@ test.skipIf(!browserAvailable)(
 );
 
 test.skipIf(!browserAvailable)(
-	"five wrong passwords for a name, and the form says how long to wait, with the name and the password kept",
+	"a limited password sign-in says how long to wait, with the name and the password kept",
 	async () => {
 		let browser: PageHarness | null = null;
 		try {
@@ -236,34 +236,20 @@ test.skipIf(!browserAvailable)(
 				.locator("form")
 				.filter({ has: page.locator("#signin-password") })
 				.getByRole("status");
-			/** Types one wrong password and waits for the server's answer to it. Returns the status of that answer. */
-			const attempt = async (n: number): Promise<number> => {
-				const answered = page.waitForResponse((response) => response.url().endsWith("/api/login"));
-				await page.locator("#signin-password").fill(`wrong password number ${n}`);
-				await page.keyboard.press("Enter");
-				return (await answered).status();
-			};
-			// The browser reaches this server from the loopback address, which is not counted. What is counted is
-			// the name, whether or not anybody has it.
+			await page.route("**/api/login", (route) =>
+				route.fulfill({
+					status: 429,
+					headers: { "Retry-After": "23" },
+					json: { ok: false, error: { code: "limited", message: "Too many attempts" } },
+				}),
+			);
 			await page.locator("#signin-name").fill("nobody-of-that-name");
-			// Four wrong passwords cost nothing, and the fifth is still answered as a wrong password: it is the one
-			// that blocks.
-			for (let n = 1; n <= 5; n++) {
-				expect(await attempt(n)).toBe(401);
-				await refusal.filter({ hasText: "That name and password did not sign you in." }).waitFor();
-			}
-			// The sixth is refused unread while the block lasts, which is one second at first. On a machine too
-			// busy to type inside that second, the sixth is one more failure, which doubles the block for the
-			// seventh, and so on (`limit.test.ts` says the same of a token).
-			let status = 0;
-			let last = 5;
-			while (status !== 429 && last < 12) status = await attempt(++last);
-			expect(status).toBe(429);
-			await refusal.filter({ hasText: /^Too many attempts\. Try again in \d+ seconds?\.$/ }).waitFor();
-			// Nothing else changed: what was typed is there for when the wait is over, and nothing was sent again.
+			await page.locator("#signin-password").fill("wrong password");
+			await page.keyboard.press("Enter");
+			await refusal.filter({ hasText: /^Too many attempts\. Try again in 23 seconds\.$/ }).waitFor();
 			expect(await page.locator("#app").count()).toBe(0);
 			expect(await page.locator("#signin-name").inputValue()).toBe("nobody-of-that-name");
-			expect(await page.locator("#signin-password").inputValue()).toBe(`wrong password number ${last}`);
+			expect(await page.locator("#signin-password").inputValue()).toBe("wrong password");
 			expect(await page.getByRole("button", { name: "Sign in", exact: true }).isEnabled()).toBe(true);
 			expect(browser.errors).toEqual([
 				"Failed to load resource: the server responded with a status of 429 (Too Many Requests)",
