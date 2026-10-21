@@ -246,9 +246,14 @@ A graceful stop during reset skips that token. If seeding has begun, the stop wa
 and its token cleanup before closing the database.
 
 Step timings go to stderr, for example `[mainworthy] demo "demo": delete results took 12.3 ms`. The log names
-the provenance check, grant capture, table discovery, every table count and delete, foreign-key check,
-recreation with grants, the reset transaction, and the seed. The worker disables per-row foreign-key enforcement
-before its reset transaction and checks all foreign keys before commit. A violation rolls the whole reset back.
+database opening and closing, owner lookup, transaction setup, the provenance check, grant capture, foreign-key deferral,
+the pending-key check, table discovery, every table count and delete, foreign-key check, recreation with grants,
+transaction completion after removal and recreation, the whole reset transaction, and the seed.
+The worker disables per-row foreign-key enforcement before its reset transaction and enables deferral before
+removal. The fresh reset transaction has no pending changes to check, so removal skips the initial whole-database
+foreign-key scan. `finish transfer transaction` includes the bulk validation after removal; `finish reset
+transaction` includes validation after recreation and commit. These checks still cover all foreign keys in the
+database. A violation rolls the whole reset back.
 Migration 25 removes indexes needed only for removal, so reports no longer maintain them.
 It changes no archive data or version.
 [Decision 0087](decisions/0087-responsive-demo-refresh.md) records the tradeoff.

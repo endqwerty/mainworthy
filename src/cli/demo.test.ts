@@ -1,7 +1,8 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { z } from "zod";
+import { removalFixture } from "../../test/demo-removal-fixture.ts";
 import { Client } from "./client.ts";
-import { refreshDemo } from "./demo.ts";
+import { refreshDemo, resetDemoSteps } from "./demo.ts";
 import { CliError } from "./errors.ts";
 import { seed } from "./seed.ts";
 import { withInstance } from "./test-support.ts";
@@ -35,6 +36,69 @@ const teamGrants = async (client: Client) =>
 		.find((team) => team.name === "testers")?.grants;
 const titles = async (client: Client, project: string) =>
 	(await client.with({ project }).call("find", { limit: 500 })).items.map((item) => item.title);
+
+test("a reset starts removal without checking the unrelated project's foreign keys", async () => {
+	await withInstance(async ({ instance }) => {
+		const { app, owner } = instance;
+		removalFixture(app.db, 2_000);
+		const queries = spyOn(app.db.raw, "query");
+		const timings = new Map<string, number>();
+		let beforeRemoval = -1;
+		const steps = resetDemoSteps(app, owner, "removing", null, (step, ms) => {
+			timings.set(step, ms);
+			if (step === "discover tables")
+				beforeRemoval = queries.mock.calls.filter(([sql]) => sql === "PRAGMA foreign_key_check").length;
+		});
+		try {
+			expect(steps.next()).toEqual({ value: undefined, done: false });
+			expect(beforeRemoval).toBe(0);
+			expect(app.db.raw.query("SELECT count(*) AS n FROM results WHERE project = 900").get()).toEqual({ n: 0 });
+			expect(app.db.raw.query("SELECT count(*) AS n FROM results WHERE project = 901").get()).toEqual({ n: 2_000 });
+			expect(steps.next()).toEqual({ value: undefined, done: true });
+			expect(app.db.raw.query("SELECT key FROM projects WHERE key = 'removing'").get()).toEqual({ key: "removing" });
+			expect(queries.mock.calls.filter(([sql]) => sql === "PRAGMA foreign_key_check")).toHaveLength(3);
+			for (const step of [
+				"begin reset transaction",
+				"defer reset foreign keys",
+				"check pending foreign keys",
+				"check foreign keys",
+				"finish transfer transaction",
+				"finish reset transaction",
+			])
+				expect(timings.get(step)).toBeNumber();
+			expect(app.db.raw.query("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
+		} finally {
+			steps.return();
+			queries.mockRestore();
+		}
+	});
+});
+
+test("the final reset check rejects a reference broken by recreation and restores both projects", async () => {
+	await withInstance(async ({ instance }) => {
+		const { app, owner } = instance;
+		removalFixture(app.db, 2);
+		app.db.raw.exec(`CREATE TRIGGER bad_recreation AFTER INSERT ON projects WHEN NEW.key = 'removing' BEGIN
+			UPDATE results SET corrects = 999999 WHERE project = 901;
+		END`);
+		const steps = resetDemoSteps(app, owner, "removing", null, () => {});
+		try {
+			expect(steps.next()).toEqual({ value: undefined, done: false });
+			expect(() => steps.next()).toThrow(/bulk write foreign key violation in results/);
+			expect(
+				app.db.raw.query("SELECT project, count(*) AS n FROM results GROUP BY project ORDER BY project").all(),
+			).toEqual([
+				{ project: 900, n: 2 },
+				{ project: 901, n: 2 },
+			]);
+			expect(app.db.raw.query("SELECT project FROM demo_projects WHERE project = 900").get()).toEqual({ project: 900 });
+			expect(app.db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
+			expect(app.db.raw.query("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
+		} finally {
+			steps.return();
+		}
+	});
+});
 
 test(
 	"restoring demo admin grants applies the server's MFA configuration to password sessions",
