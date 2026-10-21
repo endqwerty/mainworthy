@@ -332,7 +332,8 @@ final class RunsUITests: XCTestCase {
 		XCTAssertTrue(app.segmentedControls["runs-kind"].exists && app.segmentedControls["runs-state"].exists)
 		XCTAssertFalse(app.collectionViews.firstMatch.segmentedControls["runs-kind"].exists)
 		XCTAssertFalse(app.collectionViews.firstMatch.segmentedControls["runs-state"].exists)
-		let changeRun = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", " on pr:482")).firstMatch
+		// A change run is named by its change's key and title, which the server's location gives.
+		let changeRun = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "pr:482 ")).firstMatch
 		XCTAssertTrue(changeRun.waitForExistence(timeout: 10))
 		shot("7-every-kind")
 		app.segmentedControls.buttons["Change"].tap()
