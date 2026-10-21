@@ -411,6 +411,10 @@ const Q = {
 		"SELECT DISTINCT target, run FROM results WHERE project = $project AND signature = $signature AND actor = $actor",
 	),
 	resultById: sql<{ id: number }, ResultRow>("SELECT * FROM results WHERE id = $id"),
+	testTime: sql<{ results: string }, { ms: number; timed: number }>(
+		`SELECT coalesce(sum(r.duration_ms), 0) AS ms, count(r.duration_ms) AS timed
+		 FROM json_each($results) requested JOIN results r ON r.id = requested.value`,
+	),
 	previousOnTarget: sql<
 		{ target: number; test: number; actor: number; job: string; method: string },
 		{ id: number; outcome: Outcome; attempt: number }
@@ -1478,6 +1482,14 @@ export const unlinkedInFile = (db: Db, project: number, file: string): TestRow[]
 export const unlinkedCount = (db: Db, project: number): number => db.get(Q.unlinkedCount, { project })?.n ?? 0;
 export const signatureById = (db: Db, id: number): SignatureRow | null => db.get(Q.signatureById, { id });
 export const resultById = (db: Db, id: number): ResultRow | null => db.get(Q.resultById, { id });
+
+/**
+ * How long these results took, as their reports said: the sum of their durations, and how many of them named one.
+ * Results that ran side by side add up, so this is the time spent testing, not how long a build waited for it.
+ */
+export function testTime(db: Db, results: readonly number[]): { ms: number; timed: number } {
+	return db.get(Q.testTime, { results: JSON.stringify(results) }) ?? { ms: 0, timed: 0 };
+}
 
 /**
  * Every result one producer reported for one test from one job on one target that it has not since corrected,

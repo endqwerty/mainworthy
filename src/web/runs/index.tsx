@@ -1,7 +1,7 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import type { ResultStanding } from "../../core/runs.ts";
-import { ChangeResults } from "../changes/results.tsx";
+import { ChangeResults, testTimeText, useCounted } from "../changes/results.tsx";
 import { call } from "../lib/api.ts";
 import { queryClient, queryKey, useQueryOp } from "../lib/data.ts";
 import { useBindings } from "../lib/keys.ts";
@@ -275,6 +275,11 @@ function RunListing({ opened }: { opened: Run | null }) {
 function ChangeRunDetail({ run }: { run: Run }) {
 	const { project } = useApp();
 	const [standing, setStanding] = useState<ResultStanding | null>(null);
+	const counted = useCounted({ run: run.ref }, null, "").data?.pages[0];
+	const time = testTimeText(
+		counted?.testTime,
+		Object.values(counted?.tally ?? {}).reduce((sum, n) => sum + n, 0),
+	);
 	const change = run.change;
 	return (
 		<div className="pane-scroll detail-body">
@@ -286,7 +291,10 @@ function ChangeRunDetail({ run }: { run: Run }) {
 			</div>
 			<h2>{run.location?.label ?? run.name}</h2>
 			<p className={`run-verdict v-${run.verdict}`}>{run.reason}</p>
-			<p className="dim">{tallyText(run.tally)}</p>
+			<p className="dim">
+				{tallyText(run.tally)}
+				{time && ` · ${time}`}
+			</p>
 			{"commit" in run.accepts && (
 				<p className="dim">
 					{run.location ? (

@@ -66,7 +66,7 @@ export function tallyText(tally: Run["tally"]): string {
 		.filter(([, count]) => count > 0)
 		.map(
 			([name, count]) =>
-				`${count} ${name === "unexplained" ? "unexplained failures" : name === "attributed" ? "attributed failures" : name}`,
+				`${count} ${name === "unexplained" || name === "attributed" ? `${name} failure${count === 1 ? "" : "s"}` : name}`,
 		)
 		.join(" · ");
 }

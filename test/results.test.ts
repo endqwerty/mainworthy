@@ -21,7 +21,13 @@ type Row = {
 	commit: string | null;
 	question: string | null;
 };
-type Results = { count: number; cursor: string | null; items: Row[]; tally: Record<string, number> };
+type Results = {
+	count: number;
+	cursor: string | null;
+	items: Row[];
+	tally: Record<string, number>;
+	testTime: { ms: number; timed: number };
+};
 
 let h: Harness;
 beforeEach(() => {
@@ -161,6 +167,24 @@ describe("the results behind a gate", () => {
 		const none = results({ commit: "dead000000000000000000000000000000000000" });
 		expect(none).toMatchObject({ count: 0, cursor: null, items: [] });
 		expect(() => results({})).toThrow(/invalid/);
+	});
+
+	test("the test time sums the durations of the results the gate counts, whatever the filter", () => {
+		const timed = (name: string, outcome: string, durationMs?: number) => ({
+			test: { key: `tests/time.spec.ts::${name}`, name, file: "tests/time.spec.ts" },
+			outcome,
+			...(durationMs === undefined ? {} : { durationMs }),
+		});
+		h.call("report", {
+			target,
+			job: "unit",
+			results: [timed("fast", "pass", 1200), timed("retried", "fail", 5000), timed("untimed", "skip")],
+		});
+		// The rerun is the attempt the gate counts, so the first attempt's 5 s is not part of the sum.
+		h.call("report", { target, job: "unit", attempt: 2, results: [timed("retried", "pass", 40)] });
+		expect(results({ commit: COMMIT }).testTime).toEqual({ ms: 1240, timed: 2 });
+		expect(results({ commit: COMMIT, state: "skipped" }).testTime).toEqual({ ms: 1240, timed: 2 });
+		expect(results({ commit: "dead000000000000000000000000000000000000" }).testTime).toEqual({ ms: 0, timed: 0 });
 	});
 
 	test("a quarantined failure is listed as excused, as the gate counts it", () => {

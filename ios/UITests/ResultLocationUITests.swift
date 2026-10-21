@@ -24,7 +24,7 @@ final class ResultLocationUITests: XCTestCase {
 		let made = try await post("/test/project", ["kind": "demo"])
 		let project = try XCTUnwrap(made["project"] as? String)
 		let commit = "1234567890abcdef1234567890abcdef12345678"
-		let results: [[String: Any]] = [["test": ["key": "landed-coupon", "name": "Landed coupon"], "outcome": "fail", "failure": ["message": "Coupon lost after merge"]]]
+		let results: [[String: Any]] = [["test": ["key": "landed-coupon", "name": "Landed coupon"], "outcome": "fail", "durationMs": 1400, "failure": ["message": "Coupon lost after merge"]]]
 		_ = try await post("/api/p/\(project)/report", ["target": ["repo": "acme/shop", "commit": "feature0001", "branch": "coupon", "pr": 653, "title": "Keep coupons"], "results": results])
 		let app = XCUIApplication()
 		app.launchArguments = ["-forget", "-instance", address]
@@ -77,6 +77,10 @@ final class ResultLocationUITests: XCTestCase {
 		XCTAssertTrue(runRow.waitForExistence(timeout: 10))
 		runRow.tap()
 		XCTAssertTrue(app.staticTexts["change-run-verdict"].waitForExistence(timeout: 10))
+		// The run's facts are one label and value a row; its one result reported 1.4 s, and its job named none.
+		XCTAssertTrue(app.staticTexts["Test time, 1.4 s"].waitForExistence(timeout: 10))
+		XCTAssertTrue(app.staticTexts["Commit, 1234567890ab"].exists)
+		XCTAssertTrue(app.staticTexts["1.4 s · robin"].exists)
 		try shot("trunk-run")
 		app.openTab("Cases")
 		let link = app.buttons["main · pr:653 Keep coupons"].firstMatch

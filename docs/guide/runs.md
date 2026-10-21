@@ -17,6 +17,9 @@ Choose **Planned** or **Change** to see one kind, and **Open** or **Closed** to 
 Select a planned run and press <kbd>Enter</kbd> to open its cockpit.
 Select a change run to see its commit, its change, and every result its gate counted, with the
 same filters as a change's results. Press <kbd>Enter</kbd> to open its change.
+Below the verdict, the run's test time is the sum of the durations its counted results reported. Results that
+ran side by side add up, so it is time spent testing, not how long the build took. When some results reported
+no duration, it says how many did. `mainworthy find --in results` returns the same sum as `testTime`.
 
 From the command line, `mainworthy find --in runs` lists the same runs. Add `--origin planned` or
 `--origin change` for one kind, and `--state open` or `--state closed` for one state.

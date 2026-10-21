@@ -70,6 +70,14 @@ struct RefText: View {
 	}
 }
 
+/// A length of time in the largest unit that keeps it readable, as the web writes it: "88 ms", "4.2 s", "3 min".
+func spent(_ ms: Int) -> String {
+	if ms < 1000 { return "\(ms) ms" }
+	if ms < 60_000 { return String(format: ms < 10_000 ? "%.1f s" : "%.0f s", Double(ms) / 1000) }
+	let minutes = Int((Double(ms) / 60_000).rounded())
+	return minutes < 60 ? "\(minutes) min" : "\(minutes / 60) h \(minutes % 60) min"
+}
+
 /// A small word on a tinted ground: the kind of a question, a state.
 struct Tag: View {
 	let text: String

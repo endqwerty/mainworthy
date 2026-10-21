@@ -345,6 +345,8 @@ export const FindReply = z.looseObject({
 	items: z.array(FindRow),
 	/** For results: every row the gate counts, by how it counts them, whatever the filter. */
 	tally: counts.optional(),
+	/** For results: the summed duration of every row the gate counts, and how many named one, whatever the filter. */
+	testTime: z.strictObject({ ms: whole, timed: whole }).optional(),
 });
 export const ImpactReply = z.looseObject({
 	change: z.union([

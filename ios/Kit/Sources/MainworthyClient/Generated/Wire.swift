@@ -762,6 +762,13 @@ enum Wire {
 		}
 	}
 
+	/// The summed duration of every row the gate counts, whatever the filter.
+	struct TestTime: Decodable, Equatable, Sendable {
+		let ms: Int
+		/// How many of the rows named a duration.
+		let timed: Int
+	}
+
 	/// `find` in results: what a commit's gate counted, a page.
 	struct CountedResults: Decodable, Equatable, Sendable {
 		/// How many rows match the filter.
@@ -770,6 +777,7 @@ enum Wire {
 		let cursor: String?
 		/// Every row the gate counts, by standing, whatever the filter.
 		let tally: [String: Int]
+		let testTime: TestTime
 	}
 
 	/// A result's attachment metadata.
