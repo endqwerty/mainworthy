@@ -372,6 +372,7 @@ While a proposal waits, editing pauses. **Retry** reads its answer without sendi
 The editor also checks after a project change arrives. If somebody accepts the proposal, the editor follows
 the case and version named by that decision and unlocks on its complete saved content, including custom fields.
 If the saved case includes changes you did not make, the editor tells you to read it before editing again.
+The editor reads custom fields with the case you open, so unchanged field values do not trigger that notice.
 Continue editing there to propose a new version of the same case with those saved changes.
 If somebody rejects the proposal, your draft and reason remain editable.
 If the answer cannot be read, the editor keeps waiting and says so. Keep the editor open to follow the proposal.

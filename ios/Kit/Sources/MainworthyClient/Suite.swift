@@ -202,7 +202,7 @@ extension ProjectClient {
 		return reply.items.map(SuiteTag.init)
 	}
 
-	package func caseDocument(_ ref: String, version: Int? = nil, includingCustomFields: Bool = false) async throws -> CaseDocument {
+	package func caseDocument(_ ref: String, version: Int? = nil, includingCustomFields: Bool = true) async throws -> CaseDocument {
 		var input: [String: JSONValue] = ["refs": [.string(ref)]]
 		if let version { input["version"] = .number(Double(version)) }
 		if includingCustomFields { input["fields"] = ["title", "pre", "steps", "methods", "fields", "tags", "place"] }
