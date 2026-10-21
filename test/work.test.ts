@@ -462,6 +462,14 @@ test("the description names the principles that changed a choice, or says why no
 	expect(principles("Principles: n/a\n")[0]).toContain("reason");
 	expect(principles("Principles: good design\n")[0]).toContain('"good design"');
 	expect(principles("Principles: Model the Domain; clean code\n")).toHaveLength(1);
+	// Review of 89b943c: a ";" inside the choice, a name with words after it, the colon outside the bold, a short
+	// reason, and a line hidden in an HTML comment.
+	expect(principles("Principles: Model the Domain (one state; no flag pairs)\n")).toEqual([]);
+	expect(principles("Principles: Model the Domain of unicorns (one state)\n")).toHaveLength(1);
+	expect(principles("**Principles**: Model the Domain (one state)\n")).toEqual([]);
+	expect(principles("Principles: n/a: typo\n")).toEqual([]);
+	expect(principles("Principles: n/a:\n")[0]).toContain("reason");
+	expect(principles("<!--\nPrinciples: Model the Domain\n-->\n")).toHaveLength(1);
 	// A line in fenced code is an example, not the description's own line.
 	expect(principles("```\nPrinciples: Model the Domain\n```\n")).toHaveLength(1);
 });
