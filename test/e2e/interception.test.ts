@@ -1,6 +1,5 @@
 // A route must be in force before the next key is pressed (`interceptionLive` in `support.ts`).
 import { expect, test } from "bun:test";
-import type { Page } from "playwright-core";
 import { browserAvailable, interceptionLive, openPage, startServer } from "./support.ts";
 
 const check = test.skipIf(!browserAvailable);
@@ -71,19 +70,22 @@ check(
 						paused.push(event.request.url);
 						void cdp.send("Fetch.continueRequest", { requestId: event.requestId }).catch(() => {});
 					});
-					await page.evaluate(() => {
+					await cdp.send("Debugger.enable");
+					const entered = new Promise<void>((resolve) => cdp.once("Debugger.paused", () => resolve()));
+					const blocking = page.evaluate(() => {
 						window.addEventListener("keydown", (event) => {
 							if (event.key === "F8")
 								void fetch("/healthz?key").then(() => Reflect.set(window, "keyRequestDone", true));
 						});
-						setTimeout(() => {
-							const end = performance.now() + 300;
-							while (performance.now() < end);
-						}, 0);
+						// biome-ignore lint/suspicious/noDebugger: hold the renderer until interception is enabled.
+						debugger;
 					});
-					await Bun.sleep(20);
+					await entered;
 					await cdp.send("Fetch.enable", { patterns: [{ urlPattern: "*" }] });
-					await interceptionLive(page);
+					const ready = interceptionLive(page);
+					await cdp.send("Debugger.resume");
+					await blocking;
+					await ready;
 					await page.keyboard.press("F8");
 					await page.waitForFunction(() => Reflect.get(window, "keyRequestDone") === true);
 					expect(paused.filter((url) => url.endsWith("/healthz?key"))).toHaveLength(1);
@@ -98,40 +100,29 @@ check(
 	60_000,
 );
 
-/** The requests by which a page was seen to be intercepted. */
-function probes(page: Page): string[] {
-	const seen: string[] = [];
-	page.on("request", (request) => {
-		if (new URL(request.url()).searchParams.has("interception")) seen.push(request.url());
-	});
-	return seen;
-}
-
 check(
 	"a route installed on a page or on its context has waited for every open page before it returns",
 	async () => {
 		const server = await startServer();
 		const h = await openPage(server);
 		try {
-			const first = probes(h.page);
-			await h.page.route("**/never-requested", (route) => route.abort());
-			expect(first).toHaveLength(1);
-			// A page the context opens later is covered too, and one with no document yet has nothing to wait for.
+			await h.page.route("**/healthz?page-route", (route) => route.fulfill({ status: 204 }));
+			expect(await h.page.evaluate(() => fetch("/healthz?page-route").then((reply) => reply.status))).toBe(204);
+			// A page opened later is covered, including a route installed before its first document.
 			const later = await h.context.newPage();
-			const second = probes(later);
-			await later.route("**/never-requested", (route) => route.abort());
-			expect([first.length, second.length]).toEqual([2, 0]);
+			await later.route("**/healthz?later-route", (route) => route.fulfill({ status: 202 }));
 			await later.goto(`${server.url}/p/scratch/suite`);
 			await later.waitForSelector("#app");
-			await h.context.route("**/never-requested-either", (route) => route.abort());
-			expect([first.length, second.length]).toEqual([3, 1]);
-			// The probe is not an error in the page and leaves no route behind.
+			expect(await later.evaluate(() => fetch("/healthz?later-route").then((reply) => reply.status))).toBe(202);
+			await h.context.route("**/healthz?context-route", (route) => route.fulfill({ status: 203 }));
+			for (const page of [h.page, later])
+				expect(await page.evaluate(() => fetch("/healthz?context-route").then((reply) => reply.status))).toBe(203);
+			// The readiness probe leaves no route behind and causes no page error.
 			expect(h.errors).toEqual([]);
 			expect(await h.page.evaluate(() => fetch("/healthz?interception=x").then((reply) => reply.status))).toBe(200);
-			// A page that has closed is passed over.
 			await later.close();
-			await h.context.route("**/never-requested-again", (route) => route.abort());
-			expect(first.length).toBeGreaterThan(3);
+			await h.context.route("**/healthz?after-close", (route) => route.fulfill({ status: 205 }));
+			expect(await h.page.evaluate(() => fetch("/healthz?after-close").then((reply) => reply.status))).toBe(205);
 		} finally {
 			await h.close();
 			await server.stop();
