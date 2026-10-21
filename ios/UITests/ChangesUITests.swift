@@ -37,12 +37,15 @@ final class ChangesUITests: XCTestCase {
 	}
 
 	@MainActor func testAChangeUnblocksAndThisDevicesSessionIsMarked() async throws {
-		let project = try await makeProject()
+		// The chosen project is beyond the first page of the picker.
+		var project = try await makeProject()
+		for _ in 1..<16 { project = try await makeProject() }
 		let app = XCUIApplication()
 		app.launchArguments = ["-forget", "-instance", try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])]
 		app.launch()
 		try signIn(app)
 		app.openProject(project)
+		XCTAssertTrue(app.buttons["project-menu"].label.contains(project))
 		XCTAssertTrue(app.staticTexts["expected $90.00, got $100.00"].waitForExistence(timeout: 10))
 		app.openTab("Changes")
 		let row = app.buttons["change-pr:482"]
