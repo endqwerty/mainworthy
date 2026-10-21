@@ -5,13 +5,14 @@ extension XCUIApplication {
 	/// be closing, and a tap on the tab bar lands on nothing.
 	@MainActor func openProject(_ project: String) {
 		let projectMenu = buttons["project-menu"]
-		let selected = projectMenu.label
+		let existing = collectionViews.allElementsBoundByAccessibilityElement.map(\.frame)
 		projectMenu.tap()
-		let menus = collectionViews.containing(.button, identifier: selected)
-		XCTAssertTrue(menus.firstMatch.waitForExistence(timeout: 10))
-		// Bind the container before scrolling can remove its selected row from the lazy snapshot.
-		guard let menu = collectionViews.allElementsBoundByAccessibilityElement.first(where: { $0.buttons[selected].exists }) else {
-			XCTFail("The project menu did not open")
+		let appeared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "count > %d", existing.count), object: collectionViews)
+		XCTAssertEqual(XCTWaiter.wait(for: [appeared], timeout: 10), .completed)
+		// The popup adds a container; its bounds do not depend on which lazy rows currently exist.
+		let menus = collectionViews.allElementsBoundByAccessibilityElement.filter { !existing.contains($0.frame) }
+		guard menus.count == 1, let menu = menus.first else {
+			XCTFail("Expected one new project menu, found \(menus.count)")
 			return
 		}
 		let option = menu.buttons[project]
