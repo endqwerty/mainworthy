@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { type Instance, start } from "../src/app/start.ts";
+import { runCli } from "../src/cli/dispatch.ts";
+import { inThisProcess } from "../src/cli/test-support.ts";
 import { ReportInput } from "../src/core/ops.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
@@ -265,26 +267,40 @@ test("disk storage survives restart, deduplicates content, and real HTTP replies
 		'<testsuites><testsuite name="chromium"><testcase name="login fails" classname="login.spec.ts"><failure message="timeout"/><system-out><![CDATA[[[ATTACHMENT|video.webm]]\n[[ATTACHMENT|trace.zip]]\n[[ATTACHMENT|cli.png]]]]></system-out></testcase><testcase name="login passes" classname="login.spec.ts"/></testsuite></testsuites>',
 	);
 	for (const withFiles of [true, false]) {
-		const cli = Bun.spawn(
-			[
-				process.execPath,
-				"src/cli/main.ts",
-				"report",
-				join(dir, "playwright.xml"),
-				...(withFiles ? ["--attachments", dir] : []),
-				"--session",
-				`cli-attachments-${withFiles}`,
-				"--url",
-				instance.url,
-				"--project",
-				"scratch",
-				"--json",
-			],
-			{ env: { ...process.env, MAINWORTHY_TOKEN: "", MAINWORTHY_URL: instance.url }, stdout: "pipe", stderr: "pipe" },
-		);
-		const output = await new Response(cli.stdout).text();
-		const error = await new Response(cli.stderr).text();
-		expect(await cli.exited, error).toBe(0);
+		const argv = [
+			"report",
+			join(dir, "playwright.xml"),
+			...(withFiles ? ["--attachments", dir] : []),
+			"--session",
+			`cli-attachments-${withFiles}`,
+			"--url",
+			instance.url,
+			"--project",
+			"scratch",
+			"--json",
+		];
+		const env = { ...process.env, MAINWORTHY_TOKEN: "", MAINWORTHY_URL: instance.url };
+		const result = withFiles
+			? await (async () => {
+					const cli = Bun.spawn([process.execPath, "src/cli/main.ts", ...argv], {
+						env,
+						stdout: "pipe",
+						stderr: "pipe",
+					});
+					const [stdout, stderr, code] = await Promise.all([
+						new Response(cli.stdout).text(),
+						new Response(cli.stderr).text(),
+						cli.exited,
+					]);
+					return { stdout, stderr, code };
+				})()
+			: await inThisProcess("report without attachments", () => runCli(argv, null, env), {
+					environment: env,
+					cwd: process.cwd(),
+					input: "",
+				});
+		const { stdout: output, stderr: error } = result;
+		expect(result.code, error).toBe(0);
 		const uploaded = z
 			.object({
 				results: z.array(z.number()).length(2),

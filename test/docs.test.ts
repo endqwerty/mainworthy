@@ -9,7 +9,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Glob } from "bun";
 import { z } from "zod";
-import { candidatePath, currentStamp, diagramNames, REPOSITORY, SETS, Stamp, stampPath } from "../scripts/diagrams.ts";
+import {
+	candidatePath,
+	currentStamp,
+	diagramNames,
+	pictureCommand,
+	REPOSITORY,
+	SETS,
+	Stamp,
+	stampPath,
+} from "../scripts/diagrams.ts";
 import { applyBlocks, blocksIn, generatedBlocks } from "../scripts/gen-docs.ts";
 import { type Instance, start, VERSION } from "../src/app/start.ts";
 import { ADAPTER_COMMANDS } from "../src/cli/dispatch.ts";
@@ -223,12 +232,15 @@ describe("the diagrams", () => {
 		expect(missing).toEqual([]);
 	});
 
-	test("drawing a picture records nothing: a stale page stays stale, and a name that has no picture is refused", () => {
+	test("drawing a picture records nothing: a stale page stays stale, and a name that has no picture is refused", async () => {
 		const stamps = SETS.map((set) => readFileSync(stampPath(set), "utf8"));
-		for (const name of ["not-a-diagram", "overview"]) {
-			const run = Bun.spawnSync(["bun", "scripts/diagrams.ts", "picture", name], { stdout: "pipe", stderr: "pipe" });
-			expect(run.exitCode, name).not.toBe(0);
-		}
+		const run = Bun.spawnSync(["bun", "scripts/diagrams.ts", "picture", "not-a-diagram"], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		expect(run.exitCode).not.toBe(0);
+		expect(run.stderr.toString()).toContain("not-a-diagram: no candidate");
+		await expect(pictureCommand(["overview"])).rejects.toThrow("overview: only a repository diagram has a picture");
 		expect(SETS.map((set) => readFileSync(stampPath(set), "utf8"))).toEqual(stamps);
 	});
 

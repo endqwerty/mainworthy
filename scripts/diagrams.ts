@@ -171,6 +171,13 @@ async function build(archify: string, names: string[]): Promise<void> {
 	}
 }
 
+export async function pictureCommand(names: string[]): Promise<void> {
+	const chosen = names.length > 0 ? names : diagramNames(REPOSITORY);
+	for (const name of chosen)
+		if (setOf(name) !== REPOSITORY) throw new Error(`${name}: only a repository diagram has a picture`);
+	await picture(chosen);
+}
+
 if (import.meta.main) {
 	const [command, ...rest] = Bun.argv.slice(2);
 	if (command === "build") {
@@ -179,10 +186,7 @@ if (import.meta.main) {
 		const built = names.length > 0 ? names : SETS.flatMap((set) => diagramNames(set));
 		await build(archify, built);
 	} else if (command === "picture") {
-		const names = rest.length > 0 ? rest : diagramNames(REPOSITORY);
-		for (const name of names)
-			if (setOf(name) !== REPOSITORY) throw new Error(`${name}: only a repository diagram has a picture`);
-		await picture(names);
+		await pictureCommand(rest);
 	} else if (command === "stamp") {
 		for (const set of SETS) {
 			await Bun.write(stampPath(set), `${JSON.stringify(currentStamp(set), null, "\t")}\n`);
