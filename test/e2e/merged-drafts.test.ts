@@ -156,6 +156,10 @@ for (const editorOpen of [false, true])
 					edits: [{ op: "edit", case: "C-1", base: 2, body: { title: "Coupon case theirs again" } }],
 				});
 				await a.getByRole("textbox", { name: "Merged title", exact: true }).fill("Coupon case merged by hand");
+				const question = (await server.api("inbox", { on: "C-1", kind: "adopt" })).items[0];
+				if (!question) throw new Error("No conflict question");
+				const proposal = b.locator(`[data-proposal="${question.q}"]`);
+				await proposal.waitFor();
 				let received = false;
 				await a.route("**/decide", async (route) => {
 					const response = await route.fetch();
@@ -169,9 +173,23 @@ for (const editorOpen of [false, true])
 				b.on("request", (request) => {
 					if (request.url().endsWith("/command")) asked++;
 				});
+				const settled = editorOpen
+					? b.waitForResponse(async (response) => {
+							if (!response.url().endsWith("/get")) return false;
+							const input = z.object({ refs: z.array(z.string()) }).safeParse(response.request().postDataJSON());
+							if (!input.success || !input.data.refs.includes(question.q)) return false;
+							const reply = z
+								.object({ result: z.array(z.object({ q: z.string(), state: z.string() })) })
+								.safeParse(await response.json());
+							return reply.success && reply.data.result.some((row) => row.q === question.q && row.state !== "open");
+						})
+					: Promise.resolve();
 				await a.getByRole("button", { name: "Resolve conflict", exact: true }).click();
 				await eventually(async () => received, Boolean);
-				await a.waitForTimeout(1500);
+				await settled;
+				await proposal.waitFor({ state: "detached" });
+				await b.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+				expect(await card(b).count()).toBe(editorOpen ? 1 : 0);
 				expect(asked).toBe(0);
 				release();
 				await a.getByText("Nothing was adopted: the case changed again", { exact: false }).first().waitFor();
