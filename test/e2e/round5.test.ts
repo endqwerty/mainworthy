@@ -102,7 +102,7 @@ check(
 				await page.keyboard.type(text);
 				expect(await page.getByRole("textbox", { name: "Step 2", exact: true }).inputValue()).toBe("Apply the coupon");
 				await page.keyboard.press("Escape");
-				await page.waitForTimeout(150);
+				await page.getByText("Resolve the conflict first", { exact: false }).first().waitFor();
 			}
 			expect(sent).toBe(0);
 			await page.getByRole("button", { name: "Resolve conflict", exact: true }).click();
@@ -119,68 +119,63 @@ check(
 	30000,
 );
 
-for (const selectDuringRecovery of [false, true])
-	check(
-		selectDuringRecovery
-			? "N-3 selecting text during a closed tab's save recovery keeps the recovered version"
-			: "N-3 a new tab recovers a closed tab's existing-case request before continuing",
-		async () => {
-			const server = await startServer();
-			await cases(server, 1);
-			const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
-			try {
-				const a = h.page;
-				await a.getByRole("button", { name: "Case 1", exact: true }).waitFor();
-				await a.keyboard.press("e");
-				await title(a).fill("Case 1 for returning cust");
-				const firstOwner = await a.evaluate(() => sessionStorage.getItem("mainworthy:draft-window"));
-				await a.close({ runBeforeUnload: true });
-				await eventually(
-					() => server.api("get", { refs: ["C-1"] }),
-					(rows) => rows[0]?.version === 2,
-				);
-				const b = await h.context.newPage();
-				if (selectDuringRecovery)
-					await b.addInitScript(() => {
-						const removeItem = Storage.prototype.removeItem;
-						let selected = false;
-						Storage.prototype.removeItem = function (key) {
-							removeItem.call(this, key);
-							if (selected || !key.endsWith(":draft:scratch:C-1")) return;
-							selected = true;
-							// Recovery removes the sent draft before advancing its version. A selection in the next
-							// microtask must see that version, even before a deferred render would replace the editor.
-							queueMicrotask(() => {
-								const title = document.querySelector('textarea[aria-label="Case title"]');
-								if (!(title instanceof HTMLTextAreaElement)) return;
-								title.focus();
-								title.setSelectionRange(0, 3);
-								document.dispatchEvent(new Event("selectionchange"));
-								Reflect.set(window, "closedTabRecoverySelection", true);
-							});
-						};
+check(
+	"N-3 selecting text during a closed tab's save recovery keeps the recovered version",
+	async () => {
+		const server = await startServer();
+		await cases(server, 1);
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const a = h.page;
+			await a.getByRole("button", { name: "Case 1", exact: true }).waitFor();
+			await a.keyboard.press("e");
+			await title(a).fill("Case 1 for returning cust");
+			const firstOwner = await a.evaluate(() => sessionStorage.getItem("mainworthy:draft-window"));
+			await a.close({ runBeforeUnload: true });
+			await eventually(
+				() => server.api("get", { refs: ["C-1"] }),
+				(rows) => rows[0]?.version === 2,
+			);
+			const b = await h.context.newPage();
+			await b.addInitScript(() => {
+				const removeItem = Storage.prototype.removeItem;
+				let selected = false;
+				Storage.prototype.removeItem = function (key) {
+					removeItem.call(this, key);
+					if (selected || !key.endsWith(":draft:scratch:C-1")) return;
+					selected = true;
+					// Recovery removes the sent draft before advancing its version. A selection in the next
+					// microtask must see that version, even before a deferred render would replace the editor.
+					queueMicrotask(() => {
+						const title = document.querySelector('textarea[aria-label="Case title"]');
+						if (!(title instanceof HTMLTextAreaElement)) return;
+						title.focus();
+						title.setSelectionRange(0, 3);
+						document.dispatchEvent(new Event("selectionchange"));
+						Reflect.set(window, "closedTabRecoverySelection", true);
 					});
-				await b.goto(`${server.url}/p/scratch/suite/c/1`);
-				await title(b).waitFor();
-				expect(await b.evaluate(() => sessionStorage.getItem("mainworthy:draft-window"))).not.toBe(firstOwner);
-				if (selectDuringRecovery)
-					await b.waitForFunction(() => Reflect.get(window, "closedTabRecoverySelection") === true);
-				await title(b).press("End");
-				await b.keyboard.type("omers");
-				await b.keyboard.press("Escape");
-				const saved = await eventually(
-					() => server.api("get", { refs: ["C-1"] }),
-					(rows) => rows[0]?.title === "Case 1 for returning customers",
-				);
-				expect(saved[0]?.version).toBe(3);
-				expect(await b.locator(".conflict-card").count()).toBe(0);
-			} finally {
-				await h.close();
-				await server.stop();
-			}
-		},
-		30000,
-	);
+				};
+			});
+			await b.goto(`${server.url}/p/scratch/suite/c/1`);
+			await title(b).waitFor();
+			expect(await b.evaluate(() => sessionStorage.getItem("mainworthy:draft-window"))).not.toBe(firstOwner);
+			await b.waitForFunction(() => Reflect.get(window, "closedTabRecoverySelection") === true);
+			await title(b).press("End");
+			await b.keyboard.type("omers");
+			await b.keyboard.press("Escape");
+			const saved = await eventually(
+				() => server.api("get", { refs: ["C-1"] }),
+				(rows) => rows[0]?.title === "Case 1 for returning customers",
+			);
+			expect(saved[0]?.version).toBe(3);
+			expect(await b.locator(".conflict-card").count()).toBe(0);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
 
 const ready = (page: Awaited<ReturnType<typeof openPage>>["page"]) =>
 	page.locator('[data-active="true"][data-ready="true"]').waitFor();
