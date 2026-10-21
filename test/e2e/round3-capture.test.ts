@@ -6,7 +6,28 @@ const check = test.skipIf(!browserAvailable);
 const titleOf = (page: Awaited<ReturnType<typeof openPage>>["page"]) =>
 	page.getByRole("textbox", { name: "Case title", exact: true });
 
-// Keep the real selection handler from an earlier render, as an event already in progress would.
+// Dispatch a browser selection before React replaces the editor with its next render.
+async function selectWhenWaiting(page: Awaited<ReturnType<typeof openPage>>["page"]): Promise<void> {
+	await page.evaluate(() => {
+		const setItem = Storage.prototype.setItem;
+		Storage.prototype.setItem = function (key, value) {
+			setItem.call(this, key, value);
+			if (!key.endsWith(":draft:scratch:C-1") || JSON.parse(value)?.submission?.kind !== "waiting") return;
+			Storage.prototype.setItem = setItem;
+			Reflect.set(window, "waitingBeforeSelection", value);
+			queueMicrotask(() => {
+				const title = document.querySelector('textarea[aria-label="Case title"]');
+				if (!(title instanceof HTMLTextAreaElement)) throw new Error("Editor missing");
+				title.focus();
+				title.setSelectionRange(0, 3);
+				document.dispatchEvent(new Event("selectionchange"));
+				Reflect.set(window, "selectedWaitingProposal", true);
+			});
+		};
+	});
+}
+// A DOM selection dispatched during React's value commit is suppressed by React. Keep the stale-handler
+// regression here: a mutation that allowed stale selection to replace the new draft passed that DOM version.
 async function holdEditorSelection(page: Awaited<ReturnType<typeof openPage>>["page"]): Promise<void> {
 	await titleOf(page).evaluate((title) => {
 		const key = Object.keys(title).find((key) => key.startsWith("__reactProps$"));
@@ -44,13 +65,11 @@ check(
 			});
 			await page.keyboard.press("e");
 			await titleOf(page).fill("Awaiting review");
-			await holdEditorSelection(page);
+			await selectWhenWaiting(page);
 			await page.keyboard.press("Escape");
 			await page.locator("#stat").filter({ hasText: "Proposed, waiting for a person" }).waitFor();
-			const before = await page.evaluate(() =>
-				localStorage.getItem(Object.keys(localStorage).find((key) => key.endsWith(":draft:scratch:C-1")) ?? ""),
-			);
-			await selectInOldEditor(page);
+			const before = await page.evaluate((): unknown => Reflect.get(window, "waitingBeforeSelection"));
+			await page.waitForFunction(() => Reflect.get(window, "selectedWaitingProposal") === true);
 			const after = await page.evaluate(() =>
 				localStorage.getItem(Object.keys(localStorage).find((key) => key.endsWith(":draft:scratch:C-1")) ?? ""),
 			);
@@ -58,9 +77,25 @@ check(
 				cmd: z.string(),
 				submission: z.object({ kind: z.literal("waiting"), question: z.string() }),
 			});
-			expect(metadata.parse(JSON.parse(after ?? "null"))).toEqual(metadata.parse(JSON.parse(before ?? "null")));
+			expect(metadata.parse(JSON.parse(after ?? "null"))).toEqual(metadata.parse(JSON.parse(z.string().parse(before))));
+			await page.evaluate(() => {
+				const fetch = window.fetch;
+				Reflect.set(window, "fetch", async (...args: Parameters<typeof fetch>) => {
+					const response = await fetch(...args);
+					if (!response.url.endsWith("/get")) return response;
+					const json = response.json.bind(response);
+					response.json = async () => {
+						const body: unknown = await json();
+						requestAnimationFrame(() =>
+							requestAnimationFrame(() => Reflect.set(window, "waitingLookupConsumed", true)),
+						);
+						return body;
+					};
+					return response;
+				});
+			});
 			await page.keyboard.press("Escape");
-			await page.waitForTimeout(150);
+			await page.waitForFunction(() => Reflect.get(window, "waitingLookupConsumed") === true);
 			expect(requests).toBe(1);
 			expect((await server.api("inbox", { kind: "adopt" })).items).toHaveLength(1);
 			expect((await server.api("get", { refs: ["C-1"] }))[0]?.title).toBe("Original");
