@@ -40,10 +40,16 @@ extension XCUIApplication {
 
 extension XCUIElement {
 	@MainActor func scrollUpTo(_ target: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
-		let deadline = ContinuousClock.now.advanced(by: .seconds(30))
-		while !target.isHittable && ContinuousClock.now < deadline {
+		var previous: (label: String, frame: CGRect)?
+		while !(target.exists && target.isHittable) {
+			guard let last = buttons.allElementsBoundByAccessibilityElement.last else { break }
+			let position = (label: last.label, frame: last.frame)
+			if let previous, previous.label == position.label,
+				abs(previous.frame.minY - position.frame.minY) < 1,
+				abs(previous.frame.maxY - position.frame.maxY) < 1 { break }
+			previous = position
 			swipeUp()
 		}
-		XCTAssertTrue(target.isHittable, target.debugDescription, file: file, line: line)
+		XCTAssertTrue(target.exists && target.isHittable, target.debugDescription, file: file, line: line)
 	}
 }
