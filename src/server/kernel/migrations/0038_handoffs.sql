@@ -10,3 +10,4 @@ CREATE TABLE handoffs (
 ) STRICT;
 CREATE INDEX handoffs_queue ON handoffs(state, at);
 CREATE INDEX handoffs_question ON handoffs(question, at);
+CREATE INDEX handoffs_project ON handoffs(project);
