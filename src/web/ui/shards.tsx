@@ -16,13 +16,7 @@ export function GateReason({
 	compact?: boolean;
 }) {
 	const text = <span>{reasonBesideShards(reason, waiting)}</span>;
-	const strips = waiting.length > 0 && (
-		<span className={`shard-waits${compact ? " compact" : ""}`}>
-			{waiting.map((wait) => (
-				<ShardStrip key={`${wait.env}\u0000${wait.job}`} wait={wait} compact={compact} />
-			))}
-		</span>
-	);
+	const strips = <ShardWaits waiting={waiting} compact={compact} />;
 	// A row cuts its end off when it is narrow, so there the cells come first.
 	return compact ? (
 		<>
@@ -34,6 +28,21 @@ export function GateReason({
 			{text}
 			{strips}
 		</>
+	);
+}
+
+/**
+ * The strips alone, for a reason that is drawn apart from them. Only a full strip writes its words out on a phone,
+ * so a compact one belongs in a row whose own page shows the full strip.
+ */
+export function ShardWaits({ waiting, compact = false }: { waiting: readonly ShardWait[]; compact?: boolean }) {
+	if (waiting.length === 0) return null;
+	return (
+		<span className={`shard-waits${compact ? " compact" : ""}`}>
+			{waiting.map((wait) => (
+				<ShardStrip key={`${wait.env}\u0000${wait.job}`} wait={wait} compact={compact} />
+			))}
+		</span>
 	);
 }
 

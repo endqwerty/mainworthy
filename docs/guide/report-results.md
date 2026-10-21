@@ -393,7 +393,8 @@ A failure in a shard that already reported shows at once, and the reason says wh
 The web app and the iPhone app draw the shards under the gate's reason, one strip for each job and one cell for each
 shard. A missing shard is outlined in amber. The reason then counts the shards, for example
 `pending: waiting for 3 shards`. To read which shards reported and which are still due, hover over a strip in the
-web app or tap it on the iPhone. A phone's browser writes it under the strip.
+web app or tap it on the iPhone. In a phone's browser, the page of a change or a run writes it under each strip. A row
+in a list draws the cells alone, before its reason; open the row to read them.
 Each shard can run `mainworthy gate` after its own report. The last shard's gate gives the commit's verdict.
 
 A retry of a shard keeps the shard's index. Every shard of a job must give the same number of shards.

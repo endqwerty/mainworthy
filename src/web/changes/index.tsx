@@ -2,7 +2,13 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { z } from "zod";
 import { ANSWER_LABELS } from "../../core/kinds.ts";
-import { RESULT_STANDING_LABELS, type ResultStanding, ShardWait, Verdict } from "../../core/runs.ts";
+import {
+	RESULT_STANDING_LABELS,
+	type ResultStanding,
+	reasonBesideShards,
+	ShardWait,
+	Verdict,
+} from "../../core/runs.ts";
 import { call } from "../lib/api.ts";
 import { queryKey, useQueryOp } from "../lib/data.ts";
 import { useBindings } from "../lib/keys.ts";
@@ -11,7 +17,7 @@ import { openRun } from "../runs/index.tsx";
 import { Run } from "../runs/models.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, EmptyState, ListRow, ProducerGlyph, SectionHeading } from "../ui/index.tsx";
-import { GateReason } from "../ui/shards.tsx";
+import { GateReason, ShardWaits } from "../ui/shards.tsx";
 import { ChangeResults, standingOf } from "./results.tsx";
 import "./changes.css";
 
@@ -341,13 +347,13 @@ function ChangeEnding({ change }: { change: Change }) {
 							if (landing.run) navigate(routeUrl({ project, screen: "runs", ref: landing.run }));
 						}}
 					>
-						<GateReason reason={landing.reason} waiting={landing.waiting} compact />
+						{reasonBesideShards(landing.reason, landing.waiting)}
 					</a>
 				) : (
-					<span>
-						<GateReason reason={landing.reason} waiting={landing.waiting} compact />
-					</span>
+					<span>{reasonBesideShards(landing.reason, landing.waiting)}</span>
 				)}
+				{/* The landing has no row to open for its shards, so they are drawn here in full. */}
+				<ShardWaits waiting={landing.waiting ?? []} />
 			</div>
 		</div>
 	);
