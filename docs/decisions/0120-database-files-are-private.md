@@ -1,6 +1,6 @@
 # 0120: Database files are private
 
-Date: 2026-10-20. Status: accepted.
+Date: 2026-10-20. Status: accepted. Amended 2026-10-21 by decision 0125: an existing file is checked by path, not through a descriptor that is then closed.
 
 The SQLite database contains project records, identity data and credential hashes. Its write-ahead log, shared-memory file, rollback journal and upgrade copies can contain the same data. On POSIX filesystems, Mainworthy creates these files with mode `0600`, repairs broader permissions before SQLite reads or writes them, and refuses an existing file owned by another operating-system user.
 

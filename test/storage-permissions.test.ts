@@ -253,3 +253,37 @@ test("a connection opened while another process holds the database waits for it 
 		rmSync(directory, { recursive: true, force: true });
 	}
 });
+
+test("opening a second connection in this process keeps the first one's locks: another process cannot write beside it (#689)", async () => {
+	const directory = mkdtempSync(join(tmpdir(), "mainworthy-kept-locks-"));
+	const path = databasePath(directory);
+	// What another process meets when it asks to write, without waiting.
+	const otherProcessWrites = async (): Promise<string> => {
+		const other = Bun.spawn(
+			[
+				process.execPath,
+				"-e",
+				`const { Database } = require("bun:sqlite");
+				const db = new Database(${JSON.stringify(path)});
+				try { db.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE"); db.exec("ROLLBACK"); console.log("wrote"); }
+				catch (error) { console.log(error.message); }`,
+			],
+			{ stdout: "pipe" },
+		);
+		return (await new Response(other.stdout).text()).trim();
+	};
+	const writer = new Db(path);
+	try {
+		writer.exec("CREATE TABLE kept (x)");
+		writer.raw.exec("BEGIN IMMEDIATE");
+		expect(await otherProcessWrites()).toBe("database is locked");
+		// A reader thread, the checkpoint thread and a worker each open the file while the writer holds it.
+		new Db(path, { reader: true }).close();
+		new Db(path).close();
+		expect(await otherProcessWrites()).toBe("database is locked");
+		writer.raw.exec("ROLLBACK");
+	} finally {
+		writer.close();
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
