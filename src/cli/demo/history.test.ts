@@ -1,7 +1,7 @@
 // The demo's history: every day has something, in order, before today, and nothing in it comes back open.
 import { describe, expect, test } from "bun:test";
 import { demoCases } from "./cases.ts";
-import { DAY, dayStart, demoHistory, type HistoryEvent } from "./history.ts";
+import { DAY, dayStart, demoHistory, type HistoryEvent, todayAt } from "./history.ts";
 
 // A Tuesday afternoon, so the fortnight before it holds two weekends.
 const SINCE = Date.UTC(2026, 9, 13, 15, 30);
@@ -175,4 +175,17 @@ describe("the demo's history", () => {
 		expect(entry?.at).toBeLessThan(covered?.at ?? 0);
 		expect(exit?.at).toBeGreaterThan(covered?.at ?? Number.POSITIVE_INFINITY);
 	});
+});
+
+test("today's moments stay on today, in their order, however early in the UTC day the demo is made", () => {
+	const afternoon = Date.parse("2026-10-21T15:00:00Z");
+	expect(new Date(todayAt(afternoon, 90 * 60_000)).toISOString()).toBe("2026-10-21T13:30:00.000Z");
+	const early = Date.parse("2026-10-21T01:20:00Z");
+	const moments = [4.5, 3, 1.5, 0.5].map((hours) => todayAt(early, hours * 3_600_000));
+	expect(moments.map((at) => new Date(at).toISOString())).toEqual([
+		"2026-10-21T00:00:17.712Z",
+		"2026-10-21T00:26:51.808Z",
+		"2026-10-21T00:53:25.904Z",
+		"2026-10-21T01:11:08.635Z",
+	]);
 });

@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-10-21: **Fixed:** a demo seeded in the first hours of a UTC day dates today's runs, reports and questions today. They were written up to four and a half hours before the moment the project became a demo, so before about 04:30 UTC some fell on yesterday, beside yesterday's run. No stored data or API changes.
+- 2026-10-21: **Fixed:** an attachment image that leaves the page while it still loads no longer fails that load; its object URL is released once the image has read it.
 - 2026-10-20: **Fixed:** startup demo resets skip the whole-database foreign-key scan before removal, while retaining every final foreign-key check. Reset logs name transaction setup, the pending-key check, and validation and commit after removal and recreation, so their elapsed time is visible (issue #707).
 - 2026-10-20: **Fixed:** an iPhone refresh that overtakes **Set report aside** keeps the pending report without claiming that the run could not be read. A failed read still keeps the report and explains the failure (issue #704).
 - 2026-10-20: **Fixed:** iPhone question headers stack from the largest standard text size, keeping the source whole. At accessibility sizes, test references stack above their names and decided panels leave more width for whole words, without reducing the chosen text size (issue #706).

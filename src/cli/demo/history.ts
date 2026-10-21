@@ -165,6 +165,16 @@ const fileOf = (folder: string): string => `src/${folder.toLowerCase().replace(/
 /** The start of the UTC day `ago` days before the day `since` falls on. */
 export const dayStart = (since: number, ago: number): number => Math.floor(since / DAY) * DAY - ago * DAY;
 
+/** How far before `since` today's earliest write is (`seed.ts`), when today has had that long. */
+const TODAY_REACH = 4.5 * HOUR + MINUTE;
+/**
+ * The moment `ago` before `since` on the day `since` falls on. A demo made in the first hours of a UTC day has had
+ * less of today than today's writes reach back: their moments are drawn closer together, in the same order, so
+ * that none of them falls on yesterday beside yesterday's history.
+ */
+export const todayAt = (since: number, ago: number): number =>
+	since - Math.round(ago * Math.min(1, (since - dayStart(since, 0)) / TODAY_REACH));
+
 /**
  * The history of a demo that became one at `since`, over the `days` days before that day. Every time is before
  * the start of that day, and no day's last event is later than 18:00, so what the seed writes for today (in the
