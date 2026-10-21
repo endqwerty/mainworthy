@@ -25,6 +25,7 @@ test("CSV imports 2,000 cases through propose and every foreign alias resolves o
 		for (let start = 0; start < 2000; start += 200) {
 			const refs = Array.from({ length: 200 }, (_, i) => `OLD${start + i + 1}`);
 			const cases = z.array(Case).parse(await client.call("get", { refs }));
+			expect(cases).toHaveLength(200);
 			for (const [i, row] of cases.entries()) {
 				const n = start + i;
 				expect(row.title).toBe(`Imported ${n + 1}`);
