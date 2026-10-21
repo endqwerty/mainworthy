@@ -942,9 +942,7 @@ final class QueueUITests: XCTestCase {
 		XCTAssertTrue(signedInHeading.wait(for: \.isHittable, toEqual: true, timeout: 5))
 		let accountList = app.collectionViews.firstMatch
 		XCTAssertTrue(accountList.waitForExistence(timeout: 5))
-		for _ in 0..<10 where !privacy.isHittable { accountList.swipeUp() }
-		XCTAssertTrue(privacy.wait(for: \.isHittable, toEqual: true, timeout: 5),
-			"The Privacy link in the You list must be visible and tappable")
+		accountList.scrollUpTo(privacy)
 		XCTAssertEqual(privacy.label, "Privacy")
 		shot("privacy-you")
 		try await openPrivacy(privacy)
@@ -1026,8 +1024,7 @@ final class QueueUITests: XCTestCase {
 		XCTAssertTrue(app.staticTexts["Signed in"].waitForExistence(timeout: 5))
 		shot("7-you")
 		// Signing out is the last row of a list that grows with the app: it is scrolled to.
-		if !app.buttons["sign-out"].waitForExistence(timeout: 2) { app.swipeUp() }
-		XCTAssertTrue(app.buttons["sign-out"].waitForExistence(timeout: 5))
+		app.collectionViews.firstMatch.scrollUpTo(app.buttons["sign-out"])
 		// The licence, and who holds the copyright, as the App Store listing says it.
 		let licence = NSPredicate(format: "label CONTAINS 'Apache License 2.0' OR value CONTAINS 'Apache License 2.0'")
 		XCTAssertTrue(app.descendants(matching: .any).matching(licence).firstMatch.exists)

@@ -39,7 +39,7 @@ final class ChangesUITests: XCTestCase {
 	@MainActor func testAChangeUnblocksAndThisDevicesSessionIsMarked() async throws {
 		// The chosen project is beyond the first page of the picker.
 		var project = try await makeProject()
-		for _ in 1..<16 { project = try await makeProject() }
+		for _ in 1..<30 { project = try await makeProject() }
 		let app = XCUIApplication()
 		app.launchArguments = ["-forget", "-instance", try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])]
 		app.launch()
