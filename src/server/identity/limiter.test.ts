@@ -1,6 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import fc from "fast-check";
+import { type Harness, harness } from "../../../test/helpers.ts";
 import { isLoopbackOrPrivate } from "../kernel/address.ts";
+import { limiterOf } from "./attempts.ts";
+import { admit, createToken, hashToken } from "./identity.ts";
 import { accountKey, addressKey, createLimiter, isGeneratedSecret, type LimiterAnswer, prefixKey } from "./limiter.ts";
 
 const SECOND = 1000;
@@ -597,44 +600,41 @@ describe("addresses", () => {
 describe("as a surface uses it", () => {
 	const GENERATED = "cb_Ab3dE9xQk2Lm8Pq4Rs6Tu0Vw1Xy3Za5B";
 	const CHOSEN = "Ab3dE9xQ-set-by-hand";
-	const RIGHT: ReadonlySet<string> = new Set([GENERATED, CHOSEN]);
 	const wrong = (ending: number): string => `cb_Ab3dE9xQ${String(ending).padStart(24, "0")}`;
 
-	/** The lines at the top of limiter.ts, with the set of right secrets in place of the table of tokens. */
+	const instances: Harness[] = [];
+	afterEach(() => {
+		for (const h of instances.splice(0)) h.close();
+	});
+
 	function caller() {
-		const limiter = createLimiter();
-		let now = START;
-		const admit = (from: string | null, secret: string): string => {
-			const address = addressKey(from);
-			const prefix = prefixKey(secret);
-			const keys = [address, prefix].filter((key) => key !== null);
-			const answer = limiter.check(keys, now);
-			if (answer.kind === "blocked") {
-				const found = isGeneratedSecret(secret) && RIGHT.has(secret);
-				return found ? "admitted" : `limited for ${answer.retryAfterSeconds} s`;
-			}
-			if (!RIGHT.has(secret)) {
-				limiter.failed(keys, now);
-				return "unauthorized";
-			}
-			if (prefix !== null) limiter.succeeded([prefix]);
-			return "admitted";
-		};
+		const h = harness();
+		instances.push(h);
+		for (const secret of [GENERATED, CHOSEN]) {
+			const token = createToken(h.app, { actor: "robin", kind: "human", can: [], project: 0, label: "test" });
+			h.app.db.raw
+				.query("UPDATE tokens SET hash = ?, source = ? WHERE id = ?")
+				.run(hashToken(secret), secret === CHOSEN ? "env" : null, token.id);
+		}
 		return {
-			limiter,
-			admit,
-			pass: (ms: number): void => {
-				now += ms;
+			limiter: limiterOf(h.app),
+			admit: (from: string | null, secret: string): string => {
+				const answer = admit(h.app, {
+					bearer: secret,
+					address: from,
+					cookie: null,
+					sameOrigin: false,
+					localOwner: null,
+				});
+				return answer.kind === "limited"
+					? `limited for ${answer.retryAfter} s`
+					: answer.kind === "admitted"
+						? "admitted"
+						: "unauthorized";
 			},
+			pass: h.advance,
 		};
 	}
-
-	test("the secrets of this test are what they are meant to be", () => {
-		expect(isGeneratedSecret(GENERATED)).toBe(true);
-		expect(isGeneratedSecret(wrong(1))).toBe(true);
-		expect(isGeneratedSecret(CHOSEN)).toBe(false);
-		expect(new Set([GENERATED, CHOSEN, wrong(1), wrong(2)].map(prefixKey))).toEqual(new Set(["prefix:Ab3dE9xQ"]));
-	});
 
 	test("the fifth wrong secret blocks: a secret a person chose is refused unread, a right generated one passes", () => {
 		const c = caller();
