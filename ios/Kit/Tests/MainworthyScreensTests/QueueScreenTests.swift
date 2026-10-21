@@ -586,6 +586,10 @@ struct QueueScreenTests {
 		} else {
 			#expect(outbox.dropProblem?.hasPrefix("The command could not be checked. The saved answer was kept. The reply could not be read.") == true)
 		}
+		// A Forget that does nothing (this entry is not Dropped) leaves the drop's sentence where it is.
+		let said = outbox.dropProblem
+		outbox.forget(entry.id, confirmed: true)
+		#expect(outbox.dropProblem == said)
 		transport.offline.withLock { $0 = false }
 		transport.commandReply.withLock { $0 = nil }
 		store.fail = false
