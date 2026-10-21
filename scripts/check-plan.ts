@@ -365,3 +365,57 @@ export function failureLines(parts: readonly PhaseReport[]): string[] {
 			);
 	return lines;
 }
+
+/** Parse and validate the check command before it starts any work. */
+export function parseCheckArgs(argv: string[]) {
+	const testsOnly = argv[0] === "test";
+	const flags = new Map<string, string>();
+	const files: string[] = [];
+	for (const arg of argv.slice(testsOnly ? 1 : 0)) {
+		if (testsOnly && !arg.startsWith("-")) {
+			files.push(arg.replace(/^\.\//, ""));
+			continue;
+		}
+		const match = /^--(shard|only|junit|workers)=(.+)$/.exec(arg) ?? /^--(update-timings)()$/.exec(arg);
+		if (!match?.[1] || (!testsOnly && match[1] !== "update-timings")) {
+			throw new Error(
+				`check: unknown argument ${arg}. One file is \`bun test <file>\`; scripts/check.ts lists the rest.`,
+			);
+		}
+		flags.set(match[1], match[2] ?? "");
+	}
+	const only = flags.get("only");
+	if (only !== undefined && only !== "parallel" && only !== "quiet") {
+		throw new Error("check: --only is parallel or quiet");
+	}
+	const junit = flags.get("junit");
+	if (junit !== undefined && (only === undefined || !junit.endsWith(".xml"))) {
+		throw new Error("check: --junit names an .xml file and needs --only, one report for each phase");
+	}
+	const shard = flags.get("shard");
+	// A phase given no file would run every file: each named file is a test of this checkout and of the phase named.
+	const notTests = files.filter((file) => !/^(src|test)\/.+\.test\.tsx?$/.test(file) || !existsSync(file));
+	const otherPhase = files.filter((file) => QUIET.includes(file) !== (only === "quiet"));
+	if (
+		notTests.length > 0 ||
+		(files.length > 0 && (only === undefined || shard !== undefined)) ||
+		otherPhase.length > 0
+	) {
+		throw new Error(
+			notTests.length > 0
+				? `check: not a test file of this checkout: ${notTests.join(", ")}`
+				: otherPhase.length > 0
+					? `check: not a file of the ${only} phase (QUIET in scripts/check-plan.ts): ${otherPhase.join(", ")}`
+					: "check: test files are named with --only and without --shard, one phase at a time",
+		);
+	}
+	const chosen = files.length > 0 ? files : undefined;
+	// Local recording measures every file alone. CI imports can refresh the same weights from JUnit reports.
+	const record = flags.has("update-timings");
+	const workers = flags.has("workers") ? Number(flags.get("workers")) : record ? 1 : undefined;
+	if (workers !== undefined && !(Number.isInteger(workers) && workers > 0)) {
+		throw new Error("check: --workers is a positive number");
+	}
+	const phases: Phase[] = only ? [only] : shard ? ["parallel"] : ["parallel", "quiet"];
+	return { testsOnly, junit, shard, chosen, record, workers, phases, flags };
+}

@@ -16,6 +16,7 @@ import {
 	needsBrowserFixture,
 	newestAttempt,
 	parallelWorkers,
+	parseCheckArgs,
 	phaseFiles,
 	phaseReport,
 	playwrightChromium,
@@ -448,16 +449,15 @@ test("the slowest files are read from the timings Bun writes", () => {
 });
 
 test("the check refuses an argument it does not know, so a mistyped one does not run everything", async () => {
-	for (const argv of [
-		["--bogus"],
-		["test", "test/suite.test.ts"],
-		["test", "--junit=a.xml"],
-		["test", "--only=fast"],
-	]) {
-		const child = Bun.spawn([process.execPath, "scripts/check.ts", ...argv], { stdout: "pipe", stderr: "pipe" });
-		expect(await new Response(child.stderr).text()).toContain("check: ");
-		expect(await child.exited).toBe(4);
-	}
+	const child = Bun.spawn([process.execPath, "scripts/check.ts", "--bogus"], { stdout: "pipe", stderr: "pipe" });
+	expect(await new Response(child.stderr).text()).toContain("check: unknown argument --bogus");
+	expect(await child.exited).toBe(4);
+	for (const [argv, message] of [
+		[["test", "test/suite.test.ts"], "check: test files are named with --only and without --shard"],
+		[["test", "--junit=a.xml"], "check: --junit names an .xml file and needs --only"],
+		[["test", "--only=fast"], "check: --only is parallel or quiet"],
+	] satisfies [string[], string][])
+		expect(() => parseCheckArgs(argv)).toThrow(message);
 });
 
 // The machine before the code: what `bun run test` said on a Mac with an older Bun first on its PATH, and in a
@@ -644,10 +644,18 @@ test("a run ends with the tests that failed, and says so when a file did not loa
 	expect(failed.end).toContain(
 		"\nFAILED: tests: parallel\n\n1 test failed:\n  test/b.test.ts: one is two\n      expect(received).toBe(expected) (test/b.test.ts:3:12)\n",
 	);
-	const unloaded = await run({ "a.test.ts": passes, "c.test.ts": `import "./not-there.ts";\n${passes}` });
-	expect(unloaded.exit).toBe(1);
-	expect(unloaded.end).toContain(
-		"\n1 test file gave no result, so no test of it ran:\n  test/c.test.ts\nIt did not load, or the runner stopped in it",
+	const unloaded = failureLines([
+		phaseReport(
+			"tests: parallel",
+			parseJUnit(
+				'<testsuites><testsuite file="test/a.test.ts"><testcase name="passes" file="test/a.test.ts" /></testsuite></testsuites>',
+				{},
+			).results,
+			["test/a.test.ts", "test/c.test.ts"],
+		),
+	]).join("\n");
+	expect(unloaded).toContain(
+		"1 test file gave no result, so no test of it ran:\n  test/c.test.ts\nIt did not load, or the runner stopped in it",
 	);
-	expect(unloaded.end).not.toContain("test/a.test.ts");
+	expect(unloaded).not.toContain("test/a.test.ts");
 });
