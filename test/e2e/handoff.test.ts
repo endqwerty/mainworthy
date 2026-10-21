@@ -60,6 +60,13 @@ const secret = "e2e-handoff-signing-secret";
 				message: "expected 90, got 100",
 				branch: "fix-total",
 			});
+
+			// Answered, as a policy that answers failures by rule does, the question still offers the hand-off.
+			const open = (await server.api("inbox", { kind: "failure" })).items[0];
+			await server.api("decide", { q, onEvidence: open?.evidenceHash, answer: { is: "defect" } });
+			expect((await server.api("inbox", { kind: "failure" })).items).toEqual([]);
+			await phone.page.goto(`${server.url}${path}`);
+			await phone.page.getByRole("button", { name: "Hand to the agent again" }).waitFor();
 			expect([...desktop.errors, ...phone.errors]).toEqual([]);
 		} finally {
 			for (const view of pages) await view.close();

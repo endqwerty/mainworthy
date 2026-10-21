@@ -520,7 +520,7 @@ The hold stays until a successful check finds the referenced issue closed, or yo
 
 ## Hand a failure to a coding agent
 
-A failure question offers two buttons under its evidence.
+A failure question offers two buttons under its evidence, also once it is answered. A policy that answers failures by rule asks nobody, so its questions are under **Settled**, not in the queue; the buttons are there too.
 
 - **Copy for an agent** (<kbd>y</kbd>) copies a brief: the question and its link, the failing tests, the commit and branch, the failure message, and a request to find and fix the cause. Paste it into whichever agent you use.
 - **Hand to the agent** (<kbd>h</kbd>) asks the server to post that brief to the agent the instance is configured to start. It appears only on the project an operator [configured](./configuration.md#variables-the-server-reads) with `MAINWORTHY_HANDOFF_PROJECT`, `MAINWORTHY_HANDOFF_URL` and `MAINWORTHY_HANDOFF_SECRET`. The server's brief also carries the build link and the sample result's further output, which the copy leaves out.

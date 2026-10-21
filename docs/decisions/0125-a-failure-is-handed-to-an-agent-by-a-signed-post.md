@@ -1,4 +1,4 @@
-# 0122: A failure is handed to an agent by a signed post
+# 0125: A failure is handed to an agent by a signed post
 
 Date: 2026-10-20. Status: accepted.
 
@@ -12,7 +12,11 @@ A hand-off is a row in `handoffs`, queued inside the write and sent after it com
 
 Handing off needs `answer`. Starting an agent on the owner's machine is a person's call about a question, like answering it. An agent or a pipeline holding `produce` cannot do it.
 
+A hand-off is offered on a failure question whether it is open or answered. Decision 0124 has this repository's policy answer every CI failure "needs a fix" by rule, and the session that pushed the commit fixes it. Under that policy no failure waits in the queue, so a hand-off is for the failure nobody is fixing (one on `main`, or one whose session has ended), found under **Settled**.
+
 Turned down:
+
+- **Sending every failure as it arrives.** It needs no tap, but under decision 0124 the session that pushed the commit is already fixing the failure, so a second agent would race it. It would also start an agent for each flaky failure.
 
 - **A link to the webhook in the page.** A link needs no server code, but it puts the webhook address in every reader's browser.
 - **A tracker port.** A tracker returns an issue the server keeps reading. A hand-off returns nothing to read, so it would fill the tracker's shape with empty fields.
