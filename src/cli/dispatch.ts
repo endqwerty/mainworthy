@@ -1,5 +1,6 @@
 import { VERSION } from "../core/version.ts";
 import { type Args, GLOBAL_FLAGS, hasJsonInput, parseArgs } from "./args.ts";
+import type { ClientOptions } from "./client.ts";
 import type { AdapterCommand } from "./commands/types.ts";
 import { CliError } from "./errors.ts";
 import { GENERATED_COMMANDS, generatedHelp, printFlags, runGenerated } from "./generated.ts";
@@ -86,6 +87,7 @@ export async function runCli(
 	argv: readonly string[],
 	ui: unknown,
 	clientEnv: Record<string, string | undefined> = process.env,
+	request?: ClientOptions["request"],
 ): Promise<number> {
 	const { name, tokens } = splitCommand(argv);
 	if (name === "help") {
@@ -119,15 +121,16 @@ export async function runCli(
 		return 0;
 	}
 	const { Client, clientOptions } = await import("./client.ts");
-	const client = new Client(
-		name === "audit" && args.positionals[0] === "verify"
+	const client = new Client({
+		...(name === "audit" && args.positionals[0] === "verify"
 			? { url: "http://127.0.0.1:7357", token: undefined, project: undefined }
 			: clientOptions(
 					args,
 					name === "login" || name === "health" || name === "fmt" || name === "version" ? "none" : "token",
 					clientEnv,
-				),
-	);
+				)),
+		...(request ? { request } : {}),
+	});
 	if (generated && (!adapter || hasJsonInput(tokens) || machineOnly(adapter, args)))
 		return runGenerated(generated, args, client);
 	if (adapter) {

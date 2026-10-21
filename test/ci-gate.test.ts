@@ -5,7 +5,8 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
-import { chooseInstance, contractDifferences, type Probe } from "../scripts/ci-instance.ts";
+import { chooseInstance, contractDifferences, deploymentFetch, type Probe } from "../scripts/ci-instance.ts";
+import { Client } from "../src/cli/client.ts";
 import { runCli } from "../src/cli/dispatch.ts";
 import { type Running, withInstance } from "../src/cli/test-support.ts";
 import { API_VERSION } from "../src/core/version.ts";
@@ -176,6 +177,154 @@ const green: Shard[] = [
 ];
 const withFailure = (message: string): Shard[] =>
 	green.map((shard) => (shard.name === "tests-2" ? { ...shard, files: { "test/c.test.ts": message } } : shard));
+
+test("the gate waits for a deployment after choosing the instance", async () => {
+	let healthCalls = 0;
+	const result = await gate(green, {
+		routes: {
+			"/healthz": () =>
+				++healthCalls === 2
+					? new Response("deploying", { status: 503 })
+					: Response.json({ ok: true, apiVersion: API_VERSION }),
+		},
+	});
+	expect([result.code, result.batches]).toEqual([0, 3]);
+	expect(result.output).toContain("Reported to the deployed Mainworthy");
+	expect(result.output).toContain("mainworthy gate    passed");
+}, 20_000);
+
+test("CI retries health, report and gate outages, exhausts its attempts and returns definite refusals immediately", async () => {
+	let replies: number[] = [];
+	const received: { path: string; body: string }[] = [];
+	const server = Bun.serve({
+		hostname: "127.0.0.1",
+		port: 0,
+		async fetch(req) {
+			received.push({ path: new URL(req.url).pathname, body: await req.text() });
+			return Response.json(
+				{ ok: true, apiVersion: API_VERSION, accepted: "same report" },
+				{ status: replies.shift() ?? 200 },
+			);
+		},
+	});
+	try {
+		for (const path of ["/healthz", "/api/p/scratch/report", "/api/p/scratch/gate"]) {
+			const send = async (statuses: number[], retry = true) => {
+				replies = [...statuses];
+				received.length = 0;
+				const options = { url: server.url.origin, project: "scratch", token: undefined };
+				const client = new Client({
+					...options,
+					...(retry ? { request: deploymentFetch({ fetch, attempts: 3, pauseMs: 0, timeoutMs: 1000 }) } : {}),
+				});
+				// For an operation outage, its compatibility check succeeds before the outage begins.
+				if (path !== "/healthz") replies.unshift(200);
+				try {
+					const response = await client.request(path === "/healthz" ? "/api/session" : path, {
+						method: "POST",
+						body: '{"results":[{"test":{"key":"one"},"outcome":"pass"}]}',
+					});
+					return response.status;
+				} catch (error) {
+					if (error instanceof Error) return error.message;
+					throw error;
+				}
+			};
+			for (const status of [502, 503, 504]) {
+				expect(await send([status, 200])).toBe(200);
+				expect(received.filter((req) => req.path === path)).toEqual(
+					Array(2).fill({
+						path,
+						body: path === "/healthz" ? "" : '{"results":[{"test":{"key":"one"},"outcome":"pass"}]}',
+					}),
+				);
+			}
+			const outage = await send([503, 503, 503, 200]);
+			expect(outage).toBe(path === "/healthz" ? `the server answered 503 to /healthz at ${server.url.origin}` : 503);
+			expect(received.filter((req) => req.path === path)).toHaveLength(3);
+			for (const status of [400, 401, 403, 404, 429, 500]) {
+				const refused = await send([status, 200]);
+				expect(refused).toBe(
+					path === "/healthz" ? `the server answered ${status} to /healthz at ${server.url.origin}` : status,
+				);
+				expect(received.filter((req) => req.path === path)).toHaveLength(1);
+			}
+			const interactive = await send([503, 200], false);
+			expect(interactive).toBe(
+				path === "/healthz" ? `the server answered 503 to /healthz at ${server.url.origin}` : 503,
+			);
+			expect(received.filter((req) => req.path === path)).toHaveLength(1);
+		}
+	} finally {
+		await server.stop(true);
+	}
+});
+
+test("CI recovers a connection failure and a lost report reply without recording results twice", async () => {
+	await withInstance(async ({ instance }) => {
+		let connections = 0;
+		const bodies: string[] = [];
+		const request = deploymentFetch({
+			attempts: 3,
+			pauseMs: 0,
+			timeoutMs: 1000,
+			fetch: async (url, init) => {
+				if (++connections === 1) throw new Error("connection refused during deploy");
+				const response = await fetch(url, init);
+				if (url.endsWith("/report")) {
+					bodies.push(String(init?.body));
+					if (bodies.length === 1) {
+						await response.arrayBuffer();
+						return new Response(
+							new ReadableStream({ start: (controller) => controller.error(new Error("reply lost")) }),
+						);
+					}
+				}
+				return response;
+			},
+		});
+		const client = new Client({ url: instance.url, project: "scratch", token: undefined, request });
+		const receipt = await client.call("report", {
+			target: { commit: "c0ffee0123456789012345678901234567890123" },
+			job: "tests",
+			results: [{ test: { key: "one" }, outcome: "pass" }],
+		});
+		expect([receipt.fresh, receipt.counts.total, bodies.length]).toEqual([false, 1, 2]);
+		expect(bodies[1]).toBe(bodies[0]);
+		expect(instance.app.db.raw.query("SELECT count(*) AS n FROM batches").get()).toEqual({ n: 1 });
+		expect(instance.app.db.raw.query("SELECT count(*) AS n FROM results").get()).toEqual({ n: 1 });
+		expect((await client.call("gate", { commit: "c0ffee0123456789012345678901234567890123" })).verdict).toBe("passed");
+	});
+});
+
+test("CI stops retrying unreachable requests and shares its deadline across commands", async () => {
+	let unreachableCalls = 0;
+	const unreachable = deploymentFetch({
+		attempts: 3,
+		pauseMs: 0,
+		timeoutMs: 1000,
+		fetch: async () => {
+			unreachableCalls++;
+			throw new Error("still unreachable");
+		},
+	});
+	await expect(unreachable("https://mainworthy.example/healthz")).rejects.toThrow("still unreachable");
+	expect(unreachableCalls).toBe(3);
+	let calls = 0;
+	const expired = deploymentFetch({
+		attempts: 3,
+		pauseMs: 0,
+		timeoutMs: 1,
+		fetch: async () => {
+			calls++;
+			await Bun.sleep(10);
+			return new Response("still deploying", { status: 503 });
+		},
+	});
+	expect((await expired("https://mainworthy.example/healthz")).status).toBe(503);
+	expect((await expired("https://mainworthy.example/api/p/scratch/gate")).status).toBe(503);
+	expect(calls).toBe(2);
+});
 
 // Which Mainworthy the job reports to is `scripts/ci-instance.ts`. The first three tests are each on one of its
 // three ways through; the others use the instance of the test with no token, as a job on one machine does.

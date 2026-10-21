@@ -189,7 +189,7 @@ jobs:
     # Also when a shard or the lint failed: Mainworthy is told what ran, and this job is the one that fails.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 9
     permissions:
       contents: read
       # For the tailnet step: GitHub signs who this job is, and Tailscale admits it on that.

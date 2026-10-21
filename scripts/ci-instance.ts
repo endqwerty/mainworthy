@@ -31,6 +31,40 @@ export type Probe = {
 /** A runner that has just joined a tailnet resolves the name and gets its first answer within a few seconds. */
 export const PROBE: Probe = { fetch, attempts: 3, pauseMs: 1000, timeoutMs: 5000 };
 
+/**
+ * CI's JSON requests can meet a deploy after the instance was chosen. Every command shares one deadline,
+ * rather than waiting another four minutes for each shard. Ordinary CLI commands never use this transport.
+ */
+export function deploymentFetch(
+	probe: Probe = { fetch, attempts: 12, pauseMs: 10_000, timeoutMs: 10_000 },
+): Probe["fetch"] {
+	const deadline = Date.now() + probe.attempts * probe.timeoutMs + (probe.attempts - 1) * probe.pauseMs;
+	return async (url, init = {}) => {
+		for (let attempt = 1; ; attempt++) {
+			const left = deadline - Date.now();
+			const timeout = AbortSignal.timeout(left > 0 ? Math.min(probe.timeoutMs, left) : probe.timeoutMs);
+			try {
+				const response = await probe.fetch(url, {
+					...init,
+					signal: init.signal ? AbortSignal.any([init.signal, timeout]) : timeout,
+				});
+				if (![502, 503, 504].includes(response.status)) {
+					// Read CI's finite JSON replies inside the attempt, including a connection lost after headers.
+					// Definite refusals are returned untouched and never retried, even if their body cannot be read.
+					return response.ok && response.body !== null
+						? new Response(await response.arrayBuffer(), response)
+						: response;
+				}
+				if (attempt >= probe.attempts || Date.now() + probe.pauseMs >= deadline) return response;
+				await response.body?.cancel();
+			} catch (error) {
+				if (init.signal?.aborted || attempt >= probe.attempts || Date.now() + probe.pauseMs >= deadline) throw error;
+			}
+			await Bun.sleep(probe.pauseMs);
+		}
+	};
+}
+
 const PIPELINE_OPS = ["report", "gate"] as const;
 const Description = z.object({ paths: z.record(z.string(), z.unknown()) });
 const Session = z.object({
