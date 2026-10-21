@@ -31,6 +31,10 @@ jobs:
     if: ${{ vars.MAINWORTHY_URL != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ubuntu-latest
     timeout-minutes: 9
+    # One pull request's reports go one at a time, in order, so a close and a reopen during a deploy land as sent.
+    concurrency:
+      group: change-${{ inputs.pull || github.event.pull_request.number }}
+      cancel-in-progress: false
     permissions:
       pull-requests: read
     steps:
