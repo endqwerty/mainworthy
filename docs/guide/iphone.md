@@ -212,6 +212,8 @@ A question with more tests than this build can show still needs the web app.
 **Runs** lists every run of the project, newest first: the runs somebody planned, and the change run
 Mainworthy makes for each commit a report names. Each row shows the verdict and how long ago the run was made.
 Choose **Planned** or **Change** to see one kind, and **Open** or **Closed** to see one state. The two filters stay at the top while you pull the list down to refresh it.
+Queue and Runs show a spinner while reading a new filter. If that read fails, press **Try again**.
+An empty-list message appears only after the selected list has been read.
 
 Open a change run to see its commit, its change and every result its gate counted.
 Press a standing above the results to see only those results, or type part of a test's name or file.

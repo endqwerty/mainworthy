@@ -23,13 +23,13 @@ struct PagingSearchTests {
 		// The debounce has elapsed when this read reaches the transport.
 		let older = Task { if results { await counted.search() } else { await tests.search() } }
 		await transport.untilHeld()
-		#expect(results ? counted.loading == .done : tests.loading == .done)
+		#expect(results ? counted.loading == .reading : tests.loading == .reading)
 		older.cancel()
 		if results { counted.text = "ab" } else { tests.text = "ab" }
 		// The same initial-loading guards used by the two SwiftUI text tasks.
 		let newer = Task {
 			if results {
-				guard counted.loading == .done else { return }
+				guard counted.loading != .first else { return }
 				await counted.search()
 			} else {
 				guard tests.loading != .first else { return }
@@ -53,7 +53,7 @@ struct PagingSearchTests {
 		await results.load()
 		let chip = Task { await results.show(.unexplained) }
 		await transport.untilHeld()
-		#expect(results.loading == .done && results.total == 1)
+		#expect(results.loading == .reading && results.total == 1)
 		#expect(results.standing == .unexplained)
 		await transport.release()
 		await chip.value
