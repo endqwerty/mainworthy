@@ -73,7 +73,7 @@ a report under `standard`, where a person answers the failure. This project's po
 
 A failing test needs a fix, and it is the fix of the session that pushed the commit. The project's policy answers
 every CI failure "needs a fix" by rule, so nobody is asked, the gate reads `failed` and the job exits 1
-([decision 0122](../decisions/0122-ci-failures-belong-to-the-session.md)). Read what failed from the instance:
+([decision 0124](../decisions/0124-ci-failures-belong-to-the-session.md)). Read what failed from the instance:
 
 ```
 bun scripts/work.ts ci                 # this branch's pull request

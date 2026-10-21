@@ -1,4 +1,4 @@
-# 0122: A CI failure belongs to the session that pushed it
+# 0124: A CI failure belongs to the session that pushed it
 
 - Date: 2026-10-20
 - Status: accepted (the owner asked for it in the thread that built it, 2026-10-20)
