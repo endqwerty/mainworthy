@@ -385,6 +385,18 @@ describe("what reads as flaky", () => {
 		expect(testPage("T-2").last.find((row) => row.outcome === "fail")?.passedOnRetry).toBe(3);
 	});
 
+	test("every failure before the attempt that passed is flaky, not only the last one", () => {
+		report("cccc0001", { fail: { 1: "boom" } });
+		report("cccc0001", { attempt: 2, only: [1], fail: { 1: "boom" } });
+		report("cccc0001", { attempt: 3, only: [1] });
+		const last = testPage("T-2").last;
+		expect(last.map((row) => [row.attempt, row.outcome, row.passedOnRetry])).toEqual([
+			[3, "pass", null],
+			[2, "fail", 3],
+			[1, "fail", 3],
+		]);
+	});
+
 	test("the flips of a page are read from each test's own flips, however many the project has", () => {
 		const reads = declaredSql().filter((text) => text.includes("json_each") && text.includes("JOIN flips f"));
 		expect(reads.length).toBeGreaterThanOrEqual(3);
