@@ -22,7 +22,7 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 | `bun scripts/work.ts scratch new <name>`, `scratch rm <directory>` | scratch files go in `~/.cache`, never in the worktree; `rm` deletes only a directory `new` made. A reviewer works in a `git archive <rev>` export there |
 | `bun scripts/work.ts stop-server`, `wait-tests` | stop the servers you started; wait for another agent's test run (one agent at a time runs the whole suite) |
 | `bun scripts/work.ts release` | last command of a task, and the `release worktree` script of `t3.json`; refuses while a server, a test run or another bun process works from the checkout |
-| `bun scripts/work.ts board`, `pr-body`, `sync-branch`, `check-time` | below; `bun scripts/work.ts` alone lists every command; `test/work.test.ts` holds each |
+| `bun scripts/work.ts board`, `pr-body`, `sync-branch`, `check-time`, `ci` | below; `bun scripts/work.ts` alone lists every command; `test/work.test.ts` holds each |
 
 ## Rules
 
@@ -46,7 +46,7 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 | **The repository is public.** Write no tailnet name, address on the tailnet or home network, or machine name: `example.ts.net` and a documentation-range address | `test/architecture.test.ts`, "a public repository" (tailnet names only; the rest is review) |
 | **The owner's name is not written here** (their request, 2026-10-13): write "the owner", and `robin` for an example person. The one exception is the copyright line (decision 0025) | `test/licences.test.ts`, "the owner's name is written only in the copyright line" |
 | **The former name** (decision 0015) stays only in the files the architecture test lists | `test/architecture.test.ts`, "the project's name" |
-| **A failing test in CI is a question on the instance**, and `gate` stays red until a person answers it there (`docs/deploy.md`). Fix the test, or leave the question to the owner and say which. Never answer your own pull request's with the owner token | `scripts/ci-gate.ts` keeps `gate` red. Not answering with the owner token is judgment: nothing runs |
+| **A failing test in CI is yours to fix.** The instance's policy answers it "needs a fix" by rule, so nobody is asked; `gate` stays red until a commit passes it. `bun scripts/work.ts ci` reads what failed (`docs/deploy.md`). Never overrule it with the owner token | the policy (`ci-policy`); `ci` says when a person is asked. The token is judgment |
 
 ## Working rules
 

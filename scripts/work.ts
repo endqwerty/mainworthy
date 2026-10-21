@@ -12,13 +12,18 @@
 //   bun scripts/work.ts check-time <base> <head> [--rounds=2] [--no-install] [-- <command...>]
 //                                                     times the check on both, alternately, and judges the spread
 //   bun scripts/work.ts timings-from-ci <run-id>       refreshes test weights from a passing CI run's JUnit reports
-import { realpathSync } from "node:fs";
+//   bun scripts/work.ts ci [<pr> | <commit>] [--wait=<s>]  the gate on the deployed Mainworthy and what failed (default: this branch's pull request)
+//   bun scripts/work.ts ci-policy                     with the owner token: CI failures are answered "needs a fix" by rule, never queued
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
+import { Client } from "../src/cli/client.ts";
 import { check as checkBoard, isMove, move } from "./work/board.ts";
 import { compare } from "./work/check-time.ts";
+import { type Call, ciPolicy, INSTANCE, readCi, type Target, TOKEN_FILE } from "./work/ci.ts";
 import { stopServers, waitForTests } from "./work/processes.ts";
 import { gather, problems } from "./work/pull-request.ts";
 import { release } from "./work/release.ts";
+import { read } from "./work/run.ts";
 import { make, remove } from "./work/scratch.ts";
 import { syncBranch } from "./work/sync-branch.ts";
 
@@ -32,6 +37,8 @@ const USAGE = `usage: bun scripts/work.ts <command>
   sync-branch
   release
   timings-from-ci <run-id>
+  ci [<pull request number> | <commit>] [--wait=<seconds>]
+  ci-policy
   check-time <base> <head> [--rounds=2] [--no-install] [-- <command...>]`;
 
 const fail = (message: string, code = 1): never => {
@@ -41,6 +48,33 @@ const fail = (message: string, code = 1): never => {
 
 const flag = (args: readonly string[], name: string): string | undefined =>
 	args.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
+
+/** The deployed Mainworthy, unless MAINWORTHY_URL and MAINWORTHY_PROJECT name another; the token from the
+ * environment, else, when `fallback` names one, from that file. */
+function instance(fallback?: string): Call {
+	const file = process.env.MAINWORTHY_TOKEN_FILE || fallback;
+	const token = process.env.MAINWORTHY_TOKEN || (file && existsSync(file) ? readFileSync(file, "utf8").trim() : "");
+	if (!token)
+		throw new Error(
+			`no token: set MAINWORTHY_TOKEN${file ? `, or keep a read token in ${file}` : ""} (docs/deploy.md)`,
+		);
+	const client = new Client({
+		url: process.env.MAINWORTHY_URL || INSTANCE.url,
+		project: process.env.MAINWORTHY_PROJECT || INSTANCE.project,
+		token,
+	});
+	return (op, input) => client.call(op as never, input as never);
+}
+
+/** A pull request by its number, a commit by anything git resolves, or the branch's own pull request. */
+async function ciTarget(argument: string | undefined): Promise<Target> {
+	if (argument && /^[1-9]\d*$/.test(argument)) return { change: `pr:${argument}` };
+	if (argument) return { commit: await read(["git", "rev-parse", "--verify", `${argument}^{commit}`], { cwd: ROOT }) };
+	const number = await read(["gh", "pr", "view", "--json", "number", "--jq", ".number"], { cwd: ROOT }).catch(() => {
+		throw new Error("this branch has no pull request: name one by its number, or a commit");
+	});
+	return { change: `pr:${number}` };
+}
 
 async function main(args: string[]): Promise<void> {
 	const [command, ...rest] = args;
@@ -104,6 +138,22 @@ async function main(args: string[]): Promise<void> {
 			console.log(await timingsFromCi(ROOT, runId));
 			return;
 		}
+		case "ci": {
+			const wait = Number(flag(rest, "wait") ?? 0);
+			const positional = rest.filter((arg) => !arg.startsWith("--"));
+			if (!Number.isFinite(wait) || wait < 0 || positional.length > 1) return fail(USAGE, 4);
+			// 0 to 3 are the gate's verdicts, so a command that could not read one exits 4.
+			const read = await ciTarget(positional[0])
+				.then((target) => readCi(instance(TOKEN_FILE), target, { wait }))
+				.catch((error: unknown) => fail(error instanceof Error ? error.message : String(error), 4));
+			console.log(read.text);
+			process.exit(read.exit);
+			return;
+		}
+		case "ci-policy":
+			if (rest.length > 0) return fail(USAGE, 4);
+			console.log(await ciPolicy(instance(), process.env.MAINWORTHY_PROJECT || INSTANCE.project));
+			return;
 		case "check-time": {
 			const split = rest.indexOf("--");
 			const own = split < 0 ? rest : rest.slice(0, split);

@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { addArgs, BOARD, drift, editArgs, isMove } from "../scripts/work/board.ts";
 import { checkSeconds, compare, judge, sameTree } from "../scripts/work/check-time.ts";
+import { type Call, ciPolicy, readCi } from "../scripts/work/ci.ts";
 import {
 	directoriesFromLsof,
 	isServer,
@@ -36,6 +37,9 @@ import { run } from "../scripts/work/run.ts";
 import { MARKER, make, refusal, remove } from "../scripts/work/scratch.ts";
 import { syncBranch } from "../scripts/work/sync-branch.ts";
 import { timingsFromReports } from "../scripts/work/timings-from-ci.ts";
+import type { Policy } from "../src/core/kinds.ts";
+import type { GateStatus, InboxReply } from "../src/core/ops.ts";
+import { ciReport, harness } from "./helpers.ts";
 
 const made: string[] = [];
 const directory = (): string => {
@@ -605,4 +609,78 @@ test("wait-tests takes a number of seconds and nothing else", async () => {
 test("a code fence the description ends inside is code to its end", () => {
 	expect(closing("~~~text\nCloses #12\n")).toEqual({ closes: [], stray: [] });
 	expect(closing("Closes #5\n```\nCloses #12\n")).toEqual({ closes: [5], stray: [] });
+});
+
+test("under the CI policy a failure needs a fix, asks nobody, and is over when a commit passes the test", async () => {
+	const h = harness({ preset: "standard", unlinked: "create" });
+	try {
+		const call: Call = async (op, input) => h.call(op, input);
+		const gate = (commit: string) => h.call<GateStatus>("gate", { commit });
+		const open = () => h.call<InboxReply>("inbox", { kind: "failure" }).items.map((item) => item.q);
+		const change = (commit: string, fail: Record<number, string> = {}, attempt = 1) =>
+			h.call("report", ciReport({ commit, branch: "feature", pr: 69, base: "main0001", n: 2, fail, attempt }));
+		h.call("report", ciReport({ commit: "main0001", n: 2 }));
+
+		// A question asked before the switch is answered by the new rule.
+		change("change01", { 1: "Expected: 9\nReceived: 8" });
+		expect(open()).toHaveLength(1);
+		expect(gate("change01").verdict).toBe("blocked");
+		expect(await ciPolicy(call, "scratch")).toMatch(
+			/^project scratch: every CI failure is answered "needs a fix" by rule \(Q-\d+ accepted\)$/,
+		);
+		expect(await ciPolicy(call, "scratch")).toBe(
+			'project scratch: every CI failure is already answered "needs a fix" by rule',
+		);
+		const policy = h.call<Policy>("admin", { do: "policy.show", project: "scratch" });
+		expect(policy.settings.unlinked).toBe("create");
+		expect(policy.clauses.find((clause) => clause.when.includes("hint:disputed"))?.ask.who).toBe("member");
+		expect(open()).toEqual([]);
+		expect(gate("change01")).toMatchObject({ verdict: "failed", open: [], tally: { attributed: 1, unexplained: 0 } });
+
+		const read = await readCi(call, { change: "pr:69" });
+		expect(read.exit).toBe(1);
+		expect(read.text).toContain("needs a fix (1):\n");
+		expect(read.text).toContain("tests/checkout.spec.ts: test 1\n    Expected: 9\n    Received: 8\n");
+
+		// A retry of the shard that passes is the commit's newest word.
+		change("change01", {}, 2);
+		expect(gate("change01")).toMatchObject({ verdict: "passed", open: [] });
+
+		// A new failure on a later commit, then a commit that fixes it.
+		change("change02", { 0: "boom" });
+		expect(gate("change02")).toMatchObject({ verdict: "failed", open: [] });
+		expect(open()).toEqual([]);
+		change("change03");
+		expect(await readCi(call, { change: "pr:69" })).toEqual({
+			exit: 0,
+			text: expect.stringContaining("Nothing to do."),
+		});
+
+		// A failure on main is the same.
+		h.call("report", ciReport({ commit: "main0002", n: 2, fail: { 0: "boom" } }));
+		expect(gate("main0002")).toMatchObject({ verdict: "failed", open: [] });
+		expect(open()).toEqual([]);
+	} finally {
+		h.close();
+	}
+});
+
+test("ci waits for a pending gate and says when a person is asked", async () => {
+	const h = harness({ preset: "standard" });
+	try {
+		const call: Call = async (op, input) => h.call(op, input);
+		const pending = await readCi(call, { commit: "nothing0" }, { wait: 0 });
+		expect(pending.exit).toBe(3);
+		expect(pending.text).toContain("--wait=<seconds>");
+
+		h.call("report", ciReport({ commit: "main0001", n: 2, fail: { 0: "boom" } }));
+		let slept = 0;
+		const blocked = await readCi(call, { commit: "main0001" }, { wait: 60, sleep: async () => void slept++ });
+		expect(slept).toBe(0);
+		expect(blocked.exit).toBe(2);
+		expect(blocked.text).toContain("not explained yet (1):");
+		expect(blocked.text).toContain("bun scripts/work.ts ci-policy");
+	} finally {
+		h.close();
+	}
 });
