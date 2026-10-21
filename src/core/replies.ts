@@ -328,7 +328,12 @@ const GetRow: z.ZodType<Record<string, unknown>> = z.union([
 	QuestionItem,
 	Run,
 	Proposal,
-	TestSummary.extend({ flips: whole, sameCode: SameCodeEvidence, last: z.array(Result) }),
+	TestSummary.extend({
+		flips: whole,
+		sameCode: SameCodeEvidence,
+		/** `passedOnRetry`: the attempt of the same lane that passed where this failure failed, else null. */
+		last: z.array(Result.extend({ passedOnRetry: whole.nullable() })),
+	}),
 ]);
 export const GetReply = z.array(GetRow);
 const FindRow: z.ZodType<Record<string, unknown>> = z.union([

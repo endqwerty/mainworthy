@@ -178,8 +178,8 @@ function FlakyNote({ flaky }: { flaky: { flipped: number; failing: number; days:
 				<p>
 					{one ? "1 failing test" : `${flaky.failing} failing tests`} flipped between passing and failing in the last{" "}
 					{times(flaky.days, "day")}, so {one ? "it" : "they"} may be flaky rather than broken. Run{" "}
-					{one ? "its job" : "their jobs"} again before fixing {one ? "it" : "them"}: the gate counts a retry's result
-					instead.
+					{one ? "its job" : "their jobs"} again before fixing {one ? "it" : "them"}: a retry that passes or fails
+					counts instead of the failure; one that is skipped or blocked does not.
 				</p>
 			)}
 			{flaky.flipped > 0 && (
@@ -187,7 +187,7 @@ function FlakyNote({ flaky }: { flaky: { flipped: number; failing: number; days:
 					{flaky.flipped === 1
 						? "1 test both passed and failed on this commit, so it is flaky."
 						: `${flaky.flipped} tests both passed and failed on this commit, so they are flaky.`}{" "}
-					The gate counts the latest attempt.
+					The gate counts the latest attempt that passed or failed.
 				</p>
 			)}
 		</div>

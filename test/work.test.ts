@@ -708,6 +708,7 @@ test("under the CI policy a failure needs a fix, asks nobody, and is over when a
 		expect(flaky.exit).toBe(1);
 		expect(flaky.text).toContain("tests/checkout.spec.ts: test 1 (flipped 1 time in the last 14 days)\n");
 		expect(flaky.text).toContain("1 of these flipped between passing and failing in the last 14 days");
+		expect(flaky.text).toContain("the gate passes once no other failure is left");
 		change("change05");
 
 		// A failure on main is the same, and every failing test is listed, past a page of them.
