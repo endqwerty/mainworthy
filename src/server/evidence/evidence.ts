@@ -447,15 +447,22 @@ const Q = {
 		WHERE f.target = c.target AND s.actor = c.actor AND s.method = c.method AND sb.job = cb.job
 		  AND ${uncorrectedResults("f.first_result", "f.second_result")}
 	`),
-	// Of these results, each failure a later attempt of its lane passed, neither corrected: the attempt that passed.
+	// Of these results, each failure a later attempt of its lane passed: the first attempt that passed. A flip is
+	// recorded between the last failure and the pass, so a failure before it is matched by its lane and attempt, not
+	// by being the flip's first result. Nothing of it corrected.
 	passedOnRetry: sql<{ results: string }, { result: number; attempt: number }>(`
-		SELECT a.id AS result, max(s.attempt) AS attempt
+		SELECT a.id AS result, min(s.attempt) AS attempt
 		FROM json_each($results) asked
 		CROSS JOIN results a ON a.id = asked.value
+		JOIN batches ab ON ab.id = a.batch
 		JOIN flips f ON f.project = a.project AND f.test = a.test
+		JOIN results p ON p.id = f.first_result
 		JOIN results s ON s.id = f.second_result
-		WHERE f.first_result = a.id AND a.outcome IN ('fail', 'error') AND s.outcome = 'pass'
-		  AND ${uncorrectedResults("a.id", "s.id")}
+		JOIN batches sb ON sb.id = s.batch
+		WHERE f.target = a.target AND s.actor = a.actor AND s.method = a.method AND sb.job = ab.job
+		  AND a.outcome IN ('fail', 'error') AND p.outcome IN ('fail', 'error') AND s.outcome = 'pass'
+		  AND p.attempt >= a.attempt AND s.attempt > a.attempt
+		  AND ${uncorrectedResults("a.id", "f.first_result", "f.second_result")}
 		GROUP BY a.id
 	`),
 	lastOfTest: sql<{ project: number; test: number; limit: number }, ResultRow>(
