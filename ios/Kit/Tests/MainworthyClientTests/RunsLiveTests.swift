@@ -138,8 +138,11 @@ struct RunsLiveTests {
 		])
 		let slot = try #require(before.first { $0.title == "A percentage coupon lowers the total" })
 		let execution = try await project.execution(of: slot, in: run.ref)
-		#expect(execution.slot.version == 1 && execution.content.steps.count == 2)
-		#expect(!execution.content.steps.contains { $0.action == "Remove the coupon" })
+		#expect(execution.slot.version == 1 && execution.content.title == "A percentage coupon lowers the total")
+		#expect(execution.content.steps == [
+			Step(id: "s1", action: "Open the cart with one $100.00 item", expected: nil),
+			Step(id: "s2", action: "Apply the coupon SAVE10", expected: "Total shows $90.00"),
+		])
 	}
 }
 
