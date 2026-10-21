@@ -138,6 +138,28 @@ test("a run that ran again already is left, and a dry run says what it would run
 	expect(dry.calls.some((call) => call.includes("/rerun"))).toBe(false);
 });
 
+test("a run that uploaded no report is chosen from its jobs, and another failed download is an error", async () => {
+	const jobs = [job("scope"), job("static"), job("tests", "failure", 7), job("gate", "failure", 9)];
+	const read =
+		(download: () => never): Gh =>
+		async (args) => {
+			if (args[0] === "run") return download();
+			if ((args.at(-1) ?? "").includes("/jobs?")) return JSON.stringify({ jobs });
+			return JSON.stringify({ run_attempt: 1, status: "completed", conclusion: "failure" });
+		};
+	const none = read(() => {
+		throw new Error("gh run download 42: no artifact matches any of the names or patterns provided");
+	});
+	expect(await rerunFailed("42", { gh: none, dryRun: true })).toEqual({
+		exit: 0,
+		lines: ["run 42: running again once, one after the other: tests"],
+	});
+	const broken = read(() => {
+		throw new Error("gh run download 42: HTTP 502");
+	});
+	expect(rerunFailed("42", { gh: broken, dryRun: true })).rejects.toThrow("HTTP 502");
+});
+
 test("a retry that does not finish in time leaves the rest and fails the job", async () => {
 	const { gh } = github({ "tests-1": ["a"], "tests-2": ["b"] });
 	let clock = 0;

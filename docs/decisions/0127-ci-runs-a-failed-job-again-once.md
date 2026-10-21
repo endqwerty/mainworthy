@@ -26,6 +26,7 @@ first attempt, on a branch of this repository. `scripts/ci-rerun.ts` reads the r
   put off saying so for another ten minutes.
 - When only the gate failed and no test did, the gate runs again alone: what it reads, the deployed Mainworthy or
   the artifacts, may have been out of reach.
+- A run with no test report at all, because every shard failed before it uploaded one, is chosen from its jobs.
 
 The jobs run again one after the other. GitHub runs a job again only in a run that has finished, and a shard's job
 passes when its tests fail (the gate judges them), so "Re-run failed jobs" would run the gate alone.
@@ -40,8 +41,8 @@ failure it is; it does not excuse the test.
 - **Retrying failing tests inside the shard**, with Bun or a loop in `scripts/check.ts`. That is faster, but
   Mainworthy would see one attempt with a pass, the flip would never be recorded, and the flaky test would be
   hidden instead of named.
-- **Re-running the whole run.** It runs every shard, the iPhone app and the image again, about ten minutes on seven
-  runners, and gives every test that passed a fresh chance to fail.
+- **Re-running the whole run.** It runs every job again, the seven test runners, the iPhone app and the image
+  included, and gives every test that passed a fresh chance to fail.
 - **Failing a shard's job when its tests fail**, so that "Re-run failed jobs" finds it. The gate's last step reads a
   shard's job result to catch a shard that could not run. A quarantined or answered failure must not fail the run,
   so that step would need another way to know the shard ran.
