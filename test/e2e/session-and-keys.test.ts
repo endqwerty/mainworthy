@@ -2,6 +2,7 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
 import { Client } from "../../src/cli/client.ts";
+import { AuditRecord } from "../../src/core/audit.ts";
 import { Slot } from "../../src/web/runs/models.ts";
 import { browserAvailable, devicePrefix, eventually, openPage, type Server, startServer } from "./support.ts";
 
@@ -177,6 +178,20 @@ check(
 				() => server.api("get", { refs: [q] }),
 				(rows) => rows[0]?.state === "open",
 			);
+			const audit = await server.api("audit", {});
+			const decisions = audit.ndjson
+				.trimEnd()
+				.split("\n")
+				.slice(1, -1)
+				.map((line) => AuditRecord.parse(JSON.parse(line)))
+				.filter((record) => record.type === "decision")
+				.filter((record) => record.question.id === `question:${q.slice(2)}`);
+			expect(
+				decisions.map((record) => ({ answer: record.answer, reasons: record.signers.map((signer) => signer.reason) })),
+			).toEqual([
+				{ answer: { is: "infra" }, reasons: ["The runner was down"] },
+				{ answer: { is: "withdrawn" }, reasons: ["The runner is healthy, I read the wrong log"] },
+			]);
 			expect(await page.locator("#answer-extra").count()).toBe(0);
 		} finally {
 			await h.close();
