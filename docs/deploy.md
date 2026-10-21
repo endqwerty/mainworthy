@@ -302,11 +302,21 @@ the steps are kept below for an instance that has none.
 
 ### What changes for a pull request
 
-- **A failing test is a question on the instance.** The gate is `blocked` and the job exits 2. The job's log
-  names the question ("Q-70 needs an answer"). Either a later commit passes the test, and its run is green, or a
-  person answers the question in the queue (`g q`). After an answer, re-run the `gate` job alone: the shards'
-  reports are artifacts of the run, kept for seven days. The pipeline's token cannot answer, and under `standard`
-  an agent's answer is advice.
+- **A failing test needs a fix, and nobody is asked** (since 2026-10-20, [decision 0122](decisions/0122-ci-failures-belong-to-the-session.md)). Project `mainworthy`
+  answers every failure "Defect in the product" by rule, a dispute between two reports aside, so the gate is
+  `failed` and the job exits 1 with no question in the queue. The session that pushed the commit fixes it. The
+  job's log ends with the command that reads what failed from the instance: `bun scripts/work.ts ci <pull request>`
+  (no argument: the branch's pull request; a commit, for `main`; `--wait=900` waits for a pending gate). It lists
+  each failing test with its message and build, and exits as `mainworthy gate` does. The answer carries to later
+  commits of the pull request and ends when a commit passes the test (decision 0102). A person can still overrule
+  it; an agent and the pipeline cannot. When `ci` reads `blocked`, a person is asked again: if that is a CI
+  failure, the policy was changed back, and `MAINWORTHY_TOKEN=<owner token> bun scripts/work.ts ci-policy` sets it
+  again (run twice, it changes nothing). Until 2026-10-20 a failure was a question for a member and the gate
+  stayed `blocked` until a later commit passed or a person answered: the owner's queue filled with failures the
+  sessions were about to fix.
+
+  `ci` reads with the token of the agent `sessions`, which may only read: `MAINWORTHY_TOKEN`, or the file
+  `~/.config/mainworthy/agent-token` (mode 600, outside the repository; on the Mac since 2026-10-20).
 - **Elapsed time is advisory.** A shard over 180 seconds emits a warning, including above the former
   240-second failure limit. Failed tests, incomplete reports and skipped test files still block the gate.
   Decision 0097 records the owner's suspension; [issue #77](https://github.com/endqwerty/mainworthy/issues/77)
@@ -320,7 +330,7 @@ the steps are kept below for an instance that has none.
   CLI commands keep their existing behavior. Initial instance selection keeps its short probe and fallback
   to the job's own Mainworthy when the deployed instance cannot be used.
 - **A newer attempt of a shard replaces the older one.** When the test passes in it, the gate passes and the
-  question leaves the queue with no answer. Seen on this instance on 2026-10-13: `main` at `89d431a` was blocked
+  rule's answer ends. Seen on this instance on 2026-10-13: `main` at `89d431a` was blocked
   by a browser test that fails now and then (#94), and green after a re-run of shard `tests-4`. GitHub's "Re-run
   failed jobs" re-runs only `gate`, because a shard with a failing test ends as a success and leaves the verdict
   to the gate. Re-run the shard's own job (`gh run rerun <run> --job <id>`): `gate` runs again after it and reads

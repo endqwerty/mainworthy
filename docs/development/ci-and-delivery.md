@@ -65,26 +65,37 @@ read the suite, edit a case, answer a question, plan a run or administer. If the
 speaks another API version, `scripts/ci-instance.ts` starts a Mainworthy of its own for that run and says so on
 the run's summary page. A refused token fails the job instead.
 
-[Diagram: one red build, from upload to a green gate](../diagrams/red-build.html) shows what the instance does with
-a report.
+[Diagram: one red build, from upload to a green gate](../diagrams/red-build.html) shows what an instance does with
+a report under `standard`, where a person answers the failure. This project's policy answers it by rule instead
+(below).
 
 ## Clear a red gate
 
-A failing test is a question on the instance. The job's log names it, for example `Q-70 needs an answer`, and
-exits 2. To clear it, do one of these:
+A failing test needs a fix, and it is the fix of the session that pushed the commit. The project's policy answers
+every CI failure "needs a fix" by rule, so nobody is asked, the gate reads `failed` and the job exits 1
+([decision 0122](../decisions/0122-ci-failures-belong-to-the-session.md)). Read what failed from the instance:
 
-- Fix the test and push. The new commit gets its own run.
+```
+bun scripts/work.ts ci                 # this branch's pull request
+bun scripts/work.ts ci 673 --wait=900  # a pull request, waiting while its gate is pending
+bun scripts/work.ts ci origin/main     # a commit, after git fetch
+```
+
+It lists each failing test with its message and the build, and exits 0 passed, 1 failed, 2 blocked, 3 pending.
+To clear the gate, do one of these:
+
+- Fix the test and push. The new commit gets its own run, and the answer ends when a commit passes the test.
 - Re-run the shard's own job, if the failure was by chance: `gh run rerun <run> --job <id>`. The newer attempt
-  replaces the older one. If the test passes, the question leaves the queue with no answer. GitHub's "Re-run
-  failed jobs" re-runs only `gate`, because the shard itself succeeded.
-- Ask the owner to answer the question in the queue (`g q`) on the instance, then re-run the `gate` job alone.
-  The shards' reports stay as artifacts for seven days. Never answer your own pull request's question with the
-  owner token.
+  replaces the older one, and if the test passes, so does the gate. GitHub's "Re-run failed jobs" re-runs only
+  `gate`, because the shard itself succeeded.
+
+`ci` reads `blocked` when a person is asked. For a CI failure that means the policy was changed back; it says how to
+set it again. Never overrule the rule's answer with the owner token.
 
 A test that fails by chance is still a defect. File it with the `flaky-test` label in milestone M1.
 
 When a pull request is merged or closed, `.github/workflows/change.yml` tells the instance (decision 0022). A
-failure nobody explained on that pull request is then no longer asked about. To replay a missed event, run
+failure still open on that pull request is then no longer asked about. To replay a missed event, run
 `gh workflow run change.yml -f pull=<number> -f state=merged`.
 
 ## Follow the deploy
