@@ -226,6 +226,70 @@ struct QueueScreenTests {
 		#expect(AnswerOutbox(project: project, store: store).entries.isEmpty)
 	}
 
+	@Test("Forget during sending explains retry and never removes a recovered outcome", arguments: [false, true])
+	func forgetDuringSending(recorded: Bool) async throws {
+		var clock = Date(timeIntervalSince1970: 1_800_000_000)
+		let (outbox, _, transport) = try await droppedAnswer(store: MemoryAnswerStore(), now: { clock })
+		let id = try #require(outbox.entries.first?.id)
+		clock = clock.addingTimeInterval(86_400)
+		#expect(outbox.canForget(id))
+		await transport.lookupGate.holdNext()
+		let sending = Task { await outbox.send() }
+		try await transport.lookupGate.waitUntilPaused()
+		outbox.forget(id, confirmed: true)
+		#expect(outbox.dropProblem == "Saved answers were being sent, so this answer was kept. If Forget is still offered, try it again.")
+		#expect(outbox.entries.map(\.status) == ["Dropped"])
+		if recorded { try await transport.deliverHeld() }
+		await transport.lookupGate.release()
+		await sending.value
+		// The sentence is still true once the pass has ended, so it stays until the next Forget, drop or send.
+		#expect(outbox.dropProblem == "Saved answers were being sent, so this answer was kept. If Forget is still offered, try it again.")
+		#expect(outbox.entries.map(\.status) == [recorded ? "Recorded" : "Dropped"])
+		outbox.forget(id, confirmed: true)
+		#expect(outbox.dropProblem == nil)
+		#expect(outbox.entries.map(\.status) == (recorded ? ["Recorded"] : []))
+	}
+
+	@Test("the next Forget update waits for the earliest future Dropped eligibility")
+	func nextForgetEligibility() async throws {
+		var clock = Date(timeIntervalSince1970: 1_800_000_000)
+		let store = MemoryAnswerStore()
+		let (outbox, project, _) = try await droppedAnswer(store: store, now: { clock })
+		let data = try #require(store.data)
+		let savedEntries = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+		let original = try #require(savedEntries.first)
+		func saved(_ command: String, droppedAt: TimeInterval, delivery: String = "dropped", recorded: Bool = false) throws -> [String: Any] {
+			var entry = original
+			var answer = try #require(entry["answer"] as? [String: Any])
+			answer["command"] = command
+			entry["answer"] = answer
+			entry["delivery"] = delivery
+			entry["droppedAt"] = Date(timeIntervalSince1970: droppedAt).timeIntervalSinceReferenceDate
+			if recorded { entry["outcomes"] = [outbox.entries[0].question: ["decided": ["_0": 12]]] }
+			return entry
+		}
+		store.data = try JSONSerialization.data(withJSONObject: [
+			saved("later", droppedAt: 1_800_000_100),
+			saved("earliest", droppedAt: 1_800_000_000),
+			saved("already-eligible", droppedAt: 1_799_900_000),
+			saved("waiting", droppedAt: 1_799_999_900, delivery: "uncertain"),
+			saved("recorded", droppedAt: 1_799_999_900, recorded: true),
+			saved("obsolete", droppedAt: 1_799_999_900, delivery: "obsolete"),
+		])
+		let scheduled = AnswerOutbox(project: project, store: store, now: { clock })
+		#expect(scheduled.entries.map(\.status) == ["Dropped", "Dropped", "Dropped", "Waiting to send", "Recorded", "Obsolete"])
+		#expect(scheduled.nextForgetDelay == 86_400)
+		clock = clock.addingTimeInterval(86_399)
+		#expect(scheduled.nextForgetDelay == 1)
+		clock = clock.addingTimeInterval(1)
+		#expect(scheduled.canForget("earliest"))
+		#expect(scheduled.nextForgetDelay == 100)
+		clock = clock.addingTimeInterval(100)
+		#expect(scheduled.canForget("later"))
+		#expect(scheduled.nextForgetDelay == nil)
+		#expect(AnswerOutbox(project: project).nextForgetDelay == nil)
+	}
+
 	@Test("an older Dropped file starts a persisted full-day wait when first read")
 	func forgetOlderDropped() async throws {
 		var clock = Date(timeIntervalSince1970: 1_800_000_000)
@@ -1264,6 +1328,7 @@ actor QueueSendGate {
 private enum GateTimeout: Error { case neverPaused }
 
 private final class LateAnswerTransport: Transport, Sendable {
+	let lookupGate = QueueSendGate()
 	let holding = Mutex(true)
 	let rejectRetries = Mutex(false)
 	let held = Mutex<[URLRequest]>([])
@@ -1271,6 +1336,7 @@ private final class LateAnswerTransport: Transport, Sendable {
 	private let inner = URLSessionTransport()
 
 	func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+		if request.url?.lastPathComponent == "command" { await lookupGate.pauseIfNeeded() }
 		if request.url?.lastPathComponent == "decide" {
 			sent.withLock { $0 += 1 }
 			if holding.withLock({ $0 }) {

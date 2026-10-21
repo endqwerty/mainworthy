@@ -439,6 +439,7 @@ private struct UnsentAnswersView: View {
 	let screen: QueueScreen
 	@State private var chosen: AnswerOutbox.Entry?
 	@State private var forgetting = false
+	@State private var eligibilityRevision = 0
 	private var confirming: Binding<Bool> {
 		Binding(get: { chosen != nil }, set: { if !$0 { chosen = nil } })
 	}
@@ -491,7 +492,16 @@ private struct UnsentAnswersView: View {
 	}
 
 	var body: some View {
-		TimelineView(.periodic(from: .now, by: 1)) { _ in answers }
+		// A deadline changes eligibility without changing an entry. Keep the list and its scroll position.
+		let _ = eligibilityRevision
+		answers
+			.task(id: screen.outbox.entries) {
+				while let delay = screen.outbox.nextForgetDelay {
+					do { try await Task.sleep(for: .seconds(delay)) }
+					catch { return }
+					eligibilityRevision += 1
+				}
+			}
 	}
 
 	@ViewBuilder private var answers: some View {

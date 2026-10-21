@@ -44,6 +44,7 @@ public final class AnswerOutbox {
 		package var outcome: AnswerOutcome? { answer.members.count == 1 ? outcomes?[question] : nil }
 		public var waiting: Bool { !finished && delivery != .dropped }
 		public var dropped: Bool { outcomes == nil && delivery == .dropped }
+		fileprivate var forgetAt: Date? { dropped ? droppedAt?.addingTimeInterval(24 * 60 * 60) : nil }
 
 		fileprivate init(answer: PreparedAnswer, delivery: Delivery) {
 			self.answer = answer
@@ -258,14 +259,26 @@ public final class AnswerOutbox {
 		await send()
 	}
 
+	/// One device-clock wait until the next Dropped entry becomes eligible. Already eligible entries need no timer.
+	public var nextForgetDelay: TimeInterval? {
+		let current = now()
+		return entries.compactMap(\.forgetAt).map { $0.timeIntervalSince(current) }.filter { $0 > 0 }.min()
+	}
+
 	/// Device-clock eligibility only. Forget always requires the person's confirmation.
 	public func canForget(_ id: String) -> Bool {
-		guard let entry = entries.first(where: { $0.id == id }), entry.dropped, let droppedAt = entry.droppedAt else { return false }
-		return now().timeIntervalSince(droppedAt) >= 24 * 60 * 60
+		guard let at = entries.first(where: { $0.id == id })?.forgetAt else { return false }
+		return now() >= at
 	}
 
 	public func forget(_ id: String, confirmed: Bool = false) {
-		guard confirmed, active, readable, !sending, canForget(id) else { return }
+		guard confirmed, active, readable else { return }
+		dropProblem = nil
+		guard !sending else {
+			dropProblem = "Saved answers were being sent, so this answer was kept. If Forget is still offered, try it again."
+			return
+		}
+		guard canForget(id) else { return }
 		let kept = entries.filter { $0.id != id }
 		do { try save(kept); entries = kept }
 		catch { storageProblem = "The saved answer could not be forgotten on this device. It was kept. \(error.shown)" }
