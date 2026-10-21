@@ -30,7 +30,6 @@ const secret = "e2e-handoff-signing-secret";
 
 			const desktop = await openPage(server, { path });
 			pages.push(desktop);
-			desktop.page.setDefaultTimeout(8000);
 			await desktop.context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: server.url });
 			await desktop.page.getByRole("button", { name: "Copy for an agent" }).click();
 			await desktop.page.waitForFunction(() => document.querySelector("#stat")?.textContent?.includes("Copied"));
@@ -43,7 +42,6 @@ const secret = "e2e-handoff-signing-secret";
 
 			const phone = await openPage(server, { path, device: "phone" });
 			pages.push(phone);
-			phone.page.setDefaultTimeout(8000);
 			await phone.page.getByRole("button", { name: "Hand to the agent" }).tap();
 			await phone.page.getByRole("status").filter({ hasText: "Sent to the agent" }).waitFor();
 			await phone.page.getByRole("button", { name: "Hand to the agent again" }).waitFor();
@@ -63,7 +61,8 @@ const secret = "e2e-handoff-signing-secret";
 
 			// Answered, as a policy that answers failures by rule does, the question still offers the hand-off.
 			const open = (await server.api("inbox", { kind: "failure" })).items[0];
-			await server.api("decide", { q, onEvidence: open?.evidenceHash, answer: { is: "defect" } });
+			if (!open) throw new Error("expected the failure question to be open");
+			await server.api("decide", { q, onEvidence: open.evidenceHash, answer: { is: "defect" } });
 			expect((await server.api("inbox", { kind: "failure" })).items).toEqual([]);
 			await phone.page.goto(`${server.url}${path}`);
 			await phone.page.getByRole("button", { name: "Hand to the agent again" }).waitFor();
