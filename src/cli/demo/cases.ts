@@ -1,5 +1,6 @@
 // The demo's suite: the catalog's scenarios turned into cases. Pure: the same seed and count give the same
 // cases, in the same order, so a seed sent again asks for what the first one asked for.
+import type { Api } from "../../core/api.ts";
 import { type Axis, CATALOG, CONTEXTS, type Feature, type Scenario, VALUES } from "./catalog.ts";
 
 export type DemoCase = {
@@ -217,4 +218,18 @@ export function requirementOf(folder: string): { key: string; title: string } | 
 	const index = CATALOG.findIndex((feature) => feature.path === folder);
 	const feature = CATALOG[index];
 	return feature ? { key: `REQ-${101 + index}`, title: feature.path.replace("/", ": ") } : null;
+}
+
+/** A bulk catalog review, large enough to read across pages in the default demo, without a random stream. */
+export function demoBulkProposal(cases: readonly DemoCase[]): Api["propose"]["input"]["edits"] {
+	if (cases.length <= 20) return [];
+	return cases.slice(0, 201).map((item) => ({
+		op: "create",
+		folder: "Catalog review",
+		body: {
+			title: `Catalog review: ${item.title}`,
+			pre: item.pre,
+			steps: item.steps,
+		},
+	}));
 }

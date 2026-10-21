@@ -280,6 +280,8 @@ export const CaseBody = struct("CaseBody", "The content of a case that has versi
 
 export const Proposal = struct("Proposal", "`get` with a P- ref: a proposed edit with the documents it would change.", {
 	ref: text,
+	count: [whole, "The total number of edits across every page."],
+	cursor: [maybe(text), "The next page at this project snapshot. Null when every edit has been read."],
 	edits: list(
 		struct("ProposalEdit", "One edit of a proposal. Which fields it carries depends on `op`.", {
 			op: [text, "create, edit, restore, place, state, folder, cover or policy."],

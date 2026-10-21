@@ -100,7 +100,11 @@ struct ReviewFifth {
    let q=try #require(screen.questions.first {$0.ref==made["question"]?.string});await screen.readDocuments(of:q)
    guard case .proposal(let edit)=q.evidence else {Issue.record("not proposal");return}
    print("LONG attempt=\(n) count=\(edit.count) summaries=\(edit.summaries.count) reason=\(String(describing:edit.notShown)) shown=\(screen.isShown(q)) choices=\(q.choices.map(\.takes))")
-   #expect(edit.notShown == .tooManyEdits && !screen.isShown(q) && q.choices.allSatisfy {$0.takes == .more})
+   #expect(edit.notShown == nil && !screen.isShown(q) && q.choices.allSatisfy {$0.takes == .nothing})
+   guard case .read(let documents) = screen.documents(of: q) else { Issue.record("large proposal was not read"); return }
+   #expect(documents.count == 21)
+   for document in documents { screen.showProposalRange(of: q, document: document.id, height: 100, top: 0, bottom: 100) }
+   #expect(screen.isShown(q))
   }
  }
  @Test func standaloneState() async throws {

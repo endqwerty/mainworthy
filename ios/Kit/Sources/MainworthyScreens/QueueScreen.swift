@@ -557,7 +557,13 @@ public final class QueueScreen: ProjectScreen {
 		if case .read = documents[key] { return }
 		documents[key] = .reading
 		do {
-			documents[key] = .read(try await project.documents(of: edit))
+			let read = try await project.documents(of: edit)
+			try Task.checkCancellation()
+			guard current(question.ref).map(QueueScreen.proposalSnapshot) == key else {
+				if case .reading = documents[key] { documents[key] = nil }
+				return
+			}
+			documents[key] = .read(read)
 		} catch is CancellationError {
 			// The view that asked went away. What another read of the same documents brought stays.
 			if case .reading = documents[key] { documents[key] = nil }

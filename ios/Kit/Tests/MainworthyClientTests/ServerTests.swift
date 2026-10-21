@@ -253,16 +253,15 @@ struct ServerTests {
 			\(adopt("Q-5", edits: #"[{"op":"restore","case":"C-1","title":"A case"}]"#, count: 1))]}}
 			"""
 		let questions = try await server(Script(.json(inbox))).project("shop", identity: "shop-identity").questions(open: true).questions
-		// An edit and a new case are shown whole. A move beside the edit, more edits than the question lists,
-		// and a restore (whose reply does not say what the case is now) are not.
+		// Content proposals can be read whole even beyond the summaries. Moves and restores remain blocked.
 		#expect(questions.map { $0.choices.map(\.takes) } == [
-			[.nothing, .nothing], [.more, .more], [.more, .more], [.nothing, .nothing], [.more, .more],
+			[.nothing, .nothing], [.more, .more], [.nothing, .nothing], [.nothing, .nothing], [.more, .more],
 		])
-		// The page says which of the two reasons it is.
+		// Unsupported edits still explain why they need the web app.
 		let why = questions.map { question -> ProposedEdit.NotShown? in
 			if case .proposal(let edit) = question.evidence { edit.notShown } else { nil }
 		}
-		#expect(why == [nil, .otherThanContent, .tooManyEdits, nil, .otherThanContent])
+		#expect(why == [nil, .otherThanContent, nil, nil, .otherThanContent])
 	}
 
 	@Test("a proposal's reply that lacks a document is unreadable, not a smaller change")
@@ -280,7 +279,7 @@ struct ServerTests {
 		let edited = #"{"op":"edit","case":"C-1","body":\#(body),"current":\#(body)}"#
 		let created = #"{"op":"create","body":\#(body),"folder":"Checkout","tags":["checkout"],"covers":[]}"#
 		func documents(_ edits: String) async throws -> [EditedCase] {
-			let reply = #"{"ok":true,"seq":3,"result":[{"ref":"P-1","edits":[\#(edits)]}]}"#
+			let reply = #"{"ok":true,"seq":3,"result":[{"ref":"P-1","count":2,"cursor":null,"edits":[\#(edits)]}]}"#
 			let project = server(Script(.json(inbox), .json(reply))).project("shop", identity: "shop-identity")
 			let question = try #require(try await project.questions(open: true).questions.first)
 			guard case .proposal(let edit) = question.evidence else { throw ClientError.unreadable }

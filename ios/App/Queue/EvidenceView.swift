@@ -201,11 +201,9 @@ private struct ProposalEvidence: View {
 				.font(.subheadline)
 				.foregroundStyle(Color.warn)
 			}
-			if let why = edit.notShown {
+			if edit.notShown != nil {
 				Label(
-					why == .tooManyEdits
-						? "This proposal has \(edit.count) edits, and a question lists the first \(edit.summaries.count). This build shows a proposal whole or not at all, so it is answered in the web app."
-						: "This proposal does more than add a case or change what one says: it restores an earlier version, moves, tags, archives or re-covers cases, makes a folder or changes the policy. This build does not show all of that, so it is answered in the web app.",
+					"This proposal does more than add a case or change what one says: it restores an earlier version, moves, tags, archives or re-covers cases, makes a folder or changes the policy. This build does not show all of that, so it is answered in the web app.",
 					systemImage: "info.circle"
 				)
 				.font(.subheadline)

@@ -45,7 +45,7 @@ const titlesOf = async (client: Client) =>
 		.flat()
 		.sort();
 
-test("a seeded project holds a suite in folders, a fortnight of history and five questions for today", async () => {
+test("a seeded project holds a suite in folders, a fortnight of history and six questions for today", async () => {
 	await withInstance(async ({ client }) => {
 		const before = Date.now();
 		const seeded = await seed(client, { project: "demo", cases: 120 });
@@ -77,9 +77,20 @@ test("a seeded project holds a suite in folders, a fortnight of history and five
 			"duplicate-title": 0,
 		});
 
-		// Today: the failing test on `main` and on the pull request, the finding, the agent's edit, the test with no case.
+		// Today: the failing test on `main` and on the pull request, the finding, both agent proposals, the test with no case.
 		const open = await demo.call("inbox", { limit: 50 });
-		expect(open.items.map((item) => item.kind).sort()).toEqual(["adopt", "failure", "failure", "finding", "map"]);
+		expect(open.items.map((item) => item.kind).sort()).toEqual([
+			"adopt",
+			"adopt",
+			"failure",
+			"failure",
+			"finding",
+			"map",
+		]);
+		const large = open.items.find((item) => item.kind === "adopt" && item.evidence.count === 120);
+		expect(large?.evidence.edits).toHaveLength(20);
+		const full = await demo.call("get", { refs: [String(large?.evidence.proposal)] });
+		expect(full[0]).toMatchObject({ count: 120, cursor: null });
 		const inherited = (await demo.call("inbox", { on: "pr:482", kind: "failure" })).items;
 		expect(inherited).toHaveLength(1);
 		expect(inherited[0]?.evidence).toMatchObject({ hints: ["fails-on-base"] });
@@ -180,11 +191,11 @@ test("the same seed writes the same suite, another seed another, and no days lea
 		expect(await titlesOf(on(client, "two"))).toEqual(one);
 		expect(await titlesOf(on(client, "three"))).not.toEqual(one);
 
-		// With no days there is today's run and no other, and the five questions all the same.
+		// With no days there is today's run and no other, and the six questions all the same.
 		const today = on(client, "two");
 		const runs = z.array(Run).parse((await today.call("find", { in: "runs", origin: "planned", limit: 100 })).items);
 		expect(runs.map((run) => run.name)).toEqual(["Agent checkout check", "Checkout regression"]);
-		expect((await today.call("inbox", { limit: 50 })).items).toHaveLength(5);
+		expect((await today.call("inbox", { limit: 50 })).items).toHaveLength(6);
 		const inherited = (await today.call("inbox", { on: "pr:482", kind: "failure" })).items;
 		expect(inherited).toHaveLength(1);
 		expect(inherited[0]?.evidence).toMatchObject({ hints: ["fails-on-base"] });

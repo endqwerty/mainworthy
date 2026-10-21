@@ -7,7 +7,7 @@ import type { Api } from "../core/api.ts";
 import { type ActorKind, type Capability, PolicySettings } from "../core/kinds.ts";
 import { ProposeReply } from "../core/ops.ts";
 import type { Client } from "./client.ts";
-import { automateOf, type DemoCase, demoCases, random, requirementOf } from "./demo/cases.ts";
+import { automateOf, type DemoCase, demoBulkProposal, demoCases, random, requirementOf } from "./demo/cases.ts";
 import { DEMO_FIELDS, demoAliases, demoFields } from "./demo/fields.ts";
 import { AGENT_MODEL, dayStart, demoHistory, type Failure, hex, LANDED_CHANGE, REPO, todayAt } from "./demo/history.ts";
 import { demoAgentScreenshot, demoScreenshot, demoTrail } from "./demo/trails.ts";
@@ -588,6 +588,13 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 			},
 		],
 	});
+	const bulkEdits = demoBulkProposal(suite);
+	if (bulkEdits.length > 0) {
+		await write(agent, "propose", "catalog-review", before(25 * MINUTE), {
+			reason: "Review the catalog cases together before adding them to the suite.",
+			edits: bulkEdits,
+		});
+	}
 	await write(ci, "report", "unlinked", before(20 * MINUTE), {
 		target: { commit: change, repo: REPO, branch: "coupon-total", pr: 482 },
 		job: "misc",
