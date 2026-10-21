@@ -264,3 +264,7 @@
 	font: 11px var(--mono);
 	color: var(--dim);
 }
+.change-landing-gate .shard-waits {
+	flex-basis: 100%;
+	margin-top: 2px;
+}
