@@ -1669,6 +1669,25 @@ describe("a commit reported in shards", () => {
 		expect(done.waiting).toBeUndefined();
 	});
 
+	test("a commit's run, its change and the change's landing say which shards they wait for beside the reason", () => {
+		const waiting = [{ job: "tests", env: "", missing: [2, 3], of: 3 }];
+		h.call("report", shard("shard15a", 1, [0, 1], {}, 61));
+		const change = () =>
+			h
+				.call<{ items: { key: string; waiting?: unknown; landing: { waiting?: unknown } | null }[] }>("find", {
+					in: "changes",
+				})
+				.items.find((item) => item.key === "pr:61");
+		expect(change()).toMatchObject({ waiting, landing: null });
+		const run = h.call<{ ref: string; waiting?: unknown }[]>("get", { refs: [gate("shard15a").run ?? ""] })[0];
+		expect(run?.waiting).toEqual(waiting);
+		h.call("change", { change: "pr:61", state: "merged", landing: { commit: "shard15b", branch: "main" } });
+		h.call("report", ciReport({ commit: "shard15b", n: 6, job: "tests", shard: { index: 3, of: 3 }, only: [4, 5] }));
+		expect(change()?.landing?.waiting).toEqual([{ job: "tests", env: "", missing: [1, 2], of: 3 }]);
+		for (const index of [2, 3]) h.call("report", shard("shard15a", index, [index * 2 - 2, index * 2 - 1], {}, 61));
+		expect(change()?.waiting).toBeUndefined();
+	});
+
 	test("a failure in a shard that reported shows at once", () => {
 		h.call("report", shard("shard11a", 2, [2, 3], { 2: "expected 3, got 4" }));
 		expect(gate("shard11a").verdict).toBe("blocked");

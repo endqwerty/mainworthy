@@ -723,6 +723,33 @@ describe("what Changes and Your sessions read", () => {
 		expect(impact).toMatchObject({ change: { key: "pr:482", state: "merged" } });
 	});
 
+	test("a gate waiting for shards lists them beside its reason", async () => {
+		const { RunPage } = await import("../scripts/ios/contract.ts");
+		const own = z.object({ result: z.object({ project: z.string() }) }).parse(await send("POST", "/test/project", {}));
+		const key = own.result.project;
+		const shard = (commit: string, index: number, target: Record<string, unknown>) =>
+			op(key, "report", {
+				target: { commit, repo: "acme/shop", ...target },
+				job: "shop",
+				shard: { index, of: 3 },
+				results: [{ test: { key: `shop::shard ${index}`, name: `Shard ${index}` }, outcome: "pass" }],
+			});
+		await shard("5555555555555555555555555555555555555555", 1, { branch: "estimate", pr: 483 });
+		const waiting = [{ job: "shop", env: "", missing: [2, 3], of: 3 }];
+		const gate = await op(key, "gate", { change: "pr:483" });
+		holds("a gate waiting for shards", ChangeGate, gate);
+		expect(gate).toMatchObject({ waiting });
+		const runs = await op(key, "find", { in: "runs", change: "pr:483" });
+		holds("a run waiting for shards", RunPage, runs);
+		expect(runs).toMatchObject({ items: [{ waiting }] });
+		await op(key, "change", { change: "pr:483", state: "merged", landing: { commit: "6".repeat(40), branch: "main" } });
+		await shard("6".repeat(40), 2, { branch: "main" });
+		const list = await op(key, "find", { in: "changes" });
+		holds("a landing waiting for shards", ChangeList, list);
+		const landed = z.object({ items: z.array(z.object({ key: z.string() }).passthrough()) }).parse(list).items;
+		expect(landed.find((item) => item.key === "pr:483")).toMatchObject({ landing: { waiting: [{ missing: [1, 3] }] } });
+	});
+
 	test("a cookie lists and ends its own session", async () => {
 		const signed = await fetch(`${server.url}/api/login`, {
 			method: "POST",

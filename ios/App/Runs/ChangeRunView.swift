@@ -19,10 +19,11 @@ struct ChangeRunView: View {
 			VStack(alignment: .leading, spacing: 16) {
 				VStack(alignment: .leading, spacing: 4) {
 					Text(heading).font(.title2.weight(.semibold))
-					Text(run.reason)
+					Text(ShardWait.reason(run.reason, beside: run.waiting))
 						.font(.subheadline.weight(.medium))
 						.foregroundStyle(run.verdict.tint)
 						.accessibilityIdentifier("change-run-verdict")
+					ShardStrips(waiting: run.waiting).padding(.top, 4)
 				}
 				Panel {
 					if let commit {

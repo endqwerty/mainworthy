@@ -1,6 +1,6 @@
-// Written by `bun scripts/ios.ts gen` from src/core/stakes.ts. Do not edit it: change that file and run the command again.
+// Written by `bun scripts/ios.ts gen` from src/core/stakes.ts and src/core/runs.ts. Do not edit it: change that file and run the command again.
 
-/// What the functions of `src/core/stakes.ts` return. The app has those functions again in Swift, and its tests
+/// What the functions of `src/core/stakes.ts` and `src/core/runs.ts` return. The app has those functions again in Swift, and its tests
 /// hold them to these answers.
 enum Parity {
 	/// `stakes`: the kind of question, the runs it blocks and its facts, and the sentence.
@@ -97,4 +97,42 @@ enum Parity {
 		(["open": 1, "finding": 1], "1 can wait"),
 		(["open": 2, "failure": 3], "3 failures to explain"),
 	]
+
+	/// `shardWaitTitle`: a job waiting for shards, and the words its strip spells out.
+	static let shardTitles: [(wait: ShardRow, says: String)] = [
+		(("tests", "", [4, 5, 6], 6), "Job tests: 3 of 6 shards reported (1, 2 and 3). Waiting for shards 4, 5 and 6."),
+		(("lint", "linux", [2], 2), "Job lint in linux: 1 of 2 shards reported (1). Waiting for shard 2."),
+		(("", "", [1, 3], 3), "Job (unnamed): 1 of 3 shards reported (2). Waiting for shards 1 and 3."),
+	]
+
+	/// `reasonBesideShards`: a gate's reason and the jobs it waits for, and the reason beside their strips.
+	static let shardReasons: [(reason: String, waiting: [ShardRow], says: String)] = [
+		("pending: waiting for shards 4, 5 and 6 of 6 of job tests", [("tests", "", [4, 5, 6], 6)], "pending: waiting for 3 shards"),
+		("pending: waiting for shards 4, 5 and 6 of 6 of job tests; 1 quarantined failure recorded, not blocking", [("tests", "", [4, 5, 6], 6)], "pending: waiting for 3 shards; 1 quarantined failure recorded, not blocking"),
+		("failed: 2 failures attributed to this target; still waiting for shards 4, 5 and 6 of 6 of job tests", [("tests", "", [4, 5, 6], 6)], "failed: 2 failures attributed to this target; still waiting for 3 shards"),
+		("failed: 2 failures attributed to this target; still waiting for shards 4, 5 and 6 of 6 of job tests; 1 quarantined failure recorded, not blocking", [("tests", "", [4, 5, 6], 6)], "failed: 2 failures attributed to this target; still waiting for 3 shards; 1 quarantined failure recorded, not blocking"),
+		("blocked: 1 failure unexplained; still waiting for shards 4, 5 and 6 of 6 of job tests", [("tests", "", [4, 5, 6], 6)], "blocked: 1 failure unexplained; still waiting for 3 shards"),
+		("blocked: 1 failure unexplained; still waiting for shards 4, 5 and 6 of 6 of job tests; 1 quarantined failure recorded, not blocking", [("tests", "", [4, 5, 6], 6)], "blocked: 1 failure unexplained; still waiting for 3 shards; 1 quarantined failure recorded, not blocking"),
+		("pending: waiting for shard 2 of 2 of job lint in linux", [("lint", "linux", [2], 2)], "pending: waiting for 1 shard"),
+		("pending: waiting for shard 2 of 2 of job lint in linux; 1 quarantined failure recorded, not blocking", [("lint", "linux", [2], 2)], "pending: waiting for 1 shard; 1 quarantined failure recorded, not blocking"),
+		("failed: 2 failures attributed to this target; still waiting for shard 2 of 2 of job lint in linux", [("lint", "linux", [2], 2)], "failed: 2 failures attributed to this target; still waiting for 1 shard"),
+		("failed: 2 failures attributed to this target; still waiting for shard 2 of 2 of job lint in linux; 1 quarantined failure recorded, not blocking", [("lint", "linux", [2], 2)], "failed: 2 failures attributed to this target; still waiting for 1 shard; 1 quarantined failure recorded, not blocking"),
+		("blocked: 1 failure unexplained; still waiting for shard 2 of 2 of job lint in linux", [("lint", "linux", [2], 2)], "blocked: 1 failure unexplained; still waiting for 1 shard"),
+		("blocked: 1 failure unexplained; still waiting for shard 2 of 2 of job lint in linux; 1 quarantined failure recorded, not blocking", [("lint", "linux", [2], 2)], "blocked: 1 failure unexplained; still waiting for 1 shard; 1 quarantined failure recorded, not blocking"),
+		("pending: waiting for shards 1 and 3 of 3 of job (unnamed)", [("", "", [1, 3], 3)], "pending: waiting for 2 shards"),
+		("pending: waiting for shards 1 and 3 of 3 of job (unnamed); 1 quarantined failure recorded, not blocking", [("", "", [1, 3], 3)], "pending: waiting for 2 shards; 1 quarantined failure recorded, not blocking"),
+		("failed: 2 failures attributed to this target; still waiting for shards 1 and 3 of 3 of job (unnamed)", [("", "", [1, 3], 3)], "failed: 2 failures attributed to this target; still waiting for 2 shards"),
+		("failed: 2 failures attributed to this target; still waiting for shards 1 and 3 of 3 of job (unnamed); 1 quarantined failure recorded, not blocking", [("", "", [1, 3], 3)], "failed: 2 failures attributed to this target; still waiting for 2 shards; 1 quarantined failure recorded, not blocking"),
+		("blocked: 1 failure unexplained; still waiting for shards 1 and 3 of 3 of job (unnamed)", [("", "", [1, 3], 3)], "blocked: 1 failure unexplained; still waiting for 2 shards"),
+		("blocked: 1 failure unexplained; still waiting for shards 1 and 3 of 3 of job (unnamed); 1 quarantined failure recorded, not blocking", [("", "", [1, 3], 3)], "blocked: 1 failure unexplained; still waiting for 2 shards; 1 quarantined failure recorded, not blocking"),
+		("pending: waiting for shards 4, 5 and 6 of 6 of job tests; shard 2 of 2 of job lint in linux", [("tests", "", [4, 5, 6], 6), ("lint", "linux", [2], 2)], "pending: waiting for 4 shards"),
+		("pending: waiting for shards 4, 5 and 6 of 6 of job tests; shard 2 of 2 of job lint in linux; 1 quarantined failure recorded, not blocking", [("tests", "", [4, 5, 6], 6), ("lint", "linux", [2], 2)], "pending: waiting for 4 shards; 1 quarantined failure recorded, not blocking"),
+		("failed: 2 failures attributed to this target; still waiting for shards 4, 5 and 6 of 6 of job tests; shard 2 of 2 of job lint in linux", [("tests", "", [4, 5, 6], 6), ("lint", "linux", [2], 2)], "failed: 2 failures attributed to this target; still waiting for 4 shards"),
+		("failed: 2 failures attributed to this target; still waiting for shards 4, 5 and 6 of 6 of job tests; shard 2 of 2 of job lint in linux; 1 quarantined failure recorded, not blocking", [("tests", "", [4, 5, 6], 6), ("lint", "linux", [2], 2)], "failed: 2 failures attributed to this target; still waiting for 4 shards; 1 quarantined failure recorded, not blocking"),
+		("blocked: 1 failure unexplained; still waiting for shards 4, 5 and 6 of 6 of job tests; shard 2 of 2 of job lint in linux", [("tests", "", [4, 5, 6], 6), ("lint", "linux", [2], 2)], "blocked: 1 failure unexplained; still waiting for 4 shards"),
+		("blocked: 1 failure unexplained; still waiting for shards 4, 5 and 6 of 6 of job tests; shard 2 of 2 of job lint in linux; 1 quarantined failure recorded, not blocking", [("tests", "", [4, 5, 6], 6), ("lint", "linux", [2], 2)], "blocked: 1 failure unexplained; still waiting for 4 shards; 1 quarantined failure recorded, not blocking"),
+	]
 }
+
+/// A job waiting for shards: its name, its environment, the missing shards and how many it has.
+typealias ShardRow = (job: String, env: String, missing: [Int], of: Int)

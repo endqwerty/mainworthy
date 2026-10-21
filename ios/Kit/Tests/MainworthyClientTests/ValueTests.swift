@@ -75,6 +75,19 @@ struct ValueTests {
 		for row in Parity.waiting { #expect(Stakes.waitingPhrase(row.counts) == row.says) }
 	}
 
+	@Test("a job's shards and a gate's reason beside them read as every other client prints them")
+	func shards() {
+		let wait = { (row: ShardRow) in ShardWait(job: row.job, env: row.env, missing: row.missing, of: row.of) }
+		#expect(!Parity.shardTitles.isEmpty && !Parity.shardReasons.isEmpty)
+		for row in Parity.shardTitles { #expect(wait(row.wait).title == row.says) }
+		for row in Parity.shardReasons {
+			#expect(ShardWait.reason(row.reason, beside: row.waiting.map(wait)) == row.says)
+		}
+		// A reason that names other shards than the ones given is left whole rather than miscounted.
+		let other = "pending: waiting for shard 2 of 2 of job lint in linux"
+		#expect(ShardWait.reason(other, beside: [ShardWait(job: "tests", env: "", missing: [6], of: 6)]) == other)
+	}
+
 	@Test("an assertion's message is read as what was expected and what was seen", arguments: [
 		("expected $90.00, got $100.00", "$90.00", "$100.00"),
 		("AssertionError: expected 3 but received 4", "3", "4"),

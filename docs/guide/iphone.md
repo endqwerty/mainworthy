@@ -283,7 +283,8 @@ To inspect a change and the results its gate counted, follow these steps:
 1. Open **Changes**. A pipeline report with a branch or pull request makes a change appear. The list shows the
    newest 500 changes.
 2. Press a change to read its head and base commits, the gate's verdict and reason, its failing tests and
-   linked cases, and the cases it touches. Pull down to refresh. The list and open page also follow the
+   linked cases, and the cases it touches. A gate that waits for shards of a job draws them under its reason: tap
+   the strip to read which shards reported and which are still due. Pull down to refresh. The list and open page also follow the
    project's change stream. An open page stays readable when its change leaves the list.
 3. Press an open question to read its evidence and answer it, as in Queue. When you answer, the change's
    gate is read again.

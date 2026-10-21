@@ -355,6 +355,16 @@ export const ChangeEvent = struct("ChangeEvent", "One event of `GET /api/p/<proj
 });
 
 // Runs, a planned run's pinned slots, and manual results.
+
+/** Beside a gate's reason: a job of the commit that reported in shards and is missing some. */
+const ShardWait = struct("ShardWait", "A job of a commit that reported in shards and is missing some.", {
+	job: text,
+	env: text,
+	missing: [list(whole), "The shards that have not reported, ascending."],
+	of: [whole, "How many shards the job has."],
+});
+const waiting = [maybe(list(ShardWait)), "None: the gate waits for no shard."] as const;
+
 export const Run = struct("Run", "A planned run or a change run, with the server's verdict.", {
 	location: maybe(ResultLocation),
 	ref: text,
@@ -363,6 +373,7 @@ export const Run = struct("Run", "A planned run or a change run, with the server
 	state: text,
 	verdict: text,
 	reason: text,
+	waiting,
 	createdAt: [whole, "Milliseconds since 1970."],
 	slots: [maybe(whole), "A planned run's pinned cases."],
 	inProgress: whole,
@@ -481,6 +492,7 @@ const ChangeLanding = struct(
 		run: [maybe(text), "None: nothing a gate counts has been reported for this commit."],
 		verdict: text,
 		reason: text,
+		waiting,
 	},
 );
 
@@ -503,6 +515,7 @@ export const ChangeGate = struct("ChangeGate", "`gate` of a change's head commit
 	run: maybe(text),
 	verdict: text,
 	reason: text,
+	waiting,
 	tally: dictionary(whole),
 	stale: flag,
 });

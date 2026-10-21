@@ -13,7 +13,15 @@ import { execFileSync } from "node:child_process";
 import { ANSWER_HELP, ANSWER_LABELS, KIND_WORDS, KINDS } from "../../src/core/kinds.ts";
 import { METHOD_LABELS, MethodKind } from "../../src/core/model.ts";
 import { DECIDE_MAX } from "../../src/core/ops.ts";
-import { RESULT_STANDING_LABELS, RESULT_STANDINGS } from "../../src/core/runs.ts";
+import {
+	emptyTally,
+	explainVerdict,
+	RESULT_STANDING_LABELS,
+	RESULT_STANDINGS,
+	reasonBesideShards,
+	type ShardWait,
+	shardWaitTitle,
+} from "../../src/core/runs.ts";
 import { stakes, waitingPhrase } from "../../src/core/stakes.ts";
 import { SHAPES } from "./contract.ts";
 import type { Struct } from "./shape.ts";
@@ -205,6 +213,24 @@ const COUNTS: Record<string, number>[] = [
 
 const strings = (values: readonly string[]): string => `[${values.map(literal).join(", ")}]`;
 
+/** Jobs waiting for shards, and the gates whose reasons name them. */
+const SHARD_WAITS: ShardWait[][] = [
+	[{ job: "tests", env: "", missing: [4, 5, 6], of: 6 }],
+	[{ job: "lint", env: "linux", missing: [2], of: 2 }],
+	[{ job: "", env: "", missing: [1, 3], of: 3 }],
+	[
+		{ job: "tests", env: "", missing: [4, 5, 6], of: 6 },
+		{ job: "lint", env: "linux", missing: [2], of: 2 },
+	],
+];
+const SHARD_TALLIES = [
+	{ ...emptyTally(), pass: 3 },
+	{ ...emptyTally(), pass: 3, attributed: 2 },
+	{ ...emptyTally(), pass: 3, unexplained: 1 },
+];
+const shardWait = (wait: ShardWait): string =>
+	`(${literal(wait.job)}, ${literal(wait.env)}, [${wait.missing.join(", ")}], ${wait.of})`;
+
 export function parity(): string {
 	const stakesCases = KINDS.flatMap((kind) =>
 		BLOCKS.flatMap((blocks) =>
@@ -218,9 +244,22 @@ export function parity(): string {
 		const entries = Object.entries(counts).map(([key, value]) => `${literal(key)}: ${value}`);
 		return `\t\t(${entries.length > 0 ? `[${entries.join(", ")}]` : "[:]"}, ${literal(waitingPhrase(counts))}),\n`;
 	}).join("");
+	const titleCases = SHARD_WAITS.filter((waiting) => waiting.length === 1)
+		.flat()
+		.map((wait) => `\t\t(${shardWait(wait)}, ${literal(shardWaitTitle(wait))}),\n`)
+		.join("");
+	const reasonCases = SHARD_WAITS.flatMap((waiting) =>
+		SHARD_TALLIES.flatMap((tally) => {
+			const reason = explainVerdict({ tally, blocking: 0, outstanding: 0, expired: false, waiting });
+			return [reason, `${reason}; 1 quarantined failure recorded, not blocking`];
+		}).map(
+			(reason) =>
+				`\t\t(${literal(reason)}, [${waiting.map(shardWait).join(", ")}], ${literal(reasonBesideShards(reason, waiting))}),\n`,
+		),
+	).join("");
 	return [
-		HEADER("src/core/stakes.ts"),
-		"/// What the functions of `src/core/stakes.ts` return. The app has those functions again in Swift, and its tests",
+		HEADER("src/core/stakes.ts and src/core/runs.ts"),
+		"/// What the functions of `src/core/stakes.ts` and `src/core/runs.ts` return. The app has those functions again in Swift, and its tests",
 		"/// hold them to these answers.",
 		"enum Parity {",
 		"\t/// `stakes`: the kind of question, the runs it blocks and its facts, and the sentence.",
@@ -228,7 +267,16 @@ export function parity(): string {
 		"",
 		"\t/// `waitingPhrase`: the open questions by kind, and the sentence.",
 		`\tstatic let waiting: [(counts: [String: Int], says: String)] = [\n${waitingCases}\t]`,
+		"",
+		"\t/// `shardWaitTitle`: a job waiting for shards, and the words its strip spells out.",
+		`\tstatic let shardTitles: [(wait: ShardRow, says: String)] = [\n${titleCases}\t]`,
+		"",
+		"\t/// `reasonBesideShards`: a gate's reason and the jobs it waits for, and the reason beside their strips.",
+		`\tstatic let shardReasons: [(reason: String, waiting: [ShardRow], says: String)] = [\n${reasonCases}\t]`,
 		"}",
+		"",
+		"/// A job waiting for shards: its name, its environment, the missing shards and how many it has.",
+		"typealias ShardRow = (job: String, env: String, missing: [Int], of: Int)",
 		"",
 	].join("\n");
 }

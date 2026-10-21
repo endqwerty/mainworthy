@@ -9,6 +9,7 @@ import { navigate, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, EmptyState, KeyCap, ListRow } from "../ui/index.tsx";
 import { ResultLocation } from "../ui/result-location.tsx";
+import { GateReason } from "../ui/shards.tsx";
 import { RunCockpit } from "./cockpit.tsx";
 import { Run, tallyText } from "./models.ts";
 import { RunPlanner } from "./planner.tsx";
@@ -173,7 +174,7 @@ function RunListing({ opened }: { opened: Run | null }) {
 									)}
 									{run.origin === "planned" &&
 										`${run.workUntil !== null && run.workUntil <= now ? 0 : run.inProgress} in progress · `}
-									{run.reason}
+									<GateReason reason={run.reason} waiting={run.waiting} compact />
 									{run.flips ? ` · ${run.flips} flaky` : ""}
 								</span>
 							</span>
@@ -291,7 +292,9 @@ function ChangeRunDetail({ run }: { run: Run }) {
 				</span>
 			</div>
 			<h2>{run.location?.label ?? run.name}</h2>
-			<p className={`run-verdict v-${run.verdict}`}>{run.reason}</p>
+			<p className={`run-verdict v-${run.verdict}`}>
+				<GateReason reason={run.reason} waiting={run.waiting} />
+			</p>
 			<p className="dim">
 				{tallyText(run.tally)}
 				{time && ` · ${time}`}

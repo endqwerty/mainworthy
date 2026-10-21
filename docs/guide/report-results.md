@@ -390,6 +390,10 @@ Until the last shard reports, the gate reads `pending` and names the missing sha
 for example `pending: waiting for shards 3 and 5 of 6 of job tests`.
 A failure in a shard that already reported shows at once, and the reason says which shards are still due.
 `mainworthy gate --json` lists them in `waiting`.
+The web app and the iPhone app draw the shards under the gate's reason, one strip for each job and one cell for each
+shard. A missing shard is outlined in amber. The reason then counts the shards, for example
+`pending: waiting for 3 shards`. To read which shards reported and which are still due, hover over a strip in the
+web app or tap it on the iPhone. A phone's browser writes it under the strip.
 Each shard can run `mainworthy gate` after its own report. The last shard's gate gives the commit's verdict.
 
 A retry of a shard keeps the shard's index. Every shard of a job must give the same number of shards.

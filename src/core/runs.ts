@@ -96,15 +96,46 @@ export const emptyTally = (): Tally => ({
 });
 
 /** A job of a commit that reported in shards and is missing some: which, of how many, in which environment. */
-export type ShardWait = { job: string; env: string; missing: number[]; of: number };
+export const ShardWait = z.object({
+	job: z.string(),
+	env: z.string(),
+	missing: z.array(z.number().int()),
+	of: z.number().int(),
+});
+export type ShardWait = z.infer<typeof ShardWait>;
+
+/** "3", "3 and 5", "1, 3 and 5". */
+const listed = (numbers: readonly number[]): string =>
+	numbers.length === 1 ? String(numbers[0]) : `${numbers.slice(0, -1).join(", ")} and ${numbers.at(-1)}`;
+const shards = (numbers: readonly number[]): string =>
+	`${numbers.length === 1 ? "shard" : "shards"} ${listed(numbers)}`;
+const jobOf = (wait: ShardWait): string => `job ${wait.job || "(unnamed)"}${wait.env ? ` in ${wait.env}` : ""}`;
 
 /** "shards 3 and 5 of 6 of job tests", as a gate's reason says it. */
-export function describeShardWait(wait: ShardWait): string {
-	const numbers =
-		wait.missing.length === 1
-			? `shard ${wait.missing[0]}`
-			: `shards ${wait.missing.slice(0, -1).join(", ")} and ${wait.missing.at(-1)}`;
-	return `${numbers} of ${wait.of} of job ${wait.job || "(unnamed)"}${wait.env ? ` in ${wait.env}` : ""}`;
+function describeShardWait(wait: ShardWait): string {
+	return `${shards(wait.missing)} of ${wait.of} of ${jobOf(wait)}`;
+}
+
+/** What the reason names after "waiting for": every job's missing shards. */
+const waitingList = (waiting: readonly ShardWait[]): string => waiting.map(describeShardWait).join("; ");
+
+/**
+ * A gate's reason for a screen that draws each job's shards: the shards it names become a count, "pending: waiting
+ * for 3 shards". A reason that does not name them, or no waiting at all, comes back as it is.
+ */
+export function reasonBesideShards(reason: string, waiting: readonly ShardWait[] = []): string {
+	if (waiting.length === 0) return reason;
+	const count = waiting.reduce((sum, wait) => sum + wait.missing.length, 0);
+	return reason.replace(waitingList(waiting), `${count} ${count === 1 ? "shard" : "shards"}`);
+}
+
+/** One job's shards spelled out, where a screen draws them: which reported and which the gate waits for. */
+export function shardWaitTitle(wait: ShardWait): string {
+	const missing = new Set(wait.missing);
+	const reported = Array.from({ length: wait.of }, (_, i) => i + 1).filter((i) => !missing.has(i));
+	const heading = jobOf(wait).replace(/^job/, "Job");
+	const done = `${reported.length} of ${wait.of} shards reported${reported.length > 0 ? ` (${listed(reported)})` : ""}`;
+	return `${heading}: ${done}. Waiting for ${shards(wait.missing)}.`;
 }
 
 /**
@@ -141,7 +172,7 @@ export function explainVerdict(input: VerdictFacts): string {
 	const { tally } = input;
 	const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 	// A failure shows before every shard has reported; the reason says that more is to come.
-	const waiting = input.waiting && input.waiting.length > 0 ? input.waiting.map(describeShardWait).join("; ") : null;
+	const waiting = input.waiting && input.waiting.length > 0 ? waitingList(input.waiting) : null;
 	const more = waiting ? `; still waiting for ${waiting}` : "";
 	if (input.outstanding > 0) return `pending: ${plural(input.outstanding, "report")} accepted and not yet applied`;
 	if (input.expired) return "pending: a decision this run rests on has expired";
