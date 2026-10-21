@@ -34,7 +34,8 @@ public final class OpenRunScreen: ProjectScreen {
 	private var person: String
 	private var reads = 0
 	private var acceptedRead = 0
-	private var latestRead: Task<Bool, Never>?
+	private enum ReadResult { case accepted, superseded, failed }
+	private var latestRead: Task<ReadResult, Never>?
 	private var documents = 0
 	private var last: Saved?
 	private var own: [Int: OwnResult] = [:]
@@ -107,14 +108,14 @@ public final class OpenRunScreen: ProjectScreen {
 
 	public func refresh() async { _ = await read() }
 
-	private func read(slotsOnly: Bool = false) async -> Bool {
+	private func read(slotsOnly: Bool = false) async -> ReadResult {
 		reads += 1
 		let mine = reads
-		let task = Task { @MainActor in
+		let task = Task<ReadResult, Never> { @MainActor in
 			do {
 				let fresh = slotsOnly ? nil : try await project.run(run.ref)
 				let slots = try await project.slots(of: run.ref)
-				guard mine == reads else { return false }
+				guard mine == reads else { return .superseded }
 				if let fresh { run = fresh }
 				self.slots = slots
 				if let saved = last, pending[saved.execution.slot.id] == nil,
@@ -123,13 +124,13 @@ public final class OpenRunScreen: ProjectScreen {
 				}
 				acceptedRead = mine
 				loading = .done
-				return true
+				return .accepted
 			} catch is CancellationError {
 			} catch {
-				guard mine == reads else { return false }
+				guard mine == reads else { return .superseded }
 				if loading == .done { notice = error.shown } else { loading = .failed(error.shown) }
 			}
-			return false
+			return mine == reads ? .failed : .superseded
 		}
 		latestRead = task
 		return await withTaskCancellationHandler {
@@ -194,7 +195,10 @@ public final class OpenRunScreen: ProjectScreen {
 		guard !busy, canSetAsideReport(execution) else { return }
 		busy = true
 		defer { busy = false }
-		guard await read() else {
+		switch await read() {
+		case .accepted: break
+		case .superseded: return
+		case .failed:
 			notice = "The run could not be read. The report was kept. Retry or try setting it aside again."
 			return
 		}
@@ -245,7 +249,7 @@ public final class OpenRunScreen: ProjectScreen {
 						drafts[execution.slot.id]?.failedStep = nil
 					}
 					let before = reads
-					if !(await read()) { _ = await read(slotsOnly: true) }
+					if await read() != .accepted { _ = await read(slotsOnly: true) }
 					while acceptedRead <= before {
 						let waitingFor = reads
 						guard let latestRead else { return true }
@@ -295,7 +299,7 @@ public final class OpenRunScreen: ProjectScreen {
 		busy = true
 		defer { busy = false }
 		// Undo must still name the standing result, even if the stream has not refreshed this screen yet.
-		guard await read() else { return }
+		guard await read() == .accepted else { return }
 		guard let current = last, current.result == saved.result else { return }
 		let outcome: ManualOutcome
 		if let previous = saved.previous {
