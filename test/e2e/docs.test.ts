@@ -159,24 +159,27 @@ test.skipIf(!browserAvailable)(
 			expect(documented.length).toBeGreaterThan(40);
 			const missing = new Set<string>();
 			const screens = [
-				"/p/scratch/suite",
-				"/p/scratch/suite/c/1",
-				"/p/scratch/queue",
-				`/p/scratch/runs`,
-				`/p/scratch/runs/${run.slice(2)}`,
-				"/p/scratch/changes/pr%3A482",
-				"/p/scratch/tests",
-				"/p/scratch/reports",
-				"/p/scratch/settings",
-			];
+				["/p/scratch/suite", "Next case"],
+				["/p/scratch/suite/c/1", "Next case"],
+				["/p/scratch/queue", "Next question"],
+				["/p/scratch/runs", "Next run"],
+				[`/p/scratch/runs/${run.slice(2)}`, "Next slot"],
+				["/p/scratch/changes/pr%3A482", "Next change"],
+				["/p/scratch/tests", "Next test"],
+				["/p/scratch/reports", "Next report"],
+				["/p/scratch/settings", "Next setting"],
+			] satisfies [string, string][];
 			let listed = 0;
-			for (const path of screens) {
+			for (const [path, binding] of screens) {
 				await page.goto(`${server.url}${path}`);
 				await page.locator("#list").waitFor();
-				await page.waitForTimeout(250);
+				await page.locator('#list [role="option"]').first().waitFor();
+				if (path.endsWith("/suite/c/1")) await page.locator("#detail .ctitle").waitFor();
+				if (path.includes("/runs/"))
+					await page.locator('[data-run-document][data-active="true"][data-ready="true"]').waitFor();
 				await page.keyboard.press("?");
 				const rows = page.getByRole("region", { name: "Keyboard shortcuts" }).locator(".hk");
-				await rows.first().waitFor();
+				await rows.filter({ hasText: binding }).first().waitFor();
 				for (const row of await rows.all()) {
 					const label = (await row.locator("span").first().innerText()).trim().toLowerCase();
 					const key = (await row.locator("kbd").innerText()).trim().toLowerCase();
