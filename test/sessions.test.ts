@@ -902,12 +902,19 @@ describe("what is written of a use", () => {
 		clock.advance(HOUR);
 		expect(await statusOf(instance, { cookie: second.cookie })).toBe(200);
 		const gate = holdGate(instance);
-		const flushing = flushUses(instance.app);
-		const leaving = signOut(instance, { cookie: second.cookie });
-		await Bun.sleep(20);
-		await gate.release();
-		await flushing;
-		expect((await leaving).status).toBe(200);
+		const queue = gateQueue(instance);
+		try {
+			const flushing = flushUses(instance.app);
+			await queue.reaches(1);
+			const leaving = signOut(instance, { cookie: second.cookie });
+			await queue.reaches(2);
+			await gate.release();
+			await flushing;
+			expect((await leaving).status).toBe(200);
+		} finally {
+			queue.restore();
+			await gate.release();
+		}
 		await flushUses(instance.app);
 		expect(stored(instance)[1]).toMatchObject({ ended_at: T0 + 3 * HOUR, ended_why: "signed-out" });
 		expect(await statusOf(instance, { cookie: second.cookie })).toBe(401);
@@ -1236,6 +1243,8 @@ describe("an upgrade and an archive", () => {
 		const refused = await fetch(`${first.url}/api/import`, { method: "POST", headers: bearer(TOKEN), body: archive });
 		expect(refused.status).toBe(400);
 		expect(await refused.text()).toContain("older than this build");
+		const unchanged = await post<{ count: number }>(first, "/api/p/scratch/find", {}, bearer(TOKEN));
+		expect(unchanged.body.ok && unchanged.body.result).toMatchObject({ count: 0 });
 		const imported = await fetch(`${first.url}/api/import`, {
 			method: "POST",
 			headers: bearer(TOKEN),
@@ -1258,23 +1267,6 @@ describe("an upgrade and an archive", () => {
 		expect(actors.body.ok && actors.body.result.map((actor) => actor.name)).toEqual(["policy", "robin", "sam"]);
 		// A fresh export includes the attachment table, so it names the current archive version.
 		const again = await (await fetch(`${second.url}/api/export`, { headers: bearer(TOKEN) })).text();
-		expect(again.split("\n")[0]).toContain(`"schema":${ARCHIVE_VERSION}`);
-	});
-
-	test("an archive from before explicit empty reports is refused without changing the instance", async () => {
-		const archive = readFileSync(join(FIXTURES, "archive-v1.ndjson"), "utf8");
-		expect(archive.split("\n")[0]).toContain('"schema":1');
-		const instance = boot();
-		const imported = await fetch(`${instance.url}/api/import`, {
-			method: "POST",
-			headers: bearer(TOKEN),
-			body: archive,
-		});
-		expect(imported.status).toBe(400);
-		expect(await imported.text()).toContain("older");
-		const found = await post<{ count: number }>(instance, "/api/p/scratch/find", {}, bearer(TOKEN));
-		expect(found.body.ok && found.body.result).toMatchObject({ count: 0 });
-		const again = await (await fetch(`${instance.url}/api/export`, { headers: bearer(TOKEN) })).text();
 		expect(again.split("\n")[0]).toContain(`"schema":${ARCHIVE_VERSION}`);
 	});
 });

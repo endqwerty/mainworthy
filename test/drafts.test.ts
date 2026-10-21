@@ -1,7 +1,7 @@
 // Who may write, remove and take a draft kept on the device (review round 8: one live window owns a draft). The
 // browser tests in `test/e2e/draft-ownership.test.ts` run the routes, and every route there is also stopped by
 // the screen's own check before it writes. These pin the rule in `src/web/lib/drafts.ts` itself (issue #79).
-import { beforeEach, expect, test } from "bun:test";
+import { beforeEach, expect, spyOn, test } from "bun:test";
 import { emptyBody } from "../src/core/model.ts";
 import { dropNameKeyedData, setDevicePerson, suspendDeviceSession } from "../src/web/lib/device.ts";
 import {
@@ -229,6 +229,34 @@ test("a failed shared write removes its writing marker when storing waiting also
 	}
 });
 
+async function confirmWrite(write: () => void): Promise<void> {
+	const completed = Promise.withResolvers<void>();
+	const schedule = globalThis.setTimeout;
+	const confirm = new Proxy(schedule, {
+		apply(target, receiver, [callback, delay, ...args]) {
+			if (typeof callback !== "function") throw new Error("confirmation must be a function");
+			return Reflect.apply(target, receiver, [
+				() => {
+					try {
+						callback(...args);
+					} finally {
+						completed.resolve();
+					}
+				},
+				delay,
+			]);
+		},
+	});
+	const timer = spyOn(globalThis, "setTimeout").mockImplementationOnce(confirm);
+
+	try {
+		write();
+		await completed.promise;
+	} finally {
+		timer.mockRestore();
+	}
+}
+
 for (const afterSignIn of [false, true])
 	test(`this window recovers an interrupted writing copy ${afterSignIn ? "after signing in again" : "in this session"} without blocking later confirmation`, async () => {
 		const interrupted = draft({ body: { ...body, title: "Text from an interrupted write" } });
@@ -239,8 +267,7 @@ for (const afterSignIn of [false, true])
 			setDevicePerson({ actor: "", actorId: 1 });
 		}
 		const mine = draft({ body: { ...body, title: "Text typed after returning" } });
-		expect(writeCopiedDraft({ project, draft: mine })).toBe(true);
-		await new Promise((done) => setTimeout(done, 5));
+		await confirmWrite(() => expect(writeCopiedDraft({ project, draft: mine })).toBe(true));
 		let copyWrites = 0;
 		const set = localStorage.setItem;
 		localStorage.setItem = (key, value) => {
@@ -269,8 +296,7 @@ test("another window's interrupted writing marker still protects accepted text u
 	const key = `${draftCopyPrefix({ project, id: theirs.id })}${theirs.owner}:paused`;
 	kept.set(key, JSON.stringify({ draft: theirs, state: "writing" }));
 	const mine = draft({ body: { ...body, title: "Accepted while the other window was paused" } });
-	expect(writeCopiedDraft({ project, draft: mine })).toBe(true);
-	await new Promise((done) => setTimeout(done, 5));
+	await confirmWrite(() => expect(writeCopiedDraft({ project, draft: mine })).toBe(true));
 	another(theirs);
 	kept.set(key, JSON.stringify({ draft: theirs, state: "waiting" }));
 	expect(readDraftCopies({ project, id: mine.id }).map((copy) => copy.draft.body.title)).toEqual([mine.body.title]);
@@ -279,9 +305,10 @@ test("another window's interrupted writing marker still protects accepted text u
 
 test("the first storage turn confirms ownership and later keys do not write copies", async () => {
 	const mine = draft({ body: { ...body, title: "First accepted text" } });
-	expect(writeCopiedDraft({ project, draft: mine })).toBe(true);
-	expect([...kept.keys()].filter((key) => key.includes(":draft-copy:")).length).toBe(1);
-	await new Promise((done) => setTimeout(done, 5));
+	await confirmWrite(() => {
+		expect(writeCopiedDraft({ project, draft: mine })).toBe(true);
+		expect([...kept.keys()].filter((key) => key.includes(":draft-copy:")).length).toBe(1);
+	});
 	expect([...kept.keys()].filter((key) => key.includes(":draft-copy:")).length).toBe(0);
 	const next = { ...mine, body: { ...body, title: "Later accepted text" } };
 	expect(writeCopiedDraft({ project, draft: next })).toBe(true);
@@ -345,8 +372,9 @@ test("copies stay under the person's device prefix so clearing that prefix remov
 test("clearing a person's keys and signing in again cannot reuse the old ownership confirmation", async () => {
 	setDevicePerson({ actor: "returning-person", actorId: 6 });
 	const first = draft({ body: { ...body, title: "Before sign-out" } });
-	writeCopiedDraft({ project, draft: first });
-	await new Promise((done) => setTimeout(done, 5));
+	await confirmWrite(() => {
+		writeCopiedDraft({ project, draft: first });
+	});
 	expect([...kept.keys()].filter((key) => key.includes(":draft-copy:")).length).toBe(0);
 	suspendDeviceSession();
 	kept.clear();

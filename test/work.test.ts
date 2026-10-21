@@ -272,12 +272,36 @@ test("a server is `bun src/cli/main.ts serve`, not a shell that has those words 
 });
 
 /** A process that does nothing for a minute, with the arguments a server or a test worker has. */
-function decoy(root: string, args: string[], cwd: string): { pid: number; kill: () => void } {
+async function decoy(root: string, args: string[], cwd: string) {
 	const script = join(root, `decoy-${args.join("-").replace(/\W/g, "")}.js`);
-	writeFileSync(script, "setInterval(() => {}, 1000);\n");
-	const child = Bun.spawn([process.execPath, script, ...args], { cwd, stdout: "ignore", stderr: "ignore" });
+	writeFileSync(
+		script,
+		'console.log("ready"); process.stdin.on("data", () => console.log("pong")); setInterval(() => {}, 1000);\n',
+	);
+	const child = Bun.spawn([process.execPath, script, ...args], {
+		cwd,
+		stdin: "pipe",
+		stdout: "pipe",
+		stderr: "ignore",
+	});
 	children.push(child);
-	return child;
+	const reader = child.stdout.getReader();
+	const answer = async () => {
+		const read = await reader.read();
+		if (read.done) throw new Error("decoy ended before replying");
+		return new TextDecoder().decode(read.value).trim();
+	};
+	expect(await answer()).toBe("ready");
+	return {
+		pid: child.pid,
+		kill: () => child.kill(),
+		exited: child.exited,
+		ping: async () => {
+			child.stdin.write("ping\n");
+			child.stdin.flush();
+			return answer();
+		},
+	};
 }
 
 const alive = (pid: number): boolean => {
@@ -292,8 +316,8 @@ const alive = (pid: number): boolean => {
 test("stop-server stops the servers that run from this checkout, not another one's, and not the one that asked", async () => {
 	const mine = directory();
 	const other = directory();
-	const server = decoy(mine, ["src/cli/main.ts", "serve"], mine);
-	const theirs = decoy(other, ["src/cli/main.ts", "serve"], other);
+	const server = await decoy(mine, ["src/cli/main.ts", "serve"], mine);
+	const theirs = await decoy(other, ["src/cli/main.ts", "serve"], other);
 	// The caller is itself a bun process with the words in its own command line, as a shell was under `pkill -f`.
 	const caller = join(mine, "caller.ts");
 	writeFileSync(
@@ -301,25 +325,44 @@ test("stop-server stops the servers that run from this checkout, not another one
 		`import { stopServers } from ${JSON.stringify(join(import.meta.dir, "../scripts/work/processes.ts"))};
 console.log(JSON.stringify({ stopped: await stopServers(${JSON.stringify(mine)}), self: process.pid }));`,
 	);
-	await Bun.sleep(300);
 	const done = await run([process.execPath, caller, "src/cli/main.ts", "serve"], { cwd: mine });
 	expect(done.status).toBe(0);
 	const said: { stopped: number[]; self: number } = JSON.parse(done.out);
 	expect(said.stopped).toEqual([server.pid]);
-	await Bun.sleep(300);
+	await server.exited;
 	expect(alive(server.pid)).toBe(false);
 	expect(alive(theirs.pid)).toBe(true);
+	expect(await theirs.ping()).toBe("pong");
 	expect(await stopServers(mine)).toEqual([]);
 });
 
 test("wait-tests ends when the other test run's workers end, and does not wait for its own caller", async () => {
 	const root = directory();
-	const worker = decoy(root, ["--test-worker"], root);
+	const worker = await decoy(root, ["--test-worker"], root);
 	// Other test runs on the machine, this one's own workers included, are not what this test is about.
 	const table = async (): Promise<Proc[]> => (await processTable()).filter((p) => p.pid === worker.pid);
 	expect((await waitForTests(0, { pollMs: 50, table })).map((p: Proc) => p.pid)).toEqual([worker.pid]);
-	setTimeout(() => worker.kill(), 400);
-	expect(await waitForTests(20, { pollMs: 50, table })).toEqual([]);
+	const observed = Promise.withResolvers<void>();
+	const disappear = Promise.withResolvers<void>();
+	let reads = 0;
+	const waiting = waitForTests(20, {
+		pollMs: 0,
+		table: async () => {
+			if (reads++ === 0) {
+				const live = await table();
+				expect(live.map((p) => p.pid)).toEqual([worker.pid]);
+				return live;
+			}
+			observed.resolve();
+			await disappear.promise;
+			return table();
+		},
+	});
+	await observed.promise;
+	worker.kill();
+	await worker.exited;
+	disappear.resolve();
+	expect(await waiting).toEqual([]);
 	// A caller with `--test-worker` in its own command line (as the shell had `[t]est-worker` under `pgrep -f`).
 	const caller = join(root, "caller.ts");
 	writeFileSync(
@@ -463,26 +506,29 @@ test("release gives the disk back, and refuses while a server or a test run work
 	const root = directory();
 	for (const name of RELEASED) mkdirSync(join(root, name, "inner"), { recursive: true });
 	mkdirSync(join(root, "src"));
-	const server = decoy(root, ["src/cli/main.ts", "serve"], root);
-	await Bun.sleep(300);
+	const server = await decoy(root, ["src/cli/main.ts", "serve"], root);
 	// 2026-10-12: two children released the worktree under a lead and a builder that were still running.
 	await expect(release(root)).rejects.toThrow(`pid ${server.pid}`);
 	expect(existsSync(join(root, "node_modules", "inner"))).toBe(true);
 	server.kill();
+	await server.exited;
 	// A single test file, or any other bun program, is not a server and not a test worker, and is as much in use.
-	const single = decoy(root, ["running.test.ts"], root);
-	await Bun.sleep(300);
+	const single = await decoy(root, ["running.test.ts"], root);
 	await expect(release(root)).rejects.toThrow(`pid ${single.pid}`);
 	expect(existsSync(join(root, "node_modules", "inner"))).toBe(true);
 	single.kill();
+	await single.exited;
 	// The Node helper an agent keeps in the checkout does not use its packages, and does not block the release.
 	const node = Bun.which("node");
 	if (node) {
 		const script = join(root, "helper.js");
-		writeFileSync(script, "setInterval(() => {}, 1000);\n");
-		children.push(Bun.spawn([node, script], { cwd: root, stdout: "ignore", stderr: "ignore" }));
+		writeFileSync(script, 'console.log("ready"); setInterval(() => {}, 1000);\n');
+		const helper = Bun.spawn([node, script], { cwd: root, stdout: "pipe", stderr: "ignore" });
+		children.push(helper);
+		const reader = helper.stdout.getReader();
+		expect(new TextDecoder().decode((await reader.read()).value).trim()).toBe("ready");
+		reader.releaseLock();
 	}
-	await Bun.sleep(300);
 	expect(await release(root)).toContain("released node_modules");
 	expect(RELEASED.filter((name) => existsSync(join(root, name)))).toEqual([]);
 	expect(existsSync(join(root, "src"))).toBe(true);
