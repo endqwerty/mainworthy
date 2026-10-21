@@ -13,6 +13,8 @@ type CaseElement = {
 	retries: number;
 	/** The runner's earlier failed tries, from Surefire's flaky and rerun elements (decision 0129). */
 	tries: NonNullable<ResultIn["tries"]>;
+	/** Whether a rerun element gave a try: Surefire's runs after the first, which the testcase's failure is. */
+	reruns: boolean;
 	integrity: "intact" | "damaged";
 	previous: CaseElement | null;
 };
@@ -397,10 +399,23 @@ export function parseJUnit(
 				}
 				if (element.result.outcome === "pass" && element.retries > 0)
 					element.result.note = `passed after ${element.retries} retries`;
-				// Surefire writes a flaky test's failed runs before the pass it ended on, and an exhausted one's first
-				// run as the failure with the later runs after it: either way every try listed failed, so their order
-				// changes no flip.
-				if (element.tries.length > 0) element.result.tries = element.tries.slice(-10);
+				// Surefire writes a flaky test's failed runs before the pass it ended on: those are its tries. It writes an
+				// exhausted test's first run as the testcase's failure and the later runs after it: the last of those is
+				// what the runner ended on, and the first run is the oldest try. Their causes differ, and a flip from an
+				// earlier attempt is to the first.
+				if (
+					element.reruns &&
+					(element.result.outcome === "fail" || element.result.outcome === "error") &&
+					element.result.failure
+				) {
+					const last = element.tries.pop();
+					if (last) {
+						element.tries.unshift({ outcome: element.result.outcome, failure: element.result.failure });
+						element.result.outcome = last.outcome;
+						element.result.failure = last.failure ?? { message: "Test failed" };
+					}
+				}
+				if (element.tries.length > 0) element.result.tries = element.tries.slice(-100);
 				currentCase = element.previous;
 				break;
 			case "failure":
@@ -614,6 +629,7 @@ export function parseJUnit(
 			} else if (name === "system-out" || name === "system-err" || name === "properties" || retry) {
 				if (retry && currentCase !== null) {
 					currentCase.retries++;
+					if (name.startsWith("rerun")) currentCase.reruns = true;
 					const outcome = name.endsWith("Error") ? "error" : "fail";
 					currentCase.tries.push({
 						outcome,
@@ -679,6 +695,7 @@ export function parseJUnit(
 					result,
 					retries: 0,
 					tries: [],
+					reruns: false,
 					integrity: headerDamaged || currentCase !== null ? "damaged" : "intact",
 					previous: currentCase,
 				};

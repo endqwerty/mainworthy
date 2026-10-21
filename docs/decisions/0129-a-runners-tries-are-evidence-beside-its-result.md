@@ -33,8 +33,13 @@ flaky report. The detector (decision 0045) takes each end's outcome and cause fr
 names the try. A correction of a result withdraws the flips of its tries, as it withdraws a flip of the result.
 
 **Parsers fill `tries`.** Playwright's executions before the one it ended on, judged as the result is (an expected
-failure passes). Surefire's flaky and rerun elements, as failed tries with their message: every one of them failed, so
-their order changes no flip.
+failure passes). Surefire's flaky and rerun elements, as failed tries with their message, in the order they ran:
+Surefire writes an exhausted test's first run as the testcase's `failure` and the later runs after it, so the last
+rerun is the result and the `failure` the oldest try. Their causes differ, and a flip from an earlier attempt is to
+the first.
+
+**A result keeps at most a hundred tries, whole.** A parser refuses a test with more rather than dropping the oldest,
+because the try it dropped could be the only pass, and the flip with it.
 
 ## Turned down
 
@@ -51,3 +56,6 @@ their order changes no flip.
 - A try's cause goes through the signature's normalization but not the split of broad assertions by file.
 - The reruns report ("time lost to reruns") counts the pipeline's attempts, not a runner's tries.
 - Jest, Vitest and pytest reports do not export their retries, and the iPhone app does not show tries.
+
+These are issues #733 (`(retry #n)` testcases), #734 (a try's cause by file), #735 (the reruns report), #736
+(Jest, Vitest and pytest) and #737 (the iPhone).

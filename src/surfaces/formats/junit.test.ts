@@ -86,9 +86,11 @@ const fixtures: { file: string; suites: number; results: ResultIn[] }[] = [
 				note: "passed after 1 retries",
 				tries: [{ outcome: "fail", failure: { message: "temporary" } }],
 			}),
+			// Surefire writes an exhausted test's first run as its failure and the later runs after it: the last of
+			// those is the result, and the first run is a try (decision 0129).
 			result("com.acme.CartTest::com.acme.CartTest::stillFails", "stillFails", "fail", {
-				failure: { message: "final failure", detail: "stack" },
-				tries: [{ outcome: "fail", failure: { message: "retry failed" } }],
+				failure: { message: "retry failed" },
+				tries: [{ outcome: "fail", failure: { message: "final failure", detail: "stack" } }],
 			}),
 		],
 	},

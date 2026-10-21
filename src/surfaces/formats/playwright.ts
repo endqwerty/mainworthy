@@ -94,7 +94,6 @@ export function parsePlaywright(value: unknown): ParsedReport {
 				const tries = test.results
 					.filter((attempt) => attempt !== final && attempt.retry < final.retry)
 					.toSorted((a, b) => a.retry - b.retry)
-					.slice(-10)
 					.map((attempt) => {
 						const outcome = judged(attempt);
 						const detail = detailOf(attempt).trim() || `Test ${outcome === "fail" ? "failed" : "errored"}`;
@@ -106,6 +105,11 @@ export function parsePlaywright(value: unknown): ParsedReport {
 								: {}),
 						};
 					});
+				// Kept whole or refused: dropping the oldest tries could drop the one that passed, and with it the flip.
+				if (tries.length > 100)
+					throw new Error(
+						`Playwright tried "${spec.title}" ${tries.length + 1} times, more than the 101 a result and its 100 tries keep`,
+					);
 				const result = nativeResult({
 					name: spec.title,
 					file: spec.file || suite.file,

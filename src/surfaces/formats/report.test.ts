@@ -250,6 +250,17 @@ test("Playwright chooses the last decisive retry and keeps project identities se
 		// The try it failed first, kept beside the pass; the skip after it ended nothing (decision 0129).
 		tries: [{ outcome: "fail", durationMs: 2, failure: { message: "Test failed", detail: "Test failed" } }],
 	});
+	// Every try is kept, up to a hundred: a pass before eleven failures is still a flip.
+	const long = parse(
+		playwrightReport([
+			{ status: "passed", duration: 1, retry: 0 },
+			...Array.from({ length: 11 }, (_, i) => ({ status: "failed", duration: 1, retry: i + 1 })),
+		]),
+	).results[0];
+	expect(long?.tries?.map((tried) => tried.outcome)).toEqual(["pass", ...Array(10).fill("fail")]);
+	expect(() =>
+		parse(playwrightReport(Array.from({ length: 102 }, (_, i) => ({ status: "failed", duration: 1, retry: i })))),
+	).toThrow('Playwright tried "adds" 102 times, more than the 101 a result and its 100 tries keep');
 	// A test expected to fail judges its tries as it judges its result.
 	expect(
 		parse(
