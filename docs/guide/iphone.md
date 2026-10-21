@@ -239,6 +239,11 @@ You can return to any eligible slot and record again to correct your own earlier
 
 If a Record or Undo reply is lost or unreadable, **Retry report** checks the original command before another result on that slot.
 The app keeps the submitted outcome, note and evidence while the outcome is uncertain. Keep the workspace open until it recovers the receipt.
+If the server refuses a resend, the notice shows its reason. The earlier attempt may still have been recorded.
+You can keep retrying the same report or press **Set report aside** for that slot.
+Confirmation warns that setting it aside does not cancel or undo the report, which may arrive later.
+After confirmation, the app reads the run again before restoring the slot's controls, where recording is still allowed.
+If that read fails, the app keeps the pending report.
 Closing the app loses an uncertain report; reports are not saved in **Unsent answers**.
 
 Notes and step marks you have not recorded stay with their slot while the run is open, including when you use **Undo**.

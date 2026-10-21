@@ -49,11 +49,11 @@ export async function testInstance(): Promise<TestInstance> {
 	const questions = new Map<string, { arrived: boolean; wait: Promise<void>; release: () => void }>();
 	type PlanDelivery =
 		| { kind: "unreadable" }
-		| { kind: "hold"; arrived: boolean; wait: Promise<void>; release: () => void };
+		| { kind: "hold" | "before-unreadable"; arrived: boolean; wait: Promise<void>; release: () => void };
 	const plans = new Map<string, PlanDelivery>();
 	const unavailable = new Map<string, "rejected" | "uncertain">();
 	const stop = async (): Promise<void> => {
-		for (const delivery of plans.values()) if (delivery.kind === "hold") delivery.release();
+		for (const delivery of plans.values()) if (delivery.kind !== "unreadable") delivery.release();
 		for (const delivery of questions.values()) delivery.release();
 		await questionProxy?.stop(true);
 		await planProxy?.stop(true);
@@ -139,7 +139,7 @@ export async function testInstance(): Promise<TestInstance> {
 						const parsed = z
 							.object({
 								project: z.string(),
-								mode: z.enum(["hold", "unreadable", "normal", "status"]),
+								mode: z.enum(["hold", "before-unreadable", "unreadable", "normal", "status"]),
 								operation: z.enum(["plan", "report", "find"]).default("plan"),
 							})
 							.safeParse(await req.json());
@@ -147,11 +147,16 @@ export async function testInstance(): Promise<TestInstance> {
 						const path = `/api/p/${encodeURIComponent(parsed.data.project)}/${parsed.data.operation}`;
 						if (parsed.data.mode !== "status") {
 							const previous = plans.get(path);
-							if (previous?.kind === "hold") previous.release();
+							if (previous && previous.kind !== "unreadable") previous.release();
 							plans.delete(path);
-							if (parsed.data.mode === "hold") {
+							if (parsed.data.mode === "hold" || parsed.data.mode === "before-unreadable") {
 								const gate = Promise.withResolvers<void>();
-								plans.set(path, { kind: "hold", arrived: false, wait: gate.promise, release: () => gate.resolve() });
+								plans.set(path, {
+									kind: parsed.data.mode,
+									arrived: false,
+									wait: gate.promise,
+									release: () => gate.resolve(),
+								});
 							} else if (parsed.data.mode === "unreadable") plans.set(path, { kind: "unreadable" });
 						}
 						planProxy ??= Bun.serve({
@@ -161,10 +166,15 @@ export async function testInstance(): Promise<TestInstance> {
 							fetch: async (request) => {
 								const url = new URL(request.url);
 								const delivery = plans.get(url.pathname);
+								if (delivery?.kind === "before-unreadable") {
+									delivery.arrived = true;
+									await delivery.wait;
+								}
 								const reply = await fetch(new Request(`${made.url}${url.pathname}${url.search}`, request), {
 									redirect: "manual",
 								});
-								if (delivery?.kind === "unreadable") return new Response("unreadable write receipt");
+								if (delivery?.kind === "unreadable" || delivery?.kind === "before-unreadable")
+									return new Response("unreadable write receipt");
 								if (delivery?.kind === "hold") {
 									delivery.arrived = true;
 									await delivery.wait;
@@ -178,6 +188,7 @@ export async function testInstance(): Promise<TestInstance> {
 							result: {
 								url: `http://127.0.0.1:${planProxy.port}`,
 								committed: delivery?.kind === "hold" && delivery.arrived,
+								arrived: delivery && delivery.kind !== "unreadable" && delivery.arrived,
 							},
 						});
 					},

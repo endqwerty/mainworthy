@@ -45,6 +45,7 @@ public final class OpenRunScreen: ProjectScreen {
 		let submission: RunReportSubmission
 		let previous: OwnResult?
 		let isUndo: Bool
+		var resendRefusal: String?
 	}
 
 	private struct Draft {
@@ -184,6 +185,26 @@ public final class OpenRunScreen: ProjectScreen {
 		if let selected { _ = await send(selected, recovering: true) }
 	}
 
+	public func canSetAsideReport(_ execution: RunExecution) -> Bool {
+		pending[execution.slot.id]?.resendRefusal != nil
+	}
+
+	/// Called only after confirmation that an earlier attempt may still have been recorded.
+	public func setAsideReport(_ execution: RunExecution) async {
+		guard !busy, canSetAsideReport(execution) else { return }
+		busy = true
+		defer { busy = false }
+		guard await read() else {
+			notice = "The run could not be read. The report was kept. Retry or try setting it aside again."
+			return
+		}
+		pending[execution.slot.id] = nil
+		own[execution.slot.id] = nil
+		if last?.execution.slot.id == execution.slot.id { last = nil }
+		notice = "The report is set aside on this device. It may still have been recorded. The slot shows the latest results read from the server."
+		await showCorrected(execution)
+	}
+
 	private func send(_ waiting: Pending, recovering: Bool) async -> Bool {
 		busy = true
 		defer { busy = false }
@@ -195,6 +216,10 @@ public final class OpenRunScreen: ProjectScreen {
 		let execution = submission.execution
 		do {
 			switch try await project.report(submission, recovering: recovering) {
+			case .resendRefused(let why):
+				pending[execution.slot.id]?.resendRefusal = why
+				notice = "The server refused this report's resend. \(why)\nThe earlier attempt may still have been recorded. Retry the same report or set it aside for this slot."
+				return false
 			case .refused(let why):
 				pending[execution.slot.id] = nil
 				notice = why

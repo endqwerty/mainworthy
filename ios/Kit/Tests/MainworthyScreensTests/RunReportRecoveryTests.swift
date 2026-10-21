@@ -6,9 +6,11 @@ import Testing
 @testable import MainworthyScreens
 
 actor ReportReplies: Transport {
-	enum Fault: Sendable { case lost, unreadable, internalError, refused, lostThenRefused }
+	enum Fault: Sendable { case lost, unreadable, internalError, refused, statuslessRefusal, lostThenRefused }
 	var fault: Fault?
 	var commandState: String?
+	var failReads = false
+	func refuseReads(_ value: Bool) { failReads = value }
 	private(set) var inputs: [JSONValue] = []
 	private(set) var lookups = 0
 	func fail(_ fault: Fault, command: String? = nil) { self.fault = fault; commandState = command }
@@ -19,14 +21,15 @@ actor ReportReplies: Transport {
 		func reply(_ body: String, _ status: Int = 200) -> (Data, HTTPURLResponse) {
 			(Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
 		}
+		if op == "get", failReads { throw URLError(.cannotConnectToHost) }
 		if op == "command" {
 			lookups += 1
 			if let commandState { return reply(#"{"ok":true,"result":{"state":"\#(commandState)"}}"#) }
 		}
 		if op == "report" {
 			inputs.append(input)
-			if fault == .refused || (fault == .lostThenRefused && inputs.count > 1) {
-				return reply(#"{"ok":false,"error":{"code":"conflict","message":"Report refused."}}"#, 409)
+			if fault == .refused || fault == .statuslessRefusal || (fault == .lostThenRefused && inputs.count > 1) {
+				return reply(#"{"ok":false,"error":{"code":"conflict","message":"Report refused."}}"#, fault == .statuslessRefusal ? 200 : 409)
 			}
 		}
 		let response = try await URLSessionTransport().send(request)
@@ -35,7 +38,7 @@ actor ReportReplies: Transport {
 			case .lost, .lostThenRefused: throw URLError(.networkConnectionLost)
 			case .unreadable: return reply("unreadable receipt")
 			case .internalError: return reply(#"{"ok":false,"error":{"code":"internal","message":"Receipt unavailable."}}"#, 500)
-			case .refused: break
+			case .refused, .statuslessRefusal: break
 			}
 		}
 		return response
@@ -117,6 +120,72 @@ actor ReportReplies: Transport {
 		let inputs = await transport.inputs
 		#expect(Set(inputs.compactMap { $0["cmd"]?.string }).count == (earlierUncertainty ? 1 : 2))
 		#expect(screen.slots.first { $0.id == execution.slot.id }?.ownFill(by: Live.name)?.outcome == .manual(earlierUncertainty ? .fail : .pass))
+	}
+
+	@Test("a refused resend can be set aside after a lost correction reply", arguments: [false, true])
+	func refusedResend(_ failedRead: Bool) async throws {
+		let (screen, client, transport, execution) = try await setup()
+		#expect(await screen.record(execution, outcome: .pass))
+		let slot = try #require(screen.slots.first { $0.id == execution.slot.id })
+		await screen.execute(slot)
+		guard case .read(let shown) = screen.document else { throw ClientError.unreadable }
+		let original = try #require(slot.ownFill(by: Live.name))
+		let other = try await Live.signedIn().project(client.key)
+		let _: JSONValue = try await other.server.write("report", in: client.key, ["run": .string(execution.run),
+			"results": [["test": ["case": .string(try #require(execution.slot.caseRef))],
+				"outcome": "blocked", "corrects": .number(Double(original.result))]]])
+		screen.note = "Keep this observation"
+		screen.mark(try #require(shown.content.steps.first))
+		await transport.fail(.lost)
+		#expect(await screen.record(shown, outcome: .fail) == false)
+		await transport.reconnect()
+		await screen.retryReport()
+		await screen.refresh()
+		await screen.retryReport()
+		#expect(screen.hasPendingReport(for: shown))
+		#expect(screen.notice == "The server refused this report's resend. Result \(original.result) was already corrected; read the latest results and correct the current result instead\nThe earlier attempt may still have been recorded. Retry the same report or set it aside for this slot.")
+		#expect(try await results(client, shown).count == 2)
+		#expect(screen.canSetAsideReport(shown))
+		if failedRead {
+			await transport.refuseReads(true)
+			await screen.setAsideReport(shown)
+			#expect(screen.hasPendingReport(for: shown))
+			#expect(screen.notice == "The run could not be read. The report was kept. Retry or try setting it aside again.")
+			await transport.refuseReads(false)
+		}
+		await screen.setAsideReport(shown)
+		#expect(!screen.hasPendingReport(for: shown))
+		#expect(!screen.canSetAsideReport(shown))
+		#expect(!screen.canUndo)
+		guard case .read(let fresh) = screen.document else { throw ClientError.unreadable }
+		#expect(screen.mayRecord(fresh))
+		#expect(screen.latestSlot(fresh).ownFill(by: Live.name)?.outcome == .manual(.blocked))
+		#expect(screen.note == "Keep this observation")
+		#expect(screen.failedStep == shown.content.steps.first?.id)
+		#expect(try await results(client, shown).count == 2)
+		#expect(await screen.record(fresh, outcome: .fail))
+		#expect(try await results(client, fresh).count == 3)
+		#expect(screen.slots.first { $0.id == fresh.slot.id }?.ownFill(by: Live.name)?.outcome == .manual(.fail))
+	}
+
+	@Test("an unproven resend refusal keeps the report uncertain", arguments: [
+		ReportReplies.Fault.statuslessRefusal, .internalError, .unreadable
+	])
+	func unprovenResendRefusal(_ fault: ReportReplies.Fault) async throws {
+		let (screen, client, transport, execution) = try await setup()
+		await transport.fail(.unreadable)
+		#expect(await screen.record(execution, outcome: .fail) == false)
+		await transport.fail(fault, command: "none")
+		await screen.retryReport()
+		#expect(screen.hasPendingReport(for: execution))
+		#expect(!screen.canSetAsideReport(execution))
+		#expect(screen.notice?.hasPrefix("This report's outcome is unknown.") == true)
+		await screen.setAsideReport(execution)
+		#expect(screen.hasPendingReport(for: execution))
+		await transport.reconnect()
+		await screen.retryReport()
+		#expect(!screen.hasPendingReport(for: execution))
+		#expect(try await results(client, execution).count == 1)
 	}
 
 	@Test("lost Undo receipts then Undo recover one correction")
