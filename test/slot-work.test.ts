@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import type { InboxReply } from "../src/core/ops.ts";
 import { openApp } from "../src/server/kernel/app.ts";
 import { OPS } from "../src/server/ops/index.ts";
-import { invoke } from "../src/server/ops/registry.ts";
+import { invoke, invokeAsync } from "../src/server/ops/registry.ts";
 import { exportArchive, importArchive, linesOf } from "../src/server/transfer/transfer.ts";
 import { type Harness, harness } from "./helpers.ts";
 
@@ -30,11 +30,28 @@ const run = () => h.call<{ inProgress: number }[]>("get", { refs: ["R-1"] })[0];
 test("two agents asking together take different next slots", async () => {
 	const a = h.actor("one", "agent", ["read", "produce"]);
 	const b = h.actor("two", "agent", ["read", "produce"]);
-	const [one, two] = await Promise.all([
-		Promise.resolve().then(() => take({}, a)),
-		Promise.resolve().then(() => take({}, b)),
-	]);
-	expect([one.case, two.case]).toEqual(["C-1", "C-2"]);
+	const release = Promise.withResolvers<void>();
+	const held = h.app.gate.run(() => release.promise);
+	const asking = [a, b].map((actor) =>
+		invokeAsync(h.app, OPS, {
+			op: "work",
+			project: "scratch",
+			input: { do: "take", run: "R-1" },
+			actor: () => actor,
+		}),
+	);
+	try {
+		expect(slots().map((slot) => slot.work.kind)).toEqual(["free", "free"]);
+	} finally {
+		release.resolve();
+		await held;
+	}
+	const replies = await Promise.all(asking);
+	const [one, two] = replies.map((reply) => {
+		if (!reply.ok) throw new Error(JSON.stringify(reply.error));
+		return reply.result as Taken;
+	});
+	expect([one?.case, two?.case]).toEqual(["C-1", "C-2"]);
 	expect(slots().map((s) => (s.work.kind === "held" ? s.work.actor : "free"))).toEqual(["one", "two"]);
 	expect(run()).toMatchObject({ inProgress: 2 });
 	expect(take({}, a)).toEqual({ run: "R-1", slot: null, case: null, work: { kind: "free" } });

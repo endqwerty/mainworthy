@@ -2,7 +2,7 @@
 // What must hold (commitment C5): a report that was accepted is never lost and never applied twice, and the gate
 // does not show a verdict from before the report while it is half applied.
 import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { start } from "../src/app/start.ts";
@@ -21,8 +21,31 @@ afterEach(async () => {
 	for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-async function serve(dataDir: string): Promise<{ url: string; child: ReturnType<typeof Bun.spawn> }> {
-	const child = Bun.spawn([process.execPath, ENTRY, "serve"], {
+async function serve(dataDir: string, holdAcceptance = false) {
+	let entry = ENTRY;
+	if (holdAcceptance) {
+		entry = join(dataDir, "held-server.ts");
+		writeFileSync(
+			entry,
+			`
+import { start } from ${JSON.stringify(resolve(import.meta.dir, "../src/app/start.ts"))};
+import { defaultConfig } from ${JSON.stringify(resolve(import.meta.dir, "../src/server/kernel/app.ts"))};
+import { reportOp } from ${JSON.stringify(resolve(import.meta.dir, "../src/server/ops/writes.ts"))};
+const steps = reportOp.steps;
+reportOp.steps = function* (ctx, input) {
+ const running = steps(ctx, input);
+ const accepted = running.next();
+ if (accepted.done) return accepted.value;
+ yield accepted.value;
+ console.log("accepted-and-held");
+ for (;;) yield;
+};
+const instance = start(defaultConfig(process.env), () => ({ ui: null }), { readers: 2 });
+console.log(instance.url);
+`,
+		);
+	}
+	const child = Bun.spawn([process.execPath, entry, "serve"], {
 		env: {
 			PATH: process.env.PATH ?? "",
 			HOME: dataDir,
@@ -44,7 +67,20 @@ async function serve(dataDir: string): Promise<{ url: string; child: ReturnType<
 		const url = /http:\/\/127\.0\.0\.1:\d+/.exec(printed)?.[0];
 		if (url) {
 			reader.releaseLock();
-			return { url, child };
+			const accepted = async () => {
+				const reader = child.stdout.getReader();
+				try {
+					let state = printed;
+					while (!state.includes("accepted-and-held")) {
+						const chunk = await reader.read();
+						if (chunk.done) throw new Error("server ended before accepting report");
+						state += decoder.decode(chunk.value, { stream: true });
+					}
+				} finally {
+					reader.releaseLock();
+				}
+			};
+			return { url, child, accepted };
 		}
 		const chunk = await reader.read();
 		if (chunk.done) throw new Error(`the server stopped before it printed its address: ${printed}`);
@@ -214,26 +250,21 @@ test("a report accepted when the server is killed is applied in full when it sta
 		})),
 	});
 
-	const first = await serve(dataDir);
+	const first = await serve(dataDir, true);
 	const upload = call<ReportReceipt>(first.url, "report", report).catch(() => null);
-	// The moment the gate says the report is in and not yet applied, the process is killed.
-	let seen: GateStatus | null = null;
-	for (let i = 0; i < 5000 && !seen; i++) {
-		const gate = await call<GateStatus>(first.url, "gate", { commit: "c0ffee1234" });
-		if (gate.reason.includes("accepted and not yet applied")) seen = gate;
-		else await Bun.sleep(2);
-	}
-	expect(seen).toMatchObject({ verdict: "pending" });
+	await first.accepted();
+	expect(await call<GateStatus>(first.url, "gate", { commit: "c0ffee1234" })).toMatchObject({
+		verdict: "pending",
+		reason: "pending: 1 report accepted and not yet applied",
+	});
 	first.child.kill("SIGKILL");
 	await first.child.exited;
 	expect(await upload).toBeNull();
 
 	const second = await serve(dataDir);
-	let gate = await call<GateStatus>(second.url, "gate", { commit: "c0ffee1234" });
-	for (let i = 0; i < 600 && gate.verdict === "pending"; i++) {
-		await Bun.sleep(50);
-		gate = await call<GateStatus>(second.url, "gate", { commit: "c0ffee1234" });
-	}
+	const recovered = await call<CommandFate>(second.url, "command", { cmd: "upload-0001" });
+	expect(recovered).toMatchObject({ state: "done", op: "report" });
+	const gate = await call<GateStatus>(second.url, "gate", { commit: "c0ffee1234" });
 	// Every result is there, none twice.
 	expect(gate.verdict).toBe("blocked");
 	expect(gate.tally).toMatchObject({ pass: total - failing, unexplained: failing, missing: 0 });

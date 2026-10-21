@@ -38,28 +38,6 @@ const item = {
 } as const;
 const port: TrackerPort = { createDefect: async () => item, getItem: async () => item };
 
-test("Jira configuration selects the existing tracker operations without storing credentials", () => {
-	expect(
-		defaultConfig({
-			MAINWORTHY_JIRA_PROJECT: "scratch",
-			MAINWORTHY_JIRA_SITE: "https://example.atlassian.net",
-			MAINWORTHY_JIRA_PROJECT_KEY: "QA",
-			MAINWORTHY_JIRA_ISSUE_TYPE: "Bug",
-			MAINWORTHY_JIRA_EMAIL: "robin@example.com",
-			MAINWORTHY_JIRA_TOKEN: credential,
-		}),
-	).toMatchObject({
-		jira: {
-			project: "scratch",
-			site: "https://example.atlassian.net",
-			projectKey: "QA",
-			issueType: "Bug",
-			email: "robin@example.com",
-			token: credential,
-		},
-	});
-});
-
 for (const tracker of ["github", "jira"] as const) {
 	test(`${tracker} closure ends a defect through a recorded decision and asks the still-failing question again`, async () => {
 		directory = mkdtempSync(join(tmpdir(), "mainworthy-tracker-closure-"));
@@ -231,8 +209,20 @@ test("Jira's REST v3 adapter creates an ADF defect and reads status categories f
 
 test("Jira queues through the existing registry and neither credentials nor delivery state enter an archive", async () => {
 	const result = failure();
-	h.app.config.jira = jira;
+	const configured = defaultConfig({
+		MAINWORTHY_JIRA_PROJECT: "scratch",
+		MAINWORTHY_JIRA_SITE: "https://example.atlassian.net",
+		MAINWORTHY_JIRA_PROJECT_KEY: "QA",
+		MAINWORTHY_JIRA_ISSUE_TYPE: "Bug",
+		MAINWORTHY_JIRA_EMAIL: "robin@example.com",
+		MAINWORTHY_JIRA_TOKEN: credential,
+	}).jira;
+	if (!configured) throw new Error("Jira configuration was not read");
+	h.app.config.jira = configured;
 	h.call("tracker", { do: "create", result, cmd: "jira-create-001" });
+	expect(
+		h.app.db.raw.query("SELECT repository, state FROM tracker_requests WHERE id = 'jira-create-001'").get(),
+	).toEqual({ repository: "jira:https://example.atlassian.net#QA", state: "queued" });
 	const drafts: DefectDraft[] = [];
 	await deliverTrackerRequests(h.app, {
 		createDefect: async (draft) => {
@@ -1102,9 +1092,13 @@ test("stopping persists the in-flight tracker reply and leaves queued requests f
 	directory = mkdtempSync(join(tmpdir(), "mainworthy-tracker-stop-"));
 	const config = { ...defaultConfig({}), owner: "robin", dataDir: directory, port: 0, github };
 	const entered = Promise.withResolvers<void>();
+	const reached = Promise.withResolvers<void>();
 	const reply = Promise.withResolvers<TrackerItem>();
 	let calls = 0;
 	instance = start(config, () => ({ ui: null }), {
+		onShutdownPhase: (phase) => {
+			if (phase === "deliveries") reached.resolve();
+		},
 		readers: 0,
 		trackerPort: {
 			...port,
@@ -1138,10 +1132,15 @@ test("stopping persists the in-flight tracker reply and leaves queued requests f
 		});
 	const minute = instance.minute();
 	await entered.promise;
+	let stopped = false;
 	const stopping = instance.stop();
+	void stopping.then(() => {
+		stopped = true;
+	});
 	try {
 		expect(instance.stop()).toBe(stopping);
-		expect(await Promise.race([stopping.then(() => "stopped"), Bun.sleep(20).then(() => "waiting")])).toBe("waiting");
+		await reached.promise;
+		expect(stopped).toBe(false);
 	} finally {
 		reply.resolve(item);
 		await minute;
@@ -1167,8 +1166,12 @@ test("a tracker delivery rejected during HTTP drain does not create an unhandled
 	directory = mkdtempSync(join(tmpdir(), "mainworthy-tracker-reject-"));
 	const config = { ...defaultConfig({}), owner: "robin", dataDir: directory, port: 0, github };
 	const entered = Promise.withResolvers<void>();
+	const reached = Promise.withResolvers<void>();
 	const trackerReply = Promise.withResolvers<TrackerItem>();
 	instance = start(config, () => ({ ui: null }), {
+		onShutdownPhase: (phase) => {
+			if (phase === "http") reached.resolve();
+		},
 		readers: 1,
 		trackerPort: {
 			...port,
@@ -1213,18 +1216,24 @@ test("a tracker delivery rejected during HTTP drain does not create an unhandled
 		throw new Error("tracker reply write failed");
 	});
 	const stopping = current.stop();
+	let stopped = false;
 	const outcome = stopping.then(
-		() => "stopped",
+		() => {
+			stopped = true;
+			return "stopped";
+		},
 		(error: unknown) => String(error),
 	);
 	try {
+		await reached.promise;
+		expect(stopped).toBe(false);
 		trackerReply.resolve(item);
 		await minute;
 		expect(logged.mock.calls).toContainEqual([
 			"[mainworthy] sending tracker requests failed:",
 			expect.objectContaining({ message: "tracker reply write failed" }),
 		]);
-		expect(await Promise.race([outcome, Bun.sleep(20).then(() => "draining")])).toBe("draining");
+		expect(stopped).toBe(false);
 		readReply.resolve();
 		expect(await (await http).json()).toMatchObject({ ok: true, result: { items: [] } });
 		expect(await outcome).toBe("stopped");
@@ -1245,8 +1254,12 @@ test("a tracker delivery rejected after HTTP drain still completes shutdown and 
 	directory = mkdtempSync(join(tmpdir(), "mainworthy-tracker-after-drain-"));
 	const config = { ...defaultConfig({}), owner: "robin", dataDir: directory, port: 0, github };
 	const entered = Promise.withResolvers<void>();
+	const reached = Promise.withResolvers<void>();
 	const trackerReply = Promise.withResolvers<TrackerItem>();
 	instance = start(config, () => ({ ui: null }), {
+		onShutdownPhase: (phase) => {
+			if (phase === "deliveries") reached.resolve();
+		},
 		readers: 1,
 		trackerPort: {
 			...port,
@@ -1285,12 +1298,17 @@ test("a tracker delivery rejected after HTTP drain still completes shutdown and 
 	const write = spyOn(current.app.db, "run").mockImplementationOnce(() => {
 		throw new Error("tracker reply write failed after drain");
 	});
+	let stopped = false;
 	const outcome = current.stop().then(
-		() => "stopped",
+		() => {
+			stopped = true;
+			return "stopped";
+		},
 		(error: unknown) => String(error),
 	);
 	try {
-		expect(await Promise.race([outcome, Bun.sleep(50).then(() => "waiting")])).toBe("waiting");
+		await reached.promise;
+		expect(stopped).toBe(false);
 		trackerReply.resolve(item);
 		await minute;
 		expect(await outcome).toBe("stopped");
