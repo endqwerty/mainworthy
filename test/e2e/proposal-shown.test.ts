@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { Page } from "playwright-core";
 import { z } from "zod";
-import { browserAvailable, openPage, type Server, startServer } from "./support.ts";
+import { browserAvailable, eventually, openPage, type Server, startServer } from "./support.ts";
 
 const t = browserAvailable ? test : test.skip;
 
@@ -50,6 +50,33 @@ const lastSeen = (page: Page) => page.evaluate(() => (window as unknown as { las
 const frames = (page: Page) =>
 	page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 const openAdopt = async (server: Server) => (await server.api("inbox", { kind: "adopt" })).items.map((q) => q.q);
+
+/** An unread press finishes by revealing evidence; a ready press finishes with the server's decision. */
+async function advanceProposal(page: Page, q: string, press: () => Promise<unknown>): Promise<boolean> {
+	const evidence = page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`);
+	await evidence.waitFor();
+	await frames(page);
+	if ((await evidence.getAttribute("data-proposal-read")) === "ready") {
+		const decided = page.waitForResponse((response) => response.url().endsWith("/decide"));
+		await press();
+		const response = await decided;
+		expect(response.ok()).toBe(true);
+		await response.finished();
+		return true;
+	}
+	await press();
+	await page
+		.locator("#stat")
+		.filter({ hasText: new RegExp(`${q} (has unread edits|is now in view)`) })
+		.waitFor();
+	await frames(page);
+	await page
+		.locator(
+			`[data-proposal-evidence="${q}"][data-proposal-read="loaded"], [data-proposal-evidence="${q}"][data-proposal-read="ready"]`,
+		)
+		.waitFor();
+	return false;
+}
 
 /** Samples actual visible pixels independently of the proposal's read state. Reflow resets each part. */
 async function trackPartCoverage(page: Page, q: string): Promise<void> {
@@ -159,13 +186,14 @@ for (const device of ["desktop", "phone"] as const)
 				for (let presses = 0; presses < 40; presses++) {
 					const before = await partCoverage(page);
 					expect(before.parts).toBe(24);
-					if (device === "phone") await accept.tap();
-					else await page.keyboard.press("a");
-					await frames(page);
-					await page.waitForTimeout(60);
-					const open = await openAdopt(server);
-					if (before.unseen > 0) expect(open).toEqual([q]);
-					if (!open.includes(q)) {
+					answered = await advanceProposal(page, q, () =>
+						device === "phone" ? accept.tap() : page.keyboard.press("a"),
+					);
+					if (before.unseen > 0) {
+						expect(answered).toBe(false);
+						expect(await openAdopt(server)).toEqual([q]);
+					}
+					if (answered) {
 						expect(before.unseen).toBe(0);
 						expect(await partCoverage(page)).toEqual({ parts: 24, unseen: 0 });
 						answered = true;
@@ -173,6 +201,10 @@ for (const device of ["desktop", "phone"] as const)
 					}
 				}
 				expect(answered).toBe(true);
+				await eventually(
+					() => openAdopt(server),
+					(open) => !open.includes(q),
+				);
 				expect((await server.api("get", { refs: ["C-8"] }))[0]?.title).toBe("Case 7");
 				expect(view.errors).toEqual([]);
 			} finally {
@@ -198,8 +230,12 @@ t(
 			const q = proposed.question ?? "";
 			view = await openPage(server, { path: "/p/scratch/queue" });
 			const page = view.page;
+			const decides: string[] = [];
+			page.on("request", (request) => {
+				if (request.url().endsWith("/decide")) decides.push(request.url());
+			});
 			await page.setViewportSize({ width: 1000, height: 800 });
-			await page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`).waitFor({ timeout: 20000 });
+			await page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`).waitFor();
 			await trackLast(page, q);
 			const area = page.locator(".queue-evidence");
 			const narrow = await area.evaluate((a) => a.scrollHeight);
@@ -225,8 +261,8 @@ t(
 				await lastSeen(page),
 			);
 			const seenBefore = await lastSeen(page);
-			await page.keyboard.press("a");
-			await page.waitForTimeout(1500);
+			expect(await advanceProposal(page, q, () => page.keyboard.press("a"))).toBe(false);
+			expect(decides).toEqual([]);
 			const open = await openAdopt(server);
 			const status = await page.locator("[role=status]").allTextContents();
 			console.log("PROBE resize open after press", open, "status", status.slice(0, 3));
@@ -258,9 +294,8 @@ t(
 			const page = view.page;
 
 			await page.locator("#list [role=option]").first().tap();
-			await page.waitForTimeout(500);
 			console.log("PROBE phone", "layout", await page.evaluate(() => document.documentElement.dataset.layout));
-			await page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`).waitFor({ timeout: 20000 });
+			await page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`).waitFor();
 			await trackLast(page, q);
 			const accept = page.locator(".queue-answers").getByRole("button", { name: "Accept", exact: false });
 			const scroller = await page.evaluate(() => {
@@ -298,17 +333,22 @@ t(
 			const statuses: string[] = [];
 			let answered = false;
 			for (let i = 0; i < 40; i++) {
-				await accept.tap();
-				await page.waitForTimeout(300);
+				answered = await advanceProposal(page, q, () => accept.tap());
 				statuses.push((await page.locator("[role=status]").allTextContents()).join(" | "));
-				if ((await openAdopt(server)).length === 0) {
-					answered = true;
-					break;
-				}
+				if (answered) break;
+				expect(await openAdopt(server)).toEqual([q]);
 			}
 			console.log("PROBE phone", "answered after taps", answered, "taps", statuses.length);
 			expect(await lastSeen(page)).toBe(true);
 			expect(answered).toBe(true);
+			await eventually(
+				() => openAdopt(server),
+				(open) => !open.includes(q),
+			);
+			await eventually(
+				() => openAdopt(server),
+				(open) => !open.includes(q),
+			);
 			expect((await server.api("get", { refs: ["C-30"] }))[0]?.title).toBe("Short case 30");
 			expect(view.errors).toEqual([]);
 		} finally {
@@ -345,7 +385,7 @@ t(
 			page.on("request", (r) => {
 				if (r.url().endsWith("/decide")) decides.push(r.url());
 			});
-			await page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`).waitFor({ timeout: 30000 });
+			await page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`).waitFor();
 			await trackLast(page, q);
 			const accept = page.locator(`[data-proposal="${q}"]`).getByRole("button", { name: "Accept" });
 			const edits = page.locator(`[data-proposal-evidence="${q}"]`);
@@ -357,7 +397,11 @@ t(
 			await frames(page);
 			await accept.click();
 			await page.keyboard.press("a");
-			await page.waitForTimeout(500);
+			await page
+				.locator("#stat")
+				.filter({ hasText: `${q} has unread edits` })
+				.waitFor();
+			await frames(page);
 			console.log("PROBE card decides after immediate/jump", decides.length);
 			expect(decides).toEqual([]);
 			// Read three fifths of the content gradually, then widen.
@@ -365,7 +409,7 @@ t(
 				e.scrollTop = 0;
 			});
 			await page.reload();
-			await page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`).waitFor({ timeout: 30000 });
+			await page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`).waitFor();
 			await trackLast(page, q);
 			await accept.click(); // brings card into view
 			const narrow = await edits.evaluate((e) => e.scrollHeight);
@@ -383,7 +427,12 @@ t(
 			expect(wide).toBeLessThan(narrow);
 			const seen = await lastSeen(page);
 			await accept.click();
-			await page.waitForTimeout(1000);
+			await page
+				.locator("#stat")
+				.filter({ hasText: `${q} has unread edits` })
+				.waitFor();
+			await frames(page);
+			expect(decides).toEqual([]);
 			console.log(
 				"PROBE card resize narrow",
 				narrow,
@@ -427,6 +476,8 @@ t(
 			);
 			const q = proposed.question ?? "";
 			let holdPage2 = false;
+			let cursorHeld = false;
+			let cursorDelivered = false;
 			let release = () => {};
 			const held = new Promise<void>((r) => {
 				release = r;
@@ -435,15 +486,31 @@ t(
 			view = await openPage(server, {
 				path: "/p/scratch/queue",
 				setup: async (page) => {
+					await page.addInitScript(() => {
+						const Source = window.EventSource;
+						Reflect.set(window, "proposalStreamEvents", 0);
+						window.EventSource = class extends Source {
+							constructor(url: string | URL, options?: EventSourceInit) {
+								super(url, options);
+								this.addEventListener("message", () =>
+									Reflect.set(window, "proposalStreamEvents", Number(Reflect.get(window, "proposalStreamEvents")) + 1),
+								);
+							}
+						};
+					});
 					await page.route("**/get", async (route) => {
-						const input = route.request().postDataJSON() as { cursor?: string };
+						const input = z.object({ cursor: z.string().optional() }).parse(route.request().postDataJSON());
+						let wasHeld = false;
 						if (input.cursor && holdPage2) {
 							holdPage2 = false;
+							cursorHeld = true;
+							wasHeld = true;
 							await held;
 						}
 						const reply = await route.fetch();
 						if (input.cursor) page2Statuses.push(reply.status());
 						await route.fulfill({ response: reply });
+						if (wasHeld) cursorDelivered = true;
 					});
 				},
 			});
@@ -453,18 +520,20 @@ t(
 				if (r.url().endsWith("/decide")) decides.push(r.url());
 			});
 			const ev = page.locator(`[data-proposal-evidence="${q}"]`);
-			await page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`).waitFor({ timeout: 20000 });
+			await page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`).waitFor();
 			for (let i = 0; i < 10; i++) await page.keyboard.press("a");
 			const covered = await page.locator(".queue-evidence").evaluate((a) => a.scrollTop);
 			// An unrelated write: the page reads again; the same edits stay read up to where they were.
 			holdPage2 = true;
 			await server.api("propose", { edits: [{ op: "create", outline: "Unrelated" }] });
-			await page.waitForTimeout(500);
+			await eventually(async () => cursorHeld, Boolean);
+			const events = await page.evaluate(() => Number(Reflect.get(window, "proposalStreamEvents")));
 			// While page 2 is held, a further write changes the project sequence.
 			await server.api("propose", { edits: [{ op: "create", outline: "Unrelated 2" }] });
-			await page.waitForTimeout(300);
+			await page.waitForFunction((seen) => Number(Reflect.get(window, "proposalStreamEvents")) > seen, events);
 			release();
-			await page.waitForTimeout(1500);
+			await eventually(async () => cursorDelivered, Boolean);
+			await page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`).waitFor();
 			console.log(
 				"PROBE live page2 statuses",
 				JSON.stringify(page2Statuses),
@@ -475,7 +544,7 @@ t(
 				"error",
 				await ev.getAttribute("data-proposal-error"),
 			);
-			await page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`).waitFor({ timeout: 10000 });
+			await page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`).waitFor();
 			expect(await page.locator(".queue-evidence").evaluate((a) => a.scrollTop)).toBe(covered);
 			console.log(
 				"PROBE live scrollTop before",
@@ -494,15 +563,15 @@ t(
 			await server.api("propose", {
 				edits: [{ op: "edit", case: "C-1", base: body.version, body: { title: "Checkout by a person" } }],
 			});
-			await page.waitForTimeout(1500);
-			await page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`).waitFor({ timeout: 10000 });
+			await ev.getByText("Checkout by a person", { exact: false }).waitFor();
+			await page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`).waitFor();
 			expect(await page.locator(".queue-evidence").evaluate((a) => a.scrollTop)).toBe(0);
 			console.log(
 				"PROBE live after case change scrollTop",
 				await page.locator(".queue-evidence").evaluate((a) => a.scrollTop),
 			);
-			await page.keyboard.press("a");
-			await page.waitForTimeout(500);
+			expect(await advanceProposal(page, q, () => page.keyboard.press("a"))).toBe(false);
+			expect(decides).toEqual([]);
 			console.log("PROBE live decides after case change + one press", decides.length);
 			expect((await server.api("get", { refs: ["C-1"] }))[0]?.title).toBe("Checkout by a person");
 			expect(await openAdopt(server)).toEqual([q]);
@@ -604,7 +673,7 @@ for (const device of ["desktop", "phone"] as const)
 				});
 				const page = view.page;
 				if (device === "phone") await page.locator("#list [role=option]").first().tap();
-				await page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`).waitFor({ timeout: 20000 });
+				await page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`).waitFor();
 				const geometry = await page.evaluate(() => ({
 					rows: [...document.querySelectorAll(".proposal-edits .dl")].map((row) =>
 						Math.round(row.getBoundingClientRect().height),
@@ -617,17 +686,17 @@ for (const device of ["desktop", "phone"] as const)
 				await frames(page);
 				let answered = false;
 				for (let presses = 1; presses <= 60; presses++) {
-					if (device === "phone") await accept.tap();
-					else await page.keyboard.press("a");
 					await frames(page);
-					await page.waitForTimeout(60);
 					const read = await coverage(page);
+					answered = await advanceProposal(page, q, () =>
+						device === "phone" ? accept.tap() : page.keyboard.press("a"),
+					);
 					const open = await openAdopt(server);
 					if (read.partial > 0) {
 						console.log(`PROBE ${device} tall unread`, JSON.stringify({ presses, open, ...read }));
 						expect(open).toEqual([q]);
 					}
-					if (open.length === 0) {
+					if (answered) {
 						console.log(`PROBE ${device} tall answered`, JSON.stringify({ presses, ...read }));
 						expect(read.partial).toBe(0);
 						expect(read.unseenSlices).toBe(0);
@@ -636,6 +705,10 @@ for (const device of ["desktop", "phone"] as const)
 					}
 				}
 				expect(answered).toBe(true);
+				await eventually(
+					() => openAdopt(server),
+					(open) => !open.includes(q),
+				);
 				expect((await server.api("get", { refs: [device === "phone" ? "C-3" : "C-1"] }))[0]?.title).toBe(
 					device === "phone" ? "Short two" : "Tall case",
 				);
@@ -689,26 +762,28 @@ t(
 				.evaluate((row) => row.scrollIntoView({ block: "end" }));
 			await frames(page);
 			await page.setViewportSize({ width: 390, height: 844 });
+			await page.waitForFunction(() => innerHeight === 844);
 			await frames(page);
-			await accept.tap();
-			await frames(page);
-			await page.waitForTimeout(60);
+			expect(await advanceProposal(page, q, () => accept.tap())).toBe(false);
 			expect(await openAdopt(server)).toEqual([q]);
 			let answered = false;
 			for (let presses = 0; presses < 40; presses++) {
-				await accept.tap();
 				await frames(page);
-				await page.waitForTimeout(60);
 				const read = await coverage(page);
+				answered = await advanceProposal(page, q, () => accept.tap());
 				const open = await openAdopt(server);
 				if (read.partial > 0) expect(open).toEqual([q]);
-				if (open.length === 0) {
+				if (answered) {
 					expect(read.unseenSlices).toBe(0);
 					answered = true;
 					break;
 				}
 			}
 			expect(answered).toBe(true);
+			await eventually(
+				() => openAdopt(server),
+				(open) => !open.includes(q),
+			);
 			expect((await server.api("get", { refs: ["C-12"] }))[0]?.title).toBe("Short 9");
 			expect(view.errors).toEqual([]);
 		} finally {
