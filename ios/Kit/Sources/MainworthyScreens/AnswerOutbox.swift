@@ -271,13 +271,17 @@ public final class AnswerOutbox {
 		return now() >= at
 	}
 
+	private static let forgetWhileSending =
+		"Saved answers were being sent, so this answer was kept. If Forget is still offered, try it again."
+
 	public func forget(_ id: String, confirmed: Bool = false) {
 		guard confirmed, active, readable else { return }
-		dropProblem = nil
 		guard !sending else {
-			dropProblem = "Saved answers were being sent, so this answer was kept. If Forget is still offered, try it again."
+			dropProblem = Self.forgetWhileSending
 			return
 		}
+		// Forget takes back only what it said; a drop's sentence about another answer stays.
+		if dropProblem == Self.forgetWhileSending { dropProblem = nil }
 		guard canForget(id) else { return }
 		let kept = entries.filter { $0.id != id }
 		do { try save(kept); entries = kept }
