@@ -1827,7 +1827,9 @@ describe("conflict storage upgrades", () => {
 				input.cmd,
 			);
 			dropResetIndexes(db);
-			db.exec("DROP TABLE slot_leases; DROP TABLE handoffs");
+			db.exec(
+				"DROP INDEX flips_first_try; DROP INDEX flips_second_try; ALTER TABLE flips DROP COLUMN first_try; ALTER TABLE flips DROP COLUMN second_try; DROP TABLE result_tries; DROP TABLE slot_leases; DROP TABLE handoffs",
+			);
 			db.exec(
 				"DROP INDEX change_ends_landing; ALTER TABLE change_ends DROP COLUMN landing_branch; ALTER TABLE change_ends DROP COLUMN landing_repo; ALTER TABLE change_ends DROP COLUMN landing_commit; DROP INDEX projects_identity; ALTER TABLE projects DROP COLUMN identity; ALTER TABLE results RENAME COLUMN trail TO steps; ALTER TABLE results DROP COLUMN model; ALTER TABLE batches DROP COLUMN model",
 			);

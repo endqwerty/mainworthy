@@ -66,7 +66,8 @@ have separate rows, even for the same test. A retried test shows the attempt the
 
 ### Flaky tests
 
-A test that both passed and failed on the same commit, in the same job, is flaky. Its row
+A test that both passed and failed on the same commit, in the same job, is flaky, whether the
+pipeline ran the job again or the test runner retried the test inside one run. Its row
 says "flaky" under its label and "passed and failed on this commit". A failing test that
 flipped between passing and failing on any commit in the policy's detection window (14 days
 by default) also says "flaky", with how many times it flipped. The count is the one

@@ -808,6 +808,7 @@ describe("the module map", () => {
 			"results",
 			"attachments",
 			"flips",
+			"result_tries",
 			"findings",
 			"reviews",
 			"excuses",

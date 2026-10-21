@@ -11,6 +11,8 @@ type CaseElement = {
 	tag: string;
 	result: ParsedResult;
 	retries: number;
+	/** The runner's earlier failed tries, from Surefire's flaky and rerun elements (decision 0129). */
+	tries: NonNullable<ResultIn["tries"]>;
 	integrity: "intact" | "damaged";
 	previous: CaseElement | null;
 };
@@ -395,6 +397,10 @@ export function parseJUnit(
 				}
 				if (element.result.outcome === "pass" && element.retries > 0)
 					element.result.note = `passed after ${element.retries} retries`;
+				// Surefire writes a flaky test's failed runs before the pass it ended on, and an exhausted one's first
+				// run as the failure with the later runs after it: either way every try listed failed, so their order
+				// changes no flip.
+				if (element.tries.length > 0) element.result.tries = element.tries.slice(-10);
 				currentCase = element.previous;
 				break;
 			case "failure":
@@ -606,7 +612,16 @@ export function parseJUnit(
 				currentOutput = element;
 				ignoredDepth++;
 			} else if (name === "system-out" || name === "system-err" || name === "properties" || retry) {
-				if (retry && currentCase !== null) currentCase.retries++;
+				if (retry && currentCase !== null) {
+					currentCase.retries++;
+					const outcome = name.endsWith("Error") ? "error" : "fail";
+					currentCase.tries.push({
+						outcome,
+						failure: {
+							message: clip(attrs.message?.trim() || (outcome === "error" ? "Test errored" : "Test failed"), 4000),
+						},
+					});
+				}
 				element = { kind: "ignored", tag, propertyCase: name === "properties" ? currentCase : null };
 				ignoredDepth++;
 			} else if (name === "testsuite") {
@@ -663,6 +678,7 @@ export function parseJUnit(
 					tag,
 					result,
 					retries: 0,
+					tries: [],
 					integrity: headerDamaged || currentCase !== null ? "damaged" : "intact",
 					previous: currentCase,
 				};

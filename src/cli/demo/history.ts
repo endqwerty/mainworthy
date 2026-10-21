@@ -54,6 +54,8 @@ export type HistoryEvent = Base &
 				failures: Failure[];
 				/** A rerun: the attempt, and the cases it ran again. Absent: the first attempt, of every automated case. */
 				rerun?: { attempt: number; cases: number[] };
+				/** Cases the test runner tried again inside this run: each failed once, then passed (decision 0129). */
+				retried?: Failure[];
 				/** Varies the durations of this report's results. */
 				jitter: number;
 		  }
@@ -237,6 +239,9 @@ export function demoHistory(options: {
 	// stream, so the rest of the history stays as it was. Not the quarantined test, which is the first. ──
 	const flakyRng = random(options.seed ^ 0x3c6ef372);
 	const flaky = automated.length > 1 ? automated[1 + Math.floor(flakyRng() * (automated.length - 1))] : undefined;
+	// Some pull requests' runs see the same test fail once and pass when the runner tries it again (decision 0129).
+	// Their own stream too.
+	const retryRng = random(options.seed ^ 0x27d4eb2f);
 
 	// ── The pull requests, numbered up to the one before today's. ──
 	// Draw the quieter days from their own stream, so the real weekday only changes dates.
@@ -304,6 +309,8 @@ export function demoHistory(options: {
 			const target = { branch, pr: number, base: main, title, files: [fileOf(folder), fileOf(`${folder} test`)] };
 			const broke = rng() < 0.25 ? failing(folder, between(rng, 1, 3)) : [];
 			const message = pick(rng, ASSERTIONS);
+			const retried =
+				flaky !== undefined && !broke.includes(flaky) && retryRng() < 0.3 ? [{ case: flaky, message: FLAKE }] : [];
 			events.push({
 				kind: "pipeline",
 				at,
@@ -311,6 +318,7 @@ export function demoHistory(options: {
 				target: { ...target, commit: hex(rng) },
 				failures: broke.map((index) => ({ case: index, message })),
 				jitter: rng(),
+				...(retried.length > 0 ? { retried } : {}),
 			});
 			let last = at;
 			if (broke.length > 0) {

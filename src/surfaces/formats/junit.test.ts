@@ -77,12 +77,18 @@ const fixtures: { file: string; suites: number; results: ResultIn[] }[] = [
 			result("com.acme.CartTest::com.acme.CartTest::eventuallyPasses", "eventuallyPasses", "pass", {
 				durationMs: 10,
 				note: "passed after 2 retries",
+				tries: [
+					{ outcome: "fail", failure: { message: "attempt one" } },
+					{ outcome: "fail", failure: { message: "attempt two" } },
+				],
 			}),
 			result("com.acme.CartTest::com.acme.CartTest::rerunsThenPasses", "rerunsThenPasses", "pass", {
 				note: "passed after 1 retries",
+				tries: [{ outcome: "fail", failure: { message: "temporary" } }],
 			}),
 			result("com.acme.CartTest::com.acme.CartTest::stillFails", "stillFails", "fail", {
 				failure: { message: "final failure", detail: "stack" },
+				tries: [{ outcome: "fail", failure: { message: "retry failed" } }],
 			}),
 		],
 	},
@@ -246,7 +252,15 @@ describe("parseJUnit recovery and boundaries", () => {
 
 	test("Surefire retry errors are flaky signals, too", () => {
 		expect(parseJUnit('<testsuite><testcase name="one"><flakyError/><rerunError/></testcase></testsuite>')).toEqual({
-			results: [result("one", "one", "pass", { note: "passed after 2 retries" })],
+			results: [
+				result("one", "one", "pass", {
+					note: "passed after 2 retries",
+					tries: [
+						{ outcome: "error", failure: { message: "Test errored" } },
+						{ outcome: "error", failure: { message: "Test errored" } },
+					],
+				}),
+			],
 			suites: 1,
 			warnings: [],
 		});

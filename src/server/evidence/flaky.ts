@@ -18,37 +18,46 @@ type Flip = {
 	second_outcome: "pass" | "fail" | "error";
 	first_attempt: number;
 	second_attempt: number;
+	first_try: number | null;
+	second_try: number | null;
 };
 
 const Q = {
+	// Each end of a flip is a result, or a runner's try of one (decision 0129): its outcome and cause are the try's
+	// then, and a flip inside one run has the same result at both ends, its tries in order.
 	evidence: sql<{ project: number; test: number; since: number }, Flip>(`
 		SELECT * FROM (
 			SELECT s.id AS signature, s.text, s.class, t.id AS target, t.commit_sha, t.env, b.job, r.actor, f.first_result, f.second_result,
-			       a.outcome AS first_outcome, r.outcome AS second_outcome,
-			       a.attempt AS first_attempt, r.attempt AS second_attempt,
+			       coalesce(ft.outcome, a.outcome) AS first_outcome, coalesce(st.outcome, r.outcome) AS second_outcome,
+			       a.attempt AS first_attempt, r.attempt AS second_attempt, ft.try AS first_try, st.try AS second_try,
 			       count(*) OVER (PARTITION BY s.id) AS total,
 			       row_number() OVER (PARTITION BY s.id ORDER BY f.seq DESC, f.id DESC) AS sample
 			FROM flips f
 			JOIN results a ON a.id = f.first_result
 			JOIN results r ON r.id = f.second_result
+			LEFT JOIN result_tries ft ON ft.id = f.first_try
+			LEFT JOIN result_tries st ON st.id = f.second_try
 			JOIN targets t ON t.id = f.target
 			JOIN batches b ON b.id = r.batch
 			JOIN batches earlier ON earlier.id = a.batch
-			JOIN signatures s ON s.id = CASE WHEN a.outcome = 'pass' THEN r.signature ELSE a.signature END
+			JOIN signatures s ON s.id = CASE WHEN coalesce(ft.outcome, a.outcome) = 'pass'
+			                                 THEN coalesce(st.signature, r.signature)
+			                                 ELSE coalesce(ft.signature, a.signature) END
 			WHERE f.project = $project AND f.test = $test AND t.commit_sha IS NOT NULL
 			  AND a.target = r.target AND a.test = r.test AND a.actor = r.actor AND earlier.job = b.job
-			  AND a.method = 'auto' AND r.method = 'auto' AND a.attempt < r.attempt
+			  AND a.method = 'auto' AND r.method = 'auto'
+			  AND (a.attempt < r.attempt OR (a.id = r.id AND ft.try < coalesce(st.try, ft.try + 1)))
 			  AND a.at >= $since AND r.at >= $since
-			  AND ((a.outcome = 'pass' AND r.outcome IN ('fail', 'error'))
-			    OR (r.outcome = 'pass' AND a.outcome IN ('fail', 'error')))
+			  AND ((coalesce(ft.outcome, a.outcome) = 'pass' AND coalesce(st.outcome, r.outcome) IN ('fail', 'error'))
+			    OR (coalesce(st.outcome, r.outcome) = 'pass' AND coalesce(ft.outcome, a.outcome) IN ('fail', 'error')))
 			  AND ${uncorrectedResults("a.id", "r.id")}
-			  AND NOT EXISTS (
+			  AND (a.id = r.id OR NOT EXISTS (
 			    SELECT 1 FROM results worse JOIN batches wb ON wb.id = worse.batch
 			    WHERE worse.target = r.target AND worse.test = r.test AND worse.actor = r.actor
 			      AND worse.method = 'auto' AND wb.job = b.job AND worse.outcome IN ('fail', 'error')
-			      AND worse.attempt = CASE WHEN a.outcome = 'pass' THEN a.attempt ELSE r.attempt END
+			      AND worse.attempt = CASE WHEN coalesce(ft.outcome, a.outcome) = 'pass' THEN a.attempt ELSE r.attempt END
 			      AND ${uncorrectedResults("worse.id")}
-			  )
+			  ))
 		) WHERE sample <= 3 ORDER BY CASE class WHEN 'assertion' THEN 0 WHEN 'timeout' THEN 1 ELSE 2 END, signature, sample
 	`),
 };
@@ -83,8 +92,18 @@ export function sameCodeEvidence(
 			env: row.env,
 			job: row.job,
 			actor: row.actor,
-			first: { id: row.first_result, outcome: row.first_outcome, attempt: row.first_attempt },
-			second: { id: row.second_result, outcome: row.second_outcome, attempt: row.second_attempt },
+			first: {
+				id: row.first_result,
+				outcome: row.first_outcome,
+				attempt: row.first_attempt,
+				...(row.first_try === null ? {} : { try: row.first_try }),
+			},
+			second: {
+				id: row.second_result,
+				outcome: row.second_outcome,
+				attempt: row.second_attempt,
+				...(row.second_try === null ? {} : { try: row.second_try }),
+			},
 		});
 	}
 	return evidence;

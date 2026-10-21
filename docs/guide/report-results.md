@@ -299,7 +299,9 @@ between passing and failing on the same code, and any quarantine in force.
 outcome, any commit and change reported with it, the job, duration, producer, and
 failure message when present. Attempts after the first show their number.
 A failure that a later attempt of the same job, producer and environment passed on the same
-commit says "flaky", and "passed on attempt" with the attempt that passed. The flip count leaves
+commit says "flaky", and "passed on attempt" with the attempt that passed. A result whose
+runner tries disagree also says "flaky", lists the runner's tries in order, and shows an earlier
+try's failure when the result has none. The flip count leaves
 out a flip whose failure or pass its producer corrected.
 "build" opens the CI build when the report supplied an HTTP or HTTPS URL.
 
@@ -340,6 +342,24 @@ and failure within one producer, job, test, and target. Failure includes `fail` 
 A skip does not hide the previous decisive result. An old attempt or same-attempt
 disagreement adds no flip. Identical reports add nothing.
 
+### Retries by the test runner
+
+A runner that tries a test again inside one run, such as Playwright with `retries` or
+Maven Surefire with `rerunFailingTestsCount`, reports one result per test: the outcome it
+ended on. Mainworthy keeps the runner's earlier tries beside that result, oldest first, and the
+gate counts only the result. A try that passed or failed where the next one did the other is a
+flip, recorded as a flip between attempts is. So a test that failed once and passed on the
+runner's retry reads "flaky" in a change's results and on its page, counts in
+[Reports](./reports.md), and feeds the detector below. Tries that only failed, or were skipped,
+add no flip.
+
+When the pipeline also runs the job again, the earlier attempt meets the new attempt's first
+decisive try, so one recovery is one flip whichever retried first. A correction of a result
+withdraws the flips of its tries too. A report keeps at most ten tries of a result. In the API,
+a result's `tries` lists them, each with an `outcome`, an optional `durationMs` and an
+optional `failure`; `mainworthy get T-1 --json` returns each recent result's `tries`, and a
+detector sample names the runner's `try` at either end.
+
 The detector counts recent flips per test and failure signature, across assertion,
 timeout, and infrastructure classes. By default, two flips of one cause within
 14 days suggest investigation. A file-split signature is a separate cause.
@@ -363,14 +383,21 @@ across different trunk commits are not built yet. Change the detector's settings
 through a [policy edit](./policy.md#same-code-detector-settings).
 
 Playwright retries become one logical test result. The highest numbered decisive
-execution supplies its outcome and failure. A skipped retry does not erase an
+execution supplies its outcome and failure, and the executions before it are its tries, each
+with its own outcome, duration and failure. A skipped retry does not erase an
 earlier failure. The logical result's duration sums all executions, and a pass after retries has
 the same `passed after N retries` note as JUnit. An expected Playwright failure
-counts as a pass. An unexpected pass counts as a failure.
+counts as a pass. An unexpected pass counts as a failure, for a try as for the result.
+
+In JUnit, Surefire's `flakyFailure`, `flakyError`, `rerunFailure` and `rerunError`
+elements become failed tries with their `message`. A testcase with only flaky elements
+passed after them, so it is a flip. A testcase with a `failure` and rerun elements failed
+every time and keeps the `failure` as its own message. Duplicate testcases named
+`(retry #1)` and so on are not yet read as tries of one test.
 
 Jest and Vitest JSON contain the final assertion outcome and duration, but their
-standard JSON reporters do not export a retry count. Mainworthy does not invent
-one. The pytest adapter sums setup, call, and teardown durations and keeps setup
+standard JSON reporters do not export a retry count or the earlier tries. Mainworthy does not
+invent them. The pytest adapter sums setup, call, and teardown durations and keeps setup
 or teardown failures as errors. Its failure message uses `crash.message` when
 available and keeps the traceback in the details. Expected pytest failures are skipped.
 TRX keeps each execution and its duration. Ambiguous or unfinished outcomes
