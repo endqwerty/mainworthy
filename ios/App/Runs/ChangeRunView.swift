@@ -18,7 +18,7 @@ struct ChangeRunView: View {
 		ScrollView {
 			VStack(alignment: .leading, spacing: 16) {
 				VStack(alignment: .leading, spacing: 4) {
-					Text(run.location?.label ?? run.name).font(.title2.weight(.semibold))
+					Text(heading).font(.title2.weight(.semibold))
 					Text(run.reason)
 						.font(.subheadline.weight(.medium))
 						.foregroundStyle(run.verdict.tint)
@@ -32,11 +32,19 @@ struct ChangeRunView: View {
 					}
 					if let change {
 						LabeledContent("Change") {
-							if let changes = workspace.changes {
-								NavigationLink(change) { ChangeView(key: change, screen: changes, workspace: workspace) }
+							VStack(alignment: .trailing) {
+								if let changes = workspace.changes {
+									NavigationLink(change.key) {
+										ChangeView(key: change.key, screen: changes, workspace: workspace)
+									}
 									.foregroundStyle(Color.accentColor)
-							} else {
-								Text(change)
+								} else {
+									Text(change.key)
+								}
+								// The heading names the change's title when the commit's location does; otherwise it is here.
+								if let title = change.title, !heading.contains(title) {
+									Text(title).font(.caption).multilineTextAlignment(.trailing)
+								}
 							}
 						}
 					}
@@ -68,9 +76,11 @@ struct ChangeRunView: View {
 		return nil
 	}
 
-	/// The change the commit belongs to, or the one it landed on trunk.
-	private var change: String? {
-		if case .change(let change?) = run.kind { return change.key }
-		return run.location?.change
+	private var heading: String { run.location?.label ?? run.name }
+
+	/// The change the commit belongs to, or the one it landed on trunk, whose title the heading already names.
+	private var change: (key: String, title: String?)? {
+		if case .change(let change?) = run.kind { return (change.key, change.title) }
+		return run.location?.change.map { ($0, nil) }
 	}
 }

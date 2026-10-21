@@ -38,7 +38,8 @@ type Counted = z.infer<typeof Counted>;
 /** A report names its build's address, and only a web address is offered as a link. */
 export const webUrl = (url: string | null): string | null => (url && /^https?:\/\//i.test(url) ? url : null);
 
-export const duration = (ms: number | null): string | null => (ms === null ? null : spent(ms));
+export const duration = (ms: number | null): string | null =>
+	ms === null ? null : ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
 
 /** What the results a gate counts took, summed: null when none of them said, and how many did when some did not. */
 export function testTimeText(time: { ms: number; timed: number } | undefined, total: number): string | null {
