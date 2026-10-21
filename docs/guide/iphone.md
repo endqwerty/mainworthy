@@ -263,6 +263,7 @@ If you reopen the planner before that reply arrives, success closes the planner 
 Otherwise, open the run from **Runs**. Reopen the planner to recover an uncertain outcome or retry a failed run read.
 Once the run is read successfully, **+** starts a fresh planner with no submitted choices or previous planner notice.
 Opening or cancelling the planner keeps any read error in the Runs list. List errors do not appear in the planner; if the folders cannot be read, the planner says so.
+If you cancel the planner before its reply and the plan is refused or its outcome is unknown, the Runs list says so.
 An unresolved plan stays while this project's screen is open. It is not kept after the app closes.
 A selection with no cases is refused with the server's sentence.
 

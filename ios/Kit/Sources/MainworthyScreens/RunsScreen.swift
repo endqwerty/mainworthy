@@ -18,7 +18,11 @@ public final class RunsScreen: ProjectScreen {
 	public var loading: ListLoading { list.loading }
 	public var hasMore: Bool { list.hasMore }
 	public private(set) var notice: String?
-	public private(set) var plannerNotice: String?
+	public private(set) var plannerNotice: String? {
+		// A plan's outcome that arrives after the planner was closed is said where the person is: in the list.
+		didSet { if !plannerOpen, let plannerNotice { notice = plannerNotice } }
+	}
+	private var plannerOpen = false
 	public private(set) var folders: [String] = []
 	public private(set) var planning = false
 	public enum CaseCount: Equatable {
@@ -121,7 +125,13 @@ public final class RunsScreen: ProjectScreen {
 	}
 
 	public func preparePlanner() {
+		plannerOpen = true
 		if planSubmission == nil { plannerNotice = nil }
+	}
+
+	/// The planner was dismissed; what a plan still in flight says next goes to the list too.
+	public func closePlanner() {
+		plannerOpen = false
 	}
 
 	public func plan(name: String, selection: RunSelection, commit: String = "") async -> Run? {
