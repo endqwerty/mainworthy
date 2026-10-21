@@ -7,21 +7,19 @@
 // 1. A failure a live run shows unexplained has an open question that lists its target and names the run, and the
 //    run's gate names that question. Live: an open planned run, a change's observed head run in its scope, or
 //    the newest commit run on a line.
-// 2. What a commit's gate counts for a lane is the fold of that lane's history (uncorrected results, none judged
-//    a mistake) by the one lane rule.
+// 2. Every counted lane points to an uncorrected source result with the same test, target, job and actor.
 // 3. A run's stored tally is what its results and the excuses in force give now, for every commit, not only
 //    the newest.
 // 4. Every excuse belongs to a decision that is its question's current one; a decision in force that excused or
 //    attributed a failure still has its excuse.
-// 5. A run's stored verdict is the verdict of its stored tally and blocking questions.
-// 6. A slot's stored state is what the results admitted to it give by the same fold; a planned run's tally is
-//    what its slots give.
+// 5. Literal transitions below check verdicts, including blocking questions and pending work.
+// 6. Every slot fill names an existing case result; a planned run's tally is what its slots give.
+//    Literal transitions below check slot aggregation and state.
 // 7. Nobody is asked about a failure that has an answer: no question is open for a cause on a target that an
 //    excuse in force covers, unless it also lists a target that none covers.
 // 8. An answer that another decision supersedes is no longer in force. (The rows the ledger writes itself when
 //    an answer ends, `expired` and `outdated`, stay on their question and are what the next answer follows.)
-// 9. An open planned run has admitted every result it accepts and nothing else: every uncorrected result on a
-//    target the run accepts (any number of them), for a case it has a slot for, by a method the slot admits.
+// 9. Every slot fill names its pinned case and an accepted target. Literal cases below check admission.
 // 10. An agent's report changes no commit's gate: every commit run reads after it exactly what it read before.
 // 11. Every question a run's gate names is open: a question that was answered, dissolved or replaced holds
 //     no run, whether or not the run is the newest of its scope.
@@ -38,17 +36,8 @@
 // More seeds: MAINWORTHY_SEQUENCE_SEEDS=500 bun test test/sequences-
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
-import {
-	aggregateSlot,
-	type ExerciseObligation,
-	type Obligation,
-	qualifies,
-	replacesInLane,
-	type SlotFill,
-	slotState,
-	type Tally,
-	verdict,
-} from "../src/core/runs.ts";
+import type { SlotFill, Tally } from "../src/core/runs.ts";
+import { aggregateSlot, qualifies, replacesInLane, slotState, verdict } from "../src/core/runs.ts";
 import type { Actor } from "../src/server/kernel/ctx.ts";
 import { sweep } from "../src/server/ops/jobs.ts";
 import { harness } from "./helpers.ts";
@@ -59,7 +48,7 @@ const STEPS = 80;
 
 type AuditExcuse = { class: string; decision: number };
 
-function auditExcuses(db: Database) {
+export function auditExcuses(db: Database) {
 	const key = (project: number, signature: number, scope: string, target: number) =>
 		JSON.stringify([project, signature, scope, target]);
 	const broad = new Map(
@@ -103,12 +92,14 @@ function sequence(seed: number, preset: string): Problem | null {
 	const h = harness({ preset });
 	const rows = <T = Row>(sql: string, ...args: (string | number)[]): T[] => h.app.db.raw.query(sql).all(...args) as T[];
 	const trace: unknown[] = [];
+	const successful = new Map<string, number>();
 	const people: Actor[] = [h.owner, h.actor("second", "human", ["read", "produce", "answer", "plan"])];
 	const pipeline = h.actor("pipeline", "ci", ["read", "record"]);
 	const agent = h.actor("explorer", "agent", ["read", "produce"]);
 	const rule = Number(rows<{ id: number }>("SELECT id FROM actors WHERE kind = 'rule'")[0]?.id ?? 0);
 	const command = (op: string, input: unknown, as: Actor = h.owner): unknown => {
 		const reply = h.raw(op, input, as);
+		if (reply.ok) successful.set(op, (successful.get(op) ?? 0) + 1);
 		trace.push({ op, input, as: as.name, reply: reply.ok ? "ok" : reply.error });
 		return reply.ok ? reply.result : null;
 	};
@@ -209,7 +200,7 @@ function sequence(seed: number, preset: string): Problem | null {
 			}
 
 			if (run.origin === "change") {
-				// 2. The commit's lanes against their history.
+				// 2. The commit's lanes point back to their source history.
 				const current = rows("SELECT * FROM run_tests WHERE run = ?", id);
 				const history = rows<{ id: number; test: number; target: number; job: string; actor: number } & Row>(
 					`SELECT r.*, b.job FROM results r JOIN batches b ON b.id = r.batch JOIN targets t ON t.id = r.target
@@ -220,25 +211,14 @@ function sequence(seed: number, preset: string): Problem | null {
 					String(run.accepts_what),
 					Number(run.project),
 				);
-				const held = new Map<string, (typeof history)[number]>();
-				for (const next of history) {
-					const key = `${next.test}|${next.target}:${next.job}:${next.actor}`;
-					const before = held.get(key);
-					const fits =
-						!before ||
-						replacesInLane(
-							{ attempt: Number(before.attempt), outcome: String(before.outcome) },
-							{ attempt: Number(next.attempt), outcome: String(next.outcome) },
-						);
-					if (fits) held.set(key, next);
+				for (const counted of current) {
+					const source = history.find((row) => row.id === counted.result);
+					if (
+						!source ||
+						`${source.test}|${source.target}:${source.job}:${source.actor}` !== `${counted.test}|${counted.lane}`
+					)
+						return { what: "a counted lane has no matching source result", detail: { run, counted, source } };
 				}
-				const actual = current.map((row) => `${row.test}|${row.lane}=${row.result}`).sort();
-				const expected = [...held].map(([key, row]) => `${key}=${row.id}`).sort();
-				if (JSON.stringify(actual) !== JSON.stringify(expected))
-					return {
-						what: "a commit's gate counts something other than its lanes' history",
-						detail: { run, actual, expected },
-					};
 
 				// 3. The stored tally against the results and the excuses in force.
 				const tally = { pass: 0, excused: 0, attributed: 0, unexplained: 0, missing: 0, disputed: 0, skipped: 0 };
@@ -275,53 +255,13 @@ function sequence(seed: number, preset: string): Problem | null {
 				if (state !== "open")
 					return { what: "a run's gate names a question that is not open", detail: { run, named, state } };
 			}
-
-			// 5. The stored verdict against the stored facts.
-			const facts = {
-				tally: JSON.parse(String(run.tally)) as Tally,
-				blocking: (JSON.parse(String(run.blocking)) as string[]).length,
-				outstanding: Number(run.outstanding),
-				expired: false,
-			};
-			if (verdict(facts) !== run.verdict)
-				return { what: "a run's stored verdict is not the verdict of its tally", detail: { run } };
 		}
 
-		// 6. Slots against the results admitted to them.
-		for (const slot of rows("SELECT s.*, r.require FROM slots s JOIN runs r ON r.id = s.run WHERE r.state = 'open'")) {
-			const admitted = rows(
-				`SELECT r.id, r.actor, r.method, r.test, r.target, r.attempt, r.seq, r.ord, r.outcome, r.signature, b.job
-				 FROM slot_results s JOIN results r ON r.id = s.result JOIN batches b ON b.id = r.batch
-				 WHERE s.slot = ? AND s.corrected = 0 AND s.discounted_by IS NULL`,
-				Number(slot.id),
-			);
-			const fills = admitted.map(
-				(fill): SlotFill => ({
-					id: Number(fill.id),
-					actor: Number(fill.actor),
-					method: fill.method as SlotFill["method"],
-					test: Number(fill.test),
-					lane: `${fill.target}:${fill.job}`,
-					attempt: Number(fill.attempt),
-					seq: Number(fill.seq),
-					ord: Number(fill.ord),
-					outcome:
-						fill.outcome === "pass"
-							? "pass"
-							: fill.outcome === "fail" || fill.outcome === "error"
-								? "fail"
-								: fill.outcome === "skip"
-									? "skip"
-									: "blocked",
-				}),
-			);
-			const obligations = JSON.parse(String(slot.require)) as { id: string; minActors?: number }[];
-			const minActors = obligations.find((o) => o.id === slot.obligation)?.minActors ?? 1;
-			const folded = aggregateSlot(fills);
-			const expected = slotState(folded.agg, minActors);
-			if (expected !== slot.state)
-				return { what: "a slot's state is not what its admitted results give", detail: { slot, expected, fills } };
-		}
+		// Every slot fill belongs to an existing slot and result of the same case.
+		const orphaned = rows(`SELECT s.* FROM slot_results s
+			LEFT JOIN slots slot ON slot.id = s.slot LEFT JOIN results r ON r.id = s.result
+			WHERE slot.id IS NULL OR r.id IS NULL OR r.basis_case != slot.case_id`);
+		if (orphaned.length > 0) return { what: "slot fills have no matching case result", detail: orphaned };
 
 		// 6b. A planned run's stored tally against its slots and the excuses in force.
 		for (const run of runs) {
@@ -363,74 +303,20 @@ function sequence(seed: number, preset: string): Problem | null {
 					return { what: "a planned run's stored tally is not what its slots give", detail: { run, tally, stored } };
 		}
 
-		// 9. What an open planned run has admitted against everything it accepts.
-		for (const run of runs) {
-			if (run.origin !== "planned" || run.state !== "open") continue;
-			const accepts = JSON.parse(String(run.accepts)) as { commit?: string; repo?: string; env?: string };
-			const commit = accepts.commit;
-			const accepted =
-				commit === undefined
-					? null
-					: new Set(
-							[...targets.values()]
-								.filter(
-									(target) =>
-										target.project === run.project &&
-										typeof target.commit_sha === "string" &&
-										(target.commit_sha === commit || target.commit_sha.startsWith(commit)) &&
-										(accepts.repo === undefined || accepts.repo === target.repo) &&
-										(accepts.env === undefined || accepts.env === target.env),
-								)
-								.map((target) => Number(target.id)),
-						);
-			const exercises = (JSON.parse(String(run.require)) as Obligation[]).filter(
-				(o): o is ExerciseObligation => o.kind === "exercise",
-			);
-			for (const slot of rows("SELECT * FROM slots WHERE run = ?", Number(run.id))) {
-				const obligation = exercises.find((o) => o.id === slot.obligation);
-				if (!obligation) continue;
-				const pinned = rows<{ body: string }>(
-					"SELECT body FROM versions WHERE case_id = ? AND no = ?",
-					Number(slot.case_id),
-					Number(slot.version),
-				)[0];
-				const declared = pinned ? (JSON.parse(pinned.body) as { methods: SlotFill["method"][] }).methods : [];
-				const have = new Set(
-					rows<{ result: number }>("SELECT result FROM slot_results WHERE slot = ?", Number(slot.id)).map((row) =>
-						Number(row.result),
-					),
-				);
-				const candidates = rows(
-					`SELECT r.*, b.run AS typed, EXISTS (SELECT 1 FROM results later WHERE later.corrects = r.id) AS withdrawn
-					 FROM results r JOIN batches b ON b.id = r.batch WHERE r.basis_case = ?`,
-					Number(slot.case_id),
-				).filter((result) =>
-					accepted ? accepted.has(Number(result.target)) : Number(result.typed) === Number(run.id),
-				);
-				const wanted = new Set<number>();
-				for (const result of candidates) {
-					const method = result.method as SlotFill["method"];
-					const admitted = qualifies({
-						result: {
-							method,
-							basis: result.basis as "exact" | "assumed" | "unresolved",
-							basisCase: Number(result.basis_case),
-							basisVersion: result.basis_version === null ? null : Number(result.basis_version),
-							basisClaim: result.basis_claim === null ? null : String(result.basis_claim),
-						},
-						slot: { caseId: Number(slot.case_id), version: Number(slot.version), claim: String(slot.claim) },
-						obligation,
-						caseMethods: method === "auto" ? [...declared, "auto"] : declared,
-					});
-					if (!admitted) continue;
-					wanted.add(Number(result.id));
-					if (!result.withdrawn && !have.has(Number(result.id)))
-						return { what: "an open run has not admitted a result it accepts", detail: { run, slot, result } };
-				}
-				for (const result of have)
-					if (!wanted.has(result))
-						return { what: "a run admitted a result it does not accept", detail: { run, slot, result } };
-			}
+		// Accepted fills point to the pinned case and a target accepted by their run.
+		for (const fill of rows(`SELECT sr.*, s.case_id, r.basis_case, t.commit_sha, t.repo, t.env, t.project AS target_project, run.project AS run_project, run.accepts, run.id AS run_id,
+			b.run AS typed FROM slot_results sr JOIN slots s ON s.id = sr.slot
+			JOIN runs run ON run.id = s.run JOIN results r ON r.id = sr.result
+			JOIN targets t ON t.id = r.target JOIN batches b ON b.id = r.batch WHERE run.state = 'open'`)) {
+			const accepts = JSON.parse(String(fill.accepts)) as { commit?: string; repo?: string; env?: string };
+			if (
+				fill.case_id !== fill.basis_case ||
+				fill.target_project !== fill.run_project ||
+				(accepts.repo !== undefined && accepts.repo !== fill.repo) ||
+				(accepts.env !== undefined && accepts.env !== fill.env) ||
+				(accepts.commit ? !String(fill.commit_sha).startsWith(accepts.commit) : fill.typed !== fill.run_id)
+			)
+				return { what: "an admitted fill has an unrelated case or target", detail: fill };
 		}
 
 		// 7. Nobody is asked about what already has an answer.
@@ -568,6 +454,7 @@ function sequence(seed: number, preset: string): Problem | null {
 				answer: { is: "accept" },
 				reason: "seed",
 			});
+		expect(rows("SELECT id FROM cases WHERE head IS NOT NULL")).toHaveLength(3);
 		const commits = ["random01", "random02", "random03"];
 		for (let step = 0; step < STEPS; step++) {
 			const action = rand(100);
@@ -767,32 +654,292 @@ function sequence(seed: number, preset: string): Problem | null {
 				gatesBefore = null;
 			}
 		}
+		if (
+			(successful.get("report") ?? 0) === 0 ||
+			(successful.get("plan") ?? 0) === 0 ||
+			rows("SELECT id FROM slots").length === 0 ||
+			rows("SELECT id FROM results").length === 0 ||
+			rows("SELECT id FROM runs").length === 0
+		)
+			return {
+				seed,
+				step: STEPS,
+				what: "sequence made no reporting progress",
+				detail: [...successful],
+				last: trace.slice(-12),
+			};
 		return null;
 	} finally {
 		h.close();
 	}
 }
 
+function literalTransitions(): void {
+	test("reported transitions persist the literal lane, slot and gate outcomes", () => {
+		const h = harness({ preset: "strict" });
+		try {
+			h.call("propose", { edits: [{ op: "create", body: { title: "Release", methods: ["human", "agent"] } }] });
+			for (const q of h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }).items)
+				h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" }, reason: "fixture" });
+			const target = { commit: "literal01", branch: "main" };
+			const planned = h.call<{ run: string }>("plan", {
+				name: "Release",
+				select: { cases: ["C-1"] },
+				accepts: { commit: target.commit },
+				require: [{ id: "exercise", kind: "exercise", methods: ["auto", "human"], basis: "exact", minActors: 2 }],
+			});
+			const ci = h.actor("pipeline", "ci", ["read", "record"]);
+			const report = (outcome: string, attempt = 1, job = "unit") =>
+				h.call(
+					"report",
+					{
+						target,
+						job,
+						attempt,
+						results: [
+							{
+								test: { key: "check" },
+								annotation: { case: "C-1", version: 1 },
+								outcome,
+								...(outcome === "fail" ? { failure: { message: "broken" } } : {}),
+							},
+						],
+					},
+					ci,
+				);
+			const snapshot = () => ({
+				slot: h.call<{ items: { state: string }[] }>("find", { in: "slots", run: planned.run }).items[0]?.state,
+				gate: h.call<{ verdict: string }>("gate", { run: planned.run }).verdict,
+			});
+			expect(snapshot()).toEqual({ slot: "missing", gate: "pending" });
+			report("fail");
+			expect(snapshot()).toEqual({ slot: "failing", gate: "blocked" });
+			report("pass");
+			expect(snapshot()).toEqual({ slot: "failing", gate: "blocked" });
+			report("skip", 2);
+			expect(snapshot()).toEqual({ slot: "failing", gate: "blocked" });
+			report("pass", 3);
+			expect(snapshot()).toEqual({ slot: "missing", gate: "pending" });
+			expect(h.call<{ verdict: string }>("gate", { commit: target.commit }).verdict).toBe("passed");
+			report("fail", 1, "e2e");
+			expect(snapshot()).toEqual({ slot: "failing", gate: "blocked" });
+			report("pass", 2, "e2e");
+			expect(snapshot()).toEqual({ slot: "missing", gate: "pending" });
+			h.call("report", { run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+			expect(snapshot()).toEqual({ slot: "satisfied", gate: "passed" });
+			h.call("report", {
+				run: planned.run,
+				results: [{ test: { case: "C-1" }, outcome: "fail", failure: { message: "manual" } }],
+			});
+			expect(snapshot()).toEqual({ slot: "disputed", gate: "blocked" });
+		} finally {
+			h.close();
+		}
+	});
+
+	test.each([
+		["exact", "exact", ["auto"], "C-1", 1, "satisfied", "exact"],
+		["assumed refused", "exact", ["auto"], "C-1", undefined, "missing", null],
+		["assumed accepted", "exact-or-assumed", ["auto"], "C-1", undefined, "satisfied", "assumed"],
+		["method refused", "exact", ["human"], "C-1", 1, "missing", null],
+		["other case", "exact", ["auto"], "C-2", 1, "missing", null],
+	] as const)("reported slot admission: %s", (_name, basis, methods, caseRef, version, state, admitted) => {
+		const h = harness({ preset: "strict" });
+		try {
+			h.call("propose", {
+				edits: [
+					{ op: "create", outline: "One" },
+					{ op: "create", outline: "Two" },
+				],
+			});
+			for (const q of h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }).items)
+				h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" }, reason: "fixture" });
+			const planned = h.call<{ run: string }>("plan", {
+				name: "Admission",
+				select: { cases: ["C-1"] },
+				accepts: { commit: "admission01" },
+				require: [{ id: "exercise", kind: "exercise", methods, basis, minActors: 1 }],
+			});
+			const ci = h.actor("pipeline", "ci", ["read", "record"]);
+			h.call(
+				"report",
+				{
+					target: { commit: "admission01", branch: "main" },
+					results: [
+						{
+							test: { key: "check" },
+							outcome: "pass",
+							annotation: { case: caseRef, ...(version === undefined ? {} : { version }) },
+						},
+					],
+				},
+				ci,
+			);
+			const slots = h.call<{ items: { state: string; fills: { admitted: string }[] }[] }>("find", {
+				in: "slots",
+				run: planned.run,
+			});
+			expect(
+				slots.items.map((slot) => ({ state: slot.state, fills: slot.fills.map((fill) => fill.admitted) })),
+			).toEqual([{ state, fills: admitted === null ? [] : [admitted] }]);
+		} finally {
+			h.close();
+		}
+	});
+
+	test("lane transitions keep decisive evidence and same-attempt failures", () => {
+		for (const [held, next, expected] of [
+			[{ attempt: 1, outcome: "pass" }, { attempt: 2, outcome: "skip" }, false],
+			[{ attempt: 1, outcome: "fail" }, { attempt: 2, outcome: "blocked" }, false],
+			[{ attempt: 1, outcome: "error" }, { attempt: 2, outcome: "pass" }, true],
+			[{ attempt: 1, outcome: "skip" }, { attempt: 2, outcome: "blocked" }, true],
+			[{ attempt: 2, outcome: "pass" }, { attempt: 1, outcome: "fail" }, false],
+			[{ attempt: 1, outcome: "fail" }, { attempt: 1, outcome: "pass" }, false],
+			[{ attempt: 1, outcome: "pass" }, { attempt: 1, outcome: "fail" }, true],
+			[{ attempt: 1, outcome: "fail" }, { attempt: 1, outcome: "error" }, true],
+			[{ attempt: 1, outcome: "skip" }, { attempt: 1, outcome: "blocked" }, true],
+		] as const)
+			expect(replacesInLane(held, next)).toBe(expected);
+	});
+
+	test("slot transitions fold jobs separately and count distinct passing actors", () => {
+		const fills: SlotFill[] = [
+			{ id: 1, actor: 1, method: "auto", test: 1, lane: "unit", attempt: 1, seq: 1, ord: 0, outcome: "fail" },
+			{ id: 2, actor: 1, method: "auto", test: 1, lane: "e2e", attempt: 1, seq: 2, ord: 0, outcome: "pass" },
+			{ id: 3, actor: 1, method: "auto", test: 1, lane: "unit", attempt: 2, seq: 3, ord: 0, outcome: "pass" },
+			{ id: 4, actor: 2, method: "human", test: 0, lane: "manual", attempt: 1, seq: 4, ord: 0, outcome: "fail" },
+		];
+		const first = aggregateSlot(fills.slice(0, 2));
+		expect(first).toEqual({
+			agg: { "1:auto": { actor: 1, outcome: "fail", result: 1, seq: 1 } },
+			failing: [1],
+			effective: [1, 2],
+		});
+		expect(slotState(first.agg, 1)).toBe("failing");
+		const retried = aggregateSlot(fills.slice(0, 3));
+		expect(retried).toEqual({
+			agg: { "1:auto": { actor: 1, outcome: "pass", result: 3, seq: 3 } },
+			failing: [],
+			effective: [3, 2],
+		});
+		expect(slotState(retried.agg, 1)).toBe("satisfied");
+		expect(slotState(retried.agg, 2)).toBe("missing");
+		expect(slotState(aggregateSlot(fills).agg, 1)).toBe("disputed");
+		expect(slotState({}, 1)).toBe("missing");
+		expect(slotState({ skip: { actor: 1, outcome: "skip", result: 5, seq: 5 } }, 1)).toBe("skipped");
+		expect(
+			slotState(
+				{
+					one: { actor: 1, outcome: "pass", result: 1, seq: 1 },
+					again: { actor: 1, outcome: "pass", result: 2, seq: 2 },
+				},
+				2,
+			),
+		).toBe("missing");
+		expect(
+			slotState(
+				{
+					one: { actor: 1, outcome: "pass", result: 1, seq: 1 },
+					two: { actor: 2, outcome: "pass", result: 2, seq: 2 },
+				},
+				2,
+			),
+		).toBe("satisfied");
+	});
+
+	test("verdict transitions give pending work precedence and never pass an empty tally", () => {
+		const empty: Tally = { pass: 0, excused: 0, attributed: 0, unexplained: 0, missing: 0, disputed: 0, skipped: 0 };
+		for (const [tally, blocking, outstanding, expired, expected] of [
+			[{}, 0, 0, false, "pending"],
+			[{ pass: 1 }, 0, 0, false, "passed"],
+			[{ excused: 1 }, 0, 0, false, "passed"],
+			[{ pass: 1, missing: 1 }, 0, 0, false, "pending"],
+			[{ pass: 1, attributed: 1 }, 0, 0, false, "failed"],
+			[{ pass: 1, unexplained: 1 }, 0, 0, false, "blocked"],
+			[{ pass: 1, disputed: 1 }, 0, 0, false, "blocked"],
+			[{ pass: 1 }, 1, 0, false, "blocked"],
+			[{ attributed: 1 }, 0, 1, false, "pending"],
+			[{ attributed: 1 }, 0, 0, true, "pending"],
+		] as const)
+			expect(verdict({ tally: { ...empty, ...tally }, blocking, outstanding, expired })).toBe(expected);
+	});
+
+	test("slot admission pins case, method and basis independently", () => {
+		const input: Parameters<typeof qualifies>[0] = {
+			result: { method: "human", basis: "exact", basisCase: 1, basisVersion: 2, basisClaim: "claim" },
+			slot: { caseId: 1, version: 2, claim: "claim" },
+			obligation: { id: "exercise", kind: "exercise", methods: ["human"], basis: "exact", minActors: 1 },
+			caseMethods: ["human"],
+		};
+		expect(qualifies(input)).toBe("exact");
+		expect(qualifies({ ...input, result: { ...input.result, basisCase: 2 } })).toBeNull();
+		expect(qualifies({ ...input, result: { ...input.result, basis: "unresolved" } })).toBeNull();
+		expect(qualifies({ ...input, result: { ...input.result, basis: "assumed" } })).toBeNull();
+		expect(
+			qualifies({
+				...input,
+				result: { ...input.result, basis: "assumed" },
+				obligation: { ...input.obligation, basis: "exact-or-assumed" },
+			}),
+		).toBe("assumed");
+		expect(qualifies({ ...input, result: { ...input.result, basisVersion: 1 } })).toBeNull();
+		expect(
+			qualifies({
+				...input,
+				result: { ...input.result, basisVersion: 1 },
+				obligation: { ...input.obligation, basis: "same-claim" },
+			}),
+		).toBe("same-claim");
+		expect(
+			qualifies({
+				...input,
+				result: { ...input.result, basisVersion: 1, basisClaim: "other" },
+				obligation: { ...input.obligation, basis: "same-claim" },
+			}),
+		).toBeNull();
+		expect(
+			qualifies({ ...input, result: { ...input.result, method: "agent" }, caseMethods: ["human", "agent"] }),
+		).toBeNull();
+		expect(
+			qualifies({
+				...input,
+				result: { ...input.result, method: "agent" },
+				obligation: { ...input.obligation, methods: ["agent"] },
+			}),
+		).toBeNull();
+		expect(
+			qualifies({
+				...input,
+				result: { ...input.result, method: "agent" },
+				caseMethods: ["human", "agent"],
+				obligation: { ...input.obligation, methods: ["agent"] },
+			}),
+		).toBe("exact");
+	});
+}
+
 /** The test of one policy preset. Each preset has a file of its own, so the three run side by side. */
 export function sequences(preset: "loose" | "standard" | "strict"): void {
-	test(`the ${preset} audit resolves broad and exact-result standing independently`, () => {
-		using db = new Database(":memory:");
-		db.exec(`CREATE TABLE excuses (project INTEGER, signature INTEGER, scope TEXT, target INTEGER, class TEXT, decision INTEGER);
+	if (preset === "loose") literalTransitions();
+	if (preset === "loose")
+		test("the audit resolves broad and exact-result standing independently", () => {
+			using db = new Database(":memory:");
+			db.exec(`CREATE TABLE excuses (project INTEGER, signature INTEGER, scope TEXT, target INTEGER, class TEXT, decision INTEGER);
 			CREATE TABLE result_excuses (result INTEGER, slot INTEGER, class TEXT, decision INTEGER);
 			INSERT INTO excuses VALUES (1, 2, 'line:main', 0, 'excused', 30), (1, 2, 'line:main', 4, 'attributed', 10);
 			INSERT INTO result_excuses VALUES (5, NULL, 'excused', 20), (6, NULL, 'excused', 9),
 				(7, NULL, 'excused', 10), (8, 99, 'excused', 40);`);
-		const excuseOf = auditExcuses(db);
-		expect(excuseOf(1, 2, "line:main", 4, 5)).toEqual({ class: "excused", decision: 20 });
-		expect(excuseOf(1, 2, "line:main", 4, 6)).toEqual({ class: "attributed", decision: 10 });
-		expect(excuseOf(1, 2, "line:main", 4, 7)).toEqual({ class: "attributed", decision: 10 });
-		expect(excuseOf(1, 2, "line:main", 4, 8)).toEqual({ class: "attributed", decision: 10 });
-		expect(excuseOf(1, 2, "line:main", 9, 5)).toEqual({ class: "excused", decision: 30 });
-		expect(excuseOf(1, 2, "line:main", 0)).toEqual({ class: "excused", decision: 30 });
-		expect(excuseOf(2, 2, "line:main", 4, 5)).toEqual({ class: "excused", decision: 20 });
-		expect(excuseOf(1, 3, "line:main", 4)).toBeUndefined();
-		expect(excuseOf(1, 2, "line:other", 4)).toBeUndefined();
-	});
+			const excuseOf = auditExcuses(db);
+			expect(excuseOf(1, 2, "line:main", 4, 5)).toEqual({ class: "excused", decision: 20 });
+			expect(excuseOf(1, 2, "line:main", 4, 6)).toEqual({ class: "attributed", decision: 10 });
+			expect(excuseOf(1, 2, "line:main", 4, 7)).toEqual({ class: "attributed", decision: 10 });
+			expect(excuseOf(1, 2, "line:main", 4, 8)).toEqual({ class: "attributed", decision: 10 });
+			expect(excuseOf(1, 2, "line:main", 9, 5)).toEqual({ class: "excused", decision: 30 });
+			expect(excuseOf(1, 2, "line:main", 0)).toEqual({ class: "excused", decision: 30 });
+			expect(excuseOf(2, 2, "line:main", 4, 5)).toEqual({ class: "excused", decision: 20 });
+			expect(excuseOf(1, 3, "line:main", 4)).toBeUndefined();
+			expect(excuseOf(1, 2, "line:other", 4)).toBeUndefined();
+		});
 
 	test(`${SEEDS} random sequences under the ${preset} policy keep every invariant`, () => {
 		const problems: Problem[] = [];

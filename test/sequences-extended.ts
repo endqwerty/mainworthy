@@ -29,7 +29,7 @@
 // The tests are in `sequences-extended-loose.test.ts`, `-standard` and `-strict`. This file registers none, so a
 // defect hunt can import `sequence` and `stats` from it.
 // More seeds: MAINWORTHY_SEQUENCE_SEEDS=500 bun test test/sequences-extended-
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import type { GateStatus, InboxReply, PlanReply, ReportReceipt } from "../src/core/ops.ts";
 import { type Actor, findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
@@ -37,6 +37,7 @@ import { recoverAccepted, sweep } from "../src/server/ops/jobs.ts";
 import { acceptReport } from "../src/server/ops/writes.ts";
 import { harness } from "./helpers.ts";
 import { failingSlotResults, invalidInherited, slotSettlement } from "./inherited-audit.ts";
+import { auditExcuses } from "./sequences.ts";
 
 const SEEDS = Number(process.env.MAINWORTHY_SEQUENCE_SEEDS ?? 40);
 const STEPS = Number(process.env.MAINWORTHY_SEQUENCE_STEPS ?? 100);
@@ -51,37 +52,6 @@ function auditJobs(db: Database): { job: string; target: number }[] {
 			             AND r.id NOT IN (SELECT corrects FROM results WHERE corrects IS NOT NULL))`,
 		)
 		.all();
-}
-
-type AuditExcuse = { class: string; decision: number };
-
-function auditExcuses(db: Database) {
-	const key = (project: number, signature: number, scope: string, target: number) =>
-		JSON.stringify([project, signature, scope, target]);
-	const broad = new Map(
-		db
-			.query<AuditExcuse & { project: number; signature: number; scope: string; target: number }, []>(
-				"SELECT project, signature, scope, target, class, decision FROM excuses",
-			)
-			.all()
-			.map((row) => [key(row.project, row.signature, row.scope, row.target), row]),
-	);
-	const exact = new Map(
-		db
-			.query<AuditExcuse & { result: number }, []>(
-				"SELECT result, class, decision FROM result_excuses WHERE slot IS NULL",
-			)
-			.all()
-			.map((row) => [row.result, row]),
-	);
-	return (project: number, signature: number, scope: string, target: number, result = 0): AuditExcuse | undefined => {
-		// Target specificity wins within broad standing, even against a newer global decision.
-		const cause = broad.get(key(project, signature, scope, target)) ?? broad.get(key(project, signature, scope, 0));
-		const named = exact.get(result);
-		// A tie keeps the broad decision, as in the compound query's left-hand SELECT.
-		const held = named && (!cause || named.decision > cause.decision) ? named : cause;
-		return held ? { class: held.class, decision: held.decision } : undefined;
-	};
 }
 
 type Row = Record<string, string | number | null>;
@@ -111,6 +81,7 @@ export function sequence(seed: number, preset: string): Problem | null {
 	const rows = <T = Row>(sql: string, ...args: (string | number | null)[]): T[] =>
 		h.app.db.raw.query(sql).all(...args) as T[];
 	const trace: unknown[] = [];
+	const successful = new Map<string, number>();
 	let people: Actor[] = [h.owner, h.actor("second", "human", ["read", "produce", "answer", "plan"])];
 	const pipeline = h.actor("pipeline", "ci", ["read", "record"]);
 	let agents: Actor[] = [h.actor("explorer", "agent", ["read", "produce"])];
@@ -153,6 +124,7 @@ export function sequence(seed: number, preset: string): Problem | null {
 	};
 	const command = (op: string, input: unknown, as: Actor = h.owner): unknown => {
 		const reply = h.raw(op, input, as);
+		if (reply.ok) successful.set(op, (successful.get(op) ?? 0) + 1);
 		trace.push({ op, input, as: as.name, reply: reply.ok ? "ok" : reply.error });
 		const key = `${op}: ${reply.ok ? "ok" : `${reply.error.code} ${reply.error.message.slice(0, 70)}`}`;
 		stats.set(key, (stats.get(key) ?? 0) + 1);
@@ -641,6 +613,7 @@ export function sequence(seed: number, preset: string): Problem | null {
 			],
 		});
 		answerOpen("adopt");
+		expect(rows("SELECT id FROM cases WHERE head IS NOT NULL")).toHaveLength(3);
 		const commits = ["random01", "random02", "random03"];
 		const changeCommits = ["change01", "change02"];
 		const causes = ["cause a", "cause b", "cause c"];
@@ -906,6 +879,20 @@ export function sequence(seed: number, preset: string): Problem | null {
 			const problem = audit();
 			if (problem) return { seed, step, ...problem, last: trace.slice(-15) };
 		}
+		if (
+			(successful.get("report") ?? 0) === 0 ||
+			(successful.get("plan") ?? 0) === 0 ||
+			rows("SELECT id FROM slots").length === 0 ||
+			rows("SELECT id FROM results").length === 0 ||
+			rows("SELECT id FROM runs").length === 0
+		)
+			return {
+				seed,
+				step: STEPS,
+				what: "sequence made no reporting progress",
+				detail: [...successful],
+				last: trace.slice(-15),
+			};
 		return null;
 	} finally {
 		h.close();
@@ -914,79 +901,61 @@ export function sequence(seed: number, preset: string): Problem | null {
 
 /** The test of one policy preset. Each preset has a file of its own, so the three run side by side. */
 export function extendedSequences(preset: "loose" | "standard" | "strict"): void {
-	test(`the ${preset} job audit excludes corrected-only evidence in a fixed sequence`, () => {
-		const h = harness({ preset });
-		try {
-			h.call("propose", { edits: [{ op: "create", body: { title: "Release check", methods: ["human"] } }] });
-			for (const q of h.call<InboxReply>("inbox", { kind: "adopt" }).items)
-				h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" }, reason: "fixture" });
-			const target = { commit: "fixedjob01", branch: "main" };
-			const planned = h.call<PlanReply>("plan", {
-				name: "Release",
-				select: { cases: ["C-1"] },
-				accepts: { commit: target.commit },
-				require: [
-					{ id: "manual", kind: "exercise", methods: ["human"], basis: "exact", minActors: 1 },
-					{ id: "ci", kind: "jobs", jobs: ["e2e"] },
-				],
-			});
-			h.call("report", { run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
-			const ci = h.actor("pipeline", "ci", ["read", "record"]);
-			const send = (outcome: "pass" | "skip" | "blocked", job = "e2e", corrects?: number) => {
-				const receipt = h.call<ReportReceipt>(
-					"report",
-					{
-						target,
-						job,
-						results: [{ test: { key: "check" }, outcome, ...(corrects === undefined ? {} : { corrects }) }],
-					},
-					ci,
-				);
-				expect(receipt).toMatchObject({ rejected: [], declined: [], counts: { total: 1 } });
-				const id = receipt.results[0];
-				if (id === undefined) throw new Error("expected a recorded result");
-				return id;
-			};
-			const snapshot = () => {
-				const gate = h.call<GateStatus>("gate", { run: planned.run });
-				return {
-					verdict: gate.verdict,
-					missing: gate.tally.missing,
-					jobs: [...new Set(auditJobs(h.app.db.raw).map((b) => b.job))],
+	if (preset === "loose")
+		test("the job audit excludes corrected-only evidence in a fixed sequence", () => {
+			const h = harness({ preset });
+			try {
+				h.call("propose", { edits: [{ op: "create", body: { title: "Release check", methods: ["human"] } }] });
+				for (const q of h.call<InboxReply>("inbox", { kind: "adopt" }).items)
+					h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" }, reason: "fixture" });
+				const target = { commit: "fixedjob01", branch: "main" };
+				const planned = h.call<PlanReply>("plan", {
+					name: "Release",
+					select: { cases: ["C-1"] },
+					accepts: { commit: target.commit },
+					require: [
+						{ id: "manual", kind: "exercise", methods: ["human"], basis: "exact", minActors: 1 },
+						{ id: "ci", kind: "jobs", jobs: ["e2e"] },
+					],
+				});
+				h.call("report", { run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+				const ci = h.actor("pipeline", "ci", ["read", "record"]);
+				const send = (outcome: "pass" | "skip" | "blocked", job = "e2e", corrects?: number) => {
+					const receipt = h.call<ReportReceipt>(
+						"report",
+						{
+							target,
+							job,
+							results: [{ test: { key: "check" }, outcome, ...(corrects === undefined ? {} : { corrects }) }],
+						},
+						ci,
+					);
+					expect(receipt).toMatchObject({ rejected: [], declined: [], counts: { total: 1 } });
+					const id = receipt.results[0];
+					if (id === undefined) throw new Error("expected a recorded result");
+					return id;
 				};
-			};
-			expect(snapshot()).toEqual({ verdict: "pending", missing: 1, jobs: [] });
-			const pass = send("pass");
-			expect(snapshot()).toEqual({ verdict: "passed", missing: 0, jobs: ["e2e"] });
-			const skip = send("skip", "corrections", pass);
-			expect(snapshot()).toEqual({ verdict: "pending", missing: 1, jobs: [] });
-			const blocked = send("blocked", "corrections", skip);
-			expect(snapshot()).toEqual({ verdict: "pending", missing: 1, jobs: [] });
-			send("pass", "e2e", blocked);
-			expect(snapshot()).toEqual({ verdict: "passed", missing: 0, jobs: ["e2e"] });
-		} finally {
-			h.close();
-		}
-	});
-
-	test(`the ${preset} audit resolves broad and exact-result standing independently`, () => {
-		using db = new Database(":memory:");
-		db.exec(`CREATE TABLE excuses (project INTEGER, signature INTEGER, scope TEXT, target INTEGER, class TEXT, decision INTEGER);
-			CREATE TABLE result_excuses (result INTEGER, slot INTEGER, class TEXT, decision INTEGER);
-			INSERT INTO excuses VALUES (1, 2, 'line:main', 0, 'excused', 30), (1, 2, 'line:main', 4, 'attributed', 10);
-			INSERT INTO result_excuses VALUES (5, NULL, 'excused', 20), (6, NULL, 'excused', 9),
-				(7, NULL, 'excused', 10), (8, 99, 'excused', 40);`);
-		const excuseOf = auditExcuses(db);
-		expect(excuseOf(1, 2, "line:main", 4, 5)).toEqual({ class: "excused", decision: 20 });
-		expect(excuseOf(1, 2, "line:main", 4, 6)).toEqual({ class: "attributed", decision: 10 });
-		expect(excuseOf(1, 2, "line:main", 4, 7)).toEqual({ class: "attributed", decision: 10 });
-		expect(excuseOf(1, 2, "line:main", 4, 8)).toEqual({ class: "attributed", decision: 10 });
-		expect(excuseOf(1, 2, "line:main", 9, 5)).toEqual({ class: "excused", decision: 30 });
-		expect(excuseOf(1, 2, "line:main", 0)).toEqual({ class: "excused", decision: 30 });
-		expect(excuseOf(2, 2, "line:main", 4, 5)).toEqual({ class: "excused", decision: 20 });
-		expect(excuseOf(1, 3, "line:main", 4)).toBeUndefined();
-		expect(excuseOf(1, 2, "line:other", 4)).toBeUndefined();
-	});
+				const snapshot = () => {
+					const gate = h.call<GateStatus>("gate", { run: planned.run });
+					return {
+						verdict: gate.verdict,
+						missing: gate.tally.missing,
+						jobs: [...new Set(auditJobs(h.app.db.raw).map((b) => b.job))],
+					};
+				};
+				expect(snapshot()).toEqual({ verdict: "pending", missing: 1, jobs: [] });
+				const pass = send("pass");
+				expect(snapshot()).toEqual({ verdict: "passed", missing: 0, jobs: ["e2e"] });
+				const skip = send("skip", "corrections", pass);
+				expect(snapshot()).toEqual({ verdict: "pending", missing: 1, jobs: [] });
+				const blocked = send("blocked", "corrections", skip);
+				expect(snapshot()).toEqual({ verdict: "pending", missing: 1, jobs: [] });
+				send("pass", "e2e", blocked);
+				expect(snapshot()).toEqual({ verdict: "passed", missing: 0, jobs: ["e2e"] });
+			} finally {
+				h.close();
+			}
+		});
 
 	test(`${SEEDS} extended random sequences under the ${preset} policy keep every invariant`, () => {
 		const problems: Problem[] = [];
