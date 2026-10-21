@@ -486,6 +486,16 @@ public final class QueueScreen: ProjectScreen {
 
 	/// Whether the person was shown what the question asks about, which is what lets them answer it. Evidence
 	/// this build cannot read was not shown. Every range of every proposal document must have appeared.
+	/// Whether scrolling through the proposal is what stands between the person and answering: not for one this build
+	/// cannot show, or whose documents could not be read.
+	public func awaitsScrolling(_ question: Question) -> Bool {
+		guard case .proposal(let edit) = question.evidence, edit.isShownWhole, !isShown(question) else { return false }
+		switch documents(of: question) {
+		case .notShown, .failed: return false
+		case .read, .reading, nil: return true
+		}
+	}
+
 	public func isShown(_ question: Question) -> Bool {
 		switch question.evidence {
 		case .unreadable: false

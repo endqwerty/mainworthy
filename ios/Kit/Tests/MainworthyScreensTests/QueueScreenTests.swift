@@ -1070,6 +1070,8 @@ struct QueueScreenTests {
 		}
 		#expect(why.hasSuffix("so it is answered in the web app."))
 		#expect(!screen.isShown(question))
+		// Scrolling cannot make it answerable here, so the page does not ask for it.
+		#expect(!screen.awaitsScrolling(question))
 		let accept = try #require(question.choices.first { $0.answer == "accept" })
 		#expect(await screen.answer(question, with: accept, reason: "Only content can be read") == false)
 		#expect(try await project.question(question.ref)?.isOpen == true)
@@ -1118,8 +1120,10 @@ struct QueueScreenTests {
 		#expect(!screen.isShown(question))
 		screen.showProposalRange(of: question, document: last.id, height: 100, top: 50, bottom: 100)
 		#expect(!screen.isShown(question))
+		#expect(screen.awaitsScrolling(question))
 		screen.showProposalRange(of: question, document: last.id, height: 100, top: 0, bottom: 50)
 		#expect(screen.isShown(question))
+		#expect(!screen.awaitsScrolling(question))
 	}
 
 	@Test("an answer the policy does not take is said so, in the server's words, and the question stays")
