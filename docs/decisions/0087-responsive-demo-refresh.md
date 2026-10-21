@@ -176,6 +176,11 @@ changes indexes only, with `archive: false`. This revisits migration 25's choice
 costs report writes and storage, but whole-database audits under the gate held every write for minutes.
 The ingestion budget remains unchanged and is checked with the reset budget.
 
+A preflight goes stale whenever another connection commits during it, and on the instance a job commits every
+minute while a token is in use, the reset's own included; the first, cold preflight takes minutes there. So the
+worker audits beside the server's writes at most twice, then audits under the gate, where nothing can make it
+stale and the cache is warm from the rounds before. That bounds the reset without a timeout deciding it.
+
 Rejected: a project-filtered final audit misses other projects' references. Auditing only referencing tables
 still scans unrelated rows. A preflight without the generation comparison can become stale before the gate.
 Capturing deleted parent keys and changed child keys with temporary triggers would duplicate SQLite's

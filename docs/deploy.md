@@ -256,7 +256,7 @@ DELETE programs. These indexes cost storage and maintenance on reports; decision
 The migration changes no archive data or version.
 
 Step timings go to stderr, for example `[mainworthy] demo "demo": delete results took 12.3 ms`. The log names
-database opening and closing, owner lookup, `preflight foreign keys`, transaction setup, provenance, grant capture,
+database opening and closing, owner lookup, `preflight foreign keys` (or, after two stale preflights, `check foreign keys under the gate`), transaction setup, provenance, grant capture,
 foreign-key deferral, table discovery, every table count and delete, recreation with grants, `finish reset transaction`,
 the whole reset worker, and the seed. Incremental constraint checks run with each delete and recreation statement;
 `finish reset transaction` includes the final constraint decision and commit or rollback.
