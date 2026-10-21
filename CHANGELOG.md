@@ -1,6 +1,7 @@
 # Changelog
 
 - 2026-10-20: **Fixed:** iPhone question headers stack the kind, source and time at accessibility text sizes, keeping proposal evidence and method badges inside the screen (issue #667).
+- 2026-10-20: **Fixed:** confirming Forget while the iPhone sends saved answers says that the entry was kept because answers were being sent, so you can try again. A recovered outcome shows instead. The saved-answers list schedules its next 24-hour eligibility update instead of refreshing every second (issue #674).
 - 2026-10-20: **Fixed:** the iPhone recognizes unavailable native passkey sign-in from a structured server detail, so rewording the server's message keeps the app's password fallback notice (issue #680).
 - 2026-10-20: **Fixed:** opening or cancelling the iPhone run planner keeps the Runs list's read errors. Planning errors and uncertain outcomes kept for **Retry plan** stay in the planner, and list errors do not appear there; a failure to read the folders shows in the planner, where they are chosen. A plan refused or left uncertain after the planner was cancelled is said in the list (issue #661).
 - 2026-10-20: **Fixed:** an iPhone run report whose resend is refused after a lost reply shows the server's reason and offers **Set report aside** for that slot. Confirmation warns that the earlier attempt may still have been recorded. The app reads the run again before restoring eligible controls; accepted and recovered resends keep their existing behavior. No stored data or API changes (issue #669).
