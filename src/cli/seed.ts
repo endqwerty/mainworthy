@@ -17,6 +17,8 @@ import { CliError } from "./errors.ts";
 export type SeedResult = {
 	cases: string[];
 	run: string;
+	/** Today's other planned run, the one an agent and a person both work. */
+	agentRun: string;
 	proposal: string | null;
 	questions: string[];
 	workSlot: number | null;
@@ -624,7 +626,14 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 		workSlot === undefined
 			? null
 			: await owner.call("work", { do: "take", run: planned.run, slot: workSlot, seconds: DEMO_WORK.seconds });
-	return { cases: refs, run: planned.run, proposal: proposal.proposal, questions, workSlot: working?.slot ?? null };
+	return {
+		cases: refs,
+		run: planned.run,
+		agentRun: agentRun.run,
+		proposal: proposal.proposal,
+		questions,
+		workSlot: working?.slot ?? null,
+	};
 }
 
 /**

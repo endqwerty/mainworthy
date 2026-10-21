@@ -98,7 +98,8 @@ test("a seeded project holds a suite in folders, a fortnight of history and five
 		// The runs: one every other day, the old ones closed as passed, one failed, one not finished, today's open.
 		const runs = z.array(Run).parse((await demo.call("find", { in: "runs", origin: "planned", limit: 100 })).items);
 		expect(runs.find((run) => run.ref === seeded.run)).toMatchObject({ name: "Checkout regression", state: "open" });
-		const past = runs.filter((run) => run.ref !== seeded.run);
+		// Today's two runs are made in the hours before the seed, which in the first hours of a day are yesterday's.
+		const past = runs.filter((run) => run.ref !== seeded.run && run.ref !== seeded.agentRun);
 		expect(past.length).toBeGreaterThanOrEqual(7);
 		expect(new Set(past.map((run) => dayOf(run.createdAt))).size).toBe(past.length);
 		expect(Math.min(...past.map((run) => dayOf(run.createdAt)))).toBe(today - 13);
