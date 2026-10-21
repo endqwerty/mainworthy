@@ -1065,13 +1065,37 @@ struct QueueScreenTests {
 		await screen.show(.open, filter: nil)
 		let question = try #require(screen.questions.first { $0.ref == made["question"]?.string })
 		await screen.readDocuments(of: question)
-		guard case .failed = screen.documents(of: question) else {
+		guard case .notShown(let why) = screen.documents(of: question) else {
 			Issue.record("unsupported edit was not refused"); return
 		}
+		#expect(why.hasSuffix("so it is answered in the web app."))
 		#expect(!screen.isShown(question))
 		let accept = try #require(question.choices.first { $0.answer == "accept" })
 		#expect(await screen.answer(question, with: accept, reason: "Only content can be read") == false)
 		#expect(try await project.question(question.ref)?.isOpen == true)
+	}
+
+	@Test("a proposal read for a question gone from the list still shows its documents")
+	func goneQuestionKeepsItsRead() async throws {
+		let key = try await Live.project(strict: true)
+		let owner = try await Live.signedIn(as: Live.owner)
+		let made: JSONValue = try await owner.write("propose", in: key, ["reason": "Review it", "edits": [
+			["op": "create", "outline": "A case to read"],
+		]])
+		let project = try await owner.project(key)
+		let screen = QueueScreen(project: project)
+		await screen.show(.open, filter: nil)
+		let question = try #require(screen.questions.first { $0.ref == made["question"]?.string })
+		// Someone else settles it; the open list no longer has it, but its page still shows it.
+		let reject = try #require(question.choices.first { $0.answer == "reject" })
+		#expect((try await project.answer(question, with: reject, reason: "Settled elsewhere")).isDecided)
+		await screen.refresh()
+		#expect(screen.current(question.ref) == nil)
+		await screen.readDocuments(of: question)
+		guard case .read(let documents) = screen.documents(of: question) else {
+			Issue.record("a gone question's read was dropped: \(String(describing: screen.documents(of: question)))"); return
+		}
+		#expect(documents.count == 1)
 	}
 
 	@Test("every document of a proposal needs viewport coverage")

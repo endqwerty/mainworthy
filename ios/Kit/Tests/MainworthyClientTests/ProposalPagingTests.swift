@@ -31,9 +31,13 @@ struct ProposalPagingTests {
 			Script(page("\(created),\(created),\(created)", count: 2)),
 			Script(page("\(created),\(created)", count: 3)),
 			Script(page(created, count: 2, cursor: #""next""#), page(created, count: 3)),
-			Script(page(created, count: 2, cursor: #""next""#), page(#"{"op":"policy"}"#, count: 2)),
 		] {
 			await #expect(throws: ClientError.unreadable) { _ = try await documents(script) }
+		}
+		// An edit this build has no page for, on a page the question's summaries did not cover, sends the proposal
+		// to the web app rather than calling a good reply unreadable.
+		await #expect(throws: ProposalReadError.notShownHere) {
+			_ = try await documents(Script(page(created, count: 2, cursor: #""next""#), page(#"{"op":"policy"}"#, count: 2)))
 		}
 	}
 
@@ -59,9 +63,10 @@ struct ProposalPagingTests {
 		let moved = Script.Reply.json(status: 409, #"{"ok":false,"error":{"code":"conflict","message":"the project changed since this page's cursor"}}"#)
 		let script = Script(first, moved, first, moved, first, moved, first, moved, first, moved)
 		let server = Server(instance: Instance(address: "https://mainworthy.example")!, secrets: MemoryStore(), transport: script)
-		await #expect(throws: ClientError.unreadable) {
+		await #expect(throws: ProposalReadError.keptChanging) {
 			_ = try await server.project("shop", identity: "shop-identity").documents(of: try evidence(count: 2))
 		}
+		#expect(ProposalReadError.keptChanging.shown == "The project kept changing while the proposal was read. Try again.")
 		#expect(script.asked.count == 8)
 	}
 

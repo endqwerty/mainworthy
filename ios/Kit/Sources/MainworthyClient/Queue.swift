@@ -149,7 +149,7 @@ extension ProjectClient {
 				// A write invalidates every page of this attempt, including the current bodies on its first page. A
 				// project written to faster than the proposal can be read is not read at all.
 				restarts += 1
-				guard restarts <= 3 else { throw ClientError.unreadable }
+				guard restarts <= 3 else { throw ProposalReadError.keptChanging }
 				parts = []
 				cursor = nil
 				cursors = []
@@ -189,8 +189,9 @@ extension ProjectClient {
 				return nil
 			}
 		}
-		// What the question counted is what must be here.
-		guard !edit.isShownWhole || documents.count == edit.count else { throw ClientError.unreadable }
+		// What the question counted is what must be here. A later page can hold an edit this build has no page for,
+		// which the question's twenty summaries did not show.
+		guard !edit.isShownWhole || documents.count == edit.count else { throw ProposalReadError.notShownHere }
 		return documents
 	}
 

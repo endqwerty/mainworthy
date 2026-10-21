@@ -34,9 +34,25 @@ public enum ClientError: Error, Equatable, Sendable {
 	}
 }
 
+/// Why a proposal's documents were not read whole, when the server's replies were fine.
+public enum ProposalReadError: Error, Equatable, Sendable {
+	/// A later page holds an edit this build has no page for.
+	case notShownHere
+	/// The project changed between pages every time the proposal was read.
+	case keptChanging
+
+	public var message: String {
+		switch self {
+		case .notShownHere:
+			"This proposal does more than add a case or change what one says: it restores an earlier version, moves, tags, archives or re-covers cases, makes a folder or changes the policy. This build does not show all of that, so it is answered in the web app."
+		case .keptChanging: "The project kept changing while the proposal was read. Try again."
+		}
+	}
+}
+
 extension Error {
 	/// What a screen says of any error: the client's own sentence, or the system's.
 	public var shown: String {
-		(self as? ClientError)?.message ?? localizedDescription
+		(self as? ClientError)?.message ?? (self as? ProposalReadError)?.message ?? localizedDescription
 	}
 }

@@ -218,6 +218,10 @@ private struct ProposalEvidence: View {
 					}
 					.id("\(QueueScreen.proposalSnapshot(question)) \(document.id)")
 				}
+			case .notShown(let why):
+				Label(why, systemImage: "info.circle")
+					.font(.subheadline)
+					.foregroundStyle(.secondary)
 			case .failed(let why):
 				Panel {
 					Label("What the edit changes could not be read. \(why)", systemImage: "exclamationmark.triangle")
