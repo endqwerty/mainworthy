@@ -302,7 +302,7 @@ the steps are kept below for an instance that has none.
 
 ### What changes for a pull request
 
-- **A failing test needs a fix, and nobody is asked** (since 2026-10-20, [decision 0122](decisions/0122-ci-failures-belong-to-the-session.md)). Project `mainworthy`
+- **A failing test needs a fix, and nobody is asked** (since 2026-10-20, [decision 0124](decisions/0124-ci-failures-belong-to-the-session.md)). Project `mainworthy`
   answers every failure "Defect in the product" by rule, a dispute between two reports aside, so the gate is
   `failed` and the job exits 1 with no question in the queue. The session that pushed the commit fixes it. The
   job's log ends with the command that reads what failed from the instance: `bun scripts/work.ts ci <pull request>`
