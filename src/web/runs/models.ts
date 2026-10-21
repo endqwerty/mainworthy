@@ -1,9 +1,11 @@
 import { z } from "zod";
 import { CaseBody, ExpandedStep, MethodKind } from "../../core/model.ts";
+import { ResultLocation } from "../../core/ops.ts";
 import { ResultTrail } from "../../core/results.ts";
 import { Obligation, SlotState, SlotWork, Tally, TargetMatch, Verdict } from "../../core/runs.ts";
 
 export const Run = z.object({
+	location: ResultLocation.nullable(),
 	ref: z.string(),
 	name: z.string(),
 	origin: z.enum(["planned", "change"]),

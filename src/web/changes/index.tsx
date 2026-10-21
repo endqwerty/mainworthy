@@ -322,7 +322,10 @@ function ChangeRuns({ change }: { change: string }) {
 							}}
 						>
 							<span className="ref">{run.ref}</span>
-							<code>{"commit" in run.accepts ? run.accepts.commit.slice(0, 12) : run.name}</code>
+							<span>
+								{run.location?.label ?? run.name}{" "}
+								{"commit" in run.accepts && <small className="mono dim">{run.accepts.commit.slice(0, 12)}</small>}
+							</span>
 							<span className={`change-verdict v-${run.verdict}`}>{run.verdict}</span>
 							<span className="change-run-reason dim">{run.reason}</span>
 							<time dateTime={new Date(run.createdAt).toISOString()} title={new Date(run.createdAt).toLocaleString()}>

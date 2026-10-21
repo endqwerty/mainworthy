@@ -7,10 +7,11 @@ struct EvidenceView: View {
 	let question: Question
 	let screen: QueueScreen
 	let viewport: CGRect
+	let workspace: Workspace
 
 	var body: some View {
 		switch question.evidence {
-		case .failure(let failed): FailureEvidence(failed: failed, timesSeen: question.timesSeen)
+		case .failure(let failed): FailureEvidence(failed: failed, timesSeen: question.timesSeen, workspace: workspace)
 		case .unlinked(let tests): UnlinkedEvidence(tests: tests)
 		case .finding(let finding): FindingEvidence(finding: finding)
 		case .proposal(let edit): ProposalEvidence(question: question, edit: edit, screen: screen, viewport: viewport)
@@ -30,6 +31,7 @@ struct EvidenceView: View {
 private struct FailureEvidence: View {
 	let failed: FailedResult
 	let timesSeen: Int
+	let workspace: Workspace
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 12) {
@@ -64,8 +66,12 @@ private struct FailureEvidence: View {
 					.foregroundStyle(Color.warn)
 			}
 			Panel("Where") {
-				Text([failed.target, failed.branch].compactMap { $0 }.joined(separator: " · "))
-					.font(.subheadline.monospaced())
+				if let location = failed.location {
+					ResultLocationView(location: location, workspace: workspace)
+				} else {
+					Text([failed.target, failed.branch].compactMap { $0 }.joined(separator: " · "))
+						.font(.subheadline.monospaced())
+				}
 				Text(
 					"\(failed.count) \(failed.count == 1 ? "test shares" : "tests share") this cause · seen \(timesSeen) \(timesSeen == 1 ? "time" : "times")"
 				)

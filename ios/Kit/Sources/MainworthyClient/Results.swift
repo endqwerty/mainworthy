@@ -4,6 +4,7 @@ import Foundation
 public struct CountedResult: Identifiable, Equatable, Sendable {
 	/// A result is counted once for each job that reported it.
 	public var id: String { "\(result):\(job)" }
+	public let location: ResultLocation?
 	public let result: Int
 	/// The test's ref: T-9.
 	public let test: String
@@ -28,6 +29,7 @@ public struct CountedResult: Identifiable, Equatable, Sendable {
 	public let build: URL?
 
 	init(_ wire: Wire.CountedResult) {
+		location = wire.location.map(ResultLocation.init)
 		result = wire.result
 		test = wire.test
 		name = wire.name
@@ -98,6 +100,7 @@ public struct TestDetail: Equatable, Sendable {
 		public let attempt: Int
 		public let duration: Double?
 		public let message: String?
+		public let location: ResultLocation?
 		public let commit: String?
 		/// The change the commit was reported for: pr:482.
 		public let change: String?
@@ -127,7 +130,8 @@ public struct TestDetail: Equatable, Sendable {
 			Result(
 				id: $0.id, outcome: $0.outcome, by: $0.by, model: $0.model, steps: $0.steps?.map(ResultStep.init),
 				at: Date(milliseconds: $0.at), attempt: $0.attempt,
-				duration: $0.durationMs, message: $0.message, commit: $0.commit, change: $0.change, job: $0.job,
+				duration: $0.durationMs, message: $0.message, location: $0.location.map(ResultLocation.init),
+				commit: $0.commit, change: $0.change, job: $0.job,
 				build: webAddress($0.build)
 			)
 		}

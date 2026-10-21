@@ -13,6 +13,9 @@ const MINUTE = 60_000;
 /** The repository the demo's pipeline reports on. */
 export const REPO = "demo/shop";
 
+/** Today's trunk failure landed through this recorded pull request. No random stream is consumed. */
+export const LANDED_CHANGE = { pr: 481, branch: "coupon-rounding", title: "Round coupon totals consistently" };
+
 export const AGENT_MODEL = "claude-opus-5-5";
 
 /**

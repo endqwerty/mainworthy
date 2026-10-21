@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ResultLocation } from "./results.ts";
 
 export const FlakyDetectionSettings = z
 	.object({
@@ -21,6 +22,7 @@ export const SameCodeEvidence = z.object({
 			samples: z.array(
 				z.object({
 					commit: z.string(),
+					location: ResultLocation.optional(),
 					env: z.string(),
 					job: z.string(),
 					actor: z.number(),

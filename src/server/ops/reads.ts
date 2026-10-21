@@ -59,8 +59,10 @@ import {
 	recentChanges,
 	resultById,
 	resultFailedStep,
+	resultLocation,
 	resultTrail,
 	signatureById,
+	targetByCommit,
 	testById,
 	testRef,
 	testsOfCase,
@@ -244,8 +246,11 @@ export function runView(ctx: Ctx, run: RunRow): Record<string, unknown> {
 	const status = gateOf(ctx, run);
 	const work = workIn(ctx, run.id);
 	const change = run.change !== null ? changeById(ctx.db, run.change) : null;
+	const accepts = json<{ commit?: string; repo?: string }>(run.accepts);
+	const target = accepts.commit ? targetByCommit(ctx.db, ctx.project.id, accepts.commit, accepts.repo ?? null) : null;
 	return {
 		ref: runRef(run),
+		location: target ? resultLocation(ctx.db, target) : null,
 		name: run.name,
 		origin: run.origin,
 		state: run.state,
@@ -446,6 +451,7 @@ function resultView(ctx: Ctx, row: ResultRow): Record<string, unknown> {
 		steps: resultTrail(row),
 		signature: row.signature !== null ? (signatureById(ctx.db, row.signature)?.text ?? null) : null,
 		corrects: row.corrects,
+		location: resultLocation(ctx.db, target),
 		commit: target.commit_sha,
 		change: target.change !== null ? (changeById(ctx.db, target.change)?.key ?? null) : null,
 		job: batch?.job ?? "",
@@ -637,6 +643,7 @@ function countedView(ctx: Ctx, row: CountedTest): Record<string, unknown> {
 		model: result.model,
 		steps: resultTrail(result),
 		at: result.at,
+		location: view.location,
 		commit: view.commit,
 		build: view.build,
 	};

@@ -658,8 +658,8 @@ async function cases(server: Server, count: number) {
 			await view.page.getByRole("group", { name: "Kind of run" }).getByRole("button", { name: "Change" }).click();
 			await eventually(rows, (texts) => texts.length === 1 && texts[0]?.startsWith("R-2") === true);
 			const detail = view.page.locator("#detail");
-			await detail.getByRole("heading", { name: "feat000 on pr:7" }).waitFor();
-			await detail.getByText("Commit feat0001feat0001").waitFor();
+			await detail.getByRole("heading", { name: "pr:7", exact: true }).waitFor();
+			await detail.getByText("feat0001feat", { exact: true }).waitFor();
 			const results = detail.getByRole("list", { name: "Results the gate counted" });
 			await results.getByText("removes an item").waitFor();
 			await results.getByText("expected 0 items").waitFor();
@@ -668,7 +668,7 @@ async function cases(server: Server, count: number) {
 
 			// The address of a change run opens the list with it selected; its change is a key away.
 			await view.page.goto(`${server.url}/p/scratch/runs/2`);
-			await view.page.locator("#detail").getByRole("heading", { name: "feat000 on pr:7" }).waitFor();
+			await view.page.locator("#detail").getByRole("heading", { name: "pr:7", exact: true }).waitFor();
 			await view.page.keyboard.press("Enter");
 			await view.page.waitForURL(/\/p\/scratch\/changes\/pr(%3A|:)7$/);
 
@@ -681,23 +681,23 @@ async function cases(server: Server, count: number) {
 			const history = view.page.getByRole("list", { name: "Runs of this change" });
 			const pushes = () => history.getByRole("link").allInnerTexts();
 			await eventually(pushes, (texts) => texts.length === 2);
-			expect((await pushes()).map((text) => text.split(/\s+/).slice(0, 3))).toEqual([
-				["R-3", "feat0002feat", "passed"],
-				["R-2", "feat0001feat", "blocked"],
+			expect((await pushes()).map((text) => text.split(/\s+/).slice(0, 4))).toEqual([
+				["R-3", "pr:7", "feat0002feat", "passed"],
+				["R-2", "pr:7", "feat0001feat", "blocked"],
 			]);
 			await history.getByRole("link").nth(1).click();
 			await view.page.waitForURL(/\/p\/scratch\/runs\/2$/);
-			await view.page.locator("#detail").getByText("Commit feat0001feat0001").waitFor();
+			await view.page.locator("#detail").getByText("feat0001feat", { exact: true }).waitFor();
 
 			// Jumping to another run and going Back shows the run the address names again.
 			await view.page.keyboard.press("ControlOrMeta+k");
 			await view.page.keyboard.type("R-3");
 			await view.page.keyboard.press("Enter");
 			await view.page.waitForURL(/\/p\/scratch\/runs\/3$/);
-			await view.page.locator("#detail").getByText("Commit feat0002feat0002").waitFor();
+			await view.page.locator("#detail").getByText("feat0002feat", { exact: true }).waitFor();
 			await view.page.goBack();
 			await view.page.waitForURL(/\/p\/scratch\/runs\/2$/);
-			await view.page.locator("#detail").getByText("Commit feat0001feat0001").waitFor();
+			await view.page.locator("#detail").getByText("feat0001feat", { exact: true }).waitFor();
 
 			// A change with more runs than a page reads the rest on request: the reply is split in two here.
 			let rest: unknown = null;

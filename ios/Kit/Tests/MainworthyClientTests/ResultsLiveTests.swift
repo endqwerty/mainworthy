@@ -6,6 +6,29 @@ import Testing
 
 @Suite("Results and tests against the server", .enabled(if: Live.isRunning, "needs `bun scripts/ios.ts test`"))
 struct ResultsLiveTests {
+	@Test("failure evidence and history name the recorded landing, keeping the exact hash secondary")
+	func landedLocation() async throws {
+		let server = Live.server()
+		_ = try await server.signIn(Live.owner)
+		let client = try await server.project(try await Live.project())
+		let commit = "1234567890abcdef1234567890abcdef12345678"
+		let results: JSONValue = [["test": ["key": "landed-location", "name": "Landed coupon"],
+			"outcome": "fail", "failure": ["message": "Coupon lost after merge"]]]
+		let _: JSONValue = try await server.write("report", in: client.key, [
+			"target": ["commit": "feature0001", "repo": "acme/shop", "branch": "coupon", "pr": 653, "title": "Keep coupons"], "results": results])
+		let _: JSONValue = try await server.write("change", in: client.key, [
+			"change": "pr:653", "state": "merged", "landing": ["commit": .string(commit), "branch": "main"]])
+		let _: JSONValue = try await server.write("report", in: client.key, [
+			"target": ["commit": .string(commit), "repo": "acme/shop", "branch": "main"], "results": results])
+		let question = try #require(try await client.questions(open: true, kind: .failure).questions.first { $0.title == "Coupon lost after merge" })
+		guard case .failure(let failure) = question.evidence else { Issue.record("Expected failure evidence"); return }
+		#expect(failure.location?.label == "main · pr:653 Keep coupons")
+		#expect(failure.location?.change == "pr:653" && failure.location?.commit == commit)
+		let test = try #require(try await client.tests(text: "Landed coupon").rows.first)
+		let detail = try #require(try await client.test(test.ref))
+		#expect(detail.results.first?.location == failure.location)
+	}
+
 	/// The run of the gate a change's page shows.
 	func run(_ client: ProjectClient) async throws -> String {
 		try #require(try await client.details(of: "pr:482").gate.run)

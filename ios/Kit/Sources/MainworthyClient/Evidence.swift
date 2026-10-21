@@ -51,6 +51,7 @@ public struct FailedResult: Equatable, Sendable {
 	/// The commit, shortened, or what else was tested.
 	public let target: String
 	public let branch: String?
+	public let location: ResultLocation?
 	/// The same cause also fails where this change started.
 	public let failsOnBase: Bool
 	/// A pass and a fail disagree about the same case.
@@ -68,6 +69,7 @@ public struct FailedResult: Equatable, Sendable {
 		count = wire.count
 		target = wire.target
 		branch = wire.branch
+		location = wire.location.map(ResultLocation.init)
 		failsOnBase = wire.hints.contains("fails-on-base")
 		isDisputed = wire.hints.contains("disputed")
 	}

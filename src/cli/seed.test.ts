@@ -242,3 +242,24 @@ test("seed fills the project an instance starts with while nothing was written t
 		expect(seeded.questions).toHaveLength(5);
 	});
 });
+
+test("the demo's trunk failure names the pull request that landed its exact commit", async () => {
+	await withInstance(async ({ client }) => {
+		await seed(client, { project: "demo", cases: 3, days: 0 });
+		const demo = on(client, "demo");
+		const failures = (await demo.call("inbox", { kind: "failure" })).items;
+		const trunk = failures.find((item) => item.evidence.branch === "main");
+		expect(trunk?.evidence).toMatchObject({
+			location: { label: "main · pr:481 Round coupon totals consistently", change: "pr:481" },
+		});
+		const landed = z.object({ commit: z.string() }).parse(trunk?.evidence.location);
+		const change = await demo.call("find", { in: "changes", limit: 100 });
+		expect(change.items).toContainEqual(
+			expect.objectContaining({
+				key: "pr:481",
+				state: "merged",
+				head: landed.commit,
+			}),
+		);
+	});
+});

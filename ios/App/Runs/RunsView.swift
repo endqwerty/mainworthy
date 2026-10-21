@@ -20,7 +20,10 @@ struct RunsView: View {
 								Spacer()
 								Text(run.state.word).font(.caption).foregroundStyle(.secondary)
 							}
-							Text(run.name).font(.headline)
+							Text(run.isPlanned ? run.name : (run.location?.label ?? run.name)).font(.headline)
+							if let commit = run.location?.commit {
+								Text(commit.prefix(12)).font(.caption.monospaced()).foregroundStyle(.secondary)
+							}
 							HStack {
 								TimelineView(.periodic(from: .now, by: 1)) { clock in Text(detail(run, at: clock.date)) }
 								Spacer()
@@ -70,7 +73,7 @@ struct RunsView: View {
 					if run.isPlanned {
 						RunView(screen: screen.open(run))
 					} else {
-						ChangeRunView(run: run, results: screen.results(of: run))
+						ChangeRunView(run: run, results: screen.results(of: run), workspace: workspace)
 					}
 				} else {
 					ContentUnavailableView("Run unavailable", systemImage: "questionmark.folder")

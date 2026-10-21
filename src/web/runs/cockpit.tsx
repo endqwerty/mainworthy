@@ -659,7 +659,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 								? "Only this run's results count; proves nothing about a build."
 								: "build" in run.accepts
 									? `Accepts results for build ${run.accepts.build}${run.accepts.env ? ` in ${run.accepts.env}` : ""}.`
-									: `Accepts results for commit ${run.accepts.commit}${run.accepts.env ? ` in ${run.accepts.env}` : ""}.`)}
+									: `Accepts results for ${run.location?.label ?? "commit"} (${run.accepts.commit.slice(0, 12)})${run.accepts.env ? ` in ${run.accepts.env}` : ""}.`)}
 					</div>
 				</div>
 				<section className="run-strip" aria-label="Run progress">

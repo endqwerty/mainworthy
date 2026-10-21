@@ -6,7 +6,7 @@ import { newStepId } from "../../core/ids.ts";
 import { Policy } from "../../core/kinds.ts";
 import { CaseBody, ConflictAddress, conflictLabel, emptyBody } from "../../core/model.ts";
 import type { QuestionItem } from "../../core/ops.ts";
-import { QuarantineEdit } from "../../core/ops.ts";
+import { ResultLocation as LocationSchema, QuarantineEdit } from "../../core/ops.ts";
 import { parseOutline } from "../../core/outline.ts";
 import { call } from "../lib/api.ts";
 import { queryKey, useQueryOp } from "../lib/data.ts";
@@ -16,6 +16,7 @@ import { navigate, refUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { DiffView, ProducerGlyph } from "../ui/index.tsx";
 import { QuarantineList, quarantineExitText } from "../ui/quarantine.tsx";
+import { ResultLocation } from "../ui/result-location.tsx";
 
 /** Only a recognisable assertion gets a comparison; an arbitrary log stays verbatim. */
 export function assertionComparison(message: string): { expected: string; observed: string } | null {
@@ -30,6 +31,7 @@ export function assertionComparison(message: string): { expected: string; observ
 const Test = z.object({ t: z.string(), name: z.string(), case: z.string().nullable().optional() });
 export const MapEvidence = z.object({ file: z.string(), tests: z.array(Test), count: z.number() });
 export const FailureEvidence = z.object({
+	location: LocationSchema.nullish(),
 	message: z.string().nullable(),
 	sample: z.number().nullable().optional(),
 	tests: z.array(Test.extend({ sameCode: SameCodeEvidence.optional() })),
@@ -465,9 +467,10 @@ function SameCodeSignals({ evidence }: { evidence: SameCodeEvidence }) {
 			<ul>
 				{signal.samples.map((sample) => (
 					<li key={sample.second.id}>
-						{sample.commit.slice(0, 12)} · {sample.job || "unnamed job"} · {sample.env || "default environment"} ·
-						producer {sample.actor}: result {sample.first.id} ({sample.first.outcome}, attempt {sample.first.attempt})
-						to result {sample.second.id} ({sample.second.outcome}, attempt {sample.second.attempt})
+						{sample.location ? <ResultLocation location={sample.location} /> : sample.commit.slice(0, 12)} ·{" "}
+						{sample.job || "unnamed job"} · {sample.env || "default environment"} · producer {sample.actor}: result{" "}
+						{sample.first.id} ({sample.first.outcome}, attempt {sample.first.attempt}) to result {sample.second.id} (
+						{sample.second.outcome}, attempt {sample.second.attempt})
 					</li>
 				))}
 			</ul>
@@ -498,8 +501,14 @@ export function QuestionEvidence({ question, full }: { question: QuestionItem; f
 					)}
 					<pre className="queue-log">{evidence.message ?? question.title}</pre>
 					<div className="dim">
-						{evidence.target} · {evidence.branch ?? evidence.scope} · {evidence.count}{" "}
-						{evidence.count === 1 ? "test shares" : "tests share"} this cause
+						{evidence.location ? (
+							<ResultLocation location={evidence.location} />
+						) : (
+							<>
+								{evidence.target} · {evidence.branch ?? evidence.scope}
+							</>
+						)}{" "}
+						· {evidence.count} {evidence.count === 1 ? "test shares" : "tests share"} this cause
 					</div>
 					{evidence.hints.includes("fails-on-base") && (
 						<p className="hintbox">The same cause also fails on the base of this change.</p>

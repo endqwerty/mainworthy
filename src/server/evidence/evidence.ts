@@ -8,7 +8,7 @@ import { caseNameAnnotation } from "../../core/case-annotation.ts";
 import { contentHash } from "../../core/hash.ts";
 import type { ActorKind } from "../../core/kinds.ts";
 import type { MethodKind } from "../../core/model.ts";
-import type { ChangeInput, Outcome, ReportInput, ResultIn, TargetIn } from "../../core/ops.ts";
+import type { ChangeInput, Outcome, ReportInput, ResultIn, ResultLocation, TargetIn } from "../../core/ops.ts";
 import { failedStep, type ResultStep } from "../../core/results.ts";
 import type { ShardWait } from "../../core/runs.ts";
 import { normaliseFailure, signatureHash } from "../../core/signature.ts";
@@ -222,6 +222,10 @@ const Q = {
 	change: sql<{ project: number; key: string }, ChangeRow>(
 		`SELECT c.*, e.ended, e.at AS ended_at FROM changes c LEFT JOIN change_ends e ON e.change = c.id
 		 WHERE c.project = $project AND c.key = $key`,
+	),
+	landedChanges: sql<{ project: number; repo: string | null; commit: string }, { key: string; title: string | null }>(
+		`SELECT c.key, c.title FROM changes c JOIN change_ends e ON e.change = c.id
+		 WHERE c.project = $project AND c.repo IS $repo AND c.head_sha = $commit AND e.ended = 'merged' LIMIT 2`,
 	),
 	changeById: sql<{ id: number }, ChangeRow>(
 		"SELECT c.*, e.ended, e.at AS ended_at FROM changes c LEFT JOIN change_ends e ON e.change = c.id WHERE c.id = $id",
@@ -712,6 +716,25 @@ export function mustTarget(db: Db, id: number): TargetRow {
 }
 export const targetsOfCommit = (db: Db, project: number, what: string): TargetRow[] =>
 	db.all(Q.targetsOfCommit, { project, what });
+/** Presentation only: a landing does not put trunk evidence back in a change's decision scope. */
+export function resultLocation(db: Db, target: TargetRow): ResultLocation {
+	const landed =
+		target.line === "trunk" && target.commit_sha !== null
+			? db.all(Q.landedChanges, { project: target.project, repo: target.repo, commit: target.commit_sha })
+			: [];
+	const change = target.change !== null ? changeById(db, target.change) : landed.length === 1 ? landed[0] : null;
+	const named = change && !change.key.startsWith("commit:") ? change : null;
+	const name = named ? [named.key, named.title].filter(Boolean).join(" ") : null;
+	return {
+		label:
+			[target.line === "trunk" ? (target.branch ?? "trunk") : null, name].filter(Boolean).join(" · ") ||
+			target.branch ||
+			(target.commit_sha ? "Commit" : target.what),
+		commit: target.commit_sha,
+		change: named?.key ?? null,
+	};
+}
+
 export const changeByKey = (db: Db, project: number, key: string): ChangeRow | null =>
 	db.get(Q.change, { project, key });
 export const changeById = (db: Db, id: number): ChangeRow | null => db.get(Q.changeById, { id });
