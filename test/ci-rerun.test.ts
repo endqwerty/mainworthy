@@ -89,6 +89,13 @@ function github(failing: Record<string, string[]>, start = 1) {
 			return "";
 		}
 		if (path.includes("/jobs?")) return JSON.stringify({ jobs: jobs() });
+		if (path.includes("/artifacts?"))
+			return JSON.stringify({
+				artifacts: ["tests-1", "tests-2", "tests-3", "quiet"].map((name) => ({
+					name: `results-${name}-attempt-1`,
+					expired: false,
+				})),
+			});
 		if (running && ++looks >= 2) {
 			running = false;
 			attempt += 1;
@@ -141,20 +148,24 @@ test("a run that ran again already is left, and a dry run says what it would run
 test("a run that uploaded no report is chosen from its jobs, and another failed download is an error", async () => {
 	const jobs = [job("scope"), job("static"), job("tests", "failure", 7), job("gate", "failure", 9)];
 	const read =
-		(download: () => never): Gh =>
+		(artifacts: string[], download: () => never): Gh =>
 		async (args) => {
 			if (args[0] === "run") return download();
-			if ((args.at(-1) ?? "").includes("/jobs?")) return JSON.stringify({ jobs });
+			const path = args.at(-1) ?? "";
+			if (path.includes("/jobs?")) return JSON.stringify({ jobs });
+			if (path.includes("/artifacts?"))
+				return JSON.stringify({ artifacts: artifacts.map((name) => ({ name, expired: false })) });
 			return JSON.stringify({ run_attempt: 1, status: "completed", conclusion: "failure" });
 		};
-	const none = read(() => {
-		throw new Error("gh run download 42: no artifact matches any of the names or patterns provided");
+	// What `gh` says then, with no artifact at all and with others but no report; neither is asked.
+	const none = read(["image-logs"], () => {
+		throw new Error("gh run download 42: no valid artifacts found to download");
 	});
 	expect(await rerunFailed("42", { gh: none, dryRun: true })).toEqual({
 		exit: 0,
 		lines: ["run 42: running again once, one after the other: tests"],
 	});
-	const broken = read(() => {
+	const broken = read(["results-tests-attempt-1"], () => {
 		throw new Error("gh run download 42: HTTP 502");
 	});
 	expect(rerunFailed("42", { gh: broken, dryRun: true })).rejects.toThrow("HTTP 502");
