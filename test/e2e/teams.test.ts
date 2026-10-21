@@ -18,7 +18,6 @@ test.skipIf(!browserAvailable)(
 			const { token } = z.object({ token: z.string() }).parse(made);
 			browser = await openPage(server, { path: "/p/scratch/settings" });
 			const { page } = browser;
-			page.setDefaultTimeout(5000);
 			await page.getByRole("option", { name: "People", exact: true }).click();
 			const teams = page.getByRole("region", { name: "Teams", exact: true });
 			await teams
@@ -74,7 +73,6 @@ test.skipIf(!browserAvailable)(
 		try {
 			browser = await openPage(server, { path: "/p/scratch/settings" });
 			const { page } = browser;
-			page.setDefaultTimeout(5000);
 			await page.route("**/api/admin", (route) =>
 				route.request().postDataJSON().do === "actor.list" ? route.fulfill({ json: api1Actors }) : route.continue(),
 			);

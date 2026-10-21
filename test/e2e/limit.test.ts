@@ -24,7 +24,7 @@ test.skipIf(!browserAvailable)(
 			for (let n = 1; n <= 5; n++) {
 				expect(await attempt(n)).toBe(401);
 				// The page writes the sentence a moment after the answer arrives; a person reads it when it is there.
-				await message.filter({ hasText: /^That token was not accepted\. Try again\.$/ }).waitFor({ timeout: 4000 });
+				await message.filter({ hasText: /^That token was not accepted\. Try again\.$/ }).waitFor();
 			}
 			// The sixth is refused unread while the block lasts, which is one second at first. The server's clock is
 			// the real one here: on a machine too busy to type inside that second, the sixth is one more failure,
@@ -32,7 +32,7 @@ test.skipIf(!browserAvailable)(
 			let status = 0;
 			for (let n = 6; n <= 12 && status !== 429; n++) status = await attempt(n);
 			expect(status).toBe(429);
-			await page.getByText(/^Too many attempts\. Try again in \d+ seconds?\.$/).waitFor({ timeout: 4000 });
+			await page.getByText(/^Too many attempts\. Try again in \d+ seconds?\.$/).waitFor();
 			// Nothing else changed: the form is still there, with what was typed in it.
 			expect(await page.locator("#app").count()).toBe(0);
 			expect(await field.inputValue()).toMatch(/^wrong-token-\d+-0123456789$/);

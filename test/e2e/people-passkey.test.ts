@@ -40,7 +40,6 @@ test.skipIf(!browserAvailable)(
 		try {
 			browser = await openPage(server, { signedIn: false, path: `/invite#${made.code}`, ready: "h1" });
 			const { page } = browser;
-			page.setDefaultTimeout(8000);
 			const laptop = await addAuthenticator(browser);
 			await page.getByRole("heading", { name: "You are invited as sam" }).waitFor();
 
@@ -183,7 +182,6 @@ test.skipIf(!browserAvailable)(
 			// 127.0.0.1 is the same server, and not the name its passkeys belong to.
 			browser = await openPage(started, { signedIn: false });
 			const { page } = browser;
-			page.setDefaultTimeout(8000);
 			await addAuthenticator(browser);
 			await page.getByRole("button", { name: "Sign in with a passkey" }).click();
 			await page.getByRole("status").filter({ hasText: "This browser could not use a passkey here." }).waitFor();
@@ -208,7 +206,6 @@ test.skipIf(!browserAvailable)(
 		try {
 			browser = await openPage(server, { signedIn: false, path: `/invite#${made.code}`, ready: "h1" });
 			const { page } = browser;
-			page.setDefaultTimeout(8000);
 			await addAuthenticator(browser);
 			page.on("request", (request) => {
 				if (request.url().endsWith("/api/login") && request.method() === "POST")
@@ -273,7 +270,6 @@ test.skipIf(!browserAvailable)(
 		try {
 			browser = await openPage(server, { signedIn: false, path: `/invite#${made.code}`, ready: "h1" });
 			const { page } = browser;
-			page.setDefaultTimeout(8000);
 			await slowReturn(page);
 			await page.getByRole("heading", { name: "You are invited as noor" }).waitFor();
 			idp.next({ subject: "sub-noor", email: "noor@example.com" });
@@ -316,7 +312,6 @@ test.skipIf(!browserAvailable)(
 		try {
 			browser = await openPage(server, { as: { name: "lee", password } });
 			const { page } = browser;
-			page.setDefaultTimeout(8000);
 			await page.keyboard.type("g,");
 			await page.getByRole("option", { name: "Your sign-in", exact: true }).click();
 			idp.next({ subject: "sub-lee", email: "lee@example.com" });

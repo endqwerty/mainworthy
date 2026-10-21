@@ -49,7 +49,6 @@ check(
 		});
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.getByRole("button", { name: "Pending case", exact: true }).waitFor();
 			await page.keyboard.press("e");
 			const step = page.getByRole("textbox", { name: "Step 1", exact: true });
@@ -130,7 +129,6 @@ for (const surface of ["case", "run"]) {
 			);
 			try {
 				const a = h.page;
-				a.setDefaultTimeout(5000);
 				if (surface === "case") {
 					await a.getByRole("button", { name: "Identity case", exact: true }).waitFor();
 					await a.keyboard.press("e");
@@ -140,7 +138,6 @@ for (const surface of ["case", "run"]) {
 					await a.getByRole("textbox", { name: "Result note" }).fill("Alice private note");
 				}
 				const b = await h.context.newPage();
-				b.setDefaultTimeout(5000);
 				await b.goto(`${server.url}/p/scratch/queue`);
 				await b.locator("#app").waitFor();
 				await revoke(server, "alice");
@@ -188,7 +185,6 @@ check(
 		const h = await openPage({ ...server, token }, { path: "/p/scratch/settings" });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			expect(await page.getByLabel("Policy preset").isEnabled()).toBe(true);
 			await page.getByLabel("Policy preset").selectOption("standard");
 			await page.getByText("standard is in force.", { exact: false }).waitFor();
@@ -211,7 +207,6 @@ check(
 		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			let policyWrites = 0;
 			page.on("request", (request) => {
 				if (request.method() === "POST" && request.postData()?.includes('"op":"policy"')) policyWrites++;
@@ -404,7 +399,6 @@ check(
 		});
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			await page.route("**/api/p/second/find", async (route) => {
 				await held;
 				await route.continue();
@@ -437,7 +431,6 @@ check(
 		const h = await openPage({ ...server, token: first }, { path: "/p/scratch/suite/c/1" });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(5000);
 			const title = page.getByRole("textbox", { name: "Case title", exact: true });
 			await page.getByRole("button", { name: "Shared name case", exact: true }).waitFor();
 			await page.keyboard.press("e");

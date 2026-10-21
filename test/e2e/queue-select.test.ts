@@ -36,7 +36,6 @@ test.skipIf(!browserAvailable)(
 		const view = await openPage(server, { path: "/p/scratch/queue" });
 		try {
 			const { page } = view;
-			page.setDefaultTimeout(8000);
 			const { failures, unlinked } = await questions(server);
 			const [f1, f2, f3] = failures;
 			const [u1, u2, u3] = unlinked;

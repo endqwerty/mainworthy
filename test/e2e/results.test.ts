@@ -16,7 +16,6 @@ import { browserAvailable, openPage, startServer } from "./support.ts";
 			});
 			view = await openPage(server, { path: "/p/scratch/changes/pr%3A12" });
 			const page = view.page;
-			page.setDefaultTimeout(8000);
 			const list = page.getByRole("list", { name: "Results the gate counted" });
 			await list.getByRole("listitem").first().waitFor();
 			expect(await list.getByRole("listitem").count()).toBe(3);

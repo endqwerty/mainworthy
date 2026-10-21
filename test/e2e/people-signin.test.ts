@@ -34,7 +34,6 @@ for (const device of ["desktop", "phone"] as const)
 			try {
 				browser = await openPage(server, { path: "/p/scratch/settings", device });
 				const { page } = browser;
-				page.setDefaultTimeout(5000);
 				let posts = 0;
 				page.on("request", (request) => {
 					if (request.url().endsWith("/api/logout") && request.method() === "POST") posts++;
@@ -117,7 +116,6 @@ test.skipIf(!browserAvailable)(
 		try {
 			browser = await openPage(server, { signedIn: false, path: `/invite#${made.code}`, ready: "h1" });
 			const { page } = browser;
-			page.setDefaultTimeout(8000);
 			await page.getByRole("heading", { name: "You are invited as sam" }).waitFor();
 			await page.getByText("This link works once, until", { exact: false }).waitFor();
 
@@ -198,7 +196,6 @@ test.skipIf(!browserAvailable)(
 		try {
 			browser = await openPage(server, { signedIn: false });
 			const { page } = browser;
-			page.setDefaultTimeout(8000);
 			const focused = () => page.evaluate(() => document.activeElement?.id || document.activeElement?.textContent);
 			expect(await focused()).toBe("signin-name");
 			const order: unknown[] = [];
@@ -235,7 +232,6 @@ test.skipIf(!browserAvailable)(
 		try {
 			browser = await openPage(server, { signedIn: false });
 			const { page } = browser;
-			page.setDefaultTimeout(8000);
 			const refusal = page
 				.locator("form")
 				.filter({ has: page.locator("#signin-password") })
@@ -286,7 +282,6 @@ test.skipIf(!browserAvailable)(
 		try {
 			browser = await openPage(server, { signedIn: false });
 			const { page } = browser;
-			page.setDefaultTimeout(8000);
 			// What the server answers a sign-in whose body took too long to arrive. A test answers in its place:
 			// no browser sends a body that slowly.
 			const slow = "the sign-in request took too long to arrive";
@@ -337,7 +332,6 @@ test.skipIf(!browserAvailable)(
 			// No cookie: the owner of the machine is let in as they are.
 			browser = await openPage(local, { signedIn: false, ready: "#app" });
 			const { page } = browser;
-			page.setDefaultTimeout(8000);
 			expect(await page.locator(".sfoot .me").textContent()).toContain("robin");
 			expect(await page.getByRole("button", { name: "Sign out" }).count()).toBe(0);
 			// The key does nothing either: the app is still there.
@@ -365,7 +359,6 @@ for (const key of ["Enter", "Space"] as const)
 				// The Suite has keys of its own on Enter and Space. A button that has the focus takes its own.
 				browser = await openPage(server, { path: "/p/scratch/suite" });
 				const { page } = browser;
-				page.setDefaultTimeout(8000);
 				let posts = 0;
 				page.on("request", (request) => {
 					if (request.url().endsWith("/api/logout") && request.method() === "POST") posts++;
@@ -392,7 +385,6 @@ test.skipIf(!browserAvailable)(
 		try {
 			browser = await openPage(server, { path: "/p/scratch/suite" });
 			const { page } = browser;
-			page.setDefaultTimeout(8000);
 			await page.locator("#list").waitFor();
 			const shown = () => page.evaluate(() => document.documentElement.dataset.theme);
 			const before = await shown();
@@ -422,7 +414,6 @@ test.skipIf(!browserAvailable)(
 		try {
 			browser = await openPage(server, { path: "/p/scratch/settings" });
 			const { page } = browser;
-			page.setDefaultTimeout(8000);
 			await page.evaluate(() => localStorage.setItem("mainworthy:#2:queue-input:scratch:pending", "Private answer"));
 			// The server signs the browser out, and the reply is dropped on its way back.
 			await page.route("**/api/logout", async (route) => {
@@ -450,9 +441,7 @@ for (const storage of ["available", "unavailable"] as const)
 			try {
 				browser = await openPage(server, { path: "/p/scratch/settings" });
 				const { page, context } = browser;
-				page.setDefaultTimeout(8000);
 				const other = await context.newPage();
-				other.setDefaultTimeout(5000);
 				await other.goto(`${server.url}/p/scratch/settings`);
 				await other.locator("#app").waitFor();
 				await page.evaluate((refuseRemoval) => {
@@ -526,7 +515,6 @@ for (const recovery of ["first check", "fallback check", "no answer"] as const)
 				await local.api("propose", { edits: [{ op: "create", outline: "Kept case\n  Original step" }] });
 				browser = await openPage(local, { path: "/p/scratch/suite/c/1" });
 				const { page } = browser;
-				page.setDefaultTimeout(5000);
 				await page.getByRole("button", { name: "Kept case", exact: true }).waitFor();
 				await page.route("**/api/logout", (route) => route.abort());
 				let checks = 0;
@@ -589,7 +577,6 @@ for (const tab of ["same tab (Q2)", "another tab (Q4)"] as const)
 			try {
 				browser = await openPage(local, { path: "/p/scratch/settings" });
 				const { page, context } = browser;
-				page.setDefaultTimeout(5000);
 				await page.evaluate(() =>
 					localStorage.setItem("mainworthy:#2:queue-input:scratch:pending", "Kept after failed clear"),
 				);
@@ -600,7 +587,6 @@ for (const tab of ["same tab (Q2)", "another tab (Q4)"] as const)
 				await page.unroute("**/api/logout");
 				const keeping = tab === "same tab (Q2)" ? page : await context.newPage();
 				if (keeping !== page) {
-					keeping.setDefaultTimeout(5000);
 					await keeping.goto(`${local.url}/p/scratch/settings`);
 					await keeping.locator("#app").waitFor();
 				}
@@ -643,7 +629,6 @@ test.skipIf(!browserAvailable)(
 		try {
 			browser = await openPage(server, { path: "/p/scratch/settings" });
 			const { page } = browser;
-			page.setDefaultTimeout(8000);
 			await page.evaluate(() => localStorage.setItem("mainworthy:#2:queue-input:scratch:pending", "Private answer"));
 			await page.route("**/api/logout", (route) => route.abort());
 			await page.getByRole("button", { name: "Sign out", exact: true }).click();
@@ -676,12 +661,10 @@ for (const source of ["sidebar", "sessions"] as const)
 				const run = await local.api("plan", { name: "Private run", select: {} });
 				browser = await openPage(local, { path: "/p/scratch/suite/c/1" });
 				const { page, context } = browser;
-				page.setDefaultTimeout(5000);
 				await page.getByRole("button", { name: "Private case", exact: true }).waitFor();
 				await page.keyboard.press("e");
 				await page.getByRole("textbox", { name: "Step 1", exact: true }).fill("Private unsaved case text");
 				const other = await context.newPage();
-				other.setDefaultTimeout(5000);
 				await other.goto(`${local.url}/p/scratch/runs/${run.run.slice(2)}`);
 				await other.locator('[data-active="true"][data-ready="true"]').waitFor();
 				await other.getByRole("textbox", { name: "Result note" }).fill("Private unsaved run note");
@@ -757,7 +740,6 @@ test.skipIf(!browserAvailable)(
 			await local.api("propose", { edits: [{ op: "create", outline: "Kept case\n  Original step" }] });
 			browser = await openPage(local, { path: "/p/scratch/suite/c/1" });
 			const { page } = browser;
-			page.setDefaultTimeout(5000);
 			await page.getByRole("button", { name: "Kept case", exact: true }).waitFor();
 			await page.keyboard.press("e");
 			const step = page.getByRole("textbox", { name: "Step 1", exact: true });
@@ -801,7 +783,6 @@ test.skipIf(!browserAvailable)(
 			const run = await local.api("plan", { name: "Delayed tab run", select: {} });
 			browser = await openPage(local, { path: `/p/scratch/runs/${run.run.slice(2)}` });
 			const { page, context } = browser;
-			page.setDefaultTimeout(5000);
 			await page.locator('[data-active="true"][data-ready="true"]').waitFor();
 			// A suspended tab may not process its storage notifications until after another tab signed in again.
 			await page.addInitScript(() =>
@@ -812,7 +793,6 @@ test.skipIf(!browserAvailable)(
 			const note = page.getByRole("textbox", { name: "Result note" });
 			await note.fill("Private note before clearing");
 			const other = await context.newPage();
-			other.setDefaultTimeout(5000);
 			await other.goto(`${local.url}/p/scratch/suite`);
 			await other.locator("#app").waitFor();
 			await other.getByRole("button", { name: "Sign out", exact: true }).click();
@@ -854,7 +834,6 @@ test.skipIf(!browserAvailable)(
 		const browser = await openPage(server, { path: "/p/scratch/settings", as: { name: "totp-browser", password } });
 		try {
 			const { page, context } = browser;
-			page.setDefaultTimeout(5000);
 			await page.getByRole("option", { name: "Your sign-in", exact: true }).click();
 			await page.getByRole("button", { name: "Add an authenticator", exact: true }).click();
 			await page.getByRole("img", { name: "Authenticator QR code", exact: true }).waitFor();

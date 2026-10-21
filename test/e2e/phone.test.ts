@@ -756,7 +756,6 @@ test.skipIf(!browserAvailable)(
 		const phone = await openPage(server, { device: "phone", path: "/p/checkout/suite" });
 		try {
 			const { page } = phone;
-			page.setDefaultTimeout(5000);
 			const palette = page.locator("[data-overlay=palette]");
 			const fieldHasFocus = () => page.evaluate(() => document.activeElement?.className === "palette-input");
 			// g p lists the projects and starts on the first other one: scratch, from checkout.

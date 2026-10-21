@@ -140,7 +140,6 @@ async function recordedDecisions(server: Server, ref: string) {
 			).toEqual({ failure: 5, adopt: 5, finding: 5, map: 5 });
 			view = await openPage(server, { path: "/p/scratch/queue" });
 			const { page } = view;
-			page.setDefaultTimeout(8000);
 			await page.setViewportSize({ width: 1280, height: 800 });
 			await page.waitForSelector("[data-current-question]");
 			const firstRef = await page.locator("[data-current-question]").getAttribute("data-current-question");
@@ -288,7 +287,6 @@ async function recordedDecisions(server: Server, ref: string) {
 				)[0]?.status,
 			).toBe("advised");
 			view = await openPage(server, { path: "/p/scratch/queue" });
-			view.page.setDefaultTimeout(8000);
 			await view.page.getByText("reviewer suggests infra", { exact: false }).waitFor();
 			await view.page.evaluate(
 				() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
@@ -363,7 +361,6 @@ async function recordedDecisions(server: Server, ref: string) {
 				],
 			});
 			view = await openPage(server, { path: "/p/scratch/queue" });
-			view.page.setDefaultTimeout(8000);
 			await view.page.waitForSelector("[data-current-question]");
 			const submissions: unknown[] = [];
 			view.page.on("request", (request) => {
@@ -415,7 +412,6 @@ async function recordedDecisions(server: Server, ref: string) {
 				{ token },
 			);
 			view = await openPage(server, { path: `/p/scratch/queue/${proposed.question?.slice(2)}` });
-			view.page.setDefaultTimeout(8000);
 			await view.page.locator(".diff").waitFor();
 			await server.api("propose", {
 				edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Person's newer title" } }],
@@ -485,7 +481,6 @@ async function recordedDecisions(server: Server, ref: string) {
 				}),
 			).token;
 			view = await openPage({ ...server, token }, { path: "/p/scratch/queue" });
-			view.page.setDefaultTimeout(8000);
 			await view.page.waitForSelector("[data-current-question]");
 			const q = (await server.api("inbox", {})).items[0];
 			if (!q) throw new Error("Rollback question missing");
@@ -538,7 +533,6 @@ async function recordedDecisions(server: Server, ref: string) {
 			const map = (await server.api("inbox", {})).items.find((q) => q.kind === "map");
 			if (!map) throw new Error("Map question missing");
 			view = await openPage(server, { path: `/p/scratch/queue/${map.q.slice(2)}` });
-			view.page.setDefaultTimeout(8000);
 			await view.page.waitForSelector("[data-current-question]");
 			// A test with no case holds nothing: the row says so, and the sidebar's count is not red.
 			expect(await view.page.locator(".queue-stakes").innerText()).toStartWith("Blocks nothing. Left alone,");
@@ -589,7 +583,6 @@ async function recordedDecisions(server: Server, ref: string) {
 				],
 			});
 			view = await openPage(server, { path: "/p/scratch/queue" });
-			view.page.setDefaultTimeout(3000);
 			await view.page.waitForSelector("[data-current-question]");
 			const q = await view.page.locator("[data-current-question]").getAttribute("data-current-question");
 			await view.page.keyboard.press("i");
@@ -656,7 +649,6 @@ async function recordedDecisions(server: Server, ref: string) {
 			expect(reply[0]?.status).toBe("decided");
 			for (const device of ["desktop", "phone"] as const) {
 				view = await openPage(server, { path: `/p/scratch/queue/${question.q.slice(2)}`, device });
-				view.page.setDefaultTimeout(8000);
 				await view.page.locator(".queue-decision").waitFor();
 				// Where each part's text is drawn, which is not its box: text that does not fit a box runs out of it.
 				const parts = await view.page.evaluate(() => {
@@ -731,7 +723,6 @@ async function recordedDecisions(server: Server, ref: string) {
 			}
 			view = await openPage(server, { path: "/p/scratch/queue" });
 			const { page } = view;
-			page.setDefaultTimeout(8000);
 			const signal = page.locator("#detail .same-code-evidence");
 			await signal.waitFor();
 			expect(await signal.locator("summary").innerText()).toContain(

@@ -37,7 +37,6 @@ async function fixture(count = 1, minActors: 1 | 2 = 1) {
 }
 
 async function ready(page: Page) {
-	page.setDefaultTimeout(5000);
 	await page.setViewportSize({ width: 1280, height: 800 });
 	await page.locator('[data-run-document="C-1"][data-active="true"][data-ready="true"]').waitFor();
 }

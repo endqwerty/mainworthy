@@ -47,8 +47,6 @@ test.skipIf(!browserAvailable)(
 			await page.evaluate(() => window.dispatchEvent(new Event("test:first")));
 			await page.waitForFunction(
 				() => document.querySelector('[data-testid="case-list"]')?.getAttribute("data-loaded") === "2",
-				undefined,
-				{ timeout: 4000 },
 			);
 			expect(await page.locator('#list [role="option"] .ti').allTextContents()).toEqual([
 				"Saved local case",
@@ -233,8 +231,6 @@ test.skipIf(!browserAvailable)(
 			const { page } = h;
 			await page.waitForFunction(
 				() => document.querySelector('[data-testid="case-list"]')?.getAttribute("data-loaded") === "1001",
-				undefined,
-				{ timeout: 4000 },
 			);
 			expect(await page.locator('[data-testid="case-list"]').getAttribute("data-total")).toBe("1001");
 			const duringReads = () =>
@@ -248,7 +244,7 @@ test.skipIf(!browserAvailable)(
 			await server.api("propose", {
 				edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Updated while reading" } }],
 			});
-			await page.getByRole("option").filter({ hasText: "Updated while reading" }).waitFor({ timeout: 4000 });
+			await page.getByRole("option").filter({ hasText: "Updated while reading" }).waitFor();
 			expect(await page.locator('[data-testid="case-list"]').getAttribute("data-loaded")).toBe("1001");
 			const refreshedReads = await duringReads();
 			expect(refreshedReads.reads).toBeGreaterThan(initialReads.reads);
@@ -357,7 +353,6 @@ test.skipIf(!browserAvailable)(
 		const browser = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const { page } = browser;
-			page.setDefaultTimeout(3000);
 			await page.getByRole("button", { name: "Checkout", exact: true }).waitFor();
 			await page.keyboard.press("e");
 			const step = page.getByRole("textbox", { name: "Step 1", exact: true });
@@ -652,7 +647,6 @@ test.skipIf(!browserAvailable)(
 		const h = await openPage(server, { path: "/p/scratch/queue" });
 		try {
 			const { page } = h;
-			page.setDefaultTimeout(10_000);
 			await page.addInitScript(() => {
 				const streams: EventSource[] = [];
 				const Native = window.EventSource;

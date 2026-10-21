@@ -1408,3 +1408,26 @@ describe("a public repository", () => {
 		expect(found).toEqual([]);
 	});
 });
+
+describe("the browser tests' deadlines", () => {
+	// One deadline for every wait of a browser test, `SETTLES` in test/e2e/support.ts. A file's own, from 3 to 8 s,
+	// measured how busy the machine was and was half of all the flaky-test issues (#672, 2026-10-20).
+	const settles = Number(
+		/export const SETTLES = ([\d_]+);/.exec(readFileSync("test/e2e/support.ts", "utf8"))?.[1]?.replaceAll("_", ""),
+	);
+	const ownDeadlines = (text: string): string[] =>
+		[...text.matchAll(/setDefaultTimeout\(|setDefaultNavigationTimeout\(|timeout: ([\d_]+)/g)]
+			.filter((match) => match[1] === undefined || Number(match[1].replaceAll("_", "")) < settles)
+			.map((match) => match[0]);
+	test("a browser test sets no deadline shorter than the suite's", () => {
+		expect(ownDeadlines("page.setDefaultTimeout(5000); await x.waitFor({ timeout: 4000 });")).toEqual([
+			"setDefaultTimeout(",
+			"timeout: 4000",
+		]);
+		expect(ownDeadlines("await x.waitFor({ timeout: 30000 });")).toEqual([]);
+		const found = [...new Glob("test/e2e/*.ts").scanSync(".")]
+			.filter((file) => file !== "test/e2e/support.ts")
+			.flatMap((file) => ownDeadlines(readFileSync(file, "utf8")).map((deadline) => `${file}: ${deadline}`));
+		expect(found).toEqual([]);
+	});
+});

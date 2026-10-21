@@ -46,7 +46,6 @@ for (const refusal of ["request", "changed evidence"]) {
 				if (!first || !next) throw new Error("Queue questions missing");
 				browser = await openPage(server, { path: `/p/scratch/queue/${first.q.slice(2)}` });
 				const { page } = browser;
-				page.setDefaultTimeout(5000);
 				await page.locator(`[data-current-question="${first.q}"]`).waitFor();
 				let requests = 0;
 				await browser.context.route("**/api/p/scratch/decide", async (route) => {
@@ -108,7 +107,6 @@ test.skipIf(!browserAvailable)(
 			});
 			browser = await openPage(server, { browser: chromium });
 			const { page } = browser;
-			page.setDefaultTimeout(5000);
 			const origin = server.url.replace("127.0.0.1", "mainworthy.test");
 			await page.goto(`${origin}/p/scratch/suite`);
 			await page.locator("#token").fill(server.token);
@@ -192,7 +190,6 @@ test.skipIf(!browserAvailable)(
 		try {
 			browser = await openPage(server, { browser: chromium });
 			const { page, context } = browser;
-			page.setDefaultTimeout(5000);
 			await page.goto(`${server.url.replace("127.0.0.1", "mainworthy.test")}/p/scratch/settings`);
 			await page.locator("#token").fill(server.token);
 			await page.keyboard.press("Enter");
@@ -228,7 +225,6 @@ test.skipIf(!browserAvailable)(
 		const browser = await openPage(server, { path: "/p/scratch/suite/c/2" });
 		try {
 			const { page } = browser;
-			page.setDefaultTimeout(5000);
 			await page.getByRole("button", { name: "Case 2", exact: true }).waitFor();
 			await page.keyboard.press("e");
 			await page.getByRole("textbox", { name: "Case title", exact: true }).fill("Case 2, my wording");
@@ -276,7 +272,6 @@ test.skipIf(!browserAvailable)(
 		});
 		try {
 			const { page } = browser;
-			page.setDefaultTimeout(5000);
 			await page.getByRole("button", { name: "Case 1", exact: true }).waitFor();
 			await page.keyboard.press("e");
 			await page.getByRole("textbox", { name: "Case title", exact: true }).fill("Case 1, my wording");
@@ -330,7 +325,6 @@ test.skipIf(!browserAvailable)(
 		const browser = await openPage({ ...server, token }, { path: "/p/second/suite" });
 		try {
 			const { page, context } = browser;
-			page.setDefaultTimeout(5000);
 			const reply = await context.request.post(`${server.url}/api/p/second/find`, { data: { in: "cases" } });
 			const error = z
 				.object({ ok: z.literal(false), error: z.object({ message: z.string() }) })
@@ -373,7 +367,6 @@ test.skipIf(!browserAvailable)(
 			});
 			browser = await openPage(server, { path: "/p/scratch/suite/c/1" });
 			const { page } = browser;
-			page.setDefaultTimeout(5000);
 			const card = page.locator("a.question-card");
 			await card.waitFor();
 			// A link that wraps as inline text is one box for each line, and its padding lies over the row above.

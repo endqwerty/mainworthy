@@ -45,7 +45,6 @@ for (const failure of ["unreadable", "internal", "session change", "internal bef
 				const browser = await openPage(server);
 				try {
 					const { page, context } = browser;
-					page.setDefaultTimeout(5000);
 					const other = failure === "session change" ? await context.newPage() : null;
 					if (other) {
 						await other.route("**/api/session", (route) =>
@@ -152,7 +151,7 @@ test.skipIf(!browserAvailable)(
 			await browser.page
 				.getByRole("status")
 				.filter({ hasText: "The server answered something this page cannot read; reload." })
-				.waitFor({ timeout: 5000 });
+				.waitFor();
 			expect(await browser.page.locator("#detail").innerText()).not.toContain("Check the connection");
 			expect(browser.errors).toEqual([]);
 		} finally {
@@ -249,7 +248,6 @@ for (const failure of ["internal", "session change", "begun"] as const) {
 					browser = await openPage(server, { path: `/p/scratch/runs/${plan.run.slice(2)}` });
 					const { page, context } = browser;
 					await page.setViewportSize({ width: 1280, height: 800 });
-					page.setDefaultTimeout(5000);
 					await page.waitForSelector('[data-run-document="C-1"][data-active="true"][data-ready="true"]');
 					const other = failure === "session change" ? await context.newPage() : null;
 					if (other) {
@@ -364,7 +362,6 @@ test.skipIf(!browserAvailable)(
 			const plan = await server.api("plan", { name: "Refused replay", select: {} });
 			browser = await openPage(server, { path: `/p/scratch/runs/${plan.run.slice(2)}` });
 			const { page } = browser;
-			page.setDefaultTimeout(5000);
 			const commands: string[] = [];
 			let readable = false;
 			await page.waitForSelector('[data-run-document="C-1"][data-active="true"][data-ready="true"]');
@@ -437,7 +434,6 @@ for (const first of ["fail", "pass"]) {
 				const plan = await server.api("plan", { name: "Late refusal", select: {} });
 				browser = await openPage(server, { path: `/p/scratch/runs/${plan.run.slice(2)}` });
 				const { page } = browser;
-				page.setDefaultTimeout(5000);
 				await page.waitForSelector('[data-run-document="C-1"][data-active="true"][data-ready="true"]');
 				let requests = 0;
 				await browser.context.route("**/api/p/scratch/report", async (route) => {
@@ -507,7 +503,6 @@ for (const field of ["title", "step"]) {
 			});
 			try {
 				const { page } = browser;
-				page.setDefaultTimeout(5000);
 				await page.clock.install();
 				await page.keyboard.press("c");
 				await page.keyboard.type("Idle capture");
@@ -561,7 +556,6 @@ test.skipIf(!browserAvailable)(
 		const browser = await openPage(server);
 		try {
 			const { page } = browser;
-			page.setDefaultTimeout(5000);
 			await browser.context.route("**/api/p/scratch/propose", (route) =>
 				route.fulfill({ json: { ok: false, error: { code: "limited", message: "Capture unavailable" } } }),
 			);
@@ -649,7 +643,6 @@ test.skipIf(!browserAvailable)(
 		const browser = await openPage(server, { path: "/p/scratch/suite?folder=Accounts&tag=smoke&tag=fast" });
 		try {
 			const { page } = browser;
-			page.setDefaultTimeout(5000);
 			const selection = () => page.locator('#list [role="option"][aria-selected="true"] .id').textContent();
 			const checkContext = async (count = 2) => {
 				const url = new URL(page.url());
@@ -718,7 +711,6 @@ test.skipIf(!browserAvailable)(
 		const browser = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const { page } = browser;
-			page.setDefaultTimeout(5000);
 			await page.getByRole("button", { name: "Open billing", exact: true }).click();
 			await page.keyboard.press("End");
 			await page.keyboard.type(" from Settings > Billing");
@@ -781,7 +773,6 @@ for (const preset of ["strict", "standard"]) {
 				if (!question) throw new Error("Failure question missing");
 				browser = await openPage(server, { path: `/p/scratch/queue/${question.q.slice(2)}` });
 				const { page } = browser;
-				page.setDefaultTimeout(5000);
 				await page.locator(`[data-current-question="${question.q}"]`).waitFor();
 				const key = preset === "strict" ? "f" : "d";
 				const text = preset === "strict" ? "Known flaky on the staging runner, see BUG-77" : "BUG-1234";
@@ -857,7 +848,6 @@ for (const editing of [false, true]) {
 				).token;
 				browser = await openPage(server, { path: "/p/scratch/suite/c/1" });
 				const { page } = browser;
-				page.setDefaultTimeout(5000);
 				await page.locator('[data-version="1"]').waitFor();
 				if (editing) {
 					await page.keyboard.press("e");
@@ -870,7 +860,7 @@ for (const editing of [false, true]) {
 				);
 				await page.locator('#nav a[aria-label="Queue"] em').filter({ hasText: "1" }).waitFor();
 				const card = page.locator(`[data-proposal="${proposed.question}"]`);
-				await card.waitFor({ state: "attached" });
+				await card.locator('[data-proposal-loaded="true"]').waitFor({ state: "attached" });
 				if (editing) {
 					const title = page.getByRole("textbox", { name: "Case title", exact: true });
 					expect(await title.inputValue()).toBe("Coupon case unfinished");
@@ -903,7 +893,6 @@ test.skipIf(!browserAvailable)(
 		const browser = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const { page } = browser;
-			page.setDefaultTimeout(5000);
 			await page.getByRole("button", { name: "Existing", exact: true }).waitFor();
 			await page.keyboard.press("c");
 			await page.keyboard.type("Back navigation draft");

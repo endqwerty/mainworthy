@@ -72,7 +72,6 @@ for (const when of ["after reply", "before reply", "after reload", "with an olde
 			const browser = await openPage(server);
 			try {
 				const { page } = browser;
-				page.setDefaultTimeout(5000);
 				if (when === "before reply") {
 					let first = true;
 					await page.route("**/propose", async (route) => {
@@ -202,7 +201,6 @@ for (const [status, code] of [
 			const browser = await openPage(server);
 			try {
 				const { page } = browser;
-				page.setDefaultTimeout(5000);
 				const stored = async () =>
 					z
 						.array(

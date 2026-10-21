@@ -14,7 +14,6 @@ import { browserAvailable, openPage, startServer } from "./support.ts";
 			await server.api("report", ciReport({ commit, n: 4, attempt: 2, only: [1] }));
 			view = await openPage(server, { path: "/p/scratch/suite" });
 			const page = view.page;
-			page.setDefaultTimeout(8000);
 			await page.keyboard.type("go");
 			await page.waitForURL("**/p/scratch/reports");
 			const list = page.getByRole("listbox", { name: "Reports" });
