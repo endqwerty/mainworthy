@@ -351,7 +351,7 @@ the steps are kept below for an instance that has none.
   to the gate. Re-run the shard's own job (`gh run rerun <run> --job <id>`): `gate` runs again after it and reads
   the other shards' reports from the earlier attempt. Since 2026-10-21 the `rerun` workflow does this by itself,
   once, after a run's first attempt fails, unless the lint, type-check, scope or description failed or more than
-  three jobs would run again (decision 0127). Its run's summary says which jobs it ran again and why.
+  three jobs would run again (decision 0128). Its run's summary says which jobs it ran again and why.
   A test that fails now and then is still a defect to fix, not to retry (`AGENTS.md`).
 - **A change that touches no code reports fewer tests.** The `scope` job runs only what a change needs
   (decision 0090). For a change to prose, another workflow or the iPhone app, one shard named `tests` reports the

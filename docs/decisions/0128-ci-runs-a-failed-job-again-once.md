@@ -1,4 +1,4 @@
-# 0127: CI runs a failed job again once, to tell a flaky test from a broken commit
+# 0128: CI runs a failed job again once, to tell a flaky test from a broken commit
 
 - Date: 2026-10-21
 - Status: accepted (the owner asked for it in the thread that built it, 2026-10-21)
