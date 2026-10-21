@@ -314,7 +314,7 @@ test("reset requests count both recipient and client using the shared attempt li
 	}
 });
 
-test("address replacement, password replacement, expiry and import invalidate pending links", async () => {
+test("address replacement, password replacement and expiry invalidate pending links", async () => {
 	const box = await mailbox();
 	const w = box.w;
 	try {
@@ -340,11 +340,6 @@ test("address replacement, password replacement, expiry and import invalidate pe
 		const expired = linkCode(box.messages.at(-1)?.text ?? "", "reset");
 		w.clock.advance(15 * 60_000);
 		expect((await w.post("/api/login", { reset: expired, password: PASSWORD })).status).toBe(400);
-		await w.post("/api/login", { resetRequest: "new@example.com" });
-		await waitMail(w.instance.app);
-		const imported = linkCode(box.messages.at(-1)?.text ?? "", "reset");
-		clearChallenges(w.instance.app);
-		expect((await w.post("/api/login", { reset: imported, password: PASSWORD })).status).toBe(400);
 	} finally {
 		await box.close();
 	}
@@ -549,14 +544,33 @@ test("archives preserve verified contacts and import invalidates all mail links"
 		expect(exported).not.toContain(reset);
 		expect(exported).not.toContain(verify);
 		expect(exported).not.toContain("smtp-password-private");
-		expect((await w.op("credential", { do: "email.set", email: "replacement@example.com" }, { cookie })).status).toBe(
-			200,
-		);
-		await waitMail(w.instance.app);
-		const pendingVerify = linkCode(
-			box.messages.findLast((message) => message.to === "<replacement@example.com>")?.text ?? "",
-			"email",
-		);
+		// A fresh import permits only bootstrap actors. Use a second instance for the pending verification,
+		// so changing its address cannot invalidate this instance's still-valid reset link.
+		const verification = await mailbox();
+		try {
+			const recovery = await invite(verification.w, { name: OWNER });
+			const accepted = await verification.w.post("/api/login", { invitation: recovery.code, password: PASSWORD });
+			expect(
+				(
+					await verification.w.op(
+						"credential",
+						{ do: "email.set", email: "replacement@example.com" },
+						{ cookie: accepted.cookie },
+					)
+				).status,
+			).toBe(200);
+			await waitMail(verification.w.instance.app);
+			const pendingVerify = linkCode(verification.messages.at(-1)?.text ?? "", "email");
+			const imported = await fetch(`${verification.w.instance.url}/api/import`, {
+				method: "POST",
+				headers: { cookie: accepted.cookie },
+				body: exported,
+			});
+			expect(imported.status).toBe(200);
+			expect((await verification.w.post("/api/login", { emailVerification: pendingVerify })).status).toBe(400);
+		} finally {
+			await verification.close();
+		}
 		const imported = await fetch(`${w.instance.url}/api/import`, {
 			method: "POST",
 			headers: { cookie },
@@ -564,7 +578,6 @@ test("archives preserve verified contacts and import invalidates all mail links"
 		});
 		expect(imported.status).toBe(200);
 		expect((await w.post("/api/login", { reset, password: NEXT })).status).toBe(400);
-		expect((await w.post("/api/login", { emailVerification: pendingVerify })).status).toBe(400);
 		expect(w.rows("SELECT email, verified_at IS NOT NULL AS verified FROM mail_contacts")).toEqual([
 			{ email: "owner-mail@example.com", verified: 1 },
 		]);
