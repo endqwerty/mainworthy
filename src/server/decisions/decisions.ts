@@ -5,6 +5,7 @@
 // - a detector suggests, a decision excuses: nothing in this file changes standing without a decision row;
 // - an answer names the evidence it saw, and an answer on changed evidence is a conflict, not a decision;
 // - a decision carries forward only while its hold stands, and is asked again with the old answer shown when not.
+import type { SameCodeEvidence } from "../../core/flaky.ts";
 import { contentHash } from "../../core/hash.ts";
 import {
 	type ActorKind,
@@ -28,6 +29,7 @@ import {
 	mustTarget,
 	ownChangeOf,
 	resultById,
+	resultLocation,
 	scopeEnded,
 	scopeOf,
 	signatureById,
@@ -2013,7 +2015,23 @@ export function toItemFor(ctx: Ctx, row: QuestionRow): QuestionItem & { you: "co
 }
 
 function itemOf(db: Db, row: QuestionRow, facts: ReadonlySet<string>, ask: Ask): QuestionItem {
-	const stored = json<Record<string, unknown> & { hints?: string[] }>(row.evidence);
+	const stored = json<Record<string, unknown> & { hints?: string[]; tests?: { sameCode?: SameCodeEvidence }[] }>(
+		row.evidence,
+	);
+	if (row.kind === "failure" && typeof stored.targetId === "number")
+		stored.location = resultLocation(db, mustTarget(db, stored.targetId));
+	if (row.kind === "failure") {
+		for (const test of stored.tests ?? []) {
+			for (const signal of test.sameCode?.signals ?? []) {
+				for (const sample of signal.samples) {
+					const result = resultById(db, sample.first.id);
+					if (!result || result.project !== row.project) continue;
+					const target = mustTarget(db, result.target);
+					if (target.commit_sha === sample.commit) sample.location = resultLocation(db, target);
+				}
+			}
+		}
+	}
 	if (row.kind === "adopt" && typeof stored.authorId === "number") stored.author = actorLabel(db, stored.authorId).name;
 	if (row.kind === "finding" && typeof stored.finderId === "number")
 		stored.finder = actorLabel(db, stored.finderId).name;

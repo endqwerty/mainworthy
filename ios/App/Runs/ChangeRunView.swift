@@ -11,13 +11,16 @@ struct RunLink: Hashable {
 struct ChangeRunView: View {
 	let run: Run
 	let results: ChangeResults
+	let workspace: Workspace
 
 	var body: some View {
 		ScrollView {
 			VStack(alignment: .leading, spacing: 16) {
-				Text(run.name).font(.title2.weight(.semibold))
+				Text(run.location?.label ?? run.name).font(.title2.weight(.semibold))
 				Panel("Run") {
-					if case .commit(let commit, _, _) = run.accepts {
+					if let location = run.location {
+						ResultLocationView(location: location, workspace: workspace)
+					} else if case .commit(let commit, _, _) = run.accepts {
 						LabeledContent("Commit") {
 							Text(commit.prefix(12)).font(.body.monospaced()).textSelection(.enabled)
 						}

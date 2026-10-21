@@ -1,5 +1,13 @@
 import { z } from "zod";
 
+/** The server's recorded developer-facing identity for a tested target. */
+export const ResultLocation = z.object({
+	label: z.string(),
+	commit: z.string().nullable(),
+	change: z.string().nullable(),
+});
+export type ResultLocation = z.infer<typeof ResultLocation>;
+
 export const Outcome = z.enum(["pass", "fail", "skip", "blocked", "error"]);
 export type Outcome = z.infer<typeof Outcome>;
 export const TRAIL_LIMITS = {

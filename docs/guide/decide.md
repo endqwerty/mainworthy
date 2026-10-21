@@ -292,6 +292,8 @@ See [report results](./report-results.md#link-tests-to-cases).
 
 ## Explain a failure
 
+Failure evidence names the change and its title, with the short commit as secondary detail. For a trunk failure it shows the branch, such as `main`, and the merged change when the server records that exact landed commit. With no recorded association it shows only the branch and commit. Open the named change to read its gate and results. Test history and commit runs use the same identifiers.
+
 Choose "Defect in the product" when the product needs a fix.
 Choose "The test is wrong" when the test needs a fix.
 Choose "Expected: behaviour changed" when the intended behavior changed.

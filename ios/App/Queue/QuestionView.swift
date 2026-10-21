@@ -124,7 +124,8 @@ struct QuestionView: View {
 				}
 				EvidenceView(
 					question: question, screen: screen,
-					viewport: asking == nil && confirming == nil ? viewport : .zero
+					viewport: asking == nil && confirming == nil ? viewport : .zero,
+					workspace: workspace
 				)
 				if !question.advice.isEmpty { advice(question.advice) }
 				if let decision = question.decision {

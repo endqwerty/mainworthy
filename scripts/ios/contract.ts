@@ -133,6 +133,16 @@ export const Inbox = struct("Inbox", "`inbox`: a page of questions, and how many
 	cursor: maybe(text),
 });
 
+const ResultLocation = struct(
+	"ResultLocation",
+	"The server's recorded developer-facing identity for a tested target.",
+	{
+		label: text,
+		commit: maybe(text),
+		change: maybe(text),
+	},
+);
+
 const TestRef = struct("TestRef", "A test a question is about.", {
 	t: [text, "Its ref, for example T-9."],
 	name: text,
@@ -145,6 +155,7 @@ const FACTS = list(text);
 /** A question's evidence, by the question's kind. A kind the app does not know is shown and cannot be answered. */
 export const EVIDENCE = {
 	failure: struct("FailureEvidence", "A failed result nobody has explained.", {
+		location: maybe(ResultLocation),
 		message: [maybe(text), "The failure as the runner reported it."],
 		scope: [text, "Where it was asked: a change (pr:482), the trunk, or a run."],
 		tests: [list(TestRef), "The tests that share the cause: the first fifty."],
@@ -332,6 +343,7 @@ export const ChangeEvent = struct("ChangeEvent", "One event of `GET /api/p/<proj
 
 // Runs, a planned run's pinned slots, and manual results.
 export const Run = struct("Run", "A planned run or a change run, with the server's verdict.", {
+	location: maybe(ResultLocation),
 	ref: text,
 	name: text,
 	origin: [text, "planned, or change: the run of one reported commit."],
@@ -521,6 +533,7 @@ export const CountedResults = struct("CountedResults", "`find` in results: what 
 	count: [maybe(whole), "How many rows match the filter."],
 	items: list(
 		struct("CountedResult", "One test as the gate counted it.", {
+			location: maybe(ResultLocation),
 			model: maybe(text),
 			steps: nullable(list(ResultStep)),
 			result: whole,
@@ -585,6 +598,7 @@ export const TestDetail = struct("TestDetail", "`get` with a T- ref: a test and 
 			durationMs: maybe(number),
 			message: maybe(text),
 			commit: maybe(text),
+			location: maybe(ResultLocation),
 			change: maybe(text),
 			job: text,
 			build: maybe(text),

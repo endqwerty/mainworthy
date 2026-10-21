@@ -9,7 +9,7 @@ import { ProposeReply } from "../core/ops.ts";
 import type { Client } from "./client.ts";
 import { automateOf, type DemoCase, demoCases, random, requirementOf } from "./demo/cases.ts";
 import { DEMO_FIELDS, demoAliases, demoFields } from "./demo/fields.ts";
-import { AGENT_MODEL, dayStart, demoHistory, type Failure, hex, REPO } from "./demo/history.ts";
+import { AGENT_MODEL, dayStart, demoHistory, type Failure, hex, LANDED_CHANGE, REPO } from "./demo/history.ts";
 import { demoAgentScreenshot, demoScreenshot, demoTrail } from "./demo/trails.ts";
 import { DEMO_WORK } from "./demo/work.ts";
 import { CliError } from "./errors.ts";
@@ -485,9 +485,14 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 	// A demo with no history links its tests now, on the first report there is.
 	if (days === 0) await linkTests(since - 4 * HOUR);
 	await write(ci, "report", "red", since - 3 * HOUR, {
-		target: { commit: red, repo: REPO, branch: "main" },
+		target: { commit: red, repo: REPO, ...LANDED_CHANGE },
 		job: "shop",
 		results: pipelineResults(broken, 0.4, true),
+	});
+	await write(ci, "change", "red-landing", since - 3 * HOUR + MINUTE, {
+		change: `pr:${LANDED_CHANGE.pr}`,
+		state: "merged",
+		landing: { commit: red, branch: "main" },
 	});
 	await write(ci, "report", "pr", since - 2 * HOUR, {
 		target: {

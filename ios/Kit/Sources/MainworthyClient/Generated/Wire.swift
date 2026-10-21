@@ -158,6 +158,13 @@ enum Wire {
 		let cursor: String?
 	}
 
+	/// The server's recorded developer-facing identity for a tested target.
+	struct ResultLocation: Decodable, Equatable, Sendable {
+		let label: String
+		let commit: String?
+		let change: String?
+	}
+
 	/// A test a question is about.
 	struct TestRef: Decodable, Equatable, Sendable {
 		/// Its ref, for example T-9.
@@ -169,6 +176,7 @@ enum Wire {
 
 	/// A failed result nobody has explained.
 	struct FailureEvidence: Decodable, Equatable, Sendable {
+		let location: ResultLocation?
 		/// The failure as the runner reported it.
 		let message: String?
 		/// Where it was asked: a change (pr:482), the trunk, or a run.
@@ -440,6 +448,7 @@ enum Wire {
 
 	/// A planned run or a change run, with the server's verdict.
 	struct Run: Decodable, Equatable, Sendable {
+		let location: ResultLocation?
 		let ref: String
 		let name: String
 		/// planned, or change: the run of one reported commit.
@@ -687,6 +696,7 @@ enum Wire {
 
 	/// One test as the gate counted it.
 	struct CountedResult: Decodable, Equatable, Sendable {
+		let location: ResultLocation?
 		let model: String?
 		let steps: [ResultStep]?
 		let result: Int
@@ -710,10 +720,11 @@ enum Wire {
 		/// Where the CI build is, as the report named it.
 		let build: String?
 
-		private enum CodingKeys: String, CodingKey { case model, steps, result, test, name, file, `case`, outcome, standing, quarantined, question, attempt, durationMs, message, job, by, build }
+		private enum CodingKeys: String, CodingKey { case location, model, steps, result, test, name, file, `case`, outcome, standing, quarantined, question, attempt, durationMs, message, job, by, build }
 
 		init(from decoder: any Decoder) throws {
 			let container = try decoder.container(keyedBy: CodingKeys.self)
+			location = try container.decodeIfPresent(ResultLocation.self, forKey: .location)
 			model = try container.decodeIfPresent(String.self, forKey: .model)
 			steps = try container.decode([ResultStep]?.self, forKey: .steps)
 			result = try container.decode(Int.self, forKey: .result)
@@ -800,11 +811,12 @@ enum Wire {
 		let durationMs: Double?
 		let message: String?
 		let commit: String?
+		let location: ResultLocation?
 		let change: String?
 		let job: String
 		let build: String?
 
-		private enum CodingKeys: String, CodingKey { case model, steps, id, outcome, by, at, attempt, durationMs, message, commit, change, job, build }
+		private enum CodingKeys: String, CodingKey { case model, steps, id, outcome, by, at, attempt, durationMs, message, commit, location, change, job, build }
 
 		init(from decoder: any Decoder) throws {
 			let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -818,6 +830,7 @@ enum Wire {
 			durationMs = try container.decodeIfPresent(Double.self, forKey: .durationMs)
 			message = try container.decodeIfPresent(String.self, forKey: .message)
 			commit = try container.decodeIfPresent(String.self, forKey: .commit)
+			location = try container.decodeIfPresent(ResultLocation.self, forKey: .location)
 			change = try container.decodeIfPresent(String.self, forKey: .change)
 			job = try container.decode(String.self, forKey: .job)
 			build = try container.decodeIfPresent(String.self, forKey: .build)

@@ -20,6 +20,7 @@ import {
 	QuarantineEdit,
 	QuestionItem,
 	ReportReceipt,
+	ResultLocation,
 	WorkReply,
 } from "./ops.ts";
 import {
@@ -91,6 +92,7 @@ const CaseSummary = z.looseObject({
 	open: whole,
 });
 const Result = z.looseObject({
+	location: ResultLocation,
 	model: nullableText,
 	steps: ResultTrail.nullable(),
 	id: whole,
@@ -116,6 +118,7 @@ const Result = z.looseObject({
 });
 /** A test as a commit's gate counted it: `find --in results`. */
 const CountedResult = z.looseObject({
+	location: ResultLocation,
 	model: nullableText,
 	steps: ResultTrail.nullable(),
 	result: whole,
@@ -146,6 +149,7 @@ const TestSummary = z.looseObject({
 	case: nullableText,
 });
 const Run = z.looseObject({
+	location: ResultLocation.nullable(),
 	quarantined: GateStatus.shape.quarantined,
 	ref: text.regex(/^R-\d+$/),
 	name: text,

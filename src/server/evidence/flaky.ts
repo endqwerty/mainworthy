@@ -1,12 +1,13 @@
 import type { FlakyDetectionSettings, SameCodeEvidence } from "../../core/flaky.ts";
 import { type Db, sql } from "../kernel/db.ts";
-import { uncorrectedResults } from "./evidence.ts";
+import { mustTarget, resultLocation, uncorrectedResults } from "./evidence.ts";
 
 type Flip = {
 	signature: number;
 	text: string;
 	class: "assertion" | "timeout" | "infra";
 	total: number;
+	target: number;
 	commit_sha: string;
 	env: string;
 	job: string;
@@ -22,7 +23,7 @@ type Flip = {
 const Q = {
 	evidence: sql<{ project: number; test: number; since: number }, Flip>(`
 		SELECT * FROM (
-			SELECT s.id AS signature, s.text, s.class, t.commit_sha, t.env, b.job, r.actor, f.first_result, f.second_result,
+			SELECT s.id AS signature, s.text, s.class, t.id AS target, t.commit_sha, t.env, b.job, r.actor, f.first_result, f.second_result,
 			       a.outcome AS first_outcome, r.outcome AS second_outcome,
 			       a.attempt AS first_attempt, r.attempt AS second_attempt,
 			       count(*) OVER (PARTITION BY s.id) AS total,
@@ -78,6 +79,7 @@ export function sameCodeEvidence(
 		}
 		signal.samples.push({
 			commit: row.commit_sha,
+			location: resultLocation(db, mustTarget(db, row.target)),
 			env: row.env,
 			job: row.job,
 			actor: row.actor,

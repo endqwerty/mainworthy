@@ -157,7 +157,7 @@ struct TestView: View {
 				Panel("Latest results") {
 					if test.results.isEmpty { Text("No results yet.").foregroundStyle(.secondary) }
 					ForEach(test.results) { result in
-						TestResultRow(result: result, attachments: screen.attachments)
+						TestResultRow(result: result, attachments: screen.attachments, workspace: workspace)
 						if result.id != test.results.last?.id { Divider() }
 					}
 				}
@@ -172,15 +172,20 @@ struct TestView: View {
 private struct TestResultRow: View {
 	let result: TestDetail.Result
 	let attachments: ResultAttachmentScreen
+	let workspace: Workspace
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 4) {
 			HStack(spacing: 6) {
 				Tag(text: result.outcome, tint: outcomeTint(result.outcome))
-				if let commit = result.commit { Text(commit.prefix(12)).font(.caption.monospaced()) }
-				if let change = result.change { Text(change).font(.caption.weight(.medium)) }
 				Spacer(minLength: 0)
 				Text(result.at, format: .relative(presentation: .named)).font(.caption).foregroundStyle(.secondary)
+			}
+			if let location = result.location {
+				ResultLocationView(location: location, workspace: workspace)
+			} else {
+				if let change = result.change { Text(change).font(.caption.weight(.medium)) }
+				if let commit = result.commit { Text(commit.prefix(12)).font(.caption.monospaced()) }
 			}
 			Text(facts(job: result.job, attempt: result.attempt, duration: result.duration, by: result.by, model: result.model))
 				.font(.caption).foregroundStyle(.secondary)

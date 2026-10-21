@@ -25,6 +25,7 @@ import { Obligation, SlotWork, TargetMatch, Verdict } from "./runs.ts";
 import { TeamInput } from "./teams.ts";
 
 export { cmd } from "./commands.ts";
+export { ResultLocation } from "./results.ts";
 
 const ref = (what: string) => z.string().describe(what);
 const limit = z.number().int().min(1).max(500).optional();

@@ -36,7 +36,7 @@ struct ChangeView: View {
 		}
 		.navigationDestination(for: RunLink.self) { link in
 			if let run = screen.runs.first(where: { $0.ref == link.ref }) {
-				ChangeRunView(run: run, results: screen.results(of: run))
+				ChangeRunView(run: run, results: screen.results(of: run), workspace: workspace)
 			} else {
 				ContentUnavailableView("Run unavailable", systemImage: "questionmark.folder")
 			}
@@ -85,8 +85,11 @@ struct ChangeView: View {
 							NavigationLink(value: RunLink(ref: run.ref)) {
 								HStack {
 									RefText(run.ref)
-									if case .commit(let commit, _, _) = run.accepts {
-										Text(commit.prefix(7)).font(.subheadline.monospaced())
+									VStack(alignment: .leading, spacing: 4) {
+										if let location = run.location { Text(location.label).font(.subheadline) }
+										if case .commit(let commit, _, _) = run.accepts {
+											Text(commit.prefix(12)).font(.caption.monospaced()).foregroundStyle(.secondary)
+										}
 									}
 									Tag(text: run.verdict.word, tint: run.verdict.tint)
 									Spacer()

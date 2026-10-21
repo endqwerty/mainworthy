@@ -128,6 +128,7 @@ public struct RunChange: Equatable, Sendable {
 }
 
 public struct Run: Identifiable, Equatable, Sendable {
+	public let location: ResultLocation?
 	public var id: String { ref }
 	public let ref: String
 	public let name: String
@@ -163,6 +164,7 @@ public struct Run: Identifiable, Equatable, Sendable {
 		}.joined(separator: " · ")
 	}
 	init(_ wire: Wire.Run) {
+		location = wire.location.map(ResultLocation.init)
 		ref = wire.ref
 		name = wire.name
 		state = RunState(wire.state)

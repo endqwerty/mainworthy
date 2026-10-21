@@ -8,6 +8,7 @@ import { useBindings } from "../lib/keys.ts";
 import { navigate, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, EmptyState, KeyCap, ListRow } from "../ui/index.tsx";
+import { ResultLocation } from "../ui/result-location.tsx";
 import { RunCockpit } from "./cockpit.tsx";
 import { Run, tallyText } from "./models.ts";
 import { RunPlanner } from "./planner.tsx";
@@ -162,8 +163,14 @@ function RunListing({ opened }: { opened: Run | null }) {
 						<ListRow key={run.ref} selected={selected?.ref === run.ref} onClick={() => choose(run.ref)}>
 							<span className="ref">{run.ref}</span>
 							<span className="run-title">
-								<b>{run.name}</b>
+								<b>{run.origin === "change" ? (run.location?.label ?? run.name) : run.name}</b>
 								<span className="run-list-reason">
+									{run.location?.commit && (
+										<>
+											<code>{run.location.commit.slice(0, 12)}</code>
+											{" · "}
+										</>
+									)}
 									{run.origin === "planned" &&
 										`${run.workUntil !== null && run.workUntil <= now ? 0 : run.inProgress} in progress · `}
 									{run.reason}
@@ -250,7 +257,7 @@ function RunListing({ opened }: { opened: Run | null }) {
 								? "Counts only its own results; proves nothing about a build."
 								: "build" in selected.accepts
 									? `Accepts results for build ${selected.accepts.build}${selected.accepts.env ? ` in ${selected.accepts.env}` : ""}.`
-									: `Accepts results for commit ${selected.accepts.commit}.`}
+									: `Accepts results for ${selected.location?.label ?? "commit"} (${selected.accepts.commit.slice(0, 12)}).`}
 						</p>
 						<button className="out" type="button" onClick={() => open(selected)}>
 							<KeyCap>Enter</KeyCap> Open cockpit
@@ -277,12 +284,18 @@ function ChangeRunDetail({ run }: { run: Run }) {
 					{run.state} · {age(run.createdAt)} · first reported by {run.createdBy}
 				</span>
 			</div>
-			<h2>{run.name}</h2>
+			<h2>{run.location?.label ?? run.name}</h2>
 			<p className={`run-verdict v-${run.verdict}`}>{run.reason}</p>
 			<p className="dim">{tallyText(run.tally)}</p>
 			{"commit" in run.accepts && (
 				<p className="dim">
-					Commit <code>{run.accepts.commit}</code>
+					{run.location ? (
+						<ResultLocation location={run.location} />
+					) : (
+						<>
+							Commit <code>{run.accepts.commit}</code>
+						</>
+					)}
 				</p>
 			)}
 			{change && (
