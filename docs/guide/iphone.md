@@ -106,7 +106,7 @@ To answer from a question's page, follow these steps:
    much needs an answer today: "1 failure to explain · 3 can wait". **Open** and **Decided** and the kinds stay
    at the top while you pull the list down to refresh it.
 2. Press a question. Its page shows the evidence: what failed and where, what an edit changes, what a review
-   found.
+   found. At accessibility text sizes, the question's kind, source and time appear on separate lines.
    A proposed edit shows why it was proposed and who proposed it. It also says in a sentence what the edit does,
    such as "Adds 1 step." For an edit to an existing case, choose one of three views:
    **Changes** shows the steps with **Added**, **Removed**, **Changed** and **Moved** marks.

@@ -1,5 +1,6 @@
 # Changelog
 
+- 2026-10-20: **Fixed:** iPhone question headers stack the kind, source and time at accessibility text sizes, keeping proposal evidence and method badges inside the screen (issue #667).
 - 2026-10-20: **Fixed:** the iPhone recognizes unavailable native passkey sign-in from a structured server detail, so rewording the server's message keeps the app's password fallback notice (issue #680).
 - 2026-10-20: **Added:** failure evidence, test results and commit runs on the web and iPhone name the recorded change and title. A trunk commit names its branch and the merged pull request that landed that exact commit when known, with the short hash secondary; named changes open their details. Received landings are stored separately from pull request heads. Older merges without a recorded landing name no pull request until that landing is reported again.
 - 2026-10-20: **Fixed:** CI's gate waits through deployment connection failures and HTTP 502, 503 or 504 while reporting shards and reading the verdict. Requests share a bounded retry window. Definite refusals and lasting outages still fail, and replaying a report cannot record its results twice. Interactive CLI commands keep their existing behavior (issue #693).

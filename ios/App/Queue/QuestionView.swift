@@ -16,6 +16,7 @@ struct QuestionView: View {
 	@State private var confirming: Chosen?
 	@State private var settledElsewhere = false
 	@State private var viewport = CGRect.zero
+	@Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
 	/// An answer with the question as it was when the person chose it. What is sent later, from a sheet or a
 	/// dialog, is sent on that question: the list may have read newer evidence behind the sheet, and an answer
@@ -172,19 +173,22 @@ struct QuestionView: View {
 
 	private func header(_ question: Question) -> some View {
 		VStack(alignment: .leading, spacing: 8) {
-			HStack(spacing: 6) {
+			let layout = dynamicTypeSize.isAccessibilitySize
+				? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+				: AnyLayout(HStackLayout(spacing: 6))
+			layout {
 				Tag(text: question.kind.name, tint: question.kind.tint)
 				Label("from \(question.producer.name)", systemImage: question.producer.symbol)
 					.font(.caption)
 					.foregroundStyle(question.producer.tint)
-					.lineLimit(1)
-				Spacer(minLength: 4)
-				// The time keeps its width: a long name beside it is the one that gives way.
+					.lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+				if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 4) }
+				// The time keeps its width in the row; the stacked layout can wrap it.
 				Text(question.openedAt, format: .relative(presentation: .named))
 					.font(.caption)
 					.foregroundStyle(.secondary)
-					.lineLimit(1)
-					.fixedSize()
+					.lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+					.fixedSize(horizontal: !dynamicTypeSize.isAccessibilitySize, vertical: true)
 			}
 			Text(question.title)
 				.font(.title3.weight(.semibold))

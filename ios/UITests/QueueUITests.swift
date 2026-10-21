@@ -87,6 +87,60 @@ final class QueueUITests: XCTestCase {
 		return ["items": try XCTUnwrap(envelope["result"] as? [Any])]
 	}
 
+	@MainActor func testProposalFitsScreenAtLargestTextSize() async throws {
+		XCUIDevice.shared.orientation = .portrait
+		let project = try await makeProject()
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", try XCTUnwrap(environment["MAINWORTHY_TEST_URL"]),
+			"-UIPreferredContentSizeCategoryName", UIContentSizeCategory.accessibilityExtraExtraExtraLarge.rawValue]
+		app.launch()
+		try signIn(app)
+		let projectMenu = app.buttons["project-menu"]
+		projectMenu.tap()
+		let option = app.collectionViews.buttons[project]
+		for _ in 0..<10 where !option.isHittable { app.collectionViews.firstMatch.swipeUp() }
+		XCTAssertTrue(option.wait(for: \.isHittable, toEqual: true, timeout: 10))
+		option.tap()
+		let selected = XCTNSPredicateExpectation(
+			predicate: NSPredicate(format: "label CONTAINS %@", project), object: projectMenu)
+		XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 10), .completed)
+		let proposal = app.staticTexts["Edit: A percentage coupon lowers the total"]
+		for _ in 0..<6 where !proposal.isHittable { app.swipeUp() }
+		XCTAssertTrue(proposal.wait(for: \.isHittable, toEqual: true, timeout: 10))
+		proposal.tap()
+		let summary = app.staticTexts["edit-summary"]
+		XCTAssertTrue(summary.waitForExistence(timeout: 10))
+		let window = app.windows.firstMatch.frame
+		let page = app.scrollViews.firstMatch.frame
+		let header = [("question kind", app.staticTexts["proposal"].frame),
+			("proposal reason", app.staticTexts["Check removing the coupon as well as adding it."].frame)]
+		shot("u667-ax5-header")
+		let picker = app.segmentedControls["edit-side"]
+		for _ in 0..<8 where !picker.isHittable { app.swipeUp() }
+		XCTAssertTrue(picker.isHittable)
+		shot("u667-ax5-evidence")
+		let evidence = [("edit summary", summary.frame), ("side picker", picker.frame)]
+		picker.buttons["Current"].tap()
+		var chips: [(String, CGRect)] = []
+		for method in ["human", "auto", "agent"] {
+			let chip = app.descendants(matching: .any)["method-\(method)"].firstMatch
+			for _ in 0..<10 where !chip.isHittable { app.swipeUp() }
+			XCTAssertTrue(chip.isHittable)
+			chips.append((method, chip.frame))
+		}
+		shot("u667-ax5-methods")
+		continueAfterFailure = true
+		defer { continueAfterFailure = false }
+		// Allow subpoint rounding on the container; the content edges below must fit exactly.
+		XCTAssertEqual(page.minX, window.minX, accuracy: 0.5)
+		XCTAssertEqual(page.maxX, window.maxX, accuracy: 0.5)
+		for (name, frame) in header + evidence + chips {
+			print("u667 AX5 \(name): \(frame), window: \(window)")
+			XCTAssertGreaterThanOrEqual(frame.minX, window.minX, "\(name) leading edge must fit the window")
+			XCTAssertLessThanOrEqual(frame.maxX, window.maxX, "\(name) trailing edge must fit the window")
+		}
+	}
+
 	@MainActor func testProposalViewportCoverage() async throws {
 		let project = try await makeProject(strict: true)
 		let lines = (1...140).map { "Prerequisite \($0). Read this line before reviewing the proposed case." }.joined(separator: "\n")
