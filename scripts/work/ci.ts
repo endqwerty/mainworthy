@@ -102,6 +102,6 @@ const NEXT: Record<GateStatus["verdict"], (gate: GateStatus) => string> = {
 		"A test that fails now and then is a defect too: re-run its shard's job to unblock, and file it as flaky-test.",
 	blocked: (gate) =>
 		`A person is asked (${gate.open.join(", ") || "see the queue"}). If that is a CI failure, the project's policy ` +
-		"no longer answers failures by rule: `bun scripts/work.ts ci-policy` with the owner token (docs/deploy.md).",
+		"no longer answers failures by rule: `bun scripts/work.ts ci-policy` with the owner token sets it again.",
 	pending: () => "Results are still coming: run it again with --wait=<seconds>.",
 };

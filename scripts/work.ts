@@ -16,10 +16,9 @@
 //   bun scripts/work.ts ci-policy                     with the owner token: CI failures are answered "needs a fix" by rule, never queued
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
-import { Client } from "../src/cli/client.ts";
 import { check as checkBoard, isMove, move } from "./work/board.ts";
 import { compare } from "./work/check-time.ts";
-import { type Call, ciPolicy, INSTANCE, readCi, type Target, TOKEN_FILE } from "./work/ci.ts";
+import type { Call, Target } from "./work/ci.ts";
 import { stopServers, waitForTests } from "./work/processes.ts";
 import { gather, problems } from "./work/pull-request.ts";
 import { release } from "./work/release.ts";
@@ -51,13 +50,14 @@ const flag = (args: readonly string[], name: string): string | undefined =>
 
 /** The deployed Mainworthy, unless MAINWORTHY_URL and MAINWORTHY_PROJECT name another; the token from the
  * environment, else, when `fallback` names one, from that file. */
-function instance(fallback?: string): Call {
+// The client and the CI module are loaded only by the commands that use them: the `description` job runs
+// `pr-body` with no dependencies installed.
+async function instance(fallback?: string): Promise<Call> {
+	const { Client } = await import("../src/cli/client.ts");
+	const { INSTANCE } = await import("./work/ci.ts");
 	const file = process.env.MAINWORTHY_TOKEN_FILE || fallback;
 	const token = process.env.MAINWORTHY_TOKEN || (file && existsSync(file) ? readFileSync(file, "utf8").trim() : "");
-	if (!token)
-		throw new Error(
-			`no token: set MAINWORTHY_TOKEN${file ? `, or keep a read token in ${file}` : ""} (docs/deploy.md)`,
-		);
+	if (!token) throw new Error(`no token: set MAINWORTHY_TOKEN${file ? `, or keep a read token in ${file}` : ""}`);
 	const client = new Client({
 		url: process.env.MAINWORTHY_URL || INSTANCE.url,
 		project: process.env.MAINWORTHY_PROJECT || INSTANCE.project,
@@ -143,17 +143,20 @@ async function main(args: string[]): Promise<void> {
 			const positional = rest.filter((arg) => !arg.startsWith("--"));
 			if (!Number.isFinite(wait) || wait < 0 || positional.length > 1) return fail(USAGE, 4);
 			// 0 to 3 are the gate's verdicts, so a command that could not read one exits 4.
+			const { readCi, TOKEN_FILE } = await import("./work/ci.ts");
 			const read = await ciTarget(positional[0])
-				.then((target) => readCi(instance(TOKEN_FILE), target, { wait }))
+				.then(async (target) => readCi(await instance(TOKEN_FILE), target, { wait }))
 				.catch((error: unknown) => fail(error instanceof Error ? error.message : String(error), 4));
 			console.log(read.text);
 			process.exit(read.exit);
 			return;
 		}
-		case "ci-policy":
+		case "ci-policy": {
 			if (rest.length > 0) return fail(USAGE, 4);
-			console.log(await ciPolicy(instance(), process.env.MAINWORTHY_PROJECT || INSTANCE.project));
+			const { ciPolicy, INSTANCE } = await import("./work/ci.ts");
+			console.log(await ciPolicy(await instance(), process.env.MAINWORTHY_PROJECT || INSTANCE.project));
 			return;
+		}
 		case "check-time": {
 			const split = rest.indexOf("--");
 			const own = split < 0 ? rest : rest.slice(0, split);
