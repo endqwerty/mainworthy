@@ -136,6 +136,26 @@ test("a commit after the preflight makes the reset retry before removing anythin
 });
 
 test(
+	"a project written to during every preflight is audited under the gate on the third round",
+	async () => {
+		await withInstance(async ({ instance, client }) => {
+			await refreshDemo(instance, "demo", small);
+			let checks = 0;
+			const seeded = await refreshDemo(instance, "demo", small, {
+				// Each round's audit runs while this write commits, so only an audit under the gate can hold.
+				preflight: async () => {
+					checks++;
+					await client.call("admin", { do: "project.create", key: `busy-${checks}` });
+				},
+			});
+			expect(checks).toBe(3);
+			expect(seeded.cases).toHaveLength(30);
+		});
+	},
+	SLOW,
+);
+
+test(
 	"writes proceed during the worker preflight and invalidate its proof",
 	async () => {
 		await withInstance(async ({ instance, client }) => {

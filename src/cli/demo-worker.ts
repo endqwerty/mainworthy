@@ -23,10 +23,12 @@ try {
 				message === "continue" ? resolve() : reject(new Error("invalid demo reset continuation")),
 			);
 		});
-	for (;;) {
+	// Audit beside the server's writes twice at most. A project written to faster than that (a minute job, a busy
+	// pipeline) is audited under the gate, where nothing can make the audit stale; the first rounds warm the cache.
+	for (let round = 1; ; round++) {
 		const checking = performance.now();
-		const version = app.db.foreignKeySnapshot();
-		progress("preflight foreign keys", performance.now() - checking);
+		const version = round <= 2 ? app.db.foreignKeySnapshot() : undefined;
+		if (version !== undefined) progress("preflight foreign keys", performance.now() - checking);
 		const ready = resume();
 		port.postMessage({ kind: "ready" });
 		await ready;

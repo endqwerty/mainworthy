@@ -196,7 +196,7 @@ export function* resetDemoSteps(
 ): Generator<undefined, "stale" | undefined, void> {
 	const checking = performance.now();
 	const version = checkedVersion ?? app.db.foreignKeySnapshot();
-	if (checkedVersion === undefined) progress("preflight foreign keys", performance.now() - checking);
+	if (checkedVersion === undefined) progress("check foreign keys under the gate", performance.now() - checking);
 	const starting = performance.now();
 	let finishing = starting;
 	try {
