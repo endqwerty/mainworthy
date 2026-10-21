@@ -312,7 +312,7 @@ the steps are kept below for an instance that has none.
   Decision 0097 records the owner's suspension; [issue #77](https://github.com/endqwerty/mainworthy/issues/77)
   tracks a future timing gate. Job timeouts still stop hung jobs.
 - **Reporting waits out a deploy after choosing the instance.** The gate's CLI health checks, shard reports
-  and verdict requests retry connection failures and HTTP 502, 503 or 504 up to twelve times. Each attempt
+  and verdict requests make up to twelve attempts through connection failures and HTTP 502, 503 or 504. Each attempt
   has ten seconds, with ten seconds between attempts. All commands share a 230-second retry window within
   the nine-minute job, so each shard cannot start another full wait. A 4xx or other definite refusal returns
   immediately. A lasting outage still fails the job. A retry sends the same report body, whose batch key
@@ -374,8 +374,8 @@ the steps are kept below for an instance that has none.
   For a pull request that ended earlier, or whose event was missed: `gh workflow run change.yml -f pull=150`.
   A replay reads the pull request's state, merge commit and base branch from GitHub, so a merged trunk change
   keeps its landing commit. Add `-f state=merged`, `closed` or `open` only to override GitHub's state.
-  The health check and lifecycle request each retry connection failures and HTTP 502, 503 or 504 up to twelve
-  times, with ten seconds per attempt and ten seconds between attempts. Each can take up to 230 seconds,
+  The health check and lifecycle request each make up to twelve attempts through connection failures and HTTP
+  502, 503 or 504, with ten seconds per attempt and ten seconds between attempts. Each can take up to 230 seconds,
   within the nine-minute job, while the instance restarts to follow `main`. A 4xx refusal fails immediately,
   except for the missing-change reply below. After retries run out, fix the cause and replay the event.
   The workflow checks the instance's API version first. While the first build with API
