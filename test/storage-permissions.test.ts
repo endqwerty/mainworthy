@@ -217,3 +217,39 @@ test("upgrade copies are private and retained copies are hardened without changi
 		rmSync(directory, { recursive: true, force: true });
 	}
 });
+
+test("a connection opened while another process holds the database waits for it rather than failing (#689)", async () => {
+	const directory = mkdtempSync(join(tmpdir(), "mainworthy-busy-open-"));
+	const path = databasePath(directory);
+	new Db(path).close();
+	// Another process takes the database for itself and lets it go 300 ms later, as a connection recovering the
+	// log does. The checkpoint thread opened its connection in such a moment and died.
+	const holder = Bun.spawn(
+		[
+			process.execPath,
+			"-e",
+			`const { Database } = require("bun:sqlite");
+			const db = new Database(${JSON.stringify(path)});
+			db.exec("PRAGMA locking_mode = EXCLUSIVE; BEGIN EXCLUSIVE; CREATE TABLE held (x); COMMIT; BEGIN EXCLUSIVE");
+			console.log("held");
+			await Bun.sleep(300);
+			db.exec("COMMIT");
+			db.close();`,
+		],
+		{ stdout: "pipe" },
+	);
+	try {
+		const said = await holder.stdout.getReader().read();
+		expect(new TextDecoder().decode(said.value)).toBe("held\n");
+		const db = new Db(path);
+		try {
+			expect(db.raw.query("SELECT name FROM sqlite_master WHERE name = 'held'").get()).toEqual({ name: "held" });
+		} finally {
+			db.close();
+		}
+		expect(await holder.exited).toBe(0);
+	} finally {
+		holder.kill();
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
