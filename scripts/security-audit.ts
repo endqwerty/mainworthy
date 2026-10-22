@@ -109,8 +109,10 @@ const LAUNCH = "the launcher in docs/security-audit.md (origin/main's copy, writ
 type SourceFacts = {
 	/** `--source`: the commit the launcher took this copy from. */
 	given: string;
-	/** origin/main's tip as the script reads it, and whether that commit holds an audit script at all. */
+	/** origin/main's tip as the script reads it; whether that commit is here to read, fetched by its id; and whether
+	 * it holds an audit script at all. Only a tip that is here can show that main has no script. */
 	mainTip: string;
+	mainKnown: boolean;
 	mainHasScript: boolean;
 	/** The pull request's head, the only other source allowed, and only while main has no script. */
 	head: string;
@@ -131,7 +133,9 @@ export function sourceProblems(f: SourceFacts): { why: string[]; bootstrap: bool
 		why.push(`this copy was read from standard input, which says not where it came from; run ${LAUNCH}`);
 	if (f.atSource === null) why.push(`commit ${short(f.given)} holds no scripts/security-audit.ts`);
 	else if (f.own !== f.atSource) why.push(`this file is not commit ${short(f.given)}'s scripts/security-audit.ts`);
-	const bootstrap = !f.mainHasScript;
+	if (!f.mainKnown)
+		why.push(`origin/main's tip ${short(f.mainTip)} is not here to read, so nothing shows whether it holds the audit`);
+	const bootstrap = f.mainKnown && !f.mainHasScript;
 	if (f.mainHasScript && f.given !== f.mainTip)
 		why.push(
 			`--source ${short(f.given)} is not origin/main's tip (${short(f.mainTip)}): main moved, or the copy is not main's`,
@@ -425,12 +429,20 @@ function main(argv: string[]): number {
 	};
 	must(repo, "git", ["fetch", "-q", "origin", "main", pull.baseBranch, pull.head]);
 	const mainTip = must(repo, "git", ["ls-remote", "origin", "refs/heads/main"]).split(/\s/)[0] ?? "";
+	if (!/^[0-9a-f]{40}$/.test(mainTip)) throw new Error("no main on origin");
+	// main can move after the fetch above: fetch the tip ls-remote named, by its id, before reading anything from it.
+	const mainFetched = run(repo, "git", ["fetch", "-q", "origin", mainTip]).ok;
+	const mainKnown = mainFetched && run(repo, "git", ["cat-file", "-e", `${mainTip}^{commit}`]).ok;
+	const mainListing = mainKnown
+		? run(repo, "git", ["ls-tree", "--name-only", mainTip, "--", "scripts/security-audit.ts"])
+		: null;
 	const atSource = run(repo, "git", ["show", `${sourceGiven}:scripts/security-audit.ts`]);
 	const path = existsSync(import.meta.path) ? realpathSync(import.meta.path) : import.meta.path;
 	const origin = sourceProblems({
 		given: sourceGiven,
 		mainTip,
-		mainHasScript: run(repo, "git", ["cat-file", "-e", `${mainTip}:scripts/security-audit.ts`]).ok,
+		mainKnown: mainKnown && mainListing?.ok === true,
+		mainHasScript: mainListing?.out.trim() === "scripts/security-audit.ts",
 		head: pull.head,
 		path,
 		own: existsSync(path) ? readFileSync(path, "utf8") : "",
