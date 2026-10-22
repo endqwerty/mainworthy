@@ -37,12 +37,14 @@ const fixtures: { file: string; suites: number; results: ResultIn[] }[] = [
 		file: "jest-junit.xml",
 		suites: 1,
 		results: [
-			result("cart.spec::cart::adds [1, 2]", "adds [1, 2]", "fail", {
-				durationMs: 5,
-				failure: { message: "wrong sum", detail: "AssertionError: 4 != 3" },
+			result("cart.spec::cart::adds [1, 2]", "adds [1, 2]", "pass", {
+				durationMs: 10,
+				note: "passed after 2 retries",
+				tries: [
+					{ outcome: "fail", durationMs: 5, failure: { message: "wrong sum", detail: "AssertionError: 4 != 3" } },
+					{ outcome: "pass", durationMs: 2 },
+				],
 			}),
-			result("cart.spec::cart::adds [1, 2]", "adds [1, 2] (retry 1)", "pass", { durationMs: 2 }),
-			result("cart.spec::cart::adds [1, 2]", "adds [1, 2] [retry #2]", "pass", { durationMs: 3 }),
 		],
 	},
 	{
@@ -195,6 +197,100 @@ describe("parseJUnit runner fixtures", () => {
 			for (const item of parsed.results) expect(ResultIn.safeParse(item).success).toBe(true);
 		});
 	}
+});
+
+describe("JUnit suffixed retry sequences", () => {
+	test.each(["(retry #1)", "(retry 1)", "[retry 1]", "[retry #1]", "(ReTrY # 1)"])(
+		"%s becomes an earlier try beside the runner's final result",
+		(suffix) => {
+			const parsed = parseJUnit(
+				`<testsuite name="cart"><testcase name="adds" time="0.1"><failure message="wrong">stack</failure></testcase><testcase name="adds ${suffix}" time="0.2"/></testsuite>`,
+			);
+			expect(parsed.results).toEqual([
+				result("cart::adds", "adds", "pass", {
+					durationMs: 300,
+					note: "passed after 1 retries",
+					tries: [{ outcome: "fail", durationMs: 100, failure: { message: "wrong", detail: "stack" } }],
+				}),
+			]);
+		},
+	);
+
+	test("interleaved tests keep ordered tries and the last failure's details", () => {
+		const parsed = parseJUnit(
+			`<testsuite><testcase name="one"/><testcase name="two"/><testcase name="one (retry #1)"><error message="connection"/></testcase><testcase name="one [retry 2]"><failure message="final"/></testcase></testsuite>`,
+		);
+		expect(parsed.results).toEqual([
+			result("one", "one", "fail", {
+				failure: { message: "final", detail: "" },
+				tries: [{ outcome: "pass" }, { outcome: "error", failure: { message: "connection", detail: "" } }],
+			}),
+			result("two", "two"),
+		]);
+	});
+
+	test.each([
+		["one", "one"],
+		["one", "one (retry #2)"],
+		["one (retry #1)", "one (retry #2)"],
+		["one", "one (retry #1)", "one [retry 1]"],
+		["one", "one [retry 2]", "one (retry #1)"],
+		["one", "one (retry #0)"],
+		["one", "one (retry #1) (retry #2)"],
+	])("ambiguous sequence %j stays separate", (...names) => {
+		const parsed = parseJUnit(`<testsuite>${names.map((name) => `<testcase name="${name}"/>`).join("")}</testsuite>`);
+		expect(parsed.results).toHaveLength(names.length);
+		expect(parsed.results.every((item) => item.tries === undefined)).toBe(true);
+	});
+
+	test("matching suite paths in separate suite instances stay separate", () => {
+		expect(
+			parseJUnit(
+				`<testsuites><testsuite name="cart"><testcase name="one"/></testsuite><testsuite name="cart"><testcase name="one (retry #1)"/></testsuite></testsuites>`,
+			).results,
+		).toHaveLength(2);
+	});
+
+	test("file identities, conflicting claims and mixed retry encodings stay separate", () => {
+		for (const xml of [
+			`<testcase name="one" file="a.ts"/><testcase name="one (retry #1)" file="b.ts"/>`,
+			`<testcase name="one"><properties><property name="mainworthy" value="@C-1@v1"/></properties></testcase><testcase name="one (retry #1)"><properties><property name="mainworthy" value="@C-2@v1"/></properties></testcase>`,
+			`<testcase name="one"><flakyFailure message="first"/></testcase><testcase name="one (retry #1)"/>`,
+		])
+			expect(parseJUnit(`<testsuite>${xml}</testsuite>`).results).toHaveLength(2);
+	});
+
+	test("one hundred earlier tries, including skipped executions, remain ordered", () => {
+		const xml = `<testsuite><testcase name="one"/>${Array.from({ length: 100 }, (_, i) => `<testcase name="one (retry #${i + 1})" status="skipped"/>`).join("")}</testsuite>`;
+		const parsed = parseJUnit(xml);
+		expect(parsed.results).toHaveLength(1);
+		expect(parsed.results[0]?.outcome).toBe("skip");
+		expect(parsed.results[0]?.tries).toEqual([
+			{ outcome: "pass" },
+			...Array.from({ length: 99 }, () => ({ outcome: "skip" }) satisfies NonNullable<ResultIn["tries"]>[number]),
+		]);
+		expect(ResultIn.safeParse(parsed.results[0]).success).toBe(true);
+	});
+
+	test("a damaged initial testcase cannot be hidden by an intact retry", () => {
+		const parsed = parseJUnit(
+			`<testsuite><testcase name="one"time="0.1"/><testcase name="one (retry #1)"/></testsuite>`,
+		);
+		expect(parsed.results).toHaveLength(2);
+		expect(parsed.results[0]?.outcome).toBe("error");
+	});
+
+	test("suite damage cannot be hidden by a passing retry", () => {
+		const parsed = parseJUnit(
+			`<testsuite><testcase name="one"><failure message="first"/></testcase><testcase name="one (retry #1)"/><bad></testsuite>`,
+		);
+		expect(parsed.results[0]).toMatchObject({ outcome: "error", failure: { message: "Malformed JUnit suite" } });
+	});
+
+	test("a sequence over the tries limit is refused without losing flip evidence", () => {
+		const xml = `<testsuite><testcase name="one"/>${Array.from({ length: 101 }, (_, i) => `<testcase name="one (retry #${i + 1})"/>`).join("")}</testsuite>`;
+		expect(() => parseJUnit(xml)).toThrow("more than the 101 a result and its 100 tries keep");
+	});
 });
 
 describe("parseJUnit recovery and boundaries", () => {

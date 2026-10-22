@@ -62,15 +62,21 @@ failing.
   reverse, which a Playwright serial group produces when its members run again together, nor keep a cause that changes.
 - **Two flips for a recovery across attempts and tries.** It would let one recovery meet the detector's threshold of two.
 
-## Not done
+## JUnit suffix sequences, 2026-10-22
 
-- JUnit testcases repeated with `(retry #1)` in their names are read as the same test's results, with the worse of one
-  attempt counting, not as tries.
-- The reruns report ("time lost to reruns") counts the pipeline's attempts, not a runner's tries.
-- Jest, Vitest and pytest reports do not export their retries.
+[Issue #733](https://github.com/endqwerty/mainworthy/issues/733) extends the same shape to separate JUnit testcases.
+One unsuffixed testcase followed in document order by consecutive retry numbers from 1, within the same suite
+instance and test identity, becomes the last testcase's result with earlier tries. Matching annotations and no
+mixed Surefire retry elements keep the sequence unambiguous. The original name identifies the test, the duration
+sums the executions, and the last testcase supplies attachments. Ambiguous duplicates keep decision 0045's
+worse-outcome rule. More than 100 earlier tries is refused, as for Playwright. XML damage is applied before grouping.
 
-These are issues #733 (`(retry #n)` testcases), #735 (the reruns report) and #736
-(Jest, Vitest and pytest).
+## Follow-up status
+
+JUnit suffix testcases are handled above by issue #733, which closes with this change. A try's cause split by file
+(issue #734) and the runner-duration reruns report (issue #735) are now implemented.
+
+Jest, Vitest and pytest reports still do not export their retries (issue #736, open).
 
 The iPhone test page reads tries and the later passing attempt through its generated contract, labels flaky
 results and lists the runner's outcomes like the web page (issue #737).
