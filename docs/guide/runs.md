@@ -60,7 +60,8 @@ To release a request whose outcome is unknown, choose **Discard this plan**. The
 been recorded. Discarding the saved request does not undo a run.
 If the browser cannot read or remove the saved request, it keeps your choices locked and says it could not discard it.
 Restore device storage and try again.
-Other tabs release that request too; a delayed failure or stale retry cannot restore it.
+Other tabs release that request too and clear its submitted choices. A delayed failure or queued retry cannot
+restore it or send those choices as a new plan. Enter new choices before planning again.
 If another tab discarded or completed the saved request, the planner says it is no longer saved.
 Check **Runs** before planning again.
 If the browser cannot read a saved request, retry waits. Reopen the planner once storage is available.

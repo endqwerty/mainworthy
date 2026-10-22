@@ -14,7 +14,7 @@ const PendingPlan = PlanInput.extend({
 	cmd: PlanInput.shape.cmd.unwrap(),
 	projectIdentity: PlanInput.shape.projectIdentity.unwrap(),
 });
-type Submission = { state: "sending" | "uncertain"; input: z.infer<typeof PendingPlan> };
+type Submission = { state: "sending" | "uncertain" | "released"; input: z.infer<typeof PendingPlan> };
 
 function readPlan(key: string): Submission["input"] | null {
 	let stored: string | null;
@@ -69,13 +69,21 @@ export function RunPlanner({ close }: { close: () => void }) {
 		setSubmission(next);
 	}, []);
 	const clearRemoved = useCallback(() => {
-		if (!submitting.current || !sessionCurrent(owner)) return false;
+		const held = submitting.current;
+		if (!held || !sessionCurrent(owner)) return false;
+		if (held.state === "released") return true;
 		try {
 			if (localStorage.getItem(key) !== null) return false;
 		} catch {
 			return false;
 		}
-		hold(null);
+		hold({ state: "released", input: held.input });
+		setName("");
+		setMode("all");
+		setFilter("");
+		setQuery("");
+		setTarget("self");
+		setCommit("");
 		setStatus(
 			"This plan is no longer saved on this device. It may have been discarded or completed in another tab. Check Runs before planning again.",
 		);
@@ -89,6 +97,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 		return () => window.removeEventListener("storage", changed);
 	}, [key, clearRemoved]);
 	const busy = submission?.state === "sending";
+	const locked = submission !== null && submission.state !== "released";
 	const nameRef = useRef<HTMLInputElement>(null);
 	useEffect(() => {
 		nameRef.current?.focus();
@@ -163,6 +172,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 						hold({ state: "uncertain", input: previous });
 						return;
 					}
+					if (submitting.current?.state === "released") return;
 					if (!projectIdentity) {
 						setStatus("The current project's identity is unavailable. Reload before planning a run.");
 						return;
@@ -249,8 +259,11 @@ export function RunPlanner({ close }: { close: () => void }) {
 				id="run-name"
 				ref={nameRef}
 				value={name}
-				readOnly={submission !== null}
-				onChange={(event) => setName(event.target.value)}
+				readOnly={locked}
+				onChange={(event) => {
+					if (submitting.current?.state === "released") hold(null);
+					setName(event.target.value);
+				}}
 				placeholder="Regression for 1.4 rc3"
 				required
 				maxLength={200}
@@ -260,7 +273,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 				className="form-input"
 				id="run-selection"
 				value={mode}
-				disabled={submission !== null}
+				disabled={locked}
 				onChange={(event) => {
 					const value = z.enum(["all", "folder", "tag", "text"]).parse(event.target.value);
 					setMode(value);
@@ -277,7 +290,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 					className="form-input"
 					aria-label="Folder"
 					value={filter}
-					disabled={submission !== null}
+					disabled={locked}
 					onChange={(event) => {
 						setFilter(event.target.value);
 					}}
@@ -296,7 +309,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 						className="form-input"
 						aria-label={mode === "tag" ? "Tag" : "Search cases"}
 						value={filter}
-						readOnly={submission !== null}
+						readOnly={locked}
 						onChange={(event) => setFilter(event.target.value)}
 						placeholder={mode === "tag" ? "regression" : "checkout"}
 					/>
@@ -310,7 +323,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 					type="radio"
 					name="run-target"
 					checked={target === "self"}
-					disabled={submission !== null}
+					disabled={locked}
 					onChange={() => setTarget("self")}
 				/>{" "}
 				Count only results recorded in this run
@@ -320,7 +333,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 					type="radio"
 					name="run-target"
 					checked={target === "commit"}
-					disabled={submission !== null}
+					disabled={locked}
 					onChange={() => setTarget("commit")}
 				/>{" "}
 				Accept results for a commit
@@ -330,7 +343,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 					className="form-input"
 					aria-label="Commit"
 					value={commit}
-					readOnly={submission !== null}
+					readOnly={locked}
 					onChange={(event) => setCommit(event.target.value)}
 					minLength={7}
 					required
