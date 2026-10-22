@@ -322,10 +322,15 @@ the reason "Every test it named passed on `<commit>` where it had failed; the an
 See [export and verify an audit](./data.md#export-and-verify-an-audit). If the cause fails again later, it is a new question.
 The command `mainworthy get Q-1` also returns the ending and the original answer under `decision.supersedes`.
 
-When the scope is a pull request or branch, the change fixed the failure itself, and the ending says so in place of
-the rule: "Fixed by a later commit of pr:482", or "Fixed in pr:482 before it merged" once it has merged.
+When the scope is a pull request or branch, and the commit that passed is a later one than those the cause failed
+on, reported while the change was open, the change fixed the failure itself. The ending then says so in place of the
+rule: "Fixed by a later commit of pr:482", or "Fixed in pr:482 before it merged" once it has merged.
 `decision.fixedIn` carries the change's key and whether it is `open`, `merged` or `closed`. Such a failure needs no
 issue of its own: the pull request that fixed it is the record, and it names the issue it was for.
+
+A commit that failed and then passed when it ran again proves no fix, and neither does a pass reported after the
+change ended. Those endings, and endings recorded before Mainworthy noted which commit passed, keep the rule and
+reason and claim no fix. The ending's answer records `on`: `later-commit` or `same-commit`.
 An ended answer cannot be withdrawn. A timed expiry or tracker closure shows its own recorded rule and reason,
 without claiming that the cause passed.
 When you select an ended answer, the footer and command palette leave out "Undo answer".

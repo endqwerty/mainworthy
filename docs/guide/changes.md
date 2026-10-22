@@ -37,8 +37,8 @@ nonzero counts, how the change ended if it did, and then "Open questions", "Sett
 excused", and "Results". The change's key links to its pull request when a report gave
 the pull request's address.
 
-A failure that needed a fix and that a later commit of the change passed is one the change
-fixed itself. The detail counts them, for example "1 failure that needed a fix was fixed before
+A failure that needed a fix and that a later commit of the change passed, while the change was
+open, is one the change fixed itself. A retry of the same commit that passes is not. The detail counts them, for example "1 failure that needed a fix was fixed before
 it merged.", and each one in "Settled and excused" says "Fixed in pr:482 before it merged".
 See [when the fix arrives](./decide.md#when-the-fix-arrives).
 Once impact loads, "Impact" and "Uncovered files" show the related cases and paths,

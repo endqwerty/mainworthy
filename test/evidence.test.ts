@@ -1295,6 +1295,27 @@ describe("holds", () => {
 		expect(first(queue().items).q).not.toBe(asked.q);
 	});
 
+	test("an answer a retry or a report after the merge ended claims no fix by the pull request", () => {
+		const fail = { 0: "expected 90, got 100" };
+		const settled = () => h.call<InboxReply>("inbox", { state: "decided", on: "pr:42" }).items;
+		// The same commit passing when it runs again is a retry, not a later commit that fixed it.
+		h.call("report", ciReport({ commit: "retry042a", branch: "retry", pr: 42, n: 1, fail }));
+		decide(first(queue().items), { is: "defect" });
+		h.call("report", ciReport({ commit: "retry042a", branch: "retry", pr: 42, n: 1, attempt: 2 }));
+		expect(settled()).toMatchObject([{ state: "dissolved", decision: { rule: "passed" } }]);
+		expect(settled()[0]?.decision).not.toHaveProperty("fixedIn");
+		// A later commit that passes only after the merge was reported did not fix it before the merge.
+		h.call("report", ciReport({ commit: "late043a", branch: "late", pr: 43, n: 1, fail }));
+		decide(first(queue().items), { is: "defect" });
+		h.call("report", ciReport({ commit: "late043b", branch: "late", pr: 43, n: 1, fail }));
+		h.call("change", { change: "pr:43", state: "merged" });
+		h.advance(60_000);
+		h.call("report", ciReport({ commit: "late043b", branch: "late", pr: 43, n: 1, attempt: 2 }));
+		const late = h.call<InboxReply>("inbox", { state: "decided", on: "pr:43" }).items;
+		expect(late).toMatchObject([{ state: "dissolved", decision: { rule: "passed" } }]);
+		expect(late[0]?.decision).not.toHaveProperty("fixedIn");
+	});
+
 	test("an expired flaky answer stays in Settled when its failure has gone, without claiming a pass ended it", () => {
 		h.call(
 			"report",

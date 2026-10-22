@@ -1798,7 +1798,7 @@ function endPassed(ctx: Ctx, run: RunRow): void {
  *
  * Returns the reason to record.
  */
-function passedIn(ctx: Ctx, question: QuestionRow, run: RunRow): { reason: string } | null {
+function passedIn(ctx: Ctx, question: QuestionRow, run: RunRow): { reason: string; on: PassedOn } | null {
 	const { signature, scope } = json<{ signature: number; scope: string }>(question.subject);
 	const evidence = json<{ tests?: { id: number }[]; count?: number }>(question.evidence);
 	const listed = new Set((evidence.tests ?? []).map((test) => test.id));
@@ -1820,8 +1820,10 @@ function passedIn(ctx: Ctx, question: QuestionRow, run: RunRow): { reason: strin
 	const where = (row: { test: number; env: string }): string => JSON.stringify([row.test, row.env]);
 	const passing = new Set(passingIn(ctx.db, run.id, tests).map(where));
 	if (failed.length === 0 || failed.some((row) => !passing.has(where(row)))) return null;
-	const commit = json<{ commit?: string }>(run.accepts).commit?.slice(0, 12) ?? runRef(run);
-	return { reason: `Every test it named passed on ${commit} where it had failed; the answer ended.` };
+	const passedOn = json<{ commit?: string }>(run.accepts).commit;
+	const on = passedOn !== undefined && !failed.some((row) => row.commit === passedOn) ? "later-commit" : "same-commit";
+	const commit = passedOn?.slice(0, 12) ?? runRef(run);
+	return { reason: `Every test it named passed on ${commit} where it had failed; the answer ended.`, on };
 }
 
 /**
@@ -1959,11 +1961,15 @@ export function endDefectHold(ctx: Ctx, decision: DecisionRow, ref: string): boo
  * A decision stops holding by the rule: its time ran out (`hold-expired`), its tracker issue closed
  * (`tracker-closed`), or its cause passed (`passed`). Each way it no longer explains anything.
  */
-type Ending = {
-	is: "expired" | "outdated";
-	clause: "hold-expired" | "tracker-closed" | "passed";
-	reason: string | null;
-};
+/**
+ * How a hold ends. A `passed` ending says whether the passing commit is one the cause had failed on (`same-commit`:
+ * it ran again and passed) or another (`later-commit`), so a reader can tell a retry from a fix.
+ */
+type Ending =
+	| { is: "expired"; clause: "hold-expired"; reason: null }
+	| { is: "outdated"; clause: "tracker-closed"; reason: string }
+	| { is: "outdated"; clause: "passed"; reason: string; on: PassedOn };
+type PassedOn = "later-commit" | "same-commit";
 
 function endHold(ctx: Ctx, decision: DecisionRow, ending: Ending): boolean {
 	const question = questionById(ctx.db, decision.question);
@@ -1971,7 +1977,7 @@ function endHold(ctx: Ctx, decision: DecisionRow, ending: Ending): boolean {
 	HANDLERS[question.kind].revert(ctx, question, decision);
 	const ended = insertDecision(ctx, {
 		question,
-		answer: { is: ending.is },
+		answer: ending.clause === "passed" ? { is: ending.is, on: ending.on } : { is: ending.is },
 		signers: [
 			{
 				by: ruleActor(ctx.db).id,
@@ -2123,15 +2129,19 @@ function itemOf(db: Db, row: QuestionRow, facts: ReadonlySet<string>, ask: Ask):
 }
 
 /**
- * The change whose later commit passed and so ended this answer (`endPassed`), and how that change stands now. Only
- * a change's scope: a pass on a line is no fix brought by a pull request.
+ * The change that fixed this failure itself, and how it stands now: a later commit of it passed and so ended the
+ * answer (`endPassed`), while it was open. Not a retry of a commit that had failed, which proves no fix; not a pass
+ * reported once the change had ended, which says nothing about what it ended with; not a line's scope, where no pull
+ * request brought the failure. An ending recorded before endings said which commit passed claims nothing either.
  */
 function fixedInOf(db: Db, question: QuestionRow, ending: DecisionRow): FixedIn | null {
 	if (json<Signer[]>(ending.signers)[0]?.clause !== "passed") return null;
+	if (json<{ on?: PassedOn }>(ending.answer).on !== "later-commit") return null;
 	const scope = json<{ scope?: string }>(question.subject).scope;
 	if (!scope?.startsWith("change:")) return null;
 	const change = changeById(db, Number(scope.slice("change:".length)));
-	return change ? { change: change.key, state: change.ended ?? "open" } : null;
+	if (!change || (change.ended_at !== null && change.ended_at <= ending.at)) return null;
+	return { change: change.key, state: change.ended ?? "open" };
 }
 
 function decisionItem(db: Db, decision: DecisionRow) {

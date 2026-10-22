@@ -1812,7 +1812,7 @@ export function restoreLink(
 export function failedIn(
 	db: Db,
 	input: { project: number; signature: number; scope: string; tests: ReadonlySet<number> },
-): { test: number; env: string }[] {
+): { test: number; env: string; commit: string | null }[] {
 	const targets = new Map<number, TargetRow>();
 	return db.all(Q.failedWith, { project: input.project, signature: input.signature }).flatMap((row) => {
 		if (!input.tests.has(row.test)) return [];
@@ -1821,7 +1821,9 @@ export function failedIn(
 			target = mustTarget(db, row.target);
 			targets.set(row.target, target);
 		}
-		return scopeOf(target, null) === input.scope ? [{ test: row.test, env: target.env }] : [];
+		return scopeOf(target, null) === input.scope
+			? [{ test: row.test, env: target.env, commit: target.commit_sha }]
+			: [];
 	});
 }
 
