@@ -1,15 +1,20 @@
 // The Daybreak security audit that every merge into `main` passes last (`docs/security-audit.md`). It refuses a pull
 // request the owner did not open and sign, or whose head is not on the base it lands on; then it exports the head,
 // checks the export against the head's tree, writes the brief and runs Daybreak Blue in Codex's read-only sandbox.
-// Run origin/main's copy, never the branch's, and run bun from `/`, never in the checkout, where a branch's
-// `bunfig.toml` preload and `.env` would load before this script:
+// Run one exact origin/main commit's copy, written outside the checkout, never the branch's; and run bun from `/`,
+// never in the checkout, where a branch's `bunfig.toml` preload and `.env` would load before this script:
 //
-//   repo=$(git rev-parse --show-toplevel)
-//   git -C "$repo" fetch -q origin main && git -C "$repo" show origin/main:scripts/security-audit.ts |
-//     (cd / && bun run - <number> --repo "$repo" [--context <file>])
+//   repo=$(git rev-parse --show-toplevel); git -C "$repo" fetch -q origin main
+//   source=$(git -C "$repo" rev-parse --verify 'origin/main^{commit}'); runner=$(mktemp -d)
+//   git -C "$repo" show "$source:scripts/security-audit.ts" > "$runner/security-audit.ts" &&
+//     (cd / && bun "$runner/security-audit.ts" <number> --repo "$repo" --source "$source" [--context <file>])
+//   rm -rf "$runner"
 //
-// It imports nothing from the repository for the same reason: read from standard input, a relative import would load
-// the branch's file. `makeScratch` is a copy of `scripts/work/scratch.ts`'s `make`, and a test holds the two together.
+// The script then refuses unless `--source` is still origin/main's tip and this file is that commit's copy, and it
+// prints the commit it ran from. Those checks catch a mistake or a race, not a hostile copy, which would skip them:
+// what protects the audit is that the launcher above takes the copy from main. It imports nothing from the
+// repository for the same reason. `makeScratch` is a copy of `scripts/work/scratch.ts`'s `make`, and a test holds the
+// two together.
 import { spawnSync } from "node:child_process";
 import {
 	closeSync,
@@ -99,18 +104,41 @@ export function refusals({ pull, commits, local, owner, headOnBase, base }: Fact
 	return why;
 }
 
-const LAUNCH =
-	'git -C "$repo" show origin/main:scripts/security-audit.ts | (cd / && bun run - <number> --repo "$repo")';
+const LAUNCH = "the launcher in docs/security-audit.md (origin/main's copy, written outside the checkout, run from /)";
 
-/** Read from standard input, bun names the script `<cwd>/[stdin]`, a file that is not there. */
-export const fromStdin = (path: string, exists: boolean): boolean => basename(path) === "[stdin]" && !exists;
+type SourceFacts = {
+	/** `--source`: the commit the launcher took this copy from. */
+	given: string;
+	/** origin/main's tip as the script reads it, and whether that commit holds an audit script at all. */
+	mainTip: string;
+	mainHasScript: boolean;
+	/** The pull request's head, the only other source allowed, and only while main has no script. */
+	head: string;
+	/** This file's path and text, and the script as `given` holds it (null when it holds none). */
+	path: string;
+	own: string;
+	atSource: string | null;
+	repo: string;
+};
 
-/** Why this copy of the script may not run, or null. Read from standard input, it is the copy the command chose. */
-export function selfCheck(stdin: boolean, own: string, main: string | null): string | null {
-	if (stdin) return null;
-	if (main === null) return `origin/main has no scripts/security-audit.ts to run; run it as: ${LAUNCH}`;
-	if (own !== main) return `this copy differs from origin/main's, so the change may have edited it; run: ${LAUNCH}`;
-	return null;
+/** Why this copy is not the one the launcher should have run, or nothing; and whether it is the first audit's
+ * bootstrap, when origin/main has no script yet and the pull request that adds it is audited by its own copy. */
+export function sourceProblems(f: SourceFacts): { why: string[]; bootstrap: boolean } {
+	const why: string[] = [];
+	const inside = f.path === f.repo || f.path.startsWith(f.repo + sep);
+	if (inside) why.push(`this copy is in the checkout (${f.path}); run ${LAUNCH}`);
+	if (basename(f.path) === "[stdin]")
+		why.push(`this copy was read from standard input, which says not where it came from; run ${LAUNCH}`);
+	if (f.atSource === null) why.push(`commit ${short(f.given)} holds no scripts/security-audit.ts`);
+	else if (f.own !== f.atSource) why.push(`this file is not commit ${short(f.given)}'s scripts/security-audit.ts`);
+	const bootstrap = !f.mainHasScript;
+	if (f.mainHasScript && f.given !== f.mainTip)
+		why.push(
+			`--source ${short(f.given)} is not origin/main's tip (${short(f.mainTip)}): main moved, or the copy is not main's`,
+		);
+	if (bootstrap && f.given !== f.head)
+		why.push(`origin/main has no audit script yet, so only the pull request's own head may be --source`);
+	return { why, bootstrap };
 }
 
 /** Why bun may have loaded the checkout's own start-up files (`bunfig.toml`, `.env`) before this script, or null. */
@@ -190,6 +218,8 @@ export function exportProblems(entries: Entry[], exported: Map<string, string>, 
 
 type BriefFacts = {
 	pull: Pull;
+	/** The commit this script was taken from, and whether it was the pull request's own head (the bootstrap). */
+	source?: { commit: string; bootstrap: boolean };
 	head: string;
 	base: string;
 	tree: string;
@@ -199,7 +229,7 @@ type BriefFacts = {
 };
 
 /** What Daybreak is asked: the head on its base, what to read and what to look at. */
-export function brief({ pull, head, base, tree, diff, changed, context }: BriefFacts): string {
+export function brief({ pull, source, head, base, tree, diff, changed, context }: BriefFacts): string {
 	const itself = changed.filter((file) => AUDIT_FILES.includes(file));
 	return [
 		"This is the security audit the mainworthy repository requires before any merge into main. You run in a",
@@ -211,6 +241,13 @@ export function brief({ pull, head, base, tree, diff, changed, context }: BriefF
 		"",
 		`Repository: mainworthy, public on GitHub. Pull request #${pull.number}.`,
 		`Head: ${head}. Base: ${base} (${pull.baseBranch}). The head is on the base, so this is the tree that lands.`,
+		...(source === undefined
+			? []
+			: [
+					source.bootstrap
+						? `This audit ran the pull request's own scripts/security-audit.ts (${source.commit}): origin/main has none yet.`
+						: `This audit ran scripts/security-audit.ts from origin/main at ${source.commit}.`,
+				]),
 		"",
 		...(itself.length > 0
 			? [
@@ -325,7 +362,8 @@ function walk(tree: string): { files: string[]; others: string[] } {
 	return { files, others };
 }
 
-const USAGE = "usage: security-audit <pull request number> --repo <checkout> [--context <file of earlier rounds>]";
+const USAGE =
+	"usage: security-audit <pull request number> --repo <checkout> --source <commit> [--context <file of earlier rounds>]";
 
 function main(argv: string[]): number {
 	const number = Number(argv[0]);
@@ -334,8 +372,16 @@ function main(argv: string[]): number {
 		return at === -1 ? null : argv[at + 1];
 	};
 	const given = option("--repo");
+	const sourceGiven = option("--source");
 	const contextFile = option("--context");
-	if (!Number.isInteger(number) || number < 1 || !given || contextFile === undefined) {
+	if (
+		!Number.isInteger(number) ||
+		number < 1 ||
+		!given ||
+		!sourceGiven ||
+		!/^[0-9a-f]{40}$/.test(sourceGiven) ||
+		contextFile === undefined
+	) {
 		console.error(USAGE);
 		return 2;
 	}
@@ -347,13 +393,6 @@ function main(argv: string[]): number {
 	const launch = launchProblem(realpathSync(process.cwd()), repo);
 	if (launch !== null) {
 		console.error(launch);
-		return 2;
-	}
-	const stdin = fromStdin(import.meta.path, existsSync(import.meta.path));
-	const shown = run(repo, "git", ["show", "origin/main:scripts/security-audit.ts"]);
-	const copy = selfCheck(stdin, stdin ? "" : readFileSync(import.meta.path, "utf8"), shown.ok ? shown.out : null);
-	if (copy !== null) {
-		console.error(copy);
 		return 2;
 	}
 	const github = json<{ nameWithOwner: string; owner: { login: string } }>(repo, "gh", [
@@ -384,7 +423,29 @@ function main(argv: string[]): number {
 		head: view.headRefOid,
 		baseBranch: view.baseRefName,
 	};
-	must(repo, "git", ["fetch", "-q", "origin", pull.baseBranch, pull.head]);
+	must(repo, "git", ["fetch", "-q", "origin", "main", pull.baseBranch, pull.head]);
+	const mainTip = must(repo, "git", ["ls-remote", "origin", "refs/heads/main"]).split(/\s/)[0] ?? "";
+	const atSource = run(repo, "git", ["show", `${sourceGiven}:scripts/security-audit.ts`]);
+	const path = existsSync(import.meta.path) ? realpathSync(import.meta.path) : import.meta.path;
+	const origin = sourceProblems({
+		given: sourceGiven,
+		mainTip,
+		mainHasScript: run(repo, "git", ["cat-file", "-e", `${mainTip}:scripts/security-audit.ts`]).ok,
+		head: pull.head,
+		path,
+		own: existsSync(path) ? readFileSync(path, "utf8") : "",
+		atSource: atSource.ok ? atSource.out : null,
+		repo,
+	});
+	if (origin.why.length > 0) {
+		for (const line of origin.why) console.error(line);
+		return 2;
+	}
+	console.log(
+		origin.bootstrap
+			? `source: ${sourceGiven}, the pull request's own copy (origin/main has no audit script yet)`
+			: `source: ${sourceGiven} (origin/main)`,
+	);
 	const base = must(repo, "git", ["ls-remote", "origin", `refs/heads/${pull.baseBranch}`]).split(/\s/)[0] ?? "";
 	if (!/^[0-9a-f]{40}$/.test(base)) throw new Error(`no ${pull.baseBranch} on origin`);
 	const headOnBase = run(repo, "git", ["merge-base", "--is-ancestor", base, pull.head]).ok;
@@ -457,7 +518,16 @@ function main(argv: string[]): number {
 		.split("\n")
 		.filter(Boolean);
 	const context = contextFile ? readFileSync(contextFile, "utf8") : null;
-	const text = brief({ pull, head: pull.head, base, tree, diff, changed, context });
+	const text = brief({
+		pull,
+		source: { commit: sourceGiven, bootstrap: origin.bootstrap },
+		head: pull.head,
+		base,
+		tree,
+		diff,
+		changed,
+		context,
+	});
 	writeFileSync(join(directory, "brief.md"), text);
 	const findings = join(directory, "findings.md");
 	console.log(`auditing ${pull.head} on ${base} (pull request #${number} by ${pull.author}, ${files.length} files)`);

@@ -14,14 +14,13 @@ import {
 	codexArgs,
 	type Entry,
 	exportProblems,
-	fromStdin,
 	GITHUB_COMMIT_LIMIT,
 	launchProblem,
 	makeScratch,
 	type Pull,
 	parseTree,
 	refusals,
-	selfCheck,
+	sourceProblems,
 	unwritable,
 } from "../scripts/security-audit.ts";
 import { remove } from "../scripts/work/scratch.ts";
@@ -122,18 +121,39 @@ test("a pull request with as many commits as GitHub lists is refused, since the 
 	expect(refusals(facts({ commits: many.slice(1) }))).toEqual([]);
 });
 
-test("a copy run from a file must be the one on origin/main", () => {
-	expect(selfCheck(false, "same", "same")).toBeNull();
-	expect(selfCheck(false, "mine", "main's")).toContain("differs from origin/main's");
-	expect(selfCheck(false, "mine", null)).toContain("origin/main has no");
+const MAIN = "f".repeat(40);
+const source = (over: Partial<Parameters<typeof sourceProblems>[0]> = {}) =>
+	sourceProblems({
+		given: MAIN,
+		mainTip: MAIN,
+		mainHasScript: true,
+		head: HEAD,
+		path: "/tmp/runner/security-audit.ts",
+		own: "the script",
+		atSource: "the script",
+		repo: "/w",
+		...over,
+	});
+
+test("the copy that runs is origin/main's tip's, written outside the checkout", () => {
+	expect(source()).toEqual({ why: [], bootstrap: false });
 });
 
-test("a copy read from standard input is the one the command took from origin/main, and a file is not", () => {
-	expect(selfCheck(true, "", null)).toBeNull();
-	expect(fromStdin("/[stdin]", false)).toBe(true);
-	expect(fromStdin("/w/scripts/audit[stdin]", true)).toBe(false);
-	expect(fromStdin("/w/[stdin]", true)).toBe(false);
-	expect(fromStdin("/w/scripts/security-audit.ts", true)).toBe(false);
+test("a copy that is not the source commit's, or a source that is not main's tip, is refused", () => {
+	expect(source({ own: "a branch's script" }).why.join("\n")).toContain(`is not commit ${MAIN.slice(0, 8)}'s`);
+	expect(source({ given: BASE }).why.join("\n")).toContain("is not origin/main's tip");
+	expect(source({ atSource: null }).why.join("\n")).toContain("holds no scripts/security-audit.ts");
+});
+
+test("a copy in the checkout, or read from standard input, is refused", () => {
+	expect(source({ path: "/w/scripts/security-audit.ts" }).why.join("\n")).toContain("is in the checkout");
+	expect(source({ path: "/[stdin]" }).why.join("\n")).toContain("read from standard input");
+});
+
+test("only while main has no script may the pull request's own head be the source", () => {
+	expect(source({ mainHasScript: false, given: HEAD })).toEqual({ why: [], bootstrap: true });
+	expect(source({ mainHasScript: false, given: BASE }).why.join("\n")).toContain("only the pull request's own head");
+	expect(source({ given: HEAD }).why.join("\n")).toContain("is not origin/main's tip");
 });
 
 test("bun run in the checkout, where its bunfig.toml and .env load first, is refused", () => {
@@ -198,12 +218,11 @@ test("the documented launcher loads no start-up file of the checkout before the 
 	writeFileSync(join(repo, "preload.ts"), `require("node:fs").writeFileSync(${JSON.stringify(canary)}, "ran");\n`);
 	writeFileSync(join(repo, "bunfig.toml"), 'preload = ["./preload.ts"]\n');
 	writeFileSync(join(repo, ".env"), "MW_AUDIT_CANARY=loaded\n");
-	const launch = (cwd: string) =>
-		spawnSync("bun", ["run", "-", "abc", "--repo", repo], {
-			cwd,
-			input: readFileSync("scripts/security-audit.ts"),
-			encoding: "utf8",
-		});
+	const runner = realpathSync(mkdtempSync(join(tmpdir(), "mw-audit-runner-")));
+	roots.push(runner);
+	const script = join(runner, "security-audit.ts");
+	writeFileSync(script, readFileSync("scripts/security-audit.ts"));
+	const launch = (cwd: string) => spawnSync("bun", [script, "abc", "--repo", repo], { cwd, encoding: "utf8" });
 	const r = launch("/");
 	expect(r.stderr).toContain("usage: security-audit");
 	expect(r.status).toBe(2);
@@ -215,6 +234,22 @@ test("the documented launcher loads no start-up file of the checkout before the 
 
 const briefFor = (changed: string[], context: string | null = null) =>
 	brief({ pull: pull(), head: HEAD, base: BASE, tree: "/s/tree", diff: "/s/change.diff", changed, context });
+
+test("the brief names the source of the audit's script", () => {
+	const at = (bootstrap: boolean) =>
+		brief({
+			pull: pull(),
+			source: { commit: MAIN, bootstrap },
+			head: HEAD,
+			base: BASE,
+			tree: "/s/tree",
+			diff: "/s/change.diff",
+			changed: [],
+			context: null,
+		});
+	expect(at(false)).toContain(`from origin/main at ${MAIN}`);
+	expect(at(true)).toContain("origin/main has none yet");
+});
 
 test("the brief names the head, the base, what to read and what to look at", () => {
 	const text = briefFor(["src/surfaces/http.ts"]);
