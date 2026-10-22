@@ -5,9 +5,9 @@
 // never in the checkout, where a branch's `bunfig.toml` preload and `.env` would load before this script:
 //
 //   repo=$(git rev-parse --show-toplevel); git -C "$repo" fetch -q origin main
-//   source=$(git -C "$repo" rev-parse --verify 'origin/main^{commit}'); runner=$(mktemp -d)
-//   git -C "$repo" show "$source:scripts/security-audit.ts" > "$runner/security-audit.ts" &&
-//     (cd / && bun "$runner/security-audit.ts" <number> --repo "$repo" --source "$source" [--context <file>])
+//   main_commit=$(git -C "$repo" rev-parse --verify 'origin/main^{commit}'); runner=$(mktemp -d)
+//   git -C "$repo" show "${main_commit}:scripts/security-audit.ts" > "$runner/security-audit.ts" &&
+//     (cd / && bun "$runner/security-audit.ts" <number> --repo "$repo" --source "$main_commit" [--context <file>])
 //   rm -rf "$runner"
 //
 // The script then refuses unless `--source` is still origin/main's tip and this file is that commit's copy, and it
