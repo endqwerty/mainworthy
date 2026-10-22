@@ -1,6 +1,6 @@
-# 0109: Measure visible proposal parts while scrolling
+# 0133: Measure visible proposal parts while scrolling
 
-Date: 2026-10-18. Status: proposed.
+Date: 2026-10-22. Status: proposed.
 
 ## Problem
 
@@ -20,13 +20,18 @@ The observer callbacks, listeners and pending frame end when the watcher detache
 An unchanged evidence node retains its coverage through a re-fetch.
 
 Page both short and tall rows by moving the nearest scrollable ancestor to the first
-unread range. Avoid `scrollIntoView`, which moves outer ancestors too. Queue and case
+unread range. If that range remains clipped after the scroll, continue to the next
+scrollable ancestor. Stop once the unread point is visible. Avoid `scrollIntoView`,
+which moves outer ancestors even when the inner scroll suffices. Queue and case
 cards share this logic. Native clients and the operation contract do not change.
 
-A card taller than its pane cannot be fully revealed. While it overlaps the pane,
-page its evidence without moving the outer pane. If the card is entirely offscreen,
-reveal it and page the first unread range in the same press. Measure shown ranges
-before revealing so the reveal does not itself count newly exposed content as read.
+A card taller than its pane cannot be fully revealed. Page inside its evidence while
+the unread range can be exposed there. When the pane clips that range or the inner
+scroll reaches its limit, move the pane too. Exclude the card's sticky answer controls
+from the visible area so evidence behind them does not count as read. If the card is
+entirely offscreen, reveal it and page the first unread range in the same press.
+Measure shown ranges before revealing so the reveal does not itself count newly
+exposed content as read.
 With no unread content, revealing still requires another press before answering.
 Unread presses keep the same status, so wrapping cannot alternate the pane's height
 between a paging message and a shorter reveal message.

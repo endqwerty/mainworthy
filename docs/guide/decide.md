@@ -237,8 +237,9 @@ When a case it changes moves while the proposal is open, the page reads it again
 The web app reads proposals in pages of at most 200 edits and loads every page before allowing an answer.
 In Queue and a case's timeline, Accept and Reject bring the proposal into view and show its first unread part in the same press.
 Choose the answer again after reading each part. It records the answer only once every edit has been shown.
-In a case's timeline, each press pages the edits inside the card and keeps the outer pane in place, including when the card is taller than a short window.
-A wrapped status does not cost another press.
+In a case's timeline, each press pages the edits inside the card. The outer pane stays in place while the next unread part can be shown inside the card.
+If the pane clips that part or the inner scroll reaches its end, the same press moves the pane to expose it.
+This also works when a wrapped status makes the card taller than a short window. Edits behind the sticky answer buttons do not count as shown.
 If a step is taller than the visible area, each press shows its next unread section. The whole step must have been on screen before an answer counts.
 Jumping straight to the bottom does not skip unread edits. If resizing or zooming changes a part's height, read that part again.
 On a phone, scrolling the page shows the edits; Accept brings the first unread part into view if any remain.

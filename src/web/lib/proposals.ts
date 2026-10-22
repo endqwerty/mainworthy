@@ -53,6 +53,8 @@ function visibleArea(evidence: HTMLElement): { top: number; bottom: number; left
 			area.right = Math.min(area.right, box.right);
 		}
 	}
+	const actions = evidence.closest("[data-proposal]")?.querySelector(".pbtn")?.getBoundingClientRect();
+	if (actions && actions.bottom > area.top && actions.top < area.bottom) area.bottom = actions.top;
 	return area;
 }
 
@@ -167,17 +169,19 @@ export function answerShown(q: string, answer: string, via: "key" | "button"): s
 	if (evidence.dataset.proposalRead !== "ready") {
 		const next = state?.parts.find((part) => !partShown(part));
 		if (next) {
-			const area = visibleArea(evidence);
 			for (let scroller = next.element.parentElement; scroller; scroller = scroller.parentElement) {
 				if (
 					!/^(auto|scroll|hidden)$/.test(getComputedStyle(scroller).overflowY) ||
 					scroller.scrollHeight <= scroller.clientHeight
 				)
 					continue;
+				const area = visibleArea(scroller);
 				const scale = scroller.getBoundingClientRect().height / scroller.offsetHeight;
 				const offset = next.element.getBoundingClientRect().top + firstUnseen(next) - area.top - 1;
 				scroller.scrollTop += offset / scale;
-				break;
+				const remaining = next.element.getBoundingClientRect().top + firstUnseen(next);
+				const visible = visibleArea(evidence);
+				if (remaining >= visible.top - ROUNDING && remaining < visible.bottom - ROUNDING) break;
 			}
 		}
 		return `${q} has unread edits. Read the next part, then ${again}.`;
