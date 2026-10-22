@@ -2,8 +2,9 @@
 # Tailscale sidecar (the pattern in the home lab's services/coolify-tailnet-apps.md). Nothing is published on the
 # LAN. For a laptop or a plain server use compose.yaml instead.
 #
-# Public traffic must arrive through the host's Cloudflare Tunnel at http://127.0.0.1:7358.
-# Remove the old Coolify/Traefik domain after that cutover. See docs/deploy.md.
+# Public traffic must arrive through the host's Cloudflare Tunnel and a request-holding proxy on the host, which
+# passes it to the ingress at http://127.0.0.1:7359. Remove the old Coolify/Traefik domain after that cutover.
+# See docs/deploy.md, "A deploy that holds requests".
 #
 # First deploy only: set TS_AUTHKEY in Coolify to a single-use auth key. The node's identity then persists in the
 # tailscale-state volume and the variable can be deleted. Never use the sign-in link the sidecar prints.
@@ -93,8 +94,11 @@ services:
       - /tmp:uid=101,gid=101
     mem_limit: 64m
     pids_limit: 64
+    # Not the tunnel's port: the hold on the host takes 7358 and outlives every deploy of this stack.
     ports:
-      - "127.0.0.1:7358:8080"
+      - "127.0.0.1:7359:8080"
+    # Until the app is healthy nothing listens on 7359, so the hold keeps a request waiting instead of passing
+    # it to an ingress that would answer 502.
     depends_on:
       mainworthy:
         condition: service_healthy
