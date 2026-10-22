@@ -206,6 +206,7 @@ You can combine folder creations, renames, moves, and case placement in one prop
 Press <kbd>x</kbd> on each case you want to select for a bulk action.
 With no selection, the action uses the current case.
 Press <kbd>m</kbd> to choose a destination folder.
+After the move, select that folder in the sidebar to see the case without reloading.
 To add a tag, press <kbd>t</kbd>. Enter the tag name.
 Press <kbd>#</kbd> to archive the selected cases.
 Press <kbd>u</kbd> to record the inverse of the latest placement action.

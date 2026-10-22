@@ -390,7 +390,6 @@ export function SuiteScreen() {
 	});
 
 	const [picked, setPicked] = useState(new Set<string>());
-	const [hidden, setHidden] = useState(new Set<string>());
 	const [collapsed, setCollapsed] = useState(new Set<number>());
 	const [tagging, setTagging] = useState(false);
 	const [tagText, setTagText] = useState("");
@@ -487,7 +486,9 @@ export function SuiteScreen() {
 		let folderId: number | null = null;
 		const grouping = Boolean(route.folder && folders.some((folder) => folder.path.startsWith(`${route.folder}/`)));
 		for (const row of cases) {
-			if (hidden.has(row.ref)) continue;
+			if (row.state !== "active") continue;
+			const path = folders.find((folder) => folder.id === row.folder)?.path;
+			if (route.folder && path !== route.folder && !path?.startsWith(`${route.folder}/`)) continue;
 			if (grouping && folderId !== row.folder) {
 				folderId = row.folder;
 				const folder = folders.find((item) => item.id === row.folder);
@@ -516,7 +517,7 @@ export function SuiteScreen() {
 			result.splice(at >= 0 ? at + 1 : 0, 0, { kind: "draft", id: newId });
 		}
 		return result;
-	}, [cases, captures, collapsed, folders, hidden, newId, route.folder]);
+	}, [cases, captures, collapsed, folders, newId, route.folder]);
 	const virtual = useVirtualizer({
 		count: rows.length,
 		getScrollElement: () => viewport.current,
@@ -1802,7 +1803,6 @@ export function SuiteScreen() {
 			if (!sessionCurrent(owner)) return;
 			if (reply.status !== "adopted") {
 				optimistic.rollback();
-				setHidden(new Set());
 				if (undo.current === action) undo.current = previous;
 				setStatus(`Proposed, waiting for a person · ${reply.question ?? ""}`);
 			} else {
@@ -1815,7 +1815,6 @@ export function SuiteScreen() {
 		} catch (error) {
 			if (!sessionCurrent(owner)) return;
 			optimistic.rollback();
-			setHidden(new Set());
 			if (undo.current === action) undo.current = previous;
 			setStatus(error instanceof Error ? error.message : "The change failed");
 			wantsRead = true;
@@ -1854,14 +1853,11 @@ export function SuiteScreen() {
 			.filter((row) => refs.includes(row.ref) && !folders.some((folder) => folder.id === row.folder))
 			.map((row) => row.ref);
 		if (rootRefs.length) inverse.push({ op: "place", cases: rootRefs, folder: "Unsorted" });
-		if (route.folder && folder !== route.folder && !folder.startsWith(`${route.folder}/`))
-			setHidden((prior) => new Set([...prior, ...refs]));
 		void placement([{ op: "place", cases: refs, folder: folder || "Unsorted" }], inverse);
 	}
 	function archive(): void {
 		const refs = selection();
 		if (!refs.length) return;
-		setHidden((prior) => new Set([...prior, ...refs]));
 		void placement([{ op: "state", cases: refs, to: "archived" }], [{ op: "state", cases: refs, to: "active" }]);
 	}
 	function tag(): void {
@@ -1887,7 +1883,6 @@ export function SuiteScreen() {
 			// The queued inverse participates in the projection before the original write replies.
 			let wantsRead = false;
 			try {
-				setHidden(new Set());
 				setStatus("Undo queued. It will follow the pending change.");
 				let original: Api["propose"]["reply"];
 				try {
