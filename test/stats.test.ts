@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { random } from "../src/cli/demo/cases.ts";
 import type { InboxReply, ProposeReply } from "../src/core/ops.ts";
 import { replacesInLane } from "../src/core/runs.ts";
-import type { StatsKind, StatsOf } from "../src/core/stats.ts";
+import { RerunsReply, type StatsKind, type StatsOf } from "../src/core/stats.ts";
 import { parseJUnit } from "../src/surfaces/formats/junit.ts";
 import { parsePlaywright } from "../src/surfaces/formats/playwright.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
@@ -209,6 +209,40 @@ describe("flaky tests and time lost to reruns", () => {
 			lostMs: Number.MAX_SAFE_INTEGER,
 			unknown: 0,
 			items: [{ lostMs: Number.MAX_SAFE_INTEGER }],
+		});
+	});
+
+	test("negative stored result and try durations keep reruns readable without reducing another test's time", () => {
+		h = harness({ unlinked: "track" });
+		const one = ciReport({ commit: "aaaa0001", n: 3 });
+		h.call("report", {
+			...one,
+			results: one.results.map((r, i) => ({
+				...r,
+				...(i === 1 ? {} : { tries: [{ outcome: "pass", durationMs: 1 }] }),
+			})),
+		});
+		h.call("report", ciReport({ commit: "aaaa0001", n: 3, attempt: 2, only: [1] }));
+		// The archive format can retain signed durations that a new report would refuse.
+		h.app.db.raw.exec("UPDATE results SET duration_ms = -10");
+		h.app.db.raw.exec("UPDATE result_tries SET duration_ms = -1");
+		const read = () => RerunsReply.parse(stats({ of: "reruns", days: 1 }));
+		expect(read()).toMatchObject({
+			reruns: 3,
+			lostMs: 0,
+			unknown: 0,
+			items: [{ lostMs: 0 }, { lostMs: 0 }, { lostMs: 0 }],
+		});
+		h.app.db.raw.exec("UPDATE result_tries SET duration_ms = 7 WHERE id = (SELECT max(id) FROM result_tries)");
+		expect(read()).toMatchObject({
+			reruns: 3,
+			lostMs: 7,
+			unknown: 0,
+			items: [
+				{ test: "T-3", lostMs: 7 },
+				{ test: "T-1", lostMs: 0 },
+				{ test: "T-2", lostMs: 0 },
+			],
 		});
 	});
 
