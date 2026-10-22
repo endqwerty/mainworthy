@@ -1,6 +1,18 @@
 // The only module that talks to SQLite. Everything above it calls `get`, `all`, `run` and `transaction`.
 import { Database, type Statement as PreparedStatement, type SQLQueryBindings } from "bun:sqlite";
-import { chmodSync, closeSync, constants, lstatSync, mkdirSync, openSync, readdirSync } from "node:fs";
+import {
+	chmodSync,
+	closeSync,
+	constants,
+	fsyncSync,
+	lstatSync,
+	mkdirSync,
+	mkdtempSync,
+	openSync,
+	readdirSync,
+	renameSync,
+	rmSync,
+} from "node:fs";
 import { basename, dirname, join } from "node:path";
 
 export type SqlValue = string | number | bigint | boolean | null | Uint8Array;
@@ -16,7 +28,7 @@ export const databasePath = (dataDir: string): string => join(dataDir, "mainwort
  * another process write beside the writer and rebuild the log's index under it (#689, decision 0125). Only a file
  * that does not exist yet, which no connection can hold, is created through a descriptor.
  */
-export function prepareDatabaseFile(path: string, access: "create" | "existing" | "exclusive"): void {
+export function prepareDatabaseFile(path: string, access: "create" | "existing"): void {
 	const protect = (file: string): void => {
 		const stat = lstatSync(file);
 		if (!stat.isFile()) throw new Error("a database must be a regular file");
@@ -32,10 +44,10 @@ export function prepareDatabaseFile(path: string, access: "create" | "existing" 
 			);
 		} catch (error) {
 			// Made by somebody else meanwhile: it is checked below like any existing file.
-			if (!(access === "create" && error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
+			if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
 		}
 	};
-	if (access === "exclusive" || (access === "create" && !existsWithoutFollowing(path))) create();
+	if (access === "create" && !existsWithoutFollowing(path)) create();
 	protect(path);
 	for (const suffix of ["-wal", "-shm", "-journal"]) {
 		try {
@@ -56,10 +68,35 @@ const existsWithoutFollowing = (path: string): boolean => {
 	}
 };
 
-/** Create a new private database file before any callback can write sensitive bytes to it. */
-export function createPrivateDatabaseFile<T>(path: string, write: (privatePath: string) => T): T {
-	prepareDatabaseFile(path, "exclusive");
-	return write(path);
+/**
+ * Writes a new database file at `path` that no other user can read at any moment: `write` makes the file in a new
+ * directory beside `path` that only this user can enter, where it is made private and synced before it is renamed
+ * to `path` and the rename is synced. The file cannot be made private before it is written: SQLite's `VACUUM INTO`
+ * refuses an output file that exists, on macOS even an empty one (issue #670). A crash leaves that directory,
+ * still private, beside `path`.
+ */
+export function writePrivateDatabaseFile(path: string, write: (privatePath: string) => void): void {
+	const workspace = mkdtempSync(`${path}.`);
+	try {
+		const written = join(workspace, basename(path));
+		write(written);
+		prepareDatabaseFile(written, "existing");
+		const file = openSync(written, "r+");
+		try {
+			fsyncSync(file);
+		} finally {
+			closeSync(file);
+		}
+		renameSync(written, path);
+		const directory = openSync(dirname(path), "r");
+		try {
+			fsyncSync(directory);
+		} finally {
+			closeSync(directory);
+		}
+	} finally {
+		rmSync(workspace, { recursive: true, force: true });
+	}
 }
 
 /** Retained upgrade copies and interrupted copies carry the same private data as the live file. */

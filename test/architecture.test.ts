@@ -341,7 +341,7 @@ describe("fresh schema image", () => {
 			expect(schemaVersion(db)).toBe(20);
 			expect(fs.existsSync(`${path}.v20.bak`)).toBe(false);
 			expect(readFileSync(`${path}.v19.bak`, "utf8")).toBe("older copy");
-			expect(readdirSync(directory).filter((file) => file.endsWith(".tmp"))).toEqual([]);
+			expect(readdirSync(directory).filter((file) => file.startsWith("mainworthy.db.v20.bak"))).toEqual([]);
 			sync.mockRestore();
 			const reopened = openDatabase(path);
 			try {
