@@ -34,8 +34,9 @@ Every environment shares the same commit gate.
 
 The list says "Each head's verdict". The detail shows the head's gate, its reason and
 nonzero counts, how the change ended if it did, and then "Open questions", "Settled and
-excused", and "Results". The change's key links to its pull request when a report gave
-the pull request's address.
+excused", and "Results". When a report gave the pull request's address, the heading shows
+that address, for example `github.com/example/shop/pull/482`, as a link. A report supplies
+it, so read where it goes before you follow it.
 
 A failure that needed a fix and that another commit of the change passed, one it never failed
 on, is one the change fixed itself. A retry of the same commit that passes is not. The detail
