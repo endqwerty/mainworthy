@@ -66,7 +66,8 @@ failing.
 
 [Issue #733](https://github.com/endqwerty/mainworthy/issues/733) extends the same shape to separate JUnit testcases.
 One unsuffixed testcase followed in document order by consecutive retry numbers from 1, within the same suite
-instance and test identity, becomes the last testcase's result with earlier tries. Matching annotations and no
+instance and structural test identity, becomes the last testcase's result with earlier tries. Grouping compares the
+full prefix and stable name separately, because rendered keys joined with `::` can collide. Matching annotations and no
 mixed Surefire retry elements keep the sequence unambiguous. The original name identifies the test, the duration
 sums the executions, and the last testcase supplies attachments. Ambiguous duplicates keep decision 0045's
 worse-outcome rule. More than 100 earlier tries is refused, as for Playwright. XML damage is applied before grouping.

@@ -559,3 +559,17 @@ test("JUnit duplicates without an unambiguous retry sequence still count the wor
 	expect(gate("fedc7332")).toMatchObject({ verdict: "blocked", tally: { pass: 0, unexplained: 1 } });
 	expect(page()?.flips).toBe(0);
 });
+
+test("distinct JUnit identities sharing a rendered key cannot turn a failure into a retry pass", () => {
+	const parsed = parseReport(
+		`<testsuite><testcase classname="a" name="b::c"><failure message="real failure"/></testcase><testcase classname="a::b" name="c (retry #1)"/></testsuite>`,
+		{ file: "collision.xml" },
+	);
+	h.call("report", {
+		target: { commit: "fedc7333", repo: "acme/web", branch: "main" },
+		job: "e2e",
+		results: parsed.results,
+	});
+	expect(gate("fedc7333")).toMatchObject({ verdict: "blocked", tally: { pass: 0, unexplained: 1 } });
+	expect(page()?.flips).toBe(0);
+});
