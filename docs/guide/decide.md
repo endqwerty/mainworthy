@@ -217,7 +217,7 @@ An answer that needs a defect reference or a reason asks once and gives the same
 Record or cancel that answer before changing the selection.
 Advice is about the question shown. While a selection exists, <kbd>↵</kbd> does not take advice.
 
-Each question gets its own decision. To withdraw all those decisions, press <kbd>u</kbd>, as you would for one decision.
+Each question gets its own decision. Queue stays on "Open" after the batch is answered, even when a question read finishes later. To withdraw all those decisions, press <kbd>u</kbd>, as you would for one decision.
 A refused question returns to the list, for example if its evidence changed while you were choosing an answer.
 The other questions stay answered.
 
