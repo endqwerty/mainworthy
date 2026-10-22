@@ -377,12 +377,18 @@ Failed attempts are counted. The fifth wrong password for one name within 15 min
 
 The same limit applies to the current password when changing it. Password attempts already waiting to be checked stop if the name or address becomes blocked. A check that finishes during a block returns `limited` too. A successful check never clears a block that began while it was running, even if that block has since expired.
 
-Starting a passkey or provider sign-in also counts against your network address, even before you answer.
-Web and iPhone starts share that count with failed sign-ins. Invitation passkey challenges and provider linking count too.
-Five starts within 15 minutes block further starts for one second. Each later allowed start doubles the next wait, up to 15 minutes.
-While blocked, the page says how long to wait, and the API returns `429 limited` with `Retry-After` seconds.
-Asking again during the wait does not extend it. A valid answer to a challenge or provider sign-in already begun can still finish.
-This prevents repeated starts from one address from pushing other people's pending sign-ins out of memory.
+Starting a passkey or provider sign-in has its own limit of 300 starts per network address in one minute.
+Web and iPhone starts share this allowance. Provider linking and accepting an invitation through the provider also use it.
+This permits a busy office to start sign-ins together while limiting repeated anonymous requests for the server's ceremony maps.
+After the allowance runs out, the page says how long to wait. The API returns `429 limited` with the remaining seconds in `Retry-After`.
+The wait never escalates, and retries do not extend the minute. A new minute gives the full allowance again.
+
+Ordinary starts never add to failed-credential counts or cause a password refusal. Wrong invitation codes still count as failed proofs.
+Password sign-in keeps the failed-attempt rule described above.
+Valid passkey and provider answers to ceremonies already begun can still finish during a start limit.
+A working invitation still opens its form and can be accepted with a password or passkey while that address is limited.
+Reloading that invitation reuses its passkey challenge; with one minute left, the server offers a successor without invalidating an ongoing prompt.
+Each challenge expires at its original deadline. The page uses the remaining lifetime supplied by the server.
 The address follows the instance's [proxy configuration](./configuration.md#run-behind-a-proxy-that-ends-tls). Unknown and private addresses are not counted.
 
 ### Through an identity provider

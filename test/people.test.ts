@@ -2039,7 +2039,7 @@ describe("the limit on failed attempts", () => {
 		});
 	});
 
-	test("invitation challenges and failed acceptances share the address count; a right acceptance passes a blocked address", async () => {
+	test("a wrong invitation code is counted under the address, at acceptance and where the page looks at it; a right one passes a blocked address", async () => {
 		const w = world({ proxied: true });
 		const { code } = await invite(w, { name: "robin" });
 		const wrong = (n: number): string => `${String(n).padStart(2, "0")}${"x".repeat(41)}`;
@@ -2064,10 +2064,8 @@ describe("the limit on failed attempts", () => {
 				"429 limited, retry after 1",
 			);
 			expect(said(await w.post("/api/login/challenge", { invitation: wrong(8) }, address(2)))).toBe("404 not_found");
-			// A new challenge waits, but a right acceptance still passes the block.
-			expect(said(await w.post("/api/login/challenge", { invitation: code }, address(1)))).toBe(
-				"429 limited, retry after 1",
-			);
+			// The right code is 256 random bits the server made: it is looked at during the block, and it is good.
+			expect(said(await w.post("/api/login/challenge", { invitation: code }, address(1)))).toBe("200");
 			expect(said(await w.post("/api/login", { invitation: code, password: FIRST }, address(1)))).toBe("200");
 		});
 	});

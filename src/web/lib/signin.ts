@@ -126,16 +126,18 @@ const Shown = z.object({
 	/** Null on an instance with no public address: the invitation is accepted with a password. */
 	passkey: CreationOptions.nullable(),
 });
-export type ShownInvitation = z.infer<typeof Shown>;
+export type ShownInvitation = z.infer<typeof Shown> & { passkeyExpiresAt: number };
 
 /**
  * Who an invitation is for and until when, with the options to make a passkey for it. Asking changes nothing
- * and may be repeated; each asking has a challenge of its own. Null for a code that accepts nothing: used,
- * revoked, run out or wrong, which the server does not tell apart.
+ * and may be repeated; a working invitation reuses its challenge until it needs a successor. Null for a code
+ * that accepts nothing: used, revoked, run out or wrong, which the server does not tell apart.
  */
 export async function showInvitation(code: string): Promise<ShownInvitation | null> {
+	const startedAt = Date.now();
 	try {
-		return Shown.parse(await exchange("/api/login/challenge", { body: { invitation: code } }));
+		const shown = Shown.parse(await exchange("/api/login/challenge", { body: { invitation: code } }));
+		return { ...shown, passkeyExpiresAt: startedAt + (shown.passkey?.timeout ?? 0) };
 	} catch (error) {
 		if (error instanceof ApiError && error.code === "not_found") return null;
 		throw error;

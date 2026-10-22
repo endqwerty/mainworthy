@@ -1,4 +1,4 @@
-// The limit on failed authentication (the sign-in design, decision 11 as amended). Pure: no I/O and no clock of
+// Authentication limits (the sign-in design, decision 11 as amended, and anonymous starts, decision 0134). Pure: no I/O and no clock of
 // its own, so every call that depends on the time is given it. It counts opaque string keys and knows nothing of
 // requests, tokens or rows; only the helpers at the end, which make the keys, know what a token looks like and
 // which addresses are counted. How an address is written is `kernel/address.ts`'s to say.
@@ -108,6 +108,35 @@ type Entry =
 	  };
 
 const FREE: LimiterAnswer = { kind: "free" };
+
+/**
+ * Anonymous ceremony allocation has a separate fixed window, not a wrong-credential penalty. Three hundred
+ * starts a minute permits a busy office's burst, yet only 1,800 admissions in any five-minute interval.
+ * Refusals do not extend the window, and this count never blocks a proof or a password.
+ */
+export function createStartLimiter(): (key: string | null, now: number) => LimiterAnswer {
+	const windowMs = 60_000;
+	const starts = 300;
+	const entries = new Map<string, { since: number; count: number }>();
+	return (key, now) => {
+		if (key === null) return FREE;
+		const entry = entries.get(key);
+		if (entry && now >= entry.since && now < entry.since + windowMs) {
+			if (entry.count >= starts)
+				return { kind: "blocked", retryAfterSeconds: Math.ceil((entry.since + windowMs - now) / 1000) };
+			entry.count++;
+		} else {
+			entries.delete(key);
+			if (entries.size >= DEFAULT_MAX_KEYS) {
+				for (const [held, window] of entries) if (now >= window.since + windowMs) entries.delete(held);
+				const oldest = entries.keys().next();
+				if (entries.size >= DEFAULT_MAX_KEYS && !oldest.done) entries.delete(oldest.value);
+			}
+			entries.set(key, { since: now, count: 1 });
+		}
+		return FREE;
+	};
+}
 
 /** The moment a key is forgotten when no further failure comes. */
 const forgottenAt = (entry: Entry): number => (entry.kind === "counting" ? entry.lastFailure : entry.until) + WINDOW_MS;

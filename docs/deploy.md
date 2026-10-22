@@ -110,11 +110,13 @@ wait. What it means for whoever runs an instance:
   of either still works from a blocked address.
 - The count is in memory. A restart clears it.
 
-Passkey challenges and provider sign-in begins, including native app begins, share the address count too.
-Every allowed start consumes one attempt before creating a ceremony, whether or not it later succeeds.
-Invitation challenges and provider linking follow the same rule. A blocked start gets `429` and `Retry-After`.
-An answer to a ceremony already begun can still succeed from that address. Unknown and private addresses
-remain uncounted, so configure the trusted proxy below for this protection to work behind it.
+Anonymous passkey challenges and provider sign-in begins, including native app begins, have a separate
+fixed allowance of 300 starts per address per minute. These starts never add to the failed-authentication
+count and cannot block a password. Once the allowance is spent, starts get `429` and the remaining seconds
+in `Retry-After`; retries do not extend that window, and the next window restores the full allowance.
+Valid pending answers still work. A valid invitation page bypasses this allocation quota and reuses its
+registration challenge, so reloading one code cannot fill the map. Unknown and private addresses remain
+uncounted, so configure the trusted proxy below for this protection to work behind it.
 
 ### Behind a proxy
 

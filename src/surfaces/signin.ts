@@ -316,13 +316,13 @@ export function signInRoutes(app: App, tools: Tools) {
 				"invalid",
 				"send {} for a web passkey, { native: true } for a native passkey, or { invitation } to look at an invitation",
 			);
+		if ("invitation" in body.data) {
+			const looked = showInvitation(app, body.data.invitation, tools.address(req, server));
+			if (looked.ok) return answered(looked.shown);
+			return looked.why === "limited" ? tools.limited(looked.retryAfter) : failed("not_found", NO_INVITATION);
+		}
 		const limit = countSignInStart(app, tools.address(req, server));
 		if (limit) return tools.limited(limit.retryAfter);
-		if ("invitation" in body.data) {
-			const looked = showInvitation(app, body.data.invitation);
-			if (looked.ok) return answered(looked.shown);
-			return failed("not_found", NO_INVITATION);
-		}
 		const begun = passkeySignInOptions(app, "native" in body.data ? "native" : "web");
 		if (!begun)
 			return "native" in body.data
@@ -370,7 +370,7 @@ export function signInRoutes(app: App, tools: Tools) {
 		else start = { purpose: "sign-in" };
 		const limit = countSignInStart(app, tools.address(req, server));
 		if (limit) return tools.limited(limit.retryAfter);
-		const begun = await beginOidcSignIn(app, start);
+		const begun = await beginOidcSignIn(app, start, tools.address(req, server));
 		if (begun.ok) {
 			const headers = new Headers();
 			for (const cookie of tools.ceremony.set(req, begun.ceremony, Math.ceil(begun.lastsMs / 1000)))
@@ -378,6 +378,8 @@ export function signInRoutes(app: App, tools: Tools) {
 			return tools.json({ ok: true, result: { url: begun.url } }, 200, headers);
 		}
 		switch (begun.why) {
+			case "limited":
+				return tools.limited(begun.retryAfter);
 			case "other-session":
 				return failed(
 					"conflict",
