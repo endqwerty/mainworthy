@@ -1,0 +1,16 @@
+import pytest
+flaky = 0
+def test_recovers():
+    global flaky
+    flaky += 1
+    assert flaky == 3
+
+def test_still_fails():
+    assert 1 == 2
+
+def test_clean():
+    pass
+
+@pytest.mark.skip(reason='sample')
+def test_skipped():
+    pass

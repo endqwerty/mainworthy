@@ -1,0 +1,6 @@
+jest.retryTimes(2, {logErrorsBeforeRetry: true});
+let flaky = 0;
+test('recovers', () => { expect(++flaky).toBe(3); });
+test('still fails', () => { expect(1).toBe(2); });
+test('clean', () => {});
+test.skip('skipped', () => {});
