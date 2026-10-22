@@ -13,7 +13,8 @@ the window out. And it must not resend a write: an empty reply can also follow a
 
 So a Lua task in HAProxy asks nginx itself whether it answers, every 100 ms, and a request waits while it does
 not. The question is a `CONNECT`, which nginx refuses itself (405) without asking the app, so a slow app does
-not hold requests back. Any status line means nginx answers. A request still waiting after 90 s gets HAProxy's
+not hold requests back. Any status line means nginx answers. A probe that fails with a Lua error opens the
+gate, so a fault in the gate costs what it had cost with no gate rather than holding every request. A request still waiting after 90 s gets HAProxy's
 own 503. With the gate, HAProxy no longer replays anything after an empty reply (decision 0131's GET and HEAD
 replay is removed), so nothing is ever sent twice. The old ingress's drain stays unbounded: the app runs while
 it drains, so a write in flight keeps its reply, and new requests wait at the gate meanwhile.
