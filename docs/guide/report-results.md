@@ -432,9 +432,17 @@ JUnit also recognizes separate testcases with retry suffixes: `(retry #1)`, `(re
 `[retry #1]` and `[retry 1]`, ignoring case and whitespace around the number. One
 unsuffixed testcase followed by consecutive retry numbers, starting at 1, becomes one
 result with earlier tries in report order. Other tests may appear between those testcases.
-They must share the full file or class prefix, stable testcase name and suite instance,
-report the same file or all omit it, have matching case annotations, and use no Surefire retry
-elements. Identical rendered test keys alone do not identify a retry.
+They must belong to the same suite instance and have byte-equal raw testcase identity.
+Every testcase attribute counts, including `classname` alongside `file`, `id`, `line`, and
+unknown attributes. Only the recognized retry suffix and at most one preceding ASCII space are removed
+from `name`; all other name whitespace remains. The per-run attributes `time`, `status`, `message`, `assertions` and `timestamp`
+may differ, as may outcomes and output. All other literal attribute values and their presence
+must match. Attribute order and single versus double quote delimiters do not matter.
+
+The comparison preserves literal XML entity spelling, whitespace and slashes. For example,
+`classname="a\b"` differs from `classname="a/b"`, and a missing `file` differs from `file=""`.
+Identical normalized test keys alone never identify a retry. Case annotations must also match,
+and the testcases must use no Surefire retry elements.
 The final testcase supplies the outcome, failure and attachment markers. The original supplies the test's name. The duration sums all executions.
 A passing final testcase has a `passed after N retries` note. A sequence with more than
 100 earlier tries is refused rather than losing flip evidence.
