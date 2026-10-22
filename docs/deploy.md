@@ -324,13 +324,15 @@ backend stack
   tries of an immediate retry are spent in about 10 ms, so it carries a read across the start window and
   not across the stop window. A write that meets either, and a read that meets the stop window, gets 502
   (issue #743).
-- `worker_shutdown_timeout 5s` in the ingress bounds the second window. nginx stops listening on SIGQUIT
-  and then waits for the responses it has open, and a change stream stays open until somebody closes it.
-  On the owner's host, with one slow response open, the old ingress took 31.2 s to stop and answered every
-  new connection with no reply for 30.3 s; with a one-second timeout, 2.0 s and 1.1 s. With no response
-  open the window lasted 54 to 123 ms. Five seconds is what the app gives an ordinary reply when it stops,
-  so the ingress cuts no reply the app would finish; a request still running then is cut off by both. While
-  a browser holds a change stream open, the window lasts the whole 5 s.
+- The second window lasts as long as the old nginx drains. nginx stops listening on SIGQUIT and then waits
+  for the responses it has open, and a change stream stays open until somebody closes it. On the owner's
+  host the window lasted 54 to 123 ms with no response open, and 30.3 s with one slow response open, until
+  Docker killed nginx at the end of Coolify's 30-second stop. So while a browser holds a change stream open,
+  requests get 502 for up to 30 s at the start of a deploy, and are held after that. The drain is left
+  unbounded on purpose: the app keeps running while the ingress drains, so a write in flight finishes and
+  its reply arrives, as before. A shorter `worker_shutdown_timeout` would shorten the window but could cut a
+  committed write's reply (a new token's secret is shown once). Issue #743 is to reach nginx without
+  Docker's port proxy, so that a draining nginx is refused and held instead.
 - `option http-server-close` opens a new connection to the ingress for every request, so none is reused
   after the stack it belonged to has gone.
 - The two timeouts are longer than the ingress's 300 s; an open change stream sends a heartbeat every 20 s.
