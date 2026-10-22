@@ -337,6 +337,7 @@ for (const surface of ["case", "queue"] as const)
 				await held;
 				await route.fulfill({ response }).catch(() => {});
 			});
+			await view.page.locator(`[data-proposal-evidence="${proposed.question}"][data-proposal-read="ready"]`).waitFor();
 			await view.page.keyboard.press("a");
 			const current = await eventually(
 				() => server.api("get", { refs: ["C-1"] }),
@@ -666,6 +667,7 @@ for (const surface of ["case", "queue"] as const)
 				expect(await open()).toEqual([proposed.question ?? ""]);
 			}
 			expect(clicks).toBeGreaterThan(1);
+			await card.locator('[data-proposal-read="ready"]').waitFor();
 			await accept.click();
 			await eventually(open, (items) => items.length === 0);
 			const cases = await server.api("get", { refs: ["C-1", "C-2", "C-3"] });

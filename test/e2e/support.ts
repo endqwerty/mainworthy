@@ -555,11 +555,15 @@ function shown(value: unknown): string {
 /**
  * Answers short proposals after their edits load. A press can reveal evidence, or meet a fresh read started by
  * the change stream (issues #322 and #411). Retry when the card was not yet shown whole at the key; otherwise
- * wait for the decide request. Tests of long proposals page explicitly, rather than using this helper's five tries.
+ * wait for the decide request. Two frames before each try let the gate record a reveal or re-fetch. Tests of long
+ * proposals page explicitly, rather than using this helper's five tries.
  */
 export async function answerWhenRead(page: Page, q: string, key: string): Promise<void> {
 	for (let attempt = 1; attempt <= 5; attempt++) {
 		await page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`).waitFor();
+		await page.evaluate(
+			() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+		);
 		await page.evaluate((q) => {
 			const read = () =>
 				document.querySelector<HTMLElement>(`[data-proposal-evidence="${CSS.escape(q)}"]`)?.dataset.proposalRead;
