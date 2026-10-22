@@ -126,6 +126,7 @@ const source = (over: Partial<Parameters<typeof sourceProblems>[0]> = {}) =>
 	sourceProblems({
 		given: MAIN,
 		mainTip: MAIN,
+		mainKnown: true,
 		mainHasScript: true,
 		head: HEAD,
 		path: "/tmp/runner/security-audit.ts",
@@ -154,6 +155,12 @@ test("only while main has no script may the pull request's own head be the sourc
 	expect(source({ mainHasScript: false, given: HEAD })).toEqual({ why: [], bootstrap: true });
 	expect(source({ mainHasScript: false, given: BASE }).why.join("\n")).toContain("only the pull request's own head");
 	expect(source({ given: HEAD }).why.join("\n")).toContain("is not origin/main's tip");
+});
+
+test("a main tip that is not here to read shows nothing, so it allows no bootstrap", () => {
+	const unread = source({ mainKnown: false, mainHasScript: false, given: HEAD });
+	expect(unread.bootstrap).toBe(false);
+	expect(unread.why.join("\n")).toContain("is not here to read");
 });
 
 test("bun run in the checkout, where its bunfig.toml and .env load first, is refused", () => {

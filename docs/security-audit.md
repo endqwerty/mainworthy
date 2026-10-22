@@ -64,6 +64,11 @@ recorded. `--context` takes a file with the earlier rounds' issues and their ans
   pull request only through the owner's own agents, for example copied from an issue comment or a web page. Read
   `findings.md` before you quote it on GitHub, and quote nothing it read outside the export. Running a dependency's
   code is a separate exposure: [#740](https://github.com/endqwerty/mainworthy/issues/740).
+- **Also accepted by the owner (2026-10-21): the instructions come from the branch.** The agent that runs the audit
+  reads `AGENTS.md` and this page from the branch it audits, so a branch could rewrite them to run its own copy. No
+  check inside the repository can stop that, since such a copy skips the checks. What answers it is the record: the
+  script prints the commit its copy came from, and the description of the pull request names it with each round, so
+  the owner can see that it is `main`'s at the time.
 
 ## Every issue is addressed
 
@@ -79,7 +84,8 @@ recorded. `--context` takes a file with the earlier rounds' issues and their ans
 
 - **Review-first** (`AGENTS.md`, Delivery): run the audit after the verdict and a green `gate`, as the last step
   before you hand the pull request over, and record it in the description: the model and effort, the head and the
-  base it read, each issue and what answered it. The owner then knows which revision on which `main` was audited.
+  base it read, the commit the script came from, each issue and what answered it. The owner then knows which revision
+  on which `main` was audited, and by which copy of the audit.
 - **When the owner says to merge** (`ship`, [landing-a-stack.md](landing-a-stack.md)): just before the merge, check
   that each head and base is still the audited pair; if one is not, audit it again first. In a stack, every layer is
   audited.
