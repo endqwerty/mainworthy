@@ -289,7 +289,7 @@ for (const mode of ["single", "bulk", "advice"])
 		30000,
 	);
 
-for (const outcome of ["confirmed", "refused", "lost reply"])
+for (const outcome of ["confirmed", "refused", "lost reply", "moved by click", "moved by key"])
 	check(
 		`an answer typed during withdrawal stays with its question: ${outcome}`,
 		async () => {
@@ -324,14 +324,39 @@ for (const outcome of ["confirmed", "refused", "lost reply"])
 				expect(await qref(page)).toBe(q);
 				expect(await page.locator(`[data-question="${q}"]`).count()).toBe(0);
 				await page.keyboard.press("i");
+				await page.getByText("Answer queued until the withdrawal is confirmed.", { exact: true }).waitFor();
+				let destination: string | null = null;
+				if (outcome.startsWith("moved")) {
+					if (outcome === "moved by click") await page.locator("[data-question]").last().click();
+					else await page.keyboard.press("j");
+					destination = await qref(page);
+					expect(destination).not.toBe(q);
+				}
 				expect((await server.api("get", { refs: [q] }))[0]?.state).toBe("decided");
 				gate.release();
-				if (outcome === "confirmed") {
+				if (outcome.startsWith("moved")) {
+					await page
+						.getByText("Queued answer discarded. Read the question again before answering.", { exact: true })
+						.or(page.locator(".queue-last").getByText("recorded", { exact: false }))
+						.waitFor();
+					if (outcome === "moved by click" && process.env.MAINWORTHY_QUEUED_SCREENSHOT)
+						await page.screenshot({ path: process.env.MAINWORTHY_QUEUED_SCREENSHOT });
+					expect(await qref(page)).toBe(destination);
+					await page
+						.getByText("Queued answer discarded. Read the question again before answering.", { exact: true })
+						.waitFor();
+					expect(sent).toEqual([`${q}:undo`]);
+					expect((await server.api("get", { refs: [q] }))[0]).toMatchObject({ state: "open", decision: null });
+				} else if (outcome === "confirmed") {
 					await page.locator(".queue-last").getByText("recorded", { exact: false }).waitFor();
 					expect(sent).toEqual([`${q}:undo`, `${q}:infra`]);
 					expect((await server.api("get", { refs: [q] }))[0]?.decision).toMatchObject({ answer: { is: "infra" } });
 				} else {
 					await page.locator(".queue-last").getByText("Queued answer discarded.", { exact: false }).waitFor();
+					if (outcome === "refused")
+						expect(
+							(await page.locator(".queue-last").textContent())?.match(/read the question again before withdrawing/gi),
+						).toHaveLength(1);
 					expect(sent).toEqual([`${q}:undo`]);
 					expect((await server.api("get", { refs: [q] }))[0]?.decision).toMatchObject({
 						answer: { is: outcome === "refused" ? "defect" : "flaky" },
@@ -453,8 +478,8 @@ for (const outcome of ["confirmed", "refused", "lost reply"])
 						"true",
 					);
 					if (outcome === "refused") {
-						expect(await page.locator(".queue-last").textContent()).toContain(
-							"Read the question again before withdrawing.",
+						expect(await page.locator(".queue-last").textContent()).toMatch(
+							/read the question again before withdrawing/i,
 						);
 						expect(await page.locator(".queue-last").textContent()).not.toContain("Press u to retry");
 						await page.getByRole("button", { name: "Open", exact: true }).click();
@@ -578,8 +603,8 @@ for (const scenario of [
 				);
 				for (const input of sent) expect(original.get(input.q)).toBe(input.ifDecision);
 				if (scenario.endsWith("replacement")) {
-					expect(await page.locator(".queue-last").textContent()).toContain(
-						"Read the question again before withdrawing.",
+					expect(await page.locator(".queue-last").textContent()).toMatch(
+						/read the question again before withdrawing/i,
 					);
 					expect(await page.locator(".queue-last").textContent()).not.toContain("Press u to retry");
 					expect(await page.locator(".queue-last button").count()).toBe(0);

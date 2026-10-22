@@ -256,14 +256,13 @@ function QueueWorkbench() {
 			},
 		);
 	}
-	function bringBack(questions: QuestionItem[], select = true): void {
+	function bringBack(questions: QuestionItem[]): void {
 		setHidden((previous) => {
 			const next = new Set(previous);
 			for (const q of questions) next.delete(q.q);
 			return next;
 		});
 		setRestored((previous) => [...questions, ...previous.filter((item) => !questions.some((q) => q.q === item.q))]);
-		if (select) setCursor(questions[0]?.q ?? null);
 	}
 	function extraKey(entry: DecisionEntry, field: InlineAnswer["field"]): string {
 		return deviceKey(
@@ -392,7 +391,6 @@ function QueueWorkbench() {
 						rejected.map(
 							(entry) => freshQuestions.find((question) => question.q === entry.question.q) ?? entry.question,
 						),
-						false,
 					);
 					const reply = replies.find((reply) => rejected.some((entry) => entry.question.q === reply.q));
 					const message =
@@ -441,10 +439,7 @@ function QueueWorkbench() {
 			.catch((error: unknown) => {
 				if (!sessionCurrent(owner)) return [];
 				for (const ref of refs) if (refActions.current.get(ref) === action) pendingAnswers.current.delete(ref);
-				bringBack(
-					entries.map((entry) => entry.question),
-					false,
-				);
+				bringBack(entries.map((entry) => entry.question));
 				const message = error instanceof Error ? error.message : "The answer could not be recorded. Try again.";
 				if (action === actionNo.current) {
 					setLastMessage(message);
@@ -723,7 +718,6 @@ function QueueWorkbench() {
 						receipts
 							.filter(({ question }) => reopened.has(question.q))
 							.map(({ question }) => ({ ...question, state: "open", decision: null })),
-						action === actionNo.current,
 					);
 					if (action === actionNo.current) {
 						seenRoute.current = route.ref;
@@ -762,7 +756,12 @@ function QueueWorkbench() {
 					questions.filter((question) => !reopened.has(question.q)).map((question) => question.q),
 				);
 				const detail = error instanceof Error ? error.message : "Try again.";
-				const message = `${[...unconfirmed].join(", ")}: the withdrawal failed. ${reopened.size ? `${reopened.size} confirmed open. ` : ""}${detail}${/[.!?]$/.test(detail) ? "" : "."}${remaining.length ? " Press u to retry." : " Read the question again before withdrawing."}${pending.next ? " Queued answer discarded." : ""}`;
+				const guidance = remaining.length
+					? " Press u to retry."
+					: /read the question again before withdrawing/i.test(detail)
+						? ""
+						: " Read the question again before withdrawing.";
+				const message = `${[...unconfirmed].join(", ")}: the withdrawal failed. ${reopened.size ? `${reopened.size} confirmed open. ` : ""}${detail}${/[.!?]$/.test(detail) ? "" : "."}${guidance}${pending.next ? " Queued answer discarded." : ""}`;
 				if (action === actionNo.current) {
 					setLast(
 						remaining.length
