@@ -100,8 +100,8 @@ services:
     mem_limit: 64m
     pids_limit: 64
     # Not the tunnel's port: the hold on the host takes 7358 and outlives every deploy of this stack. A port
-    # below 1024, so no process on the host but root can take it while a deploy leaves it free and receive the
-    # requests the hold is keeping.
+    # below 1024, so an ordinary process on the host cannot take it while a deploy leaves it free and receive the
+    # requests the hold is keeping; only root or a process with CAP_NET_BIND_SERVICE can.
     ports:
       - "127.0.0.1:758:8080"
     # Until the app is healthy nothing listens on 758, so the hold keeps a request waiting instead of passing
