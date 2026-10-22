@@ -76,12 +76,14 @@ export function firstStep({ draft, change }: { draft: Draft; change: DraftChange
 }
 export function BodyEditor({
 	draft,
+	tags = draftTags(draft),
 	change,
 	seal,
 	rapid,
 	readOnlyStatus = null,
 }: {
 	draft: Draft;
+	tags?: string[];
 	change: DraftChange;
 	seal: () => void;
 	rapid: () => void;
@@ -425,7 +427,7 @@ export function BodyEditor({
 			)}
 			{input("title", draft.body.title, "Case title", "ctitle editor-input", "Untitled case")}
 			<div className="ctags">
-				{draftTags(draft).map((tag) => (
+				{tags.map((tag) => (
 					<span key={tag}>#{tag}</span>
 				))}
 			</div>

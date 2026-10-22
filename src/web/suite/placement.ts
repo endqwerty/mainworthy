@@ -69,7 +69,7 @@ export function placedDraft(
 	const live = placed(view, pending, folders);
 	return {
 		...draft,
-		originalTags: live.tags,
+		originalTags: view.tags,
 		folder: live.folder.path,
 	};
 }

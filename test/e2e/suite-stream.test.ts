@@ -587,3 +587,56 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+test.skipIf(!browserAvailable)(
+	"a tag typed in the editor survives refusal of the same pending tag",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", { edits: [{ op: "create", body: { title: "Independent tag intent" } }] });
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		let release = () => {};
+		try {
+			const { page } = h;
+			await page.getByRole("button", { name: "Independent tag intent", exact: true }).waitFor();
+			const held = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			let first = true;
+			await page.context().route("**/api/p/scratch/propose", async (route) => {
+				if (!first) return route.continue();
+				first = false;
+				await held;
+				await route.fulfill({
+					status: 403,
+					contentType: "application/json",
+					body: JSON.stringify({ ok: false, error: { code: "forbidden", message: "Tag refused" } }),
+				});
+			});
+			await page.keyboard.press("t");
+			await page.getByRole("textbox", { name: "Tag selected cases" }).fill("alpha");
+			await page.keyboard.press("Enter");
+			await page.waitForFunction(() => document.querySelector(".ctags")?.textContent?.includes("#alpha"));
+			await page.keyboard.press("e");
+			const title = page.getByRole("textbox", { name: "Case title", exact: true });
+			await title.fill("My title #alpha");
+			await title.press("Enter");
+			release();
+			await page.waitForFunction(() => document.querySelector("#stat")?.textContent?.includes("Tag refused"));
+			await title.press("Control+Enter");
+			await eventually(
+				() => server.api("get", { refs: ["C-1"] }),
+				(rows) => rows[0]?.title === "My title",
+			);
+			await page.waitForFunction(() => document.querySelector("#stat")?.textContent?.startsWith("Version 2,"));
+			if (process.env.MAINWORTHY_TAG_SCREENSHOT) await page.screenshot({ path: process.env.MAINWORTHY_TAG_SCREENSHOT });
+			const saved = (await server.api("get", { refs: ["C-1"] }))[0];
+			expect(saved?.title).toBe("My title");
+			expect(saved?.tags).toEqual(["alpha"]);
+		} finally {
+			release();
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);

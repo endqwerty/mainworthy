@@ -338,6 +338,7 @@ export function CasePane({
 					{draft ? (
 						<BodyEditor
 							draft={draft}
+							tags={draftTags({ ...draft, originalTags: view?.tags ?? draft.originalTags })}
 							change={change}
 							seal={seal}
 							rapid={rapid}
