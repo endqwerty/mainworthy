@@ -124,7 +124,11 @@
 }
 .queue-pane .queue-evidence {
 	padding: 0 24px 12px;
-	min-height: 160px;
+}
+@media (max-height: 480px) {
+	.queue-pane .queue-evidence {
+		min-height: 160px;
+	}
 }
 .queue-evidence .sech {
 	margin-top: 8px;
