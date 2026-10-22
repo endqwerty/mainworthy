@@ -1,11 +1,22 @@
 import { Database } from "bun:sqlite";
 import { expect, spyOn, test } from "bun:test";
-import { chmodSync, lstatSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	lstatSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { start } from "../src/app/start.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
-import { createPrivateDatabaseFile, Db, databasePath } from "../src/server/kernel/db.ts";
+import { Db, databasePath, writePrivateDatabaseFile } from "../src/server/kernel/db.ts";
 import { migrate, openDatabase, SCHEMA_VERSION, schemaVersion } from "../src/server/kernel/migrate.ts";
 
 const mode = (path: string): number => statSync(path).mode & 0o777;
@@ -76,20 +87,25 @@ test("an existing database must belong to the server operating-system user", () 
 	}
 });
 
-test("an upgrade copy is private before its first database bytes are written", () => {
+test("an upgrade copy is private from its first byte and is published whole at mode 0600", () => {
 	const directory = mkdtempSync(join(tmpdir(), "mainworthy-private-copy-"));
-	const path = join(directory, "copy.db.tmp");
+	chmodSync(directory, 0o755);
+	const path = join(directory, "copy.db");
 	try {
-		const result = createPrivateDatabaseFile(path, (privatePath) => {
-			expect(privatePath).toBe(path);
-			expect(statSync(privatePath).isFile()).toBe(true);
-			expect(mode(privatePath)).toBe(0o600);
-			writeFileSync(privatePath, "database bytes");
-			return "written";
+		writePrivateDatabaseFile(path, (privatePath) => {
+			// SQLite makes the file itself (`VACUUM INTO` refuses one that exists: issue #670), with the usual mode,
+			// in a directory of its own that only this user can enter.
+			expect(existsSync(privatePath)).toBe(false);
+			expect(dirname(dirname(privatePath))).toBe(directory);
+			expect(mode(dirname(privatePath))).toBe(0o700);
+			writeFileSync(privatePath, "database bytes", { mode: 0o644 });
 		});
-		expect(result).toBe("written");
 		expect(readFileSync(path, "utf8")).toBe("database bytes");
-		expect(() => createPrivateDatabaseFile(path, () => undefined)).toThrow();
+		expect(mode(path)).toBe(0o600);
+		expect(readdirSync(directory)).toEqual(["copy.db"]);
+		// A write that made no file publishes nothing and leaves nothing behind.
+		expect(() => writePrivateDatabaseFile(join(directory, "none.db"), () => {})).toThrow();
+		expect(readdirSync(directory)).toEqual(["copy.db"]);
 	} finally {
 		rmSync(directory, { recursive: true, force: true });
 	}
@@ -178,8 +194,8 @@ test("upgrade copies are private and retained copies are hardened without changi
 					if (property !== "run") return Reflect.get(target, property, receiver);
 					return (destination: string) => {
 						temporary.push(destination);
-						expect(statSync(destination).isFile()).toBe(true);
-						expect(mode(destination)).toBe(0o600);
+						expect(existsSync(destination)).toBe(false);
+						expect(mode(dirname(destination))).toBe(0o700);
 						return target.run(destination);
 					};
 				},
@@ -188,8 +204,8 @@ test("upgrade copies are private and retained copies are hardened without changi
 		try {
 			migrate(db, path);
 			expect(temporary).toHaveLength(1);
-			expect(temporary[0]?.startsWith(`${path}.v1.bak.`)).toBe(true);
-			expect(temporary[0]?.endsWith(".tmp")).toBe(true);
+			expect(dirname(temporary[0] ?? "").startsWith(`${path}.v1.bak.`)).toBe(true);
+			expect(existsSync(dirname(temporary[0] ?? ""))).toBe(false);
 			expect(schemaVersion(db)).toBe(SCHEMA_VERSION);
 			expect(mode(`${path}.v1.bak`)).toBe(0o600);
 			expect(mode(retained)).toBe(0o600);

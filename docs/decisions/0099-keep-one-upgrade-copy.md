@@ -14,7 +14,7 @@ each schema change and can fill the data volume.
 Keep the copy for the current upgrade. Normally one copy provides rollback to the database as the
 previous build left it without retaining the cost of every earlier upgrade.
 
-Write the copy with `VACUUM INTO` at a unique temporary path beside the database. Sync and close the file,
+Write the copy with `VACUUM INTO` in a new private directory beside the database. Sync and close the file,
 rename it to `<database>.v<N>.bak`, then sync the directory before migrating. A failed copy never publishes
 partial bytes under the final name. If that name already exists, leave it unchecked and keep all older
 copies. An existing copy does not establish that this start made a safe replacement for them.
@@ -38,7 +38,7 @@ has already disappeared is harmless.
 
 Only copies still present remain available for rollback. Operators who need an earlier rollback point
 must save a separate backup before upgrading. A pre-existing final copy, cleanup failure, or interrupted
-cleanup can leave more than one copy. A crash while writing can leave a temporary file, which cleanup
+cleanup can leave more than one copy. A crash while writing can leave that private directory, which cleanup
 ignores. Upgrade copies do not replace scheduled backups.
 
 The retention rule belongs in the migration kernel shared by local and server starts. It adds no setting,

@@ -1,7 +1,7 @@
 // Versioned migrations, run on start in every layer (decision 0002, rule 8).
-import { closeSync, existsSync, fsyncSync, openSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { createPrivateDatabaseFile, Db, protectDatabaseCopies } from "./db.ts";
+import { Db, protectDatabaseCopies, writePrivateDatabaseFile } from "./db.ts";
 import init from "./migrations/0001_init.sql" with { type: "text" };
 import sessions from "./migrations/0002_sessions.sql" with { type: "text" };
 import tokenLimits from "./migrations/0003_token_limits.sql" with { type: "text" };
@@ -157,26 +157,8 @@ export function migrate(db: Db, path: string): { from: number; to: number; backu
 	if (pending.length > 0 && from > 0 && path !== ":memory:") {
 		backup = `${path}.v${from}.bak`;
 		if (!existsSync(backup)) {
-			const temporary = `${backup}.${crypto.randomUUID()}.tmp`;
-			try {
-				createPrivateDatabaseFile(temporary, (privatePath) => db.raw.query("VACUUM INTO ?").run(privatePath));
-				const copy = openSync(temporary, "r+");
-				try {
-					fsyncSync(copy);
-				} finally {
-					closeSync(copy);
-				}
-				renameSync(temporary, backup);
-				const directory = openSync(dirname(path), "r");
-				try {
-					fsyncSync(directory);
-				} finally {
-					closeSync(directory);
-				}
-				wroteBackup = true;
-			} finally {
-				rmSync(temporary, { force: true });
-			}
+			writePrivateDatabaseFile(backup, (privatePath) => db.raw.query("VACUUM INTO ?").run(privatePath));
+			wroteBackup = true;
 		}
 	}
 	if (pending.length > 0)
