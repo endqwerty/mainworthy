@@ -80,6 +80,7 @@ If the case updates before you edit, your next edit starts from the newer versio
 While you edit, the folder and tags follow changes made elsewhere. Tags you add in
 the editor appear alongside those live tags. Saving changes only the tags you added
 or removed, and keeps unrelated tag changes.
+A tag you type remains your addition even if a pending shortcut write of that same tag fails.
 Your typed text stays on the version you started from.
 
 The editor records a step once the step has an action.
