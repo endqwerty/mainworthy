@@ -329,8 +329,9 @@ rule: "Fixed by a later commit of pr:482", or "Fixed in pr:482 before it merged"
 issue of its own: the pull request that fixed it is the record, and it names the issue it was for.
 
 A commit that failed and then passed when it ran again proves no fix, and neither does a pass reported after the
-change ended. Those endings, and endings recorded before Mainworthy noted which commit passed, keep the rule and
-reason and claim no fix. The ending's answer records `on`: `later-commit` or `same-commit`.
+change ended. Those endings, and endings recorded before Mainworthy noted fixes, keep the rule and reason and claim
+no fix. Whether an ending is a fix is decided when it is recorded, as `fixed: true` in its answer, so reopening the
+change or restoring an archive later does not change it.
 An ended answer cannot be withdrawn. A timed expiry or tracker closure shows its own recorded rule and reason,
 without claiming that the cause passed.
 When you select an ended answer, the footer and command palette leave out "Undo answer".

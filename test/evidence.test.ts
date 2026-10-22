@@ -1307,13 +1307,30 @@ describe("holds", () => {
 		// A later commit that passes only after the merge was reported did not fix it before the merge.
 		h.call("report", ciReport({ commit: "late043a", branch: "late", pr: 43, n: 1, fail }));
 		decide(first(queue().items), { is: "defect" });
-		h.call("report", ciReport({ commit: "late043b", branch: "late", pr: 43, n: 1, fail }));
-		h.call("change", { change: "pr:43", state: "merged" });
+		h.call("change", { change: "pr:43", state: "merged", head: "late043b" });
 		h.advance(60_000);
-		h.call("report", ciReport({ commit: "late043b", branch: "late", pr: 43, n: 1, attempt: 2 }));
-		const late = h.call<InboxReply>("inbox", { state: "decided", on: "pr:43" }).items;
-		expect(late).toMatchObject([{ state: "dissolved", decision: { rule: "passed" } }]);
-		expect(late[0]?.decision).not.toHaveProperty("fixedIn");
+		h.call("report", ciReport({ commit: "late043b", branch: "late", pr: 43, n: 1 }));
+		const late = () => h.call<InboxReply>("inbox", { state: "decided", on: "pr:43" }).items;
+		expect(late()).toMatchObject([{ state: "dissolved", decision: { rule: "passed" } }]);
+		expect(late()[0]?.decision).not.toHaveProperty("fixedIn");
+		// Whether it was open is decided when the answer ends: reopening, merging again or restoring an archive,
+		// which leaves out how changes ended, makes no fix of it later.
+		h.call("change", { change: "pr:43", state: "open" });
+		expect(late()[0]?.decision).not.toHaveProperty("fixedIn");
+		h.call("change", { change: "pr:43", state: "merged" });
+		expect(late()[0]?.decision).not.toHaveProperty("fixedIn");
+		const chunks: string[] = [];
+		exportArchive(h.app.db, (chunk) => chunks.push(chunk));
+		const restored = new Db(":memory:");
+		try {
+			migrate(restored, ":memory:");
+			importArchive(restored, linesOf(chunks.join("")));
+			const question = late()[0];
+			if (!question) throw new Error("expected the ended answer");
+			expect(toItem(restored, mustQuestion(restored, 1, question.q)).decision).not.toHaveProperty("fixedIn");
+		} finally {
+			restored.close();
+		}
 	});
 
 	test("an expired flaky answer stays in Settled when its failure has gone, without claiming a pass ended it", () => {
