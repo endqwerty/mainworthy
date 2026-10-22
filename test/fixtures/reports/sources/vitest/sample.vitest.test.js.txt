@@ -1,0 +1,6 @@
+import {test, expect} from 'vitest';
+let flaky = 0;
+test('recovers', { retry: 2 }, () => { expect(++flaky).toBe(3); });
+test('still fails', { retry: 2 }, () => { expect(1).toBe(2); });
+test('clean', () => {});
+test.skip('skipped', () => {});
