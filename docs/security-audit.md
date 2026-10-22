@@ -13,14 +13,18 @@ branch's `bunfig.toml` (its `preload`) and `.env` before the script's first line
 from origin/main's page (`git show origin/main:docs/security-audit.md`), not from the branch's:
 
 ```sh
-repo=$(git rev-parse --show-toplevel); git -C "$repo" fetch -q origin main
-main_commit=$(git -C "$repo" rev-parse --verify 'origin/main^{commit}'); runner=$(mktemp -d)
-git -C "$repo" show "${main_commit}:scripts/security-audit.ts" > "$runner/security-audit.ts" &&
-  (cd / && bun "$runner/security-audit.ts" <number> --repo "$repo" --source "$main_commit" [--context <file>])
-rm -rf "$runner"
+repo=$(git rev-parse --show-toplevel); runner=$(mktemp -d)
+(
+  set -e
+  git -C "$repo" fetch -q origin main
+  main_commit=$(git -C "$repo" rev-parse --verify 'origin/main^{commit}')
+  git -C "$repo" show "${main_commit}:scripts/security-audit.ts" > "$runner/security-audit.ts"
+  cd / && bun "$runner/security-audit.ts" <number> --repo "$repo" --source "$main_commit" [--context <file>]
+); rc=$?; rm -rf "$runner"; (exit "$rc")
 ```
 
-The script refuses unless `--source` is still origin/main's tip and the file it runs is that commit's copy, outside the
+The block exits with the audit's status: nonzero when a step before it fails, when the script refuses, or when Codex
+fails, so a missing audit never reads as a passing one. The script refuses unless `--source` is still origin/main's tip and the file it runs is that commit's copy, outside the
 checkout and not read from standard input, and it prints the commit it ran from; record that commit with the round.
 It also refuses when bun runs inside the checkout, but by then a preload has run, so the `cd /` is what protects you.
 Those checks catch a mistake or a race (`main` moving between the launcher and the script), not a hostile copy, which
