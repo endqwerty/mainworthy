@@ -1,0 +1,5 @@
+ARG APP_IMAGE=mainworthy-lockdown:test
+FROM ${APP_IMAGE}
+USER 0:0
+RUN apt-get update && apt-get install -y --no-install-recommends python3 iputils-ping iproute2 curl && rm -rf /var/lib/apt/lists/*
+ENTRYPOINT []

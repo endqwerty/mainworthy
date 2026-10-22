@@ -9,6 +9,7 @@ import { API_VERSION, VERSION } from "../core/version.ts";
 import { defaultConfig } from "../server/kernel/app.ts";
 import { contentSecurityPolicy } from "../surfaces/headers.ts";
 import { Client } from "./client.ts";
+import { verifyLockdownStatus } from "./lockdown.ts";
 import { CLI_ENTRY, COMMIT, inThisProcess, withInstance } from "./test-support.ts";
 
 /**
@@ -637,4 +638,36 @@ test("closing a gate's stdout preserves pending, blocked, failed and passed exit
 		});
 		expect(await pipeGate(passed)).toBe(0);
 	});
+});
+
+const lockedStatus = [
+	"Uid:\t10001\t10001\t10001\t10001",
+	"Gid:\t10001\t10001\t10001\t10001",
+	"Groups:\t ",
+	...["CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb"].map((field) => `${field}:\t0000000000000000`),
+	"NoNewPrivs:\t1",
+].join("\n");
+
+test("lockdown accepts only the unprivileged application identity", () => {
+	expect(() => verifyLockdownStatus(lockedStatus)).not.toThrow();
+	for (const field of ["CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb"]) {
+		expect(() =>
+			verifyLockdownStatus(lockedStatus.replace(`${field}:\t0000000000000000`, `${field}:\t0000000000000100`)),
+		).toThrow(field);
+		expect(() => verifyLockdownStatus(lockedStatus.replace(new RegExp(`^${field}:.*$`, "m"), ""))).toThrow(field);
+	}
+	for (const field of ["Uid", "Gid"]) {
+		for (let slot = 0; slot < 4; slot++) {
+			const ids = [10001, 10001, 10001, 10001];
+			ids[slot] = 0;
+			expect(() =>
+				verifyLockdownStatus(lockedStatus.replace(new RegExp(`^${field}:.*$`, "m"), `${field}:\t${ids.join("\t")}`)),
+			).toThrow(field);
+		}
+	}
+	for (const replacement of ["Groups:\t10001", "NoNewPrivs:\t0"]) {
+		const field = replacement.split(":")[0];
+		expect(() => verifyLockdownStatus(lockedStatus.replace(new RegExp(`^${field}:.*$`, "m"), replacement))).toThrow();
+	}
+	expect(() => verifyLockdownStatus("")).toThrow();
 });

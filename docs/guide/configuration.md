@@ -291,3 +291,11 @@ A password with no enrolled authenticator then opens no admin session. Neither d
 Each start with this setting ends every admin password session, including sessions that previously completed a second step, and every admin session opened through an identity provider that `MAINWORTHY_OIDC_MFA` does not vouch for. The admin signs in again. Becoming an admin ends the same sessions, whether through a personal grant, a team grant, or joining an admin team. Passkey sessions remain signed in.
 
 An admin password with no enrolled authenticator does not count as a working way to sign in. The last usable passkey stays until the person adds another passkey or enrols an authenticator. An admin with a password must remove the password before removing their authenticator to rely only on passkeys.
+
+### Container network lockdown
+
+The production Coolify Compose file sets `MAINWORTHY_LOCKDOWN=1` to block new outbound network connections from Mainworthy. The ordinary image defaults to `0`; any other value refuses startup.
+Its image entrypoint installs the policy before starting the app without capabilities.
+This deployment cannot send outbound mail or webhooks, or contact an OIDC provider.
+The ordinary image and local Compose file leave lockdown off and retain these integrations.
+See the repository's `docs/deploy.md` for the Linux startup checks and the trusted-proxy boundary.

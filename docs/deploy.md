@@ -159,18 +159,73 @@ address:
    A test runs this check against both kinds of header (`test/limit.test.ts`). Nobody has run it through a real
    proxy yet.
 
-**The instance at `mainworthy.com` does not set the two variables yet**, and `compose.coolify.yaml` does not
-pass them. Its requests come through Cloudflare's tunnel, then Coolify's proxy, then the container. Nobody has
-measured what the container sees on that path. The values expected to be right, both unverified:
+## Production network lockdown
 
-- `MAINWORTHY_CLIENT_ADDRESS_HEADER=cf-connecting-ip`. Cloudflare writes the visitor's address there and
-  replaces what the visitor sent. Not checked: that Coolify's proxy passes the header on unchanged, and that no
-  request reaches that proxy without going through Cloudflare. One that does could write the header itself.
-- `MAINWORTHY_TRUSTED_PROXY` set to the address of Coolify's proxy on the network it shares with the container,
-  or that network's range. Not read from the server yet.
+`compose.coolify.yaml` enables `MAINWORTHY_LOCKDOWN=1`. The ordinary image and `compose.yaml`
+leave it off, so outbound mail, webhooks, OIDC and other integrations keep working there.
+Lockdown blocks every new outbound connection, including those integrations. Do not enable it
+on a deployment that needs them.
 
-Until both are measured and set, with the check in step 3 done from two networks, that instance counts a wrong
-token against its first 8 characters and not against an address.
+The image entrypoint installs `scripts/container/lockdown.nft` in the app's network namespace.
+It atomically replaces only its own table and compares the installed rules with the packaged
+policy. IPv4 and IPv6 share a default-drop output chain. It permits loopback except Docker's
+embedded DNS at `127.0.0.11`, and established or related replies to inbound traffic. It does not
+permit the original direction of an outbound connection. New connections to another container,
+the host, private networks, or the Internet are blocked on every attached interface. This also
+covers networks Coolify adds. Reply traffic can still carry application data to an inbound caller.
+
+Only setup runs as root, with NET_ADMIN, SETUID, SETGID and SETPCAP. `setpriv` switches to
+UID/GID 10001, clears supplementary groups and every capability set, sets no-new-privileges,
+and execs Mainworthy. Before serving, Mainworthy reads its own `/proc/self/status` and refuses
+to start unless all five capability fields are zero, every UID/GID is 10001, groups are empty,
+and NoNewPrivs is 1. A failed rule install, readback or credential check prevents startup.
+Healthchecks use the same credential drop without changing the firewall. A host administrator
+can still start a privileged process with Docker; the application cannot regain those privileges.
+For a CLI command inside this container, use `docker exec <container> mainworthy-entrypoint <args>`.
+
+The `ingress` service has one fixed upstream, `mainworthy:7357`. Its pinned Nginx image runs as
+101:101 with a read-only filesystem, no capabilities, no-new-privileges, a temporary `/tmp`,
+64 MiB memory and 64 PIDs. It holds no application volume, token or other secret. It publishes
+only `127.0.0.1:7358`, forces `X-Forwarded-Proto: https`, and replaces `X-Mainworthy-Client`
+with `CF-Connecting-IP`. If the latter is missing, it removes the client header. CONNECT and
+absolute-form request targets are refused. DNS refresh handles replacement app containers;
+only the fixed service name is resolved, over IPv4 because that is the app's listening address.
+Uploads stream to Mainworthy, which owns the body-size limits; the proxy does not buffer them
+into its small tmpfs.
+Tailscale continues proxying directly to the app through their shared network.
+
+The operator must set `MAINWORTHY_TRUSTED_PROXY` to the actual application network peer range
+and `MAINWORTHY_CLIENT_ADDRESS_HEADER=x-mainworthy-client`. Compose requires both values.
+Every peer in that range is trusted; do not share it with untrusted workloads. The tailnet path
+is a separate trusted internal path, not a public Cloudflare origin.
+
+The public-origin contract requires a host Cloudflare Tunnel pointing to
+`http://127.0.0.1:7358` and removal of the previous Coolify/Traefik domain after cutover.
+A normal public request's malicious CF-Connecting-IP is replaced by Cloudflare before it
+enters the tunnel. The proxy trusts that value; it cannot authenticate Cloudflare by inspecting
+the header. A process that controls the host can spoof a loopback request, and a compromised
+trusted application-network peer can reach the proxy internally. The loopback binding excludes
+LAN clients, not a compromised host or trusted peer. Cloudflare Workers and header transforms
+are part of the operator-controlled boundary. See [Cloudflare's header semantics](https://developers.cloudflare.com/fundamentals/reference/http-headers/).
+Do not claim the public boundary until the old LAN-accessible Traefik route is gone.
+
+To reproduce the container checks on a disposable Linux Docker host:
+
+```sh
+	docker build -t mainworthy-lockdown:test .
+	docker build -f scripts/container/Dockerfile.test-tools -t mainworthy-lockdown-tools:test .
+	python3 scripts/container/test.py
+```
+
+The test creates synthetic data and disposable networks and removes its containers and networks
+on exit. It needs Python 3 on the host, Docker Compose, outbound access for positive controls,
+and unused fixture subnets `172.30.231.0/24`, `fd42:231::/64`, `198.51.100.0/24` and
+`2001:db8:231::/64`. It reads the proxy config from Compose. For Compose validation it strips
+only the existing Coolify-specific `exclude_from_hc` property, as Coolify's parser does.
+It covers TCP, UDP, ICMP, fragments, DNS, newly attached interfaces, capability removal,
+header normalization, sign-in limits, loopback binding, invalid startup, health, restarts
+and signals. IPv6 uses reachable fixtures; this does not prove public IPv6 routing on the host.
+No real Tailscale identity is enrolled by this test. The operator must check that path after deploy.
 
 ## On Coolify
 
@@ -191,37 +246,25 @@ dashboard. This page writes the tailnet's name as `example.ts.net` and the node'
    volume. Bind it to a path you back up if you have one.
 5. **Network:** the `tailscale` service in `compose.coolify.yaml` is its own tailnet node, `mainworthy`, and serves
    the app at `https://mainworthy.example.ts.net` (Tailscale issues the certificate; the first request can take
-   a few seconds). Nothing is published on the LAN; port 7357 is bound to `127.0.0.1` on the host for debugging
-   only. Anything on the tailnet can reach the name, and every request still needs a token. The node's identity
+   a few seconds). Nothing is published on the LAN; ingress port 7358 is bound to `127.0.0.1` for the host
+   tunnel. Anything on the tailnet can reach the name, and every request still needs a token. The node's identity
    lives in the `tailscale-state` volume: deleting it registers a new node.
    Once the node is up, disable its key expiry in the Tailscale admin console (Machines → the node), and delete
    `TS_AUTHKEY` from Coolify. For a server without Tailscale, use `compose.yaml` (publishes 7357) or give the
-   service a domain in Coolify.
+   ordinary non-lockdown service a domain in Coolify.
 6. **Deploy**, then check: `curl https://mainworthy.example.ts.net/healthz` answers `{"ok":true,"version":"…","commit":"…"}`, and `commit` is the commit Coolify
    built (it comes from `SOURCE_COMMIT`; `compose.coolify.yaml` needs no line for it: naming the variable there would
    make Coolify list it as one of yours, and an empty value of yours replaces the one it generates). Compare it with
    the tip of `main` (`git ls-remote origin refs/heads/main`) to see whether the instance is behind. Open the page
    and paste the owner token.
-7. **The public address** (since 2026-10-13): `https://mainworthy.com` serves this instance, before accounts
-   exist (#30). The owner decided that for the MVP: it is theirs to dogfood, its database will be wiped before
-   1.0, and they can cut it off at any time. Every request still needs a token, and wrong tokens are limited
-   ("The limit on failed sign-ins"; on this instance not yet by address). The path is the one the server's other public
-   apps use: a proxied Cloudflare record for the name, a route in the server's Cloudflare tunnel, Coolify's
-   proxy, and a domain on the service in Coolify (`https://mainworthy.com:7357` on the service `mainworthy`, with
-   "connect to the predefined network" on and Coolify's own HTTPS redirect off). Two things differ from an
-   ordinary app behind that proxy:
-   - **The tunnel route goes to the proxy's HTTPS port** (`https://localhost:443`, certificate not verified,
-     server name `mainworthy.com`), not to port 80. Mainworthy accepts a browser's sign-in only when the proxy
-     says the page was served over https (`X-Forwarded-Proto`), and Coolify's proxy replaces that header with
-     its own: `http` on port 80, `https` on port 443. Measured on the server: the same sign-in request answers
-     401 through port 80 and 200 through port 443.
-   - **Cloudflare's "Always Use HTTPS" is on** for the zone, so nobody sends a token over plain HTTP.
-   - **Cloudflare's automatic Web Analytics is to be turned off** for the zone. With it on, Cloudflare writes a
-     script tag for `static.cloudflareinsights.com` into every HTML page it passes on. The page's
-     Content-Security-Policy allows scripts from the server's own origin only, so the browser refuses that
-     script and logs one refusal for each page (seen on the instance on 2026-10-13, in the app and in the
-     documentation). Nothing is broken by it, and the product promises no analytics (`docs/compliance.md`); the
-     setting is in the Cloudflare dashboard under Web Analytics for the site.
+7. **The public address:** point the host's Cloudflare Tunnel at `http://127.0.0.1:7358` for
+   `mainworthy.com`, then remove the old Coolify domain and Traefik router. The ingress service sets the
+   HTTPS and client headers. Set the proxy range and dedicated header as described above. The previous
+   route was `https://localhost:443` through Traefik with a domain on the app service. It remains the live
+   route until the operator performs the cutover; the private homelab notes track that work and rollback.
+   - Keep Cloudflare's "Always Use HTTPS" on for the zone.
+   - Turn off Cloudflare's automatic Web Analytics. Its injected external script violates the app's
+     Content-Security-Policy, and the product promises no analytics (`docs/compliance.md`).
 
    To take the instance off the internet, delete the DNS record for the name or its route in the tunnel. A
    firewall rule for incoming connections does not do it: the tunnel is a connection the server opens outward.
@@ -302,7 +345,7 @@ the steps are kept below for an instance that has none.
    with none (decision 0021), its reports add those cases. `mainworthy` does, since 2026-10-17 (below).
 
    On the Coolify instance the commands ran inside the container, which already holds the owner token, so that
-   token was copied nowhere: `docker exec <container> sh -c 'MAINWORTHY_TOKEN="$MAINWORTHY_OWNER_TOKEN" mainworthy …'`.
+   token was copied nowhere: `docker exec <container> sh -c 'MAINWORTHY_TOKEN="$MAINWORTHY_OWNER_TOKEN" mainworthy-entrypoint …'`.
    The new token went from that command's output into `gh secret set MAINWORTHY_TOKEN` and was never printed.
    After the owner's own account is recovered, that owner token no longer signs in (decision 0067): set
    `MAINWORTHY_OWNER_TOKEN` to a new value and redeploy before using this route again. The CI token above is another
