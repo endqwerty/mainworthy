@@ -184,6 +184,8 @@ A pipeline reports tests that no case names. What happens to them is one choice 
 | Create a case for each test (`create`) | Each test gets a case named after it and is linked to that case. The case's folder is named after the directory of the test's file. Nobody is asked. |
 | Ask in the queue (`ask`) | Each file with such tests is one question in the queue. It blocks nothing. `strict` starts here. |
 
+When a report creates cases, health checks and reads can run between creation slices and files. The new cases and test links become visible together when the report applies. A concurrent save waits for that transaction.
+
 In Settings, open Policy and choose under "Tests with no case". From the command line:
 
 ```

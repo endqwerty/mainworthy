@@ -1,0 +1,164 @@
+{
+  "base": "509afe8c334a7d54f970994b59e556f26c87d368",
+  "bun": "1.4.3",
+  "platform": "macOS arm64",
+  "cores": 10,
+  "sharedMachine": true,
+  "initialLoad": [
+    17.19,
+    16.06,
+    14.46
+  ],
+  "dataset": {
+    "cases": 5000,
+    "tests": 2000,
+    "results": 50624,
+    "openQuestions": 500
+  },
+  "workload": "Fresh disk copy per run; production NODE_ENV; 8 reader threads ready before requests; one HTTP report of 10000 new tests across 200 files under unlinked=create; separate-process health and gate clients each wait 250 ms after a response. Each test key is unique, each outcome pass. Five alternating baseline/fixed pairs.",
+  "correctness": "Every report fresh=true, counts.total=10000; final filtered results count=10000; no health or gate request failures. Regression tests additionally check case creation and links.",
+  "limiter": "Synchronous report raiseMap drained the existing case-creation generator. Separate instrumented diagnostic final next() 1060\u20132678 ms; event-loop lag up to 2691 ms; slowest individual measured SQL call 45.75 ms and JSON.parse 11.25 ms. Diagnostic runs excluded from latency samples.",
+  "remaining": "Other synchronous report phases and saves waiting for the writer gate remain. Historical production 17 s stall not conclusively attributed. Report throughput ranges overlap; no throughput claim.",
+  "samples": [
+    {
+      "side": "before",
+      "pair": 1,
+      "reportMs": 2866.9419170000006,
+      "errors": 0,
+      "health": {
+        "samples": 17,
+        "longestMs": 2007.842584
+      },
+      "gate": {
+        "samples": 17,
+        "longestMs": 1939.5384170000007
+      }
+    },
+    {
+      "side": "after",
+      "pair": 1,
+      "reportMs": 3181.5553330000002,
+      "errors": 0,
+      "health": {
+        "samples": 27,
+        "longestMs": 12.813415999999961
+      },
+      "gate": {
+        "samples": 26,
+        "longestMs": 104.15254199999981
+      }
+    },
+    {
+      "side": "before",
+      "pair": 2,
+      "reportMs": 3190.9659169999995,
+      "errors": 0,
+      "health": {
+        "samples": 18,
+        "longestMs": 2143.455583
+      },
+      "gate": {
+        "samples": 17,
+        "longestMs": 2296.8857500000004
+      }
+    },
+    {
+      "side": "after",
+      "pair": 2,
+      "reportMs": 2859.659291,
+      "errors": 0,
+      "health": {
+        "samples": 25,
+        "longestMs": 48.10591699999986
+      },
+      "gate": {
+        "samples": 25,
+        "longestMs": 68.16379099999995
+      }
+    },
+    {
+      "side": "before",
+      "pair": 3,
+      "reportMs": 3037.516084,
+      "errors": 0,
+      "health": {
+        "samples": 18,
+        "longestMs": 1953.7902500000005
+      },
+      "gate": {
+        "samples": 17,
+        "longestMs": 2150.9784999999997
+      }
+    },
+    {
+      "side": "after",
+      "pair": 3,
+      "reportMs": 1625.070041,
+      "errors": 0,
+      "health": {
+        "samples": 21,
+        "longestMs": 21.071833000000197
+      },
+      "gate": {
+        "samples": 21,
+        "longestMs": 40.91450000000009
+      }
+    },
+    {
+      "side": "before",
+      "pair": 4,
+      "reportMs": 1627.4587499999998,
+      "errors": 0,
+      "health": {
+        "samples": 16,
+        "longestMs": 1096.4106249999995
+      },
+      "gate": {
+        "samples": 16,
+        "longestMs": 1060.7829160000001
+      }
+    },
+    {
+      "side": "after",
+      "pair": 4,
+      "reportMs": 1871.40575,
+      "errors": 0,
+      "health": {
+        "samples": 22,
+        "longestMs": 32.016208000000006
+      },
+      "gate": {
+        "samples": 22,
+        "longestMs": 50.04124999999999
+      }
+    },
+    {
+      "side": "before",
+      "pair": 5,
+      "reportMs": 1540.581083,
+      "errors": 0,
+      "health": {
+        "samples": 16,
+        "longestMs": 1005.2676659999997
+      },
+      "gate": {
+        "samples": 16,
+        "longestMs": 983.2602499999998
+      }
+    },
+    {
+      "side": "after",
+      "pair": 5,
+      "reportMs": 1492.4744170000004,
+      "errors": 0,
+      "health": {
+        "samples": 20,
+        "longestMs": 23.317000000000007
+      },
+      "gate": {
+        "samples": 20,
+        "longestMs": 38.80391700000018
+      }
+    }
+  ]
+}
