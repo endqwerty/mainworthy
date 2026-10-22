@@ -15,7 +15,7 @@ const Report = z.object({
 		z.object({
 			nodeid: z.string().min(1),
 			user_properties: z.array(z.object({ mainworthy: z.string().optional() })).optional(),
-			outcome: z.enum(["passed", "failed", "skipped", "xfailed", "xpassed", "error"]),
+			outcome: z.enum(["passed", "failed", "skipped", "xfailed", "xpassed", "error", "rerun"]),
 			setup: Stage.optional(),
 			call: Stage.optional(),
 			teardown: Stage.optional(),
@@ -48,6 +48,7 @@ export function parsePytest(value: unknown): ParsedReport {
 	)
 		throw new Error("pytest did not complete test collection/execution; fix the runner before uploading");
 	const results: ParsedReport["results"] = [];
+	const warnings: string[] = [];
 	for (const test of report.tests) {
 		const separator = test.nodeid.indexOf("::");
 		const file = test.nodeid.slice(0, separator);
@@ -68,12 +69,23 @@ export function parsePytest(value: unknown): ParsedReport {
 			};
 		});
 		const outcome = resultOf(test);
+		if (test.outcome === "rerun")
+			warnings.push(
+				`pytest test ${test.nodeid}: report omits retry count and earlier stages; kept one earlier failed try without diagnostics`,
+			);
 		results.push(
 			nativeResult({
 				name,
 				file,
 				suites: names,
 				outcome,
+				...(test.outcome === "rerun"
+					? {
+							tries: [
+								{ outcome: "fail", failure: { message: "pytest reran this test; earlier stages are unavailable" } },
+							],
+						}
+					: {}),
 				annotation: test.user_properties
 					?.map((item) => caseAnnotation(item.mainworthy ?? ""))
 					.findLast((claim) => claim !== undefined),
@@ -91,5 +103,5 @@ export function parsePytest(value: unknown): ParsedReport {
 	}
 	if (report.exitcode === 1 && !results.some((result) => result.outcome === "fail" || result.outcome === "error"))
 		throw new Error("pytest exited with 1 but no test failed; fix the runner before uploading");
-	return { results, warnings: [] };
+	return { results, warnings };
 }

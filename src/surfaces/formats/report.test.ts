@@ -21,7 +21,7 @@ const jestReport = (status = "passed", extra = {}) => ({
 					ancestorTitles: ["math"],
 					status,
 					duration: 12.5,
-					failureMessages: ["expected 2\n at sample.js:8"],
+					failureMessages: status === "failed" ? ["expected 2\n at sample.js:8"] : [],
 					...extra,
 				},
 			],

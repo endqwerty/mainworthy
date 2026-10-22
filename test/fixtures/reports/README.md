@@ -33,8 +33,7 @@ pytest --json-report --json-report-file=out.json
 
 All four commands exit 1 because the samples deliberately include failures.
 Jest, Vitest, and Playwright include pass, fail, skip, todo or fixme,
-parameterized cases, and a test that passes after a retry. Their JSON exports
-only retain retry history for Playwright. Pytest includes two different failing
+parameterized cases, and a test that passes after a retry. Playwright retains full retry history; the other reporters retain partial evidence, described below. Pytest includes two different failing
 assertions in one class, parameterized tests, skip, expected failure, and a
 fixture setup error. Playwright uses no browser fixtures and launches no browser.
 
@@ -82,3 +81,36 @@ The selected formats are those explicitly requested by the issue. CTRF stays
 deferred: no concrete Mainworthy pipeline requiring it was identified, and no
 adapter or adoption claim is made here. The pytest selection follows the
 plugin's published schema rather than assuming a pytest-native JSON standard.
+
+## Retry evidence regression fixtures
+
+`jest-retries.json`, `vitest-retries.json`, and `pytest-retries.json` were generated
+on 2026-10-22 with Node 26.12.0, Jest 30.5.2, Vitest 5.0.4, Python 3.15.0,
+pytest 8.4.2, pytest-json-report 1.5.0, and pytest-rerunfailures 16.7.
+Their sources are `sources/jest/sample.test.cjs.txt`,
+`sources/vitest/sample.vitest.test.js.txt`, and `sources/pytest/test_sample.py.txt`.
+Copy them into an isolated runner project and remove `.txt`, then run:
+
+```sh
+jest sample.test.cjs --runInBand --json --outputFile=jest-retries.json
+vitest run sample.vitest.test.js --reporter=json --outputFile=vitest-retries.json
+pytest --reruns 2 --json-report --json-report-file=pytest-retries.json
+```
+
+Each command exits 1. Each report has a test that fails twice then passes, an
+exhausted failure, a clean pass, and a skip. Only whitespace and path prefixes were changed to
+`/workspace`, and the scratch directory's keyword was changed to `retry-samples`.
+Values, stack traces, reporter metadata, durations, and timestamps remain as generated.
+
+Jest retains `invocations` and, with `logErrorsBeforeRetry`, `retryReasons`.
+Jest flattens errors, so multiple errors per try can lose diagnostic boundaries.
+Vitest keeps earlier errors in a passed assertion's `failureMessages`, but its
+JSON reporter omits retry counts and boundaries. Pytest overwrites stages on
+each execution; a recovered test retains the overall `rerun` outcome beside
+passing final stages. Exhausted pytest failures retain no retry marker.
+The adapter tests check these limits rather than assuming each error is one try.
+
+The serialization code for these installed versions was checked alongside the
+reports. The upstream sources are [Jest's circus result conversion](https://github.com/jestjs/jest/blob/main/packages/jest-circus/src/utils.ts),
+[Vitest's JSON reporter](https://github.com/vitest-dev/vitest/blob/main/packages/vitest/src/node/reporters/json.ts),
+and [pytest-json-report's report hook](https://github.com/numirias/pytest-json-report/blob/master/pytest_jsonreport/plugin.py).
