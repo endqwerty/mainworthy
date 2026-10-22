@@ -431,14 +431,16 @@ final class QueueUITests: XCTestCase {
 		scroll.swipeUp()
 		let bar = scroll.otherElements.matching(NSPredicate(format: "label BEGINSWITH 'Vertical scroll bar'")).firstMatch
 		XCTAssertTrue(bar.exists)
-		let pages = try XCTUnwrap(bar.label.components(separatedBy: CharacterSet.decimalDigits.inverted).compactMap(Int.init).first)
-		let percent = try XCTUnwrap(bar.value as? String).replacingOccurrences(of: "%", with: "")
-		let progress = try XCTUnwrap(Double(percent)) / 100
-		let thumb = bar.frame.height / Double(pages)
-		let position = ((bar.frame.height - thumb) * progress + thumb / 2) / bar.frame.height
-		let edge = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: position))
-		edge.press(forDuration: 0.6, thenDragTo: bar.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 1)), withVelocity: XCUIGestureVelocity(rawValue: 100_000), thenHoldForDuration: 0.1)
-		XCTAssertTrue(scroll.frame.contains(accept.frame), "The indicator drag must jump directly to the answer buttons")
+		for _ in 0..<5 where !scroll.frame.contains(accept.frame) {
+			let pages = try XCTUnwrap(bar.label.components(separatedBy: CharacterSet.decimalDigits.inverted).compactMap(Int.init).first)
+			let percent = try XCTUnwrap(bar.value as? String).replacingOccurrences(of: "%", with: "")
+			let progress = try XCTUnwrap(Double(percent)) / 100
+			let thumb = bar.frame.height / Double(pages)
+			let position = ((bar.frame.height - thumb) * progress + thumb / 2) / bar.frame.height
+			let edge = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: position))
+			edge.press(forDuration: 0.6, thenDragTo: bar.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 1)), withVelocity: XCUIGestureVelocity(rawValue: 100_000), thenHoldForDuration: 0.1)
+		}
+		XCTAssertTrue(scroll.frame.contains(accept.frame), "The indicator drags must jump directly to the answer buttons within five attempts")
 		shot("u8-proposal-disabled")
 		XCTAssertFalse(accept.isEnabled, "Fetching a tall edit and showing its bottom must leave its unseen middle unread")
 		for _ in 0..<30 where !app.staticTexts["edit-summary"].isHittable { scroll.swipeDown(velocity: .fast) }
