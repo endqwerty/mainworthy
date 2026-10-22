@@ -162,14 +162,15 @@ function ChangesWorkbench() {
 						<div className="phead">
 							<span className="ref">{key}</span>
 							<b className="change-title">{current?.title ?? current?.branch ?? "Change"}</b>
+						</div>
+						<div className="pane-scroll detail-body">
 							{link && (
-								// The address comes from a report, so it is shown as itself, never behind the change's key.
+								// A report supplies the address, so it is shown whole as itself, never behind the change's key
+								// and never clipped: a cut-off "github.com.…" could hide whose site it is.
 								<a className="change-link" href={link.href} target="_blank" rel="noreferrer noopener">
 									{link.text}
 								</a>
 							)}
-						</div>
-						<div className="pane-scroll detail-body">
 							<div className={`change-gate v-${gateData?.verdict ?? "pending"}`}>
 								<span className="dim">Gate of the head{current?.head ? `, ${current.head.slice(0, 12)}` : ""}</span>
 								<h2>{gateData?.verdict ?? (gate.error ? "Gate unavailable" : "Reading gate…")}</h2>

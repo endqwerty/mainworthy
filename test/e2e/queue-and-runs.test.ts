@@ -198,6 +198,21 @@ check(
 			await link.getByText("github.example/shop/pull/408", { exact: true }).waitFor();
 			expect(await link.getAttribute("href")).toBe("https://github.example/shop/pull/408");
 			expect(await page.locator("#detail .phead a.ref").count()).toBe(0);
+			// However long the host, all of it shows: a clipped "github.com.…" could hide whose site it is.
+			const long = ciReport({ commit: "long410a", branch: "long", pr: 410, n: 1 });
+			const host = `github.com.${"a-very-long-label.".repeat(8)}attacker.example`;
+			await server.api("report", { ...long, target: { ...long.target, url: `https://${host}/pull/410` } });
+			await page.setViewportSize({ width: 1000, height: 700 });
+			await page.goto(`${server.url}/p/scratch/changes/pr%3A410`);
+			const shown = page.locator(".change-link");
+			await shown.getByText(`${host}/pull/410`, { exact: true }).waitFor();
+			expect(
+				await shown.evaluate((element) => {
+					const pane = element.closest(".pane")?.getBoundingClientRect();
+					const box = element.getBoundingClientRect();
+					return element.scrollWidth <= element.clientWidth && !!pane && box.right <= pane.right;
+				}),
+			).toBe(true);
 			// An address that only looks like one is left out, and the page still reads.
 			const odd = ciReport({ commit: "odd409a", branch: "odd", pr: 409, n: 1 });
 			await server.api("report", { ...odd, target: { ...odd.target, url: "https://", title: "Odd address" } });

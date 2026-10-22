@@ -38,8 +38,9 @@ Endings recorded before this decision claim no fix: what passed is only in their
 
 **The change page counts them and links to the pull request.** "1 failure that needed a fix was fixed by another of
 its commits." The pull request names the issue it was for, so the failure reaches that issue in one step. The link's
-text is its own host and path, not the change's key: a report supplies the address, and a key would vouch for it
-(the Daybreak audit, 2026-10-22).
+text is its own host and path, not the change's key: a report supplies the address, and a key would vouch for it.
+It stands on its own line and wraps, never clipped, because a clipped "github.com.…" could hide whose site it is
+(both from the Daybreak audit, 2026-10-22).
 
 **One commit spelled two ways is one commit.** Mainworthy keeps a commit as it was reported, and a report may give
 seven to sixty-four characters in either case. When deciding `fixed`, a commit that is a case-insensitive prefix of
