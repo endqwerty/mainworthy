@@ -435,6 +435,9 @@ test("old unsplit tries rebuild before pending recovery without rewriting histor
 	h.call("report", input);
 	h.app.db.raw.exec(`
 		UPDATE result_tries SET signature = (SELECT root FROM assertion_roots WHERE signature = result_tries.signature);
+		DROP INDEX change_ends_receipt; ALTER TABLE change_ends DROP COLUMN receipt;
+		DROP TABLE merge_receipt_members; DROP TABLE merge_receipts;
+		DROP TABLE merge_receipt_snapshots; DROP TABLE merge_receipt_payloads;
 		DROP TABLE assertion_seen; DROP TABLE assertion_spreads; DROP TABLE assertion_roots; DROP TABLE assertion_index;
 		DROP INDEX results_assertion_rebuild;
 		UPDATE meta SET value = '39' WHERE key = 'schema_version';
