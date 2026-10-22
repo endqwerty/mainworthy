@@ -31,14 +31,28 @@ or closing without merging clears the active selection but keeps the ledger. A l
 observation, even of the same head. The operation has no code-host event id, so it cannot distinguish an old
 head replay from an intentional correction. Its existing explicit-head correction semantics still apply.
 
-The bounded manifest in `merge_receipts` references a content-addressed snapshot. `merge_receipt_snapshots`
-indexes ordered memberships in `merge_receipt_members`; `merge_receipt_payloads` shares frozen bodies by
-project and full SHA-256. A two-pass, keyset-paged traversal hashes evidence before storing any new snapshot.
-Identical reopen/merge observations add only a manifest. Each body is limited to 32 KiB; each read returns
-at most 50 members and 64 KiB of source evidence. Gate blocking refs are chunked and shard waits are paged;
-large arrays do not enter the manifest. Decision answer, signers, holds, basis and expiry are immutable in
-the existing decision ledger (the sole update changes only derived `effects`), so receipts reference that
-ledger rather than copying a potentially large decision for every counted result.
+The bounded manifest in `merge_receipts` references separate result and gate roots through
+`merge_receipt_snapshots`. Immutable radix-32 nodes and their `merge_receipt_members` share frozen bodies
+in `merge_receipt_payloads`, by project and full SHA-256. A result's numeric id is its tree key: a result
+belongs to one counted lane, so a leaf spans at most 32 result ids even when one test has many lanes.
+Branches have at most 32 children. A changed result rewrites its leaf and ancestor path, while a new open
+question changes only the separate gate tree. Reusing a root never enumerates its children.
+
+The disposable `merge_receipt_heads` cache retains the last result root per run. Source-change triggers
+mark result buckets in `merge_receipt_dirty`: effective membership, selected excuses, quarantine coverage,
+corrected flips, test labels and target scope invalidate the affected buckets. Questions, verdicts, shard
+waits and report times do not. The first capture classifies bounded buckets once; later clean captures
+read no result pages. Cache updates and dirtiness are transactional. Landing happens after capture and
+leaves its scope changes dirty for the next observation. A change that truly changes N result standings
+or scopes still requires O(N) capture work; gate-only changes and one-result changes do not.
+
+Snapshot identity uses the v2 canonical tree hash specified in the data guide, replacing the unpublished
+flat-list hash. Each body is limited to 32 KiB; each read returns at most 50 members and 64 KiB of source
+evidence. Gate blocking refs are chunked and shard waits are paged. The receipt deliberately summarizes
+the shard-wait reason, for example "pending: waiting for 2 shards"; the exact job, environment and missing
+indices remain in its frozen gate evidence. Decision answer, signers, holds, basis and expiry are immutable
+in the existing decision ledger, whose only update changes derived `effects`. Results reference that
+ledger and freeze the displayed answer rather than copying large decisions for each counted result.
 
 `impact` returns the active receipt manifest as `change.mergeReceipt`; the change list keeps only live gate summaries,
 so listing changes never reads every historical result. The web and iPhone detail pages show the receipt
@@ -62,8 +76,9 @@ therefore stays unchanged. Removing or resetting a project removes its receipts 
   consumer, while the Witness and a foreign key still protect the active standing record.
 - Computing old standings from today's results and excuses. It would repeat the bug under a historical label.
 - Returning all frozen results in any change reply. Both detail and lists must remain bounded.
+- A flat content-addressed membership list. A new question or one result would copy every membership.
 - One deduplicated JSON snapshot. It would still require a full array during capture and unindexed JSON scans
-  while paging. Indexed memberships keep capture and evidence reads bounded.
+  while paging. Persistent trees keep changed-page capture and evidence reads bounded.
 
 Principles: Model the Domain (separate an immutable observation from live gate and approval); Make Operations
 Idempotent (duplicate merge reports keep the receipt); Type System Discipline (shared receipt schema and a

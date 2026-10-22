@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { z } from "zod";
 import type { ResultStep } from "../src/core/results.ts";
 import { dropResetIndexes } from "./demo-removal-fixture.ts";
-import { type Harness, harness } from "./helpers.ts";
+import { dropReceiptSchema, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
 afterEach(() => h?.close());
@@ -144,8 +144,9 @@ test("migration preserves old simple trails and recovery preserves accepted rich
 		results: [{ test: { key: "old" }, outcome: "fail", steps: [{ step: "a1.b2", outcome: "fail" }] }],
 	});
 	dropResetIndexes(h.app.db);
+	dropReceiptSchema(h.app.db);
 	h.app.db.exec(
-		"DROP INDEX change_ends_receipt; ALTER TABLE change_ends DROP COLUMN receipt; DROP TABLE merge_receipt_members; DROP TABLE merge_receipts; DROP TABLE merge_receipt_snapshots; DROP TABLE merge_receipt_payloads; DROP TABLE assertion_seen; DROP TABLE assertion_spreads; DROP TABLE assertion_roots; DROP TABLE assertion_index; DROP INDEX results_assertion_rebuild; DROP INDEX flips_first_try; DROP INDEX flips_second_try; ALTER TABLE flips DROP COLUMN first_try; ALTER TABLE flips DROP COLUMN second_try; DROP TABLE result_tries; DROP TABLE handoffs; DROP INDEX change_ends_landing; ALTER TABLE change_ends DROP COLUMN landing_branch; ALTER TABLE change_ends DROP COLUMN landing_repo; ALTER TABLE change_ends DROP COLUMN landing_commit; DROP INDEX projects_identity; ALTER TABLE projects DROP COLUMN identity; ALTER TABLE results RENAME COLUMN trail TO steps; UPDATE meta SET value = '33' WHERE key = 'schema_version'",
+		"DROP TABLE assertion_seen; DROP TABLE assertion_spreads; DROP TABLE assertion_roots; DROP TABLE assertion_index; DROP INDEX results_assertion_rebuild; DROP INDEX flips_first_try; DROP INDEX flips_second_try; ALTER TABLE flips DROP COLUMN first_try; ALTER TABLE flips DROP COLUMN second_try; DROP TABLE result_tries; DROP TABLE handoffs; DROP INDEX change_ends_landing; ALTER TABLE change_ends DROP COLUMN landing_branch; ALTER TABLE change_ends DROP COLUMN landing_repo; ALTER TABLE change_ends DROP COLUMN landing_commit; DROP INDEX projects_identity; ALTER TABLE projects DROP COLUMN identity; ALTER TABLE results RENAME COLUMN trail TO steps; UPDATE meta SET value = '33' WHERE key = 'schema_version'",
 	);
 	const { migrate } = await import("../src/server/kernel/migrate.ts");
 	migrate(h.app.db, ":memory:");

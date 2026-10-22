@@ -53,7 +53,7 @@ import {
 	type Blocker,
 	causeKey,
 	changeRunsOf,
-	countedTestPages,
+	countedReceiptBucket,
 	countedTestsOf,
 	disputedRuns,
 	disputesOf,
@@ -73,6 +73,7 @@ import {
 	type RunRow,
 	receiptGateEvidence,
 	receiptGateOf,
+	receiptResultBuckets,
 	retally,
 	runById,
 	runRef,
@@ -112,7 +113,6 @@ import {
 	type QuestionRow,
 	questionById,
 	questionRef,
-	type ReceiptEvidence,
 	receiptDecisionAnswer,
 	refsOf,
 	type Signer,
@@ -121,6 +121,7 @@ import {
 	setQuestionFacts,
 	setQuestionState,
 	storeMergeSnapshot,
+	storeReceiptResults,
 } from "./questions.ts";
 
 export type Raise = {
@@ -2149,38 +2150,38 @@ export function recordMergeReceipt(ctx: Ctx, change: ChangeRow): ChangeRow {
 	const empty = nothingCounted();
 	const { open: _open, waiting: _waiting, ...emptyGate } = empty;
 	const observed = run ? receiptGateOf(ctx, run) : { gate: emptyGate, openCount: 0, waitingCount: 0 };
-	function* contents(): Generator<ReceiptEvidence> {
+	function* contents(bucket: number): Generator<{ key: number; body: string }> {
 		if (!run) return;
-		for (const body of receiptGateEvidence(ctx.db, run)) yield { kind: "gate", body };
-		for (const page of countedTestPages(ctx.db, run))
-			for (const row of page) {
-				const test = testById(ctx.db, row.test);
-				const result = resultById(ctx.db, row.result);
-				const batch = result ? batchById(ctx.db, result.batch) : null;
-				if (!test || !result || !batch) throw new Error(`counted result ${row.result} is missing`);
-				yield {
-					kind: "result",
-					body: JSON.stringify({
-						result: row.result,
-						test: testRef(test),
-						name: test.name,
-						file: test.file,
-						target: row.target,
-						outcome: row.outcome,
-						method: result.method,
-						job: batch.job,
-						env: mustTarget(ctx.db, row.target).env,
-						standing: row.standing,
-						scope: row.scope,
-						flipped: row.flipped,
-						quarantined: row.excuse?.quarantined ?? false,
-						decision: row.excuse?.decision ?? null,
-						decisionAnswer: row.excuse ? receiptDecisionAnswer(ctx.db, row.excuse.decision) : null,
-					}),
-				};
-			}
+		for (const row of countedReceiptBucket(ctx.db, run, bucket)) {
+			const test = testById(ctx.db, row.test);
+			const result = resultById(ctx.db, row.result);
+			const batch = result ? batchById(ctx.db, result.batch) : null;
+			if (!test || !result || !batch) throw new Error(`counted result ${row.result} is missing`);
+			yield {
+				key: row.result,
+				body: JSON.stringify({
+					result: row.result,
+					test: testRef(test),
+					name: test.name,
+					file: test.file,
+					target: row.target,
+					outcome: row.outcome,
+					method: result.method,
+					job: batch.job,
+					env: mustTarget(ctx.db, row.target).env,
+					standing: row.standing,
+					scope: row.scope,
+					flipped: row.flipped,
+					quarantined: row.excuse?.quarantined ?? false,
+					decision: row.excuse?.decision ?? null,
+					decisionAnswer: row.excuse ? receiptDecisionAnswer(ctx.db, row.excuse.decision) : null,
+				}),
+			};
+		}
 	}
-	const evidence = storeMergeSnapshot(ctx, contents);
+	const results = run ? storeReceiptResults(ctx, run.id, () => receiptResultBuckets(ctx.db, run), contents) : null;
+	const evidence = storeMergeSnapshot(ctx, results, run ? receiptGateEvidence(ctx.db, run) : []);
+
 	const snapshot: Omit<MergeReceipt, "id"> = {
 		head: change.head_sha,
 		at: ctx.now,

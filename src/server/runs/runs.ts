@@ -115,6 +115,15 @@ export type SlotRow = {
 export type SlotLease = { slot: number; actor: number; since: number; until: number };
 
 const Q = {
+	receiptBuckets: sql<{ run: number; after: number }, { bucket: number }>(
+		"SELECT result/32 AS bucket FROM run_tests WHERE run=$run AND result/32>$after GROUP BY result/32 ORDER BY result/32 LIMIT 50",
+	),
+	receiptBucket: sql<
+		{ run: number; bucket: number },
+		{ test: number; result: number; target: number; outcome: string; signature: number | null; flipped: number }
+	>(
+		"SELECT test,result,target,outcome,signature,flipped FROM run_tests WHERE run=$run AND result/32=$bucket ORDER BY result",
+	),
 	receiptBlockingCount: sql<{ id: number }, { n: number }>(
 		"SELECT json_array_length(blocking) AS n FROM runs WHERE id=$id",
 	),
@@ -141,20 +150,6 @@ const Q = {
 	),
 	changeRuns: sql<{ change: number }, { id: number }>(
 		"SELECT id FROM runs WHERE change = $change AND origin = 'change'",
-	),
-	runTestsPage: sql<
-		{ run: number; test: number; lane: string },
-		{
-			test: number;
-			lane: string;
-			result: number;
-			target: number;
-			outcome: string;
-			signature: number | null;
-			flipped: number;
-		}
-	>(
-		"SELECT test, lane, result, target, outcome, signature, flipped FROM run_tests WHERE run = $run AND (test, lane) > ($test, $lane) ORDER BY test, lane LIMIT 50",
 	),
 	allRunTests: sql<
 		{ run: number },
@@ -1386,25 +1381,25 @@ export function countedTests(db: Db, run: RunRow): CountedTest[] {
 	return rows.map((row) => standingOf(db, run, context, { ...row, flipped: flipped.has(row.result) ? 1 : 0 }));
 }
 
-/** Bounded traversal for immutable receipts; each page owns its classification caches and flip lookup. */
-export function* countedTestPages(db: Db, run: RunRow): Generator<CountedTest[]> {
-	if (run.origin !== "change") return;
-	let test = 0;
-	let lane = "";
+export function* receiptResultBuckets(db: Db, run: RunRow): Generator<number> {
+	let after = -1;
 	for (;;) {
-		const rows = db.all(Q.runTestsPage, { run: run.id, test, lane });
-		if (!rows.length) return;
-		const context = counting(db, run);
-		const flipped = flippedLanes(
-			db,
-			rows.filter((row) => row.flipped === 1).map((row) => row.result),
-		);
-		yield rows.map((row) => standingOf(db, run, context, { ...row, flipped: flipped.has(row.result) ? 1 : 0 }));
-		const last = rows.at(-1);
-		if (!last) return;
-		test = last.test;
-		lane = last.lane;
+		const page = db.all(Q.receiptBuckets, { run: run.id, after });
+		if (!page.length) return;
+		for (const row of page) {
+			yield row.bucket;
+			after = row.bucket;
+		}
 	}
+}
+export function countedReceiptBucket(db: Db, run: RunRow, bucket: number): CountedTest[] {
+	const rows = db.all(Q.receiptBucket, { run: run.id, bucket });
+	const context = counting(db, run);
+	const flipped = flippedLanes(
+		db,
+		rows.filter((row) => row.flipped === 1).map((row) => row.result),
+	);
+	return rows.map((row) => standingOf(db, run, context, { ...row, flipped: flipped.has(row.result) ? 1 : 0 }));
 }
 
 /**

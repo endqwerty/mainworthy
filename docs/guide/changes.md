@@ -225,7 +225,8 @@ mainworthy find --in receipt-results --receipt 12 --cursor 12.results.49 --limit
 ```
 
 Use the returned cursor, which stays valid through later reports and reopening. Identical
-snapshots share storage across merge observations. Shard details and blocking-question refs
+result pages share storage across merge observations, including when question refs change. A small result
+update copies only its tree path; unchanged result trees are reused without rereading every result. Shard details and blocking-question refs
 are retained in [paged audit evidence](./data.md), alongside the decision ledger.
 The `gate` command and its exit code keep describing the current head gate.
 
