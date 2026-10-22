@@ -265,6 +265,26 @@ describe("JUnit suffixed retry sequences", () => {
 		]);
 	});
 
+	test.each([
+		['file="a"', 'classname="a"'],
+		['classname="a"', 'file="a"'],
+	])("file and classname prefixes with the same text are not retries: %s / %s", (initial, retry) => {
+		const parsed = parseJUnit(
+			`<testsuite><testcase ${initial} name="t"><failure message="real failure"/></testcase><testcase ${retry} name="t (retry #1)"/></testsuite>`,
+		);
+		expect(parsed.results).toHaveLength(2);
+		expect(parsed.results.map((item) => item.outcome)).toEqual(["fail", "pass"]);
+		expect(parsed.results.every((item) => item.tries === undefined)).toBe(true);
+	});
+
+	test.each(['file="a"', 'classname="a"'])("genuine retries retain matching file metadata: %s", (prefix) => {
+		const parsed = parseJUnit(
+			`<testsuite><testcase ${prefix} name="t"><failure message="first"/></testcase><testcase ${prefix} name="t (retry #1)"/></testsuite>`,
+		);
+		expect(parsed.results).toHaveLength(1);
+		expect(parsed.results[0]).toMatchObject({ outcome: "pass", tries: [{ outcome: "fail" }] });
+	});
+
 	test("matching suite paths in separate suite instances stay separate", () => {
 		expect(
 			parseJUnit(
