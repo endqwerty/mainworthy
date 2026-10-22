@@ -43,7 +43,16 @@ test("on-disk hot paths stay inside the design budgets", async () => {
 				ingestWorkload(instance, { size: 5_000, budget: BUDGETS.smallIngest, iterations: 5, prefix: "check" }).workload,
 			);
 			const measured = [];
-			for (const workload of workloads) measured.push(await measure(workload));
+			for (const workload of workloads) {
+				const first = await measure(workload);
+				// A tripwire is for a hot path made many times slower, which misses every time it is measured. With 5 to 15
+				// samples the criterion is the slowest one, so one slow sample on a shared runner missed once (issue
+				// #717): a budget miss counts when a second measurement misses too. An error fails at once.
+				const missedOnTime = !first.pass && first.errors === 0 && first.warmupErrors.length === 0;
+				measured.push(missedOnTime ? await measure(workload) : first);
+				if (missedOnTime)
+					console.log(`${workload.name} missed once (${first[first.criterion].toFixed(2)} ms); measured again`);
+			}
 			console.log(
 				`\nHot-path regression tripwires, milliseconds (2k cases / 500 tests / 20k results):\n${table(measured)}`,
 			);
