@@ -113,6 +113,9 @@ A command that has begun but not finished is sent again under the same ID.
 Leaving the cockpit for another screen and reopening it in the same tab keeps pending reports in order.
 If the check fails, press a result key on that slot to check again, including after leaving and reopening the cockpit.
 The original result and note are recovered before another result can be recorded.
+Pending reports belong to the project in which they started. Removing and recreating a project
+does not replay them into its replacement. If a report belongs to an obsolete project, reload
+before recording a new result.
 Reloading the tab, signing out, switching to another person, or clearing this device's data ends the queue.
 Before recording the result, paste a screenshot into **Result note** or choose **Attach a file**.
 Pending files stay with their slot while you move between slots.

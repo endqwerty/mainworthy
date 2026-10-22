@@ -7,14 +7,21 @@ but its per-slot write queue and uncertain-command recovery used to disappear. R
 a pass before an older failure arrived, leaving both results active and the gate blocked.
 [Issue #632](https://github.com/endqwerty/mainworthy/issues/632) records the reproduction.
 
-Keep report state outside React in a tab-owned map, separated by project and run and bound to the
-existing device session. Each slot retains its write chain, uncertain-command retry, latest confirmed
-fill, confirmed snapshot, optimistic generation, and consumed note and step. Recording and undo keep
+Keep report state outside React in a tab-owned map, separated by project key, opaque project identity
+and run, and bound to the existing device session. Each slot retains its write chain, uncertain-command
+retry, latest confirmed fill, confirmed snapshot, optimistic generation, and consumed note and step. Recording and undo keep
 using the same chain. A later report resolves its predecessor and any uncertain command before
 choosing the result it corrects. A new cockpit rereads notes and steps when a report from the earlier
 cockpit settles. Presentation, cursor, unrecorded file selection and undo selection stay local.
 
-An invalid session's queues are removed when a cockpit next mounts. Existing session checks still
+A queue captures the project's opaque identity from the session before recording. Every report input
+requires that identity, including a report delayed behind another report and an unchanged retry,
+following the planner's pending-request shape. The registry already rejects an obsolete identity,
+including when the project was replaced after the browser's last session read.
+
+A known replacement retires the old project's queues. They cannot retry, complete, restore cached
+slots or consume notes. A cockpit mounts with a known project identity and remounts when it changes.
+An invalid session's queues are also retired when a cockpit next mounts. Existing session checks still
 stop delayed work from writing as another person or restoring cleared browser data. Different runs
 and slots do not wait for each other. This queue survives screen navigation in the same tab; a full
 reload, sign-out, a different person, or clearing device data ends it. Signing in again as the same
