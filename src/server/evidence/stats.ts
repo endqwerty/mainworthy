@@ -66,7 +66,7 @@ const Q = {
 	// its time. Runner tries count with that result. Don't add known try durations to a repeated attempt's duration:
 	// Playwright already sums its executions. Untimed tries remain unknown: Surefire times only one execution.
 	// Legacy/imported durations can exceed today's input limit: total() avoids integer overflow, and returned time
-	// stops at the wire format's largest safe integer.
+	// stays between zero and the wire format's largest safe integer.
 	// A try on a correction makes its original lane eligible; every duplicate execution of that lane must still compete.
 	reruns: sql<{ project: number; since: number }, { test: number; reruns: number; lost: number; unknown: number }>(`
 		WITH RECURSIVE tried(result) AS (
@@ -120,8 +120,8 @@ const Q = {
 		  GROUP BY a.id
 		)
 		SELECT a.test, sum(a.repeated + a.tries) AS reruns,
-		       CAST(min(total(CASE WHEN a.repeated AND a.duration_ms IS NOT NULL THEN a.duration_ms ELSE a.tried_ms END),
-		                     ${Number.MAX_SAFE_INTEGER}) AS INTEGER) AS lost,
+		       CAST(max(0, min(total(CASE WHEN a.repeated AND a.duration_ms IS NOT NULL THEN a.duration_ms ELSE a.tried_ms END),
+		                            ${Number.MAX_SAFE_INTEGER})) AS INTEGER) AS lost,
 		       sum(a.untimed_tries + (a.repeated AND a.duration_ms IS NULL)) AS unknown
 		FROM costs a WHERE a.repeated OR a.tries > 0
 		GROUP BY a.test
