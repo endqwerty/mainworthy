@@ -7,52 +7,45 @@ a judgment call that the owner reviews.
 
 ## Running it
 
-Export the head and the diff, then run Daybreak Blue in Codex's read-only sandbox from the export. Run it as one
-script, so a step that fails stops it before Codex starts on an empty diff or a partial export:
+`scripts/security-audit.ts` runs it. Run origin/main's copy, never the branch's, so a pull request cannot change the
+audit that reads it:
 
 ```sh
-set -euo pipefail
-head=$(git rev-parse --verify '<head>^{commit}'); base=$(git rev-parse --verify '<base>^{commit}')
-echo "auditing $head on $base"
-dir=$(bun scripts/work.ts scratch new audit-<number> | tail -1); mkdir "$dir/tree"
-git archive "$head" | tar -x -C "$dir/tree"
-git diff "$base" "$head" > "$dir/change.diff"; test -s "$dir/change.diff"
-cd "$dir/tree"
-codex exec -m gpt-daybreak-blue-latest -c model_reasoning_effort=high --sandbox read-only \
-  --skip-git-repo-check -o "$dir/findings.md" "<the brief>" < /dev/null
+git fetch -q origin main && git show origin/main:scripts/security-audit.ts | bun run - <number> [--context <file>]
 ```
 
-- **Head and base.** The audit is of one head on one base: the commits the brief names, and the base the merge will
-  land on (`origin/main` for an ordinary pull request, the layer below in a stack). Name a commit only after a command
-  printed it.
-- **The sandbox.** `--sandbox read-only` stops the auditor's commands from writing anywhere or reaching the network
-  (checked 2026-10-21: `touch` answers "Operation not permitted", `curl` "Could not resolve host"). Effort `high` is
-  the `reviewer` row of `homelab route models --profile deep`. Do not run it as a T3 Code child task: a child
-  inherits the thread's full access.
-- **Not isolated from the Mac's files.** The sandbox does not stop the auditor's commands reading files outside the
-  export, and what they read reaches the model provider as context. A file in a pull request can ask the auditor to
-  read a credential. Codex 0.163 denies reads only through managed requirements, not for one run, and an outer
-  `sandbox-exec` stops Codex applying its own (`sandbox_apply: Operation not permitted`). Closing this needs an
-  environment that holds only the export and no host credentials, or the owner's written acceptance of the
-  exposure. It is open on [#739](https://github.com/endqwerty/mainworthy/pull/739) and decided by the owner.
-- **What it reads.** The brief points it at `tree/` and `change.diff`, and says to read nothing else.
-- **What it looks at.** The diff and what it reaches:
-  - who a request is: `admit`, sessions and tokens in `src/server/identity/`, and the secret hashes `UNEXPORTED`
-    keeps out of an export (`src/server/transfer/`);
-  - the HTTP and browser boundary: `src/surfaces/http.ts` (`sameOrigin`, the cookie attributes),
-    `src/surfaces/signin.ts` (sign-in, passkey, OIDC and password routes, which are not operations, and their body
-    limit),
-    `src/surfaces/headers.ts` and `with-headers.ts` (the content security policy), and what `src/web` renders;
-  - the `Witness` writers, SQL and migrations, and the input an operation takes;
-  - file paths, the CLI and MCP surfaces, `.github/workflows/`, dependencies, and anything the public repository must
-    not hold.
+Run from a file instead, the script refuses unless it is the same as origin/main's. A pull request that edits the
+script, this page or the delivery rules is therefore audited by the copy already on `main`, and the brief says first
+that the change edits the audit. The script prints the head and base it read and its scratch directory, which holds
+`brief.md`, `findings.md` and `log.txt`; delete it with `bun scripts/work.ts scratch rm` once the round is recorded.
+`--context` takes a file with the earlier rounds' issues and their answers.
 
-  Word the brief as a check of how the code behaves, in the repository's terms.
+- **Whose pull request.** It refuses, before Codex starts, a pull request that is not open, that someone other than
+  the repository's owner opened, that comes from a fork, or that has a commit the owner did not write and commit or
+  that GitHub does not verify as signed. Pull requests can be opened only by collaborators, and the owner is the only
+  one (read 2026-10-21: `pull_request_creation_policy=collaborators_only`, collaborators `endqwerty admin`, all 380
+  pull requests and 355 issues the owner's). To sign the commits of a branch that has unsigned ones, run
+  `git rebase --exec 'git commit --amend --no-edit -S' <base>` where 1Password can sign, then push it.
+- **Head and base.** It reads the base branch on origin as it is now (`main`, or the layer below in a stack) and
+  refuses a head that is not on it, so the tree it audits is the tree a rebase merge lands.
+- **The sandbox.** Daybreak Blue (`gpt-daybreak-blue-latest`) runs at effort `high` (the `reviewer` row of
+  `homelab route models --profile deep`) through `codex exec --sandbox read-only`, from the export, with standard
+  input closed. The sandbox stops its commands writing anywhere or reaching the network (checked 2026-10-21: `touch`
+  answers "Operation not permitted", `curl` "Could not resolve host"). Do not run it as a T3 Code child task: a child
+  inherits the thread's full access.
+- **What it is asked.** The brief names the head, the base, the export and the diff, says to read nothing else, and
+  lists what to look at: who a request is, the HTTP and browser boundary, the writers, SQL, CI, dependencies and what
+  a public repository must not hold. The list is in the script, so the audit and this page cannot drift apart.
 - **What it returns.** Each issue with its file and line, a concrete case that goes wrong, its severity and a fix, in
-  `findings.md`. The sandbox cannot write files, so that is the run's last message, written by `-o`. A run cut off
+  `findings.md`. The sandbox cannot write files, so that is the run's last message, written by Codex. A run cut off
   keeps its session under `~/.codex/sessions`.
-- **Before anything is published.** Read `findings.md` before you quote it on GitHub. The auditor can read files
-  outside the export, so check that it quotes nothing from them.
+- **What stays open, accepted by the owner (2026-10-21).** The sandbox does not stop the auditor's commands reading
+  files outside the export, and what they read reaches the model provider as context. Codex 0.163 denies reads only
+  through managed requirements, not for one run, and an outer `sandbox-exec` stops Codex applying its own
+  (`sandbox_apply: Operation not permitted`). Text that would ask the auditor to read a credential could reach a
+  pull request only through the owner's own agents, for example copied from an issue comment or a web page. Read
+  `findings.md` before you quote it on GitHub, and quote nothing it read outside the export. Running a dependency's
+  code is a separate exposure: [#740](https://github.com/endqwerty/mainworthy/issues/740).
 
 ## Every issue is addressed
 
@@ -75,7 +68,7 @@ codex exec -m gpt-daybreak-blue-latest -c model_reasoning_effort=high --sandbox 
 - **One merge at a time.** A merge that lands first moves `main` under the next one, and GitHub's rebase merge puts
   the next head on the new `main`. So land one pull request at a time, and only while nothing else lands on `main`.
   Just before each merge, read the head (`gh pr view <number> --json headRefOid`) and `main`
-  (`git ls-remote origin refs/heads/main`), compare them with the audited pair, and pass the audited head to
-  `gh pr merge --rebase --match-head-commit <head>`.
+  (`git ls-remote origin refs/heads/main`), compare them with the pair the script printed, and pass the audited head
+  to `gh pr merge --rebase --match-head-commit <head>`.
 - **When Daybreak cannot run** (not in the catalog, the account not eligible, no allowance left): merge nothing, and
   say in the pull request that the audit is missing and why.
