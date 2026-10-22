@@ -12,3 +12,4 @@ CREATE TABLE merge_receipts (
 CREATE INDEX merge_receipts_change ON merge_receipts (change, id);
 CREATE INDEX merge_receipts_project ON merge_receipts (project, seq);
 ALTER TABLE change_ends ADD COLUMN receipt INTEGER REFERENCES merge_receipts (id);
+CREATE INDEX change_ends_receipt ON change_ends (receipt);

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { Attachment, AttachmentReply } from "./attachments.ts";
 import { AuditReply } from "./audit.ts";
+import { MergeReceipt } from "./changes.ts";
 import { CsvImportRow } from "./csv.ts";
 import { Quarantine, SameCodeEvidence } from "./flaky.ts";
 import { HandoffReceipt, HandoffStatus } from "./handoff.ts";
@@ -35,7 +36,7 @@ import {
 	TotpEnrolment,
 } from "./people.ts";
 import { ResultTrail } from "./results.ts";
-import { Obligation, SlotWork, TargetMatch, Verdict } from "./runs.ts";
+import { Obligation, ShardWait, SlotWork, TargetMatch, Verdict } from "./runs.ts";
 import { StatsReply } from "./stats.ts";
 import { TeamReply, TeamSource } from "./teams.ts";
 import { TrackerReceipt } from "./tracker.ts";
@@ -371,6 +372,17 @@ export const ImpactReply = z.looseObject({
 			files: whole,
 			title: nullableText,
 			state: text,
+			mergeReceipt: MergeReceipt.nullable(),
+			landing: z
+				.object({
+					commit: text,
+					branch: text,
+					run: nullableText,
+					verdict: Verdict,
+					reason: text,
+					waiting: z.array(ShardWait).optional(),
+				})
+				.nullable(),
 		}),
 		z.strictObject({ files: whole }),
 	]),

@@ -9,6 +9,7 @@ import { findProject, makeCtx } from "../src/server/kernel/ctx.ts";
 import { Db } from "../src/server/kernel/db.ts";
 import { migrate } from "../src/server/kernel/migrate.ts";
 import { exportArchive } from "../src/server/transfer/transfer.ts";
+import { openApi } from "../src/surfaces/http.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
@@ -120,7 +121,7 @@ test("receipt history persists and remains in the audit after reopening, while a
 test("an old merged change gains no invented receipt during migration", () => {
 	h.call("report", report("receipt726", false));
 	h.app.db.exec(
-		"ALTER TABLE change_ends DROP COLUMN receipt; DROP TABLE merge_receipts; INSERT INTO change_ends (change, ended, at) VALUES (1, 'merged', 1); UPDATE meta SET value = '39' WHERE key = 'schema_version'",
+		"DROP INDEX change_ends_receipt; ALTER TABLE change_ends DROP COLUMN receipt; DROP TABLE merge_receipts; INSERT INTO change_ends (change, ended, at) VALUES (1, 'merged', 1); UPDATE meta SET value = '39' WHERE key = 'schema_version'",
 	);
 	migrate(h.app.db, ":memory:");
 	expect(receipt()).toBeNull();
@@ -152,4 +153,13 @@ test("selecting a merge receipt refuses a value the decision machinery did not m
 	const ctx = makeCtx(h.app, project, h.owner, true);
 	expect(() => Reflect.apply(setMergeReceipt, null, [ctx, {}, change])).toThrow("not a witness");
 	expect(receipt()).toBeNull();
+});
+
+test("OpenAPI declares merge receipts and landing gates in the impact output schema", () => {
+	const schema = z.object({ paths: z.record(z.string(), z.unknown()) }).parse(openApi()).paths[
+		"/api/p/{project}/impact"
+	];
+	if (!schema) throw new Error("Expected impact path");
+	expect(JSON.stringify(schema)).toContain('"mergeReceipt":');
+	expect(JSON.stringify(schema)).toContain('"landing":');
 });
