@@ -6,7 +6,7 @@ import { z } from "zod";
 import type { Api } from "../../core/api.ts";
 import { newStepId } from "../../core/ids.ts";
 import { mergeBodies } from "../../core/merge3.ts";
-import { CaseBody, ConflictAddress, emptyBody, TAG } from "../../core/model.ts";
+import { CaseBody, ConflictAddress, cleanPath, emptyBody, TAG } from "../../core/model.ts";
 import type { Edit } from "../../core/ops.ts";
 import { cleanTitle, conflictEditorStatus, firstStep, ownershipStatus } from "../case/editor.tsx";
 import { CasePane, type ConflictState } from "../case/pane.tsx";
@@ -485,10 +485,12 @@ export function SuiteScreen() {
 		const result: VisibleRow[] = [];
 		let folderId: number | null = null;
 		const grouping = Boolean(route.folder && folders.some((folder) => folder.path.startsWith(`${route.folder}/`)));
+		const selectedPath = route.folder ? cleanPath(route.folder).join("/").toLowerCase() : null;
 		for (const row of cases) {
 			if (row.state !== "active") continue;
-			const path = folders.find((folder) => folder.id === row.folder)?.path;
-			if (route.folder && path !== route.folder && !path?.startsWith(`${route.folder}/`)) continue;
+			const folder = folders.find((folder) => folder.id === row.folder);
+			const path = folder ? cleanPath(folder.path).join("/").toLowerCase() : null;
+			if (selectedPath && path !== selectedPath && !path?.startsWith(`${selectedPath}/`)) continue;
 			if (grouping && folderId !== row.folder) {
 				folderId = row.folder;
 				const folder = folders.find((item) => item.id === row.folder);
