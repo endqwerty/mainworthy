@@ -1,4 +1,4 @@
-# 0133: A merge report keeps a receipt of the head gate
+# 0135: A merge report keeps a receipt of the head gate
 
 - Date: 2026-10-22
 - Status: accepted (issue #726 specifies the receipt)

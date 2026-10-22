@@ -499,7 +499,7 @@ appends the immutable observation to `merge_receipts`, then mints a `merge-recei
 module requires that witness to select it through `change_ends.receipt`. This internal decision records
 what was read, with no queue question or approval. `impact` reads the active receipt; audit exports read
 all retained observations. Reopening clears the selection, and archives omit both tables ([decision
-0133](decisions/0133-a-merge-report-keeps-a-receipt-of-the-head-gate.md)).
+0135](decisions/0135-a-merge-report-keeps-a-receipt-of-the-head-gate.md)).
 
 ## Rules the code enforces on itself
 
