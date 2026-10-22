@@ -2,8 +2,8 @@
 # Tailscale sidecar (the pattern in the home lab's services/coolify-tailnet-apps.md). Nothing is published on the
 # LAN. For a laptop or a plain server use compose.yaml instead.
 #
-# It is also public at https://mainworthy.com, through the server's Cloudflare tunnel and Coolify's proxy. That
-# needs nothing in this file: the domain is a setting of the service `mainworthy` in Coolify (docs/deploy.md).
+# Public traffic must arrive through the host's Cloudflare Tunnel at http://127.0.0.1:7358.
+# Remove the old Coolify/Traefik domain after that cutover. See docs/deploy.md.
 #
 # First deploy only: set TS_AUTHKEY in Coolify to a single-use auth key. The node's identity then persists in the
 # tailscale-state volume and the variable can be deleted. Never use the sign-in link the sidecar prints.
@@ -11,10 +11,17 @@ services:
   mainworthy:
     build: .
     restart: unless-stopped
-    ports:
-      # For debugging from the host only; the tailnet name is the way in.
-      - "127.0.0.1:7357:7357"
+    user: "0:0"
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN, SETUID, SETGID, SETPCAP]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs:
+      - /tmp
     environment:
+      MAINWORTHY_LOCKDOWN: "1"
+      MAINWORTHY_TRUSTED_PROXY: ${MAINWORTHY_TRUSTED_PROXY:?Set the application network peer range}
+      MAINWORTHY_CLIENT_ADDRESS_HEADER: ${MAINWORTHY_CLIENT_ADDRESS_HEADER:?Set the dedicated client header}
       MAINWORTHY_LOCK_WAIT_SECONDS: ${MAINWORTHY_LOCK_WAIT_SECONDS:-30}
       # A long random string. Leave unset to have one generated and printed once on first start.
       MAINWORTHY_OWNER_TOKEN: ${MAINWORTHY_OWNER_TOKEN:-}
@@ -33,6 +40,69 @@ services:
       MAINWORTHY_DEMO: ${MAINWORTHY_DEMO-demo}
     volumes:
       - mainworthy-data:/data
+
+  ingress:
+    image: nginx@sha256:c59d1f8b1e0e42da75be973424cd72e23f7f8adfb54e982f4d1cd0216a5a5576
+    user: "101:101"
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - |
+        cat > /tmp/nginx.conf <<'NGINX'
+        worker_processes 1;
+        pid /tmp/nginx.pid;
+        error_log /dev/stderr warn;
+        events { worker_connections 256; }
+        http {
+            access_log off;
+            resolver 127.0.0.11 ipv6=off valid=5s;
+            upstream mainworthy_backend {
+                zone mainworthy_backend 64k;
+                server mainworthy:7357 resolve;
+            }
+            client_body_temp_path /tmp/client_body;
+            proxy_temp_path /tmp/proxy;
+            fastcgi_temp_path /tmp/fastcgi;
+            uwsgi_temp_path /tmp/uwsgi;
+            scgi_temp_path /tmp/scgi;
+            server {
+                listen 8080;
+                server_name _;
+                if ($$request_method = CONNECT) { return 405; }
+                if ($$request ~* "^[^ ]+ [a-z][a-z0-9+.-]*:") { return 400; }
+                location / {
+                    proxy_pass http://mainworthy_backend;
+                    proxy_connect_timeout 3s;
+                    proxy_http_version 1.1;
+                    proxy_set_header Host $$host;
+                    proxy_set_header Connection "";
+                    proxy_set_header X-Forwarded-Proto https;
+                    proxy_set_header X-Mainworthy-Client $$http_cf_connecting_ip;
+                    proxy_buffering off;
+                    proxy_request_buffering off;
+                    proxy_read_timeout 300s;
+                    client_max_body_size 0;
+                }
+            }
+        }
+        NGINX
+        exec nginx -c /tmp/nginx.conf -g 'daemon off;'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:uid=101,gid=101
+    mem_limit: 64m
+    pids_limit: 64
+    ports:
+      - "127.0.0.1:7358:8080"
+    depends_on:
+      mainworthy:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 3s
+    restart: unless-stopped
 
   tailscale:
     image: tailscale/tailscale:stable

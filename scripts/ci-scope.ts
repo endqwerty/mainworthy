@@ -52,6 +52,7 @@ export const IMAGE: Paths = {
 		"tsconfig.json",
 		"biome.json",
 		"src/**",
+		"scripts/container/**",
 		"skill/**",
 		"docs/guide/**",
 		"docs/diagrams/**",

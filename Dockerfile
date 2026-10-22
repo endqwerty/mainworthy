@@ -20,6 +20,9 @@ COPY licences/archify ./licences/archify
 RUN NODE_ENV=production bun build --compile --minify --sourcemap --banner '/*! Mainworthy, Apache-2.0. Software from others is in this file; its licences and notices: /docs/licence */' src/cli/main.ts src/server/ops/read-worker.ts src/server/kernel/checkpoint-worker.ts src/cli/demo-worker.ts --outfile /out/mainworthy
 
 FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends nftables util-linux && rm -rf /var/lib/apt/lists/*
+COPY scripts/container/entrypoint.sh /usr/local/bin/mainworthy-entrypoint
+COPY scripts/container/lockdown.nft /usr/local/share/mainworthy/lockdown.nft
 RUN useradd --system --uid 10001 --home-dir /data mainworthy && mkdir -p /data && chown mainworthy:mainworthy /data
 COPY --from=build /out/mainworthy /usr/local/bin/mainworthy
 COPY --from=build /app/LICENSE /app/NOTICE /app/THIRD-PARTY-NOTICES.md /usr/share/doc/mainworthy/
@@ -35,6 +38,6 @@ ENV MAINWORTHY_MODE=server \
     MAINWORTHY_DATA=/data
 VOLUME /data
 EXPOSE 7357
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s CMD ["mainworthy", "health"]
-ENTRYPOINT ["mainworthy"]
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s CMD ["/usr/local/bin/mainworthy-entrypoint", "health"]
+ENTRYPOINT ["/usr/local/bin/mainworthy-entrypoint"]
 CMD ["serve"]
