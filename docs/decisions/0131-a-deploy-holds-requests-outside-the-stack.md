@@ -14,18 +14,26 @@ removed with it.
 
 So the hold lives on the host, where no deploy touches it. The tunnel's origin, `127.0.0.1:7358`, is now
 that proxy, and the stack's ingress moved to `127.0.0.1:7359`. A refused connection is tried again each
-second, for up to 90 s, which is under Cloudflare's 100-second limit. A connection that Docker's port proxy
-accepts and closes before nginx listens is sent again too. The ingress still starts only once the app is
-healthy, so a waiting request meets a refused port, which is tried again, and not an nginx 502, which is not.
-The host proxy adds no header, and the ingress keeps owning the client address and the scheme.
+second, for up to 90 s, which is under Cloudflare's 100-second limit. The ingress still starts only once the
+app is healthy, so a waiting request meets a refused port, which is tried again, and not an nginx 502, which
+is not. The host proxy adds no client or scheme header, and the ingress keeps owning both.
+
+Two short windows remain where Docker's port proxy accepts a connection and closes it with no reply: while
+the new ingress starts, and while the old one drains after SIGQUIT. A read is sent again at once. A write is
+not, because an empty reply can also follow a write the app committed, and a duplicate write is worse than a
+502. The ingress closes what it still has open half a second after SIGQUIT, so an open change stream no
+longer keeps that window open for Coolify's 30-second stop. The window can only close entirely if the host
+proxy reaches nginx without Docker's port proxy in between, for example over a Unix socket on a host
+directory. That changes the ingress's mounts and its tests, and is left for later.
 
 HAProxy over Caddy: Caddy's active health checks answer a POST with 503 while the upstream is down, and
-without them it has the same port-proxy window, which it retries for GET only. HAProxy retries a refused
+without them it has the same port-proxy window. HAProxy's health checks do the same (a 503 at once while its
+only server is down), so the hold uses none. HAProxy retries a refused
 connection for any method, and is in Ubuntu's main archive. Its configuration and tests live with the
 host's other services, outside this repository; `docs/deploy.md` gives the settings any operator needs.
 
-The tailnet address is not held: its sidecar is part of the stack. A request that runs longer than
-Coolify's 30-second stop of the old ingress is still cut off.
+The tailnet address is not held: its sidecar is part of the stack. A request still running half a
+second after the old ingress gets SIGQUIT is cut off.
 
 No demo changes apply: this changes how the container is reached, not the product.
 
