@@ -24,8 +24,11 @@ Two short windows remain where Docker's port proxy accepts a connection and clos
 the new ingress starts, and while the old one drains after SIGQUIT. A read (a GET or HEAD outside `/api/login/`, whose native OIDC callback consumes its ceremony) is sent again
 at once, which carries it across the start window only: HAProxy spends all its
 tries on an immediate retry in about 10 ms. A write is not sent again, because an empty reply can also follow a write the app committed, and a duplicate write is worse than a
-502. The ingress closes what it still has open half a second after SIGQUIT, so an open change stream no
-longer keeps that window open for Coolify's 30-second stop. The window can only close entirely if the host
+502. The ingress closes what it still has open 5 s after SIGQUIT, so an open change stream no longer keeps
+that window open for Coolify's 30-second stop. Five seconds is what the app gives an ordinary reply when it
+stops: a shorter drain would make the window shorter, but could cut a write the app has committed before its
+reply (a new token's secret is shown once). With no response open, the window lasted 54 to 123 ms on the
+owner's host; with a change stream open, it lasts the whole 5 s. The window can only close entirely if the host
 proxy reaches nginx without Docker's port proxy in between, for example over a Unix socket on a host
 directory. That changes the ingress's mounts and its tests, and is left for later.
 

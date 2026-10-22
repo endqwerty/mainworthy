@@ -52,8 +52,9 @@ services:
         worker_processes 1;
         # Docker stops nginx with SIGQUIT: it stops listening at once, then waits for open responses. Docker's
         # port proxy answers every new connection with no reply until the container exits, so an open change
-        # stream would hold that for Coolify's 30 s. Close what is left after half a second.
-        worker_shutdown_timeout 500ms;
+        # stream would hold that for Coolify's 30 s. Close what is left after 5 s, the time the app itself gives
+        # an ordinary reply when it stops (PATIENCE.shutdownMs), so no reply the app would finish is cut here.
+        worker_shutdown_timeout 5s;
         pid /tmp/nginx.pid;
         error_log /dev/stderr warn;
         events { worker_connections 256; }
