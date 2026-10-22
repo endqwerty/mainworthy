@@ -1,6 +1,7 @@
 // What a seeded project holds, read back through the operations: the suite, the days before today, and today.
 import { expect, test } from "bun:test";
 import { z } from "zod";
+import { ResultTrail } from "../core/results.ts";
 import { Client } from "./client.ts";
 import { demoCases } from "./demo/cases.ts";
 import { demoAliases } from "./demo/fields.ts";
@@ -50,6 +51,35 @@ test("a seeded project holds a suite in folders, a fortnight of history and six 
 		const before = Date.now();
 		const seeded = await seed(client, { project: "demo", cases: 120 });
 		const demo = on(client, "demo");
+		const pipeline = z
+			.array(z.object({ last: z.array(z.object({ steps: ResultTrail.nullable() })) }))
+			.parse(await demo.call("get", { refs: ["T-1"] }))[0]?.last.find((result) => result.steps !== null)?.steps;
+		const agent = z
+			.object({
+				items: z.array(z.object({ fills: z.array(z.object({ method: z.string(), steps: ResultTrail.nullable() })) })),
+			})
+			.parse(await demo.call("find", { in: "slots", run: seeded.agentRun }))
+			.items[0]?.fills.find((fill) => fill.method === "agent")?.steps;
+		for (const trail of [pipeline, agent]) {
+			expect(trail?.length).toBeGreaterThan(0);
+			for (const step of trail ?? []) {
+				const actions = step.actions ?? [];
+				expect(actions.length).toBeGreaterThan(1);
+				expect(new Set(actions.map((action) => action.text)).size).toBe(actions.length);
+				expect(actions.reduce((total, action) => total + (action.durationMs ?? 0), 0)).toBe(step.durationMs);
+				expect(actions.every((action) => Number.isInteger(action.durationMs) && (action.durationMs ?? 0) > 0)).toBe(
+					true,
+				);
+				expect(actions.at(-1)?.outcome).toBe(step.outcome);
+			}
+		}
+		expect(pipeline?.[1]?.actions?.map((action) => action.text)).toEqual([
+			"Focus Coupon",
+			"Type OLD10 into Coupon",
+			"Press Apply",
+		]);
+		expect(pipeline?.at(-1)).toMatchObject({ outcome: "fail", attachment: 1 });
+		expect(agent?.at(-1)).toMatchObject({ outcome: "pass", attachment: 0 });
 		// The day the project became a demo, which the server keeps: asked again, it is the same moment.
 		const { since } = Since.parse(await client.call("admin", { do: "project.demo", key: "demo" }));
 		const covered = demoHistory({ seed: 1, cases: demoCases(1, 120), days: 14, since }).find(
