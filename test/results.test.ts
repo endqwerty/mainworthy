@@ -192,7 +192,7 @@ describe("the results behind a gate", () => {
 	});
 
 	test("the test time stays bounded when historical durations exceed SQLite's integer sum", () => {
-		h.call("report", { ...ciReport({ n: 1025 }), target });
+		h.call("report", { ...ciReport({ commit: COMMIT, n: 1025 }), target });
 		// Earlier versions and imported archives can retain durations above today's report limit.
 		h.app.db.raw.exec("UPDATE results SET duration_ms = 9000000000000000");
 		expect(results({ commit: COMMIT })).toMatchObject({

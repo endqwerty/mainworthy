@@ -402,7 +402,8 @@ const Q = {
 	),
 	resultById: sql<{ id: number }, ResultRow>("SELECT * FROM results WHERE id = $id"),
 	testTime: sql<{ results: string }, { ms: number; timed: number }>(
-		`SELECT coalesce(sum(r.duration_ms), 0) AS ms, count(r.duration_ms) AS timed
+		`SELECT CAST(max(0, min(total(r.duration_ms), ${Number.MAX_SAFE_INTEGER})) AS INTEGER) AS ms,
+		        count(r.duration_ms) AS timed
 		 FROM json_each($results) requested JOIN results r ON r.id = requested.value`,
 	),
 	previousOnTarget: sql<
