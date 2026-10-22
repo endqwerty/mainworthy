@@ -10,6 +10,7 @@ import { migrate } from "../src/server/kernel/migrate.ts";
 import { recoverAccepted } from "../src/server/ops/jobs.ts";
 import { acceptReport, processBatchSteps } from "../src/server/ops/writes.ts";
 import { exportArchive, importArchive, linesOf } from "../src/server/transfer/transfer.ts";
+import { parseReport } from "../src/surfaces/formats/report.ts";
 import { type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
@@ -526,4 +527,35 @@ test("legacy missing file causes are created only when that file recurs on its b
 		{ signature: { text: "assertion failed" }, flips: 2 },
 		{ signature: { text: missing }, flips: 3 },
 	]);
+});
+
+test("JUnit suffixed testcases pass the gate and record their retry flip through report", () => {
+	const parsed = parseReport(
+		`<testsuite><testcase name="adds"><failure message="expected 2, got 1"/></testcase><testcase name="adds (retry #1)"/></testsuite>`,
+		{ format: "junit", file: "retry.xml" },
+	);
+	h.call("report", {
+		target: { commit: "fedc7331", repo: "acme/web", branch: "main" },
+		job: "e2e",
+		results: parsed.results,
+	});
+	expect(gate("fedc7331")).toMatchObject({ verdict: "passed", tally: { pass: 1, unexplained: 0 } });
+	expect(page()?.last[0]?.tries).toEqual([{ outcome: "fail", message: "expected 2, got 1", durationMs: null }]);
+	expect(page()?.flips).toBe(1);
+	expect(row("fedc7331")).toMatchObject({ standing: "pass", flipped: true });
+	expect(flaky()).toBe(1);
+});
+
+test("JUnit duplicates without an unambiguous retry sequence still count the worse outcome", () => {
+	const parsed = parseReport(
+		`<testsuite><testcase name="adds"><failure message="expected 2, got 1"/></testcase><testcase name="adds [retry 2]"/></testsuite>`,
+		{ file: "retry.xml" },
+	);
+	h.call("report", {
+		target: { commit: "fedc7332", repo: "acme/web", branch: "main" },
+		job: "e2e",
+		results: parsed.results,
+	});
+	expect(gate("fedc7332")).toMatchObject({ verdict: "blocked", tally: { pass: 0, unexplained: 1 } });
+	expect(page()?.flips).toBe(0);
 });

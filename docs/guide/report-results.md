@@ -426,8 +426,22 @@ In JUnit, Surefire's `flakyFailure`, `flakyError`, `rerunFailure` and `rerunErro
 elements become failed tries with their `message`. A testcase with only flaky elements
 passed after them, so it is a flip. A testcase with a `failure` and rerun elements failed
 every time. Surefire writes the first run as the `failure` and the later runs after it, so the
-last rerun is the result and the `failure` is the oldest try. Duplicate testcases named
-`(retry #1)` and so on are not yet read as tries of one test.
+last rerun is the result and the `failure` is the oldest try.
+
+JUnit also recognizes separate testcases with retry suffixes: `(retry #1)`, `(retry 1)`,
+`[retry #1]` and `[retry 1]`, ignoring case and whitespace around the number. One
+unsuffixed testcase followed by consecutive retry numbers, starting at 1, becomes one
+result with earlier tries in report order. Other tests may appear between those testcases.
+They must share the same test identity and suite instance, have matching case annotations,
+and use no Surefire retry elements. The final testcase supplies the outcome, failure and
+attachment markers. The original supplies the test's name. The duration sums all executions.
+A passing final testcase has a `passed after N retries` note. A sequence with more than
+100 earlier tries is refused rather than losing flip evidence.
+
+A missing initial testcase, gaps, repeated or reordered numbers, stacked retry suffixes,
+conflicting case annotations, malformed testcases, and testcases in separate suite instances
+stay separate results. Their worse outcome counts within the same pipeline attempt. A suffix alone
+does not prove that a testcase is a retry.
 
 Jest and Vitest JSON keep the final assertion outcome and duration, together with the
 retry evidence listed above. The pytest adapter sums its final setup, call, and teardown durations and keeps setup

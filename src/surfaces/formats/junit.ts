@@ -10,6 +10,8 @@ type CaseElement = {
 	kind: "case";
 	tag: string;
 	result: ParsedResult;
+	suite: SuiteElement | undefined;
+	ordinal: number | null;
 	retries: number;
 	/** The runner's earlier failed tries, from Surefire's flaky and rerun elements (decision 0129). */
 	tries: NonNullable<ResultIn["tries"]>;
@@ -97,9 +99,10 @@ function appendDigest(prefix: KeyDigest, suffix: KeyDigest): KeyDigest {
 const emptyDigest = digest("");
 const separatorDigest = digest("::");
 
-function stableName(value: string): string {
+function stableName(value: string): { name: string; retry: number | null } {
 	let end = value.length;
 	let changed = false;
+	let retry: number | null = 0;
 	while (end > 0) {
 		let tail = end;
 		while (tail > 0 && /\s/.test(value[tail - 1] ?? "")) tail--;
@@ -112,10 +115,11 @@ function stableName(value: string): string {
 		let count = marker.slice(5).trim();
 		if (count.startsWith("#")) count = count.slice(1).trim();
 		if (!/^\d+$/.test(count)) break;
+		retry = !changed && Number.isSafeInteger(Number(count)) && Number(count) > 0 ? Number(count) : null;
 		end = start;
 		changed = true;
 	}
-	return changed ? value.slice(0, end).trimEnd() : value;
+	return { name: changed ? value.slice(0, end).trimEnd() : value, retry };
 }
 
 function normalisePath(value: string): string {
@@ -291,6 +295,50 @@ function applyDamage(results: ResultIn[], spans: DamageSpan[]): void {
 	}
 }
 
+/** Coalesce only complete, uniquely numbered sequences; other duplicates keep the same-attempt rule. */
+function groupRetries(results: ParsedResult[], groups: Map<string, CaseElement[]>): ParsedResult[] {
+	const replacements = new Map<ParsedResult, ParsedResult>();
+	const removed = new Set<ParsedResult>();
+	for (const cases of groups.values()) {
+		const first = cases[0];
+		const last = cases.at(-1);
+		if (first === undefined || last === undefined || first === last) continue;
+		if (
+			!cases.every(
+				(item, index) =>
+					item.ordinal === index &&
+					item.integrity === "intact" &&
+					item.suite === first.suite &&
+					item.result.tries === undefined &&
+					item.result.annotation?.case === first.result.annotation?.case &&
+					item.result.annotation?.version === first.result.annotation?.version,
+			)
+		)
+			continue;
+		if (cases.length > 101)
+			throw new Error(
+				`JUnit tried "${"name" in first.result.test ? first.result.test.name : "?"}" ${cases.length} times, more than the 101 a result and its 100 tries keep`,
+			);
+		const result: ParsedResult = {
+			...last.result,
+			test: first.result.test,
+			tries: cases.slice(0, -1).map(({ result }) => ({
+				outcome: result.outcome,
+				...(result.durationMs === undefined ? {} : { durationMs: result.durationMs }),
+				...(result.failure === undefined ? {} : { failure: result.failure }),
+			})),
+		};
+		if (cases.some((item) => item.result.durationMs !== undefined)) {
+			result.durationMs = cases.reduce((total, item) => total + (item.result.durationMs ?? 0), 0);
+			if (!Number.isSafeInteger(result.durationMs)) throw new Error("Invalid test duration");
+		}
+		if (result.outcome === "pass") result.note = `passed after ${cases.length - 1} retries`;
+		replacements.set(first.result, result);
+		for (const item of cases.slice(1)) removed.add(item.result);
+	}
+	return results.filter((result) => !removed.has(result)).map((result) => replacements.get(result) ?? result);
+}
+
 /**
  * Reads JUnit XML in document order without a DOM or dependencies. Malformed input yields recovered results
  * and warnings with UTF-8 byte offsets. Nested suite names use `::`; `options.file` labels warnings only.
@@ -354,6 +402,7 @@ export function parseJUnit(
 	const suiteStack: SuiteElement[] = [];
 	const damagedSpans: DamageSpan[] = [];
 	const prefixDigests = new Map<string, KeyDigest>();
+	const retryGroups = new Map<string, CaseElement[]>();
 	let reportProblem: NonNullable<ResultIn["failure"]> | null = null;
 	let currentCase: CaseElement | null = null;
 	let currentFailure: FailureElement | null = null;
@@ -390,8 +439,9 @@ export function parseJUnit(
 				suiteStack.pop();
 				break;
 			case "case":
+				if (!closed) element.integrity = "damaged";
 				if (
-					(!closed || element.integrity === "damaged") &&
+					element.integrity === "damaged" &&
 					(element.result.outcome === "pass" || element.result.outcome === "skip")
 				) {
 					element.result.outcome = "error";
@@ -679,13 +729,15 @@ export function parseJUnit(
 				if (currentCase !== null) warnMalformed("Nested testcase element", start);
 				const suite = suiteStack.at(-1);
 				const nameText = attrs.name ?? "";
+				const stable = stableName(nameText);
 				if (attrs.name === undefined) warn("Testcase has no name", start);
 				const file = attrs.file ? normalisePath(attrs.file) : suite?.file;
 				const prefix = keyPart(file || normalisePath(attrs.classname ?? ""));
 				const status = attrs.status?.toLowerCase();
+				const key = testKey(prefix, suite, keyPart(stable.name), prefixDigests, start, warn);
 				const result: ParsedResult = {
 					test: {
-						key: testKey(prefix, suite, keyPart(stableName(nameText)), prefixDigests, start, warn),
+						key,
 						name: limited(nameText, 500, "Test name", start),
 						...(file === undefined ? {} : { file: limited(file, TEST_FILE_LIMIT, "Test file", start) }),
 					},
@@ -702,6 +754,8 @@ export function parseJUnit(
 					kind: "case",
 					tag,
 					result,
+					suite,
+					ordinal: stable.retry,
 					retries: 0,
 					tries: [],
 					reruns: false,
@@ -710,6 +764,9 @@ export function parseJUnit(
 				};
 				currentCase = element;
 				results.push(result);
+				const group = retryGroups.get(key);
+				if (group === undefined) retryGroups.set(key, [element]);
+				else group.push(element);
 			} else if (name === "failure" || name === "error") {
 				const suite = suiteStack.at(-1);
 				const orphan = currentCase === null;
@@ -758,5 +815,5 @@ export function parseJUnit(
 		warnings.push(
 			`${options?.file ? `${options.file}: ` : ""}${omittedWarnings} additional warnings omitted at byte offset ${byteOffset(xml.length)}`,
 		);
-	return { results, suites, warnings };
+	return { results: groupRetries(results, retryGroups), suites, warnings };
 }
