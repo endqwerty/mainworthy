@@ -69,7 +69,8 @@ only its earlier tries count; the final execution is not time lost. A correction
 
 Each test's time and the report's total stop at 9,007,199,254,740,991 ms, JavaScript's largest safe integer.
 Old or imported durations above today's input limit cannot overflow the report; a time at that ceiling means
-at least that much was reported.
+at least that much was reported. Negative stored durations cannot make a test's time or the report's total
+less than zero.
 
 ## Automation
 
