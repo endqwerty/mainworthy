@@ -339,6 +339,7 @@ for (const rejection of ["API", "UI"])
 				else {
 					await page.locator(`[data-proposal-evidence="${q.q}"][data-proposal-loaded="true"]`).waitFor();
 					await page.keyboard.press("r");
+					await page.locator(`[data-proposal-evidence="${q.q}"][data-proposal-read="ready"]`).waitFor();
 					await page.keyboard.press("r");
 				}
 				await page.locator(".conflict-card").waitFor({ state: "detached" });
