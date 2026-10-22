@@ -997,7 +997,7 @@ Reports over the last days: pass rate per day, flaky tests, time lost to reruns,
 | `[2].of` | `"flaky"` | yes | The tests that passed and failed on the same code, most often first. |
 | `[2].days` | `integer` | no | How many days to read, today included: 1 to 90. Default: `30`. |
 | `[2].limit` | `integer` | no | How many rows to list. Default: `20`. |
-| `[3].of` | `"reruns"` | yes | The attempts that were run again, and the time they took. |
+| `[3].of` | `"reruns"` | yes | Repeated pipeline attempts and earlier runner tries, with their time counted once. |
 | `[3].days` | `integer` | no | How many days to read, today included: 1 to 90. Default: `30`. |
 | `[3].limit` | `integer` | no | How many rows to list. Default: `20`. |
 | `[4].of` | `"automation"` | yes | How many cases have an automated test, and which to automate next. |

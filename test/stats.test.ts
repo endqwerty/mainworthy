@@ -219,6 +219,20 @@ describe("flaky tests and time lost to reruns", () => {
 		expect(stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 3, lostMs: 40, unknown: 0 });
 		send(2);
 		expect(stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 3, lostMs: 40, unknown: 0 });
+		h.call("report", {
+			target: { commit: "aaaa0001", branch: "main" },
+			job: "unit",
+			attempt: 99,
+			results: parsed.results,
+		});
+		h.call("report", {
+			target: { commit: "bbbb0002", branch: "main" },
+			job: "e2e",
+			attempt: 99,
+			results: parsed.results,
+		});
+		// Neither another job nor another commit repeats e2e's final attempt; each contributes only its own try.
+		expect(stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 5, lostMs: 60, unknown: 0 });
 	});
 
 	test("a correction replaces runner tries at their original attempt and window, with worse-then-later ranking", () => {
@@ -262,6 +276,21 @@ describe("flaky tests and time lost to reruns", () => {
 		});
 		h.call("report", { ...one, attempt: 2 });
 		expect(stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 3, lostMs: 10, unknown: 2 });
+		const first = h
+			.call<{ last: { id: number; attempt: number }[] }[]>("get", { refs: ["T-1"] })[0]
+			?.last.find((row) => row.attempt === 1);
+		if (!first) throw new Error("no first attempt");
+		h.call("report", {
+			...one,
+			results: one.results.map((r) => ({
+				...r,
+				corrects: first.id,
+				durationMs: 30,
+				tries: [{ outcome: "pass", durationMs: 10 }, { outcome: "skip" }],
+			})),
+		});
+		// A reported total covers every execution of the repeated attempt, even a try with no separate duration.
+		expect(stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 3, lostMs: 30, unknown: 0 });
 	});
 
 	test("a test that failed and passed on the same code is flaky, and the attempt that was run again is time lost", () => {

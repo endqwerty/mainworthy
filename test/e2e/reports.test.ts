@@ -4,6 +4,39 @@ import { browserAvailable, openPage, startServer } from "./support.ts";
 
 // Issue #56: the reports read the stream of results, and each has its own page beside the list.
 (browserAvailable ? test : test.skip)(
+	"runner retries appear in the reruns headline and table without a pipeline rerun",
+	async () => {
+		const server = await startServer({ preset: "loose", unlinked: "track" });
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await server.api("report", {
+				target: { commit: "aaaa0001", branch: "main" },
+				job: "e2e",
+				results: [
+					{
+						test: { key: "cart.spec.ts::adds", name: "Checkout adds an item", file: "cart.spec.ts" },
+						outcome: "pass",
+						durationMs: 3600,
+						tries: [{ outcome: "fail", durationMs: 1100, failure: { message: "socket hang up" } }, { outcome: "skip" }],
+					},
+				],
+			});
+			view = await openPage(server, { path: "/p/scratch/reports/reruns" });
+			const page = view.page;
+			await page.getByRole("option", { name: /Time lost to reruns\s*1.1 s in 2 reruns$/ }).waitFor();
+			expect(await page.locator("#detail .report-hero").innerText()).toBe("1.1 s in 2 reruns; 1 has unreported time");
+			const row = page.locator("#detail tbody tr");
+			expect(await row.locator("th").innerText()).toBe("T-1 Checkout adds an item");
+			expect(await row.locator("td").allTextContents()).toEqual(["2", "1.1 s"]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	60_000,
+);
+
+(browserAvailable ? test : test.skip)(
 	"the reports list their headlines, and each opens with its numbers",
 	async () => {
 		const server = await startServer({ preset: "loose", unlinked: "track" });

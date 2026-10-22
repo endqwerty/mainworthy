@@ -26,7 +26,9 @@ export const StatsInput = z.discriminatedUnion("of", [
 		limit: top,
 	}),
 	z.object({
-		of: z.literal("reruns").describe("The attempts that were run again, and the time they took."),
+		of: z
+			.literal("reruns")
+			.describe("Repeated pipeline attempts and earlier runner tries, with their time counted once."),
 		days,
 		limit: top,
 	}),
@@ -85,7 +87,7 @@ export const RerunsReply = z.object({
 	of: z.literal("reruns"),
 	reruns: whole,
 	lostMs: whole,
-	/** Attempts that were run again and reported no duration: their time is not in `lostMs`. */
+	/** Counted executions whose time is not covered by a reported duration. */
 	unknown: whole,
 	items: z.array(TestRow.extend({ reruns: whole, lostMs: whole })),
 });
