@@ -65,13 +65,27 @@ failing.
 ## JUnit suffix sequences, 2026-10-22
 
 [Issue #733](https://github.com/endqwerty/mainworthy/issues/733) extends the same shape to separate JUnit testcases.
-One unsuffixed testcase followed in document order by consecutive retry numbers from 1, within the same suite
-instance and structural test identity, becomes the last testcase's result with earlier tries. Grouping compares the
-full prefix and stable name separately, because rendered keys joined with `::` can collide. Parsed file metadata must
-also match, including its presence or absence. Matching annotations and no
-mixed Surefire retry elements keep the sequence unambiguous. The original name identifies the test, the duration
-sums the executions, and the last testcase supplies attachments. Ambiguous duplicates keep decision 0045's
-worse-outcome rule. More than 100 earlier tries is refused, as for Playwright. XML damage is applied before grouping.
+One unsuffixed testcase followed in document order by consecutive retry numbers from 1 becomes the last
+testcase's result with earlier tries, only when the full raw identity agrees.
+
+**A retry preserves every testcase identity attribute byte for byte.** The identity is the exact suite instance
+and the complete set of literal testcase attributes. Remove only the recognized retry suffix and at most one preceding ASCII space from
+`name`; preserve all other name whitespace. Exclude only the per-run attributes `time`, `status`, `message`, `assertions` and `timestamp`.
+Every other attribute counts, including `classname` even when `file` is present, `id`, `line`, and unknown runner
+attributes. Missing and empty attributes differ. Attribute order and quote delimiters do not matter; their literal
+values do. Do not decode entities, normalize slashes, clip, hash, select file over class, or otherwise reduce those
+values before comparing them. Outcomes, timing and output may differ between executions.
+
+The parser captures those literal attributes before its ordinary decoding, sorts them by attribute name and uses
+their complete JSON representation as one map key within the suite instance. This comparison cannot confuse
+separators or omit future identity attributes. Only attributes physically present on each testcase enter the key;
+inherited suite data stays shared through the suite instance, so a large inherited filename is not copied per case.
+The display/persisted key format is unchanged. Case annotations must also agree, and mixed Surefire retry elements
+remain ambiguous.
+
+The original name identifies the test, the duration sums the executions, and the last testcase supplies attachments.
+Ambiguous duplicates keep decision 0045's worse-outcome rule. More than 100 earlier tries is refused, as for
+Playwright. XML damage is applied before grouping.
 
 ## Follow-up status
 

@@ -57,6 +57,9 @@ type Warn = (message: string, offset: number) => void;
 /** How much of a test's file name a result keeps. Two longer names that begin alike read as one name. */
 export const TEST_FILE_LIMIT = 500;
 
+/** Every other testcase attribute contributes its literal value to the retry identity. */
+const runAttributes = new Set(["time", "status", "message", "assertions", "timestamp"]);
+
 const attributePattern = /([^ \t\r\n=/>]+)[ \t\r\n]*=[ \t\r\n]*(?:"([^"]*)"|'([^']*)')/y;
 const nameStart =
 	"[:A-Z_a-z\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u02FF\\u0370-\\u037D\\u037F-\\u1FFF" +
@@ -98,9 +101,10 @@ function appendDigest(prefix: KeyDigest, suffix: KeyDigest): KeyDigest {
 const emptyDigest = digest("");
 const separatorDigest = digest("::");
 
-function stableName(value: string): { name: string; retry: number | null } {
+function stableName(value: string): { name: string; rawName: string; retry: number | null } {
 	let end = value.length;
 	let changed = false;
+	let rawName = value;
 	let retry: number | null = 0;
 	while (end > 0) {
 		let tail = end;
@@ -114,11 +118,12 @@ function stableName(value: string): { name: string; retry: number | null } {
 		let count = marker.slice(5).trim();
 		if (count.startsWith("#")) count = count.slice(1).trim();
 		if (!/^\d+$/.test(count)) break;
+		if (!changed) rawName = value.slice(0, start - Number(value[start - 1] === " ")) + value.slice(tail);
 		retry = !changed && Number.isSafeInteger(Number(count)) && Number(count) > 0 ? Number(count) : null;
 		end = start;
 		changed = true;
 	}
-	return { name: changed ? value.slice(0, end).trimEnd() : value, retry };
+	return { name: changed ? value.slice(0, end).trimEnd() : value, rawName, retry };
 }
 
 function normalisePath(value: string): string {
@@ -166,7 +171,14 @@ function decode(value: string, offset: number, warn: Warn): string {
 	});
 }
 
-function attributes(content: string, from: number, to: number, offset: number, warn: Warn): Attributes {
+function attributes(
+	content: string,
+	from: number,
+	to: number,
+	offset: number,
+	warn: Warn,
+	rawIdentity?: Map<string, string>,
+): Attributes {
 	const result: Attributes = {};
 	const seen = new Set<string>();
 	let position = from;
@@ -192,6 +204,8 @@ function attributes(content: string, from: number, to: number, offset: number, w
 		if (seen.has(name)) warn("Duplicate XML attribute", offset + position);
 		seen.add(name);
 		if (value.includes("<")) warn("Unescaped < in XML attribute", offset + valueStart + value.indexOf("<"));
+		if (rawIdentity !== undefined && !runAttributes.has(name))
+			rawIdentity.set(name, name === "name" ? stableName(value).rawName : value);
 		const decoded = decode(value, offset + valueStart, warn);
 		switch (name) {
 			case "name":
@@ -294,52 +308,48 @@ function applyDamage(results: ResultIn[], spans: DamageSpan[]): void {
 	}
 }
 
-type RetryGroups = Map<SuiteElement | undefined, Map<string, Map<string, CaseElement[]>>>;
+type RetryGroups = Map<SuiteElement | undefined, Map<string, CaseElement[]>>;
 
 /** Coalesce only complete, uniquely numbered sequences; other duplicates keep the same-attempt rule. */
 function groupRetries(results: ParsedResult[], groups: RetryGroups): ParsedResult[] {
 	const replacements = new Map<ParsedResult, ParsedResult>();
 	const removed = new Set<ParsedResult>();
 	for (const suiteGroups of groups.values()) {
-		for (const prefixGroups of suiteGroups.values()) {
-			for (const cases of prefixGroups.values()) {
-				const first = cases[0];
-				const last = cases.at(-1);
-				if (first === undefined || last === undefined || first === last) continue;
-				const file = "file" in first.result.test ? first.result.test.file : undefined;
-				if (
-					!cases.every(
-						(item, index) =>
-							item.ordinal === index &&
-							item.integrity === "intact" &&
-							("file" in item.result.test ? item.result.test.file : undefined) === file &&
-							item.result.tries === undefined &&
-							item.result.annotation?.case === first.result.annotation?.case &&
-							item.result.annotation?.version === first.result.annotation?.version,
-					)
+		for (const cases of suiteGroups.values()) {
+			const first = cases[0];
+			const last = cases.at(-1);
+			if (first === undefined || last === undefined || first === last) continue;
+			if (
+				!cases.every(
+					(item, index) =>
+						item.ordinal === index &&
+						item.integrity === "intact" &&
+						item.result.tries === undefined &&
+						item.result.annotation?.case === first.result.annotation?.case &&
+						item.result.annotation?.version === first.result.annotation?.version,
 				)
-					continue;
-				if (cases.length > 101)
-					throw new Error(
-						`JUnit tried "${"name" in first.result.test ? first.result.test.name : "?"}" ${cases.length} times, more than the 101 a result and its 100 tries keep`,
-					);
-				const result: ParsedResult = {
-					...last.result,
-					test: first.result.test,
-					tries: cases.slice(0, -1).map(({ result }) => ({
-						outcome: result.outcome,
-						...(result.durationMs === undefined ? {} : { durationMs: result.durationMs }),
-						...(result.failure === undefined ? {} : { failure: result.failure }),
-					})),
-				};
-				if (cases.some((item) => item.result.durationMs !== undefined)) {
-					result.durationMs = cases.reduce((total, item) => total + (item.result.durationMs ?? 0), 0);
-					if (!Number.isSafeInteger(result.durationMs)) throw new Error("Invalid test duration");
-				}
-				if (result.outcome === "pass") result.note = `passed after ${cases.length - 1} retries`;
-				replacements.set(first.result, result);
-				for (const item of cases.slice(1)) removed.add(item.result);
+			)
+				continue;
+			if (cases.length > 101)
+				throw new Error(
+					`JUnit tried "${"name" in first.result.test ? first.result.test.name : "?"}" ${cases.length} times, more than the 101 a result and its 100 tries keep`,
+				);
+			const result: ParsedResult = {
+				...last.result,
+				test: first.result.test,
+				tries: cases.slice(0, -1).map(({ result }) => ({
+					outcome: result.outcome,
+					...(result.durationMs === undefined ? {} : { durationMs: result.durationMs }),
+					...(result.failure === undefined ? {} : { failure: result.failure }),
+				})),
+			};
+			if (cases.some((item) => item.result.durationMs !== undefined)) {
+				result.durationMs = cases.reduce((total, item) => total + (item.result.durationMs ?? 0), 0);
+				if (!Number.isSafeInteger(result.durationMs)) throw new Error("Invalid test duration");
 			}
+			if (result.outcome === "pass") result.note = `passed after ${cases.length - 1} retries`;
+			replacements.set(first.result, result);
+			for (const item of cases.slice(1)) removed.add(item.result);
 		}
 	}
 	return results.filter((result) => !removed.has(result)).map((result) => replacements.get(result) ?? result);
@@ -656,6 +666,7 @@ export function parseJUnit(
 		if (unescapedLessThan >= 0) warnAttribute("Unescaped < in XML attribute", unescapedLessThan);
 		if (selfClosing && content.lastIndexOf("/") !== content.length - 1)
 			warnAttribute("Whitespace after XML self-closing slash", end - 1);
+		const rawIdentityAttributes = new Map<string, string>();
 		const attrs =
 			ignoredDepth === 0 || (name === "property" && propertyCase !== null)
 				? attributes(
@@ -664,6 +675,7 @@ export function parseJUnit(
 						selfClosing ? content.lastIndexOf("/") : content.length,
 						start + 1,
 						warnAttribute,
+						name === "testcase" ? rawIdentityAttributes : undefined,
 					)
 				: {};
 		let element: Element = { kind: "other", tag };
@@ -774,13 +786,11 @@ export function parseJUnit(
 					suiteGroups = new Map();
 					retryGroups.set(suite, suiteGroups);
 				}
-				let prefixGroups = suiteGroups.get(prefix);
-				if (prefixGroups === undefined) {
-					prefixGroups = new Map();
-					suiteGroups.set(prefix, prefixGroups);
-				}
-				const group = prefixGroups.get(stable.name);
-				if (group === undefined) prefixGroups.set(stable.name, [element]);
+				const rawIdentity = JSON.stringify(
+					[...rawIdentityAttributes].sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)),
+				);
+				const group = suiteGroups.get(rawIdentity);
+				if (group === undefined) suiteGroups.set(rawIdentity, [element]);
 				else group.push(element);
 			} else if (name === "failure" || name === "error") {
 				const suite = suiteStack.at(-1);

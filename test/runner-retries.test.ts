@@ -587,3 +587,125 @@ test("a file prefix and matching classname cannot turn a failure into a retry pa
 	expect(gate("fedc7335")).toMatchObject({ verdict: "blocked", tally: { pass: 0, unexplained: 1 } });
 	expect(page()?.flips).toBe(0);
 });
+
+const rawIdentityChanges: {
+	attribute: string;
+	before: string | undefined;
+	after: string | undefined;
+	separateSuites?: boolean;
+}[] = [
+	{ attribute: "classname", before: "t.TestA", after: "t.TestB" },
+	{ attribute: "classname", before: "a\\b", after: "a/b" },
+	{ attribute: "classname", before: undefined, after: "" },
+	{ attribute: "classname", before: "t&#46;TestA", after: "t.TestA" },
+	{ attribute: "file", before: "t.py", after: "./t.py" },
+	{ attribute: "file", before: "a\\b", after: "a/b" },
+	{ attribute: "file", before: undefined, after: "" },
+	{ attribute: "name", before: "&#120;", after: "x" },
+	{ attribute: "name", before: "x ", after: "x" },
+	{ attribute: "name", before: "x", after: "x " },
+	{ attribute: "id", before: "one", after: "two" },
+	{ attribute: "id", before: undefined, after: "" },
+	{ attribute: "line", before: "12", after: "13" },
+	{ attribute: "package", before: "one", after: "two" },
+	{ attribute: "custom-runner-identity", before: "one", after: "two" },
+	{ attribute: "custom-runner-identity", before: undefined, after: "" },
+	{ attribute: "suite instance", before: undefined, after: undefined, separateSuites: true },
+];
+
+const rawTestAttributes = (values: Record<string, string | undefined>, quote = '"') =>
+	Object.entries(values)
+		.filter(([, value]) => value !== undefined)
+		.map(([name, value]) => `${name}=${quote}${value}${quote}`)
+		.join(" ");
+
+test.each(rawIdentityChanges)("raw JUnit identity changes stay separate: %j", (change) => {
+	const identity = {
+		file: "t.py",
+		classname: "t.TestA",
+		name: "x",
+		id: "case-1",
+		line: "12",
+		package: "tests",
+		"custom-runner-identity": "same",
+	};
+	const initial = change.separateSuites ? identity : { ...identity, [change.attribute]: change.before };
+	const retried = change.separateSuites ? identity : { ...identity, [change.attribute]: change.after };
+	const first = `<testcase ${rawTestAttributes(initial)}><failure message="real"/></testcase>`;
+	const last = `<testcase ${rawTestAttributes({ ...retried, name: `${retried.name} (retry #1)` })}/>`;
+	const xml = change.separateSuites
+		? `<testsuites><testsuite name="same">${first}</testsuite><testsuite name="same">${last}</testsuite></testsuites>`
+		: `<testsuite>${first}${last}</testsuite>`;
+	const parsed = parseReport(xml, { file: "raw-identity.xml" });
+	expect(parsed.results).toHaveLength(2);
+	expect(parsed.results.map((item) => item.outcome)).toEqual(["fail", "pass"]);
+	expect(parsed.results.every((item) => item.tries === undefined)).toBe(true);
+	h.call("report", {
+		target: { commit: "fedc7336", repo: "acme/web", branch: "main" },
+		job: "e2e",
+		results: parsed.results,
+	});
+	expect(gate("fedc7336")).toMatchObject({ verdict: "blocked", tally: { unexplained: 1 } });
+	expect(flaky()).toBe(0);
+});
+
+test.each(["(retry #1)", "[retry 1]"])(
+	"raw identity retains genuine retries despite run-only differences: %s",
+	(suffix) => {
+		const identity = {
+			file: "t.py",
+			classname: "t.TestA",
+			name: "x",
+			id: "case-1",
+			line: "12",
+			package: "tests",
+			"custom-runner-identity": "same",
+		};
+		const reversed = Object.fromEntries(Object.entries({ ...identity, name: `x ${suffix}` }).reverse());
+		const parsed = parseReport(
+			`<testsuite><testcase ${rawTestAttributes(identity)} time="0.1" status="failed" message="old" assertions="1" timestamp="2026-10-22T00:00:00Z"><failure message="real"/><system-out>first output</system-out></testcase><testcase ${rawTestAttributes(reversed, "'")} time="0.3" status="passed" message="new" assertions="2" timestamp="2026-10-22T00:00:01Z"><system-out>later output</system-out></testcase></testsuite>`,
+			{ file: "raw-retry.xml" },
+		);
+		expect(parsed.results).toHaveLength(1);
+		expect(parsed.results[0]).toMatchObject({
+			outcome: "pass",
+			durationMs: 400,
+			tries: [{ outcome: "fail", durationMs: 100 }],
+		});
+		h.call("report", {
+			target: { commit: "fedc7337", repo: "acme/web", branch: "main" },
+			job: "e2e",
+			results: parsed.results,
+		});
+		expect(gate("fedc7337")).toMatchObject({ verdict: "passed", tally: { pass: 1 } });
+		expect(flaky()).toBe(1);
+	},
+);
+
+test("genuine retries in different classes sharing a file and name group independently", () => {
+	const xml = `<testsuite>${["t.TestA", "t.TestB"].map((classname) => `<testcase file="t.py" classname="${classname}" name="x"><failure message="real"/></testcase><testcase file="t.py" classname="${classname}" name="x (retry #1)"/>`).join("")}</testsuite>`;
+	const parsed = parseReport(xml, { file: "classes.xml" });
+	expect(parsed.results).toHaveLength(2);
+	for (const result of parsed.results) expect(result).toMatchObject({ outcome: "pass", tries: [{ outcome: "fail" }] });
+	h.call("report", {
+		target: { commit: "fedc7338", repo: "acme/web", branch: "main" },
+		job: "e2e",
+		results: parsed.results,
+	});
+	expect(gate("fedc7338").verdict).toBe("passed");
+});
+
+test("raw name whitespace survives the removal of one retry separator", () => {
+	const parsed = parseReport(
+		`<testsuite><testcase name="x "><failure message="real"/></testcase><testcase name="x  (retry #1)"/></testsuite>`,
+		{ file: "name-whitespace.xml" },
+	);
+	expect(parsed.results).toHaveLength(1);
+	expect(parsed.results[0]).toMatchObject({ test: { name: "x " }, outcome: "pass", tries: [{ outcome: "fail" }] });
+	h.call("report", {
+		target: { commit: "fedc7339", repo: "acme/web", branch: "main" },
+		job: "e2e",
+		results: parsed.results,
+	});
+	expect(gate("fedc7339").verdict).toBe("passed");
+});
