@@ -321,6 +321,11 @@ const Q = {
 		             AND r.outcome IN ('pass', 'fail', 'error') AND ${uncorrectedResults("r.id")})`,
 	),
 	correctionOf: sql<{ result: number }, { id: number }>("SELECT id FROM results WHERE corrects = $result LIMIT 1"),
+	pendingCorrectionOf: sql<{ project: number; actor: number; result: number }, { id: number }>(
+		`SELECT batches.id FROM batches, json_each(batches.staged) staged
+		 WHERE batches.project = $project AND batches.actor = $actor AND batches.state = 'accepted'
+		 AND json_extract(staged.value, '$.corrects') = $result LIMIT 1`,
+	),
 	testByKey: sql<{ project: number; key: string }, TestRow>(
 		"SELECT * FROM tests WHERE project = $project AND key = $key",
 	),
@@ -1061,7 +1066,11 @@ export function accept(
 		if (result.corrects === undefined) continue;
 		const earlier = ctx.db.get(Q.resultById, { id: result.corrects });
 		if (!earlier || earlier.project !== ctx.project.id || earlier.actor !== ctx.actor.id) continue;
-		if (corrected.has(earlier.id) || isWithdrawn(ctx.db, earlier.id))
+		if (
+			corrected.has(earlier.id) ||
+			isWithdrawn(ctx.db, earlier.id) ||
+			ctx.db.get(Q.pendingCorrectionOf, { project: ctx.project.id, actor: ctx.actor.id, result: earlier.id })
+		)
 			throw conflict(
 				`result ${earlier.id} was already corrected; read the latest results and correct the current result instead`,
 			);
