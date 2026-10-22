@@ -91,15 +91,24 @@ test("an upgrade copy is private from its first byte and is published whole at m
 	const directory = mkdtempSync(join(tmpdir(), "mainworthy-private-copy-"));
 	chmodSync(directory, 0o755);
 	const path = join(directory, "copy.db");
+	const umask = (): number => {
+		const now = process.umask(0);
+		process.umask(now);
+		return now;
+	};
+	const before = umask();
 	try {
 		writePrivateDatabaseFile(path, (privatePath) => {
-			// SQLite makes the file itself (`VACUUM INTO` refuses one that exists: issue #670), with the usual mode,
-			// in a directory of its own that only this user can enter.
+			// SQLite makes the file itself (`VACUUM INTO` refuses one that exists: issue #670), in a directory of its
+			// own, and whatever it makes there is private from its first byte.
 			expect(existsSync(privatePath)).toBe(false);
 			expect(dirname(dirname(privatePath))).toBe(directory);
 			expect(mode(dirname(privatePath))).toBe(0o700);
-			writeFileSync(privatePath, "database bytes", { mode: 0o644 });
+			writeFileSync(privatePath, "database bytes");
+			expect(mode(privatePath)).toBe(0o600);
 		});
+		// The process's own umask is back as it was.
+		expect(umask()).toBe(before);
 		expect(readFileSync(path, "utf8")).toBe("database bytes");
 		expect(mode(path)).toBe(0o600);
 		expect(readdirSync(directory)).toEqual(["copy.db"]);
@@ -196,7 +205,11 @@ test("upgrade copies are private and retained copies are hardened without changi
 						temporary.push(destination);
 						expect(existsSync(destination)).toBe(false);
 						expect(mode(dirname(destination))).toBe(0o700);
-						return target.run(destination);
+						const result = target.run(destination);
+						// SQLite made the file private: an ACL that lets another user into the directory finds nothing
+						// to read before the copy is published.
+						expect(mode(destination)).toBe(0o600);
+						return result;
 					};
 				},
 			});

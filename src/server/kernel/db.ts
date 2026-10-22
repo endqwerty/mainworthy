@@ -69,17 +69,25 @@ const existsWithoutFollowing = (path: string): boolean => {
 };
 
 /**
- * Writes a new database file at `path` that no other user can read at any moment: `write` makes the file in a new
- * directory beside `path` that only this user can enter, where it is made private and synced before it is renamed
- * to `path` and the rename is synced. The file cannot be made private before it is written: SQLite's `VACUUM INTO`
- * refuses an output file that exists, on macOS even an empty one (issue #670). A crash leaves that directory,
- * still private, beside `path`.
+ * Writes a new database file at `path` that no other user can read at any moment. The file cannot be made private
+ * before it is written: SQLite's `VACUUM INTO` refuses an output file that exists, on macOS even an empty one (issue
+ * #670). So `write` makes it under a umask of 077, which creates it at mode 0600, in a new directory of mode 0700
+ * beside `path`. Each covers what the other cannot: on Linux a default ACL on the data directory overrides the umask,
+ * and the directory's mode masks that ACL; on macOS an inherited ACL lets another user into the directory whatever
+ * its mode, and the file's mode keeps them out. The file is synced there, renamed to `path`, and the rename synced. A
+ * crash leaves that directory, still private, beside `path`. The umask is the process's: while `write` runs, a file
+ * another thread creates is private too.
  */
 export function writePrivateDatabaseFile(path: string, write: (privatePath: string) => void): void {
 	const workspace = mkdtempSync(`${path}.`);
 	try {
 		const written = join(workspace, basename(path));
-		write(written);
+		const umask = process.umask(0o077);
+		try {
+			write(written);
+		} finally {
+			process.umask(umask);
+		}
 		prepareDatabaseFile(written, "existing");
 		const file = openSync(written, "r+");
 		try {
