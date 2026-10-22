@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod";
 import { AuditReply, verifyAudit } from "../src/core/audit.ts";
-import { MergeReceipt } from "../src/core/changes.ts";
+import { MergeReceipt, receiptNodeHash, receiptSnapshotHash } from "../src/core/changes.ts";
 import type { GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
 import { mergeReceiptById } from "../src/server/decisions/questions.ts";
 import { changeByKey, setMergeReceipt } from "../src/server/evidence/evidence.ts";
@@ -10,7 +10,7 @@ import { Db } from "../src/server/kernel/db.ts";
 import { migrate } from "../src/server/kernel/migrate.ts";
 import { exportArchive } from "../src/server/transfer/transfer.ts";
 import { openApi } from "../src/surfaces/http.ts";
-import { ciReport, type Harness, harness } from "./helpers.ts";
+import { ciReport, dropReceiptSchema, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
 beforeEach(() => {
@@ -123,8 +123,9 @@ test("receipt history persists and remains in the audit after reopening, while a
 
 test("an old merged change gains no invented receipt during migration", () => {
 	h.call("report", report("receipt726", false));
+	dropReceiptSchema(h.app.db);
 	h.app.db.exec(
-		"DROP INDEX change_ends_receipt; ALTER TABLE change_ends DROP COLUMN receipt; DROP TABLE merge_receipt_members; DROP TABLE merge_receipts; DROP TABLE merge_receipt_snapshots; DROP TABLE merge_receipt_payloads; INSERT INTO change_ends (change, ended, at) VALUES (1, 'merged', 1); UPDATE meta SET value = '40' WHERE key = 'schema_version'",
+		"INSERT INTO change_ends (change, ended, at) VALUES (1, 'merged', 1); UPDATE meta SET value = '40' WHERE key = 'schema_version'",
 	);
 	migrate(h.app.db, ":memory:");
 	expect(receipt()).toBeNull();
@@ -216,7 +217,8 @@ test("frozen receipt pages remain complete across new evidence, and audit pages 
 	expect(rows).toHaveLength(123);
 	expect(new Set(rows.map((row) => row.result)).size).toBe(123);
 	expect(h.raw("find", { in: "receipt-results", receipt: kept.id, cursor: `999.results.0` }).ok).toBe(false);
-	const hasher = new Bun.CryptoHasher("sha256").update("mainworthy.merge-receipt.v1\n");
+	const evidence: { kind: string; hash: string; body: string }[] = [];
+
 	let auditCursor: string | null = null;
 	let count = 0;
 	do {
@@ -227,16 +229,48 @@ test("frozen receipt pages remain complete across new evidence, and audit pages 
 		const members = page.ndjson
 			.split("\n")
 			.filter((line) => line.includes('"type":"merge-evidence"'))
-			.map((line) => z.object({ ordinal: z.number(), kind: z.string(), hash: z.string() }).parse(JSON.parse(line)))
+			.map((line) =>
+				z.object({ ordinal: z.number(), kind: z.string(), hash: z.string(), body: z.string() }).parse(JSON.parse(line)),
+			)
 			.sort((a, b) => a.ordinal - b.ordinal);
 		for (const member of members) {
-			hasher.update(`${member.kind}:${member.hash}\n`);
+			evidence.push(member);
 			count++;
 		}
 		auditCursor = page.cursor ?? null;
 	} while (auditCursor);
 	expect(count).toBe(kept.evidenceCount);
-	expect(hasher.digest("hex")).toBe(kept.snapshot);
+	function tree(items: { key: number; hash: string; count: number }[]): string | null {
+		if (!items.length) return null;
+		let rows = items;
+		for (let level = 0; level <= 10; level++) {
+			const groups = new Map<number, typeof rows>();
+			for (const row of rows) {
+				const parent = Math.floor(row.key / 32);
+				const group = groups.get(parent) ?? [];
+				group.push(row);
+				groups.set(parent, group);
+			}
+			rows = [...groups].map(([key, children]) => ({
+				key,
+				count: children.reduce((sum, row) => sum + row.count, 0),
+				hash: receiptNodeHash(
+					level,
+					children.map((row) => ({ slot: row.key % 32, hash: row.hash, count: row.count })),
+				),
+			}));
+		}
+		return rows[0]?.hash ?? null;
+	}
+	const gates = evidence.filter((row) => row.kind === "gate").map((row, key) => ({ key, hash: row.hash, count: 1 }));
+	const results = evidence
+		.filter((row) => row.kind === "result")
+		.map((row) => ({
+			key: z.object({ result: z.number() }).parse(JSON.parse(row.body)).result,
+			hash: row.hash,
+			count: 1,
+		}));
+	expect(receiptSnapshotHash(tree(results), tree(gates))).toBe(kept.snapshot);
 });
 
 test("a receipt summarizes large shard waits and pages their complete frozen evidence", () => {
@@ -248,4 +282,118 @@ test("a receipt summarizes large shard waits and pages their complete frozen evi
 	const audit = AuditReply.parse(h.call("audit", { receipt: kept?.id }));
 	expect(audit.ndjson).toContain('"collection\\":\\"waiting');
 	expect(verifyAudit(audit.ndjson).records).toBe(kept?.evidenceCount ?? 0);
+});
+
+for (const mutation of ["questions", "one result"] as const)
+	test(`large failing receipts share pages when changing ${mutation}`, () => {
+		const n = z.coerce
+			.number()
+			.int()
+			.min(3000)
+			.max(100000)
+			.parse(process.env.MAINWORTHY_RECEIPT_TEST_RESULTS ?? 3000);
+		h.call("report", ciReport({ commit: "receipt726", branch: "feature", pr: 726, n, fail: { 7: "boom" } }));
+		end();
+		const before = h.app.db.raw.serialize().byteLength;
+		const members = () =>
+			z.object({ n: z.number() }).parse(h.app.db.raw.query("SELECT count(*) AS n FROM merge_receipt_members").get()).n;
+		const initial = members();
+		const mergeMs: number[] = [];
+		for (let i = 0; i < 6; i++) {
+			h.call("change", { change: "pr:726", state: "open" });
+			if (mutation === "one result")
+				h.call("report", ciReport({ commit: "receipt726", branch: "feature", pr: 726, n: 1, only: [n + i] }));
+			const start = performance.now();
+			end();
+			mergeMs.push(performance.now() - start);
+		}
+		if (process.env.MAINWORTHY_RECEIPT_TEST_RESULTS)
+			console.log(
+				JSON.stringify({
+					mutation,
+					n,
+					mergeMs,
+					members: members() - initial,
+					growthBytes: h.app.db.raw.serialize().byteLength - before,
+				}),
+			);
+		expect(members() - initial).toBeLessThan(1500);
+		expect(h.app.db.raw.serialize().byteLength - before).toBeLessThan(262144);
+	});
+
+test("a clean result tree performs no result-page reads on reopen and merge", () => {
+	h.call("report", ciReport({ commit: "receipt726", branch: "feature", pr: 726, n: 3000, fail: { 7: "boom" } }));
+	end();
+	h.call("change", { change: "pr:726", state: "open" });
+	const reads = spyOn(h.app.db, "all");
+	try {
+		end();
+		expect(
+			reads.mock.calls.filter(
+				([statement]) => statement.text.includes("FROM run_tests") && statement.text.includes("result/32"),
+			),
+		).toHaveLength(0);
+	} finally {
+		reads.mockRestore();
+	}
+});
+
+test("cached receipt pages refresh cause answers, labels and removed result keys", () => {
+	const sent = h.call<ReportReceipt>("report", report());
+	end();
+	const old = receipt();
+	h.call("change", { change: "pr:726", state: "open" });
+	const question = h.call<InboxReply>("inbox", { kind: "failure" }).items[0];
+	if (!question || !old) throw new Error("Expected question and receipt");
+	h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "flaky" } });
+	end();
+	const excused = receipt();
+	expect(h.call<{ items: unknown[] }>("find", { in: "receipt-results", receipt: excused?.id }).items).toMatchObject([
+		{ standing: "excused", decisionAnswer: "flaky" },
+	]);
+	expect(h.call<{ items: unknown[] }>("find", { in: "receipt-results", receipt: old.id }).items).toMatchObject([
+		{ standing: "unexplained", decision: null },
+	]);
+	h.call("change", { change: "pr:726", state: "open" });
+	h.call("decide", { undo: question.q, reason: "Recheck this failure" });
+	end();
+	expect(h.call<{ items: unknown[] }>("find", { in: "receipt-results", receipt: receipt()?.id }).items).toMatchObject([
+		{ standing: "unexplained", decision: null },
+	]);
+	h.call("change", { change: "pr:726", state: "open" });
+	const corrected = { ...report("receipt726", false), attempt: 2 };
+	h.call("report", { ...corrected, results: corrected.results.map((row) => ({ ...row, corrects: sent.results[0] })) });
+	h.app.db.exec("UPDATE tests SET name='Renamed test' WHERE id=1");
+	end();
+	expect(h.call<{ items: unknown[] }>("find", { in: "receipt-results", receipt: receipt()?.id }).items).toMatchObject([
+		{ name: "Renamed test", standing: "pass", decision: null },
+	]);
+	expect(
+		h.call<{ items: { result: number }[] }>("find", { in: "receipt-results", receipt: receipt()?.id }).items[0]?.result,
+	).not.toBe(sent.results[0] ?? 0);
+});
+
+test("one test in many lanes keeps bounded tree leaves and complete result pages", () => {
+	for (let i = 0; i < 100; i++) h.call("report", { ...report("receipt726", false), job: `lane-${i}` });
+	end();
+	const kept = receipt();
+	if (!kept) throw new Error("Expected receipt");
+	let cursor: string | null = null;
+	const ids: number[] = [];
+	do {
+		const page: { items: { result: number }[]; cursor: string | null } = h.call<{
+			items: { result: number }[];
+			cursor: string | null;
+		}>("find", {
+			in: "receipt-results",
+			receipt: kept.id,
+			...(cursor ? { cursor } : {}),
+			limit: 500,
+		});
+		expect(page.items.length).toBeLessThanOrEqual(50);
+		ids.push(...page.items.map((row) => row.result));
+		cursor = page.cursor;
+	} while (cursor);
+	expect(ids).toHaveLength(100);
+	expect(new Set(ids).size).toBe(100);
 });

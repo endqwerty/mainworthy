@@ -631,7 +631,10 @@ function exportedTables(db: Db): string[] {
 				"invitations",
 				"passkey_users",
 				"change_ends",
+				"merge_receipt_dirty",
+				"merge_receipt_heads",
 				"merge_receipt_members",
+				"merge_receipt_nodes",
 				"merge_receipt_payloads",
 				"merge_receipt_snapshots",
 				"merge_receipts",
@@ -893,8 +896,11 @@ describe("Mainworthy instance archives", () => {
 			INSERT INTO slot_leases VALUES (602, 71, 1, 30001);
 			INSERT INTO change_ends (change, ended, at) VALUES (503, 'merged', 1);
    INSERT INTO merge_receipt_payloads (id,project,hash,body) VALUES (1,23,'payload','{}');
-   INSERT INTO merge_receipt_snapshots (id,project,hash,count,evidence_count) VALUES (1,23,'snapshot',1,1);
-   INSERT INTO merge_receipt_members (snapshot,ordinal,kind,payload) VALUES (1,0,'result',1);
+   INSERT INTO merge_receipt_nodes (id,project,hash,level,count) VALUES (1,23,'node',0,1);
+ INSERT INTO merge_receipt_snapshots (id,project,hash,result_root,count,evidence_count) VALUES (1,23,'snapshot',1,1,1);
+ INSERT INTO merge_receipt_heads (run,project,root) VALUES (601,23,1);
+ INSERT INTO merge_receipt_dirty (run,bucket) VALUES (601,1);
+   INSERT INTO merge_receipt_members (node,slot,payload) VALUES (1,0,1);
    INSERT INTO merge_receipts (id,project,change,actor,at,seq,evidence,snapshot) VALUES (1,23,503,71,1,1,1,'{}');
    UPDATE change_ends SET receipt=1 WHERE change=503;
 			INSERT INTO demo_projects VALUES (23, 1);
@@ -917,7 +923,10 @@ describe("Mainworthy instance archives", () => {
 		// the count says so. The other project holds no rows of the tables that find their project through a parent.
 		for (const table of [
 			...exportedTables(db),
+			"merge_receipt_dirty",
+			"merge_receipt_heads",
 			"merge_receipt_members",
+			"merge_receipt_nodes",
 			"merge_receipt_payloads",
 			"merge_receipt_snapshots",
 			"merge_receipts",
@@ -1391,7 +1400,10 @@ describe("Mainworthy instance archives", () => {
 			"demo_projects",
 			"handoffs",
 			"invitations",
+			"merge_receipt_dirty",
+			"merge_receipt_heads",
 			"merge_receipt_members",
+			"merge_receipt_nodes",
 			"merge_receipt_payloads",
 			"merge_receipt_snapshots",
 			"merge_receipts",

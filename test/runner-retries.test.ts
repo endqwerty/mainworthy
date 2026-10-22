@@ -11,7 +11,7 @@ import { recoverAccepted } from "../src/server/ops/jobs.ts";
 import { acceptReport, processBatchSteps } from "../src/server/ops/writes.ts";
 import { exportArchive, importArchive, linesOf } from "../src/server/transfer/transfer.ts";
 import { parseReport } from "../src/surfaces/formats/report.ts";
-import { type Harness, harness } from "./helpers.ts";
+import { dropReceiptSchema, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
 beforeEach(() => {
@@ -433,11 +433,10 @@ test("application yields within a batch's tries, and recovery after rollback app
 test("old unsplit tries rebuild before pending recovery without rewriting historical causes", () => {
 	const input = broadReport();
 	h.call("report", input);
+	dropReceiptSchema(h.app.db);
 	h.app.db.raw.exec(`
 		UPDATE result_tries SET signature = (SELECT root FROM assertion_roots WHERE signature = result_tries.signature);
-		DROP INDEX change_ends_receipt; ALTER TABLE change_ends DROP COLUMN receipt;
-		DROP TABLE merge_receipt_members; DROP TABLE merge_receipts;
-		DROP TABLE merge_receipt_snapshots; DROP TABLE merge_receipt_payloads;
+
 		DROP TABLE assertion_seen; DROP TABLE assertion_spreads; DROP TABLE assertion_roots; DROP TABLE assertion_index;
 		DROP INDEX results_assertion_rebuild;
 		UPDATE meta SET value = '39' WHERE key = 'schema_version';

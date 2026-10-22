@@ -206,10 +206,24 @@ independently verifiable with `audit verify`. The API reply also names `snapshot
 `evidenceCount`. A page has at most 50 members and 64 KiB of source evidence. Each
 `merge-evidence` record carries receipt id, ordinal, kind (`result` or `gate`), body and
 full SHA-256 of its UTF-8 body. Order all members by ordinal; require exactly
-`evidenceCount` contiguous ordinals starting at zero. Hash the UTF-8 prefix
-`mainworthy.merge-receipt.v1\n` followed by `kind:hash\n` for each member and require
-that digest to equal the manifest's `snapshot`. This checks bundle completeness; verifying
-one page alone does not. The `result` body is JSON with frozen result fields and its
+`evidenceCount` contiguous ordinals starting at zero, with gate records first and result records ordered
+by numeric result id. The unpublished flat-list hash has been replaced by this v2 canonical tree hash:
+
+- Recompute each body's SHA-256 and require it to match the record's `hash`.
+- Build separate radix-32 trees for results and gate records. Result keys are their frozen numeric `result`
+  ids; gate keys are zero-based positions among gate records. Keys must be unique nonnegative safe integers.
+- A leaf, level 0, groups keys by `floor(key / 32)`. Its entries, ordered by `key % 32`, are
+  `[slot, bodyHash, 1]`. Hash the UTF-8 JSON array `["mainworthy.receipt.node.v2",0,entries]`, without spaces.
+- Group the resulting nodes by the same rule for levels 1 through 10. Each entry is
+  `[childKey % 32, childHash, childMemberCount]`; its parent key is `floor(childKey / 32)`.
+  Hash `["mainworthy.receipt.node.v2",level,entries]`. Missing children have no entry; omit empty nodes.
+  The count of a branch is the sum of its child counts. After level 10 there is one root per nonempty tree.
+- An empty tree has a null root hash. Hash `["mainworthy.receipt.snapshot.v2",resultRootHash,gateRootHash]`
+  with the same JSON encoding and require it to equal `snapshot`.
+
+This reconstructs roots from exported bytes, independently of database node ids or edit history. All
+numbers and slots use numeric order. Completeness requires both the counts and root hash to match.
+Verifying one page alone does not establish bundle completeness. The `result` body is JSON with frozen result fields and its
 supporting decision id and displayed answer. Gate bodies are JSON frames: `collection: open`
 contains numbered `part` text chunks which join to the original blocking-ref JSON array;
 `collection: waiting` contains one complete shard-wait `item`. Exports and reads never

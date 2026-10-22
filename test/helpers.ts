@@ -3,6 +3,8 @@ import type { ActorKind, Capability } from "../src/core/kinds.ts";
 import { authenticate, bootstrap, createToken } from "../src/server/identity/identity.ts";
 import { type App, openApp, SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
 import type { Actor } from "../src/server/kernel/ctx.ts";
+import type { Db } from "../src/server/kernel/db.ts";
+import { MIGRATIONS } from "../src/server/kernel/migrate.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke, type Reply } from "../src/server/ops/registry.ts";
 
@@ -114,4 +116,22 @@ export function ciReport(input: {
 		...(input.shard ? { shard: input.shard } : {}),
 		results,
 	};
+}
+
+/** Restore the pre-receipt schema before replaying 0041, including its source-cache invalidation triggers. */
+export function dropReceiptSchema(db: Db): void {
+	const migration = MIGRATIONS.find((row) => row.name === "merge_receipts");
+	if (!migration) throw new Error("receipt migration is missing");
+	for (const match of migration.sql.matchAll(/CREATE TRIGGER (\w+)/g)) db.exec(`DROP TRIGGER ${match[1]}`);
+	db.exec("DROP INDEX run_tests_receipt; DROP INDEX change_ends_receipt; ALTER TABLE change_ends DROP COLUMN receipt");
+	for (const table of [
+		"merge_receipt_heads",
+		"merge_receipt_dirty",
+		"merge_receipt_members",
+		"merge_receipts",
+		"merge_receipt_snapshots",
+		"merge_receipt_nodes",
+		"merge_receipt_payloads",
+	])
+		db.exec(`DROP TABLE ${table}`);
 }

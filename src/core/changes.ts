@@ -1,4 +1,6 @@
 // A gate read when a merge was reported, kept independently of later evidence and scope changes.
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import { z } from "zod";
 import { MethodKind } from "./model.ts";
 import { GateStatus } from "./ops.ts";
@@ -37,3 +39,20 @@ export const MergeReceiptResult = z.object({
 	decisionAnswer: z.string().nullable(),
 });
 export type MergeReceiptResult = z.infer<typeof MergeReceiptResult>;
+
+/** Versioned canonical radix-32 nodes. Counts authenticate rank-based pagination; ids never enter the digest. */
+export function receiptNodeHash(
+	level: number,
+	entries: readonly { slot: number; hash: string; count: number }[],
+): string {
+	return bytesToHex(
+		sha256(
+			utf8ToBytes(
+				JSON.stringify(["mainworthy.receipt.node.v2", level, entries.map((row) => [row.slot, row.hash, row.count])]),
+			),
+		),
+	);
+}
+export function receiptSnapshotHash(results: string | null, gate: string | null): string {
+	return bytesToHex(sha256(utf8ToBytes(JSON.stringify(["mainworthy.receipt.snapshot.v2", results, gate]))));
+}

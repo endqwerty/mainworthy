@@ -1,6 +1,6 @@
 // Storage for the queue and the ledgers. Owns questions, question_refs, answers, decisions and merge_receipts.
 // The rules (who may answer, when a decision holds) are in decisions.ts; this file only reads and writes rows.
-import { MergeReceipt, MergeReceiptResult } from "../../core/changes.ts";
+import { MergeReceipt, MergeReceiptResult, receiptNodeHash, receiptSnapshotHash } from "../../core/changes.ts";
 import { type ActorKind, type Ask, ATTRIBUTED, type Kind } from "../../core/kinds.ts";
 import { type Ctx, ref } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
@@ -85,38 +85,60 @@ const HOLD_ENDING = `d.supersedes IS NOT NULL AND (
  OR (json_extract(d.answer, '$.is') = 'outdated' AND json_extract(d.signers, '$[0].clause') IN ('tracker-closed', 'passed'))
 )`;
 
+type ReceiptRoot = { id: number; hash: string; count: number };
+type ReceiptMember = { slot: number; child: number | null; payload: number | null; hash: string; count: number };
+
 const Q = {
 	receiptDecision: sql<{ id: number }, { answer: string }>(
 		"SELECT json_extract(answer, '$.is') AS answer FROM decisions WHERE id=$id",
 	),
-	snapshotByHash: sql<{ project: number; hash: string }, { id: number; count: number; evidence_count: number }>(
-		"SELECT id, count, evidence_count FROM merge_receipt_snapshots WHERE project=$project AND hash=$hash",
+	node: sql<{ id: number }, ReceiptRoot>("SELECT id,hash,count FROM merge_receipt_nodes WHERE id=$id"),
+	nodeByHash: sql<{ project: number; hash: string }, ReceiptRoot>(
+		"SELECT id,hash,count FROM merge_receipt_nodes WHERE project=$project AND hash=$hash",
 	),
-	insertSnapshot: sql<{ project: number; hash: string; count: number; evidence_count: number }>(
-		"INSERT INTO merge_receipt_snapshots (project,hash,count,evidence_count) VALUES ($project,$hash,$count,$evidence_count)",
+	insertNode: sql<{ project: number; hash: string; level: number; count: number }>(
+		"INSERT INTO merge_receipt_nodes(project,hash,level,count) VALUES ($project,$hash,$level,$count)",
+	),
+	members: sql<{ node: number }, ReceiptMember>(
+		`SELECT m.slot,m.child,m.payload,coalesce(n.hash,p.hash) AS hash,coalesce(n.count,1) AS count FROM merge_receipt_members m LEFT JOIN merge_receipt_nodes n ON n.id=m.child LEFT JOIN merge_receipt_payloads p ON p.id=m.payload WHERE m.node=$node ORDER BY m.slot`,
+	),
+	insertMember: sql<{ node: number; slot: number; child: number | null; payload: number | null }>(
+		"INSERT INTO merge_receipt_members(node,slot,child,payload) VALUES ($node,$slot,$child,$payload)",
+	),
+	payload: sql<{ id: number }, { hash: string; body: string }>(
+		"SELECT hash,body FROM merge_receipt_payloads WHERE id=$id",
 	),
 	insertPayload: sql<{ project: number; hash: string; body: string }>(
-		"INSERT INTO merge_receipt_payloads (project,hash,body) VALUES ($project,$hash,$body) ON CONFLICT (project,hash) DO NOTHING",
+		"INSERT INTO merge_receipt_payloads(project,hash,body) VALUES ($project,$hash,$body) ON CONFLICT(project,hash) DO NOTHING",
 	),
 	payloadByHash: sql<{ project: number; hash: string }, { id: number }>(
 		"SELECT id FROM merge_receipt_payloads WHERE project=$project AND hash=$hash",
 	),
-	insertMember: sql<{ snapshot: number; ordinal: number; kind: string; payload: number }>(
-		"INSERT INTO merge_receipt_members (snapshot,ordinal,kind,payload) VALUES ($snapshot,$ordinal,$kind,$payload)",
+	cache: sql<{ run: number; project: number }, { root: number | null }>(
+		"SELECT root FROM merge_receipt_heads WHERE run=$run AND project=$project",
 	),
-	evidencePage: sql<
-		{ project: number; receipt: number; after: number; limit: number; kind: string },
-		{ ordinal: number; kind: string; hash: string; body: string }
-	>(
-		`SELECT m.ordinal,m.kind,p.hash,p.body FROM merge_receipts r JOIN merge_receipt_members m ON m.snapshot=r.evidence JOIN merge_receipt_payloads p ON p.id=m.payload
- WHERE r.id=$receipt AND r.project=$project AND m.ordinal>$after AND m.kind=$kind ORDER BY m.ordinal LIMIT $limit`,
+	setCache: sql<{ run: number; project: number; root: number | null }>(
+		"INSERT INTO merge_receipt_heads(run,project,root) VALUES ($run,$project,$root) ON CONFLICT(run) DO UPDATE SET root=excluded.root",
 	),
-	allEvidencePage: sql<
-		{ project: number; receipt: number; after: number; limit: number },
-		{ ordinal: number; kind: string; hash: string; body: string }
-	>(
-		`SELECT m.ordinal,m.kind,p.hash,p.body FROM merge_receipts r JOIN merge_receipt_members m ON m.snapshot=r.evidence JOIN merge_receipt_payloads p ON p.id=m.payload
- WHERE r.id=$receipt AND r.project=$project AND m.ordinal>$after ORDER BY m.ordinal LIMIT $limit`,
+	dirty: sql<{ run: number; after: number }, { bucket: number }>(
+		"SELECT bucket FROM merge_receipt_dirty WHERE run=$run AND bucket>$after ORDER BY bucket LIMIT 50",
+	),
+	clearDirty: sql<{ run: number }>("DELETE FROM merge_receipt_dirty WHERE run=$run"),
+	snapshotByHash: sql<{ project: number; hash: string }, { id: number; count: number; evidence_count: number }>(
+		"SELECT id,count,evidence_count FROM merge_receipt_snapshots WHERE project=$project AND hash=$hash",
+	),
+	insertSnapshot: sql<{
+		project: number;
+		hash: string;
+		result_root: number | null;
+		gate_root: number | null;
+		count: number;
+		evidence_count: number;
+	}>(
+		"INSERT INTO merge_receipt_snapshots(project,hash,result_root,gate_root,count,evidence_count) VALUES ($project,$hash,$result_root,$gate_root,$count,$evidence_count)",
+	),
+	roots: sql<{ project: number; receipt: number }, { result_root: number | null; gate_root: number | null }>(
+		"SELECT s.result_root,s.gate_root FROM merge_receipts r JOIN merge_receipt_snapshots s ON s.id=r.evidence WHERE r.project=$project AND r.id=$receipt",
 	),
 	mergeReceipt: sql<{ id: number; project: number }, { id: number; snapshot: string }>(
 		"SELECT id, snapshot FROM merge_receipts WHERE id = $id AND project = $project",
@@ -612,42 +634,155 @@ export function mergeReceiptById(db: Db, project: number, id: number | null): Me
 	return row ? MergeReceipt.parse({ ...json<Record<string, unknown>>(row.snapshot), id: row.id }) : null;
 }
 
-export type ReceiptEvidence = { kind: "result" | "gate"; body: string };
 export const receiptDecisionAnswer = (db: Db, id: number): string => {
 	const row = db.get(Q.receiptDecision, { id });
 	if (!row) throw new Error(`counted decision ${id} is missing`);
 	return row.answer;
 };
 const digest = (body: string) => new Bun.CryptoHasher("sha256").update(body).digest("hex");
+const rootOf = (db: Db, id: number | null): ReceiptRoot | null => (id === null ? null : db.get(Q.node, { id }));
 
-/** Two passes under the command transaction: an identical observation writes no payloads or memberships. */
-export function storeMergeSnapshot(ctx: Ctx, contents: () => Iterable<ReceiptEvidence>) {
-	const hash = new Bun.CryptoHasher("sha256").update("mainworthy.merge-receipt.v1\n");
-	let count = 0;
-	let evidence_count = 0;
-	for (const item of contents()) {
-		if (Buffer.byteLength(item.body) > 32768) throw invalid("merge receipt evidence item exceeds 32 KiB");
-		hash.update(`${item.kind}:${digest(item.body)}\n`);
-		if (item.kind === "result") count++;
-		evidence_count++;
-	}
-	const key = hash.digest("hex");
+function payloadOf(ctx: Ctx, body: string): ReceiptRoot {
+	if (Buffer.byteLength(body) > 32768) throw invalid("merge receipt evidence item exceeds 32 KiB");
+	const hash = digest(body);
 	const project = ctx.project.id;
-	const existing = ctx.db.get(Q.snapshotByHash, { project, hash: key });
-	if (existing) return { ...existing, hash: key };
-	const id = ctx.db.run(Q.insertSnapshot, { project, hash: key, count, evidence_count }).lastId;
-	let ordinal = 0;
-	for (const item of contents()) {
-		const hash = digest(item.body);
-		ctx.db.run(Q.insertPayload, { project, hash, body: item.body });
-		const payload = ctx.db.get(Q.payloadByHash, { project, hash });
-		if (!payload) throw new Error("receipt payload was not stored");
-		ctx.db.run(Q.insertMember, { snapshot: id, ordinal: ordinal++, kind: item.kind, payload: payload.id });
-	}
-	return { id, hash: key, count, evidence_count };
+	ctx.db.run(Q.insertPayload, { project, hash, body });
+	const row = ctx.db.get(Q.payloadByHash, { project, hash });
+	if (!row) throw new Error("receipt payload was not stored");
+	return { ...row, hash, count: 1 };
+}
+function nodeOf(ctx: Ctx, level: number, members: ReceiptMember[]): ReceiptRoot | null {
+	if (!members.length) return null;
+	members.sort((a, b) => a.slot - b.slot);
+	if (members.length > 32 || new Set(members.map((row) => row.slot)).size !== members.length)
+		throw new Error("receipt page keys are not unique");
+	const hash = receiptNodeHash(level, members);
+	const project = ctx.project.id;
+	const found = ctx.db.get(Q.nodeByHash, { project, hash });
+	if (found) return found;
+	const count = members.reduce((sum, row) => sum + row.count, 0);
+	const id = ctx.db.run(Q.insertNode, { project, hash, level, count }).lastId;
+	for (const row of members)
+		ctx.db.run(Q.insertMember, { node: id, slot: row.slot, child: row.child, payload: row.payload });
+	return { id, hash, count };
 }
 
-/** Immutable cursors bind both the receipt and collection; project ownership is checked independently. */
+/** Copy only changed leaves and their ancestors. The iterator and recursion hold at most 32 entries per level. */
+function updateTree(
+	ctx: Ctx,
+	root: ReceiptRoot | null,
+	buckets: Iterable<number>,
+	load: (bucket: number) => Iterable<{ key: number; body: string }>,
+): ReceiptRoot | null {
+	const iterator = buckets[Symbol.iterator]();
+	let next = iterator.next();
+	if (next.done) return root;
+	function update(old: ReceiptRoot | null, level: number, base: number): ReceiptRoot | null {
+		if (level === 0) {
+			const members: ReceiptMember[] = [];
+			for (const row of load(base)) {
+				if (!Number.isSafeInteger(row.key) || row.key < 0)
+					throw invalid("receipt key must be a nonnegative safe integer");
+				const payload = payloadOf(ctx, row.body);
+				members.push({ slot: row.key % 32, child: null, payload: payload.id, hash: payload.hash, count: 1 });
+			}
+			next = iterator.next();
+			return nodeOf(ctx, 0, members);
+		}
+		const members = new Map((old ? ctx.db.all(Q.members, { node: old.id }) : []).map((row) => [row.slot, row]));
+		const span = 32 ** (level - 1);
+		while (!next.done && next.value < base + 32 ** level) {
+			const slot = Math.floor((next.value - base) / span);
+			const held = members.get(slot);
+			const child = update(
+				held?.child ? { id: held.child, hash: held.hash, count: held.count } : null,
+				level - 1,
+				base + slot * span,
+			);
+			if (child) members.set(slot, { slot, child: child.id, payload: null, hash: child.hash, count: child.count });
+			else members.delete(slot);
+		}
+		return nodeOf(ctx, level, [...members.values()]);
+	}
+	return update(root, 10, 0);
+}
+function* dirtyBuckets(db: Db, run: number): Generator<number> {
+	let after = -1;
+	for (;;) {
+		const page = db.all(Q.dirty, { run, after });
+		if (!page.length) return;
+		for (const row of page) {
+			yield row.bucket;
+			after = row.bucket;
+		}
+	}
+}
+/** Disposable roots are reused only while source-change triggers leave their dirty set empty. */
+export function storeReceiptResults(
+	ctx: Ctx,
+	run: number,
+	buckets: () => Iterable<number>,
+	load: (bucket: number) => Iterable<{ key: number; body: string }>,
+): ReceiptRoot | null {
+	const cached = ctx.db.get(Q.cache, { run, project: ctx.project.id });
+	const root = updateTree(
+		ctx,
+		cached ? rootOf(ctx.db, cached.root) : null,
+		cached ? dirtyBuckets(ctx.db, run) : buckets(),
+		load,
+	);
+	ctx.db.run(Q.setCache, { run, project: ctx.project.id, root: root?.id ?? null });
+	ctx.db.run(Q.clearDirty, { run });
+	return root;
+}
+/** Gate identity is separate: a new question reference cannot duplicate result memberships. */
+export function storeMergeSnapshot(ctx: Ctx, results: ReceiptRoot | null, gate: Iterable<string>) {
+	const iterator = gate[Symbol.iterator]();
+	let next = iterator.next();
+	let key = 0;
+	function* buckets(): Generator<number> {
+		while (!next.done) yield Math.floor(key / 32);
+	}
+	function* load(bucket: number): Generator<{ key: number; body: string }> {
+		while (!next.done && Math.floor(key / 32) === bucket) {
+			yield { key: key++, body: next.value };
+			next = iterator.next();
+		}
+	}
+	const gates = updateTree(ctx, null, buckets(), load);
+	const hash = receiptSnapshotHash(results?.hash ?? null, gates?.hash ?? null);
+	const project = ctx.project.id;
+	const found = ctx.db.get(Q.snapshotByHash, { project, hash });
+	if (found) return { ...found, hash };
+	const count = results?.count ?? 0;
+	const evidence_count = count + (gates?.count ?? 0);
+	const id = ctx.db.run(Q.insertSnapshot, {
+		project,
+		hash,
+		result_root: results?.id ?? null,
+		gate_root: gates?.id ?? null,
+		count,
+		evidence_count,
+	}).lastId;
+	return { id, hash, count, evidence_count };
+}
+function* treePage(db: Db, node: ReceiptRoot | null, skip: number): Generator<{ hash: string; body: string }> {
+	if (!node) return;
+	for (const row of db.all(Q.members, { node: node.id })) {
+		if (skip >= row.count) {
+			skip -= row.count;
+			continue;
+		}
+		if (row.child !== null) yield* treePage(db, { id: row.child, hash: row.hash, count: row.count }, skip);
+		else if (row.payload !== null) {
+			const payload = db.get(Q.payload, { id: row.payload });
+			if (!payload) throw new Error("receipt payload is missing");
+			yield payload;
+		}
+		skip = 0;
+	}
+}
+/** Rank cursors are stable because historical roots and subtree counts are immutable. */
 export function mergeReceiptPage(
 	db: Db,
 	project: number,
@@ -657,32 +792,38 @@ export function mergeReceiptPage(
 	collection: "results" | "evidence" = "results",
 ) {
 	const manifest = mergeReceiptById(db, project, receipt);
-	if (!manifest) throw notFound("merge receipt");
-	const results = collection === "results";
+	const roots = db.get(Q.roots, { project, receipt });
+	if (!manifest || !roots) throw notFound("merge receipt");
 	const match = cursor ? /^(\d+)\.(results|evidence)\.(\d+)$/.exec(cursor) : null;
 	if (
 		cursor &&
 		(!match || Number(match[1]) !== receipt || match[2] !== collection || !Number.isSafeInteger(Number(match[3])))
 	)
 		throw invalid("that is not a cursor of this receipt collection");
-	const after = match ? Number(match[3]) : -1;
-	const args = { project, receipt, after, limit: Math.min(limit, 50) + 1 };
-	const rows = results ? db.all(Q.evidencePage, { ...args, kind: "result" }) : db.all(Q.allEvidencePage, args);
-	const page: typeof rows = [];
+	const start = match ? Number(match[3]) + 1 : 0;
+	const resultRoot = rootOf(db, roots.result_root);
+	const gateRoot = rootOf(db, roots.gate_root);
+	function* rows(): Generator<{ kind: "result" | "gate"; hash: string; body: string }> {
+		if (collection === "evidence" && start < (gateRoot?.count ?? 0))
+			for (const row of treePage(db, gateRoot, start)) yield { kind: "gate", ...row };
+		const after = collection === "results" ? start : Math.max(0, start - (gateRoot?.count ?? 0));
+		for (const row of treePage(db, resultRoot, after)) yield { kind: "result", ...row };
+	}
+	const page: { ordinal: number; kind: "result" | "gate"; hash: string; body: string }[] = [];
 	let bytes = 0;
-	for (const row of rows) {
-		if (page.length >= Math.min(limit, 50) || bytes + Buffer.byteLength(row.body) > 65536) break;
-		page.push(row);
+	let more = false;
+	for (const row of rows()) {
+		if (page.length >= Math.min(limit, 50) || bytes + Buffer.byteLength(row.body) > 65536) {
+			more = true;
+			break;
+		}
+		page.push({ ordinal: start + page.length, ...row });
 		bytes += Buffer.byteLength(row.body);
 	}
 	const last = page.at(-1);
 	return {
-		count: results ? manifest.count : manifest.evidenceCount,
-		items: page.map((row) =>
-			results
-				? MergeReceiptResult.parse(json(row.body))
-				: { ordinal: row.ordinal, kind: row.kind, hash: row.hash, body: row.body },
-		),
-		cursor: rows.length > page.length && last ? `${receipt}.${collection}.${last.ordinal}` : null,
+		count: collection === "results" ? manifest.count : manifest.evidenceCount,
+		items: page.map((row) => (collection === "results" ? MergeReceiptResult.parse(json(row.body)) : row)),
+		cursor: more && last ? `${receipt}.${collection}.${last.ordinal}` : null,
 	};
 }

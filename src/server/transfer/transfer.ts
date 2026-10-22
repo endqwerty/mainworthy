@@ -88,9 +88,12 @@ export const UNEXPORTED: readonly string[] = [
 	"passkey_users",
 	"tokens",
 	"change_ends",
+	"merge_receipt_heads",
+	"merge_receipt_dirty",
 	"merge_receipt_members",
 	"merge_receipts",
 	"merge_receipt_snapshots",
+	"merge_receipt_nodes",
 	"merge_receipt_payloads",
 	"tracker_requests",
 	"tracker_polls",
@@ -172,7 +175,10 @@ function discoverTables(db: Db): Table[] {
 
 /** Tables whose project is held by a parent rather than their own row. Unknown unscoped tables fail closed. */
 const PROJECT_PARENT: Readonly<Record<string, { column: string; table: string }>> = {
-	merge_receipt_members: { column: "snapshot", table: "merge_receipt_snapshots" },
+	merge_receipt_members: { column: "node", table: "merge_receipt_nodes" },
+	merge_receipt_dirty: { column: "run", table: "runs" },
+	// Drop live capture roots before source rows so invalidation triggers cannot refill the dirty set.
+	merge_receipt_heads: { column: "run", table: "runs" },
 	attachments: { column: "result", table: "results" },
 	answers: { column: "question", table: "questions" },
 	versions: { column: "case_id", table: "cases" },
