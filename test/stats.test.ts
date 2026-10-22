@@ -546,6 +546,33 @@ function suite() {
 }
 
 describe("automation and its backlog", () => {
+	test("manual time stays bounded for historical durations and distinguishes zero from unreported", () => {
+		h = harness();
+		h.call("propose", {
+			edits: ["Large", "Zero", "Untimed"].map((title) => ({
+				op: "create",
+				body: { title, methods: ["human"], automate: "wanted" },
+			})),
+		});
+		for (let i = 0; i < 1025; i++)
+			h.call("report", {
+				target: { session: `manual-${i}` },
+				results: [{ test: { case: "C-1" }, outcome: "pass", durationMs: 1 }],
+			});
+		// Historical and restored rows are not restricted by today's report input limit.
+		h.app.db.raw.exec("UPDATE results SET duration_ms = 9000000000000000");
+		h.call("report", {
+			target: { session: "zero" },
+			results: [{ test: { case: "C-2" }, outcome: "pass", durationMs: 0 }],
+		});
+		manual("C-3", "pass");
+		expect(stats({ of: "automation" }).backlog).toEqual([
+			{ case: "C-1", title: "Large", automate: "wanted", runs: 1025, timeMs: Number.MAX_SAFE_INTEGER },
+			{ case: "C-2", title: "Zero", automate: "wanted", runs: 1, timeMs: 0 },
+			{ case: "C-3", title: "Untimed", automate: "wanted", runs: 1, timeMs: null },
+		]);
+	});
+
 	test("the rate leaves out what cannot be automated, and the backlog puts the most run by hand first", () => {
 		suite();
 		expect(stats({ of: "automation" })).toEqual({
