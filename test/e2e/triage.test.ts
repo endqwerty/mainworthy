@@ -341,8 +341,90 @@ async function recordedDecisions(server: Server, ref: string) {
 	30000,
 );
 
+for (const cached of [false, true])
+	(browserAvailable ? test : test.skip)(
+		`bulk answers keep Open after a late question read and undo restores every question: ${cached ? "cached remount" : "first mount"}`,
+		async () => {
+			const server = await fixture();
+			let view: Awaited<ReturnType<typeof openPage>> | null = null;
+			let release = () => {};
+			const held = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			try {
+				await server.api("propose", {
+					edits: [
+						{ op: "create", outline: "Amber" },
+						{ op: "create", outline: "Cedar" },
+					],
+				});
+				await server.api("report", {
+					target: { session: "bulk" },
+					results: [
+						{ test: { case: "C-1" }, outcome: "fail", note: "expected amber, got green" },
+						{ test: { case: "C-2" }, outcome: "fail", note: "expected cedar, got green" },
+					],
+				});
+				view = await openPage(server, {
+					path: "/p/scratch/queue",
+					setup: async (page) => {
+						await page.route("**/get", async (route) => {
+							const { refs } = z.object({ refs: z.array(z.string()) }).parse(route.request().postDataJSON());
+							if (refs.some((ref) => ref.startsWith("Q-"))) await held;
+							await route.continue();
+						});
+					},
+				});
+				await view.page.waitForSelector("[data-current-question]");
+				if (cached) {
+					await view.page.locator('#nav a[aria-label="Runs"]').click();
+					await view.page.locator(".queue-state").waitFor({ state: "detached" });
+					await view.page.locator('#nav a[aria-label="Queue"]').click();
+					await view.page.waitForSelector("[data-current-question]");
+				}
+				const submissions: unknown[] = [];
+				view.page.on("request", (request) => {
+					if (request.url().endsWith("/decide")) submissions.push(request.postDataJSON());
+				});
+				await view.page.keyboard.press("x");
+				await view.page.keyboard.press("j");
+				await view.page.keyboard.press("x");
+				await view.page.keyboard.press("i");
+				await eventually(
+					() => server.api("inbox", {}),
+					(reply) => reply.counts.open === 0,
+				);
+				expect(submissions).toHaveLength(1);
+				expect(z.object({ all: z.array(z.unknown()) }).parse(submissions[0]).all).toHaveLength(2);
+				const questionRead = view.page.waitForResponse(
+					(response) =>
+						response.url().endsWith("/get") && response.request().postDataJSON().refs?.[0]?.startsWith("Q-"),
+				);
+				release();
+				await (await questionRead).finished();
+				await view.page.evaluate(
+					() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+				);
+				expect(await view.page.getByRole("button", { name: "Open", exact: true }).getAttribute("aria-pressed")).toBe(
+					"true",
+				);
+				await view.page.keyboard.press("u");
+				await eventually(
+					() => server.api("inbox", {}),
+					(reply) => reply.items.filter((q) => q.kind === "failure").length === 2,
+				);
+				expect(view.errors).toEqual([]);
+			} finally {
+				release();
+				await view?.close();
+				await server.stop();
+			}
+		},
+		25000,
+	);
+
 (browserAvailable ? test : test.skip)(
-	"bulk answers keep Open after a late question read and undo restores every question",
+	"a fresh question read opens Settled after returning to a cached Open list",
 	async () => {
 		const server = await fixture();
 		let view: Awaited<ReturnType<typeof openPage>> | null = null;
@@ -358,53 +440,46 @@ async function recordedDecisions(server: Server, ref: string) {
 				],
 			});
 			await server.api("report", {
-				target: { session: "bulk" },
+				target: { session: "cached-route" },
 				results: [
 					{ test: { case: "C-1" }, outcome: "fail", note: "expected amber, got green" },
 					{ test: { case: "C-2" }, outcome: "fail", note: "expected cedar, got green" },
 				],
 			});
-			view = await openPage(server, {
-				path: "/p/scratch/queue",
-				setup: async (page) => {
-					await page.route("**/get", async (route) => {
-						const { refs } = z.object({ refs: z.array(z.string()) }).parse(route.request().postDataJSON());
-						if (refs.some((ref) => ref.startsWith("Q-"))) await held;
-						await route.continue();
-					});
+			view = await openPage(server, { path: "/p/scratch/queue" });
+			const { page } = view;
+			await page.waitForSelector("[data-current-question]");
+			const current = await page.locator("[data-current-question]").getAttribute("data-current-question");
+			const question = (await server.api("inbox", {})).items.find((item) => item.q !== current);
+			if (!question) throw new Error("Second failure question missing");
+			await page.locator('#nav a[aria-label="Runs"]').click();
+			await page.locator(".queue-state").waitFor({ state: "detached" });
+			await server.api("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "infra" } });
+			await page.route("**/inbox", async (route) => {
+				await held;
+				await route.continue();
+			});
+			const questionRead = page.waitForResponse(
+				(response) => response.url().endsWith("/get") && response.request().postDataJSON().refs?.[0] === question.q,
+			);
+			await page.evaluate(
+				(path) => {
+					history.pushState(null, "", path);
+					window.dispatchEvent(new PopStateEvent("popstate"));
 				},
-			});
-			await view.page.waitForSelector("[data-current-question]");
-			const submissions: unknown[] = [];
-			view.page.on("request", (request) => {
-				if (request.url().endsWith("/decide")) submissions.push(request.postDataJSON());
-			});
-			await view.page.keyboard.press("x");
-			await view.page.keyboard.press("j");
-			await view.page.keyboard.press("x");
-			await view.page.keyboard.press("i");
-			await eventually(
-				() => server.api("inbox", {}),
-				(reply) => reply.counts.open === 0,
+				`/p/scratch/queue/${question.q.slice(2)}`,
 			);
-			expect(submissions).toHaveLength(1);
-			expect(z.object({ all: z.array(z.unknown()) }).parse(submissions[0]).all).toHaveLength(2);
-			const questionRead = view.page.waitForResponse(
-				(response) => response.url().endsWith("/get") && response.request().postDataJSON().refs?.[0]?.startsWith("Q-"),
-			);
-			release();
 			await (await questionRead).finished();
-			await view.page.evaluate(
+			await page.evaluate(
 				() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
 			);
-			expect(await view.page.getByRole("button", { name: "Open", exact: true }).getAttribute("aria-pressed")).toBe(
+			expect(await page.getByRole("button", { name: "Settled", exact: true }).getAttribute("aria-pressed")).toBe(
 				"true",
 			);
-			await view.page.keyboard.press("u");
-			await eventually(
-				() => server.api("inbox", {}),
-				(reply) => reply.items.filter((q) => q.kind === "failure").length === 2,
-			);
+			release();
+			await page.locator(`[data-current-question="${question.q}"]`).waitFor();
+			await page.locator(".queue-decision").waitFor();
+			expect(await page.locator(".queue-decision").innerText()).toContain("Decided by robin");
 			expect(view.errors).toEqual([]);
 		} finally {
 			release();

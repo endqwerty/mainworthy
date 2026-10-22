@@ -140,7 +140,8 @@ function QueueWorkbench() {
 	});
 	const fetched = inbox.data?.pages.flatMap((page) => page.items) ?? [];
 	const merged = [...restored.filter((item) => !fetched.some((q) => q.q === item.q)), ...fetched];
-	const listedRouteQuestion = merged.find((item) => item.q === route.ref);
+	const listedRouteQuestion =
+		inbox.isFetchedAfterMount && !inbox.isError ? merged.find((item) => item.q === route.ref) : undefined;
 	const routeQuestionRef = listedRouteQuestion?.q ?? (routeState.success ? routeState.data.q : null);
 	const routeQuestionState = listedRouteQuestion?.state ?? (routeState.success ? routeState.data.state : null);
 	useEffect(() => {
@@ -323,6 +324,7 @@ function QueueWorkbench() {
 				return;
 			}
 		}
+		seenRoute.current = route.ref;
 		const action = ++actionNo.current;
 		const refs = new Set(entries.map((entry) => entry.question.q));
 		for (const ref of refs) {

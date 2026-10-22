@@ -24,6 +24,7 @@ In a short desktop window, the question pane scrolls so you can read the evidenc
 An answer key pages through unread proposal edits before it records an answer.
 The "Open" view contains questions that need an answer. "Settled" contains decisions,
 including answers that ended when their cause passed, their flaky hold expired, or their tracker issue closed.
+When you return to a question's address, a fresh question read can select "Settled" even if an older "Open" list is cached.
 When you replace an inherited answer, Settled lists the answer on the ordinary cause question.
 An ended answer shows who answered, what they answered, and the rule and reason recorded for its end.
 You can filter by "Proposals", "Unlinked", "Failures", "Findings", or "Sign-offs".
