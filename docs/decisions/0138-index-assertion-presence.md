@@ -1,4 +1,4 @@
-# 0134: Index assertion presence instead of rescanning reports
+# 0138: Index assertion presence instead of rescanning reports
 
 - Date: 2026-10-22
 - Status: accepted
