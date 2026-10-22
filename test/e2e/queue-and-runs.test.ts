@@ -289,7 +289,15 @@ for (const mode of ["single", "bulk", "advice"])
 		30000,
 	);
 
-for (const outcome of ["confirmed", "refused", "lost reply", "moved by click", "moved by key"])
+for (const outcome of [
+	"confirmed",
+	"refused",
+	"lost reply",
+	"moved by click",
+	"moved by key",
+	"moved within Settled",
+	"moved within Settled without answer",
+])
 	check(
 		`an answer typed during withdrawal stays with its question: ${outcome}`,
 		async () => {
@@ -304,6 +312,18 @@ for (const outcome of ["confirmed", "refused", "lost reply", "moved by click", "
 				if (!q) throw Error("No question");
 				await page.keyboard.press("f");
 				await page.locator(".queue-last").getByText("recorded", { exact: false }).waitFor();
+				const fromSettled = outcome.startsWith("moved within Settled");
+				const queuesAnswer = outcome !== "moved within Settled without answer";
+				let settledDestination: string | null = null;
+				if (fromSettled) {
+					settledDestination = await qref(page);
+					if (!settledDestination) throw Error("No second question");
+					await page.keyboard.press("f");
+					await page.locator(".queue-last").getByText("recorded", { exact: false }).waitFor();
+					await page.getByRole("button", { name: "Settled", exact: true }).click();
+					await page.locator(`[data-question="${q}"]`).click();
+					await page.locator(".queue-decision").waitFor();
+				}
 				const sent: string[] = [];
 				await page.route("**/decide", async (route) => {
 					const input = route.request().postDataJSON();
@@ -322,12 +342,24 @@ for (const outcome of ["confirmed", "refused", "lost reply", "moved by click", "
 				await page.keyboard.press("u");
 				await page.locator(".queue-last").getByText("withdrawing the answer", { exact: false }).waitFor();
 				expect(await qref(page)).toBe(q);
-				expect(await page.locator(`[data-question="${q}"]`).count()).toBe(0);
-				await page.keyboard.press("i");
-				await page.getByText("Answer queued until the withdrawal is confirmed.", { exact: true }).waitFor();
+				expect(await page.locator(`[data-question="${q}"]`).count()).toBe(fromSettled ? 1 : 0);
+				if (queuesAnswer) {
+					await page.keyboard.press("i");
+					await page.getByText("Answer queued until the withdrawal is confirmed.", { exact: true }).waitFor();
+				}
 				let destination: string | null = null;
 				if (outcome.startsWith("moved")) {
-					if (outcome === "moved by click") await page.locator("[data-question]").last().click();
+					if (fromSettled) {
+						const read = page.waitForResponse(
+							(reply) =>
+								reply.url().endsWith("/get") && reply.request().postDataJSON().refs?.[0] === settledDestination,
+						);
+						await page.locator(`[data-question="${settledDestination}"]`).click();
+						await (await read).finished();
+						await page.evaluate(
+							() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+						);
+					} else if (outcome === "moved by click") await page.locator("[data-question]").last().click();
 					else await page.keyboard.press("j");
 					destination = await qref(page);
 					expect(destination).not.toBe(q);
@@ -335,16 +367,31 @@ for (const outcome of ["confirmed", "refused", "lost reply", "moved by click", "
 				expect((await server.api("get", { refs: [q] }))[0]?.state).toBe("decided");
 				gate.release();
 				if (outcome.startsWith("moved")) {
-					await page
-						.getByText("Queued answer discarded. Read the question again before answering.", { exact: true })
-						.or(page.locator(".queue-last").getByText("recorded", { exact: false }))
-						.waitFor();
+					if (queuesAnswer)
+						await page
+							.getByText("Queued answer discarded. Read the question again before answering.", { exact: true })
+							.or(page.locator(".queue-last").getByText("recorded", { exact: false }))
+							.waitFor();
+					else await page.locator(".queue-last").getByText("Answer withdrawn.", { exact: false }).waitFor();
+					if (outcome === "moved within Settled" && process.env.MAINWORTHY_SETTLED_MOVE_SCREENSHOT)
+						await page.screenshot({ path: process.env.MAINWORTHY_SETTLED_MOVE_SCREENSHOT });
+					if (fromSettled) {
+						expect(await page.getByRole("button", { name: "Settled", exact: true }).getAttribute("aria-pressed")).toBe(
+							"true",
+						);
+						await page.locator(`[data-question="${q}"]`).waitFor({ state: "detached" });
+						expect(await page.locator(`[data-question="${destination}"]`).count()).toBe(1);
+						expect(
+							await page.getByText("This question was settled elsewhere. Your note is kept.", { exact: true }).count(),
+						).toBe(0);
+					}
 					if (outcome === "moved by click" && process.env.MAINWORTHY_QUEUED_SCREENSHOT)
 						await page.screenshot({ path: process.env.MAINWORTHY_QUEUED_SCREENSHOT });
 					expect(await qref(page)).toBe(destination);
-					await page
-						.getByText("Queued answer discarded. Read the question again before answering.", { exact: true })
-						.waitFor();
+					if (queuesAnswer)
+						await page
+							.getByText("Queued answer discarded. Read the question again before answering.", { exact: true })
+							.waitFor();
 					expect(sent).toEqual([`${q}:undo`]);
 					expect((await server.api("get", { refs: [q] }))[0]).toMatchObject({ state: "open", decision: null });
 				} else if (outcome === "confirmed") {

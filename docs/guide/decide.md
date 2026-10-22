@@ -407,7 +407,7 @@ The question returns to "Open" only after the server confirms the withdrawal or 
 While a withdrawal is pending, its question stays shown as withdrawing, outside the Open list.
 An answer key queues a replacement for that question and sends it only after the withdrawal is confirmed.
 If another question is current when the withdrawal is confirmed, the queued answer is discarded with a message.
-The cursor stays on the question you chose.
+The cursor stays on the question you chose. If that question is still settled, confirmation keeps you on "Settled".
 A refused or lost withdrawal reports failure without showing the question as reopened and discards the queued answer.
 
 Undo names the decision returned by your answer. If somebody replaced it meanwhile,

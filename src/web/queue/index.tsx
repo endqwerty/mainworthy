@@ -82,6 +82,8 @@ function QueueWorkbench() {
 	const [state, setState] = useState<"open" | "decided">("open");
 	const [kind, setKind] = useState<Kind | null>(null);
 	const [cursor, setCursor] = useState<string | null>(route.ref);
+	const cursorRef = useRef(cursor);
+	cursorRef.current = cursor;
 	const [selected, setSelected] = useState<Set<string>>(new Set());
 	/** Where a range starts: the row whose box was clicked last. */
 	const anchor = useRef<string | null>(null);
@@ -719,7 +721,7 @@ function QueueWorkbench() {
 							.filter(({ question }) => reopened.has(question.q))
 							.map(({ question }) => ({ ...question, state: "open", decision: null })),
 					);
-					if (action === actionNo.current) {
+					if (action === actionNo.current && cursorRef.current !== null && reopened.has(cursorRef.current)) {
 						seenRoute.current = route.ref;
 						setState("open");
 					}
