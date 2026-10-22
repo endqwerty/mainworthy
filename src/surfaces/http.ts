@@ -627,7 +627,11 @@ function events(app: App, req: Request, session: Session, project: string, closi
 			// Who may read is asked again before anything is sent, not only when the stream opens: a token that was
 			// revoked, or an actor that was forgotten, stops receiving at the next event or heartbeat.
 			const stillAllowed = (): boolean => {
-				if (mayRead(app, session, project) === "yes") return true;
+				try {
+					if (mayRead(app, session, project) === "yes") return true;
+				} catch {
+					console.error("[mainworthy] change stream authorization failed");
+				}
 				close();
 				return false;
 			};

@@ -109,8 +109,9 @@ one gate, because the file has one writer.
 `App.publish` isolates each change subscriber. A throwing subscriber is logged
 without its error text, and later subscribers still receive that event. A
 notification failure cannot change a committed reply or interrupt a report
-between commits. The stream is best effort; reads and `since` recover changes
-that a client missed.
+between commits. An HTTP stream closes if its permission check throws, including
+on a heartbeat, so its client can reconnect and reload. The stream is best effort;
+reads and `since` recover changes that a client missed.
 
 ## Who may call
 
