@@ -17,22 +17,19 @@ which names its issue.
 
 ## Decision
 
-**The ending names the change when the change fixed it.** A question's decision carries `fixedIn`, the change's
-key and whether it is `open`, `merged` or `closed`, when all of these hold:
+**The ending names the change when the change fixed it.** A `passed` ending records `fixed: true` in its answer
+when, as it is written, the commit that passed is not one the cause failed on in that scope and the scope's change
+has not ended. `passedIn` decides it from the same failures it already reads. A commit that ran again and passed is
+a retry, which proves no fix; a pass reported after the merge says nothing about what merged. A question's decision
+then carries `fixedIn`, the change's key and whether it is `open`, `merged` or `closed` now, when the ending is
+`fixed` and the scope is a pull request or branch. The state is read now, so "before it merged" appears once the
+merge is reported; the fix came first because the change was open when it was recorded.
 
-- the decision is the `passed` ending of a question whose scope is a pull request or branch;
-- the commit that passed is not one the cause failed on in that scope. A `passed` ending records this in its answer
-  as `on: "later-commit"` or `"same-commit"`, decided by `passedIn` from the same failures it already reads. A
-  commit that ran again and passed is a retry, which proves no fix;
-- the ending came before the change ended (`change_ends.at`, which a repeated identical end does not move). A pass
-  reported after the merge says nothing about what merged.
-
-The state is read now, so "before it merged" appears once the merge is reported. Anything else keeps the rule and
-reason it had. Endings recorded before this decision have no `on` and claim no fix: what passed is only in their
-reason's text, and a claim read from text would be a guess. The verifier of the first version found both the retry
-and the late report (GPT 6.1 Sol, 2026-10-22).
-`fixedInText` in `src/core/kinds.ts` writes the sentence for the web; the iPhone app writes it again and a parity
-table holds it to the same words.
+The fix is recorded, not worked out when the question is read: a change can be reopened and ended again, which
+replaces its end, and an archive leaves out how changes ended, so neither can say later whether the change was open
+at the time. Endings recorded before this decision claim no fix: what passed is only in their reason's text. The
+verifier (GPT 6.1 Sol, 2026-10-22) found each earlier version wrong: the first called a retry and a pass after the
+merge a fix, the second read whether the change was open from its current end.
 
 **The change page counts them and links to the pull request.** "1 failure that needed a fix was fixed before it
 merged." The pull request names the issue it was for, so the failure reaches that issue in one step.

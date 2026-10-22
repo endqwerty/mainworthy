@@ -1798,7 +1798,7 @@ function endPassed(ctx: Ctx, run: RunRow): void {
  *
  * Returns the reason to record.
  */
-function passedIn(ctx: Ctx, question: QuestionRow, run: RunRow): { reason: string; on: PassedOn } | null {
+function passedIn(ctx: Ctx, question: QuestionRow, run: RunRow): { reason: string; fixed: boolean } | null {
 	const { signature, scope } = json<{ signature: number; scope: string }>(question.subject);
 	const evidence = json<{ tests?: { id: number }[]; count?: number }>(question.evidence);
 	const listed = new Set((evidence.tests ?? []).map((test) => test.id));
@@ -1821,9 +1821,12 @@ function passedIn(ctx: Ctx, question: QuestionRow, run: RunRow): { reason: strin
 	const passing = new Set(passingIn(ctx.db, run.id, tests).map(where));
 	if (failed.length === 0 || failed.some((row) => !passing.has(where(row)))) return null;
 	const passedOn = json<{ commit?: string }>(run.accepts).commit;
-	const on = passedOn !== undefined && !failed.some((row) => row.commit === passedOn) ? "later-commit" : "same-commit";
+	// A fix: a commit the cause never failed on, while the scope is still open. A commit that failed and passed when
+	// it ran again proves no fix, and a pass after the change ended says nothing about what it ended with. Decided
+	// now, because a change can be reopened later and an archive leaves out how changes ended.
+	const fixed = passedOn !== undefined && !failed.some((row) => row.commit === passedOn) && !scopeEnded(ctx.db, scope);
 	const commit = passedOn?.slice(0, 12) ?? runRef(run);
-	return { reason: `Every test it named passed on ${commit} where it had failed; the answer ended.`, on };
+	return { reason: `Every test it named passed on ${commit} where it had failed; the answer ended.`, fixed };
 }
 
 /**
@@ -1959,17 +1962,13 @@ export function endDefectHold(ctx: Ctx, decision: DecisionRow, ref: string): boo
 
 /**
  * A decision stops holding by the rule: its time ran out (`hold-expired`), its tracker issue closed
- * (`tracker-closed`), or its cause passed (`passed`). Each way it no longer explains anything.
- */
-/**
- * How a hold ends. A `passed` ending says whether the passing commit is one the cause had failed on (`same-commit`:
- * it ran again and passed) or another (`later-commit`), so a reader can tell a retry from a fix.
+ * (`tracker-closed`), or its cause passed (`passed`). Each way it no longer explains anything. A `passed` ending
+ * records `fixed` in its answer when a later commit passed while its scope was open (`passedIn`).
  */
 type Ending =
 	| { is: "expired"; clause: "hold-expired"; reason: null }
 	| { is: "outdated"; clause: "tracker-closed"; reason: string }
-	| { is: "outdated"; clause: "passed"; reason: string; on: PassedOn };
-type PassedOn = "later-commit" | "same-commit";
+	| { is: "outdated"; clause: "passed"; reason: string; fixed: boolean };
 
 function endHold(ctx: Ctx, decision: DecisionRow, ending: Ending): boolean {
 	const question = questionById(ctx.db, decision.question);
@@ -1977,7 +1976,7 @@ function endHold(ctx: Ctx, decision: DecisionRow, ending: Ending): boolean {
 	HANDLERS[question.kind].revert(ctx, question, decision);
 	const ended = insertDecision(ctx, {
 		question,
-		answer: ending.clause === "passed" ? { is: ending.is, on: ending.on } : { is: ending.is },
+		answer: ending.clause === "passed" && ending.fixed ? { is: ending.is, fixed: true } : { is: ending.is },
 		signers: [
 			{
 				by: ruleActor(ctx.db).id,
@@ -2129,19 +2128,17 @@ function itemOf(db: Db, row: QuestionRow, facts: ReadonlySet<string>, ask: Ask):
 }
 
 /**
- * The change that fixed this failure itself, and how it stands now: a later commit of it passed and so ended the
- * answer (`endPassed`), while it was open. Not a retry of a commit that had failed, which proves no fix; not a pass
- * reported once the change had ended, which says nothing about what it ended with; not a line's scope, where no pull
- * request brought the failure. An ending recorded before endings said which commit passed claims nothing either.
+ * The change that fixed this failure itself, and how it stands now: its `passed` ending recorded a fix (`passedIn`)
+ * in a change's scope. A line's scope is no pull request that brought the failure, and an ending recorded before
+ * endings said whether they were a fix claims none.
  */
 function fixedInOf(db: Db, question: QuestionRow, ending: DecisionRow): FixedIn | null {
 	if (json<Signer[]>(ending.signers)[0]?.clause !== "passed") return null;
-	if (json<{ on?: PassedOn }>(ending.answer).on !== "later-commit") return null;
+	if (json<{ fixed?: boolean }>(ending.answer).fixed !== true) return null;
 	const scope = json<{ scope?: string }>(question.subject).scope;
 	if (!scope?.startsWith("change:")) return null;
 	const change = changeById(db, Number(scope.slice("change:".length)));
-	if (!change || (change.ended_at !== null && change.ended_at <= ending.at)) return null;
-	return { change: change.key, state: change.ended ?? "open" };
+	return change ? { change: change.key, state: change.ended ?? "open" } : null;
 }
 
 function decisionItem(db: Db, decision: DecisionRow) {
