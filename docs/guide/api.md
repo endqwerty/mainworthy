@@ -463,7 +463,7 @@ Record results: a parsed CI report, one manual result, or an agent's batch. The 
 | `results[].attachments[].name` | `string` | yes |  |
 | `results[].attachments[].data` | `string` | yes |  |
 | `results[].attachments[].at` | `string` | no |  |
-| `results[].durationMs` | `integer` | no | Milliseconds, at most 30 days (2592000000 ms), for a result or one runner try. |
+| `results[].durationMs` | `integer` | no | Milliseconds; at most 30 days. |
 | `results[].failure` | `object` | no |  |
 | `results[].failure.message` | `string` | yes |  |
 | `results[].failure.detail` | `string` | no |  |
@@ -484,7 +484,7 @@ Record results: a parsed CI report, one manual result, or an agent's batch. The 
 | `results[].corrects` | `integer` | no | The id of an earlier result of yours that this one replaces. |
 | `results[].tries` | `array<object>` | no |  |
 | `results[].tries[].outcome` | `"pass" \| "fail" \| "skip" \| "blocked" \| "error"` | yes |  |
-| `results[].tries[].durationMs` | `integer` | no | Milliseconds, at most 30 days (2592000000 ms), for a result or one runner try. |
+| `results[].tries[].durationMs` | `integer` | no | Milliseconds; at most 30 days. |
 | `results[].tries[].failure` | `object` | no |  |
 | `results[].tries[].failure.message` | `string` | yes |  |
 | `results[].tries[].failure.detail` | `string` | no |  |

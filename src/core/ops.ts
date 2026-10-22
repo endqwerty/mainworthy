@@ -172,7 +172,7 @@ const resultDuration = z
 	.int()
 	.min(0)
 	.max(30 * 86_400_000)
-	.describe("Milliseconds, at most 30 days (2592000000 ms), for a result or one runner try.");
+	.describe("Milliseconds; at most 30 days.");
 
 export const ResultIn = z.object({
 	test: z.union([

@@ -70,7 +70,9 @@ const Q = {
 	// A try on a correction makes its original lane eligible; every duplicate execution of that lane must still compete.
 	reruns: sql<{ project: number; since: number }, { test: number; reruns: number; lost: number; unknown: number }>(`
 		WITH RECURSIVE tried(result) AS (
-		  SELECT DISTINCT t.result FROM result_tries t WHERE t.project = $project
+		  SELECT r.id FROM results r
+		  WHERE r.project = $project AND r.at >= $since
+		    AND EXISTS (SELECT 1 FROM result_tries t WHERE t.result = r.id)
 		  UNION
 		  SELECT r.corrects FROM tried t JOIN results r ON r.id = t.result WHERE r.corrects IS NOT NULL
 		),
