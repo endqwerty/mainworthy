@@ -30,6 +30,13 @@ added or removed elsewhere never becomes the draft's own change. An existing
 case's folder always follows the live case. Moving it is a separate placement write.
 New-case drafts start with an empty baseline and own their creation tags as additions.
 
+For inline metadata parsing, a tag counts as already present only when both the
+confirmed row and its pending projection contain it. Typing a tag absent from
+either records the person's own addition, including when an undo is removing it.
+The editor displays the projection plus draft deltas separately; stored drafts
+continue to follow confirmed tags. Neither a pending addition nor a pending
+removal can swallow an explicitly typed tag.
+
 Stored drafts from before this shape recover their delta against their stored
 `originalTags`, before following any live server tags. A pending placement never
 becomes a draft edit, even when accepted while the editor is open. Receiving
