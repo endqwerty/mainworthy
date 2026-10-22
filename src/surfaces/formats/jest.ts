@@ -1,7 +1,7 @@
 import { posix, win32 } from "node:path";
 import { z } from "zod";
 import { clip } from "../../core/text.ts";
-import { nativeResult, type ParsedReport } from "./native.ts";
+import { nativeResult, type ParsedReport, reportIdentifier, reportWarnings } from "./native.ts";
 
 const Report = z.object({
 	rootDir: z.string().min(1).optional(),
@@ -39,7 +39,7 @@ export function parseJest(value: unknown, rootDir: string): ParsedReport {
 	if (report.wasInterrupted || report.runExecError != null)
 		throw new Error("Jest/Vitest did not finish; fix the runner before uploading");
 	const results: ParsedReport["results"] = [];
-	const warnings: string[] = [];
+	const warnings = reportWarnings();
 	for (const suite of report.testResults) {
 		const name = suite.name.replace(/\\/g, "/");
 		const path = /^[a-z]:\//i.test(name) || name.startsWith("//") ? win32 : posix;
@@ -57,7 +57,7 @@ export function parseJest(value: unknown, rootDir: string): ParsedReport {
 		for (const test of suite.assertionResults) {
 			const retries = Math.max(0, (test.invocations ?? 1) - 1);
 			if (test.invocations !== undefined && !retries && test.retryReasons?.length)
-				throw new Error(`Jest test ${test.title} has retry reasons without another invocation`);
+				throw new Error(`Jest test ${reportIdentifier(test.title)} has retry reasons without another invocation`);
 			// Jest counts invocations, but flattens multiple errors per try. Vitest keeps errors without boundaries.
 			const details = retries
 				? Array.from({ length: retries }, (_, index) =>
@@ -73,10 +73,13 @@ export function parseJest(value: unknown, rootDir: string): ParsedReport {
 						? [test.failureMessages.join("\n")]
 						: [];
 			if (retries && (!test.retryReasons?.length || (retries > 1 && test.retryReasons.length !== retries)))
-				warnings.push(`Jest test ${file}::${test.title}: individual retry diagnostics are unavailable`);
+				warnings.add(
+					() => `Jest test ${reportIdentifier(`${file}::${test.title}`)}: individual retry diagnostics are unavailable`,
+				);
 			if (details.length && !retries)
-				warnings.push(
-					`Jest/Vitest test ${file}::${test.title}: report omits retry count and boundaries; kept earlier failures as one try`,
+				warnings.add(
+					() =>
+						`Jest/Vitest test ${reportIdentifier(`${file}::${test.title}`)}: report omits retry count and boundaries; kept earlier failures as one try`,
 				);
 			const tries = details.map((value) => {
 				const detail = value.trim();
@@ -101,5 +104,5 @@ export function parseJest(value: unknown, rootDir: string): ParsedReport {
 			);
 		}
 	}
-	return { results, warnings };
+	return { results, warnings: warnings.finish() };
 }

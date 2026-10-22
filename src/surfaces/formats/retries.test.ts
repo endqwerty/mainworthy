@@ -141,3 +141,76 @@ test("a retry whose diagnostic was lost makes no cause claim in the adapter outp
 	expect(jest.results[0]?.tries).toEqual([{ outcome: "fail" }, { outcome: "fail" }]);
 	expect(pytest.results[0]?.tries).toEqual([{ outcome: "fail" }]);
 });
+
+const warningReport = (format: "jest" | "vitest" | "pytest", names: string[], file = "tests/sample.js") =>
+	format === "pytest"
+		? {
+				exitcode: 0,
+				tests: names.map((name) => ({
+					nodeid: `test.py::${name}`,
+					outcome: "rerun",
+					call: { outcome: "passed", duration: 0 },
+				})),
+			}
+		: {
+				testResults: [0, 1].map((part) => ({
+					name: file,
+					status: "passed",
+					assertionResults: names
+						.filter((_, index) => index % 2 === part)
+						.map((title) => ({
+							title,
+							ancestorTitles: [],
+							status: "passed",
+							...(format === "jest"
+								? { invocations: 2, retryReasons: [] }
+								: { failureMessages: ["failed before recovery"] }),
+						})),
+				})),
+			};
+
+const unsafeIdentifier = "\n::error::report title\u001b]0;report title\u0007\u001b[31m\u0085\u009b\u2028\u2029";
+// biome-ignore lint/suspicious/noControlCharactersInRegex: diagnostics must not carry terminal control characters.
+const controls = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+
+test.each(["jest", "vitest", "pytest"] as const)(
+	"%s retry warnings escape report-controlled terminal and CI controls",
+	(format) => {
+		const { warnings } = parseReport(
+			JSON.stringify(warningReport(format, [unsafeIdentifier], `tests/${unsafeIdentifier}.js`)),
+			options,
+		);
+		expect(warnings).toHaveLength(1);
+		expect(warnings[0]).not.toMatch(controls);
+		expect(warnings[0]).toContain("\\n::error::report title");
+		expect(warnings[0]).toContain("\\u001b");
+		expect(warnings[0]).toContain("\\u0085");
+		expect(warnings[0]).toContain("\\u009b");
+	},
+);
+
+test.each(["jest", "vitest", "pytest"] as const)(
+	"%s retry warnings cap the whole report, clip identifiers and count omitted warnings once",
+	(format) => {
+		const names = Array.from({ length: 1007 }, (_, index) => `${index}-${"long name ".repeat(300)}`);
+		const { results, warnings } = parseReport(JSON.stringify(warningReport(format, names)), options);
+		expect(results).toHaveLength(1007);
+		expect(warnings).toHaveLength(1001);
+		expect(warnings.at(-1)).toBe("7 additional warnings omitted");
+		expect(warnings.every((warning) => warning.length <= 1000)).toBe(true);
+		expect(warnings.filter((warning) => warning.includes("warnings omitted"))).toHaveLength(1);
+	},
+);
+
+test("the invalid Jest retry error escapes its report-controlled identifier", () => {
+	let message = "";
+	try {
+		parseReport(assertion({ title: unsafeIdentifier, invocations: 1, retryReasons: ["reason"] }), options);
+	} catch (error) {
+		if (!(error instanceof Error)) throw error;
+		message = error.message;
+	}
+	expect(message).toContain("without another invocation");
+	expect(message).not.toMatch(controls);
+	expect(message).toContain("\\n::error::report title");
+});

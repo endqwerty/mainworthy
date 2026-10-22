@@ -2452,11 +2452,11 @@ test("real report outputs use git top level or cwd for stable Jest and Vitest ke
 				const warnings =
 					format === "jest"
 						? [
-								"Jest test tests/sample.test.js::fails: individual retry diagnostics are unavailable",
-								"Jest test tests/sample.test.js::retry: individual retry diagnostics are unavailable",
+								'Jest test "tests/sample.test.js::fails": individual retry diagnostics are unavailable',
+								'Jest test "tests/sample.test.js::retry": individual retry diagnostics are unavailable',
 							]
 						: [
-								"Jest/Vitest test tests/sample.test.js::retry: report omits retry count and boundaries; kept earlier failures as one try",
+								'Jest/Vitest test "tests/sample.test.js::retry": report omits retry count and boundaries; kept earlier failures as one try',
 							];
 				expect(result.stderr).toBe(`${warnings.join("\n")}\n`);
 				expect(result.code).toBe(0);
