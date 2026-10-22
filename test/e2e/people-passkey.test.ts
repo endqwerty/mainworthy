@@ -8,7 +8,15 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Page } from "playwright-core";
 import { z } from "zod";
 import { type Provider, provider, stopProviders } from "../oidc-support.ts";
-import { addAuthenticator, browserAvailable, openPage, type PageHarness, type Server, startServer } from "./support.ts";
+import {
+	addAuthenticator,
+	browserAvailable,
+	eventually,
+	openPage,
+	type PageHarness,
+	type Server,
+	startServer,
+} from "./support.ts";
 
 // What the browser of this test calls itself, as `browserName` reads it: the system is the one the test runs on.
 // "Chrome on Linux" alone failed on macOS (issue #103).
@@ -42,10 +50,19 @@ test.skipIf(!browserAvailable)(
 			const { page } = browser;
 			const laptop = await addAuthenticator(browser);
 			await page.getByRole("heading", { name: "You are invited as sam" }).waitFor();
+			// The heading is there before the page knows who is signed in to this browser; until it does, the form is
+			// disabled and the keys go nowhere. Then typing starts in the password field (issue #709).
+			const focused = () => page.evaluate(() => document.activeElement?.id ?? "");
+			await eventually(focused, (id) => id === "invite-password");
 
 			// By keys: past the two password fields, which stay empty, to the passkey and its name.
 			await page.keyboard.press("Tab");
 			await page.keyboard.press("Tab");
+			expect(
+				await page
+					.getByRole("checkbox", { name: "Make a passkey on this device" })
+					.evaluate((box) => box === document.activeElement),
+			).toBe(true);
 			await page.keyboard.press("Space");
 			expect(await page.getByRole("checkbox", { name: "Make a passkey on this device" }).isChecked()).toBe(true);
 			await page.keyboard.press("Tab");
@@ -149,8 +166,12 @@ test.skipIf(!browserAvailable)(
 			expect([
 				await page.locator("#password-next").inputValue(),
 				await page.locator("#password-again").inputValue(),
-				await page.evaluate(() => document.activeElement?.textContent),
-			]).toEqual(["", "", "Change password"]);
+			]).toEqual(["", ""]);
+			// The button reads "Saving…" until the page has read the session again, which a slow reply can hold back.
+			await eventually(
+				() => page.evaluate(() => document.activeElement?.textContent),
+				(text) => text === "Change password",
+			);
 			await rows.filter({ hasText: "Password" }).waitFor();
 			expect(await credentials()).toMatchObject([{ kind: "passkey" }, { kind: "password" }]);
 			// From now on it is changed, with the current one asked for.
