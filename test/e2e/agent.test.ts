@@ -169,6 +169,20 @@ for (const surface of ["case", "queue"] as const)
 					const row = evidence.locator(".dl").filter({ hasText: "x".repeat(100) });
 					expect(await row.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
 					expect(await evidence.getAttribute("data-proposal-read")).toBe("loaded");
+					// Scripted presses can scroll through every page in one task, but none of those positions has painted.
+					const betweenFrames = await page.getByRole("button", { name: "Reject" }).evaluate((button, q) => {
+						if (!(button instanceof HTMLButtonElement)) throw new Error("Missing proposal answer button");
+						const evidence = document.querySelector<HTMLElement>(`[data-proposal-evidence="${CSS.escape(q)}"]`);
+						if (!evidence) throw new Error("Missing proposal evidence");
+						const positions: { element: HTMLElement; top: number }[] = [];
+						for (let element: HTMLElement | null = evidence; element; element = element.parentElement)
+							positions.push({ element, top: element.scrollTop });
+						for (let press = 0; press < 40; press++) button.click();
+						for (const { element, top } of positions) element.scrollTop = top;
+						return evidence.dataset.proposalRead;
+					}, proposed.question);
+					expect(betweenFrames).toBe("loaded");
+					expect((await server.api("get", { refs: [proposed.question] }))[0]?.state).toBe("open");
 					// Jumping to the end must leave the unshown middle unread.
 					const scroller = surface === "case" ? evidence : page.locator(".queue-evidence");
 					await scroller.evaluate((element) => {
