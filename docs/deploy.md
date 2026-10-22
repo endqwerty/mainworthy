@@ -282,8 +282,8 @@ in that time got Cloudflare's 502.
 So the tunnel does not point at the stack. It points at a proxy on the host that no deploy touches, and that
 proxy passes each request to the ingress on `127.0.0.1:7359`. While nothing listens there, a refused
 connection is tried again after a second, up to 90 times, so the request waits for the new stack instead of
-failing. Nothing was sent, so this is safe for any method. Cloudflare gives up on an origin after 100 seconds,
-so a longer hold would answer nobody; a deploy longer than 90 s still ends in a 503. The owner's instance
+failing. Nothing was sent, so this is safe for any method. Cloudflare waits 125 seconds for an origin's reply
+(its documented Proxy Read Timeout), so the hold stays under that; a deploy longer than 90 s still ends in a 503. The owner's instance
 runs HAProxy for it:
 
 ```
@@ -312,8 +312,10 @@ backend stack
   without a reply whenever its container runs but nginx does not listen: for a few milliseconds when the new
   ingress starts, and from the moment the old one gets SIGQUIT until its container exits. `empty-response`
   sends such a request again at once, without the one-second pause, and only a GET or a HEAD: an empty
-  reply can also follow a write the app has committed, and sending that again would make it twice. A write
-  that meets one gets 502.
+  reply can also follow a write the app has committed, and sending that again would make it twice. All 90
+  tries of an immediate retry are spent in about 10 ms, so it carries a read across the start window and
+  not across the stop window. A write that meets either, and a read that meets the stop window, gets 502
+  (issue #743).
 - `worker_shutdown_timeout 500ms` in the ingress keeps the second window short. nginx stops listening on
   SIGQUIT and then waits for the responses it has open, and a change stream stays open until somebody
   closes it. On the owner's host, with one slow response open, the old ingress took 31.2 s to stop and

@@ -14,13 +14,13 @@ removed with it.
 
 So the hold lives on the host, where no deploy touches it. The tunnel's origin, `127.0.0.1:7358`, is now
 that proxy, and the stack's ingress moved to `127.0.0.1:7359`. A refused connection is tried again each
-second, for up to 90 s, which is under Cloudflare's 100-second limit. The ingress still starts only once the
+second, for up to 90 s, which is under the 125 s Cloudflare waits for an origin's reply. The ingress still starts only once the
 app is healthy, so a waiting request meets a refused port, which is tried again, and not an nginx 502, which
 is not. The host proxy adds no client or scheme header, and the ingress keeps owning both.
 
 Two short windows remain where Docker's port proxy accepts a connection and closes it with no reply: while
-the new ingress starts, and while the old one drains after SIGQUIT. A read is sent again at once. A write is
-not, because an empty reply can also follow a write the app committed, and a duplicate write is worse than a
+the new ingress starts, and while the old one drains after SIGQUIT. A read is sent again at once, which carries it across the start window only: HAProxy spends all its
+tries on an immediate retry in about 10 ms. A write is not sent again, because an empty reply can also follow a write the app committed, and a duplicate write is worse than a
 502. The ingress closes what it still has open half a second after SIGQUIT, so an open change stream no
 longer keeps that window open for Coolify's 30-second stop. The window can only close entirely if the host
 proxy reaches nginx without Docker's port proxy in between, for example over a Unix socket on a host
