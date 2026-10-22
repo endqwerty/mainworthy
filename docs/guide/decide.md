@@ -321,6 +321,11 @@ The question stays in "Settled". It shows your answer and records its end, signe
 the reason "Every test it named passed on `<commit>` where it had failed; the answer ended."
 See [export and verify an audit](./data.md#export-and-verify-an-audit). If the cause fails again later, it is a new question.
 The command `mainworthy get Q-1` also returns the ending and the original answer under `decision.supersedes`.
+
+When the scope is a pull request or branch, the change fixed the failure itself, and the ending says so in place of
+the rule: "Fixed by a later commit of pr:482", or "Fixed in pr:482 before it merged" once it has merged.
+`decision.fixedIn` carries the change's key and whether it is `open`, `merged` or `closed`. Such a failure needs no
+issue of its own: the pull request that fixed it is the record, and it names the issue it was for.
 An ended answer cannot be withdrawn. A timed expiry or tracker closure shows its own recorded rule and reason,
 without claiming that the cause passed.
 When you select an ended answer, the footer and command palette leave out "Undo answer".

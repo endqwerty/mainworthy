@@ -181,6 +181,7 @@ describe("what the iOS app reads", () => {
 					decision: {
 						rule: "passed",
 						reason: "Every test it named passed on native408b where it had failed; the answer ended.",
+						fixedIn: { change: "pr:408", state: "open" },
 						supersedes: { answer: { is: "test" }, by: ["robin"], reason: "The assertion needs a fix." },
 					},
 				},

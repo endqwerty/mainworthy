@@ -189,6 +189,26 @@ export const ANSWER_KEYS = {
 	signoff: { a: "approve", r: "reject" },
 } as const satisfies Record<Kind, Record<string, string>>;
 
+/**
+ * For an answer that ended because a later commit of its pull request or branch passed (decision 0102): that change,
+ * and how it stands now. The change brought the failure and fixed it itself, so no issue need track it.
+ */
+export const FixedIn = z.object({ change: z.string(), state: z.enum(["open", "merged", "closed"]) });
+export type FixedIn = z.infer<typeof FixedIn>;
+
+/** What a screen says about a `FixedIn`. */
+export function fixedInText({ change, state }: FixedIn): string {
+	if (state === "merged") return `Fixed in ${change} before it merged`;
+	if (state === "closed") return `Fixed by a later commit of ${change}, which closed without merging`;
+	return `Fixed by a later commit of ${change}`;
+}
+
+/** What a change's page says about the failures it fixed itself: `count` of them, the change standing at `state`. */
+export function fixedOnChangeText(count: number, state: FixedIn["state"]): string {
+	const failures = count === 1 ? "1 failure that needed a fix was" : `${count} failures that needed a fix were`;
+	return state === "merged" ? `${failures} fixed before it merged.` : `${failures} fixed by a later commit.`;
+}
+
 export const ANSWER_LABELS: Record<string, string> = {
 	accept: "Accept",
 	reject: "Reject",

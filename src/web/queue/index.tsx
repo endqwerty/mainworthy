@@ -2,7 +2,16 @@ import { type InfiniteData, useInfiniteQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import type { Api } from "../../core/api.ts";
-import { ANSWER_HELP, ANSWER_KEYS, ANSWER_LABELS, ANSWERS, KIND_WORDS, KINDS, type Kind } from "../../core/kinds.ts";
+import {
+	ANSWER_HELP,
+	ANSWER_KEYS,
+	ANSWER_LABELS,
+	ANSWERS,
+	fixedInText,
+	KIND_WORDS,
+	KINDS,
+	type Kind,
+} from "../../core/kinds.ts";
 import { DECIDE_MAX, type InboxReply, QuestionItem } from "../../core/ops.ts";
 import { stakes, waitingPhrase } from "../../core/stakes.ts";
 import { call } from "../lib/api.ts";
@@ -1069,9 +1078,10 @@ function QueueWorkbench() {
 									{current.decision.supersedes && (
 										<>
 											<p className="dim">
-												Ended by{" "}
-												{current.decision.rule ? `rule ${current.decision.rule}` : current.decision.by.join(", ")} ·{" "}
-												{age(current.decision.at)}
+												{current.decision.fixedIn
+													? fixedInText(current.decision.fixedIn)
+													: `Ended by ${current.decision.rule ? `rule ${current.decision.rule}` : current.decision.by.join(", ")}`}{" "}
+												· {age(current.decision.at)}
 											</p>
 											{current.decision.reason && <p>{current.decision.reason}</p>}
 										</>

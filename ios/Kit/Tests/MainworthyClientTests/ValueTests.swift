@@ -16,6 +16,16 @@ struct ValueTests {
 		#expect(decision.ending?.by == ["policy"] && decision.ending?.rule == "passed")
 		#expect(decision.ending?.reason == "Every test it named passed on fixed408 where it had failed; the answer ended.")
 		#expect(decision.ending?.at == Date(timeIntervalSince1970: 2))
+		#expect(decision.ending?.fixed == nil)
+		let fixed = json.replacingOccurrences(of: #""at":2000,"#, with: #""at":2000,"fixedIn":{"change":"pr:408","state":"merged"},"#)
+		let ended = Decision(try JSONDecoder().decode(Wire.Decision.self, from: Data(fixed.utf8)))
+		#expect(ended.ending?.fixed == "Fixed in pr:408 before it merged")
+	}
+
+	@Test("an answer a later commit ended names its change as the server does")
+	func fixedInParity() {
+		#expect(Parity.fixedIn.count == 3)
+		for row in Parity.fixedIn { #expect(DecisionEnding.fixedText(change: "pr:482", state: row.state) == row.says) }
 	}
 
 	@Test("an address as a person types it", arguments: [

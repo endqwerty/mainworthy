@@ -107,9 +107,18 @@ const PriorDecision = struct(
 	"The answer an ending supersedes, with its original attribution.",
 	decisionFields,
 );
+const FixedIn = struct(
+	"FixedIn",
+	"The change whose later commit passed and so ended the answer: it brought the failure and fixed it itself.",
+	{
+		change: [text, "Its key, for example pr:482."],
+		state: [text, "open, merged or closed, as the change stands now."],
+	},
+);
 const Decision = struct("Decision", "A question's decision, or the ending of its answer.", {
 	...decisionFields,
 	supersedes: maybe(PriorDecision),
+	fixedIn: maybe(FixedIn),
 });
 
 const Advice = struct("Advice", "An answer that was recorded as advice: somebody else decides.", {

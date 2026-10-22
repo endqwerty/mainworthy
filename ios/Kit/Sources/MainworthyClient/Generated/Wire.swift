@@ -121,6 +121,14 @@ enum Wire {
 		let at: Double
 	}
 
+	/// The change whose later commit passed and so ended the answer: it brought the failure and fixed it itself.
+	struct FixedIn: Decodable, Equatable, Sendable {
+		/// Its key, for example pr:482.
+		let change: String
+		/// open, merged or closed, as the change stands now.
+		let state: String
+	}
+
 	/// A question's decision, or the ending of its answer.
 	struct Decision: Decodable, Equatable, Sendable {
 		let id: Int
@@ -132,6 +140,7 @@ enum Wire {
 		let reason: String?
 		let at: Double
 		let supersedes: PriorDecision?
+		let fixedIn: FixedIn?
 	}
 
 	/// One question of the queue, open, decided or dissolved.

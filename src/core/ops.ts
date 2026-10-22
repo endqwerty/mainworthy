@@ -12,6 +12,7 @@ import {
 	Clause,
 	FailureAnswer,
 	FindingAnswer,
+	FixedIn,
 	Kind,
 	MapAnswer,
 	PolicySettings,
@@ -698,6 +699,7 @@ export const QuestionItem = z.object({
 		DecisionItem.extend({
 			/** For an ending: the answer it ended, with its original attribution. */
 			supersedes: DecisionItem.optional(),
+			fixedIn: FixedIn.optional(),
 			effects: z
 				.record(z.string(), z.unknown())
 				.describe("The recorded effects of this decision, including adopted case refs and versions."),
