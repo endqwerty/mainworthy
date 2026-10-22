@@ -186,7 +186,7 @@ For a CLI command inside this container, use `docker exec <container> mainworthy
 The `ingress` service has one fixed upstream, `mainworthy:7357`. Its pinned Nginx image runs as
 101:101 with a read-only filesystem, no capabilities, no-new-privileges, a temporary `/tmp`,
 64 MiB memory and 64 PIDs. It holds no application volume, token or other secret. It publishes
-only `127.0.0.1:7359`, forces `X-Forwarded-Proto: https`, and replaces `X-Mainworthy-Client`
+only `127.0.0.1:758`, forces `X-Forwarded-Proto: https`, and replaces `X-Mainworthy-Client`
 with `CF-Connecting-IP`. If the latter is missing, it removes the client header. CONNECT and
 absolute-form request targets are refused. DNS refresh handles replacement app containers;
 only the fixed service name is resolved, over IPv4 because that is the app's listening address.
@@ -200,7 +200,7 @@ Every peer in that range is trusted; do not share it with untrusted workloads. T
 is a separate trusted internal path, not a public Cloudflare origin.
 
 The public-origin contract requires a host Cloudflare Tunnel pointing to a request-holding
-proxy on the host, which passes requests to `http://127.0.0.1:7359` ("A deploy that holds
+proxy on the host, which passes requests to `http://127.0.0.1:758` ("A deploy that holds
 requests" below), and removal of the previous Coolify/Traefik domain after cutover.
 A normal public request's malicious CF-Connecting-IP is replaced by Cloudflare before it
 enters the tunnel. The proxy trusts that value; it cannot authenticate Cloudflare by inspecting
@@ -247,7 +247,7 @@ dashboard. This page writes the tailnet's name as `example.ts.net` and the node'
    volume. Bind it to a path you back up if you have one.
 5. **Network:** the `tailscale` service in `compose.coolify.yaml` is its own tailnet node, `mainworthy`, and serves
    the app at `https://mainworthy.example.ts.net` (Tailscale issues the certificate; the first request can take
-   a few seconds). Nothing is published on the LAN; ingress port 7359 is bound to `127.0.0.1` for the hold
+   a few seconds). Nothing is published on the LAN; ingress port 758 is bound to `127.0.0.1` for the hold
    in front of the host's tunnel. Anything on the tailnet can reach the name, and every request still needs a token. The node's identity
    lives in the `tailscale-state` volume: deleting it registers a new node.
    Once the node is up, disable its key expiry in the Tailscale admin console (Machines → the node), and delete
@@ -280,7 +280,7 @@ ingress started 1.4 s after that. Another deploy that day took about 48 s. A req
 in that time got Cloudflare's 502.
 
 So the tunnel does not point at the stack. It points at a proxy on the host that no deploy touches, and that
-proxy passes each request to the ingress on `127.0.0.1:7359`. While nothing listens there, a refused
+proxy passes each request to the ingress on `127.0.0.1:758`. While nothing listens there, a refused
 connection is tried again after a second, up to 90 times, so the request waits for the new stack instead of
 failing. Nothing was sent, so this is safe for any method. Cloudflare waits 125 seconds for an origin's reply
 (its documented Proxy Read Timeout), so the hold stays under that; a deploy longer than 90 s still ends in a 503. The owner's instance
@@ -302,17 +302,23 @@ frontend public
     default_backend stack
 
 backend stack
-    http-request disable-l7-retry unless { method GET HEAD }
-    server ingress 127.0.0.1:7359
+    http-request disable-l7-retry unless { method GET HEAD } !{ path_beg /api/login/ }
+    server ingress 127.0.0.1:758
 ```
 
+- The ingress publishes a port below 1024. While a deploy leaves it free, a process on the host could
+  otherwise listen there and receive the requests the hold sends, cookies and tokens included; only root may
+  take a port below 1024 (`net.ipv4.ip_unprivileged_port_start`, 1024 by default). The hold's own port, 7358,
+  is never free: HAProxy keeps it across deploys.
 - `retries 90` with `timeout connect 1s` is the hold: HAProxy waits the shorter of the two, one second,
   before it tries a refused connection again.
-- Not every moment of a deploy refuses. Docker's port proxy accepts a connection on 7359 and closes it
+- Not every moment of a deploy refuses. Docker's port proxy accepts a connection on 758 and closes it
   without a reply whenever its container runs but nginx does not listen: for a few milliseconds when the new
   ingress starts, and from the moment the old one gets SIGQUIT until its container exits. `empty-response`
-  sends such a request again at once, without the one-second pause, and only a GET or a HEAD: an empty
-  reply can also follow a write the app has committed, and sending that again would make it twice. All 90
+  sends such a request again at once, without the one-second pause, and only a GET or a HEAD outside
+  `/api/login/`: an empty reply can also follow a write the app has committed, and sending that again would
+  make it twice. Every operation is a POST; the one GET that changes something is the native app's OIDC
+  callback, `/api/login/oidc/native/callback`, which uses up its sign-in ceremony. All 90
   tries of an immediate retry are spent in about 10 ms, so it carries a read across the start window and
   not across the stop window. A write that meets either, and a read that meets the stop window, gets 502
   (issue #743).
@@ -327,7 +333,7 @@ backend stack
 - No `option forwardfor`: the proxy adds no `X-Forwarded-For` and leaves `Host` and `CF-Connecting-IP` as
   they are; it only sends `Connection: close` towards the ingress. The ingress still sets the scheme and the
   client address from `CF-Connecting-IP`, and the app still trusts only the ingress.
-- The ingress keeps `condition: service_healthy`: until the app is healthy nothing listens on 7359 and
+- The ingress keeps `condition: service_healthy`: until the app is healthy nothing listens on 758 and
   requests wait. An ingress that started first would answer 502 itself, and that is not tried again.
 
 A change stream that is open during the deploy ends when the old stack stops; the browser opens it again
