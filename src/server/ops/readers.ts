@@ -71,17 +71,27 @@ export class Readers implements ReadPool {
 		if (!options.spawn) this.checkpoints();
 	}
 
-	private checkpoints(): void {
+	private checkpoints(failures = 0): void {
+		if (this.stopped) return;
 		try {
 			const worker = new Worker(workerUrl("checkpoint"), {
 				workerData: { dataDir: this.options.dataDir },
 				name: "mainworthy-checkpoint",
 			});
-			// If it stops, the writer's own checkpoint target takes over: slower commits, nothing lost.
+			worker.on("message", (message: unknown) => {
+				if (message === "ready") failures = 0;
+			});
 			worker.on("error", (error) => console.error("[mainworthy] the checkpoint thread failed:", error));
+			worker.on("exit", (code) => {
+				if (this.stopped) return;
+				this.checkpointer = null;
+				console.error(`[mainworthy] the checkpoint thread exited with code ${code}; restarting`);
+				this.replace(failures, (next) => this.checkpoints(next));
+			});
 			this.checkpointer = worker;
 		} catch (error) {
 			console.error("[mainworthy] the checkpoint thread did not start:", error);
+			this.replace(failures, (next) => this.checkpoints(next));
 		}
 	}
 
@@ -181,7 +191,7 @@ export class Readers implements ReadPool {
 			worker.on("exit", (code) => this.failed(slot, new Error(`reader exited with code ${code}`)));
 		} catch (error) {
 			console.error("[mainworthy] reader failed; reads will run inline:", error);
-			this.replace(failures);
+			this.replace(failures, (next) => this.spawn(next));
 		}
 	}
 
@@ -192,7 +202,7 @@ export class Readers implements ReadPool {
 		console.error("[mainworthy] reader failed; replaying its reads inline:", error);
 		this.replay(slot);
 		this.retire(slot.worker);
-		this.replace(slot.failures);
+		this.replace(slot.failures, (next) => this.spawn(next));
 	}
 
 	private replay(slot: Slot): void {
@@ -215,13 +225,13 @@ export class Readers implements ReadPool {
 		void exit.finally(() => this.retiring.delete(exit));
 	}
 
-	private replace(failures: number): void {
+	private replace(failures: number, spawn: (failures: number) => void): void {
 		if (this.stopped) return;
 		const schedule = this.options.schedule ?? ((callback: () => void, delay: number) => setTimeout(callback, delay));
 		const timer = schedule(
 			() => {
 				this.replacements.delete(timer);
-				this.spawn(failures + 1);
+				spawn(failures + 1);
 			},
 			Math.min(30_000, 100 * 2 ** Math.min(failures, 9)),
 		);

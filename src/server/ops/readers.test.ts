@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { copyFileSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
@@ -176,6 +176,93 @@ describe("reader threads", () => {
 			await instance.stop();
 		}
 	}, 10_000);
+
+	test("checkpointing resumes after its connection fails to open under a lock (#690)", async () => {
+		const settings = config();
+		const path = join(settings.dataDir, "mainworthy.db");
+		new Db(path).close();
+		const holder = Bun.spawn(
+			[
+				process.execPath,
+				"-e",
+				`const { Database } = require("bun:sqlite");
+				const db = new Database(${JSON.stringify(path)});
+				db.exec("PRAGMA locking_mode = EXCLUSIVE; BEGIN EXCLUSIVE; CREATE TABLE held (x); COMMIT; BEGIN EXCLUSIVE");
+				console.log("held");
+				for await (const chunk of Bun.stdin.stream()) break;
+				db.exec("COMMIT"); db.close();`,
+			],
+			{ stdin: "pipe", stdout: "pipe", stderr: "pipe" },
+		);
+		const log = spyOn(console, "error").mockImplementation(() => {});
+		let pool: Readers | undefined;
+		try {
+			const held = await holder.stdout.getReader().read();
+			expect(new TextDecoder().decode(held.value)).toBe("held\n");
+			pool = new Readers({ dataDir: settings.dataDir, count: 0 });
+			const failureDeadline = Date.now() + 10_000;
+			while (!log.mock.calls.some(([message]) => String(message).includes("checkpoint thread failed"))) {
+				if (Date.now() >= failureDeadline) throw new Error("the locked checkpoint worker did not fail to open");
+				await Bun.sleep(25);
+			}
+			holder.stdin.write("release\n");
+			holder.stdin.end();
+			expect(await holder.exited).toBe(0);
+			const writer = new Db(path);
+			try {
+				writer.exec("PRAGMA wal_autocheckpoint = 0");
+				writer.exec(
+					"CREATE TABLE recovered_checkpoint (value TEXT); INSERT INTO recovered_checkpoint VALUES ('recovered row')",
+				);
+				const marker = Buffer.from("recovered row");
+				expect(readFileSync(`${path}-wal`).includes(marker)).toBe(true);
+				const deadline = Date.now() + 5000;
+				while (!readFileSync(path).includes(marker) && Date.now() < deadline) await Bun.sleep(25);
+				expect(readFileSync(path).includes(marker)).toBe(true);
+				const snapshot = join(config().dataDir, "snapshot.db");
+				copyFileSync(path, snapshot);
+				const copy = new Db(snapshot, { reader: true });
+				try {
+					expect(copy.raw.query("SELECT value FROM recovered_checkpoint").get()).toEqual({ value: "recovered row" });
+				} finally {
+					copy.close();
+				}
+			} finally {
+				writer.close();
+			}
+		} finally {
+			await pool?.stop();
+			holder.kill();
+			await holder.exited;
+			log.mockRestore();
+		}
+	}, 20_000);
+
+	test("persistent checkpoint startup failures back off and stop cancels replacement", async () => {
+		const settings = config();
+		mkdirSync(join(settings.dataDir, "mainworthy.db"));
+		const delays: number[] = [];
+		const log = spyOn(console, "error").mockImplementation(() => {});
+		const pool = new Readers({
+			dataDir: settings.dataDir,
+			count: 0,
+			schedule(callback, delay) {
+				delays.push(delay);
+				return setTimeout(callback, delays.length < 12 ? 0 : 100);
+			},
+		});
+		try {
+			const deadline = Date.now() + 10_000;
+			while (delays.length < 12 && Date.now() < deadline) await Bun.sleep(5);
+			await pool.stop();
+			expect(delays).toEqual([100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600, 30000, 30000, 30000]);
+			await Bun.sleep(150);
+			expect(delays).toHaveLength(12);
+		} finally {
+			await pool.stop();
+			log.mockRestore();
+		}
+	}, 15_000);
 
 	test("overlapping snapshots may grow the WAL, then checkpoint and reuse trim it to four MiB", () => {
 		const path = join(config().dataDir, "wal-test.db");
