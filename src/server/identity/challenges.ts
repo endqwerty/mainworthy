@@ -80,6 +80,31 @@ export function issueChallenge(app: App, ceremony: Ceremony, party: RelyingParty
 	return challenge;
 }
 
+/** A valid invitation reuses its challenge; near expiry a successor leaves any ongoing prompt valid. */
+export function invitationChallenge(
+	app: App,
+	invitation: { codeHash: string; userHandle: string },
+	party: RelyingParty,
+): { challenge: Challenge; timeout: number } {
+	const context = CONTEXT.invitation(invitation.codeHash);
+	const now = app.now();
+	for (const entry of of(app).values()) {
+		if (
+			entry.ceremony.purpose === "register" &&
+			entry.ceremony.context === context &&
+			entry.ceremony.userHandle === invitation.userHandle &&
+			entry.expected.origin === party.origin &&
+			entry.expected.rpId === party.id &&
+			entry.deadline - now > 60_000
+		)
+			return { challenge: entry.expected.challenge, timeout: entry.deadline - now };
+	}
+	return {
+		challenge: issueChallenge(app, { purpose: "register", userHandle: invitation.userHandle, context }, party),
+		timeout: CEREMONY_MS,
+	};
+}
+
 /**
  * What the verifier must hold an answer to, when `challenge` is one this server issued for this purpose and
  * its time has not run out; else null. `challenge` is what the answer says it answers (`challengeOf` in

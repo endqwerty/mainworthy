@@ -15,8 +15,8 @@ import { bytesToHex } from "@noble/hashes/utils.js";
 import type { App, Config } from "../kernel/app.ts";
 import { type Db, sql } from "../kernel/db.ts";
 import { conflict, forbidden, invalid, notFound, OpError } from "../kernel/errors.ts";
-import { limiterOf } from "./attempts.ts";
-import { CONTEXT, findChallenge, issueChallenge, spendChallenge } from "./challenges.ts";
+import { limiterOf, startLimiterOf } from "./attempts.ts";
+import { CONTEXT, findChallenge, invitationChallenge, issueChallenge, spendChallenge } from "./challenges.ts";
 import { clearMailLinksOf, credentialNotice } from "./contacts.ts";
 import {
 	type CredentialRow,
@@ -92,6 +92,7 @@ import {
 	AssertionResponse,
 	assertionOptions,
 	CEREMONY_MS,
+	type Challenge,
 	challengeOf,
 	type Passkey,
 	type Refusal,
@@ -247,18 +248,12 @@ const waiting = (answer: Extract<LimiterAnswer, { kind: "blocked" }>): Limited =
 });
 
 /**
- * Counts a sign-in start before it allocates a passkey challenge or provider ceremony. Starts share the
- * address's failed-attempt count: a valid begin is no proof of identity and must not clear or bypass it.
- * Check and consume synchronously so concurrent begins cannot all reserve the same free attempt.
+ * Reserves an anonymous challenge or provider ceremony in the address's fixed-window allocation quota.
+ * This is synchronous and independent of failed proofs: ordinary starts never penalise password sign-in.
  */
 export function countSignInStart(app: App, address: string | null): Limited | null {
-	const limiter = limiterOf(app);
-	const keys = counted(addressKey(address));
-	const now = app.now();
-	const answer = limiter.check(keys, now);
-	if (answer.kind === "blocked") return waiting(answer);
-	limiter.failed(keys, now);
-	return null;
+	const answer = startLimiterOf(app)(addressKey(address), app.now());
+	return answer.kind === "blocked" ? waiting(answer) : null;
 }
 
 /**
@@ -617,25 +612,21 @@ export async function signInWithPasskey(
 }
 
 /**
- * The options for a new passkey of one person, with a new challenge that only an answer for that person, from
- * where the ceremony began (`context`), spends.
+ * The options for a new passkey of one person, using the challenge its caller issued for that ceremony.
  */
-function registrationFor(
-	app: App,
-	input: {
-		party: RelyingParty;
-		person: Person;
-		userHandle: string;
-		context: string;
-		exclude: readonly CredentialRow[];
-	},
-): RegistrationOptions {
-	const { party, person, userHandle, context, exclude } = input;
+function registrationFor(input: {
+	party: RelyingParty;
+	person: Person;
+	userHandle: string;
+	challenge: Challenge;
+	exclude: readonly CredentialRow[];
+}): RegistrationOptions {
+	const { party, person, userHandle, challenge, exclude } = input;
 	return registrationOptions({
 		rpId: party.id,
 		rpName: RP_NAME,
 		user: { handle: userHandle, name: person.name, displayName: person.name },
-		challenge: issueChallenge(app, { purpose: "register", userHandle, context }, party),
+		challenge,
 		exclude: exclude.flatMap((row) => storedPasskey(row) ?? []),
 	});
 }
@@ -680,11 +671,11 @@ export function beginPasskey(app: App, input: { actor: number; context: string }
 	const party = mustHavePasskeys(app);
 	const person = mustBePerson(app.db, input.actor);
 	const userHandle = ensureUserHandle(app.db, person.id, app.now());
-	return registrationFor(app, {
+	return registrationFor({
 		party,
 		person,
 		userHandle,
-		context: input.context,
+		challenge: issueChallenge(app, { purpose: "register", userHandle, context: input.context }, party),
 		exclude: liveCredentials(app.db, person.id),
 	});
 }
@@ -823,17 +814,18 @@ function openInvitation(app: App, db: Db, hash: string): { invitation: Invitatio
  * What the page of an invitation shows: who it is for, what accepting does and when it runs out, and the
  * options for registering a passkey with it (null on an instance with no public address). Null for a code
  * that accepts nothing, whatever the reason. It writes no row, so a link that a mail or chat preview opens,
- * or a page that is reloaded, changes nothing that is stored; each asking gets a challenge of its own, which
- * is an entry in the bounded map in memory and can push out the oldest one there.
+ * or a page that is reloaded, changes nothing that is stored. A working invitation reuses its registration
+ * challenge so one code cannot fill the map. Near expiry a successor leaves the old prompt valid until its end.
  *
  * The options exclude no passkey: whoever holds a recovery code is not told which authenticators the person
  * had, and accepting revokes those anyway.
  *
- * The caller counts this start with `countSignInStart` before looking at the code, whether right or wrong.
+ * A right code is proof of the invitation, so its page stays reachable during either address block.
  */
 export function showInvitation(
 	app: App,
 	code: string,
+	address: string | null,
 ):
 	| {
 			ok: true;
@@ -842,13 +834,17 @@ export function showInvitation(
 				passkey: RegistrationOptions | null;
 			};
 	  }
-	| Refused {
+	| Refused
+	| Limited {
+	const attempt = byAddress(app, address);
 	const hash = hashOf(code);
 	const found = openInvitation(app, app.reader, hash);
-	if (!found) return no("invitation");
+	if (!found) return attempt.wrong(no("invitation"));
 	const { invitation, person } = found;
 	const party = publicAddress(app.config)?.party;
 	const handle = userHandleOf(app.reader, person.id);
+	const passkey =
+		party && handle !== null ? invitationChallenge(app, { codeHash: hash, userHandle: handle }, party) : null;
 	return {
 		ok: true,
 		shown: {
@@ -856,14 +852,17 @@ export function showInvitation(
 			// The challenge is this invitation's, by the hash of its code: another invitation for the same person
 			// does not accept a passkey made for this one.
 			passkey:
-				party && handle !== null
-					? registrationFor(app, {
-							party,
-							person,
-							userHandle: handle,
-							context: CONTEXT.invitation(hash),
-							exclude: [],
-						})
+				party && handle !== null && passkey
+					? {
+							...registrationFor({
+								party,
+								person,
+								userHandle: handle,
+								challenge: passkey.challenge,
+								exclude: [],
+							}),
+							timeout: passkey.timeout,
+						}
 					: null,
 		},
 	};
@@ -1050,6 +1049,7 @@ export type OidcStart =
 export type OidcBegun =
 	| { ok: true; url: string; ceremony: string; lastsMs: number }
 	| Refused
+	| Limited
 	| { ok: false; why: "other-session"; signedInAs: string }
 	| { ok: false; why: "unreachable" | "not-a-person" };
 
@@ -1059,13 +1059,14 @@ export type OidcBegun =
  * and a browser signed in as somebody else is asked about first, so the person is not sent to the provider for
  * an acceptance that could not go through. Throws `OIDC_OFF` on an instance with no provider.
  */
-export async function beginOidcSignIn(app: App, start: OidcStart): Promise<OidcBegun> {
+export async function beginOidcSignIn(app: App, start: OidcStart, address: string | null): Promise<OidcBegun> {
 	const redirect = oidcRedirect(app);
 	let purpose: OidcPurpose;
 	if (start.purpose === "join") {
+		const attempt = byAddress(app, address);
 		const hash = hashOf(start.code);
 		const found = openInvitation(app, app.reader, hash);
-		if (!found) return no("invitation");
+		if (!found) return attempt.wrong(no("invitation"));
 		const holder = start.browser === null ? null : holderOf(app, start.browser);
 		if (holder && holder.id !== found.person.id && start.replace !== holder.name)
 			return { ok: false, why: "other-session", signedInAs: holder.name };

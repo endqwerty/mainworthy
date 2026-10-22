@@ -95,24 +95,71 @@ test("invitation page stays reachable with password and passkey acceptance durin
 	).toBe("200");
 }, 15_000);
 
-test.each(starts)("$name begins consume the shared address limit before concurrent allocations", async (start) => {
-	const idp = await provider();
-	const w = world({ oidc: idp.config(), proxied: true });
-	const replies = await Promise.all(Array.from({ length: 8 }, () => w.post(start.path, start.body, client)));
-	expect(replies.filter((reply) => reply.status === 200)).toHaveLength(5);
-	const blocked = replies.filter((reply) => reply.status !== 200);
-	expect(blocked.map(said)).toEqual(Array(3).fill("429 limited, retry after 1"));
-	expect(blocked.every((reply) => reply.setCookies.length === 0)).toBe(true);
-	for (const alternate of starts)
-		expect(said(await w.post(alternate.path, alternate.body, client))).toBe("429 limited, retry after 1");
-	expect(said(await w.get("/api/session", { ...client, authorization: "Bearer not-a-token" }))).toBe(
-		"429 limited, retry after 1",
+test("invitation reuse reports remaining lifetime and a successor preserves each tab's original deadline", async () => {
+	const w = world({ proxied: true });
+	const { code } = await invite(w, { name: "robin" });
+	const page = async () =>
+		must(await w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", { invitation: code }, client)).passkey;
+	const first = await page();
+	w.clock.advance(180_000);
+	const reused = await page();
+	expect(reused.challenge).toBe(first.challenge);
+	expect(reused.timeout).toBe(120_000);
+	w.clock.advance(60_000);
+	const successor = await page();
+	expect(successor.challenge).not.toBe(first.challenge);
+	expect(successor.timeout).toBe(300_000);
+	expect(said(await w.post("/api/login", { invitation: code, passkey: authenticator().register(first) }, client))).toBe(
+		"200",
 	);
-	expect(said(await w.post(start.path, start.body, other))).toBe("200");
-	w.clock.advance(1000);
-	expect(said(await w.post(start.path, start.body, client))).toBe("200");
-	expect(said(await w.post(start.path, start.body, client))).toBe("429 limited, retry after 2");
+
+	const second = await invite(w, { name: "sam" });
+	const offer = async () =>
+		must(await w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", { invitation: second.code }, client))
+			.passkey;
+	const expired = await offer();
+	w.clock.advance(240_000);
+	const fresh = await offer();
+	w.clock.advance(60_000);
+	expect(
+		said(await w.post("/api/login", { invitation: second.code, passkey: authenticator().register(expired) }, client)),
+	).toBe("401 unauthenticated");
+	expect(
+		said(await w.post("/api/login", { invitation: second.code, passkey: authenticator().register(fresh) }, client)),
+	).toBe("200");
 });
+
+test.each(starts)(
+	"$name begins share a fixed allocation window independent of failed authentication",
+	async (start) => {
+		const idp = await provider();
+		const w = world({ oidc: idp.config(), proxied: true });
+		await joined(w, "robin", PASSWORD);
+		const replies = [];
+		for (let count = 0; count < 303; count += 32)
+			replies.push(
+				...(await Promise.all(
+					Array.from({ length: Math.min(32, 303 - count) }, () => w.post(start.path, start.body, client)),
+				)),
+			);
+		expect(replies.filter((reply) => reply.status === 200)).toHaveLength(300);
+		const blocked = replies.filter((reply) => reply.status !== 200);
+		expect(blocked.map(said)).toEqual(Array(3).fill("429 limited, retry after 60"));
+		expect(blocked.every((reply) => reply.setCookies.length === 0)).toBe(true);
+		w.clock.advance(30_000);
+		for (const alternate of starts)
+			expect(said(await w.post(alternate.path, alternate.body, client))).toBe("429 limited, retry after 30");
+		expect(said(await w.get("/api/session", { ...client, authorization: "Bearer not-a-token" }))).toBe(
+			"401 unauthenticated",
+		);
+		expect(said(await signIn(w, "robin", PASSWORD, client))).toBe("200");
+		expect(said(await w.post(start.path, start.body, client))).toBe("429 limited, retry after 30");
+		expect(said(await w.post(start.path, start.body, other))).toBe("200");
+		w.clock.advance(30_000);
+		for (let count = 0; count < 300; count++) expect(said(await w.post(start.path, start.body, client))).toBe("200");
+		expect(said(await w.post(start.path, start.body, client))).toBe("429 limited, retry after 60");
+	},
+);
 
 async function flood(w: World, path: string, body: Record<string, unknown>) {
 	const statuses = new Set<number>();
@@ -158,14 +205,20 @@ test("a pending passkey challenge survives another address's 10,000 challenges",
 	expect(statuses).toEqual(new Set([200, 429]));
 }, 15_000);
 
-test("invitation challenges cannot bypass the start limit and untrusted address headers do not create counts", async () => {
+test("valid invitation reloads reuse their challenge and untrusted headers do not create counts", async () => {
 	const w = world({ proxied: true });
 	const { code } = await invite(w, { name: "robin", project: "scratch", can: ["read"] });
-	for (let count = 0; count < 5; count++)
-		expect(said(await w.post("/api/login/challenge", { invitation: code }, client))).toBe("200");
-	expect(said(await w.post("/api/login/challenge", { invitation: code }, client))).toBe("429 limited, retry after 1");
+	const first = must(
+		await w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", { invitation: code }, client),
+	);
+	for (let count = 0; count < 10_000; count++) {
+		const next = must(
+			await w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", { invitation: code }, client),
+		);
+		expect(next.passkey.challenge).toBe(first.passkey.challenge);
+	}
 	expect(said(await w.post("/api/login/challenge", { invitation: code }, other))).toBe("200");
 	const direct = world();
-	for (let count = 0; count < 8; count++)
+	for (let count = 0; count < 303; count++)
 		expect(said(await direct.post("/api/login/challenge", {}, client))).toBe("200");
-});
+}, 15_000);

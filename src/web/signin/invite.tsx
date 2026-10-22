@@ -32,11 +32,10 @@ function takeCode(): string {
 }
 
 /**
- * A passkey's challenge is good for five minutes. Before a passkey is made, one asked for longer ago than four
- * is asked for again; a passkey that was made and then waited for an answer is sent while the five last.
+ * An invitation may reuse its passkey challenge. Ask again with less than a minute remaining, and send an
+ * already-made passkey only before the deadline the server supplied.
  */
-const CHALLENGE_LASTS_MS = 5 * 60_000;
-const CHALLENGE_FRESH_MS = 4 * 60_000;
+const CHALLENGE_MARGIN_MS = 60_000;
 
 const GONE = "This invitation does not work any more. Ask whoever sent it for a new one.";
 const NOT_ACCEPTED =
@@ -94,7 +93,7 @@ type Stage =
 	| { kind: "looking" }
 	| { kind: "gone" }
 	| { kind: "unreachable"; message: string }
-	| { kind: "shown"; shown: ShownInvitation; askedAt: number };
+	| { kind: "shown"; shown: ShownInvitation };
 
 /**
  * The page an invitation link opens. It renders with nobody signed in and changes nothing by being opened: it
@@ -136,7 +135,7 @@ export function Invitation({
 		setStage({ kind: "looking" });
 		void showInvitation(asked.code).then(
 			(shown) => {
-				if (current) setStage(shown ? { kind: "shown", shown, askedAt: Date.now() } : { kind: "gone" });
+				if (current) setStage(shown ? { kind: "shown", shown } : { kind: "gone" });
 			},
 			(error: unknown) => {
 				if (current) setStage({ kind: "unreachable", message: error instanceof ApiError ? error.message : NO_ANSWER });
@@ -154,11 +153,10 @@ export function Invitation({
 				key={code}
 				code={code}
 				shown={stage.shown}
-				askedAt={stage.askedAt}
 				who={who}
 				onDone={onDone}
 				onGone={() => setStage({ kind: "gone" })}
-				onShown={(shown) => setStage({ kind: "shown", shown, askedAt: Date.now() })}
+				onShown={(shown) => setStage({ kind: "shown", shown })}
 			/>
 		);
 	return (
@@ -191,7 +189,6 @@ type Problem = { at: "password" | "again" | "passkey" | "form" | "provider"; mes
 function Accept({
 	code,
 	shown,
-	askedAt,
 	who,
 	onDone,
 	onGone,
@@ -199,25 +196,25 @@ function Accept({
 }: {
 	code: string;
 	shown: ShownInvitation;
-	askedAt: number;
 	who: Who;
 	onDone: () => Promise<void>;
 	onGone: () => void;
 	onShown: (shown: ShownInvitation) => void;
 }) {
 	const { name, purpose, expiresAt } = shown.invitation;
+	const challengeExpiresAt = shown.passkeyExpiresAt;
 	const [password, setPassword] = useState("");
 	const [again, setAgain] = useState("");
 	const [wantPasskey, setWantPasskey] = useState(false);
 	const [label, setLabel] = useState(() => browserName(navigator.userAgent));
 	const [busy, setBusy] = useState(false);
 	const [problem, setProblem] = useState<Problem | null>(null);
-	// Who the server said holds this browser when it refused an acceptance, what was sent then, and when the
-	// challenge was asked for that a passkey in it answers.
+	// Who the server said holds this browser when it refused an acceptance, what was sent, and the deadline
+	// of any passkey challenge it answers.
 	const [refusedFor, setRefusedFor] = useState<{
 		signedInAs: string;
 		sent: Acceptance;
-		challengeAt: number;
+		expiresAt: number;
 	} | null>(null);
 	// The person the question was answered for with "Continue": the one whose session in this browser may end.
 	// It is the only name an acceptance ever carries, and it is a name that was on the page when the answer
@@ -257,9 +254,9 @@ function Accept({
 
 	/**
 	 * Sends an acceptance. What comes back decides: the app, the question about whoever holds the browser, or a
-	 * refusal. `challengeAt` is when the challenge of the passkey in it was asked for.
+	 * refusal. `expiresAt` is the conservative local deadline of the passkey challenge.
 	 */
-	async function send(acceptance: Acceptance, challengeAt: number): Promise<void> {
+	async function send(acceptance: Acceptance, expiresAt: number): Promise<void> {
 		try {
 			await acceptInvitation(acceptance);
 		} catch (error) {
@@ -268,7 +265,7 @@ function Accept({
 				// Nothing was changed and the invitation still works. The page asks about the person the server
 				// named, and sends nothing until that question is answered. What was typed, and a passkey that
 				// was made, are kept for then: a challenge is spent only by an acceptance that went through.
-				setRefusedFor({ signedInAs: holder, sent: acceptance, challengeAt });
+				setRefusedFor({ signedInAs: holder, sent: acceptance, expiresAt });
 				return;
 			}
 			setProblem({ at: "form", message: error instanceof ApiError ? refusalOf(error, NOT_ACCEPTED) : MAYBE_ACCEPTED });
@@ -284,12 +281,12 @@ function Accept({
 		const refused = refusedFor;
 		// Asked before anything was sent: the form is next, and its acceptance will carry the name.
 		if (!refused || refused.signedInAs !== about) return;
-		if (refused.sent.passkey && Date.now() > refused.challengeAt + CHALLENGE_LASTS_MS) {
+		if (refused.sent.passkey && Date.now() >= refused.expiresAt) {
 			// The passkey's challenge ran out while the question stood. The form is open again to make another.
 			setProblem({ at: "passkey", message: PASSKEY_RAN_OUT });
 			return;
 		}
-		run(() => send({ ...refused.sent, replace: about }, refused.challengeAt), "form");
+		run(() => send({ ...refused.sent, replace: about }, refused.expiresAt), "form");
 	}
 
 	const typed = password !== "" || again !== "";
@@ -310,10 +307,10 @@ function Accept({
 
 	async function accept(): Promise<void> {
 		let passkey: Acceptance["passkey"] = null;
-		let challengeAt = askedAt;
+		let expiresAt = challengeExpiresAt;
 		if (wantPasskey) {
 			let offered = shown.passkey;
-			if (Date.now() - askedAt > CHALLENGE_FRESH_MS) {
+			if (challengeExpiresAt - Date.now() <= CHALLENGE_MARGIN_MS) {
 				// Asked again with the same code: a passkey for an invitation is finished with the code it began with.
 				const fresh = await showInvitation(code);
 				if (!fresh) {
@@ -322,12 +319,12 @@ function Accept({
 				}
 				onShown(fresh);
 				offered = fresh.passkey;
-				challengeAt = Date.now();
+				expiresAt = fresh.passkeyExpiresAt;
 			}
 			if (!offered) throw new PasskeyError("This instance has no passkeys.");
 			passkey = { made: await makePasskey(offered), label: label.trim() };
 		}
-		await send({ code, password: typed ? password : null, passkey, replace: confirmed }, challengeAt);
+		await send({ code, password: typed ? password : null, passkey, replace: confirmed }, expiresAt);
 	}
 
 	/** One request at a time, and whatever fails is said on the page. */
