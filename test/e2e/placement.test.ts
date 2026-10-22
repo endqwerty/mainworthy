@@ -451,38 +451,41 @@ test.skipIf(!browserAvailable)(
 	30_000,
 );
 
-test.skipIf(!browserAvailable)(
-	"a moved case appears when its destination folder is opened without reloading",
-	async () => {
-		const server = await startServer();
-		await server.api("propose", {
-			edits: [
-				{ op: "create", folder: "Original", body: { title: "Moved case" } },
-				{ op: "folder", name: "Destination" },
-			],
-		});
-		const h = await openPage(server, { path: "/p/scratch/suite/c/1?folder=Original" });
-		try {
-			const { page } = h;
-			await page.getByRole("button", { name: "Moved case", exact: true }).waitFor();
-			await page.keyboard.press("m");
-			await page.getByRole("textbox", { name: "Move selected cases to a folder" }).fill("Destination");
-			await page.keyboard.press("Enter");
-			await page.waitForFunction(() => document.querySelector("#stat")?.textContent?.includes("changed."));
-			await page.locator("button.fo").filter({ hasText: "Destination" }).click();
-			await page.waitForFunction(
-				() =>
-					document.querySelector("#ltitle")?.textContent === "Destination" &&
-					document.querySelector("#lcount")?.textContent?.trim() === "1 cases",
-			);
-			if (process.env.MAINWORTHY_PLACEMENT_SCREENSHOT)
-				await page.screenshot({ path: process.env.MAINWORTHY_PLACEMENT_SCREENSHOT });
-			expect(await page.getByRole("option").filter({ hasText: "C-1" }).count()).toBe(1);
-			expect(h.errors).toEqual([]);
-		} finally {
-			await h.close();
-			await server.stop();
-		}
-	},
-	30_000,
-);
+for (const queryFolder of ["Original", "original"]) {
+	test.skipIf(!browserAvailable)(
+		`a moved case appears when its destination folder is opened without reloading from ${queryFolder}`,
+		async () => {
+			const server = await startServer();
+			await server.api("propose", {
+				edits: [
+					{ op: "create", folder: "Original", body: { title: "Moved case" } },
+					{ op: "folder", name: "Destination" },
+				],
+			});
+			const h = await openPage(server, { path: `/p/scratch/suite/c/1?folder=${queryFolder}` });
+			try {
+				const { page } = h;
+				await page.getByRole("button", { name: "Moved case", exact: true }).waitFor();
+				expect(await page.getByRole("option").filter({ hasText: "C-1" }).count()).toBe(1);
+				await page.keyboard.press("m");
+				await page.getByRole("textbox", { name: "Move selected cases to a folder" }).fill("Destination");
+				await page.keyboard.press("Enter");
+				await page.waitForFunction(() => document.querySelector("#stat")?.textContent?.includes("changed."));
+				await page.locator("button.fo").filter({ hasText: "Destination" }).click();
+				await page.waitForFunction(
+					() =>
+						document.querySelector("#ltitle")?.textContent === "Destination" &&
+						document.querySelector("#lcount")?.textContent?.trim() === "1 cases",
+				);
+				if (queryFolder === "Original" && process.env.MAINWORTHY_PLACEMENT_SCREENSHOT)
+					await page.screenshot({ path: process.env.MAINWORTHY_PLACEMENT_SCREENSHOT });
+				expect(await page.getByRole("option").filter({ hasText: "C-1" }).count()).toBe(1);
+				expect(h.errors).toEqual([]);
+			} finally {
+				await h.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+}
