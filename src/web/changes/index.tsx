@@ -92,8 +92,7 @@ function ChangesWorkbench() {
 	const settledData = settled.isPlaceholderData ? undefined : settled.data;
 	const impactData = Impact.safeParse(impact.isPlaceholderData ? undefined : impact.data);
 	const fixedHere = settledData?.items.filter((q) => q.decision?.fixedIn?.change === key).length ?? 0;
-	const address = webUrl(current?.url ?? null);
-	const link = address ? { href: address, text: shownAddress(address) } : null;
+	const link = linkTo(current?.url ?? null);
 	const go = (ref: string) => navigate(refUrl({ project, ref }));
 	const choose = (change: string) => {
 		setCursor(change);
@@ -388,10 +387,19 @@ function MergeGateReceipt({ receipt }: { receipt: MergeReceipt | null }) {
 	);
 }
 
-/** An address as a reader should see it before following it: its host and path. */
-function shownAddress(address: string): string {
-	const url = new URL(address);
-	return `${url.host}${url.pathname.replace(/\/$/, "")}`;
+/**
+ * A link to an address a report gave, shown as a reader should see it before following it: its host and path. An
+ * address that is not a web address, or does not parse as one ("https://"), gets no link.
+ */
+function linkTo(address: string | null): { href: string; text: string } | null {
+	const href = webUrl(address);
+	if (!href) return null;
+	try {
+		const url = new URL(href);
+		return { href, text: `${url.host}${url.pathname.replace(/\/$/, "")}` };
+	} catch {
+		return null;
+	}
 }
 
 /** How a change ended, naming which commit each gate on the page is about. An open change says nothing here. */

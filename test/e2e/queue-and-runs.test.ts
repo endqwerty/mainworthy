@@ -198,6 +198,13 @@ check(
 			await link.getByText("github.example/shop/pull/408", { exact: true }).waitFor();
 			expect(await link.getAttribute("href")).toBe("https://github.example/shop/pull/408");
 			expect(await page.locator("#detail .phead a.ref").count()).toBe(0);
+			// An address that only looks like one is left out, and the page still reads.
+			const odd = ciReport({ commit: "odd409a", branch: "odd", pr: 409, n: 1 });
+			await server.api("report", { ...odd, target: { ...odd.target, url: "https://", title: "Odd address" } });
+			await page.goto(`${server.url}/p/scratch/changes/pr%3A409`);
+			await page.locator("#detail .phead").getByText("Odd address", { exact: true }).waitFor();
+			expect(await page.locator(".change-link").count()).toBe(0);
+			await page.goto(`${server.url}/p/scratch/changes/pr%3A408`);
 			await server.api("change", { change: "pr:408", state: "merged" });
 			await page.reload();
 			await onChange.getByText("Fixed by another commit of pr:408, which merged", { exact: false }).waitFor();
