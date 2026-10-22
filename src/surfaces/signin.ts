@@ -23,7 +23,6 @@ import {
 	beginNativeOidc,
 	beginOidcSignIn,
 	changePassword,
-	countSignInStart,
 	exchangeNativeOidc,
 	finishNativeOidc,
 	finishOidcSignIn,
@@ -320,15 +319,14 @@ export function signInRoutes(app: App, tools: Tools) {
 			if (looked.ok) return answered(looked.shown);
 			return looked.why === "limited" ? tools.limited(looked.retryAfter) : failed("not_found", NO_INVITATION);
 		}
-		const limit = countSignInStart(app, tools.address(req, server));
-		if (limit) return tools.limited(limit.retryAfter);
-		const begun = passkeySignInOptions(app, "native" in body.data ? "native" : "web");
+		const begun = passkeySignInOptions(app, tools.address(req, server), "native" in body.data ? "native" : "web");
 		if (!begun)
 			return "native" in body.data
 				? failed("invalid", "native passkey sign-in needs an HTTPS public address and an associated app domain", {
 						passkey: "native-unavailable",
 					})
 				: passkeysOff();
+		if ("why" in begun) return tools.limited(begun.retryAfter);
 		// The browser that asked is handed a cookie it cannot read, for as long as the challenge lasts. Only that
 		// browser can answer: the challenge keeps the cookie's hash, and the answer is taken with the cookie.
 		const headers = new Headers();
@@ -367,8 +365,6 @@ export function signInRoutes(app: App, tools: Tools) {
 				browser: tools.cookieOf(req),
 			};
 		else start = { purpose: "sign-in" };
-		const limit = countSignInStart(app, tools.address(req, server));
-		if (limit) return tools.limited(limit.retryAfter);
 		const begun = await beginOidcSignIn(app, start, tools.address(req, server));
 		if (begun.ok) {
 			const headers = new Headers();
@@ -444,9 +440,8 @@ export function signInRoutes(app: App, tools: Tools) {
 		if (read instanceof Response) return read;
 		const parsed = NativeRequest.safeParse(read.input);
 		if (!parsed.success) return failed("invalid", "send the native sign-in challenge, state, callback and instance");
-		const limit = countSignInStart(app, tools.address(req, server));
-		if (limit) return tools.limited(limit.retryAfter);
-		const url = await beginNativeOidc(app, parsed.data);
+		const url = await beginNativeOidc(app, parsed.data, tools.address(req, server));
+		if (url !== null && typeof url !== "string") return tools.limited(url.retryAfter);
 		return url
 			? answered({ url })
 			: failed("invalid", "provider sign-in could not start; use this instance's public address and try again");

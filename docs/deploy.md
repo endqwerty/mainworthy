@@ -110,15 +110,17 @@ wait. What it means for whoever runs an instance:
   of either still works from a blocked address.
 - The count is in memory. A restart clears it.
 
-Anonymous passkey challenges and provider sign-in begins, including native app begins, have a separate
-fixed allowance of 300 starts per address per minute and an instance-wide ceiling of 1,000 per minute,
-including unknown/private addresses. Rotating IPv6 networks does not bypass the instance ceiling.
-These starts never add to the failed-authentication
-count and cannot block a password. Once the allowance is spent, starts get `429` and the remaining seconds
-in `Retry-After`; retries do not extend that window, and the next window restores the full allowance.
-Valid pending answers still work. A valid invitation page bypasses this allocation quota and reuses its
-registration challenge, so reloading one code cannot fill the map. Unknown and private addresses skip only
-the per-address allowance; configure the trusted proxy below to distinguish visitors behind it.
+Anonymous passkey/provider starts have a separate allowance of 300 successful starts per public IPv4 address
+or IPv6 /56 per minute. There is no instance-wide refusal for another source to monopolise. Starts never add
+to failed-credential counts or block a password. A refused start gets `429` with remaining seconds in
+`Retry-After`; retries do not extend or escalate its own source's wait. Unavailable starts do not spend it.
+Valid pending answers, working invitations and signed-in provider linking bypass this allocation wait.
+
+At capacity, each ceremony store expires dead entries then reclaims the oldest entry from the source with
+the most live entries, preferring the incoming source on equal-size ties. Larger sources lose entries before
+small unrelated sources. Many independent prefixes with equal shares remain indistinguishable, so this is
+not unlimited Sybil isolation. Unknown/private peers are uncounted and share a retention bucket; configure
+the trusted proxy below to tell visitors apart.
 
 ### Behind a proxy
 

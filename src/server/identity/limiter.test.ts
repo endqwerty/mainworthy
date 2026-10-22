@@ -4,7 +4,15 @@ import { type Harness, harness } from "../../../test/helpers.ts";
 import { isLoopbackOrPrivate } from "../kernel/address.ts";
 import { limiterOf } from "./attempts.ts";
 import { admit, createToken, hashToken } from "./identity.ts";
-import { accountKey, addressKey, createLimiter, isGeneratedSecret, type LimiterAnswer, prefixKey } from "./limiter.ts";
+import {
+	accountKey,
+	addressKey,
+	createLimiter,
+	isGeneratedSecret,
+	type LimiterAnswer,
+	prefixKey,
+	startAddressKey,
+} from "./limiter.ts";
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
@@ -12,6 +20,16 @@ const START = Date.UTC(2026, 9, 13, 9, 0);
 
 const FREE: LimiterAnswer = { kind: "free" };
 const blocked = (seconds: number): LimiterAnswer => ({ kind: "blocked", retryAfterSeconds: seconds });
+
+test("start keys group a subscriber's /56 without changing failed-proof /64 keys or IPv4 identity", () => {
+	expect(startAddressKey("2001:db8:0:100::1")).toBe(startAddressKey("2001:db8:0:1ff::2"));
+	expect(startAddressKey("2001:db8:0:100::1")).not.toBe(startAddressKey("2001:db8:0:200::1"));
+	expect(addressKey("2001:db8:0:100::1")).not.toBe(addressKey("2001:db8:0:101::1"));
+	expect(startAddressKey("::ffff:203.0.113.10")).toBe(startAddressKey("203.0.113.10"));
+	expect(startAddressKey("203.0.113.10")).not.toBe(startAddressKey("203.0.113.11"));
+	expect(startAddressKey(null)).toBeNull();
+	expect(startAddressKey("127.0.0.1")).toBeNull();
+});
 
 /** A limiter and the clock it is told. Nothing sleeps: time passes when a test says so. */
 function world(options?: { maxKeys?: number }) {

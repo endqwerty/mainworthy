@@ -111,27 +111,22 @@ const FREE: LimiterAnswer = { kind: "free" };
 
 /**
  * Anonymous ceremony allocation has a separate fixed window, not a wrong-credential penalty. Three hundred
- * starts per address per minute permits an office's burst. The separate instance-wide ceiling of 1,000
- * per minute admits at most 6,000 in a five-minute interval, whatever the addresses. Neither window escalates
- * or extends on refusal, and this count never blocks a proof or a password.
+ * starts per source per minute permits an office's burst. Refusals do not extend the window or escalate.
+ * There is no shared allowance for another source to exhaust.
  */
 export function createStartLimiter(): (key: string | null, now: number) => LimiterAnswer {
 	const windowMs = 60_000;
 	const starts = 300;
 	type Window = { since: number; count: number };
 	const entries = new Map<string, Window>();
-	let global: Window | undefined;
 	const active = (window: Window | undefined, now: number): Window | undefined =>
 		window && now >= window.since && now < window.since + windowMs ? window : undefined;
 	const wait = (window: Window | undefined, allowance: number, now: number): number =>
 		window && window.count >= allowance ? window.since + windowMs - now : 0;
 	return (key, now) => {
 		const entry = active(key === null ? undefined : entries.get(key), now);
-		const total = active(global, now);
-		const left = Math.max(wait(entry, starts, now), wait(total, 1000, now));
+		const left = wait(entry, starts, now);
 		if (left > 0) return { kind: "blocked", retryAfterSeconds: Math.ceil(left / 1000) };
-		global = total ?? { since: now, count: 0 };
-		global.count++;
 		if (key === null) return FREE;
 		if (entry) {
 			entry.count++;
@@ -310,4 +305,13 @@ export function addressKey(address: string | null): string | null {
 	if (parsed.kind === "v4") return `addr:${parsed.bytes.join(".")}`;
 	const network = parsed.groups.slice(0, 4).map((group) => group.toString(16));
 	return `addr:${network.join(":")}::/64`;
+}
+
+/** Anonymous starts share an IPv6 subscriber's /56; failed-proof counts keep their existing /64 rule. */
+export function startAddressKey(address: string | null): string | null {
+	const key = addressKey(address);
+	const parsed = address === null ? null : parseAddress(address.trim(), true);
+	if (key === null || parsed?.kind !== "v6") return key;
+	const [a = 0, b = 0, c = 0, d = 0] = parsed.groups;
+	return `addr:${[a, b, c, d & 0xff00].map((group) => group.toString(16)).join(":")}::/56`;
 }

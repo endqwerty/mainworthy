@@ -20,6 +20,9 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { Configuration } from "openid-client";
 import type { App } from "../kernel/app.ts";
+import { takeStart } from "./attempts.ts";
+import { Ceremonies } from "./ceremonies.ts";
+import { type LimiterAnswer, startAddressKey } from "./limiter.ts";
 import { CEREMONY_MS } from "./webauthn.ts";
 
 /** Who the provider says signed in. `email` and `name` describe the identity on a screen and decide nothing. */
@@ -52,9 +55,7 @@ export type OidcRefusal =
 	/** The provider said no, could not be reached, or its answer did not hold up. */
 	| "provider";
 
-/** As many as the passkeys' map keeps, for the same reason: anybody can begin one without signing in. */
-const MOST = 10_000;
-const ceremonies = new WeakMap<App, Map<string, Kept>>();
+const ceremonies = new WeakMap<App, Ceremonies<Kept>>();
 type Library = typeof import("openid-client");
 type Held = { client: Library; configuration: Configuration };
 const configurations = new WeakMap<App, Promise<Held>>();
@@ -92,10 +93,10 @@ function configurationOf(app: App): Promise<Held> {
 	return found;
 }
 
-function keptOf(app: App): Map<string, Kept> {
+function keptOf(app: App): Ceremonies<Kept> {
 	let kept = ceremonies.get(app);
 	if (!kept) {
-		kept = new Map();
+		kept = new Ceremonies();
 		ceremonies.set(app, kept);
 	}
 	return kept;
@@ -108,8 +109,8 @@ function keptOf(app: App): Map<string, Kept> {
  */
 export async function beginOidc(
 	app: App,
-	input: { purpose: OidcPurpose; browser: string | null; redirect: string },
-): Promise<string | null> {
+	input: { purpose: OidcPurpose; browser: string | null; redirect: string; address: string | null },
+): Promise<string | Extract<LimiterAnswer, { kind: "blocked" }> | null> {
 	const deadline = app.now() + CEREMONY_MS;
 	let held: Held;
 	try {
@@ -119,20 +120,24 @@ export async function beginOidc(
 		return null;
 	}
 	if (app.now() >= deadline) return null;
+	const purpose = input.purpose;
+	const owner =
+		purpose.purpose === "link"
+			? `session ${purpose.session}`
+			: purpose.purpose === "join"
+				? `invitation ${purpose.invitation}`
+				: (startAddressKey(input.address) ?? "unknown");
+	if (purpose.purpose === "sign-in" || purpose.purpose === "native") {
+		const quota = takeStart(app, input.address);
+		if (quota.kind === "blocked") return quota;
+	}
 	const { client, configuration } = held;
 	const verifier = client.randomPKCECodeVerifier();
 	const state = client.randomState();
 	const nonce = client.randomNonce();
 	const kept = keptOf(app);
 	const now = app.now();
-	if (kept.size >= MOST) {
-		for (const [key, entry] of kept) if (now >= entry.deadline) kept.delete(key);
-		for (const key of kept.keys()) {
-			if (kept.size < MOST) break;
-			kept.delete(key);
-		}
-	}
-	kept.set(state, { purpose: input.purpose, browser: input.browser, nonce, verifier, deadline });
+	kept.put(state, { purpose: input.purpose, browser: input.browser, nonce, verifier, deadline }, owner, now);
 	return client.buildAuthorizationUrl(configuration, {
 		redirect_uri: input.redirect,
 		scope: "openid email profile",
@@ -211,7 +216,7 @@ export const NATIVE_OIDC_CALLBACK = "com.mainworthy.app://signin/oidc";
 export type NativeOidcRequest = { challenge: string; state: string; callback: string; instance: string };
 export type NativeOidcExchange = { code: string; verifier: string; callback: string; instance: string };
 type Handoff = NativeOidcRequest & { identity: Identity; credential: number; actor: number; deadline: number };
-const handoffs = new WeakMap<App, Map<string, Handoff>>();
+const handoffs = new WeakMap<App, Ceremonies<Handoff>>();
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 
 /** A short-lived proof, never a session, carried through the native callback. */
@@ -219,16 +224,11 @@ export function issueNativeOidc(app: App, input: Omit<Handoff, "deadline">, gene
 	if ((generations.get(app) ?? 0) !== generation) return null;
 	let kept = handoffs.get(app);
 	if (!kept) {
-		kept = new Map();
+		kept = new Ceremonies();
 		handoffs.set(app, kept);
 	}
-	for (const [key, entry] of kept) if (app.now() >= entry.deadline) kept.delete(key);
-	if (kept.size >= MOST) {
-		const first = kept.keys().next();
-		if (!first.done) kept.delete(first.value);
-	}
 	const code = randomBytes(32).toString("base64url");
-	kept.set(hash(code), { ...input, deadline: app.now() + 60_000 });
+	kept.put(hash(code), { ...input, deadline: app.now() + 60_000 }, `credential ${input.credential}`, app.now());
 	const back = new URL(input.callback);
 	back.searchParams.set("code", code);
 	back.searchParams.set("state", input.state);

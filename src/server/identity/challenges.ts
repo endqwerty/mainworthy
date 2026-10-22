@@ -10,6 +10,7 @@
 // same: a signed answer is then good only in the browser, the session or for the invitation that asked for it.
 
 import type { App } from "../kernel/app.ts";
+import { Ceremonies } from "./ceremonies.ts";
 import { clearMailLinks } from "./contacts.ts";
 import { clearOidc } from "./oidc.ts";
 import { clearTotp } from "./totp.ts";
@@ -42,41 +43,31 @@ export type Ceremony =
 
 type Kept = { readonly ceremony: Ceremony; readonly expected: Expected; readonly deadline: number };
 
-/**
- * How many may be under way at once. Anybody can ask for a sign-in challenge without signing in, so the map
- * has an end: past it the oldest is dropped. A person's ceremony takes seconds, and the oldest of ten thousand
- * is one nobody is still answering unless somebody asks for thousands a second.
- */
-const MOST = 10_000;
-
-const kept = new WeakMap<App, Map<string, Kept>>();
-function of(app: App): Map<string, Kept> {
+const kept = new WeakMap<App, Ceremonies<Kept>>();
+function of(app: App): Ceremonies<Kept> {
 	let challenges = kept.get(app);
 	if (!challenges) {
-		challenges = new Map();
+		challenges = new Ceremonies();
 		kept.set(app, challenges);
 	}
 	return challenges;
 }
 
 /** A new challenge for a ceremony at this relying party. It can be answered until `CEREMONY_MS` from now. */
-export function issueChallenge(app: App, ceremony: Ceremony, party: RelyingParty): Challenge {
+export function issueChallenge(app: App, ceremony: Ceremony, party: RelyingParty, owner = ceremony.context): Challenge {
 	const challenges = of(app);
 	const now = app.now();
-	if (challenges.size >= MOST) {
-		for (const [challenge, entry] of challenges) if (now >= entry.deadline) challenges.delete(challenge);
-		// A map keeps the order things were put in, so the first key is the oldest challenge.
-		for (const challenge of challenges.keys()) {
-			if (challenges.size < MOST) break;
-			challenges.delete(challenge);
-		}
-	}
 	const challenge = newChallenge();
-	challenges.set(challenge, {
-		ceremony,
-		expected: { challenge, origin: party.origin, rpId: party.id },
-		deadline: now + CEREMONY_MS,
-	});
+	challenges.put(
+		challenge,
+		{
+			ceremony,
+			expected: { challenge, origin: party.origin, rpId: party.id },
+			deadline: now + CEREMONY_MS,
+		},
+		owner,
+		now,
+	);
 	return challenge;
 }
 

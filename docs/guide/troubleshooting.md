@@ -66,8 +66,8 @@ operation is sent after a failed health probe.
 
 ### `limited: too many attempts`
 
-Anonymous passkey/provider starts have separate allowances of 300 per address and 1,000 across the instance per minute.
-If either is exhausted, wait for `Retry-After` before starting again. These waits do not escalate or extend on retry.
+Anonymous passkey/provider starts have a separate allowance of 300 per public IPv4 address or IPv6 /56 per minute.
+If that source allowance is exhausted, wait for `Retry-After` before starting again. These waits do not escalate or extend on retry.
 They never cause password refusals, and valid answers to pending ceremonies still finish. A working invitation still opens its form.
 
 For token authentication, five wrong tokens from one address or five with the same prefix within 15 minutes trigger a wait.
@@ -81,7 +81,7 @@ In the web UI, the sign-in page, an invitation, and "Your sign-in" in Settings k
 
 If everybody behind one proxy gets this message together for failed credentials, the server may be counting the proxy as one address.
 Configure `MAINWORTHY_TRUSTED_PROXY` and `MAINWORTHY_CLIENT_ADDRESS_HEADER` as described in [configuration](./configuration.md).
-The anonymous-start ceiling applies across the whole instance even when that proxy is configured correctly.
+There is no instance-wide start allowance. Sources sharing a public address or /56 still share its own allowance.
 
 ### `unauthenticated: a token is required`
 
