@@ -1,4 +1,4 @@
-# 0134: Anonymous sign-in starts have their own allowance
+# 0140: Anonymous sign-in starts have their own allowance
 
 2026-10-22. Fixes [issue #664](https://github.com/endqwerty/mainworthy/issues/664).
 
@@ -11,16 +11,25 @@ found this before landing.
 Anonymous starts have a separate fixed window of 300 starts per address per 60 seconds, anchored at the first
 start. Web/native passkey and provider starts share it, as do provider linking and invitation/provider begins.
 Reservation is synchronous before allocation or provider discovery. Refused requests do not extend the window.
-The next window restores all 300 starts. No start reads or changes the failed-credential limiter, so this quota
+The next window restores all 300 starts. Ordinary starts do not read or change the failed-credential limiter, so this quota
 cannot refuse a password or an otherwise valid completion of a pending passkey/provider ceremony.
 
 Three hundred permits an office's simultaneous first attempts and a sustained five starts per second.
-A five-minute interval intersects at most six windows, allowing at most 1,800 admissions for one remembered
-address. That is below either map's 10,000-entry cap. This is an admission bound, not a proof about arbitrary
-delays before asynchronous provider allocation. It does not protect against a distributed sender with many
-addresses. The quota remembers at most 10,000 keys, discarding expired windows then the oldest when full.
-It uses the existing trusted-proxy address extraction and IPv6 /64 grouping; private/unknown addresses remain
-uncounted. A restart clears it.
+A per-address limit alone is insufficient: a single IPv6 subscriber can use 34 /64s within one /58 to obtain
+10,200 starts in one window, evicting another person's ceremony. No distributed sender is needed.
+An additional instance-wide fixed ceiling of 1,000 starts per 60 seconds covers every anonymous start,
+including private and unknown addresses. A five-minute interval intersects at most six windows, allowing
+at most 6,000 anonymous admissions across every address, below either map's 10,000-entry cap. One thousand
+permits a large office burst and sustained traffic above sixteen starts per second. When it is exhausted,
+new anonymous starts across the instance wait for its remaining window. Passwords, valid pending answers
+and working invitation pages do not wait on this allocation ceiling.
+
+The global count is separate from the bounded address-key map, so rotating addresses cannot evict it.
+Both windows are checked and consumed synchronously; a refusal consumes neither and extends neither.
+The per-address quota remembers at most 10,000 keys, discarding expired windows then the oldest when full.
+It uses the existing trusted-proxy extraction and IPv6 /64 grouping. Private/unknown addresses skip only
+the per-address count. OIDC state keeps the deadline from before provider discovery, and a start whose
+lifetime expired while discovery was pending allocates no state. A restart clears the allocation counts.
 
 A working invitation is proof of a random server-issued code. Its page remains accessible during either
 address block, while guessed codes retain the failed-attempt limit. Repeated valid reads reuse the same

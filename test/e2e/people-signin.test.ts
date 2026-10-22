@@ -291,7 +291,7 @@ test.skipIf(!browserAvailable)(
 
 			// A wait whose length a proxy dropped on the way: the sentence has no number, and is not the page's
 			// sentence for a wrong token.
-			reply = { status: 429, code: "limited", message: "too many failed attempts; try again in 30 seconds" };
+			reply = { status: 429, code: "limited", message: "too many attempts; try again in 30 seconds" };
 			await page.locator("#token").fill("some token or other");
 			await page.keyboard.press("Enter");
 			const token = page.locator("form").filter({ has: page.locator("#token") });

@@ -215,7 +215,7 @@ test.skipIf(!browserAvailable)(
 				headers: { "retry-after": String(seconds) },
 				json: {
 					ok: false,
-					error: { code: "limited", message: `too many failed attempts; try again in ${seconds} seconds` },
+					error: { code: "limited", message: `too many attempts; try again in ${seconds} seconds` },
 				},
 			});
 			browser = await openPage(server, { signedIn: false, path: "/invite", ready: "h1" });

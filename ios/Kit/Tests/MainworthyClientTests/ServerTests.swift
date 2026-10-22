@@ -193,7 +193,7 @@ struct ServerTests {
 
 	@Test("too many attempts says how long to wait")
 	func limited() async {
-		let body = #"{"ok":false,"error":{"code":"limited","message":"too many failed attempts; try again in 8 seconds"}}"#
+		let body = #"{"ok":false,"error":{"code":"limited","message":"too many attempts; try again in 8 seconds"}}"#
 		let script = Script(.json(status: 429, body, headers: ["Retry-After": "8"]))
 		await #expect(throws: ClientError.limited(seconds: 8)) {
 			_ = try await server(script).signIn(.password(name: "robin", password: "wrong"))

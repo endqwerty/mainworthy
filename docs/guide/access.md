@@ -373,13 +373,14 @@ A password manager such as 1Password can generate a password, fill both new-pass
 
 To add a passkey, give it a name under "Passkeys" in the same section and press "Add a passkey". "Ways you sign in" lists your password and each passkey with when it was last used, and "Remove" beside each. Your last way of signing in has no working "Remove".
 
-Failed attempts are counted. The fifth wrong password for one name within 15 minutes blocks password sign-in for that name for one second, from every address. Each further wrong password doubles the wait, up to 15 minutes. A blocked sign-in is answered `limited`. The credentials are not checked, so the right password waits too. A name nobody has is counted the same way, so the count does not say which names exist. A passkey is not held up by a block on the name. [Troubleshooting](./troubleshooting.md#limited-too-many-failed-attempts) says what to do.
+Failed attempts are counted. The fifth wrong password for one name within 15 minutes blocks password sign-in for that name for one second, from every address. Each further wrong password doubles the wait, up to 15 minutes. A blocked sign-in is answered `limited`. The credentials are not checked, so the right password waits too. A name nobody has is counted the same way, so the count does not say which names exist. A passkey is not held up by a block on the name. [Troubleshooting](./troubleshooting.md#limited-too-many-attempts) says what to do.
 
 The same limit applies to the current password when changing it. Password attempts already waiting to be checked stop if the name or address becomes blocked. A check that finishes during a block returns `limited` too. A successful check never clears a block that began while it was running, even if that block has since expired.
 
 Starting a passkey or provider sign-in has its own limit of 300 starts per network address in one minute.
 Web and iPhone starts share this allowance. Provider linking and accepting an invitation through the provider also use it.
-This permits a busy office to start sign-ins together while limiting repeated anonymous requests for the server's ceremony maps.
+The instance also allows at most 1,000 anonymous starts per minute across all addresses, so rotating IPv6 networks cannot fill the ceremony maps.
+This permits an office-sized burst while keeping pending sign-ins available. If other clients exhaust the instance allowance, new starts wait too.
 After the allowance runs out, the page says how long to wait. The API returns `429 limited` with the remaining seconds in `Retry-After`.
 The wait never escalates, and retries do not extend the minute. A new minute gives the full allowance again.
 
@@ -389,7 +390,8 @@ Valid passkey and provider answers to ceremonies already begun can still finish 
 A working invitation still opens its form and can be accepted with a password or passkey while that address is limited.
 Reloading that invitation reuses its passkey challenge; with one minute left, the server offers a successor without invalidating an ongoing prompt.
 Each challenge expires at its original deadline. The page uses the remaining lifetime supplied by the server.
-The address follows the instance's [proxy configuration](./configuration.md#run-behind-a-proxy-that-ends-tls). Unknown and private addresses are not counted.
+The address follows the instance's [proxy configuration](./configuration.md#run-behind-a-proxy-that-ends-tls).
+Unknown and private addresses skip the per-address allowance; the instance-wide limit still applies.
 
 ### Through an identity provider
 

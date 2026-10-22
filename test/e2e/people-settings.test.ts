@@ -305,7 +305,7 @@ test.skipIf(!browserAvailable)(
 				route.fulfill({
 					status: 429,
 					headers: { "retry-after": "7" },
-					json: { ok: false, error: { code: "limited", message: "too many failed attempts; try again in 7 seconds" } },
+					json: { ok: false, error: { code: "limited", message: "too many attempts; try again in 7 seconds" } },
 				}),
 			);
 			await page.locator("#password-again").press("Enter");

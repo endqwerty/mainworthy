@@ -302,9 +302,8 @@ export function signInRoutes(app: App, tools: Tools) {
 	/**
 	 * `POST /api/login/challenge`. `{}`: web passkey options. `{ native: true }`: native assertion options.
 	 * `{ invitation }`: who the invitation is for, and the options for registering a passkey with it.
-	 * It writes no row, so a page that
-	 * is reloaded, or a preview that fetches it, changes nothing that is stored. Each asking does add a challenge
-	 * to the map in memory, which is bounded and drops its oldest entry when it is full.
+	 * It writes no row. An admitted anonymous start adds a challenge to the bounded map in memory;
+	 * a working invitation reuses its challenge, with a successor near expiry for an ongoing prompt.
 	 */
 	async function challenge(req: Request, server: Listener): Promise<Response> {
 		if (!tools.sameOrigin(req)) return failed("unauthenticated", NOT_SIGNED_IN);

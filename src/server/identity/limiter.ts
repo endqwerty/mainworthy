@@ -1,4 +1,4 @@
-// Authentication limits (the sign-in design, decision 11 as amended, and anonymous starts, decision 0134). Pure: no I/O and no clock of
+// Authentication limits (the sign-in design, decision 11 as amended, and anonymous starts, decision 0140). Pure: no I/O and no clock of
 // its own, so every call that depends on the time is given it. It counts opaque string keys and knows nothing of
 // requests, tokens or rows; only the helpers at the end, which make the keys, know what a token looks like and
 // which addresses are counted. How an address is written is `kernel/address.ts`'s to say.
@@ -111,19 +111,29 @@ const FREE: LimiterAnswer = { kind: "free" };
 
 /**
  * Anonymous ceremony allocation has a separate fixed window, not a wrong-credential penalty. Three hundred
- * starts a minute permits a busy office's burst, yet only 1,800 admissions in any five-minute interval.
- * Refusals do not extend the window, and this count never blocks a proof or a password.
+ * starts per address per minute permits an office's burst. The separate instance-wide ceiling of 1,000
+ * per minute admits at most 6,000 in a five-minute interval, whatever the addresses. Neither window escalates
+ * or extends on refusal, and this count never blocks a proof or a password.
  */
 export function createStartLimiter(): (key: string | null, now: number) => LimiterAnswer {
 	const windowMs = 60_000;
 	const starts = 300;
-	const entries = new Map<string, { since: number; count: number }>();
+	type Window = { since: number; count: number };
+	const entries = new Map<string, Window>();
+	let global: Window | undefined;
+	const active = (window: Window | undefined, now: number): Window | undefined =>
+		window && now >= window.since && now < window.since + windowMs ? window : undefined;
+	const wait = (window: Window | undefined, allowance: number, now: number): number =>
+		window && window.count >= allowance ? window.since + windowMs - now : 0;
 	return (key, now) => {
+		const entry = active(key === null ? undefined : entries.get(key), now);
+		const total = active(global, now);
+		const left = Math.max(wait(entry, starts, now), wait(total, 1000, now));
+		if (left > 0) return { kind: "blocked", retryAfterSeconds: Math.ceil(left / 1000) };
+		global = total ?? { since: now, count: 0 };
+		global.count++;
 		if (key === null) return FREE;
-		const entry = entries.get(key);
-		if (entry && now >= entry.since && now < entry.since + windowMs) {
-			if (entry.count >= starts)
-				return { kind: "blocked", retryAfterSeconds: Math.ceil((entry.since + windowMs - now) / 1000) };
+		if (entry) {
 			entry.count++;
 		} else {
 			entries.delete(key);

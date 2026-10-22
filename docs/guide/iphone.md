@@ -549,5 +549,5 @@ The following tasks still need another app or setup:
 | "The reply could not be read." | Update the server and install the app from matching source revisions |
 | "This build cannot show what the question is about" | Install the app again, or answer in the web app |
 | "Your session ended. Sign in again." | The session ran out, or was ended under **Your sessions**. Sign in as yourself and the screens come back as you left them |
-| "Too many attempts." | Wait as long as it says. The server limits failed sign-ins |
+| "Too many attempts." | Wait as long as it says. The server limits failed sign-ins and anonymous sign-in starts |
 | The app does not open | Its signing ran out. Run `bun scripts/ios.ts install` again |

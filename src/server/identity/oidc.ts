@@ -110,6 +110,7 @@ export async function beginOidc(
 	app: App,
 	input: { purpose: OidcPurpose; browser: string | null; redirect: string },
 ): Promise<string | null> {
+	const deadline = app.now() + CEREMONY_MS;
 	let held: Held;
 	try {
 		held = await configurationOf(app);
@@ -117,6 +118,7 @@ export async function beginOidc(
 		console.warn(`[mainworthy] the identity provider could not be reached: ${(error as Error).message}`);
 		return null;
 	}
+	if (app.now() >= deadline) return null;
 	const { client, configuration } = held;
 	const verifier = client.randomPKCECodeVerifier();
 	const state = client.randomState();
@@ -130,7 +132,7 @@ export async function beginOidc(
 			kept.delete(key);
 		}
 	}
-	kept.set(state, { purpose: input.purpose, browser: input.browser, nonce, verifier, deadline: now + CEREMONY_MS });
+	kept.set(state, { purpose: input.purpose, browser: input.browser, nonce, verifier, deadline });
 	return client.buildAuthorizationUrl(configuration, {
 		redirect_uri: input.redirect,
 		scope: "openid email profile",

@@ -157,7 +157,7 @@ export async function session(
 	return { ...info, projects: info.projects.filter((project) => project.can.includes("read")) };
 }
 /**
- * What a page says of a reply that was refused for too many failed attempts (`limited`, 429): how long to wait,
+ * What a page says of a reply that was refused for too many attempts (`limited`, 429): how long to wait,
  * and nothing about what was counted. The server says how long in a header; a proxy that dropped it leaves the
  * sentence without a number.
  */
