@@ -4,6 +4,7 @@ import { Attachment, AttachmentData } from "../../core/attachments.ts";
 import { Policy } from "../../core/kinds.ts";
 import { CaseBody } from "../../core/model.ts";
 import { policyProblem, storedPolicy } from "../../core/presets.ts";
+import { rebuildAssertionIndexes } from "../evidence/assertions.ts";
 import { attachmentType, type BlobStore, blobHash } from "../kernel/blobs.ts";
 import type { Db } from "../kernel/db.ts";
 import { OpError } from "../kernel/errors.ts";
@@ -75,6 +76,10 @@ type Table = {
  * `commit_statuses` holds GitHub commit status enrollment and delivery state. An import must not enroll historical commits.
  */
 export const UNEXPORTED: readonly string[] = [
+	"assertion_seen",
+	"assertion_spreads",
+	"assertion_roots",
+	"assertion_index",
 	"slot_leases",
 	"sessions",
 	"credentials",
@@ -556,6 +561,7 @@ export function importArchive(db: Db, lines: Iterable<string>, options: { blobs?
 			const foreign = db.raw.query<{ table: string; parent: string }, []>("PRAGMA foreign_key_check").get();
 			if (foreign)
 				throw invalid(`archive foreign key violation in table ${foreign.table}, referencing ${foreign.parent}`);
+			rebuildAssertionIndexes(db, true);
 			return { rows, tables: Object.fromEntries(counts) };
 		} finally {
 			for (const insert of inserts.values()) insert.finalize();
@@ -622,7 +628,9 @@ export function removeBootstrap(db: Db): void {
 	}
 	// The untouched project may have been made a demo. The mark goes with it: the project an archive puts under
 	// the same id is not one.
-	db.exec("DELETE FROM demo_projects; DELETE FROM policies; DELETE FROM folders; DELETE FROM projects");
+	db.exec(
+		"DELETE FROM assertion_seen; DELETE FROM assertion_spreads; DELETE FROM assertion_roots; DELETE FROM assertion_index; DELETE FROM demo_projects; DELETE FROM policies; DELETE FROM folders; DELETE FROM projects",
+	);
 }
 
 /**

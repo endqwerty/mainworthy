@@ -68,8 +68,8 @@ The check reads dynamic `import()` as well as static imports, including type-onl
   it only copies committed SQLite pages.
 - Domain modules keep their existing dependency rules: decisions may read identity, policy, suite, evidence and
   runs; runs may read suite and evidence; evidence may read suite; suite may read policy. Trackers may read
-  evidence and suite, statuses may read evidence and runs, and transfer may read suite. Every domain module may
-  read the kernel. None imports operations or an outer layer.
+  evidence and suite, statuses may read evidence and runs, and transfer may read suite and evidence to rebuild
+  their private indexes after import. Every domain module may read the kernel. None imports operations or an outer layer.
 - `src/core` stays pure and is available to every layer. `src/web` imports only itself and core.
 
 The CLI has named identity exceptions in the test's map. `client.ts` shares the sign-in token length bound.

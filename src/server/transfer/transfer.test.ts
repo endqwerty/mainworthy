@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { harness } from "../../../test/helpers.ts";
 import { PRESETS } from "../../core/presets.ts";
+import { signatureHash } from "../../core/signature.ts";
 import { type BlobStore, memoryBlobs } from "../kernel/blobs.ts";
 import { Db } from "../kernel/db.ts";
 import { OpError } from "../kernel/errors.ts";
@@ -281,7 +282,16 @@ const fixtures: Record<string, Row[]> = {
 			seq: 1,
 		},
 	],
-	signatures: [{ id: 505, project: 23, hash: "signature-one", class: "assertion", text: "雪 expected", first_seq: 1 }],
+	signatures: [
+		{
+			id: 505,
+			project: 23,
+			hash: signatureHash({ class: "assertion", text: "雪 expected" }),
+			class: "assertion",
+			text: "雪 expected",
+			first_seq: 1,
+		},
+	],
 	results: [
 		{
 			id: 201,
@@ -610,6 +620,10 @@ function exportedTables(db: Db): string[] {
 	return tables(db).filter(
 		(name) =>
 			![
+				"assertion_index",
+				"assertion_roots",
+				"assertion_seen",
+				"assertion_spreads",
 				"slot_leases",
 				"tokens",
 				"sessions",
@@ -1348,8 +1362,15 @@ describe("Mainworthy instance archives", () => {
 		const to = target();
 		people(to, 1, "f");
 		importArchive(to, linesOf(text));
-		for (const table of UNEXPORTED) expect(to.raw.query(`SELECT * FROM ${table}`).all()).toEqual([]);
+		for (const table of UNEXPORTED.filter(
+			(table) => !["assertion_index", "assertion_roots", "assertion_seen", "assertion_spreads"].includes(table),
+		))
+			expect(to.raw.query(`SELECT * FROM ${table}`).all()).toEqual([]);
 		expect([...UNEXPORTED].sort()).toEqual([
+			"assertion_index",
+			"assertion_roots",
+			"assertion_seen",
+			"assertion_spreads",
 			"change_ends",
 			"commit_status_delivery",
 			"commit_statuses",

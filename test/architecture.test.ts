@@ -717,7 +717,7 @@ describe("the module map", () => {
 				"server/evidence",
 				"server/runs",
 			],
-			"server/transfer": ["server/kernel", "server/suite"],
+			"server/transfer": ["server/kernel", "server/suite", "server/evidence"],
 			"server/trackers": ["server/kernel", "server/evidence", "server/suite"],
 			"server/statuses": ["server/kernel", "server/evidence", "server/runs"],
 			"server/handoffs": ["server/kernel", "server/evidence", "server/decisions"],
@@ -795,6 +795,10 @@ describe("the module map", () => {
 			"covers",
 		],
 		"server/evidence": [
+			"assertion_seen",
+			"assertion_spreads",
+			"assertion_roots",
+			"assertion_index",
 			"artifacts",
 			"builds",
 			"deployments",
@@ -891,6 +895,10 @@ describe("the module map", () => {
 		// Change endings, scope-move audit rows and demo marks preserve the old archive version (decisions 0022, 0038
 		// and 0100). Tracker delivery and hand-offs must never replay after import. None of these tables holds credentials.
 		const other = [
+			"assertion_seen",
+			"assertion_spreads",
+			"assertion_roots",
+			"assertion_index",
 			"slot_leases",
 			"change_ends",
 			"tracker_requests",

@@ -5,21 +5,23 @@
 // explicit basis. Between the two, every run the report matters to reads `pending` (see runs.ts).
 import { createHash } from "node:crypto";
 import { caseNameAnnotation } from "../../core/case-annotation.ts";
-import { contentHash } from "../../core/hash.ts";
 import type { ActorKind } from "../../core/kinds.ts";
 import type { MethodKind } from "../../core/model.ts";
 import type { ChangeInput, Outcome, ReportInput, ResultIn, ResultLocation, TargetIn } from "../../core/ops.ts";
 import { failedStep, type ResultStep } from "../../core/results.ts";
 import type { ShardWait } from "../../core/runs.ts";
-import { normaliseFailure, signatureHash } from "../../core/signature.ts";
 import { attachmentType } from "../kernel/blobs.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { type Db, json, placeholders, type SqlValue, sql } from "../kernel/db.ts";
 import { conflict, invalid } from "../kernel/errors.ts";
 import { decisionOf, type Witness } from "../kernel/witness.ts";
 import { type CaseRow, caseById, caseRef, findCase, versionOf } from "../suite/suite.ts";
+import { assertionScope, ensureAssertionIndex, finishAssertionScope, observeAssertion } from "./assertions.ts";
 import { recordAttachments } from "./attachments.ts";
 import { buildWhat } from "./releases.ts";
+import { ensureSignature, fileSignature, type SignatureRow, signatureByHash, signatureById } from "./signatures.ts";
+
+export { type SignatureRow, signatureById } from "./signatures.ts";
 
 /** SQL predicate for result id expressions: a correction withdraws what it names, whatever its own outcome. */
 export const uncorrectedResults = (id: string, ...others: string[]): string =>
@@ -93,14 +95,6 @@ export type BatchRow = {
 	receipt: string | null;
 	at: number;
 	seq: number;
-};
-export type SignatureRow = {
-	id: number;
-	project: number;
-	hash: string;
-	class: "assertion" | "timeout" | "infra";
-	text: string;
-	first_seq: number;
 };
 export type ResultRow = {
 	id: number;
@@ -360,37 +354,10 @@ const Q = {
 	unlinkedCount: sql<{ project: number }, { n: number }>(
 		"SELECT count(*) AS n FROM tests WHERE project = $project AND case_id IS NULL AND kind = 'auto'",
 	),
-	signature: sql<{ project: number; hash: string }, SignatureRow>(
-		"SELECT * FROM signatures WHERE project = $project AND hash = $hash",
-	),
-	signatureById: sql<{ id: number }, SignatureRow>("SELECT * FROM signatures WHERE id = $id"),
-	insertSignature: sql<{ project: number; hash: string; class: string; text: string; seq: number }>(
-		"INSERT INTO signatures (project, hash, class, text, first_seq) VALUES ($project, $hash, $class, $text, $seq)",
-	),
 	splitResult: sql<{ id: number; signature: number }>("UPDATE results SET signature = $signature WHERE id = $id"),
 	splitTry: sql<{ id: number; signature: number }>("UPDATE result_tries SET signature = $signature WHERE id = $id"),
-	assertionTries: sql<
-		{ batch: number },
-		{ id: number; test: number; file: string | null; signature: number; hash: string; text: string }
-	>(
-		`SELECT tr.id, r.test, t.file, tr.signature, s.hash, s.text FROM result_tries tr
-		 JOIN results r ON r.id = tr.result JOIN tests t ON t.id = r.test JOIN signatures s ON s.id = tr.signature
-		 WHERE r.batch = $batch AND s.class = 'assertion'`,
-	),
-	assertionsOnCommit: sql<
-		{ project: number; what: string; batch: number },
-		{ test: number; file: string | null; signature: number; message: string; detail: string | null }
-	>(
-		`SELECT r.test, t.file, r.signature, r.message, r.detail FROM results r
-		 JOIN tests t ON t.id = r.test JOIN signatures s ON s.id = r.signature
-		 WHERE r.target IN (SELECT id FROM targets WHERE project = $project AND what = $what)
-		   AND r.batch != $batch AND s.class = 'assertion' AND r.message IS NOT NULL
-		 UNION
-		 SELECT r.test, t.file, tr.signature, coalesce(tr.message, 'no failure message (' || t.name || ')'), tr.detail
-		 FROM result_tries tr
-		 JOIN results r ON r.id = tr.result JOIN tests t ON t.id = r.test JOIN signatures s ON s.id = tr.signature
-		 WHERE r.target IN (SELECT id FROM targets WHERE project = $project AND what = $what)
-		   AND r.batch != $batch AND s.class = 'assertion'`,
+	assertionTries: sql<{ result: number }, { id: number; signature: number }>(
+		"SELECT tr.id, tr.signature FROM result_tries tr JOIN signatures s ON s.id = tr.signature WHERE tr.result = $result AND s.class = 'assertion' ORDER BY tr.try LIMIT 100",
 	),
 	insertResult: sql<{
 		project: number;
@@ -1226,6 +1193,9 @@ export function* applySteps(
 	pinned: (caseId: number) => number | null,
 ): Generator<undefined, ApplyResult, void> {
 	if (batch.state !== "accepted" || batch.staged === null) throw new Error(`batch ${batch.id} was already applied`);
+	yield* ensureAssertionIndex(ctx.db, ctx.project.id);
+	const scope = assertionScope(mustTarget(ctx.db, batch.target), batch.id);
+	let observations = 0;
 	const staged = json<ResultIn[]>(batch.staged);
 	const project = ctx.project.id;
 	const out: ApplyResult = {
@@ -1342,6 +1312,7 @@ export function* applySteps(
 			signature = ensureSignature(ctx, { message, ...(input.failure?.detail ? { detail: input.failure.detail } : {}) });
 		}
 
+		if (signature) yield* observeAssertion(ctx, scope, signature, test);
 		const previous = ctx.db.get(Q.previousOnTarget, {
 			target: batch.target,
 			test: test.id,
@@ -1379,7 +1350,8 @@ export function* applySteps(
 		});
 		recordAttachments(ctx, lastId, input.attachments ?? []);
 		// What the runner saw, in order: its earlier tries, then the result (decision 0129).
-		const seen: { outcome: Outcome; try: number | null }[] = (input.tries ?? []).map((tried, index) => {
+		const seen: { outcome: Outcome; try: number | null }[] = [];
+		for (const [index, tried] of (input.tries ?? []).entries()) {
 			const message = tried.failure?.message.trim() || null;
 			const cause =
 				tried.outcome === "fail" || tried.outcome === "error"
@@ -1398,8 +1370,10 @@ export function* applySteps(
 				message,
 				detail: tried.failure?.detail ?? null,
 			});
-			return { outcome: tried.outcome, try: tryId };
-		});
+			if (cause) yield* observeAssertion(ctx, scope, cause, test);
+			seen.push({ outcome: tried.outcome, try: tryId });
+			if (++observations % SLICE === 0) yield;
+		}
 		seen.push({ outcome: input.outcome, try: null });
 		const decisive = (o: Outcome) => (o === "pass" ? "pass" : o === "fail" || o === "error" ? "fail" : null);
 		const flip = (first: number, firstTry: number | null, secondTry: number | null) => {
@@ -1457,7 +1431,25 @@ export function* applySteps(
 			fresh,
 		});
 	}
-	yield* splitBroadAssertions(ctx, batch, out.results);
+	for (const result of out.results) {
+		if (result.signature?.class === "assertion") {
+			const split = signatureByHash(ctx.db, project, fileSignature(result.signature, result.test.file).hash);
+			if (split) {
+				result.signature = split;
+				ctx.db.run(Q.splitResult, { id: result.id, signature: split.id });
+			}
+		}
+		for (const tried of ctx.db.all(Q.assertionTries, { result: result.id })) {
+			const root = signatureById(ctx.db, tried.signature);
+			if (root) {
+				const split = signatureByHash(ctx.db, project, fileSignature(root, result.test.file).hash);
+				if (split) ctx.db.run(Q.splitTry, { id: tried.id, signature: split.id });
+			}
+			if (++observations % SLICE === 0) yield;
+		}
+		if (++observations % SLICE === 0) yield;
+	}
+	finishAssertionScope(ctx, scope);
 	out.counts = countOutcomes(out.results);
 	return out;
 }
@@ -1530,135 +1522,6 @@ function insertTest(
 	};
 }
 
-function fileSignature(signature: Pick<SignatureRow, "hash" | "class" | "text">, file: string | null) {
-	return {
-		hash: contentHash({ signature: signature.hash, file }),
-		class: signature.class,
-		text: `Split by file (${file ?? "no file reported"}): ${signature.text}`,
-	};
-}
-
-type AssertionObservation = {
-	test: number;
-	file: string | null;
-	signature: Pick<SignatureRow, "id" | "hash" | "class" | "text">;
-	source: { kind: "result"; result: Applied } | { kind: "try"; id: number };
-};
-
-/** The report is still being applied: assign its final causes before any run or decision sees the results. */
-function* splitBroadAssertions(ctx: Ctx, batch: BatchRow, results: Applied[]): Generator<undefined, void, void> {
-	const observations: AssertionObservation[] = [];
-	for (const result of results) {
-		if (result.signature?.class !== "assertion") continue;
-		observations.push({
-			test: result.test.id,
-			file: result.test.file,
-			signature: result.signature,
-			source: { kind: "result", result },
-		});
-	}
-	for (const tried of ctx.db.all(Q.assertionTries, { batch: batch.id })) {
-		observations.push({
-			test: tried.test,
-			file: tried.file,
-			signature: { id: tried.signature, hash: tried.hash, class: "assertion", text: tried.text },
-			source: { kind: "try", id: tried.id },
-		});
-	}
-	const groups = new Map<
-		number,
-		{
-			signature: AssertionObservation["signature"];
-			tests: Set<number>;
-			files: Set<string | null>;
-			observations: AssertionObservation[];
-		}
-	>();
-	for (const observation of observations) {
-		let group = groups.get(observation.signature.id);
-		if (!group) {
-			group = { signature: observation.signature, tests: new Set(), files: new Set(), observations: [] };
-			groups.set(observation.signature.id, group);
-		}
-		group.tests.add(observation.test);
-		group.files.add(observation.file);
-		group.observations.push(observation);
-	}
-	if (groups.size === 0) return;
-	const target = mustTarget(ctx.db, batch.target);
-	if (target.commit_sha !== null) {
-		const byHash = new Map([...groups.values()].map((group) => [group.signature.hash, group]));
-		const hashes = new Map([...groups.values()].map((group) => [group.signature.id, group.signature.hash]));
-		// Split results and tries retain the original failure input. Count it without changing their stored causes.
-		let scanned = 0;
-		for (const earlier of ctx.db.all(Q.assertionsOnCommit, {
-			project: ctx.project.id,
-			what: target.what,
-			batch: batch.id,
-		})) {
-			if (scanned++ > 0 && scanned % SLICE === 0) yield;
-			let hash = hashes.get(earlier.signature);
-			if (hash === undefined) {
-				hash = signatureHash(
-					normaliseFailure({
-						message: earlier.message,
-						...(earlier.detail !== null ? { detail: earlier.detail } : {}),
-					}),
-				);
-				hashes.set(earlier.signature, hash);
-			}
-			const group = byHash.get(hash);
-			if (!group) continue;
-			group.tests.add(earlier.test);
-			group.files.add(earlier.file);
-		}
-	}
-	let changed = 0;
-	for (const group of groups.values()) {
-		const broad = group.tests.size > 50 && group.files.size - Number(group.files.has(null)) > 5;
-		const byFile = new Map<string | null, SignatureRow | null>();
-		if (broad) {
-			for (const file of group.files) {
-				if (changed++ > 0 && changed % SLICE === 0) yield;
-				byFile.set(file, storeSignature(ctx, fileSignature(group.signature, file)));
-			}
-		}
-		for (const observation of group.observations) {
-			if (changed++ > 0 && changed % SLICE === 0) yield;
-			const file = observation.file;
-			if (!byFile.has(file)) {
-				const signature = fileSignature(group.signature, file);
-				byFile.set(file, ctx.db.get(Q.signature, { project: ctx.project.id, hash: signature.hash }));
-			}
-			const split = byFile.get(file);
-			if (!split) continue;
-			if (observation.source.kind === "result") {
-				const result = observation.source.result;
-				result.signature = split;
-				ctx.db.run(Q.splitResult, { id: result.id, signature: split.id });
-			} else {
-				ctx.db.run(Q.splitTry, { id: observation.source.id, signature: split.id });
-			}
-		}
-	}
-}
-
-function ensureSignature(ctx: Ctx, failure: { message: string; detail?: string }): SignatureRow {
-	const normal = normaliseFailure(failure);
-	return storeSignature(ctx, { ...normal, hash: signatureHash(normal) });
-}
-
-function storeSignature(ctx: Ctx, signature: Pick<SignatureRow, "hash" | "class" | "text">): SignatureRow {
-	const found = ctx.db.get(Q.signature, { project: ctx.project.id, hash: signature.hash });
-	if (found) return found;
-	const { lastId } = ctx.db.run(Q.insertSignature, {
-		project: ctx.project.id,
-		...signature,
-		seq: ctx.seq,
-	});
-	return { id: lastId, project: ctx.project.id, ...signature, first_seq: ctx.seq };
-}
-
 // ── Reads ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 export const testRef = (row: { no: number }): string => `T-${row.no}`;
@@ -1680,7 +1543,6 @@ export const NO_FILE = "(no file)";
 export const unlinkedInFile = (db: Db, project: number, file: string): TestRow[] =>
 	db.all(file === NO_FILE ? Q.unlinkedWithoutFile : Q.unlinkedInFile, { project, file });
 export const unlinkedCount = (db: Db, project: number): number => db.get(Q.unlinkedCount, { project })?.n ?? 0;
-export const signatureById = (db: Db, id: number): SignatureRow | null => db.get(Q.signatureById, { id });
 export const resultById = (db: Db, id: number): ResultRow | null => db.get(Q.resultById, { id });
 
 /**

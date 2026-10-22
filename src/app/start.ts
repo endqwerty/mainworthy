@@ -2,6 +2,7 @@
 // then listen. The same function is the Local layer on a laptop and the Server layer in a container; only the
 // configuration differs (decision 0002).
 
+import { rebuildAssertionIndexes } from "../server/evidence/assertions.ts";
 import { attachmentHashes } from "../server/evidence/attachments.ts";
 import { deliverHandoffs, recoverHandoffs, stopHandoffs, waitHandoffs } from "../server/handoffs/handoffs.ts";
 import {
@@ -100,6 +101,7 @@ export function start(
 	let server: ReturnType<typeof serve>;
 	try {
 		app.blobs.prune(attachmentHashes(app.db));
+		rebuildAssertionIndexes(app.db);
 		recoverAccepted(app);
 		recoverDisputes(app);
 		recoverHandoffs(app);
