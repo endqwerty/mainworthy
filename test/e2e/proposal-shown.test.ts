@@ -131,6 +131,38 @@ const partCoverage = async (page: Page) =>
 		.object({ parts: z.number(), unseen: z.number() })
 		.parse(await page.evaluate((): unknown => Reflect.get(window, "mainworthyPartCoverage")));
 
+for (const height of [844, 360])
+	t(
+		`phone Queue at 390x${height} fits short evidence without extra space`,
+		async () => {
+			const server = await startServer({ preset: "standard", seed: false });
+			let view: Awaited<ReturnType<typeof openPage>> | null = null;
+			try {
+				const token = await agentToken(server);
+				const proposed = await server.api("propose", { edits: [{ op: "create", outline: "One case" }] }, { token });
+				const q = proposed.question ?? "";
+				view = await openPage(server, {
+					path: "/p/scratch/queue",
+					device: "phone",
+					setup: async (page) => page.setViewportSize({ width: 390, height }),
+				});
+				const { page } = view;
+				await page.locator("#list [role=option]").first().tap();
+				await page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`).waitFor();
+				await frames(page);
+				const evidence = await page.locator(".queue-evidence").boundingBox();
+				const answers = await page.locator(".queue-answers").boundingBox();
+				expect(Math.round(evidence?.height ?? 0)).toBe(135);
+				expect(Math.round(answers?.y ?? 0)).toBe(301);
+				expect(view.errors).toEqual([]);
+			} finally {
+				await view?.close();
+				await server.stop();
+			}
+		},
+		30000,
+	);
+
 for (const height of [260, 500])
 	t(
 		`desktop Queue at 1100x${height} pages all evidence before rejecting`,
