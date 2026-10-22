@@ -121,21 +121,41 @@ export function launchProblem(cwd: string, repo: string): string | null {
 		: null;
 }
 
-/** A file of `git ls-tree -r`: its mode, its object and its path. */
-export type Entry = { mode: string; sha: string; path: string };
+/** A file of `git ls-tree -r`: its mode, its object and its path; `exact` is false when the path's bytes are not
+ * UTF-8, so `path` (decoded with replacement characters) is not the name git holds. */
+export type Entry = { mode: string; sha: string; path: string; exact: boolean };
 
-export const parseTree = (output: string): Entry[] =>
-	output
-		.split("\0")
-		.filter(Boolean)
-		.map((line) => {
-			const tab = line.indexOf("\t");
-			const [mode = "", , sha = ""] = line.slice(0, tab).split(" ");
-			return { mode, sha, path: line.slice(tab + 1) };
-		});
+const strict = new TextDecoder("utf-8", { fatal: true });
+const loose = new TextDecoder("utf-8");
+
+/** `git ls-tree -r -z`'s output, read as bytes: a path is decoded only when it is UTF-8. */
+export function parseTree(output: Uint8Array): Entry[] {
+	const entries: Entry[] = [];
+	let at = 0;
+	while (at < output.length) {
+		const end = output.indexOf(0, at);
+		const line = output.subarray(at, end === -1 ? output.length : end);
+		at = end === -1 ? output.length : end + 1;
+		const tab = line.indexOf(9);
+		const [mode = "", , sha = ""] = loose.decode(line.subarray(0, tab)).split(" ");
+		const name = line.subarray(tab + 1);
+		let path = loose.decode(name);
+		let exact = true;
+		try {
+			path = strict.decode(name);
+		} catch {
+			exact = false;
+		}
+		entries.push({ mode, sha, path, exact });
+	}
+	return entries;
+}
 
 /** Why an entry of the head's tree cannot be written into the export: a link, a submodule, or a path that leaves it. */
 export function unwritable(e: Entry): string | null {
+	if (!e.exact) return `${JSON.stringify(e.path)} is not a UTF-8 path, so the export could not hold its name`;
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character in a path is what this refuses.
+	if (/[\u0000-\u001f\u007f]/.test(e.path)) return `${JSON.stringify(e.path)} has a control character in its name`;
 	if (e.mode === "120000") return `${e.path} is a link, which the audit does not export`;
 	if (e.mode === "160000") return `${e.path} is a submodule, which the audit does not export`;
 	if (e.mode !== "100644" && e.mode !== "100755")
@@ -244,6 +264,13 @@ type Ran = { ok: boolean; out: string; err: string };
 const run = (cwd: string, command: string, args: string[], input?: string): Ran => {
 	const r = spawnSync(command, args, { cwd, encoding: "utf8", maxBuffer: 1 << 28, input });
 	return { ok: r.status === 0, out: r.stdout ?? "", err: r.stderr ?? "" };
+};
+
+/** The command's output as bytes, for what must reach a file unchanged. */
+const bytes = (cwd: string, command: string, args: string[]): Buffer => {
+	const r = spawnSync(command, args, { cwd, maxBuffer: 1 << 30 });
+	if (r.status !== 0) throw new Error(`${command} ${args.join(" ")} failed: ${r.stderr.toString().trim()}`);
+	return r.stdout;
 };
 
 const must = (cwd: string, command: string, args: string[], input?: string): string => {
@@ -377,8 +404,9 @@ function main(argv: string[]): number {
 	console.log(`scratch: ${directory}`);
 	const tree = join(directory, "tree");
 	mkdirSync(tree);
-	const entries = parseTree(must(repo, "git", ["ls-tree", "-r", "-z", "--full-tree", pull.head]));
+	const entries = parseTree(bytes(repo, "git", ["ls-tree", "-r", "-z", "--full-tree", pull.head]));
 	const cannot = entries.map(unwritable).filter((line) => line !== null);
+	if (entries.length === 0) cannot.push(`head ${short(pull.head)} has no files`);
 	if (cannot.length > 0) {
 		for (const line of cannot) console.error(line);
 		return 2;
@@ -411,7 +439,7 @@ function main(argv: string[]): number {
 	const diff = join(directory, "change.diff");
 	writeFileSync(
 		diff,
-		must(repo, "git", [`--attr-source=${EMPTY_TREE}`, "diff", "--no-ext-diff", "--no-textconv", base, pull.head]),
+		bytes(repo, "git", [`--attr-source=${EMPTY_TREE}`, "diff", "--no-ext-diff", "--no-textconv", base, pull.head]),
 	);
 	if (statSync(diff).size === 0) throw new Error(`head ${short(pull.head)} changes nothing on ${short(base)}`);
 	const changed = must(repo, "git", [`--attr-source=${EMPTY_TREE}`, "diff", "--name-only", base, pull.head])

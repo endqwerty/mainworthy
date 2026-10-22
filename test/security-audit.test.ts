@@ -143,7 +143,7 @@ test("bun run in the checkout, where its bunfig.toml and .env load first, is ref
 	expect(launchProblem("/work", "/w")).toBeNull();
 });
 
-const entry = (path: string, sha = "1".repeat(40), mode = "100644"): Entry => ({ mode, sha, path });
+const entry = (path: string, sha = "1".repeat(40), mode = "100644"): Entry => ({ mode, sha, path, exact: true });
 
 test("the export must be the head's tree, file for file and byte for byte", () => {
 	const head = [entry("a.ts"), entry("src/b.ts", "2".repeat(40))];
@@ -171,11 +171,21 @@ test("an entry that is not a plain file inside the export is not written", () =>
 	expect(unwritable(entry("m", "1".repeat(40), "160000"))).toContain("is a submodule");
 	for (const path of ["../x", "a/../../x", "/etc/x", "a/.git/hooks/x", "a//b", "./a"])
 		expect(unwritable(entry(path))).toContain("is not a path inside the export");
+	for (const path of ["a\nb.ts", "c\td.sh", "e\u007f"]) expect(unwritable(entry(path))).toContain("control character");
 });
 
-test("ls-tree's output is read with paths that hold spaces and tabs", () => {
-	const out = `100644 blob ${"1".repeat(40)}\ta b.ts\u0000100755 blob ${"2".repeat(40)}\tc\td.sh\u0000`;
-	expect(parseTree(out)).toEqual([entry("a b.ts"), entry("c\td.sh", "2".repeat(40), "100755")]);
+test("ls-tree's output is read as bytes, and a path that is not UTF-8 is marked so", () => {
+	const out = Buffer.concat([
+		Buffer.from(`100644 blob ${"1".repeat(40)}\ta b.ts\u0000100755 blob ${"2".repeat(40)}\tc\td.sh\u0000`),
+		Buffer.from(`100644 blob ${"3".repeat(40)}\tx`),
+		Buffer.from([0xff, 0]),
+	]);
+	const [plain, tabbed, raw] = parseTree(out);
+	expect(plain).toEqual(entry("a b.ts"));
+	expect(tabbed).toEqual(entry("c\td.sh", "2".repeat(40), "100755"));
+	expect(raw?.exact).toBe(false);
+	expect(raw && unwritable(raw)).toContain("is not a UTF-8 path");
+	expect(parseTree(Buffer.alloc(0))).toEqual([]);
 });
 
 test("the documented launcher loads no start-up file of the checkout before the script refuses", () => {
