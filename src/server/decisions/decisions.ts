@@ -1821,10 +1821,10 @@ function passedIn(ctx: Ctx, question: QuestionRow, run: RunRow): { reason: strin
 	const passing = new Set(passingIn(ctx.db, run.id, tests).map(where));
 	if (failed.length === 0 || failed.some((row) => !passing.has(where(row)))) return null;
 	const passedOn = json<{ commit?: string }>(run.accepts).commit;
-	// A fix: a commit the cause never failed on, while the scope is still open. A commit that failed and passed when
-	// it ran again proves no fix, and a pass after the change ended says nothing about what it ended with. Decided
-	// now, because a change can be reopened later and an archive leaves out how changes ended.
-	const fixed = passedOn !== undefined && !failed.some((row) => row.commit === passedOn) && !scopeEnded(ctx.db, scope);
+	// A fix: the cause passed on a commit it never failed on in this scope. A commit that failed and passed when it ran
+	// again proves no fix. Nothing here says when that commit was made or reported, or that it is newer than the
+	// failing ones (a reset can return to an older one), so the fix claims neither.
+	const fixed = passedOn !== undefined && !failed.some((row) => row.commit === passedOn);
 	const commit = passedOn?.slice(0, 12) ?? runRef(run);
 	return { reason: `Every test it named passed on ${commit} where it had failed; the answer ended.`, fixed };
 }
@@ -1963,7 +1963,7 @@ export function endDefectHold(ctx: Ctx, decision: DecisionRow, ref: string): boo
 /**
  * A decision stops holding by the rule: its time ran out (`hold-expired`), its tracker issue closed
  * (`tracker-closed`), or its cause passed (`passed`). Each way it no longer explains anything. A `passed` ending
- * records `fixed` in its answer when a later commit passed while its scope was open (`passedIn`).
+ * records `fixed` in its answer when the cause passed on a commit it never failed on in its scope (`passedIn`).
  */
 type Ending =
 	| { is: "expired"; clause: "hold-expired"; reason: null }

@@ -208,9 +208,7 @@ function ChangesWorkbench() {
 								<MergeGateReceipt receipt={impactData.data.change.mergeReceipt} />
 							)}
 							{current && <ChangeEnding change={current} />}
-							{current && fixedHere > 0 && (
-								<p className="change-ended-note">{fixedOnChangeText(fixedHere, current.state)}</p>
-							)}
+							{current && fixedHere > 0 && <p className="change-ended-note">{fixedOnChangeText(fixedHere)}</p>}
 							<SectionHeading>Open questions</SectionHeading>
 							{open.error && <p role="status">{open.error.message}</p>}
 							{openData?.items.map((q) => (

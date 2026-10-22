@@ -19,10 +19,10 @@ struct ValueTests {
 		#expect(decision.ending?.fixed == nil)
 		let fixed = json.replacingOccurrences(of: #""at":2000,"#, with: #""at":2000,"fixedIn":{"change":"pr:408","state":"merged"},"#)
 		let ended = Decision(try JSONDecoder().decode(Wire.Decision.self, from: Data(fixed.utf8)))
-		#expect(ended.ending?.fixed == "Fixed in pr:408 before it merged")
+		#expect(ended.ending?.fixed == "Fixed by another commit of pr:408, which merged")
 	}
 
-	@Test("an answer a later commit ended names its change as the server does")
+	@Test("an answer another commit ended names its change as the server does")
 	func fixedInParity() {
 		#expect(Parity.fixedIn.count == 3)
 		for row in Parity.fixedIn { #expect(DecisionEnding.fixedText(change: "pr:482", state: row.state) == row.says) }

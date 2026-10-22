@@ -322,16 +322,16 @@ the reason "Every test it named passed on `<commit>` where it had failed; the an
 See [export and verify an audit](./data.md#export-and-verify-an-audit). If the cause fails again later, it is a new question.
 The command `mainworthy get Q-1` also returns the ending and the original answer under `decision.supersedes`.
 
-When the scope is a pull request or branch, and the commit that passed is a later one than those the cause failed
-on, reported while the change was open, the change fixed the failure itself. The ending then says so in place of the
-rule: "Fixed by a later commit of pr:482", or "Fixed in pr:482 before it merged" once it has merged.
-`decision.fixedIn` carries the change's key and whether it is `open`, `merged` or `closed`. Such a failure needs no
-issue of its own: the pull request that fixed it is the record, and it names the issue it was for.
+When the scope is a pull request or branch, and the commit that passed is not one the cause failed on, the change
+fixed the failure itself. The ending says so in place of the rule: "Fixed by another commit of pr:482", with ", which
+merged" or ", which closed without merging" once the change has ended. `decision.fixedIn` carries the change's key
+and whether it is `open`, `merged` or `closed`. Such a failure needs no issue of its own: the pull request that fixed
+it is the record, and it names the issue it was for.
 
-A commit that failed and then passed when it ran again proves no fix, and neither does a pass reported after the
-change ended. Those endings, and endings recorded before Mainworthy noted fixes, keep the rule and reason and claim
-no fix. Whether an ending is a fix is decided when it is recorded, as `fixed: true` in its answer, so reopening the
-change or restoring an archive later does not change it.
+A commit that failed and then passed when it ran again proves no fix, so its ending keeps the rule and reason and
+claims none. Endings recorded before Mainworthy noted fixes claim none either. Mainworthy does not know which of two
+commits is newer or when one was pushed, so the sentence says "another commit", not "a later one" or "before it
+merged". Whether an ending is a fix is decided when it is recorded, as `fixed: true` in its answer.
 An ended answer cannot be withdrawn. A timed expiry or tracker closure shows its own recorded rule and reason,
 without claiming that the cause passed.
 When you select an ended answer, the footer and command palette leave out "Undo answer".
