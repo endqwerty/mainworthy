@@ -58,7 +58,11 @@ To release a request whose outcome is unknown, choose **Discard this plan**. The
 been recorded. Discarding the saved request does not undo a run.
 If another tab saved a plan while you were typing, submitting first shows that plan and a notice.
 Choose **Retry plan** to send the displayed request.
-Invalid or older-format saved requests are removed and do not prevent a fresh plan.
+A saved plan carries the project's identity, so deleting the project and creating another with the same key
+cannot send that plan into the replacement. If the browser knows the project changed, **Retry plan** explains
+why it cannot send the plan and keeps it locked. Choose **Discard this plan** before planning in the new project.
+A replacement after the page last read the project is refused by the server instead. Reload to read the new project.
+Invalid or older-format saved requests, including those without a project identity, are removed and never retried.
 The browser must be able to save the request before it sends a plan. Clearing this site's browser data
 or signing out with **Sign out and clear browser data** removes any request still kept on this device.
 "Count only results recorded in this run" accepts work explicitly reported to the run.

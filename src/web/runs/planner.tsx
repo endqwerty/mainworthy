@@ -10,7 +10,10 @@ import { navigate, navigationToken, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { KeyCap, Select } from "../ui/index.tsx";
 
-const PendingPlan = PlanInput.extend({ cmd: PlanInput.shape.cmd.unwrap() });
+const PendingPlan = PlanInput.extend({
+	cmd: PlanInput.shape.cmd.unwrap(),
+	projectIdentity: PlanInput.shape.projectIdentity.unwrap(),
+});
 type Submission = { state: "sending" | "uncertain"; input: z.infer<typeof PendingPlan> };
 
 function readPlan(key: string): Submission["input"] | null {
@@ -27,7 +30,8 @@ function readPlan(key: string): Submission["input"] | null {
 }
 
 export function RunPlanner({ close }: { close: () => void }) {
-	const { project, setStatus } = useApp();
+	const { project, session, setStatus } = useApp();
+	const projectIdentity = session.projects.find((entry) => entry.key === project)?.identity;
 	const owner = useRef(deviceSession()).current;
 	const key = deviceKey("run-plan", project, owner.actorId);
 	const [initial] = useState(() => readPlan(key));
@@ -127,7 +131,18 @@ export function RunPlanner({ close }: { close: () => void }) {
 						hold({ state: "uncertain", input: previous });
 						return;
 					}
+					if (!projectIdentity) {
+						setStatus("The current project's identity is unavailable. Reload before planning a run.");
+						return;
+					}
+					if (previous && previous.projectIdentity !== projectIdentity) {
+						setStatus(
+							"This saved plan belongs to an earlier project and cannot be retried here. Discard it before planning a new run.",
+						);
+						return;
+					}
 					input = previous ?? {
+						projectIdentity,
 						name: name.trim(),
 						select: selection(filter),
 						...(target === "commit" ? { accepts: { commit: commit.trim() } } : {}),
