@@ -2449,7 +2449,16 @@ test("real report outputs use git top level or cwd for stable Jest and Vitest ke
 						cwd: checkout !== "plain" ? nested : root,
 					},
 				);
-				expect(result.stderr).toBe("");
+				const warnings =
+					format === "jest"
+						? [
+								"Jest test tests/sample.test.js::fails: individual retry diagnostics are unavailable",
+								"Jest test tests/sample.test.js::retry: individual retry diagnostics are unavailable",
+							]
+						: [
+								"Jest/Vitest test tests/sample.test.js::retry: report omits retry count and boundaries; kept earlier failures as one try",
+							];
+				expect(result.stderr).toBe(`${warnings.join("\n")}\n`);
 				expect(result.code).toBe(0);
 				expect(JSON.parse(result.stdout).counts).toEqual({ total: 7, pass: 4, fail: 1, skip: 2, error: 0, blocked: 0 });
 				const linked = await run(
@@ -2457,6 +2466,7 @@ test("real report outputs use git top level or cwd for stable Jest and Vitest ke
 					{ cwd: alias },
 				);
 				expect(linked.code).toBe(0);
+				expect(linked.stderr.startsWith(result.stderr)).toBe(true);
 				expect(JSON.parse(linked.stdout).fresh).toBe(false);
 				expect(
 					instance.app.db.raw.query<{ key: string; file: string }, []>("SELECT key, file FROM tests ORDER BY id").all(),

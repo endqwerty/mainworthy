@@ -79,13 +79,7 @@ export function parsePytest(value: unknown): ParsedReport {
 				file,
 				suites: names,
 				outcome,
-				...(test.outcome === "rerun"
-					? {
-							tries: [
-								{ outcome: "fail", failure: { message: "pytest reran this test; earlier stages are unavailable" } },
-							],
-						}
-					: {}),
+				...(test.outcome === "rerun" ? { tries: [{ outcome: "fail" }] } : {}),
 				annotation: test.user_properties
 					?.map((item) => caseAnnotation(item.mainworthy ?? ""))
 					.findLast((claim) => claim !== undefined),

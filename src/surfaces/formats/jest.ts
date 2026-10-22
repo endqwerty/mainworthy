@@ -79,10 +79,12 @@ export function parseJest(value: unknown, rootDir: string): ParsedReport {
 					`Jest/Vitest test ${file}::${test.title}: report omits retry count and boundaries; kept earlier failures as one try`,
 				);
 			const tries = details.map((value) => {
-				const detail = value.trim() || "Runner failed before retry; individual retry diagnostics are unavailable";
+				const detail = value.trim();
 				return {
 					outcome: "fail" as const,
-					failure: { message: clip(detail.split(/\r?\n/)[0] ?? detail, 4000), detail: clip(detail, 20_000) },
+					...(detail
+						? { failure: { message: clip(detail.split(/\r?\n/)[0] ?? detail, 4000), detail: clip(detail, 20_000) } }
+						: {}),
 				};
 			});
 			results.push(

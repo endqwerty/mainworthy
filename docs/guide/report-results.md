@@ -425,9 +425,8 @@ every time. Surefire writes the first run as the `failure` and the later runs af
 last rerun is the result and the `failure` is the oldest try. Duplicate testcases named
 `(retry #1)` and so on are not yet read as tries of one test.
 
-Jest and Vitest JSON contain the final assertion outcome and duration, but their
-standard JSON reporters do not export a retry count or the earlier tries. Mainworthy does not
-invent them. The pytest adapter sums setup, call, and teardown durations and keeps setup
+Jest and Vitest JSON keep the final assertion outcome and duration, together with the
+retry evidence listed above. The pytest adapter sums its final setup, call, and teardown durations and keeps setup
 or teardown failures as errors. Its failure message uses `crash.message` when
 available and keeps the traceback in the details. Expected pytest failures are skipped.
 TRX keeps each execution and its duration. Ambiguous or unfinished outcomes

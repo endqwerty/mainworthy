@@ -42,7 +42,7 @@ test("Jest does not attribute flattened multiple errors to individual tries", ()
 		options,
 	);
 	expect(results[0]?.tries).toHaveLength(2);
-	expect(results[0]?.tries?.[0]?.failure?.detail).not.toContain("cleanup failed");
+	expect(results[0]?.tries).toEqual([{ outcome: "fail" }, { outcome: "fail" }]);
 	expect(warnings.join(" ")).toContain("diagnostics");
 });
 
@@ -133,4 +133,11 @@ test("pytest's rerun marker cannot turn missing or unfinished final stages into 
 		const text = JSON.stringify({ exitcode: 0, tests: [{ nodeid: "test.py::sample", outcome: "rerun", ...stages }] });
 		expect(() => parseReport(text, options)).toThrow("retries.json:");
 	}
+});
+
+test("a retry whose diagnostic was lost makes no cause claim in the adapter output", async () => {
+	const jest = parseReport(assertion({ invocations: 3, retryReasons: [] }), options);
+	const pytest = parseReport(await fixture("pytest"), options);
+	expect(jest.results[0]?.tries).toEqual([{ outcome: "fail" }, { outcome: "fail" }]);
+	expect(pytest.results[0]?.tries).toEqual([{ outcome: "fail" }]);
 });
