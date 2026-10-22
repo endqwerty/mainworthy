@@ -84,6 +84,39 @@ public struct LandedCommit: Equatable, Sendable {
 	}
 }
 
+/// The head gate read when the merge was reported. Later evidence changes only the live gate.
+public struct MergeGateReceipt: Equatable, Sendable {
+	public let head: String?
+	public let at: Date
+	public let verdict: ChangeVerdict
+	public let reason: String
+	public let waiting: [ShardWait]
+	public let results: [Result]
+
+	public struct Result: Identifiable, Equatable, Sendable {
+		public let id: Int
+		public let test: String
+		public let name: String
+		public let standing: String
+		public let context: String
+		public let decision: Int?
+		public let answer: String?
+	}
+
+	init(_ wire: Wire.MergeReceipt) {
+		head = wire.head
+		at = Date(timeIntervalSince1970: Double(wire.at) / 1000)
+		verdict = ChangeVerdict(wire.gate.verdict)
+		reason = wire.gate.reason
+		waiting = (wire.gate.waiting ?? []).map(ShardWait.init)
+		results = wire.results.map { row in
+			Result(id: row.result, test: row.test, name: row.name, standing: row.standing,
+				context: [row.method, row.job, row.env].filter { !$0.isEmpty }.joined(separator: " · "),
+				decision: row.decision, answer: wire.decisions.first { $0.id == row.decision }?.answer.is)
+		}
+	}
+}
+
 /// A branch or pull request for which a pipeline has reported results.
 public struct ChangeSummary: Identifiable, Equatable, Sendable {
 	public var id: String { key }
@@ -184,6 +217,7 @@ public struct ChangeFailure: Equatable, Sendable {
 }
 
 public struct ChangeDetails: Equatable, Sendable {
+	public let mergeReceipt: MergeGateReceipt?
 	public let change: ChangeSummary
 	public let base: String?
 	public let gate: ChangeGate
@@ -237,8 +271,10 @@ extension ProjectClient {
 		guard confirmed.change.key == change, confirmed.change.head == affected.change.head,
 			confirmed.change.base == affected.change.base, confirmed.change.state == affected.change.state,
 			confirmed.change.landing == affected.change.landing,
+			confirmed.change.mergeReceipt == affected.change.mergeReceipt,
 			confirmed.gate?.run == status.run else { return nil }
 		return ChangeDetails(
+			mergeReceipt: affected.change.mergeReceipt.map(MergeGateReceipt.init),
 			change: ChangeSummary(key: change, basis: affected.change, gate: status, header: header, known: known),
 			base: affected.change.base, gate: ChangeGate(status),
 			questions: questions.items.map(Question.init), failing: failing,

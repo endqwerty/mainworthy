@@ -673,6 +673,46 @@ enum Wire {
 		let stale: Bool
 	}
 
+	/// The frozen gate, not the head's current verdict.
+	struct MergeReceiptGate: Decodable, Equatable, Sendable {
+		let verdict: String
+		let reason: String
+		/// None: the gate waits for no shard.
+		let waiting: [ShardWait]?
+	}
+
+	/// A counted result and the standing it had at that time.
+	struct MergeReceiptResult: Decodable, Equatable, Sendable {
+		let result: Int
+		let test: String
+		let name: String
+		let standing: String
+		let method: String
+		let job: String
+		let env: String
+		let decision: Int?
+	}
+
+	/// The recorded answer.
+	struct MergeReceiptAnswer: Decodable, Equatable, Sendable {
+		let `is`: String
+	}
+
+	/// The answer a frozen standing rested on.
+	struct MergeReceiptDecision: Decodable, Equatable, Sendable {
+		let id: Int
+		let answer: MergeReceiptAnswer
+	}
+
+	/// The head's gate read when a merge was reported, before any landing moves it to trunk.
+	struct MergeReceipt: Decodable, Equatable, Sendable {
+		let head: String?
+		let at: Int
+		let gate: MergeReceiptGate
+		let results: [MergeReceiptResult]
+		let decisions: [MergeReceiptDecision]
+	}
+
 	/// The change and commits the affected cases were read for.
 	struct ChangeBasis: Decodable, Equatable, Sendable {
 		let key: String
@@ -682,6 +722,7 @@ enum Wire {
 		/// Open, merged or closed, as it is now: a change older than the list's newest is read here.
 		let state: String
 		let landing: ChangeLanding?
+		let mergeReceipt: MergeReceipt?
 	}
 
 	/// The run counted for this head, if any.

@@ -76,6 +76,32 @@ struct ChangeView: View {
 							.font(.subheadline).foregroundStyle(Color.warn)
 					}
 				}
+				if detail.change.state == .merged {
+					if let receipt = detail.mergeReceipt {
+						Panel("Head \(receipt.head.map { String($0.prefix(12)) } ?? "not reported") when the merge was reported") {
+							Tag(text: receipt.verdict.name, tint: receipt.verdict.tint)
+								.accessibilityIdentifier("change-receipt-verdict")
+							Text(ShardWait.reason(receipt.reason, beside: receipt.waiting))
+							ShardStrips(waiting: receipt.waiting)
+							Text(receipt.at, format: .dateTime).font(.caption).foregroundStyle(.secondary)
+							DisclosureGroup("Counted results") {
+								if receipt.results.isEmpty { Text("No results counted at that time.") }
+								ForEach(receipt.results) { row in
+									VStack(alignment: .leading, spacing: 4) {
+										Text(row.name)
+										Text("\(row.test) · result \(row.id) · \(ResultStanding(rawValue: row.standing)?.label ?? row.standing)").font(.caption)
+										Text(row.context).font(.caption).foregroundStyle(.secondary)
+										if let decision = row.decision, let answer = row.answer {
+											Text("Decision \(decision): \(answer)").font(.caption)
+										}
+									}
+								}
+							}
+						}
+					} else {
+						Text("No gate receipt was recorded when this merge was reported.").foregroundStyle(.secondary)
+					}
+				}
 				if case .asCommit(let landed) = detail.change.landing {
 					Panel("Landed on \(landed.branch)") {
 						commit("Commit", landed.commit)

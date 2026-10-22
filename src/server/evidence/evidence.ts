@@ -69,6 +69,7 @@ export type ChangeRow = {
 	/** How the change ended, or null while it is open: read from `change_ends`. An ended change is not asked about. */
 	ended: "merged" | "closed" | null;
 	ended_at: number | null;
+	receipt: number | null;
 	/** The commit a merged change landed as on trunk, and that branch (decision 0123): its own commit, with its own gate. */
 	landing_commit: string | null;
 	landing_branch: string | null;
@@ -217,7 +218,7 @@ const Q = {
 	),
 	// A change is read with how it ended, which is a row of `change_ends` or none.
 	change: sql<{ project: number; key: string }, ChangeRow>(
-		`SELECT c.*, e.ended, e.at AS ended_at, e.landing_commit, e.landing_branch FROM changes c LEFT JOIN change_ends e ON e.change = c.id
+		`SELECT c.*, e.ended, e.at AS ended_at, e.receipt, e.landing_commit, e.landing_branch FROM changes c LEFT JOIN change_ends e ON e.change = c.id
 		 WHERE c.project = $project AND c.key = $key`,
 	),
 	locationChanges: sql<{ targets: string }, { target: number; key: string | null; title: string | null }>(
@@ -228,10 +229,10 @@ const Q = {
 		 JOIN changes c ON c.id = coalesce(t.change, e.change) AND c.project = t.project`,
 	),
 	changeById: sql<{ id: number }, ChangeRow>(
-		"SELECT c.*, e.ended, e.at AS ended_at, e.landing_commit, e.landing_branch FROM changes c LEFT JOIN change_ends e ON e.change = c.id WHERE c.id = $id",
+		"SELECT c.*, e.ended, e.at AS ended_at, e.receipt, e.landing_commit, e.landing_branch FROM changes c LEFT JOIN change_ends e ON e.change = c.id WHERE c.id = $id",
 	),
 	changes: sql<{ project: number; limit: number }, ChangeRow>(
-		`SELECT c.*, e.ended, e.at AS ended_at, e.landing_commit, e.landing_branch FROM changes c LEFT JOIN change_ends e ON e.change = c.id
+		`SELECT c.*, e.ended, e.at AS ended_at, e.receipt, e.landing_commit, e.landing_branch FROM changes c LEFT JOIN change_ends e ON e.change = c.id
 		 WHERE c.project = $project ORDER BY c.rev DESC LIMIT $limit`,
 	),
 	insertChange: sql<{
@@ -256,12 +257,15 @@ const Q = {
 	endChange: sql<{ id: number; ended: string; at: number }>(
 		`INSERT INTO change_ends (change, ended, at) VALUES ($id, $ended, $at)
 		 ON CONFLICT (change) DO UPDATE SET ended = excluded.ended, at = excluded.at,
-		 landing_commit = NULL, landing_repo = NULL, landing_branch = NULL`,
+		 landing_commit = NULL, landing_repo = NULL, landing_branch = NULL, receipt = NULL`,
 	),
 	landChange: sql<{ id: number; commit: string; repo: string | null; branch: string }>(
 		`UPDATE change_ends SET landing_commit = $commit, landing_repo = $repo, landing_branch = $branch
 		 WHERE change = $id AND ended = 'merged'
 		 AND (landing_commit IS NOT $commit OR landing_repo IS NOT $repo OR landing_branch IS NOT $branch)`,
+	),
+	setMergeReceipt: sql<{ id: number; receipt: number }>(
+		"UPDATE change_ends SET receipt = $receipt WHERE change = $id AND ended = 'merged'",
 	),
 	reopenChange: sql<{ id: number }>("DELETE FROM change_ends WHERE change = $id"),
 	touchChange: sql<{ id: number; rev: number }>("UPDATE changes SET rev = $rev WHERE id = $id"),
@@ -839,10 +843,19 @@ export function setChangeEnded(ctx: Ctx, change: ChangeRow, ended: ChangeRow["en
 		...change,
 		ended,
 		ended_at: ended === null ? null : ctx.now,
+		receipt: null,
 		landing_commit: null,
 		landing_branch: null,
 		rev: ctx.seq,
 	};
+}
+
+/** Only the receipt decision machinery can select a frozen gate for this merge. */
+export function setMergeReceipt(ctx: Ctx, witness: Witness, change: ChangeRow): void {
+	const receipt = decisionOf(witness, "merge-receipt");
+	ctx.db.run(Q.setMergeReceipt, { id: change.id, receipt });
+	ctx.db.run(Q.touchChange, { id: change.id, rev: ctx.seq });
+	ctx.touched.add(change.key);
 }
 
 /**

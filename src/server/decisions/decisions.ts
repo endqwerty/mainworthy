@@ -1,10 +1,11 @@
 // Decisions: the only writer of standing. Questions are raised here, one per cause; answers are checked against
-// the policy here; and `settle` is the single place that mints a witness and applies a decision's effect.
+// the policy here. Settlement and merge-receipt recording mint witnesses only after writing their ledger rows.
 //
 // Three rules hold everywhere (decision 0008):
 // - a detector suggests, a decision excuses: nothing in this file changes standing without a decision row;
 // - an answer names the evidence it saw, and an answer on changed evidence is a conflict, not a decision;
 // - a decision carries forward only while its hold stands, and is asked again with the old answer shown when not.
+import type { MergeReceipt } from "../../core/changes.ts";
 import type { SameCodeEvidence } from "../../core/flaky.ts";
 import { contentHash } from "../../core/hash.ts";
 import {
@@ -21,6 +22,7 @@ import {
 import type { DecideReply, QuestionItem } from "../../core/ops.ts";
 import { clip } from "../../core/text.ts";
 import {
+	batchById,
 	type ChangeRow,
 	changeById,
 	excuseFor,
@@ -32,6 +34,8 @@ import {
 	resultLocation,
 	scopeEnded,
 	scopeOf,
+	setChangeEnded,
+	setMergeReceipt,
 	signatureById,
 	type TargetRow,
 	testById,
@@ -49,6 +53,7 @@ import {
 	type Blocker,
 	causeKey,
 	changeRunsOf,
+	countedTests,
 	countedTestsOf,
 	disputedRuns,
 	disputesOf,
@@ -56,10 +61,13 @@ import {
 	type FailingGroup,
 	failsOnBase,
 	failsWith,
+	gateOf,
+	gateRun,
 	inheritanceAffected,
 	inheritanceRuns,
 	inheritedEvidenceOf,
 	newestInScope,
+	nothingCounted,
 	passesAny,
 	passingIn,
 	type Retallied,
@@ -91,9 +99,11 @@ import {
 	holdEndingById,
 	insertAnswer,
 	insertDecision,
+	insertMergeReceipt,
 	insertQuestion,
 	latestByFingerprint,
 	liveByFingerprint,
+	mergeReceiptById,
 	mustQuestion,
 	noteCarried,
 	openQuestionIds,
@@ -686,7 +696,7 @@ function askedAgain(ctx: Ctx, question: QuestionRow): string | null {
 }
 
 /**
- * Records a decision and applies its effect. The only caller of any standing writer: it mints the witness.
+ * Records a question decision and applies its effect, minting its witness after the ledger row.
  * A decision that replaces an earlier one on the same question first withdraws what the earlier one did; the
  * earlier row is never edited, and the new row names it in `supersedes`.
  */
@@ -2125,4 +2135,61 @@ function standingFor(ctx: Ctx, row: QuestionRow, ask: Ask): "counts" | "advice" 
 		isAuthor: handler.isAuthor(ctx, row),
 		isProducer: ask.notProducer && handler.isProducer(ctx, row),
 	});
+}
+
+/** Freeze the head before ending questions or moving a fast-forward onto trunk. */
+export function recordMergeReceipt(ctx: Ctx, change: ChangeRow): ChangeRow {
+	const kept = mergeReceiptById(ctx.db, ctx.project.id, change.receipt);
+	if (change.ended === "merged" && kept && kept.head === change.head_sha) return change;
+	const run = gateRun(ctx, { change: change.key });
+	const counted = run ? countedTests(ctx.db, run) : [];
+	const decisions = [...new Set(counted.flatMap((row) => (row.excuse ? [row.excuse.decision] : [])))].map((id) => {
+		const row = decisionById(ctx.db, id);
+		if (!row) throw new Error(`counted decision ${id} is missing`);
+		return {
+			id,
+			kind: row.kind,
+			answer: json<MergeReceipt["decisions"][number]["answer"]>(row.answer),
+			basis: row.basis,
+			evidence: row.on_evidence,
+			signers: json<Signer[]>(row.signers),
+			holds: json<HoldTerm[]>(row.holds),
+			expiresAt: row.expires_at,
+			at: row.at,
+		};
+	});
+	const snapshot: Omit<MergeReceipt, "id"> = {
+		head: change.head_sha,
+		at: ctx.now,
+		by: ctx.actor.id,
+		policy: currentPolicy(ctx.db, ctx.project.id).version,
+		gate: run ? gateOf(ctx, run) : nothingCounted(),
+		results: counted.map((row) => {
+			const test = testById(ctx.db, row.test);
+			const result = resultById(ctx.db, row.result);
+			const batch = result ? batchById(ctx.db, result.batch) : null;
+			if (!test || !result || !batch) throw new Error(`counted result ${row.result} is missing`);
+			return {
+				result: row.result,
+				test: testRef(test),
+				name: test.name,
+				file: test.file,
+				target: row.target,
+				outcome: row.outcome,
+				method: result.method,
+				job: batch.job,
+				env: mustTarget(ctx.db, row.target).env,
+				standing: row.standing,
+				scope: row.scope,
+				flipped: row.flipped,
+				quarantined: row.excuse?.quarantined ?? false,
+				decision: row.excuse?.decision ?? null,
+			};
+		}),
+		decisions,
+	};
+	const now = change.ended === "merged" ? change : setChangeEnded(ctx, change, "merged");
+	const id = insertMergeReceipt(ctx, change.id, snapshot);
+	setMergeReceipt(ctx, mintWitness(id, "merge-receipt", [ctx.actor.id], null), now);
+	return { ...now, receipt: id };
 }

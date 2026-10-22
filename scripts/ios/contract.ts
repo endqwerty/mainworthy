@@ -496,6 +496,38 @@ const ChangeLanding = struct(
 	},
 );
 
+const MergeReceipt = struct(
+	"MergeReceipt",
+	"The head's gate read when a merge was reported, before any landing moves it to trunk.",
+	{
+		head: maybe(text),
+		at: whole,
+		gate: struct("MergeReceiptGate", "The frozen gate, not the head's current verdict.", {
+			verdict: text,
+			reason: text,
+			waiting,
+		}),
+		results: list(
+			struct("MergeReceiptResult", "A counted result and the standing it had at that time.", {
+				result: whole,
+				test: text,
+				name: text,
+				standing: text,
+				method: text,
+				job: text,
+				env: text,
+				decision: maybe(whole),
+			}),
+		),
+		decisions: list(
+			struct("MergeReceiptDecision", "The answer a frozen standing rested on.", {
+				id: whole,
+				answer: struct("MergeReceiptAnswer", "The recorded answer.", { is: text }),
+			}),
+		),
+	},
+);
+
 export const ChangeList = struct("ChangeList", "`find` in changes: newest first, with the head's gate.", {
 	items: list(
 		struct("ChangeSummary", "A reported branch or pull request.", {
@@ -528,6 +560,7 @@ export const ChangeImpact = struct("ChangeImpact", "`impact` of a change: its ba
 		title: maybe(text),
 		state: [text, "Open, merged or closed, as it is now: a change older than the list's newest is read here."],
 		landing: maybe(ChangeLanding),
+		mergeReceipt: maybe(MergeReceipt),
 	}),
 	gate: maybe(struct("ChangeImpactGate", "The run counted for this head, if any.", { run: maybe(text) })),
 	counts: struct("ChangeImpactCounts", "The complete number of affected cases.", { cases: whole }),

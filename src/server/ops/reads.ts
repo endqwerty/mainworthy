@@ -29,6 +29,7 @@ import {
 	decisionById,
 	holdEndingById,
 	ledgerPage,
+	mergeReceiptById,
 	mustQuestion,
 	openCountOn,
 	openCounts,
@@ -1390,6 +1391,7 @@ export function impact(ctx: Ctx, input: ImpactInput): Record<string, unknown> {
 					title: change.title,
 					state: change.ended ?? "open",
 					landing: landingView(ctx, change),
+					mergeReceipt: mergeReceiptById(ctx.db, project, change.receipt),
 				}
 			: { files: files.length },
 		gate: run ? { verdict: run.verdict, reason: run.reason, run: run.run } : null,

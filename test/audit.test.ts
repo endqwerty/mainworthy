@@ -753,3 +753,32 @@ test("an audit export of a case that pins a fragment carries the pin and verifie
 		h.close();
 	}
 });
+
+test("audit checks receipt identity and report provenance after its checksum is recomputed", () => {
+	const h = harness();
+	try {
+		h.call("report", ciReport({ commit: "auditreceipt", pr: 726, n: 1 }));
+		h.call("change", { change: "pr:726", state: "merged" });
+		const file = AuditReply.parse(h.call("audit", {})).ndjson;
+		expect(() =>
+			verifyAudit(
+				rehash(file, (lines) => {
+					const row = lines.find((line) => line.type === "merge-receipt");
+					if (!row) throw new Error("Expected receipt");
+					row.id = "merge-receipt:999";
+				}),
+			),
+		).toThrow("merge receipt id mismatch");
+		expect(() =>
+			verifyAudit(
+				rehash(file, (lines) => {
+					const row = lines.find((line) => line.type === "merge-receipt");
+					if (!row) throw new Error("Expected receipt");
+					row.by = { id: 999, name: "robin", kind: "human" };
+				}),
+			),
+		).toThrow("merge receipt provenance mismatch");
+	} finally {
+		h.close();
+	}
+});

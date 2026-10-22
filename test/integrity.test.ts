@@ -2268,6 +2268,7 @@ describe("what a decision may change", () => {
 		if (!adoptWitness) throw new Error("no adopt decision was made");
 		const genuine: Witness = adoptWitness;
 		expect(decisionOf(genuine, "adopt")).toBeGreaterThan(0);
+		expect(() => decisionOf(genuine, "merge-receipt")).toThrow("only a merge-receipt decision");
 		const project = findProject(h.app.db, "scratch");
 		if (!project) throw new Error("no project");
 		const ctx = makeCtx(h.app, project, h.owner, true);

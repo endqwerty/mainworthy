@@ -256,7 +256,7 @@ Every operation of the API is also a command with the same name. Give its input 
 | `mainworthy import-csv` | Preview mapped CSV cases, then confirm one import proposal. Existing foreign aliases are refused. |
 | `mainworthy report` | Record results: a parsed CI report, one manual result, or an agent's batch. The producer is the token's actor. |
 | `mainworthy claim` | Record a review and what it found. A review with no findings is still recorded. |
-| `mainworthy change` | Say that a change ended (merged, or closed without merging) or is open again. An ended change is not asked about. |
+| `mainworthy change` | Say that a change ended or is open again. A merge records the head gate when reported. An ended change is not asked about. |
 | `mainworthy announce` | Announce a deployment and bind its build label to an attested artifact. Pipelines and human admins only. |
 | `mainworthy tracker` | Queue a defect from a failed result: create a tracker issue or validate an existing issue for linking. |
 | `mainworthy plan` | Start a run: choose cases, say which results count and what completes it. Evidence already recorded fills it at once. |

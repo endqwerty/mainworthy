@@ -808,7 +808,7 @@ describe("the module map", () => {
 				/^(?:export )?function\*? (\w+)\([^)]*\bwitness: Witness\b[^)]*\)[^{]*\{\n([\s\S]*?)^\}/gm,
 			)) {
 				const [, name, body] = match;
-				if (!/\bdecisionOf\(witness, "\w+"\)|\(ctx, witness\b/.test(body ?? ""))
+				if (!/\bdecisionOf\(witness, "[\w-]+"\)|\(ctx, witness\b/.test(body ?? ""))
 					offenders.push(`${file}: ${name} never checks its witness`);
 			}
 		}
@@ -965,7 +965,7 @@ describe("the module map", () => {
 			"quarantines",
 		],
 		"server/runs": ["runs", "run_tests", "slots", "slot_results", "depends_on", "slot_leases"],
-		"server/decisions": ["questions", "question_refs", "answers", "decisions"],
+		"server/decisions": ["merge_receipts", "questions", "question_refs", "answers", "decisions"],
 		"server/trackers": ["tracker_requests", "tracker_polls"],
 		"server/statuses": ["commit_statuses", "commit_status_delivery"],
 		"server/handoffs": ["handoffs"],
@@ -1046,6 +1046,7 @@ describe("the module map", () => {
 			"assertion_index",
 			"slot_leases",
 			"change_ends",
+			"merge_receipts",
 			"tracker_requests",
 			"tracker_polls",
 			"scope_moves",

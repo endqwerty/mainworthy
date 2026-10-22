@@ -1,5 +1,6 @@
-// Storage for the queue and the ledger. Owns questions, question_refs, answers and decisions.
+// Storage for the queue and the ledgers. Owns questions, question_refs, answers, decisions and merge_receipts.
 // The rules (who may answer, when a decision holds) are in decisions.ts; this file only reads and writes rows.
+import { MergeReceipt } from "../../core/changes.ts";
 import { type ActorKind, type Ask, ATTRIBUTED, type Kind } from "../../core/kinds.ts";
 import { type Ctx, ref } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
@@ -85,6 +86,19 @@ const HOLD_ENDING = `d.supersedes IS NOT NULL AND (
 )`;
 
 const Q = {
+	mergeReceipt: sql<{ id: number; project: number }, { id: number; snapshot: string }>(
+		"SELECT id, snapshot FROM merge_receipts WHERE id = $id AND project = $project",
+	),
+	insertMergeReceipt: sql<{
+		project: number;
+		change: number;
+		actor: number;
+		at: number;
+		seq: number;
+		snapshot: string;
+	}>(
+		"INSERT INTO merge_receipts (project, change, actor, at, seq, snapshot) VALUES ($project, $change, $actor, $at, $seq, $snapshot)",
+	),
 	latest: sql<{ project: number; fingerprint: string }, QuestionRow>(
 		"SELECT * FROM questions WHERE project = $project AND fingerprint = $fingerprint ORDER BY epoch DESC LIMIT 1",
 	),
@@ -540,3 +554,21 @@ export const expiredDecisions = (db: Db, project: number, now: number): Decision
 	db.all(Q.expired, { project, now });
 
 export const liveDefectDecisions = (db: Db, project: number): DecisionRow[] => db.all(Q.defects, { project });
+
+/** An immutable observation decision, independent of question answers and their holds. */
+export function insertMergeReceipt(ctx: Ctx, change: number, snapshot: Omit<MergeReceipt, "id">): number {
+	return ctx.db.run(Q.insertMergeReceipt, {
+		project: ctx.project.id,
+		change,
+		actor: ctx.actor.id,
+		at: ctx.now,
+		seq: ctx.seq,
+		snapshot: JSON.stringify(snapshot),
+	}).lastId;
+}
+
+export function mergeReceiptById(db: Db, project: number, id: number | null): MergeReceipt | null {
+	if (id === null) return null;
+	const row = db.get(Q.mergeReceipt, { id, project });
+	return row ? MergeReceipt.parse({ ...json<Record<string, unknown>>(row.snapshot), id: row.id }) : null;
+}

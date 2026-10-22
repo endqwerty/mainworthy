@@ -1,6 +1,7 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import { z } from "zod";
+import { MergeReceipt } from "./changes.ts";
 import { canonicalJson, claimHash, versionHash } from "./hash.ts";
 import { ActorKind, Capability, Clause, Kind, PolicySettings } from "./kinds.ts";
 import { CaseBody, FragmentPin, FragmentStep, InlineStep, MethodKind } from "./model.ts";
@@ -11,7 +12,7 @@ const hash = z.string().regex(/^[a-f0-9]{12}$/);
 const id = z
 	.string()
 	.regex(
-		/^(?:decision:\d+|answer:\d+|policy:\d+|version:\d+:\d+|question:\d+|result:\d+|team:\d+|team-event:\d+|change-end:\d+|evidence:\d+:[a-f0-9]{12})$/,
+		/^(?:decision:\d+|answer:\d+|policy:\d+|version:\d+:\d+|question:\d+|result:\d+|team:\d+|team-event:\d+|change-end:\d+|merge-receipt:\d+|evidence:\d+:[a-f0-9]{12})$/,
 	);
 export const AuditInput = z
 	.strictObject({ from: integer.default(0), to: integer.optional() })
@@ -50,6 +51,14 @@ export const AuditHeader = z.strictObject({
 });
 export type AuditHeader = z.infer<typeof AuditHeader>;
 export const AuditRecord = z.discriminatedUnion("type", [
+	z.strictObject({
+		type: z.literal("merge-receipt"),
+		...event,
+		change: integer,
+		key: z.string(),
+		by: Actor,
+		receipt: MergeReceipt,
+	}),
 	z.strictObject({
 		type: z.literal("change-end"),
 		id,
@@ -203,6 +212,7 @@ function links(record: AuditRecord): Link[] {
 			return link(record.question, "question");
 		case "result":
 		case "team":
+		case "merge-receipt":
 		case "change-end":
 			return [];
 		case "team-event":
@@ -233,6 +243,7 @@ const typePrefix: Record<AuditRecord["type"], string> = {
 	team: "team:",
 	"team-event": "team-event:",
 	"change-end": "change-end:",
+	"merge-receipt": "merge-receipt:",
 	decision: "decision:",
 	answer: "answer:",
 	policy: "policy:",
@@ -293,6 +304,11 @@ export function verifyAudit(text: string) {
 		if (record.type === "question" && (record.openedAt >= header.to || record.openedSeq > header.seq))
 			fail("question outside range or sequence");
 		if (record.type === "change-end" && record.id !== `change-end:${record.change}`) fail("change ending id mismatch");
+		if (record.type === "merge-receipt") {
+			if (record.id !== `merge-receipt:${record.receipt.id}`) fail("merge receipt id mismatch");
+			if (record.at !== record.receipt.at || record.by.id !== record.receipt.by)
+				fail("merge receipt provenance mismatch");
+		}
 		if (record.type === "case-version") {
 			if (record.id !== `version:${record.caseId}:${record.version}`) fail("case version id mismatch");
 			if (versionHash(record.body) !== record.hash || claimHash(record.body) !== record.claimHash)

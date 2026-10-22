@@ -268,3 +268,32 @@
 	flex-basis: 100%;
 	margin-top: 2px;
 }
+
+.change-merge-receipt {
+	border: 1px solid var(--line);
+	border-radius: 6px;
+	padding: 12px;
+	margin: 12px 0;
+}
+.change-merge-receipt > .change-verdict {
+	margin-left: 12px;
+}
+.change-merge-receipt time {
+	display: block;
+	color: var(--dim);
+	font-size: 12px;
+}
+.change-merge-receipt details {
+	margin-top: 8px;
+	color: var(--ink);
+}
+.change-receipt-result {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+	padding: 8px 0;
+	border-bottom: 1px solid var(--line);
+}
+.change-receipt-result small {
+	display: block;
+}

@@ -6,6 +6,7 @@ import {
 	compareAuditRecords,
 	encodeAudit,
 } from "../../core/audit.ts";
+import { MergeReceipt } from "../../core/changes.ts";
 import type { ActorKind, Kind } from "../../core/kinds.ts";
 import type { TeamEvent } from "../../core/teams.ts";
 import type { Ctx } from "../kernel/ctx.ts";
@@ -85,6 +86,12 @@ type TeamChange = {
 	can: string | null;
 };
 const Q = {
+	mergeReceipts: sql<
+		Selection,
+		{ id: number; change: number; key: string; actor: number; at: number; seq: number; snapshot: string }
+	>(
+		`SELECT r.*, c.key FROM merge_receipts r JOIN changes c ON c.id = r.change WHERE r.project = $project AND r.at < $to ORDER BY r.id`,
+	),
 	changeEnds: sql<Selection, ChangeEnd>(
 		`SELECT e.change, c.key, c.repo, e.ended AS state, e.at FROM change_ends e
 		 JOIN changes c ON c.id = e.change WHERE c.project = $project AND e.at < $to ORDER BY e.change`,
@@ -307,6 +314,19 @@ export function exportAudit(ctx: Ctx, input: AuditInput) {
 			parent: parent === null ? null : reference(parent, versionIndex.get(parent)?.at),
 			decision: reference(`decision:${row.decision}`, decisions.get(row.decision)?.at),
 		});
+	}
+	for (const row of ctx.db.all(Q.mergeReceipts, selection)) {
+		if (inRange(row.at))
+			records.push({
+				type: "merge-receipt",
+				id: `merge-receipt:${row.id}`,
+				change: row.change,
+				key: row.key,
+				by: actor(row.actor),
+				at: row.at,
+				seq: row.seq,
+				receipt: MergeReceipt.parse({ ...json<Record<string, unknown>>(row.snapshot), id: row.id }),
+			});
 	}
 	for (const row of ctx.db.all(Q.changeEnds, selection)) {
 		if (inRange(row.at)) records.push({ type: "change-end", id: `change-end:${row.change}`, ...row });
