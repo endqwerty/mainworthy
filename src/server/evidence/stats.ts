@@ -63,12 +63,23 @@ const Q = {
 	// they were sent with (a correction is stored at an attempt no older than the one it corrects, so by its own attempt
 	// it could hide the attempt it repeats). What stands of an execution is every result in its tree of corrections that
 	// nothing corrects in turn, as the gate counts it; of what stands for one attempt, the worse, then the later, gives
-	// its time. Runner tries count with that result. A repeated attempt's duration already includes its tries
-	// (Playwright sums its executions); only an attempt not repeated, or missing its total, adds their time separately.
+	// its time. Runner tries count with that result. Don't add known try durations to a repeated attempt's duration:
+	// Playwright already sums its executions. Untimed tries remain unknown: Surefire times only one execution.
 	// Legacy/imported durations can exceed today's input limit: total() avoids integer overflow, and returned time
 	// stops at the wire format's largest safe integer.
+	// A try on a correction makes its original lane eligible; every duplicate execution of that lane must still compete.
 	reruns: sql<{ project: number; since: number }, { test: number; reruns: number; lost: number; unknown: number }>(`
-		WITH RECURSIVE executions AS (
+		WITH RECURSIVE tried(result) AS (
+		  SELECT DISTINCT t.result FROM result_tries t WHERE t.project = $project
+		  UNION
+		  SELECT r.corrects FROM tried t JOIN results r ON r.id = t.result WHERE r.corrects IS NOT NULL
+		),
+		tried_lanes AS MATERIALIZED (
+		  SELECT DISTINCT r.target, r.test, r.actor, r.method, b.job, r.attempt
+		  FROM tried t JOIN results r ON r.id = t.result JOIN batches b ON b.id = r.batch
+		  WHERE r.corrects IS NULL
+		),
+		executions AS (
 		  SELECT r.id, r.test, r.target, r.actor, r.method, b.job, r.attempt, r.outcome, r.duration_ms, r.seq, r.ord,
 		    EXISTS (
 		      SELECT 1 FROM results n JOIN batches nb ON nb.id = n.batch
@@ -77,6 +88,11 @@ const Q = {
 		    ) AS repeated
 		  FROM results r JOIN batches b ON b.id = r.batch
 		  WHERE r.project = $project AND r.at >= $since AND r.corrects IS NULL
+		    AND (repeated OR EXISTS (
+		      SELECT 1 FROM tried_lanes t
+		      WHERE t.target = r.target AND t.test = r.test AND t.actor = r.actor AND t.method = r.method
+		        AND t.job = b.job AND t.attempt = r.attempt
+		    ))
 		),
 		chain(root, id, outcome, duration_ms, seq, ord) AS (
 		  SELECT e.id, e.id, e.outcome, e.duration_ms, e.seq, e.ord FROM executions e
@@ -104,7 +120,7 @@ const Q = {
 		SELECT a.test, sum(a.repeated + a.tries) AS reruns,
 		       CAST(min(total(CASE WHEN a.repeated AND a.duration_ms IS NOT NULL THEN a.duration_ms ELSE a.tried_ms END),
 		                     ${Number.MAX_SAFE_INTEGER}) AS INTEGER) AS lost,
-		       sum(CASE WHEN a.repeated AND a.duration_ms IS NOT NULL THEN 0 ELSE a.repeated + a.untimed_tries END) AS unknown
+		       sum(a.untimed_tries + (a.repeated AND a.duration_ms IS NULL)) AS unknown
 		FROM costs a WHERE a.repeated OR a.tries > 0
 		GROUP BY a.test
 	`),
