@@ -884,7 +884,8 @@ The data is `/data/mainworthy.db` (with `-wal` and `-shm` beside it while runnin
   itself, does it remove older upgrade copies and log each removed filename. At that same point it removes
   abandoned copies and journals matching the exact `<database>.v<N>.bak.<uuid>.tmp` and `.tmp-journal`
   names used by older builds. It also removes the exact copy and journal regular files inside private
-  `<database>.v<N>.bak.<six-character suffix>` workspaces, then removes a workspace only if empty.
+  `<database>.v<N>.bak.mainworthy-copy-<six-character suffix>` workspaces, then removes a workspace only if empty.
+  Unmarked directories from earlier builds remain because they cannot be distinguished from saved operator copies.
   Symlinks, non-regular entries, and unrelated contents remain. Normally one copy remains.
   If the final-name copy already exists, the server leaves it unchecked and performs no cleanup.
   Cleanup failures are logged without failing startup; extra copies remain until a later successful upgrade

@@ -30,9 +30,12 @@ database basename, a canonical positive integer version lower than this upgrade'
 the `.bak` suffix. Higher-version completed copies remain. After [issue #538](https://github.com/endqwerty/mainworthy/issues/538)
 (2026-10-22), the same cleanup removes interrupted copies for any canonical positive version. It recognizes
 only the legacy `<database>.v<N>.bak.<uuid>.tmp` and `.tmp-journal` regular files, and private
-`<database>.v<N>.bak.<six alphanumeric characters>` directories made by `mkdtemp`. Inside a workspace,
+`<database>.v<N>.bak.mainworthy-copy-<six alphanumeric characters>` directories made by `mkdtemp`. Inside a workspace,
 only the exact `<database>.v<N>.bak` and its `-journal` regular files are removed. The directory is removed
-non-recursively only when empty. Other names, symlinks, non-regular entries, and unrelated contents remain.
+non-recursively only when empty. The fixed `mainworthy-copy-` marker is written by the copy helper and is
+required by cleanup. An ordinary six-character suffix, such as `backup`, does not establish ownership.
+Unmarked directories, including crash workspaces from earlier builds, remain rather than risk deleting
+an operator's saved rollback copy. Other names, symlinks, non-regular entries, and unrelated contents remain.
 
 A start with no pending migration performs no cleanup. If interrupted during cleanup, the current copy
 and any older copies not yet removed remain. Log a failure to list or delete copies and continue startup.

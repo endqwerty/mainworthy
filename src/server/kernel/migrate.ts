@@ -199,7 +199,7 @@ export function migrate(db: Db, path: string): { from: number; to: number; backu
 					);
 					if (interrupted || (version && Number(version) < from)) remove(candidate);
 				} else if (file.isDirectory()) {
-					const copy = /^([1-9]\d*\.bak)\.[a-zA-Z0-9]{6}$/.exec(suffix)?.[1];
+					const copy = /^([1-9]\d*\.bak)\.mainworthy-copy-[a-zA-Z0-9]{6}$/.exec(suffix)?.[1];
 					if (!copy) continue;
 					const name = `${prefix}${copy}`;
 					try {

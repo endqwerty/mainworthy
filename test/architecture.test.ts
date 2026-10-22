@@ -5,7 +5,7 @@ import { describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { Glob } from "bun";
 import { z } from "zod";
 import { ERROR_CODES, HTTP_STATUS } from "../src/core/api.ts";
@@ -247,7 +247,7 @@ describe("fresh schema image", () => {
 		});
 	}
 
-	test("a completed upgrade removes only exact interrupted copy files and empty copy workspaces (#538)", () => {
+	test("a completed upgrade removes only exact interrupted copy files and empty copy workspaces (#538)", async () => {
 		const directory = mkdtempSync(join(tmpdir(), "mainworthy-interrupted-copies-"));
 		const path = databasePath(directory);
 		const db = new Db(path);
@@ -255,10 +255,12 @@ describe("fresh schema image", () => {
 		const uuid = "12345678-1234-1234-1234-123456789abc";
 		const temporary = `${path}.v1.bak.${uuid}.tmp`;
 		const journalOnly = `${path}.v2.bak.${uuid}.tmp-journal`;
-		const workspace = `${path}.v1.bak.Ab12Cd`;
-		const empty = `${path}.v2.bak.Xy12Z3`;
-		const mixed = `${path}.v3.bak.Xy12Z3`;
-		const linked = `${path}.v4.bak.Xy12Z3`;
+		const workspace = `${path}.v1.bak.mainworthy-copy-Ab12Cd`;
+		const empty = `${path}.v2.bak.mainworthy-copy-Xy12Z3`;
+		const mixed = `${path}.v3.bak.mainworthy-copy-Xy12Z3`;
+		const linked = `${path}.v4.bak.mainworthy-copy-Xy12Z3`;
+		const saved = `${path}.v1.bak.backup`;
+		const unmarked = `${path}.v1.bak.Ab12Cd`;
 		const retained = [
 			`${path}.v0.bak.${uuid}.tmp`,
 			`${path}.v01.bak.${uuid}.tmp`,
@@ -274,7 +276,9 @@ describe("fresh schema image", () => {
 			db.exec("INSERT INTO meta VALUES ('schema_version', '1'), ('preserved', 'kept')");
 			for (const file of [temporary, `${temporary}-journal`, journalOnly, ...retained])
 				fs.writeFileSync(file, "untouched");
-			for (const folder of [workspace, empty, mixed]) fs.mkdirSync(folder);
+			for (const folder of [workspace, empty, mixed, saved, unmarked]) fs.mkdirSync(folder);
+			fs.writeFileSync(join(saved, "mainworthy.db.v1.bak"), "operator rollback point");
+			fs.writeFileSync(join(unmarked, "mainworthy.db.v1.bak"), "unmarked copy");
 			const nested = join(workspace, "mainworthy.db.v1.bak");
 			fs.writeFileSync(nested, "partial copy");
 			fs.writeFileSync(`${nested}-journal`, "partial journal");
@@ -286,12 +290,44 @@ describe("fresh schema image", () => {
 			fs.symlinkSync(retained[0] ?? "", linkedJournal);
 			const directoryJournal = `${path}.v6.bak.${uuid}.tmp-journal`;
 			fs.mkdirSync(directoryJournal);
+			const crash = Bun.spawn(
+				[
+					process.execPath,
+					"-e",
+					`import { Database } from "bun:sqlite";
+					import { writeFileSync, writeSync } from "node:fs";
+					import { writePrivateDatabaseFile } from ${JSON.stringify(new URL("../src/server/kernel/db.ts", import.meta.url).href)};
+					const db = new Database(${JSON.stringify(path)});
+					writePrivateDatabaseFile(${JSON.stringify(`${path}.v1.bak`)}, (output) => {
+						db.query("VACUUM INTO ?").run(output);
+						writeFileSync(output + "-journal", "interrupted journal");
+						writeSync(1, JSON.stringify(output) + "\\n");
+						Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+					});`,
+				],
+				{ stdout: "pipe", stderr: "pipe" },
+			);
+			let interrupted: string;
+			try {
+				const said = await crash.stdout.getReader().read();
+				const output: unknown = JSON.parse(new TextDecoder().decode(said.value));
+				if (typeof output !== "string") throw new Error("the copy did not name its private file");
+				expect(fs.existsSync(output)).toBe(true);
+				expect(fs.existsSync(`${output}-journal`)).toBe(true);
+				interrupted = dirname(output);
+			} finally {
+				crash.kill("SIGKILL");
+				await crash.exited;
+			}
 			const opened = openDatabase(path);
 			try {
 				expect(schemaVersion(opened)).toBe(SCHEMA_VERSION);
 				expect(opened.raw.query("SELECT value FROM meta WHERE key = 'preserved'").get()).toEqual({ value: "kept" });
-				for (const removed of [temporary, `${temporary}-journal`, journalOnly, workspace, empty])
+				for (const removed of [temporary, `${temporary}-journal`, journalOnly, workspace, empty, interrupted])
 					expect(fs.existsSync(removed)).toBe(false);
+				expect(fs.existsSync(join(saved, "mainworthy.db.v1.bak"))).toBe(true);
+				expect(readFileSync(join(saved, "mainworthy.db.v1.bak"), "utf8")).toBe("operator rollback point");
+				expect(readFileSync(join(unmarked, "mainworthy.db.v1.bak"), "utf8")).toBe("unmarked copy");
 				for (const file of retained) expect(readFileSync(file, "utf8")).toBe("untouched");
 				expect(readFileSync(join(mixed, "unrelated"), "utf8")).toBe("untouched");
 				expect(fs.lstatSync(join(mixed, "mainworthy.db.v3.bak")).isSymbolicLink()).toBe(true);
@@ -324,7 +360,7 @@ describe("fresh schema image", () => {
 			if (!migration) throw new Error("expected a shipped migration");
 			const original = migration.sql;
 			const temporary = `${path}.v1.bak.12345678-1234-1234-1234-123456789abc.tmp`;
-			const workspace = `${path}.v1.bak.Ab12Cd`;
+			const workspace = `${path}.v1.bak.mainworthy-copy-Ab12Cd`;
 			const log = spyOn(console, "error").mockImplementation(() => {});
 			let sync: ReturnType<typeof spyOn> | undefined;
 			try {
