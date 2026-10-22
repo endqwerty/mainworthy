@@ -77,7 +77,7 @@ const existsWithoutFollowing = (path: string): boolean => {
  * directory whatever its mode, and the file's mode keeps them out. An inherited ACL that grants reading files is not
  * covered, here or for any other file (decision 0120). The file is synced there, renamed to `path`, and the rename
  * synced. A crash leaves that directory, still private, beside `path`. The umask is the process's: while `write`
- * runs, a file another thread creates is private too.
+ * runs, a file another thread creates gets no access for group or others either.
  */
 export function writePrivateDatabaseFile(path: string, write: (privatePath: string) => void): void {
 	const workspace = mkdtempSync(`${path}.`);
