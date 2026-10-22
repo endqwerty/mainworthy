@@ -92,7 +92,8 @@ function ChangesWorkbench() {
 	const settledData = settled.isPlaceholderData ? undefined : settled.data;
 	const impactData = Impact.safeParse(impact.isPlaceholderData ? undefined : impact.data);
 	const fixedHere = settledData?.items.filter((q) => q.decision?.fixedIn?.change === key).length ?? 0;
-	const link = webUrl(current?.url ?? null);
+	const address = webUrl(current?.url ?? null);
+	const link = address ? { href: address, text: shownAddress(address) } : null;
 	const go = (ref: string) => navigate(refUrl({ project, ref }));
 	const choose = (change: string) => {
 		setCursor(change);
@@ -160,14 +161,14 @@ function ChangesWorkbench() {
 				{key ? (
 					<>
 						<div className="phead">
-							{link ? (
-								<a className="ref" href={link} target="_blank" rel="noreferrer noopener">
-									{key}
-								</a>
-							) : (
-								<span className="ref">{key}</span>
-							)}
+							<span className="ref">{key}</span>
 							<b className="change-title">{current?.title ?? current?.branch ?? "Change"}</b>
+							{link && (
+								// The address comes from a report, so it is shown as itself, never behind the change's key.
+								<a className="change-link" href={link.href} target="_blank" rel="noreferrer noopener">
+									{link.text}
+								</a>
+							)}
 						</div>
 						<div className="pane-scroll detail-body">
 							<div className={`change-gate v-${gateData?.verdict ?? "pending"}`}>
@@ -385,6 +386,12 @@ function MergeGateReceipt({ receipt }: { receipt: MergeReceipt | null }) {
 			</details>
 		</section>
 	);
+}
+
+/** An address as a reader should see it before following it: its host and path. */
+function shownAddress(address: string): string {
+	const url = new URL(address);
+	return `${url.host}${url.pathname.replace(/\/$/, "")}`;
 }
 
 /** How a change ended, naming which commit each gate on the page is about. An open change says nothing here. */

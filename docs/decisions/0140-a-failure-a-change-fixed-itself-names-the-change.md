@@ -36,7 +36,15 @@ request's work resolved the failure, and a retry did not.
 
 Endings recorded before this decision claim no fix: what passed is only in their reason's text.
 
-**The change page counts them and links to the pull request.** "1 failure that needed a fix was fixed by another of its commits." The pull request names the issue it was for, so the failure reaches that issue in one step.
+**The change page counts them and links to the pull request.** "1 failure that needed a fix was fixed by another of
+its commits." The pull request names the issue it was for, so the failure reaches that issue in one step. The link's
+text is its own host and path, not the change's key: a report supplies the address, and a key would vouch for it
+(the Daybreak audit, 2026-10-22).
+
+**One commit spelled two ways is one commit.** Mainworthy keeps a commit as it was reported, and a report may give
+seven to sixty-four characters in either case. When deciding `fixed`, a commit that is a case-insensitive prefix of
+a failing one, or the other way round, counts as that commit, so an abbreviated retry claims no fix (the Daybreak
+audit, 2026-10-22). Making every report name a full lowercase hash is a larger change to the report contract.
 
 ## Turned down
 

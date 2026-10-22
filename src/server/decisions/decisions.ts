@@ -1823,8 +1823,11 @@ function passedIn(ctx: Ctx, question: QuestionRow, run: RunRow): { reason: strin
 	const passedOn = json<{ commit?: string }>(run.accepts).commit;
 	// A fix: the cause passed on a commit it never failed on in this scope. A commit that failed and passed when it ran
 	// again proves no fix. Nothing here says when that commit was made or reported, or that it is newer than the
-	// failing ones (a reset can return to an older one), so the fix claims neither.
-	const fixed = passedOn !== undefined && !failed.some((row) => row.commit === passedOn);
+	// failing ones (a reset can return to an older one), so the fix claims neither. A commit is kept as it was reported,
+	// so one commit spelled two ways (abbreviated, or in another case) counts as the same one: that errs towards no fix.
+	const same = (a: string, b: string): boolean =>
+		a.toLowerCase().startsWith(b.toLowerCase()) || b.toLowerCase().startsWith(a.toLowerCase());
+	const fixed = passedOn !== undefined && !failed.some((row) => row.commit !== null && same(row.commit, passedOn));
 	const commit = passedOn?.slice(0, 12) ?? runRef(run);
 	return { reason: `Every test it named passed on ${commit} where it had failed; the answer ended.`, fixed };
 }

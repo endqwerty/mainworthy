@@ -136,6 +136,7 @@ check(
 				const data = ciReport({ commit, branch: "fix", pr: 408, n: 1, fail });
 				return {
 					...data,
+					target: { ...data.target, url: "https://github.example/shop/pull/408" },
 					results: data.results.map((result) => ({ ...result, test: { case: "C-1" } })),
 				};
 			};
@@ -192,6 +193,11 @@ check(
 			await page
 				.getByText("1 failure that needed a fix was fixed by another of its commits.", { exact: true })
 				.waitFor();
+			// The pull request's address is shown as itself, not behind the change's key: a report supplies it.
+			const link = page.locator(".change-link");
+			await link.getByText("github.example/shop/pull/408", { exact: true }).waitFor();
+			expect(await link.getAttribute("href")).toBe("https://github.example/shop/pull/408");
+			expect(await page.locator("#detail .phead a.ref").count()).toBe(0);
 			await server.api("change", { change: "pr:408", state: "merged" });
 			await page.reload();
 			await onChange.getByText("Fixed by another commit of pr:408, which merged", { exact: false }).waitFor();

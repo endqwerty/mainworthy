@@ -1336,6 +1336,17 @@ describe("holds", () => {
 		const reset = ciReport({ commit: "older044a", branch: "reset", pr: 44, n: 1, attempt: 2 });
 		h.call("report", { ...reset, target: { ...reset.target, head: "older044a" } });
 		expect(settled("pr:44")).toMatchObject([{ decision: { fixedIn: { change: "pr:44", state: "open" } } }]);
+		// One commit spelled two ways, abbreviated or in another case, is the same commit: its pass is a retry.
+		for (const [pr, failed, passed] of [
+			[45, "abcdef0123456789abcdef0123456789abcdef01", "abcdef0"],
+			[46, "ABCDEF0123456789", "abcdef0123456789"],
+		] as const) {
+			h.call("report", ciReport({ commit: failed, branch: `spelt${pr}`, pr, n: 1, fail }));
+			decide(first(queue().items), { is: "defect" });
+			h.call("report", ciReport({ commit: passed, branch: `spelt${pr}`, pr, n: 1 }));
+			expect(settled(`pr:${pr}`)).toMatchObject([{ state: "dissolved", decision: { rule: "passed" } }]);
+			expect(settled(`pr:${pr}`)[0]?.decision).not.toHaveProperty("fixedIn");
+		}
 	});
 
 	test("an expired flaky answer stays in Settled when its failure has gone, without claiming a pass ended it", () => {
