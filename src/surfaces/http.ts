@@ -252,7 +252,7 @@ const unauthenticated = (): Response =>
 	jsonResponse({ ok: false, error: { code: "unauthenticated", message: "a token is required" } }, 401);
 
 /**
- * The reply to a caller that failed to prove itself too often: 429, with the whole seconds to wait in
+ * The reply to a caller that reached an authentication or allocation limit: 429, with the whole seconds to wait in
  * `Retry-After` and in the sentence, which is all the CLI shows. It does not say what was counted, the address
  * or the token: the wait is all the caller can act on.
  */
@@ -262,7 +262,7 @@ const limited = (seconds: number): Response =>
 			ok: false,
 			error: {
 				code: "limited",
-				message: `too many failed attempts; try again in ${seconds} ${seconds === 1 ? "second" : "seconds"}`,
+				message: `too many attempts; try again in ${seconds} ${seconds === 1 ? "second" : "seconds"}`,
 			},
 		},
 		HTTP_STATUS.limited,

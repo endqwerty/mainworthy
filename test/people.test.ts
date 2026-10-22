@@ -1928,7 +1928,7 @@ describe("an upgrade and an import", () => {
 describe("the limit on failed attempts", () => {
 	// Every request of a `proxied` world comes from the address it names, as a visitor behind a proxy does.
 	const address = (n: number): Sent => from(`203.0.113.${n}`);
-	const LIMITED = '{"ok":false,"error":{"code":"limited","message":"too many failed attempts; try again in 1 second"}}';
+	const LIMITED = '{"ok":false,"error":{"code":"limited","message":"too many attempts; try again in 1 second"}}';
 	/** Runs with the log silenced: a refused sign-in writes a line. */
 	async function quietly<T>(run: () => Promise<T>): Promise<T> {
 		const logged = spyOn(console, "warn").mockImplementation(() => {});

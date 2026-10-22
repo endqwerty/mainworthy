@@ -133,7 +133,7 @@ describe("a bearer token", () => {
 		expect([refused.status, refused.headers.get("retry-after")]).toEqual([429, "1"]);
 		expect(Refusal.parse(await refused.json()).error).toEqual({
 			code: "limited",
-			message: "too many failed attempts; try again in 1 second",
+			message: "too many attempts; try again in 1 second",
 		});
 		expect(await who(instance, { ...from(A), ...bearer(wrong()) })).toBe("429 limited, retry after 1");
 	});
@@ -521,7 +521,7 @@ describe("the CLI", () => {
 			expect({ code, stdout, stderr }).toEqual({
 				code: 4,
 				stdout: "",
-				stderr: "limited: too many failed attempts; try again in 1 second\n",
+				stderr: "limited: too many attempts; try again in 1 second\n",
 			});
 		} finally {
 			clearTimeout(timeout);

@@ -97,6 +97,67 @@ test("a start block reports attempts without claiming that authentication failed
 	});
 });
 
+test("the global window covers mixed protocols and unknown peers without blocking passwords or invitations", async () => {
+	const idp = await provider();
+	const w = world({ oidc: idp.config(), proxied: true });
+	await joined(w, "robin", PASSWORD);
+	const { code } = await invite(w, { name: "sam" });
+	for (let count = 0; count < 1000; count++) {
+		const start = starts[count % starts.length];
+		if (!start) throw new Error("no start variant");
+		expect((await w.post(start.path, start.body, from(`203.0.113.${(count % 4) + 20}`))).status).toBe(200);
+	}
+	for (const start of starts)
+		expect(said(await w.post(start.path, start.body, other))).toBe("429 limited, retry after 60");
+	expect(said(await w.post("/api/login/challenge", {}))).toBe("429 limited, retry after 60");
+	expect(said(await signIn(w, "robin", PASSWORD, other))).toBe("200");
+	expect((await w.post("/api/login/challenge", { invitation: code }, other)).status).toBe(200);
+	expect((await w.post("/api/login", { invitation: code, password: PASSWORD }, other)).status).toBe(200);
+	w.clock.advance(30_000);
+	expect(said(await w.post("/api/login/challenge", {}, other))).toBe("429 limited, retry after 30");
+	w.clock.advance(30_000);
+	for (let count = 0; count < 1000; count++) expect((await w.post("/api/login/challenge", {})).status).toBe(200);
+	expect(said(await w.post("/api/login/challenge", {}, other))).toBe("429 limited, retry after 60");
+});
+
+test("provider discovery cannot extend an admitted ceremony beyond its original lifetime", async () => {
+	const idp = await provider();
+	let arrived = () => {};
+	const discovery = new Promise<void>((resolve) => {
+		arrived = resolve;
+	});
+	let release = () => {};
+	const held = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const proxy: ReturnType<typeof Bun.serve> = Bun.serve({
+		hostname: "127.0.0.1",
+		port: 0,
+		async fetch(): Promise<Response> {
+			arrived();
+			await held;
+			const metadata = await fetch(`${idp.issuer}/.well-known/openid-configuration`);
+			return new Response((await metadata.text()).replaceAll(idp.issuer, `http://127.0.0.1:${proxy.port}`), {
+				headers: { "content-type": "application/json" },
+			});
+		},
+	});
+	try {
+		const w = world({ oidc: idp.config({ issuer: `http://127.0.0.1:${proxy.port}` }), proxied: true });
+		const pending = w.post("/api/login/oidc", {}, client);
+		await discovery;
+		w.clock.advance(300_000);
+		release();
+		const expired = await pending;
+		expect(expired.status).toBe(409);
+		expect(expired.setCookies).toEqual([]);
+		expect((await w.post("/api/login/oidc", {}, client)).status).toBe(200);
+	} finally {
+		release();
+		await proxy.stop(true);
+	}
+});
+
 test("ordinary use A: five cancelled passkey prompts never block the right password", async () => {
 	const w = world({ proxied: true });
 	await joined(w, "robin", PASSWORD);

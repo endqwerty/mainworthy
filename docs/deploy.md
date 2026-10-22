@@ -87,7 +87,7 @@ counted twice: against the address it came from, and against its own first 8 cha
 either within 15 minutes blocks it for one second, and each failure after that doubles the block, up to 15
 minutes.
 While a block lasts, a request is answered `429` with the seconds to wait in `Retry-After`. The CLI prints
-`limited: too many failed attempts; try again in 4 seconds` and exits 4, and the sign-in form says how long to
+`limited: too many attempts; try again in 4 seconds` and exits 4, and the sign-in form says how long to
 wait. What it means for whoever runs an instance:
 
 - A token the server generated (`mainworthy token new`, or the owner token it printed) still works from a
@@ -111,12 +111,14 @@ wait. What it means for whoever runs an instance:
 - The count is in memory. A restart clears it.
 
 Anonymous passkey challenges and provider sign-in begins, including native app begins, have a separate
-fixed allowance of 300 starts per address per minute. These starts never add to the failed-authentication
+fixed allowance of 300 starts per address per minute and an instance-wide ceiling of 1,000 per minute,
+including unknown/private addresses. Rotating IPv6 networks does not bypass the instance ceiling.
+These starts never add to the failed-authentication
 count and cannot block a password. Once the allowance is spent, starts get `429` and the remaining seconds
 in `Retry-After`; retries do not extend that window, and the next window restores the full allowance.
 Valid pending answers still work. A valid invitation page bypasses this allocation quota and reuses its
-registration challenge, so reloading one code cannot fill the map. Unknown and private addresses remain
-uncounted, so configure the trusted proxy below for this protection to work behind it.
+registration challenge, so reloading one code cannot fill the map. Unknown and private addresses skip only
+the per-address allowance; configure the trusted proxy below to distinguish visitors behind it.
 
 ### Behind a proxy
 

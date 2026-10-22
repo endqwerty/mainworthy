@@ -64,9 +64,14 @@ use the HTTPS destination in `--url` or `MAINWORTHY_URL`. A 5xx response or inva
 is waiting for a deployment. Check the instance. Once the instance serves `/healthz` again, retry the command. No token or
 operation is sent after a failed health probe.
 
-### `limited: too many failed attempts`
+### `limited: too many attempts`
 
-Within 15 minutes, the server received five wrong tokens from your address or five wrong tokens with the same prefix. Wait for the time the message names. Then try the right token. Each further wrong attempt doubles the wait, up to 15 minutes.
+Anonymous passkey/provider starts have separate allowances of 300 per address and 1,000 across the instance per minute.
+If either is exhausted, wait for `Retry-After` before starting again. These waits do not escalate or extend on retry.
+They never cause password refusals, and valid answers to pending ceremonies still finish. A working invitation still opens its form.
+
+For token authentication, five wrong tokens from one address or five with the same prefix within 15 minutes trigger a wait.
+Wait for the time the message names, then try the right token. Each further wrong attempt doubles the wait, up to 15 minutes.
 
 A valid token the server generated still works if you share an address with someone making wrong attempts. A token set through `MAINWORTHY_OWNER_TOKEN` counts as a chosen token and must wait, whatever it looks like.
 
@@ -74,7 +79,9 @@ Password sign-in can return the same message. Within 15 minutes, five wrong pass
 
 In the web UI, the sign-in page, an invitation, and "Your sign-in" in Settings keep what you typed. These forms display "Too many attempts. Try again in N seconds." under the attempted action. The page does not resend what you typed. Press the button after the wait.
 
-If everybody behind one proxy gets this message together, the server is counting the proxy as one address. Configure `MAINWORTHY_TRUSTED_PROXY` and `MAINWORTHY_CLIENT_ADDRESS_HEADER` as described in [configuration](./configuration.md).
+If everybody behind one proxy gets this message together for failed credentials, the server may be counting the proxy as one address.
+Configure `MAINWORTHY_TRUSTED_PROXY` and `MAINWORTHY_CLIENT_ADDRESS_HEADER` as described in [configuration](./configuration.md).
+The anonymous-start ceiling applies across the whole instance even when that proxy is configured correctly.
 
 ### `unauthenticated: a token is required`
 
