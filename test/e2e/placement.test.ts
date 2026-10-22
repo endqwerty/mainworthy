@@ -16,6 +16,61 @@ async function holdPlacements(page: Awaited<ReturnType<typeof openPage>>["page"]
 	return { release, started: () => started };
 }
 
+for (const folders of ["failed", "slow"] as const) {
+	test.skipIf(!browserAvailable)(
+		`server-filtered cases stay visible when the folders read is ${folders}`,
+		async () => {
+			const server = await startServer();
+			await server.api("propose", {
+				edits: [{ op: "create", folder: "Original", body: { title: "Waiting for folders" } }],
+			});
+			let release = () => {};
+			const held = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			let requested = false;
+			const h = await openPage(server, {
+				path: "/p/scratch/suite?folder=Original",
+				setup: async (_page, context) => {
+					await context.route("**/api/p/scratch/find", async (route) => {
+						if (!z.object({ in: z.literal("folders") }).safeParse(route.request().postDataJSON()).success)
+							return route.continue();
+						requested = true;
+						if (folders === "slow") {
+							await held;
+							await route.continue();
+						} else
+							await route.fulfill({
+								status: 500,
+								contentType: "application/json",
+								body: JSON.stringify({ ok: false, error: { code: "internal", message: "Folders unavailable" } }),
+							});
+					});
+				},
+			});
+			try {
+				const { page } = h;
+				await eventually(async () => requested, Boolean);
+				await page.locator("#lcount").filter({ hasText: "1 cases" }).waitFor();
+				if (folders === "slow" && process.env.MAINWORTHY_FOLDER_READ_SCREENSHOT)
+					await page.screenshot({ path: process.env.MAINWORTHY_FOLDER_READ_SCREENSHOT });
+				expect(await page.getByRole("option").filter({ hasText: "C-1" }).count()).toBe(1);
+				if (folders === "slow") {
+					release();
+					await page.locator("button.fo").filter({ hasText: "Original" }).waitFor();
+					expect(await page.getByRole("option").filter({ hasText: "C-1" }).count()).toBe(1);
+					expect(h.errors).toEqual([]);
+				}
+			} finally {
+				release();
+				await h.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+}
+
 test.skipIf(!browserAvailable)(
 	"UI-5 one immediate undo is queued behind a pending tag write",
 	async () => {
