@@ -268,6 +268,7 @@ since accepting it accepts all of them. An authorized person can use
 <kbd>a</kbd> to accept it or <kbd>r</kbd> to reject it.
 A key, or the Accept or Reject button, brings the proposal into view and shows its first unread part in the same press.
 Later presses page through unread edits even when the card is taller than its pane.
+If the pane hides the next unread part, the same press moves the pane to show it.
 It answers only once the last edit is showing.
 When the policy requires a reason, the case pane opens a field labeled with Accept or Reject.
 The answer buttons and keys stay disabled while this field is open.

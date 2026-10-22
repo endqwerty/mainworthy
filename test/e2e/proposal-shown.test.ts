@@ -131,6 +131,92 @@ const partCoverage = async (page: Page) =>
 		.object({ parts: z.number(), unseen: z.number() })
 		.parse(await page.evaluate((): unknown => Reflect.get(window, "mainworthyPartCoverage")));
 
+for (const [device, width, height] of [
+	["phone", 390, 360],
+	["phone", 844, 340],
+	["phone", 667, 320],
+	["desktop", 1100, 240],
+] as const)
+	for (const edge of ["top", "bottom"] as const)
+		t(
+			`${device} ${width}x${height} pages evidence clipped by the pane's ${edge}`,
+			async () => {
+				const server = await startServer({ preset: "standard", seed: false });
+				let view: Awaited<ReturnType<typeof openPage>> | null = null;
+				try {
+					await server.api("propose", { edits: [{ op: "create", outline: "Original case" }] });
+					const token = await agentToken(server);
+					const proposed = await server.api(
+						"propose",
+						{
+							edits: [
+								{ op: "edit", case: "C-1", base: 1, body: { title: "Changed case" } },
+								...Array.from({ length: 20 }, (_, i) => ({ op: "create" as const, outline: `Extra case ${i}` })),
+							],
+						},
+						{ token },
+					);
+					const q = proposed.question ?? "";
+					view = await openPage(server, {
+						path: "/p/scratch/suite/c/1",
+						device,
+						setup: async (page) => {
+							await page.setViewportSize({ width, height });
+							await trackPartCoverage(page, q);
+						},
+					});
+					const { page } = view;
+					const evidence = page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`);
+					await evidence.waitFor();
+					if (width === 390)
+						await page.locator("#bar").evaluate((bar) => {
+							bar.style.fontFamily = "monospace";
+						});
+					const clipped = await evidence.evaluate((element, edge) => {
+						const pane = element.closest<HTMLElement>(".pane-scroll");
+						if (!pane) throw new Error("Missing case pane");
+						const frame = pane.getBoundingClientRect();
+						pane.scrollTop +=
+							element.getBoundingClientRect().top - (edge === "top" ? frame.top - 40 : frame.bottom - 40);
+						const box = element.getBoundingClientRect();
+						return edge === "top" ? box.top < frame.top : box.top < frame.bottom && box.bottom > frame.bottom;
+					}, edge);
+					expect(clipped).toBe(true);
+					await frames(page);
+					expect(await evidence.getAttribute("data-proposal-read")).toBe("loaded");
+					for (
+						let presses = 0;
+						presses < 80 && (await evidence.getAttribute("data-proposal-read")) !== "ready";
+						presses++
+					) {
+						await page.keyboard.press("r");
+						await frames(page);
+						expect(await openAdopt(server)).toEqual([q]);
+						if (presses === 0)
+							expect(
+								await evidence.evaluate((element) => {
+									const card = element.closest("[data-proposal]");
+									const pane = element.closest(".pane-scroll");
+									return card && pane && card.getBoundingClientRect().height > pane.getBoundingClientRect().height;
+								}),
+							).toBe(true);
+					}
+					expect(await evidence.getAttribute("data-proposal-read")).toBe("ready");
+					expect(await partCoverage(page)).toEqual({ parts: 42, unseen: 0 });
+					const response = page.waitForResponse((reply) => reply.url().endsWith("/decide"));
+					await page.keyboard.press("r");
+					await response;
+					expect((await server.api("get", { refs: [q] }))[0]?.decision).toMatchObject({ answer: { is: "reject" } });
+					expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({ title: "Original case", version: 1 });
+					expect(view.errors).toEqual([]);
+				} finally {
+					await view?.close();
+					await server.stop();
+				}
+			},
+			30000,
+		);
+
 for (const device of ["desktop", "phone"] as const)
 	t(
 		`${device} short case window pages on every answer press without moving the outer pane`,
