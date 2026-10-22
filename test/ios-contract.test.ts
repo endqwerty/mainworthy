@@ -672,10 +672,32 @@ describe("what Changes and Your sessions read", () => {
 		expect(unlinked).toMatchObject({
 			items: [{ ref, case: null, quarantine: { active: true, reason: "It fails when the address service is slow" } }],
 		});
+		await op(key, "report", {
+			target: { commit: "3333333333333333333333333333333333333333", repo: "acme/shop", pr: 482 },
+			job: "runner",
+			results: [
+				{
+					test: { key: "tests/shipping.spec.ts::shipping::address" },
+					outcome: "pass",
+					tries: [{ outcome: "fail", durationMs: 25, failure: { message: "Address lookup timed out" } }],
+				},
+			],
+		});
 		const rows = z.array(z.unknown()).parse(await op(key, "get", { refs: [ref] }));
 		expect(rows).toHaveLength(1);
 		holds(`get ${ref}`, TestDetail, rows[0]);
-		expect(rows[0]).toMatchObject({ case: null, last: [{ outcome: "pass", change: "pr:482", job: "shop" }] });
+		expect(TestDetail.zod.parse(rows[0])).toMatchObject({
+			case: null,
+			last: [
+				{
+					outcome: "pass",
+					job: "runner",
+					passedOnRetry: null,
+					tries: [{ outcome: "fail", message: "Address lookup timed out", durationMs: 25 }],
+				},
+				{ outcome: "pass", change: "pr:482", job: "shop", tries: [], passedOnRetry: null },
+			],
+		});
 	});
 
 	test("a run's accepted commit stays its own when its change has a newer head", async () => {
