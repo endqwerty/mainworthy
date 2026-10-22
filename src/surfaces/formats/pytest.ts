@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { caseAnnotation } from "../../core/case-annotation.ts";
-import { nativeResult, type ParsedReport } from "./native.ts";
+import { nativeResult, type ParsedReport, reportIdentifier, reportWarnings } from "./native.ts";
 
 const Stage = z.object({
 	outcome: z.enum(["passed", "failed", "skipped"]),
@@ -48,7 +48,7 @@ export function parsePytest(value: unknown): ParsedReport {
 	)
 		throw new Error("pytest did not complete test collection/execution; fix the runner before uploading");
 	const results: ParsedReport["results"] = [];
-	const warnings: string[] = [];
+	const warnings = reportWarnings();
 	for (const test of report.tests) {
 		const separator = test.nodeid.indexOf("::");
 		const file = test.nodeid.slice(0, separator);
@@ -70,8 +70,9 @@ export function parsePytest(value: unknown): ParsedReport {
 		});
 		const outcome = resultOf(test);
 		if (test.outcome === "rerun")
-			warnings.push(
-				`pytest test ${test.nodeid}: report omits retry count and earlier stages; kept one earlier failed try without diagnostics`,
+			warnings.add(
+				() =>
+					`pytest test ${reportIdentifier(test.nodeid)}: report omits retry count and earlier stages; kept one earlier failed try without diagnostics`,
 			);
 		results.push(
 			nativeResult({
@@ -97,5 +98,5 @@ export function parsePytest(value: unknown): ParsedReport {
 	}
 	if (report.exitcode === 1 && !results.some((result) => result.outcome === "fail" || result.outcome === "error"))
 		throw new Error("pytest exited with 1 but no test failed; fix the runner before uploading");
-	return { results, warnings };
+	return { results, warnings: warnings.finish() };
 }

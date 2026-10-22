@@ -4,6 +4,30 @@ import { clip } from "../../core/text.ts";
 export type ParsedResult = ResultIn & { attachmentPaths?: string[] };
 export type ParsedReport = { results: ParsedResult[]; warnings: string[] };
 
+/** Quote external identifiers for one diagnostic line, including terminal controls JSON leaves unescaped. */
+export function reportIdentifier(value: string): string {
+	const shortened = clip(value, 120);
+	return JSON.stringify(shortened + (shortened.length < value.length ? "…" : "")).replace(
+		/[\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g,
+		(char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
+	);
+}
+
+/** JUnit's 1,000-warning policy, shared by native formats without XML byte-offset context. */
+export function reportWarnings() {
+	const warnings: string[] = [];
+	let omitted = 0;
+	return {
+		add(message: () => string): void {
+			if (warnings.length < 1000) warnings.push(clip(message(), 1000));
+			else omitted++;
+		},
+		finish(): string[] {
+			return omitted ? [...warnings, `${omitted} additional warnings omitted`] : warnings;
+		},
+	};
+}
+
 const reportPath = (value: string): string => value.replace(/\\/g, "/").replace(/^(?:\.\/)+/, "");
 
 /** Native formats use the same file/class, suite and stable-name identity as JUnit. */

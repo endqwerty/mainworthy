@@ -35,3 +35,40 @@ test("native retry reports upload through the executable and retain recovery evi
 		}
 	});
 });
+
+test("native retry diagnostics stay on one stderr line with control-safe identifiers", async () => {
+	await withInstance(async ({ cli, run, directory }) => {
+		const root = await realpath(directory);
+		const title = "\n::error::report title\u001b]0;report title\u0007\u0085";
+		for (const [index, format] of ["jest", "vitest", "pytest"].entries()) {
+			const fixture = new URL(`../../test/fixtures/reports/${format}-retries.json`, import.meta.url);
+			const report = JSON.parse((await Bun.file(fixture).text()).replaceAll("/workspace", root));
+			if (format === "pytest") report.tests[0].nodeid = `test_sample.py::${title}`;
+			else {
+				report.testResults[0].assertionResults[0].title = title;
+				if (format === "jest") report.testResults[0].assertionResults[0].retryReasons = [];
+			}
+			const file = join(directory, `${format}.json`);
+			await Bun.write(file, JSON.stringify(report));
+			const uploaded = await (index === 0 ? cli : run)(["report", file, "--session", "safe-warning", "--json"]);
+			expect(uploaded.code).toBe(0);
+			expect(JSON.parse(uploaded.stdout).counts.total).toBe(4);
+			expect(uploaded.stderr.split("\n")).toHaveLength(2);
+			expect(uploaded.stderr).toContain("\\n::error::report title");
+			expect(uploaded.stderr).toContain("\\u001b");
+			expect(uploaded.stderr).toContain("\\u0085");
+			expect(uploaded.stderr).not.toContain("\u001b");
+			expect(uploaded.stderr).not.toContain("\u0085");
+			if (format === "jest") {
+				report.testResults[0].assertionResults[0].invocations = 1;
+				report.testResults[0].assertionResults[0].retryReasons = ["reason"];
+				await Bun.write(file, JSON.stringify(report));
+				const refused = await run(["report", file, "--session", "safe-error"]);
+				expect(refused.code).toBe(4);
+				expect(refused.stderr.split("\n")).toHaveLength(2);
+				expect(refused.stderr).toContain("\\n::error::report title");
+				expect(refused.stderr).not.toContain("\u001b");
+			}
+		}
+	});
+});
