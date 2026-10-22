@@ -65,6 +65,7 @@
     "test/evidence.test.ts": 2422,
     "test/sessions.test.ts": 2315,
     "test/people.test.ts": 2276,
+    "test/signin-start-limit.test.ts": 2197,
     "test/e2e/result-trail.test.ts": 1971,
     "test/e2e/people-passkey.test.ts": 1934,
     "test/e2e/project-switcher.test.ts": 1915,
