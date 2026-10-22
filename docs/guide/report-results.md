@@ -370,7 +370,9 @@ A failed try's cause follows the same file-splitting rule as a failed result, ev
 result passed. Failed tries and results count together toward the broad-assertion limits:
 more than 50 distinct tests across more than five reported files on one repository and commit.
 Repeated tries of one test count once. Runner and pipeline flips of that file's failure
-then count under the same cause. Earlier reports keep their original causes.
+then count under the same cause. Earlier reports keep their original causes. After an upgrade or import,
+a file-specific cause missing from old evidence is created when that file next occurs on its broad commit;
+reporting another file does not create it in advance.
 
 The detector counts recent flips per test and failure signature, across assertion,
 timeout, and infrastructure classes. By default, two flips of one cause within

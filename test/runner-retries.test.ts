@@ -338,14 +338,60 @@ test("large assertion history cannot make a report materialize unbounded rows", 
 	expect(gate(target.commit).tally.unexplained).toBe(61);
 });
 
-test("repeated tries and reports retain one threshold observation per root, test and commit", () => {
+test.each(["rebuild", "archive"])(
+	"first recovery after %s of broad history uses bounded single-row reads",
+	(maintenance) => {
+		const tests = Array.from({ length: 1200 }, (_, i) => ({ key: `history-${i}`, file: `history-${i}.test.ts` }));
+		const input = broadReport(tests);
+		h.call("report", input, h.actor("pipeline", "ci", ["read", "record"]));
+		const pending = inContext((ctx) =>
+			acceptReport(ctx, ReportInput.parse({ ...broadReport(tests.slice(-1)), job: "pending" })),
+		).batch;
+		const imported = maintenance === "archive" ? new Db(":memory:") : null;
+		const db = imported ?? h.app.db;
+		try {
+			if (imported) {
+				const chunks: string[] = [];
+				exportArchive(h.app.db, (chunk) => chunks.push(chunk), { now: 1_800_000_000_000 });
+				migrate(imported, ":memory:");
+				importArchive(imported, linesOf(chunks.join("")));
+			} else rebuildAssertionIndexes(db, true);
+			const get = db.get.bind(db);
+			let rowsRead = 0;
+			db.get = (statement, ...params) => {
+				const row = get(statement, ...params);
+				if (row) rowsRead++;
+				return row;
+			};
+			try {
+				const app = { ...h.app, db };
+				expect(recoverAccepted(app)).toBe(1);
+				expect(rowsRead).toBeLessThanOrEqual(512);
+				expect(recoverAccepted(app)).toBe(0);
+			} finally {
+				db.get = get;
+			}
+			expect(
+				db.raw
+					.query(`SELECT s.text FROM result_tries tr JOIN results r ON r.id = tr.result
+				JOIN signatures s ON s.id = tr.signature WHERE r.batch = ?`)
+					.all(pending.id),
+			).toEqual([{ text: "Split by file (history-1199.test.ts): assertion failed" }]);
+			expect(db.raw.query("SELECT count(*) AS n FROM assertion_seen").get()).toEqual({ n: 51 });
+		} finally {
+			imported?.close();
+		}
+	},
+);
+
+test("repeated tries and reports stop retaining threshold observations once the root is broad", () => {
 	const input = broadReport();
 	input.results = input.results.map((result) => ({
 		...result,
 		tries: Array.from({ length: 100 }, () => failed("assertion failed")),
 	}));
 	for (let attempt = 1; attempt <= 3; attempt++) h.call("report", { ...input, attempt });
-	expect(h.app.db.raw.query("SELECT count(*) AS n FROM assertion_seen").get()).toEqual({ n: 60 });
+	expect(h.app.db.raw.query("SELECT count(*) AS n FROM assertion_seen").get()).toEqual({ n: 51 });
 	expect(page()?.sameCode.signals).toMatchObject([
 		{ signature: { text: "Split by file (file-0.test.ts): assertion failed" }, flips: 5 },
 	]);
@@ -431,7 +477,7 @@ test("archive import reconstructs roots using full filenames and keeps split-loo
 		migrate(to, ":memory:");
 		importArchive(to, linesOf(text));
 		expect(to.raw.query("SELECT id, signature FROM result_tries ORDER BY id").all()).toEqual(before);
-		expect(to.raw.query("SELECT count(*) AS n FROM assertion_seen").get()).toEqual({ n: 60 });
+		expect(to.raw.query("SELECT count(*) AS n FROM assertion_seen").get()).toEqual({ n: 51 });
 		expect(to.raw.query("SELECT count(*) AS n FROM assertion_roots WHERE root != signature").get()).toEqual({ n: 6 });
 	} finally {
 		to.close();
@@ -455,7 +501,7 @@ test("assertion file thresholds use covering index seeks without sorting or scan
 	}
 });
 
-test("legacy broad history activates missing earlier file causes only when its own commit is touched", () => {
+test("legacy missing file causes are created only when that file recurs on its broad commit", () => {
 	const earlier = Array.from({ length: 40 }, (_, i) => ({ key: `old-file-${i}::test`, file: `old-file-${i}` }));
 	h.call("report", broadReport(earlier));
 	h.call("report", broadReport(broadTests(20), { job: "later-shard" }));
@@ -472,9 +518,12 @@ test("legacy broad history activates missing earlier file causes only when its o
 	h.call("report", another);
 	expect(page()?.sameCode.signals).toMatchObject([{ signature: { text: "assertion failed" }, flips: 2 }]);
 	h.call("report", broadReport(broadTests(1), { job: "activate" }));
+	expect(h.app.db.raw.query("SELECT 1 FROM signatures WHERE text = ?").get(missing)).toBeNull();
+	h.call("report", broadReport(earlier.slice(0, 1), { job: "recurring-file" }));
+	expect(h.app.db.raw.query("SELECT 1 FROM signatures WHERE text = ?").get(missing)).not.toBeNull();
 	h.call("report", { ...another, attempt: 2 });
 	expect(page()?.sameCode.signals).toMatchObject([
 		{ signature: { text: "assertion failed" }, flips: 2 },
-		{ signature: { text: missing }, flips: 2 },
+		{ signature: { text: missing }, flips: 3 },
 	]);
 });

@@ -110,29 +110,38 @@ function broad(db: Db, key: { project: number; scope: string; root: number }): b
 	return false;
 }
 
-export function* observeAssertion(
+function recordObservation(
+	db: Db,
+	key: { project: number; scope: string; root: number },
+	test: { id: number; file: string | null },
+): "narrow" | "activated" | "active" {
+	if (db.get(Q.active, key)) return "active";
+	db.run(Q.see, { ...key, test: test.id, file: test.file });
+	if (!broad(db, key)) return "narrow";
+	db.run(Q.activate, key);
+	return "activated";
+}
+
+export function observeAssertion(
 	ctx: Ctx,
 	scope: string,
 	root: SignatureRow,
 	test: { id: number; file: string | null },
-): Generator<undefined, void, void> {
+): void {
 	if (root.class !== "assertion") return;
 	const key = { project: ctx.project.id, scope, root: root.id };
 	rememberRoot(ctx.db, root, root.id);
-	ctx.db.run(Q.see, { ...key, test: test.id, file: test.file });
-	if (ctx.db.get(Q.active, key)) {
+	const state = recordObservation(ctx.db, key, test);
+	if (state === "narrow") return;
+	if (state === "active") {
 		child(ctx, root, test.file);
 		return;
 	}
-	if (!broad(ctx.db, key)) return;
 	let file = ctx.db.get(Q.firstFile, key);
-	let count = 0;
 	while (file) {
 		child(ctx, root, file.file);
-		if (++count % PAGE === 0) yield;
 		file = file.file === null ? ctx.db.get(Q.firstReported, key) : ctx.db.get(Q.nextFile, { ...key, after: file.file });
 	}
-	ctx.db.run(Q.activate, key);
 }
 
 export function finishAssertionScope(ctx: Ctx, scope: string): void {
@@ -159,7 +168,11 @@ export function* ensureAssertionIndex(db: Db, project: number): Generator<undefi
 				if (signature?.class !== "assertion") return;
 				const root = originalRoot(db, signature, row.file);
 				if (row.commit_sha !== null)
-					db.run(Q.see, { project, scope: `commit:${row.what}`, root: root.id, test: row.test, file: row.file });
+					recordObservation(
+						db,
+						{ project, scope: `commit:${row.what}`, root: root.id },
+						{ id: row.test, file: row.file },
+					);
 			};
 			remember(row.signature);
 			let tries = db.all(Q.firstTries, { result: row.id });

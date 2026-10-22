@@ -1312,7 +1312,7 @@ export function* applySteps(
 			signature = ensureSignature(ctx, { message, ...(input.failure?.detail ? { detail: input.failure.detail } : {}) });
 		}
 
-		if (signature) yield* observeAssertion(ctx, scope, signature, test);
+		if (signature) observeAssertion(ctx, scope, signature, test);
 		const previous = ctx.db.get(Q.previousOnTarget, {
 			target: batch.target,
 			test: test.id,
@@ -1370,7 +1370,7 @@ export function* applySteps(
 				message,
 				detail: tried.failure?.detail ?? null,
 			});
-			if (cause) yield* observeAssertion(ctx, scope, cause, test);
+			if (cause) observeAssertion(ctx, scope, cause, test);
 			seen.push({ outcome: tried.outcome, try: tryId });
 			if (++observations % SLICE === 0) yield;
 		}
