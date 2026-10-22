@@ -30,7 +30,12 @@ replay for an unknown operation or a missing project or grant. HTTP can also ref
 Those exact replies keep the command.
 
 Discard this plan releases a pending request with a warning that it may already have been recorded.
-It does not undo a run. Invalid saved data is removed at the storage boundary and treated as absent.
+It does not undo a run. Removal of the shared key is authoritative: storage notifications, failure
+callbacks and retries release a held request when its saved key is absent. A storage read error proves
+nothing and retains the request. A different saved command is still shown before sending; absence does
+not restore the held command. An older failure callback cannot replace a newer held command.
+The notice asks the person to check Runs because another tab may have discarded or completed the request.
+Invalid saved data is removed at the storage boundary and treated as absent.
 A planner reads shared storage on every submit, including a retry. If another command is saved there,
 it shows that request's choices and a notice, then waits for an explicit Retry plan before sending it.
 An already saved retry is not written over the shared key again. A stale tab therefore cannot replace
