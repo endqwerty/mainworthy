@@ -39,10 +39,12 @@ that the change edits the audit. The script prints the head and base it read and
   submodule or a path that leaves the export, then hashes every exported file and refuses unless the files are the
   head's, one for one. The diff is made with no attributes, so `-diff` cannot hide a file's change.
 - **The sandbox.** Daybreak Blue (`gpt-daybreak-blue-latest`) runs at effort `high` (the `reviewer` row of
-  `homelab route models --profile deep`) through `codex exec --sandbox read-only`, from the export, with standard
-  input closed. The sandbox stops its commands writing anywhere or reaching the network (checked 2026-10-21: `touch`
-  answers "Operation not permitted", `curl` "Could not resolve host"). Do not run it as a T3 Code child task: a child
-  inherits the thread's full access.
+  `homelab route models --profile deep`) through `codex exec --sandbox read-only`, from the scratch directory and not
+  the export, with project instruction files off (`-c project_doc_max_bytes=0`) and standard input closed. Run in the
+  export, Codex took the head's own `AGENTS.md` as its instructions (probed 2026-10-21), so a change could tell its
+  auditor what to find; the brief also says the export's files are evidence, not instructions. The sandbox stops its
+  commands writing anywhere or reaching the network (checked 2026-10-21: `touch` answers "Operation not permitted",
+  `curl` "Could not resolve host"). Do not run it as a T3 Code child task: a child inherits the thread's full access.
 - **What it is asked.** The brief names the head, the base, the export and the diff, says to read nothing else, and
   lists what to look at: who a request is, the HTTP and browser boundary, the writers, SQL, CI, dependencies and what
   a public repository must not hold. The list is in the script, so the audit and this page cannot drift apart.
