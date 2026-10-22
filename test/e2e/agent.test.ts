@@ -421,7 +421,8 @@ for (const surface of ["case", "queue"] as const)
 			expect(await inView()).toBe(true);
 			expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(1);
 			expect((await server.api("inbox", { kind: "adopt" })).items.map((q) => q.q)).toEqual([proposed.question ?? ""]);
-			// Now it is on the screen, and the same key answers it.
+			// Wait until a frame has shown the revealed edit before the same key answers it.
+			await card.locator('[data-proposal-read="ready"]').waitFor();
 			await view.page.keyboard.press("a");
 			const adopted = await eventually(
 				() => server.api("get", { refs: ["C-1"] }),
@@ -506,6 +507,9 @@ for (const surface of ["case", "queue"] as const)
 				});
 				let presses = 0;
 				for (; presses < 40; presses++) {
+					await page.evaluate(
+						() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+					);
 					const before = await state();
 					if (before.whole && before.atEnd) break;
 					const position = await card.evaluate((element) => [
@@ -534,7 +538,8 @@ for (const surface of ["case", "queue"] as const)
 				expect(presses).toBeGreaterThan(1);
 				expect(await state()).toMatchObject({ whole: true, atEnd: true });
 				if (size.width === 1440) {
-					// Everything has been shown: now the key answers.
+					// The final scroll has painted and the frame pass has recorded it: now the key answers.
+					await card.locator('[data-proposal-read="ready"]').waitFor();
 					await page.keyboard.press("r");
 					await eventually(open, (items) => items.length === 0);
 					expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(1);
@@ -1047,9 +1052,13 @@ for (const via of ["key", "button"] as const) {
 				page.locator(".queue-evidence").evaluate((area) => area.scrollTop + area.clientHeight >= area.scrollHeight - 2);
 			for (let i = 0; i < 150 && !(await atEnd()); i++) {
 				await page.keyboard.press("a");
+				await page.evaluate(
+					() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+				);
 				expect((await server.api("inbox", { kind: "adopt" })).items.map((q) => q.q)).toEqual([proposed.question ?? ""]);
 			}
 			expect(await atEnd()).toBe(true);
+			await page.locator(`[data-proposal-evidence="${proposed.question}"][data-proposal-read="ready"]`).waitFor();
 			await page.keyboard.press("a");
 			const [last] = await eventually(
 				() => server.api("get", { refs: ["C-250"] }).catch(() => []),

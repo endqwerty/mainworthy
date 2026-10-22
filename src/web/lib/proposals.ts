@@ -3,6 +3,11 @@ const evidenceOf = (q: string): HTMLElement | null =>
 
 export function proposalReadMessage(q: string): string | null {
 	const evidence = evidenceOf(q);
+	const state = evidence && shown.get(evidence);
+	if (state && evidence.dataset.proposalLoaded === "true") {
+		for (const part of state.parts) measurePart(state, part);
+		evidence.dataset.proposalRead = state.unread.size === 0 ? "ready" : "loaded";
+	}
 	if (evidence?.dataset.proposalRead === "ready") return null;
 	return evidence?.dataset.proposalError || "Still reading the proposal. Read its edits before answering.";
 }
@@ -58,18 +63,24 @@ function visibleArea(evidence: HTMLElement): { top: number; bottom: number; left
 	return area;
 }
 
-function recordProposalShown(evidence: HTMLElement, parts?: Iterable<ShownPart>): void {
+/** Reflow invalidates a prior read, including when an answer arrives before the resize observer. */
+function measurePart(state: Shown, part: ShownPart): DOMRect {
+	const box = part.element.getBoundingClientRect();
+	if (box.height !== part.height) {
+		part.height = box.height;
+		part.ranges = [];
+		state.unread.add(part);
+	}
+	return box;
+}
+
+function recordProposalShown(evidence: HTMLElement, parts: Iterable<ShownPart>): void {
 	const state = shown.get(evidence);
 	if (!state || evidence.dataset.proposalLoaded !== "true") return;
 	const area = visibleArea(evidence);
 	if (area.bottom <= area.top || area.right <= area.left) return;
-	for (const part of parts ?? state.parts) {
-		const box = part.element.getBoundingClientRect();
-		if (box.height !== part.height) {
-			part.height = box.height;
-			part.ranges = [];
-			state.unread.add(part);
-		}
+	for (const part of parts) {
+		const box = measurePart(state, part);
 		if (box.right <= area.left || box.left >= area.right) continue;
 		// Short or tall, a part is read only where it was on screen: a fast scroll that showed only its bottom
 		// edge does not count the rest.
@@ -95,6 +106,16 @@ export function watchProposalShown(evidence: HTMLElement): () => void {
 	if (!state) return () => {};
 	const byElement = new Map(state.parts.map((part) => [part.element, part]));
 	const visible = new Set<ShownPart>();
+	const pending = new Set(state.parts);
+	let frame = 0;
+	const schedule = () => {
+		if (frame) return;
+		frame = requestAnimationFrame(() => {
+			frame = 0;
+			recordProposalShown(evidence, new Set([...visible, ...pending]));
+			pending.clear();
+		});
+	};
 	const intersections = new IntersectionObserver((entries) => {
 		for (const entry of entries) {
 			const part = byElement.get(entry.target);
@@ -102,37 +123,34 @@ export function watchProposalShown(evidence: HTMLElement): () => void {
 			if (entry.isIntersecting) visible.add(part);
 			else visible.delete(part);
 		}
-		// Entering parts are measured here too: a scroll's animation frame may run before observer delivery.
-		recordProposalShown(evidence, visible);
+		schedule();
 	});
 	const sizes = new ResizeObserver((entries) => {
-		const changed = entries.flatMap((entry) => {
+		for (const entry of entries) {
 			const part = byElement.get(entry.target);
-			return part ? [part] : [];
-		});
-		recordProposalShown(evidence, changed);
+			if (part) pending.add(part);
+		}
+		schedule();
 	});
 	for (const part of state.parts) {
 		intersections.observe(part.element);
 		sizes.observe(part.element);
 	}
-	let frame = 0;
 	const scroll = (event: Event) => {
 		const target = event.target;
 		if (target instanceof Element && !target.contains(evidence) && !evidence.contains(target)) return;
-		if (frame) return;
-		frame = requestAnimationFrame(() => {
-			frame = 0;
-			recordProposalShown(evidence, visible);
-		});
+		schedule();
 	};
-	const record = () => recordProposalShown(evidence);
+	const resize = () => {
+		for (const part of state.parts) pending.add(part);
+		schedule();
+	};
 	document.addEventListener("scroll", scroll, true);
-	window.addEventListener("resize", record);
-	record();
+	window.addEventListener("resize", resize);
+	schedule();
 	return () => {
 		document.removeEventListener("scroll", scroll, true);
-		window.removeEventListener("resize", record);
+		window.removeEventListener("resize", resize);
 		cancelAnimationFrame(frame);
 		intersections.disconnect();
 		sizes.disconnect();
@@ -142,7 +160,7 @@ export function watchProposalShown(evidence: HTMLElement): () => void {
 /** Returns a status after revealing or paging the evidence; null permits the answer. */
 export function answerShown(q: string, answer: string, via: "key" | "button"): string | null {
 	const evidence = evidenceOf(q);
-	if (evidence) recordProposalShown(evidence);
+	const message = proposalReadMessage(q);
 	const card = evidence?.closest<HTMLElement>("[data-proposal]");
 	const pane = card?.closest<HTMLElement>(".pane-scroll");
 	const box = card?.getBoundingClientRect();
@@ -164,7 +182,7 @@ export function answerShown(q: string, answer: string, via: "key" | "button"): s
 		else pane.scrollTop += Math.min(box.bottom - frame.bottom + 8, box.top - frame.top - 8);
 		revealed = true;
 	}
-	if (evidence?.dataset.proposalLoaded !== "true") return proposalReadMessage(q);
+	if (evidence?.dataset.proposalLoaded !== "true") return message;
 	const state = shown.get(evidence);
 	if (evidence.dataset.proposalRead !== "ready") {
 		const next = state?.parts.find((part) => !partShown(part));

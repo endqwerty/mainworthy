@@ -244,7 +244,7 @@ In a case's timeline, each press pages the edits inside the card. The outer pane
 If the pane clips that part or the inner scroll reaches its end, the same press moves the pane to expose it.
 This also works when a wrapped status makes the card taller than a short window. Edits behind the sticky answer buttons do not count as shown.
 If a step is taller than the visible area, each press shows its next unread section. The whole step must have been on screen before an answer counts.
-Jumping straight to the bottom does not skip unread edits. If resizing or zooming changes a part's height, read that part again.
+Jumping straight to the bottom does not skip unread edits. Scroll positions reached and left between animation frames do not count as shown. If resizing or zooming changes a part's height, read that part again.
 On a phone, scrolling the page shows the edits; Accept brings the first unread part into view if any remain.
 A policy edit lists each setting and clause it changes, and the order of the clauses when that changes, since the first clause that matches wins.
 It also says when the policy has changed since, which makes accepting refuse it.
