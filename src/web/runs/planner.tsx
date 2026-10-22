@@ -105,8 +105,10 @@ export function RunPlanner({ close }: { close: () => void }) {
 				if (!sessionCurrent(owner)) return;
 				let input: Submission["input"];
 				try {
-					const previous = submitting.current?.input ?? readPlan(key);
-					if (!submitting.current && previous) {
+					const saved = readPlan(key);
+					const held = submitting.current?.input;
+					const previous = saved && saved.cmd !== held?.cmd ? saved : (held ?? saved);
+					if (previous && previous.cmd !== held?.cmd) {
 						setStatus("Another tab's plan is waiting; Retry plan sends it.");
 						setName(previous.name);
 						setMode(
@@ -148,7 +150,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 						...(target === "commit" ? { accepts: { commit: commit.trim() } } : {}),
 						cmd: randomId(),
 					};
-					localStorage.setItem(key, JSON.stringify(input));
+					if (!saved) localStorage.setItem(key, JSON.stringify(input));
 				} catch {
 					setStatus("This browser could not keep the plan request. Enable device storage before planning a run.");
 					return;
@@ -170,9 +172,15 @@ export function RunPlanner({ close }: { close: () => void }) {
 						navigate(routeUrl({ project, screen: "runs", ref: reply.run }), { ifCurrent: navigation });
 					})
 					.catch((error: unknown) => {
+						const replayChanged =
+							error instanceof ApiError &&
+							error.status !== null &&
+							error.code === "conflict" &&
+							error.message === "this command id was already used for another request; send new content under a new id";
 						const refused =
 							error instanceof ApiError &&
 							error.status !== null &&
+							!replayChanged &&
 							(error.code === "invalid" ||
 								error.code === "conflict" ||
 								(error.code === "not_found" &&
@@ -183,9 +191,11 @@ export function RunPlanner({ close }: { close: () => void }) {
 						if (!sessionCurrent(owner)) return;
 						hold(refused ? null : { state: "uncertain", input });
 						setStatus(
-							refused
-								? error.message
-								: "The run's outcome is unknown. Retry plan sends the same request; your submitted choices are kept.",
+							replayChanged
+								? "This saved plan could not be replayed. A run may already exist. Check Runs before discarding it."
+								: refused
+									? error.message
+									: "The run's outcome is unknown. Retry plan sends the same request; your submitted choices are kept.",
 						);
 					});
 			}}

@@ -53,10 +53,12 @@ in the same project to retry. A readable success clears the request.
 A session change, permission refusal, rate limit, or server error also keeps it.
 If the operation refuses the request, the planner shows the reason and unlocks your choices for correction,
 even after a retry. The server replays a recorded request before running the operation again.
+If it says the saved request differs from one already recorded, the planner keeps the request locked and saved.
+A run may already exist. Check **Runs** before discarding the request.
 If the project is missing or you no longer have a grant on it, the request stays available to retry.
 To release a request whose outcome is unknown, choose **Discard this plan**. The plan may already have
 been recorded. Discarding the saved request does not undo a run.
-If another tab saved a plan while you were typing, submitting first shows that plan and a notice.
+If another tab has a different saved plan, submitting or retrying first shows that plan and a notice without sending it.
 Choose **Retry plan** to send the displayed request.
 A saved plan carries the project's identity, so deleting the project and creating another with the same key
 cannot send that plan into the replacement. If the browser knows the project changed, **Retry plan** explains
