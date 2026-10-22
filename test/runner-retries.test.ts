@@ -33,7 +33,7 @@ const report = (commit: string, outcome: string, tries: Try[] = [], attempt = 1,
 const gate = (commit: string) => h.call<GateStatus>("gate", { commit, repo: "acme/web" });
 type Page = {
 	flips: number;
-	sameCode: { signals: { signature: { text: string }; flips: number }[] };
+	sameCode: { signals: { signature: { id: number; text: string }; flips: number }[] };
 	last: {
 		id: number;
 		outcome: string;
@@ -138,4 +138,148 @@ test("a report holds at most a hundred tries of a result", () => {
 			Array.from({ length: 101 }, () => failed()),
 		),
 	).toThrow();
+});
+
+const broadTests = (n = 60, files = 6) =>
+	Array.from({ length: n }, (_, i) => ({
+		key: `file-${i % files}.test.ts::test ${i}`,
+		file: `file-${i % files}.test.ts`,
+	}));
+const broadReport = (tests = broadTests(), extra: Record<string, unknown> = {}) => ({
+	target: { commit: "broad001", repo: "acme/web", branch: "main" },
+	job: "e2e",
+	results: tests.map((test) => ({ test, outcome: "pass", tries: [failed("assertion failed")] })),
+	...extra,
+});
+
+test("runner and pipeline flips of a broad assertion count under the same file cause", () => {
+	const tests = broadTests();
+	h.call("report", broadReport(tests));
+	expect(page()?.sameCode.signals).toMatchObject([
+		{ signature: { text: "Split by file (file-0.test.ts): assertion failed" }, flips: 1 },
+	]);
+	expect(gate("broad001").verdict).toBe("passed");
+	const failure = {
+		...broadReport(tests),
+		attempt: 2,
+		results: [{ test: tests[0], outcome: "fail", failure: { message: "assertion failed" } }],
+	};
+	h.call("report", failure);
+	h.call("report", { ...failure, attempt: 3, results: [{ test: tests[0], outcome: "pass" }] });
+	expect(page()?.sameCode.signals).toMatchObject([
+		{ signature: { text: "Split by file (file-0.test.ts): assertion failed" }, flips: 3 },
+	]);
+	expect(page()?.sameCode.signals).toHaveLength(1);
+	const other = h.call<Page[]>("get", { refs: ["T-2"] })[0];
+	expect(other?.sameCode.signals).toMatchObject([
+		{ signature: { text: "Split by file (file-1.test.ts): assertion failed" }, flips: 1 },
+	]);
+});
+
+test.each([
+	{ n: 50, files: 6, split: false },
+	{ n: 51, files: 5, split: false },
+	{ n: 51, files: 6, split: true },
+])("runner assertions count distinct tests and reported files: %j", ({ n, files, split }) => {
+	const input = broadReport(broadTests(n, files));
+	input.results = input.results.map((result) => ({
+		...result,
+		tries: [failed("assertion failed"), failed("assertion failed")],
+	}));
+	h.call("report", input);
+	expect(page()?.sameCode.signals).toMatchObject([
+		{ signature: { text: split ? "Split by file (file-0.test.ts): assertion failed" : "assertion failed" }, flips: 1 },
+	]);
+});
+
+test("earlier shard tries count toward a split, but their historical causes stay unchanged", () => {
+	const tests = broadTests();
+	h.call("report", broadReport(tests.slice(0, 30), { job: "first-shard" }));
+	h.call("report", {
+		...broadReport(tests.slice(30), { job: "second-shard" }),
+		results: tests.slice(30).map((test) => ({
+			test,
+			outcome: "fail",
+			tries: [{ outcome: "pass" }],
+			failure: { message: "assertion failed" },
+		})),
+	});
+	expect(page()?.sameCode.signals).toMatchObject([{ signature: { text: "assertion failed" }, flips: 1 }]);
+	expect(h.call<Page[]>("get", { refs: ["T-31"] })[0]?.sameCode.signals).toMatchObject([
+		{ signature: { text: "Split by file (file-0.test.ts): assertion failed" }, flips: 1 },
+	]);
+	h.call("report", broadReport(tests.slice(0, 1), { attempt: 2, job: "first-shard" }));
+	expect(page()?.sameCode.signals).toMatchObject([
+		{ signature: { text: "assertion failed" }, flips: 1 },
+		{ signature: { text: "Split by file (file-0.test.ts): assertion failed" }, flips: 2 },
+	]);
+});
+
+test("a try keeps its own cause when the final result fails differently", () => {
+	const input = broadReport();
+	h.call("report", {
+		...input,
+		results: input.results.map((result) => ({
+			...result,
+			outcome: "fail",
+			failure: { message: "locator.click: Timeout 5000ms exceeded." },
+			tries: [...result.tries, { outcome: "pass" }],
+		})),
+	});
+	expect(page()?.sameCode.signals).toMatchObject([
+		{ signature: { text: "Split by file (file-0.test.ts): assertion failed" }, flips: 1 },
+		{ signature: { text: "locator.click: Timeout <duration> exceeded." }, flips: 1 },
+	]);
+});
+
+test("later tries reuse file causes on another commit, keeping missing and literal file names separate", () => {
+	const input = broadReport();
+	const tests = [{ key: "missing-file" }, { key: "literal-file", file: "no file reported" }];
+	const results = tests.map((test) => ({ test, outcome: "pass", tries: [failed("assertion failed")] }));
+	h.call("report", { ...input, results: [...input.results, ...results] });
+	const read = () => h.call<Page[]>("get", { refs: ["T-61", "T-62"] });
+	const before = read();
+	for (const page of before) {
+		expect(page.sameCode.signals).toMatchObject([
+			{ signature: { text: "Split by file (no file reported): assertion failed" }, flips: 1 },
+		]);
+	}
+	expect(before[0]?.sameCode.signals[0]?.signature.id).not.toBe(before[1]?.sameCode.signals[0]?.signature.id);
+	const later = { ...input, target: { ...input.target, commit: "broad002" }, results };
+	h.call("report", later);
+	h.call("report", later);
+	expect(read().map((page) => page.sameCode.signals.map(({ signature, flips }) => ({ signature, flips })))).toEqual(
+		before.map((page) => page.sameCode.signals.map(({ signature }) => ({ signature, flips: 2 }))),
+	);
+});
+
+test.each([
+	{ commit: "broad002", repo: "acme/web" },
+	{ commit: "broad001", repo: "acme/other" },
+])("tries on another commit or repository do not make an assertion broad: %j", (target) => {
+	const tests = broadTests();
+	h.call("report", broadReport(tests.slice(0, 30)));
+	h.call("report", broadReport(tests.slice(30), { target: { ...target, branch: "main" } }));
+	expect(h.call<Page[]>("get", { refs: ["T-31"] })[0]?.sameCode.signals).toMatchObject([
+		{ signature: { text: "assertion failed" }, flips: 1 },
+	]);
+});
+
+test("earlier failed tries without messages still count toward their fallback cause's split", () => {
+	const tests = broadTests().map((test) => ({ ...test, name: "works" }));
+	h.call("report", {
+		...broadReport(tests.slice(0, 30)),
+		results: tests.slice(0, 30).map((test) => ({ test, outcome: "pass", tries: [{ outcome: "fail" }] })),
+	});
+	h.call("report", {
+		...broadReport(tests.slice(30), { job: "second-shard" }),
+		results: tests.slice(30).map((test) => ({
+			test,
+			outcome: "pass",
+			tries: [failed("no failure message (works)")],
+		})),
+	});
+	expect(h.call<Page[]>("get", { refs: ["T-31"] })[0]?.sameCode.signals).toMatchObject([
+		{ signature: { text: "Split by file (file-0.test.ts): no failure message (works)" }, flips: 1 },
+	]);
 });

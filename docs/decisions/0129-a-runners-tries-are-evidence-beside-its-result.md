@@ -32,6 +32,12 @@ the test's flip count, a run's flaky tests, the flipped rows of a commit's resul
 flaky report. The detector (decision 0045) takes each end's outcome and cause from its try when it has one, and a sample
 names the try. A correction of a result withdraws the flips of its tries, as it withdraws a flip of the result.
 
+**A failed try's cause follows the same file split as a result's** (decision 0036, issue #734).
+Failed tries and results count together toward the distinct-test and reported-file thresholds across applied
+reports of one repository and commit. Each current report's assertion causes are assigned before runs and
+decisions read them, including when the final result passed or failed with a different cause. Later reports reuse
+stored file causes. Earlier reports keep their original causes; no history is regrouped.
+
 **Parsers fill `tries`.** Playwright's executions before the one it ended on, judged as the result is (an expected
 failure passes). Surefire's flaky and rerun elements, as failed tries with their message, in the order they ran:
 Surefire writes an exhausted test's first run as the testcase's `failure` and the later runs after it, so the last
@@ -60,11 +66,10 @@ failing.
 
 - JUnit testcases repeated with `(retry #1)` in their names are read as the same test's results, with the worse of one
   attempt counting, not as tries.
-- A try's cause goes through the signature's normalization but not the split of broad assertions by file.
 - The reruns report ("time lost to reruns") counts the pipeline's attempts, not a runner's tries.
 - Jest, Vitest and pytest reports do not export their retries.
 
-These are issues #733 (`(retry #n)` testcases), #734 (a try's cause by file), #735 (the reruns report), #736
+These are issues #733 (`(retry #n)` testcases), #735 (the reruns report) and #736
 (Jest, Vitest and pytest).
 
 The iPhone test page reads tries and the later passing attempt through its generated contract, labels flaky

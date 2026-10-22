@@ -366,6 +366,12 @@ a result's `tries` lists them, each with an `outcome`, an optional `durationMs` 
 optional `failure`; `mainworthy get T-1 --json` returns each recent result's `tries`, and a
 detector sample names the runner's `try` at either end.
 
+A failed try's cause follows the same file-splitting rule as a failed result, even when the
+result passed. Failed tries and results count together toward the broad-assertion limits:
+more than 50 distinct tests across more than five reported files on one repository and commit.
+Repeated tries of one test count once. Runner and pipeline flips of that file's failure
+then count under the same cause. Earlier reports keep their original causes.
+
 The detector counts recent flips per test and failure signature, across assertion,
 timeout, and infrastructure classes. By default, two flips of one cause within
 14 days suggest investigation. A file-split signature is a separate cause.

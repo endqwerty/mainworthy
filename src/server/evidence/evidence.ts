@@ -368,14 +368,29 @@ const Q = {
 		"INSERT INTO signatures (project, hash, class, text, first_seq) VALUES ($project, $hash, $class, $text, $seq)",
 	),
 	splitResult: sql<{ id: number; signature: number }>("UPDATE results SET signature = $signature WHERE id = $id"),
+	splitTry: sql<{ id: number; signature: number }>("UPDATE result_tries SET signature = $signature WHERE id = $id"),
+	assertionTries: sql<
+		{ batch: number },
+		{ id: number; test: number; file: string | null; signature: number; hash: string; text: string }
+	>(
+		`SELECT tr.id, r.test, t.file, tr.signature, s.hash, s.text FROM result_tries tr
+		 JOIN results r ON r.id = tr.result JOIN tests t ON t.id = r.test JOIN signatures s ON s.id = tr.signature
+		 WHERE r.batch = $batch AND s.class = 'assertion'`,
+	),
 	assertionsOnCommit: sql<
 		{ project: number; what: string; batch: number },
 		{ test: number; file: string | null; signature: number; message: string; detail: string | null }
 	>(
-		`SELECT DISTINCT r.test, t.file, r.signature, r.message, r.detail FROM results r
+		`SELECT r.test, t.file, r.signature, r.message, r.detail FROM results r
 		 JOIN tests t ON t.id = r.test JOIN signatures s ON s.id = r.signature
 		 WHERE r.target IN (SELECT id FROM targets WHERE project = $project AND what = $what)
-		   AND r.batch != $batch AND s.class = 'assertion' AND r.message IS NOT NULL`,
+		   AND r.batch != $batch AND s.class = 'assertion' AND r.message IS NOT NULL
+		 UNION
+		 SELECT r.test, t.file, tr.signature, coalesce(tr.message, 'no failure message (' || t.name || ')'), tr.detail
+		 FROM result_tries tr
+		 JOIN results r ON r.id = tr.result JOIN tests t ON t.id = r.test JOIN signatures s ON s.id = tr.signature
+		 WHERE r.target IN (SELECT id FROM targets WHERE project = $project AND what = $what)
+		   AND r.batch != $batch AND s.class = 'assertion'`,
 	),
 	insertResult: sql<{
 		project: number;
@@ -1523,29 +1538,58 @@ function fileSignature(signature: Pick<SignatureRow, "hash" | "class" | "text">,
 	};
 }
 
+type AssertionObservation = {
+	test: number;
+	file: string | null;
+	signature: Pick<SignatureRow, "id" | "hash" | "class" | "text">;
+	source: { kind: "result"; result: Applied } | { kind: "try"; id: number };
+};
+
 /** The report is still being applied: assign its final causes before any run or decision sees the results. */
 function* splitBroadAssertions(ctx: Ctx, batch: BatchRow, results: Applied[]): Generator<undefined, void, void> {
-	const groups = new Map<
-		number,
-		{ signature: SignatureRow; tests: Set<number>; files: Set<string | null>; results: Applied[] }
-	>();
+	const observations: AssertionObservation[] = [];
 	for (const result of results) {
 		if (result.signature?.class !== "assertion") continue;
-		let group = groups.get(result.signature.id);
-		if (!group) {
-			group = { signature: result.signature, tests: new Set(), files: new Set(), results: [] };
-			groups.set(result.signature.id, group);
+		observations.push({
+			test: result.test.id,
+			file: result.test.file,
+			signature: result.signature,
+			source: { kind: "result", result },
+		});
+	}
+	for (const tried of ctx.db.all(Q.assertionTries, { batch: batch.id })) {
+		observations.push({
+			test: tried.test,
+			file: tried.file,
+			signature: { id: tried.signature, hash: tried.hash, class: "assertion", text: tried.text },
+			source: { kind: "try", id: tried.id },
+		});
+	}
+	const groups = new Map<
+		number,
+		{
+			signature: AssertionObservation["signature"];
+			tests: Set<number>;
+			files: Set<string | null>;
+			observations: AssertionObservation[];
 		}
-		group.tests.add(result.test.id);
-		group.files.add(result.test.file);
-		group.results.push(result);
+	>();
+	for (const observation of observations) {
+		let group = groups.get(observation.signature.id);
+		if (!group) {
+			group = { signature: observation.signature, tests: new Set(), files: new Set(), observations: [] };
+			groups.set(observation.signature.id, group);
+		}
+		group.tests.add(observation.test);
+		group.files.add(observation.file);
+		group.observations.push(observation);
 	}
 	if (groups.size === 0) return;
 	const target = mustTarget(ctx.db, batch.target);
 	if (target.commit_sha !== null) {
 		const byHash = new Map([...groups.values()].map((group) => [group.signature.hash, group]));
 		const hashes = new Map([...groups.values()].map((group) => [group.signature.id, group.signature.hash]));
-		// Split results retain the original failure input. Count it without changing their stored causes.
+		// Split results and tries retain the original failure input. Count it without changing their stored causes.
 		let scanned = 0;
 		for (const earlier of ctx.db.all(Q.assertionsOnCommit, {
 			project: ctx.project.id,
@@ -1579,17 +1623,22 @@ function* splitBroadAssertions(ctx: Ctx, batch: BatchRow, results: Applied[]): G
 				byFile.set(file, storeSignature(ctx, fileSignature(group.signature, file)));
 			}
 		}
-		for (const result of group.results) {
+		for (const observation of group.observations) {
 			if (changed++ > 0 && changed % SLICE === 0) yield;
-			const file = result.test.file;
+			const file = observation.file;
 			if (!byFile.has(file)) {
 				const signature = fileSignature(group.signature, file);
 				byFile.set(file, ctx.db.get(Q.signature, { project: ctx.project.id, hash: signature.hash }));
 			}
 			const split = byFile.get(file);
 			if (!split) continue;
-			result.signature = split;
-			ctx.db.run(Q.splitResult, { id: result.id, signature: split.id });
+			if (observation.source.kind === "result") {
+				const result = observation.source.result;
+				result.signature = split;
+				ctx.db.run(Q.splitResult, { id: result.id, signature: split.id });
+			} else {
+				ctx.db.run(Q.splitTry, { id: observation.source.id, signature: split.id });
+			}
 		}
 	}
 }
