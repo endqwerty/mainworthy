@@ -377,21 +377,23 @@ Failed attempts are counted. The fifth wrong password for one name within 15 min
 
 The same limit applies to the current password when changing it. Password attempts already waiting to be checked stop if the name or address becomes blocked. A check that finishes during a block returns `limited` too. A successful check never clears a block that began while it was running, even if that block has since expired.
 
-Starting a passkey or provider sign-in has its own limit of 300 starts per network address in one minute.
-Web and iPhone starts share this allowance. Provider linking and accepting an invitation through the provider also use it.
-The instance also allows at most 1,000 anonymous starts per minute across all addresses, so rotating IPv6 networks cannot fill the ceremony maps.
-This permits an office-sized burst while keeping pending sign-ins available. If other clients exhaust the instance allowance, new starts wait too.
-After the allowance runs out, the page says how long to wait. The API returns `429 limited` with the remaining seconds in `Retry-After`.
-The wait never escalates, and retries do not extend the minute. A new minute gives the full allowance again.
+Starting a passkey or provider sign-in has a separate limit of 300 successful starts per public IPv4 address or IPv6 /56 in one minute.
+Web and iPhone starts share it. People sharing that address or network share its allowance too.
+A blocked start says how long to wait, with `429 limited` and `Retry-After` seconds in the API.
+The wait never escalates, and retries do not extend it. No instance-wide start allowance lets another network block your first attempt.
+Unavailable passkey options and an unreachable provider do not spend the allowance. Signed-in provider linking and a working invitation bypass it.
 
 Ordinary starts never add to failed-credential counts or cause a password refusal. Wrong invitation codes still count as failed proofs.
-Password sign-in keeps the failed-attempt rule described above.
-Valid passkey and provider answers to ceremonies already begun can still finish during a start limit.
-A working invitation still opens its form and can be accepted with a password or passkey while that address is limited.
-Reloading that invitation reuses its passkey challenge; with one minute left, the server offers a successor without invalidating an ongoing prompt.
-Each challenge expires at its original deadline. The page uses the remaining lifetime supplied by the server.
+Password sign-in keeps the failed-attempt rule described above. Valid answers to pending passkey/provider ceremonies can still finish during a start limit.
+A working invitation opens its form and can be accepted with a password or passkey during an address block.
+Reloading it reuses its passkey challenge; with one minute left, a successor preserves an ongoing prompt until its original deadline.
+The page uses the remaining lifetime supplied by the server.
+
+Pending ceremonies still have a memory limit. At capacity, the source holding the most live ceremonies loses its oldest entry,
+so a large flood does not discard a small unrelated source's pending sign-in. If sources hold equal shares, an oldest entry can still be displaced.
+A client controlling many independent IPv4 addresses or /56 networks can appear as many sources; the server cannot identify them as one person.
 The address follows the instance's [proxy configuration](./configuration.md#run-behind-a-proxy-that-ends-tls).
-Unknown and private addresses skip the per-address allowance; the instance-wide limit still applies.
+Unknown and private addresses are not counted and share one retention bucket, so configure the proxy to distinguish visitors.
 
 ### Through an identity provider
 

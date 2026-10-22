@@ -2,8 +2,43 @@
 // bounded in number, and gone after an import. The clock is the test's own.
 import { afterEach, expect, test } from "bun:test";
 import { type App, openApp, SESSION_LIFETIMES } from "../kernel/app.ts";
+import { Ceremonies } from "./ceremonies.ts";
 import { CONTEXT, clearChallenges, findChallenge, issueChallenge, spendChallenge } from "./challenges.ts";
 import { CEREMONY_MS, challengeOf } from "./webauthn.ts";
+
+test("full ceremony memory expires entries first, then reclaims the largest source while admitting newcomers", () => {
+	const store = new Ceremonies<{ deadline: number }>();
+	store.put("victim", { deadline: 100 }, "small", 0);
+	for (let n = 0; n < 6000; n++) store.put(`large-${n}`, { deadline: 100 }, "large", 0);
+	for (let n = 0; n < 3999; n++) store.put(`medium-${n}`, { deadline: 100 }, "medium", 0);
+	store.put("newcomer", { deadline: 100 }, "new", 0);
+	expect(store.get("victim")).toBeDefined();
+	expect(store.get("large-0")).toBeUndefined();
+	expect(store.get("medium-0")).toBeDefined();
+	expect(store.get("newcomer")).toBeDefined();
+	expect([...store.values()]).toHaveLength(10_000);
+	store.delete("large-1");
+	store.put("replacement", { deadline: 200 }, "new", 0);
+	expect(store.get("large-2")).toBeDefined();
+	store.put("after-expiry", { deadline: 300 }, "last", 100);
+	expect([...store.values()]).toHaveLength(2);
+	expect(store.get("replacement")).toBeDefined();
+});
+
+test("a largest incoming source reclaims its own oldest entry on ties, and replacements do not double-count", () => {
+	const store = new Ceremonies<{ deadline: number }>();
+	for (let n = 0; n < 5000; n++) {
+		store.put(`a-${n}`, { deadline: 100 }, "a", 0);
+		store.put(`b-${n}`, { deadline: 100 }, "b", 0);
+	}
+	store.put("new-b", { deadline: 100 }, "b", 0);
+	expect(store.get("a-0")).toBeDefined();
+	expect(store.get("b-0")).toBeUndefined();
+	store.put("a-0", { deadline: 200 }, "a", 0);
+	expect(store.get("a-1")).toBeDefined();
+	expect(store.get("b-1")).toBeDefined();
+	expect([...store.values()]).toHaveLength(10_000);
+});
 
 const PARTY = { id: "mainworthy.example", origin: "https://mainworthy.example" };
 /** A sign-in begun in some browser: the hash of its ceremony cookie stands in for it. */

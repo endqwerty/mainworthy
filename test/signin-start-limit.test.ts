@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import type { AssertionOptions, RegistrationOptions } from "../src/server/identity/webauthn.ts";
 import { provider, stopProviders } from "./oidc-support.ts";
 import {
@@ -38,6 +38,38 @@ const starts = [
 const client = from("203.0.113.10");
 const other = from("203.0.113.11");
 const PASSWORD = "correct horse battery staple";
+
+test("unavailable passkey options do not charge a source that later has working options", async () => {
+	for (const native of [false, true]) {
+		const w = world({ proxied: true, publicUrl: native ? "http://localhost" : null });
+		const body = native ? { native: true } : {};
+		for (let count = 0; count < 301; count++)
+			expect((await w.post("/api/login/challenge", body, client)).status).toBe(400);
+		w.instance.app.config.publicUrl = PUBLIC;
+		expect(said(await w.post("/api/login/challenge", body, client))).toBe("200");
+	}
+});
+
+test("unreachable providers do not charge starts, and proven linking and invitations bypass anonymous limits", async () => {
+	const stopped = await provider();
+	stopped.stop();
+	const w = world({ oidc: stopped.config(), proxied: true });
+	const warning = spyOn(console, "warn").mockImplementation(() => {});
+	try {
+		for (let count = 0; count < 301; count++) expect((await w.post("/api/login/oidc", {}, client)).status).toBe(409);
+	} finally {
+		warning.mockRestore();
+	}
+	const live = await provider();
+	w.instance.app.config.oidc = live.config();
+	expect(said(await w.post("/api/login/oidc", {}, client))).toBe("200");
+	const cookie = await joined(w, "robin", PASSWORD);
+	for (let count = 0; count < 299; count++) await w.post("/api/login/challenge", {}, client);
+	expect((await w.post("/api/login/oidc", {}, client)).status).toBe(429);
+	expect(said(await w.post("/api/login/oidc", { link: true }, { ...client, cookie }))).toBe("200");
+	const { code } = await invite(w, { name: "sam" });
+	expect(said(await w.post("/api/login/oidc", { invitation: code }, client))).toBe("200");
+});
 
 test("G3: a subscriber's /58 burst cannot refuse unrelated starts in any protocol", async () => {
 	const idp = await provider();
@@ -165,7 +197,7 @@ test.each(["passkey", "provider"])(
 			}
 		}
 		expect(said(await complete())).toBe("200");
-		expect(admitted).toBe(999);
+		expect(admitted).toBe(300);
 	},
 	15_000,
 );
@@ -180,27 +212,21 @@ test("a start block reports attempts without claiming that authentication failed
 	});
 });
 
-test("the global window covers mixed protocols and unknown peers without blocking passwords or invitations", async () => {
+test("one source cannot exhaust another source's allowance, including unknown peers", async () => {
 	const idp = await provider();
 	const w = world({ oidc: idp.config(), proxied: true });
 	await joined(w, "robin", PASSWORD);
-	const { code } = await invite(w, { name: "sam" });
-	for (let count = 0; count < 1000; count++) {
-		const start = starts[count % starts.length];
-		if (!start) throw new Error("no start variant");
-		expect((await w.post(start.path, start.body, from(`203.0.113.${(count % 4) + 20}`))).status).toBe(200);
+	for (let count = 0; count < 300; count++) expect((await w.post("/api/login/challenge", {}, client)).status).toBe(200);
+	for (const start of starts) {
+		expect(said(await w.post(start.path, start.body, client))).toBe("429 limited, retry after 60");
+		expect(said(await w.post(start.path, start.body, other))).toBe("200");
+		expect(said(await w.post(start.path, start.body))).toBe("200");
 	}
-	for (const start of starts)
-		expect(said(await w.post(start.path, start.body, other))).toBe("429 limited, retry after 60");
-	expect(said(await w.post("/api/login/challenge", {}))).toBe("429 limited, retry after 60");
-	expect(said(await signIn(w, "robin", PASSWORD, other))).toBe("200");
-	expect((await w.post("/api/login/challenge", { invitation: code }, other)).status).toBe(200);
-	expect((await w.post("/api/login", { invitation: code, password: PASSWORD }, other)).status).toBe(200);
+	expect(said(await signIn(w, "robin", PASSWORD, client))).toBe("200");
 	w.clock.advance(30_000);
-	expect(said(await w.post("/api/login/challenge", {}, other))).toBe("429 limited, retry after 30");
+	expect(said(await w.post("/api/login/challenge", {}, client))).toBe("429 limited, retry after 30");
 	w.clock.advance(30_000);
-	for (let count = 0; count < 1000; count++) expect((await w.post("/api/login/challenge", {})).status).toBe(200);
-	expect(said(await w.post("/api/login/challenge", {}, other))).toBe("429 limited, retry after 60");
+	expect(said(await w.post("/api/login/challenge", {}, client))).toBe("200");
 });
 
 test("provider discovery cannot extend an admitted ceremony beyond its original lifetime", async () => {

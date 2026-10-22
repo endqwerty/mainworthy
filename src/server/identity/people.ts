@@ -15,7 +15,7 @@ import { bytesToHex } from "@noble/hashes/utils.js";
 import type { App, Config } from "../kernel/app.ts";
 import { type Db, sql } from "../kernel/db.ts";
 import { conflict, forbidden, invalid, notFound, OpError } from "../kernel/errors.ts";
-import { limiterOf, startLimiterOf } from "./attempts.ts";
+import { limiterOf, takeStart } from "./attempts.ts";
 import { CONTEXT, findChallenge, invitationChallenge, issueChallenge, spendChallenge } from "./challenges.ts";
 import { clearMailLinksOf, credentialNotice } from "./contacts.ts";
 import {
@@ -51,7 +51,7 @@ import {
 	revokeInvitationsOf,
 	spendInvitation,
 } from "./invitations.ts";
-import { accountKey, addressKey, type LimiterAnswer } from "./limiter.ts";
+import { accountKey, addressKey, type LimiterAnswer, startAddressKey } from "./limiter.ts";
 import {
 	beginOidc,
 	findNativeOidc,
@@ -246,15 +246,6 @@ const waiting = (answer: Extract<LimiterAnswer, { kind: "blocked" }>): Limited =
 	why: "limited",
 	retryAfter: answer.retryAfterSeconds,
 });
-
-/**
- * Reserves an anonymous challenge or provider ceremony in the address's fixed-window allocation quota.
- * This is synchronous and independent of failed proofs: ordinary starts never penalise password sign-in.
- */
-export function countSignInStart(app: App, address: string | null): Limited | null {
-	const answer = startLimiterOf(app)(addressKey(address), app.now());
-	return answer.kind === "blocked" ? waiting(answer) : null;
-}
 
 /**
  * The count for something that is not a guess when it is right: a passkey's answer, an invitation's code. It
@@ -512,11 +503,14 @@ export async function changePassword(
  */
 export function passkeySignInOptions(
 	app: App,
+	source: string | null,
 	client: "web" | "native" = "web",
-): { options: AssertionOptions; ceremony: string; lastsMs: number } | null {
+): { options: AssertionOptions; ceremony: string; lastsMs: number } | Limited | null {
 	const address = publicAddress(app.config);
 	if (!address) return null;
 	if (client === "native" && !address.url.startsWith("https://")) return null;
+	const quota = takeStart(app, source);
+	if (quota.kind === "blocked") return waiting(quota);
 	// Native AuthenticationServices uses the HTTPS RP ID as its origin, without a port.
 	// Record it in this challenge, leaving browser challenges bound to the configured web origin.
 	const party = client === "native" ? { ...address.party, origin: `https://${address.party.id}` } : address.party;
@@ -525,7 +519,7 @@ export function passkeySignInOptions(
 	return {
 		options: assertionOptions({
 			rpId: address.party.id,
-			challenge: issueChallenge(app, { purpose: "sign-in", context }, party),
+			challenge: issueChallenge(app, { purpose: "sign-in", context }, party, startAddressKey(source) ?? "unknown"),
 			allow: [],
 		}),
 		ceremony,
@@ -1076,7 +1070,8 @@ export async function beginOidcSignIn(app: App, start: OidcStart, address: strin
 		purpose = { purpose: "link", actor: start.actor, session: hashOf(start.browser) };
 	} else purpose = start;
 	const ceremony = newSessionSecret();
-	const url = await beginOidc(app, { purpose, browser: hashOf(ceremony), redirect });
+	const url = await beginOidc(app, { purpose, browser: hashOf(ceremony), redirect, address });
+	if (url !== null && typeof url !== "string") return waiting(url);
 	return url === null ? { ok: false, why: "unreachable" } : { ok: true, url, ceremony, lastsMs: CEREMONY_MS };
 }
 
@@ -1260,10 +1255,15 @@ export function confirmTotp(
 	return { id, recoveryCodes: recovery.codes, sessionsEnded };
 }
 
-export async function beginNativeOidc(app: App, request: NativeOidcRequest): Promise<string | null> {
+export async function beginNativeOidc(
+	app: App,
+	request: NativeOidcRequest,
+	address: string | null,
+): Promise<string | Limited | null> {
 	const redirect = oidcRedirect(app).replace("/signin/oidc", "/api/login/oidc/native/callback");
 	if (request.instance !== publicAddress(app.config)?.url) return null;
-	return beginOidc(app, { purpose: { purpose: "native", ...request }, browser: null, redirect });
+	const begun = await beginOidc(app, { purpose: { purpose: "native", ...request }, browser: null, redirect, address });
+	return begun !== null && typeof begun !== "string" ? waiting(begun) : begun;
 }
 
 export async function finishNativeOidc(

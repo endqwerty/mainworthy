@@ -2,49 +2,54 @@
 
 2026-10-22. Fixes [issue #664](https://github.com/endqwerty/mainworthy/issues/664).
 
-A provider begin or passkey challenge allocates an entry in a 10,000-entry map for five minutes. One address
-could request enough entries to evict another person's pending sign-in. Counting starts as failed credentials
-stopped that flood but made ordinary use behind an office address escalate to fifteen-minute blocks, including
-refusals of the right password. Independent review of [PR #772](https://github.com/endqwerty/mainworthy/pull/772)
-found this before landing.
+Anonymous provider/passkey starts could fill their 10,000-entry maps and evict someone else's pending sign-in.
+An initial fix counted starts as failed credentials and blocked ordinary office users, including the right
+password. A later global ceiling protected pending state but let one client refuse every new passkey/provider
+start indefinitely by spending each minute's allowance. Independent reviews of
+[PR #772](https://github.com/endqwerty/mainworthy/pull/772) found both before landing. Neither policy remains.
 
-Anonymous starts have a separate fixed window of 300 starts per address per 60 seconds, anchored at the first
-start. Web/native passkey and provider starts share it, as do provider linking and invitation/provider begins.
-Reservation is synchronous before allocation or provider discovery. Refused requests do not extend the window.
-The next window restores all 300 starts. Ordinary starts do not read or change the failed-credential limiter, so this quota
-cannot refuse a password or an otherwise valid completion of a pending passkey/provider ceremony.
+Anonymous starts have a separate fixed allowance of 300 per 60 seconds per public IPv4 address or IPv6 /56,
+anchored at the first successful allocation. A /58 spread across 34 /64s is one /56 source, not 34 allowances.
+Three hundred permits an office-sized burst and sustained five starts per second. Failed-proof limits retain
+their existing /64 grouping and exponential rule; ordinary starts neither change nor consult them.
+A refused start does not extend its window. There is no instance-wide start refusal or shared allowance to
+monopolise. Unknown/private addresses remain uncounted because an unnamed proxy may share one among visitors.
+The operator must configure the trusted proxy to distinguish those visitors.
 
-Three hundred permits an office's simultaneous first attempts and a sustained five starts per second.
-A per-address limit alone is insufficient: a single IPv6 subscriber can use 34 /64s within one /58 to obtain
-10,200 starts in one window, evicting another person's ceremony. No distributed sender is needed.
-An additional instance-wide fixed ceiling of 1,000 starts per 60 seconds covers every anonymous start,
-including private and unknown addresses. A five-minute interval intersects at most six windows, allowing
-at most 6,000 anonymous admissions across every address, below either map's 10,000-entry cap. One thousand
-permits a large office burst and sustained traffic above sixteen starts per second. When it is exhausted,
-new anonymous starts across the instance wait for its remaining window. Passwords, valid pending answers
-and working invitation pages do not wait on this allocation ceiling.
+Check availability before consuming a source allowance. Missing passkey options, an unsupported native
+public address, an invalid invitation or native request, and failed/expired provider discovery consume no
+anonymous start. OIDC reserves after discovery, synchronously before storing state, and retains the deadline
+from before discovery. A start that expired during discovery allocates nothing. Signed-in provider linking
+and a validated invitation/provider join are proven contexts and bypass anonymous counts.
 
-The global count is separate from the bounded address-key map, so rotating addresses cannot evict it.
-Both windows are checked and consumed synchronously; a refusal consumes neither and extends neither.
-The per-address quota remembers at most 10,000 keys, discarding expired windows then the oldest when full.
-It uses the existing trusted-proxy extraction and IPv6 /64 grouping. Private/unknown addresses skip only
-the per-address count. OIDC state keeps the deadline from before provider discovery, and a start whose
-lifetime expired while discovery was pending allocates no state. A restart clears the allocation counts.
+Every ceremony store remains bounded at 10,000 entries. It owns entries and their source membership together:
+expiry, spending, replacement and capacity eviction update one index. When full, expire dead entries first,
+then drop the oldest entry from the EXISTING source bucket with the most live entries. If the incoming source
+is tied for largest, it loses its own oldest entry. Otherwise choose the oldest entry among the tied-largest
+buckets. Insert the new ceremony afterward, so a full map does not refuse an unrelated newcomer.
 
-A working invitation is proof of a random server-issued code. Its page remains accessible during either
-address block, while guessed codes retain the failed-attempt limit. Repeated valid reads reuse the same
-invitation-bound registration challenge, with its original deadline. With one minute left, the next read
-creates a successor and keeps the previous challenge valid until its original deadline. At most two unexpired
-challenges exist for one invitation. This avoids invalidating another tab's operating-system prompt or letting
-one code churn the shared map. The challenge store owns reuse, expiry and spending; there is no second cache.
-The existing passkey `timeout` reports remaining lifetime, and the web page derives its deadline conservatively
-from request dispatch. No wire field is added.
+Passkey/provider sign-in owners are IPv4 or /56 source keys. An invitation's registration and provider
+ceremonies belong to its validated code hash; authenticated registration/linking belongs to its session
+context. Native handoff codes belong to their proven credential. Unknown peers share an explicit unknown
+bucket. Both passkey and OIDC maps use the same retention implementation; native handoffs keep their existing
+one-minute lifetime with that policy too. A restart or import clears the stores as before.
 
-A token bucket would permit continuous refill but adds fractional-credit rules. Outstanding-ceremony quotas
-would require accounting across both maps, every completion, expiry and import. The fixed window bounds the
-reported flood with fewer state transitions. Exempting valid invitations without bounded reuse would leave
-another way to fill the challenge map.
+This protects a small source bucket while larger buckets consume the map, including the tested victim among
+forty independent flooding prefixes. It is not unlimited Sybil isolation. One client controlling many
+independent IPv4 addresses or /56 prefixes appears as many sources. At equal bucket sizes, no anonymous fact
+identifies the flooder; a tied source's oldest pending entry may be displaced. People behind the same public
+address or /56 share the allowance and retention bucket. Unknown visitors behind an unnamed proxy cannot be
+isolated from each other. These are limits of the information available, not a promise of a bounded global wait.
 
-Principles: Model the Domain (separate allocations from failed proofs); Laziness Protocol (one synchronous
-reservation operation); Boundary Discipline (validate invitation proof before exemption); Test Behavior Not
-Implementation (HTTP lockout, flood, invitation and expiry checks).
+A working invitation's page stays reachable during either address block. Valid reloads reuse its registration
+challenge; with one minute left, a successor preserves the old prompt until its original deadline. At most two
+unexpired challenges belong to one invitation. The existing passkey timeout reports remaining lifetime, and
+the page derives its deadline conservatively from request dispatch. No wire field or second options cache is added.
+
+Coarsening alone does not cover independently routed sources. Global refusal creates cross-client denial.
+Source-aware eviction instead reclaims overrepresented memory without a shared admission switch. Per-source
+counting, bounded ownership and proof binding remain separate policies.
+
+Principles: Attack the Premise (remove global refusal); Model the Domain (one owner for entry/index lifecycle);
+Fix Root Causes (source-aware full-map retention); Boundary Discipline (validate availability and proof before charging);
+Test Behavior Not Implementation (HTTP start availability and pending completions under sustained floods).
