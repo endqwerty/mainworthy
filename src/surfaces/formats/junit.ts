@@ -10,7 +10,6 @@ type CaseElement = {
 	kind: "case";
 	tag: string;
 	result: ParsedResult;
-	suite: SuiteElement | undefined;
 	ordinal: number | null;
 	retries: number;
 	/** The runner's earlier failed tries, from Surefire's flaky and rerun elements (decision 0129). */
@@ -295,46 +294,51 @@ function applyDamage(results: ResultIn[], spans: DamageSpan[]): void {
 	}
 }
 
+type RetryGroups = Map<SuiteElement | undefined, Map<string, Map<string, CaseElement[]>>>;
+
 /** Coalesce only complete, uniquely numbered sequences; other duplicates keep the same-attempt rule. */
-function groupRetries(results: ParsedResult[], groups: Map<string, CaseElement[]>): ParsedResult[] {
+function groupRetries(results: ParsedResult[], groups: RetryGroups): ParsedResult[] {
 	const replacements = new Map<ParsedResult, ParsedResult>();
 	const removed = new Set<ParsedResult>();
-	for (const cases of groups.values()) {
-		const first = cases[0];
-		const last = cases.at(-1);
-		if (first === undefined || last === undefined || first === last) continue;
-		if (
-			!cases.every(
-				(item, index) =>
-					item.ordinal === index &&
-					item.integrity === "intact" &&
-					item.suite === first.suite &&
-					item.result.tries === undefined &&
-					item.result.annotation?.case === first.result.annotation?.case &&
-					item.result.annotation?.version === first.result.annotation?.version,
-			)
-		)
-			continue;
-		if (cases.length > 101)
-			throw new Error(
-				`JUnit tried "${"name" in first.result.test ? first.result.test.name : "?"}" ${cases.length} times, more than the 101 a result and its 100 tries keep`,
-			);
-		const result: ParsedResult = {
-			...last.result,
-			test: first.result.test,
-			tries: cases.slice(0, -1).map(({ result }) => ({
-				outcome: result.outcome,
-				...(result.durationMs === undefined ? {} : { durationMs: result.durationMs }),
-				...(result.failure === undefined ? {} : { failure: result.failure }),
-			})),
-		};
-		if (cases.some((item) => item.result.durationMs !== undefined)) {
-			result.durationMs = cases.reduce((total, item) => total + (item.result.durationMs ?? 0), 0);
-			if (!Number.isSafeInteger(result.durationMs)) throw new Error("Invalid test duration");
+	for (const suiteGroups of groups.values()) {
+		for (const prefixGroups of suiteGroups.values()) {
+			for (const cases of prefixGroups.values()) {
+				const first = cases[0];
+				const last = cases.at(-1);
+				if (first === undefined || last === undefined || first === last) continue;
+				if (
+					!cases.every(
+						(item, index) =>
+							item.ordinal === index &&
+							item.integrity === "intact" &&
+							item.result.tries === undefined &&
+							item.result.annotation?.case === first.result.annotation?.case &&
+							item.result.annotation?.version === first.result.annotation?.version,
+					)
+				)
+					continue;
+				if (cases.length > 101)
+					throw new Error(
+						`JUnit tried "${"name" in first.result.test ? first.result.test.name : "?"}" ${cases.length} times, more than the 101 a result and its 100 tries keep`,
+					);
+				const result: ParsedResult = {
+					...last.result,
+					test: first.result.test,
+					tries: cases.slice(0, -1).map(({ result }) => ({
+						outcome: result.outcome,
+						...(result.durationMs === undefined ? {} : { durationMs: result.durationMs }),
+						...(result.failure === undefined ? {} : { failure: result.failure }),
+					})),
+				};
+				if (cases.some((item) => item.result.durationMs !== undefined)) {
+					result.durationMs = cases.reduce((total, item) => total + (item.result.durationMs ?? 0), 0);
+					if (!Number.isSafeInteger(result.durationMs)) throw new Error("Invalid test duration");
+				}
+				if (result.outcome === "pass") result.note = `passed after ${cases.length - 1} retries`;
+				replacements.set(first.result, result);
+				for (const item of cases.slice(1)) removed.add(item.result);
+			}
 		}
-		if (result.outcome === "pass") result.note = `passed after ${cases.length - 1} retries`;
-		replacements.set(first.result, result);
-		for (const item of cases.slice(1)) removed.add(item.result);
 	}
 	return results.filter((result) => !removed.has(result)).map((result) => replacements.get(result) ?? result);
 }
@@ -402,7 +406,7 @@ export function parseJUnit(
 	const suiteStack: SuiteElement[] = [];
 	const damagedSpans: DamageSpan[] = [];
 	const prefixDigests = new Map<string, KeyDigest>();
-	const retryGroups = new Map<string, CaseElement[]>();
+	const retryGroups: RetryGroups = new Map();
 	let reportProblem: NonNullable<ResultIn["failure"]> | null = null;
 	let currentCase: CaseElement | null = null;
 	let currentFailure: FailureElement | null = null;
@@ -754,7 +758,6 @@ export function parseJUnit(
 					kind: "case",
 					tag,
 					result,
-					suite,
 					ordinal: stable.retry,
 					retries: 0,
 					tries: [],
@@ -764,8 +767,18 @@ export function parseJUnit(
 				};
 				currentCase = element;
 				results.push(result);
-				const group = retryGroups.get(key);
-				if (group === undefined) retryGroups.set(key, [element]);
+				let suiteGroups = retryGroups.get(suite);
+				if (suiteGroups === undefined) {
+					suiteGroups = new Map();
+					retryGroups.set(suite, suiteGroups);
+				}
+				let prefixGroups = suiteGroups.get(prefix);
+				if (prefixGroups === undefined) {
+					prefixGroups = new Map();
+					suiteGroups.set(prefix, prefixGroups);
+				}
+				const group = prefixGroups.get(stable.name);
+				if (group === undefined) prefixGroups.set(stable.name, [element]);
 				else group.push(element);
 			} else if (name === "failure" || name === "error") {
 				const suite = suiteStack.at(-1);

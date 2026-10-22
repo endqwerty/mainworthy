@@ -243,6 +243,28 @@ describe("JUnit suffixed retry sequences", () => {
 		expect(parsed.results.every((item) => item.tries === undefined)).toBe(true);
 	});
 
+	test("a retry of a name containing separators still belongs to its structural identity", () => {
+		const parsed = parseJUnit(
+			`<testsuite><testcase classname="a" name="b::c"><failure message="first"/></testcase><testcase classname="a" name="b::c (retry #1)"/></testsuite>`,
+		);
+		expect(parsed.results).toEqual([
+			result("a::b::c", "b::c", "pass", {
+				note: "passed after 1 retries",
+				tries: [{ outcome: "fail", failure: { message: "first", detail: "" } }],
+			}),
+		]);
+	});
+
+	test("distinct structural identities with the same rendered key are not retries", () => {
+		const parsed = parseJUnit(
+			`<testsuite><testcase classname="a" name="b::c"><failure message="real failure"/></testcase><testcase classname="a::b" name="c (retry #1)"/></testsuite>`,
+		);
+		expect(parsed.results).toEqual([
+			result("a::b::c", "b::c", "fail", { failure: { message: "real failure", detail: "" } }),
+			result("a::b::c", "c (retry #1)"),
+		]);
+	});
+
 	test("matching suite paths in separate suite instances stay separate", () => {
 		expect(
 			parseJUnit(
