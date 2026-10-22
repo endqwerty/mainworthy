@@ -406,6 +406,8 @@ The undo button on the last-answer line withdraws that answer even while you rea
 The question returns to "Open" only after the server confirms the withdrawal or a fresh read confirms it is already open.
 While a withdrawal is pending, its question stays shown as withdrawing, outside the Open list.
 An answer key queues a replacement for that question and sends it only after the withdrawal is confirmed.
+If another question is current when the withdrawal is confirmed, the queued answer is discarded with a message.
+The cursor stays on the question you chose.
 A refused or lost withdrawal reports failure without showing the question as reopened and discards the queued answer.
 
 Undo names the decision returned by your answer. If somebody replaced it meanwhile,
