@@ -208,12 +208,6 @@ export function endingText(ending: { fixedIn?: FixedIn | undefined; rule: string
 	return `Fixed by another commit of ${fixedIn.change}${ended}`;
 }
 
-/** What a change's page says about the failures it fixed itself: `count` of them. */
-export function fixedOnChangeText(count: number): string {
-	const failures = count === 1 ? "1 failure that needed a fix was" : `${count} failures that needed a fix were`;
-	return `${failures} fixed by another of its commits.`;
-}
-
 export const ANSWER_LABELS: Record<string, string> = {
 	accept: "Accept",
 	reject: "Reject",

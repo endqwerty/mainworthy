@@ -190,9 +190,6 @@ check(
 					{ exact: true },
 				)
 				.waitFor();
-			await page
-				.getByText("1 failure that needed a fix was fixed by another of its commits.", { exact: true })
-				.waitFor();
 			// The pull request's address is shown as itself, not behind the change's key: a report supplies it.
 			const link = page.locator(".change-link");
 			await link.getByText("github.example/shop/pull/408", { exact: true }).waitFor();

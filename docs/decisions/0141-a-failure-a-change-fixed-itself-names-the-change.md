@@ -36,8 +36,8 @@ request's work resolved the failure, and a retry did not.
 
 Endings recorded before this decision claim no fix: what passed is only in their reason's text.
 
-**The change page counts them and links to the pull request.** "1 failure that needed a fix was fixed by another of
-its commits." The pull request names the issue it was for, so the failure reaches that issue in one step. The link's
+**The change page links to the pull request.** The pull request names the issue it was for, so the failure reaches
+that issue in one step. The link's
 text is its own host and path, not the change's key: a report supplies the address, and a key would vouch for it.
 It stands on its own line and wraps, never clipped, because a clipped "github.com.…" could hide whose site it is
 (both from the Daybreak audit, 2026-10-22).
@@ -56,4 +56,7 @@ audit, 2026-10-22). Making every report name a full lowercase hash is a larger c
   gets its own issue, as `AGENTS.md` says.
 - **Sending the pull request's closing issues with the change.** It needs another field on `change`, the workflow
   and the archive, for a link the pull request page already shows.
-- **A mark in the change list.** It would need a count per change on every list read; the change page has it.
+- **A count of such failures.** A mark in the change list would need a count per change on every list read. A line on
+  the change page counted the settled questions it had read, which the server caps at 200 with no next page, so a
+  large change could show too few or none (the Daybreak audit, 2026-10-22). Each settled failure already says it was
+  fixed, so neither was kept.
