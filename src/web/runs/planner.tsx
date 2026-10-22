@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import type { Api } from "../../core/api.ts";
 import { PlanInput } from "../../core/ops.ts";
@@ -17,9 +17,14 @@ const PendingPlan = PlanInput.extend({
 type Submission = { state: "sending" | "uncertain"; input: z.infer<typeof PendingPlan> };
 
 function readPlan(key: string): Submission["input"] | null {
+	let stored: string | null;
 	try {
-		const stored = localStorage.getItem(key);
-		if (stored === null) return null;
+		stored = localStorage.getItem(key);
+	} catch {
+		return null;
+	}
+	if (stored === null) return null;
+	try {
 		const parsed = PendingPlan.safeParse(JSON.parse(stored));
 		if (parsed.success) return parsed.data;
 	} catch {}
@@ -59,10 +64,30 @@ export function RunPlanner({ close }: { close: () => void }) {
 		initial ? { state: "uncertain", input: initial } : null,
 	);
 	const submitting = useRef(submission);
-	const hold = (next: Submission | null) => {
+	const hold = useCallback((next: Submission | null) => {
 		submitting.current = next;
 		setSubmission(next);
-	};
+	}, []);
+	const clearRemoved = useCallback(() => {
+		if (!submitting.current || !sessionCurrent(owner)) return false;
+		try {
+			if (localStorage.getItem(key) !== null) return false;
+		} catch {
+			return false;
+		}
+		hold(null);
+		setStatus(
+			"This plan is no longer saved on this device. It may have been discarded or completed in another tab. Check Runs before planning again.",
+		);
+		return true;
+	}, [key, owner, hold, setStatus]);
+	useEffect(() => {
+		const changed = (event: StorageEvent) => {
+			if (event.storageArea === localStorage && (event.key === key || event.key === null)) clearRemoved();
+		};
+		window.addEventListener("storage", changed);
+		return () => window.removeEventListener("storage", changed);
+	}, [key, clearRemoved]);
 	const busy = submission?.state === "sending";
 	const nameRef = useRef<HTMLInputElement>(null);
 	useEffect(() => {
@@ -107,6 +132,11 @@ export function RunPlanner({ close }: { close: () => void }) {
 				try {
 					const saved = readPlan(key);
 					const held = submitting.current?.input;
+					if (held && !saved) {
+						if (!clearRemoved())
+							setStatus("This browser could not confirm the saved plan. Reopen the planner before retrying.");
+						return;
+					}
 					const previous = saved && saved.cmd !== held?.cmd ? saved : (held ?? saved);
 					if (previous && previous.cmd !== held?.cmd) {
 						setStatus("Another tab's plan is waiting; Retry plan sends it.");
@@ -172,6 +202,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 						navigate(routeUrl({ project, screen: "runs", ref: reply.run }), { ifCurrent: navigation });
 					})
 					.catch((error: unknown) => {
+						if (!sessionCurrent(owner) || clearRemoved() || submitting.current?.input.cmd !== input.cmd) return;
 						const replayChanged =
 							error instanceof ApiError &&
 							error.status !== null &&

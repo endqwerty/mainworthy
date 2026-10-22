@@ -58,6 +58,10 @@ A run may already exist. Check **Runs** before discarding the request.
 If the project is missing or you no longer have a grant on it, the request stays available to retry.
 To release a request whose outcome is unknown, choose **Discard this plan**. The plan may already have
 been recorded. Discarding the saved request does not undo a run.
+Other tabs release that request too; a delayed failure or stale retry cannot restore it.
+If another tab discarded or completed the saved request, the planner says it is no longer saved.
+Check **Runs** before planning again.
+If the browser cannot read a saved request, retry waits. Reopen the planner once storage is available.
 If another tab has a different saved plan, submitting or retrying first shows that plan and a notice without sending it.
 Choose **Retry plan** to send the displayed request.
 A saved plan carries the project's identity, so deleting the project and creating another with the same key

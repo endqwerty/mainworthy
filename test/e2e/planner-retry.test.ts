@@ -787,7 +787,7 @@ check(
 			await other.locator('.run-planner button[type="submit"]').click();
 			await other.getByRole("button", { name: "Enter Retry plan", exact: true }).waitFor();
 			await page.bringToFront();
-			await page.getByRole("button", { name: "Enter Retry plan", exact: true }).click();
+			await page.locator('.run-planner button[type="submit"]').click();
 			await eventually(
 				async () => ({ status: await page.locator("#stat").textContent(), url: page.url() }),
 				({ status, url }) =>
@@ -874,6 +874,133 @@ check(
 			);
 			expect(sent).toHaveLength(3);
 			for (const input of sent) expect(input).toEqual(original);
+			expect((await server.api("find", { in: "runs", origin: "planned" })).items).toHaveLength(1);
+		} finally {
+			await view.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+for (const path of ["storage event", "late failure", "retry"] as const)
+	check(
+		`another tab's discard prevents resurrection through ${path}`,
+		async () => {
+			const server = await startServer();
+			const view = await openPage(server, { path: "/p/scratch/runs" });
+			const arrived = Promise.withResolvers<void>();
+			const release = Promise.withResolvers<void>();
+			try {
+				await server.api("propose", { edits: [{ op: "create", outline: "Checkout opens\n  Open checkout > Ready" }] });
+				const { page, context } = view;
+				const key = `${await devicePrefix(server, server.token)}run-plan:scratch`;
+				const sent: Api["plan"]["input"][] = [];
+				await page.route("**/plan", async (route) => {
+					sent.push(route.request().postDataJSON());
+					if (sent.length > 1) return route.continue();
+					arrived.resolve();
+					await release.promise;
+					await route.abort().catch(() => {});
+				});
+				if (path !== "storage event")
+					await page.evaluate(() => {
+						window.addEventListener("storage", (event) => event.stopImmediatePropagation(), true);
+					});
+				await page.keyboard.press("n");
+				await page.getByLabel("Run name").fill("Discarded plan X");
+				await page.locator('.run-planner button[type="submit"]').click();
+				await arrived.promise;
+				if (path === "retry") {
+					release.resolve();
+					await page.getByRole("button", { name: "Enter Retry plan", exact: true }).waitFor();
+				}
+				const other = await context.newPage();
+				await other.goto(`${server.url}/p/scratch/runs`);
+				await other.getByRole("listbox", { name: "Runs", exact: true }).waitFor();
+				await other.keyboard.press("n");
+				await other.getByRole("button", { name: "Discard this plan", exact: true }).click();
+				expect(await other.evaluate((key) => localStorage.getItem(key), key)).toBeNull();
+				if (path === "storage event") await eventually(() => page.getByLabel("Run name").isEditable(), Boolean);
+				const failed =
+					path === "retry" ? null : page.waitForEvent("requestfailed", (request) => request.url().endsWith("/plan"));
+				await page.bringToFront();
+				if (path === "retry") await page.getByRole("button", { name: "Enter Retry plan", exact: true }).click();
+				else release.resolve();
+				if (failed) {
+					await failed;
+					await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+				}
+				await eventually(
+					async () => ({ status: await page.locator("#stat").textContent(), url: page.url() }),
+					({ status, url }) =>
+						Boolean(
+							status?.includes("no longer saved") || url.endsWith("/runs/1") || status?.includes("outcome is unknown"),
+						),
+				);
+				expect(await page.evaluate((key) => localStorage.getItem(key), key)).toBeNull();
+				expect(await page.getByLabel("Run name").isEditable()).toBe(true);
+				expect(await page.getByRole("button", { name: "Enter Retry plan", exact: true }).count()).toBe(0);
+				expect(await page.locator("#stat").textContent()).toContain("no longer saved");
+				expect(sent).toHaveLength(1);
+				expect((await server.api("find", { in: "runs", origin: "planned" })).items).toHaveLength(0);
+			} finally {
+				release.resolve();
+				await view.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+
+check(
+	"an unreadable saved plan is retained until storage can confirm the retry",
+	async () => {
+		const server = await startServer();
+		const view = await openPage(server, { path: "/p/scratch/runs" });
+		try {
+			await server.api("propose", { edits: [{ op: "create", outline: "Checkout opens\n  Open checkout > Ready" }] });
+			const { page } = view;
+			const key = `${await devicePrefix(server, server.token)}run-plan:scratch`;
+			const sent: Api["plan"]["input"][] = [];
+			await page.route("**/plan", async (route) => {
+				sent.push(route.request().postDataJSON());
+				if (sent.length === 1) return route.abort();
+				await route.continue();
+			});
+			await page.keyboard.press("n");
+			await page.getByLabel("Run name").fill("Keep until readable");
+			await page.locator('.run-planner button[type="submit"]').click();
+			await page.getByRole("button", { name: "Enter Retry plan", exact: true }).waitFor();
+			await page.evaluate((key) => {
+				const read = Storage.prototype.getItem;
+				Storage.prototype.getItem = function (entry) {
+					if (entry === key) throw new Error("Storage temporarily unreadable");
+					return read.call(this, entry);
+				};
+				window.addEventListener(
+					"restore-plan-storage",
+					() => {
+						Storage.prototype.getItem = read;
+					},
+					{ once: true },
+				);
+			}, key);
+			await page.getByRole("button", { name: "Enter Retry plan", exact: true }).click();
+			await eventually(
+				() => page.locator("#stat").textContent(),
+				(status) => Boolean(status?.includes("could not confirm")),
+			);
+			await page.evaluate(() => {
+				window.dispatchEvent(new Event("restore-plan-storage"));
+			});
+			expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? "null"), key)).toEqual(sent[0]);
+			expect(await page.getByLabel("Run name").isEditable()).toBe(false);
+			expect(sent).toHaveLength(1);
+			await page.getByRole("button", { name: "Enter Retry plan", exact: true }).click();
+			await page.waitForURL("**/runs/1");
+			expect(sent).toHaveLength(2);
+			expect(sent[1]).toEqual(sent[0]);
 			expect((await server.api("find", { in: "runs", origin: "planned" })).items).toHaveLength(1);
 		} finally {
 			await view.close();
