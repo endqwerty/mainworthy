@@ -307,8 +307,10 @@ backend stack
 ```
 
 - The ingress publishes a port below 1024. While a deploy leaves it free, a process on the host could
-  otherwise listen there and receive the requests the hold sends, cookies and tokens included; only root may
-  take a port below 1024 (`net.ipv4.ip_unprivileged_port_start`, 1024 by default). The hold's own port, 7358,
+  otherwise listen there and receive the requests the hold sends, cookies and tokens included. Below 1024
+  (`net.ipv4.ip_unprivileged_port_start`, 1024 by default) only root or a process with
+  `CAP_NET_BIND_SERVICE` may listen; Docker's port proxy runs as root. This keeps out an ordinary process,
+  not a privileged one or a compromised host. The hold's own port, 7358,
   is never free: HAProxy keeps it across deploys.
 - `retries 90` with `timeout connect 1s` is the hold: HAProxy waits the shorter of the two, one second,
   before it tries a refused connection again.
