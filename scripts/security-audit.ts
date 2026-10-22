@@ -4,11 +4,14 @@
 // Run one exact origin/main commit's copy, written outside the checkout, never the branch's; and run bun from `/`,
 // never in the checkout, where a branch's `bunfig.toml` preload and `.env` would load before this script:
 //
-//   repo=$(git rev-parse --show-toplevel); git -C "$repo" fetch -q origin main
-//   main_commit=$(git -C "$repo" rev-parse --verify 'origin/main^{commit}'); runner=$(mktemp -d)
-//   git -C "$repo" show "${main_commit}:scripts/security-audit.ts" > "$runner/security-audit.ts" &&
-//     (cd / && bun "$runner/security-audit.ts" <number> --repo "$repo" --source "$main_commit" [--context <file>])
-//   rm -rf "$runner"
+//   repo=$(git rev-parse --show-toplevel); runner=$(mktemp -d)
+//   (
+//     set -e
+//     git -C "$repo" fetch -q origin main
+//     main_commit=$(git -C "$repo" rev-parse --verify 'origin/main^{commit}')
+//     git -C "$repo" show "${main_commit}:scripts/security-audit.ts" > "$runner/security-audit.ts"
+//     cd / && bun "$runner/security-audit.ts" <number> --repo "$repo" --source "$main_commit" [--context <file>]
+//   ); rc=$?; rm -rf "$runner"; (exit "$rc")
 //
 // The script then refuses unless `--source` is still origin/main's tip and this file is that commit's copy, and it
 // prints the commit it ran from. Those checks catch a mistake or a race, not a hostile copy, which would skip them:

@@ -301,7 +301,7 @@ test("the audit's scratch directory is one `scratch rm` deletes", () => {
 	expect(existsSync(directory)).toBe(false);
 });
 
-test("the launcher on the page writes main's script and runs it, in each shell an agent uses", () => {
+test("the launcher on the page runs main's script and exits with its status, in each shell an agent uses", () => {
 	const page = readFileSync("docs/security-audit.md", "utf8");
 	const block = page.match(/```sh\n([\s\S]*?)```/)?.[1] ?? "";
 	expect(block).toContain("--source");
@@ -333,8 +333,19 @@ test("the launcher on the page writes main's script and runs it, in each shell a
 	const command = block.replace("<number>", "abc").replace(" [--context <file>]", "");
 	const shells = ["bash", "zsh"].filter((shell) => Bun.which(shell) !== null);
 	expect(shells).toContain("bash");
+	const launch = (shell: string) => spawnSync(shell, ["-c", command], { cwd: work, encoding: "utf8" });
 	for (const shell of shells) {
-		const r = spawnSync(shell, ["-c", command], { cwd: work, encoding: "utf8" });
+		const r = launch(shell);
 		expect(`${shell}: ${r.stderr}`).toContain(`${shell}: usage: security-audit`);
+		expect(`${shell}: ${r.status}`).toBe(`${shell}: 2`);
+	}
+	// A main without the script fails before bun starts, and the block says so, whatever its clean-up does.
+	git(work, "rm", "-q", "scripts/security-audit.ts");
+	git(work, "commit", "-qm", "no audit");
+	git(work, "push", "-q", "origin", "main");
+	for (const shell of shells) {
+		const r = launch(shell);
+		expect(`${shell}: ${r.stderr}`).toContain(`${shell}: fatal:`);
+		expect(`${shell}: ${r.status === 0 ? "passed" : "failed"}`).toBe(`${shell}: failed`);
 	}
 });
