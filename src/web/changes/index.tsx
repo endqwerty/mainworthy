@@ -2,7 +2,7 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { z } from "zod";
 import { MergeReceipt, MergeReceiptResult } from "../../core/changes.ts";
-import { ANSWER_LABELS } from "../../core/kinds.ts";
+import { ANSWER_LABELS, fixedInText, fixedOnChangeText } from "../../core/kinds.ts";
 import {
 	RESULT_STANDING_LABELS,
 	type ResultStanding,
@@ -19,7 +19,7 @@ import { Run } from "../runs/models.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, EmptyState, ListRow, ProducerGlyph, SectionHeading } from "../ui/index.tsx";
 import { GateReason, ShardWaits } from "../ui/shards.tsx";
-import { ChangeResults, standingOf } from "./results.tsx";
+import { ChangeResults, standingOf, webUrl } from "./results.tsx";
 import "./changes.css";
 
 const Change = z.object({
@@ -91,6 +91,8 @@ function ChangesWorkbench() {
 	const openData = open.isPlaceholderData ? undefined : open.data;
 	const settledData = settled.isPlaceholderData ? undefined : settled.data;
 	const impactData = Impact.safeParse(impact.isPlaceholderData ? undefined : impact.data);
+	const fixedHere = settledData?.items.filter((q) => q.decision?.fixedIn?.change === key).length ?? 0;
+	const link = webUrl(current?.url ?? null);
 	const go = (ref: string) => navigate(refUrl({ project, ref }));
 	const choose = (change: string) => {
 		setCursor(change);
@@ -158,7 +160,13 @@ function ChangesWorkbench() {
 				{key ? (
 					<>
 						<div className="phead">
-							<span className="ref">{key}</span>
+							{link ? (
+								<a className="ref" href={link} target="_blank" rel="noreferrer noopener">
+									{key}
+								</a>
+							) : (
+								<span className="ref">{key}</span>
+							)}
 							<b className="change-title">{current?.title ?? current?.branch ?? "Change"}</b>
 						</div>
 						<div className="pane-scroll detail-body">
@@ -200,6 +208,9 @@ function ChangesWorkbench() {
 								<MergeGateReceipt receipt={impactData.data.change.mergeReceipt} />
 							)}
 							{current && <ChangeEnding change={current} />}
+							{current && fixedHere > 0 && (
+								<p className="change-ended-note">{fixedOnChangeText(fixedHere, current.state)}</p>
+							)}
 							<SectionHeading>Open questions</SectionHeading>
 							{open.error && <p role="status">{open.error.message}</p>}
 							{openData?.items.map((q) => (
@@ -250,7 +261,9 @@ function ChangesWorkbench() {
 										</small>
 										{q.decision?.supersedes && (
 											<small>
-												Ended by {q.decision.rule ? `rule ${q.decision.rule}` : q.decision.by.join(", ")}
+												{q.decision.fixedIn
+													? fixedInText(q.decision.fixedIn)
+													: `Ended by ${q.decision.rule ? `rule ${q.decision.rule}` : q.decision.by.join(", ")}`}
 												{q.decision.reason && ` · ${q.decision.reason}`}
 											</small>
 										)}

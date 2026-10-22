@@ -16,6 +16,7 @@ import {
 	applicableAnswers,
 	type Blocks,
 	describeAsk,
+	type FixedIn,
 	type Kind,
 	standingOf,
 } from "../../core/kinds.ts";
@@ -2079,6 +2080,7 @@ function itemOf(db: Db, row: QuestionRow, facts: ReadonlySet<string>, ask: Ask):
 		decision && decision.supersedes !== null && holdEndingById(db, decision.id) !== null
 			? decisionById(db, decision.supersedes)
 			: null;
+	const fixedIn = decision && supersedes ? fixedInOf(db, row, decision) : null;
 	return {
 		q: questionRef(row),
 		kind: row.kind,
@@ -2114,9 +2116,22 @@ function itemOf(db: Db, row: QuestionRow, facts: ReadonlySet<string>, ask: Ask):
 					...decisionItem(db, decision),
 					effects: json<Record<string, unknown>>(decision.effects),
 					...(supersedes ? { supersedes: decisionItem(db, supersedes) } : {}),
+					...(fixedIn ? { fixedIn } : {}),
 				}
 			: null,
 	};
+}
+
+/**
+ * The change whose later commit passed and so ended this answer (`endPassed`), and how that change stands now. Only
+ * a change's scope: a pass on a line is no fix brought by a pull request.
+ */
+function fixedInOf(db: Db, question: QuestionRow, ending: DecisionRow): FixedIn | null {
+	if (json<Signer[]>(ending.signers)[0]?.clause !== "passed") return null;
+	const scope = json<{ scope?: string }>(question.subject).scope;
+	if (!scope?.startsWith("change:")) return null;
+	const change = changeById(db, Number(scope.slice("change:".length)));
+	return change ? { change: change.key, state: change.ended ?? "open" } : null;
 }
 
 function decisionItem(db: Db, decision: DecisionRow) {

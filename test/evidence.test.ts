@@ -1254,6 +1254,7 @@ describe("holds", () => {
 				by: ["policy"],
 				rule: "passed",
 				reason: "Every test it named passed on fixed01b where it had failed; the answer ended.",
+				fixedIn: { change: "pr:41", state: "open" },
 				supersedes: { answer: { is: "test" }, by: ["robin"], reason: null },
 			},
 		};
@@ -1282,6 +1283,12 @@ describe("holds", () => {
 		// Like any answer that ended, it no longer explains the older commit, and nobody is asked about that one.
 		expect(gate("fixed01a")).toMatchObject({ verdict: "blocked", open: [] });
 		expect(queue().items).toEqual([]);
+		// The ending says which pull request fixed the failure, and that it merged once it has.
+		h.call("change", { change: "pr:41", state: "merged" });
+		expect(h.call<InboxReply>("inbox", { state: "decided", on: "pr:41" }).items).toMatchObject([
+			{ q: asked.q, decision: { fixedIn: { change: "pr:41", state: "merged" } } },
+		]);
+		h.call("change", { change: "pr:41", state: "open" });
 		const again = h.call<ReportReceipt>("report", ciReport({ commit: "fixed01c", branch: "fix", pr: 41, n: 3, fail }));
 		expect(again.questions[0]).toMatchObject({ how: "new", state: "open" });
 		expect(again.gate?.verdict).toBe("blocked");
@@ -1312,6 +1319,10 @@ describe("holds", () => {
 		};
 		expect(h.call("get", { refs: [asked.q] })).toMatchObject([ended]);
 		expect(h.call<InboxReply>("inbox", { state: "decided", kind: "failure" }).items).toMatchObject([ended]);
+		// A hold that ran out says nothing about a fix, though the pull request passes.
+		expect(h.call<InboxReply>("inbox", { state: "decided", kind: "failure" }).items[0]?.decision).not.toHaveProperty(
+			"fixedIn",
+		);
 		expect(queue().counts.open).toBe(0);
 		expect(gate("expired408b").verdict).toBe("passed");
 	});

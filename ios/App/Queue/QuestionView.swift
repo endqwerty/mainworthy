@@ -288,7 +288,7 @@ struct QuestionView: View {
 			if let reference = decision.reference { Text("Reference: \(reference)").font(.subheadline) }
 			if let reason = decision.reason { Text(reason).font(.subheadline) }
 			if let ending = decision.ending {
-				Text("Ended by \(ending.rule.map { "rule \($0)" } ?? ending.by.joined(separator: ", ")) · \(ending.at.formatted(date: .abbreviated, time: .shortened))")
+				Text("\(ending.fixed ?? "Ended by \(ending.rule.map { "rule \($0)" } ?? ending.by.joined(separator: ", "))") · \(ending.at.formatted(date: .abbreviated, time: .shortened))")
 					.font(.subheadline)
 					.foregroundStyle(.secondary)
 				if let reason = ending.reason { Text(reason).font(.subheadline) }

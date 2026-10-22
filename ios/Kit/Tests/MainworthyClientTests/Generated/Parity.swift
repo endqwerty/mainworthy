@@ -1,6 +1,6 @@
-// Written by `bun scripts/ios.ts gen` from src/core/stakes.ts and src/core/runs.ts. Do not edit it: change that file and run the command again.
+// Written by `bun scripts/ios.ts gen` from src/core/stakes.ts, src/core/runs.ts and src/core/kinds.ts. Do not edit it: change that file and run the command again.
 
-/// What the functions of `src/core/stakes.ts` and `src/core/runs.ts` return. The app has those functions again in Swift, and its tests
+/// What the functions of `src/core/stakes.ts`, `src/core/runs.ts` and `src/core/kinds.ts` return. The app has those functions again in Swift, and its tests
 /// hold them to these answers.
 enum Parity {
 	/// `stakes`: the kind of question, the runs it blocks and its facts, and the sentence.
@@ -131,6 +131,13 @@ enum Parity {
 		("failed: 2 failures attributed to this target; still waiting for shards 4, 5 and 6 of 6 of job tests; shard 2 of 2 of job lint in linux; 1 quarantined failure recorded, not blocking", [("tests", "", [4, 5, 6], 6), ("lint", "linux", [2], 2)], "failed: 2 failures attributed to this target; still waiting for 4 shards; 1 quarantined failure recorded, not blocking"),
 		("blocked: 1 failure unexplained; still waiting for shards 4, 5 and 6 of 6 of job tests; shard 2 of 2 of job lint in linux", [("tests", "", [4, 5, 6], 6), ("lint", "linux", [2], 2)], "blocked: 1 failure unexplained; still waiting for 4 shards"),
 		("blocked: 1 failure unexplained; still waiting for shards 4, 5 and 6 of 6 of job tests; shard 2 of 2 of job lint in linux; 1 quarantined failure recorded, not blocking", [("tests", "", [4, 5, 6], 6), ("lint", "linux", [2], 2)], "blocked: 1 failure unexplained; still waiting for 4 shards; 1 quarantined failure recorded, not blocking"),
+	]
+
+	/// `fixedInText`: how pr:482, which fixed a failure itself, stands now, and the sentence.
+	static let fixedIn: [(state: String, says: String)] = [
+		("open", "Fixed by a later commit of pr:482"),
+		("merged", "Fixed in pr:482 before it merged"),
+		("closed", "Fixed by a later commit of pr:482, which closed without merging"),
 	]
 }
 

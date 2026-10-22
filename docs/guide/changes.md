@@ -34,7 +34,13 @@ Every environment shares the same commit gate.
 
 The list says "Each head's verdict". The detail shows the head's gate, its reason and
 nonzero counts, how the change ended if it did, and then "Open questions", "Settled and
-excused", and "Results".
+excused", and "Results". The change's key links to its pull request when a report gave
+the pull request's address.
+
+A failure that needed a fix and that a later commit of the change passed is one the change
+fixed itself. The detail counts them, for example "1 failure that needed a fix was fixed before
+it merged.", and each one in "Settled and excused" says "Fixed in pr:482 before it merged".
+See [when the fix arrives](./decide.md#when-the-fix-arrives).
 Once impact loads, "Impact" and "Uncovered files" show the related cases and paths,
 or say that there are none.
 Impact lists related cases and review information. It is not a code coverage measurement.

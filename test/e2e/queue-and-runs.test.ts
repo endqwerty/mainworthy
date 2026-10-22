@@ -179,17 +179,29 @@ check(
 			await decision
 				.getByText("Every test it named passed on trace408b where it had failed; the answer ended.", { exact: true })
 				.waitFor();
+			await decision.getByText("Fixed by a later commit of pr:408", { exact: false }).waitFor();
 			await page.goto(`${server.url}/p/scratch/changes/pr%3A408`);
 			const onChange = page.locator(".change-decision").filter({ hasText: question.q });
 			await onChange.getByText("The test is wrong", { exact: true }).waitFor();
 			await onChange
-				.getByText("Every test it named passed on trace408b where it had failed; the answer ended.", { exact: false })
+				.getByText(
+					"Fixed by a later commit of pr:408 · Every test it named passed on trace408b where it had failed; the answer ended.",
+					{ exact: true },
+				)
 				.waitFor();
+			await page.getByText("1 failure that needed a fix was fixed by a later commit.", { exact: true }).waitFor();
+			await server.api("change", { change: "pr:408", state: "merged" });
+			await page.reload();
+			await page.getByText("1 failure that needed a fix was fixed before it merged.", { exact: true }).waitFor();
+			await onChange.getByText("Fixed in pr:408 before it merged", { exact: false }).waitFor();
 			await page.goto(`${server.url}/p/scratch/suite/c/1`);
 			const onCase = page.locator(".question-card").filter({ hasText: question.q });
 			await onCase.getByText("test by robin", { exact: false }).waitFor();
 			await onCase
-				.getByText("Every test it named passed on trace408b where it had failed; the answer ended.", { exact: false })
+				.getByText(
+					"Fixed in pr:408 before it merged · Every test it named passed on trace408b where it had failed; the answer ended.",
+					{ exact: true },
+				)
 				.waitFor();
 			expect(h.errors).toEqual([]);
 		} finally {
