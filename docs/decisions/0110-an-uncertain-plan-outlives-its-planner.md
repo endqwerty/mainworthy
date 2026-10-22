@@ -10,7 +10,11 @@ again created a second run. Two synchronous clicks also passed the React state g
 
 Save the exact submitted plan, including its command id, in localStorage before sending it. The key uses
 the device's existing actor id and the project. Reopening restores the choices and offers Retry plan.
-The saved input is parsed with the core PlanInput schema and requires a command id. A ref changes to
+The saved input is parsed with the core PlanInput schema and requires a command id and the opaque project
+identity from the session's project list. An unchanged retry keeps that original identity. A known mismatch
+leaves the saved plan locked with an explanation and Discard; a replacement after the session read is refused
+inside the registry's write transaction, before command replay. A saved plan without an identity is invalid,
+never filled in with the current project's identity. A ref changes to
 sending synchronously, so the next submit cannot send another command before React renders.
 
 Cancel and Escape may close the planner because the command survives outside the component. A readable

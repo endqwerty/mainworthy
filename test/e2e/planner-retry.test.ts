@@ -1,7 +1,23 @@
 import { expect, test } from "bun:test";
-import type { Api } from "../../src/core/api.ts";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { start } from "../../src/app/start.ts";
+import type { Api, OpName } from "../../src/core/api.ts";
+import { defaultConfig } from "../../src/server/kernel/app.ts";
+import { removeProject } from "../../src/server/transfer/transfer.ts";
+import ui from "../../src/web/index.html";
+import { call } from "../../src/web/lib/api.ts";
 import { Run, Slot } from "../../src/web/runs/models.ts";
-import { browserAvailable, devicePrefix, eventually, openPage, startServer } from "./support.ts";
+import {
+	browserAvailable,
+	devicePrefix,
+	eventually,
+	openPage,
+	reservePort,
+	type Server,
+	startServer,
+} from "./support.ts";
 
 const check = browserAvailable ? test : test.skip;
 
@@ -486,7 +502,14 @@ for (const failure of ["internal", "session change", "refused retry", "missing g
 		30000,
 	);
 
-for (const stored of ["{", '{"name":"Old","select":{}}', '{"name":"Old","select":{"text":5},"cmd":"x"}', "null", "[]"])
+for (const stored of [
+	'{"name":"Old","select":{},"cmd":"legacy-plan-command"}',
+	"{",
+	'{"name":"Old","select":{}}',
+	'{"name":"Old","select":{"text":5},"cmd":"x"}',
+	"null",
+	"[]",
+])
 	check(
 		`an invalid saved plan ${stored} does not block planning`,
 		async () => {
@@ -639,3 +662,89 @@ check(
 	},
 	30000,
 );
+
+for (const reload of [false, true])
+	check(
+		`an uncertain plan cannot write into a replacement project${reload ? " after reload" : " while open"}`,
+		async () => {
+			const dataDir = await mkdtemp(join(tmpdir(), "mainworthy-planner-identity-"));
+			const port = await reservePort();
+			const token = "planner-identity-test-owner-token";
+			const instance = start(
+				{ ...defaultConfig({}), dataDir, port: port.port, owner: "robin", ownerToken: token, mode: "local" },
+				() => ({ ui }),
+				{ readers: 0 },
+			);
+			const server: Server = {
+				url: instance.url,
+				project: "scratch",
+				token,
+				seeded: null,
+				stop: instance.stop,
+				api: <O extends OpName>(op: O, input: Api[O]["input"]) =>
+					call(op, input, { url: instance.url, project: "scratch", token }),
+			};
+			let view: Awaited<ReturnType<typeof openPage>> | null = null;
+			try {
+				const seed = () =>
+					server.api("propose", { edits: [{ op: "create", outline: "Checkout opens\n  Open checkout > Ready" }] });
+				await seed();
+				view = await openPage(server, { path: "/p/scratch/runs" });
+				const { page } = view;
+				const sent: Api["plan"]["input"][] = [];
+				await page.route("**/plan", (route) => {
+					sent.push(route.request().postDataJSON());
+					return sent.length === 1 ? route.abort() : route.continue();
+				});
+				await page.keyboard.press("n");
+				await page.getByLabel("Run name").fill("Original project's plan");
+				await page.locator('.run-planner button[type="submit"]').click();
+				await page.getByRole("button", { name: "Enter Retry plan", exact: true }).waitFor();
+				removeProject(instance.app.db, "scratch");
+				await server.api("admin", { do: "project.create", key: "scratch", preset: "loose" });
+				await seed();
+				if (reload) {
+					await page.reload();
+					await page.getByRole("listbox", { name: "Runs", exact: true }).waitFor();
+					await page.keyboard.press("n");
+				}
+				await page.getByRole("button", { name: "Enter Retry plan", exact: true }).click();
+				await eventually(
+					async () => ({
+						runs: (await server.api("find", { in: "runs", origin: "planned" })).items,
+						status: await page.locator("#stat").textContent(),
+					}),
+					({ runs, status }) => runs.length > 0 || /belongs to an (earlier|obsolete) project/.test(status ?? ""),
+				);
+				expect((await server.api("find", { in: "runs", origin: "planned" })).items).toHaveLength(0);
+				expect(await page.locator("#stat").textContent()).toMatch(/belongs to an (earlier|obsolete) project/);
+				const original = sent[0];
+				expect(original?.projectIdentity).toBeString();
+				if (reload) {
+					expect(sent).toHaveLength(1);
+					expect(await page.getByLabel("Run name").isEditable()).toBe(false);
+					await page.getByRole("button", { name: "Discard this plan", exact: true }).click();
+				} else {
+					expect(sent).toHaveLength(2);
+					expect(sent[1]).toEqual(original);
+					await page.reload();
+					await page.getByRole("listbox", { name: "Runs", exact: true }).waitFor();
+					await page.keyboard.press("n");
+				}
+				await page.getByLabel("Run name").fill("New project's plan");
+				await page.locator('.run-planner button[type="submit"]').click();
+				await page.waitForURL("**/runs/1");
+				expect(sent.at(-1)?.projectIdentity).toBeString();
+				expect(sent.at(-1)?.projectIdentity).not.toBe(original?.projectIdentity);
+				expect((await server.api("find", { in: "runs", origin: "planned" })).items).toMatchObject([
+					{ name: "New project's plan" },
+				]);
+			} finally {
+				await view?.close();
+				await instance.stop();
+				await port.release();
+				await rm(dataDir, { recursive: true, force: true });
+			}
+		},
+		30_000,
+	);
