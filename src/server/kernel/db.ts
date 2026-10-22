@@ -76,11 +76,12 @@ const existsWithoutFollowing = (path: string): boolean => {
  * the directory's mode masks that ACL; on macOS an inherited ACL that grants search lets another user into the
  * directory whatever its mode, and the file's mode keeps them out. An inherited ACL that grants reading files is not
  * covered, here or for any other file (decision 0120). The file is synced there, renamed to `path`, and the rename
- * synced. A crash leaves that directory, still private, beside `path`. The umask is the process's: while `write`
+ * synced. A crash leaves that directory, still private, beside `path`; the `mainworthy-copy-` marker distinguishes
+ * it from an operator's saved copy during upgrade cleanup. The umask is the process's: while `write`
  * runs, a file another thread creates gets no access for group or others either.
  */
 export function writePrivateDatabaseFile(path: string, write: (privatePath: string) => void): void {
-	const workspace = mkdtempSync(`${path}.`);
+	const workspace = mkdtempSync(`${path}.mainworthy-copy-`);
 	try {
 		const written = join(workspace, basename(path));
 		const umask = process.umask(0o077);
