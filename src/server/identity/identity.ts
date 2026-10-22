@@ -63,6 +63,7 @@ export {
 	beginTotp,
 	changePassword,
 	confirmTotp,
+	countSignInStart,
 	createInvitation,
 	credentialOwner,
 	exchangeNativeOidc,

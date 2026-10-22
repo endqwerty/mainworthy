@@ -247,6 +247,21 @@ const waiting = (answer: Extract<LimiterAnswer, { kind: "blocked" }>): Limited =
 });
 
 /**
+ * Counts a sign-in start before it allocates a passkey challenge or provider ceremony. Starts share the
+ * address's failed-attempt count: a valid begin is no proof of identity and must not clear or bypass it.
+ * Check and consume synchronously so concurrent begins cannot all reserve the same free attempt.
+ */
+export function countSignInStart(app: App, address: string | null): Limited | null {
+	const limiter = limiterOf(app);
+	const keys = counted(addressKey(address));
+	const now = app.now();
+	const answer = limiter.check(keys, now);
+	if (answer.kind === "blocked") return waiting(answer);
+	limiter.failed(keys, now);
+	return null;
+}
+
+/**
  * The count for something that is not a guess when it is right: a passkey's answer, an invitation's code. It
  * is asked before the thing is looked at, and `wrong` is what a failure is answered with: the wait when the
  * address was blocked as the attempt arrived, and else the refusal itself, counted.
@@ -814,13 +829,11 @@ function openInvitation(app: App, db: Db, hash: string): { invitation: Invitatio
  * The options exclude no passkey: whoever holds a recovery code is not told which authenticators the person
  * had, and accepting revokes those anyway.
  *
- * A code that accepts nothing is counted under `address`, where the request came from, exactly as it is at
- * acceptance: this is the cheaper place to try codes at. A right one is answered from a blocked address.
+ * The caller counts this start with `countSignInStart` before looking at the code, whether right or wrong.
  */
 export function showInvitation(
 	app: App,
 	code: string,
-	address: string | null,
 ):
 	| {
 			ok: true;
@@ -829,12 +842,10 @@ export function showInvitation(
 				passkey: RegistrationOptions | null;
 			};
 	  }
-	| Refused
-	| Limited {
-	const attempt = byAddress(app, address);
+	| Refused {
 	const hash = hashOf(code);
 	const found = openInvitation(app, app.reader, hash);
-	if (!found) return attempt.wrong(no("invitation"));
+	if (!found) return no("invitation");
 	const { invitation, person } = found;
 	const party = publicAddress(app.config)?.party;
 	const handle = userHandleOf(app.reader, person.id);
@@ -1039,7 +1050,6 @@ export type OidcStart =
 export type OidcBegun =
 	| { ok: true; url: string; ceremony: string; lastsMs: number }
 	| Refused
-	| Limited
 	| { ok: false; why: "other-session"; signedInAs: string }
 	| { ok: false; why: "unreachable" | "not-a-person" };
 
@@ -1049,14 +1059,13 @@ export type OidcBegun =
  * and a browser signed in as somebody else is asked about first, so the person is not sent to the provider for
  * an acceptance that could not go through. Throws `OIDC_OFF` on an instance with no provider.
  */
-export async function beginOidcSignIn(app: App, start: OidcStart, address: string | null): Promise<OidcBegun> {
+export async function beginOidcSignIn(app: App, start: OidcStart): Promise<OidcBegun> {
 	const redirect = oidcRedirect(app);
 	let purpose: OidcPurpose;
 	if (start.purpose === "join") {
-		const attempt = byAddress(app, address);
 		const hash = hashOf(start.code);
 		const found = openInvitation(app, app.reader, hash);
-		if (!found) return attempt.wrong(no("invitation"));
+		if (!found) return no("invitation");
 		const holder = start.browser === null ? null : holderOf(app, start.browser);
 		if (holder && holder.id !== found.person.id && start.replace !== holder.name)
 			return { ok: false, why: "other-session", signedInAs: holder.name };
