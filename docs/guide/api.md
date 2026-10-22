@@ -172,6 +172,10 @@ effort: a failed subscriber does not change a committed write's successful reply
 or prevent delivery to other subscribers. The server logs the failure without
 the subscriber's error text.
 
+If the server cannot check an open stream's read permission, it closes that
+stream so the client can reconnect and read again. Other streams keep receiving
+changes. The web app and iPhone app reconnect and reload their project reads.
+
 The stream does not replay missed events on reconnect. A client that misses an
 event can read the data again or request changes through `since` with its last
 cursor. The web app reads again when the stream opens and refreshes stale reads
