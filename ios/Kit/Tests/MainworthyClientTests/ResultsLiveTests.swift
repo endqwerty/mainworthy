@@ -71,6 +71,55 @@ struct ResultsLiveTests {
 		#expect(try await client.test("T-999") == nil)
 	}
 
+	@Test("runner tries retain their evidence and only decisive disagreement or a passing pipeline retry is flaky")
+	func runnerTries() async throws {
+		let server = Live.server()
+		_ = try await server.signIn(Live.owner)
+		let client = try await server.project(try await Live.project())
+		let examples: [(tries: [String], outcome: String, flaky: Bool)] = [
+			(["fail", "error", "skip"], "pass", true),
+			(["pass"], "fail", true),
+			(["fail", "error"], "fail", false),
+			(["skip"], "pass", false),
+			(["pass"], "skip", false),
+			([], "pass", false),
+		]
+		for (index, example) in examples.enumerated() {
+			let tries: [JSONValue] = example.tries.enumerated().map { number, outcome in
+				var tried: [String: JSONValue] = ["outcome": .string(outcome), "durationMs": .number(Double(number + 25))]
+				if outcome == "fail" || outcome == "error" { tried["failure"] = ["message": .string("try \(number + 1)")] }
+				return .object(tried)
+			}
+			let name = "Runner example \(index)"
+			let _: JSONValue = try await server.write("report", in: client.key, [
+				"target": ["commit": .string(String(repeating: "7", count: 40)), "repo": "acme/shop"],
+				"job": "runner",
+				"results": [["test": ["key": .string("runner-\(index)"), "name": .string(name)],
+					"outcome": .string(example.outcome), "tries": .array(tries)]],
+			])
+			let test = try #require(try await client.tests(text: name).rows.first)
+			let result = try #require(try await client.test(test.ref)?.results.first)
+			#expect(result.outcome == example.outcome)
+			#expect(result.tries.map(\.outcome) == example.tries)
+			#expect(result.flakedInRun == example.flaky && result.isFlaky == example.flaky)
+			#expect(result.passedOnRetry == nil)
+			if !example.tries.isEmpty { #expect(result.tries.first?.duration == 25) }
+			if example.tries.first == "fail" { #expect(result.tries.first?.message == "try 1") }
+		}
+		for (attempt, outcome) in [(1, "fail"), (2, "pass")] {
+			let _: JSONValue = try await server.write("report", in: client.key, [
+				"target": ["commit": .string(String(repeating: "7", count: 40)), "repo": "acme/shop"],
+				"job": "runner", "attempt": .number(Double(attempt)),
+				"results": [["test": ["key": "pipeline-retry", "name": "Pipeline recovery"], "outcome": .string(outcome)]],
+			])
+		}
+		let test = try #require(try await client.tests(text: "Pipeline recovery").rows.first)
+		let detail = try #require(try await client.test(test.ref))
+		let failure = try #require(detail.results.first { $0.outcome == "fail" })
+		#expect(failure.passedOnRetry == 2 && failure.isFlaky && !failure.flakedInRun && failure.tries.isEmpty)
+		#expect(detail.results.first { $0.outcome == "pass" }?.isFlaky == false)
+	}
+
 	@Test("a later page asked for after the results changed is refused as moved")
 	func moved() async throws {
 		let server = Live.server()

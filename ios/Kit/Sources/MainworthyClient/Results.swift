@@ -100,9 +100,28 @@ package struct TestPage: Equatable, Sendable {
 
 /// A test and its latest results, newest first.
 public struct TestDetail: Equatable, Sendable {
+	public struct RunnerTry: Equatable, Sendable {
+		public let outcome: String
+		public let message: String?
+		public let duration: Double?
+	}
+
 	public struct Result: Identifiable, Equatable, Sendable {
 		public let id: Int
 		public let outcome: String
+		public let tries: [RunnerTry]
+		public let passedOnRetry: Int?
+		public var flakedInRun: Bool {
+			let decisive = (tries.map(\.outcome) + [outcome]).compactMap { outcome -> String? in
+				switch outcome {
+				case "pass": "pass"
+				case "fail", "error": "fail"
+				default: nil
+				}
+			}
+			return Set(decisive).count > 1
+		}
+		public var isFlaky: Bool { passedOnRetry != nil || flakedInRun }
 		public let by: String
 		public let model: String?
 		public let steps: [ResultStep]?
@@ -138,7 +157,9 @@ public struct TestDetail: Equatable, Sendable {
 		quarantine = wire.quarantine.flatMap { $0.active ? $0.reason : nil }
 		results = wire.last.map {
 			Result(
-				id: $0.id, outcome: $0.outcome, by: $0.by, model: $0.model, steps: $0.steps?.map(ResultStep.init),
+				id: $0.id, outcome: $0.outcome,
+				tries: $0.tries.map { RunnerTry(outcome: $0.outcome, message: $0.message, duration: $0.durationMs) },
+				passedOnRetry: $0.passedOnRetry, by: $0.by, model: $0.model, steps: $0.steps?.map(ResultStep.init),
 				at: Date(milliseconds: $0.at), attempt: $0.attempt,
 				duration: $0.durationMs, message: $0.message, location: $0.location.map(ResultLocation.init),
 				commit: $0.commit, change: $0.change, job: $0.job,

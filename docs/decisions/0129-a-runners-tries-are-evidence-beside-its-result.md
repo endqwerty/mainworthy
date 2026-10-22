@@ -62,7 +62,10 @@ failing.
   attempt counting, not as tries.
 - A try's cause goes through the signature's normalization but not the split of broad assertions by file.
 - The reruns report ("time lost to reruns") counts the pipeline's attempts, not a runner's tries.
-- Jest, Vitest and pytest reports do not export their retries, and the iPhone app does not show tries.
+- Jest, Vitest and pytest reports do not export their retries.
 
 These are issues #733 (`(retry #n)` testcases), #734 (a try's cause by file), #735 (the reruns report), #736
-(Jest, Vitest and pytest) and #737 (the iPhone).
+(Jest, Vitest and pytest).
+
+The iPhone test page reads tries and the later passing attempt through its generated contract, labels flaky
+results and lists the runner's outcomes like the web page (issue #737).

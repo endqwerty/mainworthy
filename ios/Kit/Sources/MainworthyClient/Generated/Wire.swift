@@ -853,8 +853,26 @@ enum Wire {
 		let cursor: String?
 	}
 
+	/// An earlier try by the runner in this run, oldest first.
+	struct RunnerTry: Decodable, Equatable, Sendable {
+		let outcome: String
+		let message: String?
+		let durationMs: Double?
+
+		private enum CodingKeys: String, CodingKey { case outcome, message, durationMs }
+
+		init(from decoder: any Decoder) throws {
+			let container = try decoder.container(keyedBy: CodingKeys.self)
+			outcome = try container.decode(String.self, forKey: .outcome)
+			message = try container.decode(String?.self, forKey: .message)
+			durationMs = try container.decode(Double?.self, forKey: .durationMs)
+		}
+	}
+
 	/// One of a test's latest results, newest first.
 	struct TestResult: Decodable, Equatable, Sendable {
+		let passedOnRetry: Int?
+		let tries: [RunnerTry]
 		let model: String?
 		let steps: [ResultStep]?
 		let id: Int
@@ -870,10 +888,12 @@ enum Wire {
 		let job: String
 		let build: String?
 
-		private enum CodingKeys: String, CodingKey { case model, steps, id, outcome, by, at, attempt, durationMs, message, commit, location, change, job, build }
+		private enum CodingKeys: String, CodingKey { case passedOnRetry, tries, model, steps, id, outcome, by, at, attempt, durationMs, message, commit, location, change, job, build }
 
 		init(from decoder: any Decoder) throws {
 			let container = try decoder.container(keyedBy: CodingKeys.self)
+			passedOnRetry = try container.decode(Int?.self, forKey: .passedOnRetry)
+			tries = try container.decode([RunnerTry].self, forKey: .tries)
 			model = try container.decodeIfPresent(String.self, forKey: .model)
 			steps = try container.decode([ResultStep]?.self, forKey: .steps)
 			id = try container.decode(Int.self, forKey: .id)
