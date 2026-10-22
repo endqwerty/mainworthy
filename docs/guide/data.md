@@ -63,7 +63,9 @@ from that evidence. Import refuses an archive with the same inconsistency and ro
 3. Restore a tested backup to a separate data directory, or import an archive written by
    Mainworthy into a fresh instance. Verify that the restored instance starts and its
    evidence is intact before directing traffic to it. The copy taken immediately before
-   this upgrade may contain the same inconsistency, so test that copy too.
+   this upgrade (`mainworthy.db.v<N>.bak`) may contain the same inconsistency, so test that
+   copy too, and start it with the version that ran before the upgrade: this version refuses it
+   for the same reason.
 
 Without a tested backup, keep the preserved data and request a repair of the named
 signature. There is no automatic repair command for this error. Changing hashes or
