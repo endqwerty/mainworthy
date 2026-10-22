@@ -88,19 +88,18 @@ issue and GitHub's workflows move both. A task the owner gave in a thread needs 
 
 **deep**, the owner's standing choice: delegation takes models and effort from `homelab route models --profile
 deep`, not `balanced`; `max` is for a thread or task the owner names. When `homelab route plan --profile deep --role
-verifier --author codex` names no one (the Opus window is spent), take the verifier from `--profile balanced` and
-say in the pull request that it ran at balanced; with no other provider able to verify, report the work as not
-independently verified.
+verifier --author codex` names no one, take the verifier from `--profile balanced` and say so in the pull request;
+with no other provider able to verify, report it as not independently verified.
 
 ## Delivery
 
 **Review-first: the owner merges; you do not.** Work on the T3 branch in your worktree and follow the `build` skill:
 check the change, get the independent verification `verify` asks for, open a non-draft pull request with a
-standalone description that names its issue (above), link it to the thread, and stop. Do not merge, arm auto-merge,
-close it or push to `main`, even when the checks are green. Only the owner saying, in the current thread, to merge
-identified work lets you land it (the `ship` skill, by rebase: `gh pr merge --rebase`, keeping the branch). A stack
-lands in one step when the owner's word covers it: `docs/landing-a-stack.md`. Under `build`, `babysit` and
-`autopilot-stack` nothing merges, and a stack is no exception.
+standalone description that names its issue (above), link it to the thread, run the Daybreak audit every merge
+needs (`docs/security-audit.md`) and stop. Do not merge, arm auto-merge, close it or push to `main`, even when the
+checks are green. Only the owner saying, in the current thread, to merge identified work lets you land it (the
+`ship` skill, by rebase: `gh pr merge --rebase`, keeping the branch). A stack lands in one step when the owner's word
+covers it: `docs/landing-a-stack.md`. Under `build`, `babysit` and `autopilot-stack` nothing merges, a stack included.
 
 After the owner has merged and you start new work on the same T3 branch, run `bun scripts/work.ts sync-branch`:
 it moves the branch onto `origin/main` and pushes it, and refuses while the branch holds a commit that is not on
