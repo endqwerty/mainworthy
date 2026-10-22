@@ -204,6 +204,7 @@
 	overflow-y: auto;
 }
 :root[data-layout="phone"] .queue-evidence {
+	min-height: 0;
 	flex: none;
 	overflow: visible;
 }
