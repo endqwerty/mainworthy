@@ -49,6 +49,27 @@ before recovering accepted reports. Referenced evidence is kept when a producer
 is forgotten. File contents and file names may contain personal information and
 are not scanned or redacted.
 
+## Recover from an unverifiable assertion cause
+
+If startup prints `invalid: cannot reconstruct assertion root <id>` and exits, a stored
+assertion cause's hash matches neither its normalized text nor a verified file-split cause.
+The server stops before serving requests because it cannot rebuild the assertion index
+from that evidence. Import refuses an archive with the same inconsistency and rolls back.
+
+1. Stop the instance and preserve a copy of its whole data directory, including database
+   sidecars and attachments. Follow the [directory backup steps](#back-up).
+2. Keep the exact error, the signature id it names, and the version or image commit that
+   refused to start.
+3. Restore a tested backup to a separate data directory, or import an archive written by
+   Mainworthy into a fresh instance. Verify that the restored instance starts and its
+   evidence is intact before directing traffic to it. The copy taken immediately before
+   this upgrade may contain the same inconsistency, so test that copy too.
+
+Without a tested backup, keep the preserved data and request a repair of the named
+signature. There is no automatic repair command for this error. Changing hashes or
+deleting evidence to force startup bypasses the consistency check rather than repairing
+the recorded cause.
+
 ## Export everything
 
 To export the whole instance, run the following command as an instance admin. In server mode, supply an admin token with `--token` or `MAINWORTHY_TOKEN`. The export works while the server runs, and the archive is one consistent snapshot. Other requests keep running while Mainworthy prepares the archive.
