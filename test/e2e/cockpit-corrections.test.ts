@@ -1,9 +1,27 @@
 import { expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Page } from "playwright-core";
 import { z } from "zod";
+import { start } from "../../src/app/start.ts";
+import type { Api, OpName } from "../../src/core/api.ts";
 import { AttachmentReply } from "../../src/core/attachments.ts";
+import { defaultConfig } from "../../src/server/kernel/app.ts";
+import { removeProject } from "../../src/server/transfer/transfer.ts";
+import ui from "../../src/web/index.html";
+import { call } from "../../src/web/lib/api.ts";
 import { Slot } from "../../src/web/runs/models.ts";
-import { answer, browserAvailable, eventually, fetched, openPage, type Server, startServer } from "./support.ts";
+import {
+	answer,
+	browserAvailable,
+	eventually,
+	fetched,
+	openPage,
+	reservePort,
+	type Server,
+	startServer,
+} from "./support.ts";
 
 const check = browserAvailable ? test : test.skip;
 
@@ -55,6 +73,148 @@ async function fail(page: Page, note: string) {
 async function slots(server: Server, run: string) {
 	return Slot.array().parse((await server.api("find", { in: "slots", run })).items);
 }
+
+for (const scenario of ["fresh session", "stale session", "delayed reports", "retired reports"] as const)
+	check(
+		`retained cockpit reports cannot write into a replacement project with ${scenario}`,
+		async () => {
+			const delayed = scenario === "delayed reports" || scenario === "retired reports";
+			const dataDir = await mkdtemp(join(tmpdir(), "mainworthy-cockpit-identity-"));
+			const port = await reservePort();
+			const token = "cockpit-identity-test-owner-token";
+			const instance = start(
+				{ ...defaultConfig({}), dataDir, port: port.port, owner: "robin", ownerToken: token, mode: "local" },
+				() => ({ ui }),
+				{ readers: 0 },
+			);
+			const server: Server = {
+				url: instance.url,
+				project: "scratch",
+				token,
+				seeded: null,
+				stop: instance.stop,
+				api: <O extends OpName>(op: O, input: Api[O]["input"]) =>
+					call(op, input, { url: instance.url, project: "scratch", token }),
+			};
+			let view: Awaited<ReturnType<typeof openPage>> | null = null;
+			const held = Promise.withResolvers<void>();
+			const sent = Promise.withResolvers<void>();
+			try {
+				const seed = async () => {
+					await server.api("propose", {
+						edits: [1, 2].map((index) => ({ op: "create", outline: `Correction case ${index}\n  Open > Ready` })),
+					});
+					return server.api("plan", { name: "Cockpit corrections", select: {} });
+				};
+				const original = await seed();
+				const Projects = z.array(z.object({ key: z.string(), identity: z.string() }));
+				const originalProject = Projects.parse(await server.api("admin", { do: "project.list" })).find(
+					(entry) => entry.key === "scratch",
+				);
+				expect(originalProject?.identity).toBeString();
+				view = await openPage(server, { path: `/p/scratch/runs/${original.run.slice(2)}` });
+				const { page } = view;
+				await ready(page);
+				const reports: Api["report"]["input"][] = [];
+				await page.route("**/report", async (route) => {
+					reports.push(route.request().postDataJSON());
+					if (reports.length === 1) {
+						sent.resolve();
+						if (!delayed) return route.abort();
+						await held.promise;
+					}
+					await route.continue();
+				});
+				if (!delayed) await page.route("**/command", (route) => route.abort());
+				await page.keyboard.press("p");
+				await sent.promise;
+				if (delayed) {
+					await page.locator('[data-slot="1"]').click();
+					await page.keyboard.press("b");
+				} else {
+					await page
+						.locator("#stat")
+						.filter({ hasText: "check the same request before recording another result" })
+						.waitFor();
+				}
+				await page.locator("#list").getByRole("link", { name: "Runs", exact: true }).click();
+				removeProject(instance.app.db, "scratch");
+				await server.api("admin", { do: "project.create", key: "scratch", preset: "loose" });
+				const replacement = await seed();
+				expect(replacement.run).toBe(original.run);
+				const replacementProject = Projects.parse(await server.api("admin", { do: "project.list" })).find(
+					(entry) => entry.key === "scratch",
+				);
+				expect(replacementProject?.identity).not.toBe(originalProject?.identity);
+				const refresh = async () => {
+					await page.keyboard.type("g,");
+					await page.getByRole("option", { name: "Projects", exact: true }).click();
+					await page.getByLabel("Project key", { exact: true }).fill("refresh-project");
+					await page.getByRole("button", { name: "Create project", exact: true }).click();
+					await page.locator("#stat").filter({ hasText: "Project refresh-project created." }).waitFor();
+					await page.keyboard.type("gp");
+					await page
+						.getByRole("region", { name: "Switch project", exact: true })
+						.getByRole("option")
+						.filter({ hasText: "scratch" })
+						.click();
+					await page.keyboard.type("gr");
+				};
+				if (scenario === "fresh session" || scenario === "retired reports") await refresh();
+				await page.getByRole("option").filter({ hasText: "Cockpit corrections" }).click();
+				await page.keyboard.press("Enter");
+				await page.locator('[data-slot="1"]').click();
+				await ready(page);
+				if (scenario === "retired reports") {
+					const refused = page.waitForResponse((response) => response.url().endsWith("/report"));
+					held.resolve();
+					expect((await refused).status()).toBe(409);
+					expect((await slots(server, replacement.run))[0]?.fills).toHaveLength(0);
+					await page.keyboard.press("b");
+				} else if (scenario === "delayed reports") held.resolve();
+				else {
+					await page.unroute("**/command");
+					await page.keyboard.press("b");
+				}
+				await eventually(
+					() => page.locator("#stat").innerText(),
+					(text) => text.includes("recorded") || text.includes("obsolete project"),
+				);
+				const rows = await slots(server, replacement.run);
+				if (scenario === "fresh session" || scenario === "retired reports")
+					expect(rows[0]?.fills).toMatchObject([{ outcome: "blocked" }]);
+				else expect(rows[0]?.fills).toHaveLength(0);
+				expect(rows[1]?.state).toBe("missing");
+				expect((await server.api("gate", { run: replacement.run })).verdict).toBe("pending");
+				expect(reports[0]?.projectIdentity).toBe(originalProject?.identity);
+				if (scenario === "fresh session" || scenario === "retired reports") {
+					expect(reports).toHaveLength(2);
+					expect(reports[1]?.projectIdentity).toBe(replacementProject?.identity);
+					expect(reports[1]?.cmd).not.toBe(reports[0]?.cmd);
+				} else {
+					expect(reports[1]?.projectIdentity).toBe(originalProject?.identity);
+					if (scenario === "stale session") expect(reports[1]).toEqual(reports[0]);
+					await refresh();
+					await page.getByRole("option").filter({ hasText: "Cockpit corrections" }).click();
+					await page.keyboard.press("Enter");
+					await page.locator('[data-slot="1"]').click();
+					await ready(page);
+					await page.keyboard.press("b");
+					await page.locator("#stat").filter({ hasText: "C-1 blocked recorded" }).waitFor();
+					expect((await slots(server, replacement.run))[0]?.fills).toMatchObject([{ outcome: "blocked" }]);
+					expect(reports.at(-1)?.projectIdentity).toBe(replacementProject?.identity);
+				}
+				expect(view.loads()).toBe(1);
+			} finally {
+				held.resolve();
+				await view?.close();
+				await instance.stop();
+				await port.release();
+				await rm(dataDir, { recursive: true, force: true });
+			}
+		},
+		30_000,
+	);
 
 check(
 	"reopening the cockpit keeps a pending failure before its later pass (632)",

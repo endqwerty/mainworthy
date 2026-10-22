@@ -51,9 +51,12 @@ type LocalFill = { fill: Fill; questions: ReportReceipt["questions"]; pending: b
 type PendingAttachment = AttachmentInput & { key: string };
 type RecordedResult = { fill: Fill; previous: Fill | null };
 type LastResult = { slot: Slot; outcome: RunOutcome; ready: Promise<RecordedResult> };
+type PendingReport = Api["report"]["input"] & Required<Pick<Api["report"]["input"], "projectIdentity">>;
 
-function newRunReports() {
+function newRunReports(projectIdentity: PendingReport["projectIdentity"]) {
 	return {
+		projectIdentity,
+		retired: false,
 		confirmed: new Map<number, Slot>(),
 		writes: new Map<number, Promise<RecordedResult>>(),
 		uncertain: new Map<number, { message: string; retry: () => Promise<RecordedResult> }>(),
@@ -64,21 +67,56 @@ function newRunReports() {
 	};
 }
 // Requests and their correction ancestry outlive the screen that started them, within this tab and session.
-const pendingRuns = new Map<string, { owner: DeviceSession; reports: ReturnType<typeof newRunReports> }>();
-function runReports(project: string, run: string, owner: DeviceSession) {
-	for (const [key, pending] of pendingRuns) if (!sessionCurrent(pending.owner)) pendingRuns.delete(key);
-	const key = JSON.stringify([project, run]);
+const pendingRuns = new Map<
+	string,
+	{ project: string; owner: DeviceSession; reports: ReturnType<typeof newRunReports> }
+>();
+function runReports(
+	project: string,
+	run: string,
+	owner: DeviceSession,
+	projectIdentity: PendingReport["projectIdentity"],
+) {
+	for (const [key, pending] of pendingRuns)
+		if (
+			!sessionCurrent(pending.owner) ||
+			(pending.project === project && pending.reports.projectIdentity !== projectIdentity)
+		) {
+			pending.reports.retired = true;
+			pendingRuns.delete(key);
+		}
+	const key = JSON.stringify([project, projectIdentity, run]);
 	const pending = pendingRuns.get(key);
 	if (pending) return pending.reports;
-	const reports = newRunReports();
-	pendingRuns.set(key, { owner, reports });
+	const reports = newRunReports(projectIdentity);
+	pendingRuns.set(key, { project, owner, reports });
 	return reports;
 }
 
 export function RunCockpit({ runRef }: { runRef: string }) {
+	const { project, session } = useApp();
+	const projectIdentity = session.projects.find((entry) => entry.key === project)?.identity;
+	if (!projectIdentity)
+		return <EmptyState>The current project is unavailable. Reload before recording a result.</EmptyState>;
+	return (
+		<ProjectRunCockpit
+			key={JSON.stringify([projectIdentity, runRef])}
+			runRef={runRef}
+			projectIdentity={projectIdentity}
+		/>
+	);
+}
+
+function ProjectRunCockpit({
+	runRef,
+	projectIdentity,
+}: {
+	runRef: string;
+	projectIdentity: PendingReport["projectIdentity"];
+}) {
 	const { project, session, setStatus } = useApp();
 	const owner = useRef(deviceSession()).current;
-	const [reports] = useState(() => runReports(project, runRef, owner));
+	const [reports] = useState(() => runReports(project, runRef, owner, projectIdentity));
 	const runRead = useQueryOp({ project, op: "get", input: { refs: [runRef] } });
 	const parsedRun = Run.safeParse(runRead.data?.[0]);
 	const run = parsedRun.success && parsedRun.data.ref === runRef ? parsedRun.data : null;
@@ -284,6 +322,11 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			}
 		}
 	}
+	function assertReportOwner(): void {
+		if (!sessionCurrent(owner)) throw new Error("The session changed. Your note is kept.");
+		if (reports.retired)
+			throw new Error("This report belongs to an obsolete project. Read the current project before recording again.");
+	}
 	function record(
 		outcome: RunOutcome,
 		slot = current,
@@ -292,21 +335,21 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		visibleStep = false,
 		restores?: Promise<RecordedResult>,
 	): Promise<RecordedResult> | null {
-		if (!slot || !sessionCurrent(owner) || !session.can.includes("produce")) return null;
+		if (!slot || !sessionCurrent(owner) || reports.retired || !session.can.includes("produce")) return null;
 		const recovery = reports.uncertain.get(slot.id);
 		if (recovery) {
 			const recoveringSlot = slot;
 			const request = recovery.retry();
 			void request.then(
 				() => {
-					if (!sessionCurrent(owner)) return;
+					if (!sessionCurrent(owner) || reports.retired) return;
 					setNotes(readNotes(notePrefix));
 					setSteps(readNotes(stepPrefix));
 				},
 				() => {},
 			);
 			void request.catch((error: unknown) => {
-				if (sessionCurrent(owner))
+				if (sessionCurrent(owner) && !reports.retired)
 					setStatus(
 						reports.uncertain.get(recoveringSlot.id)?.message ??
 							`${recoveringSlot.case} was not recorded: ${error instanceof Error ? error.message : "The request failed"}. Its note is kept.`,
@@ -383,6 +426,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		reports.queued.set(slot.id, fill.result);
 		const request = (async () => {
 			if (priorWrite) await priorWrite.catch(() => undefined);
+			assertReportOwner();
 			const pending = reports.uncertain.get(slot.id);
 			if (pending) await pending.retry();
 			const restoration = restores ? await restores : null;
@@ -391,7 +435,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 				outcome = earlier?.outcome === "error" ? "fail" : (earlier?.outcome ?? "skip");
 				text = earlier?.note ?? "Withdrawn by the author";
 			}
-			if (!sessionCurrent(owner)) throw new Error("The session changed. Your note is kept.");
+			assertReportOwner();
 			const known = reports.confirmed.get(slot.id)?.fills.find((f) => f.by === session.actor && f.method === method);
 			const recent = reports.latest.get(slot.id);
 			const previous = known && (!recent || known.result > recent.result) ? known : (recent ?? null);
@@ -404,6 +448,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 				cached.success && cached.data.ref === slot.case && cached.data.version === slot.version
 					? cached.data
 					: RunCase.parse((await call("get", pinnedInput, { project, owner }))[0]);
+			assertReportOwner();
 			if (body.ref !== slot.case || body.version !== slot.version)
 				throw new Error("The pinned case could not be read. Try again.");
 			if (!body.methods.includes(method))
@@ -430,7 +475,9 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 				}
 			}
 			const cmd = randomId();
-			const input: Api["report"]["input"] = {
+			assertReportOwner();
+			const input: PendingReport = {
+				projectIdentity: reports.projectIdentity,
 				run: runRef,
 				cmd,
 				results: [
@@ -445,7 +492,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 				],
 			};
 			const complete = (receipt: ReportReceipt): RecordedResult => {
-				if (!sessionCurrent(owner)) throw new Error("The session changed. Your note is kept.");
+				assertReportOwner();
 				reports.uncertain.delete(slot.id);
 				if (receipt.rejected.length || receipt.declined?.length || !receipt.results[0])
 					throw new Error(
@@ -479,6 +526,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			try {
 				receipt = await call("report", input, { project, owner });
 			} catch (error) {
+				assertReportOwner();
 				if (error instanceof ApiError && error.status !== null && error.code !== "internal") throw error;
 				const reason = error instanceof Error ? error.message : "The reply could not be read.";
 				const message = `${slot.case}'s outcome is unknown. ${reason}${/[.!?]$/.test(reason) ? "" : "."} Its note is kept. Press a result key on this slot to check the same request before recording another result.`;
@@ -486,7 +534,9 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 				const retry = (): Promise<RecordedResult> => {
 					if (checking) return checking;
 					checking = (async () => {
+						assertReportOwner();
 						const fate = await call("command", { cmd }, { project, owner });
+						assertReportOwner();
 						if (fate.state !== "done")
 							return complete(
 								await call("report", input, { project, owner }).catch((error: unknown) => {
@@ -511,7 +561,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		})();
 		reports.writes.set(slot.id, request);
 		void request.catch((error: unknown) => {
-			if (!sessionCurrent(owner)) return;
+			if (!sessionCurrent(owner) || reports.retired) return;
 			for (const file of files) consumedFiles.current.delete(file);
 			if (reports.consumedNotes.get(slot.id) === text) reports.consumedNotes.delete(slot.id);
 			if (reports.consumedSteps.get(slot.id) === marked) reports.consumedSteps.delete(slot.id);
