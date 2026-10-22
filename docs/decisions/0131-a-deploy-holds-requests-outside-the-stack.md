@@ -24,13 +24,16 @@ Two short windows remain where Docker's port proxy accepts a connection and clos
 the new ingress starts, and while the old one drains after SIGQUIT. A read (a GET or HEAD outside `/api/login/`, whose native OIDC callback consumes its ceremony) is sent again
 at once, which carries it across the start window only: HAProxy spends all its
 tries on an immediate retry in about 10 ms. A write is not sent again, because an empty reply can also follow a write the app committed, and a duplicate write is worse than a
-502. The ingress closes what it still has open 5 s after SIGQUIT, so an open change stream no longer keeps
-that window open for Coolify's 30-second stop. Five seconds is what the app gives an ordinary reply when it
-stops: a shorter drain would make the window shorter, but could cut a write the app has committed before its
-reply (a new token's secret is shown once). With no response open, the window lasted 54 to 123 ms on the
-owner's host; with a change stream open, it lasts the whole 5 s. The window can only close entirely if the host
-proxy reaches nginx without Docker's port proxy in between, for example over a Unix socket on a host
-directory. That changes the ingress's mounts and its tests, and is left for later.
+502. The stop window lasts as long as the old nginx drains: 54 to 123 ms on the owner's host with no
+response open, up to Coolify's 30-second stop while a change stream is open. The drain is left unbounded:
+a `worker_shutdown_timeout` would shorten the window but could cut a write the app committed before its
+one-time reply arrives, and the app's own 5 s grace starts only after the ingress has gone, so no shorter
+bound is safe. The window can close entirely only when the host proxy reaches nginx without Docker's port
+proxy in between (issue #743). A Unix socket removes the empty replies (measured: nginx deletes it at
+SIGQUIT, and a connect gets ENOENT), but HAProxy retries a failed Unix connect at once, with no pause, and
+Ubuntu's Caddy 2.6.2 cannot resend a request body after a failed dial. A fixed container address on a
+dedicated Docker network would keep HAProxy's paced TCP retries, but Coolify rewrites each service's
+networks, so it needs a deploy to prove.
 
 HAProxy over Caddy: Caddy's active health checks answer a POST with 503 while the upstream is down, and
 without them it has the same port-proxy window. HAProxy's health checks do the same (a 503 at once while its
@@ -38,8 +41,7 @@ only server is down), so the hold uses none. HAProxy retries a refused
 connection for any method, and is in Ubuntu's main archive. Its configuration and tests live with the
 host's other services, outside this repository; `docs/deploy.md` gives the settings any operator needs.
 
-The tailnet address is not held: its sidecar is part of the stack. A request still running half a
-second after the old ingress gets SIGQUIT is cut off.
+The tailnet address is not held: its sidecar is part of the stack.
 
 No demo changes apply: this changes how the container is reached, not the product.
 
