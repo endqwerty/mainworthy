@@ -1,4 +1,4 @@
-# 0133: Reports preserve automatic case-creation pauses
+# 0137: Reports preserve automatic case-creation pauses
 
 2026-10-22. Part of [issue #746](https://github.com/endqwerty/mainworthy/issues/746).
 Extends [decision 0082](0082-atomic-bulk-proposal-slices.md).
