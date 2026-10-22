@@ -247,6 +247,115 @@ describe("fresh schema image", () => {
 		});
 	}
 
+	test("a completed upgrade removes only exact interrupted copy files and empty copy workspaces (#538)", () => {
+		const directory = mkdtempSync(join(tmpdir(), "mainworthy-interrupted-copies-"));
+		const path = databasePath(directory);
+		const db = new Db(path);
+		const log = spyOn(console, "error").mockImplementation(() => {});
+		const uuid = "12345678-1234-1234-1234-123456789abc";
+		const temporary = `${path}.v1.bak.${uuid}.tmp`;
+		const journalOnly = `${path}.v2.bak.${uuid}.tmp-journal`;
+		const workspace = `${path}.v1.bak.Ab12Cd`;
+		const empty = `${path}.v2.bak.Xy12Z3`;
+		const mixed = `${path}.v3.bak.Xy12Z3`;
+		const linked = `${path}.v4.bak.Xy12Z3`;
+		const retained = [
+			`${path}.v0.bak.${uuid}.tmp`,
+			`${path}.v01.bak.${uuid}.tmp`,
+			`${path}.v1.bak.${uuid}.tmp-journal.extra`,
+			`${path}.v1.bak.${uuid}.tmp\n`,
+			`${path}.v1.bak.bad-uuid.tmp`,
+			`${path}.other.v1.bak.${uuid}.tmp`,
+			join(directory, `mainworthyXdb.v1.bak.${uuid}.tmp`),
+			`${path}.v1.bak.Abc123`,
+		];
+		try {
+			db.exec(MIGRATIONS[0]?.sql ?? "");
+			db.exec("INSERT INTO meta VALUES ('schema_version', '1'), ('preserved', 'kept')");
+			for (const file of [temporary, `${temporary}-journal`, journalOnly, ...retained])
+				fs.writeFileSync(file, "untouched");
+			for (const folder of [workspace, empty, mixed]) fs.mkdirSync(folder);
+			const nested = join(workspace, "mainworthy.db.v1.bak");
+			fs.writeFileSync(nested, "partial copy");
+			fs.writeFileSync(`${nested}-journal`, "partial journal");
+			fs.writeFileSync(join(mixed, "unrelated"), "untouched");
+			fs.symlinkSync(retained[0] ?? "", join(mixed, "mainworthy.db.v3.bak"));
+			fs.mkdirSync(join(mixed, "mainworthy.db.v3.bak-journal"));
+			fs.symlinkSync(mixed, linked);
+			const linkedJournal = `${path}.v5.bak.${uuid}.tmp-journal`;
+			fs.symlinkSync(retained[0] ?? "", linkedJournal);
+			const directoryJournal = `${path}.v6.bak.${uuid}.tmp-journal`;
+			fs.mkdirSync(directoryJournal);
+			const opened = openDatabase(path);
+			try {
+				expect(schemaVersion(opened)).toBe(SCHEMA_VERSION);
+				expect(opened.raw.query("SELECT value FROM meta WHERE key = 'preserved'").get()).toEqual({ value: "kept" });
+				for (const removed of [temporary, `${temporary}-journal`, journalOnly, workspace, empty])
+					expect(fs.existsSync(removed)).toBe(false);
+				for (const file of retained) expect(readFileSync(file, "utf8")).toBe("untouched");
+				expect(readFileSync(join(mixed, "unrelated"), "utf8")).toBe("untouched");
+				expect(fs.lstatSync(join(mixed, "mainworthy.db.v3.bak")).isSymbolicLink()).toBe(true);
+				expect(fs.lstatSync(join(mixed, "mainworthy.db.v3.bak-journal")).isDirectory()).toBe(true);
+				expect(fs.lstatSync(linked).isSymbolicLink()).toBe(true);
+				expect(fs.lstatSync(linkedJournal).isSymbolicLink()).toBe(true);
+				expect(fs.lstatSync(directoryJournal).isDirectory()).toBe(true);
+				const backup = new Db(`${path}.v1.bak`, { reader: true });
+				try {
+					expect(schemaVersion(backup)).toBe(1);
+				} finally {
+					backup.close();
+				}
+			} finally {
+				opened.close();
+			}
+		} finally {
+			log.mockRestore();
+			db.close();
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
+
+	for (const outcome of ["copy failure", "migration failure", "existing copy", "no migration"]) {
+		test(`interrupted copies stay when cleanup is not allowed: ${outcome}`, () => {
+			const directory = mkdtempSync(join(tmpdir(), "mainworthy-interrupted-kept-"));
+			const path = databasePath(directory);
+			const db = new Db(path);
+			const migration = MIGRATIONS.at(-1);
+			if (!migration) throw new Error("expected a shipped migration");
+			const original = migration.sql;
+			const temporary = `${path}.v1.bak.12345678-1234-1234-1234-123456789abc.tmp`;
+			const workspace = `${path}.v1.bak.Ab12Cd`;
+			const log = spyOn(console, "error").mockImplementation(() => {});
+			let sync: ReturnType<typeof spyOn> | undefined;
+			try {
+				db.exec(MIGRATIONS[0]?.sql ?? "");
+				db.exec("INSERT INTO meta VALUES ('schema_version', '1')");
+				if (outcome === "no migration") migrate(db, path);
+				if (outcome === "existing copy") fs.writeFileSync(`${path}.v1.bak`, "existing copy");
+				for (const file of [temporary, `${temporary}-journal`]) fs.writeFileSync(file, "keep");
+				fs.mkdirSync(workspace);
+				const nested = join(workspace, "mainworthy.db.v1.bak");
+				fs.writeFileSync(nested, "keep");
+				fs.writeFileSync(`${nested}-journal`, "keep");
+				if (outcome === "copy failure")
+					sync = spyOn(fs, "fsyncSync").mockImplementation(() => {
+						throw new Error("copy sync failed");
+					});
+				if (outcome === "migration failure") migration.sql = "SELECT * FROM missing_table_for_regression";
+				if (outcome.endsWith("failure")) expect(() => openDatabase(path)).toThrow();
+				else openDatabase(path).close();
+				for (const file of [temporary, `${temporary}-journal`, nested, `${nested}-journal`])
+					expect(readFileSync(file, "utf8")).toBe("keep");
+			} finally {
+				sync?.mockRestore();
+				migration.sql = original;
+				log.mockRestore();
+				db.close();
+				rmSync(directory, { recursive: true, force: true });
+			}
+		});
+	}
+
 	test("a pre-existing garbage upgrade copy keeps older copies", () => {
 		const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-garbage-copy-"));
 		const path = databasePath(directory);

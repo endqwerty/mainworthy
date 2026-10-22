@@ -878,11 +878,15 @@ The data is `/data/mainworthy.db` (with `-wal` and `-shm` beside it while runnin
   added other tables still imports (`test/sessions.test.ts` imports one from the build before sessions).
 - **Upgrade:** a new image runs all pending migrations in one transaction on start. A failed migration rolls
   back the entire upgrade to its starting schema and data, and removes no copies. Before changing existing
-  data, the server uses `VACUUM INTO` to write a consistent copy to a unique temporary file beside the database.
+  data, the server uses `VACUUM INTO` to write a consistent copy in a new private directory beside the database.
   It syncs and closes that file, renames it to `mainworthy.db.v<N>.bak`, then syncs the directory. `N` is the
   version before the upgrade. Only after all migrations commit, and only if this start completed that copy
-  itself, does it remove older upgrade copies and log each removed filename. Normally one copy remains.
-  If the final-name copy already exists, the server leaves it unchecked and keeps all older copies.
+  itself, does it remove older upgrade copies and log each removed filename. At that same point it removes
+  abandoned copies and journals matching the exact `<database>.v<N>.bak.<uuid>.tmp` and `.tmp-journal`
+  names used by older builds. It also removes the exact copy and journal regular files inside private
+  `<database>.v<N>.bak.<six-character suffix>` workspaces, then removes a workspace only if empty.
+  Symlinks, non-regular entries, and unrelated contents remain. Normally one copy remains.
+  If the final-name copy already exists, the server leaves it unchecked and performs no cleanup.
   Cleanup failures are logged without failing startup; extra copies remain until a later successful upgrade
   writes a new copy. A start with no pending migrations performs no cleanup.
   Only copies still present are rollback points. To go back, stop the container, put a retained copy in place

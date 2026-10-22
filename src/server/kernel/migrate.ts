@@ -1,5 +1,5 @@
 // Versioned migrations, run on start in every layer (decision 0002, rule 8).
-import { existsSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, rmdirSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { Db, protectDatabaseCopies, writePrivateDatabaseFile } from "./db.ts";
 import init from "./migrations/0001_init.sql" with { type: "text" };
@@ -144,7 +144,7 @@ export function schemaVersion(db: Db): number {
 /**
  * Brings the database to the current schema in one transaction, so a failure leaves the starting version intact.
  * Before changing a database that already holds data, a consistent copy is synced and published next to it
- * (`<file>.v<N>.bak`). Older copies are removed only after all migrations commit and only when this call
+ * (`<file>.v<N>.bak`). Older copies and interrupted copy artifacts are removed only after all migrations commit and only when this call
  * completed the new copy itself. A pre-existing copy is left alone and never permits cleanup.
  */
 export function migrate(db: Db, path: string): { from: number; to: number; backup: string | null } {
@@ -177,19 +177,45 @@ export function migrate(db: Db, path: string): { from: number; to: number; backu
 	if (wroteBackup) {
 		const directory = dirname(path);
 		const prefix = `${basename(path)}.v`;
+		const remove = (file: string): void => {
+			try {
+				rmSync(file, { force: true });
+				console.error(`[mainworthy] removed upgrade copy ${JSON.stringify(file)}`);
+			} catch (error) {
+				console.error(
+					`[mainworthy] could not remove upgrade copy ${JSON.stringify(file)}: ${error instanceof Error ? error.message : error}`,
+				);
+			}
+		};
 		try {
 			for (const file of readdirSync(directory, { withFileTypes: true })) {
-				if (!file.isFile() || !file.name.startsWith(prefix)) continue;
-				const version = /^([1-9]\d*)\.bak$/.exec(file.name.slice(prefix.length))?.[1];
-				if (!version || Number(version) >= from) continue;
-				const older = join(directory, file.name);
-				try {
-					rmSync(older, { force: true });
-					console.error(`[mainworthy] removed upgrade copy ${JSON.stringify(older)}`);
-				} catch (error) {
-					console.error(
-						`[mainworthy] could not remove upgrade copy ${JSON.stringify(older)}: ${error instanceof Error ? error.message : error}`,
+				if (!file.name.startsWith(prefix)) continue;
+				const suffix = file.name.slice(prefix.length);
+				const candidate = join(directory, file.name);
+				if (file.isFile()) {
+					const version = /^([1-9]\d*)\.bak$/.exec(suffix)?.[1];
+					const interrupted = /^[1-9]\d*\.bak\.[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\.tmp(?:-journal)?$/.test(
+						suffix,
 					);
+					if (interrupted || (version && Number(version) < from)) remove(candidate);
+				} else if (file.isDirectory()) {
+					const copy = /^([1-9]\d*\.bak)\.[a-zA-Z0-9]{6}$/.exec(suffix)?.[1];
+					if (!copy) continue;
+					const name = `${prefix}${copy}`;
+					try {
+						for (const child of readdirSync(candidate, { withFileTypes: true })) {
+							if (child.isFile() && (child.name === name || child.name === `${name}-journal`))
+								remove(join(candidate, child.name));
+						}
+						if (readdirSync(candidate).length === 0) {
+							rmdirSync(candidate);
+							console.error(`[mainworthy] removed upgrade copy ${JSON.stringify(candidate)}`);
+						}
+					} catch (error) {
+						console.error(
+							`[mainworthy] could not clean upgrade copy workspace ${JSON.stringify(candidate)}: ${error instanceof Error ? error.message : error}`,
+						);
+					}
 				}
 			}
 		} catch (error) {
