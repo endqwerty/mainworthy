@@ -186,7 +186,7 @@ For a CLI command inside this container, use `docker exec <container> mainworthy
 The `ingress` service has one fixed upstream, `mainworthy:7357`. Its pinned Nginx image runs as
 101:101 with a read-only filesystem, no capabilities, no-new-privileges, a temporary `/tmp`,
 64 MiB memory and 64 PIDs. It holds no application volume, token or other secret. It publishes
-only `127.0.0.1:7358`, forces `X-Forwarded-Proto: https`, and replaces `X-Mainworthy-Client`
+only `127.0.0.1:7359`, forces `X-Forwarded-Proto: https`, and replaces `X-Mainworthy-Client`
 with `CF-Connecting-IP`. If the latter is missing, it removes the client header. CONNECT and
 absolute-form request targets are refused. DNS refresh handles replacement app containers;
 only the fixed service name is resolved, over IPv4 because that is the app's listening address.
@@ -199,8 +199,9 @@ and `MAINWORTHY_CLIENT_ADDRESS_HEADER=x-mainworthy-client`. Compose requires bot
 Every peer in that range is trusted; do not share it with untrusted workloads. The tailnet path
 is a separate trusted internal path, not a public Cloudflare origin.
 
-The public-origin contract requires a host Cloudflare Tunnel pointing to
-`http://127.0.0.1:7358` and removal of the previous Coolify/Traefik domain after cutover.
+The public-origin contract requires a host Cloudflare Tunnel pointing to a request-holding
+proxy on the host, which passes requests to `http://127.0.0.1:7359` ("A deploy that holds
+requests" below), and removal of the previous Coolify/Traefik domain after cutover.
 A normal public request's malicious CF-Connecting-IP is replaced by Cloudflare before it
 enters the tunnel. The proxy trusts that value; it cannot authenticate Cloudflare by inspecting
 the header. A process that controls the host can spoof a loopback request, and a compromised
@@ -246,8 +247,8 @@ dashboard. This page writes the tailnet's name as `example.ts.net` and the node'
    volume. Bind it to a path you back up if you have one.
 5. **Network:** the `tailscale` service in `compose.coolify.yaml` is its own tailnet node, `mainworthy`, and serves
    the app at `https://mainworthy.example.ts.net` (Tailscale issues the certificate; the first request can take
-   a few seconds). Nothing is published on the LAN; ingress port 7358 is bound to `127.0.0.1` for the host
-   tunnel. Anything on the tailnet can reach the name, and every request still needs a token. The node's identity
+   a few seconds). Nothing is published on the LAN; ingress port 7359 is bound to `127.0.0.1` for the hold
+   in front of the host's tunnel. Anything on the tailnet can reach the name, and every request still needs a token. The node's identity
    lives in the `tailscale-state` volume: deleting it registers a new node.
    Once the node is up, disable its key expiry in the Tailscale admin console (Machines → the node), and delete
    `TS_AUTHKEY` from Coolify. For a server without Tailscale, use `compose.yaml` (publishes 7357) or give the
@@ -257,8 +258,8 @@ dashboard. This page writes the tailnet's name as `example.ts.net` and the node'
    make Coolify list it as one of yours, and an empty value of yours replaces the one it generates). Compare it with
    the tip of `main` (`git ls-remote origin refs/heads/main`) to see whether the instance is behind. Open the page
    and paste the owner token.
-7. **The public address:** point the host's Cloudflare Tunnel at `http://127.0.0.1:7358` for
-   `mainworthy.com`, then remove the old Coolify domain and Traefik router. The ingress service sets the
+7. **The public address:** start the hold below on the host, point the host's Cloudflare Tunnel at it
+   (`http://127.0.0.1:7358`) for `mainworthy.com`, then remove the old Coolify domain and Traefik router. The ingress service sets the
    HTTPS and client headers. Set the proxy range and dedicated header as described above. The previous
    route was `https://localhost:443` through Traefik with a domain on the app service. It remains the live
    route until the operator performs the cutover; the private homelab notes track that work and rollback.
@@ -268,6 +269,60 @@ dashboard. This page writes the tailnet's name as `example.ts.net` and the node'
 
    To take the instance off the internet, delete the DNS record for the name or its route in the tunnel. A
    firewall rule for incoming connections does not do it: the tunnel is a connection the server opens outward.
+
+### A deploy that holds requests
+
+A Coolify deploy of a Compose file removes every container of the old stack, then starts the new one: it has
+no rolling replacement for Compose, and two servers cannot share the data directory anyway (decision 0031).
+On the owner's instance, on 2026-10-22, nothing listened for 16 seconds: removing the old ingress, app and
+sidecar took 6.5 s, the new app listened 7 s after that and was healthy half a second later, and the new
+ingress started 1.4 s after that. Another deploy that day took about 48 s. A request that reached the tunnel
+in that time got Cloudflare's 502.
+
+So the tunnel does not point at the stack. It points at a proxy on the host that no deploy touches, and that
+proxy passes each request to the ingress on `127.0.0.1:7359`. While nothing listens there, a refused
+connection is tried again after a second, up to 90 times, so the request waits for the new stack instead of
+failing. Nothing was sent, so this is safe for any method. Cloudflare gives up on an origin after 100 seconds,
+so a longer hold would answer nobody; a deploy longer than 90 s still ends in a 503. The owner's instance
+runs HAProxy for it:
+
+```
+defaults
+    mode http
+    option http-server-close
+    timeout connect 1s
+    timeout http-request 30s
+    timeout client 330s
+    timeout server 330s
+    retries 90
+    retry-on conn-failure empty-response
+
+frontend public
+    bind 127.0.0.1:7358
+    default_backend stack
+
+backend stack
+    server ingress 127.0.0.1:7359
+```
+
+- `retries 90` with `timeout connect 1s` is the hold: HAProxy waits the shorter of the two, one second,
+  before it tries a refused connection again.
+- `empty-response`: when the new ingress starts, Docker's port proxy accepts a connection on 7359 before
+  nginx in the container listens, and closes it without a reply. That request reached nothing, so it is
+  sent again whatever its method. The old ingress cannot produce such a reply for a request it took: Docker
+  stops it with SIGQUIT, nginx stops accepting connections and finishes the requests it has, and only one
+  that runs past Coolify's 30-second stop is cut off.
+- `option http-server-close` opens a new connection to the ingress for every request, so none is reused
+  after the stack it belonged to has gone.
+- The two timeouts are longer than the ingress's 300 s; an open change stream sends a heartbeat every 20 s.
+- No `option forwardfor`: the proxy adds and changes no header. The ingress still sets the scheme and the
+  client address from `CF-Connecting-IP`, and the app still trusts only the ingress.
+- The ingress keeps `condition: service_healthy`: until the app is healthy nothing listens on 7359 and
+  requests wait. An ingress that started first would answer 502 itself, and that is not tried again.
+
+A change stream that is open during the deploy ends when the old stack stops; the browser opens it again
+and that request waits like any other. The tailnet name is not held: the Tailscale sidecar is part of the
+stack and is replaced with it, so `https://mainworthy.example.ts.net` is unreachable for those seconds.
 
 This setup alone does not enable automatic deployment. To deploy manually, press Redeploy in Coolify or call
 its API (`POST /api/v1/deploy?uuid=<application>`). The owner's instance uses an external deploy job; its

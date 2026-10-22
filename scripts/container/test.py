@@ -107,7 +107,7 @@ try:
     assert security["Memory"] == 64 * 1024 * 1024 and security["PidsLimit"] == 64
     assert not deployed["Mounts"] and "/tmp" in security["Tmpfs"]
     assert security["PortBindings"]["8080/tcp"] == [
-        {"HostIp": "127.0.0.1", "HostPort": "7358"}
+        {"HostIp": "127.0.0.1", "HostPort": "7359"}
     ]
     content = inspection.stdout.split("# configuration file /tmp/nginx.conf:\n", 1)[1]
     (WORK / "ingress.conf").write_text(content)
