@@ -191,7 +191,7 @@ export const ANSWER_KEYS = {
 
 /**
  * For an answer that ended because the cause passed on another commit of its pull request or branch, one it never
- * failed on (decision 0140): that change, and how it stands now. The change fixed the failure itself, so no issue
+ * failed on (decision 0141): that change, and how it stands now. The change fixed the failure itself, so no issue
  * need track it.
  */
 export const FixedIn = z.object({ change: z.string(), state: z.enum(["open", "merged", "closed"]) });
