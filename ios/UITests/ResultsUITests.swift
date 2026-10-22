@@ -145,6 +145,40 @@ final class ResultsUITests: XCTestCase {
 		XCTAssertTrue(testsNoticeVisible, "Tests must say when only the beginning of a search is used")
 	}
 
+	@MainActor func testRunnerTriesOnTheTestPage() async throws {
+		let project = try await makeProject()
+		let address = try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])
+		var request = URLRequest(url: try XCTUnwrap(URL(string: "\(address)/api/p/\(project)/report")))
+		request.httpMethod = "POST"
+		request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+		request.setValue("Bearer \(environment["MAINWORTHY_TEST_TOKEN"] ?? "")", forHTTPHeaderField: "Authorization")
+		request.httpBody = try JSONSerialization.data(withJSONObject: [
+			"target": ["commit": String(repeating: "3", count: 40), "repo": "acme/shop", "pr": 482],
+			"job": "runner",
+			"results": [["test": ["key": "runner-retries", "name": "Runner retries a coupon"], "outcome": "pass",
+				"tries": [["outcome": "fail", "durationMs": 25, "failure": ["message": "Coupon did not apply"]],
+					["outcome": "error", "durationMs": 30], ["outcome": "skip"]]]],
+		])
+		let (_, response) = try await URLSession.shared.data(for: request)
+		XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+		XCUIDevice.shared.orientation = .portrait
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", address]
+		app.launch()
+		try signIn(app)
+		app.openProject(project)
+		app.openTab("Cases")
+		app.buttons["suite-tests"].tap()
+		let test = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Runner retries a coupon'")).firstMatch
+		XCTAssertTrue(test.waitForExistence(timeout: 10))
+		test.tap()
+		XCTAssertTrue(app.staticTexts["Latest results"].waitForExistence(timeout: 10))
+		shot("test-runner-tries")
+		XCTAssertTrue(app.staticTexts["flaky"].exists)
+		XCTAssertTrue(app.staticTexts["the runner's tries: fail, error, skip, pass"].exists)
+		XCTAssertTrue(app.staticTexts["An earlier try: Coupon did not apply"].exists)
+	}
+
 	@MainActor func testResultsTestsAndWhoRanACase() async throws {
 		XCUIDevice.shared.orientation = .portrait
 		let project = try await makeProject()
