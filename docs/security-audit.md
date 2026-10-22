@@ -7,22 +7,28 @@ a judgment call that the owner reviews.
 
 ## Running it
 
-`scripts/security-audit.ts` runs it. Run origin/main's copy, never the branch's, so a pull request cannot change the
-audit that reads it, and run bun from `/`: in the checkout, bun loads the branch's `bunfig.toml` (its `preload`) and
-`.env` before the script's first line, with your full access.
+`scripts/security-audit.ts` runs it. Run one exact origin/main commit's copy, written outside the checkout, never the
+branch's, so a pull request cannot change the audit that reads it; and run bun from `/`: in the checkout, bun loads the
+branch's `bunfig.toml` (its `preload`) and `.env` before the script's first line, with your full access. Copy this
+from origin/main's page (`git show origin/main:docs/security-audit.md`), not from the branch's:
 
 ```sh
-repo=$(git rev-parse --show-toplevel)
-git -C "$repo" fetch -q origin main && git -C "$repo" show origin/main:scripts/security-audit.ts |
-  (cd / && bun run - <number> --repo "$repo" [--context <file>])
+repo=$(git rev-parse --show-toplevel); git -C "$repo" fetch -q origin main
+source=$(git -C "$repo" rev-parse --verify 'origin/main^{commit}'); runner=$(mktemp -d)
+git -C "$repo" show "$source:scripts/security-audit.ts" > "$runner/security-audit.ts" &&
+  (cd / && bun "$runner/security-audit.ts" <number> --repo "$repo" --source "$source" [--context <file>])
+rm -rf "$runner"
 ```
 
-The script refuses when bun runs inside the checkout, but by then a preload has run, so the `cd /` is what protects
-you. Run from a file instead, the script refuses unless it is the same as origin/main's. A pull request that edits the
-script, this page or the delivery rules is therefore audited by the copy already on `main`, and the brief says first
-that the change edits the audit. The script prints the head and base it read and its scratch directory, which holds
-`brief.md`, `findings.md` and `log.txt`; delete it with `bun scripts/work.ts scratch rm` once the round is recorded.
-`--context` takes a file with the earlier rounds' issues and their answers.
+The script refuses unless `--source` is still origin/main's tip and the file it runs is that commit's copy, outside the
+checkout and not read from standard input, and it prints the commit it ran from; record that commit with the round.
+It also refuses when bun runs inside the checkout, but by then a preload has run, so the `cd /` is what protects you.
+Those checks catch a mistake or a race (`main` moving between the launcher and the script), not a hostile copy, which
+would skip them: what protects the audit is that the launcher takes the copy from `main`. A pull request that edits
+the script, this page or the delivery rules is therefore audited by the copy already on `main`, and the brief says
+first that the change edits the audit. The script prints the head and base it read and its scratch directory, which
+holds `brief.md`, `findings.md` and `log.txt`; delete it with `bun scripts/work.ts scratch rm` once the round is
+recorded. `--context` takes a file with the earlier rounds' issues and their answers.
 
 - **Whose pull request.** It refuses, before Codex starts, a pull request that is not open, that someone other than
   the repository's owner opened, that comes from a fork, or that has a commit the owner did not write and commit or
