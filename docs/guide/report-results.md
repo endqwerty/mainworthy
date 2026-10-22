@@ -38,8 +38,10 @@ A successful `report` exits `0` even when tests fail. Use `gate` for the verdict
 An invalid input or refused command exits `4`. See [changes](./changes.md).
 
 A result's `corrects` names an earlier result of yours that has not already been corrected.
-If another report has replaced that result, the server refuses the whole report with `conflict`
-before accepting it. Read the latest results and correct the current result instead.
+If another report has replaced that result, or an accepted report is still waiting to apply
+its correction, the server refuses the whole report with `conflict` before accepting it.
+After an interruption, retry the first report or let server startup finish it.
+Read the latest results and correct the current result instead.
 Two results in one report cannot correct the same earlier result.
 
 Sending an identical report again returns the original receipt and says

@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { emptyBody } from "../src/core/model.ts";
 import type { DecideReply, GateStatus, InboxReply, PlanReply, ProposeReply, ReportReceipt } from "../src/core/ops.ts";
+import { ReportInput } from "../src/core/ops.ts";
 import { PRESETS } from "../src/core/presets.ts";
 import { HANDLERS } from "../src/server/decisions/kinds.ts";
 import type { HoldTerm } from "../src/server/decisions/questions.ts";
@@ -606,11 +607,11 @@ describe("what a result may prove", () => {
 		const test = kind === "ci" ? { key: "pending-correction" } : { case: "C-1" };
 		const observed = { test, annotation: { case: "C-1", version: 1 } };
 		const original = first(report({ target, results: [{ ...observed, outcome: "pass" }] }, actor).results);
-		const correction = {
+		const correction = ReportInput.parse({
 			target,
 			cmd: crypto.randomUUID(),
-			results: [{ ...observed, outcome: "fail" as const, note: "Still broken", corrects: original }],
-		};
+			results: [{ ...observed, outcome: "fail", note: "Still broken", corrects: original }],
+		});
 		const project = findProject(h.app.db, "scratch");
 		if (!project) throw new Error("no project");
 		const acceptPending = () =>
@@ -641,6 +642,27 @@ describe("what a result may prove", () => {
 			report({ target, results: [{ ...observed, outcome: "pass", corrects: first(recovered.results) }] }, actor),
 		).toMatchObject({ counts: { total: 1, pass: 1 }, rejected: [], declined: [] });
 		expect(gate({ run: planned.run }).verdict).toBe("passed");
+	});
+
+	test("a pending correction from another producer does not reserve somebody else's result", () => {
+		seed();
+		const target = { commit: "producer631" };
+		const observed = { test: { key: "producer-correction" }, annotation: { case: "C-1", version: 1 } };
+		const original = first(report({ target, results: [{ ...observed, outcome: "pass" }] }).results);
+		const other = h.actor("another-producer", "ci", ["read", "record"]);
+		const project = findProject(h.app.db, "scratch");
+		if (!project) throw new Error("no project");
+		h.app.db.transaction(() => {
+			const ctx = makeCtx(h.app, project, other, true);
+			acceptReport(ctx, { target, results: [{ ...observed, outcome: "pass", corrects: original }] });
+			stampSeq(ctx);
+		});
+		const corrected = report({ target, results: [{ ...observed, outcome: "fail", corrects: original }] });
+		expect(corrected).toMatchObject({ counts: { total: 1, fail: 1 }, declined: [], rejected: [] });
+		expect(recoverAccepted(h.app)).toBe(1);
+		expect(recoverAccepted(h.app)).toBe(0);
+		expect(rows("SELECT id FROM results WHERE corrects IS NOT NULL")).toEqual([{ id: first(corrected.results) }]);
+		expect(gate({ commit: target.commit }).verdict).toBe("blocked");
 	});
 
 	test("two corrections of one result in the same report refuse the whole report", () => {
