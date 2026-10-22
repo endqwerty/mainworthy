@@ -39,9 +39,8 @@ with that address in full, for example `github.com/example/shop/pull/482`, as a 
 report supplies it, so read where it goes before you follow it.
 
 A failure that needed a fix and that another commit of the change passed, one it never failed
-on, is one the change fixed itself. A retry of the same commit that passes is not. The detail
-counts them, for example "1 failure that needed a fix was fixed by another of its commits.", and
-each one in "Settled and excused" says "Fixed by another commit of pr:482, which merged".
+on, is one the change fixed itself. A retry of the same commit that passes is not. Each one in
+"Settled and excused" says so, for example "Fixed by another commit of pr:482, which merged".
 See [when the fix arrives](./decide.md#when-the-fix-arrives).
 Once impact loads, "Impact" and "Uncovered files" show the related cases and paths,
 or say that there are none.

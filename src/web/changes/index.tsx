@@ -2,7 +2,7 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { z } from "zod";
 import { MergeReceipt, MergeReceiptResult } from "../../core/changes.ts";
-import { ANSWER_LABELS, endingText, fixedOnChangeText } from "../../core/kinds.ts";
+import { ANSWER_LABELS, endingText } from "../../core/kinds.ts";
 import {
 	RESULT_STANDING_LABELS,
 	type ResultStanding,
@@ -91,7 +91,6 @@ function ChangesWorkbench() {
 	const openData = open.isPlaceholderData ? undefined : open.data;
 	const settledData = settled.isPlaceholderData ? undefined : settled.data;
 	const impactData = Impact.safeParse(impact.isPlaceholderData ? undefined : impact.data);
-	const fixedHere = settledData?.items.filter((q) => q.decision?.fixedIn?.change === key).length ?? 0;
 	const link = linkTo(current?.url ?? null);
 	const go = (ref: string) => navigate(refUrl({ project, ref }));
 	const choose = (change: string) => {
@@ -209,7 +208,6 @@ function ChangesWorkbench() {
 								<MergeGateReceipt receipt={impactData.data.change.mergeReceipt} />
 							)}
 							{current && <ChangeEnding change={current} />}
-							{current && fixedHere > 0 && <p className="change-ended-note">{fixedOnChangeText(fixedHere)}</p>}
 							<SectionHeading>Open questions</SectionHeading>
 							{open.error && <p role="status">{open.error.message}</p>}
 							{openData?.items.map((q) => (
