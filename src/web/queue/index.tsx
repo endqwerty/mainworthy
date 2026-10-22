@@ -114,14 +114,6 @@ function QueueWorkbench() {
 	const routeState = z
 		.object({ q: z.string(), state: z.enum(["open", "decided", "dissolved"]) })
 		.safeParse(routeQuestion.data?.[0]);
-	const routeQuestionRef = routeState.success ? routeState.data.q : null;
-	const routeQuestionState = routeState.success ? routeState.data.state : null;
-	useEffect(() => {
-		if (route.ref && routeQuestionRef === route.ref && seenRoute.current !== route.ref) {
-			seenRoute.current = route.ref;
-			if (routeQuestionState === "decided" || routeQuestionState === "dissolved") setState("decided");
-		}
-	}, [route.ref, routeQuestionRef, routeQuestionState]);
 	const input: Api["inbox"]["input"] = { state, ...(kind ? { kind } : {}), limit: 100 };
 	const cacheKey = [...queryKey({ project, op: "inbox", input }), "pages"];
 	const inbox = useInfiniteQuery({
@@ -148,6 +140,15 @@ function QueueWorkbench() {
 	});
 	const fetched = inbox.data?.pages.flatMap((page) => page.items) ?? [];
 	const merged = [...restored.filter((item) => !fetched.some((q) => q.q === item.q)), ...fetched];
+	const listedRouteQuestion = merged.find((item) => item.q === route.ref);
+	const routeQuestionRef = listedRouteQuestion?.q ?? (routeState.success ? routeState.data.q : null);
+	const routeQuestionState = listedRouteQuestion?.state ?? (routeState.success ? routeState.data.state : null);
+	useEffect(() => {
+		if (route.ref && routeQuestionRef === route.ref && seenRoute.current !== route.ref) {
+			seenRoute.current = route.ref;
+			if (routeQuestionState === "decided" || routeQuestionState === "dissolved") setState("decided");
+		}
+	}, [route.ref, routeQuestionRef, routeQuestionState]);
 	const items = merged.filter(
 		(item) =>
 			(item.state === state ||

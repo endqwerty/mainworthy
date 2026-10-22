@@ -342,10 +342,14 @@ async function recordedDecisions(server: Server, ref: string) {
 );
 
 (browserAvailable ? test : test.skip)(
-	"bulk answers are one decide request and undo restores every question",
+	"bulk answers keep Open after a late question read and undo restores every question",
 	async () => {
 		const server = await fixture();
 		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		let release = () => {};
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
 		try {
 			await server.api("propose", {
 				edits: [
@@ -360,7 +364,16 @@ async function recordedDecisions(server: Server, ref: string) {
 					{ test: { case: "C-2" }, outcome: "fail", note: "expected cedar, got green" },
 				],
 			});
-			view = await openPage(server, { path: "/p/scratch/queue" });
+			view = await openPage(server, {
+				path: "/p/scratch/queue",
+				setup: async (page) => {
+					await page.route("**/get", async (route) => {
+						const { refs } = z.object({ refs: z.array(z.string()) }).parse(route.request().postDataJSON());
+						if (refs.some((ref) => ref.startsWith("Q-"))) await held;
+						await route.continue();
+					});
+				},
+			});
 			await view.page.waitForSelector("[data-current-question]");
 			const submissions: unknown[] = [];
 			view.page.on("request", (request) => {
@@ -376,6 +389,17 @@ async function recordedDecisions(server: Server, ref: string) {
 			);
 			expect(submissions).toHaveLength(1);
 			expect(z.object({ all: z.array(z.unknown()) }).parse(submissions[0]).all).toHaveLength(2);
+			const questionRead = view.page.waitForResponse(
+				(response) => response.url().endsWith("/get") && response.request().postDataJSON().refs?.[0]?.startsWith("Q-"),
+			);
+			release();
+			await (await questionRead).finished();
+			await view.page.evaluate(
+				() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+			);
+			expect(await view.page.getByRole("button", { name: "Open", exact: true }).getAttribute("aria-pressed")).toBe(
+				"true",
+			);
 			await view.page.keyboard.press("u");
 			await eventually(
 				() => server.api("inbox", {}),
@@ -383,6 +407,7 @@ async function recordedDecisions(server: Server, ref: string) {
 			);
 			expect(view.errors).toEqual([]);
 		} finally {
+			release();
 			await view?.close();
 			await server.stop();
 		}
