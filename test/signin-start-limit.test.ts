@@ -39,6 +39,89 @@ const client = from("203.0.113.10");
 const other = from("203.0.113.11");
 const PASSWORD = "correct horse battery staple";
 
+test("G3: a subscriber's /58 burst cannot refuse unrelated starts in any protocol", async () => {
+	const idp = await provider();
+	const w = world({ oidc: idp.config(), proxied: true });
+	const { code } = await invite(w, { name: "robin" });
+	for (let net = 0; net < 34; net++)
+		for (let count = 0; count < 300; count += 30)
+			await Promise.all(
+				Array.from({ length: 30 }, () =>
+					w.post("/api/login/challenge", { native: true }, from(`2001:db8:0:${net.toString(16)}::1`)),
+				),
+			);
+	for (const start of starts) expect(said(await w.post(start.path, start.body, other))).toBe("200");
+	expect(said(await w.post("/api/login/oidc", { invitation: code }, other))).toBe("200");
+}, 30_000);
+
+test("G4: four /64s refilling every minute cannot deny another person's starts for ten minutes", async () => {
+	const idp = await provider();
+	const w = world({ oidc: idp.config(), proxied: true });
+	const outcomes: number[] = [];
+	for (let second = 0; second < 600; second++) {
+		if (second % 60 === 0) {
+			for (let count = 0; count < 1000; count += 25)
+				await Promise.all(
+					Array.from({ length: 25 }, (_, n) =>
+						w.post("/api/login/challenge", { native: true }, from(`2001:db8:0:${(count + n) % 4}::1`)),
+					),
+				);
+		}
+		if (second % 7 === 0)
+			for (const start of starts) outcomes.push((await w.post(start.path, start.body, other)).status);
+		w.clock.advance(1000);
+	}
+	expect(outcomes).toHaveLength(86 * starts.length);
+	expect(outcomes.filter((status) => status === 200)).toHaveLength(outcomes.length);
+}, 30_000);
+
+test.each(["passkey", "provider"])(
+	"G1: many independent prefixes cannot evict a small pending %s bucket or deny new starts",
+	async (kind) => {
+		const idp = await provider();
+		const w = world({ oidc: idp.config(), proxied: true });
+		const { code } = await invite(w, { name: "robin" });
+		const complete = await (async () => {
+			if (kind === "passkey") {
+				const device = authenticator();
+				const registration = must(
+					await w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", { invitation: code }, other),
+				);
+				await w.post("/api/login", { invitation: code, passkey: device.register(registration.passkey) }, other);
+				const pending = await w.post<{ passkey: AssertionOptions }>("/api/login/challenge", {}, other);
+				return () =>
+					w.post("/api/login", { passkey: device.assert(must(pending).passkey) }, { ...other, cookie: pending.cookie });
+			}
+			const pending = await w.post<{ url: string }>("/api/login/oidc", { invitation: code }, other);
+			idp.next({ subject: "sub-robin" });
+			const authorized = await fetch(must(pending).url, { redirect: "manual" });
+			const query = new URL(authorized.headers.get("location") ?? "").search;
+			await authorized.text();
+			return () => w.post("/api/login", { oidc: query }, { ...other, cookie: pending.cookie });
+		})();
+		let admitted = 0;
+		for (let prefix = 0; prefix < 40; prefix++) {
+			for (let count = 0; count < 300; count += 30) {
+				const replies = await Promise.all(
+					Array.from({ length: 30 }, () =>
+						w.post(
+							kind === "passkey" ? "/api/login/challenge" : "/api/login/oidc",
+							kind === "passkey" ? { native: true } : {},
+							from(`2001:db8:${prefix.toString(16)}::1`),
+						),
+					),
+				);
+				admitted += replies.filter((reply) => reply.status === 200).length;
+			}
+		}
+		for (const start of starts) expect(said(await w.post(start.path, start.body, other))).toBe("200");
+		w.clock.advance(10_000);
+		expect(said(await complete())).toBe("200");
+		expect(admitted).toBe(12_000);
+	},
+	30_000,
+);
+
 test.each(["passkey", "provider"])(
 	"one client's IPv6 /58 spread cannot evict a pending %s ceremony",
 	async (kind) => {
