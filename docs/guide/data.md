@@ -21,6 +21,8 @@ An upgrade runs all pending database migrations in one transaction. If any state
 
 After every pending migration commits, Mainworthy keeps the copy it completed on that start and removes older copies for the same database, logging each removed filename. If the final copy already existed, Mainworthy leaves it unchecked and removes no older copies. A failed migration also removes none. A cleanup failure is logged and startup continues, so extra copies can remain until a later successful upgrade writes a new copy.
 
+After upgrading an older database, the first start also rebuilds the private assertion-presence index before applying pending reports. It reads stored evidence in bounded pages and keeps historical causes unchanged. This one-time work takes longer with more evidence.
+
 Normally one upgrade copy remains. Only copies still present can restore an earlier database state. Save a separate backup before upgrading if you need an older rollback point.
 
 On `SIGTERM` or `SIGINT`, the server stops accepting connections and closes its change streams. Requests already in flight have five seconds to send their replies before the server closes the remaining connections. The server then stops the reader threads and closes the database. A request that outlasts this wait can lose its reply. If you retry a write, send the same command id, `cmd`, so the write is not applied twice. The CLI and web UI send command ids.
@@ -69,7 +71,7 @@ $ tail -n 1 mainworthy.ndjson
 
 You can read the archive with any tool that reads text or search it with `grep`. If the data is suitable for version control, you can keep the archive there.
 
-The archive holds attachment bytes along with the database records, and actors, personal and team grants, memberships, team history, recovery addresses and their verification status. It leaves out tokens, sessions, passwords, passkeys, authenticators, passkey handles and invitations. It also leaves out the search index. Mainworthy rebuilds that index on import. Tracker delivery requests are excluded, so restoring an archive never sends an issue again.
+The archive holds attachment bytes along with the database records, and actors, personal and team grants, memberships, team history, recovery addresses and their verification status. It leaves out tokens, sessions, passwords, passkeys, authenticators, passkey handles and invitations. It also leaves out the search and assertion-presence indexes. Mainworthy rebuilds both on import. Tracker delivery requests are excluded, so restoring an archive never sends an issue again.
 
 The archive leaves out which changes have ended. After an import every change is open. Questions that were closed when a change ended stay closed. If a failure on such a change is reported again, use `mainworthy change` to record again that the change ended.
 

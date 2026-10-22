@@ -2,7 +2,14 @@
 // reports its earlier tries with the result (decision 0129). The result itself is what the gate counts; the tries
 // are evidence: a try that disagrees with the next is a flip, as a retry by the pipeline is.
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import type { GateStatus } from "../src/core/ops.ts";
+import { type GateStatus, ReportInput } from "../src/core/ops.ts";
+import { rebuildAssertionIndexes } from "../src/server/evidence/assertions.ts";
+import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
+import { Db, declaredSql } from "../src/server/kernel/db.ts";
+import { migrate } from "../src/server/kernel/migrate.ts";
+import { recoverAccepted } from "../src/server/ops/jobs.ts";
+import { acceptReport, processBatchSteps } from "../src/server/ops/writes.ts";
+import { exportArchive, importArchive, linesOf } from "../src/server/transfer/transfer.ts";
 import { type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
@@ -281,5 +288,193 @@ test("earlier failed tries without messages still count toward their fallback ca
 	});
 	expect(h.call<Page[]>("get", { refs: ["T-31"] })[0]?.sameCode.signals).toMatchObject([
 		{ signature: { text: "Split by file (file-0.test.ts): no failure message (works)" }, flips: 1 },
+	]);
+});
+
+test("large assertion history cannot make a report materialize unbounded rows", () => {
+	const ci = h.actor("pipeline", "ci", ["read", "record"]);
+	const target = { repo: "acme/web", commit: "history-bound-01", branch: "main" };
+	const db = h.app.db;
+	const all = db.all.bind(db);
+	let largestRead = 0;
+	let probing = false;
+	let probeRows = 0;
+	db.all = (statement, ...params) => {
+		const rows = all(statement, ...params);
+		largestRead = Math.max(largestRead, rows.length);
+		if (probing) probeRows += rows.length;
+		return rows;
+	};
+	try {
+		h.call(
+			"report",
+			{
+				target,
+				job: "e2e",
+				results: broadTests().map((test, i) => ({
+					test,
+					outcome: "fail",
+					failure: { message: "assertion final root" },
+					tries: Array.from({ length: 100 }, (_, j) => failed(`assertion try ${i * 100 + j}`)),
+				})),
+			},
+			ci,
+		);
+		probing = true;
+		h.call(
+			"report",
+			{
+				target,
+				job: "probe",
+				results: [{ test: { key: "probe" }, outcome: "fail", failure: { message: "unrelated assertion" } }],
+			},
+			ci,
+		);
+		expect(largestRead).toBeLessThanOrEqual(200);
+		expect(probeRows).toBeLessThanOrEqual(512);
+	} finally {
+		db.all = all;
+	}
+	expect(gate(target.commit).tally.unexplained).toBe(61);
+});
+
+test("repeated tries and reports retain one threshold observation per root, test and commit", () => {
+	const input = broadReport();
+	input.results = input.results.map((result) => ({
+		...result,
+		tries: Array.from({ length: 100 }, () => failed("assertion failed")),
+	}));
+	for (let attempt = 1; attempt <= 3; attempt++) h.call("report", { ...input, attempt });
+	expect(h.app.db.raw.query("SELECT count(*) AS n FROM assertion_seen").get()).toEqual({ n: 60 });
+	expect(page()?.sameCode.signals).toMatchObject([
+		{ signature: { text: "Split by file (file-0.test.ts): assertion failed" }, flips: 5 },
+	]);
+});
+
+const inContext = <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): T =>
+	h.app.db.transaction(() => {
+		const project = findProject(h.app.db, "scratch");
+		if (!project) throw new Error("missing project");
+		const ctx = makeCtx(h.app, project, h.owner, true);
+		const value = fn(ctx);
+		stampSeq(ctx);
+		return value;
+	});
+
+test("application yields within a batch's tries, and recovery after rollback applies it once", () => {
+	const input = broadReport(broadTests(6));
+	input.results = input.results.map((result) => ({
+		...result,
+		tries: Array.from({ length: 100 }, () => failed("assertion failed")),
+	}));
+	const batch = inContext((ctx) => acceptReport(ctx, ReportInput.parse(input))).batch;
+	expect(() =>
+		inContext((ctx) => {
+			const steps = processBatchSteps(ctx, batch.id);
+			expect(steps.next().done).toBe(false);
+			expect(h.app.db.raw.query("SELECT count(*) AS n FROM result_tries").get()).toEqual({ n: 200 });
+			throw new Error("interrupted application");
+		}),
+	).toThrow("interrupted application");
+	expect(h.app.db.raw.query("SELECT count(*) AS n FROM assertion_seen").get()).toEqual({ n: 0 });
+	expect(recoverAccepted(h.app)).toBe(1);
+	expect(recoverAccepted(h.app)).toBe(0);
+	expect(h.app.db.raw.query("SELECT count(*) AS n FROM result_tries").get()).toEqual({ n: 600 });
+	expect(gate(input.target.commit).verdict).toBe("passed");
+});
+
+test("old unsplit tries rebuild before pending recovery without rewriting historical causes", () => {
+	const input = broadReport();
+	h.call("report", input);
+	h.app.db.raw.exec(`
+		UPDATE result_tries SET signature = (SELECT root FROM assertion_roots WHERE signature = result_tries.signature);
+		DROP TABLE assertion_seen; DROP TABLE assertion_spreads; DROP TABLE assertion_roots; DROP TABLE assertion_index;
+		DROP INDEX results_assertion_rebuild;
+		UPDATE meta SET value = '39' WHERE key = 'schema_version';
+	`);
+	migrate(h.app.db, ":memory:");
+	const before = h.app.db.raw.query("SELECT id, signature FROM result_tries ORDER BY id").all();
+	inContext((ctx) =>
+		acceptReport(
+			ctx,
+			ReportInput.parse({
+				...input,
+				attempt: 2,
+				results: [{ test: input.results[0]?.test, outcome: "fail", failure: { message: "assertion failed" } }],
+			}),
+		),
+	);
+	rebuildAssertionIndexes(h.app.db);
+	expect(h.app.db.raw.query("SELECT id, signature FROM result_tries ORDER BY id").all()).toEqual(before);
+	expect(recoverAccepted(h.app)).toBe(1);
+	expect(page()?.sameCode.signals).toMatchObject([
+		{ signature: { text: "assertion failed" }, flips: 1 },
+		{ signature: { text: "Split by file (file-0.test.ts): assertion failed" }, flips: 1 },
+	]);
+});
+
+test("archive import reconstructs roots using full filenames and keeps split-looking original causes", () => {
+	const input = broadReport();
+	input.results = input.results.map((result, i) => ({
+		...result,
+		test: { key: result.test.key, file: `part ): file-${i % 6}.test.ts` },
+		tries: [failed("Split by file (literal): assertion failed")],
+	}));
+	h.call("report", input);
+	const before = h.app.db.raw.query("SELECT id, signature FROM result_tries ORDER BY id").all();
+	const chunks: string[] = [];
+	exportArchive(h.app.db, (chunk) => chunks.push(chunk), { now: 1_800_000_000_000 });
+	const text = chunks.join("");
+	expect(text).not.toContain('"t":"assertion_');
+	const to = new Db(":memory:");
+	try {
+		migrate(to, ":memory:");
+		importArchive(to, linesOf(text));
+		expect(to.raw.query("SELECT id, signature FROM result_tries ORDER BY id").all()).toEqual(before);
+		expect(to.raw.query("SELECT count(*) AS n FROM assertion_seen").get()).toEqual({ n: 60 });
+		expect(to.raw.query("SELECT count(*) AS n FROM assertion_roots WHERE root != signature").get()).toEqual({ n: 6 });
+	} finally {
+		to.close();
+	}
+});
+
+test("assertion file thresholds use covering index seeks without sorting or scanning duplicate history", () => {
+	const queries = declaredSql().filter((text) => text.startsWith("SELECT file FROM assertion_seen"));
+	expect(queries).toHaveLength(3);
+	for (const text of queries) {
+		const params = Object.fromEntries(
+			[...text.matchAll(/\$(\w+)/g)].map((match) => [match[1] ?? "", match[1] === "after" ? "file-0" : 1]),
+		);
+		const plan = h.app.db.raw
+			.query<{ detail: string }, [Record<string, string | number>]>(`EXPLAIN QUERY PLAN ${text}`)
+			.all(params)
+			.map((row) => row.detail)
+			.join("\n");
+		expect(plan).toContain("SEARCH assertion_seen USING COVERING INDEX assertion_seen_files");
+		expect(plan).not.toContain("TEMP B-TREE");
+	}
+});
+
+test("legacy broad history activates missing earlier file causes only when its own commit is touched", () => {
+	const earlier = Array.from({ length: 40 }, (_, i) => ({ key: `old-file-${i}::test`, file: `old-file-${i}` }));
+	h.call("report", broadReport(earlier));
+	h.call("report", broadReport(broadTests(20), { job: "later-shard" }));
+	const missing = "Split by file (old-file-0): assertion failed";
+	h.app.db.raw
+		.query("DELETE FROM assertion_roots WHERE signature IN (SELECT id FROM signatures WHERE text = ?)")
+		.run(missing);
+	h.app.db.raw.query("DELETE FROM signatures WHERE text = ?").run(missing);
+	rebuildAssertionIndexes(h.app.db, true);
+	expect(h.app.db.raw.query("SELECT 1 FROM signatures WHERE text = ?").get(missing)).toBeNull();
+	const another = broadReport(earlier.slice(0, 1), {
+		target: { repo: "acme/web", commit: "another-commit", branch: "main" },
+	});
+	h.call("report", another);
+	expect(page()?.sameCode.signals).toMatchObject([{ signature: { text: "assertion failed" }, flips: 2 }]);
+	h.call("report", broadReport(broadTests(1), { job: "activate" }));
+	h.call("report", { ...another, attempt: 2 });
+	expect(page()?.sameCode.signals).toMatchObject([
+		{ signature: { text: "assertion failed" }, flips: 2 },
+		{ signature: { text: missing }, flips: 2 },
 	]);
 });
