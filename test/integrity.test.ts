@@ -598,6 +598,51 @@ describe("what a result may prove", () => {
 		expect(gate({ run: planned.run }).verdict).toBe("passed");
 	});
 
+	test.each(["human", "ci"] as const)("a pending %s correction excludes another before recovery", (kind) => {
+		seed(1, ["human", "auto"]);
+		const actor = kind === "ci" ? h.actor("pipeline", "ci", ["read", "record"]) : h.owner;
+		const target = { commit: "pending631" };
+		const planned = plan({ name: "Pending correction", select: {}, accepts: target });
+		const test = kind === "ci" ? { key: "pending-correction" } : { case: "C-1" };
+		const observed = { test, annotation: { case: "C-1", version: 1 } };
+		const original = first(report({ target, results: [{ ...observed, outcome: "pass" }] }, actor).results);
+		const correction = {
+			target,
+			cmd: crypto.randomUUID(),
+			results: [{ ...observed, outcome: "fail" as const, note: "Still broken", corrects: original }],
+		};
+		const project = findProject(h.app.db, "scratch");
+		if (!project) throw new Error("no project");
+		const acceptPending = () =>
+			h.app.db.transaction(() => {
+				const ctx = makeCtx(h.app, project, actor, true);
+				const accepted = acceptReport(ctx, correction);
+				stampSeq(ctx);
+				return accepted;
+			});
+		expect(acceptPending().fresh).toBe(true);
+		expect(acceptPending().fresh).toBe(false);
+		expect(gate({ run: planned.run }).verdict).toBe("pending");
+		expect(
+			h.raw("report", { target, results: [{ ...observed, outcome: "pass", corrects: original }] }, actor),
+		).toMatchObject({ ok: false, error: { code: "conflict" } });
+		expect(rows("SELECT state FROM batches ORDER BY id")).toEqual([{ state: "processed" }, { state: "accepted" }]);
+		expect(recoverAccepted(h.app)).toBe(1);
+		expect(recoverAccepted(h.app)).toBe(0);
+		expect(rows("SELECT outcome, corrects FROM results ORDER BY id")).toEqual([
+			{ outcome: "pass", corrects: null },
+			{ outcome: "fail", corrects: original },
+		]);
+		expect(gate({ run: planned.run }).verdict).toBe("blocked");
+		const recovered = report(correction, actor);
+		expect(recovered.fresh).toBe(false);
+		expect(recovered.results).toHaveLength(1);
+		expect(
+			report({ target, results: [{ ...observed, outcome: "pass", corrects: first(recovered.results) }] }, actor),
+		).toMatchObject({ counts: { total: 1, pass: 1 }, rejected: [], declined: [] });
+		expect(gate({ run: planned.run }).verdict).toBe("passed");
+	});
+
 	test("two corrections of one result in the same report refuse the whole report", () => {
 		seed();
 		const planned = plan({ name: "Duplicate corrections", select: {}, accepts: { commit: "dupe0611" } });
