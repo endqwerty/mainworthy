@@ -254,7 +254,10 @@ export function* processBatchSteps(ctx: Ctx, batchId: number): Generator<Pause, 
 		if (result.fresh && result.test.kind === "auto" && result.test.case_id === null)
 			files.add(result.test.file ?? NO_FILE);
 	}
-	for (const file of files) raiseMap(ctx, file, producer);
+	for (const file of files) {
+		yield* raiseMapSteps(ctx, file, producer);
+		yield;
+	}
 
 	// The batch is applied before the runs are folded: a run that requires this job must count it.
 	markProcessed(ctx, batch, applied.counts);
@@ -325,9 +328,9 @@ function brief(ctx: Ctx, raised: Raised, tests: number): QuestionBrief {
 }
 
 /** Tests that arrived with no case, by file: one `map` question per file, which a loose project's rule answers. */
-function raiseMap(ctx: Ctx, file: string, producer: ActorKind): Raised {
+function* raiseMapSteps(ctx: Ctx, file: string, producer: ActorKind): Generator<undefined, Raised, void> {
 	const tests = unlinkedInFile(ctx.db, ctx.project.id, file);
-	return raise(ctx, {
+	return yield* raiseSteps(ctx, {
 		kind: "map",
 		key: `file:${file}`,
 		subject: { file },
