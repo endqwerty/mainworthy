@@ -23,8 +23,11 @@ To deliver a change, follow these steps:
 5. Run `bun scripts/work.ts pr-body <number>`. It reads back the issues GitHub linked and checks the milestone.
    CI's `description` job runs the same command.
 6. Move the pull request's card too: `bun scripts/work.ts board start <number>`.
+7. Once `gate` is green, run the Daybreak security audit on the head and its base, address every issue it declares,
+   and record the audit in the description: [docs/security-audit.md](../security-audit.md).
 
-The owner reviews every change and merges it by rebase (`gh pr merge --rebase`). An agent stops after it opens
+The owner reviews every change and merges it by rebase (`gh pr merge --rebase`), only while the head and base are
+the pair the audit read. An agent stops after it opens
 the pull request, even when every check is green. A stack of dependent pull requests lands in one step when the
 owner's word covers it: [docs/landing-a-stack.md](../landing-a-stack.md).
 

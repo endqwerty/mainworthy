@@ -7,22 +7,34 @@ a judgment call that the owner reviews.
 
 ## Running it
 
-Export the head and the diff, then run Daybreak Blue in Codex's read-only sandbox from the export:
+Export the head and the diff, then run Daybreak Blue in Codex's read-only sandbox from the export. Run it as one
+script, so a step that fails stops it before Codex starts on an empty diff or a partial export:
 
 ```sh
+set -euo pipefail
+head=$(git rev-parse --verify '<head>^{commit}'); base=$(git rev-parse --verify '<base>^{commit}')
+echo "auditing $head on $base"
 dir=$(bun scripts/work.ts scratch new audit-<number> | tail -1); mkdir "$dir/tree"
-git archive <head> | tar -x -C "$dir/tree"; git diff <base> <head> > "$dir/change.diff"
-cd "$dir/tree" && codex exec -m gpt-daybreak-blue-latest -c model_reasoning_effort=high --sandbox read-only \
-  --skip-git-repo-check -o "$dir/findings.md" "<the brief>"
+git archive "$head" | tar -x -C "$dir/tree"
+git diff "$base" "$head" > "$dir/change.diff"; test -s "$dir/change.diff"
+cd "$dir/tree"
+codex exec -m gpt-daybreak-blue-latest -c model_reasoning_effort=high --sandbox read-only \
+  --skip-git-repo-check -o "$dir/findings.md" "<the brief>" < /dev/null
 ```
 
 - **Head and base.** The audit is of one head on one base: the commits the brief names, and the base the merge will
   land on (`origin/main` for an ordinary pull request, the layer below in a stack). Name a commit only after a command
   printed it.
 - **The sandbox.** `--sandbox read-only` stops the auditor's commands from writing anywhere or reaching the network
-  (checked 2026-10-21: `touch` answers "Operation not permitted", `curl` "Could not resolve host"). It does not stop
-  them reading files outside the export. Effort `high` is the `reviewer` row of `homelab route models --profile deep`.
-  Do not run it as a T3 Code child task: a child inherits the thread's full access.
+  (checked 2026-10-21: `touch` answers "Operation not permitted", `curl` "Could not resolve host"). Effort `high` is
+  the `reviewer` row of `homelab route models --profile deep`. Do not run it as a T3 Code child task: a child
+  inherits the thread's full access.
+- **Not isolated from the Mac's files.** The sandbox does not stop the auditor's commands reading files outside the
+  export, and what they read reaches the model provider as context. A file in a pull request can ask the auditor to
+  read a credential. Codex 0.163 denies reads only through managed requirements, not for one run, and an outer
+  `sandbox-exec` stops Codex applying its own (`sandbox_apply: Operation not permitted`). Closing this needs an
+  environment that holds only the export and no host credentials, or the owner's written acceptance of the
+  exposure. It is open on [#739](https://github.com/endqwerty/mainworthy/pull/739) and decided by the owner.
 - **What it reads.** The brief points it at `tree/` and `change.diff`, and says to read nothing else.
 - **What it looks at.** The diff and what it reaches:
   - who a request is: `admit`, sessions and tokens in `src/server/identity/`, and the secret hashes `UNEXPORTED`
@@ -60,5 +72,10 @@ cd "$dir/tree" && codex exec -m gpt-daybreak-blue-latest -c model_reasoning_effo
 - **When the owner says to merge** (`ship`, [landing-a-stack.md](landing-a-stack.md)): just before the merge, check
   that each head and base is still the audited pair; if one is not, audit it again first. In a stack, every layer is
   audited.
+- **One merge at a time.** A merge that lands first moves `main` under the next one, and GitHub's rebase merge puts
+  the next head on the new `main`. So land one pull request at a time, and only while nothing else lands on `main`.
+  Just before each merge, read the head (`gh pr view <number> --json headRefOid`) and `main`
+  (`git ls-remote origin refs/heads/main`), compare them with the audited pair, and pass the audited head to
+  `gh pr merge --rebase --match-head-commit <head>`.
 - **When Daybreak cannot run** (not in the catalog, the account not eligible, no allowance left): merge nothing, and
   say in the pull request that the audit is missing and why.
