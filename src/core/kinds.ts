@@ -197,11 +197,15 @@ export const ANSWER_KEYS = {
 export const FixedIn = z.object({ change: z.string(), state: z.enum(["open", "merged", "closed"]) });
 export type FixedIn = z.infer<typeof FixedIn>;
 
-/** What a screen says about a `FixedIn`. */
-export function fixedInText({ change, state }: FixedIn): string {
-	if (state === "merged") return `Fixed by another commit of ${change}, which merged`;
-	if (state === "closed") return `Fixed by another commit of ${change}, which closed without merging`;
-	return `Fixed by another commit of ${change}`;
+/**
+ * What a screen says about how an answer ended: the change that fixed it (`FixedIn`), or who ended it, a rule or
+ * people.
+ */
+export function endingText(ending: { fixedIn?: FixedIn | undefined; rule: string | null; by: string[] }): string {
+	const { fixedIn, rule, by } = ending;
+	if (!fixedIn) return `Ended by ${rule ? `rule ${rule}` : by.join(", ")}`;
+	const ended = { open: "", merged: ", which merged", closed: ", which closed without merging" }[fixedIn.state];
+	return `Fixed by another commit of ${fixedIn.change}${ended}`;
 }
 
 /** What a change's page says about the failures it fixed itself: `count` of them. */

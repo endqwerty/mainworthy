@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { type AuditRecord, AuditReply, verifyAudit } from "../src/core/audit.ts";
+import { type AuditRecord, verifyAudit } from "../src/core/audit.ts";
 import type { Quarantine } from "../src/core/flaky.ts";
 import type { GateStatus, InboxReply, ProposeReply, ReportReceipt } from "../src/core/ops.ts";
+import { AuditReply } from "../src/core/replies.ts";
 import { effectiveQuarantine, quarantineEntries, quarantineLookup } from "../src/server/evidence/quarantine.ts";
 import { Db, declaredSql } from "../src/server/kernel/db.ts";
 import { migrate } from "../src/server/kernel/migrate.ts";

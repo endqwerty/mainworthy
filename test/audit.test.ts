@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
-import { type AuditRecord, AuditReply, auditChecksum, verifyAudit } from "../src/core/audit.ts";
+import { type AuditRecord, auditChecksum, verifyAudit } from "../src/core/audit.ts";
 import { canonicalJson } from "../src/core/hash.ts";
 import type { PolicySettings } from "../src/core/kinds.ts";
+import { AuditReply } from "../src/core/replies.ts";
 import { actorByName } from "../src/server/identity/identity.ts";
 import { findProject } from "../src/server/kernel/ctx.ts";
 import { OPS } from "../src/server/ops/index.ts";

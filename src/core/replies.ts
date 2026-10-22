@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { Attachment, AttachmentReply } from "./attachments.ts";
-import { AuditReply } from "./audit.ts";
 import { MergeReceipt, MergeReceiptResult } from "./changes.ts";
 import { CsvImportRow } from "./csv.ts";
 import { Quarantine, SameCodeEvidence } from "./flaky.ts";
@@ -565,6 +564,21 @@ export const CsvImportReply = z.object({
 });
 export type CsvImportReply = z.infer<typeof CsvImportReply>;
 
+/** `audit`'s reply. The records it carries are read by `verifyAudit` in `audit.ts`, which no client needs. */
+const auditCount = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+export const AuditReply = z.strictObject({
+	format: z.literal(1),
+	project: z.string(),
+	records: auditCount,
+	sha256: z.string().regex(/^[a-f0-9]{64}$/),
+	ndjson: z.string(),
+	cursor: z.string().nullable().optional(),
+	evidenceCount: auditCount.optional(),
+	snapshot: z
+		.string()
+		.regex(/^[a-f0-9]{64}$/)
+		.optional(),
+});
 /** Reply contracts shared by clients and registered beside each operation's input on the server. */
 export const REPLIES = {
 	attach: Attachment,

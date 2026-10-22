@@ -2,7 +2,7 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { z } from "zod";
 import { MergeReceipt, MergeReceiptResult } from "../../core/changes.ts";
-import { ANSWER_LABELS, fixedInText, fixedOnChangeText } from "../../core/kinds.ts";
+import { ANSWER_LABELS, endingText, fixedOnChangeText } from "../../core/kinds.ts";
 import {
 	RESULT_STANDING_LABELS,
 	type ResultStanding,
@@ -260,9 +260,7 @@ function ChangesWorkbench() {
 										</small>
 										{q.decision?.supersedes && (
 											<small>
-												{q.decision.fixedIn
-													? fixedInText(q.decision.fixedIn)
-													: `Ended by ${q.decision.rule ? `rule ${q.decision.rule}` : q.decision.by.join(", ")}`}
+												{endingText(q.decision)}
 												{q.decision.reason && ` · ${q.decision.reason}`}
 											</small>
 										)}

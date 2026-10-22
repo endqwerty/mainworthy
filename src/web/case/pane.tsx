@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { z } from "zod";
-import { fixedInText } from "../../core/kinds.ts";
+import { endingText } from "../../core/kinds.ts";
 import { printCase } from "../../core/markdown.ts";
 import { applyMergeChoice } from "../../core/merge3.ts";
 import {
@@ -478,9 +478,7 @@ export function CasePane({
 										</span>
 										{q.decision?.supersedes && (
 											<p>
-												{q.decision.fixedIn
-													? fixedInText(q.decision.fixedIn)
-													: `Ended by ${q.decision.rule ? `rule ${q.decision.rule}` : q.decision.by.join(", ")}`}
+												{endingText(q.decision)}
 												{q.decision.reason && ` · ${q.decision.reason}`}
 											</p>
 										)}
