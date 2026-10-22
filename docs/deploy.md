@@ -280,13 +280,17 @@ ingress started 1.4 s after that. Another deploy that day took about 48 s. A req
 in that time got Cloudflare's 502.
 
 So the tunnel does not point at the stack. It points at a proxy on the host that no deploy touches, and that
-proxy passes each request to the ingress on `127.0.0.1:758`. While nothing listens there, a refused
-connection is tried again after a second, up to 90 times, so the request waits for the new stack instead of
-failing. Nothing was sent, so this is safe for any method. Cloudflare waits 125 seconds for an origin's reply
-(its documented Proxy Read Timeout), so the hold stays under that; a deploy longer than 90 s still ends in a 503. The owner's instance
-runs HAProxy for it:
+proxy passes each request to the ingress on `127.0.0.1:758`, once nginx there answers. Until then the request
+waits, for up to 90 seconds: Cloudflare waits 125 seconds for an origin's reply (its documented Proxy Read
+Timeout), so the hold stays under that, and a deploy longer than 90 s still ends in a 503. The owner's instance
+runs HAProxy, with a small Lua gate:
 
 ```
+global
+    setenv MAINWORTHY_HOLD_PROBE 127.0.0.1:758
+    setenv MAINWORTHY_HOLD_WAIT_MS 90000
+    lua-load /etc/haproxy/mainworthy-hold.lua
+
 defaults
     mode http
     option http-server-close
@@ -295,52 +299,86 @@ defaults
     timeout client 330s
     timeout server 330s
     retries 90
-    retry-on conn-failure empty-response
 
 frontend public
     bind 127.0.0.1:7358
+    http-request lua.mainworthy_wait
+    http-request return status 503 content-type text/plain string "Mainworthy is being deployed; try again shortly.\n" if { var(txn.mainworthy_hold_expired) -m bool }
     default_backend stack
 
 backend stack
-    http-request disable-l7-retry unless { method GET HEAD } !{ path_beg /api/login/ }
     server ingress 127.0.0.1:758
 ```
 
+```lua
+local probe_host, probe_port = string.match(os.getenv("MAINWORTHY_HOLD_PROBE"), "^(.+):(%d+)$")
+local wait_at_most_ms = tonumber(os.getenv("MAINWORTHY_HOLD_WAIT_MS"))
+local answers = false
+
+local function nginx_answers()
+    local socket = core.tcp()
+    socket:settimeout(1)
+    local ok = false
+    if socket:connect(probe_host, tonumber(probe_port)) then
+        if socket:send("CONNECT hold.invalid:443 HTTP/1.1\r\nHost: hold.invalid\r\n\r\n") then
+            local line = socket:receive("*l")
+            ok = line ~= nil and string.sub(line, 1, 5) == "HTTP/"
+        end
+    end
+    socket:close()
+    return ok
+end
+
+core.register_task(function()
+    while true do
+        answers = nginx_answers()
+        core.msleep(100)
+    end
+end)
+
+core.register_action("mainworthy_wait", { "http-req" }, function(txn)
+    local waited = 0
+    while not answers do
+        if waited >= wait_at_most_ms then
+            txn:set_var("txn.mainworthy_hold_expired", true)
+            return
+        end
+        core.msleep(50)
+        waited = waited + 50
+    end
+end)
+```
+
+- **The gate asks nginx, not the port.** Docker's port proxy accepts a connection on 758 whenever the ingress
+  container runs, even while nginx in it does not listen, and closes it without a reply. On the owner's
+  instance that lasted up to about 2 s while a new ingress started (from Coolify's `Starting` to `Started`);
+  before the gate, a request held across a deploy's gap was sent into it and got 502 after 16 s. It also
+  lasts while the old nginx drains after SIGQUIT: it stops listening at once and waits for the responses it
+  has open, 54 to 123 ms with none open, and up to Coolify's 30-second stop while a browser holds a change
+  stream open. Every 100 ms the gate sends nginx a `CONNECT`, which nginx refuses itself (405) without asking
+  the app, so a slow app does not hold requests back; any status line means nginx answers.
+- **The drain is left unbounded.** The app keeps running while the ingress drains, so a write in flight
+  finishes and its reply arrives, as before, and new requests wait at the gate meanwhile. A
+  `worker_shutdown_timeout` would cut a committed write's reply (a new token's secret is shown once).
+- **Nothing is sent twice.** A request the gate let through just as the old nginx stopped, within one probe
+  interval, meets either a refused port or an empty reply. A refused connection is tried again after a
+  second (`retries 90` with `timeout connect 1s`; HAProxy waits the shorter of the two), which is safe for any
+  method because nothing was sent. An empty reply ends in 502: it can also follow a write the app has
+  committed, and HAProxy cannot tell the two apart.
 - The ingress publishes a port below 1024. While a deploy leaves it free, a process on the host could
   otherwise listen there and receive the requests the hold sends, cookies and tokens included. Below 1024
   (`net.ipv4.ip_unprivileged_port_start`, 1024 by default) only root or a process with
   `CAP_NET_BIND_SERVICE` may listen; Docker's port proxy runs as root. This keeps out an ordinary process,
-  not a privileged one or a compromised host. The hold's own port, 7358,
-  is never free: HAProxy keeps it across deploys.
-- `retries 90` with `timeout connect 1s` is the hold: HAProxy waits the shorter of the two, one second,
-  before it tries a refused connection again.
-- Not every moment of a deploy refuses. Docker's port proxy accepts a connection on 758 and closes it
-  without a reply whenever its container runs but nginx does not listen: for a few milliseconds when the new
-  ingress starts, and from the moment the old one gets SIGQUIT until its container exits. `empty-response`
-  sends such a request again at once, without the one-second pause, and only a GET or a HEAD outside
-  `/api/login/`: an empty reply can also follow a write the app has committed, and sending that again would
-  make it twice. Every operation is a POST; the one GET that changes something is the native app's OIDC
-  callback, `/api/login/oidc/native/callback`, which uses up its sign-in ceremony. All 90
-  tries of an immediate retry are spent in about 10 ms, so it carries a read across the start window and
-  not across the stop window. A write that meets either, and a read that meets the stop window, gets 502
-  (issue #743).
-- The second window lasts as long as the old nginx drains. nginx stops listening on SIGQUIT and then waits
-  for the responses it has open, and a change stream stays open until somebody closes it. On the owner's
-  host the window lasted 54 to 123 ms with no response open, and 30.3 s with one slow response open, until
-  Docker killed nginx at the end of Coolify's 30-second stop. So while a browser holds a change stream open,
-  requests get 502 for up to 30 s at the start of a deploy, and are held after that. The drain is left
-  unbounded on purpose: the app keeps running while the ingress drains, so a write in flight finishes and
-  its reply arrives, as before. A shorter `worker_shutdown_timeout` would shorten the window but could cut a
-  committed write's reply (a new token's secret is shown once). Issue #743 is to reach nginx without
-  Docker's port proxy, so that a draining nginx is refused and held instead.
+  not a privileged one or a compromised host. The hold's own port, 7358, is never free: HAProxy keeps it
+  across deploys.
 - `option http-server-close` opens a new connection to the ingress for every request, so none is reused
   after the stack it belonged to has gone.
 - The two timeouts are longer than the ingress's 300 s; an open change stream sends a heartbeat every 20 s.
 - No `option forwardfor`: the proxy adds no `X-Forwarded-For` and leaves `Host` and `CF-Connecting-IP` as
   they are; it only sends `Connection: close` towards the ingress. The ingress still sets the scheme and the
   client address from `CF-Connecting-IP`, and the app still trusts only the ingress.
-- The ingress keeps `condition: service_healthy`: until the app is healthy nothing listens on 758 and
-  requests wait. An ingress that started first would answer 502 itself, and that is not tried again.
+- The ingress keeps `condition: service_healthy`: until the app is healthy there is no nginx to answer the
+  gate, and requests wait. An ingress that started first would answer the gate and then 502 itself.
 
 A change stream that is open during the deploy ends when the old stack stops; the browser opens it again
 and that request waits like any other. The tailnet name is not held: the Tailscale sidecar is part of the
