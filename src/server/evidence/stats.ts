@@ -65,6 +65,8 @@ const Q = {
 	// nothing corrects in turn, as the gate counts it; of what stands for one attempt, the worse, then the later, gives
 	// its time. Runner tries count with that result. A repeated attempt's duration already includes its tries
 	// (Playwright sums its executions); only an attempt not repeated, or missing its total, adds their time separately.
+	// Legacy/imported durations can exceed today's input limit: total() avoids integer overflow, and returned time
+	// stops at the wire format's largest safe integer.
 	reruns: sql<{ project: number; since: number }, { test: number; reruns: number; lost: number; unknown: number }>(`
 		WITH RECURSIVE executions AS (
 		  SELECT r.id, r.test, r.target, r.actor, r.method, b.job, r.attempt, r.outcome, r.duration_ms, r.seq, r.ord,
@@ -93,14 +95,15 @@ const Q = {
 		),
 		costs AS (
 		  SELECT a.test, a.repeated, a.duration_ms, count(t.id) AS tries,
-		         coalesce(sum(t.duration_ms), 0) AS tried_ms,
+		         total(t.duration_ms) AS tried_ms,
 		         count(t.id) - count(t.duration_ms) AS untimed_tries
 		  FROM attempts a LEFT JOIN result_tries t ON t.result = a.id
 		  WHERE a.rank = 1
 		  GROUP BY a.id
 		)
 		SELECT a.test, sum(a.repeated + a.tries) AS reruns,
-		       sum(CASE WHEN a.repeated AND a.duration_ms IS NOT NULL THEN a.duration_ms ELSE a.tried_ms END) AS lost,
+		       CAST(min(total(CASE WHEN a.repeated AND a.duration_ms IS NOT NULL THEN a.duration_ms ELSE a.tried_ms END),
+		                     ${Number.MAX_SAFE_INTEGER}) AS INTEGER) AS lost,
 		       sum(CASE WHEN a.repeated AND a.duration_ms IS NOT NULL THEN 0 ELSE a.repeated + a.untimed_tries END) AS unknown
 		FROM costs a WHERE a.repeated OR a.tries > 0
 		GROUP BY a.test

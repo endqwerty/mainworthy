@@ -69,7 +69,10 @@ function reruns(ctx: Ctx, input: Extract<StatsInput, { of: "reruns" }>): StatsOf
 	return {
 		of: "reruns",
 		reruns: rows.reduce((sum, row) => sum + row.reruns, 0),
-		lostMs: rows.reduce((sum, row) => sum + row.lost, 0),
+		lostMs: Math.min(
+			Number.MAX_SAFE_INTEGER,
+			rows.reduce((sum, row) => sum + row.lost, 0),
+		),
 		unknown: rows.reduce((sum, row) => sum + row.unknown, 0),
 		items: rows
 			.slice(0, input.limit)

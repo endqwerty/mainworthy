@@ -167,6 +167,13 @@ export type ProposeReply = z.infer<typeof ProposeReply>;
 
 // ── report ─────────────────────────────────────────────────────────────────────────────────────────────────
 
+const resultDuration = z
+	.number()
+	.int()
+	.min(0)
+	.max(30 * 86_400_000)
+	.describe("Milliseconds, at most 30 days (2592000000 ms), for a result or one runner try.");
+
 export const ResultIn = z.object({
 	test: z.union([
 		z.object({
@@ -178,7 +185,7 @@ export const ResultIn = z.object({
 	]),
 	outcome: Outcome,
 	attachments: z.array(AttachmentInput).max(ATTACHMENT_LIMITS.perResult).optional().meta({ "x-mcp-hidden": true }),
-	durationMs: z.number().int().min(0).optional(),
+	durationMs: resultDuration.optional(),
 	failure: z
 		.object({
 			message: z.string().max(4000),
@@ -199,7 +206,7 @@ export const ResultIn = z.object({
 		.array(
 			z.object({
 				outcome: Outcome,
-				durationMs: z.number().int().min(0).optional(),
+				durationMs: resultDuration.optional(),
 				failure: z.object({ message: z.string().max(4000), detail: z.string().max(20_000).optional() }).optional(),
 			}),
 		)

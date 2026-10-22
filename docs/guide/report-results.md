@@ -374,6 +374,9 @@ then count under the same cause. Earlier reports keep their original causes. Aft
 a file-specific cause missing from old evidence is created when that file next occurs on its broad commit;
 reporting another file does not create it in advance.
 
+A result's `durationMs` and each try's `durationMs` are nonnegative integer milliseconds, at most 30 days
+(2,592,000,000 ms). A report with a longer duration is refused before it writes results.
+
 The detector counts recent flips per test and failure signature, across assertion,
 timeout, and infrastructure classes. By default, two flips of one cause within
 14 days suggest investigation. A file-split signature is a separate cause.
