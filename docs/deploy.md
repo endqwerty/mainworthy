@@ -299,6 +299,7 @@ defaults
     timeout client 330s
     timeout server 330s
     retries 90
+    timeout queue 30s
 
 frontend public
     bind 127.0.0.1:7358
@@ -307,7 +308,7 @@ frontend public
     default_backend stack
 
 backend stack
-    server ingress 127.0.0.1:758
+    server ingress 127.0.0.1:758 maxconn 100
 ```
 
 ```lua
@@ -366,6 +367,11 @@ end)
 - **A probe that fails with an error opens the gate.** Requests then go on as they would with no gate. A
   task that stopped on an error would otherwise keep its last answer, and if that was "no", hold every request
   until it expired. A refused or silent nginx is an answer, not an error.
+- **At most 100 requests go to nginx together** (`maxconn 100`); the rest queue in HAProxy for up to 30 s.
+  When the gate opens after a deploy, every request it held goes at once. nginx in the ingress has 256
+  connections, two for each request it passes on, and past that it drops them: in a live test on the
+  owner's instance, with about 360 requests held for 18 s, 121 got 502 and nginx logged
+  `256 worker_connections are not enough`.
 - **The drain is left unbounded.** The app keeps running while the ingress drains, so a write in flight
   finishes and its reply arrives, as before, and new requests wait at the gate meanwhile. A
   `worker_shutdown_timeout` would cut a committed write's reply (a new token's secret is shown once).

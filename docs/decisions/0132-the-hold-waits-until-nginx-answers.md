@@ -19,6 +19,10 @@ own 503. With the gate, HAProxy no longer replays anything after an empty reply 
 replay is removed), so nothing is ever sent twice. The old ingress's drain stays unbounded: the app runs while
 it drains, so a write in flight keeps its reply, and new requests wait at the gate meanwhile.
 
+Opening the gate sends every held request at once, and nginx in the ingress has 256 connections, two for
+each request. A live test that held about 360 requests got 121 of them dropped with 502. So HAProxy sends
+at most 100 to nginx together and queues the rest for up to 30 s.
+
 What remains is a request the gate let through just as the old nginx stopped, within one probe interval. If
 it meets a refused port it is tried again; if it meets an empty reply it gets 502.
 
