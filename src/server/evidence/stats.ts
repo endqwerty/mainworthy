@@ -130,7 +130,9 @@ const Q = {
 		"SELECT DISTINCT case_id FROM tests WHERE project = $project AND kind = 'auto' AND case_id IS NOT NULL",
 	),
 	byHand: sql<{ project: number; since: number }, { case_id: number; runs: number; time: number | null }>(`
-		SELECT t.case_id, count(*) AS runs, sum(r.duration_ms) AS time
+		SELECT t.case_id, count(*) AS runs,
+		       CASE WHEN count(r.duration_ms) = 0 THEN NULL
+		            ELSE CAST(max(0, min(total(r.duration_ms), ${Number.MAX_SAFE_INTEGER})) AS INTEGER) END AS time
 		FROM results r JOIN tests t ON t.id = r.test
 		WHERE r.project = $project AND r.at >= $since AND r.method = 'human' AND t.case_id IS NOT NULL
 		  AND ${uncorrectedResults("r.id")}

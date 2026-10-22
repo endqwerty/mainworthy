@@ -20,6 +20,7 @@ same filters as a change's results. Press <kbd>Enter</kbd> to open its change.
 Below the verdict, the run's test time is the sum of the durations its counted results reported. Results that
 ran side by side add up, so it is time spent testing, not how long the build took. When some results reported
 no duration, it says how many did. `mainworthy find --in results` returns the same sum as `testTime`.
+The sum stops at 9,007,199,254,740,991 ms, including when older or restored results hold larger durations.
 
 From the command line, `mainworthy find --in runs` lists the same runs. Add `--origin planned` or
 `--origin change` for one kind, and `--state open` or `--state closed` for one state.

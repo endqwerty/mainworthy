@@ -78,7 +78,9 @@ that can be automated: a case marked as one that cannot be automated is left out
 The other cases are counted by what they say about automation: to automate, not decided, or cannot be automated.
 
 The backlog lists the cases that can be automated and are not, the ones run by hand most often in the window
-first. Where people recorded how long a run took, the time is shown too.
+first. Where people recorded how long a run took, the time is shown too. Each case's total stops at
+9,007,199,254,740,991 ms, including larger historical or restored durations. A reported zero is zero;
+when no run reported a duration, the time stays unknown.
 
 ## Coverage by requirement
 
