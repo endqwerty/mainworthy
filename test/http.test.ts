@@ -3110,6 +3110,61 @@ describe("the surface", () => {
 		expect(invalid.body.ok === false && invalid.body.error.message).toContain("base");
 	});
 
+	test("a failed stream permission read closes only that stream and a reconnect recovers the write", async () => {
+		await using instance = boot("local");
+		const logged = spyOn(console, "error").mockImplementation(() => {});
+		const read = spyOn(instance.app.reader, "get");
+		let failNext = true;
+		const unsubscribe = instance.app.subscribe(() => {
+			if (!failNext) return;
+			failNext = false;
+			read.mockImplementationOnce(() => {
+				throw new Error("stream-private-detail");
+			});
+		});
+		const response = await fetch(`${instance.url}/api/p/scratch/events`, { signal: AbortSignal.timeout(2000) });
+		const healthy = await fetch(`${instance.url}/api/p/scratch/events`, { signal: AbortSignal.timeout(2000) });
+		const reader = response.body?.getReader();
+		if (!reader) throw new Error("no stream");
+		try {
+			expect(new TextDecoder().decode((await reader.read()).value)).toBe("retry: 2000\n\n");
+			const reply = await post(instance, "/api/p/scratch/propose", {
+				edits: [{ op: "create", outline: "Recovered" }],
+			});
+			expect(reply.status).toBe(200);
+			expect(reply.body).toMatchObject({ ok: true, seq: 2, result: { status: "adopted" } });
+			expect((await reader.read()).done).toBe(true);
+			const watcher = healthy.body?.getReader();
+			if (!watcher) throw new Error("no healthy stream");
+			try {
+				let text = "";
+				while (!text.includes("data:")) {
+					const { value, done } = await watcher.read();
+					if (done) break;
+					text += new TextDecoder().decode(value);
+				}
+				expect(text).toContain('"seq":2');
+			} finally {
+				await watcher.cancel();
+			}
+			const reconnected = await fetch(`${instance.url}/api/p/scratch/events`);
+			try {
+				expect(reconnected.status).toBe(200);
+				const recovered = await post(instance, "/api/p/scratch/get", { refs: ["C-1"] });
+				expect(recovered.body).toMatchObject({ ok: true, result: [{ ref: "C-1", title: "Recovered" }] });
+			} finally {
+				await reconnected.body?.cancel();
+			}
+			expect(logged.mock.calls).toEqual([["[mainworthy] change stream authorization failed"]]);
+		} finally {
+			await reader.cancel().catch(() => {});
+			await healthy.body?.cancel().catch(() => {});
+			unsubscribe();
+			read.mockRestore();
+			logged.mockRestore();
+		}
+	});
+
 	test("a throwing subscriber preserves the HTTP reply and the project's change stream", async () => {
 		await using instance = boot("local");
 		const logged = spyOn(console, "error").mockImplementation(() => {});
