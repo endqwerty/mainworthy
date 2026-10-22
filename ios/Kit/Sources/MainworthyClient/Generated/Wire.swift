@@ -121,7 +121,7 @@ enum Wire {
 		let at: Double
 	}
 
-	/// The change whose later commit passed and so ended the answer: it brought the failure and fixed it itself.
+	/// The change whose other commit passed and so ended the answer: it brought the failure and fixed it itself.
 	struct FixedIn: Decodable, Equatable, Sendable {
 		/// Its key, for example pr:482.
 		let change: String

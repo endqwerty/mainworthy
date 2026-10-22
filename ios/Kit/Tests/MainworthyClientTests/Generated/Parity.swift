@@ -135,9 +135,9 @@ enum Parity {
 
 	/// `fixedInText`: how pr:482, which fixed a failure itself, stands now, and the sentence.
 	static let fixedIn: [(state: String, says: String)] = [
-		("open", "Fixed by a later commit of pr:482"),
-		("merged", "Fixed in pr:482 before it merged"),
-		("closed", "Fixed by a later commit of pr:482, which closed without merging"),
+		("open", "Fixed by another commit of pr:482"),
+		("merged", "Fixed by another commit of pr:482, which merged"),
+		("closed", "Fixed by another commit of pr:482, which closed without merging"),
 	]
 }
 

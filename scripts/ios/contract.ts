@@ -109,7 +109,7 @@ const PriorDecision = struct(
 );
 const FixedIn = struct(
 	"FixedIn",
-	"The change whose later commit passed and so ended the answer: it brought the failure and fixed it itself.",
+	"The change whose other commit passed and so ended the answer: it brought the failure and fixed it itself.",
 	{
 		change: [text, "Its key, for example pr:482."],
 		state: [text, "open, merged or closed, as the change stands now."],

@@ -252,7 +252,7 @@ public struct DecisionEnding: Equatable, Sendable {
 	public let rule: String?
 	public let reason: String?
 	public let at: Date
-	/// The change whose later commit passed and so ended the answer, as a sentence: "Fixed in pr:482 before it merged".
+	/// The change whose other commit passed and so ended the answer, as a sentence: "Fixed by another commit of pr:482".
 	public let fixed: String?
 
 	init(_ wire: Wire.Decision) {
@@ -266,9 +266,9 @@ public struct DecisionEnding: Equatable, Sendable {
 	/// `fixedInText` of `src/core/kinds.ts`.
 	static func fixedText(change: String, state: String) -> String {
 		switch state {
-		case "merged": "Fixed in \(change) before it merged"
-		case "closed": "Fixed by a later commit of \(change), which closed without merging"
-		default: "Fixed by a later commit of \(change)"
+		case "merged": "Fixed by another commit of \(change), which merged"
+		case "closed": "Fixed by another commit of \(change), which closed without merging"
+		default: "Fixed by another commit of \(change)"
 		}
 	}
 }

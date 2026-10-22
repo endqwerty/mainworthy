@@ -17,22 +17,26 @@ which names its issue.
 
 ## Decision
 
-**The ending names the change when the change fixed it.** A `passed` ending records `fixed: true` in its answer
-when, as it is written, the commit that passed is not one the cause failed on in that scope and the scope's change
-has not ended. `passedIn` decides it from the same failures it already reads. A commit that ran again and passed is
-a retry, which proves no fix; a pass reported after the merge says nothing about what merged. A question's decision
+**The ending names the change when another of its commits passed.** A `passed` ending records `fixed: true` in its
+answer when the commit that passed is not one the cause failed on in that scope; `passedIn` decides it from the same
+failures it already reads. A commit that ran again and passed is a retry, which proves no fix. A question's decision
 then carries `fixedIn`, the change's key and whether it is `open`, `merged` or `closed` now, when the ending is
-`fixed` and the scope is a pull request or branch. The state is read now, so "before it merged" appears once the
-merge is reported; the fix came first because the change was open when it was recorded.
+`fixed` and the scope is a pull request or branch. The sentence is "Fixed by another commit of pr:482", with ", which
+merged" or ", which closed without merging" once it has ended.
 
-The fix is recorded, not worked out when the question is read: a change can be reopened and ended again, which
-replaces its end, and an archive leaves out how changes ended, so neither can say later whether the change was open
-at the time. Endings recorded before this decision claim no fix: what passed is only in their reason's text. The
-verifier (GPT 6.1 Sol, 2026-10-22) found each earlier version wrong: the first called a retry and a pass after the
-merge a fix, the second read whether the change was open from its current end.
+**It claims no order.** Mainworthy does not know which of two commits is newer (a reset can return to an older one
+that passes) or when a commit was pushed, and the ending is not written when the passing report arrives (an open
+planned run holds it until its own evidence comes). So the sentence says "another commit", not "a later commit", and
+"which merged", not "before it merged". The verifier (GPT 6.1 Sol, 2026-10-22) found each of three earlier versions
+claiming an order the server could not know: a retry and a late report read as a fix before the merge; whether the
+change was open was read from its current end, which a reopening or an archive restore changes; and whether it was
+open when the ending was written, which a planned run delays, while a reset made an older commit "later". Every
+commit of a pull request is part of its work, so "another commit" is what the owner asked to see: the same pull
+request's work resolved the failure, and a retry did not.
 
-**The change page counts them and links to the pull request.** "1 failure that needed a fix was fixed before it
-merged." The pull request names the issue it was for, so the failure reaches that issue in one step.
+Endings recorded before this decision claim no fix: what passed is only in their reason's text.
+
+**The change page counts them and links to the pull request.** "1 failure that needed a fix was fixed by another of its commits." The pull request names the issue it was for, so the failure reaches that issue in one step.
 
 ## Turned down
 

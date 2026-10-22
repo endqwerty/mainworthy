@@ -1295,42 +1295,47 @@ describe("holds", () => {
 		expect(first(queue().items).q).not.toBe(asked.q);
 	});
 
-	test("an answer a retry or a report after the merge ended claims no fix by the pull request", () => {
+	test("a retry claims no fix; another commit of the change does, whenever it was reported, and keeps it", () => {
 		const fail = { 0: "expected 90, got 100" };
-		const settled = () => h.call<InboxReply>("inbox", { state: "decided", on: "pr:42" }).items;
-		// The same commit passing when it runs again is a retry, not a later commit that fixed it.
+		const settled = (change: string) => h.call<InboxReply>("inbox", { state: "decided", on: change }).items;
+		// The same commit passing when it runs again is a retry: it proves no fix.
 		h.call("report", ciReport({ commit: "retry042a", branch: "retry", pr: 42, n: 1, fail }));
 		decide(first(queue().items), { is: "defect" });
 		h.call("report", ciReport({ commit: "retry042a", branch: "retry", pr: 42, n: 1, attempt: 2 }));
-		expect(settled()).toMatchObject([{ state: "dissolved", decision: { rule: "passed" } }]);
-		expect(settled()[0]?.decision).not.toHaveProperty("fixedIn");
-		// A later commit that passes only after the merge was reported did not fix it before the merge.
+		expect(settled("pr:42")).toMatchObject([{ state: "dissolved", decision: { rule: "passed" } }]);
+		expect(settled("pr:42")[0]?.decision).not.toHaveProperty("fixedIn");
+		// Another commit of the change passing is a fix by the change, even reported after the merge: the merge named
+		// it as the head. Nothing later (reopening, merging again, an archive without how changes ended) undoes it.
 		h.call("report", ciReport({ commit: "late043a", branch: "late", pr: 43, n: 1, fail }));
 		decide(first(queue().items), { is: "defect" });
 		h.call("change", { change: "pr:43", state: "merged", head: "late043b" });
 		h.advance(60_000);
 		h.call("report", ciReport({ commit: "late043b", branch: "late", pr: 43, n: 1 }));
-		const late = () => h.call<InboxReply>("inbox", { state: "decided", on: "pr:43" }).items;
-		expect(late()).toMatchObject([{ state: "dissolved", decision: { rule: "passed" } }]);
-		expect(late()[0]?.decision).not.toHaveProperty("fixedIn");
-		// Whether it was open is decided when the answer ends: reopening, merging again or restoring an archive,
-		// which leaves out how changes ended, makes no fix of it later.
+		const fixed = (state: string) => [{ state: "dissolved", decision: { fixedIn: { change: "pr:43", state } } }];
+		expect(settled("pr:43")).toMatchObject(fixed("merged"));
 		h.call("change", { change: "pr:43", state: "open" });
-		expect(late()[0]?.decision).not.toHaveProperty("fixedIn");
-		h.call("change", { change: "pr:43", state: "merged" });
-		expect(late()[0]?.decision).not.toHaveProperty("fixedIn");
+		expect(settled("pr:43")).toMatchObject(fixed("open"));
+		h.call("change", { change: "pr:43", state: "closed" });
+		expect(settled("pr:43")).toMatchObject(fixed("closed"));
 		const chunks: string[] = [];
 		exportArchive(h.app.db, (chunk) => chunks.push(chunk));
 		const restored = new Db(":memory:");
 		try {
 			migrate(restored, ":memory:");
 			importArchive(restored, linesOf(chunks.join("")));
-			const question = late()[0];
+			const question = settled("pr:43")[0];
 			if (!question) throw new Error("expected the ended answer");
-			expect(toItem(restored, mustQuestion(restored, 1, question.q)).decision).not.toHaveProperty("fixedIn");
+			expect(toItem(restored, mustQuestion(restored, 1, question.q))).toMatchObject(fixed("open")[0] ?? {});
 		} finally {
 			restored.close();
 		}
+		// A reset back to an older commit that passes is another commit too: the change no longer has the failure.
+		h.call("report", ciReport({ commit: "older044a", branch: "reset", pr: 44, n: 1 }));
+		h.call("report", ciReport({ commit: "newer044b", branch: "reset", pr: 44, n: 1, fail }));
+		decide(first(queue().items), { is: "defect" });
+		const reset = ciReport({ commit: "older044a", branch: "reset", pr: 44, n: 1, attempt: 2 });
+		h.call("report", { ...reset, target: { ...reset.target, head: "older044a" } });
+		expect(settled("pr:44")).toMatchObject([{ decision: { fixedIn: { change: "pr:44", state: "open" } } }]);
 	});
 
 	test("an expired flaky answer stays in Settled when its failure has gone, without claiming a pass ended it", () => {
