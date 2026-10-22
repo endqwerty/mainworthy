@@ -27,9 +27,15 @@ test.skipIf(!browserAvailable)(
 				await trail.waitFor();
 				expect(await trail.textContent()).toContain("pass");
 				expect(await trail.textContent()).toContain("700 ms");
-				expect(await trail.getByRole("list", { name: "Actions for step b2", exact: true }).textContent()).toContain(
-					"700 ms",
-				);
+				const actions = trail.getByRole("list", { name: "Actions for step b2", exact: true });
+				expect(await actions.locator("li").count()).toBe(3);
+				expect(await actions.locator(".trail-action").allTextContents()).toEqual([
+					"Focus Coupon",
+					`Type ${screen === "change" ? "OLD10" : "FREESHIP"} into Coupon`,
+					"Press Apply",
+				]);
+				expect(await actions.textContent()).toContain("233 ms");
+				expect(await actions.textContent()).toContain("234 ms");
 				const backgrounds = await trail
 					.locator(":scope > li")
 					.evaluateAll((rows) => rows.map((row) => getComputedStyle(row).backgroundColor));

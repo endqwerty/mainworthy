@@ -1,16 +1,33 @@
 import type { ResultStep } from "../../core/results.ts";
 import type { DemoCase } from "./cases.ts";
 
+function actionsOf(step: DemoCase["steps"][number]): [string, string, ...string[]] {
+	const coupon = /^Apply the coupon (.+)$/.exec(step.action)?.[1];
+	if (coupon) return ["Focus Coupon", `Type ${coupon} into Coupon`, "Press Apply"];
+	const cart = /^Open the cart with (.+)$/.exec(step.action)?.[1];
+	if (cart) return ["Open /cart", `Check the cart contains ${cart}`];
+	if (step.action === "Reload the page") return ["Reload /cart", "Read the restored items and total"];
+	if (step.action === "Continue to payment") return ["Press Continue to payment", "Read the payment total"];
+	return [step.action, step.expected ? `Check: ${step.expected}` : "Wait for the page to settle"];
+}
+
 /** Fixed observations use no random stream, so existing demo history stays the same. */
 export function demoTrail(steps: DemoCase["steps"], failed = false, screenshot?: number): ResultStep[] {
 	return steps.map((step, index) => {
 		const outcome = failed && index === steps.length - 1 ? "fail" : "pass";
 		const durationMs = [100, 700, 200][index % 3] ?? 100;
+		const actions = actionsOf(step);
 		return {
 			step: step.id,
 			outcome,
 			durationMs,
-			actions: [{ text: step.action, outcome, durationMs }],
+			actions: actions.map((text, ordinal) => ({
+				text,
+				outcome: ordinal === actions.length - 1 ? outcome : "pass",
+				durationMs:
+					Math.floor(((ordinal + 1) * durationMs) / actions.length) -
+					Math.floor((ordinal * durationMs) / actions.length),
+			})),
 			...(index === steps.length - 1 && screenshot !== undefined ? { attachment: screenshot } : {}),
 		};
 	});
