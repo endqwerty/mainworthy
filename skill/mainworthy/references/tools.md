@@ -173,7 +173,7 @@ Report to target or run; tests by key or case.
 | `results[].attachments[].name` | `string` | yes |  |
 | `results[].attachments[].data` | `string` | yes |  |
 | `results[].attachments[].at` | `string` | no |  |
-| `results[].durationMs` | `integer` | no |  |
+| `results[].durationMs` | `integer` | no | Milliseconds; at most 30 days. |
 | `results[].failure` | `object` | no |  |
 | `results[].failure.message` | `string` | yes |  |
 | `results[].failure.detail` | `string` | no |  |
@@ -194,7 +194,7 @@ Report to target or run; tests by key or case.
 | `results[].corrects` | `integer` | no | The id of an earlier result of yours that this one replaces. |
 | `results[].tries` | `array<object>` | no |  |
 | `results[].tries[].outcome` | `"pass" \| "fail" \| "skip" \| "blocked" \| "error"` | yes |  |
-| `results[].tries[].durationMs` | `integer` | no |  |
+| `results[].tries[].durationMs` | `integer` | no | Milliseconds; at most 30 days. |
 | `results[].tries[].failure` | `object` | no |  |
 | `results[].tries[].failure.message` | `string` | yes |  |
 | `results[].tries[].failure.detail` | `string` | no |  |
