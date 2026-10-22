@@ -3,6 +3,7 @@ import { random } from "../src/cli/demo/cases.ts";
 import type { InboxReply, ProposeReply } from "../src/core/ops.ts";
 import { replacesInLane } from "../src/core/runs.ts";
 import type { StatsKind, StatsOf } from "../src/core/stats.ts";
+import { parsePlaywright } from "../src/surfaces/formats/playwright.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 // The reports (issue #56): pass rate over time, flaky tests, time lost to reruns, automation and its backlog, and
@@ -151,6 +152,118 @@ describe("the pass rate counts what a gate counts", () => {
 });
 
 describe("flaky tests and time lost to reruns", () => {
+	test("a runner's earlier tries count once, including unknown durations and tries that did not fail", () => {
+		h = harness({ unlinked: "track" });
+		const one = ciReport({ commit: "aaaa0001", n: 1 });
+		h.call("report", {
+			...one,
+			results: one.results.map((r) => ({
+				...r,
+				durationMs: 100,
+				tries: [
+					{ outcome: "fail", durationMs: 11, failure: { message: "socket hang up" } },
+					{ outcome: "error", durationMs: 22, failure: { message: "runner stopped" } },
+					{ outcome: "skip", durationMs: 0 },
+					{ outcome: "pass" },
+				],
+			})),
+		});
+		expect(stats({ of: "reruns", days: 1 })).toEqual({
+			of: "reruns",
+			reruns: 4,
+			lostMs: 33,
+			unknown: 1,
+			items: [{ test: "T-1", name: "test 0", file: "tests/checkout.spec.ts", case: null, reruns: 4, lostMs: 33 }],
+		});
+		h.advance(2 * DAY);
+		expect(stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 0, lostMs: 0, unknown: 0, items: [] });
+	});
+
+	test("runner retries and pipeline reruns count together without adding Playwright's summed time twice", () => {
+		h = harness({ unlinked: "track" });
+		const parsed = parsePlaywright({
+			suites: [
+				{
+					title: "cart",
+					file: "cart.spec.ts",
+					specs: [
+						{
+							title: "adds",
+							file: "cart.spec.ts",
+							tests: [
+								{
+									projectName: "chromium",
+									expectedStatus: "passed",
+									results: [
+										{ status: "failed", duration: 10, retry: 0, error: { message: "socket hang up" } },
+										{ status: "passed", duration: 20, retry: 1 },
+									],
+								},
+							],
+						},
+					],
+				},
+			],
+		});
+		const send = (attempt: number) =>
+			h.call("report", {
+				target: { commit: "aaaa0001", branch: "main" },
+				job: "e2e",
+				attempt,
+				results: parsed.results,
+			});
+		send(1);
+		expect(stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 1, lostMs: 10, unknown: 0 });
+		send(2);
+		// The first attempt's 30 ms already contains its 10 ms try; only attempt 2's try adds another 10 ms.
+		expect(stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 3, lostMs: 40, unknown: 0 });
+		send(2);
+		expect(stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 3, lostMs: 40, unknown: 0 });
+	});
+
+	test("a correction replaces runner tries at their original attempt and window, with worse-then-later ranking", () => {
+		h = harness({ unlinked: "track" });
+		const one = ciReport({ commit: "aaaa0001", n: 1 });
+		const send = (extra: Record<string, unknown>, attempt = 1) =>
+			h.call("report", {
+				...one,
+				attempt,
+				results: one.results.map((r) => ({ ...r, ...extra })),
+			});
+		send({
+			outcome: "fail",
+			failure: { message: "socket hang up" },
+			durationMs: 30,
+			tries: [{ outcome: "pass", durationMs: 10 }],
+		});
+		const original = lastResult("T-1");
+		send({ durationMs: 100, tries: [{ outcome: "pass", durationMs: 80 }] });
+		expect(stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 1, lostMs: 10 });
+		send({ durationMs: 40, corrects: original, tries: [{ outcome: "pass", durationMs: 20 }] }, 3);
+		expect(stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 1, lostMs: 20 });
+		h.advance(2 * DAY);
+		send({ durationMs: 50, corrects: lastResult("T-1"), tries: [{ outcome: "pass", durationMs: 25 }] }, 3);
+		expect(stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 0, lostMs: 0 });
+		expect(stats({ of: "reruns", days: 3 })).toMatchObject({ reruns: 1, lostMs: 25 });
+		send({ durationMs: 60 }, 2);
+		expect(stats({ of: "reruns", days: 3 })).toMatchObject({ reruns: 2, lostMs: 50 });
+	});
+
+	test("an untimed repeated attempt keeps its known try durations and counts the missing ones", () => {
+		h = harness({ unlinked: "track" });
+		const one = ciReport({ commit: "aaaa0001", n: 1 });
+		h.call("report", {
+			...one,
+			results: one.results.map((r) => ({
+				...r,
+				durationMs: undefined,
+				tries: [{ outcome: "pass", durationMs: 10 }, { outcome: "skip" }],
+			})),
+		});
+		h.call("report", { ...one, attempt: 2 });
+		expect(stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 3, lostMs: 10, unknown: 2 });
+	});
+
 	test("a test that failed and passed on the same code is flaky, and the attempt that was run again is time lost", () => {
 		threeDays();
 		expect(stats({ of: "flaky", days: 3 })).toEqual({
