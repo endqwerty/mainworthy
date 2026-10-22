@@ -306,11 +306,13 @@ function groupRetries(results: ParsedResult[], groups: RetryGroups): ParsedResul
 				const first = cases[0];
 				const last = cases.at(-1);
 				if (first === undefined || last === undefined || first === last) continue;
+				const file = "file" in first.result.test ? first.result.test.file : undefined;
 				if (
 					!cases.every(
 						(item, index) =>
 							item.ordinal === index &&
 							item.integrity === "intact" &&
+							("file" in item.result.test ? item.result.test.file : undefined) === file &&
 							item.result.tries === undefined &&
 							item.result.annotation?.case === first.result.annotation?.case &&
 							item.result.annotation?.version === first.result.annotation?.version,

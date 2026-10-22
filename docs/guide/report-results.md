@@ -433,7 +433,8 @@ JUnit also recognizes separate testcases with retry suffixes: `(retry #1)`, `(re
 unsuffixed testcase followed by consecutive retry numbers, starting at 1, becomes one
 result with earlier tries in report order. Other tests may appear between those testcases.
 They must share the full file or class prefix, stable testcase name and suite instance,
-have matching case annotations, and use no Surefire retry elements. Identical rendered test keys alone do not identify a retry.
+report the same file or all omit it, have matching case annotations, and use no Surefire retry
+elements. Identical rendered test keys alone do not identify a retry.
 The final testcase supplies the outcome, failure and attachment markers. The original supplies the test's name. The duration sums all executions.
 A passing final testcase has a `passed after N retries` note. A sequence with more than
 100 earlier tries is refused rather than losing flip evidence.
