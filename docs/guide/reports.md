@@ -66,6 +66,10 @@ once, including its tries: Playwright already sums those durations. If that tota
 the known try durations and counts the executions with unreported time. For an attempt not repeated, only its
 earlier tries count; the final execution is not time lost. A correction replaces its result's tries too.
 
+Each test's time and the report's total stop at 9,007,199,254,740,991 ms, JavaScript's largest safe integer.
+Old or imported durations above today's input limit cannot overflow the report; a time at that ceiling means
+at least that much was reported.
+
 ## Automation
 
 A case is automated when an automated test is linked to it. The rate is the automated cases over the active cases
