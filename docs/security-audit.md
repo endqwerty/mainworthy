@@ -8,13 +8,17 @@ a judgment call that the owner reviews.
 ## Running it
 
 `scripts/security-audit.ts` runs it. Run origin/main's copy, never the branch's, so a pull request cannot change the
-audit that reads it:
+audit that reads it, and run bun from `/`: in the checkout, bun loads the branch's `bunfig.toml` (its `preload`) and
+`.env` before the script's first line, with your full access.
 
 ```sh
-git fetch -q origin main && git show origin/main:scripts/security-audit.ts | bun run - <number> [--context <file>]
+repo=$(git rev-parse --show-toplevel)
+git -C "$repo" fetch -q origin main && git -C "$repo" show origin/main:scripts/security-audit.ts |
+  (cd / && bun run - <number> --repo "$repo" [--context <file>])
 ```
 
-Run from a file instead, the script refuses unless it is the same as origin/main's. A pull request that edits the
+The script refuses when bun runs inside the checkout, but by then a preload has run, so the `cd /` is what protects
+you. Run from a file instead, the script refuses unless it is the same as origin/main's. A pull request that edits the
 script, this page or the delivery rules is therefore audited by the copy already on `main`, and the brief says first
 that the change edits the audit. The script prints the head and base it read and its scratch directory, which holds
 `brief.md`, `findings.md` and `log.txt`; delete it with `bun scripts/work.ts scratch rm` once the round is recorded.
@@ -27,7 +31,13 @@ that the change edits the audit. The script prints the head and base it read and
   pull requests and 355 issues the owner's). To sign the commits of a branch that has unsigned ones, run
   `git rebase --exec 'git commit --amend --no-edit -S' <base>` where 1Password can sign, then push it.
 - **Head and base.** It reads the base branch on origin as it is now (`main`, or the layer below in a stack) and
-  refuses a head that is not on it, so the tree it audits is the tree a rebase merge lands.
+  refuses a head that is not on it, so the tree it audits is the tree a rebase merge lands. The commits it checks
+  must be exactly `git rev-list <base>..<head>`: it refuses when GitHub's list differs (the pull request changed while
+  it was read) or reaches 250, the most GitHub lists.
+- **The export.** It writes each blob of the head's tree as git stores it, not through `git archive`, which applies
+  the head's own `.gitattributes` (`export-ignore`, `export-subst`) whatever it is told. It refuses a link, a
+  submodule or a path that leaves the export, then hashes every exported file and refuses unless the files are the
+  head's, one for one. The diff is made with no attributes, so `-diff` cannot hide a file's change.
 - **The sandbox.** Daybreak Blue (`gpt-daybreak-blue-latest`) runs at effort `high` (the `reviewer` row of
   `homelab route models --profile deep`) through `codex exec --sandbox read-only`, from the export, with standard
   input closed. The sandbox stops its commands writing anywhere or reaching the network (checked 2026-10-21: `touch`

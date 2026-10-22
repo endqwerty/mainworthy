@@ -3,7 +3,8 @@
 // run where it should not: a pull request someone else wrote, a commit nobody signed, a head that is not on the base
 // it lands on, a copy of the script the pull request changed.
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -11,10 +12,17 @@ import {
 	brief,
 	type Commit,
 	codexArgs,
+	type Entry,
+	exportProblems,
+	fromStdin,
+	GITHUB_COMMIT_LIMIT,
+	launchProblem,
 	makeScratch,
 	type Pull,
+	parseTree,
 	refusals,
 	selfCheck,
+	unwritable,
 } from "../scripts/security-audit.ts";
 import { remove } from "../scripts/work/scratch.ts";
 
@@ -44,13 +52,17 @@ const commit = (over: Partial<Commit> = {}): Commit => ({
 	...over,
 });
 
-const facts = (over: { pull?: Partial<Pull>; commits?: Commit[]; headOnBase?: boolean } = {}) => ({
-	pull: pull(over.pull),
-	commits: over.commits ?? [commit()],
-	owner: "robin",
-	headOnBase: over.headOnBase ?? true,
-	base: BASE,
-});
+const facts = (over: { pull?: Partial<Pull>; commits?: Commit[]; local?: string[]; headOnBase?: boolean } = {}) => {
+	const commits = over.commits ?? [commit()];
+	return {
+		pull: pull(over.pull),
+		commits,
+		local: over.local ?? commits.map((c) => c.sha),
+		owner: "robin",
+		headOnBase: over.headOnBase ?? true,
+		base: BASE,
+	};
+};
 
 test("an open pull request the owner wrote and signed, on its base, is audited", () => {
 	expect(refusals(facts())).toEqual([]);
@@ -95,14 +107,97 @@ test("a head that is not on the base it lands on is refused", () => {
 	expect(why).toContain("rebase");
 });
 
-test("a copy run from a file must be the one on origin/main", () => {
-	expect(selfCheck("/w/scripts/security-audit.ts", "same", "same")).toBeNull();
-	expect(selfCheck("/w/scripts/security-audit.ts", "mine", "main's")).toContain("differs from origin/main's");
-	expect(selfCheck("/w/scripts/security-audit.ts", "mine", null)).toContain("origin/main has no");
+test("GitHub's commits must be exactly the range the export holds", () => {
+	const late = `e${"0".repeat(39)}`;
+	const why = refusals(facts({ commits: [commit()], local: [commit().sha, late] })).join("\n");
+	expect(why).toContain("not listed: e0000000");
+	expect(why).toContain("may have changed while it was read");
+	const gone = refusals(facts({ commits: [commit(), commit({ sha: late })], local: [commit().sha] })).join("\n");
+	expect(gone).toContain("not in the range: e0000000");
 });
 
-test("a copy read from standard input is the one the command took from origin/main", () => {
-	expect(selfCheck("/w/[stdin]", "anything", null)).toBeNull();
+test("a pull request with as many commits as GitHub lists is refused, since the list may be cut short", () => {
+	const many = Array.from({ length: GITHUB_COMMIT_LIMIT }, (_, i) => commit({ sha: i.toString(16).padStart(40, "0") }));
+	expect(refusals(facts({ commits: many })).join("\n")).toContain(`GitHub lists at most ${GITHUB_COMMIT_LIMIT}`);
+	expect(refusals(facts({ commits: many.slice(1) }))).toEqual([]);
+});
+
+test("a copy run from a file must be the one on origin/main", () => {
+	expect(selfCheck(false, "same", "same")).toBeNull();
+	expect(selfCheck(false, "mine", "main's")).toContain("differs from origin/main's");
+	expect(selfCheck(false, "mine", null)).toContain("origin/main has no");
+});
+
+test("a copy read from standard input is the one the command took from origin/main, and a file is not", () => {
+	expect(selfCheck(true, "", null)).toBeNull();
+	expect(fromStdin("/[stdin]", false)).toBe(true);
+	expect(fromStdin("/w/scripts/audit[stdin]", true)).toBe(false);
+	expect(fromStdin("/w/[stdin]", true)).toBe(false);
+	expect(fromStdin("/w/scripts/security-audit.ts", true)).toBe(false);
+});
+
+test("bun run in the checkout, where its bunfig.toml and .env load first, is refused", () => {
+	expect(launchProblem("/w", "/w")).toContain("bun ran in the checkout");
+	expect(launchProblem("/w/scripts", "/w")).toContain("bun ran in the checkout");
+	expect(launchProblem("/", "/w")).toBeNull();
+	expect(launchProblem("/work", "/w")).toBeNull();
+});
+
+const entry = (path: string, sha = "1".repeat(40), mode = "100644"): Entry => ({ mode, sha, path });
+
+test("the export must be the head's tree, file for file and byte for byte", () => {
+	const head = [entry("a.ts"), entry("src/b.ts", "2".repeat(40))];
+	const same = new Map([
+		["a.ts", "1".repeat(40)],
+		["src/b.ts", "2".repeat(40)],
+	]);
+	expect(exportProblems(head, same, [])).toEqual([]);
+	expect(exportProblems(head, new Map([["a.ts", "1".repeat(40)]]), []).join("\n")).toContain(
+		"src/b.ts is in the head but not in the export",
+	);
+	const changed = new Map([...same, ["src/b.ts", "3".repeat(40)]]);
+	expect(exportProblems(head, changed, []).join("\n")).toContain("src/b.ts in the export is not the head's");
+	expect(exportProblems(head, new Map([...same, ["c.ts", "4".repeat(40)]]), []).join("\n")).toContain(
+		"c.ts is in the export but not in the head",
+	);
+	expect(exportProblems(head, same, ["d"]).join("\n")).toContain("d in the export is not a plain file");
+	expect(exportProblems([entry("l", "5".repeat(40), "120000")], new Map(), []).join("\n")).toContain("is a link");
+});
+
+test("an entry that is not a plain file inside the export is not written", () => {
+	expect(unwritable(entry("src/a.ts"))).toBeNull();
+	expect(unwritable(entry("run.sh", "1".repeat(40), "100755"))).toBeNull();
+	expect(unwritable(entry("l", "1".repeat(40), "120000"))).toContain("is a link");
+	expect(unwritable(entry("m", "1".repeat(40), "160000"))).toContain("is a submodule");
+	for (const path of ["../x", "a/../../x", "/etc/x", "a/.git/hooks/x", "a//b", "./a"])
+		expect(unwritable(entry(path))).toContain("is not a path inside the export");
+});
+
+test("ls-tree's output is read with paths that hold spaces and tabs", () => {
+	const out = `100644 blob ${"1".repeat(40)}\ta b.ts\u0000100755 blob ${"2".repeat(40)}\tc\td.sh\u0000`;
+	expect(parseTree(out)).toEqual([entry("a b.ts"), entry("c\td.sh", "2".repeat(40), "100755")]);
+});
+
+test("the documented launcher loads no start-up file of the checkout before the script refuses", () => {
+	const repo = realpathSync(mkdtempSync(join(tmpdir(), "mw-audit-launch-")));
+	roots.push(repo);
+	const canary = join(repo, "canary");
+	writeFileSync(join(repo, "preload.ts"), `require("node:fs").writeFileSync(${JSON.stringify(canary)}, "ran");\n`);
+	writeFileSync(join(repo, "bunfig.toml"), 'preload = ["./preload.ts"]\n');
+	writeFileSync(join(repo, ".env"), "MW_AUDIT_CANARY=loaded\n");
+	const launch = (cwd: string) =>
+		spawnSync("bun", ["run", "-", "abc", "--repo", repo], {
+			cwd,
+			input: readFileSync("scripts/security-audit.ts"),
+			encoding: "utf8",
+		});
+	const r = launch("/");
+	expect(r.stderr).toContain("usage: security-audit");
+	expect(r.status).toBe(2);
+	expect(existsSync(canary)).toBe(false);
+	// The same command in the checkout runs its preload: the canary above would have seen it.
+	launch(repo);
+	expect(readFileSync(canary, "utf8")).toBe("ran");
 });
 
 const briefFor = (changed: string[], context: string | null = null) =>
