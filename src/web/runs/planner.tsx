@@ -16,6 +16,24 @@ const PendingPlan = PlanInput.extend({
 });
 type Submission = { state: "sending" | "uncertain" | "released"; input: z.infer<typeof PendingPlan> };
 
+/** The form's choices for a saved plan. */
+function choicesOf(plan: Submission["input"] | null) {
+	const select = plan?.select;
+	const folder = typeof select?.folders?.[0] === "string" ? select.folders[0] : undefined;
+	const commit = plan?.accepts && "commit" in plan.accepts ? plan.accepts.commit : "";
+	return {
+		mode: select?.folders?.length
+			? ("folder" as const)
+			: select?.tags?.length
+				? ("tag" as const)
+				: select?.text
+					? ("text" as const)
+					: ("all" as const),
+		filter: folder ?? select?.tags?.[0] ?? select?.text ?? "",
+		commit,
+	};
+}
+
 function readPlan(key: string): Submission["input"] | null {
 	let stored: string | null;
 	try {
@@ -40,26 +58,13 @@ export function RunPlanner({ close }: { close: () => void }) {
 	const owner = useRef(deviceSession()).current;
 	const key = deviceKey("run-plan", project, owner.actorId);
 	const [initial] = useState(() => readPlan(key));
+	const [chosen] = useState(() => choicesOf(initial));
 	const [name, setName] = useState(initial?.name ?? "");
-	const [mode, setMode] = useState<"all" | "folder" | "tag" | "text">(
-		initial?.select.folders?.length
-			? "folder"
-			: initial?.select.tags?.length
-				? "tag"
-				: initial?.select.text
-					? "text"
-					: "all",
-	);
-	const [filter, setFilter] = useState(
-		(typeof initial?.select.folders?.[0] === "string" ? initial.select.folders[0] : undefined) ??
-			initial?.select.tags?.[0] ??
-			initial?.select.text ??
-			"",
-	);
+	const [mode, setMode] = useState<"all" | "folder" | "tag" | "text">(chosen.mode);
+	const [filter, setFilter] = useState(chosen.filter);
 	const [query, setQuery] = useState(filter);
-	const acceptedCommit = initial?.accepts && "commit" in initial.accepts ? initial.accepts.commit : "";
-	const [target, setTarget] = useState<"self" | "commit">(acceptedCommit ? "commit" : "self");
-	const [commit, setCommit] = useState(acceptedCommit);
+	const [target, setTarget] = useState<"self" | "commit">(chosen.commit ? "commit" : "self");
+	const [commit, setCommit] = useState(chosen.commit);
 	const [submission, setSubmission] = useState<Submission | null>(
 		initial ? { state: "uncertain", input: initial } : null,
 	);
@@ -149,24 +154,11 @@ export function RunPlanner({ close }: { close: () => void }) {
 					const previous = saved && saved.cmd !== held?.cmd ? saved : (held ?? saved);
 					if (previous && previous.cmd !== held?.cmd) {
 						setStatus("Another tab's plan is waiting; Retry plan sends it.");
+						const { mode, filter, commit } = choicesOf(previous);
 						setName(previous.name);
-						setMode(
-							previous.select.folders?.length
-								? "folder"
-								: previous.select.tags?.length
-									? "tag"
-									: previous.select.text
-										? "text"
-										: "all",
-						);
-						const filter =
-							(typeof previous.select.folders?.[0] === "string" ? previous.select.folders[0] : undefined) ??
-							previous.select.tags?.[0] ??
-							previous.select.text ??
-							"";
+						setMode(mode);
 						setFilter(filter);
 						setQuery(filter);
-						const commit = previous.accepts && "commit" in previous.accepts ? previous.accepts.commit : "";
 						setTarget(commit ? "commit" : "self");
 						setCommit(commit);
 						hold({ state: "uncertain", input: previous });
