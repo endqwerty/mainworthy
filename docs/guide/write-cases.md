@@ -11,6 +11,7 @@ Suite keeps loading the rest of the list while new results and edits arrive,
 and shows live changes without a reload. A tag or move still being sent stays visible
 when live updates arrive. If the write fails, only that pending change disappears.
 A confirmed later move replaces an earlier pending move of the same case.
+A slow or failed folder-list read keeps the cases returned by the current folder filter visible.
 
 ![Suite with cases, folders, tags, and the selected case](../ui/screenshots/suite-light.png)
 
