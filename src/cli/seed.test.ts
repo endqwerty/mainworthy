@@ -53,7 +53,8 @@ test("a seeded project holds a suite in folders, a fortnight of history and six 
 		const demo = on(client, "demo");
 		const pipeline = z
 			.array(z.object({ last: z.array(z.object({ steps: ResultTrail.nullable() })) }))
-			.parse(await demo.call("get", { refs: ["T-1"] }))[0]?.last.find((result) => result.steps !== null)?.steps;
+			.parse(await demo.call("get", { refs: ["T-1"] }))[0]
+			?.last.find((result) => result.steps !== null)?.steps;
 		const agent = z
 			.object({
 				items: z.array(z.object({ fills: z.array(z.object({ method: z.string(), steps: ResultTrail.nullable() })) })),
@@ -66,7 +67,7 @@ test("a seeded project holds a suite in folders, a fortnight of history and six 
 				const actions = step.actions ?? [];
 				expect(actions.length).toBeGreaterThan(1);
 				expect(new Set(actions.map((action) => action.text)).size).toBe(actions.length);
-				expect(actions.reduce((total, action) => total + (action.durationMs ?? 0), 0)).toBe(step.durationMs);
+				expect(actions.reduce((total, action) => total + (action.durationMs ?? 0), 0)).toBe(step.durationMs ?? -1);
 				expect(actions.every((action) => Number.isInteger(action.durationMs) && (action.durationMs ?? 0) > 0)).toBe(
 					true,
 				);
