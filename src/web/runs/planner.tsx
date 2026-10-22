@@ -347,7 +347,9 @@ export function RunPlanner({ close }: { close: () => void }) {
 					onClick={() => {
 						if (!sessionCurrent(owner)) return;
 						try {
-							if (readPlan(key)?.cmd === submission.input.cmd) localStorage.removeItem(key);
+							const stored = localStorage.getItem(key);
+							if (stored !== null && PendingPlan.parse(JSON.parse(stored)).cmd === submission.input.cmd)
+								localStorage.removeItem(key);
 						} catch {
 							setStatus("This browser could not discard the saved plan. Enable device storage and try again.");
 							return;
