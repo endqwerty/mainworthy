@@ -61,10 +61,11 @@ the correction was sent with. Where older stored history has two corrections of 
 counts the worse of the corrections that stand, then the later.
 
 The runner's earlier tries inside an attempt also count as reruns, even if the pipeline ran only once. Each try
-adds its reported duration. When a later pipeline attempt repeats the whole attempt, its reported total counts
-once, including its tries: Playwright already sums those durations. If that total is missing, the report keeps
-the known try durations and counts the executions with unreported time. For an attempt not repeated, only its
-earlier tries count; the final execution is not time lost. A correction replaces its result's tries too.
+adds its reported duration. When a later pipeline attempt repeats the whole attempt, its reported duration counts
+once, without adding known try durations again: Playwright already sums those durations. A try without a duration
+always counts as unreported time, even if its attempt has a duration: Surefire times only one execution.
+If the repeated attempt's duration is missing, the report keeps the known try durations. For an attempt not repeated,
+only its earlier tries count; the final execution is not time lost. A correction replaces its result's tries too.
 
 Each test's time and the report's total stop at 9,007,199,254,740,991 ms, JavaScript's largest safe integer.
 Old or imported durations above today's input limit cannot overflow the report; a time at that ceiling means
