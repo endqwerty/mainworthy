@@ -4,7 +4,7 @@
 // it lands on, a copy of the script the pull request changed.
 import { afterEach, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -292,4 +292,42 @@ test("the audit's scratch directory is one `scratch rm` deletes", () => {
 	expect(directory.startsWith(join(root, "mw-audit-739-"))).toBe(true);
 	remove(directory, root);
 	expect(existsSync(directory)).toBe(false);
+});
+
+test("the launcher on the page writes main's script and runs it, in each shell an agent uses", () => {
+	const page = readFileSync("docs/security-audit.md", "utf8");
+	const block = page.match(/```sh\n([\s\S]*?)```/)?.[1] ?? "";
+	expect(block).toContain("--source");
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "mw-audit-page-")));
+	roots.push(root);
+	const git = (cwd: string, ...args: string[]) => {
+		const r = spawnSync("git", ["-c", "commit.gpgsign=false", ...args], {
+			cwd,
+			encoding: "utf8",
+			env: {
+				...process.env,
+				GIT_AUTHOR_NAME: "robin",
+				GIT_AUTHOR_EMAIL: "robin@example.com",
+				GIT_COMMITTER_NAME: "robin",
+				GIT_COMMITTER_EMAIL: "robin@example.com",
+			},
+		});
+		expect(r.status).toBe(0);
+	};
+	git(root, "init", "-q", "--bare", "-b", "main", "origin.git");
+	git(root, "init", "-q", "-b", "main", "work");
+	const work = join(root, "work");
+	mkdirSync(join(work, "scripts"));
+	writeFileSync(join(work, "scripts", "security-audit.ts"), readFileSync("scripts/security-audit.ts"));
+	git(work, "add", "-A");
+	git(work, "commit", "-qm", "the audit");
+	git(work, "remote", "add", "origin", join(root, "origin.git"));
+	git(work, "push", "-q", "origin", "main");
+	const command = block.replace("<number>", "abc").replace(" [--context <file>]", "");
+	const shells = ["bash", "zsh"].filter((shell) => Bun.which(shell) !== null);
+	expect(shells).toContain("bash");
+	for (const shell of shells) {
+		const r = spawnSync(shell, ["-c", command], { cwd: work, encoding: "utf8" });
+		expect(`${shell}: ${r.stderr}`).toContain(`${shell}: usage: security-audit`);
+	}
 });
