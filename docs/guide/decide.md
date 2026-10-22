@@ -20,6 +20,8 @@ That question blocks nothing.
 
 Use <kbd>j</kbd> and <kbd>k</kbd> to move between questions.
 Press <kbd>Space</kbd> to expand the evidence.
+In a short desktop window, the question pane scrolls so you can read the evidence and reach its answers.
+An answer key pages through unread proposal edits before it records an answer.
 The "Open" view contains questions that need an answer. "Settled" contains decisions,
 including answers that ended when their cause passed, their flaky hold expired, or their tracker issue closed.
 When you replace an inherited answer, Settled lists the answer on the ordinary cause question.
