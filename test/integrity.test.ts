@@ -654,6 +654,7 @@ describe("what a result may prove", () => {
 		const actor = h.actor("pipeline", "ci", ["read", "record"]);
 		const input = ciReport({ commit: "scans631", n: 33 });
 		const original = report(input, actor).results;
+		expect(original).toHaveLength(33);
 		const reserved = original[32];
 		const observed = input.results[32];
 		if (reserved === undefined || observed === undefined) throw new Error("missing original result");
@@ -685,6 +686,16 @@ describe("what a result may prove", () => {
 				([statement]) => /\bbatches\b/.test(statement.text) && /\bstaged\b/.test(statement.text),
 			);
 			expect(scans.length).toBeLessThanOrEqual(1);
+			get.mockClear();
+			all.mockClear();
+			expect(report({ ...input, results: [{ ...observed, note: "ordinary report" }] }, actor)).toMatchObject({
+				counts: { total: 1, pass: 1 },
+			});
+			expect(
+				[...get.mock.calls, ...all.mock.calls].filter(
+					([statement]) => /\bbatches\b/.test(statement.text) && /\bstaged\b/.test(statement.text),
+				),
+			).toHaveLength(0);
 		} finally {
 			get.mockRestore();
 			all.mockRestore();

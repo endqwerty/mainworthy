@@ -321,10 +321,10 @@ const Q = {
 		             AND r.outcome IN ('pass', 'fail', 'error') AND ${uncorrectedResults("r.id")})`,
 	),
 	correctionOf: sql<{ result: number }, { id: number }>("SELECT id FROM results WHERE corrects = $result LIMIT 1"),
-	pendingCorrectionOf: sql<{ project: number; actor: number; result: number }, { id: number }>(
-		`SELECT batches.id FROM batches, json_each(batches.staged) staged
+	pendingCorrections: sql<{ project: number; actor: number }, { result: number }>(
+		`SELECT json_extract(staged.value, '$.corrects') AS result FROM batches, json_each(batches.staged) staged
 		 WHERE batches.project = $project AND batches.actor = $actor AND batches.state = 'accepted'
-		 AND json_extract(staged.value, '$.corrects') = $result LIMIT 1`,
+		 AND json_extract(staged.value, '$.corrects') IS NOT NULL`,
 	),
 	testByKey: sql<{ project: number; key: string }, TestRow>(
 		"SELECT * FROM tests WHERE project = $project AND key = $key",
@@ -1062,17 +1062,22 @@ export function accept(
 	if (existing) return { batch: existing, fresh: false };
 	// A refusal after acceptance would leave a durable batch pending, so check new corrections before storing it.
 	const corrected = new Set<number>();
+	const pending = new Set(
+		report.results.some((result) => result.corrects !== undefined)
+			? ctx.db.all(Q.pendingCorrections, { project: ctx.project.id, actor: ctx.actor.id }).map((row) => row.result)
+			: [],
+	);
 	for (const result of report.results) {
 		if (result.corrects === undefined) continue;
 		const earlier = ctx.db.get(Q.resultById, { id: result.corrects });
 		if (!earlier || earlier.project !== ctx.project.id || earlier.actor !== ctx.actor.id) continue;
-		if (
-			corrected.has(earlier.id) ||
-			isWithdrawn(ctx.db, earlier.id) ||
-			ctx.db.get(Q.pendingCorrectionOf, { project: ctx.project.id, actor: ctx.actor.id, result: earlier.id })
-		)
+		if (corrected.has(earlier.id) || isWithdrawn(ctx.db, earlier.id))
 			throw conflict(
 				`result ${earlier.id} was already corrected; read the latest results and correct the current result instead`,
+			);
+		if (pending.has(earlier.id))
+			throw conflict(
+				`result ${earlier.id} has an accepted correction waiting to be applied; retry that report or wait for server recovery before correcting again`,
 			);
 		corrected.add(earlier.id);
 	}
