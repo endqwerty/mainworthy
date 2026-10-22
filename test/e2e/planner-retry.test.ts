@@ -766,6 +766,9 @@ check(
 				expect(response.ok()).toBe(true);
 				await route.abort();
 			});
+			await page.evaluate(() => {
+				window.addEventListener("storage", (event) => event.stopImmediatePropagation(), true);
+			});
 			await page.keyboard.press("n");
 			await page.getByLabel("Run name").fill("Plan X");
 			await page.locator('.run-planner button[type="submit"]').click();
@@ -1076,6 +1079,153 @@ for (const failure of ["read", "removal"] as const)
 				expect(sent).toHaveLength(2);
 				expect(sent[1]).toEqual(original);
 				expect((await server.api("find", { in: "runs", origin: "planned" })).items).toHaveLength(1);
+			} finally {
+				await view.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+
+for (let repeat = 1; repeat <= 10; repeat++)
+	check(
+		`two tabs retry one plan simultaneously without a fresh duplicate (${repeat}/10)`,
+		async () => {
+			const server = await startServer();
+			const view = await openPage(server, { path: "/p/scratch/runs" });
+			try {
+				await server.api("propose", { edits: [{ op: "create", outline: "Checkout opens\n  Open checkout > Ready" }] });
+				const { page, context } = view;
+				const sent: Api["plan"]["input"][] = [];
+				await page.route("**/plan", async (route) => {
+					sent.push(route.request().postDataJSON());
+					if (sent.length > 1) return route.continue();
+					const response = await route.fetch();
+					expect(response.ok()).toBe(true);
+					await route.abort();
+				});
+				await page.keyboard.press("n");
+				await page.getByLabel("Run name").fill("Plan X");
+				await page.locator('.run-planner button[type="submit"]').click();
+				await page.getByRole("button", { name: "Enter Retry plan", exact: true }).waitFor();
+				const other = await context.newPage();
+				other.on("request", (request) => {
+					if (request.url().endsWith("/plan")) sent.push(request.postDataJSON());
+				});
+				await other.goto(`${server.url}/p/scratch/runs`);
+				await other.getByRole("listbox", { name: "Runs", exact: true }).waitFor();
+				await other.keyboard.press("n");
+				await other.getByRole("button", { name: "Enter Retry plan", exact: true }).waitFor();
+				const original = sent[0];
+				if (!original) throw new Error("No plan was submitted");
+				await Promise.all([
+					page.locator('.run-planner button[type="submit"]').click({ force: true }),
+					other.locator('.run-planner button[type="submit"]').click({ force: true, delay: 50 }),
+				]);
+				for (const tab of [page, other])
+					await eventually(
+						() =>
+							tab.evaluate(() => ({
+								path: location.pathname,
+								name: document.querySelector<HTMLInputElement>("#run-name")?.value,
+								editable: document.querySelector<HTMLInputElement>("#run-name")?.readOnly === false,
+							})),
+						({ path, editable }) => /\/runs\/\d+$/.test(path) || editable,
+					);
+				for (const tab of [page, other])
+					expect(await tab.evaluate(() => document.querySelector<HTMLInputElement>("#run-name")?.value ?? "")).toBe("");
+				expect(
+					Run.array()
+						.parse((await server.api("find", { in: "runs", origin: "planned" })).items)
+						.map((run) => run.name),
+				).toEqual(["Plan X"]);
+				for (const input of sent) expect(input).toEqual(original);
+			} finally {
+				await view.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+
+for (const trigger of ["click", "Enter", "queued submit"] as const)
+	check(
+		`another tab completing a plan clears every choice before a stale ${trigger}`,
+		async () => {
+			const server = await startServer();
+			const view = await openPage(server, { path: "/p/scratch/runs" });
+			try {
+				await server.api("propose", {
+					edits: [{ op: "create", folder: "checkout", outline: "Checkout opens\n  Open checkout > Ready" }],
+				});
+				const { page, context } = view;
+				let original: Api["plan"]["input"] | undefined;
+				await page.route("**/plan", async (route) => {
+					if (original) return route.continue();
+					original = route.request().postDataJSON();
+					const response = await route.fetch();
+					expect(response.ok()).toBe(true);
+					await route.abort();
+				});
+				await page.keyboard.press("n");
+				await page.getByLabel("Run name").fill("Plan X");
+				await page.getByLabel("Cases", { exact: true }).selectOption("folder");
+				await page.getByLabel("Folder", { exact: true }).selectOption("checkout");
+				await page.getByRole("radio", { name: "Accept results for a commit" }).check();
+				await page.getByLabel("Commit", { exact: true }).fill("a".repeat(40));
+				await page.locator('.run-planner button[type="submit"]').click();
+				await page.getByRole("button", { name: "Enter Retry plan", exact: true }).waitFor();
+				const other = await context.newPage();
+				const sent: Api["plan"]["input"][] = [];
+				other.on("request", (request) => {
+					if (request.url().endsWith("/plan")) sent.push(request.postDataJSON());
+				});
+				await other.goto(`${server.url}/p/scratch/runs`);
+				await other.getByRole("listbox", { name: "Runs", exact: true }).waitFor();
+				await other.keyboard.press("n");
+				await other.getByRole("button", { name: "Enter Retry plan", exact: true }).waitFor();
+				if (trigger === "queued submit") {
+					const key = `${await devicePrefix(server, server.token)}run-plan:scratch`;
+					await other.evaluate((key) => {
+						window.addEventListener("storage", (event) => {
+							if (event.key === key && event.newValue === null)
+								document
+									.querySelector(".run-planner")
+									?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+						});
+					}, key);
+				}
+				await page.locator('.run-planner button[type="submit"]').click();
+				await page.waitForURL("**/runs/1");
+				await other.bringToFront();
+				if (trigger !== "queued submit") await eventually(() => other.getByLabel("Run name").isEditable(), Boolean);
+				if (trigger === "click") await other.locator('.run-planner button[type="submit"]').click({ force: true });
+				else if (trigger === "Enter") await other.keyboard.press("Enter");
+				await eventually(
+					() =>
+						other.evaluate(() => ({
+							path: location.pathname,
+							name: document.querySelector<HTMLInputElement>("#run-name")?.value,
+						})),
+					({ path, name }) => /\/runs\/\d+$/.test(path) || name === "",
+				);
+				expect((await server.api("find", { in: "runs", origin: "planned" })).items).toHaveLength(1);
+				expect(sent).toHaveLength(0);
+				expect(await other.getByLabel("Run name").inputValue()).toBe("");
+				expect(await other.getByLabel("Cases", { exact: true }).inputValue()).toBe("all");
+				expect(await other.getByLabel("Folder", { exact: true }).count()).toBe(0);
+				expect(await other.getByLabel("Commit", { exact: true }).count()).toBe(0);
+				expect(await other.getByRole("radio", { name: "Count only results recorded in this run" }).isChecked()).toBe(
+					true,
+				);
+				expect(await other.locator("#stat").textContent()).toContain("Check Runs before planning again");
+				await other.getByLabel("Run name").fill("Intentional new plan");
+				await other.locator('.run-planner button[type="submit"]').click();
+				await other.waitForURL("**/runs/2");
+				expect(sent).toHaveLength(1);
+				expect(sent[0]).toMatchObject({ name: "Intentional new plan", select: {} });
+				expect(sent[0]?.accepts).toBeUndefined();
+				expect(sent[0]?.cmd).not.toBe(original?.cmd);
 			} finally {
 				await view.close();
 				await server.stop();
