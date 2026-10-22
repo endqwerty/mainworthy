@@ -58,8 +58,13 @@ however many times that attempt was reported. The report adds up the time those 
 it (of an attempt reported twice, the time of the result it counted: the worse, then the later), and lists the tests
 that cost the most. A correction counts in place of the attempt it corrects, its time included, whichever attempt
 the correction was sent with. Where older stored history has two corrections of the same result, the attempt
-counts the worse of the corrections that stand, then the later. An attempt whose report gave no duration is
-counted, and its time is not: the report says how many there were.
+counts the worse of the corrections that stand, then the later.
+
+The runner's earlier tries inside an attempt also count as reruns, even if the pipeline ran only once. Each try
+adds its reported duration. When a later pipeline attempt repeats the whole attempt, its reported total counts
+once, including its tries: Playwright already sums those durations. If that total is missing, the report keeps
+the known try durations and counts the executions with unreported time. For an attempt not repeated, only its
+earlier tries count; the final execution is not time lost. A correction replaces its result's tries too.
 
 ## Automation
 

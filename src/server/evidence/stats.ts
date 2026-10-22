@@ -63,17 +63,18 @@ const Q = {
 	// they were sent with (a correction is stored at an attempt no older than the one it corrects, so by its own attempt
 	// it could hide the attempt it repeats). What stands of an execution is every result in its tree of corrections that
 	// nothing corrects in turn, as the gate counts it; of what stands for one attempt, the worse, then the later, gives
-	// its time.
+	// its time. Runner tries count with that result. A repeated attempt's duration already includes its tries
+	// (Playwright sums its executions); only an attempt not repeated, or missing its total, adds their time separately.
 	reruns: sql<{ project: number; since: number }, { test: number; reruns: number; lost: number; unknown: number }>(`
 		WITH RECURSIVE executions AS (
-		  SELECT r.id, r.test, r.target, r.actor, r.method, b.job, r.attempt, r.outcome, r.duration_ms, r.seq, r.ord
-		  FROM results r JOIN batches b ON b.id = r.batch
-		  WHERE r.project = $project AND r.at >= $since AND r.corrects IS NULL
-		    AND EXISTS (
+		  SELECT r.id, r.test, r.target, r.actor, r.method, b.job, r.attempt, r.outcome, r.duration_ms, r.seq, r.ord,
+		    EXISTS (
 		      SELECT 1 FROM results n JOIN batches nb ON nb.id = n.batch
 		      WHERE n.target = r.target AND n.test = r.test AND n.actor = r.actor AND n.method = r.method
 		        AND nb.job = b.job AND n.attempt > r.attempt AND n.corrects IS NULL
-		    )
+		    ) AS repeated
+		  FROM results r JOIN batches b ON b.id = r.batch
+		  WHERE r.project = $project AND r.at >= $since AND r.corrects IS NULL
 		),
 		chain(root, id, outcome, duration_ms, seq, ord) AS (
 		  SELECT e.id, e.id, e.outcome, e.duration_ms, e.seq, e.ord FROM executions e
@@ -81,7 +82,7 @@ const Q = {
 		  SELECT k.root, c.id, c.outcome, c.duration_ms, c.seq, c.ord FROM chain k JOIN results c ON c.corrects = k.id
 		),
 		attempts AS (
-		  SELECT e.test, k.duration_ms,
+		  SELECT e.test, k.id, k.duration_ms, e.repeated,
 		         row_number() OVER (
 		           PARTITION BY e.target, e.test, e.actor, e.method, e.job, e.attempt
 		           ORDER BY CASE k.outcome WHEN 'fail' THEN 3 WHEN 'error' THEN 3 WHEN 'pass' THEN 2 WHEN 'blocked' THEN 1 ELSE 0 END DESC,
@@ -89,9 +90,19 @@ const Q = {
 		         ) AS rank
 		  FROM executions e JOIN chain k ON k.root = e.id
 		  WHERE ${uncorrectedResults("k.id")}
+		),
+		costs AS (
+		  SELECT a.test, a.repeated, a.duration_ms, count(t.id) AS tries,
+		         coalesce(sum(t.duration_ms), 0) AS tried_ms,
+		         count(t.id) - count(t.duration_ms) AS untimed_tries
+		  FROM attempts a LEFT JOIN result_tries t ON t.result = a.id
+		  WHERE a.rank = 1
+		  GROUP BY a.id
 		)
-		SELECT a.test, count(*) AS reruns, coalesce(sum(a.duration_ms), 0) AS lost, sum(a.duration_ms IS NULL) AS unknown
-		FROM attempts a WHERE a.rank = 1
+		SELECT a.test, sum(a.repeated + a.tries) AS reruns,
+		       sum(CASE WHEN a.repeated AND a.duration_ms IS NOT NULL THEN a.duration_ms ELSE a.tried_ms END) AS lost,
+		       sum(CASE WHEN a.repeated AND a.duration_ms IS NOT NULL THEN 0 ELSE a.repeated + a.untimed_tries END) AS unknown
+		FROM costs a WHERE a.repeated OR a.tries > 0
 		GROUP BY a.test
 	`),
 	automated: sql<{ project: number }, { case_id: number }>(
@@ -174,7 +185,7 @@ export function flipsOf(db: Db, project: number, tests: readonly number[], since
 /** How many automated tests reported a result since a moment. */
 export const testsReporting = (db: Db, project: number, since: number): number =>
 	db.get(Q.reporting, { project, since })?.n ?? 0;
-/** Per test, the attempts since a moment that a later attempt in their lane repeated, and their time. */
+/** Per test, repeated pipeline attempts and earlier runner tries since a moment, with their time counted once. */
 export const rerunsByTest = (db: Db, project: number, since: number) => db.all(Q.reruns, { project, since });
 /** The cases with at least one automated test. */
 export const automatedCases = (db: Db, project: number): Set<number> =>

@@ -339,8 +339,8 @@ function Reruns({ days }: { days: number }) {
 			<p className="report-hero">
 				<b>{spent(data.lostMs)}</b>{" "}
 				<span className="dim">
-					in {count(data.reruns, "attempt")} that {data.reruns === 1 ? "was" : "were"} run again
-					{data.unknown > 0 && `; ${data.unknown} of them said no duration`}
+					in {count(data.reruns, "rerun")}
+					{data.unknown > 0 && `; ${data.unknown} ${data.unknown === 1 ? "has" : "have"} unreported time`}
 				</span>
 			</p>
 			{data.items.length === 0 ? (
