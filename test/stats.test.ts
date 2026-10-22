@@ -3,6 +3,7 @@ import { random } from "../src/cli/demo/cases.ts";
 import type { InboxReply, ProposeReply } from "../src/core/ops.ts";
 import { replacesInLane } from "../src/core/runs.ts";
 import type { StatsKind, StatsOf } from "../src/core/stats.ts";
+import { parseJUnit } from "../src/surfaces/formats/junit.ts";
 import { parsePlaywright } from "../src/surfaces/formats/playwright.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
@@ -238,6 +239,44 @@ describe("flaky tests and time lost to reruns", () => {
 		expect(stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 0, lostMs: 0, unknown: 0, items: [] });
 	});
 
+	test("repeated Surefire attempts keep their untimed tries unknown beside the testcase's time", () => {
+		h = harness({ unlinked: "track" });
+		const parsed = parseJUnit(`<testsuite><testcase classname="CartTest" name="adds" time="5.0">
+			<flakyFailure message="first failure"/><flakyFailure message="second failure"/>
+		</testcase></testsuite>`);
+		for (const attempt of [1, 2]) {
+			h.call("report", {
+				target: { commit: "aaaa0001", branch: "main" },
+				job: "unit",
+				attempt,
+				results: parsed.results,
+			});
+			expect(stats({ of: "reruns", days: 1 })).toMatchObject(
+				attempt === 1 ? { reruns: 2, lostMs: 0, unknown: 2 } : { reruns: 5, lostMs: 5000, unknown: 4 },
+			);
+		}
+	});
+
+	test("a correction can add runner tries, and a worse duplicate without tries still decides the attempt", () => {
+		h = harness({ unlinked: "track" });
+		const one = ciReport({ commit: "aaaa0001", n: 1 });
+		h.call("report", one);
+		h.call("report", {
+			...one,
+			results: one.results.map((r) => ({
+				...r,
+				corrects: lastResult("T-1"),
+				tries: [{ outcome: "pass", durationMs: 10 }],
+			})),
+		});
+		expect(stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 1, lostMs: 10, unknown: 0 });
+		h.call("report", {
+			...one,
+			results: one.results.map((r) => ({ ...r, outcome: "fail", failure: { message: "broken" } })),
+		});
+		expect(stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 0, lostMs: 0, unknown: 0, items: [] });
+	});
+
 	test("runner retries and pipeline reruns count together without adding Playwright's summed time twice", () => {
 		h = harness({ unlinked: "track" });
 		const parsed = parsePlaywright({
@@ -348,8 +387,8 @@ describe("flaky tests and time lost to reruns", () => {
 				tries: [{ outcome: "pass", durationMs: 10 }, { outcome: "skip" }],
 			})),
 		});
-		// A reported total covers every execution of the repeated attempt, even a try with no separate duration.
-		expect(stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 3, lostMs: 30, unknown: 0 });
+		// A reported duration does not cover an untimed try: Surefire reports only one execution's time.
+		expect(stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 3, lostMs: 30, unknown: 1 });
 	});
 
 	test("a test that failed and passed on the same code is flaky, and the attempt that was run again is time lost", () => {
