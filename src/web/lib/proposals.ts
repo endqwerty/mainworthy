@@ -116,6 +116,8 @@ export function watchProposalShown(evidence: HTMLElement): () => void {
 			pending.clear();
 		});
 	};
+	// Observer delivery follows the frame that selected these parts. Measure current geometry next frame;
+	// a part shown for only one frame can be missed, so paging may still need to return to its unread range.
 	const intersections = new IntersectionObserver((entries) => {
 		for (const entry of entries) {
 			const part = byElement.get(entry.target);
