@@ -131,9 +131,13 @@ const partCoverage = async (page: Page) =>
 		.object({ parts: z.number(), unseen: z.number() })
 		.parse(await page.evaluate((): unknown => Reflect.get(window, "mainworthyPartCoverage")));
 
-for (const height of [844, 360])
+for (const [device, width, height] of [
+	["phone", 390, 844],
+	["phone", 390, 360],
+	["desktop", 700, 844],
+] as const)
 	t(
-		`phone Queue at 390x${height} fits short evidence without extra space`,
+		`${device} Queue at ${width}x${height} fits short evidence without extra space`,
 		async () => {
 			const server = await startServer({ preset: "standard", seed: false });
 			let view: Awaited<ReturnType<typeof openPage>> | null = null;
@@ -143,17 +147,26 @@ for (const height of [844, 360])
 				const q = proposed.question ?? "";
 				view = await openPage(server, {
 					path: "/p/scratch/queue",
-					device: "phone",
-					setup: async (page) => page.setViewportSize({ width: 390, height }),
+					device,
+					setup: async (page) => page.setViewportSize({ width, height }),
 				});
 				const { page } = view;
-				await page.locator("#list [role=option]").first().tap();
+				if (device === "phone") await page.locator("#list [role=option]").first().tap();
 				await page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`).waitFor();
 				await frames(page);
-				const evidence = await page.locator(".queue-evidence").boundingBox();
-				const answers = await page.locator(".queue-answers").boundingBox();
-				expect(Math.round(evidence?.height ?? 0)).toBe(135);
-				expect(Math.round(answers?.y ?? 0)).toBe(301);
+				const minimum = await page.locator(".queue-evidence").evaluate((area) => getComputedStyle(area).minHeight);
+				expect(minimum).toBe("0px");
+				if (device === "desktop") {
+					const fits = await page.locator("#detail").evaluate((pane) => {
+						const footer = pane.querySelector(".queue-last");
+						return (
+							pane.scrollHeight <= pane.clientHeight &&
+							footer !== null &&
+							footer.getBoundingClientRect().bottom <= pane.getBoundingClientRect().bottom
+						);
+					});
+					expect(fits).toBe(true);
+				}
 				expect(view.errors).toEqual([]);
 			} finally {
 				await view?.close();
