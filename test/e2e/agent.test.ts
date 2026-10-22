@@ -897,6 +897,7 @@ for (const surface of ["case", "queue"] as const)
 			held();
 			await page.locator(`[data-proposal="${q}"]`).getByText("Last result, changed").waitFor();
 			await pageToEnd();
+			await page.locator(`[data-proposal-evidence="${q}"][data-proposal-read="ready"]`).waitFor();
 			await accept.click();
 			const [adopted] = await eventually(
 				() => server.api("get", { refs: ["C-1"] }),

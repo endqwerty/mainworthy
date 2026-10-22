@@ -867,6 +867,7 @@ for (const editing of [false, true]) {
 					expect(await title.evaluate((node) => document.activeElement === node)).toBe(true);
 				} else {
 					await card.scrollIntoViewIfNeeded();
+					await card.locator('[data-proposal-read="ready"]').waitFor();
 					await page.keyboard.press("a");
 					const rows = await eventually(
 						() => server.api("get", { refs: ["C-1"] }),

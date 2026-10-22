@@ -190,7 +190,7 @@ async function recordedDecisions(server: Server, ref: string) {
 				const key =
 					question.kind === "failure" ? "i" : question.kind === "adopt" ? "a" : question.kind === "finding" ? "z" : "t";
 				if (question.kind === "adopt")
-					await page.locator(`[data-proposal-evidence="${question.q}"][data-proposal-loaded="true"]`).waitFor();
+					await page.locator(`[data-proposal-evidence="${question.q}"][data-proposal-read="ready"]`).waitFor();
 				await page.keyboard.press(key);
 				await page.waitForFunction((ref) => document.querySelector(`[data-question="${ref}"]`) === null, question.q);
 			}
@@ -513,17 +513,18 @@ for (const cached of [false, true])
 			);
 			view = await openPage(server, { path: `/p/scratch/queue/${proposed.question?.slice(2)}` });
 			await view.page.locator(".diff").waitFor();
+			await view.page.locator(`[data-proposal-evidence="${proposed.question}"][data-proposal-read="ready"]`).waitFor();
 			await server.api("propose", {
 				edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Person's newer title" } }],
 			});
 			await view.page.keyboard.press("a");
-			// The answer is refused either way. The page refuses it itself while it reads the proposal again after the
-			// change, or it sends it and the server refuses the old evidence: which depends on whether the change's event
-			// arrived before the key.
+			// The page refuses while fetching or showing the changed edits; otherwise the server refuses the old evidence.
+			// Which happens depends on whether the change's event arrived before the key.
 			await view.page
 				.locator(".queue-last")
 				.getByText("The evidence changed.", { exact: false })
 				.or(view.page.getByText("Still reading the proposal.", { exact: false }))
+				.or(view.page.getByText(`${proposed.question} has unread edits.`, { exact: false }))
 				.first()
 				.waitFor();
 			await view.page.locator(`[data-question="${proposed.question}"]`).waitFor();
