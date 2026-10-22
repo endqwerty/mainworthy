@@ -635,6 +635,14 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 		head: rebasedHead,
 		landing: { commit: rebasedLanding, branch: "main" },
 	});
+	// The final job arrives after this merge was reported: the receipt stays passed beside a now-blocked head.
+	await write(ci, "report", "rebased-late-job", before(21 * MINUTE), {
+		target: { commit: rebasedHead, repo: REPO, branch: "refund-currency", pr: 484 },
+		job: "refund-smoke",
+		results: [
+			{ test: shippingAddress, outcome: "fail", failure: { message: "The final refund smoke check timed out" } },
+		],
+	});
 	await write(ci, "report", "unlinked", before(20 * MINUTE), {
 		target: { commit: change, repo: REPO, branch: "coupon-total", pr: 482 },
 		job: "misc",

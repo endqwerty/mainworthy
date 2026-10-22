@@ -188,6 +188,11 @@ test("a seeded project holds a suite in folders, a fortnight of history and six 
 		const ended = changes.filter((change) => change.key !== "pr:482" && change.key !== "pr:483");
 		expect(ended.length).toBeGreaterThan(5);
 		expect(ended.every((change) => change.state === "merged")).toBe(true);
+		const receipt = z
+			.object({ change: z.object({ mergeReceipt: z.object({ gate: z.object({ verdict: z.string() }) }) }) })
+			.parse(await demo.call("impact", { change: "pr:484" }));
+		expect(receipt.change.mergeReceipt.gate.verdict).toBe("passed");
+		expect((await demo.call("gate", { change: "pr:484" })).verdict).toBe("blocked");
 		// The project's own fields, set on its cases; two cases archived; the back office's TestRail ids.
 		const policy = z
 			.object({ settings: z.object({ fields: z.record(z.string(), z.unknown()) }) })

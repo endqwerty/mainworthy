@@ -533,7 +533,7 @@ Record a review and what it found. A review with no findings is still recorded.
 
 ### change
 
-Say that a change ended (merged, or closed without merging) or is open again. An ended change is not asked about.
+Say that a change ended or is open again. A merge records the head gate when reported. An ended change is not asked about.
 
 |  |  |
 | --- | --- |
@@ -549,7 +549,7 @@ Say that a change ended (merged, or closed without merging) or is open again. An
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `change` | `string` | yes | The change, for example pr:482. |
-| `state` | `"merged" \| "closed" \| "open"` | yes | How the change ended: merged, or closed without merging. open: it is open again. |
+| `state` | `"merged" \| "closed" \| "open"` | yes | How the change ended: merged records the head gate when reported; closed is without merging. open: it is open again. |
 | `head` | `string` | no | The change's head commit as the code host says it is now: for merged, the head that merged. The change's gate is this commit's. |
 | `landing` | `object` | no | For merged: the exact commit that reached trunk and its branch. It moves to trunk and its failures are judged there; it has a gate of its own, which is the change's only when it is the head. |
 | `landing.commit` | `string` | yes |  |

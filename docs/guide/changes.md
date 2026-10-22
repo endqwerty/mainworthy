@@ -203,6 +203,24 @@ which has a gate of its own", with that commit's verdict. Until a report names t
 exact commit, its gate is pending. A pipeline that tests only the newest commit of a
 push leaves a landing inside a stack without a report.
 
+When `change --state merged` arrives, Mainworthy records the head's gate before moving
+any landing to trunk. The web and iPhone pages show **Head H when the merge was reported**
+beside the current head gate, with the report time. Expand **Counted results** to see
+what counted and how each result stood then, including the decisions behind its standing.
+The receipt records pending, failed and blocked gates too. It describes what Mainworthy
+knew when the report arrived, not the actual merge time or permission to merge.
+
+Repeating the merge report for the same head preserves the receipt, even after late jobs
+or new decisions change the live gate. Correcting `head` records another receipt at that
+new report time. Correcting only `landing` keeps the receipt. Reopening or closing without
+merging removes the active receipt. A later merge takes a new one. Audit exports retain
+all these observations. `impact --change` includes the active receipt as `change.mergeReceipt`.
+The `gate` command and its exit code keep describing the current head gate.
+
+A merge recorded before this feature has no receipt. Reporting it again records a
+receipt of today's gate, labelled with today's report time. Archives omit receipts with
+the change's end, so an imported change is open and has no merge receipt.
+
 A fast-forward lands the head itself. Then the page says "Merged as its head", and the
 head's gate is judged on trunk. All the landed commit's
 environments belong to trunk, including environments reported later. Reports that

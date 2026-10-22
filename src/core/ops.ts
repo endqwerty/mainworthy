@@ -521,7 +521,9 @@ export const ChangeInput = z.object({
 	change: z.string().min(1).max(300).describe("The change, for example pr:482."),
 	state: z
 		.enum(["merged", "closed", "open"])
-		.describe("How the change ended: merged, or closed without merging. open: it is open again."),
+		.describe(
+			"How the change ended: merged records the head gate when reported; closed is without merging. open: it is open again.",
+		),
 	head: z
 		.string()
 		.min(7)

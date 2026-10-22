@@ -134,6 +134,25 @@ struct ChangeLandingLiveTests {
 		let detail = try await client.details(of: change)
 		#expect(detail.change.landing == .asCommit(expected) && detail.gate.verdict == .blocked)
 	}
+	@Test("a fast-forward keeps its reported pass beside the current blocked head")
+	func receipt() async throws {
+		let client = try await Live.signedIn().project(try await Live.project())
+		let before = try await client.details(of: "pr:482")
+		let question = try #require(before.questions.first { $0.kind == .failure })
+		let choice = try #require(question.choices.first { $0.answer == "flaky" })
+		_ = try await client.answer(question, with: choice)
+		let head = try #require(before.change.head)
+		let _: JSONValue = try await client.server.write("change", in: client.key, [
+			"change": "pr:482", "state": "merged", "head": .string(head),
+			"landing": ["commit": .string(head), "branch": "main"],
+		])
+		let detail = try await client.details(of: "pr:482")
+		let receipt = try #require(detail.mergeReceipt)
+		#expect(receipt.head == head && receipt.verdict == .passed)
+		#expect(detail.gate.verdict == .blocked)
+		#expect(receipt.results.contains { $0.standing == "excused" && $0.answer == "flaky" })
+	}
+
 }
 
 @Suite("Change values")

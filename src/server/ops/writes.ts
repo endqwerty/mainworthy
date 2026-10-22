@@ -31,6 +31,7 @@ import {
 	raiseFailure,
 	raiseFailures,
 	raiseSteps,
+	recordMergeReceipt,
 	refold,
 	stopAskingAbout,
 	undo,
@@ -504,7 +505,7 @@ export function changeEnds(ctx: Ctx, input: ChangeInput): ChangeReply {
 	const same = change.ended === ended;
 	const headed = input.head ? observeEndingHead(ctx, change, input.head) : change;
 	const moved = headed !== change;
-	const now = same ? headed : setChangeEnded(ctx, headed, ended);
+	const now = ended === "merged" ? recordMergeReceipt(ctx, headed) : same ? headed : setChangeEnded(ctx, headed, ended);
 	// An open change whose head moved is asked about as a report that moved it would be: the old head's questions
 	// dissolve, and the new head's unexplained failures are asked about.
 	if (ended === null && moved) refold(ctx, changeRunsOf(ctx.db, now.id), { dissolveStale: true });
@@ -512,14 +513,19 @@ export function changeEnds(ctx: Ctx, input: ChangeInput): ChangeReply {
 		ended === null ? (same && !moved ? [] : askAgainAbout(ctx, now)) : same ? [] : stopAskingAbout(ctx, now);
 	const landed = input.landing ? landChange(ctx, now, input.landing) : null;
 	if (landed) refreshCommitScope(ctx, landed);
-	return { change: now.key, state: input.state, questions, already: same && !moved && landed === null };
+	return {
+		change: now.key,
+		state: input.state,
+		questions,
+		already: same && !moved && landed === null && now.receipt === change.receipt,
+	};
 }
 
 export const changeOp = defineOp({
 	name: "change",
 	output: REPLIES.change,
 	summary:
-		"Say that a change ended (merged, or closed without merging) or is open again. An ended change is not asked about.",
+		"Say that a change ended or is open again. A merge records the head gate when reported. An ended change is not asked about.",
 	input: ChangeInput,
 	needs: "record",
 	scope: "project",

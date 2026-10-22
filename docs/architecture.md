@@ -494,6 +494,13 @@ A route added to the HTTP surface gets the headers without knowing of them: the 
 would answer by itself. One reply cannot say how the browser arrived: Bun hands its error handler no request,
 so a 500 carries every header but `Strict-Transport-Security` and `Cross-Origin-Opener-Policy`.
 
+A merge report records its head gate before a landing can change the commit's scope. The decisions module
+appends the immutable observation to `merge_receipts`, then mints a `merge-receipt` Witness. The evidence
+module requires that witness to select it through `change_ends.receipt`. This internal decision records
+what was read, with no queue question or approval. `impact` reads the active receipt; audit exports read
+all retained observations. Reopening clears the selection, and archives omit both tables ([decision
+0133](decisions/0133-a-merge-report-keeps-a-receipt-of-the-head-gate.md)).
+
 ## Rules the code enforces on itself
 
 `test/architecture.test.ts` fails the check when: a source file belongs to an unlisted layer; a static or

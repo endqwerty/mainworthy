@@ -1,6 +1,7 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { z } from "zod";
+import { MergeReceipt } from "../../core/changes.ts";
 import { ANSWER_LABELS } from "../../core/kinds.ts";
 import {
 	RESULT_STANDING_LABELS,
@@ -44,6 +45,7 @@ const Change = z.object({
 });
 type Change = z.infer<typeof Change>;
 const Impact = z.object({
+	change: z.object({ head: z.string().nullable(), mergeReceipt: MergeReceipt.nullable() }),
 	counts: z.object({ cases: z.number(), unreviewed: z.number(), failing: z.number(), uncovered: z.number() }),
 	cases: z.array(
 		z.object({
@@ -194,6 +196,9 @@ function ChangesWorkbench() {
 										})}
 								</div>
 							)}
+							{current?.state === "merged" && impactData.success && impactData.data.change.head === current.head && (
+								<MergeGateReceipt receipt={impactData.data.change.mergeReceipt} />
+							)}
 							{current && <ChangeEnding change={current} />}
 							<SectionHeading>Open questions</SectionHeading>
 							{open.error && <p role="status">{open.error.message}</p>}
@@ -312,6 +317,44 @@ function ChangesWorkbench() {
 				)}
 			</section>
 		</>
+	);
+}
+
+function MergeGateReceipt({ receipt }: { receipt: MergeReceipt | null }) {
+	if (!receipt) return <p className="change-ended-note">No gate receipt was recorded when this merge was reported.</p>;
+	return (
+		<section className={`change-merge-receipt v-${receipt.gate.verdict}`} aria-label="Gate when the merge was reported">
+			<span className="dim">Head {receipt.head?.slice(0, 12) ?? "not reported"} when the merge was reported</span>
+			<b className="change-verdict">{receipt.gate.verdict}</b>
+			<p>
+				<GateReason reason={receipt.gate.reason} waiting={receipt.gate.waiting} />
+			</p>
+			<time dateTime={new Date(receipt.at).toISOString()}>{new Date(receipt.at).toLocaleString()}</time>
+			<details>
+				<summary>Counted results</summary>
+				{receipt.results.length === 0 && <p>No results counted at that time.</p>}
+				{receipt.results.map((row) => {
+					const decision = receipt.decisions.find((decision) => decision.id === row.decision);
+					return (
+						<div className="change-receipt-result" key={row.result}>
+							<span className={`s-${row.standing}`}>{RESULT_STANDING_LABELS[row.standing]}</span>
+							<span>
+								{row.name}
+								<small className="dim">
+									{row.test} · result {row.result} · {row.method} · {row.job}
+									{row.env ? ` · ${row.env}` : ""}
+								</small>
+							</span>
+							{decision && (
+								<span>
+									Decision {decision.id}: {ANSWER_LABELS[decision.answer.is] ?? decision.answer.is}
+								</span>
+							)}
+						</div>
+					);
+				})}
+			</details>
+		</section>
 	);
 }
 

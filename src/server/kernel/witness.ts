@@ -1,5 +1,5 @@
 // Proof that a decision was made. Every writer of standing (the current version of a case, a test's link to a
-// case, an excuse, a closed run, the policy) takes a Witness, and only the decision machinery can make one, so
+// case, an excuse, a closed run, the policy, a merge receipt) takes a Witness, and only the decision machinery can make one, so
 // there is no code path that changes standing without a row in the ledger (principle P0).
 //
 // What holds it, none of it a naming convention:
@@ -14,19 +14,22 @@
 // And the database refuses standing that cites a decision the ledger does not hold (foreign keys in the schema).
 import type { Kind } from "../../core/kinds.ts";
 
+/** Receipt decisions have their own ledger and no public question or policy clause. */
+type WitnessKind = Kind | "merge-receipt";
+
 /** Known only inside this module. The constructor refuses any call that does not present it. */
 const KEY: unique symbol = Symbol("witness");
 
 export class Witness {
 	readonly #decision: number;
-	readonly #kind: Kind;
+	readonly #kind: WitnessKind;
 	readonly #signers: readonly number[];
 	readonly #expiresAt: number | null;
 
 	private constructor(
 		key: typeof KEY,
 		decision: number,
-		kind: Kind,
+		kind: WitnessKind,
 		signers: readonly number[],
 		expiresAt: number | null,
 	) {
@@ -48,7 +51,7 @@ export class Witness {
 	}
 
 	/** @internal See `decisionOf`. */
-	static decisionOf(value: Witness, kind: Kind): number {
+	static decisionOf(value: Witness, kind: WitnessKind): number {
 		if (typeof value !== "object" || value === null || !(#decision in value))
 			throw new Error("standing can only be changed by a decision: this is not a witness");
 		if (value.#kind !== kind)
@@ -66,11 +69,16 @@ export class Witness {
 	}
 }
 
-export type Mint = (decision: number, kind: Kind, signers: readonly number[], expiresAt: number | null) => Witness;
+export type Mint = (
+	decision: number,
+	kind: WitnessKind,
+	signers: readonly number[],
+	expiresAt: number | null,
+) => Witness;
 
 /**
- * The one mint. `decisions/decisions.ts` claims it when it loads; a second claim throws. `settle` there is its
- * only caller, right after it has written the decision row.
+ * The one mint. `decisions/decisions.ts` claims it when it loads; a second claim throws. `settle` and `recordMergeReceipt` there mint only after writing
+ * their decision row, in the question ledger or the internal receipt ledger respectively.
  */
 export const claimMint = (): Mint => Witness.claim();
 
@@ -79,4 +87,4 @@ export const claimMint = (): Mint => Witness.claim();
  * writer stores this id and nothing it was handed directly. It throws for anything that is not a minted witness
  * and for a witness of another kind.
  */
-export const decisionOf = (witness: Witness, kind: Kind): number => Witness.decisionOf(witness, kind);
+export const decisionOf = (witness: Witness, kind: WitnessKind): number => Witness.decisionOf(witness, kind);
