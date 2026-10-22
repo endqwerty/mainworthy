@@ -178,7 +178,7 @@ private struct TestResultRow: View {
 	var body: some View {
 		VStack(alignment: .leading, spacing: 4) {
 			HStack(spacing: 6) {
-				Tag(text: result.outcome, tint: outcomeTint(result.outcome))
+				Tag(text: result.isFlaky ? "flaky" : result.outcome, tint: result.isFlaky ? .warn : outcomeTint(result.outcome))
 				Spacer(minLength: 0)
 				Text(result.at, format: .relative(presentation: .named)).font(.caption).foregroundStyle(.secondary)
 			}
@@ -190,7 +190,17 @@ private struct TestResultRow: View {
 			}
 			Text(facts(job: result.job, attempt: result.attempt, duration: result.duration, by: result.by, model: result.model))
 				.font(.caption).foregroundStyle(.secondary)
+			if let retry = result.passedOnRetry {
+				Text("passed on attempt \(retry)").font(.caption).foregroundStyle(.secondary)
+			}
+			if !result.tries.isEmpty {
+				Text("the runner's tries: \((result.tries.map(\.outcome) + [result.outcome]).joined(separator: ", "))")
+					.font(.caption).foregroundStyle(.secondary)
+			}
 			if let message = result.message { Text(message).font(.footnote).lineLimit(4) }
+			else if result.flakedInRun, let earlier = result.tries.first(where: { $0.message != nil })?.message {
+				Text("An earlier try: \(earlier)").font(.footnote).lineLimit(4)
+			}
 			if let steps = result.steps { ResultTrailView(steps: steps, result: result.id, attachments: attachments) }
 			if let build = result.build { Link("Open the build", destination: build).font(.footnote) }
 		}

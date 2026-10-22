@@ -465,6 +465,11 @@ The page also shows how often the test flipped between passing and failing on th
 twenty results. Each result names its commit, change, job, who reported it and the build. A test opened from a
 change's results shows the same page.
 
+A result says **flaky** when the runner's tries both passed and failed, or a later pipeline attempt passed
+after that result failed. The page lists the runner's earlier tries followed by its final outcome, and names
+the passing pipeline attempt when there is one. When a flaky result has no message of its own, the page shows
+the first reported message from an earlier try.
+
 ## Answer during a network drop
 
 You can answer questions whose evidence the app has already shown, except when linking tests or creating cases from a question's page.

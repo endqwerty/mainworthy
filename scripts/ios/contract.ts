@@ -632,6 +632,14 @@ export const TestDetail = struct("TestDetail", "`get` with a T- ref: a test and 
 	quarantine: maybe(TestQuarantine),
 	last: list(
 		struct("TestResult", "One of a test's latest results, newest first.", {
+			passedOnRetry: nullable(whole),
+			tries: list(
+				struct("RunnerTry", "An earlier try by the runner in this run, oldest first.", {
+					outcome: text,
+					message: nullable(text),
+					durationMs: nullable(number),
+				}),
+			),
 			model: maybe(text),
 			steps: nullable(list(ResultStep)),
 			id: whole,
