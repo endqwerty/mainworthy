@@ -1,4 +1,4 @@
-# 0133: A failed stream permission check closes the stream
+# 0139: A failed stream permission check closes the stream
 
 Date: 2026-10-22. Builds on decision 0108.
 
