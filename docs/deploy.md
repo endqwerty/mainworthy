@@ -302,20 +302,28 @@ frontend public
     default_backend stack
 
 backend stack
+    http-request disable-l7-retry unless { method GET HEAD }
     server ingress 127.0.0.1:7359
 ```
 
 - `retries 90` with `timeout connect 1s` is the hold: HAProxy waits the shorter of the two, one second,
   before it tries a refused connection again.
-- `empty-response`: when the new ingress starts, Docker's port proxy accepts a connection on 7359 before
-  nginx in the container listens, and closes it without a reply. That request reached nothing, so it is
-  sent again whatever its method. The old ingress cannot produce such a reply for a request it took: Docker
-  stops it with SIGQUIT, nginx stops accepting connections and finishes the requests it has, and only one
-  that runs past Coolify's 30-second stop is cut off.
+- Not every moment of a deploy refuses. Docker's port proxy accepts a connection on 7359 and closes it
+  without a reply whenever its container runs but nginx does not listen: for a few milliseconds when the new
+  ingress starts, and from the moment the old one gets SIGQUIT until its container exits. `empty-response`
+  sends such a request again at once, without the one-second pause, and only a GET or a HEAD: an empty
+  reply can also follow a write the app has committed, and sending that again would make it twice. A write
+  that meets one gets 502.
+- `worker_shutdown_timeout 500ms` in the ingress keeps the second window short. nginx stops listening on
+  SIGQUIT and then waits for the responses it has open, and a change stream stays open until somebody
+  closes it. On the owner's host, with one slow response open, the old ingress took 31.2 s to stop and
+  answered every new connection with no reply for 30.3 s; with a one-second timeout, 2.0 s and 1.1 s. The
+  timeout closes what is left after half a second, and a request still running then is cut off.
 - `option http-server-close` opens a new connection to the ingress for every request, so none is reused
   after the stack it belonged to has gone.
 - The two timeouts are longer than the ingress's 300 s; an open change stream sends a heartbeat every 20 s.
-- No `option forwardfor`: the proxy adds and changes no header. The ingress still sets the scheme and the
+- No `option forwardfor`: the proxy adds no `X-Forwarded-For` and leaves `Host` and `CF-Connecting-IP` as
+  they are; it only sends `Connection: close` towards the ingress. The ingress still sets the scheme and the
   client address from `CF-Connecting-IP`, and the app still trusts only the ingress.
 - The ingress keeps `condition: service_healthy`: until the app is healthy nothing listens on 7359 and
   requests wait. An ingress that started first would answer 502 itself, and that is not tried again.
