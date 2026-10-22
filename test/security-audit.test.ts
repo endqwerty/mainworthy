@@ -186,6 +186,9 @@ test("ls-tree's output is read as bytes, and a path that is not UTF-8 is marked 
 	expect(raw?.exact).toBe(false);
 	expect(raw && unwritable(raw)).toContain("is not a UTF-8 path");
 	expect(parseTree(Buffer.alloc(0))).toEqual([]);
+	const bom = parseTree(Buffer.from(`100644 blob ${"4".repeat(40)}\t\ufeffcode.ts\u0000`))[0];
+	expect(bom?.path).toBe("\ufeffcode.ts");
+	expect(bom?.exact).toBe(true);
 });
 
 test("the documented launcher loads no start-up file of the checkout before the script refuses", () => {

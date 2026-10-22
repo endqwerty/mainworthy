@@ -125,10 +125,12 @@ export function launchProblem(cwd: string, repo: string): string | null {
  * UTF-8, so `path` (decoded with replacement characters) is not the name git holds. */
 export type Entry = { mode: string; sha: string; path: string; exact: boolean };
 
-const strict = new TextDecoder("utf-8", { fatal: true });
-const loose = new TextDecoder("utf-8");
+// `ignoreBOM` keeps a leading U+FEFF in the name; a decoder drops it by default, and `code.ts` would stand for it.
+const strict = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+const loose = new TextDecoder("utf-8", { ignoreBOM: true });
 
-/** `git ls-tree -r -z`'s output, read as bytes: a path is decoded only when it is UTF-8. */
+/** `git ls-tree -r -z`'s output, read as bytes: a path is exact only when it is UTF-8 and encodes back to the same
+ * bytes. */
 export function parseTree(output: Uint8Array): Entry[] {
 	const entries: Entry[] = [];
 	let at = 0;
@@ -143,6 +145,7 @@ export function parseTree(output: Uint8Array): Entry[] {
 		let exact = true;
 		try {
 			path = strict.decode(name);
+			exact = Buffer.from(path, "utf8").equals(name);
 		} catch {
 			exact = false;
 		}
