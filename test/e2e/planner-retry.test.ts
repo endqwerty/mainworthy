@@ -748,3 +748,137 @@ for (const reload of [false, true])
 		},
 		30_000,
 	);
+
+check(
+	"a stale tab's retry preserves another tab's newer uncertain plan",
+	async () => {
+		const server = await startServer();
+		const view = await openPage(server, { path: "/p/scratch/runs" });
+		try {
+			await server.api("propose", { edits: [{ op: "create", outline: "Checkout opens\n  Open checkout > Ready" }] });
+			const { page, context } = view;
+			const key = `${await devicePrefix(server, server.token)}run-plan:scratch`;
+			const first: Api["plan"]["input"][] = [];
+			await page.route("**/plan", async (route) => {
+				first.push(route.request().postDataJSON());
+				if (first.length > 1) return route.continue();
+				const response = await route.fetch();
+				expect(response.ok()).toBe(true);
+				await route.abort();
+			});
+			await page.keyboard.press("n");
+			await page.getByLabel("Run name").fill("Plan X");
+			await page.locator('.run-planner button[type="submit"]').click();
+			await page.getByRole("button", { name: "Enter Retry plan", exact: true }).waitFor();
+			const other = await context.newPage();
+			await other.goto(`${server.url}/p/scratch/runs`);
+			await other.getByRole("listbox", { name: "Runs", exact: true }).waitFor();
+			await other.keyboard.press("n");
+			await other.getByRole("button", { name: "Discard this plan", exact: true }).click();
+			const second: Api["plan"]["input"][] = [];
+			await other.route("**/plan", async (route) => {
+				second.push(route.request().postDataJSON());
+				if (second.length > 1) return route.continue();
+				const response = await route.fetch();
+				expect(response.ok()).toBe(true);
+				await route.abort();
+			});
+			await other.getByLabel("Run name").fill("Plan Y");
+			await other.locator('.run-planner button[type="submit"]').click();
+			await other.getByRole("button", { name: "Enter Retry plan", exact: true }).waitFor();
+			await page.bringToFront();
+			await page.getByRole("button", { name: "Enter Retry plan", exact: true }).click();
+			await eventually(
+				async () => ({ status: await page.locator("#stat").textContent(), url: page.url() }),
+				({ status, url }) =>
+					status === "Another tab's plan is waiting; Retry plan sends it." || url.endsWith("/runs/1"),
+			);
+			expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? "null"), key)).toEqual(second[0]);
+			expect(first).toHaveLength(1);
+			expect(await page.getByLabel("Run name").inputValue()).toBe("Plan Y");
+			expect(await page.getByLabel("Run name").isEditable()).toBe(false);
+			await other.bringToFront();
+			await other.keyboard.press("Escape");
+			await other.keyboard.press("n");
+			expect(await other.getByLabel("Run name").inputValue()).toBe("Plan Y");
+			await other.getByRole("button", { name: "Enter Retry plan", exact: true }).click();
+			await other.waitForURL("**/runs/2");
+			expect(second).toHaveLength(2);
+			expect(second[1]).toEqual(second[0]);
+			expect(
+				Run.array()
+					.parse((await server.api("find", { in: "runs", origin: "planned" })).items)
+					.map((run) => run.name)
+					.sort(),
+			).toEqual(["Plan X", "Plan Y"]);
+		} finally {
+			await view.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+check(
+	"a recorded plan's changed-request conflict keeps its saved command and explains recovery",
+	async () => {
+		const server = await startServer();
+		const view = await openPage(server, { path: "/p/scratch/runs" });
+		try {
+			await server.api("propose", { edits: [{ op: "create", outline: "Checkout opens\n  Open checkout > Ready" }] });
+			const { page } = view;
+			const key = `${await devicePrefix(server, server.token)}run-plan:scratch`;
+			const sent: Api["plan"]["input"][] = [];
+			await page.route("**/plan", async (route) => {
+				const input: Api["plan"]["input"] = route.request().postDataJSON();
+				sent.push(input);
+				const response = await route.fetch(
+					sent.length > 1 ? { postData: JSON.stringify({ ...input, require: [] }) } : {},
+				);
+				if (sent.length === 1) {
+					expect(response.ok()).toBe(true);
+					return route.abort();
+				}
+				expect(response.status()).toBe(409);
+				expect(await response.json()).toMatchObject({
+					ok: false,
+					error: {
+						code: "conflict",
+						message: "this command id was already used for another request; send new content under a new id",
+					},
+				});
+				await route.fulfill({ response });
+			});
+			await page.keyboard.press("n");
+			await page.getByLabel("Run name").fill("Recorded before the format change");
+			await page.locator('.run-planner button[type="submit"]').click();
+			await page.getByRole("button", { name: "Enter Retry plan", exact: true }).waitFor();
+			await page.getByRole("button", { name: "Enter Retry plan", exact: true }).click();
+			await eventually(
+				() => page.locator("#stat").textContent(),
+				(status) => Boolean(status?.includes("Check Runs") || status?.startsWith("this command id was already used")),
+			);
+			const original = sent[0];
+			if (!original) throw new Error("No plan was submitted");
+			expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? "null"), key)).toEqual(original);
+			expect(await page.getByLabel("Run name").isEditable()).toBe(false);
+			expect(await page.locator("#stat").textContent()).toContain("A run may already exist. Check Runs");
+			await page.reload();
+			await page.getByRole("listbox", { name: "Runs", exact: true }).waitFor();
+			await page.keyboard.press("n");
+			expect(await page.getByLabel("Run name").inputValue()).toBe("Recorded before the format change");
+			await page.getByRole("button", { name: "Enter Retry plan", exact: true }).click();
+			await eventually(
+				() => page.locator("#stat").textContent(),
+				(status) => Boolean(status?.includes("Check Runs")),
+			);
+			expect(sent).toHaveLength(3);
+			for (const input of sent) expect(input).toEqual(original);
+			expect((await server.api("find", { in: "runs", origin: "planned" })).items).toHaveLength(1);
+		} finally {
+			await view.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);

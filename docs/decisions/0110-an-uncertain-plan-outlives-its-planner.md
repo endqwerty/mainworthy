@@ -21,6 +21,9 @@ Cancel and Escape may close the planner because the command survives outside the
 success removes only the matching saved command. An operation's `invalid`, `conflict`, or `not_found`
 refusal releases the choices, including on a retry: the registry replays a matching recorded command
 before running `plan`. The fixed request passes the same input schema, and `plan` records atomically.
+A registry conflict saying that the command was already used for another request keeps the plan saved
+and locked: it proves a command was recorded, not that no run exists. This can follow an input-format
+change between deploys. The planner says a run may already exist and to check Runs before discarding.
 An unreadable or lost reply, `internal`, `unauthenticated`, `forbidden`, or `limited` reply keeps the
 command saved. These failures can happen before replay. The registry also returns `not_found` before
 replay for an unknown operation or a missing project or grant. HTTP can also refuse a missing route.
@@ -28,8 +31,10 @@ Those exact replies keep the command.
 
 Discard this plan releases a pending request with a warning that it may already have been recorded.
 It does not undo a run. Invalid saved data is removed at the storage boundary and treated as absent.
-A planner that discovers another tab's pending request on submit shows its choices and a notice,
-then waits for an explicit Retry plan before sending it. Late replies cannot clear another command
+A planner reads shared storage on every submit, including a retry. If another command is saved there,
+it shows that request's choices and a notice, then waits for an explicit Retry plan before sending it.
+An already saved retry is not written over the shared key again. A stale tab therefore cannot replace
+a newer saved request with the command it still shows. Late replies cannot clear another command
 or restore data that the person cleared. If the browser cannot save the request, planning stops before
 the network write.
 
