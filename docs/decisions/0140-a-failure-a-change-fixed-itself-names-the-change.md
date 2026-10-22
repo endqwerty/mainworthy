@@ -17,10 +17,20 @@ which names its issue.
 
 ## Decision
 
-**The ending names the change, read when the question is read.** A question's decision carries `fixedIn`, the
-change's key and whether it is `open`, `merged` or `closed`, when the decision is the `passed` ending of a question
-whose scope is a pull request or branch. Nothing new is stored: the ending row, the question's scope and the
-change's end already hold it, and the state is read now, so "before it merged" appears once the merge is reported.
+**The ending names the change when the change fixed it.** A question's decision carries `fixedIn`, the change's
+key and whether it is `open`, `merged` or `closed`, when all of these hold:
+
+- the decision is the `passed` ending of a question whose scope is a pull request or branch;
+- the commit that passed is not one the cause failed on in that scope. A `passed` ending records this in its answer
+  as `on: "later-commit"` or `"same-commit"`, decided by `passedIn` from the same failures it already reads. A
+  commit that ran again and passed is a retry, which proves no fix;
+- the ending came before the change ended (`change_ends.at`, which a repeated identical end does not move). A pass
+  reported after the merge says nothing about what merged.
+
+The state is read now, so "before it merged" appears once the merge is reported. Anything else keeps the rule and
+reason it had. Endings recorded before this decision have no `on` and claim no fix: what passed is only in their
+reason's text, and a claim read from text would be a guess. The verifier of the first version found both the retry
+and the late report (GPT 6.1 Sol, 2026-10-22).
 `fixedInText` in `src/core/kinds.ts` writes the sentence for the web; the iPhone app writes it again and a parity
 table holds it to the same words.
 
