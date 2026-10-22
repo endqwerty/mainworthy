@@ -640,3 +640,85 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+for (const outcome of ["adopted", "refused"] as const) {
+	test.skipIf(!browserAvailable)(
+		`a typed tag stays visible and saves after its pending removal is ${outcome}`,
+		async () => {
+			const server = await startServer();
+			await server.api("propose", { edits: [{ op: "create", body: { title: "Independent removal intent" } }] });
+			const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+			let release = () => {};
+			try {
+				const { page } = h;
+				await page.getByRole("button", { name: "Independent removal intent", exact: true }).waitFor();
+				await page.keyboard.press("t");
+				await page.getByRole("textbox", { name: "Tag selected cases" }).fill("alpha");
+				await page.keyboard.press("Enter");
+				await eventually(
+					() => server.api("get", { refs: ["C-1"] }),
+					(rows) => {
+						const tags = rows[0]?.tags;
+						return Array.isArray(tags) && tags.includes("alpha");
+					},
+				);
+				await page.waitForFunction(() => document.querySelector("#stat")?.textContent?.includes("changed."));
+				const held = new Promise<void>((resolve) => {
+					release = resolve;
+				});
+				let first = true;
+				await page.context().route("**/api/p/scratch/propose", async (route) => {
+					if (!first) return route.continue();
+					first = false;
+					await held;
+					if (outcome === "adopted") await route.continue();
+					else
+						await route.fulfill({
+							status: 403,
+							contentType: "application/json",
+							body: JSON.stringify({ ok: false, error: { code: "forbidden", message: "Tag refused" } }),
+						});
+				});
+				await page.keyboard.press("u");
+				await page.waitForFunction(() => !document.querySelector(".ctags")?.textContent?.includes("#alpha"));
+				await page.keyboard.press("e");
+				const title = page.getByRole("textbox", { name: "Case title", exact: true });
+				await title.fill("My title #alpha");
+				await title.press("Enter");
+				const shownWhileHeld = await page.locator(".ctags").textContent();
+				if (outcome === "adopted" && process.env.MAINWORTHY_TAG_REMOVAL_SCREENSHOT)
+					await page.screenshot({ path: process.env.MAINWORTHY_TAG_REMOVAL_SCREENSHOT });
+				const reply = page.waitForResponse((response) => response.url().endsWith("/api/p/scratch/propose"));
+				release();
+				await reply;
+				if (outcome === "adopted") {
+					await page.waitForFunction(() => document.querySelector("#stat")?.textContent?.startsWith("Undone."));
+					await eventually(
+						() => server.api("get", { refs: ["C-1"] }),
+						(rows) => {
+							const tags = rows[0]?.tags;
+							return Array.isArray(tags) && tags.length === 0;
+						},
+					);
+				} else await page.waitForFunction(() => document.querySelector("#stat")?.textContent?.includes("Tag refused"));
+				const shownAfter = await page.locator(".ctags").textContent();
+				await title.press("Control+Enter");
+				await eventually(
+					() => server.api("get", { refs: ["C-1"] }),
+					(rows) => rows[0]?.title === "My title",
+				);
+				await page.waitForFunction(() => document.querySelector("#stat")?.textContent?.startsWith("Version 2,"));
+				const saved = (await server.api("get", { refs: ["C-1"] }))[0];
+				expect(saved?.tags).toEqual(["alpha"]);
+				expect(shownWhileHeld).toContain("#alpha");
+				expect(shownAfter).toContain("#alpha");
+				expect(await page.locator(".ctags").textContent()).toContain("#alpha");
+			} finally {
+				release();
+				await h.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+}
