@@ -88,7 +88,10 @@ export const UNEXPORTED: readonly string[] = [
 	"passkey_users",
 	"tokens",
 	"change_ends",
+	"merge_receipt_members",
 	"merge_receipts",
+	"merge_receipt_snapshots",
+	"merge_receipt_payloads",
 	"tracker_requests",
 	"tracker_polls",
 	"scope_moves",
@@ -169,6 +172,7 @@ function discoverTables(db: Db): Table[] {
 
 /** Tables whose project is held by a parent rather than their own row. Unknown unscoped tables fail closed. */
 const PROJECT_PARENT: Readonly<Record<string, { column: string; table: string }>> = {
+	merge_receipt_members: { column: "snapshot", table: "merge_receipt_snapshots" },
 	attachments: { column: "result", table: "results" },
 	answers: { column: "question", table: "questions" },
 	versions: { column: "case_id", table: "cases" },

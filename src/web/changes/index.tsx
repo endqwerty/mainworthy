@@ -1,7 +1,7 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { z } from "zod";
-import { MergeReceipt } from "../../core/changes.ts";
+import { MergeReceipt, MergeReceiptResult } from "../../core/changes.ts";
 import { ANSWER_LABELS } from "../../core/kinds.ts";
 import {
 	RESULT_STANDING_LABELS,
@@ -321,38 +321,56 @@ function ChangesWorkbench() {
 }
 
 function MergeGateReceipt({ receipt }: { receipt: MergeReceipt | null }) {
+	const { project } = useApp();
+	const [expanded, setExpanded] = useState(false);
+	const input = { in: "receipt-results" as const, receipt: receipt?.id, limit: 50 };
+	const pages = useInfiniteQuery({
+		queryKey: queryKey({ project, op: "find", input }),
+		enabled: expanded && receipt !== null,
+		initialPageParam: "",
+		queryFn: ({ pageParam, signal }) =>
+			call("find", { ...input, ...(pageParam ? { cursor: pageParam } : {}) }, { project, signal }),
+		getNextPageParam: (page) => page.cursor ?? undefined,
+	});
 	if (!receipt) return <p className="change-ended-note">No gate receipt was recorded when this merge was reported.</p>;
+	const rows = pages.data?.pages.flatMap((page) => page.items.map((row) => MergeReceiptResult.parse(row))) ?? [];
 	return (
 		<section className={`change-merge-receipt v-${receipt.gate.verdict}`} aria-label="Gate when the merge was reported">
 			<span className="dim">Head {receipt.head?.slice(0, 12) ?? "not reported"} when the merge was reported</span>
 			<b className="change-verdict">{receipt.gate.verdict}</b>
-			<p>
-				<GateReason reason={receipt.gate.reason} waiting={receipt.gate.waiting} />
-			</p>
+			<p>{receipt.gate.reason}</p>
 			<time dateTime={new Date(receipt.at).toISOString()}>{new Date(receipt.at).toLocaleString()}</time>
-			<details>
+			<details onToggle={(event) => setExpanded(event.currentTarget.open)}>
 				<summary>Counted results</summary>
-				{receipt.results.length === 0 && <p>No results counted at that time.</p>}
-				{receipt.results.map((row) => {
-					const decision = receipt.decisions.find((decision) => decision.id === row.decision);
-					return (
-						<div className="change-receipt-result" key={row.result}>
-							<span className={`s-${row.standing}`}>{RESULT_STANDING_LABELS[row.standing]}</span>
+				<p className="dim">
+					{receipt.count} {receipt.count === 1 ? "result" : "results"} counted at that time.
+				</p>
+				{receipt.count === 0 && <p>No results counted at that time.</p>}
+				{pages.isPending && expanded && <p>Reading counted results…</p>}
+				{pages.error && <p role="alert">{pages.error.message}</p>}
+				{rows.map((row) => (
+					<div className="change-receipt-result" key={`${row.result}:${row.method}:${row.job}:${row.env}`}>
+						<span className={`s-${row.standing}`}>{RESULT_STANDING_LABELS[row.standing]}</span>
+						<span>
+							{row.name}
+							<small className="dim">
+								{row.test} · result {row.result} · {row.method} · {row.job}
+								{row.env ? ` · ${row.env}` : ""}
+							</small>
+						</span>
+						{row.decision !== null && (
 							<span>
-								{row.name}
-								<small className="dim">
-									{row.test} · result {row.result} · {row.method} · {row.job}
-									{row.env ? ` · ${row.env}` : ""}
-								</small>
+								Decision {row.decision}:{" "}
+								{row.decisionAnswer ? (ANSWER_LABELS[row.decisionAnswer] ?? row.decisionAnswer) : "recorded"}
 							</span>
-							{decision && (
-								<span>
-									Decision {decision.id}: {ANSWER_LABELS[decision.answer.is] ?? decision.answer.is}
-								</span>
-							)}
-						</div>
-					);
-				})}
+						)}
+					</div>
+				))}
+				{pages.hasNextPage && (
+					<button type="button" disabled={pages.isFetchingNextPage} onClick={() => pages.fetchNextPage()}>
+						More counted results
+					</button>
+				)}
 			</details>
 		</section>
 	);

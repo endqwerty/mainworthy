@@ -1,10 +1,10 @@
 // Storage for the queue and the ledgers. Owns questions, question_refs, answers, decisions and merge_receipts.
 // The rules (who may answer, when a decision holds) are in decisions.ts; this file only reads and writes rows.
-import { MergeReceipt } from "../../core/changes.ts";
+import { MergeReceipt, MergeReceiptResult } from "../../core/changes.ts";
 import { type ActorKind, type Ask, ATTRIBUTED, type Kind } from "../../core/kinds.ts";
 import { type Ctx, ref } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
-import { notFound } from "../kernel/errors.ts";
+import { invalid, notFound } from "../kernel/errors.ts";
 
 export type QuestionRow = {
 	id: number;
@@ -86,6 +86,38 @@ const HOLD_ENDING = `d.supersedes IS NOT NULL AND (
 )`;
 
 const Q = {
+	receiptDecision: sql<{ id: number }, { answer: string }>(
+		"SELECT json_extract(answer, '$.is') AS answer FROM decisions WHERE id=$id",
+	),
+	snapshotByHash: sql<{ project: number; hash: string }, { id: number; count: number; evidence_count: number }>(
+		"SELECT id, count, evidence_count FROM merge_receipt_snapshots WHERE project=$project AND hash=$hash",
+	),
+	insertSnapshot: sql<{ project: number; hash: string; count: number; evidence_count: number }>(
+		"INSERT INTO merge_receipt_snapshots (project,hash,count,evidence_count) VALUES ($project,$hash,$count,$evidence_count)",
+	),
+	insertPayload: sql<{ project: number; hash: string; body: string }>(
+		"INSERT INTO merge_receipt_payloads (project,hash,body) VALUES ($project,$hash,$body) ON CONFLICT (project,hash) DO NOTHING",
+	),
+	payloadByHash: sql<{ project: number; hash: string }, { id: number }>(
+		"SELECT id FROM merge_receipt_payloads WHERE project=$project AND hash=$hash",
+	),
+	insertMember: sql<{ snapshot: number; ordinal: number; kind: string; payload: number }>(
+		"INSERT INTO merge_receipt_members (snapshot,ordinal,kind,payload) VALUES ($snapshot,$ordinal,$kind,$payload)",
+	),
+	evidencePage: sql<
+		{ project: number; receipt: number; after: number; limit: number; kind: string },
+		{ ordinal: number; kind: string; hash: string; body: string }
+	>(
+		`SELECT m.ordinal,m.kind,p.hash,p.body FROM merge_receipts r JOIN merge_receipt_members m ON m.snapshot=r.evidence JOIN merge_receipt_payloads p ON p.id=m.payload
+ WHERE r.id=$receipt AND r.project=$project AND m.ordinal>$after AND m.kind=$kind ORDER BY m.ordinal LIMIT $limit`,
+	),
+	allEvidencePage: sql<
+		{ project: number; receipt: number; after: number; limit: number },
+		{ ordinal: number; kind: string; hash: string; body: string }
+	>(
+		`SELECT m.ordinal,m.kind,p.hash,p.body FROM merge_receipts r JOIN merge_receipt_members m ON m.snapshot=r.evidence JOIN merge_receipt_payloads p ON p.id=m.payload
+ WHERE r.id=$receipt AND r.project=$project AND m.ordinal>$after ORDER BY m.ordinal LIMIT $limit`,
+	),
 	mergeReceipt: sql<{ id: number; project: number }, { id: number; snapshot: string }>(
 		"SELECT id, snapshot FROM merge_receipts WHERE id = $id AND project = $project",
 	),
@@ -96,8 +128,9 @@ const Q = {
 		at: number;
 		seq: number;
 		snapshot: string;
+		evidence: number;
 	}>(
-		"INSERT INTO merge_receipts (project, change, actor, at, seq, snapshot) VALUES ($project, $change, $actor, $at, $seq, $snapshot)",
+		"INSERT INTO merge_receipts (project, change, actor, at, seq, snapshot, evidence) VALUES ($project, $change, $actor, $at, $seq, $snapshot, $evidence)",
 	),
 	latest: sql<{ project: number; fingerprint: string }, QuestionRow>(
 		"SELECT * FROM questions WHERE project = $project AND fingerprint = $fingerprint ORDER BY epoch DESC LIMIT 1",
@@ -556,7 +589,12 @@ export const expiredDecisions = (db: Db, project: number, now: number): Decision
 export const liveDefectDecisions = (db: Db, project: number): DecisionRow[] => db.all(Q.defects, { project });
 
 /** An immutable observation decision, independent of question answers and their holds. */
-export function insertMergeReceipt(ctx: Ctx, change: number, snapshot: Omit<MergeReceipt, "id">): number {
+export function insertMergeReceipt(
+	ctx: Ctx,
+	change: number,
+	snapshot: Omit<MergeReceipt, "id">,
+	evidence: number,
+): number {
 	return ctx.db.run(Q.insertMergeReceipt, {
 		project: ctx.project.id,
 		change,
@@ -564,6 +602,7 @@ export function insertMergeReceipt(ctx: Ctx, change: number, snapshot: Omit<Merg
 		at: ctx.now,
 		seq: ctx.seq,
 		snapshot: JSON.stringify(snapshot),
+		evidence,
 	}).lastId;
 }
 
@@ -571,4 +610,79 @@ export function mergeReceiptById(db: Db, project: number, id: number | null): Me
 	if (id === null) return null;
 	const row = db.get(Q.mergeReceipt, { id, project });
 	return row ? MergeReceipt.parse({ ...json<Record<string, unknown>>(row.snapshot), id: row.id }) : null;
+}
+
+export type ReceiptEvidence = { kind: "result" | "gate"; body: string };
+export const receiptDecisionAnswer = (db: Db, id: number): string => {
+	const row = db.get(Q.receiptDecision, { id });
+	if (!row) throw new Error(`counted decision ${id} is missing`);
+	return row.answer;
+};
+const digest = (body: string) => new Bun.CryptoHasher("sha256").update(body).digest("hex");
+
+/** Two passes under the command transaction: an identical observation writes no payloads or memberships. */
+export function storeMergeSnapshot(ctx: Ctx, contents: () => Iterable<ReceiptEvidence>) {
+	const hash = new Bun.CryptoHasher("sha256").update("mainworthy.merge-receipt.v1\n");
+	let count = 0;
+	let evidence_count = 0;
+	for (const item of contents()) {
+		if (Buffer.byteLength(item.body) > 32768) throw invalid("merge receipt evidence item exceeds 32 KiB");
+		hash.update(`${item.kind}:${digest(item.body)}\n`);
+		if (item.kind === "result") count++;
+		evidence_count++;
+	}
+	const key = hash.digest("hex");
+	const project = ctx.project.id;
+	const existing = ctx.db.get(Q.snapshotByHash, { project, hash: key });
+	if (existing) return { ...existing, hash: key };
+	const id = ctx.db.run(Q.insertSnapshot, { project, hash: key, count, evidence_count }).lastId;
+	let ordinal = 0;
+	for (const item of contents()) {
+		const hash = digest(item.body);
+		ctx.db.run(Q.insertPayload, { project, hash, body: item.body });
+		const payload = ctx.db.get(Q.payloadByHash, { project, hash });
+		if (!payload) throw new Error("receipt payload was not stored");
+		ctx.db.run(Q.insertMember, { snapshot: id, ordinal: ordinal++, kind: item.kind, payload: payload.id });
+	}
+	return { id, hash: key, count, evidence_count };
+}
+
+/** Immutable cursors bind both the receipt and collection; project ownership is checked independently. */
+export function mergeReceiptPage(
+	db: Db,
+	project: number,
+	receipt: number,
+	cursor: string | undefined,
+	limit: number,
+	collection: "results" | "evidence" = "results",
+) {
+	const manifest = mergeReceiptById(db, project, receipt);
+	if (!manifest) throw notFound("merge receipt");
+	const results = collection === "results";
+	const match = cursor ? /^(\d+)\.(results|evidence)\.(\d+)$/.exec(cursor) : null;
+	if (
+		cursor &&
+		(!match || Number(match[1]) !== receipt || match[2] !== collection || !Number.isSafeInteger(Number(match[3])))
+	)
+		throw invalid("that is not a cursor of this receipt collection");
+	const after = match ? Number(match[3]) : -1;
+	const args = { project, receipt, after, limit: Math.min(limit, 50) + 1 };
+	const rows = results ? db.all(Q.evidencePage, { ...args, kind: "result" }) : db.all(Q.allEvidencePage, args);
+	const page: typeof rows = [];
+	let bytes = 0;
+	for (const row of rows) {
+		if (page.length >= Math.min(limit, 50) || bytes + Buffer.byteLength(row.body) > 65536) break;
+		page.push(row);
+		bytes += Buffer.byteLength(row.body);
+	}
+	const last = page.at(-1);
+	return {
+		count: results ? manifest.count : manifest.evidenceCount,
+		items: page.map((row) =>
+			results
+				? MergeReceiptResult.parse(json(row.body))
+				: { ordinal: row.ordinal, kind: row.kind, hash: row.hash, body: row.body },
+		),
+		cursor: rows.length > page.length && last ? `${receipt}.${collection}.${last.ordinal}` : null,
+	};
 }

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { Attachment, AttachmentReply } from "./attachments.ts";
 import { AuditReply } from "./audit.ts";
-import { MergeReceipt } from "./changes.ts";
+import { MergeReceipt, MergeReceiptResult } from "./changes.ts";
 import { CsvImportRow } from "./csv.ts";
 import { Quarantine, SameCodeEvidence } from "./flaky.ts";
 import { HandoffReceipt, HandoffStatus } from "./handoff.ts";
@@ -338,6 +338,7 @@ const GetRow: z.ZodType<Record<string, unknown>> = z.union([
 ]);
 export const GetReply = z.array(GetRow);
 const FindRow: z.ZodType<Record<string, unknown>> = z.union([
+	MergeReceiptResult,
 	CaseSummary,
 	CountedResult,
 	Run,

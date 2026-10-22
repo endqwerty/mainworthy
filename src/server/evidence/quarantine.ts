@@ -22,6 +22,7 @@ const Q = {
 	entry: sql<{ project: number; test: number }, Entry>(
 		"SELECT * FROM quarantines WHERE project = $project AND test = $test",
 	),
+	exists: sql<{ project: number }, { n: number }>("SELECT 1 AS n FROM quarantines WHERE project=$project LIMIT 1"),
 	entries: sql<{ project: number }, Entry>("SELECT * FROM quarantines WHERE project = $project ORDER BY test DESC"),
 	write: sql<Entry>(`INSERT INTO quarantines (project, test, decision, actor, reason, exit_rule, at, seq)
  VALUES ($project,$test,$decision,$actor,$reason,$exit_rule,$at,$seq)
@@ -160,7 +161,7 @@ export function recordQuarantines(ctx: Ctx, results: readonly { id: number }[]):
 }
 
 export function quarantineLookup(db: Db, project: number) {
-	const present = quarantineEntries(db, project).length > 0;
+	const present = db.get(Q.exists, { project }) !== null;
 	return (id: number) => {
 		if (!present) return null;
 		const result = resultById(db, id);

@@ -24,8 +24,12 @@ function time(value: string | undefined): number | undefined {
 export const auditCommand: AdapterCommand = {
 	name: "audit",
 	summary: "Export a project's audit history, or verify a saved audit file offline.",
-	usage: "audit export --out <file> [--from <time>] [--to <time>] | audit verify <file>",
+	usage:
+		"audit export --out <file> [--from <time>] [--to <time>] [--receipt <id> --cursor <cursor> --limit <n>] | audit verify <file>",
 	flags: [
+		{ name: "receipt", kind: "string", description: "Export one bounded page of frozen receipt evidence." },
+		{ name: "cursor", kind: "string", description: "Continue a receipt evidence export." },
+		{ name: "limit", kind: "string", description: "Receipt evidence items per page (1–50)." },
 		{ name: "out", kind: "string", description: "Audit NDJSON destination." },
 		{
 			name: "from",
@@ -38,7 +42,7 @@ export const auditCommand: AdapterCommand = {
 		const action = args.positionals[0];
 		if (action === "verify") {
 			assertPositionals(args, 2, 2, auditCommand.usage);
-			if (["out", "from", "to"].some((flag) => args.has(flag)))
+			if (["out", "from", "to", "receipt", "cursor", "limit"].some((flag) => args.has(flag)))
 				throw new CliError("invalid", "audit verify takes only a file and output flags");
 			const file = Bun.file(args.positionals[1] ?? "");
 			try {
@@ -61,6 +65,9 @@ export const auditCommand: AdapterCommand = {
 		const from = time(args.value("from"));
 		const to = time(args.value("to"));
 		const reply = await client.call("audit", {
+			...(args.value("receipt") ? { receipt: Number(args.value("receipt")) } : {}),
+			...(args.value("cursor") ? { cursor: args.value("cursor") } : {}),
+			...(args.value("limit") ? { limit: Number(args.value("limit")) } : {}),
 			...(from === undefined ? {} : { from }),
 			...(to === undefined ? {} : { to }),
 		});
@@ -72,8 +79,22 @@ export const auditCommand: AdapterCommand = {
 			throw new CliError("invalid", error instanceof Error ? error.message : "invalid audit reply");
 		}
 		await writeFileStream(out, new Blob([reply.ndjson]).stream());
-		if (args.has("json")) printJson({ out, records: reply.records, sha256: reply.sha256 }, args.bool("compact"));
-		else line(`exported ${reply.records} audit records to ${out}`);
+		if (args.has("json"))
+			printJson(
+				{
+					out,
+					records: reply.records,
+					sha256: reply.sha256,
+					...(reply.snapshot
+						? { snapshot: reply.snapshot, evidenceCount: reply.evidenceCount, cursor: reply.cursor }
+						: {}),
+				},
+				args.bool("compact"),
+			);
+		else {
+			line(`exported ${reply.records} audit records to ${out}`);
+			if (reply.cursor) line(`next receipt evidence cursor: ${reply.cursor}`);
+		}
 		return 0;
 	},
 };

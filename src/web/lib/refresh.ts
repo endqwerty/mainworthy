@@ -39,6 +39,7 @@ const suiteOnly = {
 	changes: false,
 	deployments: false,
 	results: false,
+	"receipt-results": false,
 } satisfies Record<z.infer<typeof FindInput>["in"], boolean>;
 
 function contains(input: unknown, match: (value: string) => boolean): boolean {

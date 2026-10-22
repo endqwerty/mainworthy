@@ -32,7 +32,7 @@ const TOKEN_COUNTS: Record<string, number> = {
 	decide: 280,
 	inbox: 165,
 	get: 219,
-	find: 246,
+	find: 279,
 	impact: 164,
 	since: 137,
 };

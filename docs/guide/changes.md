@@ -206,7 +206,8 @@ push leaves a landing inside a stack without a report.
 When `change --state merged` arrives, Mainworthy records the head's gate before moving
 any landing to trunk. The web and iPhone pages show **Head H when the merge was reported**
 beside the current head gate, with the report time. Expand **Counted results** to see
-what counted and how each result stood then, including the decisions behind its standing.
+what counted and how each result stood then, including the decision and answer behind its standing.
+Read another page with **More counted results**. The iPhone panel has a button to read each page.
 The receipt records pending, failed and blocked gates too. It describes what Mainworthy
 knew when the report arrived, not the actual merge time or permission to merge.
 
@@ -214,7 +215,18 @@ Repeating the merge report for the same head preserves the receipt, even after l
 or new decisions change the live gate. Correcting `head` records another receipt at that
 new report time. Correcting only `landing` keeps the receipt. Reopening or closing without
 merging removes the active receipt. A later merge takes a new one. Audit exports retain
-all these observations. `impact --change` includes the active receipt as `change.mergeReceipt`.
+all these observations. `impact --change` includes the active receipt's bounded manifest as
+`change.mergeReceipt`: gate summary, report time, result count and snapshot hash. Frozen results
+are separate immutable pages, at most 50 rows and 64 KiB of evidence per call:
+
+```sh
+mainworthy find --in receipt-results --receipt 12 --limit 50
+mainworthy find --in receipt-results --receipt 12 --cursor 12.results.49 --limit 50
+```
+
+Use the returned cursor, which stays valid through later reports and reopening. Identical
+snapshots share storage across merge observations. Shard details and blocking-question refs
+are retained in [paged audit evidence](./data.md), alongside the decision ledger.
 The `gate` command and its exit code keep describing the current head gate.
 
 A merge recorded before this feature has no receipt. Reporting it again records a

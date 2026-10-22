@@ -150,7 +150,8 @@ struct ChangeLandingLiveTests {
 		let receipt = try #require(detail.mergeReceipt)
 		#expect(receipt.head == head && receipt.verdict == .passed)
 		#expect(detail.gate.verdict == .blocked)
-		#expect(receipt.results.contains { $0.standing == "excused" && $0.answer == "flaky" })
+		let page = try await client.receiptResults(receipt.id)
+		#expect(page.results.contains { $0.standing == "excused" && $0.answer == "flaky" })
 	}
 
 }

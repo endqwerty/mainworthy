@@ -56,6 +56,7 @@ import {
 	targetsOfCommit,
 	targetsWithCommit,
 	testById,
+	waitingShardPages,
 	waitingShards,
 } from "../evidence/evidence.ts";
 import { quarantineLookup } from "../evidence/quarantine.ts";
@@ -114,6 +115,9 @@ export type SlotRow = {
 export type SlotLease = { slot: number; actor: number; since: number; until: number };
 
 const Q = {
+	receiptBlockingCount: sql<{ id: number }, { n: number }>(
+		"SELECT json_array_length(blocking) AS n FROM runs WHERE id=$id",
+	),
 	lease: sql<{ slot: number; now: number }, SlotLease>(
 		"SELECT l.* FROM slot_leases l JOIN slots s ON s.id = l.slot JOIN runs r ON r.id = s.run WHERE l.slot = $slot AND l.until > $now AND r.state = 'open'",
 	),
@@ -137,6 +141,20 @@ const Q = {
 	),
 	changeRuns: sql<{ change: number }, { id: number }>(
 		"SELECT id FROM runs WHERE change = $change AND origin = 'change'",
+	),
+	runTestsPage: sql<
+		{ run: number; test: number; lane: string },
+		{
+			test: number;
+			lane: string;
+			result: number;
+			target: number;
+			outcome: string;
+			signature: number | null;
+			flipped: number;
+		}
+	>(
+		"SELECT test, lane, result, target, outcome, signature, flipped FROM run_tests WHERE run = $run AND (test, lane) > ($test, $lane) ORDER BY test, lane LIMIT 50",
 	),
 	allRunTests: sql<
 		{ run: number },
@@ -1368,6 +1386,27 @@ export function countedTests(db: Db, run: RunRow): CountedTest[] {
 	return rows.map((row) => standingOf(db, run, context, { ...row, flipped: flipped.has(row.result) ? 1 : 0 }));
 }
 
+/** Bounded traversal for immutable receipts; each page owns its classification caches and flip lookup. */
+export function* countedTestPages(db: Db, run: RunRow): Generator<CountedTest[]> {
+	if (run.origin !== "change") return;
+	let test = 0;
+	let lane = "";
+	for (;;) {
+		const rows = db.all(Q.runTestsPage, { run: run.id, test, lane });
+		if (!rows.length) return;
+		const context = counting(db, run);
+		const flipped = flippedLanes(
+			db,
+			rows.filter((row) => row.flipped === 1).map((row) => row.result),
+		);
+		yield rows.map((row) => standingOf(db, run, context, { ...row, flipped: flipped.has(row.result) ? 1 : 0 }));
+		const last = rows.at(-1);
+		if (!last) return;
+		test = last.test;
+		lane = last.lane;
+	}
+}
+
 /**
  * What a run shows right now: its tally, the causes it shows with no excuse in force, and the decisions its
  * excused failures rest on. Read from the results and the excuses; nothing is stored.
@@ -1862,6 +1901,60 @@ export const waitingFor = (db: Db, run: RunRow): ShardWait[] =>
  * that has not reported. What has been applied so far cannot say the commit's failures are gone.
  */
 export const stillArriving = (db: Db, run: RunRow): boolean => run.outstanding > 0 || waitingFor(db, run).length > 0;
+
+/** The same verdict with scalar explanations, used by receipt manifests. Collections remain separately paged. */
+export function receiptGateOf(ctx: Ctx, run: RunRow) {
+	const tally = json<Tally>(run.tally);
+	const openCount = ctx.db.get(Q.receiptBlockingCount, { id: run.id })?.n ?? 0;
+	let waitingCount = 0;
+	let missing = 0;
+	let first: ShardWait | undefined;
+	if (run.accepts_what)
+		for (const page of waitingShardPages(ctx.db, run.project, run.accepts_what))
+			for (const wait of page) {
+				first ??= wait;
+				waitingCount++;
+				missing += wait.missing.length;
+			}
+	const expired = run.next_expiry !== null && run.next_expiry <= ctx.now;
+	const facts = {
+		tally,
+		blocking: openCount,
+		outstanding: run.outstanding,
+		expired,
+		nothingRequired: run.verdict === "passed",
+		waiting: first ? [first] : [],
+	};
+	const now = verdict(facts);
+	let reason = explainVerdict({ ...facts, waiting: [] });
+	if (waitingCount && !expired && !run.outstanding)
+		reason =
+			now === "pending" ? `pending: waiting for ${missing} shards` : `${reason}; still waiting for ${missing} shards`;
+	if (run.quarantined)
+		reason += `; ${run.quarantined} quarantined ${run.quarantined === 1 ? "failure" : "failures"} recorded, not blocking`;
+	return {
+		gate: {
+			run: runRef(run),
+			verdict: now,
+			reason,
+			tally,
+			url: null,
+			stale: now !== run.verdict,
+			...(run.quarantined ? { quarantined: run.quarantined } : {}),
+		},
+		openCount,
+		waitingCount,
+	};
+}
+
+/** Raw blocking refs are chunked without parsing a potentially large array; waits have at most 1,000 indices. */
+export function* receiptGateEvidence(db: Db, run: RunRow): Generator<string> {
+	for (let at = 0; at < run.blocking.length; at += 4096)
+		yield JSON.stringify({ collection: "open", part: at / 4096, text: run.blocking.slice(at, at + 4096) });
+	if (run.accepts_what)
+		for (const page of waitingShardPages(db, run.project, run.accepts_what))
+			for (const wait of page) yield JSON.stringify({ collection: "waiting", item: wait });
+}
 
 export function gateOf(ctx: Ctx, run: RunRow): GateStatus {
 	const tally = json<Tally>(run.tally);

@@ -185,11 +185,35 @@ Each record has a `type` and a unique `id`:
 | `team` | `team:<id>`, name, creation time, current members and current grants on this project or every project. This is state at export time, including for a historical range. |
 | `team-event` | `team-event:<id>`, time, team reference, actor, action, affected person, project and capabilities. Includes scoped grant changes and membership history in the range. These instance events have no project sequence. |
 | `change-end` | `change-end:<change-id>`, change id, key, repository, ending time, and state, either `merged` or `closed`. Includes the retained ending for this project's changes when its time is in the range. No ending actor or sequence is retained. Reopening deletes the ending, and a later close replaces it. This is not a full change-state history. |
-| `merge-receipt` | `merge-receipt:<id>`, change id and key, reporting actor, server report time and sequence, and the frozen head gate. The receipt includes counted results with their standings and the decision payloads they rested on. All retained receipts in range are included, even after a corrected head, reopening or closing clears their active selection. The time is when the merge was reported, not when it happened. |
+| `merge-receipt` | `merge-receipt:<id>`, change id and key, reporting actor, server report time and sequence, and the frozen head gate. The receipt is a bounded manifest with its gate summary, result and evidence counts, and content hash. Frozen results and gate collections are exported in separate bounded pages; supporting decision ids refer to the immutable decision ledger. All retained receipts in range are included, even after a corrected head, reopening or closing clears their active selection. The time is when the merge was reported, not when it happened. |
 | `decision` | `decision:<id>`, time, sequence, kind, answer, basis hash, holds, effects, expiry, question, prior decision, evidence, signers, and typed `inherited` result and base references. Each signer retains its actor, clause, policy version, and reason. Withdrawals, expirations, and outdated decisions are included. |
 | `answer` | `answer:<id>`, time, sequence, actor, question, answer, reason, whether it counted, and the exact evidence hash seen. Advice is included. |
 | `policy` | `policy:<version>`, time, sequence, actor, preset, clauses, settings, previous policy, and adopting decision. The initial policy has no adopting decision. |
 | `case-version` | `version:<case-id>:<version>`, public case ref, time, sequence, author, reason, full body, body and claim hashes, parent version, and adopting decision. |
+
+A range export contains receipt manifests, not their result payloads. For every receipt you
+need, export evidence pages separately. The full-history decision export retains the immutable
+answers, signers, holds, basis and expiry that result standings reference; a narrow time range
+may omit an earlier decision, so keep that earlier history too.
+
+```sh
+mainworthy audit export --out receipt-12-page-1.ndjson --receipt 12 --limit 50 --json
+mainworthy audit export --out receipt-12-page-2.ndjson --receipt 12 --cursor 12.evidence.49 --limit 50 --json
+```
+
+Use each reply's cursor until it is null; do not construct it from the example. Each file is
+independently verifiable with `audit verify`. The API reply also names `snapshot` and
+`evidenceCount`. A page has at most 50 members and 64 KiB of source evidence. Each
+`merge-evidence` record carries receipt id, ordinal, kind (`result` or `gate`), body and
+full SHA-256 of its UTF-8 body. Order all members by ordinal; require exactly
+`evidenceCount` contiguous ordinals starting at zero. Hash the UTF-8 prefix
+`mainworthy.merge-receipt.v1\n` followed by `kind:hash\n` for each member and require
+that digest to equal the manifest's `snapshot`. This checks bundle completeness; verifying
+one page alone does not. The `result` body is JSON with frozen result fields and its
+supporting decision id and displayed answer. Gate bodies are JSON frames: `collection: open`
+contains numbered `part` text chunks which join to the original blocking-ref JSON array;
+`collection: waiting` contains one complete shard-wait `item`. Exports and reads never
+recompute historical standings. A manifest alone is not a complete receipt evidence export.
 
 An actor contains `id`, `name`, and `kind`. Names reflect the time of export and use
 a pseudonym after forgetting. A reference is `{ scope: "included", id }` or

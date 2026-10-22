@@ -53,7 +53,7 @@ import {
 	type Blocker,
 	causeKey,
 	changeRunsOf,
-	countedTests,
+	countedTestPages,
 	countedTestsOf,
 	disputedRuns,
 	disputesOf,
@@ -61,7 +61,6 @@ import {
 	type FailingGroup,
 	failsOnBase,
 	failsWith,
-	gateOf,
 	gateRun,
 	inheritanceAffected,
 	inheritanceRuns,
@@ -72,6 +71,8 @@ import {
 	passingIn,
 	type Retallied,
 	type RunRow,
+	receiptGateEvidence,
+	receiptGateOf,
 	retally,
 	runById,
 	runRef,
@@ -111,12 +112,15 @@ import {
 	type QuestionRow,
 	questionById,
 	questionRef,
+	type ReceiptEvidence,
+	receiptDecisionAnswer,
 	refsOf,
 	type Signer,
 	setDecisionEffects,
 	setQuestionAsk,
 	setQuestionFacts,
 	setQuestionState,
+	storeMergeSnapshot,
 } from "./questions.ts";
 
 export type Raise = {
@@ -2142,54 +2146,56 @@ export function recordMergeReceipt(ctx: Ctx, change: ChangeRow): ChangeRow {
 	const kept = mergeReceiptById(ctx.db, ctx.project.id, change.receipt);
 	if (change.ended === "merged" && kept && kept.head === change.head_sha) return change;
 	const run = gateRun(ctx, { change: change.key });
-	const counted = run ? countedTests(ctx.db, run) : [];
-	const decisions = [...new Set(counted.flatMap((row) => (row.excuse ? [row.excuse.decision] : [])))].map((id) => {
-		const row = decisionById(ctx.db, id);
-		if (!row) throw new Error(`counted decision ${id} is missing`);
-		return {
-			id,
-			kind: row.kind,
-			answer: json<MergeReceipt["decisions"][number]["answer"]>(row.answer),
-			basis: row.basis,
-			evidence: row.on_evidence,
-			signers: json<Signer[]>(row.signers),
-			holds: json<HoldTerm[]>(row.holds),
-			expiresAt: row.expires_at,
-			at: row.at,
-		};
-	});
+	const empty = nothingCounted();
+	const { open: _open, waiting: _waiting, ...emptyGate } = empty;
+	const observed = run ? receiptGateOf(ctx, run) : { gate: emptyGate, openCount: 0, waitingCount: 0 };
+	function* contents(): Generator<ReceiptEvidence> {
+		if (!run) return;
+		for (const body of receiptGateEvidence(ctx.db, run)) yield { kind: "gate", body };
+		for (const page of countedTestPages(ctx.db, run))
+			for (const row of page) {
+				const test = testById(ctx.db, row.test);
+				const result = resultById(ctx.db, row.result);
+				const batch = result ? batchById(ctx.db, result.batch) : null;
+				if (!test || !result || !batch) throw new Error(`counted result ${row.result} is missing`);
+				yield {
+					kind: "result",
+					body: JSON.stringify({
+						result: row.result,
+						test: testRef(test),
+						name: test.name,
+						file: test.file,
+						target: row.target,
+						outcome: row.outcome,
+						method: result.method,
+						job: batch.job,
+						env: mustTarget(ctx.db, row.target).env,
+						standing: row.standing,
+						scope: row.scope,
+						flipped: row.flipped,
+						quarantined: row.excuse?.quarantined ?? false,
+						decision: row.excuse?.decision ?? null,
+						decisionAnswer: row.excuse ? receiptDecisionAnswer(ctx.db, row.excuse.decision) : null,
+					}),
+				};
+			}
+	}
+	const evidence = storeMergeSnapshot(ctx, contents);
 	const snapshot: Omit<MergeReceipt, "id"> = {
 		head: change.head_sha,
 		at: ctx.now,
 		by: ctx.actor.id,
 		policy: currentPolicy(ctx.db, ctx.project.id).version,
-		gate: run ? gateOf(ctx, run) : nothingCounted(),
-		results: counted.map((row) => {
-			const test = testById(ctx.db, row.test);
-			const result = resultById(ctx.db, row.result);
-			const batch = result ? batchById(ctx.db, result.batch) : null;
-			if (!test || !result || !batch) throw new Error(`counted result ${row.result} is missing`);
-			return {
-				result: row.result,
-				test: testRef(test),
-				name: test.name,
-				file: test.file,
-				target: row.target,
-				outcome: row.outcome,
-				method: result.method,
-				job: batch.job,
-				env: mustTarget(ctx.db, row.target).env,
-				standing: row.standing,
-				scope: row.scope,
-				flipped: row.flipped,
-				quarantined: row.excuse?.quarantined ?? false,
-				decision: row.excuse?.decision ?? null,
-			};
-		}),
-		decisions,
+		gate: observed.gate,
+		snapshot: evidence.hash,
+		count: evidence.count,
+		evidenceCount: evidence.evidence_count,
+		openCount: observed.openCount,
+		waitingCount: observed.waitingCount,
 	};
+
 	const now = change.ended === "merged" ? change : setChangeEnded(ctx, change, "merged");
-	const id = insertMergeReceipt(ctx, change.id, snapshot);
+	const id = insertMergeReceipt(ctx, change.id, snapshot, evidence.id);
 	setMergeReceipt(ctx, mintWitness(id, "merge-receipt", [ctx.actor.id], null), now);
 	return { ...now, receipt: id };
 }

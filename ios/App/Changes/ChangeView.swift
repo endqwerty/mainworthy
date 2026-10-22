@@ -81,12 +81,25 @@ struct ChangeView: View {
 						Panel("Head \(receipt.head.map { String($0.prefix(12)) } ?? "not reported") when the merge was reported") {
 							Tag(text: receipt.verdict.name, tint: receipt.verdict.tint)
 								.accessibilityIdentifier("change-receipt-verdict")
-							Text(ShardWait.reason(receipt.reason, beside: receipt.waiting))
-							ShardStrips(waiting: receipt.waiting)
+							Text(receipt.reason)
 							Text(receipt.at, format: .dateTime).font(.caption).foregroundStyle(.secondary)
 							DisclosureGroup("Counted results") {
-								if receipt.results.isEmpty { Text("No results counted at that time.") }
-								ForEach(receipt.results) { row in
+								if receipt.count == 0 {
+									Text("No results counted at that time.")
+								}
+								Text("\(receipt.count) results counted at that time.")
+									.font(.caption)
+								if receipt.count > 0
+									&& (screen.receiptResults.isEmpty
+										|| screen.hasMoreReceiptResults)
+								{
+									Button(
+										screen.hasMoreReceiptResults
+											? "More counted results"
+											: "Read counted results"
+									) { Task { await screen.moreReceiptResults() } }
+								}
+								ForEach(screen.receiptResults) { row in
 									VStack(alignment: .leading, spacing: 4) {
 										Text(row.name)
 										Text("\(row.test) · result \(row.id) · \(ResultStanding(rawValue: row.standing)?.label ?? row.standing)").font(.caption)
