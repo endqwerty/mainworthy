@@ -1,6 +1,7 @@
 {
   "version": 1,
   "files": {
+    "src/cli/main.test.ts": 42627,
     "test/e2e/queue-and-runs.test.ts": 22720,
     "test/e2e/settings.test.ts": 20135,
     "test/e2e/recovery.test.ts": 19642,
@@ -15,7 +16,6 @@
     "test/ci-gate.test.ts": 12328,
     "test/e2e/agent.test.ts": 11914,
     "test/e2e/round7.test.ts": 10884,
-    "src/cli/main.test.ts": 10637,
     "test/e2e/draft-conflicts.test.ts": 10432,
     "test/e2e/phone.test.ts": 9717,
     "test/e2e/people-signin.test.ts": 9614,
@@ -148,11 +148,11 @@
     "src/server/kernel/former-name.test.ts": 76,
     "test/web-client.test.ts": 75,
     "test/ci-scope.test.ts": 68,
+    "src/surfaces/formats/retries.test.ts": 65,
     "test/security-audit.test.ts": 62,
     "src/cli/report-attachments.test.ts": 52,
     "src/cli/demo/history.test.ts": 39,
     "src/server/identity/challenges.test.ts": 38,
-    "src/surfaces/formats/retries.test.ts": 34,
     "src/server/kernel/address.test.ts": 32,
     "src/surfaces/formats/cases.test.ts": 32,
     "test/drafts.test.ts": 31,
