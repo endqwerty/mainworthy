@@ -24,8 +24,9 @@ repo=$(git rev-parse --show-toplevel); runner=$(mktemp -d)
 ```
 
 The block exits with the audit's status: nonzero when a step before it fails, when the script refuses, or when Codex
-fails, so a missing audit never reads as a passing one. The script refuses unless `--source` is still origin/main's tip and the file it runs is that commit's copy, outside the
-checkout and not read from standard input, and it prints the commit it ran from; record that commit with the round.
+fails, so a missing audit never reads as a passing one. The script refuses unless `--source` is still origin/main's
+tip and the file it runs is that commit's copy, outside the checkout and not read from standard input, and it prints
+the commit it ran from; record that commit with the round.
 It also refuses when bun runs inside the checkout, but by then a preload has run, so the `cd /` is what protects you.
 Those checks catch a mistake or a race (`main` moving between the launcher and the script), not a hostile copy, which
 would skip them: what protects the audit is that the launcher takes the copy from `main`. A pull request that edits
