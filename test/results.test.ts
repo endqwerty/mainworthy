@@ -191,6 +191,16 @@ describe("the results behind a gate", () => {
 		expect(results({ commit: "dead000000000000000000000000000000000000" }).testTime).toEqual({ ms: 0, timed: 0 });
 	});
 
+	test("the test time stays bounded when historical durations exceed SQLite's integer sum", () => {
+		h.call("report", { ...ciReport({ n: 1025 }), target });
+		// Earlier versions and imported archives can retain durations above today's report limit.
+		h.app.db.raw.exec("UPDATE results SET duration_ms = 9000000000000000");
+		expect(results({ commit: COMMIT })).toMatchObject({
+			count: 1025,
+			testTime: { ms: Number.MAX_SAFE_INTEGER, timed: 1025 },
+		});
+	});
+
 	test("a quarantined failure is listed as excused, as the gate counts it", () => {
 		seed();
 		const total = results({ commit: COMMIT, text: "cart total" }).items[0]?.test;
