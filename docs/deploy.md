@@ -281,8 +281,10 @@ in that time got Cloudflare's 502.
 
 So the tunnel does not point at the stack. It points at a proxy on the host that no deploy touches, and that
 proxy passes each request to the ingress on `127.0.0.1:758`, once nginx there answers. Until then the request
-waits, for up to 90 seconds: Cloudflare waits 125 seconds for an origin's reply (its documented Proxy Read
-Timeout), so the hold stays under that, and a deploy longer than 90 s still ends in a 503. The owner's instance
+waits, for up to 90 seconds, and a deploy longer than that ends in a 503. Cloudflare waits 125 seconds for an
+origin's reply (its documented Proxy Read Timeout). The 90 s is the gate's wait alone: a request it lets
+through late can still queue (below), be retried and take the app's own time, so near the end of a long
+deploy Cloudflare may give up first with its 524. The owner's instance
 runs HAProxy, with a small Lua gate:
 
 ```
@@ -371,7 +373,10 @@ end)
   When the gate opens after a deploy, every request it held goes at once. nginx in the ingress has 256
   connections, two for each request it passes on, and past that it drops them: in a live test on the
   owner's instance, with about 360 requests held for 18 s, 121 got 502 and nginx logged
-  `256 worker_connections are not enough`.
+  `256 worker_connections are not enough`. The limit holds all the time, not only after a deploy, and an open
+  change stream keeps its slot for as long as it is open: with 100 streams open, any other request queues
+  and gets 503 after 30 s, even with nginx and the app healthy. nginx alone would take about 128 before it
+  dropped requests, so the limit costs a little capacity in exchange for never overrunning it.
 - **The drain is left unbounded.** The app keeps running while the ingress drains, so a write in flight
   finishes and its reply arrives, as before, and new requests wait at the gate meanwhile. A
   `worker_shutdown_timeout` would cut a committed write's reply (a new token's secret is shown once).
