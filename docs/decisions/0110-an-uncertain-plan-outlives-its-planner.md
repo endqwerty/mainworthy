@@ -30,6 +30,8 @@ replay for an unknown operation or a missing project or grant. HTTP can also ref
 Those exact replies keep the command.
 
 Discard this plan releases a pending request with a warning that it may already have been recorded.
+It reads the raw key and removes only a matching parsed command. Read, parse or removal failures keep
+the plan locked and report failure; the restoration helper's nullable result cannot confirm a discard.
 It does not undo a run. Removal of the shared key is authoritative: storage notifications, failure
 callbacks and retries release a held request when its saved key is absent. A storage read error proves
 nothing and retains the request. A different saved command is still shown before sending; absence does

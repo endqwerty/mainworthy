@@ -1009,3 +1009,77 @@ check(
 	},
 	30_000,
 );
+
+for (const failure of ["read", "removal"] as const)
+	check(
+		`a storage ${failure} failure during Discard keeps the saved plan locked and reports failure`,
+		async () => {
+			const server = await startServer();
+			const view = await openPage(server, { path: "/p/scratch/runs" });
+			try {
+				await server.api("propose", { edits: [{ op: "create", outline: "Checkout opens\n  Open checkout > Ready" }] });
+				const { page } = view;
+				const key = `${await devicePrefix(server, server.token)}run-plan:scratch`;
+				const sent: Api["plan"]["input"][] = [];
+				await page.route("**/plan", async (route) => {
+					sent.push(route.request().postDataJSON());
+					if (sent.length > 1) return route.continue();
+					const response = await route.fetch();
+					expect(response.ok()).toBe(true);
+					await route.abort();
+				});
+				await page.keyboard.press("n");
+				await page.getByLabel("Run name").fill("Plan X");
+				await page.locator('.run-planner button[type="submit"]').click();
+				await page.getByRole("button", { name: "Enter Retry plan", exact: true }).waitFor();
+				await page.evaluate(
+					({ key, failure }) => {
+						const read = Storage.prototype.getItem;
+						const remove = Storage.prototype.removeItem;
+						Storage.prototype.getItem = function (entry) {
+							if (failure === "read" && entry === key) throw new Error("Device storage unreadable");
+							return read.call(this, entry);
+						};
+						Storage.prototype.removeItem = function (entry) {
+							if (failure === "removal" && entry === key) throw new Error("Device storage removal unavailable");
+							return remove.call(this, entry);
+						};
+						window.addEventListener(
+							"restore-plan-storage",
+							() => {
+								Storage.prototype.getItem = read;
+								Storage.prototype.removeItem = remove;
+							},
+							{ once: true },
+						);
+					},
+					{ key, failure },
+				);
+				await page.getByRole("button", { name: "Discard this plan", exact: true }).click();
+				expect(await page.locator("#stat").textContent()).toContain("could not discard the saved plan");
+				expect(await page.getByLabel("Run name").isEditable()).toBe(false);
+				expect(await page.getByRole("button", { name: "Enter Retry plan", exact: true }).count()).toBe(1);
+				expect(sent).toHaveLength(1);
+				await page.evaluate(() => {
+					window.dispatchEvent(new Event("restore-plan-storage"));
+				});
+				const original = sent[0];
+				if (!original) throw new Error("No plan was submitted");
+				expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? "null"), key)).toEqual(original);
+				await page.reload();
+				await page.getByRole("listbox", { name: "Runs", exact: true }).waitFor();
+				await page.keyboard.press("n");
+				expect(await page.getByLabel("Run name").inputValue()).toBe("Plan X");
+				expect(await page.getByLabel("Run name").isEditable()).toBe(false);
+				await page.getByRole("button", { name: "Enter Retry plan", exact: true }).click();
+				await page.waitForURL("**/runs/1");
+				expect(sent).toHaveLength(2);
+				expect(sent[1]).toEqual(original);
+				expect((await server.api("find", { in: "runs", origin: "planned" })).items).toHaveLength(1);
+			} finally {
+				await view.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
