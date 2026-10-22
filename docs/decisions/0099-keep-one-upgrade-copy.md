@@ -27,7 +27,12 @@ schema and data statements; future migrations must also support the transaction.
 Remove older copies only after all migrations commit, and only when this start completed and published
 the current copy itself. Log each removed filename. Cleanup matches only regular files with the exact
 database basename, a canonical positive integer version lower than this upgrade's starting version, and
-the `.bak` suffix. Other names, directories, symlinks and higher-version copies are left alone.
+the `.bak` suffix. Higher-version completed copies remain. After [issue #538](https://github.com/endqwerty/mainworthy/issues/538)
+(2026-10-22), the same cleanup removes interrupted copies for any canonical positive version. It recognizes
+only the legacy `<database>.v<N>.bak.<uuid>.tmp` and `.tmp-journal` regular files, and private
+`<database>.v<N>.bak.<six alphanumeric characters>` directories made by `mkdtemp`. Inside a workspace,
+only the exact `<database>.v<N>.bak` and its `-journal` regular files are removed. The directory is removed
+non-recursively only when empty. Other names, symlinks, non-regular entries, and unrelated contents remain.
 
 A start with no pending migration performs no cleanup. If interrupted during cleanup, the current copy
 and any older copies not yet removed remain. Log a failure to list or delete copies and continue startup.
@@ -38,8 +43,8 @@ has already disappeared is harmless.
 
 Only copies still present remain available for rollback. Operators who need an earlier rollback point
 must save a separate backup before upgrading. A pre-existing final copy, cleanup failure, or interrupted
-cleanup can leave more than one copy. A crash while writing can leave that private directory, which cleanup
-ignores. Upgrade copies do not replace scheduled backups.
+cleanup can leave more than one copy. A crash while writing can leave a private workspace or legacy temporary
+files until a later successful upgrade writes a new copy and cleans them up. Upgrade copies do not replace scheduled backups.
 
 The retention rule belongs in the migration kernel shared by local and server starts. It adds no setting,
 background job, operation or database migration. The demo has no upgrade housekeeping to seed.
