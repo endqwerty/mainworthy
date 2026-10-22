@@ -306,7 +306,8 @@ Find cases/tests/runs/slots; cursor pages.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
-| `in` | `"cases" \| "tests" \| "runs" \| "folders" \| "tags" \| "requirements" \| "slots" \| "changes" \| "deployments" \| "results"` | no |  Default: `"cases"`. |
+| `receipt` | `integer` | no | For receipt-results: merge receipt id. |
+| `in` | `"cases" \| "tests" \| "runs" \| "folders" \| "tags" \| "requirements" \| "slots" \| "changes" \| "receipt-results" \| "deployments" \| "results"` | no |  Default: `"cases"`. |
 | `select` | `object` | no | For cases: preview a run selection instead of the listing filters. Excludes fragments. |
 | `select.cases` | `array<string>` | no |  |
 | `select.folders` | `array<integer \| string>` | no |  |

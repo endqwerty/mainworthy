@@ -24,6 +24,26 @@ test("audit exports through the real CLI and verifies offline without reading cr
 				.map((line) => JSON.parse(line)),
 		).toContainEqual(expect.objectContaining({ type: "change-end", key: "pr:326", state: "merged", repo: "acme/web" }));
 		expect(verifyAudit(original)).toMatchObject({ project: "scratch", unavailableDecisionEvidence: 0 });
+		const receipt = original
+			.split("\n")
+			.filter(Boolean)
+			.map((line) => JSON.parse(line))
+			.find((row) => row.type === "merge-receipt").receipt;
+		const pageFile = join(directory, "receipt.ndjson");
+		const page = await run([
+			"audit",
+			"export",
+			"--out",
+			pageFile,
+			"--receipt",
+			String(receipt.id),
+			"--limit",
+			"1",
+			"--json",
+		]);
+		expect(page.code).toBe(0);
+		expect(JSON.parse(page.stdout)).toMatchObject({ snapshot: receipt.snapshot, cursor: expect.any(String) });
+		expect(verifyAudit(await Bun.file(pageFile).text()).records).toBe(1);
 		const checked = await run(["audit", "verify", file, "--json"], {
 			env: { MAINWORTHY_URL: "invalid", MAINWORTHY_TOKEN_FILE: "/does-not-exist" },
 		});

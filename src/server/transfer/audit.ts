@@ -148,6 +148,8 @@ export function exportAudit(ctx: Ctx, input: AuditInput) {
 	if (to > ctx.now + 1 || to <= input.from)
 		throw invalid("audit needs from < to <= the server's current time plus one millisecond");
 	const selection = { project: ctx.project.id, to };
+
+	if (input.cursor || input.limit) throw invalid("audit paging needs a receipt id");
 	const questions = new Map(ctx.db.all(Q.questions, selection).map((row) => [row.id, row]));
 	const decisions = new Map(ctx.db.all(Q.decisions, selection).map((row) => [row.id, row]));
 	const policies = ctx.db.all(Q.policies, selection);
@@ -316,6 +318,7 @@ export function exportAudit(ctx: Ctx, input: AuditInput) {
 		});
 	}
 	for (const row of ctx.db.all(Q.mergeReceipts, selection)) {
+		const receipt = MergeReceipt.parse({ ...json<Record<string, unknown>>(row.snapshot), id: row.id });
 		if (inRange(row.at))
 			records.push({
 				type: "merge-receipt",
@@ -325,7 +328,7 @@ export function exportAudit(ctx: Ctx, input: AuditInput) {
 				by: actor(row.actor),
 				at: row.at,
 				seq: row.seq,
-				receipt: MergeReceipt.parse({ ...json<Record<string, unknown>>(row.snapshot), id: row.id }),
+				receipt,
 			});
 	}
 	for (const row of ctx.db.all(Q.changeEnds, selection)) {

@@ -297,6 +297,16 @@ const Q = {
 	),
 	// The shards a job of a target has reported, by the number of shards they said the job has. An agent's report
 	// under the job's name is not the job.
+	receiptShards: sql<
+		{ project: number; what: string; target: number; job: string; shards: number },
+		{ target: number; job: string; env: string; shards: number; reported: string }
+	>(
+		`SELECT t.id AS target,b.job,t.env,b.shards,group_concat(DISTINCT b.shard) AS reported
+ FROM targets t JOIN batches b ON b.target=t.id
+ WHERE t.project=$project AND t.what=$what AND b.shards IS NOT NULL AND b.method!='agent'
+ AND (t.id,b.job,b.shards)>($target,$job,$shards)
+ GROUP BY t.id,b.job,b.shards ORDER BY t.id,b.job,b.shards LIMIT 50`,
+	),
 	shardsOf: sql<{ target: number }, { job: string; shards: number; reported: string }>(
 		`SELECT job, shards, group_concat(DISTINCT shard) AS reported FROM batches
 		 WHERE target = $target AND shards IS NOT NULL AND method != 'agent' GROUP BY job, shards ORDER BY job`,
@@ -1117,6 +1127,27 @@ export const acceptedBatches = (db: Db): BatchRow[] => db.all(Q.accepted);
  * The shards a commit is still waiting for: for each job of each of its targets that reported in shards, the shards
  * that have not reported, sent or applied. Empty when every job reported whole, or every shard of it arrived.
  */
+/** Walk a commit's shard waits without collecting every target, job or missing index in one array. */
+export function* waitingShardPages(db: Db, project: number, what: string): Generator<ShardWait[]> {
+	let target = 0;
+	let job = "";
+	let shards = 0;
+	for (;;) {
+		const rows = db.all(Q.receiptShards, { project, what, target, job, shards });
+		if (!rows.length) return;
+		yield rows.flatMap((row) => {
+			const reported = new Set(row.reported.split(",").map(Number));
+			const missing = Array.from({ length: row.shards }, (_, i) => i + 1).filter((i) => !reported.has(i));
+			return missing.length ? [{ job: row.job, env: row.env, of: row.shards, missing }] : [];
+		});
+		const last = rows.at(-1);
+		if (!last) return;
+		target = last.target;
+		job = last.job;
+		shards = last.shards;
+	}
+}
+
 export function waitingShards(db: Db, targets: readonly TargetRow[]): ShardWait[] {
 	return targets.flatMap((target) =>
 		db.all(Q.shardsOf, { target: target.id }).flatMap((row) => {

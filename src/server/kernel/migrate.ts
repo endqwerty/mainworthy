@@ -43,7 +43,7 @@ import resetConstraints from "./migrations/0037_reset_constraints.sql" with { ty
 import handoffs from "./migrations/0038_handoffs.sql" with { type: "text" };
 import resultTries from "./migrations/0039_result_tries.sql" with { type: "text" };
 import assertionIndex from "./migrations/0040_assertion_index.sql" with { type: "text" };
-import mergeReceipts from "./migrations/0040_merge_receipts.sql" with { type: "text" };
+import mergeReceipts from "./migrations/0041_merge_receipts.sql" with { type: "text" };
 
 /**
  * In order. A migration is never edited after it ships; a change is a new entry.

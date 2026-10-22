@@ -12,6 +12,11 @@ public final class ChangesScreen: ProjectScreen {
 	public private(set) var loading = Loading.first
 	public private(set) var detail: ChangeDetails?
 	public private(set) var detailLoading = Loading.first
+	public private(set) var receiptResults: [MergeGateReceipt.Result] = []
+	public private(set) var hasMoreReceiptResults = false
+	private var receiptRead: Int?
+	private var receiptCursor: String?
+	private var readingReceipt = false
 	public private(set) var notice: String?
 	/// What the gate of the open change's head counted, read when its page asks. It is made for the run of the
 	/// gate the page shows, and made again when a read of the page finds another run.
@@ -34,6 +39,22 @@ public final class ChangesScreen: ProjectScreen {
 	package init(project: ProjectClient, runsPerPage: Int = 100) {
 		self.project = project
 		self.runsPerPage = runsPerPage
+	}
+
+	public func moreReceiptResults() async {
+		guard let receipt = detail?.mergeReceipt, !readingReceipt else { return }
+		if receiptRead == receipt.id && !hasMoreReceiptResults { return }
+		readingReceipt = true
+		defer { readingReceipt = false }
+		let after = receiptRead == receipt.id ? receiptCursor : nil
+		do {
+			let page = try await project.receiptResults(receipt.id, after: after)
+			guard detail?.mergeReceipt?.id == receipt.id else { return }
+			receiptResults = after == nil ? page.results : receiptResults + page.results
+			receiptRead = receipt.id
+			receiptCursor = page.next
+			hasMoreReceiptResults = page.next != nil
+		} catch is CancellationError {} catch { notice = error.shown }
 	}
 
 	public func open(_ key: String) async {
@@ -128,6 +149,12 @@ public final class ChangesScreen: ProjectScreen {
 		do {
 			let fresh = try await project.details(of: key, known: known)
 			guard mine == detailReads else { return }
+			if detail?.mergeReceipt?.id != fresh.mergeReceipt?.id {
+				receiptResults = []
+				receiptRead = nil
+				receiptCursor = nil;
+				hasMoreReceiptResults = false
+			}
 			detail = fresh
 			selectedChange = fresh.change
 			detailLoading = .done

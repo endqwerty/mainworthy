@@ -496,37 +496,29 @@ const ChangeLanding = struct(
 	},
 );
 
-const MergeReceipt = struct(
-	"MergeReceipt",
-	"The head's gate read when a merge was reported, before any landing moves it to trunk.",
-	{
-		head: maybe(text),
-		at: whole,
-		gate: struct("MergeReceiptGate", "The frozen gate, not the head's current verdict.", {
-			verdict: text,
-			reason: text,
-			waiting,
-		}),
-		results: list(
-			struct("MergeReceiptResult", "A counted result and the standing it had at that time.", {
-				result: whole,
-				test: text,
-				name: text,
-				standing: text,
-				method: text,
-				job: text,
-				env: text,
-				decision: maybe(whole),
-			}),
-		),
-		decisions: list(
-			struct("MergeReceiptDecision", "The answer a frozen standing rested on.", {
-				id: whole,
-				answer: struct("MergeReceiptAnswer", "The recorded answer.", { is: text }),
-			}),
-		),
-	},
-);
+const MergeReceiptResult = struct("MergeReceiptResult", "One frozen counted result, from a bounded page.", {
+	result: whole,
+	test: text,
+	name: text,
+	standing: text,
+	method: text,
+	job: text,
+	env: text,
+	decision: maybe(whole),
+	decisionAnswer: maybe(text),
+});
+export const MergeReceiptResults = struct("MergeReceiptResults", "find in receipt-results: bounded immutable pages.", {
+	count: whole,
+	cursor: maybe(text),
+	items: list(MergeReceiptResult),
+});
+const MergeReceipt = struct("MergeReceipt", "The bounded manifest of the gate read when a merge was reported.", {
+	id: whole,
+	head: maybe(text),
+	at: whole,
+	count: whole,
+	gate: struct("MergeReceiptGate", "The frozen gate summary.", { verdict: text, reason: text }),
+});
 
 export const ChangeList = struct("ChangeList", "`find` in changes: newest first, with the head's gate.", {
 	items: list(
@@ -842,6 +834,7 @@ export const SHAPES: readonly Shape[] = [
 	RunReportReply,
 	RunReportCommand,
 	ChangeList,
+	MergeReceiptResults,
 	ChangeGate,
 	ChangeImpact,
 	ChangeRun,

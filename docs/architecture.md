@@ -497,7 +497,8 @@ so a 500 carries every header but `Strict-Transport-Security` and `Cross-Origin-
 A merge report records its head gate before a landing can change the commit's scope. The decisions module
 appends the immutable observation to `merge_receipts`, then mints a `merge-receipt` Witness. The evidence
 module requires that witness to select it through `change_ends.receipt`. This internal decision records
-what was read, with no queue question or approval. `impact` reads the active receipt; audit exports read
+what was read, with no queue question or approval. `impact` reads the active receipt manifest; indexed `find` pages read its shared, content-addressed
+frozen results. Audit receipt pages export bounded evidence with hashes and ordinals; range exports read
 all retained observations. Reopening clears the selection, and archives omit both tables ([decision
 0135](decisions/0135-a-merge-report-keeps-a-receipt-of-the-head-gate.md)).
 

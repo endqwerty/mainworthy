@@ -662,6 +662,26 @@ enum Wire {
 		let items: [ChangeSummary]
 	}
 
+	/// One frozen counted result, from a bounded page.
+	struct MergeReceiptResult: Decodable, Equatable, Sendable {
+		let result: Int
+		let test: String
+		let name: String
+		let standing: String
+		let method: String
+		let job: String
+		let env: String
+		let decision: Int?
+		let decisionAnswer: String?
+	}
+
+	/// find in receipt-results: bounded immutable pages.
+	struct MergeReceiptResults: Decodable, Equatable, Sendable {
+		let count: Int
+		let cursor: String?
+		let items: [MergeReceiptResult]
+	}
+
 	/// `gate` of a change's head commit.
 	struct ChangeGate: Decodable, Equatable, Sendable {
 		let run: String?
@@ -673,44 +693,19 @@ enum Wire {
 		let stale: Bool
 	}
 
-	/// The frozen gate, not the head's current verdict.
+	/// The frozen gate summary.
 	struct MergeReceiptGate: Decodable, Equatable, Sendable {
 		let verdict: String
 		let reason: String
-		/// None: the gate waits for no shard.
-		let waiting: [ShardWait]?
 	}
 
-	/// A counted result and the standing it had at that time.
-	struct MergeReceiptResult: Decodable, Equatable, Sendable {
-		let result: Int
-		let test: String
-		let name: String
-		let standing: String
-		let method: String
-		let job: String
-		let env: String
-		let decision: Int?
-	}
-
-	/// The recorded answer.
-	struct MergeReceiptAnswer: Decodable, Equatable, Sendable {
-		let `is`: String
-	}
-
-	/// The answer a frozen standing rested on.
-	struct MergeReceiptDecision: Decodable, Equatable, Sendable {
-		let id: Int
-		let answer: MergeReceiptAnswer
-	}
-
-	/// The head's gate read when a merge was reported, before any landing moves it to trunk.
+	/// The bounded manifest of the gate read when a merge was reported.
 	struct MergeReceipt: Decodable, Equatable, Sendable {
+		let id: Int
 		let head: String?
 		let at: Int
+		let count: Int
 		let gate: MergeReceiptGate
-		let results: [MergeReceiptResult]
-		let decisions: [MergeReceiptDecision]
 	}
 
 	/// The change and commits the affected cases were read for.

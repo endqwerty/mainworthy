@@ -86,12 +86,12 @@ public struct LandedCommit: Equatable, Sendable {
 
 /// The head gate read when the merge was reported. Later evidence changes only the live gate.
 public struct MergeGateReceipt: Equatable, Sendable {
+	public let id: Int
 	public let head: String?
 	public let at: Date
 	public let verdict: ChangeVerdict
 	public let reason: String
-	public let waiting: [ShardWait]
-	public let results: [Result]
+	public let count: Int
 
 	public struct Result: Identifiable, Equatable, Sendable {
 		public let id: Int
@@ -101,20 +101,29 @@ public struct MergeGateReceipt: Equatable, Sendable {
 		public let context: String
 		public let decision: Int?
 		public let answer: String?
+		init(_ row: Wire.MergeReceiptResult) {
+			id = row.result
+			test = row.test
+			name = row.name
+			standing = row.standing
+			context = [row.method, row.job, row.env].filter { !$0.isEmpty }.joined(separator: " · ")
+			decision = row.decision
+			answer = row.decisionAnswer
+		}
 	}
-
 	init(_ wire: Wire.MergeReceipt) {
+		id = wire.id
 		head = wire.head
 		at = Date(timeIntervalSince1970: Double(wire.at) / 1000)
 		verdict = ChangeVerdict(wire.gate.verdict)
 		reason = wire.gate.reason
-		waiting = (wire.gate.waiting ?? []).map(ShardWait.init)
-		results = wire.results.map { row in
-			Result(id: row.result, test: row.test, name: row.name, standing: row.standing,
-				context: [row.method, row.job, row.env].filter { !$0.isEmpty }.joined(separator: " · "),
-				decision: row.decision, answer: wire.decisions.first { $0.id == row.decision }?.answer.is)
-		}
+		count = wire.count
 	}
+}
+
+public struct MergeReceiptPage: Sendable {
+	public let results: [MergeGateReceipt.Result]
+	public let next: String?
 }
 
 /// A branch or pull request for which a pipeline has reported results.
@@ -243,6 +252,15 @@ extension ProjectClient {
 			if let detail = try await readChange(change, known: known) { return detail }
 		}
 		throw ChangeReadError.moved
+	}
+
+	public func receiptResults(_ receipt: Int, after: String? = nil) async throws -> MergeReceiptPage {
+		var input: [String: JSONValue] = [
+			"in": "receipt-results", "receipt": .number(Double(receipt)), "limit": 50,
+		]
+		if let after { input["cursor"] = .string(after) }
+		let page: Wire.MergeReceiptResults = try await server.read("find", in: key, .object(input))
+		return MergeReceiptPage(results: page.items.map(MergeGateReceipt.Result.init), next: page.cursor)
 	}
 
 	private func readChange(_ change: String, known: ChangeSummary?) async throws -> ChangeDetails? {

@@ -12,10 +12,16 @@ const hash = z.string().regex(/^[a-f0-9]{12}$/);
 const id = z
 	.string()
 	.regex(
-		/^(?:decision:\d+|answer:\d+|policy:\d+|version:\d+:\d+|question:\d+|result:\d+|team:\d+|team-event:\d+|change-end:\d+|merge-receipt:\d+|evidence:\d+:[a-f0-9]{12})$/,
+		/^(?:decision:\d+|answer:\d+|policy:\d+|version:\d+:\d+|question:\d+|result:\d+|team:\d+|team-event:\d+|change-end:\d+|merge-receipt:\d+|merge-evidence:\d+:\d+|evidence:\d+:[a-f0-9]{12})$/,
 	);
 export const AuditInput = z
-	.strictObject({ from: integer.default(0), to: integer.optional() })
+	.strictObject({
+		from: integer.default(0),
+		to: integer.optional(),
+		receipt: integer.positive().optional(),
+		cursor: z.string().optional(),
+		limit: integer.min(1).max(50).optional(),
+	})
 	.refine((value) => value.to === undefined || value.to > value.from, { message: "to must be greater than from" });
 export type AuditInput = z.infer<typeof AuditInput>;
 export const AuditReply = z.strictObject({
@@ -24,6 +30,12 @@ export const AuditReply = z.strictObject({
 	records: integer,
 	sha256: z.string().regex(/^[a-f0-9]{64}$/),
 	ndjson: z.string(),
+	cursor: z.string().nullable().optional(),
+	evidenceCount: integer.optional(),
+	snapshot: z
+		.string()
+		.regex(/^[a-f0-9]{64}$/)
+		.optional(),
 });
 const Reference = z.discriminatedUnion("scope", [
 	z.strictObject({ scope: z.literal("included"), id }),
@@ -51,6 +63,15 @@ export const AuditHeader = z.strictObject({
 });
 export type AuditHeader = z.infer<typeof AuditHeader>;
 export const AuditRecord = z.discriminatedUnion("type", [
+	z.strictObject({
+		type: z.literal("merge-evidence"),
+		...event,
+		receipt: integer,
+		ordinal: integer,
+		kind: z.enum(["result", "gate"]),
+		hash: z.string().regex(/^[a-f0-9]{64}$/),
+		body: z.string().max(32768),
+	}),
 	z.strictObject({
 		type: z.literal("merge-receipt"),
 		...event,
@@ -212,6 +233,7 @@ function links(record: AuditRecord): Link[] {
 			return link(record.question, "question");
 		case "result":
 		case "team":
+		case "merge-evidence":
 		case "merge-receipt":
 		case "change-end":
 			return [];
@@ -244,6 +266,7 @@ const typePrefix: Record<AuditRecord["type"], string> = {
 	"team-event": "team-event:",
 	"change-end": "change-end:",
 	"merge-receipt": "merge-receipt:",
+	"merge-evidence": "merge-evidence:",
 	decision: "decision:",
 	answer: "answer:",
 	policy: "policy:",
@@ -304,6 +327,13 @@ export function verifyAudit(text: string) {
 		if (record.type === "question" && (record.openedAt >= header.to || record.openedSeq > header.seq))
 			fail("question outside range or sequence");
 		if (record.type === "change-end" && record.id !== `change-end:${record.change}`) fail("change ending id mismatch");
+		if (record.type === "merge-evidence") {
+			if (
+				record.id !== `merge-evidence:${record.receipt}:${record.ordinal}` ||
+				auditChecksum(record.body) !== record.hash
+			)
+				fail("merge evidence identity mismatch");
+		}
 		if (record.type === "merge-receipt") {
 			if (record.id !== `merge-receipt:${record.receipt.id}`) fail("merge receipt id mismatch");
 			if (record.at !== record.receipt.at || record.by.id !== record.receipt.by)

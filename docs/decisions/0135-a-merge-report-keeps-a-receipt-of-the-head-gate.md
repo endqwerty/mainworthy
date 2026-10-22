@@ -14,8 +14,8 @@ read blocked on trunk. The current gate cannot answer what Mainworthy knew when 
 
 A `change` report with `state: merged` observes the supplied head, or keeps the recorded head, and records
 its gate before ending questions or moving a landing. The observation includes the server time, reporting
-actor, policy version, full gate, every counted result and its standing, and the payloads of decisions those
-standings rested on. Unknown or unreported heads record pending. An explicit nothing-required pass keeps
+actor, policy version, scalar gate summary, every counted result and its standing, and references to the immutable
+decisions those standings rested on. The displayed decision answer is frozen with the result. Unknown or unreported heads record pending. An explicit nothing-required pass keeps
 that verdict even with no result rows. No caller supplies the receipt or its time.
 
 The immutable `merge_receipts` ledger belongs to decisions. It records an internal decision to preserve this
@@ -31,14 +31,25 @@ or closing without merging clears the active selection but keeps the ledger. A l
 observation, even of the same head. The operation has no code-host event id, so it cannot distinguish an old
 head replay from an intentional correction. Its existing explicit-head correction semantics still apply.
 
-`impact` returns the active receipt as `change.mergeReceipt`; the change list keeps only live gate summaries,
+The bounded manifest in `merge_receipts` references a content-addressed snapshot. `merge_receipt_snapshots`
+indexes ordered memberships in `merge_receipt_members`; `merge_receipt_payloads` shares frozen bodies by
+project and full SHA-256. A two-pass, keyset-paged traversal hashes evidence before storing any new snapshot.
+Identical reopen/merge observations add only a manifest. Each body is limited to 32 KiB; each read returns
+at most 50 members and 64 KiB of source evidence. Gate blocking refs are chunked and shard waits are paged;
+large arrays do not enter the manifest. Decision answer, signers, holds, basis and expiry are immutable in
+the existing decision ledger (the sole update changes only derived `effects`), so receipts reference that
+ledger rather than copying a potentially large decision for every counted result.
+
+`impact` returns the active receipt manifest as `change.mergeReceipt`; the change list keeps only live gate summaries,
 so listing changes never reads every historical result. The web and iPhone detail pages show the receipt
-beside the current gate and expand its counted results. CLI and MCP clients read the same `impact` reply.
+beside the current gate and request counted results through `find in: receipt-results`, a page at a time.
+CLI and MCP clients read the same bounded manifests and pages.
 `gate` and its exit code remain the live gate. Audit exports include every retained receipt, including those
-superseded or cleared by a later end. A receipt describes the gate **when the merge was reported**, not when
+superseded or cleared by a later end. The range export contains manifests, while `audit receipt` pages
+export complete frozen result and gate evidence with hashes and ordinals for bundle verification. A receipt describes the gate **when the merge was reported**, not when
 the merge actually happened or whether it was approved.
 
-A new migration creates the receipt ledger and nullable selection. Existing merged changes keep no receipt:
+Migration 0041 creates the shared evidence tables, receipt ledger and nullable selection. Existing merged changes keep no receipt:
 today's gate cannot reconstruct a past observation. Reporting the merge again takes a receipt at that new
 report time. Archives omit the ledger with `change_ends`; imported changes are open. The archive version
 therefore stays unchanged. Removing or resetting a project removes its receipts with its other records.
@@ -50,7 +61,9 @@ therefore stays unchanged. Removing or resetting a project removes its receipts 
 - Making question decisions questionless. A separate internal ledger avoids widening every queue and decision
   consumer, while the Witness and a foreign key still protect the active standing record.
 - Computing old standings from today's results and excuses. It would repeat the bug under a historical label.
-- Returning all frozen results in every change list row. Only the selected change's detail needs them.
+- Returning all frozen results in any change reply. Both detail and lists must remain bounded.
+- One deduplicated JSON snapshot. It would still require a full array during capture and unindexed JSON scans
+  while paging. Indexed memberships keep capture and evidence reads bounded.
 
 Principles: Model the Domain (separate an immutable observation from live gate and approval); Make Operations
 Idempotent (duplicate merge reports keep the receipt); Type System Discipline (shared receipt schema and a

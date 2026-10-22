@@ -20,6 +20,7 @@ import {
 	DecideReply,
 	EVIDENCE,
 	Inbox,
+	MergeReceiptResults,
 	PasskeyChallenge,
 	Proposal,
 	ProviderStart,
@@ -742,6 +743,15 @@ describe("what Changes and Your sessions read", () => {
 		// A change's own page reads its state from impact: it may be older than the newest the list holds.
 		const impact = await op(key, "impact", { change: "pr:482" });
 		holds("ended change impact", ChangeImpact, impact);
+		const frozen = z
+			.object({ change: z.object({ mergeReceipt: z.object({ id: z.number() }).nullable() }) })
+			.parse(impact).change.mergeReceipt;
+		if (frozen)
+			holds(
+				"receipt results",
+				MergeReceiptResults,
+				await op(key, "find", { in: "receipt-results", receipt: frozen.id, limit: 1 }),
+			);
 		expect(impact).toMatchObject({ change: { key: "pr:482", state: "merged" } });
 	});
 

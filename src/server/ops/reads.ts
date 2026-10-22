@@ -30,6 +30,7 @@ import {
 	holdEndingById,
 	ledgerPage,
 	mergeReceiptById,
+	mergeReceiptPage,
 	mustQuestion,
 	openCountOn,
 	openCounts,
@@ -812,6 +813,9 @@ export function find(ctx: Ctx, input: FindInput): Found {
 	const limit = input.limit ?? 100;
 	const project = ctx.project.id;
 	switch (input.in) {
+		case "receipt-results":
+			if (!input.receipt) throw invalid("receipt-results needs a receipt id");
+			return mergeReceiptPage(ctx.db, project, input.receipt, input.cursor, input.limit ?? 50);
 		case "results":
 			return countedResults(ctx, input, limit);
 		case "deployments": {

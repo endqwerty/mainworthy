@@ -128,7 +128,7 @@ Each prints text made to be read, and `--json` where it is listed prints the sam
 | `mainworthy token new --agent <name> \| --ci <name> \| --human <name> [--can read,produce] [--project <key>] [--expires 90d] \| token list \| token revoke <id>` | Issue, list and revoke actor tokens. A new secret is shown once. |
 | `mainworthy invite new <name> [--can read,answer] [--project <key>] [--expires 3d] [--email <address>] \| invite list \| invite revoke <id>` | Invite a person with a link that is shown once, list invitations, and revoke one. |
 | `mainworthy actor list \| actor grant <name> --can read,record [--roles approver,lead] [--project <key>] \| actor ungrant <name> [--project <key>] \| actor forget <name> --confirm <name>` | List who may do what, change grants, and forget an actor's identity while keeping history. |
-| `mainworthy audit export --out <file> [--from <time>] [--to <time>] \| audit verify <file>` | Export a project's audit history, or verify a saved audit file offline. |
+| `mainworthy audit export --out <file> [--from <time>] [--to <time>] [--receipt <id> --cursor <cursor> --limit <n>] \| audit verify <file>` | Export a project's audit history, or verify a saved audit file offline. |
 | `mainworthy policy show \| policy use <loose\|standard\|strict> \| policy tests <ask\|track\|create> \| policy empty <pending\|nothing-required> [--json]` | Show policy clauses, or record an admin's choice of preset, tests with no case, or empty reports. |
 | `mainworthy new [file\|-] [--json]` | Create a case from a canonical Markdown file or an outline on stdin. |
 | `mainworthy seed <project> [--cases 2000] [--seed 1] [--days 14] [--unlinked-files 60] [--json]` | Fill a new or empty project with demo data: a shop's cases, two weeks of results and runs, and questions to answer. |
@@ -209,6 +209,9 @@ Flags of `mainworthy actor`:
 
 Flags of `mainworthy audit`:
 
+- `--receipt <string>`: Export one bounded page of frozen receipt evidence.
+- `--cursor <string>`: Continue a receipt evidence export.
+- `--limit <string>`: Receipt evidence items per page (1–50).
 - `--out <string>`: Audit NDJSON destination.
 - `--from <string>`: Inclusive start: Unix milliseconds or ISO timestamp with a timezone.
 - `--to <string>`: Exclusive end: Unix milliseconds or ISO timestamp with a timezone.

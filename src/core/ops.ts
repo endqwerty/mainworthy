@@ -739,9 +739,10 @@ export const GetInput = z.object({
 export type GetInput = z.infer<typeof GetInput>;
 
 export const FindInput = z.object({
+	receipt: z.number().int().positive().optional().describe("For receipt-results: merge receipt id."),
 	in: z
 		.union([
-			z.enum(["cases", "tests", "runs", "folders", "tags", "requirements", "slots", "changes"]),
+			z.enum(["cases", "tests", "runs", "folders", "tags", "requirements", "slots", "changes", "receipt-results"]),
 			// Deployments and results are listed for CLI and HTTP; MCP's find keeps its earlier choices, whose
 			// tools/list is at its token budget (src/surfaces/mcp.ts).
 			z.literal("deployments").meta({ "x-mcp-hidden": true }),

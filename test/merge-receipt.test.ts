@@ -40,8 +40,11 @@ describe("the gate when a merge was reported", () => {
 		expect(receipt()).toMatchObject({
 			head: "receipt726",
 			gate: { verdict: "passed", tally: { excused: 1, unexplained: 0 } },
-			results: [{ result: sent.results[0], standing: "excused", decision }],
+			count: 1,
 		});
+		expect(h.call<{ items: unknown[] }>("find", { in: "receipt-results", receipt: receipt()?.id }).items).toMatchObject(
+			[{ result: sent.results[0], standing: "excused", decision, decisionAnswer: "flaky" }],
+		);
 		expect(h.call<GateStatus>("gate", { change: "pr:726" }).verdict).toBe("blocked");
 		const frozen = receipt();
 		h.advance(15 * 86400000);
@@ -56,7 +59,7 @@ describe("the gate when a merge was reported", () => {
 	test("an unreported head records pending and later jobs do not rewrite it", () => {
 		h.call("report", report());
 		end({ head: "unseen726" });
-		expect(receipt()).toMatchObject({ head: "unseen726", gate: { verdict: "pending" }, results: [] });
+		expect(receipt()).toMatchObject({ head: "unseen726", gate: { verdict: "pending" }, count: 0 });
 		const frozen = receipt();
 		h.call("report", report("unseen726", false));
 		expect(h.call<GateStatus>("gate", { change: "pr:726" }).verdict).toBe("passed");
@@ -121,7 +124,7 @@ test("receipt history persists and remains in the audit after reopening, while a
 test("an old merged change gains no invented receipt during migration", () => {
 	h.call("report", report("receipt726", false));
 	h.app.db.exec(
-		"DROP INDEX change_ends_receipt; ALTER TABLE change_ends DROP COLUMN receipt; DROP TABLE merge_receipts; INSERT INTO change_ends (change, ended, at) VALUES (1, 'merged', 1); UPDATE meta SET value = '39' WHERE key = 'schema_version'",
+		"DROP INDEX change_ends_receipt; ALTER TABLE change_ends DROP COLUMN receipt; DROP TABLE merge_receipt_members; DROP TABLE merge_receipts; DROP TABLE merge_receipt_snapshots; DROP TABLE merge_receipt_payloads; INSERT INTO change_ends (change, ended, at) VALUES (1, 'merged', 1); UPDATE meta SET value = '40' WHERE key = 'schema_version'",
 	);
 	migrate(h.app.db, ":memory:");
 	expect(receipt()).toBeNull();
@@ -162,4 +165,87 @@ test("OpenAPI declares merge receipts and landing gates in the impact output sch
 	if (!schema) throw new Error("Expected impact path");
 	expect(JSON.stringify(schema)).toContain('"mergeReceipt":');
 	expect(JSON.stringify(schema)).toContain('"landing":');
+});
+
+test("a large report shares its frozen evidence across repeated reopen and merge observations", () => {
+	h.call("report", ciReport({ commit: "receipt726", branch: "feature", pr: 726, n: 3000 }));
+	end();
+	const before = h.app.db.raw.serialize().byteLength;
+	for (let i = 0; i < 6; i++) {
+		h.call("change", { change: "pr:726", state: "open" });
+		end();
+	}
+	expect(h.app.db.raw.serialize().byteLength - before).toBeLessThan(65536);
+});
+
+test("reading a change with a large receipt returns a bounded manifest and pages its frozen results", () => {
+	h.call("report", ciReport({ commit: "receipt726", branch: "feature", pr: 726, n: 3000 }));
+	end();
+	const impact = h.call<{ change: { mergeReceipt: { id: number; count: number } } }>("impact", { change: "pr:726" });
+	expect(JSON.stringify(impact.change.mergeReceipt).length).toBeLessThan(4096);
+	expect(impact.change.mergeReceipt.count).toBe(3000);
+	const page = h.call<{ count: number; cursor: string | null; items: unknown[] }>("find", {
+		in: "receipt-results",
+		receipt: impact.change.mergeReceipt.id,
+		limit: 25,
+	});
+	expect(page.count).toBe(3000);
+	expect(page.items).toHaveLength(25);
+	expect(page.cursor).not.toBeNull();
+});
+
+test("frozen receipt pages remain complete across new evidence, and audit pages verify their manifest", () => {
+	h.call("report", ciReport({ commit: "receipt726", branch: "feature", pr: 726, n: 123 }));
+	end();
+	const kept = receipt();
+	if (!kept) throw new Error("Expected receipt");
+	const first = h.call<{ items: { result: number; name: string }[]; cursor: string | null }>("find", {
+		in: "receipt-results",
+		receipt: kept.id,
+		limit: 25,
+	});
+	h.call("change", { change: "pr:726", state: "open" });
+	h.call("report", { ...ciReport({ commit: "receipt726", branch: "feature", pr: 726, n: 123 }), attempt: 2 });
+	let cursor = first.cursor;
+	const rows = [...first.items];
+	while (cursor) {
+		const page = h.call<typeof first>("find", { in: "receipt-results", receipt: kept.id, cursor, limit: 25 });
+		rows.push(...page.items);
+		cursor = page.cursor;
+	}
+	expect(rows).toHaveLength(123);
+	expect(new Set(rows.map((row) => row.result)).size).toBe(123);
+	expect(h.raw("find", { in: "receipt-results", receipt: kept.id, cursor: `999.results.0` }).ok).toBe(false);
+	const hasher = new Bun.CryptoHasher("sha256").update("mainworthy.merge-receipt.v1\n");
+	let auditCursor: string | null = null;
+	let count = 0;
+	do {
+		const page = AuditReply.parse(
+			h.call("audit", { receipt: kept.id, limit: 17, ...(auditCursor ? { cursor: auditCursor } : {}) }),
+		);
+		expect(verifyAudit(page.ndjson).records).toBe(page.records);
+		const members = page.ndjson
+			.split("\n")
+			.filter((line) => line.includes('"type":"merge-evidence"'))
+			.map((line) => z.object({ ordinal: z.number(), kind: z.string(), hash: z.string() }).parse(JSON.parse(line)))
+			.sort((a, b) => a.ordinal - b.ordinal);
+		for (const member of members) {
+			hasher.update(`${member.kind}:${member.hash}\n`);
+			count++;
+		}
+		auditCursor = page.cursor ?? null;
+	} while (auditCursor);
+	expect(count).toBe(kept.evidenceCount);
+	expect(hasher.digest("hex")).toBe(kept.snapshot);
+});
+
+test("a receipt summarizes large shard waits and pages their complete frozen evidence", () => {
+	h.call("report", ciReport({ commit: "receipt726", branch: "feature", pr: 726, n: 1, shard: { index: 1, of: 1000 } }));
+	end();
+	const kept = receipt();
+	expect(kept).toMatchObject({ gate: { verdict: "pending" }, waitingCount: 1 });
+	expect(JSON.stringify(kept).length).toBeLessThan(4096);
+	const audit = AuditReply.parse(h.call("audit", { receipt: kept?.id }));
+	expect(audit.ndjson).toContain('"collection\\":\\"waiting');
+	expect(verifyAudit(audit.ndjson).records).toBe(kept?.evidenceCount ?? 0);
 });
