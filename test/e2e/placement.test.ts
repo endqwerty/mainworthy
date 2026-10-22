@@ -52,6 +52,7 @@ for (const folders of ["failed", "slow"] as const) {
 				const { page } = h;
 				await eventually(async () => requested, Boolean);
 				await page.locator("#lcount").filter({ hasText: "1 cases" }).waitFor();
+				await page.getByRole("button", { name: "Waiting for folders", exact: true }).waitFor();
 				if (folders === "slow" && process.env.MAINWORTHY_FOLDER_READ_SCREENSHOT)
 					await page.screenshot({ path: process.env.MAINWORTHY_FOLDER_READ_SCREENSHOT });
 				expect(await page.getByRole("option").filter({ hasText: "C-1" }).count()).toBe(1);

@@ -490,7 +490,7 @@ export function SuiteScreen() {
 			if (row.state !== "active") continue;
 			const folder = folders.find((folder) => folder.id === row.folder);
 			const path = folder ? cleanPath(folder.path).join("/").toLowerCase() : null;
-			if (selectedPath && path !== selectedPath && !path?.startsWith(`${selectedPath}/`)) continue;
+			if (selectedPath && path !== null && path !== selectedPath && !path.startsWith(`${selectedPath}/`)) continue;
 			if (grouping && folderId !== row.folder) {
 				folderId = row.folder;
 				const folder = folders.find((item) => item.id === row.folder);
