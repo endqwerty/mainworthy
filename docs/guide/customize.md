@@ -90,7 +90,7 @@ The demo is a shop's suite. Its cases are in 29 folders under eight areas: Check
 
 The pipeline also reports the shop's unit tests. No case names those tests. There are 60 files under `tests/unit/`, one open question each. Try [selecting several rows in the queue](./decide.md) to answer them together. To track every test without a case, open Settings, Policy and set "Tests with no case" to "Track without a case", or run `mainworthy --project demo policy tests track`. `--unlinked-files` sets how many files there are, from 0 to 500.
 
-Today's pipeline and agent results include step trails. Each step shows several actions with their own times, which add up to the step's time. For example, applying a coupon shows focus, typing the coupon, and pressing Apply.
+Two results in each of today's failing pipeline runs, and the agent's result, include step trails. Each step shows several actions with their own times, which add up to the step's time. For example, applying a coupon shows focus, typing the coupon, and pressing Apply.
 
 The project holds fourteen days of history before today:
 
