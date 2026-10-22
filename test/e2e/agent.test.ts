@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { answer, browserAvailable, eventually, openPage, type Server, startServer } from "./support.ts";
+import { answer, answerWhenRead, browserAvailable, eventually, openPage, type Server, startServer } from "./support.ts";
 
 /** A server with the preset these tests ask for, on a port the helpers hand out. */
 function fixture({
@@ -13,6 +13,49 @@ function fixture({
 }
 
 import { z } from "zod";
+
+test.skipIf(!browserAvailable)(
+	"the case pane offers only applicable answers on a conflicting proposal",
+	async () => {
+		const server = await startServer({ seed: false });
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await server.api("propose", { edits: [{ op: "create", outline: "Original title" }] });
+			await server.api("propose", {
+				edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Current title" } }],
+			});
+			const proposed = await server.api("propose", {
+				edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Conflicting title" } }],
+			});
+			if (!proposed.question) throw new Error("Missing conflict question");
+			view = await openPage(server, { path: "/p/scratch/suite/c/1" });
+			const { page } = view;
+			const card = page.locator(`[data-proposal="${proposed.question}"]`);
+			await card.getByText(/The author must resolve both sides/).waitFor();
+			expect(await card.getByRole("button", { name: "Accept" }).count()).toBe(0);
+			const sent: string[] = [];
+			page.on("request", (request) => {
+				if (request.url().endsWith("/decide")) sent.push(request.postData() ?? "");
+			});
+			await page.keyboard.press("a");
+			await card.scrollIntoViewIfNeeded();
+			const rejected = page.waitForResponse((reply) => reply.url().endsWith("/decide"));
+			await answerWhenRead(page, proposed.question, "r");
+			await rejected;
+			expect(sent).toHaveLength(1);
+			expect(JSON.parse(sent[0] ?? "null")).toMatchObject({ answer: { is: "reject" } });
+			expect((await server.api("get", { refs: [proposed.question] }))[0]?.decision).toMatchObject({
+				answer: { is: "reject" },
+			});
+			expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({ title: "Current title", version: 2 });
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
 
 for (const answer of ["accept", "reject"] as const)
 	(browserAvailable ? test : test.skip)(
