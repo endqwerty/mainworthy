@@ -1,4 +1,4 @@
-# 0134: Record proposal coverage only during animation frames
+# 0136: Record proposal coverage only during animation frames
 
 Date: 2026-10-22. Status: proposed.
 
@@ -36,3 +36,10 @@ Retaining synchronous coverage on answer presses would leave the demonstrated
 skip in place even after moving observer measurements. A second visibility model
 or a new scroll index would duplicate the existing range gate and its reflow
 invalidation. Keep one frame scheduler and delete all other coverage writers.
+
+Observer delivery follows the frame that selected its candidates. The next frame
+measures current geometry, so very fast wheel scrolling can leave a part unread
+even when it briefly appeared. Paging still returns to that unread range. Using
+observer-entry geometry would need to reconcile its earlier clipping and height
+with sticky controls and reflow; this change deliberately keeps the conservative
+measurement rather than crediting stale geometry.
