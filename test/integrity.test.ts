@@ -626,7 +626,13 @@ describe("what a result may prove", () => {
 		expect(gate({ run: planned.run }).verdict).toBe("pending");
 		expect(
 			h.raw("report", { target, results: [{ ...observed, outcome: "pass", corrects: original }] }, actor),
-		).toMatchObject({ ok: false, error: { code: "conflict" } });
+		).toMatchObject({
+			ok: false,
+			error: {
+				code: "conflict",
+				message: `result ${original} has an accepted correction waiting to be applied; retry that report or wait for server recovery before correcting again`,
+			},
+		});
 		expect(rows("SELECT state FROM batches ORDER BY id")).toEqual([{ state: "processed" }, { state: "accepted" }]);
 		expect(recoverAccepted(h.app)).toBe(1);
 		expect(recoverAccepted(h.app)).toBe(0);
@@ -642,6 +648,50 @@ describe("what a result may prove", () => {
 			report({ target, results: [{ ...observed, outcome: "pass", corrects: first(recovered.results) }] }, actor),
 		).toMatchObject({ counts: { total: 1, pass: 1 }, rejected: [], declined: [] });
 		expect(gate({ run: planned.run }).verdict).toBe("passed");
+	});
+
+	test("accepting many corrections reads waiting batches once", () => {
+		const actor = h.actor("pipeline", "ci", ["read", "record"]);
+		const input = ciReport({ commit: "scans631", n: 33 });
+		const original = report(input, actor).results;
+		const reserved = original[32];
+		const observed = input.results[32];
+		if (reserved === undefined || observed === undefined) throw new Error("missing original result");
+		const project = findProject(h.app.db, "scratch");
+		if (!project) throw new Error("no project");
+		h.app.db.transaction(() => {
+			const ctx = makeCtx(h.app, project, actor, true);
+			acceptReport(ctx, {
+				...input,
+				results: [
+					...Array.from({ length: 2_000 }, () => ({ test: { key: "waiting" }, outcome: "pass" as const })),
+					{ ...observed, corrects: reserved },
+				],
+			});
+			stampSeq(ctx);
+		});
+		const get = spyOn(h.app.db, "get");
+		const all = spyOn(h.app.db, "all");
+		try {
+			const corrected = report(
+				{
+					...input,
+					results: input.results.slice(0, 32).map((result, index) => ({ ...result, corrects: original[index] })),
+				},
+				actor,
+			);
+			expect(corrected).toMatchObject({ counts: { total: 32, pass: 32 }, rejected: [], declined: [] });
+			const scans = [...get.mock.calls, ...all.mock.calls].filter(
+				([statement]) => /\bbatches\b/.test(statement.text) && /\bstaged\b/.test(statement.text),
+			);
+			expect(scans.length).toBeLessThanOrEqual(1);
+		} finally {
+			get.mockRestore();
+			all.mockRestore();
+		}
+		expect(
+			h.raw("report", { ...input, results: [{ ...observed, corrects: reserved, note: "competing" }] }, actor),
+		).toMatchObject({ ok: false, error: { code: "conflict" } });
 	});
 
 	test("a pending correction from another producer does not reserve somebody else's result", () => {
