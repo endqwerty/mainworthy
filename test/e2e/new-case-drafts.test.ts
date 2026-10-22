@@ -89,16 +89,25 @@ for (const when of ["after reply", "before reply", "after reload", "with an olde
 				if (when !== "before reply") {
 					await page.locator("#stat").filter({ hasText: "Proposed, waiting for a person" }).waitFor();
 					if (when === "after reload" || when === "with an older stored draft") {
-						await page.getByRole("link", { name: "Runs", exact: true }).click();
-						if (when === "with an older stored draft")
-							await page.evaluate(() => {
+						// End the Suite document while the question is open. A client-side departure can still
+						// settle its save after acceptance and remove the draft this reload needs to recover.
+						await page.goto(`${server.url}/p/scratch/runs`);
+						await page.getByRole("listbox", { name: "Runs", exact: true }).waitFor();
+						if (when === "with an older stored draft") {
+							const changed = await page.evaluate(() => {
+								let changed = 0;
 								for (const key of Object.keys(localStorage)) {
 									if (!key.includes(":draft:")) continue;
 									const draft = JSON.parse(localStorage.getItem(key) ?? "null");
-									if (draft?.submission?.kind === "waiting")
+									if (draft?.submission?.kind === "waiting") {
 										localStorage.setItem(key, JSON.stringify({ ...draft, sent: null }));
+										changed++;
+									}
 								}
+								return changed;
 							});
+							expect(changed).toBe(1);
+						}
 						await accept(server);
 						await page.goto(`${server.url}/p/scratch/suite`);
 					} else await accept(server);
