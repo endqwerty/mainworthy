@@ -7,7 +7,7 @@ import {
 	ANSWER_KEYS,
 	ANSWER_LABELS,
 	ANSWERS,
-	fixedInText,
+	endingText,
 	KIND_WORDS,
 	KINDS,
 	type Kind,
@@ -1078,10 +1078,7 @@ function QueueWorkbench() {
 									{current.decision.supersedes && (
 										<>
 											<p className="dim">
-												{current.decision.fixedIn
-													? fixedInText(current.decision.fixedIn)
-													: `Ended by ${current.decision.rule ? `rule ${current.decision.rule}` : current.decision.by.join(", ")}`}{" "}
-												· {age(current.decision.at)}
+												{endingText(current.decision)} · {age(current.decision.at)}
 											</p>
 											{current.decision.reason && <p>{current.decision.reason}</p>}
 										</>

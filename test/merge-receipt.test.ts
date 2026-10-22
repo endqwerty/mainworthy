@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod";
-import { AuditReply, verifyAudit } from "../src/core/audit.ts";
+import { verifyAudit } from "../src/core/audit.ts";
 import { MergeReceipt, receiptNodeHash, receiptSnapshotHash } from "../src/core/changes.ts";
 import type { GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
+import { AuditReply } from "../src/core/replies.ts";
 import { mergeReceiptById } from "../src/server/decisions/questions.ts";
 import { changeByKey, setMergeReceipt } from "../src/server/evidence/evidence.ts";
 import { findProject, makeCtx } from "../src/server/kernel/ctx.ts";

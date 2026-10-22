@@ -5,6 +5,7 @@ import { MergeReceipt } from "./changes.ts";
 import { canonicalJson, claimHash, versionHash } from "./hash.ts";
 import { ActorKind, Capability, Clause, Kind, PolicySettings } from "./kinds.ts";
 import { CaseBody, FragmentPin, FragmentStep, InlineStep, MethodKind } from "./model.ts";
+import type { AuditReply } from "./replies.ts";
 import { TeamEvent, TeamGrant } from "./teams.ts";
 
 const integer = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -24,19 +25,6 @@ export const AuditInput = z
 	})
 	.refine((value) => value.to === undefined || value.to > value.from, { message: "to must be greater than from" });
 export type AuditInput = z.infer<typeof AuditInput>;
-export const AuditReply = z.strictObject({
-	format: z.literal(1),
-	project: z.string(),
-	records: integer,
-	sha256: z.string().regex(/^[a-f0-9]{64}$/),
-	ndjson: z.string(),
-	cursor: z.string().nullable().optional(),
-	evidenceCount: integer.optional(),
-	snapshot: z
-		.string()
-		.regex(/^[a-f0-9]{64}$/)
-		.optional(),
-});
 const Reference = z.discriminatedUnion("scope", [
 	z.strictObject({ scope: z.literal("included"), id }),
 	z.strictObject({ scope: z.literal("before-range"), id, at: integer }),

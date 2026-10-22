@@ -263,7 +263,7 @@ public struct DecisionEnding: Equatable, Sendable {
 		fixed = wire.fixedIn.map { DecisionEnding.fixedText(change: $0.change, state: $0.state) }
 	}
 
-	/// `fixedInText` of `src/core/kinds.ts`.
+	/// `endingText` of `src/core/kinds.ts`, for a fixed answer.
 	static func fixedText(change: String, state: String) -> String {
 		switch state {
 		case "merged": "Fixed by another commit of \(change), which merged"

@@ -10,7 +10,7 @@
 //
 // `bun scripts/ios.ts gen` writes the files; `test/ios-contract.test.ts` fails when one is not what this prints.
 import { execFileSync } from "node:child_process";
-import { ANSWER_HELP, ANSWER_LABELS, FixedIn, fixedInText, KIND_WORDS, KINDS } from "../../src/core/kinds.ts";
+import { ANSWER_HELP, ANSWER_LABELS, endingText, FixedIn, KIND_WORDS, KINDS } from "../../src/core/kinds.ts";
 import { METHOD_LABELS, MethodKind } from "../../src/core/model.ts";
 import { DECIDE_MAX } from "../../src/core/ops.ts";
 import {
@@ -258,7 +258,10 @@ export function parity(): string {
 		),
 	).join("");
 	const fixedCases = FixedIn.shape.state.options
-		.map((state) => `\t\t(${literal(state)}, ${literal(fixedInText({ change: "pr:482", state }))}),\n`)
+		.map(
+			(state) =>
+				`\t\t(${literal(state)}, ${literal(endingText({ fixedIn: { change: "pr:482", state }, rule: null, by: [] }))}),\n`,
+		)
 		.join("");
 	return [
 		HEADER("src/core/stakes.ts, src/core/runs.ts and src/core/kinds.ts"),
@@ -277,7 +280,7 @@ export function parity(): string {
 		"\t/// `reasonBesideShards`: a gate's reason and the jobs it waits for, and the reason beside their strips.",
 		`\tstatic let shardReasons: [(reason: String, waiting: [ShardRow], says: String)] = [\n${reasonCases}\t]`,
 		"",
-		"\t/// `fixedInText`: how pr:482, which fixed a failure itself, stands now, and the sentence.",
+		"\t/// `endingText`: how pr:482, which fixed a failure itself, stands now, and the sentence.",
 		`\tstatic let fixedIn: [(state: String, says: String)] = [\n${fixedCases}\t]`,
 		"}",
 		"",

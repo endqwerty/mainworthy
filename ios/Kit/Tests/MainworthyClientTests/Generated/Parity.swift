@@ -133,7 +133,7 @@ enum Parity {
 		("blocked: 1 failure unexplained; still waiting for shards 4, 5 and 6 of 6 of job tests; shard 2 of 2 of job lint in linux; 1 quarantined failure recorded, not blocking", [("tests", "", [4, 5, 6], 6), ("lint", "linux", [2], 2)], "blocked: 1 failure unexplained; still waiting for 4 shards; 1 quarantined failure recorded, not blocking"),
 	]
 
-	/// `fixedInText`: how pr:482, which fixed a failure itself, stands now, and the sentence.
+	/// `endingText`: how pr:482, which fixed a failure itself, stands now, and the sentence.
 	static let fixedIn: [(state: String, says: String)] = [
 		("open", "Fixed by another commit of pr:482"),
 		("merged", "Fixed by another commit of pr:482, which merged"),
