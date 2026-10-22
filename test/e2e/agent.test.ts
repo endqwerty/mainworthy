@@ -33,6 +33,12 @@ test.skipIf(!browserAvailable)(
 			const card = page.locator(`[data-proposal="${proposed.question}"]`);
 			await card.getByText(/The author must resolve both sides/).waitFor();
 			expect(await card.getByRole("button", { name: "Accept" }).count()).toBe(0);
+			await page.keyboard.press("ControlOrMeta+k");
+			const palette = page.locator("[data-overlay=palette]");
+			await palette.waitFor();
+			expect(await palette.getByRole("option", { name: /Accept proposal/ }).count()).toBe(0);
+			expect(await palette.getByRole("option", { name: /Reject proposal/ }).count()).toBe(1);
+			await page.keyboard.press("Escape");
 			const sent: string[] = [];
 			page.on("request", (request) => {
 				if (request.url().endsWith("/decide")) sent.push(request.postData() ?? "");

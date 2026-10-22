@@ -270,6 +270,9 @@ A key, or the Accept or Reject button, brings the proposal into view and shows i
 Later presses page through unread edits even when the card is taller than its pane.
 If the pane hides the next unread part, the same press moves the pane to show it.
 It answers only once the last edit is showing.
+The buttons and action keys offer only answers that apply to the proposal.
+A conflicting proposal cannot be accepted. Its author resolves both sides in the conflict card,
+or an authorized person rejects it with <kbd>r</kbd>.
 When the policy requires a reason, the case pane opens a field labeled with Accept or Reject.
 The answer buttons and keys stay disabled while this field is open.
 If someone settles the question meanwhile, the field closes when the page receives that decision.

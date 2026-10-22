@@ -19,6 +19,7 @@ import { type Draft, type DraftConflict, draftTags } from "../lib/drafts.ts";
 import { answerShown, proposalReadMessage } from "../lib/proposals.ts";
 import { navigate, refUrl } from "../lib/router.ts";
 import { ProposalEdits } from "../queue/evidence.tsx";
+import { takes } from "../queue/selection.ts";
 import { bodyOf, CaseView, editDraft } from "../suite/model.ts";
 import { AnswerExtra } from "../ui/answer-extra.tsx";
 import { ResultAttachments } from "../ui/attachments.tsx";
@@ -214,12 +215,14 @@ export function CasePane({
 	}
 	useCaseBindings({
 		enabled: ref !== null,
+		canAccept: pendingAnswer === null && Boolean(proposals[0] && takes(proposals[0], "accept")),
+		canReject: pendingAnswer === null && Boolean(proposals[0] && takes(proposals[0], "reject")),
 		diff: () => openDiff(draft?.base ?? view?.version ?? 1),
 		accept: () => answerVisibleProposal("accept", "key"),
 		reject: () => answerVisibleProposal("reject", "key"),
 	});
 	function answerVisibleProposal(answer: "accept" | "reject", via: "key" | "button", question = proposals[0]): void {
-		if (!question || pendingAnswer) return;
+		if (!question || pendingAnswer || !takes(question, answer)) return;
 		const message = answerShown(question.q, answer, via);
 		if (message) setStatus(message);
 		else void answerProposal(answer, question);
@@ -667,12 +670,16 @@ function ProposalCard({
 				</p>
 				<ProposalEdits question={question} />
 				<div className="pbtn">
-					<button type="button" className="out" disabled={disabled} onClick={() => answer("accept")}>
-						<KeyCap>a</KeyCap> Accept
-					</button>
-					<button type="button" className="out" disabled={disabled} onClick={() => answer("reject")}>
-						<KeyCap>r</KeyCap> Reject
-					</button>
+					{takes(question, "accept") && (
+						<button type="button" className="out" disabled={disabled} onClick={() => answer("accept")}>
+							<KeyCap>a</KeyCap> Accept
+						</button>
+					)}
+					{takes(question, "reject") && (
+						<button type="button" className="out" disabled={disabled} onClick={() => answer("reject")}>
+							<KeyCap>r</KeyCap> Reject
+						</button>
+					)}
 				</div>
 			</div>
 			<span className="age">{age(question.openedAt)}</span>
