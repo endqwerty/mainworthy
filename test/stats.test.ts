@@ -152,6 +152,65 @@ describe("the pass rate counts what a gate counts", () => {
 });
 
 describe("flaky tests and time lost to reruns", () => {
+	test("reported result and try durations are limited to 30 days at the operation boundary", () => {
+		h = harness({ unlinked: "track" });
+		const one = ciReport({ commit: "aaaa0001", n: 1 });
+		for (const durationMs of [0, 2_592_000_000, 2_592_000_001, 9_000_000_000_000_000]) {
+			for (const field of ["result", "try"]) {
+				const reply = h.raw("report", {
+					...one,
+					results: one.results.map((r) => ({
+						...r,
+						...(field === "result" ? { durationMs } : { tries: [{ outcome: "pass", durationMs }] }),
+					})),
+				});
+				expect([field, durationMs, reply.ok ? "accepted" : reply.error.code]).toEqual([
+					field,
+					durationMs,
+					durationMs <= 2_592_000_000 ? "accepted" : "invalid",
+				]);
+			}
+		}
+	});
+
+	test("large runner totals and historical durations stay readable with bounded per-test and headline time", () => {
+		h = harness({ unlinked: "track" });
+		for (let target = 0; target < 11; target++) {
+			const one = ciReport({ commit: `aaaa${target.toString().padStart(4, "0")}`, n: 2 });
+			h.call("report", {
+				...one,
+				results: one.results.map((r) => ({
+					...r,
+					tries: Array.from({ length: 100 }, () => ({ outcome: "pass", durationMs: 2_592_000_000 })),
+				})),
+			});
+		}
+		expect(stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 2200, lostMs: 5_702_400_000_000, unknown: 0 });
+		// Earlier builds and archives can contain durations above today's input limit.
+		h.app.db.raw.exec("UPDATE result_tries SET duration_ms = 9000000000000000");
+		expect(stats({ of: "reruns", days: 1 })).toMatchObject({
+			reruns: 2200,
+			lostMs: Number.MAX_SAFE_INTEGER,
+			unknown: 0,
+			items: [{ lostMs: Number.MAX_SAFE_INTEGER }, { lostMs: Number.MAX_SAFE_INTEGER }],
+		});
+		// Each execution's own sum can overflow too, before costs are added across executions.
+		h.app.db.raw.exec("UPDATE result_tries SET duration_ms = 9000000000000000000");
+		expect(stats({ of: "reruns", days: 1 })).toMatchObject({ reruns: 2200, lostMs: Number.MAX_SAFE_INTEGER });
+	});
+
+	test("historical repeated pipeline durations cannot overflow the reruns report", () => {
+		h = harness({ unlinked: "track" });
+		for (const attempt of [1, 2, 3]) h.call("report", ciReport({ commit: "aaaa0001", n: 1, attempt }));
+		h.app.db.raw.exec("UPDATE results SET duration_ms = 9000000000000000000");
+		expect(stats({ of: "reruns", days: 1 })).toMatchObject({
+			reruns: 2,
+			lostMs: Number.MAX_SAFE_INTEGER,
+			unknown: 0,
+			items: [{ lostMs: Number.MAX_SAFE_INTEGER }],
+		});
+	});
+
 	test("a runner's earlier tries count once, including unknown durations and tries that did not fail", () => {
 		h = harness({ unlinked: "track" });
 		const one = ciReport({ commit: "aaaa0001", n: 1 });
