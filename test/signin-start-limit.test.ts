@@ -36,6 +36,9 @@ test.each(starts)("$name begins consume the shared address limit before concurre
 	expect(blocked.every((reply) => reply.setCookies.length === 0)).toBe(true);
 	for (const alternate of starts)
 		expect(said(await w.post(alternate.path, alternate.body, client))).toBe("429 limited, retry after 1");
+	expect(said(await w.get("/api/session", { ...client, authorization: "Bearer not-a-token" }))).toBe(
+		"429 limited, retry after 1",
+	);
 	expect(said(await w.post(start.path, start.body, other))).toBe("200");
 	w.clock.advance(1000);
 	expect(said(await w.post(start.path, start.body, client))).toBe("200");

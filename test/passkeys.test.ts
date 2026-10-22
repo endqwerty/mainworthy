@@ -901,12 +901,14 @@ describe("a ceremony belongs to where it began", () => {
 		const w = world({ proxied: true });
 		const { device } = await person(w, "robin");
 		const at: Sent = from("203.0.113.40");
+		const pending = await Promise.all(Array.from({ length: 6 }, () => ask(w)));
 		const lines = await logged(async () => {
-			for (let n = 1; n <= 5; n++) {
-				const mine = await ask(w, at);
+			for (const mine of pending.slice(0, 5)) {
 				expect(said(await withPasskey(w, device.assert(mine.options), at))).toBe("401 unauthenticated");
 			}
-			const mine = await ask(w, at);
+			expect(said(await w.post("/api/login/challenge", {}, at))).toBe("429 limited, retry after 1");
+			const mine = pending[5];
+			if (!mine) throw new Error("no pending challenge");
 			expect(said(await withPasskey(w, device.assert(mine.options), at))).toBe("429 limited, retry after 1");
 			// The browser that asked signs in from the blocked address, as a right answer does.
 			expect(said(await withPasskey(w, device.assert(mine.options), { ...at, cookie: mine.cookie }))).toBe("200");

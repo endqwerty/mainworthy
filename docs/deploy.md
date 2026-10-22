@@ -110,6 +110,12 @@ wait. What it means for whoever runs an instance:
   of either still works from a blocked address.
 - The count is in memory. A restart clears it.
 
+Passkey challenges and provider sign-in begins, including native app begins, share the address count too.
+Every allowed start consumes one attempt before creating a ceremony, whether or not it later succeeds.
+Invitation challenges and provider linking follow the same rule. A blocked start gets `429` and `Retry-After`.
+An answer to a ceremony already begun can still succeed from that address. Unknown and private addresses
+remain uncounted, so configure the trusted proxy below for this protection to work behind it.
+
 ### Behind a proxy
 
 Without the two variables, the address of a request is the address of its connection. Behind a proxy that is

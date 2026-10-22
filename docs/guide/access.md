@@ -377,6 +377,14 @@ Failed attempts are counted. The fifth wrong password for one name within 15 min
 
 The same limit applies to the current password when changing it. Password attempts already waiting to be checked stop if the name or address becomes blocked. A check that finishes during a block returns `limited` too. A successful check never clears a block that began while it was running, even if that block has since expired.
 
+Starting a passkey or provider sign-in also counts against your network address, even before you answer.
+Web and iPhone starts share that count with failed sign-ins. Invitation passkey challenges and provider linking count too.
+Five starts within 15 minutes block further starts for one second. Each later allowed start doubles the next wait, up to 15 minutes.
+While blocked, the page says how long to wait, and the API returns `429 limited` with `Retry-After` seconds.
+Asking again during the wait does not extend it. A valid answer to a challenge or provider sign-in already begun can still finish.
+This prevents repeated starts from one address from pushing other people's pending sign-ins out of memory.
+The address follows the instance's [proxy configuration](./configuration.md#run-behind-a-proxy-that-ends-tls). Unknown and private addresses are not counted.
+
 ### Through an identity provider
 
 An instance can let people sign in through an OpenID Connect identity provider, such as Okta, Microsoft Entra ID, Google Workspace, Keycloak or Authentik. Whoever runs the instance [sets it up](./configuration.md#sign-in-through-an-identity-provider). The sign-in page then has a "Sign in with" button named after the provider.

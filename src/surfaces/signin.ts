@@ -23,6 +23,7 @@ import {
 	beginNativeOidc,
 	beginOidcSignIn,
 	changePassword,
+	countSignInStart,
 	exchangeNativeOidc,
 	finishNativeOidc,
 	finishOidcSignIn,
@@ -315,10 +316,12 @@ export function signInRoutes(app: App, tools: Tools) {
 				"invalid",
 				"send {} for a web passkey, { native: true } for a native passkey, or { invitation } to look at an invitation",
 			);
+		const limit = countSignInStart(app, tools.address(req, server));
+		if (limit) return tools.limited(limit.retryAfter);
 		if ("invitation" in body.data) {
-			const looked = showInvitation(app, body.data.invitation, tools.address(req, server));
+			const looked = showInvitation(app, body.data.invitation);
 			if (looked.ok) return answered(looked.shown);
-			return looked.why === "limited" ? tools.limited(looked.retryAfter) : failed("not_found", NO_INVITATION);
+			return failed("not_found", NO_INVITATION);
 		}
 		const begun = passkeySignInOptions(app, "native" in body.data ? "native" : "web");
 		if (!begun)
@@ -365,7 +368,9 @@ export function signInRoutes(app: App, tools: Tools) {
 				browser: tools.cookieOf(req),
 			};
 		else start = { purpose: "sign-in" };
-		const begun = await beginOidcSignIn(app, start, tools.address(req, server));
+		const limit = countSignInStart(app, tools.address(req, server));
+		if (limit) return tools.limited(limit.retryAfter);
+		const begun = await beginOidcSignIn(app, start);
 		if (begun.ok) {
 			const headers = new Headers();
 			for (const cookie of tools.ceremony.set(req, begun.ceremony, Math.ceil(begun.lastsMs / 1000)))
@@ -373,8 +378,6 @@ export function signInRoutes(app: App, tools: Tools) {
 			return tools.json({ ok: true, result: { url: begun.url } }, 200, headers);
 		}
 		switch (begun.why) {
-			case "limited":
-				return tools.limited(begun.retryAfter);
 			case "other-session":
 				return failed(
 					"conflict",
@@ -433,13 +436,15 @@ export function signInRoutes(app: App, tools: Tools) {
 		return failed(code, message);
 	}
 
-	async function nativeOidc(req: Request): Promise<Response> {
+	async function nativeOidc(req: Request, server: Listener): Promise<Response> {
 		if (!app.config.oidc) return failed("invalid", OIDC_OFF);
 		if (!tools.sameOrigin(req)) return failed("unauthenticated", NOT_SIGNED_IN);
 		const read = await tools.read(req, CHALLENGE_BODY_LIMIT);
 		if (read instanceof Response) return read;
 		const parsed = NativeRequest.safeParse(read.input);
 		if (!parsed.success) return failed("invalid", "send the native sign-in challenge, state, callback and instance");
+		const limit = countSignInStart(app, tools.address(req, server));
+		if (limit) return tools.limited(limit.retryAfter);
 		const url = await beginNativeOidc(app, parsed.data);
 		return url
 			? answered({ url })
@@ -464,7 +469,7 @@ export function signInRoutes(app: App, tools: Tools) {
 		routes: {
 			"/api/login/methods": { GET: () => answered(signInMethods(app)) },
 			"/api/login/challenge": { POST: (req: Request, server: Listener) => challenge(req, server) },
-			"/api/login/oidc/native": { POST: (req: Request) => nativeOidc(req) },
+			"/api/login/oidc/native": { POST: (req: Request, server: Listener) => nativeOidc(req, server) },
 			"/api/login/oidc/native/callback": { GET: (req: Request, server: Listener) => nativeCallback(req, server) },
 			"/api/login/oidc": { POST: (req: Request, server: Listener) => oidc(req, server) },
 			"/api/account/password": { POST: (req: Request, server: Listener) => password(req, server) },
