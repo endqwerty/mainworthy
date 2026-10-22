@@ -1,4 +1,4 @@
-# 0140: A failure a change fixed itself names the change
+# 0141: A failure a change fixed itself names the change
 
 - Date: 2026-10-22
 - Status: accepted (the owner asked for it in the thread that built it, 2026-10-22)
