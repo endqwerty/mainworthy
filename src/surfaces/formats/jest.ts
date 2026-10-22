@@ -1,5 +1,6 @@
 import { posix, win32 } from "node:path";
 import { z } from "zod";
+import { clip } from "../../core/text.ts";
 import { nativeResult, type ParsedReport } from "./native.ts";
 
 const Report = z.object({
@@ -18,6 +19,8 @@ const Report = z.object({
 					status: z.enum(["passed", "failed", "skipped", "pending", "todo", "disabled"]),
 					duration: z.number().nonnegative().nullish(),
 					failureMessages: z.array(z.string()).nullish(),
+					invocations: z.number().int().nonnegative().max(101).optional(),
+					retryReasons: z.array(z.string()).optional(),
 				}),
 			),
 		}),
@@ -36,6 +39,7 @@ export function parseJest(value: unknown, rootDir: string): ParsedReport {
 	if (report.wasInterrupted || report.runExecError != null)
 		throw new Error("Jest/Vitest did not finish; fix the runner before uploading");
 	const results: ParsedReport["results"] = [];
+	const warnings: string[] = [];
 	for (const suite of report.testResults) {
 		const name = suite.name.replace(/\\/g, "/");
 		const path = /^[a-z]:\//i.test(name) || name.startsWith("//") ? win32 : posix;
@@ -51,6 +55,36 @@ export function parseJest(value: unknown, rootDir: string): ParsedReport {
 		if (suite.status === "failed" && !suite.assertionResults.some((test) => test.status === "failed"))
 			throw new Error(`Jest/Vitest suite ${suite.name} failed without a failed test`);
 		for (const test of suite.assertionResults) {
+			const retries = Math.max(0, (test.invocations ?? 1) - 1);
+			if (test.invocations !== undefined && !retries && test.retryReasons?.length)
+				throw new Error(`Jest test ${test.title} has retry reasons without another invocation`);
+			// Jest counts invocations, but flattens multiple errors per try. Vitest keeps errors without boundaries.
+			const details = retries
+				? Array.from({ length: retries }, (_, index) =>
+						retries === 1
+							? (test.retryReasons?.join("\n") ?? "")
+							: test.retryReasons?.length === retries
+								? (test.retryReasons[index] ?? "")
+								: "",
+					)
+				: test.retryReasons?.length
+					? [test.retryReasons.join("\n")]
+					: test.invocations === undefined && test.status === "passed" && test.failureMessages?.length
+						? [test.failureMessages.join("\n")]
+						: [];
+			if (retries && (!test.retryReasons?.length || (retries > 1 && test.retryReasons.length !== retries)))
+				warnings.push(`Jest test ${file}::${test.title}: individual retry diagnostics are unavailable`);
+			if (details.length && !retries)
+				warnings.push(
+					`Jest/Vitest test ${file}::${test.title}: report omits retry count and boundaries; kept earlier failures as one try`,
+				);
+			const tries = details.map((value) => {
+				const detail = value.trim() || "Runner failed before retry; individual retry diagnostics are unavailable";
+				return {
+					outcome: "fail" as const,
+					failure: { message: clip(detail.split(/\r?\n/)[0] ?? detail, 4000), detail: clip(detail, 20_000) },
+				};
+			});
 			results.push(
 				nativeResult({
 					name: test.title,
@@ -59,9 +93,11 @@ export function parseJest(value: unknown, rootDir: string): ParsedReport {
 					outcome: test.status === "passed" ? "pass" : test.status === "failed" ? "fail" : "skip",
 					...(test.duration == null ? {} : { durationMs: test.duration }),
 					detail: test.failureMessages?.join("\n"),
+					retries,
+					tries,
 				}),
 			);
 		}
 	}
-	return { results, warnings: [] };
+	return { results, warnings };
 }

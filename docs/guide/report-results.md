@@ -356,9 +356,21 @@ runner's retry reads "flaky" in a change's results and on its page, counts in
 [Reports](./reports.md), and feeds the detector below. Tries that only failed, or were skipped,
 add no flip.
 
+The JSON reporters keep different amounts of retry evidence:
+
+| Reporter | Earlier tries Mainworthy can keep |
+| --- | --- |
+| Playwright JSON | Every execution before the final one, with its outcome, duration, and diagnostic. |
+| Jest JSON, checked with Jest 30.5.2 | `invocations` gives the number of earlier failed tries. `jest.retryTimes(2, { logErrorsBeforeRetry: true })` also keeps `retryReasons`. Each try gets its diagnostic when the report has one reason per try; a single earlier try keeps all its reasons together. Missing or flattened diagnostics produce a warning and failed tries without an attributed diagnostic. |
+| Vitest JSON, checked with Vitest 5.0.4 | A passed test's retained `failureMessages` prove earlier failure. They are kept together as one failed try, with a warning: the reporter omits the retry count and the boundaries between tries. A failed test's messages cannot distinguish retries from several errors in one execution. |
+| `pytest-json-report` 1.5.0 with `pytest-rerunfailures` 16.7, checked with pytest 8.4.2 | A recovered test keeps `outcome: "rerun"` beside its final stages. Mainworthy judges those stages and keeps one earlier failed try, with a warning. The reporter overwrites earlier stages, so their count, durations, and diagnostics are unavailable. An exhausted failure retains no retry marker. |
+
+No adapter invents a duration or attributes a diagnostic to a try when the report lost that information.
+For exact retry histories, use a reporter that retains each execution, such as Playwright JSON or Surefire's retry elements.
+
 When the pipeline also runs the job again, the earlier attempt meets the new attempt's first
 decisive try, so one recovery is one flip whichever retried first. A correction of a result
-withdraws the flips of its tries too. A result keeps at most a hundred tries. A Playwright report with more is
+withdraws the flips of its tries too. A result keeps at most a hundred tries. A Playwright report or a Jest invocation count with more is
 refused rather than cut, because the try that was dropped could be the one that passed. A
 Surefire testcase with more keeps its first run and its last 99, with a warning: every one
 failed, so those decide every flip. In the API,

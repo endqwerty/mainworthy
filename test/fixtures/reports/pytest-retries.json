@@ -1,1 +1,69 @@
-{"created": 1792678517.042837, "duration": 0.03520512580871582, "exitcode": 1, "root": "/workspace", "environment": {}, "summary": {"rerun": 1, "failed": 1, "passed": 1, "skipped": 1, "total": 4, "collected": 4}, "collectors": [{"nodeid": "", "outcome": "passed", "result": [{"nodeid": ".", "type": "Dir"}]}, {"nodeid": "test_sample.py", "outcome": "passed", "result": [{"nodeid": "test_sample.py::test_recovers", "type": "Function", "lineno": 2}, {"nodeid": "test_sample.py::test_still_fails", "type": "Function", "lineno": 7}, {"nodeid": "test_sample.py::test_clean", "type": "Function", "lineno": 10}, {"nodeid": "test_sample.py::test_skipped", "type": "Function", "lineno": 13}]}, {"nodeid": ".", "outcome": "passed", "result": [{"nodeid": "test_sample.py", "type": "Module"}]}], "tests": [{"nodeid": "test_sample.py::test_recovers", "lineno": 2, "outcome": "rerun", "keywords": ["test_recovers", "test_sample.py", "retry-samples", ""], "setup": {"duration": 0.00015491701196879148, "outcome": "passed"}, "call": {"duration": 0.00011837499914690852, "outcome": "passed"}, "teardown": {"duration": 9.366701124235988e-05, "outcome": "passed"}}, {"nodeid": "test_sample.py::test_still_fails", "lineno": 7, "outcome": "failed", "keywords": ["test_still_fails", "test_sample.py", "retry-samples", ""], "setup": {"duration": 0.00016854098066687584, "outcome": "passed"}, "call": {"duration": 0.00014649995137006044, "outcome": "failed", "crash": {"path": "/workspace/test_sample.py", "lineno": 9, "message": "assert 1 == 2"}, "traceback": [{"path": "test_sample.py", "lineno": 9, "message": "AssertionError"}], "longrepr": "def test_still_fails():\n>       assert 1 == 2\nE       assert 1 == 2\n\ntest_sample.py:9: AssertionError"}, "teardown": {"duration": 6.212503649294376e-05, "outcome": "passed"}}, {"nodeid": "test_sample.py::test_clean", "lineno": 10, "outcome": "passed", "keywords": ["test_clean", "test_sample.py", "retry-samples", ""], "setup": {"duration": 4.5666994992643595e-05, "outcome": "passed"}, "call": {"duration": 4.5042019337415695e-05, "outcome": "passed"}, "teardown": {"duration": 4.979199729859829e-05, "outcome": "passed"}}, {"nodeid": "test_sample.py::test_skipped", "lineno": 13, "outcome": "skipped", "keywords": ["test_skipped", "skip", "pytestmark", "test_sample.py", "retry-samples", ""], "setup": {"duration": 6.645795656368136e-05, "outcome": "skipped", "longrepr": "('/workspace/test_sample.py', 14, 'Skipped: sample')"}, "teardown": {"duration": 4.68750367872417e-05, "outcome": "passed"}}]}
+{
+	"created": 1792678517.042837,
+	"duration": 0.03520512580871582,
+	"exitcode": 1,
+	"root": "/workspace",
+	"environment": {},
+	"summary": { "rerun": 1, "failed": 1, "passed": 1, "skipped": 1, "total": 4, "collected": 4 },
+	"collectors": [
+		{ "nodeid": "", "outcome": "passed", "result": [{ "nodeid": ".", "type": "Dir" }] },
+		{
+			"nodeid": "test_sample.py",
+			"outcome": "passed",
+			"result": [
+				{ "nodeid": "test_sample.py::test_recovers", "type": "Function", "lineno": 2 },
+				{ "nodeid": "test_sample.py::test_still_fails", "type": "Function", "lineno": 7 },
+				{ "nodeid": "test_sample.py::test_clean", "type": "Function", "lineno": 10 },
+				{ "nodeid": "test_sample.py::test_skipped", "type": "Function", "lineno": 13 }
+			]
+		},
+		{ "nodeid": ".", "outcome": "passed", "result": [{ "nodeid": "test_sample.py", "type": "Module" }] }
+	],
+	"tests": [
+		{
+			"nodeid": "test_sample.py::test_recovers",
+			"lineno": 2,
+			"outcome": "rerun",
+			"keywords": ["test_recovers", "test_sample.py", "retry-samples", ""],
+			"setup": { "duration": 0.00015491701196879148, "outcome": "passed" },
+			"call": { "duration": 0.00011837499914690852, "outcome": "passed" },
+			"teardown": { "duration": 9.366701124235988e-5, "outcome": "passed" }
+		},
+		{
+			"nodeid": "test_sample.py::test_still_fails",
+			"lineno": 7,
+			"outcome": "failed",
+			"keywords": ["test_still_fails", "test_sample.py", "retry-samples", ""],
+			"setup": { "duration": 0.00016854098066687584, "outcome": "passed" },
+			"call": {
+				"duration": 0.00014649995137006044,
+				"outcome": "failed",
+				"crash": { "path": "/workspace/test_sample.py", "lineno": 9, "message": "assert 1 == 2" },
+				"traceback": [{ "path": "test_sample.py", "lineno": 9, "message": "AssertionError" }],
+				"longrepr": "def test_still_fails():\n>       assert 1 == 2\nE       assert 1 == 2\n\ntest_sample.py:9: AssertionError"
+			},
+			"teardown": { "duration": 6.212503649294376e-5, "outcome": "passed" }
+		},
+		{
+			"nodeid": "test_sample.py::test_clean",
+			"lineno": 10,
+			"outcome": "passed",
+			"keywords": ["test_clean", "test_sample.py", "retry-samples", ""],
+			"setup": { "duration": 4.5666994992643595e-5, "outcome": "passed" },
+			"call": { "duration": 4.5042019337415695e-5, "outcome": "passed" },
+			"teardown": { "duration": 4.979199729859829e-5, "outcome": "passed" }
+		},
+		{
+			"nodeid": "test_sample.py::test_skipped",
+			"lineno": 13,
+			"outcome": "skipped",
+			"keywords": ["test_skipped", "skip", "pytestmark", "test_sample.py", "retry-samples", ""],
+			"setup": {
+				"duration": 6.645795656368136e-5,
+				"outcome": "skipped",
+				"longrepr": "('/workspace/test_sample.py', 14, 'Skipped: sample')"
+			},
+			"teardown": { "duration": 4.68750367872417e-5, "outcome": "passed" }
+		}
+	]
+}
