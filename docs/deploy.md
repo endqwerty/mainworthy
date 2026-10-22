@@ -330,8 +330,14 @@ local function nginx_answers()
 end
 
 core.register_task(function()
+    local failing = false
     while true do
-        answers = nginx_answers()
+        local ok, result = pcall(nginx_answers)
+        if not ok and not failing then
+            core.Alert("mainworthy-hold: the probe failed, so the gate is open: " .. tostring(result))
+        end
+        failing = not ok
+        answers = not ok or result
         core.msleep(100)
     end
 end)
@@ -357,6 +363,9 @@ end)
   has open, 54 to 123 ms with none open, and up to Coolify's 30-second stop while a browser holds a change
   stream open. Every 100 ms the gate sends nginx a `CONNECT`, which nginx refuses itself (405) without asking
   the app, so a slow app does not hold requests back; any status line means nginx answers.
+- **A probe that fails with an error opens the gate.** Requests then go on as they would with no gate. A
+  task that stopped on an error would otherwise keep its last answer, and if that was "no", hold every request
+  until it expired. A refused or silent nginx is an answer, not an error.
 - **The drain is left unbounded.** The app keeps running while the ingress drains, so a write in flight
   finishes and its reply arrives, as before, and new requests wait at the gate meanwhile. A
   `worker_shutdown_timeout` would cut a committed write's reply (a new token's secret is shown once).
