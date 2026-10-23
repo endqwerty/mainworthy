@@ -224,9 +224,15 @@ for (const restricted of ["produce only", "human approval"] as const)
 				expect(await link.getAttribute("href")).toBe(`/p/scratch/queue/${signoff.q.slice(2)}`);
 				expect(await page.locator(".run-last").getByRole("button").count()).toBe(0);
 				expect(await page.locator("#hints").innerText()).not.toContain("Correct last result");
+				let sent = 0;
+				await page.route("**/report", async (route) => {
+					sent++;
+					await route.continue();
+				});
 				await page.keyboard.press("u");
 				expect((await slots(server, run))[0]?.fills).toMatchObject([{ outcome: "pass" }]);
 				expect((await server.api("get", { refs: [run] }))[0]).toMatchObject({ state: "closed" });
+				expect(sent).toBe(0);
 				await link.click();
 				await page.getByRole("option").filter({ hasText: "Close R-1" }).waitFor();
 				expect(await page.locator("[data-current-question]").getAttribute("data-current-question")).toBe(signoff.q);

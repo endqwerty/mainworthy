@@ -260,7 +260,7 @@ for (const missingReply of [false, true])
 	);
 
 check(
-	"R5B-2 undo in a closed run says nothing was recorded",
+	"R5B-2 closed-run undo announces reopening and records the owner's correction",
 	async () => {
 		const server = await startServer({ preset: "standard" });
 		await cases(server, 2);
@@ -289,17 +289,33 @@ check(
 				{ token: tester },
 			);
 			await page.getByText("Filled by person tester", { exact: false }).waitFor();
-			let sent = 0;
+			expect((await server.api("get", { refs: [run.run] }))[0]).toMatchObject({ state: "closed" });
+			const before = Slot.array().parse((await server.api("find", { in: "slots", run: run.run })).items)[0]?.fills[0];
+			if (!before) throw new Error("The owner's original result is missing");
+			await page.locator(".run-controls").filter({ hasText: "u reopens this run and corrects the result" }).waitFor();
+			const sent: z.infer<typeof ReportInput>[] = [];
 			await page.route("**/report", async (route) => {
-				sent++;
+				sent.push(ReportInput.parse(route.request().postDataJSON()));
 				await route.continue();
 			});
 			await page.keyboard.press("u");
-			await page.getByText("This run is closed. No result was recorded", { exact: false }).first().waitFor();
-			expect(sent).toBe(0);
+			await page.locator("#stat").filter({ hasText: "Run reopened. C-1 skip recorded" }).waitFor();
+			expect(sent).toHaveLength(1);
+			expect(sent[0]).toMatchObject({
+				run: run.run,
+				results: [{ test: { case: "C-1" }, outcome: "skip", corrects: before.result }],
+			});
+			expect((await server.api("get", { refs: [run.run] }))[0]).toMatchObject({ state: "open" });
+			const after = Slot.array().parse((await server.api("find", { in: "slots", run: run.run })).items);
+			expect(after[0]?.fills).toMatchObject([{ outcome: "skip", note: "Withdrawn by the author" }]);
+			expect(after[1]?.fills).toMatchObject([{ by: "tester", outcome: "pass" }]);
+			expect((await server.api("gate", { run: run.run })).verdict).toBe("pending");
 			expect(
-				Slot.array().parse((await server.api("find", { in: "slots", run: run.run })).items)[0]?.fills[0]?.outcome,
-			).toBe("pass");
+				(await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "result"),
+			).toMatchObject([
+				{ outcome: "skip", corrects: before.result },
+				{ id: before.result, outcome: "pass" },
+			]);
 		} finally {
 			await h.close();
 			await server.stop();
