@@ -306,6 +306,7 @@ test("no module outside the tests reads a file that only the tests naming it are
 		"scripts/changelog.ts":
 			"validates .changes/ and assembles CHANGELOG.md; test/changelog.test.ts and test/docs.test.ts name their inputs",
 		"scripts/decisions.ts": "validates and indexes docs/decisions/; test/docs.test.ts names the directory",
+		"scripts/work/pull-request.ts": "judges docs/decisions/ and .changes/ paths from GitHub; reads no local file",
 		"scripts/ios/swift.ts": "writes the app's generated Swift; test/ios-contract.test.ts compares it and names ios/",
 		"scripts/security-audit.ts": "names the audit's own files to call out a change to them, and reads none of them",
 		"src/server/identity/identity.ts": "a message that points to docs/deploy.md",

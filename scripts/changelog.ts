@@ -17,6 +17,8 @@ type Fragment = z.infer<typeof schema> & { text: string };
 const START = "<!-- changes:start -->";
 const END = "<!-- changes:end -->";
 const TITLE = "# Changelog\n\n";
+const RESTORE =
+	"Do not hand-edit CHANGELOG.md; restore CHANGELOG.md from main and add a .changes/ fragment for the entry.";
 
 export function fragments(sources?: readonly SourceFile[]): Fragment[] {
 	let files = sources;
@@ -77,53 +79,74 @@ function generatedLine(entry: Fragment): string {
 	return `- ${entry.date}: **${entry.category}:** ${text}${refs.length ? ` (${refs.join(", ")})` : ""} <!-- change:${entry.id} -->`;
 }
 
-/** Replace only our generated section. Everything below it remains byte for byte historical. */
-export function assemble(changelog: string, entries: readonly Fragment[]): string {
-	if (!changelog.startsWith(TITLE)) throw new Error("CHANGELOG.md must start with # Changelog and a blank line");
+function changelogParts(changelog: string): { history: string; lines: string[] } {
+	if (!changelog.startsWith(TITLE))
+		throw new Error(`CHANGELOG.md must start with # Changelog and a blank line. ${RESTORE}`);
+	let history = changelog.slice(TITLE.length);
+	let lines: string[] = [];
+	if (history.startsWith(`${START}\n`)) {
+		const end = history.indexOf(`${END}\n\n`);
+		if (end < 0) throw new Error(`CHANGELOG.md has an unfinished changes section. ${RESTORE}`);
+		const section = history.slice(START.length + 1, end).replace(/\n$/, "");
+		lines = section ? section.split("\n") : [];
+		history = history.slice(end + END.length + 2);
+	}
+	if (history.includes(START) || history.includes(END))
+		throw new Error(`CHANGELOG.md has misplaced changes markers. ${RESTORE}`);
+	return { history: `${TITLE}${history}`, lines };
+}
+
+/** Regenerate the owned section, preserving the exact outside text and checking its base when supplied. */
+export function assemble(changelog: string, entries: readonly Fragment[], options: { base?: string } = {}): string {
+	const current = changelogParts(changelog);
+	if (options.base !== undefined && current.history !== changelogParts(options.base).history)
+		throw new Error(`CHANGELOG.md history differs from its base. ${RESTORE}`);
 	const lines = new Map(
 		[...entries]
 			.sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id))
 			.map((entry) => [entry.id, generatedLine(entry)]),
 	);
-	let history = changelog.slice(TITLE.length);
-	if (history.startsWith(`${START}\n`)) {
-		const end = history.indexOf(`${END}\n\n`);
-		if (end < 0) throw new Error("CHANGELOG.md has an unfinished changes section");
-		const section = history.slice(START.length + 1, end).replace(/\n$/, "");
-		const seen = new Set<string>();
-		for (const line of section ? section.split("\n") : []) {
-			const markers = [...line.matchAll(/<!-- change:([a-z0-9-]+) -->/g)];
-			const id = markers[0]?.[1];
-			if (markers.length !== 1 || id === undefined || !lines.has(id) || seen.has(id))
-				throw new Error(
-					"CHANGELOG.md contains an unowned generated line; move the entry into a .changes/ fragment before assembling",
-				);
-			if (line !== lines.get(id))
-				throw new Error(
-					`CHANGELOG.md entry ${id} differs from its canonical fragment; restore the entry from .changes/ and add a new fragment for corrections.`,
-				);
-			seen.add(id);
-		}
-		history = history.slice(end + END.length + 2);
+	const seen = new Set<string>();
+	for (const line of current.lines) {
+		const markers = [...line.matchAll(/<!-- change:([a-z0-9-]+) -->/g)];
+		const id = markers[0]?.[1];
+		if (markers.length !== 1 || id === undefined || !lines.has(id) || seen.has(id))
+			throw new Error(`CHANGELOG.md contains an unowned generated line. ${RESTORE}`);
+		if (line !== lines.get(id))
+			throw new Error(`CHANGELOG.md entry ${id} differs from its canonical fragment. ${RESTORE}`);
+		seen.add(id);
 	}
-	if (history.includes(START) || history.includes(END)) throw new Error("CHANGELOG.md has misplaced changes markers");
-	if (entries.length === 0) return `${TITLE}${history}`;
+	if (entries.length === 0) return current.history;
+	return `${TITLE}${START}\n${[...lines.values()].join("\n")}\n${END}\n\n${current.history.slice(TITLE.length)}`;
+}
 
-	return `${TITLE}${START}\n${[...lines.values()].join("\n")}\n${END}\n\n${history}`;
+function baseChangelog(revision: string): string {
+	const run = Bun.spawnSync(["git", "show", "--end-of-options", `${revision}:CHANGELOG.md`], {
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	if (run.exitCode !== 0)
+		throw new Error(`Cannot read CHANGELOG.md from base ${revision}: ${run.stderr.toString().trim()}`);
+	return run.stdout.toString();
 }
 
 if (import.meta.main) {
 	try {
 		const args = process.argv.slice(2);
-		if (!["", "--check", "--write", "--check --complete", "--complete --check"].includes(args.join(" ")))
-			throw new Error("usage: bun scripts/changelog.ts [--check [--complete] | --write]");
+		const bases = args.filter((arg) => arg.startsWith("--base="));
+		const modes = args.filter((arg) => !arg.startsWith("--base="));
+		if (
+			bases.length > 1 ||
+			bases[0] === "--base=" ||
+			!["", "--check", "--write", "--check --complete", "--complete --check"].includes(modes.join(" "))
+		)
+			throw new Error("usage: bun scripts/changelog.ts [--check [--complete] | --write] [--base=<revision>]");
 		const entries = fragments();
 		const changelog = readFileSync("CHANGELOG.md", "utf8");
-		const output = assemble(changelog, entries);
+		const revision = bases[0]?.slice("--base=".length);
+		const output = assemble(changelog, entries, revision === undefined ? {} : { base: baseChangelog(revision) });
 		if (args.includes("--complete") && output !== changelog)
-			throw new Error(
-				"CHANGELOG.md is not fully assembled; run bun scripts/changelog.ts --write and commit the result.",
-			);
+			throw new Error(`CHANGELOG.md is not fully assembled. ${RESTORE}`);
 		if (args.includes("--write")) {
 			const temporary = `.changelog-${randomUUID()}.tmp`;
 			try {

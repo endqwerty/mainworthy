@@ -637,7 +637,7 @@ test("CI requires a changed aggregate to be fully assembled", () => {
 					expect.objectContaining({
 						name: "A changed changelog is fully assembled",
 						if: expect.stringContaining("matrix.name == 'tests' || matrix.name == 'tests-1'"),
-						run: expect.stringContaining("--check --complete"),
+						run: expect.stringContaining('--check --complete --base="$BASE"'),
 						env: { BASE: expect.stringContaining("github.event.pull_request.base.sha || github.event.before") },
 					}),
 				]),
