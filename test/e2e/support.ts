@@ -9,6 +9,7 @@ import { Client } from "../../src/cli/client.ts";
 import { type SeedResult, seed } from "../../src/cli/seed.ts";
 import type { Api, OpName } from "../../src/core/api.ts";
 import { call } from "../../src/web/lib/api.ts";
+import { browserDiagnostics } from "./browser-diagnostics.ts";
 
 const found = findChromium();
 export const browserAvailable = found.path !== null;
@@ -301,6 +302,7 @@ let closesShared = false;
 try {
 	afterAll(async () => {
 		closesShared = false;
+		browserDiagnostics.clear();
 		await (await shared?.catch(() => null))?.close();
 		shared = null;
 	}, 60_000); // A hang guard for teardown, not a browser-performance assertion (issue #497).
@@ -313,11 +315,20 @@ async function fileBrowser(): Promise<Browser | null> {
 	if (!(await shared?.catch(() => null))?.isConnected()) {
 		const endpoint = sharedBrowserEndpoint(Bun.main);
 		shared = endpoint
-			? chromium.connect(endpoint, { timeout: 10_000 }).catch((cause: unknown) => {
-					throw new Error(`Cannot connect to shared Chromium for Bun worker ${process.env.BUN_TEST_WORKER_ID ?? "1"}`, {
-						cause,
-					});
-				})
+			? chromium
+					.connect(endpoint, { timeout: 10_000 })
+					.then((browser) => {
+						browserDiagnostics.connected(browser);
+						return browser;
+					})
+					.catch((cause: unknown) => {
+						throw new Error(
+							`Cannot connect to shared Chromium for Bun worker ${process.env.BUN_TEST_WORKER_ID ?? "1"}`,
+							{
+								cause,
+							},
+						);
+					})
 			: launchBrowser();
 	}
 	return shared;
@@ -374,6 +385,7 @@ export async function openPage(
 			: { viewport: { width: 1440, height: 900 } }),
 		colorScheme: "light",
 	});
+	browserDiagnostics.context(context);
 	context.setDefaultTimeout(SETTLES);
 	routesWaitForInterception(context);
 	throttleRenderers(context);

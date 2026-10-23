@@ -17,7 +17,19 @@
 // It ends with what a reader needs and the output above it does not put in one place: each test that failed, and
 // whether the browser tests ran. On a machine that cannot run the tests it says why and runs nothing
 // (`scripts/preflight.ts`).
-import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync } from "node:fs";
+import {
+	appendFileSync,
+	closeSync,
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	openSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { BrowserServer } from "playwright-core";
@@ -43,6 +55,12 @@ import {
 	testReaders,
 	writeTimings,
 } from "./check-plan.ts";
+import {
+	ChromiumDiagnosticOutput,
+	type ChromiumSlot,
+	chromiumDiagnosticPaths,
+	StderrTail,
+} from "./chromium-diagnostics.ts";
 import { requireReady } from "./preflight.ts";
 import { ownedChildren } from "./work/processes.ts";
 
@@ -178,6 +196,10 @@ async function tests(capture: boolean, fixture: string | undefined): Promise<Tes
 		});
 		if (!capture) console.log(`\n$ bun ${args.join(" ")}`);
 		try {
+			const diagnosticSlots = new Map<number, ChromiumSlot>();
+			const browserClosures: Promise<void>[] = [];
+			const diagnosticDirectory = join(scratch, `${phase}-chromium`);
+			mkdirSync(diagnosticDirectory);
 			const chromium = findChromium();
 			const selected = phaseFiles(phase, shard, chosen);
 			const slots = phaseWorkers ?? (phase === "parallel" ? parallelWorkers() : quietWorkers());
@@ -185,7 +207,7 @@ async function tests(capture: boolean, fixture: string | undefined): Promise<Tes
 				const { chromium: launcher } = await import("playwright-core");
 				for (let slot = 1; slot <= Math.min(slots, selected?.length ?? slots); slot++) {
 					const browser = await launcher.launchServer({
-						...chromiumLaunchOptions(chromium.path),
+						...chromiumLaunchOptions(chromium.path, ["--enable-logging=stderr", "--log-level=1"]),
 						host: "127.0.0.1",
 						timeout: 15_000,
 						handleSIGINT: false,
@@ -193,10 +215,35 @@ async function tests(capture: boolean, fixture: string | undefined): Promise<Tes
 						handleSIGHUP: false,
 					});
 					browsers.add(browser);
+					browserClosures.push(new Promise<void>((resolve) => browser.process().once("close", () => resolve())));
+					const stderr = new StderrTail();
+					const diagnosticSlot: ChromiumSlot = { pid: browser.process().pid, stderr, unexpectedExit: null };
+					diagnosticSlots.set(slot, diagnosticSlot);
+					browser.process().on("exit", (code, signal) => {
+						// A fatal exit can arrive after phase cleanup began; expected graceful/forced stops are excluded.
+						if (leaving || (!browsers.has(browser) && (code === 0 || signal === "SIGTERM" || signal === "SIGKILL")))
+							return;
+						diagnosticSlot.unexpectedExit = { at: new Date().toISOString(), code, signal };
+					});
+					browser
+						.process()
+						.stderr?.setEncoding("utf8")
+						.on("data", (chunk: string) => {
+							if (leaving) return;
+							stderr.append(chunk);
+							const path = chromiumDiagnosticPaths(diagnosticDirectory, slot).stderr;
+							writeFileSync(`${path}.next`, stderr.text());
+							renameSync(`${path}.next`, path);
+						});
 					browser.on("close", () => {
 						if (!browsers.has(browser) || leaving) return;
 						browserFailed = true;
 						const child = browser.process();
+						diagnosticSlot.unexpectedExit ??= {
+							at: new Date().toISOString(),
+							code: child.exitCode,
+							signal: child.signalCode,
+						};
 						console.error(
 							`check: shared Chromium slot ${slot} exited unexpectedly (exit ${child.exitCode}, signal ${child.signalCode})`,
 						);
@@ -204,14 +251,27 @@ async function tests(capture: boolean, fixture: string | undefined): Promise<Tes
 				}
 				console.log(`check: ${browsers.size} shared Chromium slots (${phase})`);
 			}
-			parts.push({
-				...(await run(`tests: ${phase}`, [process.execPath, ...args], capture, {
-					MAINWORTHY_E2E_SERVER: fixture,
-					MAINWORTHY_E2E_BROWSER_ENDPOINTS: [...browsers].map((browser) => browser.wsEndpoint()).join("\n"),
-				})),
-				phase,
-				report,
+
+			const part = await run(`tests: ${phase}`, [process.execPath, ...args], capture, {
+				MAINWORTHY_E2E_SERVER: fixture,
+				MAINWORTHY_E2E_BROWSER_ENDPOINTS: [...browsers].map((browser) => browser.wsEndpoint()).join("\n"),
+				MAINWORTHY_E2E_DIAGNOSTICS: diagnosticSlots.size > 0 ? "1" : "",
+				MAINWORTHY_E2E_DIAGNOSTICS_DIRECTORY: diagnosticSlots.size > 0 ? diagnosticDirectory : "",
 			});
+			// Finish process exit/stderr delivery before publication, including a crash racing worker teardown.
+			await closeBrowsers();
+			await Promise.all(browserClosures);
+			if (diagnosticSlots.size > 0) {
+				const diagnostics = new ChromiumDiagnosticOutput(diagnosticSlots);
+				diagnostics.read(diagnosticDirectory);
+				const { parseJUnit } = await import("../src/surfaces/formats/junit.ts");
+				const output = diagnostics.finish(existsSync(report) ? parseJUnit(readFileSync(report, "utf8")).results : []);
+				if (output) {
+					if (part.log === null || part.exit === 0) process.stderr.write(output);
+					else appendFileSync(part.log, output);
+				}
+			}
+			parts.push({ ...part, phase, report });
 		} finally {
 			await closeBrowsers();
 		}
