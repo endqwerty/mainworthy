@@ -389,10 +389,14 @@ detector sample names the runner's `try` at either end.
 
 A failed try's cause follows the same file-splitting rule as a failed result, even when the
 result passed. Without diagnostic cause text, a failed try or result has an unknown cause.
-It creates no signature, joins no failure group, and supports no detector suggestion.
-Its outcome changes still count as flips in history and reports. Test names never supply
-diagnostic text. This applies to all report formats, including message-free Playwright and
-Surefire retries. Existing stored causes keep their earlier classification.
+It has a signature unique to that test, labelled **Unknown failure cause**. An unknown failed
+result still opens a question that you can answer in Queue. Its answer applies to that test's
+unknown failures within the answer's scope, never to another test. Unknown causes do not
+join assertion groups, split by file, support detector suggestions, or establish that a head
+has the same cause as a failure on its base. Their outcome changes still count as flips in
+history and reports. Test names never supply diagnostic text. This applies to all report
+formats, including message-free Playwright and Surefire retries. Existing stored causes keep
+their earlier classification.
 Failed tries and results with known causes count together toward the broad-assertion limits:
 more than 50 distinct tests across more than five reported files on one repository and commit.
 Repeated tries of one test count once. Runner and pipeline flips of that file's failure
@@ -418,8 +422,11 @@ Both observations must be in the configured window. Corrected observations and
 passes contradicted by a failure at the same attempt do not support a suggestion.
 The detector uses automated results on commit targets. Agent results and sessions
 are excluded. When diagnostic cause text is available, the detector classifies its normalized
-message as assertion, timeout, or infrastructure. A failed result can also supply this text
-through its note. An unknown cause stays outside these classes and their signature groups.
+message as assertion, timeout, or infrastructure. If the message contains only whitespace or
+report headers such as `Error:` or `FAILED`, Mainworthy looks for diagnostic cause text in
+`detail` before choosing unknown. Stack frames alone do not supply a failure class. A failed
+result can also supply cause text through its note. Unknown causes stay outside the detector's
+known-cause classes and suggestions.
 An infrastructure suggestion is evidence to investigate, not a diagnosis.
 
 A suggestion excuses no failure. A person still gives the existing `flaky` or

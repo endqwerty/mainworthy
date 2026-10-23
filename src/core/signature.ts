@@ -110,24 +110,30 @@ function firstFrame(detail: string): string | null {
 	return null;
 }
 
+function causeLine(text: string): string {
+	for (const raw of clip(text, 16_384).replace(ansi, "").split(/\r?\n/, 50)) {
+		const line = bounded(raw).trim();
+		if (
+			line === "" ||
+			/^(?:Error|Traceback \(most recent call last\)|FAIL|FAILED):?\s*$/i.test(line) ||
+			/^at\s+|^File ["']/i.test(line)
+		)
+			continue;
+		return line;
+	}
+	return "";
+}
+
 /**
  * Extracts a stable cause line and optional external frame, preserving assertion numbers while replacing volatile
  * syntax. Runs in time bounded by constants whatever the input: every line is cut and compacted before any
  * pattern sees it.
  */
 export function normaliseFailure(input: { message: string; detail?: string }): NormalisedFailure {
-	const message = clip(input.message, 16_384).replace(ansi, "");
-	const meaningful = bounded(
-		message
-			.split(/\r?\n/, 50)
-			.find(
-				(line) =>
-					line.trim() !== "" &&
-					!/^(?:Error|Traceback \(most recent call last\)|FAIL|FAILED):?\s*$/i.test(line.slice(0, LINE_LIMIT).trim()),
-			) ?? "",
-	);
-	if (meaningful.trim() === "") return { class: "unknown", text: "" };
-	const frame = input.detail === undefined ? null : firstFrame(clip(input.detail, 65_536));
+	const detail = clip(input.detail ?? "", 65_536);
+	const meaningful = causeLine(input.message) || causeLine(detail);
+	if (meaningful === "") return { class: "unknown", text: "" };
+	const frame = firstFrame(detail);
 	const failureClass = classify(meaningful);
 	const preserveNumbers = failureClass === "assertion" && /\b(?:expected|assertion|assert)|expect\(/i.test(meaningful);
 	const stable = stableText({ text: meaningful, ids: true, preserveNumbers });
@@ -139,6 +145,6 @@ export function normaliseFailure(input: { message: string; detail?: string }): N
 }
 
 /** Hashes the normalized class and stable cause text with the canonical evidence hash. */
-export function signatureHash(normalised: NormalisedFailure): string {
+export function signatureHash(normalised: Pick<NormalisedFailure, "class" | "text">): string {
 	return contentHash({ class: normalised.class, text: normalised.text });
 }

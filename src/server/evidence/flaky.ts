@@ -44,6 +44,7 @@ const Q = {
 			                                 THEN CASE WHEN st.id IS NULL THEN r.signature ELSE st.signature END
 			                                 ELSE CASE WHEN ft.id IS NULL THEN a.signature ELSE ft.signature END END
 			WHERE f.project = $project AND f.test = $test AND t.commit_sha IS NOT NULL
+			  AND s.class != 'unknown'
 			  AND a.target = r.target AND a.test = r.test AND a.actor = r.actor AND earlier.job = b.job
 			  AND a.method = 'auto' AND r.method = 'auto'
 			  AND (a.attempt < r.attempt OR (a.id = r.id AND ft.try < coalesce(st.try, ft.try + 1)))

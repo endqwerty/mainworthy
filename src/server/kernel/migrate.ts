@@ -44,6 +44,7 @@ import handoffs from "./migrations/0038_handoffs.sql" with { type: "text" };
 import resultTries from "./migrations/0039_result_tries.sql" with { type: "text" };
 import assertionIndex from "./migrations/0040_assertion_index.sql" with { type: "text" };
 import mergeReceipts from "./migrations/0041_merge_receipts.sql" with { type: "text" };
+import unknownCauses from "./migrations/0042_unknown_causes.sql" with { type: "text" };
 
 /**
  * In order. A migration is never edited after it ships; a change is a new entry.
@@ -96,6 +97,7 @@ export const MIGRATIONS: readonly { version: number; name: string; sql: string; 
 	{ version: 39, name: "result_tries", sql: resultTries, archive: true },
 	{ version: 40, name: "assertion_index", sql: assertionIndex, archive: false },
 	{ version: 41, name: "merge_receipts", sql: mergeReceipts, archive: false },
+	{ version: 42, name: "unknown_causes", sql: unknownCauses, archive: true },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;
