@@ -1,7 +1,8 @@
 // These checks read .changes/ fragments and CHANGELOG.md through their authoring scripts.
 import { expect, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { z } from "zod";
 import { assemble, fragments } from "../scripts/changelog.ts";
 import { make, remove } from "../scripts/work/scratch.ts";
 
@@ -246,7 +247,9 @@ for (const kind of ["edited", "removed", "complete"]) {
 				expect(run.stderr.toString()).toMatch(
 					kind === "edited" ? /canonical|differs|does not match/i : /not fully assembled/i,
 				);
-				expect(run.stderr.toString()).toMatch(/restore CHANGELOG\.md.*add a \.changes\/ fragment/i);
+				if (kind === "edited")
+					expect(run.stderr.toString()).toMatch(/restore CHANGELOG\.md.*add a \.changes\/ fragment/i);
+				else expect(run.stderr.toString()).toContain("re-run bun scripts/changelog.ts --write --base=origin/main");
 			}
 			expect(readFileSync(join(scratch, "CHANGELOG.md"), "utf8")).toBe(changed);
 		} finally {
@@ -278,7 +281,7 @@ function historyFixture(assembled: boolean) {
 	git("init", "-q");
 	git("add", "CHANGELOG.md");
 	git("commit", "-qm", "base history");
-	return { scratch, entries, baseText, base: git("rev-parse", "HEAD") };
+	return { scratch, entries, history, baseText, git, base: git("rev-parse", "HEAD") };
 }
 
 for (const kind of ["below", "history edit", "above"]) {
@@ -345,3 +348,70 @@ test("base-aware coordinator assembly keeps historical text unchanged", () => {
 		remove(fixture.scratch);
 	}
 });
+
+for (const scenario of [
+	{ event: "push", change: "late fragment" },
+	{ event: "pull_request", change: "late fragment" },
+	{ event: "push", change: "removed entry" },
+	{ event: "push", change: "removed section" },
+	{ event: "push", change: "edited entry" },
+	{ event: "push", change: "hand-written history" },
+]) {
+	test(`CI ${scenario.event} handles an older assembly with ${scenario.change}`, () => {
+		const fixture = historyFixture(true);
+		try {
+			const batch = fragment("batch", "A fact included by the assembly PR.");
+			writeFileSync(join(fixture.scratch, ".changes", batch.file), batch.text);
+			const prepared = assemble(fixture.baseText, [...fixture.entries, ...fragments([batch])]);
+			const late = fragment("late", "A fact that landed after the assembly was prepared.");
+			writeFileSync(join(fixture.scratch, ".changes", late.file), late.text);
+			fixture.git("add", ".changes");
+			fixture.git("commit", "-qm", "a late fragment lands on main");
+			const base = fixture.git("rev-parse", "HEAD");
+			const changed =
+				scenario.change === "removed entry"
+					? prepared
+							.split("\n")
+							.filter((line) => !line.includes("<!-- change:security -->"))
+							.join("\n")
+					: scenario.change === "removed section"
+						? fixture.history
+						: scenario.change === "edited entry"
+							? prepared.replace("A security entry.", "An edited security entry.")
+							: scenario.change === "hand-written history"
+								? prepared.replace("preserved historical", "rewritten historical")
+								: prepared;
+			writeFileSync(join(fixture.scratch, "CHANGELOG.md"), changed);
+			fixture.git("add", "CHANGELOG.md");
+			fixture.git("commit", "-qm", "merge the previously prepared assembly");
+			mkdirSync(join(fixture.scratch, "scripts"));
+			for (const name of ["changelog.ts", "record-files.ts"])
+				copyFileSync(join("scripts", name), join(fixture.scratch, "scripts", name));
+			symlinkSync(join(process.cwd(), "node_modules"), join(fixture.scratch, "node_modules"), "dir");
+			const workflow = z
+				.object({ jobs: z.object({ tests: z.object({ steps: z.array(z.object({ run: z.string().optional() })) }) }) })
+				.parse(Bun.YAML.parse(readFileSync(".github/workflows/check.yml", "utf8")));
+			const script = workflow.jobs.tests.steps.find((step) => step.run?.includes("scripts/changelog.ts --check"))?.run;
+			if (!script) throw new Error("the workflow has no changelog check");
+			const run = Bun.spawnSync(["bash", "-eo", "pipefail", "-c", script], {
+				cwd: fixture.scratch,
+				env: { ...process.env, BASE: base, GITHUB_EVENT_NAME: scenario.event },
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			if (scenario.event === "push" && scenario.change === "late fragment") {
+				expect(run.exitCode, run.stderr.toString()).toBe(0);
+				expect(run.stdout.toString()).toContain("1 fragment not yet assembled");
+			} else {
+				expect(run.exitCode).not.toBe(0);
+				if (scenario.change === "late fragment") {
+					expect(run.stderr.toString()).toContain("re-run bun scripts/changelog.ts --write --base=origin/main");
+					expect(run.stderr.toString()).not.toContain("Do not hand-edit");
+				} else expect(run.stderr.toString()).toMatch(restoreGuidance);
+			}
+			expect(readFileSync(join(fixture.scratch, "CHANGELOG.md"), "utf8")).toBe(changed);
+		} finally {
+			remove(fixture.scratch);
+		}
+	});
+}

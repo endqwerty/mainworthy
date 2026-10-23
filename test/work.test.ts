@@ -628,14 +628,14 @@ for (const change of [
 	});
 }
 
-test("CI requires a changed aggregate to be fully assembled", () => {
+test("CI checks changed changelog provenance and assembly", () => {
 	const workflow = Bun.YAML.parse(readFileSync(".github/workflows/check.yml", "utf8"));
 	expect(workflow).toMatchObject({
 		jobs: {
 			tests: {
 				steps: expect.arrayContaining([
 					expect.objectContaining({
-						name: "A changed changelog is fully assembled",
+						name: "A changed changelog is canonical",
 						if: expect.stringContaining("matrix.name == 'tests' || matrix.name == 'tests-1'"),
 						run: expect.stringContaining('--check --complete --base="$BASE"'),
 						env: { BASE: expect.stringContaining("github.event.pull_request.base.sha || github.event.before") },
