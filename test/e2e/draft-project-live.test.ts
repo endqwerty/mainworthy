@@ -105,3 +105,71 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+for (const action of ["placement", "undo"] as const) {
+	test.skipIf(!browserAvailable)(
+		`an open tab refuses ${action} after its project is replaced`,
+		async () => {
+			const dataDir = await mkdtemp(join(tmpdir(), "mainworthy-placement-project-"));
+			const port = await reservePort();
+			const token = "placement-project-owner-token";
+			const instance = start(
+				{ ...defaultConfig({}), dataDir, port: port.port, owner: "robin", ownerToken: token, mode: "local" },
+				() => ({ ui }),
+				{ readers: 0 },
+			);
+			const server: Server = {
+				url: instance.url,
+				project: "scratch",
+				token,
+				seeded: null,
+				stop: instance.stop,
+				api: <O extends OpName>(op: O, input: Api[O]["input"]) =>
+					call(op, input, { url: instance.url, project: "scratch", token }),
+			};
+			let view: Awaited<ReturnType<typeof openPage>> | null = null;
+			try {
+				await server.api("propose", { edits: [{ op: "create", body: { title: "Original project case" } }] });
+				view = await openPage(server, { path: "/p/scratch/suite/c/1" });
+				const { page } = view;
+				await page.getByRole("button", { name: "Original project case", exact: true }).waitFor();
+				if (action === "undo") {
+					await page.keyboard.press("#");
+					await page.locator("#stat").filter({ hasText: "1 case changed" }).waitFor();
+				}
+				removeProject(instance.app.db, "scratch");
+				await server.api("admin", { do: "project.create", key: "scratch", preset: "loose" });
+				await server.api("propose", { edits: [{ op: "create", body: { title: "Replacement project case" } }] });
+				if (action === "undo")
+					await server.api("propose", { edits: [{ op: "state", cases: ["C-1"], to: "archived" }] });
+				await page.keyboard.press(action === "undo" ? "u" : "#");
+				await page.waitForFunction(
+					() =>
+						!document.querySelector("#stat")?.textContent?.includes("queued") &&
+						!document.querySelector("#stat")?.textContent?.includes("Changing cases"),
+				);
+				if (action === "undo" && process.env.MAINWORTHY_PROJECT_UNDO_SCREENSHOT)
+					await page.screenshot({ path: process.env.MAINWORTHY_PROJECT_UNDO_SCREENSHOT });
+				expect((await server.api("get", { refs: ["C-1"] }))[0]?.state).toBe(action === "undo" ? "archived" : "active");
+				await page
+					.locator("#stat")
+					.filter({ hasText: "The project was replaced. Undo discarded. Reload before changing cases." })
+					.waitFor();
+				const writes: string[] = [];
+				page.on("request", (request) => {
+					if (request.url().endsWith("/propose")) writes.push(request.url());
+				});
+				await page.keyboard.press("u");
+				await page.keyboard.press("u");
+				await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+				expect(writes).toEqual([]);
+			} finally {
+				await view?.close();
+				await instance.stop();
+				await port.release();
+				await rm(dataDir, { recursive: true, force: true });
+			}
+		},
+		30_000,
+	);
+}

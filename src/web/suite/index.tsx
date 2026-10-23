@@ -70,6 +70,14 @@ import { type PendingPlacement, placed, placedDraft, supersedeMoves } from "./pl
 import "./suite.css";
 import "../case/case.css";
 
+const errorMessage = (error: unknown, fallback: string): string => (error instanceof Error ? error.message : fallback);
+const waitingStatus = (action: string, question: string | null): string =>
+	`${action}, waiting for a person${question === null ? "" : ` · ${question}`}`;
+const draftKept = "Your draft is kept on this device.";
+const keptFailure = (reason: string): string => `${reason}${/[.!?]$/.test(reason) ? "" : "."} ${draftKept}`;
+function readCaptures(project: string) {
+	return new Map(readDrafts(project).map((draft) => [draft.id, draft]));
+}
 const draftStorageFull = "Device storage is full. Keep this tab open until the version is recorded.";
 const caseLoadingEdit = "The case is not loaded yet. Press e when it appears.";
 const caseReadFailed = "Could not read this case. Reload to try again.";
@@ -86,7 +94,15 @@ type VisibleRow =
 	| { kind: "folder"; folder: FolderRow; count: number };
 const unsorted = "Unsorted";
 const nothingPlaced = "No cases changed. Nothing to undo.";
-type PlacementUndo = { preview: Edit[]; ready: Promise<Api["propose"]["reply"]>; queued: boolean };
+type PlacementInput = Api["propose"]["input"] & { cmd: string; projectIdentity: string };
+type PlacementUndo = {
+	preview: Edit[];
+	input: PlacementInput;
+	cmd: string;
+	ready: Promise<Api["propose"]["reply"]>;
+	queued: boolean;
+};
+const placementObsolete = "The project was replaced. Undo discarded. Reload before changing cases.";
 const ResolvedEdit = z.object({
 	op: z.literal("edit"),
 	case: schemaText,
@@ -157,7 +173,7 @@ export function SuiteScreen() {
 	});
 	const draftRef = useRef(draft);
 	const liveDrafts = useRef(new Map<string, Draft>(draft ? [[draft.id, draft]] : []));
-	const [captures, setCaptures] = useState(() => new Map(readDrafts(project).map((draft) => [draft.id, draft])));
+	const [captures, setCaptures] = useState(() => readCaptures(project));
 	useEffect(() => {
 		const prefix = draftKey({ project, id: "" });
 		const removed = (event: Event): void => {
@@ -303,7 +319,7 @@ export function SuiteScreen() {
 					}
 					return { rows };
 				} catch (error) {
-					return { failure: error instanceof Error ? error.message : "no reply" };
+					return { failure: errorMessage(error, "no reply") };
 				} finally {
 					owedReads.current.delete(ref);
 				}
@@ -367,7 +383,7 @@ export function SuiteScreen() {
 		const changed = (event: StorageEvent): void => {
 			if (!sessionCurrent(owner) || (event.key !== null && !event.key.startsWith(draftKey({ project, id: "" }))))
 				return;
-			setCaptures(new Map(readDrafts(project).map((saved) => [saved.id, saved])));
+			setCaptures(readCaptures(project));
 			const current = draftRef.current;
 			if (!current || (event.key !== null && event.key !== draftKey({ project, id: current.id }))) return;
 			const saved = readDraft({ project, id: current.id });
@@ -603,7 +619,7 @@ export function SuiteScreen() {
 		draftRef.current = restored;
 		setDraftState(restored);
 		setSelected(route.ref);
-		setCaptures(new Map(readDrafts(project).map((saved) => [saved.id, saved])));
+		setCaptures(readCaptures(project));
 	}, [project, route.folder, route.ref, ownedDraft, state]);
 	useEffect(() => {
 		const first = cases.find((row) => row.state === state);
@@ -1080,7 +1096,7 @@ export function SuiteScreen() {
 		resolving.current.add(conflict.q);
 		void settleAnswered(conflict, read.data.decision?.answer.is ?? "")
 			.catch((error: unknown) =>
-				setStatus(error instanceof Error ? error.message : "Could not read the settled conflict. Your draft is kept."),
+				setStatus(errorMessage(error, "Could not read the settled conflict. Your draft is kept.")),
 			)
 			.finally(() => resolving.current.delete(conflict.q));
 	}, [conflict, ownedElsewhere, conflictQuestion.data, settleAnswered, setStatus]);
@@ -1139,9 +1155,7 @@ export function SuiteScreen() {
 			if (!mayWrite(state.draftId)) return;
 			if (asked) uncertainMerges.current.add(state.q);
 			if (sessionCurrent(owner))
-				setStatus(
-					`${error instanceof Error ? error.message : "Conflict could not be resolved"}. Your draft and conflict card are kept.`,
-				);
+				setStatus(`${errorMessage(error, "Conflict could not be resolved")}. Your draft and conflict card are kept.`);
 		} finally {
 			resolving.current.delete(state.q);
 		}
@@ -1253,12 +1267,12 @@ export function SuiteScreen() {
 					);
 					if (!sessionCurrent(owner) || !mayWrite(source.id, !draftStored)) return;
 					if (question.state === "open") {
-						setStatus(`Proposed, waiting for a person · ${question.q}`);
+						setStatus(waitingStatus("Proposed", question.q));
 						return;
 					}
 					if (question.decision?.answer.is !== "accept" || question.decision.effects.rejected) {
 						forgetRequest(snapshot.id);
-						setStatus("The proposal was not accepted. Your draft is kept on this device.");
+						setStatus(`The proposal was not accepted. ${draftKept}`);
 						return;
 					}
 					reply = {
@@ -1333,14 +1347,14 @@ export function SuiteScreen() {
 					} catch (error) {
 						// Nothing is known, so nothing is sent. The draft keeps the save, and the next leave asks again.
 						if (sessionCurrent(owner) && mayWrite(source.id, !draftStored)) {
-							const reason = error instanceof Error ? error.message : "Could not ask what became of the last save";
-							setStatus(`${reason}${/[.!?]$/.test(reason) ? "" : "."} Your draft is kept on this device.`);
+							const reason = errorMessage(error, "Could not ask what became of the last save");
+							setStatus(keptFailure(reason));
 						}
 						return;
 					}
 					if (!sessionCurrent(owner) || !mayWrite(source.id, !draftStored)) return;
 					if (fate.state === "begun") {
-						setStatus("Your last save of this draft is still being recorded. Your draft is kept on this device.");
+						setStatus(`Your last save of this draft is still being recorded. ${draftKept}`);
 						return;
 					}
 					if (fate.state === "done") {
@@ -1439,11 +1453,11 @@ export function SuiteScreen() {
 						};
 						if (!putDraft(next)) return;
 					}
-					setStatus(`Proposed, waiting for a person${reply.question ? ` · ${reply.question}` : ""}`);
+					setStatus(waitingStatus("Proposed", reply.question));
 					return;
 				}
 				if (reply.status === "rejected") {
-					setStatus("The proposal was rejected. Your draft is kept on this device.");
+					setStatus(`The proposal was rejected. ${draftKept}`);
 					return;
 				}
 				const stamp = reply.cases.find((item) => snapshot.ref === null || item.ref === snapshot.ref);
@@ -1584,8 +1598,8 @@ export function SuiteScreen() {
 				void invalidateProject(project);
 			} catch (error) {
 				if (!sessionCurrent(owner) || !mayWrite(snapshot.id, !draftStored)) return;
-				const reason = error instanceof Error ? error.message : "Could not record this version";
-				setStatus(`${reason}${/[.!?]$/.test(reason) ? "" : "."} Your draft is kept on this device.`);
+				const reason = errorMessage(error, "Could not record this version");
+				setStatus(keptFailure(reason));
 			}
 		})();
 		pending.current.set(snapshot.id, task);
@@ -1883,7 +1897,7 @@ export function SuiteScreen() {
 		// told to resolve is on its screen (review round 9, R9-3).
 		if (!draftRef.current) draftRef.current = next;
 		followDraft(next);
-		setStatus(next.conflict ? conflictEditorStatus : "Continue editing here. Your draft is kept on this device.");
+		setStatus(next.conflict ? conflictEditorStatus : `Continue editing here. ${draftKept}`);
 	}
 	function choose(ref: string): void {
 		if (selected === ref && draftRef.current?.ref !== null) return;
@@ -1891,7 +1905,7 @@ export function SuiteScreen() {
 		draftRef.current = null;
 		setDraftState(null);
 		setSelected(ref);
-		setCaptures(new Map(readDrafts(project).map((saved) => [saved.id, saved])));
+		setCaptures(readCaptures(project));
 		navigate(`${refUrl({ project, ref })}${location.search}`, { seal: false });
 	}
 	function resumeCapture(saved: Draft): void {
@@ -1933,7 +1947,7 @@ export function SuiteScreen() {
 				);
 			if (current()) action(refs, [...rows, ...found.map((row) => placed(row, placements, folders))]);
 		})().catch((error: unknown) => {
-			if (current()) setStatus(error instanceof Error ? error.message : "Could not read selected cases");
+			if (current()) setStatus(errorMessage(error, "Could not read selected cases"));
 		});
 	}
 	function optimisticPlacement(edits: Edit[]) {
@@ -1999,11 +2013,17 @@ export function SuiteScreen() {
 			},
 		};
 	}
+	async function recoverPlacement(input: PlacementInput): Promise<Api["propose"]["reply"]> {
+		const fate = await call("command", { cmd: input.cmd }, { project, owner });
+		return fate.state === "done" ? ProposeReply.parse(fate.reply) : call("propose", input, { project, owner });
+	}
 	async function placement(edits: Edit[], preview: Edit[]): Promise<void> {
+		if (!projectIdentity) return;
 		const optimistic = optimisticPlacement(edits);
 		const previous = undo.current?.queued ? null : undo.current;
-		const ready = call("propose", { edits }, { project, owner });
-		const action: PlacementUndo = { preview, ready, queued: false };
+		const input = { edits, cmd: randomId(), projectIdentity };
+		const ready = call("propose", input, { project, owner });
+		const action: PlacementUndo = { preview, input, cmd: randomId(), ready, queued: false };
 		undo.current = action;
 		setStatus("Changing cases. Press u to undo.");
 		let wantsRead = false;
@@ -2013,7 +2033,7 @@ export function SuiteScreen() {
 			if (reply.status !== "adopted") {
 				optimistic.rollback();
 				if (undo.current === action) undo.current = previous;
-				setStatus(`Proposed, waiting for a person · ${reply.question ?? ""}`);
+				setStatus(waitingStatus("Proposed", reply.question ?? ""));
 			} else {
 				const changed = new Set(reply.placements.flatMap((edit) => edit.cases)).size;
 				if (changed) optimistic.confirm();
@@ -2027,8 +2047,13 @@ export function SuiteScreen() {
 		} catch (error) {
 			if (!sessionCurrent(owner)) return;
 			optimistic.rollback();
-			if (undo.current === action) undo.current = previous;
-			setStatus(error instanceof Error ? error.message : "The change failed");
+			if (obsoleteProject(error)) {
+				undo.current = null;
+				setStatus(placementObsolete);
+			} else if (error instanceof ApiError && error.code !== "internal") {
+				if (undo.current === action) undo.current = previous;
+				setStatus(error.message);
+			} else setStatus(`${errorMessage(error, "Change outcome unknown.")} Press u to check it and undo.`);
 			wantsRead = true;
 		} finally {
 			await optimistic.settle(wantsRead);
@@ -2123,31 +2148,32 @@ export function SuiteScreen() {
 			let wantsRead = false;
 			try {
 				setStatus("Undo queued. It will follow the pending change.");
-				const original = await action.ready.catch(() => null);
-				if (original?.status !== "adopted") return;
+				const original = await action.ready.catch(() => recoverPlacement(action.input));
+				if (original.status !== "adopted") return;
 				wantsRead = true;
 				const edits = original.placements;
 				if (!edits.length) {
 					setStatus(nothingPlaced);
 					return;
 				}
-				try {
-					const reply = await call("propose", { edits }, { project, owner });
-					if (reply.status === "adopted") {
-						optimistic.confirm(edits);
-						const changed = reply.placements.length;
-						if (undo.current === action && changed) undo.current = null;
-						setStatus(changed ? "Undone. The inverse is recorded." : nothingPlaced);
-					} else {
-						optimistic.rollback();
-						action.queued = false;
-						setStatus(`Undo proposed, waiting for a person · ${reply.question ?? ""}`);
-					}
-				} catch (error) {
+				const reply = await recoverPlacement({ ...action.input, edits, cmd: action.cmd });
+				if (reply.status === "adopted") {
+					optimistic.confirm(edits);
+					const changed = reply.placements.length;
+					if (undo.current === action && changed) undo.current = null;
+					setStatus(changed ? "Undone. The inverse is recorded." : nothingPlaced);
+				} else {
 					optimistic.rollback();
 					action.queued = false;
-					setStatus(error instanceof Error ? error.message : "Undo failed. Press u to retry.");
+					setStatus(waitingStatus("Undo proposed", reply.question ?? ""));
 				}
+			} catch (error) {
+				optimistic.rollback();
+				action.queued = false;
+				if (obsoleteProject(error)) {
+					if (undo.current === action) undo.current = null;
+					setStatus(placementObsolete);
+				} else setStatus(errorMessage(error, "Undo failed. Press u to retry."));
 			} finally {
 				void optimistic.settle(wantsRead);
 			}
@@ -2173,7 +2199,7 @@ export function SuiteScreen() {
 				setDraftState(null);
 				setStatus("Previous version restored as a new version.");
 			} else if (reply.status === "open") {
-				setStatus(`Restore proposed, waiting for a person${reply.question ? ` · ${reply.question}` : ""}`);
+				setStatus(waitingStatus("Restore proposed", reply.question));
 			} else setStatus(`The restore was ${reply.status}. The case is unchanged.`);
 			void invalidateProject(project);
 		}
@@ -2208,7 +2234,7 @@ export function SuiteScreen() {
 		archive,
 		restoring,
 		undo: () => {
-			void undoLast().catch((error: unknown) => setStatus(error instanceof Error ? error.message : "Undo failed"));
+			void undoLast().catch((error: unknown) => setStatus(errorMessage(error, "Undo failed")));
 		},
 		peek: () => {
 			document.querySelector(".timeline-block")?.scrollIntoView({ block: "nearest" });
@@ -2471,9 +2497,7 @@ export function SuiteScreen() {
 									setFolderText("");
 									void invalidateProject(project);
 								})
-								.catch((error: unknown) =>
-									setStatus(error instanceof Error ? error.message : "Folder could not be created"),
-								);
+								.catch((error: unknown) => setStatus(errorMessage(error, "Folder could not be created")));
 						}}
 					>
 						<input
