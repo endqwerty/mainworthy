@@ -35,7 +35,7 @@ ended. A test uses `cli` for what only the executable does (its exit status, its
 What `run` cannot give as a process does, and what stands in for each:
 
 - **Other ways to write.** `run` reads the two write functions only, so a test keeps the terminal behind them. In
-  `src/cli` only `output.ts`, `errors.ts` and the two commands that print a case as it is name the process's
+  `src/cli` only `output.ts` and `errors.ts` name the process's
   streams. Nothing names `console`, Bun's streams, a device file, a write to a descriptor or a child that
   inherits the streams, and only `target.ts` starts a process (git, with its output piped). The test reads the
   source as text: a comment that names one of these fails it, and a way it does not list, such as a
