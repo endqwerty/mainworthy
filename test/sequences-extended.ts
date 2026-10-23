@@ -150,6 +150,7 @@ export function sequence(seed: number, preset: string): Problem | null {
 					: `line:${target.line}`;
 
 	const audit = (): { what: string; detail: unknown } | null => {
+		let jobRows: ReturnType<typeof auditJobs> | undefined;
 		const runs = rows("SELECT * FROM runs");
 		const newestInScope = new Map<string, number>();
 		for (const run of runs) {
@@ -504,8 +505,9 @@ export function sequence(seed: number, preset: string): Problem | null {
 			// 13'. Jobs: a batch meets a job only by a decisive result that is itself automated.
 			const jobs = obligations.flatMap((o) => (o.kind === "jobs" ? (o.jobs ?? []) : []));
 			if (jobs.length > 0) {
+				jobRows ??= auditJobs(h.app.db.raw);
 				const reported = new Set<string>();
-				for (const batch of auditJobs(h.app.db.raw)) {
+				for (const batch of jobRows) {
 					const target = targets.get(batch.target);
 					if (target && accepted(target, null)) reported.add(batch.job);
 				}

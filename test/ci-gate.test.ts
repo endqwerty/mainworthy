@@ -64,6 +64,7 @@ async function gate(
 	shards: Shard[],
 	options: {
 		inProcess?: boolean;
+		request?: ReturnType<typeof deploymentFetch>;
 		repository?: string[];
 		missing?: string[];
 		/** Shards whose report is there and cannot be read (a directory of that name). */
@@ -138,7 +139,7 @@ async function gate(
 					});
 					let result: Awaited<ReturnType<typeof inThisProcess>>;
 					try {
-						result = await inThisProcess("ci-gate", () => runCiGate(argv, env), {
+						result = await inThisProcess("ci-gate", () => runCiGate(argv, env, options.request), {
 							environment: env,
 							cwd: root,
 							input: "",
@@ -152,6 +153,9 @@ async function gate(
 						summary: await readFile(join(root, "summary.md"), "utf8").catch(() => ""),
 						left: [...(await readdir(join(root, "tmp"))), ...(await stillRunning(result.stdout))],
 						batches: instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n,
+						batchJobs: instance.app.db.raw
+							.query("SELECT job, shard, count(*) AS n FROM batches GROUP BY job, shard ORDER BY job, shard")
+							.all(),
 					};
 				}
 				const child = Bun.spawn([process.execPath, resolve("scripts/ci-gate.ts"), ...argv], {
@@ -199,20 +203,121 @@ const green: Shard[] = [
 const withFailure = (message: string): Shard[] =>
 	green.map((shard) => (shard.name === "tests-2" ? { ...shard, files: { "test/c.test.ts": message } } : shard));
 
+test("CI awaits the retry pause before sending another request", async () => {
+	const paused = Promise.withResolvers<void>();
+	const resume = Promise.withResolvers<void>();
+	let calls = 0;
+	const request = deploymentFetch(
+		{
+			fetch: async () => new Response("", { status: ++calls === 1 ? 503 : 200 }),
+			attempts: 12,
+			pauseMs: 0,
+			timeoutMs: 10_000,
+		},
+		async () => {
+			paused.resolve();
+			await resume.promise;
+		},
+	);
+	const response = request("https://mainworthy.example/healthz");
+	try {
+		expect(await Promise.race([paused.promise.then(() => "paused"), response.then(() => "completed")])).toBe("paused");
+		await Bun.sleep(0);
+		expect(calls).toBe(1);
+	} finally {
+		resume.resolve();
+		await response;
+	}
+	expect(calls).toBe(2);
+});
+
 test("the gate waits for a deployment after choosing the instance", async () => {
-	let healthCalls = 0;
-	const result = await gate(green, {
+	const paused = Promise.withResolvers<void>();
+	const resume = Promise.withResolvers<void>();
+	const health: number[] = [];
+	const requests: { path: string; status: number }[] = [];
+	let batches = () => 0;
+	const running = gate(green, {
+		inProcess: true,
+		configure: async ({ instance }) => {
+			batches = () => instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n ?? 0;
+			return {};
+		},
+		request: deploymentFetch(
+			{
+				fetch: async (url, init) => {
+					const response = await fetch(url, init);
+					requests.push({ path: new URL(url).pathname, status: response.status });
+					return response;
+				},
+				attempts: 12,
+				pauseMs: 0,
+				timeoutMs: 10_000,
+			},
+			async () => {
+				paused.resolve();
+				await resume.promise;
+			},
+		),
 		routes: {
-			"/healthz": () =>
-				++healthCalls === 2
+			"/healthz": () => {
+				const status = health.length === 1 ? 503 : 200;
+				health.push(status);
+				return status === 503
 					? new Response("deploying", { status: 503 })
-					: Response.json({ ok: true, apiVersion: API_VERSION }),
+					: Response.json({ ok: true, apiVersion: API_VERSION });
+			},
 		},
 	});
+	try {
+		expect(await Promise.race([paused.promise.then(() => "paused"), running.then(() => "completed")])).toBe("paused");
+		await Bun.sleep(0);
+		expect(health).toEqual([200, 503]);
+		expect(requests).toEqual([{ path: "/healthz", status: 503 }]);
+		expect(batches()).toBe(0);
+	} finally {
+		resume.resolve();
+		await running;
+	}
+	const result = await running;
+	expect(health.slice(0, 3)).toEqual([200, 503, 200]);
+	expect(requests.filter((request) => request.path.endsWith("/report"))).toEqual(
+		green.map(() => ({ path: "/api/p/scratch/report", status: 200 })),
+	);
 	expect([result.code, result.batches]).toEqual([0, 3]);
+	expect(result.batchJobs).toEqual([
+		{ job: "quiet", shard: null, n: 1 },
+		{ job: "tests", shard: 1, n: 1 },
+		{ job: "tests", shard: 2, n: 1 },
+	]);
 	expect(result.output).toContain("Reported to the deployed Mainworthy");
 	expect(result.output).toContain("mainworthy gate    passed");
 }, 20_000);
+
+test("the production deployment transport keeps twelve attempts, ten-second pauses and ten-second timeouts", async () => {
+	const pauses: number[] = [];
+	const timeouts: number[] = [];
+	const timeout = AbortSignal.timeout;
+	const clock = spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+		timeouts.push(ms);
+		return timeout(ms);
+	});
+	const transport = spyOn(globalThis, "fetch").mockImplementation(
+		Object.assign(async () => new Response("", { status: 503 }), { preconnect: fetch.preconnect }),
+	);
+	try {
+		const request = deploymentFetch(undefined, async (ms) => {
+			pauses.push(ms);
+		});
+		expect((await request("https://mainworthy.example/healthz")).status).toBe(503);
+		expect(transport).toHaveBeenCalledTimes(12);
+		expect(pauses).toEqual(Array(11).fill(10_000));
+		expect(timeouts).toEqual(Array(12).fill(10_000));
+	} finally {
+		transport.mockRestore();
+		clock.mockRestore();
+	}
+});
 
 test("CI retries health, report and gate outages, exhausts its attempts and returns definite refusals immediately", async () => {
 	let replies: number[] = [];

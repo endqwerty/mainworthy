@@ -38,6 +38,7 @@ export const PROBE: Probe = { fetch, attempts: 3, pauseMs: 1000, timeoutMs: 5000
  */
 export function deploymentFetch(
 	probe: Probe = { fetch, attempts: 12, pauseMs: 10_000, timeoutMs: 10_000 },
+	pause: (ms: number) => Promise<unknown> = Bun.sleep,
 ): Probe["fetch"] {
 	const deadline = Date.now() + probe.attempts * probe.timeoutMs + (probe.attempts - 1) * probe.pauseMs;
 	return async (url, init = {}) => {
@@ -73,7 +74,7 @@ export function deploymentFetch(
 			} catch (error) {
 				if (init.signal?.aborted || attempt >= probe.attempts || Date.now() + probe.pauseMs >= deadline) throw error;
 			}
-			await Bun.sleep(probe.pauseMs);
+			await pause(probe.pauseMs);
 		}
 	};
 }

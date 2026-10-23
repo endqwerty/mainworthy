@@ -36,7 +36,11 @@ import {
 	startOwn,
 } from "./ci-instance.ts";
 
-export async function runCiGate(argv: string[], env: Environment): Promise<number> {
+export async function runCiGate(
+	argv: string[],
+	env: Environment,
+	transport?: ReturnType<typeof deploymentFetch>,
+): Promise<number> {
 	const filesFlag = argv.find((arg) => arg.startsWith("--files="));
 	const [directory, ...shards] = argv.filter((arg) => arg !== filesFlag);
 	const expected = filesFlag?.slice("--files=".length).split(",").filter(Boolean);
@@ -73,7 +77,7 @@ export async function runCiGate(argv: string[], env: Environment): Promise<numbe
 	if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, `${chosen}\n`);
 	if (choice.use === "none") return 4;
 
-	const request = deploymentFetch();
+	const request = transport ?? deploymentFetch();
 	const cli = async (argv: string[]): Promise<number> => {
 		console.log(`\n$ mainworthy ${argv.join(" ")}`);
 		try {
