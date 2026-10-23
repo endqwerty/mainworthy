@@ -74,6 +74,9 @@
 :root[data-layout="phone"] #hints {
 	display: none;
 }
+:root[data-layout="phone"] .tag-remove {
+	display: none;
+}
 
 /* A key cap on a button or beside a link names the key that presses it, and the hint under a case names the
    keys that edit it. A finger presses the button, and finds the rest under Actions. */

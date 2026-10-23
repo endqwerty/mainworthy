@@ -415,7 +415,25 @@ export function BodyEditor({
 			{input("title", draft.body.title, "Case title", "ctitle editor-input", "Untitled case")}
 			<div className="ctags">
 				{tags.map((tag) => (
-					<span key={tag}>#{tag}</span>
+					<span key={tag}>
+						#{tag}
+						<button
+							type="button"
+							className="tag-remove"
+							aria-label={`Remove tag #${tag}`}
+							disabled={readOnly}
+							onClick={() =>
+								change({
+									...draft,
+									dirty: true,
+									tagChanges: {
+										add: draft.tagChanges.add.filter((value) => value !== tag),
+										remove: [...new Set([...draft.tagChanges.remove, tag])],
+									},
+								})
+							}
+						/>
+					</span>
 				))}
 			</div>
 			{(draft.body.pre || draft.ref !== null) && (

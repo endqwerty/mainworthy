@@ -949,6 +949,13 @@ body[data-focus="detail"] #detail {
 	border-radius: 4px;
 	padding: 1px 6px;
 }
+.tag-remove {
+	margin-left: 4px;
+	color: inherit;
+}
+.tag-remove::after {
+	content: "×";
+}
 @container (min-width: 780px) {
 	.cols {
 		display: grid;
