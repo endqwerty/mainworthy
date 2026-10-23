@@ -90,7 +90,7 @@ Alt (Option on a Mac) works with the letter or bracket key shown below.
 | <kbd>j</kbd> or <kbd>↓</kbd> | Next case |
 | <kbd>k</kbd> or <kbd>↑</kbd> | Previous case |
 | <kbd>/</kbd> | Filter the list |
-| <kbd>x</kbd> | Select case, for the three keys below. With none selected they act on the current case. |
+| <kbd>x</kbd> | Select case, for the four keys below. With none selected they act on the current case. |
 | <kbd>m</kbd> | Move selected to a folder |
 | <kbd>t</kbd> | Tag selected |
 | <kbd>Alt</kbd> <kbd>t</kbd> | Remove tag from selected cases |
@@ -104,6 +104,8 @@ Alt (Option on a Mac) works with the letter or bracket key shown below.
 | <kbd>v</kbd> | Version diff |
 | <kbd>a</kbd> | Accept proposal |
 | <kbd>r</kbd> | Reject proposal |
+
+Filtering the list keeps your selection. Tag actions include selected cases hidden by the filter.
 
 ### While you write a case
 

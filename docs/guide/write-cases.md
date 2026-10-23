@@ -218,6 +218,8 @@ You can combine folder creations, renames, moves, and case placement in one prop
 
 Press <kbd>x</kbd> on each case you want to select for a bulk action.
 With no selection, the action uses the current case.
+Filtering keeps your selection. Adding or removing tags includes selected cases hidden by the filter.
+Undo includes those cases too.
 Press <kbd>m</kbd> to choose a destination folder.
 After the move, select that folder in the sidebar to see the case without reloading.
 To add a tag, press <kbd>t</kbd>. Enter the tag name.

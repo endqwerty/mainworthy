@@ -1794,6 +1794,31 @@ export function SuiteScreen() {
 		}
 	}
 	const selection = () => (picked.size ? [...picked] : selected ? [selected] : []);
+	function tagSelection(action: (refs: string[], rows: Pick<CaseRow, "ref" | "tags">[]) => void): void {
+		const refs = selection();
+		if (!refs.length) return;
+		const missing = new Set(refs);
+		const rows = cases.filter((row) => missing.delete(row.ref));
+		const unread = [...missing];
+		const current = () => sessionCurrent(owner) && navigationToken() === navigation;
+		const finish = (found: CaseView[]) => {
+			if (current()) action(refs, [...rows, ...found.map((row) => placed(row, placements, folders))]);
+		};
+		if (!unread.length) {
+			finish([]);
+			return;
+		}
+		void (async () => {
+			const found: CaseView[] = [];
+			for (let at = 0; at < unread.length; at += 200)
+				found.push(
+					...z.array(CaseView).parse(await call("get", { refs: unread.slice(at, at + 200) }, { project, owner })),
+				);
+			finish(found);
+		})().catch((error: unknown) => {
+			if (current()) setStatus(error instanceof Error ? error.message : "Could not read selected cases");
+		});
+	}
 	function optimisticPlacement(edits: Edit[]) {
 		const entry: PendingPlacement = { edits };
 		const earlier = [...placements];
@@ -1930,40 +1955,41 @@ export function SuiteScreen() {
 		void placement([{ op: "state", cases: refs, to: "archived" }], [{ op: "state", cases: refs, to: "active" }]);
 	}
 	function tag(): void {
-		const refs = selection();
 		const value = tagText.trim().replace(/^#/, "");
-		if (!refs.length || !value) {
+		if (!selection().length || !value) {
 			setTagging(false);
 			return;
 		}
-		const added = cases.filter((row) => refs.includes(row.ref) && !row.tags.includes(value)).map((row) => row.ref);
-		setTagging(false);
-		void placement(
-			[{ op: "place", cases: refs, tags: { add: [value] } }],
-			added.length ? [{ op: "place", cases: added, tags: { remove: [value] } }] : [],
-		);
+		tagSelection((refs, rows) => {
+			const added = rows.filter((row) => !row.tags.includes(value)).map((row) => row.ref);
+			setTagging(false);
+			void placement(
+				[{ op: "place", cases: refs, tags: { add: [value] } }],
+				added.length ? [{ op: "place", cases: added, tags: { remove: [value] } }] : [],
+			);
+		});
 	}
 	function removeTag(): void {
-		const refs = selection();
-		const rows = cases.filter((row) => refs.includes(row.ref));
-		openPalette({
-			title: "Remove tag from selected cases",
-			items: [...new Set(rows.flatMap((row) => row.tags))].sort().map((tag) => ({
-				id: tag,
-				label: `#${tag}`,
-				handler: () =>
-					void placement(
-						[{ op: "place", cases: refs, tags: { remove: [tag] } }],
-						[
-							{
-								op: "place",
-								cases: rows.filter((row) => row.tags.includes(tag)).map((row) => row.ref),
-								tags: { add: [tag] },
-							},
-						],
-					),
-			})),
-		});
+		tagSelection((refs, rows) =>
+			openPalette({
+				title: "Remove tag from selected cases",
+				items: [...new Set(rows.flatMap((row) => row.tags))].sort().map((tag) => ({
+					id: tag,
+					label: `#${tag}`,
+					handler: () =>
+						void placement(
+							[{ op: "place", cases: refs, tags: { remove: [tag] } }],
+							[
+								{
+									op: "place",
+									cases: rows.filter((row) => row.tags.includes(tag)).map((row) => row.ref),
+									tags: { add: [tag] },
+								},
+							],
+						),
+				})),
+			}),
+		);
 	}
 	async function undoLast(): Promise<void> {
 		if (undo.current) {
