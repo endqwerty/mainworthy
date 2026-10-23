@@ -36,6 +36,10 @@ A pipeline holds `read` and `record` at most, whatever its grant lists.
 
 `produce` includes `record`. You need `produce` to send an answer. The [policy](./policy.md#what-a-policy-is) decides whose answer counts. A member clause needs `answer`. An admin clause needs `admin`. Subject to its other restrictions, an author clause allows the proposal's author or an admin who is a person.
 
+A person with only `read,record` can claim and release run slots, record Pass, Fail, Blocked or Skip, and attach evidence to their own results in the web cockpit.
+The iPhone app also lets them record these outcomes and correct their last result in an open run. It can read attachments but does not upload them.
+Case edits and answers need `produce`. Starting a run needs `plan`. Withdrawing a sign-off to reopen a closed run needs the permissions that answer requires.
+
 A new person gets all six capabilities, a new agent gets `read` and `produce`, and a new pipeline gets `record`. These defaults apply only when you make a token for a name that does not exist yet and give no `--can`.
 
 ## Grants

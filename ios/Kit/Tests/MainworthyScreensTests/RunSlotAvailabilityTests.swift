@@ -70,7 +70,7 @@ struct RunSlotAvailabilityTests {
 		let client = server.project("review", identity: "review-identity")
 		let screen = OpenRunScreen(
 			project: client, run: try await client.run("R-1"),
-			permission: Project(key: "review", identity: "review-identity", name: "Review", can: ["read", "produce"]),
+			permission: Project(key: "review", identity: "review-identity", name: "Review", can: ["read", "record", "produce"]),
 			person: "robin")
 		await screen.refresh()
 		return (screen, transport)

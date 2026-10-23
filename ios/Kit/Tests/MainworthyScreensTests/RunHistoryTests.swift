@@ -91,7 +91,7 @@ struct RunHistoryTests {
 		_ = try await server.signIn(Live.owner)
 		let client = try await server.project(try await Live.project())
 		let screen = RunsScreen(
-			project: client, permission: Project(key: client.key, identity: client.identity, name: client.key, can: ["read", "produce", "plan"]),
+			project: client, permission: Project(key: client.key, identity: client.identity, name: client.key, can: ["read", "record", "produce", "plan"]),
 			person: Live.ownerName)
 		await screen.show(RunFilter(kind: .change))
 		let run = try #require(await screen.plan(name: "Planned under Change", selection: .tag("regression")))

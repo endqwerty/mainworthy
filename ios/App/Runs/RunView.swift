@@ -29,7 +29,7 @@ struct RunView: View {
 					Text("Run state: \(screen.run.state.word). This build cannot record results for it.")
 				}
 				if screen.isReadOnly {
-					Text("Slots are read-only. Recording results needs the produce capability.")
+					Text("Slots are read-only. Recording results needs the record capability.")
 				}
 				if let next = screen.firstUnfilled, !screen.isReadOnly, screen.run.state == .open {
 					Button("Start", systemImage: "play.fill") { open(next) }

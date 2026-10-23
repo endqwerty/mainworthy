@@ -11,7 +11,7 @@ import Testing
 		let key = try await Live.project()
 		let client = try await Live.signedIn().project(key)
 		let runs = RunsScreen(
-			project: client, permission: Project(key: key, identity: client.identity, name: key, can: ["read", "produce", "plan"]),
+			project: client, permission: Project(key: key, identity: client.identity, name: key, can: ["read", "record", "produce", "plan"]),
 			person: Live.name)
 		await runs.refresh()
 		let run = runs.open(try #require(runs.runs.first))

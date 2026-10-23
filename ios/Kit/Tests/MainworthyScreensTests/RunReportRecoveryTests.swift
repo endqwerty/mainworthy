@@ -75,7 +75,7 @@ actor ReportReplies: Transport {
 		let client = try await Live.signedIn(transport: transport).project(try await Live.project())
 		let run = try #require(try await client.runs().runs.first { $0.name == "Checkout regression" })
 		let screen = OpenRunScreen(project: client, run: run,
-			permission: Project(key: client.key, identity: client.identity, name: client.key, can: ["read", "produce"]), person: Live.name)
+			permission: Project(key: client.key, identity: client.identity, name: client.key, can: ["read", "record", "produce"]), person: Live.name)
 		await screen.refresh()
 		await screen.execute(try #require(screen.firstUnfilled))
 		guard case .read(let execution) = screen.document else { throw ClientError.unreadable }

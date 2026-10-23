@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
+import { AttachmentReply } from "../../src/core/attachments.ts";
+import { Slot } from "../../src/web/runs/models.ts";
 import { answer, browserAvailable, eventually, openPage, startServer } from "./support.ts";
 
 const check = test.skipIf(!browserAvailable);
@@ -180,6 +182,95 @@ check(
 			expect(
 				view.errors.every((error) => /Failed to load resource: the server responded with a status of 500/.test(error)),
 			).toBe(true);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+check(
+	"a read,record person claims, records every outcome and attaches evidence (880)",
+	async () => {
+		const server = await startServer({ seed: false, mode: "server" });
+		let view: Awaited<ReturnType<typeof openPage>> | undefined;
+		try {
+			await server.api("propose", {
+				edits: [1, 2, 3, 4].map((n) => ({
+					op: "create",
+					body: { title: `Record-only case ${n}`, methods: ["human"] },
+				})),
+			});
+			const { run } = await server.api("plan", { name: "Record-only tester", select: {} });
+			const { token } = z.object({ token: z.string() }).parse(
+				await server.api("admin", {
+					do: "token.create",
+					actor: "tester",
+					kind: "human",
+					can: ["read", "record"],
+					project: "scratch",
+				}),
+			);
+			view = await openPage({ ...server, token }, { path: `/p/scratch/runs/${run.slice(2)}` });
+			const { page } = view;
+			const session = await page.request.get(`${server.url}/api/session`);
+			const account = z
+				.object({ result: z.object({ projects: z.array(z.object({ key: z.string(), can: z.array(z.string()) })) }) })
+				.parse(await session.json());
+			expect(account.result.projects.find((project) => project.key === "scratch")?.can.sort()).toEqual([
+				"read",
+				"record",
+			]);
+			await page.locator('[data-run-document="C-1"][data-active="true"][data-ready="true"]').waitFor();
+			await page.keyboard.press("t");
+			await page
+				.locator('[data-slot="1"]')
+				.getByText(/In progress · tester/)
+				.waitFor();
+			if (process.env.MAINWORTHY_COCKPIT_EVIDENCE)
+				await page.screenshot({
+					path: `${process.env.MAINWORTHY_COCKPIT_EVIDENCE}/880-${process.env.MAINWORTHY_COCKPIT_REVISION}.png`,
+				});
+			for (const [index, outcome] of (["pass", "fail", "blocked", "skip"] as const).entries()) {
+				const ref = `C-${index + 1}`;
+				await page.locator(`[data-run-document="${ref}"][data-active="true"][data-ready="true"]`).waitFor();
+				for (const label of ["Pass", "Fail", "Blocked", "Skip"])
+					expect(await page.getByRole("button", { name: new RegExp(label) }).isEnabled()).toBe(true);
+				expect(await page.getByLabel("Attach a file").isEnabled()).toBe(true);
+				await page.getByLabel("Attach a file").setInputFiles({
+					name: `${outcome}.txt`,
+					mimeType: "text/plain",
+					buffer: Buffer.from(`${outcome} evidence`),
+				});
+				await page.getByRole("button", { name: `Remove ${outcome}.txt` }).waitFor();
+				await page
+					.locator(".outs")
+					.getByRole("button", { name: new RegExp(outcome, "i") })
+					.click();
+				if (outcome === "fail") {
+					await page.getByRole("textbox", { name: "Result note" }).fill("Observed failure");
+					await page.getByRole("textbox", { name: "Result note" }).press("Enter");
+				}
+				await page
+					.locator("#stat")
+					.filter({ hasText: `${ref} ${outcome} recorded` })
+					.waitFor();
+				const slots = await eventually(
+					async () => (await server.api("find", { in: "slots", run })).items.map((item) => Slot.parse(item)),
+					(items) => items[index]?.fills[0]?.outcome === outcome,
+				);
+				const fill = slots[index]?.fills[0];
+				expect(fill).toMatchObject({ by: "tester", outcome });
+				if (!fill) throw new Error("Recorded result missing");
+				const listed = AttachmentReply.parse(await server.api("attachment", { result: fill.result }, { token }));
+				expect(listed).toMatchObject({ kind: "list", items: [{ name: `${outcome}.txt` }] });
+				if (listed.kind !== "list" || !listed.items[0]) throw new Error("Attachment missing");
+				expect(
+					await server.api("attachment", { result: fill.result, id: listed.items[0].id }, { token }),
+				).toMatchObject({ kind: "file", data: Buffer.from(`${outcome} evidence`).toString("base64") });
+			}
+			expect(view.errors).toEqual([]);
 		} finally {
 			await view?.close();
 			await server.stop();
