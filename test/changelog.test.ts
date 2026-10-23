@@ -172,7 +172,12 @@ test("every repository fragment appears exactly once and the real command valida
 	const scratch = make("changelog-test");
 	try {
 		mkdirSync(join(scratch, ".changes"));
-		writeFileSync(join(scratch, "CHANGELOG.md"), historical);
+		// The repository's assembled section names fragments this scratch does not have; start from the history alone.
+		const end = "<!-- changes:end -->";
+		const unassembled = historical.includes(end)
+			? `# Changelog\n\n${historical.slice(historical.indexOf(end) + end.length).replace(/^\n+/, "")}`
+			: historical;
+		writeFileSync(join(scratch, "CHANGELOG.md"), unassembled);
 		const input = fragment("cli", "A CLI-assembled fact.");
 		writeFileSync(join(scratch, ".changes", input.file), input.text);
 		const command = Bun.spawnSync([process.execPath, join(process.cwd(), "scripts/changelog.ts"), "--write"], {
@@ -183,7 +188,7 @@ test("every repository fragment appears exactly once and the real command valida
 		expect(command.exitCode, command.stderr.toString()).toBe(0);
 		const written = readFileSync(join(scratch, "CHANGELOG.md"), "utf8");
 		expect(written).toContain("A CLI-assembled fact.");
-		expect(written.endsWith(historical.slice("# Changelog\n\n".length))).toBe(true);
+		expect(written.endsWith(unassembled.slice("# Changelog\n\n".length))).toBe(true);
 	} finally {
 		remove(scratch);
 	}
