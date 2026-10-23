@@ -49,7 +49,10 @@ test("get reads an exact old result with diagnostics only in its project and wit
 			error: { code: "forbidden" },
 		});
 		for (const ref of ["result:999999", "result:-1", "result:1x", "result:999999999999999999999999999999999999"])
-			expect(h.raw("get", { refs: [ref] })).toMatchObject({ ok: false, error: { code: "not_found" } });
+			expect(h.raw("get", { refs: [ref] })).toMatchObject({
+				ok: false,
+				error: { code: "not_found", message: `${ref} not found` },
+			});
 	} finally {
 		h.close();
 	}

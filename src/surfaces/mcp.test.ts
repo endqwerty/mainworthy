@@ -31,7 +31,7 @@ const TOKEN_COUNTS: Record<string, number> = {
 	work: 169,
 	decide: 280,
 	inbox: 165,
-	get: 219,
+	get: 245,
 	find: 279,
 	impact: 164,
 	since: 137,

@@ -508,7 +508,7 @@ export function get(ctx: Ctx, input: GetInput): Record<string, unknown>[] {
 		if (text.startsWith("result:")) {
 			const id = /^result:([1-9]\d*)$/.exec(text)?.[1];
 			const row = id && Number.isSafeInteger(Number(id)) ? resultById(ctx.db, Number(id)) : null;
-			if (!row || row.project !== ctx.project.id) throw notFound(`result ${text}`);
+			if (!row || row.project !== ctx.project.id) throw notFound(text);
 			return { ref: text, ...resultView(ctx, row), detail: row.detail };
 		}
 		if (text.startsWith("commit:"))
