@@ -744,7 +744,7 @@ the draft there, so the card is on the screen of the window that owns it.
 R9-4. A refused merge whose question is still open put the server's `needs` on the status line as its whole
 sentence. The route the review reported (another window merged first) no longer gets there: since #81 the page
 asks the question's state after a refusal, and reads it as decided. A merge of a proposal with more than one
-edit (a tag typed inline beside the title) still does. The status is now the page's sentence, which says only
+edit (a tag typed inline beside the title) still did at that revision. The atomic case-change checks below supersede that restriction for same-case tag/link deltas. The status is now the page's sentence, which says only
 what the page knows (the reply was not a decision, and the question read after it was open), with the server's
 reason given as the server's (`refusedStatus`).
 
@@ -950,3 +950,38 @@ The existing late-conflict test holds the new owner's `command` reply while it t
 former owner's reply changes neither the stored draft nor its text. Releasing reconciliation builds the
 conflict from that text. `round3-capture.test.ts`, "A-2 taking over reconciles the pending edit", now requires
 version 3 with the new window's text and version 2 with the first window's, without a conflict with itself.
+
+
+## Atomic case changes and protected tag review (issue #568)
+
+A case body, its explicit tag delta and requirement-link delta share a proposal. A conflict resolution replaces only the body, preserving those deltas and ordinary adoption policy. The card lists them. It does not accept folder/rank/state changes, tag replacement sets, requirement titles or other-case writes.
+
+| Route | Check | Required result |
+| --- | --- | --- |
+| Agent changes body and types protected critical tag; member accepts or rejects | `e2e/conflict-merge.test.ts` custom-policy cases | Body and tags remain unchanged while waiting; acceptance records both, rejection neither |
+| Merge changes or keeps the current body under strict policy | `e2e/conflict-merge.test.ts` one-review cases | Body and tags wait together; one acceptance applies both; no duplicate metadata proposal |
+| Recorded merge loses reply; reload, refusal or later draft inverse | `e2e/conflict-merge.test.ts`, `merges.test.ts` | Retire only accepted metadata; retain later changes and avoid overwriting later server reversals |
+| Concurrent tag/link additions and removals, adopted or unchanged body | `e2e/conflict-merge.test.ts`, `integrity.test.ts` | Preserve explicit deltas and unrelated current changes |
+| Combined proposal on iPhone | `ios-contract.test.ts`, native `ProposalPagingTests` | Decode mixed entries and give an explicit web-resolution instruction; body-only native resolution still works |
+
+### Conflict-card inline metadata (issue #568, audit round 3)
+
+| Check | Surface | Evidence |
+| --- | --- | --- |
+| Agent types `#critical @REQ-101` in a merged title under member review for `tag:critical` | `e2e/conflict-merge.test.ts` | Body, tags and links stay unchanged until review; acceptance applies all, rejection none |
+| Inline card additions survive lost reply, reload, refusal, moved question and later token reversals | `e2e/conflict-merge.test.ts`, `merges.test.ts` | Winning command's additions retire once; later intent remains explicit even after a placement refresh |
+| Direct merge sends raw inline tokens or cleaned body plus additions | `integrity.test.ts`, `ios-contract.test.ts` | New raw tokens are refused without replacement; current/base literal fields are preserved; explicit additions enter original-author protected scope atomically |
+| Native resolver chooses literal inline tokens | `NativeConflictTests.literalMergeNeedsWeb`, `keepLiteralCurrent` | New raw tokens are refused with the draft kept; keeping a current literal title records no version |
+
+| Keep a current literal title, or restore base/current literal title/action/expected text | `e2e/conflict-merge.test.ts`, `integrity.test.ts`, `outline.test.ts` | Equal fields remain literal, no new tags/links; keep-current returns unchanged; a new step with the same text still requires capture |
+
+Conflict inline capture uses the outline tokenizer for LF, CRLF and bare CR. Additional
+lines, headings, lists and tables in a field stay field text rather than becoming
+ignored nested outline steps. Server merge checks reject raw metadata before and
+after title normalization; parsed additions and the body wait for protected review
+together. Stored current/base literal selections retain their field exemptions.
+
+Changed conflict titles normalize storage whitespace before inline capture: NBSP and
+U+3000 before tags/requirement links produce cleaned text plus explicit additions,
+which wait for protected review and apply or reject atomically. Exact inherited
+titles remain literal. Step fields keep multiline capture.

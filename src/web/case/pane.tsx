@@ -774,6 +774,21 @@ function ConflictCard({
 			<div className="dim">
 				{state.ref} changed while you were writing. Choose or edit each field, then record the merge.
 			</div>
+			{state.metadata &&
+				(state.metadata.tagChanges.add.length > 0 ||
+					state.metadata.tagChanges.remove.length > 0 ||
+					state.metadata.covers.add.length > 0 ||
+					state.metadata.covers.remove.length > 0) && (
+					<p className="dim">
+						The same proposal also carries these changes:
+						{state.metadata.tagChanges.add.length > 0 &&
+							` add tags ${state.metadata.tagChanges.add.map((tag) => `#${tag}`).join(", ")};`}
+						{state.metadata.tagChanges.remove.length > 0 &&
+							` remove tags ${state.metadata.tagChanges.remove.map((tag) => `#${tag}`).join(", ")};`}
+						{state.metadata.covers.add.length > 0 && ` link ${state.metadata.covers.add.join(", ")};`}
+						{state.metadata.covers.remove.length > 0 && ` unlink ${state.metadata.covers.remove.join(", ")};`}
+					</p>
+				)}
 			{resolving && <p role="status">{pendingStatus}</p>}
 			<DiffView before={state.current} after={state.mine} />
 			{fields.map((field) => (

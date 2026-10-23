@@ -166,17 +166,21 @@ extension ProjectClient {
 			throw ClientError.refused(code: "conflict", message: "This conflict is no longer open. Your draft and choices are kept.")
 		}
 		let rows: [Wire.ConflictProposal] = try await server.read("get", in: key, ["refs": [.string(evidence.proposal)]])
-		guard let row = rows.first, row.ref == evidence.proposal, row.edits.count == 1,
-			let edit = row.edits.first, edit.op == "edit", edit.case == ref else { throw ClientError.unreadable }
-		var base = try await caseDocument(ref, version: edit.base).content
+		guard let row = rows.first, row.ref == evidence.proposal else { throw ClientError.unreadable }
+		guard row.edits.count == 1 else {
+			throw ClientError.refused(code: "invalid", message: "Use the web app to resolve a conflict with tag or requirement-link changes. Your draft is kept.")
+		}
+		guard let edit = row.edits.first, edit.op == "edit", edit.case == ref,
+			let version = edit.base, let mine = edit.mine, let current = edit.current else { throw ClientError.unreadable }
+		var base = try await caseDocument(ref, version: version).content
 		// A case read alone omits custom fields. A history comparison includes all of them, even when
 		// unchanged. Reading the base against itself supplies the exact values without guessing.
 		let fields: Wire.ConflictBaseFields = try await server.read("history", in: key,
-			["ref": .string(ref), "from": .number(Double(edit.base)), "to": .number(Double(edit.base))])
-		guard fields.ref == ref, fields.from == edit.base, fields.to == edit.base else { throw ClientError.unreadable }
+			["ref": .string(ref), "from": .number(Double(version)), "to": .number(Double(version))])
+		guard fields.ref == ref, fields.from == version, fields.to == version else { throw ClientError.unreadable }
 		base.fields = fields.diff.fields.before
 		return try CaseConflict(question: question, evidence: q.evidenceHash, wantsReason: Question(q).wantsReason, ref: ref, base: base,
-			mine: CaseContent(edit.mine), current: CaseContent(edit.current))
+			mine: CaseContent(mine), current: CaseContent(current))
 	}
 
 	package func resolve(_ submission: MergeSubmission, recovering: Bool) async throws -> MergeOutcome {

@@ -185,9 +185,19 @@ check(
 				() => page.locator(".cstate").textContent(),
 				(text) => text?.includes("version 2") === true,
 			);
-			expect(
-				(await server.api("find", { in: "cases" })).items.map(({ ref, title, tags }) => ({ ref, title, tags })),
-			).toEqual([{ ref: "C-1", title: "Continued case", tags: ["first", "later"] }]);
+			expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({
+				title: "Continued case",
+				tags: ["first", "later"],
+				version: 2,
+			});
+			const placed = await eventually(
+				() => server.api("find", { in: "cases" }),
+				(reply) => reply.items.some((row) => Array.isArray(row.tags) && row.tags.includes("later")),
+			);
+			expect(placed.items.map(({ ref, title, tags }) => ({ ref, title, tags }))).toEqual([
+				{ ref: "C-1", title: "Continued case", tags: ["first", "later"] },
+			]);
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(2);
 			expect(await expected.inputValue()).toBe("The purchase is confirmed");
 			expect(browser.errors).toEqual([]);
 		} finally {

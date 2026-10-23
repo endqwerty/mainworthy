@@ -16,6 +16,7 @@ import {
 	type CaseKind,
 	cleanPath,
 	cleanTag,
+	EDIT_MAX,
 	type ExpandedStep,
 	emptyBody,
 	fieldErrors,
@@ -549,6 +550,10 @@ export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string |
 const SLICE = 200;
 
 export function* sealSteps(ctx: Ctx, input: Parameters<typeof seal>[1]): Generator<undefined, Sealed | null, void> {
+	if (input.edits.length > EDIT_MAX)
+		throw invalid(
+			`a proposal carries at most ${EDIT_MAX} edits; reject it and propose its changes in smaller proposals`,
+		);
 	if (input.edits.some((edit) => edit.op === "quarantine") && (input.edits.length !== 1 || !input.reason?.trim()))
 		throw invalid("a quarantine edit stands alone and needs a reason");
 	const index = folderIndex(ctx.db, ctx.project.id);

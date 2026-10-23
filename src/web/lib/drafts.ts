@@ -12,6 +12,8 @@ export const DraftBody = CaseBody.extend({
 		]),
 	),
 });
+export const TagChanges = z.object({ add: z.array(z.string()), remove: z.array(z.string()) });
+export type TagChanges = z.infer<typeof TagChanges>;
 export const DraftConflict = z.object({
 	q: z.string(),
 	proposal: z.string(),
@@ -25,9 +27,19 @@ export const DraftConflict = z.object({
 	 * Every merge this card sent for its question, oldest first, each under its own command id. Until the server
 	 * says what became of one, the page does not know: the reply can be lost after the merge was recorded.
 	 */
-	sentMerges: z.array(z.object({ cmd: z.string(), body: CaseBody })).default([]),
+	sentMerges: z
+		.array(
+			z.object({
+				cmd: z.string(),
+				body: CaseBody,
+				tags: z.array(z.string()).optional(),
+				covers: z.array(z.string()).optional(),
+			}),
+		)
+		.default([]),
 	addresses: z.array(ConflictAddress),
 	draftId: z.string(),
+	metadata: z.object({ tagChanges: TagChanges, covers: TagChanges }).optional(),
 });
 export type DraftConflict = z.infer<typeof DraftConflict>;
 
@@ -45,9 +57,6 @@ export function hasTypedMerge(state: DraftConflict): boolean {
 		return merged !== null && merged !== text(state.mine) && merged !== text(state.current);
 	});
 }
-
-const TagChanges = z.object({ add: z.array(z.string()), remove: z.array(z.string()) });
-export type TagChanges = z.infer<typeof TagChanges>;
 
 export const Draft = z
 	.object({

@@ -1,7 +1,7 @@
 import { type KeyboardEvent, useLayoutEffect, useRef } from "react";
 import { newStepId } from "../../core/ids.ts";
 import { CaseKind } from "../../core/model.ts";
-import { parseOutline, splitExpected } from "../../core/outline.ts";
+import { parseBodyInline, parseOutline, splitExpected } from "../../core/outline.ts";
 import { addDraftTags, type Draft, draftTags, knownStepIds } from "../lib/drafts.ts";
 import { useBindings } from "../lib/keys.ts";
 import { readRoute } from "../lib/router.ts";
@@ -44,25 +44,12 @@ function freshStep(draft: Draft) {
 	};
 }
 export function cleanTitle(draft: Draft): Draft {
-	const tags = new Set<string>();
-	const covers = new Set(draft.covers);
-	const metadata = (text: string) =>
-		text
-			.split("\n")
-			.map((line) => {
-				const outline = parseOutline(`# ${line}`);
-				for (const tag of outline.tags) tags.add(tag);
-				for (const cover of outline.covers) covers.add(cover);
-				return outline.title ?? line;
-			})
-			.join("\n");
-	const title = metadata(draft.body.title);
-	const steps = draft.body.steps.map((step) => ({
-		...step,
-		action: metadata(step.action),
-		expected: step.expected === null ? null : metadata(step.expected),
-	}));
-	return { ...addDraftTags(draft, [...tags]), body: { ...draft.body, title, steps }, covers: [...covers] };
+	const parsed = parseBodyInline(draft.body);
+	return {
+		...addDraftTags(draft, parsed.tags),
+		body: parsed.body,
+		covers: [...new Set([...draft.covers, ...parsed.covers])],
+	};
 }
 export function firstStep({ draft, change }: { draft: Draft; change: DraftChange }): void {
 	const cleaned = cleanTitle(draft);

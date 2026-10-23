@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import fc from "fast-check";
-import { parseOutline, splitExpected } from "./outline.ts";
+import { emptyBody } from "./model.ts";
+import { parseBodyInline, parseOutline, splitExpected } from "./outline.ts";
 
 describe("capture grammar", () => {
 	test("keeps the tail of a malformed table ending in an escaped pipe", () => {
@@ -140,4 +141,131 @@ describe("capture grammar", () => {
 			),
 		);
 	});
+});
+
+test("body inline capture preserves draft steps, fragment pins and literal non-editor fields", () => {
+	const body = {
+		...emptyBody("Title #critical @REQ-1"),
+		pre: "Literal #pre @REQ-2",
+		fields: { risk: "#literal" },
+		steps: [
+			{ id: "s1", action: "Act #critical\nContinue #smoke", expected: "Ready @REQ-1 @REQ-3" },
+			{ id: "s2", action: "", expected: "Still writing" },
+			{ id: "s3", action: "", expected: null, use: { fragment: "C-2", version: 1 } },
+		],
+	};
+	const before = structuredClone(body);
+	const parsed = parseBodyInline(body);
+	expect(parsed.tags).toEqual(["critical", "smoke"]);
+	expect(parsed.covers).toEqual(["REQ-1", "REQ-3"]);
+	expect(parsed.body).toEqual({
+		...body,
+		title: "Title",
+		steps: [
+			{ id: "s1", action: "Act\nContinue", expected: "Ready" },
+			{ id: "s2", action: "", expected: "Still writing" },
+			{ id: "s3", action: "", expected: null, use: { fragment: "C-2", version: 1 } },
+		],
+	});
+	expect(body).toEqual(before);
+	expect(parseBodyInline(parsed.body)).toEqual({ body: parsed.body, tags: [], covers: [] });
+});
+
+test("body inline capture canonicalizes requirement keys before comparing local deltas", () => {
+	expect(parseBodyInline(emptyBody("Title @req-1 @REQ-1")).covers).toEqual(["REQ-1"]);
+});
+
+test("inline merge parsing keeps current/base fields literal and parses changes by field identity", () => {
+	const base = {
+		...emptyBody("Base #base @REQ-1"),
+		steps: [{ id: "s1", action: "Base #base @REQ-1", expected: "Before" }],
+	};
+	const current = {
+		...emptyBody("Current #current @REQ-2"),
+		steps: [{ id: "s1", action: "Current #current @REQ-2", expected: "Now" }],
+	};
+	const chosen = {
+		...current,
+		steps: [
+			{ id: "s1", action: "Base #base @REQ-1", expected: "Edited #critical @REQ-3" },
+			{ id: "s2", action: "Current #current @REQ-2", expected: null },
+		],
+	};
+	const parsed = parseBodyInline(chosen, [base, current]);
+	expect(parsed.body.title).toBe(current.title);
+	expect(parsed.body.steps).toEqual([
+		{ id: "s1", action: "Base #base @REQ-1", expected: "Edited" },
+		{ id: "s2", action: "Current", expected: null },
+	]);
+	expect(parsed.tags).toEqual(["critical", "current"]);
+	expect(parsed.covers).toEqual(["REQ-3", "REQ-2"]);
+});
+
+for (const [ending, separator] of [
+	["LF", "\n"],
+	["CRLF", "\r\n"],
+	["CR", "\r"],
+] as const) {
+	test(`outline and field capture share ${ending} lines without discarding field structure`, () => {
+		expect(parseOutline(`# Title${separator}- Act${separator}  > Ready`)).toEqual({
+			title: "Title",
+			steps: [{ action: "Act", expected: "Ready" }],
+			tags: [],
+			covers: [],
+		});
+		const lines = [
+			"Resolved",
+			"#critical",
+			"@REQ-101",
+			"- Keep this > literally",
+			"| left | right |",
+			"## Keep heading",
+		];
+		const parsed = parseBodyInline({
+			...emptyBody("Title"),
+			steps: [{ id: "s1", action: lines.join(separator), expected: lines.join(separator) }],
+		});
+		expect(parsed.tags).toEqual(["critical"]);
+		expect(parsed.covers).toEqual(["REQ-101"]);
+		const retained = ["Resolved", "", "", ...lines.slice(3)].join("\n");
+		expect(parsed.body.steps).toEqual([{ id: "s1", action: retained, expected: retained }]);
+		expect(parseBodyInline(parsed.body)).toEqual({ body: parsed.body, tags: [], covers: [] });
+	});
+}
+
+test("Unicode line and paragraph separators are literal within an outline line", () => {
+	for (const separator of ["\u2028", "\u2029", "\u0085", "\v", "\f"]) {
+		const text = `Keep${separator}literal`;
+		expect(parseOutline(`# ${text}`).title).toBe(text);
+		expect(parseBodyInline(emptyBody(text), [emptyBody(text)])).toEqual({
+			body: emptyBody(text),
+			tags: [],
+			covers: [],
+		});
+	}
+});
+
+test("changed titles normalize every storage whitespace boundary before capturing metadata", () => {
+	for (const space of [
+		"\t",
+		"\n",
+		"\r",
+		"\r\n",
+		"\v",
+		"\f",
+		" ",
+		"\u00a0",
+		"\u1680",
+		...Array.from({ length: 11 }, (_, i) => String.fromCharCode(0x2000 + i)),
+		"\u2028",
+		"\u2029",
+		"\u202f",
+		"\u205f",
+		"\u3000",
+		"\ufeff",
+	]) {
+		const body = emptyBody(`Price${space}#critical${space}@REQ-101`);
+		expect(parseBodyInline(body)).toEqual({ body: emptyBody("Price"), tags: ["critical"], covers: ["REQ-101"] });
+		expect(parseBodyInline(body, [body])).toEqual({ body, tags: [], covers: [] });
+	}
 });

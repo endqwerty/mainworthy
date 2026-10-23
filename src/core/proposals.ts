@@ -3,7 +3,7 @@ import { z } from "zod";
 import { projectCommand } from "./commands.ts";
 import { QuarantineExit } from "./flaky.ts";
 import { Clause, PolicySettings, Unlinked } from "./kinds.ts";
-import { CaseBody, CaseKind } from "./model.ts";
+import { CaseBody, CaseKind, EDIT_MAX } from "./model.ts";
 import { FolderRef } from "./selection.ts";
 
 const ref = (what: string) => z.string().describe(what);
@@ -106,7 +106,7 @@ export const Edit = z.discriminatedUnion("op", [
 export type Edit = z.infer<typeof Edit>;
 
 export const ProposeInput = z.object({
-	edits: z.array(Edit).min(1).max(5000),
+	edits: z.array(Edit).min(1).max(EDIT_MAX),
 	reason: z.string().max(500).optional().describe("Why. Shown in the case history."),
 	...projectCommand,
 });

@@ -912,6 +912,27 @@ describe("what the iPhone Suite reads", () => {
 });
 
 describe("what the iPhone conflict resolver reads", () => {
+	test("a combined conflict can be decoded before the phone directs its author to the web", async () => {
+		const { ConflictProposal } = await import("../scripts/ios/contract.ts");
+		const key = z.object({ project: z.string() }).parse(await result("POST", "/test/project", {})).project;
+		const made = z
+			.object({ cases: z.array(z.object({ ref: z.string() })) })
+			.parse(await op(key, "propose", { edits: [{ op: "create", body: { title: "Base" } }] }));
+		const ref = made.cases[0]?.ref;
+		await op(key, "propose", { edits: [{ op: "edit", case: ref, base: 1, body: { title: "Current" } }] });
+		const overlap = z.object({ proposal: z.string() }).parse(
+			await op(key, "propose", {
+				edits: [
+					{ op: "edit", case: ref, base: 1, body: { title: "Mine" } },
+					{ op: "place", cases: [ref], tags: { add: ["critical"] } },
+					{ op: "cover", case: ref, requirement: "REQ-100", on: true },
+				],
+			}),
+		);
+		const [proposal] = z.array(z.unknown()).parse(await op(key, "get", { refs: [overlap.proposal] }));
+		holds("combined conflict proposal", ConflictProposal, proposal);
+	});
+
 	test("a full conflict, its merge effects and its recorded command reply", async () => {
 		const { ConflictProposal, ConflictBaseFields, MergeReply, MergeCommand, SuiteProposalQuestion } = await import(
 			"../scripts/ios/contract.ts"
@@ -938,6 +959,25 @@ describe("what the iPhone conflict resolver reads", () => {
 		const [q] = z
 			.array(z.object({ evidenceHash: z.string() }))
 			.parse(await op(key, "get", { refs: [overlap.question] }));
+		const [refused] = z.array(z.unknown()).parse(
+			await op(key, "decide", {
+				q: overlap.question,
+				onEvidence: q?.evidenceHash,
+				answer: {
+					is: "merge",
+					body: {
+						title: "Resolved #critical @REQ-899",
+						pre: "",
+						steps: [],
+						methods: ["human"],
+						automate: "none",
+						fields: {},
+					},
+				},
+			}),
+		);
+		holds("unparsed inline merge refusal", MergeReply, refused);
+		expect(refused).toMatchObject({ status: "invalid", effects: null });
 		const cmd = "ios-conflict-contract";
 		holds("command before sending", MergeCommand, await op(key, "command", { cmd }));
 		const [reply] = z.array(z.unknown()).parse(

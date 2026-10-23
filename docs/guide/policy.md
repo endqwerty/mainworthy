@@ -29,7 +29,7 @@ The `when` column holds the conditions a clause tests. `always` matches every qu
 - A named role, written as `role:approver`. An actor with `answer` and that role on the project, subject to the clause's rules for agents.
 - The author. The person who wrote the proposal, or an admin.
 
-A rule that answers an adoption question with `merge` must include `conflict` among its conditions. The merged body becomes a new proposal and follows the ordinary adoption rules. A rule cannot merge a proposal with no conflict. If an older stored rule asks for that, the question stays open for a member instead of creating replacement proposals.
+A rule that answers an adoption question with `merge` must include `conflict` among its conditions. The merged body and any supported same-case tag and requirement-link deltas become one new proposal and follow the ordinary adoption rules, including current and proposed tag scope. A rule cannot merge a proposal with no conflict. If an older stored rule asks for that, the question stays open for a member instead of creating replacement proposals.
 
 An agent's answer either counts as a decision, is shown as advice for a person to decide, or is refused. The table also says whether a person who produced the evidence may answer, and whether the answer needs a reason.
 

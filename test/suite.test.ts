@@ -99,6 +99,70 @@ describe("atomic bulk proposals", () => {
 		expect(result<DecideReply[]>(instance.raw("decide", acceptance(instance, policy)))[0]?.status).toBe("decided");
 	};
 
+	test("a maximum-size conflict resolution yields while sealing and keeps its replacement atomic", async () => {
+		const instance = disk();
+		try {
+			result(instance.raw("propose", { edits: [{ op: "create", body: { title: "Base" } }] }));
+			result(instance.raw("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] }));
+			const conflict = result<ProposeReply>(
+				instance.raw("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }] }),
+			);
+			const question = result<{ evidenceHash: string }[]>(instance.raw("get", { refs: [conflict.question] }))[0];
+			const proposalsBefore = instance.app.db.raw
+				.query<{ n: number }, []>("SELECT count(*) AS n FROM proposals")
+				.get()?.n;
+			const decisionsBefore = storedCount(instance, "decisions");
+			const covers = Array.from({ length: 4999 }, (_, i) => `REQ-${i}`);
+			const input = {
+				q: conflict.question,
+				onEvidence: question?.evidenceHash,
+				answer: {
+					is: "merge",
+					body: { title: "Resolved", pre: "", steps: [], methods: ["human"], automate: "none", fields: {} },
+					covers,
+				},
+				cmd: "max-merge-01",
+			};
+			let done = false;
+			const saving = invokeAsync(instance.app, OPS, instance.call("decide", input));
+			void saving.then(() => {
+				done = true;
+			});
+			let duringSeal = false;
+			while (!done) {
+				await tick();
+				const proposals = instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM proposals").get()?.n;
+				if (done || storedCount(instance, "decisions") === decisionsBefore || proposals !== proposalsBefore) continue;
+				duringSeal = true;
+				expect(result<CaseView[]>(instance.raw("get", { refs: ["C-1"] }))[0]).toMatchObject({
+					title: "Theirs",
+					version: 2,
+					covers: [],
+				});
+				expect(result<{ state: string }[]>(instance.raw("get", { refs: [conflict.question] }))[0]?.state).toBe("open");
+			}
+			const replies = result<DecideReply[]>(await saving);
+			expect(replies[0]).toMatchObject({ status: "decided", effects: { status: "adopted" } });
+			expect(duringSeal).toBe(true);
+			const replacement = instance.app.db.raw
+				.query<{ edits: string }, []>("SELECT edits FROM proposals ORDER BY id DESC LIMIT 1")
+				.get();
+			expect(JSON.parse(replacement?.edits ?? "[]")).toHaveLength(5000);
+			expect(result<CaseView[]>(instance.raw("get", { refs: ["C-1"] }))[0]).toMatchObject({
+				title: "Resolved",
+				version: 3,
+				covers: expect.arrayContaining(["REQ-0", "REQ-4998"]),
+			});
+			expect(result<CaseView[]>(instance.raw("get", { refs: ["C-1"] }))[0]?.covers).toHaveLength(4999);
+			expect(result<DecideReply[]>(await invokeAsync(instance.app, OPS, instance.call("decide", input)))).toEqual(
+				replies,
+			);
+		} finally {
+			await instance.app.gate.run(() => {});
+			instance.close();
+		}
+	});
+
 	test.each(["map", "finding", "policy"] as const)(
 		"case creation from %s answers yields without publishing partial effects",
 		async (kind) => {

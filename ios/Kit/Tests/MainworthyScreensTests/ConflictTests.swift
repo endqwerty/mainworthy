@@ -32,6 +32,42 @@ struct NativeConflictTests {
 		#expect(try await project.caseDocument(ref).content.title == "My overlapping title")
 
 	}
+	@Test("a selected literal inline token is refused visibly and keeps the draft")
+	func literalMergeNeedsWeb() async throws {
+		let project = try await Live.signedIn().project(try await Live.project())
+		let ref = try #require(try await project.cases().items.first?.ref)
+		let opened = try await project.caseDocument(ref)
+		let editor = CaseEditorScreen(project: project, source: .edit(opened))
+		editor.content.title = "My literal #critical @REQ-899"
+		var other = opened.content; other.title = "Current title"
+		_ = try await project.saveCase(SuiteSubmission(source: .edit(opened), content: other, reason: "Other"))
+		_ = await editor.save()
+		editor.chooseConflict(.field(.title), side: .mine)
+		_ = await editor.save()
+		#expect(!editor.settled)
+		#expect(editor.notice?.contains("use the web app") == true)
+		#expect(editor.conflict?.merged.title == "My literal #critical @REQ-899")
+		#expect(try await project.caseDocument(ref).content.title == "Current title")
+	}
+
+	@Test("keeping a current literal title leaves its version and text unchanged")
+	func keepLiteralCurrent() async throws {
+		let project = try await Live.signedIn().project(try await Live.project())
+		let ref = try #require(try await project.cases().items.first?.ref)
+		let opened = try await project.caseDocument(ref)
+		let editor = CaseEditorScreen(project: project, source: .edit(opened))
+		editor.content.title = "Mine"
+		let literal = "Enter #critical in the filter @REQ-899"
+		var other = opened.content; other.title = literal
+		_ = try await project.saveCase(SuiteSubmission(source: .edit(opened), content: other, reason: "Other"))
+		_ = await editor.save()
+		editor.chooseConflict(.field(.title), side: .current)
+		_ = await editor.save()
+		#expect(editor.settled && editor.notice == "Conflict resolved. The recorded version already holds this text.")
+		#expect(try await project.caseHistory(ref).map(\.version) == [2, 1])
+		#expect(try await project.caseDocument(ref).content.title == literal)
+	}
+
 }
 
 @Suite("Conflict choices")

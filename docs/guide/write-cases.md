@@ -84,6 +84,10 @@ or removed, and keeps unrelated tag changes.
 A tag you type remains your addition while a shortcut write adds or removes that same tag,
 whether the shortcut succeeds or is refused.
 Your typed text stays on the version you started from.
+The editor submits a case's body, tag changes and requirement links together.
+Current and proposed tags classify the whole proposal for policy review.
+While review is pending, none of those changes is current. Rejecting it leaves the case unchanged.
+A conflict or failed save keeps your text and metadata on this device.
 
 The editor records a step once the step has an action.
 A step with an expected result but no action stays in your draft on this device, including after a reload.
@@ -249,8 +253,27 @@ A choice for a deleted step restores that step from the chosen side, including a
 Step choices and step-order choices are separate, even when a step's id is `order`.
 
 "Use all my changes" and "Keep current version" fill the merged body from one side.
-Resolving submits a new proposal. It still follows the policy for ordinary edits.
+Resolving sends the chosen changes through the policy for ordinary edits.
 If someone changes the case again meanwhile, the new edit merges or opens another conflict.
+The card lists the tag and requirement-link changes that accompany its body.
+Resolving submits those changes with the chosen body as one proposal, including when you keep the current body.
+You can also type `#tags` and `@REQ-123` links in the merged title, actions or expected results.
+In a field you changed, they leave the text and join the same proposal when you resolve it.
+In a changed title, whitespace becomes spaces before capture, including nonbreaking and full-width spaces before tokens.
+Actions and expected results recognize LF, CRLF and bare CR line endings equally and keep every other line of field text.
+Saved titles are one line; actions and expected results can have multiple lines.
+A title, action or expected result equal to that field in the conflict's recorded current or base version
+stays literal, including any `#tag` or `@REQ-123` text. Step fields are matched by step id.
+"Keep current version" keeps that body exactly. With no remaining metadata changes, resolving it
+records no new version.
+The replacement still needs any review required by its current or proposed tags.
+Accepting records its body, tags and links together; rejecting records none of them.
+A resolution accepts up to 5,000 tag additions and 5,000 requirement-link additions, and its whole
+replacement must fit 5,000 edits, including the original proposal. An oversized resolution keeps
+the conflict open without creating a replacement; reject it and propose smaller changes.
+Tags and links added or removed by someone else remain as they recorded them,
+unless your proposal explicitly changed those same items.
+A failed reply or reload keeps the request and any later edits, so recovery does not submit accepted metadata again.
 
 The conflict card stays until the page reads your recorded merge or a later case version from the server.
 The same rule applies in a second tab. A merge waiting for approval under a stricter policy has not changed the case yet.
