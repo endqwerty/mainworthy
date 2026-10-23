@@ -23,7 +23,8 @@ The flaky, rerun and automation reports show 20 rows per page, and coverage show
 "Showing N of M". The headline numbers count every row. Choose **Next page** or **Previous page**, or press
 <kbd>n</kbd> or <kbd>p</kbd>, to reach the rest. On a phone, open **Actions** and choose **Next report page** or
 **Previous report page**. Changing the day window starts at the first page. If live updates remove the page
-you are reading, the list returns to the first page.
+you are reading, the list returns to the first page. If a page cannot be read, **Previous page** and <kbd>p</kbd>
+still return to the preceding page.
 
 The CLI accepts `--limit` (up to 200 rows, or 500 requirements for coverage) and `--cursor`. Over HTTP, use
 `limit` and `cursor`. Each limited report reply

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import type { Api } from "../../core/api.ts";
 import { MethodKind } from "../../core/model.ts";
 import type { OutcomeCounts, StatsKind } from "../../core/stats.ts";
@@ -60,27 +60,29 @@ function usePagedReport(of: Exclude<StatsKind, "pass-rate">, days: number) {
 		if (ready && data?.cursor != null) setCursor(data.cursor);
 	};
 	const previous = () => {
-		if (ready && cursor > 0) setCursor(Math.max(0, cursor - size));
+		if (!read.isFetching && cursor > 0) setCursor(Math.max(0, cursor - size));
 	};
 	useBindings([
 		{ key: "n", label: "Next report page", handler: next, applies: () => !!ready && data?.cursor != null },
-		{ key: "p", label: "Previous report page", handler: previous, applies: () => !!ready && cursor > 0 },
+		{ key: "p", label: "Previous report page", handler: previous, applies: () => !read.isFetching && cursor > 0 },
 	]);
 	const shown = data ? (data.of === "automation" ? data.backlog : data.items).length : 0;
 	return {
 		read,
-		paging: data && (
+		paging: (data || cursor > 0) && (
 			<div className="report-paging">
-				<p className="dim" role="status">
-					Showing {shown} of {data.total}
-				</p>
-				{read.error && <p role="alert">{read.error.message}</p>}
-				{(cursor > 0 || data.cursor !== null) && (
+				{data && (
+					<p className="dim" role="status">
+						Showing {shown} of {data.total}
+					</p>
+				)}
+				{data && read.error && <p role="alert">{read.error.message}</p>}
+				{(cursor > 0 || data?.cursor != null) && (
 					<div className="report-pages">
-						<button type="button" disabled={!ready || cursor === 0} onClick={previous}>
+						<button type="button" disabled={read.isFetching || cursor === 0} onClick={previous}>
 							Previous page
 						</button>{" "}
-						<button type="button" disabled={!ready || data.cursor === null} onClick={next}>
+						<button type="button" disabled={!ready || data?.cursor == null} onClick={next}>
 							Next page
 						</button>
 					</div>
@@ -196,8 +198,13 @@ function Detail({ of, days }: { of: StatsKind; days: number }) {
 	}
 }
 
-function Unread({ read, what }: { read: { error: Error | null }; what: string }) {
-	return <EmptyState>{read.error?.message ?? `Reading ${what}…`}</EmptyState>;
+function Unread({ read, what, children }: { read: { error: Error | null }; what: string; children?: ReactNode }) {
+	return (
+		<>
+			{children}
+			<EmptyState>{read.error?.message ?? `Reading ${what}…`}</EmptyState>
+		</>
+	);
 }
 
 function useGo() {
@@ -331,7 +338,12 @@ function Flaky({ days }: { days: number }) {
 	const { read, paging } = usePagedReport("flaky", days);
 	const data = read.data?.of === "flaky" ? read.data : undefined;
 	const go = useGo();
-	if (!data) return <Unread read={read} what="flaky tests" />;
+	if (!data)
+		return (
+			<Unread read={read} what="flaky tests">
+				{paging}
+			</Unread>
+		);
 	return (
 		<>
 			<p className="report-hero">
@@ -375,7 +387,12 @@ function Reruns({ days }: { days: number }) {
 	const { read, paging } = usePagedReport("reruns", days);
 	const data = read.data?.of === "reruns" ? read.data : undefined;
 	const go = useGo();
-	if (!data) return <Unread read={read} what="reruns" />;
+	if (!data)
+		return (
+			<Unread read={read} what="reruns">
+				{paging}
+			</Unread>
+		);
 	return (
 		<>
 			<p className="report-hero">
@@ -421,7 +438,12 @@ function Automation({ days }: { days: number }) {
 	const { read, paging } = usePagedReport("automation", days);
 	const data = read.data?.of === "automation" ? read.data : undefined;
 	const go = useGo();
-	if (!data) return <Unread read={read} what="automation" />;
+	if (!data)
+		return (
+			<Unread read={read} what="automation">
+				{paging}
+			</Unread>
+		);
 	return (
 		<>
 			<p className="report-hero">
@@ -478,7 +500,12 @@ function Automation({ days }: { days: number }) {
 function Coverage({ days }: { days: number }) {
 	const { read, paging } = usePagedReport("coverage", days);
 	const data = read.data?.of === "coverage" ? read.data : undefined;
-	if (!data) return <Unread read={read} what="coverage" />;
+	if (!data)
+		return (
+			<Unread read={read} what="coverage">
+				{paging}
+			</Unread>
+		);
 	return (
 		<>
 			<p className="report-hero">
