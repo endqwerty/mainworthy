@@ -81,6 +81,8 @@ type VisibleRow =
 	| { kind: "draft"; id: string }
 	| { kind: "local"; id: string; draft: Draft }
 	| { kind: "folder"; folder: FolderRow; count: number };
+const unsorted = "Unsorted";
+const nothingPlaced = "No cases changed. Nothing to undo.";
 type PlacementUndo = { preview: Edit[]; ready: Promise<Api["propose"]["reply"]>; queued: boolean };
 const ResolvedEdit = z.object({
 	op: z.literal("edit"),
@@ -2002,12 +2004,8 @@ export function SuiteScreen() {
 				const changed = new Set(reply.placements.flatMap((edit) => edit.cases)).size;
 				if (changed) optimistic.confirm();
 				else optimistic.rollback();
-				if (undo.current === action) {
-					if (!changed) undo.current = previous;
-					if (!action.queued || !changed)
-						setStatus(
-							changed ? `${changed} case${changed === 1 ? "" : "s"} changed. Press u to undo.` : "No cases changed.",
-						);
+				if (undo.current === action && (!action.queued || !changed)) {
+					setStatus(changed ? `${changed} case${changed === 1 ? "" : "s"} changed. Press u to undo.` : nothingPlaced);
 				}
 			}
 			setPicked(new Set());
@@ -2028,8 +2026,8 @@ export function SuiteScreen() {
 		openPalette({
 			title: "Move selected cases to a folder",
 			items: [
-				...(!folders.some((folder) => folder.path === "Unsorted")
-					? [{ id: "root", label: "Unsorted", handler: () => moveTo("Unsorted") }]
+				...(!folders.some((folder) => folder.path === unsorted)
+					? [{ id: "root", label: unsorted, handler: () => moveTo(unsorted) }]
 					: []),
 				...folders.map((folder) => ({
 					id: folder.path,
@@ -2045,7 +2043,7 @@ export function SuiteScreen() {
 		const inverse: Edit[] = cases
 			.filter((row) => refs.includes(row.ref))
 			.map((row) => ({ op: "place", cases: [row.ref], folder: row.folder }));
-		void placement([{ op: "place", cases: refs, folder: folder || "Unsorted" }], inverse);
+		void placement([{ op: "place", cases: refs, folder: folder || unsorted }], inverse);
 	}
 	function archive(): void {
 		const refs = selection();
@@ -2112,13 +2110,17 @@ export function SuiteScreen() {
 				if (original?.status !== "adopted") return;
 				wantsRead = true;
 				const edits = original.placements;
-				if (!edits.length) return;
+				if (!edits.length) {
+					setStatus(nothingPlaced);
+					return;
+				}
 				try {
 					const reply = await call("propose", { edits }, { project, owner });
 					if (reply.status === "adopted") {
 						optimistic.confirm(edits);
-						if (undo.current === action) undo.current = null;
-						setStatus(reply.placements.length ? "Undone. The inverse change is recorded." : "No cases changed.");
+						const changed = reply.placements.length;
+						if (undo.current === action && changed) undo.current = null;
+						setStatus(changed ? "Undone. The inverse is recorded." : nothingPlaced);
 					} else {
 						optimistic.rollback();
 						action.queued = false;

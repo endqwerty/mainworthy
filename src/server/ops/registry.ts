@@ -31,6 +31,8 @@ type Base<I, O> = {
 	summary: string;
 	input: z.ZodType<I>;
 	output: z.ZodType<O>;
+	/** Caller-visible projection, applied to fresh and replayed replies after the full result is stored. */
+	present?: (actor: Actor, result: O) => O;
 	/** What the caller must hold. A list means any one of them; `test/architecture.test.ts` names the operations that give one. */
 	needs: Need;
 	/**
@@ -241,6 +243,7 @@ function* executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>, call
 	// pipeline's for another project included. One that holds a grant there is told which capability it lacks.
 	if ("reply" in admitted) return admitted.reply;
 	const { actor } = admitted;
+	const present = (result: unknown): unknown => (op.present ? op.present(actor, op.output.parse(result)) : result);
 
 	const parsed = op.input.safeParse(call.input ?? {});
 	if (!parsed.success) {
@@ -269,7 +272,7 @@ function* executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>, call
 				session: call.reference ? (caller?.session ?? null) : (call.session?.() ?? null),
 				context: call.reference ? (caller?.context ?? null) : (call.context?.() ?? null),
 			};
-			if (!writing) return { ok: true, result: op.run(env, input), seq: null };
+			if (!writing) return { ok: true, result: present(op.run(env, input)), seq: null };
 			const result = app.db.transaction(() => {
 				const prior = cmd ? findCommand(app.db, cmd) : null;
 				if (prior) {
@@ -291,7 +294,7 @@ function* executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>, call
 				}
 				return made;
 			});
-			return { ok: true, result, seq: null };
+			return { ok: true, result: present(result), seq: null };
 		}
 
 		if (!found) throw new Error(`${op.name}: a project operation with no project`);
@@ -311,7 +314,7 @@ function* executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>, call
 
 		if (!writing) {
 			if (!("run" in op)) throw new Error(`${op.name}: a read is one function`);
-			return { ok: true, result: op.run(makeCtx(app, found, actor, false), input), seq: found.seq };
+			return { ok: true, result: present(op.run(makeCtx(app, found, actor, false), input)), seq: found.seq };
 		}
 
 		try {
@@ -327,7 +330,7 @@ function* executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>, call
 					if (prior.request !== request) throw changed();
 					if (prior.outcome !== UNFINISHED) {
 						app.db.commit();
-						return { ok: true, result: json<unknown>(prior.outcome), seq: prior.seq };
+						return { ok: true, result: present(json<unknown>(prior.outcome)), seq: prior.seq };
 					}
 					// Begun and never answered: the operation runs again, finds what it already stored (a report finds
 					// its batch) and does the rest.
@@ -376,7 +379,7 @@ function* executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>, call
 			stampSeq(ctx);
 			app.db.commit();
 			publish();
-			return { ok: true, result, seq: ctx.seq };
+			return { ok: true, result: present(result), seq: ctx.seq };
 		} catch (error) {
 			app.db.rollback();
 			throw error;

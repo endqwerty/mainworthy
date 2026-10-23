@@ -42,6 +42,8 @@ export const PlaceEdit = z.object({
 	cases: schemaTexts.min(1),
 	folder: FolderRef.optional(),
 	after: schemaNullableText.optional(),
+	/** Restore the exact ordering key returned by a placement inverse. Mutually exclusive with after. */
+	rank: schemaOptionalText,
 	tags: TagChange.optional(),
 });
 export const StateEdit = z.object({

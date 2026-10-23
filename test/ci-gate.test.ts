@@ -397,7 +397,9 @@ test("CI retries live upgrading health without sending credentials or declaring 
 			fetch: async (_url, init) => {
 				expect(new Headers(init?.headers).get("authorization")).toBeNull();
 				return Response.json(
-					++calls === 2 && finishes ? { ok: true, apiVersion: 1 } : { ok: false, state: "upgrading", apiVersion: 1 },
+					++calls === 2 && finishes
+						? { ok: true, apiVersion: API_VERSION }
+						: { ok: false, state: "upgrading", apiVersion: API_VERSION },
 				);
 			},
 		});
@@ -907,7 +909,7 @@ test("choosing the instance: each thing that can be wrong with a deployed one, a
 		},
 	});
 	const healthy: Answers = {
-		"/healthz": () => Response.json({ ok: true, apiVersion: 1 }),
+		"/healthz": () => Response.json({ ok: true, apiVersion: API_VERSION }),
 		"/api/openapi.json": () => Response.json(openApi()),
 		"/api/session": recorder,
 	};
@@ -928,15 +930,17 @@ test("choosing the instance: each thing that can be wrong with a deployed one, a
 			...healthy,
 			"/healthz": () =>
 				Response.json(
-					++upgradeTries < 2 ? { ok: false, state: "upgrading", apiVersion: 1 } : { ok: true, apiVersion: 1 },
+					++upgradeTries < 2
+						? { ok: false, state: "upgrading", apiVersion: API_VERSION }
+						: { ok: true, apiVersion: API_VERSION },
 				),
 		}),
 	).toStartWith("deployed:");
 	expect(upgradeTries).toBe(2);
-	for (const apiVersion of [undefined, 0, 2, "1", null]) {
+	for (const apiVersion of [undefined, 0, API_VERSION + 1, "1", null]) {
 		asked.length = 0;
 		expect(await choose({ ...healthy, "/healthz": () => Response.json({ ok: true, apiVersion }) })).toStartWith(
-			"own (warning): https://mainworthy.example does not support CLI API 1",
+			`own (warning): https://mainworthy.example does not support CLI API ${API_VERSION}`,
 		);
 		expect(asked).toEqual(["/healthz"]);
 	}
@@ -955,7 +959,7 @@ test("choosing the instance: each thing that can be wrong with a deployed one, a
 	let tries = 0;
 	const slow = () => {
 		if (++tries === 1) throw new Error("no route yet");
-		return Response.json({ ok: true, apiVersion: 1 });
+		return Response.json({ ok: true, apiVersion: API_VERSION });
 	};
 	expect(await choose({ ...healthy, "/healthz": slow })).toStartWith("deployed:");
 
@@ -1044,6 +1048,7 @@ test("the change workflow refuses unknown operations and incompatible servers, a
 			[API_VERSION, 404, { ok: false, error: { code: "not_found", message: "project missing not found" } }, 1],
 			[API_VERSION, 200, { ok: false, error: { code: "invalid", message: "refused" } }, 1],
 			[API_VERSION + 1, 200, { ok: true, result: {} }, 1],
+			[API_VERSION - 1, 200, { ok: true, result: {} }, 1],
 			[undefined, 404, { ok: false, error: { code: "not_found", message: "no operation named change" } }, 1],
 			[undefined, 200, { ok: true, result: { change: "pr:482", state: "merged" } }, 0],
 			[undefined, 404, { ok: false, error: { code: "not_found", message: "change pr:482 not found" } }, 0],
@@ -1166,9 +1171,9 @@ exec "$REAL_CURL" "$@"
 					const statuses = path === "/healthz" ? health : report;
 					const call = path === "/healthz" ? healthCalls++ : reportCalls++;
 					if (path === "/healthz" && healthCalls <= Number(env.HEALTH_UPGRADES ?? 0))
-						return Response.json({ ok: false, state: "upgrading", apiVersion: 1 });
+						return Response.json({ ok: false, state: "upgrading", apiVersion: API_VERSION });
 					return Response.json(
-						{ ok: true, apiVersion: 1 },
+						{ ok: true, apiVersion: API_VERSION },
 						{ status: statuses[Math.min(call, statuses.length - 1)] ?? statuses[0] },
 					);
 				},

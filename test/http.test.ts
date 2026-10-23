@@ -20,6 +20,7 @@ import { InboxReply as InboxSchema, ReportReceipt } from "../src/core/ops.ts";
 import { PRESETS } from "../src/core/presets.ts";
 import { AuditReply, REPLIES } from "../src/core/replies.ts";
 import { TrackerReceipt } from "../src/core/tracker.ts";
+import { API_VERSION } from "../src/core/version.ts";
 import { deliverHandoffs } from "../src/server/handoffs/handoffs.ts";
 import { waitMail } from "../src/server/identity/identity.ts";
 import type { AssertionOptions, RegistrationOptions } from "../src/server/identity/webauthn.ts";
@@ -3246,17 +3247,17 @@ describe("/healthz and the commit", () => {
 		expect(await healthz({ MAINWORTHY_COMMIT: SHA })).toEqual({
 			ok: true,
 			version: "0.1.0",
-			apiVersion: 1,
+			apiVersion: API_VERSION,
 			commit: SHA,
 		});
 	});
 
 	test("it says null when no commit is known", async () => {
-		expect(await healthz({})).toEqual({ ok: true, version: "0.1.0", apiVersion: 1, commit: null });
+		expect(await healthz({})).toEqual({ ok: true, version: "0.1.0", apiVersion: API_VERSION, commit: null });
 		expect(await healthz({ MAINWORTHY_COMMIT: "" })).toEqual({
 			ok: true,
 			version: "0.1.0",
-			apiVersion: 1,
+			apiVersion: API_VERSION,
 			commit: null,
 		});
 	});
@@ -3290,7 +3291,7 @@ describe("/healthz and the commit", () => {
 		expect(await healthz({ MAINWORTHY_COMMIT: "<script>alert(1)</script>" })).toEqual({
 			ok: true,
 			version: "0.1.0",
-			apiVersion: 1,
+			apiVersion: API_VERSION,
 			commit: null,
 		});
 	});
@@ -3567,13 +3568,13 @@ describe("request size", () => {
 test("a mismatched CLI contract is refused before an operation writes", async () => {
 	await using instance = boot("local");
 	const input = { do: "project.create", key: "contract-test", preset: "loose" };
-	const refused = await post(instance, "/api/admin", input, { "x-mainworthy-api-version": "2" });
+	const refused = await post(instance, "/api/admin", input, { "x-mainworthy-api-version": String(API_VERSION - 1) });
 	expect(refused.status).toBe(409);
 	expect(refused.body).toMatchObject({
 		ok: false,
-		error: { code: "conflict", message: "incompatible API version; server requires API 1" },
+		error: { code: "conflict", message: `incompatible API version; server requires API ${API_VERSION}` },
 	});
-	const accepted = await post(instance, "/api/admin", input, { "x-mainworthy-api-version": "1" });
+	const accepted = await post(instance, "/api/admin", input, { "x-mainworthy-api-version": String(API_VERSION) });
 	expect(accepted.status).toBe(200);
 	expect(accepted.body).toMatchObject({ ok: true });
 });

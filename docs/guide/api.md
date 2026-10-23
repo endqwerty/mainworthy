@@ -25,6 +25,10 @@ both schemas. `seq` is required and is `null` for an instance operation. A field
 declared nullable may hold `null`. An optional field may be absent. Replies
 selected by an action or a ref are described as alternatives.
 
+The current API version is **2**. The CLI checks `/healthz` before sending an operation and sends
+`x-mainworthy-api-version: 2`. A server with another advertised version is refused before a write.
+Clients pinned to API 1 must upgrade with the server.
+
 A successful operation returns `ok: true`, `result`, and `seq`, the project's
 sequence number at that point. The `since` operation with `{"cursor":"s:12"}`
 returns changes after sequence 12. A reply with `more: true` has more changes
@@ -201,12 +205,16 @@ when the window regains focus.
 
 ## Placement results
 
-The `propose` reply includes `placements`, an array of inverse `place` and `state` edits for case placements actually written.
+For callers with `read`, the `propose` reply includes `placements`, an array of inverse `place` and `state` edits for case placements actually written.
+Without `read`, this array is empty. Immediate `decide` replies apply the same rule to `effects.placements`, including command replay.
 The edits are already in undo order. To undo those placements, submit `{"edits": reply.placements}` to `propose`.
 Do not submit an empty array: a no-op has `placements: []`.
 Cases that were already in the requested state or already had the requested tags do not appear in these edits.
 The `cases` field still contains body-version stamps; it does not count placement changes.
-Open or rejected proposals return no placement inverses. An adopted decision's effects also retain them.
+Move inverses include the previous folder id and `rank`, its ordering key. Submit that key unchanged for its single case; `rank` and `after` are mutually exclusive.
+If another case has occupied that key, the returned case follows it with a unique key.
+Open or rejected proposals return no placement inverses. The server retains full effects internally.
+Clients treat `placements` missing from a recorded pre-upgrade proposal reply as an empty array.
 
 ## Operations
 
@@ -355,6 +363,7 @@ Create or change cases, folders, links or the policy. Saving and proposing are t
 | `edits[][place].cases` | `array<string>` | yes |  |
 | `edits[][place].folder` | `integer \| string` | no |  |
 | `edits[][place].after` | `string \| null` | no |  |
+| `edits[][place].rank` | `string` | no |  |
 | `edits[][place].tags` | `object` | no |  |
 | `edits[][place].tags.set` | `array<string>` | no |  |
 | `edits[][place].tags.add` | `array<string>` | no |  |

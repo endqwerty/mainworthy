@@ -2528,7 +2528,7 @@ describe("authoritative placement effects", () => {
 		propose([{ op: "place", cases: ["C-1"], folder: "Concurrent" }]);
 		const before = h.call<{ folder: { id: number } }[]>("get", { refs: ["C-1"] })[0]?.folder.id;
 		const moved = propose([{ op: "place", cases: ["C-1"], folder: "Destination" }]);
-		expect(moved.placements).toEqual([{ op: "place", cases: ["C-1"], folder: before }]);
+		expect(moved.placements).toEqual([{ op: "place", cases: ["C-1"], folder: before, rank: expect.any(String) }]);
 		propose([{ op: "folder", folder: "Concurrent", name: "Renamed" }]);
 		propose(moved.placements);
 		expect(h.call("get", { refs: ["C-1"] })).toMatchObject([{ folder: { path: "Renamed" }, tags: ["kept"] }]);
@@ -2544,5 +2544,175 @@ describe("authoritative placement effects", () => {
 		expect(changed.placements).toHaveLength(3);
 		propose(changed.placements);
 		expect(h.call("get", { refs: ["C-1"] })).toMatchObject([{ state: "active", tags: [] }]);
+	});
+});
+
+describe("placement reply boundaries and order", () => {
+	const propose = (edits: Edit[]) => ProposeReply.parse(h.call("propose", { edits }));
+	const order = (folder: string) =>
+		h.call<{ items: { ref: string }[] }>("find", { in: "cases", folder }).items.map((row) => row.ref);
+
+	for (const operation of ["propose", "decide"] as const) {
+		test(`${operation} hides prior placement metadata without read, including command replay`, () => {
+			h.close();
+			h = harness({ preset: "standard" });
+			propose([{ op: "create", folder: "Private", tags: ["private-tag"], body: { title: "Protected case" } }]);
+			const reader = h.actor("writer", operation === "propose" ? "human" : "agent", ["read", "produce"]);
+			const blind = h.actor("blind-writer", "human", operation === "decide" ? ["produce", "answer"] : ["produce"]);
+			expect(h.raw("get", { refs: ["C-1"] }, blind).ok).toBe(false);
+			const input = {
+				edits: [
+					{ op: "place", cases: ["C-1"], folder: "Destination", tags: { set: [] } },
+					{ op: "state", cases: ["C-1"], to: "archived" },
+				],
+			};
+			const proposed = ProposeReply.parse(
+				h.call("propose", { ...input, cmd: "blind-placement" }, operation === "propose" ? blind : reader),
+			);
+			if (operation === "propose") {
+				expect(proposed.status).toBe("adopted");
+				expect(proposed.placements).toEqual([]);
+				expect(ProposeReply.parse(h.call("propose", { ...input, cmd: "blind-placement" }, blind)).placements).toEqual(
+					[],
+				);
+			} else {
+				const [question] = h.call<{ evidenceHash: string }[]>("get", { refs: [proposed.question] });
+				const answer = {
+					q: proposed.question,
+					onEvidence: question?.evidenceHash,
+					answer: { is: "accept" },
+					cmd: "blind-decision",
+				};
+				const [reply] = h.call<DecideReply[]>("decide", answer, blind);
+				expect(reply?.status).toBe("decided");
+				expect(reply?.effects?.placements).toEqual([]);
+				expect(h.call<DecideReply[]>("decide", answer, blind)[0]?.effects?.placements).toEqual([]);
+			}
+			const [detail] = h.call<{ decision: { id: number; effects: { placements: Edit[] } } }[]>("get", {
+				refs: [proposed.question],
+			});
+			expect(detail?.decision.effects.placements).toMatchObject([
+				{ op: "state", cases: ["C-1"], to: "active" },
+				{ op: "place", cases: ["C-1"], tags: { add: ["private-tag"] } },
+			]);
+		});
+	}
+
+	test("replay filters effects after the caller loses read access", () => {
+		propose([{ op: "create", tags: ["private-tag"], body: { title: "Revoked read" } }]);
+		const actor = h.actor("reader-writer", "human", ["read", "produce"]);
+		const input = { cmd: "read-before-revoke", edits: [{ op: "place", cases: ["C-1"], tags: { set: [] } }] };
+		expect(ProposeReply.parse(h.call("propose", input, actor)).placements).toHaveLength(1);
+		expect(ProposeReply.parse(h.call("propose", input, { ...actor, can: ["produce"] })).placements).toEqual([]);
+	});
+
+	test("legacy recorded create outcomes recover without duplicating the case", () => {
+		const input = { cmd: "pre-placements-create", edits: [{ op: "create", body: { title: "Old create reply" } }] };
+		const { placements: _placements, ...old } = ProposeReply.parse(h.call("propose", input));
+		h.app.db.raw.query("UPDATE commands SET outcome = ? WHERE id = ?").run(JSON.stringify(old), input.cmd);
+		const fate = h.call<{ reply: unknown }>("command", { cmd: input.cmd });
+		expect(ProposeReply.parse(fate.reply).placements).toEqual([]);
+		expect(ProposeReply.parse(h.call("propose", input)).placements).toEqual([]);
+		expect(order("Unsorted")).toEqual(["C-1"]);
+	});
+
+	test("API 2 refuses a version-1 server before a retried create writes", async () => {
+		let writes = 0;
+		const server = Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			fetch(request) {
+				if (new URL(request.url).pathname === "/healthz") return Response.json({ ok: true, apiVersion: 1 });
+				writes++;
+				return Response.json({
+					ok: true,
+					result: { proposal: "P-1", status: "adopted", question: null, needs: null, cases: [], conflicts: [] },
+				});
+			},
+		});
+		try {
+			for (let attempt = 0; attempt < 2; attempt++) {
+				const client = new Client({ url: `http://127.0.0.1:${server.port}`, project: "scratch", token: undefined });
+				await expect(
+					client.call("propose", { edits: [{ op: "create", body: { title: "Never written" } }] }),
+				).rejects.toMatchObject({ code: "incompatible" });
+			}
+			expect(writes).toBe(0);
+		} finally {
+			await server.stop(true);
+		}
+	});
+
+	for (const destination of ["A", "B"]) {
+		test(`move inverses restore exact order from ${destination}`, () => {
+			propose([1, 2, 3].map((n) => ({ op: "create", folder: "A", body: { title: `Ordered ${n}` } })));
+			const changed = propose([
+				{ op: "place", cases: ["C-2"], folder: destination, ...(destination === "A" ? { after: "C-3" } : {}) },
+			]);
+			expect(order("A")).toEqual(destination === "A" ? ["C-1", "C-3", "C-2"] : ["C-1", "C-3"]);
+			propose(changed.placements);
+			expect(order("A")).toEqual(["C-1", "C-2", "C-3"]);
+		});
+	}
+
+	test("bulk move inverse preserves order even after the original folder is archived", () => {
+		propose([1, 2, 3, 4].map((n) => ({ op: "create", folder: "A", body: { title: `Bulk ordered ${n}` } })));
+		const moved = propose([{ op: "place", cases: ["C-1", "C-2", "C-3"], folder: "B" }]);
+		propose([{ op: "folder", folder: "A", archive: true }]);
+		propose(moved.placements);
+		expect(order("A")).toEqual(["C-1", "C-2", "C-3", "C-4"]);
+		expect(h.call<{ items: { ref: string }[] }>("find", { in: "cases" }).items).toHaveLength(4);
+		expect(
+			h
+				.call<{ items: { path: string; state: string }[] }>("find", { in: "folders" })
+				.items.find((row) => row.path === "A")?.state,
+		).toBe("archived");
+	});
+
+	test("moving to the existing position records no effect", () => {
+		propose([1, 2, 3].map((n) => ({ op: "create", folder: "A", body: { title: `Already positioned ${n}` } })));
+		expect(propose([{ op: "place", cases: ["C-3"], folder: "A" }]).placements).toEqual([]);
+		expect(propose([{ op: "place", cases: ["C-2", "C-3"], folder: "A" }]).placements).toEqual([]);
+		expect(propose([{ op: "place", cases: ["C-2", "C-3"], after: "C-1" }]).placements).toEqual([]);
+	});
+	for (const rank of ["", "a", "a00", "a0!", "not-a-key"]) {
+		test(`invalid recorded rank ${JSON.stringify(rank)} cannot corrupt ordering`, () => {
+			propose([{ op: "create", body: { title: "Valid ordering" } }]);
+			expect(h.raw("propose", { edits: [{ op: "place", cases: ["C-1"], rank }] })).toMatchObject({
+				ok: false,
+				error: { code: "invalid" },
+			});
+			propose([{ op: "create", body: { title: "Next valid ordering" } }]);
+			expect(order("Unsorted")).toEqual(["C-1", "C-2"]);
+		});
+	}
+	test("a move inverse keeps every case pageable when a new case occupies the old rank", () => {
+		propose([1, 2, 3].map((n) => ({ op: "create", folder: "A", body: { title: `Slot ${n}` } })));
+		const moved = propose([{ op: "place", cases: ["C-2"], folder: "B" }]);
+		propose([{ op: "create", folder: "A", after: "C-1", body: { title: "New occupant" } }]);
+		propose(moved.placements);
+		const refs: string[] = [];
+		let cursor: string | null = null;
+		do {
+			const page: { items: { ref: string }[]; cursor: string | null } = h.call("find", {
+				in: "cases",
+				folder: "A",
+				limit: 1,
+				cursor: cursor ?? undefined,
+			});
+			refs.push(...page.items.map((row) => row.ref));
+			cursor = page.cursor;
+		} while (cursor);
+		expect(refs).toHaveLength(4);
+		expect(refs.filter((ref) => ref !== "C-4")).toEqual(["C-1", "C-2", "C-3"]);
+	});
+	test("a recorded rank cannot name multiple cases or an after anchor", () => {
+		propose([1, 2].map((n) => ({ op: "create", body: { title: `Rank input ${n}` } })));
+		for (const edit of [
+			{ op: "place", cases: ["C-1", "C-2"], rank: "a0" },
+			{ op: "place", cases: ["C-1"], rank: "a0", after: "C-2" },
+		])
+			expect(h.raw("propose", { edits: [edit] })).toMatchObject({ ok: false, error: { code: "invalid" } });
+		expect(order("Unsorted")).toEqual(["C-1", "C-2"]);
 	});
 });

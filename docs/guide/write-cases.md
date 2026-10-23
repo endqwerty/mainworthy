@@ -241,9 +241,12 @@ A removal protected by the project policy waits for review before changing the c
 Press <kbd>#</kbd> to archive the selected cases.
 Press <kbd>u</kbd> to record the inverse of the latest placement action.
 The changed-case count includes only cases the server changed.
-If another person already made the requested change, the action says **No cases changed** and adds no Undo action.
+If another person already made the requested change, the action says **No cases changed. Nothing to undo.**
+Pressing <kbd>u</kbd> then leaves earlier actions alone.
 For a partly stale selection, Undo affects only the cases this action changed.
-Moves return to the folder that was current at the write; tag undo reverses only the tags this action added or removed.
+Moves return to the folder and position that were current at the write.
+If that folder was archived meanwhile, it stays archived. Find the returned active cases in **All cases**.
+Tag undo reverses only the tags this action added or removed.
 
 Moves, tag changes, and archiving appear in history without creating a new body version.
 Archived cases leave the active suite. Their recorded history remains available.

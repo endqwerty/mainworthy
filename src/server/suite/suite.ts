@@ -127,6 +127,7 @@ export type Resolved =
 			caseIds: number[];
 			folder: FolderTarget | null;
 			after: number | null | undefined;
+			rank?: string;
 			/** The change asked for, applied to each case's tags as they are when the proposal is adopted. */
 			tags: TagChange | null;
 	  }
@@ -158,11 +159,14 @@ const Q = {
 	updateFolder: sql<{ id: number; parent: number | null; name: string; state: string; rev: number }>(
 		"UPDATE folders SET parent = $parent, name = $name, state = $state, rev = $rev WHERE id = $id",
 	),
-	lastRank: sql<{ project: number; folder: number }, { rank: string }>(
-		"SELECT rank FROM cases WHERE project = $project AND folder = $folder ORDER BY rank DESC LIMIT 1",
+	lastRank: sql<{ project: number; folder: number }, { id: number; rank: string }>(
+		"SELECT id, rank FROM cases WHERE project = $project AND folder = $folder ORDER BY rank DESC LIMIT 1",
 	),
-	nextRank: sql<{ project: number; folder: number; rank: string }, { rank: string }>(
-		"SELECT rank FROM cases WHERE project = $project AND folder = $folder AND rank > $rank ORDER BY rank LIMIT 1",
+	atRank: sql<{ project: number; folder: number; rank: string }, { id: number }>(
+		"SELECT id FROM cases WHERE project = $project AND folder = $folder AND rank = $rank LIMIT 1",
+	),
+	nextRank: sql<{ project: number; folder: number; rank: string }, { id: number; rank: string }>(
+		"SELECT id, rank FROM cases WHERE project = $project AND folder = $folder AND rank > $rank ORDER BY rank LIMIT 1",
 	),
 	insertCase: sql<{
 		kind: CaseKind;
@@ -685,6 +689,16 @@ export function* sealSteps(ctx: Ctx, input: Parameters<typeof seal>[1]): Generat
 					rows.push(lookup(ref));
 					if (++work % SLICE === 0) yield;
 				}
+				if (edit.rank !== undefined) {
+					if (rows.length !== 1) throw invalid("a recorded rank places one case at a time");
+					if (edit.after !== undefined) throw invalid("a placement names either rank or after, not both");
+					try {
+						if (!/^[A-Za-z][0-9A-Za-z]+$/.test(edit.rank)) throw new Error("invalid rank");
+						generateKeyBetween(edit.rank, null);
+					} catch {
+						throw invalid("rank must be an ordering key returned by a placement inverse");
+					}
+				}
 				const after = edit.after === undefined || edit.after === null ? edit.after : lookup(edit.after).id;
 				const tags: TagChange | null = edit.tags
 					? {
@@ -698,6 +712,7 @@ export function* sealSteps(ctx: Ctx, input: Parameters<typeof seal>[1]): Generat
 					caseIds: rows.map((row) => row.id),
 					folder: edit.folder === undefined ? null : folderTarget(index, edit.folder),
 					after,
+					...(edit.rank === undefined ? {} : { rank: edit.rank }),
 					tags,
 				});
 				break;
@@ -1375,7 +1390,15 @@ export function* adoptSteps(ctx: Ctx, witness: Witness, proposal: ProposalRow): 
 			case "place": {
 				const folder = edit.folder ? ensureFolder(ctx, edit.folder) : null;
 				// A move to another folder or an explicit position re-ranks; a retag alone leaves the order alone.
-				const rerank = folder !== null || edit.after !== undefined;
+				let alreadyAtEnd = folder !== null && edit.after == null && edit.rank === undefined;
+				for (const [at, id] of edit.caseIds.entries()) {
+					if (!alreadyAtEnd) break;
+					if (++work % SLICE === 0) yield;
+					const row = mustRow(id);
+					const next = ctx.db.get(Q.nextRank, { project: ctx.project.id, folder: row.folder, rank: row.rank });
+					alreadyAtEnd = row.folder === folder && next?.id === edit.caseIds[at + 1];
+				}
+				const rerank = !alreadyAtEnd && (folder !== null || edit.after !== undefined || edit.rank !== undefined);
 				// Each folder's cases follow one another from where its first one lands. A rank is only an order within
 				// its own folder, so cases that stay in different folders keep one cursor each.
 				const cursors = new Map<number, string>();
@@ -1386,7 +1409,13 @@ export function* adoptSteps(ctx: Ctx, witness: Witness, proposal: ProposalRow): 
 					let rank = row.rank;
 					if (rerank) {
 						const cursor = cursors.get(to);
-						rank = cursor === undefined ? rankAfter(ctx, to, edit.after ?? null, id) : rankBetween(ctx, to, cursor);
+						rank =
+							edit.rank ??
+							(cursor === undefined ? rankAfter(ctx, to, edit.after ?? null, id) : rankBetween(ctx, to, cursor, id));
+						if (edit.rank !== undefined) {
+							const occupant = ctx.db.get(Q.atRank, { project: ctx.project.id, folder: to, rank });
+							if (occupant && occupant.id !== id) rank = rankBetween(ctx, to, rank, id);
+						}
 						cursors.set(to, rank);
 					}
 					const current = json<string[]>(row.tags);
@@ -1526,7 +1555,7 @@ function place(ctx: Ctx, witness: Witness, proposal: ProposalRow, row: CaseRow, 
 		inverse.push({
 			op: "place",
 			cases: [ref],
-			...(moved ? { folder: before.folder } : {}),
+			...(moved ? { folder: before.folder, rank: before.rank } : {}),
 			...(tagged
 				? {
 						tags: {
@@ -1543,15 +1572,15 @@ function place(ctx: Ctx, witness: Witness, proposal: ProposalRow, row: CaseRow, 
 function rankAfter(ctx: Ctx, folder: number, after: number | null, moving?: number): string {
 	if (after !== null && after !== moving) {
 		const anchor = caseById(ctx.db, after);
-		if (anchor && anchor.folder === folder) return rankBetween(ctx, folder, anchor.rank);
+		if (anchor && anchor.folder === folder) return rankBetween(ctx, folder, anchor.rank, moving);
 	}
 	const last = ctx.db.get(Q.lastRank, { project: ctx.project.id, folder });
-	return generateKeyBetween(last?.rank ?? null, null);
+	return last && last.id === moving ? last.rank : generateKeyBetween(last?.rank ?? null, null);
 }
 
-function rankBetween(ctx: Ctx, folder: number, after: string): string {
+function rankBetween(ctx: Ctx, folder: number, after: string, moving?: number): string {
 	const next = ctx.db.get(Q.nextRank, { project: ctx.project.id, folder, rank: after });
-	return generateKeyBetween(after, next?.rank ?? null);
+	return next && next.id === moving ? next.rank : generateKeyBetween(after, next?.rank ?? null);
 }
 
 /** Ranks for `n` new cases at the end of a folder, in order. One read, whatever `n` is. */
