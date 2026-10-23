@@ -373,7 +373,9 @@ export function CasePane({
 						body={body}
 						readOnly={ownedElsewhere || Boolean(conflict)}
 						change={(next) => {
-							const base = draft ?? (view ? editDraft(view) : null);
+							const base =
+								draft ??
+								(view ? editDraft(view, session.projects.find((entry) => entry.key === project)?.identity) : null);
 							if (base)
 								change({
 									...base,

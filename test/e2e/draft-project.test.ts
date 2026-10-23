@@ -13,6 +13,131 @@ import { call } from "../../src/web/lib/api.ts";
 import { Draft } from "../../src/web/lib/drafts.ts";
 import { browserAvailable, eventually, openPage, reservePort, type Server, startServer } from "./support.ts";
 
+for (const stage of ["waiting for review", "before its first merge"] as const)
+	test.skipIf(!browserAvailable)(
+		`a restored conflict ${stage} cannot follow a replacement project's question`,
+		async () => {
+			const dataDir = await mkdtemp(join(tmpdir(), "mainworthy-draft-state-project-"));
+			const port = await reservePort();
+			const token = "draft-state-project-owner-token";
+			const instance = start(
+				{ ...defaultConfig({}), dataDir, port: port.port, owner: "robin", ownerToken: token, mode: "local" },
+				() => ({ ui }),
+				{ readers: 0 },
+			);
+			const server: Server = {
+				url: instance.url,
+				project: "scratch",
+				token,
+				seeded: null,
+				stop: instance.stop,
+				api: <O extends OpName>(op: O, input: Api[O]["input"]) =>
+					call(op, input, { url: instance.url, project: "scratch", token }),
+			};
+			let view: Awaited<ReturnType<typeof openPage>> | null = null;
+			try {
+				const seed = () => server.api("propose", { edits: [{ op: "create", outline: "Coupon case\n  Open cart" }] });
+				const edit = (title: string) =>
+					server.api("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title } }] });
+				const answer = async (q: string, is: "accept" | "reject") => {
+					const question = (await server.api("inbox", { kind: "adopt" })).items.find((item) => item.q === q);
+					if (!question) throw new Error(`Missing question ${q}`);
+					await server.api("decide", {
+						q,
+						onEvidence: question.evidenceHash,
+						answer: { is },
+						reason: "Reviewed proposal",
+					});
+				};
+				const strict = async () => {
+					const policy = await server.api("propose", { edits: [{ op: "policy", preset: "strict" }] });
+					if (!policy.question) throw new Error("Missing policy question");
+					await answer(policy.question, "accept");
+				};
+				await seed();
+				view = await openPage(server, { path: "/p/scratch/suite/c/1" });
+				const { page } = view;
+				const stored = async () =>
+					Draft.parse(
+						await page.evaluate(() => {
+							const key = Object.keys(localStorage).find((key) => key.includes(":draft:") && key.endsWith(":C-1"));
+							return key ? JSON.parse(localStorage.getItem(key) ?? "null") : null;
+						}),
+					);
+				await page.getByRole("button", { name: "Coupon case", exact: true }).waitFor();
+				await page.keyboard.press("e");
+				await page.getByRole("textbox", { name: "Case title", exact: true }).fill("Original project's draft");
+				await edit("Other person's title");
+				await page.keyboard.press("Escape");
+				await page.locator(".conflict-card").waitFor();
+				await page.getByRole("textbox", { name: "Merged title", exact: true }).fill("Original project's merge");
+				if (stage === "waiting for review") {
+					await strict();
+					await page.getByRole("button", { name: "Resolve conflict", exact: true }).click();
+					await page.locator("#stat").filter({ hasText: "Your merge is proposed and waits for a person" }).waitFor();
+				}
+				const before = await stored();
+				expect(before.sent).toBeNull();
+				const question = before.submission.kind === "waiting" ? before.submission.question : before.conflict?.q;
+				if (!question) throw new Error("Missing persisted question");
+				if (stage === "waiting for review") expect(before.conflict).toBeUndefined();
+				else expect(before.conflict?.sentMerges).toEqual([]);
+				await page.goto("about:blank");
+				removeProject(instance.app.db, "scratch");
+				await server.api("admin", { do: "project.create", key: "scratch", preset: "loose" });
+				await seed();
+				if (stage === "waiting for review") {
+					await strict();
+					let collision: string | null = null;
+					for (let index = 0; index < 10 && collision !== question; index++)
+						collision = (await edit(`Replacement proposal ${index}`)).question;
+					expect(collision).toBe(question);
+					await answer(question, "reject");
+				} else {
+					await edit("Replacement current");
+					expect((await edit("Replacement draft")).question).toBe(question);
+				}
+				const requests: string[] = [];
+				page.on("request", (request) => {
+					if (/\/(propose|decide|command)$/.test(request.url())) requests.push(request.url());
+					if (
+						request.url().endsWith("/get") &&
+						z
+							.object({ refs: z.array(z.string()) })
+							.parse(request.postDataJSON())
+							.refs.includes(question)
+					)
+						requests.push(`question ${question}`);
+				});
+				await page.goto(`${server.url}/p/scratch/suite/c/1`);
+				await eventually(
+					async () => ({ copied: await page.locator(".preserved-draft").count(), requests: requests.length }),
+					(state) => state.copied > 0 || state.requests > 0,
+				);
+				expect(requests).toEqual([]);
+				expect(await page.getByRole("textbox", { name: "Preserved draft text", exact: true }).inputValue()).toContain(
+					before.body.title,
+				);
+				if (before.conflict)
+					expect(await page.getByRole("textbox", { name: "Preserved merge text", exact: true }).inputValue()).toContain(
+						before.conflict.merged.title,
+					);
+				expect((await server.api("get", { refs: ["C-1"] }))[0]?.title).toBe(
+					stage === "waiting for review" ? "Coupon case" : "Replacement current",
+				);
+				await page.reload();
+				await page.getByRole("textbox", { name: "Preserved draft text", exact: true }).waitFor();
+				expect(requests).toEqual([]);
+			} finally {
+				await view?.close();
+				await instance.stop();
+				await port.release();
+				await rm(dataDir, { recursive: true, force: true });
+			}
+		},
+		30_000,
+	);
+
 for (const attempt of ["save", "merge"] as const)
 	for (const project of ["replacement", "replacement after retry", "unbound"] as const)
 		test.skipIf(!browserAvailable)(
@@ -77,6 +202,7 @@ for (const attempt of ["save", "merge"] as const)
 						.waitFor();
 					const before = await saved();
 					const command = z.object({ cmd: z.string(), projectIdentity: z.string() }).parse(sent[0]);
+					expect(before.projectIdentity).toBe(command.projectIdentity);
 					if (attempt === "save") expect(before.sent?.input).toMatchObject(command);
 					else {
 						const { answer } = z
@@ -87,7 +213,7 @@ for (const attempt of ["save", "merge"] as const)
 							tags: ["retained"],
 							covers: ["REQ-755"],
 						});
-						expect(before.conflict?.sentMerges).toEqual([{ ...command, ...answer }]);
+						expect(before.conflict?.sentMerges).toEqual([{ cmd: command.cmd, ...answer }]);
 					}
 					if (project !== "unbound") {
 						removeProject(instance.app.db, "scratch");
@@ -123,8 +249,8 @@ for (const attempt of ["save", "merge"] as const)
 							for (const key of Object.keys(localStorage)) {
 								if (!key.includes(":draft:")) continue;
 								const draft = JSON.parse(localStorage.getItem(key) ?? "null");
-								if (draft.sent) delete draft.sent.input.projectIdentity;
-								for (const sent of draft.conflict?.sentMerges ?? []) delete sent.projectIdentity;
+								for (const sent of draft.conflict?.sentMerges ?? []) sent.projectIdentity = draft.projectIdentity;
+								delete draft.projectIdentity;
 								localStorage.setItem(key, JSON.stringify(draft));
 							}
 						});
@@ -218,7 +344,7 @@ test.skipIf(!browserAvailable)(
 					if (!key.includes(":draft:")) continue;
 					const draft = JSON.parse(localStorage.getItem(key) ?? "null");
 					if (!draft.sent) continue;
-					delete draft.sent.input.projectIdentity;
+					delete draft.projectIdentity;
 					localStorage.setItem(key, JSON.stringify(draft));
 					changed++;
 				}

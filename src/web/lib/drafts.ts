@@ -42,7 +42,6 @@ export const DraftConflict = z.object({
 				body: CaseBody,
 				tags: schemaOptionalTexts,
 				covers: schemaOptionalTexts,
-				projectIdentity: ProposeInput.shape.projectIdentity,
 			}),
 		)
 		.default([]),
@@ -70,6 +69,7 @@ export function hasTypedMerge(state: DraftConflict): boolean {
 export const Draft = z
 	.object({
 		id: schemaText,
+		projectIdentity: ProposeInput.shape.projectIdentity,
 		ref: schemaNullableText,
 		kind: CaseKind.optional(),
 		base: schemaNumber,
