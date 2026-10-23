@@ -130,7 +130,8 @@ Automatic advancement stops when none remain. Completed and closed runs still op
 After a result is confirmed, a delayed refresh cannot make automatic navigation revisit that slot.
 You can still select it yourself to read or correct the result.
 If a lead judges a disputed failure mistaken, that result no longer fills the slot.
-The slot returns to your work when another result from you is needed.
+The next successful refresh returns the slot to your work when another result from you is needed.
+You do not need to reload the cockpit.
 To record a failure, follow these steps.
 
 1. Press <kbd>f</kbd> to focus "Result note".

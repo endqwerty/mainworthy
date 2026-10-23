@@ -55,12 +55,14 @@ const outcomes = [
 	["s", "skip"],
 ] as const;
 const changedResult = "This result has changed since it was recorded. No correction was recorded.";
+let slotRead = 0;
 
 type LocalFill = {
 	fill: Fill;
 	questions: ReportReceipt["questions"];
-	state: "pending" | "confirmed" | "released";
-};
+} & ({ state: "pending" | "released" } | { state: "confirmed"; read: number });
+type ReadSlot = Slot & { read: number };
+type SlotPage = Pick<Api["find"]["reply"], "cursor"> & { items: ReadSlot[] };
 type PendingAttachment = AttachmentInput & { key: string };
 type RecordedResult = { fill: Fill; previous: Fill | null };
 type LastResult = { slot: Slot; outcome: RunOutcome; ready: Promise<RecordedResult> };
@@ -130,11 +132,14 @@ function ProjectRunCockpit({
 	const { project, session, setStatus } = useApp();
 	const owner = useRef(deviceSession()).current;
 	const [reports] = useState(() => runReports(project, runRef, owner, projectIdentity));
+	const { uncertain } = reports;
 	const runRead = useQueryOp({ project, op: "get", input: { refs: [runRef] } });
 	const parsedRun = Run.safeParse(runRead.data?.[0]);
 	const run = parsedRun.success && parsedRun.data.ref === runRef ? parsedRun.data : null;
+	const isOpen = run?.state === "open";
+	const isClosed = run?.state === "closed";
 	const signoffInput = { on: runRef, kind: "signoff", state: "decided" } satisfies Api["inbox"]["input"];
-	const signoffs = useQueryOp({ project, op: "inbox", input: signoffInput, enabled: run?.state === "closed" });
+	const signoffs = useQueryOp({ project, op: "inbox", input: signoffInput, enabled: isClosed });
 	const signoff = signoffs.data?.items.find((item) => item.decision?.effects.closed === runRef);
 	const mayReopen = (item: typeof signoff) =>
 		session.kind === "human" && !!item?.decision?.rule && item?.you === "counts";
@@ -155,12 +160,24 @@ function ProjectRunCockpit({
 	} = useInfiniteQuery({
 		queryKey: cacheKey,
 		initialPageParam: "",
-		queryFn: ({ pageParam, signal }) =>
-			call("find", { ...slotInput, ...(pageParam ? { cursor: pageParam } : {}) }, { project, signal }),
+		queryFn: async ({ pageParam, signal }): Promise<SlotPage> => {
+			const read = ++slotRead;
+			const page = await call(
+				"find",
+				{ ...slotInput, ...(pageParam ? { cursor: pageParam } : {}) },
+				{ project, signal },
+			);
+			return {
+				...page,
+				items: Slot.array()
+					.parse(page.items)
+					.map((slot) => ({ ...slot, read })),
+			};
+		},
 		getNextPageParam: (page) => page.cursor ?? undefined,
 	});
 	function replaceSlot(slot: Pick<Slot, "id"> & Partial<Slot>): void {
-		queryClient.setQueryData<InfiniteData<Api["find"]["reply"]>>(
+		queryClient.setQueryData<InfiniteData<SlotPage>>(
 			cacheKey,
 			(value) =>
 				value && {
@@ -173,12 +190,12 @@ function ProjectRunCockpit({
 		);
 	}
 
-	const parsedSlots = Slot.array().safeParse(slotPages?.pages.flatMap((page) => page.items));
-	const storedSlots: Slot[] = parsedSlots.success
-		? parsedSlots.data.map((slot) =>
+	const storedSlots: ReadSlot[] =
+		slotPages?.pages.flatMap((page) =>
+			page.items.map((slot) =>
 				slot.work.kind === "held" && slot.work.until <= now ? { ...slot, work: { kind: "free" } } : slot,
-			)
-		: [];
+			),
+		) ?? [];
 	for (const slot of storedSlots) if (slot.fills.every((fill) => fill.result > 0)) reports.confirmed.set(slot.id, slot);
 	const [local, setLocal] = useState<Map<number, LocalFill>>(new Map());
 	const [cursor, setCursor] = useState<number | null>(null);
@@ -266,9 +283,10 @@ function ProjectRunCockpit({
 	}
 	const noteRef = useRef<HTMLInputElement>(null);
 	const [last, setLast] = useState<LastResult | null>(null);
-	const canCorrect = !!(last && (run?.state === "open" || mayReopen(signoff)));
+	const canCorrect = !!(last && (isOpen || mayReopen(signoff)));
 	const withdrawn = useRef(new Set<Promise<RecordedResult>>());
 	const method = session.kind === "agent" ? "agent" : "human";
+	const canProduce = session.can.includes("produce");
 	const isOwnFill = (fill: Fill) => fill.by === session.actor && fill.method === method;
 	const ownFillOf = (slot: Slot) => slot.fills.find(isOwnFill);
 	function filledSlot(slot: Slot, fill: Fill): Pick<Slot, "id" | "state" | "fills"> {
@@ -280,8 +298,10 @@ function ProjectRunCockpit({
 	}
 	const slots: Slot[] = storedSlots.map((slot) => {
 		const own = local.get(slot.id);
-		if (own?.state === "confirmed" && own.fill.result <= (ownFillOf(slot)?.result ?? 0))
-			setLocal((value) => new Map(value).set(slot.id, { ...own, state: "released" }));
+		if (own?.state === "confirmed" && slot.read > own.read)
+			setLocal((value) =>
+				value.get(slot.id) === own ? new Map(value).set(slot.id, { ...own, state: "released" }) : value,
+			);
 		return own && own.state !== "released" ? { ...slot, ...filledSlot(slot, own.fill) } : slot;
 	});
 	const missing = (slot: Slot) =>
@@ -331,8 +351,8 @@ function ProjectRunCockpit({
 	);
 	const canRecord = !!(
 		current &&
-		session.can.includes("produce") &&
-		(reports.uncertain.has(current.id) || (!external(current) && run?.state === "open" && admittedMethod))
+		canProduce &&
+		(uncertain.has(current.id) || (!external(current) && isOpen && admittedMethod))
 	);
 	const hasAvailable = slots.some(available);
 	const allReported = slots.length > 0 && !slots.some(unreported) && !hasNextPage;
@@ -343,7 +363,7 @@ function ProjectRunCockpit({
 		if (!hasAvailable && hasNextPage && !isFetchingNextPage && !isFetchNextPageError) void fetchNextPage();
 	}, [hasAvailable, hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage]);
 	const ownsWork = (slot: Slot) => slot.work.kind === "held" && slot.work.actor === session.actor;
-	const canWork = session.can.includes("record") && run?.state === "open" && admittedMethod;
+	const canWork = session.can.includes("record") && isOpen && admittedMethod;
 	async function work(action: Api["work"]["input"]["do"]) {
 		if (!current || !canWork || !sessionCurrent(owner)) return;
 		try {
@@ -380,8 +400,8 @@ function ProjectRunCockpit({
 		visibleStep = false,
 		restores?: Promise<RecordedResult>,
 	): Promise<RecordedResult> | null {
-		if (!slot || !sessionCurrent(owner) || reports.retired || !session.can.includes("produce")) return null;
-		const recovery = reports.uncertain.get(slot.id);
+		if (!slot || !sessionCurrent(owner) || reports.retired || !canProduce) return null;
+		const recovery = uncertain.get(slot.id);
 		if (recovery) {
 			const recoveringSlot = slot;
 			const request = recovery.retry();
@@ -396,13 +416,13 @@ function ProjectRunCockpit({
 			void request.catch((error: unknown) => {
 				if (sessionCurrent(owner) && !reports.retired)
 					setStatus(
-						reports.uncertain.get(recoveringSlot.id)?.message ??
+						uncertain.get(recoveringSlot.id)?.message ??
 							`${recoveringSlot.case} was not recorded: ${error instanceof Error ? error.message : "The request failed"}. Its note is kept.`,
 					);
 			});
 			return request;
 		}
-		if (run?.state !== "open" && !restores) {
+		if (!isOpen && !restores) {
 			setStatus("This run is closed. No result was recorded; your note is kept.");
 			return null;
 		}
@@ -455,7 +475,7 @@ function ProjectRunCockpit({
 		const request = (async () => {
 			if (priorWrite) await priorWrite.catch(() => undefined);
 			assertReportOwner();
-			const pending = reports.uncertain.get(slot.id);
+			const pending = uncertain.get(slot.id);
 			if (pending) await pending.retry();
 			const restoration = restores ? await restores : null;
 			if (restoration) {
@@ -559,12 +579,13 @@ function ProjectRunCockpit({
 			};
 			const complete = (receipt: ReportReceipt): RecordedResult => {
 				assertReportOwner();
-				reports.uncertain.delete(slot.id);
+				uncertain.delete(slot.id);
 				if (receipt.rejected.length || receipt.declined?.length || !receipt.results[0])
 					throw new Error(
 						receipt.rejected[0]?.reason ?? receipt.declined?.[0]?.reason ?? "The result was not recorded.",
 					);
 				const saved = { ...fill, outcome, note: text || null, result: receipt.results[0], atStep: atStep ?? null };
+				const confirmed: LocalFill = { fill: saved, questions: receipt.questions, state: "confirmed", read: slotRead };
 				reports.latest.set(slot.id, saved);
 				if (files.length) {
 					for (const file of files) consumedFiles.current.delete(file);
@@ -578,10 +599,7 @@ function ProjectRunCockpit({
 				// the request was on its way is newer than what was recorded, and stays.
 				if (storedNote(`${notePrefix}${slot.id}`) === text) setNoteOf(slot.id, "");
 				if (!restores) clearStep(slot.id, marked);
-				if (reports.queued.get(slot.id) === fill.result)
-					setLocal((value) =>
-						new Map(value).set(slot.id, { fill: saved, questions: receipt.questions, state: "confirmed" }),
-					);
+				if (reports.queued.get(slot.id) === fill.result) setLocal((value) => new Map(value).set(slot.id, confirmed));
 				setStatus(
 					`${reopened ? "Run reopened. " : ""}${slot.case} ${outcome} recorded on pinned version ${slot.version}${receipt.questions[0] ? ` · ${receipt.questions[0].q}: ${receipt.questions[0].how}` : ""}.`,
 				);
@@ -607,7 +625,7 @@ function ProjectRunCockpit({
 							return complete(
 								await call("report", input, { project, owner }).catch((error: unknown) => {
 									if (error instanceof ApiError && error.status !== null && error.code !== "internal")
-										reports.uncertain.delete(slot.id);
+										uncertain.delete(slot.id);
 									throw error;
 								}),
 							);
@@ -619,7 +637,7 @@ function ProjectRunCockpit({
 					});
 					return checking;
 				};
-				reports.uncertain.set(slot.id, { message, retry });
+				uncertain.set(slot.id, { message, retry });
 				setStatus(`${slot.case}'s outcome is unknown. Checking the original request; your note is kept.`);
 				return retry();
 			}
@@ -642,7 +660,7 @@ function ProjectRunCockpit({
 			setLast((value) => (value?.ready === request ? null : value));
 			// The person may already be typing another note. Restore the slot without changing their selection or input.
 			setStatus(
-				reports.uncertain.get(slot.id)?.message ??
+				uncertain.get(slot.id)?.message ??
 					`${reopened ? "Run reopened, but the correction was not recorded. " : ""}${slot.case} was not recorded: ${error instanceof Error ? error.message : "The request failed"}. Its note is kept. Return to the slot to retry.`,
 			);
 			void invalidateProject(project);
@@ -657,7 +675,7 @@ function ProjectRunCockpit({
 	}
 	function startFail(): void {
 		if (!current || !canRecord) return;
-		if (reports.uncertain.has(current.id)) {
+		if (uncertain.has(current.id)) {
 			record("fail");
 			return;
 		}
@@ -666,7 +684,7 @@ function ProjectRunCockpit({
 	}
 	function undo(): void {
 		if (!last || !canCorrect || withdrawn.current.has(last.ready)) return;
-		const recovery = reports.uncertain.get(last.slot.id);
+		const recovery = uncertain.get(last.slot.id);
 		if (recovery) {
 			setStatus(recovery.message);
 			return;
@@ -926,10 +944,10 @@ function ProjectRunCockpit({
 							This slot does not admit results from your method. Pipeline or agent evidence must fill it.
 						</p>
 					)}
-					{allReported && run?.state === "open" && (
+					{allReported && isOpen && (
 						<p className="dim">Nothing left for you to run. The server verdict is shown above.</p>
 					)}
-					{run?.state === "closed" && (
+					{isClosed && (
 						<p className="dim">
 							{canCorrect
 								? "u reopens this run and corrects the result. "
@@ -1042,7 +1060,7 @@ function ProjectRunCockpit({
 							</ul>
 						</div>
 					)}
-					{run?.state === "open" && (
+					{isOpen && (
 						<div className="run-control-hint">
 							{step ? `Step ${step} marked. ` : ""}
 							<KeyCap>2</KeyCap> <KeyCap>f</KeyCap> fails step 2.{" "}
