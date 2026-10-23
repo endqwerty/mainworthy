@@ -1,10 +1,12 @@
 # PostgreSQL on Cloud Run and Cloud SQL
 
 - Date: 2026-10-23
-- Status: proposed
+- Status: accepted
 - Issue: https://github.com/endqwerty/mainworthy/issues/821
 
 Step 1 of [issue #821](https://github.com/endqwerty/mainworthy/issues/821), as the owner set it on 2026-10-23.
+Accepted by the owner on 2026-10-23, with the proposals listed below. Acceptance permits step 2; it does not
+certify its implementation.
 It replaces [PostgreSQL and a stateless app](2026-10-23-postgresql-and-a-stateless-app.md), which was accepted the
 same morning with Railway as the host. Railway was dropped a few hours later (#821, "Decisions"), and the owner
 chose Google Cloud. This record repeats that record's store design, so a reader needs only this one. "What
