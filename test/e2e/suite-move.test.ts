@@ -136,3 +136,60 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+test.skipIf(!browserAvailable)(
+	"Undo previews the original folder of a hidden moved case before its write finishes",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [
+				{ op: "create", outline: "Hidden original", folder: "Original" },
+				{ op: "create", outline: "Visible case", folder: "Other" },
+				{ op: "folder", name: "Destination" },
+			],
+		});
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		let release = () => {};
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		try {
+			const { page } = h;
+			await page.getByRole("button", { name: "Hidden original", exact: true }).waitFor();
+			await page.keyboard.press("x");
+			await page.getByRole("option").filter({ hasText: "Visible case" }).click();
+			await page.keyboard.press("x");
+			await page.getByRole("textbox", { name: "Filter cases" }).fill("Visible");
+			await page.getByRole("option").filter({ hasText: "Hidden original" }).waitFor({ state: "detached" });
+			await page.getByRole("option").filter({ hasText: "Visible case" }).click();
+			expect(await page.locator(".bulk-indicator").textContent()).toBe("2 selected");
+			await move(page);
+			await page.locator("#stat").filter({ hasText: "2 cases changed." }).waitFor();
+			let requested = false;
+			await page.context().route("**/propose", async (route) => {
+				requested = true;
+				await held;
+				await route.continue();
+			});
+			await page.keyboard.press("u");
+			await eventually(async () => requested, Boolean);
+			await page.getByRole("textbox", { name: "Filter cases" }).fill("");
+			await page.getByRole("option").filter({ hasText: "Hidden original" }).click();
+			await page.getByRole("button", { name: "Hidden original", exact: true }).waitFor();
+			const folder = async () =>
+				z.object({ folder: z.object({ path: z.string() }) }).parse((await server.api("get", { refs: ["C-1"] }))[0])
+					.folder.path;
+			expect(await folder()).toBe("Destination");
+			expect(await page.locator("#detail .path").textContent()).toBe("Original");
+			release();
+			await page.locator("#stat").filter({ hasText: "Undone." }).waitFor();
+			expect(await folder()).toBe("Original");
+			expect(h.errors).toEqual([]);
+		} finally {
+			release();
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
