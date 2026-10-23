@@ -113,8 +113,10 @@ nothing that decides behaviour may live in one process:
   at most once a minute for each row: the update changes a row only when its stored time is more than a minute
   old. So the stored time is at most a minute behind the real one on every instance, and the idle check of a
   session (`sessions.ts`) reads the stored time with that minute allowed for. Today's notes in memory end. An
-  erasure or an import clears the rows in its transaction, and a later update cannot write an address back to an
-  erased actor or a revoked token, because it changes only rows that are still live.
+  erasure or an import clears the rows in its transaction. A later update names the row by the hash of the secret
+  the request was admitted with, not by its numeric id, and changes only a row that is still live. So it cannot
+  write an address back to an erased actor or a revoked token, or onto another row that an import gave the same
+  id (the hazard `uses.ts` describes).
 - **The change stream** works across instances. Each write records its change event in the same transaction, and
   `LISTEN`/`NOTIFY` only wakes the instances that hold streams, which then read what was recorded. One table is
   the history; a retention job trims it. Each instance holds one connection for `LISTEN`.
@@ -133,17 +135,24 @@ Attachments stay behind `BlobStore` (0002 rule 5), whose methods become asynchro
 keep the disk store. In production a Cloud Storage bucket holds them.
 
 The prune changes first. Today it deletes every hash that no committed row references, and every pending file,
-while an upload writes its object before the transaction that references it commits (`attachments.ts`). With two
-instances, one instance's prune could delete the other's upload. The prune becomes a job that deletes an object
-only when no row references it and it is older than a bound longer than any upload transaction can last, and
-deletes a pending file only past the same bound. A test starts a prune during an upload.
+while an upload writes its object before the transaction that references it commits (`attachments.ts`), and an
+upload of bytes that already exist reuses the object as it is (`blobs.ts`). With two instances, one instance's
+prune could delete the other's upload, even an old object that an upload has just reused. So each object gets a
+row keyed by its hash, with the time it was last put. An upload first commits that row, inserting it or moving its
+time forward, then writes the object if it is missing. The prune is a job that, for each candidate, locks the row,
+checks that no attachment references the hash and that the row's time is older than a bound longer than any upload
+transaction can last, deletes the object, then deletes the row. An upload that meets the lock waits, then finds no
+row and writes the object again. A pending file is deleted only past the same bound. Tests start a prune during an
+upload, and during an upload that reuses an old unreferenced object.
 
 Step 3 first tries mounting the bucket as a Cloud Storage volume, so the disk store runs unchanged. Cloud Storage
 FUSE is not fully POSIX and caches file metadata for 60 seconds by default
 ([Google's mount page](https://docs.cloud.google.com/run/docs/configuring/services/cloud-storage-volume-mounts)),
-so the mount turns that cache off, and its check is an object written on one instance and read at once on another,
-a save's time, and a prune beside an upload. If any of these fails, a store that calls Cloud Storage's API
-replaces the disk store in production.
+so the mount turns that cache off. Its checks are an object written on one instance and read at once on another,
+two instances writing the same hash at once, an instance stopped between writing a pending file and renaming it
+(the disk store publishes by rename), a save's time, and a prune beside an upload. A reader checks every object's
+hash, as `blobs.ts` does today. If any check fails, a store that calls Cloud Storage's API replaces the disk store
+in production.
 
 Full-text search moves from FTS5 to PostgreSQL's `tsvector` with `ts_rank`, as the stack arena measured (0010).
 
@@ -171,8 +180,11 @@ So background work becomes jobs behind one job interface (0002 rule 6):
 - The job interface has two ways to start work. The in-process runner polls the table and runs jobs; local
   development, CI and the tests use it, as would any host whose CPU runs between requests. On Cloud Run, a job
   runs inside an HTTP request to the service's job endpoint, so its CPU is allocated: Cloud Tasks sends one request
-  per job, and Cloud Scheduler sends the periodic work once a minute. A job must finish within Cloud Tasks' HTTP
-  deadline of 30 minutes; the transaction timeouts above are far shorter.
+  per job, and Cloud Scheduler sends the periodic work once a minute. A job must finish within both the queue's
+  dispatch deadline (ten minutes by default, thirty at most) and the service's request timeout (five minutes by
+  default), as step 3 sets them; the transaction timeouts above are far shorter. A job whose request was given up
+  may still be running, and its claim token keeps its late final write from landing. A test finishes a job after
+  its claim was taken again.
 - The job endpoint accepts only a request with an OIDC token that Google signed for the service's address and the
   job service account, within its validity. The app checks the token with `jose`, which becomes a runtime
   dependency (today it is a development one), against configured issuer, audience and account. It holds no shared
@@ -189,9 +201,10 @@ Cloud Scheduler for background work, and Secret Manager for the few secrets.
 
 Google-specific services stay in the infrastructure, not in the app. The app speaks plain PostgreSQL over one
 connection URL, reads and writes attachments through `BlobStore`, sends traces through OpenTelemetry, and runs
-background work through its job interface. App code calls a Google API in one place, the Cloud Tasks dispatcher
-behind the job interface, and in a second only if the bucket mount fails its check: the Cloud Storage store behind
-`BlobStore`. Each is one module chosen by configuration. Leaving Google Cloud means rewriting the Terraform and
+background work through its job interface. With the proposals below in place, app code calls a Google API in one
+place, the Cloud Tasks dispatcher behind the job interface. A second appears only if the bucket mount fails its
+check (a Cloud Storage store behind `BlobStore`), and a third only if the Auth Proxy sidecar fails its check (a
+token for each new database connection). Each is one module chosen by configuration. Leaving Google Cloud means rewriting the Terraform and
 choosing the in-process runner and the disk store, not changing the domain code.
 
 The lean setup from #821, which steps 3 to 7 build:
@@ -279,10 +292,13 @@ address is turned off ([Google's ingress page](https://docs.cloud.google.com/run
 So a request can skip Cloudflare and carry a forged `CF-Connecting-IP`, whatever Cloudflare's DNS says.
 
 The app therefore trusts Cloudflare's headers only for a request that proves it came through Cloudflare, on every
-way in. Step 7 chooses how: a secret header that a Cloudflare rule adds and the app checks, kept in Secret Manager,
-or a load balancer that admits only Cloudflare. Turning off the `run.app` address is extra defence, not the proof.
-A request without the proof has no trusted client address. The check sends direct requests, with a forged header,
-to the `run.app` address and to Google's endpoint for the mapped hostname, and sees that neither is trusted.
+way in. Step 7 chooses how: a secret header that a Cloudflare rule sets, overwriting any the client sent, and that
+the app checks, kept in Secret Manager; or a load balancer that admits only Cloudflare. Turning off the `run.app`
+address is extra defence, not the proof. In production the app refuses every request without the proof, except
+the startup probe's `/healthz` and the job endpoint, which has its own OIDC check. A request is never served with
+no client address: today the sign-in limits give such a request no address key (`limiter.ts`), so serving it
+would let it pass the address limits. The check sends direct requests, with and without a forged header, to the
+`run.app` address and to Google's endpoint for the mapped hostname, and sees each refused.
 
 0130's lockdown needs root and network administration inside a network namespace the operator sets up (an nft
 table, then a `setpriv` drop), and a loopback origin on the owner's host. On Cloud Run, Google runs the network
@@ -313,6 +329,8 @@ record's own proposals, and acceptance covers them:
 - **Last uses written during requests, at most once a minute a row**, instead of notes in memory.
 - **Report application stays in its request**; only recovery becomes a job.
 - **A temporary single PostgreSQL write lock** in step 2's bottom request, below.
+- **Production refuses a request without the Cloudflare proof**, apart from the startup probe and the job
+  endpoint, rather than serving it with no client address.
 
 ## Order
 
@@ -325,13 +343,17 @@ The steps are #821's. Each ends in a check that passes before the next starts.
      `Bun.sql`; the baseline schema replaces the migrations; every module's SQL is ported and every caller
      awaited; search uses `tsvector`; each test file gets its own database; Compose and CI run PostgreSQL. The
      async conversion and the SQL port land together, because synchronous code cannot call PostgreSQL. To keep
-     the concurrency the same, every write transaction first takes one exclusive transaction-scoped advisory
-     lock, which keeps today's single-writer order across instances, with authority read after it. A committed
+     the concurrency the same, every write operation holds one exclusive session-level advisory lock on its own
+     connection for the whole operation, as the write gate in `registry.ts` does today, a report's two
+     transactions included, and reads authority after taking it. A transaction-scoped lock would not do: it is
+     released at the acceptance commit and would let another writer in between a report's two phases. A committed
      codemod adds the `async` and `await` (a reviewer runs it again and compares), the SQL changes are separate
      commits by module, and a test prepares every declared statement against the baseline. The SQLite-only
      machinery goes in the same request, because nothing can call it afterwards: the upgrade copy, the reader and
      checkpoint threads, the instance lock and the database-file checks (#659).
-   - The next request replaces the single lock with the project and actor locks, their lock order and `busy`.
+   - The next request replaces the single lock with the project and actor locks, their lock order and `busy`. It
+     is the request that lets another writer in between a report's two phases, as the design above intends, and
+     a test holds a report between its phases while another write to the same project commits.
    - Then the state shared by every instance (sign-in counts, ceremonies, last uses, the change stream), the
      prune and the other startup work, and background work as jobs with the in-process runner and the job
      endpoint.
@@ -431,8 +453,8 @@ first fallback if the job endpoint proves fragile.
 but each needs temporary transaction helpers that the move throws away, and none of them runs on PostgreSQL.
 
 **The project and actor locks in the bottom request** would save one request, but would put a change of
-concurrency into the same review as the engine port. The temporary single lock keeps the bottom request's
-behaviour equal to today's, so its check compares like with like.
+concurrency into the same review as the engine port. The temporary single lock, held for the whole operation like
+today's gate, keeps the bottom request's behaviour equal to today's, so its check compares like with like.
 
 Principles: Separate Before Serializing Shared State (locks cover only the project and actor invariants, so
 unrelated projects and actors stay independent); Boundary Discipline (Google services stay in the
