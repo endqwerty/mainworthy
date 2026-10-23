@@ -34,6 +34,7 @@ import {
 	mustQuestion,
 	openCountOn,
 	openCounts,
+	openQuestionSummariesOnRefs,
 	openQuestionsOn,
 	parseQueueCursor,
 	type QuestionRow,
@@ -43,12 +44,14 @@ import {
 	questionsOn,
 	queueCursorOf,
 	queuePage,
-	refsOf,
+	refsOfQuestions,
 } from "../decisions/questions.ts";
 import {
 	batchById,
 	type ChangeRow,
-	caseIdsOfFile,
+	caseIdsOfTests,
+	caseLinksOfFiles,
+	caseSelectionOfFiles,
 	changeById,
 	changeByKey,
 	findTest,
@@ -56,6 +59,7 @@ import {
 	flippedLanes,
 	landingOf,
 	lastResultsOfCase,
+	lastResultsOfCases,
 	lastResultsOfTest,
 	listTests,
 	mustTarget,
@@ -78,7 +82,7 @@ import {
 	triesOf,
 	unlinkedCount,
 } from "../evidence/evidence.ts";
-import { findingsOfCase, reviewBasis, reviewsAtVersion, reviewsOfCase } from "../evidence/findings.ts";
+import { findingsOfCase, reviewBasis, reviewedCaseIds, reviewsAtVersion, reviewsOfCase } from "../evidence/findings.ts";
 import { sameCodeEvidence } from "../evidence/flaky.ts";
 import { effectiveQuarantine, quarantineEntries, quarantineEntry } from "../evidence/quarantine.ts";
 import { deployments } from "../evidence/releases.ts";
@@ -91,6 +95,7 @@ import { currentPolicy, policyName } from "../policy/policy.ts";
 import {
 	type CountedTest,
 	countedTests,
+	failingTestIds,
 	failingTestsOf,
 	fillsOf,
 	flippedIn,
@@ -111,9 +116,13 @@ import {
 } from "../runs/runs.ts";
 import {
 	archivedCases,
+	caseIdsOfRefs,
+	caseIdsOfRequirements,
+	caseLinksOfRequirements,
 	casesChangedSince,
-	casesCovering,
 	folderTree,
+	impactCasePage,
+	impactHeads,
 	listCases,
 	placementsOf,
 	requirementList,
@@ -132,7 +141,6 @@ import {
 	caseRef,
 	coversOf,
 	expandSteps,
-	findCase,
 	folderIndex,
 	fragmentUsers,
 	mustCase,
@@ -1361,84 +1369,87 @@ export function impact(ctx: Ctx, input: ImpactInput): Record<string, unknown> {
 	if (input.change && !change && !input.files) throw notFound(`change ${input.change}`);
 	const files = input.files ?? (change ? json<string[]>(change.files) : []);
 	const from = input.since ? cursorSeq(input.since) : null;
-	const why = new Map<number, Set<string>>();
-	const note = (caseId: number, reason: string) => {
-		const set = why.get(caseId) ?? new Set<string>();
-		set.add(reason);
-		why.set(caseId, set);
-	};
-
-	const uncovered: string[] = [];
-	for (const file of files) {
-		let hit = false;
-		for (const caseId of caseIdsOfFile(ctx.db, project, file)) {
-			note(caseId, `test:${file}`);
-			hit = true;
-		}
-		if (!hit && !/\.(md|txt|json|ya?ml|lock)$/i.test(file)) uncovered.push(file);
-	}
-	for (const key of (change?.title ?? "").match(/[A-Z][A-Z0-9]+-\d+/g) ?? []) {
-		for (const row of casesCovering(ctx.db, project, key)) note(row.id, `req:${key}`);
-	}
+	const uniqueFiles = new Set(files);
+	const fileSelection = caseSelectionOfFiles(ctx.db, project, uniqueFiles);
+	const candidates = new Set(fileSelection.ids);
+	const uncovered = files.filter(
+		(file) => !fileSelection.covered.has(file) && !/\.(md|txt|json|ya?ml|lock)$/i.test(file),
+	);
+	const keys = [...new Set((change?.title ?? "").match(/[A-Z][A-Z0-9]+-\d+/g) ?? [])];
+	for (const id of caseIdsOfRequirements(ctx.db, project, keys)) candidates.add(id);
 	const run = change?.head_sha ? gate(ctx, { change: change.key }) : null;
 	const headRun = run?.run ? mustRun(ctx.db, project, run.run) : null;
-	if (headRun) {
-		for (const failing of failingTestsOf(ctx.db, headRun.id)) {
-			const test = testById(ctx.db, failing.test);
-			if (test?.case_id != null) note(test.case_id, "failing");
-		}
-	}
-	// A case an open question about this change names is part of the change's picture, whoever raised it: an
-	// agent's failure does not count in the gate, and is still something a reviewer should see.
-	if (change) {
-		for (const asked of questionsOn(ctx.db, project, change.key)) {
-			if (asked.state !== "open") continue;
-			for (const about of refsOf(ctx.db, asked.id)) {
-				const row = /^C-\d+$/.test(about) ? findCase(ctx.db, project, about) : null;
-				if (row) note(row.id, "question");
-			}
-		}
-	}
+	const failing = new Set(headRun ? caseIdsOfTests(ctx.db, project, failingTestIds(ctx.db, headRun.id)) : []);
+	for (const id of failing) candidates.add(id);
+	const changeQuestions = change ? questionsOn(ctx.db, project, change.key) : [];
+	const mentioned = refsOfQuestions(
+		ctx.db,
+		changeQuestions.filter((q) => q.state === "open").map((q) => q.id),
+	).filter((ref) => /^C-\d+$/.test(ref));
+	const questioned = new Set(caseIdsOfRefs(ctx.db, project, mentioned));
+	for (const id of questioned) candidates.add(id);
 
-	const cases: z.infer<typeof REPLIES.impact>["cases"] = [];
-	let unreviewed = 0;
-	let failing = 0;
-	for (const [caseId, reasons] of why) {
-		const row = caseById(ctx.db, caseId);
-		if (row?.state !== "active") continue;
-		if (from !== null && row.rev <= from && (change?.rev ?? 0) <= from && !reasons.has("failing")) continue;
-		const basis = change?.head_sha
-			? reviewBasis({ version: row.head_hash, about: change.key, patch: change.head_sha })
-			: null;
-		const reviewed =
-			input.ledger &&
-			basis !== null &&
-			reviewsAtVersion(ctx.db, row.id, row.head).some(
-				(review) => review.reviewer === ctx.actor.id && review.basis === basis,
-			);
-		if (!reviewed) unreviewed++;
-		if (reasons.has("failing")) failing++;
-		const last = lastResultsOfCase(ctx.db, row.id, 1)[0];
-		const open = questionsOn(ctx.db, project, caseRef(row)).filter((q) => q.state === "open");
-		cases.push({
+	const heads = impactHeads(
+		ctx.db,
+		project,
+		[...candidates].map((id) => ({ id, failing: failing.has(id) })),
+		from !== null && (change?.rev ?? 0) <= from ? from : null,
+	);
+	const reviewed =
+		input.ledger && change?.head_sha
+			? reviewedCaseIds(
+					ctx.db,
+					ctx.actor.id,
+					heads.map((row) => ({
+						id: row.id,
+						version: row.head,
+						basis: reviewBasis({ version: row.head_hash, about: change.key, patch: change.head_sha }),
+					})),
+				)
+			: new Set<number>();
+	const selected = impactCasePage(
+		ctx.db,
+		project,
+		heads.map((row) => ({ id: row.id, no: row.no, failing: row.failing, reviewed: reviewed.has(row.id) })),
+		offset,
+	);
+	if (input.cursor && offset >= selected.counts.cases) throw invalid("that continuation is past the impact cases");
+	const pageIds = selected.rows.map((row) => row.id);
+	const why = new Map<number, Set<string>>();
+	const note = (id: number, reason: string) => {
+		const reasons = why.get(id) ?? new Set<string>();
+		reasons.add(reason);
+		why.set(id, reasons);
+	};
+	for (const link of caseLinksOfFiles(ctx.db, project, uniqueFiles, pageIds)) note(link.case_id, `test:${link.file}`);
+	for (const link of caseLinksOfRequirements(ctx.db, project, keys, pageIds)) note(link.id, `req:${link.key}`);
+	for (const id of pageIds) {
+		if (failing.has(id)) note(id, "failing");
+		if (questioned.has(id)) note(id, "question");
+	}
+	const reasonOrder = new Map(
+		[...[...uniqueFiles].map((file) => `test:${file}`), ...keys.map((key) => `req:${key}`), "failing", "question"].map(
+			(reason, index) => [reason, index],
+		),
+	);
+	const lastResults = lastResultsOfCases(ctx.db, pageIds);
+	const openQuestions = openQuestionSummariesOnRefs(ctx.db, project, selected.rows.map(caseRef));
+	const page: z.infer<typeof REPLIES.impact>["cases"] = selected.rows.map((row) => {
+		const last = lastResults.get(row.id);
+		const open = openQuestions.get(caseRef(row)) ?? [];
+		return {
 			id: caseRef(row),
 			title: row.title,
 			hash: row.head_hash,
-			why: [...reasons],
+			why: [...(why.get(row.id) ?? [])].sort((a, b) => (reasonOrder.get(a) ?? 0) - (reasonOrder.get(b) ?? 0)),
 			last: last ? `${last.outcome}@v${last.basis_version ?? "?"}` : null,
-			...(reviewed ? { reviewed: true } : {}),
-			...(open.length > 0 ? { open: open.map((q) => ({ q: questionRef(q), evidence: q.evidence_hash })) } : {}),
-		});
-	}
-	cases.sort(
-		(a, b) =>
-			Number(Boolean(a.reviewed)) - Number(Boolean(b.reviewed)) || Number(a.id.slice(2)) - Number(b.id.slice(2)),
-	);
-	if (input.cursor && offset >= cases.length) throw invalid("that continuation is past the impact cases");
-	const page = cases.slice(offset, offset + 200);
-	const next = offset + page.length < cases.length ? `${offset + page.length}.${version}` : null;
+			...(reviewed.has(row.id) ? { reviewed: true } : {}),
+			...(open.length > 0 ? { open } : {}),
+		};
+	});
+	const next = offset + page.length < selected.counts.cases ? `${offset + page.length}.${version}` : null;
 	const decided = change
-		? questionsOn(ctx.db, project, change.key)
+		? changeQuestions
 				.filter((q) => q.state === "decided")
 				.slice(0, 20)
 				.map((q) => {
@@ -1466,7 +1477,7 @@ export function impact(ctx: Ctx, input: ImpactInput): Record<string, unknown> {
 				}
 			: { files: files.length },
 		gate: run ? { verdict: run.verdict, reason: run.reason, run: run.run } : null,
-		counts: { cases: cases.length, unreviewed, failing, uncovered: uncovered.length },
+		counts: { ...selected.counts, uncovered: uncovered.length },
 		cases: page,
 		uncovered: uncovered.slice(0, 50),
 		decided,

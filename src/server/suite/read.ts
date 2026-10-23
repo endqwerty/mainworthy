@@ -8,7 +8,52 @@ import { type Db, json, placeholders, type SqlValue, sql } from "../kernel/db.ts
 import { invalid, notFound } from "../kernel/errors.ts";
 import { type CaseRow, type FolderIndex, type FolderRow, folderIndex, mustCase, type VersionRow } from "./suite.ts";
 
+type ImpactHead = Pick<CaseRow, "id" | "no" | "head" | "head_hash"> & { failing: boolean };
+
 const Q = {
+	impactHeads: sql<
+		{ project: number; candidates: string; since: number | null },
+		Omit<ImpactHead, "failing"> & { failing: number }
+	>(
+		`SELECT c.id, c.no, c.head, c.head_hash, json_extract(asked.value, '$.failing') AS failing
+		 FROM json_each($candidates) asked CROSS JOIN cases c ON c.id = json_extract(asked.value, '$.id')
+		 WHERE c.project = $project AND c.state = 'active'
+		 AND ($since IS NULL OR c.rev > $since OR json_extract(asked.value, '$.failing') = 1)`,
+	),
+	impactCountsAndIds: sql<
+		{ selection: string; offset: number },
+		{ cases: number; unreviewed: number; failing: number; page: string }
+	>(
+		`WITH selected AS MATERIALIZED (
+			SELECT json_extract(value, '$.id') AS id, json_extract(value, '$.no') AS no,
+			 json_extract(value, '$.reviewed') AS reviewed, json_extract(value, '$.failing') AS failing
+			FROM json_each($selection)
+		)
+		SELECT count(*) AS cases, coalesce(sum(1 - reviewed), 0) AS unreviewed,
+		 coalesce(sum(failing), 0) AS failing,
+		 (SELECT json_group_array(id) FROM (
+			SELECT id FROM selected ORDER BY reviewed, no LIMIT 200 OFFSET $offset
+		 )) AS page FROM selected`,
+	),
+	impactPage: sql<{ project: number; ids: string }, CaseRow>(
+		`SELECT c.* FROM json_each($ids) asked CROSS JOIN cases c ON c.id = asked.value
+		 WHERE c.project = $project ORDER BY CAST(asked.key AS INTEGER)`,
+	),
+	caseIdsOfRefs: sql<{ project: number; refs: string }, { id: number }>(
+		`SELECT id FROM cases WHERE project = $project
+		 AND no IN (SELECT CAST(substr(value, 3) AS INTEGER) FROM json_each($refs))`,
+	),
+	caseIdsOfRequirements: sql<{ project: number; keys: string }, { id: number }>(
+		`SELECT DISTINCT v.case_id AS id FROM json_each($keys) asked
+		 CROSS JOIN requirements r ON r.project = $project AND r.key = asked.value
+		 CROSS JOIN covers v ON v.requirement = r.id`,
+	),
+	caseLinksOfRequirements: sql<{ project: number; keys: string; cases: string }, { id: number; key: string }>(
+		`SELECT v.case_id AS id, r.key FROM json_each($cases) asked
+		 CROSS JOIN covers v ON v.case_id = asked.value
+		 CROSS JOIN requirements r ON r.id = v.requirement
+		 WHERE r.project = $project AND r.key IN (SELECT value FROM json_each($keys))`,
+	),
 	countsByFolder: sql<{ project: number }, { folder: number; n: number }>(
 		"SELECT folder, count(*) AS n FROM cases WHERE project = $project AND state = 'active' GROUP BY folder",
 	),
@@ -422,3 +467,37 @@ export function requirementCases(db: Db, project: number): { key: string; title:
 }
 export const casesCovering = (db: Db, project: number, key: string): CaseRow[] =>
 	db.all(Q.casesCovering, { project, key });
+
+export const caseIdsOfRequirements = (db: Db, project: number, keys: readonly string[]): number[] =>
+	keys.length ? db.all(Q.caseIdsOfRequirements, { project, keys: JSON.stringify(keys) }).map((row) => row.id) : [];
+
+export const caseLinksOfRequirements = (db: Db, project: number, keys: readonly string[], cases: readonly number[]) =>
+	keys.length && cases.length
+		? db.all(Q.caseLinksOfRequirements, { project, keys: JSON.stringify(keys), cases: JSON.stringify(cases) })
+		: [];
+
+export const caseIdsOfRefs = (db: Db, project: number, refs: readonly string[]): number[] =>
+	refs.length ? db.all(Q.caseIdsOfRefs, { project, refs: JSON.stringify(refs) }).map((row) => row.id) : [];
+
+export function impactHeads(
+	db: Db,
+	project: number,
+	candidates: readonly { id: number; failing: boolean }[],
+	since: number | null,
+): ImpactHead[] {
+	return db
+		.all(Q.impactHeads, { project, candidates: JSON.stringify(candidates), since })
+		.map((row) => ({ ...row, failing: row.failing === 1 }));
+}
+
+export function impactCasePage(
+	db: Db,
+	project: number,
+	selection: readonly (Pick<ImpactHead, "id" | "no" | "failing"> & { reviewed: boolean })[],
+	offset: number,
+) {
+	const selected = db.get(Q.impactCountsAndIds, { selection: JSON.stringify(selection), offset });
+	if (!selected) throw new Error("impact aggregate returned no row");
+	const { page, ...counts } = selected;
+	return { counts, rows: db.all(Q.impactPage, { project, ids: page }) };
+}

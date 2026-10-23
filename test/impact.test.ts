@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import { z } from "zod";
 import type { InboxReply } from "../src/core/ops.ts";
 import { type Harness, harness } from "./helpers.ts";
 
@@ -10,11 +11,145 @@ afterEach(() => h.close());
 
 type Impact = {
 	counts: { cases: number; unreviewed: number; failing: number; uncovered: number };
-	cases: { id: string; hash: string; reviewed?: boolean }[];
+	cases: {
+		id: string;
+		hash: string;
+		reviewed?: boolean;
+		last: string | null;
+		open?: { q: string; evidence: string }[];
+	}[];
 	uncovered: string[];
 	cursor: string;
 	next: string | null;
 };
+
+function databaseWork<T>(read: () => T) {
+	const gets = spyOn(h.app.db, "get");
+	const alls = spyOn(h.app.db, "all");
+	const dynamic = spyOn(h.app.db, "allDynamic");
+	const fullCase = z.object({ id: z.number(), title: z.string(), head: z.number(), head_hash: z.string() });
+	const reasonLink = z.union([
+		z.strictObject({ case_id: z.number(), file: z.string() }),
+		z.strictObject({ id: z.number(), key: z.string() }),
+	]);
+	try {
+		const reply = read();
+		const loaded = [...gets.mock.results, ...alls.mock.results, ...dynamic.mock.results].flatMap((result) => {
+			if (result.type !== "return") return [];
+			const value: unknown = result.value;
+			const rows: unknown[] = Array.isArray(value) ? value : [value];
+			return rows;
+		});
+		return {
+			reply,
+			queries: gets.mock.calls.length + alls.mock.calls.length + dynamic.mock.calls.length,
+			fullCases: loaded.filter((row) => fullCase.safeParse(row).success).length,
+			reasonLinks: loaded.filter((row) => reasonLink.safeParse(row).success).length,
+			testLookups: gets.mock.calls.filter(([statement]) => statement.text === "SELECT * FROM tests WHERE id = $id")
+				.length,
+		};
+	} finally {
+		gets.mockRestore();
+		alls.mockRestore();
+		dynamic.mockRestore();
+	}
+}
+
+test("continuation queries and hydrated case rows stay bounded from 450 to 4500 selected cases", () => {
+	const measure = (count: number) => {
+		h.close();
+		h = harness();
+		const reader = h.actor("bounded-reader", "agent", ["read"]);
+		h.call("propose", {
+			edits: Array.from({ length: count }, (_, i) => ({
+				op: "create",
+				outline: `Bounded impact ${i + 1}\n  Check > Works`,
+				covers: ["BOUND-396"],
+			})),
+		});
+		h.call("report", {
+			target: { commit: "bounded396", pr: 396, title: "BOUND-396: review" },
+			results: [{ test: { case: "C-1" }, outcome: "pass" }],
+		});
+		const input = { change: "pr:396" };
+		const first = h.call<Impact>("impact", input, reader);
+		const measured = databaseWork(() => h.call<Impact>("impact", { ...input, cursor: first.next }, reader));
+		expect(measured.reply.counts).toMatchObject({ cases: count, unreviewed: count, failing: 0 });
+		expect(measured.reply.cases).toHaveLength(200);
+		expect(measured.reply.cases[0]?.id).toBe("C-201");
+		return measured;
+	};
+	const small = measure(450);
+	const large = measure(4500);
+	console.log(
+		`impact continuation SQL: 450=${small.queries}, 4500=${large.queries}; full case rows=${small.fullCases}/${large.fullCases}; reason links=${small.reasonLinks}/${large.reasonLinks}`,
+	);
+	expect(large.queries).toBeLessThanOrEqual(small.queries + 2);
+	expect(large.queries).toBeLessThanOrEqual(50);
+	expect(small.fullCases).toBeLessThanOrEqual(200);
+	expect(large.fullCases).toBeLessThanOrEqual(200);
+	expect(small.reasonLinks).toBeLessThanOrEqual(200);
+	expect(large.reasonLinks).toBeLessThanOrEqual(200);
+});
+
+test("5000 duplicate paths do the same database work as one path without changing cursor identity", () => {
+	fixture();
+	const single = databaseWork(() => h.call<Impact>("impact", { files: ["linked.ts"] }));
+	const files = Array.from({ length: 5000 }, () => "linked.ts");
+	const repeated = databaseWork(() => h.call<Impact>("impact", { files }));
+	expect(repeated.reply.cases).toEqual(single.reply.cases);
+	expect(repeated.reply.counts).toEqual(single.reply.counts);
+	console.log(`impact duplicate-path SQL: one=${single.queries}, 5000=${repeated.queries}`);
+	expect(repeated.queries).toBeLessThanOrEqual(single.queries + 1);
+	expect(repeated.reasonLinks).toBeLessThanOrEqual(200);
+	expect(h.raw("impact", { files, cursor: single.reply.next })).toMatchObject({
+		ok: false,
+		error: { code: "conflict" },
+	});
+});
+
+test("a continuation page keeps the newest result across methods and each case's question evidence", () => {
+	fixture();
+	h.call("report", {
+		target: { commit: "impact396", pr: 396 },
+		results: [
+			{ test: { case: "C-201" }, outcome: "skip" },
+			{ test: { key: "impact-203" }, annotation: { case: "C-203", version: 1 }, outcome: "pass" },
+		],
+	});
+	const agent = h.actor("page-agent", "agent", ["read", "produce"]);
+	h.call(
+		"report",
+		{
+			target: { commit: "impact396", pr: 396 },
+			results: [{ test: { case: "C-202" }, outcome: "blocked" }],
+		},
+		agent,
+	);
+	h.call("claim", {
+		about: "pr:396",
+		lens: "review",
+		findings: [
+			{ on: "C-201", category: "ambiguous", note: "The expected message needs its text" },
+			{ on: "C-202", category: "cannot-fail", note: "The result accepts both outcomes" },
+		],
+	});
+	const input = { change: "pr:396" };
+	const first = h.call<Impact>("impact", input);
+	const page = h.call<Impact>("impact", { ...input, cursor: first.next });
+	for (const [id, last] of [
+		["C-201", "skip@v1"],
+		["C-202", "blocked@v1"],
+	]) {
+		const questions = h.call<InboxReply>("inbox", { on: id }).items;
+		expect(questions.length).toBeGreaterThan(0);
+		expect(page.cases.find((row) => row.id === id)).toMatchObject({
+			last,
+			open: questions.map((q) => ({ q: q.q, evidence: q.evidenceHash })),
+		});
+	}
+	expect(page.cases.find((row) => row.id === "C-203")?.last).toBe("pass@v1");
+});
 
 function fixture(count = 450) {
 	const before = h.call<{ cursor: string }>("since", { cursor: "s:0" }).cursor;
@@ -110,8 +245,11 @@ test("impact selection includes more than 500 links in one file and more than 20
 			failure: { message: "Expected correct result" },
 		})),
 	});
-	const failed = h.call<Impact>("impact", { change: "pr:396" });
-	expect(failed.counts).toMatchObject({ cases: 450, failing: 450 });
+	const failed = databaseWork(() => h.call<Impact>("impact", { change: "pr:396" }));
+	expect(failed.reply.counts).toMatchObject({ cases: 450, failing: 450 });
+	expect(failed.testLookups).toBe(0);
+	expect(failed.queries).toBeLessThanOrEqual(50);
+	expect(failed.fullCases).toBeLessThanOrEqual(200);
 });
 
 test("continuations reject another selection, caller, malformed position, or changed project", () => {

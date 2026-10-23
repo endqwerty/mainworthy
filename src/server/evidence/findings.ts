@@ -80,6 +80,13 @@ const Q = {
 	reviewsAtVersion: sql<{ id: number; version: number }, ReviewRow>(
 		"SELECT * FROM reviews WHERE case_id = $id AND version = $version ORDER BY seq DESC",
 	),
+	reviewedCases: sql<{ actor: number; cases: string }, { id: number }>(
+		`SELECT json_extract(asked.value, '$.id') AS id FROM json_each($cases) asked WHERE EXISTS (
+		 SELECT 1 FROM reviews r WHERE r.case_id = json_extract(asked.value, '$.id')
+		 AND r.version = json_extract(asked.value, '$.version')
+		 AND r.basis = json_extract(asked.value, '$.basis') AND r.reviewer = $actor
+		)`,
+	),
 };
 
 export function insertFinding(
@@ -128,3 +135,9 @@ export const reviewsOfCase = (db: Db, caseId: number, limit: number): ReviewRow[
 	db.all(Q.reviewsOfCase, { id: caseId, limit });
 export const reviewsAtVersion = (db: Db, caseId: number, version: number): ReviewRow[] =>
 	db.all(Q.reviewsAtVersion, { id: caseId, version });
+
+export const reviewedCaseIds = (
+	db: Db,
+	actor: number,
+	cases: readonly { id: number; version: number; basis: string }[],
+) => new Set(db.all(Q.reviewedCases, { actor, cases: JSON.stringify(cases) }).map((row) => row.id));

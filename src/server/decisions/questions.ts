@@ -281,6 +281,16 @@ const Q = {
 	refsOf: sql<{ question: number }, { ref: string }>(
 		"SELECT ref FROM question_refs WHERE question = $question ORDER BY ref",
 	),
+	refsOfQuestions: sql<{ questions: string }, { ref: string }>(
+		`SELECT DISTINCT r.ref FROM json_each($questions) asked
+		 CROSS JOIN question_refs r ON r.question = asked.value`,
+	),
+	openSummariesOnRefs: sql<{ project: number; refs: string }, { ref: string; no: number; evidence_hash: string }>(
+		`SELECT asked.value AS ref, q.no, q.evidence_hash FROM json_each($refs) asked CROSS JOIN questions q ON q.id IN (
+			SELECT r.question FROM question_refs r WHERE r.project = $project AND r.ref = asked.value
+			ORDER BY r.question DESC LIMIT 200
+		 ) WHERE q.state = 'open' ORDER BY CAST(asked.key AS INTEGER), q.id DESC`,
+	),
 	onRef: sql<{ project: number; ref: string }, StoredQuestionRow>(
 		`SELECT q.* FROM question_refs r JOIN questions q ON q.id = r.question
 		 WHERE r.project = $project AND r.ref = $ref ORDER BY q.id DESC LIMIT 200`,
@@ -538,6 +548,18 @@ export const setQuestionFacts = (
 };
 
 export const refsOf = (db: Db, question: number): string[] => db.all(Q.refsOf, { question }).map((r) => r.ref);
+export const refsOfQuestions = (db: Db, questions: readonly number[]): string[] =>
+	questions.length ? db.all(Q.refsOfQuestions, { questions: JSON.stringify(questions) }).map((row) => row.ref) : [];
+/** Open summaries among each ref's latest 200 questions, matching questionsOn's bound and order. */
+export function openQuestionSummariesOnRefs(db: Db, project: number, refs: readonly string[]) {
+	const byRef = new Map<string, { q: string; evidence: string }[]>();
+	for (const row of db.all(Q.openSummariesOnRefs, { project, refs: JSON.stringify(refs) })) {
+		const items = byRef.get(row.ref) ?? [];
+		items.push({ q: questionRef(row), evidence: row.evidence_hash });
+		byRef.set(row.ref, items);
+	}
+	return byRef;
+}
 export const questionsOn = (db: Db, project: number, about: string): QuestionRow[] =>
 	db.all(Q.onRef, { project, ref: about }).map(readQuestion);
 export const openQuestionsOn = (db: Db, project: number, about: string) =>
