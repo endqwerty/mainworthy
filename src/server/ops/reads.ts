@@ -505,6 +505,12 @@ export function get(ctx: Ctx, input: GetInput): Record<string, unknown>[] {
 	if (input.cursor && (input.refs.length !== 1 || !/^P-\d+$/i.test(input.refs[0]?.trim() ?? "")))
 		throw invalid("a proposal cursor needs exactly one P- ref");
 	return input.refs.map((text) => {
+		if (text.startsWith("result:")) {
+			const id = /^result:([1-9]\d*)$/.exec(text)?.[1];
+			const row = id && Number.isSafeInteger(Number(id)) ? resultById(ctx.db, Number(id)) : null;
+			if (!row || row.project !== ctx.project.id) throw notFound(`result ${text}`);
+			return { ref: text, ...resultView(ctx, row), detail: row.detail };
+		}
 		if (text.startsWith("commit:"))
 			return { ref: text, gate: gate(ctx, { commit: text.slice(7), ...(input.repo ? { repo: input.repo } : {}) }) };
 		if (text.startsWith("change:")) return { ref: text, gate: gate(ctx, { change: text.slice(7) }) };
@@ -586,12 +592,12 @@ export function get(ctx: Ctx, input: GetInput): Record<string, unknown>[] {
 export const getOp = defineOp({
 	name: "get",
 	output: REPLIES.get,
-	summary: "Read cases, questions, runs, tests or proposals by ref.",
+	summary: "Read cases, questions, runs, tests, results or proposals by ref.",
 	input: GetInput,
 	needs: "read",
 	scope: "project",
 	effect: "read",
-	mcp: "Read refs; verdicts: commit:hash, change:key, R-n. unless=etag; cursor pages proposals.",
+	mcp: "Read refs including result:id; verdicts: commit:hash, change:key, R-n. unless=etag; cursor pages proposals.",
 	run: get,
 });
 

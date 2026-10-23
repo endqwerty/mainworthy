@@ -552,6 +552,7 @@ const Settled = z.looseObject({ q: text, kind: text, title: text, answer: data.n
 
 const GetRow: z.ZodType<Record<string, unknown>> = z.union([
 	z.object({ ref: text.regex(/^(commit:|change:)/), gate: GateStatus }),
+	Result.extend({ ref: text.regex(/^result:[1-9]\d*$/), detail: nullableText }),
 	CaseDocument,
 	z.looseObject({ ref: text.regex(/^C-\d+$/), unchanged: z.literal(true), hash: text, etag: text }),
 	z.looseObject({ ref: text.regex(/^C-\d+$/), version: whole, hash: text, etag: text, md: text }),
