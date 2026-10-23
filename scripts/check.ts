@@ -98,7 +98,9 @@ const leave = (code: number): Promise<never> => {
 				clearTimeout(force);
 			}),
 		);
-		const deadline = Date.now() + 4_000;
+		// A registration remains until its supervisor has removed the data directory and port lock.
+		// Leave room for that I/O on a shared machine after the 1.5-second forced-shutdown deadline.
+		const deadline = Date.now() + 15_000;
 		let leaked = await ownedChildren(ownership);
 		while (leaked.length > 0 && Date.now() < deadline) {
 			await Bun.sleep(50);

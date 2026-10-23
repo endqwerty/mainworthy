@@ -1,7 +1,16 @@
 // The plan of the check (`scripts/check-plan.ts`) and what the workflow says about it. The check's own wall time
 // is measured by the check (`scripts/check.ts`); this keeps the plan whole.
 import { expect, test } from "bun:test";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Glob } from "bun";
@@ -276,6 +285,64 @@ test("a broken browser fixture build fails the check before any test runs, even 
 		rmSync(root, { recursive: true, force: true });
 	}
 });
+
+test("check waits beyond four seconds for a registry entry to disappear while its child stays alive", async () => {
+	const root = mkdtempSync(join(tmpdir(), "mainworthy-slow-unregister-"));
+	const ready = join(root, "registry");
+	const child = Bun.spawn([process.execPath, "-e", "setInterval(() => {}, 1000)"], {
+		stdin: "ignore",
+		stdout: "ignore",
+		stderr: "ignore",
+		detached: true,
+	});
+	mkdirSync(join(root, "test"));
+	writeFileSync(
+		join(root, "test/probe.test.ts"),
+		`
+		import { test } from "bun:test";
+		import { registerOwnedChild } from ${JSON.stringify(join(process.cwd(), "scripts/work/processes.ts"))};
+		test("cleanup continues after this test", async () => {
+			await registerOwnedChild(${child.pid});
+			await Bun.write(${JSON.stringify(ready)}, process.env.MAINWORTHY_TEST_CHILDREN);
+		});
+	`,
+	);
+	const check = Bun.spawn(
+		[
+			process.execPath,
+			join(process.cwd(), "scripts/check.ts"),
+			"test",
+			"--only=parallel",
+			"--workers=1",
+			"test/probe.test.ts",
+		],
+		{ cwd: root, stdout: "pipe", stderr: "pipe" },
+	);
+	const output = Promise.all([new Response(check.stdout).text(), new Response(check.stderr).text()]);
+	try {
+		const readyBy = Date.now() + 10_000;
+		while (!existsSync(ready) && check.exitCode === null && Date.now() < readyBy) await Bun.sleep(25);
+		expect(existsSync(ready)).toBe(true);
+		// Directory cleanup can legitimately take longer than the old four-second drain deadline.
+		await Bun.sleep(5_000);
+		const registry = readFileSync(ready, "utf8");
+		if (existsSync(registry)) {
+			for (const name of readdirSync(registry)) {
+				if (name.startsWith(`${child.pid}-`) && name.endsWith(".child")) rmSync(join(registry, name));
+			}
+		}
+		const code = await check.exited;
+		const [out, err] = await output;
+		expect(code, out + err).toBe(0);
+		expect(out).toContain("check: 0 owned children still alive");
+		expect(child.exitCode).toBeNull();
+	} finally {
+		check.kill("SIGKILL");
+		child.kill("SIGKILL");
+		await Promise.all([check.exited, child.exited, output]);
+		rmSync(root, { recursive: true, force: true });
+	}
+}, 40_000);
 
 test("every test file is in exactly one phase: the quiet files, and everything but them", () => {
 	expect(phaseFiles("quiet")).toContain("test/policy-latency.test.ts");

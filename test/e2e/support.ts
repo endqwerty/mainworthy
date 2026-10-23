@@ -149,7 +149,7 @@ export async function startServer({
 		const lock = join(tmpdir(), `mainworthy-e2e-port-${port}`);
 		child = Bun.spawn(
 			[
-				// Bun's Linux no-orphans spawn installs PDEATHSIG even when the child's env disables it.
+				// Observed on Bun 1.4.3: Linux no-orphans spawn installs PDEATHSIG even if the child disables it.
 				// A shell fork clears that signal; the supervisor can outlive worker loss and reap its group.
 				"/bin/sh",
 				"-c",
@@ -168,8 +168,8 @@ export async function startServer({
 				cwd: process.cwd(),
 				env: {
 					...process.env,
-					// Bun's inherited no-orphans mode SIGKILLs on parent loss before JS can clean up. This
-					// supervisor must instead finish its pipe-driven, bounded shutdown after the worker dies.
+					// Observed on Bun 1.4.3: inherited no-orphans mode terminates on parent loss before JS
+					// cleanup. Disable it so the supervisor finishes pipe-driven shutdown after worker death.
 					BUN_FEATURE_FLAG_NO_ORPHANS: "0",
 					NODE_ENV: "production",
 					MAINWORTHY_DATA: dataDir,
@@ -199,7 +199,9 @@ export async function startServer({
 				detached: true,
 			},
 		);
-		// The supervisor now releases these only after the fixture has exited, including after worker SIGKILL.
+		// Transfer cleanup to the supervisor, which waits for fixture exit before releasing these. A normal
+		// worker exit under Bun 1.4.3 --no-orphans can kill the supervisor before cleanup, leaving directories
+		// behind. Do not delete them in the worker's exit hook: the fixture can still own its database then.
 		ownedDirectories.delete(dataDir);
 		ownedDirectories.delete(lock);
 	} catch (error) {
