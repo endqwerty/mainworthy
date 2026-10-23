@@ -8,7 +8,8 @@
 		"mainworthy": "src/cli/main.ts"
 	},
 	"scripts": {
-		"dev": "bun --watch src/cli/main.ts serve",
+		"dev": "bun scripts/pg.ts dev",
+		"pg": "bun scripts/pg.ts",
 		"start": "NODE_ENV=production bun src/cli/main.ts serve",
 		"typecheck": "tsc --noEmit",
 		"lint": "biome check .",

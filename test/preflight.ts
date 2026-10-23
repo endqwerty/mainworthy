@@ -3,3 +3,12 @@
 import { requireReady } from "../scripts/preflight.ts";
 
 requireReady("bun test");
+
+import { cluster } from "../scripts/pg.ts";
+
+try {
+	process.env.MAINWORTHY_TEST_PG ??= (await cluster()).adminUrl;
+} catch (error) {
+	console.error(`bun test: ${error instanceof Error ? error.message : String(error)}`);
+	process.exit(4);
+}

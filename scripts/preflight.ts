@@ -8,6 +8,7 @@
 // This file imports nothing that is installed: it has to run where nothing is.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { binaries, POSTGRES_MISSING } from "./pg.ts";
 
 /** The oldest Bun the project runs on. AGENTS.md names it, and the workflow and the Dockerfile install it. */
 export const OLDEST_BUN = "1.4.0";
@@ -41,6 +42,7 @@ export function unready({
 		problems.push(
 			`${missing.length} of the packages package.json names are not installed (${missing.slice(0, 3).join(", ")}${missing.length > 3 ? ", ..." : ""}). Run \`bun install --frozen-lockfile\`${problems.length > 0 ? ", with the newer Bun" : ""}.`,
 		);
+	if (!process.env.MAINWORTHY_TEST_PG && !binaries()) problems.push(POSTGRES_MISSING);
 	return problems;
 }
 
@@ -49,6 +51,7 @@ export function requireReady(who: string): void {
 	const problems = unready();
 	if (problems.length === 0) return;
 	for (const problem of problems) console.error(`${who}: ${problem}`);
-	console.error(`${who}: nothing was run. This is about the machine, not the code.`);
+	if (problems.length !== 1 || problems[0] !== POSTGRES_MISSING)
+		console.error(`${who}: nothing was run. This is about the machine, not the code.`);
 	process.exit(4);
 }
