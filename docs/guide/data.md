@@ -397,8 +397,8 @@ imports keep their existing operator authority.
 
 To import an archive, follow these steps:
 
-1. Start a new instance. If using a browser, set the owner's first password and prove it with `POST /api/account/proof`; otherwise make no changes before importing.
-2. Run `mainworthy import` with the archive.
+1. Start a new instance, and make no changes before importing, apart from the sign-in a browser import needs (step 2).
+2. Run `mainworthy import` with the archive. The CLI imports with a bearer token or in local mode, so it needs no recent proof. To import from a browser session instead, first set the owner's password and prove it with `POST /api/account/proof`.
 
 ```
 $ mainworthy import mainworthy.ndjson.gz
