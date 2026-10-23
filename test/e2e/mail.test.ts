@@ -28,6 +28,16 @@ test.skipIf(!browserAvailable)(
 			await page.locator("#app").waitFor();
 			await page.goto(`${server.url}/p/scratch/settings`);
 			await page.getByRole("option", { name: "People", exact: true }).click();
+			expect(
+				(
+					await page.request.post(`${server.url}/api/account/password`, { data: { next: "the owner password" } })
+				).status(),
+			).toBe(200);
+			expect(
+				(
+					await page.request.post(`${server.url}/api/account/proof`, { data: { password: "the owner password" } })
+				).status(),
+			).toBe(200);
 			await page.locator("#invite-name").fill("mail-browser");
 			await page.locator("#invite-email").fill("robin@example.com");
 			await page.getByRole("button", { name: "Make invitation link", exact: true }).click();

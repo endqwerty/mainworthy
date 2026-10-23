@@ -1,8 +1,11 @@
 import { afterEach, expect, test } from "bun:test";
 import { CLI_ENTRY } from "../src/cli/test-support.ts";
+import { waitMail } from "../src/server/identity/identity.ts";
 import { totpCode } from "../src/server/identity/totp.ts";
 import type { AssertionOptions, RegistrationOptions } from "../src/server/identity/webauthn.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
+import { exportArchive } from "../src/server/transfer/transfer.ts";
+import { fakeSmtp } from "./mail-support.ts";
 import {
 	authenticator,
 	bearer,
@@ -27,6 +30,107 @@ const refused = (reply: { status: number; body: unknown }) => {
 	expect(reply.status).toBe(403);
 	expect(reply.body).toMatchObject({ ok: false, error: { code: "recent_proof_required" } });
 };
+
+function verifiedAdminArchive(): string {
+	const source = world();
+	const owner = source
+		.rows<{ id: number; name: string }>("SELECT id, name FROM actors")
+		.find((row) => row.name === OWNER);
+	if (!owner) throw new Error("no owner");
+	source.instance.app.db.raw
+		.query("INSERT INTO mail_contacts (actor, email, verified_at, revision) VALUES (?, ?, ?, ?)")
+		.run(owner.id, "restored@example.org", source.clock.now(), "restored-contact");
+	const chunks: string[] = [];
+	exportArchive(source.instance.app.db, (chunk) => chunks.push(chunk), { blobs: source.instance.app.blobs });
+	return chunks.join("");
+}
+
+const importBody = (w: World, body: string, headers: Record<string, string>) =>
+	fetch(`${w.instance.url}/api/import`, { method: "POST", headers, body });
+
+async function preparedImport(w: World): Promise<string> {
+	const cookie = (await w.post("/api/login", { token: TOKEN })).cookie;
+	expect((await w.post("/api/account/password", { next: PASSWORD }, { cookie })).status).toBe(200);
+	return cookie;
+}
+
+test("stale browser import cannot install a verified address and gain an administrator through mail reset", async () => {
+	const body = verifiedAdminArchive();
+	const smtp = await fakeSmtp();
+	const w = world();
+	w.instance.app.config.mail = defaultConfig({
+		MAINWORTHY_SMTP_HOST: "127.0.0.1",
+		MAINWORTHY_SMTP_PORT: String(smtp.port),
+		MAINWORTHY_SMTP_TLS: "none",
+		MAINWORTHY_MAIL_FROM: "mainworthy@example.com",
+		MAINWORTHY_PUBLIC_URL: "https://mainworthy.example",
+	}).mail;
+	try {
+		const cookie = await preparedImport(w);
+		stale(w);
+		const response = await importBody(w, body, { cookie });
+		refused({ status: response.status, body: await response.json() });
+		expect(w.rows("SELECT actor FROM mail_contacts")).toEqual([]);
+		expect(await w.status({ cookie })).toBe(200);
+		await w.post("/api/login", { resetRequest: "restored@example.org" });
+		await waitMail(w.instance.app);
+		expect(smtp.messages).toHaveLength(0);
+		expect((await signIn(w, OWNER, PASSWORD)).status).toBe(200);
+		const otherProof = await importBody(w, body, { cookie });
+		refused({ status: otherProof.status, body: await otherProof.json() });
+		expect((await proof(w, cookie)).status).toBe(200);
+		expect((await importBody(w, body, { cookie })).status).toBe(200);
+		expect(await w.status({ cookie })).toBe(401);
+		expect(w.rows("SELECT email FROM mail_contacts WHERE verified_at IS NOT NULL")).toEqual([
+			{ email: "restored@example.org" },
+		]);
+		await w.post("/api/login", { resetRequest: "restored@example.org" });
+		await waitMail(w.instance.app);
+		const reset = /\/reset#([A-Za-z0-9_-]{43})/.exec(smtp.messages.at(-1)?.text ?? "")?.[1];
+		expect(reset).toBeDefined();
+		expect((await w.post("/api/login", { reset, password: PASSWORD })).status).toBe(200);
+		const restored = await signIn(w, OWNER, PASSWORD);
+		expect((await w.op("admin", { do: "actor.list" }, { cookie: restored.cookie })).status).toBe(200);
+		expect(
+			(await w.op("credential", { do: "token.create", label: "Restored CLI" }, { cookie: restored.cookie })).status,
+		).toBe(200);
+	} finally {
+		await waitMail(w.instance.app);
+		await smtp.close();
+	}
+});
+
+test("browser import rechecks proof after waiting at the write gate", async () => {
+	const body = verifiedAdminArchive();
+	const w = world();
+	const cookie = await preparedImport(w);
+	expect((await proof(w, cookie)).status).toBe(200);
+	w.clock.advance(9 * 60_000 + 59_000);
+	const gate = holdGate(w.instance);
+	try {
+		const waiting = waitingAtGate(w.instance, 1);
+		const pending = importBody(w, body, { cookie });
+		await waiting;
+		w.clock.advance(1_001);
+		await gate.release();
+		const response = await pending;
+		refused({ status: response.status, body: await response.json() });
+		expect(w.rows("SELECT actor FROM mail_contacts")).toEqual([]);
+	} finally {
+		await gate.release();
+	}
+});
+
+for (const mode of ["server", "local"] as const) {
+	test(`${mode} operator import retains verified recovery addresses without browser proof`, async () => {
+		const body = verifiedAdminArchive();
+		const w = world({ mode });
+		expect((await importBody(w, body, mode === "server" ? bearer(TOKEN) : {})).status).toBe(200);
+		expect(w.rows("SELECT email FROM mail_contacts WHERE verified_at IS NOT NULL")).toEqual([
+			{ email: "restored@example.org" },
+		]);
+	});
+}
 
 for (const can of [undefined, ["read"]]) {
 	test(`browser join invitations require own recent proof (${can ? "read-only" : "default admin"})`, async () => {

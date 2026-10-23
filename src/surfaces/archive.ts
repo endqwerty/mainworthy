@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { HTTP_STATUS } from "../core/api.ts";
-import { clearChallenges, clearUses, type Session } from "../server/identity/identity.ts";
+import { clearChallenges, clearUses, requireRecentSessionProof, type Session } from "../server/identity/identity.ts";
 import type { App } from "../server/kernel/app.ts";
 import type { Actor } from "../server/kernel/ctx.ts";
 import { OpError } from "../server/kernel/errors.ts";
@@ -114,6 +114,7 @@ export function archiveRoutes(
 			const file = scratch(app.config.dataDir);
 			const localOwner = owner ?? (session.via === "local" ? session.actor(0) : null);
 			try {
+				requireRecentSessionProof(app, session);
 				await stageBody(req, file.path);
 				const result = await app.gate.run(async () => {
 					if (!allowed(session))
@@ -121,6 +122,7 @@ export function archiveRoutes(
 							"forbidden",
 							"import needs the admin capability; the token or grant changed while uploading",
 						);
+					requireRecentSessionProof(app, session);
 					const restored = await runArchive(app, {
 						op: "import",
 						path: file.path,

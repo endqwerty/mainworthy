@@ -308,6 +308,8 @@ Manage invitations and sign-in methods in Settings. The sections below also list
 
 ### Invite a person
 
+If your first sign-in used the owner token and you have no credential yet, add a password or passkey in **Your sign-in**, then return to **People** and prove it when asked.
+
 Making any invitation from a browser requires recent proof of your own credential, even for a read-only invite. Settings prompts inline and retries after proof. Bearer-token and local CLI invitations keep their existing authority.
 
 In Settings, open People. This section is visible to a person who holds `admin` on every project. To invite a person, follow these steps:
