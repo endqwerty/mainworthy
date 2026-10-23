@@ -591,8 +591,6 @@ async function login(
  */
 async function logout(app: App, req: Request, server: Listener): Promise<Response> {
 	if (!sameOrigin(req)) return unauthenticated();
-	const incompatible = incompatibleRequest(req);
-	if (incompatible) return incompatible;
 	const cookie = sessionCookieOf(req);
 	const ending = cookie === null ? null : signOut(app, cookie);
 	if (ending) {

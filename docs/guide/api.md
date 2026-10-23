@@ -30,14 +30,17 @@ The current API version is **2**. The CLI checks `/healthz` before sending an op
 Clients pinned to API 1 must upgrade with the server.
 
 The web client sends the same header on its API fetch requests. An explicit mismatched version is
-refused with `409 conflict` before the operation runs. Browser requests other than `GET` and `HEAD`
-must send the version: the server recognises them by `Origin` or `Sec-Fetch-Site`, including browsers
+refused with `409 conflict` before the operation runs. Except for `/api/logout`, browser requests other than
+`GET` and `HEAD` must send the version: the server recognises them by `Origin` or `Sec-Fetch-Site`, including browsers
 using local mode. An already-open old page that omits the header is refused too. Its error asks you
 to reload before trying again; the refused operation writes nothing.
 
 Unversioned requests without those browser headers remain accepted. This includes bearer scripts,
 MCP clients and the iPhone app, which sends its session cookie through a native HTTP client.
 A cookie alone does not identify a browser. Read-only browser streams use `GET` and need no header.
+
+Signing out at `/api/logout` works even when the API version is missing or mismatched. It keeps the
+same-origin check, ends the cookie-named session and expires the cookie, so an old page can still sign out.
 
 A successful operation returns `ok: true`, `result`, and `seq`, the project's
 sequence number at that point. The `since` operation with `{"cursor":"s:12"}`
