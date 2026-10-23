@@ -232,17 +232,34 @@ export async function gather(number: number, gh = (args: string[]) => read(["gh"
 		!/^[a-f0-9]{40}$/.test(pull.headRefOid)
 	)
 		throw new Error("GitHub did not return the pull request's draft state and head commit");
-	const paths = (
-		await gh([
-			"api",
-			`repos/${REPO}/pulls/${number}/files`,
-			"--paginate",
-			"--jq",
-			'.[] | select(.status == "added") | .filename',
-		])
-	)
-		.split("\n")
-		.filter((file) => file.startsWith(".changes/") && file.endsWith(".md"));
+	const pages: unknown = JSON.parse(await gh(["api", `repos/${REPO}/pulls/${number}/files`, "--paginate", "--slurp"]));
+	if (!Array.isArray(pages)) throw new Error("GitHub returned an invalid paginated file list");
+	const paths: string[] = [];
+	const fragment = (file: string): boolean => file.startsWith(".changes/") && file.endsWith(".md");
+	for (const page of pages) {
+		if (!Array.isArray(page)) throw new Error("GitHub returned an invalid page in the file list");
+		for (const row of page) {
+			const change = object(row);
+			const file = change.filename;
+			const status = change.status;
+			const previous = change.previous_filename;
+			if (
+				typeof file !== "string" ||
+				!file ||
+				typeof status !== "string" ||
+				!status ||
+				(previous !== undefined && typeof previous !== "string") ||
+				(status === "renamed" && (typeof previous !== "string" || !previous))
+			)
+				throw new Error("GitHub file list lacks a filename, status or rename source");
+			if (!fragment(file) && !(typeof previous === "string" && fragment(previous))) continue;
+			if (status !== "added")
+				throw new Error(
+					`${previous ?? file}: retained fragments are immutable (${status}); add a new fragment to correct an old entry.`,
+				);
+			paths.push(file);
+		}
+	}
 	const addedFragments: Facts["addedFragments"][number][] = [];
 	for (const file of paths) {
 		const path = file.split("/").map(encodeURIComponent).join("/");
