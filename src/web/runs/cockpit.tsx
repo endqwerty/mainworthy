@@ -286,7 +286,7 @@ function ProjectRunCockpit({
 	const canCorrect = !!(last && (isOpen || mayReopen(signoff)));
 	const withdrawn = useRef(new Set<Promise<RecordedResult>>());
 	const method = session.kind === "agent" ? "agent" : "human";
-	const canProduce = session.can.includes("produce");
+	const canReport = session.can.includes("record");
 	const isOwnFill = (fill: Fill) => fill.by === session.actor && fill.method === method;
 	const ownFillOf = (slot: Slot) => slot.fills.find(isOwnFill);
 	function filledSlot(slot: Slot, fill: Fill): Pick<Slot, "id" | "state" | "fills"> {
@@ -351,7 +351,7 @@ function ProjectRunCockpit({
 	);
 	const canRecord = !!(
 		current &&
-		canProduce &&
+		canReport &&
 		(uncertain.has(current.id) || (!external(current) && isOpen && admittedMethod))
 	);
 	const hasAvailable = slots.some(available);
@@ -400,7 +400,7 @@ function ProjectRunCockpit({
 		visibleStep = false,
 		restores?: Promise<RecordedResult>,
 	): Promise<RecordedResult> | null {
-		if (!slot || !sessionCurrent(owner) || reports.retired || !canProduce) return null;
+		if (!slot || !sessionCurrent(owner) || reports.retired || !canReport) return null;
 		const recovery = uncertain.get(slot.id);
 		if (recovery) {
 			const recoveringSlot = slot;

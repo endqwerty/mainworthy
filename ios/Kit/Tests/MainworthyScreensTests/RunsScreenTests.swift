@@ -8,7 +8,7 @@ import Testing
 @Suite("The Runs screen", .enabled(if: Live.isRunning, "needs `bun scripts/ios.ts test`"))
 @MainActor
 struct RunsScreenTests {
-	func screen(can: [String] = ["read", "produce", "plan"]) async throws -> RunsScreen {
+	func screen(can: [String] = ["read", "record", "produce", "plan"]) async throws -> RunsScreen {
 		let key = try await Live.project()
 		let client = try await Live.signedIn().project(key)
 		let screen = RunsScreen(
@@ -139,9 +139,48 @@ struct RunsScreenTests {
 		#expect(run.slots.first { $0.id == shown.slot.id }?.ownFill(by: Live.name)?.note == "From another device")
 	}
 
-	@Test("without produce slots are read-only, and without plan a plan is not sent")
+	@Test("a read,record person can record every manual outcome without produce or answer")
+	func recordOnlyPerson() async throws {
+		let key = try await Live.project()
+		let name = "tester-\(UUID().uuidString.lowercased())"
+		let password = "record-only test password"
+		let owner = try await Live.signedIn(as: Live.owner)
+		let invitation: JSONValue = try await owner.write("invitation", in: nil, [
+			"do": "create", "name": .string(name), "can": ["read", "record"], "project": .string(key),
+		])
+		var request = URLRequest(url: Live.instance.url.appending(path: "/api/login"))
+		request.httpMethod = "POST"
+		request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+		request.httpBody = try JSONEncoder().encode([
+			"invitation": try #require(invitation["code"]?.string), "password": password,
+		])
+		let (_, response) = try await URLSession.shared.data(for: request)
+		#expect((response as? HTTPURLResponse)?.statusCode == 200)
+		let server = try await Live.signedIn(as: .password(name: name, password: password))
+		let permission = try #require(try await server.account().projects.first { $0.key == key })
+		#expect(permission.may(.record) && !permission.may(.produce) && !permission.may(.answer))
+		let client = server.project(key, identity: permission.id)
+		let screen = RunsScreen(project: client, permission: permission, person: name)
+		await screen.refresh()
+		let run = screen.open(try #require(screen.runs.first { $0.isPlanned }))
+		await run.refresh()
+		let slot = try #require(run.firstUnfilled)
+		#expect(!run.isReadOnly)
+		for outcome in [ManualOutcome.pass, .fail, .blocked, .skip] {
+			await run.execute(try #require(run.slots.first { $0.id == slot.id }))
+			guard case .read(let execution) = run.document else { throw ClientError.unreadable }
+			#expect(run.mayRecord(execution))
+			#expect(await run.record(execution, outcome: outcome))
+			#expect(run.slots.first { $0.id == slot.id }?.ownFill(by: name)?.outcome == .manual(outcome))
+		}
+		#expect(run.canUndo)
+		await run.undo()
+		#expect(run.slots.first { $0.id == slot.id }?.ownFill(by: name)?.outcome == .manual(.blocked))
+	}
+
+	@Test("without record slots are read-only, and without plan a plan is not sent")
 	func permissions() async throws {
-		let screen = try await screen(can: ["read", "record"])
+		let screen = try await screen(can: ["read"])
 		let run = screen.open(try #require(screen.runs.first))
 		await run.refresh()
 		await run.execute(try #require(run.firstUnfilled))
@@ -168,7 +207,7 @@ struct RunsScreenTests {
 		// The run's one slot is the owner's result, so the owner's screen may record on it while the run is open.
 		let screen = RunsScreen(
 			project: try await Live.signedIn(as: Live.owner).project(key),
-			permission: Project(key: key, identity: client.identity, name: key, can: ["read", "produce"]), person: Live.ownerName)
+			permission: Project(key: key, identity: client.identity, name: key, can: ["read", "record", "produce"]), person: Live.ownerName)
 		await screen.refresh()
 		let run = screen.open(try #require(screen.runs.first))
 		await run.refresh()

@@ -56,7 +56,7 @@ struct RunSlotView: View {
 					} else if !screen.hasPendingReport(for: execution) {
 						Text(
 							screen.isReadOnly
-								? "Slots are read-only. Recording results needs the produce capability."
+								? "Slots are read-only. Recording results needs the record capability."
 								: screen.run.state == .closed
 									? "This run is closed. Withdrawing its sign-off in the Queue reopens it."
 									: screen.isLeftToOthers(execution.slot)
@@ -89,7 +89,7 @@ struct RunSlotView: View {
 						if screen.hasPendingReport {
 							Button("Retry report") { Task { await screen.retryReport() } }
 								.disabled(screen.busy).accessibilityIdentifier("retry-report")
-						} else if screen.canUndo, screen.permission.may(.produce), screen.run.state == .open {
+						} else if screen.canUndo, screen.permission.may(.record), screen.run.state == .open {
 							Button("Undo") {
 								noting = false
 								Task { await screen.undo() }

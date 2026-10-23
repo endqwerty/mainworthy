@@ -96,7 +96,7 @@ public final class OpenRunScreen: ProjectScreen {
 	public var firstUnfilled: RunSlot? {
 		slots.first { $0.needsProof && $0.ownFill(by: person) == nil && $0.caseRef != nil }
 	}
-	public var isReadOnly: Bool { !permission.may(.produce) }
+	public var isReadOnly: Bool { !permission.may(.record) }
 	/// Leave completed or failing external evidence to its producer. Missing proof stays open to another person.
 	/// Read from the latest slots, so a fill that arrives counts.
 	public func isLeftToOthers(_ slot: RunSlot) -> Bool {
@@ -104,7 +104,7 @@ public final class OpenRunScreen: ProjectScreen {
 		return !latest.needsProof && !latest.fills.isEmpty && latest.ownFill(by: person) == nil
 	}
 	public func mayRecord(_ execution: RunExecution) -> Bool {
-		permission.may(.produce) && run.state == .open && execution.run == run.ref
+		permission.may(.record) && run.state == .open && execution.run == run.ref
 			&& execution.content.methods.contains("human") && !isLeftToOthers(execution.slot)
 	}
 
