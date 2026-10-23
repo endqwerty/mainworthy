@@ -36,9 +36,280 @@ import {
 	testArgs,
 	testReaders,
 } from "../scripts/check-plan.ts";
+import {
+	ChromiumDiagnosticOutput,
+	type ChromiumSlot,
+	chromiumDiagnosticPaths,
+	StderrTail,
+} from "../scripts/chromium-diagnostics.ts";
 import { matrix, outputs } from "../scripts/ci-scope.ts";
 import { OLDEST_BUN, unready } from "../scripts/preflight.ts";
+import type { ResultIn } from "../src/core/ops.ts";
 import { parseJUnit, TEST_FILE_LIMIT } from "../src/surfaces/formats/junit.ts";
+
+test("Chromium stderr tails retain at most 200 lines and 64 KiB, including partial and Unicode lines", () => {
+	const tail = new StderrTail();
+	tail.append(Array.from({ length: 250 }, (_, i) => `line ${i}\n`).join(""));
+	expect(tail.text().split("\n").filter(Boolean)).toHaveLength(200);
+	expect(tail.text()).toStartWith("line 50\n");
+	tail.append("partial");
+	tail.append(" line\n");
+	expect(tail.text()).toEndWith("partial line\n");
+	expect(tail.text().split("\n").filter(Boolean)).toHaveLength(200);
+	tail.append("界".repeat(100_000));
+	expect(Buffer.byteLength(tail.text())).toBeLessThanOrEqual(64 * 1024);
+	expect(tail.text()).not.toContain("�");
+	expect(tail.text()).toEndWith("界".repeat(100));
+	tail.append("\nlast\n");
+	expect(tail.text()).toEndWith("\nlast\n");
+});
+
+test("Chromium crash diagnostics coalesce each test, filter console output and secrets, and stay silent normally", () => {
+	const tail = new StderrTail();
+	tail.append(
+		'FATAL: heap exhausted token=private-token password="private password" Authorization: Bearer private-bearer https://robin:private-pass@example.com\n',
+	);
+	tail.append('[123:INFO:CONSOLE:7] "session=abc123 /invite/zzsecret"\n');
+	const slots = new Map([[2, { pid: 1234, stderr: tail, unexpectedExit: null }]]);
+	const output = new ChromiumDiagnosticOutput(slots);
+	const state = { slot: 2, file: "test/e2e/probe.test.ts", test: 1, contexts: 2, pages: 3, stderr: tail.text() };
+	output.record({ ...state, kind: "crash", at: "2026-10-23T06:00:00.000Z" });
+	output.record({ ...state, kind: "disconnected", at: "2026-10-23T06:00:01.000Z" });
+	output.record({ ...state, kind: "state", contexts: 0, pages: 0 });
+	const diagnostic = output.finish();
+	expect(diagnostic.match(/check: Chromium diagnostic/g)).toHaveLength(1);
+	for (const text of [
+		"slot: 2",
+		"browser PID: 1234",
+		"test/e2e/probe.test.ts",
+		"live contexts: 2",
+		"live pages: 3",
+		"2026-10-23T06:00:00.000Z",
+		"2026-10-23T06:00:01.000Z",
+		"FATAL: heap exhausted",
+	])
+		expect(diagnostic).toContain(text);
+	for (const secret of [
+		"private-token",
+		"private password",
+		"private-bearer",
+		"private-pass",
+		"INFO:CONSOLE",
+		"abc123",
+		"zzsecret",
+	])
+		expect(diagnostic).not.toContain(secret);
+	expect(output.finish()).toBe("");
+	const normal = new ChromiumDiagnosticOutput(slots);
+	normal.record({ ...state, kind: "state" });
+	expect(normal.finish()).toBe("");
+	const disconnected = new ChromiumDiagnosticOutput(slots);
+	disconnected.record({ ...state, kind: "disconnected", at: "2026-10-23T06:00:01.000Z" });
+	expect(disconnected.finish()).toContain("browser disconnected: 2026-10-23T06:00:01.000Z");
+});
+
+test("Target closed failures join side-channel records by file and executed test, excluding skipped tests", () => {
+	const slots = new Map([
+		[1, { pid: 123, stderr: new StderrTail(), unexpectedExit: null }],
+		[2, { pid: 456, stderr: new StderrTail(), unexpectedExit: null }],
+	]);
+	const output = new ChromiumDiagnosticOutput(slots);
+	const state = { slot: 1, file: "test/e2e/one.test.ts", test: 1, contexts: 0, pages: 0, stderr: "slot one\n" };
+	output.record({ ...state, kind: "state" });
+	output.record({ ...state, test: 2, stderr: "later test\n", kind: "state" });
+	output.record({
+		...state,
+		slot: 2,
+		file: "test/e2e/two.test.ts",
+		stderr: "slot two\n",
+		kind: "disconnected",
+		at: "2026-10-23T06:00:02.000Z",
+	});
+	const failed = (file: string, key: string): ResultIn => ({
+		test: { key, file },
+		outcome: "error",
+		failure: { message: "locator.fill: Target page, context or browser has been closed" },
+	});
+	const results: ResultIn[] = [
+		{ test: { file: state.file, key: "skipped" }, outcome: "skip" },
+		failed(state.file, "first"),
+		failed("test/e2e/two.test.ts", "other worker"),
+		failed(state.file, "second"),
+	];
+	const text = output.finish(results);
+	expect(text.match(/check: Chromium diagnostic/g)).toHaveLength(3);
+	for (const part of [
+		"crash event: not observed",
+		"browser PID: 456",
+		"slot two",
+		"slot one",
+		"executed test in file: 2",
+		"live contexts: 0",
+		"live pages: 0",
+		"2026-10-23T06:00:02.000Z",
+	])
+		expect(text).toContain(part);
+});
+
+test("runner-owned exits report the current bounded tail when the worker disconnect record is missing", () => {
+	const tail = new StderrTail();
+	const slot: ChromiumSlot = { pid: 789, stderr: tail, unexpectedExit: null };
+	const slots = new Map([[3, slot]]);
+	const output = new ChromiumDiagnosticOutput(slots);
+	output.record({
+		slot: 3,
+		file: "test/e2e/browser-exit.test.ts",
+		test: 1,
+		contexts: 2,
+		pages: 3,
+		kind: "state",
+		stderr: "stale worker snapshot\n",
+	});
+	tail.append(`${"x".repeat(100_000)}\nFATAL: browser process SIGTRAP\n`);
+	slot.unexpectedExit = { at: "2026-10-23T08:00:00.000Z", code: null, signal: "SIGTRAP" };
+	const text = output.finish();
+	expect(text.match(/check: Chromium diagnostic/g)).toHaveLength(1);
+	for (const part of [
+		"slot: 3",
+		"browser PID: 789",
+		"test/e2e/browser-exit.test.ts",
+		"live contexts: 2",
+		"live pages: 3",
+		"SIGTRAP",
+		"2026-10-23T08:00:00.000Z",
+		"FATAL: browser process SIGTRAP",
+	])
+		expect(text).toContain(part);
+	expect(text).not.toContain("stale worker snapshot");
+	expect(output.finish()).toBe("");
+	expect(
+		Buffer.byteLength(text.split("Chromium stderr tail (last 200 lines / 64 KiB):\n")[1] ?? ""),
+	).toBeLessThanOrEqual(64 * 1024);
+	const noWorker = new ChromiumDiagnosticOutput(slots).finish();
+	expect(noWorker.match(/check: Chromium diagnostic/g)).toHaveLength(1);
+	expect(noWorker).toContain("test file: not recorded");
+	expect(noWorker).toContain("FATAL: browser process SIGTRAP");
+});
+
+test("Browser closed and has-been-closed failures report once without requiring a crash event", () => {
+	const slots = new Map([[1, { pid: 123, stderr: new StderrTail(), unexpectedExit: null }]]);
+	const file = "test/e2e/closed-browser.test.ts";
+	for (const message of [
+		"evaluate: send: Browser closed",
+		"newPage: send: Browser closed",
+		"click: send: Browser closed",
+		"context has been closed",
+		"has been closed",
+	]) {
+		const output = new ChromiumDiagnosticOutput(slots);
+		output.record({ slot: 1, file, test: 1, contexts: 0, pages: 0, kind: "state", stderr: "browser tail\n" });
+		const text = output.finish([{ test: { key: "failure", file }, outcome: "error", failure: { message } }]);
+		expect(text.match(/check: Chromium diagnostic/g), message).toHaveLength(1);
+		expect(text).toContain("browser tail");
+	}
+	const unrelated = new ChromiumDiagnosticOutput(slots);
+	unrelated.record({ slot: 1, file, test: 1, contexts: 0, pages: 0, kind: "state", stderr: "browser tail\n" });
+	expect(
+		unrelated.finish([
+			{ test: { key: "unrelated", file }, outcome: "error", failure: { message: "the case was closed" } },
+		]),
+	).toBe("");
+});
+
+test("unchanged stderr snapshots carry forward across tests within a slot", () => {
+	const file = "test/e2e/unchanged-stderr.test.ts";
+	const output = new ChromiumDiagnosticOutput(
+		new Map([[1, { pid: 123, stderr: new StderrTail(), unexpectedExit: null }]]),
+	);
+	output.record({ slot: 1, file, test: 1, contexts: 1, pages: 1, kind: "state", stderr: "unchanged slot stderr\n" });
+	output.record({ slot: 1, file, test: 2, contexts: 0, pages: 0, kind: "state", stderr: null });
+	const text = output.finish([
+		{ test: { key: "first", file }, outcome: "pass" },
+		{ test: { key: "second", file }, outcome: "error", failure: { message: "Target page has been closed" } },
+	]);
+	expect(text.match(/check: Chromium diagnostic/g)).toHaveLength(1);
+	expect(text).toContain("executed test in file: 2");
+	expect(text).toContain("unchanged slot stderr");
+});
+
+test("Chromium side-channel reading ignores damaged records and preserves bounded snapshots", () => {
+	const root = mkdtempSync(join(tmpdir(), "mainworthy-diagnostic-records-"));
+	try {
+		const tail = new StderrTail();
+		tail.append("original crash\n");
+		const state = {
+			slot: 1,
+			file: "test/e2e/probe.test.ts",
+			test: 1,
+			contexts: 1,
+			pages: 1,
+			kind: "crash",
+			at: "2026-10-23T06:00:00.000Z",
+			stderr: tail.text(),
+		};
+		writeFileSync(
+			chromiumDiagnosticPaths(root, 1).records,
+			`null\n{"slot":"wrong"}\n${JSON.stringify(state)}\n{unfinished`,
+		);
+		tail.append("later unrelated output\n".repeat(250));
+		const output = new ChromiumDiagnosticOutput(new Map([[1, { pid: 123, stderr: tail, unexpectedExit: null }]]));
+		output.read(root);
+		const text = output.finish();
+		expect(text.match(/check: Chromium diagnostic/g)).toHaveLength(1);
+		expect(text).toContain("original crash");
+		expect(text).not.toContain("later unrelated output");
+		const large = new StderrTail();
+		large.append("token=x ".repeat(20_000));
+		const bounded = new ChromiumDiagnosticOutput(new Map([[1, { pid: 123, stderr: large, unexpectedExit: null }]]));
+		bounded.record({ ...state, kind: "crash", stderr: large.text() });
+		const printed = bounded.finish().split("Chromium stderr tail (last 200 lines / 64 KiB):\n")[1] ?? "";
+		expect(Buffer.byteLength(printed)).toBeLessThanOrEqual(64 * 1024);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("a non-browser support import stays silent under diagnostics and an installed late-output guard", async () => {
+	const root = mkdtempSync(join(tmpdir(), "mainworthy-diagnostic-import-"));
+	const directory = join(root, "diagnostics");
+	mkdirSync(directory);
+	try {
+		const file = join(root, "port-only.test.ts");
+		writeFileSync(
+			file,
+			`import {afterAll,expect,test} from "bun:test";
+import {reservePort} from ${JSON.stringify(join(process.cwd(), "test/e2e/support.ts"))};
+const original=process.stderr.write;
+const late=[];
+afterAll(()=>{process.stderr.write=original;});
+test("installs a command's late-output guard",()=>{
+ expect(typeof reservePort).toBe("function");
+ process.stderr.write=(chunk)=>{late.push(String(chunk));return true;};
+});
+test("does not capture diagnostic output from a port-only import",()=>{
+ process.stderr.write=original;
+ expect(late).toEqual([]);
+});`,
+		);
+		const child = Bun.spawn([process.execPath, "test", "--parallel=1", file], {
+			env: { ...process.env, MAINWORTHY_E2E_DIAGNOSTICS: "1", MAINWORTHY_E2E_DIAGNOSTICS_DIRECTORY: directory },
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const [stdout, stderr, exit] = await Promise.all([
+			new Response(child.stdout).text(),
+			new Response(child.stderr).text(),
+			child.exited,
+		]);
+		expect({ exit, diagnosticOutput: (stdout + stderr).includes("MAINWORTHY_CHROMIUM") }, stdout + stderr).toEqual({
+			exit: 0,
+			diagnosticOutput: false,
+		});
+		expect(readdirSync(directory)).toEqual([]);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
 
 test("browser slots follow Bun's worker index and preserve local browser ownership", () => {
 	const env = { MAINWORTHY_E2E_BROWSER_ENDPOINTS: "ws://127.0.0.1:1/a\nws://127.0.0.1:2/b", BUN_TEST_WORKER_ID: "2" };
@@ -79,6 +350,7 @@ test.skipIf(findChromium().path === null)(
 		const { chromium } = await import("playwright-core");
 		const browser = await chromium.launchServer(chromiumLaunchOptions(path));
 		const root = mkdtempSync(join(tmpdir(), "mainworthy-browser-files-"));
+		writeFileSync(chromiumDiagnosticPaths(root, 1).stderr, `unchanged 25 KB stderr ${"x".repeat(25_000)}`);
 		const server = Bun.serve({
 			hostname: "127.0.0.1",
 			port: 0,
@@ -105,7 +377,8 @@ test("first file leaves a page and storage for its disconnect to clean", async (
  await context.addCookies([{name: "left-behind", value: "first", url: server.url}]);
  expect((await context.cookies()).map(cookie => cookie.name)).toEqual(["left-behind"]);
  expect(await page.evaluate(() => localStorage.getItem("left-behind"))).toBe("first");
-});`,
+});
+test("a second test reuses unchanged stderr",()=>{});`,
 			);
 			writeFileSync(
 				join(root, "second.test.ts"),
@@ -137,6 +410,8 @@ test("second file has fresh storage and the first file's page is gone", async ()
 						MAINWORTHY_E2E_BROWSER_ENDPOINTS: browser.wsEndpoint(),
 						MAINWORTHY_E2E_CPU_THROTTLE: "",
 						BUN_TEST_WORKER_ID: "1",
+						MAINWORTHY_E2E_DIAGNOSTICS: "1",
+						MAINWORTHY_E2E_DIAGNOSTICS_DIRECTORY: root,
 					},
 					stdout: "pipe",
 					stderr: "pipe",
@@ -147,10 +422,25 @@ test("second file has fresh storage and the first file's page is gone", async ()
 				new Response(child.stderr).text(),
 				child.exited,
 			]);
-			expect({ exit, output: (out + err).match(/2 pass\s+0 fail/)?.[0].replace(/\s+/g, " ") }, out + err).toEqual({
+			expect({ exit, output: (out + err).match(/3 pass\s+0 fail/)?.[0].replace(/\s+/g, " ") }, out + err).toEqual({
 				exit: 0,
-				output: "2 pass 0 fail",
+				output: "3 pass 0 fail",
 			});
+			expect(out + err).not.toContain("MAINWORTHY_CHROMIUM ");
+			const lines = (out + err).split("\n").filter((line) => line.trim());
+			for (const [index, line] of lines.entries()) {
+				if (!/\.test\.ts:$/.test(line)) continue;
+				expect(lines[index + 1]).toBeDefined();
+				expect(lines[index + 1]).not.toMatch(/\.test\.ts:$/);
+			}
+			expect(existsSync(chromiumDiagnosticPaths(root, 1).records)).toBe(true);
+			const records = readFileSync(chromiumDiagnosticPaths(root, 1).records, "utf8")
+				.trim()
+				.split("\n")
+				.map((line) => z.object({ stderr: z.string().nullable() }).parse(JSON.parse(line)));
+			const snapshots = records.filter((record) => record.stderr !== null);
+			expect(snapshots).toHaveLength(2); // One unchanged payload per isolated file, rather than per test.
+			expect(snapshots.map((record) => record.stderr?.length)).toEqual([25_023, 25_023]);
 			expect(browser.process().exitCode).toBeNull();
 		} finally {
 			await browser.close();
@@ -261,7 +551,14 @@ test("a broken browser fixture build fails the check before any test runs, even 
 	try {
 		for (const dir of ["scripts/work", "test/e2e", "src/server/ops", "src/cli"])
 			mkdirSync(join(root, dir), { recursive: true });
-		for (const file of ["check.ts", "check-plan.ts", "preflight.ts", "work/processes.ts", "work/run.ts"])
+		for (const file of [
+			"check.ts",
+			"check-plan.ts",
+			"chromium-diagnostics.ts",
+			"preflight.ts",
+			"work/processes.ts",
+			"work/run.ts",
+		])
 			copyFileSync(`scripts/${file}`, join(root, "scripts", file));
 		writeFileSync(join(root, "package.json"), "{}");
 		writeFileSync(join(root, "test/e2e/serve.ts"), "const broken = ;");
@@ -615,11 +912,20 @@ test("every way to run a test asks the machine first, and the Bun asked for is o
 			(match) => match[1] ?? "",
 		);
 	expect(loaded("scripts/check.ts").sort()).toEqual(
-		["./check-plan.ts", "./preflight.ts", "./work/processes.ts", "node:fs", "node:os", "node:path"].sort(),
+		[
+			"./check-plan.ts",
+			"./chromium-diagnostics.ts",
+			"./preflight.ts",
+			"./work/processes.ts",
+			"node:fs",
+			"node:os",
+			"node:path",
+		].sort(),
 	);
 	expect(loaded("scripts/work/processes.ts").sort()).toEqual(["./run.ts", "node:fs", "node:fs/promises", "node:path"]);
 	expect(loaded("scripts/work/run.ts")).toEqual([]);
 	expect(loaded("scripts/check-plan.ts").sort()).toEqual(["bun", "node:fs", "node:os", "node:path"]);
+	expect(loaded("scripts/chromium-diagnostics.ts").sort()).toEqual(["node:fs", "node:path"]);
 	expect(loaded("scripts/preflight.ts").sort()).toEqual(["node:fs", "node:path"]);
 	expect(loaded("test/preflight.ts")).toEqual(["../scripts/preflight.ts"]);
 	const check = readFileSync("scripts/check.ts", "utf8");
