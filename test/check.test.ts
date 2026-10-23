@@ -250,9 +250,9 @@ test("a browser phase builds once, including quiet and shards, but named server 
 test("a broken browser fixture build fails the check before any test runs, even with an inherited executable", async () => {
 	const root = mkdtempSync(join(tmpdir(), "mainworthy-broken-fixture-"));
 	try {
-		for (const dir of ["scripts", "test/e2e", "src/server/ops", "src/cli"])
+		for (const dir of ["scripts/work", "test/e2e", "src/server/ops", "src/cli"])
 			mkdirSync(join(root, dir), { recursive: true });
-		for (const file of ["check.ts", "check-plan.ts", "preflight.ts"])
+		for (const file of ["check.ts", "check-plan.ts", "preflight.ts", "work/processes.ts", "work/run.ts"])
 			copyFileSync(`scripts/${file}`, join(root, "scripts", file));
 		writeFileSync(join(root, "package.json"), "{}");
 		writeFileSync(join(root, "test/e2e/serve.ts"), "const broken = ;");
@@ -513,8 +513,10 @@ test("every way to run a test asks the machine first, and the Bun asked for is o
 			(match) => match[1] ?? "",
 		);
 	expect(loaded("scripts/check.ts").sort()).toEqual(
-		["./check-plan.ts", "./preflight.ts", "node:fs", "node:os", "node:path"].sort(),
+		["./check-plan.ts", "./preflight.ts", "./work/processes.ts", "node:fs", "node:os", "node:path"].sort(),
 	);
+	expect(loaded("scripts/work/processes.ts").sort()).toEqual(["./run.ts", "node:fs", "node:fs/promises", "node:path"]);
+	expect(loaded("scripts/work/run.ts")).toEqual([]);
 	expect(loaded("scripts/check-plan.ts").sort()).toEqual(["bun", "node:fs", "node:os", "node:path"]);
 	expect(loaded("scripts/preflight.ts").sort()).toEqual(["node:fs", "node:path"]);
 	expect(loaded("test/preflight.ts")).toEqual(["../scripts/preflight.ts"]);

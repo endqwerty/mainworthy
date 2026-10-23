@@ -1,5 +1,5 @@
 import { afterAll } from "bun:test";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -144,50 +144,92 @@ export async function startServer({
 	const token = crypto.randomUUID();
 	const url = `http://127.0.0.1:${port}`;
 	const executable = source ? undefined : process.env.MAINWORTHY_E2E_SERVER;
-	let child: Bun.Subprocess<"ignore", "ignore", "pipe">;
+	let child: Bun.Subprocess<"pipe", "ignore", "pipe">;
 	try {
-		child = Bun.spawn(executable === undefined ? [process.execPath, "test/e2e/serve.ts"] : [executable], {
-			cwd: process.cwd(),
-			env: {
-				...process.env,
-				NODE_ENV: "production",
-				MAINWORTHY_DATA: dataDir,
-				MAINWORTHY_PORT: String(port),
-				MAINWORTHY_MODE: mode,
-				MAINWORTHY_FIRST_PROJECT: firstProject,
-				MAINWORTHY_OWNER_TOKEN: token,
-				MAINWORTHY_PUBLIC_URL: passkeys || mail || oidc ? `http://localhost:${port}` : "",
-				MAINWORTHY_OIDC_ISSUER: oidc?.issuer ?? "",
-				MAINWORTHY_OIDC_CLIENT_ID: oidc?.clientId ?? "",
-				MAINWORTHY_OIDC_CLIENT_SECRET: oidc?.clientSecret ?? "",
-				MAINWORTHY_OIDC_NAME: oidc?.name ?? "",
-				MAINWORTHY_SMTP_HOST: mail ? "127.0.0.1" : "",
-				MAINWORTHY_SMTP_PORT: mail ? String(mail.port) : "",
-				MAINWORTHY_SMTP_TLS: mail ? "none" : "",
-				MAINWORTHY_SMTP_USER: "",
-				MAINWORTHY_SMTP_PASSWORD: "",
-				MAINWORTHY_MAIL_FROM: mail ? "mainworthy@example.com" : "",
-				MAINWORTHY_HANDOFF_PROJECT: handoff ? firstProject : "",
-				MAINWORTHY_HANDOFF_URL: handoff?.url ?? "",
-				MAINWORTHY_HANDOFF_SECRET: handoff?.secret ?? "",
-				MAINWORTHY_READERS: process.env.MAINWORTHY_READERS ?? testReaders(),
+		const lock = join(tmpdir(), `mainworthy-e2e-port-${port}`);
+		child = Bun.spawn(
+			[
+				// Bun's Linux no-orphans spawn installs PDEATHSIG even when the child's env disables it.
+				// A shell fork clears that signal; the supervisor can outlive worker loss and reap its group.
+				"/bin/sh",
+				"-c",
+				'"$@" <&0 & wait "$!"',
+				"mainworthy-fixture-supervisor",
+				process.execPath,
+				"test/e2e/supervise.ts",
+				JSON.stringify({
+					command: executable === undefined ? [process.execPath, "test/e2e/serve.ts"] : [executable],
+					data: dataDir,
+					lock,
+					inode: (await stat(lock)).ino,
+				}),
+			],
+			{
+				cwd: process.cwd(),
+				env: {
+					...process.env,
+					// Bun's inherited no-orphans mode SIGKILLs on parent loss before JS can clean up. This
+					// supervisor must instead finish its pipe-driven, bounded shutdown after the worker dies.
+					BUN_FEATURE_FLAG_NO_ORPHANS: "0",
+					NODE_ENV: "production",
+					MAINWORTHY_DATA: dataDir,
+					MAINWORTHY_PORT: String(port),
+					MAINWORTHY_MODE: mode,
+					MAINWORTHY_FIRST_PROJECT: firstProject,
+					MAINWORTHY_OWNER_TOKEN: token,
+					MAINWORTHY_PUBLIC_URL: passkeys || mail || oidc ? `http://localhost:${port}` : "",
+					MAINWORTHY_OIDC_ISSUER: oidc?.issuer ?? "",
+					MAINWORTHY_OIDC_CLIENT_ID: oidc?.clientId ?? "",
+					MAINWORTHY_OIDC_CLIENT_SECRET: oidc?.clientSecret ?? "",
+					MAINWORTHY_OIDC_NAME: oidc?.name ?? "",
+					MAINWORTHY_SMTP_HOST: mail ? "127.0.0.1" : "",
+					MAINWORTHY_SMTP_PORT: mail ? String(mail.port) : "",
+					MAINWORTHY_SMTP_TLS: mail ? "none" : "",
+					MAINWORTHY_SMTP_USER: "",
+					MAINWORTHY_SMTP_PASSWORD: "",
+					MAINWORTHY_MAIL_FROM: mail ? "mainworthy@example.com" : "",
+					MAINWORTHY_HANDOFF_PROJECT: handoff ? firstProject : "",
+					MAINWORTHY_HANDOFF_URL: handoff?.url ?? "",
+					MAINWORTHY_HANDOFF_SECRET: handoff?.secret ?? "",
+					MAINWORTHY_READERS: process.env.MAINWORTHY_READERS ?? testReaders(),
+				},
+				stdout: "ignore",
+				stderr: "pipe",
+				stdin: "pipe",
+				detached: true,
 			},
-			stdout: "ignore",
-			stderr: "pipe",
-		});
+		);
+		// The supervisor now releases these only after the fixture has exited, including after worker SIGKILL.
+		ownedDirectories.delete(dataDir);
+		ownedDirectories.delete(lock);
 	} catch (error) {
 		await rm(dataDir, { recursive: true, force: true });
 		ownedDirectories.delete(dataDir);
 		await reservation.release();
 		throw error;
 	}
-	const stop = async () => {
-		child.kill("SIGTERM");
-		await child.exited;
-		await rm(dataDir, { recursive: true, force: true });
-		ownedDirectories.delete(dataDir);
-		await reservation.release();
-	};
+	let stopping: Promise<void> | undefined;
+	const stop = () =>
+		(stopping ??= (async () => {
+			child.stdin.end();
+			// The supervisor normally finishes inside 1.5 seconds, even with a blocked fixture. Bound the owner
+			// too: a supervisor failure must not leave teardown awaiting a child forever.
+			const force = setTimeout(() => {
+				try {
+					const pid = Number(readFileSync(join(dataDir, "fixture-pid"), "utf8"));
+					if (Number.isSafeInteger(pid) && pid > 0) process.kill(-pid, "SIGKILL");
+				} catch {}
+				try {
+					process.kill(-child.pid, "SIGKILL");
+				} catch {}
+			}, 3_000);
+			try {
+				const code = await child.exited;
+				if (code !== 0) throw new Error(`Mainworthy e2e supervisor exited with ${code}`);
+			} finally {
+				clearTimeout(force);
+			}
+		})());
 	try {
 		let ready = false;
 		for (let i = 0; i < 300; i++) {

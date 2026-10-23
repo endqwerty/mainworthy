@@ -4,6 +4,7 @@ import { defaultConfig, SESSION_LIFETIMES } from "../../src/server/kernel/app.ts
 import { archiveRoutes } from "../../src/surfaces/archive.ts";
 import { docsRoutes } from "../../src/surfaces/docs/site.ts";
 import ui from "../../src/web/index.html";
+import { watchLifetime } from "./lifetime.ts";
 
 // The instance's clock, which a test moves forward instead of waiting for an invitation to run out:
 // `POST /test/clock` with `{ "advanceMs": n }`, from a session that administers.
@@ -44,7 +45,4 @@ const instance = start(
 	{ now: () => Date.now() + ahead, firstProject: process.env.MAINWORTHY_FIRST_PROJECT ?? "scratch" },
 );
 console.info(instance.url);
-for (const signal of ["SIGTERM", "SIGINT"] satisfies NodeJS.Signals[])
-	process.on(signal, () => {
-		void instance.stop().then(() => process.exit(0));
-	});
+watchLifetime(() => instance.stop());

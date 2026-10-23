@@ -2,7 +2,8 @@
 // and the shell that runs them has the pattern in its own; they also match another agent's. These read the process
 // table, leave the caller and its parents out, and stop only a server that runs from this checkout.
 import { existsSync, readdirSync, readlinkSync } from "node:fs";
-import { basename } from "node:path";
+import { readdir, rm, writeFile } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { read, run, sleep } from "./run.ts";
 
 export type Proc = { pid: number; ppid: number; command: string };
@@ -16,6 +17,31 @@ export function parseProcessTable(table: string): Proc[] {
 
 export async function processTable(): Promise<Proc[]> {
 	return parseProcessTable(await read(["ps", "-axo", "pid=,ppid=,command="]));
+}
+
+/** A private directory supplied by check.ts, never a process-name match across other runs. */
+export async function registerOwnedChild(pid: number): Promise<() => Promise<void>> {
+	const directory = process.env.MAINWORTHY_TEST_CHILDREN;
+	if (!directory) return async () => {};
+	// The PID is in the atomically created name, so a snapshot never reads a half-written record.
+	const path = join(directory, `${pid}-${crypto.randomUUID()}.child`);
+	await writeFile(path, "");
+	return () => rm(path, { force: true });
+}
+
+export async function ownedChildren(directory: string): Promise<number[]> {
+	const pids = new Set<number>();
+	for (const name of await readdir(directory)) {
+		const pid = Number(/^(\d+)-[\da-f-]+\.child$/.exec(name)?.[1]);
+		if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error(`invalid owned child record: ${name}`);
+		try {
+			process.kill(pid, 0);
+			pids.add(pid);
+		} catch (error) {
+			if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) throw error;
+		}
+	}
+	return [...pids];
 }
 
 /** The caller and every process above it: a pattern in the caller's own command line is not a match. */
