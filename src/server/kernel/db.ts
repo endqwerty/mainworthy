@@ -1,7 +1,14 @@
 // Driver connections never leave this module. A scope owns one backend until its callback ends.
 import { type ReservedSQL, SQL } from "bun";
 
-export type SqlValue = string | number | bigint | boolean | null | Uint8Array | readonly (string | number | bigint)[];
+export type SqlValue =
+	| string
+	| number
+	| bigint
+	| boolean
+	| null
+	| Uint8Array
+	| readonly (string | number | bigint | null)[];
 export type Params = Readonly<Record<string, SqlValue>> | readonly SqlValue[];
 export type Args<P extends Params> = P extends readonly [] ? [] : [params: P];
 export type Statement<P extends Params, R> = {
@@ -167,9 +174,11 @@ function safeInteger(value: bigint, column: string): number {
 		throw new RangeError(`PostgreSQL bigint in ${column} exceeds the safe integer range`);
 	return Number(value);
 }
-export function arrayLiteral(values: readonly (string | number | bigint)[]): string {
+/** A PostgreSQL array literal. A null element is the bare word NULL; a text element is always quoted, so "NULL" stays text. */
+export function arrayLiteral(values: readonly (string | number | bigint | null)[]): string {
 	return `{${values
 		.map((value) => {
+			if (value === null) return "NULL";
 			if (typeof value === "string") return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 			if (typeof value === "bigint") return String(value);
 			if (
