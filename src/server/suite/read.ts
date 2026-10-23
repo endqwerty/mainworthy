@@ -4,7 +4,7 @@ import { diffBodies, summariseDiff } from "../../core/diff.ts";
 import { type Automate, type CaseBody, cleanPath } from "../../core/model.ts";
 import type { Selection } from "../../core/ops.ts";
 import type { Ctx } from "../kernel/ctx.ts";
-import { type ReadDb, json, placeholders, type SqlValue, sql } from "../kernel/db.ts";
+import { json, type ReadDb, type SqlValue, sql } from "../kernel/db.ts";
 import { invalid, notFound } from "../kernel/errors.ts";
 import { type CaseRow, type FolderIndex, type FolderRow, folderIndex, mustCase, type VersionRow } from "./suite.ts";
 

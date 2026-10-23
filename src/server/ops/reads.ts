@@ -89,7 +89,7 @@ import { deployments } from "../evidence/releases.ts";
 import { flipsOf } from "../evidence/stats.ts";
 import { actorLabel } from "../identity/identity.ts";
 import { type Ctx, findCommand, UNFINISHED } from "../kernel/ctx.ts";
-import { json } from "../kernel/db.ts";
+import { json, type ReadDb } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
 import { currentPolicy, policyName } from "../policy/policy.ts";
 import {
@@ -152,11 +152,11 @@ import {
 import { withTrackerPollError } from "../trackers/polls.ts";
 import { defineOp } from "./registry.ts";
 
-const who = async (ctx: Ctx, id: number) => await actorLabel(ctx.db, id);
+const who = async (ctx: Ctx<ReadDb>, id: number) => await actorLabel(ctx.db, id);
 
 // ── inbox ──────────────────────────────────────────────────────────────────────────────────────────────────
 
-export async function inbox(ctx: Ctx, input: InboxInput): Promise<InboxReply> {
+export async function inbox(ctx: Ctx<ReadDb>, input: InboxInput): Promise<InboxReply> {
 	const limit = input.limit ?? 50;
 	const counts = await openCounts(ctx.db, ctx.project.id);
 	let rows: QuestionRow[];
@@ -232,7 +232,7 @@ const CASE_FIELDS = [
 ] as const;
 
 export async function caseView(
-	ctx: Ctx,
+	ctx: Ctx<ReadDb>,
 	row: CaseRow,
 	options: { fields?: readonly string[] | undefined; version?: number | undefined } = {},
 ): Promise<Record<string, unknown>> {
@@ -253,7 +253,7 @@ export async function caseView(
 	if (want.has("title")) out.title = body.title;
 	if (want.has("pre")) out.pre = body.pre;
 	if (want.has("steps")) {
-		out.steps = expandSteps(ctx.db, ctx.project.id, body);
+		out.steps = await expandSteps(ctx.db, ctx.project.id, body);
 		const hasFragments = body.steps.some((step) => Boolean(step.use));
 		if (hasFragments) out.sourceSteps = body.steps;
 		out.hasFragments = hasFragments;
@@ -286,13 +286,13 @@ export async function caseView(
 	return out;
 }
 
-async function runTarget(ctx: Ctx, run: RunRow): Promise<TargetRow | null> {
+async function runTarget(ctx: Ctx<ReadDb>, run: RunRow): Promise<TargetRow | null> {
 	const accepts = json<{ commit?: string; repo?: string }>(run.accepts);
 	return accepts.commit ? await targetByCommit(ctx.db, ctx.project.id, accepts.commit, accepts.repo ?? null) : null;
 }
 
 export async function runView(
-	ctx: Ctx,
+	ctx: Ctx<ReadDb>,
 	run: RunRow,
 	locationOf = async (target: TargetRow) => await resultLocation(ctx.db, target),
 ): Promise<Record<string, unknown>> {
@@ -363,7 +363,11 @@ export async function runView(
  * so it can still be refused when no edit is.
  * The reply holds at most 200 edits. `count` says how many the proposal has; `cursor` reads the next page at the same project sequence.
  */
-async function proposalView(ctx: Ctx, proposal: ProposalRow, cursor?: string): Promise<Record<string, unknown>> {
+async function proposalView(
+	ctx: Ctx<ReadDb>,
+	proposal: ProposalRow,
+	cursor?: string,
+): Promise<Record<string, unknown>> {
 	const at = cursor ? /^(\d+)\.(\d+)\.(\d+)$/.exec(cursor) : null;
 	if (cursor && (!at || Number(at[1]) !== proposal.no || !Number.isSafeInteger(Number(at[3])) || Number(at[3]) < 1))
 		throw invalid("that is not a cursor of this proposal");
@@ -486,7 +490,7 @@ async function proposalView(ctx: Ctx, proposal: ProposalRow, cursor?: string): P
 }
 
 async function resultView(
-	ctx: Ctx,
+	ctx: Ctx<ReadDb>,
 	row: ResultRow,
 	locationOf = async (target: TargetRow) => await resultLocation(ctx.db, target),
 ): Promise<Record<string, unknown>> {
@@ -520,7 +524,7 @@ async function resultView(
 	};
 }
 
-async function quarantineView(ctx: Ctx, test: number) {
+async function quarantineView(ctx: Ctx<ReadDb>, test: number) {
 	const entry = await quarantineEntry(ctx.db, ctx.project.id, test);
 	return entry
 		? {
@@ -533,10 +537,10 @@ async function quarantineView(ctx: Ctx, test: number) {
 			}
 		: null;
 }
-export function get(ctx: Ctx, input: GetInput): Record<string, unknown>[] {
+export async function get(ctx: Ctx<ReadDb>, input: GetInput): Promise<Record<string, unknown>[]> {
 	if (input.cursor && (input.refs.length !== 1 || !/^P-\d+$/i.test(input.refs[0]?.trim() ?? "")))
 		throw invalid("a proposal cursor needs exactly one P- ref");
-	return input.refs.map((text) => {
+	const readOne = async (text: string): Promise<Record<string, unknown>> => {
 		if (text.startsWith("result:")) {
 			const id = /^result:([1-9]\d*)$/.exec(text)?.[1];
 			const row = id && Number.isSafeInteger(Number(id)) ? resultById(ctx.db, Number(id)) : null;
@@ -597,28 +601,31 @@ export function get(ctx: Ctx, input: GetInput): Record<string, unknown>[] {
 			if (!proposal) throw notFound(`proposal ${text}`);
 			return proposalView(ctx, proposal, input.cursor);
 		}
-		const row = mustCase(ctx.db, ctx.project.id, text);
+		const row = await mustCase(ctx.db, ctx.project.id, text);
 		const version = input.refs.length === 1 ? input.version : undefined;
 		let document: Record<string, unknown>;
 		if (input.as === "md") {
-			const stored = versionOf(ctx.db, row.id, version ?? row.head);
+			const stored = await versionOf(ctx.db, row.id, version ?? row.head);
 			if (!stored) throw notFound(`${caseRef(row)} version ${version}`);
 			const md = printCase({
 				ref: caseRef(row),
 				kind: row.kind,
 				body: json<CaseBody>(stored.body),
 				tags: json<string[]>(row.tags),
-				covers: coversOf(ctx.db, row.id),
+				covers: await coversOf(ctx.db, row.id),
 			});
 			document = { ref: caseRef(row), version: stored.no, hash: stored.hash, md };
 		} else {
-			document = caseView(ctx, row, { fields: input.fields, version });
+			document = await caseView(ctx, row, { fields: input.fields, version });
 		}
 		const etag = contentHash(document);
 		if (version === undefined && input.unless?.[caseRef(row)] === etag)
 			return { ref: caseRef(row), unchanged: true, hash: document.hash, etag };
 		return { ...document, etag };
-	});
+	};
+	const out: Record<string, unknown>[] = [];
+	for (const text of input.refs) out.push(await readOne(text));
+	return out;
 }
 
 export const getOp = defineOp({
@@ -656,7 +663,7 @@ const FAILS_GATE: ReadonlySet<string> = new Set(["unexplained", "attributed"]);
  * that list changed is refused, and the list is read again from the start, instead of skipping or repeating the row
  * that moved.
  */
-async function countedResults(ctx: Ctx, input: FindInput, limit: number): Promise<Found> {
+async function countedResults(ctx: Ctx<ReadDb>, input: FindInput, limit: number): Promise<Found> {
 	if (!input.commit && !input.change && !input.run) throw invalid("results need a commit, a change or a run");
 	const wanted = input.state;
 	if (wanted !== undefined && !isResultStanding(wanted))
@@ -734,7 +741,7 @@ function parseResultCursor(cursor: string): { rank: number; result: number; vers
 }
 
 async function countedView(
-	ctx: Ctx,
+	ctx: Ctx<ReadDb>,
 	row: CountedTest,
 	locationOf: (target: TargetRow) => ReturnType<typeof resultLocation>,
 ): Promise<Record<string, unknown>> {
@@ -769,14 +776,18 @@ async function countedView(
 }
 
 /** The case a counted result is evidence for: the one it claimed, else the one its test is linked to. */
-async function caseOfCount(ctx: Ctx, row: CountedTest, test: { case_id: number | null }): Promise<CaseRow | null> {
+async function caseOfCount(
+	ctx: Ctx<ReadDb>,
+	row: CountedTest,
+	test: { case_id: number | null },
+): Promise<CaseRow | null> {
 	const claimed = resultById(ctx.db, row.result)?.basis_case ?? null;
 	const id = claimed ?? test.case_id;
 	return id !== null ? await caseById(ctx.db, id) : null;
 }
 
 /** The question a failure's standing comes from: the one that decided it, or the open one it waits for. */
-async function questionOfCount(ctx: Ctx, row: CountedTest): Promise<string | null> {
+async function questionOfCount(ctx: Ctx<ReadDb>, row: CountedTest): Promise<string | null> {
 	if (row.excuse) {
 		const decision = await decisionById(ctx.db, row.excuse.decision);
 		const question = decision ? await questionById(ctx.db, decision.question) : null;
@@ -793,7 +804,7 @@ async function questionOfCount(ctx: Ctx, row: CountedTest): Promise<string | nul
 	return open ? questionRef(open) : null;
 }
 
-async function caseProof(ctx: Ctx, row: CaseRow) {
+async function caseProof(ctx: Ctx<ReadDb>, row: CaseRow) {
 	const proofs = await proofOf(ctx.db, row);
 	const one = async (proof: (typeof proofs)[MethodKind]) => {
 		if (!proof) return null;
@@ -814,7 +825,7 @@ async function caseProof(ctx: Ctx, row: CaseRow) {
 	return { human: await one(proofs.human), auto: await one(proofs.auto), agent: await one(proofs.agent) };
 }
 
-async function caseRow(ctx: Ctx, row: CaseRow, rich: boolean): Promise<Record<string, unknown>> {
+async function caseRow(ctx: Ctx<ReadDb>, row: CaseRow, rich: boolean): Promise<Record<string, unknown>> {
 	const base: Record<string, unknown> = {
 		ref: caseRef(row),
 		title: row.title,
@@ -836,7 +847,7 @@ async function caseRow(ctx: Ctx, row: CaseRow, rich: boolean): Promise<Record<st
 	return base;
 }
 
-async function slotRow(ctx: Ctx, slot: SlotRow): Promise<Record<string, unknown>> {
+async function slotRow(ctx: Ctx<ReadDb>, slot: SlotRow): Promise<Record<string, unknown>> {
 	const row = await caseById(ctx.db, slot.case_id);
 	const fills = await fillsOf(ctx.db, slot.id);
 	const lease = await leaseOf(ctx, slot.id);
@@ -869,7 +880,7 @@ async function slotRow(ctx: Ctx, slot: SlotRow): Promise<Record<string, unknown>
 
 const RUN_STATES = ["open", "closed"] as const satisfies readonly RunRow["state"][];
 
-export async function find(ctx: Ctx, input: FindInput): Promise<Found> {
+export async function find(ctx: Ctx<ReadDb>, input: FindInput): Promise<Found> {
 	const limit = input.limit ?? 100;
 	const project = ctx.project.id;
 	switch (input.in) {
@@ -1065,7 +1076,7 @@ export const findOp = defineOp({
 
 // ── history and timeline ───────────────────────────────────────────────────────────────────────────────────
 
-export async function history(ctx: Ctx, input: HistoryInput): Promise<Record<string, unknown>> {
+export async function history(ctx: Ctx<ReadDb>, input: HistoryInput): Promise<Record<string, unknown>> {
 	const row = await mustCase(ctx.db, ctx.project.id, input.ref);
 	if (input.from !== undefined || input.to !== undefined) {
 		const to = input.to ?? row.head;
@@ -1101,7 +1112,10 @@ export const historyOp = defineOp({
 });
 
 /** Everything that happened to a case, newest first: versions, moves, results from every producer, findings, questions. */
-export async function timeline(ctx: Ctx, input: z.infer<typeof TimelineInput>): Promise<Record<string, unknown>> {
+export async function timeline(
+	ctx: Ctx<ReadDb>,
+	input: z.infer<typeof TimelineInput>,
+): Promise<Record<string, unknown>> {
 	const row = await mustCase(ctx.db, ctx.project.id, input.ref);
 	const limit = input.limit ?? 100;
 	type Entry = { t: string; seq: number; at: number } & Record<string, unknown>;
@@ -1204,7 +1218,7 @@ export const gateOp = defineOp({
 	scope: "project",
 	effect: "read",
 	mcp: null,
-	run: async (ctx: Ctx, input: GateInput): Promise<GateStatus> => await gate(ctx, input),
+	run: async (ctx: Ctx<ReadDb>, input: GateInput): Promise<GateStatus> => await gate(ctx, input),
 });
 
 // ── since ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1233,7 +1247,7 @@ function parseCursor(cursor: string): Cursor {
 
 const cursorSeq = (cursor: string): number => parseCursor(cursor).base;
 
-export async function since(ctx: Ctx, input: SinceInput): Promise<Record<string, unknown>> {
+export async function since(ctx: Ctx<ReadDb>, input: SinceInput): Promise<Record<string, unknown>> {
 	const from = parseCursor(input.cursor);
 	const limit = input.limit ?? 200;
 	/** One page and where the next starts: after the last row returned, or past everything when the page is whole. */
@@ -1301,7 +1315,7 @@ export const sinceOp = defineOp({
 
 /** A type-checker for the suite: structural problems the data can show, with no model involved. */
 export async function check(
-	ctx: Ctx,
+	ctx: Ctx<ReadDb>,
 	input: z.infer<typeof CheckInput>,
 ): Promise<{ problems: Problem[]; counts: Record<string, number> }> {
 	const limit = input.limit ?? 200;
@@ -1344,7 +1358,7 @@ export const checkOp = defineOp({
  * pull request never had, so this is not the change's gate unless it is the head. `run` is null when nothing a gate
  * counts has been reported for it.
  */
-async function landingView(ctx: Ctx, change: ChangeRow) {
+async function landingView(ctx: Ctx<ReadDb>, change: ChangeRow) {
 	const landing = landingOf(change);
 	if (!landing) return null;
 	const status = await gateOfCommitIn(ctx, change.repo, landing.commit);
@@ -1361,7 +1375,7 @@ async function landingView(ctx: Ctx, change: ChangeRow) {
  * Where to look for a change: the cases it touches, why each is in the set, its last result, whether this caller
  * already reviewed it at this version and change head, and the questions already open or decided. Counts first, bounded.
  */
-export async function impact(ctx: Ctx, input: ImpactInput): Promise<Record<string, unknown>> {
+export async function impact(ctx: Ctx<ReadDb>, input: ImpactInput): Promise<Record<string, unknown>> {
 	const project = ctx.project.id;
 	const version = contentHash({
 		project: ctx.project.identity,
@@ -1526,7 +1540,7 @@ export const impactOp = defineOp({
  * is `none`: an id tells nobody what somebody else did. An instance command is in no project, so its reply,
  * which can stand for a secret, is never returned here.
  */
-export async function commandFate(ctx: Ctx, input: CommandInput): Promise<CommandFate> {
+export async function commandFate(ctx: Ctx<ReadDb>, input: CommandInput): Promise<CommandFate> {
 	const row = await findCommand(ctx.db, input.cmd);
 	if (!row || row.project !== ctx.project.id || row.actor !== ctx.actor.id) return { state: "none" };
 	if (row.outcome === UNFINISHED) return { state: "begun", op: row.op };

@@ -2,7 +2,7 @@ import { type Capability, heldCapabilities } from "../../core/kinds.ts";
 import type { TeamEvent, TeamInput } from "../../core/teams.ts";
 import type { App } from "../kernel/app.ts";
 import { type Actor, allProjects } from "../kernel/ctx.ts";
-import { type ReadDb, type WriteDb, json, sql } from "../kernel/db.ts";
+import { json, type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
 import { hasAdminGrant, providerVouches } from "./identity.ts";
 import { endSessionsWithoutFactor, requireRecentProof } from "./sessions.ts";
@@ -39,7 +39,7 @@ const Q = {
 	),
 	effective: sql<{ actor: number; project: number | null }, Grant>(
 		`SELECT g.project, g.can FROM team_grants g JOIN team_members m ON m.team = g.team
-		 WHERE m.actor = $actor AND ($project IS NULL OR g.project = 0 OR g.project = $project)`,
+		 WHERE m.actor = $actor AND ($project::bigint IS NULL OR g.project = 0 OR g.project = $project)`,
 	),
 	event: sql<{
 		team: number;

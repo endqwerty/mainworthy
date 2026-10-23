@@ -59,7 +59,7 @@ test("concurrent starters apply one baseline under the migration lease", async (
 	const first = await Database.open({ url: fixture.url });
 	const second = await Database.open({ url: fixture.url });
 	try {
-		await Promise.all([await migrate(first), await migrate(second)]);
+		await Promise.all([migrate(first), migrate(second)]);
 		expect(await first.read(schemaVersion)).toBe(SCHEMA_VERSION);
 		expect(await second.read(schemaVersion)).toBe(SCHEMA_VERSION);
 	} finally {
@@ -98,7 +98,7 @@ test("failed DDL rolls back the entire baseline; the released lease can retry", 
 	try {
 		// Conflict late in the baseline so earlier CREATE statements must roll back.
 		await raw.unsafe("CREATE TABLE results(id bigint)");
-		await expect(await migrate(target)).rejects.toThrow();
+		await expect(migrate(target)).rejects.toThrow();
 		expect(await target.read(schemaVersion)).toBe(0);
 		expect(
 			await raw.unsafe<{ tablename: string }[]>(
@@ -109,9 +109,9 @@ test("failed DDL rolls back the entire baseline; the released lease can retry", 
 		await migrate(target);
 		expect(await target.read(schemaVersion)).toBe(SCHEMA_VERSION);
 		await raw.unsafe("UPDATE meta SET value='wrong' WHERE key='baseline_hash'");
-		await expect(await migrate(target)).rejects.toThrow("baseline does not match");
+		await expect(migrate(target)).rejects.toThrow("baseline does not match");
 		await raw.unsafe("UPDATE meta SET value='2' WHERE key='schema_version'");
-		await expect(await migrate(target)).rejects.toThrow("newer than this build");
+		await expect(migrate(target)).rejects.toThrow("newer than this build");
 	} finally {
 		await raw.close();
 		await target.close();

@@ -23,7 +23,7 @@ import {
 import type { App, Config } from "../kernel/app.ts";
 import type { CallerReference } from "../kernel/caller.ts";
 import type { Actor } from "../kernel/ctx.ts";
-import { type Db, type ReadDb, type WriteDb, json, sql } from "../kernel/db.ts";
+import { json, type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { conflict, forbidden, invalid, notFound } from "../kernel/errors.ts";
 import { limiterOf } from "./attempts.ts";
 import { clearChallenges } from "./challenges.ts";
@@ -137,8 +137,8 @@ const Q = {
 	insertOrg: sql<{ name: string; at: number }>("INSERT INTO orgs (name, created_at) VALUES ($name, $at)"),
 	actorByName: sql<{ org: number; name: string }, ActorRow>("SELECT * FROM actors WHERE org = $org AND name = $name"),
 	actorById: sql<{ id: number }, ActorRow>("SELECT * FROM actors WHERE id = $id"),
-	insertActor: sql<{ org: number; kind: string; name: string; behalf: number | null; at: number }>(
-		"INSERT INTO actors (org, kind, name, on_behalf_of, created_at) VALUES ($org, $kind, $name, $behalf, $at)",
+	insertActor: sql<{ org: number; kind: string; name: string; behalf: number | null; at: number }, { id: number }>(
+		"INSERT INTO actors (org, kind, name, on_behalf_of, created_at) VALUES ($org, $kind, $name, $behalf, $at) RETURNING id",
 	),
 	actors: sql<{ org: number }, ActorRow & { created_at: number }>("SELECT * FROM actors WHERE org = $org ORDER BY id"),
 	moveProjectGrants: sql<{ from: number; to: number }>("UPDATE grants SET project = $to WHERE project = $from"),
@@ -350,107 +350,111 @@ export async function bootstrap(
 ): Promise<{ owner: Actor; generatedToken: string | null; warnings: string[] }> {
 	validateBootstrap(app.config);
 	const configured = app.config.ownerToken;
-	return await app.db.transaction(async () => {
-		const at = app.now();
-		if (!app.db.get(Q.org)) await app.db.run(Q.insertOrg, { name: "default", at });
-		const org = await orgId(app.db);
-		await ensureActor(app.db, { org, kind: "rule", name: RULE_ACTOR, at });
-		const renamed = await renameOwner(app, org);
-		const existing = await app.db.get(Q.actorByName, { org, name: app.config.owner });
-		if (existing && existing.kind !== "human") {
-			throw invalid(
-				`MAINWORTHY_OWNER names ${existing.name}, which is ${KIND_NOUN[existing.kind]} on this instance and not a person. Set MAINWORTHY_OWNER to the owner's name and start again; ${START_REFUSED}`,
-			);
-		}
-		if (existing && existing.disabled_at !== null) {
-			throw invalid(
-				`MAINWORTHY_OWNER names ${existing.name}, who was forgotten. Set MAINWORTHY_OWNER to the owner's name and start again; ${START_REFUSED}`,
-			);
-		}
-		const owner = existing ?? ensureActor(app.db, { org, kind: "human", name: app.config.owner, at });
-		// Written on every start, so the owner of the instance is never left without the means to repair it.
-		await app.db.run(Q.setGrant, { actor: owner.id, project: 0, can: JSON.stringify(ALL_CAPABILITIES) });
-		const server = app.config.mode === "server";
-		const warnings: string[] = renamed === null ? [] : [renamed];
-		let generatedToken: string | null = null;
-		if (configured) {
-			if (configured.length < OWNER_TOKEN_SOUND) {
-				warnings.push(
-					`MAINWORTHY_OWNER_TOKEN is shorter than ${OWNER_TOKEN_SOUND} characters. It signs ${owner.name} in as it is; a longer one is harder to guess. Make one with \`openssl rand -hex 32\`.`,
-				);
-			}
-			const row = await app.db.get(Q.tokenByHash, { hash: hashToken(configured) });
-			if (!row) {
-				// The variable holds a value that is not a token yet, so it was changed. What it held before is
-				// retired here, in the transaction that makes the new one: an operator who replaces a value that
-				// leaked expects the old one to stop working, and until now it worked for as long as its row.
-				// That is every token marked `env`, whoever its actor is: there is one such variable, so at most
-				// one of them should work, and the owner's name may have changed in this same start. The sessions
-				// they opened end with them, because a session is read with its token.
-				const retired = await app.db.all(Q.envTokens);
-				for (const token of retired) {
-					await app.db.run(Q.revokeToken, { id: token.id, at });
-					await endSessionsOnToken(app.db, token.id, at);
+	return await app.database.write(
+		async (db) =>
+			await db.transaction(async () => {
+				const at = app.now();
+				if (!(await db.get(Q.org))) await db.run(Q.insertOrg, { name: "default", at });
+				const org = await orgId(db);
+				await ensureActor(db, { org, kind: "rule", name: RULE_ACTOR, at });
+				const renamed = await renameOwner(app, db, org);
+				const existing = await db.get(Q.actorByName, { org, name: app.config.owner });
+				if (existing && existing.kind !== "human") {
+					throw invalid(
+						`MAINWORTHY_OWNER names ${existing.name}, which is ${KIND_NOUN[existing.kind]} on this instance and not a person. Set MAINWORTHY_OWNER to the owner's name and start again; ${START_REFUSED}`,
+					);
 				}
-				await app.db.run(Q.insertToken, {
-					actor: owner.id,
-					hash: hashToken(configured),
-					label: "owner (from MAINWORTHY_OWNER_TOKEN)",
-					at,
-					expires: null,
-					by: null,
-					source: "env",
-				});
-				if (retired.length > 0) {
-					const named = retired.map((token) => `token ${token.id} of ${token.actor}`).join(", ");
-					const held =
-						retired.length === 1
-							? `the token it held before (${named}) was revoked, and every session opened with it has ended`
-							: `the tokens it held before (${named}) were revoked, and every session opened with them has ended`;
-					warnings.push(`MAINWORTHY_OWNER_TOKEN has a new value: ${held}. Sign in with the new value.`);
+				if (existing && existing.disabled_at !== null) {
+					throw invalid(
+						`MAINWORTHY_OWNER names ${existing.name}, who was forgotten. Set MAINWORTHY_OWNER to the owner's name and start again; ${START_REFUSED}`,
+					);
 				}
-			} else if (server && (!works(row, at) || row.actor !== owner.id)) {
-				// A token that was revoked stays revoked, one that reached its end stays ended, and one that is
-				// somebody else's stays theirs: bringing it back, or handing it to the owner, would undo a decision
-				// somebody made. The operator is told, because the start otherwise looks like any other and the
-				// owner is left outside.
-				// (The owner's token that works does not come here, so one that was not revoked has an end.)
-				const why =
-					row.actor !== owner.id
-						? `is the token of ${app.db.get(Q.actorById, { id: row.actor })?.name ?? "another actor"}, not of the owner ${owner.name}`
-						: row.revoked_at !== null || row.expires_at === null
-							? "was revoked"
-							: `reached its end at ${new Date(row.expires_at).toISOString()}`;
-				warnings.push(
-					`MAINWORTHY_OWNER_TOKEN ${why}: it does not sign ${owner.name} in, and it was left as it is. Set MAINWORTHY_OWNER_TOKEN to a new value and start again.`,
-				);
-			}
-		} else if (server && (app.db.get(Q.activeTokens, { actor: owner.id, now: at })?.n ?? 0) === 0) {
-			generatedToken = newSecret();
-			await app.db.run(Q.insertToken, {
-				actor: owner.id,
-				hash: hashToken(generatedToken),
-				label: "owner (generated)",
-				at,
-				expires: null,
-				by: null,
-				source: "generated",
-			});
-		}
-		// Nothing tells whoever holds a token that it is about to end, so the operator is told at each start. The
-		// label is written as JSON: it is free text, and a warning is one line.
-		for (const token of await app.db.all(Q.endingTokens, { org, now: at, until: at + ENDING_SOON_MS })) {
-			warnings.push(
-				`token ${token.id} of ${token.actor} (${JSON.stringify(token.label)}) expires ${untilPhrase(token.expires_at, at)}, and what uses it is refused from then on. Make its replacement with \`mainworthy token new\`, and revoke this one once the replacement is in use.`,
-			);
-		}
-		if (server && app.config.proxy === null) warnings.push(NO_PROXY_NAMED);
-		if (app.config.requireAdminMfa) {
-			for (const actor of await app.db.all(Q.actors, { org }))
-				if (hasAdminGrant(app.db, actor.id)) await endSessionsWithoutFactor(app.db, actor.id, at, providerVouches(app));
-		}
-		return { owner: await toActor(app.db, owner, 0), generatedToken, warnings };
-	});
+				const owner = existing ?? (await ensureActor(db, { org, kind: "human", name: app.config.owner, at }));
+				// Written on every start, so the owner of the instance is never left without the means to repair it.
+				await db.run(Q.setGrant, { actor: owner.id, project: 0, can: JSON.stringify(ALL_CAPABILITIES) });
+				const server = app.config.mode === "server";
+				const warnings: string[] = renamed === null ? [] : [renamed];
+				let generatedToken: string | null = null;
+				if (configured) {
+					if (configured.length < OWNER_TOKEN_SOUND) {
+						warnings.push(
+							`MAINWORTHY_OWNER_TOKEN is shorter than ${OWNER_TOKEN_SOUND} characters. It signs ${owner.name} in as it is; a longer one is harder to guess. Make one with \`openssl rand -hex 32\`.`,
+						);
+					}
+					const row = await db.get(Q.tokenByHash, { hash: hashToken(configured) });
+					if (!row) {
+						// The variable holds a value that is not a token yet, so it was changed. What it held before is
+						// retired here, in the transaction that makes the new one: an operator who replaces a value that
+						// leaked expects the old one to stop working, and until now it worked for as long as its row.
+						// That is every token marked `env`, whoever its actor is: there is one such variable, so at most
+						// one of them should work, and the owner's name may have changed in this same start. The sessions
+						// they opened end with them, because a session is read with its token.
+						const retired = await db.all(Q.envTokens);
+						for (const token of retired) {
+							await db.run(Q.revokeToken, { id: token.id, at });
+							await endSessionsOnToken(db, token.id, at);
+						}
+						await db.run(Q.insertToken, {
+							actor: owner.id,
+							hash: hashToken(configured),
+							label: "owner (from MAINWORTHY_OWNER_TOKEN)",
+							at,
+							expires: null,
+							by: null,
+							source: "env",
+						});
+						if (retired.length > 0) {
+							const named = retired.map((token) => `token ${token.id} of ${token.actor}`).join(", ");
+							const held =
+								retired.length === 1
+									? `the token it held before (${named}) was revoked, and every session opened with it has ended`
+									: `the tokens it held before (${named}) were revoked, and every session opened with them has ended`;
+							warnings.push(`MAINWORTHY_OWNER_TOKEN has a new value: ${held}. Sign in with the new value.`);
+						}
+					} else if (server && (!works(row, at) || row.actor !== owner.id)) {
+						// A token that was revoked stays revoked, one that reached its end stays ended, and one that is
+						// somebody else's stays theirs: bringing it back, or handing it to the owner, would undo a decision
+						// somebody made. The operator is told, because the start otherwise looks like any other and the
+						// owner is left outside.
+						// (The owner's token that works does not come here, so one that was not revoked has an end.)
+						const why =
+							row.actor !== owner.id
+								? `is the token of ${(await db.get(Q.actorById, { id: row.actor }))?.name ?? "another actor"}, not of the owner ${owner.name}`
+								: row.revoked_at !== null || row.expires_at === null
+									? "was revoked"
+									: `reached its end at ${new Date(row.expires_at).toISOString()}`;
+						warnings.push(
+							`MAINWORTHY_OWNER_TOKEN ${why}: it does not sign ${owner.name} in, and it was left as it is. Set MAINWORTHY_OWNER_TOKEN to a new value and start again.`,
+						);
+					}
+				} else if (server && ((await db.get(Q.activeTokens, { actor: owner.id, now: at }))?.n ?? 0) === 0) {
+					generatedToken = newSecret();
+					await db.run(Q.insertToken, {
+						actor: owner.id,
+						hash: hashToken(generatedToken),
+						label: "owner (generated)",
+						at,
+						expires: null,
+						by: null,
+						source: "generated",
+					});
+				}
+				// Nothing tells whoever holds a token that it is about to end, so the operator is told at each start. The
+				// label is written as JSON: it is free text, and a warning is one line.
+				for (const token of await db.all(Q.endingTokens, { org, now: at, until: at + ENDING_SOON_MS })) {
+					warnings.push(
+						`token ${token.id} of ${token.actor} (${JSON.stringify(token.label)}) expires ${untilPhrase(token.expires_at, at)}, and what uses it is refused from then on. Make its replacement with \`mainworthy token new\`, and revoke this one once the replacement is in use.`,
+					);
+				}
+				if (server && app.config.proxy === null) warnings.push(NO_PROXY_NAMED);
+				if (app.config.requireAdminMfa) {
+					for (const actor of await db.all(Q.actors, { org }))
+						if (await hasAdminGrant(db, actor.id))
+							await endSessionsWithoutFactor(db, actor.id, at, providerVouches(app));
+				}
+				return { owner: await toActor(db, owner, 0), generatedToken, warnings };
+			}),
+	);
 }
 
 /** Whether the actor holds what a start gives the owner: every capability, on every project. */
@@ -477,22 +481,22 @@ async function ownsEverything(db: ReadDb, actor: number): Promise<boolean> {
  * The new name must be one a person can be given. The start does not ask that of a new owner's name, and has
  * not since the first build; here an existing person's password would move to a name no sign-in reads.
  */
-async function renameOwner(app: App, org: number): Promise<string | null> {
+async function renameOwner(app: App, db: WriteDb, org: number): Promise<string | null> {
 	const was = app.config.ownerWas;
 	if (was === undefined) return null;
 	const to = app.config.owner;
 	// The rename was done at an earlier start, or the new name is somebody else's. Neither is this start's to undo.
-	if (app.db.get(Q.actorByName, { org, name: to })) {
+	if (await db.get(Q.actorByName, { org, name: to })) {
 		return `MAINWORTHY_OWNER_WAS names ${was} and renamed nobody: ${to} is on this instance already. Unset MAINWORTHY_OWNER_WAS.`;
 	}
-	const row = await app.db.get(Q.actorByName, { org, name: was });
+	const row = await db.get(Q.actorByName, { org, name: was });
 	const why = !row
 		? "and nobody on this instance has that name"
 		: row.kind !== "human"
 			? `which is ${KIND_NOUN[row.kind]} on this instance and not a person`
 			: row.disabled_at !== null
 				? "who was forgotten"
-				: !ownsEverything(app.db, row.id)
+				: !(await ownsEverything(db, row.id))
 					? "who does not own this instance: the owner holds every capability on every project"
 					: null;
 	if (!row || why !== null) {
@@ -505,7 +509,7 @@ async function renameOwner(app: App, org: number): Promise<string | null> {
 			`MAINWORTHY_OWNER is ${JSON.stringify(to)}, which is not a name a person can be given: letters, digits and . _ @ -, starting with a letter or a digit, 64 characters at most. Set MAINWORTHY_OWNER to the owner's new name and start again; ${START_REFUSED}`,
 		);
 	}
-	await app.db.run(Q.rename, { id: row.id, name: to });
+	await db.run(Q.rename, { id: row.id, name: to });
 	return `MAINWORTHY_OWNER_WAS: ${was} is now ${to}, with the tokens, password, passkeys, sessions and history ${was} had. ${to} signs in under the new name. Unset MAINWORTHY_OWNER_WAS.`;
 }
 
@@ -526,14 +530,14 @@ async function ensureActor(
 ): Promise<ActorRow> {
 	const found = await db.get(Q.actorByName, { org: input.org, name: input.name });
 	if (found) return found;
-	const { lastId } = await db.run(Q.insertActor, {
+	const { id } = await db.one(Q.insertActor, {
 		org: input.org,
 		kind: input.kind,
 		name: input.name,
 		behalf: null,
 		at: input.at,
 	});
-	return { id: lastId, org: input.org, kind: input.kind, name: input.name, disabled_at: null };
+	return { id, org: input.org, kind: input.kind, name: input.name, disabled_at: null };
 }
 
 async function toActor(db: ReadDb, row: ActorRow, project: number | null): Promise<Actor> {
@@ -649,7 +653,11 @@ export async function resolveCaller(
 			return token ? { actor: await toActor(db, token.actor, project), session: null, context: null } : null;
 		}
 		case "cookie": {
-			const session = findSession(app, reference.hash, { db, activity: reference.activity, idleMs: reference.idleMs });
+			const session = await findSession(app, reference.hash, {
+				db,
+				activity: reference.activity,
+				idleMs: reference.idleMs,
+			});
 			return session
 				? {
 						actor: await toActor(db, session.actor, project),
@@ -908,7 +916,7 @@ export async function ruleActor(db: ReadDb): Promise<Actor> {
 // one thing that changes a name is forgetting a person: that raises `forgottenCount`, and every connection's names
 // read before it are thrown away, so no read on any connection shows a forgotten name again.
 let forgottenCount = 0;
-const labels = new WeakMap<Db, { since: number; names: Map<number, { name: string; kind: ActorKind }> }>();
+const labels = new WeakMap<ReadDb, { since: number; names: Map<number, { name: string; kind: ActorKind }> }>();
 /** An actor's name and kind for display. Cached per connection until a person is forgotten. */
 export async function actorLabel(db: ReadDb, id: number): Promise<{ name: string; kind: ActorKind }> {
 	let kept = labels.get(db);
