@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Instance, start } from "../src/app/start.ts";
 import type { Envelope, SessionInfo } from "../src/core/api.ts";
+import { API_VERSION, API_VERSION_HEADER } from "../src/core/version.ts";
 import { flushUses, removeGrant, revokeToken, sweepSessions } from "../src/server/identity/identity.ts";
 import { openSession } from "../src/server/identity/sessions.ts";
 import { type Config, defaultConfig, openApp, type ReadCall, type ReadPool } from "../src/server/kernel/app.ts";
@@ -93,6 +94,7 @@ type Sent = Record<string, string>;
 const bearer = (token: string): Sent => ({ authorization: `Bearer ${token}` });
 /** What a browser on the https page sends through a proxy that ends TLS. */
 const overHttps = (instance: Instance): Sent => ({
+	[API_VERSION_HEADER]: String(API_VERSION),
 	origin: `https://${new URL(instance.url).host}`,
 	"x-forwarded-proto": "https",
 });

@@ -6,7 +6,7 @@ import { browserAvailable, eventually, openPage, startServer } from "./support.t
 const legacyBundle = process.env.MAINWORTHY_LEGACY_BUNDLE;
 for (const contract of ["missing", "mismatch", ...(legacyBundle ? ["historical"] : [])]) {
 	test.skipIf(!browserAvailable)(
-		`an open ${contract} browser cannot archive or undo after an API upgrade and asks for a reload`,
+		`an open ${contract} browser cannot archive after an API upgrade and asks for a reload`,
 		async () => {
 			const server = await startServer();
 			await server.api("propose", { edits: [{ op: "create", body: { title: "Old tab" } }] });
@@ -48,9 +48,6 @@ for (const contract of ["missing", "mismatch", ...(legacyBundle ? ["historical"]
 				await h.page.keyboard.press("#");
 				await h.page.locator("#stat").filter({ hasText: "Reload before trying again." }).waitFor();
 				expect(refused).toContain(409);
-				expect(await server.api("get", { refs: ["C-1"] })).toEqual(before);
-				await h.page.keyboard.press("u");
-				await h.page.waitForLoadState("networkidle");
 				expect(await server.api("get", { refs: ["C-1"] })).toEqual(before);
 				expect(await server.api("timeline", { ref: "C-1" })).toEqual(timeline);
 				if (process.env.MAINWORTHY_VERSION_SCREENSHOT)

@@ -5,6 +5,7 @@
 // authenticator written from the specification; this file is the proof that a real browser gets through them.
 import { expect, test } from "bun:test";
 import type { Page } from "playwright-core";
+import { API_VERSION, API_VERSION_HEADER } from "../../src/core/version.ts";
 import { browserAvailable, openPage, type PageHarness, startServer } from "./support.ts";
 
 type Reply = { status: number; body: { ok: boolean; result?: unknown; error?: { code: string; message: string } } };
@@ -12,14 +13,15 @@ type Reply = { status: number; body: { ok: boolean; result?: unknown; error?: { 
 /** `fetch` in the page, to its own origin: the browser attaches the cookie and says where the request is from. */
 const send = (page: Page, path: string, body?: unknown): Promise<Reply> =>
 	page.evaluate(
-		async ([path, json]) => {
+		async ([path, json, versionHeader, version]) => {
 			const response = await fetch(path, {
 				method: json === null ? "GET" : "POST",
-				...(json === null ? {} : { headers: { "content-type": "application/json" }, body: json }),
+				headers: { "content-type": "application/json", [versionHeader]: String(version) },
+				...(json === null ? {} : { body: json }),
 			});
 			return { status: response.status, body: await response.json() };
 		},
-		[path, body === undefined ? null : JSON.stringify(body)] as const,
+		[path, body === undefined ? null : JSON.stringify(body), API_VERSION_HEADER, API_VERSION] as const,
 	);
 
 /** `navigator.credentials.create` with the options the server answered, and what a page sends back of it. */

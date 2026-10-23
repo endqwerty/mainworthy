@@ -6,6 +6,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Instance, start } from "../src/app/start.ts";
+import { API_VERSION, API_VERSION_HEADER } from "../src/core/version.ts";
 import type {
 	AssertionOptions,
 	AssertionResponse,
@@ -147,7 +148,11 @@ export function world(options: Boot = {}): World {
 	const send = async <T>(method: string, path: string, body: unknown, headers: Sent): Promise<Answer<T>> => {
 		const response = await fetch(`${instance.url}${path}`, {
 			method,
-			headers: { ...(method === "POST" ? { "content-type": "application/json" } : {}), ...headers },
+			headers: {
+				[API_VERSION_HEADER]: String(API_VERSION),
+				...(method === "POST" ? { "content-type": "application/json" } : {}),
+				...headers,
+			},
 			...(method === "POST" ? { body: JSON.stringify(body) } : {}),
 		});
 		const text = await response.text();
