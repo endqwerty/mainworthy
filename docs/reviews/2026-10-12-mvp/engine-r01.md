@@ -15,9 +15,9 @@ The complete brief was read, together with the project context, product-design s
 Everything needed to rerun the reproductions is retained here:
 
 ```sh
-cd /home/endqwerty/.cache/mainworthy-arena/verify/engine-r1/tree
+cd $HOME/.cache/mainworthy-arena/verify/engine-r1/tree
 bun install --frozen-lockfile
-cd /home/endqwerty/.cache/mainworthy-arena/verify/engine-r1
+cd $HOME/.cache/mainworthy-arena/verify/engine-r1
 bun scripts/probes.mjs
 bun scripts/policy-matrix.mjs
 bun scripts/support.mjs

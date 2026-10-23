@@ -1,35 +1,35 @@
 {
   "utc": "2026-10-12T05:55:40.350265+00:00",
   "files": {
-    "/home/endqwerty/.cache/mainworthy-arena/ui/u1/index.html": {
+    "$HOME/.cache/mainworthy-arena/ui/u1/index.html": {
       "sha256": "f67951159bae55070f7b1c7e03d4e679760709d031663c4fa7c41f1ca6deb4fc",
       "mtime": 1791783650.1138463,
-      "frozen": "/home/endqwerty/.cache/mainworthy-arena/judge/ui/frozen/u1/index.html"
+      "frozen": "$HOME/.cache/mainworthy-arena/judge/ui/frozen/u1/index.html"
     },
-    "/home/endqwerty/.cache/mainworthy-arena/ui/u1/rationale.md": {
+    "$HOME/.cache/mainworthy-arena/ui/u1/rationale.md": {
       "sha256": "c1bb7c033227c5baa23dfe5d1e462ade465f2f1a44ac40f311a4ee194830706b",
       "mtime": 1791784083.3735898,
-      "frozen": "/home/endqwerty/.cache/mainworthy-arena/judge/ui/frozen/u1/rationale.md"
+      "frozen": "$HOME/.cache/mainworthy-arena/judge/ui/frozen/u1/rationale.md"
     },
-    "/home/endqwerty/.cache/mainworthy-arena/ui/u2/index.html": {
+    "$HOME/.cache/mainworthy-arena/ui/u2/index.html": {
       "sha256": "29c5e5611203e70ba53dbfab7743ffe412602e0175e285d0d339acafc845f581",
       "mtime": 1791783424.5214803,
-      "frozen": "/home/endqwerty/.cache/mainworthy-arena/judge/ui/frozen/u2/index.html"
+      "frozen": "$HOME/.cache/mainworthy-arena/judge/ui/frozen/u2/index.html"
     },
-    "/home/endqwerty/.cache/mainworthy-arena/ui/u2/rationale.md": {
+    "$HOME/.cache/mainworthy-arena/ui/u2/rationale.md": {
       "sha256": "43bd775ee1941ed8aa7f1da48e594df754354b4a007bfa73043efa056be10ed6",
       "mtime": 1791783424.5251234,
-      "frozen": "/home/endqwerty/.cache/mainworthy-arena/judge/ui/frozen/u2/rationale.md"
+      "frozen": "$HOME/.cache/mainworthy-arena/judge/ui/frozen/u2/rationale.md"
     },
-    "/home/endqwerty/.cache/mainworthy-arena/ui/u3/index.html": {
+    "$HOME/.cache/mainworthy-arena/ui/u3/index.html": {
       "sha256": "246a2ae9f555b3956f1c763ca872bdc141bd9c5fcb6d4cbbdfea6afee697920d",
       "mtime": 1791783943.8722575,
-      "frozen": "/home/endqwerty/.cache/mainworthy-arena/judge/ui/frozen/u3/index.html"
+      "frozen": "$HOME/.cache/mainworthy-arena/judge/ui/frozen/u3/index.html"
     },
-    "/home/endqwerty/.cache/mainworthy-arena/ui/u3/rationale.md": {
+    "$HOME/.cache/mainworthy-arena/ui/u3/rationale.md": {
       "sha256": "47b1a8a1ee5a116899927e426f8a3020fdc86311c4c6de218d8cd45ebabc6812",
       "mtime": 1791784364.337,
-      "frozen": "/home/endqwerty/.cache/mainworthy-arena/judge/ui/frozen/u3/rationale.md"
+      "frozen": "$HOME/.cache/mainworthy-arena/judge/ui/frozen/u3/rationale.md"
     }
   }
 }

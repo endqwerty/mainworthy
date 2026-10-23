@@ -10,7 +10,7 @@ The correctness fact under review: every counted result belongs to the right cas
 
 All work ran locally in this revision's clean archive at `engine-r12/tree`. The shared checkout was read only by `git archive`; it was never changed, installed into or cleaned. [EARLIER.md](EARLIER.md) records all 146 inherited/original-hunt reproduction entries and the four additional hunt sequence runners, including their actual output and any unexecuted tail. [STANDING.md](STANDING.md) inventories the scoped standing writes and their callers. Raw logs and executable probes are retained in this review directory.
 
-Commands below run from `/home/endqwerty/.cache/mainworthy-arena/verify/engine-r12`. Install the exported tree's dependencies with `bun install --frozen-lockfile` there if they have been released. HTTP probes use only loopback, ports 8650–8699, and their own `/tmp` data. Each main blocker probe was reproduced twice through `invoke`; all three were also reproduced over HTTP with two reader threads. The standalone defect probes assert the promised behavior and fail on this revision; their failure is the reproduction. [HTTP confirmation](logs/r12-http.log).
+Commands below run from `$HOME/.cache/mainworthy-arena/verify/engine-r12`. Install the exported tree's dependencies with `bun install --frozen-lockfile` there if they have been released. HTTP probes use only loopback, ports 8650–8699, and their own `/tmp` data. Each main blocker probe was reproduced twice through `invoke`; all three were also reproduced over HTTP with two reader threads. The standalone defect probes assert the promised behavior and fail on this revision; their failure is the reproduction. [HTTP confirmation](logs/r12-http.log).
 
 ## Required checks
 

@@ -6,8 +6,8 @@ if ! flock -n 9; then
   printf '%s\n' 'Another Rust candidate benchmark is already running.' >&2
   exit 75
 fi
-export RUSTUP_HOME=/home/endqwerty/.cache/mainworthy-arena/toolchains/rust/rustup
-export CARGO_HOME=/home/endqwerty/.cache/mainworthy-arena/toolchains/rust/cargo
+export RUSTUP_HOME="$HOME/.cache/mainworthy-arena/toolchains/rust/rustup"
+export CARGO_HOME="$HOME/.cache/mainworthy-arena/toolchains/rust/cargo"
 export PATH="$CARGO_HOME/bin:$PATH"
 export TMPDIR="$PWD/tmp"
 mkdir -p "$TMPDIR"

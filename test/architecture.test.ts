@@ -1548,6 +1548,18 @@ export function foreignTailnetNames(text: string): string[] {
 	return (text.match(/\b(?:[\w-]+\.)+ts\.net\b/gi) ?? []).filter((name) => !/(?:^|\.)example\.ts\.net$/i.test(name));
 }
 
+/** Workstation account paths, except the named examples used in fixtures and CI. */
+function workstationPaths(text: string): string[] {
+	const allowed: Record<string, string> = {
+		robin: "the project's example person",
+		runner: "the GitHub Actions account",
+		example: "a neutral documentation account",
+	};
+	return [...text.matchAll(/\/(?:home|Users)\/([A-Za-z0-9_.-]+)\//g)]
+		.filter((match) => !Object.hasOwn(allowed, match[1] ?? ""))
+		.map((match) => match[0]);
+}
+
 describe("the project's name", () => {
 	test("the former name appears only where an install or a deployment still carries it", () => {
 		// The project was called Casebook until 2026-10-13 (decision 0015). Each file here says why it still
@@ -1579,7 +1591,7 @@ describe("the project's name", () => {
 });
 
 describe("a public repository", () => {
-	test("no file names a tailnet: the owner's real one is written example.ts.net", () => {
+	test("no file names a private tailnet or workstation account", () => {
 		// The repository has been public since 2026-10-13 (the owner); commits before that day still carry the
 		// real name, and the history was not rewritten.
 		expect([".env", ".env.local", ".env.example"].map((name) => LOCAL.test(name))).toEqual([true, true, false]);
@@ -1591,6 +1603,20 @@ describe("a public repository", () => {
 			foreignTailnetNames(readFileSync(file, "utf8")).map((name) => `${file}: ${name}`),
 		);
 		expect(found).toEqual([]);
+		for (const directory of ["home", "Users"]) {
+			for (const account of ["robin", "runner", "example"]) {
+				expect(workstationPaths(`/${directory}/${account}/project`)).toEqual([]);
+			}
+			for (const account of ["work-account", "account.name", "account_name", "runner2", "constructor"]) {
+				const path = `/${directory}/${account}/`;
+				expect(workstationPaths(`file://${path}project and C:${path}project`)).toEqual([path, path]);
+			}
+		}
+		expect(workstationPaths("$HOME/project docs/reviews/ ./project /home/robinson")).toEqual([]);
+		const paths = wholeTree().flatMap((file) =>
+			workstationPaths(readFileSync(file, "utf8")).map((path) => `${file}: ${path}`),
+		);
+		expect(paths).toEqual([]);
 	});
 });
 

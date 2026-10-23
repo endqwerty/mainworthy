@@ -1,7 +1,7 @@
 # Escape "sends no proposal": the page sends it, the test's route does not see it
 
 Investigated 2026-10-12 on commit `5cc2b3a`, in the scratch worktree
-`/home/endqwerty/.cache/mainworthy-arena/ci-repro`. Bun 1.4.3, playwright-core 1.64.0,
+`$HOME/.cache/mainworthy-arena/ci-repro`. Bun 1.4.3, playwright-core 1.64.0,
 Google Chrome 155.0.8059.39 and Chromium 152.0.7977.82, Linux, 16 cores.
 
 ## Verdict
@@ -104,7 +104,7 @@ test; which queues are involved inside Chromium is my inference.
 Forced order, deterministic, about 7 s (fails 10 of 10 without a barrier):
 
 ```
-cd /home/endqwerty/.cache/mainworthy-arena/ci-repro
+cd $HOME/.cache/mainworthy-arena/ci-repro
 # zz-cdp-forced.test.ts is already in test/e2e/ (copy: race/work/scratch-tests/); it imports the helper from
 # the patched support.ts, which the scratch worktree has
 bun test test/e2e/zz-cdp-forced.test.ts                      # barrier none: 10 of 10 not intercepted
@@ -117,7 +117,7 @@ loops of `round7.test.ts` + `conflict.test.ts` in Google Chrome and one loop of 
 test files, each beside three busy loops):
 
 ```
-/home/endqwerty/.cache/mainworthy-arena/verify/race/work/recipe.sh <tag> 6
+$HOME/.cache/mainworthy-arena/verify/race/work/recipe.sh <tag> 6
 ```
 
 Result on the unfixed helper: **13 of 18 runs failed** (4/6, 4/6, 5/6), 16 failing tests, every one at

@@ -1,6 +1,6 @@
 {
   "candidate": "go",
-  "root": "/home/endqwerty/.cache/mainworthy-arena/judge/stack/builds/go",
+  "root": "$HOME/.cache/mainworthy-arena/judge/stack/builds/go",
   "checks": {
     "read_sql_oracles": {
       "pass": true,

@@ -5,7 +5,7 @@ Reviewer: Codex, GPT-6 Astra. No other agents started.
 
 The original B1 reproductions are fixed. One blocker remains in the explicitly requested testcase-without-file case. It has two consequences from the same cause: accepting an entirely skipped file and refusing a file that has a passing test. This finding uses synthesized JUnit accepted by Mainworthy's parser. The actual Bun 1.4.3 reports generated during this review include `file` on every testcase and pass all requested checks.
 
-All work ran locally in `/home/endqwerty/.cache/mainworthy-arena/verify/dx-r2/tree`, exported with `git archive 4a4f1fa`. Scratch files, fixtures, logs, and this report are under `dx-r2`. The repository was read-only. `bun install --frozen-lockfile` succeeded with Bun 1.4.3. No worktree release command ran.
+All work ran locally in `$HOME/.cache/mainworthy-arena/verify/dx-r2/tree`, exported with `git archive 4a4f1fa`. Scratch files, fixtures, logs, and this report are under `dx-r2`. The repository was read-only. `bun install --frozen-lockfile` succeeded with Bun 1.4.3. No worktree release command ran.
 
 The safety fact is that a report cannot make the CI gate succeed when every test of a reported file was skipped, while a file containing passed and skipped tests remains accepted. Before mutations, the checks were recorded in this report: the prior probes, parser edge cases, both real reports, targeted tests, static checks, and removing the new counting block.
 
@@ -16,7 +16,7 @@ Blocking under the requested missing-file case and definition of a blocker. Loca
 Reproduce from `dx-r2`:
 
 ```
-TMPDIR=/home/endqwerty/.cache/mainworthy-arena/verify/dx-r2/tmp bun neighbour-probes.ts
+TMPDIR=$HOME/.cache/mainworthy-arena/verify/dx-r2/tmp bun neighbour-probes.ts
 ```
 
 Fixture `neighbour-fixtures/missing-testcase-file/test-results/tests-1.xml` contains:
@@ -69,8 +69,8 @@ Evidence: `neighbour-summary.log`, `neighbour-*.log`, and `neighbour-fixtures/`.
 Copied `ci-probes.ts` and `workflow-probe.ts` unchanged from `dx-r1`. Their relative imports now use the new export. Their historical synthetic GitHub SHA is report metadata, not the code revision executed. Commands, from `dx-r2`:
 
 ```
-TMPDIR=/home/endqwerty/.cache/mainworthy-arena/verify/dx-r2/tmp bun ci-probes.ts
-TMPDIR=/home/endqwerty/.cache/mainworthy-arena/verify/dx-r2/tmp bun workflow-probe.ts
+TMPDIR=$HOME/.cache/mainworthy-arena/verify/dx-r2/tmp bun ci-probes.ts
+TMPDIR=$HOME/.cache/mainworthy-arena/verify/dx-r2/tmp bun workflow-probe.ts
 ```
 
 Pass for both original B1 reproductions:
@@ -107,7 +107,7 @@ Pass for the requested Bun-shaped neighbours:
 Ran in the unmodified export:
 
 ```
-TMPDIR=/home/endqwerty/.cache/mainworthy-arena/verify/dx-r2/tmp bun test test/policy.test.ts test/e2e/round5.test.ts --reporter=junit --reporter-outfile=/home/endqwerty/.cache/mainworthy-arena/verify/dx-r2/real.xml
+TMPDIR=$HOME/.cache/mainworthy-arena/verify/dx-r2/tmp bun test test/policy.test.ts test/e2e/round5.test.ts --reporter=junit --reporter-outfile=$HOME/.cache/mainworthy-arena/verify/dx-r2/real.xml
 ```
 
 **Exit 0**. `29 pass`, `1 skip`, `0 fail`, `204 expect() calls`. The actual counting block reports policy `17 tests / 0 skipped` and round5 `13 tests / 1 skipped`, with no flagged files. Feeding the complete real report through the full gate in a fixture containing those two source files yields **exit 0**, `passed: 29 results proven`.

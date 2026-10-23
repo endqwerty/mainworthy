@@ -47,4 +47,4 @@ Both drivers were built with the copied `build.sh` (1.4 s and 1.0 s, cache hits)
 - **Carried forward from R2, not re-tested:** the W9 embedded ingest miss of 2119.6 ms under a simultaneous clean compile (1354.9 ms on rerun), and the contended clean builds.
 - **Artifacts:** `REPORT.md` (modified 23:08, not by me), `results.json` and `run.sh` existed at 23:09:12. I edited nothing outside scratch and did not touch the ts or rust directories or the Mainworthy repository.
 
-Evidence is in `/home/endqwerty/.cache/mainworthy-arena/stack/go/verification-scratch-r3/`: `driver-comparison.json`, `driver-{cgo,pure}-{1..5}.json`, `measure-drivers.log`, `pragma-probe-{cgo,pure}.log`, `binary-hashes.txt`, `build.log`.
+Evidence is in `$HOME/.cache/mainworthy-arena/stack/go/verification-scratch-r3/`: `driver-comparison.json`, `driver-{cgo,pure}-{1..5}.json`, `measure-drivers.log`, `pragma-probe-{cgo,pure}.log`, `binary-hashes.txt`, `build.log`.

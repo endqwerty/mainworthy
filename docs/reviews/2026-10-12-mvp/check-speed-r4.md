@@ -4,7 +4,7 @@ Revision: `8168a5e407a0c9cea412e65ac2b37bf69e9fda48`, against parent `ed9e85e042
 
 B1-R3 is fixed. One new blocker remains: using the reader's truncated file name merges distinct files and can conceal a file whose tests all skipped. This was reproduced with Bun's own report.
 
-All execution used the clean export at `/home/endqwerty/.cache/mainworthy-arena/verify/dx-r4/tree`. The repository was read-only. `git archive 8168a5e` supplied the export, and `bun install --frozen-lockfile` succeeded with Bun 1.4.3. All review scripts, logs, fixtures and temporary directories are under `dx-r4`. Test commands set `TMPDIR` to `dx-r4/tmp`. No worktree release command ran.
+All execution used the clean export at `$HOME/.cache/mainworthy-arena/verify/dx-r4/tree`. The repository was read-only. `git archive 8168a5e` supplied the export, and `bun install --frozen-lockfile` succeeded with Bun 1.4.3. All review scripts, logs, fixtures and temporary directories are under `dx-r4`. Test commands set `TMPDIR` to `dx-r4/tmp`. No worktree release command ran.
 
 The safety fact is that counting parsed results must preserve each source file's identity, reject a wholly skipped file, and accept a file with an executed test. B1-R4 disproves the identity requirement. The `verify` skill shaped the full-gate probes and the comparison with the parent. TypeScript review and report writing also followed `typescript-best-practices`, `technical-writing` and `unslop`.
 
@@ -27,7 +27,7 @@ Both relative paths have 517 characters. Each directory component is valid on th
 Ran from `dx-r4/long-path-fixture`:
 
 ```sh
-TMPDIR=/home/endqwerty/.cache/mainworthy-arena/verify/dx-r4/tmp bun test --reporter=junit --reporter-outfile=/home/endqwerty/.cache/mainworthy-arena/verify/dx-r4/long-path.xml
+TMPDIR=$HOME/.cache/mainworthy-arena/verify/dx-r4/tmp bun test --reporter=junit --reporter-outfile=$HOME/.cache/mainworthy-arena/verify/dx-r4/long-path.xml
 ```
 
 Bun exits **0** and prints `1 pass`, `1 skip`, `0 fail`, `Ran 2 tests across 2 files.` The generated XML contains both full file paths.
@@ -123,7 +123,7 @@ Evidence: `neighbour-summary.log`, `extended-summary.log`, `text-summary.log`, `
 **Pass.** In the clean export:
 
 ```sh
-TMPDIR=/home/endqwerty/.cache/mainworthy-arena/verify/dx-r4/tmp bun test test/policy.test.ts test/e2e/round5.test.ts --reporter=junit --reporter-outfile=/home/endqwerty/.cache/mainworthy-arena/verify/dx-r4/real.xml
+TMPDIR=$HOME/.cache/mainworthy-arena/verify/dx-r4/tmp bun test test/policy.test.ts test/e2e/round5.test.ts --reporter=junit --reporter-outfile=$HOME/.cache/mainworthy-arena/verify/dx-r4/real.xml
 ```
 
 Exit **0**, `29 pass`, `1 skip`, `0 fail`, `204 expect() calls`. Through the full gate: policy has 17 tests and zero skips; round5 has 13 tests and one skip. No file is flagged. Exit **0**, `passed: 29 results proven`.

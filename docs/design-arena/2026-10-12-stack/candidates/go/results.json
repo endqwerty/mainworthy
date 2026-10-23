@@ -1497,7 +1497,7 @@
         "artifactBytes": 16917256,
         "artifactMiB": 16.13355255126953,
         "linkage": "mainworthy-cgo: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, BuildID[sha1]=c7f35ce11959982f84baae29ae32055c87defea8, for GNU/Linux 4.4.0, stripped",
-        "cache": "/home/endqwerty/.cache/mainworthy-arena/toolchains/go-clean-cgo-1791784762642667198",
+        "cache": "$HOME/.cache/mainworthy-arena/toolchains/go-clean-cgo-1791784762642667198",
         "definition": "Empty compiler cache; dependencies already downloaded; optimized stripped static binary"
       },
       "pure": {
@@ -1505,7 +1505,7 @@
         "artifactBytes": 17977504,
         "artifactMiB": 17.144683837890625,
         "linkage": "mainworthy-pure: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, Go BuildID=UdTvEJ2KvZ4LIxmsHl8L/851u0qqyHaD8pwEuKMtN/n0_KSZzp4UnnfI9PF8ML/mpm0PkywGXw6198UM6mO, BuildID[sha1]=0e10198b8ea6f1a60230cd890a89c194c7bd111e, stripped",
-        "cache": "/home/endqwerty/.cache/mainworthy-arena/toolchains/go-clean-pure-1791784825531019277",
+        "cache": "$HOME/.cache/mainworthy-arena/toolchains/go-clean-pure-1791784825531019277",
         "definition": "Empty compiler cache; dependencies already downloaded; optimized stripped static binary"
       }
     },
