@@ -31,6 +31,33 @@ public final class QueueScreen: ProjectScreen {
 		case failed(String)
 	}
 
+	public enum Sample: Equatable, Sendable {
+		case reading
+		case read(SampleResult)
+		case failed(String)
+	}
+
+	private var samples: [Int: Sample] = [:]
+	private var sampleReads: [Int: Int] = [:]
+	public let attachments: ResultAttachmentScreen
+
+	public func sample(_ result: Int) -> Sample? { samples[result] }
+
+	public func readSample(_ result: Int) async {
+		let mine = (sampleReads[result] ?? 0) + 1
+		sampleReads[result] = mine
+		samples[result] = .reading
+		do {
+			let sample = try await project.sampleResult(result)
+			try Task.checkCancellation()
+			guard sampleReads[result] == mine else { return }
+			samples[result] = .read(sample)
+		} catch {
+			guard sampleReads[result] == mine else { return }
+			samples[result] = Task.isCancelled ? nil : .failed(error.shown)
+		}
+	}
+
 	private struct Query: Equatable, Sendable {
 		var showing = Showing.open
 		var filter: Kind?
@@ -95,6 +122,7 @@ public final class QueueScreen: ProjectScreen {
 
 	package init(project: ProjectClient, outbox: AnswerOutbox? = nil) {
 		self.project = project
+		attachments = ResultAttachmentScreen(project: project)
 		self.outbox = outbox ?? AnswerOutbox(project: project)
 		list = PagedList(query: Query()) { query, cursor in
 			try await project.questions(open: query.showing == .open, kind: query.filter, after: cursor)

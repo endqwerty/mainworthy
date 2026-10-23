@@ -20,12 +20,26 @@ struct ResultTrailLiveTests {
 		]
 		let reply: JSONValue = try await server.write("report", in: project.key, [
 			"target": ["commit": .string(String(repeating: "3", count: 40)), "repo": "acme/shop", "pr": 482],
-			"job": "trail", "results": [["test": ["key": "trail-roundtrip", "name": "Trail roundtrip"],
-				"outcome": "fail", "steps": trail, "attachments": [
+			"job": "trail", "buildUrl": "https://ci.example/build/1",
+			"results": [["test": ["key": "trail-roundtrip", "name": "Trail roundtrip"],
+				"outcome": "fail", "failure": ["message": "Coupon trace failed", "detail": "Coupon diagnostic\nSecond line"],
+				"note": "Observed on the phone", "steps": trail, "attachments": [
 					["name": "first.png", "data": .string(png)], ["name": "second.png", "data": .string(png)],
 				]]],
 		])
 		let id = Int(try #require(reply["results"]?.array?.first?.number))
+		let question = try #require(try await project.questions(open: true, kind: .failure).questions.first {
+			$0.title == "Coupon trace failed"
+		})
+		guard case .failure(let failure) = question.evidence else {
+			Issue.record("The failure question was not readable")
+			return
+		}
+		#expect(failure.sample == id)
+		let sample = try await project.sampleResult(try #require(failure.sample))
+		#expect(sample.id == id && sample.detail == "Coupon diagnostic\nSecond line")
+		#expect(sample.note == "Observed on the phone" && sample.build?.absoluteString == "https://ci.example/build/1")
+		#expect(sample.attachments == ["first.png", "second.png"])
 		let run = try #require(try await project.details(of: "pr:482").gate.run)
 		let counted = try #require(try await project.results(of: run, text: "Trail roundtrip").rows.first)
 		#expect(counted.result == id)
@@ -34,6 +48,7 @@ struct ResultTrailLiveTests {
 		let test = try #require(try await project.test(counted.test))
 		let document = try #require(test.results.first)
 		let steps = try #require(document.steps)
+		#expect(sample.steps == steps)
 		#expect(steps.map(\.step) == ["a1.b2", "Coupon check", "c3"])
 		#expect(steps.map(\.outcome) == [.pass, .error, .skip])
 		#expect(steps[0].durationMs == 0 && steps[2].durationMs == nil)
@@ -45,6 +60,12 @@ struct ResultTrailLiveTests {
 		#expect(screenshot.data == Data(base64Encoded: png))
 		#expect(counted.steps == steps)
 		#expect(test.results.first?.steps == steps)
+		let _: JSONValue = try await server.write("report", in: project.key, [
+			"target": ["commit": .string(String(repeating: "3", count: 40)), "repo": "acme/shop", "pr": 482],
+			"job": "trail-newer", "results": [["test": ["key": "trail-roundtrip"],
+				"outcome": "fail", "failure": ["message": "A newer failure", "detail": "Different diagnostic"]]],
+		])
+		#expect(try await project.sampleResult(id) == sample)
 		let planned = try #require(try await project.runs().runs.first { $0.name == "Checkout regression" })
 		let slot = try #require(try await project.slots(of: planned.ref).first { $0.fills.isEmpty })
 		let caseRef = try #require(slot.caseRef)

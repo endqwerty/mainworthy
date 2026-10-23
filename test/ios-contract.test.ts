@@ -26,6 +26,7 @@ import {
 	ProviderStart,
 	Question,
 	Refusal,
+	SampleResult,
 	SessionEnd,
 	SessionInfo,
 	SessionRow,
@@ -373,6 +374,13 @@ describe("what the iOS app reads", () => {
 			seen.add(item.kind);
 			const shape: Shape | undefined = (EVIDENCE as Record<string, Shape>)[item.kind];
 			if (shape) holds(`the evidence of ${item.q}, a ${item.kind} question`, shape, item.evidence);
+			if (item.kind === "failure") {
+				const { sample } = z.object({ sample: z.number() }).parse(item.evidence);
+				expect(EVIDENCE.failure.zod.parse(item.evidence)).toMatchObject({ sample });
+				const [read] = z.array(z.unknown()).parse(await op(project, "get", { refs: [`result:${sample}`] }));
+				holds("get sample result", SampleResult, read);
+				expect(read).toMatchObject({ id: sample, ref: `result:${sample}` });
+			}
 		}
 		// The scenario leaves one of each kind open. A kind that stops arriving would stop being checked.
 		expect([...seen].sort()).toEqual([...KINDS].sort());
