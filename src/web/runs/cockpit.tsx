@@ -1,7 +1,7 @@
 import { type InfiniteData, useInfiniteQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import type { Api } from "../../core/api.ts";
-import { ATTACHMENT_LIMITS, AttachmentInput, AttachmentReply, attachmentBytes } from "../../core/attachments.ts";
+import { ATTACHMENT_LIMITS, AttachmentInput, attachmentBytes } from "../../core/attachments.ts";
 import type { ReportReceipt } from "../../core/ops.ts";
 import { REPLIES } from "../../core/replies.ts";
 import { workHeldByOther } from "../../core/runs.ts";
@@ -47,6 +47,14 @@ function storedNote(key: string): string {
 		return "";
 	}
 }
+
+const outcomes = [
+	["p", "pass"],
+	["f", "fail"],
+	["b", "blocked"],
+	["s", "skip"],
+] as const;
+const changedResult = "This result has changed since it was recorded. No correction was recorded.";
 
 type LocalFill = { fill: Fill; questions: ReportReceipt["questions"]; pending: boolean };
 type PendingAttachment = AttachmentInput & { key: string };
@@ -125,21 +133,43 @@ function ProjectRunCockpit({
 	const signoffs = useQueryOp({ project, op: "inbox", input: signoffInput, enabled: run?.state === "closed" });
 	const signoff = signoffs.data?.items.find((item) => item.decision?.effects.closed === runRef);
 	const mayReopen = (item: typeof signoff) =>
-		session.kind === "human" && Boolean(item?.decision?.rule) && item?.you === "counts";
+		session.kind === "human" && !!item?.decision?.rule && item?.you === "counts";
 	const now = useWorkExpiry(project, run?.workUntil ?? null);
 	useEffect(() => {
 		setStatus("Each result records its pinned version. p pass · f fail · b blocked · s skip.");
 	}, [setStatus]);
 	const slotInput: Api["find"]["input"] = { in: "slots", run: runRef, limit: 200 };
 	const cacheKey = [...queryKey({ project, op: "find", input: slotInput }), "pages"];
-	const slotsRead = useInfiniteQuery({
+	const {
+		data: slotPages,
+		error: slotsError,
+		hasNextPage,
+		isPending,
+		isFetchingNextPage,
+		isFetchNextPageError,
+		fetchNextPage,
+	} = useInfiniteQuery({
 		queryKey: cacheKey,
 		initialPageParam: "",
 		queryFn: ({ pageParam, signal }) =>
 			call("find", { ...slotInput, ...(pageParam ? { cursor: pageParam } : {}) }, { project, signal }),
 		getNextPageParam: (page) => page.cursor ?? undefined,
 	});
-	const parsedSlots = Slot.array().safeParse(slotsRead.data?.pages.flatMap((page) => page.items));
+	function replaceSlot(slot: Pick<Slot, "id"> & Partial<Slot>): void {
+		queryClient.setQueryData<InfiniteData<Api["find"]["reply"]>>(
+			cacheKey,
+			(value) =>
+				value && {
+					...value,
+					pages: value.pages.map((page) => ({
+						...page,
+						items: page.items.map((row) => (row.id === slot.id ? { ...row, ...slot } : row)),
+					})),
+				},
+		);
+	}
+
+	const parsedSlots = Slot.array().safeParse(slotPages?.pages.flatMap((page) => page.items));
 	const storedSlots: Slot[] = parsedSlots.success
 		? parsedSlots.data.map((slot) =>
 				slot.work.kind === "held" && slot.work.until <= now ? { ...slot, work: { kind: "free" } } : slot,
@@ -232,7 +262,7 @@ function ProjectRunCockpit({
 	}
 	const noteRef = useRef<HTMLInputElement>(null);
 	const [last, setLast] = useState<LastResult | null>(null);
-	const canCorrect = Boolean(last && (run?.state === "open" || mayReopen(signoff)));
+	const canCorrect = !!(last && (run?.state === "open" || mayReopen(signoff)));
 	const withdrawn = useRef(new Set<Promise<RecordedResult>>());
 	const method = session.kind === "agent" ? "agent" : "human";
 	const slots: Slot[] = storedSlots.map((slot) => {
@@ -251,7 +281,7 @@ function ProjectRunCockpit({
 	const unreported = (slot: Slot) => missing(slot) && !ownFillOf(slot);
 	const held = (slot: Slot) => slot.work.kind === "held" && workHeldByOther(slot.work, session.actor, now);
 	const available = (slot: Slot) => unreported(slot) && !held(slot);
-	const first = slots.find(available) ?? (slotsRead.hasNextPage ? undefined : slots.find((slot) => !held(slot)));
+	const first = slots.find(available) ?? (hasNextPage ? undefined : slots.find((slot) => !held(slot)));
 	if (cursor === null && first) setCursor(first.id);
 	const current = cursor === null ? first : slots.find((slot) => slot.id === cursor);
 	const step = current ? (steps[current.id] ?? "") : "";
@@ -297,13 +327,26 @@ function ProjectRunCockpit({
 		(reports.uncertain.has(current.id) || (!external(current) && run?.state === "open" && admittedMethod))
 	);
 	const hasAvailable = slots.some(available);
-	const allReported = slots.length > 0 && !slots.some(unreported) && !slotsRead.hasNextPage;
+	const allReported = slots.length > 0 && !slots.some(unreported) && !hasNextPage;
 	useEffect(() => {
 		if (current?.id) document.querySelector(`[data-slot="${current.id}"]`)?.scrollIntoView({ block: "nearest" });
 	}, [current?.id]);
 	useEffect(() => {
-		if (!hasAvailable && slotsRead.hasNextPage && !slotsRead.isFetchingNextPage) void slotsRead.fetchNextPage();
-	}, [hasAvailable, slotsRead.hasNextPage, slotsRead.isFetchingNextPage, slotsRead.fetchNextPage]);
+		if (!hasAvailable && hasNextPage && !isFetchingNextPage && !isFetchNextPageError) void fetchNextPage();
+	}, [hasAvailable, hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage]);
+	const ownsWork = (slot: Slot) => slot.work.kind === "held" && slot.work.actor === session.actor;
+	const canWork = session.can.includes("record") && run?.state === "open" && admittedMethod;
+	async function work(action: Api["work"]["input"]["do"]) {
+		if (!current || !canWork || !sessionCurrent(owner)) return;
+		try {
+			await call("work", { do: action, run: runRef, slot: current.id, projectIdentity }, { project, owner });
+		} catch (error) {
+			setStatus(error instanceof Error ? error.message : "Work request failed. Check the slot before retrying.");
+		} finally {
+			void invalidateProject(project);
+		}
+	}
+
 	function move(delta: number): void {
 		const start = current ? currentIndex : delta > 0 ? -1 : slots.length;
 		for (let distance = 1; distance <= slots.length; distance++) {
@@ -386,25 +429,11 @@ function ProjectRunCockpit({
 		};
 		setLocal((value) => new Map(value).set(slot.id, { fill, pending: true, questions: [] }));
 		void queryClient.cancelQueries({ queryKey: cacheKey });
-		queryClient.setQueryData<InfiniteData<Api["find"]["reply"]>>(
-			cacheKey,
-			(value) =>
-				value && {
-					...value,
-					pages: value.pages.map((page) => ({
-						...page,
-						items: page.items.map((row) =>
-							row.id === slot.id
-								? {
-										...row,
-										state: outcome === "pass" ? "satisfied" : outcome === "fail" ? "failing" : "skipped",
-										fills: [...slot.fills.filter((f) => f.by !== session.actor || f.method !== method), fill],
-									}
-								: row,
-						),
-					})),
-				},
-		);
+		replaceSlot({
+			id: slot.id,
+			state: outcome === "pass" ? "satisfied" : outcome === "fail" ? "failing" : "skipped",
+			fills: [...slot.fills.filter((f) => f.by !== session.actor || f.method !== method), fill],
+		});
 		const pinnedInput = { refs: [slot.case], version: slot.version };
 		const marked = steps[slot.id] ?? "";
 		// Undo records what was recorded before. A step marked since then is for the next failure: it is not
@@ -434,8 +463,7 @@ function ProjectRunCockpit({
 			const known = reports.confirmed.get(slot.id)?.fills.find((f) => f.by === session.actor && f.method === method);
 			const recent = reports.latest.get(slot.id);
 			const previous = known && (!recent || known.result > recent.result) ? known : (recent ?? null);
-			if (restoration && previous?.result !== restoration.fill.result)
-				throw new Error("This result has changed since it was recorded. No correction was recorded.");
+			if (restoration && previous?.result !== restoration.fill.result) throw new Error(changedResult);
 			const cached = RunCase.safeParse(
 				queryClient.getQueryData<Api["get"]["reply"]>(queryKey({ project, op: "get", input: pinnedInput }))?.[0],
 			);
@@ -461,10 +489,10 @@ function ProjectRunCockpit({
 			}));
 			if (restoration?.previous) {
 				const result = restoration.previous.result;
-				const listed = AttachmentReply.parse(await call("attachment", { result }, { project, owner }));
+				const listed = await call("attachment", { result }, { project, owner });
 				if (listed.kind !== "list") throw new UnreadableReply();
 				for (const item of listed.items) {
-					const file = AttachmentReply.parse(await call("attachment", { result, id: item.id }, { project, owner }));
+					const file = await call("attachment", { result, id: item.id }, { project, owner });
 					if (file.kind !== "file") throw new UnreadableReply();
 					attachments.push({ name: file.attachment.name, data: file.data, ...(item.at ? { at: item.at } : {}) });
 				}
@@ -487,7 +515,7 @@ function ProjectRunCockpit({
 						).items[0],
 					);
 					if (latestSlot.id !== slot.id || !latestSlot.fills.some((item) => item.result === restoration.fill.result))
-						throw new Error("This result has changed since it was recorded. No correction was recorded.");
+						throw new Error(changedResult);
 					assertReportOwner();
 					setStatus("Withdrawing the automatic sign-off before correcting the result…");
 					const [reply] = await call(
@@ -601,17 +629,7 @@ function ProjectRunCockpit({
 			if (reports.consumedSteps.get(slot.id) === marked) reports.consumedSteps.delete(slot.id);
 			if (reports.writes.get(slot.id) !== request) return;
 			const restored = reports.confirmed.get(slot.id) ?? rollback;
-			queryClient.setQueryData<InfiniteData<Api["find"]["reply"]>>(
-				cacheKey,
-				(value) =>
-					value && {
-						...value,
-						pages: value.pages.map((page) => ({
-							...page,
-							items: page.items.map((row) => (row.id === slot.id ? restored : row)),
-						})),
-					},
-			);
+			replaceSlot(restored);
 			setLocal((value) => {
 				const next = new Map(value);
 				next.delete(slot.id);
@@ -667,7 +685,7 @@ function ProjectRunCockpit({
 			label: "Record failure",
 			allowInInput: true,
 			hidden: !noting,
-			applies: () => Boolean(noting),
+			applies: () => !!noting,
 			handler: () => {
 				if (noting) record("fail", noting, notes[noting.id] ?? "", true, true);
 			},
@@ -676,7 +694,7 @@ function ProjectRunCockpit({
 			key: "escape",
 			label: "Cancel note",
 			hidden: !noting,
-			applies: () => Boolean(noting),
+			applies: () => !!noting,
 			handler: () => {
 				setNoting(null);
 				noteRef.current?.blur();
@@ -686,13 +704,23 @@ function ProjectRunCockpit({
 			key,
 			label: "Clear step mark",
 			handler: () => setStep(""),
-			applies: () => active() && Boolean(step),
+			applies: () => active() && !!step,
 			hidden: true,
 		})),
-		{ key: "j", label: "Next slot", handler: () => move(1), applies: active },
-		{ key: "k", label: "Previous slot", handler: () => move(-1), applies: active },
-		{ key: "arrowdown", label: "Next slot", handler: () => move(1), applies: active, hidden: true },
-		{ key: "arrowup", label: "Previous slot", handler: () => move(-1), applies: active, hidden: true },
+		...(
+			[
+				["j", 1],
+				["k", -1],
+				["arrowdown", 1],
+				["arrowup", -1],
+			] as const
+		).map(([key, delta]) => ({
+			key,
+			label: delta === 1 ? "Next slot" : "Previous slot",
+			handler: () => move(delta),
+			applies: active,
+			hidden: key.startsWith("arrow"),
+		})),
 		...Array.from({ length: 10 }, (_, digit) => ({
 			key: String(digit),
 			label: `Mark step digit ${digit}`,
@@ -707,40 +735,33 @@ function ProjectRunCockpit({
 			hidden: true,
 		})),
 		{ key: "u", label: "Correct last result", handler: undo, applies: () => active() && canCorrect },
-		{
-			key: "p",
-			label: "Pass",
-			hidden: !canRecord || Boolean(noting),
+		...outcomes.map(([key, outcome]) => ({
+			key,
+			label: outcome === "fail" ? "Fail and note" : outcomeName[outcome],
+			hidden: !canRecord || !!noting,
 			handler: () => {
-				record("pass");
+				if (outcome === "fail") startFail();
+				else record(outcome);
 			},
 			applies: () => active() && canRecord,
-		},
-		{
-			key: "f",
-			label: "Fail and note",
-			hidden: !canRecord || Boolean(noting),
-			handler: startFail,
-			applies: () => active() && canRecord,
-		},
-		{
-			key: "b",
-			label: "Blocked",
-			hidden: !canRecord || Boolean(noting),
+		})),
+		...(
+			[
+				["t", "Claim slot", "take"],
+				["r", "Release slot", "give-back"],
+			] as const
+		).map(([key, label, action]) => ({
+			key,
+			label,
 			handler: () => {
-				record("blocked");
+				void work(action);
 			},
-			applies: () => active() && canRecord,
-		},
-		{
-			key: "s",
-			label: "Skip",
-			hidden: !canRecord || Boolean(noting),
-			handler: () => {
-				record("skip");
-			},
-			applies: () => active() && canRecord,
-		},
+			applies: () =>
+				active() &&
+				canWork &&
+				!!current &&
+				(action === "take" ? !held(current) && !ownsWork(current) : ownsWork(current)),
+		})),
 	];
 	useBindings(bindings);
 	const back = routeUrl({ project, screen: "runs" });
@@ -762,7 +783,7 @@ function ProjectRunCockpit({
 					<b className="run-title">{run?.name ?? "Run"}</b>
 					<span className="dim">
 						{slots.filter(missing).length}
-						{slotsRead.hasNextPage ? "+" : ""} left in run ·{" "}
+						{hasNextPage ? "+" : ""} left in run ·{" "}
 						{run && (run.workUntil === null || run.workUntil > now)
 							? run.inProgress
 							: storedSlots.filter((slot) => slot.work.kind === "held").length}{" "}
@@ -832,7 +853,9 @@ function ProjectRunCockpit({
 											</span>
 										))
 									) : (
-										<span className="run-yours">{slot.assignee ?? "yours"}</span>
+										<span className="run-yours">
+											{ownsWork(slot) || slot.assignee === session.actor ? "yours" : (slot.assignee ?? "Available")}
+										</span>
 									)}
 								</span>
 								{local.get(slot.id)?.questions.map((q) => (
@@ -854,16 +877,22 @@ function ProjectRunCockpit({
 					))}
 					{!slots.length && (
 						<EmptyState>
-							{slotsRead.error?.message ??
-								(slotsRead.isPending
-									? "Reading pinned slots…"
-									: "This run has no cases. Press n in Runs to plan another.")}
+							{slotsError?.message ??
+								(isPending ? "Reading pinned slots…" : "This run has no cases. Press n in Runs to plan another.")}
 						</EmptyState>
 					)}
-					{slotsRead.hasNextPage && (
-						<button className="run-more" type="button" onClick={() => void slotsRead.fetchNextPage()}>
-							More slots
-						</button>
+					{hasNextPage && (
+						<>
+							<button
+								className="run-more"
+								type="button"
+								disabled={isFetchingNextPage}
+								onClick={() => void fetchNextPage()}
+							>
+								More slots
+							</button>
+							{isFetchNextPageError && <p role="alert">{slotsError?.message}</p>}
+						</>
 					)}
 				</div>
 				{next[0] && <UpNext slot={next[0]} />}
@@ -917,14 +946,7 @@ function ProjectRunCockpit({
 						</p>
 					)}
 					<div className="outs">
-						{(
-							[
-								["p", "pass"],
-								["f", "fail"],
-								["b", "blocked"],
-								["s", "skip"],
-							] satisfies [string, RunOutcome][]
-						).map(([key, outcome]) => (
+						{outcomes.map(([key, outcome]) => (
 							<button
 								type="button"
 								className={`out ${ownFill?.outcome === outcome || (noting && outcome === "fail") ? "on" : ""}`}
@@ -1064,7 +1086,7 @@ function RunDocument({ slot, active, step }: { slot: Slot; active: boolean; step
 			hidden={!active}
 			data-run-document={slot.case}
 			data-active={active}
-			data-ready={Boolean(body)}
+			data-ready={!!body}
 			className="run-document"
 		>
 			<div className="run-document-meta">
