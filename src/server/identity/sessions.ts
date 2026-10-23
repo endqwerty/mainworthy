@@ -11,6 +11,9 @@ import { randomBytes } from "@noble/hashes/utils.js";
 import type { ActorKind } from "../../core/kinds.ts";
 import type { App } from "../kernel/app.ts";
 import { type Db, sql } from "../kernel/db.ts";
+import { OpError } from "../kernel/errors.ts";
+import { CONTEXT, sessionHash } from "./contexts.ts";
+import { liveCredentials } from "./credentials.ts";
 import { lastAddress, notedUse } from "./uses.ts";
 
 /**
@@ -31,6 +34,12 @@ type Times = { id: number; last_seen_at: number; expires_at: number };
 type Standing = Times & { actor: number; org: number; kind: ActorKind; name: string };
 
 const Q = {
+	proof: sql<{ hash: string }, { reauthenticated_at: number | null }>(
+		"SELECT reauthenticated_at FROM sessions WHERE hash = $hash AND ended_at IS NULL",
+	),
+	prove: sql<{ hash: string; at: number }>(
+		"UPDATE sessions SET reauthenticated_at = $at WHERE hash = $hash AND ended_at IS NULL",
+	),
 	// A session of a token that was revoked, or has passed its end, or names another actor, or is gone, has no
 	// row here: both joins are inner, so a session with no token at all is nobody's. So is one whose actor was
 	// forgotten.
@@ -82,8 +91,8 @@ const Q = {
 		addr: string | null;
 	}>(
 		`INSERT INTO sessions
-			(actor, hash, credential, created_at, last_seen_at, expires_at, user_agent, created_addr, last_seen_addr)
-		 SELECT a.id, $sessionHash, c.id, $at, $at, $expires, $agent, $addr, $addr
+			(actor, hash, credential, created_at, last_seen_at, expires_at, user_agent, created_addr, last_seen_addr, reauthenticated_at)
+		 SELECT a.id, $sessionHash, c.id, $at, $at, $expires, $agent, $addr, $addr, CASE WHEN c.kind = 'password' OR c.kind = 'passkey' THEN $at ELSE NULL END
 		 FROM credentials c JOIN actors a ON a.id = c.actor AND a.disabled_at IS NULL AND a.kind = 'human'
 		 WHERE c.id = $credential AND c.actor = $actor AND c.revoked_at IS NULL AND c.data = $data`,
 	),
@@ -158,6 +167,36 @@ const Q = {
 	),
 	drop: sql<{ before: number }>("DELETE FROM sessions WHERE ended_at IS NOT NULL AND ended_at <= $before"),
 };
+
+export type ProofContext = { actor: number; context: string | null };
+export const RECENT_PROOF_MESSAGE =
+	"confirm your password, passkey or authenticator code from a signed-in browser session before changing sign-in details; the proof lasts ten minutes";
+
+/** Rechecks the session by its hash on the connection that owns the current transaction. */
+export function proofSession(app: App, input: ProofContext, db = app.db): { id: number; hash: string } | null {
+	const hash = sessionHash(input.context);
+	const session = hash === null ? null : findSession(app, hash, { db });
+	return hash !== null && session?.actor.id === input.actor ? { id: session.id, hash } : null;
+}
+
+/** Called inside each sign-in-changing writer, before it changes a credential or contact. */
+export function requireRecentProof(app: App, input: ProofContext, initial = false): void {
+	if (app.config.mode === "local" && input.context === CONTEXT.local) return;
+	const session = proofSession(app, input);
+	if (session) {
+		const at = app.db.get(Q.proof, { hash: session.hash })?.reauthenticated_at;
+		const now = app.now();
+		if (at != null && at <= now && now - at <= 10 * 60_000) return;
+		if (initial && liveCredentials(app.db, input.actor).length === 0) return;
+	}
+	throw new OpError("recent_proof_required", RECENT_PROOF_MESSAGE);
+}
+
+/** A verified credential and this exact session were checked in the writer's transaction. */
+export function dateSessionProof(app: App, input: ProofContext): boolean {
+	const session = proofSession(app, input);
+	return session !== null && app.db.run(Q.prove, { hash: session.hash, at: app.now() }).changes === 1;
+}
 
 /**
  * Whether a session is inside both lifetimes at `now`: before its absolute end, and used less than the idle

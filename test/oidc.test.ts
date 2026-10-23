@@ -375,6 +375,34 @@ describe("invitations", () => {
 });
 
 describe("the rules about ways in", () => {
+	test("linking rechecks recent proof at both ends, and a provider-only session cannot add a local credential", async () => {
+		const idp = await provider();
+		const w = world({ oidc: idp.config() });
+		const robin = await joined(w, "robin", PASSWORD);
+		w.clock.advance(9 * 60_000 + 59_000);
+		const linking = await begin(w, { link: true }, jar(robin));
+		const query = await authorize(idp, linking, { subject: "sub-robin" });
+		w.clock.advance(1_001);
+		expect((await finish(w, query, jar(robin, linking.ceremony))).body).toMatchObject({
+			error: { code: "recent_proof_required" },
+		});
+		expect(oidcRows(w)).toEqual([]);
+		expect((await w.post("/api/login/oidc", { link: true }, jar(robin))).body).toMatchObject({
+			error: { code: "recent_proof_required" },
+		});
+		expect((await w.post("/api/account/proof", { password: PASSWORD }, jar(robin))).status).toBe(200);
+		const next = await begin(w, { link: true }, jar(robin));
+		expect(
+			(await finish(w, await authorize(idp, next, { subject: "sub-robin" }), jar(robin, next.ceremony))).status,
+		).toBe(200);
+		const viaIdp = sessionOf(await viaProvider(w, idp, "sub-robin"));
+		const listed = must(await w.op<{ id: number; kind: string }[]>("credential", { do: "list" }, jar(robin)));
+		await w.op("credential", { do: "remove", id: listed.find((row) => row.kind === "password")?.id }, jar(robin));
+		expect((await w.post("/api/account/password", { next: PASSWORD }, jar(viaIdp))).body).toMatchObject({
+			error: { code: "recent_proof_required" },
+		});
+	});
+
 	test("an identity is a way in: with it the password can be removed, and removing it ends the sessions resting on it", async () => {
 		const idp = await provider();
 		const w = world({ oidc: idp.config() });
@@ -384,6 +412,10 @@ describe("the rules about ways in", () => {
 		expect(listed.map((row) => row.kind)).toEqual(["password", "oidc"]);
 		const password = listed.find((row) => row.kind === "password");
 		const identity = listed.find((row) => row.kind === "oidc");
+		expect((await w.op("credential", { do: "remove", id: password?.id }, jar(viaIdp))).body).toMatchObject({
+			error: { code: "recent_proof_required" },
+		});
+		expect((await w.post("/api/account/proof", { password: PASSWORD }, jar(viaIdp))).status).toBe(200);
 		expect((await w.op("credential", { do: "remove", id: password?.id }, jar(viaIdp))).status).toBe(200);
 		// Now the identity is the last way in, and stays.
 		expect((await w.op("credential", { do: "remove", id: identity?.id }, jar(viaIdp))).status).toBe(400);

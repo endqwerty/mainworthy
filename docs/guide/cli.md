@@ -293,10 +293,10 @@ Every operation of the API is also a command with the same name. Give its input 
 | `mainworthy tracker-status` | Read a tracker request's delivery state and its verified issue reference. |
 | `mainworthy handoff-status` | Read whether a failure question's latest hand-off to an agent was sent, or why it failed. |
 | `mainworthy audit` | Export a project's retained decisions, answers, policy changes and case versions as a verifiable audit file. |
-| `mainworthy admin` | Projects, actors, teams, grants and tokens. There are no seats: an actor is free, and a token carries what its actor may do. |
+| `mainworthy admin` | Projects, actors, teams, grants and tokens. There are no seats: an actor is free, and a token carries what its actor may do. Creating a token from a browser requires recent credential proof. |
 | `mainworthy session` | Your browser sessions: list them, and end one. An admin who is a person lists and ends anyone's. |
-| `mainworthy credential` | Your password, passkeys, authenticator, recovery email and CLI tokens: list, add or remove them. Only a person may call. A password is set in the web UI. A personal token is shown once and expires after 30d by default. |
-| `mainworthy invitation` | Invite a person with a link: make one, list them, revoke one. Optionally send it by mail. The link is shown once. |
+| `mainworthy credential` | Your password, passkeys, authenticator, recovery email and CLI tokens: list, add or remove them. Only a person may call. Sign-in changes and personal token creation require recent credential proof in the caller's browser session. A password is set in the web UI. A personal token is shown once and expires after 30d by default. |
+| `mainworthy invitation` | Invite a person with a link: make one, list them, revoke one. Optionally send it by mail. The link is shown once. Issuing a recovery link from a browser needs the caller's recent credential proof; token and local recovery authority remain. |
 
 ### Flags every command takes
 

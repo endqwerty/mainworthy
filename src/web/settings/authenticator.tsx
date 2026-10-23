@@ -3,10 +3,12 @@ import type { TotpEnrolment } from "../../core/people-replies.ts";
 import { ApiError } from "../lib/api.ts";
 import { beginTotp, confirmTotp } from "../lib/people.ts";
 import { saidOfWrite } from "./list.ts";
+import { useRecentProof } from "./recent-proof.tsx";
 
 type Setup = { kind: "idle" } | { kind: "enrol"; enrolment: TotpEnrolment } | { kind: "recovery"; codes: string[] };
 
 export function Authenticator({ enrolled, onChanged }: { enrolled: boolean; onChanged: () => Promise<void> }) {
+	const proof = useRecentProof();
 	const [setup, setSetup] = useState<Setup>({ kind: "idle" });
 	const [code, setCode] = useState("");
 	const [busy, setBusy] = useState(false);
@@ -20,6 +22,7 @@ export function Authenticator({ enrolled, onChanged }: { enrolled: boolean; onCh
 		);
 		if (!(error instanceof ApiError)) void onChanged();
 	};
+	if (proof.prompt) return proof.prompt;
 	if (setup.kind === "recovery")
 		return (
 			<div>
@@ -55,7 +58,8 @@ export function Authenticator({ enrolled, onChanged }: { enrolled: boolean; onCh
 						if (busy) return;
 						setBusy(true);
 						setProblem("");
-						void beginTotp()
+						void proof
+							.run(beginTotp)
 							.then((enrolment) => setSetup({ kind: "enrol", enrolment }))
 							.catch(failed)
 							.finally(() => setBusy(false));
@@ -77,7 +81,8 @@ export function Authenticator({ enrolled, onChanged }: { enrolled: boolean; onCh
 				if (busy) return;
 				setBusy(true);
 				setProblem("");
-				void confirmTotp(enrolment.challenge, code.trim())
+				void proof
+					.run(() => confirmTotp(enrolment.challenge, code.trim()))
 					.then(async (confirmed) => {
 						setCode("");
 						setSetup({ kind: "recovery", codes: confirmed.recoveryCodes });

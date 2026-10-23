@@ -12,6 +12,7 @@ import { Authenticator } from "./authenticator.tsx";
 import { EmailForm } from "./email.tsx";
 import { saidBy, saidOfWrite, useList, withId } from "./list.ts";
 import { YourTokens } from "./personal-tokens.tsx";
+import { useRecentProof } from "./recent-proof.tsx";
 import "./people.css";
 
 const ended = (count: number): string => (count === 0 ? "" : ` ${count} other session${count === 1 ? "" : "s"} ended.`);
@@ -22,6 +23,7 @@ const ended = (count: number): string => (count === 0 ? "" : ` ${count} other se
  */
 export function YourSignIn({ passwordRef }: { passwordRef: RefObject<HTMLInputElement | null> }) {
 	const { session, refreshSession } = useApp();
+	const proof = useRecentProof();
 	const credentials = useList("credential", listCredentials);
 	// What the instance offers does not change while it runs.
 	const methods = useQuery({ queryKey: ["instance", "sign-in-methods"], queryFn: signInMethods, staleTime: Infinity });
@@ -39,7 +41,8 @@ export function YourSignIn({ passwordRef }: { passwordRef: RefObject<HTMLInputEl
 		setRemoving((ids) => withId(ids, row.id, true));
 		setRefusal(null);
 		setMessage("");
-		void removeCredential(row.id)
+		void proof
+			.run(() => removeCredential(row.id))
 			.then(({ sessionsEnded }) => {
 				setMessage(`${row.kind === "password" ? "The password" : row.label} was removed.${ended(sessionsEnded)}`);
 				return changed();
@@ -59,6 +62,7 @@ export function YourSignIn({ passwordRef }: { passwordRef: RefObject<HTMLInputEl
 	return (
 		<>
 			<h2>Your sign-in</h2>
+			{proof.prompt}
 			<p className="dim">
 				How {session.actor} signs in to this instance. <DocLink page="access">Passwords and passkeys</DocLink>
 			</p>
@@ -145,12 +149,14 @@ export function YourSignIn({ passwordRef }: { passwordRef: RefObject<HTMLInputEl
  */
 function ProviderLink({ provider, linked, browser }: { provider: string; linked: boolean; browser: boolean }) {
 	const [busy, setBusy] = useState(false);
+	const proof = useRecentProof();
 	const [problem, setProblem] = useState("");
 	if (!browser) return <p className="dim">The provider is linked from a browser that signed in.</p>;
 	if (linked) return <p className="dim">You can sign in through {provider}. It is listed below.</p>;
 	return (
 		<div>
 			<p>Sign in through {provider} as well.</p>
+			{proof.prompt}
 			<button
 				className="out"
 				type="button"
@@ -159,7 +165,8 @@ function ProviderLink({ provider, linked, browser }: { provider: string; linked:
 					if (busy) return;
 					setBusy(true);
 					setProblem("");
-					void startOidc({ link: true }, "Your sign-in")
+					void proof
+						.run(() => startOidc({ link: true }, "Your sign-in"))
 						.catch((error: unknown) => setProblem(saidBy(error)))
 						.finally(() => setBusy(false));
 				}}
@@ -192,6 +199,7 @@ function PasswordForm({
 	const [next, setNext] = useState("");
 	const [again, setAgain] = useState("");
 	const [busy, setBusy] = useState(false);
+	const proof = useRecentProof();
 	const [problem, setProblem] = useState<{ at: Field; message: string } | null>(null);
 	const [message, setMessage] = useState("");
 	const said = (at: Field): string => (problem?.at === at ? problem.message : "");
@@ -236,7 +244,8 @@ function PasswordForm({
 		setProblem(wrong);
 		if (wrong) return;
 		setBusy(true);
-		void setPassword({ current: has ? current : null, next })
+		void proof
+			.run(() => setPassword({ current: has ? current : null, next }))
 			.then(({ sessionsEnded }) => {
 				// A password is not left in a field once it is the password.
 				setCurrent("");
@@ -261,6 +270,7 @@ function PasswordForm({
 
 	return (
 		<form className="settings-form" onSubmit={submit}>
+			{proof.prompt}
 			{/* For a password manager: the name this password is saved under. */}
 			<input type="text" name="username" autoComplete="username" value={person} readOnly hidden />
 			{has && (
@@ -332,6 +342,7 @@ function PasskeyForm({ onAdded }: { onAdded: () => Promise<void> }) {
 	const named = (): string => browserName(navigator.userAgent);
 	const [label, setLabel] = useState(named);
 	const [busy, setBusy] = useState(false);
+	const proof = useRecentProof();
 	const [problem, setProblem] = useState("");
 	const [message, setMessage] = useState("");
 
@@ -355,11 +366,12 @@ function PasskeyForm({ onAdded }: { onAdded: () => Promise<void> }) {
 		setBusy(true);
 		// The challenge is asked for at each press: it is good for five minutes and for one registration.
 		let adding = false;
-		void beginPasskey()
+		void proof
+			.run(beginPasskey)
 			.then(makePasskey)
 			.then((made) => {
 				adding = true;
-				return addPasskey({ made, label: name });
+				return proof.run(() => addPasskey({ made, label: name }));
 			})
 			.then(() => {
 				setMessage(`${name} was added.`);
@@ -383,6 +395,7 @@ function PasskeyForm({ onAdded }: { onAdded: () => Promise<void> }) {
 
 	return (
 		<form className="settings-form" onSubmit={submit}>
+			{proof.prompt}
 			<label htmlFor="passkey-label">Passkey name</label>
 			<input
 				className="form-input"

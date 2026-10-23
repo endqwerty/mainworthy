@@ -4,7 +4,15 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Page } from "playwright-core";
 import { z } from "zod";
 import type { Capability } from "../../src/core/kinds.ts";
-import { browserAvailable, eventually, openPage, type PageHarness, type Server, startServer } from "./support.ts";
+import {
+	advanceClock,
+	browserAvailable,
+	eventually,
+	openPage,
+	type PageHarness,
+	type Server,
+	startServer,
+} from "./support.ts";
 
 let server: Server;
 beforeAll(async () => {
@@ -403,6 +411,9 @@ test.skipIf(!browserAvailable)(
 		try {
 			browser = await openPage(server, { path: "/p/scratch/settings" });
 			const { page } = browser;
+			expect((await page.request.post(`${server.url}/api/account/password`, { data: { next: OLD } })).status()).toBe(
+				200,
+			);
 			await browser.context.grantPermissions(["clipboard-read", "clipboard-write"]);
 			/** The newest invitation for a name, of one purpose, as the server lists it. */
 			const invitation = async (name: string, purpose: "join" | "recover") => {
@@ -517,6 +528,9 @@ test.skipIf(!browserAvailable)(
 			await page.getByText("revokes all their tokens", { exact: false }).waitFor();
 			expect(await invitation("tess", "recover")).toBeUndefined();
 			await page.getByRole("button", { name: "Make the recovery link" }).click();
+			const proof = page.getByRole("region", { name: "Confirm your sign-in", exact: true });
+			await proof.getByLabel("Password", { exact: true }).fill(OLD);
+			await proof.getByRole("button", { name: "Confirm credential", exact: true }).click();
 			await link.waitFor();
 			expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Copy link");
 			await page.getByText("every password, passkey and token they had stops working", { exact: false }).waitFor();
@@ -545,7 +559,10 @@ test.skipIf(!browserAvailable)(
 			await page.getByText("mia signs in here already.", { exact: false }).waitFor();
 			expect(await page.getByRole("button", { name: "Make invitation link" }).isDisabled()).toBe(true);
 			expect(await invitation("mia", "join")).toMatchObject({ state: "open" });
-			expect(browser.errors).toEqual(["Failed to load resource: net::ERR_FAILED"]);
+			expect(browser.errors).toEqual([
+				"Failed to load resource: the server responded with a status of 403 (Forbidden)",
+				"Failed to load resource: net::ERR_FAILED",
+			]);
 		} finally {
 			await browser?.close();
 		}
@@ -618,7 +635,11 @@ test.skipIf(!browserAvailable)(
 			await section(page, "Your sign-in");
 			await page.getByLabel("Token label", { exact: true }).fill("Laptop CLI");
 			expect(await page.getByLabel("Token lifetime", { exact: true }).inputValue()).toBe("30d");
+			await advanceClock(server, 10 * 60_000 + 1);
 			await page.getByRole("button", { name: "Create personal token", exact: true }).click();
+			const proof = page.getByRole("region", { name: "Confirm your sign-in", exact: true });
+			await proof.getByLabel("Password", { exact: true }).fill(OLD);
+			await proof.getByRole("button", { name: "Confirm credential", exact: true }).click();
 			const secret = page.getByLabel("Your new command-line token", { exact: true });
 			await secret.waitFor();
 			const token = await secret.inputValue();
@@ -663,7 +684,10 @@ test.skipIf(!browserAvailable)(
 				.locator(".settings-personal-token", { hasText: "Lost CLI" })
 				.getByText(/Revoked/)
 				.waitFor();
-			expect(browser.errors).toEqual(["Failed to load resource: net::ERR_FAILED"]);
+			expect(browser.errors).toEqual([
+				"Failed to load resource: the server responded with a status of 403 (Forbidden)",
+				"Failed to load resource: net::ERR_FAILED",
+			]);
 		} finally {
 			await browser.close();
 		}

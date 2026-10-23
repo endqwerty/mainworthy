@@ -3,7 +3,8 @@
 import { afterEach, expect, test } from "bun:test";
 import { type App, openApp, SESSION_LIFETIMES } from "../kernel/app.ts";
 import { Ceremonies } from "./ceremonies.ts";
-import { CONTEXT, clearChallenges, findChallenge, issueChallenge, spendChallenge } from "./challenges.ts";
+import { clearChallenges, findChallenge, issueChallenge, spendChallenge } from "./challenges.ts";
+import { CONTEXT } from "./contexts.ts";
 import { CEREMONY_MS, challengeOf } from "./webauthn.ts";
 
 test("full ceremony memory expires entries first, then reclaims the largest source while admitting newcomers", () => {

@@ -16,8 +16,9 @@ import type { App, Config } from "../kernel/app.ts";
 import { type Db, sql } from "../kernel/db.ts";
 import { conflict, forbidden, invalid, notFound, OpError } from "../kernel/errors.ts";
 import { limiterOf, takeStart } from "./attempts.ts";
-import { CONTEXT, findChallenge, invitationChallenge, issueChallenge, spendChallenge } from "./challenges.ts";
+import { findChallenge, invitationChallenge, issueChallenge, spendChallenge } from "./challenges.ts";
 import { clearMailLinksOf, credentialNotice } from "./contacts.ts";
+import { CONTEXT } from "./contexts.ts";
 import {
 	type CredentialRow,
 	countPasskeyUse,
@@ -66,6 +67,7 @@ import {
 } from "./oidc.ts";
 import { dummyHash, hashPassword, type PasswordMatch, PasswordWorkBusy, verifyPassword } from "./passwords.ts";
 import {
+	dateSessionProof,
 	endOtherSessions,
 	endSession,
 	endSessionsOf,
@@ -73,6 +75,9 @@ import {
 	findSession,
 	newSessionSecret,
 	openSessionOnCredential,
+	type ProofContext,
+	proofSession,
+	requireRecentProof,
 	restSession,
 } from "./sessions.ts";
 import {
@@ -421,7 +426,14 @@ export type PasswordChange =
 	| { ok: true; sessionsEnded: number }
 	| {
 			ok: false;
-			why: "not-signed-in" | "not-a-person" | "current-required" | "wrong-current" | "changed-meanwhile" | "busy";
+			why:
+				| "not-signed-in"
+				| "not-a-person"
+				| "current-required"
+				| "wrong-current"
+				| "changed-meanwhile"
+				| "busy"
+				| "recent-proof";
 	  }
 	| Limited;
 
@@ -440,6 +452,7 @@ export async function changePassword(
 	input: {
 		who: () => { id: number; name: string } | null;
 		session: () => number | null;
+		context: () => string | null;
 		current: string | undefined;
 		next: string;
 		address: string | null;
@@ -480,6 +493,15 @@ export async function changePassword(
 			const current = livePassword(app.db, now.id);
 			if ((current?.data ?? null) !== (held?.data ?? null)) return { ok: false, why: "changed-meanwhile" };
 			const at = app.now();
+			const proof = { actor: now.id, context: input.context() };
+			if (current && !dateSessionProof(app, proof)) return { ok: false, why: "not-signed-in" };
+			try {
+				requireRecentProof(app, proof, true);
+			} catch (error) {
+				if (error instanceof OpError && error.code === "recent_proof_required")
+					return { ok: false, why: "recent-proof" };
+				throw error;
+			}
 			if (current) revokeCredential(app.db, current.id, at);
 			const made = insertPassword(app.db, { actor: now.id, hash, at });
 			credentialNotice(app, now.id, current ? "Your password was changed" : "A password was added");
@@ -491,6 +513,89 @@ export async function changePassword(
 }
 
 // ── A passkey ──────────────────────────────────────────────────────────────────────────────────────────────
+
+export function beginCredentialProof(app: App, input: ProofContext): AssertionOptions {
+	const session = proofSession(app, input);
+	if (!session || input.context === null) throw forbidden("confirm a credential from a session that is signed in");
+	const party = mustHavePasskeys(app);
+	return assertionOptions({
+		rpId: party.id,
+		challenge: issueChallenge(app, { purpose: "prove", actor: input.actor, context: input.context }, party),
+		allow: liveCredentials(app.db, input.actor).flatMap((row) => storedPasskey(row) ?? []),
+	});
+}
+
+type CredentialProof = { password: string } | { passkey: unknown } | { code: string };
+
+/** Verifies outside the gate, then rechecks the exact credential and session before dating this session. */
+export async function proveCredential(
+	app: App,
+	input: ProofContext & { proof: CredentialProof; address: string | null },
+): Promise<{ ok: true } | Refused | Limited> {
+	if (!proofSession(app, input, app.reader)) return no("context");
+	const person = app.reader.get(Q.personById, { id: input.actor });
+	if (!person) return no("unknown-name");
+	const proof = input.proof;
+	if ("passkey" in proof) {
+		const attempt = byAddress(app, input.address);
+		const first = judgeAssertion(app, app.reader, proof.passkey, null, input);
+		if (!first.ok) return attempt.wrong(first);
+		return commit(app, () => {
+			if (!proofSession(app, input)) return no("context");
+			const now = judgeAssertion(app, app.db, proof.passkey, null, input);
+			if (!now.ok) return attempt.wrong(now);
+			if (now.row.data !== first.row.data || now.row.handle !== first.row.handle) return no("changed-meanwhile");
+			if (!countPasskeyUse(app.db, now.row, now.shown, app.now()) || !dateSessionProof(app, input))
+				throw new Stop(no("changed-meanwhile"));
+			spendChallenge(app, now.challenge);
+			return { ok: true } as const;
+		});
+	}
+	const row = "password" in proof ? livePassword(app.reader, person.id) : liveTotp(app.reader, person.id);
+	if ("password" in proof) {
+		try {
+			const checked = await checkPassword(app, {
+				password: proof.password,
+				stored: row?.data ?? (await dummyHash(app.config.passwordCost)),
+				name: person.name,
+				address: input.address,
+			});
+			if (typeof checked !== "string") return checked;
+			if (!row || checked === "wrong") return no("wrong-password");
+		} catch (error) {
+			if (error instanceof PasswordWorkBusy) return no("busy");
+			throw error;
+		}
+		return commit(app, () => {
+			const current = livePassword(app.db, person.id);
+			if (!proofSession(app, input) || current?.id !== row.id || current.data !== row.data)
+				return no("changed-meanwhile");
+			if (!dateSessionProof(app, input)) return no("context");
+			noteCredentialUse(app.db, current.id, app.now());
+			return { ok: true } as const;
+		});
+	}
+	const attempt = factorAttempt(app, { kind: "sign-in", name: person.name, address: input.address });
+	if (attempt.answer.kind === "blocked") return waiting(attempt.answer);
+	const stored = row ? readTotp(row.data) : null;
+	const next = stored && /^\d{6}$/.test(proof.code) ? acceptTotp(stored, proof.code, app.now()) : null;
+	if (!row || !stored || !next) {
+		attempt.limiter.failed(attempt.keys, app.now());
+		return no("wrong-code");
+	}
+	return commit(app, () => {
+		const current = liveTotp(app.db, person.id);
+		if (!proofSession(app, input) || current?.id !== row.id || current.data !== row.data)
+			return no("changed-meanwhile");
+		const limit = attempt.limiter.check(attempt.keys, app.now());
+		if (limit.kind === "blocked") return waiting(limit);
+		if (!acceptTotp(stored, proof.code, app.now())) return no("wrong-code");
+		if (!updateTotp(app.db, current, JSON.stringify(next), app.now()) || !dateSessionProof(app, input))
+			throw new Stop(no("changed-meanwhile"));
+		attempt.limiter.succeeded([attempt.account]);
+		return { ok: true } as const;
+	});
+}
 
 /**
  * What a page passes to the browser to sign in with a passkey, with a new challenge. It names no passkey: the
@@ -532,26 +637,40 @@ export function passkeySignInOptions(
  * row names, found by the credential id; nothing else in the answer chooses who signs in. The sign-in named no
  * passkey, so the answer must carry the user handle, and it must be that person's. `ceremony` is the ceremony
  * cookie the request carried, or null: the answer is taken only from the browser its challenge was issued to.
+ * A recent-proof challenge already knows its person and offers their credentials, so its user handle may be
+ * absent; one returned must still match. Its session context and credential ownership identify the person.
  */
 function judgeAssertion(
 	app: App,
 	db: Db,
 	answer: unknown,
 	ceremony: string | null,
+	proof?: ProofContext,
 ): { ok: true; row: CredentialRow; person: Person; shown: Assertion; challenge: string } | Refused {
 	const parsed = AssertionResponse.safeParse(answer);
 	const challenge = challengeOf(answer);
 	if (!parsed.success || challenge === null) return no("input");
-	const found = findChallenge(app, challenge, "sign-in");
+	const found = proof ? findChallenge(app, challenge, "prove") : findChallenge(app, challenge, "sign-in");
 	if (!found) return no("challenge");
-	if (ceremony === null || found.ceremony.context !== CONTEXT.browser(hashOf(ceremony))) return no("context");
+	if (
+		proof
+			? found.ceremony.context !== proof.context
+			: ceremony === null || found.ceremony.context !== CONTEXT.browser(hashOf(ceremony))
+	)
+		return no("context");
 	const row = passkeyByCredentialId(db, parsed.data.id);
 	if (!row) return no("unknown-passkey");
+	if (
+		proof &&
+		(row.actor !== proof.actor || found.ceremony.purpose !== "prove" || found.ceremony.actor !== proof.actor)
+	)
+		return no("context");
 	const person = row.revoked_at === null ? db.get(Q.personById, { id: row.actor }) : null;
 	const stored = storedPasskey(row);
 	// A removed passkey's row holds no key any more, and a forgotten person's passkeys were revoked with them.
 	if (!person || !stored) return no("revoked-passkey");
-	if ((parsed.data.userHandle ?? null) === null || parsed.data.userHandle !== userHandleOf(db, person.id))
+	const handle = parsed.data.userHandle ?? null;
+	if ((!proof && handle === null) || (handle !== null && handle !== userHandleOf(db, person.id)))
 		return no("user-handle");
 	const verdict = verifyAssertion(
 		parsed.data,
@@ -662,6 +781,7 @@ function mustBePerson(db: Db, actor: number): Person {
  * nowhere else, so another session of the same person does not store a passkey this one asked for.
  */
 export function beginPasskey(app: App, input: { actor: number; context: string }): RegistrationOptions {
+	requireRecentProof(app, input, true);
 	const party = mustHavePasskeys(app);
 	const person = mustBePerson(app.db, input.actor);
 	const userHandle = ensureUserHandle(app.db, person.id, app.now());
@@ -682,6 +802,7 @@ export function addPasskey(
 	app: App,
 	input: { actor: number; context: string; answer: unknown; label: string },
 ): { id: number; label: string } {
+	requireRecentProof(app, input, true);
 	mustHavePasskeys(app);
 	const person = mustBePerson(app.db, input.actor);
 	const judged = judgeRegistration(app, app.db, { person, answer: input.answer, context: input.context });
@@ -729,9 +850,10 @@ const REMOVED: Record<CredentialRow["kind"], string> = {
  * Removes one way a person signs in, and ends the sessions that rest on it. The last one stays: with none, the
  * person could not sign in to add another, and only an admin's recovery link would let them back.
  */
-export function removeCredential(app: App, id: number): { removed: true; sessionsEnded: number } {
+export function removeCredential(app: App, id: number, proof: ProofContext): { removed: true; sessionsEnded: number } {
 	const row = credentialById(app.db, id);
 	if (!row || row.revoked_at !== null) throw notFound(`credential ${id}`);
+	requireRecentProof(app, proof);
 	const requiresFactor = app.config.requireAdminMfa && hasAdminGrant(app.db, row.actor);
 	if (row.kind === "totp" && requiresFactor && livePassword(app.db, row.actor))
 		throw forbidden(
@@ -777,8 +899,10 @@ export function removeCredential(app: App, id: number): { removed: true; session
  */
 export function createInvitation(
 	app: App,
-	input: { actor: number; by: number; purpose: InvitationPurpose; lastsMs: number },
+	input: { actor: number; by: number; purpose: InvitationPurpose; lastsMs: number; context: string | null },
 ): { id: number; code: string; link: string; expiresAt: number } {
+	if (input.purpose === "recover" && input.context !== null && input.context !== CONTEXT.local)
+		requireRecentProof(app, { actor: input.by, context: input.context });
 	const at = app.now();
 	revokeInvitationsOf(app.db, input.actor, at);
 	ensureUserHandle(app.db, input.actor, at);
@@ -1067,6 +1191,11 @@ export async function beginOidcSignIn(app: App, start: OidcStart, address: strin
 		purpose = { purpose: "join", invitation: hash, replace: start.replace };
 	} else if (start.purpose === "link") {
 		if (!app.reader.get(Q.personById, { id: start.actor })) return { ok: false, why: "not-a-person" };
+		await app.gate.run(() =>
+			app.db.transaction(() =>
+				requireRecentProof(app, { actor: start.actor, context: CONTEXT.session(hashOf(start.browser)) }),
+			),
+		);
 		purpose = { purpose: "link", actor: start.actor, session: hashOf(start.browser) };
 	} else purpose = start;
 	const ceremony = newSessionSecret();
@@ -1120,6 +1249,7 @@ export async function finishOidcSignIn(
 			const held = input.browser === null ? null : findSession(app, hashOf(input.browser), { db: app.db });
 			if (input.browser === null || hashOf(input.browser) !== linking.session || held?.actor.id !== linking.actor)
 				return no("context");
+			requireRecentProof(app, { actor: linking.actor, context: CONTEXT.session(linking.session) });
 			if (oidcByHandle(app.db, handle)) return { ok: false, why: "linked-already" };
 			insertOidc(app.db, { actor: linking.actor, handle, label, at: app.now() });
 			credentialNotice(app, linking.actor, "An identity provider sign-in was added");
@@ -1214,6 +1344,7 @@ export async function signInWithTotp(
 }
 
 export function beginTotp(app: App, input: { actor: number; context: string }) {
+	requireRecentProof(app, input, true);
 	const person = mustBePerson(app.db, input.actor);
 	if (liveTotp(app.db, person.id))
 		throw conflict("an authenticator is enrolled already; remove it before enrolling another");
@@ -1228,6 +1359,7 @@ export function confirmTotp(
 	app: App,
 	input: { actor: number; session: number | null; context: string; challenge: string; code: string },
 ) {
+	requireRecentProof(app, input, true);
 	const person = mustBePerson(app.db, input.actor);
 	const held = findTotp(app, input.challenge, "enrol");
 	if (!held || held.actor !== person.id || held.name !== person.name || held.context !== input.context)

@@ -142,6 +142,10 @@
 	color: var(--dim);
 	margin-top: 4px;
 }
+.settings-proof label {
+	display: grid;
+	gap: 8px;
+}
 .settings-form .out {
 	justify-self: start;
 	margin-top: 5px;

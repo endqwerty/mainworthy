@@ -79,7 +79,20 @@ logout needs no body. Replies use the operation envelope without `seq`.
 | `POST /api/login` | `{"emailVerification":"<code>"}` | Verifies a recovery email address. Returns `{"verified":true}` on success. The code works once for 24 hours. Requires mail. |
 | `POST /api/login` | `{"reset":"<code>","password":"<new password>"}` | Replaces the password and ends existing sessions. Returns `{"changed":true}` without signing in. The code works once for 15 minutes. An enrolled authenticator remains required. Requires mail. |
 | `POST /api/account/password` | `{"current"?, "next"}` | Sets or changes the password of the person whose browser session sends it. `current` is required when they have one. |
+| `POST /api/account/proof` | `{"password"}`, `{"code"}` or `{"passkey"}` | Proves an existing credential for the current session for ten minutes. `code` is a six-digit TOTP, not a recovery code. Returns `{"proved":true}`. A wrong proof is `forbidden`; failed-attempt limits apply. |
+| `POST /api/account/proof` | `{"begin":true}` | Returns `{"passkey":<assertion options>}` for a single-use passkey proof bound to this session and its person. Finish at the same endpoint with `{"passkey":<assertion>}`. |
 | `POST /api/logout` | none | Ends the browser's session and clears its cookie. |
+
+Credential changes, recovery-address changes, and provider linking return HTTP
+403 with `recent_proof_required` when the caller's session has no proof within
+ten minutes. Prove a credential in that session and retry the refused action.
+This refusal leaves the session signed in and writes no command. When changing
+another person's details, prove the admin's own credential. Bearer tokens do not
+carry session proof. A first credential and invitation or recovery acceptance
+need no prior proof. Replacing a password retains its current-password check.
+Creating a token through `credential` or `admin`, and issuing a recovery
+invitation from a browser also need the caller's recent proof. Bearer-token and
+local issuance retain their existing recovery authority.
 
 A body holds one of these shapes and no other fields. `GET /api/session` returns
 who is signed in, their numeric actor id (`actorId`), the current session id
@@ -1098,7 +1111,7 @@ Export a project's retained decisions, answers, policy changes and case versions
 
 ### admin
 
-Projects, actors, teams, grants and tokens. There are no seats: an actor is free, and a token carries what its actor may do.
+Projects, actors, teams, grants and tokens. There are no seats: an actor is free, and a token carries what its actor may do. Creating a token from a browser requires recent credential proof.
 
 |  |  |
 | --- | --- |
@@ -1191,7 +1204,7 @@ Your browser sessions: list them, and end one. An admin who is a person lists an
 
 ### credential
 
-Your password, passkeys, authenticator, recovery email and CLI tokens: list, add or remove them. Only a person may call. A password is set in the web UI. A personal token is shown once and expires after 30d by default.
+Your password, passkeys, authenticator, recovery email and CLI tokens: list, add or remove them. Only a person may call. Sign-in changes and personal token creation require recent credential proof in the caller's browser session. A password is set in the web UI. A personal token is shown once and expires after 30d by default.
 
 |  |  |
 | --- | --- |
@@ -1234,7 +1247,7 @@ Your password, passkeys, authenticator, recovery email and CLI tokens: list, add
 
 ### invitation
 
-Invite a person with a link: make one, list them, revoke one. Optionally send it by mail. The link is shown once.
+Invite a person with a link: make one, list them, revoke one. Optionally send it by mail. The link is shown once. Issuing a recovery link from a browser needs the caller's recent credential proof; token and local recovery authority remain.
 
 |  |  |
 | --- | --- |

@@ -20,6 +20,7 @@ import { EmailAddress, whyNotPassword } from "../core/people.ts";
 import {
 	type Accepted,
 	acceptInvitation,
+	beginCredentialProof,
 	beginNativeOidc,
 	beginOidcSignIn,
 	changePassword,
@@ -32,7 +33,9 @@ import {
 	PASSKEYS_OFF,
 	type PasswordChange,
 	passkeySignInOptions,
+	proveCredential,
 	publicAddress,
+	RECENT_PROOF_MESSAGE,
 	requestReset,
 	resetPassword,
 	type Session,
@@ -46,6 +49,7 @@ import {
 	type WhyNot,
 } from "../server/identity/identity.ts";
 import type { App } from "../server/kernel/app.ts";
+import { OpError } from "../server/kernel/errors.ts";
 
 /** What the listener knows of the connection a request arrived on, and may do to it: as `http.ts` has it. */
 type Listener = Pick<ReturnType<typeof Bun.serve>, "requestIP" | "timeout">;
@@ -92,6 +96,12 @@ const NO_INVITATION =
 // request that carries two proofs is not judged by the one that happens to be read first.
 const WithPassword = z.strictObject({ name: z.string().min(1).max(64), password: z.string().min(1).max(512) });
 const WithTotp = z.strictObject({ challenge: z.string().min(1).max(128), code: z.string().min(1).max(128) });
+const RecentProof = z.union([
+	z.strictObject({ begin: z.literal(true) }),
+	z.strictObject({ password: z.string().min(1).max(512) }),
+	z.strictObject({ passkey: z.unknown().refine((value) => value !== undefined) }),
+	z.strictObject({ code: z.string().min(1).max(128) }),
+]);
 const ResetRequest = z.strictObject({ resetRequest: EmailAddress });
 const EmailVerification = z.strictObject({ emailVerification: z.string().min(1).max(128) });
 const ResetPassword = z.strictObject({ reset: z.string().min(1).max(128), password: z.string().max(4096) });
@@ -162,7 +172,7 @@ export function signInRoutes(app: App, tools: Tools) {
 	 * from and read its body.
 	 */
 	async function signIn(req: Request, server: Listener, input: unknown): Promise<Response> {
-		const reply = await answerSignIn(req, server, input);
+		const reply = await knownRefusal(() => answerSignIn(req, server, input));
 		// A sign-in with a passkey ends its ceremony whatever came of it: the cookie that tied the challenge to
 		// this browser is cleared with the reply, accepted, refused or told to wait.
 		if (
@@ -400,6 +410,7 @@ export function signInRoutes(app: App, tools: Tools) {
 		"wrong-current": ["forbidden", "the current password is not right; nothing was changed"],
 		"changed-meanwhile": ["conflict", "the password was changed meanwhile, from another session; nothing was changed"],
 		busy: ["conflict", "the server is busy checking passwords; nothing was changed, try again in a moment"],
+		"recent-proof": ["recent_proof_required", RECENT_PROOF_MESSAGE],
 	};
 
 	/**
@@ -422,6 +433,7 @@ export function signInRoutes(app: App, tools: Tools) {
 		const changed = await changePassword(app, {
 			who: () => session.actor(0),
 			session: sessionId,
+			context: () => session.context?.() ?? null,
 			current: body.data.current,
 			next: body.data.next,
 			address: tools.address(req, server),
@@ -431,6 +443,29 @@ export function signInRoutes(app: App, tools: Tools) {
 		if (changed.why === "wrong-current") console.warn("[mainworthy] password change refused: wrong-password");
 		const [code, message] = CHANGE_REFUSED[changed.why];
 		return failed(code, message);
+	}
+
+	async function recentProof(req: Request, server: Listener): Promise<Response> {
+		const session = tools.sessionFor(req, server);
+		if (session instanceof Response) return session;
+		if (session.via !== "cookie") return failed("forbidden", "confirm a credential from a session that is signed in");
+		const read = await tools.read(req, SIGN_IN_BODY_LIMIT);
+		if (read instanceof Response) return read;
+		const body = RecentProof.safeParse(read.input);
+		if (!body.success) return failed("invalid", "send one password, passkey assertion or authenticator code");
+		const actor = session.actor(0);
+		const context = session.context?.() ?? null;
+		if (!actor || context === null) return failed("unauthenticated", "sign in again; this session ended");
+		if (actor.kind !== "human") return failed("forbidden", "only a person confirms a sign-in credential");
+		const input = { actor: actor.id, context };
+		if ("begin" in body.data) {
+			const passkey = await app.gate.run(() => app.db.transaction(() => beginCredentialProof(app, input)));
+			return answered({ passkey });
+		}
+		const result = await proveCredential(app, { ...input, proof: body.data, address: tools.address(req, server) });
+		if (result.ok) return answered({ proved: true });
+		if (result.why === "limited") return tools.limited(result.retryAfter);
+		return failed("forbidden", "that credential proof was not accepted; nothing was changed");
 	}
 
 	async function nativeOidc(req: Request, server: Listener): Promise<Response> {
@@ -460,6 +495,15 @@ export function signInRoutes(app: App, tools: Tools) {
 			: refused("provider");
 	}
 
+	async function knownRefusal(work: () => Promise<Response>): Promise<Response> {
+		try {
+			return await work();
+		} catch (error) {
+			if (error instanceof OpError) return failed(error.code, error.message, error.details);
+			throw error;
+		}
+	}
+
 	return {
 		signIn,
 		routes: {
@@ -467,8 +511,9 @@ export function signInRoutes(app: App, tools: Tools) {
 			"/api/login/challenge": { POST: (req: Request, server: Listener) => challenge(req, server) },
 			"/api/login/oidc/native": { POST: (req: Request, server: Listener) => nativeOidc(req, server) },
 			"/api/login/oidc/native/callback": { GET: (req: Request, server: Listener) => nativeCallback(req, server) },
-			"/api/login/oidc": { POST: (req: Request, server: Listener) => oidc(req, server) },
+			"/api/login/oidc": { POST: (req: Request, server: Listener) => knownRefusal(() => oidc(req, server)) },
 			"/api/account/password": { POST: (req: Request, server: Listener) => password(req, server) },
+			"/api/account/proof": { POST: (req: Request, server: Listener) => knownRefusal(() => recentProof(req, server)) },
 		},
 	};
 }

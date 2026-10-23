@@ -268,6 +268,20 @@ struct ServerTests {
 		#expect(String(decoding: secrets.load() ?? Data(), as: UTF8.self).contains(newer))
 	}
 
+	@Test("recent credential proof refusal preserves the session and points to the web app")
+	func recentProofKeepsTheSession() async throws {
+		let body = #"{"ok":false,"error":{"code":"recent_proof_required","message":"confirm your credential"}}"#
+		let script = Script(.json(signedIn, headers: ["Set-Cookie": "mainworthy_sid=\(cookie); Path=/; HttpOnly"]), .json(session), .json(status: 403, body), .json(session))
+		let client = server(script)
+		_ = try await client.signIn(.password(name: "robin", password: "a password"))
+		await #expect(throws: ClientError.recentProofRequired) {
+			let _: JSONValue = try await client.write("credential", in: nil, ["do": "email.set", "email": .null])
+		}
+		#expect(client.cookieHeader != nil)
+		_ = try await client.account()
+		#expect(ClientError.recentProofRequired.message.contains("web app"))
+	}
+
 	@Test("too many attempts says how long to wait")
 	func limited() async {
 		let body = #"{"ok":false,"error":{"code":"limited","message":"too many attempts; try again in 8 seconds"}}"#

@@ -26,8 +26,9 @@ import type { Actor } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
 import { conflict, forbidden, invalid, notFound } from "../kernel/errors.ts";
 import { limiterOf } from "./attempts.ts";
-import { CONTEXT, clearChallenges } from "./challenges.ts";
+import { clearChallenges } from "./challenges.ts";
 import { credentialNotice, forgetContact } from "./contacts.ts";
+import { CONTEXT } from "./contexts.ts";
 import { credentialSummary, dropUserHandle, forgetCredentialsOf } from "./credentials.ts";
 import { listInvitations, revokeInvitation, revokeInvitationsOf, sweepInvitations } from "./invitations.ts";
 import { addressKey, isGeneratedSecret, prefixKey } from "./limiter.ts";
@@ -43,6 +44,8 @@ import {
 	listSessions,
 	newSessionSecret,
 	openSession,
+	type ProofContext,
+	requireRecentProof,
 	sessionOwner,
 	sweepSessions,
 } from "./sessions.ts";
@@ -57,6 +60,7 @@ export {
 	type Accepted,
 	acceptInvitation,
 	addPasskey,
+	beginCredentialProof,
 	beginNativeOidc,
 	beginOidcSignIn,
 	beginPasskey,
@@ -74,6 +78,7 @@ export {
 	PASSKEYS_OFF,
 	type PasswordChange,
 	passkeySignInOptions,
+	proveCredential,
 	publicAddress,
 	removeCredential,
 	showInvitation,
@@ -83,6 +88,7 @@ export {
 	signInWithTotp,
 	type WhyNot,
 } from "./people.ts";
+export { RECENT_PROOF_MESSAGE } from "./sessions.ts";
 export { manageTeams } from "./teams.ts";
 // What the server's start and the archive need of the module's other files.
 export {
@@ -611,7 +617,7 @@ export type Session = {
 	id?: () => number | null;
 	/**
 	 * Where the caller is signed in, as one text that every request of the same browser session gives and no
-	 * other does (`CONTEXT` in `challenges.ts`), or null once that session has ended. A passkey ceremony keeps
+	 * other does (`CONTEXT` in `contexts.ts`), or null once that session has ended. A passkey ceremony keeps
 	 * it with its challenge, so that what one session began another does not complete. The owner of this
 	 * machine, who has no session, is one place too. A token has none: it is no browser's session, and a way
 	 * of signing in is not added with one.
@@ -899,6 +905,8 @@ export function actorLabel(db: Db, id: number): { name: string; kind: ActorKind 
  *
  * `lastsMs` is how long the token works from now; absent, it has no end. `madeBy` is the id of the actor that
  * asked for it, which the row keeps; absent for a harness that makes a token with nobody asking.
+ * Browser callers pass their admitted context so the writer requires their recent proof. Bootstrap and
+ * operator token/local callers keep their recovery authority.
  */
 export function createToken(
 	app: App,
@@ -911,7 +919,9 @@ export function createToken(
 		lastsMs?: number;
 		madeBy?: number;
 	},
+	caller: ProofContext | null = null,
 ): { id: number; secret: string; actor: string; expiresAt: number | null } {
+	if (caller?.context != null) requireRecentProof(app, caller);
 	if (input.kind === "rule") throw invalid("a rule does not hold a token");
 	mustBeName(input.actor);
 	const db = app.db;
@@ -1109,15 +1119,19 @@ export function createPersonalToken(
 		throw forbidden(
 			"make a personal token from a browser signed in with a password or a passkey, or as the local owner",
 		);
-	const created = createToken(app, {
-		actor: input.actor.name,
-		kind: "human",
-		can: [],
-		project: 0,
-		label: input.label,
-		lastsMs: input.lastsMs,
-		madeBy: input.actor.id,
-	});
+	const created = createToken(
+		app,
+		{
+			actor: input.actor.name,
+			kind: "human",
+			can: [],
+			project: 0,
+			label: input.label,
+			lastsMs: input.lastsMs,
+			madeBy: input.actor.id,
+		},
+		{ actor: input.actor.id, context: input.context },
+	);
 	if (created.expiresAt === null) throw new Error("a personal token must expire");
 	return { id: created.id, actor: created.actor, token: created.secret, expiresAt: created.expiresAt };
 }

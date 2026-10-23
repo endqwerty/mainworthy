@@ -159,6 +159,9 @@ test.skipIf(!browserAvailable)(
 		const admin = await openPage(server, { path: "/p/scratch/settings", device: "phone" });
 		try {
 			await passkey(other, "Phone security key");
+			expect(
+				(await admin.page.request.post(`${server.url}/api/account/password`, { data: { next: PASSWORD } })).status(),
+			).toBe(200);
 			const { page } = admin;
 			await page.getByRole("option", { name: "People", exact: true }).tap();
 			await page.getByRole("button", { name: "Sign-in details for phone-person", exact: true }).tap();
@@ -173,6 +176,9 @@ test.skipIf(!browserAvailable)(
 				.waitFor();
 			expect(await server.api("credential", { do: "list", actor: "phone-person" })).toHaveLength(2);
 			await details.getByRole("button", { name: "Remove this sign-in method", exact: true }).tap();
+			const proof = page.getByRole("region", { name: "Confirm your sign-in", exact: true });
+			await proof.getByLabel("Password", { exact: true }).fill(PASSWORD);
+			await proof.getByRole("button", { name: "Confirm credential", exact: true }).tap();
 			await details.getByText("No password set", { exact: true }).waitFor();
 			await eventually(
 				() => server.api("session", { do: "list", actor: "phone-person" }),
@@ -189,7 +195,7 @@ test.skipIf(!browserAvailable)(
 			expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 			await other.page.reload();
 			await other.page.locator("#signin-name").waitFor();
-			expect(admin.errors).toEqual([]);
+			expect(admin.errors).toEqual(["Failed to load resource: the server responded with a status of 403 (Forbidden)"]);
 			expect(other.errors).toEqual([]);
 		} finally {
 			await other.close();

@@ -109,7 +109,7 @@ export const credentialOp = defineInstanceOp({
 	name: "credential",
 	output: REPLIES.credential,
 	summary:
-		"Your password, passkeys, authenticator, recovery email and CLI tokens: list, add or remove them. Only a person may call. A password is set in the web UI. A personal token is shown once and expires after 30d by default.",
+		"Your password, passkeys, authenticator, recovery email and CLI tokens: list, add or remove them. Only a person may call. Sign-in changes and personal token creation require recent credential proof in the caller's browser session. A password is set in the web UI. A personal token is shown once and expires after 30d by default.",
 	input: CredentialInput,
 	needs: "self",
 	scope: "instance",
@@ -156,7 +156,7 @@ export const credentialOp = defineInstanceOp({
 				});
 			case "remove":
 				own(env, credentialOwner(db, input.id), `credential ${input.id}`);
-				return removeCredential(env.app, input.id);
+				return removeCredential(env.app, input.id, { actor: env.actor.id, context: env.context });
 			case "token.create": {
 				const lastsMs = durationMs(input.expires);
 				if (lastsMs === null) throw invalid("expires: invalid duration");
@@ -186,7 +186,7 @@ export const invitationOp = defineInstanceOp({
 	name: "invitation",
 	output: REPLIES.invitation,
 	summary:
-		"Invite a person with a link: make one, list them, revoke one. Optionally send it by mail. The link is shown once.",
+		"Invite a person with a link: make one, list them, revoke one. Optionally send it by mail. The link is shown once. Issuing a recovery link from a browser needs the caller's recent credential proof; token and local recovery authority remain.",
 	input: InvitationInput,
 	needs: "admin",
 	scope: "instance",
@@ -216,7 +216,13 @@ export const invitationOp = defineInstanceOp({
 					project,
 				});
 				const purpose = person.isNew ? "join" : "recover";
-				const made = createInvitation(env.app, { actor: person.id, by: env.actor.id, purpose, lastsMs });
+				const made = createInvitation(env.app, {
+					actor: person.id,
+					by: env.actor.id,
+					purpose,
+					lastsMs,
+					context: env.context,
+				});
 				if (input.email !== undefined)
 					queueMail(env.app, {
 						to: input.email,

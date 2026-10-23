@@ -8,7 +8,7 @@ import { insertPassword, livePassword, revokeCredential } from "./credentials.ts
 import { addressKey } from "./limiter.ts";
 import { deliverMail, queueMail, requireMail } from "./mail.ts";
 import { hashPassword, PasswordWorkBusy } from "./passwords.ts";
-import { endSessionsOf, newSessionSecret } from "./sessions.ts";
+import { endSessionsOf, newSessionSecret, requireRecentProof } from "./sessions.ts";
 
 type Contact = { actor: number; name: string; email: string; verified_at: number | null; revision: string };
 const Q = {
@@ -83,6 +83,7 @@ export function setEmail(
 			throw forbidden("an email address is changed from a browser that is signed in, not with a token");
 	} else if (caller.name !== app.config.owner)
 		throw forbidden("a recovery email address is changed by that person or the owner of this instance");
+	requireRecentProof(app, { actor: caller.id, context: input.context }, person.id === caller.id);
 	const actor = person.id;
 	if (email === null) {
 		credentialNotice(app, actor, "Your recovery email address was removed");

@@ -632,11 +632,19 @@ describe("removing a credential", () => {
 		}
 		expect((await w.op("credential", { do: "list", actor: "robin" }, { cookie: sam })).status).toBe(403);
 		expect(credentials(w).map((row) => row.revoked_at)).toEqual([null, null, null, null]);
-		// The owner, with a token, sees Robin's and removes one. Nobody registers a passkey for somebody else.
+		// The owner's token lists credentials, but removal needs the owner's own recent session proof.
 		const seen = await w.ok<{ id: number }[]>("credential", { do: "list", actor: "robin" });
 		expect(seen.map((row) => row.id)).toEqual([1, 2]);
-		expect(await w.ok<unknown>("credential", { do: "remove", id: 2 })).toEqual({ removed: true, sessionsEnded: 0 });
-		expect((await w.op("credential", { do: "remove", id: 1 })).status).toBe(400);
+		expect((await w.op("credential", { do: "remove", id: 2 })).body).toMatchObject({
+			error: { code: "recent_proof_required" },
+		});
+		const recovery = await invite(w, { name: OWNER });
+		const owner = await w.post("/api/login", { invitation: recovery.code, password: PASSWORD });
+		expect(await w.ok<unknown>("credential", { do: "remove", id: 2 }, { cookie: owner.cookie })).toEqual({
+			removed: true,
+			sessionsEnded: 0,
+		});
+		expect((await w.op("credential", { do: "remove", id: 1 }, { cookie: owner.cookie })).status).toBe(400);
 		expect(await w.status({ cookie: robin })).toBe(200);
 	});
 });

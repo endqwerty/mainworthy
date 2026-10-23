@@ -5,9 +5,11 @@ import { createPersonalToken, dateTime, listPersonalTokens, listSessions, revoke
 import { useApp } from "../ui/context.tsx";
 import { age, SectionHeading } from "../ui/index.tsx";
 import { saidBy, saidOfWrite, useList, withId } from "./list.ts";
+import { useRecentProof } from "./recent-proof.tsx";
 
 export function YourTokens() {
 	const { session } = useApp();
+	const proof = useRecentProof();
 	const tokens = useList("personal-token", listPersonalTokens);
 	const sessions = useList("session", listSessions);
 	const mayCreate = session.via === "local" || sessions.data?.some((row) => row.current && row.openedWith !== "token");
@@ -24,7 +26,8 @@ export function YourTokens() {
 		if (busy || created || !mayCreate || !label.trim()) return;
 		setBusy(true);
 		setMessage("");
-		void createPersonalToken(label, expires)
+		void proof
+			.run(() => createPersonalToken(label, expires))
 			.then((made) => {
 				setCreated(made);
 				setLabel("");
@@ -67,6 +70,7 @@ export function YourTokens() {
 	return (
 		<>
 			<SectionHeading>Your command-line tokens</SectionHeading>
+			{proof.prompt}
 			<p className="dim">
 				A token acts as you on every project you can access, with your current grants. Removing a grant takes it away
 				from your tokens too. Password changes do not revoke tokens.

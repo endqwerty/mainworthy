@@ -53,7 +53,7 @@ function linkCode(text: string, purpose: "email" | "reset"): string {
 }
 async function verified(w: World, messages: { text: string }[]) {
 	const cookie = await joined(w, "robin", PASSWORD);
-	expect((await w.op("credential", contactInput("robin@example.com"))).status).toBe(200);
+	expect((await w.op("credential", contactInput("robin@example.com"), { cookie })).status).toBe(200);
 	await waitMail(w.instance.app);
 	const code = linkCode(messages.at(-1)?.text ?? "", "email");
 	expect((await w.post("/api/login", { emailVerification: code })).status).toBe(200);
@@ -176,8 +176,8 @@ test("passkey-only account recovery ends earlier mail links and preserves the ve
 	};
 	try {
 		const invitation = await invite(w, { name: "robin" });
-		await accept(invitation.code);
-		expect((await w.op("credential", contactInput("robin@example.com"))).status).toBe(200);
+		const firstCookie = await accept(invitation.code);
+		expect((await w.op("credential", contactInput("robin@example.com"), { cookie: firstCookie })).status).toBe(200);
 		await waitMail(w.instance.app);
 		const verify = linkCode(box.messages.at(-1)?.text ?? "", "email");
 		expect((await w.post("/api/login", { emailVerification: verify })).status).toBe(200);
@@ -252,7 +252,7 @@ test("reset needs verified ownership, gives the same answer for every address, a
 	try {
 		const cookie = await joined(w, "robin", PASSWORD);
 		const unknown = await w.post("/api/login", { resetRequest: "unknown@example.com" });
-		expect((await w.op("credential", contactInput("robin@example.com"))).status).toBe(200);
+		expect((await w.op("credential", contactInput("robin@example.com"), { cookie })).status).toBe(200);
 		await waitMail(w.instance.app);
 		const code = linkCode(box.messages[0]?.text ?? "", "email");
 		const unverified = await w.post("/api/login", { resetRequest: "ROBIN@example.com" });
@@ -322,7 +322,7 @@ test("address replacement, password replacement and expiry invalidate pending li
 		await w.post("/api/login", { resetRequest: "robin@example.com" });
 		await waitMail(w.instance.app);
 		const first = linkCode(box.messages.at(-1)?.text ?? "", "reset");
-		await w.op("credential", contactInput("new@example.com"));
+		await w.op("credential", contactInput("new@example.com"), { cookie });
 		await waitMail(w.instance.app);
 		expect((await w.post("/api/login", { reset: first, password: NEXT })).status).toBe(400);
 		const verify = linkCode(

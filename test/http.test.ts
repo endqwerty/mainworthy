@@ -22,7 +22,7 @@ import { AuditReply, REPLIES } from "../src/core/replies.ts";
 import { TrackerReceipt } from "../src/core/tracker.ts";
 import { deliverHandoffs } from "../src/server/handoffs/handoffs.ts";
 import { waitMail } from "../src/server/identity/identity.ts";
-import type { RegistrationOptions } from "../src/server/identity/webauthn.ts";
+import type { AssertionOptions, RegistrationOptions } from "../src/server/identity/webauthn.ts";
 import { type Config, defaultConfig, SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
 import { OP_LIST, OPS } from "../src/server/ops/index.ts";
 import { Readers } from "../src/server/ops/readers.ts";
@@ -3032,6 +3032,17 @@ describe("the surface", () => {
 					headers,
 				),
 			);
+		const beganProof = await post<{ passkey: AssertionOptions }>(
+			instance,
+			"/api/account/proof",
+			{ begin: true },
+			headers,
+		);
+		if (!beganProof.body.ok) throw new Error("No proof options");
+		expect(
+			(await post(instance, "/api/account/proof", { passkey: device.assert(beganProof.body.result.passkey) }, headers))
+				.status,
+		).toBe(200);
 		await checked("credential", { do: "list" }, headers);
 		const personalInvite = z
 			.object({ code: z.string() })

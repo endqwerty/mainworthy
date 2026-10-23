@@ -22,6 +22,7 @@ import { CustomFields } from "./fields.tsx";
 import { YourHome } from "./home.tsx";
 import { People } from "./people.tsx";
 import { type ClauseChange, PolicyEditor, PolicySnapshot, policyConflictMessage } from "./policy.tsx";
+import { useRecentProof } from "./recent-proof.tsx";
 import { YourSessions } from "./sessions.tsx";
 import { YourSignIn } from "./signin.tsx";
 import { IssuedTokens, TokenAccess, useTokenAccess } from "./tokens.tsx";
@@ -121,6 +122,7 @@ function SettingsWorkbench() {
 	const { project, session, instanceCan, refreshSession, setStatus } = useApp();
 	// A person back from the identity provider returns to the section they left (`OidcReturn`).
 	const [section, setSection] = useState(() => {
+		if (new URLSearchParams(location.search).get("section") === "signin") return "Your sign-in";
 		const back = (history.state as { settingsSection?: unknown } | null)?.settingsSection;
 		return typeof back === "string" ? back : "Policy";
 	});
@@ -503,6 +505,7 @@ function SettingsWorkbench() {
 }
 function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElement | null> }) {
 	const { project, setStatus } = useApp();
+	const proof = useRecentProof();
 	const [actor, setActor] = useState("");
 	const access = useTokenAccess(actor);
 	const [kind, setKind] = useState<"human" | "agent" | "ci">("agent");
@@ -516,6 +519,7 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 	return (
 		<>
 			<h2>Tokens</h2>
+			{proof.prompt}
 			<p className="dim">
 				A token carries its actor's current grants on every project.{" "}
 				<DocLink page="access">People, agents and pipelines</DocLink>
@@ -527,19 +531,22 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 					if (!actor.trim() || busy || !canCreate) return;
 					setBusy(true);
 					setCreated(null);
-					void call(
-						"admin",
-						{
-							do: "token.create",
-							actor: actor.trim(),
-							kind,
-							project,
-							can: access.kind === "existing" ? [] : capabilities,
-							label: `${kind} for ${project}`,
-							...(expires ? { expires } : {}),
-						},
-						{ project },
-					)
+					void proof
+						.run(() =>
+							call(
+								"admin",
+								{
+									do: "token.create",
+									actor: actor.trim(),
+									kind,
+									project,
+									can: access.kind === "existing" ? [] : capabilities,
+									label: `${kind} for ${project}`,
+									...(expires ? { expires } : {}),
+								},
+								{ project },
+							),
+						)
 						.then((reply) => {
 							setCreated(CreatedToken.parse(reply));
 							setActor("");

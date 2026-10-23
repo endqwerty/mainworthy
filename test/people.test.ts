@@ -2135,6 +2135,8 @@ describe("what the pages of the web UI asked of the server", () => {
 		// It is the same rule the server refuses by: an admin who is not the owner makes no recovery for another.
 		await joined(w, "sam", SECOND);
 		expect((await w.op("invitation", { do: "create", name: "sam" }, { cookie: robin })).status).toBe(403);
+		expect((await w.post("/api/account/password", { next: FIRST }, { cookie: owner })).status).toBe(200);
+		expect((await w.post("/api/account/proof", { password: FIRST }, { cookie: owner })).status).toBe(200);
 		expect((await w.op("invitation", { do: "create", name: "sam" }, { cookie: owner })).status).toBe(200);
 	});
 
@@ -2361,6 +2363,7 @@ describe("a person's own command-line token", () => {
 		w.clock.advance(HOUR);
 		expect(await w.status(bearer(token.token))).toBe(401);
 		expect(await w.ok("credential", { do: "token.list" }, headers)).toMatchObject([{ id: token.id, expired: true }]);
+		expect((await w.post("/api/account/proof", { password: FIRST }, headers)).status).toBe(200);
 		const longest = await w.ok<{ expiresAt: number }>(
 			"credential",
 			{ do: "token.create", label: "Longest", expires: "365d" },

@@ -12,24 +12,10 @@
 import type { App } from "../kernel/app.ts";
 import { Ceremonies } from "./ceremonies.ts";
 import { clearMailLinks } from "./contacts.ts";
+import { CONTEXT } from "./contexts.ts";
 import { clearOidc } from "./oidc.ts";
 import { clearTotp } from "./totp.ts";
 import { CEREMONY_MS, type Challenge, type Expected, newChallenge, type RelyingParty } from "./webauthn.ts";
-
-/**
- * Where a ceremony began, as one text that only the same place makes again. Each holds the SHA-256 of a secret
- * and never a row's number: an import gives a number to another row, and a hash goes with what it is of.
- */
-export const CONTEXT = {
-	/** A browser nobody is signed in on, known by the ceremony cookie set with the challenge: the cookie's hash. */
-	browser: (cookieHash: string): string => `browser ${cookieHash}`,
-	/** A signed-in browser's session: the hash of its session cookie, which is what its row stores. */
-	session: (sessionHash: string): string => `session ${sessionHash}`,
-	/** The owner of the machine in local mode, who has no session: every such request is that one person. */
-	local: "local",
-	/** An invitation: the hash of its code. */
-	invitation: (codeHash: string): string => `invitation ${codeHash}`,
-} as const;
 
 /** What a challenge was issued for, and where. An answer to one is no answer to the other. */
 export type Ceremony =
@@ -39,7 +25,8 @@ export type Ceremony =
 	 */
 	| { readonly purpose: "register"; readonly userHandle: string; readonly context: string }
 	/** A sign-in by whoever holds a passkey of this instance. It names nobody. */
-	| { readonly purpose: "sign-in"; readonly context: string };
+	| { readonly purpose: "sign-in"; readonly context: string }
+	| { readonly purpose: "prove"; readonly actor: number; readonly context: string };
 
 type Kept = { readonly ceremony: Ceremony; readonly expected: Expected; readonly deadline: number };
 
