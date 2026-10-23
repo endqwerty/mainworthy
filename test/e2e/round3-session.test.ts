@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import type { Locator } from "playwright-core";
 import { z } from "zod";
+import { API_VERSION, API_VERSION_HEADER } from "../../src/core/version.ts";
 import { Slot } from "../../src/web/runs/models.ts";
 import { browserAvailable, devicePrefix, eventually, openPage, type Server, startServer } from "./support.ts";
 
@@ -162,14 +163,18 @@ for (const surface of ["case", "run"]) {
 				await b.goto(`${server.url}/p/scratch/queue`);
 				await b.locator("#app").waitFor();
 				await revoke(server, "alice");
-				await b.evaluate(() =>
-					fetch("/api/session").then(() =>
-						fetch("/api/p/scratch/get", {
-							method: "POST",
-							headers: { "content-type": "application/json" },
-							body: JSON.stringify({ refs: ["C-1"] }),
-						}),
-					),
+				await b.evaluate(
+					([versionHeader, version]) => {
+						const headers = { "content-type": "application/json", [versionHeader]: String(version) };
+						return fetch("/api/session", { headers }).then(() =>
+							fetch("/api/p/scratch/get", {
+								method: "POST",
+								headers,
+								body: JSON.stringify({ refs: ["C-1"] }),
+							}),
+						);
+					},
+					[API_VERSION_HEADER, API_VERSION] as const,
 				);
 				await b.reload();
 				await signIn(b, bob);

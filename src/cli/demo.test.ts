@@ -1,6 +1,7 @@
 import { expect, spyOn, test } from "bun:test";
 import { z } from "zod";
 import { removalFixture } from "../../test/demo-removal-fixture.ts";
+import { API_VERSION, API_VERSION_HEADER } from "../core/version.ts";
 import { Db, databasePath } from "../server/kernel/db.ts";
 import { Client } from "./client.ts";
 import { refreshDemo, resetDemoSteps } from "./demo.ts";
@@ -240,7 +241,11 @@ test(
 				);
 				const accepted = await fetch(`${instance.url}/api/login`, {
 					method: "POST",
-					headers: { "content-type": "application/json", origin: instance.url },
+					headers: {
+						"content-type": "application/json",
+						origin: instance.url,
+						[API_VERSION_HEADER]: String(API_VERSION),
+					},
 					body: JSON.stringify({ invitation: invitation.code, password: "correct horse battery staple" }),
 				});
 				expect(accepted.status).toBe(200);
