@@ -1350,8 +1350,11 @@ export function* applySteps(
 		let signature: SignatureRow | null = null;
 		let message: string | null = null;
 		if (input.outcome === "fail" || input.outcome === "error") {
-			message = input.failure?.message?.trim() || input.note?.trim() || `no failure message (${test.name})`;
-			signature = ensureSignature(ctx, { message, ...(input.failure?.detail ? { detail: input.failure.detail } : {}) });
+			message = input.failure?.message?.trim() || input.note?.trim() || null;
+			signature = ensureSignature(ctx, {
+				message: message ?? "",
+				...(input.failure?.detail ? { detail: input.failure.detail } : {}),
+			});
 		}
 
 		if (signature) observeAssertion(ctx, scope, signature, test);
@@ -1398,7 +1401,7 @@ export function* applySteps(
 			const cause =
 				tried.outcome === "fail" || tried.outcome === "error"
 					? ensureSignature(ctx, {
-							message: message ?? `no failure message (${test.name})`,
+							message: message ?? "",
 							...(tried.failure?.detail ? { detail: tried.failure.detail } : {}),
 						})
 					: null;

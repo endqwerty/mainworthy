@@ -388,7 +388,12 @@ optional `failure`; `mainworthy get T-1 --json` returns each recent result's `tr
 detector sample names the runner's `try` at either end.
 
 A failed try's cause follows the same file-splitting rule as a failed result, even when the
-result passed. Failed tries and results count together toward the broad-assertion limits:
+result passed. Without diagnostic cause text, a failed try or result has an unknown cause.
+It creates no signature, joins no failure group, and supports no detector suggestion.
+Its outcome changes still count as flips in history and reports. Test names never supply
+diagnostic text. This applies to all report formats, including message-free Playwright and
+Surefire retries. Existing stored causes keep their earlier classification.
+Failed tries and results with known causes count together toward the broad-assertion limits:
 more than 50 distinct tests across more than five reported files on one repository and commit.
 Repeated tries of one test count once. Runner and pipeline flips of that file's failure
 then count under the same cause. Earlier reports keep their original causes. After an upgrade or import,
@@ -412,8 +417,10 @@ The question keeps the evidence shown when its occurrence was recorded.
 Both observations must be in the configured window. Corrected observations and
 passes contradicted by a failure at the same attempt do not support a suggestion.
 The detector uses automated results on commit targets. Agent results and sessions
-are excluded. The failure class comes from the normalized failure message, so an
-infrastructure suggestion is evidence to investigate, not a diagnosis.
+are excluded. When diagnostic cause text is available, the detector classifies its normalized
+message as assertion, timeout, or infrastructure. A failed result can also supply this text
+through its note. An unknown cause stays outside these classes and their signature groups.
+An infrastructure suggestion is evidence to investigate, not a diagnosis.
 
 A suggestion excuses no failure. A person still gives the existing `flaky` or
 `infra` answer, under the project's policy. Automatic quarantine and alternation

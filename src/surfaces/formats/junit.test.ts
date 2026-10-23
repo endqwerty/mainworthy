@@ -411,10 +411,7 @@ describe("parseJUnit recovery and boundaries", () => {
 			results: [
 				result("one", "one", "pass", {
 					note: "passed after 2 retries",
-					tries: [
-						{ outcome: "error", failure: { message: "Test errored" } },
-						{ outcome: "error", failure: { message: "Test errored" } },
-					],
+					tries: [{ outcome: "error" }, { outcome: "error" }],
 				}),
 			],
 			suites: 1,

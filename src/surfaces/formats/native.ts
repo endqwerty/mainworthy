@@ -67,10 +67,11 @@ export function nativeResult(input: {
 		if (!Number.isSafeInteger(durationMs) || durationMs < 0) throw new Error("Invalid test duration");
 		result.durationMs = durationMs;
 	}
-	if (input.outcome === "fail" || input.outcome === "error") {
-		const detail = input.detail?.trim() || `Test ${input.outcome === "fail" ? "failed" : "errored"}`;
+	const detail = input.detail?.trim() || "";
+	const message = input.message?.trim() || detail.split(/\r?\n/)[0] || "";
+	if ((input.outcome === "fail" || input.outcome === "error") && (message || detail)) {
 		result.failure = {
-			message: clip(input.message?.trim() || detail.split(/\r?\n/)[0] || detail, 4000),
+			message: clip(message, 4000),
 			detail: clip(detail, 20_000),
 		};
 	}

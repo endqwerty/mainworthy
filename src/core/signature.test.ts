@@ -334,6 +334,18 @@ describe("failure signatures", () => {
 		);
 		expect(normaliseFailure({ message: "   \n" }).text).toBe("");
 	});
+	test.each(["", "   \n", "\nError:\n", "\u001b[31m\u001b[0m"])(
+		"a diagnostic with no cause text has an unknown class: %j",
+		(message) => {
+			expect(normaliseFailure({ message })).toEqual({ class: "unknown", text: "" });
+		},
+	);
+	test("a stack frame alone supplies no failure class", () => {
+		expect(normaliseFailure({ message: "", detail: "at timeout (/app/tests/timeout.spec.ts:41:13)" })).toEqual({
+			class: "unknown",
+			text: "",
+		});
+	});
 	test("appends the first external JS frame, ignoring framework internals", () => {
 		const detail =
 			"Error: failure\n at assert (/app/node_modules/@playwright/test/index.js:42:17)\n at processTicksAndRejections (node:internal/process/task_queues:95:5)\n at checkout (/app/tests/checkout.spec.ts:41:13)\n at later (/app/src/other.ts:2:3)";
