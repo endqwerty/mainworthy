@@ -121,6 +121,7 @@ When you open the draft again, the page asks the server about the save.
 
 Each saved draft belongs to the project it was written for, including unsent edits, conflicts and submissions waiting for review.
 If that project is deleted and another uses the same key, recovery neither reads the new project's question under the old reference nor sends the old text.
+This also applies while the tab stays open: a matching question accepted in the replacement cannot settle or erase the old draft.
 The page explains that the original project is gone or cannot be identified, and moves your text into **Preserved text**.
 The old command is removed, so you can edit and save the current case normally.
 Older saved drafts without their own project identity follow the same rule, even if an earlier saved command includes an identity.

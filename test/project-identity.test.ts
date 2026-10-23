@@ -76,6 +76,28 @@ test("the shared envelope guards project writes and command replay", () => {
 	}
 });
 
+test("a conditional read cannot follow a reused reference into a replacement project", () => {
+	const h = harness();
+	try {
+		h.call("propose", { edits: [{ op: "create", outline: "Original case" }] });
+		const identity = one(h.call<{ identity: string }[]>("admin", { do: "project.list" })).identity;
+		const input = { refs: ["C-1"], projectIdentity: identity };
+		expect(h.raw("get", input)).toMatchObject({ ok: true });
+		removeProject(h.app.db, "scratch");
+		h.call("admin", { do: "project.create", key: "scratch" });
+		h.call("propose", { edits: [{ op: "create", outline: "Replacement case" }] });
+		expect(h.raw("get", input)).toMatchObject({
+			ok: false,
+			error: { code: "conflict", details: { projectIdentity: "obsolete" } },
+		});
+		const current = one(h.call<{ identity: string }[]>("admin", { do: "project.list" })).identity;
+		expect(h.raw("get", { ...input, projectIdentity: current })).toMatchObject({ ok: true });
+		expect(h.call<{ title: string }[]>("get", { refs: ["C-1"] })[0]?.title).toBe("Replacement case");
+	} finally {
+		h.close();
+	}
+});
+
 test("a command waiting at the write gate checks the replacement identity when it runs", async () => {
 	const h = harness();
 	try {

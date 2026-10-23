@@ -378,6 +378,7 @@ export const InboxInput = z.object({
 export type InboxInput = z.infer<typeof InboxInput>;
 
 export const GetInput = z.object({
+	projectIdentity: projectCommand.projectIdentity,
 	repo: z.string().optional().describe("For commit refs: disambiguate repositories."),
 	cursor: z
 		.string()
