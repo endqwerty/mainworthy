@@ -54,11 +54,10 @@ package struct PasskeySignIn: Sendable {
 			let challenge = Data(base64Encoded: options.challenge.replacingOccurrences(of: "-", with: "+")
 				.replacingOccurrences(of: "_", with: "/") + String(repeating: "=", count: (4 - options.challenge.count % 4) % 4)),
 			!challenge.isEmpty, challenge.base64url == options.challenge,
-			let header = response.value(forHTTPHeaderField: "Set-Cookie"),
-			let found = header.firstMatch(of: /(?:^|[,\s])((?:__Host-)?mainworthy_ceremony)=([A-Za-z0-9_-]{43})(?:[;,\s]|$)/)
+			let cookie = Server.ceremonyCookie(in: response)
 		else { throw ClientError.unreadable }
 		request = PasskeyRequest(relyingParty: options.rpId, challenge: challenge)
-		ceremony = "\(found.1)=\(found.2)"
+		ceremony = cookie
 	}
 }
 

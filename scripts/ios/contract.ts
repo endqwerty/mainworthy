@@ -53,6 +53,11 @@ const Project = struct("Project", "A project the caller holds a grant on.", {
 
 export const SignInReply = struct("SignInReply", "Whether a password completed sign-in or needs a second step.", {
 	signedIn: flag,
+	secondFactor: maybe(
+		struct("SecondFactor", "The pending password sign-in, bound to its ceremony cookie.", {
+			challenge: text,
+		}),
+	),
 });
 
 export const SignInMethods = struct("SignInMethods", "The configured identity provider, if any.", {

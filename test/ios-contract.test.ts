@@ -40,9 +40,10 @@ import { type TestInstance, testInstance } from "../scripts/ios/instance.ts";
 import { mismatches, type Shape } from "../scripts/ios/shape.ts";
 import { generated } from "../scripts/ios/swift.ts";
 import { KINDS } from "../src/core/kinds.ts";
+import { totpCode } from "../src/server/identity/totp.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { ciReport } from "./helpers.ts";
-import { cleanUp as cleanUpPeople, world } from "./people-support.ts";
+import { cleanUp as cleanUpPeople, joined, must, world } from "./people-support.ts";
 
 const WHAT_TO_DO =
 	"The iOS app reads this (scripts/ios/contract.ts). If the change is meant, change the contract, run `bun scripts/ios.ts gen` and see ios/README.md.";
@@ -86,6 +87,50 @@ async function result(method: "GET" | "POST", path: string, body?: unknown): Pro
 	return reply.result;
 }
 const op = (key: string, name: string, input: unknown) => result("POST", `/api/p/${key}/${name}`, input);
+
+test("the iPhone reads the bound authenticator step and its completed recovery-code sign-in", async () => {
+	const instance = world();
+	try {
+		const password = "a password for authenticator sign-in";
+		const cookie = await joined(instance, "phone-code", password);
+		const enrolment = await instance.ok<{ challenge: string; secret: string }>(
+			"credential",
+			{ do: "totp.begin" },
+			{ cookie },
+		);
+		const enrolled = await instance.ok<{ recoveryCodes: string[] }>(
+			"credential",
+			{
+				do: "totp.confirm",
+				challenge: enrolment.challenge,
+				code: totpCode(enrolment.secret, Math.floor(instance.clock.now() / 30_000)),
+			},
+			{ cookie },
+		);
+		const pending = await instance.post<{ signedIn: boolean; secondFactor: { challenge: string } }>("/api/login", {
+			name: "phone-code",
+			password,
+		});
+		expect(pending.status).toBe(200);
+		holds("POST /api/login, second factor", SignInReply, must(pending));
+		expect(must(pending).signedIn).toBe(false);
+		expect(pending.cookie).toMatch(/^mainworthy_ceremony=[A-Za-z0-9_-]{43}$/);
+		const completed = await instance.post(
+			"/api/login",
+			{
+				challenge: must(pending).secondFactor.challenge,
+				code: enrolled.recoveryCodes[0],
+			},
+			{ cookie: pending.cookie },
+		);
+		expect(completed.status).toBe(200);
+		holds("POST /api/login, completed second factor", SignInReply, must(completed));
+		expect(must(completed)).toEqual({ signedIn: true });
+		expect(completed.cookie).toMatch(/^mainworthy_sid=[A-Za-z0-9_-]{43}$/);
+	} finally {
+		cleanUpPeople();
+	}
+});
 
 test("the iPhone reads a native passkey challenge from the configured instance", async () => {
 	const instance = world({ publicUrl: "https://mainworthy.example:8443" });

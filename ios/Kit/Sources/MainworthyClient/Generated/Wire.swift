@@ -17,9 +17,15 @@ enum Wire {
 		let details: RefusalDetails?
 	}
 
+	/// The pending password sign-in, bound to its ceremony cookie.
+	struct SecondFactor: Decodable, Equatable, Sendable {
+		let challenge: String
+	}
+
 	/// Whether a password completed sign-in or needs a second step.
 	struct SignInReply: Decodable, Equatable, Sendable {
 		let signedIn: Bool
+		let secondFactor: SecondFactor?
 	}
 
 	/// The name offered on the sign-in button.

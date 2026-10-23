@@ -9,6 +9,7 @@ public final class SignInForm {
 	public let instance: Instance
 	public var name = ""
 	public var password = ""
+	public var code = ""
 	/// What the form says above its fields: why the person is here again, or why the last attempt failed.
 	public private(set) var notice: String?
 	public private(set) var isWorking = false
@@ -16,6 +17,14 @@ public final class SignInForm {
 
 	private let connect: (Instance) -> Server
 	private let onSignedIn: (Server, Account) -> Void
+	private enum Step {
+		case password
+		case secondFactor(Server, SecondFactorSignIn)
+	}
+	private var step: Step = .password
+	public var needsSecondFactor: Bool {
+		if case .secondFactor = step { true } else { false }
+	}
 
 	init(
 		instance: Instance, notice: String?, connect: @escaping (Instance) -> Server,
@@ -30,7 +39,19 @@ public final class SignInForm {
 	public var privacyAddress: URL { instance.url.appending(path: "/privacy") }
 
 	public var canSubmit: Bool {
-		!isWorking && !name.trimmingCharacters(in: .whitespaces).isEmpty && !password.isEmpty
+		guard !isWorking else { return false }
+		switch step {
+		case .password: return !name.trimmingCharacters(in: .whitespaces).isEmpty && !password.isEmpty
+		case .secondFactor: return !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+		}
+	}
+
+	public func startAgain() {
+		guard !isWorking else { return }
+		step = .password
+		code = ""
+		password = ""
+		notice = nil
 	}
 
 	public func loadMethods() async {
@@ -38,7 +59,7 @@ public final class SignInForm {
 	}
 
 	public func signInWithProvider(using authenticate: @MainActor (URL, String) async throws -> URL) async {
-		guard providerName != nil, !isWorking else { return }
+		guard providerName != nil, !isWorking, !needsSecondFactor else { return }
 		isWorking = true
 		defer { isWorking = false }
 		let server = connect(instance)
@@ -46,7 +67,7 @@ public final class SignInForm {
 			let attempt = try await server.beginProviderSignIn()
 			let back = try await authenticate(attempt.url, "com.mainworthy.app")
 			let account = try await server.finishProviderSignIn(attempt, callback: back)
-			password = ""
+			startAfterSignIn()
 			onSignedIn(server, account)
 		} catch is CancellationError {
 			return
@@ -58,7 +79,7 @@ public final class SignInForm {
 	}
 
 	public func signInWithPasskey(using authorization: any PasskeyAuthorizing) async {
-		guard !isWorking else { return }
+		guard !isWorking, !needsSecondFactor else { return }
 		isWorking = true
 		defer { isWorking = false }
 		let server = connect(instance)
@@ -67,7 +88,7 @@ public final class SignInForm {
 			let assertion = try await authorization.authorize(attempt.request)
 			try Task.checkCancellation()
 			let account = try await server.signIn(.passkey(assertion, ceremony: attempt.ceremony))
-			password = ""
+			startAfterSignIn()
 			onSignedIn(server, account)
 		} catch is CancellationError {
 			return
@@ -84,17 +105,40 @@ public final class SignInForm {
 		guard canSubmit else { return }
 		isWorking = true
 		defer { isWorking = false }
-		let server = connect(instance)
+		notice = nil
+		let server: Server
+		let proof: Proof
+		switch step {
+		case .password:
+			server = connect(instance)
+			proof = .password(name: name.trimmingCharacters(in: .whitespaces), password: password)
+		case .secondFactor(let held, let attempt):
+			server = held
+			proof = .secondFactor(attempt, code: code.trimmingCharacters(in: .whitespacesAndNewlines))
+		}
 		do {
-			let account = try await server.signIn(
-				.password(name: name.trimmingCharacters(in: .whitespaces), password: password))
-			// The password does not outlive the attempt that used it.
-			password = ""
-			onSignedIn(server, account)
+			switch try await server.beginSignIn(proof) {
+			case .secondFactor(let attempt):
+				password = ""
+				code = ""
+				step = .secondFactor(server, attempt)
+			case .signedIn(let account):
+				startAfterSignIn()
+				onSignedIn(server, account)
+			}
 		} catch ClientError.refused(code: "unauthenticated", _) {
-			notice = "That did not sign you in. Check the name and the password."
+			notice = needsSecondFactor
+				? "That code did not sign you in. Use a new authenticator code or an unused recovery code."
+				: "That did not sign you in. Check the name and the password."
 		} catch {
 			notice = error.shown
 		}
+	}
+
+	private func startAfterSignIn() {
+		step = .password
+		password = ""
+		code = ""
+		notice = nil
 	}
 }
