@@ -362,11 +362,11 @@ for (const scenario of ["pending pass", "replaced approval", "refused correction
 		30_000,
 	);
 
-for (const restricted of ["produce only", "human approval"] as const)
+for (const restricted of ["produce only", "record and answer", "human approval"] as const)
 	check(
 		`a closed run with ${restricted} links to its settled sign-off instead of correction (793)`,
 		async () => {
-			const { server, run, path } = await fixture(1, 1, restricted === "produce only" ? "loose" : "strict");
+			const { server, run, path } = await fixture(1, 1, restricted === "human approval" ? "strict" : "loose");
 			let view: Awaited<ReturnType<typeof openPage>> | null = null;
 			try {
 				const { token } = z.object({ token: z.string() }).parse(
@@ -374,11 +374,11 @@ for (const restricted of ["produce only", "human approval"] as const)
 						do: "token.create",
 						actor: "runner",
 						kind: "human",
-						can: ["read", "produce"],
+						can: restricted === "record and answer" ? ["read", "record", "answer"] : ["read", "produce"],
 						project: "scratch",
 					}),
 				);
-				view = await openPage(restricted === "produce only" ? { ...server, token } : server, { path });
+				view = await openPage(restricted === "human approval" ? server : { ...server, token }, { path });
 				const { page } = view;
 				await ready(page);
 				await page.keyboard.press("p");
@@ -397,9 +397,18 @@ for (const restricted of ["produce only", "human approval"] as const)
 				if (!signoff) throw new Error("Settled sign-off missing");
 				const link = page.locator(".run-controls").getByRole("link", { name: "Queue > Settled" });
 				await link.waitFor();
+				if (restricted === "record and answer") await screenshot(page, 885);
+				expect(await page.locator(".run-controls").innerText()).toContain(
+					"Run closed. To reopen, withdraw the sign-off in Queue > Settled",
+				);
 				expect(await link.getAttribute("href")).toBe(`/p/scratch/queue/${signoff.q.slice(2)}`);
 				expect(await page.locator(".run-last").getByRole("button").count()).toBe(0);
 				expect(await page.locator("#hints").innerText()).not.toContain("Correct last result");
+				let decisions = 0;
+				await page.route("**/decide", async (route) => {
+					decisions++;
+					await route.continue();
+				});
 				let sent = 0;
 				await page.route("**/report", async (route) => {
 					sent++;
@@ -409,6 +418,7 @@ for (const restricted of ["produce only", "human approval"] as const)
 				expect((await slots(server, run))[0]?.fills).toMatchObject([{ outcome: "pass" }]);
 				expect((await server.api("get", { refs: [run] }))[0]).toMatchObject({ state: "closed" });
 				expect(sent).toBe(0);
+				expect(decisions).toBe(0);
 				await link.click();
 				await page.getByRole("option").filter({ hasText: "Close R-1" }).waitFor();
 				expect(await page.locator("[data-current-question]").getAttribute("data-current-question")).toBe(signoff.q);
