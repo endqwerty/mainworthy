@@ -24,7 +24,7 @@ import { People } from "./people.tsx";
 import { type ClauseChange, PolicyEditor, PolicySnapshot, policyConflictMessage } from "./policy.tsx";
 import { YourSessions } from "./sessions.tsx";
 import { YourSignIn } from "./signin.tsx";
-import { IssuedTokens } from "./tokens.tsx";
+import { IssuedTokens, TokenAccess } from "./tokens.tsx";
 import "./settings.css";
 
 type PolicyChange =
@@ -515,7 +515,7 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 		<>
 			<h2>Tokens</h2>
 			<p className="dim">
-				A token identifies its producer and is limited to this project.{" "}
+				A token carries its actor's current grants on every project.{" "}
 				<DocLink page="access">People, agents and pipelines</DocLink>
 			</p>
 			<form
@@ -559,6 +559,7 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 					placeholder="reviewer"
 					required
 				/>
+				<TokenAccess name={actor} />
 				<label htmlFor="token-kind">Producer</label>
 				<Select
 					className="form-input"

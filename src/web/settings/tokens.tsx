@@ -2,10 +2,50 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { z } from "zod";
 import { untilPhrase } from "../../core/duration.ts";
+import { TeamGrant, TeamSource } from "../../core/teams.ts";
 import { call } from "../lib/api.ts";
-import { queryKey } from "../lib/data.ts";
+import { queryKey, useQueryOp } from "../lib/data.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, ProducerGlyph, SectionHeading } from "../ui/index.tsx";
+
+const TokenActor = z.object({
+	name: z.string(),
+	grants: z.array(TeamGrant.extend({ roles: z.array(z.string()).default([]) })),
+	teams: z.array(TeamSource).default([]),
+});
+
+export function TokenAccess({ name }: { name: string }) {
+	const { project } = useApp();
+	const read = useQueryOp({ project, op: "admin", input: { do: "actor.list" } });
+	const listed = TokenActor.array().safeParse(read.isError ? null : read.data);
+	const actor = listed.success ? listed.data.find((actor) => actor.name === name.trim()) : undefined;
+	return (
+		<div className="dim">
+			{actor ? (
+				<>
+					<p>Access for {actor.name}. Permissions are for new actors.</p>
+					<ul>
+						{[
+							...actor.grants.map((grant) => ({ ...grant, source: "Own grant" })),
+							...actor.teams.flatMap((team) =>
+								team.grants.map((grant) => ({ ...grant, roles: [], source: `From team ${team.name}` })),
+							),
+						].map((grant) => (
+							<li key={`${grant.source}:${grant.project}`}>
+								{grant.source}: {grant.project === "*" ? "every project" : grant.project}: {grant.can.join(", ")}
+								{grant.roles.length > 0 && `; roles: ${grant.roles.join(", ")}`}
+							</li>
+						))}
+					</ul>
+				</>
+			) : listed.success ? (
+				<p>A new actor starts with the selected permissions on {project}.</p>
+			) : (
+				<p>Access unavailable. New actors get this project's permissions; existing actors keep all grants.</p>
+			)}
+		</div>
+	);
+}
 
 const Token = z.object({
 	id: z.number(),

@@ -188,6 +188,7 @@ const tokens = (instance: Instance): TokenRow[] =>
 			"SELECT id, label, source, created_by, expires_at, revoked_at, last_used_at, last_used_addr FROM tokens ORDER BY id",
 		)
 		.all();
+
 type SessionRow = {
 	id: number;
 	ended_at: number | null;
@@ -199,6 +200,42 @@ const sessions = (instance: Instance): SessionRow[] =>
 	instance.app.reader.raw
 		.query<SessionRow, []>("SELECT id, ended_at, last_seen_at, created_addr, last_seen_addr FROM sessions ORDER BY id")
 		.all();
+
+test("a token made in one project carries its actor's grants in other projects, as the guide says", async () => {
+	const instance = boot();
+	await token(instance, { actor: "reviewer", kind: "agent", can: ["read", "produce"] });
+	expect((await admin(instance, { do: "project.create", key: "other" })).status).toBe(200);
+	expect((await admin(instance, { do: "project.create", key: "private" })).status).toBe(200);
+	expect(
+		(await admin(instance, { do: "grant.set", actor: "reviewer", project: "other", can: ["read"], roles: ["auditor"] }))
+			.status,
+	).toBe(200);
+	const made = await token(instance, { actor: "reviewer", kind: "agent", can: ["read", "produce"] });
+	for (const project of ["scratch", "other"]) {
+		expect(
+			(
+				await post(
+					instance,
+					`/api/p/${project}/propose`,
+					{ edits: [{ op: "create", outline: `Case in ${project}` }] },
+					bearer(OWNER),
+				)
+			).status,
+		).toBe(200);
+		const read = await post(instance, `/api/p/${project}/find`, { in: "cases" }, bearer(made.token));
+		expect([project, read.status, read.body.ok]).toEqual([project, 200, true]);
+		expect(read.body).toMatchObject({ ok: true, result: { items: [{ title: `Case in ${project}` }] } });
+	}
+	expect((await post(instance, "/api/p/private/find", { in: "cases" }, bearer(made.token))).status).toBe(404);
+	// Hold the guide's scope claim to the HTTP behaviour above, rather than assuming project means token scope.
+	const guide = readFileSync(join(import.meta.dir, "../docs/guide/access.md"), "utf8");
+	expect(
+		guide.slice(
+			guide.indexOf("## Make a token"),
+			guide.indexOf("From the command line:", guide.indexOf("## Make a token")),
+		),
+	).toContain("A token carries its actor's current grants on every project.");
+});
 
 test("project-scoped actor resolution reads only global and requested direct grants", async () => {
 	const instance = boot();

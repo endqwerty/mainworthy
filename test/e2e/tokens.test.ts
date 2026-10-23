@@ -14,6 +14,81 @@ const Listed = z.array(
 );
 
 test.skipIf(!browserAvailable)(
+	"token creation describes the actor's access across projects before showing its secret",
+	async () => {
+		const server = await startServer({ mode: "server" });
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await server.api("admin", { do: "project.create", key: "other" });
+			await server.api("admin", {
+				do: "token.create",
+				actor: "reviewer",
+				kind: "agent",
+				project: "scratch",
+				can: ["read", "produce"],
+			});
+			await server.api("admin", {
+				do: "grant.set",
+				actor: "reviewer",
+				project: "other",
+				can: ["read"],
+				roles: ["auditor"],
+			});
+			await server.api("admin", { do: "token.create", actor: "sam", kind: "human", project: "scratch", can: ["read"] });
+			await server.api("admin", { do: "grant.set", actor: "sam", can: ["read"], roles: ["reader"] });
+			await server.api("admin", { do: "team.create", name: "Quality" });
+			await server.api("admin", { do: "team.grant.set", team: "Quality", project: "other", can: ["produce"] });
+			await server.api("admin", { do: "team.member.add", team: "Quality", person: "sam" });
+			view = await openPage(server, { path: "/p/scratch/settings" });
+			const { page } = view;
+			await page.getByRole("option", { name: "Tokens", exact: true }).click();
+			await page.getByLabel("Token actor").fill("reviewer");
+			expect(await page.locator("#detail").innerText()).toContain(
+				"A token carries its actor's current grants on every project.",
+			);
+			await page.getByText("scratch: read, record, produce", { exact: false }).waitFor();
+			await page.getByText("other: read; roles: auditor", { exact: false }).waitFor();
+			await page.getByRole("button", { name: "Create token", exact: true }).click();
+			await page.getByLabel("New token").waitFor();
+			const secret = await page.getByLabel("New token").inputValue();
+			const response = await fetch(`${server.url}/api/p/other/find`, {
+				method: "POST",
+				headers: { "content-type": "application/json", authorization: `Bearer ${secret}` },
+				body: JSON.stringify({ in: "cases" }),
+			});
+			expect(response.status).toBe(200);
+			await response.arrayBuffer();
+			await page.getByRole("button", { name: "Dismiss secret" }).click();
+			await page.getByLabel("Token actor").fill("new-agent");
+			await page.getByText("A new actor starts with the selected permissions on scratch.", { exact: true }).waitFor();
+			await page.getByLabel("Token actor").fill(" sam ");
+			await page.getByText("Own grant: every project: read; roles: reader", { exact: true }).waitFor();
+			await page.getByText("From team Quality: other: record, produce", { exact: true }).waitFor();
+			await page.route("**/api/admin", async (route) => {
+				if (route.request().postDataJSON().do !== "actor.list") return route.continue();
+				await route.fulfill({ json: { ok: false, error: { code: "forbidden", message: "Access list unavailable" } } });
+			});
+			await page.reload();
+			await page.getByRole("option", { name: "Tokens", exact: true }).click();
+			await page.getByLabel("Token actor").fill("reviewer");
+			await page
+				.getByText("Access unavailable. New actors get this project's permissions; existing actors keep all grants.", {
+					exact: true,
+				})
+				.waitFor();
+			expect(
+				await page.getByText("A new actor starts with the selected permissions on scratch.", { exact: true }).count(),
+			).toBe(0);
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
 	"settings gives a new token an end, and lists it with when it ends, who made it and where it was used from",
 	async () => {
 		const server = await startServer({ mode: "server" });

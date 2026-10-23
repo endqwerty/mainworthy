@@ -24,6 +24,8 @@ agent does not hold `answer`, so its answer is advice or the policy refuses the
 answer. Add `answer` only where you want an agent's answer to count.
 [People, agents and pipelines](./access.md) covers grants and revocation.
 
+For a new agent, `--project scratch` gives its initial grant on `scratch`. A token for an existing agent carries all its current grants on every project. Check `mainworthy actor list` before reusing an agent's name. Adding or removing a grant changes access for every token of that agent.
+
 > [!WARNING]
 > In local mode, a client on the same machine that sends no token acts as the owner. An agent without its own token makes edits as a person, and the policy treats them that way. Always give the agent a token.
 

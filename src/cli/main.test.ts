@@ -1080,6 +1080,9 @@ test("all registry operations have generated commands, global help and --help", 
 	await withInstance(async ({ cli, run }) => {
 		const help = await cli(["help"]);
 		expect(help.code).toBe(0);
+		const tokenHelp = await run(["token", "--help"]);
+		expect(tokenHelp.code).toBe(0);
+		expect(tokenHelp.stdout).toContain("Each carries its actor's current grants on every project.");
 		const adapters = await Promise.all([...ADAPTER_COMMANDS.values()].map((load) => load()));
 		expect([...ADAPTER_COMMANDS.keys()]).toEqual(adapters.map((command) => command.name));
 		const helps = await Promise.all(OP_LIST.map((op) => run([op.name, "--help"])));
