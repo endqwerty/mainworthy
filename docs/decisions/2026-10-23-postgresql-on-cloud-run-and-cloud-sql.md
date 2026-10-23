@@ -278,6 +278,14 @@ Terraform here reads them from CI's configuration. Four of the organisation's ru
 - **IAM database authentication** follows from the last rule and #821: the app connects as its own service
   account, with no database password. How it does so is a proposal below.
 
+Code from a pull request is untrusted until it is on `main`. A credentialed step that runs a pull request's code,
+a preview deploy (#894) or a `terraform plan` signed in to Google Cloud, runs only for a pull request from a
+branch of this repository, never a fork, and the plan signs in as the read-only identity. Each preview gets its own
+service account and its own PostgreSQL role, owner of its database only, with `CONNECT` on every other database
+revoked. A preview's identity has no access to production's network, secrets, bucket, queues or identities, and
+its account, role and database are deleted with the preview. #894 builds this and proves it with a preview that
+tries to reach another preview's database and production's secrets.
+
 Agents never hold write access to production. They change infrastructure by editing the Terraform in a pull
 request; CI shows the plan, and after the merge CI applies it as its own service account. Agents get the
 read-only identity for logs, metrics and configuration. A budget alert exists from the first day.
