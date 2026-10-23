@@ -210,6 +210,13 @@ for (const [width, height] of [
 						},
 					});
 					const { page } = view;
+					const expectPageInPlace = async () =>
+						expect(
+							await page.locator("#app").evaluate((app) => ({
+								scrollY: window.scrollY,
+								top: app.getBoundingClientRect().top,
+							})),
+						).toEqual({ scrollY: 0, top: 0 });
 					const reject = page.locator(".queue-answers").getByRole("button", { name: "Reject", exact: false });
 					const evidence = page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`);
 					await evidence.waitFor();
@@ -226,8 +233,10 @@ for (const [width, height] of [
 						if (via === "click") await reject.click();
 						else await page.keyboard.press("r");
 						await frames(page);
+						await expectPageInPlace();
 						expect(await openAdopt(server)).toEqual([q]);
 					}
+					await expectPageInPlace();
 					expect({
 						read: await evidence.getAttribute("data-proposal-read"),
 						...(await partCoverage(page)),
@@ -238,6 +247,7 @@ for (const [width, height] of [
 					else await page.keyboard.press("r");
 					expect((await decided).ok()).toBe(true);
 					expect((await server.api("get", { refs: [q] }))[0]?.decision).toMatchObject({ answer: { is: "reject" } });
+					await expectPageInPlace();
 					expect(view.errors).toEqual([]);
 				} finally {
 					await view?.close();

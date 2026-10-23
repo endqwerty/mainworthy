@@ -25,7 +25,8 @@ Open **Diagnostic detail** to read the full log. It starts collapsed so you can 
 Use **Download** beside an attachment to save it. Select a test reference to open that test's page.
 In a short desktop window, the question pane scrolls so you can read the evidence and reach its answers.
 An answer key or button pages through unread proposal edits before it records an answer.
-If the buttons have scrolled the evidence out of view, clicking an answer brings the evidence back into view.
+If the buttons have scrolled the evidence out of view, clicking an answer scrolls the question pane to reveal it.
+The sidebar and question list stay in place.
 Scroll the question pane to reach the buttons again, or continue with the answer key.
 The "Open" view contains questions that need an answer. "Settled" contains decisions,
 including answers that ended when their cause passed, their flaky hold expired, or their tracker issue closed.
