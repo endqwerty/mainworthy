@@ -2053,7 +2053,10 @@ export function SuiteScreen() {
 			} else if (error instanceof ApiError && error.code !== "internal") {
 				if (undo.current === action) undo.current = previous;
 				setStatus(error.message);
-			} else setStatus(`${errorMessage(error, "Change outcome unknown.")} Press u to check it and undo.`);
+			} else {
+				const reason = errorMessage(error, "Change outcome unknown.");
+				setStatus(`${reason}${/[.!?]$/.test(reason) ? "" : "."} Press u to check it and undo.`);
+			}
 			wantsRead = true;
 		} finally {
 			await optimistic.settle(wantsRead);
