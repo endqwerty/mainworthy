@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -70,6 +70,8 @@ async function worker(executable?: string) {
 		const data = /"data":"([^"]+)"/.exec(supervisor?.command ?? "")?.[1];
 		const pid = data ? Number(await readFile(join(data, "fixture-pid"), "utf8")) : (direct?.pid ?? 0);
 		if (!pid) throw new Error("worker did not start a fixture");
+		const lock = join(tmpdir(), `mainworthy-e2e-port-${new URL(ready.url).port}`);
+		const inode = (await stat(lock)).ino;
 		return {
 			...ready,
 			owner,
@@ -79,8 +81,22 @@ async function worker(executable?: string) {
 			async dispose() {
 				owner.kill("SIGKILL");
 				await owner.exited;
-				if (!(await until(() => !alive(pid)))) process.kill(pid, "SIGKILL");
-				if (supervisor && alive(supervisor.pid)) process.kill(supervisor.pid, "SIGTERM");
+				await until(() => !alive(pid));
+				// Assertions run before this fallback. If a Bun upgrade breaks ownership handling, fail
+				// with diagnostics and then stop the captured private group, including its descendants.
+				try {
+					process.kill(-pid, "SIGKILL");
+				} catch (error) {
+					if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) throw error;
+				}
+				if (supervisor && alive(supervisor.pid)) {
+					process.kill(supervisor.pid, "SIGTERM");
+					if (!(await until(() => !alive(supervisor.pid)))) process.kill(supervisor.pid, "SIGKILL");
+				}
+				if (!(await until(() => !alive(pid) && (!supervisor || !alive(supervisor.pid)))))
+					throw new Error(`Bun ${Bun.version} on ${process.platform}: test cleanup could not stop fixture ${pid}`);
+				if (data) await rm(data, { recursive: true, force: true });
+				if ((await stat(lock).catch(() => null))?.ino === inode) await rm(lock, { recursive: true, force: true });
 			},
 		};
 	} catch (error) {
@@ -89,11 +105,29 @@ async function worker(executable?: string) {
 		throw error;
 	}
 }
+const compatibility = (server: Awaited<ReturnType<typeof worker>>, action: string): string =>
+	`Bun ${Bun.version} on ${process.platform}: no-orphans compatibility failed: ${action} (worker ${server.owner.pid}, fixture ${server.pid}, supervisor ${server.supervisor ?? "missing"})`;
+
 async function released(server: Awaited<ReturnType<typeof worker>>) {
-	expect(await until(() => !alive(server.pid))).toBe(true);
-	if (server.data) expect(await until(() => !existsSync(server.data ?? ""))).toBe(true);
+	expect(
+		await until(() => !alive(server.pid)),
+		compatibility(server, "fixture did not exit after ownership loss"),
+	).toBe(true);
+	if (server.data)
+		expect(
+			await until(() => !existsSync(server.data ?? "")),
+			compatibility(server, "supervisor did not remove its data directory"),
+		).toBe(true);
+	if (server.supervisor)
+		expect(
+			await until(() => !alive(server.supervisor ?? 0)),
+			compatibility(server, "supervisor did not exit after cleanup"),
+		).toBe(true);
 	const port = Number(new URL(server.url).port);
-	expect(existsSync(join(tmpdir(), `mainworthy-e2e-port-${port}`))).toBe(false);
+	expect(
+		existsSync(join(tmpdir(), `mainworthy-e2e-port-${port}`)),
+		compatibility(server, "supervisor left its port lock"),
+	).toBe(false);
 	const probe = Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response() });
 	await probe.stop(true);
 }
@@ -161,7 +195,7 @@ test("the supervisor bounds stop even when the fixture event loop cannot handle 
 	}
 }, 20_000);
 
-test("owner death also bounds a stopped fixture event loop", async () => {
+test("Bun no-orphans compatibility bounds a SIGSTOPped fixture after owner SIGKILL", async () => {
 	const server = await worker();
 	try {
 		process.kill(server.pid, "SIGSTOP");
@@ -219,7 +253,9 @@ test("the fixture watchdog force-exits a hanging stop and a grandchild cannot ho
 		// Stop the supervisor so EOF alone exercises the fixture's watchdog, without its external deadline.
 		if (!server.supervisor) throw new Error("missing supervisor");
 		process.kill(server.supervisor, "SIGKILL");
-		expect(await until(() => !alive(server.pid))).toBe(true);
+		expect(await until(() => !alive(server.pid)), compatibility(server, "fixture watchdog did not exit on EOF")).toBe(
+			true,
+		);
 		expect(alive(grandchild)).toBe(true);
 		const probe = Bun.serve({
 			hostname: "127.0.0.1",
@@ -230,9 +266,6 @@ test("the fixture watchdog force-exits a hanging stop and a grandchild cannot ho
 	} finally {
 		if (alive(grandchild)) process.kill(grandchild, "SIGKILL");
 		await server.dispose();
-		// Deliberately killing the supervisor bypasses its resource cleanup.
-		if (server.data) await rm(server.data, { recursive: true, force: true });
-		await rm(join(tmpdir(), `mainworthy-e2e-port-${new URL(server.url).port}`), { recursive: true, force: true });
 		await rm(directory, { recursive: true, force: true });
 	}
 }, 20_000);
@@ -297,7 +330,7 @@ test("check reports an owned child left alive and fails an otherwise passing run
 			new Response(check.stderr).text(),
 		]);
 		expect(code).toBe(1);
-		expect(out).toContain("check: 1 owned child still alive");
+		expect(out).toContain(`check: 1 owned child still alive (pids: ${leaked.pid})`);
 		expect(err).toContain("1 pass");
 		expect(err).toContain("0 fail");
 		expect(JSON.parse(await readFile(join(directory, "probe.json"), "utf8"))).toMatchObject({ exit: 1 });
@@ -308,4 +341,4 @@ test("check reports an owned child left alive and fails an otherwise passing run
 		await leaked.exited;
 		await rm(directory, { recursive: true, force: true });
 	}
-}, 20_000);
+}, 40_000);
