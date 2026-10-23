@@ -83,6 +83,14 @@ Reports keep their two durable phases, the one exception to one operation per tr
    completion together, with its own sequence number and witness. A crash rolls the application back and the
    accepted batch can be applied again. Pausing between slices of a large batch commits nothing partial.
 
+The actor's lock ends with the acceptance commit, so a revocation can commit between the two phases. The accepted
+batch therefore records the hash of the exact token or session it was admitted with and its actor's
+`auth_version`. Application, and recovery after a crash, lock the actor row and check both again before they
+apply anything: the credential must still be live, and if the version moved, current authority must still allow
+the report. If not, application cancels the batch and removes its pending marks in one transaction, and the
+command's reply says the report was refused. Tests revoke the token, end the session and remove the grant
+between the phases, and before recovery.
+
 Today both phases run inside the report's own request: the request yields between slices but replies only when
 the batch is applied, and a batch whose request died is applied at the next startup. That stays. While the
 request is open, Cloud Run allocates its CPU. Only the recovery of an accepted batch becomes a job. If step 2
@@ -102,7 +110,13 @@ Cloud Run starts a second instance under load, and during a deploy the old and n
 nothing that decides behaviour may live in one process:
 
 - **Failed sign-in counts** move to PostgreSQL, with the same windows and limits that
-  `src/server/identity/limiter.ts` keeps in memory today.
+  `src/server/identity/limiter.ts` keeps in memory today. That limiter stays out of the write gate on purpose, so
+  that an anonymous flood cannot stall every writer, and the move keeps that property. Sign-in work that needs no
+  session (attempts, counts, starting a ceremony) runs on its own small pool of connections, which cannot use the
+  pool of domain writes. Each instance keeps a cheap limit in memory in front of it that refuses before PostgreSQL
+  is reached, a cap on the rows of each ceremony table refuses new ceremonies when it is full, and a Cloudflare
+  rate-limiting rule limits sign-in paths at the edge. A test floods sign-in from many addresses and names and
+  sees project writes, sign-out and revocation still finish within a bound.
 - **Every sign-in ceremony** moves to PostgreSQL, each consumed at most once, atomically, so a ceremony that
   starts on one instance can finish on another. That covers OIDC ceremonies and native hand-offs and the import
   generation that invalidates them (`oidc.ts`), passkey challenges (`challenges.ts`), TOTP enrolment and
@@ -111,8 +125,9 @@ nothing that decides behaviour may live in one process:
   steps (`people.ts`); its row keeps a digest of that hash instead, and every ceremony table is in `UNEXPORTED`.
 - **Last uses of tokens and sessions** (`uses.ts`) are written to PostgreSQL during the request that uses them,
   at most once a minute for each row: the update changes a row only when its stored time is more than a minute
-  old. So the stored time is at most a minute behind the real one on every instance, and the idle check of a
-  session (`sessions.ts`) reads the stored time with that minute allowed for. Today's notes in memory end. An
+  old. So the stored time is at most a minute behind the real one on every instance. The idle check of a session
+  (`sessions.ts`) reads the stored time as it is, with no allowance, so an active session can end up to a minute
+  early but never lives past its limit. Today's notes in memory end. An
   erasure or an import clears the rows in its transaction. A later update names the row by the hash of the secret
   the request was admitted with, not by its numeric id, and changes only a row that is still live. So it cannot
   write an address back to an erased actor or a revoked token, or onto another row that an import gave the same
@@ -266,7 +281,9 @@ digest as a new Cloud Run revision, signed in through Workload Identity Federati
 only `main` can use; pull requests cannot reach it.
 
 `/healthz` reports ready only when the database answers and the migrations are done, and names the image's
-commit. Cloud Run's startup probe reads it, and traffic moves to the new revision only once it is ready. A
+commit. It answers from the instance's own state and asks the database at most once every few seconds, one
+question at a time, so a flood of public requests to it costs at most one query per interval for each instance.
+Cloud Run's startup probe reads it, and traffic moves to the new revision only once it is ready. A
 revision that never becomes ready never takes traffic. A rollback moves traffic back to the previous revision.
 
 Migrations run when a new revision starts, under a PostgreSQL advisory lock held on one dedicated connection from
@@ -329,6 +346,8 @@ record's own proposals, and acceptance covers them:
 - **Last uses written during requests, at most once a minute a row**, instead of notes in memory.
 - **Report application stays in its request**; only recovery becomes a job.
 - **A temporary single PostgreSQL write lock** in step 2's bottom request, below.
+- **A separate pool and an in-memory limit in front of anonymous sign-in work**, and a Cloudflare rate-limiting
+  rule on the sign-in paths.
 - **Production refuses a request without the Cloudflare proof**, apart from the startup probe and the job
   endpoint, rather than serving it with no client address. CI's smoke check of a deployed revision sends the
   proof from a GitHub secret.
@@ -357,8 +376,9 @@ The steps are #821's. Each ends in a check that passes before the next starts.
      machinery goes in the same request, because nothing can call it afterwards: the upgrade copy, the reader and
      checkpoint threads, the instance lock and the database-file checks (#659).
    - The next request replaces the single lock with the project and actor locks, their lock order and `busy`. It
-     is the request that lets another writer in between a report's two phases, as the design above intends, and
-     a test holds a report between its phases while another write to the same project commits.
+     is the request that lets another writer in between a report's two phases, as the design above intends, so
+     it also adds the check of the credential and `auth_version` before application. A test holds a report
+     between its phases while another write to the same project commits, and another revokes the caller there.
    - Then the state shared by every instance (sign-in counts, ceremonies, last uses, the change stream), the
      prune and the other startup work, and background work as jobs with the in-process runner and the job
      endpoint.
