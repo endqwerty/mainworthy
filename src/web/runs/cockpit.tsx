@@ -242,7 +242,7 @@ function ProjectRunCockpit({
 	const missing = (slot: Slot) =>
 		(slot.state === "missing" || slot.state === "skipped") && !local.get(slot.id)?.pending;
 	const unreported = (slot: Slot) => missing(slot) && !ownFillOf(slot);
-	const first = slots.find(unreported);
+	const first = slots.find(unreported) ?? slots[0];
 	if (cursor === null && first) setCursor(first.id);
 	const current = cursor === null ? first : slots.find((slot) => slot.id === cursor);
 	const step = current ? (steps[current.id] ?? "") : "";
@@ -273,7 +273,7 @@ function ProjectRunCockpit({
 	const next = current
 		? [...slots.slice(currentIndex + 1), ...slots.slice(0, currentIndex)].filter(unreported).slice(0, 5)
 		: [];
-	const documents = current ? [current, ...next.filter((slot) => slot.id !== current.id)] : [];
+	const documents = current ? [current, ...next] : [];
 	const external = (slot: Slot) => !missing(slot) && slot.fills.length > 0 && !ownFillOf(slot);
 	const ownFill = current && ownFillOf(current);
 	const note = current ? (notes[current.id] ?? "") : "";
