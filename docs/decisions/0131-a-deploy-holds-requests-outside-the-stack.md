@@ -1,8 +1,9 @@
 # 0131: a deploy holds requests in a proxy outside the stack
 
 Date: 2026-10-22.
-Amended 2026-10-23 by [PostgreSQL and a stateless app](2026-10-23-postgresql-and-a-stateless-app.md): this hold is retired only after rolling replacement passes the continuous-request
-and rollback checks; until then it stays in place.
+Amended 2026-10-23 by [PostgreSQL on Cloud Run and Cloud SQL](2026-10-23-postgresql-on-cloud-run-and-cloud-sql.md): this hold is retired at the
+cutover, once rolling replacement on Cloud Run passes the continuous-request and rollback checks; until then it
+stays in place.
 
 A Coolify deploy of `compose.coolify.yaml` removes the old ingress, app and Tailscale sidecar, then starts
 the new ones. On the owner's instance the public address answered nothing for 16 seconds on 2026-10-22, and

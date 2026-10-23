@@ -1,6 +1,9 @@
 # 0130: production blocks new outbound connections in the app namespace
 
 Date: 2026-10-21. Local implementation; production cutover belongs to the operator.
+Amended 2026-10-23 by [PostgreSQL on Cloud Run and Cloud SQL](2026-10-23-postgresql-on-cloud-run-and-cloud-sql.md): the lockdown and the loopback origin
+do not move to Cloud Run, and stay only while the owner's server serves the instance. Trusting Cloudflare's
+client and scheme headers only for requests that came through Cloudflare does move.
 
 Coolify adds network attachments, and a host bridge filter misses host INPUT, same-bridge
 and IPv6 paths. Internal-only networks also failed the deployment's publishing and proxy

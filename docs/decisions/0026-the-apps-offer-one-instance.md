@@ -2,6 +2,8 @@
 
 - Date: 2026-10-14
 - Status: accepted (the owner's request, 2026-10-14). Amends [0002](0002-layered-self-hosting.md) for the apps.
+  Amended 2026-10-23 by [PostgreSQL on Cloud Run and Cloud SQL](2026-10-23-postgresql-on-cloud-run-and-cloud-sql.md): the pages for whoever runs an
+  instance will say that it needs PostgreSQL, and that running one elsewhere is possible but not yet supported.
 
 The owner asked to hide the option of running Mainworthy on another server, and licensing, from the user
 interfaces for now. Both stay: running elsewhere is a future item, and the open-source code keeps what anyone who
