@@ -264,6 +264,8 @@ describe("flaky tests and time lost to reruns", () => {
 		});
 		expect(stats({ of: "reruns", days: 1 })).toEqual({
 			of: "reruns",
+			total: 1,
+			cursor: null,
 			reruns: 4,
 			lostMs: 33,
 			unknown: 1,
@@ -429,6 +431,8 @@ describe("flaky tests and time lost to reruns", () => {
 		threeDays();
 		expect(stats({ of: "flaky", days: 3 })).toEqual({
 			of: "flaky",
+			total: 1,
+			cursor: null,
 			tests: 3,
 			flaky: 1,
 			items: [
@@ -445,6 +449,8 @@ describe("flaky tests and time lost to reruns", () => {
 		});
 		expect(stats({ of: "reruns", days: 3 })).toEqual({
 			of: "reruns",
+			total: 1,
+			cursor: null,
 			reruns: 1,
 			lostMs: 11,
 			unknown: 0,
@@ -452,7 +458,15 @@ describe("flaky tests and time lost to reruns", () => {
 		});
 		// The rerun was on the first day, which a window of the last day does not reach.
 		expect(stats({ of: "flaky", days: 1 })).toMatchObject({ flaky: 0, items: [] });
-		expect(stats({ of: "reruns", days: 1 })).toEqual({ of: "reruns", reruns: 0, lostMs: 0, unknown: 0, items: [] });
+		expect(stats({ of: "reruns", days: 1 })).toEqual({
+			of: "reruns",
+			total: 0,
+			cursor: null,
+			reruns: 0,
+			lostMs: 0,
+			unknown: 0,
+			items: [],
+		});
 	});
 });
 
@@ -611,6 +625,8 @@ describe("automation and its backlog", () => {
 		suite();
 		expect(stats({ of: "automation" })).toEqual({
 			of: "automation",
+			total: 2,
+			cursor: null,
 			cases: 5,
 			automated: 2,
 			manual: { wanted: 1, none: 1, notApplicable: 1 },
@@ -628,6 +644,8 @@ describe("coverage by requirement", () => {
 		suite();
 		expect(stats({ of: "coverage" })).toEqual({
 			of: "coverage",
+			total: 4,
+			cursor: null,
 			requirements: 4,
 			covered: 3,
 			items: [
@@ -638,4 +656,53 @@ describe("coverage by requirement", () => {
 			],
 		});
 	});
+});
+
+test("all limited reports page beyond their maximum limit without losing rows or changing totals", () => {
+	h = harness({ unlinked: "track" });
+	const fail = Object.fromEntries(Array.from({ length: 205 }, (_, i) => [i, "intermittent failure"]));
+	h.call("report", ciReport({ commit: "aaaa0001", n: 205, fail }));
+	h.call("report", ciReport({ commit: "aaaa0001", n: 205, attempt: 2 }));
+	h.call("propose", {
+		edits: Array.from({ length: 501 }, (_, i) => ({
+			op: "create",
+			outline: `Manual ${i} @REQ-${String(i).padStart(3, "0")}\n  Try > Done`,
+		})),
+	});
+	for (const of of ["flaky", "reruns", "automation", "coverage"] as const) {
+		const limit = of === "coverage" ? 500 : 200;
+		const total = of === "flaky" || of === "reruns" ? 205 : 501;
+		const first = stats({ of, limit });
+		expect(first.total).toBe(total);
+		expect(first.cursor).toBe(limit);
+		const ids: string[] = [];
+		let cursor: number | null = 0;
+		while (cursor !== null) {
+			const reply: StatsOf<typeof of> = stats({ of, limit, cursor });
+			expect(reply.total).toBe(total);
+			ids.push(
+				...(reply.of === "automation"
+					? reply.backlog.map((row) => row.case)
+					: reply.of === "coverage"
+						? reply.items.map((row) => row.key)
+						: reply.items.map((row) => row.test)),
+			);
+			// All the headline counts are independent of the page.
+			const { items: _items, backlog: _backlog, cursor: _cursor, ...headline } = { items: [], backlog: [], ...reply };
+			const {
+				items: _firstItems,
+				backlog: _firstBacklog,
+				cursor: _firstCursor,
+				...expected
+			} = { items: [], backlog: [], ...first };
+			expect(headline).toEqual(expected);
+			if (reply.cursor !== null) expect(reply.cursor).toBeGreaterThan(cursor);
+			cursor = reply.cursor;
+		}
+		expect(ids).toHaveLength(total);
+		expect(new Set(ids).size).toBe(total);
+		const empty = stats({ of, limit, cursor: total });
+		expect(empty.cursor).toBeNull();
+		expect(empty.of === "automation" ? empty.backlog : empty.items).toEqual([]);
+	}
 });

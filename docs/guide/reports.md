@@ -19,8 +19,17 @@ From the command line, `mainworthy stats --of <report>` prints the same report a
 `mainworthy stats --of flaky --days 14`. Over HTTP it is `POST /api/p/<project>/stats` (see [the API](./api.md#stats)).
 Agents read reports this way too: `stats` is not one of the agent tools.
 
-The flaky, rerun and automation reports list 20 tests or cases, and coverage lists 100 requirements. The headline
-numbers count all of them. To list more, pass `--limit`: up to 200 rows, or 500 requirements for coverage.
+The flaky, rerun and automation reports show 20 rows per page, and coverage shows 100. Each list says
+"Showing N of M". The headline numbers count every row. Choose **Next page** or **Previous page**, or press
+<kbd>n</kbd> or <kbd>p</kbd>, to reach the rest. On a phone, open **Actions** and choose **Next report page** or
+**Previous report page**. Changing the day window starts at the first page. If live updates remove the page
+you are reading, the list returns to the first page.
+
+The CLI accepts `--limit` (up to 200 rows, or 500 requirements for coverage) and `--cursor`. Over HTTP, use
+`limit` and `cursor`. Each limited report reply
+includes `total`, the number of rows before paging, and `cursor`, the next page or `null` at the end. Pass the
+returned cursor with the same report and window to continue. Pages read current results; if the data changes
+between reads, start from the first page to read the new order.
 
 ## Pass rate
 
@@ -85,7 +94,7 @@ when no run reported a duration, the time stays unknown.
 
 ## Coverage by requirement
 
-Each requirement with the active cases that cover it. The list shows the first 100 requirements, and the headline
+Each requirement with the active cases that cover it. The list shows 100 requirements per page, and the headline
 counts all of them. A case counts by the latest result of each of its tests in
 the window: failed when one of them failed, passed when none failed and one passed, skipped or blocked when that
 is all they were, and not run when none of its tests has a result in the window. A requirement with no active case

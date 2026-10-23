@@ -43,6 +43,11 @@ function passRate(ctx: Ctx, input: Extract<StatsInput, { of: "pass-rate" }>): St
 	};
 }
 
+function page(total: number, input: { cursor: number; limit: number }) {
+	const next = input.cursor + input.limit;
+	return { total, cursor: next < total ? next : null };
+}
+
 function flaky(ctx: Ctx, input: Extract<StatsInput, { of: "flaky" }>): StatsOf<"flaky"> {
 	const since = ctx.now - input.days * DAY;
 	const rows = flakyTests(ctx.db, ctx.project.id, since);
@@ -50,7 +55,8 @@ function flaky(ctx: Ctx, input: Extract<StatsInput, { of: "flaky" }>): StatsOf<"
 		of: "flaky",
 		tests: testsReporting(ctx.db, ctx.project.id, since),
 		flaky: rows.length,
-		items: rows.slice(0, input.limit).map((row) => {
+		...page(rows.length, input),
+		items: rows.slice(input.cursor, input.cursor + input.limit).map((row) => {
 			const entry = quarantineEntry(ctx.db, ctx.project.id, row.test);
 			return {
 				...testRow(ctx, row.test),
@@ -68,6 +74,7 @@ function reruns(ctx: Ctx, input: Extract<StatsInput, { of: "reruns" }>): StatsOf
 	);
 	return {
 		of: "reruns",
+		...page(rows.length, input),
 		reruns: rows.reduce((sum, row) => sum + row.reruns, 0),
 		lostMs: Math.max(
 			0,
@@ -78,7 +85,7 @@ function reruns(ctx: Ctx, input: Extract<StatsInput, { of: "reruns" }>): StatsOf
 		),
 		unknown: rows.reduce((sum, row) => sum + row.unknown, 0),
 		items: rows
-			.slice(0, input.limit)
+			.slice(input.cursor, input.cursor + input.limit)
 			.map((row) => ({ ...testRow(ctx, row.test), reruns: row.reruns, lostMs: row.lost })),
 	};
 }
@@ -123,13 +130,14 @@ function automation(ctx: Ctx, input: Extract<StatsInput, { of: "automation" }>):
 		automated: count,
 		manual,
 		rate: automatable === 0 ? null : count / automatable,
-		backlog: backlog.slice(0, input.limit),
+		...page(backlog.length, input),
+		backlog: backlog.slice(input.cursor, input.cursor + input.limit),
 	};
 }
 
 function coverage(ctx: Ctx, input: Extract<StatsInput, { of: "coverage" }>): StatsOf<"coverage"> {
 	const requirements = requirementCases(ctx.db, ctx.project.id);
-	const listed = requirements.slice(0, input.limit);
+	const listed = requirements.slice(input.cursor, input.cursor + input.limit);
 	const outcomes = caseOutcomes(
 		ctx.db,
 		ctx.project.id,
@@ -139,6 +147,7 @@ function coverage(ctx: Ctx, input: Extract<StatsInput, { of: "coverage" }>): Sta
 	return {
 		of: "coverage",
 		requirements: requirements.length,
+		...page(requirements.length, input),
 		covered: requirements.filter((requirement) => requirement.cases.length > 0).length,
 		items: listed.map((requirement) => {
 			const counts = { passed: 0, failed: 0, other: 0, notRun: 0 };

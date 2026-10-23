@@ -49,6 +49,47 @@ function useReport(input: Api["stats"]["input"]) {
 	return useQueryOp({ project, op: "stats", input });
 }
 
+function usePagedReport(of: Exclude<StatsKind, "pass-rate">, days: number) {
+	const [cursor, setCursor] = useState(0);
+	const size = of === "coverage" ? 100 : 20;
+	const read = useReport(cursor === 0 ? inputOf(of, days) : { of, days, cursor });
+	const data = read.data?.of !== "pass-rate" ? read.data : undefined;
+	if (cursor > 0 && data && !read.isPlaceholderData && cursor >= data.total) setCursor(0);
+	const ready = !read.isFetching && !read.error;
+	const next = () => {
+		if (ready && data?.cursor != null) setCursor(data.cursor);
+	};
+	const previous = () => {
+		if (ready && cursor > 0) setCursor(Math.max(0, cursor - size));
+	};
+	useBindings([
+		{ key: "n", label: "Next report page", handler: next, applies: () => !!ready && data?.cursor != null },
+		{ key: "p", label: "Previous report page", handler: previous, applies: () => !!ready && cursor > 0 },
+	]);
+	const shown = data ? (data.of === "automation" ? data.backlog : data.items).length : 0;
+	return {
+		read,
+		paging: data && (
+			<div className="report-paging">
+				<p className="dim" role="status">
+					Showing {shown} of {data.total}
+				</p>
+				{read.error && <p role="alert">{read.error.message}</p>}
+				{(cursor > 0 || data.cursor !== null) && (
+					<div className="report-pages">
+						<button type="button" disabled={!ready || cursor === 0} onClick={previous}>
+							Previous page
+						</button>{" "}
+						<button type="button" disabled={!ready || data.cursor === null} onClick={next}>
+							Next page
+						</button>
+					</div>
+				)}
+			</div>
+		),
+	};
+}
+
 export function ReportsScreen() {
 	const { project } = useApp();
 	return <ReportsWorkbench key={project} />;
@@ -145,13 +186,13 @@ function Detail({ of, days }: { of: StatsKind; days: number }) {
 		case "pass-rate":
 			return <PassRate days={days} />;
 		case "flaky":
-			return <Flaky days={days} />;
+			return <Flaky key={days} days={days} />;
 		case "reruns":
-			return <Reruns days={days} />;
+			return <Reruns key={days} days={days} />;
 		case "automation":
-			return <Automation days={days} />;
+			return <Automation key={days} days={days} />;
 		case "coverage":
-			return <Coverage days={days} />;
+			return <Coverage key={days} days={days} />;
 	}
 }
 
@@ -287,7 +328,7 @@ function PassRate({ days }: { days: number }) {
 }
 
 function Flaky({ days }: { days: number }) {
-	const read = useReport(inputOf("flaky", days));
+	const { read, paging } = usePagedReport("flaky", days);
 	const data = read.data?.of === "flaky" ? read.data : undefined;
 	const go = useGo();
 	if (!data) return <Unread read={read} what="flaky tests" />;
@@ -297,6 +338,7 @@ function Flaky({ days }: { days: number }) {
 				<b>{data.flaky}</b>{" "}
 				<span className="dim">of {count(data.tests, "automated test")} passed and failed on the same code</span>
 			</p>
+			{paging}
 			{data.items.length === 0 ? (
 				<p className="dim">No test flipped in these days.</p>
 			) : (
@@ -330,7 +372,7 @@ function Flaky({ days }: { days: number }) {
 }
 
 function Reruns({ days }: { days: number }) {
-	const read = useReport(inputOf("reruns", days));
+	const { read, paging } = usePagedReport("reruns", days);
 	const data = read.data?.of === "reruns" ? read.data : undefined;
 	const go = useGo();
 	if (!data) return <Unread read={read} what="reruns" />;
@@ -343,6 +385,7 @@ function Reruns({ days }: { days: number }) {
 					{data.unknown > 0 && `; ${data.unknown} ${data.unknown === 1 ? "has" : "have"} unreported time`}
 				</span>
 			</p>
+			{paging}
 			{data.items.length === 0 ? (
 				<p className="dim">Nothing was run again in these days.</p>
 			) : (
@@ -375,7 +418,7 @@ function Reruns({ days }: { days: number }) {
 }
 
 function Automation({ days }: { days: number }) {
-	const read = useReport(inputOf("automation", days));
+	const { read, paging } = usePagedReport("automation", days);
 	const data = read.data?.of === "automation" ? read.data : undefined;
 	const go = useGo();
 	if (!data) return <Unread read={read} what="automation" />;
@@ -398,6 +441,7 @@ function Automation({ days }: { days: number }) {
 				<dt>Cannot be automated</dt>
 				<dd>{data.manual.notApplicable}</dd>
 			</dl>
+			{paging}
 			<SectionHeading>Backlog: run by hand most often</SectionHeading>
 			{data.backlog.length === 0 ? (
 				<p className="dim">Every case that can be automated has an automated test.</p>
@@ -432,7 +476,7 @@ function Automation({ days }: { days: number }) {
 }
 
 function Coverage({ days }: { days: number }) {
-	const read = useReport(inputOf("coverage", days));
+	const { read, paging } = usePagedReport("coverage", days);
 	const data = read.data?.of === "coverage" ? read.data : undefined;
 	if (!data) return <Unread read={read} what="coverage" />;
 	return (
@@ -443,6 +487,7 @@ function Coverage({ days }: { days: number }) {
 				</b>{" "}
 				<span className="dim">requirements have a case</span>
 			</p>
+			{paging}
 			{data.items.length === 0 ? (
 				<EmptyState doc={{ page: "write-cases", label: "How a case covers a requirement" }}>
 					No requirements yet.

@@ -235,13 +235,18 @@ export function demoHistory(options: {
 	);
 	const outageNight = nights[2];
 
-	// ── A test that sometimes fails on `main` and passes when the job runs it again (decision 0095). Its own
-	// stream, so the rest of the history stays as it was. Not the quarantined test, which is the first. ──
+	// ── Tests that sometimes fail on `main` and pass when the job runs again (decision 0095). The first
+	// also demonstrates runner retries; up to 24 more make the reports page. No extra random draws.
+	// Its own stream leaves the rest of the history unchanged. The first automated test is quarantined. ──
 	const flakyRng = random(options.seed ^ 0x3c6ef372);
 	const flaky = automated.length > 1 ? automated[1 + Math.floor(flakyRng() * (automated.length - 1))] : undefined;
 	// Some pull requests' runs see the same test fail once and pass when the runner tries it again (decision 0129).
 	// Their own stream too.
 	const retryRng = random(options.seed ^ 0x27d4eb2f);
+	const flakyCases =
+		flaky === undefined
+			? []
+			: [flaky, ...automated.filter((index) => index !== flaky && index !== automated[0]).slice(0, 24)];
 
 	// ── The pull requests, numbered up to the one before today's. ──
 	// Draw the quieter days from their own stream, so the real weekday only changes dates.
@@ -277,7 +282,7 @@ export function demoHistory(options: {
 			at: nightAt,
 			step: `n${ago}`,
 			target: { commit: main, branch: "main" },
-			failures: flakes ? [{ case: flaky, message: FLAKE }] : failures,
+			failures: flakes ? flakyCases.map((index) => ({ case: index, message: FLAKE })) : failures,
 			jitter: rng(),
 		});
 		if (flakes)
@@ -287,7 +292,7 @@ export function demoHistory(options: {
 				step: `n${ago}r`,
 				target: { commit: main, branch: "main" },
 				failures: [],
-				rerun: { attempt: 2, cases: [flaky] },
+				rerun: { attempt: 2, cases: flakyCases },
 				jitter: 0.5,
 			});
 		if (n === 0) events.push({ kind: "link", at: nightAt + 12 * MINUTE, step: "link" });

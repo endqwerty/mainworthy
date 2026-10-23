@@ -316,3 +316,7 @@
 	font-size: 12px;
 	color: var(--dim);
 }
+
+:root[data-layout="phone"] .report-pages {
+	display: none;
+}
