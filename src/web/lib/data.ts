@@ -92,27 +92,75 @@ export function changed(project: string, change: Parameters<typeof affected>[1])
 		void readAgain((query) => queries.has(query));
 	});
 }
+const HIDDEN_STREAM_GRACE_MS = 60_000;
+const VISIBLE_STREAM_IDLE_MS = 30 * 60_000;
+type StreamLifecycle = "active" | "hidden-grace" | "hidden" | "idle" | "disposed";
+
 /** One stream per active project. Focus/reconnect refetches repair every missed event. */
 export function useEvents(project: string, setStatus: (text: string) => void): void {
 	useEffect(() => {
 		const owner = deviceSession();
-		let disposed = false;
+		let lifecycle: StreamLifecycle = document.visibilityState === "hidden" ? "hidden" : "active";
+		let pauseTimer: ReturnType<typeof setTimeout> | undefined;
+		let connection = 0;
 		let retry: ReturnType<typeof setTimeout> | undefined;
 		let events: EventSource | null = null;
-		let interrupted = false;
+		let announceReconnect = false;
+		const eligible = () => lifecycle === "active" || lifecycle === "hidden-grace";
+		function close(): void {
+			connection++;
+			clearTimeout(retry);
+			clearTimeout(pauseTimer);
+			events?.close();
+			events = null;
+		}
+		function pause(reason: "hidden" | "idle"): void {
+			lifecycle = reason;
+			close();
+			announceReconnect = true;
+			setStatus("Live updates paused while this page is inactive.");
+		}
+		function armIdle(): void {
+			clearTimeout(pauseTimer);
+			pauseTimer = setTimeout(() => pause("idle"), VISIBLE_STREAM_IDLE_MS);
+		}
+		function activity(): void {
+			if (document.visibilityState !== "visible") return;
+			if (lifecycle === "idle") {
+				lifecycle = "active";
+				connect();
+			}
+			if (lifecycle === "active") armIdle();
+		}
+		function visibility(): void {
+			if (document.visibilityState === "hidden") {
+				if (lifecycle !== "active") return;
+				lifecycle = "hidden-grace";
+				clearTimeout(pauseTimer);
+				pauseTimer = setTimeout(() => pause("hidden"), HIDDEN_STREAM_GRACE_MS);
+			} else if (lifecycle === "hidden" || lifecycle === "hidden-grace") {
+				const reopen = lifecycle === "hidden";
+				lifecycle = "active";
+				armIdle();
+				if (reopen) connect();
+			}
+		}
 		function connect(): void {
-			if (disposed || !sessionCurrent(owner)) return;
+			if (!eligible() || !sessionCurrent(owner)) return;
 			const stream = new EventSource(`/api/p/${encodeURIComponent(project)}/events`);
 			events = stream;
+			const attempt = ++connection;
 			events.onerror = () => {
-				if (disposed || events !== stream) return;
+				if (!eligible() || events !== stream) return;
 				stream.onerror = null;
 				stream.close();
-				interrupted = true;
+				events = null;
+				announceReconnect = true;
 				setStatus("Live updates disconnected. Checking the session and reconnecting…");
-				void reconnect();
+				void reconnect(attempt);
 			};
 			events.onmessage = (event) => {
+				if (!eligible() || events !== stream) return;
 				let raw: unknown;
 				try {
 					raw = JSON.parse(event.data);
@@ -123,36 +171,49 @@ export function useEvents(project: string, setStatus: (text: string) => void): v
 				if (parsed.success) changed(project, parsed.data);
 			};
 			events.onopen = () => {
-				if (interrupted) {
+				if (!eligible() || events !== stream) return;
+				if (announceReconnect) {
 					setStatus("Live updates reconnected.");
-					interrupted = false;
+					announceReconnect = false;
 				}
 				void invalidateProject(project);
 			};
 		}
-		async function reconnect(): Promise<void> {
+		async function reconnect(attempt: number): Promise<void> {
+			const currentAttempt = () => eligible() && connection === attempt && sessionCurrent(owner);
+			if (!currentAttempt()) return;
 			try {
 				const current = await session({ owner });
-				if (disposed || !sessionCurrent(owner)) return;
+				if (!currentAttempt()) return;
 				if (current.actorId !== owner.actorId) {
 					suspendDeviceSession();
 					window.dispatchEvent(new Event(unauthenticatedEvent));
 					return;
 				}
 			} catch (error) {
-				if (disposed || !sessionCurrent(owner)) return;
+				if (!currentAttempt()) return;
 				if (error instanceof ApiError && error.code === "unauthenticated") {
-					if (error.status === null) retry = setTimeout(() => void reconnect(), 1000);
+					if (error.status === null) retry = setTimeout(() => void reconnect(attempt), 1000);
 					return;
 				}
 			}
-			retry = setTimeout(connect, 1000);
+			retry = setTimeout(() => {
+				if (currentAttempt()) connect();
+			}, 1000);
 		}
-		connect();
+		document.addEventListener("visibilitychange", visibility);
+		window.addEventListener("keydown", activity, true);
+		window.addEventListener("pointerdown", activity, true);
+		if (lifecycle === "active") {
+			armIdle();
+			connect();
+		}
 		return () => {
-			disposed = true;
-			clearTimeout(retry);
-			events?.close();
+			lifecycle = "disposed";
+			close();
+			document.removeEventListener("visibilitychange", visibility);
+			window.removeEventListener("keydown", activity, true);
+			window.removeEventListener("pointerdown", activity, true);
 		};
 	}, [project, setStatus]);
 }
