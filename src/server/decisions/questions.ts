@@ -58,7 +58,7 @@ type StoredQuestionRow = {
 
 export type QuestionRow = Omit<StoredQuestionRow, "kind" | "subject"> & QuestionSubject;
 
-function readSubject(row: Pick<StoredQuestionRow, "kind" | "subject">): QuestionSubject {
+export function readSubject(row: Pick<StoredQuestionRow, "kind" | "subject">): QuestionSubject {
 	return row.kind === "failure"
 		? { kind: "failure", subject: StoredFailureSubject.parse(json<unknown>(row.subject)) }
 		: { kind: row.kind, subject: row.subject };

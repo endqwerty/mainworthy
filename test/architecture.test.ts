@@ -871,7 +871,7 @@ describe("the module map", () => {
 				"server/evidence",
 				"server/runs",
 			],
-			"server/transfer": ["server/kernel", "server/suite", "server/evidence"],
+			"server/transfer": ["server/kernel", "server/suite", "server/evidence", "server/decisions"],
 			"server/trackers": ["server/kernel", "server/evidence", "server/suite"],
 			"server/statuses": ["server/kernel", "server/evidence", "server/runs"],
 			"server/handoffs": ["server/kernel", "server/evidence", "server/decisions"],

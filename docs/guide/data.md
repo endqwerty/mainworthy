@@ -405,6 +405,8 @@ A `.gz` suffix tells the command to decompress. Before keeping anything, the imp
 
 Import refuses result and runner-try durations outside the report input range of zero through 30 days (2,592,000,000 ms), inclusive. The error names the table, row, archive line and permitted range. Missing or NULL stored durations remain unknown. Pending reports must pass the per-result input checks, including each runner try, before import can recover them. Import does not check report-level batch limits. Import refuses the whole archive rather than changing its evidence; this also applies when importing an archive backup.
 
+Import also refuses a failure question whose stored subject cannot be read by the inbox. The error names `questions.subject`, the row and the archive line. The whole import rolls back.
+
 **A successful export can produce a backup that this build refuses to import.** Before the report limit added on 2026-10-22, reports could store durations above 30 days. Export preserves those values. When exported duration columns contain invalid values, the CLI warns on stderr after saving the file. HTTP export returns the warning in `X-Mainworthy-Archive-Warning`. Neither changes the archive's evidence.
 
 Keep the original archive. To retain every timing measurement, restore a stopped copy of the data directory as described under [Back up](#back-up). To make an importable archive by discarding invalid timings, first stop the server and copy the data directory. Work on that copy, keeping the original unchanged. Open the copy's `mainworthy.db` with SQLite and inspect the affected rows:

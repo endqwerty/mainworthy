@@ -46,6 +46,36 @@ const titlesOf = async (client: Client) =>
 		.flat()
 		.sort();
 
+test("a demo archive imports with readable open and settled failure questions", async () => {
+	await withInstance(async ({ client }) => {
+		await seed(client, { project: "demo", cases: 6 });
+		const demo = on(client, "demo");
+		const open = await demo.call("inbox", { kind: "failure" });
+		const settled = await demo.call("inbox", { kind: "failure", state: "decided" });
+		expect(open.items.length).toBeGreaterThan(0);
+		expect(settled.items.length).toBeGreaterThan(0);
+		const exported = await client.request("/api/export");
+		expect(exported.status).toBe(200);
+		const archive = await exported.blob();
+		await withInstance(async ({ client: restored }) => {
+			const imported = await restored.request("/api/import", { method: "POST", body: archive });
+			expect(imported.status).toBe(200);
+			const importedDemo = on(restored, "demo");
+			for (const [state, before] of [
+				["open", open],
+				["decided", settled],
+			] as const) {
+				const after = await importedDemo.call("inbox", { kind: "failure", state });
+				expect(
+					after.items.map(({ q, kind, state, title, evidenceHash }) => ({ q, kind, state, title, evidenceHash })),
+				).toEqual(
+					before.items.map(({ q, kind, state, title, evidenceHash }) => ({ q, kind, state, title, evidenceHash })),
+				);
+			}
+		});
+	});
+});
+
 test("a seeded project holds a suite in folders, a fortnight of history and six questions for today", async () => {
 	await withInstance(async ({ client }) => {
 		const before = Date.now();
