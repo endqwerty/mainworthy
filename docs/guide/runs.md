@@ -353,7 +353,7 @@ Updates from other producers arrive through the existing live connection.
 The web cockpit skips other holders' slots during automatic navigation and includes them again when their leases expire.
 You can still click a held slot or select it with <kbd>j</kbd> or <kbd>k</kbd> and record a result.
 Recording a qualifying result releases that slot's lease, including when someone else holds it.
-Unassigned slots without a lease say **Available**. **yours** means the slot is assigned to you or leased by you.
+Unassigned slots without a lease say **Available**, and **yours** means the slot is assigned to you. A slot someone holds, you included, shows **In progress** with who holds it.
 Selecting a slot does not claim it. Press <kbd>t</kbd> to claim the selected slot and <kbd>r</kbd> to release it.
 On a phone, open the slot, then choose **Claim slot** or **Release slot** from **Actions**.
 A claim uses the existing 15-minute work lease. If someone claims it first, the status shows the refusal and
