@@ -262,6 +262,9 @@ const Q = {
 	>(
 		"SELECT test, result, outcome, signature, flipped FROM run_tests WHERE run = $run AND outcome IN ('fail', 'error') LIMIT $limit",
 	),
+	failingTestIds: sql<{ run: number }, { test: number }>(
+		"SELECT DISTINCT test FROM run_tests WHERE run = $run AND outcome IN ('fail', 'error')",
+	),
 	commitsShowing: sql<{ project: number; signature: number }, { run: number }>(
 		`SELECT DISTINCT rt.run AS run FROM run_tests rt JOIN runs r ON r.id = rt.run
 		 WHERE rt.signature = $signature AND rt.outcome IN ('fail', 'error') AND r.project = $project`,
@@ -512,7 +515,9 @@ export function fillsOf(db: Db, slot: number): Fill[] {
 	}
 	return fills.sort((a, b) => a.seq - b.seq || a.ord - b.ord);
 }
-export const failingTestsOf = (db: Db, run: number, limit = -1) => db.all(Q.failingRunTests, { run, limit });
+export const failingTestsOf = (db: Db, run: number, limit: number) => db.all(Q.failingRunTests, { run, limit });
+export const failingTestIds = (db: Db, run: number): number[] =>
+	db.all(Q.failingTestIds, { run }).map((row) => row.test);
 export const runTestsWith = (db: Db, run: number, outcome: string, limit: number) =>
 	db.all(Q.runTests, { run, outcome, limit });
 /** How many of a run's tests both passed and failed on its commit, leaving out a flip a correction withdrew (#630). */

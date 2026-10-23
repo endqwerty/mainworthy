@@ -557,8 +557,32 @@ const Q = {
 	targetsByCommitPrefix: sql<{ project: number; low: string; high: string }, TargetRow>(
 		"SELECT * FROM targets WHERE project = $project AND commit_sha >= $low AND commit_sha < $high ORDER BY id",
 	),
-	caseIdsOfFile: sql<{ project: number; file: string }, { case_id: number | null }>(
-		"SELECT DISTINCT case_id FROM tests WHERE project = $project AND file = $file",
+	caseSelectionOfFiles: sql<{ project: number; files: string }, { ids: string; files: string }>(
+		`SELECT json_group_array(DISTINCT t.case_id) AS ids, json_group_array(DISTINCT t.file) AS files
+		 FROM json_each($files) asked
+		 CROSS JOIN tests t ON t.project = $project AND t.file = asked.value
+		 WHERE t.case_id IS NOT NULL`,
+	),
+	caseLinksOfFiles: sql<{ project: number; files: string; cases: string }, { case_id: number; file: string }>(
+		`SELECT DISTINCT t.case_id, t.file FROM json_each($cases) asked
+		 CROSS JOIN tests t ON t.case_id = asked.value AND t.project = $project
+		 WHERE t.file IN (SELECT value FROM json_each($files))`,
+	),
+	caseIdsOfTests: sql<{ project: number; tests: string }, { case_id: number }>(
+		`SELECT DISTINCT t.case_id FROM json_each($tests) asked CROSS JOIN tests t ON t.id = asked.value
+		 WHERE t.project = $project AND t.case_id IS NOT NULL`,
+	),
+	lastOfCases: sql<{ cases: string }, { case_id: number; outcome: string; basis_version: number | null }>(
+		`WITH candidates AS MATERIALIZED (
+			SELECT (SELECT id FROM results WHERE basis_case = asked.value AND method = kind.value
+				ORDER BY seq DESC, ord DESC LIMIT 1) AS id
+			FROM json_each($cases) asked CROSS JOIN json_each('["human","auto","agent"]') kind
+		), ranked AS (
+			SELECT r.basis_case AS case_id, r.outcome, r.basis_version,
+				row_number() OVER (PARTITION BY r.basis_case ORDER BY r.seq DESC, r.ord DESC) AS position
+			FROM candidates c JOIN results r ON r.id = c.id
+		)
+		SELECT case_id, outcome, basis_version FROM ranked WHERE position = 1`,
 	),
 	failedWith: sql<{ project: number; signature: number }, { test: number; target: number }>(
 		`SELECT DISTINCT test, target FROM results
@@ -1735,9 +1759,25 @@ export function resultsOfCaseOnTargets(db: Db, caseId: number, targets: readonly
 	);
 }
 
-/** The cases linked to the tests in a file, for impact: a changed test file touches these cases. */
-export const caseIdsOfFile = (db: Db, project: number, file: string): number[] =>
-	db.all(Q.caseIdsOfFile, { project, file }).flatMap((row) => (row.case_id === null ? [] : [row.case_id]));
+export function caseSelectionOfFiles(db: Db, project: number, files: ReadonlySet<string>) {
+	const selected = files.size ? db.get(Q.caseSelectionOfFiles, { project, files: JSON.stringify([...files]) }) : null;
+	return {
+		ids: selected ? json<number[]>(selected.ids) : [],
+		covered: new Set(selected ? json<string[]>(selected.files) : []),
+	};
+}
+
+export const caseLinksOfFiles = (db: Db, project: number, files: ReadonlySet<string>, cases: readonly number[]) =>
+	files.size && cases.length
+		? db.all(Q.caseLinksOfFiles, { project, files: JSON.stringify([...files]), cases: JSON.stringify(cases) })
+		: [];
+
+export const caseIdsOfTests = (db: Db, project: number, tests: readonly number[]): number[] =>
+	tests.length ? db.all(Q.caseIdsOfTests, { project, tests: JSON.stringify(tests) }).map((row) => row.case_id) : [];
+
+/** Three indexed result seeks per requested case, without reading its result history or payloads. */
+export const lastResultsOfCases = (db: Db, cases: readonly number[]) =>
+	new Map(db.all(Q.lastOfCases, { cases: JSON.stringify(cases) }).map((row) => [row.case_id, row]));
 
 /**
  * A page of automated tests, newest first, optionally only those with no case or matching a text. The manual test
