@@ -60,7 +60,7 @@ test("CLI case reads retain the proving result's identity after the case changes
 });
 
 test("an agent's JSON report and CLI reads retain its model", async () => {
-	await withInstance(async ({ client, cli, run }) => {
+	await withInstance(async ({ client, run }) => {
 		const { token } = Token.parse(
 			await client.call("admin", {
 				do: "token.create",
@@ -70,7 +70,7 @@ test("an agent's JSON report and CLI reads retain its model", async () => {
 				project: "scratch",
 			}),
 		);
-		const sent = await cli(
+		const sent = await run(
 			[
 				"report",
 				"--project",
@@ -93,7 +93,7 @@ test("an agent's JSON report and CLI reads retain its model", async () => {
 });
 
 test("report prints a conflict for a CI correction whose result was already corrected", async () => {
-	await withInstance(async ({ client, cli }) => {
+	await withInstance(async ({ client, run }) => {
 		const { token } = Token.parse(
 			await client.call("admin", {
 				do: "token.create",
@@ -112,7 +112,7 @@ test("report prints a conflict for a CI correction whose result was already corr
 			...input,
 			results: [{ test: { key: "test" }, outcome: "fail", note: "Broken", corrects: original }],
 		});
-		const refused = await cli(
+		const refused = await run(
 			[
 				"report",
 				"--project",
@@ -203,7 +203,7 @@ for (const refusal of ["reason", "admin"] as const) {
 }
 
 test("get prints who answered a failure and the recorded reason its answer ended", async () => {
-	await withInstance(async ({ client, cli }) => {
+	await withInstance(async ({ client, run }) => {
 		await client.call(
 			"report",
 			ciReport({ commit: "cli408a", branch: "fix", pr: 408, n: 1, fail: { 0: "expected 90, got 100" } }),
@@ -217,7 +217,7 @@ test("get prints who answered a failure and the recorded reason its answer ended
 			reason: "Fix the assertion.",
 		});
 		await client.call("report", ciReport({ commit: "cli408b", branch: "fix", pr: 408, n: 1 }));
-		const printed = await cli(["get", question.q]);
+		const printed = await run(["get", question.q]);
 		expect(printed.code).toBe(0);
 		expect(z.array(QuestionItem).parse(JSON.parse(printed.stdout))).toMatchObject([
 			{
@@ -322,7 +322,7 @@ test("git target detection preserves branch, detached HEAD and missing origin me
 });
 
 test("get prints folder archive and placement proposals with nullable edit fields", async () => {
-	await withInstance(async ({ client, cli, run }) => {
+	await withInstance(async ({ client, run }) => {
 		await client.call("propose", {
 			edits: [
 				{ op: "create", outline: "Movable case" },
@@ -336,7 +336,7 @@ test("get prints folder archive and placement proposals with nullable edit field
 		const place = proposed.parse(
 			await client.call("propose", { edits: [{ op: "place", cases: ["C-1"], folder: "Moved" }] }),
 		);
-		const reply = await cli(["get", archive.proposal, "--json"]);
+		const reply = await run(["get", archive.proposal, "--json"]);
 		expect(reply.stderr).toBe("");
 		expect(reply.code).toBe(0);
 		expect(
@@ -356,8 +356,8 @@ test("get prints folder archive and placement proposals with nullable edit field
 // Captured from main ceee7b57's local server, before actor.list included teams.
 test("actor list reads main's API 1 reply without teams", async () => {
 	await withInstance(
-		async ({ cli, run }) => {
-			const listed = await cli(["actor", "list"]);
+		async ({ run }) => {
+			const listed = await run(["actor", "list"]);
 			expect(listed.stderr).toBe("");
 			expect(listed.code).toBe(0);
 			expect(listed.stdout).toBe(
@@ -382,9 +382,9 @@ test("actor list reads main's API 1 reply without teams", async () => {
 });
 
 test("generated admin commands manage teams and actor list attributes their grants", async () => {
-	await withInstance(async ({ cli, run, client }) => {
+	await withInstance(async ({ run, client }) => {
 		await client.call("admin", { do: "token.create", actor: "team-person", kind: "human", can: ["read"] });
-		const created = await cli(["admin", "--do", "team.create", "--name", "Quality"]);
+		const created = await run(["admin", "--do", "team.create", "--name", "Quality"]);
 		expect(created.code).toBe(0);
 		for (const args of [
 			["--do", "team.grant.set", "--team", "Quality", "--can", "produce", "--project", "scratch"],
@@ -406,14 +406,14 @@ test("generated admin commands manage teams and actor list attributes their gran
 });
 
 test("actor grant assigns, lists, preserves and clears named roles", async () => {
-	await withInstance(async ({ cli, run, client }) => {
+	await withInstance(async ({ run, client }) => {
 		await client.call("admin", {
 			do: "token.create",
 			actor: "role-cli",
 			kind: "human",
 			can: ["read", "produce", "answer"],
 		});
-		const assigned = await cli([
+		const assigned = await run([
 			"actor",
 			"grant",
 			"role-cli",
@@ -704,12 +704,12 @@ test("repeated report returns the same receipt, writes one batch, and names the 
 
 for (const policy of ["track", "ask", "create"] as const) {
 	test(`report receipt describes recorded result bases under ${policy}, including policy changes and replay`, async () => {
-		await withInstance(async ({ cli, run, client, directory }) => {
+		await withInstance(async ({ run, client, directory }) => {
 			expect((await run(["policy", "tests", policy])).code).toBe(0);
 			const file = join(directory, "passing.xml");
 			await writeFile(file, '<testsuite><testcase name="one" classname="checkout" /></testsuite>');
 			const argv = ["report", file, "--commit", COMMIT, "--branch", "main"];
-			const first = await cli(argv);
+			const first = await run(argv);
 			expect([first.code, first.stderr]).toEqual([0, ""]);
 			expect((await client.call("find", { in: "cases" })).count).toBe(policy === "create" ? 1 : 0);
 			expect((await client.call("inbox", { kind: "map" })).items).toHaveLength(policy === "ask" ? 1 : 0);
