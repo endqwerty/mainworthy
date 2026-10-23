@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { SessionRow } from "../../core/people.ts";
+import type { SessionRow } from "../../core/people-replies.ts";
 import { ApiError } from "../lib/api.ts";
 import { browserName } from "../lib/browser.ts";
 import { endSession, listSessions, until } from "../lib/people.ts";

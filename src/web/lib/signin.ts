@@ -2,17 +2,23 @@
 // in yet when most of them are called, and a password never goes through an operation (decision 0017). What a
 // refusal means to the page is for the page to say; these throw the `ApiError` as the server sent it.
 import { z } from "zod";
-import { PasswordEntry } from "../../core/people.ts";
+import { PasswordEntry } from "../../core/people-replies.ts";
+import {
+	flag as schemaFlag,
+	nullableText as schemaNullableText,
+	number as schemaNumber,
+	text as schemaText,
+} from "../../core/schema.ts";
 import { ApiError, exchange, session } from "./api.ts";
 import { clearDevicePerson, type DeviceSession, deviceSession } from "./device.ts";
 import { type Assertion, CreationOptions, type Registration, RequestOptions } from "./passkey.ts";
 
 const Methods = z.object({
-	password: z.boolean(),
-	passkey: z.boolean(),
-	mail: z.boolean().default(false),
+	password: schemaFlag,
+	passkey: schemaFlag,
+	mail: schemaFlag.default(false),
 	/** The identity provider people may sign in through, by the name the operator gave it; null for none. */
-	oidc: z.object({ name: z.string() }).nullable().default(null),
+	oidc: z.object({ name: schemaText }).nullable().default(null),
 });
 export type Methods = z.infer<typeof Methods>;
 
@@ -87,14 +93,14 @@ export async function startOidc(
 	section: string | null = null,
 ): Promise<void> {
 	const { url } = z
-		.object({ url: z.string() })
+		.object({ url: schemaText })
 		.parse(await exchange("/api/login/oidc", { body, signedIn: "link" in body }));
 	sessionStorage.setItem(OIDC_RETURN, JSON.stringify({ path: location.pathname + location.search, section }));
 	location.assign(url);
 	await new Promise(() => {});
 }
 
-const Back = z.object({ path: z.string().startsWith("/"), section: z.string().nullable() });
+const Back = z.object({ path: schemaText.startsWith("/"), section: schemaNullableText });
 export type Back = z.infer<typeof Back>;
 
 /**
@@ -122,7 +128,7 @@ export async function passkeySignInOptions(): Promise<RequestOptions> {
 }
 
 const Shown = z.object({
-	invitation: z.object({ name: z.string(), purpose: z.enum(["join", "recover"]), expiresAt: z.number() }),
+	invitation: z.object({ name: schemaText, purpose: z.enum(["join", "recover"]), expiresAt: schemaNumber }),
 	/** Null on an instance with no public address: the invitation is accepted with a password. */
 	passkey: CreationOptions.nullable(),
 });
@@ -149,7 +155,7 @@ export async function showInvitation(code: string): Promise<ShownInvitation | nu
  * have one. The reply says how many other sessions rested on the old password and ended with it.
  */
 export async function setPassword(input: { current: string | null; next: string }): Promise<{ sessionsEnded: number }> {
-	return z.object({ sessionsEnded: z.number() }).parse(
+	return z.object({ sessionsEnded: schemaNumber }).parse(
 		await exchange("/api/account/password", {
 			body: { ...(input.current === null ? {} : { current: input.current }), next: input.next },
 			signedIn: true,

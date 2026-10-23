@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { TotpEnrolment } from "../../core/people.ts";
+import type { TotpEnrolment } from "../../core/people-replies.ts";
 import { ApiError } from "../lib/api.ts";
 import { beginTotp, confirmTotp } from "../lib/people.ts";
 import { saidOfWrite } from "./list.ts";

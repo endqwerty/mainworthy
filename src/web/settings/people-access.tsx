@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import type { CredentialRow } from "../../core/people.ts";
+import type { CredentialRow } from "../../core/people-replies.ts";
 import { listCredentials, removeCredential } from "../lib/people.ts";
 import { useApp } from "../ui/context.tsx";
 import { age } from "../ui/index.tsx";

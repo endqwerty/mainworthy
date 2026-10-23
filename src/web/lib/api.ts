@@ -3,6 +3,16 @@ import { type Api, type Envelope, ERROR_CODES, INSTANCE_OPS, type OpName, type S
 import { Unlinked } from "../../core/kinds.ts";
 import { REPLIES } from "../../core/replies.ts";
 import {
+	data as schemaData,
+	flag as schemaFlag,
+	nullableNumber as schemaNullableNumber,
+	number as schemaNumber,
+	text as schemaText,
+	texts as schemaTexts,
+	unknownValue as schemaUnknownValue,
+	whole as schemaWhole,
+} from "../../core/schema.ts";
+import {
 	authenticationGeneration,
 	authenticationUnchanged,
 	type DeviceSession,
@@ -14,39 +24,39 @@ import {
 } from "./device.ts";
 
 const Wire = z.discriminatedUnion("ok", [
-	z.object({ ok: z.literal(true), result: z.unknown(), seq: z.number().nullable().optional() }),
+	z.object({ ok: z.literal(true), result: schemaUnknownValue, seq: schemaNullableNumber.optional() }),
 	z.object({
 		ok: z.literal(false),
 		error: z.object({
 			code: z.enum(ERROR_CODES),
-			message: z.string(),
-			details: z.record(z.string(), z.unknown()).optional(),
+			message: schemaText,
+			details: schemaData.optional(),
 		}),
 	}),
 ]);
 const Session = z.object({
-	actor: z.string(),
-	actorId: z.number().int(),
+	actor: schemaText,
+	actorId: schemaWhole,
 	kind: z.enum(["human", "agent", "ci", "rule"]),
-	can: z.array(z.string()),
+	can: schemaTexts,
 	mode: z.enum(["local", "server"]),
 	via: z.enum(["token", "cookie", "local"]),
-	session: z.number().nullable(),
-	credentials: z.object({ password: z.boolean(), passkeys: z.number() }).nullable(),
-	owner: z.boolean(),
-	version: z.string(),
+	session: schemaNullableNumber,
+	credentials: z.object({ password: schemaFlag, passkeys: schemaNumber }).nullable(),
+	owner: schemaFlag,
+	version: schemaText,
 	projects: z.array(
 		z.object({
-			key: z.string(),
-			identity: z.string(),
-			name: z.string(),
-			seq: z.number(),
-			createdAt: z.number(),
-			policy: z.string(),
+			key: schemaText,
+			identity: schemaText,
+			name: schemaText,
+			seq: schemaNumber,
+			createdAt: schemaNumber,
+			policy: schemaText,
 			unlinked: Unlinked,
-			demo: z.boolean(),
-			can: z.array(z.string()),
-			handoff: z.boolean(),
+			demo: schemaFlag,
+			can: schemaTexts,
+			handoff: schemaFlag,
 		}),
 	),
 });

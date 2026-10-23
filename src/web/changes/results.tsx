@@ -3,6 +3,13 @@ import { useDeferredValue, useState } from "react";
 import { z } from "zod";
 import { ResultTrail as TrailSchema } from "../../core/results.ts";
 import { isResultStanding, RESULT_STANDING_LABELS, RESULT_STANDINGS, type ResultStanding } from "../../core/runs.ts";
+import {
+	flag as schemaFlag,
+	nullableNumber as schemaNullableNumber,
+	nullableText as schemaNullableText,
+	number as schemaNumber,
+	text as schemaText,
+} from "../../core/schema.ts";
 import { call } from "../lib/api.ts";
 import { queryKey } from "../lib/data.ts";
 import { navigate, refUrl } from "../lib/router.ts";
@@ -15,25 +22,25 @@ import { ResultTrail } from "../ui/result-trail.tsx";
 export const standingOf = (key: string): ResultStanding | null => (isResultStanding(key) ? key : null);
 
 export const Counted = z.object({
-	model: z.string().nullable(),
+	model: schemaNullableText,
 	steps: TrailSchema.nullable(),
-	result: z.number(),
-	test: z.string(),
-	name: z.string(),
-	file: z.string().nullable(),
-	case: z.string().nullable(),
-	outcome: z.string(),
+	result: schemaNumber,
+	test: schemaText,
+	name: schemaText,
+	file: schemaNullableText,
+	case: schemaNullableText,
+	outcome: schemaText,
 	standing: z.enum(RESULT_STANDINGS),
-	quarantined: z.boolean(),
-	flipped: z.boolean(),
-	recentFlips: z.number(),
-	question: z.string().nullable(),
-	attempt: z.number(),
-	durationMs: z.number().nullable(),
-	message: z.string().nullable(),
-	job: z.string(),
-	by: z.string(),
-	build: z.string().nullable(),
+	quarantined: schemaFlag,
+	flipped: schemaFlag,
+	recentFlips: schemaNumber,
+	question: schemaNullableText,
+	attempt: schemaNumber,
+	durationMs: schemaNullableNumber,
+	message: schemaNullableText,
+	job: schemaText,
+	by: schemaText,
+	build: schemaNullableText,
 });
 type Counted = z.infer<typeof Counted>;
 

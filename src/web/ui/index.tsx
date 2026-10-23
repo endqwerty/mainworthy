@@ -2,7 +2,7 @@ import type { ComponentProps, MouseEvent, ReactNode } from "react";
 import { diffBodies, diffWords } from "../../core/diff.ts";
 import { type DocSlug, docUrl } from "../../core/docs.ts";
 import { type CaseBody, stepAction } from "../../core/model.ts";
-import { PASSWORD_LENGTH } from "../../core/people.ts";
+import { PASSWORD_LENGTH } from "../../core/people-replies.ts";
 import { Proofs } from "../../core/replies.ts";
 
 export function KeyCap({ children }: { children: ReactNode }) {

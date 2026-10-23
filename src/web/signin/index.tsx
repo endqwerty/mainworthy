@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { PasswordEntry } from "../../core/people.ts";
+import { PasswordEntry } from "../../core/people-replies.ts";
 import { PasskeyError, passkeysAvailable, presentPasskey } from "../lib/passkey.ts";
 import {
 	type Methods,

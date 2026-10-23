@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 import { z } from "zod";
-import { FORGET_NOTICE } from "../../core/people.ts";
+import { FORGET_NOTICE } from "../../core/people-replies.ts";
 import { ApiError, call } from "../lib/api.ts";
 import { randomId } from "../lib/ids.ts";
 import { useApp } from "../ui/context.tsx";

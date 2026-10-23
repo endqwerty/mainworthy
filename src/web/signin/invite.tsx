@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import { whyNotPassword } from "../../core/people.ts";
+import { whyNotPassword } from "../../core/people-replies.ts";
 import { ApiError } from "../lib/api.ts";
 import { browserName } from "../lib/browser.ts";
 import { makePasskey, PasskeyError, passkeysAvailable } from "../lib/passkey.ts";

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Capability } from "../../core/kinds.ts";
-import { TeamChanged, type TeamInput, TeamRow } from "../../core/teams.ts";
+import { TeamChanged, TeamRow } from "../../core/team-replies.ts";
+import type { TeamInput } from "../../core/teams.ts";
 import { call } from "../lib/api.ts";
 import { randomId } from "../lib/ids.ts";
 import { useApp } from "../ui/context.tsx";

@@ -17,18 +17,4 @@ export const TeamInput = z.discriminatedUnion("do", [
 ]);
 export type TeamInput = z.infer<typeof TeamInput>;
 
-export const TeamGrant = z.object({ project: z.string(), can: z.array(Capability) });
-export const TeamSource = z.object({ name: z.string(), grants: z.array(TeamGrant) });
-export const TeamRow = TeamSource.extend({ members: z.array(z.string()), createdAt: z.number() });
-export const TeamEvent = z.object({
-	id: z.number().int().positive(),
-	at: z.number(),
-	by: z.string(),
-	action: z.enum(["created", "member.add", "member.remove", "grant.set", "grant.remove"]),
-	person: z.string().nullable(),
-	project: z.string().nullable(),
-	can: z.array(Capability).nullable(),
-});
-export type TeamEvent = z.infer<typeof TeamEvent>;
-export const TeamChanged = z.object({ team: z.string(), changed: z.boolean() });
-export const TeamReply = z.union([z.array(TeamRow), z.array(TeamEvent), TeamChanged]);
+export { TeamChanged, TeamEvent, TeamGrant, TeamReply, TeamRow, TeamSource } from "./team-replies.ts";

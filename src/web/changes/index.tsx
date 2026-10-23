@@ -10,6 +10,13 @@ import {
 	ShardWait,
 	Verdict,
 } from "../../core/runs.ts";
+import {
+	nullableText as schemaNullableText,
+	number as schemaNumber,
+	optionalFlag as schemaOptionalFlag,
+	text as schemaText,
+	texts as schemaTexts,
+} from "../../core/schema.ts";
 import { call } from "../lib/api.ts";
 import { queryKey, useQueryOp } from "../lib/data.ts";
 import { useBindings } from "../lib/keys.ts";
@@ -23,41 +30,41 @@ import { ChangeResults, standingOf, webUrl } from "./results.tsx";
 import "./changes.css";
 
 const Change = z.object({
-	key: z.string(),
-	title: z.string().nullable(),
-	branch: z.string().nullable(),
-	head: z.string().nullable(),
-	url: z.string().nullable(),
+	key: schemaText,
+	title: schemaNullableText,
+	branch: schemaNullableText,
+	head: schemaNullableText,
+	url: schemaNullableText,
 	state: z.enum(["merged", "closed", "open"]),
 	verdict: Verdict.nullable(),
-	reason: z.string().nullable(),
+	reason: schemaNullableText,
 	waiting: z.array(ShardWait).optional(),
 	landing: z
 		.object({
-			commit: z.string(),
-			branch: z.string(),
-			run: z.string().nullable(),
+			commit: schemaText,
+			branch: schemaText,
+			run: schemaNullableText,
 			verdict: Verdict,
-			reason: z.string(),
+			reason: schemaText,
 			waiting: z.array(ShardWait).optional(),
 		})
 		.nullable(),
 });
 type Change = z.infer<typeof Change>;
 const Impact = z.object({
-	change: z.object({ head: z.string().nullable(), mergeReceipt: MergeReceipt.nullable() }),
-	counts: z.object({ cases: z.number(), unreviewed: z.number(), failing: z.number(), uncovered: z.number() }),
+	change: z.object({ head: schemaNullableText, mergeReceipt: MergeReceipt.nullable() }),
+	counts: z.object({ cases: schemaNumber, unreviewed: schemaNumber, failing: schemaNumber, uncovered: schemaNumber }),
 	cases: z.array(
 		z.object({
-			id: z.string(),
-			title: z.string(),
-			why: z.array(z.string()),
-			reviewed: z.boolean().optional(),
-			last: z.string().nullable(),
+			id: schemaText,
+			title: schemaText,
+			why: schemaTexts,
+			reviewed: schemaOptionalFlag,
+			last: schemaNullableText,
 		}),
 	),
-	uncovered: z.array(z.string()),
-	policy: z.string(),
+	uncovered: schemaTexts,
+	policy: schemaText,
 });
 
 export function ChangesScreen() {

@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import { PASSWORD_LENGTH, whyNotPassword } from "../../core/people.ts";
+import { PASSWORD_LENGTH, whyNotPassword } from "../../core/people-replies.ts";
 import { refusalOf, requestReset, resetPassword, signInMethods, verifyEmail } from "../lib/signin.ts";
 import "./signin.css";
 

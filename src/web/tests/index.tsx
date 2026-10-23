@@ -3,6 +3,12 @@ import { useDeferredValue, useState } from "react";
 import { z } from "zod";
 import { Quarantine } from "../../core/flaky.ts";
 import { ResultLocation as LocationSchema, ResultTrail as TrailSchema } from "../../core/results.ts";
+import {
+	nullableNumber as schemaNullableNumber,
+	nullableText as schemaNullableText,
+	number as schemaNumber,
+	text as schemaText,
+} from "../../core/schema.ts";
 import { duration, webUrl } from "../changes/results.tsx";
 import { call } from "../lib/api.ts";
 import { queryKey, useQueryOp } from "../lib/data.ts";
@@ -16,41 +22,39 @@ import { ResultTrail } from "../ui/result-trail.tsx";
 import "./tests.css";
 
 const Test = z.object({
-	ref: z.string(),
-	name: z.string(),
-	file: z.string().nullable(),
-	case: z.string().nullable(),
+	ref: schemaText,
+	name: schemaText,
+	file: schemaNullableText,
+	case: schemaNullableText,
 	quarantine: Quarantine.nullable(),
 });
 const Result = z.object({
 	location: LocationSchema,
-	model: z.string().nullable(),
+	model: schemaNullableText,
 	steps: TrailSchema.nullable(),
-	id: z.number(),
-	outcome: z.string(),
-	by: z.string(),
-	at: z.number(),
-	attempt: z.number(),
-	durationMs: z.number().nullable(),
-	message: z.string().nullable(),
-	commit: z.string().nullable(),
-	change: z.string().nullable(),
-	job: z.string(),
-	build: z.string().nullable(),
+	id: schemaNumber,
+	outcome: schemaText,
+	by: schemaText,
+	at: schemaNumber,
+	attempt: schemaNumber,
+	durationMs: schemaNullableNumber,
+	message: schemaNullableText,
+	commit: schemaNullableText,
+	change: schemaNullableText,
+	job: schemaText,
+	build: schemaNullableText,
 });
 const Detail = Test.extend({
-	key: z.string(),
-	flips: z.number(),
+	key: schemaText,
+	flips: schemaNumber,
 	/**
 	 * `passedOnRetry`: the attempt of the same lane that passed where this one failed, which makes it a flake.
 	 * `tries`: the runner's earlier tries of the result in its run, oldest first (decision 0129).
 	 */
 	last: z.array(
 		Result.extend({
-			passedOnRetry: z.number().nullable(),
-			tries: z.array(
-				z.object({ outcome: z.string(), message: z.string().nullable(), durationMs: z.number().nullable() }),
-			),
+			passedOnRetry: schemaNullableNumber,
+			tries: z.array(z.object({ outcome: schemaText, message: schemaNullableText, durationMs: schemaNullableNumber })),
 		}),
 	),
 });
