@@ -561,8 +561,10 @@ export function* sealSteps(ctx: Ctx, input: Parameters<typeof seal>[1]): Generat
 	const conflicts: Sealed["conflicts"] = [];
 	const cases = new Set<string>();
 	const aliases = new Set<string>();
+	const lookedUp = new Map<string, CaseRow>();
 	const lookup = (text: string): CaseRow => {
-		const row = mustCase(ctx.db, ctx.project.id, text);
+		const row = lookedUp.get(text) ?? mustCase(ctx.db, ctx.project.id, text);
+		lookedUp.set(text, row);
 		cases.add(caseRef(row));
 		return row;
 	};
@@ -1138,7 +1140,10 @@ export function* scopeFactsSteps(
 		for (const tag of values) facts.add(`tag:${cleanTag(tag)}`);
 	};
 	const referencedFolders = new Set<number>();
+	const referencedCases = new Set<number>();
 	const existing = (id: number) => {
+		if (referencedCases.has(id)) return;
+		referencedCases.add(id);
 		const row = caseById(db, id);
 		if (!row) throw notFound(`case ${id}`);
 		referencedFolders.add(row.folder);
@@ -1294,6 +1299,7 @@ export function* adoptSteps(ctx: Ctx, witness: Witness, proposal: ProposalRow): 
 		return row;
 	};
 
+	const covered = new Set<number>();
 	let work = 0;
 	for (const edit of edits) {
 		if (++work % SLICE === 0) yield;
@@ -1397,7 +1403,10 @@ export function* adoptSteps(ctx: Ctx, witness: Witness, proposal: ProposalRow): 
 			}
 			case "cover": {
 				setCover(ctx, witness, edit.caseId, edit.key, edit.title, edit.on);
-				ctx.touched.add(caseRef(mustRow(edit.caseId)));
+				if (!covered.has(edit.caseId)) {
+					ctx.touched.add(caseRef(mustRow(edit.caseId)));
+					covered.add(edit.caseId);
+				}
 				break;
 			}
 			case "quarantine":

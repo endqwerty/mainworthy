@@ -88,6 +88,7 @@ whether the shortcut succeeds or is refused.
 Your typed text stays on the version you started from.
 The editor submits a case's body, tag changes and requirement links together.
 Current and proposed tags classify the whole proposal for policy review.
+This includes requirement-link changes, even when one proposal adds many links to the same case.
 While review is pending, none of those changes is current. Rejecting it leaves the case unchanged.
 A conflict or failed save keeps your text and metadata on this device.
 
