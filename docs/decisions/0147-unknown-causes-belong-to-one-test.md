@@ -24,7 +24,7 @@ are not diagnostic cause text.
 
 Migration 0042 widens the signature class constraint without changing existing ids, classes, or references.
 It changes an exported table and advances the archive version. Current archives preserve unknown causes and
-their decisions; earlier archives require a fresh export. Existing stored causes keep their classification.
+their decisions; earlier archives require a fresh export. Existing stored causes keep their classification. Earlier answers to the old fallback causes ("no failure message (…)", "Test failed") keep covering the results already recorded, but the next failure with no message gets the unknown cause and is asked again.
 
 ## Alternatives
 
