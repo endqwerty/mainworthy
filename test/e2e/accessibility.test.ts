@@ -285,6 +285,16 @@ test.skipIf(!browserAvailable)(
 			await page.getByRole("button", { name: "Recovery link for pat", exact: true }).click();
 			await page.getByLabel("Person to forget", { exact: true }).selectOption("pat");
 			await scan("people-forms");
+			expect(
+				(
+					await page.request.post(`${server.url}/api/account/password`, { data: { next: "the owner password" } })
+				).status(),
+			).toBe(200);
+			expect(
+				(
+					await page.request.post(`${server.url}/api/account/proof`, { data: { password: "the owner password" } })
+				).status(),
+			).toBe(200);
 			await page.getByLabel("Name", { exact: true }).fill("sam");
 			await page.getByRole("button", { name: "Make invitation link", exact: true }).click();
 			await page.getByLabel("Invitation link for sam", { exact: true }).waitFor();

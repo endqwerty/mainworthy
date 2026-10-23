@@ -656,6 +656,15 @@ export function resolveCaller(
 	}
 }
 
+/** Browser proof from the admitted reference. Recheck under the gate after asynchronous work. */
+export function requireRecentSessionProof(app: App, session: Session): void {
+	if (session.via !== "cookie") return;
+	const reference = session.reference?.();
+	const caller = reference ? resolveCaller(app, app.db, reference, 0) : null;
+	if (!caller) throw forbidden("the browser session has ended");
+	requireRecentProof(app, { actor: caller.actor.id, context: caller.context });
+}
+
 /**
  * What a surface read from a request, as plain values: no header names and no cookie syntax. The surface says
  * what the request carried; what that is worth is decided here.

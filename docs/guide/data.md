@@ -390,9 +390,14 @@ upgrade in place when the current server starts.
 
 An import loads an archive into a new instance. A full archive restores every project, and a project archive restores only its selected project. Import does not merge data. The server keeps answering reads during the import. Writes wait until the import finishes.
 
+Browser-initiated imports require recent proof of the caller's own credential in
+that session, checked again after upload before import begins. An expired proof
+returns `recent_proof_required`; prove again and retry. Bearer-token CLI and local
+imports keep their existing operator authority.
+
 To import an archive, follow these steps:
 
-1. Start a new instance and make nothing in it.
+1. Start a new instance. If using a browser, set the owner's first password and prove it with `POST /api/account/proof`; otherwise make no changes before importing.
 2. Run `mainworthy import` with the archive.
 
 ```
@@ -461,7 +466,7 @@ To move older data forward, upgrade the original database and take a fresh expor
 
 Explicit empty-report declarations add a column to archived batches in schema 7. Import an older archive with the build that wrote it before upgrading that instance. Upgrading its SQLite database preserves existing records and adds the new tables and columns.
 
-After an import in server mode, the tokens are gone, because the archive carries none. It carries no password, passkey, authenticator or invitation either. An archive holds nothing that signs somebody in. The people, agents and pipelines are still there with their grants.
+After an import in server mode, the tokens are gone, because the archive carries none. It carries no password, passkey, authenticator or invitation either. The people, agents and pipelines are still there with their grants. Verified recovery addresses stay verified; with configured mail, they can authorize a password reset.
 
 To restore access in server mode, follow these steps:
 

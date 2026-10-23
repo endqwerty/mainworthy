@@ -95,6 +95,10 @@ setting a direct or team grant containing `admin`, and adding a member to an
 admin team from a browser also need the caller's recent proof. These operations remain
 available to authorized bearer-token and local callers.
 
+Browser uploads to `POST /api/import` also require recent proof, checked before
+reading the upload and again under the write gate before import. Authorized
+bearer-token and local imports remain available without proof.
+
 A body holds one of these shapes and no other fields. `GET /api/session` returns
 who is signed in, their numeric actor id (`actorId`), the current session id
 (`session`), and whether they own the instance (`owner`). For a person,

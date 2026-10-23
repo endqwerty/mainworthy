@@ -1069,7 +1069,8 @@ describe("an upgrade and an archive", () => {
 
 		const target = boot();
 		const { cookie } = await signIn(target);
-		const upload = (body: string) => fetch(`${target.url}/api/import`, { method: "POST", headers: { cookie }, body });
+		const upload = (body: string) =>
+			fetch(`${target.url}/api/import`, { method: "POST", headers: bearer(TOKEN), body });
 		// An import that fails changes nothing: whoever was signed in still is.
 		expect((await upload("not an archive\n")).status).toBe(400);
 		expect(await statusOf(target, { cookie })).toBe(200);

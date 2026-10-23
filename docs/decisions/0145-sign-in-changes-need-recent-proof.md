@@ -125,5 +125,9 @@ operators retain their existing authority for these operations.
 Other identity creation is through guarded token/invitation writers; bootstrap
 actor creation is private. Empty team creation and non-admin grants do not
 create admin authority. Grant/membership removal, revocation and forgetting only
-remove authority. Archive import discards credentials, tokens and sessions and
-requires operator reconnection; it does not hand the browser a new credential.
+remove authority. Archive import discards credentials, tokens and sessions, but
+restores verified recovery addresses that can authorize a mailed password reset. Browser imports
+therefore require the caller's recent proof before the upload is read and again
+under the write gate before import. Authorized bearer-token and local imports
+remain available without proof. Authorized restores keep recovery-address verification;
+clearing it would change backup semantics and address only the mail-reset path.
