@@ -142,7 +142,7 @@ function ProjectRunCockpit({
 	const signoffs = useQueryOp({ project, op: "inbox", input: signoffInput, enabled: isClosed });
 	const signoff = signoffs.data?.items.find((item) => item.decision?.effects.closed === runRef);
 	const mayReopen = (item: typeof signoff) =>
-		session.kind === "human" && !!item?.decision?.rule && item?.you === "counts";
+		session.kind === "human" && session.can.includes("produce") && !!item?.decision?.rule && item.you === "counts";
 	const now = useWorkExpiry(project, run?.workUntil ?? null);
 	useEffect(() => {
 		setStatus("Each result records its pinned version. p pass · f fail · b blocked · s skip.");
@@ -363,7 +363,7 @@ function ProjectRunCockpit({
 		if (!hasAvailable && hasNextPage && !isFetchingNextPage && !isFetchNextPageError) void fetchNextPage();
 	}, [hasAvailable, hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage]);
 	const ownsWork = (slot: Slot) => slot.work.kind === "held" && slot.work.actor === session.actor;
-	const canWork = session.can.includes("record") && isOpen && admittedMethod;
+	const canWork = canReport && isOpen && admittedMethod;
 	async function work(action: Api["work"]["input"]["do"]) {
 		if (!current || !canWork || !sessionCurrent(owner)) return;
 		try {
@@ -683,7 +683,7 @@ function ProjectRunCockpit({
 		noteRef.current?.focus();
 	}
 	function undo(): void {
-		if (!last || !canCorrect || withdrawn.current.has(last.ready)) return;
+		if (!canCorrect || withdrawn.current.has(last.ready)) return;
 		const recovery = uncertain.get(last.slot.id);
 		if (recovery) {
 			setStatus(recovery.message);
