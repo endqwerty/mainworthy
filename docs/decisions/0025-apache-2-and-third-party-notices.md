@@ -90,9 +90,11 @@ not refuse: someone who builds from the source for themselves gives no copy away
 ## Consequences
 
 - Giving anyone else the executable or the image needs a decision first: how the source of the LGPL and MPL
-  parts is offered, and whether the items the audit left open are acceptable (`docs/compliance.md`, gap 4;
+  parts is offered, and whether the items the audit left open are acceptable (then `docs/compliance.md`, gap 4;
   [#234](https://github.com/endqwerty/mainworthy/issues/234)). Running it for others on the owner's server, and
   publishing the source, need none.
+  Settled on 2026-10-23: [licences/SOURCE.md](../../licences/SOURCE.md) says where the source is, how to link again
+  and the written offer, and records the open items the owner accepted.
 - The notices are about 1.4 MB, and `licences/` about 2.6 MB: the price of keeping every text as published.
 - A Bun upgrade fails `test/licences.test.ts` until `licences/` is brought up to the new release.
 - The App Store listing uses Apple's standard licence agreement and the copyright line of `Info.plist`

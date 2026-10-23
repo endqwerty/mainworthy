@@ -20,6 +20,10 @@ documentation. After `gate` succeeds, also when it passes in the automatic rerun
 `publish` downloads that same tested image and pushes it to `ghcr.io/endqwerty/mainworthy`. It never rebuilds it. Pull requests never log in to GHCR or publish images.
 Only `publish` has `packages: write`, using `GITHUB_TOKEN`; no additional secret is needed.
 
+The image carries `LICENSE`, `NOTICE` and `THIRD-PARTY-NOTICES.md` in `/usr/share/doc/mainworthy/`. The executable inside
+it includes the Bun runtime, parts of which are under the LGPL and the MPL; [licences/SOURCE.md](../licences/SOURCE.md)
+says where their source is, how to link a changed library again, and the written offer `NOTICE` repeats.
+
 The tags are:
 
 - `<full-sha>`: the full 40-character commit, for example `ghcr.io/endqwerty/mainworthy:0123456789012345678901234567890123456789`.

@@ -13,6 +13,7 @@ build bundles and from this directory (decision 0025). The directory holds what 
 | `bun-1.4.3/texts/` | Those licence files, exactly as each project publishes them, each text once |
 | `bun-1.4.3/audit.tsv` | The audit's decision for each of 444 parts it looked at, linked or not, and why |
 | `npm/<name>/<version>/` | Published manifests and licence files of npm packages embedded inside another bundled package's dist |
+| `SOURCE.md` | Where the source of the LGPL and MPL parts is, how to link a changed library again, and the written offer |
 
 Every text is a file as its project publishes it, at the revision named, byte for byte; two parts share a text only
 when the bytes are the same. Where the audit kept a source file or a README rather than a licence file, the notice
@@ -66,8 +67,10 @@ verifier of the pull request that brought it in (Codex GPT-6.1 Sol) found that t
 source files whose project also has a licence file, and joined texts that differed only in whitespace; both are
 fixed, and `test/licences.test.ts` holds the import to it.
 
-What the audit did not settle, and what Mainworthy must do about each before anyone else is given the executable
-or the container image (`docs/compliance.md`, gap 4):
+What the audit did not settle. The owner settled them on 2026-10-23 for the published image and executable
+([#234](https://github.com/endqwerty/mainworthy/issues/234)): [SOURCE.md](SOURCE.md) says where the source of the LGPL
+and MPL parts is, how to link a changed library again, and the written offer that `NOTICE` repeats, and lists the
+items below that were accepted as they are:
 
 - **LGPL code is linked statically**: JavaScriptCore, WTF, WebCore files Bun copied and TinyCC. A recipient may
   replace them and link again, and may ask for their source.
