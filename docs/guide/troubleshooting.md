@@ -73,7 +73,7 @@ They never cause password refusals, and valid answers to pending ceremonies stil
 For token authentication, five wrong tokens from one address or five with the same prefix within 15 minutes trigger a wait.
 Wait for the time the message names, then try the right token. Each further wrong attempt doubles the wait, up to 15 minutes.
 
-A valid token the server generated still works if you share an address with someone making wrong attempts. A token set through `MAINWORTHY_OWNER_TOKEN` counts as a chosen token and must wait, whatever it looks like.
+A valid token the server generated still works if you share an address with someone making wrong attempts. A new token supplied through `MAINWORTHY_OWNER_TOKEN` counts as chosen and must wait. Copying an existing server-generated token into that variable preserves its exemption.
 
 Password sign-in can return the same message. Within 15 minutes, five wrong passwords for one name block password sign-in for that name from every address. Five wrong passwords from one address block that address. The block also applies to the right password. After the wait ends, type the right password once. Someone who keeps trying wrong passwords for your name can keep password sign-in blocked. If you have a passkey, use it to sign in. Mainworthy keeps no request log. The proxy's log may show where the guesses come from.
 

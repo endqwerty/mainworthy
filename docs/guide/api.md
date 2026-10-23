@@ -113,8 +113,8 @@ secret replies. Ordinary credential lists return kind `totp` and descriptive
 fields only. `remove` removes the authenticator and ends all the person's sessions.
 
 The same operation manages personal CLI tokens with `token.create`, `token.list`,
-and `token.revoke`. Creation requires a password or passkey session, or local-owner
-access. The new token belongs to the caller, and the reply returns the secret once.
+and `token.revoke`. Creation requires a password, passkey or identity-provider
+session, or local-owner access. The new token belongs to the caller, and the reply returns the secret once.
 The default expiry is 30 days, with a 365-day maximum. A bearer token or a
 token-backed browser session cannot create a personal CLI token.
 [Make your own command-line token](./access.md#make-your-own-command-line-token)

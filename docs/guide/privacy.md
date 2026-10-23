@@ -43,7 +43,7 @@ We store the content you put into Mainworthy: cases, test results, decisions, no
 The web app sets two cookies, both strictly necessary:
 
 - One keeps you signed in.
-- The other lasts the five minutes of a passkey sign-in.
+- The other binds this browser to a five-minute passkey sign-in, authenticator step or identity-provider ceremony.
 
 There are no analytics, advertising or tracking cookies.
 
@@ -63,7 +63,7 @@ The server writes no log of requests. It logs when it starts and when something 
 
 The app talks only to `mainworthy.com`, or to the instance named in a build made from the app's source code. A phone that an earlier version signed in to another instance may stay signed in there and keep talking to that instance. The app keeps your session in the phone's keychain and your last project in its settings.
 
-Except for answers that link tests or create cases, the app saves queue answers in its files before sending them. The saved data includes each question's title, evidence hash, reference and reason, the command id, and the eventual server outcomes. These files survive closing the app and signing out, separated by instance, person, and project. The app excludes these answer files from iCloud and computer backups. **Clear outcomes** removes completed answers and keeps waiting and Dropped answers. A Dropped answer stays until the server records an outcome that you can clear. There is no automatic expiry. Removing the app deletes the files.
+Except for answers that link tests or create cases, the app saves queue answers in its files before sending them. The saved data includes each question's title, evidence hash, reference and reason, the command id, and the eventual server outcomes. These files survive closing the app and signing out, separated by instance, person, and project. The app excludes these answer files from iCloud and computer backups. **Clear outcomes** removes completed answers and keeps waiting and Dropped answers. A Dropped answer stays until the server records an outcome that you can clear, or you confirm **Forget** after 24 hours on the device clock. There is no automatic expiry. Removing the app deletes the files.
 
 The app does not keep your password. It contains no analytics, advertising or crash-reporting code. Its user agent tells the server that it is "Mainworthy for iPhone" and which version. The only permission the app can ask for is to reach your local network. It asks only when the instance it talks to is on that network.
 

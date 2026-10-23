@@ -182,8 +182,9 @@ To give one answer to several questions of one kind, follow these steps:
 Each question gets its own decision on the evidence it was listed with. The answer is saved on this device and sent
 as one request. See [Answer during a network drop](#answer-during-a-network-drop). **Unsent answers** shows it as
 one entry with each of its questions. The bar under the list says how many were recorded and names any question
-that was decided or changed meanwhile. Read that question again. **Undo** withdraws every decision the answer made,
-one question after another, with one reason where the policy asks for one. Press **Done** to leave Select.
+that was decided or changed meanwhile. Read that question again. **Undo** withdraws the decisions in one request,
+with one reason where the policy asks for one. Each withdrawal names the decision returned by the answer.
+Press **Done** to leave Select.
 
 ## Link tests to cases
 
@@ -550,9 +551,9 @@ The following tasks still need another app or setup:
   Resolve an overlapping save in the open case editor, or use the button at the top right of a question to
   open it in the web app.
 - **Answer a proposal that does more than add a case or change what one says.** One that restores an earlier
-  version, moves, tags or archives cases, makes a folder or changes the policy needs the web app. So does
-  a proposal with more than twenty edits. For a new case or a change to a case's content, read the steps
-  on the question's page before choosing an answer.
+  version, moves, tags or archives cases, makes a folder or changes the policy needs the web app.
+  Proposals that only add cases or change their content can have more than twenty edits.
+  The app reads all pages and requires every edit to be shown before you answer.
 - **Notifications.** They need a paid Apple developer membership.
 - **Start without a connection.** Reopening the app needs the server to identify you. Answers saved before closing stay on the device until you reconnect and open your workspace.
 

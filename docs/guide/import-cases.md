@@ -50,7 +50,7 @@ Use `fields` to map your project's custom field keys to source columns:
 {"id":"ID","title":"Title","fields":{"priority":"Priority","risk":"Risk notes"}}
 ```
 
-Create the field definitions in **Settings**, **Fields** before importing.
+Create the field definitions in **Settings**, **Policy**, under **Custom fields** before importing.
 The importer refuses a record with a missing definition, an invalid choice, or a missing required value.
 The importer does not add definitions or invent priority values.
 The importer ignores columns you do not map, including source history and dates.
