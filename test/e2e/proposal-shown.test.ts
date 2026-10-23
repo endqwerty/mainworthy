@@ -176,62 +176,76 @@ for (const [device, width, height] of [
 		30000,
 	);
 
-for (const height of [260, 500])
-	t(
-		`desktop Queue at 1100x${height} pages all evidence before rejecting`,
-		async () => {
-			const server = await startServer({ preset: "standard", seed: false });
-			let view: Awaited<ReturnType<typeof openPage>> | null = null;
-			try {
-				const token = await agentToken(server);
-				const proposed = await server.api(
-					"propose",
-					{
-						edits: [
-							{ op: "create", outline: `Tall case\n  ${"Read the next word ".repeat(80)} > It works` },
-							...Array.from({ length: 10 }, (_, i) => ({ op: "create" as const, outline: `Extra case ${i}` })),
-						],
-					},
-					{ token },
-				);
-				const q = proposed.question ?? "";
-				view = await openPage(server, {
-					path: "/p/scratch/queue",
-					setup: async (page) => {
-						await page.setViewportSize({ width: 1100, height });
-						await trackPartCoverage(page, q);
-					},
-				});
-				const { page } = view;
-				const evidence = page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`);
-				await evidence.waitFor();
-				await frames(page);
-				expect(await evidence.getAttribute("data-proposal-read")).toBe("loaded");
-				for (
-					let presses = 0;
-					presses < 80 && (await evidence.getAttribute("data-proposal-read")) !== "ready";
-					presses++
-				) {
-					await page.keyboard.press("r");
+for (const [width, height] of [
+	[1100, 260],
+	[1100, 500],
+	[1280, 180],
+	[700, 300],
+	[1100, 220],
+] as const)
+	for (const via of ["click", "key"] as const)
+		t(
+			`desktop Queue at ${width}x${height} pages all evidence by ${via} before rejecting`,
+			async () => {
+				const server = await startServer({ preset: "standard", seed: false });
+				let view: Awaited<ReturnType<typeof openPage>> | null = null;
+				try {
+					const token = await agentToken(server);
+					const proposed = await server.api(
+						"propose",
+						{
+							edits: [
+								{ op: "create", outline: `${longTitle(0)}\n  ${"Read the next word ".repeat(80)} > It works` },
+								...Array.from({ length: 10 }, (_, i) => ({ op: "create" as const, outline: longTitle(i + 1) })),
+							],
+						},
+						{ token },
+					);
+					const q = proposed.question ?? "";
+					view = await openPage(server, {
+						path: "/p/scratch/queue",
+						setup: async (page) => {
+							await page.setViewportSize({ width, height });
+							await trackPartCoverage(page, q);
+						},
+					});
+					const { page } = view;
+					const reject = page.locator(".queue-answers").getByRole("button", { name: "Reject", exact: false });
+					const evidence = page.locator(`[data-proposal-evidence="${q}"][data-proposal-loaded="true"]`);
+					await evidence.waitFor();
+					await page.locator("#detail").evaluate((pane) => {
+						pane.scrollTop = pane.scrollHeight;
+					});
 					await frames(page);
-					expect(await openAdopt(server)).toEqual([q]);
+					expect(await evidence.getAttribute("data-proposal-read")).toBe("loaded");
+					for (
+						let presses = 0;
+						presses < 120 && (await evidence.getAttribute("data-proposal-read")) !== "ready";
+						presses++
+					) {
+						if (via === "click") await reject.click();
+						else await page.keyboard.press("r");
+						await frames(page);
+						expect(await openAdopt(server)).toEqual([q]);
+					}
+					expect({
+						read: await evidence.getAttribute("data-proposal-read"),
+						...(await partCoverage(page)),
+					}).toMatchObject({ read: "ready", unseen: 0 });
+					expect((await partCoverage(page)).parts).toBeGreaterThan(11);
+					const decided = page.waitForResponse((reply) => reply.url().endsWith("/decide"));
+					if (via === "click") await reject.click();
+					else await page.keyboard.press("r");
+					expect((await decided).ok()).toBe(true);
+					expect((await server.api("get", { refs: [q] }))[0]?.decision).toMatchObject({ answer: { is: "reject" } });
+					expect(view.errors).toEqual([]);
+				} finally {
+					await view?.close();
+					await server.stop();
 				}
-				expect(await evidence.getAttribute("data-proposal-read")).toBe("ready");
-				const covered = await partCoverage(page);
-				expect(covered.parts).toBeGreaterThan(11);
-				expect(covered.unseen).toBe(0);
-				const decided = page.waitForResponse((reply) => reply.url().endsWith("/decide"));
-				await page.locator(".queue-answers").getByRole("button", { name: "Reject", exact: false }).click();
-				expect((await decided).ok()).toBe(true);
-				expect((await server.api("get", { refs: [q] }))[0]?.decision).toMatchObject({ answer: { is: "reject" } });
-				expect(view.errors).toEqual([]);
-			} finally {
-				await view?.close();
-				await server.stop();
-			}
-		},
-		30000,
-	);
+			},
+			30000,
+		);
 
 for (const [device, width, height] of [
 	["phone", 390, 360],

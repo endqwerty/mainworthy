@@ -187,6 +187,8 @@ export function answerShown(q: string, answer: string, via: "key" | "button"): s
 	if (evidence?.dataset.proposalLoaded !== "true") return message;
 	const state = shown.get(evidence);
 	if (evidence.dataset.proposalRead !== "ready") {
+		// Clicking an answer can scroll the outer Queue pane past its evidence viewport.
+		if (via === "button") evidence.closest(".queue-evidence")?.scrollIntoView({ block: "start" });
 		const next = state?.parts.find((part) => !partShown(part));
 		if (next) {
 			for (let scroller = next.element.parentElement; scroller; scroller = scroller.parentElement) {
