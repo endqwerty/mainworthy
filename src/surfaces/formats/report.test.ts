@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { harness } from "../../../test/helpers.ts";
-import { ReportInput, type ReportReceipt } from "../../core/ops.ts";
+import { type GateStatus, type InboxReply, ReportInput, type ReportReceipt } from "../../core/ops.ts";
 import { normaliseFailure, signatureHash } from "../../core/signature.ts";
 import { parseJUnit } from "./junit.ts";
 import { nativeResult } from "./native.ts";
@@ -61,16 +61,29 @@ test.each([
 		"junit",
 		'<testsuite><testcase name="timeout once"><failure message="first"/><rerunFailure/></testcase></testsuite>',
 	],
-] as const)("%s failures without diagnostics stay unexplained without inventing a cause", (format, text) => {
+] as const)("%s failures without diagnostics open answerable unknown-cause questions", (format, text) => {
 	const h = harness({ unlinked: "track" });
 	try {
 		const { results } = parseReport(text, { file: "report", format });
 		expect(results[0]?.outcome).toBe("fail");
 		expect(results[0]?.failure?.message || "").toBe("");
-		const receipt = h.call<ReportReceipt>("report", { target: { commit: "unknown773", repo: "acme/web" }, results });
+		const target = { commit: "unknown773", head: "unknown773", repo: "acme/web", pr: 7, branch: "feature" };
+		const receipt = h.call<ReportReceipt>("report", { target, results });
 		expect(receipt.gate).toMatchObject({ verdict: "blocked", tally: { unexplained: 1 } });
+		expect(receipt.gate?.open).toHaveLength(1);
+		const questions = h.call<InboxReply>("inbox", { kind: "failure", on: "pr:7" }).items;
+		expect(questions).toHaveLength(1);
+		const question = questions[0];
+		if (!question) throw new Error("missing failure question");
+		expect(question.evidence).toMatchObject({ signature: { class: "unknown" } });
+		h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "flaky" } });
+		expect(h.call<GateStatus>("gate", { change: "pr:7", repo: "acme/web" })).toMatchObject({
+			verdict: "passed",
+			open: [],
+			tally: { excused: 1, unexplained: 0 },
+		});
 		const failed = h.app.db.raw.query("SELECT signature, message FROM results").get();
-		expect(failed).toEqual({ signature: null, message: null });
+		expect(failed).toEqual({ signature: expect.any(Number), message: null });
 	} finally {
 		h.close();
 	}

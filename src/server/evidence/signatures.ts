@@ -7,7 +7,7 @@ export type SignatureRow = {
 	id: number;
 	project: number;
 	hash: string;
-	class: Exclude<NormalisedFailure["class"], "unknown">;
+	class: NormalisedFailure["class"];
 	text: string;
 	first_seq: number;
 };
@@ -32,9 +32,18 @@ export function fileSignature(signature: Pick<SignatureRow, "hash" | "class" | "
 	};
 }
 
-export function ensureSignature(ctx: Ctx, failure: { message: string; detail?: string }): SignatureRow | null {
+export function ensureSignature(
+	ctx: Ctx,
+	testKey: string,
+	failure: { message: string; detail?: string },
+): SignatureRow {
 	const normal = normaliseFailure(failure);
-	if (normal.class === "unknown") return null;
+	if (normal.class === "unknown")
+		return storeSignature(ctx, {
+			class: normal.class,
+			hash: contentHash({ class: normal.class, test: testKey }),
+			text: "Unknown failure cause",
+		});
 	return storeSignature(ctx, { ...normal, hash: signatureHash(normal) });
 }
 

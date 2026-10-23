@@ -2,12 +2,14 @@
 // reports its earlier tries with the result (decision 0129). The result itself is what the gate counts; the tries
 // are evidence: a try that disagrees with the next is a flip, as a retry by the pipeline is.
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { type GateStatus, ReportInput } from "../src/core/ops.ts";
+import { type GateStatus, type InboxReply, ReportInput, type ReportReceipt } from "../src/core/ops.ts";
 import { rebuildAssertionIndexes } from "../src/server/evidence/assertions.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
 import { Db, declaredSql } from "../src/server/kernel/db.ts";
-import { migrate } from "../src/server/kernel/migrate.ts";
+import { MIGRATIONS, migrate } from "../src/server/kernel/migrate.ts";
+import { OPS } from "../src/server/ops/index.ts";
 import { recoverAccepted } from "../src/server/ops/jobs.ts";
+import { invoke } from "../src/server/ops/registry.ts";
 import { acceptReport, processBatchSteps } from "../src/server/ops/writes.ts";
 import { exportArchive, importArchive, linesOf } from "../src/server/transfer/transfer.ts";
 import { parseReport } from "../src/surfaces/formats/report.ts";
@@ -273,7 +275,7 @@ test.each([
 	]);
 });
 
-test("earlier failed tries without messages still count toward their fallback cause's split", () => {
+test("unknown tries never make a reported assertion broad or support a detector suggestion", () => {
 	const tests = broadTests().map((test) => ({ ...test, name: "works" }));
 	h.call("report", {
 		...broadReport(tests.slice(0, 30)),
@@ -284,12 +286,190 @@ test("earlier failed tries without messages still count toward their fallback ca
 		results: tests.slice(30).map((test) => ({
 			test,
 			outcome: "pass",
-			tries: [failed("no failure message (works)")],
+			tries: [failed("expected 1 to be 2")],
 		})),
 	});
+	expect(h.call<Page[]>("get", { refs: ["T-1"] })[0]?.sameCode.signals).toEqual([]);
 	expect(h.call<Page[]>("get", { refs: ["T-31"] })[0]?.sameCode.signals).toMatchObject([
-		{ signature: { text: "Split by file (file-0.test.ts): no failure message (works)" }, flips: 1 },
+		{ signature: { text: "expected 1 to be 2" }, flips: 1 },
 	]);
+	expect(h.app.db.raw.query("SELECT count(*) AS n FROM assertion_seen").get()).toEqual({ n: 30 });
+});
+
+test.each([
+	undefined,
+	{ message: "failed" },
+	{ message: "FAILED" },
+	{ message: "Error:" },
+	{ message: "Traceback (most recent call last):" },
+])("unknown failures remain answerable per test without sharing decisions or detector suggestions: %j", (failure) => {
+	const target = { commit: "silent001", head: "silent001", repo: "acme/web", pr: 7, branch: "feature" };
+	const results = ["first", "second"].map((key) => ({
+		test: { key, name: "timeout once" },
+		outcome: "fail",
+		...(failure ? { failure } : {}),
+	}));
+	const receipt = h.call<ReportReceipt>("report", { target, results });
+	expect(receipt.gate?.open).toHaveLength(2);
+	let questions = h.call<InboxReply>("inbox", { kind: "failure", on: "pr:7" }).items;
+	expect(questions).toHaveLength(2);
+	const signatures = h.app.db.raw
+		.query<{ id: number; class: string }, []>("SELECT id, class FROM signatures ORDER BY id")
+		.all();
+	expect(signatures).toEqual([
+		{ id: expect.any(Number), class: "unknown" },
+		{ id: expect.any(Number), class: "unknown" },
+	]);
+	expect(signatures[0]?.id).not.toBe(signatures[1]?.id);
+	const question = questions[0];
+	if (!question) throw new Error("missing failure question");
+	h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "flaky" } });
+	expect(gate("silent001")).toMatchObject({ verdict: "blocked", tally: { unexplained: 1, excused: 1 } });
+	questions = h.call<InboxReply>("inbox", { kind: "failure", on: "pr:7" }).items;
+	expect(questions).toHaveLength(1);
+	const other = questions[0];
+	if (!other) throw new Error("missing second failure question");
+	h.call("decide", { q: other.q, onEvidence: other.evidenceHash, answer: { is: "infra" } });
+	expect(gate("silent001")).toMatchObject({ verdict: "passed", open: [], tally: { unexplained: 0, excused: 2 } });
+	for (const [attempt, outcome] of [
+		[2, "pass"],
+		[3, "fail"],
+		[4, "pass"],
+	] as const) {
+		h.call("report", { target, attempt, results: results.map((result) => ({ ...result, outcome })) });
+	}
+	for (const ref of ["T-1", "T-2"]) {
+		const read = h.call<Page[]>("get", { refs: [ref] })[0];
+		expect(read?.flips).toBe(3);
+		expect(read?.sameCode.signals).toEqual([]);
+	}
+});
+
+test("diagnostic detail supplies a result and its runner try with a known cause", () => {
+	const failure = { message: "", detail: "Error:\nAssertionError: expected 1 to be 2\n at cart (cart.ts:3:1)" };
+	const target = { commit: "detail001", head: "detail001", repo: "acme/web", pr: 7, branch: "feature" };
+	h.call("report", {
+		target,
+		results: [{ test: { key: "detail", name: "timeout once" }, outcome: "fail", failure }],
+	});
+	const question = h.call<InboxReply>("inbox", { kind: "failure", on: "pr:7" }).items[0];
+	expect(question?.evidence).toMatchObject({
+		signature: { class: "assertion", text: "AssertionError: expected 1 to be 2 | at cart (cart.ts)" },
+	});
+	h.call("report", {
+		target,
+		attempt: 2,
+		results: [{ test: { key: "detail" }, outcome: "pass", tries: [{ outcome: "fail", failure }] }],
+	});
+	expect(gate("detail001").verdict).toBe("passed");
+	expect(page()?.sameCode.signals).toMatchObject([
+		{ signature: { text: "AssertionError: expected 1 to be 2 | at cart (cart.ts)" }, flips: 1 },
+	]);
+});
+
+test("the unknown cause migration preserves known classes, ids and references", () => {
+	const migration = MIGRATIONS.find((entry) => entry.name === "unknown_causes");
+	if (!migration) throw new Error("missing unknown cause migration");
+	const db = new Db(":memory:");
+	try {
+		for (const earlier of MIGRATIONS.filter((entry) => entry.version < migration.version)) db.exec(earlier.sql);
+		db.raw.exec(`
+			INSERT INTO meta VALUES ('schema_version', '${migration.version - 1}');
+			INSERT INTO orgs VALUES (1, 'Example', 1);
+			INSERT INTO projects (id, org, key, name, created_at, identity) VALUES (1, 1, 'shop', 'Shop', 1, 'shop-identity');
+			INSERT INTO signatures (id, project, hash, class, text, first_seq) VALUES
+			 (10, 1, 'assertion', 'assertion', 'expected 1', 1),
+			 (11, 1, 'timeout', 'timeout', 'TimeoutError', 2),
+			 (12, 1, 'infra', 'infra', 'ECONNRESET', 3);
+			INSERT INTO assertion_roots VALUES (1, 10, 10);
+		`);
+		const before = db.raw.query("SELECT id, project, hash, class, text, first_seq FROM signatures ORDER BY id").all();
+		migrate(db, ":memory:");
+		expect(db.raw.query("SELECT id, project, hash, class, text, first_seq FROM signatures ORDER BY id").all()).toEqual(
+			before,
+		);
+		expect(db.raw.query("SELECT * FROM assertion_roots").all()).toEqual([{ project: 1, signature: 10, root: 10 }]);
+		db.raw.exec(
+			"INSERT INTO signatures (project, hash, class, text, first_seq) VALUES (1, 'unknown', 'unknown', 'Unknown failure cause', 4)",
+		);
+		expect(() =>
+			db.raw.exec(
+				"INSERT INTO signatures (project, hash, class, text, first_seq) VALUES (1, 'unknown', 'unknown', 'Unknown failure cause', 4)",
+			),
+		).toThrow("UNIQUE");
+		expect(() =>
+			db.raw.exec(
+				"INSERT INTO signatures (project, hash, class, text, first_seq) VALUES (1, 'invalid', 'invalid', 'invalid', 4)",
+			),
+		).toThrow("CHECK");
+		expect(db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
+	} finally {
+		db.close();
+	}
+});
+
+test("an unknown failure on the base cannot explain the head's unknown failure", () => {
+	const results = [{ test: { key: "one" }, outcome: "fail" }];
+	h.call("report", { target: { commit: "silentbase", repo: "acme/web", branch: "main" }, results });
+	const receipt = h.call<ReportReceipt>("report", {
+		target: {
+			commit: "silenthead",
+			head: "silenthead",
+			base: "silentbase",
+			pr: 7,
+			repo: "acme/web",
+			branch: "feature",
+		},
+		results,
+	});
+	expect(receipt.gate).toMatchObject({ verdict: "blocked", tally: { unexplained: 1, excused: 0 } });
+	expect(receipt.questions).toMatchObject([{ state: "open" }]);
+	const questions = h.call<InboxReply>("inbox", { kind: "failure", on: "pr:7" }).items;
+	expect(questions).toHaveLength(1);
+	expect(questions[0]?.evidence.hints).not.toContain("fails-on-base");
+});
+
+test("unknown causes and their decisions survive archive replay for later reports of the same test", () => {
+	const results = [{ test: { key: "one" }, outcome: "fail", tries: [{ outcome: "fail" }] }];
+	const target = { commit: "silentarchive", head: "silentarchive", repo: "acme/web", pr: 7, branch: "feature" };
+	h.call("report", { target, results });
+	const question = h.call<InboxReply>("inbox", { kind: "failure" }).items[0];
+	if (!question) throw new Error("missing failure question");
+	h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "flaky" } });
+	const chunks: string[] = [];
+	exportArchive(h.app.db, (chunk) => chunks.push(chunk), { now: 1_800_000_000_000 });
+	const db = new Db(":memory:");
+	try {
+		migrate(db, ":memory:");
+		importArchive(db, linesOf(chunks.join("")));
+		expect(db.raw.query("SELECT class, text FROM signatures").all()).toEqual([
+			{ class: "unknown", text: "Unknown failure cause" },
+		]);
+		expect(db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
+		const project = findProject(db, "scratch");
+		if (!project) throw new Error("missing project");
+		const app = { ...h.app, db };
+		db.transaction(() => {
+			const ctx = makeCtx(app, project, h.owner, true);
+			acceptReport(ctx, ReportInput.parse({ target, results, attempt: 2 }));
+			stampSeq(ctx);
+		});
+		expect(recoverAccepted(app)).toBe(1);
+		expect(db.raw.query("SELECT class, text FROM signatures").all()).toHaveLength(1);
+		expect(
+			invoke(app, OPS, {
+				op: "gate",
+				project: "scratch",
+				input: { change: "pr:7", repo: "acme/web" },
+				actor: () => h.owner,
+			}),
+		).toMatchObject({
+			ok: true,
+			result: { verdict: "passed", open: [], tally: { excused: 1, unexplained: 0 } },
+		});
+	} finally {
+		db.close();
+	}
 });
 
 test("large assertion history cannot make a report materialize unbounded rows", () => {

@@ -194,7 +194,7 @@ test.each([
 		expect(page?.flips).toBe(2);
 		expect(SameCodeEvidence.parse(page?.sameCode).signals).toEqual([]);
 		expect(normaliseFailure({ message: tried?.failure?.message ?? "" }).class).toBe("unknown");
-		expect(h.app.db.raw.query("SELECT class FROM signatures").all()).toEqual([]);
+		expect(h.app.db.raw.query("SELECT class FROM signatures").all()).toEqual([{ class: "unknown" }]);
 	} finally {
 		h.close();
 	}

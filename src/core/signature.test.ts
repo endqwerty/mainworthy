@@ -346,6 +346,23 @@ describe("failure signatures", () => {
 			text: "",
 		});
 	});
+	test.each(["", "Error:", "FAILED", "Traceback (most recent call last):"])(
+		"uses the first diagnostic cause in detail when the message is %j",
+		(message) => {
+			expect(
+				normaliseFailure({ message, detail: "Error:\nAssertionError: expected 1 to be 2\n at checkout (cart.ts:3:1)" }),
+			).toEqual({
+				class: "assertion",
+				text: "AssertionError: expected 1 to be 2 | at checkout (cart.ts)",
+			});
+		},
+	);
+	test("a detail stack's function names cannot supply a cause ahead of the diagnostic", () => {
+		expect(normaliseFailure({ message: "", detail: " at timeout (cart.ts:3:1)\nECONNRESET" })).toEqual({
+			class: "infra",
+			text: "ECONNRESET | at timeout (cart.ts)",
+		});
+	});
 	test("appends the first external JS frame, ignoring framework internals", () => {
 		const detail =
 			"Error: failure\n at assert (/app/node_modules/@playwright/test/index.js:42:17)\n at processTicksAndRejections (node:internal/process/task_queues:95:5)\n at checkout (/app/tests/checkout.spec.ts:41:13)\n at later (/app/src/other.ts:2:3)";

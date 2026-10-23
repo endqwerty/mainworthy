@@ -1351,7 +1351,7 @@ export function* applySteps(
 		let message: string | null = null;
 		if (input.outcome === "fail" || input.outcome === "error") {
 			message = input.failure?.message?.trim() || input.note?.trim() || null;
-			signature = ensureSignature(ctx, {
+			signature = ensureSignature(ctx, test.key, {
 				message: message ?? "",
 				...(input.failure?.detail ? { detail: input.failure.detail } : {}),
 			});
@@ -1400,7 +1400,7 @@ export function* applySteps(
 			const message = tried.failure?.message.trim() || null;
 			const cause =
 				tried.outcome === "fail" || tried.outcome === "error"
-					? ensureSignature(ctx, {
+					? ensureSignature(ctx, test.key, {
 							message: message ?? "",
 							...(tried.failure?.detail ? { detail: tried.failure.detail } : {}),
 						})

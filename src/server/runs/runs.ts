@@ -1181,7 +1181,7 @@ function comparisonLane(db: Db, result: ResultRow): string {
  */
 export function failsOnBase(db: Db, id: number): boolean {
 	const result = resultById(db, id);
-	if (!result) return false;
+	if (!result || result.signature === null || signatureById(db, result.signature)?.class === "unknown") return false;
 	const base = baseRunOf(db, mustTarget(db, result.target));
 	if (!base) return false;
 	const lane = comparisonLane(db, result);
@@ -1241,6 +1241,7 @@ export function inheritedEvidenceOf(db: Db, run: RunRow) {
 	const targets = new Map<number, RunRow | null>();
 	return inheritedResultsOf(db, run).flatMap((row) => {
 		if (row.signature === null || (row.outcome !== "fail" && row.outcome !== "error")) return [];
+		if (signatureById(db, row.signature)?.class === "unknown") return [];
 		const result = resultById(db, row.result);
 		if (!result || result.method === "agent") return [];
 		if (!targets.has(row.target)) targets.set(row.target, baseRunOf(db, mustTarget(db, row.target)));
