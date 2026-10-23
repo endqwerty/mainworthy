@@ -13,6 +13,10 @@ when live updates arrive. If the write fails, only that pending change disappear
 A confirmed later move replaces an earlier pending move of the same case.
 A slow or failed folder-list read keeps the cases returned by the current folder filter visible.
 
+While the selected case loads, its pane says "Reading case…". Pressing <kbd>e</kbd>
+before it appears explains that the case has not loaded yet. Press <kbd>e</kbd> again
+after it appears to edit it.
+
 ![Suite with cases, folders, tags, and the selected case](../ui/screenshots/suite-light.png)
 
 ## Capture a case

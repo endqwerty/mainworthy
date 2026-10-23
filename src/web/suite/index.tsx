@@ -1811,7 +1811,10 @@ export function SuiteScreen() {
 			return;
 		}
 		const shown = read ?? recordedView;
-		if (!shown) return;
+		if (!shown) {
+			if (selected) setStatus("The case is not loaded yet. Press e when it appears.");
+			return;
+		}
 		if (owes(shown.ref)) {
 			void readOwed(shown.ref, (fresh) => {
 				if (draftRef.current === null) edit(fresh);
@@ -2424,6 +2427,7 @@ export function SuiteScreen() {
 				ending={draft && gone.current?.draft === draft ? ending : null}
 				onTakeOver={takeOver}
 				view={view}
+				loading={current.isLoading}
 				draft={draft ? placedDraft(draft, recordedView, placements, folders) : null}
 				stored={draftStored}
 				change={change}

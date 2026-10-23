@@ -98,6 +98,7 @@ function grouped(entries: Entry[]): TimelineGroup[] {
 export function CasePane({
 	fieldDefinitions,
 	view,
+	loading,
 	draft,
 	stored,
 	change,
@@ -116,6 +117,7 @@ export function CasePane({
 }: {
 	fieldDefinitions: FieldDefinitions | undefined;
 	view: CaseView | null;
+	loading: boolean;
 	draft: Draft | null;
 	stored: boolean;
 	change: DraftChange;
@@ -268,7 +270,15 @@ export function CasePane({
 		</details>
 	));
 	if (!view && !draft) {
-		const empty = <EmptyState>Select a case to read its steps and evidence. Press c to start a new one.</EmptyState>;
+		const empty = (
+			<EmptyState>
+				{loading ? (
+					<span role="status">Reading case…</span>
+				) : (
+					"Select a case to read its steps and evidence. Press c to start a new one."
+				)}
+			</EmptyState>
+		);
 		return (
 			<section className="pane" id="detail">
 				{preserved.length ? (
@@ -288,6 +298,8 @@ export function CasePane({
 	if (!body) return null;
 	const version = draft?.base ?? view?.version ?? 0;
 	const versionEntry = entries.find((entry) => entry.t === "version" && entry.version === version);
+	const privateDraft = draft?.dirty || draft?.ref === null;
+	const waiting = draft?.submission.kind === "waiting" ? draft.submission.question : null;
 	return (
 		<section className="pane" id="detail">
 			<div className="pane-scroll">
@@ -297,27 +309,23 @@ export function CasePane({
 						{view?.state === "archived" && <span className="chip">Archived</span>}
 						<span className="path">{draft?.folder || view?.folder.path || "All cases"}</span>
 					</div>
-					<div className={`cstate capture-state ${draft?.dirty || draft?.ref === null ? "draft" : ""}`}>
-						<span className={`chip ${draft?.dirty || draft?.ref === null ? "draft" : "ver"}`}>
-							{draft?.dirty || draft?.ref === null ? "Draft" : `v${version}`}
-						</span>
+					<div className={`cstate capture-state ${privateDraft ? "draft" : ""}`}>
+						<span className={`chip ${privateDraft ? "draft" : "ver"}`}>{privateDraft ? "Draft" : `v${version}`}</span>
 						<span className="sv">
-							{draft?.submission.kind === "waiting" ? (
+							{waiting ? (
 								<>
 									Proposed, waiting for a person ·{" "}
 									<a
-										href={refUrl({ project, ref: draft.submission.question })}
+										href={refUrl({ project, ref: waiting })}
 										onClick={(event) => {
 											event.preventDefault();
-											navigate(
-												refUrl({ project, ref: draft.submission.kind === "waiting" ? draft.submission.question : "" }),
-											);
+											navigate(refUrl({ project, ref: waiting }));
 										}}
 									>
-										{draft.submission.question}
+										{waiting}
 									</a>
 								</>
-							) : draft?.dirty || draft?.ref === null ? (
+							) : privateDraft ? (
 								stored ? (
 									"Draft, saved on this device"
 								) : (
@@ -329,7 +337,7 @@ export function CasePane({
 								`Version ${version}, current`
 							)}
 						</span>
-						{draft && (draft.dirty || draft.ref === null || draft.submission.kind === "waiting") && (
+						{draft && (privateDraft || waiting) && (
 							<span className="draft-public-state">
 								{draft.ref === null ? "Private, no version yet" : `Others see version ${view?.version ?? draft.base}`}
 							</span>
