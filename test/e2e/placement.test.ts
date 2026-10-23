@@ -1024,3 +1024,73 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+for (const lost of ["placement", "undo"] as const) {
+	test.skipIf(!browserAvailable)(
+		lost === "undo"
+			? "retrying a lost Undo reply preserves a colleague's later move"
+			: "a lost placement reply still lets Undo record its original inverse",
+		async () => {
+			const server = await startServer();
+			await server.api("propose", {
+				edits: [
+					{ op: "create", folder: "Original", body: { title: "Lost placement reply" } },
+					{ op: "folder", name: "Destination" },
+					{ op: "folder", name: "Colleague" },
+				],
+			});
+			const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+			try {
+				const { page, context } = h;
+				await page.getByRole("button", { name: "Lost placement reply", exact: true }).waitFor();
+				const dropReply = async () => {
+					let dropped = false;
+					await context.route("**/api/p/scratch/propose", async (route) => {
+						if (dropped) return route.continue();
+						dropped = true;
+						await route.fetch();
+						await route.abort("failed");
+					});
+				};
+				if (lost === "placement") await dropReply();
+				await page.keyboard.press("m");
+				await page.getByRole("textbox", { name: "Move selected cases to a folder" }).fill("Destination");
+				await page.keyboard.press("Enter");
+				if (lost === "undo") {
+					await page.locator("#stat").filter({ hasText: "1 case changed" }).waitFor();
+					await dropReply();
+					await page.keyboard.press("u");
+				}
+				await page
+					.locator("#stat")
+					.filter({ hasText: /fetch|failed|unknown/i })
+					.waitFor();
+				const before = (await server.api("get", { refs: ["C-1"] }))[0];
+				expect(z.object({ path: z.string() }).parse(before?.folder).path).toBe(
+					lost === "undo" ? "Original" : "Destination",
+				);
+				await server.api("propose", { edits: [{ op: "place", cases: ["C-1"], folder: "Colleague" }] });
+				await page.keyboard.press("u");
+				// Retrying the original placement recovers its inverse, which Undo may then apply once.
+				// Retrying an already-recorded Undo must preserve the colleague's move.
+				await page.locator("#stat").filter({ hasText: "Undone" }).waitFor();
+				if (lost === "undo" && process.env.MAINWORTHY_UNDO_LOSS_SCREENSHOT)
+					await page.screenshot({ path: process.env.MAINWORTHY_UNDO_LOSS_SCREENSHOT });
+				const after = (await server.api("get", { refs: ["C-1"] }))[0];
+				expect(z.object({ path: z.string() }).parse(after?.folder).path).toBe(
+					lost === "undo" ? "Colleague" : "Original",
+				);
+				const timeline = await server.api("timeline", { ref: "C-1" });
+				expect(timeline.entries.filter((entry) => entry.t === "placement")).toHaveLength(3);
+				await eventually(
+					() => page.locator(".cmeta .path").textContent(),
+					(folder) => folder === (lost === "undo" ? "Colleague" : "Original"),
+				);
+			} finally {
+				await h.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+}
