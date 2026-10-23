@@ -71,7 +71,13 @@ export function useKeyRegistry(): Binding[] {
 	return bindings();
 }
 function keyOf(event: KeyboardEvent): string {
-	const key = event.key === " " ? "space" : event.key.toLowerCase();
+	let value = event.key;
+	if (event.altKey) {
+		if (/^(Key[A-Z]|Digit[0-9])$/.test(event.code)) value = event.code.replace(/^(Key|Digit)/, "");
+		else if (event.code === "BracketLeft") value = "[";
+		else if (event.code === "BracketRight") value = "]";
+	}
+	const key = value === " " ? "space" : value.toLowerCase();
 	return `${event.ctrlKey || event.metaKey ? "mod+" : ""}${event.altKey ? "alt+" : ""}${event.shiftKey && key.length > 1 ? "shift+" : ""}${key}`;
 }
 /** `listOnly`: a phone that shows the list. Then a key runs an action of the list and no other (`Binding.list`). */
