@@ -535,11 +535,11 @@ describe("what ends a session", () => {
 		const sam = await person(instance, "sam");
 		await admin(instance, { do: "grant.set", actor: "sam", project: "scratch", can: ["read", "produce"] });
 		const drop = () => instance.app.db.transaction(() => removeGrant(instance.app, { actor: "sam", project: 1 }));
-		const snapshot = instance.app.reader.snapshot.bind(instance.app.reader);
+		const snapshot = instance.app.reader.snapshotAsync.bind(instance.app.reader);
 		const begin = instance.app.db.begin.bind(instance.app.db);
 		const hook =
 			effect === "read"
-				? spyOn(instance.app.reader, "snapshot").mockImplementationOnce((run) => {
+				? spyOn(instance.app.reader, "snapshotAsync").mockImplementationOnce((run) => {
 						drop();
 						return snapshot(run);
 					})
