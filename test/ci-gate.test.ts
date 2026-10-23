@@ -281,6 +281,26 @@ test("CI retries health, report and gate outages, exhausts its attempts and retu
 	}
 });
 
+test("CI retries live upgrading health without sending credentials or declaring readiness", async () => {
+	for (const finishes of [true, false]) {
+		let calls = 0;
+		const transport = deploymentFetch({
+			attempts: 3,
+			pauseMs: 0,
+			timeoutMs: 1000,
+			fetch: async (_url, init) => {
+				expect(new Headers(init?.headers).get("authorization")).toBeNull();
+				return Response.json(
+					++calls === 2 && finishes ? { ok: true, apiVersion: 1 } : { ok: false, state: "upgrading", apiVersion: 1 },
+				);
+			},
+		});
+		const reply = await transport("https://mainworthy.example/healthz");
+		expect(calls).toBe(finishes ? 2 : 3);
+		expect(await reply.json()).toMatchObject(finishes ? { ok: true } : { ok: false, state: "upgrading" });
+	}
+});
+
 test("CI recovers a connection failure and a lost report reply without recording results twice", async () => {
 	await withInstance(async ({ instance }) => {
 		let connections = 0;
@@ -746,6 +766,17 @@ test("choosing the instance: each thing that can be wrong with a deployed one, a
 	};
 
 	expect(await choose(healthy)).toBe("deployed: https://mainworthy.example, project mainworthy");
+	let upgradeTries = 0;
+	expect(
+		await choose({
+			...healthy,
+			"/healthz": () =>
+				Response.json(
+					++upgradeTries < 2 ? { ok: false, state: "upgrading", apiVersion: 1 } : { ok: true, apiVersion: 1 },
+				),
+		}),
+	).toStartWith("deployed:");
+	expect(upgradeTries).toBe(2);
 	for (const apiVersion of [undefined, 0, 2, "1", null]) {
 		asked.length = 0;
 		expect(await choose({ ...healthy, "/healthz": () => Response.json({ ok: true, apiVersion }) })).toStartWith(
@@ -978,6 +1009,8 @@ exec "$REAL_CURL" "$@"
 					received.push({ path, payload: path === "/healthz" ? null : await req.json() });
 					const statuses = path === "/healthz" ? health : report;
 					const call = path === "/healthz" ? healthCalls++ : reportCalls++;
+					if (path === "/healthz" && healthCalls <= Number(env.HEALTH_UPGRADES ?? 0))
+						return Response.json({ ok: false, state: "upgrading", apiVersion: 1 });
 					return Response.json(
 						{ ok: true, apiVersion: 1 },
 						{ status: statuses[Math.min(call, statuses.length - 1)] ?? statuses[0] },
@@ -1018,6 +1051,8 @@ exec "$REAL_CURL" "$@"
 		};
 		const recovered = await run([502, 503, 504, 200], [502, 503, 504, 200]);
 		expect([recovered.code, recovered.healthCalls, recovered.reportCalls]).toEqual([0, 4, 4]);
+		const upgraded = await run([200], [200], { HEALTH_UPGRADES: "2" });
+		expect([upgraded.code, upgraded.healthCalls, upgraded.reportCalls]).toEqual([0, 3, 1]);
 		expect(workflow.on.workflow_dispatch.inputs.state.required).toBe(false);
 		expect(workflow.jobs.tell.permissions).toEqual({ "pull-requests": "read" });
 		expect(recovered.received.filter((req) => req.payload).map((req) => req.payload)).toEqual(

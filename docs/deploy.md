@@ -891,6 +891,8 @@ The data is `/data/mainworthy.db` (with `-wal` and `-shm` beside it while runnin
 - **Upgrade:** a new image runs all pending migrations in one transaction on start. A failed migration rolls
   back the entire upgrade to its starting schema and data, and removes no copies. Before changing existing
   data, the server uses `VACUUM INTO` to write a consistent copy in a new private directory beside the database.
+  The copy inherits `synchronous=OFF` for this read-only source operation, avoiding SQLite's intermediate
+  output syncs. The source's original setting is restored before migration writes. Its journal mode is unchanged.
   It syncs and closes that file, renames it to `mainworthy.db.v<N>.bak`, then syncs the directory. `N` is the
   version before the upgrade. Only after all migrations commit, and only if this start completed that copy
   itself, does it remove older upgrade copies and log each removed filename. At that same point it removes
@@ -908,6 +910,43 @@ The data is `/data/mainworthy.db` (with `-wal` and `-shm` beside it while runnin
 
 Nothing schedules the backup yet, and the home server's own backups do not leave the host: until that is set
 up (#59), a failed disk loses the instance.
+
+### Health while upgrading
+
+`mainworthy serve` acquires the instance lock, opens its HTTP listener and runs the copy and migration on a
+worker. During that work, `GET /healthz` returns HTTP 200 with this shape:
+
+```json
+{"ok":false,"state":"upgrading","version":"0.1.0","apiVersion":1,"commit":"0123456789012345678901234567890123456789"}
+```
+
+The commit is null when unknown, as it is after startup. Every other path and method returns HTTP 503 with
+`{"ok":false,"error":{"code":"upgrading","message":"Mainworthy is upgrading; try again shortly."}}` and
+`Retry-After: 5`. No application route runs before the worker has closed the upgraded database and startup
+recovery has finished. The listener changes to the normal routes on the same port.
+
+The Dockerfile's `mainworthy health` checks liveness: it exits 0 for both ready and upgrading. This lets
+Compose's `service_healthy` dependency start the ingress while an upgrade runs, and the ingress's wget probe
+also accepts the HTTP 200. The host hold can then pass traffic through; application requests receive 503
+until ready. A migration error closes the listener and fails startup. A 30-minute deadline does the same
+for a stalled worker, so an upgrade cannot advertise liveness indefinitely. Docker's short start period
+is retained; it does not conceal a broken upgrade for 30 minutes.
+
+Readiness is different: require HTTP 200, `ok: true` and the full expected commit. Merely receiving HTTP 200
+or seeing the commit is insufficient. The image job checks both fields, and `change.yml` waits through the
+upgrading state for at most 30 minutes before sending its lifecycle write. The CLI's authenticated requests
+stop with an upgrading message; the iPhone client does not probe health and receives the ordinary 503 reply.
+CI's instance chooser and deployment transport retry upgrading within their existing deadlines. If the
+instance remains upgrading, the chooser uses its documented isolated-instance fallback with a warning.
+The external TestFlight upload job also reads health; it must require `ok: true` before acting on the commit
+(see `ios/README.md`). That external job is not changed or verified here.
+
+The autodeploy scheduler and its in-flight window are outside this checkout. None of `.github/workflows/`
+contains that scheduler or its reported 15-minute window. Before deploying this change, update the external
+job to keep the same pinned deployment in flight while its expected commit reports `upgrading`, with a
+30-minute upgrade deadline plus its image-build and container-replacement allowance. Never deploy a newer
+candidate over that work. Declare success only on `ok: true` with the pinned commit, and retain and notify
+on a failed deployment or expired deadline. This repository-only change does not update or verify that job.
 
 ## Without Docker
 
@@ -933,7 +972,9 @@ prove the checks passed. The external job needs these reads before deploying a c
 4. Read `GET https://api.github.com/repos/endqwerty/mainworthy/actions/runs/<run-id>` and `main` again immediately
    before deploying. If the run's attempt or result changed,
    check it again. If the tip changed, start over with that commit and the existing settle delay.
-5. After deploying the pinned commit, read `GET https://mainworthy.com/healthz`. Require HTTP 200, `ok: true`
+5. After deploying the pinned commit, read `GET https://mainworthy.com/healthz`. Keep the deploy in flight
+   while that commit reports `ok: false, state: "upgrading"`, for at most the upgrade's 30-minute deadline
+   plus the job's build and replacement allowance. Require HTTP 200, `ok: true`
    and `commit` equal to the full candidate SHA. Record failure if the deploy fails or that reply does not arrive
    within the job's deployment deadline. The external job must notify the operator of that failure and retain
    the commit, workflow run URL, deployment identifier and failure reason. Recovery remains a separate task

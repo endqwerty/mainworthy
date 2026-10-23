@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { UpgradingHealth } from "../src/cli/health.ts";
 import { API_VERSION, API_VERSION_HEADER, ApiHealth } from "../src/core/version.ts";
 import { openApi } from "../src/surfaces/http.ts";
 
@@ -51,12 +52,24 @@ export function deploymentFetch(
 				if (![502, 503, 504].includes(response.status)) {
 					// Read CI's finite JSON replies inside the attempt, including a connection lost after headers.
 					// Definite refusals are returned untouched and never retried, even if their body cannot be read.
-					return response.ok && response.body !== null
-						? new Response(await response.arrayBuffer(), response)
-						: response;
+					const buffered =
+						response.ok && response.body !== null ? new Response(await response.arrayBuffer(), response) : response;
+					if (
+						!buffered.ok ||
+						new URL(url).pathname !== "/healthz" ||
+						!UpgradingHealth.safeParse(
+							await buffered
+								.clone()
+								.json()
+								.catch(() => null),
+						).success
+					)
+						return buffered;
+					if (attempt >= probe.attempts || Date.now() + probe.pauseMs >= deadline) return buffered;
+				} else {
+					if (attempt >= probe.attempts || Date.now() + probe.pauseMs >= deadline) return response;
+					await response.body?.cancel();
 				}
-				if (attempt >= probe.attempts || Date.now() + probe.pauseMs >= deadline) return response;
-				await response.body?.cancel();
 			} catch (error) {
 				if (init.signal?.aborted || attempt >= probe.attempts || Date.now() + probe.pauseMs >= deadline) throw error;
 			}
@@ -115,7 +128,9 @@ export async function chooseInstance(env: Environment, probe: Probe = PROBE): Pr
 			const health = await get("/healthz");
 			unreachable = health.ok ? "" : `it answered ${health.status}`;
 			if (health.ok) {
-				const parsed = ApiHealth.safeParse(await health.json().catch(() => null));
+				const body: unknown = await health.json().catch(() => null);
+				if (UpgradingHealth.safeParse(body).success) unreachable = "it is upgrading";
+				const parsed = ApiHealth.safeParse(body);
 				compatible = parsed.success && parsed.data.apiVersion === API_VERSION;
 			}
 		} catch (error) {

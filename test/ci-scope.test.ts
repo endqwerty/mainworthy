@@ -193,6 +193,7 @@ test("the browser fixture compiles in its output directory so build files cannot
 		for (const file of [
 			"src/server/ops/read-worker.ts",
 			"src/server/kernel/checkpoint-worker.ts",
+			"src/server/kernel/migrate-worker.ts",
 			"src/cli/demo-worker.ts",
 		])
 			writeFileSync(join(root, file), "export {};");

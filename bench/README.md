@@ -1,5 +1,38 @@
 # Mainworthy budgets
 
+For the upgrade copy, export the baseline with `git archive` into a directory made by
+`bun scripts/work.ts scratch new upgrade-before`, and link its `node_modules` to this checkout's.
+Make a second scratch directory, then run:
+
+```sh
+bun bench/upgrade-copy.ts /path/to/baseline/export /path/to/second/scratch 320
+```
+
+The generated database holds 320 MiB of BLOB payload plus the real pre-upgrade schema; no dataset is
+committed. Five runs per revision alternate for the durable copy and for startup through the first ready
+HTTP reply. Setup, source hashing and output checks are outside the timer. Both copy timers include
+file sync, rename and directory sync. Every output must pass SQLite integrity checking, retain the old
+schema version and match a hash over every payload byte. The startup timer includes migration, recovery,
+bootstrap, listener startup and its ready health response. Reader threads are disabled on both sides.
+The source is deliberately warm in the filesystem cache; this is not a cold-disk or production measurement.
+Use the scratch removal command after the run.
+
+The 2026-10-22 Mac run compares baseline `5f2ba0210cae1c094822f9dc462d01dd5ee7061d` with this patch.
+Its output is [results-upgrade-copy.log](results-upgrade-copy.log): Bun 1.4.3, SQLite 3.54.0,
+Apple M4, ten cores, and 347,000,832 source bytes. Other checks shared the machine; load averages were
+above its core count, so the revisions alternate. Verdict: no measurable difference. Durable-copy medians
+were 1,364 ms before and 1,289 ms after, with ranges of 966–1,792 ms and 928–2,091 ms. Startup medians
+were 1,228 ms before and 1,011 ms after, with ranges of 890–1,523 ms and 904–1,101 ms. Each series has
+five runs per side and zero failures. These independently sampled series are not additive.
+
+A separate macOS `sample` diagnostic caught `sqlite3RunVacuum` rebuilding B-tree pages and
+`pager_write_pagelist` calling `guarded_pwrite_np`; it did not show the long fsync waits reported on the
+production disk. The copy samples used about half a second of CPU; the rest includes writes and contention
+on this busy Mac. Disabling intermediate output syncs therefore has no demonstrated speedup here.
+The output is fully materialized and synced within each timer, and its size and throughput are plausible
+for an SSD. This result does not establish production disk speed. The startup availability tests establish
+that a slow migration can answer health without admitting application requests.
+
 For folder sealing, export a baseline revision into a directory made by
 `bun scripts/work.ts scratch new folder-seal-base`, link its `node_modules` to the
 current checkout's installed dependencies, and run

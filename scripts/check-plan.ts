@@ -150,6 +150,7 @@ export function fixtureBuildArgs(outfile: string, root = process.cwd()): string[
 		resolve(root, "test/e2e/serve.ts"),
 		resolve(root, "src/server/ops/read-worker.ts"),
 		resolve(root, "src/server/kernel/checkpoint-worker.ts"),
+		resolve(root, "src/server/kernel/migrate-worker.ts"),
 		resolve(root, "src/cli/demo-worker.ts"),
 		"--outfile",
 		output,

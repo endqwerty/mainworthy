@@ -14,6 +14,7 @@ import {
 	rmSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { isMainThread } from "node:worker_threads";
 
 export type SqlValue = string | number | bigint | boolean | null | Uint8Array;
 export type Params = Record<string, SqlValue> | readonly SqlValue[];
@@ -68,6 +69,27 @@ const existsWithoutFollowing = (path: string): boolean => {
 	}
 };
 
+let privateMask: { original: number; holders: number } | null = null;
+
+/** Workers cannot set umask; their startup thread holds it until they have closed every private copy. */
+export function holdPrivateDatabaseMask(): () => void {
+	if (!isMainThread) {
+		if (process.umask() !== 0o077) throw new Error("a database-copy worker needs its parent to hold umask 077");
+		return () => {};
+	}
+	privateMask ??= { original: process.umask(0o077), holders: 0 };
+	privateMask.holders++;
+	let held = true;
+	return () => {
+		if (!held || !privateMask) return;
+		held = false;
+		if (--privateMask.holders === 0) {
+			process.umask(privateMask.original);
+			privateMask = null;
+		}
+	};
+}
+
 /**
  * Writes a new database file at `path` that is private from its first byte. It cannot be made private before it is
  * written: SQLite's `VACUUM INTO` refuses an output file that exists, on macOS even an empty one (issue #670). So
@@ -84,11 +106,11 @@ export function writePrivateDatabaseFile(path: string, write: (privatePath: stri
 	const workspace = mkdtempSync(`${path}.mainworthy-copy-`);
 	try {
 		const written = join(workspace, basename(path));
-		const umask = process.umask(0o077);
+		const releaseMask = holdPrivateDatabaseMask();
 		try {
 			write(written);
 		} finally {
-			process.umask(umask);
+			releaseMask();
 		}
 		prepareDatabaseFile(written, "existing");
 		const file = openSync(written, "r+");
@@ -167,6 +189,19 @@ export class Db {
 	private depth = 0;
 	private statements = new Map<Statement<Params, unknown>, PreparedStatement<unknown, SQLQueryBindings[]>>();
 	private committed: (() => void)[] = [];
+
+	/** VACUUM INTO inherits synchronous from its source. Sync the completed private copy once, not each spill. */
+	copyTo(path: string): void {
+		const sync = this.raw.query<{ synchronous: number }, []>("PRAGMA synchronous").get();
+		if (!sync) throw new Error("SQLite did not report its synchronous setting");
+		this.raw.exec("PRAGMA synchronous = OFF");
+		try {
+			writePrivateDatabaseFile(path, (privatePath) => this.raw.query("VACUUM INTO ?").run(privatePath));
+		} finally {
+			// No source writes run while sync is off; restore it before any migration can write.
+			this.raw.exec(`PRAGMA synchronous = ${sync.synchronous}`);
+		}
+	}
 
 	/** Schedules a non-throwing effect after the outer commit. Rollback discards it, including a savepoint's effects. */
 	afterCommit(fn: () => void): void {

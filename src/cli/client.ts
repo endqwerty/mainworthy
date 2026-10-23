@@ -8,6 +8,7 @@ import { OPS } from "../server/ops/index.ts";
 import type { Reply } from "../server/ops/registry.ts";
 import type { Args } from "./args.ts";
 import { CliError } from "./errors.ts";
+import { UpgradingHealth } from "./health.ts";
 import { displayUrl, warning } from "./output.ts";
 import { REPLY_SCHEMAS } from "./replies.ts";
 
@@ -212,6 +213,8 @@ export class Client {
 				`the server answered ${response.status} to /healthz with invalid JSON at ${displayUrl(this.url)}`,
 			);
 		}
+		if (UpgradingHealth.safeParse(body).success)
+			throw new CliError("connection", `the server at ${displayUrl(this.url)} is upgrading; try again shortly`);
 		const health = ApiHealth.safeParse(body);
 		if (!health.success || health.data.apiVersion !== API_VERSION)
 			throw new CliError(

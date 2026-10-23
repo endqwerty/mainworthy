@@ -1,14 +1,19 @@
 import { expect, test } from "bun:test";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { type Instance, start } from "../app/start.ts";
+import { reservePort } from "../../test/e2e/support.ts";
+import { type Instance, start, startServing } from "../app/start.ts";
 import { API_VERSION, VERSION } from "../core/version.ts";
 import { defaultConfig } from "../server/kernel/app.ts";
+import { Db, databasePath } from "../server/kernel/db.ts";
+import { lockInstance } from "../server/kernel/instance-lock.ts";
+import { openDatabase, SCHEMA_VERSION } from "../server/kernel/migrate.ts";
 import { contentSecurityPolicy } from "../surfaces/headers.ts";
 import { Client } from "./client.ts";
+import { runCli } from "./dispatch.ts";
 import { verifyLockdownStatus } from "./lockdown.ts";
 import { CLI_ENTRY, COMMIT, inThisProcess, withInstance } from "./test-support.ts";
 
@@ -20,6 +25,142 @@ const NO_PROXY_NAMED =
 	"mainworthy: MAINWORTHY_TRUSTED_PROXY and MAINWORTHY_CLIENT_ADDRESS_HEADER are not set: a failed sign-in from a loopback or private address, which behind a proxy is every visitor's, is not counted against that address, only against the first 8 characters of the token it tried. docs/deploy.md says how to set the two.\n";
 /** The two variables, for a start that is about something else and should have nothing to say about the limit. */
 const BEHIND_PROXY = { MAINWORTHY_TRUSTED_PROXY: "10.0.0.1", MAINWORTHY_CLIENT_ADDRESS_HEADER: "x-real-ip" };
+
+test("serve answers upgrading health and refuses every other request while a migration waits for a writer", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "mainworthy-upgrading-"));
+	const reserved = await reservePort();
+	const path = databasePath(directory);
+	const commit = "a".repeat(40);
+	writeFileSync(
+		path,
+		Bun.gunzipSync(readFileSync(new URL("../../test/fixtures/sessions/instance-v1.db.gz", import.meta.url))),
+	);
+	const writer = new Db(path);
+	writer.exec("BEGIN IMMEDIATE");
+	const child = Bun.spawn([process.execPath, CLI_ENTRY, "serve"], {
+		env: {
+			PATH: process.env.PATH ?? "",
+			MAINWORTHY_DATA: directory,
+			MAINWORTHY_PORT: String(reserved.port),
+			MAINWORTHY_OWNER: "robin",
+			MAINWORTHY_COMMIT: commit,
+			MAINWORTHY_READERS: "0",
+		},
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const url = `http://127.0.0.1:${reserved.port}`;
+	const stdout = new Response(child.stdout).text();
+	const stderr = new Response(child.stderr).text();
+	try {
+		// The published copy proves the real migration has reached the held write lock.
+		const deadline = performance.now() + 3000;
+		while (!existsSync(`${path}.v1.bak`) && performance.now() < deadline) await Bun.sleep(10);
+		expect(existsSync(`${path}.v1.bak`)).toBe(true);
+		const health = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(1000) }).catch(() => null);
+		expect(health?.status).toBe(200);
+		expect(await health?.json()).toMatchObject({ ok: false, state: "upgrading", commit });
+		const command = await inThisProcess(
+			"health during upgrade",
+			() => runCli(["health", "--url", url, "--json"], undefined),
+			{ environment: {}, cwd: directory, input: "" },
+		);
+		expect(command.code).toBe(0);
+		expect(JSON.parse(command.stdout)).toMatchObject({ healthy: true, state: "upgrading", commit });
+		await expect(
+			new Client({ url, token: "not-sent-during-upgrade", project: "scratch" }).call("find", {}),
+		).rejects.toThrow("is upgrading");
+		for (const [route, method] of [
+			["/", "GET"],
+			["/docs", "GET"],
+			["/api/session", "GET"],
+			["/mcp", "POST"],
+			["/unknown", "GET"],
+		] satisfies [string, string][]) {
+			const response = await fetch(`${url}${route}`, { method });
+			expect(response.status).toBe(503);
+			expect(response.headers.get("retry-after")).toBe("5");
+			expect(await response.json()).toMatchObject({ ok: false, error: { code: "upgrading" } });
+		}
+		writer.exec("ROLLBACK");
+		const readyBy = performance.now() + 3000;
+		let ready = false;
+		while (!ready && performance.now() < readyBy) {
+			ready = (await (await fetch(`${url}/healthz`)).json()).ok === true;
+			if (!ready) await Bun.sleep(10);
+		}
+		expect(ready).toBe(true);
+		expect((await fetch(`${url}/api/session`)).status).toBe(200);
+	} finally {
+		if (writer.raw.inTransaction) writer.exec("ROLLBACK");
+		child.kill("SIGTERM");
+		const timeout = setTimeout(() => child.kill("SIGKILL"), 2000);
+		await child.exited;
+		clearTimeout(timeout);
+		await Promise.all([stdout, stderr]);
+		writer.close();
+		await rm(directory, { recursive: true, force: true });
+		await reserved.release();
+	}
+}, 12_000);
+
+test("a failed upgrade closes liveness, restores the umask and releases the instance lock", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "mainworthy-upgrade-failed-"));
+	const reserved = await reservePort();
+	const path = databasePath(directory);
+	const db = openDatabase(path);
+	db.raw.query("UPDATE meta SET value = ? WHERE key = 'schema_version'").run(String(SCHEMA_VERSION + 1));
+	db.close();
+	const mask = process.umask();
+	try {
+		await expect(
+			startServing(defaultConfig({ MAINWORTHY_DATA: directory, MAINWORTHY_PORT: String(reserved.port) }), () => ({
+				ui: null,
+			})),
+		).rejects.toThrow("newer than this build");
+		expect(process.umask()).toBe(mask);
+		await expect(fetch(`http://127.0.0.1:${reserved.port}/healthz`)).rejects.toThrow();
+		lockInstance(directory)();
+	} finally {
+		await reserved.release();
+		await rm(directory, { recursive: true, force: true });
+	}
+});
+
+test("a stalled upgrade has a deadline and stops reporting liveness", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "mainworthy-upgrade-deadline-"));
+	const reserved = await reservePort();
+	const path = databasePath(directory);
+	writeFileSync(
+		path,
+		Bun.gunzipSync(readFileSync(new URL("../../test/fixtures/sessions/instance-v1.db.gz", import.meta.url))),
+	);
+	const db = new Db(path);
+	db.exec("BEGIN IMMEDIATE");
+	const starting = startServing(
+		defaultConfig({ MAINWORTHY_DATA: directory, MAINWORTHY_PORT: String(reserved.port) }),
+		() => ({ ui: null }),
+		{ upgradeTimeoutMs: 100 },
+	);
+	try {
+		const health = await fetch(`http://127.0.0.1:${reserved.port}/healthz`);
+		expect(await health.json()).toMatchObject({ ok: false, state: "upgrading" });
+		// Release the held statement after the deadline; worker termination must finish before the lock is released.
+		const release = setTimeout(() => db.exec("ROLLBACK"), 200);
+		try {
+			await expect(starting).rejects.toThrow("startup deadline");
+		} finally {
+			clearTimeout(release);
+		}
+		await expect(fetch(`http://127.0.0.1:${reserved.port}/healthz`)).rejects.toThrow();
+		lockInstance(directory)();
+	} finally {
+		if (db.raw.inTransaction) db.exec("ROLLBACK");
+		db.close();
+		await reserved.release();
+		await rm(directory, { recursive: true, force: true });
+	}
+});
 
 test.each([
 	{ form: "trailing space", replacement: "replacement-owner-secret-0123456789 " },
