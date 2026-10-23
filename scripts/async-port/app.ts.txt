@@ -1,0 +1,6 @@
+import type { Database, ReadDb } from "./db.ts";
+export interface App {
+	reader: ReadDb;
+	database: Database;
+}
+export declare function openApp(): Promise<App>;

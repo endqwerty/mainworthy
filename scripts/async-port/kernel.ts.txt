@@ -1,0 +1,16 @@
+export interface ReadDb {
+	get(statement: string, params?: unknown): Promise<{ x: number; id: number } | null>;
+	one(statement: string, params?: unknown): Promise<{ x: number; id: number }>;
+	all(statement: string, params?: unknown): Promise<{ x: number }[]>;
+}
+export interface WriteDb extends ReadDb {
+	afterCommit(effect: () => void | Promise<void>): void;
+	run(statement: string, params?: unknown): Promise<{ changes: number }>;
+	savepointSteps<T>(fn: () => AsyncGenerator<undefined, T, void>): AsyncGenerator<undefined, T, void>;
+}
+export type Db = WriteDb;
+export interface Database {
+	read<T>(fn: (db: ReadDb) => T | Promise<T>): Promise<T>;
+	write<T>(fn: (db: WriteDb) => T | Promise<T>): Promise<T>;
+}
+export const COMMIT = Symbol("commit");

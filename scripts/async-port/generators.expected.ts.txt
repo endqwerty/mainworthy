@@ -1,0 +1,40 @@
+import { COMMIT, type WriteDb } from "./src/server/kernel/db.ts";
+export async function* child(db: WriteDb): AsyncGenerator<undefined, number, void> {
+	await db.run("UPDATE items SET x = 1");
+	yield undefined;
+	return 1;
+}
+export async function* parent(db: WriteDb): AsyncGenerator<undefined | typeof COMMIT, number, void> {
+	const value = yield* child(db);
+	yield COMMIT;
+	return value;
+}
+export async function* savepoint(db: WriteDb): AsyncGenerator<undefined, number, void> {
+	return yield* db.savepointSteps(async function* () {
+		await db.run("UPDATE items SET x = 2");
+		yield undefined;
+		return 2;
+	});
+}
+export async function consume(db: WriteDb) {
+	for await (const step of parent(db)) console.log(step);
+}
+export function wrapped(db: WriteDb) {
+	return child(db);
+}
+export async function variable(db: WriteDb) {
+	const steps = wrapped(db);
+	for await (const step of steps) console.log(step);
+}
+export async function complete<T>(steps: AsyncGenerator<undefined, T, void>): Promise<T> {
+	for (let step = await steps.next(); ; step = await steps.next()) if (step.done) return step.value;
+}
+export async function drain(db: WriteDb) {
+	return await complete(child(db));
+}
+export async function drainAgain(db: WriteDb) {
+	return await complete(child(db));
+}
+export async function* forwardingSavepoint(db: WriteDb): AsyncGenerator<undefined, number, void> {
+	return yield* db.savepointSteps(() => child(db));
+}

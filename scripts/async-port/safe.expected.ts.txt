@@ -1,0 +1,52 @@
+import type { ReadDb, WriteDb } from "./src/server/kernel/db.ts";
+import { openApp as open } from "./src/server/kernel/app.ts";
+const S = "SELECT x";
+export async function lookup(db: ReadDb) {
+	return await db.get(S);
+}
+export async function property(db: ReadDb) {
+	return (await lookup(db))?.x;
+}
+export async function object(db: ReadDb) {
+	return { value: await lookup(db) };
+}
+export async function write(db: WriteDb): Promise<void> {
+	await db.run("UPDATE items SET x = 1");
+}
+export async function transitive(db: WriteDb) {
+	await write(db);
+}
+export interface Reader {
+	lookup(db: ReadDb): Promise<{ x: number; id: number } | null>;
+}
+export class Impl implements Reader {
+	async lookup(db: ReadDb) {
+		return await lookup(db);
+	}
+}
+export async function throughInterface(reader: Reader, db: ReadDb) {
+	return await reader.lookup(db);
+}
+export async function start() {
+	return await open();
+}
+export function unrelated() {
+	const db = { get: () => 3 };
+	return db.get();
+}
+export type Contract = { lookup: (db: ReadDb) => Promise<{ x: number; id: number } | null> };
+export const implementation: Contract = { lookup: async (db: ReadDb) => await lookup(db) };
+export function overloaded(db: ReadDb): Promise<{ x: number; id: number } | null>;
+export async function overloaded(db: ReadDb) {
+	return await lookup(db);
+}
+export async function holder(db: ReadDb) {
+	await lookup(db);
+	return { read: async () => await lookup(db) };
+}
+export async function nested(db: ReadDb) {
+	return await (await holder(db)).read();
+}
+export function effect(db: WriteDb) {
+	db.afterCommit(() => {});
+}
