@@ -3,6 +3,58 @@ import { fakeSmtp } from "../mail-support.ts";
 import { browserAvailable, eventually, openPage, startServer } from "./support.ts";
 
 test.skipIf(!browserAvailable)(
+	"a credentialless owner is guided to add and prove a credential before setting a recovery address",
+	async () => {
+		const smtp = await fakeSmtp();
+		const server = await startServer({ mode: "server", mail: { port: smtp.port } });
+		const browser = await openPage(server, { path: "/p/scratch/settings?section=signin" });
+		try {
+			const { page } = browser;
+			const email = page.getByRole("region", { name: "Email for password reset", exact: true });
+			const save = async () => {
+				await email.getByLabel("Email address", { exact: true }).fill("owner-recovery@example.org");
+				const reply = page.waitForResponse(
+					(response) =>
+						response.url().endsWith("/api/credential") && response.request().postDataJSON().do === "email.set",
+				);
+				await email.getByRole("button", { name: "Send verification link", exact: true }).click();
+				return reply;
+			};
+			const first = await save();
+			if (process.env.MAINWORTHY_RECOVERY_PROOF_SCREENSHOT) {
+				if (first.status() === 403)
+					await email.getByText("Add your first password or passkey", { exact: false }).waitFor();
+				else await email.getByText(/Verification mail requested/).waitFor();
+				await page.screenshot({ path: process.env.MAINWORTHY_RECOVERY_PROOF_SCREENSHOT, fullPage: true });
+			}
+			expect(first.status()).toBe(403);
+			const proof = email.getByRole("region", { name: "Confirm your sign-in", exact: true });
+			await proof.getByText("Add your first password or passkey", { exact: false }).waitFor();
+			expect(await proof.getByLabel("Password", { exact: true }).count()).toBe(0);
+			expect(smtp.messages).toHaveLength(0);
+			await proof.getByRole("link", { name: "Your sign-in", exact: true }).click();
+			await page.getByLabel("New password", { exact: true }).fill("the first owner password");
+			await page.getByLabel("New password again", { exact: true }).fill("the first owner password");
+			await page.getByRole("button", { name: "Set password", exact: true }).click();
+			await page.getByText("Password set.", { exact: true }).waitFor();
+			expect((await save()).status()).toBe(403);
+			await proof.getByLabel("Password", { exact: true }).fill("the first owner password");
+			await proof.getByRole("button", { name: "Confirm credential", exact: true }).click();
+			await email.getByText(/Verification mail requested/).waitFor();
+			await eventually(
+				async () => smtp.messages.filter((message) => message.text.includes("/email#")),
+				(messages) => messages.length === 1,
+			);
+		} finally {
+			await browser.close();
+			await server.stop();
+			await smtp.close();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
 	"mail enables invitation, verification and reset pages, and reset keeps the person signed out",
 	async () => {
 		const smtp = await fakeSmtp();

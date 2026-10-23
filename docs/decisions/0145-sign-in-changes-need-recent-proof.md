@@ -29,9 +29,12 @@ details. We do not infer provider reauthentication from its redirect.
 
 Accepting an invitation, accepting an admin recovery link, and using a valid
 mailed password-reset link use their existing recovery authority. Adding one's
-first credential from a live session needs no prior credential. The local-mode
-owner keeps the machine's existing authority, since local mode has no sign-in
-session. A token cannot borrow this exception for an admin action on another person.
+first password or passkey from a live session needs no prior credential. This
+exception applies only when no live credential exists, at password creation and
+both passkey-registration stages. Setting or removing a recovery address and
+both authenticator-enrollment stages always require proof, even for an owner
+without credentials signed in with the owner token. The local-mode owner keeps
+the machine's existing authority, since local mode has no sign-in session. A token cannot borrow this exception for an admin action on another person.
 Removing the last usable way to sign in remains refused. Removing the credential
 just proved is allowed when another usable way remains; existing session-ending
 rules still apply, including ending this session if it rests on that credential.

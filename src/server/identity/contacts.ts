@@ -83,7 +83,7 @@ export function setEmail(
 			throw forbidden("an email address is changed from a browser that is signed in, not with a token");
 	} else if (caller.name !== app.config.owner)
 		throw forbidden("a recovery email address is changed by that person or the owner of this instance");
-	requireRecentProof(app, { actor: caller.id, context: input.context }, person.id === caller.id);
+	requireRecentProof(app, { actor: caller.id, context: input.context });
 	const actor = person.id;
 	if (email === null) {
 		credentialNotice(app, actor, "Your recovery email address was removed");

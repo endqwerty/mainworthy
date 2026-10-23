@@ -31,6 +31,56 @@ const refused = (reply: { status: number; body: unknown }) => {
 	expect(reply.body).toMatchObject({ ok: false, error: { code: "recent_proof_required" } });
 };
 
+for (const email of ["recovery@example.org", null]) {
+	test(`a credentialless token-opened owner must add and prove a credential before ${email === null ? "removing" : "setting"} a recovery address`, async () => {
+		const smtp = await fakeSmtp();
+		const w = world();
+		w.instance.app.config.mail = defaultConfig({
+			MAINWORTHY_SMTP_HOST: "127.0.0.1",
+			MAINWORTHY_SMTP_PORT: String(smtp.port),
+			MAINWORTHY_SMTP_TLS: "none",
+			MAINWORTHY_MAIL_FROM: "mainworthy@example.com",
+			MAINWORTHY_PUBLIC_URL: "https://mainworthy.example",
+		}).mail;
+		try {
+			const cookie = (await w.post("/api/login", { token: TOKEN })).cookie;
+			if (email === null) {
+				w.instance.app.db.raw
+					.query(
+						"INSERT INTO mail_contacts (actor, email, verified_at, revision) SELECT id, ?, ?, ? FROM actors WHERE name = ?",
+					)
+					.run("existing@example.org", w.clock.now(), "existing-contact", OWNER);
+			}
+			const before = w.rows("SELECT * FROM mail_contacts");
+			stale(w);
+			const change = () => w.op("credential", { do: "email.set", email }, { cookie });
+			refused(await change());
+			expect(w.rows("SELECT * FROM mail_contacts")).toEqual(before);
+			await waitMail(w.instance.app);
+			expect(smtp.messages).toHaveLength(0);
+			expect((await w.post("/api/account/password", { next: PASSWORD }, { cookie })).status).toBe(200);
+			refused(await change());
+			expect(w.rows("SELECT * FROM mail_contacts")).toEqual(before);
+			expect((await proof(w, cookie)).status).toBe(200);
+			expect(must(await change())).toEqual({ email, verified: false });
+			expect(w.rows("SELECT email FROM mail_contacts")).toEqual(email === null ? [] : [{ email }]);
+		} finally {
+			await waitMail(w.instance.app);
+			await smtp.close();
+		}
+	});
+}
+
+for (const input of [{ do: "totp.begin" }, { do: "totp.confirm", challenge: "unproved-enrollment", code: "123456" }]) {
+	test(`a credentialless token-opened owner has no first-credential exemption for ${input.do}`, async () => {
+		const w = world();
+		const cookie = (await w.post("/api/login", { token: TOKEN })).cookie;
+		stale(w);
+		refused(await w.op("credential", input, { cookie }));
+		expect(must(await w.op<unknown[]>("credential", { do: "list" }, { cookie }))).toEqual([]);
+	});
+}
+
 function verifiedAdminArchive(): string {
 	const source = world();
 	const owner = source
