@@ -88,7 +88,13 @@ The owner is the person named by `MAINWORTHY_OWNER`. See [configuration](./confi
 
 ## Make your own command-line token
 
-Sign in with your password, a passkey or an identity provider, then open Settings, **Your sign-in**, **Your command-line tokens**.
+Sign in with your password or a passkey, then open Settings, **Your sign-in**, **Your command-line tokens**. A provider session can also create a token after you prove an existing password, passkey or authenticator code.
+Creating a personal token or issuing any token under **Tokens** requires proof of
+your own credential within ten minutes in that browser session. Settings asks
+inline when needed and retries after proof. Admin token issuance with a bearer
+token and local CLI issuance keep their existing authority.
+If you signed in with the owner token and have no credential yet, add a password or passkey in **Your sign-in**, then return to **Tokens** and confirm that credential when asked.
+If your only sign-in method is a provider identity, ask the owner for a recovery link and accept it with a password or passkey before creating a personal token. Adding a local credential from that provider-only session requires proof too.
 You need no admin capability. As the local owner, you can make one without signing in.
 
 To create a personal token, follow these steps:
@@ -126,7 +132,7 @@ The `credential` operation accepts `token.create` with `label`, optional `expire
 The reply holds `id`, `actor`, `token`, and `expiresAt`, a Unix timestamp in milliseconds.
 An expiry is required internally, defaults to `30d`, and cannot exceed `365d`.
 A command id prevents a repeated creation. Its secret reply is never saved, and a retry receives `conflict`.
-Creation accepts no actor, project, or grants. It requires a browser session opened with a password, passkey or identity provider, or local-owner access.
+Creation accepts no actor, project, or grants. It requires a browser session opened with a password, passkey or identity provider, plus recent proof of an existing password, passkey or authenticator code, or local-owner access. A provider sign-in alone does not supply that proof.
 A bearer token and a browser signed in with a token cannot make a personal token.
 There is no instance setting to disable personal tokens. An admin who is a person may revoke another person's token by id, as with other credentials.
 
@@ -369,6 +375,26 @@ A script signs in with `POST /api/login` and `{"name": "dana", "password": "..."
 A passkey is a key that a device or a password manager holds and unlocks with a fingerprint, a face or a PIN. It needs `MAINWORTHY_PUBLIC_URL`, because a passkey belongs to the host name people open the instance at. One made at `https://mainworthy.example` does not sign in at another name of the same instance. Without that variable the pages offer no passkey. [API](./api.md#sign-in-as-a-person) lists the requests a page makes to register and use one.
 
 To set or change your password, open Settings, **Your sign-in**. <kbd>n</kbd> puts the caret in the new password. Changing a password asks for the current one. The server ends other sessions opened with the old password, and the page says how many. The browser making the change stays signed in, and the page empties the fields.
+
+Adding or removing a password, passkey or authenticator, changing your recovery
+address, and linking or removing a provider identity need recent proof of your
+own credential. Password or passkey sign-in counts for ten minutes in that
+session. When proof is older, Settings asks inline for your password, passkey or
+six-digit authenticator code, then retries the change. A recovery code alone does
+not count. Another browser's proof does not count for this session.
+
+An admin removing somebody else's credential, or the owner changing their
+recovery address in **People**, proves their own credential. A bearer token
+cannot provide session proof. Use a signed-in browser for these changes. The
+first credential, invitation acceptance, recovery links, and the local-mode
+owner need no prior proof. If you have only a provider identity, ask the owner
+for a recovery link to establish a password or passkey first. The last usable
+way to sign in stays even after proof. Removing a credential that this session
+rests on ends the session.
+
+Making a recovery link from a browser also asks for the admin's recent proof.
+If you lost every credential, the operator can still issue a link with their
+owner token or the local CLI. Accepting the link needs no prior proof.
 
 A password manager such as 1Password can generate a password, fill both new-password fields and save it under your name. The fields tell password managers the allowed length. The sign-in page asks them to ignore the token field. A bearer token cannot change a password. If no reply comes back, the page says it cannot tell whether the password changed and reads your sign-in methods again. Try signing in with the new password to find out.
 

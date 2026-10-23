@@ -7,10 +7,12 @@ import { age } from "../ui/index.tsx";
 import { EmailForm } from "./email.tsx";
 import { InlineConfirmation } from "./inline-confirmation.tsx";
 import { saidBy, saidOfWrite, useList, withId } from "./list.ts";
+import { useRecentProof } from "./recent-proof.tsx";
 import { SessionList } from "./sessions.tsx";
 
 export function PersonAccess({ actor }: { actor: string }) {
 	const { project, session, refreshSession } = useApp();
+	const proof = useRecentProof();
 	const client = useQueryClient();
 	const credentials = useList("credential", (options) => listCredentials(options, actor), actor);
 	const [removing, setRemoving] = useState<ReadonlySet<number>>(new Set());
@@ -32,7 +34,8 @@ export function PersonAccess({ actor }: { actor: string }) {
 		setConfirming(null);
 		setRemoving((ids) => withId(ids, row.id, true));
 		setMessage("");
-		void removeCredential(row.id)
+		void proof
+			.run(() => removeCredential(row.id))
 			.then(({ sessionsEnded }) => {
 				setMessage(
 					`${row.kind === "password" ? "The password" : row.label} was removed. ${sessionsEnded} session${sessionsEnded === 1 ? "" : "s"} ended.`,
@@ -55,6 +58,7 @@ export function PersonAccess({ actor }: { actor: string }) {
 		<section className="settings-person-access" aria-label={`Sign-in details for ${actor}`}>
 			{(actor === session.actor ? session.via === "cookie" : session.owner) && <EmailForm actor={actor} />}
 			<h4>Ways of signing in</h4>
+			{proof.prompt}
 			{credentials.isPending && <p className="dim">Reading ways of signing in…</p>}
 			{credentials.error && <p role="status">{saidBy(credentials.error)}</p>}
 			{rows && (

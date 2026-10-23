@@ -14,6 +14,61 @@ const Listed = z.array(
 );
 
 test.skipIf(!browserAvailable)(
+	"a token-only owner is guided to a first credential, then proves it before creating a token",
+	async () => {
+		const server = await startServer({ mode: "server" });
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			view = await openPage(server, { path: "/p/scratch/settings" });
+			const { page } = view;
+			const create = async () => {
+				await page.getByRole("option", { name: "Tokens", exact: true }).click();
+				await page.getByLabel("Token actor").fill("first-agent");
+				const reply = page.waitForResponse(
+					(response) =>
+						response.url().endsWith("/api/admin") && response.request().postDataJSON().do === "token.create",
+				);
+				await page.getByRole("button", { name: "Create token", exact: true }).click();
+				expect((await reply).status()).toBe(403);
+			};
+			await create();
+			const proof = page.getByRole("region", { name: "Confirm your sign-in", exact: true });
+			await proof.getByText("Add your first password or passkey", { exact: false }).waitFor();
+			expect(
+				await proof
+					.getByRole("link", { name: "Your sign-in", exact: true })
+					.evaluate((link) => link === document.activeElement),
+			).toBe(true);
+			expect(await proof.getByLabel("Password", { exact: true }).count()).toBe(0);
+			expect(await proof.getByLabel("Or authenticator code", { exact: true }).count()).toBe(0);
+			expect(await proof.getByRole("button", { name: "Confirm credential", exact: true }).count()).toBe(0);
+			expect(await server.api("admin", { do: "token.list" })).toHaveLength(1);
+			await proof.getByRole("link", { name: "Your sign-in", exact: true }).click();
+			await page.getByRole("heading", { name: "Your sign-in", exact: true }).waitFor();
+			await page.getByLabel("New password", { exact: true }).fill("the first owner password");
+			await page.getByLabel("New password again", { exact: true }).fill("the first owner password");
+			await page.getByRole("button", { name: "Set password", exact: true }).click();
+			await page.getByText("Password set.", { exact: true }).waitFor();
+			await create();
+			await proof.getByLabel("Password", { exact: true }).fill("the first owner password");
+			expect(await proof.getByRole("link", { name: "Your sign-in", exact: true }).count()).toBe(0);
+			await proof.getByRole("button", { name: "Confirm credential", exact: true }).click();
+			const secret = page.getByLabel("New token", { exact: true });
+			await secret.waitFor();
+			expect((await server.api("find", {}, { token: await secret.inputValue() })).items).toEqual([]);
+			expect(await server.api("admin", { do: "token.list" })).toHaveLength(2);
+			expect(view.errors).toEqual(
+				Array(2).fill("Failed to load resource: the server responded with a status of 403 (Forbidden)"),
+			);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
 	"token creation reuses existing actors without sending new permissions",
 	async () => {
 		const server = await startServer({ mode: "server" });
@@ -34,6 +89,16 @@ test.skipIf(!browserAvailable)(
 			const before = await server.api("admin", { do: "actor.list" });
 			view = await openPage(server, { path: "/p/scratch/settings" });
 			const { page } = view;
+			expect(
+				(
+					await page.request.post(`${server.url}/api/account/password`, { data: { next: "the owner password" } })
+				).status(),
+			).toBe(200);
+			expect(
+				(
+					await page.request.post(`${server.url}/api/account/proof`, { data: { password: "the owner password" } })
+				).status(),
+			).toBe(200);
 			await page.getByRole("option", { name: "Tokens", exact: true }).click();
 			const outcomes = [];
 			for (const [actor, kind] of [
@@ -165,6 +230,16 @@ test.skipIf(!browserAvailable)(
 			await server.api("admin", { do: "team.member.add", team: "Quality", person: "sam" });
 			view = await openPage(server, { path: "/p/scratch/settings" });
 			const { page } = view;
+			expect(
+				(
+					await page.request.post(`${server.url}/api/account/password`, { data: { next: "the owner password" } })
+				).status(),
+			).toBe(200);
+			expect(
+				(
+					await page.request.post(`${server.url}/api/account/proof`, { data: { password: "the owner password" } })
+				).status(),
+			).toBe(200);
 			await page.getByRole("option", { name: "Tokens", exact: true }).click();
 			await page.getByLabel("Token actor").fill("reviewer");
 			expect(await page.locator("#detail").innerText()).toContain(
@@ -220,6 +295,16 @@ test.skipIf(!browserAvailable)(
 		try {
 			view = await openPage(server, { path: "/p/scratch/settings" });
 			const { page } = view;
+			expect(
+				(
+					await page.request.post(`${server.url}/api/account/password`, { data: { next: "the owner password" } })
+				).status(),
+			).toBe(200);
+			expect(
+				(
+					await page.request.post(`${server.url}/api/account/proof`, { data: { password: "the owner password" } })
+				).status(),
+			).toBe(200);
 			await page.getByRole("option", { name: "Tokens", exact: true }).click();
 			await page.route("**/api/admin", async (route) => {
 				if (route.request().postDataJSON().do !== "token.list") return route.continue();

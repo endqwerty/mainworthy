@@ -341,6 +341,8 @@ package final class Server: Sendable {
 			if (400...599).contains(response.statusCode), head.error != nil { delivery?.rejected() }
 			let refusal = head.error ?? Wire.Refusal(code: "internal", message: "the server refused without saying why", details: nil)
 			switch refusal.code {
+			case "recent_proof_required":
+				throw ClientError.recentProofRequired
 			case "unauthenticated" where asSignedIn:
 				if let session, forget(session) { ended.continuation.yield() }
 				throw ClientError.signedOut

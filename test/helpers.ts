@@ -118,8 +118,9 @@ export function ciReport(input: {
 	};
 }
 
-/** Restore the pre-receipt schema before replaying 0041, including its source-cache invalidation triggers. */
+/** Restore the pre-receipt schema before replaying 0041 and later migrations. */
 export function dropReceiptSchema(db: Db): void {
+	db.exec("ALTER TABLE sessions DROP COLUMN reauthenticated_at");
 	const migration = MIGRATIONS.find((row) => row.name === "merge_receipts");
 	if (!migration) throw new Error("receipt migration is missing");
 	for (const match of migration.sql.matchAll(/CREATE TRIGGER (\w+)/g)) db.exec(`DROP TRIGGER ${match[1]}`);

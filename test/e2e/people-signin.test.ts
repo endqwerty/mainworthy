@@ -26,6 +26,73 @@ afterAll(async () => {
 	await server?.stop();
 });
 
+test.skipIf(!browserAvailable)(
+	"Settings asks for inline recent proof and retries the refused action",
+	async () => {
+		const password = "a recent proof browser password";
+		const made = await server.api("invitation", { do: "create", name: "proof-browser", can: ["read"] });
+		if (!("code" in made)) throw new Error("no invitation was made");
+		await fetch(`${server.url}/api/login`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ invitation: made.code, password }),
+		});
+		const browser = await openPage(server, { path: "/p/scratch/settings", as: { name: "proof-browser", password } });
+		try {
+			const { page } = browser;
+			await page.getByRole("option", { name: "Your sign-in", exact: true }).click();
+			await advanceClock(server, 10 * 60_000 + 1);
+			await page.getByRole("button", { name: "Add an authenticator", exact: true }).click();
+			const prompt = page.getByRole("region", { name: "Confirm your sign-in", exact: true });
+			await prompt.waitFor();
+			expect(
+				await prompt.getByLabel("Password", { exact: true }).evaluate((input) => input === document.activeElement),
+			).toBe(true);
+			await prompt.getByLabel("Password", { exact: true }).fill("wrong password");
+			await prompt.getByRole("button", { name: "Confirm credential", exact: true }).click();
+			await prompt.getByText("that credential proof was not accepted; nothing was changed", { exact: true }).waitFor();
+			expect(await page.getByTestId("totp-setup-key").count()).toBe(0);
+			await prompt.getByLabel("Password", { exact: true }).fill(password);
+			await prompt.getByRole("button", { name: "Confirm credential", exact: true }).click();
+			await page.getByTestId("totp-setup-key").waitFor();
+			expect(await prompt.count()).toBe(0);
+			await page.getByRole("button", { name: "Cancel enrolment", exact: true }).click();
+			await page.getByRole("button", { name: "Add an authenticator", exact: true }).click();
+			await page.getByTestId("totp-setup-key").waitFor();
+			expect(await prompt.count()).toBe(0);
+			const secret = await page.getByTestId("totp-setup-key").innerText();
+			const readClock = async () => {
+				const reply = await fetch(`${server.url}/test/clock`, {
+					method: "POST",
+					headers: { authorization: `Bearer ${server.token}`, "content-type": "application/json" },
+					body: JSON.stringify({ advanceMs: 0 }),
+				});
+				return z.object({ result: z.object({ ahead: z.number() }) }).parse(await reply.json()).result.ahead;
+			};
+			let ahead = await readClock();
+			await page
+				.getByLabel("Authenticator code", { exact: true })
+				.fill(totpCode(secret, Math.floor((Date.now() + ahead) / 30_000)));
+			await page.getByRole("button", { name: "Confirm authenticator", exact: true }).click();
+			await page.getByRole("button", { name: "I saved the recovery codes", exact: true }).click();
+			await advanceClock(server, 10 * 60_000 + 1);
+			ahead = await readClock();
+			await page.getByRole("button", { name: "Remove Authenticator", exact: true }).click();
+			await prompt
+				.getByLabel("Or authenticator code", { exact: true })
+				.fill(totpCode(secret, Math.floor((Date.now() + ahead) / 30_000)));
+			await prompt.getByRole("button", { name: "Confirm credential", exact: true }).click();
+			await page.locator("#signin-name").waitFor();
+			expect(browser.errors).toEqual(
+				Array(3).fill("Failed to load resource: the server responded with a status of 403 (Forbidden)"),
+			);
+		} finally {
+			await browser.close();
+		}
+	},
+	30_000,
+);
+
 for (const device of ["desktop", "phone"] as const)
 	test.skipIf(!browserAvailable)(
 		`the sign-out dialog on ${device} keeps the session until a choice, with safe focus and Escape`,

@@ -5,10 +5,12 @@ import { call } from "../lib/api.ts";
 import { signInMethods } from "../lib/signin.ts";
 import { useApp } from "../ui/context.tsx";
 import { saidBy } from "./list.ts";
+import { useRecentProof } from "./recent-proof.tsx";
 
 const Contact = z.object({ email: z.string().nullable(), verified: z.boolean() });
 export function EmailForm({ actor }: { actor?: string }) {
 	const { project, session } = useApp();
+	const proof = useRecentProof();
 	const methods = useQuery({ queryKey: ["instance", "sign-in-methods"], queryFn: signInMethods, staleTime: Infinity });
 	const contact = useQuery({
 		queryKey: [project, "credential-email", actor ?? session.actor],
@@ -25,7 +27,8 @@ export function EmailForm({ actor }: { actor?: string }) {
 		if (busy) return;
 		setBusy(true);
 		setMessage("");
-		void call("credential", { do: "email.set", email: value, ...(actor ? { actor } : {}) })
+		void proof
+			.run(() => call("credential", { do: "email.set", email: value, ...(actor ? { actor } : {}) }))
 			.then((reply) => Contact.parse(reply))
 			.then(async () => {
 				setEmail("");
@@ -47,6 +50,7 @@ export function EmailForm({ actor }: { actor?: string }) {
 	return (
 		<section aria-label="Email for password reset">
 			<h3>Email for password reset</h3>
+			{proof.prompt}
 			{shown?.email && (
 				<p>
 					{shown.email} · {shown.verified ? "verified" : "awaiting verification"}

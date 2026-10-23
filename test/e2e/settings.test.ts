@@ -399,6 +399,16 @@ import { PRESETS } from "../../src/core/presets.ts";
 			);
 			view = await openPage(server, { path: "/p/scratch/settings" });
 			const { page } = view;
+			expect(
+				(
+					await page.request.post(`${server.url}/api/account/password`, { data: { next: "the owner password" } })
+				).status(),
+			).toBe(200);
+			expect(
+				(
+					await page.request.post(`${server.url}/api/account/proof`, { data: { password: "the owner password" } })
+				).status(),
+			).toBe(200);
 			// The policy in force is explained where it is read, and the comparison marks it.
 			const inForce = page.locator("#detail .settings-preset-summary");
 			expect(await inForce.innerText()).toBe(PRESET_SUMMARY.loose);

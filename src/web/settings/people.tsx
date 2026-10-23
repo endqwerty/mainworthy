@@ -14,6 +14,7 @@ import { InlineConfirmation } from "./inline-confirmation.tsx";
 import { saidBy, saidOfWrite, useList, withId } from "./list.ts";
 import { PersonAccess } from "./people-access.tsx";
 import { ForgetPerson } from "./people-forget.tsx";
+import { useRecentProof } from "./recent-proof.tsx";
 import { Teams } from "./teams.tsx";
 import { IssuedTokens } from "./tokens.tsx";
 import "./people.css";
@@ -59,6 +60,7 @@ const STARTS_WITH: readonly Capability[] = defaultCapabilities("human").filter((
  */
 export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null> }) {
 	const { project, session } = useApp();
+	const proof = useRecentProof();
 	const client = useQueryClient();
 	const methods = useQuery({ queryKey: ["instance", "sign-in-methods"], queryFn: signInMethods, staleTime: Infinity });
 	const [email, setEmail] = useState("");
@@ -129,7 +131,8 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 		if (recovering) return;
 		setRecovering(person);
 		setRefusal(null);
-		void createInvitation({ name: person, expires: INVITATION_LASTS.default, grant: null })
+		void proof
+			.run(() => createInvitation({ name: person, expires: INVITATION_LASTS.default, grant: null }))
 			.then((link) => {
 				setConfirming(null);
 				return made(link);
@@ -172,6 +175,7 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 	return (
 		<>
 			<h2>People</h2>
+			{proof.prompt}
 			<p className="dim">
 				You make a link and hand it to the person{methods.data?.mail ? ", or send it by mail" : ""}; it works once, and
 				they choose a password or a passkey with it. <DocLink page="access">How a person gets in</DocLink>

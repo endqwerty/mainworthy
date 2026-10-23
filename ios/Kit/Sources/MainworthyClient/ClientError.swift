@@ -6,6 +6,7 @@ public enum ClientError: Error, Equatable, Sendable {
 	case unreachable(String)
 	/// The session ended: the person signs in again.
 	case signedOut
+	case recentProofRequired
 	/// Too many failed attempts. The seconds to wait, when the server said.
 	case limited(seconds: Int?)
 	/// The server said no. `code` is its word for why (`forbidden`, `conflict`, `invalid`); `message` its sentence.
@@ -18,6 +19,8 @@ public enum ClientError: Error, Equatable, Sendable {
 		switch self {
 		case .unreachable(let why): "The server could not be reached. \(why)"
 		case .signedOut: "You are signed out. Sign in again."
+		case .recentProofRequired:
+			"Confirm your password, passkey or authenticator in the web app before changing sign-in details. This iPhone build has no sign-in settings."
 		case .limited(let seconds):
 			if let seconds, seconds > 0 {
 				"Too many attempts. Try again in \(seconds) \(seconds == 1 ? "second" : "seconds")."

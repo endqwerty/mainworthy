@@ -179,15 +179,19 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 			const isNew = existing === null;
 			// The schema lets through only what `durationMs` reads, so a null here is an `expires` that was absent.
 			const lastsMs = input.expires === undefined ? null : durationMs(input.expires);
-			const created = createToken(env.app, {
-				actor: input.actor,
-				kind: input.kind,
-				can: isNew && input.can.length === 0 ? defaultCapabilities(input.kind) : input.can,
-				project,
-				label: input.label ?? `${input.kind} token`,
-				...(lastsMs === null ? {} : { lastsMs }),
-				madeBy: env.actor.id,
-			});
+			const created = createToken(
+				env.app,
+				{
+					actor: input.actor,
+					kind: input.kind,
+					can: isNew && input.can.length === 0 ? defaultCapabilities(input.kind) : input.can,
+					project,
+					label: input.label ?? `${input.kind} token`,
+					...(lastsMs === null ? {} : { lastsMs }),
+					madeBy: env.actor.id,
+				},
+				{ actor: env.actor.id, context: env.context },
+			);
 			return {
 				// The token's id, which `token.revoke` takes: whoever made it can revoke exactly this one.
 				id: created.id,
@@ -279,7 +283,7 @@ export const adminOp = defineInstanceOp({
 	name: "admin",
 	output: REPLIES.admin,
 	summary:
-		"Projects, actors, teams, grants and tokens. There are no seats: an actor is free, and a token carries what its actor may do.",
+		"Projects, actors, teams, grants and tokens. There are no seats: an actor is free, and a token carries what its actor may do. Creating a token from a browser requires recent credential proof.",
 	input: AdminInput,
 	needs: "admin",
 	scope: "instance",

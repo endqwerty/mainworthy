@@ -10,6 +10,7 @@ import { z } from "zod";
 import { type Provider, provider, stopProviders } from "../oidc-support.ts";
 import {
 	addAuthenticator,
+	advanceClock,
 	browserAvailable,
 	eventually,
 	openPage,
@@ -92,8 +93,13 @@ test.skipIf(!browserAvailable)(
 			await page.getByText("The only way you sign in stays.", { exact: false }).waitFor();
 
 			// The authenticator that holds the passkey is not registered twice.
+			await advanceClock(server, 10 * 60_000 + 1);
 			await page.locator("#passkey-label").fill("The same laptop");
 			await page.getByRole("button", { name: "Add a passkey" }).click();
+			await page
+				.getByRole("region", { name: "Confirm your sign-in", exact: true })
+				.getByRole("button", { name: "Use a passkey", exact: true })
+				.click();
 			await page.getByRole("status").filter({ hasText: "This passkey is already registered." }).waitFor();
 			expect(await page.locator("#passkey-label").inputValue()).toBe("The same laptop");
 			expect(await credentials()).toHaveLength(1);
@@ -187,7 +193,9 @@ test.skipIf(!browserAvailable)(
 			await page.locator("#signin-password").fill("a password set later");
 			await page.keyboard.press("Enter");
 			await page.locator("#app").waitFor();
-			expect(browser.errors).toEqual([]);
+			expect(browser.errors).toEqual([
+				"Failed to load resource: the server responded with a status of 403 (Forbidden)",
+			]);
 		} finally {
 			await browser?.close();
 		}
@@ -315,6 +323,79 @@ test.skipIf(!browserAvailable)(
 			await page.locator("#app").waitFor();
 			expect(await page.locator(".sfoot .me").textContent()).toContain("noor");
 			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser?.close();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"a provider-only person is guided to recovery before making a personal token",
+	async () => {
+		const made = await server.api("invitation", { do: "create", name: "provider-cli", can: ["read"] });
+		if (!("code" in made)) throw new Error("no invitation was made");
+		let browser: PageHarness | null = null;
+		try {
+			browser = await openPage(server, { signedIn: false, path: `/invite#${made.code}`, ready: "h1" });
+			const { page } = browser;
+			idp.next({ subject: "sub-provider-cli" });
+			await page.getByRole("button", { name: "Accept with Example ID" }).click();
+			await page.locator("#app").waitFor();
+			for (const stage of ["invitation", "sign-in"]) {
+				await page.goto(`${server.url}/p/scratch/settings`);
+				await page.getByRole("option", { name: "Your sign-in", exact: true }).click();
+				expect(
+					(
+						await page.request.post(`${server.url}/api/account/password`, { data: { next: "a recovery password" } })
+					).status(),
+				).toBe(403);
+				expect(
+					(await page.request.post(`${server.url}/api/credential`, { data: { do: "passkey.begin" } })).status(),
+				).toBe(403);
+				await page.getByLabel("Token label", { exact: true }).fill("Provider CLI");
+				const response = page.waitForResponse(
+					(reply) => reply.url().endsWith("/api/credential") && reply.request().postDataJSON().do === "token.create",
+				);
+				await page.getByRole("button", { name: "Create personal token", exact: true }).click();
+				expect((await response).status()).toBe(403);
+				const prompt = page.getByRole("region", { name: "Confirm your sign-in", exact: true });
+				await prompt.getByText("Ask the owner for a recovery link", { exact: false }).waitFor();
+				expect(
+					await prompt
+						.getByRole("button", { name: "Cancel confirmation", exact: true })
+						.evaluate((button) => button === document.activeElement),
+				).toBe(true);
+				expect(await prompt.getByLabel("Password", { exact: true }).count()).toBe(0);
+				expect(await prompt.getByLabel("Or authenticator code", { exact: true }).count()).toBe(0);
+				expect(await prompt.getByRole("button", { name: "Confirm credential", exact: true }).count()).toBe(0);
+				expect(await prompt.getByRole("link", { name: "Your sign-in", exact: true }).count()).toBe(0);
+				await prompt.getByRole("button", { name: "Cancel confirmation", exact: true }).click();
+				if (stage === "invitation") {
+					await page.getByRole("button", { name: "Sign out", exact: true }).click();
+					await page.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
+					idp.next({ subject: "sub-provider-cli" });
+					await page.getByRole("button", { name: "Sign in with Example ID", exact: true }).click();
+					await page.locator("#app").waitFor();
+				}
+			}
+			const recovery = await server.api("invitation", { do: "create", name: "provider-cli" });
+			if (!("code" in recovery)) throw new Error("no recovery invitation was made");
+			await page.goto(`${server.url}/invite#${recovery.code}`);
+			await page.locator("#invite-password").fill("a recovery password");
+			await page.locator("#invite-password-again").fill("a recovery password");
+			await page.getByRole("button", { name: "Accept and sign in", exact: true }).click();
+			await page.locator("#app").waitFor();
+			await page.goto(`${server.url}/p/scratch/settings`);
+			await page.getByRole("option", { name: "Your sign-in", exact: true }).click();
+			await page.getByLabel("Token label", { exact: true }).fill("Recovered CLI");
+			await page.getByRole("button", { name: "Create personal token", exact: true }).click();
+			const secret = page.getByLabel("Your new command-line token", { exact: true });
+			await secret.waitFor();
+			expect((await server.api("find", {}, { token: await secret.inputValue() })).items).toEqual([]);
+			expect(browser.errors).toEqual(
+				Array(2).fill("Failed to load resource: the server responded with a status of 403 (Forbidden)"),
+			);
 		} finally {
 			await browser?.close();
 		}
