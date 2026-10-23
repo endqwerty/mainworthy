@@ -29,8 +29,9 @@ import { browserAvailable, openPage, startServer } from "./support.ts";
 			await view.page.locator(".change-gate h2").getByText("blocked", { exact: true }).waitFor();
 			await view.page.getByText("Merged as its head.", { exact: false }).waitFor();
 
-			expect(await view.page.locator(".change-merge-receipt").count()).toBe(1);
 			const receipt = view.page.locator(".change-merge-receipt");
+			await receipt.waitFor();
+			expect(await receipt.count()).toBe(1);
 			expect(await receipt.innerText()).toContain("Head receipt726 when the merge was reported");
 			expect(await receipt.innerText()).toContain("passed");
 			await receipt.getByText("Counted results", { exact: true }).click();
