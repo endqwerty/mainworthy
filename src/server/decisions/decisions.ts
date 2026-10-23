@@ -98,6 +98,7 @@ import {
 	decisionById,
 	decisionsOf,
 	everyQuestionOn,
+	type FailureSubject,
 	type HoldTerm,
 	holdEndingById,
 	insertAnswer,
@@ -112,6 +113,7 @@ import {
 	openQuestionIds,
 	openQuestionsOn,
 	type QuestionRow,
+	type QuestionSubjectInput,
 	questionById,
 	questionRef,
 	receiptDecisionAnswer,
@@ -125,11 +127,9 @@ import {
 	storeReceiptResults,
 } from "./questions.ts";
 
-export type Raise = {
-	kind: Kind;
+export type Raise = QuestionSubjectInput & {
 	/** Names the cause. Two raises with the same kind and key are the same question. */
 	key: string;
-	subject: Record<string, unknown>;
 	title: string;
 	/** Whose evidence raised it: shown as the producer glyph in the queue. */
 	producer: ActorKind;
@@ -410,8 +410,7 @@ function* openSteps(
 		found.ask.who === "rule" && prior !== null && overruled(ctx, questionById(ctx.db, prior), found.answer);
 	const clause = refused ? { ...found, ask: { ...found.ask, who: "member" as const } } : found;
 	const question = insertQuestion(ctx, {
-		kind: r.kind,
-		subject: r.subject,
+		...r,
 		fingerprint,
 		epoch,
 		prior,
@@ -581,7 +580,7 @@ export function* answerSteps(
 		if (
 			prior &&
 			mode === "answer" &&
-			!json<{ perResult?: boolean }>(question.subject).perResult &&
+			!(question.kind === "failure" && question.subject.kind === "inherited") &&
 			JSON.stringify(json(prior.answer)) === JSON.stringify(given)
 		)
 			return reply(question, "already", { decision: prior.id });
@@ -613,42 +612,8 @@ export function* answerSteps(
 	}
 
 	try {
-		if (
-			standing === "counts" &&
-			question.kind === "failure" &&
-			json<{ perResult?: boolean }>(question.subject).perResult
-		) {
-			return yield* ctx.db.savepointSteps(function* () {
-				const withdrawn = undo(ctx, { q: input.q, ifDecision: question.decision ?? undefined, reason: input.reason });
-				if (withdrawn.status !== "reopened") throw new RefusedReplacement(withdrawn);
-				const subject = json<{ signature: number; scope: string }>(question.subject);
-				const signature = signatureById(ctx.db, subject.signature);
-				const target = json<{ targetId: number }>(question.evidence).targetId;
-				const cause = signature
-					? (openFailureQuestion(ctx.db, ctx.project.id, { signature: signature.hash, scope: subject.scope, target }) ??
-						standingOn(ctx, failureFingerprint(signature.hash, subject.scope)).find(({ question, decision }) =>
-							stillHolds(json<HoldTerm[]>(decision.holds), {
-								hash: question.basis,
-								target,
-								facts: [...factsNow(ctx.db, question)],
-								now: ctx.now,
-							}),
-						)?.question)
-					: null;
-				if (!cause) throw conflict("this failure no longer has a cause question");
-				const replacement = yield* answerSteps(
-					ctx,
-					{ ...input, q: questionRef(cause), onEvidence: cause.evidence_hash },
-					"replace-inherited",
-				);
-				if (replacement.status !== "decided")
-					throw new RefusedReplacement({
-						...replacement,
-						status: replacement.status === "advised" ? "forbidden" : replacement.status,
-					});
-				return { ...replacement, q: input.q, effects: { ...replacement.effects, question: replacement.q } };
-			});
-		}
+		if (standing === "counts" && question.kind === "failure" && question.subject.kind === "inherited")
+			return yield* replaceInheritedSteps(ctx, { ...question, subject: question.subject }, input);
 		insertAnswer(ctx, {
 			question: question.id,
 			answer: given,
@@ -684,6 +649,45 @@ export function* answerSteps(
 			return reply(question, error.code === "conflict" ? "conflict" : "invalid", { needs: error.message });
 		throw error;
 	}
+}
+
+/** A person's counted answer withdraws the rule's result standing and answers the ordinary cause instead. */
+function* replaceInheritedSteps(
+	ctx: Ctx,
+	question: QuestionRow & { kind: "failure"; subject: Extract<FailureSubject, { kind: "inherited" }> },
+	input: Parameters<typeof answerSteps>[1],
+): Generator<undefined, DecideReply, void> {
+	return yield* ctx.db.savepointSteps(function* () {
+		const withdrawn = undo(ctx, { q: input.q, ifDecision: question.decision ?? undefined, reason: input.reason });
+		if (withdrawn.status !== "reopened") throw new RefusedReplacement(withdrawn);
+		const subject = question.subject;
+		const signature = signatureById(ctx.db, subject.signature);
+		const target = json<{ targetId: number }>(question.evidence).targetId;
+		const cause = signature
+			? (openFailureQuestion(ctx.db, ctx.project.id, { signature: signature.hash, scope: subject.scope, target }) ??
+				standingOn(ctx, failureFingerprint(signature.hash, subject.scope)).find(({ question, decision }) =>
+					stillHolds(json<HoldTerm[]>(decision.holds), {
+						hash: question.basis,
+						target,
+						facts: [...factsNow(ctx.db, question)],
+						now: ctx.now,
+					}),
+				)?.question)
+			: null;
+		if (cause?.kind !== "failure" || cause.subject.kind !== "cause")
+			throw conflict("this failure no longer has a cause question");
+		const replacement = yield* answerSteps(
+			ctx,
+			{ ...input, q: questionRef(cause), onEvidence: cause.evidence_hash },
+			"replace-inherited",
+		);
+		if (replacement.status !== "decided")
+			throw new RefusedReplacement({
+				...replacement,
+				status: replacement.status === "advised" ? "forbidden" : replacement.status,
+			});
+		return { ...replacement, q: input.q, effects: { ...replacement.effects, question: replacement.q } };
+	});
 }
 
 /**
@@ -742,22 +746,15 @@ function* settleSteps(
 	const effects = yield* handler.effect(ctx, witness, question, given, { raiseSteps, reconsiderPolicySteps });
 	setDecisionEffects(ctx, decision.id, effects);
 	const about = runsAbout(ctx, question);
-	if (Array.isArray(effects.reask) && effects.reask.length > 0) askAgain(ctx, question, effects.reask as number[]);
+	if (question.kind === "failure" && Array.isArray(effects.reask) && effects.reask.length > 0)
+		askAgain(ctx, question, effects.reask as number[]);
 	about.push(...closeAnswered(ctx, question), ...rested);
 	// A cause answer reaches older commits and planned runs the question never named. An inherited answer
 	// excuses only its exact results: its named commit and that commit's planned runs are folded by refold.
-	if (question.kind === "failure") {
-		const subject = json<{ signature?: number; scope?: string; slot?: number; perResult?: boolean }>(question.subject);
-		if (
-			!subject.perResult &&
-			subject.slot === undefined &&
-			subject.signature !== undefined &&
-			subject.scope !== undefined
-		)
-			about.push(...runsShowing(ctx.db, ctx.project.id, subject.signature));
-	}
+	if (question.kind === "failure" && question.subject.kind === "cause")
+		about.push(...runsShowing(ctx.db, ctx.project.id, question.subject.signature));
 	refold(ctx, [...about, ...(supersedes !== null ? runsDependingOn(ctx.db, supersedes) : [])], {
-		dissolveStale: json<{ slot?: number }>(question.subject).slot !== undefined,
+		dissolveStale: question.kind === "failure" && question.subject.kind === "slot",
 	});
 	return { decision: { ...decision, effects: JSON.stringify(effects) }, effects };
 }
@@ -870,11 +867,9 @@ function endedBefore(ctx: Ctx, question: QuestionRow): number | null {
  * about something that is answered. Returns the runs those questions named, to be recomputed.
  */
 function closeAnswered(ctx: Ctx, question: QuestionRow): number[] {
-	if (question.kind !== "failure") return [];
-	if (json<{ slot?: number }>(question.subject).slot !== undefined) return [];
-	const subject = json<{ signature?: number; scope?: string }>(question.subject);
+	if (question.kind !== "failure" || question.subject.kind === "slot") return [];
+	const subject = question.subject;
 	const { signature, scope } = subject;
-	if (signature === undefined || scope === undefined) return [];
 	const runs: number[] = [];
 	for (const other of liveByFingerprint(ctx.db, ctx.project.id, question.fingerprint)) {
 		if (other.state !== "open") continue;
@@ -897,7 +892,7 @@ function closeAnswered(ctx: Ctx, question: QuestionRow): number[] {
  * target that another answer in force already covers, or that an open question about this cause already lists,
  * is not asked about a second time.
  */
-function askAgain(ctx: Ctx, question: QuestionRow, targets: readonly number[]): void {
+function askAgain(ctx: Ctx, question: QuestionRow & { kind: "failure" }, targets: readonly number[]): void {
 	const {
 		facts,
 		targetId: _decided,
@@ -935,12 +930,11 @@ function askAgain(ctx: Ctx, question: QuestionRow, targets: readonly number[]): 
 	const pending = targets.filter((target) => !covered.has(target));
 	const latest = pending.at(-1);
 	if (latest === undefined) return;
-	const subject = json<Record<string, unknown> & { signature?: number; scope?: string }>(question.subject);
-	const key =
-		subject.signature !== undefined && subject.scope !== undefined ? causeKey(subject.signature, subject.scope) : null;
+	const subject = question.subject;
+	const key = causeKey(subject.signature, subject.scope);
 	const runs = runsAbout(ctx, question).flatMap((id) => {
 		const run = runById(ctx.db, id);
-		return run && (key === null || unexplainedIn(ctx.db, run).has(key)) ? [run] : [];
+		return run && unexplainedIn(ctx.db, run).has(key) ? [run] : [];
 	});
 	const newest = latestByFingerprint(ctx.db, ctx.project.id, question.fingerprint) ?? question;
 	complete(
@@ -1011,7 +1005,7 @@ export function undo(
 		holds: [],
 		supersedes: prior.id,
 	});
-	if (question.kind === "failure" && json<{ perResult?: boolean }>(question.subject).perResult) {
+	if (question.kind === "failure" && question.subject.kind === "inherited") {
 		setQuestionState(ctx, question, "dissolved", decision.id);
 		refold(ctx, [...runsAbout(ctx, question), ...runsDependingOn(ctx.db, prior.id)]);
 		return reply(question, "reopened", {
@@ -1054,7 +1048,9 @@ export function raiseFailures(ctx: Ctx, inputs: readonly Parameters<typeof raise
 		const automatic = new Map(
 			[...runs.values()]
 				.flatMap((run) => refreshInherited(ctx, run))
-				.map((raised) => [json<{ signature: number }>(raised.question.subject).signature, raised] as const),
+				.flatMap((raised) =>
+					raised.question.kind === "failure" ? [[raised.question.subject.signature, raised] as const] : [],
+				),
 		);
 		return inputs.map((input) => raiseFailure(ctx, input, automatic));
 	} finally {
@@ -1142,7 +1138,7 @@ export function raiseFailure(
 	return raise(ctx, {
 		kind: "failure",
 		key,
-		subject: { signature: group.signature.id, scope: group.scope },
+		subject: { kind: "cause", signature: group.signature.id, scope: group.scope },
 		title: clip(group.signature.text, 160),
 		producer: input.producer,
 		evidence: {
@@ -1243,7 +1239,7 @@ export function stopAskingAbout(ctx: Ctx, change: ChangeRow): string[] {
 	const closed: string[] = [];
 	for (const asked of openQuestionsOn(ctx.db, ctx.project.id, `scope:${scope}`)) {
 		const question = questionById(ctx.db, asked.id);
-		if (question?.state !== "open" || json<{ scope?: string }>(question.subject).scope !== scope) continue;
+		if (question?.kind !== "failure" || question.state !== "open" || question.subject.scope !== scope) continue;
 		if (!endedUnawaited(ctx, question)) continue;
 		dissolve(ctx, question);
 		ctx.touched.add(questionRef(question));
@@ -1262,7 +1258,7 @@ export function askAgainAbout(ctx: Ctx, change: ChangeRow): string[] {
 	const newest = newestInScope(ctx.db, ctx.project.id, scope);
 	if (newest) refold(ctx, [newest.id]);
 	return openQuestionsOn(ctx.db, ctx.project.id, `scope:${scope}`).flatMap((asked) =>
-		asked.kind === "failure" && json<{ scope?: string }>(asked.subject).scope === scope ? [`Q-${asked.no}`] : [],
+		asked.kind === "failure" && asked.subject.scope === scope ? [`Q-${asked.no}`] : [],
 	);
 }
 
@@ -1314,7 +1310,7 @@ export function askWhereCommitIs(ctx: Ctx, target: TargetRow): void {
 	for (const asked of everyQuestionOn(ctx.db, ctx.project.id, `scope:${before}`)) {
 		const question = questionById(ctx.db, asked.id);
 		if (question?.kind !== "failure") continue;
-		const subject = json<{ signature: number; scope: string }>(question.subject);
+		const subject = question.subject;
 		if (subject.scope !== before) continue;
 		const standing =
 			question.state === "decided" && question.decision !== null ? decisionById(ctx.db, question.decision) : null;
@@ -1410,7 +1406,7 @@ function renewedApproval(ctx: Ctx, asked: QuestionRow | null): boolean {
 function refreshInherited(ctx: Ctx, run: RunRow): Raised[] {
 	if (run.origin !== "change") return [];
 	const about = `inherited:${runRef(run)}`;
-	const questions = everyQuestionOn(ctx.db, ctx.project.id, about);
+	const questions = everyQuestionOn(ctx.db, ctx.project.id, about).filter((question) => question.kind === "failure");
 	if (!run.scope?.startsWith("change:") && questions.length === 0) return [];
 	const policy = currentPolicy(ctx.db, ctx.project.id);
 	const enabled = policy.clauses.some(
@@ -1424,7 +1420,7 @@ function refreshInherited(ctx: Ctx, run: RunRow): Raised[] {
 		questions.flatMap((question) =>
 			question.decision !== null &&
 			json<{ is?: string }>(decisionById(ctx.db, question.decision)?.answer ?? "{}").is === "withdrawn"
-				? [json<{ signature: number }>(question.subject).signature]
+				? [question.subject.signature]
 				: [],
 		),
 	);
@@ -1451,11 +1447,9 @@ function refreshInherited(ctx: Ctx, run: RunRow): Raised[] {
 				)),
 	);
 	const raised: Raised[] = [];
-	const bySignature = new Map(
-		live.map((question) => [json<{ signature: number }>(question.subject).signature, question]),
-	);
+	const bySignature = new Map(live.map((question) => [question.subject.signature, question]));
 	for (const question of live) {
-		const { signature } = json<{ signature: number }>(question.subject);
+		const { signature } = question.subject;
 		if (groups.has(signature)) continue;
 		if (question.state === "decided" && question.decision !== null) {
 			const decision = decisionById(ctx.db, question.decision);
@@ -1506,7 +1500,7 @@ function refreshInherited(ctx: Ctx, run: RunRow): Raised[] {
 			raise(ctx, {
 				kind: "failure",
 				key: `inherited:${run.id}:${signatureId}`,
-				subject: { signature: signatureId, scope, perResult: true },
+				subject: { kind: "inherited", signature: signatureId, scope },
 				title: clip(signature.text, 160),
 				producer: "rule",
 				evidence: {
@@ -1538,13 +1532,14 @@ function refreshInherited(ctx: Ctx, run: RunRow): Raised[] {
 }
 
 function unchangedSlotSettlement(ctx: Ctx, question: QuestionRow, run: RunRow): boolean {
+	if (question.kind !== "failure" || question.subject.kind !== "slot") return false;
 	if (question.state !== "decided" || question.decision === null) return false;
 	const decision = decisionById(ctx.db, question.decision);
 	if (!decision || ["withdrawn", "expired", "outdated", "mistaken"].includes(json<{ is: string }>(decision.answer).is))
 		return false;
 	if (decision.expires_at !== null && decision.expires_at <= ctx.now) return false;
 	if (!json<Signer[]>(decision.signers).some((signer) => actorLabel(ctx.db, signer.by).kind === "human")) return false;
-	const subject = json<{ slot: number; scope: string }>(question.subject);
+	const subject = question.subject;
 	const evidence = json<{ effective: number[]; results: number[] }>(question.evidence);
 	if (
 		evidence.results.some((id) => {
@@ -1591,7 +1586,7 @@ function refreshDisputes(ctx: Ctx, run: RunRow): void {
 		raise(ctx, {
 			kind: "failure",
 			key,
-			subject: { slot: slot.id, signature, scope },
+			subject: { kind: "slot", slot: slot.id, signature, scope },
 			title: `Disputed ${caseRow ? caseRef(caseRow) : "slot"} in ${runRef(run)}: ${clip(cause.text, 110)}`,
 			producer: actorLabel(ctx.db, latest.actor).kind,
 			evidence: {
@@ -1746,9 +1741,9 @@ function blockersOf(ctx: Ctx, run: RunRow): Blocker[] {
 	return openQuestionsOn(ctx.db, ctx.project.id, runRef(run)).map((open) => ({
 		ref: questionRef(open),
 		kind: open.kind,
-		signature: open.kind === "failure" ? (json<{ signature?: number }>(open.subject).signature ?? null) : null,
-		scope: open.kind === "failure" ? (json<{ scope?: string }>(open.subject).scope ?? null) : null,
-		slot: open.kind === "failure" ? json<{ slot?: number }>(open.subject).slot : undefined,
+		signature: open.kind === "failure" ? open.subject.signature : null,
+		scope: open.kind === "failure" ? open.subject.scope : null,
+		slot: open.kind === "failure" && open.subject.kind === "slot" ? open.subject.slot : undefined,
 		blocks: json<number[]>(open.blocks),
 	}));
 }
@@ -1790,7 +1785,7 @@ function endPassed(ctx: Ctx, run: RunRow): void {
 	if (run.origin !== "change" || run.scope === null) return;
 	if (newestInScope(ctx.db, ctx.project.id, run.scope)?.id !== run.id) return;
 	for (const question of attributedQuestionsOn(ctx.db, ctx.project.id, `scope:${run.scope}`)) {
-		if (json<{ scope?: string }>(question.subject).scope !== run.scope || question.decision === null) continue;
+		if (question.kind !== "failure" || question.subject.scope !== run.scope || question.decision === null) continue;
 		const decision = decisionById(ctx.db, question.decision);
 		const passed = decision ? passedIn(ctx, question, run) : null;
 		if (decision && passed) endHold(ctx, decision, { is: "outdated", clause: "passed", ...passed });
@@ -1811,8 +1806,12 @@ function endPassed(ctx: Ctx, run: RunRow): void {
  *
  * Returns the reason to record.
  */
-function passedIn(ctx: Ctx, question: QuestionRow, run: RunRow): { reason: string; fixed: boolean } | null {
-	const { signature, scope } = json<{ signature: number; scope: string }>(question.subject);
+function passedIn(
+	ctx: Ctx,
+	question: QuestionRow & { kind: "failure" },
+	run: RunRow,
+): { reason: string; fixed: boolean } | null {
+	const { signature, scope } = question.subject;
 	const evidence = json<{ tests?: { id: number }[]; count?: number }>(question.evidence);
 	const listed = new Set((evidence.tests ?? []).map((test) => test.id));
 	if (listed.size === 0 || (evidence.count ?? 0) > listed.size) return null;
@@ -1880,10 +1879,8 @@ function closeIfGone(ctx: Ctx, id: number): boolean {
  * for by a person, and waits for the answer whatever became of the change.
  */
 function endedUnawaited(ctx: Ctx, question: QuestionRow): boolean {
-	if (question.kind !== "failure") return false;
-	if (json<{ slot?: number }>(question.subject).slot !== undefined) return false;
-	const subject = json<{ signature?: number; scope?: string }>(question.subject);
-	if (subject.signature === undefined || subject.scope === undefined) return false;
+	if (question.kind !== "failure" || question.subject.kind === "slot") return false;
+	const subject = question.subject;
 	if (!scopeEnded(ctx.db, subject.scope)) return false;
 	const key = causeKey(subject.signature, subject.scope);
 	return !runsAbout(ctx, question).some((id) => {
@@ -1906,8 +1903,9 @@ function endedUnawaited(ctx: Ctx, question: QuestionRow): boolean {
  * test says nothing about the failure an agent found in it, which stays asked about until a person answers.
  */
 function stoppedFailing(ctx: Ctx, question: QuestionRow, shown: Map<number, Set<string>>): boolean {
-	const subject = json<{ signature: number; scope: string; slot?: number }>(question.subject);
-	if (subject.slot !== undefined) return slotById(ctx.db, subject.slot)?.state !== "disputed";
+	if (question.kind !== "failure") return false;
+	const subject = question.subject;
+	if (subject.kind === "slot") return slotById(ctx.db, subject.slot)?.state !== "disputed";
 	const key = causeKey(subject.signature, subject.scope);
 	const shows = (run: RunRow): boolean => {
 		let causes = shown.get(run.id);
@@ -2037,9 +2035,8 @@ function* factsNowSteps(db: Db, question: QuestionRow): Generator<undefined, Set
 		}
 	}
 	if (question.kind !== "failure") return facts;
-	const subject = json<{ signature?: number; scope?: string; slot?: number }>(question.subject);
-	if (subject.signature === undefined || subject.scope === undefined) return facts;
-	if (subject.slot !== undefined) facts.add("hint:disputed");
+	const subject = question.subject;
+	if (subject.kind === "slot") facts.add("hint:disputed");
 	else facts.delete("hint:disputed");
 	return facts;
 }
@@ -2151,7 +2148,7 @@ function itemOf(db: Db, row: QuestionRow, facts: ReadonlySet<string>, ask: Ask):
 function fixedInOf(db: Db, question: QuestionRow, ending: DecisionRow): FixedIn | null {
 	if (json<Signer[]>(ending.signers)[0]?.clause !== "passed") return null;
 	if (json<{ fixed?: boolean }>(ending.answer).fixed !== true) return null;
-	const scope = json<{ scope?: string }>(question.subject).scope;
+	const scope = question.kind === "failure" ? question.subject.scope : undefined;
 	if (!scope?.startsWith("change:")) return null;
 	const change = changeById(db, Number(scope.slice("change:".length)));
 	return change ? { change: change.key, state: change.ended ?? "open" } : null;

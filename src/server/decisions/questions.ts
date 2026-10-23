@@ -1,12 +1,32 @@
 // Storage for the queue and the ledgers. Owns questions, question_refs, answers, decisions and merge_receipts.
 // The rules (who may answer, when a decision holds) are in decisions.ts; this file only reads and writes rows.
+import { z } from "zod";
 import { MergeReceipt, MergeReceiptResult, receiptNodeHash, receiptSnapshotHash } from "../../core/changes.ts";
 import { type ActorKind, type Ask, ATTRIBUTED, type Kind } from "../../core/kinds.ts";
 import { type Ctx, ref } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
 import { invalid, notFound } from "../kernel/errors.ts";
 
-export type QuestionRow = {
+const causeFields = { signature: z.number(), scope: z.string() };
+const StoredFailureSubject = z.union([
+	z.strictObject(causeFields).transform((subject) => ({ kind: "cause" as const, ...subject })),
+	z
+		.strictObject({ ...causeFields, perResult: z.literal(true) })
+		.transform(({ signature, scope }) => ({ kind: "inherited" as const, signature, scope })),
+	z.strictObject({ ...causeFields, slot: z.number() }).transform((subject) => ({ kind: "slot" as const, ...subject })),
+]);
+
+export type FailureSubject = z.output<typeof StoredFailureSubject>;
+
+export type QuestionSubjectInput =
+	| { kind: "failure"; subject: FailureSubject }
+	| { kind: Exclude<Kind, "failure">; subject: Record<string, unknown> };
+
+type QuestionSubject =
+	| { kind: "failure"; subject: FailureSubject }
+	| { kind: Exclude<Kind, "failure">; subject: string };
+
+type StoredQuestionRow = {
 	id: number;
 	project: number;
 	no: number;
@@ -35,6 +55,33 @@ export type QuestionRow = {
 	opened_at: number;
 	rev: number;
 };
+
+export type QuestionRow = Omit<StoredQuestionRow, "kind" | "subject"> & QuestionSubject;
+
+function readSubject(row: Pick<StoredQuestionRow, "kind" | "subject">): QuestionSubject {
+	return row.kind === "failure"
+		? { kind: "failure", subject: StoredFailureSubject.parse(json<unknown>(row.subject)) }
+		: { kind: row.kind, subject: row.subject };
+}
+
+function readQuestion(row: StoredQuestionRow): QuestionRow {
+	return { ...row, ...readSubject(row) };
+}
+
+function storedFailureSubject(subject: FailureSubject): z.input<typeof StoredFailureSubject> {
+	switch (subject.kind) {
+		case "cause":
+			return { signature: subject.signature, scope: subject.scope };
+		case "inherited":
+			return { signature: subject.signature, scope: subject.scope, perResult: true };
+		case "slot":
+			return { slot: subject.slot, signature: subject.signature, scope: subject.scope };
+		default: {
+			const _exhaustive: never = subject;
+			return _exhaustive;
+		}
+	}
+}
 
 export type DecisionRow = {
 	on_evidence: string | null;
@@ -154,22 +201,22 @@ const Q = {
 	}>(
 		"INSERT INTO merge_receipts (project, change, actor, at, seq, snapshot, evidence) VALUES ($project, $change, $actor, $at, $seq, $snapshot, $evidence)",
 	),
-	latest: sql<{ project: number; fingerprint: string }, QuestionRow>(
+	latest: sql<{ project: number; fingerprint: string }, StoredQuestionRow>(
 		"SELECT * FROM questions WHERE project = $project AND fingerprint = $fingerprint ORDER BY epoch DESC LIMIT 1",
 	),
 	// The questions of one cause that are open or whose decision is in force. A decision that stopped holding left
 	// a row saying so (`expired`, `outdated`) as its question's decision: that question is history.
-	live: sql<{ project: number; fingerprint: string }, QuestionRow>(
+	live: sql<{ project: number; fingerprint: string }, StoredQuestionRow>(
 		`SELECT q.* FROM questions q LEFT JOIN decisions d ON d.id = q.decision
 		 WHERE q.project = $project AND q.fingerprint = $fingerprint
 		   AND (q.state = 'open' OR (q.state = 'decided' AND d.id IS NOT NULL
 		        AND json_extract(d.answer, '$.is') NOT IN ('expired', 'outdated', 'withdrawn')))
 		 ORDER BY q.epoch DESC, q.id DESC`,
 	),
-	byNo: sql<{ project: number; no: number }, QuestionRow>(
+	byNo: sql<{ project: number; no: number }, StoredQuestionRow>(
 		"SELECT * FROM questions WHERE project = $project AND no = $no",
 	),
-	byId: sql<{ id: number }, QuestionRow>("SELECT * FROM questions WHERE id = $id"),
+	byId: sql<{ id: number }, StoredQuestionRow>("SELECT * FROM questions WHERE id = $id"),
 	insert: sql<{
 		project: number;
 		no: number;
@@ -234,18 +281,18 @@ const Q = {
 	refsOf: sql<{ question: number }, { ref: string }>(
 		"SELECT ref FROM question_refs WHERE question = $question ORDER BY ref",
 	),
-	onRef: sql<{ project: number; ref: string }, QuestionRow>(
+	onRef: sql<{ project: number; ref: string }, StoredQuestionRow>(
 		`SELECT q.* FROM question_refs r JOIN questions q ON q.id = r.question
 		 WHERE r.project = $project AND r.ref = $ref ORDER BY q.id DESC LIMIT 200`,
 	),
 	// Every question about a thing, with no cap: for a calculation that must reach each of them. (`onRef` is the
 	// capped list a page shows.)
-	allOnRef: sql<{ project: number; ref: string }, QuestionRow>(
+	allOnRef: sql<{ project: number; ref: string }, StoredQuestionRow>(
 		`SELECT q.* FROM question_refs r JOIN questions q ON q.id = r.question
 		 WHERE r.project = $project AND r.ref = $ref ORDER BY q.id`,
 	),
 	// A cause answer that says the target needs a fix and still stands: it ends when its cause passes.
-	attributedOnRef: sql<{ project: number; ref: string }, QuestionRow>(
+	attributedOnRef: sql<{ project: number; ref: string }, StoredQuestionRow>(
 		`SELECT q.* FROM question_refs r JOIN questions q ON q.id = r.question JOIN decisions d ON d.id = q.decision
 		 WHERE r.project = $project AND r.ref = $ref AND q.kind = 'failure' AND q.state = 'decided'
 		   AND json_extract(q.subject, '$.slot') IS NULL AND json_extract(q.subject, '$.perResult') IS NULL
@@ -265,25 +312,25 @@ const Q = {
 	),
 	// The queue is ordered by rank and id together: one report can raise many questions that share a rank, so a page
 	// cut on the rank alone would skip the rest of them. (`questions_queue` ends in the id, so no sort is needed.)
-	queue: sql<{ project: number; state: string; rank: number; id: number; limit: number }, QuestionRow>(
+	queue: sql<{ project: number; state: string; rank: number; id: number; limit: number }, StoredQuestionRow>(
 		`SELECT * FROM questions WHERE project = $project AND state = $state AND owner = 0 AND (rank, id) > ($rank, $id)
 		 ORDER BY rank, id LIMIT $limit`,
 	),
 	queueOfKind: sql<
 		{ project: number; state: string; kind: string; rank: number; id: number; limit: number },
-		QuestionRow
+		StoredQuestionRow
 	>(
 		`SELECT * FROM questions WHERE project = $project AND state = $state AND owner = 0 AND (rank, id) > ($rank, $id)
 		 AND kind = $kind ORDER BY rank, id LIMIT $limit`,
 	),
 	// Newest first. Several questions can be decided at one revision (one command), so the page is cut on the
 	// revision and the id together.
-	ledger: sql<{ project: number; rev: number; id: number; limit: number }, QuestionRow>(
+	ledger: sql<{ project: number; rev: number; id: number; limit: number }, StoredQuestionRow>(
 		`SELECT q.* FROM questions q LEFT JOIN decisions d ON d.id = q.decision
 		 WHERE q.project = $project AND (q.state = 'decided' OR (q.state = 'dissolved' AND ${HOLD_ENDING}))
 		 AND (q.rev, q.id) < ($rev, $id) ORDER BY q.rev DESC, q.id DESC LIMIT $limit`,
 	),
-	ledgerOfKind: sql<{ project: number; kind: string; rev: number; id: number; limit: number }, QuestionRow>(
+	ledgerOfKind: sql<{ project: number; kind: string; rev: number; id: number; limit: number }, StoredQuestionRow>(
 		`SELECT q.* FROM questions q LEFT JOIN decisions d ON d.id = q.decision
 		 WHERE q.project = $project AND (q.state = 'decided' OR (q.state = 'dissolved' AND ${HOLD_ENDING}))
 		 AND q.kind = $kind AND (q.rev, q.id) < ($rev, $id) ORDER BY q.rev DESC, q.id DESC LIMIT $limit`,
@@ -297,7 +344,7 @@ const Q = {
 	openByKind: sql<{ project: number }, { kind: Kind; n: number }>(
 		"SELECT kind, count(*) AS n FROM questions WHERE project = $project AND state = 'open' AND owner = 0 GROUP BY kind",
 	),
-	changedSince: sql<{ project: number; rev: number; id: number; limit: number }, QuestionRow>(
+	changedSince: sql<{ project: number; rev: number; id: number; limit: number }, StoredQuestionRow>(
 		"SELECT * FROM questions WHERE project = $project AND (rev, id) >= ($rev, $id) ORDER BY rev, id LIMIT $limit",
 	),
 	insertAnswer: sql<{
@@ -354,30 +401,33 @@ export function forgetQuestionNames(db: Db, name: string, pseudonym: string): vo
 
 export const questionRef = (row: { no: number }): string => ref("question", row.no);
 
-export const latestByFingerprint = (db: Db, project: number, fingerprint: string): QuestionRow | null =>
-	db.get(Q.latest, { project, fingerprint });
+export function latestByFingerprint(db: Db, project: number, fingerprint: string): QuestionRow | null {
+	const row = db.get(Q.latest, { project, fingerprint });
+	return row ? readQuestion(row) : null;
+}
 
 /**
  * Every question about a cause that is open or decided with the decision still in force, newest first. Usually
  * one. More when an answer held for certain targets only and the cause was asked about again for the others.
  */
 export const liveByFingerprint = (db: Db, project: number, fingerprint: string): QuestionRow[] =>
-	db.all(Q.live, { project, fingerprint });
+	db.all(Q.live, { project, fingerprint }).map(readQuestion);
 
-export const questionById = (db: Db, id: number): QuestionRow | null => db.get(Q.byId, { id });
+export function questionById(db: Db, id: number): QuestionRow | null {
+	const row = db.get(Q.byId, { id });
+	return row ? readQuestion(row) : null;
+}
 
 export function mustQuestion(db: Db, project: number, text: string): QuestionRow {
 	const match = /^(?:Q-)?(\d+)$/i.exec(text.trim());
 	const row = match ? db.get(Q.byNo, { project, no: Number(match[1]) }) : null;
 	if (!row) throw notFound(`question ${text}`);
-	return row;
+	return readQuestion(row);
 }
 
 export function insertQuestion(
 	ctx: Ctx,
-	input: {
-		kind: Kind;
-		subject: unknown;
+	input: QuestionSubjectInput & {
 		fingerprint: string;
 		epoch: number;
 		prior: number | null;
@@ -397,7 +447,7 @@ export function insertQuestion(
 		project: ctx.project.id,
 		no,
 		kind: input.kind,
-		subject: JSON.stringify(input.subject),
+		subject: JSON.stringify(input.kind === "failure" ? storedFailureSubject(input.subject) : input.subject),
 		fingerprint: input.fingerprint,
 		epoch: input.epoch,
 		prior: input.prior,
@@ -414,7 +464,7 @@ export function insertQuestion(
 	});
 	for (const about of input.refs) ctx.db.run(Q.addRef, { project: ctx.project.id, ref: about, question: lastId });
 	ctx.touched.add(ref("question", no));
-	const row = ctx.db.get(Q.byId, { id: lastId });
+	const row = questionById(ctx.db, lastId);
 	if (!row) throw new Error("question was not stored");
 	return row;
 }
@@ -489,14 +539,15 @@ export const setQuestionFacts = (
 
 export const refsOf = (db: Db, question: number): string[] => db.all(Q.refsOf, { question }).map((r) => r.ref);
 export const questionsOn = (db: Db, project: number, about: string): QuestionRow[] =>
-	db.all(Q.onRef, { project, ref: about });
-export const openQuestionsOn = (db: Db, project: number, about: string) => db.all(Q.openOnRef, { project, ref: about });
+	db.all(Q.onRef, { project, ref: about }).map(readQuestion);
+export const openQuestionsOn = (db: Db, project: number, about: string) =>
+	db.all(Q.openOnRef, { project, ref: about }).map((row) => ({ ...row, ...readSubject(row) }));
 /** The failure questions about a thing whose standing answer says the target needs a fix (`ATTRIBUTED`). */
 export const attributedQuestionsOn = (db: Db, project: number, about: string): QuestionRow[] =>
-	db.all(Q.attributedOnRef, { project, ref: about });
+	db.all(Q.attributedOnRef, { project, ref: about }).map(readQuestion);
 /** Every question about a thing, oldest first, however many there are. */
 export const everyQuestionOn = (db: Db, project: number, about: string): QuestionRow[] =>
-	db.all(Q.allOnRef, { project, ref: about });
+	db.all(Q.allOnRef, { project, ref: about }).map(readQuestion);
 export const openCountOn = (db: Db, project: number, about: string): number =>
 	db.get(Q.openCountOnRef, { project, ref: about })?.n ?? 0;
 
@@ -519,7 +570,7 @@ export function queuePage(
 ) {
 	const at = input.after ?? { rank: Number.MIN_SAFE_INTEGER, id: Number.MIN_SAFE_INTEGER };
 	const base = { project: input.project, state: input.state, rank: at.rank, id: at.id, limit: input.limit };
-	return input.kind ? db.all(Q.queueOfKind, { ...base, kind: input.kind }) : db.all(Q.queue, base);
+	return (input.kind ? db.all(Q.queueOfKind, { ...base, kind: input.kind }) : db.all(Q.queue, base)).map(readQuestion);
 }
 
 /** A page of the ledger, newest first, after the position `before` (the revision and id of the last row seen). */
@@ -529,7 +580,9 @@ export function ledgerPage(
 ) {
 	const at = input.before ?? { rev: Number.MAX_SAFE_INTEGER, id: Number.MAX_SAFE_INTEGER };
 	const base = { project: input.project, rev: at.rev, id: at.id, limit: input.limit };
-	return input.kind ? db.all(Q.ledgerOfKind, { ...base, kind: input.kind }) : db.all(Q.ledger, base);
+	return (input.kind ? db.all(Q.ledgerOfKind, { ...base, kind: input.kind }) : db.all(Q.ledger, base)).map(
+		readQuestion,
+	);
 }
 
 /** The ids of every open question of a kind in the queue, oldest first, however many there are. */
@@ -548,7 +601,7 @@ export const questionsChangedSince = (
 	project: number,
 	from: { rev: number; id: number },
 	limit: number,
-): QuestionRow[] => db.all(Q.changedSince, { project, rev: from.rev, id: from.id, limit });
+): QuestionRow[] => db.all(Q.changedSince, { project, rev: from.rev, id: from.id, limit }).map(readQuestion);
 
 export function insertAnswer(
 	ctx: Ctx,

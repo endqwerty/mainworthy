@@ -73,16 +73,21 @@ type Handler<K extends Kind> = {
 	effect: (
 		ctx: Ctx,
 		witness: Witness,
-		question: QuestionRow,
+		question: QuestionRow & { kind: K },
 		answer: AnswerOf<K>,
 		tools: Tools,
 	) => Generator<undefined, Record<string, unknown>, void>;
-	revert: (ctx: Ctx, question: QuestionRow, decision: DecisionRow) => void;
-	holds: (input: { question: QuestionRow; answer: AnswerOf<K>; now: number; policy: Policy }) => HoldTerm[];
+	revert: (ctx: Ctx, question: QuestionRow & { kind: K }, decision: DecisionRow) => void;
+	holds: (input: {
+		question: QuestionRow & { kind: K };
+		answer: AnswerOf<K>;
+		now: number;
+		policy: Policy;
+	}) => HoldTerm[];
 	/** Whether the acting actor wrote the thing in question (the author of a proposal). */
-	isAuthor: (ctx: Ctx, question: QuestionRow) => boolean;
+	isAuthor: (ctx: Ctx, question: QuestionRow & { kind: K }) => boolean;
 	/** Whether the acting actor produced the evidence in question. */
-	isProducer: (ctx: Ctx, question: QuestionRow) => boolean;
+	isProducer: (ctx: Ctx, question: QuestionRow & { kind: K }) => boolean;
 	undoable: boolean;
 	undoHint: string;
 };
@@ -409,40 +414,50 @@ export function runsAbout(ctx: Ctx, question: QuestionRow): number[] {
 
 /** The result producers in this slot, kept on its question after settlement too. */
 export function disputeParties(ctx: Ctx, question: QuestionRow): number[] {
-	const subject = json<{ slot?: number }>(question.subject);
-	return subject.slot === undefined ? [] : [...new Set(fillsOf(ctx.db, subject.slot).map((fill) => fill.actor))];
+	if (question.kind !== "failure" || question.subject.kind !== "slot") return [];
+	return [...new Set(fillsOf(ctx.db, question.subject.slot).map((fill) => fill.actor))];
 }
 
 const failureHandler: Handler<"failure"> = {
 	*effect(ctx, witness, question, answer) {
-		const subject = json<{ signature: number; scope: string; slot?: number }>(question.subject);
-		if (subject.slot !== undefined) {
-			const { results } = json<{ results: number[] }>(question.evidence);
-			if (answer.is === "mistaken") {
-				const corrected = discountResults(ctx, witness, results);
-				if (corrected.length === 0) throw invalid("this slot no longer counts the failing results");
-				return { corrected };
+		const subject = question.subject;
+		if (subject.kind !== "slot" && answer.is === "mistaken")
+			throw invalid("`mistaken` answers a slot dispute, not the whole cause");
+		switch (subject.kind) {
+			case "slot": {
+				const { results } = json<{ results: number[] }>(question.evidence);
+				if (answer.is === "mistaken") {
+					const corrected = discountResults(ctx, witness, results);
+					if (corrected.length === 0) throw invalid("this slot no longer counts the failing results");
+					return { corrected };
+				}
+				const klass = failureClass(answer);
+				setResultExcuses(ctx, witness, results, klass, { kind: "slot", slot: subject.slot });
+				return { class: klass, results, slot: subject.slot };
 			}
-			const klass = failureClass(answer);
-			setResultExcuses(ctx, witness, results, klass, { kind: "slot", slot: subject.slot });
-			return { class: klass, results, slot: subject.slot };
+			case "inherited": {
+				const klass = failureClass(answer);
+				const { inherited } = json<{ inherited: { result: number; base: number[] }[] }>(question.evidence);
+				setResultExcuses(
+					ctx,
+					witness,
+					inherited.map((row) => row.result),
+					klass,
+				);
+				return {
+					class: klass,
+					results: inherited.map((row) => row.result),
+					inherited: answer.is === "inherited" ? inherited : [],
+				};
+			}
+			case "cause":
+				break;
+			default: {
+				const _exhaustive: never = subject;
+				return _exhaustive;
+			}
 		}
-		if (answer.is === "mistaken") throw invalid("`mistaken` answers a slot dispute, not the whole cause");
 		const klass = failureClass(answer);
-		if (json<{ perResult?: boolean }>(question.subject).perResult) {
-			const { inherited } = json<{ inherited: { result: number; base: number[] }[] }>(question.evidence);
-			setResultExcuses(
-				ctx,
-				witness,
-				inherited.map((row) => row.result),
-				klass,
-			);
-			return {
-				class: klass,
-				results: inherited.map((row) => row.result),
-				inherited: answer.is === "inherited" ? inherited : [],
-			};
-		}
 		// A decision that holds on certain targets excuses those and no other.
 		const policy = currentPolicy(ctx.db, ctx.project.id);
 		const here = failureHandler
@@ -474,7 +489,7 @@ const failureHandler: Handler<"failure"> = {
 		};
 	},
 	revert(ctx, question, decision) {
-		const subject = json<{ signature: number; scope: string }>(question.subject);
+		const subject = question.subject;
 		const effects = json<{ corrected?: [number, number][]; class?: string }>(decision.effects);
 		if (effects.corrected) restoreFailures(ctx, decision.id);
 		if (effects.class) {
@@ -483,14 +498,23 @@ const failureHandler: Handler<"failure"> = {
 		}
 	},
 	holds({ question, answer, now, policy }) {
+		const subject = question.subject;
 		const basis = untilBasisChanges(question);
-		if (json<{ slot?: number }>(question.subject).slot !== undefined) {
-			if (answer.is === "mistaken") return [{ until: "results-named" }];
-			return answer.is === "flaky"
-				? [...basis, { until: "time", at: now + policy.settings.holds.flakyDays * DAY }]
-				: basis;
+		switch (subject.kind) {
+			case "slot":
+				if (answer.is === "mistaken") return [{ until: "results-named" }];
+				return answer.is === "flaky"
+					? [...basis, { until: "time", at: now + policy.settings.holds.flakyDays * DAY }]
+					: basis;
+			case "inherited":
+				return basis;
+			case "cause":
+				break;
+			default: {
+				const _exhaustive: never = subject;
+				return _exhaustive;
+			}
 		}
-		if (json<{ perResult?: boolean }>(question.subject).perResult) return basis;
 		// The target of the question's latest evidence: the build the person answering was looking at.
 		const latest = json<{ targetId?: number }>(question.evidence).targetId;
 		const targets = latest !== undefined ? [latest] : [];
@@ -524,11 +548,11 @@ const failureHandler: Handler<"failure"> = {
 	 * A cause answer judges its failure producers in its scope. A slot settlement judges only that slot's parties.
 	 */
 	isProducer(ctx, question) {
-		const subject = json<{ signature: number; scope: string; slot?: number }>(question.subject);
+		const subject = question.subject;
 		const actor = ctx.actor.id;
 		const kept = json<{ producers?: number[]; parties?: number[] }>(question.evidence);
 		if ((kept.producers ?? []).includes(actor) || (kept.parties ?? []).includes(actor)) return true;
-		if (subject.slot !== undefined) return disputeParties(ctx, question).includes(actor);
+		if (subject.kind === "slot") return disputeParties(ctx, question).includes(actor);
 		const reported = producedCause(ctx.db, ctx.project.id, subject.signature, actor).some(
 			(seen) => scopeOf(mustTarget(ctx.db, seen.target), seen.run) === subject.scope,
 		);
