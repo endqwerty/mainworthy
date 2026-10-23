@@ -220,16 +220,31 @@ test("the browser fixture compiles in its output directory so build files cannot
 	}
 });
 
+function checkoutEntries(root = "."): string[] {
+	return topEntries(
+		Bun.spawnSync(["git", "ls-files", "--cached"], { cwd: root, stdout: "pipe" }).stdout.toString(),
+		() => readdirSync(root),
+	);
+}
+
+test("checkout inventories ignore unrelated untracked files", () => {
+	const scratch = make("scope-tracked");
+	try {
+		Bun.spawnSync(["git", "init", "--quiet", scratch], { stdout: "pipe", stderr: "pipe" });
+		writeFileSync(join(scratch, "README.md"), "Tracked document.\n");
+		Bun.spawnSync(["git", "add", "README.md"], { cwd: scratch, stdout: "pipe", stderr: "pipe" });
+		writeFileSync(join(scratch, "stray-local-notes.txt"), "Local notes.\n");
+		expect(checkoutEntries(scratch)).toEqual(["README.md"]);
+	} finally {
+		remove(scratch);
+	}
+});
+
 // Each entry at the top of the repository, and the jobs a change to it runs. A new one is decided here, in review:
 // a configuration file a job reads goes into that job's paths in scripts/ci-scope.ts. Every one of these runs every
 // test, except the files that only the tests naming them read.
 test("every entry at the top of the repository has the jobs it needs", () => {
-	const entries = topEntries(
-		Bun.spawnSync(["git", "ls-files", "--cached", "--others", "--exclude-standard"], {
-			stdout: "pipe",
-		}).stdout.toString(),
-		() => readdirSync("."),
-	);
+	const entries = checkoutEntries();
 	const jobs = (entry: string): string => {
 		const file = existsSync(entry) && statSync(entry).isDirectory() ? `${entry}/a-file.ts` : entry;
 		const chosen = plan([file], tests);

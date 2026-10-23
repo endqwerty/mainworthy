@@ -37,3 +37,8 @@ test("decisions reject conflicting ids, mismatched headings, missing metadata an
 		]),
 	).toThrow(/duplicate/i);
 });
+
+test("mistyped dates cannot fall back to historical decision numbers", () => {
+	for (const file of ["2026-10-3-a.md", "2026-1-03-a.md", "2026-not-a-date.md", "2026-10-32-a.md"])
+		expect(() => decisions([{ file, text: "# A title\n" }])).toThrow(/dated.*filename|filename.*dated|date/i);
+});

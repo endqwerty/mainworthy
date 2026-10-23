@@ -31,7 +31,7 @@ import {
 	waitForTests,
 	within,
 } from "../scripts/work/processes.ts";
-import { closing, type Facts, principles, problems } from "../scripts/work/pull-request.ts";
+import { closing, type Facts, gather, principles, problems } from "../scripts/work/pull-request.ts";
 import { RELEASED, release } from "../scripts/work/release.ts";
 import { run } from "../scripts/work/run.ts";
 import { MARKER, make, refusal, remove } from "../scripts/work/scratch.ts";
@@ -426,6 +426,8 @@ test("`board check` names the id that no longer fits the board", () => {
 
 const NOTE = "\nPrinciples: Model the Domain (one tagged status)\n";
 const facts = (over: Partial<Facts> = {}): Facts => ({
+	pull: { url: "https://github.com/endqwerty/mainworthy/pull/832", draft: false },
+	addedFragments: [],
 	body: `## Why\n\nCloses #12\n${NOTE}`,
 	base: "main",
 	milestone: "M3",
@@ -487,6 +489,59 @@ test("the milestone of the pull request is the milestone of its issue; in a stac
 		problems(facts({ body: `No issue: the owner asked in a thread.\n${NOTE}`, linked: [], milestone: null })),
 	).toEqual([]);
 	expect(problems(facts({ base: "feature/below", linked: [] }))).toEqual([]);
+});
+
+test("added fragments name their own PR and pending is allowed only in a draft", () => {
+	const file = ".changes/example-change.md";
+	const own = "https://github.com/endqwerty/mainworthy/pull/832";
+	const reference = (pr: string) => `---\nid: example\npr: ${pr}\n---\n\nA change.\n`;
+	for (const text of [
+		reference("pending"),
+		reference("https://github.com/endqwerty/mainworthy/pull/831"),
+		`---\nid: example\n---\n\npr: ${own}`,
+		reference(own).replace(`pr: ${own}`, `pr: ${own}\npr: ${own}`),
+	]) {
+		const found = problems(facts({ addedFragments: [{ file, text }] }));
+		expect(found.join("\n")).toContain(file);
+		expect(found.join("\n")).toContain(own);
+	}
+	expect(problems(facts({ addedFragments: [{ file, text: reference(own) }] }))).toEqual([]);
+	expect(
+		problems(facts({ pull: { url: own, draft: true }, addedFragments: [{ file, text: reference("pending") }] })),
+	).toEqual([]);
+	expect(
+		problems(
+			facts({
+				pull: { url: own, draft: true },
+				addedFragments: [{ file, text: reference("https://github.com/endqwerty/mainworthy/pull/831") }],
+			}),
+		),
+	).not.toEqual([]);
+});
+
+test("PR facts read added fragments at the immutable PR head", async () => {
+	const head = "a".repeat(40);
+	const calls: string[][] = [];
+	const source = "---\nid: example\npr: pending\n---\n\nA fact.\n";
+	const got = await gather(832, async (args) => {
+		calls.push(args);
+		if (args[0] === "pr")
+			return JSON.stringify({
+				body: NOTE,
+				baseRefName: "main",
+				milestone: null,
+				closingIssuesReferences: [],
+				isDraft: true,
+				headRefOid: head,
+			});
+		if (args[1]?.endsWith("/pulls/832/files")) return ".changes/example-change.md\nsrc/example.ts";
+		if (args[1] === `repos/endqwerty/mainworthy/contents/.changes/example-change.md?ref=${head}`) return source;
+		throw new Error(`unexpected GitHub read: ${args.join(" ")}`);
+	});
+	expect(got.pull).toEqual({ url: "https://github.com/endqwerty/mainworthy/pull/832", draft: true });
+	expect(got.addedFragments).toEqual([{ file: ".changes/example-change.md", text: source }]);
+	expect(calls.find((args) => args[1]?.endsWith("/files"))?.join(" ")).toContain("--paginate");
+	expect(calls.find((args) => args[1]?.endsWith("/files"))?.join(" ")).toContain('.status == "added"');
 });
 
 test("the check's time is read from its report and judged against the spread between runs of one revision", () => {
@@ -782,4 +837,11 @@ test("ci waits for a pending gate and says when a person is asked", async () => 
 	} finally {
 		h.close();
 	}
+});
+
+test("marking a PR ready reruns its fragment-reference check", () => {
+	const workflow = Bun.YAML.parse(readFileSync(".github/workflows/check.yml", "utf8"));
+	expect(workflow).toMatchObject({
+		on: { pull_request: { types: expect.arrayContaining(["opened", "synchronize", "reopened", "ready_for_review"]) } },
+	});
 });

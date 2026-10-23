@@ -150,14 +150,19 @@ id: 123-example
 category: Fixed
 date: 2026-10-23
 issue: https://github.com/endqwerty/mainworthy/issues/123
+pr: pending
 ---
 
 Describe the behaviour a person can observe and any compatibility break.
 ```
 
-The metadata accepts one plain scalar per line. Categories are `Fixed`, `Changed`, `Breaks`, `Security` and `Added`. Dates are real calendar dates in `YYYY-MM-DD` form. Include `issue`, `pr`, or both as full links to this repository. A thread task with no PR yet uses `pr: pending`; replace it with the PR URL when opening one. Write Markdown links relative to `.changes/`, or use HTTPS links. The assembler relocates relative links for the root changelog.
+The metadata accepts one plain scalar per line. Categories are `Fixed`, `Changed`, `Breaks`, `Security` and `Added`. Dates are real calendar dates in `YYYY-MM-DD` form. Include `issue`, `pr`, or both as full links to this repository. Use `pr: pending` before a PR exists or while it is a draft. Every fragment added by a ready PR must carry that PR's full URL. The `description` job enforces this against files at the PR head. Write one Markdown paragraph, with inline links relative to `.changes/` or HTTPS links. Soft wraps are allowed. Headings, reference definitions and multiple paragraphs are refused. Use LF line endings and keep only lowercase `.md` fragment files in `.changes/`. The assembler relocates relative links for the root changelog and preserves code spans.
 
-Run `bun scripts/changelog.ts --check` to validate fragments. A feature author leaves `CHANGELOG.md` alone. The release coordinator previews with `bun scripts/changelog.ts` and assembles with `bun scripts/changelog.ts --write`. Commit the aggregate only when cutting a release or integrating a batch. Keep the fragments after assembly. Repeated runs replace the same marked section, sorted by descending date and ascending id, and preserve every byte of historical entries. Do not use union merges.
+Run `bun scripts/changelog.ts --check` to validate fragments. Its count of fragments not yet assembled is information, not a failure. A feature author leaves `CHANGELOG.md` alone. The coordinator previews with `bun scripts/changelog.ts` and assembles with `bun scripts/changelog.ts --write`.
+
+`main` deploys continuously; `CHANGELOG.md` is the user-facing record. At the end of each landing batch, the coordinator opens an ordinary pull request titled "Assemble the changelog" with the updated aggregate. Do this at least daily while fragments are pending. The owner reviews and merges it through the usual workflow. CI must never push to `main`.
+
+Keep the fragments after assembly. Repeated runs replace the same marked section, sorted by descending date and ascending id, and preserve every byte of historical entries. Each fragment occupies one generated line. Both check and write refuse unmarked lines, unknown fragment ids and duplicate ids inside an existing section. Move a hand-written entry into a fragment before retrying. Do not use union merges.
 
 ## Record a design decision
 
@@ -175,7 +180,7 @@ Add `docs/decisions/YYYY-MM-DD-<slug>.md` with an unnumbered first heading and t
 Describe the problem, decision, alternatives and checks.
 ```
 
-The date matches the filename. Status is `proposed`, `accepted`, `superseded`, `rejected` or `deprecated`. Include `- Issue: <full issue URL>`, `- PR: <full PR URL>`, or both. Use `pending` for a PR that does not exist yet, then replace it when opening one. Keep every historical numbered filename and its links unchanged. Historical records retain their older metadata conventions.
+The date matches the filename. Status is `proposed`, `accepted`, `superseded`, `rejected` or `deprecated`. Include `- Issue: <full issue URL>`, `- PR: <full PR URL>`, or both. Use `pending` for a PR that does not exist yet, then replace it when opening one. Historical numbered records start with `0` and three digits. Any new record uses a complete calendar date. Keep every historical numbered filename and its links unchanged. Historical records retain their older metadata conventions.
 
 Run `bun test test/docs.test.ts test/decisions.test.ts` to check records. `bun scripts/decisions.ts` prints a Markdown index with repository-relative links, sorted by ascending date and id. Undated historical records come first. Generate this list when needed instead of editing a shared index. The app serves guide pages only; it does not enumerate these records or read the changelog.
 

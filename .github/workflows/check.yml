@@ -29,7 +29,8 @@
 #
 # `description` checks a pull request's description and milestone (scripts/work/pull-request.ts): a closing word is
 # only on a line of its own, GitHub links the issues the description closes and no other, and the milestone is the
-# issue's. It reads them when the check starts, so after a fix to either, run the job again
+# issue's. Added fragments must name this PR; pending is allowed only for drafts. It reads these facts when the check starts,
+# so after a fix to the description or milestone, run the job again
 # (`gh run rerun <run> --job <id>`). A push to `main` has no pull request and skips it.
 #
 # `gate` is the job to require on the branch. It fails when the gate does not pass, when a report is missing,
@@ -40,6 +41,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -171,7 +173,7 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.3
-      - name: Closing words, linked issues, milestone and principles
+      - name: Closing words, linked issues, milestone, principles and fragment references
         env:
           GH_TOKEN: ${{ github.token }}
         run: bun scripts/work.ts pr-body ${{ github.event.pull_request.number }}

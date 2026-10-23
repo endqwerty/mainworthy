@@ -20,8 +20,9 @@ To deliver a change, follow these steps:
 3. Get an independent verification from a model of another provider, as the `verify` skill asks.
 4. Open a non-draft pull request. Give it the issue's milestone. Put `Closes #123` on a line of its own only when
    the merge makes everything the issue asks for true. Otherwise write `Part of #123`.
-5. Run `bun scripts/work.ts pr-body <number>`. It reads back the issues GitHub linked and checks the milestone.
-   CI's `description` job runs the same command.
+5. Set `pr: <this PR's URL>` in each fragment this PR adds, commit and push that update, then run
+   `bun scripts/work.ts pr-body <number>`. It checks the linked issues, milestone, principles and fragment PR references.
+   CI's `description` job runs the same command; `pr: pending` is allowed only while the PR is a draft.
 6. Move the pull request's card too: `bun scripts/work.ts board start <number>`.
 7. Once `gate` is green, run the Daybreak security audit on the head and its base, address every issue it declares,
    and record the audit in the description: [docs/security-audit.md](../security-audit.md).
@@ -33,7 +34,7 @@ owner's word covers it: [docs/landing-a-stack.md](../landing-a-stack.md).
 
 ## Know what CI runs
 
-`.github/workflows/check.yml` runs for every pull request and every push to `main`.
+`.github/workflows/check.yml` runs when a pull request opens, receives commits, reopens or becomes ready for review, and on every push to `main`. The ready-for-review run prevents a draft's `pr: pending` from carrying into a ready PR.
 
 | Job | Runs when | What it does |
 | --- | --- | --- |

@@ -1,3 +1,4 @@
+// These checks read .changes/ fragments and CHANGELOG.md through their authoring scripts.
 import { expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -57,17 +58,108 @@ test("assembly rejects broken section markers instead of overwriting history", (
 	expect(assemble("# Changelog\n\nHistorical entry.\n", [])).toBe("# Changelog\n\nHistorical entry.\n");
 });
 
-test("assembly relocates inline and reference links from .changes/ to the root changelog", () => {
+test("fragments refuse reference definitions that would collide across entries", () => {
+	expect(() => fragments([fragment("refs", "A [guide][x].\n\n[x]: ../docs/development/README.md")])).toThrow(
+		/reference definitions/i,
+	);
+});
+
+test("multiline and escaped reference labels are refused too", () => {
+	for (const body of [
+		"A [guide][long label].\n\n[long\n label]: ../docs/development/README.md",
+		"A [guide][escaped\\]label].\n\n[escaped\\]label]: ../docs/development/README.md",
+	])
+		expect(() => fragments([fragment("references", body)])).toThrow(/reference definitions/i);
+});
+
+test("fragment headings follow CommonMark and issue-number text remains valid", () => {
+	for (const body of ["An entry.\n\n   ## Indented heading", "Heading\n===", "Heading\n---"])
+		expect(() => fragments([fragment("heading", body)])).toThrow(/heading/i);
+	expect(() => fragments([fragment("issue", "#123 is fixed.")])).not.toThrow();
+});
+
+test("soft-wrapped paragraphs assemble onto one owned line and blocks are refused", () => {
+	const entries = fragments([fragment("wrapped", "First sentence.\nSecond sentence.")]);
+	const output = assemble("# Changelog\n\nHistory.\n", entries);
+	expect(output).toContain("First sentence. Second sentence.");
+	expect(assemble(output, entries)).toBe(output);
+	expect(() => fragments([fragment("paragraphs", "One paragraph.\n\nAnother paragraph.")])).toThrow(/paragraph/i);
+});
+
+test("assembly relocates real inline links while preserving code spans", () => {
 	const entry = fragment(
 		"links",
-		"[guide](../docs/development/README.md) and [decisions][records].\n\n[records]: ../docs/decisions/2026-10-23-changelog-fragments-and-dated-decisions.md",
+		"Read [guide](../docs/development/README.md); literal `[example](../docs/development/README.md)` and `` `[nested](../docs/development/README.md)` `` stay as typed.",
 	);
 	const output = assemble("# Changelog\n\nOld history.\n", fragments([entry]));
 	expect(output).toContain("[guide](docs/development/README.md)");
-	expect(output).toContain("[records]: docs/decisions/2026-10-23-changelog-fragments-and-dated-decisions.md");
-	expect(Bun.markdown.html(output)).toContain(
-		'href="docs/decisions/2026-10-23-changelog-fragments-and-dated-decisions.md"',
-	);
+	expect(output).toContain("`[example](../docs/development/README.md)`");
+	expect(output).toContain("`` `[nested](../docs/development/README.md)` ``");
+});
+
+test("fragment CRLF line endings receive an explicit refusal", () => {
+	expect(() =>
+		fragments([{ ...fragment("windows"), text: fragment("windows").text.replaceAll("\n", "\r\n") }]),
+	).toThrow(/CRLF line endings/i);
+});
+
+test("empty-path anchors receive an explicit refusal", () => {
+	expect(() => fragments([fragment("anchor", "[x](#top)")])).toThrow(/missing (?:file|heading).*#top/i);
+});
+
+test("assembly refuses unowned generated lines and unknown fragment ids", () => {
+	const entries = fragments([fragment("a")]);
+	const output = assemble("# Changelog\n\nHistory.\n", entries);
+	for (const changed of [
+		output.replace("<!-- changes:end -->", "HAND-ADDED\n<!-- changes:end -->"),
+		output.replace("change:a", "change:unknown"),
+	])
+		expect(() => assemble(changed, entries)).toThrow(/move.*\.changes\/.*fragment/i);
+});
+
+for (const option of ["--check", "--write"]) {
+	test(`${option} refuses handwritten generated content and preserves the file`, () => {
+		const scratch = make("changelog-unowned");
+		try {
+			mkdirSync(join(scratch, ".changes"));
+			const input = fragment("owned");
+			writeFileSync(join(scratch, ".changes", input.file), input.text);
+			const changed = assemble("# Changelog\n\nHistory.\n", fragments([input])).replace(
+				"<!-- changes:end -->",
+				"HAND-ADDED\n<!-- changes:end -->",
+			);
+			writeFileSync(join(scratch, "CHANGELOG.md"), changed);
+			const run = Bun.spawnSync([process.execPath, join(process.cwd(), "scripts/changelog.ts"), option], {
+				cwd: scratch,
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			expect(run.exitCode).not.toBe(0);
+			expect(run.stderr.toString()).toMatch(/move.*\.changes\/.*fragment/i);
+			expect(readFileSync(join(scratch, "CHANGELOG.md"), "utf8")).toBe(changed);
+		} finally {
+			remove(scratch);
+		}
+	});
+}
+
+test("discovery refuses every non-fragment directory entry", () => {
+	const scratch = make("changelog-files");
+	try {
+		mkdirSync(join(scratch, ".changes"));
+		for (const name of ["u-x.MD", "notes.txt", ".changelog-stale.tmp"])
+			writeFileSync(join(scratch, ".changes", name), "ignored before this fix");
+		writeFileSync(join(scratch, "CHANGELOG.md"), "# Changelog\n\nHistory.\n");
+		const run = Bun.spawnSync([process.execPath, join(process.cwd(), "scripts/changelog.ts"), "--check"], {
+			cwd: scratch,
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		expect(run.exitCode).not.toBe(0);
+		for (const name of ["u-x.MD", "notes.txt", ".changelog-stale.tmp"]) expect(run.stderr.toString()).toContain(name);
+	} finally {
+		remove(scratch);
+	}
 });
 
 test("every repository fragment appears exactly once and the real command validates them", () => {
@@ -91,6 +183,28 @@ test("every repository fragment appears exactly once and the real command valida
 		const written = readFileSync(join(scratch, "CHANGELOG.md"), "utf8");
 		expect(written).toContain("A CLI-assembled fact.");
 		expect(written.endsWith(historical.slice("# Changelog\n\n".length))).toBe(true);
+	} finally {
+		remove(scratch);
+	}
+});
+
+test("--check reports pending fragments as information without writing the aggregate", () => {
+	const scratch = make("changelog-pending");
+	try {
+		mkdirSync(join(scratch, ".changes"));
+		const first = fragment("first");
+		const second = fragment("second");
+		for (const input of [first, second]) writeFileSync(join(scratch, ".changes", input.file), input.text);
+		const current = assemble("# Changelog\n\nHistory.\n", fragments([first]));
+		writeFileSync(join(scratch, "CHANGELOG.md"), current);
+		const run = Bun.spawnSync([process.execPath, join(process.cwd(), "scripts/changelog.ts"), "--check"], {
+			cwd: scratch,
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		expect(run.exitCode, run.stderr.toString()).toBe(0);
+		expect(run.stdout.toString()).toContain("1 fragment not yet assembled");
+		expect(readFileSync(join(scratch, "CHANGELOG.md"), "utf8")).toBe(current);
 	} finally {
 		remove(scratch);
 	}
