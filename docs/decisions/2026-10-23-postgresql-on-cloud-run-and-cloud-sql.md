@@ -72,7 +72,11 @@ it arrives.
 
 A read that spans several statements runs in one `REPEATABLE READ READ ONLY` transaction on one connection, so it
 sees one snapshot, as `snapshotAsync` in `src/server/kernel/db.ts` gives it today. PostgreSQL's default,
-`READ COMMITTED`, takes a new snapshot for each statement and is not enough.
+`READ COMMITTED`, takes a new snapshot for each statement and is not enough. A snapshot can be older than a
+revocation that committed while the read ran, so after the snapshot closes and before the result is returned,
+every read checks the credential, the project and the capability again on a fresh view, as reads on the reader
+threads do today (`registry.ts`). Tests pause a read, revoke the token, end the session or remove the grant from
+another connection, and see the read refused.
 
 Reports keep their two durable phases, the one exception to one operation per transaction
 (`src/server/ops/writes.ts`, `registry.ts`):
@@ -85,7 +89,9 @@ Reports keep their two durable phases, the one exception to one operation per tr
 
 The actor's lock ends with the acceptance commit, so a revocation can commit between the two phases. The accepted
 batch therefore records the hash of the exact token or session it was admitted with and its actor's
-`auth_version`. Application, and recovery after a crash, lock the actor row and check both again before they
+`auth_version`, in a table of its own that is in `UNEXPORTED` and loses its row when the batch is applied or
+cancelled, so no archive holds a credential's hash. An accepted batch that arrives by import has no such row and
+is cancelled, not applied. A test checks that no token or session hash appears in an export. Application, and recovery after a crash, lock the actor row and check both again before they
 apply anything: the credential must still be live, and if the version moved, current authority must still allow
 the report. If not, application cancels the batch and removes its pending marks in one transaction, and the
 command's reply says the report was refused. Tests revoke the token, end the session and remove the grant
@@ -194,16 +200,20 @@ So background work becomes jobs behind one job interface (0002 rule 6):
 - A job keeps the actor and the time it was accepted with, and never replays a bearer token.
 - The job interface has two ways to start work. The in-process runner polls the table and runs jobs; local
   development, CI and the tests use it, as would any host whose CPU runs between requests. On Cloud Run, a job
-  runs inside an HTTP request to the service's job endpoint, so its CPU is allocated: Cloud Tasks sends one request
-  per job, and Cloud Scheduler sends the periodic work once a minute. A job must finish within both its task's
+  runs inside an HTTP request to a second Cloud Run service, the job service, so its CPU is allocated: Cloud Tasks
+  sends one request per job, and Cloud Scheduler sends the periodic work once a minute. The job service runs the
+  same image, scales to zero, and serves only the job endpoint; the public service refuses that path. A job must finish within both its
+  task's
   dispatch deadline (ten minutes by default, thirty at most) and the service's request timeout (five minutes by
   default), as step 3 sets them; the transaction timeouts above are far shorter. A job whose request was given up
   may still be running, and its claim token keeps its late final write from landing. A test finishes a job after
   its claim was taken again.
-- The job endpoint accepts only a request with an OIDC token that Google signed for the service's address and the
-  job service account, within its validity. The app checks the token with `jose`, which becomes a runtime
-  dependency (today it is a development one), against configured issuer, audience and account. It holds no shared
-  secret. The address Cloud Tasks and Cloud Scheduler call is one the service accepts.
+- The job service keeps Cloud Run's invoker IAM check on, and only the job service account may invoke it. That is
+  allowed under domain-restricted sharing, which forbids only principals outside the organisation such as
+  `allUsers`. So Google refuses every other caller before a request reaches the container, and a flood of forged
+  tokens costs the app nothing. The app checks the OIDC token again (signature, issuer, audience, account and
+  validity) with `jose`, which becomes a runtime dependency (today it is a development one). It holds no shared
+  secret.
 - A job whose request never arrived is still a row. The next successful periodic run starts every due job that is
   not claimed. Cloud Scheduler retries with backoff and gives no deadline, so the record claims no bound on that
   delay beyond "the next successful run".
@@ -240,7 +250,8 @@ A `db-f1-micro` instance starts with `max_connections` at 25, the default for it
 ([Cloud SQL's flags](https://docs.cloud.google.com/sql/docs/postgres/flags)), and Cloud SQL keeps some of them for
 itself. Cloud Run's maximum instance count is not a hard cap: it can be exceeded briefly, and during a deploy the
 old and new revisions run together ([Google's page](https://docs.cloud.google.com/run/docs/configuring/max-instances-limits)).
-So the budget counts both revisions at their maximum, each instance's pool plus its `LISTEN` connection, the
+So the budget counts both revisions of both services at their maximum, each instance's pool (and, on the public
+service, its `LISTEN` connection), the
 migration's connection and an operator's session, and leaves headroom under the limit. An instance that cannot
 get a connection within a bound answers `busy`, rather than waiting without end. Step 2 makes the pool size a
 setting with a small default; step 3 sets the maximum instance count from that sum. The preview instance has its
@@ -257,8 +268,8 @@ Terraform here reads them from CI's configuration. Four of the organisation's ru
 - **Domain-restricted sharing.** `allUsers` cannot be granted a role, so a Cloud Run service cannot be made public
   through IAM. The service turns off its invoker IAM check instead (`invoker_iam_disabled` in Terraform,
   [Google's page](https://docs.cloud.google.com/run/docs/authenticating/public#disable)). Google then
-  authenticates no request to it, and every path, the job endpoint included, is reachable by anyone who has the
-  address. The app already authenticates every request itself; the job endpoint checks its OIDC token.
+  authenticates no request to it, and every path is reachable by anyone who has the address. The app already
+  authenticates every request itself. The job service is not public, so it keeps the invoker check.
 - **No public IP on Cloud SQL, and no default network in a new project.** Step 3 makes a VPC with one subnet in
   `us-west1` and private services access for Cloud SQL. The app reaches Cloud SQL's private address through
   Direct VPC egress, for private ranges only, so its other outbound requests (GitHub, mail, sign-in providers)
@@ -311,8 +322,8 @@ So a request can skip Cloudflare and carry a forged `CF-Connecting-IP`, whatever
 The app therefore trusts Cloudflare's headers only for a request that proves it came through Cloudflare, on every
 way in. Step 7 chooses how: a secret header that a Cloudflare rule sets, overwriting any the client sent, and that
 the app checks, kept in Secret Manager; or a load balancer that admits only Cloudflare. Turning off the `run.app`
-address is extra defence, not the proof. In production the app refuses every request without the proof, except
-the startup probe's `/healthz` and the job endpoint, which has its own OIDC check. A request is never served with
+address is extra defence, not the proof. In production the public service refuses every request without the
+proof, except the startup probe's `/healthz`. A request is never served with
 no client address: today the sign-in limits give such a request no address key (`limiter.ts`), so serving it
 would let it pass the address limits. The check sends direct requests, with and without a forged header, to the
 `run.app` address and to Google's endpoint for the mapped hostname, and sees each refused.
@@ -348,8 +359,10 @@ record's own proposals, and acceptance covers them:
 - **A temporary single PostgreSQL write lock** in step 2's bottom request, below.
 - **A separate pool and an in-memory limit in front of anonymous sign-in work**, and a Cloudflare rate-limiting
   rule on the sign-in paths.
-- **Production refuses a request without the Cloudflare proof**, apart from the startup probe and the job
-  endpoint, rather than serving it with no client address. CI's smoke check of a deployed revision sends the
+- **A second Cloud Run service for jobs**, with its invoker IAM check on, so only the job service account reaches
+  the job endpoint.
+- **Production refuses a request without the Cloudflare proof**, apart from the startup probe, rather than serving
+  it with no client address. CI's smoke check of a deployed revision sends the
   proof from a GitHub secret.
 
 ## Order
@@ -388,8 +401,8 @@ The steps are #821's. Each ends in a check that passes before the next starts.
    - The last request measures the timeouts and looks for requests that make many small queries, since each query
      is now a round trip.
 3. The app's Google Cloud infrastructure in Terraform, in this repository, applied by CI inside the Mainworthy
-   projects only: Artifact Registry, both Cloud SQL instances, the bucket, the Cloud Tasks queue, the Cloud
-   Scheduler job, Secret Manager, the VPC, its subnet and private services access. The Cloud Tasks dispatcher
+   projects only: Artifact Registry, both Cloud SQL instances, the bucket, the job service, the Cloud Tasks queue,
+   the Cloud Scheduler job, Secret Manager, the VPC, its subnet and private services access. The Cloud Tasks dispatcher
    lands here, where a real queue can check it. Check: `terraform plan` in CI shows no change after the first
    apply, and the read-only identity cannot change anything.
 4. Build once in CI and push to Artifact Registry. Check: `/healthz` reports the commit of the deployed image.
@@ -472,7 +485,7 @@ host** keeps the database file and the handover.
 
 **CPU always allocated** (instance-based billing) would let the in-process runner do the background work with no
 Cloud Tasks or Scheduler, for about $45 a month instead of $10 for the app (#821). It is the simpler design and the
-first fallback if the job endpoint proves fragile.
+first fallback if the job service proves fragile.
 
 **Async slices on SQLite first**, the Railway record's plan, give smaller pull requests before the engine moves,
 but each needs temporary transaction helpers that the move throws away, and none of them runs on PostgreSQL.
