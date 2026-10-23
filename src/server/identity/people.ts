@@ -1343,7 +1343,7 @@ export async function signInWithTotp(
 }
 
 export function beginTotp(app: App, input: { actor: number; context: string }) {
-	requireRecentProof(app, input, true);
+	requireRecentProof(app, input);
 	const person = mustBePerson(app.db, input.actor);
 	if (liveTotp(app.db, person.id))
 		throw conflict("an authenticator is enrolled already; remove it before enrolling another");
@@ -1358,7 +1358,7 @@ export function confirmTotp(
 	app: App,
 	input: { actor: number; session: number | null; context: string; challenge: string; code: string },
 ) {
-	requireRecentProof(app, input, true);
+	requireRecentProof(app, input);
 	const person = mustBePerson(app.db, input.actor);
 	const held = findTotp(app, input.challenge, "enrol");
 	if (!held || held.actor !== person.id || held.name !== person.name || held.context !== input.context)

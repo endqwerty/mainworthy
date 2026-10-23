@@ -392,11 +392,13 @@ not count. Another browser's proof does not count for this session.
 An admin removing somebody else's credential, or the owner changing their
 recovery address in **People**, proves their own credential. A bearer token
 cannot provide session proof. Use a signed-in browser for these changes. The
-first credential, invitation acceptance, recovery links, and the local-mode
-owner need no prior proof. If you have only a provider identity, ask the owner
-for a recovery link to establish a password or passkey first. The last usable
-way to sign in stays even after proof. Removing a credential that this session
-rests on ends the session.
+local-mode owner, invitation acceptance, and recovery links need no prior proof.
+If you have no live credential, adding your first password or passkey needs no
+prior proof either. Add it in **Your sign-in**, then retry and prove it before
+setting or removing a recovery address or enrolling an authenticator. If you have
+only a provider identity, ask the owner for a recovery link to establish a
+password or passkey first. The last usable way to sign in stays even after proof.
+Removing a credential that this session rests on ends the session.
 
 Making any invitation or recovery link from a browser asks for the admin's recent proof.
 If you lost every credential, the operator can still issue a link with their
