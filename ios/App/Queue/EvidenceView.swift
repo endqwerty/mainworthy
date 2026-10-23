@@ -97,27 +97,29 @@ private struct FailureEvidence: View {
 				Button("Try again") { Task { await screen.readSample(id) } }
 			}
 		case .read(let sample):
-			Panel("Sample result") {
-				if let detail = sample.detail, !detail.isEmpty {
-					DisclosureGroup("Diagnostic detail") {
-						Text(detail).font(.callout.monospaced()).textSelection(.enabled)
-							.frame(maxWidth: .infinity, alignment: .leading)
+			if sample.hasContent {
+				Panel("Sample result") {
+					if let detail = sample.detail, !detail.isEmpty {
+						DisclosureGroup("Diagnostic detail") {
+							Text(detail).font(.callout.monospaced()).textSelection(.enabled)
+								.frame(maxWidth: .infinity, alignment: .leading)
+						}
+						.accessibilityIdentifier("sample-detail")
 					}
-					.accessibilityIdentifier("sample-detail")
-				}
-				if let note = sample.note { Text(note).font(.subheadline).textSelection(.enabled) }
-				if let build = sample.build { Link("Build", destination: build) }
-				if let steps = sample.steps {
-					ResultTrailView(steps: steps, result: id, attachments: screen.attachments)
-				}
-				ForEach(Array(sample.attachments.enumerated()), id: \.offset) { index, name in
-					Button {
-						Task { await screen.attachments.open(result: id, index: index) }
-					} label: {
-						Label(name, systemImage: "paperclip").font(.subheadline)
+					if let note = sample.note, !note.isEmpty { Text(note).font(.subheadline).textSelection(.enabled) }
+					if let build = sample.build { Link("Build", destination: build) }
+					if let steps = sample.steps {
+						ResultTrailView(steps: steps, result: id, attachments: screen.attachments)
 					}
-					.buttonStyle(.borderless)
-					.accessibilityIdentifier("sample-attachment-\(index)")
+					ForEach(Array(sample.attachments.enumerated()), id: \.offset) { index, name in
+						Button {
+							Task { await screen.attachments.open(result: id, index: index) }
+						} label: {
+							Label(name, systemImage: "paperclip").font(.subheadline)
+						}
+						.buttonStyle(.borderless)
+						.accessibilityIdentifier("sample-attachment-\(index)")
+					}
 				}
 			}
 		}

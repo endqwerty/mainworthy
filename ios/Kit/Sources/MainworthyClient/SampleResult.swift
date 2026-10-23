@@ -8,6 +8,11 @@ public struct SampleResult: Equatable, Sendable {
 	public let build: URL?
 	/// File names in the server's order, including files no step points to.
 	public let attachments: [String]
+
+	public var hasContent: Bool {
+		!(detail ?? "").isEmpty || !(note ?? "").isEmpty || build != nil
+			|| !(steps ?? []).isEmpty || !attachments.isEmpty
+	}
 }
 
 extension ProjectClient {

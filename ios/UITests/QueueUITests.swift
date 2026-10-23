@@ -40,6 +40,55 @@ private func reportUnlinkedTests(in project: String) async throws {
 final class QueueUITests: XCTestCase {
 	private let environment = ProcessInfo.processInfo.environment
 
+	@MainActor func testFailureSampleEmptyAndText() async throws {
+		let project = try await makeProject()
+		let text = "<script>alert('untrusted')</script>\n**Literal log**, not Markdown."
+		_ = try await call("report", project: project, input: [
+			"target": ["commit": String(repeating: "7", count: 40), "repo": "acme/shop", "pr": 837],
+			"job": "sample-rough-edges", "results": [
+				["test": ["key": "empty-sample"], "outcome": "fail", "failure": ["message": "Empty sample evidence"]],
+				["test": ["key": "text-sample"], "outcome": "fail", "failure": ["message": "Text sample evidence"],
+					"attachments": [["name": "result.txt", "data": Data(text.utf8).base64EncodedString()],
+						["name": "result.bin", "data": Data([0, 1, 255]).base64EncodedString()]]],
+			],
+		])
+		let inbox = try await call("inbox", project: project, input: ["kind": "failure"])
+		let questions = try XCTUnwrap(inbox["items"] as? [[String: Any]])
+		func ref(_ title: String) throws -> String {
+			try XCTUnwrap(questions.first { $0["title"] as? String == title }?["q"] as? String)
+		}
+		let app = try launchAtTextSize(.large, project: project)
+		let empty = app.buttons["question-\(try ref("Empty sample evidence"))"]
+		XCTAssertTrue(empty.waitForExistence(timeout: 10))
+		empty.tap()
+		XCTAssertTrue(app.staticTexts["Empty sample evidence"].firstMatch.waitForExistence(timeout: 10))
+		let spinner = app.progressIndicators.firstMatch
+		XCTAssertTrue(spinner.waitForNonExistence(timeout: 10))
+		shot("failure-empty-sample")
+		let emptyPanelHidden = !app.staticTexts["Sample result"].exists
+		app.navigationBars.buttons.element(boundBy: 0).tap()
+		let fileQuestion = app.buttons["question-\(try ref("Text sample evidence"))"]
+		XCTAssertTrue(fileQuestion.waitForExistence(timeout: 10))
+		fileQuestion.tap()
+		let file = app.buttons["sample-attachment-0"]
+		XCTAssertTrue(file.waitForExistence(timeout: 10))
+		file.tap()
+		XCTAssertTrue(app.staticTexts["screenshot-filename"].waitForExistence(timeout: 10))
+		shot("failure-text-file")
+		XCTAssertTrue(emptyPanelHidden, "An empty sample must not show a Sample result panel")
+		XCTAssertTrue(app.staticTexts["attachment-text"].exists)
+		XCTAssertEqual(app.staticTexts["attachment-text"].label, text)
+		XCTAssertTrue(app.navigationBars["Attachment"].exists)
+		XCTAssertTrue(app.buttons["share-attachment"].exists)
+		app.buttons["Done"].tap()
+		app.buttons["sample-attachment-1"].tap()
+		XCTAssertTrue(app.staticTexts["Share this file to open it in another app."].waitForExistence(timeout: 10))
+		XCTAssertEqual(app.staticTexts["screenshot-filename"].label, "result.bin")
+		app.buttons["share-attachment"].tap()
+		XCTAssertTrue(app.cells["Save to Files"].waitForExistence(timeout: 10))
+		shot("failure-share-file")
+	}
+
 	@MainActor func testFailureSampleEvidence() async throws {
 		let project = try await makeProject()
 		let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="

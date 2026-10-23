@@ -1,4 +1,5 @@
 import Foundation
+import UniformTypeIdentifiers
 
 public enum ResultOutcome: String, Decodable, Equatable, Sendable {
 	case pass, fail, skip, blocked, error
@@ -57,9 +58,24 @@ public struct ResultStep: Equatable, Sendable {
 }
 
 public struct ResultScreenshot: Equatable, Sendable {
+	public enum Preview: Equatable, Sendable {
+		case image
+		case text(String, truncated: Bool)
+		case share
+	}
+
 	public let name: String
 	public let type: String
 	public let data: Data
+
+	public var preview: Preview {
+		if type.hasPrefix("image/") { return .image }
+		let suffix = (name as NSString).pathExtension.lowercased()
+		guard type.hasPrefix("text/") || suffix == "log"
+			|| UTType(filenameExtension: suffix)?.conforms(to: .text) == true else { return .share }
+		let limit = 64 * 1024
+		return .text(String(decoding: data.prefix(limit), as: UTF8.self), truncated: data.count > limit)
+	}
 }
 
 extension ProjectClient {

@@ -1,6 +1,8 @@
+import CoreTransferable
 import MainworthyClient
 import MainworthyScreens
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// One rendering for the trail wherever a result appears.
 struct ResultTrailView: View {
@@ -60,15 +62,20 @@ extension View {
 private struct ResultAttachmentPresentation: ViewModifier {
 	@Bindable var screen: ResultAttachmentScreen
 
+	private var title: String {
+		if case .file(let file) = screen.content, file.preview == .image { return "Screenshot" }
+		return "Attachment"
+	}
+
 	func body(content: Content) -> some View {
 		content.sheet(isPresented: $screen.presented) {
 			NavigationStack {
 				Group {
 					switch screen.content {
-					case .loading: ProgressView("Reading screenshot…")
+					case .loading: ProgressView("Reading attachment…")
 					case .failed(let why):
 						ContentUnavailableView {
-							Label("Screenshot could not be read", systemImage: "exclamationmark.triangle")
+							Label("Attachment could not be read", systemImage: "exclamationmark.triangle")
 						} description: { Text(why) } actions: {
 							Button("Try again") { Task { await screen.retry() } }
 						}
@@ -76,19 +83,35 @@ private struct ResultAttachmentPresentation: ViewModifier {
 						ScrollView {
 							VStack(spacing: 16) {
 								Text(file.name).font(.headline).accessibilityIdentifier("screenshot-filename")
-								if file.type.hasPrefix("image/"), let image = UIImage(data: file.data) {
-									Image(uiImage: image).resizable().scaledToFit()
-										.accessibilityLabel(file.name)
-										.accessibilityIdentifier("screenshot-image")
-								} else {
-									Text("This attachment cannot be displayed as an image.").foregroundStyle(.secondary)
+								switch file.preview {
+								case .image:
+									if let image = UIImage(data: file.data) {
+										Image(uiImage: image).resizable().scaledToFit()
+											.accessibilityLabel(file.name)
+											.accessibilityIdentifier("screenshot-image")
+									} else {
+										Text("This image could not be displayed.").foregroundStyle(.secondary)
+									}
+								case .text(let text, let truncated):
+									Text(verbatim: text).font(.callout.monospaced()).textSelection(.enabled)
+										.frame(maxWidth: .infinity, alignment: .leading)
+										.accessibilityIdentifier("attachment-text")
+									if truncated {
+										Text("Showing the first 64 KiB. Share to read the whole file.").font(.caption).foregroundStyle(.secondary)
+									}
+								case .share:
+									Text("Share this file to open it in another app.").foregroundStyle(.secondary)
 								}
+								ShareLink(item: SharedResultAttachment(file: file), preview: SharePreview(file.name)) {
+									Label("Share", systemImage: "square.and.arrow.up")
+								}
+								.accessibilityIdentifier("share-attachment")
 							}
 							.padding(16)
 						}
 					}
 				}
-				.navigationTitle("Screenshot")
+				.navigationTitle(title)
 				.navigationBarTitleDisplayMode(.inline)
 				.toolbar {
 					ToolbarItem(placement: .confirmationAction) {
@@ -98,5 +121,14 @@ private struct ResultAttachmentPresentation: ViewModifier {
 			}
 			.presentationDragIndicator(.visible)
 		}
+	}
+}
+
+private struct SharedResultAttachment: Transferable {
+	let file: ResultScreenshot
+
+	static var transferRepresentation: some TransferRepresentation {
+		DataRepresentation(exportedContentType: .data) { item in item.file.data }
+			.suggestedFileName { item in item.file.name }
 	}
 }
