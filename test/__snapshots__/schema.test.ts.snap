@@ -1,0 +1,2005 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`PostgreSQL 18 baseline catalog matches the reviewed snapshot 1`] = `
+"column actors.created_at: bigint NOT NULL
+column actors.disabled_at: bigint NULL
+column actors.id: bigint NOT NULL IDENTITY d
+column actors.kind: text NOT NULL
+column actors.name: text NOT NULL
+column actors.on_behalf_of: bigint NULL
+column actors.org: bigint NOT NULL
+column answers.actor: bigint NOT NULL
+column answers.answer: text NOT NULL
+column answers.at: bigint NOT NULL
+column answers.counts: bigint NOT NULL
+column answers.id: bigint NOT NULL IDENTITY d
+column answers.on_evidence: text NOT NULL
+column answers.question: bigint NOT NULL
+column answers.reason: text NULL
+column answers.seq: bigint NOT NULL
+column artifacts.actor: bigint NOT NULL
+column artifacts.at: bigint NOT NULL
+column artifacts.code: text NOT NULL
+column artifacts.digest: text NOT NULL
+column artifacts.id: bigint NOT NULL IDENTITY d
+column artifacts.project: bigint NOT NULL
+column artifacts.seq: bigint NOT NULL
+column assertion_index.project: bigint NOT NULL
+column assertion_roots.project: bigint NOT NULL
+column assertion_roots.root: bigint NOT NULL
+column assertion_roots.signature: bigint NOT NULL
+column assertion_seen.file: text NULL
+column assertion_seen.project: bigint NOT NULL
+column assertion_seen.root: bigint NOT NULL
+column assertion_seen.scope: text NOT NULL
+column assertion_seen.test: bigint NOT NULL
+column assertion_spreads.project: bigint NOT NULL
+column assertion_spreads.root: bigint NOT NULL
+column assertion_spreads.scope: text NOT NULL
+column attachments.at: text NULL
+column attachments.hash: text NOT NULL
+column attachments.id: bigint NOT NULL IDENTITY d
+column attachments.name: text NOT NULL
+column attachments.result: bigint NOT NULL
+column attachments.size: bigint NOT NULL
+column attachments.type: text NOT NULL
+column batches.actor: bigint NOT NULL
+column batches.at: bigint NOT NULL
+column batches.attempt: bigint NOT NULL DEFAULT 1
+column batches.build_url: text NULL
+column batches.counts: text NOT NULL
+column batches.id: bigint NOT NULL IDENTITY d
+column batches.job: text NOT NULL DEFAULT ''::text
+column batches.key: text NOT NULL
+column batches.method: text NOT NULL
+column batches.model: text NULL
+column batches.nothing_required: bigint NOT NULL DEFAULT 0
+column batches.project: bigint NOT NULL
+column batches.receipt: text NULL
+column batches.run: bigint NULL
+column batches.seq: bigint NOT NULL
+column batches.shard: bigint NULL
+column batches.shards: bigint NULL
+column batches.staged: text NULL
+column batches.state: text NOT NULL
+column batches.target: bigint NOT NULL
+column builds.artifact: bigint NOT NULL
+column builds.id: bigint NOT NULL IDENTITY d
+column builds.label: text NOT NULL
+column builds.project: bigint NOT NULL
+column builds.seq: bigint NOT NULL
+column case_aliases.alias: text NOT NULL
+column case_aliases.case_id: bigint NOT NULL
+column case_aliases.project: bigint NOT NULL
+column case_tags.case_id: bigint NOT NULL
+column case_tags.project: bigint NOT NULL
+column case_tags.tag: text NOT NULL
+column cases.aliases: text NOT NULL DEFAULT '[]'::text
+column cases.automate: text NOT NULL
+column cases.claim_hash: text NOT NULL
+column cases.created_at: bigint NOT NULL
+column cases.created_by: bigint NOT NULL
+column cases.folder: bigint NOT NULL
+column cases.head: bigint NOT NULL
+column cases.head_hash: text NOT NULL
+column cases.id: bigint NOT NULL IDENTITY d
+column cases.kind: text NOT NULL DEFAULT 'case'::text
+column cases.methods: text NOT NULL
+column cases.no: bigint NOT NULL
+column cases.project: bigint NOT NULL
+column cases.rank: text NOT NULL
+column cases.rev: bigint NOT NULL
+column cases.state: text NOT NULL DEFAULT 'active'::text
+column cases.step_count: bigint NOT NULL
+column cases.tags: text NOT NULL DEFAULT '[]'::text
+column cases.title: text NOT NULL
+column cases.updated_at: bigint NOT NULL
+column cases.updated_by: bigint NOT NULL
+column change_ends.at: bigint NOT NULL
+column change_ends.change: bigint NOT NULL
+column change_ends.ended: text NOT NULL
+column change_ends.landing_branch: text NULL
+column change_ends.landing_commit: text NULL
+column change_ends.landing_repo: text NULL
+column change_ends.receipt: bigint NULL
+column changes.base_sha: text NULL
+column changes.branch: text NULL
+column changes.files: text NOT NULL DEFAULT '[]'::text
+column changes.head_observed_seq: bigint NULL
+column changes.head_sha: text NULL
+column changes.id: bigint NOT NULL IDENTITY d
+column changes.key: text NOT NULL
+column changes.project: bigint NOT NULL
+column changes.repo: text NULL
+column changes.rev: bigint NOT NULL
+column changes.title: text NULL
+column changes.url: text NULL
+column commands.actor: bigint NOT NULL
+column commands.at: bigint NOT NULL
+column commands.id: text NOT NULL
+column commands.op: text NOT NULL
+column commands.outcome: text NOT NULL
+column commands.project: bigint NOT NULL
+column commands.request: text NOT NULL
+column commands.seq: bigint NOT NULL
+column commands.touched: text NOT NULL
+column commit_status_delivery.failures: bigint NOT NULL
+column commit_status_delivery.id: bigint NOT NULL IDENTITY d
+column commit_status_delivery.pause_until: bigint NOT NULL
+column commit_status_delivery.posts: text NOT NULL
+column commit_statuses.attempts: bigint NOT NULL DEFAULT 0
+column commit_statuses.commit_sha: text NOT NULL
+column commit_statuses.desired: text NOT NULL
+column commit_statuses.error: text NULL
+column commit_statuses.next_at: bigint NOT NULL
+column commit_statuses.nonce: text NOT NULL
+column commit_statuses.project: bigint NOT NULL
+column commit_statuses.repository: text NOT NULL
+column commit_statuses.sent: text NULL
+column commit_statuses.state: text NOT NULL
+column commit_statuses.watch_until: bigint NOT NULL
+column counters.name: text NOT NULL
+column counters.project: bigint NOT NULL
+column counters.value: bigint NOT NULL
+column covers.case_id: bigint NOT NULL
+column covers.decision: bigint NOT NULL
+column covers.requirement: bigint NOT NULL
+column credentials.actor: bigint NOT NULL
+column credentials.created_at: bigint NOT NULL
+column credentials.data: text NOT NULL
+column credentials.handle: text NULL
+column credentials.id: bigint NOT NULL IDENTITY d
+column credentials.kind: text NOT NULL
+column credentials.label: text NOT NULL
+column credentials.last_used_at: bigint NULL
+column credentials.revoked_at: bigint NULL
+column decisions.answer: text NOT NULL
+column decisions.at: bigint NOT NULL
+column decisions.basis: text NOT NULL
+column decisions.effects: text NOT NULL DEFAULT '{}'::text
+column decisions.expires_at: bigint NULL
+column decisions.holds: text NOT NULL
+column decisions.id: bigint NOT NULL IDENTITY d
+column decisions.kind: text NOT NULL
+column decisions.on_evidence: text NULL
+column decisions.project: bigint NOT NULL
+column decisions.question: bigint NOT NULL
+column decisions.seq: bigint NOT NULL
+column decisions.signers: text NOT NULL
+column decisions.supersedes: bigint NULL
+column demo_projects.project: bigint NOT NULL
+column demo_projects.since: bigint NOT NULL
+column depends_on.decision: bigint NOT NULL
+column depends_on.expires_at: bigint NULL
+column depends_on.run: bigint NOT NULL
+column deployments.actor: bigint NOT NULL
+column deployments.at: bigint NOT NULL
+column deployments.build: bigint NOT NULL
+column deployments.env: text NOT NULL
+column deployments.id: bigint NOT NULL IDENTITY d
+column deployments.project: bigint NOT NULL
+column deployments.seq: bigint NOT NULL
+column excuses.class: text NOT NULL
+column excuses.decision: bigint NOT NULL
+column excuses.expires_at: bigint NULL
+column excuses.project: bigint NOT NULL
+column excuses.scope: text NOT NULL
+column excuses.signature: bigint NOT NULL
+column excuses.target: bigint NOT NULL DEFAULT 0
+column findings.actor: bigint NOT NULL
+column findings.at: bigint NOT NULL
+column findings.basis: text NOT NULL
+column findings.case_id: bigint NULL
+column findings.category: text NOT NULL
+column findings.id: bigint NOT NULL IDENTITY d
+column findings.lens: text NOT NULL
+column findings.locus: text NOT NULL
+column findings.note: text NOT NULL
+column findings.project: bigint NOT NULL
+column findings.question: bigint NULL
+column findings.repro: text NULL
+column findings.seq: bigint NOT NULL
+column findings.suggest: text NULL
+column flips.first_result: bigint NOT NULL
+column flips.first_try: bigint NULL
+column flips.id: bigint NOT NULL IDENTITY d
+column flips.project: bigint NOT NULL
+column flips.second_result: bigint NOT NULL
+column flips.second_try: bigint NULL
+column flips.seq: bigint NOT NULL
+column flips.target: bigint NOT NULL
+column flips.test: bigint NOT NULL
+column folders.id: bigint NOT NULL IDENTITY d
+column folders.name: text NOT NULL
+column folders.parent: bigint NULL
+column folders.project: bigint NOT NULL
+column folders.rank: text NOT NULL
+column folders.rev: bigint NOT NULL
+column folders.state: text NOT NULL DEFAULT 'active'::text
+column grants.actor: bigint NOT NULL
+column grants.can: text NOT NULL
+column grants.project: bigint NOT NULL DEFAULT 0
+column grants.roles: text NOT NULL DEFAULT '[]'::text
+column handoffs.at: bigint NOT NULL
+column handoffs.body: text NOT NULL
+column handoffs.error: text NULL
+column handoffs.id: text NOT NULL
+column handoffs.nonce: text NOT NULL
+column handoffs.project: bigint NOT NULL
+column handoffs.question: bigint NOT NULL
+column handoffs.queue_order: bigint NOT NULL IDENTITY d
+column handoffs.state: text NOT NULL
+column invitations.actor: bigint NOT NULL
+column invitations.created_at: bigint NOT NULL
+column invitations.created_by: bigint NOT NULL
+column invitations.expires_at: bigint NOT NULL
+column invitations.hash: text NOT NULL
+column invitations.id: bigint NOT NULL IDENTITY d
+column invitations.purpose: text NOT NULL
+column invitations.revoked_at: bigint NULL
+column invitations.used_at: bigint NULL
+column mail_contacts.actor: bigint NOT NULL
+column mail_contacts.email: text NOT NULL
+column mail_contacts.revision: text NOT NULL
+column mail_contacts.verified_at: bigint NULL
+column merge_receipt_dirty.bucket: bigint NOT NULL
+column merge_receipt_dirty.run: bigint NOT NULL
+column merge_receipt_heads.project: bigint NOT NULL
+column merge_receipt_heads.root: bigint NULL
+column merge_receipt_heads.run: bigint NOT NULL
+column merge_receipt_members.child: bigint NULL
+column merge_receipt_members.node: bigint NOT NULL
+column merge_receipt_members.payload: bigint NULL
+column merge_receipt_members.slot: bigint NOT NULL
+column merge_receipt_nodes.count: bigint NOT NULL
+column merge_receipt_nodes.hash: text NOT NULL
+column merge_receipt_nodes.id: bigint NOT NULL IDENTITY d
+column merge_receipt_nodes.level: bigint NOT NULL
+column merge_receipt_nodes.project: bigint NOT NULL
+column merge_receipt_payloads.body: text NOT NULL
+column merge_receipt_payloads.hash: text NOT NULL
+column merge_receipt_payloads.id: bigint NOT NULL IDENTITY d
+column merge_receipt_payloads.project: bigint NOT NULL
+column merge_receipt_snapshots.count: bigint NOT NULL
+column merge_receipt_snapshots.evidence_count: bigint NOT NULL
+column merge_receipt_snapshots.gate_root: bigint NULL
+column merge_receipt_snapshots.hash: text NOT NULL
+column merge_receipt_snapshots.id: bigint NOT NULL IDENTITY d
+column merge_receipt_snapshots.project: bigint NOT NULL
+column merge_receipt_snapshots.result_root: bigint NULL
+column merge_receipts.actor: bigint NOT NULL
+column merge_receipts.at: bigint NOT NULL
+column merge_receipts.change: bigint NOT NULL
+column merge_receipts.evidence: bigint NOT NULL
+column merge_receipts.id: bigint NOT NULL IDENTITY d
+column merge_receipts.project: bigint NOT NULL
+column merge_receipts.seq: bigint NOT NULL
+column merge_receipts.snapshot: text NOT NULL
+column meta.key: text NOT NULL
+column meta.value: text NOT NULL
+column orgs.created_at: bigint NOT NULL
+column orgs.id: bigint NOT NULL IDENTITY d
+column orgs.name: text NOT NULL
+column passkey_users.actor: bigint NOT NULL
+column passkey_users.created_at: bigint NOT NULL
+column passkey_users.handle: text NOT NULL
+column placements.actor: bigint NOT NULL
+column placements.after: text NOT NULL
+column placements.at: bigint NOT NULL
+column placements.before: text NOT NULL
+column placements.case_id: bigint NOT NULL
+column placements.decision: bigint NOT NULL
+column placements.id: bigint NOT NULL IDENTITY d
+column placements.proposal: bigint NOT NULL
+column placements.seq: bigint NOT NULL
+column policies.actor: bigint NOT NULL
+column policies.at: bigint NOT NULL
+column policies.clauses: text NOT NULL
+column policies.decision: bigint NULL
+column policies.preset: text NOT NULL
+column policies.project: bigint NOT NULL
+column policies.seq: bigint NOT NULL
+column policies.settings: text NOT NULL
+column policies.version: bigint NOT NULL
+column projects.created_at: bigint NOT NULL
+column projects.id: bigint NOT NULL IDENTITY d
+column projects.identity: text NOT NULL DEFAULT ''::text
+column projects.key: text NOT NULL
+column projects.name: text NOT NULL
+column projects.org: bigint NOT NULL
+column projects.seq: bigint NOT NULL DEFAULT 0
+column proposals.at: bigint NOT NULL
+column proposals.author: bigint NOT NULL
+column proposals.cause: text NULL
+column proposals.edits: text NOT NULL
+column proposals.id: bigint NOT NULL IDENTITY d
+column proposals.no: bigint NOT NULL
+column proposals.project: bigint NOT NULL
+column proposals.reason: text NULL
+column proposals.resolved: text NOT NULL
+column proposals.seq: bigint NOT NULL
+column quarantines.actor: bigint NOT NULL
+column quarantines.at: bigint NOT NULL
+column quarantines.decision: bigint NOT NULL
+column quarantines.exit_rule: text NULL
+column quarantines.project: bigint NOT NULL
+column quarantines.reason: text NOT NULL
+column quarantines.seq: bigint NOT NULL
+column quarantines.test: bigint NOT NULL
+column question_refs.project: bigint NOT NULL
+column question_refs.question: bigint NOT NULL
+column question_refs.ref: text NOT NULL
+column questions.ask: text NOT NULL
+column questions.basis: text NOT NULL
+column questions.blocks: text NOT NULL
+column questions.carried: bigint NOT NULL DEFAULT 0
+column questions.decision: bigint NULL
+column questions.epoch: bigint NOT NULL DEFAULT 0
+column questions.evidence: text NOT NULL
+column questions.evidence_hash: text NOT NULL
+column questions.fingerprint: text NOT NULL
+column questions.id: bigint NOT NULL IDENTITY d
+column questions.kind: text NOT NULL
+column questions.no: bigint NOT NULL
+column questions.opened_at: bigint NOT NULL
+column questions.owner: bigint NOT NULL DEFAULT 0
+column questions.prior: bigint NULL
+column questions.producer: text NOT NULL
+column questions.project: bigint NOT NULL
+column questions.rank: bigint NOT NULL
+column questions.rev: bigint NOT NULL
+column questions.seen_count: bigint NOT NULL DEFAULT 1
+column questions.seen_first: bigint NOT NULL
+column questions.seen_last: bigint NOT NULL
+column questions.state: text NOT NULL
+column questions.subject: text NOT NULL
+column questions.title: text NOT NULL
+column requirements.id: bigint NOT NULL IDENTITY d
+column requirements.key: text NOT NULL
+column requirements.project: bigint NOT NULL
+column requirements.rev: bigint NOT NULL
+column requirements.source: text NULL
+column requirements.state: text NOT NULL DEFAULT 'active'::text
+column requirements.title: text NOT NULL DEFAULT ''::text
+column result_excuses.class: text NOT NULL
+column result_excuses.decision: bigint NOT NULL
+column result_excuses.expires_at: bigint NULL
+column result_excuses.id: bigint NOT NULL IDENTITY d
+column result_excuses.result: bigint NOT NULL
+column result_excuses.slot: bigint NULL
+column result_tries.detail: text NULL
+column result_tries.duration_ms: bigint NULL
+column result_tries.id: bigint NOT NULL IDENTITY d
+column result_tries.message: text NULL
+column result_tries.outcome: text NOT NULL
+column result_tries.project: bigint NOT NULL
+column result_tries.result: bigint NOT NULL
+column result_tries.signature: bigint NULL
+column result_tries.try: bigint NOT NULL
+column results.actor: bigint NOT NULL
+column results.at: bigint NOT NULL
+column results.at_step: text NULL
+column results.attempt: bigint NOT NULL DEFAULT 1
+column results.basis: text NOT NULL
+column results.basis_case: bigint NULL
+column results.basis_claim: text NULL
+column results.basis_version: bigint NULL
+column results.batch: bigint NOT NULL
+column results.corrects: bigint NULL
+column results.detail: text NULL
+column results.duration_ms: bigint NULL
+column results.id: bigint NOT NULL IDENTITY d
+column results.message: text NULL
+column results.method: text NOT NULL
+column results.model: text NULL
+column results.note: text NULL
+column results.ord: bigint NOT NULL
+column results.outcome: text NOT NULL
+column results.project: bigint NOT NULL
+column results.quarantine_decision: bigint NULL
+column results.quarantine_exit: bigint NULL
+column results.run: bigint NULL
+column results.seq: bigint NOT NULL
+column results.signature: bigint NULL
+column results.target: bigint NOT NULL
+column results.test: bigint NOT NULL
+column results.trail: text NULL
+column reviews.about: text NULL
+column reviews.at: bigint NOT NULL
+column reviews.basis: text NOT NULL
+column reviews.case_id: bigint NOT NULL
+column reviews.id: bigint NOT NULL IDENTITY d
+column reviews.lens: text NOT NULL
+column reviews.project: bigint NOT NULL
+column reviews.reviewer: bigint NOT NULL
+column reviews.seq: bigint NOT NULL
+column reviews.version: bigint NOT NULL
+column run_tests.attempt: bigint NOT NULL
+column run_tests.flipped: bigint NOT NULL DEFAULT 0
+column run_tests.lane: text NOT NULL
+column run_tests.outcome: text NOT NULL
+column run_tests.result: bigint NOT NULL
+column run_tests.run: bigint NOT NULL
+column run_tests.signature: bigint NULL
+column run_tests.target: bigint NOT NULL
+column run_tests.test: bigint NOT NULL
+column runs.accepted_seq: bigint NOT NULL DEFAULT 0
+column runs.accepts: text NOT NULL
+column runs.accepts_what: text NULL
+column runs.applied_seq: bigint NOT NULL DEFAULT 0
+column runs.blocking: text NOT NULL DEFAULT '[]'::text
+column runs.change: bigint NULL
+column runs.created_at: bigint NOT NULL
+column runs.created_by: bigint NOT NULL
+column runs.id: bigint NOT NULL IDENTITY d
+column runs.name: text NOT NULL
+column runs.next_expiry: bigint NULL
+column runs.no: bigint NOT NULL
+column runs.origin: text NOT NULL
+column runs.outstanding: bigint NOT NULL DEFAULT 0
+column runs.project: bigint NOT NULL
+column runs.quarantined: bigint NOT NULL DEFAULT 0
+column runs.require: text NOT NULL
+column runs.rev: bigint NOT NULL
+column runs.scope: text NULL
+column runs.signoff: bigint NULL
+column runs.state: text NOT NULL DEFAULT 'open'::text
+column runs.tally: text NOT NULL
+column runs.verdict: text NOT NULL
+column scope_moves.actor: bigint NOT NULL
+column scope_moves.after_scope: text NOT NULL
+column scope_moves.at: bigint NOT NULL
+column scope_moves.before_scope: text NOT NULL
+column scope_moves.id: bigint NOT NULL IDENTITY d
+column scope_moves.project: bigint NOT NULL
+column scope_moves.seq: bigint NOT NULL
+column scope_moves.what: text NOT NULL
+column search_docs.body: text NULL
+column search_docs.id: bigint NOT NULL
+column search_docs.project: bigint NOT NULL
+column search_docs.tags: text NULL
+column search_docs.title: text NULL
+column search_docs.title_tsv: tsvector NOT NULL
+column search_docs.tsv: tsvector NOT NULL
+column sessions.actor: bigint NOT NULL
+column sessions.created_addr: text NULL
+column sessions.created_at: bigint NOT NULL
+column sessions.credential: bigint NULL
+column sessions.ended_at: bigint NULL
+column sessions.ended_why: text NULL
+column sessions.expires_at: bigint NOT NULL
+column sessions.hash: text NOT NULL
+column sessions.id: bigint NOT NULL IDENTITY d
+column sessions.last_seen_addr: text NULL
+column sessions.last_seen_at: bigint NOT NULL
+column sessions.reauthenticated_at: bigint NULL
+column sessions.token: bigint NULL
+column sessions.user_agent: text NULL
+column signatures.class: text NOT NULL DEFAULT 'assertion'::text
+column signatures.first_seq: bigint NOT NULL
+column signatures.hash: text NOT NULL
+column signatures.id: bigint NOT NULL IDENTITY d
+column signatures.project: bigint NOT NULL
+column signatures.text: text NOT NULL
+column slot_leases.actor: bigint NOT NULL
+column slot_leases.since: bigint NOT NULL
+column slot_leases.slot: bigint NOT NULL
+column slot_leases.until: bigint NOT NULL
+column slot_results.admitted: text NOT NULL
+column slot_results.corrected: bigint NOT NULL DEFAULT 0
+column slot_results.discounted_by: bigint NULL
+column slot_results.result: bigint NOT NULL
+column slot_results.run: bigint NOT NULL
+column slot_results.slot: bigint NOT NULL
+column slots.agg: text NOT NULL DEFAULT '{}'::text
+column slots.assignee: bigint NULL
+column slots.case_id: bigint NOT NULL
+column slots.causes: text NOT NULL DEFAULT '[]'::text
+column slots.claim: text NOT NULL
+column slots.id: bigint NOT NULL IDENTITY d
+column slots.obligation: text NOT NULL
+column slots.rank: bigint NOT NULL
+column slots.rev: bigint NOT NULL
+column slots.run: bigint NOT NULL
+column slots.signature: bigint NULL
+column slots.state: text NOT NULL DEFAULT 'missing'::text
+column slots.version: bigint NOT NULL
+column slots.waiver: bigint NULL
+column targets.branch: text NULL
+column targets.change: bigint NULL
+column targets.commit_sha: text NULL
+column targets.env: text NOT NULL DEFAULT ''::text
+column targets.first_seq: bigint NOT NULL
+column targets.id: bigint NOT NULL IDENTITY d
+column targets.line: text NOT NULL
+column targets.project: bigint NOT NULL
+column targets.repo: text NULL
+column targets.what: text NOT NULL
+column team_events.action: text NOT NULL
+column team_events.at: bigint NOT NULL
+column team_events.by_actor: bigint NOT NULL
+column team_events.can: text NULL
+column team_events.id: bigint NOT NULL IDENTITY d
+column team_events.person: bigint NULL
+column team_events.project: bigint NULL
+column team_events.team: bigint NOT NULL
+column team_grants.can: text NOT NULL
+column team_grants.project: bigint NOT NULL DEFAULT 0
+column team_grants.team: bigint NOT NULL
+column team_members.actor: bigint NOT NULL
+column team_members.team: bigint NOT NULL
+column teams.created_at: bigint NOT NULL
+column teams.id: bigint NOT NULL IDENTITY d
+column teams.name: text NOT NULL
+column teams.org: bigint NOT NULL
+column tests.case_id: bigint NULL
+column tests.file: text NULL
+column tests.first_seq: bigint NOT NULL
+column tests.id: bigint NOT NULL IDENTITY d
+column tests.key: text NOT NULL
+column tests.kind: text NOT NULL
+column tests.last_seq: bigint NOT NULL
+column tests.linked_by: bigint NULL
+column tests.name: text NOT NULL
+column tests.no: bigint NOT NULL
+column tests.project: bigint NOT NULL
+column tokens.actor: bigint NOT NULL
+column tokens.created_at: bigint NOT NULL
+column tokens.created_by: bigint NULL
+column tokens.expires_at: bigint NULL
+column tokens.hash: text NOT NULL
+column tokens.id: bigint NOT NULL IDENTITY d
+column tokens.label: text NOT NULL
+column tokens.last_used_addr: text NULL
+column tokens.last_used_at: bigint NULL
+column tokens.revoked_at: bigint NULL
+column tokens.source: text NULL
+column tracker_polls.attempts: bigint NOT NULL
+column tracker_polls.decision: bigint NOT NULL
+column tracker_polls.error: text NULL
+column tracker_polls.next_at: bigint NOT NULL
+column tracker_polls.nonce: text NOT NULL
+column tracker_requests.action: text NOT NULL
+column tracker_requests.at: bigint NOT NULL
+column tracker_requests.body: text NOT NULL
+column tracker_requests.error: text NULL
+column tracker_requests.id: text NOT NULL
+column tracker_requests.issue: text NULL
+column tracker_requests.item_key: text NULL
+column tracker_requests.nonce: text NOT NULL
+column tracker_requests.project: bigint NOT NULL
+column tracker_requests.repository: text NOT NULL
+column tracker_requests.result: bigint NOT NULL
+column tracker_requests.state: text NOT NULL
+column tracker_requests.title: text NOT NULL
+column versions.at: bigint NOT NULL
+column versions.author: bigint NOT NULL
+column versions.body: text NOT NULL
+column versions.case_id: bigint NOT NULL
+column versions.claim_hash: text NOT NULL
+column versions.decision: bigint NOT NULL
+column versions.hash: text NOT NULL
+column versions.no: bigint NOT NULL
+column versions.parent: bigint NULL
+column versions.proposal: bigint NOT NULL
+column versions.reason: text NULL
+column versions.seq: bigint NOT NULL
+constraint actors.actors_created_at_not_null: NOT NULL created_at
+constraint actors.actors_id_not_null: NOT NULL id
+constraint actors.actors_kind_check: CHECK ((kind = ANY (ARRAY['human'::text, 'agent'::text, 'ci'::text, 'rule'::text])))
+constraint actors.actors_kind_not_null: NOT NULL kind
+constraint actors.actors_name_not_null: NOT NULL name
+constraint actors.actors_on_behalf_of_fkey: FOREIGN KEY (on_behalf_of) REFERENCES actors(id) DEFERRABLE
+constraint actors.actors_org_fkey: FOREIGN KEY (org) REFERENCES orgs(id) DEFERRABLE
+constraint actors.actors_org_name_key: UNIQUE (org, name)
+constraint actors.actors_org_not_null: NOT NULL org
+constraint actors.actors_pkey: PRIMARY KEY (id)
+constraint answers.answers_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
+constraint answers.answers_actor_not_null: NOT NULL actor
+constraint answers.answers_answer_not_null: NOT NULL answer
+constraint answers.answers_at_not_null: NOT NULL at
+constraint answers.answers_counts_not_null: NOT NULL counts
+constraint answers.answers_id_not_null: NOT NULL id
+constraint answers.answers_on_evidence_not_null: NOT NULL on_evidence
+constraint answers.answers_pkey: PRIMARY KEY (id)
+constraint answers.answers_question_fkey: FOREIGN KEY (question) REFERENCES questions(id) DEFERRABLE
+constraint answers.answers_question_not_null: NOT NULL question
+constraint answers.answers_seq_not_null: NOT NULL seq
+constraint artifacts.artifacts_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
+constraint artifacts.artifacts_actor_not_null: NOT NULL actor
+constraint artifacts.artifacts_at_not_null: NOT NULL at
+constraint artifacts.artifacts_code_not_null: NOT NULL code
+constraint artifacts.artifacts_digest_not_null: NOT NULL digest
+constraint artifacts.artifacts_id_not_null: NOT NULL id
+constraint artifacts.artifacts_pkey: PRIMARY KEY (id)
+constraint artifacts.artifacts_project_digest_key: UNIQUE (project, digest)
+constraint artifacts.artifacts_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint artifacts.artifacts_project_not_null: NOT NULL project
+constraint artifacts.artifacts_seq_not_null: NOT NULL seq
+constraint assertion_index.assertion_index_pkey: PRIMARY KEY (project)
+constraint assertion_index.assertion_index_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint assertion_index.assertion_index_project_not_null: NOT NULL project
+constraint assertion_roots.assertion_roots_pkey: PRIMARY KEY (signature)
+constraint assertion_roots.assertion_roots_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint assertion_roots.assertion_roots_project_not_null: NOT NULL project
+constraint assertion_roots.assertion_roots_root_fkey: FOREIGN KEY (root) REFERENCES signatures(id) DEFERRABLE
+constraint assertion_roots.assertion_roots_root_not_null: NOT NULL root
+constraint assertion_roots.assertion_roots_signature_fkey: FOREIGN KEY (signature) REFERENCES signatures(id) DEFERRABLE
+constraint assertion_roots.assertion_roots_signature_not_null: NOT NULL signature
+constraint assertion_seen.assertion_seen_pkey: PRIMARY KEY (project, scope, root, test)
+constraint assertion_seen.assertion_seen_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint assertion_seen.assertion_seen_project_not_null: NOT NULL project
+constraint assertion_seen.assertion_seen_root_fkey: FOREIGN KEY (root) REFERENCES signatures(id) DEFERRABLE
+constraint assertion_seen.assertion_seen_root_not_null: NOT NULL root
+constraint assertion_seen.assertion_seen_scope_not_null: NOT NULL scope
+constraint assertion_seen.assertion_seen_test_fkey: FOREIGN KEY (test) REFERENCES tests(id) DEFERRABLE
+constraint assertion_seen.assertion_seen_test_not_null: NOT NULL test
+constraint assertion_spreads.assertion_spreads_pkey: PRIMARY KEY (project, scope, root)
+constraint assertion_spreads.assertion_spreads_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint assertion_spreads.assertion_spreads_project_not_null: NOT NULL project
+constraint assertion_spreads.assertion_spreads_root_fkey: FOREIGN KEY (root) REFERENCES signatures(id) DEFERRABLE
+constraint assertion_spreads.assertion_spreads_root_not_null: NOT NULL root
+constraint assertion_spreads.assertion_spreads_scope_not_null: NOT NULL scope
+constraint attachments.attachments_hash_check: CHECK ((length(hash) = 64))
+constraint attachments.attachments_hash_not_null: NOT NULL hash
+constraint attachments.attachments_id_not_null: NOT NULL id
+constraint attachments.attachments_name_not_null: NOT NULL name
+constraint attachments.attachments_pkey: PRIMARY KEY (id)
+constraint attachments.attachments_result_fkey: FOREIGN KEY (result) REFERENCES results(id) DEFERRABLE
+constraint attachments.attachments_result_not_null: NOT NULL result
+constraint attachments.attachments_size_check: CHECK (((size >= 0) AND (size <= 4194304)))
+constraint attachments.attachments_size_not_null: NOT NULL size
+constraint attachments.attachments_type_not_null: NOT NULL type
+constraint batches.batches_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
+constraint batches.batches_actor_not_null: NOT NULL actor
+constraint batches.batches_at_not_null: NOT NULL at
+constraint batches.batches_attempt_not_null: NOT NULL attempt
+constraint batches.batches_check: CHECK (((shards IS NULL) OR (shards >= shard)))
+constraint batches.batches_check1: CHECK (((model IS NULL) OR (method = 'agent'::text)))
+constraint batches.batches_counts_not_null: NOT NULL counts
+constraint batches.batches_id_not_null: NOT NULL id
+constraint batches.batches_job_not_null: NOT NULL job
+constraint batches.batches_key_not_null: NOT NULL key
+constraint batches.batches_method_check: CHECK ((method = ANY (ARRAY['human'::text, 'auto'::text, 'agent'::text])))
+constraint batches.batches_method_not_null: NOT NULL method
+constraint batches.batches_nothing_required_check: CHECK ((nothing_required = ANY (ARRAY[(0)::bigint, (1)::bigint])))
+constraint batches.batches_nothing_required_not_null: NOT NULL nothing_required
+constraint batches.batches_pkey: PRIMARY KEY (id)
+constraint batches.batches_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint batches.batches_project_key_key: UNIQUE (project, key)
+constraint batches.batches_project_not_null: NOT NULL project
+constraint batches.batches_seq_not_null: NOT NULL seq
+constraint batches.batches_shard_check: CHECK (((shard IS NULL) OR (shard >= 1)))
+constraint batches.batches_state_check: CHECK ((state = ANY (ARRAY['accepted'::text, 'processed'::text])))
+constraint batches.batches_state_not_null: NOT NULL state
+constraint batches.batches_target_fkey: FOREIGN KEY (target) REFERENCES targets(id) DEFERRABLE
+constraint batches.batches_target_not_null: NOT NULL target
+constraint builds.builds_artifact_fkey: FOREIGN KEY (artifact) REFERENCES artifacts(id) DEFERRABLE
+constraint builds.builds_artifact_not_null: NOT NULL artifact
+constraint builds.builds_id_not_null: NOT NULL id
+constraint builds.builds_label_not_null: NOT NULL label
+constraint builds.builds_pkey: PRIMARY KEY (id)
+constraint builds.builds_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint builds.builds_project_label_key: UNIQUE (project, label)
+constraint builds.builds_project_not_null: NOT NULL project
+constraint builds.builds_seq_not_null: NOT NULL seq
+constraint case_aliases.case_aliases_alias_not_null: NOT NULL alias
+constraint case_aliases.case_aliases_case_id_fkey: FOREIGN KEY (case_id) REFERENCES cases(id) DEFERRABLE
+constraint case_aliases.case_aliases_case_id_not_null: NOT NULL case_id
+constraint case_aliases.case_aliases_pkey: PRIMARY KEY (project, alias)
+constraint case_aliases.case_aliases_project_not_null: NOT NULL project
+constraint case_tags.case_tags_case_id_fkey: FOREIGN KEY (case_id) REFERENCES cases(id) DEFERRABLE
+constraint case_tags.case_tags_case_id_not_null: NOT NULL case_id
+constraint case_tags.case_tags_pkey: PRIMARY KEY (project, tag, case_id)
+constraint case_tags.case_tags_project_not_null: NOT NULL project
+constraint case_tags.case_tags_tag_not_null: NOT NULL tag
+constraint cases.cases_aliases_not_null: NOT NULL aliases
+constraint cases.cases_automate_not_null: NOT NULL automate
+constraint cases.cases_claim_hash_not_null: NOT NULL claim_hash
+constraint cases.cases_created_at_not_null: NOT NULL created_at
+constraint cases.cases_created_by_fkey: FOREIGN KEY (created_by) REFERENCES actors(id) DEFERRABLE
+constraint cases.cases_created_by_not_null: NOT NULL created_by
+constraint cases.cases_folder_fkey: FOREIGN KEY (folder) REFERENCES folders(id) DEFERRABLE
+constraint cases.cases_folder_not_null: NOT NULL folder
+constraint cases.cases_head_hash_not_null: NOT NULL head_hash
+constraint cases.cases_head_not_null: NOT NULL head
+constraint cases.cases_id_not_null: NOT NULL id
+constraint cases.cases_kind_check: CHECK ((kind = ANY (ARRAY['case'::text, 'fragment'::text])))
+constraint cases.cases_kind_not_null: NOT NULL kind
+constraint cases.cases_methods_not_null: NOT NULL methods
+constraint cases.cases_no_not_null: NOT NULL no
+constraint cases.cases_pkey: PRIMARY KEY (id)
+constraint cases.cases_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint cases.cases_project_no_key: UNIQUE (project, no)
+constraint cases.cases_project_not_null: NOT NULL project
+constraint cases.cases_rank_not_null: NOT NULL rank
+constraint cases.cases_rev_not_null: NOT NULL rev
+constraint cases.cases_state_check: CHECK ((state = ANY (ARRAY['active'::text, 'archived'::text])))
+constraint cases.cases_state_not_null: NOT NULL state
+constraint cases.cases_step_count_not_null: NOT NULL step_count
+constraint cases.cases_tags_not_null: NOT NULL tags
+constraint cases.cases_title_not_null: NOT NULL title
+constraint cases.cases_updated_at_not_null: NOT NULL updated_at
+constraint cases.cases_updated_by_fkey: FOREIGN KEY (updated_by) REFERENCES actors(id) DEFERRABLE
+constraint cases.cases_updated_by_not_null: NOT NULL updated_by
+constraint change_ends.change_ends_at_not_null: NOT NULL at
+constraint change_ends.change_ends_change_fkey: FOREIGN KEY (change) REFERENCES changes(id) DEFERRABLE
+constraint change_ends.change_ends_change_not_null: NOT NULL change
+constraint change_ends.change_ends_check: CHECK ((((landing_commit IS NULL) AND (landing_repo IS NULL) AND (landing_branch IS NULL)) OR ((ended = 'merged'::text) AND (landing_commit IS NOT NULL) AND (landing_branch IS NOT NULL) AND (landing_branch = ANY (ARRAY['main'::text, 'master'::text, 'trunk'::text])))))
+constraint change_ends.change_ends_ended_check: CHECK ((ended = ANY (ARRAY['merged'::text, 'closed'::text])))
+constraint change_ends.change_ends_ended_not_null: NOT NULL ended
+constraint change_ends.change_ends_pkey: PRIMARY KEY (change)
+constraint change_ends.change_ends_receipt_fkey: FOREIGN KEY (receipt) REFERENCES merge_receipts(id) DEFERRABLE
+constraint changes.changes_files_not_null: NOT NULL files
+constraint changes.changes_id_not_null: NOT NULL id
+constraint changes.changes_key_not_null: NOT NULL key
+constraint changes.changes_pkey: PRIMARY KEY (id)
+constraint changes.changes_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint changes.changes_project_key_key: UNIQUE (project, key)
+constraint changes.changes_project_not_null: NOT NULL project
+constraint changes.changes_rev_not_null: NOT NULL rev
+constraint commands.commands_actor_not_null: NOT NULL actor
+constraint commands.commands_at_not_null: NOT NULL at
+constraint commands.commands_id_not_null: NOT NULL id
+constraint commands.commands_op_not_null: NOT NULL op
+constraint commands.commands_outcome_not_null: NOT NULL outcome
+constraint commands.commands_pkey: PRIMARY KEY (id)
+constraint commands.commands_project_not_null: NOT NULL project
+constraint commands.commands_request_not_null: NOT NULL request
+constraint commands.commands_seq_not_null: NOT NULL seq
+constraint commands.commands_touched_not_null: NOT NULL touched
+constraint commit_status_delivery.commit_status_delivery_failures_not_null: NOT NULL failures
+constraint commit_status_delivery.commit_status_delivery_id_check: CHECK ((id = 1))
+constraint commit_status_delivery.commit_status_delivery_id_not_null: NOT NULL id
+constraint commit_status_delivery.commit_status_delivery_pause_until_not_n: NOT NULL pause_until
+constraint commit_status_delivery.commit_status_delivery_pkey: PRIMARY KEY (id)
+constraint commit_status_delivery.commit_status_delivery_posts_not_null: NOT NULL posts
+constraint commit_statuses.commit_statuses_attempts_not_null: NOT NULL attempts
+constraint commit_statuses.commit_statuses_commit_sha_not_null: NOT NULL commit_sha
+constraint commit_statuses.commit_statuses_desired_not_null: NOT NULL desired
+constraint commit_statuses.commit_statuses_next_at_not_null: NOT NULL next_at
+constraint commit_statuses.commit_statuses_nonce_key: UNIQUE (nonce)
+constraint commit_statuses.commit_statuses_nonce_not_null: NOT NULL nonce
+constraint commit_statuses.commit_statuses_pkey: PRIMARY KEY (project, repository, commit_sha)
+constraint commit_statuses.commit_statuses_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint commit_statuses.commit_statuses_project_not_null: NOT NULL project
+constraint commit_statuses.commit_statuses_repository_not_null: NOT NULL repository
+constraint commit_statuses.commit_statuses_state_check: CHECK ((state = ANY (ARRAY['queued'::text, 'sending'::text, 'complete'::text, 'stopped'::text])))
+constraint commit_statuses.commit_statuses_state_not_null: NOT NULL state
+constraint commit_statuses.commit_statuses_watch_until_not_null: NOT NULL watch_until
+constraint counters.counters_name_not_null: NOT NULL name
+constraint counters.counters_pkey: PRIMARY KEY (project, name)
+constraint counters.counters_project_not_null: NOT NULL project
+constraint counters.counters_value_not_null: NOT NULL value
+constraint covers.covers_case_id_fkey: FOREIGN KEY (case_id) REFERENCES cases(id) DEFERRABLE
+constraint covers.covers_case_id_not_null: NOT NULL case_id
+constraint covers.covers_decision_fkey: FOREIGN KEY (decision) REFERENCES decisions(id) DEFERRABLE
+constraint covers.covers_decision_not_null: NOT NULL decision
+constraint covers.covers_pkey: PRIMARY KEY (requirement, case_id)
+constraint covers.covers_requirement_fkey: FOREIGN KEY (requirement) REFERENCES requirements(id) DEFERRABLE
+constraint covers.covers_requirement_not_null: NOT NULL requirement
+constraint credentials.credentials_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
+constraint credentials.credentials_actor_not_null: NOT NULL actor
+constraint credentials.credentials_created_at_not_null: NOT NULL created_at
+constraint credentials.credentials_data_not_null: NOT NULL data
+constraint credentials.credentials_id_not_null: NOT NULL id
+constraint credentials.credentials_kind_check: CHECK ((kind = ANY (ARRAY['password'::text, 'passkey'::text, 'oidc'::text, 'totp'::text])))
+constraint credentials.credentials_kind_not_null: NOT NULL kind
+constraint credentials.credentials_label_not_null: NOT NULL label
+constraint credentials.credentials_pkey: PRIMARY KEY (id)
+constraint decisions.decisions_answer_not_null: NOT NULL answer
+constraint decisions.decisions_at_not_null: NOT NULL at
+constraint decisions.decisions_basis_not_null: NOT NULL basis
+constraint decisions.decisions_effects_not_null: NOT NULL effects
+constraint decisions.decisions_holds_not_null: NOT NULL holds
+constraint decisions.decisions_id_not_null: NOT NULL id
+constraint decisions.decisions_kind_not_null: NOT NULL kind
+constraint decisions.decisions_pkey: PRIMARY KEY (id)
+constraint decisions.decisions_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint decisions.decisions_project_not_null: NOT NULL project
+constraint decisions.decisions_question_fkey: FOREIGN KEY (question) REFERENCES questions(id) DEFERRABLE
+constraint decisions.decisions_question_not_null: NOT NULL question
+constraint decisions.decisions_seq_not_null: NOT NULL seq
+constraint decisions.decisions_signers_not_null: NOT NULL signers
+constraint decisions.decisions_supersedes_fkey: FOREIGN KEY (supersedes) REFERENCES decisions(id) DEFERRABLE
+constraint demo_projects.demo_projects_pkey: PRIMARY KEY (project)
+constraint demo_projects.demo_projects_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint demo_projects.demo_projects_project_not_null: NOT NULL project
+constraint demo_projects.demo_projects_since_not_null: NOT NULL since
+constraint depends_on.depends_on_decision_fkey: FOREIGN KEY (decision) REFERENCES decisions(id) DEFERRABLE
+constraint depends_on.depends_on_decision_not_null: NOT NULL decision
+constraint depends_on.depends_on_pkey: PRIMARY KEY (run, decision)
+constraint depends_on.depends_on_run_fkey: FOREIGN KEY (run) REFERENCES runs(id) DEFERRABLE
+constraint depends_on.depends_on_run_not_null: NOT NULL run
+constraint deployments.deployments_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
+constraint deployments.deployments_actor_not_null: NOT NULL actor
+constraint deployments.deployments_at_not_null: NOT NULL at
+constraint deployments.deployments_build_fkey: FOREIGN KEY (build) REFERENCES builds(id) DEFERRABLE
+constraint deployments.deployments_build_not_null: NOT NULL build
+constraint deployments.deployments_env_not_null: NOT NULL env
+constraint deployments.deployments_id_not_null: NOT NULL id
+constraint deployments.deployments_pkey: PRIMARY KEY (id)
+constraint deployments.deployments_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint deployments.deployments_project_not_null: NOT NULL project
+constraint deployments.deployments_seq_not_null: NOT NULL seq
+constraint excuses.excuses_class_check: CHECK ((class = ANY (ARRAY['attributed'::text, 'excused'::text])))
+constraint excuses.excuses_class_not_null: NOT NULL class
+constraint excuses.excuses_decision_fkey: FOREIGN KEY (decision) REFERENCES decisions(id) DEFERRABLE
+constraint excuses.excuses_decision_not_null: NOT NULL decision
+constraint excuses.excuses_pkey: PRIMARY KEY (project, signature, scope, target)
+constraint excuses.excuses_project_not_null: NOT NULL project
+constraint excuses.excuses_scope_not_null: NOT NULL scope
+constraint excuses.excuses_signature_fkey: FOREIGN KEY (signature) REFERENCES signatures(id) DEFERRABLE
+constraint excuses.excuses_signature_not_null: NOT NULL signature
+constraint excuses.excuses_target_not_null: NOT NULL target
+constraint findings.findings_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
+constraint findings.findings_actor_not_null: NOT NULL actor
+constraint findings.findings_at_not_null: NOT NULL at
+constraint findings.findings_basis_not_null: NOT NULL basis
+constraint findings.findings_case_id_fkey: FOREIGN KEY (case_id) REFERENCES cases(id) DEFERRABLE
+constraint findings.findings_category_not_null: NOT NULL category
+constraint findings.findings_id_not_null: NOT NULL id
+constraint findings.findings_lens_not_null: NOT NULL lens
+constraint findings.findings_locus_not_null: NOT NULL locus
+constraint findings.findings_note_not_null: NOT NULL note
+constraint findings.findings_pkey: PRIMARY KEY (id)
+constraint findings.findings_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint findings.findings_project_not_null: NOT NULL project
+constraint findings.findings_seq_not_null: NOT NULL seq
+constraint flips.flips_first_result_not_null: NOT NULL first_result
+constraint flips.flips_id_not_null: NOT NULL id
+constraint flips.flips_pkey: PRIMARY KEY (id)
+constraint flips.flips_project_not_null: NOT NULL project
+constraint flips.flips_second_result_not_null: NOT NULL second_result
+constraint flips.flips_seq_not_null: NOT NULL seq
+constraint flips.flips_target_fkey: FOREIGN KEY (target) REFERENCES targets(id) DEFERRABLE
+constraint flips.flips_target_not_null: NOT NULL target
+constraint flips.flips_test_fkey: FOREIGN KEY (test) REFERENCES tests(id) DEFERRABLE
+constraint flips.flips_test_not_null: NOT NULL test
+constraint folders.folders_id_not_null: NOT NULL id
+constraint folders.folders_name_not_null: NOT NULL name
+constraint folders.folders_parent_fkey: FOREIGN KEY (parent) REFERENCES folders(id) DEFERRABLE
+constraint folders.folders_pkey: PRIMARY KEY (id)
+constraint folders.folders_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint folders.folders_project_not_null: NOT NULL project
+constraint folders.folders_rank_not_null: NOT NULL rank
+constraint folders.folders_rev_not_null: NOT NULL rev
+constraint folders.folders_state_check: CHECK ((state = ANY (ARRAY['active'::text, 'archived'::text])))
+constraint folders.folders_state_not_null: NOT NULL state
+constraint grants.grants_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
+constraint grants.grants_actor_not_null: NOT NULL actor
+constraint grants.grants_can_not_null: NOT NULL can
+constraint grants.grants_pkey: PRIMARY KEY (actor, project)
+constraint grants.grants_project_not_null: NOT NULL project
+constraint grants.grants_roles_not_null: NOT NULL roles
+constraint handoffs.handoffs_at_not_null: NOT NULL at
+constraint handoffs.handoffs_body_not_null: NOT NULL body
+constraint handoffs.handoffs_id_not_null: NOT NULL id
+constraint handoffs.handoffs_nonce_not_null: NOT NULL nonce
+constraint handoffs.handoffs_pkey: PRIMARY KEY (id)
+constraint handoffs.handoffs_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint handoffs.handoffs_project_not_null: NOT NULL project
+constraint handoffs.handoffs_question_fkey: FOREIGN KEY (question) REFERENCES questions(id) DEFERRABLE
+constraint handoffs.handoffs_question_not_null: NOT NULL question
+constraint handoffs.handoffs_queue_order_not_null: NOT NULL queue_order
+constraint handoffs.handoffs_state_check: CHECK ((state = ANY (ARRAY['queued'::text, 'sending'::text, 'sent'::text, 'failed'::text])))
+constraint handoffs.handoffs_state_not_null: NOT NULL state
+constraint invitations.invitations_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
+constraint invitations.invitations_actor_not_null: NOT NULL actor
+constraint invitations.invitations_created_at_not_null: NOT NULL created_at
+constraint invitations.invitations_created_by_fkey: FOREIGN KEY (created_by) REFERENCES actors(id) DEFERRABLE
+constraint invitations.invitations_created_by_not_null: NOT NULL created_by
+constraint invitations.invitations_expires_at_not_null: NOT NULL expires_at
+constraint invitations.invitations_hash_key: UNIQUE (hash)
+constraint invitations.invitations_hash_not_null: NOT NULL hash
+constraint invitations.invitations_id_not_null: NOT NULL id
+constraint invitations.invitations_pkey: PRIMARY KEY (id)
+constraint invitations.invitations_purpose_check: CHECK ((purpose = ANY (ARRAY['join'::text, 'recover'::text])))
+constraint invitations.invitations_purpose_not_null: NOT NULL purpose
+constraint mail_contacts.mail_contacts_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
+constraint mail_contacts.mail_contacts_actor_not_null: NOT NULL actor
+constraint mail_contacts.mail_contacts_email_key: UNIQUE (email)
+constraint mail_contacts.mail_contacts_email_not_null: NOT NULL email
+constraint mail_contacts.mail_contacts_pkey: PRIMARY KEY (actor)
+constraint mail_contacts.mail_contacts_revision_not_null: NOT NULL revision
+constraint merge_receipt_dirty.merge_receipt_dirty_bucket_not_null: NOT NULL bucket
+constraint merge_receipt_dirty.merge_receipt_dirty_pkey: PRIMARY KEY (run, bucket)
+constraint merge_receipt_dirty.merge_receipt_dirty_run_fkey: FOREIGN KEY (run) REFERENCES runs(id) ON DELETE CASCADE DEFERRABLE
+constraint merge_receipt_dirty.merge_receipt_dirty_run_not_null: NOT NULL run
+constraint merge_receipt_heads.merge_receipt_heads_pkey: PRIMARY KEY (run)
+constraint merge_receipt_heads.merge_receipt_heads_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint merge_receipt_heads.merge_receipt_heads_project_not_null: NOT NULL project
+constraint merge_receipt_heads.merge_receipt_heads_root_fkey: FOREIGN KEY (root) REFERENCES merge_receipt_nodes(id) DEFERRABLE
+constraint merge_receipt_heads.merge_receipt_heads_run_fkey: FOREIGN KEY (run) REFERENCES runs(id) ON DELETE CASCADE DEFERRABLE
+constraint merge_receipt_heads.merge_receipt_heads_run_not_null: NOT NULL run
+constraint merge_receipt_members.merge_receipt_members_check: CHECK (((child IS NULL) <> (payload IS NULL)))
+constraint merge_receipt_members.merge_receipt_members_child_fkey: FOREIGN KEY (child) REFERENCES merge_receipt_nodes(id) DEFERRABLE
+constraint merge_receipt_members.merge_receipt_members_node_fkey: FOREIGN KEY (node) REFERENCES merge_receipt_nodes(id) DEFERRABLE
+constraint merge_receipt_members.merge_receipt_members_node_not_null: NOT NULL node
+constraint merge_receipt_members.merge_receipt_members_payload_fkey: FOREIGN KEY (payload) REFERENCES merge_receipt_payloads(id) DEFERRABLE
+constraint merge_receipt_members.merge_receipt_members_pkey: PRIMARY KEY (node, slot)
+constraint merge_receipt_members.merge_receipt_members_slot_check: CHECK (((slot >= 0) AND (slot <= 31)))
+constraint merge_receipt_members.merge_receipt_members_slot_not_null: NOT NULL slot
+constraint merge_receipt_nodes.merge_receipt_nodes_count_check: CHECK ((count > 0))
+constraint merge_receipt_nodes.merge_receipt_nodes_count_not_null: NOT NULL count
+constraint merge_receipt_nodes.merge_receipt_nodes_hash_not_null: NOT NULL hash
+constraint merge_receipt_nodes.merge_receipt_nodes_id_not_null: NOT NULL id
+constraint merge_receipt_nodes.merge_receipt_nodes_level_check: CHECK (((level >= 0) AND (level <= 10)))
+constraint merge_receipt_nodes.merge_receipt_nodes_level_not_null: NOT NULL level
+constraint merge_receipt_nodes.merge_receipt_nodes_pkey: PRIMARY KEY (id)
+constraint merge_receipt_nodes.merge_receipt_nodes_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint merge_receipt_nodes.merge_receipt_nodes_project_hash_key: UNIQUE (project, hash)
+constraint merge_receipt_nodes.merge_receipt_nodes_project_not_null: NOT NULL project
+constraint merge_receipt_payloads.merge_receipt_payloads_body_check: CHECK ((octet_length(body) <= 32768))
+constraint merge_receipt_payloads.merge_receipt_payloads_body_not_null: NOT NULL body
+constraint merge_receipt_payloads.merge_receipt_payloads_hash_not_null: NOT NULL hash
+constraint merge_receipt_payloads.merge_receipt_payloads_id_not_null: NOT NULL id
+constraint merge_receipt_payloads.merge_receipt_payloads_pkey: PRIMARY KEY (id)
+constraint merge_receipt_payloads.merge_receipt_payloads_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint merge_receipt_payloads.merge_receipt_payloads_project_hash_key: UNIQUE (project, hash)
+constraint merge_receipt_payloads.merge_receipt_payloads_project_not_null: NOT NULL project
+constraint merge_receipt_snapshots.merge_receipt_snapshots_count_not_null: NOT NULL count
+constraint merge_receipt_snapshots.merge_receipt_snapshots_evidence_count_: NOT NULL evidence_count
+constraint merge_receipt_snapshots.merge_receipt_snapshots_gate_root_fkey: FOREIGN KEY (gate_root) REFERENCES merge_receipt_nodes(id) DEFERRABLE
+constraint merge_receipt_snapshots.merge_receipt_snapshots_hash_not_null: NOT NULL hash
+constraint merge_receipt_snapshots.merge_receipt_snapshots_id_not_null: NOT NULL id
+constraint merge_receipt_snapshots.merge_receipt_snapshots_pkey: PRIMARY KEY (id)
+constraint merge_receipt_snapshots.merge_receipt_snapshots_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint merge_receipt_snapshots.merge_receipt_snapshots_project_hash_ke: UNIQUE (project, hash)
+constraint merge_receipt_snapshots.merge_receipt_snapshots_project_not_nul: NOT NULL project
+constraint merge_receipt_snapshots.merge_receipt_snapshots_result_root_fke: FOREIGN KEY (result_root) REFERENCES merge_receipt_nodes(id) DEFERRABLE
+constraint merge_receipts.merge_receipts_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
+constraint merge_receipts.merge_receipts_actor_not_null: NOT NULL actor
+constraint merge_receipts.merge_receipts_at_not_null: NOT NULL at
+constraint merge_receipts.merge_receipts_change_fkey: FOREIGN KEY (change) REFERENCES changes(id) DEFERRABLE
+constraint merge_receipts.merge_receipts_change_not_null: NOT NULL change
+constraint merge_receipts.merge_receipts_evidence_fkey: FOREIGN KEY (evidence) REFERENCES merge_receipt_snapshots(id) DEFERRABLE
+constraint merge_receipts.merge_receipts_evidence_not_null: NOT NULL evidence
+constraint merge_receipts.merge_receipts_id_not_null: NOT NULL id
+constraint merge_receipts.merge_receipts_pkey: PRIMARY KEY (id)
+constraint merge_receipts.merge_receipts_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint merge_receipts.merge_receipts_project_not_null: NOT NULL project
+constraint merge_receipts.merge_receipts_seq_not_null: NOT NULL seq
+constraint merge_receipts.merge_receipts_snapshot_check: CHECK (((snapshot IS JSON) AND (octet_length(snapshot) <= 4096)))
+constraint merge_receipts.merge_receipts_snapshot_not_null: NOT NULL snapshot
+constraint meta.meta_key_not_null: NOT NULL key
+constraint meta.meta_pkey: PRIMARY KEY (key)
+constraint meta.meta_value_not_null: NOT NULL value
+constraint orgs.orgs_created_at_not_null: NOT NULL created_at
+constraint orgs.orgs_id_not_null: NOT NULL id
+constraint orgs.orgs_name_not_null: NOT NULL name
+constraint orgs.orgs_pkey: PRIMARY KEY (id)
+constraint passkey_users.passkey_users_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
+constraint passkey_users.passkey_users_actor_not_null: NOT NULL actor
+constraint passkey_users.passkey_users_created_at_not_null: NOT NULL created_at
+constraint passkey_users.passkey_users_handle_key: UNIQUE (handle)
+constraint passkey_users.passkey_users_handle_not_null: NOT NULL handle
+constraint passkey_users.passkey_users_pkey: PRIMARY KEY (actor)
+constraint placements.placements_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
+constraint placements.placements_actor_not_null: NOT NULL actor
+constraint placements.placements_after_not_null: NOT NULL after
+constraint placements.placements_at_not_null: NOT NULL at
+constraint placements.placements_before_not_null: NOT NULL before
+constraint placements.placements_case_id_fkey: FOREIGN KEY (case_id) REFERENCES cases(id) DEFERRABLE
+constraint placements.placements_case_id_not_null: NOT NULL case_id
+constraint placements.placements_decision_fkey: FOREIGN KEY (decision) REFERENCES decisions(id) DEFERRABLE
+constraint placements.placements_decision_not_null: NOT NULL decision
+constraint placements.placements_id_not_null: NOT NULL id
+constraint placements.placements_pkey: PRIMARY KEY (id)
+constraint placements.placements_proposal_not_null: NOT NULL proposal
+constraint placements.placements_seq_not_null: NOT NULL seq
+constraint policies.policies_actor_not_null: NOT NULL actor
+constraint policies.policies_at_not_null: NOT NULL at
+constraint policies.policies_clauses_not_null: NOT NULL clauses
+constraint policies.policies_decision_fkey: FOREIGN KEY (decision) REFERENCES decisions(id) DEFERRABLE
+constraint policies.policies_pkey: PRIMARY KEY (project, version)
+constraint policies.policies_preset_not_null: NOT NULL preset
+constraint policies.policies_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint policies.policies_project_not_null: NOT NULL project
+constraint policies.policies_seq_not_null: NOT NULL seq
+constraint policies.policies_settings_not_null: NOT NULL settings
+constraint policies.policies_version_not_null: NOT NULL version
+constraint projects.projects_created_at_not_null: NOT NULL created_at
+constraint projects.projects_id_not_null: NOT NULL id
+constraint projects.projects_identity_not_null: NOT NULL identity
+constraint projects.projects_key_key: UNIQUE (key)
+constraint projects.projects_key_not_null: NOT NULL key
+constraint projects.projects_name_not_null: NOT NULL name
+constraint projects.projects_org_fkey: FOREIGN KEY (org) REFERENCES orgs(id) DEFERRABLE
+constraint projects.projects_org_not_null: NOT NULL org
+constraint projects.projects_pkey: PRIMARY KEY (id)
+constraint projects.projects_seq_not_null: NOT NULL seq
+constraint proposals.proposals_at_not_null: NOT NULL at
+constraint proposals.proposals_author_fkey: FOREIGN KEY (author) REFERENCES actors(id) DEFERRABLE
+constraint proposals.proposals_author_not_null: NOT NULL author
+constraint proposals.proposals_edits_not_null: NOT NULL edits
+constraint proposals.proposals_id_not_null: NOT NULL id
+constraint proposals.proposals_no_not_null: NOT NULL no
+constraint proposals.proposals_pkey: PRIMARY KEY (id)
+constraint proposals.proposals_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint proposals.proposals_project_no_key: UNIQUE (project, no)
+constraint proposals.proposals_project_not_null: NOT NULL project
+constraint proposals.proposals_resolved_not_null: NOT NULL resolved
+constraint proposals.proposals_seq_not_null: NOT NULL seq
+constraint quarantines.quarantines_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
+constraint quarantines.quarantines_actor_not_null: NOT NULL actor
+constraint quarantines.quarantines_at_not_null: NOT NULL at
+constraint quarantines.quarantines_decision_fkey: FOREIGN KEY (decision) REFERENCES decisions(id) DEFERRABLE
+constraint quarantines.quarantines_decision_not_null: NOT NULL decision
+constraint quarantines.quarantines_pkey: PRIMARY KEY (project, test)
+constraint quarantines.quarantines_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint quarantines.quarantines_project_not_null: NOT NULL project
+constraint quarantines.quarantines_reason_not_null: NOT NULL reason
+constraint quarantines.quarantines_seq_not_null: NOT NULL seq
+constraint quarantines.quarantines_test_fkey: FOREIGN KEY (test) REFERENCES tests(id) DEFERRABLE
+constraint quarantines.quarantines_test_not_null: NOT NULL test
+constraint question_refs.question_refs_pkey: PRIMARY KEY (project, ref, question)
+constraint question_refs.question_refs_project_not_null: NOT NULL project
+constraint question_refs.question_refs_question_fkey: FOREIGN KEY (question) REFERENCES questions(id) DEFERRABLE
+constraint question_refs.question_refs_question_not_null: NOT NULL question
+constraint question_refs.question_refs_ref_not_null: NOT NULL ref
+constraint questions.questions_ask_not_null: NOT NULL ask
+constraint questions.questions_basis_not_null: NOT NULL basis
+constraint questions.questions_blocks_not_null: NOT NULL blocks
+constraint questions.questions_carried_not_null: NOT NULL carried
+constraint questions.questions_epoch_not_null: NOT NULL epoch
+constraint questions.questions_evidence_hash_not_null: NOT NULL evidence_hash
+constraint questions.questions_evidence_not_null: NOT NULL evidence
+constraint questions.questions_fingerprint_not_null: NOT NULL fingerprint
+constraint questions.questions_id_not_null: NOT NULL id
+constraint questions.questions_kind_check: CHECK ((kind = ANY (ARRAY['adopt'::text, 'map'::text, 'failure'::text, 'finding'::text, 'signoff'::text])))
+constraint questions.questions_kind_not_null: NOT NULL kind
+constraint questions.questions_no_not_null: NOT NULL no
+constraint questions.questions_opened_at_not_null: NOT NULL opened_at
+constraint questions.questions_owner_not_null: NOT NULL owner
+constraint questions.questions_pkey: PRIMARY KEY (id)
+constraint questions.questions_prior_fkey: FOREIGN KEY (prior) REFERENCES questions(id) DEFERRABLE
+constraint questions.questions_producer_check: CHECK ((producer = ANY (ARRAY['human'::text, 'agent'::text, 'ci'::text, 'rule'::text])))
+constraint questions.questions_producer_not_null: NOT NULL producer
+constraint questions.questions_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint questions.questions_project_no_key: UNIQUE (project, no)
+constraint questions.questions_project_not_null: NOT NULL project
+constraint questions.questions_rank_not_null: NOT NULL rank
+constraint questions.questions_rev_not_null: NOT NULL rev
+constraint questions.questions_seen_count_not_null: NOT NULL seen_count
+constraint questions.questions_seen_first_not_null: NOT NULL seen_first
+constraint questions.questions_seen_last_not_null: NOT NULL seen_last
+constraint questions.questions_state_check: CHECK ((state = ANY (ARRAY['open'::text, 'decided'::text, 'dissolved'::text])))
+constraint questions.questions_state_not_null: NOT NULL state
+constraint questions.questions_subject_not_null: NOT NULL subject
+constraint questions.questions_title_not_null: NOT NULL title
+constraint requirements.requirements_id_not_null: NOT NULL id
+constraint requirements.requirements_key_not_null: NOT NULL key
+constraint requirements.requirements_pkey: PRIMARY KEY (id)
+constraint requirements.requirements_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint requirements.requirements_project_key_key: UNIQUE (project, key)
+constraint requirements.requirements_project_not_null: NOT NULL project
+constraint requirements.requirements_rev_not_null: NOT NULL rev
+constraint requirements.requirements_state_not_null: NOT NULL state
+constraint requirements.requirements_title_not_null: NOT NULL title
+constraint result_excuses.result_excuses_class_check: CHECK ((class = ANY (ARRAY['attributed'::text, 'excused'::text])))
+constraint result_excuses.result_excuses_class_not_null: NOT NULL class
+constraint result_excuses.result_excuses_decision_fkey: FOREIGN KEY (decision) REFERENCES decisions(id) DEFERRABLE
+constraint result_excuses.result_excuses_decision_not_null: NOT NULL decision
+constraint result_excuses.result_excuses_id_not_null: NOT NULL id
+constraint result_excuses.result_excuses_pkey: PRIMARY KEY (id)
+constraint result_excuses.result_excuses_result_fkey: FOREIGN KEY (result) REFERENCES results(id) DEFERRABLE
+constraint result_excuses.result_excuses_result_not_null: NOT NULL result
+constraint result_excuses.result_excuses_slot_fkey: FOREIGN KEY (slot) REFERENCES slots(id) DEFERRABLE
+constraint result_tries.result_tries_id_not_null: NOT NULL id
+constraint result_tries.result_tries_outcome_check: CHECK ((outcome = ANY (ARRAY['pass'::text, 'fail'::text, 'skip'::text, 'blocked'::text, 'error'::text])))
+constraint result_tries.result_tries_outcome_not_null: NOT NULL outcome
+constraint result_tries.result_tries_pkey: PRIMARY KEY (id)
+constraint result_tries.result_tries_project_not_null: NOT NULL project
+constraint result_tries.result_tries_result_fkey: FOREIGN KEY (result) REFERENCES results(id) DEFERRABLE
+constraint result_tries.result_tries_result_not_null: NOT NULL result
+constraint result_tries.result_tries_signature_fkey: FOREIGN KEY (signature) REFERENCES signatures(id) DEFERRABLE
+constraint result_tries.result_tries_try_not_null: NOT NULL try
+constraint results.results_actor_not_null: NOT NULL actor
+constraint results.results_at_not_null: NOT NULL at
+constraint results.results_attempt_not_null: NOT NULL attempt
+constraint results.results_basis_check: CHECK ((basis = ANY (ARRAY['exact'::text, 'assumed'::text, 'unresolved'::text])))
+constraint results.results_basis_not_null: NOT NULL basis
+constraint results.results_batch_fkey: FOREIGN KEY (batch) REFERENCES batches(id) DEFERRABLE
+constraint results.results_batch_not_null: NOT NULL batch
+constraint results.results_check: CHECK (((model IS NULL) OR (method = 'agent'::text)))
+constraint results.results_corrects_fkey: FOREIGN KEY (corrects) REFERENCES results(id) DEFERRABLE
+constraint results.results_id_not_null: NOT NULL id
+constraint results.results_method_not_null: NOT NULL method
+constraint results.results_ord_not_null: NOT NULL ord
+constraint results.results_outcome_check: CHECK ((outcome = ANY (ARRAY['pass'::text, 'fail'::text, 'skip'::text, 'blocked'::text, 'error'::text])))
+constraint results.results_outcome_not_null: NOT NULL outcome
+constraint results.results_pkey: PRIMARY KEY (id)
+constraint results.results_project_not_null: NOT NULL project
+constraint results.results_quarantine_decision_fkey: FOREIGN KEY (quarantine_decision) REFERENCES decisions(id) DEFERRABLE
+constraint results.results_quarantine_exit_fkey: FOREIGN KEY (quarantine_exit) REFERENCES decisions(id) DEFERRABLE
+constraint results.results_seq_not_null: NOT NULL seq
+constraint results.results_signature_fkey: FOREIGN KEY (signature) REFERENCES signatures(id) DEFERRABLE
+constraint results.results_target_fkey: FOREIGN KEY (target) REFERENCES targets(id) DEFERRABLE
+constraint results.results_target_not_null: NOT NULL target
+constraint results.results_test_fkey: FOREIGN KEY (test) REFERENCES tests(id) DEFERRABLE
+constraint results.results_test_not_null: NOT NULL test
+constraint reviews.reviews_at_not_null: NOT NULL at
+constraint reviews.reviews_basis_not_null: NOT NULL basis
+constraint reviews.reviews_case_id_basis_lens_reviewer_key: UNIQUE (case_id, basis, lens, reviewer)
+constraint reviews.reviews_case_id_fkey: FOREIGN KEY (case_id) REFERENCES cases(id) DEFERRABLE
+constraint reviews.reviews_case_id_not_null: NOT NULL case_id
+constraint reviews.reviews_id_not_null: NOT NULL id
+constraint reviews.reviews_lens_not_null: NOT NULL lens
+constraint reviews.reviews_pkey: PRIMARY KEY (id)
+constraint reviews.reviews_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint reviews.reviews_project_not_null: NOT NULL project
+constraint reviews.reviews_reviewer_fkey: FOREIGN KEY (reviewer) REFERENCES actors(id) DEFERRABLE
+constraint reviews.reviews_reviewer_not_null: NOT NULL reviewer
+constraint reviews.reviews_seq_not_null: NOT NULL seq
+constraint reviews.reviews_version_not_null: NOT NULL version
+constraint run_tests.run_tests_attempt_not_null: NOT NULL attempt
+constraint run_tests.run_tests_flipped_not_null: NOT NULL flipped
+constraint run_tests.run_tests_lane_not_null: NOT NULL lane
+constraint run_tests.run_tests_outcome_not_null: NOT NULL outcome
+constraint run_tests.run_tests_pkey: PRIMARY KEY (run, test, lane)
+constraint run_tests.run_tests_result_fkey: FOREIGN KEY (result) REFERENCES results(id) DEFERRABLE
+constraint run_tests.run_tests_result_not_null: NOT NULL result
+constraint run_tests.run_tests_run_fkey: FOREIGN KEY (run) REFERENCES runs(id) DEFERRABLE
+constraint run_tests.run_tests_run_not_null: NOT NULL run
+constraint run_tests.run_tests_target_fkey: FOREIGN KEY (target) REFERENCES targets(id) DEFERRABLE
+constraint run_tests.run_tests_target_not_null: NOT NULL target
+constraint run_tests.run_tests_test_fkey: FOREIGN KEY (test) REFERENCES tests(id) DEFERRABLE
+constraint run_tests.run_tests_test_not_null: NOT NULL test
+constraint runs.runs_accepted_seq_not_null: NOT NULL accepted_seq
+constraint runs.runs_accepts_not_null: NOT NULL accepts
+constraint runs.runs_applied_seq_not_null: NOT NULL applied_seq
+constraint runs.runs_blocking_not_null: NOT NULL blocking
+constraint runs.runs_change_fkey: FOREIGN KEY (change) REFERENCES changes(id) DEFERRABLE
+constraint runs.runs_created_at_not_null: NOT NULL created_at
+constraint runs.runs_created_by_not_null: NOT NULL created_by
+constraint runs.runs_id_not_null: NOT NULL id
+constraint runs.runs_name_not_null: NOT NULL name
+constraint runs.runs_no_not_null: NOT NULL no
+constraint runs.runs_origin_check: CHECK ((origin = ANY (ARRAY['change'::text, 'planned'::text])))
+constraint runs.runs_origin_not_null: NOT NULL origin
+constraint runs.runs_outstanding_not_null: NOT NULL outstanding
+constraint runs.runs_pkey: PRIMARY KEY (id)
+constraint runs.runs_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint runs.runs_project_no_key: UNIQUE (project, no)
+constraint runs.runs_project_not_null: NOT NULL project
+constraint runs.runs_quarantined_not_null: NOT NULL quarantined
+constraint runs.runs_require_not_null: NOT NULL require
+constraint runs.runs_rev_not_null: NOT NULL rev
+constraint runs.runs_signoff_fkey: FOREIGN KEY (signoff) REFERENCES decisions(id) DEFERRABLE
+constraint runs.runs_state_check: CHECK ((state = ANY (ARRAY['open'::text, 'closed'::text])))
+constraint runs.runs_state_not_null: NOT NULL state
+constraint runs.runs_tally_not_null: NOT NULL tally
+constraint runs.runs_verdict_check: CHECK ((verdict = ANY (ARRAY['passed'::text, 'failed'::text, 'blocked'::text, 'pending'::text])))
+constraint runs.runs_verdict_not_null: NOT NULL verdict
+constraint scope_moves.scope_moves_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
+constraint scope_moves.scope_moves_actor_not_null: NOT NULL actor
+constraint scope_moves.scope_moves_after_scope_not_null: NOT NULL after_scope
+constraint scope_moves.scope_moves_at_not_null: NOT NULL at
+constraint scope_moves.scope_moves_before_scope_not_null: NOT NULL before_scope
+constraint scope_moves.scope_moves_id_not_null: NOT NULL id
+constraint scope_moves.scope_moves_pkey: PRIMARY KEY (id)
+constraint scope_moves.scope_moves_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint scope_moves.scope_moves_project_not_null: NOT NULL project
+constraint scope_moves.scope_moves_seq_not_null: NOT NULL seq
+constraint scope_moves.scope_moves_what_not_null: NOT NULL what
+constraint search_docs.search_docs_id_not_null: NOT NULL id
+constraint search_docs.search_docs_pkey: PRIMARY KEY (id)
+constraint search_docs.search_docs_project_not_null: NOT NULL project
+constraint search_docs.search_docs_title_tsv_not_null: NOT NULL title_tsv
+constraint search_docs.search_docs_tsv_not_null: NOT NULL tsv
+constraint sessions.sessions_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
+constraint sessions.sessions_actor_not_null: NOT NULL actor
+constraint sessions.sessions_check: CHECK (((credential IS NULL) OR (token IS NULL)))
+constraint sessions.sessions_created_at_not_null: NOT NULL created_at
+constraint sessions.sessions_credential_fkey: FOREIGN KEY (credential) REFERENCES credentials(id) DEFERRABLE
+constraint sessions.sessions_ended_why_check: CHECK ((ended_why = ANY (ARRAY['signed-out'::text, 'ended'::text, 'forgotten'::text, 'expired'::text])))
+constraint sessions.sessions_expires_at_not_null: NOT NULL expires_at
+constraint sessions.sessions_hash_key: UNIQUE (hash)
+constraint sessions.sessions_hash_not_null: NOT NULL hash
+constraint sessions.sessions_id_not_null: NOT NULL id
+constraint sessions.sessions_last_seen_at_not_null: NOT NULL last_seen_at
+constraint sessions.sessions_pkey: PRIMARY KEY (id)
+constraint sessions.sessions_token_fkey: FOREIGN KEY (token) REFERENCES tokens(id) DEFERRABLE
+constraint signatures.signatures_class_check: CHECK ((class = ANY (ARRAY['assertion'::text, 'timeout'::text, 'infra'::text, 'unknown'::text])))
+constraint signatures.signatures_class_not_null: NOT NULL class
+constraint signatures.signatures_first_seq_not_null: NOT NULL first_seq
+constraint signatures.signatures_hash_not_null: NOT NULL hash
+constraint signatures.signatures_id_not_null: NOT NULL id
+constraint signatures.signatures_pkey: PRIMARY KEY (id)
+constraint signatures.signatures_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint signatures.signatures_project_hash_key: UNIQUE (project, hash)
+constraint signatures.signatures_project_not_null: NOT NULL project
+constraint signatures.signatures_text_not_null: NOT NULL text
+constraint slot_leases.slot_leases_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
+constraint slot_leases.slot_leases_actor_not_null: NOT NULL actor
+constraint slot_leases.slot_leases_check: CHECK ((until > since))
+constraint slot_leases.slot_leases_pkey: PRIMARY KEY (slot)
+constraint slot_leases.slot_leases_since_not_null: NOT NULL since
+constraint slot_leases.slot_leases_slot_fkey: FOREIGN KEY (slot) REFERENCES slots(id) ON DELETE CASCADE DEFERRABLE
+constraint slot_leases.slot_leases_slot_not_null: NOT NULL slot
+constraint slot_leases.slot_leases_until_not_null: NOT NULL until
+constraint slot_results.slot_results_admitted_check: CHECK ((admitted = ANY (ARRAY['exact'::text, 'assumed'::text, 'same-claim'::text])))
+constraint slot_results.slot_results_admitted_not_null: NOT NULL admitted
+constraint slot_results.slot_results_corrected_not_null: NOT NULL corrected
+constraint slot_results.slot_results_discounted_by_fkey: FOREIGN KEY (discounted_by) REFERENCES decisions(id) DEFERRABLE
+constraint slot_results.slot_results_pkey: PRIMARY KEY (slot, result)
+constraint slot_results.slot_results_result_fkey: FOREIGN KEY (result) REFERENCES results(id) DEFERRABLE
+constraint slot_results.slot_results_result_not_null: NOT NULL result
+constraint slot_results.slot_results_run_not_null: NOT NULL run
+constraint slot_results.slot_results_slot_fkey: FOREIGN KEY (slot) REFERENCES slots(id) DEFERRABLE
+constraint slot_results.slot_results_slot_not_null: NOT NULL slot
+constraint slots.slots_agg_not_null: NOT NULL agg
+constraint slots.slots_assignee_fkey: FOREIGN KEY (assignee) REFERENCES actors(id) DEFERRABLE
+constraint slots.slots_case_id_fkey: FOREIGN KEY (case_id) REFERENCES cases(id) DEFERRABLE
+constraint slots.slots_case_id_not_null: NOT NULL case_id
+constraint slots.slots_causes_not_null: NOT NULL causes
+constraint slots.slots_claim_not_null: NOT NULL claim
+constraint slots.slots_id_not_null: NOT NULL id
+constraint slots.slots_obligation_not_null: NOT NULL obligation
+constraint slots.slots_pkey: PRIMARY KEY (id)
+constraint slots.slots_rank_not_null: NOT NULL rank
+constraint slots.slots_rev_not_null: NOT NULL rev
+constraint slots.slots_run_case_id_obligation_key: UNIQUE (run, case_id, obligation)
+constraint slots.slots_run_fkey: FOREIGN KEY (run) REFERENCES runs(id) DEFERRABLE
+constraint slots.slots_run_not_null: NOT NULL run
+constraint slots.slots_state_check: CHECK ((state = ANY (ARRAY['missing'::text, 'satisfied'::text, 'failing'::text, 'disputed'::text, 'waived'::text, 'skipped'::text])))
+constraint slots.slots_state_not_null: NOT NULL state
+constraint slots.slots_version_not_null: NOT NULL version
+constraint targets.targets_env_not_null: NOT NULL env
+constraint targets.targets_first_seq_not_null: NOT NULL first_seq
+constraint targets.targets_id_not_null: NOT NULL id
+constraint targets.targets_line_check: CHECK ((line = ANY (ARRAY['trunk'::text, 'change'::text, 'release'::text, 'session'::text])))
+constraint targets.targets_line_not_null: NOT NULL line
+constraint targets.targets_pkey: PRIMARY KEY (id)
+constraint targets.targets_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint targets.targets_project_not_null: NOT NULL project
+constraint targets.targets_project_what_env_key: UNIQUE (project, what, env)
+constraint targets.targets_what_not_null: NOT NULL what
+constraint team_events.team_events_action_check: CHECK ((action = ANY (ARRAY['created'::text, 'member.add'::text, 'member.remove'::text, 'grant.set'::text, 'grant.remove'::text])))
+constraint team_events.team_events_action_not_null: NOT NULL action
+constraint team_events.team_events_at_not_null: NOT NULL at
+constraint team_events.team_events_by_actor_fkey: FOREIGN KEY (by_actor) REFERENCES actors(id) DEFERRABLE
+constraint team_events.team_events_by_actor_not_null: NOT NULL by_actor
+constraint team_events.team_events_id_not_null: NOT NULL id
+constraint team_events.team_events_person_fkey: FOREIGN KEY (person) REFERENCES actors(id) DEFERRABLE
+constraint team_events.team_events_pkey: PRIMARY KEY (id)
+constraint team_events.team_events_team_fkey: FOREIGN KEY (team) REFERENCES teams(id) DEFERRABLE
+constraint team_events.team_events_team_not_null: NOT NULL team
+constraint team_grants.team_grants_can_not_null: NOT NULL can
+constraint team_grants.team_grants_pkey: PRIMARY KEY (team, project)
+constraint team_grants.team_grants_project_not_null: NOT NULL project
+constraint team_grants.team_grants_team_fkey: FOREIGN KEY (team) REFERENCES teams(id) DEFERRABLE
+constraint team_grants.team_grants_team_not_null: NOT NULL team
+constraint team_members.team_members_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
+constraint team_members.team_members_actor_not_null: NOT NULL actor
+constraint team_members.team_members_pkey: PRIMARY KEY (team, actor)
+constraint team_members.team_members_team_fkey: FOREIGN KEY (team) REFERENCES teams(id) DEFERRABLE
+constraint team_members.team_members_team_not_null: NOT NULL team
+constraint teams.teams_created_at_not_null: NOT NULL created_at
+constraint teams.teams_id_not_null: NOT NULL id
+constraint teams.teams_name_not_null: NOT NULL name
+constraint teams.teams_org_fkey: FOREIGN KEY (org) REFERENCES orgs(id) DEFERRABLE
+constraint teams.teams_org_name_key: UNIQUE (org, name)
+constraint teams.teams_org_not_null: NOT NULL org
+constraint teams.teams_pkey: PRIMARY KEY (id)
+constraint tests.tests_case_id_fkey: FOREIGN KEY (case_id) REFERENCES cases(id) DEFERRABLE
+constraint tests.tests_first_seq_not_null: NOT NULL first_seq
+constraint tests.tests_id_not_null: NOT NULL id
+constraint tests.tests_key_not_null: NOT NULL key
+constraint tests.tests_kind_check: CHECK ((kind = ANY (ARRAY['manual'::text, 'auto'::text])))
+constraint tests.tests_kind_not_null: NOT NULL kind
+constraint tests.tests_last_seq_not_null: NOT NULL last_seq
+constraint tests.tests_linked_by_fkey: FOREIGN KEY (linked_by) REFERENCES decisions(id) DEFERRABLE
+constraint tests.tests_name_not_null: NOT NULL name
+constraint tests.tests_no_not_null: NOT NULL no
+constraint tests.tests_pkey: PRIMARY KEY (id)
+constraint tests.tests_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint tests.tests_project_key_key: UNIQUE (project, key)
+constraint tests.tests_project_no_key: UNIQUE (project, no)
+constraint tests.tests_project_not_null: NOT NULL project
+constraint tokens.tokens_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
+constraint tokens.tokens_actor_not_null: NOT NULL actor
+constraint tokens.tokens_created_at_not_null: NOT NULL created_at
+constraint tokens.tokens_created_by_fkey: FOREIGN KEY (created_by) REFERENCES actors(id) DEFERRABLE
+constraint tokens.tokens_hash_key: UNIQUE (hash)
+constraint tokens.tokens_hash_not_null: NOT NULL hash
+constraint tokens.tokens_id_not_null: NOT NULL id
+constraint tokens.tokens_label_not_null: NOT NULL label
+constraint tokens.tokens_pkey: PRIMARY KEY (id)
+constraint tokens.tokens_source_check: CHECK ((source = ANY (ARRAY['env'::text, 'generated'::text])))
+constraint tracker_polls.tracker_polls_attempts_not_null: NOT NULL attempts
+constraint tracker_polls.tracker_polls_decision_fkey: FOREIGN KEY (decision) REFERENCES decisions(id) ON DELETE CASCADE DEFERRABLE
+constraint tracker_polls.tracker_polls_decision_not_null: NOT NULL decision
+constraint tracker_polls.tracker_polls_next_at_not_null: NOT NULL next_at
+constraint tracker_polls.tracker_polls_nonce_key: UNIQUE (nonce)
+constraint tracker_polls.tracker_polls_nonce_not_null: NOT NULL nonce
+constraint tracker_polls.tracker_polls_pkey: PRIMARY KEY (decision)
+constraint tracker_requests.tracker_requests_action_check: CHECK ((action = ANY (ARRAY['create'::text, 'link'::text])))
+constraint tracker_requests.tracker_requests_action_not_null: NOT NULL action
+constraint tracker_requests.tracker_requests_at_not_null: NOT NULL at
+constraint tracker_requests.tracker_requests_body_not_null: NOT NULL body
+constraint tracker_requests.tracker_requests_id_not_null: NOT NULL id
+constraint tracker_requests.tracker_requests_nonce_not_null: NOT NULL nonce
+constraint tracker_requests.tracker_requests_pkey: PRIMARY KEY (id)
+constraint tracker_requests.tracker_requests_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
+constraint tracker_requests.tracker_requests_project_not_null: NOT NULL project
+constraint tracker_requests.tracker_requests_repository_not_null: NOT NULL repository
+constraint tracker_requests.tracker_requests_result_fkey: FOREIGN KEY (result) REFERENCES results(id) DEFERRABLE
+constraint tracker_requests.tracker_requests_result_not_null: NOT NULL result
+constraint tracker_requests.tracker_requests_state_check: CHECK ((state = ANY (ARRAY['queued'::text, 'sending'::text, 'complete'::text, 'failed'::text])))
+constraint tracker_requests.tracker_requests_state_not_null: NOT NULL state
+constraint tracker_requests.tracker_requests_title_not_null: NOT NULL title
+constraint versions.versions_at_not_null: NOT NULL at
+constraint versions.versions_author_fkey: FOREIGN KEY (author) REFERENCES actors(id) DEFERRABLE
+constraint versions.versions_author_not_null: NOT NULL author
+constraint versions.versions_body_not_null: NOT NULL body
+constraint versions.versions_case_id_fkey: FOREIGN KEY (case_id) REFERENCES cases(id) DEFERRABLE
+constraint versions.versions_case_id_not_null: NOT NULL case_id
+constraint versions.versions_claim_hash_not_null: NOT NULL claim_hash
+constraint versions.versions_decision_fkey: FOREIGN KEY (decision) REFERENCES decisions(id) DEFERRABLE
+constraint versions.versions_decision_not_null: NOT NULL decision
+constraint versions.versions_hash_not_null: NOT NULL hash
+constraint versions.versions_no_not_null: NOT NULL no
+constraint versions.versions_pkey: PRIMARY KEY (case_id, no)
+constraint versions.versions_proposal_not_null: NOT NULL proposal
+constraint versions.versions_seq_not_null: NOT NULL seq
+function receipt_batch_fn: CREATE OR REPLACE FUNCTION public.receipt_batch_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+ IF OLD.job IS DISTINCT FROM NEW.job THEN
+INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.result IN (SELECT id FROM results WHERE batch=NEW.id) ON CONFLICT(run,bucket) DO NOTHING;
+
+ END IF;
+ RETURN NEW;
+END;
+$function$
+
+function receipt_correction_delete_old_fn: CREATE OR REPLACE FUNCTION public.receipt_correction_delete_old_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+ IF OLD.corrects IS NOT NULL THEN
+INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.test=(SELECT test FROM results WHERE id=OLD.corrects) AND rt.target=(SELECT target FROM results WHERE id=OLD.corrects) ON CONFLICT(run,bucket) DO NOTHING;
+
+ END IF;
+ RETURN OLD;
+END;
+$function$
+
+function receipt_correction_insert_new_fn: CREATE OR REPLACE FUNCTION public.receipt_correction_insert_new_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+ IF NEW.corrects IS NOT NULL THEN
+INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.test=(SELECT test FROM results WHERE id=NEW.corrects) AND rt.target=(SELECT target FROM results WHERE id=NEW.corrects) ON CONFLICT(run,bucket) DO NOTHING;
+
+ END IF;
+ RETURN NEW;
+END;
+$function$
+
+function receipt_correction_update_new_fn: CREATE OR REPLACE FUNCTION public.receipt_correction_update_new_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+ IF NEW.corrects IS NOT NULL AND OLD.corrects IS DISTINCT FROM NEW.corrects THEN
+INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.test=(SELECT test FROM results WHERE id=NEW.corrects) AND rt.target=(SELECT target FROM results WHERE id=NEW.corrects) ON CONFLICT(run,bucket) DO NOTHING;
+
+ END IF;
+ RETURN NEW;
+END;
+$function$
+
+function receipt_correction_update_old_fn: CREATE OR REPLACE FUNCTION public.receipt_correction_update_old_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+ IF OLD.corrects IS NOT NULL AND OLD.corrects IS DISTINCT FROM NEW.corrects THEN
+INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.test=(SELECT test FROM results WHERE id=OLD.corrects) AND rt.target=(SELECT target FROM results WHERE id=OLD.corrects) ON CONFLICT(run,bucket) DO NOTHING;
+
+ END IF;
+ RETURN NEW;
+END;
+$function$
+
+function receipt_excuses_delete_old_fn: CREATE OR REPLACE FUNCTION public.receipt_excuses_delete_old_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.signature=OLD.signature AND rt.outcome IN ('fail','error') AND h.project=OLD.project AND (OLD.target=0 OR rt.target=OLD.target) ON CONFLICT(run,bucket) DO NOTHING;
+
+ RETURN OLD;
+END;
+$function$
+
+function receipt_excuses_insert_new_fn: CREATE OR REPLACE FUNCTION public.receipt_excuses_insert_new_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.signature=NEW.signature AND rt.outcome IN ('fail','error') AND h.project=NEW.project AND (NEW.target=0 OR rt.target=NEW.target) ON CONFLICT(run,bucket) DO NOTHING;
+
+ RETURN NEW;
+END;
+$function$
+
+function receipt_excuses_update_new_fn: CREATE OR REPLACE FUNCTION public.receipt_excuses_update_new_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.signature=NEW.signature AND rt.outcome IN ('fail','error') AND h.project=NEW.project AND (NEW.target=0 OR rt.target=NEW.target) ON CONFLICT(run,bucket) DO NOTHING;
+
+ RETURN NEW;
+END;
+$function$
+
+function receipt_excuses_update_old_fn: CREATE OR REPLACE FUNCTION public.receipt_excuses_update_old_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.signature=OLD.signature AND rt.outcome IN ('fail','error') AND h.project=OLD.project AND (OLD.target=0 OR rt.target=OLD.target) ON CONFLICT(run,bucket) DO NOTHING;
+
+ RETURN NEW;
+END;
+$function$
+
+function receipt_flips_delete_old_fn: CREATE OR REPLACE FUNCTION public.receipt_flips_delete_old_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.test=OLD.test AND rt.target=OLD.target ON CONFLICT(run,bucket) DO NOTHING;
+
+ RETURN OLD;
+END;
+$function$
+
+function receipt_flips_insert_new_fn: CREATE OR REPLACE FUNCTION public.receipt_flips_insert_new_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.test=NEW.test AND rt.target=NEW.target ON CONFLICT(run,bucket) DO NOTHING;
+
+ RETURN NEW;
+END;
+$function$
+
+function receipt_flips_update_new_fn: CREATE OR REPLACE FUNCTION public.receipt_flips_update_new_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.test=NEW.test AND rt.target=NEW.target ON CONFLICT(run,bucket) DO NOTHING;
+
+ RETURN NEW;
+END;
+$function$
+
+function receipt_flips_update_old_fn: CREATE OR REPLACE FUNCTION public.receipt_flips_update_old_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.test=OLD.test AND rt.target=OLD.target ON CONFLICT(run,bucket) DO NOTHING;
+
+ RETURN NEW;
+END;
+$function$
+
+function receipt_quarantine_insert_fn: CREATE OR REPLACE FUNCTION public.receipt_quarantine_insert_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+ IF (SELECT count(*) FROM quarantines WHERE project=NEW.project)=1 THEN
+INSERT INTO merge_receipt_dirty(run,bucket)
+ SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run
+ WHERE h.project=NEW.project AND rt.result IN (SELECT id FROM results WHERE quarantine_decision IS NOT NULL)
+ ON CONFLICT(run,bucket) DO NOTHING;
+
+ END IF;
+ RETURN NEW;
+END;
+$function$
+
+function receipt_quarantine_presence_fn: CREATE OR REPLACE FUNCTION public.receipt_quarantine_presence_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM quarantines WHERE project=OLD.project) THEN
+INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE h.project=OLD.project AND rt.result IN (SELECT id FROM results WHERE quarantine_decision IS NOT NULL) ON CONFLICT(run,bucket) DO NOTHING;
+
+ END IF;
+ RETURN OLD;
+END;
+$function$
+
+function receipt_result_excuses_delete_old_fn: CREATE OR REPLACE FUNCTION public.receipt_result_excuses_delete_old_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE OLD.slot IS NULL AND rt.result=OLD.result ON CONFLICT(run,bucket) DO NOTHING;
+
+ RETURN OLD;
+END;
+$function$
+
+function receipt_result_excuses_insert_new_fn: CREATE OR REPLACE FUNCTION public.receipt_result_excuses_insert_new_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE NEW.slot IS NULL AND rt.result=NEW.result ON CONFLICT(run,bucket) DO NOTHING;
+
+ RETURN NEW;
+END;
+$function$
+
+function receipt_result_excuses_update_new_fn: CREATE OR REPLACE FUNCTION public.receipt_result_excuses_update_new_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE NEW.slot IS NULL AND rt.result=NEW.result ON CONFLICT(run,bucket) DO NOTHING;
+
+ RETURN NEW;
+END;
+$function$
+
+function receipt_result_excuses_update_old_fn: CREATE OR REPLACE FUNCTION public.receipt_result_excuses_update_old_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE OLD.slot IS NULL AND rt.result=OLD.result ON CONFLICT(run,bucket) DO NOTHING;
+
+ RETURN NEW;
+END;
+$function$
+
+function receipt_result_fn: CREATE OR REPLACE FUNCTION public.receipt_result_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+ IF OLD.quarantine_decision IS DISTINCT FROM NEW.quarantine_decision OR OLD.quarantine_exit IS DISTINCT FROM NEW.quarantine_exit OR OLD.signature IS DISTINCT FROM NEW.signature OR OLD.method IS DISTINCT FROM NEW.method OR OLD.batch IS DISTINCT FROM NEW.batch OR OLD.test IS DISTINCT FROM NEW.test OR OLD.target IS DISTINCT FROM NEW.target THEN
+INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.result=NEW.id ON CONFLICT(run,bucket) DO NOTHING;
+
+ END IF;
+ RETURN NEW;
+END;
+$function$
+
+function receipt_run_delete_fn: CREATE OR REPLACE FUNCTION public.receipt_run_delete_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+INSERT INTO merge_receipt_dirty(run,bucket) SELECT OLD.run,OLD.result/32 WHERE EXISTS(SELECT 1 FROM merge_receipt_heads WHERE run=OLD.run) ON CONFLICT(run,bucket) DO NOTHING;
+
+ RETURN OLD;
+END;
+$function$
+
+function receipt_run_insert_fn: CREATE OR REPLACE FUNCTION public.receipt_run_insert_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+INSERT INTO merge_receipt_dirty(run,bucket) SELECT NEW.run,NEW.result/32 WHERE EXISTS(SELECT 1 FROM merge_receipt_heads WHERE run=NEW.run) ON CONFLICT(run,bucket) DO NOTHING;
+
+ RETURN NEW;
+END;
+$function$
+
+function receipt_run_update_new_fn: CREATE OR REPLACE FUNCTION public.receipt_run_update_new_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+ IF OLD.run IS DISTINCT FROM NEW.run OR OLD.result IS DISTINCT FROM NEW.result OR OLD.outcome IS DISTINCT FROM NEW.outcome OR OLD.signature IS DISTINCT FROM NEW.signature OR OLD.flipped IS DISTINCT FROM NEW.flipped OR OLD.target IS DISTINCT FROM NEW.target OR OLD.test IS DISTINCT FROM NEW.test THEN
+INSERT INTO merge_receipt_dirty(run,bucket) SELECT NEW.run,NEW.result/32 WHERE EXISTS(SELECT 1 FROM merge_receipt_heads WHERE run=NEW.run) ON CONFLICT(run,bucket) DO NOTHING;
+
+ END IF;
+ RETURN NEW;
+END;
+$function$
+
+function receipt_run_update_old_fn: CREATE OR REPLACE FUNCTION public.receipt_run_update_old_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+ IF OLD.run IS DISTINCT FROM NEW.run OR OLD.result IS DISTINCT FROM NEW.result OR OLD.outcome IS DISTINCT FROM NEW.outcome OR OLD.signature IS DISTINCT FROM NEW.signature OR OLD.flipped IS DISTINCT FROM NEW.flipped OR OLD.target IS DISTINCT FROM NEW.target OR OLD.test IS DISTINCT FROM NEW.test THEN
+INSERT INTO merge_receipt_dirty(run,bucket) SELECT OLD.run,OLD.result/32 WHERE EXISTS(SELECT 1 FROM merge_receipt_heads WHERE run=OLD.run) ON CONFLICT(run,bucket) DO NOTHING;
+
+ END IF;
+ RETURN NEW;
+END;
+$function$
+
+function receipt_target_fn: CREATE OR REPLACE FUNCTION public.receipt_target_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+ IF OLD.line IS DISTINCT FROM NEW.line OR OLD.change IS DISTINCT FROM NEW.change OR OLD.repo IS DISTINCT FROM NEW.repo OR OLD.what IS DISTINCT FROM NEW.what OR OLD.env IS DISTINCT FROM NEW.env THEN
+INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.target=NEW.id ON CONFLICT(run,bucket) DO NOTHING;
+
+ END IF;
+ RETURN NEW;
+END;
+$function$
+
+function receipt_test_fn: CREATE OR REPLACE FUNCTION public.receipt_test_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+ IF OLD.name IS DISTINCT FROM NEW.name OR OLD.file IS DISTINCT FROM NEW.file OR OLD.no IS DISTINCT FROM NEW.no OR OLD.kind IS DISTINCT FROM NEW.kind THEN
+INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.test=NEW.id ON CONFLICT(run,bucket) DO NOTHING;
+
+ END IF;
+ RETURN NEW;
+END;
+$function$
+
+function search_docs_vector_fn: CREATE OR REPLACE FUNCTION public.search_docs_vector_fn()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+ NEW.title_tsv := to_tsvector('mainworthy_search', coalesce(NEW.title, ''));
+ NEW.tsv := setweight(NEW.title_tsv, 'A') ||
+  setweight(to_tsvector('mainworthy_search', coalesce(NEW.tags, '')), 'B') ||
+  setweight(to_tsvector('mainworthy_search', coalesce(NEW.body, '')), 'D');
+ RETURN NEW;
+END;
+$function$
+
+index actors_org_name_key: CREATE UNIQUE INDEX actors_org_name_key ON public.actors USING btree (org, name)
+index actors_pkey: CREATE UNIQUE INDEX actors_pkey ON public.actors USING btree (id)
+index answers_pkey: CREATE UNIQUE INDEX answers_pkey ON public.answers USING btree (id)
+index answers_question: CREATE INDEX answers_question ON public.answers USING btree (question, id)
+index artifacts_pkey: CREATE UNIQUE INDEX artifacts_pkey ON public.artifacts USING btree (id)
+index artifacts_project_digest_key: CREATE UNIQUE INDEX artifacts_project_digest_key ON public.artifacts USING btree (project, digest)
+index assertion_index_pkey: CREATE UNIQUE INDEX assertion_index_pkey ON public.assertion_index USING btree (project)
+index assertion_roots_pkey: CREATE UNIQUE INDEX assertion_roots_pkey ON public.assertion_roots USING btree (signature)
+index assertion_roots_project: CREATE INDEX assertion_roots_project ON public.assertion_roots USING btree (project)
+index assertion_roots_root: CREATE INDEX assertion_roots_root ON public.assertion_roots USING btree (root)
+index assertion_seen_files: CREATE INDEX assertion_seen_files ON public.assertion_seen USING btree (project, scope, root, file, test)
+index assertion_seen_pkey: CREATE UNIQUE INDEX assertion_seen_pkey ON public.assertion_seen USING btree (project, scope, root, test)
+index assertion_seen_root: CREATE INDEX assertion_seen_root ON public.assertion_seen USING btree (root)
+index assertion_seen_test: CREATE INDEX assertion_seen_test ON public.assertion_seen USING btree (test)
+index assertion_spreads_pkey: CREATE UNIQUE INDEX assertion_spreads_pkey ON public.assertion_spreads USING btree (project, scope, root)
+index assertion_spreads_root: CREATE INDEX assertion_spreads_root ON public.assertion_spreads USING btree (root)
+index attachments_pkey: CREATE UNIQUE INDEX attachments_pkey ON public.attachments USING btree (id)
+index attachments_result: CREATE INDEX attachments_result ON public.attachments USING btree (result, id)
+index batches_accepted: CREATE INDEX batches_accepted ON public.batches USING btree (project, state) WHERE (state = 'accepted'::text)
+index batches_pkey: CREATE UNIQUE INDEX batches_pkey ON public.batches USING btree (id)
+index batches_project_key_key: CREATE UNIQUE INDEX batches_project_key_key ON public.batches USING btree (project, key)
+index batches_target: CREATE INDEX batches_target ON public.batches USING btree (target, seq)
+index batches_target_shards: CREATE INDEX batches_target_shards ON public.batches USING btree (target, job) WHERE (shards IS NOT NULL)
+index builds_artifact_reset: CREATE INDEX builds_artifact_reset ON public.builds USING btree (artifact)
+index builds_pkey: CREATE UNIQUE INDEX builds_pkey ON public.builds USING btree (id)
+index builds_project_label_key: CREATE UNIQUE INDEX builds_project_label_key ON public.builds USING btree (project, label)
+index case_aliases_case_id_reset: CREATE INDEX case_aliases_case_id_reset ON public.case_aliases USING btree (case_id)
+index case_aliases_pkey: CREATE UNIQUE INDEX case_aliases_pkey ON public.case_aliases USING btree (project, alias)
+index case_tags_case: CREATE INDEX case_tags_case ON public.case_tags USING btree (case_id)
+index case_tags_pkey: CREATE UNIQUE INDEX case_tags_pkey ON public.case_tags USING btree (project, tag, case_id)
+index cases_folder: CREATE INDEX cases_folder ON public.cases USING btree (project, folder, rank)
+index cases_folder_reset: CREATE INDEX cases_folder_reset ON public.cases USING btree (folder)
+index cases_pkey: CREATE UNIQUE INDEX cases_pkey ON public.cases USING btree (id)
+index cases_project_kind: CREATE INDEX cases_project_kind ON public.cases USING btree (project, kind, state)
+index cases_project_no_key: CREATE UNIQUE INDEX cases_project_no_key ON public.cases USING btree (project, no)
+index cases_rev: CREATE INDEX cases_rev ON public.cases USING btree (project, rev)
+index cases_state: CREATE INDEX cases_state ON public.cases USING btree (project, state, folder)
+index change_ends_landing: CREATE INDEX change_ends_landing ON public.change_ends USING btree (landing_commit, landing_repo, landing_branch) WHERE (ended = 'merged'::text)
+index change_ends_pkey: CREATE UNIQUE INDEX change_ends_pkey ON public.change_ends USING btree (change)
+index change_ends_receipt: CREATE INDEX change_ends_receipt ON public.change_ends USING btree (receipt)
+index changes_base: CREATE INDEX changes_base ON public.changes USING btree (project, base_sha, repo)
+index changes_pkey: CREATE UNIQUE INDEX changes_pkey ON public.changes USING btree (id)
+index changes_project_key_key: CREATE UNIQUE INDEX changes_project_key_key ON public.changes USING btree (project, key)
+index commands_pkey: CREATE UNIQUE INDEX commands_pkey ON public.commands USING btree (id)
+index commands_seq: CREATE INDEX commands_seq ON public.commands USING btree (project, seq)
+index commit_status_delivery_pkey: CREATE UNIQUE INDEX commit_status_delivery_pkey ON public.commit_status_delivery USING btree (id)
+index commit_statuses_nonce_key: CREATE UNIQUE INDEX commit_statuses_nonce_key ON public.commit_statuses USING btree (nonce)
+index commit_statuses_pkey: CREATE UNIQUE INDEX commit_statuses_pkey ON public.commit_statuses USING btree (project, repository, commit_sha)
+index commit_statuses_watch: CREATE INDEX commit_statuses_watch ON public.commit_statuses USING btree (project, repository, state, watch_until)
+index counters_pkey: CREATE UNIQUE INDEX counters_pkey ON public.counters USING btree (project, name)
+index covers_case: CREATE INDEX covers_case ON public.covers USING btree (case_id)
+index covers_decision_reset: CREATE INDEX covers_decision_reset ON public.covers USING btree (decision)
+index covers_pkey: CREATE UNIQUE INDEX covers_pkey ON public.covers USING btree (requirement, case_id)
+index credentials_actor: CREATE INDEX credentials_actor ON public.credentials USING btree (actor, revoked_at)
+index credentials_handle: CREATE UNIQUE INDEX credentials_handle ON public.credentials USING btree (kind, handle) WHERE (handle IS NOT NULL)
+index credentials_password: CREATE UNIQUE INDEX credentials_password ON public.credentials USING btree (actor) WHERE ((kind = 'password'::text) AND (revoked_at IS NULL))
+index credentials_pkey: CREATE UNIQUE INDEX credentials_pkey ON public.credentials USING btree (id)
+index decisions_expiry: CREATE INDEX decisions_expiry ON public.decisions USING btree (project, expires_at) WHERE (expires_at IS NOT NULL)
+index decisions_pkey: CREATE UNIQUE INDEX decisions_pkey ON public.decisions USING btree (id)
+index decisions_question: CREATE INDEX decisions_question ON public.decisions USING btree (question, id)
+index decisions_seq: CREATE INDEX decisions_seq ON public.decisions USING btree (project, seq)
+index decisions_supersedes_reset: CREATE INDEX decisions_supersedes_reset ON public.decisions USING btree (supersedes) WHERE (supersedes IS NOT NULL)
+index demo_projects_pkey: CREATE UNIQUE INDEX demo_projects_pkey ON public.demo_projects USING btree (project)
+index depends_on_decision: CREATE INDEX depends_on_decision ON public.depends_on USING btree (decision)
+index depends_on_pkey: CREATE UNIQUE INDEX depends_on_pkey ON public.depends_on USING btree (run, decision)
+index deployments_build_fk: CREATE INDEX deployments_build_fk ON public.deployments USING btree (build)
+index deployments_pkey: CREATE UNIQUE INDEX deployments_pkey ON public.deployments USING btree (id)
+index deployments_project: CREATE INDEX deployments_project ON public.deployments USING btree (project, id)
+index excuses_decision_fk: CREATE INDEX excuses_decision_fk ON public.excuses USING btree (decision)
+index excuses_pkey: CREATE UNIQUE INDEX excuses_pkey ON public.excuses USING btree (project, signature, scope, target)
+index excuses_signature_reset: CREATE INDEX excuses_signature_reset ON public.excuses USING btree (signature)
+index findings_case: CREATE INDEX findings_case ON public.findings USING btree (case_id, seq DESC)
+index findings_pkey: CREATE UNIQUE INDEX findings_pkey ON public.findings USING btree (id)
+index findings_project_reset: CREATE INDEX findings_project_reset ON public.findings USING btree (project)
+index flips_first_try: CREATE INDEX flips_first_try ON public.flips USING btree (first_try) WHERE (first_try IS NOT NULL)
+index flips_pkey: CREATE UNIQUE INDEX flips_pkey ON public.flips USING btree (id)
+index flips_second_try: CREATE INDEX flips_second_try ON public.flips USING btree (second_try) WHERE (second_try IS NOT NULL)
+index flips_target_reset: CREATE INDEX flips_target_reset ON public.flips USING btree (target)
+index flips_test: CREATE INDEX flips_test ON public.flips USING btree (project, test, seq DESC)
+index flips_test_reset: CREATE INDEX flips_test_reset ON public.flips USING btree (test)
+index folders_parent_reset: CREATE INDEX folders_parent_reset ON public.folders USING btree (parent) WHERE (parent IS NOT NULL)
+index folders_pkey: CREATE UNIQUE INDEX folders_pkey ON public.folders USING btree (id)
+index folders_tree: CREATE INDEX folders_tree ON public.folders USING btree (project, parent, rank)
+index grants_pkey: CREATE UNIQUE INDEX grants_pkey ON public.grants USING btree (actor, project)
+index handoffs_order: CREATE UNIQUE INDEX handoffs_order ON public.handoffs USING btree (queue_order)
+index handoffs_pkey: CREATE UNIQUE INDEX handoffs_pkey ON public.handoffs USING btree (id)
+index handoffs_project: CREATE INDEX handoffs_project ON public.handoffs USING btree (project)
+index handoffs_question: CREATE INDEX handoffs_question ON public.handoffs USING btree (question, at)
+index handoffs_queue: CREATE INDEX handoffs_queue ON public.handoffs USING btree (state, at)
+index invitations_actor: CREATE INDEX invitations_actor ON public.invitations USING btree (actor)
+index invitations_hash_key: CREATE UNIQUE INDEX invitations_hash_key ON public.invitations USING btree (hash)
+index invitations_pkey: CREATE UNIQUE INDEX invitations_pkey ON public.invitations USING btree (id)
+index mail_contacts_email_key: CREATE UNIQUE INDEX mail_contacts_email_key ON public.mail_contacts USING btree (email)
+index mail_contacts_pkey: CREATE UNIQUE INDEX mail_contacts_pkey ON public.mail_contacts USING btree (actor)
+index merge_receipt_dirty_pkey: CREATE UNIQUE INDEX merge_receipt_dirty_pkey ON public.merge_receipt_dirty USING btree (run, bucket)
+index merge_receipt_heads_pkey: CREATE UNIQUE INDEX merge_receipt_heads_pkey ON public.merge_receipt_heads USING btree (run)
+index merge_receipt_heads_project: CREATE INDEX merge_receipt_heads_project ON public.merge_receipt_heads USING btree (project)
+index merge_receipt_heads_root: CREATE INDEX merge_receipt_heads_root ON public.merge_receipt_heads USING btree (root)
+index merge_receipt_members_child: CREATE INDEX merge_receipt_members_child ON public.merge_receipt_members USING btree (child)
+index merge_receipt_members_payload: CREATE INDEX merge_receipt_members_payload ON public.merge_receipt_members USING btree (payload)
+index merge_receipt_members_pkey: CREATE UNIQUE INDEX merge_receipt_members_pkey ON public.merge_receipt_members USING btree (node, slot)
+index merge_receipt_nodes_pkey: CREATE UNIQUE INDEX merge_receipt_nodes_pkey ON public.merge_receipt_nodes USING btree (id)
+index merge_receipt_nodes_project_hash_key: CREATE UNIQUE INDEX merge_receipt_nodes_project_hash_key ON public.merge_receipt_nodes USING btree (project, hash)
+index merge_receipt_payloads_pkey: CREATE UNIQUE INDEX merge_receipt_payloads_pkey ON public.merge_receipt_payloads USING btree (id)
+index merge_receipt_payloads_project_hash_key: CREATE UNIQUE INDEX merge_receipt_payloads_project_hash_key ON public.merge_receipt_payloads USING btree (project, hash)
+index merge_receipt_snapshots_gate: CREATE INDEX merge_receipt_snapshots_gate ON public.merge_receipt_snapshots USING btree (gate_root)
+index merge_receipt_snapshots_pkey: CREATE UNIQUE INDEX merge_receipt_snapshots_pkey ON public.merge_receipt_snapshots USING btree (id)
+index merge_receipt_snapshots_project_hash_key: CREATE UNIQUE INDEX merge_receipt_snapshots_project_hash_key ON public.merge_receipt_snapshots USING btree (project, hash)
+index merge_receipt_snapshots_results: CREATE INDEX merge_receipt_snapshots_results ON public.merge_receipt_snapshots USING btree (result_root)
+index merge_receipts_change: CREATE INDEX merge_receipts_change ON public.merge_receipts USING btree (change, id)
+index merge_receipts_evidence: CREATE INDEX merge_receipts_evidence ON public.merge_receipts USING btree (evidence)
+index merge_receipts_pkey: CREATE UNIQUE INDEX merge_receipts_pkey ON public.merge_receipts USING btree (id)
+index merge_receipts_project: CREATE INDEX merge_receipts_project ON public.merge_receipts USING btree (project, seq)
+index meta_pkey: CREATE UNIQUE INDEX meta_pkey ON public.meta USING btree (key)
+index orgs_pkey: CREATE UNIQUE INDEX orgs_pkey ON public.orgs USING btree (id)
+index passkey_users_handle_key: CREATE UNIQUE INDEX passkey_users_handle_key ON public.passkey_users USING btree (handle)
+index passkey_users_pkey: CREATE UNIQUE INDEX passkey_users_pkey ON public.passkey_users USING btree (actor)
+index placements_case: CREATE INDEX placements_case ON public.placements USING btree (case_id, seq)
+index placements_decision_reset: CREATE INDEX placements_decision_reset ON public.placements USING btree (decision)
+index placements_pkey: CREATE UNIQUE INDEX placements_pkey ON public.placements USING btree (id)
+index policies_decision_reset: CREATE INDEX policies_decision_reset ON public.policies USING btree (decision) WHERE (decision IS NOT NULL)
+index policies_pkey: CREATE UNIQUE INDEX policies_pkey ON public.policies USING btree (project, version)
+index projects_identity: CREATE UNIQUE INDEX projects_identity ON public.projects USING btree (identity)
+index projects_key_key: CREATE UNIQUE INDEX projects_key_key ON public.projects USING btree (key)
+index projects_pkey: CREATE UNIQUE INDEX projects_pkey ON public.projects USING btree (id)
+index proposals_pkey: CREATE UNIQUE INDEX proposals_pkey ON public.proposals USING btree (id)
+index proposals_project_no_key: CREATE UNIQUE INDEX proposals_project_no_key ON public.proposals USING btree (project, no)
+index quarantines_decision_reset: CREATE INDEX quarantines_decision_reset ON public.quarantines USING btree (decision)
+index quarantines_pkey: CREATE UNIQUE INDEX quarantines_pkey ON public.quarantines USING btree (project, test)
+index quarantines_test_reset: CREATE INDEX quarantines_test_reset ON public.quarantines USING btree (test)
+index question_refs_pkey: CREATE UNIQUE INDEX question_refs_pkey ON public.question_refs USING btree (project, ref, question)
+index question_refs_question: CREATE INDEX question_refs_question ON public.question_refs USING btree (question)
+index questions_fingerprint: CREATE INDEX questions_fingerprint ON public.questions USING btree (project, fingerprint, epoch DESC)
+index questions_kinds: CREATE INDEX questions_kinds ON public.questions USING btree (project, state, owner, kind)
+index questions_pkey: CREATE UNIQUE INDEX questions_pkey ON public.questions USING btree (id)
+index questions_prior_reset: CREATE INDEX questions_prior_reset ON public.questions USING btree (prior) WHERE (prior IS NOT NULL)
+index questions_project_no_key: CREATE UNIQUE INDEX questions_project_no_key ON public.questions USING btree (project, no)
+index questions_queue: CREATE INDEX questions_queue ON public.questions USING btree (project, state, owner, rank)
+index questions_rev: CREATE INDEX questions_rev ON public.questions USING btree (project, rev)
+index requirements_pkey: CREATE UNIQUE INDEX requirements_pkey ON public.requirements USING btree (id)
+index requirements_project_key_key: CREATE UNIQUE INDEX requirements_project_key_key ON public.requirements USING btree (project, key)
+index result_excuses_decision: CREATE INDEX result_excuses_decision ON public.result_excuses USING btree (decision)
+index result_excuses_global: CREATE UNIQUE INDEX result_excuses_global ON public.result_excuses USING btree (result) WHERE (slot IS NULL)
+index result_excuses_pkey: CREATE UNIQUE INDEX result_excuses_pkey ON public.result_excuses USING btree (id)
+index result_excuses_result_reset: CREATE INDEX result_excuses_result_reset ON public.result_excuses USING btree (result)
+index result_excuses_slot: CREATE UNIQUE INDEX result_excuses_slot ON public.result_excuses USING btree (slot, result) WHERE (slot IS NOT NULL)
+index result_tries_pkey: CREATE UNIQUE INDEX result_tries_pkey ON public.result_tries USING btree (id)
+index result_tries_project: CREATE INDEX result_tries_project ON public.result_tries USING btree (project)
+index result_tries_result: CREATE UNIQUE INDEX result_tries_result ON public.result_tries USING btree (result, try)
+index result_tries_signature: CREATE INDEX result_tries_signature ON public.result_tries USING btree (signature) WHERE (signature IS NOT NULL)
+index results_assertion_rebuild: CREATE INDEX results_assertion_rebuild ON public.results USING btree (project, id)
+index results_at: CREATE INDEX results_at ON public.results USING btree (project, at)
+index results_batch: CREATE INDEX results_batch ON public.results USING btree (batch, outcome)
+index results_case: CREATE INDEX results_case ON public.results USING btree (basis_case, method, seq DESC) WHERE (basis_case IS NOT NULL)
+index results_corrects: CREATE INDEX results_corrects ON public.results USING btree (corrects) WHERE (corrects IS NOT NULL)
+index results_pkey: CREATE UNIQUE INDEX results_pkey ON public.results USING btree (id)
+index results_producer: CREATE INDEX results_producer ON public.results USING btree (project, signature, actor, target, run) WHERE (signature IS NOT NULL)
+index results_quarantine_decision_reset: CREATE INDEX results_quarantine_decision_reset ON public.results USING btree (quarantine_decision) WHERE (quarantine_decision IS NOT NULL)
+index results_quarantine_exit: CREATE INDEX results_quarantine_exit ON public.results USING btree (quarantine_exit) WHERE (quarantine_exit IS NOT NULL)
+index results_signature: CREATE INDEX results_signature ON public.results USING btree (project, signature, seq DESC) WHERE (signature IS NOT NULL)
+index results_signature_reset: CREATE INDEX results_signature_reset ON public.results USING btree (signature) WHERE (signature IS NOT NULL)
+index results_target: CREATE INDEX results_target ON public.results USING btree (target, test, attempt)
+index results_test: CREATE INDEX results_test ON public.results USING btree (project, test, seq DESC, ord DESC)
+index results_test_reset: CREATE INDEX results_test_reset ON public.results USING btree (test)
+index reviews_case_id_basis_lens_reviewer_key: CREATE UNIQUE INDEX reviews_case_id_basis_lens_reviewer_key ON public.reviews USING btree (case_id, basis, lens, reviewer)
+index reviews_pkey: CREATE UNIQUE INDEX reviews_pkey ON public.reviews USING btree (id)
+index reviews_project_reset: CREATE INDEX reviews_project_reset ON public.reviews USING btree (project)
+index run_tests_cause: CREATE INDEX run_tests_cause ON public.run_tests USING btree (signature, run) WHERE (signature IS NOT NULL)
+index run_tests_outcome: CREATE INDEX run_tests_outcome ON public.run_tests USING btree (run, outcome, signature)
+index run_tests_pkey: CREATE UNIQUE INDEX run_tests_pkey ON public.run_tests USING btree (run, test, lane)
+index run_tests_receipt: CREATE INDEX run_tests_receipt ON public.run_tests USING btree (run, ((result / 32)), result)
+index run_tests_result_reset: CREATE INDEX run_tests_result_reset ON public.run_tests USING btree (result)
+index run_tests_target_fk: CREATE INDEX run_tests_target_fk ON public.run_tests USING btree (target)
+index run_tests_test: CREATE INDEX run_tests_test ON public.run_tests USING btree (test, run)
+index runs_change: CREATE UNIQUE INDEX runs_change ON public.runs USING btree (project, accepts_what) WHERE (origin = 'change'::text)
+index runs_change_fk: CREATE INDEX runs_change_fk ON public.runs USING btree (change)
+index runs_open: CREATE INDEX runs_open ON public.runs USING btree (project, state, id DESC)
+index runs_pkey: CREATE UNIQUE INDEX runs_pkey ON public.runs USING btree (id)
+index runs_planned_commit: CREATE INDEX runs_planned_commit ON public.runs USING btree (project, (((accepts)::jsonb ->> 'commit'::text)), state, id DESC) WHERE (origin = 'planned'::text)
+index runs_planned_receiving: CREATE INDEX runs_planned_receiving ON public.runs USING btree (project, state, id DESC) WHERE (origin = 'planned'::text)
+index runs_project_no_key: CREATE UNIQUE INDEX runs_project_no_key ON public.runs USING btree (project, no)
+index runs_scope: CREATE INDEX runs_scope ON public.runs USING btree (project, scope, id) WHERE (scope IS NOT NULL)
+index runs_signoff_reset: CREATE INDEX runs_signoff_reset ON public.runs USING btree (signoff) WHERE (signoff IS NOT NULL)
+index scope_moves_pkey: CREATE UNIQUE INDEX scope_moves_pkey ON public.scope_moves USING btree (id)
+index scope_moves_project_reset: CREATE INDEX scope_moves_project_reset ON public.scope_moves USING btree (project)
+index search_docs_pkey: CREATE UNIQUE INDEX search_docs_pkey ON public.search_docs USING btree (id)
+index search_docs_title_tsv: CREATE INDEX search_docs_title_tsv ON public.search_docs USING gin (title_tsv)
+index search_docs_tsv: CREATE INDEX search_docs_tsv ON public.search_docs USING gin (tsv)
+index sessions_actor: CREATE INDEX sessions_actor ON public.sessions USING btree (actor, ended_at)
+index sessions_credential: CREATE INDEX sessions_credential ON public.sessions USING btree (credential) WHERE (credential IS NOT NULL)
+index sessions_hash_key: CREATE UNIQUE INDEX sessions_hash_key ON public.sessions USING btree (hash)
+index sessions_pkey: CREATE UNIQUE INDEX sessions_pkey ON public.sessions USING btree (id)
+index signatures_pkey: CREATE UNIQUE INDEX signatures_pkey ON public.signatures USING btree (id)
+index signatures_project_hash_key: CREATE UNIQUE INDEX signatures_project_hash_key ON public.signatures USING btree (project, hash)
+index slot_leases_pkey: CREATE UNIQUE INDEX slot_leases_pkey ON public.slot_leases USING btree (slot)
+index slot_results_discounted_by_fk: CREATE INDEX slot_results_discounted_by_fk ON public.slot_results USING btree (discounted_by)
+index slot_results_pkey: CREATE UNIQUE INDEX slot_results_pkey ON public.slot_results USING btree (slot, result)
+index slot_results_result: CREATE INDEX slot_results_result ON public.slot_results USING btree (result)
+index slots_case: CREATE INDEX slots_case ON public.slots USING btree (case_id, run)
+index slots_disputed: CREATE INDEX slots_disputed ON public.slots USING btree (run) WHERE (state = 'disputed'::text)
+index slots_next: CREATE INDEX slots_next ON public.slots USING btree (run, state, rank)
+index slots_pkey: CREATE UNIQUE INDEX slots_pkey ON public.slots USING btree (id)
+index slots_rank: CREATE INDEX slots_rank ON public.slots USING btree (run, rank)
+index slots_run_case_id_obligation_key: CREATE UNIQUE INDEX slots_run_case_id_obligation_key ON public.slots USING btree (run, case_id, obligation)
+index targets_commit: CREATE INDEX targets_commit ON public.targets USING btree (project, commit_sha)
+index targets_pkey: CREATE UNIQUE INDEX targets_pkey ON public.targets USING btree (id)
+index targets_project_what_env_key: CREATE UNIQUE INDEX targets_project_what_env_key ON public.targets USING btree (project, what, env)
+index team_events_pkey: CREATE UNIQUE INDEX team_events_pkey ON public.team_events USING btree (id)
+index team_events_team: CREATE INDEX team_events_team ON public.team_events USING btree (team, id)
+index team_grants_pkey: CREATE UNIQUE INDEX team_grants_pkey ON public.team_grants USING btree (team, project)
+index team_members_actor: CREATE INDEX team_members_actor ON public.team_members USING btree (actor, team)
+index team_members_pkey: CREATE UNIQUE INDEX team_members_pkey ON public.team_members USING btree (team, actor)
+index teams_org_name_key: CREATE UNIQUE INDEX teams_org_name_key ON public.teams USING btree (org, name)
+index teams_pkey: CREATE UNIQUE INDEX teams_pkey ON public.teams USING btree (id)
+index tests_case: CREATE INDEX tests_case ON public.tests USING btree (project, case_id)
+index tests_case_id_reset: CREATE INDEX tests_case_id_reset ON public.tests USING btree (case_id) WHERE (case_id IS NOT NULL)
+index tests_file: CREATE INDEX tests_file ON public.tests USING btree (project, file)
+index tests_linked_by_reset: CREATE INDEX tests_linked_by_reset ON public.tests USING btree (linked_by) WHERE (linked_by IS NOT NULL)
+index tests_pkey: CREATE UNIQUE INDEX tests_pkey ON public.tests USING btree (id)
+index tests_project_key_key: CREATE UNIQUE INDEX tests_project_key_key ON public.tests USING btree (project, key)
+index tests_project_no_key: CREATE UNIQUE INDEX tests_project_no_key ON public.tests USING btree (project, no)
+index tokens_hash_key: CREATE UNIQUE INDEX tokens_hash_key ON public.tokens USING btree (hash)
+index tokens_pkey: CREATE UNIQUE INDEX tokens_pkey ON public.tokens USING btree (id)
+index tracker_polls_nonce_key: CREATE UNIQUE INDEX tracker_polls_nonce_key ON public.tracker_polls USING btree (nonce)
+index tracker_polls_pkey: CREATE UNIQUE INDEX tracker_polls_pkey ON public.tracker_polls USING btree (decision)
+index tracker_requests_pkey: CREATE UNIQUE INDEX tracker_requests_pkey ON public.tracker_requests USING btree (id)
+index tracker_requests_project_reset: CREATE INDEX tracker_requests_project_reset ON public.tracker_requests USING btree (project)
+index tracker_requests_queue: CREATE INDEX tracker_requests_queue ON public.tracker_requests USING btree (state, at)
+index tracker_requests_result_reset: CREATE INDEX tracker_requests_result_reset ON public.tracker_requests USING btree (result)
+index versions_decision_reset: CREATE INDEX versions_decision_reset ON public.versions USING btree (decision)
+index versions_pkey: CREATE UNIQUE INDEX versions_pkey ON public.versions USING btree (case_id, no)
+table actors: 
+table answers: 
+table artifacts: 
+table assertion_index: 
+table assertion_roots: 
+table assertion_seen: 
+table assertion_spreads: 
+table attachments: 
+table batches: 
+table builds: 
+table case_aliases: 
+table case_tags: 
+table cases: 
+table change_ends: 
+table changes: 
+table commands: 
+table commit_status_delivery: 
+table commit_statuses: 
+table counters: 
+table covers: 
+table credentials: 
+table decisions: 
+table demo_projects: 
+table depends_on: 
+table deployments: 
+table excuses: 
+table findings: 
+table flips: 
+table folders: 
+table grants: 
+table handoffs: 
+table invitations: 
+table mail_contacts: 
+table merge_receipt_dirty: 
+table merge_receipt_heads: 
+table merge_receipt_members: 
+table merge_receipt_nodes: 
+table merge_receipt_payloads: 
+table merge_receipt_snapshots: 
+table merge_receipts: 
+table meta: 
+table orgs: 
+table passkey_users: 
+table placements: 
+table policies: 
+table projects: 
+table proposals: 
+table quarantines: 
+table question_refs: 
+table questions: 
+table requirements: 
+table result_excuses: 
+table result_tries: 
+table results: 
+table reviews: 
+table run_tests: 
+table runs: 
+table scope_moves: 
+table search_docs: 
+table sessions: 
+table signatures: 
+table slot_leases: 
+table slot_results: 
+table slots: 
+table targets: 
+table team_events: 
+table team_grants: 
+table team_members: 
+table teams: 
+table tests: 
+table tokens: 
+table tracker_polls: 
+table tracker_requests: 
+table versions: 
+trigger batches.receipt_batch: CREATE TRIGGER receipt_batch AFTER UPDATE OF job ON public.batches FOR EACH ROW EXECUTE FUNCTION receipt_batch_fn()
+trigger excuses.receipt_excuses_delete_old: CREATE TRIGGER receipt_excuses_delete_old AFTER DELETE ON public.excuses FOR EACH ROW EXECUTE FUNCTION receipt_excuses_delete_old_fn()
+trigger excuses.receipt_excuses_insert_new: CREATE TRIGGER receipt_excuses_insert_new AFTER INSERT ON public.excuses FOR EACH ROW EXECUTE FUNCTION receipt_excuses_insert_new_fn()
+trigger excuses.receipt_excuses_update_new: CREATE TRIGGER receipt_excuses_update_new AFTER UPDATE ON public.excuses FOR EACH ROW EXECUTE FUNCTION receipt_excuses_update_new_fn()
+trigger excuses.receipt_excuses_update_old: CREATE TRIGGER receipt_excuses_update_old AFTER UPDATE ON public.excuses FOR EACH ROW EXECUTE FUNCTION receipt_excuses_update_old_fn()
+trigger flips.receipt_flips_delete_old: CREATE TRIGGER receipt_flips_delete_old AFTER DELETE ON public.flips FOR EACH ROW EXECUTE FUNCTION receipt_flips_delete_old_fn()
+trigger flips.receipt_flips_insert_new: CREATE TRIGGER receipt_flips_insert_new AFTER INSERT ON public.flips FOR EACH ROW EXECUTE FUNCTION receipt_flips_insert_new_fn()
+trigger flips.receipt_flips_update_new: CREATE TRIGGER receipt_flips_update_new AFTER UPDATE ON public.flips FOR EACH ROW EXECUTE FUNCTION receipt_flips_update_new_fn()
+trigger flips.receipt_flips_update_old: CREATE TRIGGER receipt_flips_update_old AFTER UPDATE ON public.flips FOR EACH ROW EXECUTE FUNCTION receipt_flips_update_old_fn()
+trigger quarantines.receipt_quarantine_insert: CREATE TRIGGER receipt_quarantine_insert AFTER INSERT ON public.quarantines FOR EACH ROW EXECUTE FUNCTION receipt_quarantine_insert_fn()
+trigger quarantines.receipt_quarantine_presence: CREATE TRIGGER receipt_quarantine_presence AFTER DELETE ON public.quarantines FOR EACH ROW EXECUTE FUNCTION receipt_quarantine_presence_fn()
+trigger result_excuses.receipt_result_excuses_delete_old: CREATE TRIGGER receipt_result_excuses_delete_old AFTER DELETE ON public.result_excuses FOR EACH ROW EXECUTE FUNCTION receipt_result_excuses_delete_old_fn()
+trigger result_excuses.receipt_result_excuses_insert_new: CREATE TRIGGER receipt_result_excuses_insert_new AFTER INSERT ON public.result_excuses FOR EACH ROW EXECUTE FUNCTION receipt_result_excuses_insert_new_fn()
+trigger result_excuses.receipt_result_excuses_update_new: CREATE TRIGGER receipt_result_excuses_update_new AFTER UPDATE ON public.result_excuses FOR EACH ROW EXECUTE FUNCTION receipt_result_excuses_update_new_fn()
+trigger result_excuses.receipt_result_excuses_update_old: CREATE TRIGGER receipt_result_excuses_update_old AFTER UPDATE ON public.result_excuses FOR EACH ROW EXECUTE FUNCTION receipt_result_excuses_update_old_fn()
+trigger results.receipt_correction_delete_old: CREATE TRIGGER receipt_correction_delete_old AFTER DELETE ON public.results FOR EACH ROW EXECUTE FUNCTION receipt_correction_delete_old_fn()
+trigger results.receipt_correction_insert_new: CREATE TRIGGER receipt_correction_insert_new AFTER INSERT ON public.results FOR EACH ROW EXECUTE FUNCTION receipt_correction_insert_new_fn()
+trigger results.receipt_correction_update_new: CREATE TRIGGER receipt_correction_update_new AFTER UPDATE ON public.results FOR EACH ROW EXECUTE FUNCTION receipt_correction_update_new_fn()
+trigger results.receipt_correction_update_old: CREATE TRIGGER receipt_correction_update_old AFTER UPDATE ON public.results FOR EACH ROW EXECUTE FUNCTION receipt_correction_update_old_fn()
+trigger results.receipt_result: CREATE TRIGGER receipt_result AFTER UPDATE OF quarantine_decision, quarantine_exit, signature, method, batch, test, target ON public.results FOR EACH ROW EXECUTE FUNCTION receipt_result_fn()
+trigger run_tests.receipt_run_delete: CREATE TRIGGER receipt_run_delete AFTER DELETE ON public.run_tests FOR EACH ROW EXECUTE FUNCTION receipt_run_delete_fn()
+trigger run_tests.receipt_run_insert: CREATE TRIGGER receipt_run_insert AFTER INSERT ON public.run_tests FOR EACH ROW EXECUTE FUNCTION receipt_run_insert_fn()
+trigger run_tests.receipt_run_update_new: CREATE TRIGGER receipt_run_update_new AFTER UPDATE ON public.run_tests FOR EACH ROW EXECUTE FUNCTION receipt_run_update_new_fn()
+trigger run_tests.receipt_run_update_old: CREATE TRIGGER receipt_run_update_old AFTER UPDATE ON public.run_tests FOR EACH ROW EXECUTE FUNCTION receipt_run_update_old_fn()
+trigger search_docs.search_docs_vector: CREATE TRIGGER search_docs_vector BEFORE INSERT OR UPDATE ON public.search_docs FOR EACH ROW EXECUTE FUNCTION search_docs_vector_fn()
+trigger targets.receipt_target: CREATE TRIGGER receipt_target AFTER UPDATE OF line, change, repo, what, env ON public.targets FOR EACH ROW EXECUTE FUNCTION receipt_target_fn()
+trigger tests.receipt_test: CREATE TRIGGER receipt_test AFTER UPDATE OF name, file, no, kind ON public.tests FOR EACH ROW EXECUTE FUNCTION receipt_test_fn()"
+`;

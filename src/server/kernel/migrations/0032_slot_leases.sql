@@ -1,6 +1,0 @@
-CREATE TABLE slot_leases (
-	slot INTEGER PRIMARY KEY REFERENCES slots (id) ON DELETE CASCADE,
-	actor INTEGER NOT NULL REFERENCES actors (id),
-	since INTEGER NOT NULL,
-	until INTEGER NOT NULL CHECK (until > since)
-);
