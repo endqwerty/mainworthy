@@ -2,7 +2,7 @@ import { writeFileStream } from "../archive-stream.ts";
 import { assertPositionals } from "../args.ts";
 import { readEnvelope, unwrap } from "../client.ts";
 import { CliError } from "../errors.ts";
-import { line, printJson } from "../output.ts";
+import { line, printJson, warning } from "../output.ts";
 import type { AdapterCommand } from "./types.ts";
 
 export const exportCommand: AdapterCommand = {
@@ -27,6 +27,8 @@ export const exportCommand: AdapterCommand = {
 		if (!response.body) throw new CliError("internal", "the server returned no archive stream");
 		const stream = out.endsWith(".gz") ? response.body.pipeThrough(new CompressionStream("gzip")) : response.body;
 		await writeFileStream(out, stream);
+		const note = response.headers.get("x-mainworthy-archive-warning");
+		if (note) warning(`warning: ${note}`);
 		if (args.has("json")) printJson({ out }, args.bool("compact"));
 		else line(`exported to ${out}`);
 		return 0;

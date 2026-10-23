@@ -84,7 +84,7 @@ export function archiveRoutes(
 			try {
 				const project = new URL(req.url).searchParams.get("project") ?? undefined;
 				if (project === "") throw new OpError("invalid", "export needs a nonempty project key");
-				await runArchive(app, { op: "export", path: file.path, now: app.now(), project });
+				const result = await runArchive(app, { op: "export", path: file.path, now: app.now(), project });
 				const stream = await fileStream(file);
 				if (!allowed(session)) {
 					await stream.cancel();
@@ -94,7 +94,13 @@ export function archiveRoutes(
 					);
 				}
 				return new Response(stream, {
-					headers: { "content-type": "application/x-ndjson", "cache-control": "no-store" },
+					headers: {
+						"content-type": "application/x-ndjson",
+						"cache-control": "no-store",
+						...(result.counts.warnings?.length
+							? { "x-mainworthy-archive-warning": result.counts.warnings.join(" ") }
+							: {}),
+					},
 				});
 			} catch (error) {
 				file.remove();

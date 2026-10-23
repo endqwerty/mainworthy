@@ -110,7 +110,7 @@ export const UNEXPORTED: readonly string[] = [
 export type ArchiveCounts = { rows: number; tables: Record<string, number> };
 
 /** The digest covers the UTF-8 bytes of the header and all row lines, including each newline. */
-export type ExportedArchive = ArchiveCounts & { sha256: string };
+export type ExportedArchive = ArchiveCounts & { sha256: string; warnings: string[] };
 
 function invalid(message: string): OpError {
 	return new OpError("invalid", message);
@@ -315,13 +315,25 @@ export function exportArchive(
 		const metadata = discoverTables(db);
 		const filters = options.project === undefined ? null : projectFilters(db, metadata, options.project);
 		const filter = (table: Table): string => filters?.get(table.name) ?? where(table);
+		const warnings: string[] = [];
 		const tables = Object.fromEntries(
-			metadata.map((table) => [
-				table.name,
-				db.raw
-					.query<{ count: number }, []>(`SELECT count(*) AS count FROM ${identifier(table.name)} ${filter(table)}`)
-					.get()?.count ?? 0,
-			]),
+			metadata.map((table) => {
+				const timed = table.name === "results" || table.name === "result_tries";
+				const durationCheck = timed
+					? `, max(duration_ms IS NOT NULL AND (typeof(duration_ms) <> 'integer' OR duration_ms NOT BETWEEN ${resultDuration.minValue} AND ${resultDuration.maxValue})) AS invalid`
+					: "";
+				const counts = db.raw
+					.query<{ count: number; invalid?: number | null }, []>(
+						`SELECT count(*) AS count${durationCheck} FROM ${identifier(table.name)} ${filter(table)}`,
+					)
+					.get();
+				if (counts?.invalid) {
+					warnings.push(
+						`Archive contains ${table.name}.duration_ms outside the integer range ${resultDuration.minValue} to ${resultDuration.maxValue} ms; this build will refuse to import it. Original values were preserved. See /docs/data#import-into-a-new-instance.`,
+					);
+				}
+				return [table.name, counts?.count ?? 0];
+			}),
 		);
 		const hash = createHash("sha256");
 		const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -375,7 +387,7 @@ export function exportArchive(
 		const sha256 = hash.digest("hex");
 		append(`${JSON.stringify({ end: true, rows, sha256 })}\n`, false);
 		flush();
-		return { rows, tables, sha256 };
+		return { rows, tables, sha256, warnings };
 	});
 }
 
@@ -567,9 +579,10 @@ export function importArchive(db: Db, lines: Iterable<string>, options: { blobs?
 					}
 					const pending = StagedResults.safeParse(staged);
 					if (!pending.success) {
-						throw invalid(
-							`${context}: result and try durations must be integers from ${resultDuration.minValue} to ${resultDuration.maxValue} ms; ${pending.error.message}`,
-						);
+						const issues = pending.error.issues
+							.map(({ path, message }) => `${path.join(".") || "results"}: ${message.replace(/[\r\n]+/g, " ")}`)
+							.join("; ");
+						throw invalid(`${context}: pending results fail result input: ${issues}`);
 					}
 				}
 				if (entry.t === "meta" && entry.r.get("key") === "schema_version")

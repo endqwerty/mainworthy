@@ -237,6 +237,56 @@ test("HTTP and CLI archive imports refuse invalid durations and accept their exa
 	});
 });
 
+test("HTTP and CLI exports warn about unrestorable durations while preserving the backup", async () => {
+	await withInstance(async (source) => {
+		await source.client.call("report", {
+			target: { commit: "historical-duration", branch: "main" },
+			results: [
+				{ test: { key: "timed-test" }, outcome: "pass", durationMs: 0, tries: [{ outcome: "fail", durationMs: 0 }] },
+			],
+		});
+		source.instance.app.db.raw.exec(
+			"UPDATE results SET duration_ms = -1; UPDATE result_tries SET duration_ms = 2592000001",
+		);
+		const exported = await source.client.request("/api/export");
+		expect(exported.status).toBe(200);
+		const message = exported.headers.get("x-mainworthy-archive-warning");
+		expect(message).toContain("results.duration_ms");
+		expect(message).toContain("result_tries.duration_ms");
+		expect(message).toContain("refuse to import");
+		const text = await exported.text();
+		expect(text).toContain('"duration_ms":2592000001');
+		expect(text).toContain('"duration_ms":-1');
+		const file = join(source.directory, "historical.ndjson.gz");
+		const saved = await source.cli(["export", "--out", file]);
+		expect(saved.code).toBe(0);
+		expect(saved.stdout).toContain("exported to");
+		expect(saved.stdout).not.toContain("warning:");
+		expect(saved.stderr).toContain(`warning: ${message}`);
+		expect(new TextDecoder().decode(Bun.gunzipSync(await Bun.file(file).bytes()))).toContain(
+			'"duration_ms":2592000001',
+		);
+		await withInstance(async (target) => {
+			const refused = await target.client.request("/api/import", { method: "POST", body: text });
+			expect(refused.status).toBe(400);
+			expect(await refused.text()).toContain("invalid archive");
+		});
+		await source.client.call("admin", { do: "project.create", key: "healthy" });
+		const scoped = await source.client.request("/api/export?project=healthy");
+		expect(scoped.status).toBe(200);
+		expect(scoped.headers.get("x-mainworthy-archive-warning")).toBeNull();
+		await scoped.body?.cancel();
+		for (const duration of [0, 2_592_000_000, null]) {
+			for (const table of ["results", "result_tries"]) {
+				source.instance.app.db.raw.query(`UPDATE ${table} SET duration_ms = ?`).run(duration);
+			}
+			const valid = await source.client.request("/api/export");
+			expect(valid.headers.get("x-mainworthy-archive-warning")).toBeNull();
+			await valid.body?.cancel();
+		}
+	});
+});
+
 test("a failed export reports the worker's validation error and the next export succeeds", async () => {
 	await withInstance(async ({ client, instance }) => {
 		instance.app.db.raw.exec("INSERT INTO meta (key, value) VALUES ('bad-text', CAST(X'80' AS TEXT))");
@@ -484,7 +534,9 @@ test("an archive refuses out-of-range durations in pending reports before recove
 					const archive = await source.client.request("/api/export");
 					const response = await target.client.request("/api/import", { method: "POST", body: archive.body });
 					expect(response.status).toBe(400);
-					expect(await response.text()).toMatch(/batches\.staged.*row \d+.*line \d+.*0.*2592000000/);
+					expect(await response.text()).toMatch(
+						/batches\.staged.*row \d+.*line \d+.*pending results fail result input: 0\.(durationMs|tries\.0\.durationMs):/,
+					);
 					expect(await target.client.call("admin", { do: "project.list" })).toEqual(before);
 				}
 			}
