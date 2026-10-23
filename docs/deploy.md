@@ -16,8 +16,8 @@ export taken just before is in the volume (`/data/before-rename-2026-10-13.ndjso
 
 On each push to `main`, `check.yml` builds the image once with a GitHub Actions layer cache (`type=gha`).
 The `image` job loads it locally and checks readiness, the full commit from `/healthz`, and the packaged
-documentation. After `gate` succeeds, `publish` downloads that same tested image and pushes it to
-`ghcr.io/endqwerty/mainworthy`. It never rebuilds it. Pull requests never log in to GHCR or publish images.
+documentation. After `gate` succeeds, also when it passes in the automatic rerun of a test failing by chance,
+`publish` downloads that same tested image and pushes it to `ghcr.io/endqwerty/mainworthy`. It never rebuilds it. Pull requests never log in to GHCR or publish images.
 Only `publish` has `packages: write`, using `GITHUB_TOKEN`; no additional secret is needed.
 
 The tags are:
