@@ -2469,3 +2469,80 @@ describe("conflict storage upgrades", () => {
 		}
 	}
 });
+
+describe("authoritative placement effects", () => {
+	const propose = (edits: Edit[]) => ProposeReply.parse(h.call("propose", { edits }));
+	test("a partial state change names only written cases and a no-op has no inverse", () => {
+		propose([
+			{ op: "create", body: { title: "Already archived" } },
+			{ op: "create", body: { title: "Still active" } },
+		]);
+		propose([{ op: "state", cases: ["C-1"], to: "archived" }]);
+		const reply = propose([{ op: "state", cases: ["C-1", "C-2"], to: "archived" }]);
+		expect(reply.placements).toEqual([{ op: "state", cases: ["C-2"], to: "active" }]);
+		expect(propose([{ op: "state", cases: ["C-1", "C-2"], to: "archived" }]).placements).toEqual([]);
+		propose(reply.placements);
+		expect(h.call<{ state: string }[]>("get", { refs: ["C-1", "C-2"] }).map((row) => row.state)).toEqual([
+			"archived",
+			"active",
+		]);
+	});
+
+	test("command recovery retains the original placement effects without writing them twice", () => {
+		propose([{ op: "create", body: { title: "Retry placement" } }]);
+		const input = { cmd: "recorded-placement", edits: [{ op: "state", cases: ["C-1"], to: "archived" }] };
+		const first = ProposeReply.parse(h.call("propose", input));
+		expect(first.placements).toEqual([{ op: "state", cases: ["C-1"], to: "active" }]);
+		expect(ProposeReply.parse(h.call("propose", input))).toEqual(first);
+		expect(
+			h
+				.call<{ entries: { t: string }[] }>("timeline", { ref: "C-1" })
+				.entries.filter((entry) => entry.t === "placement"),
+		).toHaveLength(1);
+	});
+
+	test("tag inverses exclude no-ops and preserve unrelated tags added after the write", () => {
+		propose([
+			{ op: "create", tags: ["shared"], body: { title: "Has tag" } },
+			{ op: "create", body: { title: "Needs tag" } },
+		]);
+		const added = propose([{ op: "place", cases: ["C-1", "C-2"], tags: { add: ["shared"] } }]);
+		expect(added.placements).toEqual([{ op: "place", cases: ["C-2"], tags: { add: [], remove: ["shared"] } }]);
+		propose([{ op: "place", cases: ["C-2"], tags: { add: ["other"] } }]);
+		propose(added.placements);
+		expect(h.call<{ tags: string[] }[]>("get", { refs: ["C-1", "C-2"] }).map((row) => row.tags)).toEqual([
+			["shared"],
+			["other"],
+		]);
+		const removed = propose([{ op: "place", cases: ["C-1", "C-2"], tags: { remove: ["shared"] } }]);
+		expect(removed.placements).toEqual([{ op: "place", cases: ["C-1"], tags: { add: ["shared"], remove: [] } }]);
+		propose(removed.placements);
+		expect(propose([{ op: "place", cases: ["C-1"], tags: { add: ["shared"] } }]).placements).toEqual([]);
+	});
+
+	test("a folder inverse uses the folder at the write, including after a rename", () => {
+		propose([
+			{ op: "create", folder: "Original", tags: ["kept"], body: { title: "Moved twice" } },
+			{ op: "folder", name: "Concurrent" },
+		]);
+		propose([{ op: "place", cases: ["C-1"], folder: "Concurrent" }]);
+		const before = h.call<{ folder: { id: number } }[]>("get", { refs: ["C-1"] })[0]?.folder.id;
+		const moved = propose([{ op: "place", cases: ["C-1"], folder: "Destination" }]);
+		expect(moved.placements).toEqual([{ op: "place", cases: ["C-1"], folder: before }]);
+		propose([{ op: "folder", folder: "Concurrent", name: "Renamed" }]);
+		propose(moved.placements);
+		expect(h.call("get", { refs: ["C-1"] })).toMatchObject([{ folder: { path: "Renamed" }, tags: ["kept"] }]);
+	});
+
+	test("effects reverse repeated changes to a case in the same proposal", () => {
+		propose([{ op: "create", body: { title: "Several changes" } }]);
+		const changed = propose([
+			{ op: "state", cases: ["C-1"], to: "archived" },
+			{ op: "place", cases: ["C-1"], tags: { add: ["first"] } },
+			{ op: "place", cases: ["C-1"], tags: { add: ["second"] } },
+		]);
+		expect(changed.placements).toHaveLength(3);
+		propose(changed.placements);
+		expect(h.call("get", { refs: ["C-1"] })).toMatchObject([{ state: "active", tags: [] }]);
+	});
+});

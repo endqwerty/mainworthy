@@ -81,7 +81,7 @@ type VisibleRow =
 	| { kind: "draft"; id: string }
 	| { kind: "local"; id: string; draft: Draft }
 	| { kind: "folder"; folder: FolderRow; count: number };
-type PlacementUndo = { edits: Edit[]; ready: Promise<Api["propose"]["reply"]>; queued: boolean };
+type PlacementUndo = { preview: Edit[]; ready: Promise<Api["propose"]["reply"]>; queued: boolean };
 const ResolvedEdit = z.object({
 	op: z.literal("edit"),
 	case: schemaText,
@@ -1249,6 +1249,7 @@ export function SuiteScreen() {
 						question: question.q,
 						needs: null,
 						cases: question.decision.effects.cases ?? [],
+						placements: [],
 						conflicts: [],
 					};
 					recorded = true;
@@ -1932,7 +1933,8 @@ export function SuiteScreen() {
 			});
 		return {
 			rollback: remove,
-			confirm(): void {
+			confirm(edits = entry.edits): void {
+				entry.edits = edits;
 				supersedeMoves(earlier, entry);
 				const refs = new Set(
 					entry.edits.flatMap((edit) => (edit.op === "place" || edit.op === "state" ? edit.cases : [])),
@@ -1952,6 +1954,10 @@ export function SuiteScreen() {
 				// These placements are server facts now. Cancel older reads before holding them, including paged reads.
 				void queryClient.cancelQueries(lists);
 				void queryClient.cancelQueries(details);
+				const apply = (row: Record<string, unknown>, schema: typeof CaseRow | typeof CaseView) => {
+					const parsed = schema.safeParse(row);
+					return parsed.success ? { ...row, ...placed(parsed.data, [entry], folders) } : row;
+				};
 				queryClient.setQueriesData<InfiniteData<Api["find"]["reply"]>>(
 					lists,
 					(cached) =>
@@ -1959,18 +1965,12 @@ export function SuiteScreen() {
 							...cached,
 							pages: cached.pages.map((page) => ({
 								...page,
-								items: page.items.map((row) => {
-									const parsed = CaseRow.safeParse(row);
-									return parsed.success ? { ...row, ...placed(parsed.data, [entry], folders) } : row;
-								}),
+								items: page.items.map((row) => apply(row, CaseRow)),
 							})),
 						},
 				);
 				queryClient.setQueriesData<Api["get"]["reply"]>(details, (cached) =>
-					cached?.map((row) => {
-						const parsed = CaseView.safeParse(row);
-						return parsed.success ? { ...row, ...placed(parsed.data, [entry], folders) } : row;
-					}),
+					cached?.map((row) => apply(row, CaseView)),
 				);
 				remove();
 			},
@@ -1983,14 +1983,13 @@ export function SuiteScreen() {
 			},
 		};
 	}
-	async function placement(edits: Edit[], inverse: Edit[]): Promise<void> {
+	async function placement(edits: Edit[], preview: Edit[]): Promise<void> {
 		const optimistic = optimisticPlacement(edits);
 		const previous = undo.current?.queued ? null : undo.current;
-		const count = selection().length;
 		const ready = call("propose", { edits }, { project, owner });
-		const action: PlacementUndo = { edits: inverse, ready, queued: false };
+		const action: PlacementUndo = { preview, ready, queued: false };
 		undo.current = action;
-		setStatus(`${count} case${count === 1 ? "" : "s"} changing. Press u to undo.`);
+		setStatus("Changing cases. Press u to undo.");
 		let wantsRead = false;
 		try {
 			const reply = await ready;
@@ -2000,9 +1999,16 @@ export function SuiteScreen() {
 				if (undo.current === action) undo.current = previous;
 				setStatus(`Proposed, waiting for a person · ${reply.question ?? ""}`);
 			} else {
-				optimistic.confirm();
-				if (!action.queued && undo.current === action)
-					setStatus(`${count} case${count === 1 ? "" : "s"} changed. Press u to undo.`);
+				const changed = new Set(reply.placements.flatMap((edit) => edit.cases)).size;
+				if (changed) optimistic.confirm();
+				else optimistic.rollback();
+				if (undo.current === action) {
+					if (!changed) undo.current = previous;
+					if (!action.queued || !changed)
+						setStatus(
+							changed ? `${changed} case${changed === 1 ? "" : "s"} changed. Press u to undo.` : "No cases changed.",
+						);
+				}
 			}
 			setPicked(new Set());
 			wantsRead = !action.queued || reply.status !== "adopted";
@@ -2036,17 +2042,9 @@ export function SuiteScreen() {
 	}
 	function moveTo(folder: string, refs = selection()): void {
 		if (!refs.length) return;
-		const inverse: Edit[] = folders
-			.filter((item) => cases.some((row) => refs.includes(row.ref) && row.folder === item.id))
-			.map((item) => ({
-				op: "place",
-				cases: cases.filter((row) => refs.includes(row.ref) && row.folder === item.id).map((row) => row.ref),
-				folder: item.path,
-			}));
-		const rootRefs = cases
-			.filter((row) => refs.includes(row.ref) && !folders.some((folder) => folder.id === row.folder))
-			.map((row) => row.ref);
-		if (rootRefs.length) inverse.push({ op: "place", cases: rootRefs, folder: "Unsorted" });
+		const inverse: Edit[] = cases
+			.filter((row) => refs.includes(row.ref))
+			.map((row) => ({ op: "place", cases: [row.ref], folder: row.folder }));
 		void placement([{ op: "place", cases: refs, folder: folder || "Unsorted" }], inverse);
 	}
 	function archive(): void {
@@ -2072,13 +2070,21 @@ export function SuiteScreen() {
 			return;
 		}
 		tagSelection((refs, rows) => {
-			const added = rows.filter((row) => !row.tags.includes(value)).map((row) => row.ref);
 			setTagging(false);
-			void placement(
-				[{ op: "place", cases: refs, tags: { add: [value] } }],
-				added.length ? [{ op: "place", cases: added, tags: { remove: [value] } }] : [],
-			);
+			retag(refs, rows, value, true);
 		});
+	}
+	function retag(refs: string[], rows: Pick<CaseRow, "ref" | "tags">[], tag: string, add: boolean): void {
+		void placement(
+			[{ op: "place", cases: refs, tags: { [add ? "add" : "remove"]: [tag] } }],
+			[
+				{
+					op: "place",
+					cases: rows.filter((row) => row.tags.includes(tag) !== add).map((row) => row.ref),
+					tags: { [add ? "remove" : "add"]: [tag] },
+				},
+			],
+		);
 	}
 	function removeTag(): void {
 		tagSelection((refs, rows) =>
@@ -2087,17 +2093,7 @@ export function SuiteScreen() {
 				items: [...new Set(rows.flatMap((row) => row.tags))].sort().map((tag) => ({
 					id: tag,
 					label: `#${tag}`,
-					handler: () =>
-						void placement(
-							[{ op: "place", cases: refs, tags: { remove: [tag] } }],
-							[
-								{
-									op: "place",
-									cases: rows.filter((row) => row.tags.includes(tag)).map((row) => row.ref),
-									tags: { add: [tag] },
-								},
-							],
-						),
+					handler: () => retag(refs, rows, tag, false),
 				})),
 			}),
 		);
@@ -2107,27 +2103,22 @@ export function SuiteScreen() {
 			const action = undo.current;
 			if (action.queued) return;
 			action.queued = true;
-			const optimistic = optimisticPlacement(action.edits);
+			const optimistic = optimisticPlacement(action.preview);
 			// The queued inverse participates in the projection before the original write replies.
 			let wantsRead = false;
 			try {
 				setStatus("Undo queued. It will follow the pending change.");
-				let original: Api["propose"]["reply"];
-				try {
-					original = await action.ready;
-				} catch {
-					return;
-				}
-				if (original.status !== "adopted") return;
+				const original = await action.ready.catch(() => null);
+				if (original?.status !== "adopted") return;
 				wantsRead = true;
+				const edits = original.placements;
+				if (!edits.length) return;
 				try {
-					const reply = action.edits.length
-						? await call("propose", { edits: action.edits }, { project, owner })
-						: original;
+					const reply = await call("propose", { edits }, { project, owner });
 					if (reply.status === "adopted") {
-						optimistic.confirm();
+						optimistic.confirm(edits);
 						if (undo.current === action) undo.current = null;
-						setStatus("Undone. The inverse change is recorded.");
+						setStatus(reply.placements.length ? "Undone. The inverse change is recorded." : "No cases changed.");
 					} else {
 						optimistic.rollback();
 						action.queued = false;

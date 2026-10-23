@@ -840,3 +840,123 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+for (const initial of ["active", "archived"] as const) {
+	for (const count of [1, 2]) {
+		test.skipIf(!browserAvailable)(
+			`a stale ${initial} selection counts actual changes and undo leaves another client's change alone (${count} selected)`,
+			async () => {
+				const server = await startServer();
+				await server.api("propose", {
+					edits: [
+						{ op: "create", body: { title: "Other client's case" } },
+						{ op: "create", body: { title: "This client's case" } },
+					],
+				});
+				if (initial === "archived")
+					await server.api("propose", { edits: [{ op: "state", cases: ["C-1", "C-2"], to: "archived" }] });
+				const changed = initial === "active" ? "archived" : "active";
+				const h = await openPage(server, {
+					path: `/p/scratch/suite/c/1${initial === "archived" ? "?state=archived" : ""}`,
+					setup: async (page) => {
+						await page.addInitScript(() => {
+							Reflect.set(
+								window,
+								"EventSource",
+								class {
+									close(): void {}
+								},
+							);
+						});
+					},
+				});
+				try {
+					const { page } = h;
+					await page.getByRole("button", { name: "Other client's case", exact: true }).waitFor();
+					await page.keyboard.press("x");
+					if (count === 2) {
+						await page.locator("#list").getByRole("option").filter({ hasText: "C-2" }).click();
+						await page.getByRole("button", { name: "This client's case", exact: true }).waitFor();
+						await page.keyboard.press("x");
+					}
+					await server.api("propose", { edits: [{ op: "state", cases: ["C-1"], to: changed }] });
+					expect(await page.locator("#list").getByRole("option").filter({ hasText: "C-1" }).count()).toBe(1);
+					await page.keyboard.press("#");
+					await page
+						.locator("#stat")
+						.filter({ hasText: /changed\./ })
+						.waitFor();
+					const countText = await page.locator("#stat").textContent();
+					if (process.env.MAINWORTHY_PLACEMENT_EFFECTS_SCREENSHOT && initial === "active" && count === 1) {
+						await page.locator("#detail .chip").filter({ hasText: "Archived" }).waitFor();
+						await page.screenshot({ path: process.env.MAINWORTHY_PLACEMENT_EFFECTS_SCREENSHOT });
+					}
+					await page.keyboard.press("u");
+					await page
+						.locator("#stat")
+						.filter({ hasText: /No cases changed\.|Undone\./ })
+						.waitFor();
+					const rows = await server.api("get", { refs: ["C-1", "C-2"] });
+					expect(rows.map((row) => row.state)).toEqual([changed, initial]);
+					expect(countText).toContain(count === 1 ? "No cases changed." : "1 case changed.");
+					expect(
+						(await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "placement"),
+					).toHaveLength(initial === "active" ? 1 : 2);
+					expect(
+						(await server.api("timeline", { ref: "C-2" })).entries.filter((entry) => entry.t === "placement"),
+					).toHaveLength((initial === "active" ? 0 : 1) + (count === 2 ? 2 : 0));
+					expect(h.errors).toEqual([]);
+				} finally {
+					await h.close();
+					await server.stop();
+				}
+			},
+			30_000,
+		);
+	}
+}
+
+test.skipIf(!browserAvailable)(
+	"undo queued behind an adopted no-op sends no inverse write",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", { edits: [{ op: "create", body: { title: "Queued no-op" } }] });
+		const h = await openPage(server, {
+			path: "/p/scratch/suite/c/1",
+			setup: async (page) => {
+				await page.addInitScript(() => {
+					Reflect.set(
+						window,
+						"EventSource",
+						class {
+							close(): void {}
+						},
+					);
+				});
+			},
+		});
+		let release = () => {};
+		try {
+			const { page } = h;
+			await page.getByRole("button", { name: "Queued no-op", exact: true }).waitFor();
+			const held = await holdPlacements(page);
+			release = held.release;
+			await server.api("propose", { edits: [{ op: "state", cases: ["C-1"], to: "archived" }] });
+			await page.keyboard.press("#");
+			await eventually(async () => held.started(), Boolean);
+			await page.keyboard.press("u");
+			release();
+			await page.locator("#stat").filter({ hasText: "No cases changed." }).waitFor();
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.state).toBe("archived");
+			expect(
+				(await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "placement"),
+			).toHaveLength(1);
+			expect(h.errors).toEqual([]);
+		} finally {
+			release();
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);

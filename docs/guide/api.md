@@ -199,6 +199,15 @@ event can read the data again or request changes through `since` with its last
 cursor. The web app reads again when the stream opens and refreshes stale reads
 when the window regains focus.
 
+## Placement results
+
+The `propose` reply includes `placements`, an array of inverse `place` and `state` edits for case placements actually written.
+The edits are already in undo order. To undo those placements, submit `{"edits": reply.placements}` to `propose`.
+Do not submit an empty array: a no-op has `placements: []`.
+Cases that were already in the requested state or already had the requested tags do not appear in these edits.
+The `cases` field still contains body-version stamps; it does not count placement changes.
+Open or rejected proposals return no placement inverses. An adopted decision's effects also retain them.
+
 ## Operations
 
 Ordinary JSON case reads include custom field values in `fields`. Explicit `get` field selections such as

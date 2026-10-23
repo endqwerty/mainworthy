@@ -179,7 +179,12 @@ const adoptHandler: Handler<"adopt"> = {
 			return { cases: [], created: [], policyVersion: null, quarantine };
 		}
 		const adopted = yield* adoptSteps(ctx, witness, proposal);
-		const effects = { cases: adopted.cases, created: adopted.created, policyVersion: adopted.policyVersion };
+		const effects = {
+			cases: adopted.cases,
+			placements: adopted.placements,
+			created: adopted.created,
+			policyVersion: adopted.policyVersion,
+		};
 		if (adopted.policyVersion === null) return effects;
 		reconsiderEmptyReports(ctx);
 		const ruled = yield* tools.reconsiderPolicySteps(ctx);
