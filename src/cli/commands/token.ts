@@ -51,7 +51,8 @@ function listed(token: ListedToken): string {
 
 export const tokenCommand: AdapterCommand = {
 	name: "token",
-	summary: "Issue, list and revoke actor tokens. A new secret is shown once.",
+	summary:
+		"Issue, list and revoke actor tokens. Each carries its actor's current grants on every project. A new secret is shown once.",
 	usage:
 		"token new --agent <name> | --ci <name> | --human <name> [--can read,produce] [--project <key>] [--expires 90d] | token list | token revoke <id>",
 	flags: [

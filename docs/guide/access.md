@@ -177,7 +177,8 @@ To create an admin-issued token in Settings, follow these steps:
 6. Tick the "Permissions".
 7. Choose "Create token".
 
-The new secret appears once, with "Copy token" and "Dismiss secret". A token made here is limited to the project you are in.
+The new secret appears once, with "Copy token" and "Dismiss secret". A token carries its actor's current grants on every project.
+A new actor starts with the selected permissions on the project you are in. For an existing actor, the form shows their personal and team grants, including project names and roles. The selected permissions do not narrow that actor's token. If the form cannot read actor access, it says so.
 
 From the command line:
 
@@ -188,7 +189,7 @@ token for agent "reviewer" (read, record, produce)
 Shown once. It will not be shown again.
 ```
 
-Use `--human` for a person and `--ci` for a pipeline. Add `--project <key>` to limit the grant to one project. Without it the grant covers every project.
+Use `--human` for a person and `--ci` for a pipeline. For a new actor, add `--project <key>` to give its initial grant on one project. Without it the initial grant covers every project. For an existing actor, `--project` does not limit the token's access. Use `mainworthy actor list` to check its grants before making a token.
 
 Mainworthy shows a token once and keeps only a hash, so it cannot show it again. If you lose one, revoke it and make another.
 
