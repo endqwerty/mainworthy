@@ -3,6 +3,8 @@
 import { expect, test } from "bun:test";
 import type { Page } from "playwright-core";
 import { z } from "zod";
+import type { Edit } from "../../src/core/ops.ts";
+import { PRESETS } from "../../src/core/presets.ts";
 import { browserAvailable, eventually, openPage, type Server, startServer } from "./support.ts";
 
 const Head = z.object({
@@ -49,15 +51,19 @@ async function colleagueEdits(server: Server, change: (body: Head) => Partial<He
  * leaving the editor meets a conflict and the card opens.
  */
 async function card1({
+	covers = [],
+	tags = [],
 	theirs = () => ({ title: "Coupon case theirs" }),
 	alsoTyped = async () => {},
 }: {
+	covers?: string[];
+	tags?: string[];
 	theirs?: (body: Head) => Partial<Head>;
 	alsoTyped?: (page: Page) => Promise<void>;
 } = {}) {
 	const server = await startServer();
 	await server.api("propose", {
-		edits: [{ op: "create", outline: "Coupon case\n  Open the cart\n  Apply the coupon" }],
+		edits: [{ op: "create", outline: "Coupon case\n  Open the cart\n  Apply the coupon", covers, tags }],
 	});
 	const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 	const { page } = h;
@@ -147,6 +153,195 @@ async function expectTheMergeToStand(server: Server, page: Page) {
 
 const check = test.skipIf(!browserAvailable);
 
+async function criticalReview(server: Server): Promise<void> {
+	const policy = await server.api("propose", {
+		edits: [
+			{
+				op: "policy",
+				base: z
+					.object({ version: z.number() })
+					.parse(await server.api("admin", { do: "policy.show", project: "scratch" })).version,
+				clauses: PRESETS.loose.clauses.flatMap((clause) =>
+					clause.id === "adopt-any"
+						? [
+								{
+									id: "critical-agent",
+									kind: "adopt" as const,
+									when: ["author:agent", "tag:critical"],
+									ask: {
+										who: "member" as const,
+										agents: "none" as const,
+										notProducer: false,
+										reason: "optional" as const,
+									},
+									blocks: "nothing" as const,
+								},
+								clause,
+							]
+						: [
+								{
+									...clause,
+									ask: clause.id === "adopt-conflict" ? { ...clause.ask, agents: "answer" as const } : clause.ask,
+								},
+							],
+				),
+			},
+		],
+	});
+	const policyQuestion = (await server.api("inbox", { kind: "adopt" })).items.find((q) => q.q === policy.question);
+	if (!policyQuestion) throw Error("Missing policy question");
+	await server.api("decide", {
+		q: policyQuestion.q,
+		onEvidence: policyQuestion.evidenceHash,
+		answer: { is: "accept" },
+	});
+}
+
+check(
+	"keeping the current literal title records no version or metadata",
+	async () => {
+		const literal = "Enter #critical in the filter @REQ-101";
+		const { server, page, close } = await card1({ theirs: () => ({ title: literal }) });
+		try {
+			await page.getByRole("button", { name: "Keep current version", exact: true }).click();
+			const replied = page.waitForResponse((response) => response.url().endsWith("/decide"));
+			await resolve(page);
+			const reply = await (await replied).json();
+			await card(page).waitFor({ state: "detached" });
+			if (process.env.MAINWORTHY_LITERAL_SCREENSHOT)
+				await page.screenshot({ path: process.env.MAINWORTHY_LITERAL_SCREENSHOT });
+			expect(reply.result[0]).toMatchObject({ status: "decided", effects: { status: "unchanged", cases: [] } });
+			const saved = (await server.api("get", { refs: ["C-1"] }))[0];
+			expect(saved).toMatchObject({ version: 2, title: literal, tags: [], covers: [] });
+			await expectNothingLeftToPropose(page);
+		} finally {
+			await close();
+		}
+	},
+	30_000,
+);
+
+for (const answer of ["accept", "reject"] as const) {
+	check(
+		`a body adding a protected inline tag stays unchanged until review chooses ${answer}`,
+		async () => {
+			const server = await startServer();
+			await server.api("propose", { edits: [{ op: "create", body: { title: "Unreviewed original" } }] });
+			await criticalReview(server);
+			const agent = z.object({ token: z.string() }).parse(
+				await server.api("admin", {
+					do: "token.create",
+					actor: "case-writer",
+					kind: "agent",
+					can: ["read", "produce", "answer"],
+				}),
+			);
+			const h = await openPage({ ...server, token: agent.token }, { path: "/p/scratch/suite/c/1" });
+			try {
+				const { page } = h;
+				await page.getByRole("button", { name: "Unreviewed original", exact: true }).waitFor();
+				await page.keyboard.press("e");
+				await caseTitle(page).fill("Protected body #critical");
+				await caseTitle(page).press("Control+Enter");
+				await page.waitForFunction(() =>
+					document.querySelector("#stat")?.textContent?.includes("waiting for a person"),
+				);
+				const before = (await server.api("get", { refs: ["C-1"] }))[0];
+				if (answer === "accept" && process.env.MAINWORTHY_SCOPE_SCREENSHOT)
+					await page.screenshot({ path: process.env.MAINWORTHY_SCOPE_SCREENSHOT });
+				const questions = (await server.api("inbox", { kind: "adopt", on: "C-1" })).items;
+				expect(questions).toHaveLength(1);
+				const question = questions[0];
+				if (!question) throw Error("Missing protected proposal");
+				await server.api("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: answer } });
+				const after = (await server.api("get", { refs: ["C-1"] }))[0];
+				expect(before?.title).toBe("Unreviewed original");
+				expect(before?.tags).toEqual([]);
+				expect(after?.title).toBe(answer === "accept" ? "Protected body" : "Unreviewed original");
+				expect(after?.tags).toEqual(answer === "accept" ? ["critical"] : []);
+			} finally {
+				await h.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+}
+
+for (const [boundary, space, answer] of [
+	["space", " ", "accept"],
+	["space", " ", "reject"],
+	["NBSP", "\u00a0", "accept"],
+	["NBSP", "\u00a0", "reject"],
+	["U+3000", "\u3000", "accept"],
+	["U+3000", "\u3000", "reject"],
+] as const) {
+	check(
+		`conflict-card ${boundary === "space" ? "" : `${boundary} `}inline tags and links wait for protected review before ${answer}`,
+		async () => {
+			const server = await startServer();
+			await server.api("propose", { edits: [{ op: "create", body: { title: "Base" } }] });
+			await criticalReview(server);
+			const agent = z.object({ token: z.string() }).parse(
+				await server.api("admin", {
+					do: "token.create",
+					actor: "merge-writer",
+					kind: "agent",
+					can: ["read", "produce", "answer"],
+				}),
+			);
+			const h = await openPage({ ...server, token: agent.token }, { path: "/p/scratch/suite/c/1" });
+			try {
+				const { page } = h;
+				await page.getByRole("button", { name: "Base", exact: true }).waitFor();
+				await page.keyboard.press("e");
+				await caseTitle(page).fill("Mine");
+				await colleagueEdits(server, () => ({ title: "Theirs" }));
+				await page.keyboard.press("Escape");
+				await card(page).waitFor();
+				await mergedTitle(page).fill(`Protected body${space}#critical${space}@REQ-101`);
+				const replied = page.waitForResponse((response) => response.url().endsWith("/decide"));
+				await resolve(page);
+				const reply = (await (await replied).json()).result[0];
+				if (boundary === "NBSP" && answer === "accept" && process.env.MAINWORTHY_UNICODE_SCREENSHOT)
+					await page.screenshot({ path: process.env.MAINWORTHY_UNICODE_SCREENSHOT });
+				expect(reply).toMatchObject({
+					status: "decided",
+					effects: { status: "open" },
+				});
+				if (answer === "accept" && process.env.MAINWORTHY_INLINE_SCREENSHOT)
+					await page.screenshot({ path: process.env.MAINWORTHY_INLINE_SCREENSHOT });
+				const beforeImmediate = (await server.api("get", { refs: ["C-1"] }))[0];
+				expect(beforeImmediate?.title).toBe("Theirs");
+				await eventually(
+					() => storedDrafts(page),
+					(rows) => rows.every((row) => !JSON.parse(row).conflict),
+				);
+				if (answer === "accept" && process.env.MAINWORTHY_INLINE_SCREENSHOT)
+					await page.screenshot({ path: process.env.MAINWORTHY_INLINE_SCREENSHOT });
+				const before = (await server.api("get", { refs: ["C-1"] }))[0];
+				expect(before?.title).toBe("Theirs");
+				expect(before?.tags).toEqual([]);
+				expect(before?.covers).toEqual([]);
+				const questions = (await server.api("inbox", { kind: "adopt", on: "C-1" })).items;
+				expect(questions).toHaveLength(1);
+				const question = questions[0];
+				if (!question) throw Error("Missing protected merge proposal");
+				expect(question.evidence).toMatchObject({ author: "merge-writer" });
+				await server.api("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: answer } });
+				const after = (await server.api("get", { refs: ["C-1"] }))[0];
+				expect(after?.title).toBe(answer === "accept" ? "Protected body" : "Theirs");
+				expect(after?.tags).toEqual(answer === "accept" ? ["critical"] : []);
+				expect(after?.covers).toEqual(answer === "accept" ? ["REQ-101"] : []);
+			} finally {
+				await h.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+}
+
 check(
 	"an in-flight conflict merge preserves a decision from another client",
 	async () => {
@@ -217,32 +412,39 @@ for (const recovery of ["a second press", "a reload"])
 		30_000,
 	);
 
-check(
-	"text typed in the card after a lost merge reply is kept on the recorded version, with the colleague's change",
-	async () => {
-		const { server, page, close } = await cardWithANewerChange();
-		try {
-			await failTheNextMerge(page, { reaches: true });
-			await resolve(page);
-			await kept(page);
-			await mergedTitle(page).fill(`${MERGED}, and later words`);
-			await resolve(page);
-			await page.getByText("later text is kept", { exact: false }).first().waitFor();
-			// The later words are a draft on version 4, and the draft has the colleague's step, not the old one.
-			expect(await page.getByRole("textbox", { name: "Step 1", exact: true }).inputValue()).toBe(COLLEAGUE);
-			await page.keyboard.press("Escape");
-			const saved = await eventually(
-				() => head(server),
-				(value) => value.version === 5,
-			);
-			expect(saved.title).toBe(`${MERGED}, and later words`);
-			expect(actions(saved)).toEqual([COLLEAGUE, MINE]);
-		} finally {
-			await close();
-		}
-	},
-	30_000,
-);
+for (const inline of [false, true])
+	check(
+		`later card text and ${inline ? "inline metadata" : "steps"} survive recovery of the winning merge`,
+		async () => {
+			const { server, page, close } = await cardWithANewerChange();
+			try {
+				if (inline) await mergedTitle(page).fill(`${MERGED} #smoke @REQ-101`);
+				await failTheNextMerge(page, { reaches: true });
+				await resolve(page);
+				await kept(page);
+				await mergedTitle(page).fill(`${MERGED}, and later words${inline ? " #later @REQ-102" : ""}`);
+				await resolve(page);
+				await page.getByText("later text is kept", { exact: false }).first().waitFor();
+				// The later words are a draft on version 4, and the draft has the colleague's step, not the old one.
+				expect(await page.getByRole("textbox", { name: "Step 1", exact: true }).inputValue()).toBe(COLLEAGUE);
+				await page.keyboard.press("Escape");
+				const saved = await eventually(
+					() => head(server),
+					(value) => value.version === 5,
+				);
+				expect(saved.title).toBe(`${MERGED}, and later words`);
+				expect(actions(saved)).toEqual([COLLEAGUE, MINE]);
+				if (inline) {
+					const row = (await server.api("get", { refs: ["C-1"] }))[0];
+					expect(row?.tags).toEqual(["later"]);
+					expect(row?.covers).toEqual(["REQ-102"]);
+				}
+			} finally {
+				await close();
+			}
+		},
+		30_000,
+	);
 
 // The second check's `same-after` (F2): the later words meet a change the person never saw.
 check(
@@ -280,40 +482,49 @@ check(
 );
 
 // The second check's `same-before` (F2): the lost reply said that nothing was adopted and named a new question.
-check(
-	"a lost reply that held a new conflict brings the new card, with nothing recorded and nothing dropped",
-	async () => {
-		const { server, page, close } = await cardWithANewerChange();
-		try {
-			await colleagueEdits(server, () => ({ title: "Colleague title BEFORE merge" }));
-			await failTheNextMerge(page, { reaches: true });
-			await resolve(page);
-			await kept(page);
-			await mergedTitle(page).fill(`${MERGED}, and later words`);
-			await resolve(page);
-			await page.getByText("Nothing was adopted: the case changed again", { exact: false }).first().waitFor();
-			expect(await card(page).count()).toBe(1);
-			const asked = await head(server);
-			expect(asked.version).toBe(4);
-			expect(asked.title).toBe("Colleague title BEFORE merge");
-			expect((await storedDrafts(page)).join(" ")).toContain(MINE);
-			expect(await mergedTitle(page).inputValue()).toBe(`${MERGED}, and later words`);
-			await resolve(page);
-			const saved = await eventually(
-				() => head(server),
-				(value) => value.version === 5,
-			);
-			expect(saved.title).toBe(`${MERGED}, and later words`);
-			expect(actions(saved)).toEqual([COLLEAGUE, MINE]);
-			await card(page).waitFor({ state: "detached" });
-			expect(await storedDrafts(page)).toHaveLength(0);
-			expect((await server.api("inbox", { on: "C-1", kind: "adopt" })).items).toHaveLength(0);
-		} finally {
-			await close();
-		}
-	},
-	30_000,
-);
+for (const inline of [false, true])
+	check(
+		`a lost reply holding a new conflict keeps text and ${inline ? "inline metadata" : "steps"}`,
+		async () => {
+			const { server, page, close } = await cardWithANewerChange();
+			try {
+				if (inline) await mergedTitle(page).fill(`${MERGED} #smoke @REQ-12`);
+				await colleagueEdits(server, () => ({ title: "Colleague title BEFORE merge" }));
+				await failTheNextMerge(page, { reaches: true });
+				await resolve(page);
+				await kept(page);
+				await mergedTitle(page).fill(`${MERGED}, and later words${inline ? " #smoke @REQ-12" : ""}`);
+				await resolve(page);
+				await page.getByText("Nothing was adopted: the case changed again", { exact: false }).first().waitFor();
+				expect(await card(page).count()).toBe(1);
+				const asked = await head(server);
+				expect(asked.version).toBe(4);
+				expect(asked.title).toBe("Colleague title BEFORE merge");
+				expect((await storedDrafts(page)).join(" ")).toContain(MINE);
+				expect(await mergedTitle(page).inputValue()).toBe(
+					`${MERGED}, and later words${inline ? " #smoke @REQ-12" : ""}`,
+				);
+				await resolve(page);
+				const saved = await eventually(
+					() => head(server),
+					(value) => value.version === 5,
+				);
+				expect(saved.title).toBe(`${MERGED}, and later words`);
+				expect(actions(saved)).toEqual([COLLEAGUE, MINE]);
+				if (inline) {
+					const row = (await server.api("get", { refs: ["C-1"] }))[0];
+					expect(row?.tags).toEqual(["smoke"]);
+					expect(row?.covers).toEqual(["REQ-12"]);
+				}
+				await card(page).waitFor({ state: "detached" });
+				await expectNothingLeftToPropose(page);
+				expect((await server.api("inbox", { on: "C-1", kind: "adopt" })).items).toHaveLength(0);
+			} finally {
+				await close();
+			}
+		},
+		30_000,
+	);
 
 // A request the page gave up can still arrive. Here it arrives while a second attempt, with later words, is on
 // its way: the server records the first and refuses the second, and the command ids say which.
@@ -535,28 +746,184 @@ for (const outcome of ["is recorded", "meets a new conflict"])
 		30_000,
 	);
 
-// Review round 9, R9-4. The server merges only a proposal that is one edit of one case. This one also places a
-// tag, so the merge is refused and the question stays open. The status is the page's sentence, not the server's.
 check(
-	"a merge the server refuses while the conflict stays open is told in the page's words, and the card stays",
+	"an overlapping title resolves atomically with its typed tag",
 	async () => {
 		const { server, page, close } = await card1({
 			alsoTyped: (page) => caseTitle(page).fill("Coupon case mine #smoke"),
 		});
 		try {
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.tags).toEqual([]);
+			expect(await card(page).textContent()).toContain("add tags #smoke");
+			await page.getByRole("button", { name: "Use my title", exact: true }).click();
+			const decided = page.waitForResponse((response) => response.url().endsWith("/decide"));
 			await resolve(page);
-			const status = page.locator("#stat");
-			await status.filter({ hasText: "Your merge was not adopted, and the conflict is still open." }).waitFor();
-			expect(await status.textContent()).toMatch(/ The server's reason: .+\. Your draft and conflict card are kept\.$/);
-			expect(await card(page).count()).toBe(1);
-			expect((await storedDrafts(page)).join(" ")).toContain(MINE);
-			expect((await head(server)).version).toBe(2);
+			await decided;
+			await page.waitForFunction(() =>
+				/Conflict resolved|Your merge was not adopted/.test(document.querySelector("#stat")?.textContent ?? ""),
+			);
+			if (process.env.MAINWORTHY_CONFLICT_SCREENSHOT)
+				await page.screenshot({ path: process.env.MAINWORTHY_CONFLICT_SCREENSHOT });
+			const saved = (await server.api("get", { refs: ["C-1"] }))[0];
+			expect(saved?.title).toBe("Coupon case mine");
+			await eventually(
+				() => server.api("get", { refs: ["C-1"] }),
+				(rows) => Array.isArray(rows[0]?.tags) && rows[0]?.tags.includes("smoke"),
+			);
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.tags).toEqual(["smoke"]);
+			await card(page).waitFor({ state: "detached" });
+			await expectNothingLeftToPropose(page);
 		} finally {
 			await close();
 		}
 	},
 	30_000,
 );
+
+for (const source of ["editor", "card"] as const)
+	check(
+		`keeping the current body still records the tag typed in the ${source}`,
+		async () => {
+			const { server, page, close } = await card1({
+				alsoTyped: (page) => caseTitle(page).fill(source === "editor" ? "Coupon case mine #smoke" : "Coupon case mine"),
+			});
+			try {
+				await page.getByRole("button", { name: "Keep current version", exact: true }).click();
+				if (source === "card") await mergedTitle(page).fill("Coupon case theirs #smoke");
+				await resolve(page);
+				await card(page).waitFor({ state: "detached" });
+				const rows = await eventually(
+					() => server.api("get", { refs: ["C-1"] }),
+					(rows) => Array.isArray(rows[0]?.tags) && rows[0]?.tags.includes("smoke"),
+				);
+				expect(rows[0]?.title).toBe("Coupon case theirs");
+				expect(rows[0]?.version).toBe(2);
+				await expectNothingLeftToPropose(page);
+			} finally {
+				await close();
+			}
+		},
+		30_000,
+	);
+
+for (const source of ["editor", "card"] as const)
+	check(
+		`tags and requirement links typed in the ${source} survive a lost reply and reload`,
+		async () => {
+			const { server, page, close } = await card1({
+				alsoTyped: (page) =>
+					caseTitle(page).fill(source === "editor" ? "Coupon case mine #smoke @REQ-12" : "Coupon case mine"),
+			});
+			try {
+				await page.getByRole("button", { name: "Use my title", exact: true }).click();
+				if (source === "card") await mergedTitle(page).fill("Coupon case mine #smoke @REQ-12");
+				await failTheNextMerge(page, { reaches: true });
+				await resolve(page);
+				await kept(page);
+				expect((await server.api("get", { refs: ["C-1"] }))[0]?.tags).toEqual(["smoke"]);
+				expect((await server.api("get", { refs: ["C-1"] }))[0]?.covers).toEqual(["REQ-12"]);
+				await page.reload();
+				const rows = await eventually(
+					() => server.api("get", { refs: ["C-1"] }),
+					(rows) => Array.isArray(rows[0]?.tags) && rows[0]?.tags.includes("smoke"),
+				);
+				expect(rows[0]?.title).toBe("Coupon case mine");
+				expect(rows[0]?.covers).toEqual(["REQ-12"]);
+				await expectNothingLeftToPropose(page);
+			} finally {
+				await close();
+			}
+		},
+		30_000,
+	);
+
+for (const source of ["editor", "card"] as const)
+	check(
+		`a refused atomic merge keeps the ${source} body and tag for retry after reload`,
+		async () => {
+			const { server, page, close } = await card1({
+				alsoTyped: (page) => caseTitle(page).fill(source === "editor" ? "Coupon case mine #smoke" : "Coupon case mine"),
+			});
+			try {
+				await page.getByRole("button", { name: "Use my title", exact: true }).click();
+				if (source === "card") await mergedTitle(page).fill("Coupon case mine #smoke");
+				await page.route("**/decide", async (route) =>
+					route.fulfill({
+						status: 403,
+						contentType: "application/json",
+						body: JSON.stringify({ ok: false, error: { code: "forbidden", message: "Metadata refused" } }),
+					}),
+				);
+				await resolve(page);
+				await page.waitForFunction(() => document.querySelector("#stat")?.textContent?.includes("Metadata refused"));
+				const before = (await server.api("get", { refs: ["C-1"] }))[0];
+				expect(before?.title).toBe("Coupon case theirs");
+				expect(before?.tags).toEqual([]);
+				await page.unroute("**/decide");
+				await page.reload();
+				await card(page).waitFor();
+				await resolve(page);
+				await eventually(
+					() => server.api("get", { refs: ["C-1"] }),
+					(rows) => Array.isArray(rows[0]?.tags) && rows[0]?.tags.includes("smoke"),
+				);
+				await expectNothingLeftToPropose(page);
+			} finally {
+				await close();
+			}
+		},
+		30_000,
+	);
+
+for (const choice of ["my body", "current body"] as const)
+	check(
+		`the resolved ${choice} and its tags wait together for one policy review`,
+		async () => {
+			const { server, page, close } = await card1({
+				alsoTyped: (page) => caseTitle(page).fill("Coupon case mine #smoke"),
+			});
+			const accept = async (q: string) => {
+				const question = (await server.api("inbox", { kind: "adopt" })).items.find((item) => item.q === q);
+				if (!question) throw Error("Missing adoption question");
+				await server.api("decide", {
+					q,
+					onEvidence: question.evidenceHash,
+					answer: { is: "accept" },
+					reason: "Reviewed this proposal",
+				});
+			};
+			try {
+				const policy = await server.api("propose", { edits: [{ op: "policy", preset: "strict" }] });
+				if (!policy.question) throw Error("Missing policy question");
+				await accept(policy.question);
+				await page
+					.getByRole("button", { name: choice === "my body" ? "Use my title" : "Keep current version", exact: true })
+					.click();
+				await resolve(page);
+				await card(page).waitFor({ state: "detached" });
+				const waiting = (await server.api("inbox", { kind: "adopt", on: "C-1" })).items;
+				expect(waiting).toHaveLength(1);
+				await caseTitle(page).press("Control+Enter");
+				expect((await server.api("inbox", { kind: "adopt", on: "C-1" })).items.map((item) => item.q)).toEqual(
+					waiting.map((item) => item.q),
+				);
+				expect((await server.api("get", { refs: ["C-1"] }))[0]?.tags).toEqual([]);
+				const bodyQuestion = waiting[0];
+				if (!bodyQuestion) throw Error("Missing body question");
+				await accept(bodyQuestion.q);
+				await caseTitle(page).press("Control+Enter");
+				expect((await server.api("get", { refs: ["C-1"] }))[0]?.title).toBe(
+					choice === "my body" ? "Coupon case mine" : "Coupon case theirs",
+				);
+				expect((await server.api("inbox", { kind: "adopt", on: "C-1" })).items).toEqual([]);
+				await expectNothingLeftToPropose(page);
+				expect((await server.api("get", { refs: ["C-1"] }))[0]?.tags).toEqual(["smoke"]);
+			} finally {
+				await close();
+			}
+		},
+		30_000,
+	);
 
 // The second independent check of this change (N2). The recorded version can hold a colleague's text in the
 // very field the person types in afterwards: they took the current title, and the colleague changed it again
@@ -596,3 +963,73 @@ check(
 	},
 	30_000,
 );
+
+for (const resolution of ["adopted", "unchanged"]) {
+	for (const remote of ["addition", "removal"]) {
+		check(
+			`an ${resolution} body resolution preserves concurrent requirement ${remote}s`,
+			async () => {
+				const { server, h, page, close } = await card1({
+					covers: remote === "removal" ? ["REQ-100"] : [],
+					alsoTyped: (page) => caseTitle(page).fill("Coupon case mine @REQ-101"),
+				});
+				try {
+					await server.api("propose", {
+						edits: [
+							{ op: "cover", case: "C-1", requirement: "REQ-102", on: true },
+							...(remote === "removal"
+								? [{ op: "cover", case: "C-1", requirement: "REQ-100", on: false } satisfies Edit]
+								: []),
+						],
+					});
+					await page
+						.getByRole("button", {
+							name: resolution === "adopted" ? "Use all my changes" : "Keep current version",
+							exact: true,
+						})
+						.click();
+					await resolve(page);
+					await card(page).waitFor({ state: "detached" });
+					await expectNothingLeftToPropose(page);
+					const saved = (await server.api("get", { refs: ["C-1"] }))[0];
+					if (resolution === "adopted" && remote === "addition" && process.env.MAINWORTHY_LINK_SCREENSHOT)
+						await page.screenshot({ path: process.env.MAINWORTHY_LINK_SCREENSHOT });
+					expect(saved?.covers).toEqual(["REQ-101", "REQ-102"]);
+					expect(saved?.title).toBe(resolution === "adopted" ? "Coupon case mine" : "Coupon case theirs");
+					expect(h.errors).toEqual([]);
+				} finally {
+					await close();
+				}
+			},
+			30_000,
+		);
+	}
+	check(
+		`an ${resolution} body resolution applies only the draft's tag delta over concurrent tag changes`,
+		async () => {
+			const { server, h, page, close } = await card1({
+				tags: ["old"],
+				alsoTyped: (page) => caseTitle(page).fill("Coupon case mine #mine"),
+			});
+			try {
+				await server.api("propose", {
+					edits: [{ op: "place", cases: ["C-1"], tags: { add: ["theirs"], remove: ["old"] } }],
+				});
+				await page
+					.getByRole("button", {
+						name: resolution === "adopted" ? "Use all my changes" : "Keep current version",
+						exact: true,
+					})
+					.click();
+				await resolve(page);
+				await card(page).waitFor({ state: "detached" });
+				await expectNothingLeftToPropose(page);
+				expect((await server.api("get", { refs: ["C-1"] }))[0]?.tags).toEqual(["mine", "theirs"]);
+				expect(h.errors).toEqual([]);
+			} finally {
+				await close();
+			}
+		},
+		30_000,
+	);
+}

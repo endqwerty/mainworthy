@@ -6,6 +6,7 @@
 import { ANSWERS, type AnswerOf, type AnyAnswer, failureClass, type Kind, type Policy } from "../../core/kinds.ts";
 import type { CaseBody } from "../../core/model.ts";
 import type { Edit } from "../../core/ops.ts";
+import { parseBodyInline } from "../../core/outline.ts";
 import {
 	dropExcuse,
 	dropResultExcuses,
@@ -44,11 +45,11 @@ import {
 	bodyOf,
 	caseById,
 	caseRef,
+	cleanBody,
 	mustCase,
 	proposalById,
 	resolvedOf,
 	type Sealed,
-	seal,
 	sealSteps,
 } from "../suite/suite.ts";
 import type { Raise, Raised } from "./decisions.ts";
@@ -63,7 +64,6 @@ import {
 } from "./questions.ts";
 
 type Tools = {
-	raise: (ctx: Ctx, r: Raise) => Raised;
 	raiseSteps: (ctx: Ctx, r: Raise) => Generator<undefined, Raised, void>;
 	/** Apply the new policy to inherited standing and open questions about tests with no case. */
 	reconsiderPolicySteps: (ctx: Ctx) => Generator<undefined, number, void>;
@@ -159,7 +159,7 @@ const adoptHandler: Handler<"adopt"> = {
 		const proposal = proposalById(ctx.db, id);
 		if (!proposal) throw notFound("proposal");
 		if (answer.is === "reject") return { rejected: true };
-		if (answer.is === "merge") return resolveConflict(ctx, proposal, answer.body, tools);
+		if (answer.is === "merge") return yield* resolveConflictSteps(ctx, proposal, answer, tools);
 		for (const edit of resolvedOf(proposal))
 			if (edit.op === "policy") requirePolicyRoles(ctx.db, ctx.project.id, edit.policy.clauses);
 		const quarantine = resolvedOf(proposal).find((edit) => edit.op === "quarantine");
@@ -199,31 +199,70 @@ const adoptHandler: Handler<"adopt"> = {
  * The author's resolution of a conflict. It adopts nothing: the resolved body becomes a new proposal by the same
  * author, made on the version the conflict was shown against, and meets the adopt policy like any other edit. So
  * resolving a conflict is never a way around a review, and work that landed after the conflict was shown is merged
- * in, or shown as a new conflict, instead of being overwritten. Only a proposal that is one edit of one case can be
- * resolved this way: anything else it carried would otherwise ride along unseen.
+ * in, or shown as a new conflict, instead of being overwritten. A single case's tag and requirement-link deltas
+ * accompany its body, so the entire replacement is judged within its current and proposed tag scope.
  */
-function resolveConflict(
+function* resolveConflictSteps(
 	ctx: Ctx,
 	proposal: NonNullable<ReturnType<typeof proposalById>>,
-	body: CaseBody,
+	answer: Extract<AnswerOf<"adopt">, { is: "merge" }>,
 	tools: Tools,
-): Record<string, unknown> {
+): Generator<undefined, Record<string, unknown>, void> {
+	const tags = new Set(answer.tags ?? []);
+	const covers = new Set(answer.covers ?? []);
+	const existingCovers = new Set<string>();
 	const edits = resolvedOf(proposal);
-	const [only] = edits;
-	if (edits.length !== 1 || only?.op !== "edit") {
-		throw invalid(
-			"a merge resolves a proposal that is one edit of one case; reject this one and propose its edits again on the current versions",
+	const bodies = edits.filter((edit) => edit.op === "edit");
+	const [only] = bodies;
+	const unsupported = () =>
+		invalid(
+			"a merge resolves one case body with only its tag and requirement-link deltas; reject other edits and propose them again on current versions",
 		);
-	}
+	if (bodies.length !== 1 || !only || only.exact) throw unsupported();
 	const row = caseById(ctx.db, only.caseId);
 	if (!row) throw notFound("case");
+	const snapshots = [bodyOf(ctx.db, row.id, only.head), bodyOf(ctx.db, row.id, only.base)];
+	const unparsed = [answer.body, cleanBody(answer.body, answer.body)].some((body) => {
+		const inline = parseBodyInline(body, snapshots);
+		return inline.tags.length > 0 || inline.covers.length > 0;
+	});
+	if (unparsed)
+		throw invalid(
+			"extract inline #tags and @requirement links from changed merged fields and send them as tags and covers additions; use the web app to resolve this conflict",
+		);
+	const ref = caseRef(row);
+	const replacement = edits.map((edit): Edit => {
+		if (edit.op === "edit") return { op: "edit", case: ref, base: only.head, body: answer.body };
+		if (
+			edit.op === "place" &&
+			edit.caseIds.length === 1 &&
+			edit.caseIds[0] === row.id &&
+			edit.folder === null &&
+			edit.after === undefined &&
+			edit.tags &&
+			edit.tags.set === null
+		)
+			return {
+				op: "place",
+				cases: [ref],
+				tags: { add: edit.tags.add, remove: edit.tags.remove.filter((tag) => !tags.has(tag)) },
+			};
+		if (edit.op === "cover" && edit.caseId === row.id && edit.title === null) {
+			existingCovers.add(edit.key);
+			return { op: "cover", case: ref, requirement: edit.key, on: edit.on || covers.has(edit.key) };
+		}
+		throw unsupported();
+	});
+	if (tags.size) replacement.push({ op: "place", cases: [ref], tags: { add: [...tags] } });
+	for (const requirement of covers)
+		if (!existingCovers.has(requirement)) replacement.push({ op: "cover", case: ref, requirement, on: true });
 	const asAuthor: Ctx = { ...ctx, actor: actorById(ctx.db, proposal.author, ctx.project.id) };
-	const sealed = seal(asAuthor, {
-		edits: [{ op: "edit", case: caseRef(row), base: only.head, body }],
+	const sealed = yield* sealSteps(asAuthor, {
+		edits: replacement,
 		reason: proposal.reason ?? `Resolves the conflict in P-${proposal.no}`,
 	});
 	if (!sealed) return { cases: [], status: "unchanged" };
-	const raised = raiseAdopt(asAuthor, tools, sealed);
+	const raised = yield* raiseAdopt(asAuthor, { raise: tools.raiseSteps }, sealed);
 	return {
 		cases: raised.s === "decided" ? (raised.effects.cases ?? []) : [],
 		proposal: `P-${sealed.proposal.no}`,

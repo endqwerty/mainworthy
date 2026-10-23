@@ -112,6 +112,9 @@ export const CaseDoc = z.object({
 });
 export type CaseDoc = z.infer<typeof CaseDoc>;
 
+/** The most edits a proposal carries, and additions per merge-answer metadata array. */
+export const EDIT_MAX = 5000;
+
 /** A tag is lower case, starts with a letter or digit, and may contain `-`, `_`, `.` and `/`. */
 export const TAG = /^[a-z0-9][a-z0-9_./-]{0,39}$/;
 /** Folder paths trim each segment and ignore empty segments; dot segments are literal names. */

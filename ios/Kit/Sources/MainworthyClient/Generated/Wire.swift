@@ -392,12 +392,12 @@ enum Wire {
 	struct ConflictEdit: Decodable, Equatable, Sendable {
 		let op: String
 		let `case`: String?
-		let base: Int
-		let mine: CaseBody
-		let current: CaseBody
+		let base: Int?
+		let mine: CaseBody?
+		let current: CaseBody?
 	}
 
-	/// One edit that the author resolves.
+	/// A conflicted proposal. Mixed edits are directed to the web app.
 	struct ConflictProposal: Decodable, Equatable, Sendable {
 		let ref: String
 		let edits: [ConflictEdit]

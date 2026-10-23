@@ -425,6 +425,9 @@ You can make these choices:
 The app combines changes that do not overlap automatically.
 If the case changes again, a new conflict keeps your merge for another choice.
 The policy can leave the merge waiting for acceptance in the Queue. A refused answer keeps your draft and choices.
+Literal `#tags` or `@REQ-123` links in fields kept from the conflict's recorded current or base version stay as text.
+Keeping the current body creates no new version. If a different selected field still contains inline tokens,
+the server asks you to resolve it in the web app; the iPhone keeps the draft and selections.
 If the question was answered elsewhere or no longer applies, recording stops and the notice offers **Cancel**.
 Keeping a removed step restores that step beside its surviving neighbours from the chosen side.
 An order you explicitly choose takes precedence. Steps absent from that order follow at the end.
@@ -532,6 +535,7 @@ The app needs a connection to identify you after reopening. It sends no answers 
 
 The following tasks still need another app or setup:
 
+- **Resolve a conflict that also changes tags or requirement links**. The phone keeps your draft and directs you to the web app. Its own case editor submits text changes only.
 - **Resolve a conflict opened from the Queue**. The answer is listed and greyed.
   Resolve an overlapping save in the open case editor, or use the button at the top right of a question to
   open it in the web app.

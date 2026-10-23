@@ -2,8 +2,60 @@
 import { z } from "zod";
 import { mergeBodies } from "../../core/merge3.ts";
 import { CaseBody, type Step } from "../../core/model.ts";
-import { type Draft, DraftBody, type DraftConflict, hasTypedMerge } from "./drafts.ts";
+import { parseBodyInline } from "../../core/outline.ts";
+import {
+	type Draft,
+	DraftBody,
+	type DraftConflict,
+	hasTypedMerge,
+	remainingTagChanges,
+	type TagChanges,
+} from "./drafts.ts";
 import { randomId } from "./ids.ts";
+
+function withAdditions(original: TagChanges, additions: string[]): TagChanges {
+	return {
+		add: [...new Set([...original.add, ...additions])],
+		remove: original.remove.filter((item) => !additions.includes(item)),
+	};
+}
+
+export function applyCoverChanges(original: string[], changes: TagChanges): string[] {
+	return [...new Set([...original.filter((link) => !changes.remove.includes(link)), ...changes.add])];
+}
+
+/** Normalize a copy: the durable raw card keeps inline additions recoverable until its attempt settles. */
+export function parsedMergeCard({ draft, conflict }: { draft: Draft; conflict: DraftConflict }): {
+	draft: Draft;
+	conflict: DraftConflict;
+} {
+	const parsed = parseBodyInline(conflict.merged, [conflict.current, conflict.base]);
+	return {
+		draft: {
+			...draft,
+			tagChanges: withAdditions(draft.tagChanges, parsed.tags),
+			covers: [...new Set([...draft.covers, ...parsed.covers])],
+		},
+		conflict: { ...conflict, merged: parsed.body },
+	};
+}
+
+/** Original proposal deltas with only this attempt's inline additions overlaid. */
+export function mergeMetadata({
+	conflict,
+	sent,
+}: {
+	conflict: DraftConflict;
+	sent: DraftConflict["sentMerges"][number];
+}): NonNullable<DraftConflict["metadata"]> {
+	const original = conflict.metadata ?? { tagChanges: { add: [], remove: [] }, covers: { add: [], remove: [] } };
+	const tags = sent.tags ?? [];
+	const covers = sent.covers ?? [];
+	return {
+		tagChanges: withAdditions(original.tagChanges, tags),
+		covers: withAdditions(original.covers, covers),
+	};
+}
 
 export function sameBody(left: CaseBody, right: CaseBody): boolean {
 	return JSON.stringify(DraftBody.parse(left)) === JSON.stringify(DraftBody.parse(right));
@@ -209,6 +261,24 @@ export function nextMine({ merged, sent }: { merged: Draft["body"]; sent: CaseBo
 	});
 }
 
+/** Apply only the draft's explicit link additions and removals to the newly recorded links. */
+export function carriedCovers({
+	original,
+	mine,
+	recorded,
+}: {
+	original: readonly string[];
+	mine: readonly string[];
+	recorded: readonly string[];
+}): string[] {
+	return [
+		...new Set([
+			...recorded.filter((link) => !original.includes(link) || mine.includes(link)),
+			...mine.filter((link) => !original.includes(link)),
+		]),
+	];
+}
+
 /**
  * The draft that is left when the server recorded the merge `sent` for this card, or null when the card and the
  * draft hold nothing that merge did not. `draft` comes with tags and links typed inline already taken out of its
@@ -226,16 +296,28 @@ export function draftAfterMerge({
 	conflict,
 	sent,
 	recorded,
+	acceptedMetadata,
 }: {
 	draft: Draft;
 	conflict: DraftConflict;
 	sent: CaseBody;
 	recorded: { version: number; body: CaseBody; tags: string[]; covers: string[] } | null;
+	acceptedMetadata?: DraftConflict["metadata"];
 }): Draft | null {
+	const tagChanges = acceptedMetadata
+		? remainingTagChanges({ sent: acceptedMetadata.tagChanges, current: draft.tagChanges })
+		: draft.tagChanges;
+	const originalCovers = acceptedMetadata
+		? applyCoverChanges(draft.originalCovers, acceptedMetadata.covers)
+		: draft.originalCovers;
 	const inCard = !sameBody(sent, conflict.merged);
 	const inDraft = beyondCard({ draft, conflict });
-	if (!inCard && !inDraft) return null;
-	const rest = { conflict: undefined, sent: null, cmd: randomId() };
+	const metadata =
+		tagChanges.add.length > 0 ||
+		tagChanges.remove.length > 0 ||
+		JSON.stringify(draft.covers) !== JSON.stringify(originalCovers);
+	if (!inCard && !inDraft && !metadata) return null;
+	const rest = { conflict: undefined, sent: null, cmd: randomId(), tagChanges, originalCovers };
 	if (recorded) {
 		const card = inCard
 			? mergeBodies({ base: sent, mine: conflict.merged, theirs: recorded.body })
@@ -249,8 +331,9 @@ export function draftAfterMerge({
 				base: recorded.version,
 				original: recorded.body,
 				originalTags: recorded.tags,
+				covers: carriedCovers({ original: originalCovers, mine: draft.covers, recorded: recorded.covers }),
 				originalCovers: recorded.covers,
 			};
 	}
-	return { ...draft, ...rest, body: cardText({ draft, conflict }) };
+	return { ...draft, ...rest, body: !inCard && !inDraft ? sent : cardText({ draft, conflict }) };
 }

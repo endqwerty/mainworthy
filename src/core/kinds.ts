@@ -3,7 +3,7 @@
 // queue's keys and the policy presets are checked against it.
 import { z } from "zod";
 import { FlakyDetectionSettings } from "./flaky.ts";
-import { CaseBody, cleanPath, cleanTag, FieldDefinitions, TAG } from "./model.ts";
+import { CaseBody, cleanPath, cleanTag, EDIT_MAX, FieldDefinitions, REQUIREMENT_KEY, TAG } from "./model.ts";
 
 export const Kind = z.enum(["adopt", "map", "failure", "finding", "signoff"]);
 export type Kind = z.infer<typeof Kind>;
@@ -112,7 +112,24 @@ export const AdoptAnswer = z.discriminatedUnion("is", [
 	z.object({ is: z.literal("accept") }),
 	z.object({ is: z.literal("reject") }),
 	/** Resolves a same-field conflict on one case: the author supplies the body to adopt. */
-	z.object({ is: z.literal("merge"), body: CaseBody }),
+	z.object({
+		is: z.literal("merge"),
+		body: CaseBody,
+		/** Inline additions extracted from the merged body; the conflict fixes their case. */
+		tags: z
+			.array(z.string().transform(cleanTag).pipe(z.string().regex(TAG)))
+			.max(EDIT_MAX)
+			.optional(),
+		covers: z
+			.array(
+				z
+					.string()
+					.regex(REQUIREMENT_KEY)
+					.transform((key) => key.toUpperCase()),
+			)
+			.max(EDIT_MAX)
+			.optional(),
+	}),
 ]);
 
 export const MapAnswer = z.discriminatedUnion("is", [

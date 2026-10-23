@@ -1,4 +1,4 @@
-import { REQUIREMENT_KEY, TAG } from "./model.ts";
+import { type CaseBody, REQUIREMENT_KEY, TAG } from "./model.ts";
 
 export type Outline = {
 	title: string | null;
@@ -99,9 +99,13 @@ function titleMetadata(text: string): Pick<Outline, "title" | "tags" | "covers">
 	return { title: title.trim().replace(/[ \t]+/g, " "), tags: [...tags], covers: [...covers] };
 }
 
+function linesOf(text: string): string[] {
+	return text.split(/\r\n|\n|\r/);
+}
+
 /** Captures outlines and pasted two-column text without throwing; only recognized grammar syntax is discarded. */
 export function parseOutline(text: string): Outline {
-	const lines = text.split(/\r\n|\n|\r/).filter((line) => line.trim().length > 0);
+	const lines = linesOf(text).filter((line) => line.trim().length > 0);
 	const result: Outline = { title: null, steps: [], tags: [], covers: [] };
 	const first = lines[0];
 	if (first === undefined) return result;
@@ -155,4 +159,55 @@ export function parseOutline(text: string): Outline {
 		previousIndent = line.indent;
 	}
 	return result;
+}
+
+/** Inline capture; fields equal to a supplied snapshot stay literal, with step fields matched by id. */
+export function parseBodyInline<T extends Pick<CaseBody, "title" | "steps">>(
+	body: T,
+	unchanged: readonly Pick<CaseBody, "title" | "steps">[] = [],
+): {
+	body: T;
+	tags: string[];
+	covers: string[];
+} {
+	const tags = new Set<string>();
+	const covers = new Set<string>();
+	const metadata = (text: string, originals: readonly (string | null | undefined)[]): string => {
+		if (originals.includes(text)) return text;
+		return linesOf(text)
+			.map((line) => {
+				const outline = titleMetadata(line);
+				for (const tag of outline.tags) tags.add(tag);
+				for (const cover of outline.covers) covers.add(cover.toUpperCase());
+				return outline.title ?? line;
+			})
+			.join("\n");
+	};
+	return {
+		body: {
+			...body,
+			title: unchanged.some((saved) => saved.title === body.title)
+				? body.title
+				: metadata(body.title.replace(/\s+/g, " "), []),
+			steps: body.steps.map((step) => {
+				const originals = unchanged.map((saved) => saved.steps.find((old) => old.id === step.id));
+				return {
+					...step,
+					action: metadata(
+						step.action,
+						originals.map((old) => old?.action),
+					),
+					expected:
+						step.expected === null
+							? null
+							: metadata(
+									step.expected,
+									originals.map((old) => old?.expected),
+								),
+				};
+			}),
+		},
+		tags: [...tags],
+		covers: [...covers],
+	};
 }

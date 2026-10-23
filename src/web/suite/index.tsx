@@ -8,6 +8,7 @@ import { newStepId } from "../../core/ids.ts";
 import { mergeBodies } from "../../core/merge3.ts";
 import { CaseBody, ConflictAddress, cleanPath, emptyBody, TAG } from "../../core/model.ts";
 import type { Edit } from "../../core/ops.ts";
+import { parseBodyInline } from "../../core/outline.ts";
 import { cleanTitle, conflictEditorStatus, firstStep, ownershipStatus } from "../case/editor.tsx";
 import { CasePane, type ConflictState } from "../case/pane.tsx";
 import { ApiError, call } from "../lib/api.ts";
@@ -35,18 +36,23 @@ import {
 	readDrafts,
 	remainingTagChanges,
 	removeDraft,
+	TagChanges,
 } from "../lib/drafts.ts";
 import { draftOwner, draftOwnerIsLive, randomId } from "../lib/ids.ts";
 import {
 	allRecorded,
+	applyCoverChanges,
 	cardText,
 	carried,
+	carriedCovers,
 	caseHeld,
 	draftAfterMerge,
 	holdsUnfinishedStep,
 	type MergeFate,
 	mergeFate,
+	mergeMetadata,
 	nextMine,
+	parsedMergeCard,
 	recordable,
 	refusedStatus,
 	sameBody,
@@ -100,7 +106,12 @@ const AdoptionQuestion = CardQuestion.extend({
 		})
 		.nullable(),
 });
-const SubmittedText = z.object({ body: CaseBody, tags: z.array(z.string()), covers: z.array(z.string()) });
+const SubmittedText = z.object({
+	body: CaseBody,
+	tags: z.array(z.string()),
+	covers: z.array(z.string()),
+	tagChanges: TagChanges.optional(),
+});
 /** A draft's body as it is sent: tags and links typed inline are taken out, and a step with no action is left out. */
 function sentBody(draft: Draft): CaseBody {
 	return recordable(cleanTitle(draft).body);
@@ -750,17 +761,31 @@ export function SuiteScreen() {
 		async ({
 			state,
 			sent,
-			version,
+			result,
 			done,
 		}: {
 			state: ConflictState;
-			sent: CaseBody;
-			version: number | null;
+			sent: ConflictState["sentMerges"][number];
+			result: Extract<MergeFate, { kind: "adopted" | "unchanged" | "waiting" }>;
 			done: string;
 		}): Promise<void> => {
+			const source = cardDraft(state);
+			if (!source) return;
+			const metadata = mergeMetadata({ ...source, sent });
+			const version = result.kind === "adopted" ? result.version : null;
+			const waiting = result.kind === "waiting" ? result.question : null;
 			const left = (recorded: Parameters<typeof draftAfterMerge>[0]["recorded"]): Draft | null | undefined => {
-				const card = cardDraft(state);
-				return card && draftAfterMerge({ ...card, sent, recorded });
+				const raw = cardDraft(state);
+				if (!raw) return undefined;
+				const card = sent.tags !== undefined || sent.covers !== undefined ? parsedMergeCard(raw) : raw;
+				return (
+					draftAfterMerge({
+						...card,
+						sent: sent.body,
+						recorded,
+						acceptedMetadata: waiting ? undefined : metadata,
+					}) ?? (waiting ? { ...card.draft, body: sent.body, conflict: undefined, sent: null, cmd: randomId() } : null)
+				);
 			};
 			// The case is read before the card ends, with later text to carry or without: the reply names a version
 			// and not its text, and the case the page holds may be from before the merge (issue #94). A merge that
@@ -773,20 +798,58 @@ export function SuiteScreen() {
 			);
 			const view = version !== null ? CaseView.parse(rows[0]) : null;
 			if (!sessionCurrent(owner) || !mayWrite(state.draftId)) return;
-			const next = left(view && { version: view.version, body: bodyOf(view), tags: view.tags, covers: view.covers });
+			const remaining = left(
+				view && { version: view.version, body: bodyOf(view), tags: view.tags, covers: view.covers },
+			);
+			const recorded = CaseView.parse(rows[0]);
+			const next: Draft | null | undefined =
+				remaining && !waiting && version === null && sameBody(remaining.body, sent.body)
+					? {
+							...remaining,
+							base: recorded.version,
+							body: bodyOf(recorded),
+							original: bodyOf(recorded),
+							originalTags: recorded.tags,
+							covers: carriedCovers({
+								original: remaining.originalCovers,
+								mine: remaining.covers,
+								recorded: recorded.covers,
+							}),
+							originalCovers: recorded.covers,
+						}
+					: remaining && waiting
+						? {
+								...remaining,
+								submission: {
+									kind: "waiting",
+									question: waiting,
+									fingerprint: JSON.stringify({
+										body: sent.body,
+										tags: draftTags({
+											originalTags: remaining.originalTags,
+											tagChanges: metadata.tagChanges,
+										}),
+										tagChanges: metadata.tagChanges,
+										covers: applyCoverChanges(remaining.originalCovers, metadata.covers),
+										folder: remaining.folder,
+									}),
+								},
+							}
+						: remaining;
 			if (next === undefined) return;
 			holdCase({ ref: state.ref, rows });
 			if (next === null) dropDraft(state.draftId);
 			else if (!putDraft(next)) return;
 			uncertainMerges.current.delete(state.q);
 			setStatus(
-				next === null
+				next === null || next.submission.kind === "waiting"
 					? done
 					: next.base === version
 						? `Conflict resolved. Your later text is kept on this device as a draft on version ${version}.`
 						: "Conflict resolved. Your later text is kept on this device as a draft; leave the editor to propose it.",
 			);
 			void invalidateProject(project);
+			if (next && !waiting && sameBody(next.body, bodyOf(recorded))) await sealRef.current({ saved: next });
 		},
 		[project, owner, mayWrite, cardDraft, holdCase, putDraft, dropDraft, setStatus],
 	);
@@ -830,6 +893,7 @@ export function SuiteScreen() {
 						current,
 						merged: next.merged,
 						addresses: next.conflicts.map((conflict) => conflict.address),
+						metadata: mergeMetadata({ ...card, sent }),
 						sentMerges: [],
 					});
 					uncertainMerges.current.delete(state.q);
@@ -842,24 +906,24 @@ export function SuiteScreen() {
 				case "adopted":
 					await endMergedCard({
 						state,
-						sent: sent.body,
-						version: fate.version,
+						sent,
+						result: fate,
 						done: `Conflict resolved. Version ${fate.version} is recorded; both earlier versions remain in the timeline.`,
 					});
 					return true;
 				case "unchanged":
 					await endMergedCard({
 						state,
-						sent: sent.body,
-						version: null,
+						sent,
+						result: fate,
 						done: "Conflict resolved. The recorded version already holds this text.",
 					});
 					return true;
 				case "waiting":
 					await endMergedCard({
 						state,
-						sent: sent.body,
-						version: null,
+						sent,
+						result: fate,
 						done: `Conflict resolved. Your merge is proposed and waits for a person · ${fate.question}`,
 					});
 					return true;
@@ -940,7 +1004,8 @@ export function SuiteScreen() {
 			if (!card || !mayWrite(state.draftId)) return;
 			// A new id for every attempt. An earlier attempt may still arrive: the server records one of the two
 			// and refuses the other, and each id says which.
-			const sent = { cmd: randomId(), body: CaseBody.parse(merged) };
+			const parsed = parseBodyInline(merged, [card.conflict.current, card.conflict.base]);
+			const sent = { cmd: randomId(), body: CaseBody.parse(parsed.body), tags: parsed.tags, covers: parsed.covers };
 			storeConflict({ ...card.conflict, sentMerges: [...card.conflict.sentMerges, sent] });
 			if (!mayWrite(state.draftId)) return;
 			asked = true;
@@ -950,7 +1015,7 @@ export function SuiteScreen() {
 					q: open.q,
 					onEvidence: open.evidenceHash,
 					ifOpen: true,
-					answer: { is: "merge", body: sent.body },
+					answer: { is: "merge", body: sent.body, tags: sent.tags, covers: sent.covers },
 					cmd: sent.cmd,
 				},
 				{ project, owner },
@@ -1025,12 +1090,6 @@ export function SuiteScreen() {
 				.filter((step) => step.use || step.action.trim())
 				.map((step) => ({ ...step, expected: step.expected || null })),
 		};
-		const fingerprint = JSON.stringify({
-			body,
-			tags: draftTags(cleaned),
-			covers: cleaned.covers,
-			folder: snapshot.folder,
-		});
 		if (settleOnly && !snapshot.sent && snapshot.submission.kind !== "waiting") return;
 		// All the draft holds beyond its version is a step still without an action, which no version can take.
 		// Nothing is sent, and the draft stays on the device as it is (issue #86).
@@ -1059,19 +1118,17 @@ export function SuiteScreen() {
 		const sentTagChanges =
 			recovered?.tagChanges ??
 			(waitingText
-				? {
+				? (waitingText.tagChanges ?? {
 						add: sentTags.filter((tag) => !source.originalTags.includes(tag)),
 						remove: source.originalTags.filter((tag) => !sentTags.includes(tag)),
-					}
+					})
 				: cleaned.tagChanges);
 		const tagsToPlace = {
 			add: sentTagChanges.add.filter((tag) => !source.originalTags.includes(tag)),
 			remove: sentTagChanges.remove.filter((tag) => source.originalTags.includes(tag)),
 		};
 		// What the reply handled below was given for: the draft's text, or the save of unknown fate it is about.
-		const proposed = recovered
-			? JSON.stringify({ body, tags: sentTags, covers: cleaned.covers, folder: snapshot.folder })
-			: fingerprint;
+		const proposed = JSON.stringify({ body, tags: sentTags, covers: cleaned.covers, folder: snapshot.folder });
 		let moreToSend = false;
 		let reply: Api["propose"]["reply"] | null = null;
 		const task = (async () => {
@@ -1240,6 +1297,13 @@ export function SuiteScreen() {
 						current: currentBody,
 						merged: merged.merged,
 						addresses: merged.conflicts.map((conflict) => conflict.address),
+						metadata: {
+							tagChanges: sentTagChanges,
+							covers: {
+								add: cleaned.covers.filter((link) => !source.originalCovers.includes(link)),
+								remove: source.originalCovers.filter((link) => !cleaned.covers.includes(link)),
+							},
+						},
 						sentMerges: [],
 						draftId: snapshot.id,
 					};
@@ -1268,15 +1332,16 @@ export function SuiteScreen() {
 				}
 				const stamp = reply.cases.find((item) => snapshot.ref === null || item.ref === snapshot.ref);
 				const ref = stamp?.ref ?? snapshot.ref;
-				const version = stamp?.version ?? snapshot.base;
+				let version = stamp?.version ?? snapshot.base;
 				let adopted = body;
 				let adoptedTags = sentTags;
 				let adoptedCovers = cleaned.covers;
 				if (ref) {
-					const rows = await call("get", { refs: [ref], version }, { project, owner });
+					const rows = await call("get", { refs: [ref], ...(stamp ? { version } : {}) }, { project, owner });
 					if (!sessionCurrent(owner)) return;
 					if (!mayWrite(source.id, !draftStored)) return;
 					const received = CaseView.parse(rows[0]);
+					version = received.version;
 					adopted = bodyOf(received);
 					adoptedTags = received.tags;
 					adoptedCovers = received.covers;
@@ -1363,12 +1428,7 @@ export function SuiteScreen() {
 						original: adopted,
 						submission: { kind: "none" },
 						tagChanges,
-						covers: [
-							...new Set([
-								...adoptedCovers.filter((link) => !cleaned.covers.includes(link) || normalized.covers.includes(link)),
-								...normalized.covers.filter((link) => !cleaned.covers.includes(link)),
-							]),
-						],
+						covers: carriedCovers({ original: cleaned.covers, mine: normalized.covers, recorded: adoptedCovers }),
 						originalTags: adoptedTags,
 						originalCovers: adoptedCovers,
 						sent: null,

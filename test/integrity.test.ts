@@ -2,8 +2,17 @@
 // One test per promise: what a result may prove, what a decision may change, and what a caller may see.
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { emptyBody } from "../src/core/model.ts";
-import type { DecideReply, GateStatus, InboxReply, PlanReply, ProposeReply, ReportReceipt } from "../src/core/ops.ts";
+import type {
+	DecideReply,
+	Edit,
+	GateStatus,
+	InboxReply,
+	PlanReply,
+	ProposeReply,
+	ReportReceipt,
+} from "../src/core/ops.ts";
 import { ReportInput } from "../src/core/ops.ts";
+import { parseBodyInline } from "../src/core/outline.ts";
 import { PRESETS } from "../src/core/presets.ts";
 import { HANDLERS } from "../src/server/decisions/kinds.ts";
 import type { HoldTerm } from "../src/server/decisions/questions.ts";
@@ -56,6 +65,522 @@ const usePolicy = (preset: string, unlinked?: "ask" | "track" | "create") => {
 };
 
 describe("who may change the suite and the policy", () => {
+	for (const chosen of ["Merged", "Theirs"]) {
+		test(`a combined conflict keeps tag and link deltas when choosing ${chosen}`, () => {
+			h.call("propose", { edits: [{ op: "create", body: { title: "Base" }, tags: ["old"], covers: ["REQ-100"] }] });
+			h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
+			const pending = h.call<ProposeReply>("propose", {
+				edits: [
+					{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } },
+					{ op: "place", cases: ["C-1"], tags: { add: ["mine"], remove: ["old"] } },
+					{ op: "cover", case: "C-1", requirement: "REQ-100", on: false },
+					{ op: "cover", case: "C-1", requirement: "REQ-101", on: true },
+				],
+			});
+			expect(pending.status).toBe("conflict");
+			const question = open("adopt");
+			h.call("propose", {
+				edits: [
+					{ op: "edit", case: "C-1", base: 2, body: { pre: "Independent later work" } },
+					{ op: "place", cases: ["C-1"], tags: { add: ["theirs"] } },
+					{ op: "cover", case: "C-1", requirement: "REQ-102", on: true },
+				],
+			});
+			const merged = decide(question, { is: "merge", body: emptyBody(chosen) });
+			expect(merged.status).toBe("decided");
+			expect(getCase()).toMatchObject({
+				title: chosen,
+				pre: "Independent later work",
+				version: chosen === "Merged" ? 4 : 3,
+			});
+			expect([...getCase().tags].sort()).toEqual(["mine", "theirs"]);
+			expect(h.call<{ covers: string[] }[]>("get", { refs: ["C-1"] })[0]?.covers).toEqual(["REQ-101", "REQ-102"]);
+		});
+	}
+
+	test("inline merge additions override same-item removals without losing other or concurrent deltas", () => {
+		h.call("propose", {
+			edits: [{ op: "create", body: { title: "Base" }, tags: ["old", "remove"], covers: ["REQ-100", "REQ-101"] }],
+		});
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
+		h.call("propose", {
+			edits: [
+				{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } },
+				{ op: "place", cases: ["C-1"], tags: { add: ["mine"], remove: ["old", "remove"] } },
+				{ op: "cover", case: "C-1", requirement: "REQ-100", on: false },
+				{ op: "cover", case: "C-1", requirement: "REQ-101", on: false },
+				{ op: "cover", case: "C-1", requirement: "REQ-102", on: true },
+			],
+		});
+		const question = open("adopt");
+		h.call("propose", {
+			edits: [
+				{ op: "place", cases: ["C-1"], tags: { add: ["concurrent"] } },
+				{ op: "cover", case: "C-1", requirement: "REQ-103", on: true },
+			],
+		});
+		expect(
+			decide(question, {
+				is: "merge",
+				body: emptyBody("Merged"),
+				tags: ["old", "mine", "new"],
+				covers: ["req-100", "REQ-102", "req-104"],
+			}),
+		).toMatchObject({ status: "decided", effects: { status: "adopted" } });
+		expect([...getCase().tags].sort()).toEqual(["concurrent", "mine", "new", "old"]);
+		expect(h.call<{ covers: string[] }[]>("get", { refs: ["C-1"] })[0]?.covers).toEqual([
+			"REQ-100",
+			"REQ-102",
+			"REQ-103",
+			"REQ-104",
+		]);
+	});
+
+	for (const metadata of ["tags", "covers"] as const) {
+		test(`a merge refuses ${metadata} limit plus one without a replacement`, () => {
+			seed();
+			h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
+			h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }] });
+			const before = rows("SELECT count(*) AS n FROM proposals");
+			const decisions = rows("SELECT count(*) AS n FROM decisions");
+			const question = open("adopt");
+			const values = Array.from({ length: 5001 }, (_, i) => (metadata === "tags" ? `tag-${i}` : `REQ-${i}`));
+			expect(decide(question, { is: "merge", body: emptyBody("Resolved"), [metadata]: values })).toMatchObject({
+				status: "invalid",
+				effects: null,
+			});
+			expect(rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
+			expect(rows("SELECT count(*) AS n FROM decisions")).toEqual(decisions);
+			expect(open("adopt").q).toBe(question.q);
+			expect(getCase()).toMatchObject({ title: "Theirs", version: 2, tags: [] });
+		});
+	}
+
+	test("a merge refuses a reconstructed proposal above the ordinary edit ceiling", () => {
+		seed();
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }] });
+		const before = rows("SELECT count(*) AS n FROM proposals");
+		const decisions = rows("SELECT count(*) AS n FROM decisions");
+		const question = open("adopt");
+		const reply = decide(question, {
+			is: "merge",
+			body: emptyBody("Resolved"),
+			tags: ["critical"],
+			covers: Array.from({ length: 4999 }, (_, i) => `REQ-${i}`),
+		});
+		expect(reply).toMatchObject({ status: "invalid", effects: null });
+		expect(reply.needs).toContain("5000");
+		expect(rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
+		expect(rows("SELECT count(*) AS n FROM decisions")).toEqual(decisions);
+		expect(open("adopt").q).toBe(question.q);
+		expect(getCase()).toMatchObject({ title: "Theirs", version: 2, tags: [] });
+	});
+
+	test("reconstruction counts original link deltas as well as new merge additions", () => {
+		seed();
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
+		h.call("propose", {
+			edits: [
+				{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } },
+				...Array.from({ length: 4999 }, (_, i) => ({ op: "cover", case: "C-1", requirement: `REQ-${i}`, on: true })),
+			],
+		});
+		const before = rows("SELECT count(*) AS n FROM proposals");
+		const decisions = rows("SELECT count(*) AS n FROM decisions");
+		const question = open("adopt");
+		expect(decide(question, { is: "merge", body: emptyBody("Resolved"), covers: ["REQ-99999"] })).toMatchObject({
+			status: "invalid",
+			effects: null,
+		});
+		expect(rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
+		expect(rows("SELECT count(*) AS n FROM decisions")).toEqual(decisions);
+		expect(open("adopt").q).toBe(question.q);
+		expect(getCase()).toMatchObject({ title: "Theirs", version: 2, tags: [] });
+	});
+
+	test("a maximum tag addition array cancels original removals and stays in one placement", () => {
+		const tags = Array.from({ length: 5000 }, (_, i) => `tag-${i}`);
+		h.call("propose", { edits: [{ op: "create", body: { title: "Base" }, tags }] });
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
+		h.call("propose", {
+			edits: [
+				{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } },
+				{ op: "place", cases: ["C-1"], tags: { remove: tags } },
+			],
+		});
+		expect(decide(open("adopt"), { is: "merge", body: emptyBody("Resolved"), tags })).toMatchObject({
+			status: "decided",
+			effects: { status: "adopted" },
+		});
+		expect(getCase().tags).toEqual([...tags].sort());
+		const proposal = rows<{ edits: string }>("SELECT edits FROM proposals ORDER BY id DESC LIMIT 1")[0];
+		expect(JSON.parse(proposal?.edits ?? "[]")).toHaveLength(3);
+	});
+
+	test("merge bounds count deduplicated reconstructed links, not repeated additions", () => {
+		seed();
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
+		h.call("propose", {
+			edits: [
+				{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } },
+				{ op: "cover", case: "C-1", requirement: "REQ-1", on: false },
+			],
+		});
+		const reply = decide(open("adopt"), {
+			is: "merge",
+			body: emptyBody("Resolved"),
+			covers: Array.from({ length: 5000 }, () => "REQ-1"),
+		});
+		expect(reply).toMatchObject({ status: "decided", effects: { status: "adopted" } });
+		expect(h.call<{ covers: string[] }[]>("get", { refs: ["C-1"] })[0]?.covers).toEqual(["REQ-1"]);
+		const proposal = rows<{ edits: string }>("SELECT edits FROM proposals ORDER BY id DESC LIMIT 1")[0];
+		expect(JSON.parse(proposal?.edits ?? "[]")).toHaveLength(2);
+	});
+
+	for (const source of ["base", "current"] as const) {
+		for (const field of ["title", "action", "expected"] as const) {
+			test(`a merge preserves literal ${source} ${field} text`, () => {
+				const literal = "Enter #critical in the filter @REQ-100";
+				const content = (text: string) => ({
+					...emptyBody(field === "title" ? text : "Title"),
+					steps: [
+						{ id: "s1", action: field === "action" ? text : "Act", expected: field === "expected" ? text : null },
+					],
+				});
+				const base = content(source === "base" ? literal : "Base");
+				const current = content(source === "current" ? literal : "Current");
+				h.call("propose", { edits: [{ op: "create", body: base }] });
+				h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: current }] });
+				h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: content("Mine") }] });
+				const chosen = source === "current" ? current : base;
+				const reply = decide(open("adopt"), { is: "merge", body: chosen });
+				expect(reply).toMatchObject({
+					status: "decided",
+					effects: { status: source === "current" ? "unchanged" : "adopted" },
+				});
+				expect(h.call("get", { refs: ["C-1"] })[0]).toMatchObject({
+					title: chosen.title,
+					steps: chosen.steps,
+					tags: [],
+					covers: [],
+					version: source === "current" ? 2 : 3,
+				});
+			});
+		}
+	}
+
+	test("an unchanged literal field does not excuse new tokens in another field or step", () => {
+		const literal = "Enter #critical @REQ-100";
+		h.call("propose", { edits: [{ op: "create", body: emptyBody("Base") }] });
+		h.call("propose", {
+			edits: [
+				{
+					op: "edit",
+					case: "C-1",
+					base: 1,
+					body: { title: literal, steps: [{ id: "s1", action: literal, expected: null }] },
+				},
+			],
+		});
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }] });
+		const question = open("adopt");
+		const before = rows("SELECT count(*) AS n FROM proposals");
+		const reply = decide(question, {
+			is: "merge",
+			body: { ...emptyBody(literal), steps: [{ id: "s2", action: literal, expected: null }] },
+		});
+		expect(reply).toMatchObject({ status: "invalid", effects: null });
+		expect(rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
+		expect(getCase()).toMatchObject({ title: literal, version: 2, tags: [] });
+	});
+
+	test("literal text from a newer live head is not a stored conflict-side exemption", () => {
+		seed();
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }] });
+		const question = open("adopt");
+		const literal = "New #critical @REQ-100";
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 2, body: { title: literal } }] });
+		expect(decide(question, { is: "merge", body: emptyBody(literal) })).toMatchObject({
+			status: "invalid",
+			effects: null,
+		});
+		expect(getCase()).toMatchObject({ title: literal, version: 3, tags: [] });
+	});
+
+	test("literal structured bodies remain literal and an unparsed merge refuses without a replacement", () => {
+		h.call("propose", {
+			edits: [
+				{
+					op: "create",
+					body: { title: "Base", steps: [{ id: "s1", action: "Enter #critical @REQ-100", expected: null }] },
+				},
+			],
+		});
+		expect(
+			h.call<{ steps: { action: string }[]; tags: string[]; covers: string[] }[]>("get", { refs: ["C-1"] })[0],
+		).toMatchObject({ steps: [{ action: "Enter #critical @REQ-100" }], tags: [], covers: [] });
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }] });
+		const before = rows("SELECT count(*) AS n FROM proposals");
+		const reply = decide(open("adopt"), {
+			is: "merge",
+			body: { ...emptyBody("Merged"), steps: [{ id: "s1", action: "New #critical @REQ-100", expected: null }] },
+		});
+		expect(reply).toMatchObject({ status: "invalid", effects: null });
+		expect(reply.needs).toContain("use the web app");
+		expect(rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
+		expect(getCase()).toMatchObject({ title: "Theirs", version: 2, tags: [] });
+	});
+
+	const unrelated: [string, Edit][] = [
+		["another body", { op: "edit", case: "C-2", base: 1, body: { title: "Other" } }],
+		["another case tag", { op: "place", cases: ["C-2"], tags: { add: ["extra"] } }],
+		["multiple case tags", { op: "place", cases: ["C-1", "C-2"], tags: { add: ["extra"] } }],
+		["folder", { op: "place", cases: ["C-1"], folder: "Other" }],
+		["rank", { op: "place", cases: ["C-1"], after: null, tags: { add: ["extra"] } }],
+		["tag replacement", { op: "place", cases: ["C-1"], tags: { set: [] } }],
+		["another case link", { op: "cover", case: "C-2", requirement: "REQ-100", on: true }],
+		["requirement title", { op: "cover", case: "C-1", requirement: "REQ-100", title: "Unshown title", on: true }],
+		["state", { op: "state", cases: ["C-1"], to: "archived" }],
+		["creation", { op: "create", body: { title: "Extra" } }],
+		["restore", { op: "restore", case: "C-1", to: 1 }],
+	];
+	for (const form of ["raw", "parsed"] as const) {
+		test(`a ${form} inline merge answer classifies its body and links under protected review`, () => {
+			h.call("propose", { edits: [{ op: "create", body: { title: "Base" } }] });
+			h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
+			h.call("propose", {
+				edits: [
+					{
+						op: "policy",
+						base: h.call<{ version: number }>("admin", { do: "policy.show", project: "scratch" }).version,
+						clauses: PRESETS.loose.clauses.flatMap((clause) =>
+							clause.id === "adopt-any"
+								? [
+										{
+											id: "critical-review",
+											kind: "adopt",
+											when: ["author:agent", "tag:critical"],
+											ask: { who: "member", agents: "none", notProducer: false, reason: "optional" },
+											blocks: "nothing",
+										},
+										clause,
+									]
+								: [
+										{
+											...clause,
+											ask: clause.id === "adopt-conflict" ? { ...clause.ask, agents: "answer" } : clause.ask,
+										},
+									],
+						),
+					},
+				],
+			});
+			decide(open("adopt"), { is: "accept" });
+			const writer = h.actor("merge-agent", "agent", ["read", "produce", "answer"]);
+			h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }] }, writer);
+			const merged = decide(
+				open("adopt"),
+				{
+					is: "merge",
+					body: emptyBody(form === "raw" ? "Resolved #critical @REQ-101" : "Resolved"),
+					...(form === "parsed" ? { tags: ["critical"], covers: ["REQ-101"] } : {}),
+				},
+				writer,
+			);
+			if (form === "raw") {
+				expect(merged).toMatchObject({ status: "invalid", effects: null });
+				expect(merged.needs).toContain("extract inline");
+				expect(getCase()).toMatchObject({ title: "Theirs", version: 2, tags: [] });
+				return;
+			}
+			expect(merged).toMatchObject({ status: "decided", effects: { status: "open" } });
+			expect(getCase()).toMatchObject({ title: "Theirs", version: 2, tags: [] });
+			expect(h.call<{ covers: string[] }[]>("get", { refs: ["C-1"] })[0]?.covers).toEqual([]);
+			decide(open("adopt"), { is: "accept" });
+			expect(getCase()).toMatchObject({ title: "Resolved", tags: ["critical"] });
+			expect(h.call<{ covers: string[] }[]>("get", { refs: ["C-1"] })[0]?.covers).toEqual(["REQ-101"]);
+		});
+	}
+
+	for (const [ending, separator] of [
+		["LF", "\n"],
+		["CRLF", "\r\n"],
+		["CR", "\r"],
+	] as const) {
+		for (const field of ["title", "action", "expected"] as const) {
+			test(`a ${ending} ${field} merge refuses hidden metadata and reviews the parsed replacement`, () => {
+				h.call("propose", { edits: [{ op: "create", body: emptyBody("Base") }] });
+				h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
+				h.call("propose", {
+					edits: [
+						{
+							op: "policy",
+							base: h.call<{ version: number }>("admin", { do: "policy.show", project: "scratch" }).version,
+							clauses: PRESETS.loose.clauses.flatMap((clause) =>
+								clause.id === "adopt-any"
+									? [
+											{
+												id: "critical-review",
+												kind: "adopt",
+												when: ["author:agent", "tag:critical"],
+												ask: { who: "member", agents: "none", notProducer: false, reason: "optional" },
+												blocks: "nothing",
+											},
+											clause,
+										]
+									: [
+											{
+												...clause,
+												ask: clause.id === "adopt-conflict" ? { ...clause.ask, agents: "answer" } : clause.ask,
+											},
+										],
+							),
+						},
+					],
+				});
+				decide(open("adopt"), { is: "accept" });
+				const writer = h.actor("merge-agent", "agent", ["read", "produce", "answer"]);
+				h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }] }, writer);
+				const question = open("adopt");
+				const content = (text: string) => ({
+					...emptyBody(field === "title" ? text : "Resolved"),
+					steps: [
+						{ id: "s1", action: field === "action" ? text : "Act", expected: field === "expected" ? text : null },
+					],
+				});
+				const before = rows("SELECT count(*) AS n FROM proposals");
+				for (const token of ["#critical", "@REQ-101"]) {
+					const raw = decide(
+						question,
+						{ is: "merge", body: content(`Resolved${separator}${token}${separator}Retained`) },
+						writer,
+					);
+					expect(raw).toMatchObject({ status: "invalid", effects: null });
+					expect(rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
+				}
+				const parsed = parseBodyInline(
+					content(`Resolved${separator}#critical${separator}@REQ-101${separator}Retained`),
+				);
+				expect(parsed.tags).toEqual(["critical"]);
+				expect(parsed.covers).toEqual(["REQ-101"]);
+				const merged = decide(question, { is: "merge", ...parsed }, writer);
+				expect(merged).toMatchObject({ status: "decided", effects: { status: "open" } });
+				expect(getCase()).toMatchObject({ title: "Theirs", version: 2, tags: [] });
+				expect(h.call<{ covers: string[] }[]>("get", { refs: ["C-1"] })[0]?.covers).toEqual([]);
+				decide(open("adopt"), { is: "accept" });
+				const saved = h.call<
+					{ title: string; steps: { action: string; expected: string | null }[]; tags: string[]; covers: string[] }[]
+				>("get", { refs: ["C-1"] })[0];
+				expect(saved).toMatchObject({
+					title: field === "title" ? "Resolved Retained" : "Resolved",
+					tags: ["critical"],
+					covers: ["REQ-101"],
+				});
+				expect(saved?.steps[0]).toMatchObject({
+					action: field === "action" ? "Resolved\n\n\nRetained" : "Act",
+					expected: field === "expected" ? "Resolved\n\n\nRetained" : null,
+				});
+			});
+		}
+	}
+
+	test("stored titles normalize line separators, and normalization cannot conceal merge metadata", () => {
+		for (const separator of ["\r", "\r\n", "\n", "\u2028", "\u2029", "\u0085", "\v", "\f"]) {
+			h.call("propose", { edits: [{ op: "create", body: { title: `Enter${separator}literal` } }] });
+		}
+		const found = h.call<{ title: string }[]>("get", { refs: Array.from({ length: 8 }, (_, i) => `C-${i + 1}`) });
+		expect(found.map((body) => body.title)).toEqual([
+			"Enter literal",
+			"Enter literal",
+			"Enter literal",
+			"Enter literal",
+			"Enter literal",
+			"Enter\u0085literal",
+			"Enter literal",
+			"Enter literal",
+		]);
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }] });
+		const question = open("adopt");
+		const before = rows("SELECT count(*) AS n FROM proposals");
+		for (const separator of ["\u2028", "\u2029", "\v", "\f"]) {
+			for (const token of ["#critical", "@REQ-101"]) {
+				expect(decide(question, { is: "merge", body: emptyBody(`Resolved${separator}${token}`) })).toMatchObject({
+					status: "invalid",
+					effects: null,
+				});
+				expect(rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
+			}
+		}
+	});
+
+	for (const change of ["add", "remove"] as const) {
+		test(`a combined resolution keeps proposed and current protected tag scope for ${change}`, () => {
+			h.call("propose", {
+				edits: [{ op: "create", body: { title: "Base" }, tags: change === "remove" ? ["critical"] : [] }],
+			});
+			h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
+			h.call("propose", {
+				edits: [
+					{
+						op: "policy",
+						base: h.call<{ version: number }>("admin", { do: "policy.show", project: "scratch" }).version,
+						clauses: PRESETS.loose.clauses.flatMap((clause) =>
+							clause.id === "adopt-any"
+								? [
+										{
+											id: "critical-review",
+											kind: "adopt",
+											when: ["tag:critical"],
+											ask: { who: "member", agents: "none", notProducer: false, reason: "optional" },
+											blocks: "nothing",
+										},
+										clause,
+									]
+								: [clause],
+						),
+					},
+				],
+			});
+			decide(open("adopt"), { is: "accept" });
+			const writer = h.actor("case-writer", "human", ["read", "produce", "answer"]);
+			h.call(
+				"propose",
+				{
+					edits: [
+						{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } },
+						{ op: "place", cases: ["C-1"], tags: { [change]: ["critical"] } },
+						{ op: "cover", case: "C-1", requirement: "REQ-101", on: true },
+					],
+				},
+				writer,
+			);
+			expect(decide(open("adopt"), { is: "merge", body: emptyBody("Resolved") }, writer)).toMatchObject({
+				status: "decided",
+				effects: { status: "open" },
+			});
+			expect(getCase()).toMatchObject({ title: "Theirs", version: 2, tags: change === "remove" ? ["critical"] : [] });
+			expect(open("adopt").evidence).toMatchObject({ author: "case-writer" });
+			expect(h.call<{ covers: string[] }[]>("get", { refs: ["C-1"] })[0]?.covers).toEqual([]);
+			decide(open("adopt"), { is: "accept" });
+			expect(getCase()).toMatchObject({ title: "Resolved", tags: change === "add" ? ["critical"] : [] });
+			expect(h.call<{ covers: string[] }[]>("get", { refs: ["C-1"] })[0]?.covers).toEqual(["REQ-101"]);
+		});
+	}
+	test.each(unrelated)("a conflict with %s still refuses a body-only resolution", (_name, extra) => {
+		seed(2);
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }, extra] });
+		const before = h.call<CaseView[]>("get", { refs: ["C-1", "C-2"] });
+		const proposals = rows("SELECT count(*) AS n FROM proposals");
+		expect(decide(open("adopt"), { is: "merge", body: emptyBody("Merged") }).status).toBe("invalid");
+		expect(h.call<CaseView[]>("get", { refs: ["C-1", "C-2"] })).toEqual(before);
+		expect(rows("SELECT count(*) AS n FROM proposals")).toEqual(proposals);
+	});
+
 	test("resolving a conflict does not carry other edits or a policy change through", () => {
 		seed(2);
 		const member = h.actor("member", "human", ["read", "produce"]);

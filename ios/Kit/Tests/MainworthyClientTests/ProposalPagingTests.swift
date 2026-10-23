@@ -14,6 +14,21 @@ struct ProposalPagingTests {
 		return ProposedEdit(try JSONDecoder().decode(Wire.AdoptEvidence.self, from: Data(json.utf8)))
 	}
 
+	@Test("a combined conflict gives a web instruction instead of a decoding failure")
+	func combinedConflictNeedsWeb() async throws {
+		let body = #"{"title":"A case","pre":"","steps":[],"methods":["human"],"automate":"none","fields":{}}"#
+		let question = #"{"q":"Q-1","kind":"adopt","title":"Resolve","producer":"human","state":"open","evidence":{"proposal":"P-1","author":"robin","reason":null,"edits":[],"count":2,"conflicts":[{"case":"C-1","addresses":[{"kind":"field","name":"title"}]}],"facts":[]},"evidenceHash":"read","seen":{"count":1,"carried":0},"needs":"author","answers":["merge","reject"],"blocks":[],"about":["C-1"],"openedAt":0,"advice":[]}"#
+		let script = Script(
+			.json(#"{"ok":true,"seq":3,"result":[\#(question)]}"#),
+			.json(#"{"ok":true,"seq":3,"result":[{"ref":"P-1","edits":[{"op":"edit","case":"C-1","base":1,"mine":\#(body),"current":\#(body)},{"op":"place","cases":["C-1"],"tags":{"add":["critical"],"remove":[]}}]}]}"#)
+		)
+		let server = Server(instance: Instance(address: "https://mainworthy.example")!, secrets: MemoryStore(), transport: script)
+		let project = try await server.project("scratch", identity: "scratch-test")
+		await #expect(throws: ClientError.refused(code: "invalid", message: "Use the web app to resolve a conflict with tag or requirement-link changes. Your draft is kept.")) {
+			_ = try await project.conflict("Q-1", ref: "C-1")
+		}
+	}
+
 	@Test("a full read must match both the question's count and every page's total")
 	func completeCount() async throws {
 		let created = #"{"op":"create","body":\#(body),"folder":"","tags":[],"covers":[]}"#

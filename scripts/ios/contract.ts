@@ -312,18 +312,22 @@ export const Proposal = struct("Proposal", "`get` with a P- ref: a proposed edit
 });
 
 // The conflict resolver reads the complete three-way inputs and the recorded fate of its own command.
-export const ConflictProposal = struct("ConflictProposal", "One edit that the author resolves.", {
-	ref: text,
-	edits: list(
-		struct("ConflictEdit", "The complete edit and the current document.", {
-			op: text,
-			case: maybe(text),
-			base: whole,
-			mine: CaseBody,
-			current: CaseBody,
-		}),
-	),
-});
+export const ConflictProposal = struct(
+	"ConflictProposal",
+	"A conflicted proposal. Mixed edits are directed to the web app.",
+	{
+		ref: text,
+		edits: list(
+			struct("ConflictEdit", "The complete edit and the current document.", {
+				op: text,
+				case: maybe(text),
+				base: maybe(whole),
+				mine: maybe(CaseBody),
+				current: maybe(CaseBody),
+			}),
+		),
+	},
+);
 export const ConflictBaseFields = struct(
 	"ConflictBaseFields",
 	"Custom fields at the exact base version, from history.",

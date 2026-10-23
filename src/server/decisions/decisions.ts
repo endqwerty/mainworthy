@@ -738,7 +738,7 @@ function* settleSteps(
 		signers.map((signer) => signer.by),
 		decision.expires_at,
 	);
-	const effects = yield* handler.effect(ctx, witness, question, given, { raise, raiseSteps, reconsiderPolicySteps });
+	const effects = yield* handler.effect(ctx, witness, question, given, { raiseSteps, reconsiderPolicySteps });
 	setDecisionEffects(ctx, decision.id, effects);
 	const about = runsAbout(ctx, question);
 	if (Array.isArray(effects.reask) && effects.reask.length > 0) askAgain(ctx, question, effects.reask as number[]);

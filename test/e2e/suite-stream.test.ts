@@ -179,7 +179,11 @@ test.skipIf(!browserAvailable)(
 			await page.waitForFunction(() => document.querySelector(".cmeta .path")?.textContent === "Destination");
 			expect(await title.inputValue()).toBe("My title");
 			const shownTags = await page.locator(".ctags").textContent();
-			const proposal = page.waitForRequest((request) => request.url().endsWith("/propose"));
+			const proposal = page.waitForRequest(
+				(request) =>
+					request.url().endsWith("/propose") &&
+					request.postDataJSON().edits.some((edit: { op: string }) => edit.op === "place"),
+			);
 			await title.press("Control+Enter");
 			expect((await proposal).postDataJSON().edits.filter((edit: { op: string }) => edit.op === "place")).toEqual([
 				{ op: "place", cases: ["C-1"], tags: { add: ["alpha"], remove: [] } },
@@ -187,7 +191,7 @@ test.skipIf(!browserAvailable)(
 			expect(shownTags).toBe("#beta#alpha");
 			const saved = await eventually(
 				() => server.api("get", { refs: ["C-1"] }),
-				(rows) => rows[0]?.title === "My title",
+				(rows) => rows[0]?.title === "My title" && Array.isArray(rows[0]?.tags) && rows[0]?.tags.length === 2,
 			);
 			expect(saved[0]?.tags).toEqual(["alpha", "beta"]);
 			expect(saved[0]?.folder).toMatchObject({ path: "Destination" });
@@ -278,14 +282,18 @@ test.skipIf(!browserAvailable)(
 			expect(await page.locator(".ctags").textContent()).toContain("#beta");
 			release();
 			await page.waitForFunction(() => document.querySelector("#stat")?.textContent?.includes("changed."));
-			const proposal = page.waitForRequest((request) => request.url().endsWith("/propose"));
+			const proposal = page.waitForRequest(
+				(request) =>
+					request.url().endsWith("/propose") &&
+					request.postDataJSON().edits.some((edit: { op: string }) => edit.op === "place"),
+			);
 			await title.press("Control+Enter");
 			expect((await proposal).postDataJSON().edits.filter((edit: { op: string }) => edit.op === "place")).toEqual([
 				{ op: "place", cases: ["C-1"], tags: { add: ["beta"], remove: [] } },
 			]);
 			const saved = await eventually(
 				() => server.api("get", { refs: ["C-1"] }),
-				(rows) => rows[0]?.title === "My title",
+				(rows) => rows[0]?.title === "My title" && Array.isArray(rows[0]?.tags) && rows[0]?.tags.length === 2,
 			);
 			expect(saved[0]?.tags).toEqual(["alpha", "beta"]);
 			expect(h.errors).toEqual([]);
@@ -377,7 +385,11 @@ test.skipIf(!browserAvailable)(
 			await title.waitFor();
 			await title.focus();
 			await page.getByRole("option").filter({ hasText: "C-1" }).filter({ hasText: "#gamma" }).waitFor();
-			const proposal = page.waitForRequest((request) => request.url().endsWith("/propose"));
+			const proposal = page.waitForRequest(
+				(request) =>
+					request.url().endsWith("/propose") &&
+					request.postDataJSON().edits.some((edit: { op: string }) => edit.op === "place"),
+			);
 			const shownTags = await page.locator(".ctags").textContent();
 			await title.press("Control+Enter");
 			expect((await proposal).postDataJSON().edits.filter((edit: { op: string }) => edit.op === "place")).toEqual([
@@ -435,7 +447,7 @@ test.skipIf(!browserAvailable)(
 			release();
 			const saved = await eventually(
 				() => server.api("get", { refs: ["C-1"] }),
-				(rows) => rows[0]?.title === "Later title",
+				(rows) => rows[0]?.title === "Later title" && Array.isArray(rows[0]?.tags) && rows[0]?.tags.includes("beta"),
 			);
 			expect(proposals).toEqual([
 				[{ op: "place", cases: ["C-1"], tags: { add: ["alpha"], remove: [] } }],

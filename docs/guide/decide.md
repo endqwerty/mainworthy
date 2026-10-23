@@ -259,6 +259,19 @@ Accept keeps the adopted version in history.
 An edit conflict needs a merged body, rather than a plain acceptance.
 Resolve it in the case's conflict card. See [write cases](./write-cases.md#resolve-simultaneous-edits).
 The merged body is another proposal and still follows the adoption policy.
+A proposal containing one body edit can carry the same case's tag additions/removals and requirement-link changes through resolution.
+Those changes stay in the replacement proposal, so current and proposed tags classify the whole edit.
+For an API, CLI or MCP merge answer, extract inline `#tags` and `@REQ-123` links from changed title,
+action and expected-result fields. Send the cleaned `body` with optional `tags` and `covers` addition arrays.
+Each addition array accepts at most 5,000 items, including repetitions. The replacement, including the original deltas,
+must fit the ordinary 5,000-edit proposal limit; otherwise the conflict stays open and no replacement is created.
+Reject that proposal and submit smaller proposals when its resolution would exceed the limit.
+They apply to the conflicted case, alongside its original proposal's deltas. A new addition cancels an original removal of the same item.
+A changed field still containing recognized inline tokens is refused; the conflict stays open.
+A field equal to the conflict's recorded current or base value stays literal, with step fields matched by id.
+Keeping the current body alone returns `unchanged`; it creates no new version.
+Ordinary structured `propose` bodies keep their literal text; `outline` input uses capture syntax.
+Other cases, tag replacement sets, folder/rank/state changes and supplied requirement titles cannot accompany a body resolution; reject and propose those changes again on current versions.
 
 If an edit on its own would be refused now, the queue says why.
 If someone changed a field the edit changes too after it was proposed, reject the edit and propose it again on the newer version.

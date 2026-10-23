@@ -12,7 +12,9 @@ import {
 	draftAfterMerge,
 	holdsUnfinishedStep,
 	mergeFate,
+	mergeMetadata,
 	nextMine,
+	parsedMergeCard,
 	recordable,
 	refusedStatus,
 } from "../src/web/lib/merges.ts";
@@ -413,4 +415,92 @@ test("shared choices apply every case property without changing the source docum
 		fields: { keep: "yes", "priority.level": "low" },
 	});
 	expect({ initial, source }).toEqual(before);
+});
+
+test("a recorded body merge rebases explicit link additions and removals onto concurrent server changes", () => {
+	const card = conflict(sent);
+	const held = {
+		...draft(card),
+		originalCovers: ["REQ-1", "REQ-2", "REQ-3"],
+		covers: ["REQ-1", "REQ-4"],
+	};
+	const fresh = { ...recorded, covers: ["REQ-1", "REQ-2", "REQ-5"] };
+	const left = draftAfterMerge({ draft: held, conflict: card, sent, recorded: fresh });
+	expect(left?.covers).toEqual(["REQ-1", "REQ-5", "REQ-4"]);
+	expect(left?.originalCovers).toEqual(fresh.covers);
+});
+
+test("atomic merge completion retires only its metadata and follows later server reversals", () => {
+	const card = conflict(sent);
+	const held = {
+		...draft(card),
+		originalTags: ["old"],
+		tagChanges: { add: ["smoke", "later"], remove: ["old"] },
+		originalCovers: ["REQ-100"],
+		covers: ["REQ-101", "REQ-103"],
+	};
+	const fresh = { ...recorded, tags: ["old"], covers: ["REQ-100", "REQ-102"] };
+	const left = draftAfterMerge({
+		draft: held,
+		conflict: card,
+		sent,
+		recorded: fresh,
+		acceptedMetadata: {
+			tagChanges: { add: ["smoke"], remove: ["old"] },
+			covers: { add: ["REQ-101"], remove: ["REQ-100"] },
+		},
+	});
+	expect(left?.tagChanges).toEqual({ add: ["later"], remove: [] });
+	expect(left?.originalTags).toEqual(["old"]);
+	expect(left?.covers).toEqual(["REQ-100", "REQ-102", "REQ-103"]);
+});
+
+test("cancelling tags and links after their atomic submission keeps the inverse for a later save", () => {
+	const card = conflict(sent);
+	const left = draftAfterMerge({
+		draft: draft(card),
+		conflict: card,
+		sent,
+		recorded: { ...recorded, tags: ["smoke"], covers: ["REQ-101"] },
+		acceptedMetadata: { tagChanges: { add: ["smoke"], remove: [] }, covers: { add: ["REQ-101"], remove: [] } },
+	});
+	expect(left?.tagChanges).toEqual({ add: [], remove: ["smoke"] });
+	expect(left?.covers).toEqual([]);
+	expect(left?.originalCovers).toEqual(["REQ-101"]);
+});
+
+test("a winning inline merge snapshot retires only its tags and links, retaining later card tokens", () => {
+	const original = conflict({ ...sent, title: "Merged by hand #later @REQ-102" });
+	const attempt = { cmd: "winning", body: sent, tags: ["smoke"], covers: ["REQ-101"] };
+	const live = parsedMergeCard({ draft: draft(original), conflict: original });
+	const metadata = mergeMetadata({ ...live, sent: attempt });
+	expect(metadata).toEqual({ tagChanges: { add: ["smoke"], remove: [] }, covers: { add: ["REQ-101"], remove: [] } });
+	const left = draftAfterMerge({
+		...live,
+		sent,
+		recorded: { ...recorded, tags: ["smoke"], covers: ["REQ-101"] },
+		acceptedMetadata: metadata,
+	});
+	expect(left?.tagChanges).toEqual({ add: ["later"], remove: ["smoke"] });
+	expect(left?.covers).toEqual(["REQ-102"]);
+	expect(original.merged.title).toContain("#later");
+});
+
+test("inline re-additions cancel original removals while preserving other original deltas", () => {
+	const card = {
+		...conflict(sent),
+		metadata: {
+			tagChanges: { add: ["mine"], remove: ["old", "remove"] },
+			covers: { add: ["REQ-3"], remove: ["REQ-1", "REQ-2"] },
+		},
+	};
+	expect(
+		mergeMetadata({
+			conflict: card,
+			sent: { cmd: "test", body: sent, tags: ["old", "new"], covers: ["REQ-1", "REQ-4"] },
+		}),
+	).toEqual({
+		tagChanges: { add: ["mine", "old", "new"], remove: ["remove"] },
+		covers: { add: ["REQ-3", "REQ-1", "REQ-4"], remove: ["REQ-2"] },
+	});
 });
