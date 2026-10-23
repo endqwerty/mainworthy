@@ -199,8 +199,8 @@ export function describeChoice(choice: Choice): string {
 
 /** A Mainworthy this job started. */
 export type Own = {
-	/** Kills the server and removes its data. Safe at any moment after `startOwn` returned, and more than once. */
-	stop: () => void;
+	/** Kills the server, waits for its exit, then removes its data. Concurrent calls share the same cleanup. */
+	stop: () => Promise<void>;
 	/** The environment a `mainworthy` command needs to reach it, once it listens. */
 	ready: Promise<Environment>;
 };
@@ -224,10 +224,28 @@ export function startOwn(cli: string): Own {
 		stdout: "pipe",
 		stderr: "inherit",
 	});
-	const stop = (): void => {
-		// Not asked to finish what it is doing: nothing is in flight when the job is done with it, and the data goes.
-		child.kill("SIGKILL");
-		rmSync(data, { recursive: true, force: true });
+	let stopping: Promise<void> | undefined;
+	const stop = (): Promise<void> => {
+		stopping ??= (async () => {
+			child.kill("SIGKILL");
+			let timeout: ReturnType<typeof setTimeout> | undefined;
+			try {
+				await Promise.race([
+					child.exited,
+					new Promise<never>((_resolve, reject) => {
+						timeout = setTimeout(
+							() =>
+								reject(new Error(`the job's own Mainworthy (process ${child.pid}) did not stop; data kept at ${data}`)),
+							5000,
+						);
+					}),
+				]);
+			} finally {
+				clearTimeout(timeout);
+			}
+			rmSync(data, { recursive: true, force: true });
+		})();
+		return stopping;
 	};
 	const listening = async (): Promise<Environment> => {
 		// The server's first line ends with its address.
@@ -243,7 +261,7 @@ export function startOwn(cli: string): Own {
 		reader.releaseLock();
 		const url = /(http:\/\/\S+)\s*$/.exec(printed.split("\n")[0] ?? "")?.[1];
 		if (!url) {
-			stop();
+			await stop();
 			throw new Error(`the job's own Mainworthy did not start: ${printed.trim() || "it printed nothing"}`);
 		}
 		console.log(`Started a Mainworthy for this job: ${url} (process ${child.pid})`);

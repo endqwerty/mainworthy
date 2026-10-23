@@ -1,12 +1,13 @@
 // The last job of the check workflow (`scripts/ci-gate.ts`), run as the workflow runs it against a real
 // Mainworthy: the result is Mainworthy's gate, and a report that is missing or says less than happened is not a pass.
 import { expect, spyOn, test } from "bun:test";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import { runCiGate } from "../scripts/ci-gate.ts";
-import { chooseInstance, contractDifferences, deploymentFetch, type Probe } from "../scripts/ci-instance.ts";
+import { chooseInstance, contractDifferences, deploymentFetch, type Probe, startOwn } from "../scripts/ci-instance.ts";
 import { Client } from "../src/cli/client.ts";
 import { runCli } from "../src/cli/dispatch.ts";
 import { inThisProcess, type Running, withInstance } from "../src/cli/test-support.ts";
@@ -809,6 +810,56 @@ test("an explicit invalid reader count reaches the job's own server and its refu
 	expect(result.output).not.toContain("$ mainworthy report");
 	expect([result.code, result.left]).toEqual([1, []]);
 }, 20_000);
+
+test.each(["http://127.0.0.1:7357", "startup refused"])(
+	"stopping waits for the server's last directory write before removing its data (%s)",
+	async (message) => {
+		const root = await mkdtemp(join(tmpdir(), "mainworthy-ci-stop-"));
+		const cli = join(root, "serve.ts");
+		try {
+			await writeFile(
+				cli,
+				`import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+const data = process.env.MAINWORTHY_DATA;
+writeFileSync(join(import.meta.dir, "data"), data);
+console.log(${JSON.stringify(message)});
+while (!existsSync(join(import.meta.dir, "finish"))) await Bun.sleep(1);
+mkdirSync(data, { recursive: true });
+writeFileSync(join(data, "last-write"), "finished");
+`,
+			);
+			const spawned = spyOn(Bun, "spawn");
+			const own = startOwn(cli);
+			const result = spawned.mock.results[0];
+			spawned.mockRestore();
+			if (result?.type !== "return") throw new Error("the server was not spawned");
+			const child = result.value;
+			// Hold the requested kill until the real child completes an in-flight directory write.
+			const killing = Promise.withResolvers<void>();
+			const kill = spyOn(child, "kill").mockImplementation(() => killing.resolve());
+			const ready = own.ready.catch((error: unknown) => error);
+			try {
+				await Promise.race([ready, killing.promise]);
+				const data = await readFile(join(root, "data"), "utf8");
+				const stopped = Promise.all([own.stop(), own.stop()]);
+				expect(existsSync(data)).toBe(true);
+				await writeFile(join(root, "finish"), "");
+				await child.exited;
+				await stopped;
+				expect(existsSync(data)).toBe(false);
+				if (message === "startup refused") expect(await ready).toBeInstanceOf(Error);
+			} finally {
+				kill.mockRestore();
+				child.kill("SIGKILL");
+				await child.exited;
+				await own.stop();
+			}
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	},
+);
 
 test("a job that is told to stop does so before its next command, exits as stopped, and leaves nothing", async () => {
 	// Told while its own Mainworthy is starting, and told once that one runs. A Mainworthy left behind would hold the

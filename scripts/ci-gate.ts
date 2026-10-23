@@ -24,7 +24,6 @@ import { join } from "node:path";
 import { Glob } from "bun";
 import { runCli } from "../src/cli/dispatch.ts";
 import { printError } from "../src/cli/errors.ts";
-import { installOutputHandlers } from "../src/cli/output.ts";
 import { parseJUnit, TEST_FILE_LIMIT } from "../src/surfaces/formats/junit.ts";
 import { CI_SHARD_WARNING_SECONDS, newestAttempt, type Outcome, readOutcome, seconds } from "./check-plan.ts";
 import {
@@ -58,15 +57,38 @@ export async function runCiGate(
 	// or report parsing has been synchronous.
 	let own: Own | null = null;
 	let ownEnv: Environment = {};
+	let leaving: Promise<never> | undefined;
+	const leave = (code: number): Promise<never> => {
+		leaving ??= (async () => {
+			try {
+				await own?.stop();
+			} catch (error) {
+				printError(error);
+			}
+			process.exit(code);
+		})();
+		return leaving;
+	};
 	if (import.meta.main) {
-		process.on("exit", () => own?.stop());
 		for (const signal of ["SIGINT", "SIGTERM"] as const)
 			process.on(signal, () => {
-				own?.stop();
-				process.exit(signal === "SIGINT" ? 130 : 143);
+				void leave(signal === "SIGINT" ? 130 : 143);
 			});
+		for (const event of ["uncaughtException", "unhandledRejection"] as const)
+			process.on(event, (error) => {
+				printError(error);
+				void leave(1);
+			});
+		process.stdout.on("error", (error: NodeJS.ErrnoException) => {
+			if (error.code === "EPIPE") return;
+			printError(error);
+			void leave(4);
+		});
 	}
-	const heard = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+	const heard = async (): Promise<void> => {
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		await leaving;
+	};
 
 	const choice = await chooseInstance(env);
 	const chosen = describeChoice(choice);
@@ -165,7 +187,8 @@ export async function runCiGate(
 		gate = await cli(["gate"]);
 		await heard();
 	} finally {
-		own?.stop();
+		await own?.stop();
+		await leaving;
 	}
 
 	const unreported = (expected ?? [...new Glob("{src,test}/**/*.test.{ts,tsx}").scanSync(".")])
@@ -200,6 +223,5 @@ export async function runCiGate(
 }
 
 if (import.meta.main) {
-	installOutputHandlers();
 	process.exit(await runCiGate(process.argv.slice(2), process.env));
 }
