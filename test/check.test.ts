@@ -739,7 +739,11 @@ test("a shard's artifact is named for its attempt and downloaded into its own di
 			`test "${expression(`needs.${job}.result`)}" = success || test "${expression(`needs.scope.outputs.${job}`)}:${expression(`needs.${job}.result`)}" = false:skipped\n`,
 		);
 		expect(readFileSync(".github/workflows/check.yml", "utf8")).toContain(
-			`if: ${expression(`needs.scope.outputs.${job} == 'true'`)}`,
+			`if: ${expression(
+				job === "image"
+					? "(github.event_name == 'push' && github.ref == 'refs/heads/main') || needs.scope.outputs.image == 'true'"
+					: `needs.scope.outputs.${job} == 'true'`,
+			)}`,
 		);
 	}
 
@@ -767,7 +771,11 @@ test("a shard's artifact is named for its attempt and downloaded into its own di
 });
 
 test("the workflow gives the pipeline's token to the one step that reports, and that step chooses the Mainworthy", () => {
-	const Step = z.object({ name: z.string().optional(), env: z.record(z.string(), z.string()).optional() });
+	const Step = z.object({
+		name: z.string().optional(),
+		env: z.record(z.string(), z.string()).optional(),
+		run: z.string().optional(),
+	});
 	const Job = z.object({
 		permissions: z.record(z.string(), z.string()).optional(),
 		env: z.unknown().optional(),
@@ -789,7 +797,16 @@ test("the workflow gives the pipeline's token to the one step that reports, and 
 		"needs: [scope, static, tests, image, ios, description]",
 	);
 	// No secret in an environment every step of a job or of the workflow would share.
-	expect(Object.keys(workflow.jobs)).toEqual(["scope", "static", "image", "ios", "description", "tests", "gate"]);
+	expect(Object.keys(workflow.jobs)).toEqual([
+		"scope",
+		"static",
+		"image",
+		"ios",
+		"description",
+		"tests",
+		"gate",
+		"publish",
+	]);
 	expect(
 		[workflow.env, ...Object.values(workflow.jobs).map((job) => job.env)].filter((env) => env !== undefined),
 	).toEqual([]);
@@ -803,10 +820,96 @@ test("the workflow gives the pipeline's token to the one step that reports, and 
 	).toEqual([
 		["description", { contents: "read", issues: "read", "pull-requests": "read" }],
 		["gate", { contents: "read", "id-token": "write" }],
+		["publish", { contents: "read", packages: "write" }],
 	]);
 	// The choice of instance is the script's (scripts/ci-instance.ts): no step starts a server. (The `image` job
 	// runs the container it built, to ask it for a page; nothing reports to that one.)
-	expect(readFileSync(".github/workflows/check.yml", "utf8")).not.toContain("serve");
+	expect(
+		Object.values(workflow.jobs)
+			.flatMap((job) => job.steps.map((step) => step.run ?? ""))
+			.join("\n"),
+	).not.toMatch(/(?:^|\s)serve(?:\s|$)/);
+});
+
+test("only main publishes the image that passed the smoke test, after the gate", () => {
+	const step = z.object({
+		uses: z.string().optional(),
+		run: z.string().optional(),
+		if: z.string().optional(),
+		with: z.record(z.string(), z.unknown()).optional(),
+	});
+	const job = z.object({
+		needs: z.array(z.string()).or(z.string()).optional(),
+		if: z.string().optional(),
+		permissions: z.record(z.string(), z.string()).optional(),
+		steps: z.array(step),
+	});
+	const workflow = z
+		.object({ permissions: z.record(z.string(), z.string()), jobs: z.record(z.string(), job) })
+		.parse(Bun.YAML.parse(readFileSync(".github/workflows/check.yml", "utf8")));
+	const { image, publish, gate } = z.object({ image: job, publish: job, gate: job }).parse(workflow.jobs);
+	const expression = (name: string): string => `$\{{ ${name} }}`;
+	const main = "github.event_name == 'push' && github.ref == 'refs/heads/main'";
+	expect(publish.if).toBe(expression(main));
+	expect(publish.needs).toEqual(["gate", "image"]);
+	expect(gate.needs).not.toContain("publish");
+	// Even a prose-only main commit needs its own embedded revision and image tag.
+	expect(image.if).toBe(expression(`(${main}) || needs.scope.outputs.image == 'true'`));
+	expect(workflow.permissions).toEqual({ contents: "read" });
+	expect(
+		Object.entries(workflow.jobs)
+			.filter(([, one]) => one.permissions?.packages === "write")
+			.map(([name]) => name),
+	).toEqual(["publish"]);
+	expect(publish.permissions).toEqual({ contents: "read", packages: "write" });
+	const builds = Object.values(workflow.jobs).flatMap((one) =>
+		one.steps.filter((one) => one.uses?.startsWith("docker/build-push-action@")),
+	);
+	expect(builds).toHaveLength(1);
+	expect(builds[0]?.with).toMatchObject({
+		context: ".",
+		load: true,
+		push: false,
+		tags: "mainworthy:check",
+		"build-args": `MAINWORTHY_COMMIT=${expression("github.sha")}\n`,
+		"cache-from": "type=gha",
+		"cache-to": "type=gha,mode=max",
+	});
+	expect(builds[0]?.with?.labels).toBe(
+		`org.opencontainers.image.source=${expression("github.server_url")}/${expression("github.repository")}\n` +
+			`org.opencontainers.image.revision=${expression("github.sha")}\n` +
+			`org.opencontainers.image.created=${expression("steps.created.outputs.time")}\n`,
+	);
+	const smokeIndex = image.steps.findIndex((one) => one.run?.includes("docker run"));
+	const smoke = image.steps[smokeIndex]?.run ?? "";
+	expect(smoke).toContain("mainworthy:check");
+	expect(smoke).toContain(".ok == true and .commit == $commit");
+	const saveIndex = image.steps.findIndex((one) => one.run?.includes("docker save"));
+	expect(saveIndex).toBeGreaterThan(smokeIndex);
+	expect(image.steps[saveIndex]?.if).toBe(expression(main));
+	expect(image.steps[saveIndex]?.run).toContain("mainworthy:check");
+	const upload = image.steps.find((one) => one.uses?.startsWith("actions/upload-artifact@"));
+	const download = publish.steps.find((one) => one.uses?.startsWith("actions/download-artifact@"));
+	expect(upload?.if).toBe(expression(main));
+	expect(upload?.with?.name).toBe("mainworthy-image");
+	expect(upload?.with?.overwrite).toBe(true);
+	expect(download?.with?.name).toBe(upload?.with?.name);
+	expect(image.steps[saveIndex]?.run).toContain(String(upload?.with?.path));
+	const login = publish.steps.find((one) => one.uses?.startsWith("docker/login-action@"));
+	expect(login?.with).toEqual({
+		registry: "ghcr.io",
+		username: expression("github.actor"),
+		password: expression("github.token"),
+	});
+	expect(image.steps.some((one) => one.uses?.startsWith("docker/login-action@"))).toBe(false);
+	const push = publish.steps.map((one) => one.run ?? "").join("\n");
+	expect(push).toContain("docker load --input");
+	expect(push).not.toContain("docker build");
+	expect(push).toContain('docker push "$image:$GITHUB_SHA"');
+	expect(push).toContain('docker push "$image:main"');
+	expect(push).toContain('if [ "$tip" = "$GITHUB_SHA" ]; then');
+	expect(readFileSync("compose.coolify.yaml", "utf8")).toContain("    build: .\n");
+	expect(readFileSync("Dockerfile", "utf8")).toContain("ENV MAINWORTHY_COMMIT=$MAINWORTHY_COMMIT");
 });
 
 test("the slowest files are read from the timings Bun writes", () => {

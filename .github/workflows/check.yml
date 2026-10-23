@@ -15,6 +15,7 @@
 #
 # `image` builds the container the way a deployment does and asks it for a page of the documentation: what the
 # image carries is decided by the Dockerfile and .dockerignore, which no test runs. Nothing reports to it.
+# On main it saves that tested image for `publish`, which pushes it to GHCR only after `gate` succeeds.
 #
 # `ios` runs the tests of the iPhone app's Swift package on a Mac, against a Mainworthy started from this commit,
 # and builds the app (ios/README.md). Nothing reports to it either. What the app reads of a reply is checked
@@ -24,6 +25,7 @@
 # a file it reads changed, and the tests run whole unless every changed file is one that only the tests naming it
 # read (prose, the iPhone app, another workflow); then one runner runs those tests and the ones that read every file.
 # A job the change does not need is skipped, and the gate counts a skip as a pass only when `scope` asked for it.
+# The image also runs for every main push, so even a prose-only commit has an image bearing its revision.
 #
 # `description` checks a pull request's description and milestone (scripts/work/pull-request.ts): a closing word is
 # only on a line of its own, GitHub links the issues the description closes and no other, and the milestone is the
@@ -86,12 +88,29 @@ jobs:
 
   image:
     needs: scope
-    if: ${{ needs.scope.outputs.image == 'true' }}
+    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || needs.scope.outputs.image == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - run: docker build --build-arg MAINWORTHY_COMMIT=${{ github.sha }} --tag mainworthy:check .
+      - uses: docker/setup-buildx-action@v4
+      - name: Image creation time
+        id: created
+        run: echo "time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          push: false
+          tags: mainworthy:check
+          build-args: |
+            MAINWORTHY_COMMIT=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ steps.created.outputs.time }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       - name: The container answers, and carries the documentation with its diagrams and screenshots
         run: |
           docker run --detach --name mainworthy --publish 7357:7357 mainworthy:check
@@ -107,6 +126,18 @@ jobs:
           curl --fail --silent http://127.0.0.1:7357/docs/skill/mainworthy.tar.gz | tar -tz | grep --quiet "^mainworthy/SKILL.md$"
       - if: failure()
         run: docker logs mainworthy
+      - name: Save the tested image
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        run: docker save --output /tmp/mainworthy-image.tar mainworthy:check
+      - uses: actions/upload-artifact@v4
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        with:
+          name: mainworthy-image
+          path: /tmp/mainworthy-image.tar
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          overwrite: true
 
   ios:
     needs: scope
@@ -247,3 +278,40 @@ jobs:
           test "${{ needs.image.result }}" = success || test "${{ needs.scope.outputs.image }}:${{ needs.image.result }}" = false:skipped
           test "${{ needs.ios.result }}" = success || test "${{ needs.scope.outputs.ios }}:${{ needs.ios.result }}" = false:skipped
           test "${{ needs.description.result }}" = success || test "${{ github.event_name }}:${{ needs.description.result }}" = push:skipped
+
+  publish:
+    needs: [gate, image]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: mainworthy-image-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mainworthy-image
+          path: /tmp
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Publish the tested image without rebuilding
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          docker load --input /tmp/mainworthy-image.tar
+          image=ghcr.io/endqwerty/mainworthy
+          docker tag mainworthy:check "$image:$GITHUB_SHA"
+          docker push "$image:$GITHUB_SHA"
+          tip=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          if [ "$tip" = "$GITHUB_SHA" ]; then
+            docker tag mainworthy:check "$image:main"
+            docker push "$image:main"
+          else
+            echo "main has advanced; published the commit tag only"
+          fi

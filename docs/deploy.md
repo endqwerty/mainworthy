@@ -12,6 +12,48 @@ across the rename on 2026-10-13: Coolify built the image, the server logged
 export taken just before is in the volume (`/data/before-rename-2026-10-13.ndjson.gz`).
 **What is not:** the Tailscale sidecar in `compose.coolify.yaml` on that instance (`docker compose config` accepts the file once Coolify's own `exclude_from_hc` line is removed; the node has not joined yet), a restore from a backup on that instance, an upgrade that changes the schema of an instance that holds data, and the limit on failed sign-ins counting each visitor of that instance by address ("The limit on failed sign-ins" says what is expected and what was not measured).
 
+## Images published by CI
+
+On each push to `main`, `check.yml` builds the image once with a GitHub Actions layer cache (`type=gha`).
+The `image` job loads it locally and checks readiness, the full commit from `/healthz`, and the packaged
+documentation. After `gate` succeeds, `publish` downloads that same tested image and pushes it to
+`ghcr.io/endqwerty/mainworthy`. It never rebuilds it. Pull requests never log in to GHCR or publish images.
+Only `publish` has `packages: write`, using `GITHUB_TOKEN`; no additional secret is needed.
+
+The tags are:
+
+- `<full-sha>`: the full 40-character commit, for example `ghcr.io/endqwerty/mainworthy:0123456789012345678901234567890123456789`.
+- `main`: the latest published commit that was still the tip of `main` when publishing. An older run or rerun
+  publishes its commit tag but skips `main` if the branch has advanced.
+
+The image embeds `MAINWORTHY_COMMIT`, so `/healthz` reports the image's full SHA without a runtime override.
+Its OCI labels name the source repository (`org.opencontainers.image.source`), commit
+(`org.opencontainers.image.revision`), and UTC creation time (`org.opencontainers.image.created`).
+
+Production still builds on the owner's server through Coolify, using `build: .` in `compose.coolify.yaml`.
+Publishing an image changes no deployment trigger or production configuration. Switching production to a
+published image belongs to [issue #821](https://github.com/endqwerty/mainworthy/issues/821), step 5.
+The future check that the server builds nothing does not apply to production yet.
+
+### Make the package public once
+
+After the first successful publish, the owner must open the `mainworthy` package on GitHub, open **Package
+settings**, and change its visibility to **Public** under **Danger Zone**. The public repository does not make
+the package public automatically. This is a one-time manual setting the owner must make; an agent cannot
+perform it. Until then, anonymous pulls fail. GitHub documents
+[package visibility settings](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility).
+
+### Check the first push after merge
+
+1. Confirm `image` builds once, passes its health and documentation smoke checks, and uploads `mainworthy-image`.
+2. Confirm `publish` starts only after a successful `gate`, loads the archive without building, and pushes the
+   full-SHA tag and `main` tag. If `main` advanced during the run, expect only the full-SHA tag.
+3. After making the package public, pull the full-SHA tag without registry credentials. Inspect its OCI labels
+   and run it without a commit environment override. Require HTTP 200, `ok: true`, and `commit` equal to that SHA
+   from `/healthz`. Check that both tags resolve to the same digest when the commit is still `main`.
+4. Confirm Coolify still builds from source on its existing schedule. After that deployment, the public
+   `/healthz` must report the deployed commit. This checks the existing deploy path, not deployment of the GHCR image.
+
 ## The container
 
 ```
