@@ -1,7 +1,7 @@
 import { SaxesParser } from "saxes";
 import { z } from "zod";
 import { clip } from "../../core/text.ts";
-import { nativeResult, type ParsedReport } from "./native.ts";
+import { nativeResult, type ParsedReport, reportIdentifier } from "./native.ts";
 
 const Attributes = z.object({
 	testId: z.string().min(1),
@@ -34,6 +34,9 @@ function duration(value: string | undefined): number | undefined {
 
 export function parseTRX(xml: string): ParsedReport {
 	const parser = new SaxesParser({ xmlns: true });
+	parser.on("error", (error) => {
+		throw new Error(`Invalid TRX XML: ${reportIdentifier(error.message)}`);
+	});
 	const stack: string[] = [];
 	const executions: Execution[] = [];
 	const definitions = new Map<string, string>();

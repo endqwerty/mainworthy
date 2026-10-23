@@ -69,7 +69,7 @@ test("unavailable or disallowed files are skipped without losing results", () =>
 	});
 	const longName = "a".repeat(201);
 	writeFileSync(join(root, longName), "file");
-	expect(load(longName)).toMatchObject({ skipped: 1, warnings: [expect.stringContaining(longName)] });
+	expect(load(longName)).toMatchObject({ skipped: 1, warnings: [expect.stringContaining(`${"a".repeat(120)}…`)] });
 	writeFileSync(join(root, "target.txt"), "file");
 	symlinkSync(join(root, "target.txt"), join(root, "alias.txt"));
 	expect(load("alias.txt").results[0]?.attachments).toEqual([{ name: "alias.txt", data: "ZmlsZQ==" }]);

@@ -1,7 +1,7 @@
 import { caseAnnotation } from "../../core/case-annotation.ts";
 import type { ResultIn } from "../../core/ops.ts";
 import { clip } from "../../core/text.ts";
-import type { ParsedResult } from "./native.ts";
+import { type ParsedResult, reportIdentifier } from "./native.ts";
 
 type Attributes = Partial<Record<"name" | "file" | "classname" | "time" | "status" | "message" | "value", string>>;
 type KeyDigest = { first: number; second: number; firstPower: number; secondPower: number; length: number };
@@ -332,7 +332,7 @@ function groupRetries(results: ParsedResult[], groups: RetryGroups): ParsedResul
 				continue;
 			if (cases.length > 101)
 				throw new Error(
-					`JUnit tried "${"name" in first.result.test ? first.result.test.name : "?"}" ${cases.length} times, more than the 101 a result and its 100 tries keep`,
+					`JUnit tried ${reportIdentifier("name" in first.result.test ? (first.result.test.name ?? "?") : "?")} ${cases.length} times, more than the 101 a result and its 100 tries keep`,
 				);
 			const result: ParsedResult = {
 				...last.result,
@@ -369,6 +369,7 @@ export function parseJUnit(
 ): { results: ParsedResult[]; suites: number; warnings: string[] } {
 	const results: ParsedResult[] = [];
 	const warnings: string[] = [];
+	const label = options?.file ? `${reportIdentifier(options.file)}: ` : "";
 	let suites = 0;
 	const encoder = new TextEncoder();
 	let warningPosition = 0;
@@ -396,7 +397,7 @@ export function parseJUnit(
 			return;
 		}
 		const bytes = byteOffset(offset);
-		warnings.push(`${options?.file ? `${options.file}: ` : ""}${message} at byte offset ${bytes}`);
+		warnings.push(`${label}${message} at byte offset ${bytes}`);
 	};
 	if (!xml.trimStart().startsWith("<")) {
 		warn("Empty or non-XML JUnit report", 0);
@@ -486,7 +487,7 @@ export function parseJUnit(
 				if (element.tries.length > 100) {
 					if (warnings.length < 1000)
 						warnings.push(
-							`${options?.file ? `${options.file}: ` : ""}Testcase ${element.result.test && "name" in element.result.test ? element.result.test.name : "?"}: kept the first and the last 99 of its ${element.tries.length} earlier runs; every one failed`,
+							`${label}Testcase ${reportIdentifier("name" in element.result.test ? (element.result.test.name ?? "?") : "?")}: kept the first and the last 99 of its ${element.tries.length} earlier runs; every one failed`,
 						);
 					element.tries = [...element.tries.slice(0, 1), ...element.tries.slice(-99)];
 				}
@@ -837,8 +838,6 @@ export function parseJUnit(
 	if (reportProblem !== null) damagedSpans.push({ from: 0, to: results.length, problem: reportProblem });
 	applyDamage(results, damagedSpans);
 	if (omittedWarnings > 0)
-		warnings.push(
-			`${options?.file ? `${options.file}: ` : ""}${omittedWarnings} additional warnings omitted at byte offset ${byteOffset(xml.length)}`,
-		);
+		warnings.push(`${label}${omittedWarnings} additional warnings omitted at byte offset ${byteOffset(xml.length)}`);
 	return { results: groupRetries(results, retryGroups), suites, warnings };
 }

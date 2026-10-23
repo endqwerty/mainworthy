@@ -2482,7 +2482,7 @@ test("real report outputs use git top level or cwd for stable Jest and Vitest ke
 				const refused = await run(["report", file, "--session", "real-tools", "--job", "refused"], { cwd });
 				expect(refused.code).toBe(4);
 				expect(refused.stderr).toContain(
-					`${file}: Jest/Vitest ${cwd === "/" ? "filesystem root" : "outside root"}: ${cwd}`,
+					`${JSON.stringify(file)}: Jest/Vitest ${cwd === "/" ? "filesystem root" : "outside root"}: ${JSON.stringify(cwd)}`,
 				);
 			}
 			const relativeRootFile = join(directory, `relative-root-${format}.json`);
@@ -2492,7 +2492,9 @@ test("real report outputs use git top level or cwd for stable Jest and Vitest ke
 			);
 			const refused = await run(["report", relativeRootFile, "--session", "real-tools"], { cwd: other });
 			expect(refused.code).toBe(4);
-			expect(refused.stderr).toContain(`${relativeRootFile}: Jest/Vitest root must be absolute: relative/root`);
+			expect(refused.stderr).toContain(
+				`${JSON.stringify(relativeRootFile)}: Jest/Vitest root must be absolute: "relative/root"`,
+			);
 		}
 		expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n).toBe(6);
 		for (const [format, counts] of [

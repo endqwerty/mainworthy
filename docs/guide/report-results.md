@@ -365,7 +365,10 @@ The JSON reporters keep different amounts of retry evidence:
 | Vitest JSON, checked with Vitest 5.0.4 | A passed test's retained `failureMessages` prove earlier failure. They are kept together as one failed try, with a warning: the reporter omits the retry count and the boundaries between tries. A failed test's messages cannot distinguish retries from several errors in one execution. |
 | `pytest-json-report` 1.5.0 with `pytest-rerunfailures` 16.7, checked with pytest 8.4.2 | A recovered test keeps `outcome: "rerun"` beside its final stages. Mainworthy judges those stages and keeps one earlier failed try, with a warning. The reporter overwrites earlier stages, so their count, durations, and diagnostics are unavailable. An exhausted failure retains no retry marker. |
 
-Jest, Vitest, and pytest retry warnings quote and shorten report identifiers, escaping terminal control characters.
+Report errors and warnings quote and shorten external identifiers, including suite and test names,
+report filenames and attachment paths, escaping terminal control characters. Human-readable receipts do the same
+for failure titles. JSON output escapes these controls without changing the values a JSON client reads.
+Parsed test identities and failure evidence stay unchanged.
 Each report keeps at most 1,000 warnings, each at most 1,000 UTF-16 units, followed by one line counting any omitted warnings.
 The warning limit does not drop results or tries.
 

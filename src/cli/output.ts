@@ -1,3 +1,4 @@
+import { reportJson } from "../surfaces/formats/native.ts";
 import { printError } from "./errors.ts";
 
 /** A server address for output, without its username or password. Requests keep the original address. */
@@ -15,7 +16,7 @@ export function line(text: string): void {
 
 /** Generated commands use pretty JSON unless the caller explicitly asks for compact output. */
 export function printJson(value: unknown, compact: boolean): void {
-	line(JSON.stringify(value, null, compact ? undefined : 2));
+	line(reportJson(value, compact ? undefined : 2));
 }
 
 export function warning(text: string): void {

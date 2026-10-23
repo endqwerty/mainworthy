@@ -33,7 +33,7 @@ function resultOf(test: Test): ParsedReport["results"][number]["outcome"] {
 	if (test.outcome === "failed" || call?.outcome === "failed") return "fail";
 	if (!call) {
 		if (setup?.outcome === "skipped") return "skip";
-		throw new Error(`pytest test ${test.nodeid} has no call stage`);
+		throw new Error(`pytest test ${reportIdentifier(test.nodeid)} has no call stage`);
 	}
 	if (call.outcome === "skipped" || test.outcome === "skipped") return "skip";
 	return "pass";
@@ -59,7 +59,7 @@ export function parsePytest(value: unknown): ParsedReport {
 		if (separator < 1 || !title) throw new Error("pytest nodeid must identify a file and test");
 		const name = title + (parameter < 0 ? "" : path.slice(parameter));
 		const stages = [test.setup, test.call, test.teardown].filter((stage) => stage !== undefined);
-		if (!stages.length) throw new Error(`pytest test ${test.nodeid} has no completed stage`);
+		if (!stages.length) throw new Error(`pytest test ${reportIdentifier(test.nodeid)} has no completed stage`);
 		const broken = stages.filter((stage) => stage.outcome === "failed");
 		const failures = broken.map((stage) => {
 			const detail = typeof stage.longrepr === "string" ? stage.longrepr : (stage.longrepr?.join(":") ?? "");

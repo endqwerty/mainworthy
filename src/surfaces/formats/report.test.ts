@@ -327,9 +327,9 @@ test("native JSON rejects malformed or unknown statuses instead of uploading par
 		{ ...playwrightReport([]) },
 		{ ...playwrightReport([{ status: "passed", duration: 1, retry: 0 }]), errors: [{ message: "runner crashed" }] },
 	]) {
-		expect(() => parse(value)).toThrow("report.json:");
+		expect(() => parse(value)).toThrow('"report.json":');
 	}
-	expect(() => parseReport('{"testResults":', { file: "broken.json" })).toThrow("broken.json:");
+	expect(() => parseReport('{"testResults":', { file: "broken.json" })).toThrow('"broken.json":');
 	expect(() => parse(jestReport(), "pytest")).toThrow("exitcode");
 });
 
@@ -351,7 +351,7 @@ test("runner errors cannot become a passing native upload", () => {
 		{ exitcode: 0, tests: [], collectors: [{ outcome: "failed" }] },
 		{ exitcode: 0, tests: [{ nodeid: "test.py::test_pass", outcome: "passed" }] },
 	]) {
-		expect(() => parse(value)).toThrow("report.json:");
+		expect(() => parse(value)).toThrow('"report.json":');
 	}
 });
 
@@ -359,7 +359,7 @@ test("pytest passes only a completed passing call, and a failed exit code needs 
 	const stage = (outcome: string) => ({ outcome, duration: 0.01 });
 	const nodeid = "tests/test.py::test_one";
 	expect(() => parse({ exitcode: 0, tests: [{ nodeid, outcome: "passed", setup: stage("passed") }] })).toThrow(
-		"report.json: pytest test tests/test.py::test_one has no call stage",
+		'"report.json": pytest test "tests/test.py::test_one" has no call stage',
 	);
 	expect(
 		parse({
@@ -373,7 +373,7 @@ test("pytest passes only a completed passing call, and a failed exit code needs 
 		),
 	).toEqual(["skip"]);
 	expect(() => parse({ exitcode: 1, tests: [{ nodeid, outcome: "passed", call: stage("passed") }] })).toThrow(
-		"report.json: pytest exited with 1 but no test failed; fix the runner before uploading",
+		'"report.json": pytest exited with 1 but no test failed; fix the runner before uploading',
 	);
 });
 
@@ -429,7 +429,7 @@ test("TRX rejects malformed XML, unknown results, document types and run-level e
 		sample.replace("<Results>", '<RunInfos><RunInfo outcome="Error"/></RunInfos><Results>'),
 		'<!DOCTYPE TestRun [<!ENTITY example "pass">]><TestRun/>',
 	]) {
-		expect(() => parseReport(xml, { file: "sample.trx" })).toThrow("sample.trx:");
+		expect(() => parseReport(xml, { file: "sample.trx" })).toThrow('"sample.trx":');
 	}
 	expect(() =>
 		parseReport(
@@ -516,12 +516,12 @@ test("real Playwright diagnostics remove colours while preserving retries and pa
 
 test("TRX refuses XML deeper than 32 elements", () => {
 	const xml = `<TestRun>${"<a>".repeat(40)}${"</a>".repeat(40)}</TestRun>`;
-	expect(() => parseReport(xml, { file: "deep.trx" })).toThrow("deep.trx: TRX nesting exceeds 32 elements");
+	expect(() => parseReport(xml, { file: "deep.trx" })).toThrow('"deep.trx": TRX nesting exceeds 32 elements');
 });
 
 test("invalid JSON root diagnostics name the report", () => {
 	expect(() => parseReport("[1,2]", { file: "array.json" })).toThrow(
-		"array.json: report: Invalid input: expected object, received array",
+		'"array.json": report: Invalid input: expected object, received array',
 	);
 });
 
@@ -580,7 +580,7 @@ test.each([
 	suite.name = name;
 	expect(() =>
 		parseReport(JSON.stringify({ ...report, rootDir }), { file: "refused.json", rootDir: "/valid/cli/root" }),
-	).toThrow(`refused.json: Jest/Vitest ${reason}: ${rootDir}`);
+	).toThrow(`"refused.json": Jest/Vitest ${reason}: ${JSON.stringify(rootDir)}`);
 });
 
 test.each([
@@ -601,7 +601,7 @@ test.each([
 test.each(["jest", "vitest"] as const)("real %s report refuses a source outside the CLI root", async (format) => {
 	const text = await fixture(`real-${format}.json`);
 	expect(() => parseReport(text, { file: "other-checkout.json", rootDir: "/home/robin/other" })).toThrow(
-		"other-checkout.json: Jest/Vitest outside root: /home/robin/other",
+		'"other-checkout.json": Jest/Vitest outside root: "/home/robin/other"',
 	);
 });
 

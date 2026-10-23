@@ -2,6 +2,7 @@ import { z } from "zod";
 import { csvExecution, parseCsv } from "../../core/csv.ts";
 import { type CaseBody, emptyBody, REQUIREMENT_KEY, TAG } from "../../core/model.ts";
 import { CaseAlias, type Edit, ProposeInput } from "../../core/ops.ts";
+import { reportIdentifier } from "./native.ts";
 
 export const CaseImportFormat = z.enum(["csv", "testrail", "qase"]);
 export type CaseImportFormat = z.infer<typeof CaseImportFormat>;
@@ -30,7 +31,7 @@ function qaseColumn(text: string, encoded: boolean): { key: string; value: strin
 
 function qaseSteps(row: Row, v2: boolean): ReturnType<typeof emptyBody>["steps"] {
 	if (row.steps_type && row.steps_type !== "classic" && row.steps_type !== "gherkin")
-		throw new Error(`unknown Qase steps_type ${JSON.stringify(row.steps_type)}`);
+		throw new Error(`unknown Qase steps_type ${reportIdentifier(row.steps_type)}`);
 	const actions = qaseColumn(row.steps_actions ?? "", v2 && row.steps_type !== "gherkin");
 	const results = qaseColumn(row.steps_result ?? row.steps_results ?? "", v2);
 	const data = qaseColumn(row.steps_data ?? "", v2);
@@ -72,7 +73,7 @@ export function parseCaseImport(text: string, format: CaseImportFormat, prefix =
 			const suite = { parent: row.suite_parent_id ?? "", name: row.suite };
 			const previous = suites.get(row.suite_id);
 			if (previous && (previous.parent !== suite.parent || previous.name !== suite.name))
-				throw new Error(`Qase suite ${row.suite_id} has conflicting definitions`);
+				throw new Error(`Qase suite ${reportIdentifier(row.suite_id)} has conflicting definitions`);
 			suites.set(row.suite_id, suite);
 		}
 	const suitePath = (id: string): string => {
@@ -82,7 +83,7 @@ export function parseCaseImport(text: string, format: CaseImportFormat, prefix =
 			if (seen.has(id)) throw new Error("Qase suite parents form a cycle");
 			seen.add(id);
 			const suite = suites.get(id);
-			if (!suite) throw new Error(`Qase suite ${id} is missing`);
+			if (!suite) throw new Error(`Qase suite ${reportIdentifier(id)} is missing`);
 			if (suite.name.includes("/")) throw new Error("Qase suite names containing / need renaming before import");
 			names.unshift(suite.name);
 			id = suite.parent;
@@ -130,9 +131,15 @@ export function parseCaseImport(text: string, format: CaseImportFormat, prefix =
 			if (format === "qase") kind = row.automation ?? "";
 			if (format === "testrail")
 				kind = row["Automation Type"] || (/^(automated|manual)$/i.test(row.Type ?? "") ? row.Type : "") || "";
+			let execution: ReturnType<typeof csvExecution>;
+			try {
+				execution = csvExecution(kind);
+			} catch (error) {
+				throw new Error(reportIdentifier(error instanceof Error ? error.message : String(error)));
+			}
 			const body = {
 				...emptyBody(title),
-				...csvExecution(kind),
+				...execution,
 				pre: row[format === "testrail" ? "Preconditions" : "preconditions"] ?? "",
 				fields: { [`import.${format}.row.${i + 2}`]: JSON.stringify(row) },
 			};
@@ -164,7 +171,9 @@ export function parseCaseImport(text: string, format: CaseImportFormat, prefix =
 			previousId = id;
 			if (edits.length > 5000) throw new Error("an import accepts at most 5,000 cases; split the CSV");
 		} catch (error) {
-			throw new Error(`CSV record ${i + 2}: ${error instanceof Error ? error.message : String(error)}`);
+			throw new Error(
+				`CSV record ${i + 2}: ${error instanceof SyntaxError ? reportIdentifier(error.message) : error instanceof Error ? error.message : reportIdentifier(String(error))}`,
+			);
 		}
 	}
 	if (!edits.length) throw new Error("CSV contains no cases");
