@@ -441,9 +441,13 @@ for (const device of ["desktop", "phone"] as const)
 		60000,
 	);
 
-for (const device of ["desktop", "phone"] as const)
+for (const [device, fractional] of [
+	["desktop", false],
+	["phone", false],
+	["phone", true],
+] as const)
 	t(
-		`${device} Queue keeps a partly shown short step unread before accepting`,
+		`${device} Queue keeps a partly shown short step unread before accepting${fractional ? " with a fractional pane height" : ""}`,
 		async () => {
 			const server = await startServer({ mode: "local", preset: "standard" });
 			let view: Awaited<ReturnType<typeof openPage>> | null = null;
@@ -465,6 +469,17 @@ for (const device of ["desktop", "phone"] as const)
 					device,
 					setup: async (page) => {
 						await page.setViewportSize(device === "phone" ? { width: 390, height: 360 } : { width: 1000, height: 800 });
+						if (fractional)
+							await page.addInitScript(() => {
+								// Set the geometry before any evidence can be measured or painted.
+								const observer = new MutationObserver(() => {
+									const pane = document.getElementById("detail");
+									if (!pane) return;
+									pane.style.height = "200.6px";
+									observer.disconnect();
+								});
+								observer.observe(document, { childList: true, subtree: true });
+							});
 						await trackPartCoverage(page, q);
 					},
 				});

@@ -200,9 +200,8 @@ export function answerShown(q: string, answer: string, via: "key" | "button"): s
 				)
 					continue;
 				const area = visibleArea(scroller);
-				const scale = scroller.getBoundingClientRect().height / scroller.offsetHeight;
 				const offset = next.element.getBoundingClientRect().top + firstUnseen(next) - area.top - 1;
-				scroller.scrollTop += offset / scale;
+				scroller.scrollTop += offset;
 				const remaining = next.element.getBoundingClientRect().top + firstUnseen(next);
 				const visible = visibleArea(evidence);
 				if (remaining >= visible.top - ROUNDING && remaining < visible.bottom - ROUNDING) break;
