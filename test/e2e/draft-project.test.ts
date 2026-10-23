@@ -249,6 +249,9 @@ for (const attempt of ["save", "merge"] as const)
 								.waitFor();
 						}
 					} else {
+						// The recorded merge refreshes the draft's tags even when its reply is lost.
+						// Let that write finish before replacing the live draft with an unbound fixture.
+						if (attempt === "merge") await eventually(saved, (draft) => draft.originalTags.includes("retained"));
 						await page.evaluate(() => {
 							for (const key of Object.keys(localStorage)) {
 								if (!key.includes(":draft:")) continue;
