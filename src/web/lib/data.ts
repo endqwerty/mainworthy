@@ -1,5 +1,5 @@
 import { type Query, QueryClient, useQuery } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { type Dispatch, type SetStateAction, useEffect } from "react";
 import type { Api, OpName } from "../../core/api.ts";
 import { ApiError, call, session, unauthenticatedEvent } from "./api.ts";
 import { deviceSession, sessionCurrent, suspendDeviceSession } from "./device.ts";
@@ -97,7 +97,7 @@ const VISIBLE_STREAM_IDLE_MS = 30 * 60_000;
 type StreamLifecycle = "active" | "hidden-grace" | "hidden" | "idle" | "disposed";
 
 /** One stream per active project. Focus/reconnect refetches repair every missed event. */
-export function useEvents(project: string, setStatus: (text: string) => void): void {
+export function useEvents(project: string, setStatus: Dispatch<SetStateAction<string>>): void {
 	useEffect(() => {
 		const owner = deviceSession();
 		let lifecycle: StreamLifecycle = document.visibilityState === "hidden" ? "hidden" : "active";
@@ -106,6 +106,12 @@ export function useEvents(project: string, setStatus: (text: string) => void): v
 		let retry: ReturnType<typeof setTimeout> | undefined;
 		let events: EventSource | null = null;
 		let announceReconnect = false;
+		// The last sentence this stream put in the status line. Another project's stream cannot know it is there.
+		let said: string | null = null;
+		function say(text: string): void {
+			said = text;
+			setStatus(text);
+		}
 		const eligible = () => lifecycle === "active" || lifecycle === "hidden-grace";
 		function close(): void {
 			connection++;
@@ -118,7 +124,7 @@ export function useEvents(project: string, setStatus: (text: string) => void): v
 			lifecycle = reason;
 			close();
 			announceReconnect = true;
-			setStatus("Live updates paused while this page is inactive.");
+			say("Live updates paused while this page is inactive.");
 		}
 		function armIdle(): void {
 			clearTimeout(pauseTimer);
@@ -156,7 +162,7 @@ export function useEvents(project: string, setStatus: (text: string) => void): v
 				stream.close();
 				events = null;
 				announceReconnect = true;
-				setStatus("Live updates disconnected. Checking the session and reconnecting…");
+				say("Live updates disconnected. Checking the session and reconnecting…");
 				void reconnect(attempt);
 			};
 			events.onmessage = (event) => {
@@ -173,7 +179,7 @@ export function useEvents(project: string, setStatus: (text: string) => void): v
 			events.onopen = () => {
 				if (!eligible() || events !== stream) return;
 				if (announceReconnect) {
-					setStatus("Live updates reconnected.");
+					say("Live updates reconnected.");
 					announceReconnect = false;
 				}
 				void invalidateProject(project);
@@ -211,6 +217,9 @@ export function useEvents(project: string, setStatus: (text: string) => void): v
 		return () => {
 			lifecycle = "disposed";
 			close();
+			// What this stream said is no longer true of the next project's; leave anybody else's sentence alone.
+			const stale = said;
+			if (stale !== null) setStatus((current) => (current === stale ? "" : current));
 			document.removeEventListener("visibilitychange", visibility);
 			window.removeEventListener("keydown", activity, true);
 			window.removeEventListener("pointerdown", activity, true);

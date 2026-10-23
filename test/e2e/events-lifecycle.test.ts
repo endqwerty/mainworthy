@@ -4,9 +4,12 @@ import { browserAvailable, eventually, launchBrowser, reservePort, startServer }
 
 const check = test.skipIf(!browserAvailable);
 
-async function workbench(setup?: (page: Page) => Promise<void>) {
+type Server = Awaited<ReturnType<typeof startServer>>;
+
+async function workbench(setup?: (page: Page) => Promise<void>, seed?: (server: Server) => Promise<unknown>) {
 	const server = await startServer({ mode: "server" });
 	await server.api("propose", { edits: [{ op: "create", outline: "Before the pause" }] });
+	await seed?.(server);
 	const port = await reservePort();
 	const browser = await launchBrowser({ args: [`--remote-debugging-port=${port.port}`] });
 	// Playwright normally forces every page visible through its own CDP session. The default context
@@ -26,11 +29,18 @@ async function workbench(setup?: (page: Page) => Promise<void>) {
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await page.clock.install();
 		const active = new Set<Request>();
-		let opened = 0;
-		page.on("request", (request) => {
-			if (request.url().endsWith("/events")) {
-				opened++;
-			}
+		// Counted in the page, where the constructor runs: a network event reaches this process only after the
+		// clock call that caused it has returned, so a count kept here could miss a stream the page just opened.
+		await page.addInitScript(() => {
+			const Native = window.EventSource;
+			const counted = { opened: 0 };
+			Object.assign(window, { streamsOpened: counted });
+			window.EventSource = class extends Native {
+				constructor(url: string | URL, init?: EventSourceInit) {
+					super(url, init);
+					counted.opened++;
+				}
+			};
 		});
 		page.on("response", (response) => {
 			if (response.url().endsWith("/events") && response.status() === 200) active.add(response.request());
@@ -53,7 +63,8 @@ async function workbench(setup?: (page: Page) => Promise<void>) {
 			server,
 			page,
 			active,
-			opened: () => opened,
+			opened: () =>
+				page.evaluate(() => (window as unknown as { streamsOpened: { opened: number } }).streamsOpened.opened),
 			async visibility(state: "hidden" | "visible") {
 				await cdp.send("Browser.setWindowBounds", {
 					windowId,
@@ -80,7 +91,7 @@ check(
 			expect(h.active.size).toBe(1);
 			await h.visibility("visible");
 			await page.clock.fastForward(2_000);
-			expect(h.opened()).toBe(1);
+			expect(await h.opened()).toBe(1);
 			expect(h.active.size).toBe(1);
 
 			await h.visibility("hidden");
@@ -95,7 +106,7 @@ check(
 			});
 			await h.visibility("visible");
 			await eventually(
-				async () => h.opened(),
+				() => h.opened(),
 				(n) => n === 2,
 			);
 			await page.clock.resume();
@@ -122,12 +133,12 @@ check(
 					(n) => n === 0,
 				);
 				expect(await page.locator("#stat").textContent()).not.toContain("disconnected");
-				const opened = h.opened();
+				const opened = await h.opened();
 				await page.clock.fastForward(60_000);
-				expect(h.opened()).toBe(opened);
+				expect(await h.opened()).toBe(opened);
 				await input();
 				await eventually(
-					async () => h.opened(),
+					() => h.opened(),
 					(n) => n === opened + 1,
 				);
 				await eventually(
@@ -172,17 +183,17 @@ for (const reason of ["hidden", "idle"])
 				await eventually(async () => checking, Boolean);
 				if (reason === "hidden") await h.visibility("hidden");
 				await page.clock.fastForward(reason === "hidden" ? 60_000 : 30 * 60_000);
-				const opened = h.opened();
+				const opened = await h.opened();
 				const checked = page.waitForResponse((response) => response.url().endsWith("/api/session"));
 				release();
 				await checked;
 				await page.clock.fastForward(2_000);
-				expect(h.opened()).toBe(opened);
+				expect(await h.opened()).toBe(opened);
 				expect(h.active.size).toBe(0);
 				if (reason === "hidden") await h.visibility("visible");
 				else await page.keyboard.press("Shift");
 				await eventually(
-					async () => h.opened(),
+					() => h.opened(),
 					(n) => n === opened + 1,
 				);
 				await eventually(
@@ -196,3 +207,36 @@ for (const reason of ["hidden", "idle"])
 		},
 		30_000,
 	);
+
+check(
+	"a project opened after a pause does not keep the pause in the status line",
+	async () => {
+		const h = await workbench(undefined, (server) =>
+			server.api("admin", { do: "project.create", key: "other", name: "Other", preset: "standard" }),
+		);
+		try {
+			const { page } = h;
+			// The picker is open before the pause, so the key that leaves for the other project is the first input
+			// after it: it reopens this project's stream at the moment the page moves on.
+			await page.keyboard.type("gp");
+			await page.getByRole("region", { name: "Switch project", exact: true }).waitFor();
+			await page.clock.fastForward(30 * 60_000);
+			await eventually(
+				async () => h.active.size,
+				(n) => n === 0,
+			);
+			expect(await page.locator("#stat").textContent()).toContain("paused");
+			await page.clock.resume();
+			await page.keyboard.press("Enter");
+			await page.waitForURL(/\/p\/other\//);
+			await eventually(
+				async () => [...h.active].map((request) => new URL(request.url()).pathname),
+				(paths) => paths.length === 1 && paths[0] === "/api/p/other/events",
+			);
+			expect(await page.locator("#stat").textContent()).not.toContain("paused");
+		} finally {
+			await h.close();
+		}
+	},
+	30_000,
+);
