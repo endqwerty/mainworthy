@@ -5,6 +5,7 @@ import { Policy } from "../../core/kinds.ts";
 import { CaseBody } from "../../core/model.ts";
 import { ResultIn, resultDuration } from "../../core/ops.ts";
 import { policyProblem, storedPolicy } from "../../core/presets.ts";
+import { readSubject } from "../decisions/questions.ts";
 import { rebuildAssertionIndexes } from "../evidence/assertions.ts";
 import { attachmentType, type BlobStore, blobHash } from "../kernel/blobs.ts";
 import type { Db } from "../kernel/db.ts";
@@ -471,7 +472,7 @@ function importTransaction<T>(db: Db, fn: () => T, progress: (step: string, ms: 
  * Replays a format-1 archive into an instance with no projects, preserving all IDs and stored values. The
  * header must name this build's archive version. Missing nullable, non-key columns are filled with NULL, so adding
  * such columns need not change the archive version when NULL preserves the earlier behavior. Every count, digest,
- * column, duration, pending result input and foreign key is checked before commit; a failure restores the entire target, including bootstrap rows, sessions and the old
+ * column, duration, failure subject, pending result input and foreign key is checked before commit; a failure restores the entire target, including bootstrap rows, sessions and the old
  * search index. Tokens and sessions are discarded on success along with bootstrap identity rows.
  * Migration-owned schema_version is retained.
  * Lines exclude the LF separator and retain all other characters, since their bytes determine the digest.
@@ -567,6 +568,15 @@ export function importArchive(db: Db, lines: Iterable<string>, options: { blobs?
 					throw invalid(
 						`invalid archive ${entry.t}.duration_ms for row ${entry.r.get("id")} on line ${position}: expected an integer from ${resultDuration.minValue} to ${resultDuration.maxValue} ms`,
 					);
+				}
+				if (entry.t === "questions" && entry.r.get("kind") === "failure") {
+					try {
+						readSubject({ kind: "failure", subject: z.string().parse(entry.r.get("subject")) });
+					} catch {
+						throw invalid(
+							`invalid archive questions.subject for row ${entry.r.get("id")} on line ${position}: expected a valid failure subject`,
+						);
+					}
 				}
 				if (entry.t === "batches" && entry.r.get("state") === "accepted") {
 					const stored = entry.r.get("staged");

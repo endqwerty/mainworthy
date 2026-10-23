@@ -1012,6 +1012,39 @@ describe("Mainworthy instance archives", () => {
 		}
 	});
 
+	test("invalid failure subjects name the archive row and line and roll back every table", () => {
+		const from = source();
+		for (const subject of [
+			'{"signature":1,"scope":"line:main","perResult":false}',
+			'{"signature":"1","scope":"line:main"}',
+			'{"signature":1,"scope":"run:1","slot":2,"perResult":true}',
+			'{"signature":1,"scope":"line:main","extra":true}',
+			'{"signature":1}',
+			"null",
+			"[]",
+			"{",
+		]) {
+			from.raw.query("UPDATE questions SET kind = 'failure', subject = ? WHERE id = 402").run(subject);
+			const text = archive(from);
+			const line = [...linesOf(text)].findIndex((line) => line.startsWith('{"t":"questions",')) + 1;
+			refuse(text, `invalid archive questions.subject for row 402 on line ${line}: expected a valid failure subject`);
+		}
+	});
+
+	test("every written failure subject shape imports without changing its stored JSON", () => {
+		const from = source();
+		for (const subject of [
+			'{ "scope": "line:main", "signature": 505 }',
+			'{"signature":505,"scope":"change:1","perResult":true}',
+			'{"slot":1,"signature":505,"scope":"run:301"}',
+		]) {
+			from.raw.query("UPDATE questions SET kind = 'failure', subject = ? WHERE id = 402").run(subject);
+			const to = target();
+			importArchive(to, linesOf(archive(from)));
+			expect(dump(to)).toEqual(dump(from));
+		}
+	});
+
 	test("result and runner-try durations keep the exact limit, zero and unknown time", () => {
 		const from = source();
 		for (const duration of [2_592_000_000, 0, null]) {
