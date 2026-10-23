@@ -930,23 +930,6 @@ test("image publication pins every action and derives creation time from the com
 	const created = jobs.image.steps.find((step) => step.run?.includes("time="))?.run ?? "";
 	expect(created).toContain("git log -1 --format=%cI");
 	expect(created).not.toContain("date ");
-	const dependabot = z
-		.object({
-			version: z.literal(2),
-			updates: z.array(
-				z.object({
-					"package-ecosystem": z.string(),
-					directory: z.string(),
-					schedule: z.object({ interval: z.string() }),
-				}),
-			),
-		})
-		.parse(Bun.YAML.parse(readFileSync(".github/dependabot.yml", "utf8")));
-	expect(dependabot.updates).toContainEqual({
-		"package-ecosystem": "github-actions",
-		directory: "/",
-		schedule: { interval: "weekly" },
-	});
 });
 
 for (const mode of ["missing", "same", "different", "unreadable", "bad-digest", "stage-fails", "stale-main"]) {

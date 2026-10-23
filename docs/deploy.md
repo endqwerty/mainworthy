@@ -49,8 +49,8 @@ The future check that the server builds nothing does not apply to production yet
 ### Update pinned actions
 
 Every action in the `image` and `publish` jobs uses a full 40-character commit SHA, with its release version in
-an adjacent comment. The artifact actions in the other jobs use the same pins. `.github/dependabot.yml` checks
-GitHub Actions weekly and opens pull requests for updates; it does not merge them.
+an adjacent comment. The artifact actions in the other jobs use the same pins. Pinning the rest of the workflows,
+and automated pin updates, is [issue #853](https://github.com/endqwerty/mainworthy/issues/853).
 
 To update a pin, review the action's release notes and changes since the pinned commit. Resolve the exact release
 with `gh api repos/<owner>/<repo>/git/ref/tags/<version> --jq .object`. If its type is `tag`, resolve that SHA with
