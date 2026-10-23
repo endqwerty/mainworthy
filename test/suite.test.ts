@@ -2716,3 +2716,86 @@ describe("placement reply boundaries and order", () => {
 		expect(order("Unsorted")).toEqual(["C-1", "C-2"]);
 	});
 });
+
+describe("conflict-merge placement effects", () => {
+	const propose = (edits: Edit[], as = h.owner) => ProposeReply.parse(h.call("propose", { edits }, as));
+	const conflictFor = (as = h.owner, tagged = true) => {
+		propose([{ op: "create", tags: ["kept", "removed"], body: { title: "Base" } }]);
+		propose([{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }]);
+		const edits: Edit[] = [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }];
+		if (tagged) edits.push({ op: "place", cases: ["C-1"], tags: { add: ["merged-tag"], remove: ["removed"] } });
+		const pending = propose(edits, as);
+		expect(pending.status).toBe("conflict");
+		if (!pending.question) throw new Error("no conflict question");
+		if (tagged) propose([{ op: "place", cases: ["C-1"], tags: { add: ["concurrent"] } }]);
+		return pending.question;
+	};
+	const resolution = (q: string, body = emptyBody("Resolved")) => {
+		const [question] = h.call<{ evidenceHash: string }[]>("get", { refs: [q] });
+		return { q, onEvidence: question?.evidenceHash, answer: { is: "merge", body } };
+	};
+	const inverse = [{ op: "place", cases: ["C-1"], tags: { add: ["removed"], remove: ["merged-tag"] } }];
+
+	for (const read of [true, false]) {
+		test(`a tag-delta merge returns placement effects ${read ? "to a reader" : "without disclosing them to its produce-only author"}`, () => {
+			const author = h.actor("merge-author", "human", read ? ["read", "produce"] : ["produce"]);
+			const q = conflictFor(author);
+			const input = { ...resolution(q), cmd: read ? "reader-merge" : "blind-merge" };
+			const first = h.call<DecideReply[]>("decide", input, author);
+			const [reply] = first;
+			expect(h.call<DecideReply[]>("decide", input, author)).toEqual(first);
+			expect(reply).toMatchObject({ status: "decided", effects: { status: "adopted" } });
+			expect(reply?.effects?.placements).toEqual(read ? inverse : []);
+			const [stored] = h.call<{ decision: { effects: Record<string, unknown> } }[]>("get", { refs: [q] });
+			expect(stored?.decision.effects.placements).toEqual(inverse);
+			expect(h.call("get", { refs: ["C-1"] })).toMatchObject([
+				{ version: 3, tags: ["concurrent", "kept", "merged-tag"] },
+			]);
+			if (read) {
+				propose(ProposeReply.shape.placements.parse(reply?.effects?.placements), author);
+				expect(h.call("get", { refs: ["C-1"] })).toMatchObject([
+					{ version: 3, title: "Resolved", tags: ["concurrent", "kept", "removed"] },
+				]);
+			}
+		});
+	}
+
+	test("command replay retains merge placement effects without recording the tag delta twice", () => {
+		const q = conflictFor();
+		const input = { ...resolution(q), cmd: "merge-with-placement-effects" };
+		const first = h.call<DecideReply[]>("decide", input);
+		expect(first[0]?.effects?.placements).toEqual(inverse);
+		const timeline = () => h.call<{ entries: unknown[] }>("timeline", { ref: "C-1" });
+		const before = timeline();
+		expect(h.call<DecideReply[]>("decide", input)).toEqual(first);
+		expect(timeline()).toEqual(before);
+		const recovered = h.call<{ reply: DecideReply[] }>("command", { cmd: input.cmd });
+		expect(recovered.reply).toEqual(first);
+	});
+
+	test("an unchanged merge explicitly returns no placement effects", () => {
+		const q = conflictFor(h.owner, false);
+		const [reply] = h.call<DecideReply[]>("decide", resolution(q, emptyBody("Theirs")));
+		expect(reply).toMatchObject({ status: "decided", effects: { status: "unchanged", placements: [] } });
+	});
+
+	test("a replacement waiting for review explicitly returns no placement effects", () => {
+		const q = conflictFor();
+		const policy = propose([{ op: "policy", preset: "strict" }]);
+		const [question] = h.call<{ evidenceHash: string }[]>("get", { refs: [policy.question] });
+		h.call("decide", { q: policy.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } });
+		const [reply] = h.call<DecideReply[]>("decide", resolution(q));
+		expect(reply).toMatchObject({ status: "decided", effects: { status: "open", placements: [] } });
+		expect(h.call("get", { refs: ["C-1"] })).toMatchObject([{ version: 2, tags: ["concurrent", "kept", "removed"] }]);
+	});
+
+	test("a replacement that meets another body conflict explicitly returns no placement effects", () => {
+		const q = conflictFor();
+		propose([{ op: "edit", case: "C-1", base: 2, body: { title: "Changed again" } }]);
+		const [reply] = h.call<DecideReply[]>("decide", resolution(q));
+		expect(reply).toMatchObject({ status: "decided", effects: { status: "conflict", placements: [] } });
+		expect(h.call("get", { refs: ["C-1"] })).toMatchObject([
+			{ version: 3, title: "Changed again", tags: ["concurrent", "kept", "removed"] },
+		]);
+	});
+});

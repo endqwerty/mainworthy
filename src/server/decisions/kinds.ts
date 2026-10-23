@@ -271,10 +271,11 @@ function* resolveConflictSteps(
 		edits: replacement,
 		reason: proposal.reason ?? `Resolves the conflict in P-${proposal.no}`,
 	});
-	if (!sealed) return { cases: [], status: "unchanged" };
+	if (!sealed) return { cases: [], placements: [], status: "unchanged" };
 	const raised = yield* raiseAdopt(asAuthor, { raise: tools.raiseSteps }, sealed);
 	return {
 		cases: raised.s === "decided" ? (raised.effects.cases ?? []) : [],
+		placements: raised.s === "decided" ? (raised.effects.placements ?? []) : [],
 		proposal: `P-${sealed.proposal.no}`,
 		adopt: `Q-${raised.question.no}`,
 		status: raised.s === "decided" ? "adopted" : sealed.conflicts.length > 0 ? "conflict" : "open",
