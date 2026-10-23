@@ -10,6 +10,11 @@ cases reports the full count for those filters, independent of the page size.
 Suite keeps loading the rest of the list while new results and edits arrive,
 and shows live changes without a reload. A tag or move still being sent stays visible
 when live updates arrive. If the write fails, only that pending change disappears.
+Live updates pause after the page stays hidden for one minute, or after thirty
+minutes without keyboard or pointer input while visible. Returning to a hidden
+page resumes updates; an idle page resumes on the next key or pointer press.
+Reconnecting reads the latest project data. A shorter tab switch keeps the connection.
+
 A confirmed later move replaces an earlier pending move of the same case.
 A slow or failed folder-list read keeps the cases returned by the current folder filter visible.
 
