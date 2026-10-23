@@ -375,6 +375,10 @@ Parser diagnostics from `mainworthy import --format csv|testrail|qase` quote ext
 control characters. Long suite and step-type identifiers are shortened; invalid execution-type diagnostics keep
 the full value and correction guidance. A CSV read failure shows the quoted filename and filesystem error code.
 All CLI errors fold CR/LF runs into `; ` and escape other controls. Imported case content stays unchanged.
+Human-readable CSV previews also escape controls in case titles, folders, aliases
+and refusal messages. CLI warnings, receipts and Markdown output apply the same
+terminal protection. Markdown keeps its line breaks; use `get --md --json` and
+decode the JSON for the original document text.
 
 ## Import into a new instance
 

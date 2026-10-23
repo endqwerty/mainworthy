@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { escapeControls } from "../core/text.ts";
+import { escapeWorkflowCommands } from "./terminal-text.ts";
 
 /** A user-facing CLI failure. Codes 0–3 belong to gate verdicts; command errors exit 4. */
 export class CliError extends Error {
@@ -30,5 +31,5 @@ export function printError(error: unknown): void {
 			: error instanceof Error
 				? error.message
 				: String(error);
-	process.stderr.write(`${escapeControls(`${code}: ${message}`.replace(/[\r\n]+/g, "; "))}\n`);
+	process.stderr.write(`${escapeWorkflowCommands(escapeControls(`${code}: ${message}`.replace(/[\r\n]+/g, "; ")))}\n`);
 }

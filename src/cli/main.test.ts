@@ -1136,12 +1136,12 @@ test("run in the test's process gives what the executable gives", async () => {
 
 // `run` returns what a command writes through `process.stdout.write` and `process.stderr.write`, so the command line
 // must reach the terminal through them and by no other way. This reads the source as text and holds it to that: only
-// the output module, the error printer and the two commands that print a case as it is name the process's streams;
+// the output module and the error printer name the process's streams;
 // nothing names another way to the terminal; and only the code that asks git for the commit starts a process. It is
 // strict (a comment that names one of these fails too) and it knows only the ways listed: the tests that start the
 // executable are what proves its output, and `run` is a sample of it.
 test("the command line reaches the terminal only through the two write functions that run reads", async () => {
-	const streams = ["output.ts", "errors.ts", "commands/fmt.ts", "commands/get.ts"];
+	const streams = ["output.ts", "errors.ts"];
 	const rules: { what: string; pattern: RegExp; allowed: string[] }[] = [
 		{ what: "the process's streams", pattern: /\bprocess\s*\.\s*std(out|err)\b/, allowed: streams },
 		{ what: "console", pattern: /\bconsole\b/, allowed: [] },

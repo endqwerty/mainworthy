@@ -1,7 +1,7 @@
 import { parseCase, printCase } from "../../core/markdown.ts";
 import { assertPositionals } from "../args.ts";
 import { CliError } from "../errors.ts";
-import { printJson } from "../output.ts";
+import { printJson, printMarkdown } from "../output.ts";
 import type { AdapterCommand } from "./types.ts";
 
 export const fmtCommand: AdapterCommand = {
@@ -17,7 +17,7 @@ export const fmtCommand: AdapterCommand = {
 			throw new CliError("invalid", parsed.errors.map((error) => `${file}:${error.line}: ${error.message}`).join("; "));
 		const md = printCase(parsed.doc);
 		if (args.has("json")) printJson({ md }, args.bool("compact"));
-		else process.stdout.write(md);
+		else printMarkdown(md);
 		return 0;
 	},
 };

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { assertPositionals } from "../args.ts";
-import { printJson } from "../output.ts";
+import { printJson, printMarkdown } from "../output.ts";
 import type { AdapterCommand } from "./types.ts";
 
 export const getCommand: AdapterCommand = {
@@ -12,7 +12,7 @@ export const getCommand: AdapterCommand = {
 		assertPositionals(args, 1, 1, getCommand.usage);
 		const result = await client.call("get", { refs: args.positionals, as: args.bool("md") ? "md" : "data" });
 		if (args.bool("md") && !args.has("json")) {
-			for (const row of z.array(z.object({ md: z.string() })).parse(result)) process.stdout.write(row.md);
+			for (const row of z.array(z.object({ md: z.string() })).parse(result)) printMarkdown(row.md);
 		} else printJson(result, args.bool("compact"));
 		return 0;
 	},
