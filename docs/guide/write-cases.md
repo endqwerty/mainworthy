@@ -121,9 +121,12 @@ When you open the draft again, the page asks the server about the save.
 
 Saved commands and conflict merge attempts belong to the project they were written for.
 If that project is deleted and another uses the same key, recovery sends nothing to the new project.
-The page explains that the original project is gone or cannot be identified, and keeps your text on this device.
-Older saved attempts without a project identity also keep their text but cannot be retried here.
-Copy the text you want to keep into a new draft in the current project.
+The page explains that the original project is gone or cannot be identified, and moves your text into **Preserved text**.
+The old command is removed, so you can edit and save the current case normally.
+Older saved attempts without a project identity follow the same rule.
+You can copy text from the preserved draft or merge into your current edit, or choose **Discard preserved copy**.
+The preserved copy stays through reloads and fresh saves until you discard it.
+For a draft of a new case, find the preserved copy on the Suite.
 
 The draft status says "Draft, saved on this device" when device storage works.
 If storage is unavailable, it says "Draft, kept in this tab". Keep that tab open

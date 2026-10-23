@@ -234,12 +234,55 @@ export function CasePane({
 		if (message) setStatus(message);
 		else void answerProposal(answer, question);
 	}
-	if (!view && !draft)
+	const preserved = copies.map(({ draft: copy, key, stored: copyStored, reason }) => (
+		<details className="preserved-draft" key={key} open>
+			<summary>Preserved text</summary>
+			<p>
+				{reason === "project"
+					? "The project this draft was written for is gone or cannot be identified. Copy any text you need, or discard this copy."
+					: "This text was accepted in a window that lost ownership. Copy any text you need before discarding it."}
+			</p>
+			{!copyStored && <p>Device storage is full. Keep this tab open until you have copied this text.</p>}
+			<p>Folder: {copy.folder || "All cases"}</p>
+			<textarea
+				aria-label="Preserved draft text"
+				readOnly
+				value={printCase({ ref: copy.ref, body: copy.body, tags: draftTags(copy), covers: copy.covers })}
+			/>
+			{copy.conflict && (
+				<textarea
+					aria-label="Preserved merge text"
+					readOnly
+					value={printCase({
+						ref: copy.ref,
+						body: copy.conflict.merged,
+						tags: draftTags(copy),
+						covers: copy.covers,
+					})}
+				/>
+			)}
+			<button type="button" onClick={() => onDiscardCopy({ key, draft: copy, stored: copyStored, reason })}>
+				Discard preserved copy
+			</button>
+		</details>
+	));
+	if (!view && !draft) {
+		const empty = <EmptyState>Select a case to read its steps and evidence. Press c to start a new one.</EmptyState>;
 		return (
 			<section className="pane" id="detail">
-				<EmptyState>Select a case to read its steps and evidence. Press c to start a new one.</EmptyState>
+				{preserved.length ? (
+					<div className="pane-scroll">
+						<div className="detail-body">
+							{preserved}
+							{empty}
+						</div>
+					</div>
+				) : (
+					empty
+				)}
 			</section>
 		);
+	}
 	const body = draft?.body ?? (view ? bodyOf(view) : null);
 	if (!body) return null;
 	const version = draft?.base ?? view?.version ?? 0;
@@ -303,36 +346,7 @@ export function CasePane({
 							)}
 						</div>
 					)}
-					{copies.map(({ draft: copy, key, stored: copyStored }) => (
-						<details className="preserved-draft" key={key} open>
-							<summary>Preserved text</summary>
-							<p>
-								This text was accepted in a window that lost ownership. Copy any text you need before discarding it.
-							</p>
-							{!copyStored && <p>Device storage is full. Keep this tab open until you have copied this text.</p>}
-							<p>Folder: {copy.folder || "All cases"}</p>
-							<textarea
-								aria-label="Preserved draft text"
-								readOnly
-								value={printCase({ ref: copy.ref, body: copy.body, tags: draftTags(copy), covers: copy.covers })}
-							/>
-							{copy.conflict && (
-								<textarea
-									aria-label="Preserved merge text"
-									readOnly
-									value={printCase({
-										ref: copy.ref,
-										body: copy.conflict.merged,
-										tags: draftTags(copy),
-										covers: copy.covers,
-									})}
-								/>
-							)}
-							<button type="button" onClick={() => onDiscardCopy({ key, draft: copy, stored: copyStored })}>
-								Discard preserved copy
-							</button>
-						</details>
-					))}
+					{preserved}
 					{conflict && (
 						<ConflictCard
 							key={conflict.q}

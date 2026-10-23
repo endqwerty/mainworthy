@@ -9,6 +9,7 @@ import {
 	discardDraftCopy,
 	draftCopyPrefix,
 	forgetDraftCopy,
+	preserveDraftCopy,
 	readDraftCopies,
 	writeCopiedDraft,
 } from "../src/web/lib/draft-copies.ts";
@@ -185,6 +186,81 @@ test("typing after takeover and recording keeps the earlier losing copy until it
 	if (!copy) throw new Error("Missing preserved draft");
 	discardDraftCopy(copy.key);
 	expect(readDraftCopies({ project, id: mine.id })).toEqual([]);
+});
+
+test("a project-detached copy drops command intent and survives recording and ownership reconciliation", () => {
+	const mine = draft({
+		sent: request,
+		conflict: {
+			q: "Q-1",
+			proposal: "P-1",
+			ref: "C-1",
+			base: body,
+			mine: body,
+			current: body,
+			merged: { ...body, title: "Preserve this merge #smoke" },
+			sentMerges: [{ cmd: "merge-cmd-01", body, tags: ["smoke"], projectIdentity: "old-project" }],
+			addresses: [{ kind: "field", name: "title" }],
+			draftId: "C-1",
+		},
+	});
+	writeDraft({ project, draft: mine });
+	expect(preserveDraftCopy({ project, draft: mine })).toBe(true);
+	expect(preserveDraftCopy({ project, draft: { ...mine, cmd: "claimed-draft-02" } })).toBe(true);
+	removeDraft({ project, id: mine.id });
+	forgetDraftCopy({ project, draft: mine });
+	const [copy] = readDraftCopies({
+		project,
+		id: mine.id,
+		recorded: { ...mine, base: 2, body: mine.conflict?.merged ?? body },
+	});
+	expect(copy?.reason).toBe("project");
+	expect(copy?.draft.body).toEqual(mine.body);
+	expect(copy?.draft.conflict?.merged).toEqual(mine.conflict?.merged);
+	expect(copy?.draft.sent).toBeNull();
+	expect(copy?.draft.conflict?.sentMerges).toEqual([]);
+	const next = another({ sent: null });
+	claimCopiedDraft({ project, draft: next, takeOver: true });
+	expect(readDraftCopies({ project, id: mine.id }).filter((copy) => copy.reason === "project")).toHaveLength(1);
+	if (!copy) throw new Error("Missing project-detached copy");
+	discardDraftCopy(copy.key);
+	expect(readDraftCopies({ project, id: mine.id }).filter((copy) => copy.reason === "project")).toEqual([]);
+});
+
+test("a project-detached copy survives matching recorded text until explicit discard", () => {
+	const mine = draft({ sent: request });
+	preserveDraftCopy({ project, draft: mine });
+	expect(readDraftCopies({ project, id: mine.id, recorded: { ...mine, base: 2 } })).toHaveLength(1);
+	another({ body: mine.body });
+	expect(readDraftCopies({ project, id: mine.id })).toHaveLength(1);
+});
+
+test("detached new-case text is readable without an active capture", () => {
+	const mine = draft({ id: "draft:new-case", ref: null, base: 0, sent: request });
+	preserveDraftCopy({ project, draft: mine });
+	const [copy] = readDraftCopies({ project, id: "" });
+	expect(copy?.draft.body).toEqual(mine.body);
+	expect(copy?.draft.sent).toBeNull();
+	expect(copy?.reason).toBe("project");
+	if (!copy) throw new Error("Missing new-case copy");
+	discardDraftCopy(copy.key);
+	expect(readDraftCopies({ project, id: "" })).toEqual([]);
+});
+
+test("failed project-copy storage keeps an in-tab copy and a repeat persists that same copy", () => {
+	const mine = draft({ sent: request });
+	const set = localStorage.setItem;
+	localStorage.setItem = () => {
+		throw new DOMException("Full", "QuotaExceededError");
+	};
+	try {
+		expect(preserveDraftCopy({ project, draft: mine })).toBe(false);
+		expect(readDraftCopies({ project, id: mine.id }).map((copy) => copy.stored)).toEqual([false]);
+	} finally {
+		localStorage.setItem = set;
+	}
+	expect(preserveDraftCopy({ project, draft: mine })).toBe(true);
+	expect(readDraftCopies({ project, id: mine.id }).map((copy) => copy.stored)).toEqual([true]);
 });
 
 test("full device storage keeps the losing copy in the tab with its storage state", () => {

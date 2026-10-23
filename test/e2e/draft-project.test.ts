@@ -11,12 +11,12 @@ import { removeProject } from "../../src/server/transfer/transfer.ts";
 import ui from "../../src/web/index.html";
 import { call } from "../../src/web/lib/api.ts";
 import { Draft } from "../../src/web/lib/drafts.ts";
-import { browserAvailable, eventually, openPage, reservePort, type Server } from "./support.ts";
+import { browserAvailable, eventually, openPage, reservePort, type Server, startServer } from "./support.ts";
 
 for (const attempt of ["save", "merge"] as const)
 	for (const project of ["replacement", "replacement after retry", "unbound"] as const)
 		test.skipIf(!browserAvailable)(
-			`a lost ${attempt} reply cannot recover into a ${project} project after reload`,
+			`a refused ${attempt} keeps a discardable copy and releases its case (${project})`,
 			async () => {
 				const dataDir = await mkdtemp(join(tmpdir(), "mainworthy-draft-project-"));
 				const port = await reservePort();
@@ -100,8 +100,19 @@ for (const attempt of ["save", "merge"] as const)
 						}
 						if (project === "replacement after retry") {
 							await page.unroute(`**/${operation}`);
+							const refusal = page.waitForResponse(
+								(response) => response.url().endsWith(`/${operation}`) && response.status() === 409,
+							);
 							if (attempt === "save") await page.keyboard.press("Control+Enter");
 							else await page.getByRole("button", { name: "Resolve conflict", exact: true }).click();
+							expect(await (await refusal).json()).toMatchObject({
+								ok: false,
+								error: { details: { projectIdentity: "obsolete" } },
+							});
+							await page.locator(".preserved-draft").waitFor();
+							expect(
+								await page.evaluate(() => Object.keys(localStorage).filter((key) => key.includes(":draft:")).length),
+							).toBe(0);
 							await page
 								.locator("#stat")
 								.filter({ hasText: /obsolete project|cannot be retried here/ })
@@ -124,36 +135,57 @@ for (const attempt of ["save", "merge"] as const)
 						if (/\/(propose|decide|command)$/.test(request.url())) recovery.push(request.url());
 					});
 					await page.reload();
-					await eventually(
-						() => page.locator("#stat").textContent(),
-						(status) => recovery.length > 0 || Boolean(status?.includes("cannot be retried here")),
-					);
-					expect(recovery).toEqual([]);
-					if (attempt === "save") {
-						expect(await page.getByRole("textbox", { name: "Case title", exact: true }).inputValue()).toBe(
-							before.body.title,
-						);
-						await page.keyboard.press("Control+Enter");
-					} else {
-						expect(await page.getByRole("textbox", { name: "Merged title", exact: true }).inputValue()).toBe(
-							before.conflict?.merged.title ?? "missing",
-						);
-						await page.getByRole("button", { name: "Resolve conflict", exact: true }).click();
-					}
-					await page.locator("#stat").filter({ hasText: "cannot be retried here" }).waitFor();
+					const preserved = page.getByRole("textbox", { name: "Preserved draft text", exact: true });
+					await preserved.waitFor();
+					expect(await preserved.inputValue()).toContain(before.body.title);
+					if (attempt === "merge")
+						expect(
+							await page.getByRole("textbox", { name: "Preserved merge text", exact: true }).inputValue(),
+						).toContain(before.conflict?.merged.title ?? "missing");
+					expect(await page.locator(".preserved-draft").textContent()).toContain("gone or cannot be identified");
+					expect(await page.locator(".conflict-card").count()).toBe(0);
 					expect(recovery).toEqual([]);
 					expect(await server.api("get", { refs: ["C-1"] })).toEqual(head);
-					const after = await saved();
-					expect(after.body).toEqual(before.body);
-					expect(after.conflict?.merged).toEqual(before.conflict?.merged);
-					if (attempt === "merge") {
-						const first = before.conflict?.sentMerges[0];
-						if (!first) throw new Error("Missing saved merge attempt");
-						const { projectIdentity, ...unbound } = first;
-						expect(after.conflict?.sentMerges[0]).toEqual(
-							project === "unbound" ? unbound : { ...unbound, projectIdentity },
-						);
+					expect(
+						await page.evaluate(() => Object.keys(localStorage).filter((key) => key.includes(":draft:")).length),
+					).toBe(0);
+					const copies = await page.evaluate(() =>
+						Object.keys(localStorage)
+							.filter((key) => key.includes(":draft-copy:"))
+							.map((key) => JSON.parse(localStorage.getItem(key) ?? "null")),
+					);
+					const copy = z.array(z.object({ draft: Draft })).parse(copies)[0]?.draft;
+					expect(copy?.body).toEqual(before.body);
+					expect(copy?.conflict?.merged).toEqual(before.conflict?.merged);
+					expect(copy?.sent).toBeNull();
+					if (copy?.conflict) expect(copy.conflict.sentMerges).toEqual([]);
+					await page.reload();
+					await preserved.waitFor();
+					expect(await preserved.inputValue()).toContain(before.body.title);
+					expect(recovery).toEqual([]);
+					if (project === "unbound")
+						await page.getByRole("button", { name: "Discard preserved copy", exact: true }).click();
+					await page.unroute(`**/${operation}`);
+					await page.keyboard.press("e");
+					await page.getByRole("textbox", { name: "Case title", exact: true }).fill("Current project's fresh edit");
+					await page.keyboard.press("Escape");
+					await eventually(
+						() => server.api("get", { refs: ["C-1"] }),
+						(rows) => rows[0]?.title === "Current project's fresh edit",
+					);
+					await page
+						.locator("#stat")
+						.filter({ hasText: /Version \d+, by you/ })
+						.waitFor();
+					expect(recovery).toHaveLength(1);
+					expect(recovery[0]).toEndWith("/propose");
+					if (project !== "unbound") {
+						expect(await preserved.inputValue()).toContain(before.body.title);
+						await page.getByRole("button", { name: "Discard preserved copy", exact: true }).click();
 					}
+					await page.reload();
+					await page.getByRole("button", { name: "Current project's fresh edit", exact: true }).waitFor();
+					expect(await page.locator(".preserved-draft").count()).toBe(0);
 				} finally {
 					await view?.close();
 					await instance.stop();
@@ -163,3 +195,60 @@ for (const attempt of ["save", "merge"] as const)
 			},
 			30_000,
 		);
+
+test.skipIf(!browserAvailable)(
+	"a refused new-case draft keeps a discardable copy after releasing its capture",
+	async () => {
+		const server = await startServer();
+		const view = await openPage(server);
+		try {
+			const { page } = view;
+			await page.route("**/propose", async (route) => {
+				await route.fetch();
+				await route.abort();
+			});
+			await page.route("**/command", (route) => route.abort());
+			await page.keyboard.press("c");
+			await page.keyboard.type("Original capture");
+			await page.keyboard.press("Escape");
+			await page.locator("#stat").filter({ hasText: "kept on this device" }).waitFor();
+			const changed = await page.evaluate(() => {
+				let changed = 0;
+				for (const key of Object.keys(localStorage)) {
+					if (!key.includes(":draft:")) continue;
+					const draft = JSON.parse(localStorage.getItem(key) ?? "null");
+					if (!draft.sent) continue;
+					delete draft.sent.input.projectIdentity;
+					localStorage.setItem(key, JSON.stringify(draft));
+					changed++;
+				}
+				return changed;
+			});
+			expect(changed).toBe(1);
+			await page.reload();
+			const preserved = page.getByRole("textbox", { name: "Preserved draft text", exact: true });
+			await preserved.waitFor();
+			expect(await preserved.inputValue()).toContain("Original capture");
+			await page.reload();
+			await preserved.waitFor();
+			await page.unroute("**/propose");
+			await page.unroute("**/command");
+			await page.keyboard.press("c");
+			await page.keyboard.type("Fresh capture");
+			await page.keyboard.press("Enter");
+			await page.keyboard.type("Fresh step");
+			await page.keyboard.press("Escape");
+			await page.waitForURL("**/suite/c/2");
+			await page.goto(`${server.url}/p/scratch/suite`);
+			await preserved.waitFor();
+			expect(await preserved.inputValue()).toContain("Original capture");
+			await page.getByRole("button", { name: "Discard preserved copy", exact: true }).click();
+			expect(await page.locator(".preserved-draft").count()).toBe(0);
+			expect((await server.api("find", { in: "cases" })).items).toHaveLength(2);
+		} finally {
+			await view.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);

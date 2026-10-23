@@ -27,6 +27,7 @@ import {
 	draftCopiesChanged,
 	draftCopyPrefix,
 	forgetDraftCopy,
+	preserveDraftCopy,
 	readDraftCopies,
 	writeCopiedDraft,
 } from "../lib/draft-copies.ts";
@@ -183,28 +184,6 @@ export function SuiteScreen() {
 	selectedRef.current = selected;
 	const conflict = draft?.conflict ?? (selected ? captures.get(selected)?.conflict : undefined) ?? null;
 	const displayedDraft = draft ?? (conflict ? captures.get(conflict.draftId) : null);
-	const mayRecover = useCallback(
-		(saved: Draft): boolean => {
-			if (!projectIdentity) {
-				setStatus("The current project's identity is unavailable. Reload before saving a draft.");
-				return false;
-			}
-			if (
-				(saved.sent && saved.sent.input.projectIdentity !== projectIdentity) ||
-				saved.conflict?.sentMerges.some((sent) => sent.projectIdentity !== projectIdentity)
-			) {
-				setStatus(
-					"This saved draft cannot be retried here. The project it was written for is gone or cannot be identified. Your text is kept on this device.",
-				);
-				return false;
-			}
-			return true;
-		},
-		[projectIdentity, setStatus],
-	);
-	useEffect(() => {
-		if (displayedDraft?.sent || displayedDraft?.conflict?.sentMerges.length) mayRecover(displayedDraft);
-	}, [displayedDraft, mayRecover]);
 	const ownedElsewhere = Boolean(displayedDraft && displayedDraft.owner !== windowId);
 	const resolving = useRef(new Set<string>());
 	const uncertainMerges = useRef(new Set<string>());
@@ -494,15 +473,23 @@ export function SuiteScreen() {
 			if (!sessionCurrent(owner)) return;
 			setCopies({
 				id: copyCase,
-				copies: readDraftCopies({
-					project,
-					id: copyCase,
-					...(recordedView ? { recorded: editDraft(recordedView) } : {}),
-				}),
+				copies: [
+					...readDraftCopies({
+						project,
+						id: copyCase,
+						...(recordedView ? { recorded: editDraft(recordedView) } : {}),
+					}),
+					...(copyCase ? readDraftCopies({ project, id: "" }) : []),
+				],
 			});
 		};
 		const changed = (event: StorageEvent): void => {
-			if (event.key === null || event.key.startsWith(draftCopyPrefix({ project, id: copyCase }))) refresh();
+			if (
+				event.key === null ||
+				event.key.startsWith(draftCopyPrefix({ project, id: copyCase })) ||
+				event.key.startsWith(draftCopyPrefix({ project, id: "" }))
+			)
+				refresh();
 		};
 		refresh();
 		window.addEventListener("storage", changed);
@@ -763,6 +750,49 @@ export function SuiteScreen() {
 		},
 		[removeOwnedDraft],
 	);
+	const preserveRejectedDraft = useCallback(
+		(snapshot: Draft): void => {
+			if (!sessionCurrent(owner)) return;
+			const latest = readDraft({ project, id: snapshot.id }) ?? liveDrafts.current.get(snapshot.id);
+			if (!latest || latest.owner !== windowId || !mayWrite(latest.id)) return;
+			const command = snapshot.sent?.input.cmd ?? snapshot.cmd;
+			if (
+				latest.cmd !== snapshot.cmd &&
+				latest.sent?.input.cmd !== command &&
+				!latest.conflict?.sentMerges.some((sent) => sent.cmd === command)
+			)
+				return;
+			if (!preserveDraftCopy({ project, draft: latest })) {
+				setStatus("Device storage is full. Keep this tab open until you have copied the preserved text.");
+				return;
+			}
+			dropDraft(latest.id);
+			setStatus(
+				"This saved draft cannot be retried here. Its text is preserved separately; you can edit the case again.",
+			);
+		},
+		[project, owner, windowId, mayWrite, dropDraft, setStatus],
+	);
+	const mayRecover = useCallback(
+		(saved: Draft): boolean => {
+			if (!projectIdentity) {
+				setStatus("The current project's identity is unavailable. Reload before saving a draft.");
+				return false;
+			}
+			if (
+				(saved.sent && saved.sent.input.projectIdentity !== projectIdentity) ||
+				saved.conflict?.sentMerges.some((sent) => sent.projectIdentity !== projectIdentity)
+			) {
+				preserveRejectedDraft(saved);
+				return false;
+			}
+			return true;
+		},
+		[projectIdentity, setStatus, preserveRejectedDraft],
+	);
+	useEffect(() => {
+		if (displayedDraft?.sent || displayedDraft?.conflict?.sentMerges.length) mayRecover(displayedDraft);
+	}, [displayedDraft, mayRecover]);
 	/**
 	 * The draft of a card as it is now, while its conflict is still the question `state` was shown for. Tags and
 	 * links typed inline are out of its text and in its lists, as they were when the card's side was made.
@@ -1071,6 +1101,10 @@ export function SuiteScreen() {
 			uncertainMerges.current.delete(state.q);
 			setStatus(refusedStatus(fate.needs));
 		} catch (error) {
+			if (error instanceof ApiError && error.details.projectIdentity === "obsolete") {
+				preserveRejectedDraft(saved.draft);
+				return;
+			}
 			if (!mayWrite(state.draftId)) return;
 			if (asked) uncertainMerges.current.add(state.q);
 			if (sessionCurrent(owner))
@@ -1306,6 +1340,10 @@ export function SuiteScreen() {
 					try {
 						reply = await call("propose", request, { project, keepalive, owner });
 					} catch (error) {
+						if (error instanceof ApiError && error.details.projectIdentity === "obsolete") {
+							preserveRejectedDraft(source);
+							return;
+						}
 						if (
 							error instanceof ApiError &&
 							error.status !== null &&
@@ -2348,14 +2386,7 @@ export function SuiteScreen() {
 				copies={copies}
 				onDiscardCopy={(copy) => {
 					discardDraftCopy(copy.key);
-					setCopies({
-						id: copyCase,
-						copies: readDraftCopies({
-							project,
-							id: copyCase,
-							...(recordedView ? { recorded: editDraft(recordedView) } : {}),
-						}),
-					});
+					window.dispatchEvent(new Event(draftCopiesChanged));
 				}}
 				ownedElsewhere={ownedElsewhere}
 				ownerLive={!displayedDraft || draftOwnerIsLive(displayedDraft.owner)}

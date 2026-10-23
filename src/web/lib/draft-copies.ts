@@ -3,8 +3,8 @@ import { type DeviceSession, deviceKey, deviceSession, sessionCurrent } from "./
 import { claimDraft, Draft, draftKey, draftTags, hasTypedMerge, readDraft, writeDraft } from "./drafts.ts";
 import { draftOwner, randomId } from "./ids.ts";
 
-export type DraftCopy = { key: string; draft: Draft; stored: boolean };
-const Copy = z.object({ draft: Draft, state: z.enum(["writing", "waiting", "lost"]) });
+export type DraftCopy = { key: string; draft: Draft; stored: boolean; reason: "ownership" | "project" };
+const Copy = z.object({ draft: Draft, state: z.enum(["writing", "waiting", "lost", "detached"]) });
 type Copy = z.infer<typeof Copy>;
 type Pending = { key: string; copy: Copy; ready: boolean; owner: DeviceSession };
 const unstored = new Map<string, { copy: Copy; owner: DeviceSession }>();
@@ -38,7 +38,12 @@ function copies(scope: { project: string; id: string }): Map<string, Copy> {
 			if (!key?.startsWith(start)) continue;
 			try {
 				const parsed = Copy.safeParse(JSON.parse(localStorage.getItem(key) ?? "null"));
-				if (!parsed.success || parsed.data.draft.id !== scope.id) continue;
+				if (
+					!parsed.success ||
+					(parsed.data.draft.id !== scope.id &&
+						!(scope.id === "" && parsed.data.state === "detached" && parsed.data.draft.ref === null))
+				)
+					continue;
 				const copy = parsed.data;
 				// This window's synchronous write cannot still be running when it reads copies, including after reload.
 				if (copy.state === "writing" && copy.draft.owner === draftOwner()) {
@@ -166,7 +171,7 @@ export function claimCopiedDraft(scope: Parameters<typeof claimDraft>[0]): Draft
 	if (current && claimed.owner === draftOwner()) {
 		const kept = pending.get(shared)?.key;
 		for (const [key, copy] of copies({ project: scope.project, id: claimed.id })) {
-			if (key === kept || copy.state === "writing") continue;
+			if (key === kept || copy.state === "writing" || copy.state === "detached") continue;
 			if (matches(copy.draft, current)) discardDraftCopy(key);
 			else if (copy.draft.owner !== current.owner && copy.state !== "lost") store(key, { ...copy, state: "lost" });
 		}
@@ -182,23 +187,46 @@ export function readDraftCopies(scope: { project: string; id: string; recorded?:
 	return [...found].flatMap(([key, copy]) => {
 		if (copy.state === "writing" || !copy.draft.dirty) return [];
 		if (
-			(current && current.owner !== copy.draft.owner && matches(copy.draft, current)) ||
-			(scope.recorded &&
-				scope.recorded.base > copy.draft.base &&
-				content(copy.draft) === content(scope.recorded) &&
-				(!copy.draft.conflict ||
-					!hasTypedMerge(copy.draft.conflict) ||
-					JSON.stringify(copy.draft.conflict.merged) === JSON.stringify(scope.recorded.body)))
+			copy.state !== "detached" &&
+			((current && current.owner !== copy.draft.owner && matches(copy.draft, current)) ||
+				(scope.recorded &&
+					scope.recorded.base > copy.draft.base &&
+					content(copy.draft) === content(scope.recorded) &&
+					(!copy.draft.conflict ||
+						!hasTypedMerge(copy.draft.conflict) ||
+						JSON.stringify(copy.draft.conflict.merged) === JSON.stringify(scope.recorded.body))))
 		) {
 			discardDraftCopy(key);
 			return [];
 		}
-		if (copy.state !== "lost") {
+		if (copy.state !== "lost" && copy.state !== "detached") {
 			if (!current || current.owner === copy.draft.owner) return [];
 			store(key, { ...copy, state: "lost" });
 		}
-		return [{ key, draft: copy.draft, stored: !unstored.has(key) }];
+		return [
+			{
+				key,
+				draft: copy.draft,
+				stored: !unstored.has(key),
+				reason: copy.state === "detached" ? "project" : "ownership",
+			},
+		];
 	});
+}
+export function preserveDraftCopy({ project, draft }: { project: string; draft: Draft }): boolean {
+	const command = draft.sent?.input.cmd ?? draft.conflict?.sentMerges[0]?.cmd ?? draft.cmd;
+	const key = `${draftCopyPrefix({ project, id: draft.ref === null ? "" : draft.id })}detached:${command}`;
+	const stored = store(key, {
+		state: "detached",
+		draft: {
+			...draft,
+			sent: null,
+			conflict: draft.conflict ? { ...draft.conflict, sentMerges: [] } : undefined,
+			submission: { kind: "none" },
+		},
+	});
+	notify();
+	return stored;
 }
 export function forgetDraftCopy({ project, draft }: { project: string; draft: Draft }): void {
 	const shared = draftKey({ project, id: draft.id });
