@@ -84,21 +84,30 @@ runs one:
 `util-linux` and their dependencies together. Exact package versions from a live mirror can disappear after a
 security update, so they would not keep an old commit buildable.
 
-To update a base image, inspect its tag:
+To resolve a new image digest, inspect its tag:
 
 ```
 docker buildx imagetools inspect oven/bun:1.4.3
 docker buildx imagetools inspect debian:bookworm-slim
+docker buildx imagetools inspect tailscale/tailscale:stable
 ```
 
-Copy the top-level `Digest` into the matching `FROM image:tag@sha256:...` line. Use the index digest, not a
-platform's manifest digest, so amd64 and arm64 remain available. Keep the tag beside the digest for readability.
+For a base image, copy the top-level `Digest` into the matching `FROM image:tag@sha256:...` line. Use the index
+digest, not a platform's manifest digest, so amd64 and arm64 remain available. Keep the tag beside the digest
+for readability.
 Changing the Bun version also requires updating its licence notices and CI version (`licences/README.md`).
 
+The production server uses `compose.coolify.yaml`, which pins the nginx and Tailscale images too. To move the
+Tailscale pin, inspect `tailscale/tailscale:stable` with the command above and replace the digest in its `image:`
+entry, keeping `stable` beside it. Editing the pin changes no running container. The next production deploy
+pulls that exact digest.
+
 For a Debian security rebuild, update the Debian digest and all three snapshot URLs to a fixed UTC date that
-includes the required fixes. The snapshot sources replace the base's live sources. They use HTTP because the
-slim base has no CA certificates; apt still verifies Debian's archive signatures. `check-valid-until=no` permits
-old signed snapshot metadata after its expiry date, without disabling signature verification.
+includes the required fixes. The snapshot sources replace the base's live sources and use HTTPS. The slim
+runtime base has no CA bundle, so the Dockerfile copies `/etc/ssl/certs/ca-certificates.crt` from the
+digest-pinned Bun build stage before apt runs. `check-valid-until=no` permits old signed snapshot metadata
+after its expiry date; apt still verifies Debian's archive signatures. HTTPS prevents a network-only attacker
+from replacing that metadata with an older signed version without also compromising TLS authentication.
 
 Submit pin updates as ordinary reviewed changes. CI's `image` job builds and smoke-tests the image before it
 can pass the deployment gate.

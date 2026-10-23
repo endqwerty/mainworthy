@@ -111,7 +111,7 @@ services:
     restart: unless-stopped
 
   tailscale:
-    image: tailscale/tailscale:stable
+    image: tailscale/tailscale:stable@sha256:b11583ad2e93e4671128538c88cf11f460444a5d7e449311dd1933a400ab849d
     # No `hostname:` here: the sidecar would then resolve the service name `mainworthy` to itself, not to the app.
     # TS_HOSTNAME names the tailnet node.
     environment:
