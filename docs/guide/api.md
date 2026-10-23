@@ -90,9 +90,10 @@ This refusal leaves the session signed in and writes no command. When changing
 another person's details, prove the admin's own credential. Bearer tokens do not
 carry session proof. A first credential and invitation or recovery acceptance
 need no prior proof. Replacing a password retains its current-password check.
-Creating a token through `credential` or `admin`, and issuing a recovery
-invitation from a browser also need the caller's recent proof. Bearer-token and
-local issuance retain their existing recovery authority.
+Creating a token through `credential` or `admin`, issuing any invitation,
+setting a direct or team grant containing `admin`, and adding a member to an
+admin team from a browser also need the caller's recent proof. These operations remain
+available to authorized bearer-token and local callers.
 
 A body holds one of these shapes and no other fields. `GET /api/session` returns
 who is signed in, their numeric actor id (`actorId`), the current session id
@@ -1111,7 +1112,7 @@ Export a project's retained decisions, answers, policy changes and case versions
 
 ### admin
 
-Projects, actors, teams, grants and tokens. There are no seats: an actor is free, and a token carries what its actor may do. Creating a token from a browser requires recent credential proof.
+Projects, actors, teams, grants and tokens. There are no seats: an actor is free, and a token carries what its actor may do. Creating tokens or granting admin from a browser requires recent credential proof.
 
 |  |  |
 | --- | --- |
@@ -1247,7 +1248,7 @@ Your password, passkeys, authenticator, recovery email and CLI tokens: list, add
 
 ### invitation
 
-Invite a person with a link: make one, list them, revoke one. Optionally send it by mail. The link is shown once. Issuing a recovery link from a browser needs the caller's recent credential proof; token and local recovery authority remain.
+Invite a person with a link: make one, list them, revoke one. Optionally send it by mail. The link is shown once. Issuing any invitation from a browser needs the caller's recent credential proof; token and local authority remain.
 
 |  |  |
 | --- | --- |

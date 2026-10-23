@@ -138,6 +138,8 @@ There is no instance setting to disable personal tokens. An admin who is a perso
 
 ## Teams
 
+A browser setting a personal or team grant that includes `admin`, or adding someone to a team holding `admin` on any project, requires recent proof of the caller's own credential. Settings asks inline for team changes. Bearer-token and local CLI grant and membership changes retain their existing authority. Non-admin grants and removal operations keep their existing rules.
+
 A team is a named set of grants. A person's effective permissions are their own grants plus the grants of every team they belong to. Grants on one project and on every project add up. Removing a person from one team takes away that team's contribution immediately, including requests waiting to run. A personal grant or another team's grant still applies.
 
 To create a team and assign its permissions, open Settings, People, and follow these steps:
@@ -306,6 +308,8 @@ Manage invitations and sign-in methods in Settings. The sections below also list
 
 ### Invite a person
 
+Making any invitation from a browser requires recent proof of your own credential, even for a read-only invite. Settings prompts inline and retries after proof. Bearer-token and local CLI invitations keep their existing authority.
+
 In Settings, open People. This section is visible to a person who holds `admin` on every project. To invite a person, follow these steps:
 
 1. Type the person's name. <kbd>n</kbd> puts the caret in the field.
@@ -392,7 +396,7 @@ for a recovery link to establish a password or passkey first. The last usable
 way to sign in stays even after proof. Removing a credential that this session
 rests on ends the session.
 
-Making a recovery link from a browser also asks for the admin's recent proof.
+Making any invitation or recovery link from a browser asks for the admin's recent proof.
 If you lost every credential, the operator can still issue a link with their
 owner token or the local CLI. Accepting the link needs no prior proof.
 

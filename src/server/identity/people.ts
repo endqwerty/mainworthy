@@ -901,8 +901,7 @@ export function createInvitation(
 	app: App,
 	input: { actor: number; by: number; purpose: InvitationPurpose; lastsMs: number; context: string | null },
 ): { id: number; code: string; link: string; expiresAt: number } {
-	if (input.purpose === "recover" && input.context !== null && input.context !== CONTEXT.local)
-		requireRecentProof(app, { actor: input.by, context: input.context });
+	if (input.context !== null) requireRecentProof(app, { actor: input.by, context: input.context });
 	const at = app.now();
 	revokeInvitationsOf(app.db, input.actor, at);
 	ensureUserHandle(app.db, input.actor, at);

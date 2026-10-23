@@ -36,7 +36,8 @@ Removing the last usable way to sign in remains refused. Removing the credential
 just proved is allowed when another usable way remains; existing session-ending
 rules still apply, including ending this session if it rests on that credential.
 
-A browser issuing a recovery link also needs the admin's recent proof. Otherwise
+Every browser-issued invitation, for joining or recovery, needs the admin's
+recent proof. Otherwise
 an old admin session could issue a link and accept it under the recovery
 exception. Bearer-token and local issuance retain the operator's recovery
 authority, including through the CLI. Agent tokens retain their existing
@@ -110,3 +111,19 @@ Principles: Model the Domain (one session timestamp); Boundary Discipline (secre
 stay outside the command ledger); Foundational Thinking (recheck shared state at
 commit); Exhaust the Design Space (session state instead of separate grants);
 Test Behavior, Not Implementation (HTTP refusals and browser retry).
+
+## Administrative authority
+
+Browser invitations require proof regardless of requested grant: omitted human
+grants include admin, and a non-admin invitation could be elevated later. A
+browser setting a direct or team grant that contains admin also proves its own
+credential. Adding a member to a team holding admin on any project requires the
+same proof, with the team's current grants read inside the writer. Both orders
+of team grant and membership changes are covered. Bearer-token and local
+operators retain their existing authority for these operations.
+
+Other identity creation is through guarded token/invitation writers; bootstrap
+actor creation is private. Empty team creation and non-admin grants do not
+create admin authority. Grant/membership removal, revocation and forgetting only
+remove authority. Archive import discards credentials, tokens and sessions and
+requires operator reconnection; it does not hand the browser a new credential.

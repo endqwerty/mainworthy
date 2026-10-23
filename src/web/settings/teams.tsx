@@ -7,9 +7,11 @@ import { randomId } from "../lib/ids.ts";
 import { useApp } from "../ui/context.tsx";
 import { SectionHeading, Select } from "../ui/index.tsx";
 import { saidBy, saidOfWrite, useList } from "./list.ts";
+import { useRecentProof } from "./recent-proof.tsx";
 
 export function Teams({ people, changed }: { people: readonly string[]; changed: () => Promise<unknown> }) {
 	const { session, project } = useApp();
+	const proof = useRecentProof();
 	const teams = useList("teams", async ({ signal }) =>
 		TeamRow.array().parse(await call("admin", { do: "team.list" }, { project, signal })),
 	);
@@ -28,7 +30,7 @@ export function Teams({ people, changed }: { people: readonly string[]; changed:
 		setBusy(true);
 		setMessage("");
 		try {
-			TeamChanged.parse(await call("admin", input, { project }));
+			TeamChanged.parse(await proof.run(() => call("admin", input, { project })));
 			setMessage("Team updated.");
 			if (input.do === "team.create") {
 				setName("");
@@ -52,6 +54,7 @@ export function Teams({ people, changed }: { people: readonly string[]; changed:
 	return (
 		<section aria-label="Teams">
 			<SectionHeading>Teams</SectionHeading>
+			{proof.prompt}
 			<p className="dim">
 				A person's own grants and their teams' grants add up. Removing a membership takes away that team's grants at
 				once. Teams grant permissions only. Assign named roles on each person's own grant. Another admin changes your

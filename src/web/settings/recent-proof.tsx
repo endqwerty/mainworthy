@@ -112,10 +112,7 @@ export function useRecentProof() {
 				</p>
 			) : (
 				<>
-					<p>
-						Prove your own credential to continue. This session can change sign-in details and create tokens for ten
-						minutes.
-					</p>
+					<p>Prove your own credential to continue. This proof lasts ten minutes in this session.</p>
 					<div className="settings-form">
 						<label>
 							Password
