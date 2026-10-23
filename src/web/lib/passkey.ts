@@ -9,6 +9,12 @@
 // reads without parsing CBOR (`getPublicKey()`, `getAuthenticatorData()`, `getPublicKeyAlgorithm()`). A browser
 // that lacks them is told so in a sentence.
 import { z } from "zod";
+import {
+	flag as schemaFlag,
+	number as schemaNumber,
+	text as schemaText,
+	texts as schemaTexts,
+} from "../../core/schema.ts";
 
 /** Bytes as base64url with no padding: what the server reads for every byte string of a passkey. */
 export function toBase64Url(bytes: ArrayBuffer | Uint8Array): string {
@@ -32,25 +38,25 @@ export function fromBase64Url(text: string): Uint8Array<ArrayBuffer> {
 	return bytes;
 }
 
-const Encoded = z.string().regex(/^[A-Za-z0-9_-]*$/);
+const Encoded = schemaText.regex(/^[A-Za-z0-9_-]*$/);
 const Descriptor = z.object({
 	type: z.literal("public-key"),
 	id: Encoded,
-	transports: z.array(z.string()).default([]),
+	transports: schemaTexts.default([]),
 });
 const Verification = z.enum(["required", "preferred", "discouraged"]);
 
 /** What the server answers for a new passkey: `PublicKeyCredentialCreationOptionsJSON`, as it writes it. */
 export const CreationOptions = z.object({
-	rp: z.object({ id: z.string(), name: z.string() }),
-	user: z.object({ id: Encoded, name: z.string(), displayName: z.string() }),
+	rp: z.object({ id: schemaText, name: schemaText }),
+	user: z.object({ id: Encoded, name: schemaText, displayName: schemaText }),
 	challenge: Encoded,
-	pubKeyCredParams: z.array(z.object({ type: z.literal("public-key"), alg: z.number() })),
-	timeout: z.number(),
+	pubKeyCredParams: z.array(z.object({ type: z.literal("public-key"), alg: schemaNumber })),
+	timeout: schemaNumber,
 	attestation: z.enum(["none", "indirect", "direct", "enterprise"]),
 	authenticatorSelection: z.object({
 		residentKey: Verification,
-		requireResidentKey: z.boolean(),
+		requireResidentKey: schemaFlag,
 		userVerification: Verification,
 	}),
 	excludeCredentials: z.array(Descriptor).default([]),
@@ -59,9 +65,9 @@ export type CreationOptions = z.infer<typeof CreationOptions>;
 
 /** What the server answers for a sign-in: `PublicKeyCredentialRequestOptionsJSON`, as it writes it. */
 export const RequestOptions = z.object({
-	rpId: z.string(),
+	rpId: schemaText,
 	challenge: Encoded,
-	timeout: z.number(),
+	timeout: schemaNumber,
 	userVerification: Verification,
 	allowCredentials: z.array(Descriptor).default([]),
 });

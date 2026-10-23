@@ -9,6 +9,17 @@ import type { QuestionItem } from "../../core/ops.ts";
 import { parseOutline } from "../../core/outline.ts";
 import { QuarantineEdit } from "../../core/proposals.ts";
 import { ResultLocation as LocationSchema, ResultTrail as TrailSchema } from "../../core/results.ts";
+import {
+	counts as schemaCounts,
+	flag as schemaFlag,
+	nullableNumber as schemaNullableNumber,
+	nullableText as schemaNullableText,
+	number as schemaNumber,
+	optionalText as schemaOptionalText,
+	optionalTexts as schemaOptionalTexts,
+	text as schemaText,
+	texts as schemaTexts,
+} from "../../core/schema.ts";
 import { webUrl } from "../changes/results.tsx";
 import { call } from "../lib/api.ts";
 import { queryKey, useQueryOp } from "../lib/data.ts";
@@ -36,100 +47,100 @@ export function assertionComparison(message: string): { expected: string; observ
 	return unequal?.[1] && unequal[2] ? { expected: unequal[2].trim(), observed: unequal[1].trim() } : null;
 }
 
-const Test = z.object({ t: z.string(), name: z.string(), case: z.string().nullable().optional() });
-export const MapEvidence = z.object({ file: z.string(), tests: z.array(Test), count: z.number() });
+const Test = z.object({ t: schemaText, name: schemaText, case: schemaNullableText.optional() });
+export const MapEvidence = z.object({ file: schemaText, tests: z.array(Test), count: schemaNumber });
 export const FailureEvidence = z.object({
 	location: LocationSchema.nullish(),
-	message: z.string().nullable(),
-	sample: z.number().nullable().optional(),
+	message: schemaNullableText,
+	sample: schemaNullableNumber.optional(),
 	tests: z.array(Test.extend({ sameCode: SameCodeEvidence.optional() })),
-	count: z.number(),
-	target: z.string(),
-	branch: z.string().nullable(),
-	hints: z.array(z.string()),
-	scope: z.string(),
+	count: schemaNumber,
+	target: schemaText,
+	branch: schemaNullableText,
+	hints: schemaTexts,
+	scope: schemaText,
 });
 const Suggestion = z.union([
-	z.object({ case: z.object({ title: z.string(), folder: z.string().optional(), steps: z.array(z.string()) }) }),
-	z.object({ step: z.string().optional(), action: z.string().optional(), expected: z.string().optional() }),
+	z.object({ case: z.object({ title: schemaText, folder: schemaOptionalText, steps: schemaTexts }) }),
+	z.object({ step: schemaOptionalText, action: schemaOptionalText, expected: schemaOptionalText }),
 ]);
 export const FindingEvidence = z.object({
-	on: z.string(),
-	case: z.string().nullable(),
-	category: z.string(),
-	note: z.string(),
-	finder: z.string(),
-	step: z.string().nullable(),
-	repro: z.string().nullable(),
+	on: schemaText,
+	case: schemaNullableText,
+	category: schemaText,
+	note: schemaText,
+	finder: schemaText,
+	step: schemaNullableText,
+	repro: schemaNullableText,
 	suggest: Suggestion.nullable(),
 });
-const AdoptEvidence = z.object({ proposal: z.string(), author: z.string(), reason: z.string().nullable() });
+const AdoptEvidence = z.object({ proposal: schemaText, author: schemaText, reason: schemaNullableText });
 const ProposalEdit = z.discriminatedUnion("op", [
 	QuarantineEdit,
 	z.object({
 		op: z.literal("create"),
 		body: CaseBody,
-		folder: z.string(),
-		tags: z.array(z.string()),
-		covers: z.array(z.string()),
-		after: z.string().nullable(),
+		folder: schemaText,
+		tags: schemaTexts,
+		covers: schemaTexts,
+		after: schemaNullableText,
 	}),
 	z.object({
 		op: z.literal("edit"),
-		case: z.string().nullable(),
-		base: z.number(),
-		head: z.number(),
+		case: schemaNullableText,
+		base: schemaNumber,
+		head: schemaNumber,
 		body: CaseBody,
 		current: CaseBody.nullable(),
 		mine: CaseBody,
 		conflicts: z.array(z.object({ address: ConflictAddress }).passthrough()),
-		refused: z.string().nullable(),
+		refused: schemaNullableText,
 	}),
 	z.object({
 		op: z.literal("restore"),
-		case: z.string().nullable(),
-		to: z.number(),
+		case: schemaNullableText,
+		to: schemaNumber,
 		body: CaseBody,
 		current: CaseBody.nullable(),
 	}),
 	z.object({
 		op: z.literal("policy"),
-		preset: z.string(),
-		clauses: z.number(),
+		preset: schemaText,
+		clauses: schemaNumber,
 		policy: Policy,
 		inForce: Policy,
-		stale: z.boolean(),
+		stale: schemaFlag,
 	}),
 	z.object({
 		op: z.literal("place"),
-		cases: z.array(z.string().nullable()),
-		folder: z.string().nullable(),
+		cases: z.array(schemaNullableText),
+		folder: schemaNullableText,
 		tags: z
 			.object({
-				set: z.array(z.string()).nullish(),
-				add: z.array(z.string()).optional(),
-				remove: z.array(z.string()).optional(),
+				set: schemaTexts.nullish(),
+				add: schemaOptionalTexts,
+				remove: schemaOptionalTexts,
 			})
 			.nullable(),
-		after: z.string().optional(),
+		after: schemaOptionalText,
 	}),
-	z.object({ op: z.literal("state"), cases: z.array(z.string().nullable()), to: z.string() }),
+	z.object({ op: z.literal("state"), cases: z.array(schemaNullableText), to: schemaText }),
 	z.object({
 		op: z.literal("folder"),
-		folder: z.string().nullable(),
-		name: z.string().nullable(),
-		parent: z.string().optional(),
-		archive: z.boolean(),
+		folder: schemaNullableText,
+		name: schemaNullableText,
+		parent: schemaOptionalText,
+		archive: schemaFlag,
 	}),
-	z.object({ op: z.literal("cover"), case: z.string().nullable(), requirement: z.string(), on: z.boolean() }),
+	z.object({ op: z.literal("cover"), case: schemaNullableText, requirement: schemaText, on: schemaFlag }),
 ]);
 const Proposal = z.object({
-	ref: z.string(),
-	author: z.string(),
-	kind: z.string(),
-	reason: z.string().nullable(),
-	count: z.number(),
-	cursor: z.string().nullable(),
+	ref: schemaText,
+	author: schemaText,
+	kind: schemaText,
+	reason: schemaNullableText,
+	count: schemaNumber,
+	cursor: schemaNullableText,
 	edits: z.array(ProposalEdit),
 });
 
@@ -149,9 +160,9 @@ function tagChange(tags: {
 		.join(", ");
 }
 const Document = CaseBody.extend({
-	fields: z.record(z.string(), z.string()).default({}),
-	ref: z.string(),
-	version: z.number(),
+	fields: z.record(schemaText, schemaText).default({}),
+	ref: schemaText,
+	version: schemaNumber,
 });
 
 export function RefLink({ refValue }: { refValue: string }) {
@@ -416,10 +427,10 @@ function FindingSuggestion({ evidence, q }: { evidence: z.infer<typeof FindingEv
 }
 
 const SignoffEvidence = z.object({
-	run: z.string(),
-	name: z.string(),
-	verdict: z.string(),
-	tally: z.record(z.string(), z.number()),
+	run: schemaText,
+	name: schemaText,
+	verdict: schemaText,
+	tally: schemaCounts,
 });
 export function evidenceMessage(question: QuestionItem): string | null {
 	const parsed =
@@ -610,7 +621,7 @@ export function QuestionEvidence({ question, full }: { question: QuestionItem; f
 		}
 		case "signoff": {
 			const parsed = z
-				.object({ run: z.string(), name: z.string(), verdict: z.string(), tally: z.record(z.string(), z.number()) })
+				.object({ run: schemaText, name: schemaText, verdict: schemaText, tally: schemaCounts })
 				.safeParse(question.evidence);
 			return parsed.success ? (
 				<>

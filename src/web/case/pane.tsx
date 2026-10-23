@@ -12,6 +12,12 @@ import {
 	METHOD_LABELS,
 } from "../../core/model.ts";
 import type { QuestionItem } from "../../core/ops.ts";
+import {
+	nullableNumber as schemaNullableNumber,
+	nullableText as schemaNullableText,
+	number as schemaNumber,
+	text as schemaText,
+} from "../../core/schema.ts";
 import { call } from "../lib/api.ts";
 import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
 import { deviceSession, sessionCurrent } from "../lib/device.ts";
@@ -31,42 +37,42 @@ import { BodyEditor, conflictEditorStatus, type DraftChange, draftEndedStatus, o
 import { FragmentUsers } from "./fragments.tsx";
 
 export type ConflictState = DraftConflict;
-const EntryBase = z.object({ seq: z.number(), at: z.number(), by: z.string() });
+const EntryBase = z.object({ seq: schemaNumber, at: schemaNumber, by: schemaText });
 const Entry = z.discriminatedUnion("t", [
 	EntryBase.extend({
 		t: z.literal("version"),
-		version: z.number(),
-		kind: z.string(),
-		reason: z.string().nullable(),
-		summary: z.string(),
+		version: schemaNumber,
+		kind: schemaText,
+		reason: schemaNullableText,
+		summary: schemaText,
 	}),
-	EntryBase.extend({ t: z.literal("placement"), kind: z.string(), what: z.string() }),
+	EntryBase.extend({ t: z.literal("placement"), kind: schemaText, what: schemaText }),
 	EntryBase.extend({
 		t: z.literal("result"),
-		model: z.string().nullable(),
-		id: z.number(),
-		outcome: z.string(),
-		method: z.string(),
-		basis: z.string(),
-		version: z.number().nullable(),
-		name: z.string().nullable(),
-		note: z.string().nullable(),
-		message: z.string().nullable(),
+		model: schemaNullableText,
+		id: schemaNumber,
+		outcome: schemaText,
+		method: schemaText,
+		basis: schemaText,
+		version: schemaNullableNumber,
+		name: schemaNullableText,
+		note: schemaNullableText,
+		message: schemaNullableText,
 	}),
 	EntryBase.extend({
 		t: z.literal("finding"),
-		kind: z.string(),
-		on: z.string(),
-		category: z.string(),
-		note: z.string(),
-		lens: z.string(),
+		kind: schemaText,
+		on: schemaText,
+		category: schemaText,
+		note: schemaText,
+		lens: schemaText,
 	}),
 	EntryBase.extend({
 		t: z.literal("review"),
-		kind: z.string(),
-		lens: z.string(),
-		version: z.number(),
-		about: z.string().nullable(),
+		kind: schemaText,
+		lens: schemaText,
+		version: schemaNumber,
+		about: schemaNullableText,
 	}),
 ]);
 type Entry = z.infer<typeof Entry>;

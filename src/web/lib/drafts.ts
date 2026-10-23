@@ -1,23 +1,31 @@
 import { z } from "zod";
 import { CaseBody, CaseKind, ConflictAddress, FragmentStep, InlineStep, StepId } from "../../core/model.ts";
 import { ProposeInput } from "../../core/proposals.ts";
+import {
+	flag as schemaFlag,
+	nullableText as schemaNullableText,
+	number as schemaNumber,
+	optionalTexts as schemaOptionalTexts,
+	text as schemaText,
+	texts as schemaTexts,
+} from "../../core/schema.ts";
 import { deviceKey, deviceSession, sessionCurrent } from "./device.ts";
 import { draftOwnedElsewhere, draftOwner, randomId } from "./ids.ts";
 
 export const DraftBody = CaseBody.extend({
 	steps: z.array(
 		z.union([
-			InlineStep.extend({ action: z.string(), expected: z.string().nullable(), use: z.never().optional() }),
+			InlineStep.extend({ action: schemaText, expected: schemaNullableText, use: z.never().optional() }),
 			FragmentStep,
 		]),
 	),
 });
-export const TagChanges = z.object({ add: z.array(z.string()), remove: z.array(z.string()) });
+export const TagChanges = z.object({ add: schemaTexts, remove: schemaTexts });
 export type TagChanges = z.infer<typeof TagChanges>;
 export const DraftConflict = z.object({
-	q: z.string(),
-	proposal: z.string(),
-	ref: z.string(),
+	q: schemaText,
+	proposal: schemaText,
+	ref: schemaText,
 	base: CaseBody,
 	mine: CaseBody,
 	current: CaseBody,
@@ -30,15 +38,15 @@ export const DraftConflict = z.object({
 	sentMerges: z
 		.array(
 			z.object({
-				cmd: z.string(),
+				cmd: schemaText,
 				body: CaseBody,
-				tags: z.array(z.string()).optional(),
-				covers: z.array(z.string()).optional(),
+				tags: schemaOptionalTexts,
+				covers: schemaOptionalTexts,
 			}),
 		)
 		.default([]),
 	addresses: z.array(ConflictAddress),
-	draftId: z.string(),
+	draftId: schemaText,
 	metadata: z.object({ tagChanges: TagChanges, covers: TagChanges }).optional(),
 });
 export type DraftConflict = z.infer<typeof DraftConflict>;
@@ -60,40 +68,40 @@ export function hasTypedMerge(state: DraftConflict): boolean {
 
 export const Draft = z
 	.object({
-		id: z.string(),
-		ref: z.string().nullable(),
+		id: schemaText,
+		ref: schemaNullableText,
 		kind: CaseKind.optional(),
-		base: z.number(),
+		base: schemaNumber,
 		body: DraftBody,
 		original: CaseBody,
 		conflict: DraftConflict.optional(),
-		tags: z.array(z.string()).optional(),
+		tags: schemaOptionalTexts,
 		tagChanges: TagChanges.optional(),
-		covers: z.array(z.string()),
-		originalTags: z.array(z.string()).optional(),
-		originalCovers: z.array(z.string()).optional(),
-		owner: z.string().default(""),
+		covers: schemaTexts,
+		originalTags: schemaOptionalTexts,
+		originalCovers: schemaOptionalTexts,
+		owner: schemaText.default(""),
 		sent: z
 			.object({
 				input: ProposeInput,
 				body: CaseBody,
-				tags: z.array(z.string()),
-				covers: z.array(z.string()),
+				tags: schemaTexts,
+				covers: schemaTexts,
 				tagChanges: TagChanges.optional(),
 			})
 			.nullable()
 			.default(null),
-		placement: z.object({ tags: z.array(z.string()).optional() }).optional(),
-		folder: z.string(),
-		after: z.string().nullable(),
-		caret: z.object({ field: z.string(), start: z.number(), end: z.number() }),
-		dirty: z.boolean(),
-		at: z.number(),
-		cmd: z.string(),
+		placement: z.object({ tags: schemaOptionalTexts }).optional(),
+		folder: schemaText,
+		after: schemaNullableText,
+		caret: z.object({ field: schemaText, start: schemaNumber, end: schemaNumber }),
+		dirty: schemaFlag,
+		at: schemaNumber,
+		cmd: schemaText,
 		submission: z
 			.discriminatedUnion("kind", [
 				z.object({ kind: z.literal("none") }),
-				z.object({ kind: z.literal("waiting"), question: z.string(), fingerprint: z.string() }),
+				z.object({ kind: z.literal("waiting"), question: schemaText, fingerprint: schemaText }),
 			])
 			.default({ kind: "none" }),
 	})

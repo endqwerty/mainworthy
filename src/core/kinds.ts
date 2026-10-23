@@ -4,6 +4,13 @@
 import { z } from "zod";
 import { FlakyDetectionSettings } from "./flaky.ts";
 import { CaseBody, cleanPath, cleanTag, EDIT_MAX, FieldDefinitions, REQUIREMENT_KEY, TAG } from "./model.ts";
+import {
+	flag as schemaFlag,
+	optionalText as schemaOptionalText,
+	text as schemaText,
+	unknownValue as schemaUnknownValue,
+	whole as schemaWhole,
+} from "./schema.ts";
 
 export const Kind = z.enum(["adopt", "map", "failure", "finding", "signoff"]);
 export type Kind = z.infer<typeof Kind>;
@@ -38,7 +45,7 @@ export type ActorKind = z.infer<typeof ActorKind>;
 export const Capability = z.enum(["read", "record", "produce", "answer", "plan", "admin"]);
 export type Capability = z.infer<typeof Capability>;
 
-export const Role = z.string().regex(/^[a-z][a-z0-9-]{0,31}$/);
+export const Role = schemaText.regex(/^[a-z][a-z0-9-]{0,31}$/);
 export type Role = z.infer<typeof Role>;
 
 /** What holding one capability also gives. Nothing else implies anything. */
@@ -117,7 +124,7 @@ export const AdoptAnswer = z.discriminatedUnion("is", [
 		body: CaseBody,
 		/** Inline additions extracted from the merged body; the conflict fixes their case. */
 		tags: z
-			.array(z.string().transform(cleanTag).pipe(z.string().regex(TAG)))
+			.array(schemaText.transform(cleanTag).pipe(schemaText.regex(TAG)))
 			.max(EDIT_MAX)
 			.optional(),
 		covers: z
@@ -134,9 +141,9 @@ export const AdoptAnswer = z.discriminatedUnion("is", [
 
 export const MapAnswer = z.discriminatedUnion("is", [
 	/** Pairs of test ref and case ref: `[["T-12", "C-3"]]`. */
-	z.object({ is: z.literal("link"), pairs: z.array(z.tuple([z.string(), z.string()])).min(1) }),
+	z.object({ is: z.literal("link"), pairs: z.array(z.tuple([schemaText, schemaText])).min(1) }),
 	/** One new case per unlinked test, titled after the test and linked to it. */
-	z.object({ is: z.literal("create"), folder: z.string().optional() }),
+	z.object({ is: z.literal("create"), folder: schemaOptionalText }),
 	/** Keep the tests as tests without cases; they still have history and a place in the gate. */
 	z.object({ is: z.literal("track") }),
 	z.object({ is: z.literal("unlink") }),
@@ -144,7 +151,7 @@ export const MapAnswer = z.discriminatedUnion("is", [
 
 export const FailureAnswer = z.discriminatedUnion("is", [
 	// attributed: the target needs a fix, so its gate is `failed`
-	z.object({ is: z.literal("defect"), ref: z.string().max(200).optional() }),
+	z.object({ is: z.literal("defect"), ref: schemaText.max(200).optional() }),
 	z.object({ is: z.literal("test") }),
 	z.object({ is: z.literal("expected") }),
 	// excused: recorded, not blocking
@@ -162,9 +169,9 @@ export type FailureAnswer = z.infer<typeof FailureAnswer>;
 
 export const FindingAnswer = z.discriminatedUnion("is", [
 	/** `apply`: the finding's suggestion becomes a sealed proposal authored by the finder. */
-	z.object({ is: z.literal("accept"), apply: z.boolean().default(false) }),
+	z.object({ is: z.literal("accept"), apply: schemaFlag.default(false) }),
 	z.object({ is: z.literal("reject") }),
-	z.object({ is: z.literal("duplicate"), of: z.string().optional() }),
+	z.object({ is: z.literal("duplicate"), of: schemaOptionalText }),
 	z.object({ is: z.literal("defer") }),
 ]);
 
@@ -211,7 +218,7 @@ export const ANSWER_KEYS = {
  * failed on (decision 0141): that change, and how it stands now. The change fixed the failure itself, so no issue
  * need track it.
  */
-export const FixedIn = z.object({ change: z.string(), state: z.enum(["open", "merged", "closed"]) });
+export const FixedIn = z.object({ change: schemaText, state: z.enum(["open", "merged", "closed"]) });
 export type FixedIn = z.infer<typeof FixedIn>;
 
 /**
@@ -338,7 +345,7 @@ export const Ask = z.object({
 	/** What an agent's answer is worth: counted, shown as advice, or refused. */
 	agents: z.enum(["answer", "advise", "none"]),
 	/** When true, an actor who produced the evidence in question may not settle it. */
-	notProducer: z.boolean(),
+	notProducer: schemaFlag,
 	reason: z.enum(["optional", "required"]),
 });
 export type Ask = z.infer<typeof Ask>;
@@ -366,7 +373,7 @@ export const Predicate = z.union([
 		"unlinked:track",
 		"unlinked:create",
 	]),
-	z.string().regex(/^(?:answer:[a-z]+|(?:folder|tag):.*)$/),
+	schemaText.regex(/^(?:answer:[a-z]+|(?:folder|tag):.*)$/),
 ]);
 export type Predicate = z.infer<typeof Predicate>;
 
@@ -386,13 +393,13 @@ export type Blocks = z.infer<typeof Blocks>;
 
 export const Clause = z
 	.object({
-		id: z.string().regex(/^[a-z0-9-]+$/),
+		id: schemaText.regex(/^[a-z0-9-]+$/),
 		kind: Kind,
 		/** Every predicate must hold. The first matching clause of a kind wins. */
 		when: z.array(Predicate).min(1),
 		ask: Ask,
 		/** For `who: rule`: the answer the rule gives. */
-		answer: z.unknown().optional(),
+		answer: schemaUnknownValue.optional(),
 		blocks: Blocks,
 	})
 	.superRefine((clause, ctx) => {
@@ -444,15 +451,15 @@ export const PolicySettings = z.object({
 	basis: z.enum(["exact", "exact-or-assumed"]),
 	holds: z.object({
 		/** A `flaky` answer stops carrying forward after this many days. */
-		flakyDays: z.number().int().min(1).max(365),
+		flakyDays: schemaWhole.min(1).max(365),
 		/** An `infra` excuse covers the build it was given for, and no other, when true. */
-		infraThisTargetOnly: z.boolean(),
+		infraThisTargetOnly: schemaFlag,
 	}),
 });
 export type PolicySettings = z.infer<typeof PolicySettings>;
 
 export const Policy = z.object({
-	preset: z.string(),
+	preset: schemaText,
 	clauses: z.array(Clause),
 	settings: PolicySettings,
 });

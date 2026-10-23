@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, type RefObject, useRef, useState } from "react";
-import { type CredentialRow, whyNotPassword } from "../../core/people.ts";
+import { type CredentialRow, whyNotPassword } from "../../core/people-replies.ts";
 import { ApiError, UnreadableReply } from "../lib/api.ts";
 import { browserName } from "../lib/browser.ts";
 import { makePasskey, PasskeyError, passkeysAvailable } from "../lib/passkey.ts";

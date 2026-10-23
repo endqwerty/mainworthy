@@ -3,7 +3,7 @@
 
 import { z } from "zod";
 import { isZone } from "./days.ts";
-import { Automate, MethodKind } from "./model.ts";
+import { MethodKind } from "./model.ts";
 
 const days = z.number().int().min(1).max(90).default(30).describe("How many days to read, today included: 1 to 90.");
 const cursor = z
@@ -57,105 +57,13 @@ export const StatsInput = z.discriminatedUnion("of", [
 export type StatsInput = z.infer<typeof StatsInput>;
 export type StatsKind = StatsInput["of"];
 
-const whole = z.number().int().min(0);
-const page = {
-	total: whole.describe("All rows matching this report, before paging."),
-	cursor: whole.nullable().describe("The next page, or null when there are no more rows."),
-};
-/** Passes over passes and failures; null when nothing passed or failed. */
-const rate = z.number().min(0).max(1).nullable();
-
-/** What a day's results were. A quarantined test's failure is `quarantined`, not `fail`; skips and blocks are not in the rate. */
-export const OutcomeCounts = z.object({
-	pass: whole,
-	fail: whole,
-	skip: whole,
-	blocked: whole,
-	quarantined: whole,
-	rate,
-});
-export type OutcomeCounts = z.infer<typeof OutcomeCounts>;
-
-const TestRow = z.object({
-	test: z.string(),
-	name: z.string(),
-	file: z.string().nullable(),
-	case: z.string().nullable(),
-});
-
-export const PassRateReply = z.object({
-	of: z.literal("pass-rate"),
-	zone: z.string(),
-	method: MethodKind.nullable(),
-	days: z.array(OutcomeCounts.extend({ day: z.string() })),
-	total: OutcomeCounts,
-});
-export const FlakyReply = z.object({
-	...page,
-	of: z.literal("flaky"),
-	/** Automated tests with a result in the window. */
-	tests: whole,
-	/** Of those, the tests with a flip in the window. */
-	flaky: whole,
-	items: z.array(TestRow.extend({ flips: whole, lastAt: z.number(), quarantined: z.boolean() })),
-});
-export const RerunsReply = z.object({
-	...page,
-	of: z.literal("reruns"),
-	reruns: whole,
-	lostMs: whole,
-	/** Counted executions whose time is not covered by a reported duration. */
-	unknown: whole,
-	items: z.array(TestRow.extend({ reruns: whole, lostMs: whole })),
-});
-export const AutomationReply = z.object({
-	...page,
-	of: z.literal("automation"),
-	/** Active cases. */
-	cases: whole,
-	/** Active cases with at least one automated test. */
-	automated: whole,
-	/** The rest, by what each says about automating it. */
-	manual: z.object({ wanted: whole, none: whole, notApplicable: whole }),
-	/** Automated over the cases that can be automated; null when there are none. */
-	rate,
-	backlog: z.array(
-		z.object({
-			case: z.string(),
-			title: z.string(),
-			automate: Automate.exclude(["not-applicable"]),
-			/** Results recorded by a person in the window. */
-			runs: whole,
-			/** Their time, where they said it; null when none did. */
-			timeMs: whole.nullable(),
-		}),
-	),
-});
-export const CoverageReply = z.object({
-	...page,
-	of: z.literal("coverage"),
-	requirements: whole,
-	/** Requirements with at least one active case. */
-	covered: whole,
-	items: z.array(
-		z.object({
-			key: z.string(),
-			title: z.string(),
-			cases: whole,
-			passed: whole,
-			failed: whole,
-			/** Cases whose tests' latest results were only skips or blocks. */
-			other: whole,
-			notRun: whole,
-		}),
-	),
-});
-export const StatsReply = z.discriminatedUnion("of", [
-	PassRateReply,
-	FlakyReply,
-	RerunsReply,
+export {
 	AutomationReply,
 	CoverageReply,
-]);
-export type StatsReply = z.infer<typeof StatsReply>;
-export type StatsOf<K extends StatsKind> = Extract<StatsReply, { of: K }>;
+	FlakyReply,
+	OutcomeCounts,
+	PassRateReply,
+	RerunsReply,
+	type StatsOf,
+	StatsReply,
+} from "./stats-replies.ts";

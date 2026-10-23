@@ -4,48 +4,55 @@ import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import { z } from "zod";
 import { MethodKind } from "./model.ts";
 import { GateStatus, RESULT_STANDINGS } from "./runs.ts";
+import {
+	flag as schemaFlag,
+	nullableText as schemaNullableText,
+	nullableWhole as schemaNullableWhole,
+	text as schemaText,
+	whole as schemaWhole,
+} from "./schema.ts";
 
 export const ArtifactCode = z
 	.array(
 		z.object({
-			repo: z.string().trim().min(1).max(200),
-			commit: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/, "use a full lowercase commit hash"),
+			repo: schemaText.trim().min(1).max(200),
+			commit: schemaText.regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/, "use a full lowercase commit hash"),
 		}),
 	)
 	.min(1)
 	.max(100);
 
 export const MergeReceipt = z.object({
-	id: z.number().int(),
-	head: z.string().nullable(),
-	at: z.number().int(),
-	by: z.number().int(),
-	policy: z.number().int(),
+	id: schemaWhole,
+	head: schemaNullableText,
+	at: schemaWhole,
+	by: schemaWhole,
+	policy: schemaWhole,
 	gate: GateStatus.omit({ open: true, waiting: true }),
-	snapshot: z.string().regex(/^[a-f0-9]{64}$/),
-	count: z.number().int().nonnegative(),
-	evidenceCount: z.number().int().nonnegative(),
-	openCount: z.number().int().nonnegative(),
-	waitingCount: z.number().int().nonnegative(),
+	snapshot: schemaText.regex(/^[a-f0-9]{64}$/),
+	count: schemaWhole.nonnegative(),
+	evidenceCount: schemaWhole.nonnegative(),
+	openCount: schemaWhole.nonnegative(),
+	waitingCount: schemaWhole.nonnegative(),
 });
 export type MergeReceipt = z.infer<typeof MergeReceipt>;
 
 export const MergeReceiptResult = z.object({
-	result: z.number().int(),
-	test: z.string(),
-	name: z.string(),
-	file: z.string().nullable(),
-	target: z.number().int(),
-	outcome: z.string(),
+	result: schemaWhole,
+	test: schemaText,
+	name: schemaText,
+	file: schemaNullableText,
+	target: schemaWhole,
+	outcome: schemaText,
 	method: MethodKind,
-	job: z.string(),
-	env: z.string(),
+	job: schemaText,
+	env: schemaText,
 	standing: z.enum(RESULT_STANDINGS),
-	scope: z.string(),
-	flipped: z.boolean(),
-	quarantined: z.boolean(),
-	decision: z.number().int().nullable(),
-	decisionAnswer: z.string().nullable(),
+	scope: schemaText,
+	flipped: schemaFlag,
+	quarantined: schemaFlag,
+	decision: schemaNullableWhole,
+	decisionAnswer: schemaNullableText,
 });
 export type MergeReceiptResult = z.infer<typeof MergeReceiptResult>;
 

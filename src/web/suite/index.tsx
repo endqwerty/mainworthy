@@ -9,6 +9,13 @@ import { mergeBodies } from "../../core/merge3.ts";
 import { CaseBody, ConflictAddress, cleanPath, emptyBody, TAG } from "../../core/model.ts";
 import type { Edit } from "../../core/ops.ts";
 import { parseBodyInline } from "../../core/outline.ts";
+import {
+	nullableText as schemaNullableText,
+	number as schemaNumber,
+	optionalFlag as schemaOptionalFlag,
+	text as schemaText,
+	texts as schemaTexts,
+} from "../../core/schema.ts";
 import { cleanTitle, conflictEditorStatus, firstStep, ownershipStatus } from "../case/editor.tsx";
 import { CasePane, type ConflictState } from "../case/pane.tsx";
 import { ApiError, call } from "../lib/api.ts";
@@ -76,7 +83,7 @@ type VisibleRow =
 type PlacementUndo = { edits: Edit[]; ready: Promise<Api["propose"]["reply"]>; queued: boolean };
 const ResolvedEdit = z.object({
 	op: z.literal("edit"),
-	case: z.string(),
+	case: schemaText,
 	mine: CaseBody,
 	current: CaseBody,
 	body: CaseBody,
@@ -84,32 +91,32 @@ const ResolvedEdit = z.object({
 
 /** The reply a save was given, as `command` returns it for a save whose reply the page never got. */
 const RecordedSave = z.object({
-	proposal: z.string().nullable(),
+	proposal: schemaNullableText,
 	status: z.enum(["adopted", "open", "conflict", "rejected"]),
-	question: z.string().nullable(),
-	needs: z.string().nullable(),
-	cases: z.array(z.object({ ref: z.string(), version: z.number(), hash: z.string() })),
-	conflicts: z.array(z.object({ case: z.string(), addresses: z.array(ConflictAddress) })),
+	question: schemaNullableText,
+	needs: schemaNullableText,
+	cases: z.array(z.object({ ref: schemaText, version: schemaNumber, hash: schemaText })),
+	conflicts: z.array(z.object({ case: schemaText, addresses: z.array(ConflictAddress) })),
 });
 
 const CardQuestion = z.object({
-	q: z.string(),
-	state: z.string(),
-	evidenceHash: z.string(),
-	decision: z.object({ answer: z.object({ is: z.string() }) }).nullable(),
+	q: schemaText,
+	state: schemaText,
+	evidenceHash: schemaText,
+	decision: z.object({ answer: z.object({ is: schemaText }) }).nullable(),
 });
 const AdoptionQuestion = CardQuestion.extend({
 	decision: z
 		.object({
-			answer: z.object({ is: z.string() }),
-			effects: z.object({ cases: RecordedSave.shape.cases.optional(), rejected: z.boolean().optional() }),
+			answer: z.object({ is: schemaText }),
+			effects: z.object({ cases: RecordedSave.shape.cases.optional(), rejected: schemaOptionalFlag }),
 		})
 		.nullable(),
 });
 const SubmittedText = z.object({
 	body: CaseBody,
-	tags: z.array(z.string()),
-	covers: z.array(z.string()),
+	tags: schemaTexts,
+	covers: schemaTexts,
 	tagChanges: TagChanges.optional(),
 });
 /** A draft's body as it is sent: tags and links typed inline are taken out, and a step with no action is left out. */
@@ -559,7 +566,7 @@ export function SuiteScreen() {
 		// Sealing gives the live editor its case URL. Its draft is already current, even after storage was cleared.
 		if (previous.folder === route.folder && latest && latest.ref === route.ref) return;
 		if (latest?.ref === null) setCaptures((prior) => new Map(prior).set(latest.id, latest));
-		const historyDraft = z.object({ draft: z.string() }).safeParse(history.state);
+		const historyDraft = z.object({ draft: schemaText }).safeParse(history.state);
 		const saved = !route.ref && historyDraft.success ? readDraft({ project, id: historyDraft.data.draft }) : null;
 		const restored = saved?.ref === null ? ownedDraft(saved) : null;
 		draftRef.current = restored;
@@ -1813,7 +1820,7 @@ export function SuiteScreen() {
 				const details = {
 					queryKey: [project, "get"],
 					predicate: (query: { queryKey: readonly unknown[] }) => {
-						const input = z.object({ refs: z.array(z.string()) }).safeParse(query.queryKey[2]);
+						const input = z.object({ refs: schemaTexts }).safeParse(query.queryKey[2]);
 						return input.success && input.data.refs.some((ref) => refs.has(ref));
 					},
 				};
@@ -2005,7 +2012,7 @@ export function SuiteScreen() {
 	useEffect(() => {
 		const drop = (event: Event) => {
 			if (!(event instanceof CustomEvent)) return;
-			const detail = z.object({ ref: z.string(), folder: z.string() }).safeParse(event.detail);
+			const detail = z.object({ ref: schemaText, folder: schemaText }).safeParse(event.detail);
 			if (detail.success) moveTo(detail.data.folder, [detail.data.ref]);
 		};
 		window.addEventListener("mainworthy:drop", drop);

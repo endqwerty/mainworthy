@@ -1,8 +1,11 @@
 import { z } from "zod";
 import { projectCommand } from "./commands.ts";
-import { CaseBody, cleanPath, emptyBody, type FieldDefinitions, fieldErrors } from "./model.ts";
+import type { CsvImportRow } from "./csv-replies.ts";
+import { cleanPath, emptyBody, type FieldDefinitions, fieldErrors } from "./model.ts";
 import { CaseAlias } from "./proposals.ts";
 import { reportJson } from "./text.ts";
+
+export { CsvImportRow } from "./csv-replies.ts";
 
 /** RFC 4180 records, including doubled quotes and multiline cells. No delimiter or encoding guesses. */
 export function parseCsv(text: string): string[][] {
@@ -100,15 +103,6 @@ export const CsvImportInput = z
 		"supply a column mapping or the testrail preset",
 	);
 export type CsvImportInput = z.infer<typeof CsvImportInput>;
-
-export const CsvImportRow = z.object({
-	record: z.number().int().positive(),
-	alias: z.string().nullable(),
-	folder: z.string(),
-	body: CaseBody.nullable(),
-	errors: z.array(z.string()),
-});
-export type CsvImportRow = z.infer<typeof CsvImportRow>;
 
 /** One CSV record is one case. Newlines inside a quoted step cell belong to that one step. */
 export function mapCsv(

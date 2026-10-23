@@ -2,11 +2,20 @@
 // into a slot state and a verdict (decision 0008, items 3 and 4). No I/O here: the server folds, this decides.
 import { z } from "zod";
 import { MethodKind } from "./model.ts";
+import {
+	counts as schemaCounts,
+	flag as schemaFlag,
+	nullableText as schemaNullableText,
+	optionalText as schemaOptionalText,
+	text as schemaText,
+	texts as schemaTexts,
+	whole as schemaWhole,
+} from "./schema.ts";
 
 /** Work coordination is independent of the evidence a slot already holds. */
 export const SlotWork = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("free") }),
-	z.object({ kind: z.literal("held"), actor: z.string(), since: z.number().int(), until: z.number().int() }),
+	z.object({ kind: z.literal("held"), actor: schemaText, since: schemaWhole, until: schemaWhole }),
 ]);
 export type SlotWork = z.infer<typeof SlotWork>;
 
@@ -20,8 +29,8 @@ export function workHeldByOther<Actor>(work: { actor: Actor; until: number }, ac
  * an abbreviated commit when the run is planned, so a stored `commit` is the whole hash.
  */
 export const TargetMatch = z.union([
-	z.object({ build: z.string().trim().min(1).max(120), env: z.string().trim().min(1).max(60).optional() }),
-	z.object({ commit: z.string().min(7), repo: z.string().optional(), env: z.string().optional() }),
+	z.object({ build: schemaText.trim().min(1).max(120), env: schemaText.trim().min(1).max(60).optional() }),
+	z.object({ commit: schemaText.min(7), repo: schemaOptionalText, env: schemaOptionalText }),
 	z.object({ self: z.literal(true) }),
 ]);
 export type TargetMatch = z.infer<typeof TargetMatch>;
@@ -32,7 +41,7 @@ export type BasisRule = z.infer<typeof BasisRule>;
 /** What a run needs before it is complete. Not a requirement in the tracker sense. */
 export const Obligation = z.discriminatedUnion("kind", [
 	z.object({
-		id: z.string(),
+		id: schemaText,
 		kind: z.literal("exercise"),
 		/** Which producers may fill the slot. An agent is admitted only when named here. */
 		methods: z.array(MethodKind).min(1),
@@ -43,7 +52,7 @@ export const Obligation = z.discriminatedUnion("kind", [
 	 * Named CI jobs must each have an applied report on the run's target: a pipeline's report that ran something,
 	 * not an agent's and not one of skips only. A `self` run cannot require a job.
 	 */
-	z.object({ id: z.string(), kind: z.literal("jobs"), jobs: z.array(z.string()).min(1) }),
+	z.object({ id: schemaText, kind: z.literal("jobs"), jobs: schemaTexts.min(1) }),
 ]);
 export type Obligation = z.infer<typeof Obligation>;
 export type ExerciseObligation = Extract<Obligation, { kind: "exercise" }>;
@@ -56,19 +65,19 @@ export const EXIT_CODE: Record<Verdict, number> = { passed: 0, failed: 1, blocke
 
 export const Tally = z.object({
 	/** Proven: a counted pass and nothing against it. */
-	pass: z.number().int(),
+	pass: schemaWhole,
 	/** Failing, and a decision says it does not block (flaky, infrastructure, already failing on base). */
-	excused: z.number().int(),
+	excused: schemaWhole,
 	/** Failing, and a decision says the target needs a fix. */
-	attributed: z.number().int(),
+	attributed: schemaWhole,
 	/** Failing, and nobody has decided why. */
-	unexplained: z.number().int(),
+	unexplained: schemaWhole,
 	/** No counted evidence yet: an unfilled slot or a required job that has not reported. */
-	missing: z.number().int(),
+	missing: schemaWhole,
 	/** A counted pass and a counted fail from different actors. */
-	disputed: z.number().int(),
+	disputed: schemaWhole,
 	/** The producer chose not to run it. Shown, never counted as proof. */
-	skipped: z.number().int(),
+	skipped: schemaWhole,
 });
 export type Tally = z.infer<typeof Tally>;
 
@@ -101,23 +110,23 @@ export const emptyTally = (): Tally => ({
 
 /** A job of a commit that reported in shards and is missing some: which, of how many, in which environment. */
 export const ShardWait = z.object({
-	job: z.string(),
-	env: z.string(),
-	missing: z.array(z.number().int()),
-	of: z.number().int(),
+	job: schemaText,
+	env: schemaText,
+	missing: z.array(schemaWhole),
+	of: schemaWhole,
 });
 export type ShardWait = z.infer<typeof ShardWait>;
 
 export const GateStatus = z.object({
-	quarantined: z.number().int().nonnegative().optional(),
-	run: z.string().nullable(),
+	quarantined: schemaWhole.nonnegative().optional(),
+	run: schemaNullableText,
 	verdict: Verdict,
-	reason: z.string(),
-	tally: z.record(z.string(), z.number()),
-	open: z.array(z.string()),
-	url: z.string().nullable(),
+	reason: schemaText,
+	tally: schemaCounts,
+	open: schemaTexts,
+	url: schemaNullableText,
 	/** True when the stored verdict was overridden because an upload is unapplied or a hold expired. */
-	stale: z.boolean(),
+	stale: schemaFlag,
 	/** Jobs of the commit that reported in shards and are missing some: the gate is pending until they report. */
 	waiting: z.array(ShardWait).optional(),
 });

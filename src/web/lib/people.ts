@@ -13,7 +13,7 @@ import {
 	type SessionRow,
 	TotpConfirmed,
 	TotpEnrolment,
-} from "../../core/people.ts";
+} from "../../core/people-replies.ts";
 import { type CallOptions, call } from "./api.ts";
 import { CreationOptions, type Registration } from "./passkey.ts";
 

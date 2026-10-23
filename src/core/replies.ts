@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { Attachment, AttachmentReply } from "./attachments.ts";
 import { ArtifactCode, MergeReceipt, MergeReceiptResult } from "./changes.ts";
-import { CsvImportRow } from "./csv.ts";
+import { CsvImportRow } from "./csv-replies.ts";
 import { Quarantine, SameCodeEvidence } from "./flaky.ts";
 import { HandoffReceipt, HandoffStatus } from "./handoff.ts";
 import { ActorKind, FixedIn, Kind, Policy, Unlinked } from "./kinds.ts";
@@ -15,31 +15,45 @@ import {
 	SessionRow,
 	TotpConfirmed,
 	TotpEnrolment,
-} from "./people.ts";
+} from "./people-replies.ts";
 import { QuarantineEdit } from "./proposals.ts";
 import { ResultLocation, ResultTrail } from "./results.ts";
 import { GateStatus, Obligation, ShardWait, SlotWork, TargetMatch, Verdict } from "./runs.ts";
-import { StatsReply } from "./stats.ts";
-import { TeamReply, TeamSource } from "./teams.ts";
+import {
+	counts as schemaCounts,
+	data as schemaData,
+	flag as schemaFlag,
+	nullableNumber as schemaNullableNumber,
+	nullableText as schemaNullableText,
+	nullableWhole as schemaNullableWhole,
+	number as schemaNumber,
+	optionalText as schemaOptionalText,
+	text as schemaText,
+	texts as schemaTexts,
+	unknownValue as schemaUnknownValue,
+	whole as schemaWhole,
+} from "./schema.ts";
+import { StatsReply } from "./stats-replies.ts";
+import { TeamReply, TeamSource } from "./team-replies.ts";
 import { TrackerReceipt } from "./tracker.ts";
 
 export const CaseStamp = z.object({
-	ref: z.string(),
-	version: z.number(),
-	hash: z.string(),
+	ref: schemaText,
+	version: schemaNumber,
+	hash: schemaText,
 });
 export type CaseStamp = z.infer<typeof CaseStamp>;
 export const ProposeReply = z.object({
 	/** Null when the edits changed nothing, so nothing was proposed. */
-	proposal: z.string().nullable(),
+	proposal: schemaNullableText,
 	/** `adopted`: it is the current version. `open`: a person must accept it. `conflict`: the author must resolve it. */
 	status: z.enum(["adopted", "open", "conflict", "rejected"]),
-	question: z.string().nullable(),
-	needs: z.string().nullable(),
+	question: schemaNullableText,
+	needs: schemaNullableText,
 	cases: z.array(CaseStamp),
 	conflicts: z.array(
 		z.object({
-			case: z.string(),
+			case: schemaText,
 			addresses: z.array(ConflictAddress),
 		}),
 	),
@@ -47,44 +61,44 @@ export const ProposeReply = z.object({
 export type ProposeReply = z.infer<typeof ProposeReply>;
 
 export const QuestionBrief = z.object({
-	q: z.string(),
+	q: schemaText,
 	kind: Kind,
-	title: z.string(),
+	title: schemaText,
 	state: z.enum(["open", "decided"]),
 	/** Why this cause did or did not become a new question for a person. */
 	how: z.enum(["new", "already open", "already decided", "decided by rule"]),
-	answer: z.string().nullable(),
-	by: z.string().nullable(),
-	tests: z.number(),
+	answer: schemaNullableText,
+	by: schemaNullableText,
+	tests: schemaNumber,
 });
 export type QuestionBrief = z.infer<typeof QuestionBrief>;
 export const ReportReceipt = z.object({
-	batch: z.number(),
+	batch: schemaNumber,
 	/** False when this exact report was already received: nothing was written. */
-	fresh: z.boolean(),
-	target: z.string(),
+	fresh: schemaFlag,
+	target: schemaText,
 	counts: z.object({
-		total: z.number(),
-		pass: z.number(),
-		fail: z.number(),
-		skip: z.number(),
-		error: z.number(),
-		blocked: z.number(),
+		total: schemaNumber,
+		pass: schemaNumber,
+		fail: schemaNumber,
+		skip: schemaNumber,
+		error: schemaNumber,
+		blocked: schemaNumber,
 	}),
 	basis: z.object({
-		exact: z.number(),
-		assumed: z.number(),
-		unresolved: z.number(),
+		exact: schemaNumber,
+		assumed: schemaNumber,
+		unresolved: schemaNumber,
 	}),
 	/** Failures by cause: new questions, questions already decided, and those a rule settled. */
 	questions: z.array(QuestionBrief),
-	unlinked: z.number(),
-	flips: z.number(),
+	unlinked: schemaNumber,
+	flips: schemaNumber,
 	/** Results that were refused, by position in the report, with the reason. Nothing is relabelled to make it fit. */
 	rejected: z.array(
 		z.object({
-			index: z.number(),
-			reason: z.string(),
+			index: schemaNumber,
+			reason: schemaText,
 		}),
 	),
 	/**
@@ -93,116 +107,116 @@ export const ReportReceipt = z.object({
 	 */
 	declined: z.array(
 		z.object({
-			index: z.number(),
-			reason: z.string(),
+			index: schemaNumber,
+			reason: schemaText,
 		}),
 	),
 	/** Ids of the results written, for a small report (a person's keypress), so a correction can name one. */
-	results: z.array(z.number()),
+	results: z.array(schemaNumber),
 	gate: z.union([GateStatus, z.null()]),
 });
 export type ReportReceipt = z.infer<typeof ReportReceipt>;
 
 export const ClaimReply = z.object({
-	opened: z.array(z.string()),
+	opened: schemaTexts,
 	known: z.array(
 		z.object({
-			q: z.string(),
-			state: z.string(),
-			answer: z.string().nullable(),
-			by: z.string().nullable(),
+			q: schemaText,
+			state: schemaText,
+			answer: schemaNullableText,
+			by: schemaNullableText,
 		}),
 	),
-	reviewed: z.number(),
+	reviewed: schemaNumber,
 });
 export type ClaimReply = z.infer<typeof ClaimReply>;
 
 export const DecideReply = z.object({
-	q: z.string(),
+	q: schemaText,
 	/**
 	 * `decided`: your answer settled it. `advised`: recorded as advice; someone else decides. `conflict`: the
 	 * evidence changed, it was already decided differently, or the decision to undo changed. `forbidden`: policy
 	 * does not let you answer.
 	 */
 	status: z.enum(["decided", "advised", "conflict", "forbidden", "invalid", "already", "reopened"]),
-	needs: z.string().nullable(),
-	decision: z.number().nullable(),
-	effects: z.union([z.record(z.string(), z.unknown()), z.null()]),
+	needs: schemaNullableText,
+	decision: schemaNullableNumber,
+	effects: z.union([schemaData, z.null()]),
 	/** On a conflict: the evidence hash to answer on now. */
-	evidence: z.string().nullable(),
+	evidence: schemaNullableText,
 });
 export type DecideReply = z.infer<typeof DecideReply>;
 
 export const ChangeReply = z.object({
-	change: z.string(),
+	change: schemaText,
 	state: z.enum(["merged", "closed", "open"]),
 	/** The failure questions this ended (no longer asked) or, for a change that is open again, the ones asked now. */
-	questions: z.array(z.string()),
+	questions: schemaTexts,
 	/** True when the change was already as the caller says: its end and its questions are as they were. */
-	already: z.boolean(),
+	already: schemaFlag,
 });
 export type ChangeReply = z.infer<typeof ChangeReply>;
 
 export const AnnounceReply = z.object({
-	deployment: z.number().int(),
-	build: z.string(),
-	digest: z.string(),
-	env: z.string(),
+	deployment: schemaWhole,
+	build: schemaText,
+	digest: schemaText,
+	env: schemaText,
 	code: ArtifactCode,
-	by: z.string(),
-	at: z.number(),
+	by: schemaText,
+	at: schemaNumber,
 });
 export type AnnounceReply = z.infer<typeof AnnounceReply>;
 
 export const PlanReply = z.object({
-	run: z.string(),
-	slots: z.number(),
-	already: z.number(),
+	run: schemaText,
+	slots: schemaNumber,
+	already: schemaNumber,
 });
 export type PlanReply = z.infer<typeof PlanReply>;
 
 export const WorkReply = z.object({
-	run: z.string(),
-	slot: z.number().int().nullable(),
-	case: z.string().nullable(),
+	run: schemaText,
+	slot: schemaNullableWhole,
+	case: schemaNullableText,
 	work: SlotWork,
 });
 export type WorkReply = z.infer<typeof WorkReply>;
 
 const DecisionItem = z.object({
-	id: z.number(),
-	answer: z.record(z.string(), z.unknown()),
-	by: z.array(z.string()),
-	rule: z.string().nullable(),
-	reason: z.string().nullable(),
-	trackerError: z.string().optional(),
-	at: z.number(),
+	id: schemaNumber,
+	answer: schemaData,
+	by: schemaTexts,
+	rule: schemaNullableText,
+	reason: schemaNullableText,
+	trackerError: schemaOptionalText,
+	at: schemaNumber,
 });
 
 export const QuestionItem = z.object({
-	q: z.string(),
+	q: schemaText,
 	kind: Kind,
-	title: z.string(),
+	title: schemaText,
 	producer: ActorKind,
 	state: z.enum(["open", "decided", "dissolved"]),
-	evidence: z.record(z.string(), z.unknown()),
-	evidenceHash: z.string(),
+	evidence: schemaData,
+	evidenceHash: schemaText,
 	seen: z.object({
-		count: z.number(),
-		carried: z.number(),
+		count: schemaNumber,
+		carried: schemaNumber,
 	}),
-	needs: z.string(),
+	needs: schemaText,
 	/** The answers that apply to this question, in key order. The keys and labels are in `ANSWER_KEYS`. */
-	answers: z.array(z.string()),
-	blocks: z.array(z.string()),
-	about: z.array(z.string()),
-	openedAt: z.number(),
+	answers: schemaTexts,
+	blocks: schemaTexts,
+	about: schemaTexts,
+	openedAt: schemaNumber,
 	advice: z.array(
 		z.object({
-			by: z.string(),
+			by: schemaText,
 			kind: ActorKind,
-			answer: z.record(z.string(), z.unknown()),
-			reason: z.string().nullable(),
+			answer: schemaData,
+			reason: schemaNullableText,
 		}),
 	),
 	/** In a listing: what the caller's own answer would be worth under the policy. */
@@ -213,7 +227,7 @@ export const QuestionItem = z.object({
 			supersedes: DecisionItem.optional(),
 			fixedIn: FixedIn.optional(),
 			effects: z
-				.record(z.string(), z.unknown())
+				.record(schemaText, schemaUnknownValue)
 				.describe("The recorded effects of this decision, including adopted case refs and versions."),
 		}),
 		z.null(),
@@ -221,16 +235,16 @@ export const QuestionItem = z.object({
 });
 export type QuestionItem = z.infer<typeof QuestionItem>;
 export const InboxReply = z.object({
-	counts: z.record(z.string(), z.number()),
+	counts: schemaCounts,
 	items: z.array(QuestionItem),
-	cursor: z.string().nullable(),
+	cursor: schemaNullableText,
 });
 export type InboxReply = z.infer<typeof InboxReply>;
 
 export const Problem = z.object({
-	rule: z.string(),
-	ref: z.string(),
-	message: z.string(),
+	rule: schemaText,
+	ref: schemaText,
+	message: schemaText,
 });
 export type Problem = z.infer<typeof Problem>;
 
@@ -245,25 +259,25 @@ export const CommandFate = z.union([
 	}),
 	z.object({
 		state: z.literal("begun"),
-		op: z.string(),
+		op: schemaText,
 	}),
 	z.object({
 		state: z.literal("done"),
-		op: z.string(),
-		seq: z.number(),
-		reply: z.unknown(),
+		op: schemaText,
+		seq: schemaNumber,
+		reply: schemaUnknownValue,
 	}),
 ]);
 export type CommandFate = z.infer<typeof CommandFate>;
 
-const text = z.string();
-const number = z.number();
-const whole = z.number().int();
-const flag = z.boolean();
+const text = schemaText;
+const number = schemaNumber;
+const whole = schemaWhole;
+const flag = schemaFlag;
 const texts = z.array(text);
 const nullableText = text.nullable();
 const counts = z.record(text, number);
-const data = z.record(text, z.unknown());
+const data = z.record(text, schemaUnknownValue);
 const Body = CaseBody;
 const Proof = z
 	.looseObject({
@@ -450,9 +464,9 @@ const ProposalEdit = z.discriminatedUnion("op", [
 		conflicts: z.array(
 			z.object({
 				address: ConflictAddress,
-				base: z.unknown().optional(),
-				mine: z.unknown().optional(),
-				theirs: z.unknown().optional(),
+				base: schemaUnknownValue.optional(),
+				mine: schemaUnknownValue.optional(),
+				theirs: schemaUnknownValue.optional(),
 			}),
 		),
 		/** Why accepting this edit on its own would be refused now, while the proposal waits; else null. */
@@ -796,14 +810,14 @@ export const CsvImportReply = z.object({
 export type CsvImportReply = z.infer<typeof CsvImportReply>;
 
 /** `audit`'s reply. The records it carries are read by `verifyAudit` in `audit.ts`, which no client needs. */
-const auditCount = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const auditCount = schemaWhole.nonnegative().max(Number.MAX_SAFE_INTEGER);
 export const AuditReply = z.strictObject({
 	format: z.literal(1),
-	project: z.string(),
+	project: schemaText,
 	records: auditCount,
-	sha256: z.string().regex(/^[a-f0-9]{64}$/),
-	ndjson: z.string(),
-	cursor: z.string().nullable().optional(),
+	sha256: schemaText.regex(/^[a-f0-9]{64}$/),
+	ndjson: schemaText,
+	cursor: schemaNullableText.optional(),
 	evidenceCount: auditCount.optional(),
 	snapshot: z
 		.string()

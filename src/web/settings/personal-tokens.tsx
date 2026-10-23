@@ -1,5 +1,5 @@
 import { type FormEvent, useRef, useState } from "react";
-import { PERSONAL_TOKEN_LASTS, type PersonalTokenCreated, type PersonalTokenRow } from "../../core/people.ts";
+import { PERSONAL_TOKEN_LASTS, type PersonalTokenCreated, type PersonalTokenRow } from "../../core/people-replies.ts";
 import { copySecret } from "../lib/clipboard.ts";
 import { createPersonalToken, dateTime, listPersonalTokens, listSessions, revokePersonalToken } from "../lib/people.ts";
 import { useApp } from "../ui/context.tsx";

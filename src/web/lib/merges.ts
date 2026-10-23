@@ -4,6 +4,12 @@ import { mergeBodies } from "../../core/merge3.ts";
 import { CaseBody, type Step } from "../../core/model.ts";
 import { parseBodyInline } from "../../core/outline.ts";
 import {
+	nullableText as schemaNullableText,
+	number as schemaNumber,
+	text as schemaText,
+	unknownValue as schemaUnknownValue,
+} from "../../core/schema.ts";
+import {
 	type Draft,
 	DraftBody,
 	type DraftConflict,
@@ -142,12 +148,12 @@ export type MergeFate =
 	| { kind: "waiting"; question: string }
 	| { kind: "moved"; question: string; proposal: string };
 
-const Outcome = z.object({ status: z.string(), needs: z.string().nullable(), effects: z.unknown() });
+const Outcome = z.object({ status: schemaText, needs: schemaNullableText, effects: schemaUnknownValue });
 const Effects = z.discriminatedUnion("status", [
-	z.object({ status: z.literal("adopted"), cases: z.array(z.object({ ref: z.string(), version: z.number() })) }),
+	z.object({ status: z.literal("adopted"), cases: z.array(z.object({ ref: schemaText, version: schemaNumber })) }),
 	z.object({ status: z.literal("unchanged") }),
-	z.object({ status: z.literal("open"), adopt: z.string() }),
-	z.object({ status: z.literal("conflict"), adopt: z.string(), proposal: z.string() }),
+	z.object({ status: z.literal("open"), adopt: schemaText }),
+	z.object({ status: z.literal("conflict"), adopt: schemaText, proposal: schemaText }),
 ]);
 
 /**
@@ -186,7 +192,7 @@ export function refusedStatus(needs: string | null): string {
 	return `Your merge was not adopted, and the conflict is still open.${reason} Your draft and conflict card are kept.`;
 }
 
-const CaseStamp = z.object({ ref: z.string(), version: z.number() });
+const CaseStamp = z.object({ ref: schemaText, version: schemaNumber });
 
 /**
  * The rows the page holds for a case once it has read `read`, a version the server recorded: `read`, unless the
