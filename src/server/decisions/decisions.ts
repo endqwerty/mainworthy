@@ -464,12 +464,13 @@ function* settleByRuleSteps(
 
 /** Reconcile inherited standing and let the new policy answer every eligible open question by rule. */
 function* reconsiderPolicySteps(ctx: Ctx): Generator<undefined, number, void> {
-	refold(ctx, inheritanceRuns(ctx.db, ctx.project.id), { dissolveStale: true });
+	yield* refoldSteps(ctx, inheritanceRuns(ctx.db, ctx.project.id), { dissolveStale: true });
 	const policy = currentPolicy(ctx.db, ctx.project.id);
 	const kinds = new Set(policy.clauses.filter((clause) => clause.ask.who === "rule").map((clause) => clause.kind));
 	let taken = 0;
 	// Every one of them, by id: answering one changes the queue the loop would be reading.
 	for (const id of [...kinds].flatMap((kind) => openQuestionIds(ctx.db, ctx.project.id, kind))) {
+		yield;
 		const question = questionById(ctx.db, id);
 		if (question?.state !== "open") continue;
 		const clause = clauseFor(currentPolicy(ctx.db, ctx.project.id), {
@@ -1645,6 +1646,15 @@ export function recoverDisputes(ctx: Ctx): number {
 
 /** Recompute affected runs and raise sign-off for a planned run that now passes. */
 export function refold(ctx: Ctx, runIds: Iterable<number>, options: { dissolveStale?: boolean } = {}): void {
+	complete(refoldSteps(ctx, runIds, options));
+}
+
+/** Keeps one reconciliation and its transaction intact while allowing the server to answer between runs. */
+function* refoldSteps(
+	ctx: Ctx,
+	runIds: Iterable<number>,
+	options: { dissolveStale?: boolean } = {},
+): Generator<undefined, void, void> {
 	for (const id of runIds) ctx.recompute.add(id);
 	ctx.dissolveStale ||= options.dissolveStale === true;
 	if (ctx.folding) return;
@@ -1658,14 +1668,17 @@ export function refold(ctx: Ctx, runIds: Iterable<number>, options: { dissolveSt
 			ctx.recompute.clear();
 			// Base results and retargeting reach every affected commit and planned run in this transaction.
 			for (const id of ids) {
+				yield;
 				const run = runById(ctx.db, id);
 				if (run) for (const affected of inheritanceAffected(ctx.db, run)) ids.add(affected);
 			}
 			for (const id of ids) {
+				yield;
 				const run = runById(ctx.db, id);
 				if (run) refreshInherited(ctx, run);
 			}
 			for (const id of ids) {
+				yield;
 				ctx.recompute.delete(id);
 				const existing = runById(ctx.db, id);
 				if (!existing) continue;

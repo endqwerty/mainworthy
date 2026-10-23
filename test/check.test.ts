@@ -278,6 +278,8 @@ test("a broken browser fixture build fails the check before any test runs, even 
 });
 
 test("every test file is in exactly one phase: the quiet files, and everything but them", () => {
+	expect(phaseFiles("quiet")).toContain("test/policy-latency.test.ts");
+	expect(phaseFiles("parallel")).not.toContain("test/policy-latency.test.ts");
 	for (const file of QUIET) expect(existsSync(file), `${file} is listed as quiet and is not there`).toBe(true);
 	const quiet = testArgs("quiet", { timings: "t.json" });
 	const parallel = testArgs("parallel", { timings: "t.json" });

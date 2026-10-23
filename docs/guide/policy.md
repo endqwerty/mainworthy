@@ -8,6 +8,8 @@ A policy says who must answer each kind of question and what an agent's answer i
 
 A policy is a table of clauses. Each clause covers one kind of question: a proposed edit, a test with no case, a failed result, a finding, or closing a run. The clause says who answers, whether they give a reason, and what an agent's answer is worth. Mainworthy reads the clauses of a kind from the top and uses the first one that matches.
 
+While a new policy reconciles existing change runs and open questions, the server can answer health requests and reads between runs and questions. Readers see the previous committed policy until adoption completes. The new policy and its decisions publish together; other writes wait for that adoption.
+
 [Diagram: who answers a question under a policy](../diagrams/policy-routing.html)
 
 The `when` column holds the conditions a clause tests. `always` matches every question of its kind. Other conditions describe the question:

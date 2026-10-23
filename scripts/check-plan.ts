@@ -55,6 +55,7 @@ export const QUIET = [
 	"test/demo-removal-budget.test.ts",
 	"test/archive-latency.test.ts",
 	"test/report-latency.test.ts",
+	"test/policy-latency.test.ts",
 	"test/e2e/latency-10000.test.ts",
 	"test/e2e/latency-2000.test.ts",
 	"test/budgets.test.ts",
