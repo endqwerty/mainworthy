@@ -243,7 +243,15 @@ Press <kbd>u</kbd> to record the inverse of the latest placement action.
 
 Moves, tag changes, and archiving appear in history without creating a new body version.
 Archived cases leave the active suite. Their recorded history remains available.
-Use [the API](./api.md) to return an archived case to active state.
+Select **Archived** in the Suite sidebar to find them, then open the case.
+The case page labels it **Archived**, including when you open its old URL.
+Press <kbd>#</kbd> to restore it, or choose **Restore selected** from the command palette.
+On a phone, open the case and choose **Restore selected** under **Actions**.
+Select only active cases to archive, or only archived cases to restore. A mixed selection is refused without changing any case.
+A picked case must be open or in the loaded list before you archive or restore it.
+If a selected state is unread, open the case or return to its list and wait for it to load.
+Restore keeps its folder, tags, body version, and history. Select **All cases** to return to the active suite.
+Folder, tag, and text filters also work in the archived view.
 
 While the server saves or accepts a large bulk change, you can keep reading the suite.
 Each read sees the complete state before or after the change. The proposal's changes become current together.

@@ -130,11 +130,13 @@ export function SuiteScreen() {
 	const owner = useRef(deviceSession()).current;
 	const windowId = useRef(draftOwner()).current;
 	const ownedDraft = useCallback((saved: Draft): Draft => claimCopiedDraft({ project, draft: saved }), [project]);
-	const tagFilter = new URLSearchParams(location.search)
+	const suiteParams = new URLSearchParams(location.search);
+	const tagFilter = suiteParams
 		.getAll("tag")
 		.filter((tag) => TAG.test(tag))
 		.join(",");
-	const search = new URLSearchParams(location.search).get("text") ?? "";
+	const state = suiteParams.get("state") === "archived" ? "archived" : "active";
+	const search = suiteParams.get("text") ?? "";
 	const [text, setText] = useState(search);
 	useEffect(() => setText(search), [search]);
 	useEffect(() => {
@@ -410,12 +412,13 @@ export function SuiteScreen() {
 		() =>
 			({
 				in: "cases",
+				state,
 				limit: 500,
 				...(route.folder ? { folder: route.folder, deep: true } : {}),
 				...(search ? { text: search } : {}),
 				...(tagFilter ? { tags: tagFilter.split(",") } : {}),
 			}) satisfies Parameters<typeof call<"find">>[1],
-		[route.folder, search, tagFilter],
+		[route.folder, search, tagFilter, state],
 	);
 	const list = useInfiniteQuery({
 		queryKey: [project, "find", input, "pages"],
@@ -450,6 +453,12 @@ export function SuiteScreen() {
 		() => (recordedView ? placed(recordedView, placements, folders) : null),
 		[recordedView, placements, folders],
 	);
+	const selection = () => (picked.size ? [...picked] : selected ? [selected] : []);
+	const selectionStates = new Set(
+		selection().map((ref) => (ref === view?.ref ? view.state : cases.find((row) => row.ref === ref)?.state)),
+	);
+	const restoring =
+		selectionStates.size === 1 && !selectionStates.has(undefined) ? selectionStates.has("archived") : null;
 	const copyCase = draft?.id ?? selected ?? "";
 	const [heldCopies, setCopies] = useState<{ id: string; copies: ReturnType<typeof readDraftCopies> }>({
 		id: "",
@@ -503,7 +512,7 @@ export function SuiteScreen() {
 		const grouping = Boolean(route.folder && folders.some((folder) => folder.path.startsWith(`${route.folder}/`)));
 		const selectedPath = route.folder ? cleanPath(route.folder).join("/").toLowerCase() : null;
 		for (const row of cases) {
-			if (row.state !== "active") continue;
+			if (row.state !== state) continue;
 			const folder = folders.find((folder) => folder.id === row.folder);
 			const path = folder ? cleanPath(folder.path).join("/").toLowerCase() : null;
 			if (selectedPath && path !== null && path !== selectedPath && !path.startsWith(`${selectedPath}/`)) continue;
@@ -516,6 +525,7 @@ export function SuiteScreen() {
 		}
 		for (const [id, local] of captures) {
 			if (
+				state === "archived" ||
 				id === newId ||
 				(local.ref && cases.some((row) => row.ref === local.ref)) ||
 				(route.folder && local.folder !== route.folder && !local.folder.startsWith(`${route.folder}/`))
@@ -527,7 +537,7 @@ export function SuiteScreen() {
 			result.splice(at >= 0 ? at + 1 : 0, 0, { kind: "local", id, draft: local });
 		}
 
-		if (newId) {
+		if (newId && state === "active") {
 			const after = draftRef.current?.after;
 			const at = result.findIndex((item) =>
 				item.kind === "case" ? item.row.ref === after : item.kind === "local" ? item.id === after : false,
@@ -535,7 +545,7 @@ export function SuiteScreen() {
 			result.splice(at >= 0 ? at + 1 : 0, 0, { kind: "draft", id: newId });
 		}
 		return result;
-	}, [cases, captures, collapsed, folders, newId, route.folder]);
+	}, [cases, captures, collapsed, folders, newId, route.folder, state]);
 	const virtual = useVirtualizer({
 		count: rows.length,
 		getScrollElement: () => viewport.current,
@@ -555,11 +565,16 @@ export function SuiteScreen() {
 	useEffect(() => {
 		if (list.hasNextPage && !list.isFetching) void list.fetchNextPage();
 	}, [list.hasNextPage, list.isFetching, list.fetchNextPage]);
-	const previousRoute = useRef({ ref: route.ref, folder: route.folder });
+	const previousRoute = useRef({ ref: route.ref, folder: route.folder, state });
 	useLayoutEffect(() => {
 		const previous = previousRoute.current;
+		if (previous.state !== state) {
+			setPicked(new Set());
+			setSelected(route.ref);
+		}
+		previousRoute.current.state = state;
 		if (previous.ref === route.ref && previous.folder === route.folder) return;
-		previousRoute.current = { ref: route.ref, folder: route.folder };
+		previousRoute.current = { ref: route.ref, folder: route.folder, state };
 		const latest = draftRef.current;
 		// Sealing gives the live editor its case URL. Its draft is already current, even after storage was cleared.
 		if (previous.folder === route.folder && latest && latest.ref === route.ref) return;
@@ -571,10 +586,11 @@ export function SuiteScreen() {
 		setDraftState(restored);
 		setSelected(route.ref);
 		setCaptures(new Map(readDrafts(project).map((saved) => [saved.id, saved])));
-	}, [project, route.folder, route.ref, ownedDraft]);
+	}, [project, route.folder, route.ref, ownedDraft, state]);
 	useEffect(() => {
-		if (selected === null && cases[0] && !draftRef.current) setSelected(cases[0].ref);
-	}, [cases, selected]);
+		const first = cases.find((row) => row.state === state);
+		if (selected === null && first && !draftRef.current) setSelected(first.ref);
+	}, [cases, selected, state]);
 	function focusDraft(next: Draft): void {
 		const target = document.querySelector(
 			`#detail [data-field="${next.caret.field === "capture-title" ? "title" : next.caret.field}"]`,
@@ -1878,7 +1894,6 @@ export function SuiteScreen() {
 			virtual.scrollToIndex(at, { align: "auto" });
 		}
 	}
-	const selection = () => (picked.size ? [...picked] : selected ? [selected] : []);
 	function tagSelection(action: (refs: string[], rows: Pick<CaseRow, "ref" | "tags">[]) => void): void {
 		const refs = selection();
 		if (!refs.length) return;
@@ -2037,7 +2052,18 @@ export function SuiteScreen() {
 	function archive(): void {
 		const refs = selection();
 		if (!refs.length) return;
-		void placement([{ op: "state", cases: refs, to: "archived" }], [{ op: "state", cases: refs, to: "active" }]);
+		if (restoring === null) {
+			setStatus(
+				selectionStates.has(undefined)
+					? "Open selected cases and wait for their state."
+					: "Select only active or only archived cases.",
+			);
+			return;
+		}
+		void placement(
+			[{ op: "state", cases: refs, to: restoring ? "active" : "archived" }],
+			[{ op: "state", cases: refs, to: restoring ? "archived" : "active" }],
+		);
 	}
 	function tag(): void {
 		const value = tagText.trim().replace(/^#/, "");
@@ -2158,13 +2184,11 @@ export function SuiteScreen() {
 		previous: () => stepCursor(-1),
 		filter: () => filter.current?.focus(),
 		seal: leaveEditor,
-		rapid: create,
 		select: () => {
 			if (selected)
 				setPicked((prior) => {
 					const next = new Set(prior);
-					if (next.has(selected)) next.delete(selected);
-					else next.add(selected);
+					if (!next.delete(selected)) next.add(selected);
 					return next;
 				});
 		},
@@ -2172,6 +2196,7 @@ export function SuiteScreen() {
 		tag: () => setTagging(true),
 		removeTag,
 		archive,
+		restoring,
 		undo: () => {
 			void undoLast().catch((error: unknown) => setStatus(error instanceof Error ? error.message : "Undo failed"));
 		},
@@ -2200,7 +2225,7 @@ export function SuiteScreen() {
 		<>
 			<section className="pane" id="list">
 				<div className="phead">
-					<b id="ltitle">{route.folder ?? "All cases"}</b>
+					<b id="ltitle">{state === "archived" ? "Archived" : (route.folder ?? "All cases")}</b>
 					<span id="lcount">
 						{list.error
 							? "Cases unavailable"
@@ -2289,9 +2314,11 @@ export function SuiteScreen() {
 							>
 								{list.isPending
 									? "Reading cases…"
-									: search
-										? "No matching cases. Change the filter, or press c to capture one."
-										: "No cases yet. Press c and start typing."}
+									: state === "archived"
+										? "No archived cases match this view."
+										: search
+											? "No matching cases. Change the filter, or press c to capture one."
+											: "No cases yet. Press c and start typing."}
 							</EmptyState>
 						)
 					) : (

@@ -1,4 +1,6 @@
 import { useBindings } from "../lib/keys.ts";
+
+const action = (key: string, label: string, handler: () => void, hidden = false) => ({ key, label, handler, hidden });
 export function useSuiteBindings({
 	create,
 	edit,
@@ -6,12 +8,12 @@ export function useSuiteBindings({
 	previous,
 	filter,
 	seal,
-	rapid,
 	select,
 	move,
 	tag,
 	removeTag,
 	archive,
+	restoring,
 	undo,
 	peek,
 	folder,
@@ -26,12 +28,12 @@ export function useSuiteBindings({
 	previous: () => void;
 	filter: () => void;
 	seal: () => void;
-	rapid: () => void;
 	select: () => void;
 	move: () => void;
 	tag: () => void;
 	removeTag: () => void;
 	archive: () => void;
+	restoring: boolean | null;
 	undo: () => void;
 	peek: () => void;
 	folder: (direction: number) => void;
@@ -49,25 +51,29 @@ export function useSuiteBindings({
 	useBindings([
 		// The three marked `list` do not act on the case the detail shows (`Binding.list`).
 		{ key: "c", label: "New case", list: true, handler: create },
-		{ key: "e", label: "Edit case", handler: edit },
-		{ key: "enter", label: "Edit case", handler: edit },
-		{ key: "j", label: "Next case", handler: next },
-		{ key: "arrowdown", label: "Next case", handler: next, hidden: true },
-		{ key: "k", label: "Previous case", handler: previous },
-		{ key: "arrowup", label: "Previous case", handler: previous, hidden: true },
+		action("e", "Edit case", edit),
+		action("enter", "Edit case", edit),
+		action("j", "Next case", next),
+		action("arrowdown", "Next case", next, true),
+		action("k", "Previous case", previous),
+		action("arrowup", "Previous case", previous, true),
 		{ key: "/", label: "Filter", list: true, handler: filter },
-		{ key: "escape", label: "Seal and leave editor", handler: seal },
-		{ key: "mod+enter", label: "Record version", handler: seal },
-		{ key: "shift+enter", label: "Next new case", handler: rapid },
-		{ key: "x", label: "Select case", handler: select },
-		{ key: "m", label: "Move selected", handler: move },
-		{ key: "t", label: "Tag selected", handler: tag },
-		{ key: "alt+t", label: "Remove tag from selected cases", handler: removeTag },
-		{ key: "#", label: "Archive selected", handler: archive },
-		{ key: "u", label: "Undo", handler: undo },
-		{ key: "space", label: "Peek timeline", handler: peek },
-		{ key: "alt+[", label: "Previous folder", handler: () => folder(-1) },
-		{ key: "]", label: "Next folder", handler: () => folder(1) },
+		action("escape", "Seal and leave editor", seal),
+		action("mod+enter", "Record version", seal),
+		action("shift+enter", "Next new case", create),
+		action("x", "Select case", select),
+		action("m", "Move selected", move),
+		action("t", "Tag selected", tag),
+		action("alt+t", "Remove tag from selected cases", removeTag),
+		action(
+			"#",
+			restoring === null ? "Archive/restore unavailable" : restoring ? "Restore selected" : "Archive selected",
+			archive,
+		),
+		action("u", "Undo", undo),
+		action("space", "Peek timeline", peek),
+		action("alt+[", "Previous folder", () => folder(-1)),
+		action("]", "Next folder", () => folder(1)),
 		// Its form is in the sidebar, which a phone keeps closed: the shell opens it (`mainworthy:sidebar`). It
 		// makes a folder and decides nothing about a case, so a phone offers it over the list too.
 		{
@@ -79,7 +85,7 @@ export function useSuiteBindings({
 				window.dispatchEvent(new Event("mainworthy:sidebar"));
 			},
 		},
-		{ key: "z", label: "Widen case pane", handler: zoom },
+		action("z", "Widen case pane", zoom),
 		...(cancelTag ? [{ key: "escape", label: "Cancel tag", list: true, handler: cancelTag, applies: cancelling }] : []),
 		...(cancelFolder
 			? [{ key: "escape", label: "Cancel new folder", list: true, handler: cancelFolder, applies: cancelling }]

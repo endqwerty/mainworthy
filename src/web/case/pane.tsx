@@ -294,6 +294,7 @@ export function CasePane({
 				<div className="detail-body">
 					<div className="cmeta">
 						<span className="cid">{ref ?? "New case"}</span>
+						{view?.state === "archived" && <span className="chip">Archived</span>}
 						<span className="path">{draft?.folder || view?.folder.path || "All cases"}</span>
 					</div>
 					<div className={`cstate capture-state ${draft?.dirty || draft?.ref === null ? "draft" : ""}`}>
