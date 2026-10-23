@@ -534,15 +534,50 @@ test("PR facts read added fragments at the immutable PR head", async () => {
 				isDraft: true,
 				headRefOid: head,
 			});
-		if (args[1]?.endsWith("/pulls/832/files")) return ".changes/example-change.md\nsrc/example.ts";
+		if (args[1]?.endsWith("/pulls/832/files"))
+			return JSON.stringify([
+				[{ status: "modified", filename: "src/example.ts" }],
+				[{ status: "added", filename: ".changes/example-change.md" }],
+			]);
 		if (args[1] === `repos/endqwerty/mainworthy/contents/.changes/example-change.md?ref=${head}`) return source;
 		throw new Error(`unexpected GitHub read: ${args.join(" ")}`);
 	});
 	expect(got.pull).toEqual({ url: "https://github.com/endqwerty/mainworthy/pull/832", draft: true });
 	expect(got.addedFragments).toEqual([{ file: ".changes/example-change.md", text: source }]);
 	expect(calls.find((args) => args[1]?.endsWith("/files"))?.join(" ")).toContain("--paginate");
-	expect(calls.find((args) => args[1]?.endsWith("/files"))?.join(" ")).toContain('.status == "added"');
+	expect(calls.find((args) => args[1]?.endsWith("/files"))?.join(" ")).toContain("--slurp");
 });
+
+for (const change of [
+	{ status: "modified", filename: ".changes/existing-fact.md" },
+	{ status: "renamed", filename: ".changes/new-name.md", previous_filename: ".changes/existing-fact.md" },
+	{ status: "removed", filename: ".changes/existing-fact.md" },
+	{ status: "renamed", filename: "docs/moved-fact.md", previous_filename: ".changes/existing-fact.md" },
+	{ status: "renamed", filename: ".changes/imported-fact.md", previous_filename: "docs/existing-fact.md" },
+]) {
+	test(`retained fragments refuse ${change.status}: ${change.filename}`, async () => {
+		const reads: string[] = [];
+		const gh = async (args: string[]): Promise<string> => {
+			if (args[0] === "pr")
+				return JSON.stringify({
+					body: NOTE,
+					baseRefName: "main",
+					milestone: null,
+					closingIssuesReferences: [],
+					isDraft: false,
+					headRefOid: "a".repeat(40),
+				});
+			if (args[1]?.endsWith("/files")) {
+				if (args.includes("--jq")) return ""; // The old added-only API query hides this change.
+				return JSON.stringify([[{ status: "modified", filename: "src/unrelated.ts" }], [change]]);
+			}
+			reads.push(args.join(" "));
+			return "---\npr: https://github.com/endqwerty/mainworthy/pull/832\n---\n\nAltered old fact.\n";
+		};
+		await expect(gather(832, gh)).rejects.toThrow(/immutable.*add a new fragment/i);
+		expect(reads).toEqual([]);
+	});
+}
 
 test("the check's time is read from its report and judged against the spread between runs of one revision", () => {
 	expect(checkSeconds("typecheck 9.1 s ok\ntests   121.4 s\ntotal   130.0 s\n")).toBe(121.4);

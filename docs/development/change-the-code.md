@@ -162,7 +162,9 @@ Run `bun scripts/changelog.ts --check` to validate fragments. Its count of fragm
 
 `main` deploys continuously; `CHANGELOG.md` is the user-facing record. At the end of each landing batch, the coordinator opens an ordinary pull request titled "Assemble the changelog" with the updated aggregate. Do this at least daily while fragments are pending. The owner reviews and merges it through the usual workflow. CI must never push to `main`.
 
-Keep the fragments after assembly. Repeated runs replace the same marked section, sorted by descending date and ascending id, and preserve every byte of historical entries. Each fragment occupies one generated line. Both check and write refuse unmarked lines, unknown fragment ids and duplicate ids inside an existing section. Move a hand-written entry into a fragment before retrying. Do not use union merges.
+Keep the fragments after assembly. Once merged, a fragment is immutable, whether or not it has been assembled. The `description` check refuses modifications, renames and deletions of fragments already present on the PR's base, including renames into or out of `.changes/`. To correct an old entry, add a new fragment that names the original fragment and states the correction. A fragment added by the current PR may still be edited before that PR merges.
+
+Repeated runs replace the same marked section, sorted by descending date and ascending id, and preserve every byte of historical entries. Each fragment occupies one generated line. Both check and write refuse unmarked lines, unknown fragment ids and duplicate ids inside an existing section. Move a hand-written entry into a fragment before retrying. Do not use union merges.
 
 ## Record a design decision
 
