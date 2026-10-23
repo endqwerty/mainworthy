@@ -25,7 +25,7 @@ struct SuiteLiveTests {
 		#expect(try await client.caseDocument(proven.ref).proof == proven.proof)
 	}
 
-	@Test("create and edit keep methods, automation and unread fields, and history reads old content")
+	@Test("create and edit keep methods, automation and custom fields, and history reads old content")
 	func write() async throws {
 		let client = try await Live.signedIn().project(try await Live.project())
 		let body = CaseContent(title: "A structured case", pre: "Signed in", steps: [
@@ -50,7 +50,7 @@ struct SuiteLiveTests {
 		#expect(histories.map(\.version) == [2, 1])
 		#expect(histories.map(\.reason) == ["More", "First"])
 		#expect(try await client.caseDocument(stamp.ref, version: 1).content.title == body.title)
-		// Get omits custom fields. A proposal's current body exposes them and proves the edit preserved them.
+		// A proposal's complete current body proves the edit preserved custom fields.
 		var competing = body
 		competing.title = "A competing title"
 		let overlap = try await client.saveCase(SuiteSubmission(source: .edit(opened), content: competing, reason: "Old"))

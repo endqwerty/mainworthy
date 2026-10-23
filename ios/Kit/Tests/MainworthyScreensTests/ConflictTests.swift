@@ -363,15 +363,24 @@ struct ConflictRecoveryTests {
 		#expect(editor.content.title == "My title")
 	}
 
-	@Test("the exact historical base keeps custom fields that a partial case read omits")
-	func customFields() async throws {
+	@Test("the exact historical base keeps custom fields across default and partial case reads", arguments: [false, true])
+	func customFields(partial: Bool) async throws {
 		let server = try await Live.signedIn()
 		let project = try await server.project(try await Live.project())
 		let made = try await project.saveCase(SuiteSubmission(source: .create(folder: nil),
 			content: CaseContent(title: "Base", fields: ["priority": "high"]), reason: "Create"))
 		guard case .adopted(let stamp) = made, let stamp else { Issue.record("not created"); return }
-		let opened = try await project.caseDocument(stamp.ref, includingCustomFields: false)
-		#expect(opened.readFields == nil)
+		let opened: CaseDocument
+		if partial {
+			let rows: [Wire.SuiteDocument] = try await server.read("get", in: project.key, [
+				"refs": [.string(stamp.ref)],
+				"fields": ["title", "pre", "steps", "methods", "tags", "place", "proof"],
+			])
+			opened = CaseDocument(try #require(rows.first))
+		} else {
+			opened = try await project.caseDocument(stamp.ref, includingCustomFields: false)
+		}
+		#expect(opened.readFields == (partial ? nil : ["priority": "high"]))
 		let editor = CaseEditorScreen(project: project, source: .edit(opened))
 		editor.content.title = "My custom case"
 		let _: Wire.SuiteProposeReply = try await server.read("propose", in: project.key, ["edits": [[

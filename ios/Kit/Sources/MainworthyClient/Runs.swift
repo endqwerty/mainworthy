@@ -423,7 +423,7 @@ extension ProjectClient {
 			content: CaseContent(
 				Wire.CaseBody(
 					title: row.title, pre: row.pre, steps: row.steps, methods: row.methods,
-					// A case that is read alone leaves its custom fields out. A run shows none of them.
+					// Explicit partial reads can omit custom fields. The run screen does not show them.
 					automate: row.automate, fields: row.fields ?? [:]
 				)))
 	}
