@@ -292,6 +292,8 @@ for (const attempt of ["save", "merge"] as const)
 					if (project === "unbound")
 						await page.getByRole("button", { name: "Discard preserved copy", exact: true }).click();
 					await page.unroute(`**/${operation}`);
+					// The preserved copy can render before the current case has been read.
+					await page.locator("#detail .read-body .ctitle").waitFor();
 					await page.keyboard.press("e");
 					await page.getByRole("textbox", { name: "Case title", exact: true }).fill("Current project's fresh edit");
 					await page.keyboard.press("Escape");
