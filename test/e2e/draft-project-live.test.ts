@@ -9,7 +9,7 @@ import { removeProject } from "../../src/server/transfer/transfer.ts";
 import ui from "../../src/web/index.html";
 import { call } from "../../src/web/lib/api.ts";
 import { Draft } from "../../src/web/lib/drafts.ts";
-import { browserAvailable, eventually, openPage, reservePort, type Server } from "./support.ts";
+import { browserAvailable, openPage, reservePort, type Server } from "./support.ts";
 
 test.skipIf(!browserAvailable)(
 	"an open tab preserves a waiting capture when its project is replaced and its question collides",
@@ -78,10 +78,9 @@ test.skipIf(!browserAvailable)(
 			});
 			expect(replacement.question).toBe("Q-3");
 			await answer("Q-3", "accept");
-			await eventually(
-				async () => ({ preserved: await page.locator(".preserved-draft").count(), drafts: (await drafts()).length }),
-				(state) => state.preserved > 0 || state.drafts === 0,
-			);
+			// The draft leaves device storage just before its preserved copy renders, so wait for the copy itself (#896).
+			await page.getByRole("textbox", { name: "Preserved draft text", exact: true }).waitFor();
+			expect(await drafts()).toEqual([]);
 			expect(await page.getByRole("textbox", { name: "Preserved draft text", exact: true }).count()).toBe(1);
 			expect(await page.getByRole("textbox", { name: "Preserved draft text", exact: true }).inputValue()).toContain(
 				before.body.title,
