@@ -1,5 +1,5 @@
 import { contentHash } from "../../core/hash.ts";
-import { normaliseFailure, signatureHash } from "../../core/signature.ts";
+import { type NormalisedFailure, normaliseFailure, signatureHash } from "../../core/signature.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { type Db, sql } from "../kernel/db.ts";
 
@@ -7,7 +7,7 @@ export type SignatureRow = {
 	id: number;
 	project: number;
 	hash: string;
-	class: "assertion" | "timeout" | "infra";
+	class: Exclude<NormalisedFailure["class"], "unknown">;
 	text: string;
 	first_seq: number;
 };
@@ -32,8 +32,9 @@ export function fileSignature(signature: Pick<SignatureRow, "hash" | "class" | "
 	};
 }
 
-export function ensureSignature(ctx: Ctx, failure: { message: string; detail?: string }): SignatureRow {
+export function ensureSignature(ctx: Ctx, failure: { message: string; detail?: string }): SignatureRow | null {
 	const normal = normaliseFailure(failure);
+	if (normal.class === "unknown") return null;
 	return storeSignature(ctx, { ...normal, hash: signatureHash(normal) });
 }
 

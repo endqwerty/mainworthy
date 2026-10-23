@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
 import { harness } from "../../../test/helpers.ts";
+import { SameCodeEvidence } from "../../core/flaky.ts";
 import type { GateStatus } from "../../core/ops.ts";
+import { normaliseFailure } from "../../core/signature.ts";
 import { parseReport } from "./report.ts";
 
 const fixture = (format: string) =>
@@ -141,6 +143,95 @@ test("a retry whose diagnostic was lost makes no cause claim in the adapter outp
 	expect(jest.results[0]?.tries).toEqual([{ outcome: "fail" }, { outcome: "fail" }]);
 	expect(pytest.results[0]?.tries).toEqual([{ outcome: "fail" }]);
 });
+
+test.each([
+	["jest", assertion({ title: "timeout once", invocations: 2, retryReasons: [] })],
+	[
+		"pytest",
+		JSON.stringify({
+			exitcode: 0,
+			tests: [{ nodeid: "test.py::test_recovers", outcome: "rerun", call: { outcome: "passed", duration: 0 } }],
+		}),
+	],
+	[
+		"playwright",
+		JSON.stringify({
+			suites: [
+				{
+					title: "test.js",
+					file: "test.js",
+					specs: [
+						{
+							title: "timeout once",
+							file: "test.js",
+							tests: [
+								{
+									projectName: "chromium",
+									expectedStatus: "passed",
+									results: [
+										{ status: "failed", duration: 1, retry: 0 },
+										{ status: "passed", duration: 1, retry: 1 },
+									],
+								},
+							],
+						},
+					],
+				},
+			],
+		}),
+	],
+	["junit", '<testsuite><testcase name="timeout once"><flakyFailure/></testcase></testsuite>'],
+] as const)("%s recoveries without diagnostics have an unknown cause and no signature grouping", (format, text) => {
+	const h = harness({ unlinked: "track" });
+	try {
+		const { results } = parseReport(text, { ...options, format });
+		const tried = results[0]?.tries?.[0];
+		expect(tried?.outcome).toBe("fail");
+		for (const attempt of [1, 2]) {
+			h.call("report", { target: { commit: `unknown773${attempt}`, repo: "acme/web" }, results });
+		}
+		const page = h.call<{ flips: number; sameCode: unknown }[]>("get", { refs: ["T-1"] })[0];
+		expect(page?.flips).toBe(2);
+		expect(SameCodeEvidence.parse(page?.sameCode).signals).toEqual([]);
+		expect(normaliseFailure({ message: tried?.failure?.message ?? "" }).class).toBe("unknown");
+		expect(h.app.db.raw.query("SELECT class FROM signatures").all()).toEqual([]);
+	} finally {
+		h.close();
+	}
+});
+
+test.each([
+	{
+		end: "first",
+		tries: [{ outcome: "fail" }, { outcome: "pass" }],
+		flips: 2,
+		signals: [{ class: "assertion", flips: 1, suggested: false }],
+	},
+	{ end: "second", tries: [{ outcome: "pass" }, { outcome: "fail" }], flips: 1, signals: [] },
+])(
+	"an unknown try at the $end end of a flip does not borrow the final failure's cause",
+	({ tries, flips, signals }) => {
+		const h = harness({ unlinked: "track" });
+		try {
+			h.call("report", {
+				target: { commit: "unknown774", repo: "acme/web" },
+				results: [
+					{
+						test: { key: "one", name: "timeout once" },
+						outcome: "fail",
+						failure: { message: "expected 1, got 2" },
+						tries,
+					},
+				],
+			});
+			const page = h.call<{ flips: number; sameCode: unknown }[]>("get", { refs: ["T-1"] })[0];
+			expect(page?.flips).toBe(flips);
+			expect(SameCodeEvidence.parse(page?.sameCode).signals).toMatchObject(signals);
+		} finally {
+			h.close();
+		}
+	},
+);
 
 const warningReport = (format: "jest" | "vitest" | "pytest", names: string[], file = "tests/sample.js") =>
 	format === "pytest"

@@ -1,7 +1,9 @@
 import { contentHash } from "./hash.ts";
 import { clip, clipEnd } from "./text.ts";
 
-export type NormalisedFailure = { class: "assertion" | "timeout" | "infra"; text: string };
+export type NormalisedFailure =
+	| { class: "assertion" | "timeout" | "infra"; text: string }
+	| { class: "unknown"; text: "" };
 
 const ansi = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "g");
 const timeout =
@@ -16,7 +18,7 @@ const sourceLocation = /(^|[\s("'])([^\s()"'<>]+\.(?:[cm]?[jt]sx?|py|java|kt|go|
 const internalFrame =
 	/(?:^|[/\\])node_modules(?:[/\\]|$)|(?:^|[/\\])(?:playwright-core|@playwright|vitest|jest)[/\\](?:lib|dist|build|src)[/\\]|(?:^|[/\\])_pytest[/\\]|[/\\]unittest[/\\](?:case|runner|suite|loader|main|mock)\.py|[/\\]src[/\\]testing[/\\]testing\.go|node:internal|bun:test|(?:^|\s)(?:org\.junit\.|org\.testng\.|org\.opentest4j\.|junit\.|java\.lang\.reflect\.|jdk\.internal\.|testing\.tRunner|runtime\.goexit)|<internal>|<frozen /i;
 
-function classify(message: string): NormalisedFailure["class"] {
+function classify(message: string): Exclude<NormalisedFailure["class"], "unknown"> {
 	if (/\b(?:AssertionError|AssertionFailedError|ComparisonFailure)\b|^(?:E\s+)?assert\b/i.test(message))
 		return "assertion";
 	if (/^\s*(?:Error:\s*)?expected\b/i.test(message)) return "assertion";
@@ -124,6 +126,7 @@ export function normaliseFailure(input: { message: string; detail?: string }): N
 					!/^(?:Error|Traceback \(most recent call last\)|FAIL|FAILED):?\s*$/i.test(line.slice(0, LINE_LIMIT).trim()),
 			) ?? "",
 	);
+	if (meaningful.trim() === "") return { class: "unknown", text: "" };
 	const frame = input.detail === undefined ? null : firstFrame(clip(input.detail, 65_536));
 	const failureClass = classify(meaningful);
 	const preserveNumbers = failureClass === "assertion" && /\b(?:expected|assertion|assert)|expect\(/i.test(meaningful);

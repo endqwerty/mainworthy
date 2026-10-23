@@ -42,6 +42,41 @@ const playwrightReport = (results: unknown[], expectedStatus = "passed") => ({
 });
 
 test.each([
+	["jest", JSON.stringify(jestReport("failed", { title: "timeout once", failureMessages: [] }))],
+	["vitest", JSON.stringify(jestReport("failed", { title: "timeout once", failureMessages: [] }))],
+	["playwright", JSON.stringify(playwrightReport([{ status: "failed", duration: 1, retry: 0 }]))],
+	[
+		"pytest",
+		JSON.stringify({
+			exitcode: 1,
+			tests: [{ nodeid: "test.py::test_timeout", outcome: "failed", call: { outcome: "failed", duration: 0 } }],
+		}),
+	],
+	[
+		"trx",
+		'<TestRun><Results><UnitTestResult testId="one" testName="timeout once" outcome="Failed"/></Results></TestRun>',
+	],
+	["junit", '<testsuite><testcase name="timeout once"><failure/></testcase></testsuite>'],
+	[
+		"junit",
+		'<testsuite><testcase name="timeout once"><failure message="first"/><rerunFailure/></testcase></testsuite>',
+	],
+] as const)("%s failures without diagnostics stay unexplained without inventing a cause", (format, text) => {
+	const h = harness({ unlinked: "track" });
+	try {
+		const { results } = parseReport(text, { file: "report", format });
+		expect(results[0]?.outcome).toBe("fail");
+		expect(results[0]?.failure?.message || "").toBe("");
+		const receipt = h.call<ReportReceipt>("report", { target: { commit: "unknown773", repo: "acme/web" }, results });
+		expect(receipt.gate).toMatchObject({ verdict: "blocked", tally: { unexplained: 1 } });
+		const failed = h.app.db.raw.query("SELECT signature, message FROM results").get();
+		expect(failed).toEqual({ signature: null, message: null });
+	} finally {
+		h.close();
+	}
+});
+
+test.each([
 	["C1234", { case: "C1234" }],
 	["Old.Id/123:case@v2", { case: "Old.Id/123:case", version: 2 }],
 	["PAY-7@v1", { case: "PAY-7", version: 1 }],
@@ -248,7 +283,7 @@ test("Playwright chooses the last decisive retry and keeps project identities se
 		durationMs: 5,
 		note: "passed after 1 retries",
 		// The try it failed first, kept beside the pass; the skip after it ended nothing (decision 0129).
-		tries: [{ outcome: "fail", durationMs: 2, failure: { message: "Test failed", detail: "Test failed" } }],
+		tries: [{ outcome: "fail", durationMs: 2 }],
 	});
 	// Every try is kept, up to a hundred: a pass before eleven failures is still a flip.
 	const long = parse(

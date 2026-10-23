@@ -41,8 +41,8 @@ const Q = {
 			JOIN batches b ON b.id = r.batch
 			JOIN batches earlier ON earlier.id = a.batch
 			JOIN signatures s ON s.id = CASE WHEN coalesce(ft.outcome, a.outcome) = 'pass'
-			                                 THEN coalesce(st.signature, r.signature)
-			                                 ELSE coalesce(ft.signature, a.signature) END
+			                                 THEN CASE WHEN st.id IS NULL THEN r.signature ELSE st.signature END
+			                                 ELSE CASE WHEN ft.id IS NULL THEN a.signature ELSE ft.signature END END
 			WHERE f.project = $project AND f.test = $test AND t.commit_sha IS NOT NULL
 			  AND a.target = r.target AND a.test = r.test AND a.actor = r.actor AND earlier.job = b.job
 			  AND a.method = 'auto' AND r.method = 'auto'

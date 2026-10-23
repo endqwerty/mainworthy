@@ -96,11 +96,11 @@ export function parsePlaywright(value: unknown): ParsedReport {
 					.toSorted((a, b) => a.retry - b.retry)
 					.map((attempt) => {
 						const outcome = judged(attempt);
-						const detail = detailOf(attempt).trim() || `Test ${outcome === "fail" ? "failed" : "errored"}`;
+						const detail = detailOf(attempt).trim();
 						return {
 							outcome,
 							durationMs: Math.round(attempt.duration),
-							...(outcome === "fail" || outcome === "error"
+							...((outcome === "fail" || outcome === "error") && detail
 								? { failure: { message: clip(detail.split(/\r?\n/)[0] ?? detail, 4000), detail: clip(detail, 20_000) } }
 								: {}),
 						};

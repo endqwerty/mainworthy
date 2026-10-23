@@ -479,7 +479,8 @@ export function parseJUnit(
 					if (last) {
 						element.tries.unshift({ outcome: element.result.outcome, failure: element.result.failure });
 						element.result.outcome = last.outcome;
-						element.result.failure = last.failure ?? { message: "Test failed" };
+						if (last.failure) element.result.failure = last.failure;
+						else delete element.result.failure;
 					}
 				}
 				// Every Surefire try failed, so the first and the last decide every flip and the cause a flip from an
@@ -709,11 +710,10 @@ export function parseJUnit(
 					currentCase.retries++;
 					if (name.startsWith("rerun")) currentCase.reruns = true;
 					const outcome = name.endsWith("Error") ? "error" : "fail";
+					const message = attrs.message?.trim();
 					currentCase.tries.push({
 						outcome,
-						failure: {
-							message: clip(attrs.message?.trim() || (outcome === "error" ? "Test errored" : "Test failed"), 4000),
-						},
+						...(message ? { failure: { message: clip(message, 4000) } } : {}),
 					});
 				}
 				element = { kind: "ignored", tag, propertyCase: name === "properties" ? currentCase : null };
