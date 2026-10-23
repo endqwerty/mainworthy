@@ -108,7 +108,7 @@ test("the minute job posts a commit gate and posts a newer status in the same co
 		),
 	);
 	try {
-		instance = start(config, () => ({ ui: null }), { readers: 0, now: () => now });
+		instance = await start(config, () => ({ ui: null }), { readers: 0, now: () => now });
 		const post = async (op: string, input: unknown = {}) => {
 			const response = await original(`${instance?.url}/api/p/scratch/${op}`, {
 				method: "POST",
@@ -177,14 +177,15 @@ test("all four verdicts map to commit status states", async () => {
 		state: "failure",
 		description: expect.stringContaining("failed:"),
 	});
-	const project = findProject(fixture.app.db, "scratch");
+	const project = await findProject(fixture.app.db, "scratch");
 	if (!project) throw new Error("expected scratch");
-	fixture.app.db.transaction(() =>
-		acceptReport(makeCtx(fixture.app, project, fixture.owner, true), {
-			target: { commit, repo: github.repository, pr: 55 },
-			attempt: 2,
-			results: [{ test: { key: "checkout" }, outcome: "pass" }],
-		}),
+	await fixture.app.db.transaction(
+		async () =>
+			await acceptReport(makeCtx(fixture.app, project, fixture.owner, true), {
+				target: { commit, repo: github.repository, pr: 55 },
+				attempt: 2,
+				results: [{ test: { key: "checkout" }, outcome: "pass" }],
+			}),
 	);
 	fixture.advance(60_000);
 	await deliverCommitStatuses(fixture.app, fake.port);
@@ -341,9 +342,9 @@ test("archives omit commit status state and restoring one does not enroll histor
 	exportArchive(fixture.app.db, (chunk) => chunks.push(chunk));
 	expect(chunks.join("")).not.toContain('"t":"commit_statuses"');
 	expect(chunks.join("")).not.toContain(credential);
-	const restored = openApp(fixture.app.config, { memory: true });
+	const restored = await openApp(fixture.app.config, { memory: true });
 	try {
-		importArchive(restored.db, chunks.join("").trimEnd().split("\n"));
+		await importArchive(restored.db, chunks.join("").trimEnd().split("\n"));
 		const fake = remote();
 		await deliverCommitStatuses(restored, fake.port);
 		expect(fake.requests).toEqual([]);
@@ -424,7 +425,7 @@ test("expired holds post the current status after the same sweep the minute job 
 	await deliverCommitStatuses(fixture.app, fake.port);
 	expect(fake.requests.at(-1)?.body).toMatchObject({ state: "success" });
 	fixture.advance(15 * 86_400_000);
-	await fixture.app.gate.run(() => sweep(fixture.app, ruleActor(fixture.app.db).id));
+	await fixture.app.gate.run(async () => await sweep(fixture.app, (await ruleActor(fixture.app.db)).id));
 	await deliverCommitStatuses(fixture.app, fake.port);
 	expect(fake.requests.at(-1)).toMatchObject({
 		url: `https://api.github.com/repos/example/shop/statuses/${commit}`,
@@ -453,7 +454,7 @@ test("shutdown records the in-flight reply and restart preserves accepted status
 		entered.resolve();
 		return finish.promise;
 	});
-	instance = start(config, () => ({ ui: null }), { readers: 0, now: () => now, statusPort: slow.port });
+	instance = await start(config, () => ({ ui: null }), { readers: 0, now: () => now, statusPort: slow.port });
 	const post = async (op: string, input: unknown) => {
 		const reply = await fetch(`${instance?.url}/api/p/scratch/${op}`, {
 			method: "POST",
@@ -488,7 +489,7 @@ test("shutdown records the in-flight reply and restart preserves accepted status
 		instance = undefined;
 	}
 	const resumed = remote();
-	instance = start(config, () => ({ ui: null }), { readers: 0, now: () => now, statusPort: resumed.port });
+	instance = await start(config, () => ({ ui: null }), { readers: 0, now: () => now, statusPort: resumed.port });
 	expect(instance.app.db.raw.query("SELECT commit_sha, state FROM commit_statuses ORDER BY commit_sha").all()).toEqual([
 		{ commit_sha: commit, state: "complete" },
 		{ commit_sha: "b".repeat(40), state: "queued" },
@@ -888,7 +889,7 @@ for (const deadline of ["HTTP date", "ten-year seconds", "ten-year HTTP date", "
 		const limited = remote(() => new Response(credential, { status: 403, headers }));
 		const log = spyOn(console, "error").mockImplementation(() => undefined);
 		try {
-			instance = start(config, () => ({ ui: null }), { readers: 0, now: () => now, statusPort: limited.port });
+			instance = await start(config, () => ({ ui: null }), { readers: 0, now: () => now, statusPort: limited.port });
 			for (const sha of [commit, "b".repeat(40)]) {
 				const reply = await fetch(`${instance.url}/api/p/scratch/report`, {
 					method: "POST",
@@ -905,7 +906,7 @@ for (const deadline of ["HTTP date", "ten-year seconds", "ten-year HTTP date", "
 			await instance.stop();
 			instance = undefined;
 			const accepted = remote();
-			instance = start(config, () => ({ ui: null }), { readers: 0, now: () => now, statusPort: accepted.port });
+			instance = await start(config, () => ({ ui: null }), { readers: 0, now: () => now, statusPort: accepted.port });
 			now += pause - 1000;
 			await instance.minute();
 			expect(accepted.requests).toHaveLength(0);

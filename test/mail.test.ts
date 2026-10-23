@@ -33,7 +33,7 @@ const PASSWORD = "a quite long first password";
 const NEXT = "a quite different password";
 async function mailbox(options: Parameters<typeof fakeSmtp>[0] = {}) {
 	const smtp = await fakeSmtp(options);
-	const w = world({ proxied: true });
+	const w = await world({ proxied: true });
 	w.instance.app.config.mail = defaultConfig({
 		MAINWORTHY_SMTP_HOST: "127.0.0.1",
 		MAINWORTHY_SMTP_PORT: String(smtp.port),
@@ -66,7 +66,7 @@ test("a reset request delivers independently of another write and its rollback",
 	try {
 		await verified(w, box.messages);
 		const before = box.messages.length;
-		w.instance.app.db.begin();
+		await w.instance.app.db.begin();
 		try {
 			const reply = await w.post("/api/login", { resetRequest: "robin@example.com" });
 			expect(reply.status).toBe(200);
@@ -74,7 +74,7 @@ test("a reset request delivers independently of another write and its rollback",
 			await waitMail(w.instance.app);
 			expect(box.messages.slice(before).map((message) => message.to)).toEqual(["<robin@example.com>"]);
 		} finally {
-			w.instance.app.db.rollback();
+			await w.instance.app.db.rollback();
 		}
 		await waitMail(w.instance.app);
 		expect(box.messages).toHaveLength(before + 1);
@@ -448,9 +448,9 @@ test("mail follows commit, discards rolled back work, and reports SMTP failure w
 				throw new Error("rollback");
 			}),
 		).toThrow("rollback");
-		app.db.transaction(() => {
+		await app.db.transaction(async () => {
 			try {
-				app.db.savepoint(() => {
+				await app.db.savepoint(() => {
 					queueMail(app, { to: "nobody@example.com", subject: "savepoint", text: "no" });
 					throw new Error("rollback");
 				});
@@ -472,7 +472,7 @@ test("mail follows commit, discards rolled back work, and reports SMTP failure w
 });
 
 test("STARTTLS is required when selected, and mail-disabled and unrelated callers cannot change a contact", async () => {
-	const plain = world();
+	const plain = await world();
 	expect((await plain.op("invitation", { do: "create", name: "off", email: "off@example.com" })).status).toBe(400);
 	expect((await plain.post("/api/login", { resetRequest: "off@example.com" })).status).toBe(400);
 	const box = await mailbox();
@@ -592,9 +592,9 @@ test("archives preserve verified contacts and import invalidates all mail links"
 });
 
 test("mail is optional and configured instances advertise password reset", async () => {
-	const plain = world();
+	const plain = await world();
 	expect(must(await plain.get("/api/login/methods"))).toMatchObject({ mail: false });
-	const configured = world();
+	const configured = await world();
 	configured.instance.app.config.mail = defaultConfig({
 		MAINWORTHY_SMTP_HOST: "127.0.0.1",
 		MAINWORTHY_SMTP_PORT: "2525",

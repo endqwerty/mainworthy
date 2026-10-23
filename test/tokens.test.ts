@@ -83,9 +83,9 @@ const said = (instance: { warnings: string[] }): string[] =>
 
 type Boot = { mode?: Config["mode"]; dataDir?: string; clock?: Clock; owner?: string; ownerToken?: string | null };
 /** An instance with the archive routes. In server mode its owner `robin` signs in with `OWNER` unless told otherwise. */
-function boot(options: Boot = {}): Instance {
+async function boot(options: Boot = {}): Promise<Instance> {
 	const mode = options.mode ?? "server";
-	const instance = start(
+	const instance = await start(
 		{
 			dataDir: options.dataDir ?? scratch(),
 			host: LOOPBACK,
@@ -202,7 +202,7 @@ const sessions = (instance: Instance): SessionRow[] =>
 		.all();
 
 test("a token made in one project carries its actor's grants in other projects, as the guide says", async () => {
-	const instance = boot();
+	const instance = await boot();
 	await token(instance, { actor: "reviewer", kind: "agent", can: ["read", "produce"] });
 	expect((await admin(instance, { do: "project.create", key: "other" })).status).toBe(200);
 	expect((await admin(instance, { do: "project.create", key: "private" })).status).toBe(200);
@@ -238,7 +238,7 @@ test("a token made in one project carries its actor's grants in other projects, 
 });
 
 test("project-scoped actor resolution reads only global and requested direct grants", async () => {
-	const instance = boot();
+	const instance = await boot();
 	const sam = await token(instance, { actor: "sam", project: undefined });
 	expect((await admin(instance, { do: "project.create", key: "other" })).status).toBe(200);
 	expect((await admin(instance, { do: "grant.set", actor: "sam", can: ["read"], roles: ["auditor"] })).status).toBe(
@@ -267,7 +267,7 @@ test("project-scoped actor resolution reads only global and requested direct gra
 	if (scratch === undefined || other === undefined) throw new Error("missing project");
 	const reads = spyOn(instance.app.reader, "all");
 	try {
-		expect(authenticate(instance.app, sam.token, scratch)).toMatchObject({
+		expect(await authenticate(instance.app, sam.token, scratch)).toMatchObject({
 			name: "sam",
 			can: ["read", "record", "produce"],
 			roles: ["auditor", "approver"],
@@ -284,12 +284,12 @@ test("project-scoped actor resolution reads only global and requested direct gra
 				],
 			},
 		]);
-		expect(authenticate(instance.app, sam.token, other)).toMatchObject({
+		expect(await authenticate(instance.app, sam.token, other)).toMatchObject({
 			name: "sam",
 			can: ["read", "admin"],
 			roles: ["auditor", "lead"],
 		});
-		expect(authenticate(instance.app, sam.token, 0)).toMatchObject({
+		expect(await authenticate(instance.app, sam.token, 0)).toMatchObject({
 			name: "sam",
 			can: ["read"],
 			roles: ["auditor"],
@@ -300,30 +300,30 @@ test("project-scoped actor resolution reads only global and requested direct gra
 });
 
 test("all-project admin checks and actor listings retain grants on other projects", async () => {
-	const instance = boot();
+	const instance = await boot();
 	const sam = await token(instance, { actor: "sam" });
 	expect((await admin(instance, { do: "project.create", key: "other" })).status).toBe(200);
 	expect(
 		(await admin(instance, { do: "grant.set", actor: "sam", project: "other", can: ["admin"], roles: ["lead"] }))
 			.status,
 	).toBe(200);
-	const actor = authenticate(instance.app, sam.token, 0);
+	const actor = await authenticate(instance.app, sam.token, 0);
 	if (!actor) throw new Error("token did not authenticate");
 	expect(actor.can).toEqual([]);
-	expect(hasAdminGrant(instance.app.reader, actor.id)).toBe(true);
-	expect(listActors(instance.app.reader).find((listed) => listed.name === "sam")?.grants).toEqual([
+	expect(await hasAdminGrant(instance.app.reader, actor.id)).toBe(true);
+	expect((await listActors(instance.app.reader)).find((listed) => listed.name === "sam")?.grants).toEqual([
 		{ project: 1, can: ["read"], roles: [] },
 		{ project: 2, can: ["admin"], roles: ["lead"] },
 	]);
 	expect((await admin(instance, { do: "grant.remove", actor: "sam", project: "other" })).status).toBe(200);
-	expect(hasAdminGrant(instance.app.reader, actor.id)).toBe(false);
-	expect(authenticate(instance.app, sam.token, 1)?.can).toEqual(["read"]);
+	expect(await hasAdminGrant(instance.app.reader, actor.id)).toBe(false);
+	expect((await authenticate(instance.app, sam.token, 1))?.can).toEqual(["read"]);
 });
 
 test("grant and token revocation are visible to the next request and an admitted caller", async () => {
-	const instance = boot();
+	const instance = await boot();
 	const sam = await token(instance, { actor: "sam", can: ["read", "produce"] });
-	const admission = admit(instance.app, {
+	const admission = await admit(instance.app, {
 		bearer: sam.token,
 		cookie: null,
 		sameOrigin: false,
@@ -331,22 +331,22 @@ test("grant and token revocation are visible to the next request and an admitted
 		address: null,
 	});
 	if (admission.kind !== "admitted") throw new Error("token was not admitted");
-	expect(admission.session.actor(1)?.can).toEqual(["read", "record", "produce"]);
+	expect((await admission.session.actor(1))?.can).toEqual(["read", "record", "produce"]);
 	expect((await create(instance, "Before revocation", bearer(sam.token))).status).toBe(200);
 	expect((await admin(instance, { do: "grant.set", actor: "sam", project: "scratch", can: ["read"] })).status).toBe(
 		200,
 	);
-	expect(admission.session.actor(1)?.can).toEqual(["read"]);
+	expect((await admission.session.actor(1))?.can).toEqual(["read"]);
 	expect((await create(instance, "After grant revocation", bearer(sam.token))).status).toBe(403);
 	expect((await admin(instance, { do: "token.revoke", id: sam.id })).status).toBe(200);
-	expect(admission.session.actor(1)).toBeNull();
+	expect(await admission.session.actor(1)).toBeNull();
 	expect(await statusOf(instance, bearer(sam.token))).toBe(401);
 });
 
 describe("sign-in record retention", () => {
 	test("revocation records the end of its sessions immediately, without changing an earlier end", async () => {
 		const clock = clockAt();
-		const instance = boot({ clock });
+		const instance = await boot({ clock });
 		const sam = await token(instance, { actor: "sam" });
 		const first = await signIn(instance, sam.token);
 		const second = await signIn(instance, sam.token);
@@ -365,7 +365,7 @@ describe("sign-in record retention", () => {
 
 	test("the minute job erases token addresses 30 days after the earlier of revocation and expiry", async () => {
 		const clock = clockAt();
-		const instance = boot({ clock });
+		const instance = await boot({ clock });
 		const revoked = await token(instance, { actor: "sam", expires: "60d" });
 		const expired = await token(instance, { actor: "pat", expires: "1d" });
 		const active = await token(instance, { actor: "lee" });
@@ -401,7 +401,7 @@ describe("sign-in record retention", () => {
 
 	test("a delayed minute job uses the token's end rather than the time of the sweep", async () => {
 		const clock = clockAt();
-		const instance = boot({ clock });
+		const instance = await boot({ clock });
 		const sam = await token(instance, { actor: "sam", expires: "1d" });
 		const { cookie } = await signIn(instance, sam.token);
 		clock.set(T0 + 31 * DAY - 1);
@@ -415,7 +415,7 @@ describe("sign-in record retention", () => {
 
 	test("revoking an expired token keeps its sessions' earlier expiry as their end", async () => {
 		const clock = clockAt();
-		const instance = boot({ clock });
+		const instance = await boot({ clock });
 		const sam = await token(instance, { actor: "sam", expires: "1d" });
 		await signIn(instance, sam.token);
 		clock.advance(2 * DAY);
@@ -428,7 +428,7 @@ describe("sign-in record retention", () => {
 
 	test("sessions left unended by an earlier build are deleted 30 days after their token's revocation", async () => {
 		const clock = clockAt();
-		const instance = boot({ clock });
+		const instance = await boot({ clock });
 		const sam = await token(instance, { actor: "sam" });
 		await signIn(instance, sam.token);
 		clock.advance(DAY);
@@ -489,7 +489,7 @@ async function stream(instance: Instance, headers: Sent) {
 describe("a token with an end", () => {
 	test("it works before its end, and after it is refused with the reply a revoked token gets, on every route", async () => {
 		const clock = clockAt();
-		const instance = boot({ clock });
+		const instance = await boot({ clock });
 		const sam = await token(instance, { actor: "sam", expires: "12h" });
 		expect(sam.expiresAt).toBe(T0 + 12 * HOUR);
 		const pat = await token(instance, { actor: "pat" });
@@ -542,7 +542,7 @@ describe("a token with an end", () => {
 
 	test("a session opened with it ends when it does, and the change streams of the token and of the session stop", async () => {
 		const clock = clockAt();
-		const instance = boot({ clock });
+		const instance = await boot({ clock });
 		const sam = await token(instance, { actor: "sam", expires: "12h" });
 		const { cookie } = await signIn(instance, sam.token);
 		const bySession = await stream(instance, { cookie });
@@ -569,7 +569,7 @@ describe("a token with an end", () => {
 
 	test("a token that reaches its end while its sign-in waits at the gate opens no session", async () => {
 		const clock = clockAt();
-		const instance = boot({ clock });
+		const instance = await boot({ clock });
 		const sam = await token(instance, { actor: "sam", expires: "12h" });
 		clock.set(T0 + 12 * HOUR - 1);
 		const gate = holdGate(instance);
@@ -595,7 +595,7 @@ describe("a token with an end", () => {
 	});
 
 	test("what is not a duration is refused, and nothing is made", async () => {
-		const instance = boot();
+		const instance = await boot();
 		for (const expires of ["90m", "0d", "14", "1y", "", 30]) {
 			const refused = await admin(instance, {
 				do: "token.create",
@@ -615,7 +615,7 @@ describe("a token with an end", () => {
 	test("the owner's last token that works is kept, and one that has ended is not another", async () => {
 		const clock = clockAt();
 		const dataDir = scratch();
-		const first = boot({ clock, dataDir, ownerToken: null });
+		const first = await boot({ clock, dataDir, ownerToken: null });
 		const generated = first.generatedToken ?? "";
 		const second = await token(first, { ...FOR_OWNER, expires: "12h" }, bearer(generated));
 		clock.set(T0 + 12 * HOUR);
@@ -631,11 +631,11 @@ describe("a token with an end", () => {
 		});
 		await first.stop();
 		// A start that finds the owner with a token that works makes no other; one that finds none does.
-		const before = boot({ clock, dataDir, ownerToken: null });
+		const before = await boot({ clock, dataDir, ownerToken: null });
 		expect(before.generatedToken).toBeNull();
 		await before.stop();
 		clock.set(T0 + 12 * HOUR);
-		const after = boot({ clock, dataDir, ownerToken: null });
+		const after = await boot({ clock, dataDir, ownerToken: null });
 		expect(after.generatedToken).toMatch(/^cb_[0-9A-Za-z]{32}$/);
 		expect(await statusOf(after, bearer(after.generatedToken ?? ""))).toBe(200);
 		expect(tokens(after).at(-1)).toMatchObject({ source: "generated", expires_at: null, created_by: null });
@@ -645,7 +645,7 @@ describe("a token with an end", () => {
 describe("what a token's row says", () => {
 	test("token.list shows when a token ends, who made it and where it was last used from", async () => {
 		const clock = clockAt();
-		const instance = boot({ clock });
+		const instance = await boot({ clock });
 		const dana = await token(instance, { actor: "dana", can: ["read", "admin"], project: undefined });
 		// Made by an admin who is not the owner: the maker is whoever called, not whoever owns the instance.
 		const helper = await token(
@@ -714,7 +714,7 @@ describe("what a token's row says", () => {
 
 	test("a read by a token writes where it came from after a flush, and the read did not wait for the writer", async () => {
 		const clock = clockAt();
-		const instance = boot({ clock });
+		const instance = await boot({ clock });
 		const gate = holdGate(instance);
 		try {
 			clock.advance(HOUR);
@@ -731,7 +731,7 @@ describe("what a token's row says", () => {
 
 	test("a session's row says where it was opened from and where it was last seen from", async () => {
 		const clock = clockAt();
-		const instance = boot({ clock });
+		const instance = await boot({ clock });
 		const { cookie } = await signIn(instance, OWNER);
 		expect(sessions(instance)).toMatchObject([{ created_addr: LOOPBACK, last_seen_at: T0 }]);
 		// Seen from elsewhere, as far as the row knows, until a use from here is written over it.
@@ -749,7 +749,7 @@ describe("what a token's row says", () => {
 
 	test("a use with no address writes none and erases none, and an older use does not replace a newer address", async () => {
 		const clock = clockAt();
-		const instance = boot({ clock });
+		const instance = await boot({ clock });
 		const app = instance.app;
 		const rewrite = (at: number, address: string) =>
 			app.gate.run(() => app.db.raw.query("UPDATE tokens SET last_used_at = ?, last_used_addr = ?").run(at, address));
@@ -760,7 +760,7 @@ describe("what a token's row says", () => {
 		// A request that never was on a connection has no address to note. The time is written, the address stays.
 		const offline = new Request("http://mainworthy.test/api/session", { headers: bearer(OWNER) });
 		clock.advance(HOUR);
-		expect(sessionOf(app, offline, instance.owner)?.via).toBe("token");
+		expect((await sessionOf(app, offline, instance.owner))?.via).toBe("token");
 		await flushUses(app);
 		expect(tokens(instance)).toMatchObject([{ last_used_at: T0 + 2 * HOUR, last_used_addr: LOOPBACK }]);
 		// The same between two flushes: the address noted first is still the last one known.
@@ -768,7 +768,7 @@ describe("what a token's row says", () => {
 		clock.advance(HOUR);
 		expect(await statusOf(instance, bearer(OWNER))).toBe(200);
 		clock.advance(HOUR);
-		expect(sessionOf(app, offline, instance.owner)?.via).toBe("token");
+		expect((await sessionOf(app, offline, instance.owner))?.via).toBe("token");
 		await flushUses(app);
 		expect(tokens(instance)).toMatchObject([{ last_used_at: T0 + 4 * HOUR, last_used_addr: LOOPBACK }]);
 		// The row was since used from elsewhere and later than what is noted now (the clock was set back).
@@ -783,7 +783,7 @@ describe("what a token's row says", () => {
 describe("forgetting a person", () => {
 	test("it erases where their tokens were last used from, written or only noted, and keeps when", async () => {
 		const clock = clockAt();
-		const instance = boot({ clock });
+		const instance = await boot({ clock });
 		const sam = await token(instance, { actor: "sam" });
 		clock.advance(HOUR);
 		expect(await statusOf(instance, bearer(sam.token))).toBe(200);
@@ -816,7 +816,7 @@ describe("the owner's token from the environment", () => {
 	test("a changed value retires the token it replaces and says so, and the old value is refused", async () => {
 		const clock = clockAt();
 		const dataDir = scratch();
-		const first = boot({ clock, dataDir });
+		const first = await boot({ clock, dataDir });
 		expect(said(first)).toEqual([]);
 		// Two more tokens of the owner, which no variable holds: one the owner made, one a start generated.
 		const own = await token(first, { ...FOR_OWNER, label: "robin's laptop" });
@@ -832,7 +832,7 @@ describe("the owner's token from the environment", () => {
 		await first.stop();
 
 		clock.advance(DAY);
-		const second = boot({ clock, dataDir, ownerToken: SECOND });
+		const second = await boot({ clock, dataDir, ownerToken: SECOND });
 		expect(said(second)).toEqual([
 			"MAINWORTHY_OWNER_TOKEN has a new value: the token it held before (token 1 of robin) was revoked, and every session opened with it has ended. Sign in with the new value.",
 		]);
@@ -855,7 +855,7 @@ describe("the owner's token from the environment", () => {
 		await second.stop();
 
 		// The same value again changes nothing and says nothing.
-		const third = boot({ clock, dataDir, ownerToken: SECOND });
+		const third = await boot({ clock, dataDir, ownerToken: SECOND });
 		expect(said(third)).toEqual([]);
 		expect(tokens(third).map((row) => row.revoked_at)).toEqual([T0 + DAY, null, null, null]);
 		clock.advance(31 * DAY);
@@ -864,7 +864,7 @@ describe("the owner's token from the environment", () => {
 		await third.stop();
 
 		// The first value again is a token that was revoked: it is not revived, and it retires nothing.
-		const fourth = boot({ clock, dataDir, ownerToken: OWNER });
+		const fourth = await boot({ clock, dataDir, ownerToken: OWNER });
 		expect(said(fourth)).toEqual([
 			expect.stringMatching(/^MAINWORTHY_OWNER_TOKEN was revoked: .* Set MAINWORTHY_OWNER_TOKEN to a new value/),
 		]);
@@ -877,7 +877,7 @@ describe("the owner's token from the environment", () => {
 		expect(nineteen).toHaveLength(19);
 		let refusal = "";
 		try {
-			boot({ dataDir, ownerToken: nineteen });
+			await boot({ dataDir, ownerToken: nineteen });
 		} catch (error) {
 			refusal = error instanceof Error ? error.message : String(error);
 		}
@@ -886,7 +886,7 @@ describe("the owner's token from the environment", () => {
 		);
 		// No actor and no token was made, and the database was left closed: the next start is the instance's first.
 		const twenty = `${nineteen}k`;
-		const warned = boot({ dataDir, ownerToken: twenty });
+		const warned = await boot({ dataDir, ownerToken: twenty });
 		expect(said(warned)).toEqual([
 			"MAINWORTHY_OWNER_TOKEN is shorter than 32 characters. It signs robin in as it is; a longer one is harder to guess. Make one with `openssl rand -hex 32`.",
 		]);
@@ -894,15 +894,15 @@ describe("the owner's token from the environment", () => {
 		expect(await statusOf(warned, bearer(twenty))).toBe(200);
 		await warned.stop();
 		// It warns on every start, not only on the one that stored it.
-		const again = boot({ dataDir, ownerToken: twenty });
+		const again = await boot({ dataDir, ownerToken: twenty });
 		expect(said(again)).toHaveLength(1);
 		await again.stop();
 
-		const quiet = boot({ ownerToken: "a".repeat(32) });
+		const quiet = await boot({ ownerToken: "a".repeat(32) });
 		expect(said(quiet)).toEqual([]);
 		await quiet.stop();
 		// A variable a compose file passes on empty is one that was not set: the start generates the token.
-		const unset = boot({ ownerToken: "" });
+		const unset = await boot({ ownerToken: "" });
 		expect([said(unset), unset.generatedToken]).toEqual([[], expect.stringMatching(/^cb_/)]);
 		// The same rule where the machine's owner needs no token: the value is a token there too.
 		expect(() => boot({ mode: "local", ownerToken: nineteen })).toThrow("shorter than 20 characters");
@@ -914,14 +914,14 @@ describe("the owner's token from the environment", () => {
 		expect(longest).toHaveLength(512);
 		let refusal = "";
 		try {
-			boot({ ownerToken: `${longest}k` });
+			await boot({ ownerToken: `${longest}k` });
 		} catch (error) {
 			refusal = error instanceof Error ? error.message : String(error);
 		}
 		expect(refusal).toBe(
 			`MAINWORTHY_OWNER_TOKEN is longer than 512 characters, and a sign-in reads no token longer than that. Make one with \`openssl rand -hex 32\`, set MAINWORTHY_OWNER_TOKEN to it and start again${UNCHANGED}`,
 		);
-		const instance = boot({ ownerToken: longest });
+		const instance = await boot({ ownerToken: longest });
 		expect([
 			said(instance),
 			await statusOf(instance, bearer(longest)),
@@ -935,7 +935,7 @@ describe("the owner's token from the environment", () => {
 		// An earlier build took an owner token of any length. Its row survives the upgrade, and nothing can tell its
 		// length from its hash, so no start can warn about it. What must not happen is that it works one way and
 		// not the other: a sign-in reads at most 512 characters, so a bearer does too.
-		const instance = boot();
+		const instance = await boot();
 		const kept = "k1".repeat(300);
 		await instance.app.gate.run(() =>
 			instance.app.db.raw
@@ -959,9 +959,9 @@ describe("the owner's token from the environment", () => {
 		const THIRD = "a-third-owner-secret-0123456789abcdef";
 		const clock = clockAt();
 		const dataDir = scratch();
-		const first = boot({ clock, dataDir });
+		const first = await boot({ clock, dataDir });
 		await first.stop();
-		const second = boot({ clock, dataDir, ownerToken: SECOND });
+		const second = await boot({ clock, dataDir, ownerToken: SECOND });
 		expect(said(second)).toEqual([expect.stringContaining("(token 1 of robin) was revoked")]);
 		const { cookie } = await signIn(second, SECOND);
 		// Another person's token that the upgrade marked as from the environment, because of its label.
@@ -977,7 +977,7 @@ describe("the owner's token from the environment", () => {
 
 		// The owner's name and the configured value change in one start.
 		clock.advance(DAY);
-		const third = boot({ clock, dataDir, owner: "alex", ownerToken: THIRD });
+		const third = await boot({ clock, dataDir, owner: "alex", ownerToken: THIRD });
 		expect(said(third)).toEqual([
 			"MAINWORTHY_OWNER_TOKEN has a new value: the tokens it held before (token 2 of robin, token 4 of sam) were revoked, and every session opened with them has ended. Sign in with the new value.",
 		]);
@@ -1003,14 +1003,14 @@ describe("the owner's token from the environment", () => {
 	test("a configured value that is a token past its end is said at the start, with when it ended, and is not revived", async () => {
 		const clock = clockAt();
 		const dataDir = scratch();
-		const first = boot({ clock, dataDir });
+		const first = await boot({ clock, dataDir });
 		const brief = await token(first, { ...FOR_OWNER, expires: "1h" });
 		// The owner's other token goes while this one works, so its end leaves the owner with none.
 		expect((await admin(first, { do: "token.revoke", id: 1 }, bearer(brief.token))).status).toBe(200);
 		await first.stop();
 
 		clock.set(T0 + HOUR);
-		const second = boot({ clock, dataDir, ownerToken: brief.token });
+		const second = await boot({ clock, dataDir, ownerToken: brief.token });
 		expect(said(second)).toEqual([
 			`MAINWORTHY_OWNER_TOKEN reached its end at ${new Date(T0 + HOUR).toISOString()}: it does not sign robin in, and it was left as it is. Set MAINWORTHY_OWNER_TOKEN to a new value and start again.`,
 		]);
@@ -1022,7 +1022,7 @@ describe("the owner's token from the environment", () => {
 		]);
 		await second.stop();
 		// A new value is the way back in, as the line says.
-		const third = boot({ clock, dataDir, ownerToken: SECOND });
+		const third = await boot({ clock, dataDir, ownerToken: SECOND });
 		expect([said(third), await statusOf(third, bearer(SECOND))]).toEqual([[], 200]);
 	});
 
@@ -1075,7 +1075,7 @@ describe("the owner's token from the environment", () => {
 	test("a token that ends within 14 days is named at the start, and one further out is not", async () => {
 		const clock = clockAt();
 		const dataDir = scratch();
-		const first = boot({ clock, dataDir });
+		const first = await boot({ clock, dataDir });
 		const soon = await token(first, {
 			actor: "pipeline",
 			kind: "ci",
@@ -1090,7 +1090,7 @@ describe("the owner's token from the environment", () => {
 		await first.stop();
 
 		clock.advance(DAY);
-		const second = boot({ clock, dataDir });
+		const second = await boot({ clock, dataDir });
 		expect(said(second)).toEqual([
 			`token ${soon.id} of pipeline ("CI\\non main") expires in 13 days, and what uses it is refused from then on. Make its replacement with \`mainworthy token new\`, and revoke this one once the replacement is in use.`,
 		]);
@@ -1099,7 +1099,7 @@ describe("the owner's token from the environment", () => {
 
 		// Sixteen days on, the first has ended and is not named again; the second now ends within 14 days.
 		clock.advance(16 * DAY);
-		const third = boot({ clock, dataDir });
+		const third = await boot({ clock, dataDir });
 		expect(said(third)).toEqual([
 			expect.stringMatching(new RegExp(`^token ${later.id} of helper \\("agent token"\\) expires in 13 days,`)),
 		]);
@@ -1113,7 +1113,7 @@ describe("an upgrade", () => {
 		writeFileSync(path, Bun.gunzipSync(readFileSync(FIXTURE.file)));
 		writeFileSync(`${path}.v1.bak`, "an older upgrade copy");
 		const clock = clockAt(FIXTURE.stoppedAt + HOUR);
-		const instance = boot({ dataDir, clock, ownerToken: FIXTURE.env });
+		const instance = await boot({ dataDir, clock, ownerToken: FIXTURE.env });
 		expect(said(instance)).toEqual([]);
 		expect(existsSync(`${path}.v1.bak`)).toBe(false);
 		expect(existsSync(`${path}.v2.bak`)).toBe(true);
@@ -1165,7 +1165,7 @@ describe("an upgrade", () => {
 
 		// The mark is what a changed variable goes by: the old build's token from the environment is retired, and
 		// the one that build generated is not.
-		const changed = boot({ dataDir, clock, ownerToken: OWNER });
+		const changed = await boot({ dataDir, clock, ownerToken: OWNER });
 		expect(said(changed)).toEqual([expect.stringContaining("(token 2 of robin) was revoked")]);
 		expect([
 			await statusOf(changed, bearer(FIXTURE.env)),
@@ -1186,7 +1186,7 @@ describe("an upgrade", () => {
 		raw.query("UPDATE tokens SET label = 'owner (from EARLIER_OWNER_TOKEN)' WHERE id = 2").run();
 		raw.close();
 		const at = FIXTURE.stoppedAt + HOUR;
-		const kept = boot({ dataDir, clock: clockAt(at), ownerToken: FIXTURE.env });
+		const kept = await boot({ dataDir, clock: clockAt(at), ownerToken: FIXTURE.env });
 		expect(tokens(kept)).toMatchObject([
 			{ id: 1, source: "generated" },
 			{ id: 2, label: "owner (from EARLIER_OWNER_TOKEN)", source: "env", revoked_at: null },
@@ -1195,7 +1195,7 @@ describe("an upgrade", () => {
 		expect([said(kept), await statusOf(kept, bearer(FIXTURE.env))]).toEqual([[], 200]);
 		await kept.stop();
 		// So a new value in the variable retires it, as it retires one this build labelled.
-		const changed = boot({ dataDir, clock: clockAt(at), ownerToken: OWNER });
+		const changed = await boot({ dataDir, clock: clockAt(at), ownerToken: OWNER });
 		expect(said(changed)).toEqual([expect.stringContaining("(token 2 of robin) was revoked")]);
 		expect(tokens(changed)).toMatchObject([{ id: 1 }, { id: 2, revoked_at: at }, { id: 3 }, { id: 4, source: "env" }]);
 		expect(await statusOf(changed, bearer(FIXTURE.env))).toBe(401);

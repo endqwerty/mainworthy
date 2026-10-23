@@ -50,9 +50,9 @@ afterEach(() => {
 	for (const app of apps.splice(0)) app.close();
 });
 
-function instance(): { app: App; advance: (ms: number) => void } {
+async function instance(): Promise<{ app: App; advance: (ms: number) => void }> {
 	let now = 1_800_000_000_000;
-	const app = openApp(
+	const app = await openApp(
 		{
 			dataDir: ":memory:",
 			host: "127.0.0.1",
@@ -75,8 +75,8 @@ function instance(): { app: App; advance: (ms: number) => void } {
 	};
 }
 
-test("a challenge is found for the purpose it was issued for, with the relying party it was issued under, until its time runs out", () => {
-	const { app, advance } = instance();
+test("a challenge is found for the purpose it was issued for, with the relying party it was issued under, until its time runs out", async () => {
+	const { app, advance } = await instance();
 	const signIn = issueChallenge(app, SIGN_IN, PARTY);
 	const begun = { purpose: "register", userHandle: "aGFuZGxl", context: CONTEXT.session("5".repeat(64)) } as const;
 	const register = issueChallenge(app, begun, PARTY);
@@ -110,9 +110,9 @@ test("a challenge is found for the purpose it was issued for, with the relying p
 	expect(findChallenge(app, register, "register")).toBeNull();
 });
 
-test("a spent challenge answers nothing again, and another instance's challenge is not this one's", () => {
-	const { app } = instance();
-	const other = instance().app;
+test("a spent challenge answers nothing again, and another instance's challenge is not this one's", async () => {
+	const { app } = await instance();
+	const other = (await instance()).app;
 	const challenge = issueChallenge(app, SIGN_IN, PARTY);
 	expect(findChallenge(other, challenge, "sign-in")).toBeNull();
 	spendChallenge(other, challenge);
@@ -128,8 +128,8 @@ test("a spent challenge answers nothing again, and another instance's challenge 
 	expect(findChallenge(other, kept, "sign-in")).not.toBeNull();
 });
 
-test("the challenges under way are bounded: past ten thousand the ones whose time ran out go first, then the oldest", () => {
-	const { app, advance } = instance();
+test("the challenges under way are bounded: past ten thousand the ones whose time ran out go first, then the oldest", async () => {
+	const { app, advance } = await instance();
 	const first = issueChallenge(app, SIGN_IN, PARTY);
 	const second = issueChallenge(app, SIGN_IN, PARTY);
 	for (let i = 2; i < 10_000; i++) issueChallenge(app, SIGN_IN, PARTY);

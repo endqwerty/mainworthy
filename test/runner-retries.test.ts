@@ -385,7 +385,7 @@ test("diagnostic detail supplies a result and its runner try with a known cause"
 	]);
 });
 
-test("the unknown cause migration preserves known classes, ids and references", () => {
+test("the unknown cause migration preserves known classes, ids and references", async () => {
 	const migration = MIGRATIONS.find((entry) => entry.name === "unknown_causes");
 	if (!migration) throw new Error("missing unknown cause migration");
 	const db = new Db(":memory:");
@@ -402,7 +402,7 @@ test("the unknown cause migration preserves known classes, ids and references", 
 			INSERT INTO assertion_roots VALUES (1, 10, 10);
 		`);
 		const before = db.raw.query("SELECT id, project, hash, class, text, first_seq FROM signatures ORDER BY id").all();
-		migrate(db, ":memory:");
+		await migrate(db, ":memory:");
 		expect(db.raw.query("SELECT id, project, hash, class, text, first_seq FROM signatures ORDER BY id").all()).toEqual(
 			before,
 		);
@@ -458,28 +458,28 @@ test("unknown causes and their decisions survive archive replay for later report
 	exportArchive(h.app.db, (chunk) => chunks.push(chunk), { now: 1_800_000_000_000 });
 	const db = new Db(":memory:");
 	try {
-		migrate(db, ":memory:");
-		importArchive(db, linesOf(chunks.join("")));
+		await migrate(db, ":memory:");
+		await importArchive(db, linesOf(chunks.join("")));
 		expect(db.raw.query("SELECT class, text FROM signatures").all()).toEqual([
 			{ class: "unknown", text: "Unknown failure cause" },
 		]);
 		expect(db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
-		const project = findProject(db, "scratch");
+		const project = await findProject(db, "scratch");
 		if (!project) throw new Error("missing project");
 		const app = { ...h.app, db };
-		db.transaction(() => {
+		db.transaction(async () => {
 			const ctx = makeCtx(app, project, h.owner, true);
-			acceptReport(ctx, ReportInput.parse({ target, results, attempt: 2 }));
-			stampSeq(ctx);
+			await acceptReport(ctx, ReportInput.parse({ target, results, attempt: 2 }));
+			await stampSeq(ctx);
 		});
-		expect(recoverAccepted(app)).toBe(1);
+		expect(await recoverAccepted(app)).toBe(1);
 		expect(db.raw.query("SELECT class, text FROM signatures").all()).toHaveLength(1);
 		expect(
 			await invoke(app, OPS, {
 				op: "gate",
 				project: "scratch",
 				input: { change: "pr:7", repo: "acme/web" },
-				actor: () => h.owner,
+				actor: async () => h.owner,
 			}),
 		).toMatchObject({
 			ok: true,
@@ -543,8 +543,10 @@ test.each(["rebuild", "archive"])(
 		const tests = Array.from({ length: 1200 }, (_, i) => ({ key: `history-${i}`, file: `history-${i}.test.ts` }));
 		const input = broadReport(tests);
 		await h.call("report", input, h.actor("pipeline", "ci", ["read", "record"]));
-		const pending = inContext((ctx) =>
-			acceptReport(ctx, ReportInput.parse({ ...broadReport(tests.slice(-1)), job: "pending" })),
+		const pending = (
+			await inContext((ctx) =>
+				acceptReport(ctx, ReportInput.parse({ ...broadReport(tests.slice(-1)), job: "pending" })),
+			)
 		).batch;
 		const imported = maintenance === "archive" ? new Db(":memory:") : null;
 		const db = imported ?? h.app.db;
@@ -552,9 +554,9 @@ test.each(["rebuild", "archive"])(
 			if (imported) {
 				const chunks: string[] = [];
 				exportArchive(h.app.db, (chunk) => chunks.push(chunk), { now: 1_800_000_000_000 });
-				migrate(imported, ":memory:");
-				importArchive(imported, linesOf(chunks.join("")));
-			} else rebuildAssertionIndexes(db, true);
+				await migrate(imported, ":memory:");
+				await importArchive(imported, linesOf(chunks.join("")));
+			} else await rebuildAssertionIndexes(db, true);
 			const get = db.get.bind(db);
 			let rowsRead = 0;
 			db.get = (statement, ...params) => {
@@ -564,9 +566,9 @@ test.each(["rebuild", "archive"])(
 			};
 			try {
 				const app = { ...h.app, db };
-				expect(recoverAccepted(app)).toBe(1);
+				expect(await recoverAccepted(app)).toBe(1);
 				budget("rows read recovering an accepted report", rowsRead, 512, "rows");
-				expect(recoverAccepted(app)).toBe(0);
+				expect(await recoverAccepted(app)).toBe(0);
 			} finally {
 				db.get = get;
 			}
@@ -596,13 +598,13 @@ test("repeated tries and reports stop retaining threshold observations once the 
 	]);
 });
 
-const inContext = <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): T =>
-	h.app.db.transaction(() => {
-		const project = findProject(h.app.db, "scratch");
+const inContext = async <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): Promise<T> =>
+	await h.app.db.transaction(async () => {
+		const project = await findProject(h.app.db, "scratch");
 		if (!project) throw new Error("missing project");
 		const ctx = makeCtx(h.app, project, h.owner, true);
 		const value = fn(ctx);
-		stampSeq(ctx);
+		await stampSeq(ctx);
 		return value;
 	});
 
@@ -612,7 +614,7 @@ test("application yields within a batch's tries, and recovery after rollback app
 		...result,
 		tries: Array.from({ length: 100 }, () => failed("assertion failed")),
 	}));
-	const batch = inContext((ctx) => acceptReport(ctx, ReportInput.parse(input))).batch;
+	const batch = (await inContext((ctx) => acceptReport(ctx, ReportInput.parse(input)))).batch;
 	expect(() =>
 		inContext((ctx) => {
 			const steps = processBatchSteps(ctx, batch.id);
@@ -622,8 +624,8 @@ test("application yields within a batch's tries, and recovery after rollback app
 		}),
 	).toThrow("interrupted application");
 	expect(h.app.db.raw.query("SELECT count(*) AS n FROM assertion_seen").get()).toEqual({ n: 0 });
-	expect(recoverAccepted(h.app)).toBe(1);
-	expect(recoverAccepted(h.app)).toBe(0);
+	expect(await recoverAccepted(h.app)).toBe(1);
+	expect(await recoverAccepted(h.app)).toBe(0);
 	expect(h.app.db.raw.query("SELECT count(*) AS n FROM result_tries").get()).toEqual({ n: 600 });
 	expect((await gate(input.target.commit)).verdict).toBe("passed");
 });
@@ -631,7 +633,7 @@ test("application yields within a batch's tries, and recovery after rollback app
 test("old unsplit tries rebuild before pending recovery without rewriting historical causes", async () => {
 	const input = broadReport();
 	await h.call("report", input);
-	dropReceiptSchema(h.app.db);
+	await dropReceiptSchema(h.app.db);
 	h.app.db.raw.exec(`
 		UPDATE result_tries SET signature = (SELECT root FROM assertion_roots WHERE signature = result_tries.signature);
 
@@ -639,9 +641,9 @@ test("old unsplit tries rebuild before pending recovery without rewriting histor
 		DROP INDEX results_assertion_rebuild;
 		UPDATE meta SET value = '39' WHERE key = 'schema_version';
 	`);
-	migrate(h.app.db, ":memory:");
+	await migrate(h.app.db, ":memory:");
 	const before = h.app.db.raw.query("SELECT id, signature FROM result_tries ORDER BY id").all();
-	inContext((ctx) =>
+	await inContext((ctx) =>
 		acceptReport(
 			ctx,
 			ReportInput.parse({
@@ -651,9 +653,9 @@ test("old unsplit tries rebuild before pending recovery without rewriting histor
 			}),
 		),
 	);
-	rebuildAssertionIndexes(h.app.db);
+	await rebuildAssertionIndexes(h.app.db);
 	expect(h.app.db.raw.query("SELECT id, signature FROM result_tries ORDER BY id").all()).toEqual(before);
-	expect(recoverAccepted(h.app)).toBe(1);
+	expect(await recoverAccepted(h.app)).toBe(1);
 	expect((await page())?.sameCode.signals).toMatchObject([
 		{ signature: { text: "assertion failed" }, flips: 1 },
 		{ signature: { text: "Split by file (file-0.test.ts): assertion failed" }, flips: 1 },
@@ -675,8 +677,8 @@ test("archive import reconstructs roots using full filenames and keeps split-loo
 	expect(text).not.toContain('"t":"assertion_');
 	const to = new Db(":memory:");
 	try {
-		migrate(to, ":memory:");
-		importArchive(to, linesOf(text));
+		await migrate(to, ":memory:");
+		await importArchive(to, linesOf(text));
 		expect(to.raw.query("SELECT id, signature FROM result_tries ORDER BY id").all()).toEqual(before);
 		expect(to.raw.query("SELECT count(*) AS n FROM assertion_seen").get()).toEqual({ n: 51 });
 		expect(to.raw.query("SELECT count(*) AS n FROM assertion_roots WHERE root != signature").get()).toEqual({ n: 6 });
@@ -711,7 +713,7 @@ test("legacy missing file causes are created only when that file recurs on its b
 		.query("DELETE FROM assertion_roots WHERE signature IN (SELECT id FROM signatures WHERE text = ?)")
 		.run(missing);
 	h.app.db.raw.query("DELETE FROM signatures WHERE text = ?").run(missing);
-	rebuildAssertionIndexes(h.app.db, true);
+	await rebuildAssertionIndexes(h.app.db, true);
 	expect(h.app.db.raw.query("SELECT 1 FROM signatures WHERE text = ?").get(missing)).toBeNull();
 	const another = broadReport(earlier.slice(0, 1), {
 		target: { repo: "acme/web", commit: "another-commit", branch: "main" },

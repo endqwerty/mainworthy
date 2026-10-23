@@ -169,9 +169,9 @@ test("a hand-off the server was sending when it stopped is failed at start, not 
 	const { url, received } = agent();
 	const { h, q } = await failing(url);
 	const queued = h.call("handoff", { question: q, cmd: "handoff-cmd-04" });
-	const interrupted = h.app.gate.run(() => {
+	const interrupted = h.app.gate.run(async () => {
 		h.app.db.raw.query("UPDATE handoffs SET state = 'sending'").run();
-		recoverHandoffs(h.app);
+		await recoverHandoffs(h.app);
 	});
 	await queued;
 	await interrupted;
@@ -251,7 +251,7 @@ test("the configuration takes all three settings or none, and never repeats the 
 test("the session tells a page which projects hand failures to an agent", async () => {
 	directory = mkdtempSync(join(tmpdir(), "mainworthy-handoff-"));
 	const handoff = { project: "scratch", url: "https://agent.example/hooks/abc", secret };
-	instance = start(
+	instance = await start(
 		{ ...defaultConfig({}), owner: "robin", dataDir: directory, port: 0, handoff },
 		() => ({ ui: null }),
 		{

@@ -48,8 +48,8 @@ import { defineInstanceOp, type InstanceCtx } from "./registry.ts";
  * Whether the caller may look is settled before saying whether there is such an actor, so somebody who may not
  * is told that and learns no name.
  */
-function subject(env: InstanceCtx, named: string | undefined, what: string): Actor {
-	const found = named === undefined || named === env.actor.name ? env.actor : actorByName(env.app.db, named, 0);
+async function subject(env: InstanceCtx, named: string | undefined, what: string): Promise<Actor> {
+	const found = named === undefined || named === env.actor.name ? env.actor : await actorByName(env.app.db, named, 0);
 	// No actor has the id 0, so for a name that is nobody's this asks whether the caller may look at anyone's.
 	if (!mayActFor(env.actor, found?.id ?? 0))
 		throw forbidden(`${what} of somebody else are for a person who administers this instance`);
@@ -83,16 +83,16 @@ export const sessionOp = defineInstanceOp({
 	// admits requests keeps, so it runs there and not on a reader thread.
 	effect: "write",
 	mcp: null,
-	run(env, input) {
+	async run(env, input) {
 		const db = env.app.db;
 		switch (input.do) {
 			case "list": {
-				const who = subject(env, input.actor, "the sessions");
-				return listSessions(env.app, db, who.id).map((row) => ({ ...row, current: row.id === env.session }));
+				const who = await subject(env, input.actor, "the sessions");
+				return (await listSessions(env.app, db, who.id)).map((row) => ({ ...row, current: row.id === env.session }));
 			}
 			case "end": {
-				own(env, sessionOwner(db, input.id), `session ${input.id}`);
-				endSessionById(db, input.id, env.now);
+				own(env, await sessionOwner(db, input.id), `session ${input.id}`);
+				await endSessionById(db, input.id, env.now);
 				// Ending the session the request came by is allowed: it is how a person signs this browser out
 				// from the list, and the page then finds itself signed out.
 				return { ended: true, current: input.id === env.session };
@@ -115,20 +115,20 @@ export const credentialOp = defineInstanceOp({
 	scope: "instance",
 	effect: "write",
 	mcp: null,
-	run(env, input) {
+	async run(env, input) {
 		// An agent and a pipeline sign in with a token and nothing else.
 		if (env.actor.kind !== "human")
 			throw forbidden(`${env.actor.name} is ${KIND_NOUN[env.actor.kind]}: only a person has a password or a passkey`);
 		const db = env.app.db;
 		switch (input.do) {
 			case "email.get":
-				return getEmail(db, subject(env, input.actor, "the email address").id);
+				return await getEmail(db, (await subject(env, input.actor, "the email address")).id);
 			case "email.set": {
-				const person = subject(env, input.actor, "the email address");
-				return setEmail(env.app, { caller: env.actor, person, context: env.context, email: input.email });
+				const person = await subject(env, input.actor, "the email address");
+				return await setEmail(env.app, { caller: env.actor, person, context: env.context, email: input.email });
 			}
 			case "list":
-				return listCredentials(db, subject(env, input.actor, "the passwords and passkeys").id);
+				return await listCredentials(db, (await subject(env, input.actor, "the passwords and passkeys")).id);
 			// A passkey is registered by the person it is for, signed in, and for nobody else: an admin who could
 			// add one to another person's account could sign in as them.
 			// It is registered where the person is signed in, and finished there: the challenge keeps the caller's
@@ -136,9 +136,9 @@ export const credentialOp = defineInstanceOp({
 			// from, so it begins and finishes none, as it sets no password: a way in that a script could add would
 			// outlive the token.
 			case "totp.begin":
-				return beginTotp(env.app, { actor: env.actor.id, context: signedInAt(env, "an authenticator") });
+				return await beginTotp(env.app, { actor: env.actor.id, context: signedInAt(env, "an authenticator") });
 			case "totp.confirm":
-				return confirmTotp(env.app, {
+				return await confirmTotp(env.app, {
 					actor: env.actor.id,
 					session: env.session,
 					context: signedInAt(env, "an authenticator"),
@@ -146,21 +146,21 @@ export const credentialOp = defineInstanceOp({
 					code: input.code,
 				});
 			case "passkey.begin":
-				return beginPasskey(env.app, { actor: env.actor.id, context: signedInAt(env) });
+				return await beginPasskey(env.app, { actor: env.actor.id, context: signedInAt(env) });
 			case "passkey.add":
-				return addPasskey(env.app, {
+				return await addPasskey(env.app, {
 					actor: env.actor.id,
 					context: signedInAt(env),
 					answer: input.passkey,
 					label: input.label,
 				});
 			case "remove":
-				own(env, credentialOwner(db, input.id), `credential ${input.id}`);
-				return removeCredential(env.app, input.id, { actor: env.actor.id, context: env.context });
+				own(env, await credentialOwner(db, input.id), `credential ${input.id}`);
+				return await removeCredential(env.app, input.id, { actor: env.actor.id, context: env.context });
 			case "token.create": {
 				const lastsMs = durationMs(input.expires);
 				if (lastsMs === null) throw invalid("expires: invalid duration");
-				return createPersonalToken(env.app, {
+				return await createPersonalToken(env.app, {
 					actor: env.actor,
 					session: env.session,
 					context: env.context,
@@ -169,10 +169,10 @@ export const credentialOp = defineInstanceOp({
 				});
 			}
 			case "token.list":
-				return listPersonalTokens(env.app, env.actor.id);
+				return await listPersonalTokens(env.app, env.actor.id);
 			case "token.revoke":
-				own(env, tokenOwner(db, input.id), `token ${input.id}`);
-				return { revoked: revokeToken(env.app, input.id) };
+				own(env, await tokenOwner(db, input.id), `token ${input.id}`);
+				return { revoked: await revokeToken(env.app, input.id) };
 			default: {
 				const _exhaustive: never = input;
 				throw invalid(`unknown credential action ${JSON.stringify(_exhaustive)}`);
@@ -192,7 +192,7 @@ export const invitationOp = defineInstanceOp({
 	scope: "instance",
 	effect: "write",
 	mcp: null,
-	run(env, input) {
+	async run(env, input) {
 		// Who a person is, is for a person to say (`personOnly` in `admin.ts`): an agent that could invite could
 		// accept, and would then be a person to every rule that says "not an agent".
 		personOnly(env, "an invitation is made, listed or revoked");
@@ -205,18 +205,18 @@ export const invitationOp = defineInstanceOp({
 					throw invalid(
 						"expires: an invitation lasts at most 30d; a link that is still good in a year is a key left out",
 					);
-				const project = projectOf(db, input.project);
-				const existing = actorByName(db, input.name, project);
+				const project = await projectOf(db, input.project);
+				const existing = await actorByName(db, input.name, project);
 				// For a person who exists the invitation is a recovery: whoever accepts it is that person from
 				// then on. So it is theirs or the owner's to make, as a token for them is.
 				refuseToken(env, { kind: "human" }, existing, "invitation");
-				const person = invitedPerson(env.app, {
+				const person = await invitedPerson(env.app, {
 					name: input.name,
 					can: existing === null && input.can.length === 0 ? defaultCapabilities("human") : input.can,
 					project,
 				});
 				const purpose = person.isNew ? "join" : "recover";
-				const made = createInvitation(env.app, {
+				const made = await createInvitation(env.app, {
 					actor: person.id,
 					by: env.actor.id,
 					purpose,
@@ -254,11 +254,11 @@ export const invitationOp = defineInstanceOp({
 			case "list": {
 				// What an invitation gives is what its person holds, on which project: the grant is the person's and
 				// not the link's, so it is read as `actor.list` reads it, now.
-				const held = new Map(actorsWithGrants(db).map((actor) => [actor.name, actor.grants]));
-				return listInvitations(db, env.now).map((row) => ({ ...row, grants: held.get(row.name) ?? [] }));
+				const held = new Map((await actorsWithGrants(db)).map((actor) => [actor.name, actor.grants]));
+				return (await listInvitations(db, env.now)).map((row) => ({ ...row, grants: held.get(row.name) ?? [] }));
 			}
 			case "revoke":
-				return { revoked: revokeInvitation(db, input.id, env.now) };
+				return { revoked: await revokeInvitation(db, input.id, env.now) };
 			default: {
 				const _exhaustive: never = input;
 				throw invalid(`unknown invitation action ${JSON.stringify(_exhaustive)}`);

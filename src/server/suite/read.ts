@@ -4,7 +4,7 @@ import { diffBodies, summariseDiff } from "../../core/diff.ts";
 import { type Automate, type CaseBody, cleanPath } from "../../core/model.ts";
 import type { Selection } from "../../core/ops.ts";
 import type { Ctx } from "../kernel/ctx.ts";
-import { type Db, json, placeholders, type SqlValue, sql } from "../kernel/db.ts";
+import { type ReadDb, json, placeholders, type SqlValue, sql } from "../kernel/db.ts";
 import { invalid, notFound } from "../kernel/errors.ts";
 import { type CaseRow, type FolderIndex, type FolderRow, folderIndex, mustCase, type VersionRow } from "./suite.ts";
 
@@ -99,7 +99,7 @@ export type SuiteProblem = { rule: string; total: number; rows: { ref: string; m
  * Structural problems the suite's own data can show, each with a total and its first rows. Deterministic: the
  * same rules a person would apply by reading, with no model involved.
  */
-export function structuralProblems(db: Db, project: number): SuiteProblem[] {
+export function structuralProblems(db: ReadDb, project: number): SuiteProblem[] {
 	const rules: { rule: string; where: string; message: (title: string) => string }[] = [
 		{ rule: "no-steps", where: "c.step_count = 0", message: (title) => `"${title}" has no steps` },
 		{ rule: "no-title", where: "c.title = ''", message: () => "has no title" },
@@ -127,11 +127,11 @@ export function structuralProblems(db: Db, project: number): SuiteProblem[] {
 }
 
 /** Archived cases, newest first: a test still linked to one of these is linked to nothing a run can use. */
-export const archivedCases = (db: Db, project: number, limit: number): CaseRow[] =>
-	db.allDynamic<CaseRow>("SELECT * FROM cases WHERE project = ? AND state = 'archived' ORDER BY rev DESC LIMIT ?", [
-		project,
-		limit,
-	]);
+export const archivedCases = async (db: ReadDb, project: number, limit: number): Promise<CaseRow[]> =>
+	await db.allDynamic<CaseRow>(
+		"SELECT * FROM cases WHERE project = ? AND state = 'archived' ORDER BY rev DESC LIMIT ?",
+		[project, limit],
+	);
 
 /**
  * The most matches a search scores for relevance. Beyond this a word is too common for a ranking to help, and
@@ -184,15 +184,15 @@ export type CaseQuery = {
  * One page of cases. Without text: in outline order (folder, then rank), from the cursor. With text: by relevance,
  * from a place in that order (the cursor). Folder and tag filters are applied by the database in the same query.
  */
-export function listCases(
+export async function listCases(
 	ctx: Ctx,
 	query: CaseQuery,
-): { items: CaseRow[]; cursor: string | null; count: number | null } {
+): Promise<{ items: CaseRow[]; cursor: string | null; count: number | null }> {
 	const project = ctx.project.id;
 	const where: string[] = ["c.project = ?", "c.state = ?"];
 	const params: SqlValue[] = [project, query.state === "archived" ? "archived" : "active"];
 	if (query.folder !== undefined) {
-		const index = folderIndex(ctx.db, project);
+		const index = await folderIndex(ctx.db, project);
 		const root = resolveFolderId(index, query.folder);
 		const ids = query.deep ? subtree(index, root) : [root];
 		where.push(`c.folder IN (${placeholders(ids.length)})`);
@@ -205,13 +205,13 @@ export function listCases(
 
 	if (query.text?.trim()) {
 		const from = searchOffset(query.cursor);
-		const { ids, exact } = searchIds(ctx, query, where, params);
+		const { ids, exact } = await searchIds(ctx, query, where, params);
 		// Only a search of every match has an order that holds from one page to the next. One too broad to rank is
 		// read only as far as its first page needs, and a longer read would change that order, so it answers one page
 		// and no cursor; a cursor into it reads nothing more.
 		const page = exact || from === 0 ? ids.slice(from, from + query.limit) : [];
 		const rows = page.length
-			? ctx.db.allDynamic<CaseRow>(`SELECT c.* FROM cases c WHERE c.id IN (${placeholders(page.length)})`, page)
+			? await ctx.db.allDynamic<CaseRow>(`SELECT c.* FROM cases c WHERE c.id IN (${placeholders(page.length)})`, page)
 			: [];
 		const order = new Map(page.map((id, i) => [id, i]));
 		rows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
@@ -234,7 +234,7 @@ export function listCases(
 		where.push("(c.folder > ? OR (c.folder = ? AND c.rank > ?))");
 		params.push(folder, folder, rank);
 	}
-	const rows = ctx.db.allDynamic<CaseRow>(
+	const rows = await ctx.db.allDynamic<CaseRow>(
 		`SELECT c.* FROM cases c WHERE ${where.join(" AND ")} ORDER BY c.folder, c.rank LIMIT ?`,
 		[...params, query.limit + 1],
 	);
@@ -256,7 +256,12 @@ function searchOffset(cursor: string | undefined): number {
  * Otherwise the word is too common to rank: newest first, matches in the title before matches in the steps, and the
  * list is only as long as the page asked for needs.
  */
-function searchIds(ctx: Ctx, query: CaseQuery, where: string[], params: SqlValue[]): { ids: number[]; exact: boolean } {
+async function searchIds(
+	ctx: Ctx,
+	query: CaseQuery,
+	where: string[],
+	params: SqlValue[],
+): Promise<{ ids: number[]; exact: boolean }> {
 	const project = ctx.project.id;
 	const text = query.text ?? "";
 	const direct = /^(?:c-)?(\d+)$/i.exec(text.trim());
@@ -264,7 +269,7 @@ function searchIds(ctx: Ctx, query: CaseQuery, where: string[], params: SqlValue
 	const ids: number[] = [];
 	// A ref is found like any match: only where the folder, the tags and the state let it be.
 	if (direct) {
-		const [row] = ctx.db.allDynamic<{ id: number }>(
+		const [row] = await ctx.db.allDynamic<{ id: number }>(
 			`SELECT c.id FROM cases c WHERE c.no = ? AND ${where.join(" AND ")}`,
 			[Number(direct[1]), ...params],
 		);
@@ -272,50 +277,50 @@ function searchIds(ctx: Ctx, query: CaseQuery, where: string[], params: SqlValue
 	}
 	if (!match) return { ids, exact: true };
 	const filtered = query.folder !== undefined || (query.tags?.length ?? 0) > 0;
-	const candidates = (match: string, newest: boolean, limit: number): number[] => {
+	const candidates = async (match: string, newest: boolean, limit: number): Promise<number[]> => {
 		// Unary + keeps the case index on the filter range instead of probing it once per FTS rowid.
 		if (filtered && !newest)
-			return ctx.db
-				.allDynamic<{ id: number }>(
+			return (
+				await ctx.db.allDynamic<{ id: number }>(
 					`SELECT c.id FROM cases c WHERE ${where.join(" AND ")}
 				 AND +c.id IN (SELECT rowid FROM search_docs WHERE search_docs MATCH ?) LIMIT ?`,
 					[...params, match, limit],
 				)
-				.map((row) => row.id);
-		return ctx.db
-			.allDynamic<{ rowid: number }>(
+			).map((row) => row.id);
+		return (
+			await ctx.db.allDynamic<{ rowid: number }>(
 				`SELECT rowid FROM search_docs WHERE search_docs MATCH ? AND project = ?
 			 AND EXISTS (SELECT 1 FROM cases c WHERE c.id = search_docs.rowid AND ${where.join(" AND ")})
 			 ${newest ? "ORDER BY rowid DESC" : ""} LIMIT ?`,
 				[match, project, ...params, limit],
 			)
-			.map((row) => row.rowid);
+		).map((row) => row.rowid);
 	};
 	const append = (more: number[]) => {
 		const seen = new Set(ids);
 		for (const id of more) if (!seen.has(id)) ids.push(id);
 	};
 	// How many match? Stop counting past the limit: this read is bounded whatever the word.
-	const probe = candidates(match, false, RANKED_MATCHES + 1);
+	const probe = await candidates(match, false, RANKED_MATCHES + 1);
 	if (probe.length <= RANKED_MATCHES) {
 		if (probe.length) {
 			// Unary + keeps one MATCH scan and sorts only survivors by the configured rank. Without it,
 			// FTS repeats MATCH per rowid or ranks every full-text match before filtering.
 			append(
-				ctx.db
-					.allDynamic<{ rowid: number }>(
+				(
+					await ctx.db.allDynamic<{ rowid: number }>(
 						`SELECT rowid FROM search_docs WHERE search_docs MATCH ? AND +rowid IN (${placeholders(probe.length)})
 					 ORDER BY +rank`,
 						[match, ...probe],
 					)
-					.map((row) => row.rowid),
+				).map((row) => row.rowid),
 			);
 		}
 		return { ids, exact: true };
 	}
-	const inTitle = candidates(`title : (${match})`, true, query.limit);
+	const inTitle = await candidates(`title : (${match})`, true, query.limit);
 	append(inTitle);
-	if (ids.length < query.limit) append(candidates(match, true, query.limit));
+	if (ids.length < query.limit) append(await candidates(match, true, query.limit));
 	return { ids, exact: false };
 }
 
@@ -325,7 +330,7 @@ function splitCursor(cursor: string): [number, string] {
 }
 
 /** The active cases a plan selects, in outline order. Criteria narrow each other; `cases` names them outright. */
-export function selectCases(ctx: Ctx, selection: Selection): CaseRow[] {
+export async function selectCases(ctx: Ctx, selection: Selection): Promise<CaseRow[]> {
 	const project = ctx.project.id;
 	if ((selection.cases?.length ?? 0) > MAX_SELECTION) throw tooMany();
 	const named = selection.cases
@@ -343,7 +348,7 @@ export function selectCases(ctx: Ctx, selection: Selection): CaseRow[] {
 		throw invalid("fragments are shared steps; select their cases to run");
 	if (named && !narrowing) return named.filter((row) => row.state === "active");
 
-	const index = folderIndex(ctx.db, project);
+	const index = await folderIndex(ctx.db, project);
 	const where: string[] = ["c.project = ?", "c.state = 'active'", "c.kind = 'case'"];
 	const params: SqlValue[] = [project];
 	if (selection.folders?.length) {
@@ -367,7 +372,7 @@ export function selectCases(ctx: Ctx, selection: Selection): CaseRow[] {
 	}
 	// A selection is used whole or not at all: a run planned over part of what was asked for could be signed
 	// off without the rest. More than a run can sensibly hold is refused, with what to do about it.
-	const rows = ctx.db.allDynamic<CaseRow>(
+	const rows = await ctx.db.allDynamic<CaseRow>(
 		`SELECT c.* FROM cases c WHERE ${where.join(" AND ")} ORDER BY c.folder, c.rank LIMIT ${MAX_SELECTION + 1}`,
 		params,
 	);
@@ -392,9 +397,9 @@ export type FolderNode = {
 	cases: number;
 };
 
-export function folderTree(db: Db, project: number): { folders: FolderNode[]; total: number } {
-	const index = folderIndex(db, project);
-	const counts = new Map(db.all(Q.countsByFolder, { project }).map((row) => [row.folder, row.n]));
+export async function folderTree(db: ReadDb, project: number): Promise<{ folders: FolderNode[]; total: number }> {
+	const index = await folderIndex(db, project);
+	const counts = new Map((await db.all(Q.countsByFolder, { project })).map((row) => [row.folder, row.n]));
 	const folders = [...index.byId.values()].map((row: FolderRow) => ({
 		id: row.id,
 		parent: row.parent,
@@ -419,8 +424,8 @@ export type VersionEntry = {
 };
 
 /** The versions of a case, newest first, each with a one-line summary of what it changed. */
-export function versionList(db: Db, caseId: number): VersionEntry[] {
-	const rows = db.all(Q.versions, { id: caseId });
+export async function versionList(db: ReadDb, caseId: number): Promise<VersionEntry[]> {
+	const rows = await db.all(Q.versions, { id: caseId });
 	return rows.map((row, i) => {
 		const previous = rows[i + 1];
 		const summary = previous
@@ -440,24 +445,28 @@ export function versionList(db: Db, caseId: number): VersionEntry[] {
 }
 
 /** The version of a case that was current at a point on the project's clock, or null if it did not exist yet. */
-export const versionAt = (db: Db, caseId: number, seq: number): VersionRow | null =>
-	db.get(Q.versionAt, { id: caseId, seq });
-export const placementsOf = (db: Db, caseId: number, limit: number) => db.all(Q.placements, { id: caseId, limit });
+export const versionAt = async (db: ReadDb, caseId: number, seq: number): Promise<VersionRow | null> =>
+	await db.get(Q.versionAt, { id: caseId, seq });
+export const placementsOf = async (db: ReadDb, caseId: number, limit: number) =>
+	await db.all(Q.placements, { id: caseId, limit });
 /** Cases changed at or after a position (a revision and a case id within it), in that order: one page of a cursor. */
-export const casesChangedSince = (
-	db: Db,
+export const casesChangedSince = async (
+	db: ReadDb,
 	project: number,
 	from: { rev: number; id: number },
 	limit: number,
-): CaseRow[] => db.all(Q.changedSince, { project, rev: from.rev, id: from.id, limit });
-export const tagCounts = (db: Db, project: number) => db.all(Q.tags, { project });
-export const requirementList = (db: Db, project: number) => db.all(Q.requirements, { project });
+): Promise<CaseRow[]> => await db.all(Q.changedSince, { project, rev: from.rev, id: from.id, limit });
+export const tagCounts = async (db: ReadDb, project: number) => await db.all(Q.tags, { project });
+export const requirementList = async (db: ReadDb, project: number) => await db.all(Q.requirements, { project });
 /** The active cases, with what each says about automating it, by number. */
-export const automationOfCases = (db: Db, project: number) => db.all(Q.automation, { project });
+export const automationOfCases = async (db: ReadDb, project: number) => await db.all(Q.automation, { project });
 /** Every requirement, by key, with the ids of the active cases that cover it. */
-export function requirementCases(db: Db, project: number): { key: string; title: string; cases: number[] }[] {
+export async function requirementCases(
+	db: ReadDb,
+	project: number,
+): Promise<{ key: string; title: string; cases: number[] }[]> {
 	const out: { key: string; title: string; cases: number[] }[] = [];
-	for (const row of db.all(Q.covering, { project })) {
+	for (const row of await db.all(Q.covering, { project })) {
 		const last = out.at(-1);
 		const entry = last?.key === row.key ? last : { key: row.key, title: row.title, cases: [] };
 		if (entry !== last) out.push(entry);
@@ -465,39 +474,47 @@ export function requirementCases(db: Db, project: number): { key: string; title:
 	}
 	return out;
 }
-export const casesCovering = (db: Db, project: number, key: string): CaseRow[] =>
-	db.all(Q.casesCovering, { project, key });
+export const casesCovering = async (db: ReadDb, project: number, key: string): Promise<CaseRow[]> =>
+	await db.all(Q.casesCovering, { project, key });
 
-export const caseIdsOfRequirements = (db: Db, project: number, keys: readonly string[]): number[] =>
-	keys.length ? db.all(Q.caseIdsOfRequirements, { project, keys: JSON.stringify(keys) }).map((row) => row.id) : [];
-
-export const caseLinksOfRequirements = (db: Db, project: number, keys: readonly string[], cases: readonly number[]) =>
-	keys.length && cases.length
-		? db.all(Q.caseLinksOfRequirements, { project, keys: JSON.stringify(keys), cases: JSON.stringify(cases) })
+export const caseIdsOfRequirements = async (db: ReadDb, project: number, keys: readonly string[]): Promise<number[]> =>
+	keys.length
+		? (await db.all(Q.caseIdsOfRequirements, { project, keys: JSON.stringify(keys) })).map((row) => row.id)
 		: [];
 
-export const caseIdsOfRefs = (db: Db, project: number, refs: readonly string[]): number[] =>
-	refs.length ? db.all(Q.caseIdsOfRefs, { project, refs: JSON.stringify(refs) }).map((row) => row.id) : [];
+export const caseLinksOfRequirements = async (
+	db: ReadDb,
+	project: number,
+	keys: readonly string[],
+	cases: readonly number[],
+) =>
+	keys.length && cases.length
+		? await db.all(Q.caseLinksOfRequirements, { project, keys: JSON.stringify(keys), cases: JSON.stringify(cases) })
+		: [];
 
-export function impactHeads(
-	db: Db,
+export const caseIdsOfRefs = async (db: ReadDb, project: number, refs: readonly string[]): Promise<number[]> =>
+	refs.length ? (await db.all(Q.caseIdsOfRefs, { project, refs: JSON.stringify(refs) })).map((row) => row.id) : [];
+
+export async function impactHeads(
+	db: ReadDb,
 	project: number,
 	candidates: readonly { id: number; failing: boolean }[],
 	since: number | null,
-): ImpactHead[] {
-	return db
-		.all(Q.impactHeads, { project, candidates: JSON.stringify(candidates), since })
-		.map((row) => ({ ...row, failing: row.failing === 1 }));
+): Promise<ImpactHead[]> {
+	return (await db.all(Q.impactHeads, { project, candidates: JSON.stringify(candidates), since })).map((row) => ({
+		...row,
+		failing: row.failing === 1,
+	}));
 }
 
-export function impactCasePage(
-	db: Db,
+export async function impactCasePage(
+	db: ReadDb,
 	project: number,
 	selection: readonly (Pick<ImpactHead, "id" | "no" | "failing"> & { reviewed: boolean })[],
 	offset: number,
 ) {
-	const selected = db.get(Q.impactCountsAndIds, { selection: JSON.stringify(selection), offset });
+	const selected = await db.get(Q.impactCountsAndIds, { selection: JSON.stringify(selection), offset });
 	if (!selected) throw new Error("impact aggregate returned no row");
 	const { page, ...counts } = selected;
-	return { counts, rows: db.all(Q.impactPage, { project, ids: page }) };
+	return { counts, rows: await db.all(Q.impactPage, { project, ids: page }) };
 }

@@ -757,15 +757,15 @@ describe("what a result may prove", () => {
 	test("a nothing-required declaration waits for application and survives accepted-batch recovery", async () => {
 		await emptyPolicy("nothing-required");
 		const pipeline = h.actor("pipeline", "ci", ["read", "record"]);
-		const project = findProject(h.app.db, "scratch");
+		const project = await findProject(h.app.db, "scratch");
 		if (!project) throw new Error("no project");
-		h.app.db.transaction(() => {
+		await h.app.db.transaction(async () => {
 			const ctx = makeCtx(h.app, project, pipeline, true);
-			acceptReport(ctx, { target: { commit: "empty0008" }, results: [], nothingRequired: true });
-			stampSeq(ctx);
+			await acceptReport(ctx, { target: { commit: "empty0008" }, results: [], nothingRequired: true });
+			await stampSeq(ctx);
 		});
 		expect((await gate({ commit: "empty0008" })).verdict).toBe("pending");
-		recoverAccepted(h.app);
+		await recoverAccepted(h.app);
 		expect((await gate({ commit: "empty0008" })).verdict).toBe("passed");
 		expect(rows("SELECT nothing_required, state FROM batches")).toEqual([{ nothing_required: 1, state: "processed" }]);
 	});
@@ -1190,17 +1190,17 @@ describe("what a result may prove", () => {
 			cmd: crypto.randomUUID(),
 			results: [{ ...observed, outcome: "fail", note: "Still broken", corrects: original }],
 		});
-		const project = findProject(h.app.db, "scratch");
+		const project = await findProject(h.app.db, "scratch");
 		if (!project) throw new Error("no project");
-		const acceptPending = () =>
-			h.app.db.transaction(() => {
+		const acceptPending = async () =>
+			await h.app.db.transaction(async () => {
 				const ctx = makeCtx(h.app, project, actor, true);
-				const accepted = acceptReport(ctx, correction);
-				stampSeq(ctx);
+				const accepted = await acceptReport(ctx, correction);
+				await stampSeq(ctx);
 				return accepted;
 			});
-		expect(acceptPending().fresh).toBe(true);
-		expect(acceptPending().fresh).toBe(false);
+		expect((await acceptPending()).fresh).toBe(true);
+		expect((await acceptPending()).fresh).toBe(false);
 		expect((await gate({ run: planned.run })).verdict).toBe("pending");
 		expect(
 			await h.raw("report", { target, results: [{ ...observed, outcome: "pass", corrects: original }] }, actor),
@@ -1212,8 +1212,8 @@ describe("what a result may prove", () => {
 			},
 		});
 		expect(rows("SELECT state FROM batches ORDER BY id")).toEqual([{ state: "processed" }, { state: "accepted" }]);
-		expect(recoverAccepted(h.app)).toBe(1);
-		expect(recoverAccepted(h.app)).toBe(0);
+		expect(await recoverAccepted(h.app)).toBe(1);
+		expect(await recoverAccepted(h.app)).toBe(0);
 		expect(rows("SELECT outcome, corrects FROM results ORDER BY id")).toEqual([
 			{ outcome: "pass", corrects: null },
 			{ outcome: "fail", corrects: original },
@@ -1236,18 +1236,18 @@ describe("what a result may prove", () => {
 		const reserved = original[32];
 		const observed = input.results[32];
 		if (reserved === undefined || observed === undefined) throw new Error("missing original result");
-		const project = findProject(h.app.db, "scratch");
+		const project = await findProject(h.app.db, "scratch");
 		if (!project) throw new Error("no project");
-		h.app.db.transaction(() => {
+		await h.app.db.transaction(async () => {
 			const ctx = makeCtx(h.app, project, actor, true);
-			acceptReport(ctx, {
+			await acceptReport(ctx, {
 				...input,
 				results: [
 					...Array.from({ length: 2_000 }, () => ({ test: { key: "waiting" }, outcome: "pass" as const })),
 					{ ...observed, corrects: reserved },
 				],
 			});
-			stampSeq(ctx);
+			await stampSeq(ctx);
 		});
 		const get = spyOn(h.app.db, "get");
 		const all = spyOn(h.app.db, "all");
@@ -1292,17 +1292,17 @@ describe("what a result may prove", () => {
 		const observed = { test: { key: "producer-correction" }, annotation: { case: "C-1", version: 1 } };
 		const original = first((await report({ target, results: [{ ...observed, outcome: "pass" }] })).results);
 		const other = h.actor("another-producer", "ci", ["read", "record"]);
-		const project = findProject(h.app.db, "scratch");
+		const project = await findProject(h.app.db, "scratch");
 		if (!project) throw new Error("no project");
-		h.app.db.transaction(() => {
+		await h.app.db.transaction(async () => {
 			const ctx = makeCtx(h.app, project, other, true);
-			acceptReport(ctx, { target, results: [{ ...observed, outcome: "pass", corrects: original }] });
-			stampSeq(ctx);
+			await acceptReport(ctx, { target, results: [{ ...observed, outcome: "pass", corrects: original }] });
+			await stampSeq(ctx);
 		});
 		const corrected = await report({ target, results: [{ ...observed, outcome: "fail", corrects: original }] });
 		expect(corrected).toMatchObject({ counts: { total: 1, fail: 1 }, declined: [], rejected: [] });
-		expect(recoverAccepted(h.app)).toBe(1);
-		expect(recoverAccepted(h.app)).toBe(0);
+		expect(await recoverAccepted(h.app)).toBe(1);
+		expect(await recoverAccepted(h.app)).toBe(0);
 		expect(rows("SELECT id FROM results WHERE corrects IS NOT NULL")).toEqual([{ id: first(corrected.results) }]);
 		expect((await gate({ commit: target.commit })).verdict).toBe("blocked");
 	});
@@ -2436,18 +2436,18 @@ describe("what a run and a change may count", () => {
 		// The pipeline's first report of the commit, for another environment, is accepted and not yet applied:
 		// the commit is already where the pipeline says, so the run's failure is no longer covered. Until the
 		// report is applied and the run recomputed, the run must not go on saying passed.
-		const project = findProject(h.app.db, "scratch");
+		const project = await findProject(h.app.db, "scratch");
 		if (!project) throw new Error("no project");
-		h.app.db.transaction(() => {
+		await h.app.db.transaction(async () => {
 			const ctx = makeCtx(h.app, project, ci, true);
-			acceptReport(ctx, {
+			await acceptReport(ctx, {
 				target: { commit, pr: 7, branch: "feature", env: "pipeline-env" },
 				results: [{ test: { key: "t" }, outcome: "pass" }],
 			});
-			stampSeq(ctx);
+			await stampSeq(ctx);
 		});
 		expect(await gate({ run: planned.run })).toMatchObject({ verdict: "pending", stale: true });
-		recoverAccepted(h.app);
+		await recoverAccepted(h.app);
 		const after = await gate({ run: planned.run });
 		expect(after).toMatchObject({ verdict: "blocked", stale: false });
 		expect(after.tally).toMatchObject({ unexplained: 1, excused: 0 });
@@ -2557,11 +2557,11 @@ describe("what a run and a change may count", () => {
 		const target = { commit, branch: "main" };
 		await report({ target, results: [linked("pass")] }, ci);
 		// The pipeline's next attempt fails. It is accepted and, for whatever reason, not applied yet.
-		const project = findProject(h.app.db, "scratch");
+		const project = await findProject(h.app.db, "scratch");
 		if (!project) throw new Error("no project");
-		h.app.db.transaction(() => {
+		await h.app.db.transaction(async () => {
 			const ctx = makeCtx(h.app, project, ci, true);
-			acceptReport(ctx, {
+			await acceptReport(ctx, {
 				target,
 				attempt: 2,
 				results: [
@@ -2573,14 +2573,14 @@ describe("what a run and a change may count", () => {
 					},
 				],
 			});
-			stampSeq(ctx);
+			await stampSeq(ctx);
 		});
 		expect((await gate({ commit })).verdict).toBe("pending");
 		// A run planned over that commit now sees the older pass. It must not pass on it, let alone be closed.
 		const planned = await plan({ name: "Release", select: {}, accepts: { commit } });
 		expect((await gate({ run: planned.run })).verdict).toBe("pending");
 		expect(first(rows<{ state: string }>("SELECT state FROM runs WHERE origin = 'planned'")).state).toBe("open");
-		recoverAccepted(h.app);
+		await recoverAccepted(h.app);
 		expect(await gate({ run: planned.run })).toMatchObject({ verdict: "blocked", stale: false });
 		expect(
 			first(rows<{ outstanding: number }>("SELECT outstanding FROM runs WHERE origin = 'planned'")).outstanding,
@@ -2826,7 +2826,7 @@ describe("what a run and a change may count", () => {
 describe("what a decision may change", () => {
 	test("standing cannot cite a decision that is not in the ledger", async () => {
 		await report(ciReport({ commit: "witness1", n: 1, fail: { 0: "bug" } }));
-		const project = findProject(h.app.db, "scratch");
+		const project = await findProject(h.app.db, "scratch");
 		if (!project) throw new Error("no project");
 		const ctx = makeCtx(h.app, project, h.owner, true);
 		const signature = first(rows<{ id: number }>("SELECT id FROM signatures")).id;
@@ -2902,11 +2902,11 @@ describe("what a decision may change", () => {
 		const genuine: Witness = adoptWitness;
 		expect(decisionOf(genuine, "adopt")).toBeGreaterThan(0);
 		expect(() => decisionOf(genuine, "merge-receipt")).toThrow("only a merge-receipt decision");
-		const project = findProject(h.app.db, "scratch");
+		const project = await findProject(h.app.db, "scratch");
 		if (!project) throw new Error("no project");
 		const ctx = makeCtx(h.app, project, h.owner, true);
-		const test = testById(h.app.db, 1);
-		const run = runById(h.app.db, 1);
+		const test = await testById(h.app.db, 1);
+		const run = await runById(h.app.db, 1);
 		if (!test || !run) throw new Error("fixture missing");
 		const signature = first(rows<{ id: number }>("SELECT id FROM signatures")).id;
 		// The same witness is refused by every writer that another kind of decision owns, and nothing is written.
@@ -2949,7 +2949,7 @@ describe("what a decision may change", () => {
 		expect(ledger()).toEqual(["flaky", "expired"]);
 		// The timer finds nothing left to do: the question was already asked again.
 		const rule = first(rows<{ id: number }>("SELECT id FROM actors WHERE kind = 'rule'")).id;
-		expect(sweep(h.app, rule)).toBe(0);
+		expect(await sweep(h.app, rule)).toBe(0);
 		expect((await h.call<InboxReply>("inbox", { kind: "failure" })).items.map((item) => item.q)).toEqual([again.q]);
 		await decide(again, { is: "defect" });
 		expect(ledger()).toEqual(["flaky", "expired", "defect"]);
@@ -3002,7 +3002,7 @@ describe("what a decision may change", () => {
 		await decide(await open("failure"), { is: "flaky" });
 		h.advance(15 * 86_400_000);
 		const rule = first(rows<{ id: number }>("SELECT id FROM actors WHERE kind = 'rule'")).id;
-		expect(sweep(h.app, rule)).toBe(1);
+		expect(await sweep(h.app, rule)).toBe(1);
 		await decide(await open("failure"), { is: "defect" });
 		const ledger = rows<{ id: number; answer: string; supersedes: number | null }>(
 			"SELECT id, answer, supersedes FROM decisions WHERE kind = 'failure' ORDER BY id",
@@ -3467,7 +3467,7 @@ describe("what a decision may change", () => {
 		expect(await gate({ run: unsettledRun })).toMatchObject({ verdict: "blocked", tally: { disputed: 1 } });
 		h.advance(15 * 86_400_000);
 		const rule = first(rows<{ id: number }>("SELECT id FROM actors WHERE kind = 'rule'")).id;
-		expect(sweep(h.app, rule)).toBe(1);
+		expect(await sweep(h.app, rule)).toBe(1);
 		expect(await gate({ run: settledRun })).toMatchObject({ verdict: "blocked", tally: { disputed: 1 } });
 		expect(await gate({ commit: target.commit })).toMatchObject({ verdict: "passed", tally: { excused: 1 } });
 	});
@@ -3482,15 +3482,15 @@ describe("what a decision may change", () => {
 		const earlier = MIGRATIONS.find((migration) => migration.name === "result_excuses");
 		const slots = MIGRATIONS.find((migration) => migration.name === "slot_excuses");
 		if (!earlier || !slots) throw new Error("missing the result or slot excuse migration");
-		h.app.db.exec("DROP TABLE result_excuses; DROP INDEX changes_base;");
-		h.app.db.exec(earlier.sql);
+		await h.app.db.exec("DROP TABLE result_excuses; DROP INDEX changes_base;");
+		await h.app.db.exec(earlier.sql);
 		for (const row of before)
 			h.app.db.raw
 				.query("INSERT INTO result_excuses (result, decision, class, expires_at) VALUES (?, ?, ?, ?)")
 				.run(row.result, row.decision, row.class, row.expires_at);
 		// Only the slot migration runs, in one transaction as migrate applies it: the tables of every other migration
 		// are already here, so rewinding the version would run later migrations a second time.
-		h.app.db.transaction(() => h.app.db.exec(slots.sql));
+		await h.app.db.transaction(async () => await h.app.db.exec(slots.sql));
 		expect(rows("SELECT result, decision, class, expires_at, slot FROM result_excuses")).toEqual(
 			before.map((row) => ({ ...row, slot: null })),
 		);
@@ -3512,7 +3512,7 @@ describe("what a decision may change", () => {
 		h.app.db.raw
 			.query("UPDATE runs SET verdict = 'pending', tally = ? WHERE origin = 'planned'")
 			.run(JSON.stringify({ pass: 1, excused: 0, attributed: 0, unexplained: 0, disputed: 0, missing: 1, skipped: 0 }));
-		expect(recoverDisputes(h.app)).toBe(1);
+		expect(await recoverDisputes(h.app)).toBe(1);
 		expect(await gate({ run: planned.run })).toMatchObject({ verdict: "blocked", tally: { disputed: 1, pass: 0 } });
 		expect((await open("failure")).title).toStartWith("Disputed C-1");
 		expect(
@@ -3520,7 +3520,7 @@ describe("what a decision may change", () => {
 				(row) => JSON.parse(row.answer).is,
 			),
 		).toEqual(["flaky"]);
-		expect(recoverDisputes(h.app)).toBe(0);
+		expect(await recoverDisputes(h.app)).toBe(0);
 	});
 
 	test.each(["ci", "human"] as const)(
@@ -4339,7 +4339,7 @@ describe("what a caller is told", () => {
 			const reply = await invoke(h.app, OPS, {
 				op: "report",
 				project: "scratch",
-				actor: () => h.owner,
+				actor: async () => h.owner,
 				input,
 			});
 			expect(reply).toMatchObject({ ok: true, seq: 3, result: { fresh: true, counts: { total: 1, pass: 1 } } });
@@ -4367,7 +4367,7 @@ describe("what a caller is told", () => {
 			op: "propose",
 			project: "other",
 			input: { cmd, edits: [{ op: "create", outline: "Other project" }] },
-			actor: () => h.owner,
+			actor: async () => h.owner,
 		});
 		expect(cross).toMatchObject({ ok: false, error: { code: "conflict" } });
 	});
@@ -4395,7 +4395,7 @@ describe("what a caller is told", () => {
 
 	test("the caller of a command can ask what became of it, and nobody else is told", async () => {
 		const fate = async (cmd: string, as = h.owner, project = "scratch") =>
-			await invoke(h.app, OPS, { op: "command", project, input: { cmd }, actor: () => as });
+			await invoke(h.app, OPS, { op: "command", project, input: { cmd }, actor: async () => as });
 		expect(await fate("never-sent-01")).toMatchObject({ ok: true, result: { state: "none" } });
 		const made = await h.raw("propose", { cmd: "asked-about-01", edits: [{ op: "create", outline: "Once" }] });
 		if (!made.ok) throw new Error(made.error.message);
@@ -4460,12 +4460,12 @@ describe("what a caller is told", () => {
 				op: "command",
 				project: "scratch",
 				input: { cmd: "report-cmd-01" },
-				actor: () => h.owner,
+				actor: async () => h.owner,
 			});
-		const pending = invoke(h.app, OPS, {
+		const pending = await invoke(h.app, OPS, {
 			op: "report",
 			project: "scratch",
-			actor: () => h.owner,
+			actor: async () => h.owner,
 			input: { ...ciReport({ commit: "c0ffee01", n: 3 }), cmd: "report-cmd-01" },
 		});
 		try {
@@ -4483,7 +4483,7 @@ describe("what a caller is told", () => {
 	// Issue #377. The process stops after the first transaction of a report committed, with a command id bound to it.
 	test("a report that recovery applies finishes its command with the receipt, as the request would have", async () => {
 		const fate = async (cmd: string) =>
-			await invoke(h.app, OPS, { op: "command", project: "scratch", input: { cmd }, actor: () => h.owner });
+			await invoke(h.app, OPS, { op: "command", project: "scratch", input: { cmd }, actor: async () => h.owner });
 		const begin = h.app.db.begin.bind(h.app.db);
 		let transactions = 0;
 		const interrupted = spyOn(h.app.db, "begin").mockImplementation(() => {
@@ -4494,7 +4494,7 @@ describe("what a caller is told", () => {
 		const stopped = await invoke(h.app, OPS, {
 			op: "report",
 			project: "scratch",
-			actor: () => h.owner,
+			actor: async () => h.owner,
 			input: { ...ciReport({ commit: "c0ffee02", n: 3 }), cmd: "report-cmd-02" },
 		});
 		interrupted.mockRestore();
@@ -4503,7 +4503,7 @@ describe("what a caller is told", () => {
 		expect(await fate("report-cmd-02")).toMatchObject({ ok: true, result: { state: "begun", op: "report" } });
 		const seqBefore = rows<{ seq: number }>("SELECT seq FROM projects WHERE key = 'scratch'")[0]?.seq ?? 0;
 
-		expect(recoverAccepted(h.app)).toBe(1);
+		expect(await recoverAccepted(h.app)).toBe(1);
 
 		const receipt = rows<{ receipt: string }>("SELECT receipt FROM batches")[0]?.receipt;
 		expect(receipt).toBeDefined();
@@ -4515,7 +4515,7 @@ describe("what a caller is told", () => {
 		const again = await invoke(h.app, OPS, {
 			op: "report",
 			project: "scratch",
-			actor: () => h.owner,
+			actor: async () => h.owner,
 			input: { ...ciReport({ commit: "c0ffee02", n: 3 }), cmd: "report-cmd-02" },
 		});
 		expect(again).toMatchObject({ ok: true, result: JSON.parse(receipt ?? "null"), seq: seqBefore + 1 });

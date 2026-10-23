@@ -1467,7 +1467,7 @@ check(
 		const request: typeof fetch = Object.assign(async () => new Response(jira.token, { status: 401 }), {
 			preconnect: fetch.preconnect,
 		});
-		const instance = start(
+		const instance = await start(
 			{ ...defaultConfig({}), owner: "robin", dataDir, port: 0, ownerToken: token, jira },
 			() => ({ ui }),
 			{ readers: 0, trackerPort: jiraPort(jira, request) },

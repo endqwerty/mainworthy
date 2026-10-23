@@ -76,7 +76,7 @@ export async function testInstance(): Promise<TestInstance> {
 			},
 		});
 		elsewhere = other;
-		const made = start(
+		const made = await start(
 			{
 				dataDir,
 				oidc: idp.config(),
@@ -127,8 +127,8 @@ export async function testInstance(): Promise<TestInstance> {
 					},
 					"/test/replace-project": async (req) => {
 						const { project } = z.object({ project: z.string() }).parse(await req.json());
-						await made.app.gate.run(() => {
-							removeProject(made.app.db, project);
+						await made.app.gate.run(async () => {
+							await removeProject(made.app.db, project);
 						});
 						return Response.json({
 							ok: true,

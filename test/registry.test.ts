@@ -64,7 +64,7 @@ test("invoke waits for a rejected handler and rolls its writes back", async () =
 				op: "propose",
 				project: "scratch",
 				input: { edits: [{ op: "create", body: { title: "Rolled back" } }] },
-				actor: () => h.owner,
+				actor: async () => h.owner,
 			},
 		);
 		expect(reply).toEqual({ ok: false, error: { code: "conflict", message: "probe refused" } });
@@ -98,7 +98,7 @@ test("invoke awaits async steps and keeps other writers behind the whole operati
 		},
 	});
 	const call = { op: "probe", project: "scratch", input: { cmd: "async-steps" }, actor: () => h.owner };
-	const pending = invoke(h.app, { probe: op }, call);
+	const pending = await invoke(h.app, { probe: op }, call);
 	let next: Promise<unknown> | undefined;
 	try {
 		await accepted.promise;
@@ -127,8 +127,8 @@ test("invoke awaits async steps and keeps other writers behind the whole operati
 
 test("an awaited read keeps its snapshot while another connection commits", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "mainworthy-async-read-"));
-	const app = openApp({ ...defaultConfig({}), dataDir: dir, mode: "local", owner: "robin" });
-	const { owner } = bootstrap(app);
+	const app = await openApp({ ...defaultConfig({}), dataDir: dir, mode: "local", owner: "robin" });
+	const { owner } = await bootstrap(app);
 	const started = Promise.withResolvers<void>();
 	const resume = Promise.withResolvers<void>();
 	let pending: ReturnType<typeof invoke> | undefined;
@@ -138,7 +138,7 @@ test("an awaited read keeps its snapshot while another connection commits", asyn
 				op: "admin",
 				project: null,
 				input: { do: "project.create", key: "scratch" },
-				actor: () => owner,
+				actor: async () => owner,
 			}),
 		).toMatchObject({ ok: true });
 		const op = defineOp({
@@ -151,25 +151,29 @@ test("an awaited read keeps its snapshot while another connection commits", asyn
 			needs: "read",
 			mcp: null,
 			async run(ctx) {
-				const before = findProject(ctx.db, "scratch")?.seq;
+				const before = (await findProject(ctx.db, "scratch"))?.seq;
 				started.resolve();
 				await resume.promise;
 				return [before ?? -1, findProject(ctx.db, "scratch")?.seq ?? -1];
 			},
 		});
-		pending = invoke(app, { probe: op }, { op: "probe", project: "scratch", input: {}, actor: () => owner });
+		pending = await invoke(
+			app,
+			{ probe: op },
+			{ op: "probe", project: "scratch", input: {}, actor: async () => owner },
+		);
 		await started.promise;
 		expect(
 			await invoke(app, OPS, {
 				op: "propose",
 				project: "scratch",
 				input: { edits: [{ op: "create", body: { title: "Committed during read" } }] },
-				actor: () => owner,
+				actor: async () => owner,
 			}),
 		).toMatchObject({ ok: true });
 		resume.resolve();
 		expect(await pending).toEqual({ ok: true, result: [1, 1], seq: 1 });
-		expect(findProject(app.reader, "scratch")?.seq).toBe(2);
+		expect((await findProject(app.reader, "scratch"))?.seq).toBe(2);
 	} finally {
 		resume.resolve();
 		await pending;

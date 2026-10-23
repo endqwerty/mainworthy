@@ -35,7 +35,7 @@ const refused = (reply: { status: number; body: unknown }) => {
 for (const email of ["recovery@example.org", null]) {
 	test(`a credentialless token-opened owner must add and prove a credential before ${email === null ? "removing" : "setting"} a recovery address`, async () => {
 		const smtp = await fakeSmtp();
-		const w = world();
+		const w = await world();
 		w.instance.app.config.mail = defaultConfig({
 			MAINWORTHY_SMTP_HOST: "127.0.0.1",
 			MAINWORTHY_SMTP_PORT: String(smtp.port),
@@ -74,7 +74,7 @@ for (const email of ["recovery@example.org", null]) {
 
 for (const input of [{ do: "totp.begin" }, { do: "totp.confirm", challenge: "unproved-enrollment", code: "123456" }]) {
 	test(`a credentialless token-opened owner has no first-credential exemption for ${input.do}`, async () => {
-		const w = world();
+		const w = await world();
 		const cookie = (await w.post("/api/login", { token: TOKEN })).cookie;
 		stale(w);
 		refused(await w.op("credential", input, { cookie }));
@@ -82,8 +82,8 @@ for (const input of [{ do: "totp.begin" }, { do: "totp.confirm", challenge: "unp
 	});
 }
 
-function verifiedAdminArchive(): string {
-	const source = world();
+async function verifiedAdminArchive(): Promise<string> {
+	const source = await world();
 	const owner = source
 		.rows<{ id: number; name: string }>("SELECT id, name FROM actors")
 		.find((row) => row.name === OWNER);
@@ -106,9 +106,9 @@ async function preparedImport(w: World): Promise<string> {
 }
 
 test("stale browser import cannot install a verified address and gain an administrator through mail reset", async () => {
-	const body = verifiedAdminArchive();
+	const body = await verifiedAdminArchive();
 	const smtp = await fakeSmtp();
-	const w = world();
+	const w = await world();
 	w.instance.app.config.mail = defaultConfig({
 		MAINWORTHY_SMTP_HOST: "127.0.0.1",
 		MAINWORTHY_SMTP_PORT: String(smtp.port),
@@ -152,8 +152,8 @@ test("stale browser import cannot install a verified address and gain an adminis
 });
 
 test("browser import rechecks proof after waiting at the write gate", async () => {
-	const body = verifiedAdminArchive();
-	const w = world();
+	const body = await verifiedAdminArchive();
+	const w = await world();
 	const cookie = await preparedImport(w);
 	expect((await proof(w, cookie)).status).toBe(200);
 	w.clock.advance(9 * 60_000 + 59_000);
@@ -174,8 +174,8 @@ test("browser import rechecks proof after waiting at the write gate", async () =
 
 for (const mode of ["server", "local"] as const) {
 	test(`${mode} operator import retains verified recovery addresses without browser proof`, async () => {
-		const body = verifiedAdminArchive();
-		const w = world({ mode });
+		const body = await verifiedAdminArchive();
+		const w = await world({ mode });
 		expect((await importBody(w, body, mode === "server" ? bearer(TOKEN) : {})).status).toBe(200);
 		expect(w.rows("SELECT email FROM mail_contacts WHERE verified_at IS NOT NULL")).toEqual([
 			{ email: "restored@example.org" },
@@ -185,7 +185,7 @@ for (const mode of ["server", "local"] as const) {
 
 for (const can of [undefined, ["read"]]) {
 	test(`browser join invitations require own recent proof (${can ? "read-only" : "default admin"})`, async () => {
-		const w = world();
+		const w = await world();
 		const cookie = await joined(w, "ada", PASSWORD, { can: ["read", "admin"] });
 		stale(w);
 		const input = { do: "create", name: "new-person", ...(can ? { can } : {}), cmd: "join-proof" };
@@ -197,14 +197,14 @@ for (const can of [undefined, ["read"]]) {
 		expect((await proof(w, cookie)).status).toBe(200);
 		expect((await w.op("invitation", input, { cookie })).status).toBe(200);
 		expect((await w.op("invitation", { do: "create", name: "token-person" }, bearer(TOKEN))).status).toBe(200);
-		const local = world({ mode: "local" });
+		const local = await world({ mode: "local" });
 		expect((await local.op("invitation", { do: "create", name: "local-person" }, {})).status).toBe(200);
 	});
 }
 
 for (const via of ["direct", "team-grant", "team-member"] as const) {
 	test(`browser admin authority through ${via} requires own recent proof`, async () => {
-		const w = world();
+		const w = await world();
 		await joined(w, "controlled", "a controlled person's password", { can: ["read"] });
 		const cookie = await joined(w, "ada", PASSWORD, { can: ["read", "admin"] });
 		await w.ok("admin", { do: "team.create", name: "Quality" });
@@ -233,7 +233,7 @@ for (const via of ["direct", "team-grant", "team-member"] as const) {
 }
 
 test("queued team membership checks the current admin grant inside the writer", async () => {
-	const w = world();
+	const w = await world();
 	await joined(w, "controlled", "a controlled person's password");
 	const cookie = await joined(w, "ada", PASSWORD, { can: ["read", "admin"] });
 	await w.ok("admin", { do: "team.create", name: "Quality" });
@@ -258,7 +258,7 @@ test("queued team membership checks the current admin grant inside the writer", 
 for (const owner of [false, true]) {
 	for (const operation of ["credential", "admin"] as const) {
 		test(`a stale ${owner ? "owner" : "non-owner admin"} browser cannot mint a ${operation} token to reach recovery authority`, async () => {
-			const w = world();
+			const w = await world();
 			const sam = await joined(w, "sam", "sam's own long password");
 			const name = owner ? OWNER : "ada";
 			const cookie = await joined(w, name, PASSWORD, owner ? {} : { can: ["read", "admin"] });
@@ -296,7 +296,7 @@ async function passkey(w: World, cookie: string) {
 }
 
 test("a session older than ten minutes cannot begin changing its sign-in", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "robin", PASSWORD);
 	w.clock.advance(10 * 60_000 + 1);
 	const reply = await w.op("credential", { do: "passkey.begin" }, { cookie });
@@ -305,7 +305,7 @@ test("a session older than ten minutes cannot begin changing its sign-in", async
 });
 
 test("fresh password sign-in and proof authorize only their own session for ten minutes", async () => {
-	const w = world();
+	const w = await world();
 	const first = await joined(w, "robin", PASSWORD);
 	const second = (await signIn(w, "robin", PASSWORD)).cookie;
 	w.clock.advance(10 * 60_000);
@@ -325,7 +325,7 @@ test("fresh password sign-in and proof authorize only their own session for ten 
 });
 
 test("passkey finalization, password addition, removal and recovery address writes all require proof", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "robin", PASSWORD);
 	const { device, id } = await passkey(w, cookie);
 	w.clock.advance(9 * 60_000 + 59_000);
@@ -381,7 +381,7 @@ test("passkey finalization, password addition, removal and recovery address writ
 });
 
 test("TOTP confirmation rechecks freshness, TOTP proof consumes the code, and recovery codes are not standalone proof", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "robin", PASSWORD);
 	const setup = await w.ok<{ challenge: string; secret: string }>("credential", { do: "totp.begin" }, { cookie });
 	stale(w);
@@ -423,7 +423,7 @@ test("TOTP proof keeps the replay step that was checked at the write gate", asyn
 	const step = 60_779_457;
 	const code = "566269";
 	expect([totpCode(secret, step), totpCode(secret, step + 1)]).toEqual([code, code]);
-	const w = world({ clock: clockAt(step * 30_000 + 29_000) });
+	const w = await world({ clock: clockAt(step * 30_000 + 29_000) });
 	const cookie = await joined(w, "robin", PASSWORD);
 	const setup = await w.ok<{ challenge: string; secret: string }>("credential", { do: "totp.begin" }, { cookie });
 	await w.ok(
@@ -449,7 +449,7 @@ test("TOTP proof keeps the replay step that was checked at the write gate", asyn
 });
 
 test("an admin needs their own session proof when changing another person's credentials or address", async () => {
-	const w = world();
+	const w = await world();
 	const person = await joined(w, "sam", "a different quite long password");
 	const key = await passkey(w, person);
 	refused(await w.op("credential", { do: "email.set", actor: "sam", email: null }, bearer(TOKEN)));
@@ -468,7 +468,7 @@ test("an admin needs their own session proof when changing another person's cred
 });
 
 test("a passkey proof cannot be moved to another session or person", async () => {
-	const w = world();
+	const w = await world();
 	const first = await joined(w, "robin", PASSWORD);
 	const second = (await signIn(w, "robin", PASSWORD)).cookie;
 	const other = await joined(w, "sam", PASSWORD);
@@ -488,7 +488,7 @@ test("a passkey proof cannot be moved to another session or person", async () =>
 });
 
 test("proof rereads credential and session state after waiting for the writer", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "robin", PASSWORD);
 	stale(w);
 	const gate = holdGate(w.instance);
@@ -502,7 +502,7 @@ test("proof rereads credential and session state after waiting for the writer", 
 });
 
 test("a password replaced ahead of a queued proof cannot authenticate the still-live passkey session", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "robin", PASSWORD);
 	const key = await passkey(w, cookie);
 	const begun = await w.post<{ passkey: AssertionOptions }>("/api/login/challenge", {});
@@ -531,7 +531,7 @@ test("a password replaced ahead of a queued proof cannot authenticate the still-
 });
 
 test("a future proof fails closed and failed password proofs share sign-in throttling", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "robin", PASSWORD);
 	w.clock.advance(-1);
 	refused(await w.op("credential", { do: "totp.begin" }, { cookie }));
@@ -542,7 +542,7 @@ test("a future proof fails closed and failed password proofs share sign-in throt
 });
 
 test("the proof exchange enforces origin and accepts exactly one proof without recording secrets", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "robin", PASSWORD);
 	stale(w);
 	expect(
@@ -557,7 +557,7 @@ test("the proof exchange enforces origin and accepts exactly one proof without r
 });
 
 test("invitation and recovery acceptance need no prior proof, and the last usable credential stays", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "robin", PASSWORD);
 	stale(w);
 	const recovered = await invite(w, { name: "robin" });
@@ -573,7 +573,7 @@ test("invitation and recovery acceptance need no prior proof, and the last usabl
 });
 
 test("a stale browser cannot issue a recovery link; token, CLI and local recovery authority still works", async () => {
-	const w = world();
+	const w = await world();
 	await joined(w, "sam", PASSWORD);
 	const admin = (await w.post("/api/login", { token: TOKEN })).cookie;
 	expect((await w.post("/api/account/password", { next: PASSWORD }, { cookie: admin })).status).toBe(200);
@@ -598,7 +598,7 @@ test("a stale browser cannot issue a recovery link; token, CLI and local recover
 	expect(stdout).toContain("/invite#");
 	expect((await proof(w, admin)).status).toBe(200);
 	expect((await w.op("invitation", { do: "create", name: "sam" }, { cookie: admin })).status).toBe(200);
-	const local = world({ mode: "local" });
+	const local = await world({ mode: "local" });
 	await invite(local, { name: "local-person", can: ["read"], project: "scratch" }, {});
 	expect((await invite(local, { name: "local-person" }, {})).purpose).toBe("recover");
 });

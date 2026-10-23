@@ -44,7 +44,7 @@ for (const tracker of ["github", "jira"] as const) {
 		const issue = tracker === "github" ? item : jiraItem;
 		const keys: string[] = [];
 		let closed = false;
-		instance = start(
+		instance = await start(
 			{
 				...defaultConfig({}),
 				owner: "robin",
@@ -575,14 +575,14 @@ for (const change of ["answer", "configuration", "archive"] as const) {
 				answer: { is: "expected" },
 				reason: "Expected while changing checkout",
 			});
-		await h.app.gate.run(() => {
+		await h.app.gate.run(async () => {
 			if (change === "configuration") h.app.config.github = { ...github, repository: "example/other" };
 			if (change === "archive") {
 				const archive: string[] = [];
 				exportArchive(h.app.db, (chunk) => archive.push(chunk));
 				const restored = new Db(":memory:");
-				migrate(restored, ":memory:");
-				importArchive(restored, archive.join("").trimEnd().split("\n"));
+				await migrate(restored, ":memory:");
+				await importArchive(restored, archive.join("").trimEnd().split("\n"));
 				const replaced = h.app.db;
 				h.app.db = restored;
 				h.app.reader = restored;
@@ -671,7 +671,7 @@ test("polling back-off survives an instance restart", async () => {
 				},
 			},
 		};
-		instance = start(config, () => ({ ui: null }), options);
+		instance = await start(config, () => ({ ui: null }), options);
 		const post = async (operation: string, input: unknown = {}) => {
 			const response = await fetch(`${instance?.url}/api/p/scratch/${operation}`, {
 				method: "POST",
@@ -694,7 +694,7 @@ test("polling back-off survives an instance restart", async () => {
 		expect(diagnostic).toContain(`The tracker could not be read since ${new Date(now).toISOString()}`);
 		expect(logged.mock.calls).toHaveLength(1);
 		await instance.stop();
-		instance = start(config, () => ({ ui: null }), options);
+		instance = await start(config, () => ({ ui: null }), options);
 		now += 59_999;
 		await instance.minute();
 		expect(calls).toBe(1);
@@ -991,8 +991,8 @@ test("an archive drops pending delivery and an old response cannot attach to a r
 	exportArchive(h.app.db, (chunk) => archive.push(chunk));
 	const restored = new Db(":memory:");
 	try {
-		migrate(restored, ":memory:");
-		importArchive(restored, archive.join("").trimEnd().split("\n"));
+		await migrate(restored, ":memory:");
+		await importArchive(restored, archive.join("").trimEnd().split("\n"));
 		expect(restored.raw.query("SELECT count(*) AS n FROM tracker_requests").get()).toEqual({ n: 0 });
 	} finally {
 		restored.close();
@@ -1068,7 +1068,7 @@ test("tracker configuration is opt-in and malformed configuration never quotes c
 test("the HTTP operations preserve queued and uncertain requests across restart and deliver through the minute job", async () => {
 	directory = mkdtempSync(join(tmpdir(), "mainworthy-tracker-"));
 	const config = { ...defaultConfig({}), owner: "robin", dataDir: directory, port: 0, github };
-	instance = start(config, () => ({ ui: null }), { readers: 0, trackerPort: port });
+	instance = await start(config, () => ({ ui: null }), { readers: 0, trackerPort: port });
 	const post = async (operation: string, input: unknown) => {
 		const response = await fetch(`${instance?.url}/api/p/scratch/${operation}`, {
 			method: "POST",
@@ -1094,7 +1094,7 @@ test("the HTTP operations preserve queued and uncertain requests across restart 
 	});
 	instance.app.db.raw.query("UPDATE tracker_requests SET state = 'sending' WHERE id = 'tracker-http-02'").run();
 	await instance.stop();
-	instance = start(config, () => ({ ui: null }), { readers: 0, trackerPort: port });
+	instance = await start(config, () => ({ ui: null }), { readers: 0, trackerPort: port });
 	expect(await post("tracker-status", { id: "tracker-http-01" })).toMatchObject({
 		status: 200,
 		body: { ok: true, result: { state: "queued" } },
@@ -1116,7 +1116,7 @@ test("stopping persists the in-flight tracker reply and leaves queued requests f
 	const entered = Promise.withResolvers<void>();
 	const reply = Promise.withResolvers<TrackerItem>();
 	let calls = 0;
-	instance = start(config, () => ({ ui: null }), {
+	instance = await start(config, () => ({ ui: null }), {
 		readers: 0,
 		trackerPort: {
 			...port,
@@ -1160,7 +1160,7 @@ test("stopping persists the in-flight tracker reply and leaves queued requests f
 		await stopping;
 	}
 	expect(calls).toBe(1);
-	instance = start(config, () => ({ ui: null }), { readers: 0, trackerPort: port });
+	instance = await start(config, () => ({ ui: null }), { readers: 0, trackerPort: port });
 	expect(await post("tracker-status", { id: "tracker-stop-01" })).toMatchObject({
 		ok: true,
 		result: { state: "complete", issue: item },
@@ -1180,7 +1180,7 @@ test("a tracker delivery rejected during HTTP drain does not create an unhandled
 	const config = { ...defaultConfig({}), owner: "robin", dataDir: directory, port: 0, github };
 	const entered = Promise.withResolvers<void>();
 	const trackerReply = Promise.withResolvers<TrackerItem>();
-	instance = start(config, () => ({ ui: null }), {
+	instance = await start(config, () => ({ ui: null }), {
 		readers: 1,
 		trackerPort: {
 			...port,
@@ -1258,7 +1258,7 @@ test("a tracker delivery rejected after HTTP drain still completes shutdown and 
 	const config = { ...defaultConfig({}), owner: "robin", dataDir: directory, port: 0, github };
 	const entered = Promise.withResolvers<void>();
 	const trackerReply = Promise.withResolvers<TrackerItem>();
-	instance = start(config, () => ({ ui: null }), {
+	instance = await start(config, () => ({ ui: null }), {
 		readers: 1,
 		trackerPort: {
 			...port,

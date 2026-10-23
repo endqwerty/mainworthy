@@ -6,7 +6,7 @@ import { withInstance } from "../../cli/test-support.ts";
 import { PRESETS } from "../../core/presets.ts";
 import { signatureHash } from "../../core/signature.ts";
 import { type BlobStore, memoryBlobs } from "../kernel/blobs.ts";
-import { Db } from "../kernel/db.ts";
+import { Db, type ReadDb, type WriteDb } from "../kernel/db.ts";
 import { OpError } from "../kernel/errors.ts";
 import { ARCHIVE_VERSION, MIGRATIONS, migrate, SCHEMA_VERSION } from "../kernel/migrate.ts";
 import {
@@ -27,7 +27,7 @@ type Row = Record<string, Value>;
 const opened: Db[] = [];
 const stores = new WeakMap<Db, BlobStore>();
 const attachmentBytes = Buffer.from("archive attachment");
-function storage(db: Db): BlobStore {
+function storage(db: ReadDb): BlobStore {
 	let store = stores.get(db);
 	if (!store) {
 		store = memoryBlobs();
@@ -35,11 +35,11 @@ function storage(db: Db): BlobStore {
 	}
 	return store;
 }
-function exportArchive(db: Db, write: (chunk: string) => void, options: { now?: number; project?: string } = {}) {
+function exportArchive(db: ReadDb, write: (chunk: string) => void, options: { now?: number; project?: string } = {}) {
 	return exportWithBlobs(db, write, { ...options, blobs: storage(db) });
 }
-function importArchive(db: Db, lines: Iterable<string>) {
-	return importWithBlobs(db, lines, { blobs: storage(db) });
+async function importArchive(db: WriteDb, lines: Iterable<string>) {
+	return await importWithBlobs(db, lines, { blobs: storage(db) });
 }
 
 const time = 1_791_741_600_000;
@@ -544,10 +544,10 @@ const fixtures: Record<string, Row[]> = {
 	depends_on: [{ run: 601, decision: 401, expires_at: null }],
 };
 
-function database(): Db {
+async function database(): Promise<Db> {
 	const db = new Db(":memory:");
 	opened.push(db);
-	migrate(db, ":memory:");
+	await migrate(db, ":memory:");
 	return db;
 }
 
@@ -555,7 +555,7 @@ function identifier(name: string): string {
 	return `"${name.replaceAll('"', '""')}"`;
 }
 
-function insert(db: Db, table: string, row: Row): void {
+function insert(db: ReadDb, table: string, row: Row): void {
 	const columns = Object.keys(row);
 	db.raw
 		.query<unknown, Value[]>(
@@ -564,10 +564,10 @@ function insert(db: Db, table: string, row: Row): void {
 		.run(...Object.values(row));
 }
 
-function source(): Db {
-	const db = database();
+async function source(): Promise<Db> {
+	const db = await database();
 	storage(db).put(attachmentBytes);
-	db.transaction(() => {
+	await db.transaction(() => {
 		db.raw.exec("PRAGMA defer_foreign_keys = ON");
 		for (const [table, rows] of Object.entries(fixtures)) {
 			for (const row of rows) insert(db, table, row);
@@ -586,8 +586,8 @@ function source(): Db {
 	return db;
 }
 
-function target(): Db {
-	const db = database();
+async function target(): Promise<Db> {
+	const db = await database();
 	insert(db, "orgs", { id: 1, name: "default", created_at: time });
 	insert(db, "actors", { id: 1, org: 1, kind: "human", name: "bootstrap owner", created_at: time });
 	insert(db, "actors", { id: 2, org: 1, kind: "rule", name: "bootstrap rule", created_at: time });
@@ -606,20 +606,20 @@ function target(): Db {
 	return db;
 }
 
-function archive(db: Db, now = time): string {
+function archive(db: ReadDb, now = time): string {
 	const chunks: string[] = [];
 	exportArchive(db, (chunk) => chunks.push(chunk), { now });
 	return chunks.join("");
 }
 
-function tables(db: Db): string[] {
+function tables(db: ReadDb): string[] {
 	return db.raw
 		.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
 		.all()
 		.map((row) => row.name);
 }
 
-function exportedTables(db: Db): string[] {
+function exportedTables(db: ReadDb): string[] {
 	return tables(db).filter(
 		(name) =>
 			![
@@ -654,7 +654,7 @@ function exportedTables(db: Db): string[] {
 	);
 }
 
-function dump(db: Db): Record<string, string[]> {
+function dump(db: ReadDb): Record<string, string[]> {
 	return Object.fromEntries(
 		exportedTables(db).map((table) => {
 			const columns = db.raw.query<{ name: string; pk: number }, []>(`PRAGMA table_info(${identifier(table)})`).all();
@@ -674,7 +674,7 @@ function dump(db: Db): Record<string, string[]> {
 	);
 }
 
-function allRows(db: Db): Record<string, unknown[]> {
+function allRows(db: ReadDb): Record<string, unknown[]> {
 	return Object.fromEntries(
 		tables(db).map((table) => [table, db.raw.query<unknown, []>(`SELECT * FROM ${identifier(table)}`).all()]),
 	);
@@ -688,8 +688,8 @@ function rehash(text: string): string {
 	return `${preceding}${JSON.stringify({ end: true, rows, sha256: createHash("sha256").update(preceding).digest("hex") })}\n`;
 }
 
-function refuse(text: string, message: string | RegExp): void {
-	const db = target();
+async function refuse(text: string, message: string | RegExp): Promise<void> {
+	const db = await target();
 	const before = allRows(db);
 	expect(() => importArchive(db, linesOf(text))).toThrow(message);
 	expect(allRows(db)).toEqual(before);
@@ -726,11 +726,11 @@ test("archives wait for retired demo cleanup instead of restoring retired data w
 }, 30_000);
 
 describe("Mainworthy instance archives", () => {
-	test("an archive preserves legacy corrections that branch from the same result", () => {
-		const from = source();
+	test("an archive preserves legacy corrections that branch from the same result", async () => {
+		const from = await source();
 		insert(from, "results", { ...fixtures.results?.[1], id: 202, outcome: "blocked" });
-		const to = target();
-		importArchive(to, linesOf(archive(from)));
+		const to = await target();
+		await importArchive(to, linesOf(archive(from)));
 		expect(to.raw.query("SELECT id, corrects, outcome FROM results ORDER BY id").all()).toEqual([
 			{ id: 200, corrects: 201, outcome: "pass" },
 			{ id: 201, corrects: null, outcome: "fail" },
@@ -738,8 +738,8 @@ describe("Mainworthy instance archives", () => {
 		]);
 	});
 
-	test("a project archive keeps every head, decision and verdict and excludes other projects", () => {
-		const from = source();
+	test("a project archive keeps every head, decision and verdict and excludes other projects", async () => {
+		const from = await source();
 		const selectedSettings = JSON.stringify({
 			...PRESETS.standard.settings,
 			named: "雪",
@@ -747,7 +747,7 @@ describe("Mainworthy instance archives", () => {
 		});
 		from.raw.query("UPDATE policies SET settings = ? WHERE project = 23").run(selectedSettings);
 		const expected = dump(from);
-		from.exec(`
+		await from.exec(`
 			INSERT INTO orgs VALUES (18, 'Unrelated organisation', 1);
 			INSERT INTO actors VALUES (80, 18, 'human', 'Unrelated person', NULL, 1, NULL);
 			INSERT INTO projects VALUES (24, 18, 'other', 'Unrelated project', 1, 1, 'identity-other');
@@ -772,8 +772,8 @@ describe("Mainworthy instance archives", () => {
 		expect(text).not.toContain("Other project only");
 		expect(text).not.toContain("instance-note");
 		for (const table of UNEXPORTED) expect(text).not.toContain(`"t":"${table}"`);
-		const to = target();
-		importArchive(to, linesOf(text));
+		const to = await target();
+		await importArchive(to, linesOf(text));
 		const actual = dump(to);
 		for (const [table, rows] of Object.entries(expected)) {
 			expect(actual[table]).toEqual(table === "meta" ? [] : rows);
@@ -801,8 +801,8 @@ describe("Mainworthy instance archives", () => {
 		]) {
 			expect(otherCounts.tables[table]).toBe(0);
 		}
-		const other = target();
-		importArchive(other, linesOf(otherChunks.join("")));
+		const other = await target();
+		await importArchive(other, linesOf(otherChunks.join("")));
 		expect(other.raw.query("SELECT email, verified_at FROM mail_contacts ORDER BY actor").all()).toEqual([
 			{ email: "zoe@example.com", verified_at: time },
 			{ email: "unrelated@example.com", verified_at: null },
@@ -817,9 +817,9 @@ describe("Mainworthy instance archives", () => {
 		expect(other.raw.query("SELECT settings FROM policies").all()).toEqual([{ settings: otherSettings }]);
 	});
 
-	test("project identity includes signer-only actors and the people and organisations behind them", () => {
-		const from = source();
-		from.exec(`
+	test("project identity includes signer-only actors and the people and organisations behind them", async () => {
+		const from = await source();
+		await from.exec(`
 			INSERT INTO orgs VALUES (18, 'Delegated organisation', 1);
 			INSERT INTO actors VALUES (81, 18, 'human', 'Delegating person', NULL, 1, NULL);
 			INSERT INTO actors VALUES (82, 18, 'agent', 'Signer only', 81, 1, NULL);
@@ -827,8 +827,8 @@ describe("Mainworthy instance archives", () => {
 		`);
 		const chunks: string[] = [];
 		exportArchive(from, (chunk) => chunks.push(chunk), { project: "qa" });
-		const to = target();
-		importArchive(to, linesOf(chunks.join("")));
+		const to = await target();
+		await importArchive(to, linesOf(chunks.join("")));
 		expect(to.raw.query("SELECT id FROM actors ORDER BY id").all()).toEqual([
 			{ id: 70 },
 			{ id: 71 },
@@ -839,8 +839,8 @@ describe("Mainworthy instance archives", () => {
 		expect(to.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
 	});
 
-	test("a project export refuses a new table with no ownership rule before writing", () => {
-		const from = source();
+	test("a project export refuses a new table with no ownership rule before writing", async () => {
+		const from = await source();
 		from.raw.exec("CREATE TABLE unscoped_private (id INTEGER PRIMARY KEY, note TEXT)");
 		const chunks: string[] = [];
 		expect(() => exportArchive(from, (chunk) => chunks.push(chunk), { project: "qa" })).toThrow(/no ownership rule/);
@@ -853,11 +853,11 @@ describe("Mainworthy instance archives", () => {
 		try {
 			const chunks: string[] = [];
 			exportArchive(from.app.db, (chunk) => chunks.push(chunk), { project: "scratch" });
-			to.app.db.transaction(() => {
+			await to.app.db.transaction(async () => {
 				// The harness recorded project.create; the server's untouched bootstrap records no command.
 				to.app.db.raw.exec("DELETE FROM commands");
-				removeBootstrap(to.app.db);
-				importArchive(to.app.db, linesOf(chunks.join("")));
+				await removeBootstrap(to.app.db);
+				await importArchive(to.app.db, linesOf(chunks.join("")));
 			});
 			expect(await to.raw("propose", { edits: [{ op: "create", outline: "First case after restore" }] })).toMatchObject(
 				{
@@ -913,10 +913,10 @@ describe("Mainworthy instance archives", () => {
 			await from.call("decide", { q: chosen.q, onEvidence: chosen.evidenceHash, answer: { is: "flaky" } });
 			const chunks: string[] = [];
 			exportArchive(from.app.db, (chunk) => chunks.push(chunk), { project: "scratch" });
-			to.app.db.transaction(() => {
+			await to.app.db.transaction(async () => {
 				to.app.db.raw.exec("DELETE FROM commands");
-				removeBootstrap(to.app.db);
-				importArchive(to.app.db, linesOf(chunks.join("")));
+				await removeBootstrap(to.app.db);
+				await importArchive(to.app.db, linesOf(chunks.join("")));
 			});
 			expect(await to.call("gate", { run: one.run })).toMatchObject({ tally: { pass: 1, disputed: 0 } });
 			expect(await to.call("gate", { run: two.run })).toMatchObject({ verdict: "blocked", tally: { disputed: 1 } });
@@ -926,9 +926,9 @@ describe("Mainworthy instance archives", () => {
 		}
 	});
 
-	test("removing a project deletes every row it owns and leaves people and another project as they were", () => {
-		const db = source();
-		db.exec(`
+	test("removing a project deletes every row it owns and leaves people and another project as they were", async () => {
+		const db = await source();
+		await db.exec(`
 			INSERT INTO projects VALUES (24, 17, 'other', 'Another project', 1, 1, 'identity-other');
 			INSERT INTO folders VALUES (44, 24, NULL, 'Kept folder', 'a0', 'active', 1);
 			INSERT INTO grants (actor, project, can) VALUES (70, 24, '["read"]');
@@ -957,7 +957,7 @@ describe("Mainworthy instance archives", () => {
 		};
 		const kept = ["meta", "orgs", "actors", "tokens", "mail_contacts", "teams", "team_members"];
 		const before = { other: other(), kept: kept.map((table) => db.raw.query(`SELECT * FROM ${table}`).all()) };
-		const removed = removeProject(db, "qa");
+		const removed = await removeProject(db, "qa");
 		// Every table the fixture fills for the project lost its rows, the ones an archive leaves out included, and
 		// the count says so. The other project holds no rows of the tables that find their project through a parent.
 		for (const table of [
@@ -1179,12 +1179,12 @@ describe("Mainworthy instance archives", () => {
 		);
 		expect(chunks).toEqual([]);
 	});
-	test("every included table and column survives replay, including full 64-bit integers", () => {
-		const from = source();
-		const to = target();
+	test("every included table and column survives replay, including full 64-bit integers", async () => {
+		const from = await source();
+		const to = await target();
 		expect(Object.keys(fixtures).sort()).toEqual(exportedTables(from));
 		const text = archive(from);
-		const result = importArchive(to, linesOf(text));
+		const result = await importArchive(to, linesOf(text));
 		expect(dump(to)).toEqual(dump(from));
 		for (const table of exportedTables(from)) expect(result.tables[table]).toBeGreaterThan(0);
 		expect(result.rows).toBe(Object.values(result.tables).reduce((sum, count) => sum + count, 0));
@@ -1200,17 +1200,17 @@ describe("Mainworthy instance archives", () => {
 	test.each([
 		["results", 201],
 		["result_tries", 513],
-	] as const)("an archive refuses out-of-range %s durations without changing the target", (table, id) => {
-		const from = source();
+	] as const)("an archive refuses out-of-range %s durations without changing the target", async (table, id) => {
+		const from = await source();
 		for (const duration of [-1, 2_592_000_001, 9_223_372_036_854_775_807n]) {
 			from.raw.query(`UPDATE ${table} SET duration_ms = ? WHERE id = ?`).run(duration, id);
 			const text = archive(from);
-			refuse(text, new RegExp(`${table}\\.duration_ms.*row ${id}.*line \\d+.*0.*2592000000`));
+			await refuse(text, new RegExp(`${table}\\.duration_ms.*row ${id}.*line \\d+.*0.*2592000000`));
 		}
 	});
 
-	test("invalid failure subjects name the archive row and line and roll back every table", () => {
-		const from = source();
+	test("invalid failure subjects name the archive row and line and roll back every table", async () => {
+		const from = await source();
 		for (const subject of [
 			'{"signature":1,"scope":"line:main","perResult":false}',
 			'{"signature":"1","scope":"line:main"}',
@@ -1224,31 +1224,34 @@ describe("Mainworthy instance archives", () => {
 			from.raw.query("UPDATE questions SET kind = 'failure', subject = ? WHERE id = 402").run(subject);
 			const text = archive(from);
 			const line = [...linesOf(text)].findIndex((line) => line.startsWith('{"t":"questions",')) + 1;
-			refuse(text, `invalid archive questions.subject for row 402 on line ${line}: expected a valid failure subject`);
+			await refuse(
+				text,
+				`invalid archive questions.subject for row 402 on line ${line}: expected a valid failure subject`,
+			);
 		}
 	});
 
-	test("every written failure subject shape imports without changing its stored JSON", () => {
-		const from = source();
+	test("every written failure subject shape imports without changing its stored JSON", async () => {
+		const from = await source();
 		for (const subject of [
 			'{ "scope": "line:main", "signature": 505 }',
 			'{"signature":505,"scope":"change:1","perResult":true}',
 			'{"slot":1,"signature":505,"scope":"run:301"}',
 		]) {
 			from.raw.query("UPDATE questions SET kind = 'failure', subject = ? WHERE id = 402").run(subject);
-			const to = target();
-			importArchive(to, linesOf(archive(from)));
+			const to = await target();
+			await importArchive(to, linesOf(archive(from)));
 			expect(dump(to)).toEqual(dump(from));
 		}
 	});
 
-	test("result and runner-try durations keep the exact limit, zero and unknown time", () => {
-		const from = source();
+	test("result and runner-try durations keep the exact limit, zero and unknown time", async () => {
+		const from = await source();
 		for (const duration of [2_592_000_000, 0, null]) {
 			from.raw.query("UPDATE results SET duration_ms = ? WHERE id = 201").run(duration);
 			from.raw.query("UPDATE result_tries SET duration_ms = ? WHERE id = 513").run(duration);
-			const to = target();
-			importArchive(to, linesOf(archive(from)));
+			const to = await target();
+			await importArchive(to, linesOf(archive(from)));
 			for (const table of ["results", "result_tries"]) {
 				expect(to.raw.query(`SELECT DISTINCT duration_ms FROM ${table} WHERE id IN (201, 513)`).all()).toEqual([
 					{ duration_ms: duration },
@@ -1261,10 +1264,10 @@ describe("Mainworthy instance archives", () => {
 		{ staged: null, path: "results" },
 		{ staged: JSON.stringify([{ test: { key: "one" }, outcome: "wrong" }]), path: "0\\.outcome" },
 		{ staged: JSON.stringify([{ test: { key: "x".repeat(1001) }, outcome: "pass" }]), path: "0\\.test\\.key" },
-	])("pending result errors name $path on one line without blaming durations", ({ staged, path }) => {
-		const from = source();
+	])("pending result errors name $path on one line without blaming durations", async ({ staged, path }) => {
+		const from = await source();
 		from.raw.query("UPDATE batches SET staged = ? WHERE id = 504").run(staged);
-		refuse(
+		await refuse(
 			archive(from),
 			new RegExp(
 				`^invalid archive batches\\.staged for row 504 on line \\d+: pending results fail result input: ${path}: [^\\r\\n]+$`,
@@ -1272,8 +1275,8 @@ describe("Mainworthy instance archives", () => {
 		);
 	});
 
-	test("an archive keeps the moved scope but leaves its audit trail behind", () => {
-		const from = source();
+	test("an archive keeps the moved scope but leaves its audit trail behind", async () => {
+		const from = await source();
 		from.raw
 			.query(
 				"UPDATE targets SET what = 'code:example/app@abc12345', commit_sha = 'abc12345', branch = 'main', line = 'trunk' WHERE id = 502",
@@ -1292,8 +1295,8 @@ describe("Mainworthy instance archives", () => {
 		});
 		const text = archive(from);
 		expect(text).not.toContain('"t":"scope_moves"');
-		const to = target();
-		importArchive(to, linesOf(text));
+		const to = await target();
+		await importArchive(to, linesOf(text));
 		expect(to.raw.query("SELECT line, branch, change FROM targets WHERE id = 502").get()).toEqual({
 			line: "trunk",
 			branch: "main",
@@ -1304,23 +1307,26 @@ describe("Mainworthy instance archives", () => {
 		expect(to.raw.query("SELECT * FROM scope_moves").all()).toEqual([]);
 	});
 
-	test("an archive exported under the former name replays the same rows", () => {
-		const from = source();
-		const to = target();
+	test("an archive exported under the former name replays the same rows", async () => {
+		const from = await source();
+		const to = await target();
 		const former = rehash(archive(from).replace('{"mainworthy":"archive"', '{"casebook":"archive"'));
 		expect(former.startsWith('{"casebook":"archive"')).toBe(true);
-		importArchive(to, linesOf(former));
+		await importArchive(to, linesOf(former));
 		expect(dump(to)).toEqual(dump(from));
 	});
 
-	test("a header that names both the former and the current name, or neither, is refused", () => {
-		const text = archive(source());
-		refuse(rehash(text.replace('{"mainworthy":"archive"', '{"casebook":"archive","mainworthy":"archive"')), /header/);
-		refuse(rehash(text.replace('{"mainworthy":"archive"', '{"other":"archive"')), /header/);
+	test("a header that names both the former and the current name, or neither, is refused", async () => {
+		const text = archive(await source());
+		await refuse(
+			rehash(text.replace('{"mainworthy":"archive"', '{"casebook":"archive","mainworthy":"archive"')),
+			/header/,
+		);
+		await refuse(rehash(text.replace('{"mainworthy":"archive"', '{"other":"archive"')), /header/);
 	});
 
-	test("exports are deterministic apart from exportedAt, with a verifiable footer", () => {
-		const db = source();
+	test("exports are deterministic apart from exportedAt, with a verifiable footer", async () => {
+		const db = await source();
 		const first = archive(db, 100);
 		const second = archive(db, 200);
 		const normalize = (text: string) =>
@@ -1340,8 +1346,8 @@ describe("Mainworthy instance archives", () => {
 		expect(first).not.toContain('"key":"schema_version"');
 	});
 
-	test("tables follow foreign-key dependencies and rows follow composite primary keys", () => {
-		const db = source();
+	test("tables follow foreign-key dependencies and rows follow composite primary keys", async () => {
+		const db = await source();
 		const text = archive(db);
 		const positions = new Map(exportedTables(db).map((name) => [name, text.indexOf(`"t":${JSON.stringify(name)}`)]));
 		for (const table of exportedTables(db)) {
@@ -1356,9 +1362,9 @@ describe("Mainworthy instance archives", () => {
 		expect(text.indexOf('"id":200,"project":23,')).toBeLessThan(text.indexOf('"id":201,"project":23,'));
 	});
 
-	test("rebuilds the head version's title, preconditions, steps and tags, including archived cases", () => {
-		const db = target();
-		importArchive(db, linesOf(archive(source())));
+	test("rebuilds the head version's title, preconditions, steps and tags, including archived cases", async () => {
+		const db = await target();
+		await importArchive(db, linesOf(archive(await source())));
 		const query = db.raw.query<{ rowid: number }, [string]>("SELECT rowid FROM search_docs WHERE search_docs MATCH ?");
 		for (const term of ["nebulouswidget", "luminousreply", "Précondition", "regression", "café"]) {
 			expect(query.all(term)).toEqual([{ rowid: 101 }]);
@@ -1372,9 +1378,9 @@ describe("Mainworthy instance archives", () => {
 		});
 	});
 
-	test("replays a model-valid case whose step has no expected result", () => {
-		const from = source();
-		const to = target();
+	test("replays a model-valid case whose step has no expected result", async () => {
+		const from = await source();
+		const to = await target();
 		const validBody = JSON.stringify({
 			title: "An unfinished expectation",
 			pre: "",
@@ -1384,7 +1390,7 @@ describe("Mainworthy instance archives", () => {
 			fields: {},
 		});
 		from.raw.query("UPDATE versions SET body = ? WHERE case_id = 101 AND no = 2").run(validBody);
-		importArchive(to, linesOf(archive(from)));
+		await importArchive(to, linesOf(archive(from)));
 		expect(dump(to)).toEqual(dump(from));
 		expect(to.raw.query("SELECT body FROM search_docs WHERE rowid = 101").get()).toEqual({
 			body: "\nInspect unansweredstep",
@@ -1394,28 +1400,28 @@ describe("Mainworthy instance archives", () => {
 		]);
 	});
 
-	test("discovers added tables, quoted identifiers and added columns without an archive list", () => {
-		const from = source();
-		const to = target();
+	test("discovers added tables, quoted identifiers and added columns without an archive list", async () => {
+		const from = await source();
+		const to = await target();
 		for (const db of [from, to])
-			db.exec(`
+			await db.exec(`
 			ALTER TABLE cases ADD COLUMN extra_text TEXT;
 			CREATE TABLE "future 'table" ("odd column" INTEGER PRIMARY KEY, owner INTEGER REFERENCES cases(id), note TEXT) STRICT;
 		`);
 		from.raw.query("UPDATE cases SET extra_text = ?").run("new\ncolumn 雪");
 		insert(from, "future 'table", { "odd column": 9_223_372_036_854_775_807n, owner: 101, note: "" });
-		const result = importArchive(to, linesOf(archive(from)));
+		const result = await importArchive(to, linesOf(archive(from)));
 		expect(result.tables["future 'table"]).toBe(1);
 		expect(dump(to)).toEqual(dump(from));
 	});
 
-	test("an older archive fills added nullable columns with NULL, even with defaults", () => {
-		const from = source();
-		const to = target();
-		to.exec(
+	test("an older archive fills added nullable columns with NULL, even with defaults", async () => {
+		const from = await source();
+		const to = await target();
+		await to.exec(
 			"ALTER TABLE cases ADD COLUMN later_note TEXT DEFAULT 'new'; ALTER TABLE cases ADD COLUMN later_count INTEGER",
 		);
-		importArchive(to, linesOf(archive(from)));
+		await importArchive(to, linesOf(archive(from)));
 		expect(to.raw.query("SELECT later_note, later_count FROM cases WHERE id = 101").get()).toEqual({
 			later_note: null,
 			later_count: null,
@@ -1425,64 +1431,70 @@ describe("Mainworthy instance archives", () => {
 		);
 	});
 
-	test("an archive from before head observations leaves the observation unset", () => {
-		const to = target();
-		const old = rehash(archive(source()).replace(',"head_observed_seq":2', ""));
+	test("an archive from before head observations leaves the observation unset", async () => {
+		const to = await target();
+		const old = rehash(archive(await source()).replace(',"head_observed_seq":2', ""));
 		expect(old).not.toContain('"head_observed_seq"');
-		importArchive(to, linesOf(old));
+		await importArchive(to, linesOf(old));
 		expect(to.raw.query("SELECT key, head_observed_seq FROM changes WHERE id = 503").get()).toEqual({
 			key: "change-one",
 			head_observed_seq: null,
 		});
 	});
 
-	test("an archive without decision evidence imports legacy hashes as NULL", () => {
+	test("an archive without decision evidence imports legacy hashes as NULL", async () => {
 		const migration = MIGRATIONS.find((entry) => entry.name === "decision_evidence");
 		expect(migration?.archive).toBe(false);
-		const from = source();
-		from.exec("ALTER TABLE decisions DROP COLUMN on_evidence");
+		const from = await source();
+		await from.exec("ALTER TABLE decisions DROP COLUMN on_evidence");
 		const old = archive(from);
 		expect(old).toContain(`"schema":${ARCHIVE_VERSION},`);
 		const decision = [...linesOf(old)].map((line) => JSON.parse(line)).find((row) => row.t === "decisions");
 		expect(decision.r).not.toHaveProperty("on_evidence");
-		const to = target();
-		importArchive(to, linesOf(old));
+		const to = await target();
+		await importArchive(to, linesOf(old));
 		expect(to.raw.query("SELECT DISTINCT on_evidence FROM decisions").all()).toEqual([{ on_evidence: null }]);
 	});
 
-	test("a missing required column is refused rather than using a default", () => {
-		const to = target();
+	test("a missing required column is refused rather than using a default", async () => {
+		const to = await target();
 		to.raw.exec("ALTER TABLE cases ADD COLUMN required_note TEXT NOT NULL DEFAULT 'new'");
 		const before = allRows(to);
 		expect(() => importArchive(to, linesOf(archive(source())))).toThrow("missing column cases.required_note");
 		expect(allRows(to)).toEqual(before);
 	});
 
-	test("a missing primary key is refused rather than assigned a new identity", () => {
-		refuse(rehash(archive(source()).replace('"id":101,', "")), /missing column cases.id/);
+	test("a missing primary key is refused rather than assigned a new identity", async () => {
+		await refuse(rehash(archive(await source()).replace('"id":101,', "")), /missing column cases.id/);
 	});
 
-	test("SQLite table and column names that match object prototypes remain lossless", () => {
-		const from = source();
-		const to = target();
+	test("SQLite table and column names that match object prototypes remain lossless", async () => {
+		const from = await source();
+		const to = await target();
 		for (const db of [from, to])
-			db.exec(`
+			await db.exec(`
 			CREATE TABLE future_notes (id INTEGER PRIMARY KEY, "__proto__" TEXT) STRICT;
 			CREATE TABLE "__proto__" (id INTEGER PRIMARY KEY, "constructor" TEXT) STRICT;
 		`);
 		from.raw.query("INSERT INTO future_notes VALUES (1, ?)").run("preserved column");
 		from.raw.query('INSERT INTO "__proto__" VALUES (1, ?)').run("preserved table");
-		importArchive(to, linesOf(archive(from)));
+		await importArchive(to, linesOf(archive(from)));
 		expect(dump(to)).toEqual(dump(from));
 	});
 
-	test("unknown prototype-named tables and columns are named and refused", () => {
-		refuse(rehash(archive(source()).replace('"tables":{', '"tables":{"__proto__":0,')), /unknown.*table.*__proto__/i);
-		refuse(rehash(archive(source()).replace('"r":{', '"r":{"__proto__":"unknown",')), /unknown.*column.*__proto__/i);
+	test("unknown prototype-named tables and columns are named and refused", async () => {
+		await refuse(
+			rehash(archive(await source()).replace('"tables":{', '"tables":{"__proto__":0,')),
+			/unknown.*table.*__proto__/i,
+		);
+		await refuse(
+			rehash(archive(await source()).replace('"r":{', '"r":{"__proto__":"unknown",')),
+			/unknown.*column.*__proto__/i,
+		);
 	});
 
-	test("emits complete lines in approximately 64 KiB chunks within a read transaction", () => {
-		const db = source();
+	test("emits complete lines in approximately 64 KiB chunks within a read transaction", async () => {
+		const db = await source();
 		for (let i = 0; i < 2_000; i++) insert(db, "meta", { key: `chunk-${i}`, value: "雪".repeat(40) });
 		const chunks: string[] = [];
 		exportArchive(
@@ -1498,11 +1510,11 @@ describe("Mainworthy instance archives", () => {
 		);
 		expect(chunks.length).toBeGreaterThan(3);
 		expect(db.raw.inTransaction).toBe(false);
-		expect(importArchive(target(), linesOf(chunks.join(""))).tables.meta).toBe(2_001);
+		expect((await importArchive(await target(), linesOf(chunks.join("")))).tables.meta).toBe(2_001);
 	});
 
-	test("an oversized row stays one line and a failing writer releases the read transaction", () => {
-		const db = source();
+	test("an oversized row stays one line and a failing writer releases the read transaction", async () => {
+		const db = await source();
 		insert(db, "meta", { key: "large-document", value: "雪".repeat(40_000) });
 		const chunks: string[] = [];
 		exportArchive(db, (chunk) => chunks.push(chunk));
@@ -1513,99 +1525,111 @@ describe("Mainworthy instance archives", () => {
 			}),
 		).toThrow("writer failed");
 		expect(db.raw.inTransaction).toBe(false);
-		const to = target();
-		importArchive(to, linesOf(archive(db)));
+		const to = await target();
+		await importArchive(to, linesOf(archive(db)));
 		expect(dump(to)).toEqual(dump(db));
 	});
 
-	test("invalid UTF-8 in stored TEXT is refused instead of replacing bytes", () => {
-		const db = source();
+	test("invalid UTF-8 in stored TEXT is refused instead of replacing bytes", async () => {
+		const db = await source();
 		db.raw.exec("UPDATE meta SET value = CAST(X'61FF62' AS TEXT) WHERE key = 'instance-note'");
 		expect(() => exportArchive(db, () => {})).toThrow(/UTF-8/);
 		expect(db.raw.inTransaction).toBe(false);
 	});
 
-	test("an instance with no rows exports every table with zero counts and can be replayed", () => {
-		const from = database();
-		const to = target();
-		const imported = importArchive(to, linesOf(archive(from)));
+	test("an instance with no rows exports every table with zero counts and can be replayed", async () => {
+		const from = await database();
+		const to = await target();
+		const imported = await importArchive(to, linesOf(archive(from)));
 		expect(imported.rows).toBe(0);
 		expect(Object.keys(imported.tables).sort()).toEqual(exportedTables(from));
 		expect(Object.values(imported.tables).every((count) => count === 0)).toBe(true);
 		expect(dump(to)).toEqual(dump(from));
 	});
 
-	test("a missing footer rolls back every row and bootstrap deletion", () => {
-		const lines = [...linesOf(archive(source()))];
+	test("a missing footer rolls back every row and bootstrap deletion", async () => {
+		const lines = [...linesOf(archive(await source()))];
 		lines.pop();
-		refuse(`${lines.join("\n")}\n`, /footer|truncated/);
+		await refuse(`${lines.join("\n")}\n`, /footer|truncated/);
 	});
 
-	test("a truncated footer is refused without changing the target", () => {
-		refuse(archive(source()).slice(0, -20), /JSON|footer|archive/);
+	test("a truncated footer is refused without changing the target", async () => {
+		await refuse(archive(await source()).slice(0, -20), /JSON|footer|archive/);
 	});
 
-	test("a flipped byte is refused without changing the target", () => {
-		refuse(archive(source()).replace("Archive organisation", "Brchive organisation"), /hash|checksum|SHA/);
+	test("a flipped byte is refused without changing the target", async () => {
+		await refuse(archive(await source()).replace("Archive organisation", "Brchive organisation"), /hash|checksum|SHA/);
 	});
 
-	test("a wrong footer row count is refused without changing the target", () => {
-		refuse(archive(source()).replace(/"rows":\d+/, '"rows":0'), /row count/);
+	test("a wrong footer row count is refused without changing the target", async () => {
+		await refuse(archive(await source()).replace(/"rows":\d+/, '"rows":0'), /row count/);
 	});
 
-	test("a wrong per-table count is refused even with a valid checksum", () => {
-		refuse(rehash(archive(source()).replace(/"results":2/, '"results":3')), /results.*count|count.*results/);
+	test("a wrong per-table count is refused even with a valid checksum", async () => {
+		await refuse(
+			rehash(archive(await source()).replace(/"results":2/, '"results":3')),
+			/results.*count|count.*results/,
+		);
 	});
 
-	test("an unknown row table is named and rolled back", () => {
-		refuse(archive(source()).replace('"t":"meta"', '"t":"unknown_table"'), /unknown.*table.*unknown_table/i);
+	test("an unknown row table is named and rolled back", async () => {
+		await refuse(
+			archive(await source()).replace('"t":"meta"', '"t":"unknown_table"'),
+			/unknown.*table.*unknown_table/i,
+		);
 	});
 
-	test("an unknown header table is named and refused", () => {
-		refuse(archive(source()).replace('"tables":{', '"tables":{"unknown_table":0,'), /unknown.*table.*unknown_table/i);
+	test("an unknown header table is named and refused", async () => {
+		await refuse(
+			archive(await source()).replace('"tables":{', '"tables":{"unknown_table":0,'),
+			/unknown.*table.*unknown_table/i,
+		);
 	});
 
-	test("an unknown column is named and rolled back", () => {
-		refuse(
-			archive(source()).replace('"key":"instance-note"', '"unknown_column":"instance-note"'),
+	test("an unknown column is named and rolled back", async () => {
+		await refuse(
+			archive(await source()).replace('"key":"instance-note"', '"unknown_column":"instance-note"'),
 			/unknown.*column.*unknown_column/i,
 		);
 	});
 
-	test("newer formats are refused before changing the target", () => {
-		refuse(archive(source()).replace('"format":1', '"format":2'), /format.*2/);
+	test("newer formats are refused before changing the target", async () => {
+		await refuse(archive(await source()).replace('"format":1', '"format":2'), /format.*2/);
 	});
 
-	test("newer and older schemas are refused with a clear message", () => {
+	test("newer and older schemas are refused with a clear message", async () => {
 		// The header names the archive version: the last migration that changed what an archive holds, which is
 		// behind the schema version whenever a later migration only added a table an archive leaves out.
-		expect(archive(source())).toContain(`"schema":${ARCHIVE_VERSION},`);
+		expect(archive(await source())).toContain(`"schema":${ARCHIVE_VERSION},`);
 		expect(ARCHIVE_VERSION).toBeLessThanOrEqual(SCHEMA_VERSION);
-		refuse(
-			archive(source()).replace(`"schema":${ARCHIVE_VERSION}`, `"schema":${ARCHIVE_VERSION + 1}`),
+		await refuse(
+			archive(await source()).replace(`"schema":${ARCHIVE_VERSION}`, `"schema":${ARCHIVE_VERSION + 1}`),
 			/schema.*newer|newer.*schema/,
 		);
-		refuse(archive(source()).replace(`"schema":${ARCHIVE_VERSION}`, '"schema":0'), /schema.*older|older.*schema/);
+		await refuse(
+			archive(await source()).replace(`"schema":${ARCHIVE_VERSION}`, '"schema":0'),
+			/schema.*older|older.*schema/,
+		);
 	});
 
-	test("sessions never travel, and an import empties them before the tokens they refer to", () => {
-		const from = source();
+	test("sessions never travel, and an import empties them before the tokens they refer to", async () => {
+		const from = await source();
 		const seen = { created_at: time, last_seen_at: time, expires_at: time };
 		insert(from, "sessions", { id: 1, actor: 71, token: 900, hash: "c".repeat(64), ...seen });
 		const text = archive(from);
 		expect(text).not.toContain('"t":"sessions"');
 		expect(text).not.toContain("c".repeat(64));
-		refuse(text.replace('"t":"meta"', '"t":"sessions"'), /sessions/);
+		await refuse(text.replace('"t":"meta"', '"t":"sessions"'), /sessions/);
 		// The target's own session refers to the target's own token: both go, the session first.
-		const to = target();
+		const to = await target();
 		insert(to, "sessions", { id: 1, actor: 1, token: 1, hash: "d".repeat(64), ...seen });
-		importArchive(to, linesOf(text));
+		await importArchive(to, linesOf(text));
 		expect(to.raw.query("SELECT * FROM sessions").all()).toEqual([]);
 		expect(to.raw.query("SELECT * FROM tokens").all()).toEqual([]);
 	});
 
-	test("a password, a passkey, its handle and an invitation never travel, and an import empties them in an order the foreign keys allow", () => {
-		const people = (db: Db, actor: number, mark: string): void => {
+	test("a password, a passkey, its handle and an invitation never travel, and an import empties them in an order the foreign keys allow", async () => {
+		const people = (db: ReadDb, actor: number, mark: string): void => {
 			insert(db, "credentials", {
 				id: 1,
 				actor,
@@ -1644,18 +1668,18 @@ describe("Mainworthy instance archives", () => {
 				expires_at: time,
 			});
 		};
-		const from = source();
+		const from = await source();
 		people(from, 71, "e");
 		const text = archive(from);
 		for (const table of ["credentials", "passkey_users", "invitations"]) {
 			expect(text).not.toContain(`"t":"${table}"`);
-			refuse(text.replace('"t":"meta"', `"t":"${table}"`), new RegExp(table));
+			await refuse(text.replace('"t":"meta"', `"t":"${table}"`), new RegExp(table));
 		}
 		for (const held of ["$argon2id$e", "credential-e", "key-e", "handle-e", "e".repeat(63)])
 			expect(text).not.toContain(held);
-		const to = target();
+		const to = await target();
 		people(to, 1, "f");
-		importArchive(to, linesOf(text));
+		await importArchive(to, linesOf(text));
 		for (const table of UNEXPORTED.filter(
 			(table) => !["assertion_index", "assertion_roots", "assertion_seen", "assertion_spreads"].includes(table),
 		))
@@ -1698,12 +1722,12 @@ describe("Mainworthy instance archives", () => {
 		expect(late).toEqual([]);
 	});
 
-	test("a non-empty target throws conflict and stays unchanged", () => {
-		const db = target();
+	test("a non-empty target throws conflict and stays unchanged", async () => {
+		const db = await target();
 		insert(db, "projects", { id: 1, org: 1, key: "existing", name: "Existing", created_at: time });
 		const before = allRows(db);
 		try {
-			importArchive(db, linesOf(archive(source())));
+			await importArchive(db, linesOf(archive(await source())));
 			throw new Error("import should have conflicted");
 		} catch (error) {
 			expect(error).toBeInstanceOf(OpError);
@@ -1713,30 +1737,30 @@ describe("Mainworthy instance archives", () => {
 		expect(allRows(db)).toEqual(before);
 	});
 
-	test("a deferred foreign-key violation rolls back, including when a caller catches it", () => {
-		const text = rehash(archive(source()).replace('"org":17', '"org":9999'));
-		refuse(text, /foreign key/i);
-		const db = target();
+	test("a deferred foreign-key violation rolls back, including when a caller catches it", async () => {
+		const text = rehash(archive(await source()).replace('"org":17', '"org":9999'));
+		await refuse(text, /foreign key/i);
+		const db = await target();
 		const before = allRows(db);
-		db.transaction(() => {
+		await db.transaction(() => {
 			expect(() => importArchive(db, linesOf(text))).toThrow(/foreign key/i);
 		});
 		expect(allRows(db)).toEqual(before);
 	});
 
-	test("nested import restores the caller's foreign-key deferral setting after success or failure", () => {
-		const text = archive(source());
+	test("nested import restores the caller's foreign-key deferral setting after success or failure", async () => {
+		const text = archive(await source());
 		for (const deferred of [0, 1]) {
 			for (const fail of [false, true]) {
-				const db = target();
-				db.transaction(() => {
+				const db = await target();
+				await db.transaction(async () => {
 					db.raw.exec(`PRAGMA defer_foreign_keys = ${deferred}`);
 					if (fail) {
 						expect(() =>
 							importArchive(db, linesOf(text.replace("Archive organisation", "Brchive organisation"))),
 						).toThrow(/checksum/);
 					} else {
-						importArchive(db, linesOf(text));
+						await importArchive(db, linesOf(text));
 					}
 					expect(db.raw.query<{ defer_foreign_keys: number }, []>("PRAGMA defer_foreign_keys").get()).toEqual({
 						defer_foreign_keys: deferred,
@@ -1751,32 +1775,33 @@ describe("Mainworthy instance archives", () => {
 		}
 	});
 
-	test("nested import preserves a caller's already pending deferred constraint", () => {
-		const from = source();
-		const db = target();
+	test("nested import preserves a caller's already pending deferred constraint", async () => {
+		const from = await source();
+		const db = await target();
 		for (const instance of [from, db])
 			instance.raw.exec(`CREATE TABLE future_rows (
 			id INTEGER PRIMARY KEY, org INTEGER REFERENCES orgs(id) DEFERRABLE INITIALLY DEFERRED
 		) STRICT`);
 		const text = archive(from).replace("Archive organisation", "Brchive organisation");
-		expect(() =>
-			db.transaction(() => {
-				db.raw.query("INSERT INTO future_rows VALUES (1, 9999)").run();
-				expect(() => importArchive(db, linesOf(text))).toThrow();
-				expect(db.raw.query<{ defer_foreign_keys: number }, []>("PRAGMA defer_foreign_keys").get()).toEqual({
-					defer_foreign_keys: 0,
-				});
-			}),
+		expect(
+			async () =>
+				await db.transaction(() => {
+					db.raw.query("INSERT INTO future_rows VALUES (1, 9999)").run();
+					expect(() => importArchive(db, linesOf(text))).toThrow();
+					expect(db.raw.query<{ defer_foreign_keys: number }, []>("PRAGMA defer_foreign_keys").get()).toEqual({
+						defer_foreign_keys: 0,
+					});
+				}),
 		).toThrow(/FOREIGN KEY/);
 		expect(db.raw.query("SELECT * FROM future_rows").all()).toEqual([]);
 	});
 
-	test("invalid archived row constraints produce an invalid operation error and roll back", () => {
-		const db = target();
+	test("invalid archived row constraints produce an invalid operation error and roll back", async () => {
+		const db = await target();
 		const before = allRows(db);
-		const text = rehash(archive(source()).replace('"name":"Archive organisation"', '"name":null'));
+		const text = rehash(archive(await source()).replace('"name":"Archive organisation"', '"name":null'));
 		try {
-			importArchive(db, linesOf(text));
+			await importArchive(db, linesOf(text));
 			throw new Error("import should have refused a NULL organisation name");
 		} catch (error) {
 			expect(error).toBeInstanceOf(OpError);
@@ -1787,22 +1812,25 @@ describe("Mainworthy instance archives", () => {
 		expect(allRows(db)).toEqual(before);
 	});
 
-	test("trailing input, empty input and attempts to import excluded data are refused", () => {
-		refuse(`${archive(source())}{"end":true}\n`, /after.*footer|trailing/);
-		refuse("", /header|empty/);
-		refuse(archive(source()).replace('"key":"instance-note"', '"key":"schema_version"'), /schema_version/);
-		refuse(archive(source()).replace('"t":"meta"', '"t":"tokens"'), /tokens/);
-		refuse(archive(source()).replace('"t":"meta"', '"t":"search_docs"'), /search_docs/);
+	test("trailing input, empty input and attempts to import excluded data are refused", async () => {
+		await refuse(`${archive(await source())}{"end":true}\n`, /after.*footer|trailing/);
+		await refuse("", /header|empty/);
+		await refuse(archive(await source()).replace('"key":"instance-note"', '"key":"schema_version"'), /schema_version/);
+		await refuse(archive(await source()).replace('"t":"meta"', '"t":"tokens"'), /tokens/);
+		await refuse(archive(await source()).replace('"t":"meta"', '"t":"search_docs"'), /search_docs/);
 	});
 
-	test("a missing head version or invalid search body rolls back index rebuilding", () => {
-		refuse(rehash(archive(source()).replace('"head":2', '"head":99')), /head.*version|version.*head/);
-		refuse(rehash(archive(source()).replace('\\"pre\\": \\"Précondition 雪\\"', '\\"pre\\": null')), /search|body|pre/);
+	test("a missing head version or invalid search body rolls back index rebuilding", async () => {
+		await refuse(rehash(archive(await source()).replace('"head":2', '"head":99')), /head.*version|version.*head/);
+		await refuse(
+			rehash(archive(await source()).replace('\\"pre\\": \\"Précondition 雪\\"', '\\"pre\\": null')),
+			/search|body|pre/,
+		);
 	});
 
-	test("50,000 result rows are exported and imported, with timing and complete data checks", () => {
-		const from = source();
-		const to = target();
+	test("50,000 result rows are exported and imported, with timing and complete data checks", async () => {
+		const from = await source();
+		const to = await target();
 		const row = fixtures.results?.[0];
 		if (!row) throw new Error("missing result fixture");
 		const columns = Object.keys(row);
@@ -1810,7 +1838,7 @@ describe("Mainworthy instance archives", () => {
 			`INSERT INTO results (${columns.map(identifier).join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`,
 		);
 		try {
-			from.transaction(() => {
+			await from.transaction(() => {
 				for (let i = 2; i < 50_000; i++)
 					statement.run(
 						...columns.map((column) => {
@@ -1829,7 +1857,7 @@ describe("Mainworthy instance archives", () => {
 		const exportedAt = performance.now();
 		const text = chunks.join("");
 		const importStart = performance.now();
-		const imported = importArchive(to, linesOf(text));
+		const imported = await importArchive(to, linesOf(text));
 		const finished = performance.now();
 		expect(exported.tables.results).toBe(50_000);
 		expect(imported.tables.results).toBe(50_000);
@@ -1904,10 +1932,10 @@ test("archive import leaves a landed change open without naming its landing on t
 		exportArchive(from.app.db, (chunk) => chunks.push(chunk), { project: "scratch" });
 		const archive = chunks.join("");
 		expect(archive).not.toContain('"t":"change_ends"');
-		to.app.db.transaction(() => {
-			to.app.db.exec("DELETE FROM commands");
-			removeBootstrap(to.app.db);
-			importArchive(to.app.db, linesOf(archive));
+		await to.app.db.transaction(async () => {
+			await to.app.db.exec("DELETE FROM commands");
+			await removeBootstrap(to.app.db);
+			await importArchive(to.app.db, linesOf(archive));
 		});
 		expect(await history(to)).toMatchObject({ location: { label: "main", commit, change: null } });
 		expect(await to.call("find", { in: "changes" })).toMatchObject({ items: [{ key: "pr:8", state: "open" }] });

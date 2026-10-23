@@ -34,12 +34,12 @@ test("two agents asking together take different next slots", async () => {
 	const release = Promise.withResolvers<void>();
 	const entered = Promise.withResolvers<void>();
 	const held = h.app.gate.run(async () => {
-		h.app.db.begin();
+		await h.app.db.begin();
 		entered.resolve();
 		try {
 			await release.promise;
 		} finally {
-			h.app.db.rollback();
+			await h.app.db.rollback();
 		}
 	});
 	await entered.promise;
@@ -48,7 +48,7 @@ test("two agents asking together take different next slots", async () => {
 			op: "work",
 			project: "scratch",
 			input: { do: "take", run: "R-1" },
-			actor: () => actor,
+			actor: async () => actor,
 		}),
 	);
 	try {
@@ -172,11 +172,11 @@ test("archives preserve the run and its slots but do not revive work leases", as
 	exportArchive(h.app.db, (chunk) => chunks.push(chunk));
 	const archive = chunks.join("");
 	expect(archive).not.toContain("slot_leases");
-	const restored = openApp({ ...h.app.config, dataDir: ":memory:" }, { memory: true, now: h.app.now });
+	const restored = await openApp({ ...h.app.config, dataDir: ":memory:" }, { memory: true, now: h.app.now });
 	try {
-		importArchive(restored.db, linesOf(archive));
+		await importArchive(restored.db, linesOf(archive));
 		const read = async (op: string, input: unknown) =>
-			await invoke(restored, OPS, { op, project: "scratch", input, actor: () => h.owner });
+			await invoke(restored, OPS, { op, project: "scratch", input, actor: async () => h.owner });
 		expect(await read("get", { refs: ["R-1"] })).toMatchObject({
 			ok: true,
 			result: [{ ref: "R-1", slots: 2, inProgress: 0 }],

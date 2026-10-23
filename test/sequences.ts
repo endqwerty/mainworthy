@@ -610,7 +610,7 @@ async function sequence(seed: number, preset: string): Promise<Problem | null> {
 			} else {
 				h.advance(15 * 86_400_000);
 				trace.push({ advance: "15 days" });
-				sweep(h.app, rule);
+				await sweep(h.app, rule);
 			}
 			// 13. An answer or a withdrawal by somebody the policy keeps it from did not go through.
 			if (keptFrom !== null) {

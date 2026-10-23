@@ -13,7 +13,7 @@ import { needs } from "../src/core/kinds.ts";
 import { REPLIES } from "../src/core/replies.ts";
 import { mustTarget, resultLocation } from "../src/server/evidence/evidence.ts";
 import { defaultConfig, openApp } from "../src/server/kernel/app.ts";
-import { Db, databasePath, declaredSql, sql } from "../src/server/kernel/db.ts";
+import { type ReadDb, databasePath, declaredSql, sql } from "../src/server/kernel/db.ts";
 import { MIGRATIONS, migrate, openDatabase, SCHEMA_VERSION, schemaVersion } from "../src/server/kernel/migrate.ts";
 import { OP_LIST } from "../src/server/ops/index.ts";
 import { UNEXPORTED } from "../src/server/transfer/transfer.ts";
@@ -42,7 +42,7 @@ const layerOf = (file: string): string => {
 };
 
 describe("fresh schema image", () => {
-	const contents = (db: Db) => {
+	const contents = (db: ReadDb) => {
 		const schema = db.raw
 			.query<{ type: string; name: string; tbl_name: string; sql: string | null }, []>(
 				"SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY name",
@@ -82,22 +82,22 @@ describe("fresh schema image", () => {
 	};
 
 	for (const memory of [true, false]) {
-		test(`matches real migrations and isolates later databases on ${memory ? "memory" : "disk"}`, () => {
+		test(`matches real migrations and isolates later databases on ${memory ? "memory" : "disk"}`, async () => {
 			const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-"));
 			const config = defaultConfig({ MAINWORTHY_DATA: join(directory, "image"), USER: "robin" });
 			const path = memory ? ":memory:" : join(directory, "migrated.db");
 			const migrated = new Db(path);
-			const app = openApp(config, { memory });
+			const app = await openApp(config, { memory });
 			try {
-				expect(migrate(migrated, path)).toEqual({ from: 0, to: SCHEMA_VERSION, backup: null });
-				expect(schemaVersion(app.db)).toBe(SCHEMA_VERSION);
+				expect(await migrate(migrated, path)).toEqual({ from: 0, to: SCHEMA_VERSION, backup: null });
+				expect(await schemaVersion(app.db)).toBe(SCHEMA_VERSION);
 				expect(app.db.raw.query("SELECT * FROM meta").all()).toEqual([
 					{ key: "schema_version", value: String(SCHEMA_VERSION) },
 				]);
 				expect(contents(app.db)).toEqual(contents(migrated));
 				expect(() => app.db.raw.query("SELECT $value").get({ wrong: 1 })).toThrow();
 				app.db.exec("INSERT INTO meta VALUES ('private', 'first app'); CREATE TABLE private_rows (value TEXT)");
-				const next = openApp({ ...config, dataDir: join(directory, "next") }, { memory });
+				const next = await openApp({ ...config, dataDir: join(directory, "next") }, { memory });
 				try {
 					expect(contents(next.db)).toEqual(contents(migrated));
 				} finally {
@@ -135,7 +135,7 @@ describe("fresh schema image", () => {
 		}
 	});
 
-	test("existing version-zero files keep their data and run the migrations", () => {
+	test("existing version-zero files keep their data and run the migrations", async () => {
 		const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-existing-"));
 		const path = databasePath(directory);
 		const original = new Db(path);
@@ -143,7 +143,7 @@ describe("fresh schema image", () => {
 		original.close();
 		const db = openDatabase(path);
 		try {
-			expect(schemaVersion(db)).toBe(SCHEMA_VERSION);
+			expect(await schemaVersion(db)).toBe(SCHEMA_VERSION);
 			expect(db.raw.query("SELECT value FROM preserved").all()).toEqual([{ value: "kept" }]);
 		} finally {
 			db.close();
@@ -152,7 +152,7 @@ describe("fresh schema image", () => {
 	});
 
 	for (const failFirst of [false, true]) {
-		test(`existing files retain upgrade backups ${failFirst ? "after a failed open" : "on the first open"}`, () => {
+		test(`existing files retain upgrade backups ${failFirst ? "after a failed open" : "on the first open"}`, async () => {
 			const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-upgrade-"));
 			const path = databasePath(directory);
 			const migration = MIGRATIONS.at(-1);
@@ -216,12 +216,12 @@ describe("fresh schema image", () => {
 					);
 					const kept = new Db(`${path}.v${previous}.bak`, { reader: true });
 					try {
-						expect(schemaVersion(kept)).toBe(previous);
+						expect(await schemaVersion(kept)).toBe(previous);
 						expect(kept.raw.query("SELECT value FROM meta WHERE key = 'preserved'").get()).toEqual({ value: "kept" });
 					} finally {
 						kept.close();
 					}
-					expect(schemaVersion(reopened)).toBe(SCHEMA_VERSION);
+					expect(await schemaVersion(reopened)).toBe(SCHEMA_VERSION);
 					expect(reopened.raw.query("SELECT value FROM meta WHERE key = 'preserved'").get()).toEqual({ value: "kept" });
 				} finally {
 					reopened.close();
@@ -229,7 +229,7 @@ describe("fresh schema image", () => {
 				removed.mockClear();
 				const restarted = openDatabase(path);
 				try {
-					expect(schemaVersion(restarted)).toBe(SCHEMA_VERSION);
+					expect(await schemaVersion(restarted)).toBe(SCHEMA_VERSION);
 					expect(fs.existsSync(`${path}.v${previous}.bak`)).toBe(true);
 					expect(removed.mock.calls).toEqual([]);
 				} finally {
@@ -237,7 +237,7 @@ describe("fresh schema image", () => {
 				}
 				db.raw.query("UPDATE meta SET value = ? WHERE key = 'schema_version'").run(String(SCHEMA_VERSION + 1));
 				expect(() => openDatabase(path)).toThrow("is newer than this build");
-				expect(schemaVersion(db)).toBe(SCHEMA_VERSION + 1);
+				expect(await schemaVersion(db)).toBe(SCHEMA_VERSION + 1);
 			} finally {
 				removed.mockRestore();
 				migration.sql = original;
@@ -327,7 +327,7 @@ describe("fresh schema image", () => {
 			}
 			const opened = openDatabase(path);
 			try {
-				expect(schemaVersion(opened)).toBe(SCHEMA_VERSION);
+				expect(await schemaVersion(opened)).toBe(SCHEMA_VERSION);
 				expect(opened.raw.query("SELECT value FROM meta WHERE key = 'preserved'").get()).toEqual({ value: "kept" });
 				for (const removed of [temporary, `${temporary}-journal`, journalOnly, workspace, empty, interrupted])
 					expect(fs.existsSync(removed)).toBe(false);
@@ -346,7 +346,7 @@ describe("fresh schema image", () => {
 				expect(fs.lstatSync(directoryJournal).isDirectory()).toBe(true);
 				const backup = new Db(`${path}.v1.bak`, { reader: true });
 				try {
-					expect(schemaVersion(backup)).toBe(1);
+					expect(await schemaVersion(backup)).toBe(1);
 				} finally {
 					backup.close();
 				}
@@ -361,7 +361,7 @@ describe("fresh schema image", () => {
 	});
 
 	for (const outcome of ["copy failure", "migration failure", "existing copy", "no migration"]) {
-		test(`interrupted copies stay when cleanup is not allowed: ${outcome}`, () => {
+		test(`interrupted copies stay when cleanup is not allowed: ${outcome}`, async () => {
 			const directory = mkdtempSync(join(tmpdir(), "mainworthy-interrupted-kept-"));
 			const path = databasePath(directory);
 			const db = new Db(path);
@@ -375,7 +375,7 @@ describe("fresh schema image", () => {
 			try {
 				db.exec(MIGRATIONS[0]?.sql ?? "");
 				db.exec("INSERT INTO meta VALUES ('schema_version', '1')");
-				if (outcome === "no migration") migrate(db, path);
+				if (outcome === "no migration") await migrate(db, path);
 				if (outcome === "existing copy") fs.writeFileSync(`${path}.v1.bak`, "existing copy");
 				for (const file of [temporary, `${temporary}-journal`]) fs.writeFileSync(file, "keep");
 				fs.mkdirSync(workspace);
@@ -401,7 +401,7 @@ describe("fresh schema image", () => {
 		});
 	}
 
-	test("a pre-existing garbage upgrade copy keeps older copies", () => {
+	test("a pre-existing garbage upgrade copy keeps older copies", async () => {
 		const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-garbage-copy-"));
 		const path = databasePath(directory);
 		const db = new Db(path);
@@ -415,13 +415,13 @@ describe("fresh schema image", () => {
 			fs.writeFileSync(`${path}.v20.bak`, "partial garbage");
 			const opened = openDatabase(path);
 			try {
-				expect(schemaVersion(opened)).toBe(SCHEMA_VERSION);
+				expect(await schemaVersion(opened)).toBe(SCHEMA_VERSION);
 				expect(fs.existsSync(`${path}.v19.bak`)).toBe(true);
 				expect(readFileSync(`${path}.v20.bak`, "utf8")).toBe("partial garbage");
 				expect(log.mock.calls).toEqual([]);
 				const older = new Db(`${path}.v19.bak`, { reader: true });
 				try {
-					expect(schemaVersion(older)).toBe(19);
+					expect(await schemaVersion(older)).toBe(19);
 					expect(older.raw.query("SELECT value FROM meta WHERE key = 'preserved'").get()).toEqual({ value: "kept" });
 				} finally {
 					older.close();
@@ -436,7 +436,7 @@ describe("fresh schema image", () => {
 		}
 	});
 
-	test("a later failed migration rolls back the whole upgrade before a retry", () => {
+	test("a later failed migration rolls back the whole upgrade before a retry", async () => {
 		const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-batch-rollback-"));
 		const path = databasePath(directory);
 		const db = new Db(path);
@@ -451,20 +451,20 @@ describe("fresh schema image", () => {
 			const before = contents(db);
 			migration.sql = "INSERT INTO meta VALUES ('preserved', 'duplicate')";
 			expect(() => openDatabase(path)).toThrow("UNIQUE");
-			expect(schemaVersion(db)).toBe(20);
+			expect(await schemaVersion(db)).toBe(20);
 			expect(contents(db)).toEqual(before);
 			expect(fs.existsSync(`${path}.v19.bak`)).toBe(true);
 			expect(log.mock.calls).toEqual([]);
 			migration.sql = original;
 			const reopened = openDatabase(path);
 			try {
-				expect(schemaVersion(reopened)).toBe(SCHEMA_VERSION);
+				expect(await schemaVersion(reopened)).toBe(SCHEMA_VERSION);
 				expect(fs.existsSync(`${path}.v19.bak`)).toBe(true);
 				expect(fs.existsSync(`${path}.v24.bak`)).toBe(false);
 				expect(log.mock.calls).toEqual([]);
 				const backup = new Db(`${path}.v20.bak`, { reader: true });
 				try {
-					expect(schemaVersion(backup)).toBe(20);
+					expect(await schemaVersion(backup)).toBe(20);
 					expect(backup.raw.query("SELECT value FROM meta WHERE key = 'preserved'").get()).toEqual({ value: "kept" });
 				} finally {
 					backup.close();
@@ -480,7 +480,7 @@ describe("fresh schema image", () => {
 		}
 	});
 
-	test("a failed copy sync publishes no final copy and preserves the starting database", () => {
+	test("a failed copy sync publishes no final copy and preserves the starting database", async () => {
 		const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-copy-sync-"));
 		const path = databasePath(directory);
 		const db = new Db(path);
@@ -492,18 +492,18 @@ describe("fresh schema image", () => {
 			db.exec("INSERT INTO meta VALUES ('schema_version', '20'), ('preserved', 'kept')");
 			fs.writeFileSync(`${path}.v19.bak`, "older copy");
 			expect(() => openDatabase(path)).toThrow("copy sync failed");
-			expect(schemaVersion(db)).toBe(20);
+			expect(await schemaVersion(db)).toBe(20);
 			expect(fs.existsSync(`${path}.v20.bak`)).toBe(false);
 			expect(readFileSync(`${path}.v19.bak`, "utf8")).toBe("older copy");
 			expect(readdirSync(directory).filter((file) => file.startsWith("mainworthy.db.v20.bak"))).toEqual([]);
 			sync.mockRestore();
 			const reopened = openDatabase(path);
 			try {
-				expect(schemaVersion(reopened)).toBe(SCHEMA_VERSION);
+				expect(await schemaVersion(reopened)).toBe(SCHEMA_VERSION);
 				expect(fs.existsSync(`${path}.v19.bak`)).toBe(false);
 				const backup = new Db(`${path}.v20.bak`, { reader: true });
 				try {
-					expect(schemaVersion(backup)).toBe(20);
+					expect(await schemaVersion(backup)).toBe(20);
 					expect(backup.raw.query("SELECT value FROM meta WHERE key = 'preserved'").get()).toEqual({ value: "kept" });
 				} finally {
 					backup.close();
@@ -518,7 +518,7 @@ describe("fresh schema image", () => {
 		}
 	});
 
-	test("a failed upgrade copy deletion logs and still opens the upgraded database", () => {
+	test("a failed upgrade copy deletion logs and still opens the upgraded database", async () => {
 		const directory = mkdtempSync(join(tmpdir(), "mainworthy-schema-cleanup-failure-"));
 		const path = databasePath(directory);
 		const db = new Db(path);
@@ -537,7 +537,7 @@ describe("fresh schema image", () => {
 			fs.writeFileSync(removable, "remove successfully");
 			const opened = openDatabase(path);
 			try {
-				expect(schemaVersion(opened)).toBe(SCHEMA_VERSION);
+				expect(await schemaVersion(opened)).toBe(SCHEMA_VERSION);
 				expect(opened.raw.query("SELECT value FROM meta WHERE key = 'preserved'").get()).toEqual({ value: "kept" });
 				expect(readFileSync(older, "utf8")).toBe("keep on removal failure");
 				expect(fs.existsSync(removable)).toBe(false);
@@ -549,7 +549,7 @@ describe("fresh schema image", () => {
 				);
 				const backup = new Db(`${path}.v20.bak`, { reader: true });
 				try {
-					expect(schemaVersion(backup)).toBe(20);
+					expect(await schemaVersion(backup)).toBe(20);
 				} finally {
 					backup.close();
 				}
@@ -574,9 +574,9 @@ describe("declared statements", () => {
 		"SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'meta'",
 	);
 
-	test("1000 bound reads and writes prepare once each despite dynamic SQL churn, and close finalizes them", () => {
+	test("1000 bound reads and writes prepare once each despite dynamic SQL churn, and close finalizes them", async () => {
 		const db = new Db(":memory:");
-		migrate(db, ":memory:");
+		await migrate(db, ":memory:");
 		const prepare = spyOn(db.raw, "prepare");
 		const query = spyOn(db.raw, "query");
 		try {
@@ -622,11 +622,11 @@ describe("declared statements", () => {
 		}
 	});
 
-	test("connections keep their own bindings, data and statement lifetimes", () => {
+	test("connections keep their own bindings, data and statement lifetimes", async () => {
 		const first = new Db(":memory:");
 		const second = new Db(":memory:");
 		try {
-			for (const db of [first, second]) migrate(db, ":memory:");
+			for (const db of [first, second]) await migrate(db, ":memory:");
 			first.run(write, { key: "cache-probe", value: "first" });
 			second.run(write, { key: "cache-probe", value: "second" });
 			expect(first.get(read, { key: "cache-probe" })).toEqual({ value: "first" });
@@ -640,12 +640,12 @@ describe("declared statements", () => {
 		}
 	});
 
-	test("a statement prepared before migration reads the migrated schema on the same connection", () => {
+	test("a statement prepared before migration reads the migrated schema on the same connection", async () => {
 		const db = new Db(":memory:");
 		try {
 			expect(db.all(tables)).toEqual([]);
 			expect(() => db.get(read, { key: "schema_version" })).toThrow("no such table");
-			expect(migrate(db, ":memory:")).toEqual({ from: 0, to: SCHEMA_VERSION, backup: null });
+			expect(await migrate(db, ":memory:")).toEqual({ from: 0, to: SCHEMA_VERSION, backup: null });
 			expect(db.get(read, { key: "schema_version" })).toEqual({ value: String(SCHEMA_VERSION) });
 			expect(db.all(tables)).toEqual([{ name: "meta" }]);
 			db.run(write, { key: "cache-probe", value: "after migration" });
@@ -1003,7 +1003,7 @@ describe("the module map", () => {
 		"server/handoffs": ["handoffs"],
 	};
 
-	test("a module runs SQL only on the tables it owns", () => {
+	test("a module runs SQL only on the tables it owns", async () => {
 		const ownerOf = new Map(
 			Object.entries(owners).flatMap(([layer, tables]) => tables.map((table) => [table, layer] as const)),
 		);
@@ -1024,7 +1024,7 @@ describe("the module map", () => {
 		expect(offenders).toEqual([]);
 		// Every table in the schema has an owner: a new table without one fails here.
 		const db = new Db(":memory:");
-		migrate(db, ":memory:");
+		await migrate(db, ":memory:");
 		const tables = db.raw
 			.query<{ name: string }, []>(
 				"SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'search_docs_%'",
@@ -1121,7 +1121,7 @@ describe("the module map", () => {
 		["UNIQUE", "'kept'"],
 		["FOREIGN KEY", "'missing'"],
 	]) {
-		test(`a migration's second-statement ${constraint} failure rolls back its rows and version`, () => {
+		test(`a migration's second-statement ${constraint} failure rolls back its rows and version`, async () => {
 			const db = new Db(":memory:");
 			const migration = MIGRATIONS.at(-1);
 			if (!migration) throw new Error("expected a shipped migration");
@@ -1140,12 +1140,12 @@ describe("the module map", () => {
 				migration.sql = `INSERT INTO migration_probe VALUES ('before');
 					INSERT INTO migration_probe VALUES (${value});
 					INSERT INTO migration_probe VALUES ('after');`;
-				expect(() => migrate(db, ":memory:")).toThrow(constraint);
+				expect(async () => await migrate(db, ":memory:")).toThrow(constraint);
 				expect(db.raw.query("SELECT value FROM migration_probe").all()).toEqual([{ value: "kept" }]);
-				expect(schemaVersion(db)).toBe(migration.version - 1);
+				expect(await schemaVersion(db)).toBe(migration.version - 1);
 				expect(db.raw.inTransaction).toBe(false);
 				migration.sql = original;
-				expect(migrate(db, ":memory:").to).toBe(SCHEMA_VERSION);
+				expect((await migrate(db, ":memory:")).to).toBe(SCHEMA_VERSION);
 			} finally {
 				migration.sql = original;
 				db.close();
@@ -1153,7 +1153,7 @@ describe("the module map", () => {
 		});
 	}
 
-	test("change landing migration never guesses old heads and indexes only received exact landings", () => {
+	test("change landing migration never guesses old heads and indexes only received exact landings", async () => {
 		const db = new Db(":memory:");
 		try {
 			const migration = MIGRATIONS.find((entry) => entry.name === "change_landings");
@@ -1166,18 +1166,18 @@ describe("the module map", () => {
 				INSERT INTO change_ends VALUES (1, 'merged', 1);
 				INSERT INTO targets (id, project, what, repo, commit_sha, branch, line, first_seq)
 				VALUES (1, 1, 'code:acme/shop@landed123', 'acme/shop', 'landed123', 'main', 'trunk', 1);`);
-			expect(migrate(db, ":memory:").to).toBe(SCHEMA_VERSION);
-			const location = () => resultLocation(db, mustTarget(db, 1));
-			expect(location()).toEqual({ label: "main", commit: "landed123", change: null });
+			expect((await migrate(db, ":memory:")).to).toBe(SCHEMA_VERSION);
+			const location = async () => await resultLocation(db, await mustTarget(db, 1));
+			expect(await location()).toEqual({ label: "main", commit: "landed123", change: null });
 			expect(db.raw.query("SELECT landing_commit, landing_repo, landing_branch FROM change_ends").all()).toEqual([
 				{ landing_commit: null, landing_repo: null, landing_branch: null },
 			]);
 			db.exec(
 				"UPDATE change_ends SET landing_commit = 'landed123', landing_repo = 'acme/shop', landing_branch = 'master'",
 			);
-			expect(location()).toEqual({ label: "main", commit: "landed123", change: null });
+			expect(await location()).toEqual({ label: "main", commit: "landed123", change: null });
 			db.exec("UPDATE change_ends SET landing_branch = 'main'");
-			expect(location()).toEqual({ label: "main · pr:8 Keep coupons", commit: "landed123", change: "pr:8" });
+			expect(await location()).toEqual({ label: "main · pr:8 Keep coupons", commit: "landed123", change: "pr:8" });
 			const query = declaredSql().find(
 				(text) => text.includes("json_each($targets)") && text.includes("e.landing_commit"),
 			);
@@ -1202,18 +1202,19 @@ describe("the module map", () => {
 		}
 	});
 
-	test("every older schema upgrades to the same fresh schema", () => {
+	test("every older schema upgrades to the same fresh schema", async () => {
 		const fresh = new Db(":memory:");
-		const schema = (db: Db) => db.raw.query("SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY name").all();
+		const schema = (db: ReadDb) =>
+			db.raw.query("SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY name").all();
 		try {
-			migrate(fresh, ":memory:");
+			await migrate(fresh, ":memory:");
 			for (let version = 0; version < SCHEMA_VERSION; version++) {
 				const db = new Db(":memory:");
 				try {
 					for (const migration of MIGRATIONS.slice(0, version)) db.exec(migration.sql);
 					if (version > 0)
 						db.raw.query("INSERT INTO meta (key, value) VALUES ('schema_version', ?)").run(String(version));
-					expect(migrate(db, ":memory:"), `upgrade from schema ${version}`).toEqual({
+					expect(await migrate(db, ":memory:"), `upgrade from schema ${version}`).toEqual({
 						from: version,
 						to: SCHEMA_VERSION,
 						backup: null,
@@ -1408,9 +1409,9 @@ describe("the registry", () => {
 			expect(OP_LIST.find((op) => op.name === name)?.output).toBe(schema);
 	});
 
-	test("every statement the server can run prepares against the schema", () => {
+	test("every statement the server can run prepares against the schema", async () => {
 		const db = new Db(":memory:");
-		migrate(db, ":memory:");
+		await migrate(db, ":memory:");
 		const broken: string[] = [];
 		for (const text of declaredSql()) {
 			try {

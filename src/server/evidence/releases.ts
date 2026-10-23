@@ -1,6 +1,6 @@
 import type { AnnounceInput, AnnounceReply } from "../../core/ops.ts";
 import type { Ctx } from "../kernel/ctx.ts";
-import { type Db, json, sql } from "../kernel/db.ts";
+import { type ReadDb, json, sql } from "../kernel/db.ts";
 import { conflict, forbidden, invalid, notFound } from "../kernel/errors.ts";
 
 type Artifact = {
@@ -54,16 +54,16 @@ const Q = {
 };
 
 /** Build labels are immutable and project-local. A digest is the target identity, shared by its labels. */
-function mustBuild(db: Db, project: number, label: string): Build {
-	const build = db.get(Q.build, { project, label });
+async function mustBuild(db: ReadDb, project: number, label: string): Promise<Build> {
+	const build = await db.get(Q.build, { project, label });
 	if (!build) throw notFound(`build ${label}`);
 	return build;
 }
 
-export function buildWhat(db: Db, project: number, label: string, env?: string): string {
-	const build = mustBuild(db, project, label);
+export async function buildWhat(db: ReadDb, project: number, label: string, env?: string): Promise<string> {
+	const build = await mustBuild(db, project, label);
 	if (env !== undefined) {
-		const environments = db.all(Q.environments, { project, build: build.build_id }).map((row) => row.env);
+		const environments = (await db.all(Q.environments, { project, build: build.build_id })).map((row) => row.env);
 		if (!environments.includes(env))
 			throw invalid(
 				`build ${label} has not been deployed to ${JSON.stringify(env)}; deployed environments: ${environments.map((value) => JSON.stringify(value)).join(", ") || "none"}`,
@@ -73,7 +73,7 @@ export function buildWhat(db: Db, project: number, label: string, env?: string):
 }
 
 /** The authenticated pipeline or admin attests the artifact's source, then records a deployment fact. */
-export function announce(ctx: Ctx, input: AnnounceInput): AnnounceReply {
+export async function announce(ctx: Ctx, input: AnnounceInput): Promise<AnnounceReply> {
 	if (ctx.actor.kind !== "ci" && !(ctx.actor.kind === "human" && ctx.actor.can.includes("admin")))
 		throw forbidden("only a pipeline or a human admin may announce a deployment and attest its artifact");
 	const project = ctx.project.id;
@@ -84,19 +84,19 @@ export function announce(ctx: Ctx, input: AnnounceInput): AnnounceReply {
 				),
 			)
 		: null;
-	let build = ctx.db.get(Q.build, { project, label: input.deploy });
+	let build = await ctx.db.get(Q.build, { project, label: input.deploy });
 	if (build) {
 		if (input.digest !== undefined && input.digest !== build.digest)
 			throw conflict(`build ${input.deploy} is already bound to ${build.digest}`);
 		if (code !== null && code !== build.code) throw conflict("the artifact's attested source cannot change");
 	} else {
 		if (!input.digest) throw invalid("a new build label needs its artifact digest");
-		let artifact = ctx.db.get(Q.artifact, { project, digest: input.digest });
+		let artifact = await ctx.db.get(Q.artifact, { project, digest: input.digest });
 		if (artifact) {
 			if (code !== null && code !== artifact.code) throw conflict("the artifact's attested source cannot change");
 		} else {
 			if (code === null) throw invalid("a new artifact needs its source repositories and full commits in code");
-			ctx.db.run(Q.insertArtifact, {
+			await ctx.db.run(Q.insertArtifact, {
 				project,
 				digest: input.digest,
 				code,
@@ -104,13 +104,13 @@ export function announce(ctx: Ctx, input: AnnounceInput): AnnounceReply {
 				at: ctx.now,
 				seq: ctx.seq,
 			});
-			artifact = ctx.db.get(Q.artifact, { project, digest: input.digest });
+			artifact = await ctx.db.get(Q.artifact, { project, digest: input.digest });
 			if (!artifact) throw new Error("artifact was not stored");
 		}
-		ctx.db.run(Q.insertBuild, { project, label: input.deploy, artifact: artifact.id, seq: ctx.seq });
-		build = mustBuild(ctx.db, project, input.deploy);
+		await ctx.db.run(Q.insertBuild, { project, label: input.deploy, artifact: artifact.id, seq: ctx.seq });
+		build = await mustBuild(ctx.db, project, input.deploy);
 	}
-	const { lastId } = ctx.db.run(Q.deploy, {
+	const { lastId } = await ctx.db.run(Q.deploy, {
 		project,
 		build: build.build_id,
 		env: input.env,
@@ -129,5 +129,7 @@ export function announce(ctx: Ctx, input: AnnounceInput): AnnounceReply {
 	};
 }
 
-export const deployments = (db: Db, input: { project: number; before: number; limit: number }): Deployment[] =>
-	db.all(Q.deployments, input);
+export const deployments = async (
+	db: ReadDb,
+	input: { project: number; before: number; limit: number },
+): Promise<Deployment[]> => await db.all(Q.deployments, input);

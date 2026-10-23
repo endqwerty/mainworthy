@@ -1,7 +1,7 @@
 // The broad-assertion rule reads distinct observations, never the payload of a commit's raw results or tries.
 import { signatureHash } from "../../core/signature.ts";
 import { allProjects, type Ctx } from "../kernel/ctx.ts";
-import { type Db, sql } from "../kernel/db.ts";
+import { type ReadDb, type WriteDb, sql } from "../kernel/db.ts";
 import { invalid } from "../kernel/errors.ts";
 import { fileSignature, type SignatureRow, signatureByHash, signatureById, storeSignature } from "./signatures.ts";
 
@@ -66,19 +66,19 @@ const Q = {
 export const assertionScope = (target: { what: string; commit_sha: string | null }, batch: number): string =>
 	target.commit_sha === null ? `batch:${batch}` : `commit:${target.what}`;
 
-function rememberRoot(db: Db, root: SignatureRow, signature: number): void {
-	db.run(Q.rememberRoot, { project: root.project, root: root.id, signature });
+async function rememberRoot(db: WriteDb, root: SignatureRow, signature: number): Promise<void> {
+	await db.run(Q.rememberRoot, { project: root.project, root: root.id, signature });
 }
 
 /** Verify both hashes when recovering a file child; a failure message can itself start with "Split by file". */
-function originalRoot(db: Db, signature: SignatureRow, file: string | null): SignatureRow {
-	const known = db.get(Q.root, { signature: signature.id });
+async function originalRoot(db: WriteDb, signature: SignatureRow, file: string | null): Promise<SignatureRow> {
+	const known = await db.get(Q.root, { signature: signature.id });
 	if (known) return known;
 	let root = signature;
 	if (signatureHash(signature) !== signature.hash) {
 		const prefix = `Split by file (${file ?? "no file reported"}): `;
 		const text = signature.text.slice(prefix.length);
-		const candidate = signatureByHash(db, signature.project, signatureHash({ class: signature.class, text }));
+		const candidate = await signatureByHash(db, signature.project, signatureHash({ class: signature.class, text }));
 		if (
 			!signature.text.startsWith(prefix) ||
 			!candidate ||
@@ -90,116 +90,123 @@ function originalRoot(db: Db, signature: SignatureRow, file: string | null): Sig
 		}
 		root = candidate;
 	}
-	rememberRoot(db, root, signature.id);
+	await rememberRoot(db, root, signature.id);
 	return root;
 }
 
-function child(ctx: Ctx, root: SignatureRow, file: string | null): void {
-	const split = storeSignature(ctx, fileSignature(root, file));
-	rememberRoot(ctx.db, root, split.id);
+async function child(ctx: Ctx, root: SignatureRow, file: string | null): Promise<void> {
+	const split = await storeSignature(ctx, fileSignature(root, file));
+	await rememberRoot(ctx.db, root, split.id);
 }
 
 /** At most six covering-index successor seeks, regardless of repeated tests in one file. */
-function broad(db: Db, key: { project: number; scope: string; root: number }): boolean {
+async function broad(db: ReadDb, key: { project: number; scope: string; root: number }): Promise<boolean> {
 	if ((db.get(Q.tests, key)?.n ?? 0) < 51) return false;
-	let file = db.get(Q.firstReported, key)?.file;
+	let file = (await db.get(Q.firstReported, key))?.file;
 	for (let n = 1; file !== undefined; n++) {
 		if (n === 6) return true;
-		file = db.get(Q.nextFile, { ...key, after: file })?.file;
+		file = (await db.get(Q.nextFile, { ...key, after: file }))?.file;
 	}
 	return false;
 }
 
-function recordObservation(
-	db: Db,
+async function recordObservation(
+	db: WriteDb,
 	key: { project: number; scope: string; root: number },
 	test: { id: number; file: string | null },
-): "narrow" | "activated" | "active" {
+): Promise<"narrow" | "activated" | "active"> {
 	if (db.get(Q.active, key)) return "active";
-	db.run(Q.see, { ...key, test: test.id, file: test.file });
+	await db.run(Q.see, { ...key, test: test.id, file: test.file });
 	if (!broad(db, key)) return "narrow";
-	db.run(Q.activate, key);
+	await db.run(Q.activate, key);
 	return "activated";
 }
 
-export function observeAssertion(
+export async function observeAssertion(
 	ctx: Ctx,
 	scope: string,
 	root: SignatureRow,
 	test: { id: number; file: string | null },
-): void {
+): Promise<void> {
 	if (root.class !== "assertion") return;
 	const key = { project: ctx.project.id, scope, root: root.id };
-	rememberRoot(ctx.db, root, root.id);
-	const state = recordObservation(ctx.db, key, test);
+	await rememberRoot(ctx.db, root, root.id);
+	const state = await recordObservation(ctx.db, key, test);
 	if (state === "narrow") return;
 	if (state === "active") {
-		child(ctx, root, test.file);
+		await child(ctx, root, test.file);
 		return;
 	}
-	let file = ctx.db.get(Q.firstFile, key);
+	let file = await ctx.db.get(Q.firstFile, key);
 	while (file) {
-		child(ctx, root, file.file);
-		file = file.file === null ? ctx.db.get(Q.firstReported, key) : ctx.db.get(Q.nextFile, { ...key, after: file.file });
+		await child(ctx, root, file.file);
+		file =
+			file.file === null
+				? await ctx.db.get(Q.firstReported, key)
+				: await ctx.db.get(Q.nextFile, { ...key, after: file.file });
 	}
 }
 
-export function finishAssertionScope(ctx: Ctx, scope: string): void {
+export async function finishAssertionScope(ctx: Ctx, scope: string): Promise<void> {
 	if (!scope.startsWith("batch:")) return;
-	ctx.db.run(Q.clearSessionSeen, { project: ctx.project.id, scope });
-	ctx.db.run(Q.clearSessionSpread, { project: ctx.project.id, scope });
+	await ctx.db.run(Q.clearSessionSeen, { project: ctx.project.id, scope });
+	await ctx.db.run(Q.clearSessionSpread, { project: ctx.project.id, scope });
 }
 
 /** One-time derived reconstruction. The caller's transaction includes the completion marker. No evidence is rewritten. */
-export function* ensureAssertionIndex(db: Db, project: number): Generator<undefined, void, void> {
+export async function* ensureAssertionIndex(db: WriteDb, project: number): AsyncGenerator<undefined, void, void> {
 	if (db.get(Q.ready, { project })) return;
-	db.run(Q.clearRoots, { project });
-	db.run(Q.clearSeen, { project });
-	db.run(Q.clearSpreads, { project });
+	await db.run(Q.clearRoots, { project });
+	await db.run(Q.clearSeen, { project });
+	await db.run(Q.clearSpreads, { project });
 	let after = 0;
 	let work = 0;
 	for (;;) {
-		const rows = db.all(Q.history, { project, after });
+		const rows = await db.all(Q.history, { project, after });
 		if (rows.length === 0) break;
 		for (const row of rows) {
 			after = row.id;
-			const remember = (id: number | null) => {
-				const signature = id === null ? null : signatureById(db, id);
+			const remember = async (id: number | null) => {
+				const signature = id === null ? null : await signatureById(db, id);
 				if (signature?.class !== "assertion") return;
-				const root = originalRoot(db, signature, row.file);
+				const root = await originalRoot(db, signature, row.file);
 				if (row.commit_sha !== null)
-					recordObservation(
+					await recordObservation(
 						db,
 						{ project, scope: `commit:${row.what}`, root: root.id },
 						{ id: row.test, file: row.file },
 					);
 			};
-			remember(row.signature);
-			let tries = db.all(Q.firstTries, { result: row.id });
+			await remember(row.signature);
+			let tries = await db.all(Q.firstTries, { result: row.id });
 			for (;;) {
 				let last: number | null = null;
 				for (const tried of tries) {
-					remember(tried.signature);
+					await remember(tried.signature);
 					last = tried.try;
 					if (++work % PAGE === 0) yield;
 				}
 				if (tries.length < PAGE || last === null) break;
 				yield;
-				tries = db.all(Q.nextTries, { result: row.id, after: last });
+				tries = await db.all(Q.nextTries, { result: row.id, after: last });
 			}
 			if (++work % PAGE === 0) yield;
 		}
 		yield;
 	}
-	db.run(Q.markReady, { project });
+	await db.run(Q.markReady, { project });
 }
 
 /** Startup and archive import rebuild privately, before any accepted batch can use the index. */
-export function rebuildAssertionIndexes(db: Db, force = false, progress: () => void = () => {}): void {
-	db.transaction(() => {
-		for (const { id: project } of allProjects(db)) {
-			if (force) db.run(Q.clearReady, { project });
-			for (const _ of ensureAssertionIndex(db, project)) {
+export async function rebuildAssertionIndexes(
+	db: WriteDb,
+	force = false,
+	progress: () => void = () => {},
+): Promise<void> {
+	await db.transaction(async () => {
+		for (const { id: project } of await allProjects(db)) {
+			if (force) await db.run(Q.clearReady, { project });
+			for await (const _ of ensureAssertionIndex(db, project)) {
 				progress();
 			}
 		}

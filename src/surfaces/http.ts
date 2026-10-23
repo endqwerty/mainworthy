@@ -252,8 +252,13 @@ function factsOf(app: App, req: Request, owner: Actor, peer: string | null): Fac
  * Null for a caller that is refused and for one that is told to wait; a route answers each with its own reply
  * (`sessionFor`).
  */
-export function sessionOf(app: App, req: Request, owner: Actor, peer: string | null = null): Session | null {
-	const admission = admit(app, factsOf(app, req, owner, peer));
+export async function sessionOf(
+	app: App,
+	req: Request,
+	owner: Actor,
+	peer: string | null = null,
+): Promise<Session | null> {
+	const admission = await admit(app, factsOf(app, req, owner, peer));
 	return admission.kind === "admitted" ? admission.session : null;
 }
 
@@ -286,10 +291,10 @@ const limited = (seconds: number): Response =>
  * the CLI, an agent) is whoever its token says.
  */
 export const AS_HEADER = "x-mainworthy-as";
-function sameCaller(req: Request, session: Session): boolean {
+async function sameCaller(req: Request, session: Session): Promise<boolean> {
 	const expected = req.headers.get(AS_HEADER);
 	if (expected === null) return true;
-	const actor = session.actor(0);
+	const actor = await session.actor(0);
 	return actor !== null && String(actor.id) === expected;
 }
 const changedSession = (): Response =>
@@ -416,12 +421,12 @@ const tooLarge = (limit: number): Response =>
  * open. (Bun keeps the timeout off while the connection stays idle after the reply; the next request on it is
  * under the timeout again until it is given a session in its turn.)
  */
-function sessionFor(app: App, owner: Actor, req: Request, server: Listener): Session | Response {
+async function sessionFor(app: App, owner: Actor, req: Request, server: Listener): Promise<Session | Response> {
 	const incompatible = incompatibleRequest(req);
 	if (incompatible) return incompatible;
 	// The address the connection came from decides, in local mode, whether the request started on this machine,
 	// and in every mode where the request is counted as coming from.
-	const admission = admit(app, factsOf(app, req, owner, server.requestIP(req)?.address ?? null));
+	const admission = await admit(app, factsOf(app, req, owner, server.requestIP(req)?.address ?? null));
 	if (admission.kind === "refused") return unauthenticated();
 	if (admission.kind === "limited") return limited(admission.retryAfter);
 	const { session } = admission;
@@ -439,7 +444,7 @@ export async function handleOp(
 	project: string | null,
 	op: string,
 ): Promise<Response> {
-	const session = sessionFor(app, owner, req, server);
+	const session = await sessionFor(app, owner, req, server);
 	if (session instanceof Response) return session;
 	const at = timeOf(req);
 	if (at === null)
@@ -476,8 +481,8 @@ export async function handleOp(
  * `handoff` says whether a failure there can be handed to an agent (`MAINWORTHY_HANDOFF_*`).
  */
 export function grantedProjects(app: App, session: Session) {
-	return app.reader.snapshot(() =>
-		listProjects(app.reader).flatMap((project) => {
+	return app.reader.snapshot(async () =>
+		(await app.database.read(async (readDb) => await listProjects(readDb))).flatMap((project) => {
 			const id = findProject(app.reader, project.key)?.id;
 			const can = id === undefined ? [] : (session.actor(id)?.can ?? []);
 			return can.length > 0
@@ -495,8 +500,8 @@ export function grantedProjects(app: App, session: Session) {
 }
 
 /** Who the caller is and which projects it may read. */
-function sessionInfo(app: App, session: Session): Response {
-	const actor = session.actor(0);
+async function sessionInfo(app: App, session: Session): Promise<Response> {
+	const actor = await session.actor(0);
 	if (!actor) return unauthenticated();
 	return jsonResponse({
 		ok: true,
@@ -509,7 +514,10 @@ function sessionInfo(app: App, session: Session): Response {
 			via: session.via,
 			// What a page needs to show a person their own sign-in: which session this is, and what they sign in with.
 			session: session.id?.() ?? null,
-			credentials: actor.kind === "human" ? credentialSummary(app.reader, actor.id) : null,
+			credentials:
+				actor.kind === "human"
+					? await app.database.read(async (readDb) => await credentialSummary(readDb, actor.id))
+					: null,
 			// The owner is the person the configuration names, as `refuseToken` in `ops/admin.ts` takes it.
 			owner: actor.kind === "human" && actor.name === app.config.owner,
 			version: VERSION,
@@ -522,8 +530,8 @@ function sessionInfo(app: App, session: Session): Response {
  * Whether this session may read a project: the same rules an operation that needs `read` applies. A project the
  * caller holds no grant on is `missing`, like one that does not exist (see `execute` in the registry).
  */
-function mayRead(app: App, session: Session, key: string): "yes" | "no" | "missing" {
-	const project = findProject(app.reader, key);
+async function mayRead(app: App, session: Session, key: string): Promise<"yes" | "no" | "missing"> {
+	const project = await app.database.read(async (readDb) => await findProject(readDb, key));
 	const can = project ? (session.actor(project.id)?.can ?? []) : [];
 	if (can.length === 0) return "missing";
 	return can.includes("read") ? "yes" : "no";
@@ -567,7 +575,7 @@ async function login(
 	const body = z.strictObject({ token: z.string().max(TOKEN_MAX) }).safeParse(input);
 	if (!body.success) return otherwise(req, server, input);
 	// A token typed into the form is a token: it is counted as one sent in a header is, under the same keys.
-	const opening = signInWithToken(app, body.data.token, {
+	const opening = await signInWithToken(app, body.data.token, {
 		userAgent: req.headers.get("user-agent"),
 		address: clientAddress(req, server, app.config),
 	});
@@ -592,7 +600,7 @@ async function login(
 async function logout(app: App, req: Request, server: Listener): Promise<Response> {
 	if (!sameOrigin(req)) return unauthenticated();
 	const cookie = sessionCookieOf(req);
-	const ending = cookie === null ? null : signOut(app, cookie);
+	const ending = cookie === null ? null : await signOut(app, cookie);
 	if (ending) {
 		// A session that is open is being ended: its holder is vouched for while the end waits at the gate.
 		server.timeout(req, 0);
@@ -606,8 +614,14 @@ async function logout(app: App, req: Request, server: Listener): Promise<Respons
  * that misses an event refetches. It is silent for as long as nothing changes; like every request with a session,
  * it is not held to the idle timeout (`sessionFor`).
  */
-function events(app: App, req: Request, session: Session, project: string, closing: AbortSignal): Response {
-	const allowed = mayRead(app, session, project);
+async function events(
+	app: App,
+	req: Request,
+	session: Session,
+	project: string,
+	closing: AbortSignal,
+): Promise<Response> {
+	const allowed = await mayRead(app, session, project);
 	if (allowed === "missing") {
 		const { code, message } = noProject(project);
 		return jsonResponse({ ok: false, error: { code, message } }, HTTP_STATUS[code]);
@@ -646,7 +660,7 @@ function events(app: App, req: Request, session: Session, project: string, closi
 			send("retry: 2000\n\n");
 			// Who may read is asked again before anything is sent, not only when the stream opens: a token that was
 			// revoked, or an actor that was forgotten, stops receiving at the next event or heartbeat.
-			const stillAllowed = (): boolean => {
+			const stillAllowed = async (): Promise<boolean> => {
 				try {
 					if (mayRead(app, session, project) === "yes") return true;
 				} catch {
@@ -830,8 +844,9 @@ export function serve(
 	const closing = new AbortController();
 	// Every route that takes a session takes it here or in `handleOp`, and both through `sessionFor`.
 	const guarded =
-		(handler: (req: Request, session: Session) => Response | Promise<Response>) => (req: Request, server: Listener) => {
-			const session = sessionFor(app, owner, req, server);
+		(handler: (req: Request, session: Session) => Response | Promise<Response>) =>
+		async (req: Request, server: Listener) => {
+			const session = await sessionFor(app, owner, req, server);
 			return session instanceof Response ? session : handler(req, session);
 		};
 	// The routes by which a person signs in as themselves are in `signin.ts`, which is lent what this file
@@ -861,7 +876,7 @@ export function serve(
 			set: (req, value, seconds) => cookieHeaders(req, CEREMONY_COOKIE, { value, seconds }),
 			clear: (req) => cookieHeaders(req, CEREMONY_COOKIE, null),
 		},
-		sessionFor: (req, server) => sessionFor(app, owner, req, server),
+		sessionFor: async (req, server) => await sessionFor(app, owner, req, server),
 		address: (req, server) => clientAddress(req, server, app.config),
 		limited,
 	});
@@ -872,22 +887,31 @@ export function serve(
 				? jsonResponse({ webcredentials: { apps: app.config.appleApps } })
 				: jsonResponse({ ok: false, error: { code: "not_found", message: "no such route" } }, 404),
 		"/api/openapi.json": () => jsonText(openApiJson()),
-		"/api/session": { GET: guarded((_req, session) => sessionInfo(app, session)) },
-		"/api/login": { POST: (req: Request, server: Listener) => login(app, req, server, patience, people.signIn) },
+		"/api/session": { GET: guarded(async (_req, session) => await sessionInfo(app, session)) },
+		"/api/login": {
+			POST: async (req: Request, server: Listener) => await login(app, req, server, patience, people.signIn),
+		},
 		...people.routes,
-		"/api/logout": { POST: (req: Request, server: Listener) => logout(app, req, server) },
+		"/api/logout": { POST: async (req: Request, server: Listener) => await logout(app, req, server) },
 		"/api/p/:project/events": {
-			GET: guarded((req, session) =>
-				events(app, req, session, (req as Request & { params: { project: string } }).params.project, closing.signal),
+			GET: guarded(
+				async (req, session) =>
+					await events(
+						app,
+						req,
+						session,
+						(req as Request & { params: { project: string } }).params.project,
+						closing.signal,
+					),
 			),
 		},
 		"/api/p/:project/:op": {
-			POST: (req: Request & { params: { project: string; op: string } }, server: Listener) =>
-				handleOp(app, owner, req, server, req.params.project, req.params.op),
+			POST: async (req: Request & { params: { project: string; op: string } }, server: Listener) =>
+				await handleOp(app, owner, req, server, req.params.project, req.params.op),
 		},
 		"/api/:op": {
-			POST: (req: Request & { params: { op: string } }, server: Listener) =>
-				handleOp(app, owner, req, server, null, req.params.op),
+			POST: async (req: Request & { params: { op: string } }, server: Listener) =>
+				await handleOp(app, owner, req, server, null, req.params.op),
 		},
 	};
 	for (const [path, handler] of Object.entries(extra.routes ?? {})) routes[path] = guarded(handler);

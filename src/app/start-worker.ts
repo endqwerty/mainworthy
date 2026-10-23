@@ -6,7 +6,7 @@ if (!parentPort) throw new Error("startup needs its parent thread");
 const port = parentPort;
 const data: StartupData = workerData;
 const progress = () => port.postMessage({ kind: "progress" });
-const prepared = prepareStartup(
+const prepared = await prepareStartup(
 	startupConfig(data),
 	{
 		copyWorkspace: data.workspace,

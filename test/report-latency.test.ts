@@ -7,7 +7,7 @@ import { ciReport } from "./helpers.ts";
 
 async function reportWhilePolling(files: number): Promise<number> {
 	const cases = files === 1 ? 500 : 2000;
-	return withInstance(async ({ instance, client }) => {
+	return await withInstance(async ({ instance, client }) => {
 		await client.call("admin", { do: "project.create", key: "creating", preset: "loose", unlinked: "create" });
 		const producer = client.with({ project: "creating" });
 		const worker = new Worker(new URL("./archive-poll.ts", import.meta.url), {

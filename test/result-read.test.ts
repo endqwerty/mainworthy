@@ -45,7 +45,7 @@ test("get reads an exact old result with diagnostics only in its project and wit
 				op: "get",
 				project: "another",
 				input: { refs: [`result:${id}`] },
-				actor: () => h.owner,
+				actor: async () => h.owner,
 			}),
 		).toMatchObject({ ok: false, error: { code: "not_found" } });
 		const recorder = h.actor("recorder", "ci", ["record"]);

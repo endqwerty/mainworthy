@@ -74,21 +74,21 @@ const receipt = (row: HandoffRow): HandoffReceipt => ({
 	at: row.at,
 });
 
-export function handoffStatus(ctx: Ctx, text: string): HandoffReceipt | null {
-	const question = mustQuestion(ctx.db, ctx.project.id, text);
-	const row = ctx.db.get(Q.latest, { question: question.id });
+export async function handoffStatus(ctx: Ctx, text: string): Promise<HandoffReceipt | null> {
+	const question = await mustQuestion(ctx.db, ctx.project.id, text);
+	const row = await ctx.db.get(Q.latest, { question: question.id });
 	return row ? receipt(row) : null;
 }
 
-export function queueHandoff(ctx: Ctx, input: HandoffInput): HandoffReceipt {
+export async function queueHandoff(ctx: Ctx, input: HandoffInput): Promise<HandoffReceipt> {
 	if (ctx.app.config.handoff?.project !== ctx.project.key)
 		throw invalid("Handing a failure to an agent is not configured for this project.");
-	const question = mustQuestion(ctx.db, ctx.project.id, input.question);
+	const question = await mustQuestion(ctx.db, ctx.project.id, input.question);
 	if (question.kind !== "failure") throw invalid("Only a failure question can be handed to an agent.");
 	const evidence = FailureEvidence.safeParse(json<unknown>(question.evidence));
 	if (!evidence.success) throw invalid("This failure question has no failure to hand to an agent.");
 	const facts = evidence.data;
-	const sample = facts.sample ? resultById(ctx.db, facts.sample) : null;
+	const sample = facts.sample ? await resultById(ctx.db, facts.sample) : null;
 	const build = sample ? (batchById(ctx.db, sample.batch)?.build_url ?? null) : null;
 	const ref = questionRef(question);
 	const publicUrl = ctx.app.config.publicUrl?.replace(/\/$/, "");
@@ -129,7 +129,7 @@ export function queueHandoff(ctx: Ctx, input: HandoffInput): HandoffReceipt {
 		error: null,
 		at: ctx.now,
 	};
-	ctx.db.run(Q.insert, row);
+	await ctx.db.run(Q.insert, row);
 	const app = ctx.app;
 	ctx.db.afterCommit(() => void deliverHandoffs(app).catch(() => undefined));
 	return receipt(row);
@@ -160,8 +160,8 @@ export async function waitHandoffs(app: App): Promise<void> {
  * At start, a hand-off the last process was sending is failed, not sent again: it may have arrived, and a second
  * would start a second agent on the same failure.
  */
-export function recoverHandoffs(app: App): void {
-	app.db.run(Q.interrupted, {
+export async function recoverHandoffs(app: App): Promise<void> {
+	await app.db.run(Q.interrupted, {
 		error:
 			"The server stopped while sending this. It may have arrived: look for the agent's thread before sending again.",
 	});
@@ -170,17 +170,17 @@ export function recoverHandoffs(app: App): void {
 async function deliver(app: App): Promise<number> {
 	let delivered = 0;
 	for (let n = 0; n < 20; n++) {
-		const claimed = await app.gate.run(() => {
+		const claimed = await app.gate.run(async () => {
 			if (stopping.has(app)) return null;
-			const next = app.db.get(Q.next);
-			if (next) app.db.run(Q.claim, { id: next.id, nonce: next.nonce });
-			return next ? { row: next, project: projectById(app.db, next.project)?.key } : null;
+			const next = await app.db.get(Q.next);
+			if (next) await app.db.run(Q.claim, { id: next.id, nonce: next.nonce });
+			return next ? { row: next, project: (await projectById(app.db, next.project))?.key } : null;
 		});
 		if (!claimed) break;
 		const { row, project } = claimed;
 		const error = await send(app.config, project, row);
-		await app.gate.run(() =>
-			app.db.run(Q.finish, { id: row.id, nonce: row.nonce, state: error ? "failed" : "sent", error }),
+		await app.gate.run(
+			async () => await app.db.run(Q.finish, { id: row.id, nonce: row.nonce, state: error ? "failed" : "sent", error }),
 		);
 		delivered++;
 	}

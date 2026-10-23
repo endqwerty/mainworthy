@@ -51,27 +51,28 @@ export type Instance = {
 /** Opens the instance without listening: for the CLI commands that work on the data directly, and for tests. */
 type OpenOptions = { memory?: boolean; firstProject?: string; now?: () => number; copyWorkspace?: string };
 
-export function open(
+export async function open(
 	config: Config,
 	options: OpenOptions = {},
-): { app: App; owner: Actor; project: string; generatedToken: string | null; warnings: string[] } {
+): Promise<{ app: App; owner: Actor; project: string; generatedToken: string | null; warnings: string[] }> {
 	validateBootstrap(config);
-	const app = openApp(config, {
+	const app = await openApp(config, {
 		...(options.memory ? { memory: true } : {}),
 		...(options.now ? { now: options.now } : {}),
 		...(options.copyWorkspace ? { copyWorkspace: options.copyWorkspace } : {}),
 	});
 	try {
-		const { owner, generatedToken, warnings } = bootstrap(app);
-		let project = allProjects(app.db)[0]?.key;
+		const { owner, generatedToken, warnings } = await bootstrap(app);
+		let project = (await allProjects(app.db))[0]?.key;
 		if (!project) {
 			// Zero configuration to first value: a project exists before the first case is typed.
 			project = options.firstProject ?? "scratch";
-			app.db.transaction(() =>
-				createProject(
-					{ app, actor: owner, now: app.now(), session: null, context: null },
-					{ key: project ?? "scratch", preset: "loose" },
-				),
+			app.db.transaction(
+				async () =>
+					await createProject(
+						{ app, actor: owner, now: app.now(), session: null, context: null },
+						{ key: project ?? "scratch", preset: "loose" },
+					),
 			);
 		}
 		return { app, owner, project, generatedToken, warnings };
@@ -126,26 +127,30 @@ const StartupMessage = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("prepared"), prepared: Prepared }),
 ]);
 
-function recoverStartup(app: App, progress: (phase: string) => void = () => {}): void {
+async function recoverStartup(app: App, progress: (phase: string) => void = () => {}): Promise<void> {
 	progress("attachments");
-	app.blobs.prune(attachmentHashes(app.db));
+	app.blobs.prune(await attachmentHashes(app.db));
 	progress("assertions");
-	rebuildAssertionIndexes(app.db, false, () => progress("assertions"));
+	await rebuildAssertionIndexes(app.db, false, () => progress("assertions"));
 	progress("accepted reports");
-	recoverAccepted(app);
+	await recoverAccepted(app);
 	progress("disputes");
-	recoverDisputes(app);
+	await recoverDisputes(app);
 	progress("handoffs");
-	recoverHandoffs(app);
+	await recoverHandoffs(app);
 	progress("recovered");
 }
 
 /** The worker completes all data-dependent scans, closes its connections, then hands back bootstrap output. */
-export function prepareStartup(config: Config, options: OpenOptions, progress: (phase: string) => void): Prepared {
-	const { app, ...prepared } = open(config, options);
+export async function prepareStartup(
+	config: Config,
+	options: OpenOptions,
+	progress: (phase: string) => void,
+): Promise<Prepared> {
+	const { app, ...prepared } = await open(config, options);
 	try {
 		progress("opened");
-		recoverStartup(app, progress);
+		await recoverStartup(app, progress);
 		return prepared;
 	} finally {
 		app.close();
@@ -263,7 +268,7 @@ export async function startServing(
 		});
 		options.signal?.throwIfAborted();
 		releaseMask();
-		return startLocked(config, extra, options, count, unlock, listener, prepared);
+		return await startLocked(config, extra, options, count, unlock, listener, prepared);
 	} catch (error) {
 		try {
 			await listener?.stop(true);
@@ -284,12 +289,16 @@ export async function startServing(
 	}
 }
 
-export function start(config: Config, extra: (app: App, owner: Actor) => Extra, options: StartOptions = {}): Instance {
+export async function start(
+	config: Config,
+	extra: (app: App, owner: Actor) => Extra,
+	options: StartOptions = {},
+): Promise<Instance> {
 	const count = validateStartup(config, options);
-	return startLocked(config, extra, options, count, lockInstance(config.dataDir));
+	return await startLocked(config, extra, options, count, lockInstance(config.dataDir));
 }
 
-function startLocked(
+async function startLocked(
 	config: Config,
 	extra: (app: App, owner: Actor) => Extra,
 	options: StartOptions,
@@ -297,10 +306,10 @@ function startLocked(
 	unlock: () => void,
 	listener?: ReturnType<typeof upgradingListener>,
 	prepared?: Prepared,
-): Instance {
+): Promise<Instance> {
 	let opened: ReturnType<typeof open>;
 	try {
-		opened = prepared ? { ...prepared, app: openApp(config, options) } : open(config, options);
+		opened = prepared ? { ...prepared, app: await openApp(config, options) } : await open(config, options);
 	} catch (error) {
 		unlock();
 		throw error;
@@ -308,7 +317,7 @@ function startLocked(
 	const { app, owner } = opened;
 	let server: ReturnType<typeof serve>;
 	try {
-		if (!prepared) recoverStartup(app);
+		if (!prepared) await recoverStartup(app);
 		server = serve(app, owner, extra(app, owner), options.patience, listener);
 	} catch (error) {
 		app.close();
@@ -328,10 +337,10 @@ function startLocked(
 	// it had when the server started may then be somebody else's (issue #123).
 	const minute = async (): Promise<void> => {
 		const jobs = [
-			["sweep", app.gate.run(() => sweep(app, ruleActor(app.db).id))],
+			["sweep", app.gate.run(async () => await sweep(app, (await ruleActor(app.db)).id))],
 			["writing last uses", flushUses(app)],
-			["ending expired sessions", app.gate.run(() => sweepSessions(app))],
-			["deleting old sign-in records", app.gate.run(() => sweepSignInRecords(app))],
+			["ending expired sessions", app.gate.run(async () => await sweepSessions(app))],
+			["deleting old sign-in records", app.gate.run(async () => await sweepSignInRecords(app))],
 			["sending tracker requests", deliverTrackerRequests(app, options.trackerPort)],
 			["sending hand-offs", deliverHandoffs(app)],
 			["checking defect holds", pollDefectHolds(app, options.trackerPort)],

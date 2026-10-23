@@ -8,22 +8,22 @@ import { migrate } from "../src/server/kernel/migrate.ts";
 import { removeProject } from "../src/server/transfer/transfer.ts";
 import { removalFixture } from "./demo-removal-fixture.ts";
 
-test("deferred demo removal does not scan another project's excuses for every result", () => {
+test("deferred demo removal does not scan another project's excuses for every result", async () => {
 	mkdirSync(join(homedir(), ".cache"), { recursive: true });
 	const directory = mkdtempSync(join(homedir(), ".cache", "mainworthy-removal-"));
 	const db = new Db(join(directory, "mainworthy.db"));
 	try {
-		migrate(db, ":memory:");
-		removalFixture(db, 5_000);
+		await migrate(db, ":memory:");
+		await removalFixture(db, 5_000);
 		// The fixture plus removal crosses SQLite's auto-checkpoint threshold. Finish the fixture's disk writes
 		// here so the budget includes removal and its commit, without also syncing the setup's WAL pages.
 		db.checkpoint();
 		const start = performance.now();
 		// The enforced transfer path: one transaction, foreign keys checked at commit.
 		// The standalone path turns foreign keys off and would pass without the indexes this budget guards.
-		const removed = db.transaction(() => {
+		const removed = db.transaction(async () => {
 			db.raw.exec("PRAGMA defer_foreign_keys = ON");
-			return removeProject(db, "removing", undefined, "deferred");
+			return await removeProject(db, "removing", undefined, "deferred");
 		});
 		const ms = performance.now() - start;
 		console.log(`removeProject: ${ms.toFixed(1)} ms, ${removed.tables.results} results removed`);

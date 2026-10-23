@@ -78,14 +78,14 @@ test("accepted reports recover the model, and planned slots and case activity ex
 	const { acceptReport } = await import("../src/server/ops/writes.ts");
 	const { findProject, makeCtx, stampSeq } = await import("../src/server/kernel/ctx.ts");
 	const { recoverAccepted } = await import("../src/server/ops/jobs.ts");
-	h.app.db.transaction(() => {
-		const project = findProject(h.app.db, "scratch");
+	await h.app.db.transaction(async () => {
+		const project = await findProject(h.app.db, "scratch");
 		if (!project) throw new Error("missing project");
 		const ctx = makeCtx(h.app, project, agent, true);
-		acceptReport(ctx, { run, model: "gpt-6.1-sol", results: [{ test: { case: "C-1" }, outcome: "pass" }] });
-		stampSeq(ctx);
+		await acceptReport(ctx, { run, model: "gpt-6.1-sol", results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+		await stampSeq(ctx);
 	});
-	expect(recoverAccepted(h.app)).toBe(1);
+	expect(await recoverAccepted(h.app)).toBe(1);
 	const slots = await h.call<{ items: { work: WorkReply["work"]; fills: { by: string; model: string | null }[] }[] }>(
 		"find",
 		{ in: "slots", run },
@@ -100,20 +100,20 @@ test("accepted reports recover the model, and planned slots and case activity ex
 	expect(activity.entries.filter(({ t }) => t === "result").map(({ by, model }) => ({ by, model }))).toEqual([
 		{ by: "runner", model: "gpt-6.1-sol" },
 	]);
-	expect(recoverAccepted(h.app)).toBe(0);
+	expect(await recoverAccepted(h.app)).toBe(0);
 });
 
 test("schema 32 evidence upgrades with an unspecified model and keeps working", async () => {
 	h = await harness();
 	const agent = h.actor("runner", "agent", ["read", "produce"]);
 	await h.call("report", ciReport({ commit: "legacy638", n: 1 }), agent);
-	dropResetIndexes(h.app.db);
-	dropReceiptSchema(h.app.db);
-	h.app.db.exec(
+	await dropResetIndexes(h.app.db);
+	await dropReceiptSchema(h.app.db);
+	await h.app.db.exec(
 		"DROP TABLE assertion_seen; DROP TABLE assertion_spreads; DROP TABLE assertion_roots; DROP TABLE assertion_index; DROP INDEX results_assertion_rebuild; DROP INDEX flips_first_try; DROP INDEX flips_second_try; ALTER TABLE flips DROP COLUMN first_try; ALTER TABLE flips DROP COLUMN second_try; DROP TABLE result_tries; DROP TABLE handoffs; DROP INDEX change_ends_landing; ALTER TABLE change_ends DROP COLUMN landing_branch; ALTER TABLE change_ends DROP COLUMN landing_repo; ALTER TABLE change_ends DROP COLUMN landing_commit; DROP INDEX projects_identity; ALTER TABLE projects DROP COLUMN identity; ALTER TABLE results RENAME COLUMN trail TO steps; ALTER TABLE results DROP COLUMN model; ALTER TABLE batches DROP COLUMN model; UPDATE meta SET value = '32' WHERE key = 'schema_version'",
 	);
 	const { migrate, SCHEMA_VERSION } = await import("../src/server/kernel/migrate.ts");
-	expect(migrate(h.app.db, ":memory:")).toEqual({ from: 32, to: SCHEMA_VERSION, backup: null });
+	expect(await migrate(h.app.db, ":memory:")).toEqual({ from: 32, to: SCHEMA_VERSION, backup: null });
 	const [detail] = await h.call<{ last: { by: string; model: string | null }[] }[]>("get", { refs: ["T-1"] });
 	expect(detail?.last.map(({ by, model }) => ({ by, model }))).toEqual([{ by: "runner", model: null }]);
 	await h.call("report", { ...ciReport({ commit: "legacy638", n: 1, attempt: 2 }), model: "m".repeat(120) }, agent);
@@ -132,8 +132,8 @@ test("archive replay preserves an agent result's model", async () => {
 	exportArchive(h.app.db, (chunk) => chunks.push(chunk));
 	const copy = new Db(":memory:");
 	try {
-		migrate(copy, ":memory:");
-		importArchive(copy, linesOf(chunks.join("")));
+		await migrate(copy, ":memory:");
+		await importArchive(copy, linesOf(chunks.join("")));
 		expect(copy.raw.query("SELECT model, method FROM results").all()).toEqual([
 			{ model: "claude-opus-5-5", method: "agent" },
 		]);

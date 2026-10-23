@@ -74,7 +74,8 @@ export function archiveRoutes(
 	app: App,
 	owner?: Actor,
 ): Record<string, (req: Request, session: Session) => Response | Promise<Response>> {
-	const allowed = (session: Session): boolean => session.actor(0)?.can.includes("admin") ?? false;
+	const allowed = async (session: Session): Promise<boolean> =>
+		(await session.actor(0))?.can.includes("admin") ?? false;
 	return {
 		"/api/export": async (req, session) => {
 			if (!allowed(session)) return failure(new OpError("forbidden", "export needs the admin capability"));
@@ -112,9 +113,9 @@ export function archiveRoutes(
 			if (req.method !== "POST")
 				return json({ ok: false, error: { code: "invalid", message: "import requires POST" } }, 405);
 			const file = scratch(app.config.dataDir);
-			const localOwner = owner ?? (session.via === "local" ? session.actor(0) : null);
+			const localOwner = owner ?? (session.via === "local" ? await session.actor(0) : null);
 			try {
-				requireRecentSessionProof(app, session);
+				await requireRecentSessionProof(app, session);
 				await stageBody(req, file.path);
 				const result = await app.gate.run(async () => {
 					if (!allowed(session))
@@ -122,7 +123,7 @@ export function archiveRoutes(
 							"forbidden",
 							"import needs the admin capability; the token or grant changed while uploading",
 						);
-					requireRecentSessionProof(app, session);
+					await requireRecentSessionProof(app, session);
 					const restored = await runArchive(app, {
 						op: "import",
 						path: file.path,

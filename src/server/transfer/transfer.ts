@@ -130,7 +130,7 @@ function where(table: Table): string {
 	return table.name === "meta" ? "WHERE key <> 'schema_version'" : "";
 }
 
-function discoverTables(db: Db): Table[] {
+function discoverTables(db: ReadDb): Table[] {
 	const shadowTables = new Set(
 		TableKind.array()
 			.parse(db.raw.query("PRAGMA table_list").all())
@@ -226,7 +226,7 @@ const INSTANCE_TABLES = [
  * The project's ID as an SQL expression: read as text, since SQLite IDs need not fit in a JavaScript number, and
  * cast back to an integer, since a column of the search index has no type to convert the text to.
  */
-function projectLiteral(db: Db, key: string): string {
+function projectLiteral(db: ReadDb, key: string): string {
 	const project = db.raw
 		.query<{ id: string }, [string]>("SELECT CAST(id AS TEXT) AS id FROM projects WHERE key = ?")
 		.get(key);
@@ -246,7 +246,7 @@ function ownedBy(table: { name: string; columns: string[] }, id: string, what: s
 	return `WHERE ${identifier(parent.column)} IN (SELECT id FROM ${identifier(parent.table)} ${filter})`;
 }
 
-function projectFilters(db: Db, metadata: readonly Table[], key: string): Map<string, string> {
+function projectFilters(db: ReadDb, metadata: readonly Table[], key: string): Map<string, string> {
 	const id = projectLiteral(db, key);
 	const teams = `SELECT team FROM team_grants WHERE project IN (0, ${id}) UNION SELECT team FROM team_events WHERE project IN (0, ${id})`;
 	const filters = new Map<string, string>([
@@ -306,7 +306,7 @@ function projectFilters(db: Db, metadata: readonly Table[], key: string): Map<st
  * writer must not mutate this database connection. A writer failure propagates and releases the snapshot.
  */
 export function exportArchive(
-	db: Db,
+	db: ReadDb,
 	write: (chunk: string) => void,
 	options: { now?: number; project?: string; blobs?: BlobStore } = {},
 ): ExportedArchive {
@@ -439,7 +439,11 @@ function readHeader(line: string, metadata: readonly Table[]): Header {
 	return header;
 }
 
-function importTransaction<T>(db: Db, fn: () => T, progress: (step: string, ms: number) => void = () => {}): T {
+async function importTransaction<T>(
+	db: WriteDb,
+	fn: () => T,
+	progress: (step: string, ms: number) => void = () => {},
+): Promise<T> {
 	const checking = performance.now();
 	const deferred =
 		db.raw.query<{ defer_foreign_keys: number }, []>("PRAGMA defer_foreign_keys").get()?.defer_foreign_keys ?? 0;
@@ -455,7 +459,7 @@ function importTransaction<T>(db: Db, fn: () => T, progress: (step: string, ms: 
 	}
 	let finishing = performance.now();
 	try {
-		return db.checkedBulk(() => {
+		return await db.checkedBulk(() => {
 			try {
 				return fn();
 			} finally {
@@ -485,8 +489,12 @@ function importTransaction<T>(db: Db, fn: () => T, progress: (step: string, ms: 
  * A caller with pending deferred constraints and global deferral off must resolve those references first,
  * because restoring that PRAGMA would otherwise discard its pending constraint checks.
  */
-export function importArchive(db: Db, lines: Iterable<string>, options: { blobs?: BlobStore } = {}): ArchiveCounts {
-	return importTransaction(db, () => {
+export async function importArchive(
+	db: WriteDb,
+	lines: Iterable<string>,
+	options: { blobs?: BlobStore } = {},
+): Promise<ArchiveCounts> {
+	return await importTransaction(db, () => {
 		if (db.raw.query("SELECT 1 FROM projects LIMIT 1").get()) {
 			throw new OpError(
 				"conflict",
@@ -640,7 +648,7 @@ export function importArchive(db: Db, lines: Iterable<string>, options: { blobs?
 
 const Tags = z.array(z.string());
 
-function rebuildSearch(db: Db): void {
+function rebuildSearch(db: ReadDb): void {
 	const heads = db.raw.prepare<{ id: string; project: string; tags: string; body: string | null }, []>(`
 		SELECT CAST(c.id AS TEXT) AS id, CAST(c.project AS TEXT) AS project, c.tags, v.body
 		FROM cases c LEFT JOIN versions v ON v.case_id = c.id AND v.no = c.head ORDER BY c.id
@@ -674,7 +682,7 @@ function rebuildSearch(db: Db): void {
  * else (another project, a command that ran, another actor, a changed policy) is refused: an import never
  * overwrites work.
  */
-export function removeBootstrap(db: Db): void {
+export async function removeBootstrap(db: WriteDb): Promise<void> {
 	const projects = z
 		.array(z.object({ key: z.string(), name: z.string(), seq: z.number() }))
 		.parse(db.raw.query("SELECT key, name, seq FROM projects").all());
@@ -696,7 +704,7 @@ export function removeBootstrap(db: Db): void {
 	}
 	// The untouched project may have been made a demo. The mark goes with it: the project an archive puts under
 	// the same id is not one.
-	db.exec(
+	await db.exec(
 		"DELETE FROM assertion_seen; DELETE FROM assertion_spreads; DELETE FROM assertion_roots; DELETE FROM assertion_index; DELETE FROM demo_projects; DELETE FROM policies; DELETE FROM folders; DELETE FROM projects",
 	);
 }
@@ -710,12 +718,12 @@ export function removeBootstrap(db: Db): void {
  *
  * No operation offers this. Demo deployment uses removeProjectSlice after swapping the visible project.
  */
-export function removeProject(
-	db: Db,
+export async function removeProject(
+	db: WriteDb,
 	key: string,
 	progress: (step: string, ms: number) => void = () => {},
 	validation: "audit" | "deferred" = "audit",
-): ArchiveCounts {
+): Promise<ArchiveCounts> {
 	if (
 		validation === "deferred" &&
 		(!db.raw.inTransaction ||
@@ -793,7 +801,7 @@ export function removeProject(
 			);
 		return { rows: Object.values(tables).reduce((sum, count) => sum + count, 0), tables };
 	};
-	return validation === "deferred" ? db.savepoint(remove) : importTransaction(db, remove, progress);
+	return validation === "deferred" ? await db.savepoint(remove) : await importTransaction(db, remove, progress);
 }
 
 const SliceForeignKey = z.object({

@@ -28,7 +28,13 @@ const at = async (
 	input: unknown,
 	project: string | null = "demo",
 ): Promise<Reply> =>
-	await invoke(h.app, OPS, { op, project, input, actor: () => h.owner, ...(time === undefined ? {} : { at: time }) });
+	await invoke(h.app, OPS, {
+		op,
+		project,
+		input,
+		actor: async () => h.owner,
+		...(time === undefined ? {} : { at: time }),
+	});
 const rows = <T>(query: string): T[] => h.app.db.raw.query<T, []>(query).all();
 const newCase = (title: string, cmd?: string) => ({
 	edits: [{ op: "create", body: { title } }],
@@ -157,17 +163,17 @@ describe("when a write happened", () => {
 	test("a report accepted before a restart is applied with the time it was accepted at", async () => {
 		const since = await demo();
 		const then = since - 4 * DAY;
-		const project = findProject(h.app.db, "demo");
+		const project = await findProject(h.app.db, "demo");
 		if (!project) throw new Error("no project");
-		h.app.db.transaction(() => {
+		await h.app.db.transaction(async () => {
 			const ctx = makeCtx(h.app, project, h.owner, true, then);
-			acceptReport(ctx, {
+			await acceptReport(ctx, {
 				target: { commit: "bbbbbbb2", branch: "main" },
 				results: [{ test: { key: "t1" }, outcome: "pass" }],
 			});
-			stampSeq(ctx);
+			await stampSeq(ctx);
 		});
-		expect(recoverAccepted(h.app)).toBe(1);
+		expect(await recoverAccepted(h.app)).toBe(1);
 		expect(rows<{ at: number }>("SELECT at FROM results")).toEqual([{ at: then }]);
 	});
 });
@@ -187,17 +193,17 @@ describe("a demo and an archive", () => {
 		h = await harness();
 		await h.call("admin", { do: "project.demo", key: "scratch" });
 		expect(rows<{ project: number }>("SELECT project FROM demo_projects")).toEqual([{ project: 1 }]);
-		removeBootstrap(h.app.db);
-		importArchive(h.app.db, linesOf(archive));
+		await removeBootstrap(h.app.db);
+		await importArchive(h.app.db, linesOf(archive));
 		expect(rows<{ id: number }>("SELECT id FROM projects")).toEqual([{ id: 1 }]);
 		expect(rows("SELECT project FROM demo_projects")).toEqual([]);
-		const owner = actorByName(h.app.db, "robin", 0);
+		const owner = await actorByName(h.app.db, "robin", 0);
 		if (!owner) throw new Error("the archive holds no owner");
 		const refused = await invoke(h.app, OPS, {
 			op: "propose",
 			project: "scratch",
 			input: newCase("Backdated after import"),
-			actor: () => owner,
+			actor: async () => owner,
 			at: h.app.now() - DAY,
 		});
 		expect(refused).toMatchObject({
@@ -218,7 +224,7 @@ describe("the time over HTTP", () => {
 	test("the header carries the time to a demo's write, and one that is not a number is refused", async () => {
 		const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-demo-time-"));
 		dirs.push(dataDir);
-		const instance = start(
+		const instance = await start(
 			{
 				dataDir,
 				host: "127.0.0.1",

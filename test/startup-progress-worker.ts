@@ -51,7 +51,7 @@ if (data.mode === "published-stall") {
 if (data.mode !== "progress") {
 	const { prepareStartup, startupConfig } = await import("../src/app/start.ts");
 	let paused = false;
-	const prepared = prepareStartup(startupConfig(data), { copyWorkspace: data.workspace }, (phase) => {
+	const prepared = await prepareStartup(startupConfig(data), { copyWorkspace: data.workspace }, (phase) => {
 		port.postMessage({ kind: "progress" });
 		if (data.mode === "recovery" && phase === "assertions" && !paused && data.pause) {
 			paused = true;

@@ -116,12 +116,12 @@ export type Boot = {
 	requireAdminMfa?: boolean;
 };
 /** A server-mode instance whose owner signs in with `TOKEN`. Passwords are hashed at a cost a test can afford. */
-export function world(options: Boot = {}): World {
+export async function world(options: Boot = {}): Promise<World> {
 	const clock = options.clock ?? clockAt();
 	const dataDir = options.dataDir ?? scratch();
 	const mode = options.mode ?? "server";
 	const publicUrl = options.publicUrl === undefined ? PUBLIC : options.publicUrl;
-	const instance = start(
+	const instance = await start(
 		{
 			dataDir,
 			host: "127.0.0.1",

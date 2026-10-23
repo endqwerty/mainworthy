@@ -80,7 +80,7 @@ async function gate(
 		files?: string[];
 	} = {},
 ) {
-	return withInstance(
+	return await withInstance(
 		async (running) => {
 			const { instance } = running;
 			const configured = (await options.configure?.(running)) ?? {};
@@ -140,7 +140,7 @@ async function gate(
 					});
 					let result: Awaited<ReturnType<typeof inThisProcess>>;
 					try {
-						result = await inThisProcess("ci-gate", () => runCiGate(argv, env, options.request), {
+						result = await inThisProcess("ci-gate", async () => await runCiGate(argv, env, options.request), {
 							environment: env,
 							cwd: root,
 							input: "",
@@ -238,7 +238,7 @@ test("the gate waits for a deployment after choosing the instance", async () => 
 	const health: number[] = [];
 	const requests: { path: string; status: number }[] = [];
 	let batches = () => 0;
-	const running = gate(green, {
+	const running = await gate(green, {
 		inProcess: true,
 		configure: async ({ instance }) => {
 			batches = () => instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n ?? 0;
@@ -481,10 +481,10 @@ test("CI stops retrying unreachable requests and shares its deadline across comm
 /** Run one executable smoke, then the remaining report variants in this process. */
 function gateVariants(): typeof gate {
 	let first = true;
-	return (shards, options = {}) => {
+	return async (shards, options = {}) => {
 		const inProcess = !first;
 		first = false;
-		return gate(shards, { ...options, inProcess });
+		return await gate(shards, { ...options, inProcess });
 	};
 }
 

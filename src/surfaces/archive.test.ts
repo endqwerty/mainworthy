@@ -314,12 +314,15 @@ test("an export whose token is revoked while its worker runs returns no archive"
 				.parse(await client.call("admin", { do: "token.list" }))
 				.at(-1);
 			if (!token) throw new Error("the second owner token is missing");
-			const session: Session = { via: "token", actor: (project) => authenticate(instance.app, secret, project) };
+			const session: Session = {
+				via: "token",
+				actor: async (project) => await authenticate(instance.app, secret, project),
+			};
 			const route = archiveRoutes(instance.app)["/api/export"];
 			if (!route) throw new Error("export route is missing");
 			const pending = route(new Request(`${instance.url}/api/export`), session);
 			// The route has admitted the token and started the worker. Revoke before any worker reply is handled.
-			instance.app.db.transaction(() => revokeToken(instance.app, token.id));
+			await instance.app.db.transaction(async () => await revokeToken(instance.app, token.id));
 			const response = await pending;
 			if (response.status === 200) await response.body?.cancel();
 			expect(response.status).toBe(403);
@@ -351,7 +354,7 @@ test("export pulls fixed chunks and cancels without leaving its spool on disk", 
 			],
 		});
 		const spool = join(instance.app.config.dataDir, "spool");
-		const session: Session = { via: "local", actor: () => instance.owner };
+		const session: Session = { via: "local", actor: async () => instance.owner };
 		const route = archiveRoutes(instance.app)["/api/export"];
 		if (!route) throw new Error("export route is missing");
 		const response = await route(new Request(`${instance.url}/api/export?project=scratch`), session);
@@ -390,7 +393,7 @@ test("imports spool privately on the data filesystem and remove rejected uploads
 		if (!route || !input) throw new Error("missing import input");
 		const pending = route(new Request(`${instance.url}/api/import`, { method: "POST", body }), {
 			via: "local",
-			actor: () => instance.owner,
+			actor: async () => instance.owner,
 		});
 		const spool = join(instance.app.config.dataDir, "spool");
 		try {
@@ -427,7 +430,7 @@ test("a token revoked while the body is uploading cannot complete the import", a
 				if (!token) throw new Error("the second token is missing");
 				const session: Session = {
 					via: "token",
-					actor: (project) => authenticate(instance.app, secret, project),
+					actor: async (project) => await authenticate(instance.app, secret, project),
 				};
 				let input: ReadableStreamDefaultController<Uint8Array> | undefined;
 				const body = new ReadableStream<Uint8Array>({
@@ -481,19 +484,19 @@ test("a report the original had accepted and not yet applied is applied by the i
 		await source.client.call("propose", { edits: [{ op: "create", outline: "Imported mid-report" }] });
 		// The moment between a report's two transactions, as an export taken under load catches it.
 		const app = source.instance.app;
-		app.db.transaction(() => {
-			const project = findProject(app.db, "scratch");
-			const owner = project ? actorByName(app.db, "robin", project.id) : null;
+		await app.db.transaction(async () => {
+			const project = await findProject(app.db, "scratch");
+			const owner = project ? await actorByName(app.db, "robin", project.id) : null;
 			if (!project || !owner) throw new Error("the source has no project or owner");
 			const ctx = makeCtx(app, project, owner, true);
-			acceptReport(ctx, {
+			await acceptReport(ctx, {
 				target: { commit: "midreport1", branch: "main" },
 				results: [
 					{ test: { key: "one" }, outcome: "pass" },
 					{ test: { key: "two" }, outcome: "fail", failure: { message: "expected 1 to equal 2" } },
 				],
 			});
-			stampSeq(ctx);
+			await stampSeq(ctx);
 		});
 		const archive = await source.client.request("/api/export");
 		if (!archive.body) throw new Error("missing archive body");
@@ -515,13 +518,13 @@ test("an archive refuses out-of-range durations in pending reports before recove
 			tries: [{ outcome: "fail" as const, durationMs: 2_592_000_000 }],
 		};
 		const app = source.instance.app;
-		app.db.transaction(() => {
-			const project = findProject(app.db, "scratch");
-			const owner = project ? actorByName(app.db, "robin", project.id) : null;
+		await app.db.transaction(async () => {
+			const project = await findProject(app.db, "scratch");
+			const owner = project ? await actorByName(app.db, "robin", project.id) : null;
 			if (!project || !owner) throw new Error("the source has no project or owner");
 			const ctx = makeCtx(app, project, owner, true);
-			acceptReport(ctx, { target: { commit: "pending-duration", branch: "main" }, results: [result] });
-			stampSeq(ctx);
+			await acceptReport(ctx, { target: { commit: "pending-duration", branch: "main" }, results: [result] });
+			await stampSeq(ctx);
 		});
 		await withInstance(async (target) => {
 			const before = await target.client.call("admin", { do: "project.list" });

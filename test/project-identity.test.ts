@@ -33,7 +33,7 @@ test("a saved command cannot decide a replacement project, even after a fresh pr
 		};
 		// Reading again cannot protect a command that is delayed past replacement.
 		expect((await projects())[0]?.identity).toBe(identity);
-		removeProject(h.app.db, "scratch");
+		await removeProject(h.app.db, "scratch");
 		await h.call("admin", { do: "project.create", key: "scratch", preset: "standard" });
 		const replacement = await question();
 		expect(replacement.q).toBe(oldQuestion.q);
@@ -85,7 +85,7 @@ test("a conditional read cannot follow a reused reference into a replacement pro
 		const identity = one(await h.call<{ identity: string }[]>("admin", { do: "project.list" })).identity;
 		const input = { refs: ["C-1"], projectIdentity: identity };
 		expect(await h.raw("get", input)).toMatchObject({ ok: true });
-		removeProject(h.app.db, "scratch");
+		await removeProject(h.app.db, "scratch");
 		await h.call("admin", { do: "project.create", key: "scratch" });
 		await h.call("propose", { edits: [{ op: "create", outline: "Replacement case" }] });
 		expect(await h.raw("get", input)).toMatchObject({
@@ -111,12 +111,12 @@ test("a command waiting at the write gate checks the replacement identity when i
 			return release.promise;
 		});
 		await entered.promise;
-		const removed = h.app.gate.run(() => removeProject(h.app.db, "scratch"));
+		const removed = h.app.gate.run(async () => await removeProject(h.app.db, "scratch"));
 		const replaced = h.call("admin", { do: "project.create", key: "scratch" });
-		const pending = invoke(h.app, OPS, {
+		const pending = await invoke(h.app, OPS, {
 			op: "propose",
 			project: "scratch",
-			actor: () => h.owner,
+			actor: async () => h.owner,
 			input: {
 				cmd: "queued-command-385",
 				projectIdentity: identity,
@@ -137,21 +137,21 @@ test("a command waiting at the write gate checks the replacement identity when i
 	}
 });
 
-test("upgrading existing projects assigns distinct identities and preserves them on restart", () => {
+test("upgrading existing projects assigns distinct identities and preserves them on restart", async () => {
 	const db = new Db(":memory:");
 	try {
 		for (const migration of MIGRATIONS.filter((entry) => entry.version < 35)) db.exec(migration.sql);
 		db.exec(`INSERT INTO meta VALUES ('schema_version', '34');
 			INSERT INTO orgs (id, name, created_at) VALUES (1, 'Example', 1);
 			INSERT INTO projects (org, key, name, created_at) VALUES (1, 'first', 'First', 1), (1, 'second', 'Second', 1);`);
-		migrate(db, ":memory:");
+		await migrate(db, ":memory:");
 		const rows = () =>
 			db.raw.query<{ key: string; identity: string }, []>("SELECT key, identity FROM projects ORDER BY key").all();
 		const upgraded = rows();
 		expect(upgraded.map((row) => row.key)).toEqual(["first", "second"]);
 		expect(new Set(upgraded.map((row) => row.identity)).size).toBe(2);
 		for (const row of upgraded) expect(row.identity).toMatch(/^[a-f0-9]{32}$/);
-		migrate(db, ":memory:");
+		await migrate(db, ":memory:");
 		expect(rows()).toEqual(upgraded);
 	} finally {
 		db.close();

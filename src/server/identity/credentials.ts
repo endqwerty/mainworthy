@@ -8,7 +8,7 @@
 // An identity at the provider is the exception: its handle (issuer and subject) says who somebody is elsewhere,
 // so revoking the row erases it, and the same identity can be linked again later.
 import { z } from "zod";
-import { type Db, sql } from "../kernel/db.ts";
+import { type ReadDb, type WriteDb, sql } from "../kernel/db.ts";
 import { ALGORITHMS, type Passkey } from "./webauthn.ts";
 
 export type CredentialKind = "password" | "passkey" | "oidc" | "totp";
@@ -91,54 +91,63 @@ const Q = {
 };
 
 /** A credential by its row id, live or revoked, or null. */
-export const credentialById = (db: Db, id: number): CredentialRow | null => db.get(Q.byId, { id });
+export const credentialById = async (db: ReadDb, id: number): Promise<CredentialRow | null> =>
+	await db.get(Q.byId, { id });
 
 /** The credentials a person signs in with now: every row of theirs that is not revoked. */
-export const liveCredentials = (db: Db, actor: number): CredentialRow[] => db.all(Q.live, { actor });
+export const liveCredentials = async (db: ReadDb, actor: number): Promise<CredentialRow[]> =>
+	await db.all(Q.live, { actor });
 
 /** The password a person signs in with now, or null when they have none. The database allows one. */
-export const livePassword = (db: Db, actor: number): CredentialRow | null => db.get(Q.livePassword, { actor });
+export const livePassword = async (db: ReadDb, actor: number): Promise<CredentialRow | null> =>
+	await db.get(Q.livePassword, { actor });
 
 /** Stores a password's hash as a new row. Throws when the person already has a password that works. */
-export function insertPassword(db: Db, input: { actor: number; hash: string; at: number }): number {
-	return db.run(Q.insert, {
-		actor: input.actor,
-		kind: "password",
-		handle: null,
-		data: input.hash,
-		label: "password",
-		at: input.at,
-	}).lastId;
+export async function insertPassword(db: WriteDb, input: { actor: number; hash: string; at: number }): Promise<number> {
+	return (
+		await db.one(Q.insert, {
+			actor: input.actor,
+			kind: "password",
+			handle: null,
+			data: input.hash,
+			label: "password",
+			at: input.at,
+		})
+	).id;
 }
 
-export function insertTotp(db: Db, input: { actor: number; data: string; at: number }): number {
-	return db.run(Q.insert, { ...input, kind: "totp", handle: null, label: "Authenticator" }).lastId;
+export async function insertTotp(db: WriteDb, input: { actor: number; data: string; at: number }): Promise<number> {
+	return (await db.one(Q.insert, { ...input, kind: "totp", handle: null, label: "Authenticator" })).id;
 }
 
-export function updateTotp(db: Db, row: CredentialRow, data: string, at: number): boolean {
+export async function updateTotp(db: WriteDb, row: CredentialRow, data: string, at: number): Promise<boolean> {
 	return row.kind === "totp" && db.run(Q.counted, { id: row.id, was: row.data, data, at }).changes === 1;
 }
 
-export const liveTotp = (db: Db, actor: number): CredentialRow | null =>
-	liveCredentials(db, actor).find((row) => row.kind === "totp") ?? null;
+export const liveTotp = async (db: ReadDb, actor: number): Promise<CredentialRow | null> =>
+	(await liveCredentials(db, actor)).find((row) => row.kind === "totp") ?? null;
 
 /** The row a credential id was registered under, at any time and whether or not it still works; else null. */
-export const passkeyByCredentialId = (db: Db, credentialId: string): CredentialRow | null =>
-	db.get(Q.passkey, { handle: credentialId });
+export const passkeyByCredentialId = async (db: ReadDb, credentialId: string): Promise<CredentialRow | null> =>
+	await db.get(Q.passkey, { handle: credentialId });
 
 /** The handle of an identity at a provider: its issuer and subject. An issuer has no `#` (it has no fragment). */
 export const oidcHandle = (identity: { issuer: string; subject: string }): string =>
 	`${identity.issuer}#${identity.subject}`;
 
 /** The row an identity is linked under now, or null. */
-export const oidcByHandle = (db: Db, handle: string): CredentialRow | null => db.get(Q.oidc, { handle });
+export const oidcByHandle = async (db: ReadDb, handle: string): Promise<CredentialRow | null> =>
+	await db.get(Q.oidc, { handle });
 
 /**
  * Stores an identity a provider vouched for, as a new row of this person. Throws when the identity is linked
  * already: the caller looks first, and the index holds when two links of one identity arrive together.
  */
-export function insertOidc(db: Db, input: { actor: number; handle: string; label: string; at: number }): CredentialRow {
-	const { lastId } = db.run(Q.insert, {
+export async function insertOidc(
+	db: WriteDb,
+	input: { actor: number; handle: string; label: string; at: number },
+): Promise<CredentialRow> {
+	const { lastId } = await db.run(Q.insert, {
 		actor: input.actor,
 		kind: "oidc",
 		handle: input.handle,
@@ -146,7 +155,7 @@ export function insertOidc(db: Db, input: { actor: number; handle: string; label
 		label: input.label,
 		at: input.at,
 	});
-	const row = db.get(Q.byId, { id: lastId });
+	const row = await db.get(Q.byId, { id: lastId });
 	if (!row) throw new Error("the identity was not stored");
 	return row;
 }
@@ -179,11 +188,11 @@ const dataOf = (passkey: Omit<Passkey, "credentialId">): string =>
  * credential id is on any row already: the caller looks first and says so in words, and the index is what
  * holds when two registrations of one id arrive together.
  */
-export function insertPasskey(
-	db: Db,
+export async function insertPasskey(
+	db: WriteDb,
 	input: { actor: number; passkey: Passkey; label: string; at: number },
-): CredentialRow {
-	const { lastId } = db.run(Q.insert, {
+): Promise<CredentialRow> {
+	const { lastId } = await db.run(Q.insert, {
 		actor: input.actor,
 		kind: "passkey",
 		handle: input.passkey.credentialId,
@@ -191,7 +200,7 @@ export function insertPasskey(
 		label: input.label,
 		at: input.at,
 	});
-	const row = db.get(Q.byId, { id: lastId });
+	const row = await db.get(Q.byId, { id: lastId });
 	if (!row) throw new Error("the passkey was not stored");
 	return row;
 }
@@ -200,12 +209,12 @@ export function insertPasskey(
  * Writes what a sign-in showed into a passkey's row: its counter, its backup flags and when it was used. False,
  * with nothing written, when the row no longer holds what the sign-in was checked against (`row.data`).
  */
-export function countPasskeyUse(
-	db: Db,
+export async function countPasskeyUse(
+	db: WriteDb,
 	row: CredentialRow,
 	shown: { signCount: number; backupEligible: boolean; backedUp: boolean },
 	at: number,
-): boolean {
+): Promise<boolean> {
 	const stored = storedPasskey(row);
 	if (!stored) return false;
 	const data = dataOf({ ...stored, publicKey: stored.key, ...shown });
@@ -213,30 +222,31 @@ export function countPasskeyUse(
 }
 
 /** Refreshes a legacy password's hash without changing the credential its existing sessions rest on. */
-export function rehashPassword(db: Db, row: CredentialRow, hash: string, at: number): boolean {
+export async function rehashPassword(db: WriteDb, row: CredentialRow, hash: string, at: number): Promise<boolean> {
 	return row.kind === "password" && db.run(Q.counted, { id: row.id, was: row.data, data: hash, at }).changes === 1;
 }
 
 /** Notes that a credential signed its person in. */
-export function noteCredentialUse(db: Db, id: number, at: number): void {
-	db.run(Q.used, { id, at });
+export async function noteCredentialUse(db: WriteDb, id: number, at: number): Promise<void> {
+	await db.run(Q.used, { id, at });
 }
 
 /** Revokes one credential and erases what it held. False when it was revoked already or does not exist. */
-export const revokeCredential = (db: Db, id: number, at: number): boolean => db.run(Q.revoke, { id, at }).changes > 0;
+export const revokeCredential = async (db: WriteDb, id: number, at: number): Promise<boolean> =>
+	db.run(Q.revoke, { id, at }).changes > 0;
 
 /** Revokes every credential of a person and erases what each held. Returns how many. */
-export const revokeCredentialsOf = (db: Db, actor: number, at: number): number =>
-	db.run(Q.revokeOf, { actor, at }).changes;
+export const revokeCredentialsOf = async (db: WriteDb, actor: number, at: number): Promise<number> =>
+	(await db.run(Q.revokeOf, { actor, at })).changes;
 
 /** Erases every credential's label and data, including revoked rows, while retaining credential ids. */
-export function forgetCredentialsOf(db: Db, actor: number, at: number): void {
-	db.run(Q.forgetOf, { actor, at });
+export async function forgetCredentialsOf(db: WriteDb, actor: number, at: number): Promise<void> {
+	await db.run(Q.forgetOf, { actor, at });
 }
 
 /** What a person signs in with, in two numbers: for a page that decides what to offer. */
-export function credentialSummary(db: Db, actor: number): { password: boolean; passkeys: number } {
-	const live = liveCredentials(db, actor);
+export async function credentialSummary(db: ReadDb, actor: number): Promise<{ password: boolean; passkeys: number }> {
+	const live = await liveCredentials(db, actor);
 	return {
 		password: live.some((row) => row.kind === "password"),
 		passkeys: live.filter((row) => row.kind === "passkey").length,
@@ -247,18 +257,19 @@ export function credentialSummary(db: Db, actor: number): { password: boolean; p
  * The handle a person's passkeys are filed under by an authenticator, which gives it back at sign-in: sixteen
  * random bytes, base64url, the same for all of the person's passkeys. Null when the person has none yet.
  */
-export const userHandleOf = (db: Db, actor: number): string | null => db.get(Q.userHandle, { actor })?.handle ?? null;
+export const userHandleOf = async (db: ReadDb, actor: number): Promise<string | null> =>
+	db.get(Q.userHandle, { actor })?.handle ?? null;
 
 /** The person's handle, made now if they had none. In a write transaction. */
-export function ensureUserHandle(db: Db, actor: number, at: number): string {
-	const held = userHandleOf(db, actor);
+export async function ensureUserHandle(db: WriteDb, actor: number, at: number): Promise<string> {
+	const held = await userHandleOf(db, actor);
 	if (held !== null) return held;
 	const handle = Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("base64url");
-	db.run(Q.insertUserHandle, { actor, handle, at });
+	await db.run(Q.insertUserHandle, { actor, handle, at });
 	return handle;
 }
 
 /** Removes a person's handle, when the person is forgotten: no passkey is filed under it any more. */
-export function dropUserHandle(db: Db, actor: number): void {
-	db.run(Q.dropUserHandle, { actor });
+export async function dropUserHandle(db: WriteDb, actor: number): Promise<void> {
+	await db.run(Q.dropUserHandle, { actor });
 }

@@ -16,19 +16,19 @@ import { applyAccepted } from "./writes.ts";
  * stays accepted, its gate keeps reading `pending`, and the reason is written to the log. An instance that
  * will not start because of one stored report would be worse than one honest `pending`.
  */
-export function recoverAccepted(app: App): number {
+export async function recoverAccepted(app: App): Promise<number> {
 	let applied = 0;
-	for (const batch of acceptedBatches(app.db)) {
+	for (const batch of await acceptedBatches(app.db)) {
 		let done: { key: string; seq: number; touched: string[]; actor: string } | null = null;
 		try {
-			done = app.db.transaction(() => {
-				const project = projectById(app.db, batch.project);
+			done = await app.db.transaction(async () => {
+				const project = await projectById(app.db, batch.project);
 				if (!project) return null;
 				// A report applied here keeps the time it was accepted at, as one applied by its own request does:
 				// its results are not dated by the restart, and a demo's history stays where the seed put it.
-				const ctx = makeCtx(app, project, actorById(app.db, batch.actor, project.id), true, batch.at);
-				applyAccepted(ctx, batch);
-				stampSeq(ctx);
+				const ctx = makeCtx(app, project, await actorById(app.db, batch.actor, project.id), true, batch.at);
+				await applyAccepted(ctx, batch);
+				await stampSeq(ctx);
 				return { key: project.key, seq: ctx.seq, touched: [...ctx.touched], actor: ctx.actor.name };
 			});
 		} catch (error) {
@@ -44,15 +44,15 @@ export function recoverAccepted(app: App): number {
 }
 
 /** Give disputes stored before slot settlements their own questions without ending cause answers. */
-export function recoverDisputes(app: App): number {
+export async function recoverDisputes(app: App): Promise<number> {
 	let repaired = 0;
-	for (const { id } of allProjects(app.db)) {
-		repaired += app.db.transaction(() => {
-			const project = projectById(app.db, id);
+	for (const { id } of await allProjects(app.db)) {
+		repaired += await app.db.transaction(async () => {
+			const project = await projectById(app.db, id);
 			if (!project) return 0;
-			const ctx = makeCtx(app, project, actorById(app.db, ruleActor(app.db).id, id), true);
-			const n = reconcileDisputes(ctx);
-			if (n > 0) stampSeq(ctx);
+			const ctx = makeCtx(app, project, await actorById(app.db, (await ruleActor(app.db)).id, id), true);
+			const n = await reconcileDisputes(ctx);
+			if (n > 0) await stampSeq(ctx);
 			return n;
 		});
 	}
@@ -60,18 +60,18 @@ export function recoverDisputes(app: App): number {
 }
 
 /** Reopens questions whose decisions have expired, in every project. Returns the number reopened. */
-export function sweep(app: App, as: number): number {
+export async function sweep(app: App, as: number): Promise<number> {
 	let reopened = 0;
-	for (const { id } of allProjects(app.db)) {
-		const expired = expiredDecisions(app.db, id, app.now());
+	for (const { id } of await allProjects(app.db)) {
+		const expired = await expiredDecisions(app.db, id, app.now());
 		if (expired.length === 0) continue;
-		const done = app.db.transaction(() => {
-			const project = projectById(app.db, id);
+		const done = await app.db.transaction(async () => {
+			const project = await projectById(app.db, id);
 			if (!project) return null;
-			const ctx = makeCtx(app, project, actorById(app.db, as, project.id), true);
-			const n = sweepExpired(ctx, expired);
+			const ctx = makeCtx(app, project, await actorById(app.db, as, project.id), true);
+			const n = await sweepExpired(ctx, expired);
 			if (n === 0) return null;
-			stampSeq(ctx);
+			await stampSeq(ctx);
 			return { n, key: project.key, seq: ctx.seq, touched: [...ctx.touched], actor: ctx.actor.name };
 		});
 		if (!done) continue;

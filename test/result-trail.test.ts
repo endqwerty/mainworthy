@@ -146,13 +146,13 @@ test("migration preserves old simple trails and recovery preserves accepted rich
 		target: { session: "old" },
 		results: [{ test: { key: "old" }, outcome: "fail", steps: [{ step: "a1.b2", outcome: "fail" }] }],
 	});
-	dropResetIndexes(h.app.db);
-	dropReceiptSchema(h.app.db);
-	h.app.db.exec(
+	await dropResetIndexes(h.app.db);
+	await dropReceiptSchema(h.app.db);
+	await h.app.db.exec(
 		"DROP TABLE assertion_seen; DROP TABLE assertion_spreads; DROP TABLE assertion_roots; DROP TABLE assertion_index; DROP INDEX results_assertion_rebuild; DROP INDEX flips_first_try; DROP INDEX flips_second_try; ALTER TABLE flips DROP COLUMN first_try; ALTER TABLE flips DROP COLUMN second_try; DROP TABLE result_tries; DROP TABLE handoffs; DROP INDEX change_ends_landing; ALTER TABLE change_ends DROP COLUMN landing_branch; ALTER TABLE change_ends DROP COLUMN landing_repo; ALTER TABLE change_ends DROP COLUMN landing_commit; DROP INDEX projects_identity; ALTER TABLE projects DROP COLUMN identity; ALTER TABLE results RENAME COLUMN trail TO steps; UPDATE meta SET value = '33' WHERE key = 'schema_version'",
 	);
 	const { migrate } = await import("../src/server/kernel/migrate.ts");
-	migrate(h.app.db, ":memory:");
+	await migrate(h.app.db, ":memory:");
 	expect(
 		(await h.call<{ last: { steps: unknown; atStep: string }[] }[]>("get", { refs: ["T-1"] }))[0]?.last[0],
 	).toMatchObject({
@@ -162,19 +162,19 @@ test("migration preserves old simple trails and recovery preserves accepted rich
 	const { acceptReport } = await import("../src/server/ops/writes.ts");
 	const { findProject, makeCtx, stampSeq } = await import("../src/server/kernel/ctx.ts");
 	const { recoverAccepted } = await import("../src/server/ops/jobs.ts");
-	h.app.db.transaction(() => {
-		const project = findProject(h.app.db, "scratch");
+	await h.app.db.transaction(async () => {
+		const project = await findProject(h.app.db, "scratch");
 		if (!project) throw new Error("missing project");
 		const ctx = makeCtx(h.app, project, h.owner, true);
-		acceptReport(ctx, {
+		await acceptReport(ctx, {
 			target: { session: "accepted" },
 			results: [{ test: { key: "rich" }, outcome: "error", steps: trail }],
 		});
-		stampSeq(ctx);
+		await stampSeq(ctx);
 	});
-	expect(recoverAccepted(h.app)).toBe(1);
+	expect(await recoverAccepted(h.app)).toBe(1);
 	expect((await h.call<{ last: { steps: unknown }[] }[]>("get", { refs: ["T-2"] }))[0]?.last[0]?.steps).toEqual(trail);
-	expect(recoverAccepted(h.app)).toBe(0);
+	expect(await recoverAccepted(h.app)).toBe(0);
 });
 
 test("screenshots keep their input index after later files append, and non-images are refused", async () => {

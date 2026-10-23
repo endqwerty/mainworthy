@@ -1,8 +1,8 @@
 import { aggregateSlot, type SlotFill } from "../src/core/runs.ts";
-import type { Db } from "../src/server/kernel/db.ts";
+import type { ReadDb } from "../src/server/kernel/db.ts";
 
 /** A slot's recorded classification also covers later agent results of that cause and scope. */
-export function slotSettlement(db: Db, slot: number, result: number) {
+export function slotSettlement(db: ReadDb, slot: number, result: number) {
 	return db.raw
 		.query<{ class: string; decision: number }, [number, number]>(
 			`SELECT e.class, e.decision FROM result_excuses e
@@ -21,7 +21,7 @@ export function slotSettlement(db: Db, slot: number, result: number) {
 		.get(result, slot);
 }
 
-export function failingSlotResults(db: Db, slot: number) {
+export function failingSlotResults(db: ReadDb, slot: number) {
 	const rows = db.raw
 		.query<
 			{
@@ -63,7 +63,7 @@ export function failingSlotResults(db: Db, slot: number) {
 }
 
 /** Independent audit of every inherited rule's support against the stored effective base lanes. */
-export function invalidInherited(db: Db): unknown[] {
+export function invalidInherited(db: ReadDb): unknown[] {
 	return db.raw
 		.query(`SELECT e.result, e.decision FROM result_excuses e JOIN decisions d ON d.id = e.decision
   JOIN questions q ON q.id = d.question JOIN results r ON r.id = e.result JOIN targets t ON t.id = r.target

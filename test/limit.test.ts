@@ -55,11 +55,11 @@ const BEHIND_PROXY = { MAINWORTHY_TRUSTED_PROXY: "127.0.0.1", MAINWORTHY_CLIENT_
  * from the environment as the real command reads it; `proxy` is the two variables, or none of them. With
  * `ownerToken` null the environment names no token, and the start makes the owner's.
  */
-function boot(
+async function boot(
 	clock: Clock = clockAt(),
 	proxy: Record<string, string> = BEHIND_PROXY,
 	ownerToken: string | null = TOKEN,
-): Instance {
+): Promise<Instance> {
 	const config = defaultConfig({
 		MAINWORTHY_DATA: scratch(),
 		MAINWORTHY_PORT: "0",
@@ -68,7 +68,7 @@ function boot(
 		...(ownerToken === null ? {} : { MAINWORTHY_OWNER_TOKEN: ownerToken }),
 		...proxy,
 	});
-	const instance = start(
+	const instance = await start(
 		config,
 		(app, owner) => ({ ui: null, routes: { "/mcp": mcpRoute(app), ...archiveRoutes(app, owner) } }),
 		{ readers: 0, now: clock.now },
@@ -126,7 +126,7 @@ async function block(instance: Instance, address: string): Promise<void> {
 
 describe("a bearer token", () => {
 	test("the fifth wrong token from an address blocks it: the next request is 429 and its token is not looked at", async () => {
-		const instance = boot();
+		const instance = await boot();
 		await block(instance, A);
 		// The owner's own token, which works: the block answers before any credential is read.
 		const refused = await fetch(`${instance.url}/api/session`, { headers: { ...from(A), ...bearer(TOKEN) } });
@@ -140,7 +140,7 @@ describe("a bearer token", () => {
 
 	test("the block ends when the clock passes it, and the next failure doubles it", async () => {
 		const clock = clockAt();
-		const instance = boot(clock);
+		const instance = await boot(clock);
 		const asOwner = { ...from(A), ...bearer(TOKEN) };
 		await block(instance, A);
 		clock.advance(SECOND - 1);
@@ -157,17 +157,17 @@ describe("a bearer token", () => {
 	});
 
 	test("another address is not affected, and neither is another instance in the same process", async () => {
-		const instance = boot();
+		const instance = await boot();
 		await block(instance, A);
 		expect(await who(instance, { ...from(B), ...bearer(wrong()) })).toBe("401 unauthenticated");
 		expect(await who(instance, { ...from(B), ...bearer(TOKEN) })).toBe("200");
 		expect(await who(instance, { ...from(A), ...bearer(TOKEN) })).toBe("429 limited, retry after 1");
 		// Each instance counts for itself: the same address is free on a second one.
-		expect(await who(boot(), { ...from(A), ...bearer(TOKEN) })).toBe("200");
+		expect(await who(await boot(), { ...from(A), ...bearer(TOKEN) })).toBe("200");
 	});
 
 	test("five wrong secrets that share their first 8 characters block those characters for every address", async () => {
-		const instance = boot();
+		const instance = await boot();
 		for (let i = 1; i <= 5; i++) {
 			const guess = { ...from(`203.0.113.${i}`), ...bearer(`guess-me-${i}-0123456789`) };
 			expect(await who(instance, guess)).toBe("401 unauthenticated");
@@ -182,7 +182,7 @@ describe("a bearer token", () => {
 
 	test("a right generated token passes a blocked address; a wrong one in that form is 429 and is not counted", async () => {
 		const clock = clockAt();
-		const instance = boot(clock);
+		const instance = await boot(clock);
 		const created = await postJson(
 			instance,
 			"/api/admin",
@@ -210,7 +210,7 @@ describe("a bearer token", () => {
 		// A person chose it, whatever it looks like: `cb_` and 32 letters somebody typed are not 190 random bits.
 		const chosen = "cb_OwnerChoseThisTokenByHand0123456";
 		expect(chosen).toMatch(/^cb_[0-9a-zA-Z]{32}$/);
-		const instance = boot(clockAt(), BEHIND_PROXY, chosen);
+		const instance = await boot(clockAt(), BEHIND_PROXY, chosen);
 		const created = await postJson(
 			instance,
 			"/api/admin",
@@ -227,13 +227,13 @@ describe("a bearer token", () => {
 		expect(await who(instance, { ...from(B), ...bearer(chosen) })).toBe("200");
 
 		// The owner's token a start made, because the environment named none, is the server's own: it passes.
-		const other = boot(clockAt(), BEHIND_PROXY, null);
+		const other = await boot(clockAt(), BEHIND_PROXY, null);
 		await block(other, A);
 		expect(await who(other, { ...from(A), ...bearer(other.generatedToken ?? "") })).toBe("200");
 	});
 
 	test("/mcp, the archive and the change stream answer 429 for a token from a blocked address", async () => {
-		const instance = boot();
+		const instance = await boot();
 		const routes = (address: string): Promise<Response>[] => {
 			const headers = { ...from(address), ...bearer(TOKEN) };
 			return [
@@ -267,7 +267,7 @@ describe("a bearer token", () => {
 	});
 
 	test("an import replaces the tokens and not the count of who was guessing at them", async () => {
-		const instance = boot();
+		const instance = await boot();
 		await block(instance, A);
 		const asOwner = { ...from(B), ...bearer(TOKEN) };
 		const archive = await (await fetch(`${instance.url}/api/export`, { headers: asOwner })).text();
@@ -281,7 +281,7 @@ describe("a bearer token", () => {
 
 describe("a session cookie", () => {
 	test("is never blocked and never counted, right or wrong, even from a blocked address", async () => {
-		const instance = boot();
+		const instance = await boot();
 		const signedIn = await signIn(instance, TOKEN, from(A));
 		expect(signedIn.status).toBe(200);
 		const cookie = (signedIn.headers.getSetCookie()[0] ?? "").split(";")[0] ?? "";
@@ -303,7 +303,7 @@ describe("a session cookie", () => {
 describe("POST /api/login", () => {
 	test("is limited by the same keys as a bearer token", async () => {
 		const clock = clockAt();
-		const instance = boot(clock);
+		const instance = await boot(clock);
 		// Three failed sign-ins and two failed bearer tokens from one address are five failures of that address.
 		for (let i = 0; i < 3; i++)
 			expect(await said(await signIn(instance, wrong(), from(A)))).toBe("401 unauthenticated");
@@ -324,7 +324,7 @@ describe("POST /api/login", () => {
 	});
 
 	test("a prefix blocked by failed sign-ins is blocked for a bearer token too", async () => {
-		const instance = boot();
+		const instance = await boot();
 		for (let i = 1; i <= 5; i++) {
 			const reply = await signIn(instance, `owner-secret-wrong-${i}`, from(`203.0.113.${i}`));
 			expect(await said(reply)).toBe("401 unauthenticated");
@@ -346,7 +346,7 @@ describe("the client's address", () => {
 	test("the check docs/deploy.md gives an operator tells a header with the visitor's address from one with the proxy's", async () => {
 		// Step 3 of "Behind a proxy": eight wrong tokens from one network, then two from another a while later.
 		const clock = clockAt();
-		const instance = boot(clock);
+		const instance = await boot(clock);
 		expect(await sixWrong(instance, from(A), 8)).toEqual([
 			...Array(5).fill("401 unauthenticated"),
 			...Array(3).fill("429 limited, retry after 1"),
@@ -362,12 +362,12 @@ describe("the client's address", () => {
 	test("the header is ignored from a peer that is not a trusted proxy", async () => {
 		// The proxy is another machine. This request comes from the loopback address, which is then its own
 		// address and is not counted, whatever it says about itself.
-		const instance = boot(clockAt(), { ...BEHIND_PROXY, MAINWORTHY_TRUSTED_PROXY: "10.9.9.9, 2001:db8::/32" });
+		const instance = await boot(clockAt(), { ...BEHIND_PROXY, MAINWORTHY_TRUSTED_PROXY: "10.9.9.9, 2001:db8::/32" });
 		expect(await sixWrong(instance, from(A))).toEqual(NEVER_BLOCKED);
 	});
 
 	test("a trusted peer whose header is missing, or holds two addresses, gives the request no address", async () => {
-		const instance = boot();
+		const instance = await boot();
 		expect(await sixWrong(instance, {})).toEqual(NEVER_BLOCKED);
 		expect(await sixWrong(instance, from(`${A}, ${B}`))).toEqual(NEVER_BLOCKED);
 		expect(await sixWrong(instance, from(`${A}:443`))).toEqual(NEVER_BLOCKED);
@@ -376,7 +376,7 @@ describe("the client's address", () => {
 	});
 
 	test("without the two variables a loopback peer is not counted per address, whatever headers it sends", async () => {
-		const instance = boot(clockAt(), {});
+		const instance = await boot(clockAt(), {});
 		expect(await sixWrong(instance, { ...from(A), "x-forwarded-for": A, "cf-connecting-ip": A })).toEqual(
 			NEVER_BLOCKED,
 		);
@@ -490,7 +490,7 @@ describe("the client's address", () => {
 
 describe("the CLI", () => {
 	test("prints the refusal with the seconds to wait, and exits non-zero", async () => {
-		const instance = boot();
+		const instance = await boot();
 		// The CLI's own requests come from the loopback address and carry no address, so what blocks it here is
 		// the first 8 characters of its token: five wrong guesses at them, from anywhere.
 		for (let i = 1; i <= 5; i++) {

@@ -3,7 +3,7 @@
 import type { LocalDay } from "../../core/days.ts";
 import type { MethodKind } from "../../core/model.ts";
 import type { OutcomeCounts } from "../../core/stats.ts";
-import { type Db, sql } from "../kernel/db.ts";
+import { type ReadDb, sql } from "../kernel/db.ts";
 import { uncorrectedResults } from "./evidence.ts";
 
 type Window = { project: number; from: number; to: number };
@@ -169,14 +169,14 @@ const rated = (counts: OutcomeCounts): OutcomeCounts => {
  * the window. An attempt that was run again, and a result its producer corrected, are not counted. A failure that a
  * quarantine covered is counted as `quarantined`, apart from `fail`.
  */
-export function outcomesByDay(
-	db: Db,
+export async function outcomesByDay(
+	db: ReadDb,
 	input: { project: number; days: readonly LocalDay[]; method: MethodKind | null },
-): OutcomeCounts[] {
+): Promise<OutcomeCounts[]> {
 	const counts = input.days.map(empty);
 	const from = input.days[0]?.from ?? 0;
 	const to = input.days.at(-1)?.to ?? 0;
-	for (const row of db.all(Q.effective, { project: input.project, from, to, method: input.method })) {
+	for (const row of await db.all(Q.effective, { project: input.project, from, to, method: input.method })) {
 		const at = row.slot * SLOT;
 		const day = counts[input.days.findIndex((d) => at >= d.from && at < d.to)];
 		if (day) add(day, row.outcome, row.quarantined === 1, row.n);
@@ -198,37 +198,45 @@ export function totalOf(days: readonly OutcomeCounts[]): OutcomeCounts {
 }
 
 /** Tests with a flip (a pass and a failure on the same code) since a moment, the most flips first. */
-export const flakyTests = (db: Db, project: number, since: number) => db.all(Q.flaky, { project, since });
+export const flakyTests = async (db: ReadDb, project: number, since: number) =>
+	await db.all(Q.flaky, { project, since });
 /** How often each of these tests flipped since a moment, counted as the flaky report counts; a test with none is absent. */
-export function flipsOf(db: Db, project: number, tests: readonly number[], since: number): Map<number, number> {
+export async function flipsOf(
+	db: ReadDb,
+	project: number,
+	tests: readonly number[],
+	since: number,
+): Promise<Map<number, number>> {
 	if (tests.length === 0) return new Map();
-	const rows = db.all(Q.flipsOf, { project, since, tests: JSON.stringify([...new Set(tests)]) });
+	const rows = await db.all(Q.flipsOf, { project, since, tests: JSON.stringify([...new Set(tests)]) });
 	return new Map(rows.map((row) => [row.test, row.flips]));
 }
 /** How many automated tests reported a result since a moment. */
-export const testsReporting = (db: Db, project: number, since: number): number =>
+export const testsReporting = async (db: ReadDb, project: number, since: number): Promise<number> =>
 	db.get(Q.reporting, { project, since })?.n ?? 0;
 /** Per test, repeated pipeline attempts and earlier runner tries since a moment, with their time counted once. */
-export const rerunsByTest = (db: Db, project: number, since: number) => db.all(Q.reruns, { project, since });
+export const rerunsByTest = async (db: ReadDb, project: number, since: number) =>
+	await db.all(Q.reruns, { project, since });
 /** The cases with at least one automated test. */
-export const automatedCases = (db: Db, project: number): Set<number> =>
-	new Set(db.all(Q.automated, { project }).map((row) => row.case_id));
+export const automatedCases = async (db: ReadDb, project: number): Promise<Set<number>> =>
+	new Set((await db.all(Q.automated, { project })).map((row) => row.case_id));
 /** Per case, the results a person recorded since a moment, and the time of those that said it. */
-export const runsByHand = (db: Db, project: number, since: number) => db.all(Q.byHand, { project, since });
+export const runsByHand = async (db: ReadDb, project: number, since: number) =>
+	await db.all(Q.byHand, { project, since });
 
 export type CaseOutcome = "passed" | "failed" | "other" | "notRun";
 /**
  * Each case by the latest result of each of its tests since a moment: failed when one of them failed, passed when
  * none failed and one passed, other when they were only skipped or blocked, not run when none has a result.
  */
-export function caseOutcomes(
-	db: Db,
+export async function caseOutcomes(
+	db: ReadDb,
 	project: number,
 	cases: readonly number[],
 	since: number,
-): Map<number, CaseOutcome> {
+): Promise<Map<number, CaseOutcome>> {
 	const latest = new Map<number, string[]>();
-	for (const row of db.all(Q.latest, { project, since, cases: JSON.stringify(cases) }))
+	for (const row of await db.all(Q.latest, { project, since, cases: JSON.stringify(cases) }))
 		if (row.outcome !== null) latest.set(row.case_id, [...(latest.get(row.case_id) ?? []), row.outcome]);
 	const out = new Map<number, CaseOutcome>();
 	for (const id of cases) {

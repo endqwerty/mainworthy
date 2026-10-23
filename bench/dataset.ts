@@ -178,15 +178,15 @@ export function requireDisk(dir: string): void {
 }
 
 /** Creates and authenticates the same scoped CI identity used by the real operation tests. Secrets stay in memory. */
-export function ciActor(app: App): { actor: Actor; secret: string } {
-	const { secret } = createToken(app, {
+export async function ciActor(app: App): Promise<{ actor: Actor; secret: string }> {
+	const { secret } = await createToken(app, {
 		actor: "benchmark-ci",
 		kind: "ci",
 		can: ["read", "record"],
 		project: 0,
 		label: "benchmark",
 	});
-	const actor = authenticate(app, secret, 0);
+	const actor = await authenticate(app, secret, 0);
 	ensure(actor !== null, "CI token must authenticate");
 	return { actor, secret };
 }
@@ -320,8 +320,8 @@ export async function buildDataset(options: {
 		!existsSync(join(dir, "mainworthy.db")),
 		`incomplete or mismatched dataset at ${dir}; choose a new directory or remove this benchmark dataset`,
 	);
-	const { app, owner } = open(config(dir));
-	const ci = ciActor(app).actor;
+	const { app, owner } = await open(config(dir));
+	const ci = (await ciActor(app)).actor;
 	const phases: Metadata["phases"] = [];
 	const phase = async <T>(name: string, rowCount: number | (() => number), work: () => T | Promise<T>): Promise<T> => {
 		log(`Building ${name}…`);
@@ -687,11 +687,11 @@ export async function buildDataset(options: {
 }
 
 /** Clones the closed WAL baseline so every repeated run starts with identical history and removes its writes on close. */
-export function openDataset(dataset: Dataset, dir: string): DatasetInstance {
+export async function openDataset(dataset: Dataset, dir: string): Promise<DatasetInstance> {
 	requireDisk(dir);
 	copyFileSync(join(dataset.dir, "mainworthy.db"), join(dir, "mainworthy.db"), constants.COPYFILE_FICLONE);
-	const { app, owner } = open(config(dir));
-	const ci = ciActor(app);
+	const { app, owner } = await open(config(dir));
+	const ci = await ciActor(app);
 	ensure(
 		z.object({ journal_mode: z.literal("wal") }).safeParse(app.db.raw.query("PRAGMA journal_mode").get()).success,
 		"on-disk database must use production WAL mode",

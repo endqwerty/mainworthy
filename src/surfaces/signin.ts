@@ -79,7 +79,7 @@ export type Tools = {
 		clear: (req: Request) => string[];
 	};
 	/** The session of a request, or the reply that refuses it. */
-	sessionFor: (req: Request, server: Listener) => Session | Response;
+	sessionFor: (req: Request, server: Listener) => Promise<Session | Response>;
 	/** The address a request came from, as failed attempts are counted and a session records it; null when nothing says. */
 	address: (req: Request, server: Listener) => string | null;
 	/** The reply to a caller that failed too often: 429, with the seconds to wait. */
@@ -172,7 +172,7 @@ export function signInRoutes(app: App, tools: Tools) {
 	 * from and read its body.
 	 */
 	async function signIn(req: Request, server: Listener, input: unknown): Promise<Response> {
-		const reply = await knownRefusal(() => answerSignIn(req, server, input));
+		const reply = await knownRefusal(async () => await answerSignIn(req, server, input));
 		// A sign-in with a passkey ends its ceremony whatever came of it: the cookie that tied the challenge to
 		// this browser is cleared with the reply, accepted, refused or told to wait.
 		if (
@@ -191,7 +191,7 @@ export function signInRoutes(app: App, tools: Tools) {
 		if (resetRequest.success || verification.success || reset.success) {
 			if (!app.config.mail) return failed("invalid", "mail is off on this instance");
 			if (resetRequest.success) {
-				const limited = requestReset(app, resetRequest.data.resetRequest, tools.address(req, server));
+				const limited = await requestReset(app, resetRequest.data.resetRequest, tools.address(req, server));
 				return limited ? tools.limited(limited.retryAfter) : answered({ requested: true });
 			}
 			if (verification.success)
@@ -325,7 +325,7 @@ export function signInRoutes(app: App, tools: Tools) {
 				"send {} for a web passkey, { native: true } for a native passkey, or { invitation } to look at an invitation",
 			);
 		if ("invitation" in body.data) {
-			const looked = showInvitation(app, body.data.invitation, tools.address(req, server));
+			const looked = await showInvitation(app, body.data.invitation, tools.address(req, server));
 			if (looked.ok) return answered(looked.shown);
 			return looked.why === "limited" ? tools.limited(looked.retryAfter) : failed("not_found", NO_INVITATION);
 		}
@@ -360,9 +360,9 @@ export function signInRoutes(app: App, tools: Tools) {
 			return failed("invalid", "send {} to sign in, { invitation } to accept an invitation, or { link: true }");
 		let start: OidcStart;
 		if ("link" in body.data) {
-			const session = tools.sessionFor(req, server);
+			const session = await tools.sessionFor(req, server);
 			if (session instanceof Response) return session;
-			const actor = session.actor(0);
+			const actor = await session.actor(0);
 			const browser = tools.cookieOf(req);
 			if (session.via !== "cookie" || !actor || browser === null)
 				return failed("forbidden", "an identity is linked from a browser that is signed in, not with a token");
@@ -419,7 +419,7 @@ export function signInRoutes(app: App, tools: Tools) {
 	 * that outlives the token.
 	 */
 	async function password(req: Request, server: Listener): Promise<Response> {
-		const session = tools.sessionFor(req, server);
+		const session = await tools.sessionFor(req, server);
 		if (session instanceof Response) return session;
 		const sessionId = session.id;
 		if (session.via !== "cookie" || !sessionId)
@@ -431,7 +431,7 @@ export function signInRoutes(app: App, tools: Tools) {
 		const why = whyNotPassword(body.data.next);
 		if (why) return failed("invalid", `next: ${why}`);
 		const changed = await changePassword(app, {
-			who: () => session.actor(0),
+			who: async () => await session.actor(0),
 			session: sessionId,
 			context: () => session.context?.() ?? null,
 			current: body.data.current,
@@ -446,20 +446,22 @@ export function signInRoutes(app: App, tools: Tools) {
 	}
 
 	async function recentProof(req: Request, server: Listener): Promise<Response> {
-		const session = tools.sessionFor(req, server);
+		const session = await tools.sessionFor(req, server);
 		if (session instanceof Response) return session;
 		if (session.via !== "cookie") return failed("forbidden", "confirm a credential from a session that is signed in");
 		const read = await tools.read(req, SIGN_IN_BODY_LIMIT);
 		if (read instanceof Response) return read;
 		const body = RecentProof.safeParse(read.input);
 		if (!body.success) return failed("invalid", "send one password, passkey assertion or authenticator code");
-		const actor = session.actor(0);
+		const actor = await session.actor(0);
 		const context = session.context?.() ?? null;
 		if (!actor || context === null) return failed("unauthenticated", "sign in again; this session ended");
 		if (actor.kind !== "human") return failed("forbidden", "only a person confirms a sign-in credential");
 		const input = { actor: actor.id, context };
 		if ("begin" in body.data) {
-			const passkey = await app.gate.run(() => app.db.transaction(() => beginCredentialProof(app, input)));
+			const passkey = await app.gate.run(
+				async () => await app.db.transaction(async () => await beginCredentialProof(app, input)),
+			);
 			return answered({ passkey });
 		}
 		const result = await proveCredential(app, { ...input, proof: body.data, address: tools.address(req, server) });
@@ -508,12 +510,18 @@ export function signInRoutes(app: App, tools: Tools) {
 		signIn,
 		routes: {
 			"/api/login/methods": { GET: () => answered(signInMethods(app)) },
-			"/api/login/challenge": { POST: (req: Request, server: Listener) => challenge(req, server) },
+			"/api/login/challenge": { POST: async (req: Request, server: Listener) => await challenge(req, server) },
 			"/api/login/oidc/native": { POST: (req: Request, server: Listener) => nativeOidc(req, server) },
-			"/api/login/oidc/native/callback": { GET: (req: Request, server: Listener) => nativeCallback(req, server) },
-			"/api/login/oidc": { POST: (req: Request, server: Listener) => knownRefusal(() => oidc(req, server)) },
-			"/api/account/password": { POST: (req: Request, server: Listener) => password(req, server) },
-			"/api/account/proof": { POST: (req: Request, server: Listener) => knownRefusal(() => recentProof(req, server)) },
+			"/api/login/oidc/native/callback": {
+				GET: async (req: Request, server: Listener) => await nativeCallback(req, server),
+			},
+			"/api/login/oidc": {
+				POST: (req: Request, server: Listener) => knownRefusal(async () => await oidc(req, server)),
+			},
+			"/api/account/password": { POST: async (req: Request, server: Listener) => await password(req, server) },
+			"/api/account/proof": {
+				POST: (req: Request, server: Listener) => knownRefusal(async () => await recentProof(req, server)),
+			},
 		},
 	};
 }

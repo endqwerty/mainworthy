@@ -65,7 +65,7 @@ export type ProjectOp<I, O> = ProjectBase<I, O> &
 export type InstanceOp<I, O> = Base<I, O> & {
 	scope: "instance";
 	effect: "read" | "write";
-	run: (env: InstanceCtx, input: I) => O | Promise<O>;
+	run: (env: InstanceCtx, input: I) => Promise<O | Promise<O>>;
 	/** True when the reply to this input holds a secret. It is then never stored, so the command cannot be replayed. */
 	secret?: (input: I) => boolean;
 };
@@ -133,7 +133,7 @@ export type Call = {
 	project: string | null;
 	input: unknown;
 	/** Resolves the caller for a project (0 for the instance). Null when the caller is not signed in. */
-	actor: (project: number) => Actor | null;
+	actor: (project: number) => Promise<Actor | null>;
 	/** Admitted requests carry this instead of sending resolved authority to a reader. */
 	reference?: CallerReference;
 	/**
@@ -198,16 +198,16 @@ async function execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Cal
 	if (ops[call.op]?.effect !== "write") return await executeInSnapshot(app, ops, call);
 	if (app.db.inTransaction)
 		return fail("internal", "a write is in progress; writes go through invoke, which queues them");
-	app.db.begin();
+	await app.db.begin();
 	try {
 		const reply = await executeInSnapshot(app, ops, call);
 		if (app.db.inTransaction) {
-			if (reply.ok) app.db.commit();
-			else app.db.rollback();
+			if (reply.ok) await app.db.commit();
+			else await app.db.rollback();
 		}
 		return reply;
 	} finally {
-		app.db.rollback();
+		await app.db.rollback();
 	}
 }
 
@@ -224,7 +224,7 @@ async function executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>,
 	// Who may call is settled before the operation's input is checked: a caller that may not run the operation
 	// learns that and nothing about what it sent. (A surface has read the body by then: HTTP wants it to be JSON.)
 	const db = op.effect === "write" ? app.db : app.reader;
-	const found = op.scope === "project" && call.project ? findProject(db, call.project) : null;
+	const found = op.scope === "project" && call.project ? await findProject(db, call.project) : null;
 	const noSuchProject = (): Reply => {
 		const { code, message } = noProject(call.project);
 		return fail(code, message);
@@ -233,11 +233,11 @@ async function executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>,
 		if (!call.project) return fail("invalid", `${op.name} needs a project`);
 		if (!found) return noSuchProject();
 	}
-	const caller = call.reference ? resolveCaller(app, db, call.reference, found?.id ?? 0) : null;
+	const caller = call.reference ? await resolveCaller(app, db, call.reference, found?.id ?? 0) : null;
 	const admitted = admitCaller(
 		call,
 		op,
-		call.reference ? (caller?.actor ?? null) : call.actor(found?.id ?? 0),
+		call.reference ? (caller?.actor ?? null) : await call.actor(found?.id ?? 0),
 		found?.key ?? null,
 	);
 	// A caller that holds no grant on a project is told what it would be told of a project that does not exist,
@@ -275,7 +275,7 @@ async function executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>,
 				context: call.reference ? (caller?.context ?? null) : (call.context?.() ?? null),
 			};
 			if (!writing) return { ok: true, result: present(await op.run(env, input)), seq: null };
-			const prior = cmd ? findCommand(app.db, cmd) : null;
+			const prior = cmd ? await findCommand(app.db, cmd) : null;
 			if (prior) {
 				if (prior.op !== op.name || prior.actor !== actor.id || prior.project !== 0) throw reused();
 				if (prior.request !== request) throw changed();
@@ -291,7 +291,7 @@ async function executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>,
 			const result = await op.run(env, input);
 			if (cmd) {
 				const outcome = op.secret?.(input) ? WITHHELD : result;
-				recordInstanceCommand(app.db, { id: cmd, op: op.name, actor: actor.id, at: env.now, outcome, request });
+				await recordInstanceCommand(app.db, { id: cmd, op: op.name, actor: actor.id, at: env.now, outcome, request });
 			}
 			return { ok: true, result: present(result), seq: null };
 		}
@@ -321,14 +321,14 @@ async function executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>,
 			// transaction and never finished (the server stopped), or by this one when it commits its own.
 			let bound = false;
 			if (cmd) {
-				const prior = findCommand(app.db, cmd);
+				const prior = await findCommand(app.db, cmd);
 				if (prior) {
 					// The same id from the same actor for the same operation in the same project, or it is a conflict:
 					// a reply recorded for one project is never returned for another.
 					if (prior.op !== op.name || prior.actor !== actor.id || prior.project !== found.id) throw reused();
 					if (prior.request !== request) throw changed();
 					if (prior.outcome !== UNFINISHED) {
-						app.db.commit();
+						await app.db.commit();
 						return { ok: true, result: present(json<unknown>(prior.outcome)), seq: prior.seq };
 					}
 					// Begun and never answered: the operation runs again, finds what it already stored (a report finds
@@ -361,26 +361,26 @@ async function executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>,
 					}
 					if (step.value === COMMIT) {
 						if (cmd && !bound) {
-							beginCommand(ctx, { id: cmd, op: op.name, request });
+							await beginCommand(ctx, { id: cmd, op: op.name, request });
 							bound = true;
 						}
-						stampSeq(ctx);
-						app.db.commit();
+						await stampSeq(ctx);
+						await app.db.commit();
 						publish();
-						app.db.begin();
+						await app.db.begin();
 						ctx.seq += 1;
 					}
 					await nextTick();
 				}
 			} else result = await op.run(ctx, input);
-			if (cmd && bound) finishCommand(ctx, { id: cmd, outcome: result });
-			else if (cmd) recordCommand(ctx, { id: cmd, op: op.name, outcome: result, request });
-			stampSeq(ctx);
-			app.db.commit();
+			if (cmd && bound) await finishCommand(ctx, { id: cmd, outcome: result });
+			else if (cmd) await recordCommand(ctx, { id: cmd, op: op.name, outcome: result, request });
+			await stampSeq(ctx);
+			await app.db.commit();
 			publish();
 			return { ok: true, result: present(result), seq: ctx.seq };
 		} catch (error) {
-			app.db.rollback();
+			await app.db.rollback();
 			throw error;
 		}
 	} catch (error) {
@@ -395,7 +395,7 @@ async function executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>,
 
 /** Runs an inline read in one snapshot, including an awaited handler. */
 const read = (app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> => {
-	const run = () => app.reader.snapshotAsync(() => execute(app, ops, call));
+	const run = () => app.reader.snapshotAsync(async () => await execute(app, ops, call));
 	// In-memory instances share the writer connection. An idle read owns the gate until its snapshot ends;
 	// a read during a sliced write joins that transaction, as synchronous reads did.
 	return app.reader === app.db && !app.db.inTransaction ? app.gate.run(run) : run();
@@ -414,9 +414,12 @@ export async function invoke(app: App, ops: Readonly<Record<string, AnyOp>>, cal
 	const misplaced = misplacedTime(op, call);
 	if (misplaced) return misplaced;
 	if (op?.effect === "read" && app.readers && call.reference) {
-		const project = op.scope === "project" && call.project ? findProject(app.reader, call.project) : null;
+		const project =
+			op.scope === "project" && call.project
+				? await app.database.read(async (readDb) => await findProject(readDb, call.project))
+				: null;
 		if (op.scope === "project" && !project) return read(app, ops, call);
-		const actor = call.actor(project?.id ?? 0);
+		const actor = await call.actor(project?.id ?? 0);
 		// Who may read is decided here, in the thread that knows the caller, and asked again when the reader has
 		// answered. A reader thread is only ever handed a call its caller is allowed to make; a refusal is answered
 		// inline and never reaches one.
@@ -432,16 +435,19 @@ export async function invoke(app: App, ops: Readonly<Record<string, AnyOp>>, cal
 				},
 				() => read(app, ops, call),
 			)
-			.then((reply) => {
+			.then(async (reply) => {
 				// Also refuse a project, credential or capability that ended while the reader was answering. The read
 				// itself resolved these in its snapshot; an inline replay does the same.
-				const current = op.scope === "project" && call.project ? findProject(app.reader, call.project) : null;
+				const current =
+					op.scope === "project" && call.project
+						? await app.database.read(async (readDb) => await findProject(readDb, call.project))
+						: null;
 				if (op.scope === "project" && !current) {
 					const { code, message } = noProject(call.project);
 					return fail(code, message);
 				}
 				if (current?.identity !== project?.identity) return read(app, ops, call);
-				const admitted = admitCaller(call, op, call.actor(current?.id ?? 0), current?.key ?? null);
+				const admitted = admitCaller(call, op, await call.actor(current?.id ?? 0), current?.key ?? null);
 				if ("reply" in admitted) return admitted.reply;
 				return reply.ok ? reply : fail(reply.error.code, reply.error.message, reply.error.details);
 			});

@@ -34,9 +34,9 @@ async function modules(root: string) {
 
 async function server(root: string, directory: string, demoFile: string) {
 	const { start, config, archiveRoutes, renewDemoWork, ciActor, Readers } = await modules(root);
-	const instance = start(config(directory), (app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }));
+	const instance = await start(config(directory), (app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }));
 	if (instance.app.readers instanceof Readers) await instance.app.readers.ready(60_000);
-	const ci = ciActor(instance.app);
+	const ci = await ciActor(instance.app);
 	const demo = Demo.parse(JSON.parse(readFileSync(demoFile, "utf8")));
 	let phase = "idle";
 	let last = performance.now();
@@ -101,7 +101,7 @@ async function seed(directory: string, root: string) {
 		}),
 	});
 	const { start, config, archiveRoutes, seed: seedDemo } = await modules(root);
-	const instance = start(config(directory), (app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }));
+	const instance = await start(config(directory), (app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }));
 	try {
 		const demo = await seedDemo(new Client({ url: instance.url, token: undefined, project: "demo" }), {
 			project: "demo",

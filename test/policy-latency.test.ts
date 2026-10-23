@@ -11,14 +11,14 @@ const CHANGE_RUNS = 6000;
 const LIMIT_MS = 750;
 
 async function adoptWhilePolling(): Promise<number> {
-	return withInstance(async ({ instance, client }) => {
+	return await withInstance(async ({ instance, client }) => {
 		await client.call("admin", { do: "project.create", key: "policy-latency", preset: "standard", unlinked: "ask" });
 		const project = client.with({ project: "policy-latency" });
 		for (let pr = 1; pr <= CHANGE_RUNS; pr++) {
 			const receipt = await invoke(instance.app, OPS, {
 				op: "report",
 				project: "policy-latency",
-				actor: () => instance.owner,
+				actor: async () => instance.owner,
 				input: ciReport({
 					commit: `policy-head-${pr}`,
 					pr,

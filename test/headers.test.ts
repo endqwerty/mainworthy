@@ -158,8 +158,8 @@ const scratch = (): string => {
 };
 
 /** A server-mode instance with every surface `mainworthy serve` has, and one route that fails. */
-function boot(ui: unknown = null): Instance {
-	const instance = start(
+async function boot(ui: unknown = null): Promise<Instance> {
+	const instance = await start(
 		{
 			dataDir: scratch(),
 			host: "127.0.0.1",
@@ -311,7 +311,7 @@ describe("on a real listener, without the web UI", () => {
 		test(`every route's reply carries the headers when the request came over ${scheme}`, async () => {
 			const failures = spyOn(console, "error").mockImplementation(() => {});
 			try {
-				const instance = boot();
+				const instance = await boot();
 				for (const request of REQUESTS) {
 					const headers = {
 						...Object.fromEntries(new Headers(request.init?.headers)),
@@ -334,7 +334,7 @@ describe("on a real listener, without the web UI", () => {
 	}
 
 	test("a route's own headers stay: the cookie of a sign-in, the methods a 405 allows, no-store on the API", async () => {
-		const instance = boot();
+		const instance = await boot();
 		const signedIn = await fetch(`${instance.url}/api/login`, {
 			method: "POST",
 			headers: json,
@@ -348,7 +348,7 @@ describe("on a real listener, without the web UI", () => {
 	});
 
 	test("a proxy's list of schemes counts by its first element, whatever its case", async () => {
-		const instance = boot();
+		const instance = await boot();
 		const sent = async (forwarded: string) =>
 			(await fetch(`${instance.url}/healthz`, { headers: { "x-forwarded-proto": forwarded } })).headers.get(
 				"strict-transport-security",
@@ -369,8 +369,8 @@ describe("on a real listener, without the web UI", () => {
 describe("a route that answers without a session and writes the policy of its own pages", () => {
 	const OWN = "default-src 'none'; script-src 'self'; style-src 'self'; frame-src 'self'; frame-ancestors 'self'";
 	const SANDBOXED = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; frame-ancestors 'self'";
-	const open = (): Instance => {
-		const instance = start(
+	const open = async (): Promise<Instance> => {
+		const instance = await start(
 			{
 				dataDir: scratch(),
 				host: "127.0.0.1",
@@ -411,7 +411,7 @@ describe("a route that answers without a session and writes the policy of its ow
 	};
 
 	test("keeps that policy and its referrer rule, gets the framing header that policy means, and every other header", async () => {
-		const instance = open();
+		const instance = await open();
 		const page = await fetch(`${instance.url}/open/page`);
 		expect(carried(page)).toEqual({
 			...FIXED,
@@ -434,14 +434,14 @@ describe("a route that answers without a session and writes the policy of its ow
 	});
 
 	test("a reply of such a route that carries no policy gets the one for everything else", async () => {
-		const instance = open();
+		const instance = await open();
 		const moved = await fetch(`${instance.url}/open/moved`, { redirect: "manual" });
 		expect(moved.status).toBe(308);
 		expect(carried(moved)).toEqual(expected(OTHER, false));
 	});
 
 	test("the documentation's pages keep their policy: a page may frame a diagram, and a diagram stays sandboxed", async () => {
-		const instance = start(
+		const instance = await start(
 			{
 				dataDir: scratch(),
 				host: "127.0.0.1",
@@ -496,7 +496,7 @@ describe("the web UI as the executable holds it: a list of built files", () => {
 	}
 
 	test("the page carries the strict policy at every address the app routes, and is checked again on each visit", async () => {
-		const instance = boot(built());
+		const instance = await boot(built());
 		for (const path of ["/", "/p/scratch/suite/c/1", "/index-h7qagb7x.html", "/chunk-unknown.js", "/api/nothing"]) {
 			const reply = await fetch(`${instance.url}${path}`, { headers: { "x-forwarded-proto": "https" } });
 			expect(reply.status, path).toBe(200);
@@ -509,7 +509,7 @@ describe("the web UI as the executable holds it: a list of built files", () => {
 	});
 
 	test("a script, a style sheet and the icon carry the headers, their own type, and may be kept for good", async () => {
-		const instance = boot(built());
+		const instance = await boot(built());
 		for (const [path, type, body] of [
 			["/chunk-ehzzqme2.js", "text/javascript;charset=utf-8", SCRIPT],
 			["/chunk-dsth2dfw.css", "text/css;charset=utf-8", "body{margin:0}"],
@@ -530,7 +530,7 @@ describe("the web UI as the executable holds it: a list of built files", () => {
 	});
 
 	test("a browser that holds a file is told so, with the headers; HEAD has no body; nothing but GET and HEAD is taken", async () => {
-		const instance = boot(built());
+		const instance = await boot(built());
 		// `*` is "whatever you have of it": the browser holds some version, and a name with its hash has only one.
 		for (const held of ['"rrFff1eUjuI"', 'W/"rrFff1eUjuI"', '"other", "rrFff1eUjuI"', "*", " * "]) {
 			const reply = await fetch(`${instance.url}/chunk-ehzzqme2.js`, { headers: { "if-none-match": held } });
@@ -557,7 +557,7 @@ describe("the web UI as the executable holds it: a list of built files", () => {
 	});
 
 	test("only the listed files are served: an address cannot reach a file beside them", async () => {
-		const instance = boot(built());
+		const instance = await boot(built());
 		const beside = join(scratch(), "secret.txt");
 		writeFileSync(beside, "not part of the bundle");
 		for (const path of ["/../secret.txt", "/%2e%2e/secret.txt", `/${encodeURIComponent(beside)}`, "//etc/passwd"]) {
@@ -567,7 +567,7 @@ describe("the web UI as the executable holds it: a list of built files", () => {
 	});
 
 	test("an API route is still the API's when the UI takes every other path", async () => {
-		const instance = boot(built());
+		const instance = await boot(built());
 		const reply = await fetch(`${instance.url}/api/session`, { headers: bearer });
 		expect(reply.headers.get("content-type")).toBe("application/json; charset=utf-8");
 		expect(carried(reply)).toEqual(expected(OTHER, false));
@@ -580,7 +580,7 @@ describe("the web UI from source: Bun's development bundle, passed on with the h
 	const sha256 = (text: string): string => new Bun.CryptoHasher("sha256").update(text).digest("base64");
 
 	test("the page allows the inline scripts that are in it, by hash, and its files carry the headers", async () => {
-		const instance = boot(sourceUi);
+		const instance = await boot(sourceUi);
 		const reply = await fetch(`${instance.url}/p/scratch/suite`, { headers: { "x-forwarded-proto": "https" } });
 		const html = await reply.text();
 		expect(reply.status).toBe(200);
@@ -653,7 +653,7 @@ describe("the web UI from source: Bun's development bundle, passed on with the h
 	}
 
 	test("the page's own reload socket opens: this server's Origin, on the path the development page asks for", async () => {
-		const instance = boot(sourceUi);
+		const instance = await boot(sourceUi);
 		const html = await (await fetch(`${instance.url}/`)).text();
 		const client = [...html.matchAll(/src="(\/_bun\/client\/[^"]+)"/g)].map((match) => match[1] ?? "")[0];
 		// The path is Bun's, in the script it serves with the development page. If Bun moves it, this says so.
@@ -666,7 +666,7 @@ describe("the web UI from source: Bun's development bundle, passed on with the h
 	});
 
 	test("a page on another site cannot open the reload socket: its Origin is refused, with the headers, and nothing is opened", async () => {
-		const instance = boot(sourceUi);
+		const instance = await boot(sourceUi);
 		await (await fetch(`${instance.url}/`)).text();
 		const { host } = new URL(instance.url);
 		for (const sent of [
@@ -687,7 +687,7 @@ describe("the web UI from source: Bun's development bundle, passed on with the h
 	});
 
 	test("the reload socket does not open under a name the bundler does not serve, whatever Origin comes with it", async () => {
-		const instance = boot(sourceUi);
+		const instance = await boot(sourceUi);
 		await (await fetch(`${instance.url}/`)).text();
 		// A page reached through a name that resolves here (DNS rebinding) is same-origin with that name. Bun's
 		// development server refuses the name, and it is shown the name the visitor sent, not the relay's own.
@@ -704,7 +704,7 @@ describe("the web UI from source: Bun's development bundle, passed on with the h
 	});
 
 	test("only the reload socket's path is made a socket: an upgrade asked of any other path is answered as that path", async () => {
-		const instance = boot(sourceUi);
+		const instance = await boot(sourceUi);
 		const page = await (await fetch(`${instance.url}/`)).text();
 		for (const path of ["/not-a-websocket", "/p/scratch/suite", "/_bun/hmr/", "/_bun/hmrx", "/x/_bun/hmr"]) {
 			const reply = await handshake(instance, path, { Origin: instance.url });
@@ -717,7 +717,7 @@ describe("the web UI from source: Bun's development bundle, passed on with the h
 	});
 
 	test("the reload socket is relayed to the bundler, and what the page posts to it arrives", async () => {
-		const instance = boot(sourceUi);
+		const instance = await boot(sourceUi);
 		await (await fetch(`${instance.url}/`)).text();
 		const socket = new WebSocket(`${instance.url.replace("http", "ws")}/_bun/hmr`);
 		socket.binaryType = "arraybuffer";

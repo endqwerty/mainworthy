@@ -3,7 +3,7 @@ import type { ActorKind, Capability } from "../src/core/kinds.ts";
 import { authenticate, bootstrap, createToken } from "../src/server/identity/identity.ts";
 import { type App, openApp, SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
 import type { Actor } from "../src/server/kernel/ctx.ts";
-import type { Db } from "../src/server/kernel/db.ts";
+import type { WriteDb } from "../src/server/kernel/db.ts";
 import { MIGRATIONS } from "../src/server/kernel/migrate.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke, type Reply } from "../src/server/ops/registry.ts";
@@ -25,7 +25,7 @@ export async function harness(
 	options: { preset?: string; project?: string; unlinked?: "ask" | "track" | "create" } = {},
 ): Promise<Harness> {
 	let now = 1_800_000_000_000;
-	const app = openApp(
+	const app = await openApp(
 		{
 			dataDir: ":memory:",
 			host: "127.0.0.1",
@@ -39,11 +39,11 @@ export async function harness(
 		},
 		{ memory: true, now: () => now },
 	);
-	const { owner } = bootstrap(app);
+	const { owner } = await bootstrap(app);
 	const project = options.project ?? "scratch";
-	const raw = (op: string, input: unknown = {}, as: Actor = owner): Promise<Reply> => {
+	const raw = async (op: string, input: unknown = {}, as: Actor = owner): Promise<Reply> => {
 		now += 1;
-		return invoke(app, OPS, { op, project: op === "admin" ? null : project, input, actor: () => as });
+		return await invoke(app, OPS, { op, project: op === "admin" ? null : project, input, actor: async () => as });
 	};
 	const call = async <T>(op: string, input: unknown = {}, as: Actor = owner): Promise<T> => {
 		const reply = await raw(op, input, as);
@@ -64,9 +64,9 @@ export async function harness(
 		},
 		call,
 		raw,
-		actor(name, kind, can) {
-			const { secret } = createToken(app, { actor: name, kind, can, project: 0, label: "test" });
-			const actor = authenticate(app, secret, 0);
+		async actor(name, kind, can) {
+			const { secret } = await createToken(app, { actor: name, kind, can, project: 0, label: "test" });
+			const actor = await authenticate(app, secret, 0);
 			if (!actor) throw new Error("token did not authenticate");
 			return actor;
 		},
@@ -119,13 +119,15 @@ export function ciReport(input: {
 }
 
 /** Restore the pre-receipt schema, including removal of later extensions, before replaying 0041 onward. */
-export function dropReceiptSchema(db: Db): void {
-	db.exec("ALTER TABLE demo_projects DROP COLUMN deployment");
-	db.exec("ALTER TABLE sessions DROP COLUMN reauthenticated_at");
+export async function dropReceiptSchema(db: WriteDb): Promise<void> {
+	await db.exec("ALTER TABLE demo_projects DROP COLUMN deployment");
+	await db.exec("ALTER TABLE sessions DROP COLUMN reauthenticated_at");
 	const migration = MIGRATIONS.find((row) => row.name === "merge_receipts");
 	if (!migration) throw new Error("receipt migration is missing");
-	for (const match of migration.sql.matchAll(/CREATE TRIGGER (\w+)/g)) db.exec(`DROP TRIGGER ${match[1]}`);
-	db.exec("DROP INDEX run_tests_receipt; DROP INDEX change_ends_receipt; ALTER TABLE change_ends DROP COLUMN receipt");
+	for (const match of migration.sql.matchAll(/CREATE TRIGGER (\w+)/g)) await db.exec(`DROP TRIGGER ${match[1]}`);
+	await db.exec(
+		"DROP INDEX run_tests_receipt; DROP INDEX change_ends_receipt; ALTER TABLE change_ends DROP COLUMN receipt",
+	);
 	for (const table of [
 		"merge_receipt_heads",
 		"merge_receipt_dirty",
@@ -135,5 +137,5 @@ export function dropReceiptSchema(db: Db): void {
 		"merge_receipt_nodes",
 		"merge_receipt_payloads",
 	])
-		db.exec(`DROP TABLE ${table}`);
+		await db.exec(`DROP TABLE ${table}`);
 }

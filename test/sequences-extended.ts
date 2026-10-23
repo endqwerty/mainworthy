@@ -835,7 +835,7 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 			} else if (action < 93) {
 				// A report accepted and applied later, as a restart does.
 				const app = h.app;
-				const projectRow = findProject(app.db, "scratch");
+				const projectRow = await findProject(app.db, "scratch");
 				if (projectRow) {
 					const as = pick([pipeline, ...people]);
 					const input = {
@@ -846,17 +846,17 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 					};
 					let error: string | null = null;
 					try {
-						app.db.transaction(() => {
+						await app.db.transaction(async () => {
 							const ctx = makeCtx(app, projectRow, as, true);
-							acceptReport(ctx, input);
-							stampSeq(ctx);
+							await acceptReport(ctx, input);
+							await stampSeq(ctx);
 						});
 					} catch (e) {
 						error = e instanceof Error ? e.message : String(e);
 					}
 					trace.push({ op: "acceptReport", input, as: as.name, error });
 					if (error === null) placeOf(as, input);
-					const applied = recoverAccepted(app);
+					const applied = await recoverAccepted(app);
 					trace.push({ op: "recoverAccepted", applied });
 				}
 			} else if (action < 95 && !forgotten) {
@@ -881,7 +881,7 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 			} else {
 				h.advance(15 * 86_400_000);
 				trace.push({ advance: "15 days" });
-				sweep(h.app, rule);
+				await sweep(h.app, rule);
 			}
 			const problem = audit();
 			if (problem) return { seed, step, ...problem, last: trace.slice(-15) };

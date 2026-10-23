@@ -49,7 +49,7 @@ const FIRST = "correct horse battery staple";
 const SECOND = "a second quite long passphrase";
 
 test("TOTP enrolment begins only in a signed-in context and waits for a code", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "totp-robin", FIRST);
 	expect((await w.op("credential", { do: "totp.begin" })).status).toBe(403);
 	const begun = await w.op("credential", { do: "totp.begin" }, { cookie });
@@ -99,7 +99,7 @@ async function secondStep(w: World, name: string, headers: Sent = {}) {
 }
 
 test("TOTP password sign-in has a bound second step, single-use codes and single-use recovery", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "totp-login", FIRST);
 	const older = await signIn(w, "totp-login", FIRST);
 	const enrolled = await enrol(w, cookie);
@@ -141,7 +141,7 @@ test("TOTP password sign-in has a bound second step, single-use codes and single
 });
 
 test("TOTP failed codes remain limited across fresh correct passwords and across concurrent attempts", async () => {
-	const w = world({ proxied: true });
+	const w = await world({ proxied: true });
 	const cookie = await joined(w, "totp-limit", FIRST);
 	const enrolled = await enrol(w, cookie);
 	const visitor = from("203.0.113.27");
@@ -183,7 +183,7 @@ test("TOTP failed codes remain limited across fresh correct passwords and across
 
 for (const path of ["sign-in", "change"] as const) {
 	test(`queued password ${path} attempts stop when the name becomes blocked`, async () => {
-		const w = world();
+		const w = await world();
 		const cookie = await joined(w, "queued-robin", FIRST);
 		const attempt = (password: string) =>
 			path === "sign-in"
@@ -216,7 +216,7 @@ for (const path of ["sign-in", "change"] as const) {
 	});
 	for (const expires of [false, true]) {
 		test(`an in-flight password ${path} preserves a newer block${expires ? " after it expires" : " while it is active"}`, async () => {
-			const w = world();
+			const w = await world();
 			const cookie = await joined(w, "running-robin", FIRST);
 			const started = Promise.withResolvers<void>();
 			const finish = Promise.withResolvers<void>();
@@ -265,7 +265,7 @@ for (const path of ["sign-in", "change"] as const) {
 }
 
 test("TOTP pending proofs expire and cannot finish after password replacement or credential removal", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "totp-stale", FIRST);
 	const setup = await w.ok<Enrolment>("credential", { do: "totp.begin" }, { cookie });
 	const other = await signIn(w, "totp-stale", FIRST);
@@ -326,7 +326,7 @@ test("TOTP pending proofs expire and cannot finish after password replacement or
 });
 
 test("TOTP is never a primary credential, and admin-required instances refuse password-only entry", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "totp-admin", FIRST, { can: ["read", "admin"] });
 	const enrolled = await enrol(w, cookie);
 	const password = w.rows<{ id: number }>("SELECT id FROM credentials WHERE kind = 'password'")[0];
@@ -344,7 +344,7 @@ test("TOTP is never a primary credential, and admin-required instances refuse pa
 });
 
 test("TOTP admin policy ends existing password sessions on startup and promotion while verified passkeys work", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "totp-promoted", FIRST);
 	w.instance.app.config.requireAdminMfa =
 		defaultConfig({ MAINWORTHY_REQUIRE_ADMIN_MFA: "true" }).requireAdminMfa === true;
@@ -357,7 +357,7 @@ test("TOTP admin policy ends existing password sessions on startup and promotion
 	w.instance.app.config.requireAdminMfa = false;
 	const old = await joined(w, "totp-startup", FIRST, { can: ["read", "admin"] });
 	w.instance.app.config.requireAdminMfa = true;
-	await w.instance.app.gate.run(() => bootstrap(w.instance.app));
+	await w.instance.app.gate.run(async () => await bootstrap(w.instance.app));
 	expect(await w.status({ cookie: old })).toBe(401);
 	const invitation = await invite(w, { name: "totp-passkey", can: ["read", "admin"] });
 	const shown = must(
@@ -384,7 +384,7 @@ test("TOTP admin policy ends existing password sessions on startup and promotion
 for (const project of [undefined, "other"]) {
 	for (const path of ["personal grant", "team grant", "team membership"]) {
 		test(`TOTP review: ${path} promotion on ${project ?? "every project"} ends password sessions`, async () => {
-			const w = world();
+			const w = await world();
 			await w.ok("admin", { do: "project.create", key: "other" });
 			const cookie = await joined(w, "promoted", FIRST);
 			const ordinary = await joined(w, "ordinary", FIRST);
@@ -406,7 +406,7 @@ for (const project of [undefined, "other"]) {
 	}
 
 	test(`TOTP review: team admin on ${project ?? "every project"} is covered by startup and password refusal`, async () => {
-		const w = world();
+		const w = await world();
 		await w.ok("admin", { do: "project.create", key: "other" });
 		const cookie = await joined(w, "team-startup", FIRST);
 		await w.ok("admin", { do: "team.create", name: "Admins" });
@@ -414,12 +414,12 @@ for (const project of [undefined, "other"]) {
 		await w.ok("admin", { do: "team.member.add", team: "Admins", person: "team-startup" });
 		w.instance.app.config.requireAdminMfa = true;
 		expect((await signIn(w, "team-startup", FIRST)).status).toBe(403);
-		await w.instance.app.gate.run(() => bootstrap(w.instance.app));
+		await w.instance.app.gate.run(async () => await bootstrap(w.instance.app));
 		expect(await w.status({ cookie })).toBe(401);
 	});
 
 	test(`TOTP review: team admin on ${project ?? "every project"} needs a passkey invitation and keeps TOTP`, async () => {
-		const w = world();
+		const w = await world();
 		await w.ok("admin", { do: "project.create", key: "other" });
 		await joined(w, "team-recover", FIRST);
 		await w.ok("admin", { do: "team.create", name: "Admins" });
@@ -448,7 +448,7 @@ for (const project of [undefined, "other"]) {
 }
 
 test("TOTP review: an admin keeps the last usable passkey when their password is refused", async () => {
-	const w = world();
+	const w = await world();
 	w.instance.app.config.requireAdminMfa = true;
 	const invitation = await invite(w, { name: "last-passkey", can: ["admin"] });
 	const device = authenticator();
@@ -486,7 +486,7 @@ test("TOTP review: an admin keeps the last usable passkey when their password is
 });
 
 test("TOTP review: enrolment typos have their own limit and do not block password second steps", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "setup-typos", FIRST);
 	const setup = await w.ok<Enrolment>("credential", { do: "totp.begin" }, { cookie });
 	const acceptedCodes = [-30_000, 0, 30_000].map((offset) => appCode(setup.secret, w.clock.now() + offset));
@@ -518,7 +518,7 @@ test("TOTP review: enrolment typos have their own limit and do not block passwor
 });
 
 test("TOTP review: enrolment neither shares nor resets the sign-in code limit", async () => {
-	const w = world();
+	const w = await world();
 	const cookie = await joined(w, "separate-limits", FIRST);
 	const enrolled = await enrol(w, cookie);
 	const step = await secondStep(w, "separate-limits");
@@ -549,7 +549,7 @@ test("TOTP review: enrolment neither shares nor resets the sign-in code limit", 
 });
 
 test("TOTP secret replies are not recorded, archives exclude them, and import clears pending proofs", async () => {
-	const w = world();
+	const w = await world();
 	const archive = await (await fetch(`${w.instance.url}/api/export`, { headers: bearer(TOKEN) })).text();
 	const recovery = await invite(w, { name: OWNER });
 	const accepted = await w.post("/api/login", { invitation: recovery.code, password: FIRST });
@@ -579,7 +579,7 @@ test("TOTP secret replies are not recorded, archives exclude them, and import cl
 });
 
 test("TOTP delays legacy password NFC rehash until the second step succeeds", async () => {
-	const w = world();
+	const w = await world();
 	const typed = "cafe\u0301 password for TOTP";
 	const cookie = await joined(w, "totp-nfc", typed);
 	const enrolled = await enrol(w, cookie);
@@ -630,7 +630,7 @@ type Listed = { id: number; openedWith: string; current: boolean; userAgent: str
 
 describe("an invitation", () => {
 	test("the minute job deletes invitations 30 days after use, revocation or expiry, keeping open ones", async () => {
-		const w = world();
+		const w = await world();
 		const used = await invite(w, { name: "robin", expires: "30d" });
 		const revoked = await invite(w, { name: "sam", expires: "30d" });
 		const expired = await invite(w, { name: "pat", expires: "1d" });
@@ -656,7 +656,7 @@ describe("an invitation", () => {
 	});
 
 	test("an admin invites a person: the code is in the reply once and nowhere in the database, the log or the stored command", async () => {
-		const w = world();
+		const w = await world();
 		const logged = [spyOn(console, "warn"), spyOn(console, "error"), spyOn(console, "info"), spyOn(console, "log")];
 		try {
 			const input = { do: "create", name: "robin", can: ["read", "answer"], project: "scratch", cmd: "invite-robin-1" };
@@ -695,7 +695,7 @@ describe("an invitation", () => {
 	});
 
 	test("accepting with a password signs the person in: the session rests on the password, and the person holds the grant the invitation named and nothing else", async () => {
-		const w = world();
+		const w = await world();
 		const { code } = await invite(w, { name: "robin", can: ["read", "answer"], project: "scratch" });
 		const accepted = await w.post<{ signedIn: boolean }>("/api/login", { invitation: code, password: FIRST });
 		expect(accepted.status).toBe(200);
@@ -734,7 +734,7 @@ describe("an invitation", () => {
 
 	test("an invitation is used once: a second acceptance, an expired one, a revoked one and a wrong code are refused with the same reply", async () => {
 		const clock = clockAt();
-		const w = world({ clock });
+		const w = await world({ clock });
 		const used = await invite(w, { name: "robin" });
 		expect((await w.post("/api/login", { invitation: used.code, password: FIRST })).status).toBe(200);
 		const expired = await invite(w, { name: "sam", expires: "1d" });
@@ -763,7 +763,7 @@ describe("an invitation", () => {
 	});
 
 	test("two acceptances of one invitation at the same moment: one signs in, the other is refused, and one password is stored", async () => {
-		const w = world();
+		const w = await world();
 		const { code } = await invite(w, { name: "robin" });
 		const logged = spyOn(console, "warn").mockImplementation(() => {});
 		const gate = holdGate(w.instance);
@@ -789,7 +789,7 @@ describe("an invitation", () => {
 	});
 
 	test("the page of an invitation learns who it is for and when it ends, and asking changes nothing", async () => {
-		const w = world({ publicUrl: null });
+		const w = await world({ publicUrl: null });
 		const { code, link } = await invite(w, { name: "robin" });
 		// With no public address the link is relative, and the reply says so.
 		expect(link).toBe(`/invite#${code}`);
@@ -808,7 +808,7 @@ describe("an invitation", () => {
 	});
 
 	test("an acceptance says what is wrong with a password before it looks at the invitation, and needs a password or a passkey", async () => {
-		const w = world();
+		const w = await world();
 		const { code } = await invite(w, { name: "robin" });
 		const replies: string[] = [];
 		for (const body of [
@@ -829,7 +829,7 @@ describe("an invitation", () => {
 	};
 
 	test("a browser signed in as somebody else is refused until it names who it asked about, and only the session it held ends then", async () => {
-		const w = world();
+		const w = await world();
 		const robin = await joined(w, "robin", FIRST);
 		const elsewhere = (await signIn(w, "robin", FIRST)).cookie;
 		const pat = await joined(w, "pat", FIRST);
@@ -863,7 +863,7 @@ describe("an invitation", () => {
 	test("saying yes to one person signs no other person out: the browser is asked again, about who it holds now", async () => {
 		// The page asked "you are signed in as robin, go on as sam?". Before the answer was sent another tab signed
 		// Pat in, so the request carries Pat's cookie and a yes that was about Robin.
-		const w = world();
+		const w = await world();
 		const robin = await joined(w, "robin", FIRST);
 		const pat = await joined(w, "pat", FIRST);
 		const { code } = await invite(w, { name: "sam" });
@@ -892,7 +892,7 @@ describe("an invitation", () => {
 	});
 
 	test("replace is a name: a bare yes is refused as wrong input, before the invitation is looked at", async () => {
-		const w = world();
+		const w = await world();
 		const robin = await joined(w, "robin", FIRST);
 		const { code } = await invite(w, { name: "sam" });
 		const replies: string[] = [];
@@ -914,7 +914,7 @@ describe("an invitation", () => {
 
 	test("a name given where nobody else is signed in ends nothing: no session, or the invited person's own", async () => {
 		// The page may have asked a moment before a sign-out.
-		const w = world();
+		const w = await world();
 		const robin = await joined(w, "robin", FIRST);
 		const forSam = await invite(w, { name: "sam" });
 		const joinedNow = await w.post("/api/login", { invitation: forSam.code, password: SECOND, replace: "robin" });
@@ -937,7 +937,7 @@ describe("an invitation", () => {
 		// No request moves a session to another person today: a cookie names one session, and a session keeps its
 		// person. The commit is not allowed to rest on that. So the test moves the row itself while it holds the
 		// gate, behind which the acceptance waits with a yes that was about Robin.
-		const w = world();
+		const w = await world();
 		const robin = await joined(w, "robin", FIRST);
 		await joined(w, "pat", FIRST);
 		const { code } = await invite(w, { name: "sam" });
@@ -962,7 +962,7 @@ describe("an invitation", () => {
 	test.each(["end", "idle"] as const)(
 		"a concurrent sign-in whose cookie an invitation response replaces stays listed until %s",
 		async (until) => {
-			const w = world();
+			const w = await world();
 			const robin = await joined(w, "robin", FIRST);
 			const pat = await joined(w, "pat", FIRST);
 			const { code } = await invite(w, { name: "sam" });
@@ -1017,7 +1017,7 @@ describe("an invitation", () => {
 	);
 
 	test("who may invite whom: a new person is any admin's to invite, a person who exists is the owner's or their own", async () => {
-		const w = world();
+		const w = await world();
 		const robin = await joined(w, "robin", FIRST, { can: ["read", "admin"] });
 		const sam = await joined(w, "sam", SECOND);
 		// Robin administers and is not the owner.
@@ -1049,7 +1049,7 @@ describe("an invitation", () => {
 
 describe("a name and a password", () => {
 	test("canonical password spellings sign in after joining, changing a password and recovering", async () => {
-		const w = world();
+		const w = await world();
 		const first = "cafe\u0301 password for robin";
 		const second = "the next cafe\u0301 password";
 		const recovered = "recovered cafe\u0301 password";
@@ -1065,7 +1065,7 @@ describe("a name and a password", () => {
 	});
 
 	test("an old password keeps working and is rehashed to NFC without ending its existing sessions", async () => {
-		const w = world();
+		const w = await world();
 		const typed = "cafe\u0301 password for robin";
 		const cookie = await joined(w, "robin", typed);
 		const oldHash = await Bun.password.hash(typed, { algorithm: "argon2id", memoryCost: 8, timeCost: 1 });
@@ -1088,7 +1088,7 @@ describe("a name and a password", () => {
 	});
 
 	test("a password change accepts an old password's original spelling without a preceding sign-in", async () => {
-		const w = world();
+		const w = await world();
 		const typed = "cafe\u0301 password for robin";
 		const cookie = await joined(w, "robin", typed);
 		const oldHash = await Bun.password.hash(typed, { algorithm: "argon2id", memoryCost: 8, timeCost: 1 });
@@ -1105,7 +1105,7 @@ describe("a name and a password", () => {
 	});
 
 	test("a legacy password check queued behind a change cannot rehash over the new password", async () => {
-		const w = world();
+		const w = await world();
 		const typed = "cafe\u0301 password for robin";
 		await joined(w, "robin", typed);
 		const oldHash = await Bun.password.hash(typed, { algorithm: "argon2id", memoryCost: 8, timeCost: 1 });
@@ -1129,7 +1129,7 @@ describe("a name and a password", () => {
 	});
 
 	test("sign in; a wrong password, an unknown name, a forgotten person and a person with no password are the same reply, and each costs a verification", async () => {
-		const w = world();
+		const w = await world();
 		await joined(w, "robin", FIRST);
 		await joined(w, "sam", SECOND);
 		await w.ok("admin", { do: "actor.forget", name: "sam" });
@@ -1177,7 +1177,7 @@ describe("a name and a password", () => {
 	});
 
 	test("a body that is not one way of signing in is refused like a wrong password", async () => {
-		const w = world();
+		const w = await world();
 		await joined(w, "robin", FIRST);
 		const logged = spyOn(console, "warn").mockImplementation(() => {});
 		try {
@@ -1211,7 +1211,7 @@ describe("a name and a password", () => {
 	});
 
 	test("changing a password needs the current one, ends the other sessions that rested on it, and keeps the one that made the change", async () => {
-		const w = world();
+		const w = await world();
 		const first = await joined(w, "robin", FIRST);
 		const second = (await signIn(w, "robin", FIRST)).cookie;
 		const byToken = (await w.post("/api/login", { token: await tokenFor(w, { actor: "robin", kind: "human" }) }))
@@ -1260,7 +1260,7 @@ describe("a name and a password", () => {
 	});
 
 	test("two changes of one password at the same moment: one wins, the other is refused, and the stored password is the winner's", async () => {
-		const w = world();
+		const w = await world();
 		const cookie = await joined(w, "robin", FIRST);
 		const other = (await signIn(w, "robin", FIRST)).cookie;
 		let gate = holdGate(w.instance);
@@ -1302,7 +1302,7 @@ describe("a name and a password", () => {
 	});
 
 	test("a password never appears in the database, in a log line or in a reply", async () => {
-		const w = world();
+		const w = await world();
 		const logged = [spyOn(console, "warn"), spyOn(console, "error"), spyOn(console, "info"), spyOn(console, "log")];
 		for (const spy of logged) spy.mockImplementation(() => {});
 		const typed = [
@@ -1346,7 +1346,7 @@ describe("a name and a password", () => {
 	});
 
 	test("a recovery invitation revokes every credential and ends every session of the person when it is accepted, and not before", async () => {
-		const w = world();
+		const w = await world();
 		const first = await joined(w, "robin", FIRST);
 		const byToken = (await w.post("/api/login", { token: await tokenFor(w, { actor: "robin", kind: "human" }) }))
 			.cookie;
@@ -1387,7 +1387,7 @@ describe("a name and a password", () => {
 	});
 
 	test("accepted recovery revokes the person's personal CLI and admin-issued tokens, leaving other actors alone", async () => {
-		const w = world();
+		const w = await world();
 		const cookie = await joined(w, "robin", FIRST);
 		const personal = PersonalTokenCreated.parse(
 			await w.ok("credential", { do: "token.create", label: "my CLI" }, { cookie }),
@@ -1415,7 +1415,7 @@ describe("a name and a password", () => {
 	});
 
 	test("a personal token revoked by recovery cannot write a proposal queued behind recovery", async () => {
-		const w = world();
+		const w = await world();
 		const cookie = await joined(w, "robin", FIRST, { can: ["read", "produce"], project: "scratch" });
 		const personal = PersonalTokenCreated.parse(
 			await w.ok("credential", { do: "token.create", label: "queued CLI" }, { cookie }),
@@ -1445,7 +1445,7 @@ describe("a name and a password", () => {
 	});
 
 	test("owner recovery also revokes the configured owner token, even when it is the last one", async () => {
-		const w = world();
+		const w = await world();
 		const before = await w.post("/api/login", { token: TOKEN });
 		const recovery = await invite(w, { name: OWNER });
 		expect(await w.status(bearer(TOKEN))).toBe(200);
@@ -1456,13 +1456,13 @@ describe("a name and a password", () => {
 			await w.status({ cookie: before.cookie }),
 			await w.status({ cookie: accepted.cookie }),
 		]).toEqual([401, 401, 200]);
-		const restarted = await w.instance.app.gate.run(() => bootstrap(w.instance.app));
+		const restarted = await w.instance.app.gate.run(async () => await bootstrap(w.instance.app));
 		expect(restarted.warnings.join("\n")).toContain("was revoked");
 		expect(await w.status(bearer(TOKEN))).toBe(401);
 		expect((await signIn(w, OWNER, SECOND)).status).toBe(200);
 		const replacement = "replacement-owner-secret-0123456789";
 		w.instance.app.config.ownerToken = replacement;
-		await w.instance.app.gate.run(() => bootstrap(w.instance.app));
+		await w.instance.app.gate.run(async () => await bootstrap(w.instance.app));
 		expect([
 			await w.status(bearer(TOKEN)),
 			await w.status(bearer(replacement)),
@@ -1473,7 +1473,7 @@ describe("a name and a password", () => {
 
 describe("what a signed-in caller sees and ends", () => {
 	test("session list shows the caller's sessions and marks the current one; session end ends one's own and not somebody else's", async () => {
-		const w = world();
+		const w = await world();
 		const laptop = await joined(w, "robin", FIRST);
 		const phone = (await signIn(w, "robin", FIRST, { "user-agent": "Phone/1.0" })).cookie;
 		const sam = await joined(w, "sam", SECOND);
@@ -1514,7 +1514,7 @@ describe("what a signed-in caller sees and ends", () => {
 	});
 
 	test("an admin who is a person lists and ends anyone's sessions, and an agent with admin does not", async () => {
-		const w = world();
+		const w = await world();
 		const robin = await joined(w, "robin", FIRST);
 		const admin = await joined(w, "sam", SECOND, { can: ["read", "admin"] });
 		const agent = await tokenFor(w, { actor: "helper", kind: "agent", can: ["read", "admin"] });
@@ -1542,7 +1542,7 @@ describe("what a signed-in caller sees and ends", () => {
 
 	test("a session that is no longer alive is not in the list: ended, past a lifetime, or its token revoked", async () => {
 		const clock = clockAt();
-		const w = world({ clock });
+		const w = await world({ clock });
 		const token = await tokenFor(w, { actor: "robin", kind: "human", can: ["read"] });
 		const robin = (await w.post("/api/login", { token })).cookie;
 		const cookie = await joined(w, "sam", FIRST);
@@ -1560,7 +1560,7 @@ describe("what a signed-in caller sees and ends", () => {
 	});
 
 	test("a caller with a token and no grant at all runs a self operation and no other, and a pipeline runs none", async () => {
-		const w = world();
+		const w = await world();
 		const token = await tokenFor(w, { actor: "robin", kind: "human", can: ["read"], project: "scratch" });
 		await w.ok("admin", { do: "grant.remove", actor: "robin", project: "scratch" });
 		const info = await me(w, bearer(token));
@@ -1588,7 +1588,7 @@ describe("what a signed-in caller sees and ends", () => {
 	});
 
 	test("forgetting a person ends their sessions and revokes their credentials and their invitations", async () => {
-		const w = world();
+		const w = await world();
 		const cookie = await joined(w, "robin", FIRST);
 		const pending = await invite(w, { name: "robin" });
 		expect(await w.status({ cookie })).toBe(200);
@@ -1618,7 +1618,7 @@ describe("what a signed-in caller sees and ends", () => {
 	test.each([false, true])(
 		"forgetting erases stored attribution and access labels without losing replay protection, legacy evidence: %s",
 		async (legacy) => {
-			const w = world();
+			const w = await world();
 			const name = "erasure-person";
 			const cookie = await joined(w, name, FIRST);
 			await tokenFor(w, { actor: name, kind: "human", label: `${name}'s script`, cmd: "create-secret-01" });
@@ -1760,7 +1760,7 @@ describe("what a signed-in caller sees and ends", () => {
 	);
 
 	test("a name that starts with forgotten- from an older build does not stop the actor with that id being forgotten", async () => {
-		const w = world();
+		const w = await world();
 		await tokenFor(w, { actor: "dana", kind: "agent" });
 		const app = w.instance.app;
 		// An archive made before such names were refused: two actors hold the pseudonyms dana would be given.
@@ -1805,7 +1805,7 @@ describe("an upgrade and an import", () => {
 		writeFileSync(path, Bun.gunzipSync(readFileSync(join(import.meta.dir, "fixtures", "people", "instance-v2.db.gz"))));
 		const { start } = await import("../src/app/start.ts");
 		const clock = clockAt(T0 + HOUR);
-		const instance = start(
+		const instance = await start(
 			{
 				dataDir,
 				host: "127.0.0.1",
@@ -1874,7 +1874,7 @@ describe("an upgrade and an import", () => {
 	});
 
 	test("a sign-in that waits at the gate across an import does not sign in whoever took the ids afterwards", async () => {
-		const w = world();
+		const w = await world();
 		const archive = await (await fetch(`${w.instance.url}/api/export`, { headers: bearer(TOKEN) })).text();
 		// An import is taken only by an instance that holds its owner and nothing else, so the owner is the
 		// person whose ids an import gives away. The owner has a password, by a recovery link of their own.
@@ -1941,7 +1941,7 @@ describe("the limit on failed attempts", () => {
 
 	test("the fifth wrong password for a name blocks the name from every address: the right password is 429 then and is not looked at, and a success clears the name", async () => {
 		const clock = clockAt();
-		const w = world({ clock, proxied: true });
+		const w = await world({ clock, proxied: true });
 		await joined(w, "robin", FIRST);
 		const verified = spyOn(Bun.password, "verify");
 		try {
@@ -1978,7 +1978,7 @@ describe("the limit on failed attempts", () => {
 	});
 
 	test("a name nobody has is counted exactly as a wrong password is, so the count does not say which names exist", async () => {
-		const w = world({ proxied: true });
+		const w = await world({ proxied: true });
 		await joined(w, "robin", FIRST);
 		await quietly(async () => {
 			const replies: Record<string, string[]> = { robin: [], nobody: [] };
@@ -1994,7 +1994,7 @@ describe("the limit on failed attempts", () => {
 
 	test("five wrong passwords from one address block the address for every name and for a token, and a success clears the name and never the address", async () => {
 		const clock = clockAt();
-		const w = world({ clock, proxied: true });
+		const w = await world({ clock, proxied: true });
 		await joined(w, "robin", FIRST);
 		await quietly(async () => {
 			// Five names, one guess each: no name is near its limit, the address is at its own.
@@ -2017,7 +2017,7 @@ describe("the limit on failed attempts", () => {
 
 	test("the current password of a password change is counted under the address and the name, as a sign-in is", async () => {
 		const clock = clockAt();
-		const w = world({ clock, proxied: true });
+		const w = await world({ clock, proxied: true });
 		const cookie = await joined(w, "robin", FIRST);
 		const change = (current: string, n: number) =>
 			w.post("/api/account/password", { current, next: SECOND }, { cookie, ...address(n) });
@@ -2040,7 +2040,7 @@ describe("the limit on failed attempts", () => {
 	});
 
 	test("a wrong invitation code is counted under the address, at acceptance and where the page looks at it; a right one passes a blocked address", async () => {
-		const w = world({ proxied: true });
+		const w = await world({ proxied: true });
 		const { code } = await invite(w, { name: "robin" });
 		const wrong = (n: number): string => `${String(n).padStart(2, "0")}${"x".repeat(41)}`;
 		await quietly(async () => {
@@ -2071,7 +2071,7 @@ describe("the limit on failed attempts", () => {
 	});
 
 	test("a request from the loopback address, which behind a proxy is everybody's, is counted by the name and not by the address", async () => {
-		const w = world();
+		const w = await world();
 		await joined(w, "robin", FIRST);
 		await quietly(async () => {
 			for (let n = 1; n <= 12; n++)
@@ -2084,7 +2084,7 @@ describe("the limit on failed attempts", () => {
 
 	test("a session opened with a password says where it was opened and last used from, and one whose token has reached its end is not listed", async () => {
 		const clock = clockAt();
-		const w = world({ clock, proxied: true });
+		const w = await world({ clock, proxied: true });
 		const { code } = await invite(w, { name: "robin", can: ["read"], project: "scratch" });
 		const accepted = await w.post("/api/login", { invitation: code, password: FIRST }, address(1));
 		const byPassword = await signIn(w, "robin", FIRST, address(2));
@@ -2122,7 +2122,7 @@ describe("the limit on failed attempts", () => {
 
 describe("what the pages of the web UI asked of the server", () => {
 	test("the session says whether the caller owns the instance, which decides who may make a recovery link for somebody else", async () => {
-		const w = world();
+		const w = await world();
 		const robin = await joined(w, "robin", FIRST, { can: ["read", "admin"] });
 		const agent = await tokenFor(w, { actor: "helper", kind: "agent", can: ["read", "admin"] });
 		const owner = (await w.post("/api/login", { token: TOKEN })).cookie;
@@ -2141,7 +2141,7 @@ describe("what the pages of the web UI asked of the server", () => {
 	});
 
 	test("the list of invitations says what each person may do and where, as the list of actors does", async () => {
-		const w = world();
+		const w = await world();
 		await w.ok("admin", { do: "project.create", key: "checkout" });
 		await invite(w, { name: "robin", can: ["read", "produce"], project: "checkout" });
 		await invite(w, { name: "sam" });
@@ -2174,7 +2174,7 @@ describe("what the pages of the web UI asked of the server", () => {
 
 	test("a password an invitation was accepted with says when it was last used: the moment it signed its person in", async () => {
 		const clock = clockAt();
-		const w = world({ clock });
+		const w = await world({ clock });
 		const { code } = await invite(w, { name: "robin" });
 		clock.advance(HOUR);
 		const accepted = await w.post("/api/login", { invitation: code, password: FIRST });
@@ -2184,7 +2184,7 @@ describe("what the pages of the web UI asked of the server", () => {
 	});
 
 	test("an operation of the instance is called at /api/<operation> and nowhere else: under a project's path it is refused", async () => {
-		const w = world();
+		const w = await world();
 		const cookie = await joined(w, "robin", FIRST);
 		const { OP_LIST } = await import("../src/server/ops/index.ts");
 		const instance = OP_LIST.filter((op) => op.scope === "instance").map((op) => op.name);
@@ -2212,7 +2212,7 @@ describe("what the pages of the web UI asked of the server", () => {
 
 describe("a sign-in body the server cannot read", () => {
 	test("one that is too large, or is not JSON, is answered as any body that is no way of signing in: not with a sentence about tokens", async () => {
-		const w = world();
+		const w = await world();
 		await joined(w, "robin", FIRST);
 		const logged = spyOn(console, "warn").mockImplementation(() => {});
 		try {
@@ -2241,7 +2241,7 @@ describe("a sign-in body the server cannot read", () => {
 
 describe("a person's own command-line token", () => {
 	test("the local owner creates an expiring token without a browser sign-in", async () => {
-		const w = world({ mode: "local" });
+		const w = await world({ mode: "local" });
 		const made = PersonalTokenCreated.parse(await w.ok("credential", { do: "token.create", label: "Local CLI" }, {}));
 		expect(made).toMatchObject({ actor: OWNER, expiresAt: T0 + 30 * DAY });
 		expect(await w.status(bearer(made.token))).toBe(200);
@@ -2250,7 +2250,7 @@ describe("a person's own command-line token", () => {
 	});
 
 	test("a non-admin creates once, uses current grants, lists only their tokens and revokes them", async () => {
-		const w = world();
+		const w = await world();
 		const cookie = await joined(w, "personal", FIRST, { can: ["read", "produce"], project: "scratch" });
 		const headers = { cookie, origin: w.instance.url };
 		const input = { do: "token.create", label: "Laptop CLI", cmd: "personal-token-once" };
@@ -2309,7 +2309,7 @@ describe("a person's own command-line token", () => {
 	});
 
 	test("a personal token follows team grants and membership without changing personal grants", async () => {
-		const w = world();
+		const w = await world();
 		const cookie = await joined(w, "team-cli", FIRST, { can: ["read"], project: "scratch" });
 		const made = PersonalTokenCreated.parse(
 			await w.ok("credential", { do: "token.create", label: "Team CLI" }, { cookie, origin: w.instance.url }),
@@ -2338,7 +2338,7 @@ describe("a person's own command-line token", () => {
 	});
 
 	test("expiry is bounded, caller identity cannot be supplied, and token sign-ins cannot renew themselves", async () => {
-		const w = world();
+		const w = await world();
 		const cookie = await joined(w, "expiry-person", FIRST);
 		const headers = { cookie, origin: w.instance.url };
 		for (const expires of ["0d", "never", "366d", "9999w"])
@@ -2376,7 +2376,7 @@ describe("a person's own command-line token", () => {
 	});
 
 	test("a passkey session can create, and the owner's last token stays", async () => {
-		const w = world();
+		const w = await world();
 		const invitation = await invite(w, { name: "passkey-cli", can: ["read"], project: "scratch" });
 		const options = await w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", {
 			invitation: invitation.code,
