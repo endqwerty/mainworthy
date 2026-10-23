@@ -105,7 +105,9 @@ Alt (Option on a Mac) works with the letter or bracket key shown below.
 | <kbd>a</kbd> | Accept proposal |
 | <kbd>r</kbd> | Reject proposal |
 
-Filtering the list keeps your selection. Tag actions include selected cases hidden by the filter.
+Filtering the list keeps your selection. Move and tag actions include selected cases hidden by the filter.
+Undo returns each moved case to its original folder, including hidden selections. If a hidden case cannot
+be read, the action changes nothing. Try again when the case is available.
 
 ### While you write a case
 

@@ -1897,27 +1897,22 @@ export function SuiteScreen() {
 			virtual.scrollToIndex(at, { align: "auto" });
 		}
 	}
-	function tagSelection(action: (refs: string[], rows: Pick<CaseRow, "ref" | "tags">[]) => void): void {
-		const refs = selection();
+	function withSelection(
+		action: (refs: string[], rows: Pick<CaseRow | CaseView, "ref" | "tags" | "folder">[]) => void,
+		refs = selection(),
+	): void {
 		if (!refs.length) return;
 		const missing = new Set(refs);
 		const rows = cases.filter((row) => missing.delete(row.ref));
 		const unread = [...missing];
 		const current = () => sessionCurrent(owner) && navigationToken() === navigation;
-		const finish = (found: CaseView[]) => {
-			if (current()) action(refs, [...rows, ...found.map((row) => placed(row, placements, folders))]);
-		};
-		if (!unread.length) {
-			finish([]);
-			return;
-		}
 		void (async () => {
 			const found: CaseView[] = [];
 			for (let at = 0; at < unread.length; at += 200)
 				found.push(
 					...z.array(CaseView).parse(await call("get", { refs: unread.slice(at, at + 200) }, { project, owner })),
 				);
-			finish(found);
+			if (current()) action(refs, [...rows, ...found.map((row) => placed(row, placements, folders))]);
 		})().catch((error: unknown) => {
 			if (current()) setStatus(error instanceof Error ? error.message : "Could not read selected cases");
 		});
@@ -2039,11 +2034,14 @@ export function SuiteScreen() {
 		});
 	}
 	function moveTo(folder: string, refs = selection()): void {
-		if (!refs.length) return;
-		const inverse: Edit[] = cases
-			.filter((row) => refs.includes(row.ref))
-			.map((row) => ({ op: "place", cases: [row.ref], folder: row.folder }));
-		void placement([{ op: "place", cases: refs, folder: folder || unsorted }], inverse);
+		withSelection((refs, rows) => {
+			const preview: Edit[] = rows.map((row) => ({
+				op: "place",
+				cases: [row.ref],
+				folder: typeof row.folder === "number" ? row.folder : row.folder.id,
+			}));
+			void placement([{ op: "place", cases: refs, folder: folder || unsorted }], preview);
+		}, refs);
 	}
 	function archive(): void {
 		const refs = selection();
@@ -2067,7 +2065,7 @@ export function SuiteScreen() {
 			setTagging(false);
 			return;
 		}
-		tagSelection((refs, rows) => {
+		withSelection((refs, rows) => {
 			setTagging(false);
 			retag(refs, rows, value, true);
 		});
@@ -2085,7 +2083,7 @@ export function SuiteScreen() {
 		);
 	}
 	function removeTag(): void {
-		tagSelection((refs, rows) =>
+		withSelection((refs, rows) =>
 			openPalette({
 				title: "Remove tag from selected cases",
 				items: [...new Set(rows.flatMap((row) => row.tags))].sort().map((tag) => ({
