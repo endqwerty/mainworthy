@@ -2,10 +2,10 @@
 
 - Date: 2026-10-23
 - PR: https://github.com/endqwerty/mainworthy/pull/839
-- Status: proposed
+- Status: accepted
 - Issue: https://github.com/endqwerty/mainworthy/issues/821
 
-Step 1 of [issue #821](https://github.com/endqwerty/mainworthy/issues/821), for the owner's acceptance in its pull request. Numbered 0155 when it was proposed; renamed to a dated record when [#832](https://github.com/endqwerty/mainworthy/pull/832) made new decisions dated, because 0155 went to the placement-undo record.
+Step 1 of [issue #821](https://github.com/endqwerty/mainworthy/issues/821). Accepted by the owner on 2026-10-23. Acceptance permits the PostgreSQL flip; it does not certify its implementation, and until that lands the code runs on SQLite as the records below describe. Numbered 0155 when it was proposed; renamed to a dated record when [#832](https://github.com/endqwerty/mainworthy/pull/832) made new decisions dated, because 0155 went to the placement-undo record.
 
 Replaces [0010](0010-stack.md)'s store choice and PostgreSQL trigger. Amends
 [0002](0002-layered-self-hosting.md)'s layers and
