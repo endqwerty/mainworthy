@@ -75,6 +75,86 @@ async function slots(server: Server, run: string) {
 }
 
 check(
+	"a mistaken dispute releases confirmed local evidence and lets its author report again (872)",
+	async () => {
+		const { server, run, path } = await fixture(1, 2);
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			const second = z.object({ token: z.string() }).parse(
+				await server.api("admin", {
+					do: "token.create",
+					actor: "second-person",
+					kind: "human",
+					can: ["read", "produce"],
+					project: "scratch",
+				}),
+			);
+			const lead = z.object({ token: z.string() }).parse(
+				await server.api("admin", {
+					do: "token.create",
+					actor: "lead",
+					kind: "human",
+					can: ["read", "produce", "answer"],
+					project: "scratch",
+				}),
+			);
+			await server.api("report", { run, results: [{ test: { case: "C-1" }, outcome: "pass" }] }, second);
+			view = await openPage(server, { path });
+			const { page } = view;
+			await ready(page);
+			await fail(page, "Mistaken observation");
+			await page.locator("#stat").filter({ hasText: "C-1 fail recorded" }).waitFor();
+			await page.getByRole("button", { name: "Slot 1: C-1, disputed by robin", exact: true }).waitFor();
+			const receiptQuestion = await page.locator('[data-slot="1"] .run-question').first().innerText();
+			const dispute = (await server.api("inbox", { kind: "failure" })).items.find((item) =>
+				item.title.startsWith(`Disputed C-1 in ${run}:`),
+			);
+			if (!dispute) throw new Error("Slot dispute missing");
+			expect(
+				await server.api(
+					"decide",
+					{
+						q: dispute.q,
+						onEvidence: dispute.evidenceHash,
+						answer: { is: "mistaken" },
+						reason: "The failure was an observation error",
+					},
+					lead,
+				),
+			).toMatchObject([{ status: "decided" }]);
+			expect((await slots(server, run))[0]).toMatchObject({
+				state: "missing",
+				fills: [{ by: "second-person", outcome: "pass" }],
+			});
+			const gate = await server.api("gate", { run });
+			await page.locator(".run-verdict").filter({ hasText: gate.reason }).waitFor();
+			try {
+				await page.getByRole("button", { name: "Slot 1: C-1, missing by second-person", exact: true }).waitFor();
+			} finally {
+				await screenshot(page, 8741);
+			}
+			await page.locator('[data-slot="1"]').getByRole("link", { name: receiptQuestion, exact: true }).waitFor();
+			await page.getByText("Nothing left for you to run. The server verdict is shown above.", { exact: true }).waitFor({
+				state: "hidden",
+			});
+			await page.keyboard.press("p");
+			await page.locator("#stat").filter({ hasText: "C-1 pass recorded" }).waitFor();
+			expect((await slots(server, run))[0]).toMatchObject({
+				state: "satisfied",
+				fills: [
+					{ by: "second-person", outcome: "pass" },
+					{ by: "robin", outcome: "pass" },
+				],
+			});
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+check(
 	"undo reopens an automatically closed run before correcting its last result (793)",
 	async () => {
 		const { server, run, path } = await fixture(1, 1, "loose");

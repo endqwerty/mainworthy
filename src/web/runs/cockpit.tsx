@@ -56,7 +56,11 @@ const outcomes = [
 ] as const;
 const changedResult = "This result has changed since it was recorded. No correction was recorded.";
 
-type LocalFill = { fill: Fill; questions: ReportReceipt["questions"]; pending: boolean };
+type LocalFill = {
+	fill: Fill;
+	questions: ReportReceipt["questions"];
+	state: "pending" | "confirmed" | "released";
+};
 type PendingAttachment = AttachmentInput & { key: string };
 type RecordedResult = { fill: Fill; previous: Fill | null };
 type LastResult = { slot: Slot; outcome: RunOutcome; ready: Promise<RecordedResult> };
@@ -267,18 +271,21 @@ function ProjectRunCockpit({
 	const method = session.kind === "agent" ? "agent" : "human";
 	const isOwnFill = (fill: Fill) => fill.by === session.actor && fill.method === method;
 	const ownFillOf = (slot: Slot) => slot.fills.find(isOwnFill);
+	function filledSlot(slot: Slot, fill: Fill): Pick<Slot, "id" | "state" | "fills"> {
+		return {
+			id: slot.id,
+			state: fill.outcome === "pass" ? "satisfied" : fill.outcome === "fail" ? "failing" : "skipped",
+			fills: [...slot.fills.filter((fill) => !isOwnFill(fill)), fill],
+		};
+	}
 	const slots: Slot[] = storedSlots.map((slot) => {
 		const own = local.get(slot.id);
-		return own && (own.pending || own.fill.result > (ownFillOf(slot)?.result ?? 0))
-			? {
-					...slot,
-					state: own.fill.outcome === "pass" ? "satisfied" : own.fill.outcome === "fail" ? "failing" : "skipped",
-					fills: [...slot.fills.filter((fill) => !isOwnFill(fill)), own.fill],
-				}
-			: slot;
+		if (own?.state === "confirmed" && own.fill.result <= (ownFillOf(slot)?.result ?? 0))
+			setLocal((value) => new Map(value).set(slot.id, { ...own, state: "released" }));
+		return own && own.state !== "released" ? { ...slot, ...filledSlot(slot, own.fill) } : slot;
 	});
 	const missing = (slot: Slot) =>
-		(slot.state === "missing" || slot.state === "skipped") && !local.get(slot.id)?.pending;
+		(slot.state === "missing" || slot.state === "skipped") && local.get(slot.id)?.state !== "pending";
 	const unreported = (slot: Slot) => missing(slot) && !ownFillOf(slot);
 	const held = (slot: Slot) => slot.work.kind === "held" && workHeldByOther(slot.work, session.actor, now);
 	const available = (slot: Slot) => unreported(slot) && !held(slot);
@@ -428,13 +435,9 @@ function ProjectRunCockpit({
 			atStep: null,
 			steps: null,
 		};
-		setLocal((value) => new Map(value).set(slot.id, { fill, pending: true, questions: [] }));
+		setLocal((value) => new Map(value).set(slot.id, { fill, state: "pending", questions: [] }));
 		void queryClient.cancelQueries({ queryKey: cacheKey });
-		replaceSlot({
-			id: slot.id,
-			state: outcome === "pass" ? "satisfied" : outcome === "fail" ? "failing" : "skipped",
-			fills: [...slot.fills.filter((fill) => !isOwnFill(fill)), fill],
-		});
+		replaceSlot(filledSlot(slot, fill));
 		const pinnedInput = { refs: [slot.case], version: slot.version };
 		const marked = steps[slot.id] ?? "";
 		// Undo records what was recorded before. A step marked since then is for the next failure: it is not
@@ -461,7 +464,7 @@ function ProjectRunCockpit({
 				text = earlier?.note ?? "Withdrawn by the author";
 			}
 			assertReportOwner();
-			const known = reports.confirmed.get(slot.id)?.fills.find((f) => f.by === session.actor && f.method === method);
+			const known = reports.confirmed.get(slot.id)?.fills.find(isOwnFill);
 			const recent = reports.latest.get(slot.id);
 			const previous = known && (!recent || known.result > recent.result) ? known : (recent ?? null);
 			if (restoration && previous?.result !== restoration.fill.result) throw new Error(changedResult);
@@ -577,7 +580,7 @@ function ProjectRunCockpit({
 				if (!restores) clearStep(slot.id, marked);
 				if (reports.queued.get(slot.id) === fill.result)
 					setLocal((value) =>
-						new Map(value).set(slot.id, { fill: saved, questions: receipt.questions, pending: false }),
+						new Map(value).set(slot.id, { fill: saved, questions: receipt.questions, state: "confirmed" }),
 					);
 				setStatus(
 					`${reopened ? "Run reopened. " : ""}${slot.case} ${outcome} recorded on pinned version ${slot.version}${receipt.questions[0] ? ` · ${receipt.questions[0].q}: ${receipt.questions[0].how}` : ""}.`,

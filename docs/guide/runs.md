@@ -129,6 +129,8 @@ If every slot is held by someone else, choose one explicitly or wait for a lease
 Automatic advancement stops when none remain. Completed and closed runs still open a case to read.
 After a result is confirmed, a delayed refresh cannot make automatic navigation revisit that slot.
 You can still select it yourself to read or correct the result.
+If a lead judges a disputed failure mistaken, that result no longer fills the slot.
+The slot returns to your work when another result from you is needed.
 To record a failure, follow these steps.
 
 1. Press <kbd>f</kbd> to focus "Result note".
