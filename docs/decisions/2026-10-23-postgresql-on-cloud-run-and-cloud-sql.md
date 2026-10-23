@@ -180,7 +180,7 @@ So background work becomes jobs behind one job interface (0002 rule 6):
 - The job interface has two ways to start work. The in-process runner polls the table and runs jobs; local
   development, CI and the tests use it, as would any host whose CPU runs between requests. On Cloud Run, a job
   runs inside an HTTP request to the service's job endpoint, so its CPU is allocated: Cloud Tasks sends one request
-  per job, and Cloud Scheduler sends the periodic work once a minute. A job must finish within both the queue's
+  per job, and Cloud Scheduler sends the periodic work once a minute. A job must finish within both its task's
   dispatch deadline (ten minutes by default, thirty at most) and the service's request timeout (five minutes by
   default), as step 3 sets them; the transaction timeouts above are far shorter. A job whose request was given up
   may still be running, and its claim token keeps its late final write from landing. A test finishes a job after
@@ -330,7 +330,8 @@ record's own proposals, and acceptance covers them:
 - **Report application stays in its request**; only recovery becomes a job.
 - **A temporary single PostgreSQL write lock** in step 2's bottom request, below.
 - **Production refuses a request without the Cloudflare proof**, apart from the startup probe and the job
-  endpoint, rather than serving it with no client address.
+  endpoint, rather than serving it with no client address. CI's smoke check of a deployed revision sends the
+  proof from a GitHub secret.
 
 ## Order
 
@@ -346,7 +347,11 @@ The steps are #821's. Each ends in a check that passes before the next starts.
      the concurrency the same, every write operation holds one exclusive session-level advisory lock on its own
      connection for the whole operation, as the write gate in `registry.ts` does today, a report's two
      transactions included, and reads authority after taking it. A transaction-scoped lock would not do: it is
-     released at the acceptance commit and would let another writer in between a report's two phases. A committed
+     released at the acceptance commit and would let another writer in between a report's two phases. A session
+     lock outlives a rollback and the connection's return to the pool, so the operation rolls back and unlocks in
+     `finally` before it returns the connection, closes the connection instead when the unlock cannot be
+     confirmed, and fails if the connection is lost while it holds the lock (PostgreSQL then releases it). Tests
+     cover a failure in each phase and a connection lost between a report's phases. A committed
      codemod adds the `async` and `await` (a reviewer runs it again and compares), the SQL changes are separate
      commits by module, and a test prepares every declared statement against the baseline. The SQLite-only
      machinery goes in the same request, because nothing can call it afterwards: the upgrade copy, the reader and
