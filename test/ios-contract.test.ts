@@ -987,7 +987,7 @@ describe("what the iPhone conflict resolver reads", () => {
 	});
 
 	test("a full conflict, its merge effects and its recorded command reply", async () => {
-		const { ConflictProposal, ConflictBaseFields, MergeReply, MergeCommand, SuiteProposalQuestion } = await import(
+		const { ConflictProposal, MergeReply, MergeCommand, SuiteProposalQuestion } = await import(
 			"../scripts/ios/contract.ts"
 		);
 		const key = z.object({ project: z.string() }).parse(await result("POST", "/test/project", {})).project;
@@ -1007,7 +1007,6 @@ describe("what the iPhone conflict resolver reads", () => {
 		expect(proposal).toMatchObject({
 			edits: [{ refused: `${ref} has an unresolved conflict; its author must resolve it` }],
 		});
-		holds("base custom fields", ConflictBaseFields, await op(key, "history", { ref, from: 1, to: 1 }));
 		expect(proposal).toMatchObject({ edits: [{ base: 1, mine: { title: "Mine" }, current: { title: "Current" } }] });
 		const [q] = z
 			.array(z.object({ evidenceHash: z.string() }))

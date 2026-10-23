@@ -411,24 +411,6 @@ enum Wire {
 		let edits: [ConflictEdit]
 	}
 
-	/// The fields before this comparison.
-	struct ConflictCustomFields: Decodable, Equatable, Sendable {
-		let before: [String: String]
-	}
-
-	/// The complete custom fields, including when unchanged.
-	struct ConflictBaseDiff: Decodable, Equatable, Sendable {
-		let fields: ConflictCustomFields
-	}
-
-	/// Custom fields at the exact base version, from history.
-	struct ConflictBaseFields: Decodable, Equatable, Sendable {
-		let ref: String
-		let from: Int
-		let to: Int
-		let diff: ConflictBaseDiff
-	}
-
 	/// An adopted version.
 	struct MergeStamp: Decodable, Equatable, Sendable {
 		let ref: String
