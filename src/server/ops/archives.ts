@@ -1,9 +1,13 @@
-import { Worker } from "node:worker_threads";
+import { closeSync, openSync } from "node:fs";
 import { z } from "zod";
 import { ERROR_CODES } from "../../core/api.ts";
 import { ActorKind, Capability, Role } from "../../core/kinds.ts";
+import { bootstrap } from "../identity/identity.ts";
 import type { App } from "../kernel/app.ts";
-import { OpError } from "../kernel/errors.ts";
+import type { WriteDb } from "../kernel/db.ts";
+import { fileLines, writeBytes } from "../transfer/spool.ts";
+import { exportArchive, importArchive, removeBootstrap } from "../transfer/transfer.ts";
+import { recoverAccepted } from "./jobs.ts";
 
 export const ArchiveTask = z.discriminatedUnion("op", [
 	z.object({ op: z.literal("export"), path: z.string(), now: z.number(), project: z.string().min(1).optional() }),
@@ -48,26 +52,44 @@ export const ArchiveReply = z.discriminatedUnion("ok", [
 	z.object({ ok: z.literal(false), error: z.object({ code: z.enum(ERROR_CODES), message: z.string() }) }),
 ]);
 
-/** Runs a transfer on its own connection. A failed worker never replays archive work on the HTTP thread. */
-export async function runArchive(app: App, task: z.infer<typeof ArchiveTask>) {
-	const worker = new Worker(
-		new URL(Bun.isStandaloneExecutable ? "./server/ops/read-worker.js" : "./read-worker.ts", import.meta.url),
-		{ workerData: { dataDir: app.config.dataDir, role: "archive", task }, name: "mainworthy-archive" },
-	);
-	try {
-		return await new Promise<Extract<z.infer<typeof ArchiveReply>, { ok: true }>>((resolve, reject) => {
-			worker.once("message", (message: unknown) => {
-				const parsed = ArchiveReply.safeParse(message);
-				if (!parsed.success) return reject(new Error("invalid archive worker reply"));
-				const reply = parsed.data;
-				if (!reply.ok) return reject(new OpError(reply.error.code, reply.error.message));
-				resolve(reply);
-			});
-			worker.once("error", reject);
-			worker.once("messageerror", reject);
-			worker.once("exit", (code) => reject(new Error(`archive worker exited with code ${code}`)));
-		});
-	} finally {
-		await worker.terminate();
+/** Transfers use explicit scopes; import admission is rechecked on the locked lease. */
+export async function runArchive(
+	app: App,
+	task: z.infer<typeof ArchiveTask>,
+	authorize?: (db: WriteDb) => Promise<void>,
+): Promise<Extract<z.infer<typeof ArchiveReply>, { ok: true }>> {
+	if (task.op === "export") {
+		const fd = openSync(task.path, "w", 0o600);
+		try {
+			const encoder = new TextEncoder();
+			const counts = await app.database.read(async (db) =>
+				exportArchive(db, (chunk) => writeBytes(fd, encoder.encode(chunk)), {
+					now: task.now,
+					...(task.project === undefined ? {} : { project: task.project }),
+					blobs: app.blobs,
+				}),
+			);
+			return { ok: true, counts, owner: null, events: [] };
+		} finally {
+			closeSync(fd);
+		}
 	}
+	const restored = await app.database.write(async (db) =>
+		db.transaction(async () => {
+			await authorize?.(db);
+			await removeBootstrap(db);
+			const counts = await importArchive(db, fileLines(task.path), { blobs: app.blobs });
+			const owner = task.mode === "local" ? (await bootstrap(app, db)).owner : null;
+			return { counts, owner };
+		}),
+	);
+	await recoverAccepted(app);
+	return {
+		ok: true,
+		counts: restored.counts,
+		owner: restored.owner
+			? { ...restored.owner, can: [...restored.owner.can], roles: [...(restored.owner.roles ?? [])] }
+			: null,
+		events: [],
+	};
 }

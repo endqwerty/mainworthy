@@ -51,8 +51,8 @@ export type Ctx<D extends ReadDb = WriteDb> = {
 	 * stopped with an error instead of holding the server's one writer for ever.
 	 */
 	raised: Map<string, number>;
-	/** The next number for a kind of ref. */
-	nextNo: (name: CounterName) => Promise<number>;
+	/** Reserves count refs (one by default) and returns the last number in that range. */
+	nextNo: (name: CounterName, count?: number) => Promise<number>;
 	/** A counter that grows within the command, to order rows that share a seq. */
 	ord: () => number;
 };
@@ -60,9 +60,9 @@ export type Ctx<D extends ReadDb = WriteDb> = {
 const Q = {
 	project: sql<{ key: string }, ProjectRow>("SELECT * FROM projects WHERE key = $key"),
 	projectById: sql<{ id: number }, ProjectRow>("SELECT * FROM projects WHERE id = $id"),
-	bumpCounter: sql<{ project: number; name: string }, { value: number }>(
-		`INSERT INTO counters (project, name, value) VALUES ($project, $name, 1)
-		 ON CONFLICT (project, name) DO UPDATE SET value = counters.value + 1 RETURNING value`,
+	bumpCounter: sql<{ project: number; name: string; count: number }, { value: number }>(
+		`INSERT INTO counters (project, name, value) VALUES ($project, $name, $count)
+		 ON CONFLICT (project, name) DO UPDATE SET value = counters.value + excluded.value RETURNING value`,
 	),
 	setSeq: sql<{ id: number; seq: number }>("UPDATE projects SET seq = $seq WHERE id = $id"),
 	projects: sql<readonly [], ProjectRow>(`SELECT p.* FROM projects p WHERE NOT EXISTS
@@ -322,9 +322,11 @@ export function makeCtx<D extends ReadDb>(
 		dissolveStale: false,
 		changedBases: new Set(),
 		raised: new Map(),
-		async nextNo(name) {
+		async nextNo(name, count = 1) {
+			if (!Number.isSafeInteger(count) || count < 1)
+				throw new Error("a ref reservation needs a positive safe integer count");
 			if (!("run" in db)) throw new Error("a read cannot allocate a ref");
-			const row = await db.one(Q.bumpCounter, { project: project.id, name });
+			const row = await db.one(Q.bumpCounter, { project: project.id, name, count });
 			if (!row) throw new Error(`counter ${name} did not advance`);
 			return row.value;
 		},

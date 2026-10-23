@@ -5,7 +5,7 @@ import { mustQuestion, questionRef } from "../decisions/questions.ts";
 import { batchById, resultById } from "../evidence/evidence.ts";
 import type { App, Config } from "../kernel/app.ts";
 import { type Ctx, projectById } from "../kernel/ctx.ts";
-import { json, sql } from "../kernel/db.ts";
+import { json, type ReadDb, sql } from "../kernel/db.ts";
 import { invalid } from "../kernel/errors.ts";
 
 /**
@@ -28,7 +28,7 @@ const Q = {
 	insert: sql<HandoffRow>(`INSERT INTO handoffs (id, nonce, project, question, body, state, error, at)
 		VALUES ($id, $nonce, $project, $question, $body, $state, $error, $at)`),
 	latest: sql<{ question: number }, HandoffRow>(
-		"SELECT * FROM handoffs WHERE question = $question ORDER BY at DESC, rowid DESC LIMIT 1",
+		"SELECT * FROM handoffs WHERE question = $question ORDER BY at DESC, queue_order DESC LIMIT 1",
 	),
 	next: sql<readonly [], HandoffRow>("SELECT * FROM handoffs WHERE state = 'queued' ORDER BY at, id LIMIT 1"),
 	claim: sql<{ id: string; nonce: string }>(
@@ -74,7 +74,7 @@ const receipt = (row: HandoffRow): HandoffReceipt => ({
 	at: row.at,
 });
 
-export async function handoffStatus(ctx: Ctx, text: string): Promise<HandoffReceipt | null> {
+export async function handoffStatus(ctx: Ctx<ReadDb>, text: string): Promise<HandoffReceipt | null> {
 	const question = await mustQuestion(ctx.db, ctx.project.id, text);
 	const row = await ctx.db.get(Q.latest, { question: question.id });
 	return row ? receipt(row) : null;
@@ -89,7 +89,7 @@ export async function queueHandoff(ctx: Ctx, input: HandoffInput): Promise<Hando
 	if (!evidence.success) throw invalid("This failure question has no failure to hand to an agent.");
 	const facts = evidence.data;
 	const sample = facts.sample ? await resultById(ctx.db, facts.sample) : null;
-	const build = sample ? (batchById(ctx.db, sample.batch)?.build_url ?? null) : null;
+	const build = sample ? ((await batchById(ctx.db, sample.batch))?.build_url ?? null) : null;
 	const ref = questionRef(question);
 	const publicUrl = ctx.app.config.publicUrl?.replace(/\/$/, "");
 	const url = publicUrl ? `${publicUrl}/p/${encodeURIComponent(ctx.project.key)}/queue/${question.no}` : null;
@@ -141,7 +141,7 @@ const stopping = new WeakSet<App>();
 /** Sends what is queued, one at a time. A second call while one runs joins it. */
 export function deliverHandoffs(app: App): Promise<number> {
 	const running = active.get(app);
-	if (running) return running;
+	if (running !== undefined) return running;
 	if (stopping.has(app)) return Promise.resolve(0);
 	const work = deliver(app).finally(() => active.delete(app));
 	active.set(app, work);
@@ -161,26 +161,34 @@ export async function waitHandoffs(app: App): Promise<void> {
  * would start a second agent on the same failure.
  */
 export async function recoverHandoffs(app: App): Promise<void> {
-	await app.db.run(Q.interrupted, {
-		error:
-			"The server stopped while sending this. It may have arrived: look for the agent's thread before sending again.",
-	});
+	await app.database.write(async (db) =>
+		db.transaction(async () =>
+			db.run(Q.interrupted, {
+				error:
+					"The server stopped while sending this. It may have arrived: look for the agent's thread before sending again.",
+			}),
+		),
+	);
 }
 
 async function deliver(app: App): Promise<number> {
 	let delivered = 0;
 	for (let n = 0; n < 20; n++) {
-		const claimed = await app.gate.run(async () => {
-			if (stopping.has(app)) return null;
-			const next = await app.db.get(Q.next);
-			if (next) await app.db.run(Q.claim, { id: next.id, nonce: next.nonce });
-			return next ? { row: next, project: (await projectById(app.db, next.project))?.key } : null;
-		});
+		const claimed = await app.database.write(async (db) =>
+			db.transaction(async () => {
+				if (stopping.has(app)) return null;
+				const next = await db.get(Q.next);
+				if (next) await db.run(Q.claim, { id: next.id, nonce: next.nonce });
+				return next ? { row: next, project: (await projectById(db, next.project))?.key } : null;
+			}),
+		);
 		if (!claimed) break;
 		const { row, project } = claimed;
 		const error = await send(app.config, project, row);
-		await app.gate.run(
-			async () => await app.db.run(Q.finish, { id: row.id, nonce: row.nonce, state: error ? "failed" : "sent", error }),
+		await app.database.write(async (db) =>
+			db.transaction(
+				async () => await db.run(Q.finish, { id: row.id, nonce: row.nonce, state: error ? "failed" : "sent", error }),
+			),
 		);
 		delivered++;
 	}

@@ -5,16 +5,36 @@ import { join } from "node:path";
 import { type Instance, start } from "../src/app/start.ts";
 import type { InboxReply } from "../src/core/ops.ts";
 import type { TrackerItem, TrackerReceipt } from "../src/core/tracker.ts";
-import { defaultConfig } from "../src/server/kernel/app.ts";
-import { Db } from "../src/server/kernel/db.ts";
-import { migrate } from "../src/server/kernel/migrate.ts";
+import { type App, defaultConfig } from "../src/server/kernel/app.ts";
+import { Database, type SqlValue, sql } from "../src/server/kernel/db.ts";
 import { pollDefectHolds, stopTrackerPolls, waitTrackerPolls } from "../src/server/ops/tracker-holds.ts";
 import { githubPort } from "../src/server/trackers/github.ts";
 import { jiraPort } from "../src/server/trackers/jira.ts";
 import type { DefectDraft, TrackerPort } from "../src/server/trackers/port.ts";
 import { deliverTrackerRequests } from "../src/server/trackers/requests.ts";
 import { exportArchive, importArchive } from "../src/server/transfer/transfer.ts";
+import { testDatabase } from "./db.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
+
+function rejectTrackerCompletion(app: App, message: string) {
+	const write = app.database.write.bind(app.database);
+	return spyOn(app.database, "write").mockImplementation(
+		async (fn, options) =>
+			await write(async (db) => {
+				const run = db.run.bind(db);
+				const writes = spyOn(db, "run").mockImplementation(async (statement, ...params) => {
+					if (statement.text.includes("UPDATE tracker_requests") && statement.text.includes("issue ="))
+						throw new Error(message);
+					return await run(statement, ...params);
+				});
+				try {
+					return await fn(db);
+				} finally {
+					writes.mockRestore();
+				}
+			}, options),
+	);
+}
 
 const credential = "test-tracker-credential";
 const github = { project: "scratch", repository: "example/shop", token: credential };
@@ -46,7 +66,7 @@ for (const tracker of ["github", "jira"] as const) {
 		let closed = false;
 		instance = await start(
 			{
-				...defaultConfig({}),
+				...defaultConfig({ MAINWORTHY_DATABASE_URL: (await testDatabase()).url }),
 				owner: "robin",
 				dataDir: directory,
 				port: 0,
@@ -54,7 +74,6 @@ for (const tracker of ["github", "jira"] as const) {
 			},
 			() => ({ ui: null }),
 			{
-				readers: 0,
 				trackerPort:
 					tracker === "github"
 						? githubPort(
@@ -104,14 +123,23 @@ for (const tracker of ["github", "jira"] as const) {
 		await instance.minute();
 		expect((await post("inbox")).items.filter((q: { kind: string }) => q.kind === "failure")).toHaveLength(1);
 		expect(keys).toEqual([tracker === "github" ? "42" : "QA-42"]);
-		const ending = instance.app.db.raw
-			.query<{ answer: string; signers: string }, [number]>(
-				"SELECT answer, signers FROM decisions WHERE supersedes = ? ORDER BY id DESC LIMIT 1",
-			)
-			.get(decision);
+		const ending = await instance.app.database.read(
+			async (db) =>
+				await db.get(
+					sql<readonly SqlValue[], { answer: string; signers: string }>(
+						"SELECT answer, signers FROM decisions WHERE supersedes = $1 ORDER BY id DESC LIMIT 1",
+					),
+					[decision],
+				),
+		);
 		expect(ending && JSON.parse(ending.answer)).toEqual({ is: "outdated" });
 		expect(ending?.signers).toContain(issue.url);
-		expect(instance.app.db.raw.query("SELECT count(*) AS n FROM excuses").get()).toEqual({ n: 0 });
+		expect(
+			await instance.app.database.read(
+				async (db) =>
+					await db.get(sql<readonly SqlValue[], Record<string, unknown>>("SELECT count(*) AS n FROM excuses"), []),
+			),
+		).toEqual({ n: 0 });
 		await instance.minute();
 		expect(keys).toHaveLength(1);
 	});
@@ -124,7 +152,7 @@ afterEach(async () => {
 	instance = undefined;
 	if (directory) rmSync(directory, { recursive: true, force: true });
 	directory = undefined;
-	h?.close();
+	await h?.close();
 });
 
 async function failure() {
@@ -136,7 +164,11 @@ async function failure() {
 		buildUrl: "https://ci.example/build/42",
 		results: [{ test: { case: "C-1" }, outcome: "fail", failure: { message: "Expected 90, got 100" } }],
 	});
-	const result = h.app.db.raw.query<{ id: number }, []>("SELECT id FROM results").get()?.id;
+	const result = (
+		await h.app.database.read(
+			async (db) => await db.get(sql<readonly SqlValue[], { id: number }>("SELECT id FROM results"), []),
+		)
+	)?.id;
 	if (!result) throw new Error("expected the reported result");
 	return result;
 }
@@ -222,7 +254,15 @@ test("Jira queues through the existing registry and neither credentials nor deli
 	h.app.config.jira = configured;
 	await h.call("tracker", { do: "create", result, cmd: "jira-create-001" });
 	expect(
-		h.app.db.raw.query("SELECT repository, state FROM tracker_requests WHERE id = 'jira-create-001'").get(),
+		await h.app.database.read(
+			async (db) =>
+				await db.get(
+					sql<readonly SqlValue[], Record<string, unknown>>(
+						"SELECT repository, state FROM tracker_requests WHERE id = 'jira-create-001'",
+					),
+					[],
+				),
+		),
 	).toEqual({ repository: "jira:https://example.atlassian.net#QA", state: "queued" });
 	const drafts: DefectDraft[] = [];
 	await deliverTrackerRequests(h.app, {
@@ -252,11 +292,18 @@ test("Jira queues through the existing registry and neither credentials nor deli
 		error: { code: "invalid" },
 	});
 	const archive: string[] = [];
-	exportArchive(h.app.db, (chunk) => archive.push(chunk));
+	await h.app.database.read(async (db) => await exportArchive(db, (chunk) => archive.push(chunk)));
 	const contents = archive.join("");
 	for (const secret of [credential, jira.email, Buffer.from(`${jira.email}:${credential}`).toString("base64")]) {
 		expect(contents).not.toContain(secret);
-		expect(JSON.stringify(h.app.db.raw.query("SELECT * FROM tracker_requests").all())).not.toContain(secret);
+		expect(
+			JSON.stringify(
+				await h.app.database.read(
+					async (db) =>
+						await db.all(sql<readonly SqlValue[], Record<string, unknown>>("SELECT * FROM tracker_requests"), []),
+				),
+			),
+		).not.toContain(secret);
 	}
 	expect(contents).not.toContain('"t":"tracker_requests"');
 	expect(contents).not.toContain('"t":"tracker_polls"');
@@ -425,7 +472,12 @@ for (const scenario of ["401", "404", "network", "undefined", "moved"] as const)
 				expect(JSON.stringify(logged.mock.calls)).not.toContain(secret);
 				expect(JSON.stringify(detail)).not.toContain(secret);
 			}
-			expect(h.app.db.raw.query("SELECT count(*) AS n FROM excuses").get()).toEqual({ n: 1 });
+			expect(
+				await h.app.database.read(
+					async (db) =>
+						await db.get(sql<readonly SqlValue[], Record<string, unknown>>("SELECT count(*) AS n FROM excuses"), []),
+				),
+			).toEqual({ n: 1 });
 			h.advance(120_000);
 			expect(await pollDefectHolds(h.app, { ...port, getItem: async () => jiraItem })).toBe(0);
 			expect(
@@ -500,23 +552,27 @@ test("open issues and failed reads keep holds, back off persistently, and a late
 		tally: { attributed: 1 },
 	});
 	expect(await pollDefectHolds(h.app, adapter)).toBe(0);
-	const schedule = () =>
-		h.app.db.raw
-			.query<{ next_at: number; attempts: number; error: string }, []>(
-				"SELECT next_at, attempts, error FROM tracker_polls",
-			)
-			.get();
-	expect(schedule()?.attempts).toBe(1);
-	expect(schedule()?.error).not.toContain(credential);
+	const schedule = async () =>
+		await h.app.database.read(
+			async (db) =>
+				await db.get(
+					sql<readonly SqlValue[], { next_at: number; attempts: number; error: string }>(
+						"SELECT next_at, attempts, error FROM tracker_polls",
+					),
+					[],
+				),
+		);
+	expect((await schedule())?.attempts).toBe(1);
+	expect((await schedule())?.error).not.toContain(credential);
 	expect(await pollDefectHolds(h.app, adapter)).toBe(0);
 	expect(calls).toBe(1);
-	h.advance((schedule()?.next_at ?? 0) - h.app.now());
+	h.advance(((await schedule())?.next_at ?? 0) - h.app.now());
 	expect(await pollDefectHolds(h.app, adapter)).toBe(0);
-	expect(schedule()?.next_at).toBe(h.app.now() + 120_000);
+	expect((await schedule())?.next_at).toBe(h.app.now() + 120_000);
 	state = "open";
 	h.advance(120_000);
 	expect(await pollDefectHolds(h.app, adapter)).toBe(0);
-	expect(schedule()?.attempts).toBe(0);
+	expect((await schedule())?.attempts).toBe(0);
 	expect((await h.call<InboxReply>("inbox")).items.filter((q) => q.kind === "failure")).toHaveLength(0);
 	state = "closed";
 	h.advance(60_000);
@@ -557,6 +613,7 @@ test("tracker closure keeps an ended defect and its reason in Settled when its c
 for (const change of ["answer", "configuration", "archive"] as const) {
 	test(`a delayed closed reply cannot end a hold after the ${change} changes`, async () => {
 		const { question, decision } = await heldDefect();
+		const originalDatabase = h.app.database;
 		const entered = Promise.withResolvers<void>();
 		const reply = Promise.withResolvers<TrackerItem>();
 		const polling = pollDefectHolds(h.app, {
@@ -575,41 +632,62 @@ for (const change of ["answer", "configuration", "archive"] as const) {
 				answer: { is: "expected" },
 				reason: "Expected while changing checkout",
 			});
-		await h.app.gate.run(async () => {
-			if (change === "configuration") h.app.config.github = { ...github, repository: "example/other" };
-			if (change === "archive") {
-				const archive: string[] = [];
-				exportArchive(h.app.db, (chunk) => archive.push(chunk));
-				const restored = new Db(":memory:");
-				await migrate(restored, ":memory:");
-				await importArchive(restored, archive.join("").trimEnd().split("\n"));
-				const replaced = h.app.db;
-				h.app.db = restored;
-				h.app.reader = restored;
-				replaced.close();
-				expect(restored.raw.query("SELECT count(*) AS n FROM tracker_polls").get()).toEqual({ n: 0 });
-			}
-		});
+		if (change === "configuration") h.app.config.github = { ...github, repository: "example/other" };
+		if (change === "archive") {
+			const archive: string[] = [];
+			await h.app.database.read(async (db) => await exportArchive(db, (chunk) => archive.push(chunk)));
+			const restored = await Database.open({ url: (await testDatabase()).url });
+			await restored.write(
+				async (db) => await db.transaction(async () => await importArchive(db, archive.join("").trimEnd().split("\n"))),
+			);
+			const replaced = h.app.database;
+			h.app.database = restored;
+			await replaced.close();
+			expect(
+				await restored.read(
+					async (db) => await db.get(sql<readonly [], { n: number }>("SELECT count(*) AS n FROM tracker_polls")),
+				),
+			).toEqual({ n: 0 });
+		}
 		reply.resolve({ ...item, state: "closed" });
 		expect(await polling).toBe(0);
 		expect((await h.call<InboxReply>("inbox")).items.filter((q) => q.kind === "failure")).toHaveLength(0);
 		expect(
-			h.app.db.raw
-				.query<{ n: number }, [number]>(
-					'SELECT count(*) AS n FROM decisions WHERE supersedes = ? AND answer = \'{"is":"outdated"}\'',
-				)
-				.get(decision ?? 0),
+			await h.app.database.read(
+				async (db) =>
+					await db.get(
+						sql<readonly SqlValue[], { n: number }>(
+							'SELECT count(*) AS n FROM decisions WHERE supersedes = $1 AND answer = \'{"is":"outdated"}\'',
+						),
+						[decision ?? 0],
+					),
+			),
 		).toEqual({ n: 0 });
+		if (h.app.database !== originalDatabase) {
+			await h.app.database.close();
+			h.app.database = originalDatabase;
+		}
 	});
 }
 
 test("polling only recognizes exact configured issue references and never accepts another issue's closure", async () => {
 	await heldDefect("https://github.com/example/elsewhere/issues/42");
 	expect(await pollDefectHolds(h.app, port)).toBe(0);
-	expect(h.app.db.raw.query("SELECT count(*) AS n FROM tracker_polls").get()).toEqual({ n: 0 });
-	const q = h.app.db.raw
-		.query<{ no: number; evidence_hash: string }, []>("SELECT no, evidence_hash FROM questions WHERE kind = 'failure'")
-		.get();
+	expect(
+		await h.app.database.read(
+			async (db) =>
+				await db.get(sql<readonly SqlValue[], Record<string, unknown>>("SELECT count(*) AS n FROM tracker_polls"), []),
+		),
+	).toEqual({ n: 0 });
+	const q = await h.app.database.read(
+		async (db) =>
+			await db.get(
+				sql<readonly SqlValue[], { no: number; evidence_hash: string }>(
+					"SELECT no, evidence_hash FROM questions WHERE kind = 'failure'",
+				),
+				[],
+			),
+	);
 	await h.call("decide", { q: `Q-${q?.no}`, onEvidence: q?.evidence_hash, answer: { is: "defect", ref: item.ref } });
 	expect(
 		await pollDefectHolds(h.app, {
@@ -621,7 +699,12 @@ test("polling only recognizes exact configured issue references and never accept
 			}),
 		}),
 	).toBe(0);
-	expect(h.app.db.raw.query("SELECT count(*) AS n FROM excuses").get()).toEqual({ n: 1 });
+	expect(
+		await h.app.database.read(
+			async (db) =>
+				await db.get(sql<readonly SqlValue[], Record<string, unknown>>("SELECT count(*) AS n FROM excuses"), []),
+		),
+	).toEqual({ n: 1 });
 	h.advance(60_000);
 	expect(await pollDefectHolds(h.app, { ...port, getItem: async () => ({ ...item, state: "closed" }) })).toBe(1);
 });
@@ -658,9 +741,14 @@ test("polling back-off survives an instance restart", async () => {
 		let now = 1_800_000_000_000;
 		let calls = 0;
 		let closed = false;
-		const config = { ...defaultConfig({}), owner: "robin", dataDir: directory, port: 0, github };
+		const config = {
+			...defaultConfig({ MAINWORTHY_DATABASE_URL: (await testDatabase()).url }),
+			owner: "robin",
+			dataDir: directory,
+			port: 0,
+			github,
+		};
 		const options = {
-			readers: 0,
 			now: () => now,
 			trackerPort: {
 				...port,
@@ -882,7 +970,7 @@ test("GitHub failures and invalid replies expose no response text or credential 
 	}
 	expect(await deliverTrackerRequests(h.app, port)).toBe(0);
 	const contents: string[] = [];
-	exportArchive(h.app.db, (chunk) => contents.push(chunk));
+	await h.app.database.read(async (db) => await exportArchive(db, (chunk) => contents.push(chunk)));
 	expect(contents.join("")).not.toContain(credential);
 	expect(contents.join("")).not.toContain('"t":"tracker_requests"');
 });
@@ -890,7 +978,7 @@ test("GitHub failures and invalid replies expose no response text or credential 
 test("request validation, project permissions and result ownership are checked before queuing", async () => {
 	const result = await failure();
 	const input = { do: "create", result, cmd: "tracker-check-01" };
-	const reader = h.actor("reader", "agent", ["read"]);
+	const reader = await h.actor("reader", "agent", ["read"]);
 	expect(await h.raw("tracker", input, reader)).toMatchObject({ ok: false, error: { code: "forbidden" } });
 	expect(await h.raw("tracker", { ...input, token: credential })).toMatchObject({
 		ok: false,
@@ -901,25 +989,54 @@ test("request validation, project permissions and result ownership are checked b
 		ok: false,
 		error: { code: "invalid" },
 	});
-	h.app.db.raw.query("UPDATE results SET outcome = 'pass' WHERE id = ?").run(result);
+	await h.app.database.write(
+		async (db) =>
+			await db.transaction(
+				async () =>
+					await db.run(
+						sql<readonly SqlValue[], Record<string, unknown>>("UPDATE results SET outcome = 'pass' WHERE id = $1"),
+						[result],
+					),
+			),
+	);
 	expect(await h.raw("tracker", input)).toMatchObject({
 		ok: false,
 		error: { code: "invalid", message: "A defect needs a failed or errored result." },
 	});
 	await h.call("admin", { do: "project.create", key: "other" });
-	const other = h.app.db.raw.query<{ id: number }, []>("SELECT id FROM projects WHERE key = 'other'").get();
+	const other = await h.app.database.read(
+		async (db) =>
+			await db.get(sql<readonly SqlValue[], { id: number }>("SELECT id FROM projects WHERE key = 'other'"), []),
+	);
 	if (!other) throw new Error("expected the other project");
-	h.app.db.raw.query("UPDATE results SET project = ? WHERE id = ?").run(other.id, result);
+	await h.app.database.write(
+		async (db) =>
+			await db.transaction(
+				async () =>
+					await db.run(
+						sql<readonly SqlValue[], Record<string, unknown>>("UPDATE results SET project = $1 WHERE id = $2"),
+						[other.id, result],
+					),
+			),
+	);
 	expect(await h.raw("tracker", input)).toMatchObject({
 		ok: false,
 		error: { code: "not_found", message: "result not found" },
 	});
-	expect(h.app.db.raw.query("SELECT count(*) AS n FROM tracker_requests").get()).toEqual({ n: 0 });
+	expect(
+		await h.app.database.read(
+			async (db) =>
+				await db.get(
+					sql<readonly SqlValue[], Record<string, unknown>>("SELECT count(*) AS n FROM tracker_requests"),
+					[],
+				),
+		),
+	).toEqual({ n: 0 });
 });
 
 test("a producer exports only its own result unless it can read the project", async () => {
 	const ownerResult = await failure();
-	const producer = h.actor("producer", "agent", ["produce"]);
+	const producer = await h.actor("producer", "agent", ["produce"]);
 	const foreign = await h.raw(
 		"tracker",
 		{ do: "create", result: ownerResult, cmd: "tracker-foreign-result" },
@@ -935,7 +1052,15 @@ test("a producer exports only its own result unless it can read the project", as
 		producer,
 	);
 	expect(absent).toEqual(foreign);
-	expect(h.app.db.raw.query("SELECT count(*) AS n FROM tracker_requests").get()).toEqual({ n: 0 });
+	expect(
+		await h.app.database.read(
+			async (db) =>
+				await db.get(
+					sql<readonly SqlValue[], Record<string, unknown>>("SELECT count(*) AS n FROM tracker_requests"),
+					[],
+				),
+		),
+	).toEqual({ n: 0 });
 
 	await h.call(
 		"report",
@@ -945,16 +1070,21 @@ test("a producer exports only its own result unless it can read the project", as
 		},
 		producer,
 	);
-	const ownResult = h.app.db.raw
-		.query<{ id: number }, [number]>("SELECT id FROM results WHERE actor = ?")
-		.get(producer.id)?.id;
+	const ownResult = (
+		await h.app.database.read(
+			async (db) =>
+				await db.get(sql<readonly SqlValue[], { id: number }>("SELECT id FROM results WHERE actor = $1"), [
+					producer.id,
+				]),
+		)
+	)?.id;
 	if (!ownResult) throw new Error("expected the producer's result");
 	expect(
 		(await h.call<TrackerReceipt>("tracker", { do: "create", result: ownResult, cmd: "tracker-own-result" }, producer))
 			.state,
 	).toBe("queued");
 
-	const readerProducer = h.actor("reader-producer", "agent", ["read", "produce"]);
+	const readerProducer = await h.actor("reader-producer", "agent", ["read", "produce"]);
 	expect(
 		(
 			await h.call<TrackerReceipt>(
@@ -988,14 +1118,19 @@ test("delivery releases the writer while waiting and overlapping jobs send only 
 test("an archive drops pending delivery and an old response cannot attach to a replacement request", async () => {
 	const result = await failure();
 	const archive: string[] = [];
-	exportArchive(h.app.db, (chunk) => archive.push(chunk));
-	const restored = new Db(":memory:");
+	await h.app.database.read(async (db) => await exportArchive(db, (chunk) => archive.push(chunk)));
+	const restored = await Database.open({ url: (await testDatabase()).url });
 	try {
-		await migrate(restored, ":memory:");
-		await importArchive(restored, archive.join("").trimEnd().split("\n"));
-		expect(restored.raw.query("SELECT count(*) AS n FROM tracker_requests").get()).toEqual({ n: 0 });
+		await restored.write(
+			async (db) => await db.transaction(async () => await importArchive(db, archive.join("").trimEnd().split("\n"))),
+		);
+		expect(
+			await restored.read(
+				async (db) => await db.get(sql<readonly [], { n: number }>("SELECT count(*) AS n FROM tracker_requests")),
+			),
+		).toEqual({ n: 0 });
 	} finally {
-		restored.close();
+		await restored.close();
 	}
 	const input = { do: "create", result, cmd: "tracker-restore1" };
 	await h.call("tracker", input);
@@ -1010,10 +1145,15 @@ test("an archive drops pending delivery and an old response cannot attach to a r
 		...port,
 		createDefect: () => (++calls === 1 ? waiting : Promise.resolve(item)),
 	});
-	await h.app.gate.run(() => {
-		h.app.db.raw.query("DELETE FROM tracker_requests").run();
-		h.app.db.raw.query("DELETE FROM commands WHERE id = ?").run(input.cmd);
-	});
+	await h.app.database.write(
+		async (db) =>
+			await db.transaction(async () => {
+				await db.run(sql<readonly SqlValue[], Record<string, unknown>>("DELETE FROM tracker_requests"), []);
+				await db.run(sql<readonly SqlValue[], Record<string, unknown>>("DELETE FROM commands WHERE id = $1"), [
+					input.cmd,
+				]);
+			}),
+	);
 	expect(await h.raw("tracker-status", { id: input.cmd })).toMatchObject({ ok: false, error: { code: "not_found" } });
 	await h.call("tracker", input);
 	complete({ ...item, ref: "github:example/shop#41", url: "https://github.com/example/shop/issues/41" });
@@ -1027,7 +1167,16 @@ test("an archive drops pending delivery and an old response cannot attach to a r
 test("a sending request is left uncertain after restart and a changed configuration sends nothing", async () => {
 	const result = await failure();
 	await h.call("tracker", { do: "create", result, cmd: "tracker-crash-01" });
-	h.app.db.raw.query("UPDATE tracker_requests SET state = 'sending'").run();
+	await h.app.database.write(
+		async (db) =>
+			await db.transaction(
+				async () =>
+					await db.run(
+						sql<readonly SqlValue[], Record<string, unknown>>("UPDATE tracker_requests SET state = 'sending'"),
+						[],
+					),
+			),
+	);
 	expect(await deliverTrackerRequests(h.app, port)).toBe(0);
 	expect(await h.call("tracker-status", { id: "tracker-crash-01" })).toMatchObject({ state: "sending", issue: null });
 	await h.call("tracker", { do: "create", result, cmd: "tracker-config1" });
@@ -1067,8 +1216,14 @@ test("tracker configuration is opt-in and malformed configuration never quotes c
 
 test("the HTTP operations preserve queued and uncertain requests across restart and deliver through the minute job", async () => {
 	directory = mkdtempSync(join(tmpdir(), "mainworthy-tracker-"));
-	const config = { ...defaultConfig({}), owner: "robin", dataDir: directory, port: 0, github };
-	instance = await start(config, () => ({ ui: null }), { readers: 0, trackerPort: port });
+	const config = {
+		...defaultConfig({ MAINWORTHY_DATABASE_URL: (await testDatabase()).url }),
+		owner: "robin",
+		dataDir: directory,
+		port: 0,
+		github,
+	};
+	instance = await start(config, () => ({ ui: null }), { trackerPort: port });
 	const post = async (operation: string, input: unknown) => {
 		const response = await fetch(`${instance?.url}/api/p/scratch/${operation}`, {
 			method: "POST",
@@ -1083,7 +1238,11 @@ test("the HTTP operations preserve queued and uncertain requests across restart 
 			results: [{ test: { key: "checkout" }, outcome: "fail", failure: { message: "Expected 90, got 100" } }],
 		}),
 	).toMatchObject({ status: 200, body: { ok: true } });
-	const result = instance.app.db.raw.query<{ id: number }, []>("SELECT id FROM results").get()?.id;
+	const result = (
+		await instance.app.database.read(
+			async (db) => await db.get(sql<readonly SqlValue[], { id: number }>("SELECT id FROM results"), []),
+		)
+	)?.id;
 	expect(await post("tracker", { do: "create", result, cmd: "tracker-http-01" })).toMatchObject({
 		status: 200,
 		body: { ok: true, result: { state: "queued" } },
@@ -1092,9 +1251,20 @@ test("the HTTP operations preserve queued and uncertain requests across restart 
 		status: 200,
 		body: { ok: true, result: { state: "queued" } },
 	});
-	instance.app.db.raw.query("UPDATE tracker_requests SET state = 'sending' WHERE id = 'tracker-http-02'").run();
+	await instance.app.database.write(
+		async (db) =>
+			await db.transaction(
+				async () =>
+					await db.run(
+						sql<readonly SqlValue[], Record<string, unknown>>(
+							"UPDATE tracker_requests SET state = 'sending' WHERE id = 'tracker-http-02'",
+						),
+						[],
+					),
+			),
+	);
 	await instance.stop();
-	instance = await start(config, () => ({ ui: null }), { readers: 0, trackerPort: port });
+	instance = await start(config, () => ({ ui: null }), { trackerPort: port });
 	expect(await post("tracker-status", { id: "tracker-http-01" })).toMatchObject({
 		status: 200,
 		body: { ok: true, result: { state: "queued" } },
@@ -1112,12 +1282,17 @@ test("the HTTP operations preserve queued and uncertain requests across restart 
 
 test("stopping persists the in-flight tracker reply and leaves queued requests for the next start", async () => {
 	directory = mkdtempSync(join(tmpdir(), "mainworthy-tracker-stop-"));
-	const config = { ...defaultConfig({}), owner: "robin", dataDir: directory, port: 0, github };
+	const config = {
+		...defaultConfig({ MAINWORTHY_DATABASE_URL: (await testDatabase()).url }),
+		owner: "robin",
+		dataDir: directory,
+		port: 0,
+		github,
+	};
 	const entered = Promise.withResolvers<void>();
 	const reply = Promise.withResolvers<TrackerItem>();
 	let calls = 0;
 	instance = await start(config, () => ({ ui: null }), {
-		readers: 0,
 		trackerPort: {
 			...port,
 			createDefect: () => {
@@ -1141,7 +1316,11 @@ test("stopping persists the in-flight tracker reply and leaves queued requests f
 			results: [{ test: { key: "checkout" }, outcome: "fail", failure: { message: "Expected 90, got 100" } }],
 		}),
 	).toMatchObject({ ok: true });
-	const result = instance.app.db.raw.query<{ id: number }, []>("SELECT id FROM results").get()?.id;
+	const result = (
+		await instance.app.database.read(
+			async (db) => await db.get(sql<readonly SqlValue[], { id: number }>("SELECT id FROM results"), []),
+		)
+	)?.id;
 	const ids = Array.from({ length: 6 }, (_, index) => `tracker-stop-0${index + 1}`);
 	for (const cmd of ids)
 		expect(await post("tracker", { do: "create", result, cmd })).toMatchObject({
@@ -1160,7 +1339,7 @@ test("stopping persists the in-flight tracker reply and leaves queued requests f
 		await stopping;
 	}
 	expect(calls).toBe(1);
-	instance = await start(config, () => ({ ui: null }), { readers: 0, trackerPort: port });
+	instance = await start(config, () => ({ ui: null }), { trackerPort: port });
 	expect(await post("tracker-status", { id: "tracker-stop-01" })).toMatchObject({
 		ok: true,
 		result: { state: "complete", issue: item },
@@ -1177,11 +1356,16 @@ test("stopping persists the in-flight tracker reply and leaves queued requests f
 
 test("a tracker delivery rejected during HTTP drain does not create an unhandled rejection", async () => {
 	directory = mkdtempSync(join(tmpdir(), "mainworthy-tracker-reject-"));
-	const config = { ...defaultConfig({}), owner: "robin", dataDir: directory, port: 0, github };
+	const config = {
+		...defaultConfig({ MAINWORTHY_DATABASE_URL: (await testDatabase()).url }),
+		owner: "robin",
+		dataDir: directory,
+		port: 0,
+		github,
+	};
 	const entered = Promise.withResolvers<void>();
 	const trackerReply = Promise.withResolvers<TrackerItem>();
 	instance = await start(config, () => ({ ui: null }), {
-		readers: 1,
 		trackerPort: {
 			...port,
 			createDefect: () => {
@@ -1201,7 +1385,11 @@ test("a tracker delivery rejected during HTTP drain does not create an unhandled
 		target: { session: "reject-during-stop" },
 		results: [{ test: { key: "checkout" }, outcome: "fail" }],
 	});
-	const result = current.app.db.raw.query<{ id: number }, []>("SELECT id FROM results").get()?.id;
+	const result = (
+		await current.app.database.read(
+			async (db) => await db.get(sql<readonly SqlValue[], { id: number }>("SELECT id FROM results"), []),
+		)
+	)?.id;
 	expect(await (await post("tracker", { do: "create", result, cmd: "tracker-stop-reject" })).json()).toMatchObject({
 		ok: true,
 		result: { state: "queued" },
@@ -1209,21 +1397,17 @@ test("a tracker delivery rejected during HTTP drain does not create an unhandled
 	const logged = spyOn(console, "error").mockImplementation(() => undefined);
 	const minute = current.minute();
 	await entered.promise;
-	const pool = current.app.readers;
-	if (!pool) throw new Error("No reader pool");
 	const reading = Promise.withResolvers<void>();
 	const readReply = Promise.withResolvers<void>();
-	const run = pool.run.bind(pool);
-	const reads = spyOn(pool, "run").mockImplementation(async (call, fallback) => {
+	const read = current.app.database.read.bind(current.app.database);
+	const reads = spyOn(current.app.database, "read").mockImplementationOnce(async (fn, options) => {
 		reading.resolve();
 		await readReply.promise;
-		return run(call, fallback);
+		return await read(fn, options);
 	});
 	const http = post("find", { in: "cases" });
 	await reading.promise;
-	const write = spyOn(current.app.db, "run").mockImplementationOnce(() => {
-		throw new Error("tracker reply write failed");
-	});
+	const write = rejectTrackerCompletion(current.app, "tracker reply write failed");
 	const stopping = current.stop();
 	const outcome = stopping.then(
 		() => "stopped",
@@ -1247,19 +1431,23 @@ test("a tracker delivery rejected during HTTP drain does not create an unhandled
 		readReply.resolve();
 		await http;
 		await outcome;
-		await pool.stop();
-		current.app.close();
+		await current.app.close();
 		instance = undefined;
 	}
 });
 
 test("a tracker delivery rejected after HTTP drain still completes shutdown and logs once", async () => {
 	directory = mkdtempSync(join(tmpdir(), "mainworthy-tracker-after-drain-"));
-	const config = { ...defaultConfig({}), owner: "robin", dataDir: directory, port: 0, github };
+	const config = {
+		...defaultConfig({ MAINWORTHY_DATABASE_URL: (await testDatabase()).url }),
+		owner: "robin",
+		dataDir: directory,
+		port: 0,
+		github,
+	};
 	const entered = Promise.withResolvers<void>();
 	const trackerReply = Promise.withResolvers<TrackerItem>();
 	instance = await start(config, () => ({ ui: null }), {
-		readers: 1,
 		trackerPort: {
 			...port,
 			createDefect: () => {
@@ -1283,20 +1471,20 @@ test("a tracker delivery rejected after HTTP drain still completes shutdown and 
 			results: [{ test: { key: "checkout" }, outcome: "fail" }],
 		}),
 	).toMatchObject({ ok: true });
-	const result = current.app.db.raw.query<{ id: number }, []>("SELECT id FROM results").get()?.id;
+	const result = (
+		await current.app.database.read(
+			async (db) => await db.get(sql<readonly SqlValue[], { id: number }>("SELECT id FROM results"), []),
+		)
+	)?.id;
 	expect(await post("tracker", { do: "create", result, cmd: "tracker-after-drain" })).toMatchObject({
 		ok: true,
 		result: { state: "queued" },
 	});
-	const pool = current.app.readers;
-	if (!pool) throw new Error("No reader pool");
 	const logged = spyOn(console, "error").mockImplementation(() => undefined);
-	const readersStopped = spyOn(pool, "stop");
+	const databaseClosed = spyOn(current.app.database, "close");
 	const minute = current.minute();
 	await entered.promise;
-	const write = spyOn(current.app.db, "run").mockImplementationOnce(() => {
-		throw new Error("tracker reply write failed after drain");
-	});
+	const write = rejectTrackerCompletion(current.app, "tracker reply write failed after drain");
 	const outcome = current.stop().then(
 		() => "stopped",
 		(error: unknown) => String(error),
@@ -1306,8 +1494,10 @@ test("a tracker delivery rejected after HTTP drain still completes shutdown and 
 		trackerReply.resolve(item);
 		await minute;
 		expect(await outcome).toBe("stopped");
-		expect(readersStopped.mock.calls).toEqual([[]]);
-		expect(() => current.app.db.raw.query("SELECT 1").get()).toThrow(/closed/i);
+		expect(databaseClosed.mock.calls).toEqual([[]]);
+		await expect(
+			current.app.database.read(async (db) => await db.get(sql<readonly [], { n: number }>("SELECT 1 AS n"))),
+		).rejects.toThrow(/closed/i);
 		expect(logged.mock.calls).toEqual([
 			[
 				"[mainworthy] sending tracker requests failed:",
@@ -1319,10 +1509,9 @@ test("a tracker delivery rejected after HTTP drain still completes shutdown and 
 		await minute;
 		await outcome;
 		write.mockRestore();
-		readersStopped.mockRestore();
+		databaseClosed.mockRestore();
 		logged.mockRestore();
-		await pool.stop();
-		current.app.close();
+		await current.app.close();
 		instance = undefined;
 	}
 });

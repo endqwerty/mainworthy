@@ -387,13 +387,16 @@ async function executeInSnapshot(
 			throw error;
 		}
 	} catch (error) {
-		if (error instanceof OpError) return fail(error.code, error.message, error.details);
-		// Anything else is a failure nobody wrote a sentence for: a constraint of the database, a missing file.
-		// Its text can name a table, a path or a statement, so it goes to the log and the caller gets one fixed
-		// sentence, the same one the HTTP surface gives for a failure of its own.
-		console.error(`[mainworthy] ${op.name} failed:`, error);
-		return fail("internal", INTERNAL_ERROR);
+		// A failed read statement aborts its snapshot; let the scope roll back before making the reply.
+		if (op.effect === "read") throw error;
+		return failure(op.name, error);
 	}
+}
+
+function failure(op: string, error: unknown): Reply {
+	if (error instanceof OpError) return fail(error.code, error.message, error.details);
+	console.error(`[mainworthy] ${op} failed:`, error);
+	return fail("internal", INTERNAL_ERROR);
 }
 
 const nextTick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
@@ -401,10 +404,16 @@ const nextTick = (): Promise<void> => new Promise((resolve) => setImmediate(reso
 /** Every read closes its snapshot before checking current authority in a fresh scope. */
 async function read(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> {
 	const op = ops[call.op];
-	const { reply, identity } = await app.database.read(async (db) => ({
-		reply: await executeInSnapshot(app, db, ops, call),
-		identity: op?.scope === "project" && call.project ? (await findProject(db, call.project))?.identity : undefined,
-	}));
+	let identity: string | undefined;
+	let reply: Reply;
+	try {
+		reply = await app.database.read(async (db) => {
+			identity = op?.scope === "project" && call.project ? (await findProject(db, call.project))?.identity : undefined;
+			return await executeInSnapshot(app, db, ops, call);
+		});
+	} catch (error) {
+		reply = failure(call.op, error);
+	}
 	if (!op) return reply;
 	const rechecked = await app.database.read(async (db) => {
 		const project = op.scope === "project" && call.project ? await findProject(db, call.project) : null;

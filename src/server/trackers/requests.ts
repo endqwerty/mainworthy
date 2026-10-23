@@ -6,7 +6,7 @@ import { type TrackerInput, TrackerItem, type TrackerReceipt } from "../../core/
 import { batchById, mustTarget, resultById, testById, testRef } from "../evidence/evidence.ts";
 import type { App } from "../kernel/app.ts";
 import { type Ctx, projectById } from "../kernel/ctx.ts";
-import { type ReadDb, json, sql } from "../kernel/db.ts";
+import { json, type ReadDb, sql } from "../kernel/db.ts";
 import { forbidden, invalid, notFound } from "../kernel/errors.ts";
 import { caseById, caseRef, versionOf } from "../suite/suite.ts";
 import { configuredTrackers } from "./config.ts";
@@ -120,7 +120,7 @@ const stopping = new WeakSet<App>();
 
 export function deliverTrackerRequests(app: App, port?: TrackerPort): Promise<number> {
 	const running = active.get(app);
-	if (running) return running;
+	if (running !== undefined) return running;
 	if (stopping.has(app)) return Promise.resolve(0);
 	const work = deliver(app, port).finally(() => active.delete(app));
 	active.set(app, work);
@@ -138,12 +138,14 @@ export async function waitTrackerRequests(app: App): Promise<void> {
 async function deliver(app: App, supplied?: TrackerPort): Promise<number> {
 	let delivered = 0;
 	for (let n = 0; n < 20; n++) {
-		const claimed = await app.gate.run(async () => {
-			if (stopping.has(app)) return null;
-			const next = await app.db.get(Q.next);
-			if (next) await app.db.run(Q.claim, { id: next.id, nonce: next.nonce });
-			return next ? { row: next, project: (await projectById(app.db, next.project))?.key } : null;
-		});
+		const claimed = await app.database.write(async (db) =>
+			db.transaction(async () => {
+				if (stopping.has(app)) return null;
+				const next = await db.get(Q.next);
+				if (next) await db.run(Q.claim, { id: next.id, nonce: next.nonce });
+				return next ? { row: next, project: (await projectById(db, next.project))?.key } : null;
+			}),
+		);
 		if (!claimed) break;
 		const { row, project } = claimed;
 		let issue: TrackerItem | null = null;
@@ -165,15 +167,17 @@ async function deliver(app: App, supplied?: TrackerPort): Promise<number> {
 					? caught.message
 					: "The tracker request failed; check the tracker before creating another issue.";
 		}
-		await app.gate.run(
-			async () =>
-				await app.db.run(Q.finish, {
-					id: row.id,
-					nonce: row.nonce,
-					issue: issue ? JSON.stringify(issue) : null,
-					error,
-					state: issue ? "complete" : "failed",
-				}),
+		await app.database.write(async (db) =>
+			db.transaction(
+				async () =>
+					await db.run(Q.finish, {
+						id: row.id,
+						nonce: row.nonce,
+						issue: issue ? JSON.stringify(issue) : null,
+						error,
+						state: issue ? "complete" : "failed",
+					}),
+			),
 		);
 		delivered++;
 	}

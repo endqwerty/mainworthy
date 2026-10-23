@@ -49,14 +49,14 @@ export async function listProjects(db: ReadDb): Promise<
 		demo: boolean;
 	}[]
 > {
-	return (await allProjects(db)).map((row) => ({
+	return await Array.fromAsync(await allProjects(db), async (row) => ({
 		key: row.key,
 		identity: row.identity,
 		name: row.name,
 		seq: row.seq,
 		createdAt: row.created_at,
-		...policySummary(currentPolicy(db, row.id)),
-		demo: demoSince(db, row.id) !== null,
+		...policySummary(await currentPolicy(db, row.id)),
+		demo: (await demoSince(db, row.id)) !== null,
 	}));
 }
 
@@ -157,7 +157,7 @@ export async function admin(env: InstanceCtx, input: AdminInput): Promise<unknow
 		case "team.grant.remove":
 		case "team.history":
 			personOnly(env, "a team is administered");
-			return await manageTeams(env.app, env.actor, await orgId(db), input, env.context);
+			return await manageTeams(env.app, db, env.actor, await orgId(db), input, env.context);
 		case "project.create":
 			return await createProject(env, input);
 		case "project.list":
@@ -193,6 +193,7 @@ export async function admin(env: InstanceCtx, input: AdminInput): Promise<unknow
 					madeBy: env.actor.id,
 				},
 				{ actor: env.actor.id, context: env.context },
+				db,
 			);
 			return {
 				// The token's id, which `token.revoke` takes: whoever made it can revoke exactly this one.
@@ -200,13 +201,13 @@ export async function admin(env: InstanceCtx, input: AdminInput): Promise<unknow
 				actor: created.actor,
 				token: created.secret,
 				// What the token's holder may do on the project asked about, as the registry will see it.
-				can: actorByName(db, created.actor, project)?.can ?? [],
+				can: (await actorByName(db, created.actor, project))?.can ?? [],
 				expiresAt: created.expiresAt,
 				note: "This token is shown once. Store it now.",
 			};
 		}
 		case "token.list":
-			return (await listTokens(env.app)).map((row) => ({
+			return (await listTokens(env.app, db)).map((row) => ({
 				id: row.id,
 				actor: row.actor,
 				kind: row.kind,
@@ -220,7 +221,7 @@ export async function admin(env: InstanceCtx, input: AdminInput): Promise<unknow
 				revoked: row.revoked_at !== null,
 			}));
 		case "token.revoke":
-			return { revoked: await revokeToken(env.app, input.id) };
+			return { revoked: await revokeToken(env.app, db, input.id) };
 		case "actor.list":
 			return (await actorsWithGrants(db)).map((actor) => ({ ...actor, owner: actor.name === owner }));
 		case "grant.set":
@@ -233,9 +234,11 @@ export async function admin(env: InstanceCtx, input: AdminInput): Promise<unknow
 			if (input.actor === owner)
 				throw invalid(`${input.actor} owns this instance and may do everything; that is not changed here`);
 			const project = await projectOf(db, input.project);
-			if (input.do === "grant.remove") return { removed: await removeGrant(env.app, { actor: input.actor, project }) };
+			if (input.do === "grant.remove")
+				return { removed: await removeGrant(env.app, db, { actor: input.actor, project }) };
 			const roles = await setGrant(
 				env.app,
+				db,
 				{
 					actor: input.actor,
 					project,
@@ -256,7 +259,7 @@ export async function admin(env: InstanceCtx, input: AdminInput): Promise<unknow
 					`${owner} owns this instance and is not forgotten: nobody would be left who can always repair it. To hand the instance to somebody else, start it with MAINWORTHY_OWNER set to their name; ${owner} can be forgotten after that`,
 				);
 			}
-			const forgotten = await forgetActor(env.app, input.name);
+			const forgotten = await forgetActor(env.app, db, input.name);
 			await forgetQuestionNames(db, input.name, forgotten.forgotten);
 			// These write replies name people in grant.actor, report.questions[].by, claim.known[].by and announce.by.
 			// Requests are digests; their binding to a command id must survive forgetting, as must free text.

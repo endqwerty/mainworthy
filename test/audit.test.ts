@@ -5,6 +5,7 @@ import type { PolicySettings } from "../src/core/kinds.ts";
 import { AuditReply } from "../src/core/replies.ts";
 import { actorByName } from "../src/server/identity/identity.ts";
 import { findProject } from "../src/server/kernel/ctx.ts";
+import { type SqlValue, sql } from "../src/server/kernel/db.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
 import { ciReport, harness } from "./helpers.ts";
@@ -64,7 +65,7 @@ test("audit refuses reordered context and event records even after rehashing", a
 		for (const change of changes)
 			expect(() => verifyAudit(rehash(file, change))).toThrow(/line \d+ record \S+: records out of order/);
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -92,7 +93,7 @@ test("audit event order breaks equal-time ties by sequence and then id", async (
 			expect(() => verifyAudit(swapped)).toThrow(/line \d+ record \S+: records out of order/);
 		}
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -124,7 +125,7 @@ test("audit errors name the line and record once without raw schema output", asy
 			new RegExp(`^invalid audit: line ${line} record version:1:1: case body hash mismatch$`),
 		);
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -170,14 +171,17 @@ test("audit exports retained change endings in range and only for its project", 
 			state: "merged",
 		});
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
 test("an admin can export a validated project audit without writing a command", async () => {
 	const h = await harness();
 	try {
-		const before = h.app.db.raw.query("SELECT count(*) AS n FROM commands").get();
+		const before = await h.app.database.read(
+			async (db) =>
+				await db.get(sql<readonly SqlValue[], Record<string, unknown>>("SELECT count(*) AS n FROM commands"), []),
+		);
 		const reply = AuditReply.parse(await h.call("audit", {}));
 		expect(verifyAudit(reply.ndjson)).toMatchObject({
 			format: 1,
@@ -185,8 +189,13 @@ test("an admin can export a validated project audit without writing a command", 
 			records: 1,
 			unavailableDecisionEvidence: 0,
 		});
-		expect(h.app.db.raw.query("SELECT count(*) AS n FROM commands").get()).toEqual(before);
-		const reader = h.actor("reader", "human", ["read"]);
+		expect(
+			await h.app.database.read(
+				async (db) =>
+					await db.get(sql<readonly SqlValue[], Record<string, unknown>>("SELECT count(*) AS n FROM commands"), []),
+			),
+		).toEqual(before);
+		const reader = await h.actor("reader", "human", ["read"]);
 		expect(await h.raw("audit", {}, reader)).toMatchObject({ ok: false, error: { code: "forbidden" } });
 		expect(await h.raw("audit", { from: 10, to: 5 })).toMatchObject({ ok: false, error: { code: "invalid" } });
 		expect(await h.raw("audit", { to: Number.MAX_SAFE_INTEGER })).toMatchObject({
@@ -194,7 +203,7 @@ test("an admin can export a validated project audit without writing a command", 
 			error: { code: "invalid" },
 		});
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -219,7 +228,7 @@ test("audit exports every retained version, decision and policy, with exact evid
 		expect(exported.ndjson).not.toContain('"other"');
 		expect(exported.ndjson).not.toContain('"tokens"');
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -233,21 +242,30 @@ test("range exports mark actual old version predecessors and decisions, and excl
 		const earlier = AuditReply.parse(await h.call("audit", { to: cutoff }));
 		expect(entries(earlier.ndjson)).toEqual(entries(first.ndjson));
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
 test("legacy decision evidence is explicitly unavailable rather than replaced by current question evidence", async () => {
 	const { h } = await fixture();
 	try {
-		h.app.db.raw.query("UPDATE decisions SET on_evidence = NULL WHERE id = 1").run();
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.run(
+							sql<readonly SqlValue[], Record<string, unknown>>("UPDATE decisions SET on_evidence = NULL WHERE id = 1"),
+							[],
+						),
+				),
+		);
 		const file = AuditReply.parse(await h.call("audit", {})).ndjson;
 		expect(entries(file).find((record) => record.type === "decision")).toMatchObject({
 			evidence: { state: "not-recorded" },
 		});
 		expect(verifyAudit(file).unavailableDecisionEvidence).toBe(1);
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -265,7 +283,7 @@ test("checksum, truncation, trailing data, malformed JSON and unsupported versio
 			expect(() => verifyAudit(bad)).toThrow();
 		}
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -317,7 +335,7 @@ test("verification checks references, body hashes, duplicates and ranges even wi
 		];
 		for (const change of changes) expect(() => verifyAudit(rehash(file, change))).toThrow();
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -327,7 +345,7 @@ test("answers, advice and withdrawals retain their actors, reasons and exact evi
 		await h.call("report", ciReport({ commit: "audit-answer", n: 1, fail: { 0: "failed for audit" } }));
 		const q = (await h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "failure" })).items[0];
 		if (!q) throw new Error("missing failure question");
-		const agent = h.actor("helper", "agent", ["read", "produce"]);
+		const agent = await h.actor("helper", "agent", ["read", "produce"]);
 		expect(
 			await h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "flaky" }, reason: "advice" }, agent),
 		).toMatchObject([{ status: "advised" }]);
@@ -373,7 +391,7 @@ test("answers, advice and withdrawals retain their actors, reasons and exact evi
 		});
 		expect(verifyAudit(partial.ndjson).beforeRangeReferences).toBe(1);
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -395,7 +413,7 @@ test("policy changes include their adopting decision and a verifiable previous p
 		});
 		expect(verifyAudit(partial.ndjson).beforeRangeReferences).toBe(1);
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -406,13 +424,22 @@ test("saved decision evidence survives later question updates", async () => {
 			(record) => record.type === "decision",
 		);
 		if (before?.type !== "decision") throw new Error("missing decision");
-		h.app.db.raw.query("UPDATE questions SET evidence_hash = '000000000000'").run();
+		await h.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.run(
+							sql<readonly SqlValue[], Record<string, unknown>>("UPDATE questions SET evidence_hash = '000000000000'"),
+							[],
+						),
+				),
+		);
 		const after = entries(AuditReply.parse(await h.call("audit", {})).ndjson).find(
 			(record) => record.type === "decision",
 		);
 		expect(after).toMatchObject({ evidence: before.evidence });
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -439,7 +466,7 @@ test("caller-dated demo versions can be audited when their timestamps run backwa
 				.map((record) => record.version),
 		).toEqual([2, 1]);
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -478,7 +505,7 @@ test("verification rejects missing middle case and policy versions even after re
 		];
 		for (const change of changes) expect(() => verifyAudit(rehash(file, change))).toThrow(/parent|prior/);
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -527,7 +554,7 @@ test("a demo answer can precede its question's recorded date, but never its open
 			),
 		).toThrow(/sequence/);
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -551,7 +578,7 @@ test("a range cutting a backward-dated demo chain asks for a wider range", async
 			error: { code: "invalid", message: expect.stringContaining("widen") },
 		});
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -583,7 +610,7 @@ test("a reopened question cannot precede the opening sequence of its prior quest
 			),
 		).toThrow(/question prior mismatch/);
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -624,7 +651,7 @@ test("inherited audit decisions resolve exact head and base results after their 
 			expect(() => verifyAudit(rehash(file, change))).toThrow(/inherited|reference/);
 		expect(verifyAudit(file).unavailableDecisionEvidence).toBe(0);
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -644,8 +671,8 @@ test("audit includes project and global team grant history, removed memberships 
 		}
 		await h.call("report", ciReport({ commit: "team-signed", n: 1, fail: { 0: "needs a person" } }));
 		const q = (await h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "failure" })).items[0];
-		const project = await findProject(h.app.db, "scratch");
-		const signer = await actorByName(h.app.db, "reviewer", project?.id ?? -1);
+		const project = await h.app.database.read(async (db) => await findProject(db, "scratch"));
+		const signer = await h.app.database.read(async (db) => await actorByName(db, "reviewer", project?.id ?? -1));
 		if (!q || !signer) throw new Error("missing team signer or question");
 		expect(
 			await h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "flaky" } }, signer),
@@ -696,7 +723,7 @@ test("audit includes project and global team grant history, removed memberships 
 		}
 		expect(verifyAudit(file).project).toBe("scratch");
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -729,7 +756,7 @@ test("audit retains and validates each policy's custom field definitions", async
 			),
 		).toThrow(/policy/);
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -767,7 +794,7 @@ test("an audit export of a case that pins a fragment carries the pin and verifie
 		});
 		expect(() => verifyAudit(unknownInPin)).toThrow();
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -796,6 +823,6 @@ test("audit checks receipt identity and report provenance after its checksum is 
 			),
 		).toThrow("merge receipt provenance mismatch");
 	} finally {
-		h.close();
+		await h.close();
 	}
 });

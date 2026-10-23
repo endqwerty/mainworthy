@@ -195,7 +195,7 @@ export async function acceptReport(ctx: Ctx, input: ReportInput): Promise<{ batc
 		const accepts = json<TargetMatch>(run.accepts);
 		target = "self" in accepts ? await ensureTarget(ctx, { session: runRef(run) }) : await ensureTarget(ctx, accepts);
 	} else throw invalid("a report needs a target (what was tested) or a run");
-	if (run && !runAccepts(ctx.db, run, target)) {
+	if (run && !(await runAccepts(ctx.db, run, target))) {
 		throw invalid(
 			`${runRef(run)} counts ${describeAccepts(run)}, and this report is for another target. Report it without \`run\` to record it for its own target.`,
 		);
@@ -225,12 +225,14 @@ export async function acceptReport(ctx: Ctx, input: ReportInput): Promise<{ batc
  * They wait for it with the runs it folds into, from acceptance to application, and are recomputed with them.
  */
 async function alsoWaiting(ctx: Ctx, batch: BatchRow, target: TargetRow, runs: readonly RunRow[]): Promise<RunRow[]> {
-	if (target.commit_sha === null || !firstCountedReport(ctx.db, batch, target)) return [];
+	if (target.commit_sha === null || !(await firstCountedReport(ctx.db, batch, target))) return [];
 	const folded = new Set(runs.map((run) => run.id));
-	return (await plannedCounting(ctx.db, ctx.project.id, target.commit_sha)).flatMap((id) => {
-		const run = folded.has(id) ? null : runById(ctx.db, id);
-		return run ? [run] : [];
-	});
+	return (
+		await Array.fromAsync(await plannedCounting(ctx.db, ctx.project.id, target.commit_sha), async (id) => {
+			const run = folded.has(id) ? null : await runById(ctx.db, id);
+			return run ? [run] : [];
+		})
+	).flat();
 }
 
 /**
@@ -249,14 +251,16 @@ export async function* processBatchSteps(ctx: Ctx, batchId: number): AsyncGenera
 	const groups = yield* applyBatchSteps(ctx, { batch, target, applied: applied.results, runs });
 
 	const questions: QuestionBrief[] = [];
-	const asking = groups.filter((group) => {
-		// A report for a change that has ended (a pipeline that finished after the merge) is recorded and counted,
-		// and not asked about, unless an open planned run shows the failure and waits for the answer.
-		return (
-			!scopeEnded(ctx.db, group.scope) || group.runs.some((run) => run.origin === "planned" && run.state === "open")
-		);
-	});
-	const raised = raiseFailures(
+	const asking: typeof groups = [];
+	for (const group of groups) {
+		// Ended change reports ask only when an open planned run still waits for an answer.
+		if (
+			!(await scopeEnded(ctx.db, group.scope)) ||
+			group.runs.some((run) => run.origin === "planned" && run.state === "open")
+		)
+			asking.push(group);
+	}
+	const raised = await raiseFailures(
 		ctx,
 		asking.map((group) => ({ group, target, by: batch.actor, producer })),
 	);
@@ -279,7 +283,7 @@ export async function* processBatchSteps(ctx: Ctx, batchId: number): AsyncGenera
 	// before): every run that counts the commit is recomputed with the others, because its failures are
 	// answered there from now on.
 	const waiting = await alsoWaiting(ctx, batch, target, runs);
-	if (target.commit_sha !== null && firstCountedReport(ctx.db, batch, target)) {
+	if (target.commit_sha !== null && (await firstCountedReport(ctx.db, batch, target))) {
 		for (const id of await plannedCounting(ctx.db, ctx.project.id, target.commit_sha)) ctx.recompute.add(id);
 		await askWhereCommitIs(ctx, target);
 	}
@@ -423,7 +427,7 @@ export async function claim(ctx: Ctx, input: ClaimInput): Promise<ClaimReply> {
 		const row = await mustCase(ctx.db, ctx.project.id, caseText);
 		if (row.head_hash !== hash) continue; // the case moved since it was read: that review is of an old version
 		const basis = reviewBasis({ version: row.head_hash, about: input.about ?? null, patch: input.patch ?? null });
-		if (!reviewedAt(ctx.db, row.id, basis, input.lens, ctx.actor.id)) {
+		if (!(await reviewedAt(ctx.db, row.id, basis, input.lens, ctx.actor.id))) {
 			await insertReview(ctx, {
 				caseId: row.id,
 				version: row.head,
@@ -571,8 +575,8 @@ export const changeOp = defineOp({
 export async function planRun(ctx: Ctx, input: PlanInput): Promise<PlanReply> {
 	const policy = await currentPolicy(ctx.db, ctx.project.id);
 	const cases = await selectCases(ctx, input.select);
-	const assignees = (input.assign ?? []).map((name) => {
-		const actor = actorByName(ctx.db, name, ctx.project.id);
+	const assignees = await Array.fromAsync(input.assign ?? [], async (name) => {
+		const actor = await actorByName(ctx.db, name, ctx.project.id);
 		if (!actor) throw notFound(`actor ${name}`);
 		return actor.id;
 	});
@@ -623,7 +627,7 @@ export async function* decideSteps(ctx: Ctx, input: DecideInput): AsyncGenerator
 			typeof input.undo === "string"
 				? [{ q: input.undo, ifDecision: "ifDecision" in input ? input.ifDecision : undefined }]
 				: input.undo;
-		return withdrawals.map((one) => undo(ctx, { ...one, reason: input.reason }));
+		return await Array.fromAsync(withdrawals, async (one) => await undo(ctx, { ...one, reason: input.reason }));
 	}
 	if ("all" in input) {
 		const replies: DecideReply[] = [];

@@ -3,10 +3,11 @@ import { REPLIES } from "../../core/replies.ts";
 import { attachmentContent, attachmentsOf, recordAttachments } from "../evidence/attachments.ts";
 import { resultById } from "../evidence/evidence.ts";
 import type { Ctx } from "../kernel/ctx.ts";
+import type { ReadDb } from "../kernel/db.ts";
 import { forbidden, notFound } from "../kernel/errors.ts";
 import { defineOp } from "./registry.ts";
 
-async function mustResult(ctx: Ctx, id: number) {
+async function mustResult(ctx: Ctx<ReadDb>, id: number) {
 	const result = await resultById(ctx.db, id);
 	if (!result || result.project !== ctx.project.id) throw notFound(`result ${id}`);
 	return result;

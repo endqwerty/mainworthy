@@ -16,7 +16,7 @@ const stopping = new WeakSet<App>();
 
 export function pollDefectHolds(app: App, supplied?: TrackerPort): Promise<number> {
 	const running = active.get(app);
-	if (running) return running;
+	if (running !== undefined) return running;
 	if (stopping.has(app)) return Promise.resolve(0);
 	const work = poll(app, supplied).finally(() => active.delete(app));
 	active.set(app, work);
@@ -33,38 +33,41 @@ export async function waitTrackerPolls(app: App): Promise<void> {
 
 async function poll(app: App, supplied?: TrackerPort): Promise<number> {
 	const failedIssues = new Map<string, Set<number>>();
-	const candidates = await app.gate.run(async () => {
-		if (stopping.has(app)) return [];
-		return (await allProjects(app.db))
-			.flatMap((project) => {
+	const candidates = await app.database.write(async (db) =>
+		db.transaction(async () => {
+			if (stopping.has(app)) return [];
+			const candidates = [];
+			for (const project of await allProjects(db)) {
 				const trackers = configuredTrackers(app.config, project.key);
-				if (trackers.length === 0) return [];
-				return liveDefectDecisions(app.db, project.id).flatMap((decision) => {
+				if (trackers.length === 0) continue;
+				for (const decision of await liveDefectDecisions(db, project.id)) {
 					const answer = Defect.safeParse(json<unknown>(decision.answer));
-					if (!answer.success) return [];
+					if (!answer.success) continue;
 					for (const tracker of trackers) {
 						const key = tracker.keyOf(answer.data.ref);
 						if (!key) continue;
-						const schedule = trackerPoll(app.db, decision.id);
+						const schedule = await trackerPoll(db, decision.id);
 						const identity = JSON.stringify([project.id, tracker.destination, key]);
 						const failures = failedIssues.get(identity) ?? new Set<number>();
 						if (schedule.diagnosed) failures.add(decision.id);
 						failedIssues.set(identity, failures);
-						return [{ decision, ref: answer.data.ref, project, tracker, key, schedule, failures }];
+						candidates.push({ decision, ref: answer.data.ref, project, tracker, key, schedule, failures });
+						break;
 					}
-					return [];
-				});
-			})
-			.filter((candidate) => candidate.schedule.next_at <= app.now())
-			.sort((a, b) => a.schedule.next_at - b.schedule.next_at || a.decision.id - b.decision.id)
-			.slice(0, 20);
-	});
+				}
+			}
+			return candidates
+				.filter((candidate) => candidate.schedule.next_at <= app.now())
+				.sort((a, b) => a.schedule.next_at - b.schedule.next_at || a.decision.id - b.decision.id)
+				.slice(0, 20);
+		}),
+	);
 	let ended = 0;
 	for (const candidate of candidates) {
 		const { decision, ref, project, tracker, key, schedule, failures } = candidate;
-		const currentTracker = await app.gate.run(async () => {
+		const currentTracker = await app.database.read(async (db) => {
 			if (stopping.has(app)) return null;
-			const current = (await liveDefectDecisions(app.db, project.id)).find((row) => row.id === decision.id);
+			const current = (await liveDefectDecisions(db, project.id)).find((row) => row.id === decision.id);
 			if (!current || current.answer !== decision.answer) return null;
 			return configuredTrackers(app.config, project.key).find((row) => row.destination === tracker.destination) ?? null;
 		});
@@ -82,26 +85,26 @@ async function poll(app: App, supplied?: TrackerPort): Promise<number> {
 			failure = error instanceof TrackerError ? error.readFailure : "unreadable";
 		}
 		const closed = issue?.state === "closed";
-		const completion = await app.gate.run(
-			async () =>
-				await app.db.transaction(async () => {
-					const currentProject = await projectById(app.db, project.id);
+		const completion = await app.database.write(
+			async (db) =>
+				await db.transaction(async () => {
+					const currentProject = await projectById(db, project.id);
 					if (!currentProject || currentProject.key !== project.key) return null;
 					if (!configuredTrackers(app.config, project.key).some((row) => row.destination === tracker.destination))
 						return null;
-					const current = (await liveDefectDecisions(app.db, project.id)).find((row) => row.id === decision.id);
+					const current = (await liveDefectDecisions(db, project.id)).find((row) => row.id === decision.id);
 					if (!current || current.answer !== decision.answer) return null;
-					const before = await trackerPollError(app.db, decision.id);
-					if (!finishTrackerPoll(app.db, schedule, app.now(), failure)) return null;
-					const diagnostic = await trackerPollError(app.db, decision.id);
+					const before = await trackerPollError(db, decision.id);
+					if (!(await finishTrackerPoll(db, schedule, app.now(), failure))) return null;
+					const diagnostic = await trackerPollError(db, decision.id);
 					const warning = diagnostic && failures.size === 0 ? diagnostic : null;
 					if (diagnostic === before && !closed) return { warning, event: null, ended: false };
-					const ctx = makeCtx(app, currentProject, await ruleActor(app.db), true);
-					const ended = closed && endDefectHold(ctx, decision, ref);
-					const question = await questionById(app.db, decision.question);
+					const ctx = makeCtx(app, db, currentProject, await ruleActor(db), true);
+					const ended = closed && (await endDefectHold(ctx, decision, ref));
+					const question = await questionById(db, decision.question);
 					if (question) {
 						ctx.touched.add(questionRef(question));
-						for (const about of await refsOf(app.db, question.id)) ctx.touched.add(about);
+						for (const about of await refsOf(db, question.id)) ctx.touched.add(about);
 					}
 					await stampSeq(ctx);
 					return {

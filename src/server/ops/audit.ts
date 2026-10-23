@@ -3,6 +3,7 @@ import { AuditInput, type AuditRecord, compareAuditRecords, encodeAudit } from "
 import { REPLIES } from "../../core/replies.ts";
 import { mergeReceiptById, mergeReceiptPage } from "../decisions/questions.ts";
 import type { Ctx } from "../kernel/ctx.ts";
+import type { ReadDb } from "../kernel/db.ts";
 import { invalid } from "../kernel/errors.ts";
 import { exportAudit } from "../transfer/audit.ts";
 import { defineOp } from "./registry.ts";
@@ -21,7 +22,7 @@ export const auditOp = defineOp({
 		input.receipt === undefined ? await exportAudit(ctx, input) : await exportReceiptAudit(ctx, input),
 });
 
-async function exportReceiptAudit(ctx: Ctx, input: AuditInput) {
+async function exportReceiptAudit(ctx: Ctx<ReadDb>, input: AuditInput) {
 	const to = input.to ?? ctx.now + 1;
 	if (to > ctx.now + 1 || to <= input.from)
 		throw invalid("audit needs from < to <= the server's current time plus one millisecond");
