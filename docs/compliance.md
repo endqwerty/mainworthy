@@ -26,21 +26,11 @@ Read this first. These are the known gaps, in order of how soon they bite.
 3. **Sign-off is identity and time, not an electronic signature.** It does not re-authenticate the signer or
    record the meaning of the signature, so it does not satisfy 21 CFR Part 11 or EU Annex 11. Cost: medium.
    Individual accounts already exist (decision 0017). Tracked in #40.
-4. **Giving someone the executable or the image has open licence items, all from Bun.** The executable carries the
-   Bun runtime and what it links, and `licences/README.md` lists what the audit of Bun 1.4.3 left open: LGPL
-   libraries linked statically (JavaScriptCore, WTF, copied WebCore files, TinyCC), which a recipient may ask
-   the source of and link again; MPL-2.0 files whose source must stay available; TinyCC's runtime source under
-   the GPL with a linking exception; a package under Artistic-2.0; and two ports in Bun that name no licence. The
-   notices are inside the executable, which serves them at `/docs/licence`, and in the image beside it, and they
-   point at the public source of each part at its exact revision. Harmless while the only copy runs on the
-   owner's server; before anyone else is given the image or the executable, the owner decides how the source is
-   offered (hosted beside the image, or a written offer) and whether the open items are acceptable. Cost: low to
-   medium. Decision 0025; tracked in [#234](https://github.com/endqwerty/mainworthy/issues/234).
-5. **Accessibility needs manual assessment.** The automated WCAG 2.2 AA checks and remaining gaps are in
+4. **Accessibility needs manual assessment.** The automated WCAG 2.2 AA checks and remaining gaps are in
    [the web accessibility assessment](accessibility.md). VoiceOver and NVDA testing is still open.
    Public-sector and many enterprise buyers require a conformance
    report. Cost: medium. Tracked in #47.
-6. **The instance keeps more than it needs.** The policy at `/privacy`
+5. **The instance keeps more than it needs.** The policy at `/privacy`
    (`docs/guide/privacy.md`, 2026-10-14) says what is kept today, gaps included. To keep only what is needed:
    a forgotten person's name in stored command replies (#228),
    forgetting a person without the raw API (#229), and a person's drafts left in the browser after sign-out
@@ -115,7 +105,7 @@ procedures with a tested restore on the hosting side.
 
 ## Accessibility (EU Accessibility Act, EN 301 549, Section 508, ADA)
 
-Gap 5. Business software sold to private companies is mostly outside the Accessibility Act, but public
+Gap 4. Business software sold to private companies is mostly outside the Accessibility Act, but public
 procurement in the EU and the US asks for a conformance report against WCAG.
 The [web accessibility assessment](accessibility.md) lists every WCAG 2.2 A and AA criterion, automated
 evidence, known gaps, and the tasks still needing a person with VoiceOver or NVDA. Automated checks cover
@@ -132,10 +122,20 @@ build. Every instance serves it at `/docs/licence/THIRD-PARTY-NOTICES.md`, and t
 (`<link rel="license">`), every page of the docs links
 it at its foot, each diagram page carries Archify's notice, and the iPhone app links it under **You**, **About**. `test/licences.test.ts` fails on a dependency under a licence nobody has accepted.
 
+**Giving others the executable or the image** was settled on 2026-10-23 ([#234](https://github.com/endqwerty/mainworthy/issues/234)).
+Since [#857](https://github.com/endqwerty/mainworthy/pull/857) every passing `main` run publishes the image to public GHCR.
+The executable carries the Bun runtime, including LGPL libraries linked statically (JavaScriptCore, WTF, copied
+WebCore files, TinyCC) and MPL-2.0 files. [licences/SOURCE.md](../licences/SOURCE.md) names the public source of each
+of those parts at its exact revision, explains how to link a changed library again from Mainworthy's public source
+and `Dockerfile`, and makes a written offer of that source for three years, which `NOTICE` repeats in the image and
+at `/docs/licence`. The owner accepted the audit's remaining items as they are: domain-browser under Artistic-2.0,
+Bun's `LICENSE.md` without an MIT text, two ports in Bun that name no licence, and a released binary that was not
+inspected (`licences/README.md`).
+
 | Ships in | What | Licences |
 | --- | --- | --- |
 | The executable, and of those the web UI a browser loads takes some | 18 npm packages: React, TanStack, Zod, the MCP SDK, Ajv, @noble/hashes and what they import | MIT, ISC, BSD-3-Clause, CC0-1.0 |
-| The executable | The Bun runtime 1.4.3 and what it links: 266 parts, among them 65 Rust crates and 84 npm packages it embeds for its Node.js fallbacks (`licences/README.md`) | Mostly MIT, BSD, Apache-2.0, ISC and Zlib; LGPL for JavaScriptCore, WebKit and TinyCC; MPL-2.0 for some CSS code, three crates and Mozilla's certificate list; GPL with runtime exceptions for the compilers' runtime libraries; Artistic-2.0 for domain-browser (gap 4) |
+| The executable | The Bun runtime 1.4.3 and what it links: 266 parts, among them 65 Rust crates and 84 npm packages it embeds for its Node.js fallbacks (`licences/README.md`) | Mostly MIT, BSD, Apache-2.0, ISC and Zlib; LGPL for JavaScriptCore, WebKit and TinyCC; MPL-2.0 for some CSS code, three crates and Mozilla's certificate list; GPL with runtime exceptions for the compilers' runtime libraries; Artistic-2.0 for domain-browser (giving it to others is settled below) |
 | The pages at `/docs` | Archify 3.0.1's viewer and the JetBrains Mono font in the diagrams; the privacy policy, adapted from Basecamp's policies | MIT, OFL-1.1, CC-BY-4.0 |
 | The iPhone app | Nothing from others: its own code and Apple's frameworks | |
 

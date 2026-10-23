@@ -3,3 +3,10 @@ Copyright 2026 Daniel Yang
 
 This product includes software that others wrote, under their own licences. Their notices are in
 THIRD-PARTY-NOTICES.md.
+
+Some of those parts are under the LGPL or the MPL. Their source, at the revisions shipped, and how to link a
+changed library again are described in licences/SOURCE.md:
+https://github.com/endqwerty/mainworthy/blob/main/licences/SOURCE.md
+For three years after an image or executable is published, anyone who received it can ask for a copy of that
+source by opening an issue at https://github.com/endqwerty/mainworthy/issues; it is given at no more than the
+cost of making and sending the copy.
