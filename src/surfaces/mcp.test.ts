@@ -39,22 +39,22 @@ const TOKEN_COUNTS: Record<string, number> = {
 };
 
 test("MCP impact pages all 450 selected cases before advancing since", async () => {
-	const h = harness();
+	const h = await harness();
 	const server = mcpServer(
-		async (op, _project, input) => h.raw(op, input),
+		async (op, _project, input) => await h.raw(op, input),
 		async () => ["scratch"],
 	);
 	const client = new Client({ name: "impact-pages", version: "1" });
 	const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 	try {
-		h.call("propose", {
+		await h.call("propose", {
 			edits: Array.from({ length: 450 }, (_, i) => ({
 				op: "create",
 				outline: `Affected case ${i + 1}\n  Check > Works`,
 				covers: ["REQ-396"],
 			})),
 		});
-		h.call("report", {
+		await h.call("report", {
 			target: { commit: "mcpimpact396", pr: 396, title: "REQ-396: review cases" },
 			results: [{ test: { case: "C-1" }, outcome: "pass" }],
 		});
