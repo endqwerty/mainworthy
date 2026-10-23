@@ -197,6 +197,11 @@ test.skipIf(!browserAvailable)(
 			});
 			expect(accepted.ok()).toBe(true);
 			await h.context.request.post(`${server.url}/api/login`, { data: { token: server.token } });
+			expect(
+				(
+					await page.request.post(`${server.url}/api/account/password`, { data: { next: "the owner password" } })
+				).status(),
+			).toBe(200);
 			const closed = await server.api("plan", { name: "Closed audit run", select: { cases: ["C-2"] } });
 			await server.api("report", { run: closed.run, results: [{ test: { case: "C-2" }, outcome: "pass" }] });
 			const pending = await server.api("plan", {
@@ -285,19 +290,18 @@ test.skipIf(!browserAvailable)(
 			await page.getByRole("button", { name: "Recovery link for pat", exact: true }).click();
 			await page.getByLabel("Person to forget", { exact: true }).selectOption("pat");
 			await scan("people-forms");
-			expect(
-				(
-					await page.request.post(`${server.url}/api/account/password`, { data: { next: "the owner password" } })
-				).status(),
-			).toBe(200);
-			expect(
-				(
-					await page.request.post(`${server.url}/api/account/proof`, { data: { password: "the owner password" } })
-				).status(),
-			).toBe(200);
 			await page.getByLabel("Name", { exact: true }).fill("sam");
 			await page.getByRole("button", { name: "Make invitation link", exact: true }).click();
+			const proof = page.getByRole("region", { name: "Confirm your sign-in", exact: true });
+			await proof.waitFor();
+			await proof.getByLabel("Password", { exact: true }).fill("wrong password");
+			await proof.getByRole("button", { name: "Confirm credential", exact: true }).click();
+			await proof.getByRole("status").filter({ hasText: "that credential proof was not accepted" }).waitFor();
+			await scan("recent-proof");
+			await proof.getByLabel("Password", { exact: true }).fill("the owner password");
+			await proof.getByRole("button", { name: "Confirm credential", exact: true }).click();
 			await page.getByLabel("Invitation link for sam", { exact: true }).waitFor();
+			expect(await proof.count()).toBe(0);
 			await scan("people-invitation-link");
 			await page.keyboard.press("ControlOrMeta+k");
 			await page.locator("[data-overlay=palette]").waitFor();
@@ -353,7 +357,9 @@ test.skipIf(!browserAvailable)(
 			await scan("phone-palette");
 			await page.keyboard.press("Escape");
 			expect(await page.locator("[data-overlay=palette]").count()).toBe(0);
-			expect(h.errors).toEqual([]);
+			expect(h.errors).toEqual(
+				Array(2).fill("Failed to load resource: the server responded with a status of 403 (Forbidden)"),
+			);
 			if (capture) await Bun.write(`${capture}/manual-checks.json`, JSON.stringify(manual, null, 2));
 			console.info(
 				`Accessibility: ${scanned.length} screens in light and dark; keyboard, targets and live status checked; ${manual.length} axe results need human review.`,
