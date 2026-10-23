@@ -82,6 +82,7 @@ Propose cases at base: adopted=current, open=needs acceptance, conflict=resolve,
 | `edits[][place].cases` | `array<string>` | yes |  |
 | `edits[][place].folder` | `integer \| string` | no |  |
 | `edits[][place].after` | `string \| null` | no |  |
+| `edits[][place].rank` | `string` | no |  |
 | `edits[][place].tags` | `object` | no |  |
 | `edits[][place].tags.set` | `array<string>` | no |  |
 | `edits[][place].tags.add` | `array<string>` | no |  |

@@ -25,7 +25,7 @@ import { compactSchema, mcpRoute, mcpServer, mcpTools, TOOL_TOKEN_GUIDELINE } fr
 
 const tokens = (value: unknown): number => encode(JSON.stringify(value)).length;
 const TOKEN_COUNTS: Record<string, number> = {
-	propose: 1368,
+	propose: 1377,
 	report: 855,
 	claim: 358,
 	work: 169,

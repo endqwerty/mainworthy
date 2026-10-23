@@ -61,7 +61,7 @@ export const ProposeReply = z.object({
 	needs: schemaNullableText,
 	cases: z.array(CaseStamp),
 	/** Ready-to-propose inverse edits for placements actually written. No-ops contribute none. */
-	placements: z.array(PlacementEdit),
+	placements: z.array(PlacementEdit).default([]),
 	conflicts: z.array(
 		z.object({
 			case: schemaText,

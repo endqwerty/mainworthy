@@ -960,3 +960,67 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+test.skipIf(!browserAvailable)(
+	"a no-op undo step never undoes the preceding tag action",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", { edits: [{ op: "create", body: { title: "Keep earlier tag" } }] });
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = h;
+			await page.getByRole("button", { name: "Keep earlier tag", exact: true }).waitFor();
+			await tagSelected(page, "kept");
+			await page.locator("#stat").filter({ hasText: "1 case changed." }).waitFor();
+			await tagSelected(page, "kept");
+			await page.locator("#stat").filter({ hasText: "No cases changed." }).waitFor();
+			if (process.env.MAINWORTHY_PLACEMENT_NOOP_SCREENSHOT)
+				await page.screenshot({ path: process.env.MAINWORTHY_PLACEMENT_NOOP_SCREENSHOT });
+			await page.keyboard.press("u");
+			await page.locator("#stat").filter({ hasText: "Nothing to undo." }).waitFor();
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.tags).toEqual(["kept"]);
+			expect(
+				(await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "placement"),
+			).toHaveLength(1);
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"an undo that becomes a no-op does not fall through to body restoration",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", { edits: [{ op: "create", body: { title: "Keep current body" } }] });
+		await server.api("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { pre: "Keep this content" } }] });
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = h;
+			await page.getByRole("button", { name: "Keep current body", exact: true }).waitFor();
+			await tagSelected(page, "removed-elsewhere");
+			await page.locator("#stat").filter({ hasText: "1 case changed." }).waitFor();
+			await server.api("propose", {
+				edits: [{ op: "place", cases: ["C-1"], tags: { remove: ["removed-elsewhere"] } }],
+			});
+			await page.keyboard.press("u");
+			await page.locator("#stat").filter({ hasText: "Nothing to undo." }).waitFor();
+			const read = page.waitForResponse((response) => response.url().endsWith("/api/p/scratch/get"));
+			await page.keyboard.press("u");
+			await page.keyboard.press("v");
+			await read;
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(2);
+			expect(
+				(await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "placement"),
+			).toHaveLength(2);
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);

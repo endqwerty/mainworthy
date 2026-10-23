@@ -158,6 +158,7 @@ export function* proposeSteps(ctx: Ctx, input: ProposeInput): Generator<undefine
 export const proposeOp = defineOp({
 	name: "propose",
 	output: REPLIES.propose,
+	present: (actor, reply) => ({ ...reply, placements: actor.can.includes("read") ? reply.placements : [] }),
 	summary:
 		"Create or change cases, folders, links or the policy. Saving and proposing are the same call; policy decides what happens next.",
 	input: ProposeInput,
@@ -616,6 +617,14 @@ export function* decideSteps(ctx: Ctx, input: DecideInput): Generator<undefined,
 export const decideOp = defineOp({
 	name: "decide",
 	output: REPLIES.decide,
+	present: (actor, replies) =>
+		actor.can.includes("read")
+			? replies
+			: replies.map((reply) => ({
+					...reply,
+					effects:
+						reply.effects && "placements" in reply.effects ? { ...reply.effects, placements: [] } : reply.effects,
+				})),
 	summary:
 		"Answer a question, or withdraw a decision. Policy says whether your answer settles it, is advice, or is refused.",
 	input: DecideInput,

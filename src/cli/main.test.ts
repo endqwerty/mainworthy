@@ -1435,7 +1435,7 @@ test("health prints the first 12 characters of the commit the server reports, an
 				healthy: true,
 				version: "0.1.0",
 				commit: sha,
-				apiVersion: 1,
+				apiVersion: API_VERSION,
 				compatible: true,
 			});
 		},
@@ -2252,7 +2252,7 @@ test("a token bound for plain http on another machine is warned of once, on stde
 			const { result, asked } = await viaServer(instance, () => run(["find", "--url", PLAIN, "--compact"]));
 			// The health probe sends no token; the session and operation follow, with one warning ahead of them.
 			expect(asked.map((request) => request.authorization)).toEqual([null, `Bearer ${token}`, `Bearer ${token}`]);
-			expect(asked.map((request) => request.apiVersion)).toEqual([null, "1", "1"]);
+			expect(asked.map((request) => request.apiVersion)).toEqual([null, String(API_VERSION), String(API_VERSION)]);
 			expect(result.code).toBe(0);
 			expect(result.stderr).toBe(`[fetch]\n${PLAIN_WARNING}[fetch]\n[fetch]\n`);
 			expect(outputWith(Found, result).items).toEqual([]);
@@ -2591,13 +2591,13 @@ test("version reports the CLI contract without reaching a server or reading a to
 			{ refuse: true },
 		);
 		expect(result.code).toBe(0);
-		expect(JSON.parse(result.stdout)).toEqual({ version: "0.1.0", apiVersion: 1 });
+		expect(JSON.parse(result.stdout)).toEqual({ version: "0.1.0", apiVersion: API_VERSION });
 		expect(asked).toEqual([]);
 	});
 });
 
 test("an incompatible or unversioned server receives no CLI operation or credentials", async () => {
-	for (const apiVersion of [undefined, 0, 2, "1", null]) {
+	for (const apiVersion of [undefined, 0, API_VERSION - 1, API_VERSION + 1, "1", null]) {
 		const received: { path: string; token: string | null }[] = [];
 		const server = Bun.serve({
 			hostname: "127.0.0.1",
@@ -2628,7 +2628,7 @@ test("an incompatible or unversioned server receives no CLI operation or credent
 				]);
 				expect(result.code).toBe(4);
 				expect(result.stderr).toContain("incompatible:");
-				expect(result.stderr).toContain("CLI requires API 1");
+				expect(result.stderr).toContain(`CLI requires API ${API_VERSION}`);
 				expect(received).toEqual([{ path: "/healthz", token: null }]);
 			});
 		} finally {
