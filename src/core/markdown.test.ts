@@ -5,6 +5,30 @@ import { CaseDoc } from "./model.ts";
 import { docArbitrary, exampleBody } from "./test-support.ts";
 
 describe("canonical case Markdown", () => {
+	test.each(["\u007f", "\u0085", "\u009b", "\u202b", "\u202c", "\u202e", "\u2066", "\u2069", "##[error]", "::error::"])(
+		"prints terminal-safe, lossless text for %j in every position",
+		(text) => {
+			const value = `é 雪${text}text`;
+			const doc: CaseDoc = {
+				ref: value,
+				body: {
+					...exampleBody(),
+					title: value,
+					pre: `${text}body\n\\${text}literal`,
+					fields: { [value]: value },
+					steps: [{ id: "a1", action: `${text}action`, expected: `${text}expected` }],
+				},
+				tags: [value],
+				covers: [value],
+			};
+			const printed = printCase(doc);
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: canonical output must contain only structural LF controls.
+			expect(printed).not.toMatch(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/);
+			expect(printed).not.toContain("##[");
+			expect(printed).not.toMatch(/^\s*::/m);
+			expect(parseCase(printed)).toEqual({ ok: true, doc });
+		},
+	);
 	test.each(["\u2028", "\u2029"])("preserves Unicode separator %j in every string position", (text) => {
 		const doc: CaseDoc = {
 			ref: text,

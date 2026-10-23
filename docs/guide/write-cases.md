@@ -341,6 +341,7 @@ See [the CLI guide](./cli.md) for command forms and flags.
 ## Custom field values
 
 Canonical Markdown can carry a `fields` map in its header. Values are strings and survive Markdown round trips.
+Terminal controls and workflow-command prefixes print as reversible escapes in header values and body text.
 When editing an existing case, omitting the `fields` header keeps the values from the edit's base version.
 Concurrent field changes merge under the ordinary edit rules.
 A proposal that supplies the map replaces all its values, so include keys you want to keep.

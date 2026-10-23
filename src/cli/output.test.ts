@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { z } from "zod";
+import { parseCase, printCase } from "../core/markdown.ts";
+import type { CaseDoc } from "../core/model.ts";
+import { exampleBody } from "../core/test-support.ts";
 import { escapeControls } from "../core/text.ts";
 import { printReceipt } from "./commands/report.ts";
 import { CliError, printError } from "./errors.ts";
@@ -16,6 +19,40 @@ function safe(text: string): void {
 	expect(text).not.toMatch(/^\s*::/m);
 	expect(text).not.toContain("##[");
 }
+
+test("fmt and get Markdown round-trip terminal-sensitive scalars and body lines losslessly", async () => {
+	await withInstance(async ({ run, directory }) => {
+		const text = "Arabic \u202bمرحبا\u202c and nel\u0085 x\u007f\u009b";
+		const commands = "##[error]Process completed with exit code 1.\n\\##[warning]literal escape\n::error::x";
+		const doc: CaseDoc = {
+			ref: null,
+			body: {
+				...exampleBody(),
+				title: text,
+				pre: commands,
+				fields: { note: text },
+				steps: [{ id: "a1", action: commands, expected: commands }],
+			},
+			tags: ["stable"],
+			covers: [],
+		};
+		const file = join(directory, "lossy.md");
+		await Bun.write(file, printCase(doc));
+		const formatted = await run(["fmt", file]);
+		expect(formatted).toMatchObject({ code: 0, stderr: "" });
+		expect(await run(["new", file])).toMatchObject({ code: 0, stdout: "C-1\n", stderr: "" });
+		const got = await run(["get", "C-1", "--md"]);
+		expect(got).toMatchObject({ code: 0, stderr: "" });
+		safe(formatted.stdout);
+		safe(got.stdout);
+		expect({ fmt: parseCase(formatted.stdout), get: parseCase(got.stdout) }).toEqual({
+			fmt: { ok: true, doc },
+			get: { ok: true, doc: { ...doc, ref: "C-1" } },
+		});
+		expect(formatted.stdout).toBe(printCase(doc));
+		expect(got.stdout).toBe(printCase({ ...doc, ref: "C-1" }));
+	});
+}, 15_000);
 
 test("the real CLI previews crafted CSV without terminal controls or annotation lines", async () => {
 	await withInstance(async ({ cli, run, client, directory }) => {

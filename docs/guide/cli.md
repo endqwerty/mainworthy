@@ -115,9 +115,10 @@ Human-readable output escapes terminal controls, including embedded line breaks,
 as visible `\uNNNN` text. This covers import previews, warnings, receipts and
 lists. Non-ASCII text such as `é` and `雪` stays readable. Output also escapes
 GitHub Actions command prefixes so imported text cannot create annotations.
-`get --md` and `fmt` retain Markdown line breaks but escape controls and command
-prefixes within the document. For original values, use `get --md --json` or
-`fmt --json` and decode the JSON. Pretty and compact JSON preserve their values
+`get --md` and `fmt` retain Markdown structure and encode controls and command
+prefixes with reversible canonical Markdown escapes. Parsing that output recovers
+the original values. Their JSON forms preserve the canonical document text.
+Pretty and compact JSON preserve their values
 and remain valid JSON; saved archives and audit exports retain their original bytes.
 
 ## Commands
