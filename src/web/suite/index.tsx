@@ -1943,6 +1943,28 @@ export function SuiteScreen() {
 			added.length ? [{ op: "place", cases: added, tags: { remove: [value] } }] : [],
 		);
 	}
+	function removeTag(): void {
+		const refs = selection();
+		const rows = cases.filter((row) => refs.includes(row.ref));
+		openPalette({
+			title: "Remove tag from selected cases",
+			items: [...new Set(rows.flatMap((row) => row.tags))].sort().map((tag) => ({
+				id: tag,
+				label: `#${tag}`,
+				handler: () =>
+					void placement(
+						[{ op: "place", cases: refs, tags: { remove: [tag] } }],
+						[
+							{
+								op: "place",
+								cases: rows.filter((row) => row.tags.includes(tag)).map((row) => row.ref),
+								tags: { add: [tag] },
+							},
+						],
+					),
+			})),
+		});
+	}
 	async function undoLast(): Promise<void> {
 		if (undo.current) {
 			const action = undo.current;
@@ -2037,6 +2059,7 @@ export function SuiteScreen() {
 		},
 		move,
 		tag: () => setTagging(true),
+		removeTag,
 		archive,
 		undo: () => {
 			void undoLast().catch((error: unknown) => setStatus(error instanceof Error ? error.message : "Undo failed"));

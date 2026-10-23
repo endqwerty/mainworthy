@@ -10,6 +10,7 @@ export function useSuiteBindings({
 	select,
 	move,
 	tag,
+	removeTag,
 	archive,
 	undo,
 	peek,
@@ -29,6 +30,7 @@ export function useSuiteBindings({
 	select: () => void;
 	move: () => void;
 	tag: () => void;
+	removeTag: () => void;
 	archive: () => void;
 	undo: () => void;
 	peek: () => void;
@@ -60,6 +62,7 @@ export function useSuiteBindings({
 		{ key: "x", label: "Select case", handler: select },
 		{ key: "m", label: "Move selected", handler: move },
 		{ key: "t", label: "Tag selected", handler: tag },
+		{ key: "alt+t", label: "Remove tag…", handler: removeTag },
 		{ key: "#", label: "Archive selected", handler: archive },
 		{ key: "u", label: "Undo", handler: undo },
 		{ key: "space", label: "Peek timeline", handler: peek },
