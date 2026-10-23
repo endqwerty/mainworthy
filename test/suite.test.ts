@@ -2521,95 +2521,95 @@ describe("conflict storage upgrades", () => {
 });
 
 describe("authoritative placement effects", () => {
-	const propose = (edits: Edit[]) => ProposeReply.parse(h.call("propose", { edits }));
-	test("a partial state change names only written cases and a no-op has no inverse", () => {
-		propose([
+	const propose = async (edits: Edit[]) => ProposeReply.parse(await h.call("propose", { edits }));
+	test("a partial state change names only written cases and a no-op has no inverse", async () => {
+		await propose([
 			{ op: "create", body: { title: "Already archived" } },
 			{ op: "create", body: { title: "Still active" } },
 		]);
-		propose([{ op: "state", cases: ["C-1"], to: "archived" }]);
-		const reply = propose([{ op: "state", cases: ["C-1", "C-2"], to: "archived" }]);
+		await propose([{ op: "state", cases: ["C-1"], to: "archived" }]);
+		const reply = await propose([{ op: "state", cases: ["C-1", "C-2"], to: "archived" }]);
 		expect(reply.placements).toEqual([{ op: "state", cases: ["C-2"], to: "active" }]);
-		expect(propose([{ op: "state", cases: ["C-1", "C-2"], to: "archived" }]).placements).toEqual([]);
-		propose(reply.placements);
-		expect(h.call<{ state: string }[]>("get", { refs: ["C-1", "C-2"] }).map((row) => row.state)).toEqual([
+		expect((await propose([{ op: "state", cases: ["C-1", "C-2"], to: "archived" }])).placements).toEqual([]);
+		await propose(reply.placements);
+		expect((await h.call<{ state: string }[]>("get", { refs: ["C-1", "C-2"] })).map((row) => row.state)).toEqual([
 			"archived",
 			"active",
 		]);
 	});
 
-	test("command recovery retains the original placement effects without writing them twice", () => {
-		propose([{ op: "create", body: { title: "Retry placement" } }]);
+	test("command recovery retains the original placement effects without writing them twice", async () => {
+		await propose([{ op: "create", body: { title: "Retry placement" } }]);
 		const input = { cmd: "recorded-placement", edits: [{ op: "state", cases: ["C-1"], to: "archived" }] };
-		const first = ProposeReply.parse(h.call("propose", input));
+		const first = ProposeReply.parse(await h.call("propose", input));
 		expect(first.placements).toEqual([{ op: "state", cases: ["C-1"], to: "active" }]);
-		expect(ProposeReply.parse(h.call("propose", input))).toEqual(first);
+		expect(ProposeReply.parse(await h.call("propose", input))).toEqual(first);
 		expect(
-			h
-				.call<{ entries: { t: string }[] }>("timeline", { ref: "C-1" })
-				.entries.filter((entry) => entry.t === "placement"),
+			(await h.call<{ entries: { t: string }[] }>("timeline", { ref: "C-1" })).entries.filter(
+				(entry) => entry.t === "placement",
+			),
 		).toHaveLength(1);
 	});
 
-	test("tag inverses exclude no-ops and preserve unrelated tags added after the write", () => {
-		propose([
+	test("tag inverses exclude no-ops and preserve unrelated tags added after the write", async () => {
+		await propose([
 			{ op: "create", tags: ["shared"], body: { title: "Has tag" } },
 			{ op: "create", body: { title: "Needs tag" } },
 		]);
-		const added = propose([{ op: "place", cases: ["C-1", "C-2"], tags: { add: ["shared"] } }]);
+		const added = await propose([{ op: "place", cases: ["C-1", "C-2"], tags: { add: ["shared"] } }]);
 		expect(added.placements).toEqual([{ op: "place", cases: ["C-2"], tags: { add: [], remove: ["shared"] } }]);
-		propose([{ op: "place", cases: ["C-2"], tags: { add: ["other"] } }]);
-		propose(added.placements);
-		expect(h.call<{ tags: string[] }[]>("get", { refs: ["C-1", "C-2"] }).map((row) => row.tags)).toEqual([
+		await propose([{ op: "place", cases: ["C-2"], tags: { add: ["other"] } }]);
+		await propose(added.placements);
+		expect((await h.call<{ tags: string[] }[]>("get", { refs: ["C-1", "C-2"] })).map((row) => row.tags)).toEqual([
 			["shared"],
 			["other"],
 		]);
-		const removed = propose([{ op: "place", cases: ["C-1", "C-2"], tags: { remove: ["shared"] } }]);
+		const removed = await propose([{ op: "place", cases: ["C-1", "C-2"], tags: { remove: ["shared"] } }]);
 		expect(removed.placements).toEqual([{ op: "place", cases: ["C-1"], tags: { add: ["shared"], remove: [] } }]);
-		propose(removed.placements);
-		expect(propose([{ op: "place", cases: ["C-1"], tags: { add: ["shared"] } }]).placements).toEqual([]);
+		await propose(removed.placements);
+		expect((await propose([{ op: "place", cases: ["C-1"], tags: { add: ["shared"] } }])).placements).toEqual([]);
 	});
 
-	test("a folder inverse uses the folder at the write, including after a rename", () => {
-		propose([
+	test("a folder inverse uses the folder at the write, including after a rename", async () => {
+		await propose([
 			{ op: "create", folder: "Original", tags: ["kept"], body: { title: "Moved twice" } },
 			{ op: "folder", name: "Concurrent" },
 		]);
-		propose([{ op: "place", cases: ["C-1"], folder: "Concurrent" }]);
-		const before = h.call<{ folder: { id: number } }[]>("get", { refs: ["C-1"] })[0]?.folder.id;
-		const moved = propose([{ op: "place", cases: ["C-1"], folder: "Destination" }]);
+		await propose([{ op: "place", cases: ["C-1"], folder: "Concurrent" }]);
+		const before = (await h.call<{ folder: { id: number } }[]>("get", { refs: ["C-1"] }))[0]?.folder.id;
+		const moved = await propose([{ op: "place", cases: ["C-1"], folder: "Destination" }]);
 		expect(moved.placements).toEqual([{ op: "place", cases: ["C-1"], folder: before, rank: expect.any(String) }]);
-		propose([{ op: "folder", folder: "Concurrent", name: "Renamed" }]);
-		propose(moved.placements);
-		expect(h.call("get", { refs: ["C-1"] })).toMatchObject([{ folder: { path: "Renamed" }, tags: ["kept"] }]);
+		await propose([{ op: "folder", folder: "Concurrent", name: "Renamed" }]);
+		await propose(moved.placements);
+		expect(await h.call("get", { refs: ["C-1"] })).toMatchObject([{ folder: { path: "Renamed" }, tags: ["kept"] }]);
 	});
 
-	test("effects reverse repeated changes to a case in the same proposal", () => {
-		propose([{ op: "create", body: { title: "Several changes" } }]);
-		const changed = propose([
+	test("effects reverse repeated changes to a case in the same proposal", async () => {
+		await propose([{ op: "create", body: { title: "Several changes" } }]);
+		const changed = await propose([
 			{ op: "state", cases: ["C-1"], to: "archived" },
 			{ op: "place", cases: ["C-1"], tags: { add: ["first"] } },
 			{ op: "place", cases: ["C-1"], tags: { add: ["second"] } },
 		]);
 		expect(changed.placements).toHaveLength(3);
-		propose(changed.placements);
-		expect(h.call("get", { refs: ["C-1"] })).toMatchObject([{ state: "active", tags: [] }]);
+		await propose(changed.placements);
+		expect(await h.call("get", { refs: ["C-1"] })).toMatchObject([{ state: "active", tags: [] }]);
 	});
 });
 
 describe("placement reply boundaries and order", () => {
-	const propose = (edits: Edit[]) => ProposeReply.parse(h.call("propose", { edits }));
-	const order = (folder: string) =>
-		h.call<{ items: { ref: string }[] }>("find", { in: "cases", folder }).items.map((row) => row.ref);
+	const propose = async (edits: Edit[]) => ProposeReply.parse(await h.call("propose", { edits }));
+	const order = async (folder: string) =>
+		(await h.call<{ items: { ref: string }[] }>("find", { in: "cases", folder })).items.map((row) => row.ref);
 
 	for (const operation of ["propose", "decide"] as const) {
-		test(`${operation} hides prior placement metadata without read, including command replay`, () => {
+		test(`${operation} hides prior placement metadata without read, including command replay`, async () => {
 			h.close();
-			h = harness({ preset: "standard" });
-			propose([{ op: "create", folder: "Private", tags: ["private-tag"], body: { title: "Protected case" } }]);
+			h = await harness({ preset: "standard" });
+			await propose([{ op: "create", folder: "Private", tags: ["private-tag"], body: { title: "Protected case" } }]);
 			const reader = h.actor("writer", operation === "propose" ? "human" : "agent", ["read", "produce"]);
 			const blind = h.actor("blind-writer", "human", operation === "decide" ? ["produce", "answer"] : ["produce"]);
-			expect(h.raw("get", { refs: ["C-1"] }, blind).ok).toBe(false);
+			expect((await h.raw("get", { refs: ["C-1"] }, blind)).ok).toBe(false);
 			const input = {
 				edits: [
 					{ op: "place", cases: ["C-1"], folder: "Destination", tags: { set: [] } },
@@ -2617,28 +2617,28 @@ describe("placement reply boundaries and order", () => {
 				],
 			};
 			const proposed = ProposeReply.parse(
-				h.call("propose", { ...input, cmd: "blind-placement" }, operation === "propose" ? blind : reader),
+				await h.call("propose", { ...input, cmd: "blind-placement" }, operation === "propose" ? blind : reader),
 			);
 			if (operation === "propose") {
 				expect(proposed.status).toBe("adopted");
 				expect(proposed.placements).toEqual([]);
-				expect(ProposeReply.parse(h.call("propose", { ...input, cmd: "blind-placement" }, blind)).placements).toEqual(
-					[],
-				);
+				expect(
+					ProposeReply.parse(await h.call("propose", { ...input, cmd: "blind-placement" }, blind)).placements,
+				).toEqual([]);
 			} else {
-				const [question] = h.call<{ evidenceHash: string }[]>("get", { refs: [proposed.question] });
+				const [question] = await h.call<{ evidenceHash: string }[]>("get", { refs: [proposed.question] });
 				const answer = {
 					q: proposed.question,
 					onEvidence: question?.evidenceHash,
 					answer: { is: "accept" },
 					cmd: "blind-decision",
 				};
-				const [reply] = h.call<DecideReply[]>("decide", answer, blind);
+				const [reply] = await h.call<DecideReply[]>("decide", answer, blind);
 				expect(reply?.status).toBe("decided");
 				expect(reply?.effects?.placements).toEqual([]);
-				expect(h.call<DecideReply[]>("decide", answer, blind)[0]?.effects?.placements).toEqual([]);
+				expect((await h.call<DecideReply[]>("decide", answer, blind))[0]?.effects?.placements).toEqual([]);
 			}
-			const [detail] = h.call<{ decision: { id: number; effects: { placements: Edit[] } } }[]>("get", {
+			const [detail] = await h.call<{ decision: { id: number; effects: { placements: Edit[] } } }[]>("get", {
 				refs: [proposed.question],
 			});
 			expect(detail?.decision.effects.placements).toMatchObject([
@@ -2648,22 +2648,22 @@ describe("placement reply boundaries and order", () => {
 		});
 	}
 
-	test("replay filters effects after the caller loses read access", () => {
-		propose([{ op: "create", tags: ["private-tag"], body: { title: "Revoked read" } }]);
+	test("replay filters effects after the caller loses read access", async () => {
+		await propose([{ op: "create", tags: ["private-tag"], body: { title: "Revoked read" } }]);
 		const actor = h.actor("reader-writer", "human", ["read", "produce"]);
 		const input = { cmd: "read-before-revoke", edits: [{ op: "place", cases: ["C-1"], tags: { set: [] } }] };
-		expect(ProposeReply.parse(h.call("propose", input, actor)).placements).toHaveLength(1);
-		expect(ProposeReply.parse(h.call("propose", input, { ...actor, can: ["produce"] })).placements).toEqual([]);
+		expect(ProposeReply.parse(await h.call("propose", input, actor)).placements).toHaveLength(1);
+		expect(ProposeReply.parse(await h.call("propose", input, { ...actor, can: ["produce"] })).placements).toEqual([]);
 	});
 
-	test("legacy recorded create outcomes recover without duplicating the case", () => {
+	test("legacy recorded create outcomes recover without duplicating the case", async () => {
 		const input = { cmd: "pre-placements-create", edits: [{ op: "create", body: { title: "Old create reply" } }] };
-		const { placements: _placements, ...old } = ProposeReply.parse(h.call("propose", input));
+		const { placements: _placements, ...old } = ProposeReply.parse(await h.call("propose", input));
 		h.app.db.raw.query("UPDATE commands SET outcome = ? WHERE id = ?").run(JSON.stringify(old), input.cmd);
-		const fate = h.call<{ reply: unknown }>("command", { cmd: input.cmd });
+		const fate = await h.call<{ reply: unknown }>("command", { cmd: input.cmd });
 		expect(ProposeReply.parse(fate.reply).placements).toEqual([]);
-		expect(ProposeReply.parse(h.call("propose", input)).placements).toEqual([]);
-		expect(order("Unsorted")).toEqual(["C-1"]);
+		expect(ProposeReply.parse(await h.call("propose", input)).placements).toEqual([]);
+		expect(await order("Unsorted")).toEqual(["C-1"]);
 	});
 
 	test("API 2 refuses a version-1 server before a retried create writes", async () => {
@@ -2694,57 +2694,57 @@ describe("placement reply boundaries and order", () => {
 	});
 
 	for (const destination of ["A", "B"]) {
-		test(`move inverses restore exact order from ${destination}`, () => {
-			propose([1, 2, 3].map((n) => ({ op: "create", folder: "A", body: { title: `Ordered ${n}` } })));
-			const changed = propose([
+		test(`move inverses restore exact order from ${destination}`, async () => {
+			await propose([1, 2, 3].map((n) => ({ op: "create", folder: "A", body: { title: `Ordered ${n}` } })));
+			const changed = await propose([
 				{ op: "place", cases: ["C-2"], folder: destination, ...(destination === "A" ? { after: "C-3" } : {}) },
 			]);
-			expect(order("A")).toEqual(destination === "A" ? ["C-1", "C-3", "C-2"] : ["C-1", "C-3"]);
-			propose(changed.placements);
-			expect(order("A")).toEqual(["C-1", "C-2", "C-3"]);
+			expect(await order("A")).toEqual(destination === "A" ? ["C-1", "C-3", "C-2"] : ["C-1", "C-3"]);
+			await propose(changed.placements);
+			expect(await order("A")).toEqual(["C-1", "C-2", "C-3"]);
 		});
 	}
 
-	test("bulk move inverse preserves order even after the original folder is archived", () => {
-		propose([1, 2, 3, 4].map((n) => ({ op: "create", folder: "A", body: { title: `Bulk ordered ${n}` } })));
-		const moved = propose([{ op: "place", cases: ["C-1", "C-2", "C-3"], folder: "B" }]);
-		propose([{ op: "folder", folder: "A", archive: true }]);
-		propose(moved.placements);
-		expect(order("A")).toEqual(["C-1", "C-2", "C-3", "C-4"]);
-		expect(h.call<{ items: { ref: string }[] }>("find", { in: "cases" }).items).toHaveLength(4);
+	test("bulk move inverse preserves order even after the original folder is archived", async () => {
+		await propose([1, 2, 3, 4].map((n) => ({ op: "create", folder: "A", body: { title: `Bulk ordered ${n}` } })));
+		const moved = await propose([{ op: "place", cases: ["C-1", "C-2", "C-3"], folder: "B" }]);
+		await propose([{ op: "folder", folder: "A", archive: true }]);
+		await propose(moved.placements);
+		expect(await order("A")).toEqual(["C-1", "C-2", "C-3", "C-4"]);
+		expect((await h.call<{ items: { ref: string }[] }>("find", { in: "cases" })).items).toHaveLength(4);
 		expect(
-			h
-				.call<{ items: { path: string; state: string }[] }>("find", { in: "folders" })
-				.items.find((row) => row.path === "A")?.state,
+			(await h.call<{ items: { path: string; state: string }[] }>("find", { in: "folders" })).items.find(
+				(row) => row.path === "A",
+			)?.state,
 		).toBe("archived");
 	});
 
-	test("moving to the existing position records no effect", () => {
-		propose([1, 2, 3].map((n) => ({ op: "create", folder: "A", body: { title: `Already positioned ${n}` } })));
-		expect(propose([{ op: "place", cases: ["C-3"], folder: "A" }]).placements).toEqual([]);
-		expect(propose([{ op: "place", cases: ["C-2", "C-3"], folder: "A" }]).placements).toEqual([]);
-		expect(propose([{ op: "place", cases: ["C-2", "C-3"], after: "C-1" }]).placements).toEqual([]);
+	test("moving to the existing position records no effect", async () => {
+		await propose([1, 2, 3].map((n) => ({ op: "create", folder: "A", body: { title: `Already positioned ${n}` } })));
+		expect((await propose([{ op: "place", cases: ["C-3"], folder: "A" }])).placements).toEqual([]);
+		expect((await propose([{ op: "place", cases: ["C-2", "C-3"], folder: "A" }])).placements).toEqual([]);
+		expect((await propose([{ op: "place", cases: ["C-2", "C-3"], after: "C-1" }])).placements).toEqual([]);
 	});
 	for (const rank of ["", "a", "a00", "a0!", "not-a-key"]) {
-		test(`invalid recorded rank ${JSON.stringify(rank)} cannot corrupt ordering`, () => {
-			propose([{ op: "create", body: { title: "Valid ordering" } }]);
-			expect(h.raw("propose", { edits: [{ op: "place", cases: ["C-1"], rank }] })).toMatchObject({
+		test(`invalid recorded rank ${JSON.stringify(rank)} cannot corrupt ordering`, async () => {
+			await propose([{ op: "create", body: { title: "Valid ordering" } }]);
+			expect(await h.raw("propose", { edits: [{ op: "place", cases: ["C-1"], rank }] })).toMatchObject({
 				ok: false,
 				error: { code: "invalid" },
 			});
-			propose([{ op: "create", body: { title: "Next valid ordering" } }]);
-			expect(order("Unsorted")).toEqual(["C-1", "C-2"]);
+			await propose([{ op: "create", body: { title: "Next valid ordering" } }]);
+			expect(await order("Unsorted")).toEqual(["C-1", "C-2"]);
 		});
 	}
-	test("a move inverse keeps every case pageable when a new case occupies the old rank", () => {
-		propose([1, 2, 3].map((n) => ({ op: "create", folder: "A", body: { title: `Slot ${n}` } })));
-		const moved = propose([{ op: "place", cases: ["C-2"], folder: "B" }]);
-		propose([{ op: "create", folder: "A", after: "C-1", body: { title: "New occupant" } }]);
-		propose(moved.placements);
+	test("a move inverse keeps every case pageable when a new case occupies the old rank", async () => {
+		await propose([1, 2, 3].map((n) => ({ op: "create", folder: "A", body: { title: `Slot ${n}` } })));
+		const moved = await propose([{ op: "place", cases: ["C-2"], folder: "B" }]);
+		await propose([{ op: "create", folder: "A", after: "C-1", body: { title: "New occupant" } }]);
+		await propose(moved.placements);
 		const refs: string[] = [];
 		let cursor: string | null = null;
 		do {
-			const page: { items: { ref: string }[]; cursor: string | null } = h.call("find", {
+			const page: { items: { ref: string }[]; cursor: string | null } = await h.call("find", {
 				in: "cases",
 				folder: "A",
 				limit: 1,
@@ -2756,95 +2756,97 @@ describe("placement reply boundaries and order", () => {
 		expect(refs).toHaveLength(4);
 		expect(refs.filter((ref) => ref !== "C-4")).toEqual(["C-1", "C-2", "C-3"]);
 	});
-	test("a recorded rank cannot name multiple cases or an after anchor", () => {
-		propose([1, 2].map((n) => ({ op: "create", body: { title: `Rank input ${n}` } })));
+	test("a recorded rank cannot name multiple cases or an after anchor", async () => {
+		await propose([1, 2].map((n) => ({ op: "create", body: { title: `Rank input ${n}` } })));
 		for (const edit of [
 			{ op: "place", cases: ["C-1", "C-2"], rank: "a0" },
 			{ op: "place", cases: ["C-1"], rank: "a0", after: "C-2" },
 		])
-			expect(h.raw("propose", { edits: [edit] })).toMatchObject({ ok: false, error: { code: "invalid" } });
-		expect(order("Unsorted")).toEqual(["C-1", "C-2"]);
+			expect(await h.raw("propose", { edits: [edit] })).toMatchObject({ ok: false, error: { code: "invalid" } });
+		expect(await order("Unsorted")).toEqual(["C-1", "C-2"]);
 	});
 });
 
 describe("conflict-merge placement effects", () => {
-	const propose = (edits: Edit[], as = h.owner) => ProposeReply.parse(h.call("propose", { edits }, as));
-	const conflictFor = (as = h.owner, tagged = true) => {
-		propose([{ op: "create", tags: ["kept", "removed"], body: { title: "Base" } }]);
-		propose([{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }]);
+	const propose = async (edits: Edit[], as = h.owner) => ProposeReply.parse(await h.call("propose", { edits }, as));
+	const conflictFor = async (as = h.owner, tagged = true) => {
+		await propose([{ op: "create", tags: ["kept", "removed"], body: { title: "Base" } }]);
+		await propose([{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }]);
 		const edits: Edit[] = [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }];
 		if (tagged) edits.push({ op: "place", cases: ["C-1"], tags: { add: ["merged-tag"], remove: ["removed"] } });
-		const pending = propose(edits, as);
+		const pending = await propose(edits, as);
 		expect(pending.status).toBe("conflict");
 		if (!pending.question) throw new Error("no conflict question");
-		if (tagged) propose([{ op: "place", cases: ["C-1"], tags: { add: ["concurrent"] } }]);
+		if (tagged) await propose([{ op: "place", cases: ["C-1"], tags: { add: ["concurrent"] } }]);
 		return pending.question;
 	};
-	const resolution = (q: string, body = emptyBody("Resolved")) => {
-		const [question] = h.call<{ evidenceHash: string }[]>("get", { refs: [q] });
+	const resolution = async (q: string, body = emptyBody("Resolved")) => {
+		const [question] = await h.call<{ evidenceHash: string }[]>("get", { refs: [q] });
 		return { q, onEvidence: question?.evidenceHash, answer: { is: "merge", body } };
 	};
 	const inverse = [{ op: "place", cases: ["C-1"], tags: { add: ["removed"], remove: ["merged-tag"] } }];
 
 	for (const read of [true, false]) {
-		test(`a tag-delta merge returns placement effects ${read ? "to a reader" : "without disclosing them to its produce-only author"}`, () => {
+		test(`a tag-delta merge returns placement effects ${read ? "to a reader" : "without disclosing them to its produce-only author"}`, async () => {
 			const author = h.actor("merge-author", "human", read ? ["read", "produce"] : ["produce"]);
-			const q = conflictFor(author);
-			const input = { ...resolution(q), cmd: read ? "reader-merge" : "blind-merge" };
-			const first = h.call<DecideReply[]>("decide", input, author);
+			const q = await conflictFor(author);
+			const input = { ...(await resolution(q)), cmd: read ? "reader-merge" : "blind-merge" };
+			const first = await h.call<DecideReply[]>("decide", input, author);
 			const [reply] = first;
-			expect(h.call<DecideReply[]>("decide", input, author)).toEqual(first);
+			expect(await h.call<DecideReply[]>("decide", input, author)).toEqual(first);
 			expect(reply).toMatchObject({ status: "decided", effects: { status: "adopted" } });
 			expect(reply?.effects?.placements).toEqual(read ? inverse : []);
-			const [stored] = h.call<{ decision: { effects: Record<string, unknown> } }[]>("get", { refs: [q] });
+			const [stored] = await h.call<{ decision: { effects: Record<string, unknown> } }[]>("get", { refs: [q] });
 			expect(stored?.decision.effects.placements).toEqual(inverse);
-			expect(h.call("get", { refs: ["C-1"] })).toMatchObject([
+			expect(await h.call("get", { refs: ["C-1"] })).toMatchObject([
 				{ version: 3, tags: ["concurrent", "kept", "merged-tag"] },
 			]);
 			if (read) {
-				propose(ProposeReply.shape.placements.parse(reply?.effects?.placements), author);
-				expect(h.call("get", { refs: ["C-1"] })).toMatchObject([
+				await propose(ProposeReply.shape.placements.parse(reply?.effects?.placements), author);
+				expect(await h.call("get", { refs: ["C-1"] })).toMatchObject([
 					{ version: 3, title: "Resolved", tags: ["concurrent", "kept", "removed"] },
 				]);
 			}
 		});
 	}
 
-	test("command replay retains merge placement effects without recording the tag delta twice", () => {
-		const q = conflictFor();
-		const input = { ...resolution(q), cmd: "merge-with-placement-effects" };
-		const first = h.call<DecideReply[]>("decide", input);
+	test("command replay retains merge placement effects without recording the tag delta twice", async () => {
+		const q = await conflictFor();
+		const input = { ...(await resolution(q)), cmd: "merge-with-placement-effects" };
+		const first = await h.call<DecideReply[]>("decide", input);
 		expect(first[0]?.effects?.placements).toEqual(inverse);
-		const timeline = () => h.call<{ entries: unknown[] }>("timeline", { ref: "C-1" });
-		const before = timeline();
-		expect(h.call<DecideReply[]>("decide", input)).toEqual(first);
-		expect(timeline()).toEqual(before);
-		const recovered = h.call<{ reply: DecideReply[] }>("command", { cmd: input.cmd });
+		const timeline = async () => await h.call<{ entries: unknown[] }>("timeline", { ref: "C-1" });
+		const before = await timeline();
+		expect(await h.call<DecideReply[]>("decide", input)).toEqual(first);
+		expect(await timeline()).toEqual(before);
+		const recovered = await h.call<{ reply: DecideReply[] }>("command", { cmd: input.cmd });
 		expect(recovered.reply).toEqual(first);
 	});
 
-	test("an unchanged merge explicitly returns no placement effects", () => {
-		const q = conflictFor(h.owner, false);
-		const [reply] = h.call<DecideReply[]>("decide", resolution(q, emptyBody("Theirs")));
+	test("an unchanged merge explicitly returns no placement effects", async () => {
+		const q = await conflictFor(h.owner, false);
+		const [reply] = await h.call<DecideReply[]>("decide", await resolution(q, emptyBody("Theirs")));
 		expect(reply).toMatchObject({ status: "decided", effects: { status: "unchanged", placements: [] } });
 	});
 
-	test("a replacement waiting for review explicitly returns no placement effects", () => {
-		const q = conflictFor();
-		const policy = propose([{ op: "policy", preset: "strict" }]);
-		const [question] = h.call<{ evidenceHash: string }[]>("get", { refs: [policy.question] });
-		h.call("decide", { q: policy.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } });
-		const [reply] = h.call<DecideReply[]>("decide", resolution(q));
+	test("a replacement waiting for review explicitly returns no placement effects", async () => {
+		const q = await conflictFor();
+		const policy = await propose([{ op: "policy", preset: "strict" }]);
+		const [question] = await h.call<{ evidenceHash: string }[]>("get", { refs: [policy.question] });
+		await h.call("decide", { q: policy.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } });
+		const [reply] = await h.call<DecideReply[]>("decide", await resolution(q));
 		expect(reply).toMatchObject({ status: "decided", effects: { status: "open", placements: [] } });
-		expect(h.call("get", { refs: ["C-1"] })).toMatchObject([{ version: 2, tags: ["concurrent", "kept", "removed"] }]);
+		expect(await h.call("get", { refs: ["C-1"] })).toMatchObject([
+			{ version: 2, tags: ["concurrent", "kept", "removed"] },
+		]);
 	});
 
-	test("a replacement that meets another body conflict explicitly returns no placement effects", () => {
-		const q = conflictFor();
-		propose([{ op: "edit", case: "C-1", base: 2, body: { title: "Changed again" } }]);
-		const [reply] = h.call<DecideReply[]>("decide", resolution(q));
+	test("a replacement that meets another body conflict explicitly returns no placement effects", async () => {
+		const q = await conflictFor();
+		await propose([{ op: "edit", case: "C-1", base: 2, body: { title: "Changed again" } }]);
+		const [reply] = await h.call<DecideReply[]>("decide", await resolution(q));
 		expect(reply).toMatchObject({ status: "decided", effects: { status: "conflict", placements: [] } });
-		expect(h.call("get", { refs: ["C-1"] })).toMatchObject([
+		expect(await h.call("get", { refs: ["C-1"] })).toMatchObject([
 			{ version: 3, title: "Changed again", tags: ["concurrent", "kept", "removed"] },
 		]);
 	});
