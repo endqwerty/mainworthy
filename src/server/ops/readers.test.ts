@@ -314,11 +314,11 @@ describe("reader threads", () => {
 		await expect(pool.ready(20)).rejects.toThrow("were not ready within 20 ms");
 	});
 
-	test("memory apps keep reads inline", () => {
-		const h = harness();
+	test("memory apps keep reads inline", async () => {
+		const h = await harness();
 		try {
 			expect(h.app.readers).toBeNull();
-			expect(h.call("find")).toMatchObject({ items: [] });
+			expect(await h.call("find")).toMatchObject({ items: [] });
 		} finally {
 			h.close();
 		}
@@ -387,7 +387,8 @@ describe("reader threads", () => {
 			const requests = Array.from({ length: 32 }, () =>
 				pool.run(
 					{ op: "find", project: "scratch", input: {}, caller: { via: "local", owner: "robin" }, clockOffset: 0 },
-					() => {
+					async () => {
+						await Promise.resolve();
 						retried++;
 						return { ok: true, result: "replayed", seq: null };
 					},

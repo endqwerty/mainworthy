@@ -30,8 +30,8 @@ type RunView = {
 	slots: number;
 };
 
-const seed = (n = 3) =>
-	h.call("propose", {
+const seed = async (n = 3) =>
+	await h.call("propose", {
 		edits: Array.from({ length: n }, (_, i) => ({
 			op: "create",
 			outline: `Case ${i + 1}\n  Do thing ${i + 1} > It works`,
@@ -39,53 +39,59 @@ const seed = (n = 3) =>
 			tags: ["regression"],
 		})),
 	});
-const run = (ref: string) => {
-	const view = h.call<RunView[]>("get", { refs: [ref] })[0];
+const run = async (ref: string) => {
+	const view = (await h.call<RunView[]>("get", { refs: [ref] }))[0];
 	if (!view) throw new Error("no run");
 	return view;
 };
-const slots = (ref: string) => h.call<{ items: Slot[] }>("find", { in: "slots", run: ref }).items;
-const record = (runRef: string, caseRef: string, outcome: string, extra: Record<string, unknown> = {}, as = h.owner) =>
-	h.call<ReportReceipt>("report", { run: runRef, results: [{ test: { case: caseRef }, outcome, ...extra }] }, as);
-const queue = () => h.call<InboxReply>("inbox");
+const slots = async (ref: string) => (await h.call<{ items: Slot[] }>("find", { in: "slots", run: ref })).items;
+const record = async (
+	runRef: string,
+	caseRef: string,
+	outcome: string,
+	extra: Record<string, unknown> = {},
+	as = h.owner,
+) =>
+	await h.call<ReportReceipt>("report", { run: runRef, results: [{ test: { case: caseRef }, outcome, ...extra }] }, as);
+const queue = async () => await h.call<InboxReply>("inbox");
 const first = <T>(items: T[]): T => {
 	const item = items[0];
 	if (item === undefined) throw new Error("expected at least one item");
 	return item;
 };
 /** Links the automated test `key` to a case by answering the `map` question of a project that asks about tests with no case. */
-function link(key: string, caseRef: string, commit: string) {
-	h.call("report", {
+async function link(key: string, caseRef: string, commit: string) {
+	await h.call("report", {
 		target: { commit, branch: "main" },
 		results: [{ test: { key, file: key.split("::")[0] }, outcome: "pass" }],
 	});
-	const map = first(h.call<InboxReply>("inbox", { kind: "map" }).items);
+	const map = first((await h.call<InboxReply>("inbox", { kind: "map" })).items);
 	const test = first((map.evidence as { tests: { t: string }[] }).tests).t;
-	h.call("decide", { q: map.q, onEvidence: map.evidenceHash, answer: { is: "link", pairs: [[test, caseRef]] } });
+	await h.call("decide", { q: map.q, onEvidence: map.evidenceHash, answer: { is: "link", pairs: [[test, caseRef]] } });
 }
 
 describe("a run typed by hand", () => {
-	beforeEach(() => {
-		h = harness();
-		seed();
+	beforeEach(async () => {
+		h = await harness();
+		await seed();
 	});
 
-	test("pins each case's version, starts pending, and closes by a recorded rule once every slot passes", () => {
-		const planned = h.call<PlanReply>("plan", {
+	test("pins each case's version, starts pending, and closes by a recorded rule once every slot passes", async () => {
+		const planned = await h.call<PlanReply>("plan", {
 			name: "1.4.0 rc3 regression",
 			select: { folders: ["checkout"], tags: ["regression"] },
 		});
 		expect(planned).toEqual({ run: "R-1", slots: 3, already: 0 });
-		expect(run("R-1")).toMatchObject({ state: "open", verdict: "pending", reason: "pending: 3 results missing" });
+		expect(await run("R-1")).toMatchObject({ state: "open", verdict: "pending", reason: "pending: 3 results missing" });
 
-		const receipt = record("R-1", "C-1", "pass");
+		const receipt = await record("R-1", "C-1", "pass");
 		expect(receipt.basis).toEqual({ exact: 1, assumed: 0, unresolved: 0 }); // the slot pinned the version
-		record("R-1", "C-2", "pass");
-		expect(run("R-1").tally).toMatchObject({ pass: 2, missing: 1 });
-		record("R-1", "C-3", "pass");
+		await record("R-1", "C-2", "pass");
+		expect((await run("R-1")).tally).toMatchObject({ pass: 2, missing: 1 });
+		await record("R-1", "C-3", "pass");
 
-		expect(run("R-1")).toMatchObject({ state: "closed", verdict: "passed" });
-		const ledger = h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" });
+		expect(await run("R-1")).toMatchObject({ state: "closed", verdict: "passed" });
+		const ledger = await h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" });
 		expect(first(ledger.items).decision).toMatchObject({
 			answer: { is: "approve" },
 			rule: "signoff-passed",
@@ -93,121 +99,124 @@ describe("a run typed by hand", () => {
 		});
 	});
 
-	test("planning repeated case names makes one slot per case in first-appearance order", () => {
-		const planned = h.call<PlanReply>("plan", { name: "Repeated case", select: { cases: ["C-2", "C-2"] } });
+	test("planning repeated case names makes one slot per case in first-appearance order", async () => {
+		const planned = await h.call<PlanReply>("plan", { name: "Repeated case", select: { cases: ["C-2", "C-2"] } });
 		expect(planned).toEqual({ run: "R-1", slots: 1, already: 0 });
-		expect(slots(planned.run).map((slot) => slot.case)).toEqual(["C-2"]);
+		expect((await slots(planned.run)).map((slot) => slot.case)).toEqual(["C-2"]);
 
-		const ordered = h.call<PlanReply>("plan", {
+		const ordered = await h.call<PlanReply>("plan", {
 			name: "Repeated references",
 			select: { cases: ["C-2", "C-1", "C-2", "2", "C-3", "C-1"] },
 		});
 		expect(ordered).toEqual({ run: "R-2", slots: 3, already: 0 });
-		expect(slots(ordered.run).map((slot) => slot.case)).toEqual(["C-2", "C-1", "C-3"]);
+		expect((await slots(ordered.run)).map((slot) => slot.case)).toEqual(["C-2", "C-1", "C-3"]);
 	});
 
-	test("previewing repeated case names counts each case once in first-appearance order", () => {
-		expect(h.call("find", { in: "cases", select: { cases: ["C-2", "C-2"] } })).toMatchObject({
+	test("previewing repeated case names counts each case once in first-appearance order", async () => {
+		expect(await h.call("find", { in: "cases", select: { cases: ["C-2", "C-2"] } })).toMatchObject({
 			count: 1,
 			items: [{ ref: "C-2" }],
 			cursor: null,
 		});
 		const select = { cases: ["C-2", "C-1", "C-2", "2", "C-3", "C-1"] };
-		expect(h.call("find", { in: "cases", select, limit: 2 })).toMatchObject({
+		expect(await h.call("find", { in: "cases", select, limit: 2 })).toMatchObject({
 			count: 3,
 			items: [{ ref: "C-2" }, { ref: "C-1" }],
 			cursor: "2",
 		});
-		expect(h.call("find", { in: "cases", select, limit: 2, cursor: "2" })).toMatchObject({
+		expect(await h.call("find", { in: "cases", select, limit: 2, cursor: "2" })).toMatchObject({
 			count: 3,
 			items: [{ ref: "C-3" }],
 			cursor: null,
 		});
 	});
 
-	test("a failure opens a question in the run's own scope; the run is blocked until it is answered", () => {
-		h.call("plan", { name: "smoke", select: { folders: ["checkout"] } });
-		record("R-1", "C-1", "pass");
-		record("R-1", "C-2", "fail", {
+	test("a failure opens a question in the run's own scope; the run is blocked until it is answered", async () => {
+		await h.call("plan", { name: "smoke", select: { folders: ["checkout"] } });
+		await record("R-1", "C-1", "pass");
+		await record("R-1", "C-2", "fail", {
 			note: "Total shows $100.00 after SAVE10",
 			steps: [{ step: "x1", outcome: "fail" }],
 		});
-		expect(run("R-1")).toMatchObject({ verdict: "blocked" });
-		expect(slots("R-1").map((slot) => slot.fills.map((fill) => fill.atStep))).toEqual([[null], ["x1"], []]);
-		const q = first(queue().items);
+		expect(await run("R-1")).toMatchObject({ verdict: "blocked" });
+		expect((await slots("R-1")).map((slot) => slot.fills.map((fill) => fill.atStep))).toEqual([[null], ["x1"], []]);
+		const q = first((await queue()).items);
 		expect(q).toMatchObject({ kind: "failure", producer: "human", title: "Total shows $100.00 after SAVE10" });
 		expect(q.blocks).toEqual(["R-1"]);
-		h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "defect", ref: "WEB-301" } });
-		expect(run("R-1")).toMatchObject({ verdict: "failed" });
+		await h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "defect", ref: "WEB-301" } });
+		expect(await run("R-1")).toMatchObject({ verdict: "failed" });
 	});
 
-	test("recording again replaces your own earlier result for that case; both stay in the history", () => {
-		h.call("plan", { name: "smoke", select: { cases: ["C-1"] } });
-		const failed = record("R-1", "C-1", "fail", { note: "wrong total" });
-		expect(first(slots("R-1")).state).toBe("failing");
-		record("R-1", "C-1", "pass", { corrects: first(failed.results) });
-		expect(first(slots("R-1")).state).toBe("satisfied");
-		expect(run("R-1")).toMatchObject({ verdict: "passed", state: "closed" });
+	test("recording again replaces your own earlier result for that case; both stay in the history", async () => {
+		await h.call("plan", { name: "smoke", select: { cases: ["C-1"] } });
+		const failed = await record("R-1", "C-1", "fail", { note: "wrong total" });
+		expect(first(await slots("R-1")).state).toBe("failing");
+		await record("R-1", "C-1", "pass", { corrects: first(failed.results) });
+		expect(first(await slots("R-1")).state).toBe("satisfied");
+		expect(await run("R-1")).toMatchObject({ verdict: "passed", state: "closed" });
 		expect(h.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM results").get()?.n).toBe(2);
 	});
 
-	test("blocked and skipped are not proof: the run stays pending", () => {
-		h.call("plan", { name: "smoke", select: { cases: ["C-1", "C-2"] } });
-		record("R-1", "C-1", "pass");
-		record("R-1", "C-2", "blocked", { note: "env down" });
-		expect(run("R-1")).toMatchObject({ verdict: "pending", state: "open" });
-		expect(run("R-1").tally).toMatchObject({ pass: 1, missing: 1, skipped: 1 });
+	test("blocked and skipped are not proof: the run stays pending", async () => {
+		await h.call("plan", { name: "smoke", select: { cases: ["C-1", "C-2"] } });
+		await record("R-1", "C-1", "pass");
+		await record("R-1", "C-2", "blocked", { note: "env down" });
+		expect(await run("R-1")).toMatchObject({ verdict: "pending", state: "open" });
+		expect((await run("R-1")).tally).toMatchObject({ pass: 1, missing: 1, skipped: 1 });
 	});
 
-	test("E7: a case edited or moved after the run started keeps its slot and its pinned version", () => {
-		h.call("plan", { name: "smoke", select: { cases: ["C-1"] } });
-		h.call("propose", {
+	test("E7: a case edited or moved after the run started keeps its slot and its pinned version", async () => {
+		await h.call("plan", { name: "smoke", select: { cases: ["C-1"] } });
+		await h.call("propose", {
 			edits: [
 				{ op: "edit", case: "C-1", base: 1, body: { title: "Renamed" } },
 				{ op: "place", cases: ["C-1"], folder: "elsewhere" },
 			],
 		});
-		expect(first(slots("R-1"))).toMatchObject({ case: "C-1", version: 1 });
-		const receipt = record("R-1", "C-1", "pass");
+		expect(first(await slots("R-1"))).toMatchObject({ case: "C-1", version: 1 });
+		const receipt = await record("R-1", "C-1", "pass");
 		expect(receipt.basis.exact).toBe(1);
 		expect(h.app.db.raw.query<{ v: number }, []>("SELECT basis_version AS v FROM results").get()?.v).toBe(1);
 	});
 
-	test("a closed run takes no more results until its sign-off is withdrawn", () => {
-		h.call("plan", { name: "smoke", select: { cases: ["C-1"] } });
-		record("R-1", "C-1", "pass");
-		const refused = h.raw("report", { run: "R-1", results: [{ test: { case: "C-1" }, outcome: "fail" }] });
+	test("a closed run takes no more results until its sign-off is withdrawn", async () => {
+		await h.call("plan", { name: "smoke", select: { cases: ["C-1"] } });
+		await record("R-1", "C-1", "pass");
+		const refused = await h.raw("report", { run: "R-1", results: [{ test: { case: "C-1" }, outcome: "fail" }] });
 		expect(refused).toMatchObject({ ok: false, error: { code: "conflict" } });
-		const signoff = first(h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" }).items);
-		expect(h.call<{ status: string }[]>("decide", { undo: signoff.q })[0]?.status).toBe("reopened");
-		expect(run("R-1").state).toBe("open");
+		const signoff = first((await h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" })).items);
+		expect((await h.call<{ status: string }[]>("decide", { undo: signoff.q }))[0]?.status).toBe("reopened");
+		expect((await run("R-1")).state).toBe("open");
 	});
 
-	test("the list of runs holds planned and change runs, newest first, and filters by kind and state", () => {
-		h.call("plan", { name: "smoke", select: { cases: ["C-1"] } });
-		record("R-1", "C-1", "pass");
-		h.call("report", ciReport({ commit: "feat0001", branch: "feature", pr: 7, n: 1 }));
-		h.call("plan", { name: "regression", select: { cases: ["C-2"] } });
+	test("the list of runs holds planned and change runs, newest first, and filters by kind and state", async () => {
+		await h.call("plan", { name: "smoke", select: { cases: ["C-1"] } });
+		await record("R-1", "C-1", "pass");
+		await h.call("report", ciReport({ commit: "feat0001", branch: "feature", pr: 7, n: 1 }));
+		await h.call("plan", { name: "regression", select: { cases: ["C-2"] } });
 		type Listed = { ref: string; origin: string; state: string; change: { key: string } | null };
-		const listed = (input: Record<string, unknown> = {}) =>
-			h
-				.call<{ items: Listed[] }>("find", { in: "runs", ...input })
-				.items.map((item) => [item.ref, item.origin, item.state, item.change?.key ?? null]);
-		expect(listed()).toEqual([
+		const listed = async (input: Record<string, unknown> = {}) =>
+			(await h.call<{ items: Listed[] }>("find", { in: "runs", ...input })).items.map((item) => [
+				item.ref,
+				item.origin,
+				item.state,
+				item.change?.key ?? null,
+			]);
+		expect(await listed()).toEqual([
 			["R-3", "planned", "open", null],
 			["R-2", "change", "open", "pr:7"],
 			["R-1", "planned", "closed", null],
 		]);
-		expect(listed({ origin: "change" })).toEqual([["R-2", "change", "open", "pr:7"]]);
-		expect(listed({ origin: "planned", state: "open" })).toEqual([["R-3", "planned", "open", null]]);
-		expect(listed({ state: "closed" })).toEqual([["R-1", "planned", "closed", null]]);
-		expect(h.raw("find", { in: "runs", state: "change" })).toMatchObject({
+		expect(await listed({ origin: "change" })).toEqual([["R-2", "change", "open", "pr:7"]]);
+		expect(await listed({ origin: "planned", state: "open" })).toEqual([["R-3", "planned", "open", null]]);
+		expect(await listed({ state: "closed" })).toEqual([["R-1", "planned", "closed", null]]);
+		expect(await h.raw("find", { in: "runs", state: "change" })).toMatchObject({
 			ok: false,
 			error: { code: "invalid", message: 'a run is "open" or "closed", not "change"' },
 		});
-		const page = h.call<{ items: Listed[]; cursor: string | null }>("find", { in: "runs", limit: 2 });
+		const page = await h.call<{ items: Listed[]; cursor: string | null }>("find", { in: "runs", limit: 2 });
 		expect(page.items.map((item) => item.ref)).toEqual(["R-3", "R-2"]);
-		const rest = h.call<{ items: Listed[]; cursor: string | null }>("find", {
+		const rest = await h.call<{ items: Listed[]; cursor: string | null }>("find", {
 			in: "runs",
 			limit: 2,
 			cursor: page.cursor,
@@ -215,22 +224,25 @@ describe("a run typed by hand", () => {
 		expect([rest.items.map((item) => item.ref), rest.cursor]).toEqual([["R-1"], null]);
 	});
 
-	test("the runs of one change are its pushed commits, newest first", () => {
-		h.call("report", ciReport({ commit: "feat0001", branch: "feature", pr: 7, n: 1 }));
-		h.call("report", ciReport({ commit: "other001", branch: "other", pr: 8, n: 1 }));
-		h.call("report", ciReport({ commit: "feat0002", branch: "feature", pr: 7, n: 1, fail: { 0: "broke" } }));
-		h.call("plan", { name: "smoke", select: { cases: ["C-1"] } });
+	test("the runs of one change are its pushed commits, newest first", async () => {
+		await h.call("report", ciReport({ commit: "feat0001", branch: "feature", pr: 7, n: 1 }));
+		await h.call("report", ciReport({ commit: "other001", branch: "other", pr: 8, n: 1 }));
+		await h.call("report", ciReport({ commit: "feat0002", branch: "feature", pr: 7, n: 1, fail: { 0: "broke" } }));
+		await h.call("plan", { name: "smoke", select: { cases: ["C-1"] } });
 		type Listed = { ref: string; name: string; verdict: string; accepts: { commit: string } };
-		const of = (change: string) =>
-			h
-				.call<{ items: Listed[] }>("find", { in: "runs", change })
-				.items.map((item) => [item.ref, item.name, item.accepts.commit, item.verdict]);
-		expect(of("pr:7")).toEqual([
+		const of = async (change: string) =>
+			(await h.call<{ items: Listed[] }>("find", { in: "runs", change })).items.map((item) => [
+				item.ref,
+				item.name,
+				item.accepts.commit,
+				item.verdict,
+			]);
+		expect(await of("pr:7")).toEqual([
 			["R-3", "feat000 on pr:7", "feat0002", "blocked"],
 			["R-1", "feat000 on pr:7", "feat0001", "passed"],
 		]);
-		expect(of("pr:8")).toEqual([["R-2", "other00 on pr:8", "other001", "passed"]]);
-		expect(h.raw("find", { in: "runs", change: "pr:9" })).toMatchObject({
+		expect(await of("pr:8")).toEqual([["R-2", "other00 on pr:8", "other001", "passed"]]);
+		expect(await h.raw("find", { in: "runs", change: "pr:9" })).toMatchObject({
 			ok: false,
 			error: { code: "not_found", message: "change pr:9 not found" },
 		});
@@ -238,27 +250,31 @@ describe("a run typed by hand", () => {
 });
 
 describe("planned lookups beside change history", () => {
-	beforeEach(() => {
-		h = harness({ preset: "standard", unlinked: "ask" });
-		seed();
-		link("tests/a.spec.ts::case one", "C-1", "seed0001");
+	beforeEach(async () => {
+		h = await harness({ preset: "standard", unlinked: "ask" });
+		await seed();
+		await link("tests/a.spec.ts::case one", "C-1", "seed0001");
 	});
 
-	test("planned lookups preserve mixed-history membership, processing order and closed horizons", () => {
-		const plan = (name: string, commit?: string, caseRef = "C-1") =>
-			h.call<PlanReply>("plan", { name, select: { cases: [caseRef] }, ...(commit ? { accepts: { commit } } : {}) });
-		plan("first z", "zzzz0001");
-		plan("other commit", "aaaa0001");
-		plan("typed only");
+	test("planned lookups preserve mixed-history membership, processing order and closed horizons", async () => {
+		const plan = async (name: string, commit?: string, caseRef = "C-1") =>
+			await h.call<PlanReply>("plan", {
+				name,
+				select: { cases: [caseRef] },
+				...(commit ? { accepts: { commit } } : {}),
+			});
+		await plan("first z", "zzzz0001");
+		await plan("other commit", "aaaa0001");
+		await plan("typed only");
 		const report = (commit: string, job: string) => ({
 			target: { commit, branch: "main" },
 			job,
 			results: [{ test: { key: "tests/a.spec.ts::case one" }, outcome: "pass" as const }],
 		});
-		h.call("report", report("zzzz0001", "first"));
-		plan("second z", "zzzz0001");
-		plan("open z", "zzzz0001", "C-2");
-		h.call("report", report("aaaa0001", "first"));
+		await h.call("report", report("zzzz0001", "first"));
+		await plan("second z", "zzzz0001");
+		await plan("open z", "zzzz0001", "C-2");
+		await h.call("report", report("aaaa0001", "first"));
 		const project = findProject(h.app.db, "scratch");
 		if (!project) throw new Error("no project");
 		const refs = (ids: number[]) =>
@@ -310,9 +326,9 @@ describe("planned lookups beside change history", () => {
 			});
 		for (const no of [3, 4]) expect(after.find((row) => row.no === no)).toEqual(before.find((row) => row.no === no));
 		for (const ref of ["R-2", "R-3", "R-6"])
-			expect(run(ref)).toMatchObject({ state: "closed", verdict: "passed", tally: { pass: 1, missing: 0 } });
+			expect(await run(ref)).toMatchObject({ state: "closed", verdict: "passed", tally: { pass: 1, missing: 0 } });
 		for (const ref of ["R-4", "R-7"])
-			expect(run(ref)).toMatchObject({ state: "open", verdict: "pending", tally: { pass: 0, missing: 1 } });
+			expect(await run(ref)).toMatchObject({ state: "open", verdict: "pending", tally: { pass: 0, missing: 1 } });
 	});
 
 	test("planned lookups exclude change history in their query plans", () => {
@@ -354,66 +370,66 @@ describe("planned lookups beside change history", () => {
 });
 
 describe("a run that accepts a build", () => {
-	beforeEach(() => {
-		h = harness({ preset: "standard", unlinked: "ask" });
-		seed();
-		link("tests/a.spec.ts::case one", "C-1", "seed0001");
+	beforeEach(async () => {
+		h = await harness({ preset: "standard", unlinked: "ask" });
+		await seed();
+		await link("tests/a.spec.ts::case one", "C-1", "seed0001");
 	});
 
-	test("results a pipeline already reported on that commit fill the slots, so nobody repeats them by hand", () => {
-		h.call("report", {
+	test("results a pipeline already reported on that commit fill the slots, so nobody repeats them by hand", async () => {
+		await h.call("report", {
 			target: { commit: "rc300001", branch: "main" },
 			results: [{ test: { key: "tests/a.spec.ts::case one" }, outcome: "pass" }],
 		});
-		const planned = h.call<PlanReply>("plan", {
+		const planned = await h.call<PlanReply>("plan", {
 			name: "rc3",
 			select: { folders: ["checkout"] },
 			accepts: { commit: "rc300001" },
 		});
 		expect(planned).toEqual({ run: "R-3", slots: 3, already: 1 });
-		const filled = slots("R-3").find((slot) => slot.case === "C-1");
+		const filled = (await slots("R-3")).find((slot) => slot.case === "C-1");
 		expect(filled).toMatchObject({ state: "satisfied" });
 		expect(filled?.fills[0]).toMatchObject({ method: "auto", outcome: "pass", admitted: "assumed" });
-		expect(run("R-3").tally).toMatchObject({ pass: 1, missing: 2 });
+		expect((await run("R-3")).tally).toMatchObject({ pass: 1, missing: 2 });
 	});
 
-	test("a report that arrives after the run started fills it too", () => {
-		h.call("report", {
+	test("a report that arrives after the run started fills it too", async () => {
+		await h.call("report", {
 			target: { commit: "rc300002", branch: "main" },
 			results: [{ test: { key: "tests/other.spec.ts::x" }, outcome: "pass" }],
 		});
-		h.call("plan", { name: "rc3", select: { cases: ["C-1"] }, accepts: { commit: "rc300002" } });
-		expect(first(slots("R-3")).state).toBe("missing");
-		h.call("report", {
+		await h.call("plan", { name: "rc3", select: { cases: ["C-1"] }, accepts: { commit: "rc300002" } });
+		expect(first(await slots("R-3")).state).toBe("missing");
+		await h.call("report", {
 			target: { commit: "rc300002", branch: "main" },
 			job: "late",
 			results: [{ test: { key: "tests/a.spec.ts::case one" }, outcome: "pass" }],
 		});
-		expect(first(slots("R-3")).state).toBe("satisfied");
-		expect(run("R-3")).toMatchObject({ verdict: "passed", state: "closed" });
+		expect(first(await slots("R-3")).state).toBe("satisfied");
+		expect(await run("R-3")).toMatchObject({ verdict: "passed", state: "closed" });
 	});
 
-	test("E5: late batches supersede a closed commit run's sign-off, including a late failure", () => {
-		const planned = h.call<PlanReply>("plan", {
+	test("E5: late batches supersede a closed commit run's sign-off, including a late failure", async () => {
+		const planned = await h.call<PlanReply>("plan", {
 			name: "late evidence",
 			select: { cases: ["C-1"] },
 			accepts: { commit: "late0001" },
 		});
-		const report = (outcome: string, job: string, named = false) =>
-			h.call<ReportReceipt>("report", {
+		const report = async (outcome: string, job: string, named = false) =>
+			await h.call<ReportReceipt>("report", {
 				...(named ? { run: planned.run } : {}),
 				target: { commit: "late0001", branch: "main" },
 				job,
 				results: [{ test: { key: "tests/a.spec.ts::case one" }, outcome }],
 			});
-		const signoffs = () => h.call<InboxReply>("inbox", { kind: "signoff", state: "decided" }).items;
-		report("pass", "first");
-		const original = first(signoffs());
-		expect(run(planned.run)).toMatchObject({ state: "closed", verdict: "passed" });
+		const signoffs = async () => (await h.call<InboxReply>("inbox", { kind: "signoff", state: "decided" })).items;
+		await report("pass", "first");
+		const original = first(await signoffs());
+		expect(await run(planned.run)).toMatchObject({ state: "closed", verdict: "passed" });
 
-		report("pass", "late", true);
-		const replacement = first(signoffs());
-		expect(signoffs()).toHaveLength(2);
+		await report("pass", "late", true);
+		const replacement = first(await signoffs());
+		expect(await signoffs()).toHaveLength(2);
 		expect(replacement.q).not.toBe(original.q);
 		expect(
 			h.app.db.raw
@@ -426,68 +442,74 @@ describe("a run that accepts a build", () => {
 		).toEqual([
 			{
 				prior: Number(original.q.slice(2)),
-				supersedes: signoffs().find((q) => q.q === original.q)?.decision?.id ?? -1,
+				supersedes: (await signoffs()).find((q) => q.q === original.q)?.decision?.id ?? -1,
 				approval: original.decision?.id ?? -1,
 			},
 		]);
 		expect(replacement.decision?.answer).toEqual({ is: "approve" });
-		expect(signoffs().find((q) => q.q === original.q)?.decision?.answer).toEqual({ is: "outdated" });
-		expect(run(planned.run)).toMatchObject({ state: "closed", verdict: "passed" });
+		expect((await signoffs()).find((q) => q.q === original.q)?.decision?.answer).toEqual({ is: "outdated" });
+		expect(await run(planned.run)).toMatchObject({ state: "closed", verdict: "passed" });
 
-		report("fail", "late failure");
-		const asked = first(h.call<InboxReply>("inbox", { kind: "signoff" }).items);
-		expect(signoffs().find((q) => q.q === replacement.q)?.decision?.answer).toEqual({ is: "outdated" });
+		await report("fail", "late failure");
+		const asked = first((await h.call<InboxReply>("inbox", { kind: "signoff" })).items);
+		expect((await signoffs()).find((q) => q.q === replacement.q)?.decision?.answer).toEqual({ is: "outdated" });
 		expect(asked.evidence).toMatchObject({ verdict: "blocked" });
-		expect(run(planned.run)).toMatchObject({ state: "open", verdict: "blocked" });
-		expect(first(slots(planned.run)).state).toBe("failing");
+		expect(await run(planned.run)).toMatchObject({ state: "open", verdict: "blocked" });
+		expect(first(await slots(planned.run)).state).toBe("failing");
 		expect(
-			first(h.call<DecideReply[]>("decide", { q: asked.q, onEvidence: asked.evidenceHash, answer: { is: "approve" } })),
+			first(
+				await h.call<DecideReply[]>("decide", {
+					q: asked.q,
+					onEvidence: asked.evidenceHash,
+					answer: { is: "approve" },
+				}),
+			),
 		).toMatchObject({ status: "conflict", decision: null });
 	});
 
-	test("a strict commit run asks a person again after a late pass, and an older approval cannot reopen it", () => {
-		h.call("propose", { edits: [{ op: "policy", preset: "strict" }] });
-		const policy = first(h.call<InboxReply>("inbox", { kind: "adopt" }).items);
-		h.call("decide", {
+	test("a strict commit run asks a person again after a late pass, and an older approval cannot reopen it", async () => {
+		await h.call("propose", { edits: [{ op: "policy", preset: "strict" }] });
+		const policy = first((await h.call<InboxReply>("inbox", { kind: "adopt" })).items);
+		await h.call("decide", {
 			q: policy.q,
 			onEvidence: policy.evidenceHash,
 			answer: { is: "accept" },
 			reason: "require sign-off",
 		});
-		const planned = h.call<PlanReply>("plan", {
+		const planned = await h.call<PlanReply>("plan", {
 			name: "human sign-off",
 			select: { cases: ["C-1"] },
 			accepts: { commit: "late0003" },
 		});
-		const approve = (q: InboxReply["items"][number]) =>
+		const approve = async (q: InboxReply["items"][number]) =>
 			first(
-				h.call<DecideReply[]>("decide", {
+				await h.call<DecideReply[]>("decide", {
 					q: q.q,
 					onEvidence: q.evidenceHash,
 					answer: { is: "approve" },
 					reason: "checked the evidence",
 				}),
 			);
-		record(planned.run, "C-1", "pass");
-		const original = first(h.call<InboxReply>("inbox", { kind: "signoff" }).items);
-		expect(approve(original).status).toBe("decided");
-		expect(run(planned.run).state).toBe("closed");
+		await record(planned.run, "C-1", "pass");
+		const original = first((await h.call<InboxReply>("inbox", { kind: "signoff" })).items);
+		expect((await approve(original)).status).toBe("decided");
+		expect((await run(planned.run)).state).toBe("closed");
 		const lateInput = {
 			cmd: "late-human-pass",
 			run: planned.run,
 			results: [{ test: { case: "C-1" }, outcome: "pass" }],
 		};
-		const late = h.call<ReportReceipt>("report", lateInput);
-		const asked = first(h.call<InboxReply>("inbox", { kind: "signoff" }).items);
+		const late = await h.call<ReportReceipt>("report", lateInput);
+		const asked = first((await h.call<InboxReply>("inbox", { kind: "signoff" })).items);
 		expect(asked.q).not.toBe(original.q);
 		expect(asked.evidence).toMatchObject({ verdict: "passed" });
-		expect(run(planned.run)).toMatchObject({ state: "open", verdict: "passed" });
-		expect(approve(asked).status).toBe("decided");
-		h.call("decide", { undo: original.q, reason: "withdraw the older approval" });
-		expect(run(planned.run)).toMatchObject({ state: "closed", verdict: "passed" });
-		const retried = h.call<ReportReceipt>("report", lateInput);
+		expect(await run(planned.run)).toMatchObject({ state: "open", verdict: "passed" });
+		expect((await approve(asked)).status).toBe("decided");
+		await h.call("decide", { undo: original.q, reason: "withdraw the older approval" });
+		expect(await run(planned.run)).toMatchObject({ state: "closed", verdict: "passed" });
+		const retried = await h.call<ReportReceipt>("report", lateInput);
 		expect(retried).toEqual(late);
-		expect(run(planned.run)).toMatchObject({ state: "closed", verdict: "passed" });
+		expect(await run(planned.run)).toMatchObject({ state: "closed", verdict: "passed" });
 	});
 
 	for (const preset of ["standard", "strict"] as const) {
@@ -497,11 +519,11 @@ describe("a run that accepts a build", () => {
 			"unrelated case",
 			"unqualified result",
 		] as const) {
-			test(`${preset}: a closed run keeps its approval after a report for ${reportKind}`, () => {
+			test(`${preset}: a closed run keeps its approval after a report for ${reportKind}`, async () => {
 				if (preset === "strict") {
-					h.call("propose", { edits: [{ op: "policy", preset }] });
-					const policy = first(h.call<InboxReply>("inbox", { kind: "adopt" }).items);
-					h.call("decide", {
+					await h.call("propose", { edits: [{ op: "policy", preset }] });
+					const policy = first((await h.call<InboxReply>("inbox", { kind: "adopt" })).items);
+					await h.call("decide", {
 						q: policy.q,
 						onEvidence: policy.evidenceHash,
 						answer: { is: "accept" },
@@ -509,24 +531,24 @@ describe("a run that accepts a build", () => {
 					});
 				}
 				const target = { commit: "same0001", repo: "acme/app", env: "prod" };
-				const planned = h.call<PlanReply>("plan", {
+				const planned = await h.call<PlanReply>("plan", {
 					name: "only counted evidence",
 					select: { cases: ["C-2"] },
 					accepts: target,
 					require: [{ id: "exercise", kind: "exercise", methods: ["human"], minActors: 1, basis: "exact" }],
 				});
-				record(planned.run, "C-2", "pass");
+				await record(planned.run, "C-2", "pass");
 				if (preset === "strict") {
-					const signoff = first(h.call<InboxReply>("inbox", { kind: "signoff" }).items);
-					h.call("decide", {
+					const signoff = first((await h.call<InboxReply>("inbox", { kind: "signoff" })).items);
+					await h.call("decide", {
 						q: signoff.q,
 						onEvidence: signoff.evidenceHash,
 						answer: { is: "approve" },
 						reason: "checked",
 					});
 				}
-				const signoffs = () => h.call<InboxReply>("inbox", { kind: "signoff", state: "decided" }).items;
-				const original = signoffs();
+				const signoffs = async () => (await h.call<InboxReply>("inbox", { kind: "signoff", state: "decided" })).items;
+				const original = await signoffs();
 				const horizon = () =>
 					h.app.db.raw
 						.query<{ applied_seq: number; outstanding: number }, [number]>(
@@ -534,9 +556,9 @@ describe("a run that accepts a build", () => {
 						)
 						.get(Number(planned.run.slice(2)));
 				const before = horizon();
-				expect(run(planned.run)).toMatchObject({ state: "closed", verdict: "passed" });
+				expect(await run(planned.run)).toMatchObject({ state: "closed", verdict: "passed" });
 				expect(first(original).decision?.answer).toEqual({ is: "approve" });
-				const receipt = h.call<ReportReceipt>("report", {
+				const receipt = await h.call<ReportReceipt>("report", {
 					target: {
 						...target,
 						...(reportKind === "other repository" ? { repo: "acme/other" } : {}),
@@ -554,332 +576,362 @@ describe("a run that accepts a build", () => {
 				});
 				if (reportKind === "unqualified result" || reportKind === "unrelated case")
 					expect(receipt.basis).toEqual({ exact: 1, assumed: 0, unresolved: 0 });
-				expect(run(planned.run)).toMatchObject({ state: "closed", verdict: "passed", tally: { pass: 1, missing: 0 } });
-				expect(signoffs()).toEqual(original);
-				expect(h.call<InboxReply>("inbox", { kind: "signoff" }).items).toEqual([]);
+				expect(await run(planned.run)).toMatchObject({
+					state: "closed",
+					verdict: "passed",
+					tally: { pass: 1, missing: 0 },
+				});
+				expect(await signoffs()).toEqual(original);
+				expect((await h.call<InboxReply>("inbox", { kind: "signoff" })).items).toEqual([]);
 				expect(horizon()).toEqual(before);
-				expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({ verdict: "passed", stale: false });
+				expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+					verdict: "passed",
+					stale: false,
+				});
 			});
 		}
 	}
 
-	test("a never-closed strict run dissolves a repeated sign-off when a failure arrives", () => {
-		h.call("propose", { edits: [{ op: "policy", preset: "strict" }] });
-		const policy = first(h.call<InboxReply>("inbox", { kind: "adopt" }).items);
-		h.call("decide", {
+	test("a never-closed strict run dissolves a repeated sign-off when a failure arrives", async () => {
+		await h.call("propose", { edits: [{ op: "policy", preset: "strict" }] });
+		const policy = first((await h.call<InboxReply>("inbox", { kind: "adopt" })).items);
+		await h.call("decide", {
 			q: policy.q,
 			onEvidence: policy.evidenceHash,
 			answer: { is: "accept" },
 			reason: "require sign-off",
 		});
-		const planned = h.call<PlanReply>("plan", {
+		const planned = await h.call<PlanReply>("plan", {
 			name: "never approved",
 			select: { cases: ["C-1", "C-2"] },
 			accepts: { commit: "never001" },
 		});
-		record(planned.run, "C-1", "pass");
-		record(planned.run, "C-2", "pass");
-		const original = first(h.call<InboxReply>("inbox", { kind: "signoff" }).items);
-		h.call("decide", { q: original.q, onEvidence: original.evidenceHash, answer: { is: "reject" }, reason: "not yet" });
-		record(planned.run, "C-1", "pass");
-		const repeated = first(h.call<InboxReply>("inbox", { kind: "signoff" }).items);
+		await record(planned.run, "C-1", "pass");
+		await record(planned.run, "C-2", "pass");
+		const original = first((await h.call<InboxReply>("inbox", { kind: "signoff" })).items);
+		await h.call("decide", {
+			q: original.q,
+			onEvidence: original.evidenceHash,
+			answer: { is: "reject" },
+			reason: "not yet",
+		});
+		await record(planned.run, "C-1", "pass");
+		const repeated = first((await h.call<InboxReply>("inbox", { kind: "signoff" })).items);
 		expect(repeated.q).not.toBe(original.q);
 		expect(repeated.evidence).toMatchObject({ verdict: "passed" });
-		record(planned.run, "C-2", "fail", { failure: { message: "new failure" } });
-		expect(run(planned.run)).toMatchObject({ state: "open", verdict: "blocked" });
-		expect(h.call<InboxReply>("inbox", { kind: "signoff" }).items).toEqual([]);
+		await record(planned.run, "C-2", "fail", { failure: { message: "new failure" } });
+		expect(await run(planned.run)).toMatchObject({ state: "open", verdict: "blocked" });
+		expect((await h.call<InboxReply>("inbox", { kind: "signoff" })).items).toEqual([]);
 		expect(
 			h.app.db.raw
 				.query<{ state: string }, [number]>("SELECT state FROM questions WHERE no = ?")
 				.get(Number(repeated.q.slice(2))),
 		).toEqual({ state: "dissolved" });
-		expect(first(h.call<InboxReply>("inbox", { kind: "failure" }).items).title).toBe("new failure");
+		expect(first((await h.call<InboxReply>("inbox", { kind: "failure" })).items).title).toBe("new failure");
 	});
 
-	test.each([false, true])("E5: a closed run waits for both accepted batches, reversed processing: %s", (reverse) => {
-		const planned = h.call<PlanReply>("plan", {
-			name: "two late batches",
-			select: { cases: ["C-1"] },
-			accepts: { commit: "late0002" },
-		});
-		const input = (attempt: number) => ({
-			run: planned.run,
-			target: { commit: "late0002", branch: "main" },
-			job: "tests",
-			attempt,
-			results: [{ test: { key: "tests/a.spec.ts::case one" }, outcome: "pass" as const }],
-		});
-		h.call("report", input(1));
-		const original = first(h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" }).items);
-		const inTx = <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): T =>
-			h.app.db.transaction(() => {
-				const project = findProject(h.app.db, "scratch");
-				if (!project) throw new Error("no project");
-				const ctx = makeCtx(h.app, project, h.owner, true);
-				const result = fn(ctx);
-				stampSeq(ctx);
-				return result;
+	test.each([false, true])(
+		"E5: a closed run waits for both accepted batches, reversed processing: %s",
+		async (reverse) => {
+			const planned = await h.call<PlanReply>("plan", {
+				name: "two late batches",
+				select: { cases: ["C-1"] },
+				accepts: { commit: "late0002" },
 			});
-		const batches = [2, 3].map((attempt) => inTx((ctx) => acceptReport(ctx, input(attempt))).batch);
-		if (reverse) batches.reverse();
-		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
-			verdict: "pending",
-			stale: true,
-			reason: "pending: 2 reports accepted and not yet applied",
-		});
-		inTx((ctx) => processBatch(ctx, first(batches).id));
-		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
-			verdict: "pending",
-			reason: "pending: 1 report accepted and not yet applied",
-		});
-		expect(first(h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" }).items).q).toBe(original.q);
-		inTx((ctx) => processBatch(ctx, first(batches.slice(1)).id));
-		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({ verdict: "passed", stale: false });
-		expect(run(planned.run).state).toBe("closed");
-		const signoffs = h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" }).items;
-		expect(signoffs).toHaveLength(2);
-		expect(first(signoffs).decision?.answer).toEqual({ is: "approve" });
-		expect(signoffs.find((q) => q.q === original.q)?.decision?.answer).toEqual({ is: "outdated" });
-	});
+			const input = (attempt: number) => ({
+				run: planned.run,
+				target: { commit: "late0002", branch: "main" },
+				job: "tests",
+				attempt,
+				results: [{ test: { key: "tests/a.spec.ts::case one" }, outcome: "pass" as const }],
+			});
+			await h.call("report", input(1));
+			const original = first((await h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" })).items);
+			const inTx = <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): T =>
+				h.app.db.transaction(() => {
+					const project = findProject(h.app.db, "scratch");
+					if (!project) throw new Error("no project");
+					const ctx = makeCtx(h.app, project, h.owner, true);
+					const result = fn(ctx);
+					stampSeq(ctx);
+					return result;
+				});
+			const batches = [2, 3].map((attempt) => inTx((ctx) => acceptReport(ctx, input(attempt))).batch);
+			if (reverse) batches.reverse();
+			expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+				verdict: "pending",
+				stale: true,
+				reason: "pending: 2 reports accepted and not yet applied",
+			});
+			inTx((ctx) => processBatch(ctx, first(batches).id));
+			expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+				verdict: "pending",
+				reason: "pending: 1 report accepted and not yet applied",
+			});
+			expect(first((await h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" })).items).q).toBe(
+				original.q,
+			);
+			inTx((ctx) => processBatch(ctx, first(batches.slice(1)).id));
+			expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({ verdict: "passed", stale: false });
+			expect((await run(planned.run)).state).toBe("closed");
+			const signoffs = (await h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" })).items;
+			expect(signoffs).toHaveLength(2);
+			expect(first(signoffs).decision?.answer).toEqual({ is: "approve" });
+			expect(signoffs.find((q) => q.q === original.q)?.decision?.answer).toEqual({ is: "outdated" });
+		},
+	);
 
-	test("E3: an assumed result does not count when the run asks for an exact basis", () => {
-		h.call("report", {
+	test("E3: an assumed result does not count when the run asks for an exact basis", async () => {
+		await h.call("report", {
 			target: { commit: "rc300003", branch: "main" },
 			results: [{ test: { key: "tests/a.spec.ts::case one" }, outcome: "pass" }],
 		});
 		const exact = [{ id: "exercise", kind: "exercise", methods: ["human", "auto"], minActors: 1, basis: "exact" }];
-		const planned = h.call<PlanReply>("plan", {
+		const planned = await h.call<PlanReply>("plan", {
 			name: "strict rc3",
 			select: { cases: ["C-1"] },
 			accepts: { commit: "rc300003" },
 			require: exact,
 		});
 		expect(planned.already).toBe(0);
-		expect(run(planned.run)).toMatchObject({ verdict: "pending" });
+		expect(await run(planned.run)).toMatchObject({ verdict: "pending" });
 		// the same test, annotated with the version it exercised, is exact and counts
-		h.call("report", {
+		await h.call("report", {
 			target: { commit: "rc300003", branch: "main" },
 			job: "annotated",
 			results: [
 				{ test: { key: "tests/a.spec.ts::case one" }, annotation: { case: "C-1", version: 1 }, outcome: "pass" },
 			],
 		});
-		expect(first(slots(planned.run)).fills[0]).toMatchObject({ admitted: "exact" });
-		expect(run(planned.run)).toMatchObject({ verdict: "passed" });
+		expect(first(await slots(planned.run)).fills[0]).toMatchObject({ admitted: "exact" });
+		expect(await run(planned.run)).toMatchObject({ verdict: "passed" });
 	});
 
-	test("a slot that asks for a person is not filled by a linked test", () => {
+	test("a slot that asks for a person is not filled by a linked test", async () => {
 		const humanOnly = [
 			{ id: "by-hand", kind: "exercise", methods: ["human"], minActors: 1, basis: "exact-or-assumed" },
 		];
-		h.call("report", {
+		await h.call("report", {
 			target: { commit: "rc300004", branch: "main" },
 			results: [{ test: { key: "tests/a.spec.ts::case one" }, outcome: "pass" }],
 		});
-		const planned = h.call<PlanReply>("plan", {
+		const planned = await h.call<PlanReply>("plan", {
 			name: "a11y",
 			select: { cases: ["C-1"] },
 			accepts: { commit: "rc300004" },
 			require: humanOnly,
 		});
 		expect(planned.already).toBe(0);
-		expect(first(slots(planned.run)).state).toBe("missing");
+		expect(first(await slots(planned.run)).state).toBe("missing");
 	});
 
-	test("E1: a manual fail beside a pipeline pass is disputed until a person decides; a later write never hides it", () => {
-		h.call("report", {
+	test("E1: a manual fail beside a pipeline pass is disputed until a person decides; a later write never hides it", async () => {
+		await h.call("report", {
 			target: { commit: "rc300005", branch: "main" },
 			results: [{ test: { key: "tests/a.spec.ts::case one" }, outcome: "pass" }],
 		});
-		const planned = h.call<PlanReply>("plan", {
+		const planned = await h.call<PlanReply>("plan", {
 			name: "rc3",
 			select: { cases: ["C-1"] },
 			accepts: { commit: "rc300005" },
 		});
 		// the run closed by rule on the pipeline's pass; reopen it to test by hand
-		const signoff = first(h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" }).items);
-		h.call("decide", { undo: signoff.q });
-		record(planned.run, "C-1", "fail", { note: "Total is wrong on a real device" });
-		expect(first(slots(planned.run)).state).toBe("disputed");
-		expect(run(planned.run)).toMatchObject({ verdict: "blocked" });
-		const q = first(queue().items);
+		const signoff = first((await h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" })).items);
+		await h.call("decide", { undo: signoff.q });
+		await record(planned.run, "C-1", "fail", { note: "Total is wrong on a real device" });
+		expect(first(await slots(planned.run)).state).toBe("disputed");
+		expect(await run(planned.run)).toMatchObject({ verdict: "blocked" });
+		const q = first((await queue()).items);
 		expect((q.evidence as { hints: string[] }).hints).toContain("disputed");
 		// the producer of the failing result may not settle the dispute under the standard preset
-		const own = h.call<{ status: string }[]>("decide", {
+		const own = await h.call<{ status: string }[]>("decide", {
 			q: q.q,
 			onEvidence: q.evidenceHash,
 			answer: { is: "mistaken" },
 		});
 		expect(own[0]?.status).toBe("forbidden");
 		const lead = h.actor("mira", "human", ["read", "produce", "answer", "plan"]);
-		const settled = h.call<{ status: string }[]>(
+		const settled = await h.call<{ status: string }[]>(
 			"decide",
 			{ q: q.q, onEvidence: q.evidenceHash, answer: { is: "mistaken" } },
 			lead,
 		);
 		expect(settled[0]?.status).toBe("decided");
-		expect(first(slots(planned.run)).state).toBe("satisfied");
+		expect(first(await slots(planned.run)).state).toBe("satisfied");
 	});
 });
 
 describe("an agent's evidence", () => {
-	beforeEach(() => {
-		h = harness();
-		seed(1);
+	beforeEach(async () => {
+		h = await harness();
+		await seed(1);
 	});
 
-	test("is recorded and visible, and does not fill a slot unless the run asks for it and the case declares it", () => {
+	test("is recorded and visible, and does not fill a slot unless the run asks for it and the case declares it", async () => {
 		const agent = h.actor("explorer", "agent", ["read", "produce"]);
-		h.call("plan", { name: "default", select: { cases: ["C-1"] } });
-		record("R-1", "C-1", "pass", {}, agent);
-		expect(first(slots("R-1")).state).toBe("missing");
-		const timeline = h.call<{ entries: { t: string; method?: string; by?: string }[] }>("timeline", { ref: "C-1" });
+		await h.call("plan", { name: "default", select: { cases: ["C-1"] } });
+		await record("R-1", "C-1", "pass", {}, agent);
+		expect(first(await slots("R-1")).state).toBe("missing");
+		const timeline = await h.call<{ entries: { t: string; method?: string; by?: string }[] }>("timeline", {
+			ref: "C-1",
+		});
 		expect(timeline.entries.find((e) => e.t === "result")).toMatchObject({ method: "agent", by: "explorer" });
 
 		// opt in: the case declares an agent method, and the run names agent
-		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { methods: ["human", "agent"] } }] });
+		await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { methods: ["human", "agent"] } }] });
 		const withAgents = [
 			{ id: "exercise", kind: "exercise", methods: ["human", "agent"], minActors: 1, basis: "exact-or-assumed" },
 		];
-		const planned = h.call<PlanReply>("plan", {
+		const planned = await h.call<PlanReply>("plan", {
 			name: "agents welcome",
 			select: { cases: ["C-1"] },
 			require: withAgents,
 		});
-		record(planned.run, "C-1", "pass", {}, agent);
-		expect(first(slots(planned.run))).toMatchObject({ state: "satisfied" });
+		await record(planned.run, "C-1", "pass", {}, agent);
+		expect(first(await slots(planned.run))).toMatchObject({ state: "satisfied" });
 	});
 
-	test("a review is recorded but is never a runtime pass", () => {
+	test("a review is recorded but is never a runtime pass", async () => {
 		const agent = h.actor("reviewer", "agent", ["read", "produce"]);
-		h.call("plan", { name: "default", select: { cases: ["C-1"] } });
-		const hash = h.call<{ hash: string }[]>("get", { refs: ["C-1"] })[0]?.hash;
-		const claimed = h.call<{ reviewed: number; opened: string[] }>(
+		await h.call("plan", { name: "default", select: { cases: ["C-1"] } });
+		const hash = (await h.call<{ hash: string }[]>("get", { refs: ["C-1"] }))[0]?.hash;
+		const claimed = await h.call<{ reviewed: number; opened: string[] }>(
 			"claim",
 			{ lens: "adversarial-review", reviewed: [`C-1@${hash}`], findings: [] },
 			agent,
 		);
 		expect(claimed).toMatchObject({ reviewed: 1, opened: [] });
-		expect(first(slots("R-1")).state).toBe("missing");
-		expect(h.call<GateStatus>("gate", { run: "R-1" }).verdict).toBe("pending");
+		expect(first(await slots("R-1")).state).toBe("missing");
+		expect((await h.call<GateStatus>("gate", { run: "R-1" })).verdict).toBe("pending");
 	});
 });
 
 describe("deploy announcements and release runs", () => {
 	const digest = `sha256:${"a".repeat(64)}`;
 	const code = [{ repo: "acme/web", commit: "1".repeat(40) }];
-	beforeEach(() => {
-		h = harness();
-		seed(1);
+	beforeEach(async () => {
+		h = await harness();
+		await seed(1);
 	});
 
-	test("a pipeline binds a build to attested code and records each deployment; a command retry writes nothing", () => {
+	test("a pipeline binds a build to attested code and records each deployment; a command retry writes nothing", async () => {
 		const ci = h.actor("deploy", "ci", ["record"]);
 		const input = { deploy: "1.4-rc3", env: "staging", digest, code, cmd: "deploy-rc3-1" };
-		const announced = h.call<AnnounceReply>("announce", input, ci);
+		const announced = await h.call<AnnounceReply>("announce", input, ci);
 		expect(announced).toMatchObject({ build: "1.4-rc3", digest, env: "staging", code, by: "deploy" });
-		expect(h.call<AnnounceReply>("announce", input, ci)).toEqual(announced);
-		h.call("announce", { deploy: "1.4-rc3", env: "production" }, ci);
-		const deployments = h.call<{ items: { env: string; build: string }[] }>("find", { in: "deployments" });
+		expect(await h.call<AnnounceReply>("announce", input, ci)).toEqual(announced);
+		await h.call("announce", { deploy: "1.4-rc3", env: "production" }, ci);
+		const deployments = await h.call<{ items: { env: string; build: string }[] }>("find", { in: "deployments" });
 		expect(deployments.items.map(({ env, build }) => [env, build])).toEqual([
 			["production", "1.4-rc3"],
 			["staging", "1.4-rc3"],
 		]);
-		const page = h.call<{ items: { env: string }[]; cursor: string }>("find", { in: "deployments", limit: 1 });
+		const page = await h.call<{ items: { env: string }[]; cursor: string }>("find", { in: "deployments", limit: 1 });
 		expect(page.items.map((event) => event.env)).toEqual(["production"]);
 		expect(
-			h.call<{ items: { env: string }[]; cursor: null }>("find", { in: "deployments", cursor: page.cursor, limit: 1 }),
+			await h.call<{ items: { env: string }[]; cursor: null }>("find", {
+				in: "deployments",
+				cursor: page.cursor,
+				limit: 1,
+			}),
 		).toMatchObject({ items: [{ env: "staging" }], cursor: null });
 		expect(
-			h.raw("announce", { deploy: "1.4-rc3", env: "staging", digest: `sha256:${"b".repeat(64)}`, code }, ci),
+			await h.raw("announce", { deploy: "1.4-rc3", env: "staging", digest: `sha256:${"b".repeat(64)}`, code }, ci),
 		).toMatchObject({ ok: false, error: { code: "conflict" } });
 		expect(
-			h.raw(
+			await h.raw(
 				"announce",
 				{ deploy: "alias", env: "staging", digest, code: [{ ...code[0], commit: "2".repeat(40) }] },
 				ci,
 			),
 		).toMatchObject({ ok: false, error: { code: "conflict" } });
-		expect(h.call<{ items: unknown[] }>("find", { in: "deployments" }).items.length).toBe(2);
+		expect((await h.call<{ items: unknown[] }>("find", { in: "deployments" })).items.length).toBe(2);
 	});
 
-	test("only pipelines and admins attest artifacts; an unknown build or incomplete attestation is refused", () => {
+	test("only pipelines and admins attest artifacts; an unknown build or incomplete attestation is refused", async () => {
 		const member = h.actor("tester", "human", ["record"]);
 		const agent = h.actor("reviewer", "agent", ["record", "produce"]);
 		for (const actor of [member, agent]) {
-			expect(h.raw("announce", { deploy: "rc3", env: "staging", digest, code }, actor)).toMatchObject({
+			expect(await h.raw("announce", { deploy: "rc3", env: "staging", digest, code }, actor)).toMatchObject({
 				ok: false,
 				error: { code: "forbidden" },
 			});
 		}
-		expect(h.raw("announce", { deploy: "unknown", env: "staging" })).toMatchObject({
+		expect(await h.raw("announce", { deploy: "unknown", env: "staging" })).toMatchObject({
 			ok: false,
 			error: { code: "invalid" },
 		});
-		expect(h.raw("announce", { deploy: "rc3", env: "staging", digest })).toMatchObject({
+		expect(await h.raw("announce", { deploy: "rc3", env: "staging", digest })).toMatchObject({
 			ok: false,
 			error: { code: "invalid" },
 		});
-		expect(h.raw("plan", { name: "release", select: { cases: ["C-1"] }, accepts: { build: "unknown" } })).toMatchObject(
-			{ ok: false, error: { code: "not_found" } },
-		);
+		expect(
+			await h.raw("plan", { name: "release", select: { cases: ["C-1"] }, accepts: { build: "unknown" } }),
+		).toMatchObject({ ok: false, error: { code: "not_found" } });
 	});
 
-	test.each(["report", "plan"] as const)("P1: %s refuses an environment the build was never deployed to", (op) => {
-		h.call("announce", { deploy: "rc3", env: "staging", digest, code });
-		const target = { build: "rc3", env: "prodution" };
-		const reply =
-			op === "report"
-				? h.raw("report", { target, results: [{ test: { case: "C-1" }, outcome: "pass" }] })
-				: h.raw("plan", { name: "Typo release", select: { cases: ["C-1"] }, accepts: target });
-		expect(reply).toMatchObject({
-			ok: false,
-			error: {
-				code: "invalid",
-				message: 'build rc3 has not been deployed to "prodution"; deployed environments: "staging"',
-			},
-		});
-		expect(h.call<{ items: unknown[] }>("find", { in: "runs" }).items).toEqual([]);
-		const planned = h.call<PlanReply>("plan", {
-			name: "Staging",
-			select: { cases: ["C-1"] },
-			accepts: { build: "rc3", env: "staging" },
-		});
-		expect(planned).toMatchObject({ run: "R-1", already: 0 });
-		expect(h.call<GateStatus>("gate", { run: planned.run }).verdict).toBe("pending");
-		h.call("announce", { deploy: "rc3", env: "prodution" });
-		const later = h.call<PlanReply>("plan", { name: "Later deployment", select: { cases: ["C-1"] }, accepts: target });
-		expect(later.already).toBe(0);
-		h.call("report", { target, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
-		expect(h.call<GateStatus>("gate", { run: later.run }).verdict).toBe("passed");
-	});
+	test.each(["report", "plan"] as const)(
+		"P1: %s refuses an environment the build was never deployed to",
+		async (op) => {
+			await h.call("announce", { deploy: "rc3", env: "staging", digest, code });
+			const target = { build: "rc3", env: "prodution" };
+			const reply =
+				op === "report"
+					? await h.raw("report", { target, results: [{ test: { case: "C-1" }, outcome: "pass" }] })
+					: await h.raw("plan", { name: "Typo release", select: { cases: ["C-1"] }, accepts: target });
+			expect(reply).toMatchObject({
+				ok: false,
+				error: {
+					code: "invalid",
+					message: 'build rc3 has not been deployed to "prodution"; deployed environments: "staging"',
+				},
+			});
+			expect((await h.call<{ items: unknown[] }>("find", { in: "runs" })).items).toEqual([]);
+			const planned = await h.call<PlanReply>("plan", {
+				name: "Staging",
+				select: { cases: ["C-1"] },
+				accepts: { build: "rc3", env: "staging" },
+			});
+			expect(planned).toMatchObject({ run: "R-1", already: 0 });
+			expect((await h.call<GateStatus>("gate", { run: planned.run })).verdict).toBe("pending");
+			await h.call("announce", { deploy: "rc3", env: "prodution" });
+			const later = await h.call<PlanReply>("plan", {
+				name: "Later deployment",
+				select: { cases: ["C-1"] },
+				accepts: target,
+			});
+			expect(later.already).toBe(0);
+			await h.call("report", { target, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+			expect((await h.call<GateStatus>("gate", { run: later.run })).verdict).toBe("passed");
+		},
+	);
 
-	test("a later deployment can count earlier results for the same artifact under another label", () => {
-		h.call("announce", { deploy: "rc3", env: "staging", digest, code });
-		h.call("announce", { deploy: "alias", env: "production", digest, code });
-		h.call("report", {
+	test("a later deployment can count earlier results for the same artifact under another label", async () => {
+		await h.call("announce", { deploy: "rc3", env: "staging", digest, code });
+		await h.call("announce", { deploy: "alias", env: "production", digest, code });
+		await h.call("report", {
 			target: { build: "alias", env: "production" },
 			results: [{ test: { case: "C-1" }, outcome: "pass" }],
 		});
 		const plan = { name: "Production", select: { cases: ["C-1"] }, accepts: { build: "rc3", env: "production" } };
-		expect(h.raw("plan", plan)).toMatchObject({ ok: false, error: { code: "invalid" } });
-		h.call("announce", { deploy: "rc3", env: "production" });
-		const planned = h.call<PlanReply>("plan", plan);
+		expect(await h.raw("plan", plan)).toMatchObject({ ok: false, error: { code: "invalid" } });
+		await h.call("announce", { deploy: "rc3", env: "production" });
+		const planned = await h.call<PlanReply>("plan", plan);
 		expect(planned.already).toBe(1);
-		expect(h.call<GateStatus>("gate", { run: planned.run }).verdict).toBe("passed");
+		expect((await h.call<GateStatus>("gate", { run: planned.run })).verdict).toBe("passed");
 	});
 
-	test("release slots count the exact artifact and environment, including earlier evidence, and gate by run", () => {
-		h.call("announce", { deploy: "rc3", env: "staging", digest, code });
-		h.call("announce", { deploy: "rc3", env: "production" });
-		const planned = h.call<PlanReply>("plan", {
+	test("release slots count the exact artifact and environment, including earlier evidence, and gate by run", async () => {
+		await h.call("announce", { deploy: "rc3", env: "staging", digest, code });
+		await h.call("announce", { deploy: "rc3", env: "production" });
+		const planned = await h.call<PlanReply>("plan", {
 			name: "Release smoke",
 			select: { cases: ["C-1"] },
 			accepts: { build: "rc3", env: "staging" },
 		});
 		const ci = h.actor("tests", "ci", ["record"]);
 		// A pass on the attested commit proves no execution of the artifact.
-		h.call(
+		await h.call(
 			"report",
 			{
 				target: { ...code[0], branch: "main" },
@@ -887,29 +939,29 @@ describe("deploy announcements and release runs", () => {
 			},
 			ci,
 		);
-		h.call("report", {
+		await h.call("report", {
 			target: { build: "rc3", env: "production" },
 			results: [{ test: { case: "C-1" }, outcome: "pass" }],
 		});
-		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+		expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
 			verdict: "pending",
 			tally: { missing: 1 },
 		});
 		// Recording by run alone must use its artifact, never a session or the attested commit.
-		h.call("report", { run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
-		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+		await h.call("report", { run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+		expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
 			verdict: "passed",
 			tally: { pass: 1, missing: 0 },
 		});
-		h.call("announce", { deploy: "same-artifact", env: "staging", digest, code });
-		const reuse = h.call<PlanReply>("plan", {
+		await h.call("announce", { deploy: "same-artifact", env: "staging", digest, code });
+		const reuse = await h.call<PlanReply>("plan", {
 			name: "Same artifact",
 			select: { cases: ["C-1"] },
 			accepts: { build: "same-artifact", env: "staging" },
 		});
 		expect(reuse.already).toBe(1);
-		expect(h.call<GateStatus>("gate", { run: reuse.run }).verdict).toBe("passed");
-		const other = h.call<PlanReply>("plan", {
+		expect((await h.call<GateStatus>("gate", { run: reuse.run })).verdict).toBe("passed");
+		const other = await h.call<PlanReply>("plan", {
 			name: "Production",
 			select: { cases: ["C-1"] },
 			accepts: { build: "rc3", env: "production" },
@@ -917,12 +969,12 @@ describe("deploy announcements and release runs", () => {
 		expect(other.already).toBe(1);
 	});
 
-	test("a release planned during an accepted upload stays pending, then counts the recovered failure", () => {
-		h.call("announce", { deploy: "rc3", env: "staging", digest, code });
+	test("a release planned during an accepted upload stays pending, then counts the recovered failure", async () => {
+		await h.call("announce", { deploy: "rc3", env: "staging", digest, code });
 		const ci = h.actor("tests", "ci", ["record"]);
 		const target = { build: "rc3", env: "staging" };
 		const result = { test: { key: "checkout" }, annotation: { case: "C-1", version: 1 } };
-		h.call("report", { target, results: [{ ...result, outcome: "pass" }] }, ci);
+		await h.call("report", { target, results: [{ ...result, outcome: "pass" }] }, ci);
 		const project = findProject(h.app.db, "scratch");
 		if (!project) throw new Error("no project");
 		h.app.db.transaction(() => {
@@ -934,30 +986,30 @@ describe("deploy announcements and release runs", () => {
 			});
 			stampSeq(ctx);
 		});
-		const planned = h.call<PlanReply>("plan", {
+		const planned = await h.call<PlanReply>("plan", {
 			name: "Release during upload",
 			select: { cases: ["C-1"] },
 			accepts: target,
 		});
-		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+		expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
 			verdict: "pending",
 			reason: "pending: 1 report accepted and not yet applied",
 		});
-		expect(run(planned.run).state).toBe("open");
+		expect((await run(planned.run)).state).toBe("open");
 		recoverAccepted(h.app);
-		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+		expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
 			verdict: "blocked",
 			tally: { unexplained: 1 },
 		});
-		const failure = first(h.call<InboxReply>("inbox", { kind: "failure", on: planned.run }).items);
-		h.call("decide", { q: failure.q, onEvidence: failure.evidenceHash, answer: { is: "defect" } });
-		expect(h.call<GateStatus>("gate", { run: planned.run }).verdict).toBe("failed");
+		const failure = first((await h.call<InboxReply>("inbox", { kind: "failure", on: planned.run })).items);
+		await h.call("decide", { q: failure.q, onEvidence: failure.evidenceHash, answer: { is: "defect" } });
+		expect((await h.call<GateStatus>("gate", { run: planned.run })).verdict).toBe("failed");
 	});
 
-	test("release jobs must report on the artifact in the selected environment", () => {
-		h.call("announce", { deploy: "rc3", env: "staging", digest, code });
-		h.call("announce", { deploy: "rc3", env: "production" });
-		const planned = h.call<PlanReply>("plan", {
+	test("release jobs must report on the artifact in the selected environment", async () => {
+		await h.call("announce", { deploy: "rc3", env: "staging", digest, code });
+		await h.call("announce", { deploy: "rc3", env: "production" });
+		const planned = await h.call<PlanReply>("plan", {
 			name: "Release jobs",
 			select: { cases: ["C-1"] },
 			accepts: { build: "rc3", env: "staging" },
@@ -966,37 +1018,37 @@ describe("deploy announcements and release runs", () => {
 				{ id: "ci", kind: "jobs", jobs: ["smoke"] },
 			],
 		});
-		h.call("report", { run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+		await h.call("report", { run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
 		const ci = h.actor("smoke", "ci", ["record"]);
 		const results = [{ test: { key: "health" }, outcome: "pass" }];
-		h.call("report", { target: { build: "rc3", env: "production" }, job: "smoke", results }, ci);
-		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+		await h.call("report", { target: { build: "rc3", env: "production" }, job: "smoke", results }, ci);
+		expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
 			verdict: "pending",
 			tally: { pass: 1, missing: 1 },
 		});
-		h.call("report", { target: { build: "rc3", env: "staging" }, job: "smoke", results }, ci);
-		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+		await h.call("report", { target: { build: "rc3", env: "staging" }, job: "smoke", results }, ci);
+		expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
 			verdict: "passed",
 			tally: { missing: 0 },
 		});
 	});
 
-	test("forgetting an announcer removes its display name from saved replies and resolves provenance by id", () => {
+	test("forgetting an announcer removes its display name from saved replies and resolves provenance by id", async () => {
 		const ci = h.actor("retired-deployer", "ci", ["record"]);
-		h.call("announce", { deploy: "rc3", env: "staging", digest, code, cmd: "forgotten-deploy-1" }, ci);
-		const forgotten = h.call<{ forgotten: string }>("admin", { do: "actor.forget", name: "retired-deployer" });
+		await h.call("announce", { deploy: "rc3", env: "staging", digest, code, cmd: "forgotten-deploy-1" }, ci);
+		const forgotten = await h.call<{ forgotten: string }>("admin", { do: "actor.forget", name: "retired-deployer" });
 		const saved = h.app.db.raw
 			.query<{ outcome: string }, []>("SELECT outcome FROM commands WHERE id = 'forgotten-deploy-1'")
 			.get();
 		expect(JSON.parse(saved?.outcome ?? "{}")).toMatchObject({ by: forgotten.forgotten });
-		expect(h.call<{ items: unknown[] }>("find", { in: "deployments" }).items).toMatchObject([
+		expect((await h.call<{ items: unknown[] }>("find", { in: "deployments" })).items).toMatchObject([
 			{ by: forgotten.forgotten, attestation: { by: forgotten.forgotten } },
 		]);
 	});
 
-	test("an archive preserves the immutable build, its attestation and deployment history", () => {
-		h.call("announce", { deploy: "rc3", env: "staging", digest, code });
-		h.call("announce", { deploy: "rc3", env: "production" });
+	test("an archive preserves the immutable build, its attestation and deployment history", async () => {
+		await h.call("announce", { deploy: "rc3", env: "staging", digest, code });
+		await h.call("announce", { deploy: "rc3", env: "production" });
 		const chunks: string[] = [];
 		exportArchive(h.app.db, (chunk) => chunks.push(chunk));
 		const restored = new Db(":memory:");
@@ -1020,19 +1072,19 @@ describe("deploy announcements and release runs", () => {
 });
 
 describe("a person's refusal of a rule's answer", () => {
-	beforeEach(() => {
-		h = harness();
-		seed(1);
+	beforeEach(async () => {
+		h = await harness();
+		await seed(1);
 	});
 
-	test("holds however many questions the rule was not asked in between", () => {
-		const planned = h.call<PlanReply>("plan", {
+	test("holds however many questions the rule was not asked in between", async () => {
+		const planned = await h.call<PlanReply>("plan", {
 			name: "refused",
 			select: { cases: ["C-1"] },
 			accepts: { commit: "refuse01" },
 		});
-		const report = (attempt: number, outcome: "pass" | "fail") =>
-			h.call("report", {
+		const report = async (attempt: number, outcome: "pass" | "fail") =>
+			await h.call("report", {
 				run: planned.run,
 				target: { commit: "refuse01", branch: "main" },
 				job: "tests",
@@ -1046,19 +1098,21 @@ describe("a person's refusal of a rule's answer", () => {
 					},
 				],
 			});
-		report(1, "pass");
-		const approved = first(h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" }).items);
-		h.call("decide", { undo: approved.q, reason: "withdraw the automatic approval" });
-		const asked = first(h.call<InboxReply>("inbox", { kind: "signoff" }).items);
-		h.call("decide", { q: asked.q, onEvidence: asked.evidenceHash, answer: { is: "reject" }, reason: "not yet" });
+		await report(1, "pass");
+		const approved = first((await h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" })).items);
+		await h.call("decide", { undo: approved.q, reason: "withdraw the automatic approval" });
+		const asked = first((await h.call<InboxReply>("inbox", { kind: "signoff" })).items);
+		await h.call("decide", { q: asked.q, onEvidence: asked.evidenceHash, answer: { is: "reject" }, reason: "not yet" });
 		// The walk back through earlier questions stopped after 100 (issue #369): the rule approved at cycle 101.
 		for (let cycle = 1; cycle <= 101; cycle++) {
-			report(2 * cycle, "fail");
-			report(2 * cycle + 1, "pass");
+			await report(2 * cycle, "fail");
+			await report(2 * cycle + 1, "pass");
 		}
-		expect(run(planned.run).state).toBe("open");
-		const decided = h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" }).items;
+		expect((await run(planned.run)).state).toBe("open");
+		const decided = (await h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" })).items;
 		expect(decided.map((q) => q.decision?.answer)).not.toContainEqual({ is: "approve" });
-		expect(first(h.call<InboxReply>("inbox", { kind: "signoff" }).items).evidence).toMatchObject({ verdict: "passed" });
+		expect(first((await h.call<InboxReply>("inbox", { kind: "signoff" })).items).evidence).toMatchObject({
+			verdict: "passed",
+		});
 	}, 30_000);
 });

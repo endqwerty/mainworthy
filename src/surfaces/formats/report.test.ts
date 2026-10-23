@@ -61,23 +61,23 @@ test.each([
 		"junit",
 		'<testsuite><testcase name="timeout once"><failure message="first"/><rerunFailure/></testcase></testsuite>',
 	],
-] as const)("%s failures without diagnostics open answerable unknown-cause questions", (format, text) => {
-	const h = harness({ unlinked: "track" });
+] as const)("%s failures without diagnostics open answerable unknown-cause questions", async (format, text) => {
+	const h = await harness({ unlinked: "track" });
 	try {
 		const { results } = parseReport(text, { file: "report", format });
 		expect(results[0]?.outcome).toBe("fail");
 		expect(results[0]?.failure?.message || "").toBe("");
 		const target = { commit: "unknown773", head: "unknown773", repo: "acme/web", pr: 7, branch: "feature" };
-		const receipt = h.call<ReportReceipt>("report", { target, results });
+		const receipt = await h.call<ReportReceipt>("report", { target, results });
 		expect(receipt.gate).toMatchObject({ verdict: "blocked", tally: { unexplained: 1 } });
 		expect(receipt.gate?.open).toHaveLength(1);
-		const questions = h.call<InboxReply>("inbox", { kind: "failure", on: "pr:7" }).items;
+		const questions = (await h.call<InboxReply>("inbox", { kind: "failure", on: "pr:7" })).items;
 		expect(questions).toHaveLength(1);
 		const question = questions[0];
 		if (!question) throw new Error("missing failure question");
 		expect(question.evidence).toMatchObject({ signature: { class: "unknown" } });
-		h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "flaky" } });
-		expect(h.call<GateStatus>("gate", { change: "pr:7", repo: "acme/web" })).toMatchObject({
+		await h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "flaky" } });
+		expect(await h.call<GateStatus>("gate", { change: "pr:7", repo: "acme/web" })).toMatchObject({
 			verdict: "passed",
 			open: [],
 			tally: { excused: 1, unexplained: 0 },
@@ -653,7 +653,7 @@ test.each(["jest", "vitest"] as const)("real %s report refuses a source outside 
 	);
 });
 
-test("Unicode names at the cutoff upload through the registry in every report format", () => {
+test("Unicode names at the cutoff upload through the registry in every report format", async () => {
 	const name = `${"n".repeat(499)}🦊`;
 	const reports: [ReportFormat, string][] = [
 		["junit", `<testsuite><testcase name="${name}"/></testsuite>`],
@@ -690,11 +690,11 @@ test("Unicode names at the cutoff upload through the registry in every report fo
 		],
 		["trx", `<TestRun><Results><UnitTestResult testId="one" testName="${name}" outcome="Passed"/></Results></TestRun>`],
 	];
-	const h = harness();
+	const h = await harness();
 	try {
 		for (const [format, text] of reports) {
 			const { results } = parseReport(text, { file: "unicode.report", format });
-			const receipt = h.call<ReportReceipt>("report", { target: { session: format }, results });
+			const receipt = await h.call<ReportReceipt>("report", { target: { session: format }, results });
 			expect(receipt.counts).toMatchObject({ total: 1, pass: 1, fail: 0, error: 0, skip: 0 });
 			expect(results[0]?.test).toMatchObject({ name: "n".repeat(499) });
 		}

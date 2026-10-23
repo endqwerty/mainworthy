@@ -91,16 +91,18 @@ test("pytest's rerun marker keeps earlier failure evidence and judges its final 
 test.each(["jest", "vitest", "pytest"] as const)(
 	"%s upload stores tries and one recovery flip while the gate counts final outcomes",
 	async (format) => {
-		const h = harness({ unlinked: "track" });
+		const h = await harness({ unlinked: "track" });
 		try {
 			const { results } = parseReport(await fixture(format), { ...options, format });
-			h.call("report", { target: { commit: "aabb0736", repo: "acme/web" }, results });
-			const page = h.call<{ flips: number; last: { tries: { outcome: string }[] }[] }[]>("get", { refs: ["T-1"] })[0];
+			await h.call("report", { target: { commit: "aabb0736", repo: "acme/web" }, results });
+			const page = (
+				await h.call<{ flips: number; last: { tries: { outcome: string }[] }[] }[]>("get", { refs: ["T-1"] })
+			)[0];
 			expect(page?.flips).toBe(1);
 			expect(page?.last[0]?.tries.map((tried) => tried.outcome)).toEqual(
 				format === "jest" ? ["fail", "fail"] : ["fail"],
 			);
-			expect(h.call<GateStatus>("gate", { commit: "aabb0736", repo: "acme/web" }).tally).toMatchObject({
+			expect((await h.call<GateStatus>("gate", { commit: "aabb0736", repo: "acme/web" })).tally).toMatchObject({
 				pass: 2,
 				skipped: 1,
 				unexplained: 1,
@@ -181,24 +183,27 @@ test.each([
 		}),
 	],
 	["junit", '<testsuite><testcase name="timeout once"><flakyFailure/></testcase></testsuite>'],
-] as const)("%s recoveries without diagnostics have an unknown cause and no signature grouping", (format, text) => {
-	const h = harness({ unlinked: "track" });
-	try {
-		const { results } = parseReport(text, { ...options, format });
-		const tried = results[0]?.tries?.[0];
-		expect(tried?.outcome).toBe("fail");
-		for (const attempt of [1, 2]) {
-			h.call("report", { target: { commit: `unknown773${attempt}`, repo: "acme/web" }, results });
+] as const)(
+	"%s recoveries without diagnostics have an unknown cause and no signature grouping",
+	async (format, text) => {
+		const h = await harness({ unlinked: "track" });
+		try {
+			const { results } = parseReport(text, { ...options, format });
+			const tried = results[0]?.tries?.[0];
+			expect(tried?.outcome).toBe("fail");
+			for (const attempt of [1, 2]) {
+				await h.call("report", { target: { commit: `unknown773${attempt}`, repo: "acme/web" }, results });
+			}
+			const page = (await h.call<{ flips: number; sameCode: unknown }[]>("get", { refs: ["T-1"] }))[0];
+			expect(page?.flips).toBe(2);
+			expect(SameCodeEvidence.parse(page?.sameCode).signals).toEqual([]);
+			expect(normaliseFailure({ message: tried?.failure?.message ?? "" }).class).toBe("unknown");
+			expect(h.app.db.raw.query("SELECT class FROM signatures").all()).toEqual([{ class: "unknown" }]);
+		} finally {
+			h.close();
 		}
-		const page = h.call<{ flips: number; sameCode: unknown }[]>("get", { refs: ["T-1"] })[0];
-		expect(page?.flips).toBe(2);
-		expect(SameCodeEvidence.parse(page?.sameCode).signals).toEqual([]);
-		expect(normaliseFailure({ message: tried?.failure?.message ?? "" }).class).toBe("unknown");
-		expect(h.app.db.raw.query("SELECT class FROM signatures").all()).toEqual([{ class: "unknown" }]);
-	} finally {
-		h.close();
-	}
-});
+	},
+);
 
 test.each([
 	{
@@ -210,10 +215,10 @@ test.each([
 	{ end: "second", tries: [{ outcome: "pass" }, { outcome: "fail" }], flips: 1, signals: [] },
 ])(
 	"an unknown try at the $end end of a flip does not borrow the final failure's cause",
-	({ tries, flips, signals }) => {
-		const h = harness({ unlinked: "track" });
+	async ({ tries, flips, signals }) => {
+		const h = await harness({ unlinked: "track" });
 		try {
-			h.call("report", {
+			await h.call("report", {
 				target: { commit: "unknown774", repo: "acme/web" },
 				results: [
 					{
@@ -224,7 +229,7 @@ test.each([
 					},
 				],
 			});
-			const page = h.call<{ flips: number; sameCode: unknown }[]>("get", { refs: ["T-1"] })[0];
+			const page = (await h.call<{ flips: number; sameCode: unknown }[]>("get", { refs: ["T-1"] }))[0];
 			expect(page?.flips).toBe(flips);
 			expect(SameCodeEvidence.parse(page?.sameCode).signals).toMatchObject(signals);
 		} finally {

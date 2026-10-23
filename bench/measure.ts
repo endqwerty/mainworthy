@@ -34,7 +34,7 @@ export type Workload = {
 	/** Builds inputs outside the timer and returns the exact operation to time. */
 	prepare: (iteration: number) => () => unknown | Promise<unknown>;
 	/** Checks the result and persisted state outside the timed region. */
-	check: (result: unknown, iteration: number) => void;
+	check: (result: unknown, iteration: number) => void | Promise<void>;
 };
 
 /** Nearest-rank quantiles keep a long tail visible, including the sole slow sample in small runs. */
@@ -82,7 +82,7 @@ export async function measure(workload: Workload): Promise<Measurement> {
 			} finally {
 				ms = performance.now() - start;
 			}
-			workload.check(result, iteration);
+			await workload.check(result, iteration);
 			if (iteration >= 0) checked++;
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : String(cause);

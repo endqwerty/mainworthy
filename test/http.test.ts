@@ -1127,7 +1127,7 @@ describe("reads on other cores through HTTP", () => {
 		let checked = 0;
 		for (const op of reads) {
 			for (const input of inputs[op.name] ?? []) {
-				const expected = invoke(instance.app, OPS, {
+				const expected = await invoke(instance.app, OPS, {
 					op: op.name,
 					project: "scratch",
 					input,
@@ -2932,9 +2932,9 @@ describe("the surface", () => {
 		const unsubscribe = instance.app.subscribe((event) => {
 			if (event.op === "report") accepted.resolve();
 		});
-		const pause = spyOn(op, "steps").mockImplementation(function* (ctx, input) {
+		const pause = spyOn(op, "steps").mockImplementation(async function* (ctx, input) {
 			const run = steps(ctx, input);
-			const first = run.next();
+			const first = await run.next();
 			if (first.done) return first.value;
 			yield first.value;
 			while (held) yield;

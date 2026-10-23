@@ -18,28 +18,28 @@ import { TimelineReply } from "../src/core/replies.ts";
 import { removalFixture } from "./demo-removal-fixture.ts";
 import { ciReport, harness } from "./helpers.ts";
 
-test("a large link proposal does not multiply its edits by the case's tags", () => {
-	const apply = () => {
-		const h = harness();
+test("a large link proposal does not multiply its edits by the case's tags", async () => {
+	const apply = async () => {
+		const h = await harness();
 		try {
 			const tags = Array.from({ length: 2_000 }, (_, i) => `tag-${i}`);
 			const covers = Array.from({ length: 1_999 }, (_, i) => `REQ-${i}`);
-			h.call("propose", { edits: [{ op: "create", body: { title: "Before links" }, tags }] });
+			await h.call("propose", { edits: [{ op: "create", body: { title: "Before links" }, tags }] });
 			const edits: Edit[] = [
 				{ op: "edit", case: "C-1", base: 1, body: { title: "With links" } },
 				...covers.map((requirement) => ({ op: "cover" as const, case: "C-1", requirement, on: true })),
 			];
 			const start = performance.now();
-			const reply = h.call<ProposeReply>("propose", { edits });
+			const reply = await h.call<ProposeReply>("propose", { edits });
 			const ms = performance.now() - start;
 			expect(reply).toMatchObject({ status: "adopted", conflicts: [], cases: [{ ref: "C-1", version: 2 }] });
-			const [saved] = h.call<{ title: string; version: number; tags: string[]; covers: string[] }[]>("get", {
+			const [saved] = await h.call<{ title: string; version: number; tags: string[]; covers: string[] }[]>("get", {
 				refs: ["C-1"],
 			});
 			expect(saved).toMatchObject({ title: "With links", version: 2 });
 			expect(saved?.tags.toSorted()).toEqual(tags.toSorted());
 			expect(saved?.covers.toSorted()).toEqual(covers.toSorted());
-			const timeline = TimelineReply.parse(h.call("timeline", { ref: "C-1" }));
+			const timeline = TimelineReply.parse(await h.call("timeline", { ref: "C-1" }));
 			expect(timeline.entries.filter((entry) => entry.t === "version").map((entry) => entry.version)).toEqual([2, 1]);
 			expect(timeline.entries.filter((entry) => entry.t === "placement")).toEqual([]);
 			return ms;
@@ -48,8 +48,8 @@ test("a large link proposal does not multiply its edits by the case's tags", () 
 		}
 	};
 	// Like the other tripwires, repeat a timing miss once to tolerate a busy shared runner.
-	const first = apply();
-	const ms = first < 1_000 ? first : apply();
+	const first = await apply();
+	const ms = first < 1_000 ? first : await apply();
 	console.log(`2000-tag / 2000-edit proposal: ${ms.toFixed(1)} ms`);
 	expect(ms, "applying all links and the body must stay below 1000 ms").toBeLessThan(1_000);
 }, 30_000);
@@ -60,7 +60,7 @@ test("on-disk hot paths stay inside the design budgets", async () => {
 	// The system temporary directory can be tmpfs. A private temporary directory beside the benchmark is disk.
 	const dir = mkdtempSync(join(root, "check-"));
 	try {
-		const dataset = buildDataset({
+		const dataset = await buildDataset({
 			dir: join(dir, "baseline"),
 			parameters: Parameters.parse({
 				cases: 2_000,
@@ -73,8 +73,8 @@ test("on-disk hot paths stay inside the design budgets", async () => {
 		});
 		const instance = openDataset(dataset, join(dir, "measurement"));
 		try {
-			prepareRecentChanges(instance);
-			const workloads = readWorkloads(instance, 15).filter((workload) => workload.budget !== null);
+			await prepareRecentChanges(instance);
+			const workloads = (await readWorkloads(instance, 15)).filter((workload) => workload.budget !== null);
 			workloads.push(
 				saveWorkload(instance, 15),
 				ingestWorkload(instance, { size: 5_000, budget: BUDGETS.smallIngest, iterations: 5, prefix: "check" }).workload,
@@ -111,21 +111,23 @@ test("on-disk hot paths stay inside the design budgets", async () => {
 }, 20_000);
 
 test("quarantined reports stay within budget after 3000 earlier trunk commits", async () => {
-	const h = harness({ unlinked: "track" });
+	const h = await harness({ unlinked: "track" });
 	try {
 		const commit = (i: number) => i.toString(16).padStart(40, "0");
 		for (let i = 1; i <= 3000; i++)
-			h.call(
+			await h.call(
 				"report",
 				ciReport({ commit: commit(i), n: 1, ...(i % 3 === 0 ? { fail: { 0: "expected green" } } : {}) }),
 			);
-		const proposal = h.call<ProposeReply>("propose", {
+		const proposal = await h.call<ProposeReply>("propose", {
 			edits: [{ op: "quarantine", test: "T-1", base: null, exit: { kind: "passes", count: 100 } }],
 			reason: "Repair an unreliable test",
 		});
-		const question = h.call<InboxReply>("inbox", { kind: "adopt" }).items.find((q) => q.q === proposal.question);
+		const question = (await h.call<InboxReply>("inbox", { kind: "adopt" })).items.find(
+			(q) => q.q === proposal.question,
+		);
 		if (!question) throw new Error("missing quarantine proposal");
-		h.call("decide", {
+		await h.call("decide", {
 			q: question.q,
 			onEvidence: question.evidenceHash,
 			answer: { is: "accept" },
@@ -139,15 +141,15 @@ test("quarantined reports stay within budget after 3000 earlier trunk commits", 
 			correctness: "one fresh result recorded, its gate passes, and quarantine remains active",
 			prepare: (i) => {
 				const input = ciReport({ commit: commit(3001 + i), n: 1 });
-				return () => h.call<ReportReceipt>("report", input);
+				return async () => await h.call<ReportReceipt>("report", input);
 			},
-			check: (result, i) => {
+			check: async (result, i) => {
 				expect(result).toMatchObject({ fresh: true, counts: { total: 1, pass: 1 }, rejected: [] });
-				expect(h.call<GateStatus>("gate", { commit: commit(3001 + i) })).toMatchObject({
+				expect(await h.call<GateStatus>("gate", { commit: commit(3001 + i) })).toMatchObject({
 					verdict: "passed",
 					tally: { pass: 1, unexplained: 0 },
 				});
-				expect(h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] })[0]?.quarantine.active).toBe(true);
+				expect((await h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] }))[0]?.quarantine.active).toBe(true);
 			},
 		});
 		console.log(`\nQuarantine history regression tripwire, milliseconds:\n${table([row])}`);
@@ -164,8 +166,8 @@ test("quarantined reports stay within budget after 3000 earlier trunk commits", 
  * size of the runs that waited for them. At product scale this was fourteen seconds for a report that should
  * take one (a pipeline going green after a bad day closes thousands of questions at once).
  */
-test("a report that makes many failures go away recomputes each run once, not once per question", () => {
-	const h = harness();
+test("a report that makes many failures go away recomputes each run once, not once per question", async () => {
+	const h = await harness();
 	try {
 		const ci = h.actor("pipeline", "ci", ["read", "record"]);
 		const causes = 300;
@@ -177,9 +179,13 @@ test("a report that makes many failures go away recomputes each run once, not on
 				outcome,
 				...(outcome === "fail" ? { failure: { message: `the ${word(i)} widget did not answer` } } : {}),
 			}));
-		const counts = () => h.call<InboxReply>("inbox", { kind: "failure", state: "open", limit: 1 }).counts;
-		h.call("report", { target: { commit: "a".repeat(40), branch: "main" }, job: "unit", results: results("fail") }, ci);
-		expect(counts().failure).toBe(causes);
+		const counts = async () => (await h.call<InboxReply>("inbox", { kind: "failure", state: "open", limit: 1 })).counts;
+		await h.call(
+			"report",
+			{ target: { commit: "a".repeat(40), branch: "main" }, job: "unit", results: results("fail") },
+			ci,
+		);
+		expect((await counts()).failure).toBe(causes);
 
 		let tallies = 0;
 		const db = h.app.db;
@@ -193,7 +199,7 @@ test("a report that makes many failures go away recomputes each run once, not on
 			return (all as (...rest: unknown[]) => unknown[])(statement, ...args);
 		}) as typeof db.all;
 		try {
-			h.call(
+			await h.call(
 				"report",
 				{ target: { commit: "b".repeat(40), branch: "main" }, job: "unit", results: results("pass") },
 				ci,
@@ -201,7 +207,7 @@ test("a report that makes many failures go away recomputes each run once, not on
 		} finally {
 			db.all = all;
 		}
-		expect(counts().failure ?? 0).toBe(0);
+		expect((await counts()).failure ?? 0).toBe(0);
 		// Two commits' runs, each read a few times in one report: nowhere near once per question.
 		expect(tallies).toBeLessThan(12);
 	} finally {
@@ -210,12 +216,12 @@ test("a report that makes many failures go away recomputes each run once, not on
 });
 
 /** A report reuses its tally and reads each target's scope once per discovery pass, however many tests fail. */
-test("a report with existing failures bounds repeated scans and targets reads", () => {
-	const work = (failures: number) => {
-		const h = harness({ unlinked: "track" });
+test("a report with existing failures bounds repeated scans and targets reads", async () => {
+	const work = async (failures: number) => {
+		const h = await harness({ unlinked: "track" });
 		try {
 			const ci = h.actor("pipeline", "ci", ["read", "record"]);
-			h.call(
+			await h.call(
 				"report",
 				ciReport({
 					commit: "reuse001",
@@ -242,7 +248,7 @@ test("a report with existing failures bounds repeated scans and targets reads", 
 			};
 			let receipt: ReportReceipt;
 			try {
-				receipt = h.call<ReportReceipt>(
+				receipt = await h.call<ReportReceipt>(
 					"report",
 					{
 						target: { commit: "reuse001", repo: "acme/web", branch: "main" },
@@ -256,18 +262,18 @@ test("a report with existing failures bounds repeated scans and targets reads", 
 				db.get = get;
 			}
 			expect(receipt).toMatchObject({ fresh: true, counts: { total: 1, pass: 1 }, rejected: [] });
-			expect(h.call<GateStatus>("gate", { commit: "reuse001", repo: "acme/web" })).toMatchObject({
+			expect(await h.call<GateStatus>("gate", { commit: "reuse001", repo: "acme/web" })).toMatchObject({
 				verdict: "blocked",
 				tally: { pass: 1, unexplained: failures },
 			});
-			expect(h.call<InboxReply>("inbox", { kind: "failure" }).items.map((q) => q.state)).toEqual(["open"]);
+			expect((await h.call<InboxReply>("inbox", { kind: "failure" })).items.map((q) => q.state)).toEqual(["open"]);
 			return reads;
 		} finally {
 			h.close();
 		}
 	};
-	const small = work(3);
-	const large = work(30);
+	const small = await work(3);
+	const large = await work(30);
 	// One tally and one question-discovery pass. Stale handling already has the tally's failing set.
 	expect(small.scans).toBe(2);
 	expect(large.scans).toBe(2);
@@ -275,11 +281,11 @@ test("a report with existing failures bounds repeated scans and targets reads", 
 });
 
 test("a 500-result trunk page batches landing reads beside 8000 changes", async () => {
-	const h = harness({ unlinked: "track" });
+	const h = await harness({ unlinked: "track" });
 	try {
 		const ci = h.actor("pipeline", "ci", ["read", "record"]);
 		const commit = "1234567890abcdef1234567890abcdef12345678";
-		h.call(
+		await h.call(
 			"report",
 			{
 				target: { repo: "acme/shop", commit: "feature0001", pr: 8, branch: "feature", title: "Keep coupons" },
@@ -287,8 +293,8 @@ test("a 500-result trunk page batches landing reads beside 8000 changes", async 
 			},
 			ci,
 		);
-		h.call("change", { change: "pr:8", state: "merged", landing: { commit, branch: "main" } });
-		const receipt = h.call<ReportReceipt>(
+		await h.call("change", { change: "pr:8", state: "merged", landing: { commit, branch: "main" } });
+		const receipt = await h.call<ReportReceipt>(
 			"report",
 			{
 				target: { repo: "acme/shop", commit, branch: "main" },
@@ -312,7 +318,7 @@ test("a 500-result trunk page batches landing reads beside 8000 changes", async 
 				budget: BUDGETS.search,
 				iterations: 10,
 				correctness: "all 500 results name only the recorded landing, using one landing query per page",
-				prepare: () => () => {
+				prepare: () => async () => {
 					landingReads = 0;
 					return h.call("find", { in: "results", run: receipt.gate?.run, limit: 500 });
 				},

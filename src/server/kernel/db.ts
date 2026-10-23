@@ -486,6 +486,26 @@ export class Db {
 		}
 	}
 
+	private snapshots: Promise<unknown> = Promise.resolve();
+
+	/** Keeps an awaited read in one snapshot and queues other async reads on this connection. */
+	snapshotAsync<T>(fn: () => Promise<T>): Promise<T> {
+		const run = async (): Promise<T> => {
+			if (this.depth > 0) return await fn();
+			this.raw.exec("BEGIN");
+			this.depth++;
+			try {
+				return await fn();
+			} finally {
+				this.raw.exec("COMMIT");
+				this.depth--;
+			}
+		};
+		const next = this.snapshots.then(run, run);
+		this.snapshots = next.catch(() => undefined);
+		return next;
+	}
+
 	close(): void {
 		for (const statement of this.statements.values()) statement.finalize();
 		this.statements.clear();

@@ -819,9 +819,9 @@ describe("Mainworthy instance archives", () => {
 		expect(chunks).toEqual([]);
 	});
 
-	test("an untouched project keeps the rule actor for the first policy decision after restore", () => {
-		const from = harness();
-		const to = harness();
+	test("an untouched project keeps the rule actor for the first policy decision after restore", async () => {
+		const from = await harness();
+		const to = await harness();
 		try {
 			const chunks: string[] = [];
 			exportArchive(from.app.db, (chunk) => chunks.push(chunk), { project: "scratch" });
@@ -831,9 +831,11 @@ describe("Mainworthy instance archives", () => {
 				removeBootstrap(to.app.db);
 				importArchive(to.app.db, linesOf(chunks.join("")));
 			});
-			expect(to.raw("propose", { edits: [{ op: "create", outline: "First case after restore" }] })).toMatchObject({
-				ok: true,
-			});
+			expect(await to.raw("propose", { edits: [{ op: "create", outline: "First case after restore" }] })).toMatchObject(
+				{
+					ok: true,
+				},
+			);
 			expect(to.app.db.raw.query("SELECT kind, name FROM actors ORDER BY id").all()).toEqual(
 				from.app.db.raw.query("SELECT kind, name FROM actors ORDER BY id").all(),
 			);
@@ -843,19 +845,27 @@ describe("Mainworthy instance archives", () => {
 		}
 	});
 
-	test("slot settlements travel with their slot and do not settle another slot after restore", () => {
-		const from = harness();
-		const to = harness();
+	test("slot settlements travel with their slot and do not settle another slot after restore", async () => {
+		const from = await harness();
+		const to = await harness();
 		try {
-			from.call("propose", {
+			await from.call("propose", {
 				edits: [
 					{ op: "create", outline: "One" },
 					{ op: "create", outline: "Keep open" },
 				],
 			});
 			const target = { commit: "archiveslot", branch: "main" };
-			const one = from.call<{ run: string }>("plan", { name: "One", select: {}, accepts: { commit: target.commit } });
-			const two = from.call<{ run: string }>("plan", { name: "Two", select: {}, accepts: { commit: target.commit } });
+			const one = await from.call<{ run: string }>("plan", {
+				name: "One",
+				select: {},
+				accepts: { commit: target.commit },
+			});
+			const two = await from.call<{ run: string }>("plan", {
+				name: "Two",
+				select: {},
+				accepts: { commit: target.commit },
+			});
 			const passer = from.actor("passer", "human", ["read", "produce"]);
 			const result = (outcome: string) => ({
 				test: { key: "one" },
@@ -863,15 +873,16 @@ describe("Mainworthy instance archives", () => {
 				outcome,
 				...(outcome === "fail" ? { failure: { message: "same cause" } } : {}),
 			});
-			from.call("report", { target, results: [result("fail")] });
-			from.call("report", { target, results: [result("pass")] }, passer);
-			const questions = from.call<{ items: { q: string; evidenceHash: string; evidence: { run?: string } }[] }>(
-				"inbox",
-				{ kind: "failure" },
+			await from.call("report", { target, results: [result("fail")] });
+			await from.call("report", { target, results: [result("pass")] }, passer);
+			const questions = (
+				await from.call<{ items: { q: string; evidenceHash: string; evidence: { run?: string } }[] }>("inbox", {
+					kind: "failure",
+				})
 			).items;
 			const chosen = questions.find((question) => question.evidence.run === one.run);
 			if (!chosen) throw new Error("missing slot dispute");
-			from.call("decide", { q: chosen.q, onEvidence: chosen.evidenceHash, answer: { is: "flaky" } });
+			await from.call("decide", { q: chosen.q, onEvidence: chosen.evidenceHash, answer: { is: "flaky" } });
 			const chunks: string[] = [];
 			exportArchive(from.app.db, (chunk) => chunks.push(chunk), { project: "scratch" });
 			to.app.db.transaction(() => {
@@ -879,8 +890,8 @@ describe("Mainworthy instance archives", () => {
 				removeBootstrap(to.app.db);
 				importArchive(to.app.db, linesOf(chunks.join("")));
 			});
-			expect(to.call("gate", { run: one.run })).toMatchObject({ tally: { pass: 1, disputed: 0 } });
-			expect(to.call("gate", { run: two.run })).toMatchObject({ verdict: "blocked", tally: { disputed: 1 } });
+			expect(await to.call("gate", { run: one.run })).toMatchObject({ tally: { pass: 1, disputed: 0 } });
+			expect(await to.call("gate", { run: two.run })).toMatchObject({ verdict: "blocked", tally: { disputed: 1 } });
 		} finally {
 			from.close();
 			to.close();
@@ -1684,22 +1695,25 @@ describe("archive line helpers", () => {
 	});
 });
 
-test("archive import leaves a landed change open without naming its landing on trunk", () => {
-	const from = harness();
-	const to = harness();
+test("archive import leaves a landed change open without naming its landing on trunk", async () => {
+	const from = await harness();
+	const to = await harness();
 	try {
 		const commit = "1234567890abcdef1234567890abcdef12345678";
-		from.call("report", {
+		await from.call("report", {
 			target: { repo: "acme/shop", commit: "feature0001", branch: "feature", pr: 8, title: "Keep coupons" },
 			results: [{ test: { key: "checkout" }, outcome: "pass" }],
 		});
-		from.call("change", { change: "pr:8", state: "merged", landing: { commit, branch: "main" } });
-		from.call("report", {
+		await from.call("change", { change: "pr:8", state: "merged", landing: { commit, branch: "main" } });
+		await from.call("report", {
 			target: { repo: "acme/shop", commit, branch: "main" },
 			results: [{ test: { key: "checkout" }, outcome: "pass" }],
 		});
-		const history = (h: typeof from) => h.call<{ last: unknown[] }[]>("get", { refs: ["T-1"] })[0]?.last[0];
-		expect(history(from)).toMatchObject({ location: { label: "main · pr:8 Keep coupons", commit, change: "pr:8" } });
+		const history = async (h: typeof from) =>
+			(await h.call<{ last: unknown[] }[]>("get", { refs: ["T-1"] }))[0]?.last[0];
+		expect(await history(from)).toMatchObject({
+			location: { label: "main · pr:8 Keep coupons", commit, change: "pr:8" },
+		});
 		const chunks: string[] = [];
 		exportArchive(from.app.db, (chunk) => chunks.push(chunk), { project: "scratch" });
 		const archive = chunks.join("");
@@ -1709,8 +1723,8 @@ test("archive import leaves a landed change open without naming its landing on t
 			removeBootstrap(to.app.db);
 			importArchive(to.app.db, linesOf(archive));
 		});
-		expect(history(to)).toMatchObject({ location: { label: "main", commit, change: null } });
-		expect(to.call("find", { in: "changes" })).toMatchObject({ items: [{ key: "pr:8", state: "open" }] });
+		expect(await history(to)).toMatchObject({ location: { label: "main", commit, change: null } });
+		expect(await to.call("find", { in: "changes" })).toMatchObject({ items: [{ key: "pr:8", state: "open" }] });
 	} finally {
 		from.close();
 		to.close();

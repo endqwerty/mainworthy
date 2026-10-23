@@ -621,12 +621,12 @@ describe("as a surface uses it", () => {
 	const wrong = (ending: number): string => `cb_Ab3dE9xQ${String(ending).padStart(24, "0")}`;
 
 	const instances: Harness[] = [];
-	afterEach(() => {
+	afterEach(async () => {
 		for (const h of instances.splice(0)) h.close();
 	});
 
-	function caller() {
-		const h = harness();
+	async function caller() {
+		const h = await harness();
 		instances.push(h);
 		for (const secret of [GENERATED, CHOSEN]) {
 			const token = createToken(h.app, { actor: "robin", kind: "human", can: [], project: 0, label: "test" });
@@ -654,8 +654,8 @@ describe("as a surface uses it", () => {
 		};
 	}
 
-	test("the fifth wrong secret blocks: a secret a person chose is refused unread, a right generated one passes", () => {
-		const c = caller();
+	test("the fifth wrong secret blocks: a secret a person chose is refused unread, a right generated one passes", async () => {
+		const c = await caller();
 		for (let i = 0; i < 5; i++) expect(c.admit("203.0.113.9", wrong(i))).toBe("unauthorized");
 		expect(c.admit("203.0.113.9", wrong(5))).toBe("limited for 1 s");
 		expect(c.admit("203.0.113.9", CHOSEN)).toBe("limited for 1 s");
@@ -666,21 +666,21 @@ describe("as a surface uses it", () => {
 		expect(c.admit("198.51.100.7", "cb_another-secret")).toBe("unauthorized");
 	});
 
-	test("nothing that came during the block was reported: the next failure doubles it once, from 1 second", () => {
-		const c = caller();
+	test("nothing that came during the block was reported: the next failure doubles it once, from 1 second", async () => {
+		const c = await caller();
 		for (let i = 0; i < 5; i++) c.admit("203.0.113.9", wrong(i));
 		for (let i = 0; i < 50; i++) {
 			c.admit("203.0.113.9", wrong(100 + i));
 			c.admit("203.0.113.9", CHOSEN);
 			c.admit("203.0.113.9", GENERATED);
 		}
-		c.pass(SECOND);
+		await c.pass(SECOND);
 		expect(c.admit("203.0.113.9", wrong(5))).toBe("unauthorized");
 		expect(c.admit("203.0.113.9", wrong(6))).toBe("limited for 2 s");
 	});
 
-	test("a success clears the prefix and never the address", () => {
-		const c = caller();
+	test("a success clears the prefix and never the address", async () => {
+		const c = await caller();
 		for (let i = 0; i < 4; i++) c.admit("203.0.113.9", wrong(i));
 		expect(c.admit("203.0.113.9", CHOSEN)).toBe("admitted");
 		expect(c.limiter.size).toBe(1);
@@ -690,8 +690,8 @@ describe("as a surface uses it", () => {
 		expect(c.admit("198.51.100.7", CHOSEN)).toBe("admitted");
 	});
 
-	test("a peer that is a proxy, or unknown, is counted by prefix alone", () => {
-		const c = caller();
+	test("a peer that is a proxy, or unknown, is counted by prefix alone", async () => {
+		const c = await caller();
 		let attempts = 0;
 		for (const from of ["127.0.0.1", "::ffff:10.0.0.5", null, ""]) {
 			// Twenty wrong secrets from each, no two with the same first 8 characters.
@@ -706,8 +706,8 @@ describe("as a surface uses it", () => {
 		expect(c.admit("::1", CHOSEN)).toBe("limited for 1 s");
 	});
 
-	test("a secret with no prefix key is counted by address alone, and by nothing behind a proxy", () => {
-		const c = caller();
+	test("a secret with no prefix key is counted by address alone, and by nothing behind a proxy", async () => {
+		const c = await caller();
 		for (let i = 0; i < 20; i++) expect(c.admit("127.0.0.1", i % 2 ? "" : "cb_")).toBe("unauthorized");
 		expect(c.limiter.size).toBe(0);
 		for (let i = 0; i < 5; i++) expect(c.admit("203.0.113.9", "")).toBe("unauthorized");

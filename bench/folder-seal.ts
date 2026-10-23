@@ -10,7 +10,7 @@ if (process.argv[2] === "--sample") {
 	const count = Number(process.argv[5]);
 	assert(root && (kind === "create" || kind === "rename") && Number.isInteger(count) && count > 0);
 	const { harness }: typeof import("../test/helpers.ts") = await import(`${root}/test/helpers.ts`);
-	const h = harness({ preset: "standard" });
+	const h = await harness({ preset: "standard" });
 	try {
 		const project = h.app.db.raw.query<{ id: number }, []>("SELECT id FROM projects WHERE key = 'scratch'").get();
 		assert(project);
@@ -28,7 +28,7 @@ if (process.argv[2] === "--sample") {
 		);
 		const cpu = process.cpuUsage();
 		const start = performance.now();
-		const reply = h.call<ProposeReply>("propose", { edits }, agent);
+		const reply = await h.call<ProposeReply>("propose", { edits }, agent);
 		const ms = performance.now() - start;
 		const used = process.cpuUsage(cpu);
 		assert.equal(reply.status, "open");

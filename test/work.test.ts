@@ -848,30 +848,34 @@ test("a code fence the description ends inside is code to its end", () => {
 });
 
 test("under the CI policy a failure needs a fix, asks nobody, and is over when a commit passes the test", async () => {
-	const h = harness({ preset: "standard", unlinked: "create" });
+	const h = await harness({ preset: "standard", unlinked: "create" });
 	try {
-		const call: Call = async (op, input) => h.call(op, input);
-		const gate = (commit: string) => h.call<GateStatus>("gate", { commit });
-		const open = () => h.call<InboxReply>("inbox", { kind: "failure" }).items.map((item) => item.q);
-		const change = (commit: string, fail: Record<number, string> = {}, attempt = 1) =>
-			h.call("report", ciReport({ commit, branch: "feature", pr: 69, base: "main0001", n: 2, fail, attempt }));
-		h.call("report", ciReport({ commit: "main0001", n: 2 }));
+		const call: Call = async (op, input) => await h.call(op, input);
+		const gate = async (commit: string) => await h.call<GateStatus>("gate", { commit });
+		const open = async () => (await h.call<InboxReply>("inbox", { kind: "failure" })).items.map((item) => item.q);
+		const change = async (commit: string, fail: Record<number, string> = {}, attempt = 1) =>
+			await h.call("report", ciReport({ commit, branch: "feature", pr: 69, base: "main0001", n: 2, fail, attempt }));
+		await h.call("report", ciReport({ commit: "main0001", n: 2 }));
 
 		// A question asked before the switch is answered by the new rule.
-		change("change01", { 1: "Expected: 9\nReceived: 8" });
-		expect(open()).toHaveLength(1);
-		expect(gate("change01").verdict).toBe("blocked");
+		await change("change01", { 1: "Expected: 9\nReceived: 8" });
+		expect(await open()).toHaveLength(1);
+		expect((await gate("change01")).verdict).toBe("blocked");
 		expect(await ciPolicy(call, "scratch")).toMatch(
 			/^project scratch: every CI failure is answered "needs a fix" by rule \(Q-\d+ accepted\)$/,
 		);
 		expect(await ciPolicy(call, "scratch")).toBe(
 			'project scratch: every CI failure is already answered "needs a fix" by rule',
 		);
-		const policy = h.call<Policy>("admin", { do: "policy.show", project: "scratch" });
+		const policy = await h.call<Policy>("admin", { do: "policy.show", project: "scratch" });
 		expect(policy.settings.unlinked).toBe("create");
 		expect(policy.clauses.find((clause) => clause.when.includes("hint:disputed"))?.ask.who).toBe("member");
-		expect(open()).toEqual([]);
-		expect(gate("change01")).toMatchObject({ verdict: "failed", open: [], tally: { attributed: 1, unexplained: 0 } });
+		expect(await open()).toEqual([]);
+		expect(await gate("change01")).toMatchObject({
+			verdict: "failed",
+			open: [],
+			tally: { attributed: 1, unexplained: 0 },
+		});
 
 		const read = await readCi(call, { change: "pr:69" });
 		expect(read.exit).toBe(1);
@@ -879,39 +883,39 @@ test("under the CI policy a failure needs a fix, asks nobody, and is over when a
 		expect(read.text).toContain("tests/checkout.spec.ts: test 1\n    Expected: 9\n    Received: 8\n");
 
 		// A retry of the shard that passes is the commit's newest word.
-		change("change01", {}, 2);
-		expect(gate("change01")).toMatchObject({ verdict: "passed", open: [] });
+		await change("change01", {}, 2);
+		expect(await gate("change01")).toMatchObject({ verdict: "passed", open: [] });
 
 		// A new failure on a later commit, then a commit that fixes it.
-		change("change02", { 0: "boom" });
-		expect(gate("change02")).toMatchObject({ verdict: "failed", open: [] });
-		expect(open()).toEqual([]);
-		change("change03");
+		await change("change02", { 0: "boom" });
+		expect(await gate("change02")).toMatchObject({ verdict: "failed", open: [] });
+		expect(await open()).toEqual([]);
+		await change("change03");
 		expect(await readCi(call, { change: "pr:69" })).toEqual({
 			exit: 0,
 			text: expect.stringContaining("Nothing to do."),
 		});
 
 		// The test the retry passed fails again: the session is told it flipped lately, so it re-runs before fixing.
-		change("change04", { 1: "Expected: 9\nReceived: 8" });
+		await change("change04", { 1: "Expected: 9\nReceived: 8" });
 		const flaky = await readCi(call, { change: "pr:69" });
 		expect(flaky.exit).toBe(1);
 		expect(flaky.text).toContain("tests/checkout.spec.ts: test 1 (flipped 1 time in the last 14 days)\n");
 		expect(flaky.text).toContain("1 of these flipped between passing and failing in the last 14 days");
 		expect(flaky.text).toContain("the gate passes once no other failure is left");
-		change("change05");
+		await change("change05");
 
 		// A failure on main is the same, and every failing test is listed, past a page of them.
 		const many = Object.fromEntries(Array.from({ length: 503 }, (_, i) => [i, `boom ${i}`]));
-		h.call("report", ciReport({ commit: "main0002", n: 503, fail: many }));
-		expect(gate("main0002")).toMatchObject({ verdict: "failed", open: [] });
-		expect(open()).toEqual([]);
+		await h.call("report", ciReport({ commit: "main0002", n: 503, fail: many }));
+		expect(await gate("main0002")).toMatchObject({ verdict: "failed", open: [] });
+		expect(await open()).toEqual([]);
 		const all = await readCi(call, { commit: "main0002" });
 		expect(all.text).toContain("needs a fix (503):");
 		expect(all.text).toContain("tests/checkout.spec.ts: test 502\n    boom 502\n");
 
 		// Once main passes, the commit that failed has no answer left and nobody is asked about it (decision 0102).
-		h.call("report", ciReport({ commit: "main0003", n: 503 }));
+		await h.call("report", ciReport({ commit: "main0003", n: 503 }));
 		const old = await readCi(call, { commit: "main0002" });
 		expect(old.exit).toBe(2);
 		expect(old.text).toContain("Nobody is asked: a later commit passed these tests");
@@ -922,14 +926,14 @@ test("under the CI policy a failure needs a fix, asks nobody, and is over when a
 });
 
 test("ci waits for a pending gate and says when a person is asked", async () => {
-	const h = harness({ preset: "standard" });
+	const h = await harness({ preset: "standard" });
 	try {
-		const call: Call = async (op, input) => h.call(op, input);
+		const call: Call = async (op, input) => await h.call(op, input);
 		const pending = await readCi(call, { commit: "nothing0" }, { wait: 0 });
 		expect(pending.exit).toBe(3);
 		expect(pending.text).toContain("--wait=<seconds>");
 
-		h.call("report", ciReport({ commit: "main0001", n: 2, fail: { 0: "boom" } }));
+		await h.call("report", ciReport({ commit: "main0001", n: 2, fail: { 0: "boom" } }));
 		let slept = 0;
 		const blocked = await readCi(call, { commit: "main0001" }, { wait: 60, sleep: async () => void slept++ });
 		expect(slept).toBe(0);

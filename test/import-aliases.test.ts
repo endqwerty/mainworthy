@@ -94,16 +94,16 @@ const nameProbes = [
 
 test.each(nameFormats.flatMap((format) => nameProbes.map(([name, caseId]) => [format, name, caseId] as const)))(
 	"%s name claim: %s",
-	(format, name, caseId) => {
-		const h = harness();
+	async (format, name, caseId) => {
+		const h = await harness();
 		try {
-			h.call("propose", {
+			await h.call("propose", {
 				edits: [
 					{ op: "create", body: { title: "Imported" }, aliases: ["C1234"] },
 					{ op: "create", body: { title: "Other" } },
 				],
 			});
-			const receipt = h.call<ReportReceipt>("report", {
+			const receipt = await h.call<ReportReceipt>("report", {
 				target: { session: name },
 				results: namedResults(format, [name]),
 			});
@@ -125,16 +125,16 @@ test.each(nameFormats.flatMap((format) => nameProbes.map(([name, caseId]) => [fo
 	},
 );
 
-test.each([...nameFormats])("%s Apply quartet preserves native refs and ignores tags and emails", (format) => {
-	const h = harness();
+test.each([...nameFormats])("%s Apply quartet preserves native refs and ignores tags and emails", async (format) => {
+	const h = await harness();
 	try {
-		h.call("propose", {
+		await h.call("propose", {
 			edits: [
 				{ op: "create", body: { title: "One" } },
 				{ op: "create", body: { title: "Two" } },
 			],
 		});
-		const receipt = h.call<ReportReceipt>("report", {
+		const receipt = await h.call<ReportReceipt>("report", {
 			target: { session: "apply-quartet" },
 			results: namedResults(format, ["login @smoke", "login @smoke @C-2", "mail user@example.com @C-2", "plain @C-2"]),
 		});
@@ -145,25 +145,27 @@ test.each([...nameFormats])("%s Apply quartet preserves native refs and ignores 
 	}
 });
 
-test.each([...nameFormats])("%s ordinary tags preserve a test's queue-decided link", (format) => {
-	const h = harness({ preset: "standard", unlinked: "ask" });
+test.each([...nameFormats])("%s ordinary tags preserve a test's queue-decided link", async (format) => {
+	const h = await harness({ preset: "standard", unlinked: "ask" });
 	try {
-		h.call("propose", { edits: [{ op: "create", body: { title: "Linked case" } }] });
+		await h.call("propose", { edits: [{ op: "create", body: { title: "Linked case" } }] });
 		const results = namedResults(format, ["login @smoke"]);
-		h.call("report", { target: { session: "before-link" }, results });
-		const question = h.call<InboxReply>("inbox", { kind: "map" }).items[0];
+		await h.call("report", { target: { session: "before-link" }, results });
+		const question = (await h.call<InboxReply>("inbox", { kind: "map" })).items[0];
 		if (!question) throw new Error("missing map question");
 		const tests = z.object({ tests: z.array(z.object({ t: z.string() })) }).parse(question.evidence).tests;
 		const t = tests[0]?.t;
 		if (!t) throw new Error("missing test");
 		expect(
-			h.call<{ status: string }[]>("decide", {
-				q: question.q,
-				onEvidence: question.evidenceHash,
-				answer: { is: "link", pairs: [[t, "C-1"]] },
-			})[0]?.status,
+			(
+				await h.call<{ status: string }[]>("decide", {
+					q: question.q,
+					onEvidence: question.evidenceHash,
+					answer: { is: "link", pairs: [[t, "C-1"]] },
+				})
+			)[0]?.status,
 		).toBe("decided");
-		const receipt = h.call<ReportReceipt>("report", { target: { session: "after-link" }, results });
+		const receipt = await h.call<ReportReceipt>("report", { target: { session: "after-link" }, results });
 		expect(receipt.basis).toEqual({ exact: 0, assumed: 1, unresolved: 0 });
 		expect(receipt.declined).toEqual([]);
 		expect(h.app.db.raw.query("SELECT basis_case FROM results ORDER BY id DESC LIMIT 1").get()).toEqual({
@@ -176,12 +178,12 @@ test.each([...nameFormats])("%s ordinary tags preserve a test's queue-decided li
 
 test.each(reportCases)(
 	"%s %s claims resolve imported aliases and distinguish names from explicit metadata",
-	(format, source) => {
-		const h = harness();
+	async (format, source) => {
+		const h = await harness();
 		try {
 			const edits = parseCaseImport("ID,Title\nC1234,Imported\n", "testrail");
-			h.call("propose", { edits });
-			h.call("propose", { edits: [{ op: "create", body: { title: "Other case" } }] });
+			await h.call("propose", { edits });
+			await h.call("propose", { edits: [{ op: "create", body: { title: "Other case" } }] });
 			const claims = ["C1234", "C1234@v1", "Missing123", "C-1@v1"];
 			const names = claims.map((claim, i) => `test ${i} @${source === "property" ? "C-2" : claim}`);
 			let report: string;
@@ -256,7 +258,10 @@ test.each(reportCases)(
 					{ case: "Missing123" },
 					{ case: "C-1", version: 1 },
 				]);
-			const receipt = h.call<ReportReceipt>("report", { target: { session: "aliases" }, results: parsed.results });
+			const receipt = await h.call<ReportReceipt>("report", {
+				target: { session: "aliases" },
+				results: parsed.results,
+			});
 			expect(receipt).toMatchObject({
 				counts: { total: 4, pass: 4 },
 				rejected: [],
@@ -278,69 +283,72 @@ test.each(reportCases)(
 	},
 );
 
-test.each(["junit", "playwright", "pytest"] as const)("%s metadata keeps native refs uppercase-only", (format) => {
-	const h = harness();
-	try {
-		h.call("propose", {
-			edits: [
-				{ op: "create", body: { title: "One" } },
-				{ op: "create", body: { title: "Two" } },
-			],
-		});
-		const report =
-			format === "junit"
-				? '<testsuite><testcase name="login @C-1"><properties><property name="mainworthy" value="c-2"/></properties></testcase></testsuite>'
-				: format === "playwright"
-					? JSON.stringify({
-							suites: [
-								{
-									title: "tests.js",
-									file: "tests.js",
-									specs: [
-										{
-											title: "login @C-1",
-											file: "tests.js",
-											tests: [
-												{
-													projectName: "chromium",
-													expectedStatus: "passed",
-													annotations: [{ type: "mainworthy", description: "c-2" }],
-													results: [{ status: "passed", duration: 0, retry: 0 }],
-												},
-											],
-										},
-									],
-								},
-							],
-						})
-					: JSON.stringify({
-							exitcode: 0,
-							tests: [
-								{
-									nodeid: "test.py::login @C-1",
-									outcome: "passed",
-									call: { outcome: "passed", duration: 0 },
-									user_properties: [{ mainworthy: "c-2" }],
-								},
-							],
-						});
-		const receipt = h.call<ReportReceipt>("report", {
-			target: { session: "lowercase-metadata" },
-			results: parseReport(report, { file: `report.${format}`, format }).results,
-		});
-		expect(receipt.basis).toEqual({ exact: 0, assumed: 1, unresolved: 0 });
-		expect(receipt.declined).toEqual([]);
-		expect(h.app.db.raw.query("SELECT basis_case FROM results").get()).toEqual({ basis_case: 1 });
-	} finally {
-		h.close();
-	}
-});
+test.each(["junit", "playwright", "pytest"] as const)(
+	"%s metadata keeps native refs uppercase-only",
+	async (format) => {
+		const h = await harness();
+		try {
+			await h.call("propose", {
+				edits: [
+					{ op: "create", body: { title: "One" } },
+					{ op: "create", body: { title: "Two" } },
+				],
+			});
+			const report =
+				format === "junit"
+					? '<testsuite><testcase name="login @C-1"><properties><property name="mainworthy" value="c-2"/></properties></testcase></testsuite>'
+					: format === "playwright"
+						? JSON.stringify({
+								suites: [
+									{
+										title: "tests.js",
+										file: "tests.js",
+										specs: [
+											{
+												title: "login @C-1",
+												file: "tests.js",
+												tests: [
+													{
+														projectName: "chromium",
+														expectedStatus: "passed",
+														annotations: [{ type: "mainworthy", description: "c-2" }],
+														results: [{ status: "passed", duration: 0, retry: 0 }],
+													},
+												],
+											},
+										],
+									},
+								],
+							})
+						: JSON.stringify({
+								exitcode: 0,
+								tests: [
+									{
+										nodeid: "test.py::login @C-1",
+										outcome: "passed",
+										call: { outcome: "passed", duration: 0 },
+										user_properties: [{ mainworthy: "c-2" }],
+									},
+								],
+							});
+			const receipt = await h.call<ReportReceipt>("report", {
+				target: { session: "lowercase-metadata" },
+				results: parseReport(report, { file: `report.${format}`, format }).results,
+			});
+			expect(receipt.basis).toEqual({ exact: 0, assumed: 1, unresolved: 0 });
+			expect(receipt.declined).toEqual([]);
+			expect(h.app.db.raw.query("SELECT basis_case FROM results").get()).toEqual({ basis_case: 1 });
+		} finally {
+			h.close();
+		}
+	},
+);
 
-test("typed test names use the same alias claims as parsed reports", () => {
-	const h = harness();
+test("typed test names use the same alias claims as parsed reports", async () => {
+	const h = await harness();
 	try {
-		h.call("propose", { edits: [{ op: "create", body: { title: "Imported" }, aliases: ["Old.Id/123:case"] }] });
-		const receipt = h.call<ReportReceipt>("report", {
+		await h.call("propose", { edits: [{ op: "create", body: { title: "Imported" }, aliases: ["Old.Id/123:case"] }] });
+		const receipt = await h.call<ReportReceipt>("report", {
 			target: { session: "typed-alias" },
 			results: [
 				{ test: { key: "known", name: "checks @Old.Id/123:case@v1" }, outcome: "pass" },
@@ -354,17 +362,17 @@ test("typed test names use the same alias claims as parsed reports", () => {
 	}
 });
 
-test("aliases are witnessed case creation and idempotent with propose", () => {
-	const h = harness();
+test("aliases are witnessed case creation and idempotent with propose", async () => {
+	const h = await harness();
 	try {
 		const input = {
 			edits: [{ op: "create", body: { title: "Imported" }, aliases: ["C1234"] }],
 			cmd: "import-alias-once",
 		};
-		const first = h.call<ProposeReply>("propose", input);
-		expect(h.call<ProposeReply>("propose", input)).toEqual(first);
-		expect(h.call("get", { refs: ["C1234"] })).toMatchObject([{ ref: "C-1", title: "Imported" }]);
-		expect(h.call("history", { ref: "C1234" })).toMatchObject({ versions: [{ version: 1 }] });
+		const first = await h.call<ProposeReply>("propose", input);
+		expect(await h.call<ProposeReply>("propose", input)).toEqual(first);
+		expect(await h.call("get", { refs: ["C1234"] })).toMatchObject([{ ref: "C-1", title: "Imported" }]);
+		expect(await h.call("history", { ref: "C1234" })).toMatchObject({ versions: [{ version: 1 }] });
 		const stored = h.app.db.raw.query<{ aliases: string }, []>("SELECT aliases FROM cases").get();
 		expect(stored?.aliases).toBe('["C1234"]');
 		expect(first.status).toBe("adopted");
@@ -373,21 +381,21 @@ test("aliases are witnessed case creation and idempotent with propose", () => {
 	}
 });
 
-test("an alias conflict rolls back the whole proposal, including earlier new cases", () => {
-	const h = harness();
+test("an alias conflict rolls back the whole proposal, including earlier new cases", async () => {
+	const h = await harness();
 	try {
-		h.call("propose", { edits: [{ op: "create", body: { title: "Existing" }, aliases: ["C1234"] }] });
-		const refused = h.raw("propose", {
+		await h.call("propose", { edits: [{ op: "create", body: { title: "Existing" }, aliases: ["C1234"] }] });
+		const refused = await h.raw("propose", {
 			edits: [
 				{ op: "create", body: { title: "Would be new" }, aliases: ["C1235"] },
 				{ op: "create", body: { title: "Duplicate" }, aliases: ["C1234"] },
 			],
 		});
 		expect(refused).toMatchObject({ ok: false, error: { code: "conflict" } });
-		expect(h.raw("get", { refs: ["C1235"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
-		expect(h.call("find", {})).toMatchObject({ items: [{ title: "Existing" }] });
+		expect(await h.raw("get", { refs: ["C1235"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
+		expect(await h.call("find", {})).toMatchObject({ items: [{ title: "Existing" }] });
 		expect(
-			h.raw("propose", {
+			await h.raw("propose", {
 				edits: [
 					{ op: "create", body: { title: "One" }, aliases: ["SAME"] },
 					{ op: "create", body: { title: "Two" }, aliases: ["SAME"] },
@@ -399,19 +407,19 @@ test("an alias conflict rolls back the whole proposal, including earlier new cas
 	}
 });
 
-test("pending proposals create no aliases and recheck alias ownership when adopted", () => {
-	const h = harness({ preset: "strict" });
+test("pending proposals create no aliases and recheck alias ownership when adopted", async () => {
+	const h = await harness({ preset: "strict" });
 	try {
 		const input = { edits: [{ op: "create", body: { title: "Imported" }, aliases: ["C1234"] }] };
-		const first = h.call<ProposeReply>("propose", input);
-		const second = h.call<ProposeReply>("propose", {
+		const first = await h.call<ProposeReply>("propose", input);
+		const second = await h.call<ProposeReply>("propose", {
 			edits: [{ op: "create", body: { title: "Also pending" }, aliases: ["OLD2"] }, ...input.edits],
 		});
 		expect(first.status).toBe("open");
 		expect(second.status).toBe("open");
-		expect(h.raw("get", { refs: ["C1234"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
-		const items = h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox").items;
-		const accept = (q: string | null) => {
+		expect(await h.raw("get", { refs: ["C1234"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
+		const items = (await h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox")).items;
+		const accept = async (q: string | null) => {
 			const item = items.find((item) => item.q === q);
 			if (!item) throw new Error("missing adoption question");
 			return h.call<{ status: string }[]>("decide", {
@@ -421,29 +429,35 @@ test("pending proposals create no aliases and recheck alias ownership when adopt
 				reason: "Accept imported cases",
 			});
 		};
-		expect(accept(first.question)[0]?.status).toBe("decided");
-		expect(accept(second.question)[0]?.status).toBe("conflict");
-		expect(h.raw("get", { refs: ["OLD2"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
-		expect(h.call("get", { refs: ["C1234"] })).toMatchObject([{ ref: "C-1", title: "Imported" }]);
-		expect(h.call<{ items: unknown[] }>("find", {}).items).toHaveLength(1);
+		expect((await accept(first.question))[0]?.status).toBe("decided");
+		expect((await accept(second.question))[0]?.status).toBe("conflict");
+		expect(await h.raw("get", { refs: ["OLD2"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
+		expect(await h.call("get", { refs: ["C1234"] })).toMatchObject([{ ref: "C-1", title: "Imported" }]);
+		expect((await h.call<{ items: unknown[] }>("find", {})).items).toHaveLength(1);
 	} finally {
 		h.close();
 	}
 });
 
-test("the registry rejects reserved aliases and callers without produce capability", () => {
-	const h = harness();
+test("the registry rejects reserved aliases and callers without produce capability", async () => {
+	const h = await harness();
 	try {
 		for (const alias of ["C-1", "Q-1", "123", "bad alias"])
-			expect(h.raw("propose", { edits: [{ op: "create", body: { title: "Bad" }, aliases: [alias] }] })).toMatchObject({
+			expect(
+				await h.raw("propose", { edits: [{ op: "create", body: { title: "Bad" }, aliases: [alias] }] }),
+			).toMatchObject({
 				ok: false,
 				error: { code: "invalid" },
 			});
 		const reader = h.actor("reader", "human", ["read"]);
 		expect(
-			h.raw("propose", { edits: [{ op: "create", body: { title: "No capability" }, aliases: ["OLD1"] }] }, reader),
+			await h.raw(
+				"propose",
+				{ edits: [{ op: "create", body: { title: "No capability" }, aliases: ["OLD1"] }] },
+				reader,
+			),
 		).toMatchObject({ ok: false, error: { code: "forbidden" } });
-		expect(h.call<{ items: unknown[] }>("find", {}).items).toHaveLength(0);
+		expect((await h.call<{ items: unknown[] }>("find", {})).items).toHaveLength(0);
 	} finally {
 		h.close();
 	}

@@ -292,11 +292,11 @@ export function verifyReport(app: App, receipt: z.infer<typeof Receipt>, expecte
 }
 
 /** Builds the immutable baseline through invoke, or reuses a matching completed baseline. */
-export function buildDataset(options: {
+export async function buildDataset(options: {
 	dir: string;
 	parameters: Parameters;
 	log?: (message: string) => void;
-}): Dataset {
+}): Promise<Dataset> {
 	const dir = resolve(options.dir);
 	const parameters = Parameters.parse(options.parameters);
 	const revision = fingerprints();
@@ -323,10 +323,10 @@ export function buildDataset(options: {
 	const { app, owner } = open(config(dir));
 	const ci = ciActor(app).actor;
 	const phases: Metadata["phases"] = [];
-	const phase = <T>(name: string, rowCount: number | (() => number), work: () => T): T => {
+	const phase = async <T>(name: string, rowCount: number | (() => number), work: () => T | Promise<T>): Promise<T> => {
 		log(`Building ${name}…`);
 		const start = performance.now();
-		const result = work();
+		const result = await work();
 		const ms = performance.now() - start;
 		const load = loadavg();
 		const rows = typeof rowCount === "number" ? rowCount : rowCount();
@@ -337,7 +337,7 @@ export function buildDataset(options: {
 		return result;
 	};
 	try {
-		call(
+		await call(
 			app,
 			owner,
 			"admin",
@@ -345,16 +345,16 @@ export function buildDataset(options: {
 			z.unknown(),
 		);
 		const roots = Math.max(1, Math.min(20, Math.floor(parameters.cases / 250)));
-		const folders = phase("folders", roots * 25, () => {
+		const folders = await phase("folders", roots * 25, async () => {
 			const edits: Edit[] = [];
 			for (let root = 0; root < roots; root++) {
 				const domain = itemAt(domains, root);
 				edits.push({ op: "folder", name: domain });
 				for (let leaf = 0; leaf < 24; leaf++) edits.push({ op: "folder", name: `journey-${leaf}`, parent: domain });
 			}
-			const reply = call(app, owner, "propose", { edits, reason: "Benchmark project structure" }, Proposal);
+			const reply = await call(app, owner, "propose", { edits, reason: "Benchmark project structure" }, Proposal);
 			ensure(reply.status === "adopted", "folder proposal must be adopted");
-			const found = call(
+			const found = await call(
 				app,
 				owner,
 				"find",
@@ -365,7 +365,7 @@ export function buildDataset(options: {
 		});
 		const rng = random(parameters.seed);
 		const hotFolder = itemAt(folders, 0).id;
-		const stamps = phase("cases", parameters.cases, () => {
+		const stamps = await phase("cases", parameters.cases, async () => {
 			const out: Metadata["cases"] = [];
 			for (let start = 0; start < parameters.cases; start += 1_000) {
 				const edits = Array.from({ length: Math.min(1_000, parameters.cases - start) }, (_, offset): Edit => {
@@ -397,7 +397,7 @@ export function buildDataset(options: {
 						},
 					};
 				});
-				const reply = call(app, owner, "propose", { edits, reason: "Seeded customer journey cases" }, Proposal);
+				const reply = await call(app, owner, "propose", { edits, reason: "Seeded customer journey cases" }, Proposal);
 				ensure(reply.status === "adopted" && reply.cases.length === edits.length, "every created case must be adopted");
 				out.push(...reply.cases.map(({ ref, version }) => ({ ref, version })));
 				if (start % 10_000 === 0) log(`  cases ${out.length}/${parameters.cases}`);
@@ -405,10 +405,10 @@ export function buildDataset(options: {
 			return out;
 		});
 		const revisionCounts = stamps.map((_, index) => (index % 5 === 0 ? 1 + Math.floor(rng() * 5) : 0));
-		phase(
+		await phase(
 			"history edits",
 			revisionCounts.reduce((a, b) => a + b, 0),
-			() => {
+			async () => {
 				for (let round = 0; round < 5; round++) {
 					const selected = stamps.filter((_, index) => itemAt(revisionCounts, index) > round);
 					for (let start = 0; start < selected.length; start += 1_000) {
@@ -421,7 +421,7 @@ export function buildDataset(options: {
 								pre: `Revision ${round + 1}: customer has an active account, a valid basket, and confirmed checkout access.`,
 							},
 						}));
-						const reply = call(
+						const reply = await call(
 							app,
 							owner,
 							"propose",
@@ -439,7 +439,7 @@ export function buildDataset(options: {
 		);
 		let command = 0;
 		let lastCommit = "";
-		const send = (results: ResultIn[], target?: TargetIn) => {
+		const send = async (results: ResultIn[], target?: TargetIn) => {
 			lastCommit = `seed-${parameters.seed.toString(16)}-${(++command).toString(16).padStart(8, "0")}`;
 			const input: ReportInput = {
 				target: target ?? { commit: lastCommit, repo: "example/mainworthy", branch: "main" },
@@ -447,19 +447,19 @@ export function buildDataset(options: {
 				attempt: 1,
 				results,
 			};
-			const receipt = call(app, ci, "report", input, Receipt);
+			const receipt = await call(app, ci, "report", input, Receipt);
 			verifyReport(app, receipt, results.length);
 			return receipt;
 		};
-		phase("test registration", parameters.tests, () => {
+		await phase("test registration", parameters.tests, async () => {
 			for (let start = 0; start < parameters.tests; start += 5_000)
-				send(generatedResults(start, Math.min(5_000, parameters.tests - start), parameters.tests, false));
+				await send(generatedResults(start, Math.min(5_000, parameters.tests - start), parameters.tests, false));
 		});
 		const tests: Metadata["tests"] = [];
 		const refs = new Map<string, string>();
 		let cursor: string | null = null;
 		do {
-			const page: z.infer<typeof TestPage> = call(
+			const page: z.infer<typeof TestPage> = await call(
 				app,
 				owner,
 				"find",
@@ -475,7 +475,7 @@ export function buildDataset(options: {
 			ensure(ref !== undefined, `test ${identity.key} must exist after registration`);
 			tests.push({ ref, ...identity });
 		}
-		phase("test linking", Math.ceil(parameters.tests * 0.75), () => {
+		await phase("test linking", Math.ceil(parameters.tests * 0.75), async () => {
 			const pairsByFile = new Map<string, [string, string][]>();
 			tests.forEach((test, index) => {
 				if (index % 4 === 3) return;
@@ -483,14 +483,14 @@ export function buildDataset(options: {
 				pairs.push([test.ref, itemAt(stamps, index % stamps.length).ref]);
 				pairsByFile.set(test.file, pairs);
 			});
-			const queue = call(app, owner, "inbox", { kind: "map", limit: 500 }, Queue);
+			const queue = await call(app, owner, "inbox", { kind: "map", limit: 500 }, Queue);
 			const all = queue.items.flatMap((question) => {
 				const { file } = z.object({ file: z.string() }).parse(question.evidence);
 				const pairs = pairsByFile.get(file);
 				return pairs ? [{ q: question.q, onEvidence: question.evidenceHash, answer: { is: "link", pairs } }] : [];
 			});
 			if (all.length > 0) {
-				const replies = call(
+				const replies = await call(
 					app,
 					owner,
 					"decide",
@@ -503,22 +503,24 @@ export function buildDataset(options: {
 				);
 			}
 		});
-		phase("results", parameters.results - parameters.tests, () => {
+		await phase("results", parameters.results - parameters.tests, async () => {
 			for (let start = parameters.tests; start < parameters.results; start += 5_000) {
-				send(generatedResults(start, Math.min(5_000, parameters.results - start), parameters.tests));
+				await send(generatedResults(start, Math.min(5_000, parameters.results - start), parameters.tests));
 				if (start === parameters.tests) {
-					const queue = call(app, owner, "inbox", { kind: "failure", limit: 50 }, Queue);
+					const queue = await call(app, owner, "inbox", { kind: "failure", limit: 50 }, Queue);
 					const all = queue.items
 						.slice(0, 10)
 						.map((q) => ({ q: q.q, onEvidence: q.evidenceHash, answer: { is: "flaky" } }));
 					if (all.length > 0)
 						ensure(
-							call(
-								app,
-								owner,
-								"decide",
-								{ all, reason: "Known intermittent customer environment checks" },
-								Decisions,
+							(
+								await call(
+									app,
+									owner,
+									"decide",
+									{ all, reason: "Known intermittent customer environment checks" },
+									Decisions,
+								)
 							).every((reply) => reply.status === "decided"),
 							"failure decisions must settle",
 						);
@@ -528,8 +530,8 @@ export function buildDataset(options: {
 			}
 		});
 		const retried = tests.slice(0, 1);
-		phase("fail-then-pass retries", retried.length * 2, () => {
-			send(
+		await phase("fail-then-pass retries", retried.length * 2, async () => {
+			await send(
 				retried.map((test) => ({
 					test: { key: test.key, name: test.name, file: test.file },
 					outcome: "fail",
@@ -537,7 +539,7 @@ export function buildDataset(options: {
 					failure: { message: "Customer journey passed only on retry" },
 				})),
 			);
-			const receipt = call(
+			const receipt = await call(
 				app,
 				ci,
 				"report",
@@ -558,13 +560,13 @@ export function buildDataset(options: {
 		const base = lastCommit;
 		const files = [...new Set(tests.map((test) => test.file))].slice(0, 20);
 		let scope = 0;
-		let openQuestions = call(app, owner, "inbox", { limit: 1 }, Queue).counts.open ?? 0;
+		let openQuestions = (await call(app, owner, "inbox", { limit: 1 }, Queue)).counts.open ?? 0;
 		const initialOpen = openQuestions;
 		const queueStart = performance.now();
-		phase(
+		await phase(
 			"PR scopes and open queue",
 			() => openQuestions - initialOpen,
-			() => {
+			async () => {
 				do {
 					const remaining = Math.max(1, Math.min(40, parameters.openQuestions - openQuestions));
 					const results = Array.from(
@@ -576,7 +578,7 @@ export function buildDataset(options: {
 							durationMs: 70,
 						}),
 					);
-					const receipt = send(results, {
+					const receipt = await send(results, {
 						commit: `queue-${parameters.seed}-${scope.toString(16).padStart(8, "0")}`,
 						repo: "example/mainworthy",
 						branch: `feature/journey-${scope}`,
@@ -595,8 +597,8 @@ export function buildDataset(options: {
 			},
 		);
 		const runCases = stamps.slice(0, 500).map((stamp) => stamp.ref);
-		const planned = phase("planned run", 500, () => {
-			const run = call(
+		const planned = await phase("planned run", 500, async () => {
+			const run = await call(
 				app,
 				owner,
 				"plan",
@@ -608,7 +610,7 @@ export function buildDataset(options: {
 				Plan,
 			);
 			ensure(run.slots === 500 && run.already === 0, "plan must pin 500 initially missing slots");
-			const receipt = call(
+			const receipt = await call(
 				app,
 				owner,
 				"report",
@@ -621,7 +623,7 @@ export function buildDataset(options: {
 				Receipt,
 			);
 			verifyReport(app, receipt, 250);
-			const slots = call(app, owner, "find", { in: "slots", run: run.run, limit: 500 }, Slots);
+			const slots = await call(app, owner, "find", { in: "slots", run: run.run, limit: 500 }, Slots);
 			ensure(
 				slots.items.filter((slot) => slot.state === "satisfied").length === 250 &&
 					slots.items.filter((slot) => slot.state === "missing").length === 250,
@@ -642,12 +644,14 @@ export function buildDataset(options: {
 			stored.decided > 0 && (parameters.results < parameters.tests + 10_000 || stored.carried > 0),
 			"the dataset must contain decided and carried questions",
 		);
-		const current = call(
-			app,
-			owner,
-			"since",
-			{ cursor: `s:${Number.MAX_SAFE_INTEGER}`, limit: 1 },
-			z.object({ cursor: z.string() }),
+		const current = (
+			await call(
+				app,
+				owner,
+				"since",
+				{ cursor: `s:${Number.MAX_SAFE_INTEGER}`, limit: 1 },
+				z.object({ cursor: z.string() }),
+			)
 		).cursor;
 		const metadata: Metadata = {
 			generator: GENERATOR,

@@ -131,19 +131,22 @@ async function reads(): Promise<void> {
 	const Message = z.discriminatedUnion("type", [ReadMessage, z.object({ type: z.literal("refresh") })]);
 
 	process.once("exit", () => app.close());
+	let pending = Promise.resolve();
 	port.on("message", (message: unknown) => {
-		const call = Message.parse(message);
-		if (call.type === "refresh") {
-			app.close();
-			app = openApp(config, { reader: true });
-			return;
-		}
-		app.now = () => Date.now() + call.clockOffset;
-		const reply: Reply =
-			OPS[call.op]?.effect === "write"
-				? { ok: false, error: { code: "forbidden", message: "reader threads cannot write" } }
-				: invoke(app, OPS, { ...call, reference: call.caller, actor: () => null });
-		port.postMessage({ type: "reply", id: call.id, reply });
+		pending = pending.then(async () => {
+			const call = Message.parse(message);
+			if (call.type === "refresh") {
+				app.close();
+				app = openApp(config, { reader: true });
+				return;
+			}
+			app.now = () => Date.now() + call.clockOffset;
+			const reply: Reply =
+				OPS[call.op]?.effect === "write"
+					? { ok: false, error: { code: "forbidden", message: "reader threads cannot write" } }
+					: await invoke(app, OPS, { ...call, reference: call.caller, actor: () => null });
+			port.postMessage({ type: "reply", id: call.id, reply });
+		});
 	});
 	port.postMessage("ready");
 }

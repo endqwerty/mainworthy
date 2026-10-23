@@ -89,7 +89,7 @@ async function server(root: string, directory: string, demoFile: string) {
 }
 
 async function seed(directory: string, root: string) {
-	const dataset = buildDataset({
+	const dataset = await buildDataset({
 		dir: directory,
 		parameters: Parameters.parse({
 			cases: 10_000,

@@ -110,15 +110,15 @@ export const Impact = z.object({
 });
 
 /** Runs the public operation boundary and refuses errors before parsing its unknown output. */
-export function call<T>(
+export async function call<T>(
 	app: App,
 	actor: Actor,
 	op: string,
 	input: unknown,
 	output: z.ZodType<T>,
 	project = "benchmark",
-): T {
-	const reply = invoke(app, OPS, { op, project: op === "admin" ? null : project, input, actor: () => actor });
+): Promise<T> {
+	const reply = await invoke(app, OPS, { op, project: op === "admin" ? null : project, input, actor: () => actor });
 	if (!reply.ok) throw new Error(`${op}: ${reply.error.code}: ${reply.error.message}`);
 	return output.parse(reply.result);
 }

@@ -14,7 +14,7 @@ async function adoptWhilePolling(): Promise<number> {
 		await client.call("admin", { do: "project.create", key: "policy-latency", preset: "standard", unlinked: "ask" });
 		const project = client.with({ project: "policy-latency" });
 		for (let pr = 1; pr <= CHANGE_RUNS; pr++) {
-			const receipt = invoke(instance.app, OPS, {
+			const receipt = await invoke(instance.app, OPS, {
 				op: "report",
 				project: "policy-latency",
 				actor: () => instance.owner,

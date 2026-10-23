@@ -25,15 +25,21 @@ import { archiveRoutes } from "../src/surfaces/archive.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
-beforeEach(() => {
-	h = harness();
+beforeEach(async () => {
+	h = await harness();
 });
 afterEach(() => h.close());
 
-const gate = (commit: string) => h.call<GateStatus>("gate", { commit });
-const queue = () => h.call<InboxReply>("inbox");
-const decide = (q: { q: string; evidenceHash: string }, answer: Record<string, unknown>, as = h.owner) =>
-	h.call<{ status: string; needs: string | null }[]>("decide", { q: q.q, onEvidence: q.evidenceHash, answer }, as)[0];
+const gate = async (commit: string) => await h.call<GateStatus>("gate", { commit });
+const queue = async () => await h.call<InboxReply>("inbox");
+const decide = async (q: { q: string; evidenceHash: string }, answer: Record<string, unknown>, as = h.owner) =>
+	(
+		await h.call<{ status: string; needs: string | null }[]>(
+			"decide",
+			{ q: q.q, onEvidence: q.evidenceHash, answer },
+			as,
+		)
+	)[0];
 const count = (table: string) =>
 	h.app.db.raw.query<{ n: number }, []>(`SELECT count(*) AS n FROM ${table}`).get()?.n ?? 0;
 const first = <T>(items: T[]): T => {
@@ -43,41 +49,41 @@ const first = <T>(items: T[]): T => {
 };
 
 describe("standing excuse precedence", () => {
-	test("an exact target wins, another target falls back to the cause, and an unanswered cause stays unexplained", () => {
-		const report = (commit: string, attempt = 1, message = "shared cause") =>
-			h.call<ReportReceipt>("report", ciReport({ commit, attempt, n: 1, fail: { 0: message } }));
-		const failure = () => first(queue().items.filter((item) => item.kind === "failure"));
-		expect(report("lookup01").gate).toMatchObject({ verdict: "blocked", tally: { unexplained: 1 } });
-		const broad = failure();
-		expect(decide(broad, { is: "infra" })?.status).toBe("decided");
-		report("lookup02");
-		const exact = failure();
-		expect(decide(exact, { is: "infra" })?.status).toBe("decided");
-		expect(decide(broad, { is: "defect" })?.status).toBe("decided");
-		expect(decide(exact, { is: "infra" })?.status).toBe("decided");
+	test("an exact target wins, another target falls back to the cause, and an unanswered cause stays unexplained", async () => {
+		const report = async (commit: string, attempt = 1, message = "shared cause") =>
+			await h.call<ReportReceipt>("report", ciReport({ commit, attempt, n: 1, fail: { 0: message } }));
+		const failure = async () => first((await queue()).items.filter((item) => item.kind === "failure"));
+		expect((await report("lookup01")).gate).toMatchObject({ verdict: "blocked", tally: { unexplained: 1 } });
+		const broad = await failure();
+		expect((await decide(broad, { is: "infra" }))?.status).toBe("decided");
+		await report("lookup02");
+		const exact = await failure();
+		expect((await decide(exact, { is: "infra" }))?.status).toBe("decided");
+		expect((await decide(broad, { is: "defect" }))?.status).toBe("decided");
+		expect((await decide(exact, { is: "infra" }))?.status).toBe("decided");
 		expect(h.app.db.raw.query("SELECT target, class FROM excuses ORDER BY target").all()).toEqual([
 			{ target: 0, class: "attributed" },
 			{ target: 2, class: "excused" },
 		]);
-		expect(report("lookup02", 2).gate).toMatchObject({
+		expect((await report("lookup02", 2)).gate).toMatchObject({
 			verdict: "passed",
 			tally: { excused: 1, attributed: 0, unexplained: 0 },
 		});
-		expect(report("lookup03").gate).toMatchObject({
+		expect((await report("lookup03")).gate).toMatchObject({
 			verdict: "failed",
 			tally: { excused: 0, attributed: 1, unexplained: 0 },
 		});
-		expect(report("lookup04", 1, "another cause").gate).toMatchObject({
+		expect((await report("lookup04", 1, "another cause")).gate).toMatchObject({
 			verdict: "blocked",
 			tally: { excused: 0, attributed: 0, unexplained: 1 },
 		});
 	});
 
-	test("a newer exact-result decision wins over both target and scope standing in counted results", () => {
+	test("a newer exact-result decision wins over both target and scope standing in counted results", async () => {
 		const failed = { test: { key: "one" }, outcome: "fail", failure: { message: "shared cause" } };
-		h.call("report", { target: { repo: "app", commit: "lookupbase", branch: "main" }, results: [failed] });
-		expect(decide(first(queue().items), { is: "defect" })?.status).toBe("decided");
-		const receipt = h.call<ReportReceipt>("report", {
+		await h.call("report", { target: { repo: "app", commit: "lookupbase", branch: "main" }, results: [failed] });
+		expect((await decide(first((await queue()).items), { is: "defect" }))?.status).toBe("decided");
+		const receipt = await h.call<ReportReceipt>("report", {
 			target: { repo: "app", commit: "lookuphead", branch: "feature", pr: 91, base: "lookupbase" },
 			results: [failed],
 		});
@@ -93,7 +99,7 @@ describe("standing excuse precedence", () => {
 			 WHERE r.id = ?`,
 			[first(receipt.results), first(receipt.results)],
 		);
-		const found = h.call<{ items: { standing: string; question: string }[] }>("find", {
+		const found = await h.call<{ items: { standing: string; question: string }[] }>("find", {
 			in: "results",
 			commit: "lookuphead",
 			repo: "app",
@@ -107,51 +113,51 @@ describe("standing excuse precedence", () => {
 });
 
 describe("a green report", () => {
-	test("is recorded with an explicit basis and the gate passes", () => {
-		const receipt = h.call<ReportReceipt>("report", ciReport({ commit: "aaaaaaa1", n: 20 }));
+	test("is recorded with an explicit basis and the gate passes", async () => {
+		const receipt = await h.call<ReportReceipt>("report", ciReport({ commit: "aaaaaaa1", n: 20 }));
 		expect(receipt.counts).toMatchObject({ total: 20, pass: 20, fail: 0 });
 		expect(receipt.basis).toEqual({ exact: 0, assumed: 0, unresolved: 20 }); // no test is linked to a case yet
 		expect(receipt.gate?.verdict).toBe("passed");
-		expect(gate("aaaaaaa1")).toMatchObject({ verdict: "passed", stale: false });
+		expect(await gate("aaaaaaa1")).toMatchObject({ verdict: "passed", stale: false });
 	});
 
-	test("sent twice writes once and returns the same receipt", () => {
+	test("sent twice writes once and returns the same receipt", async () => {
 		const report = ciReport({ commit: "aaaaaaa1", n: 20 });
-		const one = h.call<ReportReceipt>("report", report);
+		const one = await h.call<ReportReceipt>("report", report);
 		const rows = count("results");
-		const two = h.call<ReportReceipt>("report", report);
+		const two = await h.call<ReportReceipt>("report", report);
 		expect(two).toEqual({ ...one, fresh: false });
 		expect(count("results")).toBe(rows);
 		expect(count("batches")).toBe(1);
 	});
 
-	test("a commit nobody reported on is pending, never green", () => {
-		expect(gate("deadbeef")).toMatchObject({ verdict: "pending", run: null });
+	test("a commit nobody reported on is pending, never green", async () => {
+		expect(await gate("deadbeef")).toMatchObject({ verdict: "pending", run: null });
 	});
 });
 
 describe("a red report", () => {
-	test("forgetting rewrites report attribution in command replay and receipts while preserving decisions", () => {
+	test("forgetting rewrites report attribution in command replay and receipts while preserving decisions", async () => {
 		const person = h.actor("erasure-person", "human", ["read", "produce", "answer"]);
 		const report = ciReport({ commit: "ddddddd1", n: 1, fail: { 0: "expected total" } });
-		h.call("report", report);
-		expect(decide(first(queue().items), { is: "defect" }, person)?.status).toBe("decided");
+		await h.call("report", report);
+		expect((await decide(first((await queue()).items), { is: "defect" }, person))?.status).toBe("decided");
 		const input = { ...report, attempt: 2, cmd: "receipt-command-01" };
-		const receipt = h.call<ReportReceipt>("report", input);
+		const receipt = await h.call<ReportReceipt>("report", input);
 		expect(receipt.questions[0]).toMatchObject({ by: person.name, answer: "defect" });
-		const fate = h.call<CommandFate>("command", { cmd: input.cmd });
+		const fate = await h.call<CommandFate>("command", { cmd: input.cmd });
 		if (fate.state !== "done") throw new Error("the report command did not finish");
 		const decisions = h.app.db.raw.query("SELECT * FROM decisions ORDER BY id").all();
 		const commands = h.app.db.raw.query("SELECT id, request, seq, touched FROM commands ORDER BY id").all();
 		const results = count("results");
-		h.call("admin", { do: "actor.forget", name: person.name });
+		await h.call("admin", { do: "actor.forget", name: person.name });
 		const expected = {
 			...receipt,
 			questions: receipt.questions.map((question) => ({ ...question, by: `forgotten-${person.id}` })),
 		};
-		expect(h.call<CommandFate>("command", { cmd: input.cmd })).toEqual({ ...fate, reply: expected });
-		expect(h.call<ReportReceipt>("report", input)).toEqual(expected);
-		expect(h.call<ReportReceipt>("report", { ...input, cmd: undefined })).toEqual({ ...expected, fresh: false });
+		expect(await h.call<CommandFate>("command", { cmd: input.cmd })).toEqual({ ...fate, reply: expected });
+		expect(await h.call<ReportReceipt>("report", input)).toEqual(expected);
+		expect(await h.call<ReportReceipt>("report", { ...input, cmd: undefined })).toEqual({ ...expected, fresh: false });
 		expect(
 			h.app.db.raw
 				.query("SELECT receipt FROM batches WHERE receipt IS NOT NULL")
@@ -162,42 +168,42 @@ describe("a red report", () => {
 		expect(h.app.db.raw.query("SELECT * FROM decisions ORDER BY id").all()).toEqual(decisions);
 		expect(h.app.db.raw.query("SELECT id, request, seq, touched FROM commands ORDER BY id").all()).toEqual(commands);
 		expect(count("results")).toBe(results);
-		expect(h.call<InboxReply>("inbox", { state: "decided", kind: "failure" }).items[0]?.decision?.by).toEqual([
+		expect((await h.call<InboxReply>("inbox", { state: "decided", kind: "failure" })).items[0]?.decision?.by).toEqual([
 			`forgotten-${person.id}`,
 		]);
-		expect(h.raw("report", { ...input, attempt: 3 })).toMatchObject({ ok: false, error: { code: "conflict" } });
+		expect(await h.raw("report", { ...input, attempt: 3 })).toMatchObject({ ok: false, error: { code: "conflict" } });
 	});
 
-	test("forgetting rewrites known claim attribution but leaves arbitrary content and other replies alone", () => {
+	test("forgetting rewrites known claim attribution but leaves arbitrary content and other replies alone", async () => {
 		const person = h.actor("erasure-person", "human", ["read", "produce", "answer"]);
-		h.call("propose", { edits: [{ op: "create", outline: person.name }] });
+		await h.call("propose", { edits: [{ op: "create", outline: person.name }] });
 		const claim = { lens: "review", findings: [{ on: "C-1", category: "ambiguous", note: person.name }] };
-		h.call("claim", claim);
-		expect(decide(first(queue().items), { is: "reject" }, person)?.status).toBe("decided");
+		await h.call("claim", claim);
+		expect((await decide(first((await queue()).items), { is: "reject" }, person))?.status).toBe("decided");
 		const input = { ...claim, cmd: "known-claim-01" };
-		const reply = h.call<ClaimReply>("claim", input);
+		const reply = await h.call<ClaimReply>("claim", input);
 		expect(reply.known[0]).toMatchObject({ by: person.name, answer: "reject" });
 		const project = { do: "project.create", key: "another", name: person.name, cmd: "project-create-01" };
-		const projectReply = h.call("admin", project);
-		const before = h.call("get", { refs: ["C-1"] });
-		h.call("admin", { do: "actor.forget", name: person.name });
+		const projectReply = await h.call("admin", project);
+		const before = await h.call("get", { refs: ["C-1"] });
+		await h.call("admin", { do: "actor.forget", name: person.name });
 		const expected = { ...reply, known: reply.known.map((known) => ({ ...known, by: `forgotten-${person.id}` })) };
-		expect(h.call<ClaimReply>("claim", input)).toEqual(expected);
-		expect(h.call<CommandFate>("command", { cmd: input.cmd })).toMatchObject({ state: "done", reply: expected });
-		expect(h.call<unknown>("get", { refs: ["C-1"] })).toEqual(before);
-		expect(h.call<unknown>("admin", project)).toEqual(projectReply);
-		expect(h.call<InboxReply>("inbox", { state: "decided", kind: "finding" }).items[0]?.evidence.note).toBe(
+		expect(await h.call<ClaimReply>("claim", input)).toEqual(expected);
+		expect(await h.call<CommandFate>("command", { cmd: input.cmd })).toMatchObject({ state: "done", reply: expected });
+		expect(await h.call<unknown>("get", { refs: ["C-1"] })).toEqual(before);
+		expect(await h.call<unknown>("admin", project)).toEqual(projectReply);
+		expect((await h.call<InboxReply>("inbox", { state: "decided", kind: "finding" })).items[0]?.evidence.note).toBe(
 			person.name,
 		);
 	});
 
-	test("D1: 500 failures with one cause open one question", () => {
+	test("D1: 500 failures with one cause open one question", async () => {
 		const fail = Object.fromEntries(Array.from({ length: 500 }, (_, i) => [i, "expected 90.00, got 100.00"]));
-		const receipt = h.call<ReportReceipt>("report", ciReport({ commit: "bbbbbbb1", n: 600, fail }));
+		const receipt = await h.call<ReportReceipt>("report", ciReport({ commit: "bbbbbbb1", n: 600, fail }));
 		expect(receipt.counts.fail).toBe(500);
 		expect(receipt.questions).toHaveLength(1);
 		expect(receipt.questions[0]).toMatchObject({ how: "new", tests: 500, state: "open" });
-		expect(queue().counts.failure).toBe(1);
+		expect((await queue()).counts.failure).toBe(1);
 		expect(receipt.gate).toMatchObject({ verdict: "blocked" });
 		expect(receipt.gate?.tally.unexplained).toBe(500);
 	});
@@ -224,64 +230,65 @@ describe("a red report", () => {
 
 	test.each([{ order: [0, 1, 2, 3, 4, 5] }, { order: [5, 4, 3, 2, 1, 0] }])(
 		"a broad assertion spread across six CI shards splits as reports accumulate: %j",
-		({ order }) => {
-			const applied = order.map((shard) => {
+		async ({ order }) => {
+			const applied = [];
+			for (const shard of order) {
 				const report = assertionShard(shard);
-				return { report, receipt: h.call<ReportReceipt>("report", report) };
-			});
+				applied.push({ report, receipt: await h.call<ReportReceipt>("report", report) });
+			}
 			expect(first(applied).receipt.questions).toHaveLength(1);
 			for (const { receipt } of applied.slice(1)) {
 				expect(receipt.questions).toHaveLength(6);
 				expect(receipt.questions.every((q) => q.title.startsWith("Split by file (shard-"))).toBe(true);
 			}
-			expect(queue().counts.failure).toBe(31);
-			expect(gate("broad001").tally).toMatchObject({ unexplained: 240, excused: 0 });
-			const file = first(queue().items.filter((q) => q.title.includes("/file-0.test.ts): assertion failed")));
-			expect(decide(file, { is: "flaky" })?.status).toBe("decided");
-			expect(gate("broad001").tally).toMatchObject({ unexplained: 233, excused: 7 });
+			expect((await queue()).counts.failure).toBe(31);
+			expect((await gate("broad001")).tally).toMatchObject({ unexplained: 240, excused: 0 });
+			const file = first((await queue()).items.filter((q) => q.title.includes("/file-0.test.ts): assertion failed")));
+			expect((await decide(file, { is: "flaky" }))?.status).toBe("decided");
+			expect((await gate("broad001")).tally).toMatchObject({ unexplained: 233, excused: 7 });
 			for (const { report, receipt } of applied) {
-				expect(h.call<ReportReceipt>("report", report)).toEqual({ ...receipt, fresh: false });
+				expect(await h.call<ReportReceipt>("report", report)).toEqual({ ...receipt, fresh: false });
 			}
 			expect(count("results")).toBe(240);
 			expect(count("batches")).toBe(6);
 		},
 	);
 
-	test("a split across shards preserves the earlier generic answer and its results", () => {
-		const receipt = h.call<ReportReceipt>("report", assertionShard(0));
-		const question = first(queue().items);
-		expect(decide(question, { is: "flaky", reason: "the first shard's evidence" })?.status).toBe("decided");
+	test("a split across shards preserves the earlier generic answer and its results", async () => {
+		const receipt = await h.call<ReportReceipt>("report", assertionShard(0));
+		const question = first((await queue()).items);
+		expect((await decide(question, { is: "flaky", reason: "the first shard's evidence" }))?.status).toBe("decided");
 		const earlier = h.app.db.raw.query("SELECT * FROM results ORDER BY id").all();
 		const decisions = h.app.db.raw.query("SELECT * FROM decisions WHERE kind = 'failure' ORDER BY id").all();
 		const excuses = h.app.db.raw.query("SELECT * FROM excuses ORDER BY decision").all();
-		const next = h.call<ReportReceipt>("report", assertionShard(1));
+		const next = await h.call<ReportReceipt>("report", assertionShard(1));
 		expect(next.questions).toHaveLength(6);
 		expect(next.questions.every((q) => q.state === "open")).toBe(true);
-		expect(gate("broad001").tally).toMatchObject({ unexplained: 40, excused: 40 });
+		expect((await gate("broad001")).tally).toMatchObject({ unexplained: 40, excused: 40 });
 		expect(h.app.db.raw.query("SELECT * FROM results ORDER BY id LIMIT 40").all()).toEqual(earlier);
 		expect(h.app.db.raw.query("SELECT * FROM decisions WHERE kind = 'failure' ORDER BY id").all()).toEqual(decisions);
 		expect(h.app.db.raw.query("SELECT * FROM excuses ORDER BY decision").all()).toEqual(excuses);
-		expect(h.call<InboxReply>("inbox", { state: "decided", kind: "failure" }).items[0]).toMatchObject({
+		expect((await h.call<InboxReply>("inbox", { state: "decided", kind: "failure" })).items[0]).toMatchObject({
 			q: question.q,
 			title: "assertion failed",
 		});
-		expect(h.call<ReportReceipt>("report", assertionShard(0))).toEqual({ ...receipt, fresh: false });
+		expect(await h.call<ReportReceipt>("report", assertionShard(0))).toEqual({ ...receipt, fresh: false });
 	});
 
 	test.each([false, true])(
 		"a stable shard order reuses the first shard's file causes on later commits, answered=%j",
-		(answered) => {
+		async (answered) => {
 			const commits = answered ? ["c0000001", "c0000002"] : ["c1000001", "c1000002", "c1000003"];
 			const firstShards: ReportReceipt[] = [];
 			for (const commit of commits) {
 				for (let shard = 0; shard < 6; shard++) {
 					const report = assertionShard(shard);
-					const receipt = h.call<ReportReceipt>("report", { ...report, target: { ...report.target, commit } });
+					const receipt = await h.call<ReportReceipt>("report", { ...report, target: { ...report.target, commit } });
 					if (shard === 0) firstShards.push(receipt);
 				}
 				if (answered && commit === commits[0]) {
-					const generic = first(queue().items.filter((q) => q.title === "assertion failed"));
-					expect(decide(generic, { is: "flaky" })?.status).toBe("decided");
+					const generic = first((await queue()).items.filter((q) => q.title === "assertion failed"));
+					expect((await decide(generic, { is: "flaky" }))?.status).toBe("decided");
 				}
 			}
 			expect(first(firstShards).questions).toMatchObject([{ title: "assertion failed", tests: 40, state: "open" }]);
@@ -291,90 +298,94 @@ describe("a red report", () => {
 					receipt.questions.every((q) => q.title.startsWith("Split by file (shard-0/") && q.state === "open"),
 				).toBe(true);
 			}
-			expect(gate(first(commits)).tally).toMatchObject({
+			expect((await gate(first(commits))).tally).toMatchObject({
 				excused: answered ? 40 : 0,
 				unexplained: answered ? 200 : 240,
 			});
 			for (const commit of commits.slice(1)) {
-				expect(gate(commit).tally).toMatchObject({ excused: 0, unexplained: 240 });
+				expect((await gate(commit)).tally).toMatchObject({ excused: 0, unexplained: 240 });
 			}
-			expect(queue().counts.failure).toBe(answered ? 36 : 37);
-			const generic = h.call<InboxReply>("inbox", { kind: "failure", state: answered ? "decided" : "open" }).items;
+			expect((await queue()).counts.failure).toBe(answered ? 36 : 37);
+			const generic = (await h.call<InboxReply>("inbox", { kind: "failure", state: answered ? "decided" : "open" }))
+				.items;
 			expect(generic.find((q) => q.title === "assertion failed")?.evidence.tests).toHaveLength(40);
 		},
 	);
 
-	test("a null-file cause seen only before the split is reused on later commits", () => {
+	test("a null-file cause seen only before the split is reused on later commits", async () => {
 		const report = genericReport(1);
 		const missing = {
 			...report,
 			job: "without-file",
 			results: [{ test: { key: "without-file" }, outcome: "fail", failure: { message: "assertion failed" } }],
 		};
-		const receipt = h.call<ReportReceipt>("report", missing);
-		expect(decide(first(queue().items), { is: "flaky" })?.status).toBe("decided");
-		h.call("report", assertionShard(0));
-		h.call("report", assertionShard(1));
-		expect(gate("broad001").tally).toMatchObject({ excused: 41, unexplained: 40 });
-		expect(h.call<ReportReceipt>("report", missing)).toEqual({ ...receipt, fresh: false });
-		const next = h.call<ReportReceipt>("report", { ...missing, target: { ...missing.target, commit: "broad002" } });
+		const receipt = await h.call<ReportReceipt>("report", missing);
+		expect((await decide(first((await queue()).items), { is: "flaky" }))?.status).toBe("decided");
+		await h.call("report", assertionShard(0));
+		await h.call("report", assertionShard(1));
+		expect((await gate("broad001")).tally).toMatchObject({ excused: 41, unexplained: 40 });
+		expect(await h.call<ReportReceipt>("report", missing)).toEqual({ ...receipt, fresh: false });
+		const next = await h.call<ReportReceipt>("report", {
+			...missing,
+			target: { ...missing.target, commit: "broad002" },
+		});
 		expect(next.questions).toMatchObject([
 			{ title: "Split by file (no file reported): assertion failed", tests: 1, state: "open" },
 		]);
-		expect(gate("broad002").tally).toMatchObject({ excused: 0, unexplained: 1 });
+		expect((await gate("broad002")).tally).toMatchObject({ excused: 0, unexplained: 1 });
 	});
 
-	test("new files in small later shards count earlier split results under the original cause", () => {
-		h.call("report", assertionShard(0));
-		h.call("report", assertionShard(1));
-		const receipt = h.call<ReportReceipt>("report", assertionShard(2, 1));
+	test("new files in small later shards count earlier split results under the original cause", async () => {
+		await h.call("report", assertionShard(0));
+		await h.call("report", assertionShard(1));
+		const receipt = await h.call<ReportReceipt>("report", assertionShard(2, 1));
 		expect(receipt.questions[0]).toMatchObject({
 			title: "Split by file (shard-2/file-0.test.ts): assertion failed",
 			tests: 1,
 		});
-		expect(gate("broad001").tally.unexplained).toBe(81);
+		expect((await gate("broad001")).tally.unexplained).toBe(81);
 	});
 
-	test("cross-report thresholds count distinct tests and keep different assertions separate", () => {
+	test("cross-report thresholds count distinct tests and keep different assertions separate", async () => {
 		const report = assertionShard(0);
-		h.call("report", report);
-		const retry = h.call<ReportReceipt>("report", { ...report, attempt: 2 });
+		await h.call("report", report);
+		const retry = await h.call<ReportReceipt>("report", { ...report, attempt: 2 });
 		expect(retry.questions).toHaveLength(1);
 		expect(retry.questions[0]?.title).toBe("assertion failed");
 		const other = assertionShard(1);
-		const distinct = h.call<ReportReceipt>("report", {
+		const distinct = await h.call<ReportReceipt>("report", {
 			...other,
 			results: other.results.map((result) => ({ ...result, failure: { message: "expected eight, got nine" } })),
 		});
 		expect(distinct.questions).toHaveLength(1);
 		expect(distinct.questions[0]?.title).toBe("expected eight, got nine");
-		const atLimit = h.call<ReportReceipt>("report", assertionShard(2, 10));
+		const atLimit = await h.call<ReportReceipt>("report", assertionShard(2, 10));
 		expect(atLimit.questions).toHaveLength(1);
 		expect(atLimit.questions[0]?.title).toBe("assertion failed");
-		const overLimit = h.call<ReportReceipt>("report", assertionShard(3, 1));
+		const overLimit = await h.call<ReportReceipt>("report", assertionShard(3, 1));
 		expect(overLimit.questions[0]?.title).toBe("Split by file (shard-3/file-0.test.ts): assertion failed");
 	});
 
-	test("the guard combines environments of one repository and commit, not other commits or repositories", () => {
-		h.call("report", assertionShard(0));
+	test("the guard combines environments of one repository and commit, not other commits or repositories", async () => {
+		await h.call("report", assertionShard(0));
 		const other = assertionShard(1);
 		for (const target of [
 			{ ...other.target, commit: "broad002" },
 			{ ...other.target, repo: "acme/other" },
 		]) {
-			const receipt = h.call<ReportReceipt>("report", { ...other, target });
+			const receipt = await h.call<ReportReceipt>("report", { ...other, target });
 			expect(receipt.questions).toHaveLength(1);
 			expect(receipt.questions[0]?.title).toBe("assertion failed");
 		}
-		const receipt = h.call<ReportReceipt>("report", { ...other, target: { ...other.target, env: "another" } });
+		const receipt = await h.call<ReportReceipt>("report", { ...other, target: { ...other.target, env: "another" } });
 		expect(receipt.questions).toHaveLength(6);
-		expect(h.call<GateStatus>("gate", { commit: "broad001", repo: "acme/web" }).tally.unexplained).toBe(80);
+		expect((await h.call<GateStatus>("gate", { commit: "broad001", repo: "acme/web" })).tally.unexplained).toBe(80);
 	});
 
-	test("five reported files and missing files across shards do not cross the file threshold", () => {
+	test("five reported files and missing files across shards do not cross the file threshold", async () => {
 		const report = genericReport(30, 5);
-		h.call("report", report);
-		const sameFiles = h.call<ReportReceipt>("report", {
+		await h.call("report", report);
+		const sameFiles = await h.call<ReportReceipt>("report", {
 			...report,
 			job: "another",
 			results: report.results.map((result) => ({
@@ -383,7 +394,7 @@ describe("a red report", () => {
 			})),
 		});
 		expect(sameFiles.questions[0]?.title).toBe("assertion failed");
-		const missingFiles = h.call<ReportReceipt>("report", {
+		const missingFiles = await h.call<ReportReceipt>("report", {
 			...report,
 			job: "missing",
 			results: Array.from({ length: 20 }, (_, i) => ({
@@ -393,12 +404,12 @@ describe("a red report", () => {
 			})),
 		});
 		expect(missingFiles.questions[0]?.title).toBe("assertion failed");
-		const sixthFile = h.call<ReportReceipt>("report", assertionShard(1, 1));
+		const sixthFile = await h.call<ReportReceipt>("report", assertionShard(1, 1));
 		expect(sixthFile.questions[0]?.title).toBe("Split by file (shard-1/file-0.test.ts): assertion failed");
-		expect(gate("broad001").tally.unexplained).toBe(81);
+		expect((await gate("broad001")).tally.unexplained).toBe(81);
 	});
 
-	test("the guard counts applied reports even when acceptance order is reversed", () => {
+	test("the guard counts applied reports even when acceptance order is reversed", async () => {
 		const inTx = <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): T =>
 			h.app.db.transaction(() => {
 				const project = findProject(h.app.db, "scratch");
@@ -415,35 +426,35 @@ describe("a red report", () => {
 		expect(firstApplied.questions[0]?.title).toBe("assertion failed");
 		const secondApplied = inTx((ctx) => processBatch(ctx, firstBatch.id));
 		expect(secondApplied.questions).toHaveLength(6);
-		expect(gate("broad001")).toMatchObject({ verdict: "blocked", stale: false, tally: { unexplained: 80 } });
+		expect(await gate("broad001")).toMatchObject({ verdict: "blocked", stale: false, tally: { unexplained: 80 } });
 		expect(recoverAccepted(h.app)).toBe(0);
 	});
 
-	test("a broad assertion is split by file, and one answer excuses only that file", () => {
+	test("a broad assertion is split by file, and one answer excuses only that file", async () => {
 		const report = genericReport();
-		const receipt = h.call<ReportReceipt>("report", report);
+		const receipt = await h.call<ReportReceipt>("report", report);
 		expect(receipt.questions).toHaveLength(6);
 		expect(receipt.questions.map((q) => q.tests)).toEqual([10, 10, 10, 10, 10, 10]);
-		const questions = queue().items.filter((q) => q.kind === "failure");
+		const questions = (await queue()).items.filter((q) => q.kind === "failure");
 		expect(questions.map((q) => q.title).sort()).toEqual(
 			Array.from({ length: 6 }, (_, i) => `Split by file (file-${i}.test.ts): assertion failed`),
 		);
 		const fileZero = questions.find((q) => q.title === "Split by file (file-0.test.ts): assertion failed");
 		if (!fileZero) throw new Error("the first file's question was not raised");
-		expect(decide(fileZero, { is: "flaky", reason: "known in this file" })?.status).toBe("decided");
-		expect(gate("broad001").tally).toMatchObject({ excused: 10, unexplained: 50 });
-		expect(gate("broad001").verdict).toBe("blocked");
-		const retry = h.call<ReportReceipt>("report", { ...report, attempt: 2 });
+		expect((await decide(fileZero, { is: "flaky", reason: "known in this file" }))?.status).toBe("decided");
+		expect((await gate("broad001")).tally).toMatchObject({ excused: 10, unexplained: 50 });
+		expect((await gate("broad001")).verdict).toBe("blocked");
+		const retry = await h.call<ReportReceipt>("report", { ...report, attempt: 2 });
 		expect(retry.questions.filter((q) => q.state === "open")).toHaveLength(5);
-		expect(gate("broad001").tally).toMatchObject({ excused: 10, unexplained: 50 });
-		const later = h.call<ReportReceipt>("report", {
+		expect((await gate("broad001")).tally).toMatchObject({ excused: 10, unexplained: 50 });
+		const later = await h.call<ReportReceipt>("report", {
 			...report,
 			target: { ...report.target, commit: "broad002" },
 			results: [first(report.results)],
 		});
 		expect(later.questions[0]?.title).toBe("Split by file (file-0.test.ts): assertion failed");
 		expect(later.gate?.tally).toMatchObject({ excused: 1, unexplained: 0 });
-		expect(h.call<ReportReceipt>("report", report)).toMatchObject({ fresh: false, questions: receipt.questions });
+		expect(await h.call<ReportReceipt>("report", report)).toMatchObject({ fresh: false, questions: receipt.questions });
 	});
 
 	test.each([
@@ -452,29 +463,32 @@ describe("a red report", () => {
 		[60, 5, "assertion failed"],
 		[60, 6, "Timeout 5000ms exceeded"],
 		[60, 6, "connect ECONNREFUSED localhost:5432"],
-	])("the guard keeps %i tests in %i files with %s together", (n, files, message) => {
-		const receipt = h.call<ReportReceipt>("report", genericReport(n, files, message));
+	])("the guard keeps %i tests in %i files with %s together", async (n, files, message) => {
+		const receipt = await h.call<ReportReceipt>("report", genericReport(n, files, message));
 		expect(receipt.questions).toHaveLength(1);
 		expect(receipt.questions[0]?.tests).toBe(n);
 	});
 
-	test("51 tests across six files split even when one file already has a split signature", () => {
+	test("51 tests across six files split even when one file already has a split signature", async () => {
 		const report = genericReport();
-		h.call("report", report);
+		await h.call("report", report);
 		const later = genericReport(51);
 		later.results = later.results.map((result, i) => ({
 			...result,
 			test: i % 6 === 0 ? result.test : { key: `new-${i % 6}.ts::test ${i}`, file: `new-${i % 6}.ts` },
 		}));
-		const receipt = h.call<ReportReceipt>("report", { ...later, target: { ...later.target, commit: "mixed001" } });
+		const receipt = await h.call<ReportReceipt>("report", {
+			...later,
+			target: { ...later.target, commit: "mixed001" },
+		});
 		expect(receipt.questions).toHaveLength(6);
 		expect(receipt.questions.map((q) => q.tests).sort()).toEqual([8, 8, 8, 9, 9, 9]);
 		expect(receipt.questions.every((q) => q.title.startsWith("Split by file ("))).toBe(true);
 	});
 
-	test("a missing file stays separate from a file named no file reported", () => {
+	test("a missing file stays separate from a file named no file reported", async () => {
 		const report = genericReport();
-		const receipt = h.call<ReportReceipt>("report", {
+		const receipt = await h.call<ReportReceipt>("report", {
 			...report,
 			results: [
 				...report.results,
@@ -491,16 +505,16 @@ describe("a red report", () => {
 		expect(receipt.questions.filter((q) => q.tests === 1)).toHaveLength(2);
 	});
 
-	test("the guard sees the whole report across application slices", () => {
-		const receipt = h.call<ReportReceipt>("report", genericReport(600));
+	test("the guard sees the whole report across application slices", async () => {
+		const receipt = await h.call<ReportReceipt>("report", genericReport(600));
 		expect(receipt.questions).toHaveLength(6);
 		expect(receipt.questions.map((q) => q.tests)).toEqual([100, 100, 100, 100, 100, 100]);
 		expect(receipt.gate?.tally.unexplained).toBe(600);
 	});
 
-	test("each normalised assertion has its own thresholds", () => {
+	test("each normalised assertion has its own thresholds", async () => {
 		const report = genericReport();
-		const receipt = h.call<ReportReceipt>("report", {
+		const receipt = await h.call<ReportReceipt>("report", {
 			...report,
 			results: report.results.map((result, i) => ({
 				...result,
@@ -512,25 +526,32 @@ describe("a red report", () => {
 		expect(receipt.questions.map((q) => q.title)).toEqual(["expected 5, got 7", "expected 8, got 9"]);
 	});
 
-	test("the guard counts distinct tests, not repeated results", () => {
+	test("the guard counts distinct tests, not repeated results", async () => {
 		const report = genericReport(6);
-		const receipt = h.call<ReportReceipt>("report", { ...report, results: Array(10).fill(report.results).flat() });
+		const receipt = await h.call<ReportReceipt>("report", {
+			...report,
+			results: Array(10).fill(report.results).flat(),
+		});
 		expect(receipt.questions).toHaveLength(1);
-		expect(queue().items.find((q) => q.kind === "failure")?.title).toBe("assertion failed");
+		expect((await queue()).items.find((q) => q.kind === "failure")?.title).toBe("assertion failed");
 	});
 
-	test("a prior answer for the generic cause cannot excuse a broad report", () => {
+	test("a prior answer for the generic cause cannot excuse a broad report", async () => {
 		const report = genericReport();
-		h.call("report", { ...report, target: { ...report.target, commit: "prior001" }, results: [first(report.results)] });
-		decide(first(queue().items), { is: "flaky", reason: "known earlier" });
-		const receipt = h.call<ReportReceipt>("report", report);
+		await h.call("report", {
+			...report,
+			target: { ...report.target, commit: "prior001" },
+			results: [first(report.results)],
+		});
+		await decide(first((await queue()).items), { is: "flaky", reason: "known earlier" });
+		const receipt = await h.call<ReportReceipt>("report", report);
 		expect(receipt.questions).toHaveLength(6);
 		expect(receipt.gate?.tally).toMatchObject({ excused: 0, unexplained: 60 });
-		expect(gate("prior001").tally).toMatchObject({ excused: 1, unexplained: 0 });
+		expect((await gate("prior001")).tally).toMatchObject({ excused: 1, unexplained: 0 });
 	});
 
-	test("volatile parts of a message do not split a cause, different assertions do", () => {
-		const receipt = h.call<ReportReceipt>(
+	test("volatile parts of a message do not split a cause, different assertions do", async () => {
+		const receipt = await h.call<ReportReceipt>(
 			"report",
 			ciReport({
 				commit: "bbbbbbb2",
@@ -546,56 +567,56 @@ describe("a red report", () => {
 		expect(receipt.questions).toHaveLength(3);
 	});
 
-	test("C3: a decision changes the gate without re-running the pipeline", () => {
-		h.call("report", ciReport({ commit: "ccccccc1", n: 10, fail: { 3: "connect ECONNREFUSED 10.0.0.5:5432" } }));
-		expect(gate("ccccccc1").verdict).toBe("blocked");
-		expect(decide(first(queue().items), { is: "infra" })?.status).toBe("decided");
-		const after = gate("ccccccc1");
+	test("C3: a decision changes the gate without re-running the pipeline", async () => {
+		await h.call("report", ciReport({ commit: "ccccccc1", n: 10, fail: { 3: "connect ECONNREFUSED 10.0.0.5:5432" } }));
+		expect((await gate("ccccccc1")).verdict).toBe("blocked");
+		expect((await decide(first((await queue()).items), { is: "infra" }))?.status).toBe("decided");
+		const after = await gate("ccccccc1");
 		expect(after).toMatchObject({ verdict: "passed" });
 		expect(after.tally).toMatchObject({ pass: 9, excused: 1, unexplained: 0 });
 	});
 
-	test("a defect is attributed: the gate says failed, which needs a fix, not a decision", () => {
-		h.call("report", ciReport({ commit: "ccccccc2", n: 10, fail: { 3: "expected 90.00, got 100.00" } }));
-		decide(first(queue().items), { is: "defect", ref: "WEB-301" });
-		expect(gate("ccccccc2")).toMatchObject({
+	test("a defect is attributed: the gate says failed, which needs a fix, not a decision", async () => {
+		await h.call("report", ciReport({ commit: "ccccccc2", n: 10, fail: { 3: "expected 90.00, got 100.00" } }));
+		await decide(first((await queue()).items), { is: "defect", ref: "WEB-301" });
+		expect(await gate("ccccccc2")).toMatchObject({
 			verdict: "failed",
 			reason: "failed: 1 failure attributed to this target",
 		});
 	});
 
-	test("D3: the same failing commit re-run asks nothing new", () => {
+	test("D3: the same failing commit re-run asks nothing new", async () => {
 		const fail = { 3: "expected 90.00, got 100.00" };
-		h.call("report", ciReport({ commit: "ddddddd1", n: 10, fail }));
-		decide(first(queue().items), { is: "defect" });
-		const again = h.call<ReportReceipt>("report", ciReport({ commit: "ddddddd1", n: 10, fail, attempt: 2 }));
+		await h.call("report", ciReport({ commit: "ddddddd1", n: 10, fail }));
+		await decide(first((await queue()).items), { is: "defect" });
+		const again = await h.call<ReportReceipt>("report", ciReport({ commit: "ddddddd1", n: 10, fail, attempt: 2 }));
 		expect(again.questions[0]).toMatchObject({ how: "already decided", answer: "defect", by: "robin" });
-		expect(queue().counts.open).toBe(0);
+		expect((await queue()).counts.open).toBe(0);
 		expect(count("questions WHERE kind = 'failure'")).toBe(1);
 	});
 
-	test("an answer on evidence that has changed is a conflict, with the new evidence", () => {
-		h.call("report", ciReport({ commit: "eeeeeee1", pr: 7, branch: "fix", n: 3, fail: { 0: "boom" } }));
-		const seen = first(queue().items);
+	test("an answer on evidence that has changed is a conflict, with the new evidence", async () => {
+		await h.call("report", ciReport({ commit: "eeeeeee1", pr: 7, branch: "fix", n: 3, fail: { 0: "boom" } }));
+		const seen = first((await queue()).items);
 		// trunk fails the same way, then the change gets a newer build
-		h.call("report", ciReport({ commit: "0000000a", n: 3, fail: { 0: "boom" } })); // trunk now fails the same way
-		h.call("report", ciReport({ commit: "eeeeeee2", pr: 7, branch: "fix", n: 3, fail: { 0: "boom" } }));
-		const reply = h.raw("decide", { q: seen.q, onEvidence: seen.evidenceHash, answer: { is: "flaky" } });
+		await h.call("report", ciReport({ commit: "0000000a", n: 3, fail: { 0: "boom" } })); // trunk now fails the same way
+		await h.call("report", ciReport({ commit: "eeeeeee2", pr: 7, branch: "fix", n: 3, fail: { 0: "boom" } }));
+		const reply = await h.raw("decide", { q: seen.q, onEvidence: seen.evidenceHash, answer: { is: "flaky" } });
 		// a newer build has arrived since the answer was prepared, so it is a conflict
 		expect(reply.ok && (reply.result as { status: string }[])[0]?.status).toBe("conflict");
 	});
 
-	test("one undo command withdraws unchanged decisions, refuses replacements, and replays without writes", () => {
-		h.call("report", ciReport({ commit: "undo-many", n: 2, fail: { 0: "first failure", 1: "second failure" } }));
-		const questions = queue().items;
+	test("one undo command withdraws unchanged decisions, refuses replacements, and replays without writes", async () => {
+		await h.call("report", ciReport({ commit: "undo-many", n: 2, fail: { 0: "first failure", 1: "second failure" } }));
+		const questions = (await queue()).items;
 		expect(questions).toHaveLength(2);
-		const receipts = h.call<DecideReply[]>("decide", {
+		const receipts = await h.call<DecideReply[]>("decide", {
 			all: questions.map((q) => ({ q: q.q, onEvidence: q.evidenceHash, answer: { is: "flaky" } })),
 		});
 		const changed = first(questions);
 		const unchanged = first(questions.slice(1));
 		const replacement = first(
-			h.call<DecideReply[]>("decide", {
+			await h.call<DecideReply[]>("decide", {
 				q: changed.q,
 				onEvidence: changed.evidenceHash,
 				answer: { is: "defect" },
@@ -607,13 +628,13 @@ describe("a red report", () => {
 			cmd: "withdraw-selection",
 		};
 		const before = count("decisions");
-		const reply = h.call<DecideReply[]>("decide", input);
+		const reply = await h.call<DecideReply[]>("decide", input);
 		expect(reply.map(({ q, status }) => ({ q, status }))).toEqual([
 			{ q: changed.q, status: "conflict" },
 			{ q: unchanged.q, status: "reopened" },
 		]);
 		expect(count("decisions")).toBe(before + 1);
-		expect(first(h.call<InboxReply>("inbox", { state: "decided" }).items).decision).toMatchObject({
+		expect(first((await h.call<InboxReply>("inbox", { state: "decided" })).items).decision).toMatchObject({
 			id: replacement.decision,
 		});
 		expect(
@@ -621,21 +642,21 @@ describe("a red report", () => {
 				.query("SELECT json_extract(signers, '$[0].reason') AS reason FROM decisions ORDER BY id DESC LIMIT 1")
 				.get(),
 		).toEqual({ reason: input.reason });
-		const state = h.raw("inbox");
+		const state = await h.raw("inbox");
 		if (!state.ok) throw new Error("No inbox");
 		const seq = state.seq;
 		expect(seq).toBeNumber();
-		expect(h.call<DecideReply[]>("decide", input)).toEqual(reply);
+		expect(await h.call<DecideReply[]>("decide", input)).toEqual(reply);
 		expect(count("decisions")).toBe(before + 1);
-		expect(h.raw("inbox")).toMatchObject({ ok: true, seq });
+		expect(await h.raw("inbox")).toMatchObject({ ok: true, seq });
 	});
 
-	test("one undo accepts 500 conditional withdrawals and refuses empty, oversized or unconditional lists", () => {
-		h.call("propose", {
+	test("one undo accepts 500 conditional withdrawals and refuses empty, oversized or unconditional lists", async () => {
+		await h.call("propose", {
 			edits: Array.from({ length: 500 }, (_, i) => ({ op: "create", outline: `Reviewed case ${i}` })),
 		});
 		for (let offset = 0; offset < 500; offset += 100)
-			h.call("claim", {
+			await h.call("claim", {
 				lens: "undo-limit",
 				findings: Array.from({ length: 100 }, (_, i) => ({
 					on: `C-${offset + i + 1}`,
@@ -643,105 +664,107 @@ describe("a red report", () => {
 					note: "Name the expected result",
 				})),
 			});
-		const questions = h.call<InboxReply>("inbox", { limit: 500 }).items;
+		const questions = (await h.call<InboxReply>("inbox", { limit: 500 })).items;
 		expect(questions).toHaveLength(500);
-		const receipts = h.call<DecideReply[]>("decide", {
+		const receipts = await h.call<DecideReply[]>("decide", {
 			all: questions.map((q) => ({ q: q.q, onEvidence: q.evidenceHash, answer: { is: "defer" } })),
 		});
 		const undo = receipts.map((reply) => ({ q: reply.q, ifDecision: reply.decision }));
 		const before = count("decisions");
 		for (const invalid of [[], [...undo, undo[0]], [{ q: questions[0]?.q }]]) {
-			expect(h.raw("decide", { undo: invalid })).toMatchObject({ ok: false, error: { code: "invalid" } });
+			expect(await h.raw("decide", { undo: invalid })).toMatchObject({ ok: false, error: { code: "invalid" } });
 		}
 		expect(count("decisions")).toBe(before);
-		expect(h.call<DecideReply[]>("decide", { undo }).map((reply) => reply.status)).toEqual(Array(500).fill("reopened"));
+		expect((await h.call<DecideReply[]>("decide", { undo })).map((reply) => reply.status)).toEqual(
+			Array(500).fill("reopened"),
+		);
 		expect(count("decisions")).toBe(before + 500);
-		expect(queue().counts.open).toBe(500);
+		expect((await queue()).counts.open).toBe(500);
 	});
 
-	test("undo withdraws a decision: the gate returns, and both decisions stay in the ledger", () => {
-		h.call("report", ciReport({ commit: "fffffff1", n: 5, fail: { 1: "expected 1, got 2" } }));
-		const q = first(queue().items);
-		decide(q, { is: "flaky" });
-		expect(gate("fffffff1").verdict).toBe("passed");
-		const undone = h.call<{ status: string }[]>("decide", { undo: q.q });
+	test("undo withdraws a decision: the gate returns, and both decisions stay in the ledger", async () => {
+		await h.call("report", ciReport({ commit: "fffffff1", n: 5, fail: { 1: "expected 1, got 2" } }));
+		const q = first((await queue()).items);
+		await decide(q, { is: "flaky" });
+		expect((await gate("fffffff1")).verdict).toBe("passed");
+		const undone = await h.call<{ status: string }[]>("decide", { undo: q.q });
 		expect(undone[0]?.status).toBe("reopened");
-		expect(gate("fffffff1").verdict).toBe("blocked");
-		expect(queue().counts.open).toBe(1);
+		expect((await gate("fffffff1")).verdict).toBe("blocked");
+		expect((await queue()).counts.open).toBe(1);
 		expect(count("decisions WHERE kind = 'failure'")).toBe(2);
 		expect(count("excuses")).toBe(0);
 	});
 
-	test("undo with a decision receipt leaves an intervening answer in force", () => {
-		h.call("report", ciReport({ commit: "fffffff2", n: 1, fail: { 0: "expected one, got two" } }));
-		const q = first(queue().items);
-		const give = (is: string, as = h.owner) =>
-			first(h.call<DecideReply[]>("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is } }, as));
-		const receipt = give("flaky");
+	test("undo with a decision receipt leaves an intervening answer in force", async () => {
+		await h.call("report", ciReport({ commit: "fffffff2", n: 1, fail: { 0: "expected one, got two" } }));
+		const q = first((await queue()).items);
+		const give = async (is: string, as = h.owner) =>
+			first(await h.call<DecideReply[]>("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is } }, as));
+		const receipt = await give("flaky");
 		const colleague = h.actor("colleague", "human", ["read", "produce", "answer"]);
-		const replacement = give("defect", colleague);
+		const replacement = await give("defect", colleague);
 		expect(receipt.status).toBe("decided");
 		expect(replacement.status).toBe("decided");
 		const decisions = count("decisions");
-		const stale = first(h.call<DecideReply[]>("decide", { undo: q.q, ifDecision: receipt.decision }));
+		const stale = first(await h.call<DecideReply[]>("decide", { undo: q.q, ifDecision: receipt.decision }));
 		expect(stale.status).toBe("conflict");
 		expect(stale.needs).toContain("decision changed");
-		expect(first(h.call<InboxReply>("inbox", { state: "decided" }).items).decision).toMatchObject({
+		expect(first((await h.call<InboxReply>("inbox", { state: "decided" })).items).decision).toMatchObject({
 			id: replacement.decision,
 		});
-		expect(gate("fffffff2").verdict).toBe("failed");
+		expect((await gate("fffffff2")).verdict).toBe("failed");
 		expect(count("decisions")).toBe(decisions);
 		for (const ifDecision of [0, -1, 1.5, null, "decision"]) {
-			expect(h.raw("decide", { undo: q.q, ifDecision })).toMatchObject({
+			expect(await h.raw("decide", { undo: q.q, ifDecision })).toMatchObject({
 				ok: false,
 				error: { code: "invalid" },
 			});
 		}
 		expect(count("decisions")).toBe(decisions);
-		expect(first(h.call<DecideReply[]>("decide", { undo: q.q, ifDecision: replacement.decision })).status).toBe(
+		expect(first(await h.call<DecideReply[]>("decide", { undo: q.q, ifDecision: replacement.decision })).status).toBe(
 			"reopened",
 		);
-		expect(gate("fffffff2").verdict).toBe("blocked");
-		expect(first(h.call<DecideReply[]>("decide", { undo: q.q, ifDecision: replacement.decision })).status).toBe(
+		expect((await gate("fffffff2")).verdict).toBe("blocked");
+		expect(first(await h.call<DecideReply[]>("decide", { undo: q.q, ifDecision: replacement.decision })).status).toBe(
 			"conflict",
 		);
 	});
 
-	test("receiptless undo deliberately withdraws the decision that stands now", () => {
-		h.call("report", ciReport({ commit: "fffffff3", n: 1, fail: { 0: "expected one, got two" } }));
-		const q = first(queue().items);
-		decide(q, { is: "flaky" });
-		decide(q, { is: "defect" });
-		expect(first(h.call<DecideReply[]>("decide", { undo: q.q })).status).toBe("reopened");
-		expect(gate("fffffff3").verdict).toBe("blocked");
+	test("receiptless undo deliberately withdraws the decision that stands now", async () => {
+		await h.call("report", ciReport({ commit: "fffffff3", n: 1, fail: { 0: "expected one, got two" } }));
+		const q = first((await queue()).items);
+		await decide(q, { is: "flaky" });
+		await decide(q, { is: "defect" });
+		expect(first(await h.call<DecideReply[]>("decide", { undo: q.q })).status).toBe("reopened");
+		expect((await gate("fffffff3")).verdict).toBe("blocked");
 	});
 
-	test("a retry that passes is a recorded flip, the gate passes, and nobody is asked why it failed", () => {
-		h.call("report", ciReport({ commit: "abababa1", n: 5, fail: { 2: "expected 1, got 2" } }));
-		expect(queue().counts.open).toBe(1);
-		const retry = h.call<ReportReceipt>("report", ciReport({ commit: "abababa1", n: 5, attempt: 2 }));
+	test("a retry that passes is a recorded flip, the gate passes, and nobody is asked why it failed", async () => {
+		await h.call("report", ciReport({ commit: "abababa1", n: 5, fail: { 2: "expected 1, got 2" } }));
+		expect((await queue()).counts.open).toBe(1);
+		const retry = await h.call<ReportReceipt>("report", ciReport({ commit: "abababa1", n: 5, attempt: 2 }));
 		expect(retry.flips).toBe(1);
 		expect(retry.gate?.verdict).toBe("passed");
-		expect(queue().counts.open).toBe(0);
+		expect((await queue()).counts.open).toBe(0);
 		expect(count("questions WHERE state = 'dissolved'")).toBe(1);
 		expect(count("flips")).toBe(1);
 	});
 });
 
 describe("same-code detector suggestions", () => {
-	const sameCode = () =>
-		SameCodeEvidence.parse(h.call<Record<string, unknown>[]>("get", { refs: ["T-1"] })[0]?.sameCode);
-	const report = (attempt: number, message?: string, job = "e2e") =>
-		h.call<ReportReceipt>(
+	const sameCode = async () =>
+		SameCodeEvidence.parse((await h.call<Record<string, unknown>[]>("get", { refs: ["T-1"] }))[0]?.sameCode);
+	const report = async (attempt: number, message?: string, job = "e2e") =>
+		await h.call<ReportReceipt>(
 			"report",
 			ciReport({ commit: "detector1", n: 1, attempt, job, fail: message ? { 0: message } : {} }),
 		);
 
-	test("shows assertion evidence without silently excusing the current failure", () => {
-		report(1, "expected 1, got 2");
-		report(2);
-		const failing = report(3, "expected 1, got 2");
-		expect(sameCode()).toMatchObject({
+	test("shows assertion evidence without silently excusing the current failure", async () => {
+		await report(1, "expected 1, got 2");
+		await report(2);
+		const failing = await report(3, "expected 1, got 2");
+		expect(await sameCode()).toMatchObject({
 			enabled: true,
 			windowDays: 14,
 			minFlips: 2,
@@ -753,7 +776,7 @@ describe("same-code detector suggestions", () => {
 				},
 			],
 		});
-		expect(sameCode().signals[0]?.samples[0]).toMatchObject({
+		expect((await sameCode()).signals[0]?.samples[0]).toMatchObject({
 			commit: "detector1",
 			job: "e2e",
 			first: { id: 2, outcome: "pass", attempt: 2 },
@@ -761,20 +784,20 @@ describe("same-code detector suggestions", () => {
 		});
 		expect(failing.gate?.verdict).toBe("blocked");
 		expect(count("excuses")).toBe(0);
-		expect(queue().items[0]?.evidence.tests).toMatchObject([
+		expect((await queue()).items[0]?.evidence.tests).toMatchObject([
 			{ sameCode: { signals: [{ class: "assertion", suggested: true }] } },
 		]);
 	});
 
-	test("keeps assertion, timeout and infrastructure evidence separate", () => {
-		report(1);
-		report(2, "expected 1, got 2");
-		report(3);
-		report(4, "ECONNRESET");
-		report(5);
-		report(6, "TimeoutError: waiting for element");
-		report(7);
-		expect(sameCode()).toMatchObject({
+	test("keeps assertion, timeout and infrastructure evidence separate", async () => {
+		await report(1);
+		await report(2, "expected 1, got 2");
+		await report(3);
+		await report(4, "ECONNRESET");
+		await report(5);
+		await report(6, "TimeoutError: waiting for element");
+		await report(7);
+		expect(await sameCode()).toMatchObject({
 			signals: [
 				{ class: "assertion", flips: 2, suggested: true },
 				{ class: "timeout", flips: 2, suggested: true },
@@ -783,25 +806,25 @@ describe("same-code detector suggestions", () => {
 		});
 	});
 
-	test("different assertion causes do not pool flips toward the threshold", () => {
-		report(1, "expected 1, got 2");
-		report(2);
-		report(3, "expected 3, got 4");
-		expect(sameCode().signals).toMatchObject([
+	test("different assertion causes do not pool flips toward the threshold", async () => {
+		await report(1, "expected 1, got 2");
+		await report(2);
+		await report(3, "expected 3, got 4");
+		expect((await sameCode()).signals).toMatchObject([
 			{ signature: { text: "expected 1, got 2" }, class: "assertion", flips: 1, suggested: false },
 			{ signature: { text: "expected 3, got 4" }, class: "assertion", flips: 1, suggested: false },
 		]);
 	});
 
-	test("a file-split cause counts its own flips and keeps the original cause's history separate", () => {
+	test("a file-split cause counts its own flips and keeps the original cause's history separate", async () => {
 		const input = ciReport({ commit: "splitflip1", n: 0 });
 		const tests = Array.from({ length: 60 }, (_, i) => ({
 			key: `file-${i % 6}.test.ts::test ${i}`,
 			file: `file-${i % 6}.test.ts`,
 		}));
 		const chosen = first(tests);
-		const send = (attempt: number, outcome: "pass" | "fail", broad = false) =>
-			h.call<ReportReceipt>("report", {
+		const send = async (attempt: number, outcome: "pass" | "fail", broad = false) =>
+			await h.call<ReportReceipt>("report", {
 				...input,
 				attempt,
 				results: (broad ? tests : [chosen]).map((test) => ({
@@ -810,12 +833,12 @@ describe("same-code detector suggestions", () => {
 					...(outcome === "fail" ? { failure: { message: "assertion failed" } } : {}),
 				})),
 			});
-		send(1, "pass");
-		send(2, "fail");
-		send(3, "pass");
-		const splitReport = send(4, "fail", true);
+		await send(1, "pass");
+		await send(2, "fail");
+		await send(3, "pass");
+		const splitReport = await send(4, "fail", true);
 		expect(splitReport.questions).toHaveLength(6);
-		expect(sameCode().signals).toMatchObject([
+		expect((await sameCode()).signals).toMatchObject([
 			{ signature: { text: "assertion failed" }, class: "assertion", flips: 2, suggested: true },
 			{
 				signature: { text: "Split by file (file-0.test.ts): assertion failed" },
@@ -824,23 +847,26 @@ describe("same-code detector suggestions", () => {
 				suggested: false,
 			},
 		]);
-		const fileZero = () => queue().items.find((q) => q.title === "Split by file (file-0.test.ts): assertion failed");
-		expect(first(z.array(z.unknown()).parse(fileZero()?.evidence.tests))).toMatchObject({
+		const fileZero = async () =>
+			(await queue()).items.find((q) => q.title === "Split by file (file-0.test.ts): assertion failed");
+		expect(first(z.array(z.unknown()).parse((await fileZero())?.evidence.tests))).toMatchObject({
 			t: "T-1",
 			sameCode: { signals: [{ flips: 1, suggested: false }] },
 		});
-		const otherFile = queue().items.find((q) => q.title === "Split by file (file-1.test.ts): assertion failed");
+		const otherFile = (await queue()).items.find((q) => q.title === "Split by file (file-1.test.ts): assertion failed");
 		expect(otherFile?.evidence.tests).toHaveLength(10);
 		expect(otherFile?.evidence.tests).not.toContainEqual(expect.objectContaining({ sameCode: expect.anything() }));
-		send(5, "pass");
-		const retry = send(6, "fail");
+		await send(5, "pass");
+		const retry = await send(6, "fail");
 		expect(retry.questions[0]?.title).toBe("Split by file (file-0.test.ts): assertion failed");
-		expect(sameCode().signals).toMatchObject([
+		expect((await sameCode()).signals).toMatchObject([
 			{ signature: { text: "assertion failed" }, flips: 2, suggested: true },
 			{ signature: { text: "Split by file (file-0.test.ts): assertion failed" }, flips: 3, suggested: true },
 		]);
 		const snapshot = first(
-			z.array(z.object({ sameCode: SameCodeEvidence.optional() }).passthrough()).parse(fileZero()?.evidence.tests),
+			z
+				.array(z.object({ sameCode: SameCodeEvidence.optional() }).passthrough())
+				.parse((await fileZero())?.evidence.tests),
 		).sameCode;
 		expect(snapshot?.signals).toHaveLength(1);
 		expect(snapshot?.signals[0]).toMatchObject({
@@ -851,63 +877,63 @@ describe("same-code detector suggestions", () => {
 		expect(retry.gate).toMatchObject({ verdict: "blocked", tally: { unexplained: 60, excused: 0 } });
 	});
 
-	test("a different job and an older attempt do not add detector evidence", () => {
-		report(2, "expected 1, got 2");
-		report(3, undefined, "unit");
-		report(1);
-		expect(sameCode()).toMatchObject({ signals: [] });
-		report(3);
-		expect(sameCode()).toMatchObject({ signals: [{ class: "assertion", flips: 1, suggested: false }] });
+	test("a different job and an older attempt do not add detector evidence", async () => {
+		await report(2, "expected 1, got 2");
+		await report(3, undefined, "unit");
+		await report(1);
+		expect(await sameCode()).toMatchObject({ signals: [] });
+		await report(3);
+		expect(await sameCode()).toMatchObject({ signals: [{ class: "assertion", flips: 1, suggested: false }] });
 	});
 
-	test("a skipped retry does not hide a decisive flip, and replaying a batch adds nothing", () => {
-		report(1, "expected 1, got 2");
+	test("a skipped retry does not hide a decisive flip, and replaying a batch adds nothing", async () => {
+		await report(1, "expected 1, got 2");
 		const skipped = ciReport({ commit: "detector1", n: 1, attempt: 2 });
-		h.call("report", { ...skipped, results: skipped.results.map((r) => ({ ...r, outcome: "skip" })) });
-		report(3);
-		report(3);
-		expect(sameCode()).toMatchObject({ signals: [{ class: "assertion", flips: 1, suggested: false }] });
+		await h.call("report", { ...skipped, results: skipped.results.map((r) => ({ ...r, outcome: "skip" })) });
+		await report(3);
+		await report(3);
+		expect(await sameCode()).toMatchObject({ signals: [{ class: "assertion", flips: 1, suggested: false }] });
 	});
 
-	test("project settings change thresholds, disable suggestions, and expire old evidence", () => {
-		const configure = (flakyDetection: { enabled: boolean; windowDays: number; minFlips: number }) => {
+	test("project settings change thresholds, disable suggestions, and expire old evidence", async () => {
+		const configure = async (flakyDetection: { enabled: boolean; windowDays: number; minFlips: number }) => {
 			const policy = Policy.extend({ version: z.number() }).parse(
-				h.call("admin", { do: "policy.show", project: "scratch" }),
+				await h.call("admin", { do: "policy.show", project: "scratch" }),
 			);
-			const proposed = h.call<{ question: string }>("propose", {
+			const proposed = await h.call<{ question: string }>("propose", {
 				edits: [{ op: "policy", base: policy.version, settings: { ...policy.settings, flakyDetection } }],
 			});
-			const q = h.call<InboxReply["items"]>("get", { refs: [proposed.question] })[0];
+			const q = (await h.call<InboxReply["items"]>("get", { refs: [proposed.question] }))[0];
 			if (!q) throw new Error("policy question missing");
-			expect(decide(q, { is: "accept" })?.status).toBe("decided");
+			expect((await decide(q, { is: "accept" }))?.status).toBe("decided");
 		};
-		report(1, "expected 1, got 2");
-		report(2);
-		report(3, "expected 1, got 2");
-		configure({ enabled: true, windowDays: 1, minFlips: 3 });
-		expect(sameCode().signals).toMatchObject([{ class: "assertion", flips: 2, suggested: false }]);
-		configure({ enabled: false, windowDays: 1, minFlips: 1 });
-		expect(sameCode()).toEqual({ enabled: false, windowDays: 1, minFlips: 1, signals: [] });
-		const other = harness({ project: "other" });
+		await report(1, "expected 1, got 2");
+		await report(2);
+		await report(3, "expected 1, got 2");
+		await configure({ enabled: true, windowDays: 1, minFlips: 3 });
+		expect((await sameCode()).signals).toMatchObject([{ class: "assertion", flips: 2, suggested: false }]);
+		await configure({ enabled: false, windowDays: 1, minFlips: 1 });
+		expect(await sameCode()).toEqual({ enabled: false, windowDays: 1, minFlips: 1, signals: [] });
+		const other = await harness({ project: "other" });
 		try {
 			expect(
-				Policy.parse(other.call("admin", { do: "policy.show", project: "other" })).settings.flakyDetection,
+				Policy.parse(await other.call("admin", { do: "policy.show", project: "other" })).settings.flakyDetection,
 			).toEqual({ enabled: true, windowDays: 14, minFlips: 2 });
 		} finally {
 			other.close();
 		}
 
 		expect(count("flips")).toBe(2);
-		configure({ enabled: true, windowDays: 1, minFlips: 1 });
-		expect(sameCode().signals).toMatchObject([{ flips: 2, suggested: true }]);
+		await configure({ enabled: true, windowDays: 1, minFlips: 1 });
+		expect((await sameCode()).signals).toMatchObject([{ flips: 2, suggested: true }]);
 		h.advance(86_400_001);
-		expect(sameCode().signals).toEqual([]);
-		expect(gate("detector1").verdict).toBe("blocked");
+		expect((await sameCode()).signals).toEqual([]);
+		expect((await gate("detector1")).verdict).toBe("blocked");
 	});
 
-	test("invalid detector settings are refused without changing the policy", () => {
+	test("invalid detector settings are refused without changing the policy", async () => {
 		const policy = Policy.extend({ version: z.number() }).parse(
-			h.call("admin", { do: "policy.show", project: "scratch" }),
+			await h.call("admin", { do: "policy.show", project: "scratch" }),
 		);
 		for (const bad of [
 			{ enabled: "yes" },
@@ -917,7 +943,7 @@ describe("same-code detector suggestions", () => {
 			{ windowDays: 366 },
 		]) {
 			expect(
-				h.raw("propose", {
+				await h.raw("propose", {
 					edits: [
 						{
 							op: "policy",
@@ -928,80 +954,85 @@ describe("same-code detector suggestions", () => {
 				}),
 			).toMatchObject({ ok: false, error: { code: "invalid" } });
 		}
-		expect(Policy.parse(h.call("admin", { do: "policy.show", project: "scratch" })).settings.flakyDetection).toEqual({
+		expect(
+			Policy.parse(await h.call("admin", { do: "policy.show", project: "scratch" })).settings.flakyDetection,
+		).toEqual({
 			enabled: true,
 			windowDays: 14,
 			minFlips: 2,
 		});
 	});
 
-	test("one producer cannot create a flip with another producer's result", () => {
-		report(1, "expected 1, got 2");
+	test("one producer cannot create a flip with another producer's result", async () => {
+		await report(1, "expected 1, got 2");
 		const pipeline = h.actor("other-pipeline", "ci", ["record"]);
-		h.call("report", ciReport({ commit: "detector1", n: 1, attempt: 2 }), pipeline);
-		expect(sameCode().signals).toEqual([]);
-		report(2);
-		expect(sameCode().signals).toMatchObject([{ class: "assertion", flips: 1 }]);
+		await h.call("report", ciReport({ commit: "detector1", n: 1, attempt: 2 }), pipeline);
+		expect((await sameCode()).signals).toEqual([]);
+		await report(2);
+		expect((await sameCode()).signals).toMatchObject([{ class: "assertion", flips: 1 }]);
 	});
 
-	test("same-attempt disagreement is not a retry flip", () => {
-		report(1, "expected 1, got 2");
-		report(1);
-		expect(sameCode().signals).toEqual([]);
-		report(2);
-		expect(sameCode().signals).toMatchObject([{ class: "assertion", flips: 1 }]);
+	test("same-attempt disagreement is not a retry flip", async () => {
+		await report(1, "expected 1, got 2");
+		await report(1);
+		expect((await sameCode()).signals).toEqual([]);
+		await report(2);
+		expect((await sameCode()).signals).toMatchObject([{ class: "assertion", flips: 1 }]);
 	});
 
-	test("a later same-attempt failure removes a pass from detector evidence", () => {
-		report(1, "expected 1, got 2");
-		report(2);
-		expect(sameCode().signals).toMatchObject([{ flips: 1 }]);
-		report(2, "expected 1, got 2");
-		expect(sameCode().signals).toEqual([]);
-		report(3);
-		expect(sameCode().signals).toMatchObject([
+	test("a later same-attempt failure removes a pass from detector evidence", async () => {
+		await report(1, "expected 1, got 2");
+		await report(2);
+		expect((await sameCode()).signals).toMatchObject([{ flips: 1 }]);
+		await report(2, "expected 1, got 2");
+		expect((await sameCode()).signals).toEqual([]);
+		await report(3);
+		expect((await sameCode()).signals).toMatchObject([
 			{ flips: 1, samples: [{ first: { outcome: "fail", attempt: 2 }, second: { outcome: "pass", attempt: 3 } }] },
 		]);
 	});
 
-	test("counts every flip but bounds concrete examples to three per failure cause", () => {
-		for (const attempt of [1, 2, 3, 4, 5]) report(attempt, attempt % 2 === 1 ? "expected 1, got 2" : undefined);
-		expect(sameCode().signals).toMatchObject([{ class: "assertion", flips: 4, suggested: true }]);
-		expect(sameCode().signals[0]?.samples).toHaveLength(3);
+	test("counts every flip but bounds concrete examples to three per failure cause", async () => {
+		for (const attempt of [1, 2, 3, 4, 5]) await report(attempt, attempt % 2 === 1 ? "expected 1, got 2" : undefined);
+		expect((await sameCode()).signals).toMatchObject([{ class: "assertion", flips: 4, suggested: true }]);
+		expect((await sameCode()).signals[0]?.samples).toHaveLength(3);
 	});
 
-	test("different environments, repositories and commits do not cross", () => {
-		report(1, "expected 1, got 2");
+	test("different environments, repositories and commits do not cross", async () => {
+		await report(1, "expected 1, got 2");
 		const pass = ciReport({ commit: "detector1", n: 1, attempt: 2 });
 		for (const target of [
 			{ ...pass.target, env: "staging" },
 			{ ...pass.target, repo: "acme/other" },
 			{ ...pass.target, commit: "detector2" },
 		])
-			h.call("report", { ...pass, target });
-		expect(sameCode().signals).toEqual([]);
-		report(2);
-		expect(sameCode().signals).toMatchObject([{ class: "assertion", flips: 1 }]);
+			await h.call("report", { ...pass, target });
+		expect((await sameCode()).signals).toEqual([]);
+		await report(2);
+		expect((await sameCode()).signals).toMatchObject([{ class: "assertion", flips: 1 }]);
 	});
 
-	test("a corrected observation stops supporting a suggestion", () => {
-		const initial = report(1, "expected 1, got 2");
-		report(2);
-		expect(sameCode().signals).toMatchObject([{ flips: 1 }]);
+	test("a corrected observation stops supporting a suggestion", async () => {
+		const initial = await report(1, "expected 1, got 2");
+		await report(2);
+		expect((await sameCode()).signals).toMatchObject([{ flips: 1 }]);
 		const corrected = ciReport({ commit: "detector1", n: 1, attempt: 3 });
-		h.call("report", { ...corrected, results: corrected.results.map((r) => ({ ...r, corrects: initial.results[0] })) });
-		expect(sameCode().signals).toEqual([]);
+		await h.call("report", {
+			...corrected,
+			results: corrected.results.map((r) => ({ ...r, corrects: initial.results[0] })),
+		});
+		expect((await sameCode()).signals).toEqual([]);
 	});
 
-	test("agents and session targets do not become same-code suggestions", () => {
+	test("agents and session targets do not become same-code suggestions", async () => {
 		const agent = h.actor("review-bot", "agent", ["read", "produce"]);
 		for (const attempt of [1, 2, 3])
-			h.call(
+			await h.call(
 				"report",
 				ciReport({ commit: "detector1", n: 1, attempt, fail: attempt === 2 ? {} : { 0: "expected 1, got 2" } }),
 				agent,
 			);
-		expect(sameCode().signals).toEqual([]);
+		expect((await sameCode()).signals).toEqual([]);
 		for (const attempt of [1, 2, 3]) {
 			const input = ciReport({
 				commit: "detector1",
@@ -1009,65 +1040,67 @@ describe("same-code detector suggestions", () => {
 				attempt,
 				fail: attempt === 2 ? {} : { 0: "expected 1, got 2" },
 			});
-			h.call("report", { ...input, target: { session: "manual-session" } });
+			await h.call("report", { ...input, target: { session: "manual-session" } });
 		}
-		expect(sameCode().signals).toEqual([]);
-		report(1);
-		report(2, "expected 1, got 2");
-		expect(sameCode().signals).toMatchObject([{ class: "assertion", flips: 1 }]);
+		expect((await sameCode()).signals).toEqual([]);
+		await report(1);
+		await report(2, "expected 1, got 2");
+		expect((await sameCode()).signals).toMatchObject([{ class: "assertion", flips: 1 }]);
 	});
 
-	test("policies stored before detection settings still read with defaults", () => {
-		const policy = Policy.parse(h.call("admin", { do: "policy.show", project: "scratch" }));
+	test("policies stored before detection settings still read with defaults", async () => {
+		const policy = Policy.parse(await h.call("admin", { do: "policy.show", project: "scratch" }));
 		const { flakyDetection: _, ...legacy } = policy.settings;
 		h.app.db.raw.query("UPDATE policies SET settings = ?").run(JSON.stringify(legacy));
-		expect(Policy.parse(h.call("admin", { do: "policy.show", project: "scratch" })).settings.flakyDetection).toEqual({
+		expect(
+			Policy.parse(await h.call("admin", { do: "policy.show", project: "scratch" })).settings.flakyDetection,
+		).toEqual({
 			enabled: true,
 			minFlips: 2,
 			windowDays: 14,
 		});
-		report(1);
-		report(2, "expected 1, got 2");
-		expect(sameCode().signals).toMatchObject([{ class: "assertion", flips: 1 }]);
+		await report(1);
+		await report(2, "expected 1, got 2");
+		expect((await sameCode()).signals).toMatchObject([{ class: "assertion", flips: 1 }]);
 	});
 });
 
 describe("a change against its base", () => {
 	const failure = { 4: "expected 90.00, got 100.00" };
 
-	test("loose: a failure the base has too is excused by a recorded rule for each commit", () => {
-		h.call("report", ciReport({ commit: "base0001", n: 10, fail: failure }));
-		decide(first(queue().items), { is: "defect" });
+	test("loose: a failure the base has too is excused by a recorded rule for each commit", async () => {
+		await h.call("report", ciReport({ commit: "base0001", n: 10, fail: failure }));
+		await decide(first((await queue()).items), { is: "defect" });
 		const change = (commit: string) =>
 			ciReport({ commit, branch: "feature", pr: 482, base: "base0001", n: 10, fail: failure });
-		const pr = h.call<ReportReceipt>("report", change("feat0001"));
+		const pr = await h.call<ReportReceipt>("report", change("feat0001"));
 		expect(pr.questions[0]).toMatchObject({ how: "decided by rule", state: "decided", answer: "inherited" });
 		expect(pr.gate).toMatchObject({ verdict: "passed", tally: { excused: 1 } });
-		const next = h.call<ReportReceipt>("report", change("feat0001b"));
+		const next = await h.call<ReportReceipt>("report", change("feat0001b"));
 		expect(next.questions[0]).toMatchObject({ how: "decided by rule", state: "decided", answer: "inherited" });
 		expect(next.questions[0]?.q).not.toBe(pr.questions[0]?.q);
 		expect(next.gate?.verdict).toBe("passed");
 	});
 
-	test("loose: a failure the change introduced is a question, and it blocks the change", () => {
-		h.call("report", ciReport({ commit: "base0002", n: 10 }));
-		const pr = h.call<ReportReceipt>(
+	test("loose: a failure the change introduced is a question, and it blocks the change", async () => {
+		await h.call("report", ciReport({ commit: "base0002", n: 10 }));
+		const pr = await h.call<ReportReceipt>(
 			"report",
 			ciReport({ commit: "feat0002", branch: "feature", pr: 483, base: "base0002", n: 10, fail: failure }),
 		);
 		expect(pr.questions[0]).toMatchObject({ how: "new", state: "open" });
 		expect(pr.gate).toMatchObject({ verdict: "blocked" });
-		expect(h.call<GateStatus>("gate", { change: "pr:483" }).verdict).toBe("blocked");
+		expect((await h.call<GateStatus>("gate", { change: "pr:483" })).verdict).toBe("blocked");
 	});
 
-	test("a decision on one push of a pull request still stands on the next push", () => {
-		h.call("report", ciReport({ commit: "base0003", n: 10 }));
-		h.call(
+	test("a decision on one push of a pull request still stands on the next push", async () => {
+		await h.call("report", ciReport({ commit: "base0003", n: 10 }));
+		await h.call(
 			"report",
 			ciReport({ commit: "feat0003", branch: "feature", pr: 484, base: "base0003", n: 10, fail: failure }),
 		);
-		decide(first(queue().items), { is: "flaky" });
-		const next = h.call<ReportReceipt>(
+		await decide(first((await queue()).items), { is: "flaky" });
+		const next = await h.call<ReportReceipt>(
 			"report",
 			ciReport({ commit: "feat0004", branch: "feature", pr: 484, base: "base0003", n: 10, fail: failure }),
 		);
@@ -1075,36 +1108,36 @@ describe("a change against its base", () => {
 		expect(next.gate?.verdict).toBe("passed");
 	});
 
-	test("standard: the same data, but the base failure is only a hint and a person decides", () => {
-		const s = harness({ preset: "standard" });
-		s.call("report", ciReport({ commit: "base0001", n: 10, fail: failure }));
-		const pr = s.call<ReportReceipt>(
+	test("standard: the same data, but the base failure is only a hint and a person decides", async () => {
+		const s = await harness({ preset: "standard" });
+		await s.call("report", ciReport({ commit: "base0001", n: 10, fail: failure }));
+		const pr = await s.call<ReportReceipt>(
 			"report",
 			ciReport({ commit: "feat0001", branch: "feature", pr: 482, base: "base0001", n: 10, fail: failure }),
 		);
 		expect(pr.questions[0]).toMatchObject({ how: "new", state: "open" });
-		const open = s.call<InboxReply>("inbox", { on: "pr:482" });
+		const open = await s.call<InboxReply>("inbox", { on: "pr:482" });
 		expect((first(open.items).evidence as { hints: string[] }).hints).toContain("fails-on-base");
 		s.close();
 	});
 });
 
 describe("holds", () => {
-	test("E8: a flaky excuse expires with no new report: the gate reads pending, and the next occurrence is asked again", () => {
+	test("E8: a flaky excuse expires with no new report: the gate reads pending, and the next occurrence is asked again", async () => {
 		const fail = { 0: "expected 1, got 2" };
-		h.call("report", ciReport({ commit: "1111111a", n: 3, fail }));
-		decide(first(queue().items), { is: "flaky" });
-		expect(gate("1111111a").verdict).toBe("passed");
+		await h.call("report", ciReport({ commit: "1111111a", n: 3, fail }));
+		await decide(first((await queue()).items), { is: "flaky" });
+		expect((await gate("1111111a")).verdict).toBe("passed");
 		h.advance(15 * 86_400_000);
-		const stale = gate("1111111a");
+		const stale = await gate("1111111a");
 		expect(stale).toMatchObject({
 			verdict: "pending",
 			stale: true,
 			reason: "pending: a decision this run rests on has expired",
 		});
-		const next = h.call<ReportReceipt>("report", ciReport({ commit: "1111111b", n: 3, fail }));
+		const next = await h.call<ReportReceipt>("report", ciReport({ commit: "1111111b", n: 3, fail }));
 		expect(next.questions[0]).toMatchObject({ how: "new", state: "open" });
-		const asked = first(queue().items);
+		const asked = first((await queue()).items);
 		const prior = h.app.db.raw
 			.query<{ prior: number | null; epoch: number }, []>("SELECT prior, epoch FROM questions WHERE state = 'open'")
 			.get();
@@ -1125,14 +1158,14 @@ describe("holds", () => {
 				clause: (JSON.parse(row.signers) as { clause: string; reason: string | null }[])[0]?.clause,
 				reason: (JSON.parse(row.signers) as { clause: string; reason: string | null }[])[0]?.reason ?? null,
 			}));
-	const state = (q: string) => h.call<{ state: string }[]>("get", { refs: [q] })[0]?.state;
+	const state = async (q: string) => (await h.call<{ state: string }[]>("get", { refs: [q] }))[0]?.state;
 
 	test.each(["loose", "standard"])(
 		"an agent report preserves a PR question when its head's run belongs to another scope, preset=%s",
-		(preset) => {
-			const s = harness({ preset });
+		async (preset) => {
+			const s = await harness({ preset });
 			try {
-				s.call("propose", { edits: [{ op: "create", outline: "Checkout works" }] });
+				await s.call("propose", { edits: [{ op: "create", outline: "Checkout works" }] });
 				const ci = s.actor("pipeline", "ci", ["read", "record"]);
 				const agent = s.actor("reviewer", "agent", ["read", "produce"]);
 				const old = ciReport({
@@ -1142,21 +1175,21 @@ describe("holds", () => {
 					n: 1,
 					fail: { 0: "checkout total is wrong" },
 				});
-				s.call("report", old, ci);
+				await s.call("report", old, ci);
 				// A typed result keeps this commit in its own scope when CI later names the PR.
-				s.call("report", {
+				await s.call("report", {
 					target: { commit: "scope002", repo: "acme/web" },
 					results: [{ test: { case: "C-1" }, outcome: "pass" }],
 				});
-				s.call("report", ciReport({ commit: "scope002", pr: 7, branch: "feature", n: 1 }), ci);
-				expect(s.call<GateStatus>("gate", { change: "pr:7" })).toMatchObject({ run: "R-2", verdict: "passed" });
+				await s.call("report", ciReport({ commit: "scope002", pr: 7, branch: "feature", n: 1 }), ci);
+				expect(await s.call<GateStatus>("gate", { change: "pr:7" })).toMatchObject({ run: "R-2", verdict: "passed" });
 				const blocked = { run: "R-1", verdict: "blocked", open: ["Q-2"], tally: { unexplained: 1 } };
-				expect(s.call<GateStatus>("gate", { commit: "scope001" })).toMatchObject(blocked);
+				expect(await s.call<GateStatus>("gate", { commit: "scope001" })).toMatchObject(blocked);
 
-				s.call("report", ciReport({ commit: "scope001", pr: 7, branch: "feature", n: 1, attempt: 2 }), agent);
-				expect(s.call<GateStatus>("gate", { commit: "scope001" })).toMatchObject(blocked);
-				expect(s.call<{ state: string }[]>("get", { refs: ["Q-2"] })[0]?.state).toBe("open");
-				expect(s.call<InboxReply>("inbox", { kind: "failure" }).items.map((item) => item.q)).toEqual(["Q-2"]);
+				await s.call("report", ciReport({ commit: "scope001", pr: 7, branch: "feature", n: 1, attempt: 2 }), agent);
+				expect(await s.call<GateStatus>("gate", { commit: "scope001" })).toMatchObject(blocked);
+				expect((await s.call<{ state: string }[]>("get", { refs: ["Q-2"] }))[0]?.state).toBe("open");
+				expect((await s.call<InboxReply>("inbox", { kind: "failure" })).items.map((item) => item.q)).toEqual(["Q-2"]);
 			} finally {
 				s.close();
 			}
@@ -1165,7 +1198,7 @@ describe("holds", () => {
 
 	test.each([false, true])(
 		"a discarded head passing preserves the reset head's failure, defect answer=%s",
-		(answered) => {
+		async (answered) => {
 			const ci = h.actor("pipeline", "ci", ["read", "record"]);
 			const at = (commit: string, attempt = 1, failing = true) =>
 				ciReport({
@@ -1177,40 +1210,40 @@ describe("holds", () => {
 					...(failing ? { fail: { 0: "checkout total is wrong" } } : {}),
 				});
 			const old = at("old00001");
-			h.call("report", old, ci);
-			const asked = first(queue().items);
-			if (answered) expect(decide(asked, { is: "defect" })?.status).toBe("decided");
-			h.call("report", at("new00002"), ci);
-			h.call(
+			await h.call("report", old, ci);
+			const asked = first((await queue()).items);
+			if (answered) expect((await decide(asked, { is: "defect" }))?.status).toBe("decided");
+			await h.call("report", at("new00002"), ci);
+			await h.call(
 				"report",
 				{ ...old, target: { ...old.target, head: "old00001" }, buildUrl: "https://ci.example/reset" },
 				ci,
 			);
 			const current = { run: "R-1", verdict: answered ? "failed" : "blocked", open: answered ? [] : ["Q-1"] };
-			expect(h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject(current);
+			expect(await h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject(current);
 
-			h.call("report", at("new00002", 2, false), ci);
-			expect(h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject(current);
-			expect(state(asked.q)).toBe(answered ? "decided" : "open");
-			const inbox = h.call<InboxReply>("inbox", { kind: "failure" });
+			await h.call("report", at("new00002", 2, false), ci);
+			expect(await h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject(current);
+			expect(await state(asked.q)).toBe(answered ? "decided" : "open");
+			const inbox = await h.call<InboxReply>("inbox", { kind: "failure" });
 			expect(inbox.counts.open).toBe(answered ? 0 : 1);
 			expect(inbox.items.map((item) => item.q)).toEqual(answered ? [] : ["Q-1"]);
-			expect(gate("new00002")).toMatchObject({ run: "R-2", verdict: "passed" });
+			expect(await gate("new00002")).toMatchObject({ run: "R-2", verdict: "passed" });
 
-			h.call("report", at("old00001", 2, false), ci);
-			expect(h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({
+			await h.call("report", at("old00001", 2, false), ci);
+			expect(await h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({
 				run: "R-1",
 				verdict: "passed",
 				open: [],
 			});
-			expect(state(asked.q)).toBe("dissolved");
+			expect(await state(asked.q)).toBe("dissolved");
 			if (answered) expect(ledger(asked.q).map((entry) => entry.is)).toEqual(["defect", "outdated"]);
 		},
 	);
 
 	test.each([false, true])(
 		"a discarded head passing supplies no proof for an unreported head, defect answer=%s",
-		(answered) => {
+		async (answered) => {
 			const failed = ciReport({
 				commit: "old00001",
 				pr: 12,
@@ -1218,34 +1251,34 @@ describe("holds", () => {
 				n: 1,
 				fail: { 0: "checkout total is wrong" },
 			});
-			h.call("report", failed);
-			const asked = first(queue().items);
-			if (answered) expect(decide(asked, { is: "defect" })?.status).toBe("decided");
-			h.call("report", {
+			await h.call("report", failed);
+			const asked = first((await queue()).items);
+			if (answered) expect((await decide(asked, { is: "defect" }))?.status).toBe("decided");
+			await h.call("report", {
 				...failed,
 				target: { ...failed.target, head: "unseen003" },
 				buildUrl: "https://ci.example/unseen",
 			});
-			h.call("report", ciReport({ commit: "old00001", pr: 12, branch: "feature", n: 1, attempt: 2 }));
-			expect(h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({
+			await h.call("report", ciReport({ commit: "old00001", pr: 12, branch: "feature", n: 1, attempt: 2 }));
+			expect(await h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({
 				run: null,
 				verdict: "pending",
 				open: [],
 			});
-			expect(state(asked.q)).toBe(answered ? "decided" : "open");
-			expect(gate("old00001")).toMatchObject({ run: "R-1", verdict: "passed" });
+			expect(await state(asked.q)).toBe(answered ? "decided" : "open");
+			expect(await gate("old00001")).toMatchObject({ run: "R-1", verdict: "passed" });
 		},
 	);
 
-	test("an answer that needs a fix ends when a later commit of the pull request passes, and a new failure is asked", () => {
+	test("an answer that needs a fix ends when a later commit of the pull request passes, and a new failure is asked", async () => {
 		const fail = { 0: "expected 90, got 100" };
-		h.call("report", ciReport({ commit: "fixed01a", branch: "fix", pr: 41, n: 3, fail }));
-		const asked = first(queue().items);
-		decide(asked, { is: "test" });
-		expect(gate("fixed01a").verdict).toBe("failed");
-		h.call("report", ciReport({ commit: "fixed01b", branch: "fix", pr: 41, n: 3 }));
-		expect(gate("fixed01b").verdict).toBe("passed");
-		expect(state(asked.q)).toBe("dissolved");
+		await h.call("report", ciReport({ commit: "fixed01a", branch: "fix", pr: 41, n: 3, fail }));
+		const asked = first((await queue()).items);
+		await decide(asked, { is: "test" });
+		expect((await gate("fixed01a")).verdict).toBe("failed");
+		await h.call("report", ciReport({ commit: "fixed01b", branch: "fix", pr: 41, n: 3 }));
+		expect((await gate("fixed01b")).verdict).toBe("passed");
+		expect(await state(asked.q)).toBe("dissolved");
 		const ended = {
 			q: asked.q,
 			state: "dissolved",
@@ -1258,9 +1291,11 @@ describe("holds", () => {
 				supersedes: { answer: { is: "test" }, by: ["robin"], reason: null },
 			},
 		};
-		expect(h.call("get", { refs: [asked.q] })).toMatchObject([ended]);
-		expect(h.call<InboxReply>("inbox", { state: "decided", kind: "failure", limit: 1 }).items).toMatchObject([ended]);
-		expect(h.call<InboxReply>("inbox", { state: "decided", on: "pr:41" }).items).toMatchObject([ended]);
+		expect(await h.call("get", { refs: [asked.q] })).toMatchObject([ended]);
+		expect((await h.call<InboxReply>("inbox", { state: "decided", kind: "failure", limit: 1 })).items).toMatchObject([
+			ended,
+		]);
+		expect((await h.call<InboxReply>("inbox", { state: "decided", on: "pr:41" })).items).toMatchObject([ended]);
 		const chunks: string[] = [];
 		exportArchive(h.app.db, (chunk) => chunks.push(chunk));
 		const restored = new Db(":memory:");
@@ -1281,82 +1316,86 @@ describe("holds", () => {
 			},
 		]);
 		// Like any answer that ended, it no longer explains the older commit, and nobody is asked about that one.
-		expect(gate("fixed01a")).toMatchObject({ verdict: "blocked", open: [] });
-		expect(queue().items).toEqual([]);
+		expect(await gate("fixed01a")).toMatchObject({ verdict: "blocked", open: [] });
+		expect((await queue()).items).toEqual([]);
 		// The ending says which pull request fixed the failure, and that it merged once it has.
-		h.call("change", { change: "pr:41", state: "merged" });
-		expect(h.call<InboxReply>("inbox", { state: "decided", on: "pr:41" }).items).toMatchObject([
+		await h.call("change", { change: "pr:41", state: "merged" });
+		expect((await h.call<InboxReply>("inbox", { state: "decided", on: "pr:41" })).items).toMatchObject([
 			{ q: asked.q, decision: { fixedIn: { change: "pr:41", state: "merged" } } },
 		]);
-		h.call("change", { change: "pr:41", state: "open" });
-		const again = h.call<ReportReceipt>("report", ciReport({ commit: "fixed01c", branch: "fix", pr: 41, n: 3, fail }));
+		await h.call("change", { change: "pr:41", state: "open" });
+		const again = await h.call<ReportReceipt>(
+			"report",
+			ciReport({ commit: "fixed01c", branch: "fix", pr: 41, n: 3, fail }),
+		);
 		expect(again.questions[0]).toMatchObject({ how: "new", state: "open" });
 		expect(again.gate?.verdict).toBe("blocked");
-		expect(first(queue().items).q).not.toBe(asked.q);
+		expect(first((await queue()).items).q).not.toBe(asked.q);
 	});
 
-	test("a retry claims no fix; another commit of the change does, whenever it was reported, and keeps it", () => {
+	test("a retry claims no fix; another commit of the change does, whenever it was reported, and keeps it", async () => {
 		const fail = { 0: "expected 90, got 100" };
-		const settled = (change: string) => h.call<InboxReply>("inbox", { state: "decided", on: change }).items;
+		const settled = async (change: string) =>
+			(await h.call<InboxReply>("inbox", { state: "decided", on: change })).items;
 		// The same commit passing when it runs again is a retry: it proves no fix.
-		h.call("report", ciReport({ commit: "retry042a", branch: "retry", pr: 42, n: 1, fail }));
-		decide(first(queue().items), { is: "defect" });
-		h.call("report", ciReport({ commit: "retry042a", branch: "retry", pr: 42, n: 1, attempt: 2 }));
-		expect(settled("pr:42")).toMatchObject([{ state: "dissolved", decision: { rule: "passed" } }]);
-		expect(settled("pr:42")[0]?.decision).not.toHaveProperty("fixedIn");
+		await h.call("report", ciReport({ commit: "retry042a", branch: "retry", pr: 42, n: 1, fail }));
+		await decide(first((await queue()).items), { is: "defect" });
+		await h.call("report", ciReport({ commit: "retry042a", branch: "retry", pr: 42, n: 1, attempt: 2 }));
+		expect(await settled("pr:42")).toMatchObject([{ state: "dissolved", decision: { rule: "passed" } }]);
+		expect((await settled("pr:42"))[0]?.decision).not.toHaveProperty("fixedIn");
 		// Another commit of the change passing is a fix by the change, even reported after the merge: the merge named
 		// it as the head. Nothing later (reopening, merging again, an archive without how changes ended) undoes it.
-		h.call("report", ciReport({ commit: "late043a", branch: "late", pr: 43, n: 1, fail }));
-		decide(first(queue().items), { is: "defect" });
-		h.call("change", { change: "pr:43", state: "merged", head: "late043b" });
+		await h.call("report", ciReport({ commit: "late043a", branch: "late", pr: 43, n: 1, fail }));
+		await decide(first((await queue()).items), { is: "defect" });
+		await h.call("change", { change: "pr:43", state: "merged", head: "late043b" });
 		h.advance(60_000);
-		h.call("report", ciReport({ commit: "late043b", branch: "late", pr: 43, n: 1 }));
+		await h.call("report", ciReport({ commit: "late043b", branch: "late", pr: 43, n: 1 }));
 		const fixed = (state: string) => [{ state: "dissolved", decision: { fixedIn: { change: "pr:43", state } } }];
-		expect(settled("pr:43")).toMatchObject(fixed("merged"));
-		h.call("change", { change: "pr:43", state: "open" });
-		expect(settled("pr:43")).toMatchObject(fixed("open"));
-		h.call("change", { change: "pr:43", state: "closed" });
-		expect(settled("pr:43")).toMatchObject(fixed("closed"));
+		expect(await settled("pr:43")).toMatchObject(fixed("merged"));
+		await h.call("change", { change: "pr:43", state: "open" });
+		expect(await settled("pr:43")).toMatchObject(fixed("open"));
+		await h.call("change", { change: "pr:43", state: "closed" });
+		expect(await settled("pr:43")).toMatchObject(fixed("closed"));
 		const chunks: string[] = [];
 		exportArchive(h.app.db, (chunk) => chunks.push(chunk));
 		const restored = new Db(":memory:");
 		try {
 			migrate(restored, ":memory:");
 			importArchive(restored, linesOf(chunks.join("")));
-			const question = settled("pr:43")[0];
+			const question = (await settled("pr:43"))[0];
 			if (!question) throw new Error("expected the ended answer");
 			expect(toItem(restored, mustQuestion(restored, 1, question.q))).toMatchObject(fixed("open")[0] ?? {});
 		} finally {
 			restored.close();
 		}
 		// A reset back to an older commit that passes is another commit too: the change no longer has the failure.
-		h.call("report", ciReport({ commit: "older044a", branch: "reset", pr: 44, n: 1 }));
-		h.call("report", ciReport({ commit: "newer044b", branch: "reset", pr: 44, n: 1, fail }));
-		decide(first(queue().items), { is: "defect" });
+		await h.call("report", ciReport({ commit: "older044a", branch: "reset", pr: 44, n: 1 }));
+		await h.call("report", ciReport({ commit: "newer044b", branch: "reset", pr: 44, n: 1, fail }));
+		await decide(first((await queue()).items), { is: "defect" });
 		const reset = ciReport({ commit: "older044a", branch: "reset", pr: 44, n: 1, attempt: 2 });
-		h.call("report", { ...reset, target: { ...reset.target, head: "older044a" } });
-		expect(settled("pr:44")).toMatchObject([{ decision: { fixedIn: { change: "pr:44", state: "open" } } }]);
+		await h.call("report", { ...reset, target: { ...reset.target, head: "older044a" } });
+		expect(await settled("pr:44")).toMatchObject([{ decision: { fixedIn: { change: "pr:44", state: "open" } } }]);
 		// One commit spelled two ways, abbreviated or in another case, is the same commit: its pass is a retry.
 		for (const [pr, failed, passed] of [
 			[45, "abcdef0123456789abcdef0123456789abcdef01", "abcdef0"],
 			[46, "ABCDEF0123456789", "abcdef0123456789"],
 		] as const) {
-			h.call("report", ciReport({ commit: failed, branch: `spelt${pr}`, pr, n: 1, fail }));
-			decide(first(queue().items), { is: "defect" });
-			h.call("report", ciReport({ commit: passed, branch: `spelt${pr}`, pr, n: 1 }));
-			expect(settled(`pr:${pr}`)).toMatchObject([{ state: "dissolved", decision: { rule: "passed" } }]);
-			expect(settled(`pr:${pr}`)[0]?.decision).not.toHaveProperty("fixedIn");
+			await h.call("report", ciReport({ commit: failed, branch: `spelt${pr}`, pr, n: 1, fail }));
+			await decide(first((await queue()).items), { is: "defect" });
+			await h.call("report", ciReport({ commit: passed, branch: `spelt${pr}`, pr, n: 1 }));
+			expect(await settled(`pr:${pr}`)).toMatchObject([{ state: "dissolved", decision: { rule: "passed" } }]);
+			expect((await settled(`pr:${pr}`))[0]?.decision).not.toHaveProperty("fixedIn");
 		}
 	});
 
-	test("an expired flaky answer stays in Settled when its failure has gone, without claiming a pass ended it", () => {
-		h.call(
+	test("an expired flaky answer stays in Settled when its failure has gone, without claiming a pass ended it", async () => {
+		await h.call(
 			"report",
 			ciReport({ commit: "expired408a", branch: "fix", pr: 408, n: 1, fail: { 0: "expected 90, got 100" } }),
 		);
-		const asked = first(queue().items);
-		decide(asked, { is: "flaky" });
-		h.call("report", ciReport({ commit: "expired408b", branch: "fix", pr: 408, n: 1 }));
+		const asked = first((await queue()).items);
+		await decide(asked, { is: "flaky" });
+		await h.call("report", ciReport({ commit: "expired408b", branch: "fix", pr: 408, n: 1 }));
 		h.advance(15 * 86_400_000);
 		const rule = ruleActor(h.app.db);
 		expect(sweep(h.app, rule.id)).toBe(1);
@@ -1371,37 +1410,42 @@ describe("holds", () => {
 				supersedes: { answer: { is: "flaky" }, by: ["robin"], reason: null },
 			},
 		};
-		expect(h.call("get", { refs: [asked.q] })).toMatchObject([ended]);
-		expect(h.call<InboxReply>("inbox", { state: "decided", kind: "failure" }).items).toMatchObject([ended]);
+		expect(await h.call("get", { refs: [asked.q] })).toMatchObject([ended]);
+		expect((await h.call<InboxReply>("inbox", { state: "decided", kind: "failure" })).items).toMatchObject([ended]);
 		// A hold that ran out says nothing about a fix, though the pull request passes.
-		expect(h.call<InboxReply>("inbox", { state: "decided", kind: "failure" }).items[0]?.decision).not.toHaveProperty(
-			"fixedIn",
-		);
-		expect(queue().counts.open).toBe(0);
-		expect(gate("expired408b").verdict).toBe("passed");
+		expect(
+			(await h.call<InboxReply>("inbox", { state: "decided", kind: "failure" })).items[0]?.decision,
+		).not.toHaveProperty("fixedIn");
+		expect((await queue()).counts.open).toBe(0);
+		expect((await gate("expired408b")).verdict).toBe("passed");
 	});
 
-	test("Settled paginates decided and ended answers together, leaving out unanswered dissolved questions", () => {
-		const report = (commit: string, pr: number, fail: Record<number, string> = {}) =>
-			h.call("report", ciReport({ commit, branch: "fix", pr, n: 1, fail }));
-		report("page408a", 408, { 0: "expected 90, got 100" });
-		const ended = first(queue().items);
-		decide(ended, { is: "test" });
-		report("page408b", 408);
-		report("page409a", 409, { 0: "expected 90, got 100" });
-		const standing = first(queue().items);
-		decide(standing, { is: "flaky" });
-		report("page410a", 410, { 0: "expected 90, got 100" });
-		const unanswered = first(queue().items);
-		report("page410b", 410);
-		expect(h.call("get", { refs: [unanswered.q] })).toMatchObject([{ state: "dissolved", decision: null }]);
+	test("Settled paginates decided and ended answers together, leaving out unanswered dissolved questions", async () => {
+		const report = async (commit: string, pr: number, fail: Record<number, string> = {}) =>
+			await h.call("report", ciReport({ commit, branch: "fix", pr, n: 1, fail }));
+		await report("page408a", 408, { 0: "expected 90, got 100" });
+		const ended = first((await queue()).items);
+		await decide(ended, { is: "test" });
+		await report("page408b", 408);
+		await report("page409a", 409, { 0: "expected 90, got 100" });
+		const standing = first((await queue()).items);
+		await decide(standing, { is: "flaky" });
+		await report("page410a", 410, { 0: "expected 90, got 100" });
+		const unanswered = first((await queue()).items);
+		await report("page410b", 410);
+		expect(await h.call("get", { refs: [unanswered.q] })).toMatchObject([{ state: "dissolved", decision: null }]);
 		for (const kind of [undefined, "failure"] as const) {
-			const firstPage = h.call<InboxReply>("inbox", { state: "decided", kind, limit: 1 });
+			const firstPage = await h.call<InboxReply>("inbox", { state: "decided", kind, limit: 1 });
 			expect(firstPage.items).toMatchObject([
 				{ q: standing.q, state: "decided", decision: { answer: { is: "flaky" } } },
 			]);
 			expect(firstPage.cursor).not.toBeNull();
-			const nextPage = h.call<InboxReply>("inbox", { state: "decided", kind, limit: 1, cursor: firstPage.cursor });
+			const nextPage = await h.call<InboxReply>("inbox", {
+				state: "decided",
+				kind,
+				limit: 1,
+				cursor: firstPage.cursor,
+			});
 			expect(nextPage.items).toMatchObject([
 				{
 					q: ended.q,
@@ -1411,7 +1455,7 @@ describe("holds", () => {
 			]);
 			if (kind === "failure") expect(nextPage.cursor).toBeNull();
 			else {
-				const lastPage = h.call<InboxReply>("inbox", { state: "decided", limit: 1, cursor: nextPage.cursor });
+				const lastPage = await h.call<InboxReply>("inbox", { state: "decided", limit: 1, cursor: nextPage.cursor });
 				expect(lastPage.items).toMatchObject([
 					{ kind: "map", state: "decided", decision: { answer: { is: "track" } } },
 				]);
@@ -1420,34 +1464,37 @@ describe("holds", () => {
 		}
 	});
 
-	test("on the line too: a defect answer ends when the line passes, and the regression is asked", () => {
+	test("on the line too: a defect answer ends when the line passes, and the regression is asked", async () => {
 		const fail = { 1: "checkout total is wrong" };
-		h.call("report", ciReport({ commit: "line001a", n: 3, fail }));
-		const asked = first(queue().items);
-		decide(asked, { is: "defect" });
+		await h.call("report", ciReport({ commit: "line001a", n: 3, fail }));
+		const asked = first((await queue()).items);
+		await decide(asked, { is: "defect" });
 		// While the line keeps failing the answer carries, so nobody is asked on every commit.
-		const still = h.call<ReportReceipt>("report", ciReport({ commit: "line001b", n: 3, fail }));
+		const still = await h.call<ReportReceipt>("report", ciReport({ commit: "line001b", n: 3, fail }));
 		expect(still.questions[0]).toMatchObject({ how: "already decided", q: asked.q });
 		expect(still.gate?.verdict).toBe("failed");
-		h.call("report", ciReport({ commit: "line001c", n: 3 }));
-		expect(state(asked.q)).toBe("dissolved");
-		const again = h.call<ReportReceipt>("report", ciReport({ commit: "line001d", n: 3, fail }));
+		await h.call("report", ciReport({ commit: "line001c", n: 3 }));
+		expect(await state(asked.q)).toBe("dissolved");
+		const again = await h.call<ReportReceipt>("report", ciReport({ commit: "line001d", n: 3, fail }));
 		expect(again.questions[0]).toMatchObject({ how: "new", state: "open" });
 	});
 
-	test("a flaky answer does not end on a pass: a flaky test passes", () => {
+	test("a flaky answer does not end on a pass: a flaky test passes", async () => {
 		const fail = { 0: "timed out after 5000 ms" };
-		h.call("report", ciReport({ commit: "flaky01a", branch: "fix", pr: 42, n: 3, fail }));
-		const asked = first(queue().items);
-		decide(asked, { is: "flaky" });
-		h.call("report", ciReport({ commit: "flaky01b", branch: "fix", pr: 42, n: 3 }));
-		expect(state(asked.q)).toBe("decided");
-		const again = h.call<ReportReceipt>("report", ciReport({ commit: "flaky01c", branch: "fix", pr: 42, n: 3, fail }));
+		await h.call("report", ciReport({ commit: "flaky01a", branch: "fix", pr: 42, n: 3, fail }));
+		const asked = first((await queue()).items);
+		await decide(asked, { is: "flaky" });
+		await h.call("report", ciReport({ commit: "flaky01b", branch: "fix", pr: 42, n: 3 }));
+		expect(await state(asked.q)).toBe("decided");
+		const again = await h.call<ReportReceipt>(
+			"report",
+			ciReport({ commit: "flaky01c", branch: "fix", pr: 42, n: 3, fail }),
+		);
 		expect(again.questions[0]).toMatchObject({ how: "already decided", q: asked.q });
 		expect(again.gate?.verdict).toBe("passed");
 	});
 
-	test("a pass from one job does not end the answer while another job that failed has not reported", () => {
+	test("a pass from one job does not end the answer while another job that failed has not reported", async () => {
 		const fail = { 0: "connection reset by fixture" };
 		const unit = (commit: string, failing: boolean) =>
 			ciReport({
@@ -1461,35 +1508,35 @@ describe("holds", () => {
 			});
 		const e2e = (commit: string, failing: boolean) =>
 			ciReport({ commit, branch: "fix", pr: 43, n: 2, job: "e2e", ...(failing ? { fail } : {}) });
-		h.call("report", e2e("shard01a", true));
-		h.call("report", unit("shard01a", true));
-		const asked = first(queue().items);
-		decide(asked, { is: "defect" });
-		h.call("report", e2e("shard01b", false));
-		expect(state(asked.q)).toBe("decided");
+		await h.call("report", e2e("shard01a", true));
+		await h.call("report", unit("shard01a", true));
+		const asked = first((await queue()).items);
+		await decide(asked, { is: "defect" });
+		await h.call("report", e2e("shard01b", false));
+		expect(await state(asked.q)).toBe("decided");
 		// The other job still fails with the cause on the same commit: the answer carries, nobody is asked again.
-		const late = h.call<ReportReceipt>("report", unit("shard01b", true));
+		const late = await h.call<ReportReceipt>("report", unit("shard01b", true));
 		expect(late.questions[0]).toMatchObject({ how: "already decided", q: asked.q });
-		expect(gate("shard01b").verdict).toBe("failed");
-		h.call("report", e2e("shard01c", false));
-		h.call("report", unit("shard01c", false));
-		expect(state(asked.q)).toBe("dissolved");
+		expect((await gate("shard01b")).verdict).toBe("failed");
+		await h.call("report", e2e("shard01c", false));
+		await h.call("report", unit("shard01c", false));
+		expect(await state(asked.q)).toBe("dissolved");
 	});
 
-	test("a passing retry of the failing commit ends the answer, and a later failure is asked again", () => {
+	test("a passing retry of the failing commit ends the answer, and a later failure is asked again", async () => {
 		const fail = { 0: "expected 4 items, got 3" };
 		const at = (commit: string, attempt: number, failing: boolean) =>
 			ciReport({ commit, branch: "retry", pr: 45, n: 2, job: "checks", attempt, ...(failing ? { fail } : {}) });
-		h.call("report", at("retry01a", 1, true));
-		const asked = first(queue().items);
-		decide(asked, { is: "test" });
-		h.call("report", at("retry01a", 2, false));
-		expect(state(asked.q)).toBe("dissolved");
-		const again = h.call<ReportReceipt>("report", at("retry01c", 1, true));
+		await h.call("report", at("retry01a", 1, true));
+		const asked = first((await queue()).items);
+		await decide(asked, { is: "test" });
+		await h.call("report", at("retry01a", 2, false));
+		expect(await state(asked.q)).toBe("dissolved");
+		const again = await h.call<ReportReceipt>("report", at("retry01c", 1, true));
 		expect(again.questions[0]).toMatchObject({ how: "new", state: "open" });
 	});
 
-	test("a job that failed and then passed on a retry still has to pass on the next commit", () => {
+	test("a job that failed and then passed on a retry still has to pass on the next commit", async () => {
 		const fail = { 0: "the order total is wrong" };
 		const unit = (commit: string, attempt: number, failing: boolean) =>
 			ciReport({
@@ -1504,135 +1551,135 @@ describe("holds", () => {
 			});
 		const e2e = (commit: string, attempt: number, failing: boolean) =>
 			ciReport({ commit, branch: "fix", pr: 46, n: 2, job: "e2e", attempt, ...(failing ? { fail } : {}) });
-		h.call("report", unit("retry02a", 1, true));
-		h.call("report", e2e("retry02a", 1, true));
-		const asked = first(queue().items);
-		decide(asked, { is: "defect" });
-		h.call("report", e2e("retry02a", 2, false));
-		h.call("report", unit("retry02b", 1, false));
+		await h.call("report", unit("retry02a", 1, true));
+		await h.call("report", e2e("retry02a", 1, true));
+		const asked = first((await queue()).items);
+		await decide(asked, { is: "defect" });
+		await h.call("report", e2e("retry02a", 2, false));
+		await h.call("report", unit("retry02b", 1, false));
 		// e2e failed on the first commit and has not reported on this one: its test has not passed, so the answer holds.
-		expect(state(asked.q)).toBe("decided");
-		h.call("report", e2e("retry02b", 1, false));
-		expect(state(asked.q)).toBe("dissolved");
+		expect(await state(asked.q)).toBe("decided");
+		await h.call("report", e2e("retry02b", 1, false));
+		expect(await state(asked.q)).toBe("dissolved");
 	});
 
-	test("a test that failed in two environments must pass in both, whatever they are called", () => {
+	test("a test that failed in two environments must pass in both, whatever they are called", async () => {
 		const fail = { 0: "a specific checkout assertion" };
 		const report = (commit: string, env: string, failing: boolean) => {
 			const input = ciReport({ commit, branch: "fix", pr: 47, n: 1, ...(failing ? { fail } : {}) });
 			return { ...input, target: { ...input.target, env } };
 		};
-		h.call("report", report("lanes01a", "linux|chrome", true));
-		h.call("report", report("lanes01a", "linux", true));
-		const asked = first(queue().items);
-		decide(asked, { is: "test" });
-		h.call("report", report("lanes01b", "linux|chrome", false));
-		expect(state(asked.q)).toBe("decided");
-		h.call("report", report("lanes01b", "linux", false));
-		expect(state(asked.q)).toBe("dissolved");
+		await h.call("report", report("lanes01a", "linux|chrome", true));
+		await h.call("report", report("lanes01a", "linux", true));
+		const asked = first((await queue()).items);
+		await decide(asked, { is: "test" });
+		await h.call("report", report("lanes01b", "linux|chrome", false));
+		expect(await state(asked.q)).toBe("decided");
+		await h.call("report", report("lanes01b", "linux", false));
+		expect(await state(asked.q)).toBe("dissolved");
 	});
 
-	test("a test that moved to another shard ends the answer where it passes", () => {
+	test("a test that moved to another shard ends the answer where it passes", async () => {
 		const fail = { 0: "expected the receipt, got none" };
-		h.call("report", ciReport({ commit: "shard02a", branch: "fix", pr: 48, n: 2, job: "shard-2", fail }));
-		const asked = first(queue().items);
-		decide(asked, { is: "defect" });
+		await h.call("report", ciReport({ commit: "shard02a", branch: "fix", pr: 48, n: 2, job: "shard-2", fail }));
+		const asked = first((await queue()).items);
+		await decide(asked, { is: "defect" });
 		// The shards were balanced again: the same test now runs in another job.
-		h.call("report", ciReport({ commit: "shard02b", branch: "fix", pr: 48, n: 2, job: "shard-3" }));
-		expect(state(asked.q)).toBe("dissolved");
+		await h.call("report", ciReport({ commit: "shard02b", branch: "fix", pr: 48, n: 2, job: "shard-3" }));
+		expect(await state(asked.q)).toBe("dissolved");
 	});
 
-	test("every environment the question saw before the answer must pass, in whatever order they reported", () => {
+	test("every environment the question saw before the answer must pass, in whatever order they reported", async () => {
 		const fail = { 0: "the receipt shows the wrong tax" };
 		const report = (commit: string, env: string, failing: boolean) => {
 			const input = ciReport({ commit, branch: "fix", pr: 49, n: 1, ...(failing ? { fail } : {}) });
 			return { ...input, target: { ...input.target, env } };
 		};
-		h.call("report", report("order01a", "early", true));
-		h.call("report", report("order01a", "late", true));
-		const asked = first(queue().items);
-		decide(asked, { is: "defect" });
-		h.call("report", report("order01b", "late", false));
-		expect(state(asked.q)).toBe("decided");
-		h.call("report", report("order01b", "early", false));
-		expect(state(asked.q)).toBe("dissolved");
+		await h.call("report", report("order01a", "early", true));
+		await h.call("report", report("order01a", "late", true));
+		const asked = first((await queue()).items);
+		await decide(asked, { is: "defect" });
+		await h.call("report", report("order01b", "late", false));
+		expect(await state(asked.q)).toBe("decided");
+		await h.call("report", report("order01b", "early", false));
+		expect(await state(asked.q)).toBe("dissolved");
 	});
 
-	test("every test the question saw before the answer must pass, in whatever order they reported", () => {
+	test("every test the question saw before the answer must pass, in whatever order they reported", async () => {
 		const fail = { 0: "the basket is empty after sign-in" };
 		const report = (commit: string, file: string, failing: boolean) =>
 			ciReport({ commit, branch: "fix", pr: 50, n: 1, job: file, file, ...(failing ? { fail } : {}) });
-		h.call("report", report("order02a", "tests/first.spec.ts", true));
-		h.call("report", report("order02a", "tests/last.spec.ts", true));
-		const asked = first(queue().items);
-		decide(asked, { is: "test" });
-		h.call("report", report("order02b", "tests/last.spec.ts", false));
-		expect(state(asked.q)).toBe("decided");
-		h.call("report", report("order02b", "tests/first.spec.ts", false));
-		expect(state(asked.q)).toBe("dissolved");
+		await h.call("report", report("order02a", "tests/first.spec.ts", true));
+		await h.call("report", report("order02a", "tests/last.spec.ts", true));
+		const asked = first((await queue()).items);
+		await decide(asked, { is: "test" });
+		await h.call("report", report("order02b", "tests/last.spec.ts", false));
+		expect(await state(asked.q)).toBe("decided");
+		await h.call("report", report("order02b", "tests/first.spec.ts", false));
+		expect(await state(asked.q)).toBe("dissolved");
 	});
 
-	test("an agent's later report of the cause does not keep the answer once the pipeline passes", () => {
+	test("an agent's later report of the cause does not keep the answer once the pipeline passes", async () => {
 		const fail = { 0: "the coupon is applied twice" };
-		h.call("report", ciReport({ commit: "agent01a", branch: "fix", pr: 51, n: 1, fail }));
+		await h.call("report", ciReport({ commit: "agent01a", branch: "fix", pr: 51, n: 1, fail }));
 		const agent = h.actor("explorer", "agent", ["read", "produce"]);
-		h.call("report", ciReport({ commit: "agent01a", branch: "fix", pr: 51, n: 1, job: "explore", fail }), agent);
-		const asked = first(queue().items.filter((item) => item.kind === "failure"));
-		decide(asked, { is: "defect" });
-		h.call("report", ciReport({ commit: "agent01b", branch: "fix", pr: 51, n: 1 }));
-		expect(state(asked.q)).toBe("dissolved");
+		await h.call("report", ciReport({ commit: "agent01a", branch: "fix", pr: 51, n: 1, job: "explore", fail }), agent);
+		const asked = first((await queue()).items.filter((item) => item.kind === "failure"));
+		await decide(asked, { is: "defect" });
+		await h.call("report", ciReport({ commit: "agent01b", branch: "fix", pr: 51, n: 1 }));
+		expect(await state(asked.q)).toBe("dissolved");
 	});
 
-	test("a question asked again on a retried commit waits for every environment its cause failed in", () => {
+	test("a question asked again on a retried commit waits for every environment its cause failed in", async () => {
 		const fail = { 0: "the voucher is rejected" };
 		const report = (commit: string, env: string, attempt: number, failing: boolean) => {
 			const input = ciReport({ commit, branch: "fix", pr: 52, n: 1, attempt, ...(failing ? { fail } : {}) });
 			return { ...input, target: { ...input.target, env } };
 		};
-		h.call("report", report("epoch01a", "new", 1, true));
-		h.call("report", report("epoch01a", "old", 1, true));
-		const asked = first(queue().items);
-		decide(asked, { is: "defect" });
-		h.call("report", report("epoch01a", "new", 2, false));
-		h.call("report", report("epoch01a", "old", 2, false));
-		expect(state(asked.q)).toBe("dissolved");
+		await h.call("report", report("epoch01a", "new", 1, true));
+		await h.call("report", report("epoch01a", "old", 1, true));
+		const asked = first((await queue()).items);
+		await decide(asked, { is: "defect" });
+		await h.call("report", report("epoch01a", "new", 2, false));
+		await h.call("report", report("epoch01a", "old", 2, false));
+		expect(await state(asked.q)).toBe("dissolved");
 		// The cause comes back on a retry of the same commit, in one environment: a new question about it.
-		h.call("report", report("epoch01a", "new", 3, true));
-		const again = first(queue().items);
+		await h.call("report", report("epoch01a", "new", 3, true));
+		const again = first((await queue()).items);
 		expect(again.q).not.toBe(asked.q);
-		decide(again, { is: "defect" });
-		h.call("report", report("epoch01b", "new", 1, false));
+		await decide(again, { is: "defect" });
+		await h.call("report", report("epoch01b", "new", 1, false));
 		// The cause failed in `old` in this scope too, and `old` has not reported on this commit.
-		expect(state(again.q)).toBe("decided");
-		h.call("report", report("epoch01b", "old", 1, false));
-		expect(state(again.q)).toBe("dissolved");
+		expect(await state(again.q)).toBe("decided");
+		await h.call("report", report("epoch01b", "old", 1, false));
+		expect(await state(again.q)).toBe("dissolved");
 	});
 
-	test("a change closed and opened again asks about its failures, and that answer ends when they pass", () => {
+	test("a change closed and opened again asks about its failures, and that answer ends when they pass", async () => {
 		const fail = { 0: "the coupon expired a day early", 1: "the coupon expired a day early" };
-		h.call("report", ciReport({ commit: "reopen1a", branch: "fix", pr: 53, n: 2, fail }));
-		const asked = first(queue().items);
-		h.call("change", { change: "pr:53", state: "closed" });
-		expect(state(asked.q)).toBe("dissolved");
-		h.call("change", { change: "pr:53", state: "open" });
-		const again = first(queue().items);
+		await h.call("report", ciReport({ commit: "reopen1a", branch: "fix", pr: 53, n: 2, fail }));
+		const asked = first((await queue()).items);
+		await h.call("change", { change: "pr:53", state: "closed" });
+		expect(await state(asked.q)).toBe("dissolved");
+		await h.call("change", { change: "pr:53", state: "open" });
+		const again = first((await queue()).items);
 		expect(again.q).not.toBe(asked.q);
-		decide(again, { is: "defect" });
+		await decide(again, { is: "defect" });
 		// Only test 1 reports on the next commit: test 0 failed too, so the answer holds.
-		h.call("report", ciReport({ commit: "reopen1b", branch: "fix", pr: 53, n: 2, only: [1] }));
-		expect(state(again.q)).toBe("decided");
-		h.call("report", ciReport({ commit: "reopen1c", branch: "fix", pr: 53, n: 2 }));
-		expect(state(again.q)).toBe("dissolved");
-		const recurred = h.call<ReportReceipt>(
+		await h.call("report", ciReport({ commit: "reopen1b", branch: "fix", pr: 53, n: 2, only: [1] }));
+		expect(await state(again.q)).toBe("decided");
+		await h.call("report", ciReport({ commit: "reopen1c", branch: "fix", pr: 53, n: 2 }));
+		expect(await state(again.q)).toBe("dissolved");
+		const recurred = await h.call<ReportReceipt>(
 			"report",
 			ciReport({ commit: "reopen1d", branch: "fix", pr: 53, n: 2, fail }),
 		);
 		expect(recurred.questions[0]).toMatchObject({ how: "new", state: "open" });
 	});
 
-	test("a planned run over failures in two environments waits for each where it failed, and no other", () => {
+	test("a planned run over failures in two environments waits for each where it failed, and no other", async () => {
 		const message = "the order total is wrong";
-		const report = (commit: string, env: string, i: number, failing: boolean, attempt = 1) => {
+		const report = async (commit: string, env: string, i: number, failing: boolean, attempt = 1) => {
 			const input = ciReport({
 				commit,
 				branch: "fix",
@@ -1648,31 +1695,33 @@ describe("holds", () => {
 				results: input.results.map((result) => ({ ...result, annotation: { case: `C-${i + 1}`, version: 1 } })),
 			});
 		};
-		h.call("propose", {
+		await h.call("propose", {
 			edits: [
 				{ op: "create", outline: "First checkout" },
 				{ op: "create", outline: "Second checkout" },
 			],
 		});
-		report("planp01a", "A", 0, true);
-		report("planp01a", "B", 1, true);
-		decide(first(queue().items), { is: "defect" });
-		report("planp01b", "A", 0, false);
-		report("planp01b", "B", 1, false);
-		h.call("plan", { name: "Old evidence", select: {}, accepts: { commit: "planp01a" } });
-		const asked = first(queue().items.filter((item) => item.kind === "failure" && !item.answers.includes("mistaken")));
-		decide(asked, { is: "defect" });
-		report("planp01a", "A", 0, false, 2);
-		report("planp01a", "B", 1, false, 2);
-		report("planp01b", "A", 0, false, 2);
-		report("planp01b", "B", 1, false, 2);
+		await report("planp01a", "A", 0, true);
+		await report("planp01a", "B", 1, true);
+		await decide(first((await queue()).items), { is: "defect" });
+		await report("planp01b", "A", 0, false);
+		await report("planp01b", "B", 1, false);
+		await h.call("plan", { name: "Old evidence", select: {}, accepts: { commit: "planp01a" } });
+		const asked = first(
+			(await queue()).items.filter((item) => item.kind === "failure" && !item.answers.includes("mistaken")),
+		);
+		await decide(asked, { is: "defect" });
+		await report("planp01a", "A", 0, false, 2);
+		await report("planp01a", "B", 1, false, 2);
+		await report("planp01b", "A", 0, false, 2);
+		await report("planp01b", "B", 1, false, 2);
 		// Test 0 never ran in B: nothing waits for it there.
-		expect(state(asked.q)).toBe("dissolved");
+		expect(await state(asked.q)).toBe("dissolved");
 	});
 
-	test("a commit that moves into a pull request takes all of its failures along", () => {
+	test("a commit that moves into a pull request takes all of its failures along", async () => {
 		const message = "the order total is wrong";
-		const report = (commit: string, env: string, only: number[], failing: boolean, pr?: number) => {
+		const report = async (commit: string, env: string, only: number[], failing: boolean, pr?: number) => {
 			const input = ciReport({
 				commit,
 				n: 2,
@@ -1682,33 +1731,33 @@ describe("holds", () => {
 			});
 			return h.call("report", { ...input, target: { ...input.target, env, ...(pr ? {} : { branch: undefined }) } });
 		};
-		report("movep01a", "A", [0], true);
-		report("movep01a", "B", [1], true);
+		await report("movep01a", "A", [0], true);
+		await report("movep01a", "B", [1], true);
 		// A report that says the commit belongs to pull request 77 moves it, and its failures, into that scope.
-		report("movep01a", "A", [0], false, 77);
-		const asked = first(queue().items.filter((item) => item.evidence.scope === "pr:77"));
-		decide(asked, { is: "defect" });
-		report("movep01b", "B", [1], false, 77);
-		expect(state(asked.q)).toBe("decided");
-		report("movep01b", "A", [0], false, 77);
-		expect(state(asked.q)).toBe("dissolved");
+		await report("movep01a", "A", [0], false, 77);
+		const asked = first((await queue()).items.filter((item) => item.evidence.scope === "pr:77"));
+		await decide(asked, { is: "defect" });
+		await report("movep01b", "B", [1], false, 77);
+		expect(await state(asked.q)).toBe("decided");
+		await report("movep01b", "A", [0], false, 77);
+		expect(await state(asked.q)).toBe("dissolved");
 	});
 
-	test("a pass of other tests does not end the answer: the tests it named must pass", () => {
+	test("a pass of other tests does not end the answer: the tests it named must pass", async () => {
 		const fail = { 0: "expected 3 rows, got 2" };
-		h.call("report", ciReport({ commit: "named01a", branch: "fix", pr: 44, n: 2, fail }));
-		const asked = first(queue().items);
-		decide(asked, { is: "test" });
+		await h.call("report", ciReport({ commit: "named01a", branch: "fix", pr: 44, n: 2, fail }));
+		const asked = first((await queue()).items);
+		await decide(asked, { is: "test" });
 		// The fix renamed the file: none of the tests the answer named ran.
-		h.call("report", ciReport({ commit: "named01b", branch: "fix", pr: 44, n: 2, file: "tests/rows.spec.ts" }));
-		expect(state(asked.q)).toBe("decided");
+		await h.call("report", ciReport({ commit: "named01b", branch: "fix", pr: 44, n: 2, file: "tests/rows.spec.ts" }));
+		expect(await state(asked.q)).toBe("decided");
 	});
 
-	test("an infrastructure excuse covers the commit it was given for and no other", () => {
+	test("an infrastructure excuse covers the commit it was given for and no other", async () => {
 		const fail = { 0: "connect ECONNREFUSED 10.0.0.5:5432" };
-		h.call("report", ciReport({ commit: "2222222a", n: 3, fail }));
-		decide(first(queue().items), { is: "infra" });
-		const next = h.call<ReportReceipt>("report", ciReport({ commit: "2222222b", n: 3, fail }));
+		await h.call("report", ciReport({ commit: "2222222a", n: 3, fail }));
+		await decide(first((await queue()).items), { is: "infra" });
+		const next = await h.call<ReportReceipt>("report", ciReport({ commit: "2222222b", n: 3, fail }));
 		expect(next.questions[0]).toMatchObject({ how: "new" });
 		expect(next.gate?.verdict).toBe("blocked");
 	});
@@ -1717,94 +1766,100 @@ describe("holds", () => {
 describe("a commit reported in shards", () => {
 	const shard = (commit: string, index: number, only: number[], fail: Record<number, string> = {}, pr = 60) =>
 		ciReport({ commit, branch: "fix", pr, n: 6, job: "tests", shard: { index, of: 3 }, only, fail });
-	const state = (q: string) => h.call<{ state: string }[]>("get", { refs: [q] })[0]?.state;
+	const state = async (q: string) => (await h.call<{ state: string }[]>("get", { refs: [q] }))[0]?.state;
 
-	test("its gate waits for every shard of the job, and passes when the last one does", () => {
-		h.call("report", shard("shard10a", 1, [0, 1]));
-		expect(gate("shard10a")).toMatchObject({
+	test("its gate waits for every shard of the job, and passes when the last one does", async () => {
+		await h.call("report", shard("shard10a", 1, [0, 1]));
+		expect(await gate("shard10a")).toMatchObject({
 			verdict: "pending",
 			reason: "pending: waiting for shards 2 and 3 of 3 of job tests",
 			waiting: [{ job: "tests", env: "", missing: [2, 3], of: 3 }],
 		});
-		h.call("report", shard("shard10a", 3, [4, 5]));
-		expect(gate("shard10a").reason).toBe("pending: waiting for shard 2 of 3 of job tests");
-		h.call("report", shard("shard10a", 2, [2, 3]));
-		const done = gate("shard10a");
+		await h.call("report", shard("shard10a", 3, [4, 5]));
+		expect((await gate("shard10a")).reason).toBe("pending: waiting for shard 2 of 3 of job tests");
+		await h.call("report", shard("shard10a", 2, [2, 3]));
+		const done = await gate("shard10a");
 		expect(done.verdict).toBe("passed");
 		expect(done.waiting).toBeUndefined();
 	});
 
-	test("a commit's run, its change and the change's landing say which shards they wait for beside the reason", () => {
+	test("a commit's run, its change and the change's landing say which shards they wait for beside the reason", async () => {
 		const waiting = [{ job: "tests", env: "", missing: [2, 3], of: 3 }];
-		h.call("report", shard("shard15a", 1, [0, 1], {}, 61));
-		const change = () =>
-			h
-				.call<{ items: { key: string; waiting?: unknown; landing: { waiting?: unknown } | null }[] }>("find", {
+		await h.call("report", shard("shard15a", 1, [0, 1], {}, 61));
+		const change = async () =>
+			(
+				await h.call<{ items: { key: string; waiting?: unknown; landing: { waiting?: unknown } | null }[] }>("find", {
 					in: "changes",
 				})
-				.items.find((item) => item.key === "pr:61");
-		expect(change()).toMatchObject({ waiting, landing: null });
-		const run = h.call<{ ref: string; waiting?: unknown }[]>("get", { refs: [gate("shard15a").run ?? ""] })[0];
+			).items.find((item) => item.key === "pr:61");
+		expect(await change()).toMatchObject({ waiting, landing: null });
+		const run = (
+			await h.call<{ ref: string; waiting?: unknown }[]>("get", { refs: [(await gate("shard15a")).run ?? ""] })
+		)[0];
 		expect(run?.waiting).toEqual(waiting);
-		h.call("change", { change: "pr:61", state: "merged", landing: { commit: "shard15b", branch: "main" } });
-		h.call("report", ciReport({ commit: "shard15b", n: 6, job: "tests", shard: { index: 3, of: 3 }, only: [4, 5] }));
-		expect(change()?.landing?.waiting).toEqual([{ job: "tests", env: "", missing: [1, 2], of: 3 }]);
-		for (const index of [2, 3]) h.call("report", shard("shard15a", index, [index * 2 - 2, index * 2 - 1], {}, 61));
-		expect(change()?.waiting).toBeUndefined();
+		await h.call("change", { change: "pr:61", state: "merged", landing: { commit: "shard15b", branch: "main" } });
+		await h.call(
+			"report",
+			ciReport({ commit: "shard15b", n: 6, job: "tests", shard: { index: 3, of: 3 }, only: [4, 5] }),
+		);
+		expect((await change())?.landing?.waiting).toEqual([{ job: "tests", env: "", missing: [1, 2], of: 3 }]);
+		for (const index of [2, 3])
+			await h.call("report", shard("shard15a", index, [index * 2 - 2, index * 2 - 1], {}, 61));
+		expect((await change())?.waiting).toBeUndefined();
 	});
 
-	test("a failure in a shard that reported shows at once", () => {
-		h.call("report", shard("shard11a", 2, [2, 3], { 2: "expected 3, got 4" }));
-		expect(gate("shard11a").verdict).toBe("blocked");
+	test("a failure in a shard that reported shows at once", async () => {
+		await h.call("report", shard("shard11a", 2, [2, 3], { 2: "expected 3, got 4" }));
+		expect((await gate("shard11a")).verdict).toBe("blocked");
 	});
 
-	test("a shard that says the job has another number of shards is refused", () => {
-		h.call("report", shard("shard12a", 1, [0, 1]));
+	test("a shard that says the job has another number of shards is refused", async () => {
+		await h.call("report", shard("shard12a", 1, [0, 1]));
 		const other = { ...shard("shard12a", 2, [2, 3]), shard: { index: 2, of: 4 } };
-		expect(h.raw("report", other)).toMatchObject({ ok: false, error: { code: "invalid" } });
+		expect(await h.raw("report", other)).toMatchObject({ ok: false, error: { code: "invalid" } });
 	});
 
-	test("a shard is about a commit, not a planned run", () => {
+	test("a shard is about a commit, not a planned run", async () => {
 		const input = { run: "R-1", job: "tests", shard: { index: 1, of: 2 }, results: shard("x", 1, [0]).results };
-		expect(h.raw("report", input)).toMatchObject({ ok: false, error: { code: "invalid" } });
+		expect(await h.raw("report", input)).toMatchObject({ ok: false, error: { code: "invalid" } });
 	});
 
-	test("an answer that needs a fix waits for the whole commit before it ends", () => {
-		h.call("report", shard("shard13a", 1, [0, 1], { 0: "the total is off by one" }));
-		h.call("report", shard("shard13a", 2, [2, 3]));
-		h.call("report", shard("shard13a", 3, [4, 5]));
-		const asked = first(queue().items);
-		decide(asked, { is: "defect" });
+	test("an answer that needs a fix waits for the whole commit before it ends", async () => {
+		await h.call("report", shard("shard13a", 1, [0, 1], { 0: "the total is off by one" }));
+		await h.call("report", shard("shard13a", 2, [2, 3]));
+		await h.call("report", shard("shard13a", 3, [4, 5]));
+		const asked = first((await queue()).items);
+		await decide(asked, { is: "defect" });
 		// The shards were balanced again: test 0 passes in shard 3, while shards 1 and 2 have not reported.
-		h.call("report", shard("shard13b", 3, [0, 5]));
-		expect(state(asked.q)).toBe("decided");
+		await h.call("report", shard("shard13b", 3, [0, 5]));
+		expect(await state(asked.q)).toBe("decided");
 		// A test of the cause that never failed before fails in a later shard: the answer covers it, nobody is asked.
-		const late = h.call<ReportReceipt>("report", shard("shard13b", 1, [1, 2], { 1: "the total is off by one" }));
+		const late = await h.call<ReportReceipt>("report", shard("shard13b", 1, [1, 2], { 1: "the total is off by one" }));
 		expect(late.questions[0]).toMatchObject({ how: "already decided", q: asked.q });
-		expect(gate("shard13b").verdict).toBe("failed");
-		h.call("report", shard("shard13b", 2, [3, 4]));
-		expect(state(asked.q)).toBe("decided");
+		expect((await gate("shard13b")).verdict).toBe("failed");
+		await h.call("report", shard("shard13b", 2, [3, 4]));
+		expect(await state(asked.q)).toBe("decided");
 		// The next commit passes in every shard.
-		h.call("report", shard("shard13c", 1, [0, 1]));
-		h.call("report", shard("shard13c", 2, [2, 3]));
-		expect(state(asked.q)).toBe("decided");
-		h.call("report", shard("shard13c", 3, [4, 5]));
-		expect(state(asked.q)).toBe("dissolved");
+		await h.call("report", shard("shard13c", 1, [0, 1]));
+		await h.call("report", shard("shard13c", 2, [2, 3]));
+		expect(await state(asked.q)).toBe("decided");
+		await h.call("report", shard("shard13c", 3, [4, 5]));
+		expect(await state(asked.q)).toBe("dissolved");
 	});
 
-	test("an open failure question waits for the whole commit before it closes", () => {
-		h.call("report", shard("shard14a", 1, [0, 1], { 0: "the button is missing" }));
-		const asked = first(queue().items);
-		h.call("report", shard("shard14b", 1, [0, 1]));
-		expect(state(asked.q)).toBe("open");
-		h.call("report", shard("shard14b", 2, [2, 3]));
-		h.call("report", shard("shard14b", 3, [4, 5]));
-		expect(state(asked.q)).toBe("dissolved");
+	test("an open failure question waits for the whole commit before it closes", async () => {
+		await h.call("report", shard("shard14a", 1, [0, 1], { 0: "the button is missing" }));
+		const asked = first((await queue()).items);
+		await h.call("report", shard("shard14b", 1, [0, 1]));
+		expect(await state(asked.q)).toBe("open");
+		await h.call("report", shard("shard14b", 2, [2, 3]));
+		await h.call("report", shard("shard14b", 3, [4, 5]));
+		expect(await state(asked.q)).toBe("dissolved");
 	});
 
-	test("a planned run that clears does not close the question while the newest commit waits for a shard", () => {
-		h.call("propose", { edits: [{ op: "create", outline: "Checkout total" }] });
-		const report = (commit: string, outcome: "pass" | "fail", attempt = 1) => {
+	test("a planned run that clears does not close the question while the newest commit waits for a shard", async () => {
+		await h.call("propose", { edits: [{ op: "create", outline: "Checkout total" }] });
+		const report = async (commit: string, outcome: "pass" | "fail", attempt = 1) => {
 			const input = shard(commit, 1, [0], outcome === "fail" ? { 0: "the total is off by one" } : {}, 88);
 			return h.call("report", {
 				...input,
@@ -1812,17 +1867,17 @@ describe("a commit reported in shards", () => {
 				results: input.results.map((result) => ({ ...result, annotation: { case: "C-1", version: 1 } })),
 			});
 		};
-		report("planwait1", "fail");
-		h.call("plan", { name: "Release", select: {}, accepts: { commit: "planwait1" } });
-		const asked = first(queue().items.filter((item) => item.kind === "failure"));
-		report("planwait2", "pass");
-		expect(state(asked.q)).toBe("open");
+		await report("planwait1", "fail");
+		await h.call("plan", { name: "Release", select: {}, accepts: { commit: "planwait1" } });
+		const asked = first((await queue()).items.filter((item) => item.kind === "failure"));
+		await report("planwait2", "pass");
+		expect(await state(asked.q)).toBe("open");
 		// A passing retry on the older commit clears the planned run, but the newest commit still waits for shards.
-		report("planwait1", "pass", 2);
-		expect(state(asked.q)).toBe("open");
+		await report("planwait1", "pass", 2);
+		expect(await state(asked.q)).toBe("open");
 	});
 
-	test("a shard that is accepted and not yet applied keeps the answer until it is", () => {
+	test("a shard that is accepted and not yet applied keeps the answer until it is", async () => {
 		const inTx = <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): T =>
 			h.app.db.transaction(() => {
 				const project = findProject(h.app.db, "scratch");
@@ -1837,83 +1892,83 @@ describe("a commit reported in shards", () => {
 			...ciReport({ commit, branch: "fix", pr: 89, n: 6, job: "tests", only, fail }),
 			shard: { index, of: 2 },
 		});
-		h.call("report", two("unapp01a", 1, [0, 1, 2], { 0: cause }));
-		h.call("report", two("unapp01a", 2, [3, 4, 5]));
-		const asked = first(queue().items);
-		decide(asked, { is: "defect" });
+		await h.call("report", two("unapp01a", 1, [0, 1, 2], { 0: cause }));
+		await h.call("report", two("unapp01a", 2, [3, 4, 5]));
+		const asked = first((await queue()).items);
+		await decide(asked, { is: "defect" });
 		// Shard 2 of the next commit is accepted, holding a new test that fails with the cause, and is not applied yet.
 		const late = inTx((ctx) => acceptReport(ctx, two("unapp01b", 2, [3, 4, 5], { 3: cause }))).batch;
-		h.call("report", two("unapp01b", 1, [0, 1, 2]));
-		expect(state(asked.q)).toBe("decided");
+		await h.call("report", two("unapp01b", 1, [0, 1, 2]));
+		expect(await state(asked.q)).toBe("decided");
 		const applied = inTx((ctx) => processBatch(ctx, late.id));
 		expect(applied.questions[0]).toMatchObject({ how: "already decided", q: asked.q });
 	});
 
-	test("a shard's retry counts as that shard", () => {
-		h.call("report", shard("shard15a", 1, [0, 1]));
-		h.call("report", shard("shard15a", 2, [2, 3], { 2: "timed out" }));
-		h.call("report", { ...shard("shard15a", 2, [2, 3]), attempt: 2 });
-		h.call("report", shard("shard15a", 3, [4, 5]));
-		expect(gate("shard15a").verdict).toBe("passed");
+	test("a shard's retry counts as that shard", async () => {
+		await h.call("report", shard("shard15a", 1, [0, 1]));
+		await h.call("report", shard("shard15a", 2, [2, 3], { 2: "timed out" }));
+		await h.call("report", { ...shard("shard15a", 2, [2, 3]), attempt: 2 });
+		await h.call("report", shard("shard15a", 3, [4, 5]));
+		expect((await gate("shard15a")).verdict).toBe("passed");
 	});
 });
 
 describe("who may answer", () => {
-	test("loose: an agent advises on a failure and a person decides", () => {
+	test("loose: an agent advises on a failure and a person decides", async () => {
 		const agent = h.actor("triage-bot", "agent", ["read", "produce"]);
-		h.call("report", ciReport({ commit: "3333333a", n: 3, fail: { 0: "expected 1, got 2" } }));
-		const q = first(queue().items);
-		const advised = decide(q, { is: "defect" }, agent);
+		await h.call("report", ciReport({ commit: "3333333a", n: 3, fail: { 0: "expected 1, got 2" } }));
+		const q = first((await queue()).items);
+		const advised = await decide(q, { is: "defect" }, agent);
 		expect(advised).toMatchObject({ status: "advised", needs: "one member who is not an agent" });
-		expect(gate("3333333a").verdict).toBe("blocked");
-		const shown = first(queue().items);
+		expect((await gate("3333333a")).verdict).toBe("blocked");
+		const shown = first((await queue()).items);
 		expect(shown.advice).toEqual([{ by: "triage-bot", kind: "agent", answer: { is: "defect" }, reason: null }]);
-		expect(decide(shown, { is: "defect" })?.status).toBe("decided");
+		expect((await decide(shown, { is: "defect" }))?.status).toBe("decided");
 	});
 
-	test("a pipeline cannot answer, and a reader cannot answer", () => {
+	test("a pipeline cannot answer, and a reader cannot answer", async () => {
 		const ci = h.actor("github-actions", "ci", ["read", "record"]);
 		const reader = h.actor("pm", "human", ["read"]);
-		h.call("report", ciReport({ commit: "3333333b", n: 3, fail: { 0: "expected 1, got 2" } }), ci);
-		const q = first(queue().items);
+		await h.call("report", ciReport({ commit: "3333333b", n: 3, fail: { 0: "expected 1, got 2" } }), ci);
+		const q = first((await queue()).items);
 		// Neither may call `decide` at all: a pipeline records, a reader reads.
 		for (const actor of [ci, reader]) {
-			const refused = h.raw("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "flaky" } }, actor);
+			const refused = await h.raw("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "flaky" } }, actor);
 			expect(refused).toMatchObject({ ok: false, error: { code: "forbidden" } });
 		}
 	});
 
-	test("an answer the kind does not have is invalid and says which are allowed", () => {
-		h.call("report", ciReport({ commit: "3333333c", n: 3, fail: { 0: "expected 1, got 2" } }));
-		const reply = decide(first(queue().items), { is: "accept" });
+	test("an answer the kind does not have is invalid and says which are allowed", async () => {
+		await h.call("report", ciReport({ commit: "3333333c", n: 3, fail: { 0: "expected 1, got 2" } }));
+		const reply = await decide(first((await queue()).items), { is: "accept" });
 		expect(reply?.status).toBe("invalid");
 		expect(reply?.needs).toContain("defect");
 	});
 });
 
 describe("basis", () => {
-	test("E3: a linked test is assumed at the current version; an annotation with a version is exact; neither is guessed", () => {
-		h.call("propose", { edits: [{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90" }] });
-		const s = harness({ preset: "standard", unlinked: "ask" });
-		s.call("propose", { edits: [{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90" }] });
-		s.call("report", ciReport({ commit: "4444444a", n: 2 }));
-		const map = first(s.call<InboxReply>("inbox", { kind: "map" }).items);
+	test("E3: a linked test is assumed at the current version; an annotation with a version is exact; neither is guessed", async () => {
+		await h.call("propose", { edits: [{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90" }] });
+		const s = await harness({ preset: "standard", unlinked: "ask" });
+		await s.call("propose", { edits: [{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90" }] });
+		await s.call("report", ciReport({ commit: "4444444a", n: 2 }));
+		const map = first((await s.call<InboxReply>("inbox", { kind: "map" })).items);
 		const tests = (map.evidence as { tests: { t: string }[] }).tests;
 		expect(tests).toHaveLength(2);
-		const linked = s.call<{ status: string }[]>("decide", {
+		const linked = await s.call<{ status: string }[]>("decide", {
 			q: map.q,
 			onEvidence: map.evidenceHash,
 			answer: { is: "link", pairs: [[first(tests).t, "C-1"]] },
 		});
 		expect(linked[0]?.status).toBe("decided");
-		const next = s.call<ReportReceipt>("report", ciReport({ commit: "4444444b", n: 2 }));
+		const next = await s.call<ReportReceipt>("report", ciReport({ commit: "4444444b", n: 2 }));
 		expect(next.basis).toEqual({ exact: 0, assumed: 1, unresolved: 1 });
-		const annotated = s.call<ReportReceipt>("report", {
+		const annotated = await s.call<ReportReceipt>("report", {
 			target: { commit: "4444444c", branch: "main" },
 			results: [{ test: { key: "tests/x.spec.ts::coupon @C-1@v1", name: "coupon @C-1@v1" }, outcome: "pass" }],
 		});
 		expect(annotated.basis).toEqual({ exact: 1, assumed: 0, unresolved: 0 });
-		const wrong = s.call<ReportReceipt>("report", {
+		const wrong = await s.call<ReportReceipt>("report", {
 			target: { commit: "4444444d", branch: "main" },
 			results: [{ test: { key: "tests/x.spec.ts::coupon @C-1@v9", name: "coupon @C-1@v9" }, outcome: "pass" }],
 		});
@@ -1927,9 +1982,9 @@ describe("basis", () => {
 });
 
 describe("the horizon", () => {
-	test("C5: accepting an upload turns a green gate pending until it is applied; a stale green is never served", () => {
-		h.call("report", ciReport({ commit: "5555555a", n: 5 }));
-		expect(gate("5555555a").verdict).toBe("passed");
+	test("C5: accepting an upload turns a green gate pending until it is applied; a stale green is never served", async () => {
+		await h.call("report", ciReport({ commit: "5555555a", n: 5 }));
+		expect((await gate("5555555a")).verdict).toBe("passed");
 
 		const inTx = <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): T =>
 			h.app.db.transaction(() => {
@@ -1943,7 +1998,7 @@ describe("the horizon", () => {
 		const { batch } = inTx((ctx) =>
 			acceptReport(ctx, ciReport({ commit: "5555555a", n: 5, fail: { 1: "expected 1, got 2" }, attempt: 2 })),
 		);
-		const between = gate("5555555a");
+		const between = await gate("5555555a");
 		expect(between).toMatchObject({
 			verdict: "pending",
 			stale: true,
@@ -1951,14 +2006,14 @@ describe("the horizon", () => {
 		});
 
 		inTx((ctx) => processBatch(ctx, batch.id));
-		expect(gate("5555555a")).toMatchObject({ verdict: "blocked", stale: false });
+		expect(await gate("5555555a")).toMatchObject({ verdict: "blocked", stale: false });
 	});
 });
 
 describe("work the server does on its own", () => {
 	// The recovery step on its own. `test/restart.test.ts` kills a real server in the middle of a report.
-	test("a report that was accepted and never applied is applied by recovery, once; the gate was pending meanwhile", () => {
-		h.call("report", ciReport({ commit: "6666666a", n: 4 }));
+	test("a report that was accepted and never applied is applied by recovery, once; the gate was pending meanwhile", async () => {
+		await h.call("report", ciReport({ commit: "6666666a", n: 4 }));
 		h.app.db.transaction(() => {
 			const project = findProject(h.app.db, "scratch");
 			if (!project) throw new Error("no project");
@@ -1967,9 +2022,9 @@ describe("work the server does on its own", () => {
 			stampSeq(ctx);
 		});
 		// ...the process dies here. Nothing is lost: the batch is staged, and the gate does not claim green.
-		expect(gate("6666666a").verdict).toBe("pending");
+		expect((await gate("6666666a")).verdict).toBe("pending");
 		expect(recoverAccepted(h.app)).toBe(1);
-		expect(gate("6666666a")).toMatchObject({ verdict: "blocked", stale: false });
+		expect(await gate("6666666a")).toMatchObject({ verdict: "blocked", stale: false });
 		expect(recoverAccepted(h.app)).toBe(0);
 	});
 
@@ -2058,16 +2113,16 @@ describe("work the server does on its own", () => {
 		}
 	});
 
-	test("the sweep reopens a question whose excuse ran out, so it is visible before the next report", () => {
-		h.call("report", ciReport({ commit: "7777777a", n: 3, fail: { 0: "expected 1, got 2" } }));
-		decide(first(queue().items), { is: "flaky" });
-		expect(queue().counts.open).toBe(0);
+	test("the sweep reopens a question whose excuse ran out, so it is visible before the next report", async () => {
+		await h.call("report", ciReport({ commit: "7777777a", n: 3, fail: { 0: "expected 1, got 2" } }));
+		await decide(first((await queue()).items), { is: "flaky" });
+		expect((await queue()).counts.open).toBe(0);
 		const rule = h.app.db.raw.query<{ id: number }, []>("SELECT id FROM actors WHERE kind = 'rule'").get()?.id ?? 0;
 		expect(sweep(h.app, rule)).toBe(0); // still holds
 		h.advance(15 * 86_400_000);
 		expect(sweep(h.app, rule)).toBe(1);
-		expect(queue().counts.open).toBe(1);
-		expect(gate("7777777a")).toMatchObject({ verdict: "blocked", stale: false });
+		expect((await queue()).counts.open).toBe(1);
+		expect(await gate("7777777a")).toMatchObject({ verdict: "blocked", stale: false });
 		// The expired decision stays in the ledger, followed by the row that records that it ran out.
 		expect(count("decisions WHERE kind = 'failure'")).toBe(2);
 		expect(count("excuses")).toBe(0);
@@ -2080,99 +2135,106 @@ describe("what a failure question says leaving it costs", () => {
 		stakes({ kind: item.kind, blocks: item.blocks, facts: new Set(item.evidence.facts as string[]) });
 	const held = "While this is open, no gate that counts the unexplained failure passes.";
 
-	test("while a failure question is open, no gate that counts the failure passes, whether or not it names a run", () => {
-		h.call("report", ciReport({ commit: "stakes001", n: 1, fail: { 0: "expected 90, got 100" } }));
-		h.call("report", ciReport({ commit: "stakes002", branch: "fix", pr: 7, n: 1, fail: { 0: "timed out" } }));
-		const [change, trunk] = queue().items;
+	test("while a failure question is open, no gate that counts the failure passes, whether or not it names a run", async () => {
+		await h.call("report", ciReport({ commit: "stakes001", n: 1, fail: { 0: "expected 90, got 100" } }));
+		await h.call("report", ciReport({ commit: "stakes002", branch: "fix", pr: 7, n: 1, fail: { 0: "timed out" } }));
+		const [change, trunk] = (await queue()).items;
 		if (!change || !trunk) throw new Error("two failure questions expected");
 		expect(said(change)).toBe(`Listed as blocking ${change.blocks.join(", ")}. ${held}`);
-		expect(gate("stakes002").verdict).toBe("blocked");
+		expect((await gate("stakes002")).verdict).toBe("blocked");
 		// A failure on the line names no run under `loose`, and its commit's gate does not pass all the same.
 		expect(trunk.blocks).toEqual([]);
 		expect(said(trunk)).toBe(held);
-		expect(gate("stakes001").verdict).toBe("blocked");
+		expect((await gate("stakes001")).verdict).toBe("blocked");
 		// Beside a failure a person called a defect, the gate reads failed: still not passed.
-		h.call("report", {
+		await h.call("report", {
 			...ciReport({ commit: "stakes001", n: 1, fail: { 0: "another cause entirely" }, file: "tests/other.spec.ts" }),
 			job: "other",
 		});
-		const other = first(queue().items.filter((item) => item.title.includes("another cause")));
-		decide(other, { is: "defect" });
-		expect(gate("stakes001").verdict).not.toBe("passed");
+		const other = first((await queue()).items.filter((item) => item.title.includes("another cause")));
+		await decide(other, { is: "defect" });
+		expect((await gate("stakes001")).verdict).not.toBe("passed");
 	});
 
-	test("the sentence is true of a failure no gate counts: an agent's, on a commit whose gate passes", () => {
+	test("the sentence is true of a failure no gate counts: an agent's, on a commit whose gate passes", async () => {
 		const agent = h.actor("runner", "agent", ["read", "produce"]);
-		h.call("report", ciReport({ commit: "stakes003", n: 1, file: "tests/passes.spec.ts" }));
-		h.call(
+		await h.call("report", ciReport({ commit: "stakes003", n: 1, file: "tests/passes.spec.ts" }));
+		await h.call(
 			"report",
 			ciReport({ commit: "stakes003", n: 1, file: "tests/agent.spec.ts", fail: { 0: "agent saw it" } }),
 			agent,
 		);
-		expect(said(first(queue().items))).toBe(held);
-		expect(gate("stakes003")).toMatchObject({ verdict: "passed", open: [] });
+		expect(said(first((await queue()).items))).toBe(held);
+		expect(await gate("stakes003")).toMatchObject({ verdict: "passed", open: [] });
 	});
 
-	test("a listed run can pass again while the question stays open for a newer commit: it is listed, not said to be blocked", () => {
+	test("a listed run can pass again while the question stays open for a newer commit: it is listed, not said to be blocked", async () => {
 		// The same test fails in job `one` on two commits of a pull request, and the older commit's job is run again.
 		for (const commit of ["stakes005", "stakes006"])
-			h.call("report", { ...ciReport({ commit, branch: "fix", pr: 9, n: 1, fail: { 0: "timed out" } }), job: "one" });
-		h.call("report", { ...ciReport({ commit: "stakes005", branch: "fix", pr: 9, n: 1 }), job: "one", attempt: 2 });
-		const asked = first(queue().items);
-		expect(gate("stakes005").verdict).toBe("passed");
-		expect(gate("stakes006").verdict).toBe("blocked");
+			await h.call("report", {
+				...ciReport({ commit, branch: "fix", pr: 9, n: 1, fail: { 0: "timed out" } }),
+				job: "one",
+			});
+		await h.call("report", {
+			...ciReport({ commit: "stakes005", branch: "fix", pr: 9, n: 1 }),
+			job: "one",
+			attempt: 2,
+		});
+		const asked = first((await queue()).items);
+		expect((await gate("stakes005")).verdict).toBe("passed");
+		expect((await gate("stakes006")).verdict).toBe("blocked");
 		expect(said(asked)).toStartWith("Listed as blocking ");
 		expect(said(asked)).toEndWith(held);
 	});
 
-	test("a failing result stops counting when it is replaced, and not when a pass is reported beside it", () => {
+	test("a failing result stops counting when it is replaced, and not when a pass is reported beside it", async () => {
 		// The guide's account of how a block ends without an answer, which the sentence leaves to it.
-		h.call("propose", { edits: [{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90" }] });
-		const run = h.call<{ run: string }>("plan", { name: "Release check", select: { cases: ["C-1"] } }).run;
-		const failed = h.call<ReportReceipt>("report", {
+		await h.call("propose", { edits: [{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90" }] });
+		const run = (await h.call<{ run: string }>("plan", { name: "Release check", select: { cases: ["C-1"] } })).run;
+		const failed = await h.call<ReportReceipt>("report", {
 			run,
 			results: [{ test: { case: "C-1" }, outcome: "fail", failure: { message: "expected 90, got 100" } }],
 		});
-		h.call("report", { run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
-		expect(h.call<GateStatus>("gate", { run }).verdict).toBe("blocked");
+		await h.call("report", { run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+		expect((await h.call<GateStatus>("gate", { run })).verdict).toBe("blocked");
 		// A result that corrects it replaces it, whatever its outcome: skipped, the run waits for a result again.
-		h.call("report", { run, results: [{ test: { case: "C-1" }, outcome: "skip", corrects: failed.results[0] }] });
-		expect(h.call<GateStatus>("gate", { run }).verdict).not.toBe("blocked");
+		await h.call("report", { run, results: [{ test: { case: "C-1" }, outcome: "skip", corrects: failed.results[0] }] });
+		expect((await h.call<GateStatus>("gate", { run })).verdict).not.toBe("blocked");
 		// On a commit: a newer attempt of another job does not replace it, nor does a newer attempt of the same
 		// job in which the test was skipped. A newer attempt of the same job that passes does.
-		h.call("report", { ...ciReport({ commit: "stakes004", n: 1, fail: { 0: "timed out" } }), job: "one" });
-		h.call("report", { ...ciReport({ commit: "stakes004", n: 1 }), job: "two", attempt: 2 });
-		expect(gate("stakes004").verdict).toBe("blocked");
+		await h.call("report", { ...ciReport({ commit: "stakes004", n: 1, fail: { 0: "timed out" } }), job: "one" });
+		await h.call("report", { ...ciReport({ commit: "stakes004", n: 1 }), job: "two", attempt: 2 });
+		expect((await gate("stakes004")).verdict).toBe("blocked");
 		const again = ciReport({ commit: "stakes004", n: 1 });
-		h.call("report", {
+		await h.call("report", {
 			...again,
 			job: "one",
 			attempt: 2,
 			results: again.results.map((result) => ({ test: result.test, outcome: "skip" })),
 		});
-		expect(gate("stakes004").verdict).toBe("blocked");
-		h.call("report", { ...again, job: "one", attempt: 3 });
-		expect(gate("stakes004").verdict).toBe("passed");
+		expect((await gate("stakes004")).verdict).toBe("blocked");
+		await h.call("report", { ...again, job: "one", attempt: 3 });
+		expect((await gate("stakes004")).verdict).toBe("passed");
 	});
 });
 
 describe("a question that gains occurrences while open", () => {
-	test("keeps its policy facts and its latest target, so the answer lands under the right clause and hold", () => {
+	test("keeps its policy facts and its latest target, so the answer lands under the right clause and hold", async () => {
 		const fail = { 0: "connect ECONNREFUSED 10.0.0.5:5432" };
-		h.call("report", ciReport({ commit: "8888888a", branch: "feature", pr: 9, n: 3, fail }));
-		h.call("report", ciReport({ commit: "8888888b", branch: "feature", pr: 9, n: 3, fail })); // attaches to the open question
-		const q = first(queue().items);
+		await h.call("report", ciReport({ commit: "8888888a", branch: "feature", pr: 9, n: 3, fail }));
+		await h.call("report", ciReport({ commit: "8888888b", branch: "feature", pr: 9, n: 3, fail })); // attaches to the open question
+		const q = first((await queue()).items);
 		expect(q.seen.count).toBe(2);
 		expect(q.blocks).toHaveLength(2); // both pushes' runs wait on it
 		expect((q.evidence as { facts: string[] }).facts).toContain("scope:change");
-		decide(q, { is: "infra" });
-		expect(gate("8888888b").verdict).toBe("passed");
+		await decide(q, { is: "infra" });
+		expect((await gate("8888888b")).verdict).toBe("passed");
 		const signer = h.app.db.raw
 			.query<{ signers: string }, []>("SELECT signers FROM decisions WHERE kind = 'failure'")
 			.get();
 		expect(JSON.parse(signer?.signers ?? "[]")[0].clause).toBe("failure-change");
 		// infrastructure is excused for the build it was given on (the latest), so the next push asks again
-		const next = h.call<ReportReceipt>(
+		const next = await h.call<ReportReceipt>(
 			"report",
 			ciReport({ commit: "8888888c", branch: "feature", pr: 9, n: 3, fail }),
 		);
@@ -2181,75 +2243,85 @@ describe("a question that gains occurrences while open", () => {
 });
 
 describe("which answers apply", () => {
-	test("a trunk failure cannot be called inherited or mistaken; a change's failure can be inherited", () => {
-		h.call("report", ciReport({ commit: "9999999a", n: 2, fail: { 0: "expected 1, got 2" } }));
-		const trunk = first(queue().items);
+	test("a trunk failure cannot be called inherited or mistaken; a change's failure can be inherited", async () => {
+		await h.call("report", ciReport({ commit: "9999999a", n: 2, fail: { 0: "expected 1, got 2" } }));
+		const trunk = first((await queue()).items);
 		expect(trunk.answers).toEqual(["defect", "test", "expected", "flaky", "infra"]);
-		expect(decide(trunk, { is: "inherited" })).toMatchObject({ status: "invalid" });
-		expect(decide(trunk, { is: "mistaken" })?.needs).toContain("does not apply");
-		h.call(
+		expect(await decide(trunk, { is: "inherited" })).toMatchObject({ status: "invalid" });
+		expect((await decide(trunk, { is: "mistaken" }))?.needs).toContain("does not apply");
+		await h.call(
 			"report",
 			ciReport({ commit: "9999999b", branch: "feature", pr: 12, n: 2, fail: { 1: "expected 3, got 4" } }),
 		);
-		const change = queue().items.find((item) => item.about.includes("pr:12"));
+		const change = (await queue()).items.find((item) => item.about.includes("pr:12"));
 		expect(change?.answers).toEqual(["defect", "test", "expected", "flaky", "infra", "inherited"]);
 	});
 });
 
 describe("a change that ends", () => {
-	test("a fast-forward landing moves every environment into trunk without carrying pull request answers", () => {
+	test("a fast-forward landing moves every environment into trunk without carrying pull request answers", async () => {
 		const commit = "landed001";
 		const report = ciReport({ commit, branch: "feature", pr: 68, n: 1, fail: { 0: "same cause" } });
-		h.call("report", { ...report, target: { ...report.target, env: "one" } });
-		h.call("report", { ...report, target: { ...report.target, env: "two" } });
-		const asked = first(queue().items);
-		decide(asked, { is: "flaky" });
-		const before = gate(commit);
+		await h.call("report", { ...report, target: { ...report.target, env: "one" } });
+		await h.call("report", { ...report, target: { ...report.target, env: "two" } });
+		const asked = first((await queue()).items);
+		await decide(asked, { is: "flaky" });
+		const before = await gate(commit);
 		expect(before.verdict).toBe("passed");
 		const decisions = h.app.db.raw.query("SELECT * FROM decisions").all();
-		h.call("change", { change: "pr:68", state: "merged", landing: { commit, branch: "main" } });
+		await h.call("change", { change: "pr:68", state: "merged", landing: { commit, branch: "main" } });
 		expect(h.app.db.raw.query("SELECT DISTINCT line, branch, change FROM targets").all()).toEqual([
 			{ line: "trunk", branch: "main", change: null },
 		]);
-		expect(gate(commit)).toMatchObject({ run: before.run, verdict: "blocked", tally: { unexplained: 2, excused: 0 } });
-		expect(first(queue().items).evidence.scope).toBe("line:trunk@acme/web");
+		expect(await gate(commit)).toMatchObject({
+			run: before.run,
+			verdict: "blocked",
+			tally: { unexplained: 2, excused: 0 },
+		});
+		expect(first((await queue()).items).evidence.scope).toBe("line:trunk@acme/web");
 		expect(h.app.db.raw.query("SELECT * FROM decisions").all()).toEqual(decisions);
 		expect(h.app.db.raw.query("SELECT before_scope, after_scope, actor FROM scope_moves").all()).toEqual([
 			{ before_scope: "change:1", after_scope: "line:trunk@acme/web", actor: h.owner.id },
 		]);
-		expect(h.call("change", { change: "pr:68", state: "merged", landing: { commit, branch: "main" } })).toMatchObject({
+		expect(
+			await h.call("change", { change: "pr:68", state: "merged", landing: { commit, branch: "main" } }),
+		).toMatchObject({
 			already: true,
 		});
 		expect(count("scope_moves")).toBe(1);
-		expect(h.call<InboxReply>("inbox", { state: "decided" }).items.map((q) => q.q)).toContain(asked.q);
-		decide(first(queue().items), { is: "defect" });
-		expect(h.call<GateStatus>("gate", { change: "pr:68" })).toMatchObject({ run: before.run, verdict: "failed" });
-		h.call("report", {
+		expect((await h.call<InboxReply>("inbox", { state: "decided" })).items.map((q) => q.q)).toContain(asked.q);
+		await decide(first((await queue()).items), { is: "defect" });
+		expect(await h.call<GateStatus>("gate", { change: "pr:68" })).toMatchObject({ run: before.run, verdict: "failed" });
+		await h.call("report", {
 			...report,
 			attempt: 2,
 			target: { ...report.target, branch: "main", pr: undefined, env: "three" },
 		});
-		expect(gate(commit)).toMatchObject({ run: before.run, verdict: "failed", tally: { attributed: 3, excused: 0 } });
+		expect(await gate(commit)).toMatchObject({
+			run: before.run,
+			verdict: "failed",
+			tally: { attributed: 3, excused: 0 },
+		});
 		expect(count("runs")).toBe(1);
 	});
 
-	test.each([true, false])("a merged change ignores code host head observations, landing=%s", (landing) => {
+	test.each([true, false])("a merged change ignores code host head observations, landing=%s", async (landing) => {
 		const old = ciReport({ commit: "landold01", branch: "feature", pr: 68, n: 1 });
 		const landed = ciReport({ commit: "landnew01", branch: "feature", pr: 68, n: 1, fail: { 0: "defect" } });
-		h.call("report", old);
-		h.call("report", landed);
-		h.call("change", {
+		await h.call("report", old);
+		await h.call("report", landed);
+		await h.call("change", {
 			change: "pr:68",
 			state: "merged",
 			...(landing ? { landing: { commit: "landnew01", branch: "main" } } : {}),
 		});
-		const trunkGate = gate("landnew01");
+		const trunkGate = await gate("landnew01");
 		expect(trunkGate.verdict).toBe("blocked");
-		expect(queue().items.map((q) => q.evidence.scope)).toEqual(landing ? ["line:trunk@acme/web"] : []);
+		expect((await queue()).items.map((q) => q.evidence.scope)).toEqual(landing ? ["line:trunk@acme/web"] : []);
 
 		const reset = { ...landed, job: "head-after-landing", target: { ...landed.target, head: "landold01" } };
-		expect(h.call<ReportReceipt>("report", reset).fresh).toBe(true);
-		expect(h.call<GateStatus>("gate", { change: "pr:68" })).toMatchObject({
+		expect((await h.call<ReportReceipt>("report", reset)).fresh).toBe(true);
+		expect(await h.call<GateStatus>("gate", { change: "pr:68" })).toMatchObject({
 			run: trunkGate.run,
 			verdict: "blocked",
 		});
@@ -2257,36 +2329,43 @@ describe("a change that ends", () => {
 			head_sha: "landnew01",
 		});
 		expect(h.app.db.raw.query("SELECT ended FROM change_ends").all()).toEqual([{ ended: "merged" }]);
-		h.call("report", { ...landed, job: "late-after-reset", target: { ...landed.target, env: "two" } });
-		expect(h.call<GateStatus>("gate", { change: "pr:68" }).run).toBe(trunkGate.run);
+		await h.call("report", { ...landed, job: "late-after-reset", target: { ...landed.target, env: "two" } });
+		expect((await h.call<GateStatus>("gate", { change: "pr:68" })).run).toBe(trunkGate.run);
 		expect(h.app.db.raw.query("SELECT line, branch, change FROM targets WHERE commit_sha = 'landnew01'").all()).toEqual(
 			[
 				{ line: landing ? "trunk" : "change", branch: landing ? "main" : "feature", change: landing ? null : 1 },
 				{ line: landing ? "trunk" : "change", branch: landing ? "main" : "feature", change: landing ? null : 1 },
 			],
 		);
-		expect(gate("landnew01")).toMatchObject({ run: trunkGate.run, verdict: "blocked", tally: { unexplained: 3 } });
-		expect(queue().items.map((q) => q.evidence.scope)).toEqual(landing ? ["line:trunk@acme/web"] : []);
+		expect(await gate("landnew01")).toMatchObject({
+			run: trunkGate.run,
+			verdict: "blocked",
+			tally: { unexplained: 3 },
+		});
+		expect((await queue()).items.map((q) => q.evidence.scope)).toEqual(landing ? ["line:trunk@acme/web"] : []);
 		expect(count("scope_moves")).toBe(landing ? 1 : 0);
-		h.call("report", { ...landed, job: "head-forward", target: { ...landed.target, head: "unseen01" } });
-		expect(h.call<ReportReceipt>("report", reset).fresh).toBe(false);
-		expect(h.call<GateStatus>("gate", { change: "pr:68" })).toMatchObject({ run: trunkGate.run, verdict: "blocked" });
+		await h.call("report", { ...landed, job: "head-forward", target: { ...landed.target, head: "unseen01" } });
+		expect((await h.call<ReportReceipt>("report", reset)).fresh).toBe(false);
+		expect(await h.call<GateStatus>("gate", { change: "pr:68" })).toMatchObject({
+			run: trunkGate.run,
+			verdict: "blocked",
+		});
 	});
 
 	test.each([undefined, "linux"])(
 		"a fast-forward of a head no report has named waits for its failing CI, env=%s",
-		(env) => {
-			h.call("report", ciReport({ commit: "headX0001", branch: "feature", pr: 12, n: 1 }));
+		async (env) => {
+			await h.call("report", ciReport({ commit: "headX0001", branch: "feature", pr: 12, n: 1 }));
 			const merge = {
 				change: "pr:12",
 				state: "merged",
 				head: "headY0001",
 				landing: { commit: "headY0001", branch: "main" },
 			};
-			h.call("change", merge);
-			expect(h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({ verdict: "pending", run: null });
-			expect(changes()).toMatchObject([{ key: "pr:12", head: "headY0001", state: "merged", verdict: "pending" }]);
-			expect(h.call("change", merge)).toMatchObject({ already: true });
+			await h.call("change", merge);
+			expect(await h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({ verdict: "pending", run: null });
+			expect(await changes()).toMatchObject([{ key: "pr:12", head: "headY0001", state: "merged", verdict: "pending" }]);
+			expect(await h.call("change", merge)).toMatchObject({ already: true });
 			const report = ciReport({
 				commit: "headY0001",
 				branch: "feature",
@@ -2294,55 +2373,67 @@ describe("a change that ends", () => {
 				n: 1,
 				fail: { 0: "final push fails" },
 			});
-			h.call("report", { ...report, target: { ...report.target, env } });
-			const failed = gate("headY0001");
+			await h.call("report", { ...report, target: { ...report.target, env } });
+			const failed = await gate("headY0001");
 			expect(failed.verdict).toBe("blocked");
-			expect(h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({ run: failed.run, verdict: "blocked" });
-			const asked = first(queue().items);
+			expect(await h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({
+				run: failed.run,
+				verdict: "blocked",
+			});
+			const asked = first((await queue()).items);
 			expect(asked.evidence.scope).toBe("line:trunk@acme/web");
-			expect(h.call("change", merge)).toMatchObject({ already: true });
-			expect(queue().items.map((q) => q.q)).toEqual([asked.q]);
-			h.call("report", { ...report, target: { ...report.target, env: "mac", head: "headX0001" } });
+			expect(await h.call("change", merge)).toMatchObject({ already: true });
+			expect((await queue()).items.map((q) => q.q)).toEqual([asked.q]);
+			await h.call("report", { ...report, target: { ...report.target, env: "mac", head: "headX0001" } });
 			expect(
 				h.app.db.raw.query("SELECT DISTINCT line, branch, change FROM targets WHERE commit_sha = 'headY0001'").all(),
 			).toEqual([{ line: "trunk", branch: "main", change: null }]);
-			expect(h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({ run: failed.run, verdict: "blocked" });
-			expect(queue().items.map((q) => q.evidence.scope)).toEqual(["line:trunk@acme/web"]);
+			expect(await h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({
+				run: failed.run,
+				verdict: "blocked",
+			});
+			expect((await queue()).items.map((q) => q.evidence.scope)).toEqual(["line:trunk@acme/web"]);
 		},
 	);
 
-	test("the merge's head can be older than the recorded head", () => {
-		h.call("report", ciReport({ commit: "older0012", branch: "feature", pr: 12, n: 1, fail: { 0: "older failure" } }));
-		h.call("report", ciReport({ commit: "newer0012", branch: "feature", pr: 12, n: 1 }));
-		expect(h.call<GateStatus>("gate", { change: "pr:12" }).verdict).toBe("passed");
-		h.call("change", {
+	test("the merge's head can be older than the recorded head", async () => {
+		await h.call(
+			"report",
+			ciReport({ commit: "older0012", branch: "feature", pr: 12, n: 1, fail: { 0: "older failure" } }),
+		);
+		await h.call("report", ciReport({ commit: "newer0012", branch: "feature", pr: 12, n: 1 }));
+		expect((await h.call<GateStatus>("gate", { change: "pr:12" })).verdict).toBe("passed");
+		await h.call("change", {
 			change: "pr:12",
 			state: "merged",
 			head: "older0012",
 			landing: { commit: "older0012", branch: "main" },
 		});
-		expect(changes()).toMatchObject([{ key: "pr:12", head: "older0012", state: "merged", verdict: "blocked" }]);
-		expect(h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({
-			run: gate("older0012").run,
+		expect(await changes()).toMatchObject([{ key: "pr:12", head: "older0012", state: "merged", verdict: "blocked" }]);
+		expect(await h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({
+			run: (await gate("older0012")).run,
 			verdict: "blocked",
 		});
-		expect(queue().items.map((q) => q.evidence.scope)).toEqual(["line:trunk@acme/web"]);
-		h.call("report", { ...ciReport({ commit: "newer0012", branch: "feature", pr: 12, n: 1 }), attempt: 2 });
-		expect(h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({
-			run: gate("older0012").run,
+		expect((await queue()).items.map((q) => q.evidence.scope)).toEqual(["line:trunk@acme/web"]);
+		await h.call("report", { ...ciReport({ commit: "newer0012", branch: "feature", pr: 12, n: 1 }), attempt: 2 });
+		expect(await h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({
+			run: (await gate("older0012")).run,
 			verdict: "blocked",
 		});
 	});
 
-	test("a merge with another hash leaves the original commit's scope and decisions alone", () => {
-		h.call("report", ciReport({ commit: "landed002", branch: "feature", pr: 68, n: 1, fail: { 0: "same cause" } }));
-		decide(first(queue().items), { is: "flaky" });
-		h.call("change", { change: "pr:68", state: "merged", landing: { commit: "merge0002", branch: "main" } });
-		expect(gate("landed002").verdict).toBe("passed");
+	test("a merge with another hash leaves the original commit's scope and decisions alone", async () => {
+		await h.call(
+			"report",
+			ciReport({ commit: "landed002", branch: "feature", pr: 68, n: 1, fail: { 0: "same cause" } }),
+		);
+		await decide(first((await queue()).items), { is: "flaky" });
+		await h.call("change", { change: "pr:68", state: "merged", landing: { commit: "merge0002", branch: "main" } });
+		expect((await gate("landed002")).verdict).toBe("passed");
 		expect(h.app.db.raw.query("SELECT DISTINCT line FROM targets WHERE commit_sha = 'landed002'").all()).toEqual([
 			{ line: "change" },
 		]);
-		expect(changes()).toMatchObject([
+		expect(await changes()).toMatchObject([
 			{
 				key: "pr:68",
 				head: "landed002",
@@ -2351,79 +2442,82 @@ describe("a change that ends", () => {
 				landing: { commit: "merge0002", branch: "main", run: null, verdict: "pending" },
 			},
 		]);
-		expect(h.call<GateStatus>("gate", { change: "pr:68" })).toMatchObject({
-			run: gate("landed002").run,
+		expect(await h.call<GateStatus>("gate", { change: "pr:68" })).toMatchObject({
+			run: (await gate("landed002")).run,
 			verdict: "passed",
 		});
 	});
 
-	test("a rebased landing keeps the pull request's gate, and the landed commit's gate is its own", () => {
-		h.call("report", ciReport({ commit: "prhead077", branch: "feature", pr: 77, n: 2 }));
-		h.call("change", {
+	test("a rebased landing keeps the pull request's gate, and the landed commit's gate is its own", async () => {
+		await h.call("report", ciReport({ commit: "prhead077", branch: "feature", pr: 77, n: 2 }));
+		await h.call("change", {
 			change: "pr:77",
 			state: "merged",
 			head: "prhead077",
 			landing: { commit: "rebase077", branch: "main" },
 		});
 		const landed = { commit: "rebase077", branch: "main", run: null, verdict: "pending" };
-		expect(h.call<GateStatus>("gate", { change: "pr:77" })).toMatchObject({
-			run: gate("prhead077").run,
+		expect(await h.call<GateStatus>("gate", { change: "pr:77" })).toMatchObject({
+			run: (await gate("prhead077")).run,
 			verdict: "passed",
 		});
-		expect(changes()).toMatchObject([
+		expect(await changes()).toMatchObject([
 			{ key: "pr:77", head: "prhead077", state: "merged", verdict: "passed", landing: landed },
 		]);
-		h.call("report", ciReport({ commit: "rebase077", n: 2, fail: { 1: "broke on main" } }));
-		expect(h.call<GateStatus>("gate", { change: "pr:77" }).verdict).toBe("passed");
-		expect(changes()).toMatchObject([
+		await h.call("report", ciReport({ commit: "rebase077", n: 2, fail: { 1: "broke on main" } }));
+		expect((await h.call<GateStatus>("gate", { change: "pr:77" })).verdict).toBe("passed");
+		expect(await changes()).toMatchObject([
 			{
 				head: "prhead077",
 				verdict: "passed",
 				landing: {
 					...landed,
-					run: gate("rebase077").run,
+					run: (await gate("rebase077")).run,
 					verdict: "blocked",
 					reason: "blocked: 1 failure unexplained, 1 question open",
 				},
 			},
 		]);
-		expect(queue().items.map((q) => q.evidence.scope)).toEqual(["line:trunk@acme/web"]);
+		expect((await queue()).items.map((q) => q.evidence.scope)).toEqual(["line:trunk@acme/web"]);
 	});
 
-	test("the merge names the head that merged, even one no report has named yet", () => {
-		h.call("report", ciReport({ commit: "first0078", branch: "feature", pr: 78, n: 1 }));
-		h.call("change", {
+	test("the merge names the head that merged, even one no report has named yet", async () => {
+		await h.call("report", ciReport({ commit: "first0078", branch: "feature", pr: 78, n: 1 }));
+		await h.call("change", {
 			change: "pr:78",
 			state: "merged",
 			head: "final0078",
 			landing: { commit: "rebase078", branch: "main" },
 		});
-		expect(changes()).toMatchObject([{ key: "pr:78", head: "final0078", verdict: "pending" }]);
-		expect(h.call<GateStatus>("gate", { change: "pr:78" })).toMatchObject({ run: null, verdict: "pending" });
-		h.call("report", ciReport({ commit: "final0078", branch: "feature", pr: 78, n: 1, fail: { 0: "late failure" } }));
-		expect(h.call<GateStatus>("gate", { change: "pr:78" })).toMatchObject({
-			run: gate("final0078").run,
+		expect(await changes()).toMatchObject([{ key: "pr:78", head: "final0078", verdict: "pending" }]);
+		expect(await h.call<GateStatus>("gate", { change: "pr:78" })).toMatchObject({ run: null, verdict: "pending" });
+		await h.call(
+			"report",
+			ciReport({ commit: "final0078", branch: "feature", pr: 78, n: 1, fail: { 0: "late failure" } }),
+		);
+		expect(await h.call<GateStatus>("gate", { change: "pr:78" })).toMatchObject({
+			run: (await gate("final0078")).run,
 			verdict: "blocked",
 		});
 		// An ended change is not asked about (decision 0022): the failure is there to read, not to answer.
-		expect(queue().items).toEqual([]);
+		expect((await queue()).items).toEqual([]);
 	});
 
-	test("a landing's gate is read in the change's repository, even when that is none", () => {
+	test("a landing's gate is read in the change's repository, even when that is none", async () => {
 		const { repo: _repo, ...target } = ciReport({ commit: "head0079", branch: "feature", pr: 79, n: 1 }).target;
-		h.call("report", { ...ciReport({ commit: "head0079", branch: "feature", pr: 79, n: 1 }), target });
-		h.call("change", {
+		await h.call("report", { ...ciReport({ commit: "head0079", branch: "feature", pr: 79, n: 1 }), target });
+		await h.call("change", {
 			change: "pr:79",
 			state: "merged",
 			head: "head0079",
 			landing: { commit: "land0079", branch: "main" },
 		});
 		// Another repository reports the same hash: it is not this landing, and does not make it ambiguous.
-		h.call("report", {
+		await h.call("report", {
 			...ciReport({ commit: "land0079", n: 1, fail: { 0: "other repo" } }),
 			target: { repo: "acme/other", commit: "land0079", branch: "main" },
 		});
-		expect(changes()).toMatchObject([
+		expect(await changes()).toMatchObject([
 			{
 				key: "pr:79",
 				head: "head0079",
@@ -2431,62 +2525,75 @@ describe("a change that ends", () => {
 				landing: { commit: "land0079", run: null, verdict: "pending" },
 			},
 		]);
-		expect(h.call<{ change: { landing: unknown } }>("impact", { change: "pr:79" }).change.landing).toMatchObject({
+		expect(
+			(await h.call<{ change: { landing: unknown } }>("impact", { change: "pr:79" })).change.landing,
+		).toMatchObject({
 			commit: "land0079",
 			verdict: "pending",
 		});
 	});
 
-	test("a head the code host names on an open change is asked about, and the old head's question leaves", () => {
-		h.call("report", ciReport({ commit: "first080", branch: "feature", pr: 80, n: 1, fail: { 0: "first fails" } }));
-		const asked = first(queue().items);
-		h.call("report", ciReport({ commit: "second80", branch: "feature", pr: 80, n: 1 }));
-		expect(queue().items).toEqual([]);
-		const moved = h.call<{ questions: string[]; already: boolean }>("change", {
+	test("a head the code host names on an open change is asked about, and the old head's question leaves", async () => {
+		await h.call(
+			"report",
+			ciReport({ commit: "first080", branch: "feature", pr: 80, n: 1, fail: { 0: "first fails" } }),
+		);
+		const asked = first((await queue()).items);
+		await h.call("report", ciReport({ commit: "second80", branch: "feature", pr: 80, n: 1 }));
+		expect((await queue()).items).toEqual([]);
+		const moved = await h.call<{ questions: string[]; already: boolean }>("change", {
 			change: "pr:80",
 			state: "open",
 			head: "first080",
 		});
-		const again = first(queue().items);
+		const again = first((await queue()).items);
 		expect(moved).toMatchObject({ questions: [again.q], already: false });
 		expect(again).toMatchObject({ kind: "failure", state: "open", title: asked.title });
-		expect(h.call<GateStatus>("gate", { change: "pr:80" })).toMatchObject({ verdict: "blocked", open: [again.q] });
-		expect(h.call("change", { change: "pr:80", state: "open", head: "first080" })).toMatchObject({ already: true });
-		h.call("change", { change: "pr:80", state: "open", head: "second80" });
-		expect(queue().items).toEqual([]);
-		expect(h.call<GateStatus>("gate", { change: "pr:80" }).verdict).toBe("passed");
+		expect(await h.call<GateStatus>("gate", { change: "pr:80" })).toMatchObject({
+			verdict: "blocked",
+			open: [again.q],
+		});
+		expect(await h.call("change", { change: "pr:80", state: "open", head: "first080" })).toMatchObject({
+			already: true,
+		});
+		await h.call("change", { change: "pr:80", state: "open", head: "second80" });
+		expect((await queue()).items).toEqual([]);
+		expect((await h.call<GateStatus>("gate", { change: "pr:80" })).verdict).toBe("passed");
 	});
 
-	test("a landing received after the end still moves its commit to trunk, and reopening does not move it back", () => {
-		h.call("report", ciReport({ commit: "landed003", branch: "feature", pr: 68, n: 1, fail: { 0: "same cause" } }));
-		h.call("change", { change: "pr:68", state: "merged" });
-		h.call("change", { change: "pr:68", state: "merged", landing: { commit: "landed003", branch: "main" } });
-		expect(first(queue().items).evidence.scope).toBe("line:trunk@acme/web");
-		h.call("change", { change: "pr:68", state: "open" });
-		expect(queue().items.map((q) => q.evidence.scope)).toEqual(["line:trunk@acme/web"]);
+	test("a landing received after the end still moves its commit to trunk, and reopening does not move it back", async () => {
+		await h.call(
+			"report",
+			ciReport({ commit: "landed003", branch: "feature", pr: 68, n: 1, fail: { 0: "same cause" } }),
+		);
+		await h.call("change", { change: "pr:68", state: "merged" });
+		await h.call("change", { change: "pr:68", state: "merged", landing: { commit: "landed003", branch: "main" } });
+		expect(first((await queue()).items).evidence.scope).toBe("line:trunk@acme/web");
+		await h.call("change", { change: "pr:68", state: "open" });
+		expect((await queue()).items.map((q) => q.evidence.scope)).toEqual(["line:trunk@acme/web"]);
 	});
 
-	test("a commit first reported by hash gains its branch scope and keeps one exact gate", () => {
+	test("a commit first reported by hash gains its branch scope and keeps one exact gate", async () => {
 		const report = ciReport({ commit: "placed068", branch: "feature", n: 1, fail: { 0: "same cause" } });
-		h.call("report", { ...report, target: { commit: report.target.commit, repo: report.target.repo } });
-		decide(first(queue().items), { is: "flaky" });
-		const before = gate("placed068");
-		h.call("report", report);
-		expect(gate("placed068")).toMatchObject({ run: before.run, verdict: "blocked" });
-		expect(first(queue().items).about).toContain("branch:feature");
+		await h.call("report", { ...report, target: { commit: report.target.commit, repo: report.target.repo } });
+		await decide(first((await queue()).items), { is: "flaky" });
+		const before = await gate("placed068");
+		await h.call("report", report);
+		expect(await gate("placed068")).toMatchObject({ run: before.run, verdict: "blocked" });
+		expect(first((await queue()).items).about).toContain("branch:feature");
 		expect(count("runs")).toBe(1);
 	});
 
-	test("a typed failure keeps its open question when CI later names the commit's branch", () => {
-		h.call("propose", { edits: [{ op: "create", outline: "Checkout works" }] });
+	test("a typed failure keeps its open question when CI later names the commit's branch", async () => {
+		await h.call("propose", { edits: [{ op: "create", outline: "Checkout works" }] });
 		const tester = h.actor("tester", "human", ["read", "produce"]);
 		const ci = h.actor("ci", "ci", ["read", "record"]);
-		const run = h.call<{ run: string }>("plan", {
+		const run = await h.call<{ run: string }>("plan", {
 			name: "Dispute",
 			select: {},
 			accepts: { commit: "typed0068" },
 		});
-		h.call(
+		await h.call(
 			"report",
 			{
 				run: run.run,
@@ -2494,8 +2601,8 @@ describe("a change that ends", () => {
 			},
 			tester,
 		);
-		const asked = first(queue().items.filter((q) => q.kind === "failure"));
-		h.call(
+		const asked = first((await queue()).items.filter((q) => q.kind === "failure"));
+		await h.call(
 			"report",
 			{
 				target: { commit: "typed0068", branch: "main" },
@@ -2503,7 +2610,7 @@ describe("a change that ends", () => {
 			},
 			ci,
 		);
-		const questions = queue().items.filter((q) => q.kind === "failure");
+		const questions = (await queue()).items.filter((q) => q.kind === "failure");
 		const cause = first(questions.filter((q) => q.q === asked.q));
 		const disputed = first(questions.filter((q) => q.title.startsWith(`Disputed C-1 in ${run.run}:`)));
 		expect(cause).toMatchObject({ state: "open", evidence: { message: "expected 10, got 12" } });
@@ -2515,27 +2622,27 @@ describe("a change that ends", () => {
 		});
 		expect(disputed.q).not.toBe(asked.q);
 		expect(disputed.answers).toEqual(["defect", "test", "expected", "flaky", "infra", "mistaken"]);
-		const status = h.call<GateStatus>("gate", { run: run.run });
+		const status = await h.call<GateStatus>("gate", { run: run.run });
 		expect(status.verdict).toBe("blocked");
 		expect(status.open.toSorted()).toEqual([asked.q, disputed.q].toSorted());
 		expect(count("scope_moves")).toBe(0);
 	});
 
-	test("a typed failure keeps its answer when CI later names the commit's branch", () => {
-		h.call("propose", { edits: [{ op: "create", outline: "Checkout works" }] });
-		const run = h.call<{ run: string }>("plan", {
+	test("a typed failure keeps its answer when CI later names the commit's branch", async () => {
+		await h.call("propose", { edits: [{ op: "create", outline: "Checkout works" }] });
+		const run = await h.call<{ run: string }>("plan", {
 			name: "Answered",
 			select: {},
 			accepts: { commit: "typed0069" },
 		});
-		h.call("report", {
+		await h.call("report", {
 			run: run.run,
 			results: [{ test: { case: "C-1" }, outcome: "fail", failure: { message: "same cause" } }],
 		});
-		const asked = first(queue().items.filter((q) => q.kind === "failure"));
-		expect(decide(asked, { is: "flaky" })?.status).toBe("decided");
+		const asked = first((await queue()).items.filter((q) => q.kind === "failure"));
+		expect((await decide(asked, { is: "flaky" }))?.status).toBe("decided");
 		const decisions = h.app.db.raw.query("SELECT * FROM decisions WHERE kind = 'failure'").all();
-		h.call("report", {
+		await h.call("report", {
 			target: { commit: "typed0069", branch: "main" },
 			results: [
 				{
@@ -2546,30 +2653,33 @@ describe("a change that ends", () => {
 				},
 			],
 		});
-		expect(h.call<{ state: string }[]>("get", { refs: [asked.q] })[0]?.state).toBe("decided");
+		expect((await h.call<{ state: string }[]>("get", { refs: [asked.q] }))[0]?.state).toBe("decided");
 		expect(h.app.db.raw.query("SELECT * FROM decisions WHERE kind = 'failure'").all()).toEqual(decisions);
-		expect(h.call<GateStatus>("gate", { run: run.run })).toMatchObject({ verdict: "passed", tally: { excused: 1 } });
-		expect(queue().items.filter((q) => q.kind === "failure")).toEqual([]);
+		expect(await h.call<GateStatus>("gate", { run: run.run })).toMatchObject({
+			verdict: "passed",
+			tally: { excused: 1 },
+		});
+		expect((await queue()).items.filter((q) => q.kind === "failure")).toEqual([]);
 		expect(count("scope_moves")).toBe(0);
 	});
 
-	test("a landing uses trunk's existing answer while older pull request commits keep their answer", () => {
+	test("a landing uses trunk's existing answer while older pull request commits keep their answer", async () => {
 		const fail = { 0: "same cause" };
-		h.call("report", ciReport({ commit: "trunk0068", n: 1, fail }));
-		decide(first(queue().items), { is: "defect" });
-		h.call("report", ciReport({ commit: "older0068", branch: "feature", pr: 68, n: 1, fail }));
-		decide(first(queue().items), { is: "flaky" });
-		h.call("report", ciReport({ commit: "newer0068", branch: "feature", pr: 68, n: 1, fail }));
-		expect(gate("newer0068").verdict).toBe("passed");
-		h.call("change", { change: "pr:68", state: "merged", landing: { commit: "newer0068", branch: "main" } });
-		expect(gate("newer0068").verdict).toBe("failed");
-		expect(gate("older0068").verdict).toBe("passed");
-		expect(queue().items).toEqual([]);
+		await h.call("report", ciReport({ commit: "trunk0068", n: 1, fail }));
+		await decide(first((await queue()).items), { is: "defect" });
+		await h.call("report", ciReport({ commit: "older0068", branch: "feature", pr: 68, n: 1, fail }));
+		await decide(first((await queue()).items), { is: "flaky" });
+		await h.call("report", ciReport({ commit: "newer0068", branch: "feature", pr: 68, n: 1, fail }));
+		expect((await gate("newer0068")).verdict).toBe("passed");
+		await h.call("change", { change: "pr:68", state: "merged", landing: { commit: "newer0068", branch: "main" } });
+		expect((await gate("newer0068")).verdict).toBe("failed");
+		expect((await gate("older0068")).verdict).toBe("passed");
+		expect((await queue()).items).toEqual([]);
 	});
 
-	test("a landing recomputes a planned run and replaces its old failure question", () => {
-		h.call("propose", { edits: [{ op: "create", outline: "Checkout works" }] });
-		h.call("report", {
+	test("a landing recomputes a planned run and replaces its old failure question", async () => {
+		await h.call("propose", { edits: [{ op: "create", outline: "Checkout works" }] });
+		await h.call("report", {
 			target: { commit: "planned68", repo: "acme/web", branch: "feature", pr: 68 },
 			results: [
 				{
@@ -2580,32 +2690,39 @@ describe("a change that ends", () => {
 				},
 			],
 		});
-		const planned = h.call<{ run: string }>("plan", { name: "Release", select: {}, accepts: { commit: "planned68" } });
-		const asked = first(queue().items);
-		h.call("change", { change: "pr:68", state: "merged", landing: { commit: "planned68", branch: "main" } });
-		const again = first(queue().items);
+		const planned = await h.call<{ run: string }>("plan", {
+			name: "Release",
+			select: {},
+			accepts: { commit: "planned68" },
+		});
+		const asked = first((await queue()).items);
+		await h.call("change", { change: "pr:68", state: "merged", landing: { commit: "planned68", branch: "main" } });
+		const again = first((await queue()).items);
 		expect(again.q).not.toBe(asked.q);
 		expect(again.evidence.scope).toBe("line:trunk@acme/web");
-		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({ verdict: "blocked", open: [again.q] });
-		expect(h.call<{ state: string }[]>("get", { refs: [asked.q] })[0]?.state).toBe("dissolved");
+		expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+			verdict: "blocked",
+			open: [again.q],
+		});
+		expect((await h.call<{ state: string }[]>("get", { refs: [asked.q] }))[0]?.state).toBe("dissolved");
 	});
 
-	test("landing metadata is refused for an open change or an agent and moves only its repository", () => {
+	test("landing metadata is refused for an open change or an agent and moves only its repository", async () => {
 		const report = ciReport({ commit: "repos0068", branch: "feature", pr: 68, n: 1, fail: { 0: "same cause" } });
-		h.call("report", report);
-		h.call("report", { ...report, target: { ...report.target, repo: "example/other" } });
+		await h.call("report", report);
+		await h.call("report", { ...report, target: { ...report.target, repo: "example/other" } });
 		const landing = { commit: "repos0068", branch: "main" };
-		expect(h.raw("change", { change: "pr:68", state: "open", landing })).toMatchObject({
+		expect(await h.raw("change", { change: "pr:68", state: "open", landing })).toMatchObject({
 			ok: false,
 			error: { code: "invalid" },
 		});
 		const agent = h.actor("reviewer", "agent", ["read", "produce"]);
-		expect(h.raw("change", { change: "pr:68", state: "merged", landing }, agent)).toMatchObject({
+		expect(await h.raw("change", { change: "pr:68", state: "merged", landing }, agent)).toMatchObject({
 			ok: false,
 			error: { code: "forbidden" },
 		});
 		expect(count("scope_moves")).toBe(0);
-		h.call("change", { change: "pr:68", state: "merged", landing });
+		await h.call("change", { change: "pr:68", state: "merged", landing });
 		expect(h.app.db.raw.query("SELECT repo, line FROM targets ORDER BY id").all()).toEqual([
 			{ repo: "acme/web", line: "trunk" },
 			{ repo: "example/other", line: "change" },
@@ -2614,143 +2731,160 @@ describe("a change that ends", () => {
 	});
 
 	type Ended = { change: string; state: string; questions: string[]; already: boolean };
-	const end = (change: string, state: "merged" | "closed" | "open", as = h.owner) =>
-		h.call<Ended>("change", { change, state }, as);
-	const changes = () =>
-		h.call<{ items: { key: string; head: string | null; state: string; verdict: string | null }[] }>("find", {
-			in: "changes",
-		}).items;
+	const end = async (change: string, state: "merged" | "closed" | "open", as = h.owner) =>
+		await h.call<Ended>("change", { change, state }, as);
+	const changes = async () =>
+		(
+			await h.call<{ items: { key: string; head: string | null; state: string; verdict: string | null }[] }>("find", {
+				in: "changes",
+			})
+		).items;
 	/** A pull request whose only commit fails one test, and the question about it. */
-	const failingPull = (pr = 12, commit = "ended0001") => {
-		h.call("report", ciReport({ commit, branch: "fix", pr, n: 2, fail: { 0: "expected 90, got 100" } }));
-		const asked = queue().items.find((item) => item.about.includes(`pr:${pr}`));
+	const failingPull = async (pr = 12, commit = "ended0001") => {
+		await h.call("report", ciReport({ commit, branch: "fix", pr, n: 2, fail: { 0: "expected 90, got 100" } }));
+		const asked = (await queue()).items.find((item) => item.about.includes(`pr:${pr}`));
 		if (!asked) throw new Error("the failing pull request raised no question");
 		return asked;
 	};
 
-	test("a report that corrects only a change's URL updates it, and a report that corrects nothing writes nothing", () => {
-		const urls = () =>
-			h.call<{ items: { key: string; url: string | null }[] }>("find", { in: "changes" }).items.map((c) => c.url);
+	test("a report that corrects only a change's URL updates it, and a report that corrects nothing writes nothing", async () => {
+		const urls = async () =>
+			(await h.call<{ items: { key: string; url: string | null }[] }>("find", { in: "changes" })).items.map(
+				(c) => c.url,
+			);
 		const rev = () => h.app.db.raw.query("SELECT rev FROM changes").all();
 		const at = (attempt: number, url: string) => {
 			const report = ciReport({ commit: "url00001", branch: "fix", pr: 12, n: 2, attempt });
 			return { ...report, target: { ...report.target, url } };
 		};
-		h.call("report", at(1, "https://github.com/acme/old/issues/12"));
-		expect(urls()).toEqual(["https://github.com/acme/old/issues/12"]);
+		await h.call("report", at(1, "https://github.com/acme/old/issues/12"));
+		expect(await urls()).toEqual(["https://github.com/acme/old/issues/12"]);
 		const written = rev();
-		h.call("report", at(2, "https://github.com/acme/old/issues/12"));
+		await h.call("report", at(2, "https://github.com/acme/old/issues/12"));
 		expect(rev()).toEqual(written);
-		h.call("report", at(3, "https://github.com/acme/new/pull/12"));
-		expect(urls()).toEqual(["https://github.com/acme/new/pull/12"]);
+		await h.call("report", at(3, "https://github.com/acme/new/pull/12"));
+		expect(await urls()).toEqual(["https://github.com/acme/new/pull/12"]);
 		expect(rev()).not.toEqual(written);
 	});
 
-	test("its unanswered failures are no longer asked about, and nothing else about it changes", () => {
-		const asked = failingPull();
+	test("its unanswered failures are no longer asked about, and nothing else about it changes", async () => {
+		const asked = await failingPull();
 		expect(asked.blocks).toHaveLength(1);
-		expect(end("pr:12", "merged")).toEqual({ change: "pr:12", state: "merged", questions: [asked.q], already: false });
-		expect(queue().counts.open).toBe(0);
-		expect(h.call<{ state: string }[]>("get", { refs: [asked.q] })[0]?.state).toBe("dissolved");
-		expect(changes()).toMatchObject([{ key: "pr:12", state: "merged", verdict: "blocked" }]);
-		// The commit's own verdict is history: it failed, nobody explained it, and nobody is asked now.
-		expect(gate("ended0001")).toMatchObject({ verdict: "blocked", open: [] });
-		// Saying it again changes nothing about the change or its questions.
-		expect(end("PR:12", "merged")).toEqual({ change: "pr:12", state: "merged", questions: [], already: true });
-	});
-
-	test.each([true, false])("a merged change keeps its head after another commit reports, landing=%s", (landing) => {
-		failingPull();
-		h.call("change", {
+		expect(await end("pr:12", "merged")).toEqual({
 			change: "pr:12",
 			state: "merged",
-			...(landing ? { landing: { commit: "ended0001", branch: "main" } } : {}),
+			questions: [asked.q],
+			already: false,
 		});
-		const later = h.call<ReportReceipt>("report", ciReport({ commit: "ended0002", branch: "fix", pr: 12, n: 2 }));
-		expect(later.counts).toMatchObject({ total: 2, pass: 2 });
-		expect(later.questions).toEqual([]);
-		expect(gate("ended0002").verdict).toBe("passed");
-		expect(changes()).toMatchObject([{ key: "pr:12", head: "ended0001", state: "merged", verdict: "blocked" }]);
-		expect(h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({
-			run: gate("ended0001").run,
-			verdict: "blocked",
-		});
-		h.call("report", ciReport({ commit: "ended0001", branch: "fix", pr: 12, n: 2, attempt: 2 }));
-		expect(changes()).toMatchObject([{ key: "pr:12", head: "ended0001", state: "merged", verdict: "passed" }]);
-		expect(queue().counts.open).toBe(0);
+		expect((await queue()).counts.open).toBe(0);
+		expect((await h.call<{ state: string }[]>("get", { refs: [asked.q] }))[0]?.state).toBe("dissolved");
+		expect(await changes()).toMatchObject([{ key: "pr:12", state: "merged", verdict: "blocked" }]);
+		// The commit's own verdict is history: it failed, nobody explained it, and nobody is asked now.
+		expect(await gate("ended0001")).toMatchObject({ verdict: "blocked", open: [] });
+		// Saying it again changes nothing about the change or its questions.
+		expect(await end("PR:12", "merged")).toEqual({ change: "pr:12", state: "merged", questions: [], already: true });
 	});
 
-	test("a closed unmerged change follows later reports and asks about its latest head when reopened", () => {
-		failingPull();
-		end("pr:12", "closed");
-		h.call("report", ciReport({ commit: "ended0002", branch: "fix", pr: 12, n: 2, fail: { 1: "new failure" } }));
-		expect(changes()).toMatchObject([{ key: "pr:12", head: "ended0002", state: "closed", verdict: "blocked" }]);
-		expect(queue().counts.open).toBe(0);
-		const reopened = end("pr:12", "open");
+	test.each([true, false])(
+		"a merged change keeps its head after another commit reports, landing=%s",
+		async (landing) => {
+			await failingPull();
+			await h.call("change", {
+				change: "pr:12",
+				state: "merged",
+				...(landing ? { landing: { commit: "ended0001", branch: "main" } } : {}),
+			});
+			const later = await h.call<ReportReceipt>(
+				"report",
+				ciReport({ commit: "ended0002", branch: "fix", pr: 12, n: 2 }),
+			);
+			expect(later.counts).toMatchObject({ total: 2, pass: 2 });
+			expect(later.questions).toEqual([]);
+			expect((await gate("ended0002")).verdict).toBe("passed");
+			expect(await changes()).toMatchObject([{ key: "pr:12", head: "ended0001", state: "merged", verdict: "blocked" }]);
+			expect(await h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({
+				run: (await gate("ended0001")).run,
+				verdict: "blocked",
+			});
+			await h.call("report", ciReport({ commit: "ended0001", branch: "fix", pr: 12, n: 2, attempt: 2 }));
+			expect(await changes()).toMatchObject([{ key: "pr:12", head: "ended0001", state: "merged", verdict: "passed" }]);
+			expect((await queue()).counts.open).toBe(0);
+		},
+	);
+
+	test("a closed unmerged change follows later reports and asks about its latest head when reopened", async () => {
+		await failingPull();
+		await end("pr:12", "closed");
+		await h.call("report", ciReport({ commit: "ended0002", branch: "fix", pr: 12, n: 2, fail: { 1: "new failure" } }));
+		expect(await changes()).toMatchObject([{ key: "pr:12", head: "ended0002", state: "closed", verdict: "blocked" }]);
+		expect((await queue()).counts.open).toBe(0);
+		const reopened = await end("pr:12", "open");
 		expect(reopened.questions).toHaveLength(1);
-		expect(h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({
-			run: gate("ended0002").run,
+		expect(await h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({
+			run: (await gate("ended0002")).run,
 			verdict: "blocked",
 			open: reopened.questions,
 		});
 	});
 
-	test("a closed unmerged change follows a code host head observation", () => {
-		h.call("report", ciReport({ commit: "ended0001", branch: "fix", pr: 12, n: 1 }));
-		failingPull(12, "ended0002");
-		end("pr:12", "closed");
+	test("a closed unmerged change follows a code host head observation", async () => {
+		await h.call("report", ciReport({ commit: "ended0001", branch: "fix", pr: 12, n: 1 }));
+		await failingPull(12, "ended0002");
+		await end("pr:12", "closed");
 		const old = ciReport({ commit: "ended0001", branch: "fix", pr: 12, n: 1, job: "observe-reset" });
-		expect(h.call<ReportReceipt>("report", { ...old, target: { ...old.target, head: "ended0001" } }).fresh).toBe(true);
-		expect(changes()).toMatchObject([{ key: "pr:12", head: "ended0001", state: "closed", verdict: "passed" }]);
-		expect(h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({
-			run: gate("ended0001").run,
+		expect(
+			(await h.call<ReportReceipt>("report", { ...old, target: { ...old.target, head: "ended0001" } })).fresh,
+		).toBe(true);
+		expect(await changes()).toMatchObject([{ key: "pr:12", head: "ended0001", state: "closed", verdict: "passed" }]);
+		expect(await h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({
+			run: (await gate("ended0001")).run,
 			verdict: "passed",
 		});
-		expect(queue().counts.open).toBe(0);
+		expect((await queue()).counts.open).toBe(0);
 	});
 
-	test("a merged change follows new reports again after it is explicitly reopened", () => {
-		failingPull();
-		end("pr:12", "merged");
-		end("pr:12", "open");
-		h.call("report", ciReport({ commit: "ended0002", branch: "fix", pr: 12, n: 2 }));
-		expect(changes()).toMatchObject([{ key: "pr:12", head: "ended0002", state: "open", verdict: "passed" }]);
-		expect(queue().counts.open).toBe(0);
+	test("a merged change follows new reports again after it is explicitly reopened", async () => {
+		await failingPull();
+		await end("pr:12", "merged");
+		await end("pr:12", "open");
+		await h.call("report", ciReport({ commit: "ended0002", branch: "fix", pr: 12, n: 2 }));
+		expect(await changes()).toMatchObject([{ key: "pr:12", head: "ended0002", state: "open", verdict: "passed" }]);
+		expect((await queue()).counts.open).toBe(0);
 	});
 
-	test("the same failure on the line is its own question, and stays", () => {
-		failingPull();
-		h.call("report", ciReport({ commit: "ended0002", n: 2, fail: { 0: "expected 90, got 100" } }));
-		expect(queue().counts.failure).toBe(2);
-		end("pr:12", "merged");
-		const left = queue().items;
+	test("the same failure on the line is its own question, and stays", async () => {
+		await failingPull();
+		await h.call("report", ciReport({ commit: "ended0002", n: 2, fail: { 0: "expected 90, got 100" } }));
+		expect((await queue()).counts.failure).toBe(2);
+		await end("pr:12", "merged");
+		const left = (await queue()).items;
 		expect(left.map((item) => item.evidence.scope)).toEqual(["line:trunk@acme/web"]);
-		expect(gate("ended0002")).toMatchObject({ verdict: "blocked", open: [first(left).q] });
+		expect(await gate("ended0002")).toMatchObject({ verdict: "blocked", open: [first(left).q] });
 	});
 
-	test("an answer already given stands, and a finding about the change is still asked", () => {
-		const asked = failingPull();
-		decide(asked, { is: "flaky" });
+	test("an answer already given stands, and a finding about the change is still asked", async () => {
+		const asked = await failingPull();
+		await decide(asked, { is: "flaky" });
 		const agent = h.actor("reviewer", "agent", ["read", "produce"]);
-		h.call("propose", { edits: [{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90" }] });
-		h.call(
+		await h.call("propose", { edits: [{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90" }] });
+		await h.call(
 			"claim",
 			{ lens: "review", about: "pr:12", findings: [{ on: "C-1", category: "ambiguous", note: "Say which total" }] },
 			agent,
 		);
-		expect(end("pr:12", "closed").questions).toEqual([]);
-		expect(queue().counts).toMatchObject({ open: 1, finding: 1 });
-		expect(h.call<InboxReply>("inbox", { state: "decided", kind: "failure" }).items.map((item) => item.q)).toEqual([
-			asked.q,
-		]);
-		expect(gate("ended0001").verdict).toBe("passed");
+		expect((await end("pr:12", "closed")).questions).toEqual([]);
+		expect((await queue()).counts).toMatchObject({ open: 1, finding: 1 });
+		expect(
+			(await h.call<InboxReply>("inbox", { state: "decided", kind: "failure" })).items.map((item) => item.q),
+		).toEqual([asked.q]);
+		expect((await gate("ended0001")).verdict).toBe("passed");
 	});
 
-	test("a report that arrives after the end is recorded and counted, and nobody is asked", () => {
-		failingPull();
-		end("pr:12", "merged");
+	test("a report that arrives after the end is recorded and counted, and nobody is asked", async () => {
+		await failingPull();
+		await end("pr:12", "merged");
 		// The pipeline's second shard finishes after the merge, with another failure.
-		const late = h.call<ReportReceipt>("report", {
+		const late = await h.call<ReportReceipt>("report", {
 			...ciReport({
 				commit: "ended0001",
 				branch: "fix",
@@ -2763,28 +2897,28 @@ describe("a change that ends", () => {
 		});
 		expect(late.counts.fail).toBe(1);
 		expect(late.questions).toEqual([]);
-		expect(queue().counts.open).toBe(0);
-		expect(gate("ended0001")).toMatchObject({ verdict: "blocked", open: [] });
+		expect((await queue()).counts.open).toBe(0);
+		expect(await gate("ended0001")).toMatchObject({ verdict: "blocked", open: [] });
 		// A newer commit of the ended change is not asked about either.
-		h.call(
+		await h.call(
 			"report",
 			ciReport({ commit: "ended0003", branch: "fix", pr: 12, n: 2, fail: { 0: "expected 90, got 100" } }),
 		);
-		expect(queue().counts.open).toBe(0);
+		expect((await queue()).counts.open).toBe(0);
 	});
 
-	test("reopening with an unreported merged head waits for evidence in the change's scope", () => {
-		const asked = failingPull();
-		h.call("change", {
+	test("reopening with an unreported merged head waits for evidence in the change's scope", async () => {
+		const asked = await failingPull();
+		await h.call("change", {
 			change: "pr:12",
 			state: "merged",
 			head: "unseen001",
 			landing: { commit: "unseen001", branch: "main" },
 		});
-		expect(h.call<{ state: string }[]>("get", { refs: [asked.q] })[0]?.state).toBe("dissolved");
-		expect(end("pr:12", "open")).toMatchObject({ state: "open", questions: [] });
-		expect(h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({ run: null, verdict: "pending" });
-		expect(queue().counts.open).toBe(0);
+		expect((await h.call<{ state: string }[]>("get", { refs: [asked.q] }))[0]?.state).toBe("dissolved");
+		expect(await end("pr:12", "open")).toMatchObject({ state: "open", questions: [] });
+		expect(await h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({ run: null, verdict: "pending" });
+		expect((await queue()).counts.open).toBe(0);
 
 		const report = ciReport({
 			commit: "ended0001",
@@ -2794,33 +2928,33 @@ describe("a change that ends", () => {
 			attempt: 2,
 			fail: { 0: "expected 90, got 100" },
 		});
-		h.call("report", { ...report, target: { ...report.target, head: "ended0001" } });
-		const again = first(queue().items);
+		await h.call("report", { ...report, target: { ...report.target, head: "ended0001" } });
+		const again = first((await queue()).items);
 		expect(again).toMatchObject({ kind: "failure", state: "open", title: asked.title });
-		expect(h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({
+		expect(await h.call<GateStatus>("gate", { change: "pr:12" })).toMatchObject({
 			run: "R-1",
 			verdict: "blocked",
 			open: [again.q],
 		});
 	});
 
-	test("a change that is open again is asked about at once, with no new report", () => {
-		const asked = failingPull();
-		end("pr:12", "closed");
-		const reopened = end("pr:12", "open");
+	test("a change that is open again is asked about at once, with no new report", async () => {
+		const asked = await failingPull();
+		await end("pr:12", "closed");
+		const reopened = await end("pr:12", "open");
 		expect(reopened).toMatchObject({ change: "pr:12", state: "open", already: false });
 		expect(reopened.questions).toHaveLength(1);
-		const again = first(queue().items);
+		const again = first((await queue()).items);
 		expect(reopened.questions).toEqual([again.q]);
 		expect(again.q).not.toBe(asked.q);
 		expect(again.title).toBe(asked.title);
-		expect(gate("ended0001")).toMatchObject({ verdict: "blocked", open: [again.q] });
-		expect(changes()[0]?.state).toBe("open");
+		expect(await gate("ended0001")).toMatchObject({ verdict: "blocked", open: [again.q] });
+		expect((await changes())[0]?.state).toBe("open");
 	});
 
-	test("an open planned run that shows the failure still waits for its answer", () => {
-		h.call("propose", { edits: [{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90" }] });
-		h.call("report", {
+	test("an open planned run that shows the failure still waits for its answer", async () => {
+		await h.call("propose", { edits: [{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90" }] });
+		await h.call("report", {
 			target: { commit: "ended0004", repo: "acme/web", branch: "fix", pr: 12 },
 			results: [
 				{
@@ -2831,44 +2965,50 @@ describe("a change that ends", () => {
 				},
 			],
 		});
-		const planned = h.call<{ run: string }>("plan", {
+		const planned = await h.call<{ run: string }>("plan", {
 			name: "Release check",
 			select: { cases: ["C-1"] },
 			accepts: { commit: "ended0004", repo: "acme/web" },
 		});
-		const asked = first(queue().items.filter((item) => item.kind === "failure"));
+		const asked = first((await queue()).items.filter((item) => item.kind === "failure"));
 		expect(asked.about).toContain(planned.run);
-		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({ verdict: "blocked", open: [asked.q] });
-		expect(end("pr:12", "merged").questions).toEqual([]);
-		expect(queue().items.map((item) => item.q)).toContain(asked.q);
-		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({ verdict: "blocked", open: [asked.q] });
+		expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+			verdict: "blocked",
+			open: [asked.q],
+		});
+		expect((await end("pr:12", "merged")).questions).toEqual([]);
+		expect((await queue()).items.map((item) => item.q)).toContain(asked.q);
+		expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+			verdict: "blocked",
+			open: [asked.q],
+		});
 		// Once the run has its answer, nothing is left to ask about the ended change.
-		decide(asked, { is: "flaky" });
-		expect(queue().counts.failure ?? 0).toBe(0);
+		await decide(asked, { is: "flaky" });
+		expect((await queue()).counts.failure ?? 0).toBe(0);
 	});
 
-	test("an answer taken back or run out after the end asks nobody", () => {
-		const asked = failingPull();
-		decide(asked, { is: "flaky" });
-		end("pr:12", "merged");
-		const undone = h.call<{ status: string; needs: string | null }[]>("decide", { undo: asked.q })[0];
+	test("an answer taken back or run out after the end asks nobody", async () => {
+		const asked = await failingPull();
+		await decide(asked, { is: "flaky" });
+		await end("pr:12", "merged");
+		const undone = (await h.call<{ status: string; needs: string | null }[]>("decide", { undo: asked.q }))[0];
 		expect(undone?.status).toBe("reopened");
 		expect(undone?.needs).toContain("has ended");
-		expect(queue().counts.open).toBe(0);
-		expect(gate("ended0001")).toMatchObject({ verdict: "blocked", open: [] });
+		expect((await queue()).counts.open).toBe(0);
+		expect(await gate("ended0001")).toMatchObject({ verdict: "blocked", open: [] });
 		// A flaky answer that runs out on another ended change does not come back to the queue either.
-		const other = failingPull(13, "ended0005");
-		decide(other, { is: "flaky" });
-		end("pr:13", "closed");
+		const other = await failingPull(13, "ended0005");
+		await decide(other, { is: "flaky" });
+		await end("pr:13", "closed");
 		h.advance(15 * 86_400_000);
 		const rule = h.app.db.raw.query<{ id: number }, []>("SELECT id FROM actors WHERE kind = 'rule'").get()?.id ?? 0;
 		sweep(h.app, rule);
-		expect(queue().counts.open).toBe(0);
+		expect((await queue()).counts.open).toBe(0);
 	});
 
-	test("an archive does not say which changes ended: after an import each is open, and what was closed stays closed", () => {
-		const asked = failingPull();
-		end("pr:12", "merged");
+	test("an archive does not say which changes ended: after an import each is open, and what was closed stays closed", async () => {
+		const asked = await failingPull();
+		await end("pr:12", "merged");
 		const chunks: string[] = [];
 		exportArchive(h.app.db, (chunk) => chunks.push(chunk));
 		expect(chunks.join("")).not.toContain("change_ends");
@@ -2888,20 +3028,20 @@ describe("a change that ends", () => {
 		}
 	});
 
-	test("a pipeline or a person says so; an agent's word is not taken, and an unknown change is not found", () => {
-		failingPull();
+	test("a pipeline or a person says so; an agent's word is not taken, and an unknown change is not found", async () => {
+		await failingPull();
 		const pipeline = h.actor("pipeline", "ci", ["record"]);
 		const agent = h.actor("runner", "agent", ["read", "produce"]);
-		expect(h.raw("change", { change: "pr:12", state: "merged" }, agent)).toMatchObject({
+		expect(await h.raw("change", { change: "pr:12", state: "merged" }, agent)).toMatchObject({
 			ok: false,
 			error: { code: "forbidden" },
 		});
-		expect(queue().counts.open).toBe(1);
-		expect(h.raw("change", { change: "pr:404", state: "merged" }, pipeline)).toMatchObject({
+		expect((await queue()).counts.open).toBe(1);
+		expect(await h.raw("change", { change: "pr:404", state: "merged" }, pipeline)).toMatchObject({
 			ok: false,
 			error: { code: "not_found" },
 		});
-		expect(end("pr:12", "merged", pipeline).questions).toHaveLength(1);
-		expect(queue().counts.open).toBe(0);
+		expect((await end("pr:12", "merged", pipeline)).questions).toHaveLength(1);
+		expect((await queue()).counts.open).toBe(0);
 	});
 });
