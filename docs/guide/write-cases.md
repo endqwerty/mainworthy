@@ -119,11 +119,11 @@ Later text stays on the version that save made.
 A tab closed before the reply arrives sends nothing more. The draft stays on this device.
 When you open the draft again, the page asks the server about the save.
 
-Saved commands and conflict merge attempts belong to the project they were written for.
-If that project is deleted and another uses the same key, recovery sends nothing to the new project.
+Each saved draft belongs to the project it was written for, including unsent edits, conflicts and submissions waiting for review.
+If that project is deleted and another uses the same key, recovery neither reads the new project's question under the old reference nor sends the old text.
 The page explains that the original project is gone or cannot be identified, and moves your text into **Preserved text**.
 The old command is removed, so you can edit and save the current case normally.
-Older saved attempts without a project identity follow the same rule.
+Older saved drafts without their own project identity follow the same rule, even if an earlier saved command includes an identity.
 You can copy text from the preserved draft or merge into your current edit, or choose **Discard preserved copy**.
 The preserved copy stays through reloads and fresh saves until you discard it.
 For a draft of a new case, find the preserved copy on the Suite.

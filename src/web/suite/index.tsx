@@ -406,7 +406,7 @@ export function SuiteScreen() {
 		project,
 		op: "get",
 		input: { refs: [conflict?.q ?? ""] },
-		enabled: Boolean(conflict),
+		enabled: Boolean(conflict && projectIdentity && displayedDraft?.projectIdentity === projectIdentity),
 	});
 
 	const [picked, setPicked] = useState(new Set<string>());
@@ -477,7 +477,7 @@ export function SuiteScreen() {
 					...readDraftCopies({
 						project,
 						id: copyCase,
-						...(recordedView ? { recorded: editDraft(recordedView) } : {}),
+						...(recordedView ? { recorded: editDraft(recordedView, projectIdentity) } : {}),
 					}),
 					...(copyCase ? readDraftCopies({ project, id: "" }) : []),
 				],
@@ -498,7 +498,7 @@ export function SuiteScreen() {
 			window.removeEventListener("storage", changed);
 			window.removeEventListener(draftCopiesChanged, refresh);
 		};
-	}, [project, copyCase, recordedView, owner]);
+	}, [project, projectIdentity, copyCase, recordedView, owner]);
 
 	useEffect(() => {
 		if (view)
@@ -775,23 +775,16 @@ export function SuiteScreen() {
 	);
 	const mayRecover = useCallback(
 		(saved: Draft): boolean => {
-			if (!projectIdentity) {
-				setStatus("The current project's identity is unavailable. Reload before saving a draft.");
-				return false;
-			}
-			if (
-				(saved.sent && saved.sent.input.projectIdentity !== projectIdentity) ||
-				saved.conflict?.sentMerges.some((sent) => sent.projectIdentity !== projectIdentity)
-			) {
+			if (!saved.projectIdentity || saved.projectIdentity !== projectIdentity) {
 				preserveRejectedDraft(saved);
 				return false;
 			}
 			return true;
 		},
-		[projectIdentity, setStatus, preserveRejectedDraft],
+		[projectIdentity, preserveRejectedDraft],
 	);
 	useEffect(() => {
-		if (displayedDraft?.sent || displayedDraft?.conflict?.sentMerges.length) mayRecover(displayedDraft);
+		if (displayedDraft) mayRecover(displayedDraft);
 	}, [displayedDraft, mayRecover]);
 	/**
 	 * The draft of a card as it is now, while its conflict is still the question `state` was shown for. Tags and
@@ -1074,7 +1067,6 @@ export function SuiteScreen() {
 				body: CaseBody.parse(parsed.body),
 				tags: parsed.tags,
 				covers: parsed.covers,
-				projectIdentity,
 			};
 			storeConflict({ ...card.conflict, sentMerges: [...card.conflict.sentMerges, sent] });
 			if (!mayWrite(state.draftId)) return;
@@ -1087,7 +1079,7 @@ export function SuiteScreen() {
 					ifOpen: true,
 					answer: { is: "merge", body: sent.body, tags: sent.tags, covers: sent.covers },
 					cmd: sent.cmd,
-					projectIdentity: sent.projectIdentity,
+					projectIdentity: saved.draft.projectIdentity,
 				},
 				{ project, owner },
 			);
@@ -1316,7 +1308,7 @@ export function SuiteScreen() {
 					// typed since follows it under a new id (the review of the first fix for #71, B1).
 				}
 				if (!reply) {
-					const request = recovered?.input ?? { cmd: source.cmd, edits, projectIdentity };
+					const request = recovered?.input ?? { cmd: source.cmd, edits, projectIdentity: source.projectIdentity };
 					if (!sessionCurrent(owner) || !mayWrite(source.id, !draftStored)) return;
 					const sent = recovered ?? {
 						input: request,
@@ -1620,7 +1612,11 @@ export function SuiteScreen() {
 	const sealRef = useRef(sealDraft);
 	sealRef.current = sealDraft;
 	const waiting = [...captures.values()].filter(
-		(draft) => draft.submission.kind === "waiting" && draft.owner === windowId,
+		(draft) =>
+			Boolean(projectIdentity) &&
+			draft.submission.kind === "waiting" &&
+			draft.owner === windowId &&
+			draft.projectIdentity === projectIdentity,
 	);
 	const waitingQuestions = useQueryOp({
 		project,
@@ -1709,6 +1705,7 @@ export function SuiteScreen() {
 		const body = emptyBody();
 		const next: Draft = {
 			id: `draft:${randomId()}`,
+			projectIdentity,
 			ref: null,
 			base: 0,
 			body,
@@ -1790,7 +1787,9 @@ export function SuiteScreen() {
 			return;
 		}
 		const saved = readDraft({ project, id: shown.ref });
-		const next = ownedDraft(saved ?? (draftRef.current?.ref === shown.ref ? draftRef.current : editDraft(shown)));
+		const next = ownedDraft(
+			saved ?? (draftRef.current?.ref === shown.ref ? draftRef.current : editDraft(shown, projectIdentity)),
+		);
 		change(
 			saved ? next : { ...next, caret: { field: "title", start: next.body.title.length, end: next.body.title.length } },
 			true,
@@ -1806,7 +1805,7 @@ export function SuiteScreen() {
 			});
 			return;
 		}
-		const next = ownedDraft(readDraft({ project, id: shown.ref }) ?? editDraft(shown));
+		const next = ownedDraft(readDraft({ project, id: shown.ref }) ?? editDraft(shown, projectIdentity));
 		const parts = field.split(":");
 		const step = next.body.steps.find((item) => item.id === parts[0]);
 		const value =

@@ -199,7 +199,7 @@ test("a project-detached copy drops command intent and survives recording and ow
 			mine: body,
 			current: body,
 			merged: { ...body, title: "Preserve this merge #smoke" },
-			sentMerges: [{ cmd: "merge-cmd-01", body, tags: ["smoke"], projectIdentity: "old-project" }],
+			sentMerges: [{ cmd: "merge-cmd-01", body, tags: ["smoke"] }],
 			addresses: [{ kind: "field", name: "title" }],
 			draftId: "C-1",
 		},

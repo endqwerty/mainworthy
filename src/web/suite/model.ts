@@ -70,10 +70,11 @@ export function bodyOf(view: CaseView): CaseBody {
 		fields: view.fields,
 	};
 }
-export function editDraft(view: CaseView): Draft {
+export function editDraft(view: CaseView, projectIdentity: Draft["projectIdentity"]): Draft {
 	const body = bodyOf(view);
 	return {
 		id: view.ref,
+		projectIdentity,
 		kind: view.kind,
 		ref: view.ref,
 		base: view.version,
