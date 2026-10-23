@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
@@ -175,6 +176,65 @@ test("invalid import leaves bootstrap rows and the caller's token intact", async
 		},
 		{ mode: "server" },
 	);
+});
+
+test("HTTP and CLI archive imports refuse invalid durations and accept their exact limit", async () => {
+	await withInstance(async (source) => {
+		await source.client.call("report", {
+			target: { commit: "archive-duration", branch: "main" },
+			results: [
+				{
+					test: { key: "timed-test" },
+					outcome: "pass",
+					durationMs: 2_592_000_000,
+					tries: [{ outcome: "fail", durationMs: 2_592_000_000 }],
+				},
+			],
+		});
+		const exported = await source.client.request("/api/export");
+		expect(exported.status).toBe(200);
+		const text = await exported.text();
+		await withInstance(async (target) => {
+			const before = await target.client.call("admin", { do: "project.list" });
+			for (const table of ["results", "result_tries"]) {
+				for (const duration of ["-1", "2592000001", "9223372036854775807"]) {
+					const lines = text.trimEnd().split("\n").slice(0, -1);
+					const changed = lines.map((line) =>
+						line.startsWith(`{"t":"${table}",`)
+							? line.replace('"duration_ms":2592000000', `"duration_ms":${duration}`)
+							: line,
+					);
+					const preceding = `${changed.join("\n")}\n`;
+					const body = `${preceding}${JSON.stringify({ end: true, rows: changed.length - 1, sha256: createHash("sha256").update(preceding).digest("hex") })}\n`;
+					const response = await target.client.request("/api/import", { method: "POST", body });
+					expect(response.status).toBe(400);
+					const refused = z
+						.object({ ok: z.literal(false), error: z.object({ code: z.literal("invalid"), message: z.string() }) })
+						.parse(await response.json());
+					expect(refused.error.message).toMatch(
+						new RegExp(`${table}\\.duration_ms.*row \\d+.*line \\d+.*0.*2592000000`),
+					);
+					const file = join(target.directory, "duration.ndjson.gz");
+					await Bun.write(file, Bun.gzipSync(body));
+					const run = table === "results" && duration === "-1" ? target.cli : target.run;
+					const imported = await run(["import", file]);
+					expect(imported.code).toBe(4);
+					expect(imported.stderr).toContain(`invalid: ${refused.error.message}`);
+					expect(await target.client.call("admin", { do: "project.list" })).toEqual(before);
+					expect(target.instance.app.reader.raw.query("SELECT * FROM results").all()).toEqual([]);
+					expect(await readdir(join(target.directory, "spool"))).toEqual([]);
+				}
+			}
+			const file = join(target.directory, "valid.ndjson.gz");
+			await Bun.write(file, Bun.gzipSync(text));
+			expect(await target.run(["import", file])).toMatchObject({ code: 0, stderr: "" });
+			for (const table of ["results", "result_tries"]) {
+				expect(target.instance.app.reader.raw.query(`SELECT duration_ms FROM ${table}`).all()).toEqual([
+					{ duration_ms: 2_592_000_000 },
+				]);
+			}
+		});
+	});
 });
 
 test("a failed export reports the worker's validation error and the next export succeeds", async () => {
@@ -392,6 +452,50 @@ test("a report the original had accepted and not yet applied is applied by the i
 			// No restart: the staged report is applied as part of the import, and its gate says what it showed.
 			const gate = (await target.client.call("gate", { commit: "midreport1" })) as GateStatus;
 			expect(gate).toMatchObject({ verdict: "blocked", tally: { pass: 1, unexplained: 1 } });
+		});
+	});
+});
+
+test("an archive refuses out-of-range durations in pending reports before recovery", async () => {
+	await withInstance(async (source) => {
+		const result = {
+			test: { key: "pending-timed-test" },
+			outcome: "pass" as const,
+			durationMs: 2_592_000_000,
+			tries: [{ outcome: "fail" as const, durationMs: 2_592_000_000 }],
+		};
+		const app = source.instance.app;
+		app.db.transaction(() => {
+			const project = findProject(app.db, "scratch");
+			const owner = project ? actorByName(app.db, "robin", project.id) : null;
+			if (!project || !owner) throw new Error("the source has no project or owner");
+			const ctx = makeCtx(app, project, owner, true);
+			acceptReport(ctx, { target: { commit: "pending-duration", branch: "main" }, results: [result] });
+			stampSeq(ctx);
+		});
+		await withInstance(async (target) => {
+			const before = await target.client.call("admin", { do: "project.list" });
+			for (const field of ["result", "try"]) {
+				for (const durationMs of [-1, 2_592_000_001]) {
+					const staged = [
+						{ ...result, ...(field === "result" ? { durationMs } : { tries: [{ outcome: "fail", durationMs }] }) },
+					];
+					app.db.raw.query("UPDATE batches SET staged = ? WHERE state = 'accepted'").run(JSON.stringify(staged));
+					const archive = await source.client.request("/api/export");
+					const response = await target.client.request("/api/import", { method: "POST", body: archive.body });
+					expect(response.status).toBe(400);
+					expect(await response.text()).toMatch(/batches\.staged.*row \d+.*line \d+.*0.*2592000000/);
+					expect(await target.client.call("admin", { do: "project.list" })).toEqual(before);
+				}
+			}
+			app.db.raw.query("UPDATE batches SET staged = ? WHERE state = 'accepted'").run(JSON.stringify([result]));
+			const archive = await source.client.request("/api/export");
+			expect((await target.client.request("/api/import", { method: "POST", body: archive.body })).status).toBe(200);
+			for (const table of ["results", "result_tries"]) {
+				expect(target.instance.app.reader.raw.query(`SELECT duration_ms FROM ${table}`).all()).toEqual([
+					{ duration_ms: 2_592_000_000 },
+				]);
+			}
 		});
 	});
 });

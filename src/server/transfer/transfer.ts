@@ -3,6 +3,7 @@ import { z } from "zod";
 import { Attachment, AttachmentData } from "../../core/attachments.ts";
 import { Policy } from "../../core/kinds.ts";
 import { CaseBody } from "../../core/model.ts";
+import { ResultIn, resultDuration } from "../../core/ops.ts";
 import { policyProblem, storedPolicy } from "../../core/presets.ts";
 import { rebuildAssertionIndexes } from "../evidence/assertions.ts";
 import { attachmentType, type BlobStore, blobHash } from "../kernel/blobs.ts";
@@ -13,6 +14,7 @@ import { searchText } from "../suite/suite.ts";
 
 const CHUNK_BYTES = 64 * 1024;
 const Count = z.number().int().nonnegative();
+const StagedResults = ResultIn.array();
 
 // Maps preserve every JSON key, including __proto__, which Zod object records discard.
 function jsonMap<T extends z.ZodType>(values: T) {
@@ -457,7 +459,7 @@ function importTransaction<T>(db: Db, fn: () => T, progress: (step: string, ms: 
  * Replays a format-1 archive into an instance with no projects, preserving all IDs and stored values. The
  * header must name this build's archive version. Missing nullable, non-key columns are filled with NULL, so adding
  * such columns need not change the archive version when NULL preserves the earlier behavior. Every count, digest,
- * column and foreign key is checked before commit; a failure restores the entire target, including bootstrap rows, sessions and the old
+ * column, duration, pending result input and foreign key is checked before commit; a failure restores the entire target, including bootstrap rows, sessions and the old
  * search index. Tokens and sessions are discarded on success along with bootstrap identity rows.
  * Migration-owned schema_version is retained.
  * Lines exclude the LF separator and retain all other characters, since their bytes determine the digest.
@@ -542,6 +544,33 @@ export function importArchive(db: Db, lines: Iterable<string>, options: { blobs?
 				}
 				for (const column of table.columns) {
 					if (!entry.r.has(column) && !table.nullable.has(column)) throw invalid(`missing column ${entry.t}.${column}`);
+				}
+				const duration = entry.r.get("duration_ms");
+				if (
+					(entry.t === "results" || entry.t === "result_tries") &&
+					duration !== null &&
+					duration !== undefined &&
+					!resultDuration.safeParse(duration).success
+				) {
+					throw invalid(
+						`invalid archive ${entry.t}.duration_ms for row ${entry.r.get("id")} on line ${position}: expected an integer from ${resultDuration.minValue} to ${resultDuration.maxValue} ms`,
+					);
+				}
+				if (entry.t === "batches" && entry.r.get("state") === "accepted") {
+					const stored = entry.r.get("staged");
+					const context = `invalid archive batches.staged for row ${entry.r.get("id")} on line ${position}`;
+					let staged: unknown;
+					try {
+						staged = typeof stored === "string" ? JSON.parse(stored) : stored;
+					} catch {
+						throw invalid(`${context}: invalid JSON`);
+					}
+					const pending = StagedResults.safeParse(staged);
+					if (!pending.success) {
+						throw invalid(
+							`${context}: result and try durations must be integers from ${resultDuration.minValue} to ${resultDuration.maxValue} ms; ${pending.error.message}`,
+						);
+					}
 				}
 				if (entry.t === "meta" && entry.r.get("key") === "schema_version")
 					throw invalid("archive must not overwrite meta.schema_version");
