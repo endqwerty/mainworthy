@@ -12,6 +12,12 @@ import { call } from "../../src/web/lib/api.ts";
 
 const found = findChromium();
 export const browserAvailable = found.path !== null;
+/**
+ * Runs its arguments in the background with this shell's stdin, then waits. POSIX `sh` (dash on Ubuntu) points a
+ * background job's stdin at /dev/null before applying its redirections, so `<&0` alone would hand the supervisor
+ * an empty lifetime pipe; copying the pipe to fd 3 first keeps it.
+ */
+export const FORWARD_STDIN = 'exec 3<&0; "$@" 0<&3 3<&- & wait "$!"';
 if (found.path === null) console.info(`Skipping Mainworthy e2e. ${found.skipped}`);
 export type Server = {
 	url: string;
@@ -153,7 +159,7 @@ export async function startServer({
 				// A shell fork clears that signal; the supervisor can outlive worker loss and reap its group.
 				"/bin/sh",
 				"-c",
-				'"$@" <&0 & wait "$!"',
+				FORWARD_STDIN,
 				"mainworthy-fixture-supervisor",
 				process.execPath,
 				"test/e2e/supervise.ts",

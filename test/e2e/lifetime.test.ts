@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { lineage, ownedChildren, processTable, registerOwnedChild } from "../../scripts/work/processes.ts";
+import { FORWARD_STDIN } from "./support.ts";
 
 const alive = (pid: number): boolean => {
 	try {
@@ -130,6 +131,25 @@ async function released(server: Awaited<ReturnType<typeof worker>>) {
 	).toBe(false);
 	const probe = Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response() });
 	await probe.stop(true);
+}
+
+for (const shell of ["/bin/sh", "/bin/dash", "/bin/bash"]) {
+	test.skipIf(!existsSync(shell))(
+		`the supervisor's shell wrapper keeps the lifetime pipe as stdin under ${shell}`,
+		async () => {
+			const child = Bun.spawn(
+				[shell, "-c", FORWARD_STDIN, "wrapper", "/bin/sh", "-c", 'read -r line; echo "[$line]"'],
+				{
+					stdin: "pipe",
+					stdout: "pipe",
+				},
+			);
+			child.stdin.write("lifetime\n");
+			await child.stdin.end();
+			expect((await new Response(child.stdout).text()).trim()).toBe("[lifetime]");
+			expect(await child.exited).toBe(0);
+		},
+	);
 }
 
 test("a SIGKILLed worker's server exits and frees its port without stopping an unrelated server", async () => {
