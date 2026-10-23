@@ -16,5 +16,5 @@ export const projectCommand = {
 		.max(128)
 		.optional()
 		.meta({ "x-mcp-hidden": true })
-		.describe("Only write if the project key still names this identity."),
+		.describe("Only proceed if the project key still names this identity."),
 };

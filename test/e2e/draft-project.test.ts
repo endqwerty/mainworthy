@@ -215,6 +215,13 @@ for (const attempt of ["save", "merge"] as const)
 						});
 						expect(before.conflict?.sentMerges).toEqual([{ cmd: command.cmd, ...answer }]);
 					}
+					const refusal =
+						project === "replacement after retry"
+							? page.waitForResponse(
+									(response) =>
+										response.url().endsWith(`/${attempt === "merge" ? "get" : operation}`) && response.status() === 409,
+								)
+							: null;
 					if (project !== "unbound") {
 						removeProject(instance.app.db, "scratch");
 						await server.api("admin", { do: "project.create", key: "scratch", preset: "loose" });
@@ -226,11 +233,8 @@ for (const attempt of ["save", "merge"] as const)
 						}
 						if (project === "replacement after retry") {
 							await page.unroute(`**/${operation}`);
-							const refusal = page.waitForResponse(
-								(response) => response.url().endsWith(`/${operation}`) && response.status() === 409,
-							);
 							if (attempt === "save") await page.keyboard.press("Control+Enter");
-							else await page.getByRole("button", { name: "Resolve conflict", exact: true }).click();
+							if (!refusal) throw new Error("Missing obsolete-project refusal");
 							expect(await (await refusal).json()).toMatchObject({
 								ok: false,
 								error: { details: { projectIdentity: "obsolete" } },

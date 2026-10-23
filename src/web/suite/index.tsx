@@ -7,16 +7,11 @@ import type { Api } from "../../core/api.ts";
 import { canonicalJson } from "../../core/hash.ts";
 import { newStepId } from "../../core/ids.ts";
 import { mergeBodies } from "../../core/merge3.ts";
-import { CaseBody, ConflictAddress, cleanPath, emptyBody, fieldErrors, TAG } from "../../core/model.ts";
+import { CaseBody, cleanPath, emptyBody, fieldErrors, TAG } from "../../core/model.ts";
 import type { Edit } from "../../core/ops.ts";
 import { parseBodyInline } from "../../core/outline.ts";
-import {
-	nullableText as schemaNullableText,
-	number as schemaNumber,
-	optionalFlag as schemaOptionalFlag,
-	text as schemaText,
-	texts as schemaTexts,
-} from "../../core/schema.ts";
+import { ProposeReply } from "../../core/replies.ts";
+import { optionalFlag as schemaOptionalFlag, text as schemaText, texts as schemaTexts } from "../../core/schema.ts";
 import { cleanTitle, conflictEditorStatus, firstStep, ownershipStatus } from "../case/editor.tsx";
 import { CasePane, type ConflictState } from "../case/pane.tsx";
 import { ApiError, call } from "../lib/api.ts";
@@ -75,6 +70,10 @@ import { type PendingPlacement, placed, placedDraft, supersedeMoves } from "./pl
 import "./suite.css";
 import "../case/case.css";
 
+const draftStorageFull = "Device storage is full. Keep this tab open until the version is recorded.";
+const obsoleteProject = (error: unknown): boolean =>
+	error instanceof ApiError && error.details.projectIdentity === "obsolete";
+
 const draftRemoved = "mainworthy:suite-draft-removed";
 
 type VisibleRow =
@@ -91,16 +90,6 @@ const ResolvedEdit = z.object({
 	body: CaseBody,
 });
 
-/** The reply a save was given, as `command` returns it for a save whose reply the page never got. */
-const RecordedSave = z.object({
-	proposal: schemaNullableText,
-	status: z.enum(["adopted", "open", "conflict", "rejected"]),
-	question: schemaNullableText,
-	needs: schemaNullableText,
-	cases: z.array(z.object({ ref: schemaText, version: schemaNumber, hash: schemaText })),
-	conflicts: z.array(z.object({ case: schemaText, addresses: z.array(ConflictAddress) })),
-});
-
 const CardQuestion = z.object({
 	q: schemaText,
 	state: schemaText,
@@ -111,7 +100,7 @@ const AdoptionQuestion = CardQuestion.extend({
 	decision: z
 		.object({
 			answer: z.object({ is: schemaText }),
-			effects: z.object({ cases: RecordedSave.shape.cases.optional(), rejected: schemaOptionalFlag }),
+			effects: z.object({ cases: ProposeReply.shape.cases.optional(), rejected: schemaOptionalFlag }),
 		})
 		.nullable(),
 });
@@ -247,7 +236,7 @@ export function SuiteScreen() {
 				setDraftStored(true);
 			} catch {
 				setDraftStored(false);
-				setStatus("Device storage is full. Keep this tab open until the version is recorded.");
+				setStatus(draftStorageFull);
 			}
 			followDraft(next);
 		},
@@ -402,7 +391,7 @@ export function SuiteScreen() {
 	const conflictQuestion = useQueryOp({
 		project,
 		op: "get",
-		input: { refs: [conflict?.q ?? ""] },
+		input: { refs: [conflict?.q ?? ""], projectIdentity: displayedDraft?.projectIdentity },
 		enabled: Boolean(conflict && projectIdentity && displayedDraft?.projectIdentity === projectIdentity),
 	});
 
@@ -672,7 +661,7 @@ export function SuiteScreen() {
 			setDraftStored(true);
 		} catch {
 			setDraftStored(false);
-			setStatus("Device storage is full. Keep this tab open until the version is recorded.");
+			setStatus(draftStorageFull);
 		}
 		if (focus) {
 			flushSync(() => setDraftState(changed));
@@ -767,6 +756,18 @@ export function SuiteScreen() {
 		},
 		[project, owner, windowId, mayWrite, dropDraft, setStatus],
 	);
+	const readForDraft = useCallback(
+		async (draft: Draft, input: Api["get"]["input"]) => {
+			try {
+				return await call("get", { ...input, projectIdentity: draft.projectIdentity }, { project, owner });
+			} catch (error) {
+				if (obsoleteProject(error)) preserveRejectedDraft(draft);
+				throw error;
+			}
+		},
+		[project, owner, preserveRejectedDraft],
+	);
+
 	const mayRecover = useCallback(
 		(saved: Draft): boolean => {
 			if (!saved.projectIdentity || saved.projectIdentity !== projectIdentity) {
@@ -838,11 +839,7 @@ export function SuiteScreen() {
 			// and not its text, and the case the page holds may be from before the merge (issue #94). A merge that
 			// made a version is read at that version. One that made none (the head held its text already, or it
 			// waits for a person) is read as it is now, which is the version the card was shown against or a later one.
-			const rows = await call(
-				"get",
-				{ refs: [state.ref], ...(version !== null ? { version } : {}) },
-				{ project, owner },
-			);
+			const rows = await readForDraft(source.draft, { refs: [state.ref], ...(version !== null ? { version } : {}) });
 			const view = version !== null ? CaseView.parse(rows[0]) : null;
 			if (!sessionCurrent(owner) || !mayWrite(state.draftId)) return;
 			const remaining = left(
@@ -898,7 +895,7 @@ export function SuiteScreen() {
 			void invalidateProject(project);
 			if (next && !waiting && sameBody(next.body, bodyOf(recorded))) await sealRef.current({ saved: next });
 		},
-		[project, owner, mayWrite, cardDraft, holdCase, putDraft, dropDraft, setStatus],
+		[project, owner, mayWrite, cardDraft, readForDraft, holdCase, putDraft, dropDraft, setStatus],
 	);
 	/** Acts on what the server recorded for a merge this card sent. False when that merge settled nothing. */
 	const settleMerge = useCallback(
@@ -922,7 +919,9 @@ export function SuiteScreen() {
 					return false;
 				}
 				case "moved": {
-					const rows = await call("get", { refs: [state.ref] }, { project, owner });
+					const source = cardDraft(state);
+					if (!source) return true;
+					const rows = await readForDraft(source.draft, { refs: [state.ref] });
 					if (!sessionCurrent(owner) || !mayWrite(state.draftId)) return true;
 					const card = cardDraft(state);
 					if (!card) return true;
@@ -980,7 +979,7 @@ export function SuiteScreen() {
 				}
 			}
 		},
-		[project, owner, mayWrite, cardDraft, storeConflict, endMergedCard, setStatus],
+		[project, owner, mayWrite, cardDraft, readForDraft, storeConflict, endMergedCard, setStatus],
 	);
 	/**
 	 * The card's question is answered. Whether a merge this card sent answered it is asked of the server (the
@@ -999,7 +998,7 @@ export function SuiteScreen() {
 				if (found.state !== "done") continue;
 				if (await settleMerge({ state, sent, fate: mergeFate({ reply: found.reply, ref: state.ref }) })) return;
 			}
-			const rows = await call("get", { refs: [state.ref] }, { project, owner });
+			const rows = await readForDraft(saved.draft, { refs: [state.ref] });
 			if (!sessionCurrent(owner) || !mayWrite(state.draftId)) return;
 			const card = cardDraft(state);
 			if (!card) return;
@@ -1018,7 +1017,19 @@ export function SuiteScreen() {
 			uncertainMerges.current.delete(state.q);
 			void invalidateProject(project);
 		},
-		[project, owner, mayWrite, mayRecover, cardDraft, settleMerge, holdCase, dropDraft, forgetRequest, setStatus],
+		[
+			project,
+			owner,
+			mayWrite,
+			mayRecover,
+			cardDraft,
+			readForDraft,
+			settleMerge,
+			holdCase,
+			dropDraft,
+			forgetRequest,
+			setStatus,
+		],
 	);
 	useEffect(() => {
 		const read = CardQuestion.safeParse(conflictQuestion.data?.[0]);
@@ -1046,7 +1057,7 @@ export function SuiteScreen() {
 		if (!saved || !mayRecover(saved.draft)) return;
 		resolving.current.add(state.q);
 		let asked = false;
-		const question = async () => CardQuestion.parse((await call("get", { refs: [state.q] }, { project, owner }))[0]);
+		const question = async () => CardQuestion.parse((await readForDraft(saved.draft, { refs: [state.q] }))[0]);
 		try {
 			const open = await question();
 			// Answered already, perhaps by a merge sent from here whose reply was lost.
@@ -1087,7 +1098,7 @@ export function SuiteScreen() {
 			uncertainMerges.current.delete(state.q);
 			setStatus(refusedStatus(fate.needs));
 		} catch (error) {
-			if (error instanceof ApiError && error.details.projectIdentity === "obsolete") {
+			if (obsoleteProject(error)) {
 				preserveRejectedDraft(saved.draft);
 				return;
 			}
@@ -1204,7 +1215,7 @@ export function SuiteScreen() {
 				let recorded = false;
 				if (snapshot.submission.kind === "waiting") {
 					const question = AdoptionQuestion.parse(
-						(await call("get", { refs: [snapshot.submission.question] }, { project, owner }))[0],
+						(await readForDraft(snapshot, { refs: [snapshot.submission.question] }))[0],
 					);
 					if (!sessionCurrent(owner) || !mayWrite(source.id, !draftStored)) return;
 					if (question.state === "open") {
@@ -1298,7 +1309,7 @@ export function SuiteScreen() {
 						return;
 					}
 					if (fate.state === "done") {
-						reply = RecordedSave.parse(fate.reply);
+						reply = ProposeReply.parse(fate.reply);
 						recorded = true;
 					}
 					// `none` is "not recorded yet": the save may still be on its way. The one request that cannot be
@@ -1330,7 +1341,7 @@ export function SuiteScreen() {
 					try {
 						reply = await call("propose", request, { project, keepalive, owner });
 					} catch (error) {
-						if (error instanceof ApiError && error.details.projectIdentity === "obsolete") {
+						if (obsoleteProject(error)) {
 							preserveRejectedDraft(source);
 							return;
 						}
@@ -1348,7 +1359,7 @@ export function SuiteScreen() {
 				}
 				if (reply.status === "conflict" || reply.status === "rejected") forgetRequest(snapshot.id);
 				if (reply.status === "conflict" && reply.question && snapshot.ref && reply.proposal) {
-					const proposal = (await call("get", { refs: [reply.proposal] }, { project, owner }))[0];
+					const proposal = (await readForDraft(snapshot, { refs: [reply.proposal] }))[0];
 					if (!mayWrite(source.id, !draftStored)) return;
 					const rawEdits = proposal && Array.isArray(proposal.edits) ? proposal.edits : [];
 					const edit = rawEdits
@@ -1407,7 +1418,7 @@ export function SuiteScreen() {
 				let adoptedTags = sentTags;
 				let adoptedCovers = cleaned.covers;
 				if (ref) {
-					const rows = await call("get", { refs: [ref], ...(stamp ? { version } : {}) }, { project, owner });
+					const rows = await readForDraft(snapshot, { refs: [ref], ...(stamp ? { version } : {}) });
 					if (!sessionCurrent(owner)) return;
 					if (!mayWrite(source.id, !draftStored)) return;
 					const received = CaseView.parse(rows[0]);
@@ -1615,10 +1626,19 @@ export function SuiteScreen() {
 		project,
 		op: "get",
 		input: {
+			projectIdentity,
 			refs: waiting.flatMap((draft) => (draft.submission.kind === "waiting" ? [draft.submission.question] : [])),
 		},
 		enabled: waiting.length > 0,
 	});
+	useEffect(() => {
+		for (const [error, drafts] of [
+			[conflictQuestion.error, displayedDraft ? [displayedDraft] : []],
+			[waitingQuestions.error, waiting],
+		] as const)
+			if (obsoleteProject(error)) for (const draft of drafts) preserveRejectedDraft(draft);
+	}, [conflictQuestion.error, displayedDraft, waitingQuestions.error, waiting, preserveRejectedDraft]);
+
 	useEffect(() => {
 		for (const item of waitingQuestions.data ?? []) {
 			const question = CardQuestion.safeParse(item);
@@ -1729,7 +1749,7 @@ export function SuiteScreen() {
 			setDraftStored(true);
 		} catch {
 			setDraftStored(false);
-			setStatus("Device storage is full. Keep this tab open until the version is recorded.");
+			setStatus(draftStorageFull);
 		}
 
 		focusDraft(next);

@@ -296,11 +296,6 @@ function* executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>, call
 
 		if (!found) throw new Error(`${op.name}: a project operation with no project`);
 
-		if (!writing) {
-			if (!("run" in op)) throw new Error(`${op.name}: a read is one function`);
-			return { ok: true, result: op.run(makeCtx(app, found, actor, false), input), seq: found.seq };
-		}
-
 		if (
 			typeof input === "object" &&
 			input !== null &&
@@ -310,9 +305,14 @@ function* executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>, call
 		)
 			return fail(
 				"conflict",
-				"This saved command belongs to an obsolete project. Read the current project before writing again.",
+				"This request belongs to an obsolete project. Read the current project before trying again.",
 				{ projectIdentity: "obsolete" },
 			);
+
+		if (!writing) {
+			if (!("run" in op)) throw new Error(`${op.name}: a read is one function`);
+			return { ok: true, result: op.run(makeCtx(app, found, actor, false), input), seq: found.seq };
+		}
 
 		try {
 			// True once the command id is bound to this request: by an earlier attempt that committed its first
