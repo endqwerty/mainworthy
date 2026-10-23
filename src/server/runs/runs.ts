@@ -21,6 +21,7 @@ import {
 	type TargetMatch,
 	type Verdict,
 	verdict,
+	workHeldByOther,
 } from "../../core/runs.ts";
 import {
 	type Applied,
@@ -438,7 +439,7 @@ export function takeWork(
 	if (!slot) return { kind: "empty" };
 	if (!canWork(ctx, run, slot)) throw forbidden("your method is not admitted by this slot's run and pinned case");
 	const held = leaseOf(ctx, slot.id);
-	if (held && held.actor !== ctx.actor.id) return { kind: "busy", lease: held };
+	if (held && workHeldByOther(held, ctx.actor.id, ctx.app.now())) return { kind: "busy", lease: held };
 	const now = ctx.app.now();
 	const lease = { slot: slot.id, actor: ctx.actor.id, since: held?.since ?? now, until: now + input.seconds * 1000 };
 	ctx.db.run(Q.take, lease);
