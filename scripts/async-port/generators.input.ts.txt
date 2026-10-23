@@ -1,0 +1,40 @@
+import { COMMIT, type WriteDb } from "./src/server/kernel/db.ts";
+export function* child(db: WriteDb): Generator<undefined, number, void> {
+	db.run("UPDATE items SET x = 1");
+	yield undefined;
+	return 1;
+}
+export function* parent(db: WriteDb): Generator<undefined | typeof COMMIT, number, void> {
+	const value = yield* child(db);
+	yield COMMIT;
+	return value;
+}
+export function* savepoint(db: WriteDb): Generator<undefined, number, void> {
+	return yield* db.savepointSteps(function* () {
+		db.run("UPDATE items SET x = 2");
+		yield undefined;
+		return 2;
+	});
+}
+export function consume(db: WriteDb) {
+	for (const step of parent(db)) console.log(step);
+}
+export function wrapped(db: WriteDb) {
+	return child(db);
+}
+export function variable(db: WriteDb) {
+	const steps = wrapped(db);
+	for (const step of steps) console.log(step);
+}
+export function complete<T>(steps: Generator<undefined, T, void>): T {
+	for (let step = steps.next(); ; step = steps.next()) if (step.done) return step.value;
+}
+export function drain(db: WriteDb) {
+	return complete(child(db));
+}
+export function drainAgain(db: WriteDb) {
+	return complete(child(db));
+}
+export function* forwardingSavepoint(db: WriteDb): Generator<undefined, number, void> {
+	return yield* db.savepointSteps(() => child(db));
+}

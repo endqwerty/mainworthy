@@ -1,0 +1,52 @@
+import type { Db } from "./src/server/kernel/db.ts";
+import { openApp as open } from "./src/server/kernel/app.ts";
+const S = "SELECT x";
+export function lookup(db: Db) {
+	return db.get(S);
+}
+export function property(db: Db) {
+	return lookup(db)?.x;
+}
+export function object(db: Db) {
+	return { value: lookup(db) };
+}
+export function write(db: Db): void {
+	db.run("UPDATE items SET x = 1");
+}
+export function transitive(db: Db) {
+	write(db);
+}
+export interface Reader {
+	lookup(db: Db): { x: number; id: number } | null;
+}
+export class Impl implements Reader {
+	lookup(db: Db) {
+		return lookup(db);
+	}
+}
+export function throughInterface(reader: Reader, db: Db) {
+	return reader.lookup(db);
+}
+export function start() {
+	return open();
+}
+export function unrelated() {
+	const db = { get: () => 3 };
+	return db.get();
+}
+export type Contract = { lookup: (db: Db) => { x: number; id: number } | null };
+export const implementation: Contract = { lookup: (db: Db) => lookup(db) };
+export function overloaded(db: Db): { x: number; id: number } | null;
+export function overloaded(db: Db) {
+	return lookup(db);
+}
+export function holder(db: Db) {
+	lookup(db);
+	return { read: () => lookup(db) };
+}
+export function nested(db: Db) {
+	return holder(db).read();
+}
+export function effect(db: Db) {
+	db.afterCommit(() => {});
+}

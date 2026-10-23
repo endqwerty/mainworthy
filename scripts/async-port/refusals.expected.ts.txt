@@ -1,0 +1,34 @@
+import type { ReadDb } from "./src/server/kernel/db.ts";
+declare const db: ReadDb;
+async function lookup() {
+	return await db.get("SELECT x");
+}
+export async function branches() {
+	const no = !lookup();
+	const fallback = lookup() ?? { x: 1 };
+	if (db.get("SELECT x")) return no;
+	return fallback;
+}
+export async function comparisons() {
+	return lookup() === null || (lookup() && true);
+}
+export function callbacks() {
+	const mapped = [1].map(async () => lookup());
+	const filtered = [1].filter(() => lookup());
+	return { mapped, filtered };
+}
+declare function sync(fn: () => void): void;
+sync(lookup);
+sync(() => lookup());
+export class Unsafe {
+	field = lookup();
+	constructor() {
+		lookup();
+	}
+	get value() {
+		return lookup();
+	}
+	set value(x: unknown) {
+		lookup();
+	}
+}

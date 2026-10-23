@@ -8,6 +8,7 @@
 			"preset": "recommended",
 			"style": { "noNonNullAssertion": "error" },
 			"suspicious": { "noExplicitAny": "error" },
+			"nursery": { "noFloatingPromises": "error", "noMisusedPromises": "error" },
 			"a11y": { "noLabelWithoutControl": { "level": "error", "options": { "inputComponents": ["Select"] } } }
 		}
 	}
