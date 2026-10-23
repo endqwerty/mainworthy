@@ -29,11 +29,20 @@ export { VERSION } from "../core/version.ts";
 
 function incompatibleRequest(req: Request): Response | null {
 	const version = req.headers.get(API_VERSION_HEADER);
-	return version !== null && version !== String(API_VERSION)
+	// Browser POSTs carry Origin, including on plain HTTP where fetch metadata may be absent. Native cookie
+	// clients (the iPhone app) send neither. Old bundles cannot opt out of these browser-controlled headers.
+	const browser = req.headers.has("origin") || req.headers.has("sec-fetch-site");
+	const required = browser && req.method !== "GET" && req.method !== "HEAD" && sameOrigin(req);
+	return (version !== null || required) && version !== String(API_VERSION)
 		? jsonResponse(
 				{
 					ok: false,
-					error: { code: "conflict", message: `incompatible API version; server requires API ${API_VERSION}` },
+					error: {
+						code: "conflict",
+						message: browser
+							? "This page needs an update. Reload before trying again."
+							: `incompatible API version; server requires API ${API_VERSION}`,
+					},
 				},
 				HTTP_STATUS.conflict,
 			)
@@ -533,6 +542,8 @@ async function login(
 	otherwise: (req: Request, server: Listener, input: unknown) => Promise<Response>,
 ): Promise<Response> {
 	if (!sameOrigin(req)) return unauthenticated();
+	const incompatible = incompatibleRequest(req);
+	if (incompatible) return incompatible;
 	// A sign-in body is a token and nothing else: a few kilobytes at most and one packet, read before anyone is
 	// authenticated. So it is held to a size and to a time, and one that is still arriving after that is answered
 	// and its connection closed.
@@ -580,6 +591,8 @@ async function login(
  */
 async function logout(app: App, req: Request, server: Listener): Promise<Response> {
 	if (!sameOrigin(req)) return unauthenticated();
+	const incompatible = incompatibleRequest(req);
+	if (incompatible) return incompatible;
 	const cookie = sessionCookieOf(req);
 	const ending = cookie === null ? null : signOut(app, cookie);
 	if (ending) {
@@ -828,6 +841,8 @@ export function serve(
 	const people = signInRoutes(app, {
 		sameOrigin,
 		read: async (req, limit) => {
+			const incompatible = incompatibleRequest(req);
+			if (incompatible) return incompatible;
 			try {
 				return { input: await readJson(req, limit, patience.signInBodyMs) };
 			} catch (error) {

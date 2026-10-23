@@ -13,6 +13,7 @@ import {
 	unknownValue as schemaUnknownValue,
 	whole as schemaWhole,
 } from "../../core/schema.ts";
+import { API_VERSION, API_VERSION_HEADER } from "../../core/version.ts";
 import {
 	authenticationGeneration,
 	authenticationUnchanged,
@@ -102,6 +103,9 @@ function refuse(error: Refusal, status: number): never {
 	if (error.code === "unauthenticated" && typeof window !== "undefined") signedOut();
 	throw new ApiError(error.code, error.message, error.details, status);
 }
+function sessionChanged(): never {
+	throw new ApiError("unauthenticated", "The session changed. Your input is kept for the person who typed it.");
+}
 export type CallOptions = {
 	project?: string;
 	url?: string;
@@ -113,6 +117,7 @@ export type CallOptions = {
 
 const instanceOps: readonly OpName[] = INSTANCE_OPS;
 const replySchemas: { [O in OpName]: z.ZodType<Api[O]["reply"]> } = REPLIES;
+const headers = { "content-type": "application/json", [API_VERSION_HEADER]: String(API_VERSION) };
 
 /** The operation map owns input and reply types; envelopes and replies are validated at this boundary. */
 export async function call<O extends OpName>(
@@ -125,7 +130,7 @@ export async function call<O extends OpName>(
 	const authentication = owner ? authenticationGeneration() : null;
 	const assertOwner = (): void => {
 		if (owner && (!sessionCurrent(owner) || (authentication && !authenticationUnchanged(authentication))))
-			throw new ApiError("unauthenticated", "The session changed. Your input is kept for the person who typed it.");
+			sessionChanged();
 	};
 	assertOwner();
 
@@ -136,7 +141,7 @@ export async function call<O extends OpName>(
 	const response = await fetch(`${options.url ?? ""}${path}`, {
 		method: "POST",
 		headers: {
-			"content-type": "application/json",
+			...headers,
 			...(owner ? { "X-Mainworthy-As": String(owner.actorId) } : {}),
 			...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
 		},
@@ -157,12 +162,13 @@ export async function session(
 	const owner = options.owner ?? deviceSession();
 	const authentication = authenticationGeneration();
 	const response = await fetch("/api/session", {
+		headers,
 		...(options.signal ? { signal: options.signal } : {}),
 		keepalive: options.keepalive ?? false,
 	});
 	const envelope = Wire.parse(await response.json());
 	if (!authenticationUnchanged(authentication) || !(options.owner ? sessionCurrent(owner) : sessionUnchanged(owner)))
-		throw new ApiError("unauthenticated", "The session changed. Your input is kept.");
+		sessionChanged();
 	if (!envelope.ok) refuse(envelope.error, response.status);
 	const info = Session.parse(envelope.result);
 	// The pages show a project's content. A project the caller holds a grant on and may not read is not one of them.
@@ -192,22 +198,13 @@ export async function exchange(
 ): Promise<unknown> {
 	const owner = signedIn ? deviceSession() : null;
 	const authentication = owner ? authenticationGeneration() : null;
-	const response = await fetch(
-		path,
-		body === undefined
-			? {}
-			: {
-					method: "POST",
-					headers: {
-						"content-type": "application/json",
-						...(owner ? { "X-Mainworthy-As": String(owner.actorId) } : {}),
-					},
-					body: JSON.stringify(body),
-				},
-	);
+	const response = await fetch(path, {
+		headers: { ...headers, ...(owner ? { "X-Mainworthy-As": String(owner.actorId) } : {}) },
+		...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }),
+	});
 	const envelope = Wire.parse(await response.json());
 	if (owner && (!sessionCurrent(owner) || (authentication && !authenticationUnchanged(authentication))))
-		throw new ApiError("unauthenticated", "The session changed. Your input is kept.");
+		sessionChanged();
 	if (envelope.ok) {
 		if (path === "/api/logout" || z.object({ signedIn: z.literal(true) }).safeParse(envelope.result).success)
 			publishAuthentication();

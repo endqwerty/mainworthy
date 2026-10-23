@@ -29,6 +29,16 @@ The current API version is **2**. The CLI checks `/healthz` before sending an op
 `x-mainworthy-api-version: 2`. A server with another advertised version is refused before a write.
 Clients pinned to API 1 must upgrade with the server.
 
+The web client sends the same header on its API fetch requests. An explicit mismatched version is
+refused with `409 conflict` before the operation runs. Browser requests other than `GET` and `HEAD`
+must send the version: the server recognises them by `Origin` or `Sec-Fetch-Site`, including browsers
+using local mode. An already-open old page that omits the header is refused too. Its error asks you
+to reload before trying again; the refused operation writes nothing.
+
+Unversioned requests without those browser headers remain accepted. This includes bearer scripts,
+MCP clients and the iPhone app, which sends its session cookie through a native HTTP client.
+A cookie alone does not identify a browser. Read-only browser streams use `GET` and need no header.
+
 A successful operation returns `ok: true`, `result`, and `seq`, the project's
 sequence number at that point. The `since` operation with `{"cursor":"s:12"}`
 returns changes after sequence 12. A reply with `more: true` has more changes

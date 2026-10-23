@@ -3,6 +3,7 @@
 // list is in the core, and here it is compared with the registry, so the two cannot drift apart unnoticed.
 import { expect, spyOn, test } from "bun:test";
 import { INSTANCE_OPS } from "../src/core/api.ts";
+import { API_VERSION, API_VERSION_HEADER } from "../src/core/version.ts";
 import { OP_LIST } from "../src/server/ops/index.ts";
 import { ApiError, call, exchange, session, UnreadableReply, unauthenticatedEvent } from "../src/web/lib/api.ts";
 import {
@@ -17,6 +18,43 @@ import { signOut } from "../src/web/lib/signin.ts";
 test("the client's list of instance operations is the registry's, so each is sent to the path that serves it", () => {
 	const registered: string[] = OP_LIST.filter((op) => op.scope === "instance").map((op) => op.name);
 	expect<string[]>([...INSTANCE_OPS].sort()).toEqual(registered.sort());
+});
+
+test("every web request declares its API version and preserves a reload refusal", async () => {
+	const versions: (string | null)[] = [];
+	const message = "This page needs an update. Reload before trying again.";
+	const server = Bun.serve({
+		hostname: "127.0.0.1",
+		port: 0,
+		fetch(request) {
+			versions.push(request.headers.get(API_VERSION_HEADER));
+			return Response.json({ ok: false, error: { code: "conflict", message } }, { status: 409 });
+		},
+	});
+	const transport = globalThis.fetch;
+	const redirected = spyOn(globalThis, "fetch").mockImplementation(
+		Object.assign(
+			(input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
+				transport(new URL(String(input), server.url), init),
+			{ preconnect: transport.preconnect },
+		),
+	);
+	try {
+		for (const request of [
+			() => call("find", {}),
+			() => session(),
+			() => exchange("/api/login/methods"),
+			() => exchange("/api/login", { body: {} }),
+		]) {
+			const error = await request().catch((error: unknown) => error);
+			expect(error).toBeInstanceOf(ApiError);
+			expect(error).toMatchObject({ code: "conflict", message, status: 409 });
+		}
+		expect(versions).toEqual(Array(4).fill(String(API_VERSION)));
+	} finally {
+		redirected.mockRestore();
+		await server.stop(true);
+	}
 });
 
 test("call rejects replies that do not match the operation before returning typed data", async () => {

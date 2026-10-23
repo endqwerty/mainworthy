@@ -240,7 +240,7 @@ async function post<T>(
 ): Promise<{ status: number; body: Envelope<T>; cookie: string | null }> {
 	const response = await fetch(`${instance.url}${path}`, {
 		method: "POST",
-		headers: { "content-type": "application/json", ...headers },
+		headers: { "content-type": "application/json", "x-mainworthy-api-version": String(API_VERSION), ...headers },
 		body: JSON.stringify(body),
 	});
 	return {
@@ -3577,4 +3577,61 @@ test("a mismatched CLI contract is refused before an operation writes", async ()
 	const accepted = await post(instance, "/api/admin", input, { "x-mainworthy-api-version": String(API_VERSION) });
 	expect(accepted.status).toBe(200);
 	expect(accepted.body).toMatchObject({ ok: true });
+});
+
+test("an unversioned browser cannot write, while an unversioned native cookie client can", async () => {
+	await using instance = boot("local", "owner-secret-0123456789");
+	const signedIn = await post(instance, "/api/login", { token: "owner-secret-0123456789" });
+	const cookie = signedIn.cookie?.split(";")[0];
+	if (!cookie) throw new Error("no session cookie");
+	const input = { do: "project.create", key: "old-browser", preset: "loose" };
+	for (const headers of [
+		{ origin: instance.url },
+		{ "sec-fetch-site": "same-origin" },
+		{ cookie, origin: instance.url },
+		{ cookie, "sec-fetch-site": "same-origin" },
+	]) {
+		const response = await fetch(`${instance.url}/api/admin`, {
+			method: "POST",
+			headers: { "content-type": "application/json", ...headers },
+			body: JSON.stringify(input),
+		});
+		expect(response.status).toBe(409);
+		expect(await response.json()).toMatchObject({
+			ok: false,
+			error: { code: "conflict", message: "This page needs an update. Reload before trying again." },
+		});
+	}
+	// Reusing the key proves none of the refused requests created the project. The iPhone uses a native cookie.
+	for (const [key, headers] of [
+		["old-browser", { cookie }],
+		["bearer-script", bearer("owner-secret-0123456789")],
+		["local-script", {}],
+	] as const) {
+		const native = await fetch(`${instance.url}/api/admin`, {
+			method: "POST",
+			headers: { "content-type": "application/json", ...headers },
+			body: JSON.stringify({ ...input, key }),
+		});
+		expect(await native.json()).toMatchObject({ ok: true });
+	}
+	// Signing in, signing out and starting a passkey ceremony must not bypass the version gate either.
+	for (const path of ["/api/login", "/api/logout", "/api/login/challenge"]) {
+		for (const version of [null, String(API_VERSION - 1)]) {
+			const response = await fetch(`${instance.url}${path}`, {
+				method: "POST",
+				headers: {
+					cookie,
+					origin: instance.url,
+					...(version === null ? {} : { "x-mainworthy-api-version": version }),
+				},
+				body: "{}",
+			});
+			expect(response.status).toBe(409);
+			expect(response.headers.get("set-cookie")).toBeNull();
+		}
+	}
+	expect(
+		(await fetch(`${instance.url}/api/session`, { headers: { cookie, "sec-fetch-site": "same-origin" } })).status,
+	).toBe(200);
 });
