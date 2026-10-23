@@ -49,7 +49,9 @@ If the reply is lost or unreadable, the planner locks and dims your submitted ch
 Choose **Retry plan** or press <kbd>Enter</kbd> to resend the same request without creating a second run.
 **Cancel** and <kbd>Esc</kbd> close the planner and keep the request while its outcome is unknown.
 After closing the planner, visiting another screen or project, or reloading the page, reopen the planner
-in the same project to retry. A readable success clears the request.
+in the same project to retry. A readable success clears that request.
+Plans submitted simultaneously in different tabs are saved separately. Each tab keeps its own submitted choices
+and retries its own request. Reopen the planner to recover any remaining saved plans, one at a time.
 A session change, permission refusal, rate limit, or server error also keeps it.
 If the operation refuses the request, the planner shows the reason and unlocks your choices for correction,
 even after a retry. The server replays a recorded request before running the operation again.
@@ -65,7 +67,8 @@ restore it or send those choices as a new plan. Enter new choices before plannin
 If another tab discarded or completed the saved request, the planner says it is no longer saved.
 Check **Runs** before planning again.
 If the browser cannot read a saved request, retry waits. Reopen the planner once storage is available.
-If another tab has a different saved plan, submitting or retrying first shows that plan and a notice without sending it.
+If this tab has no saved request of its own and another tab has a saved plan, submitting first shows that plan
+and a notice without sending it.
 Choose **Retry plan** to send the displayed request.
 A saved plan carries the project's identity, so deleting the project and creating another with the same key
 cannot send that plan into the replacement. If the browser knows the project changed, **Retry plan** explains

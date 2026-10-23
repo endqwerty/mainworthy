@@ -14,42 +14,47 @@ const PendingPlan = PlanInput.extend({
 	cmd: PlanInput.shape.cmd.unwrap(),
 	projectIdentity: PlanInput.shape.projectIdentity.unwrap(),
 });
-type Submission = { state: "sending" | "uncertain" | "released"; input: z.infer<typeof PendingPlan> };
+type SavedPlan = { key: string; input: z.infer<typeof PendingPlan> };
+type Submission = SavedPlan & { state: "sending" | "uncertain" | "released" };
+const unreadablePlan = "This browser could not confirm the saved plan. Reopen the planner before retrying.";
 
 /** The form's choices for a saved plan. */
 function choicesOf(plan: Submission["input"] | null) {
-	const select = plan?.select;
-	const folder = typeof select?.folders?.[0] === "string" ? select.folders[0] : undefined;
-	const commit = plan?.accepts && "commit" in plan.accepts ? plan.accepts.commit : "";
+	const { folders, tags, text } = plan?.select ?? {};
+	const folder = folders?.[0];
+	const accepts = plan?.accepts;
 	return {
-		mode: select?.folders?.length
+		mode: folders?.length
 			? ("folder" as const)
-			: select?.tags?.length
+			: tags?.length
 				? ("tag" as const)
-				: select?.text
+				: text
 					? ("text" as const)
 					: ("all" as const),
-		filter: folder ?? select?.tags?.[0] ?? select?.text ?? "",
-		commit,
+		filter: (typeof folder === "string" ? folder : undefined) ?? tags?.[0] ?? text ?? "",
+		commit: accepts && "commit" in accepts ? accepts.commit : "",
 	};
 }
 
-function readPlan(key: string): Submission["input"] | null {
-	let stored: string | null;
-	try {
-		stored = localStorage.getItem(key);
-	} catch {
-		return null;
+function readPlan(key: string, held?: SavedPlan | null): SavedPlan | null {
+	for (const entry of [held?.key ?? key, ...Object.keys(localStorage)]) {
+		if (entry !== key && !entry.startsWith(`${key}:`)) continue;
+		const stored = localStorage.getItem(entry);
+		if (stored === null) continue;
+		try {
+			const parsed = PendingPlan.safeParse(JSON.parse(stored));
+			if (parsed.success) return { key: entry, input: parsed.data };
+		} catch {}
+		try {
+			localStorage.removeItem(entry);
+		} catch {}
 	}
-	if (stored === null) return null;
-	try {
-		const parsed = PendingPlan.safeParse(JSON.parse(stored));
-		if (parsed.success) return parsed.data;
-	} catch {}
-	try {
-		localStorage.removeItem(key);
-	} catch {}
 	return null;
+}
+
+function forgetPlan({ key, input }: SavedPlan) {
+	const stored = localStorage.getItem(key);
+	if (stored !== null && PendingPlan.parse(JSON.parse(stored)).cmd === input.cmd) localStorage.removeItem(key);
 }
 
 export function RunPlanner({ close }: { close: () => void }) {
@@ -57,50 +62,59 @@ export function RunPlanner({ close }: { close: () => void }) {
 	const projectIdentity = session.projects.find((entry) => entry.key === project)?.identity;
 	const owner = useRef(deviceSession()).current;
 	const key = deviceKey("run-plan", project, owner.actorId);
-	const [initial] = useState(() => readPlan(key));
-	const [chosen] = useState(() => choicesOf(initial));
-	const [name, setName] = useState(initial?.name ?? "");
+	const [initial] = useState(() => {
+		try {
+			return readPlan(key);
+		} catch {
+			return null;
+		}
+	});
+	const chosen = choicesOf(initial?.input ?? null);
+	const [name, setName] = useState(initial?.input.name ?? "");
 	const [mode, setMode] = useState<"all" | "folder" | "tag" | "text">(chosen.mode);
 	const [filter, setFilter] = useState(chosen.filter);
 	const [query, setQuery] = useState(filter);
 	const [target, setTarget] = useState<"self" | "commit">(chosen.commit ? "commit" : "self");
 	const [commit, setCommit] = useState(chosen.commit);
-	const [submission, setSubmission] = useState<Submission | null>(
-		initial ? { state: "uncertain", input: initial } : null,
-	);
+	const [submission, setSubmission] = useState<Submission | null>(initial ? { state: "uncertain", ...initial } : null);
 	const submitting = useRef(submission);
 	const hold = useCallback((next: Submission | null) => {
 		submitting.current = next;
 		setSubmission(next);
+	}, []);
+	const show = useCallback((input: SavedPlan["input"] | null) => {
+		const { mode, filter, commit } = choicesOf(input);
+		setName(input?.name ?? "");
+		setMode(mode);
+		setFilter(filter);
+		setQuery(filter);
+		setTarget(commit ? "commit" : "self");
+		setCommit(commit);
 	}, []);
 	const clearRemoved = useCallback(() => {
 		const held = submitting.current;
 		if (!held || !sessionCurrent(owner)) return false;
 		if (held.state === "released") return true;
 		try {
-			if (localStorage.getItem(key) !== null) return false;
+			if (localStorage.getItem(held.key) !== null) return false;
 		} catch {
 			return false;
 		}
-		hold({ state: "released", input: held.input });
-		setName("");
-		setMode("all");
-		setFilter("");
-		setQuery("");
-		setTarget("self");
-		setCommit("");
+		hold({ ...held, state: "released" });
+		show(null);
 		setStatus(
 			"This plan is no longer saved on this device. It may have been discarded or completed in another tab. Check Runs before planning again.",
 		);
 		return true;
-	}, [key, owner, hold, setStatus]);
+	}, [owner, hold, show, setStatus]);
 	useEffect(() => {
 		const changed = (event: StorageEvent) => {
-			if (event.storageArea === localStorage && (event.key === key || event.key === null)) clearRemoved();
+			if (event.storageArea === localStorage && (event.key === submitting.current?.key || event.key === null))
+				clearRemoved();
 		};
 		window.addEventListener("storage", changed);
 		return () => window.removeEventListener("storage", changed);
-	}, [key, clearRemoved]);
+	}, [clearRemoved]);
 	const busy = submission?.state === "sending";
 	const locked = submission !== null && submission.state !== "released";
 	const nameRef = useRef<HTMLInputElement>(null);
@@ -142,26 +156,18 @@ export function RunPlanner({ close }: { close: () => void }) {
 				)
 					return;
 				if (!sessionCurrent(owner)) return;
-				let input: Submission["input"];
+				let plan: SavedPlan;
 				try {
-					const saved = readPlan(key);
-					const held = submitting.current?.input;
+					const held = submitting.current;
+					const saved = readPlan(key, held);
 					if (held && !saved) {
-						if (!clearRemoved())
-							setStatus("This browser could not confirm the saved plan. Reopen the planner before retrying.");
+						if (!clearRemoved()) setStatus(unreadablePlan);
 						return;
 					}
-					const previous = saved && saved.cmd !== held?.cmd ? saved : (held ?? saved);
-					if (previous && previous.cmd !== held?.cmd) {
+					if (saved && saved.input.cmd !== held?.input.cmd) {
 						setStatus("Another tab's plan is waiting; Retry plan sends it.");
-						const { mode, filter, commit } = choicesOf(previous);
-						setName(previous.name);
-						setMode(mode);
-						setFilter(filter);
-						setQuery(filter);
-						setTarget(commit ? "commit" : "self");
-						setCommit(commit);
-						hold({ state: "uncertain", input: previous });
+						show(saved.input);
+						hold({ ...saved, state: "uncertain" });
 						return;
 					}
 					if (submitting.current?.state === "released") return;
@@ -169,32 +175,38 @@ export function RunPlanner({ close }: { close: () => void }) {
 						setStatus("The current project's identity is unavailable. Reload before planning a run.");
 						return;
 					}
-					if (previous && previous.projectIdentity !== projectIdentity) {
+					if (saved && saved.input.projectIdentity !== projectIdentity) {
 						setStatus(
 							"This saved plan belongs to an earlier project and cannot be retried here. Discard it before planning a new run.",
 						);
 						return;
 					}
-					input = previous ?? {
+					const input = saved?.input ?? {
 						projectIdentity,
 						name: name.trim(),
 						select: selection(filter),
 						...(target === "commit" ? { accepts: { commit: commit.trim() } } : {}),
 						cmd: randomId(),
 					};
-					if (!saved) localStorage.setItem(key, JSON.stringify(input));
+					plan = saved ?? { key: `${key}:${input.cmd}`, input };
+					if (!saved) localStorage.setItem(plan.key, JSON.stringify(input));
 				} catch {
-					setStatus("This browser could not keep the plan request. Enable device storage before planning a run.");
+					setStatus(
+						submitting.current
+							? unreadablePlan
+							: "This browser could not keep the plan request. Enable device storage before planning a run.",
+					);
 					return;
 				}
+				const { input } = plan;
 				const forget = () => {
 					if (!sessionCurrent(owner)) return;
 					try {
-						if (readPlan(key)?.cmd === input.cmd) localStorage.removeItem(key);
+						forgetPlan(plan);
 					} catch {}
 				};
 				event.currentTarget.querySelector<HTMLButtonElement>('button[type="submit"]')?.focus();
-				hold({ state: "sending", input });
+				hold({ ...plan, state: "sending" });
 				const navigation = navigationToken();
 				void call("plan", input, { project, owner })
 					.then((reply) => {
@@ -205,14 +217,13 @@ export function RunPlanner({ close }: { close: () => void }) {
 					})
 					.catch((error: unknown) => {
 						if (!sessionCurrent(owner) || clearRemoved() || submitting.current?.input.cmd !== input.cmd) return;
+						const definite = error instanceof ApiError && error.status !== null;
 						const replayChanged =
-							error instanceof ApiError &&
-							error.status !== null &&
+							definite &&
 							error.code === "conflict" &&
 							error.message === "this command id was already used for another request; send new content under a new id";
 						const refused =
-							error instanceof ApiError &&
-							error.status !== null &&
+							definite &&
 							!replayChanged &&
 							(error.code === "invalid" ||
 								error.code === "conflict" ||
@@ -222,7 +233,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 									error.message !== "no such route"));
 						if (refused) forget();
 						if (!sessionCurrent(owner)) return;
-						hold(refused ? null : { state: "uncertain", input });
+						hold(refused ? null : { ...plan, state: "uncertain" });
 						setStatus(
 							replayChanged
 								? "This saved plan could not be replayed. A run may already exist. Check Runs before discarding it."
@@ -310,26 +321,18 @@ export function RunPlanner({ close }: { close: () => void }) {
 			<div className="dim" role="status">
 				{found.error ? found.error.message : `${found.data?.count ?? 0} matching cases`}
 			</div>
-			<label className="run-radio">
-				<input
-					type="radio"
-					name="run-target"
-					checked={target === "self"}
-					disabled={locked}
-					onChange={() => setTarget("self")}
-				/>{" "}
-				Count only results recorded in this run
-			</label>
-			<label className="run-radio">
-				<input
-					type="radio"
-					name="run-target"
-					checked={target === "commit"}
-					disabled={locked}
-					onChange={() => setTarget("commit")}
-				/>{" "}
-				Accept results for a commit
-			</label>
+			{(["self", "commit"] as const).map((value) => (
+				<label className="run-radio" key={value}>
+					<input
+						type="radio"
+						name="run-target"
+						checked={target === value}
+						disabled={locked}
+						onChange={() => setTarget(value)}
+					/>{" "}
+					{value === "self" ? "Count only results recorded in this run" : "Accept results for a commit"}
+				</label>
+			))}
 			{target === "commit" && (
 				<input
 					className="form-input"
@@ -352,9 +355,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 					onClick={() => {
 						if (!sessionCurrent(owner)) return;
 						try {
-							const stored = localStorage.getItem(key);
-							if (stored !== null && PendingPlan.parse(JSON.parse(stored)).cmd === submission.input.cmd)
-								localStorage.removeItem(key);
+							forgetPlan(submission);
 						} catch {
 							setStatus("This browser could not discard the saved plan. Enable device storage and try again.");
 							return;
