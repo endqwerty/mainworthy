@@ -114,6 +114,10 @@ To answer from a question's page, follow these steps:
    appear on separate lines.
    A failure's **Sample result** shows its reported note, build link, step trail and files when present.
    Expand **Diagnostic detail** to read the full log. Press a step's **Screenshot** or a file name to open its attachment.
+   Text files open as selectable plain text, up to 64 KiB.
+   Press **Share** to open another file type in another app or read a whole large log.
+   An empty sample has no **Sample result** panel.
+   Returning to the question keeps its last read sample visible while it refreshes.
    If the sample could not be read, press **Try again**.
    A proposed edit shows why it was proposed and who proposed it. It also says in a sentence what the edit does,
    such as "Adds 1 step." For an edit to an existing case, choose one of three views:

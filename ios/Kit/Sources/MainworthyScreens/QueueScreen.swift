@@ -46,7 +46,11 @@ public final class QueueScreen: ProjectScreen {
 	public func readSample(_ result: Int) async {
 		let mine = (sampleReads[result] ?? 0) + 1
 		sampleReads[result] = mine
-		samples[result] = .reading
+		let cached: Sample? = switch samples[result] {
+		case .read(let sample): .read(sample)
+		default: nil
+		}
+		samples[result] = cached ?? .reading
 		do {
 			let sample = try await project.sampleResult(result)
 			try Task.checkCancellation()
@@ -54,7 +58,7 @@ public final class QueueScreen: ProjectScreen {
 			samples[result] = .read(sample)
 		} catch {
 			guard sampleReads[result] == mine else { return }
-			samples[result] = Task.isCancelled ? nil : .failed(error.shown)
+			samples[result] = Task.isCancelled ? cached : .failed(error.shown)
 		}
 	}
 

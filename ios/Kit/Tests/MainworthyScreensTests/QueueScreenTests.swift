@@ -9,6 +9,42 @@ import Testing
 @Suite("The queue screen", .enabled(if: Live.isRunning, "needs the server `bun scripts/ios.ts test` starts"))
 @MainActor
 struct QueueScreenTests {
+	@Test("revisiting a failure keeps its sample while refreshing and never borrows another result")
+	func revisitSample() async throws {
+		let transport = HeldReply("get")
+		let project = try await Live.signedIn(transport: transport).project(try await Live.project())
+		let screen = QueueScreen(project: project)
+		let question = try #require(try await project.questions(open: true, kind: .failure).questions.first)
+		guard case .failure(let failure) = question.evidence else {
+			Issue.record("Missing failure evidence")
+			return
+		}
+		let id = try #require(failure.sample)
+		await screen.readSample(id)
+		let cached = try #require(screen.sample(id))
+		guard case .read = cached else {
+			Issue.record("Missing sample")
+			return
+		}
+		await transport.gate.holdNext()
+		let refresh = Task { await screen.readSample(id) }
+		try await transport.gate.waitUntilPaused()
+		#expect(screen.sample(id) == cached)
+		#expect(screen.sample(Int.max) == nil)
+		await screen.readSample(Int.max)
+		guard case .failed = screen.sample(Int.max) else {
+			Issue.record("Missing read failure")
+			return
+		}
+		#expect(screen.sample(id) == cached)
+		refresh.cancel()
+		await transport.gate.release()
+		await refresh.value
+		#expect(screen.sample(id) == cached)
+		await screen.readSample(id)
+		#expect(screen.sample(id) == cached)
+	}
+
 	@Test("failure samples can be retried without replacing another sample")
 	func failureSample() async throws {
 		let transport = SwitchableQueueTransport()

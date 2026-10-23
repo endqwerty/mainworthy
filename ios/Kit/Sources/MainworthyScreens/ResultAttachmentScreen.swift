@@ -2,7 +2,7 @@ import Foundation
 import MainworthyClient
 import Observation
 
-/// The screenshot a person chose in a result trail. It loads only after the choice.
+/// The attachment a person chose in a result. It loads only after the choice.
 @MainActor @Observable
 public final class ResultAttachmentScreen {
 	public enum Content: Equatable {
