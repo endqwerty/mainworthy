@@ -104,6 +104,21 @@ export const ShardWait = z.object({
 });
 export type ShardWait = z.infer<typeof ShardWait>;
 
+export const GateStatus = z.object({
+	quarantined: z.number().int().nonnegative().optional(),
+	run: z.string().nullable(),
+	verdict: Verdict,
+	reason: z.string(),
+	tally: z.record(z.string(), z.number()),
+	open: z.array(z.string()),
+	url: z.string().nullable(),
+	/** True when the stored verdict was overridden because an upload is unapplied or a hold expired. */
+	stale: z.boolean(),
+	/** Jobs of the commit that reported in shards and are missing some: the gate is pending until they report. */
+	waiting: z.array(ShardWait).optional(),
+});
+export type GateStatus = z.infer<typeof GateStatus>;
+
 /** "3", "3 and 5", "1, 3 and 5". */
 const listed = (numbers: readonly number[]): string =>
 	numbers.length === 1 ? String(numbers[0]) : `${numbers.slice(0, -1).join(", ")} and ${numbers.at(-1)}`;

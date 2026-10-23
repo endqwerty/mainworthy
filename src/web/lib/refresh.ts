@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Api, OpName } from "../../core/api.ts";
-import { FindInput } from "../../core/ops.ts";
+import { FindInput } from "../../core/selection.ts";
 
 export const Change = z.object({ op: z.string().optional(), touched: z.array(z.string()) });
 type Change = z.infer<typeof Change>;

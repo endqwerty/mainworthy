@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { CaseBody, CaseKind, ConflictAddress, FragmentStep, InlineStep, StepId } from "../../core/model.ts";
-import { ProposeInput } from "../../core/ops.ts";
+import { ProposeInput } from "../../core/proposals.ts";
 import { deviceKey, deviceSession, sessionCurrent } from "./device.ts";
 import { draftOwnedElsewhere, draftOwner, randomId } from "./ids.ts";
 

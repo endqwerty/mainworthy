@@ -531,3 +531,6 @@ export function describeAsk(ask: Ask): string {
 	if (ask.reason === "required") parts.push("with a reason");
 	return parts.join(" ");
 }
+
+/** The most answers or withdrawals one `decide` request carries, and so the Queue selection limit. */
+export const DECIDE_MAX = 500;

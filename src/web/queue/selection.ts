@@ -1,7 +1,7 @@
 // Which questions may be answered together. One answer is for one kind, and nobody selects what they cannot settle.
 import { z } from "zod";
-import { ANSWER_KEYS, countOf, KIND_WORDS, type Kind } from "../../core/kinds.ts";
-import { DECIDE_MAX, type QuestionItem } from "../../core/ops.ts";
+import { ANSWER_KEYS, countOf, DECIDE_MAX, KIND_WORDS, type Kind } from "../../core/kinds.ts";
+import type { QuestionItem } from "../../core/replies.ts";
 
 export type Row = Pick<QuestionItem, "q" | "kind" | "you" | "answers" | "evidence">;
 

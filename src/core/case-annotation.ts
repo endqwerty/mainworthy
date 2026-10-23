@@ -1,4 +1,5 @@
-import { CaseAlias, type ResultIn } from "./ops.ts";
+import type { ResultIn } from "./ops.ts";
+import { CaseAlias } from "./proposals.ts";
 
 /** Reads explicit case metadata, preserving the case and punctuation of aliases. */
 export function caseAnnotation(value: string): ResultIn["annotation"] {

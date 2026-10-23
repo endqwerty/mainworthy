@@ -7,12 +7,13 @@ import {
 	ANSWER_KEYS,
 	ANSWER_LABELS,
 	ANSWERS,
+	DECIDE_MAX,
 	endingText,
 	KIND_WORDS,
 	KINDS,
 	type Kind,
 } from "../../core/kinds.ts";
-import { DECIDE_MAX, type InboxReply, QuestionItem } from "../../core/ops.ts";
+import { type InboxReply, QuestionItem } from "../../core/replies.ts";
 import { stakes, waitingPhrase } from "../../core/stakes.ts";
 import { call } from "../lib/api.ts";
 import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";

@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { CaseBody, ExpandedStep, MethodKind } from "../../core/model.ts";
-import { ResultLocation } from "../../core/ops.ts";
-import { ResultTrail } from "../../core/results.ts";
+import { ResultLocation, ResultTrail } from "../../core/results.ts";
 import { Obligation, ShardWait, SlotState, SlotWork, Tally, TargetMatch, Verdict } from "../../core/runs.ts";
 
 export const Run = z.object({
