@@ -261,6 +261,8 @@ describe("fresh schema image", () => {
 		const linked = `${path}.v4.bak.mainworthy-copy-Xy12Z3`;
 		const saved = `${path}.v1.bak.backup`;
 		const unmarked = `${path}.v1.bak.Ab12Cd`;
+		const startup = `${path}.mainworthy-start-Ab12Cd`;
+		const startupMixed = `${path}.mainworthy-start-Xy12Z3`;
 		const retained = [
 			`${path}.v0.bak.${uuid}.tmp`,
 			`${path}.v01.bak.${uuid}.tmp`,
@@ -276,7 +278,11 @@ describe("fresh schema image", () => {
 			db.exec("INSERT INTO meta VALUES ('schema_version', '1'), ('preserved', 'kept')");
 			for (const file of [temporary, `${temporary}-journal`, journalOnly, ...retained])
 				fs.writeFileSync(file, "untouched");
-			for (const folder of [workspace, empty, mixed, saved, unmarked]) fs.mkdirSync(folder);
+			for (const folder of [workspace, empty, mixed, saved, unmarked, startup, startupMixed]) fs.mkdirSync(folder);
+			fs.writeFileSync(join(startup, "mainworthy.db.v1.bak"), "partial startup copy");
+			fs.writeFileSync(join(startup, "mainworthy.db.v1.bak-journal"), "partial startup journal");
+			fs.writeFileSync(join(startupMixed, "unrelated"), "keep");
+			fs.symlinkSync(retained[0] ?? "", join(startupMixed, "mainworthy.db.v1.bak"));
 			fs.writeFileSync(join(saved, "mainworthy.db.v1.bak"), "operator rollback point");
 			fs.writeFileSync(join(unmarked, "mainworthy.db.v1.bak"), "unmarked copy");
 			const nested = join(workspace, "mainworthy.db.v1.bak");
@@ -325,6 +331,9 @@ describe("fresh schema image", () => {
 				expect(opened.raw.query("SELECT value FROM meta WHERE key = 'preserved'").get()).toEqual({ value: "kept" });
 				for (const removed of [temporary, `${temporary}-journal`, journalOnly, workspace, empty, interrupted])
 					expect(fs.existsSync(removed)).toBe(false);
+				expect(fs.existsSync(startup)).toBe(false);
+				expect(readFileSync(join(startupMixed, "unrelated"), "utf8")).toBe("keep");
+				expect(fs.lstatSync(join(startupMixed, "mainworthy.db.v1.bak")).isSymbolicLink()).toBe(true);
 				expect(fs.existsSync(join(saved, "mainworthy.db.v1.bak"))).toBe(true);
 				expect(readFileSync(join(saved, "mainworthy.db.v1.bak"), "utf8")).toBe("operator rollback point");
 				expect(readFileSync(join(unmarked, "mainworthy.db.v1.bak"), "utf8")).toBe("unmarked copy");

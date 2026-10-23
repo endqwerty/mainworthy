@@ -148,7 +148,11 @@ function parseRange(entry: string): Range | null {
 }
 
 /** A list that was read. `contains` is false for an address that is unknown or is not an address. */
-export type AddressRanges = { readonly kind: "ranges"; readonly contains: (address: string | null) => boolean };
+export type AddressRanges = {
+	readonly kind: "ranges";
+	readonly source: string;
+	readonly contains: (address: string | null) => boolean;
+};
 /** A list that was not: `entry` is the first entry at fault, and `why` ends the sentence that starts with it. */
 export type MalformedAddressRanges = { readonly kind: "malformed"; readonly entry: string; readonly why: string };
 
@@ -175,6 +179,7 @@ export function parseAddressRanges(list: string): AddressRanges | MalformedAddre
 	}
 	return {
 		kind: "ranges",
+		source: list,
 		contains: (address) => {
 			const parsed = parseAddress(address?.trim() ?? "", true);
 			if (!parsed) return false;

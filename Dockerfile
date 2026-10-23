@@ -17,7 +17,7 @@ COPY docs/ui/screenshots ./docs/ui/screenshots
 # The licence files, which /docs serves too, and Archify's, which each diagram page carries.
 COPY LICENSE NOTICE THIRD-PARTY-NOTICES.md ./
 COPY licences/archify ./licences/archify
-RUN NODE_ENV=production bun build --compile --minify --sourcemap --banner '/*! Mainworthy, Apache-2.0. Software from others is in this file; its licences and notices: /docs/licence */' src/cli/main.ts src/server/ops/read-worker.ts src/server/kernel/checkpoint-worker.ts src/server/kernel/migrate-worker.ts src/cli/demo-worker.ts --outfile /out/mainworthy
+RUN NODE_ENV=production bun build --compile --minify --sourcemap --banner '/*! Mainworthy, Apache-2.0. Software from others is in this file; its licences and notices: /docs/licence */' src/cli/main.ts src/server/ops/read-worker.ts src/server/kernel/checkpoint-worker.ts src/app/start-worker.ts src/cli/demo-worker.ts --outfile /out/mainworthy
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends nftables util-linux && rm -rf /var/lib/apt/lists/*
@@ -39,7 +39,7 @@ ENV MAINWORTHY_MODE=server \
 VOLUME /data
 EXPOSE 7357
 # Liveness includes the upgrading listener. Readiness requires /healthz ok:true and the expected commit.
-# A failed upgrade closes the listener; a stalled worker fails startup after 30 minutes.
+# A failed upgrade closes the listener; a worker with no observable progress fails after 30 minutes.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s CMD ["/usr/local/bin/mainworthy-entrypoint", "health"]
 ENTRYPOINT ["/usr/local/bin/mainworthy-entrypoint"]
 CMD ["serve"]

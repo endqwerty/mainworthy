@@ -160,10 +160,13 @@ export type App = {
 /** The data directory of an instance that names none. */
 export const defaultDataDir = (env: Record<string, string | undefined>): string => join(env.HOME ?? ".", ".mainworthy");
 
-export function openApp(config: Config, options: { memory?: boolean; now?: () => number; reader?: boolean } = {}): App {
+export function openApp(
+	config: Config,
+	options: { memory?: boolean; now?: () => number; reader?: boolean; copyWorkspace?: string } = {},
+): App {
 	const path = options.memory ? ":memory:" : databasePath(config.dataDir);
 	if (options.reader && !existsSync(path)) throw new Error("a reader needs an existing database");
-	const db = options.reader ? new Db(path, { reader: true }) : openDatabase(path);
+	const db = options.reader ? new Db(path, { reader: true }) : openDatabase(path, options);
 	const reader = options.memory || options.reader ? db : new Db(path, { reader: true });
 	const listeners = new Set<(event: ChangeEvent) => void>();
 	return {

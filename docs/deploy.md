@@ -928,9 +928,18 @@ recovery has finished. The listener changes to the normal routes on the same por
 The Dockerfile's `mainworthy health` checks liveness: it exits 0 for both ready and upgrading. This lets
 Compose's `service_healthy` dependency start the ingress while an upgrade runs, and the ingress's wget probe
 also accepts the HTTP 200. The host hold can then pass traffic through; application requests receive 503
-until ready. A migration error closes the listener and fails startup. A 30-minute deadline does the same
-for a stalled worker, so an upgrade cannot advertise liveness indefinitely. Docker's short start period
-is retained; it does not conceal a broken upgrade for 30 minutes.
+until ready. A migration error closes the listener and fails startup. The startup worker's watchdog stops it
+after 30 minutes without observable progress: copy/database file size or modification time changes, or
+bounded recovery progress messages. This is an inactivity allowance, not a total upgrade duration. A copy
+that keeps progressing is allowed to finish and publish its backup. Health replies themselves do not reset
+the watchdog. Docker's short start period is retained.
+
+The parent owns a private `<database>.mainworthy-start-<six-character suffix>` copy workspace. It removes
+that exact workspace after awaiting the worker on failure, cancellation or inactivity; it keeps a published
+`.v<N>.bak`, which a restart reuses. A whole-process crash leaves a marked workspace for the next successful
+upgrade's exact regular-file cleanup. Files not matching the copy/journal names and symlinks remain. Bootstrap,
+attachment pruning, assertion reconstruction and pending-report/dispute/hand-off recovery run on the worker,
+so health keeps answering during those data-dependent steps too.
 
 Readiness is different: require HTTP 200, `ok: true` and the full expected commit. Merely receiving HTTP 200
 or seeing the commit is insufficient. The image job checks both fields, and `change.yml` waits through the
@@ -941,10 +950,11 @@ instance remains upgrading, the chooser uses its documented isolated-instance fa
 The external TestFlight upload job also reads health; it must require `ok: true` before acting on the commit
 (see `ios/README.md`). That external job is not changed or verified here.
 
-The autodeploy scheduler and its in-flight window are outside this checkout. None of `.github/workflows/`
-contains that scheduler or its reported 15-minute window. Before deploying this change, update the external
-job to keep the same pinned deployment in flight while its expected commit reports `upgrading`, with a
-30-minute upgrade deadline plus its image-build and container-replacement allowance. Never deploy a newer
+The autodeploy scheduler and its in-flight window are outside this checkout. Its installed 45-minute allowance
+for an upgrading attempt is separate from the application's inactivity watchdog. The external job must keep
+the same pinned deployment in flight while its expected commit reports `upgrading`, within its own deployment
+budget, including its image-build and container-replacement allowance. The application has no total-duration
+cutoff while progressing. Never deploy a newer
 candidate over that work. Declare success only on `ok: true` with the pinned commit, and retain and notify
 on a failed deployment or expired deadline. This repository-only change does not update or verify that job.
 
@@ -973,8 +983,8 @@ prove the checks passed. The external job needs these reads before deploying a c
    before deploying. If the run's attempt or result changed,
    check it again. If the tip changed, start over with that commit and the existing settle delay.
 5. After deploying the pinned commit, read `GET https://mainworthy.com/healthz`. Keep the deploy in flight
-   while that commit reports `ok: false, state: "upgrading"`, for at most the upgrade's 30-minute deadline
-   plus the job's build and replacement allowance. Require HTTP 200, `ok: true`
+   while that commit reports `ok: false, state: "upgrading"`, within the job's separate deployment deadline.
+   The server's 30-minute inactivity allowance can reset throughout an active upgrade. Require HTTP 200, `ok: true`
    and `commit` equal to the full candidate SHA. Record failure if the deploy fails or that reply does not arrive
    within the job's deployment deadline. The external job must notify the operator of that failure and retain
    the commit, workflow run URL, deployment identifier and failure reason. Recovery remains a separate task

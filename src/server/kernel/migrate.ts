@@ -125,10 +125,12 @@ function schemaImage(): Buffer {
  * schema, built once per process by the migrations themselves. A file always goes through the migrations: copying
  * the image into a new file would let a stale write-ahead log left beside a deleted database replay onto it.
  */
-export function openDatabase(path: string): Db {
+type MigrationOptions = { copyWorkspace?: string };
+
+export function openDatabase(path: string, options: MigrationOptions = {}): Db {
 	const db = new Db(path === ":memory:" ? schemaImage() : path);
 	try {
-		migrate(db, path);
+		migrate(db, path, options);
 		return db;
 	} catch (error) {
 		db.close();
@@ -149,7 +151,11 @@ export function schemaVersion(db: Db): number {
  * (`<file>.v<N>.bak`). Older copies and interrupted copy artifacts are removed only after all migrations commit and only when this call
  * completed the new copy itself. A pre-existing copy is left alone and never permits cleanup.
  */
-export function migrate(db: Db, path: string): { from: number; to: number; backup: string | null } {
+export function migrate(
+	db: Db,
+	path: string,
+	options: MigrationOptions = {},
+): { from: number; to: number; backup: string | null } {
 	if (path !== ":memory:") protectDatabaseCopies(path);
 	const from = schemaVersion(db);
 	if (from > SCHEMA_VERSION) {
@@ -161,7 +167,7 @@ export function migrate(db: Db, path: string): { from: number; to: number; backu
 	if (pending.length > 0 && from > 0 && path !== ":memory:") {
 		backup = `${path}.v${from}.bak`;
 		if (!existsSync(backup)) {
-			db.copyTo(backup);
+			db.copyTo(backup, options.copyWorkspace);
 			wroteBackup = true;
 		}
 	}
@@ -189,8 +195,35 @@ export function migrate(db: Db, path: string): { from: number; to: number; backu
 				);
 			}
 		};
+		const cleanWorkspace = (candidate: string, matches: (name: string) => boolean): void => {
+			try {
+				for (const child of readdirSync(candidate, { withFileTypes: true })) {
+					if (child.isFile() && matches(child.name)) remove(join(candidate, child.name));
+				}
+				if (readdirSync(candidate).length === 0) {
+					rmdirSync(candidate);
+					console.error(`[mainworthy] removed upgrade copy ${JSON.stringify(candidate)}`);
+				}
+			} catch (error) {
+				console.error(
+					`[mainworthy] could not clean upgrade copy workspace ${JSON.stringify(candidate)}: ${error instanceof Error ? error.message : error}`,
+				);
+			}
+		};
 		try {
 			for (const file of readdirSync(directory, { withFileTypes: true })) {
+				const startupPrefix = `${basename(path)}.mainworthy-start-`;
+				if (
+					file.isDirectory() &&
+					file.name.startsWith(startupPrefix) &&
+					/^[a-zA-Z0-9]{6}$/.test(file.name.slice(startupPrefix.length))
+				) {
+					cleanWorkspace(
+						join(directory, file.name),
+						(name) => name.startsWith(prefix) && /^[1-9]\d*\.bak(?:-journal)?$/.test(name.slice(prefix.length)),
+					);
+					continue;
+				}
 				if (!file.name.startsWith(prefix)) continue;
 				const suffix = file.name.slice(prefix.length);
 				const candidate = join(directory, file.name);
@@ -204,20 +237,7 @@ export function migrate(db: Db, path: string): { from: number; to: number; backu
 					const copy = /^([1-9]\d*\.bak)\.mainworthy-copy-[a-zA-Z0-9]{6}$/.exec(suffix)?.[1];
 					if (!copy) continue;
 					const name = `${prefix}${copy}`;
-					try {
-						for (const child of readdirSync(candidate, { withFileTypes: true })) {
-							if (child.isFile() && (child.name === name || child.name === `${name}-journal`))
-								remove(join(candidate, child.name));
-						}
-						if (readdirSync(candidate).length === 0) {
-							rmdirSync(candidate);
-							console.error(`[mainworthy] removed upgrade copy ${JSON.stringify(candidate)}`);
-						}
-					} catch (error) {
-						console.error(
-							`[mainworthy] could not clean upgrade copy workspace ${JSON.stringify(candidate)}: ${error instanceof Error ? error.message : error}`,
-						);
-					}
+					cleanWorkspace(candidate, (child) => child === name || child === `${name}-journal`);
 				}
 			}
 		} catch (error) {

@@ -195,12 +195,12 @@ export function* ensureAssertionIndex(db: Db, project: number): Generator<undefi
 }
 
 /** Startup and archive import rebuild privately, before any accepted batch can use the index. */
-export function rebuildAssertionIndexes(db: Db, force = false): void {
+export function rebuildAssertionIndexes(db: Db, force = false, progress: () => void = () => {}): void {
 	db.transaction(() => {
 		for (const { id: project } of allProjects(db)) {
 			if (force) db.run(Q.clearReady, { project });
 			for (const _ of ensureAssertionIndex(db, project)) {
-				/* Synchronous maintenance; each allocation is bounded. */
+				progress();
 			}
 		}
 	});
