@@ -49,7 +49,7 @@ contiguous, keep each entry equal to its file, check the `archive` marks against
 schema to the fresh one. Whether a shipped migration was edited is left to review.
 
 Nothing is compatible before 1.0. A migration may break stored data, tokens or archives when that makes the
-result simpler. Say what breaks in `CHANGELOG.md`. Build no migration path.
+result simpler. Say what breaks in a `.changes/` fragment with category `Breaks`. Build no migration path.
 
 ## Add a web screen
 
@@ -137,3 +137,46 @@ A feature adds to the demo (the owner, 2026-10-15). `src/cli/demo/` decides what
 existing demo changes. Write times only through the demo project's own clock: only a demo project accepts a time
 from its caller (decision 0100), and `test/demo-time.test.ts` holds that. If adding to the demo is truly
 unreasonable, say why in the pull request.
+
+## Record a visible change
+
+Add one `.changes/<issue-or-unique-id>-<slug>.md` file. Choose an id unique to this fact, such as the issue number or a task name. Different facts for one issue need different ids. The filename starts with the metadata id followed by a hyphen and a descriptive slug. Use lowercase letters, digits and hyphens.
+
+Use this format:
+
+```markdown
+---
+id: 123-example
+category: Fixed
+date: 2026-10-23
+issue: https://github.com/endqwerty/mainworthy/issues/123
+---
+
+Describe the behaviour a person can observe and any compatibility break.
+```
+
+The metadata accepts one plain scalar per line. Categories are `Fixed`, `Changed`, `Breaks`, `Security` and `Added`. Dates are real calendar dates in `YYYY-MM-DD` form. Include `issue`, `pr`, or both as full links to this repository. A thread task with no PR yet uses `pr: pending`; replace it with the PR URL when opening one. Write Markdown links relative to `.changes/`, or use HTTPS links. The assembler relocates relative links for the root changelog.
+
+Run `bun scripts/changelog.ts --check` to validate fragments. A feature author leaves `CHANGELOG.md` alone. The release coordinator previews with `bun scripts/changelog.ts` and assembles with `bun scripts/changelog.ts --write`. Commit the aggregate only when cutting a release or integrating a batch. Keep the fragments after assembly. Repeated runs replace the same marked section, sorted by descending date and ascending id, and preserve every byte of historical entries. Do not use union merges.
+
+## Record a design decision
+
+Add `docs/decisions/YYYY-MM-DD-<slug>.md` with an unnumbered first heading and this metadata:
+
+```markdown
+# A descriptive title
+
+- Date: 2026-10-23
+- Status: accepted
+- PR: pending
+
+## Problem
+
+Describe the problem, decision, alternatives and checks.
+```
+
+The date matches the filename. Status is `proposed`, `accepted`, `superseded`, `rejected` or `deprecated`. Include `- Issue: <full issue URL>`, `- PR: <full PR URL>`, or both. Use `pending` for a PR that does not exist yet, then replace it when opening one. Keep every historical numbered filename and its links unchanged. Historical records retain their older metadata conventions.
+
+Run `bun test test/docs.test.ts test/decisions.test.ts` to check records. `bun scripts/decisions.ts` prints a Markdown index with repository-relative links, sorted by ascending date and id. Undated historical records come first. Generate this list when needed instead of editing a shared index. The app serves guide pages only; it does not enumerate these records or read the changelog.
+
+[Changelog fragments and dated decisions](../decisions/2026-10-23-changelog-fragments-and-dated-decisions.md) records why these files are independent.

@@ -90,7 +90,7 @@ export const IOS: Paths = {
  * which `scripts/diagrams.ts` stamps and `test/docs.test.ts` checks through it.
  */
 export const NAMED: Paths = {
-	include: ["docs/**", "*.md", ".github/**", "ios/**"],
+	include: [".changes/**", "docs/**", "*.md", ".github/**", "ios/**"],
 	exclude: [
 		"docs/guide/**",
 		"docs/diagrams/**",

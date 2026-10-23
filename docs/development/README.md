@@ -117,11 +117,13 @@ Each of these has a test or a script behind it, except where the table says othe
 
 | A change that | Also updates |
 | --- | --- |
-| a person can see | `CHANGELOG.md` and the page of `docs/guide` that describes it |
+| a person can see | a new `.changes/<issue-or-unique-id>-<slug>.md` fragment and the relevant `docs/guide` page |
 | an operation, a command, a preset, a capability or an answer key | the generated docs: run `bun scripts/gen-docs.ts` |
-| a design choice | a decision record in `docs/decisions/NNNN-title.md` |
+| a design choice | a decision record in `docs/decisions/YYYY-MM-DD-<slug>.md` |
 | a feature | the demo in `src/cli/demo/`, unless that is truly unreasonable (the owner's review, nothing runs) |
 | a dependency | the licence notices: run `bun scripts/licences.ts` |
 | a reply field the iPhone app reads | `scripts/ios/contract.ts`, then `bun scripts/ios.ts gen` |
 | the tests, by adding or splitting files | `scripts/test-timings.json` ([The check and the tests](tests.md#refresh-the-test-timings)) |
 | the schema | a new migration, never an edit to a shipped one |
+
+[Write a changelog fragment or decision](change-the-code.md#record-a-visible-change) describes the metadata and assembly commands.

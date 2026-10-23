@@ -1,0 +1,39 @@
+import { expect, test } from "bun:test";
+import { decisions } from "../scripts/decisions.ts";
+
+const dated = (slug = "example", title = "Example") => ({
+	file: `2026-10-23-${slug}.md`,
+	text: `# ${title}\n\n- Date: 2026-10-23\n- Status: accepted\n- PR: pending\n\nA design decision.\n`,
+});
+
+test("the decision index accepts both conventions and sorts by date then stable id", () => {
+	const records = decisions([
+		dated("z", "Z"),
+		{ file: "0002-old.md", text: "# 0002: Old\n\n- Date: 2026-10-22\n- Status: accepted\n" },
+		dated("a", "A"),
+		{ file: "0001-undated.md", text: "# Historical undated decision\n" },
+	]);
+	expect(records.map((record) => record.id)).toEqual(["0001", "0002", "2026-10-23-a", "2026-10-23-z"]);
+	expect(records[0]?.date).toBeNull();
+});
+
+test("decisions reject conflicting ids, mismatched headings, missing metadata and bad links", () => {
+	for (const input of [
+		{ ...dated(), file: "not-a-decision.md" },
+		{ ...dated(), text: dated().text.replace("# Example", "# 2026: Example") },
+		{ ...dated(), text: dated().text.replace("Date: 2026-10-23", "Date: 2026-10-24") },
+		{ ...dated(), text: dated().text.replace("- Status: accepted\n", "") },
+		{ ...dated(), text: dated().text.replace("- Status: accepted", "- Status: wrong") },
+		{ ...dated(), text: dated().text.replace("- PR: pending\n", "") },
+		{ ...dated(), text: `${dated().text}\n[bad](no-such-decision.md)` },
+		{ file: "0001-old.md", text: "# 0002: Wrong number\n" },
+	])
+		expect(() => decisions([input])).toThrow();
+	expect(() => decisions([dated(), dated()])).toThrow(/duplicate/i);
+	expect(() =>
+		decisions([
+			{ file: "0001-a.md", text: "# 0001: A" },
+			{ file: "0001-b.md", text: "# 0001: B" },
+		]),
+	).toThrow(/duplicate/i);
+});
