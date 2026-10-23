@@ -224,3 +224,66 @@ one report. The fix makes eight: an inherited answer covers exact results, so it
 longer asks for every run in the project with the same cause. Cause-wide answers keep
 their existing recomputation path. Existing sequence and inherited-evidence tests cover
 base propagation, corrections, closed runs and policy changes.
+
+## Server-thread health stalls
+
+`health-stalls.ts` seeds a disk fixture with 10,000 cases, 100,000 requested results,
+5,000 open questions and a separate live demo. Its probe starts a fresh database copy
+in another process with production `NODE_ENV`, the normal WAL settings, eight ready
+reader threads on a ten-core host, and the ordinary checkpoint worker. It probes
+`/healthz` every 125 ms after the preceding response, logs 20 ms server timer drift,
+and records every health wait or drift above 250 ms with its active workload and timestamp.
+This frequency slows during a stall; the server's independent drift log records the pause too.
+
+Create both directories through `bun scripts/work.ts scratch new <name>`, then run:
+
+```sh
+bun bench/health-stalls.ts --seed <dataset-directory>
+bun bench/health-stalls.ts <dataset-directory> <artifact-directory> <source-root>
+```
+
+The source root can be an archived baseline with `node_modules` linked to the working
+checkout. Alternate five fresh copies per revision. The ordered workloads are a CI
+report of 4,000 results with 200 earlier tries and 20 attachments, a gate read, merge
+and reopen events, `renewDemoWork`, full archive export, a 500-row search, a 500-row
+Queue page and policy adoption across the existing change runs. The final assertions
+check stored report, try and attachment counts, an extended demo lease and the adopted
+policy. Request failures exit nonzero. Local mode supplies the benchmark owner for
+administrative requests; the report uses an authenticated CI token held only in memory.
+
+Add `--profile` for a separate diagnostic run. Bun writes its CPU profile to the
+artifact directory. Do not include that run in latency samples. Preserve the JSON
+output, which includes every health sample, every server drift above 10 ms, machine
+load, completed workload results and all events above 250 ms. Shared-host observations
+are not a production latency guarantee. See `results-health-stalls.log` for the policy
+reconciliation investigation and remaining synchronous work.
+
+The 2026-10-22 investigation observed the following longest health waits in
+milliseconds. Each cell is the median of five fresh-process runs, followed by the
+full range. The host was heavily shared; these are observations, not a global health SLA.
+Policy reconciliation improved in this workload; ranges for unchanged paths overlap.
+
+| Workload | Before, ms | After, ms |
+| --- | ---: | ---: |
+| CI report, 4,000 results with tries and attachments | 883 (720–2,419) | 981 (598–5,021) |
+| Gate | 8 (1–56) | 9 (3–365) |
+| Change merged | 129 (24–679) | 43 (2–962) |
+| Change reopened | 231 (1–818) | 159 (111–303) |
+| Demo work renewal | 19 (5–92) | 7 (0–330) |
+| Archive export | 356 (136–1,239) | 751 (99–1,195) |
+| Large find | 5 (1–121) | 3 (1–11) |
+| Queue inbox | 7 (4–32) | 6 (2–114) |
+| Policy adoption | 5,132 (4,093–10,189) | 527 (393–666) |
+
+The [full measurement log](results-health-stalls.log) records all 290 health or
+timer-drift events above 250 ms, their concurrent workload and timestamp, the
+profile findings, failed-start exclusions and follow-up proposals. These observations
+do not identify the historical production stall conclusively.
+
+The current policy regression uses 6,000 small change runs and a 750 ms bound. Ten
+alternating fresh-instance tests passed on fixed code and failed on old code, with no
+latency retries. Fixed health waits ranged from 2.8 to 197.5 ms; old waits ranged from
+926.4 to 6755.1 ms. The slowest fixed sample leaves
+552.5 ms below the bound; the fastest old sample exceeds it by 176.4 ms.
+The log also retains the rejected smaller fixtures and bounds, so falling host load
+is visible rather than hidden by selecting favorable samples.
