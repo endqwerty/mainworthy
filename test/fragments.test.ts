@@ -305,14 +305,15 @@ test("source steps are returned only for a case version with fragment pins", () 
 	expect(historical).not.toHaveProperty("sourceSteps");
 });
 
-test("custom fields and fragment users are returned only when selected", () => {
+test("custom fields are returned by default and fragment users only when selected", () => {
 	createFragment();
 	createUser();
 	for (const ref of ["C-1", "C-2"]) {
 		for (const fields of [undefined, ["title"]]) {
 			const [read] = h.call<Record<string, unknown>[]>("get", { refs: [ref], fields });
 			expect(read).toMatchObject({ ref, title: ref === "C-1" ? "Sign in" : "Checkout", version: 1 });
-			expect(read).not.toHaveProperty("fields");
+			if (fields === undefined) expect(read).toHaveProperty("fields", ref === "C-2" ? { risk: "high" } : {});
+			else expect(read).not.toHaveProperty("fields");
 			expect(read).not.toHaveProperty("users");
 		}
 	}

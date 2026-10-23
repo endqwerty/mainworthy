@@ -111,7 +111,7 @@ An instance admin can define a project's fields in **Settings**, **Policy**, und
 2. Give the field a unique key and a label.
 3. Choose **Text** or **Choice**.
 4. For a choice, enter one allowed value per line. Values must be nonblank, unique, and fit on one line.
-5. If the field needs a value, mark **Required**.
+5. To require a nonblank value on new cases and changed field values, mark **Required**.
 6. Press **Save field definitions** to propose and accept the change.
 
 Both the proposal and the admin's decision stay in the record. Definitions belong to the project and survive a switch of preset. Saving sends the version of the policy read by the browser. A policy change during saving causes a conflict and keeps your field draft. Review the current policy before trying again. If another edit changes the definitions while you type, choose **Reload field definitions** before saving. Reloading replaces your unsaved form with the current definitions.
@@ -122,13 +122,19 @@ New cases and restores must meet the definitions when proposed and adopted. An e
 
 Required fields cannot be combined with **Create a case for each test**. Automatic creation has no values for those fields. Choose **Ask in the queue** or **Track without a case** first. Optional definitions work with automatic creation.
 
-The case editor does not edit field values yet. Use canonical Markdown or a `propose` body:
+The web capture and edit editor shows every defined field below the title, including optional fields.
+Required fields are marked **required**. The editor checks values before sending a save and names invalid fields
+in the status line. Fill them and save again; your draft stays on this device. Older cases can keep unchanged
+missing values or obsolete choices. Clearing an optional field removes its value; undefined keys stay intact.
+The demo project's Priority, Team and Risk fields are optional examples you can edit.
+
+You can also use canonical Markdown or a `propose` body:
 
 ```
 $ mainworthy propose --json '{"edits":[{"op":"edit","case":"C-1","base":1,"body":{"fields":{"risk":"high","legacy":"keep this value"}}}]}'
 ```
 
-A supplied `fields` map replaces the case's map. Include every value you want to keep. Omitting `fields` preserves the base version's values. Use `mainworthy get --json '{"refs":["C-1"],"as":"md"}'` to read them. The ordinary JSON case reply omits custom field values.
+A supplied `fields` map replaces the case's map. Include every value you want to keep. Omitting `fields` preserves the base version's values. Use `mainworthy get --json '{"refs":["C-1"],"as":"md"}'` to read them. The ordinary JSON case reply includes `fields`. A `find --in cases` reply includes the project's `fieldDefinitions`, even when the list is empty.
 
 To define fields through the CLI or HTTP API, start with `mainworthy policy show --json`. Keep its settings and add a `fields` map, then propose the whole settings object. Use the policy's `version` as `base` in place of `1`:
 

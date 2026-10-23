@@ -7,6 +7,7 @@ import type { AuditInput } from "./audit.ts";
 import type { CsvImportInput } from "./csv.ts";
 import type { HandoffInput, HandoffStatusInput } from "./handoff.ts";
 import type { Unlinked } from "./kinds.ts";
+import type { FieldDefinitions } from "./model.ts";
 import type {
 	AdminInput,
 	AnnounceInput,
@@ -156,6 +157,7 @@ export type SessionInfo = {
 		policy: string;
 		/** What happens to a test with no case. Absent only in the reply of a server older than the setting. */
 		unlinked?: Unlinked | undefined;
+		fieldDefinitions?: FieldDefinitions | undefined;
 		demo: boolean;
 		can?: string[];
 		/** Whether a failure question can be handed to a coding agent (`MAINWORTHY_HANDOFF_*`). */

@@ -9,6 +9,7 @@ import {
 	type ConflictAddress,
 	conflictLabel,
 	type ExpandedStep,
+	type FieldDefinitions,
 	METHOD_LABELS,
 } from "../../core/model.ts";
 import type { QuestionItem } from "../../core/ops.ts";
@@ -95,12 +96,12 @@ function grouped(entries: Entry[]): TimelineGroup[] {
 }
 
 export function CasePane({
+	fieldDefinitions,
 	view,
 	draft,
 	stored,
 	change,
 	begin,
-	seal,
 	rapid,
 	conflict,
 	onResolved,
@@ -113,12 +114,12 @@ export function CasePane({
 	copies,
 	onDiscardCopy,
 }: {
+	fieldDefinitions: FieldDefinitions | undefined;
 	view: CaseView | null;
 	draft: Draft | null;
 	stored: boolean;
 	change: DraftChange;
 	begin: (field?: string) => void;
-	seal: () => void;
 	rapid: () => void;
 	conflict: ConflictState | null;
 	onResolved: (state: ConflictState, body: CaseBody) => Promise<void>;
@@ -358,10 +359,10 @@ export function CasePane({
 					)}
 					{draft ? (
 						<BodyEditor
+							fieldDefinitions={fieldDefinitions}
 							draft={draft}
 							tags={draftTags({ ...draft, originalTags: view?.tags ?? draft.originalTags })}
 							change={change}
-							seal={seal}
 							rapid={rapid}
 							readOnlyStatus={ownedElsewhere ? elsewhereStatus : conflict ? conflictEditorStatus : null}
 						/>
@@ -788,6 +789,12 @@ function ConflictCard({
 			setResolving(false);
 		}
 	}
+	function guard(event: { preventDefault: () => void }): void {
+		if (refusal) {
+			event.preventDefault();
+			setStatus(refusal);
+		}
+	}
 	return (
 		<section className="conflict-card" aria-label="Edit conflict">
 			<h3>Both edits are kept</h3>
@@ -815,25 +822,25 @@ function ConflictCard({
 				<div className="conflict-field" key={field.key}>
 					<b>{field.key}</b>
 					<div className="conflict-sides">
-						<div className="conflict-side">
-							<h4>Your draft</h4>
-							<div>{field.mine}</div>
-							<button type="button" className="out" disabled={Boolean(refusal)} onClick={() => field.set(field.mine)}>
-								Use my {field.key}
-							</button>
-						</div>
-						<div className="conflict-side">
-							<h4>Current version</h4>
-							<div>{field.current}</div>
-							<button
-								type="button"
-								className="out"
-								disabled={Boolean(refusal)}
-								onClick={() => field.set(field.current)}
-							>
-								Use current {field.key}
-							</button>
-						</div>
+						{(
+							[
+								["mine", "Your draft", "my"],
+								["current", "Current version", "current"],
+							] as const
+						).map(([side, label, action]) => (
+							<div className="conflict-side" key={side}>
+								<h4>{label}</h4>
+								<div>{field[side]}</div>
+								<button
+									type="button"
+									className="out"
+									disabled={Boolean(refusal)}
+									onClick={() => field.set(field[side])}
+								>
+									Use {action} {field.key}
+								</button>
+							</div>
+						))}
 					</div>
 					<label>
 						Edit merged {field.key}
@@ -846,24 +853,9 @@ function ConflictCard({
 									setStatus(refusal);
 								}
 							}}
-							onBeforeInput={(event) => {
-								if (refusal) {
-									event.preventDefault();
-									setStatus(refusal);
-								}
-							}}
-							onPaste={(event) => {
-								if (refusal) {
-									event.preventDefault();
-									setStatus(refusal);
-								}
-							}}
-							onCut={(event) => {
-								if (refusal) {
-									event.preventDefault();
-									setStatus(refusal);
-								}
-							}}
+							onBeforeInput={guard}
+							onPaste={guard}
+							onCut={guard}
 							value={field.value}
 							onChange={(event) => field.set(event.target.value)}
 						/>

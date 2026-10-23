@@ -2,6 +2,7 @@ import { closeSync, openSync, readSync } from "node:fs";
 import { z } from "zod";
 import { type Api, type Envelope, ERROR_CODES, type OpName, type SessionInfo } from "../core/api.ts";
 import { Unlinked } from "../core/kinds.ts";
+import { FieldDefinitions } from "../core/model.ts";
 import { API_VERSION, API_VERSION_HEADER, ApiHealth, AT_HEADER } from "../core/version.ts";
 import { TOKEN_MAX } from "../server/identity/identity.ts";
 import { OPS } from "../server/ops/index.ts";
@@ -41,6 +42,7 @@ const SessionSchema = z.object({
 			createdAt: z.number(),
 			policy: z.string(),
 			unlinked: Unlinked.optional(),
+			fieldDefinitions: FieldDefinitions.optional(),
 			demo: z.boolean(),
 			can: z.array(z.string()).default([]),
 			handoff: z.boolean().default(false),

@@ -356,7 +356,14 @@ Concurrent field changes merge under the ordinary edit rules.
 A proposal that supplies the map replaces all its values, so include keys you want to keep.
 Unless a required field prevents it, an explicit empty header clears the values.
 The empty header can be either `fields:` with no entries or `fields: {}`.
-The web and iPhone case editors preserve these values but do not edit them.
+In the web editor, every field defined in Settings appears below the title when you capture or edit a case.
+Text fields accept text; choice fields offer the allowed values. Fields marked **required** need a nonblank
+value for a new case. Escape, Record version and automatic saving validate fields before sending a proposal.
+A refusal names the field in the status line and keeps your draft on this device. Fill the field and save again.
+Clearing an optional field removes its value. The editor preserves stored keys without a definition. A save sends the field map only when you change it, so
+resuming a draft from before custom field reads preserves values the draft never loaded, unless you change a field in it:
+then the save sends only the fields that draft knows, and stored values it never loaded are removed.
+The iPhone editor preserves custom field values but does not edit them.
 
 A project can define text or choice fields and require values.
 See [Custom fields](./policy.md#custom-fields) for the procedure.

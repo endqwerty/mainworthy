@@ -1,4 +1,4 @@
-// The demo project's own fields (decision 0052): a priority and the team that owns a case. Pure: a case's values
+// The demo project's own fields (decision 0052): a priority, the owning team and risk notes. Pure: a case's values
 // come from its folder, so the same case has the same values in every demo.
 import type { FieldDefinitions } from "../../core/model.ts";
 import type { DemoCase } from "./cases.ts";
@@ -7,6 +7,7 @@ import { CATALOG } from "./catalog.ts";
 export const DEMO_FIELDS: FieldDefinitions = {
 	priority: { kind: "choice", label: "Priority", required: false, choices: ["P1", "P2", "P3"] },
 	team: { kind: "text", label: "Team", required: false },
+	risk: { kind: "text", label: "Risk", required: false },
 };
 
 /** Who owns each area of the shop. */
@@ -27,6 +28,7 @@ export function demoFields(item: DemoCase): Record<string, string> {
 	const area = item.folder.split("/")[0] ?? item.folder;
 	return {
 		priority: weight >= 8 ? "P1" : weight >= 5 ? "P2" : "P3",
+		...(item.folder.startsWith("Checkout/") ? { risk: "Customer payments" } : {}),
 		...(TEAMS[area] ? { team: TEAMS[area] } : {}),
 	};
 }

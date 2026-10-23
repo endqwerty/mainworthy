@@ -8,7 +8,7 @@
     "quality_profile": "showcase",
     "repository": {
       "url": "git@github.com:endqwerty/mainworthy.git",
-      "revision": "688ffae7790fd7741275f35d4d324b9314d754db",
+      "revision": "1ec824efbd531471c019e443f2803c83eeb3ff2e",
       "link_mode": "local-only"
     },
     "legend": {
@@ -332,7 +332,7 @@
       "items": [
         "The case\u2019s methods name people, automated tests or agents. Change the case with propose; the case\u2019s folder and tags use placement edits. A saved edit follows the policy before it becomes current.",
         "An automated test\u2019s link names the case it exercises. Link or unlink through a mapping decision in the queue, subject to policy and answer permissions. A link and an admitted method are separate choices.",
-        "A case can carry free text fields through its Markdown or the API. The web UI does not show or edit them, and there are no typed or required fields."
+        "A project defines text or choice fields in Settings and can require nonblank values. The web capture and edit editor shows every defined field and validates before saving. Markdown and the API also carry field values."
       ]
     },
     {

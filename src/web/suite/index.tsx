@@ -4,9 +4,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal, flushSync } from "react-dom";
 import { z } from "zod";
 import type { Api } from "../../core/api.ts";
+import { canonicalJson } from "../../core/hash.ts";
 import { newStepId } from "../../core/ids.ts";
 import { mergeBodies } from "../../core/merge3.ts";
-import { CaseBody, ConflictAddress, cleanPath, emptyBody, TAG } from "../../core/model.ts";
+import { CaseBody, ConflictAddress, cleanPath, emptyBody, fieldErrors, TAG } from "../../core/model.ts";
 import type { Edit } from "../../core/ops.ts";
 import { parseBodyInline } from "../../core/outline.ts";
 import {
@@ -248,13 +249,9 @@ export function SuiteScreen() {
 				setDraftStored(false);
 				setStatus("Device storage is full. Keep this tab open until the version is recorded.");
 			}
-			setCaptures((previous) => new Map(previous).set(next.id, next));
-			if (draftRef.current?.id === next.id) {
-				draftRef.current = next;
-				setDraftState(next);
-			}
+			followDraft(next);
 		},
-		[project, mayWrite, writeOwnedDraft, draftStored, setStatus],
+		[project, mayWrite, writeOwnedDraft, draftStored, setStatus, followDraft],
 	);
 	/**
 	 * The page holds these rows of a case from now on, unless it holds a later version already. The paths that
@@ -439,6 +436,8 @@ export function SuiteScreen() {
 		getNextPageParam: (last) => last.cursor ?? undefined,
 		placeholderData: (previous) => previous,
 	});
+	const fieldDefinitions =
+		list.data?.pages[0]?.fieldDefinitions ?? session.projects.find((item) => item.key === project)?.fieldDefinitions;
 	const [placements, setPlacements] = useState<Set<PendingPlacement>>(() => new Set());
 	const cases = useMemo(
 		() =>
@@ -644,8 +643,8 @@ export function SuiteScreen() {
 		if (
 			stored?.conflict &&
 			(!sameBody(stored.body, next.body) ||
-				JSON.stringify([stored.tagChanges, stored.covers, stored.folder]) !==
-					JSON.stringify([next.tagChanges, next.covers, next.folder]))
+				canonicalJson([stored.tagChanges, stored.covers, stored.folder]) !==
+					canonicalJson([next.tagChanges, next.covers, next.folder]))
 		) {
 			draftRef.current = stored;
 			liveDrafts.current.set(stored.id, stored);
@@ -724,15 +723,10 @@ export function SuiteScreen() {
 	const putDraft = useCallback(
 		(next: Draft): boolean => {
 			if (!writeOwnedDraft(next)) return false;
-			liveDrafts.current.set(next.id, next);
-			setCaptures((previous) => new Map(previous).set(next.id, next));
-			if (draftRef.current?.id === next.id) {
-				draftRef.current = next;
-				setDraftState(next);
-			}
+			followDraft(next);
 			return true;
 		},
-		[writeOwnedDraft],
+		[writeOwnedDraft, followDraft],
 	);
 	const dropDraft = useCallback(
 		(id: string): void => {
@@ -1152,12 +1146,7 @@ export function SuiteScreen() {
 			return;
 		}
 		let cleaned = cleanTitle(snapshot);
-		let body: CaseBody = {
-			...cleaned.body,
-			steps: cleaned.body.steps
-				.filter((step) => step.use || step.action.trim())
-				.map((step) => ({ ...step, expected: step.expected || null })),
-		};
+		let body = recordable(cleaned.body);
 		if (settleOnly && !snapshot.sent && snapshot.submission.kind !== "waiting") return;
 		// All the draft holds beyond its version is a step still without an action, which no version can take.
 		// Nothing is sent, and the draft stays on the device as it is (issue #86).
@@ -1168,9 +1157,20 @@ export function SuiteScreen() {
 			sameBody(body, snapshot.original) &&
 			cleaned.tagChanges.add.length === 0 &&
 			cleaned.tagChanges.remove.length === 0 &&
-			JSON.stringify(cleaned.covers) === JSON.stringify(snapshot.originalCovers)
+			canonicalJson(cleaned.covers) === canonicalJson(snapshot.originalCovers)
 		)
 			return;
+		if (!snapshot.sent && snapshot.submission.kind === "none") {
+			if (!fieldDefinitions) {
+				setStatus("Custom field definitions are unavailable. Wait for the Suite to load before saving.");
+				return;
+			}
+			const errors = fieldErrors(body.fields, fieldDefinitions, snapshot.ref ? snapshot.original.fields : undefined);
+			if (errors.length) {
+				setStatus(errors.join("; "));
+				return;
+			}
+		}
 		const source = snapshot;
 		const recovered = snapshot.sent;
 		const waitingText =
@@ -1253,11 +1253,9 @@ export function SuiteScreen() {
 									case: snapshot.ref,
 									base: snapshot.base,
 									body: {
-										title: body.title,
-										pre: body.pre,
-										steps: body.steps,
-										methods: body.methods,
-										automate: body.automate,
+										...body,
+										fields:
+											canonicalJson(body.fields) === canonicalJson(snapshot.original.fields) ? undefined : body.fields,
 									},
 								},
 								...(tagsToPlace.add.length || tagsToPlace.remove.length
@@ -1473,12 +1471,7 @@ export function SuiteScreen() {
 				let unfinished = false;
 				if (latest && ref) {
 					const normalized = cleanTitle(latest);
-					const normalizedBody = {
-						...normalized.body,
-						steps: normalized.body.steps
-							.filter((step) => step.use || step.action.trim())
-							.map((step) => ({ ...step, expected: step.expected || null })),
-					};
+					const normalizedBody = recordable(normalized.body);
 					const tagChanges = remainingTagChanges({ sent: sentTagChanges, current: normalized.tagChanges });
 					const more =
 						tagChanges.add.length > 0 ||
@@ -1569,7 +1562,7 @@ export function SuiteScreen() {
 		)
 			return;
 		const next = placedDraft(current, recordedView);
-		if (JSON.stringify([next.folder, next.originalTags]) === JSON.stringify([current.folder, current.originalTags]))
+		if (canonicalJson([next.folder, next.originalTags]) === canonicalJson([current.folder, current.originalTags]))
 			return;
 		followDraft(next);
 		try {
@@ -2382,6 +2375,7 @@ export function SuiteScreen() {
 				</div>
 			</section>
 			<CasePane
+				fieldDefinitions={fieldDefinitions}
 				copies={copies}
 				onDiscardCopy={(copy) => {
 					discardDraftCopy(copy.key);
@@ -2396,7 +2390,6 @@ export function SuiteScreen() {
 				stored={draftStored}
 				change={change}
 				begin={begin}
-				seal={leaveEditor}
 				rapid={create}
 				hasDraft={Boolean(selected && captures.get(selected)?.dirty)}
 				conflict={draft?.conflict ?? null}

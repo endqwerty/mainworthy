@@ -294,7 +294,7 @@ Read refs including result:id; verdicts: commit:hash, change:key, R-n. unless=et
 | `repo` | `string` | no | For commit refs: disambiguate repositories. |
 | `cursor` | `string` | no | For one proposal: the cursor from its previous page of edits. Restart without it after a project change. |
 | `refs` | `array<string>` | yes | C-, Q-, R-, T-, P-, result:id, commit:hash or change:key. |
-| `fields` | `array<string>` | no | For cases: any of title, pre, steps, methods, tags, covers, place, proof. Default: all. |
+| `fields` | `array<string>` | no | For cases: any of title, pre, steps, methods, fields, tags, covers, place, proof. Default: all. |
 | `as` | `"data" \| "md"` | no | `md` returns a case as canonical Markdown: fewer tokens than JSON. Default: `"data"`. |
 | `unless` | `record<string>` | no | Ref to the etag from get for the same as/fields. Unchanged: {ref, unchanged: true, etag}. |
 | `version` | `integer` | no | For one case: this version instead of the current one. |

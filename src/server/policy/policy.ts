@@ -55,12 +55,15 @@ export function policyAt(db: Db, project: number, version: number): CurrentPolic
 export const policyName = (policy: Pick<Policy, "preset" | "clauses">): string => presetOf(policy) ?? "custom";
 
 /**
- * What a project list says of a policy without its clauses: the name, and what happens to a test with no case,
- * which a project's admin may change and so must be able to read.
+ * The project summary carries policy metadata without its clauses. Case authors need field definitions before
+ * the Suite's first list arrives; the session includes them only for readers.
  */
-export const policySummary = (policy: Policy): { policy: string; unlinked: Unlinked } => ({
+export const policySummary = (
+	policy: Policy,
+): { policy: string; unlinked: Unlinked; fieldDefinitions: NonNullable<Policy["settings"]["fields"]> } => ({
 	policy: policyName(policy),
 	unlinked: policy.settings.unlinked,
+	fieldDefinitions: policy.settings.fields ?? {},
 });
 
 /** The owning clause, or combined review requirements when a refused replay has several possible matches. */
