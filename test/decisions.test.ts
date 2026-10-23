@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { decisions } from "../scripts/decisions.ts";
 
 const dated = (slug = "example", title = "Example") => ({
@@ -41,4 +42,11 @@ test("decisions reject conflicting ids, mismatched headings, missing metadata an
 test("mistyped dates cannot fall back to historical decision numbers", () => {
 	for (const file of ["2026-10-3-a.md", "2026-1-03-a.md", "2026-not-a-date.md", "2026-10-32-a.md"])
 		expect(() => decisions([{ file, text: "# A title\n" }])).toThrow(/dated.*filename|filename.*dated|date/i);
+});
+
+test("0155 is the last historical numbered record and later records must be dated", () => {
+	const file = "0155-placement-undo-comes-from-recorded-effects.md";
+	expect(decisions([{ file, text: readFileSync(`docs/decisions/${file}`, "utf8") }])[0]?.id).toBe("0155");
+	expect(() => decisions([{ file: "0156-new-record.md", text: "# 0156: New record\n" }])).toThrow(/dated/i);
+	expect(() => decisions([dated("new-record", "New record")])).not.toThrow();
 });

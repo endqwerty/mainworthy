@@ -27,6 +27,8 @@ export function decisions(sources?: readonly SourceFile[]): Decision[] {
 		.map(({ file, text }) => {
 			const dated = /^(\d{4}-\d{2}-\d{2})-[a-z0-9]+(?:-[a-z0-9]+)*\.md$/.exec(file);
 			const numbered = /^(0\d{3})-[a-z0-9]+(?:-[a-z0-9]+)*\.md$/.exec(file);
+			if (numbered && (Number(numbered[1]) < 1 || Number(numbered[1]) > 155))
+				throw new Error(`${file}: new decisions must use dated filenames; historical numbers end at 0155`);
 			if (dated) date.parse(dated[1]);
 			if (!dated && !numbered) throw new Error(`${file}: expected a dated or historical numbered decision filename`);
 			const id = dated ? file.slice(0, -3) : (numbered?.[1] ?? "");

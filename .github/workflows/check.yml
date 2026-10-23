@@ -195,6 +195,15 @@ jobs:
         with:
           bun-version: 1.4.3
       - run: bun install --frozen-lockfile
+      - name: A changed changelog is fully assembled
+        if: ${{ matrix.name == 'tests' || matrix.name == 'tests-1' }}
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          git cat-file -e "${BASE}^{commit}" 2>/dev/null || git fetch --no-tags --depth=1 origin "$BASE"
+          if ! git diff --quiet "$BASE" HEAD -- CHANGELOG.md; then
+            bun scripts/changelog.ts --check --complete
+          fi
       - name: Install the browser
         # The Chromium playwright-core is built for (`findChromium` in scripts/check-plan.ts), not the runner's Chrome.
         run: bun run browser
