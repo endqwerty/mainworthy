@@ -175,6 +175,49 @@ test("body inline capture canonicalizes requirement keys before comparing local 
 	expect(parseBodyInline(emptyBody("Title @req-1 @REQ-1")).covers).toEqual(["REQ-1"]);
 });
 
+test("step inline capture recognizes every title whitespace boundary before trimming", () => {
+	for (const space of [
+		" ",
+		"\t",
+		"\v",
+		"\f",
+		"\u00a0",
+		"\u1680",
+		...Array.from({ length: 11 }, (_, i) => String.fromCharCode(0x2000 + i)),
+		"\u2028",
+		"\u2029",
+		"\u202f",
+		"\u205f",
+		"\u3000",
+		"\ufeff",
+	]) {
+		for (const separator of ["\n", "\r\n", "\r"]) {
+			for (const [text, retained] of [
+				[`${space}#critical Apply the coupon`, "Apply the coupon"],
+				[`#smoke${space}#critical Apply the coupon`, "Apply the coupon"],
+				[`${space}#smoke${space}#critical Apply the coupon`, "Apply the coupon"],
+				[`Check total${space}#critical${space}@req-101`, "Check total"],
+				[`Check total${separator}${space}#critical`, "Check total\n"],
+				[`Check total${separator}${space}#critical${space}@req-101${separator}Retained`, "Check total\n\nRetained"],
+			] satisfies [string, string][]) {
+				const body = { ...emptyBody("Title"), steps: [{ id: "s1", action: text, expected: text }] };
+				const parsed = parseBodyInline(body);
+				expect(parsed.tags).toEqual(text.includes("#smoke") ? ["smoke", "critical"] : ["critical"]);
+				expect(parsed.covers).toEqual(text.includes("@req-101") ? ["REQ-101"] : []);
+				expect(parsed.body.steps).toEqual([{ id: "s1", action: retained, expected: retained }]);
+				expect(parseBodyInline(parsed.body)).toEqual({ body: parsed.body, tags: [], covers: [] });
+				expect(parseBodyInline(body, [body])).toEqual({ body, tags: [], covers: [] });
+			}
+		}
+	}
+});
+
+test("step inline capture preserves non-token whitespace and embedded or invalid markers", () => {
+	const text = "Check\u00a0total\u3000again\u2007today a#critical a@REQ-101 #bad! @invalid";
+	const body = { ...emptyBody("Title"), steps: [{ id: "s1", action: text, expected: text }] };
+	expect(parseBodyInline(body)).toEqual({ body, tags: [], covers: [] });
+});
+
 test("inline merge parsing keeps current/base fields literal and parses changes by field identity", () => {
 	const base = {
 		...emptyBody("Base #base @REQ-1"),

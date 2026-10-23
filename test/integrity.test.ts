@@ -453,16 +453,18 @@ describe("who may change the suite and the policy", () => {
 				});
 				const before = rows("SELECT count(*) AS n FROM proposals");
 				for (const token of ["#critical", "@REQ-101"]) {
-					const raw = decide(
-						question,
-						{ is: "merge", body: content(`Resolved${separator}${token}${separator}Retained`) },
-						writer,
-					);
-					expect(raw).toMatchObject({ status: "invalid", effects: null });
-					expect(rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
+					for (const space of ["", "\t", "\u00a0", "\u2007", "\u3000"]) {
+						const raw = decide(
+							question,
+							{ is: "merge", body: content(`Resolved${separator}${space}${token}${separator}Retained`) },
+							writer,
+						);
+						expect(raw).toMatchObject({ status: "invalid", effects: null });
+						expect(rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
+					}
 				}
 				const parsed = parseBodyInline(
-					content(`Resolved${separator}#critical${separator}@REQ-101${separator}Retained`),
+					content(`Resolved${separator}\u00a0#critical${separator}\u3000@REQ-101${separator}Retained`),
 				);
 				expect(parsed.tags).toEqual(["critical"]);
 				expect(parsed.covers).toEqual(["REQ-101"]);

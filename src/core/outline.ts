@@ -82,20 +82,17 @@ function columns({
 function titleMetadata(text: string): Pick<Outline, "title" | "tags" | "covers"> {
 	const tags = new Set<string>();
 	const covers = new Set<string>();
-	const title = text.replace(
-		/(^|[ \t])([#@])([^\s]+)/g,
-		(whole: string, space: string, marker: string, token: string) => {
-			if (marker === "#" && TAG.test(token)) {
-				tags.add(token);
-				return space;
-			}
-			if (marker === "@" && REQUIREMENT_KEY.test(token)) {
-				covers.add(token);
-				return space;
-			}
-			return whole;
-		},
-	);
+	const title = text.replace(/(^|\s)([#@])([^\s]+)/g, (whole: string, space: string, marker: string, token: string) => {
+		if (marker === "#" && TAG.test(token)) {
+			tags.add(token);
+			return space;
+		}
+		if (marker === "@" && REQUIREMENT_KEY.test(token)) {
+			covers.add(token);
+			return space;
+		}
+		return whole;
+	});
 	return { title: title.trim().replace(/[ \t]+/g, " "), tags: [...tags], covers: [...covers] };
 }
 
