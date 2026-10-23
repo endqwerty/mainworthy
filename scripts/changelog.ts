@@ -99,7 +99,8 @@ function changelogParts(changelog: string): { history: string; lines: string[] }
 /** Regenerate the owned section, preserving the exact outside text and checking its base when supplied. */
 export function assemble(changelog: string, entries: readonly Fragment[], options: { base?: string } = {}): string {
 	const current = changelogParts(changelog);
-	if (options.base !== undefined && current.history !== changelogParts(options.base).history)
+	const base = options.base === undefined ? null : changelogParts(options.base);
+	if (base !== null && current.history !== base.history)
 		throw new Error(`CHANGELOG.md history differs from its base. ${RESTORE}`);
 	const lines = new Map(
 		[...entries]
@@ -115,6 +116,11 @@ export function assemble(changelog: string, entries: readonly Fragment[], option
 		if (line !== lines.get(id))
 			throw new Error(`CHANGELOG.md entry ${id} differs from its canonical fragment. ${RESTORE}`);
 		seen.add(id);
+	}
+	if (base !== null) {
+		const retained = new Set(current.lines);
+		if (base.lines.some((line) => !retained.has(line)))
+			throw new Error(`CHANGELOG.md removes a previously assembled entry. ${RESTORE}`);
 	}
 	if (entries.length === 0) return current.history;
 	return `${TITLE}${START}\n${[...lines.values()].join("\n")}\n${END}\n\n${current.history.slice(TITLE.length)}`;
@@ -146,7 +152,9 @@ if (import.meta.main) {
 		const revision = bases[0]?.slice("--base=".length);
 		const output = assemble(changelog, entries, revision === undefined ? {} : { base: baseChangelog(revision) });
 		if (args.includes("--complete") && output !== changelog)
-			throw new Error(`CHANGELOG.md is not fully assembled. ${RESTORE}`);
+			throw new Error(
+				"CHANGELOG.md is not fully assembled; the coordinator should re-run bun scripts/changelog.ts --write --base=origin/main on an up-to-date branch.",
+			);
 		if (args.includes("--write")) {
 			const temporary = `.changelog-${randomUUID()}.tmp`;
 			try {
