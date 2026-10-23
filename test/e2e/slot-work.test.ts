@@ -13,7 +13,7 @@ test.skipIf(!browserAvailable)(
 			await h.page.getByText("0 in progress", { exact: false }).waitFor();
 			const taken = await server.api("work", { do: "take", run: planned.run, seconds: 30 });
 			await h.page.getByText("In progress · robin", { exact: false }).waitFor();
-			expect(await h.page.locator(".phead").innerText()).toContain("1 in progress");
+			await h.page.locator(".phead").filter({ hasText: "1 in progress" }).waitFor();
 			await advanceClock(server, 30_000);
 			await h.page.clock.fastForward(30_100);
 			await h.page.getByText("0 in progress", { exact: false }).waitFor();
