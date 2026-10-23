@@ -202,7 +202,7 @@ jobs:
         run: |
           git cat-file -e "${BASE}^{commit}" 2>/dev/null || git fetch --no-tags --depth=1 origin "$BASE"
           if ! git diff --quiet "$BASE" HEAD -- CHANGELOG.md; then
-            bun scripts/changelog.ts --check --complete
+            bun scripts/changelog.ts --check --complete --base="$BASE"
           fi
       - name: Install the browser
         # The Chromium playwright-core is built for (`findChromium` in scripts/check-plan.ts), not the runner's Chrome.

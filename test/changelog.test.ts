@@ -114,7 +114,7 @@ test("assembly refuses unowned generated lines and unknown fragment ids", () => 
 		output.replace("<!-- changes:end -->", "HAND-ADDED\n<!-- changes:end -->"),
 		output.replace("change:a", "change:unknown"),
 	])
-		expect(() => assemble(changed, entries)).toThrow(/move.*\.changes\/.*fragment/i);
+		expect(() => assemble(changed, entries)).toThrow(/restore CHANGELOG\.md.*add a \.changes\/ fragment/i);
 });
 
 for (const option of ["--check", "--write"]) {
@@ -135,7 +135,7 @@ for (const option of ["--check", "--write"]) {
 				stderr: "pipe",
 			});
 			expect(run.exitCode).not.toBe(0);
-			expect(run.stderr.toString()).toMatch(/move.*\.changes\/.*fragment/i);
+			expect(run.stderr.toString()).toMatch(/restore CHANGELOG\.md.*add a \.changes\/ fragment/i);
 			expect(readFileSync(join(scratch, "CHANGELOG.md"), "utf8")).toBe(changed);
 		} finally {
 			remove(scratch);
@@ -246,6 +246,7 @@ for (const kind of ["edited", "removed", "complete"]) {
 				expect(run.stderr.toString()).toMatch(
 					kind === "edited" ? /canonical|differs|does not match/i : /not fully assembled/i,
 				);
+				expect(run.stderr.toString()).toMatch(/restore CHANGELOG\.md.*add a \.changes\/ fragment/i);
 			}
 			expect(readFileSync(join(scratch, "CHANGELOG.md"), "utf8")).toBe(changed);
 		} finally {
@@ -253,3 +254,94 @@ for (const kind of ["edited", "removed", "complete"]) {
 		}
 	});
 }
+
+const restoreGuidance = /restore CHANGELOG\.md.*add a \.changes\/ fragment/i;
+
+function historyFixture(assembled: boolean) {
+	const scratch = make("changelog-history");
+	mkdirSync(join(scratch, ".changes"));
+	const input = fragment("security", "A security entry.");
+	writeFileSync(join(scratch, ".changes", input.file), input.text);
+	const entries = fragments([input]);
+	const history = "# Changelog\n\n- A preserved historical fact.\n";
+	const baseText = assembled ? assemble(history, entries) : history;
+	writeFileSync(join(scratch, "CHANGELOG.md"), baseText);
+	const git = (...args: string[]) => {
+		const run = Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", ...args], {
+			cwd: scratch,
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		if (run.exitCode !== 0) throw new Error(run.stderr.toString());
+		return run.stdout.toString().trim();
+	};
+	git("init", "-q");
+	git("add", "CHANGELOG.md");
+	git("commit", "-qm", "base history");
+	return { scratch, entries, baseText, base: git("rev-parse", "HEAD") };
+}
+
+for (const kind of ["below", "history edit", "above"]) {
+	test(`base-aware checking refuses a hand-written change ${kind}`, () => {
+		const fixture = historyFixture(true);
+		try {
+			const changed =
+				kind === "below"
+					? fixture.baseText.replace("<!-- changes:end -->\n\n", "<!-- changes:end -->\n\n- A hand-written entry.\n")
+					: kind === "above"
+						? fixture.baseText.replace("# Changelog\n\n", "# Changelog\n\n- A hand-written entry.\n")
+						: fixture.baseText.replace("preserved historical", "rewritten historical");
+			writeFileSync(join(fixture.scratch, "CHANGELOG.md"), changed);
+			const run = Bun.spawnSync(
+				[
+					process.execPath,
+					join(process.cwd(), "scripts/changelog.ts"),
+					"--check",
+					"--complete",
+					`--base=${fixture.base}`,
+				],
+				{ cwd: fixture.scratch, stdout: "pipe", stderr: "pipe" },
+			);
+			expect(run.exitCode).not.toBe(0);
+			expect(run.stderr.toString()).toMatch(restoreGuidance);
+			expect(readFileSync(join(fixture.scratch, "CHANGELOG.md"), "utf8")).toBe(changed);
+		} finally {
+			remove(fixture.scratch);
+		}
+	});
+}
+
+test("writing before the first assembly cannot launder a hand-written entry into trusted history", () => {
+	const fixture = historyFixture(false);
+	try {
+		writeFileSync(
+			join(fixture.scratch, "CHANGELOG.md"),
+			fixture.baseText.replace("# Changelog\n\n", "# Changelog\n\n- A hand-written entry.\n"),
+		);
+		const run = Bun.spawnSync([process.execPath, join(process.cwd(), "scripts/changelog.ts"), "--write"], {
+			cwd: fixture.scratch,
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		expect(run.exitCode, run.stderr.toString()).toBe(0);
+		const written = readFileSync(join(fixture.scratch, "CHANGELOG.md"), "utf8");
+		expect(() => assemble(written, fixture.entries, { base: fixture.baseText })).toThrow(restoreGuidance);
+	} finally {
+		remove(fixture.scratch);
+	}
+});
+
+test("base-aware coordinator assembly keeps historical text unchanged", () => {
+	const fixture = historyFixture(false);
+	try {
+		const run = Bun.spawnSync(
+			[process.execPath, join(process.cwd(), "scripts/changelog.ts"), "--write", `--base=${fixture.base}`],
+			{ cwd: fixture.scratch, stdout: "pipe", stderr: "pipe" },
+		);
+		expect(run.exitCode, run.stderr.toString()).toBe(0);
+		const written = readFileSync(join(fixture.scratch, "CHANGELOG.md"), "utf8");
+		expect(written).toBe(assemble(fixture.baseText, fixture.entries, { base: fixture.baseText }));
+	} finally {
+		remove(fixture.scratch);
+	}
+});
