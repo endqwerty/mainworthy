@@ -589,8 +589,11 @@ export async function proveCredential(
 			return no("changed-meanwhile");
 		const limit = attempt.limiter.check(attempt.keys, app.now());
 		if (limit.kind === "blocked") return waiting(limit);
-		if (!acceptTotp(stored, proof.code, app.now())) return no("wrong-code");
-		if (!updateTotp(app.db, current, JSON.stringify(next), app.now()) || !dateSessionProof(app, input))
+		// Checked again at the write's time, and that result is what is kept: a step later than the first check
+		// is the one the code was spent on.
+		const accepted = acceptTotp(stored, proof.code, app.now());
+		if (!accepted) return no("wrong-code");
+		if (!updateTotp(app.db, current, JSON.stringify(accepted), app.now()) || !dateSessionProof(app, input))
 			throw new Stop(no("changed-meanwhile"));
 		attempt.limiter.succeeded([attempt.account]);
 		return { ok: true } as const;

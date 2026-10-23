@@ -10,6 +10,7 @@ import {
 	authenticator,
 	bearer,
 	cleanUp,
+	clockAt,
 	holdGate,
 	invite,
 	joined,
@@ -413,6 +414,38 @@ test("TOTP confirmation rechecks freshness, TOTP proof consumes the code, and re
 	expect((await w.post("/api/account/proof", { code }, { cookie })).status).toBe(200);
 	expect((await w.post("/api/account/proof", { code }, { cookie })).status).toBe(403);
 	expect((await w.op("credential", { do: "remove", id: confirmed.id }, { cookie })).status).toBe(200);
+});
+
+// A secret whose code is the same in two consecutive 30-second steps, found by search. A proof checked in the
+// first step and written in the second must keep the step the write accepted, or the code works once more.
+test("TOTP proof keeps the replay step that was checked at the write gate", async () => {
+	const secret = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
+	const step = 60_779_457;
+	const code = "566269";
+	expect([totpCode(secret, step), totpCode(secret, step + 1)]).toEqual([code, code]);
+	const w = world({ clock: clockAt(step * 30_000 + 29_000) });
+	const cookie = await joined(w, "robin", PASSWORD);
+	const setup = await w.ok<{ challenge: string; secret: string }>("credential", { do: "totp.begin" }, { cookie });
+	await w.ok(
+		"credential",
+		{ do: "totp.confirm", challenge: setup.challenge, code: totpCode(setup.secret, step) },
+		{ cookie },
+	);
+	w.instance.app.db.raw
+		.query("UPDATE credentials SET data = json_set(data, '$.secret', ?, '$.lastStep', -1) WHERE kind = 'totp'")
+		.run(secret);
+	const gate = holdGate(w.instance);
+	try {
+		const waiting = waitingAtGate(w.instance, 1);
+		const pending = w.post("/api/account/proof", { code }, { cookie });
+		await waiting;
+		w.clock.advance(1_500);
+		await gate.release();
+		expect((await pending).status).toBe(200);
+	} finally {
+		await gate.release();
+	}
+	expect((await w.post("/api/account/proof", { code }, { cookie })).status).toBe(403);
 });
 
 test("an admin needs their own session proof when changing another person's credentials or address", async () => {
