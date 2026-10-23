@@ -564,13 +564,39 @@ test("a machine that cannot run the tests is told why, and what to do, before an
 	}
 });
 
-test("the image pins every base image by digest", () => {
+test("the deployment pins every base and Compose image by digest", () => {
 	const bases = [...readFileSync("Dockerfile", "utf8").matchAll(/^\s*FROM\s+(.+)$/gim)];
 	expect(bases.length).toBeGreaterThan(0);
 	for (const base of bases)
 		expect(base[1], "a base image keeps its tag and pins its digest").toMatch(
 			/^\S+:\S+@sha256:[a-f0-9]{64}(?:\s+AS\s+\S+)?$/i,
 		);
+	const files = [...new Glob("*compose*.{yaml,yml}").scanSync(".")];
+	expect(files.length).toBeGreaterThan(0);
+	for (const file of files) {
+		const compose = z
+			.object({ services: z.record(z.string(), z.object({ image: z.string().optional() })) })
+			.parse(Bun.YAML.parse(readFileSync(file, "utf8")));
+		for (const [service, { image }] of Object.entries(compose.services))
+			if (image !== undefined)
+				expect(image, `${file}: ${service} pins its image digest`).toMatch(/^\S+@sha256:[a-f0-9]{64}$/);
+	}
+});
+
+test("the image fetches Debian snapshots over HTTPS with a pinned CA bundle", () => {
+	const runtime =
+		readFileSync("Dockerfile", "utf8")
+			.split(/^FROM /m)
+			.at(-1) ?? "";
+	const sources = [...runtime.matchAll(/https?:\/\/snapshot\.debian\.org\/\S+/g)].map((match) => match[0]);
+	expect(sources.length).toBe(3);
+	for (const source of sources)
+		expect(source, "snapshot metadata needs authenticated transport").toStartWith("https://");
+	const caBundle = runtime.indexOf(
+		"COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt",
+	);
+	expect(caBundle, "the digest-pinned build image supplies the trust roots").toBeGreaterThanOrEqual(0);
+	expect(caBundle).toBeLessThan(runtime.indexOf("apt-get update"));
 });
 
 test("every way to run a test asks the machine first, and the Bun asked for is one the workflow and the image install", () => {

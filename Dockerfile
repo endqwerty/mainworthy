@@ -20,12 +20,14 @@ COPY licences/archify ./licences/archify
 RUN NODE_ENV=production bun build --compile --minify --sourcemap --banner '/*! Mainworthy, Apache-2.0. Software from others is in this file; its licences and notices: /docs/licence */' src/cli/main.ts src/server/ops/read-worker.ts src/server/kernel/checkpoint-worker.ts src/app/start-worker.ts src/cli/demo-worker.ts --outfile /out/mainworthy
 
 FROM debian:bookworm-slim@sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 # Freeze packages and their dependencies together; updating these pins is documented in docs/deploy.md.
-# HTTP works without ca-certificates in the slim base; apt still verifies Debian's archive signatures.
+# HTTPS uses trust roots from the digest-pinned build image to prevent network-only metadata rollback.
+# check-valid-until=no permits expired snapshot metadata; apt still verifies Debian's archive signatures.
 RUN printf '%s\n' \
-    'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20261022T000000Z/ bookworm main' \
-    'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20261022T000000Z/ bookworm-updates main' \
-    'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/20261022T000000Z/ bookworm-security main' \
+    'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20261022T000000Z/ bookworm main' \
+    'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20261022T000000Z/ bookworm-updates main' \
+    'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/20261022T000000Z/ bookworm-security main' \
     > /etc/apt/sources.list \
     && rm /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
