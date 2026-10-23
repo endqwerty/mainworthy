@@ -61,6 +61,10 @@ import { browserAvailable, openPage, startServer } from "./support.ts";
 			// Thirty days in the table, newest first; only today had results, so the chart has one point.
 			expect(await page.locator("#detail tbody tr").count()).toBe(30);
 			expect(await page.locator(".rate-dot").count()).toBe(1);
+			await page.getByLabel("Whose results").selectOption("auto");
+			await page.getByLabel("Days to read").selectOption("7");
+			expect(await page.getByLabel("Whose results").inputValue()).toBe("auto");
+			await page.getByLabel("Days to read").selectOption("30");
 
 			await page.keyboard.press("j");
 			await page.waitForURL("**/p/scratch/reports/flaky");
@@ -71,6 +75,91 @@ import { browserAvailable, openPage, startServer } from "./support.ts";
 
 			await flaky.getByRole("link", { name: "T-2" }).click();
 			await page.waitForURL(/\/p\/scratch\/tests\/2$/);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	60_000,
+);
+
+(browserAvailable ? test : test.skip)(
+	"every limited report says how many rows it shows and reaches the rest",
+	async () => {
+		const server = await startServer({ preset: "loose", unlinked: "track" });
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			const fail = Object.fromEntries(Array.from({ length: 25 }, (_, i) => [i, "intermittent failure"]));
+			await server.api("report", ciReport({ commit: "aaaa0001", n: 25, fail }));
+			await server.api("report", ciReport({ commit: "aaaa0001", n: 25, attempt: 2 }));
+			await server.api("propose", {
+				edits: Array.from({ length: 25 }, (_, i) => ({ op: "create", outline: `Manual ${i}\n  Try > Done` })),
+			});
+			view = await openPage(server, { path: "/p/scratch/reports/flaky" });
+			const page = view.page;
+			const detail = page.locator("#detail");
+			await detail.getByText("of 25 automated tests passed and failed on the same code", { exact: true }).waitFor();
+			if (process.env.MAINWORTHY_REPORT_SCREENSHOT)
+				await page.screenshot({ path: process.env.MAINWORTHY_REPORT_SCREENSHOT });
+			await detail.getByText("Showing 20 of 25", { exact: true }).waitFor();
+			expect(await detail.locator("tbody tr").count()).toBe(20);
+			await detail.getByRole("button", { name: "Next page", exact: true }).click();
+			await detail.getByRole("link", { name: "T-25", exact: true }).waitFor();
+			await detail.getByText("Showing 5 of 25", { exact: true }).waitFor();
+			expect(await detail.locator("tbody tr").count()).toBe(5);
+			await page.keyboard.press("p");
+			await detail.getByText("Showing 20 of 25", { exact: true }).waitFor();
+			await page.keyboard.press("n");
+			await detail.getByText("Showing 5 of 25", { exact: true }).waitFor();
+			await page.getByLabel("Days to read").selectOption("7");
+			await detail.getByText("Showing 20 of 25", { exact: true }).waitFor();
+			await page.getByRole("option", { name: /Time lost to reruns/ }).click();
+			await detail.getByText("Showing 20 of 25", { exact: true }).waitFor();
+			await detail.getByRole("button", { name: "Next page", exact: true }).click();
+			await detail.getByRole("link", { name: "T-1", exact: true }).waitFor();
+			await detail.getByText("Showing 5 of 25", { exact: true }).waitFor();
+			await page.getByRole("option", { name: /^Automation/ }).click();
+			await detail.getByText("Showing 20 of 25", { exact: true }).waitFor();
+			await detail.getByRole("button", { name: "Next page", exact: true }).click();
+			await detail.getByRole("link", { name: "C-25", exact: true }).waitFor();
+			await detail.getByText("Showing 5 of 25", { exact: true }).waitFor();
+			await server.api("propose", {
+				edits: [{ op: "state", cases: ["C-21", "C-22", "C-23", "C-24", "C-25"], to: "archived" }],
+			});
+			await detail.getByText("Showing 20 of 20", { exact: true }).waitFor();
+			expect(await detail.locator("tbody tr").count()).toBe(20);
+
+			await server.api("propose", {
+				edits: Array.from({ length: 101 }, (_, i) => ({
+					op: "create",
+					outline: `Requirement ${i} @REQ-${String(i).padStart(3, "0")}\n  Try > Done`,
+				})),
+			});
+			await page.getByRole("option", { name: /Coverage by requirement/ }).click();
+			await detail.getByText("Showing 100 of 101", { exact: true }).waitFor();
+			await detail.getByRole("button", { name: "Next page", exact: true }).click();
+			await detail.getByText("REQ-100", { exact: true }).waitFor();
+			await detail.getByText("Showing 1 of 101", { exact: true }).waitFor();
+			expect(await detail.locator("tbody tr").count()).toBe(1);
+			await view.close();
+			view = await openPage(server, { device: "phone", path: "/p/scratch/reports/flaky" });
+			const phone = view.page;
+			const phoneDetail = phone.locator("#detail");
+			await phoneDetail.getByText("Showing 20 of 25", { exact: true }).waitFor();
+			expect(await phoneDetail.getByRole("button", { name: "Next page", exact: true }).isVisible()).toBe(false);
+			await phone.getByRole("button", { name: "Actions", exact: true }).tap();
+			await phone
+				.locator("[data-overlay=palette]")
+				.getByRole("option", { name: /Next report page/ })
+				.tap();
+			await phoneDetail.getByRole("link", { name: "T-25", exact: true }).waitFor();
+			await phoneDetail.getByText("Showing 5 of 25", { exact: true }).waitFor();
+			await phone.getByRole("button", { name: "Actions", exact: true }).tap();
+			await phone
+				.locator("[data-overlay=palette]")
+				.getByRole("option", { name: /Previous report page/ })
+				.tap();
+			await phoneDetail.getByText("Showing 20 of 25", { exact: true }).waitFor();
 		} finally {
 			await view?.close();
 			await server.stop();

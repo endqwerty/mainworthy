@@ -998,15 +998,19 @@ Reports over the last days: pass rate per day, flaky tests, time lost to reruns,
 | `[2].of` | `"flaky"` | yes | The tests that passed and failed on the same code, most often first. |
 | `[2].days` | `integer` | no | How many days to read, today included: 1 to 90. Default: `30`. |
 | `[2].limit` | `integer` | no | How many rows to list. Default: `20`. |
+| `[2].cursor` | `integer` | no | The cursor from the previous page, or 0 for the first page. Default: `0`. |
 | `[3].of` | `"reruns"` | yes | Repeated pipeline attempts and earlier runner tries, with their time counted once. |
 | `[3].days` | `integer` | no | How many days to read, today included: 1 to 90. Default: `30`. |
 | `[3].limit` | `integer` | no | How many rows to list. Default: `20`. |
+| `[3].cursor` | `integer` | no | The cursor from the previous page, or 0 for the first page. Default: `0`. |
 | `[4].of` | `"automation"` | yes | How many cases have an automated test, and which to automate next. |
 | `[4].days` | `integer` | no | How many days to read, today included: 1 to 90. Default: `30`. |
 | `[4].limit` | `integer` | no | How many rows to list. Default: `20`. |
+| `[4].cursor` | `integer` | no | The cursor from the previous page, or 0 for the first page. Default: `0`. |
 | `[5].of` | `"coverage"` | yes | Each requirement's cases, by the latest result of their tests. |
 | `[5].days` | `integer` | no | How many days to read, today included: 1 to 90. Default: `30`. |
 | `[5].limit` | `integer` | no | How many requirements to list. Default: `100`. |
+| `[5].cursor` | `integer` | no | The cursor from the previous page, or 0 for the first page. Default: `0`. |
 
 </details>
 

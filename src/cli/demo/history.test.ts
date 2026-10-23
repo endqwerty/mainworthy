@@ -147,15 +147,16 @@ describe("the demo's history", () => {
 		expect(of(events, "pipeline").length).toBeGreaterThanOrEqual(14);
 		for (const event of of(events, "pipeline")) expect(event.failures).toEqual([]);
 	});
-	test("a flaky test fails on some nights and passes when the job runs it again", () => {
+	test("25 flaky tests fill more than one report page and pass when the job runs again", () => {
 		const events = of(history(), "pipeline");
 		const reruns = events.filter((event) => event.rerun);
 		expect(reruns.length).toBeGreaterThanOrEqual(2);
 		const flaky = reruns[0]?.rerun?.cases;
+		expect(flaky).toHaveLength(25);
 		for (const rerun of reruns) {
 			expect(rerun.rerun).toEqual({ attempt: 2, cases: flaky ?? [] });
 			expect(rerun.failures).toEqual([]);
-			// The night it repeats failed that test, and only that test.
+			// The repeated night failed exactly the tests in the rerun.
 			const night = events.find((event) => event.step === rerun.step.slice(0, -1));
 			expect(night?.target.commit).toBe(rerun.target.commit);
 			expect(night?.failures.map((failure) => failure.case)).toEqual(flaky ?? []);

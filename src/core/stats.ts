@@ -6,6 +6,13 @@ import { isZone } from "./days.ts";
 import { Automate, MethodKind } from "./model.ts";
 
 const days = z.number().int().min(1).max(90).default(30).describe("How many days to read, today included: 1 to 90.");
+const cursor = z
+	.number()
+	.int()
+	.min(0)
+	.max(Number.MAX_SAFE_INTEGER)
+	.default(0)
+	.describe("The cursor from the previous page, or 0 for the first page.");
 const top = z.number().int().min(1).max(200).default(20).describe("How many rows to list.");
 
 export const StatsInput = z.discriminatedUnion("of", [
@@ -24,6 +31,7 @@ export const StatsInput = z.discriminatedUnion("of", [
 		of: z.literal("flaky").describe("The tests that passed and failed on the same code, most often first."),
 		days,
 		limit: top,
+		cursor,
 	}),
 	z.object({
 		of: z
@@ -31,22 +39,29 @@ export const StatsInput = z.discriminatedUnion("of", [
 			.describe("Repeated pipeline attempts and earlier runner tries, with their time counted once."),
 		days,
 		limit: top,
+		cursor,
 	}),
 	z.object({
 		of: z.literal("automation").describe("How many cases have an automated test, and which to automate next."),
 		days,
 		limit: top,
+		cursor,
 	}),
 	z.object({
 		of: z.literal("coverage").describe("Each requirement's cases, by the latest result of their tests."),
 		days,
 		limit: z.number().int().min(1).max(500).default(100).describe("How many requirements to list."),
+		cursor,
 	}),
 ]);
 export type StatsInput = z.infer<typeof StatsInput>;
 export type StatsKind = StatsInput["of"];
 
 const whole = z.number().int().min(0);
+const page = {
+	total: whole.describe("All rows matching this report, before paging."),
+	cursor: whole.nullable().describe("The next page, or null when there are no more rows."),
+};
 /** Passes over passes and failures; null when nothing passed or failed. */
 const rate = z.number().min(0).max(1).nullable();
 
@@ -76,6 +91,7 @@ export const PassRateReply = z.object({
 	total: OutcomeCounts,
 });
 export const FlakyReply = z.object({
+	...page,
 	of: z.literal("flaky"),
 	/** Automated tests with a result in the window. */
 	tests: whole,
@@ -84,6 +100,7 @@ export const FlakyReply = z.object({
 	items: z.array(TestRow.extend({ flips: whole, lastAt: z.number(), quarantined: z.boolean() })),
 });
 export const RerunsReply = z.object({
+	...page,
 	of: z.literal("reruns"),
 	reruns: whole,
 	lostMs: whole,
@@ -92,6 +109,7 @@ export const RerunsReply = z.object({
 	items: z.array(TestRow.extend({ reruns: whole, lostMs: whole })),
 });
 export const AutomationReply = z.object({
+	...page,
 	of: z.literal("automation"),
 	/** Active cases. */
 	cases: whole,
@@ -114,6 +132,7 @@ export const AutomationReply = z.object({
 	),
 });
 export const CoverageReply = z.object({
+	...page,
 	of: z.literal("coverage"),
 	requirements: whole,
 	/** Requirements with at least one active case. */
