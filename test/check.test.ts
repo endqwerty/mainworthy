@@ -219,20 +219,23 @@ test("the page is ready before teardown", async () => {
 );
 
 test("the browser fixture uses the production compiler flags and worker layout", () => {
-	const args = fixtureBuildArgs("/scratch/fixture");
+	const args = fixtureBuildArgs("/scratch/fixture", "/repo");
 	const production = z
 		.object({ scripts: z.object({ build: z.string() }) })
 		.parse(JSON.parse(readFileSync("package.json", "utf8"))).scripts.build;
 	const productionArgs = args
-		.filter((arg) => arg !== "--root=src")
+		.filter((arg, i) => arg !== "--cwd" && args[i - 1] !== "--cwd")
+		.filter((arg) => arg !== "--root=/repo/src")
+		.map((arg) => arg.replace(/^\/repo\//, ""))
 		.map((arg, i, all) => {
 			if (all[i - 1] === "--banner") return `'${arg}'`;
 			if (arg === "test/e2e/serve.ts") return "src/cli/main.ts";
 			return arg === "/scratch/fixture" ? "dist/mainworthy" : arg;
 		});
 	expect(`NODE_ENV=production bun ${productionArgs.join(" ")}`).toBe(production);
-	expect(args).toContain("test/e2e/serve.ts");
-	expect(args).toContain("--root=src");
+	expect(args.slice(0, 3)).toEqual(["build", "--cwd", "/scratch"]);
+	expect(args).toContain("/repo/test/e2e/serve.ts");
+	expect(args).toContain("--root=/repo/src");
 	expect(args.slice(-2)).toEqual(["--outfile", "/scratch/fixture"]);
 });
 

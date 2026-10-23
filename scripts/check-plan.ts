@@ -2,7 +2,7 @@
 // the browser tests' set-up and `test/check.test.ts`.
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { Glob } from "bun";
 import type { LaunchOptions } from "playwright-core";
 import type { ResultIn } from "../src/core/ops.ts";
@@ -133,22 +133,26 @@ export function needsBrowserFixture(phases: readonly Phase[], shard?: string, fi
 }
 
 /** Production's compile flags, with the test fixture and the same embedded worker paths. */
-export function fixtureBuildArgs(outfile: string): string[] {
+export function fixtureBuildArgs(outfile: string, root = process.cwd()): string[] {
+	const output = resolve(outfile);
 	return [
 		"build",
+		// Bun writes its temporary .bun-build file in cwd, even with an absolute outfile.
+		"--cwd",
+		dirname(output),
 		"--compile",
 		"--minify",
 		"--sourcemap",
 		// The fixture is outside src, but workers resolve server/ and cli/ from the executable's root.
-		"--root=src",
+		`--root=${resolve(root, "src")}`,
 		"--banner",
 		"/*! Mainworthy, Apache-2.0. Software from others is in this file; its licences and notices: /docs/licence */",
-		"test/e2e/serve.ts",
-		"src/server/ops/read-worker.ts",
-		"src/server/kernel/checkpoint-worker.ts",
-		"src/cli/demo-worker.ts",
+		resolve(root, "test/e2e/serve.ts"),
+		resolve(root, "src/server/ops/read-worker.ts"),
+		resolve(root, "src/server/kernel/checkpoint-worker.ts"),
+		resolve(root, "src/cli/demo-worker.ts"),
 		"--outfile",
-		outfile,
+		output,
 	];
 }
 

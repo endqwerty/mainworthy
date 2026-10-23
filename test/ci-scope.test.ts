@@ -1,11 +1,20 @@
 // What the check workflow runs for a change (`scripts/ci-scope.ts`, decision 0090). A job that is skipped when it
 // was needed lets a change land untested, so the paths each job reads are held here to the files that decide them.
 import { expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Glob } from "bun";
-import { parseCheckArgs, QUIET, testArgs } from "../scripts/check-plan.ts";
+import { fixtureBuildArgs, parseCheckArgs, QUIET, testArgs } from "../scripts/check-plan.ts";
 import {
 	changedFiles,
 	IMAGE,
@@ -20,7 +29,7 @@ import {
 	TREE,
 	testFiles,
 } from "../scripts/ci-scope.ts";
-import { MARKER } from "../scripts/work/scratch.ts";
+import { MARKER, make, remove } from "../scripts/work/scratch.ts";
 
 const tests = testFiles();
 const covers = (paths: { include: readonly string[]; exclude?: readonly string[] }, file: string): boolean =>
@@ -165,6 +174,42 @@ function topEntries(listed: string, tree: () => string[]): string[] {
 test("an export's top entries leave out what a checkout or a scratch export makes", () => {
 	expect(topEntries("", () => [".mw-scratch", "node_modules", "src", "README.md"])).toEqual(["src", "README.md"]);
 	expect(topEntries("src/a.ts\nsrc/b.ts\nREADME.md\n", () => [".mw-scratch"])).toEqual(["src", "README.md"]);
+});
+
+test("the browser fixture compiles in its output directory so build files cannot enter the source tree", () => {
+	const scratch = make("fixture-build");
+	const root = join(scratch, "source tree");
+	const output = join(scratch, "build output");
+	try {
+		for (const dir of ["test/e2e", "src/server/ops", "src/server/kernel", "src/cli"])
+			mkdirSync(join(root, dir), { recursive: true });
+		mkdirSync(output);
+		// A macro records the compiler's cwd without racing Bun's short-lived .bun-build file.
+		writeFileSync(join(root, "test/e2e/build-directory.ts"), "export function directory() { return process.cwd(); }");
+		writeFileSync(
+			join(root, "test/e2e/serve.ts"),
+			'import { directory } from "./build-directory.ts" with { type: "macro" }; console.log(directory());',
+		);
+		for (const file of [
+			"src/server/ops/read-worker.ts",
+			"src/server/kernel/checkpoint-worker.ts",
+			"src/cli/demo-worker.ts",
+		])
+			writeFileSync(join(root, file), "export {};");
+		const executable = join(output, "fixture");
+		const build = Bun.spawnSync([process.execPath, ...fixtureBuildArgs(executable, root)], {
+			cwd: root,
+			env: { ...process.env, NODE_ENV: "production" },
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		expect(build.exitCode, build.stderr.toString()).toBe(0);
+		const run = Bun.spawnSync([executable], { stdout: "pipe", stderr: "pipe" });
+		expect(run.exitCode, run.stderr.toString()).toBe(0);
+		expect(run.stdout.toString().trim()).toBe(output);
+	} finally {
+		remove(scratch);
+	}
 });
 
 // Each entry at the top of the repository, and the jobs a change to it runs. A new one is decided here, in review:
