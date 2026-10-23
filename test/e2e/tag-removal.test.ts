@@ -28,7 +28,9 @@ test.skipIf(!browserAvailable)(
 			await page.keyboard.press("x");
 			await page.keyboard.press("j");
 			await page.keyboard.press("x");
-			await page.keyboard.press("Alt+t");
+			await page.evaluate(() =>
+				window.dispatchEvent(new KeyboardEvent("keydown", { key: "†", code: "KeyT", altKey: true, bubbles: true })),
+			);
 			await page.getByRole("textbox", { name: "Remove tag from selected cases" }).fill("shared");
 			await page.keyboard.press("Enter");
 			const tags = async () => (await cases(server, ["C-1", "C-2", "C-3"])).map((row) => row.tags);
@@ -175,6 +177,36 @@ test.skipIf(!browserAvailable)(
 				(rows) => rows[0]?.tags?.length === 1,
 			);
 			expect(saved[0]?.tags).toEqual(["keep"]);
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"Option+[ uses its physical bracket key to open the previous folder",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [
+				{ op: "create", outline: "First folder case", folder: "Alpha" },
+				{ op: "create", outline: "Second folder case", folder: "Beta" },
+			],
+		});
+		const h = await openPage(server, { path: "/p/scratch/suite?folder=Beta" });
+		try {
+			const { page } = h;
+			await page.getByRole("option").filter({ hasText: "Second folder case" }).waitFor();
+			await page.evaluate(() =>
+				window.dispatchEvent(
+					new KeyboardEvent("keydown", { key: "“", code: "BracketLeft", altKey: true, bubbles: true }),
+				),
+			);
+			await page.getByRole("option").filter({ hasText: "First folder case" }).waitFor();
+			expect(await page.locator("#ltitle").textContent()).toBe("Alpha");
 			expect(h.errors).toEqual([]);
 		} finally {
 			await h.close();

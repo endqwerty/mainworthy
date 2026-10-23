@@ -81,6 +81,8 @@ A tablet whose window is wider than 900 px and taller than 500 px also keeps the
 
 ![The suite: cases on the left, the selected case on the right](../ui/screenshots/suite-light.png)
 
+Alt (Option on a Mac) works with the letter or bracket key shown below.
+
 | Key | What it does |
 | --- | --- |
 | <kbd>c</kbd> | New case |
@@ -91,7 +93,7 @@ A tablet whose window is wider than 900 px and taller than 500 px also keeps the
 | <kbd>x</kbd> | Select case, for the three keys below. With none selected they act on the current case. |
 | <kbd>m</kbd> | Move selected to a folder |
 | <kbd>t</kbd> | Tag selected |
-| <kbd>Alt</kbd> <kbd>t</kbd> | Remove a tag from selected cases |
+| <kbd>Alt</kbd> <kbd>t</kbd> | Remove tag from selected cases |
 | <kbd>#</kbd> | Archive selected |
 | <kbd>u</kbd> | Undo the last move, tag or archive. With nothing to undo, restores the version before. |
 | <kbd>Space</kbd> | Peek timeline |

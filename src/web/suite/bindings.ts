@@ -62,7 +62,7 @@ export function useSuiteBindings({
 		{ key: "x", label: "Select case", handler: select },
 		{ key: "m", label: "Move selected", handler: move },
 		{ key: "t", label: "Tag selected", handler: tag },
-		{ key: "alt+t", label: "Remove tag…", handler: removeTag },
+		{ key: "alt+t", label: "Remove tag from selected cases", handler: removeTag },
 		{ key: "#", label: "Archive selected", handler: archive },
 		{ key: "u", label: "Undo", handler: undo },
 		{ key: "space", label: "Peek timeline", handler: peek },

@@ -221,10 +221,10 @@ With no selection, the action uses the current case.
 Press <kbd>m</kbd> to choose a destination folder.
 After the move, select that folder in the sidebar to see the case without reloading.
 To add a tag, press <kbd>t</kbd>. Enter the tag name.
-To remove a tag, press <kbd>Alt</kbd> <kbd>t</kbd> or choose **Remove tag…** in the command palette.
+To remove a tag, press <kbd>Alt</kbd> (Option on a Mac) and <kbd>t</kbd>, or choose **Remove tag from selected cases** in the command palette.
 Choose the tag to remove from the selected cases.
 While editing one case, you can also use the remove control beside a tag chip, then record the edit with <kbd>Escape</kbd>.
-On a phone, open the case and choose **Remove tag…** from **Actions**.
+On a phone, open the case and choose **Remove tag from selected cases** from **Actions**.
 A removal protected by the project policy waits for review before changing the case.
 Press <kbd>#</kbd> to archive the selected cases.
 Press <kbd>u</kbd> to record the inverse of the latest placement action.
