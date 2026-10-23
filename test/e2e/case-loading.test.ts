@@ -96,9 +96,10 @@ for (const result of ["failed", "missing"] as const)
 					async () => replies,
 					(count) => count >= (result === "failed" ? 2 : 1),
 				);
-				await page.waitForFunction(() => !document.querySelector("#detail")?.textContent?.includes("Reading case…"));
-				await page.keyboard.press("e");
 				const message = result === "failed" ? "Could not read this case. Reload to try again." : "Case not found.";
+				// Before the read starts, "Reading case…" is not shown yet either: wait for the answer itself (#890).
+				await page.locator("#detail").filter({ hasText: message }).waitFor();
+				await page.keyboard.press("e");
 				expect(await page.locator("#stat").textContent()).toBe(message);
 				expect(await page.locator("#detail").textContent()).toBe(message);
 				expect(await page.getByRole("textbox", { name: "Case title", exact: true }).count()).toBe(0);
