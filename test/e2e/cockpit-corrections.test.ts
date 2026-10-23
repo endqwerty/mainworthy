@@ -25,7 +25,7 @@ import {
 
 const check = browserAvailable ? test : test.skip;
 
-async function fixture(count = 1, minActors: 1 | 2 = 1) {
+async function fixture(count = 1, minActors: 1 | 2 = 1, preset: "strict" | "loose" = "strict") {
 	const server = await startServer({ mode: "server" });
 	try {
 		await server.api("propose", {
@@ -38,7 +38,7 @@ async function fixture(count = 1, minActors: 1 | 2 = 1) {
 				},
 			})),
 		});
-		const policy = await server.api("propose", { edits: [{ op: "policy", preset: "strict" }] });
+		const policy = await server.api("propose", { edits: [{ op: "policy", preset }] });
 		const question = (await server.api("inbox", { kind: "adopt" })).items.find((item) => item.q === policy.question);
 		if (question)
 			await server.api("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" } });
@@ -73,6 +73,171 @@ async function fail(page: Page, note: string) {
 async function slots(server: Server, run: string) {
 	return Slot.array().parse((await server.api("find", { in: "slots", run })).items);
 }
+
+check(
+	"undo reopens an automatically closed run before correcting its last result (793)",
+	async () => {
+		const { server, run, path } = await fixture(1, 1, "loose");
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			view = await openPage(server, { path });
+			const { page } = view;
+			await ready(page);
+			await page.keyboard.press("p");
+			await page.locator("#stat").filter({ hasText: "C-1 pass recorded" }).waitFor();
+			const signoff = (await server.api("inbox", { on: run, kind: "signoff", state: "decided" })).items[0];
+			expect(signoff?.decision?.rule).toBeTruthy();
+			await page.locator(".run-controls").filter({ hasText: "u reopens this run" }).waitFor();
+			await screenshot(page, 793);
+			await page.keyboard.press("u");
+			await page.locator("#stat").filter({ hasText: "Run reopened. C-1 skip recorded" }).waitFor();
+			expect((await server.api("get", { refs: [run] }))[0]).toMatchObject({ state: "open" });
+			expect((await slots(server, run))[0]?.fills).toMatchObject([{ outcome: "skip" }]);
+			expect((await server.api("gate", { run })).verdict).toBe("pending");
+			const question = (await server.api("get", { refs: [signoff?.q ?? ""] }))[0];
+			expect(question).toMatchObject({ state: "dissolved", decision: null });
+			const history = (await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "result");
+			expect(history).toMatchObject([{ outcome: "skip", corrects: history[1]?.id }, { outcome: "pass" }]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+for (const scenario of ["pending pass", "replaced approval", "refused correction", "lost withdrawal reply"] as const)
+	check(
+		`closed-run correction handles ${scenario} (793)`,
+		async () => {
+			const { server, run, path } = await fixture(1, 1, "loose");
+			let view: Awaited<ReturnType<typeof openPage>> | null = null;
+			const held = Promise.withResolvers<void>();
+			const sent = Promise.withResolvers<void>();
+			try {
+				view = await openPage(server, { path });
+				const { page } = view;
+				await ready(page);
+				if (scenario === "pending pass")
+					await page.route("**/report", async (route) => {
+						if (
+							z.object({ results: z.array(z.object({ outcome: z.string() })) }).parse(route.request().postDataJSON())
+								.results[0]?.outcome === "pass"
+						) {
+							sent.resolve();
+							await held.promise;
+						}
+						await route.continue();
+					});
+				await page.keyboard.press("p");
+				if (scenario === "pending pass") await sent.promise;
+				else {
+					await page.locator("#stat").filter({ hasText: "C-1 pass recorded" }).waitFor();
+					await page.locator(".run-controls").filter({ hasText: "u reopens this run" }).waitFor();
+				}
+				if (scenario === "refused correction")
+					await page.route("**/report", (route) =>
+						route.fulfill({
+							status: 400,
+							json: { ok: false, error: { code: "invalid", message: "Correction refused" } },
+						}),
+					);
+				if (scenario === "replaced approval" || scenario === "lost withdrawal reply")
+					await page.route("**/decide", async (route) => {
+						if (scenario === "lost withdrawal reply") {
+							await fetched(route);
+							await route.abort();
+							return;
+						}
+						const input = z.object({ undo: z.string(), ifDecision: z.number() }).parse(route.request().postDataJSON());
+						await server.api("decide", input);
+						const question = (await server.api("inbox", { on: run, kind: "signoff" })).items[0];
+						if (!question) throw new Error("Reopened sign-off missing");
+						await server.api("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "approve" } });
+						await route.continue();
+					});
+				await page.keyboard.press("u");
+				held.resolve();
+				if (scenario === "pending pass") {
+					await page.locator("#stat").filter({ hasText: "Run reopened. C-1 skip recorded" }).waitFor();
+					expect((await slots(server, run))[0]?.fills).toMatchObject([{ outcome: "skip" }]);
+				} else {
+					const message =
+						scenario === "replaced approval"
+							? "the decision changed"
+							: scenario === "refused correction"
+								? "Run reopened, but the correction was not recorded"
+								: "withdrawal was not confirmed";
+					await page.locator("#stat").filter({ hasText: message }).waitFor();
+					expect((await slots(server, run))[0]?.fills).toMatchObject([{ outcome: "pass" }]);
+					expect(
+						(await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "result"),
+					).toHaveLength(1);
+				}
+				expect((await server.api("get", { refs: [run] }))[0]).toMatchObject({
+					state: scenario === "replaced approval" ? "closed" : "open",
+				});
+			} finally {
+				held.resolve();
+				await view?.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+
+for (const restricted of ["produce only", "human approval"] as const)
+	check(
+		`a closed run with ${restricted} links to its settled sign-off instead of correction (793)`,
+		async () => {
+			const { server, run, path } = await fixture(1, 1, restricted === "produce only" ? "loose" : "strict");
+			let view: Awaited<ReturnType<typeof openPage>> | null = null;
+			try {
+				const { token } = z.object({ token: z.string() }).parse(
+					await server.api("admin", {
+						do: "token.create",
+						actor: "runner",
+						kind: "human",
+						can: ["read", "produce"],
+						project: "scratch",
+					}),
+				);
+				view = await openPage(restricted === "produce only" ? { ...server, token } : server, { path });
+				const { page } = view;
+				await ready(page);
+				await page.keyboard.press("p");
+				await page.locator("#stat").filter({ hasText: "C-1 pass recorded" }).waitFor();
+				if (restricted === "human approval") {
+					const question = (await server.api("inbox", { on: run, kind: "signoff" })).items[0];
+					if (!question) throw new Error("Sign-off missing");
+					await server.api("decide", {
+						q: question.q,
+						onEvidence: question.evidenceHash,
+						answer: { is: "approve" },
+						reason: "Reviewed run",
+					});
+				}
+				const signoff = (await server.api("inbox", { on: run, kind: "signoff", state: "decided" })).items[0];
+				if (!signoff) throw new Error("Settled sign-off missing");
+				const link = page.locator(".run-controls").getByRole("link", { name: "Queue > Settled" });
+				await link.waitFor();
+				expect(await link.getAttribute("href")).toBe(`/p/scratch/queue/${signoff.q.slice(2)}`);
+				expect(await page.locator(".run-last").getByRole("button").count()).toBe(0);
+				expect(await page.locator("#hints").innerText()).not.toContain("Correct last result");
+				await page.keyboard.press("u");
+				expect((await slots(server, run))[0]?.fills).toMatchObject([{ outcome: "pass" }]);
+				expect((await server.api("get", { refs: [run] }))[0]).toMatchObject({ state: "closed" });
+				await link.click();
+				await page.getByRole("option").filter({ hasText: "Close R-1" }).waitFor();
+				expect(await page.locator("[data-current-question]").getAttribute("data-current-question")).toBe(signoff.q);
+				expect(view.loads()).toBe(1);
+			} finally {
+				await view?.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
 
 for (const scenario of ["fresh session", "stale session", "delayed reports", "retired reports"] as const)
 	check(

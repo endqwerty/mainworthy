@@ -168,7 +168,7 @@ Blocked and skipped results record that the case was not proven. They do not sat
 a slot, and a run with missing proof stays `pending`.
 A failure opens a question. Answer it in [Queue](./decide.md).
 
-Press <kbd>u</kbd> to correct the last result while the run remains open.
+Press <kbd>u</kbd> to correct the last result.
 Undo waits for pending reports and restores the previous recorded outcome, note, failed step,
 and attachments. A refused report cannot become the outcome restored by undo.
 If an earlier attachment cannot be read, undo records nothing and reports the error.
@@ -176,7 +176,12 @@ Press <kbd>u</kbd> again to retry once the attachment can be read.
 If there was no previous recorded result, the correction is a skip. Both results stay recorded.
 Undo targets only the result recorded by this page. If another tab has replaced it, the page
 reports that it changed and leaves the newer result in place.
-The web app requires you to reopen a closed run before recording or correcting results.
+If a rule has closed the run, a person allowed to withdraw its automatic sign-off can press
+<kbd>u</kbd> to reopen the run and correct the result. The cockpit says when this action is available.
+Other closed runs show a link to the sign-off in **Queue > Settled** instead of offering correction.
+Reopening and correction happen in order. If reopening succeeds but correction fails, the run stays open
+and the status says the correction was not recorded. If the withdrawal's reply is lost, check the sign-off
+in Queue before trying again.
 The reporting operation also accepts late results for closed runs that accept a commit.
 
 ## Let CI fill the run
@@ -268,6 +273,9 @@ To reopen the run, follow these steps.
 2. Withdraw that approval.
 
 Newer decisions and the current policy still control who may withdraw it.
+For an automatic approval, a person with **answer** permission can normally withdraw it, including
+the person who recorded the last result. Producing results alone does not grant that permission.
+The cockpit's <kbd>u</kbd> shortcut can do this before correcting its last result, as described above.
 
 ## Plan a run from the command line
 

@@ -121,6 +121,11 @@ function ProjectRunCockpit({
 	const runRead = useQueryOp({ project, op: "get", input: { refs: [runRef] } });
 	const parsedRun = Run.safeParse(runRead.data?.[0]);
 	const run = parsedRun.success && parsedRun.data.ref === runRef ? parsedRun.data : null;
+	const signoffInput = { on: runRef, kind: "signoff", state: "decided" } satisfies Api["inbox"]["input"];
+	const signoffs = useQueryOp({ project, op: "inbox", input: signoffInput, enabled: run?.state === "closed" });
+	const signoff = signoffs.data?.items.find((item) => item.decision?.effects.closed === runRef);
+	const mayReopen = (item: typeof signoff) =>
+		session.kind === "human" && Boolean(item?.decision?.rule) && item?.you === "counts";
 	const now = useWorkExpiry(project, run?.workUntil ?? null);
 	useEffect(() => {
 		setStatus("Each result records its pinned version. p pass · f fail · b blocked · s skip.");
@@ -227,6 +232,7 @@ function ProjectRunCockpit({
 	}
 	const noteRef = useRef<HTMLInputElement>(null);
 	const [last, setLast] = useState<LastResult | null>(null);
+	const canCorrect = Boolean(last && (run?.state === "open" || mayReopen(signoff)));
 	const withdrawn = useRef(new Set<Promise<RecordedResult>>());
 	const method = session.kind === "agent" ? "agent" : "human";
 	const slots: Slot[] = storedSlots.map((slot) => {
@@ -345,7 +351,7 @@ function ProjectRunCockpit({
 			});
 			return request;
 		}
-		if (run?.state !== "open") {
+		if (run?.state !== "open" && !restores) {
 			setStatus("This run is closed. No result was recorded; your note is kept.");
 			return null;
 		}
@@ -412,6 +418,7 @@ function ProjectRunCockpit({
 		const priorWrite = reports.writes.get(slot.id);
 		const rollback = reports.confirmed.get(slot.id) ?? slot;
 		reports.queued.set(slot.id, fill.result);
+		let reopened = false;
 		const request = (async () => {
 			if (priorWrite) await priorWrite.catch(() => undefined);
 			assertReportOwner();
@@ -462,6 +469,45 @@ function ProjectRunCockpit({
 					attachments.push({ name: file.attachment.name, data: file.data, ...(item.at ? { at: item.at } : {}) });
 				}
 			}
+			if (restoration) {
+				const latestRun = Run.parse((await call("get", { refs: [runRef] }, { project, owner }))[0]);
+				if (latestRun.state === "closed") {
+					const approval = (await call("inbox", signoffInput, { project, owner })).items.find(
+						(item) => item.decision?.effects.closed === runRef,
+					);
+					if (!mayReopen(approval) || !approval?.decision)
+						throw new Error("Withdraw the sign-off in Queue > Settled before correcting this closed run.");
+					const latestSlot = Slot.parse(
+						(
+							await call(
+								"find",
+								{ in: "slots", run: runRef, cursor: String(slot.rank - 1), limit: 1 },
+								{ project, owner },
+							)
+						).items[0],
+					);
+					if (latestSlot.id !== slot.id || !latestSlot.fills.some((item) => item.result === restoration.fill.result))
+						throw new Error("This result has changed since it was recorded. No correction was recorded.");
+					assertReportOwner();
+					setStatus("Withdrawing the automatic sign-off before correcting the result…");
+					const [reply] = await call(
+						"decide",
+						{
+							undo: approval.q,
+							ifDecision: approval.decision.id,
+							reason: "Correct the last cockpit result",
+							projectIdentity: reports.projectIdentity,
+						},
+						{ project, owner },
+					).catch(() => {
+						throw new Error("The sign-off withdrawal was not confirmed. Check the sign-off in Queue before retrying.");
+					});
+					if (reply?.status !== "reopened")
+						throw new Error(reply?.needs ?? "The sign-off was not withdrawn. Check Queue > Settled.");
+					reopened = true;
+					setStatus("Run reopened. Recording the correction…");
+				}
+			}
 			const cmd = randomId();
 			assertReportOwner();
 			const input: PendingReport = {
@@ -505,7 +551,7 @@ function ProjectRunCockpit({
 						new Map(value).set(slot.id, { fill: saved, questions: receipt.questions, pending: false }),
 					);
 				setStatus(
-					`${slot.case} ${outcome} recorded on pinned version ${slot.version}${receipt.questions[0] ? ` · ${receipt.questions[0].q}: ${receipt.questions[0].how}` : ""}.`,
+					`${reopened ? "Run reopened. " : ""}${slot.case} ${outcome} recorded on pinned version ${slot.version}${receipt.questions[0] ? ` · ${receipt.questions[0].q}: ${receipt.questions[0].how}` : ""}.`,
 				);
 				void invalidateProject(project);
 				return { fill: saved, previous };
@@ -575,7 +621,7 @@ function ProjectRunCockpit({
 			// The person may already be typing another note. Restore the slot without changing their selection or input.
 			setStatus(
 				reports.uncertain.get(slot.id)?.message ??
-					`${slot.case} was not recorded: ${error instanceof Error ? error.message : "The request failed"}. Its note is kept. Return to the slot to retry.`,
+					`${reopened ? "Run reopened, but the correction was not recorded. " : ""}${slot.case} was not recorded: ${error instanceof Error ? error.message : "The request failed"}. Its note is kept. Return to the slot to retry.`,
 			);
 			void invalidateProject(project);
 		});
@@ -597,7 +643,7 @@ function ProjectRunCockpit({
 		noteRef.current?.focus();
 	}
 	function undo(): void {
-		if (!last || withdrawn.current.has(last.ready)) return;
+		if (!last || !canCorrect || withdrawn.current.has(last.ready)) return;
 		const recovery = reports.uncertain.get(last.slot.id);
 		if (recovery) {
 			setStatus(recovery.message);
@@ -660,7 +706,7 @@ function ProjectRunCockpit({
 			applies: () => active() && canRecord,
 			hidden: true,
 		})),
-		{ key: "u", label: "Correct last result", handler: undo, applies: () => active() && Boolean(last) },
+		{ key: "u", label: "Correct last result", handler: undo, applies: () => active() && canCorrect },
 		{
 			key: "p",
 			label: "Pass",
@@ -847,7 +893,29 @@ function ProjectRunCockpit({
 							This slot does not admit results from your method. Pipeline or agent evidence must fill it.
 						</p>
 					)}
-					{allReported && <p className="dim">Nothing left for you to run. The server verdict is shown above.</p>}
+					{allReported && run?.state === "open" && (
+						<p className="dim">Nothing left for you to run. The server verdict is shown above.</p>
+					)}
+					{run?.state === "closed" && (
+						<p className="dim">
+							{canCorrect
+								? "u reopens this run and corrects the result. "
+								: "Run closed. To reopen, withdraw the sign-off in "}
+							{signoff ? (
+								<a
+									href={refUrl({ project, ref: signoff.q })}
+									onClick={(event) => {
+										event.preventDefault();
+										navigate(event.currentTarget.pathname);
+									}}
+								>
+									Queue &gt; Settled
+								</a>
+							) : (
+								"Queue > Settled. Reading the sign-off…"
+							)}
+						</p>
+					)}
 					<div className="outs">
 						{(
 							[
@@ -948,16 +1016,18 @@ function ProjectRunCockpit({
 							</ul>
 						</div>
 					)}
-					<div className="run-control-hint">
-						{step ? `Step ${step} marked. ` : ""}
-						<KeyCap>2</KeyCap> <KeyCap>f</KeyCap> fails step 2.{" "}
-						{ownFill && "Recording again corrects your earlier result."}
-					</div>
+					{run?.state === "open" && (
+						<div className="run-control-hint">
+							{step ? `Step ${step} marked. ` : ""}
+							<KeyCap>2</KeyCap> <KeyCap>f</KeyCap> fails step 2.{" "}
+							{ownFill && "Recording again corrects your earlier result."}
+						</div>
+					)}
 					<div className="run-last" role="status">
 						{last
 							? `${last.slot.case} · ${outcomeName[last.outcome]} on pinned v${last.slot.version}`
 							: "Each result records the pinned case version."}
-						{last && (
+						{canCorrect && (
 							<button type="button" onClick={undo}>
 								<KeyCap>u</KeyCap> correct
 							</button>
