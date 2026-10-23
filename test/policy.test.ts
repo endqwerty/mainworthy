@@ -856,6 +856,32 @@ describe("agent edits", () => {
 		);
 	});
 
+	test("repeated link edits retain the scope of every proposed tag change", () => {
+		h.call("propose", { edits: [{ op: "create", outline: "Original" }] });
+		scopePolicy(["tag:critical"]);
+		const agent = h.actor("link-writer", "agent", ["read", "produce", "answer"]);
+		const proposed = h.call<Proposed>(
+			"propose",
+			{
+				edits: [
+					{ op: "cover", case: "C-1", requirement: "REQ-1", on: true },
+					{ op: "place", cases: ["C-1"], tags: { add: ["critical"] } },
+					{ op: "place", cases: ["C-1"], tags: { remove: ["critical"] } },
+					{ op: "cover", case: "C-1", requirement: "REQ-2", on: true },
+				],
+			},
+			agent,
+		);
+		expect(proposed.status).toBe("open");
+		const q = first(queue({ kind: "adopt" }).items);
+		expect(q.q).toBe(proposed.question ?? "");
+		const answer = { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } };
+		expect(h.call<{ status: string }[]>("decide", answer, agent)[0]?.status).toBe("forbidden");
+		expect(h.call("get", { refs: ["C-1"] })).toMatchObject([{ version: 1, tags: [], covers: [] }]);
+		expect(h.call<{ status: string }[]>("decide", answer)[0]?.status).toBe("decided");
+		expect(h.call("get", { refs: ["C-1"] })).toMatchObject([{ version: 1, tags: [], covers: ["REQ-1", "REQ-2"] }]);
+	});
+
 	test("folder clauses cover both sides of a move and folder renames", () => {
 		h.call("propose", {
 			edits: [

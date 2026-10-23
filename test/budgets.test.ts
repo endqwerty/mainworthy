@@ -13,9 +13,46 @@ import { ingestWorkload, prepareRecentChanges, readWorkloads, saveWorkload } fro
 import { resetDemoSteps } from "../src/cli/demo.ts";
 import { withInstance } from "../src/cli/test-support.ts";
 import type { Quarantine } from "../src/core/flaky.ts";
-import type { GateStatus, InboxReply, ProposeReply, ReportReceipt } from "../src/core/ops.ts";
+import type { Edit, GateStatus, InboxReply, ProposeReply, ReportReceipt } from "../src/core/ops.ts";
+import { TimelineReply } from "../src/core/replies.ts";
 import { removalFixture } from "./demo-removal-fixture.ts";
 import { ciReport, harness } from "./helpers.ts";
+
+test("a large link proposal does not multiply its edits by the case's tags", () => {
+	const apply = () => {
+		const h = harness();
+		try {
+			const tags = Array.from({ length: 2_000 }, (_, i) => `tag-${i}`);
+			const covers = Array.from({ length: 1_999 }, (_, i) => `REQ-${i}`);
+			h.call("propose", { edits: [{ op: "create", body: { title: "Before links" }, tags }] });
+			const edits: Edit[] = [
+				{ op: "edit", case: "C-1", base: 1, body: { title: "With links" } },
+				...covers.map((requirement) => ({ op: "cover" as const, case: "C-1", requirement, on: true })),
+			];
+			const start = performance.now();
+			const reply = h.call<ProposeReply>("propose", { edits });
+			const ms = performance.now() - start;
+			expect(reply).toMatchObject({ status: "adopted", conflicts: [], cases: [{ ref: "C-1", version: 2 }] });
+			const [saved] = h.call<{ title: string; version: number; tags: string[]; covers: string[] }[]>("get", {
+				refs: ["C-1"],
+			});
+			expect(saved).toMatchObject({ title: "With links", version: 2 });
+			expect(saved?.tags.toSorted()).toEqual(tags.toSorted());
+			expect(saved?.covers.toSorted()).toEqual(covers.toSorted());
+			const timeline = TimelineReply.parse(h.call("timeline", { ref: "C-1" }));
+			expect(timeline.entries.filter((entry) => entry.t === "version").map((entry) => entry.version)).toEqual([2, 1]);
+			expect(timeline.entries.filter((entry) => entry.t === "placement")).toEqual([]);
+			return ms;
+		} finally {
+			h.close();
+		}
+	};
+	// Like the other tripwires, repeat a timing miss once to tolerate a busy shared runner.
+	const first = apply();
+	const ms = first < 1_000 ? first : apply();
+	console.log(`2000-tag / 2000-edit proposal: ${ms.toFixed(1)} ms`);
+	expect(ms, "applying all links and the body must stay below 1000 ms").toBeLessThan(1_000);
+}, 30_000);
 
 test("on-disk hot paths stay inside the design budgets", async () => {
 	const root = resolve(".mainworthy", "bench");
