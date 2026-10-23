@@ -28,6 +28,18 @@ test.skipIf(!browserAvailable)(
 			await page.keyboard.press("x");
 			await page.keyboard.press("j");
 			await page.keyboard.press("x");
+			const removeBox = page.getByRole("textbox", { name: "Remove tag from selected cases" });
+			// Windows and Linux send the typed letter with Alt: Dvorak Alt+t is on the K key, and Alt+y on the T key.
+			await page.evaluate(() =>
+				window.dispatchEvent(new KeyboardEvent("keydown", { key: "t", code: "KeyK", altKey: true, bubbles: true })),
+			);
+			await removeBox.waitFor();
+			await page.keyboard.press("Escape");
+			await removeBox.waitFor({ state: "detached" });
+			await page.evaluate(() =>
+				window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", code: "KeyT", altKey: true, bubbles: true })),
+			);
+			expect(await removeBox.count()).toBe(0);
 			await page.evaluate(() =>
 				window.dispatchEvent(new KeyboardEvent("keydown", { key: "†", code: "KeyT", altKey: true, bubbles: true })),
 			);

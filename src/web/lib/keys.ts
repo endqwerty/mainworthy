@@ -72,7 +72,7 @@ export function useKeyRegistry(): Binding[] {
 }
 function keyOf(event: KeyboardEvent): string {
 	let value = event.key;
-	if (event.altKey) {
+	if (event.altKey && !/^[a-z0-9[\]]$/i.test(event.key)) {
 		if (/^(Key[A-Z]|Digit[0-9])$/.test(event.code)) value = event.code.replace(/^(Key|Digit)/, "");
 		else if (event.code === "BracketLeft") value = "[";
 		else if (event.code === "BracketRight") value = "]";
