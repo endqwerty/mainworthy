@@ -97,8 +97,8 @@ Alt (Option on a Mac) works with the letter or bracket key shown below.
 | <kbd>#</kbd> | Archive selected active cases, or restore selected archived cases. Mixed or unread selections are refused. |
 | <kbd>u</kbd> | Undo the last move, tag or archive. With nothing to undo, restores the version before. |
 | <kbd>Space</kbd> | Peek timeline |
-| <kbd>]</kbd> | Next folder |
-| <kbd>Alt</kbd> <kbd>[</kbd> | Previous folder |
+| <kbd>]</kbd> | Next folder, with the cursor on its first case |
+| <kbd>Alt</kbd> <kbd>[</kbd> | Previous folder, with the cursor on its first case |
 | <kbd>n</kbd> <kbd>f</kbd> | New folder |
 | <kbd>z</kbd> | Widen case pane |
 | <kbd>v</kbd> | Version diff |

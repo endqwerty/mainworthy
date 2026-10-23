@@ -591,8 +591,8 @@ export function SuiteScreen() {
 	}, [project, route.folder, route.ref, ownedDraft, state]);
 	useEffect(() => {
 		const first = cases.find((row) => row.state === state);
-		if (selected === null && first && !draftRef.current) setSelected(first.ref);
-	}, [cases, selected, state]);
+		if (selected === null && !list.isPlaceholderData && first && !draftRef.current) setSelected(first.ref);
+	}, [cases, selected, state, list.isPlaceholderData]);
 	function focusDraft(next: Draft): void {
 		const target = document.querySelector(
 			`#detail [data-field="${next.caret.field === "capture-title" ? "title" : next.caret.field}"]`,
