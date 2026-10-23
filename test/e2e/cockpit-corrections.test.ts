@@ -394,6 +394,7 @@ check(
 			await page.locator("#stat").filter({ hasText: "C-1 fail recorded" }).waitFor();
 			const other = await context.newPage();
 			await other.goto(`${server.url}${path}`);
+			await other.locator('[data-slot="1"]').click();
 			await ready(other);
 			await fail(other, "Second tab new failure");
 			await other.locator("#stat").filter({ hasText: "C-1 fail recorded" }).waitFor();
@@ -701,3 +702,98 @@ check(
 	},
 	30_000,
 );
+
+for (const outcome of ["skip", "blocked"] as const)
+	check(
+		`automatic navigation leaves one's own ${outcome} recorded while the run still needs proof (612)`,
+		async () => {
+			const { server, run, path } = await fixture(3);
+			let view: Awaited<ReturnType<typeof openPage>> | null = null;
+			try {
+				view = await openPage(server, { path });
+				const { page } = view;
+				await ready(page);
+				await page.keyboard.press(outcome === "skip" ? "s" : "b");
+				await page
+					.locator("#stat")
+					.filter({ hasText: `C-1 ${outcome} recorded` })
+					.waitFor();
+				await page.keyboard.press("p");
+				await page.locator("#stat").filter({ hasText: "C-2 pass recorded" }).waitFor();
+				await page.keyboard.press("p");
+				await page.locator("#stat").filter({ hasText: "C-3 pass recorded" }).waitFor();
+				if (outcome === "skip") await screenshot(page, 6121);
+				expect(await page.locator('[data-run-document][data-active="true"]').getAttribute("data-run-document")).toBe(
+					"C-3",
+				);
+				await page
+					.getByText("Nothing left for you to run. The server verdict is shown above.", { exact: true })
+					.waitFor();
+				expect(await page.locator("#list .phead").innerText()).toContain("1 left in run");
+				expect(await page.getByRole("complementary", { name: "Up next" }).count()).toBe(0);
+				expect(await server.api("gate", { run })).toMatchObject({ verdict: "pending", tally: { missing: 1 } });
+				expect((await slots(server, run)).map((slot) => slot.fills.map((fill) => fill.outcome))).toEqual([
+					[outcome],
+					["pass"],
+					["pass"],
+				]);
+				await page.keyboard.press("k");
+				await page.keyboard.press("k");
+				expect(await page.locator('[data-run-document][data-active="true"]').getAttribute("data-run-document")).toBe(
+					"C-1",
+				);
+				expect(await page.getByRole("button", { name: "p Pass", exact: true }).isEnabled()).toBe(true);
+				await page.keyboard.press("j");
+				expect(await page.locator('[data-run-document][data-active="true"]').getAttribute("data-run-document")).toBe(
+					"C-2",
+				);
+				await page.keyboard.press("k");
+				expect(await page.locator('[data-run-document][data-active="true"]').getAttribute("data-run-document")).toBe(
+					"C-1",
+				);
+				await page.locator('[data-slot="3"]').click();
+				await page.locator('[data-slot="1"]').click();
+				expect(await page.locator('[data-run-document][data-active="true"]').getAttribute("data-run-document")).toBe(
+					"C-1",
+				);
+				await page.locator("#list").getByRole("link", { name: "Runs", exact: true }).click();
+				await page.getByRole("option").filter({ hasText: "Cockpit corrections" }).click();
+				await page.keyboard.press("Enter");
+				await page
+					.getByText("Nothing left for you to run. The server verdict is shown above.", { exact: true })
+					.waitFor();
+				expect(await page.locator('[data-run-document][data-active="true"]').count()).toBe(0);
+				expect(await page.locator("#list .phead").innerText()).toContain("1 left in run");
+			} finally {
+				await view?.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+
+for (const outcome of ["skip", "blocked", "pass"] as const)
+	check(
+		`opening the cockpit skips one's own ${outcome} when proof is unfinished (612)`,
+		async () => {
+			const { server, run, path } = await fixture(3, 2);
+			let view: Awaited<ReturnType<typeof openPage>> | null = null;
+			try {
+				await server.api("report", { run, results: [{ test: { case: "C-1" }, outcome }] });
+				view = await openPage(server, { path });
+				const { page } = view;
+				await page.locator('[data-run-document][data-active="true"][data-ready="true"]').waitFor();
+				expect(await page.locator('[data-run-document][data-active="true"]').getAttribute("data-run-document")).toBe(
+					"C-2",
+				);
+				await page.keyboard.press("k");
+				expect(await page.locator('[data-run-document][data-active="true"]').getAttribute("data-run-document")).toBe(
+					"C-1",
+				);
+			} finally {
+				await view?.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
