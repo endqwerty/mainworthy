@@ -172,7 +172,8 @@ describe("the third-party notices", () => {
 			.groups.flatMap((g) => g.components)
 			.find((c) => c.name === "Bun");
 		expect(bun, "licences/components.json lists Bun").toBeDefined();
-		expect(read("Dockerfile")).toContain(`FROM oven/bun:${bun?.version} AS build`);
+		const image = read("Dockerfile").match(/^FROM oven\/bun:([^\s@]+)@sha256:[a-f0-9]{64} AS build$/m);
+		expect(image?.[1]).toBe(bun?.version);
 		const ci = [...read(".github/workflows/check.yml").matchAll(/bun-version: (\S+)/g)].map((m) => m[1]);
 		expect(ci.length).toBeGreaterThan(0);
 		expect(new Set(ci)).toEqual(new Set([bun?.version]));

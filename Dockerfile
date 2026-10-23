@@ -3,7 +3,7 @@
 
 # The exact Bun: the executable carries it, and THIRD-PARTY-NOTICES.md lists the libraries of this release
 # (`licences/README.md`). `test/licences.test.ts` holds the version here, in CI and in the notices to one another.
-FROM oven/bun:1.4.3 AS build
+FROM oven/bun:1.4.3@sha256:ec06c3b6cea04192ae6770c434f668ca41d343ad19fa6472216c7b48be39c598 AS build
 WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
@@ -19,8 +19,18 @@ COPY LICENSE NOTICE THIRD-PARTY-NOTICES.md ./
 COPY licences/archify ./licences/archify
 RUN NODE_ENV=production bun build --compile --minify --sourcemap --banner '/*! Mainworthy, Apache-2.0. Software from others is in this file; its licences and notices: /docs/licence */' src/cli/main.ts src/server/ops/read-worker.ts src/server/kernel/checkpoint-worker.ts src/app/start-worker.ts src/cli/demo-worker.ts --outfile /out/mainworthy
 
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends nftables util-linux && rm -rf /var/lib/apt/lists/*
+FROM debian:bookworm-slim@sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8
+# Freeze packages and their dependencies together; updating these pins is documented in docs/deploy.md.
+# HTTP works without ca-certificates in the slim base; apt still verifies Debian's archive signatures.
+RUN printf '%s\n' \
+    'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20261022T000000Z/ bookworm main' \
+    'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20261022T000000Z/ bookworm-updates main' \
+    'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/20261022T000000Z/ bookworm-security main' \
+    > /etc/apt/sources.list \
+    && rm /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends nftables util-linux \
+    && rm -rf /var/lib/apt/lists/*
 COPY scripts/container/entrypoint.sh /usr/local/bin/mainworthy-entrypoint
 COPY scripts/container/lockdown.nft /usr/local/share/mainworthy/lockdown.nft
 RUN useradd --system --uid 10001 --home-dir /data mainworthy && mkdir -p /data && chown mainworthy:mainworthy /data

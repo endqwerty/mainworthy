@@ -564,6 +564,15 @@ test("a machine that cannot run the tests is told why, and what to do, before an
 	}
 });
 
+test("the image pins every base image by digest", () => {
+	const bases = [...readFileSync("Dockerfile", "utf8").matchAll(/^\s*FROM\s+(.+)$/gim)];
+	expect(bases.length).toBeGreaterThan(0);
+	for (const base of bases)
+		expect(base[1], "a base image keeps its tag and pins its digest").toMatch(
+			/^\S+:\S+@sha256:[a-f0-9]{64}(?:\s+AS\s+\S+)?$/i,
+		);
+});
+
 test("every way to run a test asks the machine first, and the Bun asked for is one the workflow and the image install", () => {
 	// `bun test <file>` loads the preload; `bun run check` and `bun run test` ask before their first import of a package.
 	expect(
@@ -593,7 +602,7 @@ test("every way to run a test asks the machine first, and the Bun asked for is o
 
 	const installed = [
 		...readFileSync(".github/workflows/check.yml", "utf8").matchAll(/bun-version: (\S+)/g),
-		...readFileSync("Dockerfile", "utf8").matchAll(/FROM oven\/bun:(\S+)/g),
+		...readFileSync("Dockerfile", "utf8").matchAll(/FROM oven\/bun:([^\s@]+)/g),
 	].map((match) => match[1] ?? "");
 	expect(installed.length).toBeGreaterThanOrEqual(4);
 	// The image's tag names a line (`1.4`), which is its newest release.

@@ -77,6 +77,32 @@ runs one:
 - No page can show the app in a frame, on the same host or another. A dashboard or a tool that embeds
   applications in a frame shows an empty one for Mainworthy.
 
+## Update the image pins
+
+`Dockerfile` pins both base images by their multi-platform index digest and installs Debian packages from the
+2026-10-22 [snapshot archive](https://snapshot.debian.org/). The dated archive fixes the versions of `nftables`,
+`util-linux` and their dependencies together. Exact package versions from a live mirror can disappear after a
+security update, so they would not keep an old commit buildable.
+
+To update a base image, inspect its tag:
+
+```
+docker buildx imagetools inspect oven/bun:1.4.3
+docker buildx imagetools inspect debian:bookworm-slim
+```
+
+Copy the top-level `Digest` into the matching `FROM image:tag@sha256:...` line. Use the index digest, not a
+platform's manifest digest, so amd64 and arm64 remain available. Keep the tag beside the digest for readability.
+Changing the Bun version also requires updating its licence notices and CI version (`licences/README.md`).
+
+For a Debian security rebuild, update the Debian digest and all three snapshot URLs to a fixed UTC date that
+includes the required fixes. The snapshot sources replace the base's live sources. They use HTTP because the
+slim base has no CA certificates; apt still verifies Debian's archive signatures. `check-valid-until=no` permits
+old signed snapshot metadata after its expiry date, without disabling signature verification.
+
+Submit pin updates as ordinary reviewed changes. CI's `image` job builds and smoke-tests the image before it
+can pass the deployment gate.
+
 ## The limit on failed sign-ins
 
 A wrong token is counted where the server asks who the caller is: on a route that needs a sign-in, whether a
