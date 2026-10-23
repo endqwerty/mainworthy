@@ -14,6 +14,130 @@ const Listed = z.array(
 );
 
 test.skipIf(!browserAvailable)(
+	"token creation reuses existing actors without sending new permissions",
+	async () => {
+		const server = await startServer({ mode: "server" });
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await server.api("admin", { do: "project.create", key: "other" });
+			for (const [actor, kind] of [
+				["bot", "agent"],
+				["none", "agent"],
+				["teamonly", "human"],
+			] as const) {
+				await server.api("admin", { do: "token.create", actor, kind, project: "other", can: ["read"] });
+				if (actor !== "bot") await server.api("admin", { do: "grant.remove", actor, project: "other" });
+			}
+			await server.api("admin", { do: "team.create", name: "Quality" });
+			await server.api("admin", { do: "team.grant.set", team: "Quality", project: "other", can: ["read"] });
+			await server.api("admin", { do: "team.member.add", team: "Quality", person: "teamonly" });
+			const before = await server.api("admin", { do: "actor.list" });
+			view = await openPage(server, { path: "/p/scratch/settings" });
+			const { page } = view;
+			await page.getByRole("option", { name: "Tokens", exact: true }).click();
+			const outcomes = [];
+			for (const [actor, kind] of [
+				["bot", "agent"],
+				["none", "agent"],
+				["teamonly", "human"],
+			] as const) {
+				await page.getByLabel("Token actor").fill(actor);
+				await page.getByText(`Access for ${actor}.`, { exact: false }).waitFor();
+				await page.getByLabel("Producer", { exact: true }).selectOption(kind);
+				const disabled = await page.getByRole("checkbox", { name: "read", exact: true }).isDisabled();
+				const response = page.waitForResponse(
+					(response) =>
+						response.url().endsWith("/api/admin") && response.request().postDataJSON().do === "token.create",
+				);
+				await page.getByRole("button", { name: "Create token", exact: true }).click();
+				const created = await response;
+				const sent = z.object({ can: z.array(z.string()) }).parse(created.request().postDataJSON());
+				const reply = z.object({ ok: z.boolean() }).parse(await created.json());
+				outcomes.push({ actor, can: sent.can, ok: reply.ok, disabled });
+				if (reply.ok) {
+					await page.getByLabel("New token").waitFor();
+					await page.getByRole("button", { name: "Dismiss secret" }).click();
+				}
+			}
+			expect(outcomes).toEqual(
+				(["bot", "none", "teamonly"] as const).map((actor) => ({ actor, can: [], ok: true, disabled: true })),
+			);
+			expect(await server.api("admin", { do: "actor.list" })).toEqual(before);
+			await page.getByLabel("Token actor").fill("new-agent");
+			expect(await page.getByRole("checkbox", { name: "read", exact: true }).isEnabled()).toBe(true);
+			await page.getByLabel("Producer", { exact: true }).selectOption("agent");
+			await page.getByRole("checkbox", { name: "produce", exact: true }).uncheck();
+			await page.getByRole("button", { name: "Create token", exact: true }).click();
+			await page.getByLabel("New token").waitFor();
+			await page.getByRole("button", { name: "Dismiss secret" }).click();
+			await page.getByLabel("Token actor").fill("new-agent");
+			await page.getByText("Access for new-agent.", { exact: false }).waitFor();
+			expect(await page.getByRole("checkbox", { name: "read", exact: true }).isDisabled()).toBe(true);
+			await page.getByRole("button", { name: "Create token", exact: true }).click();
+			await page.getByLabel("New token").waitFor();
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)("token creation stays quiet while actor access is loading", async () => {
+	const server = await startServer({ mode: "server" });
+	let view: Awaited<ReturnType<typeof openPage>> | null = null;
+	const release = Promise.withResolvers<void>();
+	const started = Promise.withResolvers<void>();
+	try {
+		view = await openPage(server, { path: "/p/scratch/settings" });
+		const { page } = view;
+		await page.route("**/api/admin", async (route) => {
+			if (route.request().postDataJSON().do !== "actor.list") return route.continue();
+			started.resolve();
+			await release.promise;
+			await route.continue();
+		});
+		await page.getByRole("option", { name: "Tokens", exact: true }).click();
+		await started.promise;
+		await page.getByLabel("Token actor").fill("new-agent");
+		expect(await page.getByText("Access unavailable.", { exact: false }).count()).toBe(0);
+		expect(await page.getByRole("button", { name: "Create token", exact: true }).isDisabled()).toBe(true);
+		release.resolve();
+		await page.getByText("A new actor starts with the selected permissions on scratch.", { exact: true }).waitFor();
+		expect(await page.getByRole("button", { name: "Create token", exact: true }).isEnabled()).toBe(true);
+		expect(view.errors).toEqual([]);
+	} finally {
+		release.resolve();
+		await view?.close();
+		await server.stop();
+	}
+});
+
+test.skipIf(!browserAvailable)("token creation refuses a forgotten actor before submission", async () => {
+	const server = await startServer({ mode: "server" });
+	let view: Awaited<ReturnType<typeof openPage>> | null = null;
+	try {
+		await server.api("admin", { do: "token.create", actor: "gone", kind: "agent", project: "scratch", can: ["read"] });
+		const { forgotten } = z
+			.object({ forgotten: z.string() })
+			.parse(await server.api("admin", { do: "actor.forget", name: "gone" }));
+		view = await openPage(server, { path: "/p/scratch/settings" });
+		const { page } = view;
+		await page.getByRole("option", { name: "Tokens", exact: true }).click();
+		await page.getByLabel("Token actor").fill(forgotten);
+		await page.getByText(`${forgotten} was forgotten and cannot get a token.`, { exact: true }).waitFor();
+		expect(await page.locator("#detail").innerText()).toContain(`${forgotten} was forgotten and cannot get a token.`);
+		expect(await page.getByRole("button", { name: "Create token", exact: true }).isDisabled()).toBe(true);
+		expect(await page.getByRole("checkbox", { name: "read", exact: true }).isDisabled()).toBe(true);
+		expect(view.errors).toEqual([]);
+	} finally {
+		await view?.close();
+		await server.stop();
+	}
+});
+
+test.skipIf(!browserAvailable)(
 	"token creation describes the actor's access across projects before showing its secret",
 	async () => {
 		const server = await startServer({ mode: "server" });

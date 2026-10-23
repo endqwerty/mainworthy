@@ -24,7 +24,7 @@ import { People } from "./people.tsx";
 import { type ClauseChange, PolicyEditor, PolicySnapshot, policyConflictMessage } from "./policy.tsx";
 import { YourSessions } from "./sessions.tsx";
 import { YourSignIn } from "./signin.tsx";
-import { IssuedTokens, TokenAccess } from "./tokens.tsx";
+import { IssuedTokens, TokenAccess, useTokenAccess } from "./tokens.tsx";
 import "./settings.css";
 
 type PolicyChange =
@@ -503,14 +503,16 @@ function SettingsWorkbench() {
 }
 function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElement | null> }) {
 	const { project, setStatus } = useApp();
-	const read = useQueryOp({ project, op: "admin", input: { do: "token.list" } });
 	const [actor, setActor] = useState("");
+	const access = useTokenAccess(actor);
 	const [kind, setKind] = useState<"human" | "agent" | "ci">("agent");
 	const [capabilities, setCapabilities] = useState<z.infer<typeof Capability>[]>([...defaultCapabilities("agent")]);
 	const [expires, setExpires] = useState<(typeof LIFETIMES)[number]["value"]>("");
 	const [created, setCreated] = useState<z.infer<typeof CreatedToken> | null>(null);
 	const secretRef = useRef<HTMLInputElement>(null);
 	const [busy, setBusy] = useState(false);
+	const canCreate =
+		access.kind === "existing" ? !access.actor.disabled : access.kind === "new" && capabilities.length > 0;
 	return (
 		<>
 			<h2>Tokens</h2>
@@ -522,7 +524,7 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 				className="settings-form"
 				onSubmit={(event) => {
 					event.preventDefault();
-					if (!actor.trim() || busy) return;
+					if (!actor.trim() || busy || !canCreate) return;
 					setBusy(true);
 					setCreated(null);
 					void call(
@@ -532,7 +534,7 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 							actor: actor.trim(),
 							kind,
 							project,
-							can: capabilities,
+							can: access.kind === "existing" ? [] : capabilities,
 							label: `${kind} for ${project}`,
 							...(expires ? { expires } : {}),
 						},
@@ -541,7 +543,7 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 						.then((reply) => {
 							setCreated(CreatedToken.parse(reply));
 							setActor("");
-							return read.refetch();
+							return invalidateProject(project);
 						})
 						.catch((error: unknown) =>
 							setStatus(error instanceof Error ? error.message : "The token could not be created."),
@@ -559,7 +561,7 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 					placeholder="reviewer"
 					required
 				/>
-				<TokenAccess name={actor} />
+				<TokenAccess access={access} />
 				<label htmlFor="token-kind">Producer</label>
 				<Select
 					className="form-input"
@@ -576,7 +578,7 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 					<option value="ci">Pipeline</option>
 					<option value="human">Person</option>
 				</Select>
-				<fieldset className="settings-capabilities">
+				<fieldset className="settings-capabilities" disabled={access.kind !== "new"}>
 					<legend>Permissions</legend>
 					{(kind === "ci" ? CI_CAPABILITIES : Capability.options).map((can) => (
 						<label key={can}>
@@ -609,7 +611,7 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 						</option>
 					))}
 				</Select>
-				<button className="out" type="submit" disabled={busy || !actor.trim() || !capabilities.length}>
+				<button className="out" type="submit" disabled={busy || !actor.trim() || !canCreate}>
 					Create token
 				</button>
 			</form>
