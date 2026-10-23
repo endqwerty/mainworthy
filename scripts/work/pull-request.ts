@@ -151,6 +151,8 @@ export function principles(body: string): string[] {
 }
 
 export type Facts = {
+	pull: { url: string; draft: boolean };
+	addedFragments: readonly { file: string; text: string }[];
 	body: string;
 	base: string;
 	milestone: string | null;
@@ -183,6 +185,16 @@ export function problems(facts: Facts): string[] {
 			`The pull request has ${facts.milestone ? `milestone "${facts.milestone}"` : "no milestone"}; its issue has ${milestones.map((m) => `"${m}"`).join(" or ")}.`,
 		);
 	found.push(...principles(facts.body));
+	for (const { file, text } of facts.addedFragments) {
+		// The description job installs no dependencies. Full fragment validation stays with the docs checks.
+		const header = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(text)?.[1] ?? "";
+		const refs = [...header.matchAll(/^pr: ([^\n]+)$/gm)];
+		const ref = refs[0]?.[1];
+		if (refs.length !== 1 || (ref !== facts.pull.url && !(facts.pull.draft && ref === "pending")))
+			found.push(
+				`${file} must name this pull request as \`pr: ${facts.pull.url}\`; pending is allowed only while the pull request is a draft.`,
+			);
+	}
 	return found;
 }
 
@@ -200,7 +212,7 @@ export async function gather(number: number, gh = (args: string[]) => read(["gh"
 				"--repo",
 				REPO,
 				"--json",
-				"body,baseRefName,milestone,closingIssuesReferences",
+				"body,baseRefName,milestone,closingIssuesReferences,isDraft,headRefOid",
 			]),
 		),
 	);
@@ -214,8 +226,38 @@ export async function gather(number: number, gh = (args: string[]) => read(["gh"
 		const title = (await gh(["api", `repos/${REPO}/issues/${n}`, "--jq", ".milestone.title // empty"])).trim();
 		issueMilestones.set(n, title || null);
 	}
+	if (
+		typeof pull.isDraft !== "boolean" ||
+		typeof pull.headRefOid !== "string" ||
+		!/^[a-f0-9]{40}$/.test(pull.headRefOid)
+	)
+		throw new Error("GitHub did not return the pull request's draft state and head commit");
+	const paths = (
+		await gh([
+			"api",
+			`repos/${REPO}/pulls/${number}/files`,
+			"--paginate",
+			"--jq",
+			'.[] | select(.status == "added") | .filename',
+		])
+	)
+		.split("\n")
+		.filter((file) => file.startsWith(".changes/") && file.endsWith(".md"));
+	const addedFragments: Facts["addedFragments"][number][] = [];
+	for (const file of paths) {
+		const path = file.split("/").map(encodeURIComponent).join("/");
+		const text = await gh([
+			"api",
+			`repos/${REPO}/contents/${path}?ref=${pull.headRefOid}`,
+			"--header",
+			"Accept: application/vnd.github.raw+json",
+		]);
+		addedFragments.push({ file, text });
+	}
 	const milestone = object(pull.milestone).title;
 	return {
+		pull: { url: `https://github.com/${REPO}/pull/${number}`, draft: pull.isDraft },
+		addedFragments,
 		body,
 		base: String(pull.baseRefName),
 		milestone: typeof milestone === "string" ? milestone : null,

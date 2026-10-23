@@ -22,4 +22,4 @@ xcuserdata
 .*.bun-build
 
 # Interrupted changelog assembly leaves only a replaceable temporary file.
-/.changes/.changelog-*.tmp
+/.changelog-*.tmp

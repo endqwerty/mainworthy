@@ -47,10 +47,10 @@ export function checkLinks(file: string, text: string): void {
 		}
 		if (!link || /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(link)) throw new Error(`${file}: bad link ${link}`);
 		const [path = "", anchor] = link.split("#");
-		const target = resolve(dirname(file), decodeURIComponent(path));
+		const target = path ? resolve(dirname(file), decodeURIComponent(path)) : resolve(file);
 		if (relative(process.cwd(), target).startsWith(".."))
 			throw new Error(`${file}: link leaves the repository ${link}`);
-		if (!existsSync(target)) throw new Error(`${file}: missing link ${link}`);
+		if (!existsSync(target)) throw new Error(`${file}: missing file for link ${link}`);
 		if (anchor !== undefined && (target.endsWith(".md") || !path)) {
 			const targetHtml = Bun.markdown.html(readFileSync(target, "utf8"), { headings: { ids: true } });
 			if (!targetHtml.includes(`id="${decodeURIComponent(anchor)}"`))
