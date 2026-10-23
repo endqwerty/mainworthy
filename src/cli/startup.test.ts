@@ -48,7 +48,7 @@ test.each([
 	const options = source === "option" ? { readers: 9 } : {};
 	const expected = source === "port" ? undefined : "MAINWORTHY_READERS";
 	try {
-		if (kind === "start") expect(() => start(config, () => ({ ui: null }), options)).toThrow(expected);
+		if (kind === "start") expect(async () => await start(config, () => ({ ui: null }), options)).toThrow(expected);
 		else await expect(await startServing(config, () => ({ ui: null }), options)).rejects.toThrow(expected);
 		expect(readFileSync(path).equals(Buffer.from(fixture))).toBe(true);
 		expect(readdirSync(directory)).toEqual(["mainworthy.db"]);

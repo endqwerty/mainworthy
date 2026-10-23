@@ -105,7 +105,9 @@ test("question readers reject impossible failure subjects at the storage boundar
 			for (const read of readers) expect(read).toThrow();
 			db.raw.run("UPDATE questions SET state = 'decided' WHERE id = ?", [row.id]);
 			for (const kind of [undefined, "failure"] as const)
-				expect(() => questions.ledgerPage(db, { project: row.project, kind, before: null, limit: 10 })).toThrow();
+				expect(
+					async () => await questions.ledgerPage(db, { project: row.project, kind, before: null, limit: 10 }),
+				).toThrow();
 			db.raw.run("UPDATE questions SET state = 'open' WHERE id = ?", [row.id]);
 		}
 		db.raw.run("UPDATE questions SET subject = '{' WHERE id = ?", [row.id]);
@@ -128,7 +130,7 @@ test("the attributed cause reader uses the same failure subject boundary", async
 			JSON.stringify({ signature: "1", scope: "line:main" }),
 			row.id,
 		]);
-		expect(() => questions.attributedQuestionsOn(db, row.project, about)).toThrow();
+		expect(async () => await questions.attributedQuestionsOn(db, row.project, about)).toThrow();
 	} finally {
 		h.close();
 	}

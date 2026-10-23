@@ -298,14 +298,11 @@ describe("planned lookups beside change history", () => {
 				await stampSeq(ctx);
 				return result;
 			});
-		const batch = (await inTx((ctx) => acceptReport(ctx, report("zzzz0001", "late")))).batch;
+		const batch = (await inTx(async (ctx) => await acceptReport(ctx, report("zzzz0001", "late")))).batch;
 		const target = await mustTarget(h.app.db, batch.target);
-		expect((await inTx((ctx) => runsFor(ctx, target, null, h.owner.kind))).map((row) => `R-${row.no}`)).toEqual([
-			"R-5",
-			"R-6",
-			"R-2",
-			"R-7",
-		]);
+		expect(
+			(await inTx(async (ctx) => await runsFor(ctx, target, null, h.owner.kind))).map((row) => `R-${row.no}`),
+		).toEqual(["R-5", "R-6", "R-2", "R-7"]);
 		const waiting = horizons();
 		for (const no of [2, 6, 7])
 			expect(waiting.find((row) => row.no === no)).toEqual({
@@ -315,7 +312,7 @@ describe("planned lookups beside change history", () => {
 				outstanding: 1,
 			});
 		for (const no of [3, 4]) expect(waiting.find((row) => row.no === no)).toEqual(before.find((row) => row.no === no));
-		await inTx((ctx) => processBatch(ctx, batch.id));
+		await inTx(async (ctx) => await processBatch(ctx, batch.id));
 		const after = horizons();
 		for (const no of [2, 6, 7])
 			expect(after.find((row) => row.no === no)).toEqual({
@@ -656,14 +653,14 @@ describe("a run that accepts a build", () => {
 					await stampSeq(ctx);
 					return result;
 				});
-			const batches = [2, 3].map((attempt) => inTx((ctx) => acceptReport(ctx, input(attempt))).batch);
+			const batches = [2, 3].map((attempt) => inTx(async (ctx) => await acceptReport(ctx, input(attempt))).batch);
 			if (reverse) batches.reverse();
 			expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
 				verdict: "pending",
 				stale: true,
 				reason: "pending: 2 reports accepted and not yet applied",
 			});
-			await inTx((ctx) => processBatch(ctx, first(batches).id));
+			await inTx(async (ctx) => await processBatch(ctx, first(batches).id));
 			expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
 				verdict: "pending",
 				reason: "pending: 1 report accepted and not yet applied",
@@ -671,7 +668,7 @@ describe("a run that accepts a build", () => {
 			expect(first((await h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" })).items).q).toBe(
 				original.q,
 			);
-			await inTx((ctx) => processBatch(ctx, first(batches.slice(1)).id));
+			await inTx(async (ctx) => await processBatch(ctx, first(batches.slice(1)).id));
 			expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({ verdict: "passed", stale: false });
 			expect((await run(planned.run)).state).toBe("closed");
 			const signoffs = (await h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" })).items;

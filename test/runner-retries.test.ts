@@ -544,8 +544,8 @@ test.each(["rebuild", "archive"])(
 		const input = broadReport(tests);
 		await h.call("report", input, h.actor("pipeline", "ci", ["read", "record"]));
 		const pending = (
-			await inContext((ctx) =>
-				acceptReport(ctx, ReportInput.parse({ ...broadReport(tests.slice(-1)), job: "pending" })),
+			await inContext(
+				async (ctx) => await acceptReport(ctx, ReportInput.parse({ ...broadReport(tests.slice(-1)), job: "pending" })),
 			)
 		).batch;
 		const imported = maintenance === "archive" ? new Db(":memory:") : null;
@@ -614,14 +614,15 @@ test("application yields within a batch's tries, and recovery after rollback app
 		...result,
 		tries: Array.from({ length: 100 }, () => failed("assertion failed")),
 	}));
-	const batch = (await inContext((ctx) => acceptReport(ctx, ReportInput.parse(input)))).batch;
-	expect(() =>
-		inContext((ctx) => {
-			const steps = processBatchSteps(ctx, batch.id);
-			expect(steps.next().done).toBe(false);
-			expect(h.app.db.raw.query("SELECT count(*) AS n FROM result_tries").get()).toEqual({ n: 200 });
-			throw new Error("interrupted application");
-		}),
+	const batch = (await inContext(async (ctx) => await acceptReport(ctx, ReportInput.parse(input)))).batch;
+	expect(
+		async () =>
+			await inContext((ctx) => {
+				const steps = processBatchSteps(ctx, batch.id);
+				expect(steps.next().done).toBe(false);
+				expect(h.app.db.raw.query("SELECT count(*) AS n FROM result_tries").get()).toEqual({ n: 200 });
+				throw new Error("interrupted application");
+			}),
 	).toThrow("interrupted application");
 	expect(h.app.db.raw.query("SELECT count(*) AS n FROM assertion_seen").get()).toEqual({ n: 0 });
 	expect(await recoverAccepted(h.app)).toBe(1);
@@ -643,15 +644,16 @@ test("old unsplit tries rebuild before pending recovery without rewriting histor
 	`);
 	await migrate(h.app.db, ":memory:");
 	const before = h.app.db.raw.query("SELECT id, signature FROM result_tries ORDER BY id").all();
-	await inContext((ctx) =>
-		acceptReport(
-			ctx,
-			ReportInput.parse({
-				...input,
-				attempt: 2,
-				results: [{ test: input.results[0]?.test, outcome: "fail", failure: { message: "assertion failed" } }],
-			}),
-		),
+	await inContext(
+		async (ctx) =>
+			await acceptReport(
+				ctx,
+				ReportInput.parse({
+					...input,
+					attempt: 2,
+					results: [{ test: input.results[0]?.test, outcome: "fail", failure: { message: "assertion failed" } }],
+				}),
+			),
 	);
 	await rebuildAssertionIndexes(h.app.db);
 	expect(h.app.db.raw.query("SELECT id, signature FROM result_tries ORDER BY id").all()).toEqual(before);

@@ -96,7 +96,7 @@ describe("fresh schema image", () => {
 				]);
 				expect(contents(app.db)).toEqual(contents(migrated));
 				expect(() => app.db.raw.query("SELECT $value").get({ wrong: 1 })).toThrow();
-				app.db.exec("INSERT INTO meta VALUES ('private', 'first app'); CREATE TABLE private_rows (value TEXT)");
+				await app.db.exec("INSERT INTO meta VALUES ('private', 'first app'); CREATE TABLE private_rows (value TEXT)");
 				const next = await openApp({ ...config, dataDir: join(directory, "next") }, { memory });
 				try {
 					expect(contents(next.db)).toEqual(contents(migrated));

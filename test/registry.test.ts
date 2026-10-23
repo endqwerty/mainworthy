@@ -173,7 +173,7 @@ test("an awaited read keeps its snapshot while another connection commits", asyn
 		).toMatchObject({ ok: true });
 		resume.resolve();
 		expect(await pending).toEqual({ ok: true, result: [1, 1], seq: 1 });
-		expect((await findProject(app.reader, "scratch"))?.seq).toBe(2);
+		expect((await await app.database.read(async (readDb) => await findProject(readDb, "scratch")))?.seq).toBe(2);
 	} finally {
 		resume.resolve();
 		await pending;

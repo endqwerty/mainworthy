@@ -75,7 +75,7 @@ for (const foreignKeys of [0, 1]) {
 				db.raw.exec(`PRAGMA foreign_keys = ${foreignKeys}`);
 				const before = snapshot(db);
 				const attempt = () => {
-					expect(() => removeProject(db, "removing")).toThrow(/left rows in results that refer to results/);
+					expect(async () => await removeProject(db, "removing")).toThrow(/left rows in results that refer to results/);
 					expect(snapshot(db)).toBe(before);
 					expect(db.raw.query("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: foreignKeys });
 				};

@@ -146,7 +146,7 @@ test("the former name must be a person who is there to rename, or the start is r
 	const dataDir = scratch();
 	await asRobin(dataDir);
 	const refused = (ownerWas: string, why: string): void => {
-		expect(() => boot({ dataDir, owner: "rowan", ownerWas })).toThrow(
+		expect(async () => await boot({ dataDir, owner: "rowan", ownerWas })).toThrow(
 			`MAINWORTHY_OWNER_WAS names ${ownerWas}, ${why}. Set it to the name the owner has now, or unset it to make rowan a new person who owns this instance, and start again${UNCHANGED}`,
 		);
 	};
@@ -159,7 +159,7 @@ test("the former name must be a person who is there to rename, or the start is r
 	// The new name is one a person can be given, as it is for anybody else. One that is not would move the
 	// owner's password to a name the sign-in page refuses to read.
 	for (const owner of ["ro wan", "rowan\nextra", "r".repeat(65), "-rowan"]) {
-		expect(() => boot({ dataDir, owner, ownerWas: "robin" })).toThrow(
+		expect(async () => await boot({ dataDir, owner, ownerWas: "robin" })).toThrow(
 			`MAINWORTHY_OWNER is ${JSON.stringify(owner)}, which is not a name a person can be given: letters, digits and . _ @ -, starting with a letter or a digit, 64 characters at most. Set MAINWORTHY_OWNER to the owner's new name and start again${UNCHANGED}`,
 		);
 	}

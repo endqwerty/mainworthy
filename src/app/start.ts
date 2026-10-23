@@ -67,7 +67,7 @@ export async function open(
 		if (!project) {
 			// Zero configuration to first value: a project exists before the first case is typed.
 			project = options.firstProject ?? "scratch";
-			app.db.transaction(
+			await app.db.transaction(
 				async () =>
 					await createProject(
 						{ app, actor: owner, now: app.now(), session: null, context: null },

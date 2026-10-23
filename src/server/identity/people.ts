@@ -721,10 +721,10 @@ export async function signInWithPasskey(
 	if (!first.ok) return attempt.wrong(first);
 	about.proven?.();
 	const cookie = newSessionSecret();
-	const entry = await commit(app, () => {
-		const now = judgeAssertion(app, app.db, answer, ceremony);
+	const entry = await commit(app, async () => {
+		const now = await judgeAssertion(app, app.db, answer, ceremony);
 		if (!now.ok) return now;
-		const opened = openOn(app, now.row, cookie, about);
+		const opened = await openOn(app, now.row, cookie, about);
 		if (!opened || !countPasskeyUse(app.db, now.row, now.shown, app.now())) throw new Stop(no("changed-meanwhile"));
 		spendChallenge(app, now.challenge);
 		return { ok: true, signedIn: { cookie, expiresAt: opened.expiresAt } } as const;

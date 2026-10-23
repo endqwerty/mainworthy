@@ -134,12 +134,12 @@ test("one data directory admits one server, releases on stop, and releases after
 	const previousWait = process.env.MAINWORTHY_LOCK_WAIT_SECONDS;
 	process.env.MAINWORTHY_LOCK_WAIT_SECONDS = "0";
 	try {
-		expect(() => boot("local", null, first.app.config.dataDir)).toThrow(
+		expect(async () => await boot("local", null, first.app.config.dataDir)).toThrow(
 			"another server is already using this data directory",
 		);
 		const alias = join(first.app.config.dataDir, "alias");
 		symlinkSync(first.app.config.dataDir, alias);
-		expect(() => boot("local", null, alias)).toThrow("another server is already using this data directory");
+		expect(async () => await boot("local", null, alias)).toThrow("another server is already using this data directory");
 	} finally {
 		if (previousWait === undefined) delete process.env.MAINWORTHY_LOCK_WAIT_SECONDS;
 		else process.env.MAINWORTHY_LOCK_WAIT_SECONDS = previousWait;
@@ -150,14 +150,15 @@ test("one data directory admits one server, releases on stop, and releases after
 	expect((await fetch(`${second.url}/healthz`)).status).toBe(200);
 	await second.stop();
 	const config = { ...first.app.config };
-	expect(() =>
-		start(
-			config,
-			() => {
-				throw new Error("extra failed");
-			},
-			{ readers: 0 },
-		),
+	expect(
+		async () =>
+			await start(
+				config,
+				() => {
+					throw new Error("extra failed");
+				},
+				{ readers: 0 },
+			),
 	).toThrow("extra failed");
 	await using third = await boot("local", null, config.dataDir);
 	expect((await fetch(`${third.url}/healthz`)).status).toBe(200);
@@ -202,12 +203,12 @@ test.each([
 		for (const mode of ["local", "server"] as const) {
 			const dataDir = join(parent, mode);
 			const config = { ...first.app.config, ...setting, mode, dataDir };
-			expect(() => open(config)).toThrow(error);
+			expect(async () => await open(config)).toThrow(error);
 			expect(existsSync(dataDir)).toBe(false);
-			expect(() => start(config, () => ({ ui: null }), { readers: 0 })).toThrow(error);
+			expect(async () => await start(config, () => ({ ui: null }), { readers: 0 })).toThrow(error);
 			expect(existsSync(dataDir)).toBe(false);
-			expect(() =>
-				start({ ...config, dataDir: first.app.config.dataDir }, () => ({ ui: null }), { readers: 0 }),
+			expect(
+				async () => await start({ ...config, dataDir: first.app.config.dataDir }, () => ({ ui: null }), { readers: 0 }),
 			).toThrow(error);
 		}
 	} finally {
@@ -224,7 +225,7 @@ test("an invalid lock wait refuses startup before creating the data directory", 
 	try {
 		for (const value of ["-1", "NaN", "Infinity", "1e309", "later"]) {
 			process.env.MAINWORTHY_LOCK_WAIT_SECONDS = value;
-			expect(() => boot("local", null, join(parent, "absent"))).toThrow(
+			expect(async () => await boot("local", null, join(parent, "absent"))).toThrow(
 				"MAINWORTHY_LOCK_WAIT_SECONDS must be a finite nonnegative number of seconds",
 			);
 			expect(existsSync(join(parent, "absent"))).toBe(false);

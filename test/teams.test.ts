@@ -171,9 +171,9 @@ test("teams, grants, members and attribution survive an archive; its version cha
 	const empty = new Db(":memory:");
 	try {
 		await migrate(empty, ":memory:");
-		expect(() => importArchive(empty, linesOf(archive.replace(`"schema":${ARCHIVE_VERSION}`, '"schema":7')))).toThrow(
-			`older than this build's archive schema ${ARCHIVE_VERSION}`,
-		);
+		expect(
+			async () => await importArchive(empty, linesOf(archive.replace(`"schema":${ARCHIVE_VERSION}`, '"schema":7'))),
+		).toThrow(`older than this build's archive schema ${ARCHIVE_VERSION}`);
 	} finally {
 		empty.close();
 	}
@@ -219,7 +219,7 @@ test("a project archive keeps relevant team authority and history without other 
 test("an unrecorded team still prevents bootstrap replacement during import", async () => {
 	h = await harness();
 	await h.call("admin", { do: "team.create", name: "Quality" });
-	expect(() => removeBootstrap(h.app.db)).toThrow("import needs a fresh instance");
+	expect(async () => await removeBootstrap(h.app.db)).toThrow("import needs a fresh instance");
 });
 
 test("team grants reject roles without changing the team's permissions", async () => {
