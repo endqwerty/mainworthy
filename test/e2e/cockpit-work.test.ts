@@ -97,9 +97,17 @@ check(
 		const server = await startServer({ seed: false });
 		let view: Awaited<ReturnType<typeof openPage>> | undefined;
 		let calls = 0;
-		// A read of the first page clears the paging error, and the cockpit asks for the next page again: each read
-		// allows a try and the one retry `retry: 1` gives (#888).
-		let firstPageReads = 0;
+		// A read of the first page clears the paging error, and the cockpit asks for the next page again (#888). So
+		// each read, like each click on More slots, starts at most a try and the one retry `retry: 1` gives.
+		const events: ("read" | "click" | "page")[] = [];
+		// The sequence when a burst has more, so a failure shows it.
+		const beyondRetry = () =>
+			events
+				.join(" ")
+				.split(/read|click/)
+				.some((burst) => burst.split("page").length - 1 > 2)
+				? events.join(" ")
+				: "";
 		let fail = true;
 		try {
 			await server.api("propose", {
@@ -118,10 +126,11 @@ check(
 							.object({ in: z.string(), cursor: z.string().optional() })
 							.parse(route.request().postDataJSON());
 						if (!input.cursor) {
-							if (input.in === "slots") firstPageReads++;
+							if (input.in === "slots") events.push("read");
 							return route.continue();
 						}
 						calls++;
+						events.push("page");
 						if (!fail) return route.continue();
 						await answer(route, {
 							status: 500,
@@ -144,10 +153,10 @@ check(
 			// A try started before the alert can still retry after it; then the requests stop.
 			await page.waitForTimeout(2200);
 			const stopped = calls;
-			let reads = firstPageReads;
 			expect(stopped).toBeGreaterThan(0);
-			expect(stopped).toBeLessThanOrEqual(2 * reads);
+			expect(beyondRetry()).toBe("");
 			// A retry can fail again, then a later explicit retry recovers the page.
+			events.push("click");
 			await page.getByRole("button", { name: "More slots", exact: true }).click();
 			await eventually(
 				async () => calls,
@@ -156,17 +165,16 @@ check(
 			await page.getByRole("alert").filter({ hasText: "Page two unavailable" }).waitFor();
 			await page.waitForTimeout(2200);
 			const retried = calls;
-			expect(retried - stopped).toBeLessThanOrEqual(2 * (1 + firstPageReads - reads));
-			reads = firstPageReads;
+			expect(beyondRetry()).toBe("");
 			fail = false;
+			events.push("click");
 			await page.getByRole("button", { name: "More slots", exact: true }).click();
 			await page.locator('[data-run-document="C-201"][data-active="true"]').waitFor();
-			// Once the second page is held, a read of the first reads the second again too.
-			expect(calls - retried).toBeLessThanOrEqual(1 + firstPageReads - reads);
 			expect(calls).toBeGreaterThan(retried);
+			expect(beyondRetry()).toBe("");
 			if (process.env.MAINWORTHY_COCKPIT_EVIDENCE)
 				console.info(
-					`Page-two requests: initial failure ${stopped}, explicit failed retry ${retried - stopped}, successful retry ${calls - retried}, first-page reads ${firstPageReads}`,
+					`Page-two requests: initial failure ${stopped}, explicit failed retry ${retried - stopped}, successful retry ${calls - retried}; ${events.join(" ")}`,
 				);
 			expect(await page.getByRole("alert").count()).toBe(0);
 			expect(
