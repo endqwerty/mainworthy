@@ -1,6 +1,7 @@
 // Administering the instance: projects, actors, tokens, and reading a project's policy.
 import { durationMs } from "../../core/duration.ts";
 import { type ActorKind, defaultCapabilities, type Unlinked } from "../../core/kinds.ts";
+import type { FieldDefinitions } from "../../core/model.ts";
 import { AdminInput } from "../../core/ops.ts";
 import { REPLIES } from "../../core/replies.ts";
 import { forgetQuestionNames } from "../decisions/questions.ts";
@@ -43,6 +44,7 @@ export function listProjects(db: Db): {
 	createdAt: number;
 	policy: string;
 	unlinked: Unlinked;
+	fieldDefinitions: FieldDefinitions;
 	demo: boolean;
 }[] {
 	return allProjects(db).map((row) => ({

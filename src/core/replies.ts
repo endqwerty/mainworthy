@@ -5,7 +5,16 @@ import { CsvImportRow } from "./csv-replies.ts";
 import { Quarantine, SameCodeEvidence } from "./flaky.ts";
 import { HandoffReceipt, HandoffStatus } from "./handoff.ts";
 import { ActorKind, FixedIn, Kind, Policy, Unlinked } from "./kinds.ts";
-import { Automate, CaseBody, CaseKind, ConflictAddress, ExpandedStep, MethodKind, Step } from "./model.ts";
+import {
+	Automate,
+	CaseBody,
+	CaseKind,
+	ConflictAddress,
+	ExpandedStep,
+	FieldDefinitions,
+	MethodKind,
+	Step,
+} from "./model.ts";
 import {
 	CredentialRow,
 	InvitationCreated,
@@ -308,6 +317,7 @@ const CaseDocument = z.looseObject({
 	steps: z.array(ExpandedStep).optional(),
 	sourceSteps: z.array(Step).optional(),
 	hasFragments: flag.optional(),
+	fields: CaseBody.shape.fields.optional(),
 	kind: CaseKind.optional(),
 	users: z.array(z.object({ case: text, base: whole, versions: z.array(whole) })).optional(),
 	methods: z.array(MethodKind).optional(),
@@ -595,6 +605,8 @@ const FindRow: z.ZodType<Record<string, unknown>> = z.union([
 	z.looseObject({ key: text, title: nullableText, cases: whole }),
 ]);
 export const FindReply = z.looseObject({
+	/** For cases: the project definitions used when writing custom field values. */
+	fieldDefinitions: FieldDefinitions.optional(),
 	count: whole.nullable(),
 	cursor: nullableText,
 	items: z.array(FindRow),
@@ -733,6 +745,7 @@ const Project = z.looseObject({
 	createdAt: number,
 	policy: text,
 	unlinked: Unlinked,
+	fieldDefinitions: FieldDefinitions,
 	demo: flag,
 });
 export const AdminReply = z.union([

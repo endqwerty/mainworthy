@@ -1946,6 +1946,11 @@ describe("a pipeline's token", () => {
 			await fetch(`${instance.url}/api/session`, { headers: ci })
 		).json()) as Envelope<SessionInfo>;
 		expect(session.ok && session.result).toMatchObject({ actor: "github-actions", kind: "ci", can: [] });
+		expect(session.ok && session.result.projects[0]?.fieldDefinitions).toBeUndefined();
+		const readable = (await (
+			await fetch(`${instance.url}/api/session`, { headers: owner })
+		).json()) as Envelope<SessionInfo>;
+		expect(readable.ok && readable.result.projects[0]?.fieldDefinitions).toEqual({});
 		expect(session.ok && session.result.projects.map((project) => [project.key, project.can])).toEqual([
 			["scratch", ["record"]],
 		]);

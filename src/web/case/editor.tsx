@@ -1,6 +1,6 @@
 import { type KeyboardEvent, useLayoutEffect, useRef } from "react";
 import { newStepId } from "../../core/ids.ts";
-import { CaseKind } from "../../core/model.ts";
+import { CaseKind, type FieldDefinitions } from "../../core/model.ts";
 import { parseBodyInline, parseOutline, splitExpected } from "../../core/outline.ts";
 import { addDraftTags, type Draft, draftTags, knownStepIds } from "../lib/drafts.ts";
 import { useBindings } from "../lib/keys.ts";
@@ -62,54 +62,52 @@ export function firstStep({ draft, change }: { draft: Draft; change: DraftChange
 		);
 }
 export function BodyEditor({
+	fieldDefinitions,
 	draft,
 	tags = draftTags(draft),
 	change,
-	seal,
 	rapid,
 	readOnlyStatus = null,
 }: {
+	fieldDefinitions: FieldDefinitions | undefined;
 	draft: Draft;
 	tags?: string[];
 	change: DraftChange;
-	seal: () => void;
 	rapid: () => void;
 	readOnlyStatus?: string | null;
 }) {
 	const { setStatus } = useApp();
 	const readOnly = readOnlyStatus !== null;
+	const refuse = () => setStatus(readOnlyStatus ?? conflictEditorStatus);
+	function guard(event: { preventDefault: () => void }): boolean {
+		if (!readOnly) return false;
+		event.preventDefault();
+		refuse();
+		return true;
+	}
+	function changeSteps(steps: Draft["body"]["steps"], field: string, position = 0, dirty = draft.dirty): void {
+		change({ ...draft, dirty, body: { ...draft.body, steps }, caret: { field, start: position, end: position } }, true);
+	}
 	function nextStep(): void {
-		if (draft.caret.field === "title" || draft.caret.field === "capture-title") {
+		const field = draft.caret.field;
+		if (field === "title" || field === "capture-title") {
 			firstStep({ draft, change });
 			return;
 		}
-		const id = draft.caret.field.split(":")[0];
+		const id = field.split(":")[0];
 		const at = draft.body.steps.findIndex((step) => step.id === id);
 		if (at < 0) return;
 		const next = draft.body.steps[at + 1] ?? freshStep(draft);
-		change(
-			{
-				...draft,
-				body: { ...draft.body, steps: draft.body.steps[at + 1] ? draft.body.steps : [...draft.body.steps, next] },
-				caret: { field: `${next.id}:action`, start: 0, end: 0 },
-			},
-			true,
-		);
+		changeSteps(draft.body.steps[at + 1] ? draft.body.steps : [...draft.body.steps, next], `${next.id}:action`);
 	}
 	function expected(): void {
 		const id = draft.caret.field.split(":")[0];
 		const step = draft.body.steps.find((item) => item.id === id);
 		if (!step) return;
-		change(
-			{
-				...draft,
-				body: {
-					...draft.body,
-					steps: draft.body.steps.map((item) => (item.id === id ? { ...item, expected: item.expected ?? "" } : item)),
-				},
-				caret: { field: `${id}:expected`, start: step.expected?.length ?? 0, end: step.expected?.length ?? 0 },
-			},
-			true,
+		changeSteps(
+			draft.body.steps.map((item) => (item.id === id ? { ...item, expected: item.expected ?? "" } : item)),
+			`${id}:expected`,
+			step.expected?.length ?? 0,
 		);
 	}
 	const editing = () =>
@@ -154,7 +152,7 @@ export function BodyEditor({
 	}
 	function update(field: string, text: string, target: HTMLTextAreaElement): void {
 		if (readOnly) {
-			setStatus(readOnlyStatus ?? conflictEditorStatus);
+			refuse();
 			return;
 		}
 		let body = draft.body;
@@ -188,16 +186,13 @@ export function BodyEditor({
 							? {
 									...step,
 									action: split?.action ?? text,
-									expected:
-										split && (split.action !== text || split.expected !== null)
-											? (split.expected ?? "")
-											: step.expected,
+									expected: split ? (split.expected ?? "") : step.expected,
 								}
 							: { ...step, expected: text }
 						: step,
 				),
 			};
-			if (part === "action" && split && (split.action !== text || split.expected !== null)) {
+			if (split) {
 				const expected = split.expected ?? "";
 				change(
 					{
@@ -222,7 +217,7 @@ export function BodyEditor({
 				(event.key.length === 1 && ((!event.ctrlKey && !event.metaKey) || /[vx]/i.test(event.key)))
 			) {
 				event.preventDefault();
-				setStatus(readOnlyStatus ?? conflictEditorStatus);
+				refuse();
 			}
 			return;
 		}
@@ -231,78 +226,25 @@ export function BodyEditor({
 			event.preventDefault();
 			return;
 		}
-		if (event.key === "Escape" || (event.key === "Enter" && (event.metaKey || event.ctrlKey))) {
-			event.preventDefault();
-			seal();
-			return;
-		}
-		if (event.key === "Enter" && event.shiftKey) {
-			event.preventDefault();
-			rapid();
-			return;
-		}
-		if (field === "title" && event.key === "Enter") {
-			event.preventDefault();
-			firstStep({ draft, change });
-			return;
-		}
 		if (field === "title" || field === "pre") return;
 		const [id, part] = field.split(":");
 		const index = draft.body.steps.findIndex((step) => step.id === id);
 		const step = draft.body.steps[index];
 		if (!step) return;
-		if (event.key === "Tab" && !event.shiftKey && part === "action") {
-			event.preventDefault();
-			change(
-				{
-					...draft,
-					body: {
-						...draft.body,
-						steps: draft.body.steps.map((item) => (item.id === id ? { ...item, expected: item.expected ?? "" } : item)),
-					},
-					caret: { field: `${id}:expected`, start: step.expected?.length ?? 0, end: step.expected?.length ?? 0 },
-				},
-				true,
-			);
-			return;
-		}
-		if (event.key === "Enter") {
-			event.preventDefault();
-			const next = draft.body.steps[index + 1] ?? freshStep(draft);
-			const steps = draft.body.steps[index + 1] ? draft.body.steps : [...draft.body.steps, next];
-			change(
-				{ ...draft, body: { ...draft.body, steps }, caret: { field: `${next.id}:action`, start: 0, end: 0 } },
-				true,
-			);
-			return;
-		}
 		if (event.key === "Backspace" && event.currentTarget.value.length === 0) {
 			event.preventDefault();
 			if (part === "expected") {
-				change(
-					{
-						...draft,
-						body: {
-							...draft.body,
-							steps: draft.body.steps.map((item) => (item.id === id ? { ...item, expected: null } : item)),
-						},
-						caret: { field: `${id}:action`, start: step.action.length, end: step.action.length },
-					},
-					true,
+				changeSteps(
+					draft.body.steps.map((item) => (item.id === id ? { ...item, expected: null } : item)),
+					`${id}:action`,
+					step.action.length,
 				);
 			} else {
 				const prev = draft.body.steps[index - 1];
-				change(
-					{
-						...draft,
-						dirty: true,
-						body: { ...draft.body, steps: draft.body.steps.filter((item) => item.id !== id) },
-						caret: {
-							field: prev ? `${prev.id}:action` : "title",
-							start: prev?.action.length ?? draft.body.title.length,
-							end: prev?.action.length ?? draft.body.title.length,
-						},
-					},
+				changeSteps(
+					draft.body.steps.filter((item) => item.id !== id),
+					prev ? `${prev.id}:action` : "title",
+					prev?.action.length ?? draft.body.title.length,
 					true,
 				);
 			}
@@ -322,11 +264,7 @@ export function BodyEditor({
 		}
 	}
 	function paste(event: React.ClipboardEvent<HTMLTextAreaElement>, field: string): void {
-		if (readOnly) {
-			event.preventDefault();
-			setStatus(readOnlyStatus ?? conflictEditorStatus);
-			return;
-		}
+		if (guard(event)) return;
 		const text = event.clipboardData.getData("text/plain");
 		if (!/[\n\t]/.test(text)) return;
 		if (field !== "title" && !field.endsWith(":action")) return;
@@ -377,18 +315,8 @@ export function BodyEditor({
 			placeholder={placeholder}
 			value={value}
 			readOnly={readOnly}
-			onBeforeInput={(event) => {
-				if (readOnly) {
-					event.preventDefault();
-					setStatus(readOnlyStatus ?? conflictEditorStatus);
-				}
-			}}
-			onCut={(event) => {
-				if (readOnly) {
-					event.preventDefault();
-					setStatus(readOnlyStatus ?? conflictEditorStatus);
-				}
-			}}
+			onBeforeInput={guard}
+			onCut={guard}
 			onChange={(event) => update(field, event.target.value, event.target)}
 			onSelect={(event) => remember(field, event.currentTarget)}
 			onKeyDown={(event) => keys(event, field)}
@@ -436,6 +364,40 @@ export function BodyEditor({
 					</span>
 				))}
 			</div>
+			{Object.entries(fieldDefinitions ?? {}).map(([key, field]) => {
+				const value = Object.hasOwn(draft.body.fields, key) ? (draft.body.fields[key] ?? "") : "";
+				const label = `${field.label}${field.required ? " (required)" : ""}`;
+				const props = {
+					id: `case-field-${key}`,
+					className: "form-input",
+					"aria-label": label,
+					"aria-required": field.required,
+					value,
+					onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+						const fields = { ...draft.body.fields, [key]: event.target.value };
+						if (!event.target.value) delete fields[key];
+						change({ ...draft, body: { ...draft.body, fields }, dirty: true });
+					},
+				};
+				return (
+					<label className="case-field" htmlFor={props.id} key={key}>
+						{label}
+						{field.kind === "choice" ? (
+							<select {...props} disabled={readOnly}>
+								<option value="">Choose a value</option>
+								{value && !field.choices.includes(value) && <option value={value}>{value}</option>}
+								{field.choices.map((choice) => (
+									<option key={choice} value={choice}>
+										{choice}
+									</option>
+								))}
+							</select>
+						) : (
+							<input {...props} readOnly={readOnly} />
+						)}
+					</label>
+				);
+			})}
 			{(draft.body.pre || draft.ref !== null) && (
 				<>
 					<div className="sech">Preconditions</div>

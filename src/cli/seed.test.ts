@@ -227,7 +227,7 @@ test("a seeded project holds a suite in folders, a fortnight of history and six 
 		const policy = z
 			.object({ settings: z.object({ fields: z.record(z.string(), z.unknown()) }) })
 			.parse(await client.call("admin", { do: "policy.show", project: "demo" }));
-		expect(Object.keys(policy.settings.fields)).toEqual(["priority", "team"]);
+		expect(Object.keys(policy.settings.fields)).toEqual(["priority", "team", "risk"]);
 		expect(JSON.stringify(await demo.call("get", { refs: ["C-2"], as: "md" }))).toMatch(/priority: P[123]/);
 		// A demo this small has no case that a run or an edit leaves alone, so nothing is archived (history.test.ts).
 		expect((await demo.call("find", { state: "archived" })).items).toHaveLength(0);

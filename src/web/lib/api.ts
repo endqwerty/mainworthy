@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { type Api, type Envelope, ERROR_CODES, INSTANCE_OPS, type OpName, type SessionInfo } from "../../core/api.ts";
 import { Unlinked } from "../../core/kinds.ts";
+import { FieldDefinitions } from "../../core/model.ts";
 import { REPLIES } from "../../core/replies.ts";
 import {
 	data as schemaData,
@@ -54,6 +55,7 @@ const Session = z.object({
 			createdAt: schemaNumber,
 			policy: schemaText,
 			unlinked: Unlinked,
+			fieldDefinitions: FieldDefinitions.optional(),
 			demo: schemaFlag,
 			can: schemaTexts,
 			handoff: schemaFlag,

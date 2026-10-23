@@ -5,7 +5,7 @@ import { diffBodies, summariseDiff } from "../../core/diff.ts";
 import { QuarantineExit } from "../../core/flaky.ts";
 import { contentHash } from "../../core/hash.ts";
 import { printCase } from "../../core/markdown.ts";
-import type { CaseBody, MethodKind } from "../../core/model.ts";
+import type { CaseBody, FieldDefinitions, MethodKind } from "../../core/model.ts";
 import {
 	CheckInput,
 	type CommandFate,
@@ -202,7 +202,18 @@ export const inboxOp = defineOp({
 
 // ── get ────────────────────────────────────────────────────────────────────────────────────────────────────
 
-const CASE_FIELDS = ["title", "pre", "steps", "methods", "tags", "covers", "place", "proof", "tests"] as const;
+const CASE_FIELDS = [
+	"title",
+	"pre",
+	"steps",
+	"methods",
+	"tags",
+	"covers",
+	"place",
+	"proof",
+	"tests",
+	"fields",
+] as const;
 
 export function caseView(
 	ctx: Ctx,
@@ -604,6 +615,7 @@ export const getOp = defineOp({
 // ── find ───────────────────────────────────────────────────────────────────────────────────────────────────
 
 type Found = {
+	fieldDefinitions?: FieldDefinitions;
 	count: number | null;
 	items: Record<string, unknown>[];
 	cursor: string | null;
@@ -864,11 +876,13 @@ export function find(ctx: Ctx, input: FindInput): Found {
 			};
 		}
 		case "cases": {
+			const fieldDefinitions = currentPolicy(ctx.db, project).settings.fields ?? {};
 			if (input.select) {
 				const selected = selectCases(ctx, input.select);
 				const from = input.cursor ? Number(input.cursor) : 0;
 				if (!Number.isSafeInteger(from) || from < 0) throw invalid("that is not a cursor of a selection");
 				return {
+					fieldDefinitions,
 					count: selected.length,
 					items: selected.slice(from, from + limit).map((row) => caseRow(ctx, row, true)),
 					cursor: selected.length > from + limit ? String(from + limit) : null,
@@ -883,7 +897,12 @@ export function find(ctx: Ctx, input: FindInput): Found {
 				limit,
 				cursor: input.cursor,
 			});
-			return { count: page.count, items: page.items.map((row) => caseRow(ctx, row, true)), cursor: page.cursor };
+			return {
+				fieldDefinitions,
+				count: page.count,
+				items: page.items.map((row) => caseRow(ctx, row, true)),
+				cursor: page.cursor,
+			};
 		}
 		case "folders": {
 			const tree = folderTree(ctx.db, project);

@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { z } from "zod";
 import { Policy } from "../../src/core/kinds.ts";
 import { parseCase } from "../../src/core/markdown.ts";
+import { CaseView, editDraft } from "../../src/web/suite/model.ts";
 import { browserAvailable, eventually, keyCount, openPage, paste, startServer } from "./support.ts";
 
 test.skipIf(!browserAvailable)(
@@ -249,6 +250,204 @@ test.skipIf(!browserAvailable)(
 	30_000,
 );
 
+for (const device of ["desktop", "phone"] as const) {
+	test.skipIf(!browserAvailable)(
+		`the ${device} editor validates and saves defined custom fields for a case author`,
+		async () => {
+			const server = await startServer({ mode: "server" });
+			const policy = Policy.extend({ version: z.number() }).parse(
+				await server.api("admin", { do: "policy.show", project: "scratch" }),
+			);
+			const proposed = await server.api("propose", {
+				edits: [
+					{
+						op: "policy",
+						base: policy.version,
+						settings: {
+							...policy.settings,
+							fields: {
+								risk: { kind: "text", label: "Risk", required: true },
+								priority: { kind: "choice", label: "Priority", required: true, choices: ["low", "high"] },
+								notes: { kind: "text", label: "Notes", required: false },
+								team: { kind: "choice", label: "Team", required: false, choices: ["checkout", "accounts"] },
+							},
+						},
+					},
+				],
+			});
+			const question = (await server.api("inbox", { kind: "adopt" })).items.find((q) => q.q === proposed.question);
+			if (!question) throw new Error("Policy question missing");
+			await server.api("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" } });
+			const invitation = await server.api("invitation", {
+				do: "create",
+				name: "case-author",
+				project: "scratch",
+				can: ["read", "produce"],
+			});
+			if (!("code" in invitation)) throw new Error("Invitation missing");
+			const password = "a long enough password";
+			expect(
+				(
+					await fetch(`${server.url}/api/login`, {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify({ invitation: invitation.code, password }),
+					})
+				).status,
+			).toBe(200);
+			const h = await openPage(server, { device, as: { name: "case-author", password } });
+			try {
+				const { page } = h;
+				let saves = 0;
+				page.on("request", (request) => {
+					if (request.url().endsWith("/propose")) saves++;
+				});
+				await page.keyboard.press("c");
+				await page.getByRole("textbox", { name: "Case title", exact: true }).fill("Case with custom fields");
+				const screenshot = process.env.MAINWORTHY_FIELDS_SCREENSHOT;
+				if (screenshot) await page.screenshot({ path: `${screenshot}-${device}.png`, fullPage: true });
+				await page.getByLabel("Risk (required)", { exact: true }).waitFor();
+				await page.keyboard.press("Escape");
+				await page.getByText("risk: Risk is required; priority: Priority is required", { exact: true }).waitFor();
+				expect(saves).toBe(0);
+				expect((await server.api("find", { in: "cases" })).count).toBe(0);
+				await page.getByLabel("Priority (required)", { exact: true }).selectOption("high");
+				await page.getByLabel("Risk (required)", { exact: true }).fill("   ");
+				await page.keyboard.press("Escape");
+				await page.getByText("risk: Risk is required", { exact: true }).waitFor();
+				expect(saves).toBe(0);
+				await page.getByLabel("Risk (required)", { exact: true }).fill("Payments");
+				await page.getByLabel("Notes", { exact: true }).fill("Check refunds");
+				await page.getByLabel("Team", { exact: true }).selectOption("checkout");
+				await page.keyboard.press("Escape");
+				await eventually(
+					() => server.api("find", { in: "cases" }),
+					(reply) => reply.count === 1,
+				);
+				const read = await eventually(
+					() => server.api("get", { refs: ["C-1"], as: "md" }),
+					(rows) => rows[0]?.version === 1,
+				);
+				const parsed = parseCase(String(read[0]?.md));
+				if (!parsed.ok) throw new Error("Saved case did not parse");
+				expect(parsed.doc.body.fields).toEqual({
+					risk: "Payments",
+					priority: "high",
+					notes: "Check refunds",
+					team: "checkout",
+				});
+				expect(saves).toBe(1);
+				await page.waitForFunction(() => document.querySelector(".cstate .chip")?.textContent === "v1");
+				await page.reload();
+				await page.getByRole("button", { name: "Case with custom fields", exact: true }).waitFor();
+				await page.keyboard.press("e");
+				expect(await page.getByLabel("Risk (required)", { exact: true }).inputValue()).toBe("Payments");
+				expect(await page.getByLabel("Priority (required)", { exact: true }).inputValue()).toBe("high");
+				await page.getByLabel("Risk (required)", { exact: true }).fill("");
+				await page.keyboard.press("Escape");
+				await page.getByText("risk: Risk is required", { exact: true }).waitFor();
+				expect(saves).toBe(1);
+				await page.getByLabel("Risk (required)", { exact: true }).fill("Refunds");
+				await page.getByLabel("Team", { exact: true }).selectOption("");
+				await page.keyboard.press("Escape");
+				const edited = await eventually(
+					() => server.api("get", { refs: ["C-1"], as: "md" }),
+					(rows) => rows[0]?.version === 2,
+				);
+				const updated = parseCase(String(edited[0]?.md));
+				if (!updated.ok) throw new Error("Edited case did not parse");
+				expect(updated.doc.body.fields).toEqual({ risk: "Refunds", priority: "high", notes: "Check refunds" });
+				expect(saves).toBe(2);
+				expect(h.errors).toEqual([]);
+			} finally {
+				await h.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+}
+
+test.skipIf(!browserAvailable)(
+	"a stored draft from before field reads preserves optional and undefined values",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [
+				{
+					op: "create",
+					body: {
+						title: "Before deploy",
+						fields: { notes: "Keep optional notes", legacy: "Keep undefined value" },
+					},
+				},
+			],
+		});
+		const policy = Policy.extend({ version: z.number() }).parse(
+			await server.api("admin", { do: "policy.show", project: "scratch" }),
+		);
+		const proposed = await server.api("propose", {
+			edits: [
+				{
+					op: "policy",
+					base: policy.version,
+					settings: {
+						...policy.settings,
+						fields: { notes: { kind: "text", label: "Notes", required: false } },
+					},
+				},
+			],
+		});
+		const question = (await server.api("inbox", { kind: "adopt" })).items.find((q) => q.q === proposed.question);
+		if (!question) throw new Error("Policy question missing");
+		await server.api("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" } });
+		// A draft saved after drafts carried their project (issue #755) but before the editor read fields.
+		const scratch = z
+			.array(z.object({ key: z.string(), identity: z.string() }))
+			.parse(await server.api("admin", { do: "project.list" }))
+			.find((entry) => entry.key === "scratch");
+		const old = editDraft(CaseView.parse((await server.api("get", { refs: ["C-1"] }))[0]), scratch?.identity);
+		old.body = { ...old.body, title: "Draft written before deploy", fields: {} };
+		old.original = { ...old.original, fields: {} };
+		old.dirty = true;
+		const h = await openPage(server, {
+			path: "/p/scratch/suite/c/1",
+			setup: async (page, context) => {
+				const session = z
+					.object({ result: z.object({ actorId: z.number() }) })
+					.parse(await (await context.request.get(`${server.url}/api/session`)).json());
+				await page.addInitScript(
+					({ actorId, draft }) => {
+						localStorage.setItem(`mainworthy:#${actorId}:draft:scratch:C-1`, JSON.stringify(draft));
+					},
+					{ actorId: session.result.actorId, draft: old },
+				);
+			},
+		});
+		try {
+			const { page } = h;
+			const title = page.getByRole("textbox", { name: "Case title", exact: true });
+			await title.waitFor();
+			expect(await title.inputValue()).toBe("Draft written before deploy");
+			expect(await page.getByLabel("Notes", { exact: true }).inputValue()).toBe("");
+			await title.press("Escape");
+			const rows = await eventually(
+				() => server.api("get", { refs: ["C-1"] }),
+				(rows) => rows[0]?.version === 2,
+			);
+			expect(rows[0]).toMatchObject({
+				title: "Draft written before deploy",
+				fields: { notes: "Keep optional notes", legacy: "Keep undefined value" },
+			});
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
 test.skipIf(!browserAvailable)(
 	"an ordinary edit preserves old fields and is not blocked by a new required field",
 	async () => {
@@ -266,7 +465,10 @@ test.skipIf(!browserAvailable)(
 					base: policy.version,
 					settings: {
 						...policy.settings,
-						fields: { risk: { kind: "choice", label: "Risk", required: true, choices: ["low", "high"] } },
+						fields: {
+							risk: { kind: "choice", label: "Risk", required: true, choices: ["low", "high"] },
+							priority: { kind: "choice", label: "Priority", required: false, choices: ["P2", "P3"] },
+						},
 					},
 				},
 			],
@@ -281,6 +483,7 @@ test.skipIf(!browserAvailable)(
 		try {
 			await browser.page.getByRole("button", { name: "Field-bearing case", exact: true }).waitFor();
 			await browser.page.keyboard.press("e");
+			expect(await browser.page.getByLabel("Priority", { exact: true }).inputValue()).toBe("P1");
 			await browser.page.getByRole("textbox", { name: "Case title", exact: true }).fill("Revised field-bearing case");
 			await browser.page.keyboard.press("Escape");
 			const rows = await eventually(

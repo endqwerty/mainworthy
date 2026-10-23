@@ -471,7 +471,16 @@ export function grantedProjects(app: App, session: Session) {
 		listProjects(app.reader).flatMap((project) => {
 			const id = findProject(app.reader, project.key)?.id;
 			const can = id === undefined ? [] : (session.actor(id)?.can ?? []);
-			return can.length > 0 ? [{ ...project, can, handoff: app.config.handoff?.project === project.key }] : [];
+			return can.length > 0
+				? [
+						{
+							...project,
+							fieldDefinitions: can.includes("read") ? project.fieldDefinitions : undefined,
+							can,
+							handoff: app.config.handoff?.project === project.key,
+						},
+					]
+				: [];
 		}),
 	);
 }

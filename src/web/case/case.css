@@ -190,3 +190,12 @@
 	width: 100%;
 	min-height: 160px;
 }
+
+.case-field {
+	display: block;
+	margin: 12px 0;
+}
+.case-field .form-input {
+	display: block;
+	width: 100%;
+}

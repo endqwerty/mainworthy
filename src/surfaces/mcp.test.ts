@@ -31,7 +31,8 @@ const TOKEN_COUNTS: Record<string, number> = {
 	work: 169,
 	decide: 280,
 	inbox: 165,
-	get: 245,
+	// The get contract now documents custom fields and result references; decision 0118 records the measured size.
+	get: 274,
 	find: 279,
 	impact: 164,
 	since: 137,

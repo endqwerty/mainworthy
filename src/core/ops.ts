@@ -389,7 +389,7 @@ export const GetInput = z.object({
 	fields: z
 		.array(z.string())
 		.optional()
-		.describe("For cases: any of title, pre, steps, methods, tags, covers, place, proof. Default: all."),
+		.describe("For cases: any of title, pre, steps, methods, fields, tags, covers, place, proof. Default: all."),
 	as: z
 		.enum(["data", "md"])
 		.default("data")
