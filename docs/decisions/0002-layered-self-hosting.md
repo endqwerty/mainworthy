@@ -6,6 +6,8 @@
   on SQLite; a server database is added for the Cloud layer (decision 0010). Amended
   2026-10-14: the apps offer one instance, `mainworthy.com`, and do not ask for another
   (decision 0026); running elsewhere stays possible from the code.
+  Amended 2026-10-23: the Local layer and its embedded store end with [PostgreSQL and a stateless app](2026-10-23-postgresql-and-a-stateless-app.md); local
+  development runs PostgreSQL through Compose. Until that is implemented, the layers stay as described here.
 
 ## Decision
 

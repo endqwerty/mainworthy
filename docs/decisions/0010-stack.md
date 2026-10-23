@@ -2,6 +2,8 @@
 
 - Date: 2026-10-12
 - Status: proposed (the owner reviews). Supersedes [0001](0001-stack-open.md); amends [0002](0002-layered-self-hosting.md).
+  Amended 2026-10-23: the store choice and the PostgreSQL trigger are replaced by [PostgreSQL and a stateless app](2026-10-23-postgresql-and-a-stateless-app.md): PostgreSQL becomes the
+  only store. Until that is implemented, the code runs on SQLite as described here.
 
 Decision 0001 left the stack open and said it must be chosen on measurements. The owner's answer on language
 (decision 0009, answer 6): they know TypeScript best, Python well and Go a little, "but if another language is
