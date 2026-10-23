@@ -51,9 +51,9 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 ## Working rules
 
 - Nothing is compatible before 1.0, and the owner says when that is. A change may break stored data, tokens, the
-  API and the CLI when that makes the result simpler. Say what breaks in `CHANGELOG.md`; build no migration path.
-- Behaviour changes need tests and a check on the real surface. Record user-visible changes in `CHANGELOG.md` and
-  design decisions in `docs/decisions/NNNN-title.md`. Secrets never enter the repository, logs or chat.
+  API and the CLI when that makes the result simpler. Say what breaks in the changelog; build no migration path.
+- Behaviour changes need tests and a check on the real surface. A user-visible change adds a `.changes/` fragment,
+  a decision a dated file in `docs/decisions/`. Secrets never enter the repository, logs or chat.
 - After a pull request lands, check that `/healthz` names its commit.
 - Competitor claims in `docs/competitors.md` are hypotheses until verified.
 - A review is sized to the change: the verifier reads the diff, runs `bun run check` and probes what the change

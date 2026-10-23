@@ -9,6 +9,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Glob } from "bun";
 import { z } from "zod";
+import { assemble, fragments } from "../scripts/changelog.ts";
+import { decisions } from "../scripts/decisions.ts";
 import {
 	candidatePath,
 	currentStamp,
@@ -41,24 +43,15 @@ const read = (slug: string): string => readFileSync(join(GUIDE, `${slug}.md`), "
 const articles = new Map(DOC_PAGES.map((page) => [page.slug, renderArticle(PAGES[page.slug])] as const));
 const everything = DOC_PAGES.map((page) => PAGES[page.slug]).join("\n");
 
-describe("the decision records", () => {
-	test("decision numbers are unique and numbered headings match their filenames", () => {
-		const records = readdirSync("docs/decisions")
-			.filter((file) => file.endsWith(".md"))
-			.sort();
-		const numbers = new Map<string, string>();
-		const problems: string[] = [];
-		for (const file of records) {
-			expect(file, "a decision filename starts with its four-digit number").toMatch(/^\d{4}-.+\.md$/);
-			const number = file.slice(0, 4);
-			const prior = numbers.get(number);
-			if (prior) problems.push(`${prior} and ${file} share decision ${number}`);
-			numbers.set(number, file);
-			const heading = readFileSync(join("docs/decisions", file), "utf8").match(/^# (\d+)[.:] /)?.[1];
-			if (heading !== undefined && heading !== number)
-				problems.push(`${file} has heading number ${heading}, expected ${number}`);
-		}
-		expect(problems).toEqual([]);
+describe("the contributor records", () => {
+	test("decision records accept historical numbers and dated ids with required metadata", () => {
+		expect(() => decisions()).not.toThrow();
+	});
+
+	test(".changes/ fragments validate and each appears once in the assembled changelog", () => {
+		const entries = fragments();
+		const assembled = assemble(readFileSync("CHANGELOG.md", "utf8"), entries);
+		for (const entry of entries) expect(assembled.split(`<!-- change:${entry.id} -->`)).toHaveLength(2);
 	});
 });
 

@@ -229,5 +229,5 @@ storage and any cache pass the same job suite.
   the result against the three team profiles.
 - The phase order after phase 1 is revisable once research and the stack
   decision are in; change it here and say why.
-- User-visible changes go in `CHANGELOG.md`; design decisions in
-  `docs/decisions/`.
+- User-visible changes add `.changes/<issue-or-unique-id>-<slug>.md`; new design decisions use
+  `docs/decisions/YYYY-MM-DD-<slug>.md`. The release coordinator assembles `CHANGELOG.md`.

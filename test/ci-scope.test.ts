@@ -49,6 +49,13 @@ test("a change to prose runs no job but the tests, and of them only the ones tha
 	expect(plan(["CONTRIBUTING.md"], tests).tests).toContain("test/ci-scope.test.ts");
 });
 
+test("a fragment-only change runs the record validators and tree checks", () => {
+	const chosen = plan([".changes/123-example.md"], tests);
+	expect(chosen.jobs).toEqual({ static: false, image: false, ios: false });
+	expect(chosen.tests).not.toBe("all");
+	for (const file of [...TREE, "test/changelog.test.ts", "test/docs.test.ts"]) expect(chosen.tests).toContain(file);
+});
+
 test("a change to the iPhone app runs its job and the tests that read the app, and not the image", () => {
 	const chosen = plan(["ios/App/Info.plist"], tests);
 	expect(chosen.jobs).toEqual({ static: false, image: false, ios: true });
@@ -217,8 +224,11 @@ test("the browser fixture compiles in its output directory so build files cannot
 // a configuration file a job reads goes into that job's paths in scripts/ci-scope.ts. Every one of these runs every
 // test, except the files that only the tests naming them read.
 test("every entry at the top of the repository has the jobs it needs", () => {
-	const entries = topEntries(Bun.spawnSync(["git", "ls-files"], { stdout: "pipe" }).stdout.toString(), () =>
-		readdirSync("."),
+	const entries = topEntries(
+		Bun.spawnSync(["git", "ls-files", "--cached", "--others", "--exclude-standard"], {
+			stdout: "pipe",
+		}).stdout.toString(),
+		() => readdirSync("."),
 	);
 	const jobs = (entry: string): string => {
 		const file = existsSync(entry) && statSync(entry).isDirectory() ? `${entry}/a-file.ts` : entry;
@@ -227,6 +237,7 @@ test("every entry at the top of the repository has the jobs it needs", () => {
 		return [...names, chosen.tests === "all" ? "tests" : "named tests"].join(" ");
 	};
 	expect(Object.fromEntries(entries.sort().map((entry) => [entry, jobs(entry)]))).toEqual({
+		".changes": "named tests",
 		".dockerignore": "image tests",
 		".github": "named tests",
 		".gitignore": "static tests",
@@ -277,6 +288,9 @@ test("the iPhone app's job runs for every module its script loads, and none of t
 // it. A module that names one in its code is listed here with what it does with it.
 test("no module outside the tests reads a file that only the tests naming it are run for", () => {
 	const expected: Record<string, string> = {
+		"scripts/changelog.ts":
+			"validates .changes/ and assembles CHANGELOG.md; test/changelog.test.ts and test/docs.test.ts name their inputs",
+		"scripts/decisions.ts": "validates and indexes docs/decisions/; test/docs.test.ts names the directory",
 		"scripts/ios/swift.ts": "writes the app's generated Swift; test/ios-contract.test.ts compares it and names ios/",
 		"scripts/security-audit.ts": "names the audit's own files to call out a change to them, and reads none of them",
 		"src/server/identity/identity.ts": "a message that points to docs/deploy.md",
@@ -287,7 +301,7 @@ test("no module outside the tests reads a file that only the tests naming it are
 		const code = readFileSync(file, "utf8")
 			.replace(/\/\*[\s\S]*?\*\//g, "")
 			.replace(/^\s*\/\/.*$/gm, "");
-		const named = [...code.matchAll(/(?:^|[^\w./-]|\.\.\/)((?:\.github|docs|ios)\/[\w./-]*\w|[\w-]+\.md)\b/g)]
+		const named = [...code.matchAll(/(?:^|[^\w./-]|\.\.\/)((?:\.changes|\.github|docs|ios)\/[\w./-]*\w|[\w-]+\.md)\b/g)]
 			.map((match) => match[1] ?? "")
 			.filter((path) => existsSync(path))
 			.filter((path) => (/\.\w+$/.test(path) ? covers(NAMED, path) : covers(NAMED, `${path}/a-file`)));

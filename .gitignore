@@ -20,3 +20,6 @@ ios/Kit/.swiftpm
 xcuserdata
 # What `bun build --compile` writes while it makes an executable, in the directory it runs in (#401).
 .*.bun-build
+
+# Interrupted changelog assembly leaves only a replaceable temporary file.
+/.changes/.changelog-*.tmp
