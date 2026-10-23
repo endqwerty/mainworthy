@@ -1,8 +1,9 @@
 # 0132: the hold waits until nginx answers, not until the port accepts
 
 Date: 2026-10-22. Builds on decision 0131.
-Amended 2026-10-23 by [PostgreSQL and a stateless app](2026-10-23-postgresql-and-a-stateless-app.md): this hold is retired only after rolling replacement passes the continuous-request
-and rollback checks; until then it stays in place.
+Amended 2026-10-23 by [PostgreSQL on Cloud Run and Cloud SQL](2026-10-23-postgresql-on-cloud-run-and-cloud-sql.md): this hold is retired at the
+cutover, once rolling replacement on Cloud Run passes the continuous-request and rollback checks; until then it
+stays in place.
 
 Decision 0131 put HAProxy on the host in front of the stack's ingress, retrying a refused connection every
 second. The first two deploys behind it showed what that missed. Docker's port proxy accepts a connection on

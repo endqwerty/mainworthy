@@ -2,8 +2,11 @@
 
 - Date: 2026-10-23
 - PR: https://github.com/endqwerty/mainworthy/pull/839
-- Status: accepted
+- Status: superseded
 - Issue: https://github.com/endqwerty/mainworthy/issues/821
+
+Superseded on 2026-10-23 by [PostgreSQL on Cloud Run and Cloud SQL](2026-10-23-postgresql-on-cloud-run-and-cloud-sql.md), after the owner dropped Railway for
+Google Cloud. That record repeats the store design below and says what changed; read it instead.
 
 Step 1 of [issue #821](https://github.com/endqwerty/mainworthy/issues/821). Accepted by the owner on 2026-10-23. Acceptance permits the PostgreSQL flip; it does not certify its implementation, and until that lands the code runs on SQLite as the records below describe. Numbered 0155 when it was proposed; renamed to a dated record when [#832](https://github.com/endqwerty/mainworthy/pull/832) made new decisions dated, because 0155 went to the placement-undo record.
 
