@@ -16,7 +16,7 @@ import { defaultConfig } from "../src/server/kernel/app.ts";
 import { Db } from "../src/server/kernel/db.ts";
 import { ARCHIVE_VERSION } from "../src/server/kernel/migrate.ts";
 import { OPS } from "../src/server/ops/index.ts";
-import { invoke, invokeAsync, type Reply } from "../src/server/ops/registry.ts";
+import { invoke, type Reply } from "../src/server/ops/registry.ts";
 import { exportArchive, importArchive, linesOf, removeBootstrap } from "../src/server/transfer/transfer.ts";
 import { serve } from "../src/surfaces/http.ts";
 import { dropResetIndexes } from "./demo-removal-fixture.ts";
@@ -24,8 +24,8 @@ import legacyConflicts from "./fixtures/legacy-conflicts.json";
 import { ciReport, dropReceiptSchema, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
-beforeEach(() => {
-	h = harness();
+beforeEach(async () => {
+	h = await harness();
 });
 afterEach(() => h.close());
 
@@ -52,8 +52,8 @@ const OUTLINE = `Checkout applies a percentage coupon #checkout @WEB-290
   Apply coupon SAVE10 > Total shows $90.00
   Reload the page => Coupon is still applied`;
 
-const storedBody = () => {
-	const [result] = h.call<{ md: string }[]>("get", { refs: ["C-1"], as: "md" });
+const storedBody = async () => {
+	const [result] = await h.call<{ md: string }[]>("get", { refs: ["C-1"], as: "md" });
 	const parsed = parseCase(result?.md ?? "");
 	if (!parsed.ok) throw new Error(JSON.stringify(parsed.errors));
 	return parsed.doc.body;
@@ -69,7 +69,7 @@ describe("atomic bulk proposals", () => {
 		const config = defaultConfig({ MAINWORTHY_DATA: dir, MAINWORTHY_OWNER: "robin" });
 		const instance = open(config);
 		const call = (op: string, input: unknown = {}) => ({ op, input, project: "scratch", actor: () => instance.owner });
-		const raw = (op: string, input: unknown = {}) => invoke(instance.app, OPS, call(op, input));
+		const raw = async (op: string, input: unknown = {}) => await invoke(instance.app, OPS, call(op, input));
 		return {
 			...instance,
 			config,
@@ -87,8 +87,8 @@ describe("atomic bulk proposals", () => {
 	};
 	const storedCount = (instance: ReturnType<typeof disk>, table: "cases" | "versions" | "decisions") =>
 		instance.app.db.raw.query<{ n: number }, []>(`SELECT count(*) AS n FROM ${table}`).get()?.n ?? 0;
-	const acceptance = (instance: ReturnType<typeof disk>, proposed: ProposeReply) => {
-		const question = result<{ evidenceHash: string }[]>(instance.raw("get", { refs: [proposed.question] }))[0];
+	const acceptance = async (instance: ReturnType<typeof disk>, proposed: ProposeReply) => {
+		const question = result<{ evidenceHash: string }[]>(await instance.raw("get", { refs: [proposed.question] }))[0];
 		return {
 			q: proposed.question,
 			onEvidence: question?.evidenceHash,
@@ -96,20 +96,24 @@ describe("atomic bulk proposals", () => {
 			reason: "Reviewed all cases",
 		};
 	};
-	const strict = (instance: ReturnType<typeof disk>) => {
-		const policy = result<ProposeReply>(instance.raw("propose", { edits: [{ op: "policy", preset: "strict" }] }));
-		expect(result<DecideReply[]>(instance.raw("decide", acceptance(instance, policy)))[0]?.status).toBe("decided");
+	const strict = async (instance: ReturnType<typeof disk>) => {
+		const policy = result<ProposeReply>(await instance.raw("propose", { edits: [{ op: "policy", preset: "strict" }] }));
+		expect(result<DecideReply[]>(await instance.raw("decide", await acceptance(instance, policy)))[0]?.status).toBe(
+			"decided",
+		);
 	};
 
 	test("a maximum-size conflict resolution yields while sealing and keeps its replacement atomic", async () => {
 		const instance = disk();
 		try {
-			result(instance.raw("propose", { edits: [{ op: "create", body: { title: "Base" } }] }));
-			result(instance.raw("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] }));
-			const conflict = result<ProposeReply>(
-				instance.raw("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }] }),
+			result(await instance.raw("propose", { edits: [{ op: "create", body: { title: "Base" } }] }));
+			result(
+				await instance.raw("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] }),
 			);
-			const question = result<{ evidenceHash: string }[]>(instance.raw("get", { refs: [conflict.question] }))[0];
+			const conflict = result<ProposeReply>(
+				await instance.raw("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }] }),
+			);
+			const question = result<{ evidenceHash: string }[]>(await instance.raw("get", { refs: [conflict.question] }))[0];
 			const proposalsBefore = instance.app.db.raw
 				.query<{ n: number }, []>("SELECT count(*) AS n FROM proposals")
 				.get()?.n;
@@ -126,7 +130,7 @@ describe("atomic bulk proposals", () => {
 				cmd: "max-merge-01",
 			};
 			let done = false;
-			const saving = invokeAsync(instance.app, OPS, instance.call("decide", input));
+			const saving = invoke(instance.app, OPS, instance.call("decide", input));
 			void saving.then(() => {
 				done = true;
 			});
@@ -136,12 +140,14 @@ describe("atomic bulk proposals", () => {
 				const proposals = instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM proposals").get()?.n;
 				if (done || storedCount(instance, "decisions") === decisionsBefore || proposals !== proposalsBefore) continue;
 				duringSeal = true;
-				expect(result<CaseView[]>(instance.raw("get", { refs: ["C-1"] }))[0]).toMatchObject({
+				expect(result<CaseView[]>(await instance.raw("get", { refs: ["C-1"] }))[0]).toMatchObject({
 					title: "Theirs",
 					version: 2,
 					covers: [],
 				});
-				expect(result<{ state: string }[]>(instance.raw("get", { refs: [conflict.question] }))[0]?.state).toBe("open");
+				expect(result<{ state: string }[]>(await instance.raw("get", { refs: [conflict.question] }))[0]?.state).toBe(
+					"open",
+				);
 			}
 			const replies = result<DecideReply[]>(await saving);
 			expect(replies[0]).toMatchObject({ status: "decided", effects: { status: "adopted" } });
@@ -150,15 +156,13 @@ describe("atomic bulk proposals", () => {
 				.query<{ edits: string }, []>("SELECT edits FROM proposals ORDER BY id DESC LIMIT 1")
 				.get();
 			expect(JSON.parse(replacement?.edits ?? "[]")).toHaveLength(5000);
-			expect(result<CaseView[]>(instance.raw("get", { refs: ["C-1"] }))[0]).toMatchObject({
+			expect(result<CaseView[]>(await instance.raw("get", { refs: ["C-1"] }))[0]).toMatchObject({
 				title: "Resolved",
 				version: 3,
 				covers: expect.arrayContaining(["REQ-0", "REQ-4998"]),
 			});
-			expect(result<CaseView[]>(instance.raw("get", { refs: ["C-1"] }))[0]?.covers).toHaveLength(4999);
-			expect(result<DecideReply[]>(await invokeAsync(instance.app, OPS, instance.call("decide", input)))).toEqual(
-				replies,
-			);
+			expect(result<CaseView[]>(await instance.raw("get", { refs: ["C-1"] }))[0]?.covers).toHaveLength(4999);
+			expect(result<DecideReply[]>(await invoke(instance.app, OPS, instance.call("decide", input)))).toEqual(replies);
 		} finally {
 			await instance.app.gate.run(() => {});
 			instance.close();
@@ -173,14 +177,16 @@ describe("atomic bulk proposals", () => {
 				const total = kind === "finding" ? 200 : count;
 				const questionKind = kind === "finding" ? "finding" : "map";
 				if (kind !== "finding") {
-					const policy = result<ProposeReply>(instance.raw("propose", { edits: [{ op: "policy", unlinked: "ask" }] }));
-					expect(result<DecideReply[]>(instance.raw("decide", acceptance(instance, policy)))[0]?.status).toBe(
-						"decided",
+					const policy = result<ProposeReply>(
+						await instance.raw("propose", { edits: [{ op: "policy", unlinked: "ask" }] }),
 					);
-					result(instance.raw("report", ciReport({ commit: "ba1c0001", n: total })));
+					expect(
+						result<DecideReply[]>(await instance.raw("decide", await acceptance(instance, policy)))[0]?.status,
+					).toBe("decided");
+					result(await instance.raw("report", ciReport({ commit: "ba1c0001", n: total })));
 				} else {
 					result(
-						instance.raw("claim", {
+						await instance.raw("claim", {
 							lens: "coverage",
 							findings: Array.from({ length: total }, (_, i) => ({
 								on: `req:bulk-${i}`,
@@ -192,16 +198,16 @@ describe("atomic bulk proposals", () => {
 					);
 				}
 				const questions = result<{ items: { q: string; evidenceHash: string }[] }>(
-					instance.raw("inbox", { kind: questionKind, limit: 200 }),
+					await instance.raw("inbox", { kind: questionKind, limit: 200 }),
 				).items;
 				expect(questions).toHaveLength(kind === "finding" ? total : 1);
 				const pendingPolicy =
 					kind === "policy"
-						? result<ProposeReply>(instance.raw("propose", { edits: [{ op: "policy", unlinked: "create" }] }))
+						? result<ProposeReply>(await instance.raw("propose", { edits: [{ op: "policy", unlinked: "create" }] }))
 						: null;
 				const input = {
 					all: pendingPolicy
-						? [acceptance(instance, pendingPolicy)]
+						? [await acceptance(instance, pendingPolicy)]
 						: questions.map((question) => ({
 								q: question.q,
 								onEvidence: question.evidenceHash,
@@ -210,7 +216,7 @@ describe("atomic bulk proposals", () => {
 					cmd: `bulk-${kind}`,
 				};
 				let done = false;
-				const saving = invokeAsync(instance.app, OPS, instance.call("decide", input));
+				const saving = invoke(instance.app, OPS, instance.call("decide", input));
 				void saving.then(() => {
 					done = true;
 				});
@@ -220,21 +226,19 @@ describe("atomic bulk proposals", () => {
 					const written = storedCount(instance, "cases");
 					if (done || written === 0 || written === total) continue;
 					partial = true;
-					expect(result(instance.raw("find"))).toMatchObject({ count: 0, items: [] });
+					expect(result(await instance.raw("find"))).toMatchObject({ count: 0, items: [] });
 					expect(
-						result<{ items: unknown[] }>(instance.raw("inbox", { kind: questionKind, limit: 200 })).items,
+						result<{ items: unknown[] }>(await instance.raw("inbox", { kind: questionKind, limit: 200 })).items,
 					).toHaveLength(questions.length);
 				}
 				const saved = result<DecideReply[]>(await saving);
 				expect(saved.map((reply) => reply.status)).toEqual(questions.map(() => "decided"));
-				expect(result(instance.raw("find"))).toMatchObject({ count: total });
-				expect(result(instance.raw("inbox", { kind: questionKind }))).toMatchObject({ items: [] });
-				expect(result<DecideReply[]>(await invokeAsync(instance.app, OPS, instance.call("decide", input)))).toEqual(
-					saved,
-				);
+				expect(result(await instance.raw("find"))).toMatchObject({ count: total });
+				expect(result(await instance.raw("inbox", { kind: questionKind }))).toMatchObject({ items: [] });
+				expect(result<DecideReply[]>(await invoke(instance.app, OPS, instance.call("decide", input)))).toEqual(saved);
 				if (kind !== "finding") {
 					const receipt = result<{ basis: { assumed: number; unresolved: number } }>(
-						instance.raw("report", ciReport({ commit: "ba1c0002", n: total })),
+						await instance.raw("report", ciReport({ commit: "ba1c0002", n: total })),
 					);
 					expect(receipt.basis).toMatchObject({ assumed: total, unresolved: 0 });
 				}
@@ -249,9 +253,9 @@ describe("atomic bulk proposals", () => {
 	test("sealing a bulk proposal that needs review also answers reads before publishing it", async () => {
 		const instance = disk();
 		try {
-			strict(instance);
+			await strict(instance);
 			let done = false;
-			const sealing = invokeAsync(instance.app, OPS, instance.call("propose", { edits: creates() }));
+			const sealing = invoke(instance.app, OPS, instance.call("propose", { edits: creates() }));
 			void sealing.then(() => {
 				done = true;
 			});
@@ -260,12 +264,14 @@ describe("atomic bulk proposals", () => {
 				await tick();
 				if (done) break;
 				during = true;
-				expect(result(instance.raw("find"))).toMatchObject({ count: 0 });
-				expect(instance.raw("get", { refs: ["P-2"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
+				expect(result(await instance.raw("find"))).toMatchObject({ count: 0 });
+				expect(await instance.raw("get", { refs: ["P-2"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
 			}
 			const proposed = result<ProposeReply>(await sealing);
 			expect(proposed).toMatchObject({ proposal: "P-2", status: "open", cases: [] });
-			expect(result<unknown[]>(instance.raw("get", { refs: [proposed.proposal] }))[0]).toMatchObject({ ref: "P-2" });
+			expect(result<unknown[]>(await instance.raw("get", { refs: [proposed.proposal] }))[0]).toMatchObject({
+				ref: "P-2",
+			});
 			expect(during).toBe(true);
 		} finally {
 			await instance.app.gate.run(() => {});
@@ -277,7 +283,7 @@ describe("atomic bulk proposals", () => {
 		const instance = disk();
 		try {
 			result(
-				instance.raw("propose", {
+				await instance.raw("propose", {
 					edits: [
 						{
 							op: "create",
@@ -291,7 +297,7 @@ describe("atomic bulk proposals", () => {
 				}),
 			);
 			const created = result<ProposeReply>(
-				instance.raw("propose", {
+				await instance.raw("propose", {
 					edits: Array.from({ length: 5000 }, (_, i) => ({
 						op: "create",
 						body: {
@@ -302,7 +308,7 @@ describe("atomic bulk proposals", () => {
 				}),
 			);
 			result(
-				instance.raw("propose", {
+				await instance.raw("propose", {
 					edits: [
 						{
 							op: "edit",
@@ -328,7 +334,7 @@ describe("atomic bulk proposals", () => {
 				},
 			];
 			let done = false;
-			const moving = invokeAsync(instance.app, OPS, instance.call("propose", { edits }));
+			const moving = invoke(instance.app, OPS, instance.call("propose", { edits }));
 			void moving.then(() => {
 				done = true;
 			});
@@ -337,7 +343,7 @@ describe("atomic bulk proposals", () => {
 				await tick();
 				if (done) break;
 				expect(
-					result<unknown[]>(await invokeAsync(instance.app, OPS, instance.call("get", { refs: ["C-2", "C-5001"] }))),
+					result<unknown[]>(await invoke(instance.app, OPS, instance.call("get", { refs: ["C-2", "C-5001"] }))),
 				).toMatchObject([
 					{ version: 1, steps: [{ action: "Password", source: { version: 1 } }] },
 					{ version: 2, title: "Changed consumer", steps: [{ action: "Password", source: { version: 1 } }] },
@@ -353,10 +359,10 @@ describe("atomic bulk proposals", () => {
 			});
 			expect(storedCount(instance, "versions")).toBe(before.versions);
 			expect(storedCount(instance, "decisions")).toBe(before.decisions);
-			expect(instance.raw("get", { refs: ["P-4"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
+			expect(await instance.raw("get", { refs: ["P-4"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
 			expect(readDuringSealing).toBe(true);
 
-			const retry = invokeAsync(
+			const retry = invoke(
 				instance.app,
 				OPS,
 				instance.call("propose", {
@@ -378,7 +384,7 @@ describe("atomic bulk proposals", () => {
 			while (!done) {
 				await tick();
 				if (done) break;
-				expect(result<unknown[]>(instance.raw("get", { refs: ["C-2", "C-5001"] }))).toMatchObject([
+				expect(result<unknown[]>(await instance.raw("get", { refs: ["C-2", "C-5001"] }))).toMatchObject([
 					{ version: 1, steps: [{ action: "Password", source: { version: 1 } }] },
 					{ version: 2, steps: [{ action: "Password", source: { version: 1 } }] },
 				]);
@@ -388,7 +394,7 @@ describe("atomic bulk proposals", () => {
 			expect(adopted.cases).toHaveLength(5000);
 			expect(storedCount(instance, "versions")).toBe(before.versions + 5000);
 			expect(storedCount(instance, "decisions")).toBe(before.decisions + 1);
-			expect(result<unknown[]>(instance.raw("get", { refs: ["C-2", "C-5001"] }))).toMatchObject([
+			expect(result<unknown[]>(await instance.raw("get", { refs: ["C-2", "C-5001"] }))).toMatchObject([
 				{ version: 2, steps: [{ action: "Passkey", source: { version: 2 } }] },
 				{ version: 3, title: "Changed consumer", steps: [{ action: "Passkey", source: { version: 2 } }] },
 			]);
@@ -404,11 +410,7 @@ describe("atomic bulk proposals", () => {
 			const events: unknown[] = [];
 			instance.app.subscribe((event) => events.push(event));
 			let done = false;
-			const saving = invokeAsync(
-				instance.app,
-				OPS,
-				instance.call("propose", { edits: creates(), cmd: "bulk-save-01" }),
-			);
+			const saving = invoke(instance.app, OPS, instance.call("propose", { edits: creates(), cmd: "bulk-save-01" }));
 			void saving.then(() => {
 				done = true;
 			});
@@ -418,22 +420,22 @@ describe("atomic bulk proposals", () => {
 				const written = storedCount(instance, "cases");
 				if (written === 0 || written === count) continue;
 				partial = true;
-				expect(result(instance.raw("find"))).toMatchObject({ count: 0, items: [] });
-				expect(instance.raw("get", { refs: ["P-1"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
-				expect(result(instance.raw("inbox"))).toMatchObject({ items: [] });
+				expect(result(await instance.raw("find"))).toMatchObject({ count: 0, items: [] });
+				expect(await instance.raw("get", { refs: ["P-1"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
+				expect(result(await instance.raw("inbox"))).toMatchObject({ items: [] });
 				expect(events).toHaveLength(0);
 			}
 			const saved = result<ProposeReply>(await saving);
 			expect(saved.status).toBe("adopted");
 			expect(saved.cases).toHaveLength(count);
-			expect(result(instance.raw("find"))).toMatchObject({ count });
+			expect(result(await instance.raw("find"))).toMatchObject({ count });
 			expect(storedCount(instance, "versions")).toBe(count);
 			expect(storedCount(instance, "decisions")).toBe(1);
 			expect(events).toHaveLength(1);
 			expect(partial).toBe(true);
 			expect(
 				result<ProposeReply>(
-					await invokeAsync(instance.app, OPS, instance.call("propose", { edits: creates(), cmd: "bulk-save-01" })),
+					await invoke(instance.app, OPS, instance.call("propose", { edits: creates(), cmd: "bulk-save-01" })),
 				),
 			).toEqual(saved);
 			expect(storedCount(instance, "versions")).toBe(count);
@@ -446,12 +448,12 @@ describe("atomic bulk proposals", () => {
 	test("accepting a bulk proposal answers reads without exposing half its cases or a decided question", async () => {
 		const instance = disk();
 		try {
-			strict(instance);
-			const proposed = result<ProposeReply>(instance.raw("propose", { edits: creates() }));
+			await strict(instance);
+			const proposed = result<ProposeReply>(await instance.raw("propose", { edits: creates() }));
 			expect(proposed.status).toBe("open");
-			const question = result<{ evidenceHash: string }[]>(instance.raw("get", { refs: [proposed.question] }))[0];
+			const question = result<{ evidenceHash: string }[]>(await instance.raw("get", { refs: [proposed.question] }))[0];
 			let done = false;
-			const accepting = invokeAsync(
+			const accepting = invoke(
 				instance.app,
 				OPS,
 				instance.call("decide", {
@@ -470,9 +472,9 @@ describe("atomic bulk proposals", () => {
 				const written = storedCount(instance, "cases");
 				if (written === 0 || written === count) continue;
 				partial = true;
-				expect(result(instance.raw("find"))).toMatchObject({ count: 0 });
-				expect(result(instance.raw("find", { text: "Bulk" }))).toMatchObject({ count: 0 });
-				expect(result<unknown[]>(instance.raw("get", { refs: [proposed.question] }))[0]).toMatchObject({
+				expect(result(await instance.raw("find"))).toMatchObject({ count: 0 });
+				expect(result(await instance.raw("find", { text: "Bulk" }))).toMatchObject({ count: 0 });
+				expect(result<unknown[]>(await instance.raw("get", { refs: [proposed.question] }))[0]).toMatchObject({
 					state: "open",
 				});
 			}
@@ -480,8 +482,8 @@ describe("atomic bulk proposals", () => {
 				status: "decided",
 				effects: { cases: expect.any(Array) },
 			});
-			expect(result(instance.raw("find"))).toMatchObject({ count });
-			expect(result<unknown[]>(instance.raw("get", { refs: [proposed.question] }))[0]).toMatchObject({
+			expect(result(await instance.raw("find"))).toMatchObject({ count });
+			expect(result<unknown[]>(await instance.raw("get", { refs: [proposed.question] }))[0]).toMatchObject({
 				state: "decided",
 			});
 			expect(partial).toBe(true);
@@ -496,7 +498,7 @@ describe("atomic bulk proposals", () => {
 		async (op) => {
 			const instance = disk();
 			try {
-				const created = result<ProposeReply>(instance.raw("propose", { edits: creates() }));
+				const created = result<ProposeReply>(await instance.raw("propose", { edits: creates() }));
 				const refs = created.cases.map((row) => row.ref);
 				const edits: Edit[] =
 					op === "edit"
@@ -506,7 +508,7 @@ describe("atomic bulk proposals", () => {
 							: [{ op, cases: refs, to: "archived" }];
 				const condition = op === "edit" ? "head = 2" : op === "place" ? "tags = '[\"changed\"]'" : "state = 'archived'";
 				let done = false;
-				const saving = invokeAsync(instance.app, OPS, instance.call("propose", { edits }));
+				const saving = invoke(instance.app, OPS, instance.call("propose", { edits }));
 				void saving.then(() => {
 					done = true;
 				});
@@ -518,8 +520,8 @@ describe("atomic bulk proposals", () => {
 							?.n ?? 0;
 					if (changed === 0 || changed === count) continue;
 					partial = true;
-					expect(result(instance.raw("find"))).toMatchObject({ count });
-					expect(result<unknown[]>(instance.raw("get", { refs: ["C-1", `C-${count}`] }))).toMatchObject([
+					expect(result(await instance.raw("find"))).toMatchObject({ count });
+					expect(result<unknown[]>(await instance.raw("get", { refs: ["C-1", `C-${count}`] }))).toMatchObject([
 						{ title: "Bulk case 0", version: 1, tags: [], state: "active" },
 						{ title: `Bulk case ${count - 1}`, version: 1, tags: [], state: "active" },
 					]);
@@ -539,33 +541,37 @@ describe("atomic bulk proposals", () => {
 	test("a late adoption conflict rolls back earlier slices and leaves the next batched answer usable", async () => {
 		const instance = disk();
 		try {
-			strict(instance);
+			await strict(instance);
 			const edits = creates();
 			edits.push({ op: "create", outline: "Last case", aliases: ["bulk:last"] });
-			const pending = result<ProposeReply>(instance.raw("propose", { edits }));
+			const pending = result<ProposeReply>(await instance.raw("propose", { edits }));
 			const competitor = result<ProposeReply>(
-				instance.raw("propose", { edits: [{ op: "create", outline: "Alias holder", aliases: ["bulk:last"] }] }),
+				await instance.raw("propose", { edits: [{ op: "create", outline: "Alias holder", aliases: ["bulk:last"] }] }),
 			);
-			expect(result<DecideReply[]>(instance.raw("decide", acceptance(instance, competitor)))[0]?.status).toBe(
-				"decided",
+			expect(
+				result<DecideReply[]>(await instance.raw("decide", await acceptance(instance, competitor)))[0]?.status,
+			).toBe("decided");
+			const next = result<ProposeReply>(
+				await instance.raw("propose", { edits: [{ op: "create", outline: "Next answer" }] }),
 			);
-			const next = result<ProposeReply>(instance.raw("propose", { edits: [{ op: "create", outline: "Next answer" }] }));
 			const replies = result<DecideReply[]>(
-				await invokeAsync(
+				await invoke(
 					instance.app,
 					OPS,
 					instance.call("decide", {
-						all: [acceptance(instance, pending), acceptance(instance, next)],
+						all: [await acceptance(instance, pending), await acceptance(instance, next)],
 					}),
 				),
 			);
 			expect(replies.map((reply) => reply.status)).toEqual(["conflict", "decided"]);
 			expect(replies[0]?.needs).toBe("case alias bulk:last is already in use");
-			expect(result(instance.raw("find"))).toMatchObject({ count: 2 });
+			expect(result(await instance.raw("find"))).toMatchObject({ count: 2 });
 			expect(storedCount(instance, "versions")).toBe(2);
 			expect(storedCount(instance, "decisions")).toBe(3);
-			expect(result<unknown[]>(instance.raw("get", { refs: [pending.question] }))[0]).toMatchObject({ state: "open" });
-			expect(result<CaseView[]>(instance.raw("get", { refs: ["C-1", "C-2"] })).map((row) => row.title)).toEqual([
+			expect(result<unknown[]>(await instance.raw("get", { refs: [pending.question] }))[0]).toMatchObject({
+				state: "open",
+			});
+			expect(result<CaseView[]>(await instance.raw("get", { refs: ["C-1", "C-2"] })).map((row) => row.title)).toEqual([
 				"Alias holder",
 				"Next answer",
 			]);
@@ -584,9 +590,9 @@ describe("atomic bulk proposals", () => {
 				let input: unknown = { edits: creates(), cmd: "bulk-crash-01" };
 				let pending: ProposeReply | undefined;
 				if (op === "decide") {
-					strict(instance);
-					pending = result<ProposeReply>(instance.raw("propose", { edits: creates() }));
-					input = { ...acceptance(instance, pending), cmd: "bulk-crash-01" };
+					await strict(instance);
+					pending = result<ProposeReply>(await instance.raw("propose", { edits: creates() }));
+					input = { ...(await acceptance(instance, pending)), cmd: "bulk-crash-01" };
 				}
 				const before = storedCount(instance, "decisions");
 				const module = (path: string) => JSON.stringify(new URL(path, import.meta.url).href);
@@ -596,7 +602,7 @@ describe("atomic bulk proposals", () => {
 						"-e",
 						`
 import { OPS } from ${module("../src/server/ops/index.ts")};
-import { invokeAsync } from ${module("../src/server/ops/registry.ts")};
+import { invoke } from ${module("../src/server/ops/registry.ts")};
 import { open } from ${module("../src/app/start.ts")};
 const { config, op, input } = JSON.parse(await Bun.stdin.text());
 const { app, owner } = open(config);
@@ -614,7 +620,7 @@ const paused = { ...operation, *steps(ctx, input) {
 		yield step.value;
 	}
 } };
-await invokeAsync(app, { ...OPS, [op]: paused }, { op, project: "scratch", input, actor: () => owner });
+await invoke(app, { ...OPS, [op]: paused }, { op, project: "scratch", input, actor: () => owner });
 throw new Error("the operation completed without a partial adoption slice");
 `,
 					],
@@ -637,14 +643,14 @@ throw new Error("the operation completed without a partial adoption slice");
 				await child.exited;
 				const restarted = open(instance.config);
 				try {
-					const raw = (operation: string, body: unknown = {}) =>
-						invoke(restarted.app, OPS, {
+					const raw = async (operation: string, body: unknown = {}) =>
+						await invoke(restarted.app, OPS, {
 							op: operation,
 							project: "scratch",
 							input: body,
 							actor: () => restarted.owner,
 						});
-					expect(result(raw("find"))).toMatchObject({ count: 0 });
+					expect(result(await raw("find"))).toMatchObject({ count: 0 });
 					for (const table of ["cases", "versions", "placements", "search_docs", "commands"]) {
 						expect(restarted.app.db.raw.query<{ n: number }, []>(`SELECT count(*) AS n FROM ${table}`).get()?.n).toBe(
 							0,
@@ -654,12 +660,14 @@ throw new Error("the operation completed without a partial adoption slice");
 						before,
 					);
 					if (pending)
-						expect(result<unknown[]>(raw("get", { refs: [pending.question] }))[0]).toMatchObject({ state: "open" });
-					else expect(raw("get", { refs: ["P-1"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
-					const retried = raw(op, input);
+						expect(result<unknown[]>(await raw("get", { refs: [pending.question] }))[0]).toMatchObject({
+							state: "open",
+						});
+					else expect(await raw("get", { refs: ["P-1"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
+					const retried = await raw(op, input);
 					expect(retried.ok).toBe(true);
-					expect(raw(op, input)).toEqual(retried);
-					expect(result(raw("find"))).toMatchObject({ count });
+					expect(await raw(op, input)).toEqual(retried);
+					expect(result(await raw("find"))).toMatchObject({ count });
 					expect(restarted.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM versions").get()?.n).toBe(
 						count,
 					);
@@ -681,13 +689,13 @@ throw new Error("the operation completed without a partial adoption slice");
 });
 
 describe("capture", () => {
-	test("an outline becomes C-1, version 1, with steps, expected results, a tag and a requirement", () => {
-		const reply = h.call<Proposed>("propose", {
+	test("an outline becomes C-1, version 1, with steps, expected results, a tag and a requirement", async () => {
+		const reply = await h.call<Proposed>("propose", {
 			edits: [{ op: "create", outline: OUTLINE, folder: "checkout/coupons" }],
 		});
 		expect(reply.status).toBe("adopted");
 		expect(reply.cases).toEqual([{ ref: "C-1", version: 1, hash: expect.any(String) }]);
-		const [view] = h.call<CaseView[]>("get", { refs: ["C-1"] });
+		const [view] = await h.call<CaseView[]>("get", { refs: ["C-1"] });
 		expect(view?.title).toBe("Checkout applies a percentage coupon");
 		expect(view?.steps.map((s) => [s.action, s.expected])).toEqual([
 			["Open the cart with one $100.00 item", null],
@@ -699,90 +707,86 @@ describe("capture", () => {
 		expect(view?.folder.path).toBe("checkout/coupons");
 	});
 
-	test("suite writes clean Unicode folder paths and tags", () => {
-		h.call("propose", {
+	test("suite writes clean Unicode folder paths and tags", async () => {
+		await h.call("propose", {
 			edits: [{ op: "create", outline: "Unicode", folder: " Cafe\u0301\u200b / Child ", tags: ["#Crit\u200bical"] }],
 		});
-		expect(h.call<CaseView[]>("get", { refs: ["C-1"] })[0]).toMatchObject({
+		expect((await h.call<CaseView[]>("get", { refs: ["C-1"] }))[0]).toMatchObject({
 			folder: { path: "Café/Child" },
 			tags: ["critical"],
 		});
-		h.call("propose", {
+		await h.call("propose", {
 			edits: [{ op: "place", cases: ["C-1"], folder: "Re\u0301sume\u0301", tags: { set: ["re\u200bview"] } }],
 		});
-		expect(h.call<CaseView[]>("get", { refs: ["C-1"] })[0]).toMatchObject({
+		expect((await h.call<CaseView[]>("get", { refs: ["C-1"] }))[0]).toMatchObject({
 			folder: { path: "Résumé" },
 			tags: ["review"],
 		});
 	});
 
-	test("folder creation and rename use the same Unicode cleaning as paths", () => {
-		h.call("propose", { edits: [{ op: "folder", name: " Cafe\u0301\u200b " }] });
-		h.call("propose", { edits: [{ op: "create", outline: "Unicode", folder: "Café" }] });
-		expect(h.call<{ items: unknown[] }>("find", { in: "folders" }).items.length).toBe(1);
-		h.call("propose", { edits: [{ op: "folder", folder: "Café", name: " Re\u0301sume\u0301\u200b " }] });
-		expect(h.call<CaseView[]>("get", { refs: ["C-1"] })[0]?.folder.path).toBe("Résumé");
+	test("folder creation and rename use the same Unicode cleaning as paths", async () => {
+		await h.call("propose", { edits: [{ op: "folder", name: " Cafe\u0301\u200b " }] });
+		await h.call("propose", { edits: [{ op: "create", outline: "Unicode", folder: "Café" }] });
+		expect((await h.call<{ items: unknown[] }>("find", { in: "folders" })).items.length).toBe(1);
+		await h.call("propose", { edits: [{ op: "folder", folder: "Café", name: " Re\u0301sume\u0301\u200b " }] });
+		expect((await h.call<CaseView[]>("get", { refs: ["C-1"] }))[0]?.folder.path).toBe("Résumé");
 	});
 
 	test.each([
 		["Checkout", "Checkout"],
 		["check\u200bout", "checkout"],
-	])("a rename cannot hide a sibling's cases at %s", (name, path) => {
-		h.call("propose", {
+	])("a rename cannot hide a sibling's cases at %s", async (name, path) => {
+		await h.call("propose", {
 			edits: [
 				{ op: "create", outline: "Checkout case", folder: "Checkout" },
 				{ op: "create", outline: "Refund case", folder: "Refunds" },
 			],
 		});
-		expect(h.raw("propose", { edits: [{ op: "folder", folder: "Refunds", name }] })).toMatchObject({
+		expect(await h.raw("propose", { edits: [{ op: "folder", folder: "Refunds", name }] })).toMatchObject({
 			ok: false,
 			error: { code: "invalid", message: `folder path "${path}" is already in use; choose another name or parent` },
 		});
-		expect(h.call<{ items: { path: string }[] }>("find", { in: "folders" }).items.map((row) => row.path)).toEqual([
-			"Checkout",
-			"Refunds",
-		]);
-		expect(h.call("find", { folder: "Checkout" })).toMatchObject({ count: 1, items: [{ ref: "C-1" }] });
-		expect(h.call("find", { folder: "Refunds" })).toMatchObject({ count: 1, items: [{ ref: "C-2" }] });
-		expect(h.call("find")).toMatchObject({ count: 2 });
-		expect(h.call("plan", { name: "Checkout regression", select: { folders: ["Checkout"] } })).toMatchObject({
+		expect(
+			(await h.call<{ items: { path: string }[] }>("find", { in: "folders" })).items.map((row) => row.path),
+		).toEqual(["Checkout", "Refunds"]);
+		expect(await h.call("find", { folder: "Checkout" })).toMatchObject({ count: 1, items: [{ ref: "C-1" }] });
+		expect(await h.call("find", { folder: "Refunds" })).toMatchObject({ count: 1, items: [{ ref: "C-2" }] });
+		expect(await h.call("find")).toMatchObject({ count: 2 });
+		expect(await h.call("plan", { name: "Checkout regression", select: { folders: ["Checkout"] } })).toMatchObject({
 			run: "R-1",
 			slots: 1,
 		});
-		expect(h.call("plan", { name: "Both folders", select: { folders: ["Checkout", "Refunds"] } })).toMatchObject({
+		expect(await h.call("plan", { name: "Both folders", select: { folders: ["Checkout", "Refunds"] } })).toMatchObject({
 			run: "R-2",
 			slots: 2,
 		});
 	});
 
-	test.each([false, true])("legacy duplicate paths allow edits and repairs, new folder first: %s", (first) => {
+	test.each([false, true])("legacy duplicate paths allow edits and repairs, new folder first: %s", async (first) => {
 		const names = first ? ["Public", "Checkout", "Refunds"] : ["Checkout", "Refunds", "Public"];
-		h.call("propose", {
+		await h.call("propose", {
 			edits: [
 				...names.map((name) => ({ op: "folder", name })),
 				{ op: "create", outline: "Unrelated", folder: "Public" },
 			],
 		});
-		const duplicate = h
-			.call<{ items: { id: number; path: string }[] }>("find", { in: "folders" })
-			.items.find((row) => row.path === "Refunds");
+		const duplicate = (await h.call<{ items: { id: number; path: string }[] }>("find", { in: "folders" })).items.find(
+			(row) => row.path === "Refunds",
+		);
 		if (!duplicate) throw new Error("no folder to duplicate");
 		h.app.db.raw.query("UPDATE folders SET name = 'Checkout' WHERE id = ?").run(duplicate.id);
 		expect(
-			h.raw("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Updated" } }] }),
+			await h.raw("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Updated" } }] }),
 		).toMatchObject({ ok: true, result: { status: "adopted" } });
-		expect(h.call<CaseView[]>("get", { refs: ["C-1"] })[0]).toMatchObject({
+		expect((await h.call<CaseView[]>("get", { refs: ["C-1"] }))[0]).toMatchObject({
 			title: "Updated",
 			version: 2,
 			folder: { path: "Public" },
 		});
 		expect(
-			h
-				.call<{ items: { path: string }[] }>("find", { in: "folders" })
-				.items.map((row) => row.path)
-				.sort(),
+			(await h.call<{ items: { path: string }[] }>("find", { in: "folders" })).items.map((row) => row.path).sort(),
 		).toEqual(["Checkout", "Checkout", "Public"]);
-		expect(h.raw("propose", { edits: [{ op: "folder", folder: "Public", name: "Checkout" }] })).toMatchObject({
+		expect(await h.raw("propose", { edits: [{ op: "folder", folder: "Public", name: "Checkout" }] })).toMatchObject({
 			ok: false,
 			error: {
 				code: "invalid",
@@ -790,27 +794,26 @@ describe("capture", () => {
 			},
 		});
 		expect(
-			h.call<Proposed>("propose", {
-				edits: [{ op: "folder", folder: duplicate.id, name: "Repaired" }],
-			}).status,
+			(
+				await h.call<Proposed>("propose", {
+					edits: [{ op: "folder", folder: duplicate.id, name: "Repaired" }],
+				})
+			).status,
 		).toBe("adopted");
 		expect(
-			h
-				.call<{ items: { path: string }[] }>("find", { in: "folders" })
-				.items.map((row) => row.path)
-				.sort(),
+			(await h.call<{ items: { path: string }[] }>("find", { in: "folders" })).items.map((row) => row.path).sort(),
 		).toEqual(["Checkout", "Public", "Repaired"]);
 	});
 
-	test("two renames cannot create the same final folder path", () => {
-		h.call("propose", {
+	test("two renames cannot create the same final folder path", async () => {
+		await h.call("propose", {
 			edits: [
 				{ op: "create", outline: "First", folder: "Public/First" },
 				{ op: "create", outline: "Second", folder: "Public/Second" },
 			],
 		});
 		expect(
-			h.raw("propose", {
+			await h.raw("propose", {
 				edits: [
 					{ op: "folder", folder: "Public", name: "Checkout" },
 					{ op: "folder", folder: "Public/First", name: "Secure" },
@@ -824,14 +827,14 @@ describe("capture", () => {
 				message: 'folder path "Checkout/Secure" is already in use; choose another name or parent',
 			},
 		});
-		expect(h.call<CaseView[]>("get", { refs: ["C-1", "C-2"] }).map((row) => row.folder.path)).toEqual([
+		expect((await h.call<CaseView[]>("get", { refs: ["C-1", "C-2"] })).map((row) => row.folder.path)).toEqual([
 			"Public/First",
 			"Public/Second",
 		]);
 	});
 
-	test("creating or moving a folder cannot duplicate a canonical sibling path", () => {
-		h.call("propose", {
+	test("creating or moving a folder cannot duplicate a canonical sibling path", async () => {
+		await h.call("propose", {
 			edits: [
 				{ op: "create", outline: "Existing", folder: "Parent/Café" },
 				{ op: "create", outline: "Moving", folder: "Other/Café" },
@@ -841,21 +844,22 @@ describe("capture", () => {
 			{ op: "folder", parent: "Parent", name: "CAFE\u0301" },
 			{ op: "folder", folder: "Other/Café", parent: "Parent" },
 		])
-			expect(h.raw("propose", { edits: [edit] })).toMatchObject({ ok: false, error: { code: "invalid" } });
-		expect(h.call<CaseView[]>("get", { refs: ["C-1", "C-2"] }).map((row) => row.folder.path)).toEqual([
+			expect(await h.raw("propose", { edits: [edit] })).toMatchObject({ ok: false, error: { code: "invalid" } });
+		expect((await h.call<CaseView[]>("get", { refs: ["C-1", "C-2"] })).map((row) => row.folder.path)).toEqual([
 			"Parent/Café",
 			"Other/Café",
 		]);
 	});
 
-	test("a pending rename rechecks collisions at adoption and leaves the proposal rejectable", () => {
-		h.call("propose", { edits: [{ op: "create", outline: "Original", folder: "Refunds" }] });
+	test("a pending rename rechecks collisions at adoption and leaves the proposal rejectable", async () => {
+		await h.call("propose", { edits: [{ op: "create", outline: "Original", folder: "Refunds" }] });
 		const agent = h.actor("writer", "agent", ["read", "produce"]);
-		h.call("propose", { edits: [{ op: "policy", preset: "standard" }] });
-		const policy = h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }).items[0];
+		await h.call("propose", { edits: [{ op: "policy", preset: "standard" }] });
+		const policy = (await h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }))
+			.items[0];
 		if (!policy) throw new Error("no policy question");
-		h.call("decide", { q: policy.q, onEvidence: policy.evidenceHash, answer: { is: "accept" } });
-		const pending = h.call<Proposed>(
+		await h.call("decide", { q: policy.q, onEvidence: policy.evidenceHash, answer: { is: "accept" } });
+		const pending = await h.call<Proposed>(
 			"propose",
 			{
 				edits: [
@@ -865,50 +869,55 @@ describe("capture", () => {
 			},
 			agent,
 		);
-		h.call("propose", { edits: [{ op: "create", outline: "New sibling", folder: "Checkout" }] });
-		const question = h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }).items[0];
+		await h.call("propose", { edits: [{ op: "create", outline: "New sibling", folder: "Checkout" }] });
+		const question = (await h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }))
+			.items[0];
 		if (!question) throw new Error("no rename question");
 		expect(pending).toMatchObject({ question: question.q });
 		expect(
-			h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" } }),
+			await h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" } }),
 		).toMatchObject([
 			{ status: "invalid", needs: 'folder path "Checkout" is already in use; choose another name or parent' },
 		]);
-		expect(h.call<CaseView[]>("get", { refs: ["C-1"] })[0]).toMatchObject({
+		expect((await h.call<CaseView[]>("get", { refs: ["C-1"] }))[0]).toMatchObject({
 			title: "Original",
 			version: 1,
 			folder: { path: "Refunds" },
 		});
 		expect(
-			h.call<{ status: string }[]>("decide", {
-				q: question.q,
-				onEvidence: question.evidenceHash,
-				answer: { is: "reject" },
-			})[0]?.status,
+			(
+				await h.call<{ status: string }[]>("decide", {
+					q: question.q,
+					onEvidence: question.evidenceHash,
+					answer: { is: "reject" },
+				})
+			)[0]?.status,
 		).toBe("decided");
 	});
 
-	test("a batch may swap folder names when its final paths are distinct", () => {
-		h.call("propose", {
+	test("a batch may swap folder names when its final paths are distinct", async () => {
+		await h.call("propose", {
 			edits: [
 				{ op: "create", outline: "First", folder: "Checkout" },
 				{ op: "create", outline: "Second", folder: "Refunds" },
 			],
 		});
 		expect(
-			h.call<Proposed>("propose", {
-				edits: [
-					{ op: "folder", folder: "Checkout", name: "Refunds" },
-					{ op: "folder", folder: "Refunds", name: "Checkout" },
-				],
-			}).status,
+			(
+				await h.call<Proposed>("propose", {
+					edits: [
+						{ op: "folder", folder: "Checkout", name: "Refunds" },
+						{ op: "folder", folder: "Refunds", name: "Checkout" },
+					],
+				})
+			).status,
 		).toBe("adopted");
-		expect(h.call("find", { folder: "Checkout" })).toMatchObject({ count: 1, items: [{ ref: "C-2" }] });
-		expect(h.call("find", { folder: "Refunds" })).toMatchObject({ count: 1, items: [{ ref: "C-1" }] });
+		expect(await h.call("find", { folder: "Checkout" })).toMatchObject({ count: 1, items: [{ ref: "C-2" }] });
+		expect(await h.call("find", { folder: "Refunds" })).toMatchObject({ count: 1, items: [{ ref: "C-1" }] });
 	});
 
-	test("a mixed folder batch preserves nested moves, a rename chain, a swap and case placement", () => {
-		h.call("propose", {
+	test("a mixed folder batch preserves nested moves, a rename chain, a swap and case placement", async () => {
+		await h.call("propose", {
 			edits: [
 				{ op: "create", outline: "Nested", folder: "Source/Child/Leaf" },
 				{ op: "create", outline: "Left case", folder: "Left/Inside" },
@@ -917,23 +926,26 @@ describe("capture", () => {
 			],
 		});
 		expect(
-			h.call<Proposed>("propose", {
-				edits: [
-					{ op: "folder", folder: "Source", name: "Interim" },
-					{ op: "folder", folder: "Source/Child", parent: "Destination", name: "Moved" },
-					{ op: "folder", folder: "Source", name: "Final" },
-					{ op: "folder", folder: "Left", name: "Right" },
-					{ op: "folder", folder: "Right", name: "Left" },
-					{ op: "folder", name: "New", parent: "Final/Branch" },
-					{ op: "place", cases: ["C-4"], folder: "Final/Branch/New" },
-					{ op: "create", outline: "Created case", folder: "Destination/Moved/Leaf" },
-				],
-			}).status,
+			(
+				await h.call<Proposed>("propose", {
+					edits: [
+						{ op: "folder", folder: "Source", name: "Interim" },
+						{ op: "folder", folder: "Source/Child", parent: "Destination", name: "Moved" },
+						{ op: "folder", folder: "Source", name: "Final" },
+						{ op: "folder", folder: "Left", name: "Right" },
+						{ op: "folder", folder: "Right", name: "Left" },
+						{ op: "folder", name: "New", parent: "Final/Branch" },
+						{ op: "place", cases: ["C-4"], folder: "Final/Branch/New" },
+						{ op: "create", outline: "Created case", folder: "Destination/Moved/Leaf" },
+					],
+				})
+			).status,
 		).toBe("adopted");
 		expect(
-			h
-				.call<CaseView[]>("get", { refs: ["C-1", "C-2", "C-3", "C-4", "C-5"] })
-				.map((row) => ({ title: row.title, folder: row.folder.path })),
+			(await h.call<CaseView[]>("get", { refs: ["C-1", "C-2", "C-3", "C-4", "C-5"] })).map((row) => ({
+				title: row.title,
+				folder: row.folder.path,
+			})),
 		).toEqual([
 			{ title: "Nested", folder: "Destination/Moved/Leaf" },
 			{ title: "Left case", folder: "Right/Inside" },
@@ -942,10 +954,7 @@ describe("capture", () => {
 			{ title: "Created case", folder: "Destination/Moved/Leaf" },
 		]);
 		expect(
-			h
-				.call<{ items: { path: string }[] }>("find", { in: "folders" })
-				.items.map((row) => row.path)
-				.sort(),
+			(await h.call<{ items: { path: string }[] }>("find", { in: "folders" })).items.map((row) => row.path).sort(),
 		).toEqual([
 			"Destination",
 			"Destination/Moved",
@@ -960,15 +969,15 @@ describe("capture", () => {
 		]);
 	});
 
-	test("path targets cannot pick an arbitrary folder while a batch swaps names", () => {
-		h.call("propose", {
+	test("path targets cannot pick an arbitrary folder while a batch swaps names", async () => {
+		await h.call("propose", {
 			edits: [
 				{ op: "create", outline: "First", folder: "Checkout" },
 				{ op: "create", outline: "Second", folder: "Refunds" },
 			],
 		});
 		expect(
-			h.raw("propose", {
+			await h.raw("propose", {
 				edits: [
 					{ op: "folder", folder: "Checkout", name: "Refunds" },
 					{ op: "create", outline: "Ambiguous", folder: "Refunds/New" },
@@ -982,7 +991,7 @@ describe("capture", () => {
 				message: 'folder path "Refunds" is ambiguous during the proposal; reorder the folder edits',
 			},
 		});
-		expect(h.call("find", { folder: "Checkout" })).toMatchObject({ count: 1, items: [{ ref: "C-1" }] });
+		expect(await h.call("find", { folder: "Checkout" })).toMatchObject({ count: 1, items: [{ ref: "C-1" }] });
 	});
 
 	test.each([
@@ -995,25 +1004,26 @@ describe("capture", () => {
 		["place", "inbox"],
 		["place", "read"],
 		["place", "accept"],
-	] as const)("a stored %s proposal handles %s when its target becomes ambiguous during replay", (op, action) => {
-		h.call("propose", {
+	] as const)("a stored %s proposal handles %s when its target becomes ambiguous during replay", async (op, action) => {
+		await h.call("propose", {
 			edits: [
 				{ op: "create", outline: "First", folder: "Source" },
 				{ op: "create", outline: "Second", folder: "Moving" },
 			],
 		});
 		const agent = h.actor("writer", "agent", ["read", "produce"]);
-		h.call("propose", { edits: [{ op: "policy", preset: "standard" }] });
-		const policy = h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }).items[0];
+		await h.call("propose", { edits: [{ op: "policy", preset: "standard" }] });
+		const policy = (await h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }))
+			.items[0];
 		if (!policy) throw new Error("no policy question");
-		h.call("decide", { q: policy.q, onEvidence: policy.evidenceHash, answer: { is: "accept" } });
+		await h.call("decide", { q: policy.q, onEvidence: policy.evidenceHash, answer: { is: "accept" } });
 		const target: Edit =
 			op === "move"
 				? { op: "folder", folder: "Moving", parent: "Target" }
 				: op === "create"
 					? { op: "create", outline: "New case", folder: "Target/New" }
 					: { op: "place", cases: ["C-2"], folder: "Target/New" };
-		const pending = h.call<Proposed>(
+		const pending = await h.call<Proposed>(
 			"propose",
 			{
 				edits: [
@@ -1025,35 +1035,38 @@ describe("capture", () => {
 			},
 			agent,
 		);
-		const question = h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }).items[0];
+		const question = (await h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }))
+			.items[0];
 		if (!question) throw new Error("no folder question");
 		expect(pending).toMatchObject({ status: "open", question: question.q });
-		h.call("propose", { edits: [{ op: "folder", folder: "Moving", name: "Target" }] });
+		await h.call("propose", { edits: [{ op: "folder", folder: "Moving", name: "Target" }] });
 		const ambiguity = 'folder path "Target" is ambiguous during the proposal; reorder the folder edits';
 		if (action === "accept")
 			expect(
-				h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" } }),
+				await h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" } }),
 			).toMatchObject([{ status: "invalid", needs: ambiguity }]);
 		else if (action === "inbox")
-			expect(h.call("inbox", { kind: "adopt" })).toMatchObject({
+			expect(await h.call("inbox", { kind: "adopt" })).toMatchObject({
 				items: [
 					{ q: question.q, state: "open", needs: `one member who is not an agent; accepting refused: ${ambiguity}` },
 				],
 			});
 		else
-			expect(h.call("get", { refs: [question.q] })).toMatchObject([
+			expect(await h.call("get", { refs: [question.q] })).toMatchObject([
 				{ q: question.q, state: "open", needs: `one member who is not an agent; accepting refused: ${ambiguity}` },
 			]);
-		expect(h.call<CaseView[]>("get", { refs: ["C-1", "C-2"] }).map((row) => row.folder.path)).toEqual([
+		expect((await h.call<CaseView[]>("get", { refs: ["C-1", "C-2"] })).map((row) => row.folder.path)).toEqual([
 			"Source",
 			"Target",
 		]);
 		expect(
-			h.call<{ status: string }[]>("decide", {
-				q: question.q,
-				onEvidence: question.evidenceHash,
-				answer: { is: "reject" },
-			})[0]?.status,
+			(
+				await h.call<{ status: string }[]>("decide", {
+					q: question.q,
+					onEvidence: question.evidenceHash,
+					answer: { is: "reject" },
+				})
+			)[0]?.status,
 		).toBe("decided");
 	});
 
@@ -1070,8 +1083,8 @@ describe("capture", () => {
 		["ambiguity", "folder:fin/n/old"],
 	] as const)(
 		"a refused %s replay keeps policy facts for %s from later edits and every candidate",
-		(refusal, scope) => {
-			h.call("propose", {
+		async (refusal, scope) => {
+			await h.call("propose", {
 				edits: ["A", "B", "C", "Secure", "C/Sub", ...(scope === "folder:fin/n/old" ? ["A/N"] : [])].map(
 					(folder, i) => ({
 						op: "create",
@@ -1081,7 +1094,7 @@ describe("capture", () => {
 				),
 			});
 			h.actor("approver", "human", ["read", "produce", "answer"]);
-			h.call("admin", {
+			await h.call("admin", {
 				do: "grant.set",
 				actor: "approver",
 				project: "scratch",
@@ -1102,12 +1115,13 @@ describe("capture", () => {
 					blocks: "nothing",
 				},
 			);
-			h.call("propose", { edits: [{ op: "policy", base: 1, clauses }] });
-			const policy = h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }).items[0];
+			await h.call("propose", { edits: [{ op: "policy", base: 1, clauses }] });
+			const policy = (await h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }))
+				.items[0];
 			if (!policy) throw new Error("no policy question");
-			h.call("decide", { q: policy.q, onEvidence: policy.evidenceHash, answer: { is: "accept" } });
+			await h.call("decide", { q: policy.q, onEvidence: policy.evidenceHash, answer: { is: "accept" } });
 			const agent = h.actor("writer", "agent", ["read", "produce"]);
-			const pending = h.call<Proposed>(
+			const pending = await h.call<Proposed>(
 				"propose",
 				{
 					edits: [
@@ -1138,7 +1152,7 @@ describe("capture", () => {
 				agent,
 			);
 			const ask = "a member with role approver who is not an agent with a reason";
-			expect(h.call("get", { refs: [pending.question] })).toMatchObject([
+			expect(await h.call("get", { refs: [pending.question] })).toMatchObject([
 				{
 					needs:
 						scope === "folder:other/n" || scope === "folder:other/n/fin/n" || scope === "folder:a/b/secure"
@@ -1146,7 +1160,7 @@ describe("capture", () => {
 							: ask,
 				},
 			]);
-			h.call("propose", {
+			await h.call("propose", {
 				edits: [
 					refusal === "ambiguity"
 						? { op: "folder", folder: "C", name: "X" }
@@ -1157,21 +1171,25 @@ describe("capture", () => {
 				refusal === "ambiguity"
 					? `${ask}; accepting refused: folder path "X" is ambiguous during the proposal; reorder the folder edits`
 					: ask;
-			expect(h.call("get", { refs: [pending.question] })).toMatchObject([{ state: "open", needs }]);
-			const question = h
-				.call<{ items: { q: string; evidenceHash: string; needs: string }[] }>("inbox", { kind: "adopt" })
-				.items.find((item) => item.q === pending.question);
+			expect(await h.call("get", { refs: [pending.question] })).toMatchObject([{ state: "open", needs }]);
+			const question = (
+				await h.call<{ items: { q: string; evidenceHash: string; needs: string }[] }>("inbox", { kind: "adopt" })
+			).items.find((item) => item.q === pending.question);
 			if (!question) throw new Error("no folder question");
 			expect(question.needs).toBe(needs);
 			const member = h.actor("plain", "human", ["read", "produce", "answer"]);
 			expect(
-				h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "reject" } }, member),
+				await h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "reject" } }, member),
 			).toMatchObject([{ status: "forbidden", needs: ask }]);
 			expect(
-				h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "reject" } }, approver),
+				await h.call(
+					"decide",
+					{ q: question.q, onEvidence: question.evidenceHash, answer: { is: "reject" } },
+					approver,
+				),
 			).toMatchObject([{ status: "invalid", needs: "a reason" }]);
 			expect(
-				h.call(
+				await h.call(
 					"decide",
 					{ q: question.q, onEvidence: question.evidenceHash, answer: { is: "reject" }, reason: "No longer needed" },
 					approver,
@@ -1187,9 +1205,9 @@ describe("capture", () => {
 		["union", "author"],
 		["budget", "member"],
 		["budget", "rule"],
-	] as const)("a refused %s replay cannot select an earlier looser %s clause", (shape, who) => {
+	] as const)("a refused %s replay cannot select an earlier looser %s clause", async (shape, who) => {
 		const chain = Array.from({ length: 16 }, (_, i) => `L${i}`);
-		h.call("propose", {
+		await h.call("propose", {
 			edits: ["A", "C", ...(shape === "budget" ? [chain.join("/")] : [])].map((folder) => ({
 				op: "create",
 				outline: folder,
@@ -1197,7 +1215,7 @@ describe("capture", () => {
 			})),
 		});
 		h.actor("approver", "human", ["read", "produce", "answer"]);
-		h.call("admin", {
+		await h.call("admin", {
 			do: "grant.set",
 			actor: "approver",
 			project: "scratch",
@@ -1208,7 +1226,7 @@ describe("capture", () => {
 		if (!approver) throw new Error("no approver");
 		if (who === "role:auditor") {
 			h.actor("auditor", "human", ["read", "produce", "answer"]);
-			h.call("admin", {
+			await h.call("admin", {
 				do: "grant.set",
 				actor: "auditor",
 				project: "scratch",
@@ -1236,10 +1254,11 @@ describe("capture", () => {
 				blocks: "nothing",
 			},
 		);
-		h.call("propose", { edits: [{ op: "policy", base: 1, clauses }] });
-		const policy = h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }).items[0];
+		await h.call("propose", { edits: [{ op: "policy", base: 1, clauses }] });
+		const policy = (await h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }))
+			.items[0];
 		if (!policy) throw new Error("no policy question");
-		h.call("decide", { q: policy.q, onEvidence: policy.evidenceHash, answer: { is: "accept" } });
+		await h.call("decide", { q: policy.q, onEvidence: policy.evidenceHash, answer: { is: "accept" } });
 		const edits: Edit[] = [
 			{ op: "folder", folder: "A", name: "X" },
 			{ op: "create", outline: "New case", folder: "X/N" },
@@ -1256,10 +1275,11 @@ describe("capture", () => {
 			...(shape === "union" ? ([{ op: "folder", folder: "C", name: "Other" }] satisfies Edit[]) : []),
 		];
 		const agent = h.actor("writer", "agent", ["read", "produce", "answer"]);
-		const pending = h.call<Proposed>("propose", { edits }, agent);
+		const pending = await h.call<Proposed>("propose", { edits }, agent);
 		expect(pending.status).toBe("open");
-		h.call("propose", { edits: [{ op: "folder", folder: "C", name: "X" }] });
-		const question = h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }).items[0];
+		await h.call("propose", { edits: [{ op: "folder", folder: "C", name: "X" }] });
+		const question = (await h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }))
+			.items[0];
 		if (!question) throw new Error("no folder question");
 		const member = h.actor("plain", "human", ["read", "produce", "answer"]);
 		const incompatible = who === "role:auditor" || who === "author";
@@ -1267,27 +1287,27 @@ describe("capture", () => {
 			? "an admin who is not an agent with a reason"
 			: "a member with role approver who is not an agent with a reason";
 		expect(
-			h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "reject" } }, member),
+			await h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "reject" } }, member),
 		).toMatchObject([{ status: "forbidden", needs: ask }]);
-		expect(h.call("get", { refs: [pending.question] })).toMatchObject([
+		expect(await h.call("get", { refs: [pending.question] })).toMatchObject([
 			{
 				state: "open",
 				needs: `${ask}; accepting refused: folder path "X" is ambiguous during the proposal; reorder the folder edits`,
 			},
 		]);
 		expect(
-			h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "reject" } }, agent),
+			await h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "reject" } }, agent),
 		).toMatchObject([{ status: "forbidden", needs: ask }]);
 		expect(
-			h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "reject" } }, approver),
+			await h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "reject" } }, approver),
 		).toMatchObject([incompatible ? { status: "forbidden", needs: ask } : { status: "invalid", needs: "a reason" }]);
-		h.call("propose", { edits: [{ op: "folder", folder: "X", name: "Elsewhere" }] });
-		expect(h.call("get", { refs: [pending.question] })).toMatchObject([
+		await h.call("propose", { edits: [{ op: "folder", folder: "X", name: "Elsewhere" }] });
+		expect(await h.call("get", { refs: [pending.question] })).toMatchObject([
 			{ state: "open", needs: "a member with role approver who is not an agent with a reason" },
 		]);
-		h.call("propose", { edits: [{ op: "folder", folder: "Elsewhere", name: "X" }] });
+		await h.call("propose", { edits: [{ op: "folder", folder: "Elsewhere", name: "X" }] });
 		expect(
-			h.call(
+			await h.call(
 				"decide",
 				{ q: question.q, onEvidence: question.evidenceHash, answer: { is: "reject" }, reason: "No longer needed" },
 				incompatible ? undefined : approver,
@@ -1299,12 +1319,12 @@ describe("capture", () => {
 		["wide", 0, ""],
 		["deep", 16, "a"],
 		["deep", 12, "ab"],
-	] as const)("a refused %s replay bounds candidate work at depth %i with renames %s", (shape, depth, names) => {
+	] as const)("a refused %s replay bounds candidate work at depth %i with renames %s", async (shape, depth, names) => {
 		const chain = Array.from({ length: depth }, (_, i) => `L${i}`);
 		const edits: Edit[] = [{ op: "folder", folder: "S", name: "X" }];
 		let scope: string;
 		if (shape === "wide") {
-			h.call("propose", {
+			await h.call("propose", {
 				edits: Array.from({ length: 200 }, (_, i) => ({
 					op: "create",
 					outline: `Case ${i} #guarded`,
@@ -1321,7 +1341,7 @@ describe("capture", () => {
 			edits.push({ op: "folder", folder: "F0", name: "Fin" });
 			scope = "folder:fin/n0/m2";
 		} else {
-			h.call("propose", {
+			await h.call("propose", {
 				edits: [
 					{ op: "create", outline: "Deep #guarded", folder: chain.join("/") },
 					{ op: "create", outline: "Source", folder: "S" },
@@ -1339,7 +1359,7 @@ describe("capture", () => {
 		}
 		const clauses = [...PRESETS.standard.clauses];
 		h.actor("approver", "human", ["read", "produce", "answer"]);
-		h.call("admin", {
+		await h.call("admin", {
 			do: "grant.set",
 			actor: "approver",
 			project: "scratch",
@@ -1357,14 +1377,15 @@ describe("capture", () => {
 				blocks: "nothing",
 			},
 		);
-		h.call("propose", { edits: [{ op: "policy", base: 1, clauses }] });
-		const policy = h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }).items[0];
+		await h.call("propose", { edits: [{ op: "policy", base: 1, clauses }] });
+		const policy = (await h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }))
+			.items[0];
 		if (!policy) throw new Error("no policy question");
-		h.call("decide", { q: policy.q, onEvidence: policy.evidenceHash, answer: { is: "accept" } });
+		await h.call("decide", { q: policy.q, onEvidence: policy.evidenceHash, answer: { is: "accept" } });
 		const agent = h.actor("writer", "agent", ["read", "produce"]);
-		const pending = h.call<Proposed>("propose", { edits }, agent);
+		const pending = await h.call<Proposed>("propose", { edits }, agent);
 		expect(pending.status).toBe("open");
-		h.call("propose", { edits: [{ op: "folder", name: "X" }] });
+		await h.call("propose", { edits: [{ op: "folder", name: "X" }] });
 		// Count actual path candidates, including duplicates, rather than elapsed time on a shared machine.
 		const add = Set.prototype.add;
 		let candidates = 0;
@@ -1378,7 +1399,7 @@ describe("capture", () => {
 		});
 		let reply: Reply;
 		try {
-			reply = h.raw("inbox", { kind: "adopt" });
+			reply = await h.raw("inbox", { kind: "adopt" });
 		} finally {
 			spy.mockRestore();
 		}
@@ -1398,66 +1419,66 @@ describe("capture", () => {
 		});
 	});
 
-	test.each(["\u200b", " \u200b "])("a folder name empty after cleaning is refused: %s", (name) => {
-		expect(h.raw("propose", { edits: [{ op: "folder", name }] })).toMatchObject({
+	test.each(["\u200b", " \u200b "])("a folder name empty after cleaning is refused: %s", async (name) => {
+		expect(await h.raw("propose", { edits: [{ op: "folder", name }] })).toMatchObject({
 			ok: false,
 			error: { code: "invalid" },
 		});
-		expect(h.call<{ items: unknown[] }>("find", { in: "folders" }).items.length).toBe(0);
+		expect((await h.call<{ items: unknown[] }>("find", { in: "folders" })).items.length).toBe(0);
 	});
 
-	test("canonical lookup reuses an existing NFD folder without rewriting it", () => {
-		h.call("propose", { edits: [{ op: "create", outline: "Original", folder: "Café" }] });
+	test("canonical lookup reuses an existing NFD folder without rewriting it", async () => {
+		await h.call("propose", { edits: [{ op: "create", outline: "Original", folder: "Café" }] });
 		h.app.db.raw.query("UPDATE folders SET name = ? WHERE name = 'Café'").run("Cafe\u0301");
-		h.call("propose", { edits: [{ op: "create", outline: "Second", folder: "Café" }] });
-		expect(h.call<{ items: unknown[] }>("find", { in: "folders" }).items.length).toBe(1);
-		expect(h.call<CaseView[]>("get", { refs: ["C-1", "C-2"] }).map((view) => view.folder.path)).toEqual([
+		await h.call("propose", { edits: [{ op: "create", outline: "Second", folder: "Café" }] });
+		expect((await h.call<{ items: unknown[] }>("find", { in: "folders" })).items.length).toBe(1);
+		expect((await h.call<CaseView[]>("get", { refs: ["C-1", "C-2"] })).map((view) => view.folder.path)).toEqual([
 			"Cafe\u0301",
 			"Cafe\u0301",
 		]);
 		for (const folder of ["Café", "Cafe\u0301", "Café\u200b"]) {
-			expect(h.call<{ items: { ref: string }[] }>("find", { folder }).items.map((item) => item.ref)).toEqual([
+			expect((await h.call<{ items: { ref: string }[] }>("find", { folder })).items.map((item) => item.ref)).toEqual([
 				"C-1",
 				"C-2",
 			]);
 		}
 	});
 
-	test("the save is a recorded decision made by the policy's rule", () => {
-		h.call("propose", { edits: [{ op: "create", outline: OUTLINE }] });
-		const ledger = h.call<{
+	test("the save is a recorded decision made by the policy's rule", async () => {
+		await h.call("propose", { edits: [{ op: "create", outline: OUTLINE }] });
+		const ledger = await h.call<{
 			items: { kind: string; decision: { answer: { is: string }; rule: string | null; by: string[] } }[];
 		}>("inbox", { state: "decided" });
 		expect(ledger.items).toHaveLength(1);
 		expect(ledger.items[0]?.decision).toMatchObject({ answer: { is: "accept" }, rule: "adopt-any", by: ["policy"] });
 	});
 
-	test("the same command twice writes once", () => {
+	test("the same command twice writes once", async () => {
 		const input = { edits: [{ op: "create", outline: "A case" }], cmd: "cmd-0000000001" };
-		const first = h.call<Proposed>("propose", input);
-		const second = h.call<Proposed>("propose", input);
+		const first = await h.call<Proposed>("propose", input);
+		const second = await h.call<Proposed>("propose", input);
 		expect(second).toEqual(first);
 		const count = (table: string) =>
 			h.app.db.raw.query<{ n: number }, []>(`SELECT count(*) AS n FROM ${table}`).get()?.n;
 		expect([count("cases"), count("versions"), count("proposals"), count("decisions")]).toEqual([1, 1, 1, 1]);
-		expect(h.call<{ count: number }>("find", { in: "folders" }).count).toBe(1);
+		expect((await h.call<{ count: number }>("find", { in: "folders" })).count).toBe(1);
 	});
 
-	test("the canonical Markdown round-trips through the server", () => {
-		h.call("propose", { edits: [{ op: "create", outline: OUTLINE }] });
-		const [md] = h.call<{ md: string }[]>("get", { refs: ["C-1"], as: "md" });
+	test("the canonical Markdown round-trips through the server", async () => {
+		await h.call("propose", { edits: [{ op: "create", outline: OUTLINE }] });
+		const [md] = await h.call<{ md: string }[]>("get", { refs: ["C-1"], as: "md" });
 		expect(md?.md).toContain("## Steps");
-		const again = h.call<Proposed>("propose", { edits: [{ op: "edit", case: "C-1", base: 1, md: md?.md }] });
+		const again = await h.call<Proposed>("propose", { edits: [{ op: "edit", case: "C-1", base: 1, md: md?.md }] });
 		expect(again.proposal).toBeNull(); // nothing changed, so nothing was proposed
 	});
 
-	test("a Markdown edit without a fields header preserves free-form values", () => {
-		h.call("propose", { edits: [{ op: "create", body: { title: "Original", fields: { legacy: "Keep me" } } }] });
-		const reply = h.call<Proposed>("propose", {
+	test("a Markdown edit without a fields header preserves free-form values", async () => {
+		await h.call("propose", { edits: [{ op: "create", body: { title: "Original", fields: { legacy: "Keep me" } } }] });
+		const reply = await h.call<Proposed>("propose", {
 			edits: [{ op: "edit", case: "C-1", base: 1, md: "---\ntitle: Edited\n---\n## Steps\n" }],
 		});
 		expect(reply.status).toBe("adopted");
-		expect(storedBody()).toMatchObject({
+		expect(await storedBody()).toMatchObject({
 			title: "Edited",
 			fields: { legacy: "Keep me" },
 		});
@@ -1467,27 +1488,27 @@ describe("capture", () => {
 		["fields:", {}],
 		["fields: {}", {}],
 		["fields:\n  risk: low", { risk: "low" }],
-	])("a Markdown edit with %s replaces the field map", (header, fields) => {
-		h.call("propose", {
+	])("a Markdown edit with %s replaces the field map", async (header, fields) => {
+		await h.call("propose", {
 			edits: [{ op: "create", body: { title: "Original", fields: { risk: "high", legacy: "Keep me" } } }],
 		});
-		const reply = h.call<Proposed>("propose", {
+		const reply = await h.call<Proposed>("propose", {
 			edits: [{ op: "edit", case: "C-1", base: 1, md: `---\ntitle: Edited\n${header}\n---\n## Steps\n` }],
 		});
 		expect(reply.status).toBe("adopted");
-		expect(storedBody().fields).toEqual(fields);
+		expect((await storedBody()).fields).toEqual(fields);
 	});
 
-	test("a stale Markdown edit without fields merges a concurrent field change", () => {
-		h.call("propose", { edits: [{ op: "create", body: { title: "Original", fields: { risk: "high" } } }] });
-		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { fields: { risk: "low" } } }] });
-		const reply = h.call<Proposed>("propose", {
+	test("a stale Markdown edit without fields merges a concurrent field change", async () => {
+		await h.call("propose", { edits: [{ op: "create", body: { title: "Original", fields: { risk: "high" } } }] });
+		await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { fields: { risk: "low" } } }] });
+		const reply = await h.call<Proposed>("propose", {
 			edits: [{ op: "edit", case: "C-1", base: 1, md: "---\ntitle: Edited\n---\n## Steps\n" }],
 		});
 		expect(reply.status).toBe("adopted");
 		expect(reply.conflicts).toEqual([]);
 		expect(reply.cases[0]?.version).toBe(3);
-		expect(storedBody()).toMatchObject({
+		expect(await storedBody()).toMatchObject({
 			title: "Edited",
 			fields: { risk: "low" },
 		});
@@ -1495,51 +1516,55 @@ describe("capture", () => {
 });
 
 describe("editing", () => {
-	beforeEach(() => {
-		h.call("propose", { edits: [{ op: "create", outline: OUTLINE }] });
+	beforeEach(async () => {
+		await h.call("propose", { edits: [{ op: "create", outline: OUTLINE }] });
 	});
-	const steps = () => h.call<CaseView[]>("get", { refs: ["C-1"] })[0]?.steps ?? [];
+	const steps = async () => (await h.call<CaseView[]>("get", { refs: ["C-1"] }))[0]?.steps ?? [];
 
-	test("an edit is version 2 and the diff is by step", () => {
-		const next = steps().map((s, i) => (i === 1 ? { ...s, expected: "Total shows $90.00 (10% off $100.00)" } : s));
-		const reply = h.call<Proposed>("propose", {
+	test("an edit is version 2 and the diff is by step", async () => {
+		const next = (await steps()).map((s, i) =>
+			i === 1 ? { ...s, expected: "Total shows $90.00 (10% off $100.00)" } : s,
+		);
+		const reply = await h.call<Proposed>("propose", {
 			edits: [{ op: "edit", case: "C-1", base: 1, body: { steps: next } }],
 			reason: "be exact",
 		});
 		expect(reply.cases[0]).toMatchObject({ ref: "C-1", version: 2 });
-		const diff = h.call<{ summary: string }>("history", { ref: "C-1", from: 1, to: 2 });
+		const diff = await h.call<{ summary: string }>("history", { ref: "C-1", from: 1, to: 2 });
 		expect(diff.summary).toContain("expected");
-		const list = h.call<{ versions: { version: number; reason: string | null; summary: string }[] }>("history", {
+		const list = await h.call<{ versions: { version: number; reason: string | null; summary: string }[] }>("history", {
 			ref: "C-1",
 		});
 		expect(list.versions.map((v) => v.version)).toEqual([2, 1]);
 		expect(list.versions[0]?.reason).toBe("be exact");
 	});
 
-	test("two edits to different fields on the same base merge", () => {
-		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Coupon: percentage" } }] });
-		const mine = steps().map((s, i) => (i === 0 ? { ...s, action: "Open the cart with one $200.00 item" } : s));
-		const reply = h.call<Proposed>("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { steps: mine } }] });
+	test("two edits to different fields on the same base merge", async () => {
+		await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Coupon: percentage" } }] });
+		const mine = (await steps()).map((s, i) => (i === 0 ? { ...s, action: "Open the cart with one $200.00 item" } : s));
+		const reply = await h.call<Proposed>("propose", {
+			edits: [{ op: "edit", case: "C-1", base: 1, body: { steps: mine } }],
+		});
 		expect(reply.status).toBe("adopted");
-		const [view] = h.call<CaseView[]>("get", { refs: ["C-1"] });
+		const [view] = await h.call<CaseView[]>("get", { refs: ["C-1"] });
 		expect(view?.version).toBe(3);
 		expect(view?.title).toBe("Coupon: percentage");
 		expect(view?.steps[0]?.action).toBe("Open the cart with one $200.00 item");
 	});
 
-	test("two edits to the same field conflict: nothing is overwritten and the author resolves it", () => {
-		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
-		const reply = h.call<Proposed>("propose", {
+	test("two edits to the same field conflict: nothing is overwritten and the author resolves it", async () => {
+		await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
+		const reply = await h.call<Proposed>("propose", {
 			edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }],
 		});
 		expect(reply.status).toBe("conflict");
 		expect(reply.conflicts).toEqual([{ case: "C-1", addresses: [{ kind: "field", name: "title" }] }]);
-		expect(h.call<CaseView[]>("get", { refs: ["C-1"] })[0]?.title).toBe("Theirs");
+		expect((await h.call<CaseView[]>("get", { refs: ["C-1"] }))[0]?.title).toBe("Theirs");
 
-		const queue = h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox");
+		const queue = await h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox");
 		const q = queue.items[0];
 		expect(q?.q).toBe(reply.question ?? "");
-		const refused = h.call<{ status: string }[]>("decide", {
+		const refused = await h.call<{ status: string }[]>("decide", {
 			q: q?.q,
 			onEvidence: q?.evidenceHash,
 			answer: { is: "accept" },
@@ -1551,42 +1576,45 @@ describe("editing", () => {
 		const body = {
 			title: "Mine and theirs",
 			pre: "",
-			steps: steps(),
+			steps: await steps(),
 			methods: ["human"],
 			automate: "none",
 			fields: {},
 		};
-		const merged = h.call<{ status: string }[]>("decide", {
+		const merged = await h.call<{ status: string }[]>("decide", {
 			q: q?.q,
 			onEvidence: q?.evidenceHash,
 			answer: { is: "merge", body },
 		});
 		expect(merged[0]?.status).toBe("decided");
-		expect(h.call<CaseView[]>("get", { refs: ["C-1"] })[0]).toMatchObject({ title: "Mine and theirs", version: 3 });
+		expect((await h.call<CaseView[]>("get", { refs: ["C-1"] }))[0]).toMatchObject({
+			title: "Mine and theirs",
+			version: 3,
+		});
 	});
 
-	test("a proposal read after its case moved shows the body that accepting it writes", () => {
-		const s = harness({ preset: "standard" });
+	test("a proposal read after its case moved shows the body that accepting it writes", async () => {
+		const s = await harness({ preset: "standard" });
 		try {
-			s.call("propose", { edits: [{ op: "create", outline: OUTLINE }] });
+			await s.call("propose", { edits: [{ op: "create", outline: OUTLINE }] });
 			const agent = s.actor("writer", "agent", ["read", "produce"]);
-			const proposed = s.call<Proposed>(
+			const proposed = await s.call<Proposed>(
 				"propose",
 				{ edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Coupon: percentage" } }] },
 				agent,
 			);
 			expect(proposed.status).toBe("open");
-			s.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { pre: "Signed in as robin" } }] });
-			const [read] = s.call<{ edits: { head: number; body: { title: string; pre: string } }[] }[]>("get", {
+			await s.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { pre: "Signed in as robin" } }] });
+			const [read] = await s.call<{ edits: { head: number; body: { title: string; pre: string } }[] }[]>("get", {
 				refs: [proposed.proposal],
 			});
 			expect(read?.edits[0]).toMatchObject({
 				head: 2,
 				body: { title: "Coupon: percentage", pre: "Signed in as robin" },
 			});
-			const [question] = s.call<{ evidenceHash: string }[]>("get", { refs: [proposed.question] });
-			s.call("decide", { q: proposed.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } });
-			expect(s.call<CaseView[]>("get", { refs: ["C-1"] })[0]).toMatchObject({
+			const [question] = await s.call<{ evidenceHash: string }[]>("get", { refs: [proposed.question] });
+			await s.call("decide", { q: proposed.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } });
+			expect((await s.call<CaseView[]>("get", { refs: ["C-1"] }))[0]).toMatchObject({
 				version: 3,
 				title: "Coupon: percentage",
 				pre: "Signed in as robin",
@@ -1596,17 +1624,17 @@ describe("editing", () => {
 		}
 	});
 
-	test("a proposal read pages all 250 edits without hiding the last 50", () => {
+	test("a proposal read pages all 250 edits without hiding the last 50", async () => {
 		const edits = Array.from({ length: 250 }, (_, i) => ({ op: "create", outline: `Case ${i}` }));
-		const s = harness({ preset: "standard" });
+		const s = await harness({ preset: "standard" });
 		try {
 			const agent = s.actor("writer", "agent", ["read", "produce"]);
-			const proposed = s.call<Proposed>("propose", { edits }, agent);
+			const proposed = await s.call<Proposed>("propose", { edits }, agent);
 			type Page = { count: number; cursor: string | null; edits: { body: { title: string } }[] };
-			const [read] = s.call<Page[]>("get", { refs: [proposed.proposal] });
+			const [read] = await s.call<Page[]>("get", { refs: [proposed.proposal] });
 			expect([read?.count, read?.edits.length]).toEqual([250, 200]);
 			expect(typeof read?.cursor).toBe("string");
-			const [last] = s.call<Page[]>("get", { refs: [proposed.proposal], cursor: read?.cursor });
+			const [last] = await s.call<Page[]>("get", { refs: [proposed.proposal], cursor: read?.cursor });
 			expect([last?.count, last?.edits.length, last?.cursor]).toEqual([250, 50, null]);
 			expect([read?.edits[0]?.body.title, last?.edits[0]?.body.title, last?.edits.at(-1)?.body.title]).toEqual([
 				"Case 0",
@@ -1614,15 +1642,15 @@ describe("editing", () => {
 				"Case 249",
 			]);
 			for (const cursor of ["bad", read?.cursor?.replace(/^\d+/, "999")]) {
-				expect(() => s.call("get", { refs: [proposed.proposal], cursor })).toThrow(
+				await expect(s.call("get", { refs: [proposed.proposal], cursor })).rejects.toThrow(
 					"that is not a cursor of this proposal",
 				);
 			}
-			expect(() => s.call("get", { refs: [proposed.proposal, proposed.proposal], cursor: read?.cursor })).toThrow(
-				"a proposal cursor needs exactly one P- ref",
-			);
-			s.call("propose", { edits: [{ op: "create", outline: "New case" }] });
-			expect(() => s.call("get", { refs: [proposed.proposal], cursor: read?.cursor })).toThrow(
+			await expect(
+				s.call("get", { refs: [proposed.proposal, proposed.proposal], cursor: read?.cursor }),
+			).rejects.toThrow("a proposal cursor needs exactly one P- ref");
+			await s.call("propose", { edits: [{ op: "create", outline: "New case" }] });
+			await expect(s.call("get", { refs: [proposed.proposal], cursor: read?.cursor })).rejects.toThrow(
 				"The project changed. Read the proposal again from its first page.",
 			);
 		} finally {
@@ -1630,10 +1658,10 @@ describe("editing", () => {
 		}
 	});
 
-	test("a proposal read names the case a move asks to follow, and ranking places it by the guide's rule", () => {
-		const s = harness({ preset: "standard" });
+	test("a proposal read names the case a move asks to follow, and ranking places it by the guide's rule", async () => {
+		const s = await harness({ preset: "standard" });
 		try {
-			s.call("propose", {
+			await s.call("propose", {
 				edits: [
 					{ op: "create", outline: "One", folder: "A" },
 					{ op: "create", outline: "Two", folder: "A" },
@@ -1642,7 +1670,7 @@ describe("editing", () => {
 				],
 			});
 			const agent = s.actor("writer", "agent", ["read", "produce"]);
-			const proposed = s.call<Proposed>(
+			const proposed = await s.call<Proposed>(
 				"propose",
 				{
 					edits: [
@@ -1658,22 +1686,22 @@ describe("editing", () => {
 				agent,
 			);
 			expect(proposed.status).toBe("open");
-			const [read] = s.call<{ edits: { after?: string }[] }[]>("get", { refs: [proposed.proposal] });
+			const [read] = await s.call<{ edits: { after?: string }[] }[]>("get", { refs: [proposed.proposal] });
 			expect(read?.edits.map((edit) => edit.after)).toEqual(["C-1", "C-3", "C-2", "C-2"]);
-			const [question] = s.call<{ evidenceHash: string }[]>("get", { refs: [proposed.question] });
-			s.call("decide", { q: proposed.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } });
-			const order = (folder: string) =>
-				s.call<{ items: { ref: string }[] }>("find", { in: "cases", folder }).items.map((item) => item.ref);
-			expect([order("A"), order("B")]).toEqual([["C-3", "C-4", "C-2"], ["C-1"]]);
+			const [question] = await s.call<{ evidenceHash: string }[]>("get", { refs: [proposed.question] });
+			await s.call("decide", { q: proposed.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } });
+			const order = async (folder: string) =>
+				(await s.call<{ items: { ref: string }[] }>("find", { in: "cases", folder })).items.map((item) => item.ref);
+			expect([await order("A"), await order("B")]).toEqual([["C-3", "C-4", "C-2"], ["C-1"]]);
 		} finally {
 			s.close();
 		}
 	});
 
-	test("a move after a folder edit, and a move with its anchor, land by the guide's rule", () => {
-		const s = harness({ preset: "standard" });
+	test("a move after a folder edit, and a move with its anchor, land by the guide's rule", async () => {
+		const s = await harness({ preset: "standard" });
 		try {
-			s.call("propose", {
+			await s.call("propose", {
 				edits: [
 					{ op: "create", outline: "One", folder: "A" },
 					{ op: "create", outline: "Two", folder: "A" },
@@ -1683,7 +1711,7 @@ describe("editing", () => {
 				],
 			});
 			const agent = s.actor("writer", "agent", ["read", "produce"]);
-			const proposed = s.call<Proposed>(
+			const proposed = await s.call<Proposed>(
 				"propose",
 				{
 					edits: [
@@ -1696,13 +1724,13 @@ describe("editing", () => {
 				},
 				agent,
 			);
-			const [read] = s.call<{ edits: { after?: string }[] }[]>("get", { refs: [proposed.proposal] });
+			const [read] = await s.call<{ edits: { after?: string }[] }[]>("get", { refs: [proposed.proposal] });
 			expect(read?.edits.map((edit) => edit.after)).toEqual([undefined, "C-1", "C-5"]);
-			const [question] = s.call<{ evidenceHash: string }[]>("get", { refs: [proposed.question] });
-			s.call("decide", { q: proposed.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } });
-			const order = (folder: string) =>
-				s.call<{ items: { ref: string }[] }>("find", { in: "cases", folder }).items.map((item) => item.ref);
-			expect([order("Renamed"), order("B")]).toEqual([
+			const [question] = await s.call<{ evidenceHash: string }[]>("get", { refs: [proposed.question] });
+			await s.call("decide", { q: proposed.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } });
+			const order = async (folder: string) =>
+				(await s.call<{ items: { ref: string }[] }>("find", { in: "cases", folder })).items.map((item) => item.ref);
+			expect([await order("Renamed"), await order("B")]).toEqual([
 				["C-1", "C-3", "C-2"],
 				["C-4", "C-5"],
 			]);
@@ -1711,11 +1739,11 @@ describe("editing", () => {
 		}
 	});
 
-	test("cases from two folders moved together each go where the guide says in their own folder", () => {
+	test("cases from two folders moved together each go where the guide says in their own folder", async () => {
 		for (const after of [null, "C-1"]) {
-			const s = harness();
+			const s = await harness();
 			try {
-				s.call("propose", {
+				await s.call("propose", {
 					edits: [
 						{ op: "create", outline: "One", folder: "A" },
 						...["Two", "Three", "Four", "Five", "Six"].map((title) => ({
@@ -1725,29 +1753,29 @@ describe("editing", () => {
 						})),
 					],
 				});
-				s.call("propose", { edits: [{ op: "place", cases: ["C-1", "C-2"], after }] });
-				const order = (folder: string) =>
-					s.call<{ items: { ref: string }[] }>("find", { in: "cases", folder }).items.map((item) => item.ref);
+				await s.call("propose", { edits: [{ op: "place", cases: ["C-1", "C-2"], after }] });
+				const order = async (folder: string) =>
+					(await s.call<{ items: { ref: string }[] }>("find", { in: "cases", folder })).items.map((item) => item.ref);
 				// C-1 is the only case in A. C-1 is not in B, so C-2 goes to the end of B: a rank made in A does not
 				// place a case in B.
-				expect([order("A"), order("B")]).toEqual([["C-1"], ["C-3", "C-4", "C-5", "C-6", "C-2"]]);
+				expect([await order("A"), await order("B")]).toEqual([["C-1"], ["C-3", "C-4", "C-5", "C-6", "C-2"]]);
 			} finally {
 				s.close();
 			}
 		}
 	});
 
-	test("a proposal that moves two folders into each other can be read and rejected", () => {
-		const s = harness({ preset: "standard" });
+	test("a proposal that moves two folders into each other can be read and rejected", async () => {
+		const s = await harness({ preset: "standard" });
 		try {
-			s.call("propose", {
+			await s.call("propose", {
 				edits: [
 					{ op: "create", outline: "One", folder: "A" },
 					{ op: "create", outline: "Two", folder: "B" },
 				],
 			});
 			const agent = s.actor("writer", "agent", ["read", "produce"]);
-			const proposed = s.call<Proposed>(
+			const proposed = await s.call<Proposed>(
 				"propose",
 				{
 					edits: [
@@ -1758,10 +1786,10 @@ describe("editing", () => {
 				},
 				agent,
 			);
-			const [read] = s.call<{ edits: unknown[] }[]>("get", { refs: [proposed.proposal] });
+			const [read] = await s.call<{ edits: unknown[] }[]>("get", { refs: [proposed.proposal] });
 			expect(read?.edits).toHaveLength(3);
-			const [question] = s.call<{ evidenceHash: string }[]>("get", { refs: [proposed.question] });
-			const [reply] = s.call<{ status: string }[]>("decide", {
+			const [question] = await s.call<{ evidenceHash: string }[]>("get", { refs: [proposed.question] });
+			const [reply] = await s.call<{ status: string }[]>("decide", {
 				q: proposed.question,
 				onEvidence: question?.evidenceHash,
 				answer: { is: "reject" },
@@ -1772,13 +1800,13 @@ describe("editing", () => {
 		}
 	});
 
-	test("restore makes a new version and keeps the history", () => {
-		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Changed" } }] });
-		const reply = h.call<Proposed>("propose", { edits: [{ op: "restore", case: "C-1", to: 1 }] });
+	test("restore makes a new version and keeps the history", async () => {
+		await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Changed" } }] });
+		const reply = await h.call<Proposed>("propose", { edits: [{ op: "restore", case: "C-1", to: 1 }] });
 		expect(reply.cases[0]).toMatchObject({ version: 3 });
-		const [view] = h.call<CaseView[]>("get", { refs: ["C-1"] });
+		const [view] = await h.call<CaseView[]>("get", { refs: ["C-1"] });
 		expect(view?.title).toBe("Checkout applies a percentage coupon");
-		const first = h.call<CaseView[]>("get", { refs: ["C-1"], version: 1 })[0];
+		const first = (await h.call<CaseView[]>("get", { refs: ["C-1"], version: 1 }))[0];
 		expect(view?.hash).toBe(first?.hash ?? "");
 	});
 });
@@ -1788,80 +1816,82 @@ describe("a proposal that waits while its case moves on", () => {
 		edits: { body: { title: string; steps: { id: string }[] }; current: { title: string }; refused: string | null }[];
 	};
 	let agent: ReturnType<Harness["actor"]>;
-	beforeEach(() => {
+	beforeEach(async () => {
 		h.close();
-		h = harness({ preset: "standard" });
-		h.call("propose", { edits: [{ op: "create", outline: OUTLINE }] });
+		h = await harness({ preset: "standard" });
+		await h.call("propose", { edits: [{ op: "create", outline: OUTLINE }] });
 		agent = h.actor("helper", "agent", ["read", "produce"]);
 	});
-	const proposeAsAgent = (body: Record<string, unknown>) => {
-		const waiting = h.call<Proposed>("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body }] }, agent);
+	const proposeAsAgent = async (body: Record<string, unknown>) => {
+		const waiting = await h.call<Proposed>("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body }] }, agent);
 		expect(waiting.status).toBe("open");
 		return waiting;
 	};
-	const retitle = (title: string, base: number) =>
-		h.call<Proposed>("propose", { edits: [{ op: "edit", case: "C-1", base, body: { title } }] });
-	const read = (proposal: string | null) => h.call<Read[]>("get", { refs: [proposal] })[0]?.edits[0];
-	const accept = (question: string | null) => {
-		const [item] = h.call<{ evidenceHash: string }[]>("get", { refs: [question] });
-		return h.call<{ status: string; needs: string | null }[]>("decide", {
-			q: question,
-			onEvidence: item?.evidenceHash,
-			answer: { is: "accept" },
-		})[0];
+	const retitle = async (title: string, base: number) =>
+		await h.call<Proposed>("propose", { edits: [{ op: "edit", case: "C-1", base, body: { title } }] });
+	const read = async (proposal: string | null) => (await h.call<Read[]>("get", { refs: [proposal] }))[0]?.edits[0];
+	const accept = async (question: string | null) => {
+		const [item] = await h.call<{ evidenceHash: string }[]>("get", { refs: [question] });
+		return (
+			await h.call<{ status: string; needs: string | null }[]>("decide", {
+				q: question,
+				onEvidence: item?.evidenceHash,
+				answer: { is: "accept" },
+			})
+		)[0];
 	};
 
-	test("reads as what accepting it writes: merged with the newer version, as the merge on accepting does", () => {
-		const [view] = h.call<CaseView[]>("get", { refs: ["C-1"] });
+	test("reads as what accepting it writes: merged with the newer version, as the merge on accepting does", async () => {
+		const [view] = await h.call<CaseView[]>("get", { refs: ["C-1"] });
 		const reordered = [...(view?.steps ?? [])].reverse();
-		const waiting = proposeAsAgent({ steps: reordered });
-		retitle("Updated by a person", 1);
+		const waiting = await proposeAsAgent({ steps: reordered });
+		await retitle("Updated by a person", 1);
 
-		const edit = read(waiting.proposal);
+		const edit = await read(waiting.proposal);
 		expect(edit?.current.title).toBe("Updated by a person");
 		expect(edit?.body.title).toBe("Updated by a person");
 		expect(edit?.body.steps.map((step) => step.id)).toEqual(reordered.map((step) => step.id));
 		expect(edit?.refused).toBeNull();
 
-		expect(accept(waiting.question)?.status).toBe("decided");
-		const [accepted] = h.call<CaseView[]>("get", { refs: ["C-1"] });
+		expect((await accept(waiting.question))?.status).toBe("decided");
+		const [accepted] = await h.call<CaseView[]>("get", { refs: ["C-1"] });
 		expect({ title: accepted?.title, steps: accepted?.steps.map((step) => step.id) }).toEqual({
 			title: edit?.body.title,
 			steps: edit?.body.steps.map((step) => step.id),
 		});
 	});
 
-	test("says that accepting is refused, in the words accepting refuses with, when the newer version cannot merge", () => {
-		const waiting = proposeAsAgent({ title: "Retitled by the agent" });
-		retitle("Retitled by a person", 1);
+	test("says that accepting is refused, in the words accepting refuses with, when the newer version cannot merge", async () => {
+		const waiting = await proposeAsAgent({ title: "Retitled by the agent" });
+		await retitle("Retitled by a person", 1);
 		const refusal = "C-1 changed after this proposal was made; redo the proposal on version 2";
 		// Refused, the edit is shown as it was proposed.
-		expect(read(waiting.proposal)).toMatchObject({ refused: refusal, body: { title: "Retitled by the agent" } });
-		expect(accept(waiting.question)).toMatchObject({ status: "conflict", needs: refusal });
+		expect(await read(waiting.proposal)).toMatchObject({ refused: refusal, body: { title: "Retitled by the agent" } });
+		expect(await accept(waiting.question)).toMatchObject({ status: "conflict", needs: refusal });
 	});
 
-	test("says that accepting is refused when the body no longer meets the policy's field definitions", () => {
-		const setFields = (choices: string[]) => {
-			const policy = h.call<{ version: number; settings: Record<string, unknown> }>("admin", {
+	test("says that accepting is refused when the body no longer meets the policy's field definitions", async () => {
+		const setFields = async (choices: string[]) => {
+			const policy = await h.call<{ version: number; settings: Record<string, unknown> }>("admin", {
 				do: "policy.show",
 				project: "scratch",
 			});
 			const fields = { risk: { kind: "choice", label: "Risk", required: false, choices } };
-			const reply = h.call<Proposed>("propose", {
+			const reply = await h.call<Proposed>("propose", {
 				edits: [{ op: "policy", base: policy.version, settings: { ...policy.settings, fields } }],
 			});
-			if (reply.question) expect(accept(reply.question)?.status).toBe("decided");
+			if (reply.question) expect((await accept(reply.question))?.status).toBe("decided");
 		};
-		setFields(["low", "high"]);
-		const waiting = proposeAsAgent({ fields: { risk: "high" } });
-		setFields(["low"]);
-		const refusal = read(waiting.proposal)?.refused;
+		await setFields(["low", "high"]);
+		const waiting = await proposeAsAgent({ fields: { risk: "high" } });
+		await setFields(["low"]);
+		const refusal = (await read(waiting.proposal))?.refused;
 		expect(refusal).toStartWith("case custom fields are not valid:");
-		expect(accept(waiting.question)).toMatchObject({ status: "invalid", needs: refusal });
+		expect(await accept(waiting.question)).toMatchObject({ status: "invalid", needs: refusal });
 	});
 
-	test("reads each edit on its own, so a proposal whose edits refuse each other reads clean and accepting refuses it", () => {
-		const waiting = h.call<Proposed>(
+	test("reads each edit on its own, so a proposal whose edits refuse each other reads clean and accepting refuses it", async () => {
+		const waiting = await h.call<Proposed>(
 			"propose",
 			{
 				edits: [
@@ -1872,23 +1902,23 @@ describe("a proposal that waits while its case moves on", () => {
 			agent,
 		);
 		expect(waiting.status).toBe("open");
-		const [proposal] = h.call<Read[]>("get", { refs: [waiting.proposal] });
+		const [proposal] = await h.call<Read[]>("get", { refs: [waiting.proposal] });
 		expect(proposal?.edits.map((edit) => [edit.body.title, edit.refused])).toEqual([
 			["First", null],
 			["Second", null],
 		]);
 		// Accepting applies them in order: the second meets a version the first made. The answer says so.
-		expect(accept(waiting.question)).toMatchObject({
+		expect(await accept(waiting.question)).toMatchObject({
 			status: "conflict",
 			needs: "C-1 changed after this proposal was made; redo the proposal on version 2",
 		});
 	});
 
-	test("once decided, reads as it was proposed: a later version adds nothing to it and refuses nothing", () => {
-		const waiting = proposeAsAgent({ title: "Retitled by the agent" });
-		expect(accept(waiting.question)?.status).toBe("decided");
-		retitle("Retitled again", 2);
-		expect(read(waiting.proposal)).toMatchObject({
+	test("once decided, reads as it was proposed: a later version adds nothing to it and refuses nothing", async () => {
+		const waiting = await proposeAsAgent({ title: "Retitled by the agent" });
+		expect((await accept(waiting.question))?.status).toBe("decided");
+		await retitle("Retitled again", 2);
+		expect(await read(waiting.proposal)).toMatchObject({
 			body: { title: "Retitled by the agent" },
 			current: { title: "Retitled again" },
 			refused: null,
@@ -1897,23 +1927,23 @@ describe("a proposal that waits while its case moves on", () => {
 });
 
 describe("organising", () => {
-	test("a bulk move and retag of 300 cases is one proposal, one decision, one point on the clock", () => {
+	test("a bulk move and retag of 300 cases is one proposal, one decision, one point on the clock", async () => {
 		const edits = Array.from({ length: 300 }, (_, i) => ({ op: "create", outline: `Case ${i}`, folder: "inbox" }));
-		h.call("propose", { edits });
+		await h.call("propose", { edits });
 		const cases = Array.from({ length: 300 }, (_, i) => `C-${i + 1}`);
 		const count = (table: string) =>
 			h.app.db.raw.query<{ n: number }, []>(`SELECT count(*) AS n FROM ${table}`).get()?.n ?? 0;
 		const proposals = count("proposals");
 		const decisions = count("decisions");
 		const before = h.app.db.raw.query<{ seq: number }, []>("SELECT seq FROM projects").get()?.seq ?? 0;
-		const reply = h.call<Proposed>("propose", {
+		const reply = await h.call<Proposed>("propose", {
 			edits: [{ op: "place", cases, folder: "checkout/regression", tags: { add: ["regression"] } }],
 		});
 		expect(reply.status).toBe("adopted");
 		const after = h.app.db.raw.query<{ seq: number }, []>("SELECT seq FROM projects").get()?.seq ?? 0;
 		expect(after).toBe(before + 1);
 		expect([count("proposals") - proposals, count("decisions") - decisions]).toEqual([1, 1]);
-		const found = h.call<{ items: { ref: string; tags: string[] }[] }>("find", {
+		const found = await h.call<{ items: { ref: string; tags: string[] }[] }>("find", {
 			folder: "checkout/regression",
 			limit: 500,
 		});
@@ -1924,89 +1954,90 @@ describe("organising", () => {
 		expect(versions).toBe(300); // a move is history, not a new version
 	});
 
-	test("search finds by word and prefix, and by ref", () => {
-		h.call("propose", {
+	test("search finds by word and prefix, and by ref", async () => {
+		await h.call("propose", {
 			edits: [
 				{ op: "create", outline: OUTLINE },
 				{ op: "create", outline: "Login rejects an expired password\n  Enter the old password > Error shown" },
 			],
 		});
-		const byWord = h.call<{ items: { ref: string }[] }>("find", { text: "coupon" });
+		const byWord = await h.call<{ items: { ref: string }[] }>("find", { text: "coupon" });
 		expect(byWord.items.map((c) => c.ref)).toEqual(["C-1"]);
-		const byPrefix = h.call<{ items: { ref: string }[] }>("find", { text: "expired pass" });
+		const byPrefix = await h.call<{ items: { ref: string }[] }>("find", { text: "expired pass" });
 		expect(byPrefix.items.map((c) => c.ref)).toEqual(["C-2"]);
-		expect(h.call<{ items: { ref: string }[] }>("find", { text: "C-2" }).items[0]?.ref).toBe("C-2");
-		expect(h.call<{ items: unknown[] }>("find", { text: '"*) OR 1=1 --' }).items).toEqual([]);
-		h.call("propose", {
+		expect((await h.call<{ items: { ref: string }[] }>("find", { text: "C-2" })).items[0]?.ref).toBe("C-2");
+		expect((await h.call<{ items: unknown[] }>("find", { text: '"*) OR 1=1 --' })).items).toEqual([]);
+		await h.call("propose", {
 			edits: [
 				{ op: "create", folder: "Ranked", tags: ["ranked"], outline: "Needle\n  Check > Good" },
 				{ op: "create", folder: "Ranked", tags: ["ranked"], outline: "Other\n  Needle needle needle needle > Good" },
 			],
 		});
 		for (const scope of [{}, { folder: "Ranked" }, { tags: ["ranked"] }]) {
-			const ranked = h.call<{ items: { ref: string }[] }>("find", { text: "needle", ...scope });
+			const ranked = await h.call<{ items: { ref: string }[] }>("find", { text: "needle", ...scope });
 			expect(ranked.items.map((item) => item.ref)).toEqual(["C-3", "C-4"]);
 		}
 	});
 
-	test("a search by ref keeps to the folder, the tags and the state it is narrowed by", () => {
-		h.call("propose", {
+	test("a search by ref keeps to the folder, the tags and the state it is narrowed by", async () => {
+		await h.call("propose", {
 			edits: [
 				{ op: "create", folder: "Checkout", tags: ["checkout"], outline: "Coupon applies\n  Apply > Lower" },
 				{ op: "create", folder: "Accounts", outline: "Password resets\n  Reset > Access" },
 			],
 		});
-		const refs = (input: Record<string, unknown>) =>
-			h.call<{ items: { ref: string }[] }>("find", input).items.map((c) => c.ref);
-		expect(refs({ text: "C-1", folder: "Checkout" })).toEqual(["C-1"]);
-		expect(refs({ text: "C-2", folder: "Checkout" })).toEqual([]);
-		expect(refs({ text: "2", folder: "Checkout", deep: true })).toEqual([]);
-		expect(refs({ text: "C-2", tags: ["checkout"] })).toEqual([]);
-		expect(refs({ text: "C-1", tags: ["checkout"] })).toEqual(["C-1"]);
-		expect(refs({ text: "C-2", state: "archived" })).toEqual([]);
-		expect(refs({ text: "C-2" })).toEqual(["C-2"]);
+		const refs = async (input: Record<string, unknown>) =>
+			(await h.call<{ items: { ref: string }[] }>("find", input)).items.map((c) => c.ref);
+		expect(await refs({ text: "C-1", folder: "Checkout" })).toEqual(["C-1"]);
+		expect(await refs({ text: "C-2", folder: "Checkout" })).toEqual([]);
+		expect(await refs({ text: "2", folder: "Checkout", deep: true })).toEqual([]);
+		expect(await refs({ text: "C-2", tags: ["checkout"] })).toEqual([]);
+		expect(await refs({ text: "C-1", tags: ["checkout"] })).toEqual(["C-1"]);
+		expect(await refs({ text: "C-2", state: "archived" })).toEqual([]);
+		expect(await refs({ text: "C-2" })).toEqual(["C-2"]);
 	});
 
-	test("a search too broad to rank is bounded: newest first, title matches first, and it says the count is unknown", () => {
+	test("a search too broad to rank is bounded: newest first, title matches first, and it says the count is unknown", async () => {
 		const batch = (from: number, n: number) =>
 			Array.from({ length: n }, (_, i) => ({ op: "create", outline: `Common thing ${from + i}\n  Step > Result` }));
-		h.call("propose", { edits: batch(0, 1100) });
-		h.call("propose", { edits: batch(1100, 1000) });
-		h.call("propose", { edits: [{ op: "create", outline: "Rare needle\n  A common step > Result" }] });
-		const broad = h.call<{ count: number | null; cursor: string | null; items: { ref: string; title: string }[] }>(
-			"find",
-			{
-				text: "common",
-				limit: 5,
-			},
-		);
+		await h.call("propose", { edits: batch(0, 1100) });
+		await h.call("propose", { edits: batch(1100, 1000) });
+		await h.call("propose", { edits: [{ op: "create", outline: "Rare needle\n  A common step > Result" }] });
+		const broad = await h.call<{
+			count: number | null;
+			cursor: string | null;
+			items: { ref: string; title: string }[];
+		}>("find", {
+			text: "common",
+			limit: 5,
+		});
 		expect(broad.count).toBeNull(); // more than can be ranked: the caller is told the number is not known
 		expect(broad.items.map((c) => c.ref)).toEqual(["C-2100", "C-2099", "C-2098", "C-2097", "C-2096"]); // in the title, newest first
 		// Its order holds only for what one page reads, so it has no next page: a cursor into it reads nothing more.
 		expect(broad.cursor).toBeNull();
-		expect(h.call("find", { text: "common", limit: 5, cursor: "5" })).toMatchObject({
+		expect(await h.call("find", { text: "common", limit: 5, cursor: "5" })).toMatchObject({
 			items: [],
 			cursor: null,
 			count: null,
 		});
-		const narrow = h.call<{ count: number | null; items: { ref: string }[] }>("find", { text: "common needle" });
+		const narrow = await h.call<{ count: number | null; items: { ref: string }[] }>("find", { text: "common needle" });
 		expect(narrow).toMatchObject({ count: 1, items: [{ ref: "C-2101" }] });
-		const ranked = h.call<{ count: number | null; items: { ref: string }[] }>("find", { text: "thing 1500" });
+		const ranked = await h.call<{ count: number | null; items: { ref: string }[] }>("find", { text: "thing 1500" });
 		expect(ranked.count).toBe(1);
 	});
 
-	test("a search's count and its pages do not depend on the page size", () => {
-		h.call("propose", {
+	test("a search's count and its pages do not depend on the page size", async () => {
+		await h.call("propose", {
 			edits: Array.from({ length: 600 }, (_, i) => ({ op: "create", outline: `Needle ${i}\n  Step > Result` })),
 		});
 		type Page = { count: number | null; cursor: string | null; items: { ref: string }[] };
 		for (const limit of [50, 100, 200]) {
 			const refs: string[] = [];
-			let page = h.call<Page>("find", { text: "needle", limit });
+			let page = await h.call<Page>("find", { text: "needle", limit });
 			expect(page.count).toBe(600);
 			refs.push(...page.items.map((c) => c.ref));
 			while (page.cursor) {
-				page = h.call<Page>("find", { text: "needle", limit, cursor: page.cursor });
+				page = await h.call<Page>("find", { text: "needle", limit, cursor: page.cursor });
 				expect(page.count).toBe(600);
 				refs.push(...page.items.map((c) => c.ref));
 			}
@@ -2014,27 +2045,30 @@ describe("organising", () => {
 			expect(new Set(refs).size).toBe(600);
 		}
 		// Narrowed by a tag the cases do not have: the count is of what qualifies, not of what matches.
-		expect(h.call<Page>("find", { text: "needle", tags: ["absent"], limit: 50 })).toMatchObject({
+		expect(await h.call<Page>("find", { text: "needle", tags: ["absent"], limit: 50 })).toMatchObject({
 			count: 0,
 			cursor: null,
 			items: [],
 		});
-		expect(h.raw("find", { text: "needle", cursor: "3:abc" })).toMatchObject({ ok: false, error: { code: "invalid" } });
+		expect(await h.raw("find", { text: "needle", cursor: "3:abc" })).toMatchObject({
+			ok: false,
+			error: { code: "invalid" },
+		});
 	});
 
-	test("archiving hides a case from lists and keeps it readable", () => {
-		h.call("propose", { edits: [{ op: "create", outline: OUTLINE }] });
-		h.call("propose", { edits: [{ op: "state", cases: ["C-1"], to: "archived" }] });
-		expect(h.call<{ items: unknown[] }>("find", {}).items).toEqual([]);
-		expect(h.call<{ state: string }[]>("get", { refs: ["C-1"] })[0]?.state).toBe("archived");
+	test("archiving hides a case from lists and keeps it readable", async () => {
+		await h.call("propose", { edits: [{ op: "create", outline: OUTLINE }] });
+		await h.call("propose", { edits: [{ op: "state", cases: ["C-1"], to: "archived" }] });
+		expect((await h.call<{ items: unknown[] }>("find", {})).items).toEqual([]);
+		expect((await h.call<{ state: string }[]>("get", { refs: ["C-1"] }))[0]?.state).toBe("archived");
 	});
 
-	test("archived search matches cannot hide the active match or change its count", () => {
+	test("archived search matches cannot hide the active match or change its count", async () => {
 		for (const [from, length] of [
 			[0, 1100],
 			[1100, 1001],
 		] as const) {
-			h.call("propose", {
+			await h.call("propose", {
 				edits: Array.from({ length }, (_, i) => ({
 					op: "create",
 					folder: "Regression",
@@ -2042,58 +2076,65 @@ describe("organising", () => {
 				})),
 			});
 		}
-		h.call("propose", {
+		await h.call("propose", {
 			edits: [{ op: "state", cases: Array.from({ length: 2100 }, (_, i) => `C-${i + 2}`), to: "archived" }],
 		});
 		type Page = { count: number | null; cursor: string | null; items: { ref: string }[] };
 		for (const limit of [5, 50, 200]) {
 			for (const scope of [{}, { folder: "Regression" }, { state: "active" }]) {
-				const found = h.call<Page>("find", { text: "common", limit, ...scope });
+				const found = await h.call<Page>("find", { text: "common", limit, ...scope });
 				expect(found.items.map((item) => item.ref)).toEqual(["C-1"]);
 				expect(found.count).toBe(1);
 				expect(found.cursor).toBeNull();
 			}
 		}
-		expect(h.call<Page>("find", { limit: 5 })).toMatchObject({ count: 1, items: [{ ref: "C-1" }] });
-		expect(h.call("plan", { name: "Search regression", select: { text: "common" } })).toMatchObject({ slots: 1 });
-		expect(h.call<Page>("find", { text: "common", state: "archived", limit: 5 })).toMatchObject({
+		expect(await h.call<Page>("find", { limit: 5 })).toMatchObject({ count: 1, items: [{ ref: "C-1" }] });
+		expect(await h.call("plan", { name: "Search regression", select: { text: "common" } })).toMatchObject({ slots: 1 });
+		expect(await h.call<Page>("find", { text: "common", state: "archived", limit: 5 })).toMatchObject({
 			count: null,
 			items: [{ ref: "C-2101" }, { ref: "C-2100" }, { ref: "C-2099" }, { ref: "C-2098" }, { ref: "C-2097" }],
 		});
 	});
 
-	test.each(["data", "md"] as const)("conditional %s case reads refresh changed tags, coverage and state", (as) => {
-		h.call("propose", { edits: [{ op: "create", outline: "Checkout #smoke @REQ-1\n  Check > Pass" }] });
-		type Document = { hash: string; etag?: string; md?: string; tags?: string[]; covers?: string[]; state?: string };
-		const before = h.call<Document[]>("get", { refs: ["C-1"], as })[0];
-		if (!before) throw new Error("missing case");
-		h.call("propose", {
-			edits: [
-				{ op: "place", cases: ["C-1"], tags: { set: ["critical"] } },
-				{ op: "cover", case: "C-1", requirement: "REQ-2", on: true },
-				{ op: "state", cases: ["C-1"], to: "archived" },
-			],
-		});
-		const conditional = h.call<Document[]>("get", { refs: ["C-1"], as, unless: { "C-1": before.etag ?? before.hash } });
-		if (as === "md") {
-			expect(conditional[0]?.md).toContain("tags: [critical]");
-			expect(conditional[0]?.md).toContain("covers: [REQ-1, REQ-2]");
-		} else {
-			expect(conditional[0]).toMatchObject({ tags: ["critical"], covers: ["REQ-1", "REQ-2"], state: "archived" });
-		}
-		expect(conditional).toEqual(h.call("get", { refs: ["C-1"], as }));
-	});
+	test.each(["data", "md"] as const)(
+		"conditional %s case reads refresh changed tags, coverage and state",
+		async (as) => {
+			await h.call("propose", { edits: [{ op: "create", outline: "Checkout #smoke @REQ-1\n  Check > Pass" }] });
+			type Document = { hash: string; etag?: string; md?: string; tags?: string[]; covers?: string[]; state?: string };
+			const before = (await h.call<Document[]>("get", { refs: ["C-1"], as }))[0];
+			if (!before) throw new Error("missing case");
+			await h.call("propose", {
+				edits: [
+					{ op: "place", cases: ["C-1"], tags: { set: ["critical"] } },
+					{ op: "cover", case: "C-1", requirement: "REQ-2", on: true },
+					{ op: "state", cases: ["C-1"], to: "archived" },
+				],
+			});
+			const conditional = await h.call<Document[]>("get", {
+				refs: ["C-1"],
+				as,
+				unless: { "C-1": before.etag ?? before.hash },
+			});
+			if (as === "md") {
+				expect(conditional[0]?.md).toContain("tags: [critical]");
+				expect(conditional[0]?.md).toContain("covers: [REQ-1, REQ-2]");
+			} else {
+				expect(conditional[0]).toMatchObject({ tags: ["critical"], covers: ["REQ-1", "REQ-2"], state: "archived" });
+			}
+			expect(conditional).toEqual(await h.call("get", { refs: ["C-1"], as }));
+		},
+	);
 
-	test("a document etag covers each requested field and keeps the body hash for reviews", () => {
-		h.call("propose", {
+	test("a document etag covers each requested field and keeps the body hash for reviews", async () => {
+		await h.call("propose", {
 			edits: [{ op: "create", folder: "Regression", outline: "Checkout #smoke @REQ-1\n  Check > Pass" }],
 		});
-		const read = (input = {}) => {
-			const [doc] = h.call<Record<string, unknown>[]>("get", { refs: ["C-1"], ...input });
+		const read = async (input = {}) => {
+			const [doc] = await h.call<Record<string, unknown>[]>("get", { refs: ["C-1"], ...input });
 			if (!doc) throw new Error("missing case");
 			return doc;
 		};
-		const created = read();
+		const created = await read();
 		for (const [edit, expected] of [
 			[{ op: "place", cases: ["C-1"], tags: { set: ["critical"] } }, { tags: ["critical"] }],
 			[{ op: "cover", case: "C-1", requirement: "REQ-2", on: true }, { covers: ["REQ-1", "REQ-2"] }],
@@ -2101,46 +2142,49 @@ describe("organising", () => {
 			[{ op: "folder", folder: "Moved", name: "Renamed" }, { folder: { path: "Renamed" } }],
 			[{ op: "state", cases: ["C-1"], to: "archived" }, { state: "archived" }],
 		] as const) {
-			const before = read();
-			expect(read({ unless: { "C-1": before.etag } })).toEqual({
+			const before = await read();
+			expect(await read({ unless: { "C-1": before.etag } })).toEqual({
 				ref: "C-1",
 				unchanged: true,
 				hash: created.hash,
 				etag: before.etag,
 			});
-			h.call("propose", { edits: [edit] });
-			const changed = read({ unless: { "C-1": before.etag } });
+			await h.call("propose", { edits: [edit] });
+			const changed = await read({ unless: { "C-1": before.etag } });
 			expect(changed).toMatchObject(expected);
 			expect(changed.hash).toBe(created.hash);
 			expect(changed.etag).not.toBe(before.etag);
 		}
-		const beforeEdit = read();
-		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Changed checkout" } }] });
-		expect(read({ unless: { "C-1": beforeEdit.etag } })).toMatchObject({ title: "Changed checkout", version: 2 });
-		const titleOnly = read({ fields: ["title"] });
-		expect(read({ fields: ["title"], unless: { "C-1": titleOnly.etag } })).toMatchObject({ unchanged: true });
-		expect(read({ unless: { "C-1": titleOnly.etag } })).toMatchObject({
+		const beforeEdit = await read();
+		await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Changed checkout" } }] });
+		expect(await read({ unless: { "C-1": beforeEdit.etag } })).toMatchObject({ title: "Changed checkout", version: 2 });
+		const titleOnly = await read({ fields: ["title"] });
+		expect(await read({ fields: ["title"], unless: { "C-1": titleOnly.etag } })).toMatchObject({ unchanged: true });
+		expect(await read({ unless: { "C-1": titleOnly.etag } })).toMatchObject({
 			tags: ["critical"],
 			covers: ["REQ-1", "REQ-2"],
 		});
-		expect(read({ as: "md", unless: { "C-1": read().etag } })).toMatchObject({
+		expect(await read({ as: "md", unless: { "C-1": (await read()).etag } })).toMatchObject({
 			md: expect.stringContaining("Changed checkout"),
 		});
-		expect(read({ version: 1, unless: { "C-1": created.etag } })).toMatchObject({ title: "Checkout", version: 1 });
-		expect(read({ unless: { "C-1": read().hash } })).toMatchObject({ title: "Changed checkout" });
+		expect(await read({ version: 1, unless: { "C-1": created.etag } })).toMatchObject({
+			title: "Checkout",
+			version: 1,
+		});
+		expect(await read({ unless: { "C-1": (await read()).hash } })).toMatchObject({ title: "Changed checkout" });
 	});
 
 	test.each(["human", "ci", "agent"] as const)(
 		"%s proof returns the selected result's identity in get and find",
-		(kind) => {
-			h.call("propose", {
+		async (kind) => {
+			await h.call("propose", {
 				edits: [{ op: "create", body: { title: "Checkout", methods: ["human", "auto", "agent"] } }],
 			});
 			const method = kind === "ci" ? "auto" : kind;
 			const author = h.actor("proof-author", kind, ["read", "record"]);
 			const other = h.actor("later-author", kind, ["read", "record"]);
-			const report = (run: string, as: typeof author) =>
-				h.call(
+			const report = async (run: string, as: typeof author) =>
+				await h.call(
 					"report",
 					{
 						run,
@@ -2149,20 +2193,20 @@ describe("organising", () => {
 					},
 					as,
 				);
-			h.call("plan", { name: "First", select: {} });
-			report("R-1", author);
+			await h.call("plan", { name: "First", select: {} });
+			await report("R-1", author);
 			const original = z
 				.object({ id: z.number(), name: z.string().nullable(), at: z.number() })
 				.parse(
-					h
-						.call<{ entries: Record<string, unknown>[] }>("timeline", { ref: "C-1" })
-						.entries.find((entry) => entry.t === "result"),
+					(await h.call<{ entries: Record<string, unknown>[] }>("timeline", { ref: "C-1" })).entries.find(
+						(entry) => entry.t === "result",
+					),
 				);
-			const read = () => {
-				const [doc] = h.call<Record<string, unknown>[]>("get", { refs: ["C-1"], fields: ["proof"] });
+			const read = async () => {
+				const [doc] = await h.call<Record<string, unknown>[]>("get", { refs: ["C-1"], fields: ["proof"] });
 				return Proofs.parse(doc?.proof)[method];
 			};
-			expect(read()).toEqual({
+			expect(await read()).toEqual({
 				id: original.id,
 				version: 1,
 				by: "proof-author",
@@ -2174,24 +2218,24 @@ describe("organising", () => {
 				current: true,
 				basis: "exact",
 			});
-			h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Updated" } }] });
-			expect(read()).toMatchObject({ id: original.id, version: 1, by: "proof-author", current: false });
-			const found = h.call<{ items: Record<string, unknown>[] }>("find", { in: "cases" }).items[0];
-			expect(Proofs.parse(found?.proof)[method]).toEqual(read());
-			h.call("plan", { name: "Second", select: {} });
-			report("R-2", other);
-			expect(read()).toMatchObject({ version: 2, by: "later-author", current: true, basis: "exact" });
-			expect(read()?.id).not.toBe(original.id);
+			await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Updated" } }] });
+			expect(await read()).toMatchObject({ id: original.id, version: 1, by: "proof-author", current: false });
+			const found = (await h.call<{ items: Record<string, unknown>[] }>("find", { in: "cases" })).items[0];
+			expect(Proofs.parse(found?.proof)[method]).toEqual(await read());
+			await h.call("plan", { name: "Second", select: {} });
+			await report("R-2", other);
+			expect(await read()).toMatchObject({ version: 2, by: "later-author", current: true, basis: "exact" });
+			expect((await read())?.id).not.toBe(original.id);
 		},
 	);
 
-	test("conditional data reads refresh proof without a body edit", () => {
-		h.call("propose", { edits: [{ op: "create", outline: "Checkout\n  Check > Pass" }] });
-		const [before] = h.call<{ etag: string; hash: string }[]>("get", { refs: ["C-1"] });
+	test("conditional data reads refresh proof without a body edit", async () => {
+		await h.call("propose", { edits: [{ op: "create", outline: "Checkout\n  Check > Pass" }] });
+		const [before] = await h.call<{ etag: string; hash: string }[]>("get", { refs: ["C-1"] });
 		if (!before) throw new Error("missing case");
-		h.call("plan", { name: "Smoke", select: { cases: ["C-1"] } });
-		h.call("report", { run: "R-1", results: [{ test: { case: "C-1" }, outcome: "pass" }] });
-		expect(h.call("get", { refs: ["C-1"], unless: { "C-1": before.etag } })).toMatchObject([
+		await h.call("plan", { name: "Smoke", select: { cases: ["C-1"] } });
+		await h.call("report", { run: "R-1", results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+		expect(await h.call("get", { refs: ["C-1"], unless: { "C-1": before.etag } })).toMatchObject([
 			{ hash: before.hash, title: "Checkout", proof: { human: { outcome: "pass", current: true } } },
 		]);
 	});
@@ -2219,38 +2263,40 @@ test("a sliced savepoint closed early rolls back and drops the after-commit work
 	expect(ran).toEqual(["before", "next"]);
 });
 
-test("choosing current restores a deleted step named order through the registry", () => {
+test("choosing current restores a deleted step named order through the registry", async () => {
 	const base = { ...emptyBody("Order step"), steps: [{ id: "order", action: "Before", expected: null }] };
 	const current = { ...base, steps: [{ id: "order", action: "Current change", expected: null }] };
 	const mine = { ...base, steps: [] };
-	h.call("propose", { edits: [{ op: "create", body: base }] });
-	h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: current }] });
-	const overlap = h.call<ProposeReply>("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: mine }] });
+	await h.call("propose", { edits: [{ op: "create", body: base }] });
+	await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: current }] });
+	const overlap = await h.call<ProposeReply>("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: mine }] });
 	expect(overlap.status).toBe("conflict");
 	expect(overlap.conflicts).toEqual([{ case: "C-1", addresses: [{ kind: "step", id: "order" }] }]);
-	const [proposal] = h.call<{ edits: { body: CaseBody; current: CaseBody; conflicts: Conflict[] }[] }[]>("get", {
+	const [proposal] = await h.call<{ edits: { body: CaseBody; current: CaseBody; conflicts: Conflict[] }[] }[]>("get", {
 		refs: [overlap.proposal],
 	});
 	const edit = proposal?.edits[0];
 	const conflict = edit?.conflicts[0];
 	if (!edit || !conflict) throw Error("Missing step conflict");
 	const chosen = applyMergeChoice({ merged: edit.body, source: edit.current, address: conflict.address });
-	const [question] = h.call<{ evidenceHash: string }[]>("get", { refs: [overlap.question] });
+	const [question] = await h.call<{ evidenceHash: string }[]>("get", { refs: [overlap.question] });
 	expect(
-		h.call<{ status: string }[]>("decide", {
-			q: overlap.question,
-			onEvidence: question?.evidenceHash,
-			answer: { is: "merge", body: chosen },
-		})[0]?.status,
+		(
+			await h.call<{ status: string }[]>("decide", {
+				q: overlap.question,
+				onEvidence: question?.evidenceHash,
+				answer: { is: "merge", body: chosen },
+			})
+		)[0]?.status,
 	).toBe("decided");
-	expect(storedBody().steps).toEqual([{ id: "order", action: "Current change", expected: null }]);
+	expect((await storedBody()).steps).toEqual([{ id: "order", action: "Current change", expected: null }]);
 });
 
-test("choosing current keeps the current fragment pin named order through the registry", () => {
+test("choosing current keeps the current fragment pin named order through the registry", async () => {
 	const fragment = { ...emptyBody("Fragment"), steps: [{ id: "ab", action: "v1", expected: null }] };
-	h.call("propose", { edits: [{ op: "create", kind: "fragment", body: fragment }] });
+	await h.call("propose", { edits: [{ op: "create", kind: "fragment", body: fragment }] });
 	for (const version of [2, 3])
-		h.call("propose", {
+		await h.call("propose", {
 			edits: [
 				{
 					op: "edit",
@@ -2264,27 +2310,29 @@ test("choosing current keeps the current fragment pin named order through the re
 	const base = { ...emptyBody("Pinned case"), steps: [pin(1)] };
 	const current = { ...base, steps: [pin(3)] };
 	const mine = { ...base, steps: [pin(2)] };
-	h.call("propose", { edits: [{ op: "create", body: base }] });
-	h.call("propose", { edits: [{ op: "edit", case: "C-2", base: 1, body: current }] });
-	const overlap = h.call<ProposeReply>("propose", { edits: [{ op: "edit", case: "C-2", base: 1, body: mine }] });
+	await h.call("propose", { edits: [{ op: "create", body: base }] });
+	await h.call("propose", { edits: [{ op: "edit", case: "C-2", base: 1, body: current }] });
+	const overlap = await h.call<ProposeReply>("propose", { edits: [{ op: "edit", case: "C-2", base: 1, body: mine }] });
 	expect(overlap.status).toBe("conflict");
 	expect(overlap.conflicts).toEqual([{ case: "C-2", addresses: [{ kind: "step", id: "order" }] }]);
-	const [proposal] = h.call<{ edits: { body: CaseBody; current: CaseBody; conflicts: Conflict[] }[] }[]>("get", {
+	const [proposal] = await h.call<{ edits: { body: CaseBody; current: CaseBody; conflicts: Conflict[] }[] }[]>("get", {
 		refs: [overlap.proposal],
 	});
 	const edit = proposal?.edits[0];
 	const conflict = edit?.conflicts[0];
 	if (!edit || !conflict) throw Error("Missing pin conflict");
 	const chosen = applyMergeChoice({ merged: edit.body, source: edit.current, address: conflict.address });
-	const [question] = h.call<{ evidenceHash: string }[]>("get", { refs: [overlap.question] });
+	const [question] = await h.call<{ evidenceHash: string }[]>("get", { refs: [overlap.question] });
 	expect(
-		h.call<{ status: string }[]>("decide", {
-			q: overlap.question,
-			onEvidence: question?.evidenceHash,
-			answer: { is: "merge", body: chosen },
-		})[0]?.status,
+		(
+			await h.call<{ status: string }[]>("decide", {
+				q: overlap.question,
+				onEvidence: question?.evidenceHash,
+				answer: { is: "merge", body: chosen },
+			})
+		)[0]?.status,
 	).toBe("decided");
-	const [saved] = h.call<{ md: string }[]>("get", { refs: ["C-2"], as: "md" });
+	const [saved] = await h.call<{ md: string }[]>("get", { refs: ["C-2"], as: "md" });
 	const parsed = parseCase(saved?.md ?? "");
 	if (!parsed.ok) throw Error("Invalid saved case");
 	expect(parsed.doc.body.steps).toEqual([
@@ -2309,29 +2357,31 @@ describe("conflict storage upgrades", () => {
 	];
 
 	// Conflicts were generated by mergeBodies at b59be234, including both meanings of steps.order in one proposal.
-	const oldInstance = (sample: (typeof legacyConflicts)[number]) => {
+	const oldInstance = async (sample: (typeof legacyConflicts)[number]) => {
 		const dir = mkdtempSync(join(tmpdir(), "mainworthy-conflict-upgrade-"));
 		const config = defaultConfig({ MAINWORTHY_DATA: dir, MAINWORTHY_OWNER: "robin" });
 		const instance = open({ ...config, port: 0 });
-		const call = (op: string, input: unknown) => {
-			const reply = invoke(instance.app, OPS, { op, input, project: "scratch", actor: () => instance.owner });
+		const call = async (op: string, input: unknown) => {
+			const reply = await invoke(instance.app, OPS, { op, input, project: "scratch", actor: () => instance.owner });
 			if (!reply.ok) throw new Error(JSON.stringify(reply.error));
 			return reply.result;
 		};
 		try {
-			call("propose", { edits: [{ op: "create", kind: "fragment", outline: "Shared\n  Check" }] });
+			await call("propose", { edits: [{ op: "create", kind: "fragment", outline: "Shared\n  Check" }] });
 			for (const version of [1, 2]) {
-				call("propose", { edits: [{ op: "edit", case: "C-1", base: version, body: { title: `Shared ${version}` } }] });
+				await call("propose", {
+					edits: [{ op: "edit", case: "C-1", base: version, body: { title: `Shared ${version}` } }],
+				});
 			}
-			call("propose", { edits: [{ op: "create", body: CaseBody.parse(sample.base) }] });
-			call("propose", {
+			await call("propose", { edits: [{ op: "create", body: CaseBody.parse(sample.base) }] });
+			await call("propose", {
 				edits: [
 					{ op: "create", outline: "Base" },
 					{ op: "create", outline: "Uncontested" },
 				],
 			});
-			call("propose", { edits: [{ op: "edit", case: "C-3", base: 1, body: { title: "Theirs" } }] });
-			call("propose", { edits: [{ op: "edit", case: "C-2", base: 1, body: CaseBody.parse(sample.theirs) }] });
+			await call("propose", { edits: [{ op: "edit", case: "C-3", base: 1, body: { title: "Theirs" } }] });
+			await call("propose", { edits: [{ op: "edit", case: "C-2", base: 1, body: CaseBody.parse(sample.theirs) }] });
 			const input = {
 				cmd: "legacy-conflict-command",
 				edits: [
@@ -2340,7 +2390,7 @@ describe("conflict storage upgrades", () => {
 					{ op: "edit", case: "C-3", base: 1, body: { title: "Mine" } },
 				],
 			};
-			const proposed = ProposeReply.parse(call("propose", input));
+			const proposed = ProposeReply.parse(await call("propose", input));
 			expect(proposed.status).toBe("conflict");
 			const db = instance.app.db;
 			db.raw
@@ -2387,7 +2437,7 @@ describe("conflict storage upgrades", () => {
 	for (const sample of legacyConflicts) {
 		for (const operation of ["get", "replay"] as const) {
 			test(`old ${sample.kind} conflicts survive upgrade and archive: ${operation}`, async () => {
-				const old = oldInstance(sample);
+				const old = await oldInstance(sample);
 				const upgraded = open(old.config);
 				const server = serve(upgraded.app, upgraded.owner);
 				const client = new Client({ url: `http://127.0.0.1:${server.port}`, project: "scratch", token: undefined });
@@ -2435,7 +2485,7 @@ describe("conflict storage upgrades", () => {
 					).toEqual(old.command);
 					const chunks: string[] = [];
 					exportArchive(upgraded.app.db, (chunk) => chunks.push(chunk), { blobs: upgraded.app.blobs });
-					const restored = harness();
+					const restored = await harness();
 					try {
 						removeBootstrap(restored.app.db);
 						importArchive(restored.app.db, linesOf(chunks.join("")), { blobs: restored.app.blobs });
@@ -2450,7 +2500,7 @@ describe("conflict storage upgrades", () => {
 					} finally {
 						restored.close();
 					}
-					const empty = harness();
+					const empty = await harness();
 					try {
 						removeBootstrap(empty.app.db);
 						const legacyArchive = chunks.join("").replace(`"schema":${ARCHIVE_VERSION}`, '"schema":23');

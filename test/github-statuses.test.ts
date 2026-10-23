@@ -54,13 +54,13 @@ function remote(reply?: (request: Request) => Response | Promise<Response>) {
 function response(): Response {
 	return new Response(credential, { status: 201 });
 }
-function setup() {
-	const fixture = harness();
+async function setup() {
+	const fixture = await harness();
 	h = fixture;
 	Object.assign(fixture.app.config, { github, githubStatuses: true, publicUrl: "https://mainworthy.example" });
 	return fixture;
 }
-function report(
+async function report(
 	fixture: Harness,
 	outcome: "pass" | "fail" | "skip" = "fail",
 	target = { commit, repo: github.repository, pr: 55 },
@@ -76,8 +76,8 @@ function report(
 		],
 	});
 }
-function question(fixture: Harness) {
-	const found = fixture.call<InboxReply>("inbox").items.find((item) => item.kind === "failure");
+async function question(fixture: Harness) {
+	const found = (await fixture.call<InboxReply>("inbox")).items.find((item) => item.kind === "failure");
 	if (!found) throw new Error("expected a failure question");
 	return found;
 }
@@ -161,12 +161,12 @@ test("the minute job posts a commit gate and posts a newer status in the same co
 });
 
 test("all four verdicts map to commit status states", async () => {
-	const fixture = setup();
+	const fixture = await setup();
 	const fake = remote();
-	report(fixture);
+	await report(fixture);
 	await deliverCommitStatuses(fixture.app, fake.port);
-	const q = question(fixture);
-	fixture.call("decide", {
+	const q = await question(fixture);
+	await fixture.call("decide", {
 		q: q.q,
 		onEvidence: q.evidenceHash,
 		answer: { is: "defect", ref: "https://github.com/example/shop/issues/1" },
@@ -203,8 +203,8 @@ test("all four verdicts map to commit status states", async () => {
 });
 
 test("busy commits coalesce decisions and withdrawals and overlapping jobs release the writer", async () => {
-	const fixture = setup();
-	report(fixture);
+	const fixture = await setup();
+	await report(fixture);
 	const entered = Promise.withResolvers<void>();
 	const finish = Promise.withResolvers<Response>();
 	let request: Request | undefined;
@@ -219,13 +219,11 @@ test("busy commits coalesce decisions and withdrawals and overlapping jobs relea
 	await entered.promise;
 	if (!request) throw new Error("expected a status post");
 	try {
-		await fixture.app.gate.run(() => {
-			const q = question(fixture);
-			fixture.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "infra" } });
-			fixture.call("decide", { undo: q.q });
-			const reopened = question(fixture);
-			fixture.call("decide", { q: reopened.q, onEvidence: reopened.evidenceHash, answer: { is: "infra" } });
-		});
+		const q = await question(fixture);
+		await fixture.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "infra" } });
+		await fixture.call("decide", { undo: q.q });
+		const reopened = await question(fixture);
+		await fixture.call("decide", { q: reopened.q, onEvidence: reopened.evidenceHash, answer: { is: "infra" } });
 	} finally {
 		finish.resolve(response());
 		await delivery;
@@ -235,17 +233,19 @@ test("busy commits coalesce decisions and withdrawals and overlapping jobs relea
 	await deliverCommitStatuses(fixture.app, fake.port);
 	expect(fake.requests.map((value) => value.init?.method)).toEqual(["POST", "POST"]);
 	expect(fake.requests.at(-1)?.body).toMatchObject({ state: "success" });
-	const decided = fixture.call<InboxReply>("inbox", { state: "decided" }).items.find((item) => item.kind === "failure");
+	const decided = (await fixture.call<InboxReply>("inbox", { state: "decided" })).items.find(
+		(item) => item.kind === "failure",
+	);
 	if (!decided) throw new Error("expected the decided failure");
-	fixture.call("decide", { undo: decided.q });
+	await fixture.call("decide", { undo: decided.q });
 	fixture.advance(60_000);
 	await deliverCommitStatuses(fixture.app, fake.port);
 	expect(fake.requests.at(-1)?.body).toMatchObject({ state: "error" });
 });
 
 test("failed status posts stay due and an accepted post clears the last error", async () => {
-	const fixture = setup();
-	report(fixture);
+	const fixture = await setup();
+	await report(fixture);
 	let refuse = true;
 	const fake = remote(() => (refuse ? new Response(credential, { status: 403 }) : response()));
 	const log = spyOn(console, "error").mockImplementation(() => undefined);
@@ -271,8 +271,8 @@ test("failed status posts stay due and an accepted post clears the last error", 
 });
 
 test("a lost first reply retries the latest gate without reading remote state", async () => {
-	const fixture = setup();
-	report(fixture);
+	const fixture = await setup();
+	await report(fixture);
 	let lose = true;
 	const fake = remote(() => {
 		if (lose) throw new Error(credential);
@@ -281,8 +281,8 @@ test("a lost first reply retries the latest gate without reading remote state", 
 	const log = spyOn(console, "error").mockImplementation(() => undefined);
 	try {
 		await deliverCommitStatuses(fixture.app, fake.port);
-		const q = question(fixture);
-		fixture.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "infra" } });
+		const q = await question(fixture);
+		await fixture.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "infra" } });
 		expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
 		lose = false;
 		fixture.advance(60_000);
@@ -302,16 +302,16 @@ test("a lost first reply retries the latest gate without reading remote state", 
 });
 
 test("only opted-in counted reports for the configured project and repository enroll commit statuses", async () => {
-	const fixture = setup();
+	const fixture = await setup();
 	const fake = remote();
 	fixture.app.config.githubStatuses = false;
-	report(fixture);
+	await report(fixture);
 	fixture.app.config.githubStatuses = true;
 	await deliverCommitStatuses(fixture.app, fake.port);
 	expect(fake.requests).toEqual([]);
-	report(fixture, "pass", { commit: "b".repeat(40), repo: "other/repository", pr: 55 });
+	await report(fixture, "pass", { commit: "b".repeat(40), repo: "other/repository", pr: 55 });
 	const agent = fixture.actor("agent", "agent", ["read", "produce"]);
-	fixture.call(
+	await fixture.call(
 		"report",
 		{
 			target: { commit: "c".repeat(40), repo: github.repository, pr: 55 },
@@ -319,13 +319,13 @@ test("only opted-in counted reports for the configured project and repository en
 		},
 		agent,
 	);
-	report(fixture, "pass", { commit: "abcdef123", repo: github.repository, pr: 55 });
+	await report(fixture, "pass", { commit: "abcdef123", repo: github.repository, pr: 55 });
 	fixture.app.config.github = { ...github, project: "other" };
-	report(fixture, "pass", { commit: "d".repeat(40), repo: github.repository, pr: 55 });
+	await report(fixture, "pass", { commit: "d".repeat(40), repo: github.repository, pr: 55 });
 	fixture.app.config.github = github;
 	await deliverCommitStatuses(fixture.app, fake.port);
 	expect(fake.requests).toEqual([]);
-	const receipt = report(fixture, "pass", { commit: "e".repeat(40), repo: github.repository, pr: 55 });
+	const receipt = await report(fixture, "pass", { commit: "e".repeat(40), repo: github.repository, pr: 55 });
 	await deliverCommitStatuses(fixture.app, fake.port);
 	expect(fake.requests.find((value) => value.init?.method === "POST")?.body).toMatchObject({
 		state: "success",
@@ -335,8 +335,8 @@ test("only opted-in counted reports for the configured project and repository en
 });
 
 test("archives omit commit status state and restoring one does not enroll historical commits", async () => {
-	const fixture = setup();
-	report(fixture, "pass");
+	const fixture = await setup();
+	await report(fixture, "pass");
 	const chunks: string[] = [];
 	exportArchive(fixture.app.db, (chunk) => chunks.push(chunk));
 	expect(chunks.join("")).not.toContain('"t":"commit_statuses"');
@@ -399,8 +399,8 @@ test("the adapter bounds descriptions and ignores reply bodies", async () => {
 });
 
 test("a row interrupted during delivery retries after its existing minute delay", async () => {
-	const fixture = setup();
-	report(fixture);
+	const fixture = await setup();
+	await report(fixture);
 	fixture.app.db.raw
 		.query("UPDATE commit_statuses SET state = 'sending', sent = NULL, next_at = ?")
 		.run(fixture.app.now() + 60_000);
@@ -416,10 +416,10 @@ test("a row interrupted during delivery retries after its existing minute delay"
 });
 
 test("expired holds post the current status after the same sweep the minute job runs", async () => {
-	const fixture = setup();
-	report(fixture);
-	const q = question(fixture);
-	fixture.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "flaky" } });
+	const fixture = await setup();
+	await report(fixture);
+	const q = await question(fixture);
+	await fixture.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "flaky" } });
 	const fake = remote();
 	await deliverCommitStatuses(fixture.app, fake.port);
 	expect(fake.requests.at(-1)?.body).toMatchObject({ state: "success" });
@@ -504,8 +504,8 @@ test("shutdown records the in-flight reply and restart preserves accepted status
 });
 
 test("an older reply cannot complete a replacement row or bypass its minute limit", async () => {
-	const fixture = setup();
-	report(fixture);
+	const fixture = await setup();
+	await report(fixture);
 	const old = fixture.app.db.raw.query<{ nonce: string }, []>("SELECT nonce FROM commit_statuses").get();
 	const entered = Promise.withResolvers<void>();
 	const finish = Promise.withResolvers<Response>();
@@ -516,13 +516,11 @@ test("an older reply cannot complete a replacement row or bypass its minute limi
 	const delivery = deliverCommitStatuses(fixture.app, fake.port);
 	await entered.promise;
 	try {
-		await fixture.app.gate.run(() => {
-			fixture.app.db.raw.query("DELETE FROM commit_statuses").run();
-			fixture.call("report", {
-				target: { commit, repo: github.repository, pr: 55 },
-				attempt: 2,
-				results: [{ test: { key: "checkout" }, outcome: "pass" }],
-			});
+		await fixture.app.gate.run(() => fixture.app.db.raw.query("DELETE FROM commit_statuses").run());
+		await fixture.call("report", {
+			target: { commit, repo: github.repository, pr: 55 },
+			attempt: 2,
+			results: [{ test: { key: "checkout" }, outcome: "pass" }],
 		});
 	} finally {
 		finish.resolve(response());
@@ -544,9 +542,9 @@ test("an older reply cannot complete a replacement row or bypass its minute limi
 });
 
 test("a minute handles twenty commits and leaves the rest for the next run", async () => {
-	const fixture = setup();
+	const fixture = await setup();
 	for (let n = 1; n <= 21; n++)
-		report(fixture, "pass", { commit: n.toString(16).padStart(40, "0"), repo: github.repository, pr: n });
+		await report(fixture, "pass", { commit: n.toString(16).padStart(40, "0"), repo: github.repository, pr: n });
 	const fake = remote();
 	expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(20);
 	expect(fake.requests.filter((request) => request.init?.method === "POST")).toHaveLength(20);
@@ -560,11 +558,11 @@ test("a minute handles twenty commits and leaves the rest for the next run", asy
 });
 
 test("a fresh upload that returns to the delivered verdict and reason sends no redundant update", async () => {
-	const fixture = setup();
-	report(fixture, "pass");
+	const fixture = await setup();
+	await report(fixture, "pass");
 	const fake = remote();
 	await deliverCommitStatuses(fixture.app, fake.port);
-	fixture.call("report", {
+	await fixture.call("report", {
 		target: { commit, repo: github.repository, pr: 55 },
 		attempt: 2,
 		results: [{ test: { key: "checkout" }, outcome: "pass" }],
@@ -577,8 +575,8 @@ test("a fresh upload that returns to the delivered verdict and reason sends no r
 });
 
 test("a lost success reply followed by undo republishes the blocked gate", async () => {
-	const fixture = setup();
-	report(fixture);
+	const fixture = await setup();
+	await report(fixture);
 	let remoteState: string | undefined;
 	let loseSuccess = true;
 	const fake = remote((request) => {
@@ -592,13 +590,15 @@ test("a lost success reply followed by undo republishes the blocked gate", async
 	const log = spyOn(console, "error").mockImplementation(() => undefined);
 	try {
 		await deliverCommitStatuses(fixture.app, fake.port);
-		const q = question(fixture);
-		fixture.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "infra" } });
+		const q = await question(fixture);
+		await fixture.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "infra" } });
 		fixture.advance(60_000);
 		await deliverCommitStatuses(fixture.app, fake.port);
 		expect(remoteState).toBe("success");
-		fixture.call("decide", { undo: q.q });
-		expect(fixture.call<{ verdict: string }>("gate", { commit, repo: github.repository }).verdict).toBe("blocked");
+		await fixture.call("decide", { undo: q.q });
+		expect((await fixture.call<{ verdict: string }>("gate", { commit, repo: github.repository })).verdict).toBe(
+			"blocked",
+		);
 		fixture.advance(60_000);
 		await deliverCommitStatuses(fixture.app, fake.port);
 		fixture.advance(60_000);
@@ -610,8 +610,8 @@ test("a lost success reply followed by undo republishes the blocked gate", async
 });
 
 test("a first post returning 500 retries the current gate on a later minute", async () => {
-	const fixture = setup();
-	report(fixture);
+	const fixture = await setup();
+	await report(fixture);
 	let posts = 0;
 	let remoteState: string | undefined;
 	const fake = remote((request) => {
@@ -637,25 +637,25 @@ test("a first post returning 500 retries the current gate on a later minute", as
 });
 
 test("accepted commits stop reconciliation after thirty inactive days and a new report resumes it", async () => {
-	const fixture = setup();
-	report(fixture);
-	const q = question(fixture);
-	fixture.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "infra" } });
+	const fixture = await setup();
+	await report(fixture);
+	const q = await question(fixture);
+	await fixture.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "infra" } });
 	const fake = remote();
 	await deliverCommitStatuses(fixture.app, fake.port);
 	fixture.advance(29 * 86_400_000);
-	fixture.call("decide", { undo: q.q });
+	await fixture.call("decide", { undo: q.q });
 	await deliverCommitStatuses(fixture.app, fake.port);
 	expect(fake.requests.map((request) => request.body.state)).toEqual(["success", "error"]);
-	const reopened = question(fixture);
-	fixture.call("decide", { q: reopened.q, onEvidence: reopened.evidenceHash, answer: { is: "infra" } });
+	const reopened = await question(fixture);
+	await fixture.call("decide", { q: reopened.q, onEvidence: reopened.evidenceHash, answer: { is: "infra" } });
 	fixture.advance(60_000);
 	await deliverCommitStatuses(fixture.app, fake.port);
 	fixture.advance(30 * 86_400_000);
-	fixture.call("decide", { undo: reopened.q });
+	await fixture.call("decide", { undo: reopened.q });
 	expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
 	expect(fake.requests.map((request) => request.body.state)).toEqual(["success", "error", "success"]);
-	fixture.call("report", {
+	await fixture.call("report", {
 		target: { commit, repo: github.repository, pr: 55 },
 		attempt: 2,
 		results: [{ test: { key: "checkout" }, outcome: "fail", failure: { message: "Still failing" } }],
@@ -665,8 +665,8 @@ test("accepted commits stop reconciliation after thirty inactive days and a new 
 });
 
 test("a failed post remains due even after thirty days", async () => {
-	const fixture = setup();
-	report(fixture);
+	const fixture = await setup();
+	await report(fixture);
 	let fail = true;
 	const fake = remote(() => (fail ? new Response(credential, { status: 500 }) : response()));
 	const log = spyOn(console, "error").mockImplementation(() => undefined);
@@ -686,8 +686,8 @@ test("a failed post remains due even after thirty days", async () => {
 });
 
 test("P6 a refused 422 commit backs off and stops during one simulated day until a counted report resumes it", async () => {
-	const fixture = setup();
-	report(fixture);
+	const fixture = await setup();
+	await report(fixture);
 	const start = fixture.app.now();
 	const times: number[] = [];
 	let refuse = true;
@@ -712,12 +712,12 @@ test("P6 a refused 422 commit backs off and stops during one simulated day until
 				"GitHub commit status delivery stopped after 16 unsuccessful attempts; check repository access and Commit statuses write permission, then send a new counted report.",
 		});
 		expect(log.mock.calls.filter(([line]) => String(line).includes("delivery stopped"))).toHaveLength(1);
-		const q = question(fixture);
-		fixture.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "infra" } });
+		const q = await question(fixture);
+		await fixture.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "infra" } });
 		fixture.advance(31 * 86_400_000);
 		expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
 		refuse = false;
-		fixture.call("report", {
+		await fixture.call("report", {
 			target: { commit, repo: github.repository, pr: 55 },
 			attempt: 2,
 			results: [{ test: { key: "checkout" }, outcome: "pass" }],
@@ -732,9 +732,9 @@ test("P6 a refused 422 commit backs off and stops during one simulated day until
 
 for (const status of [403, 429]) {
 	test(`${status} pauses every row until both retry-after and the rate-limit reset have elapsed`, async () => {
-		const fixture = setup();
-		report(fixture, "pass");
-		report(fixture, "pass", { commit: "b".repeat(40), repo: github.repository, pr: 56 });
+		const fixture = await setup();
+		await report(fixture, "pass");
+		await report(fixture, "pass", { commit: "b".repeat(40), repo: github.repository, pr: 56 });
 		const reset = fixture.app.now() + 900_000;
 		let refuse = true;
 		const fake = remote(() =>
@@ -751,7 +751,7 @@ for (const status of [403, 429]) {
 			fixture.advance(600_000);
 			expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
 			// Even a newly enrolled row must wait for the shared pause.
-			report(fixture, "pass", { commit: "c".repeat(40), repo: github.repository, pr: 57 });
+			await report(fixture, "pass", { commit: "c".repeat(40), repo: github.repository, pr: 57 });
 			fixture.advance(299_000);
 			expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
 			refuse = false;
@@ -767,8 +767,8 @@ for (const status of [403, 429]) {
 for (const status of [403, 429]) {
 	for (const remaining of ["0", "5000", null]) {
 		test(`${status} with remaining ${remaining} uses reset only when the limit is exhausted`, async () => {
-			const fixture = setup();
-			report(fixture, "pass");
+			const fixture = await setup();
+			await report(fixture, "pass");
 			const headers = new Headers({ "x-ratelimit-reset": String(Math.ceil((fixture.app.now() + 3_000_000) / 1000)) });
 			if (remaining !== null) headers.set("x-ratelimit-remaining", remaining);
 			let refuse = true;
@@ -792,9 +792,9 @@ for (const status of [403, 429]) {
 }
 
 test("the rolling hour permits 240 status posts across jobs and resumes when the oldest posts expire", async () => {
-	const fixture = setup();
+	const fixture = await setup();
 	for (let n = 1; n <= 241; n++)
-		report(fixture, "pass", { commit: n.toString(16).padStart(40, "0"), repo: github.repository, pr: n });
+		await report(fixture, "pass", { commit: n.toString(16).padStart(40, "0"), repo: github.repository, pr: n });
 	const fake = remote();
 	for (let minute = 0; minute < 12; minute++) {
 		expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(20);
@@ -814,8 +814,8 @@ test("the rolling hour permits 240 status posts across jobs and resumes when the
 
 for (const failure of ["permission", "lost reply"]) {
 	test(`a lasting ${failure} stops after sixteen attempts and accepted delivery resets the back-off`, async () => {
-		const fixture = setup();
-		report(fixture);
+		const fixture = await setup();
+		await report(fixture);
 		let reject = true;
 		const fake = remote(() => {
 			if (!reject) return response();
@@ -831,14 +831,14 @@ for (const failure of ["permission", "lost reply"]) {
 			expect(fake.requests).toHaveLength(16);
 			expect(fixture.app.db.raw.query("SELECT state FROM commit_statuses").get()).toEqual({ state: "stopped" });
 			reject = false;
-			fixture.call("report", {
+			await fixture.call("report", {
 				target: { commit, repo: github.repository, pr: 55 },
 				attempt: 2,
 				results: [{ test: { key: "checkout" }, outcome: "pass" }],
 			});
 			await deliverCommitStatuses(fixture.app, fake.port);
 			expect(fake.requests.at(-1)?.body.state).toBe("success");
-			fixture.call("report", {
+			await fixture.call("report", {
 				target: { commit, repo: github.repository, pr: 55 },
 				attempt: 3,
 				results: [{ test: { key: "checkout" }, outcome: "fail", failure: { message: "Failed again" } }],
@@ -922,9 +922,9 @@ for (const deadline of ["HTTP date", "ten-year seconds", "ten-year HTTP date", "
 }
 
 test("repeated rate limits increase the shared delay even when each post is for a different commit", async () => {
-	const fixture = setup();
+	const fixture = await setup();
 	for (let n = 1; n <= 8; n++)
-		report(fixture, "pass", { commit: n.toString(16).padStart(40, "0"), repo: github.repository, pr: n });
+		await report(fixture, "pass", { commit: n.toString(16).padStart(40, "0"), repo: github.repository, pr: n });
 	const start = fixture.app.now();
 	const times: number[] = [];
 	const fake = remote(() => {
@@ -946,8 +946,8 @@ test("repeated rate limits increase the shared delay even when each post is for 
 });
 
 test("an interrupted sixteenth attempt stops once and a counted report with unchanged content resumes it", async () => {
-	const fixture = setup();
-	report(fixture, "pass");
+	const fixture = await setup();
+	await report(fixture, "pass");
 	fixture.app.db.raw.query("UPDATE commit_statuses SET state = 'sending', attempts = 16").run();
 	const fake = remote();
 	const log = spyOn(console, "error").mockImplementation(() => undefined);
@@ -956,7 +956,7 @@ test("an interrupted sixteenth attempt stops once and a counted report with unch
 		expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
 		expect(log.mock.calls).toHaveLength(1);
 		expect(fixture.app.db.raw.query("SELECT state FROM commit_statuses").get()).toEqual({ state: "stopped" });
-		fixture.call("report", {
+		await fixture.call("report", {
 			target: { commit, repo: github.repository, pr: 55 },
 			attempt: 2,
 			results: [{ test: { key: "checkout" }, outcome: "pass" }],

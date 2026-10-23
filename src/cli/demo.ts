@@ -9,7 +9,7 @@ import type { App, Config } from "../server/kernel/app.ts";
 import { type Actor, demoSince, findProject, markDemo } from "../server/kernel/ctx.ts";
 import { actorsWithGrants, createProject } from "../server/ops/admin.ts";
 import { OPS } from "../server/ops/index.ts";
-import { invokeAsync } from "../server/ops/registry.ts";
+import { invoke } from "../server/ops/registry.ts";
 import { firstWrite, removeProject } from "../server/transfer/transfer.ts";
 import { Client } from "./client.ts";
 import { DEMO_WORK } from "./demo/work.ts";
@@ -280,7 +280,7 @@ export async function renewDemoWork(
 	seeded: Pick<SeedResult, "run" | "workSlot">,
 ): Promise<void> {
 	if (seeded.workSlot === null) return;
-	const read = await invokeAsync(instance.app, OPS, {
+	const read = await invoke(instance.app, OPS, {
 		op: "find",
 		project,
 		input: { in: "slots", run: seeded.run, limit: 200 },
@@ -290,7 +290,7 @@ export async function renewDemoWork(
 	const slots = z.object({ items: z.array(z.object({ id: z.number(), state: z.string() })) }).parse(read.result).items;
 	const slot = slots.find((slot) => slot.id === seeded.workSlot);
 	if (!slot || !["missing", "skipped"].includes(slot.state)) return;
-	await invokeAsync(instance.app, OPS, {
+	await invoke(instance.app, OPS, {
 		op: "work",
 		project,
 		input: { do: "take", run: seeded.run, slot: seeded.workSlot, seconds: DEMO_WORK.seconds },

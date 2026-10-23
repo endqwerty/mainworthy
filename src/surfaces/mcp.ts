@@ -18,7 +18,7 @@ import { z } from "zod";
 import type { Session } from "../server/identity/identity.ts";
 import type { App } from "../server/kernel/app.ts";
 import { MCP_OPS, OPS } from "../server/ops/index.ts";
-import { invokeAsync, type Reply } from "../server/ops/registry.ts";
+import { invoke, type Reply } from "../server/ops/registry.ts";
 import { grantedProjects, VERSION } from "./http.ts";
 
 /** The tools/list size agents should expect, in o200k_base tokens: a guideline, not a gate (decision 0118). */
@@ -436,7 +436,7 @@ export function mcpRoute(app: App): (req: Request, session: Session) => Promise<
 		const buildServer = () =>
 			mcpServer(
 				(op, project, input) =>
-					invokeAsync(app, OPS, {
+					invoke(app, OPS, {
 						op,
 						project,
 						input,

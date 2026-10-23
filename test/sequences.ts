@@ -80,7 +80,7 @@ export function auditExcuses(db: Database) {
 type Row = Record<string, string | number | null>;
 type Problem = { seed: number; step: number; what: string; detail: unknown; last: unknown[] };
 
-function sequence(seed: number, preset: string): Problem | null {
+async function sequence(seed: number, preset: string): Promise<Problem | null> {
 	let state = seed * 2654435761 + 1;
 	const rand = (n: number): number => {
 		state ^= state << 13;
@@ -89,7 +89,7 @@ function sequence(seed: number, preset: string): Problem | null {
 		return (state >>> 0) % n;
 	};
 	const pick = <T>(items: readonly T[]): T => items[rand(items.length)] as T;
-	const h = harness({ preset });
+	const h = await harness({ preset });
 	const rows = <T = Row>(sql: string, ...args: (string | number)[]): T[] => h.app.db.raw.query(sql).all(...args) as T[];
 	const trace: unknown[] = [];
 	const successful = new Map<string, number>();
@@ -97,8 +97,8 @@ function sequence(seed: number, preset: string): Problem | null {
 	const pipeline = h.actor("pipeline", "ci", ["read", "record"]);
 	const agent = h.actor("explorer", "agent", ["read", "produce"]);
 	const rule = Number(rows<{ id: number }>("SELECT id FROM actors WHERE kind = 'rule'")[0]?.id ?? 0);
-	const command = (op: string, input: unknown, as: Actor = h.owner): unknown => {
-		const reply = h.raw(op, input, as);
+	const command = async (op: string, input: unknown, as: Actor = h.owner): Promise<unknown> => {
+		const reply = await h.raw(op, input, as);
 		if (reply.ok) successful.set(op, (successful.get(op) ?? 0) + 1);
 		trace.push({ op, input, as: as.name, reply: reply.ok ? "ok" : reply.error });
 		return reply.ok ? reply.result : null;
@@ -437,7 +437,7 @@ function sequence(seed: number, preset: string): Problem | null {
 	};
 
 	try {
-		command("propose", {
+		await command("propose", {
 			edits: [
 				{ op: "create", body: { title: "One", methods: ["human", "agent"] } },
 				{ op: "create", body: { title: "Two", methods: ["human"] } },
@@ -448,7 +448,7 @@ function sequence(seed: number, preset: string): Problem | null {
 		for (const waiting of rows<{ no: number; evidence_hash: string }>(
 			"SELECT no, evidence_hash FROM questions WHERE kind = 'adopt' AND state = 'open'",
 		))
-			command("decide", {
+			await command("decide", {
 				q: `Q-${waiting.no}`,
 				onEvidence: waiting.evidence_hash,
 				answer: { is: "accept" },
@@ -490,12 +490,12 @@ function sequence(seed: number, preset: string): Problem | null {
 					);
 					if (earlier.length > 0) result.corrects = pick(earlier).id;
 				}
-				command("report", { target, job: pick(["a", "b"]), attempt: 1 + rand(4), results: [result] }, as);
+				await command("report", { target, job: pick(["a", "b"]), attempt: 1 + rand(4), results: [result] }, as);
 			} else if (action < 48) {
 				// A change with a base on trunk: failures can be inherited.
 				const index = rand(2);
 				const outcome = pick(["fail", "fail", "pass"]);
-				command(
+				await command(
 					"report",
 					{
 						target: {
@@ -527,7 +527,7 @@ function sequence(seed: number, preset: string): Problem | null {
 					{ commit: pick(["change01", "change02"]), base: pick(commits), pr: 7, branch: "feature", env: "prod" },
 				]);
 				gatesBefore = commitGates();
-				command(
+				await command(
 					"report",
 					{
 						target,
@@ -553,7 +553,7 @@ function sequence(seed: number, preset: string): Problem | null {
 					{ self: true },
 				]);
 				const methods = pick([["human", "auto"], ["human", "auto"], ["agent"], ["human", "auto", "agent"]]);
-				command("plan", {
+				await command("plan", {
 					name: `Plan ${step}`,
 					select: {},
 					accepts,
@@ -564,7 +564,7 @@ function sequence(seed: number, preset: string): Problem | null {
 				const planned = rows<{ no: number }>("SELECT no FROM runs WHERE origin = 'planned' AND state = 'open'");
 				if (planned.length > 0) {
 					const outcome = pick(["fail", "pass", "pass", "skip"]);
-					command(
+					await command(
 						"report",
 						{
 							run: `R-${pick(planned).no}`,
@@ -589,9 +589,9 @@ function sequence(seed: number, preset: string): Problem | null {
 					const as = pick(people);
 					keptFrom = question.kind === "failure" && keptFromAnswering(question.no, as) ? `Q-${question.no}` : null;
 					if (question.state === "decided" && rand(3) === 0)
-						settled = command("decide", { undo: `Q-${question.no}`, reason: "changed my mind" }, as);
+						settled = await command("decide", { undo: `Q-${question.no}`, reason: "changed my mind" }, as);
 					else
-						settled = command(
+						settled = await command(
 							"decide",
 							{
 								q: `Q-${question.no}`,
@@ -675,22 +675,23 @@ function sequence(seed: number, preset: string): Problem | null {
 }
 
 function literalTransitions(): void {
-	test("reported transitions persist the literal lane, slot and gate outcomes", () => {
-		const h = harness({ preset: "strict" });
+	test("reported transitions persist the literal lane, slot and gate outcomes", async () => {
+		const h = await harness({ preset: "strict" });
 		try {
-			h.call("propose", { edits: [{ op: "create", body: { title: "Release", methods: ["human", "agent"] } }] });
-			for (const q of h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }).items)
-				h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" }, reason: "fixture" });
+			await h.call("propose", { edits: [{ op: "create", body: { title: "Release", methods: ["human", "agent"] } }] });
+			for (const q of (await h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }))
+				.items)
+				await h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" }, reason: "fixture" });
 			const target = { commit: "literal01", branch: "main" };
-			const planned = h.call<{ run: string }>("plan", {
+			const planned = await h.call<{ run: string }>("plan", {
 				name: "Release",
 				select: { cases: ["C-1"] },
 				accepts: { commit: target.commit },
 				require: [{ id: "exercise", kind: "exercise", methods: ["auto", "human"], basis: "exact", minActors: 2 }],
 			});
 			const ci = h.actor("pipeline", "ci", ["read", "record"]);
-			const report = (outcome: string, attempt = 1, job = "unit") =>
-				h.call(
+			const report = async (outcome: string, attempt = 1, job = "unit") =>
+				await h.call(
 					"report",
 					{
 						target,
@@ -707,31 +708,31 @@ function literalTransitions(): void {
 					},
 					ci,
 				);
-			const snapshot = () => ({
-				slot: h.call<{ items: { state: string }[] }>("find", { in: "slots", run: planned.run }).items[0]?.state,
-				gate: h.call<{ verdict: string }>("gate", { run: planned.run }).verdict,
+			const snapshot = async () => ({
+				slot: (await h.call<{ items: { state: string }[] }>("find", { in: "slots", run: planned.run })).items[0]?.state,
+				gate: (await h.call<{ verdict: string }>("gate", { run: planned.run })).verdict,
 			});
-			expect(snapshot()).toEqual({ slot: "missing", gate: "pending" });
-			report("fail");
-			expect(snapshot()).toEqual({ slot: "failing", gate: "blocked" });
-			report("pass");
-			expect(snapshot()).toEqual({ slot: "failing", gate: "blocked" });
-			report("skip", 2);
-			expect(snapshot()).toEqual({ slot: "failing", gate: "blocked" });
-			report("pass", 3);
-			expect(snapshot()).toEqual({ slot: "missing", gate: "pending" });
-			expect(h.call<{ verdict: string }>("gate", { commit: target.commit }).verdict).toBe("passed");
-			report("fail", 1, "e2e");
-			expect(snapshot()).toEqual({ slot: "failing", gate: "blocked" });
-			report("pass", 2, "e2e");
-			expect(snapshot()).toEqual({ slot: "missing", gate: "pending" });
-			h.call("report", { run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
-			expect(snapshot()).toEqual({ slot: "satisfied", gate: "passed" });
-			h.call("report", {
+			expect(await snapshot()).toEqual({ slot: "missing", gate: "pending" });
+			await report("fail");
+			expect(await snapshot()).toEqual({ slot: "failing", gate: "blocked" });
+			await report("pass");
+			expect(await snapshot()).toEqual({ slot: "failing", gate: "blocked" });
+			await report("skip", 2);
+			expect(await snapshot()).toEqual({ slot: "failing", gate: "blocked" });
+			await report("pass", 3);
+			expect(await snapshot()).toEqual({ slot: "missing", gate: "pending" });
+			expect((await h.call<{ verdict: string }>("gate", { commit: target.commit })).verdict).toBe("passed");
+			await report("fail", 1, "e2e");
+			expect(await snapshot()).toEqual({ slot: "failing", gate: "blocked" });
+			await report("pass", 2, "e2e");
+			expect(await snapshot()).toEqual({ slot: "missing", gate: "pending" });
+			await h.call("report", { run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+			expect(await snapshot()).toEqual({ slot: "satisfied", gate: "passed" });
+			await h.call("report", {
 				run: planned.run,
 				results: [{ test: { case: "C-1" }, outcome: "fail", failure: { message: "manual" } }],
 			});
-			expect(snapshot()).toEqual({ slot: "disputed", gate: "blocked" });
+			expect(await snapshot()).toEqual({ slot: "disputed", gate: "blocked" });
 		} finally {
 			h.close();
 		}
@@ -743,25 +744,26 @@ function literalTransitions(): void {
 		["assumed accepted", "exact-or-assumed", ["auto"], "C-1", undefined, "satisfied", "assumed"],
 		["method refused", "exact", ["human"], "C-1", 1, "missing", null],
 		["other case", "exact", ["auto"], "C-2", 1, "missing", null],
-	] as const)("reported slot admission: %s", (_name, basis, methods, caseRef, version, state, admitted) => {
-		const h = harness({ preset: "strict" });
+	] as const)("reported slot admission: %s", async (_name, basis, methods, caseRef, version, state, admitted) => {
+		const h = await harness({ preset: "strict" });
 		try {
-			h.call("propose", {
+			await h.call("propose", {
 				edits: [
 					{ op: "create", outline: "One" },
 					{ op: "create", outline: "Two" },
 				],
 			});
-			for (const q of h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }).items)
-				h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" }, reason: "fixture" });
-			const planned = h.call<{ run: string }>("plan", {
+			for (const q of (await h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "adopt" }))
+				.items)
+				await h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" }, reason: "fixture" });
+			const planned = await h.call<{ run: string }>("plan", {
 				name: "Admission",
 				select: { cases: ["C-1"] },
 				accepts: { commit: "admission01" },
 				require: [{ id: "exercise", kind: "exercise", methods, basis, minActors: 1 }],
 			});
 			const ci = h.actor("pipeline", "ci", ["read", "record"]);
-			h.call(
+			await h.call(
 				"report",
 				{
 					target: { commit: "admission01", branch: "main" },
@@ -775,7 +777,7 @@ function literalTransitions(): void {
 				},
 				ci,
 			);
-			const slots = h.call<{ items: { state: string; fills: { admitted: string }[] }[] }>("find", {
+			const slots = await h.call<{ items: { state: string; fills: { admitted: string }[] }[] }>("find", {
 				in: "slots",
 				run: planned.run,
 			});
@@ -941,10 +943,10 @@ export function sequences(preset: "loose" | "standard" | "strict"): void {
 			expect(excuseOf(1, 2, "line:other", 4)).toBeUndefined();
 		});
 
-	test(`${SEEDS} random sequences under the ${preset} policy keep every invariant`, () => {
+	test(`${SEEDS} random sequences under the ${preset} policy keep every invariant`, async () => {
 		const problems: Problem[] = [];
 		for (let seed = 1; seed <= SEEDS && problems.length < 3; seed++) {
-			const problem = sequence(seed, preset);
+			const problem = await sequence(seed, preset);
 			if (problem) problems.push(problem);
 		}
 		expect(problems).toEqual([]);

@@ -31,23 +31,28 @@ export const SEARCHES = [
 ];
 
 /** Runs exactly the registry path timed by the benchmark, leaving output and storage checks outside its timer. */
-export function operation(instance: DatasetInstance, op: string, input: unknown, actor = instance.owner): unknown {
-	const reply = invoke(instance.app, OPS, { op, project: instance.metadata.project, input, actor: () => actor });
+export async function operation(
+	instance: DatasetInstance,
+	op: string,
+	input: unknown,
+	actor = instance.owner,
+): Promise<unknown> {
+	const reply = await invoke(instance.app, OPS, { op, project: instance.metadata.project, input, actor: () => actor });
 	if (!reply.ok) throw new Error(`${op}: ${reply.error.code}: ${reply.error.message}`);
 	return reply.result;
 }
 
 /** Adds twenty real recent edits to each clone without mutating the reusable baseline. */
-export function prepareRecentChanges(instance: DatasetInstance): void {
+export async function prepareRecentChanges(instance: DatasetInstance): Promise<void> {
 	// A cursor past everything returns no changes and the cursor of where the project is now.
 	const current = Delta.parse(
-		operation(instance, "since", { cursor: `s:${Number.MAX_SAFE_INTEGER}`, limit: 1 }),
+		await operation(instance, "since", { cursor: `s:${Number.MAX_SAFE_INTEGER}`, limit: 1 }),
 	).cursor;
 	const seq = Number(current.slice(2));
 	const recent = instance.metadata.cases.filter((stamp) => stamp.version > 1 && stamp.version < 6).slice(0, 20);
 	ensure(recent.length === 20, "the history fixture must supply twenty cases for recent diffs");
 	const reply = Proposal.parse(
-		operation(instance, "propose", {
+		await operation(instance, "propose", {
 			edits: recent.map((stamp) => ({
 				op: "edit",
 				case: stamp.ref,
@@ -61,12 +66,12 @@ export function prepareRecentChanges(instance: DatasetInstance): void {
 }
 
 /** Checks every returned search row against its persisted document and FTS word/prefix semantics. */
-export function verifySearch(
+export async function verifySearch(
 	instance: DatasetInstance,
 	result: unknown,
 	text: string,
 	scope: { folder?: number; tags?: string[] } = {},
-): void {
+): Promise<void> {
 	const page = CasePage.parse(result);
 	ensure(page.items.length > 0 && page.items.length <= 50, `search ${text} must match a bounded nonempty page`);
 	ensure(
@@ -79,7 +84,7 @@ export function verifySearch(
 		steps: z.array(z.object({ action: z.string(), expected: z.string().nullable() })),
 		tags: z.array(z.string()),
 	});
-	const docs = call(
+	const docs = await call(
 		instance.app,
 		instance.owner,
 		"get",
@@ -222,10 +227,10 @@ export function readRequests(instance: DatasetInstance, index: number): ReadRequ
 }
 
 /** Produces isolated reads, including the complete proof strip and queue counts, over an immutable baseline clone. */
-export function readWorkloads(instance: DatasetInstance, iterations: number): Workload[] {
+export async function readWorkloads(instance: DatasetInstance, iterations: number): Promise<Workload[]> {
 	const { metadata, app, owner } = instance;
 	const rng = random(metadata.parameters.seed + 1);
-	const expectedGate = Gate.parse(operation(instance, "gate", { commit: metadata.lastCommit }));
+	const expectedGate = Gate.parse(await operation(instance, "gate", { commit: metadata.lastCommit }));
 	let expectedRef = "";
 	const reads: Workload[] = [
 		{
@@ -235,7 +240,7 @@ export function readWorkloads(instance: DatasetInstance, iterations: number): Wo
 			correctness: "Requested full document, 3–9 steps, proof, open counts and current version.",
 			prepare() {
 				expectedRef = itemAt(metadata.cases, Math.floor(rng() * metadata.cases.length)).ref;
-				return () => operation(instance, "get", { refs: [expectedRef] });
+				return async () => await operation(instance, "get", { refs: [expectedRef] });
 			},
 			check(value) {
 				const row = itemAt(z.array(CaseView).parse(value), 0);
@@ -250,7 +255,8 @@ export function readWorkloads(instance: DatasetInstance, iterations: number): Wo
 			budget: BUDGETS.folder,
 			iterations,
 			correctness: "Fifty cases in the requested folder, each with proof and open-question count.",
-			prepare: () => () => operation(instance, "find", { in: "cases", folder: metadata.hotFolder, limit: 50 }),
+			prepare: () => async () =>
+				await operation(instance, "find", { in: "cases", folder: metadata.hotFolder, limit: 50 }),
 			check(value) {
 				const page = CasePage.parse(value);
 				ensure(
@@ -270,7 +276,7 @@ export function readWorkloads(instance: DatasetInstance, iterations: number): Wo
 	for (const search of searches) {
 		const filtered = search.scope.folder !== undefined || search.scope.tags !== undefined;
 		const expected = filtered
-			? CasePage.parse(operation(instance, "find", { in: "cases", ...search.scope, limit: 1 })).count
+			? CasePage.parse(await operation(instance, "find", { in: "cases", ...search.scope, limit: 1 })).count
 			: null;
 		if (filtered) ensure(expected !== null && expected > 0, "filtered search must exercise a populated selection");
 		reads.push({
@@ -279,9 +285,10 @@ export function readWorkloads(instance: DatasetInstance, iterations: number): Wo
 			iterations,
 			correctness:
 				"Nonempty bounded results; persisted documents satisfy the FTS terms, folder and tags; filtered counts are exact.",
-			prepare: () => () => operation(instance, "find", { in: "cases", text: search.text, ...search.scope, limit: 50 }),
-			check(value) {
-				verifySearch(instance, value, search.text, search.scope);
+			prepare: () => async () =>
+				await operation(instance, "find", { in: "cases", text: search.text, ...search.scope, limit: 50 }),
+			async check(value) {
+				await verifySearch(instance, value, search.text, search.scope);
 				if (expected !== null) {
 					const page = CasePage.parse(value);
 					ensure(page.items.length === Math.min(50, expected), "filtered search must fill its page");
@@ -307,7 +314,7 @@ export function readWorkloads(instance: DatasetInstance, iterations: number): Wo
 			budget: BUDGETS.test,
 			iterations,
 			correctness: "Latest twenty persisted results of the requested T-ref, newest first.",
-			prepare: () => () => operation(instance, "get", { refs: [test.ref] }),
+			prepare: () => async () => await operation(instance, "get", { refs: [test.ref] }),
 			check(value) {
 				const row = itemAt(z.array(TestView).parse(value), 0);
 				ensure(
@@ -324,7 +331,7 @@ export function readWorkloads(instance: DatasetInstance, iterations: number): Wo
 			budget: BUDGETS.gate,
 			iterations,
 			correctness: "Persisted commit run, unchanged verdict and tally; no stale accepted batch.",
-			prepare: () => () => operation(instance, "gate", { commit: metadata.lastCommit }),
+			prepare: () => async () => await operation(instance, "gate", { commit: metadata.lastCommit }),
 			check(value) {
 				const gate = Gate.parse(value);
 				ensure(
@@ -342,7 +349,7 @@ export function readWorkloads(instance: DatasetInstance, iterations: number): Wo
 			budget: BUDGETS.queue,
 			iterations,
 			correctness: "Fifty open questions with evidence hashes; total count equals the persisted baseline.",
-			prepare: () => () => operation(instance, "inbox", { limit: 50 }),
+			prepare: () => async () => await operation(instance, "inbox", { limit: 50 }),
 			check(value) {
 				const queue = Queue.parse(value);
 				ensure(
@@ -358,7 +365,7 @@ export function readWorkloads(instance: DatasetInstance, iterations: number): Wo
 			budget: null,
 			iterations,
 			correctness: "Bounded changed cases or settled questions, with an advancing sequence cursor.",
-			prepare: () => () => operation(instance, "since", { cursor: metadata.since, limit: 200 }),
+			prepare: () => async () => await operation(instance, "since", { cursor: metadata.since, limit: 200 }),
 			check(value) {
 				const delta = Delta.parse(value);
 				ensure(
@@ -376,8 +383,8 @@ export function readWorkloads(instance: DatasetInstance, iterations: number): Wo
 			budget: null,
 			iterations,
 			correctness: "Twenty input files; bounded linked candidates with reasons and version hashes.",
-			prepare: () => () =>
-				operation(instance, "impact", { change: metadata.change, files: metadata.files, ledger: false }),
+			prepare: () => async () =>
+				await operation(instance, "impact", { change: metadata.change, files: metadata.files, ledger: false }),
 			check(value) {
 				const impact = Impact.parse(value);
 				ensure(
@@ -397,7 +404,7 @@ export function readWorkloads(instance: DatasetInstance, iterations: number): Wo
 			budget: BUDGETS.report,
 			iterations,
 			correctness: "The report asked for, over 30 days, with populated counts and rows from the dataset.",
-			prepare: () => () => operation(instance, "stats", { of, days: 30 }),
+			prepare: () => async () => await operation(instance, "stats", { of, days: 30 }),
 			check(value) {
 				const report = StatsReply.parse(value);
 				ensure(report.of === of, "the reply must be the report asked for");
@@ -465,15 +472,18 @@ export function saveWorkload(instance: DatasetInstance, iterations: number): Wor
 				edits: [{ op: "edit", case: stamp.ref, base: version, body: { pre } }],
 				reason: "Clarify setup during case authoring",
 			};
-			return () => operation(instance, "propose", input);
+			return async () => await operation(instance, "propose", input);
 		},
-		check(value) {
+		async check(value) {
 			const reply = Proposal.parse(value);
 			ensure(
 				reply.status === "adopted" && reply.proposal !== null && reply.cases.length === 1,
 				"save must adopt a real changed version",
 			);
-			const current = itemAt(call(instance.app, instance.owner, "get", { refs: [stamp.ref] }, z.array(CaseView)), 0);
+			const current = itemAt(
+				await call(instance.app, instance.owner, "get", { refs: [stamp.ref] }, z.array(CaseView)),
+				0,
+			);
 			ensure(
 				current.version === version + 1 && current.pre === pre && current.hash === itemAt(reply.cases, 0).hash,
 				"the saved version and content must be persistent",
@@ -503,13 +513,13 @@ export function bulkWorkload(instance: DatasetInstance): Workload {
 				edits: [{ op: "place", cases: refs, folder, tags: { add: [tag] } }],
 				reason: "Move customer journeys together",
 			};
-			return () => operation(instance, "propose", input);
+			return async () => await operation(instance, "propose", input);
 		},
-		check(value) {
+		async check(value) {
 			const reply = Proposal.parse(value);
 			ensure(reply.status === "adopted" && reply.proposal !== null, "bulk move must adopt a proposal");
 			for (let start = 0; start < refs.length; start += 200) {
-				const rows = call(
+				const rows = await call(
 					instance.app,
 					instance.owner,
 					"get",
@@ -545,20 +555,20 @@ export function ingestWorkload(
 			iterations: options.iterations ?? 10,
 			warmup: 1,
 			correctness:
-				"Fresh batch, exact accepted and stored result counts, twenty failure causes, and gate readable after synchronous invoke completes acceptance and apply.",
+				"Fresh batch, exact accepted and stored result counts, twenty failure causes, and gate readable after awaited invoke completes acceptance and apply.",
 			prepare() {
 				const id = `${options.prefix ?? "direct"}-${++serial}`;
 				const input = ingestInput(instance.metadata, id, size);
 				commit = `bench-${id}`;
-				return () => {
+				return async () => {
 					started = performance.now();
 					return operation(instance, "report", input, instance.ci);
 				};
 			},
-			check(value, iteration) {
+			async check(value, iteration) {
 				const receipt = Receipt.parse(value);
 				// Read the gate before the storage assertion, so its visibility includes no benchmark count scan.
-				const gate = Gate.parse(operation(instance, "gate", { commit }));
+				const gate = Gate.parse(await operation(instance, "gate", { commit }));
 				const visible = performance.now() - started;
 				if (iteration >= 0) visibility.push(visible);
 				ensure(
@@ -592,9 +602,9 @@ export function executeWorkload(instance: DatasetInstance, iterations: number): 
 				run: instance.metadata.run,
 				results: [{ test: { case: ref }, outcome: "pass", durationMs: 750 }],
 			};
-			return () => operation(instance, "report", input);
+			return async () => await operation(instance, "report", input);
 		},
-		check(value) {
+		async check(value) {
 			const receipt = Receipt.parse(value);
 			verifyReport(instance.app, receipt, 1);
 			ensure(
@@ -602,7 +612,7 @@ export function executeWorkload(instance: DatasetInstance, iterations: number): 
 				"manual results must have an exact pinned basis",
 			);
 			const result = itemAt(receipt.results, 0);
-			const slots = call(
+			const slots = await call(
 				instance.app,
 				instance.owner,
 				"find",

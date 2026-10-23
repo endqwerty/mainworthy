@@ -68,7 +68,7 @@ const replaces = (held: { attempt: number; outcome: string }, next: { attempt: n
 /** How the commands of every sequence ended, per operation: a check that the random actions are effective. */
 export const stats = new Map<string, number>();
 
-export function sequence(seed: number, preset: string): Problem | null {
+export async function sequence(seed: number, preset: string): Promise<Problem | null> {
 	let state = seed * 2654435761 + 1;
 	const rand = (n: number): number => {
 		state ^= state << 13;
@@ -77,7 +77,7 @@ export function sequence(seed: number, preset: string): Problem | null {
 		return (state >>> 0) % n;
 	};
 	const pick = <T>(items: readonly T[]): T => items[rand(items.length)] as T;
-	const h = harness({ preset });
+	const h = await harness({ preset });
 	const rows = <T = Row>(sql: string, ...args: (string | number | null)[]): T[] =>
 		h.app.db.raw.query(sql).all(...args) as T[];
 	const trace: unknown[] = [];
@@ -122,8 +122,8 @@ export function sequence(seed: number, preset: string): Problem | null {
 			}
 		}
 	};
-	const command = (op: string, input: unknown, as: Actor = h.owner): unknown => {
-		const reply = h.raw(op, input, as);
+	const command = async (op: string, input: unknown, as: Actor = h.owner): Promise<unknown> => {
+		const reply = await h.raw(op, input, as);
 		if (reply.ok) successful.set(op, (successful.get(op) ?? 0) + 1);
 		trace.push({ op, input, as: as.name, reply: reply.ok ? "ok" : reply.error });
 		const key = `${op}: ${reply.ok ? "ok" : `${reply.error.code} ${reply.error.message.slice(0, 70)}`}`;
@@ -132,12 +132,12 @@ export function sequence(seed: number, preset: string): Problem | null {
 		if (op === "report" && reply.ok) placeOf(as, input);
 		return reply.ok ? reply.result : null;
 	};
-	const answerOpen = (kind: string, as: Actor = h.owner, answer: Record<string, unknown> = { is: "accept" }) => {
+	const answerOpen = async (kind: string, as: Actor = h.owner, answer: Record<string, unknown> = { is: "accept" }) => {
 		for (const waiting of rows<{ no: number; evidence_hash: string }>(
 			"SELECT no, evidence_hash FROM questions WHERE kind = ? AND state = 'open'",
 			kind,
 		))
-			command("decide", { q: `Q-${waiting.no}`, onEvidence: waiting.evidence_hash, answer, reason: "seed" }, as);
+			await command("decide", { q: `Q-${waiting.no}`, onEvidence: waiting.evidence_hash, answer, reason: "seed" }, as);
 	};
 
 	const scopeOf = (target: Row, run: number): string =>
@@ -607,14 +607,14 @@ export function sequence(seed: number, preset: string): Problem | null {
 	};
 
 	try {
-		command("propose", {
+		await command("propose", {
 			edits: [
 				{ op: "create", body: { title: "One", methods: ["human", "agent"] } },
 				{ op: "create", body: { title: "Two", methods: ["human"] } },
 				{ op: "create", outline: "Spare" },
 			],
 		});
-		answerOpen("adopt");
+		await answerOpen("adopt");
 		expect(rows("SELECT id FROM cases WHERE head IS NOT NULL")).toHaveLength(3);
 		const commits = ["random01", "random02", "random03"];
 		const changeCommits = ["change01", "change02"];
@@ -660,11 +660,11 @@ export function sequence(seed: number, preset: string): Problem | null {
 					const id = correctionFor(as, first.test.key, target.commit, target.env, null);
 					if (id !== null) first.corrects = id;
 				}
-				command("report", { target, job: pick(["a", "b"]), attempt: 1 + rand(4), results }, as);
+				await command("report", { target, job: pick(["a", "b"]), attempt: 1 + rand(4), results }, as);
 			} else if (action < 36) {
 				// A change with a base on trunk.
 				const results = Array.from({ length: 1 + rand(2) }, () => autoResult(rand(4)));
-				command(
+				await command(
 					"report",
 					{
 						target: {
@@ -694,11 +694,15 @@ export function sequence(seed: number, preset: string): Problem | null {
 					rand(2) === 0
 						? { ...autoResult(rand(4)) }
 						: { test: { case: `C-${1 + rand(2)}` }, outcome, ...(outcome === "fail" ? { note: pick(causes) } : {}) };
-				command("report", { target, job: pick(["a", "b"]), attempt: 1 + rand(3), results: [result] }, pick(agents));
+				await command(
+					"report",
+					{ target, job: pick(["a", "b"]), attempt: 1 + rand(3), results: [result] },
+					pick(agents),
+				);
 			} else if (action < 44 && sentLast() !== null) {
 				// The same report again, exactly as it was sent.
 				const sent = sentLast();
-				if (sent) command("report", sent.input, sent.as);
+				if (sent) await command("report", sent.input, sent.as);
 			} else if (action < 52) {
 				// Plan: by commit, by commit and environment, by a change's commit, or by hand; sometimes jobs and two actors.
 				const accepts = pick([
@@ -721,7 +725,7 @@ export function sequence(seed: number, preset: string): Problem | null {
 				if (rand(5) === 0)
 					require.push({ id: "second", kind: "exercise", methods: ["human"], basis: "exact-or-assumed", minActors: 1 });
 				const select = rand(3) === 0 ? { cases: [`C-${1 + rand(3)}`] } : {};
-				command("plan", { name: `Plan ${step}`, select, accepts, require }, pick(people));
+				await command("plan", { name: `Plan ${step}`, select, accepts, require }, pick(people));
 			} else if (action < 60) {
 				// A person records a result by hand in an open run, sometimes correcting an earlier one of theirs.
 				const planned = rows<{ id: number; no: number }>(
@@ -749,7 +753,7 @@ export function sequence(seed: number, preset: string): Problem | null {
 					// Sometimes under a job's name, and sometimes with a skipped automated key alongside.
 					const results: Record<string, unknown>[] = [result];
 					if (rand(4) === 0) results.push({ test: { key: `test-${rand(4)}` }, outcome: "skip" });
-					command(
+					await command(
 						"report",
 						{ run: `R-${run.no}`, attempt: 1 + rand(2), ...(rand(3) === 0 ? { job: pick(["a", "b"]) } : {}), results },
 						as,
@@ -764,7 +768,7 @@ export function sequence(seed: number, preset: string): Problem | null {
 					const question = pick(questions);
 					const as = rand(6) === 0 && agents.length > 0 ? pick(agents) : pick(people);
 					if (question.state === "decided" && rand(3) === 0) {
-						command("decide", { undo: `Q-${question.no}`, reason: "changed my mind" }, as);
+						await command("decide", { undo: `Q-${question.no}`, reason: "changed my mind" }, as);
 					} else {
 						const is =
 							question.kind === "signoff"
@@ -778,7 +782,7 @@ export function sequence(seed: number, preset: string): Problem | null {
 											: pick(["accept", "reject"]);
 						const answer: Record<string, unknown> = { is };
 						if (is === "link") answer.pairs = [[pick(["test-0", "test-1", "test-2", "test-3"]), `C-${1 + rand(3)}`]];
-						command(
+						await command(
 							"decide",
 							{ q: `Q-${question.no}`, onEvidence: question.evidence_hash, answer, reason: "because" },
 							as,
@@ -790,19 +794,20 @@ export function sequence(seed: number, preset: string): Problem | null {
 				const closed = rows<{ no: number }>(
 					`SELECT q.no FROM questions q JOIN runs r ON r.signoff = q.decision WHERE r.state = 'closed' AND q.kind = 'signoff'`,
 				);
-				if (closed.length > 0) command("decide", { undo: `Q-${pick(closed).no}`, reason: "reopen" }, pick(people));
+				if (closed.length > 0)
+					await command("decide", { undo: `Q-${pick(closed).no}`, reason: "reopen" }, pick(people));
 			} else if (action < 84) {
 				// The policy is switched; where a person must adopt it, the owner (an admin) does.
-				command("propose", {
+				await command("propose", {
 					edits: [{ op: "policy", preset: pick(["loose", "standard", "strict"]) }],
 					reason: "switch",
 				});
-				answerOpen("adopt");
+				await answerOpen("adopt");
 			} else if (action < 87) {
 				// A case is edited, so runs planned before pin the older version.
 				const caseNo = 1 + rand(2);
 				const head = rows<{ head: number }>("SELECT head FROM cases WHERE no = ?", caseNo)[0]?.head ?? 1;
-				command("propose", {
+				await command("propose", {
 					edits: [
 						{
 							op: "edit",
@@ -813,11 +818,11 @@ export function sequence(seed: number, preset: string): Problem | null {
 					],
 					reason: "edit",
 				});
-				if (rand(2) === 0) answerOpen("adopt");
+				if (rand(2) === 0) await answerOpen("adopt");
 			} else if (action < 90) {
 				// A review with findings, by a person or an agent.
 				const as = rand(2) === 0 && agents.length > 0 ? pick(agents) : pick(people);
-				command(
+				await command(
 					"claim",
 					{
 						lens: "review",
@@ -857,7 +862,7 @@ export function sequence(seed: number, preset: string): Problem | null {
 			} else if (action < 95 && !forgotten) {
 				// The second person or the agent is forgotten; nothing uses them afterwards.
 				const name = pick(["second", "explorer"]);
-				command("admin", { do: "actor.forget", name });
+				await command("admin", { do: "actor.forget", name });
 				forgotten = true;
 				people = people.filter((p) => p.name !== name);
 				agents = agents.filter((a) => a.name !== name);
@@ -868,7 +873,7 @@ export function sequence(seed: number, preset: string): Problem | null {
 					outcome: i % 3 === 0 ? "pass" : "fail",
 					...(i % 3 === 0 ? {} : { failure: { message: "cause bulk" } }),
 				}));
-				command(
+				await command(
 					"report",
 					{ target: { commit: pick(commits), branch: "main", env: "prod" }, job: "bulk", results },
 					pipeline,
@@ -904,14 +909,14 @@ export function sequence(seed: number, preset: string): Problem | null {
 /** The test of one policy preset. Each preset has a file of its own, so the three run side by side. */
 export function extendedSequences(preset: "loose" | "standard" | "strict"): void {
 	if (preset === "loose")
-		test("the job audit excludes corrected-only evidence in a fixed sequence", () => {
-			const h = harness({ preset });
+		test("the job audit excludes corrected-only evidence in a fixed sequence", async () => {
+			const h = await harness({ preset });
 			try {
-				h.call("propose", { edits: [{ op: "create", body: { title: "Release check", methods: ["human"] } }] });
-				for (const q of h.call<InboxReply>("inbox", { kind: "adopt" }).items)
-					h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" }, reason: "fixture" });
+				await h.call("propose", { edits: [{ op: "create", body: { title: "Release check", methods: ["human"] } }] });
+				for (const q of (await h.call<InboxReply>("inbox", { kind: "adopt" })).items)
+					await h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" }, reason: "fixture" });
 				const target = { commit: "fixedjob01", branch: "main" };
-				const planned = h.call<PlanReply>("plan", {
+				const planned = await h.call<PlanReply>("plan", {
 					name: "Release",
 					select: { cases: ["C-1"] },
 					accepts: { commit: target.commit },
@@ -920,10 +925,10 @@ export function extendedSequences(preset: "loose" | "standard" | "strict"): void
 						{ id: "ci", kind: "jobs", jobs: ["e2e"] },
 					],
 				});
-				h.call("report", { run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+				await h.call("report", { run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
 				const ci = h.actor("pipeline", "ci", ["read", "record"]);
-				const send = (outcome: "pass" | "skip" | "blocked", job = "e2e", corrects?: number) => {
-					const receipt = h.call<ReportReceipt>(
+				const send = async (outcome: "pass" | "skip" | "blocked", job = "e2e", corrects?: number) => {
+					const receipt = await h.call<ReportReceipt>(
 						"report",
 						{
 							target,
@@ -937,32 +942,32 @@ export function extendedSequences(preset: "loose" | "standard" | "strict"): void
 					if (id === undefined) throw new Error("expected a recorded result");
 					return id;
 				};
-				const snapshot = () => {
-					const gate = h.call<GateStatus>("gate", { run: planned.run });
+				const snapshot = async () => {
+					const gate = await h.call<GateStatus>("gate", { run: planned.run });
 					return {
 						verdict: gate.verdict,
 						missing: gate.tally.missing,
 						jobs: [...new Set(auditJobs(h.app.db.raw).map((b) => b.job))],
 					};
 				};
-				expect(snapshot()).toEqual({ verdict: "pending", missing: 1, jobs: [] });
-				const pass = send("pass");
-				expect(snapshot()).toEqual({ verdict: "passed", missing: 0, jobs: ["e2e"] });
-				const skip = send("skip", "corrections", pass);
-				expect(snapshot()).toEqual({ verdict: "pending", missing: 1, jobs: [] });
-				const blocked = send("blocked", "corrections", skip);
-				expect(snapshot()).toEqual({ verdict: "pending", missing: 1, jobs: [] });
-				send("pass", "e2e", blocked);
-				expect(snapshot()).toEqual({ verdict: "passed", missing: 0, jobs: ["e2e"] });
+				expect(await snapshot()).toEqual({ verdict: "pending", missing: 1, jobs: [] });
+				const pass = await send("pass");
+				expect(await snapshot()).toEqual({ verdict: "passed", missing: 0, jobs: ["e2e"] });
+				const skip = await send("skip", "corrections", pass);
+				expect(await snapshot()).toEqual({ verdict: "pending", missing: 1, jobs: [] });
+				const blocked = await send("blocked", "corrections", skip);
+				expect(await snapshot()).toEqual({ verdict: "pending", missing: 1, jobs: [] });
+				await send("pass", "e2e", blocked);
+				expect(await snapshot()).toEqual({ verdict: "passed", missing: 0, jobs: ["e2e"] });
 			} finally {
 				h.close();
 			}
 		});
 
-	test(`${SEEDS} extended random sequences under the ${preset} policy keep every invariant`, () => {
+	test(`${SEEDS} extended random sequences under the ${preset} policy keep every invariant`, async () => {
 		const problems: Problem[] = [];
 		for (let seed = FIRST; seed < FIRST + SEEDS && problems.length < 3; seed++) {
-			const problem = sequence(seed, preset);
+			const problem = await sequence(seed, preset);
 			if (problem) problems.push(problem);
 		}
 		expect(problems).toEqual([]);

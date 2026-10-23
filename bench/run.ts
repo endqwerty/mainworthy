@@ -118,15 +118,15 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 	console.log(
 		`Filesystem: ${hardware.filesystem}\nLoad at start: ${hardware.load.map((value) => value.toFixed(2)).join(" / ")}`,
 	);
-	const dataset = buildDataset({ dir: cli.dir, parameters: cli.parameters });
+	const dataset = await buildDataset({ dir: cli.dir, parameters: cli.parameters });
 	const instance = openDataset(dataset, join(cli.dir, `isolated-${randomUUID()}`));
 	const rows: Measurement[] = [];
 	const repetitions: { name: string; results: Measurement[] }[] = [];
 	const loads: { after: string; load: number[] }[] = [];
 	const diagnostic: Awaited<ReturnType<typeof profile>>[] = [];
 	const iterations = cli.quick ? 25 : 50;
-	const repeatWorkload = (peer: typeof instance, name: string): Workload => {
-		const read = readWorkloads(peer, iterations).find((workload) => workload.name === name);
+	const repeatWorkload = async (peer: typeof instance, name: string): Promise<Workload> => {
+		const read = (await readWorkloads(peer, iterations)).find((workload) => workload.name === name);
 		if (read) return read;
 		if (name === "case save") return saveWorkload(peer, iterations);
 		if (name === "bulk move (1000)") return bulkWorkload(peer);
@@ -150,8 +150,8 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 			for (let round = 0; round < 5; round++) {
 				const peer = openDataset(dataset, join(cli.dir, `repeat-${randomUUID()}`));
 				try {
-					prepareRecentChanges(peer);
-					repeated.push(await measure(repeatWorkload(peer, row.name)));
+					await prepareRecentChanges(peer);
+					repeated.push(await measure(await repeatWorkload(peer, row.name)));
 				} finally {
 					peer.close();
 				}
@@ -165,9 +165,9 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 		return row;
 	};
 	try {
-		prepareRecentChanges(instance);
+		await prepareRecentChanges(instance);
 		assertProducer(instance.ci);
-		for (const workload of readWorkloads(instance, iterations)) await run(workload);
+		for (const workload of await readWorkloads(instance, iterations)) await run(workload);
 		await run(saveWorkload(instance, iterations));
 		await run(bulkWorkload(instance));
 		const ingest = ingestWorkload(instance);
@@ -180,7 +180,7 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 			budget: BUDGETS.visible,
 			criterion: "max",
 			pass: visible.max < BUDGETS.visible && rows.every((row) => row.name !== "ingest (10000)" || row.errors === 0),
-			correctness: "Gate read after synchronous invoke completes acceptance and apply, timed from report start.",
+			correctness: "Gate read after awaited invoke completes acceptance and apply, timed from report start.",
 			checked: visible.n,
 			samples: visibleSamples,
 			warmupErrors: [],
@@ -263,9 +263,9 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 	}
 	const profiling = openDataset(dataset, join(cli.dir, `profile-${randomUUID()}`));
 	try {
-		prepareRecentChanges(profiling);
+		await prepareRecentChanges(profiling);
 		const workloads = [
-			...readWorkloads(profiling, 5),
+			...(await readWorkloads(profiling, 5)),
 			saveWorkload(profiling, 5),
 			bulkWorkload(profiling),
 			ingestWorkload(profiling, { prefix: "profile", iterations: 5 }).workload,

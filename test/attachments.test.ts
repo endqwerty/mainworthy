@@ -38,23 +38,23 @@ afterEach(async () => {
 	for (const h of rigs.splice(0)) h.close();
 	for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
-function rig() {
-	const h = harness();
+async function rig() {
+	const h = await harness();
 	rigs.push(h);
 	return h;
 }
-function report(h: Harness, attachments: unknown[] = [file]) {
+async function report(h: Harness, attachments: unknown[] = [file]) {
 	return h.call<{ results: number[]; fresh: boolean }>("report", {
 		target: { session: "attachments" },
 		results: [{ test: { key: "screenshot" }, outcome: "fail", attachments }],
 	});
 }
 
-test("report preserves attachment bytes and retry identity", () => {
-	const h = rig();
-	const sent = report(h);
+test("report preserves attachment bytes and retry identity", async () => {
+	const h = await rig();
+	const sent = await report(h);
 	const result = sent.results[0];
-	const list = listed.parse(h.call("attachment", { result }));
+	const list = listed.parse(await h.call("attachment", { result }));
 	expect(list.items).toHaveLength(1);
 	const item = list.items[0];
 	expect(item).toMatchObject({
@@ -65,24 +65,24 @@ test("report preserves attachment bytes and retry identity", () => {
 		at: "s1",
 	});
 	expect(item?.hash).toBe(createHash("sha256").update(Buffer.from(PNG, "base64")).digest("hex"));
-	expect(downloaded.parse(h.call("attachment", { result, id: item?.id })).data).toBe(PNG);
-	expect(report(h)).toMatchObject({ results: sent.results, fresh: false });
-	expect(listed.parse(h.call("attachment", { result })).items).toHaveLength(1);
+	expect(downloaded.parse(await h.call("attachment", { result, id: item?.id })).data).toBe(PNG);
+	expect(await report(h)).toMatchObject({ results: sent.results, fresh: false });
+	expect(listed.parse(await h.call("attachment", { result })).items).toHaveLength(1);
 });
 
-test("attach appends to the producer's result and requires read permission for downloads", () => {
-	const h = rig();
-	const result = report(h, []).results[0];
-	const attached = metadata.parse(h.call("attach", { result, attachment: file, cmd: "attach-once" }));
-	expect(metadata.parse(h.call("attach", { result, attachment: file, cmd: "attach-once" }))).toEqual(attached);
+test("attach appends to the producer's result and requires read permission for downloads", async () => {
+	const h = await rig();
+	const result = (await report(h, [])).results[0];
+	const attached = metadata.parse(await h.call("attach", { result, attachment: file, cmd: "attach-once" }));
+	expect(metadata.parse(await h.call("attach", { result, attachment: file, cmd: "attach-once" }))).toEqual(attached);
 	const other = h.actor("other", "human", ["record", "read"]);
-	expect(h.raw("attach", { result, attachment: file }, other)).toMatchObject({
+	expect(await h.raw("attach", { result, attachment: file }, other)).toMatchObject({
 		ok: false,
 		error: { code: "forbidden" },
 	});
-	h.call("admin", { do: "project.create", key: "another", preset: "loose" });
+	await h.call("admin", { do: "project.create", key: "another", preset: "loose" });
 	expect(
-		invoke(h.app, OPS, {
+		await invoke(h.app, OPS, {
 			op: "attachment",
 			project: "another",
 			input: { result, id: attached.id },
@@ -90,34 +90,34 @@ test("attach appends to the producer's result and requires read permission for d
 		}),
 	).toMatchObject({ ok: false, error: { code: "not_found" } });
 	const recorder = h.actor("recorder", "ci", ["record"]);
-	expect(h.raw("attachment", { result, id: attached.id }, recorder)).toMatchObject({
+	expect(await h.raw("attachment", { result, id: attached.id }, recorder)).toMatchObject({
 		ok: false,
 		error: { code: "forbidden" },
 	});
-	expect(h.raw("attachment", { result: 999999, id: attached.id })).toMatchObject({
+	expect(await h.raw("attachment", { result: 999999, id: attached.id })).toMatchObject({
 		ok: false,
 		error: { code: "not_found" },
 	});
 	const html = metadata.parse(
-		h.call("attach", {
+		await h.call("attach", {
 			result,
 			attachment: { name: "page.html", data: Buffer.from("<script>window.executed=true</script>").toString("base64") },
 		}),
 	);
 	expect(html.type).toBe("application/octet-stream");
-	const byOther = h.call<{ results: number[] }>(
+	const byOther = await h.call<{ results: number[] }>(
 		"report",
 		{ target: { session: "other" }, results: [{ test: { key: "other" }, outcome: "fail", attachments: [file] }] },
 		other,
 	);
-	h.call("admin", { do: "actor.forget", name: "other" });
-	const retained = listed.parse(h.call("attachment", { result: byOther.results[0] })).items[0];
+	await h.call("admin", { do: "actor.forget", name: "other" });
+	const retained = listed.parse(await h.call("attachment", { result: byOther.results[0] })).items[0];
 	expect(retained?.name).toBe(file.name);
-	expect(downloaded.parse(h.call("attachment", { result: byOther.results[0], id: retained?.id })).data).toBe(PNG);
+	expect(downloaded.parse(await h.call("attachment", { result: byOther.results[0], id: retained?.id })).data).toBe(PNG);
 });
 
-test("invalid data and file/report/result limits refuse the whole request", () => {
-	const h = rig();
+test("invalid data and file/report/result limits refuse the whole request", async () => {
+	const h = await rig();
 	for (const bad of [
 		{ ...file, data: "%%%" },
 		{ ...file, data: "Zh==" },
@@ -130,7 +130,7 @@ test("invalid data and file/report/result limits refuse the whole request", () =
 		{ ...file, data: Buffer.alloc(4 * 1024 ** 2 + 1).toString("base64") },
 	]) {
 		expect(
-			h.raw("report", {
+			await h.raw("report", {
 				target: { session: "bad" },
 				results: [{ test: { key: "bad" }, outcome: "pass", attachments: [bad] }],
 			}),
@@ -138,13 +138,13 @@ test("invalid data and file/report/result limits refuse the whole request", () =
 	}
 	const big = { name: "big.bin", data: Buffer.alloc(4 * 1024 ** 2).toString("base64") };
 	expect(
-		h.raw("report", {
+		await h.raw("report", {
 			target: { session: "too-big" },
 			results: [{ test: { key: "big" }, outcome: "pass", attachments: Array(5).fill(big) }],
 		}),
 	).toMatchObject({ ok: false, error: { code: "invalid" } });
 	expect(
-		h.raw("report", {
+		await h.raw("report", {
 			target: { session: "too-many" },
 			results: Array.from({ length: 6 }, (_, i) => ({
 				test: { key: `too-many-${i}` },
@@ -153,17 +153,17 @@ test("invalid data and file/report/result limits refuse the whole request", () =
 			})),
 		}),
 	).toMatchObject({ ok: false, error: { code: "invalid" } });
-	expect(h.call<{ items: unknown[] }>("find", { in: "tests", text: "bad" }).items.length).toBe(0);
-	const result = report(h, Array(20).fill(file)).results[0];
-	expect(h.raw("attach", { result, attachment: file })).toMatchObject({ ok: false, error: { code: "invalid" } });
+	expect((await h.call<{ items: unknown[] }>("find", { in: "tests", text: "bad" })).items.length).toBe(0);
+	const result = (await report(h, Array(20).fill(file))).results[0];
+	expect(await h.raw("attach", { result, attachment: file })).toMatchObject({ ok: false, error: { code: "invalid" } });
 });
 
-test("one-project archives carry only that project's attachment metadata and bytes", () => {
-	const h = rig();
-	const result = report(h).results[0];
-	h.call("admin", { do: "project.create", key: "another", preset: "loose" });
+test("one-project archives carry only that project's attachment metadata and bytes", async () => {
+	const h = await rig();
+	const result = (await report(h)).results[0];
+	await h.call("admin", { do: "project.create", key: "another", preset: "loose" });
 	const privateData = Buffer.from("another project's private evidence").toString("base64");
-	const other = invoke(h.app, OPS, {
+	const other = await invoke(h.app, OPS, {
 		op: "report",
 		project: "another",
 		actor: () => h.owner,
@@ -181,39 +181,39 @@ test("one-project archives carry only that project's attachment metadata and byt
 		expect(archive).toContain(project === "scratch" ? PNG : privateData);
 		expect(archive).not.toContain(project === "scratch" ? privateData : PNG);
 		expect(archive).toContain(project === "scratch" ? "screenshot.png" : "private.txt");
-		const destination = rig();
+		const destination = await rig();
 		destination.app.db.exec("DELETE FROM policies; DELETE FROM folders; DELETE FROM projects");
 		importArchive(destination.app.db, linesOf(archive), { blobs: destination.app.blobs });
 		expect(destination.app.db.raw.query("SELECT key FROM projects").all()).toEqual([{ key: project }]);
 		if (project === "scratch") {
-			const item = listed.parse(destination.call("attachment", { result })).items[0];
-			expect(downloaded.parse(destination.call("attachment", { result, id: item?.id })).data).toBe(PNG);
+			const item = listed.parse(await destination.call("attachment", { result })).items[0];
+			expect(downloaded.parse(await destination.call("attachment", { result, id: item?.id })).data).toBe(PNG);
 		}
 	}
 });
 
-test("archives carry attachment content and validate its hash before restoring", () => {
-	const h = rig();
-	const result = report(h).results[0];
+test("archives carry attachment content and validate its hash before restoring", async () => {
+	const h = await rig();
+	const result = (await report(h)).results[0];
 	const chunks: string[] = [];
 	exportArchive(h.app.db, (chunk) => chunks.push(chunk), { blobs: h.app.blobs });
 	const archive = chunks.join("");
 	expect(archive).toContain(PNG);
-	const destination = harness();
+	const destination = await harness();
 	rigs.push(destination);
 	// An archive restores only into an empty instance.
 	destination.app.db.exec("DELETE FROM policies; DELETE FROM folders; DELETE FROM projects");
 	importArchive(destination.app.db, linesOf(archive), { blobs: destination.app.blobs });
-	expect(listed.parse(destination.call("attachment", { result })).items).toHaveLength(1);
-	const item = listed.parse(destination.call("attachment", { result })).items[0];
-	expect(downloaded.parse(destination.call("attachment", { result, id: item?.id })).data).toBe(PNG);
+	expect(listed.parse(await destination.call("attachment", { result })).items).toHaveLength(1);
+	const item = listed.parse(await destination.call("attachment", { result })).items[0];
+	expect(downloaded.parse(await destination.call("attachment", { result, id: item?.id })).data).toBe(PNG);
 	const corrupt = archive
 		.split("\n")
 		.filter(Boolean)
 		.map((line) => JSON.parse(line));
 	const attachment = corrupt.find((entry) => entry.t === "attachments");
 	attachment.blob = Buffer.from("changed").toString("base64");
-	const bad = harness();
+	const bad = await harness();
 	rigs.push(bad);
 	bad.app.db.exec("DELETE FROM policies; DELETE FROM folders; DELETE FROM projects");
 	expect(() =>
@@ -222,7 +222,10 @@ test("archives carry attachment content and validate its hash before restoring",
 		}),
 	).toThrow(/attachment/);
 	h.app.blobs.prune(new Set());
-	expect(h.raw("attachment", { result, id: item?.id })).toMatchObject({ ok: false, error: { code: "not_found" } });
+	expect(await h.raw("attachment", { result, id: item?.id })).toMatchObject({
+		ok: false,
+		error: { code: "not_found" },
+	});
 	expect(() => exportArchive(h.app.db, () => {}, { blobs: h.app.blobs })).toThrow(/missing or damaged/);
 });
 

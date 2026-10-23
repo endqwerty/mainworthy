@@ -19,19 +19,19 @@ const trail: ResultStep[] = [
 	},
 ];
 
-test("get returns every action and time unchanged, derives the failed step, and replays once", () => {
-	h = harness();
+test("get returns every action and time unchanged, derives the failed step, and replays once", async () => {
+	h = await harness();
 	const input = {
 		target: { session: "trail" },
 		results: [
 			{ test: { key: "checkout" }, outcome: "error", failure: { message: "Timeout", at: "wrong" }, steps: trail },
 		],
 	};
-	h.call("report", input);
-	const [read] = h.call<{ last: { steps: unknown; atStep: string }[] }[]>("get", { refs: ["T-1"] });
+	await h.call("report", input);
+	const [read] = await h.call<{ last: { steps: unknown; atStep: string }[] }[]>("get", { refs: ["T-1"] });
 	expect(read?.last[0]?.steps).toEqual(trail);
 	expect(read?.last[0]?.atStep).toBe("s2");
-	expect(h.call("report", input).fresh).toBe(false);
+	expect((await h.call("report", input)).fresh).toBe(false);
 });
 
 test.each([
@@ -46,9 +46,9 @@ test.each([
 		"65536 bytes per result trail",
 		[{ step: "s1", outcome: "pass", actions: Array.from({ length: 40 }, () => ({ text: "x".repeat(2000) })) }],
 	],
-])("a report exceeding %s is refused before acceptance", (limit, steps) => {
-	h = harness();
-	const reply = h.raw("report", {
+])("a report exceeding %s is refused before acceptance", async (limit, steps) => {
+	h = await harness();
+	const reply = await h.raw("report", {
 		target: { session: "limit" },
 		results: [{ test: { key: "checkout" }, outcome: "pass", steps }],
 	});
@@ -56,10 +56,10 @@ test.each([
 	expect(h.app.db.raw.query("SELECT count(*) AS n FROM batches").get()).toEqual({ n: 0 });
 });
 
-test("a screenshot index must name one of this result's attachments", () => {
-	h = harness();
+test("a screenshot index must name one of this result's attachments", async () => {
+	h = await harness();
 	expect(
-		h.raw("report", {
+		await h.raw("report", {
 			target: { session: "shot" },
 			results: [
 				{
@@ -72,16 +72,16 @@ test("a screenshot index must name one of this result's attachments", () => {
 	).toMatchObject({ ok: false, error: { code: "invalid", message: expect.stringContaining("attachment index") } });
 });
 
-test("an empty trail has no failed step; an absent trail keeps a runner's failure location", () => {
-	h = harness();
-	h.call("report", {
+test("an empty trail has no failed step; an absent trail keeps a runner's failure location", async () => {
+	h = await harness();
+	await h.call("report", {
 		target: { session: "empty" },
 		results: [
 			{ test: { key: "empty" }, outcome: "fail", failure: { message: "Oops", at: "s1" }, steps: [] },
 			{ test: { key: "absent" }, outcome: "fail", failure: { message: "Oops", at: "s1" } },
 		],
 	});
-	const rows = h.call<{ last: { steps: unknown; atStep: string | null }[] }[]>("get", { refs: ["T-1", "T-2"] });
+	const rows = await h.call<{ last: { steps: unknown; atStep: string | null }[] }[]>("get", { refs: ["T-1", "T-2"] });
 	expect(rows.map((row) => ({ steps: row.last[0]?.steps, atStep: row.last[0]?.atStep }))).toEqual([
 		{ steps: [], atStep: null },
 		{ steps: null, atStep: "s1" },
@@ -118,19 +118,22 @@ test("a rich trail survives a real HTTP report and CLI get JSON unchanged", asyn
 	});
 });
 
-test("trail limits include UTF-8 bytes and the whole report", () => {
-	h = harness();
+test("trail limits include UTF-8 bytes and the whole report", async () => {
+	h = await harness();
 	const steps = [
 		{ step: "s1", outcome: "pass", actions: Array.from({ length: 30 }, () => ({ text: "界".repeat(1000) })) },
 	];
 	expect(
-		h.raw("report", { target: { session: "utf8" }, results: [{ test: { key: "utf8" }, outcome: "pass", steps }] }),
+		await h.raw("report", {
+			target: { session: "utf8" },
+			results: [{ test: { key: "utf8" }, outcome: "pass", steps }],
+		}),
 	).toMatchObject({ ok: false, error: { message: expect.stringContaining("65536 bytes per result trail") } });
 	const bounded = [
 		{ step: "s1", outcome: "pass", actions: Array.from({ length: 30 }, () => ({ text: "x".repeat(2000) })) },
 	];
 	expect(
-		h.raw("report", {
+		await h.raw("report", {
 			target: { session: "total" },
 			results: Array.from({ length: 18 }, (_, i) => ({ test: { key: `test-${i}` }, outcome: "pass", steps: bounded })),
 		}),
@@ -138,8 +141,8 @@ test("trail limits include UTF-8 bytes and the whole report", () => {
 });
 
 test("migration preserves old simple trails and recovery preserves accepted rich ones", async () => {
-	h = harness();
-	h.call("report", {
+	h = await harness();
+	await h.call("report", {
 		target: { session: "old" },
 		results: [{ test: { key: "old" }, outcome: "fail", steps: [{ step: "a1.b2", outcome: "fail" }] }],
 	});
@@ -150,7 +153,9 @@ test("migration preserves old simple trails and recovery preserves accepted rich
 	);
 	const { migrate } = await import("../src/server/kernel/migrate.ts");
 	migrate(h.app.db, ":memory:");
-	expect(h.call<{ last: { steps: unknown; atStep: string }[] }[]>("get", { refs: ["T-1"] })[0]?.last[0]).toMatchObject({
+	expect(
+		(await h.call<{ last: { steps: unknown; atStep: string }[] }[]>("get", { refs: ["T-1"] }))[0]?.last[0],
+	).toMatchObject({
 		steps: [{ step: "a1.b2", outcome: "fail" }],
 		atStep: "a1.b2",
 	});
@@ -168,12 +173,12 @@ test("migration preserves old simple trails and recovery preserves accepted rich
 		stampSeq(ctx);
 	});
 	expect(recoverAccepted(h.app)).toBe(1);
-	expect(h.call<{ last: { steps: unknown }[] }[]>("get", { refs: ["T-2"] })[0]?.last[0]?.steps).toEqual(trail);
+	expect((await h.call<{ last: { steps: unknown }[] }[]>("get", { refs: ["T-2"] }))[0]?.last[0]?.steps).toEqual(trail);
 	expect(recoverAccepted(h.app)).toBe(0);
 });
 
-test("screenshots keep their input index after later files append, and non-images are refused", () => {
-	h = harness();
+test("screenshots keep their input index after later files append, and non-images are refused", async () => {
+	h = await harness();
 	const png = {
 		name: "cart.png",
 		data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWhoAAAAASUVORK5CYII=",
@@ -189,33 +194,36 @@ test("screenshots keep their input index after later files append, and non-image
 			},
 		],
 	};
-	const receipt = h.call<{ results: number[] }>("report", input);
+	const receipt = await h.call<{ results: number[] }>("report", input);
 	const result = receipt.results[0];
-	h.call("attach", { result, attachment: { name: "later.txt", data: "bGF0ZXI=" } });
-	const listed = h.call<{ items: { name: string }[] }>("attachment", { result });
+	await h.call("attach", { result, attachment: { name: "later.txt", data: "bGF0ZXI=" } });
+	const listed = await h.call<{ items: { name: string }[] }>("attachment", { result });
 	expect(listed.items.map((file) => file.name)).toEqual(["trace.txt", "cart.png", "later.txt"]);
-	expect(h.call<{ last: { steps: unknown }[] }[]>("get", { refs: ["T-1"] })[0]?.last[0]?.steps).toEqual([
+	expect((await h.call<{ last: { steps: unknown }[] }[]>("get", { refs: ["T-1"] }))[0]?.last[0]?.steps).toEqual([
 		{ step: "a1.b2", outcome: "pass", attachment: 1 },
 	]);
 	expect(
-		h.raw("report", {
+		await h.raw("report", {
 			...input,
 			results: [{ ...input.results[0], steps: [{ step: "s1", outcome: "pass", attachment: 0 }] }],
 		}),
 	).toMatchObject({ ok: false, error: { code: "invalid", message: "A step screenshot attachment must be an image" } });
 });
 
-test.each([-1, 0.5, Number.POSITIVE_INFINITY, Number.NaN])("step and action durations refuse %s", (durationMs) => {
-	h = harness();
-	for (const steps of [
-		[{ step: "s1", outcome: "pass", durationMs }],
-		[{ step: "s1", outcome: "pass", actions: [{ text: "Click", durationMs }] }],
-	]) {
-		expect(
-			h.raw("report", {
-				target: { session: "bad-time" },
-				results: [{ test: { key: "bad-time" }, outcome: "pass", steps }],
-			}),
-		).toMatchObject({ ok: false, error: { code: "invalid" } });
-	}
-});
+test.each([-1, 0.5, Number.POSITIVE_INFINITY, Number.NaN])(
+	"step and action durations refuse %s",
+	async (durationMs) => {
+		h = await harness();
+		for (const steps of [
+			[{ step: "s1", outcome: "pass", durationMs }],
+			[{ step: "s1", outcome: "pass", actions: [{ text: "Click", durationMs }] }],
+		]) {
+			expect(
+				await h.raw("report", {
+					target: { session: "bad-time" },
+					results: [{ test: { key: "bad-time" }, outcome: "pass", steps }],
+				}),
+			).toMatchObject({ ok: false, error: { code: "invalid" } });
+		}
+	},
+);

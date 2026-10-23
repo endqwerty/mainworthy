@@ -19,12 +19,12 @@ import { dropResetIndexes } from "./demo-removal-fixture.ts";
 import { dropReceiptSchema, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
-beforeEach(() => {
-	h = harness();
+beforeEach(async () => {
+	h = await harness();
 });
 afterEach(() => h.close());
-const createFragment = () =>
-	h.call("propose", {
+const createFragment = async () =>
+	await h.call("propose", {
 		edits: [
 			{
 				op: "create",
@@ -33,8 +33,8 @@ const createFragment = () =>
 			},
 		],
 	});
-const createUser = (title = "Checkout") =>
-	h.call("propose", {
+const createUser = async (title = "Checkout") =>
+	await h.call("propose", {
 		edits: [
 			{
 				op: "create",
@@ -49,9 +49,10 @@ const createUser = (title = "Checkout") =>
 			},
 		],
 	});
-const view = (ref = "C-2", version?: number) => h.call<Record<string, unknown>[]>("get", { refs: [ref], version })[0];
-const updateFragment = () =>
-	h.call("propose", {
+const view = async (ref = "C-2", version?: number) =>
+	(await h.call<Record<string, unknown>[]>("get", { refs: [ref], version }))[0];
+const updateFragment = async () =>
+	await h.call("propose", {
 		edits: [
 			{
 				op: "edit",
@@ -62,8 +63,8 @@ const updateFragment = () =>
 		],
 	});
 
-function seedSearchPins(): void {
-	h.call("propose", {
+async function seedSearchPins(): Promise<void> {
+	await h.call("propose", {
 		edits: [
 			{
 				op: "create",
@@ -77,7 +78,7 @@ function seedSearchPins(): void {
 			},
 		],
 	});
-	h.call("propose", {
+	await h.call("propose", {
 		edits: [
 			{
 				op: "create",
@@ -91,53 +92,58 @@ function seedSearchPins(): void {
 			},
 		],
 	});
-	updateFragment();
+	await updateFragment();
 }
 
-test("search finds pinned actions and expectations at the pinned version and follows pin and tag edits", () => {
-	seedSearchPins();
-	expect(h.call("find", { text: "zephyrpassword", folder: "Consumers" })).toMatchObject({
+test("search finds pinned actions and expectations at the pinned version and follows pin and tag edits", async () => {
+	await seedSearchPins();
+	expect(await h.call("find", { text: "zephyrpassword", folder: "Consumers" })).toMatchObject({
 		count: 2,
 		items: expect.arrayContaining([expect.objectContaining({ ref: "C-2", title: "Pinned only" })]),
 	});
-	expect(h.call("find", { text: "luminousreply", folder: "Consumers" })).toMatchObject({
+	expect(await h.call("find", { text: "luminousreply", folder: "Consumers" })).toMatchObject({
 		count: 1,
 		items: [{ ref: "C-2" }],
 	});
-	expect(h.call("find", { text: "passkey", folder: "Consumers" })).toMatchObject({ count: 0 });
-	expect(h.call("find", { text: "fragmentprecondition", folder: "Consumers" })).toMatchObject({ count: 0 });
-	h.call("propose", { edits: [{ op: "place", cases: ["C-2"], tags: { add: ["regression"] } }] });
-	expect(h.call("find", { text: "zephyrpassword", folder: "Consumers", tags: ["regression"] })).toMatchObject({
+	expect(await h.call("find", { text: "passkey", folder: "Consumers" })).toMatchObject({ count: 0 });
+	expect(await h.call("find", { text: "fragmentprecondition", folder: "Consumers" })).toMatchObject({ count: 0 });
+	await h.call("propose", { edits: [{ op: "place", cases: ["C-2"], tags: { add: ["regression"] } }] });
+	expect(await h.call("find", { text: "zephyrpassword", folder: "Consumers", tags: ["regression"] })).toMatchObject({
 		count: 1,
 		items: [{ ref: "C-2" }],
 	});
-	h.call("propose", {
+	await h.call("propose", {
 		edits: [{ op: "fragment", fragment: "C-1", from: 1, to: 2, cases: [{ case: "C-2", base: 1 }] }],
 	});
-	expect(h.call("find", { text: "passkey", folder: "Consumers" })).toMatchObject({
+	expect(await h.call("find", { text: "passkey", folder: "Consumers" })).toMatchObject({
 		count: 1,
 		items: [{ ref: "C-2", version: 2 }],
 	});
-	expect(h.call("find", { text: "zephyrpassword", folder: "Consumers" })).toMatchObject({
+	expect(await h.call("find", { text: "zephyrpassword", folder: "Consumers" })).toMatchObject({
 		count: 1,
 		items: [{ ref: "C-3" }],
 	});
 });
 
-test("a run selected by text includes the pinned-only case beside the inline sibling", () => {
-	seedSearchPins();
+test("a run selected by text includes the pinned-only case beside the inline sibling", async () => {
+	await seedSearchPins();
 	expect(
-		h.call<PlanReply>("plan", { name: "Password checks", select: { text: "zephyrpassword", folders: ["Consumers"] } }),
+		await h.call<PlanReply>("plan", {
+			name: "Password checks",
+			select: { text: "zephyrpassword", folders: ["Consumers"] },
+		}),
 	).toEqual({ run: "R-1", slots: 2, already: 0 });
-	expect(h.call("find", { in: "slots", run: "R-1" })).toMatchObject({ items: [{ case: "C-2" }, { case: "C-3" }] });
+	expect(await h.call("find", { in: "slots", run: "R-1" })).toMatchObject({
+		items: [{ case: "C-2" }, { case: "C-3" }],
+	});
 	expect(
-		h.call<PlanReply>("plan", { name: "Pinned only", select: { text: "luminousreply", folders: ["Consumers"] } }),
+		await h.call<PlanReply>("plan", { name: "Pinned only", select: { text: "luminousreply", folders: ["Consumers"] } }),
 	).toEqual({ run: "R-2", slots: 1, already: 0 });
-	expect(h.call("find", { in: "slots", run: "R-2" })).toMatchObject({ items: [{ case: "C-2" }] });
+	expect(await h.call("find", { in: "slots", run: "R-2" })).toMatchObject({ items: [{ case: "C-2" }] });
 });
 
-test.each(["instance", "project"])("%s archive replay rebuilds pinned search for find and plan", (scope) => {
-	seedSearchPins();
+test.each(["instance", "project"])("%s archive replay rebuilds pinned search for find and plan", async (scope) => {
+	await seedSearchPins();
 	const chunks: string[] = [];
 	exportArchive(
 		h.app.db,
@@ -152,7 +158,7 @@ test.each(["instance", "project"])("%s archive replay rebuilds pinned search for
 		importArchive(db, linesOf(chunks.join("")));
 		const app = { ...h.app, db, reader: db };
 		expect(
-			invoke(app, OPS, {
+			await invoke(app, OPS, {
 				op: "find",
 				project: "scratch",
 				input: { text: "zephyrpassword", folder: "Consumers" },
@@ -160,7 +166,7 @@ test.each(["instance", "project"])("%s archive replay rebuilds pinned search for
 			}),
 		).toMatchObject({ ok: true, result: { count: 2 } });
 		expect(
-			invoke(app, OPS, {
+			await invoke(app, OPS, {
 				op: "find",
 				project: "scratch",
 				input: { text: "luminousreply", folder: "Consumers" },
@@ -168,7 +174,7 @@ test.each(["instance", "project"])("%s archive replay rebuilds pinned search for
 			}),
 		).toMatchObject({ ok: true, result: { count: 1, items: [{ ref: "C-2" }] } });
 		expect(
-			invoke(app, OPS, {
+			await invoke(app, OPS, {
 				op: "plan",
 				project: "scratch",
 				input: { name: "Restored password checks", select: { text: "zephyrpassword", folders: ["Consumers"] } },
@@ -180,9 +186,9 @@ test.each(["instance", "project"])("%s archive replay rebuilds pinned search for
 	}
 });
 
-test("upgrading an existing database rebuilds pinned search once", () => {
-	seedSearchPins();
-	h.call("propose", {
+test("upgrading an existing database rebuilds pinned search once", async () => {
+	await seedSearchPins();
+	await h.call("propose", {
 		edits: [
 			{
 				op: "create",
@@ -201,7 +207,7 @@ test("upgrading an existing database rebuilds pinned search once", () => {
 			{ op: "create", kind: "fragment", body: { title: "Empty fragment", steps: [] } },
 		],
 	});
-	h.call("propose", {
+	await h.call("propose", {
 		edits: [
 			{
 				op: "create",
@@ -209,7 +215,7 @@ test("upgrading an existing database rebuilds pinned search once", () => {
 			},
 		],
 	});
-	h.call("propose", { edits: [{ op: "state", cases: ["C-1"], to: "archived" }] });
+	await h.call("propose", { edits: [{ op: "state", cases: ["C-1"], to: "archived" }] });
 	const db = h.app.db;
 	const documents = () =>
 		db.raw.query("SELECT rowid, title, body, tags, project FROM search_docs ORDER BY rowid").all();
@@ -223,33 +229,33 @@ test("upgrading an existing database rebuilds pinned search once", () => {
 	db.exec(
 		"DROP TABLE slot_leases; UPDATE search_docs SET body = '' WHERE rowid = 2; UPDATE meta SET value = '29' WHERE key = 'schema_version'",
 	);
-	expect(h.call("find", { text: "zephyrpassword", folder: "Consumers" })).toMatchObject({
+	expect(await h.call("find", { text: "zephyrpassword", folder: "Consumers" })).toMatchObject({
 		count: 1,
 		items: [{ ref: "C-3" }],
 	});
 	expect(migrate(db, ":memory:")).toEqual({ from: 29, to: SCHEMA_VERSION, backup: null });
 	expect(documents()).toEqual(expected);
-	expect(h.call("find", { text: "zephyrpassword", folder: "Consumers" })).toMatchObject({ count: 2 });
-	expect(h.call("find", { text: "luminousreply", folder: "Consumers" })).toMatchObject({
+	expect(await h.call("find", { text: "zephyrpassword", folder: "Consumers" })).toMatchObject({ count: 2 });
+	expect(await h.call("find", { text: "luminousreply", folder: "Consumers" })).toMatchObject({
 		count: 1,
 		items: [{ ref: "C-2" }],
 	});
 	expect(
-		h.call<PlanReply>("plan", {
+		await h.call<PlanReply>("plan", {
 			name: "Upgraded password checks",
 			select: { text: "zephyrpassword", folders: ["Consumers"] },
 		}),
 	).toEqual({ run: "R-1", slots: 2, already: 0 });
 	expect(migrate(db, ":memory:")).toEqual({ from: SCHEMA_VERSION, to: SCHEMA_VERSION, backup: null });
-	expect(h.call("find", { text: "zephyrpassword", folder: "Consumers" })).toMatchObject({ count: 2 });
+	expect(await h.call("find", { text: "zephyrpassword", folder: "Consumers" })).toMatchObject({ count: 2 });
 });
 
-test("a case expands its pinned fragment, retaining the editable pin and source marker", () => {
-	createFragment();
-	createUser();
-	expect(view("C-1")).toMatchObject({ kind: "fragment" });
-	expect(REPLIES.get.safeParse([view()])).toMatchObject({ success: true });
-	expect(view()).toMatchObject({
+test("a case expands its pinned fragment, retaining the editable pin and source marker", async () => {
+	await createFragment();
+	await createUser();
+	expect(await view("C-1")).toMatchObject({ kind: "fragment" });
+	expect(REPLIES.get.safeParse([await view()])).toMatchObject({ success: true });
+	expect(await view()).toMatchObject({
 		steps: [
 			{
 				id: "cd.ab",
@@ -264,18 +270,18 @@ test("a case expands its pinned fragment, retaining the editable pin and source 
 			{ id: "ef", action: "Pay" },
 		],
 	});
-	updateFragment();
-	expect(view()).toMatchObject({ version: 1, steps: [{ action: "Enter a password" }, {}] });
+	await updateFragment();
+	expect(await view()).toMatchObject({ version: 1, steps: [{ action: "Enter a password" }, {}] });
 });
 
-test("source steps are returned only for a case version with fragment pins", () => {
-	createFragment();
-	h.call("propose", {
+test("source steps are returned only for a case version with fragment pins", async () => {
+	await createFragment();
+	await h.call("propose", {
 		edits: [{ op: "create", body: { title: "Plain case", steps: [{ id: "ef", action: "Pay", expected: "Receipt" }] } }],
 	});
 	for (const ref of ["C-1", "C-2"]) {
 		for (const fields of [undefined, ["steps"]]) {
-			const reply = h.call<Record<string, unknown>[]>("get", { refs: [ref], fields });
+			const reply = await h.call<Record<string, unknown>[]>("get", { refs: [ref], fields });
 			expect(REPLIES.get.safeParse(reply).success).toBe(true);
 			expect(reply[0]).toMatchObject({
 				ref,
@@ -285,12 +291,12 @@ test("source steps are returned only for a case version with fragment pins", () 
 			expect(reply[0]).not.toHaveProperty("sourceSteps");
 		}
 	}
-	h.call("propose", {
+	await h.call("propose", {
 		edits: [
 			{ op: "edit", case: "C-2", base: 1, body: { steps: [{ id: "cd", use: { fragment: "C-1", version: 1 } }] } },
 		],
 	});
-	const pinned = h.call("get", { refs: ["C-2"] });
+	const pinned = await h.call("get", { refs: ["C-2"] });
 	expect(REPLIES.get.safeParse(pinned).success).toBe(true);
 	expect(pinned).toMatchObject([
 		{
@@ -300,46 +306,48 @@ test("source steps are returned only for a case version with fragment pins", () 
 			steps: [{ action: "Enter a password" }],
 		},
 	]);
-	const historical = view("C-2", 1);
+	const historical = await view("C-2", 1);
 	expect(historical).toMatchObject({ version: 1, hasFragments: false, steps: [{ action: "Pay" }] });
 	expect(historical).not.toHaveProperty("sourceSteps");
 });
 
-test("custom fields are returned by default and fragment users only when selected", () => {
-	createFragment();
-	createUser();
+test("custom fields are returned by default and fragment users only when selected", async () => {
+	await createFragment();
+	await createUser();
 	for (const ref of ["C-1", "C-2"]) {
 		for (const fields of [undefined, ["title"]]) {
-			const [read] = h.call<Record<string, unknown>[]>("get", { refs: [ref], fields });
+			const [read] = await h.call<Record<string, unknown>[]>("get", { refs: [ref], fields });
 			expect(read).toMatchObject({ ref, title: ref === "C-1" ? "Sign in" : "Checkout", version: 1 });
 			if (fields === undefined) expect(read).toHaveProperty("fields", ref === "C-2" ? { risk: "high" } : {});
 			else expect(read).not.toHaveProperty("fields");
 			expect(read).not.toHaveProperty("users");
 		}
 	}
-	expect(h.call("get", { refs: ["C-2"], fields: ["fields"] })).toMatchObject([
+	expect(await h.call("get", { refs: ["C-2"], fields: ["fields"] })).toMatchObject([
 		{ ref: "C-2", fields: { risk: "high" } },
 	]);
-	expect(h.call("get", { refs: ["C-1"], fields: ["users", "fields"] })).toMatchObject([
+	expect(await h.call("get", { refs: ["C-1"], fields: ["users", "fields"] })).toMatchObject([
 		{ ref: "C-1", fields: {}, users: [{ case: "C-2", base: 1, versions: [1] }] },
 	]);
 });
 
-test("archived fragments retain existing users but refuse new pins", () => {
-	createFragment();
-	createUser();
-	expect(h.call("propose", { edits: [{ op: "state", cases: ["C-1"], to: "archived" }] })).toMatchObject({
+test("archived fragments retain existing users but refuse new pins", async () => {
+	await createFragment();
+	await createUser();
+	expect(await h.call("propose", { edits: [{ op: "state", cases: ["C-1"], to: "archived" }] })).toMatchObject({
 		status: "adopted",
 	});
-	expect(view("C-1")).toMatchObject({ state: "archived" });
-	expect(view()).toMatchObject({ steps: [{ action: "Enter a password" }, {}] });
-	expect(h.call("propose", { edits: [{ op: "edit", case: "C-2", base: 1, body: { title: "Edited" } }] })).toMatchObject(
-		{
-			status: "adopted",
-		},
-	);
-	expect(h.call("propose", { edits: [{ op: "restore", case: "C-2", to: 1 }] })).toMatchObject({ status: "adopted" });
-	expect(view()).toMatchObject({ version: 3, title: "Checkout", steps: [{ action: "Enter a password" }, {}] });
+	expect(await view("C-1")).toMatchObject({ state: "archived" });
+	expect(await view()).toMatchObject({ steps: [{ action: "Enter a password" }, {}] });
+	expect(
+		await h.call("propose", { edits: [{ op: "edit", case: "C-2", base: 1, body: { title: "Edited" } }] }),
+	).toMatchObject({
+		status: "adopted",
+	});
+	expect(await h.call("propose", { edits: [{ op: "restore", case: "C-2", to: 1 }] })).toMatchObject({
+		status: "adopted",
+	});
+	expect(await view()).toMatchObject({ version: 3, title: "Checkout", steps: [{ action: "Enter a password" }, {}] });
 	const before = h.app.db.raw.query("SELECT * FROM versions").all();
 	for (const edit of [
 		{ op: "create", body: { title: "New user", steps: [{ id: "gh", use: { fragment: "C-1", version: 1 } }] } },
@@ -355,24 +363,24 @@ test("archived fragments retain existing users but refuse new pins", () => {
 			},
 		},
 	]) {
-		expect(h.raw("propose", { edits: [edit] })).toMatchObject({
+		expect(await h.raw("propose", { edits: [edit] })).toMatchObject({
 			ok: false,
 			error: { code: "invalid", message: expect.stringContaining("C-1 is archived") },
 		});
 	}
 	expect(h.app.db.raw.query("SELECT * FROM versions").all()).toEqual(before);
-	expect(h.call("propose", { edits: [{ op: "state", cases: ["C-1"], to: "active" }] })).toMatchObject({
+	expect(await h.call("propose", { edits: [{ op: "state", cases: ["C-1"], to: "active" }] })).toMatchObject({
 		status: "adopted",
 	});
-	expect(createUser("New user")).toMatchObject({ status: "adopted" });
+	expect(await createUser("New user")).toMatchObject({ status: "adopted" });
 });
 
-test("a fragment archived while a new pin waits for acceptance refuses that adoption", () => {
+test("a fragment archived while a new pin waits for acceptance refuses that adoption", async () => {
 	h.close();
-	h = harness({ preset: "standard" });
-	createFragment();
+	h = await harness({ preset: "standard" });
+	await createFragment();
 	const writer = h.actor("writer", "agent", ["read", "produce"]);
-	const pending = h.call<ProposeReply>(
+	const pending = await h.call<ProposeReply>(
 		"propose",
 		{
 			edits: [
@@ -382,45 +390,45 @@ test("a fragment archived while a new pin waits for acceptance refuses that adop
 		writer,
 	);
 	expect(pending).toMatchObject({ status: "open", question: "Q-2" });
-	h.call("propose", { edits: [{ op: "state", cases: ["C-1"], to: "archived" }] });
-	const question = h.call<{ evidenceHash: string }[]>("get", { refs: [pending.question] })[0];
+	await h.call("propose", { edits: [{ op: "state", cases: ["C-1"], to: "archived" }] });
+	const question = (await h.call<{ evidenceHash: string }[]>("get", { refs: [pending.question] }))[0];
 	expect(
-		h.raw("decide", { q: pending.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } }),
+		await h.raw("decide", { q: pending.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } }),
 	).toMatchObject({
 		ok: true,
 		result: [{ status: "invalid", needs: expect.stringContaining("C-1 is archived") }],
 	});
-	expect(h.raw("get", { refs: ["C-2"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
+	expect(await h.raw("get", { refs: ["C-2"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
 });
 
-test("an explicit creation kind must match its Markdown kind", () => {
+test("an explicit creation kind must match its Markdown kind", async () => {
 	for (const kind of ["case", "fragment"]) {
 		const other = kind === "case" ? "fragment" : "case";
 		expect(
-			h.raw("propose", {
+			await h.raw("propose", {
 				edits: [{ op: "create", kind, md: `---\nkind: ${other}\ntitle: Mismatch\n---\n## Steps\n` }],
 			}),
 		).toMatchObject({
 			ok: false,
 			error: { code: "invalid", message: expect.stringContaining("kind") },
 		});
-		expect(h.call("find", { in: "cases" })).toMatchObject({ items: [] });
+		expect(await h.call("find", { in: "cases" })).toMatchObject({ items: [] });
 	}
 	expect(
-		h.call("propose", {
+		await h.call("propose", {
 			edits: [{ op: "create", kind: "fragment", md: "---\nkind: fragment\ntitle: Matching\n---\n## Steps\n" }],
 		}),
 	).toMatchObject({ status: "adopted" });
-	expect(view("C-1")).toMatchObject({ kind: "fragment", title: "Matching" });
+	expect(await view("C-1")).toMatchObject({ kind: "fragment", title: "Matching" });
 });
 
-test("one batch moves selected users through one attributable decision and leaves others pinned", () => {
-	createFragment();
-	createUser();
-	createUser("Returns");
-	createUser("Stay pinned");
-	updateFragment();
-	const reply = h.call<ProposeReply>("propose", {
+test("one batch moves selected users through one attributable decision and leaves others pinned", async () => {
+	await createFragment();
+	await createUser();
+	await createUser("Returns");
+	await createUser("Stay pinned");
+	await updateFragment();
+	const reply = await h.call<ProposeReply>("propose", {
 		edits: [
 			{
 				op: "fragment",
@@ -442,9 +450,9 @@ test("one batch moves selected users through one attributable decision and leave
 			{ ref: "C-3", version: 2 },
 		],
 	});
-	expect(view()).toMatchObject({ steps: [{ action: "Use a passkey", source: { version: 2 } }, {}] });
-	expect(view("C-4")).toMatchObject({ version: 1, steps: [{ action: "Enter a password" }, {}] });
-	expect(view("C-2", 1)).toMatchObject({ steps: [{ action: "Enter a password" }, {}] });
+	expect(await view()).toMatchObject({ steps: [{ action: "Use a passkey", source: { version: 2 } }, {}] });
+	expect(await view("C-4")).toMatchObject({ version: 1, steps: [{ action: "Enter a password" }, {}] });
+	expect(await view("C-2", 1)).toMatchObject({ steps: [{ action: "Enter a password" }, {}] });
 	const rows = h.app.db.raw
 		.query<{ decision: number; proposal: number; author: number; reason: string }, []>(
 			"SELECT decision, proposal, author, reason FROM versions WHERE no = 2 AND case_id IN (2, 3) ORDER BY case_id",
@@ -455,54 +463,56 @@ test("one batch moves selected users through one attributable decision and leave
 	expect(rows[0]).toMatchObject({ author: h.owner.id, reason: "Adopt passkeys" });
 });
 
-test("Markdown round trips preserve fragment kind and pinned references through edits", () => {
-	createFragment();
-	createUser();
-	const md = h.call<{ md: string }[]>("get", { refs: ["C-2"], as: "md" })[0]?.md ?? "";
+test("Markdown round trips preserve fragment kind and pinned references through edits", async () => {
+	await createFragment();
+	await createUser();
+	const md = (await h.call<{ md: string }[]>("get", { refs: ["C-2"], as: "md" }))[0]?.md ?? "";
 	expect(md).toContain("- !use C-1@v1 ^cd");
 	const parsed = parseCase(md);
 	expect(parsed).toMatchObject({
 		ok: true,
 		doc: { body: { steps: [{ id: "cd", use: { fragment: "C-1", version: 1 } }, {}] } },
 	});
-	h.call("propose", {
+	await h.call("propose", {
 		edits: [{ op: "edit", case: "C-2", base: 1, md: md.replace("title: Checkout", "title: Edited") }],
 	});
-	expect(view()).toMatchObject({ title: "Edited", steps: [{ action: "Enter a password" }, {}] });
-	const fragmentMd = h.call<{ md: string }[]>("get", { refs: ["C-1"], as: "md" })[0]?.md ?? "";
+	expect(await view()).toMatchObject({ title: "Edited", steps: [{ action: "Enter a password" }, {}] });
+	const fragmentMd = (await h.call<{ md: string }[]>("get", { refs: ["C-1"], as: "md" }))[0]?.md ?? "";
 	expect(parseCase(fragmentMd)).toMatchObject({ ok: true, doc: { kind: "fragment" } });
 });
 
-test("missing targets, missing versions and every form of fragment nesting are refused without writes", () => {
-	createFragment();
-	createUser();
+test("missing targets, missing versions and every form of fragment nesting are refused without writes", async () => {
+	await createFragment();
+	await createUser();
 	for (const step of [
 		{ id: "zz", use: { fragment: "C-99", version: 1 } },
 		{ id: "zz", use: { fragment: "C-1", version: 99 } },
 		{ id: "zz", use: { fragment: "C-2", version: 1 } },
 	]) {
-		expect(h.raw("propose", { edits: [{ op: "edit", case: "C-2", base: 1, body: { steps: [step] } }] })).toMatchObject({
+		expect(
+			await h.raw("propose", { edits: [{ op: "edit", case: "C-2", base: 1, body: { steps: [step] } }] }),
+		).toMatchObject({
 			ok: false,
 		});
 	}
 	for (const fragment of ["C-1", "C-2"]) {
 		expect(
-			h.raw("propose", {
+			await h.raw("propose", {
 				edits: [{ op: "edit", case: "C-1", base: 1, body: { steps: [{ id: "zz", use: { fragment, version: 1 } }] } }],
 			}),
 		).toMatchObject({ ok: false, error: { code: "invalid" } });
 	}
-	expect(view()).toMatchObject({ version: 1, title: "Checkout" });
+	expect(await view()).toMatchObject({ version: 1, title: "Checkout" });
 });
 
-test("a stale selected base refuses the entire batch", () => {
-	createFragment();
-	createUser();
-	createUser("Returns");
-	updateFragment();
-	h.call("propose", { edits: [{ op: "edit", case: "C-3", base: 1, body: { title: "Changed" } }] });
+test("a stale selected base refuses the entire batch", async () => {
+	await createFragment();
+	await createUser();
+	await createUser("Returns");
+	await updateFragment();
+	await h.call("propose", { edits: [{ op: "edit", case: "C-3", base: 1, body: { title: "Changed" } }] });
 	expect(
-		h.raw("propose", {
+		await h.raw("propose", {
 			edits: [
 				{
 					op: "fragment",
@@ -517,19 +527,19 @@ test("a stale selected base refuses the entire batch", () => {
 			],
 		}),
 	).toMatchObject({ ok: false, error: { code: "conflict" } });
-	expect(view()).toMatchObject({ version: 1, steps: [{ action: "Enter a password" }, {}] });
+	expect(await view()).toMatchObject({ version: 1, steps: [{ action: "Enter a password" }, {}] });
 });
 
 test.each(["instance", "project"])(
 	"pins survive %s archive replay with history, hashes and current usage intact",
-	(scope) => {
-		createFragment();
-		createUser();
-		updateFragment();
-		h.call("propose", {
+	async (scope) => {
+		await createFragment();
+		await createUser();
+		await updateFragment();
+		await h.call("propose", {
 			edits: [{ op: "fragment", fragment: "C-1", from: 1, to: 2, cases: [{ case: "C-2", base: 1 }] }],
 		});
-		const before = view();
+		const before = await view();
 		const chunks: string[] = [];
 		exportArchive(
 			h.app.db,
@@ -581,9 +591,9 @@ test("pin updates participate in hashing, history diffs, stale merges and draft 
 	expect(holdsUnfinishedStep(original)).toBe(false);
 });
 
-test("two uses of the same fragment have distinct result anchors, and plans select cases", () => {
-	createFragment();
-	h.call("propose", {
+test("two uses of the same fragment have distinct result anchors, and plans select cases", async () => {
+	await createFragment();
+	await h.call("propose", {
 		edits: [
 			{
 				op: "create",
@@ -597,73 +607,73 @@ test("two uses of the same fragment have distinct result anchors, and plans sele
 			},
 		],
 	});
-	expect(view()).toMatchObject({ steps: [{ id: "cd.ab" }, { id: "ef.ab" }] });
-	expect(h.call("plan", { name: "Cases", select: {} })).toMatchObject({ slots: 1 });
-	expect(h.raw("plan", { name: "Fragment", select: { cases: ["C-1"] } })).toMatchObject({
+	expect(await view()).toMatchObject({ steps: [{ id: "cd.ab" }, { id: "ef.ab" }] });
+	expect(await h.call("plan", { name: "Cases", select: {} })).toMatchObject({ slots: 1 });
+	expect(await h.raw("plan", { name: "Fragment", select: { cases: ["C-1"] } })).toMatchObject({
 		ok: false,
 		error: { code: "invalid" },
 	});
 });
 
-test("run selection previews share planned membership and paging, while Suite listings keep fragments", () => {
-	createFragment();
-	createUser();
-	createUser("Checkout again");
-	createUser("Checkout retired");
-	h.call("propose", {
+test("run selection previews share planned membership and paging, while Suite listings keep fragments", async () => {
+	await createFragment();
+	await createUser();
+	await createUser("Checkout again");
+	await createUser("Checkout retired");
+	await h.call("propose", {
 		edits: [
 			{ op: "place", cases: ["C-1", "C-2", "C-3", "C-4"], folder: "checkout/pay", tags: { add: ["smoke"] } },
 			{ op: "place", cases: ["C-1"], tags: { add: ["shared"] } },
 			{ op: "state", cases: ["C-4"], to: "archived" },
 		],
 	});
-	expect(h.call("find", { in: "cases" })).toMatchObject({ count: 3 });
+	expect(await h.call("find", { in: "cases" })).toMatchObject({ count: 3 });
 	for (const select of [{}, { folders: ["checkout"] }, { tags: ["#smoke"] }, { text: "Checkout" }]) {
-		const preview = h.call<{ count: number; items: { ref: string }[]; cursor: string | null }>("find", {
+		const preview = await h.call<{ count: number; items: { ref: string }[]; cursor: string | null }>("find", {
 			in: "cases",
 			select,
 			limit: 1,
 		});
 		expect(preview).toMatchObject({ count: 2, items: [{ ref: "C-2" }], cursor: "1" });
-		expect(h.call("find", { in: "cases", select, limit: 1, cursor: preview.cursor })).toMatchObject({
+		expect(await h.call("find", { in: "cases", select, limit: 1, cursor: preview.cursor })).toMatchObject({
 			count: 2,
 			items: [{ ref: "C-3" }],
 			cursor: null,
 		});
-		const planned = h.call<{ run: string; slots: number }>("plan", { name: "Previewed checkout", select });
+		const planned = await h.call<{ run: string; slots: number }>("plan", { name: "Previewed checkout", select });
 		expect(planned.slots).toBe(2);
-		expect(h.call("find", { in: "slots", run: planned.run })).toMatchObject({
+		expect(await h.call("find", { in: "slots", run: planned.run })).toMatchObject({
 			count: 2,
 			items: [{ case: "C-2" }, { case: "C-3" }],
 		});
 	}
-	expect(h.call("find", { in: "cases", select: { tags: ["shared"] } })).toMatchObject({
+	expect(await h.call("find", { in: "cases", select: { tags: ["shared"] } })).toMatchObject({
 		count: 0,
 		items: [],
 		cursor: null,
 	});
-	expect(h.raw("plan", { name: "Only shared steps", select: { tags: ["shared"] } })).toMatchObject({
+	expect(await h.raw("plan", { name: "Only shared steps", select: { tags: ["shared"] } })).toMatchObject({
 		ok: false,
 		error: { code: "invalid", message: "the selection matches no active case" },
 	});
-	expect(h.raw("find", { in: "cases", select: { cases: ["C-1"] } })).toMatchObject({
+	expect(await h.raw("find", { in: "cases", select: { cases: ["C-1"] } })).toMatchObject({
 		ok: false,
 		error: { code: "invalid", message: "fragments are shared steps; select their cases to run" },
 	});
 });
 
-test("a batch waiting for review refuses a case changed after the proposal was sealed", () => {
-	createFragment();
-	createUser();
-	createUser("Returns");
-	updateFragment();
-	const policy = h.call<ProposeReply>("propose", { edits: [{ op: "policy", preset: "strict" }] });
+test("a batch waiting for review refuses a case changed after the proposal was sealed", async () => {
+	await createFragment();
+	await createUser();
+	await createUser("Returns");
+	await updateFragment();
+	const policy = await h.call<ProposeReply>("propose", { edits: [{ op: "policy", preset: "strict" }] });
 	if (policy.question) {
-		const question = h.call<{ evidenceHash: string }[]>("get", { refs: [policy.question] })[0];
-		h.call("decide", { q: policy.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } });
+		const question = (await h.call<{ evidenceHash: string }[]>("get", { refs: [policy.question] }))[0];
+		await h.call("decide", { q: policy.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } });
 	}
 	const writer = h.actor("writer", "agent", ["read", "produce"]);
-	const batch = h.call<ProposeReply>(
+	const batch = await h.call<ProposeReply>(
 		"propose",
 		{
 			edits: [
@@ -683,13 +693,13 @@ test("a batch waiting for review refuses a case changed after the proposal was s
 	);
 	expect(batch.status).toBe("open");
 	// An earlier consumer edit can be accepted before this batch.
-	const other = h.call<ProposeReply>(
+	const other = await h.call<ProposeReply>(
 		"propose",
 		{ edits: [{ op: "edit", case: "C-3", base: 1, body: { title: "Changed" } }] },
 		writer,
 	);
-	const decide = (q: string | null) => {
-		const question = h.call<{ evidenceHash: string }[]>("get", { refs: [q] })[0];
+	const decide = async (q: string | null) => {
+		const question = (await h.call<{ evidenceHash: string }[]>("get", { refs: [q] }))[0];
 		return h.raw("decide", {
 			q,
 			onEvidence: question?.evidenceHash,
@@ -697,23 +707,27 @@ test("a batch waiting for review refuses a case changed after the proposal was s
 			reason: "Accept the selected case changes",
 		});
 	};
-	expect(decide(other.question)).toMatchObject({ ok: true });
+	expect(await decide(other.question)).toMatchObject({ ok: true });
 	// Read before it is answered, the batch says that accepting it is refused now, and why.
 	type Read = { edits: { case: string; refused: string | null }[] };
-	const [read] = h.call<Read[]>("get", { refs: [batch.proposal] });
+	const [read] = await h.call<Read[]>("get", { refs: [batch.proposal] });
 	expect(read?.edits.map((edit) => [edit.case, edit.refused])).toEqual([
 		["C-2", null],
 		["C-3", "C-3 changed; redo the fragment batch"],
 	]);
-	const result = decide(batch.question);
+	const result = await decide(batch.question);
 	expect(result).toMatchObject({ ok: true, result: [{ status: "conflict" }] });
-	expect(view()).toMatchObject({ version: 1, steps: [{ action: "Enter a password" }, {}] });
-	expect(view("C-3")).toMatchObject({ version: 2, title: "Changed", steps: [{ action: "Enter a password" }, {}] });
+	expect(await view()).toMatchObject({ version: 1, steps: [{ action: "Enter a password" }, {}] });
+	expect(await view("C-3")).toMatchObject({
+		version: 2,
+		title: "Changed",
+		steps: [{ action: "Enter a password" }, {}],
+	});
 });
 
-test("expected results in pinned fragments count for structural checks", () => {
-	createFragment();
-	h.call("propose", {
+test("expected results in pinned fragments count for structural checks", async () => {
+	await createFragment();
+	await h.call("propose", {
 		edits: [
 			{
 				op: "create",
@@ -722,7 +736,7 @@ test("expected results in pinned fragments count for structural checks", () => {
 		],
 	});
 	expect(structuralProblems(h.app.db, 1).find((problem) => problem.rule === "no-expected")).toMatchObject({ total: 0 });
-	h.call("propose", {
+	await h.call("propose", {
 		edits: [
 			{ op: "edit", case: "C-1", base: 1, body: { steps: [{ id: "ab", action: "No outcome", expected: null }] } },
 		],

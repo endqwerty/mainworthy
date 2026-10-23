@@ -3,9 +3,9 @@ import type { FailureSubject, QuestionRow } from "../src/server/decisions/questi
 import * as questions from "../src/server/decisions/questions.ts";
 import { ciReport, harness } from "./helpers.ts";
 
-function fixture() {
-	const h = harness();
-	h.call("report", ciReport({ commit: "subject01", n: 1, fail: { 0: "same cause" } }));
+async function fixture() {
+	const h = await harness();
+	await h.call("report", ciReport({ commit: "subject01", n: 1, fail: { 0: "same cause" } }));
 	const db = h.app.db;
 	const row = db.raw
 		.query<{ id: number; no: number; project: number; fingerprint: string; subject: string }, []>(
@@ -54,8 +54,8 @@ test("failure subjects have exactly the fields of their tagged variant", () => {
 	expectTypeOf<FailureSubject>().not.toHaveProperty("perResult");
 });
 
-test("every question reader parses each legacy failure subject without changing its stored JSON", () => {
-	const { h, db, row, readers } = fixture();
+test("every question reader parses each legacy failure subject without changing its stored JSON", async () => {
+	const { h, db, row, readers } = await fixture();
 	try {
 		for (const [stored, subject] of [
 			['{ "scope": "line:main", "signature": 1 }', { kind: "cause", signature: 1, scope: "line:main" }],
@@ -79,8 +79,8 @@ test("every question reader parses each legacy failure subject without changing 
 	}
 });
 
-test("question readers reject impossible failure subjects at the storage boundary", () => {
-	const { h, db, row, readers } = fixture();
+test("question readers reject impossible failure subjects at the storage boundary", async () => {
+	const { h, db, row, readers } = await fixture();
 	try {
 		for (const subject of [
 			{ signature: 1, scope: "run:1", slot: 2, perResult: true },
@@ -113,11 +113,11 @@ test("question readers reject impossible failure subjects at the storage boundar
 	}
 });
 
-test("the attributed cause reader uses the same failure subject boundary", () => {
-	const { h, db, row, about } = fixture();
+test("the attributed cause reader uses the same failure subject boundary", async () => {
+	const { h, db, row, about } = await fixture();
 	try {
 		const open = questions.mustQuestion(db, row.project, `Q-${row.no}`);
-		h.call("decide", { q: `Q-${row.no}`, onEvidence: open.evidence_hash, answer: { is: "defect" } });
+		await h.call("decide", { q: `Q-${row.no}`, onEvidence: open.evidence_hash, answer: { is: "defect" } });
 		expect(questions.attributedQuestionsOn(db, row.project, about)[0]?.subject).toEqual({
 			kind: "cause",
 			...JSON.parse(row.subject),
@@ -132,11 +132,11 @@ test("the attributed cause reader uses the same failure subject boundary", () =>
 	}
 });
 
-test("cause and inherited writers keep their legacy JSON encodings", () => {
-	const h = harness();
+test("cause and inherited writers keep their legacy JSON encodings", async () => {
+	const h = await harness();
 	try {
-		h.call("report", ciReport({ commit: "base0001", n: 1, fail: { 0: "same cause" } }));
-		h.call(
+		await h.call("report", ciReport({ commit: "base0001", n: 1, fail: { 0: "same cause" } }));
+		await h.call(
 			"report",
 			ciReport({ commit: "change01", branch: "feature", pr: 69, base: "base0001", n: 1, fail: { 0: "same cause" } }),
 		);
@@ -149,18 +149,18 @@ test("cause and inherited writers keep their legacy JSON encodings", () => {
 	}
 });
 
-test("a slot writer keeps its legacy JSON encoding", () => {
-	const h = harness();
+test("a slot writer keeps its legacy JSON encoding", async () => {
+	const h = await harness();
 	try {
-		h.call("propose", { edits: [{ op: "create", outline: "Checkout works" }] });
+		await h.call("propose", { edits: [{ op: "create", outline: "Checkout works" }] });
 		const tester = h.actor("tester", "human", ["read", "produce"]);
 		const ci = h.actor("ci", "ci", ["read", "record"]);
-		const run = h.call<{ run: string }>("plan", {
+		const run = await h.call<{ run: string }>("plan", {
 			name: "Dispute",
 			select: {},
 			accepts: { commit: "typed0068" },
 		});
-		h.call(
+		await h.call(
 			"report",
 			{
 				run: run.run,
@@ -168,7 +168,7 @@ test("a slot writer keeps its legacy JSON encoding", () => {
 			},
 			tester,
 		);
-		h.call(
+		await h.call(
 			"report",
 			{
 				target: { commit: "typed0068", branch: "main" },

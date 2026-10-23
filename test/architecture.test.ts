@@ -792,6 +792,16 @@ function migrationArchiveMismatches(migrations: typeof MIGRATIONS): string[] {
 	return mismatches;
 }
 
+function uncheckedWitnesses(text: string): string[] {
+	return [
+		...text.matchAll(
+			/^(?:export )?(?:async )?function\*? (\w+)\([^)]*\bwitness: Witness\b[^)]*\)[^{]*\{\n([\s\S]*?)^\}/gm,
+		),
+	]
+		.filter(([, , body]) => !/\bdecisionOf\(witness, "[\w-]+"\)|\(ctx, witness\b/.test(body ?? ""))
+		.map(([, name]) => name ?? "");
+}
+
 describe("the module map", () => {
 	test("only the decision machinery can mint a witness, so standing cannot change without a decision", () => {
 		// The mint is claimed once, by the module that settles decisions; a second claim throws when it loads
@@ -813,15 +823,18 @@ describe("the module map", () => {
 			const text = readFileSync(file, "utf8");
 			if (/\b_witness\b/.test(text) && !file.startsWith("src/server/decisions/"))
 				offenders.push(`${file} ignores a witness`);
-			for (const match of text.matchAll(
-				/^(?:export )?function\*? (\w+)\([^)]*\bwitness: Witness\b[^)]*\)[^{]*\{\n([\s\S]*?)^\}/gm,
-			)) {
-				const [, name, body] = match;
-				if (!/\bdecisionOf\(witness, "[\w-]+"\)|\(ctx, witness\b/.test(body ?? ""))
-					offenders.push(`${file}: ${name} never checks its witness`);
-			}
+			for (const name of uncheckedWitnesses(text)) offenders.push(`${file}: ${name} never checks its witness`);
 		}
 		expect(offenders).toEqual([]);
+	});
+
+	test("the witness scan rejects unchecked async writers and accepts checked or forwarded witnesses", () => {
+		for (const declaration of ["function", "function*", "async function", "async function*"]) {
+			const writer = (body: string) => `export ${declaration} probe(ctx: Ctx, witness: Witness) {\n${body}\n}`;
+			expect(uncheckedWitnesses(writer("writeStanding(ctx);"))).toEqual(["probe"]);
+			expect(uncheckedWitnesses(writer('decisionOf(witness, "probe");'))).toEqual([]);
+			expect(uncheckedWitnesses(writer("writeStanding(ctx, witness);"))).toEqual([]);
+		}
 	});
 
 	test("the raw database handle is used only by the kernel and by the archive, which reads every table by design", () => {

@@ -50,12 +50,12 @@ function agent(status = 200): { url: string; received: Received[] } {
 }
 
 /** A project whose pipeline reported one failing test, with a build link and further output. */
-function failing(url: string): { h: Harness; q: string } {
-	const harnessed = harness();
+async function failing(url: string): Promise<{ h: Harness; q: string }> {
+	const harnessed = await harness();
 	h = harnessed;
 	harnessed.app.config.handoff = { project: "scratch", url, secret };
 	harnessed.app.config.publicUrl = "https://mainworthy.example/";
-	harnessed.call("report", {
+	await harnessed.call("report", {
 		...ciReport({ commit: "abcdef1234567890", branch: "fix-total", n: 2 }),
 		buildUrl: "https://ci.example/build/42",
 		results: [
@@ -66,15 +66,15 @@ function failing(url: string): { h: Harness; q: string } {
 			},
 		],
 	});
-	const question = harnessed.call<InboxReply>("inbox", { kind: "failure" }).items[0];
+	const question = (await harnessed.call<InboxReply>("inbox", { kind: "failure" })).items[0];
 	if (!question) throw new Error("expected a failure question");
 	return { h: harnessed, q: question.q };
 }
 
 test("a hand-off posts the failure, signed with the secret, and its status says it was sent", async () => {
 	const { url, received } = agent();
-	const { h, q } = failing(url);
-	expect(h.call<HandoffReceipt>("handoff", { question: q, cmd: "handoff-cmd-01" })).toMatchObject({
+	const { h, q } = await failing(url);
+	expect(await h.call<HandoffReceipt>("handoff", { question: q, cmd: "handoff-cmd-01" })).toMatchObject({
 		id: "handoff-cmd-01",
 		question: q,
 		state: "queued",
@@ -103,27 +103,27 @@ test("a hand-off posts the failure, signed with the secret, and its status says 
 	expect(payload.brief).toContain("Build: https://ci.example/build/42");
 	expect(payload.brief).toContain("at total (src/checkout.ts:12:3)");
 	expect(payload.brief).toContain("fix the cause");
-	expect(h.call<HandoffReceipt>("handoff-status", { question: q })).toMatchObject({ state: "sent", error: null });
+	expect(await h.call<HandoffReceipt>("handoff-status", { question: q })).toMatchObject({ state: "sent", error: null });
 	// The same command again writes nothing and sends nothing.
-	h.call("handoff", { question: q, cmd: "handoff-cmd-01" });
+	await h.call("handoff", { question: q, cmd: "handoff-cmd-01" });
 	await deliverHandoffs(h.app);
 	expect(received).toHaveLength(1);
 });
 
 test("an endpoint that refuses, or cannot be reached, leaves a failed hand-off that says why", async () => {
 	const { url } = agent(500);
-	const { h, q } = failing(url);
-	h.call("handoff", { question: q, cmd: "handoff-cmd-02" });
+	const { h, q } = await failing(url);
+	await h.call("handoff", { question: q, cmd: "handoff-cmd-02" });
 	await deliverHandoffs(h.app);
-	expect(h.call<HandoffReceipt>("handoff-status", { question: q })).toMatchObject({
+	expect(await h.call<HandoffReceipt>("handoff-status", { question: q })).toMatchObject({
 		state: "failed",
 		error:
 			"The agent's endpoint answered HTTP 500. It may have started anyway: look for the agent's work before sending again.",
 	});
 	await endpoint?.stop(true);
-	h.call("handoff", { question: q, cmd: "handoff-cmd-03" });
+	await h.call("handoff", { question: q, cmd: "handoff-cmd-03" });
 	await deliverHandoffs(h.app);
-	expect(h.call<HandoffReceipt>("handoff-status", { question: q })).toMatchObject({
+	expect(await h.call<HandoffReceipt>("handoff-status", { question: q })).toMatchObject({
 		id: "handoff-cmd-03",
 		state: "failed",
 		error: unanswered,
@@ -133,11 +133,11 @@ test("an endpoint that refuses, or cannot be reached, leaves a failed hand-off t
 test("an endpoint that took the post but gave no answer the server can use may have started the agent", async () => {
 	// A redirect is refused after the endpoint has read the post, as a reply that comes after the time limit is.
 	const { url, received } = agent(302);
-	const { h, q } = failing(url);
-	h.call("handoff", { question: q, cmd: "handoff-cmd-09" });
+	const { h, q } = await failing(url);
+	await h.call("handoff", { question: q, cmd: "handoff-cmd-09" });
 	await deliverHandoffs(h.app);
 	expect(received).toHaveLength(1);
-	expect(h.call<HandoffReceipt>("handoff-status", { question: q })).toMatchObject({
+	expect(await h.call<HandoffReceipt>("handoff-status", { question: q })).toMatchObject({
 		state: "failed",
 		error: unanswered,
 	});
@@ -145,66 +145,72 @@ test("an endpoint that took the post but gave no answer the server can use may h
 
 test("a failure the policy answered by rule, as this repository's CI policy does, can still be handed off", async () => {
 	const { url, received } = agent();
-	const harnessed = harness({ preset: "standard", unlinked: "create" });
+	const harnessed = await harness({ preset: "standard", unlinked: "create" });
 	h = harnessed;
 	harnessed.app.config.handoff = { project: "scratch", url, secret };
-	await ciPolicy(async (op, input) => harnessed.call(op, input), "scratch");
-	harnessed.call("report", ciReport({ commit: "main0001", n: 2 }));
-	harnessed.call(
+	await ciPolicy(async (op, input) => await harnessed.call(op, input), "scratch");
+	await harnessed.call("report", ciReport({ commit: "main0001", n: 2 }));
+	await harnessed.call(
 		"report",
 		ciReport({ commit: "change01", branch: "feature", pr: 69, base: "main0001", n: 2, fail: { 1: "Expected: 9" } }),
 	);
-	expect(harnessed.call<InboxReply>("inbox", { kind: "failure" }).items).toEqual([]);
-	const [settled] = harnessed.call<InboxReply>("inbox", { kind: "failure", state: "decided" }).items;
+	expect((await harnessed.call<InboxReply>("inbox", { kind: "failure" })).items).toEqual([]);
+	const [settled] = (await harnessed.call<InboxReply>("inbox", { kind: "failure", state: "decided" })).items;
 	if (!settled) throw new Error("expected a failure answered by rule");
-	harnessed.call("handoff", { question: settled.q, cmd: "handoff-cmd-10" });
+	await harnessed.call("handoff", { question: settled.q, cmd: "handoff-cmd-10" });
 	await deliverHandoffs(harnessed.app);
 	expect(received).toHaveLength(1);
-	expect(harnessed.call<HandoffReceipt>("handoff-status", { question: settled.q })).toMatchObject({ state: "sent" });
+	expect(await harnessed.call<HandoffReceipt>("handoff-status", { question: settled.q })).toMatchObject({
+		state: "sent",
+	});
 });
 
 test("a hand-off the server was sending when it stopped is failed at start, not sent again", async () => {
 	const { url, received } = agent();
-	const { h, q } = failing(url);
-	h.call("handoff", { question: q, cmd: "handoff-cmd-04" });
-	h.app.db.raw.query("UPDATE handoffs SET state = 'sending'").run();
-	recoverHandoffs(h.app);
+	const { h, q } = await failing(url);
+	const queued = h.call("handoff", { question: q, cmd: "handoff-cmd-04" });
+	const interrupted = h.app.gate.run(() => {
+		h.app.db.raw.query("UPDATE handoffs SET state = 'sending'").run();
+		recoverHandoffs(h.app);
+	});
+	await queued;
+	await interrupted;
 	await deliverHandoffs(h.app);
 	expect(received).toHaveLength(0);
-	expect(h.call<HandoffReceipt>("handoff-status", { question: q })).toMatchObject({
+	expect(await h.call<HandoffReceipt>("handoff-status", { question: q })).toMatchObject({
 		state: "failed",
 		error:
 			"The server stopped while sending this. It may have arrived: look for the agent's thread before sending again.",
 	});
 });
 
-test("only a failure question, on a configured project, by someone who may answer, is handed off", () => {
+test("only a failure question, on a configured project, by someone who may answer, is handed off", async () => {
 	const { url } = agent();
-	const { h, q } = failing(url);
-	expect(h.call("handoff-status", { question: q })).toBeNull();
+	const { h, q } = await failing(url);
+	expect(await h.call("handoff-status", { question: q })).toBeNull();
 	const reader = h.actor("pat", "human", ["read"]);
-	expect(h.raw("handoff", { question: q, cmd: "handoff-cmd-05" }, reader)).toMatchObject({
+	expect(await h.raw("handoff", { question: q, cmd: "handoff-cmd-05" }, reader)).toMatchObject({
 		ok: false,
 		error: { code: "forbidden" },
 	});
 	const bot = h.actor("bot", "agent", ["read", "produce"]);
-	expect(h.raw("handoff", { question: q, cmd: "handoff-cmd-06" }, bot)).toMatchObject({
+	expect(await h.raw("handoff", { question: q, cmd: "handoff-cmd-06" }, bot)).toMatchObject({
 		ok: false,
 		error: { code: "forbidden" },
 	});
-	h.call("propose", { edits: [{ op: "create", outline: "Checkout total" }] });
-	h.call("report", {
+	await h.call("propose", { edits: [{ op: "create", outline: "Checkout total" }] });
+	await h.call("report", {
 		target: { session: "local-check" },
 		results: [{ test: { key: "checkout" }, outcome: "pass" }],
 	});
-	const other = h.call<InboxReply>("inbox").items.find((item) => item.kind !== "failure");
+	const other = (await h.call<InboxReply>("inbox")).items.find((item) => item.kind !== "failure");
 	if (other)
-		expect(h.raw("handoff", { question: other.q, cmd: "handoff-cmd-07" })).toMatchObject({
+		expect(await h.raw("handoff", { question: other.q, cmd: "handoff-cmd-07" })).toMatchObject({
 			ok: false,
 			error: { code: "invalid", message: "Only a failure question can be handed to an agent." },
 		});
 	delete h.app.config.handoff;
-	expect(h.raw("handoff", { question: q, cmd: "handoff-cmd-08" })).toMatchObject({
+	expect(await h.raw("handoff", { question: q, cmd: "handoff-cmd-08" })).toMatchObject({
 		ok: false,
 		error: { code: "invalid", message: "Handing a failure to an agent is not configured for this project." },
 	});

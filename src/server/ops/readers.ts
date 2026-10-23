@@ -36,7 +36,10 @@ const ReplyMessage = z.object({
 	]),
 });
 
-type Pending = { fallback: () => Envelope<unknown>; resolve: (reply: Envelope<unknown>) => void };
+type Pending = {
+	fallback: () => Envelope<unknown> | Promise<Envelope<unknown>>;
+	resolve: (reply: Envelope<unknown> | PromiseLike<Envelope<unknown>>) => void;
+};
 type Slot = { worker: Worker; pending: Map<number, Pending>; ready: boolean; failed: boolean; failures: number };
 type Options = {
 	dataDir: string;
@@ -210,12 +213,14 @@ export class Readers implements ReadPool {
 		slot.pending.clear();
 		for (const request of pending) {
 			this.fallbacks++;
-			try {
-				request.resolve(request.fallback());
-			} catch (error) {
-				console.error("[mainworthy] a read replayed inline failed:", error);
-				request.resolve({ ok: false, error: { code: "internal", message: INTERNAL_ERROR } });
-			}
+			request.resolve(
+				Promise.resolve()
+					.then(request.fallback)
+					.catch((error: unknown) => {
+						console.error("[mainworthy] a read replayed inline failed:", error);
+						return { ok: false, error: { code: "internal", message: INTERNAL_ERROR } };
+					}),
+			);
 		}
 	}
 

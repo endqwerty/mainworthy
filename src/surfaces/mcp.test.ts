@@ -19,7 +19,7 @@ import { PRESETS } from "../core/presets.ts";
 import { REPLIES } from "../core/replies.ts";
 import { actorByName, createToken, listTokens } from "../server/identity/identity.ts";
 import { MCP_OPS, OPS } from "../server/ops/index.ts";
-import { invoke, invokeAsync } from "../server/ops/registry.ts";
+import { invoke } from "../server/ops/registry.ts";
 import { serve, sessionOf, VERSION } from "./http.ts";
 import { compactSchema, mcpRoute, mcpServer, mcpTools, TOOL_TOKEN_GUIDELINE } from "./mcp.ts";
 
@@ -422,10 +422,10 @@ test("compact output schemas describe structured results from the registry", () 
 });
 
 test("MCP report and get keep the session model beside the agent", async () => {
-	const h = harness();
+	const h = await harness();
 	const actor = h.actor("model-runner", "agent", ["read", "produce"]);
 	const server = mcpServer(
-		async (op, project, input) => invoke(h.app, OPS, { op, project, input, actor: () => actor }),
+		async (op, project, input) => await invoke(h.app, OPS, { op, project, input, actor: () => actor }),
 		async () => ["scratch"],
 	);
 	const client = new Client({ name: "model-client", version: "1" });
@@ -461,11 +461,11 @@ test("MCP report and get keep the session model beside the agent", async () => {
 });
 
 test("MCP role approval follows the current grant and requires a reason", async () => {
-	const h = harness();
+	const h = await harness();
 	const actor = h.actor("role-reviewer", "human", ["read", "produce", "answer"]);
 	const server = mcpServer(
 		async (op, project, input) =>
-			invoke(h.app, OPS, { op, project, input, actor: (id) => actorByName(h.app.db, actor.name, id) }),
+			await invoke(h.app, OPS, { op, project, input, actor: (id) => actorByName(h.app.db, actor.name, id) }),
 		async () => ["scratch"],
 	);
 	const client = new Client({ name: "role-client", version: "1" });
@@ -473,7 +473,12 @@ test("MCP role approval follows the current grant and requires a reason", async 
 	try {
 		await server.connect(serverTransport);
 		await client.connect(clientTransport);
-		h.call("admin", { do: "grant.set", actor: actor.name, can: ["read", "produce", "answer"], roles: ["approver"] });
+		await h.call("admin", {
+			do: "grant.set",
+			actor: actor.name,
+			can: ["read", "produce", "answer"],
+			roles: ["approver"],
+		});
 		const proposed = resultOf(
 			await client.callTool({
 				name: "propose",
@@ -481,7 +486,7 @@ test("MCP role approval follows the current grant and requires a reason", async 
 					edits: [
 						{
 							op: "policy",
-							base: h.call<{ version: number }>("admin", { do: "policy.show", project: "scratch" }).version,
+							base: (await h.call<{ version: number }>("admin", { do: "policy.show", project: "scratch" })).version,
 							clauses: PRESETS.strict.clauses.map((clause) =>
 								clause.id === "adopt-any"
 									? { ...clause, ask: { who: "role:approver", agents: "none", notProducer: true, reason: "required" } }
@@ -494,12 +499,12 @@ test("MCP role approval follows the current grant and requires a reason", async 
 			REPLIES.propose,
 		);
 		expect(proposed.status).toBe("open");
-		const policy = h.call<InboxReply>("inbox", { kind: "adopt" }).items[0];
+		const policy = (await h.call<InboxReply>("inbox", { kind: "adopt" })).items[0];
 		if (!policy) throw new Error("no policy question");
-		h.call("decide", { q: policy.q, onEvidence: policy.evidenceHash, answer: { is: "accept" } });
-		h.call("admin", { do: "grant.set", actor: actor.name, can: ["read", "produce", "answer"], roles: [] });
-		h.call("propose", { edits: [{ op: "create", outline: "MCP reviewed case" }] });
-		const question = h.call<InboxReply>("inbox", { kind: "adopt" }).items[0];
+		await h.call("decide", { q: policy.q, onEvidence: policy.evidenceHash, answer: { is: "accept" } });
+		await h.call("admin", { do: "grant.set", actor: actor.name, can: ["read", "produce", "answer"], roles: [] });
+		await h.call("propose", { edits: [{ op: "create", outline: "MCP reviewed case" }] });
+		const question = (await h.call<InboxReply>("inbox", { kind: "adopt" })).items[0];
 		if (!question) throw new Error("no case question");
 		const decide = (reason: string) =>
 			client.callTool({
@@ -509,12 +514,17 @@ test("MCP role approval follows the current grant and requires a reason", async 
 		expect(resultOf(await decide("reviewed"), z.array(z.object({ status: z.string() })))).toEqual([
 			{ status: "forbidden" },
 		]);
-		h.call("admin", { do: "grant.set", actor: actor.name, can: ["read", "produce", "answer"], roles: ["approver"] });
+		await h.call("admin", {
+			do: "grant.set",
+			actor: actor.name,
+			can: ["read", "produce", "answer"],
+			roles: ["approver"],
+		});
 		expect(resultOf(await decide(" "), z.array(z.object({ status: z.string() })))).toEqual([{ status: "invalid" }]);
 		expect(resultOf(await decide("independent review"), z.array(z.object({ status: z.string() })))).toEqual([
 			{ status: "decided" },
 		]);
-		expect(h.call<{ title: string }[]>("get", { refs: ["C-1"] })[0]?.title).toBe("MCP reviewed case");
+		expect((await h.call<{ title: string }[]>("get", { refs: ["C-1"] }))[0]?.title).toBe("MCP reviewed case");
 	} finally {
 		await client.close();
 		await server.close();
@@ -525,7 +535,7 @@ test("MCP role approval follows the current grant and requires a reason", async 
 test.each(["2025-11-25", "2026-07-28"])(
 	"an agent completes a %s session, with hashes, advice, and compact reads",
 	async (version) => {
-		const h = harness();
+		const h = await harness();
 		const actor = h.actor("reviewer", "agent", ["read", "produce"]);
 		const client = new Client(
 			{ name: "reference-agent", version: "1" },
@@ -545,7 +555,7 @@ test.each(["2025-11-25", "2026-07-28"])(
 		const server = serveStdio(
 			() =>
 				mcpServer(
-					async (op, project, input) => invoke(h.app, OPS, { op, project, input, actor: () => actor }),
+					async (op, project, input) => await invoke(h.app, OPS, { op, project, input, actor: () => actor }),
 					async () => ["scratch"],
 				),
 			{ transport: serverTransport, legacy: "serve" },
@@ -597,7 +607,7 @@ test.each(["2025-11-25", "2026-07-28"])(
 			if (!created) throw new Error("No case was created");
 			// The pull request's pipeline has reported its head: that is what makes `pr:482` exist. (What an agent
 			// says about where a commit is counts for nothing until a pipeline or a person has reported the commit.)
-			h.call(
+			await h.call(
 				"report",
 				{
 					target: { commit: "9f3c2ab", pr: 482, branch: "coupon-total", files: ["tests/checkout.spec.ts"] },
@@ -694,10 +704,10 @@ test.each(["2025-11-25", "2026-07-28"])(
 );
 
 test("tool errors name bad fields and require a project when the choice is ambiguous", async () => {
-	const h = harness();
-	h.call("admin", { do: "project.create", key: "other" });
+	const h = await harness();
+	await h.call("admin", { do: "project.create", key: "other" });
 	const server = mcpServer(
-		async (op, project, input) => invoke(h.app, OPS, { op, project, input, actor: () => h.owner }),
+		async (op, project, input) => await invoke(h.app, OPS, { op, project, input, actor: () => h.owner }),
 		async () => ["scratch", "other"],
 	);
 	const client = new Client({ name: "bad-input", version: "1" });
@@ -759,7 +769,7 @@ test("tool errors name bad fields and require a project when the choice is ambig
 });
 
 test("HTTP tools/list reuses definitions without sharing mutable tool documents", async () => {
-	const h = harness();
+	const h = await harness();
 	const http = serve(h.app, h.owner, { ui: null, routes: { "/mcp": mcpRoute(h.app) } });
 	const list = () =>
 		fetch(`http://127.0.0.1:${http.port}/mcp`, {
@@ -805,7 +815,7 @@ test("HTTP tools/list reuses definitions without sharing mutable tool documents"
 });
 
 test("authenticated stateless HTTP answers initialize and tools/list and keeps the caller's permissions", async () => {
-	const h = harness();
+	const h = await harness();
 	const { secret } = createToken(h.app, {
 		actor: "http-reader",
 		kind: "agent",
@@ -881,7 +891,7 @@ test("authenticated stateless HTTP answers initialize and tools/list and keeps t
 test.each(["2025-03-26", "2025-11-25", "2026-07-28"])(
 	"a v2 HTTP client negotiates %s and discovers and calls the same tools",
 	async (version) => {
-		const h = harness();
+		const h = await harness();
 		const http = serve(h.app, h.owner, { ui: null, routes: { "/mcp": mcpRoute(h.app) } });
 		const { secret } = createToken(h.app, {
 			actor: "v2-reader",
@@ -937,7 +947,7 @@ test.each(["2025-03-26", "2025-11-25", "2026-07-28"])(
 );
 
 test("an HTTP MCP tool returns its committed reply when a subscriber throws", async () => {
-	const h = harness();
+	const h = await harness();
 	const http = serve(h.app, h.owner, { ui: null, routes: { "/mcp": mcpRoute(h.app) } });
 	const client = new Client({ name: "publish-failure", version: "1" });
 	const logged = spyOn(console, "error").mockImplementation(() => {});
@@ -968,7 +978,7 @@ test("an HTTP MCP tool returns its committed reply when a subscriber throws", as
 });
 
 test("an HTTP tool write waits for an applying report and records token use", async () => {
-	const h = harness();
+	const h = await harness();
 	const { secret } = createToken(h.app, {
 		actor: "queue-writer",
 		kind: "agent",
@@ -983,7 +993,7 @@ test("an HTTP tool write waits for an applying report and records token use", as
 	const unsubscribe = h.app.subscribe((event) => {
 		if (event.op === "report") onAccepted();
 	});
-	const pendingReport = invokeAsync(h.app, OPS, {
+	const pendingReport = invoke(h.app, OPS, {
 		op: "report",
 		project: "scratch",
 		actor: () => h.owner,
@@ -1027,7 +1037,7 @@ test("an HTTP tool write waits for an applying report and records token use", as
 test.each(["2025-03-26", "2025-11-25", "2026-07-28"])(
 	"stdio %s forwards calls to the running HTTP instance without owning its database",
 	async (version) => {
-		const h = harness();
+		const h = await harness();
 		const http = serve(h.app, h.owner);
 		const { secret } = createToken(h.app, {
 			actor: "stdio-reader",
@@ -1107,14 +1117,14 @@ test("the shipped skill stays short and its tool reference matches the registry"
 
 for (const target of ["commit", "change", "run"] as const) {
 	test(`MCP get preserves the complete gate verdict for a ${target}`, async () => {
-		const h = harness();
-		h.call("report", {
+		const h = await harness();
+		await h.call("report", {
 			target: { commit: "abcdef123", pr: 482, branch: "feature" },
 			results: [{ test: { key: "works" }, outcome: "pass" }],
 		});
 		const agent = h.actor("slot-reader", "agent", ["read", "produce"]);
 		const server = mcpServer(
-			async (op, project, input) => invoke(h.app, OPS, { op, project, input, actor: () => agent }),
+			async (op, project, input) => await invoke(h.app, OPS, { op, project, input, actor: () => agent }),
 			async () => ["scratch"],
 		);
 		const client = new Client({ name: "slot-reader", version: "1" });
@@ -1125,7 +1135,7 @@ for (const target of ["commit", "change", "run"] as const) {
 			const input =
 				target === "commit" ? { commit: "abcdef123" } : target === "change" ? { change: "pr:482" } : { run: "R-1" };
 			const ref = target === "commit" ? "commit:abcdef123" : target === "change" ? "change:pr:482" : "R-1";
-			const expected = REPLIES.gate.parse(h.call("gate", input));
+			const expected = REPLIES.gate.parse(await h.call("gate", input));
 			const rows = resultOf(
 				await client.callTool({ name: "get", arguments: { project: "scratch", refs: [ref] } }),
 				z.array(z.object({ gate: REPLIES.gate })),
@@ -1145,9 +1155,11 @@ for (const target of ["commit", "change", "run"] as const) {
 }
 
 test("two MCP producers taking next concurrently receive different slots", async () => {
-	const h = harness();
-	h.call("propose", { edits: [1, 2].map((n) => ({ op: "create", body: { title: `Case ${n}`, methods: ["agent"] } })) });
-	h.call("plan", {
+	const h = await harness();
+	await h.call("propose", {
+		edits: [1, 2].map((n) => ({ op: "create", body: { title: `Case ${n}`, methods: ["agent"] } })),
+	});
+	await h.call("plan", {
 		name: "Shared",
 		select: { cases: ["C-1", "C-2"] },
 		require: [{ id: "exercise", kind: "exercise", methods: ["agent"], minActors: 1, basis: "exact" }],
@@ -1156,7 +1168,7 @@ test("two MCP producers taking next concurrently receive different slots", async
 		["first", "second"].map(async (name) => {
 			const actor = h.actor(name, "agent", ["read", "produce"]);
 			const server = mcpServer(
-				(op, project, input) => invokeAsync(h.app, OPS, { op, project, input, actor: () => actor }),
+				async (op, project, input) => invoke(h.app, OPS, { op, project, input, actor: () => actor }),
 				async () => ["scratch"],
 			);
 			const client = new Client({ name, version: "1" });
@@ -1187,10 +1199,10 @@ test("two MCP producers taking next concurrently receive different slots", async
 });
 
 test("MCP discovers and roundtrips a complete result trail", async () => {
-	const h = harness();
+	const h = await harness();
 	const actor = h.actor("trail-runner", "agent", ["read", "produce"]);
 	const server = mcpServer(
-		async (op, project, input) => invoke(h.app, OPS, { op, project, input, actor: () => actor }),
+		async (op, project, input) => await invoke(h.app, OPS, { op, project, input, actor: () => actor }),
 		async () => ["scratch"],
 	);
 	const client = new Client({ name: "trail-client", version: "1" });

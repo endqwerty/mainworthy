@@ -127,11 +127,11 @@ afterEach(async () => {
 	h?.close();
 });
 
-function failure() {
-	h = harness();
+async function failure() {
+	h = await harness();
 	h.app.config.github = github;
-	h.call("propose", { edits: [{ op: "create", outline: "Checkout total" }] });
-	h.call("report", {
+	await h.call("propose", { edits: [{ op: "create", outline: "Checkout total" }] });
+	await h.call("report", {
 		target: { commit: "abcdef123", repo: "example/shop" },
 		buildUrl: "https://ci.example/build/42",
 		results: [{ test: { case: "C-1" }, outcome: "fail", failure: { message: "Expected 90, got 100" } }],
@@ -208,7 +208,7 @@ test("Jira's REST v3 adapter creates an ADF defect and reads status categories f
 });
 
 test("Jira queues through the existing registry and neither credentials nor delivery state enter an archive", async () => {
-	const result = failure();
+	const result = await failure();
 	const configured = defaultConfig({
 		MAINWORTHY_JIRA_PROJECT: "scratch",
 		MAINWORTHY_JIRA_SITE: "https://example.atlassian.net",
@@ -220,7 +220,7 @@ test("Jira queues through the existing registry and neither credentials nor deli
 	if (!configured) throw new Error("Jira configuration was not read");
 	expect(configured).toMatchObject({ issueType: "Bug", email: "robin@example.com", token: credential });
 	h.app.config.jira = configured;
-	h.call("tracker", { do: "create", result, cmd: "jira-create-001" });
+	await h.call("tracker", { do: "create", result, cmd: "jira-create-001" });
 	expect(
 		h.app.db.raw.query("SELECT repository, state FROM tracker_requests WHERE id = 'jira-create-001'").get(),
 	).toEqual({ repository: "jira:https://example.atlassian.net#QA", state: "queued" });
@@ -233,8 +233,11 @@ test("Jira queues through the existing registry and neither credentials nor deli
 		getItem: async () => jiraItem,
 	});
 	expect(drafts[0]?.body).toContain("Case: C-1@v1");
-	expect(h.call("tracker-status", { id: "jira-create-001" })).toMatchObject({ state: "complete", issue: jiraItem });
-	h.call("tracker", { do: "link", key: "QA-42", result, cmd: "jira-link-0001" });
+	expect(await h.call("tracker-status", { id: "jira-create-001" })).toMatchObject({
+		state: "complete",
+		issue: jiraItem,
+	});
+	await h.call("tracker", { do: "link", key: "QA-42", result, cmd: "jira-link-0001" });
 	const keys: string[] = [];
 	await deliverTrackerRequests(h.app, {
 		...port,
@@ -244,7 +247,7 @@ test("Jira queues through the existing registry and neither credentials nor deli
 		},
 	});
 	expect(keys).toEqual(["QA-42"]);
-	expect(h.raw("tracker", { do: "link", key: "OTHER-42", result, cmd: "jira-link-other" })).toMatchObject({
+	expect(await h.raw("tracker", { do: "link", key: "OTHER-42", result, cmd: "jira-link-other" })).toMatchObject({
 		ok: false,
 		error: { code: "invalid" },
 	});
@@ -260,7 +263,7 @@ test("Jira queues through the existing registry and neither credentials nor deli
 });
 
 test("Jira rejects wrong issues, malformed categories, failures and redirects without exposing response text or retrying creation", async () => {
-	const result = failure();
+	const result = await failure();
 	h.app.config.jira = jira;
 	for (const [index, response] of [
 		new Response(`${credential} ${jira.email}`, { status: 401 }),
@@ -270,7 +273,7 @@ test("Jira rejects wrong issues, malformed categories, failures and redirects wi
 		new Response(credential, { status: 201 }),
 	].entries()) {
 		const id = `jira-failed-${index}`;
-		h.call("tracker", { do: "create", result, cmd: id });
+		await h.call("tracker", { do: "create", result, cmd: id });
 		let calls = 0;
 		const adapter = jiraPort(
 			jira,
@@ -281,7 +284,7 @@ test("Jira rejects wrong issues, malformed categories, failures and redirects wi
 			}),
 		);
 		await deliverTrackerRequests(h.app, adapter);
-		const status = h.call<TrackerReceipt>("tracker-status", { id });
+		const status = await h.call<TrackerReceipt>("tracker-status", { id });
 		expect(status).toMatchObject({ state: "failed", issue: null });
 		expect(status.error).toContain("Jira");
 		expect(JSON.stringify(status)).not.toContain(credential);
@@ -302,11 +305,11 @@ test("Jira rejects wrong issues, malformed categories, failures and redirects wi
 });
 
 test("a Jira create whose follow-up status read fails is left uncertain and is never created again automatically", async () => {
-	const result = failure();
+	const result = await failure();
 	h.app.config.jira = jira;
 	let creates = 0;
 	let reads = 0;
-	h.call("tracker", { do: "create", result, cmd: "jira-created-uncertain" });
+	await h.call("tracker", { do: "create", result, cmd: "jira-created-uncertain" });
 	const adapter = jiraPort(
 		jira,
 		transport((_url, init) => {
@@ -319,7 +322,7 @@ test("a Jira create whose follow-up status read fails is left uncertain and is n
 		}),
 	);
 	expect(await deliverTrackerRequests(h.app, adapter)).toBe(1);
-	const status = h.call<TrackerReceipt>("tracker-status", { id: "jira-created-uncertain" });
+	const status = await h.call<TrackerReceipt>("tracker-status", { id: "jira-created-uncertain" });
 	expect(status).toMatchObject({ state: "failed", issue: null });
 	expect(status.error).toContain("check Jira before creating another issue");
 	expect(JSON.stringify(status)).not.toContain(credential);
@@ -358,11 +361,11 @@ test("malformed Jira process configuration is refused without quoting email, tok
 	}
 });
 
-function heldDefect(ref: string = item.url) {
-	failure();
-	const question = h.call<InboxReply>("inbox").items.find((row) => row.kind === "failure");
+async function heldDefect(ref: string = item.url) {
+	await failure();
+	const question = (await h.call<InboxReply>("inbox")).items.find((row) => row.kind === "failure");
 	if (!question) throw new Error("expected a failure question");
-	const answer = h.call<{ decision: number }[]>("decide", {
+	const answer = await h.call<{ decision: number }[]>("decide", {
 		q: question.q,
 		onEvidence: question.evidenceHash,
 		answer: { is: "defect", ref },
@@ -372,7 +375,7 @@ function heldDefect(ref: string = item.url) {
 
 for (const scenario of ["401", "404", "network", "undefined", "moved"] as const) {
 	test(`unreadable Jira hold exposes a safe actionable diagnostic in get, queue and history: ${scenario}`, async () => {
-		const { question, decision } = heldDefect(jiraItem.url);
+		const { question, decision } = await heldDefect(jiraItem.url);
 		h.app.config.jira = jira;
 		const logged = spyOn(console, "warn").mockImplementation(() => undefined);
 		const since = new Date(h.app.now()).toISOString();
@@ -390,7 +393,9 @@ for (const scenario of ["401", "404", "network", "undefined", "moved"] as const)
 		);
 		try {
 			expect(await pollDefectHolds(h.app, adapter)).toBe(0);
-			const detail = h.call<{ decision: { id: number; trackerError?: string } }[]>("get", { refs: [question.q] })[0];
+			const detail = (
+				await h.call<{ decision: { id: number; trackerError?: string } }[]>("get", { refs: [question.q] })
+			)[0];
 			const text = detail?.decision.trackerError;
 			expect(text).toContain(`The tracker could not be read since ${since}:`);
 			const action = {
@@ -402,18 +407,19 @@ for (const scenario of ["401", "404", "network", "undefined", "moved"] as const)
 			}[scenario];
 			expect(text).toContain(action);
 			expect(
-				h.call<InboxReply>("inbox", { state: "decided" }).items.find((row) => row.q === question.q)?.decision,
+				(await h.call<InboxReply>("inbox", { state: "decided" })).items.find((row) => row.q === question.q)?.decision,
 			).toMatchObject({ id: decision, trackerError: text });
-			expect(h.call<{ questions: { decision: unknown }[] }>("timeline", { ref: "C-1" }).questions).toContainEqual(
-				expect.objectContaining({ decision: expect.objectContaining({ trackerError: text }) }),
-			);
+			expect(
+				(await h.call<{ questions: { decision: unknown }[] }>("timeline", { ref: "C-1" })).questions,
+			).toContainEqual(expect.objectContaining({ decision: expect.objectContaining({ trackerError: text }) }));
 			expect(logged.mock.calls).toHaveLength(1);
 			expect(JSON.stringify(logged.mock.calls)).toContain(text ?? "missing diagnostic");
 			h.advance(60_000);
 			expect(await pollDefectHolds(h.app, adapter)).toBe(0);
 			expect(logged.mock.calls).toHaveLength(1);
 			expect(
-				h.call<{ decision: { trackerError?: string } }[]>("get", { refs: [question.q] })[0]?.decision.trackerError,
+				(await h.call<{ decision: { trackerError?: string } }[]>("get", { refs: [question.q] }))[0]?.decision
+					.trackerError,
 			).toBe(text);
 			for (const secret of [credential, jira.email, Buffer.from(`${jira.email}:${credential}`).toString("base64")]) {
 				expect(JSON.stringify(logged.mock.calls)).not.toContain(secret);
@@ -423,7 +429,8 @@ for (const scenario of ["401", "404", "network", "undefined", "moved"] as const)
 			h.advance(120_000);
 			expect(await pollDefectHolds(h.app, { ...port, getItem: async () => jiraItem })).toBe(0);
 			expect(
-				h.call<{ decision: { trackerError?: string } }[]>("get", { refs: [question.q] })[0]?.decision.trackerError,
+				(await h.call<{ decision: { trackerError?: string } }[]>("get", { refs: [question.q] }))[0]?.decision
+					.trackerError,
 			).toBeUndefined();
 			h.advance(60_000);
 			await pollDefectHolds(h.app, adapter);
@@ -435,9 +442,9 @@ for (const scenario of ["401", "404", "network", "undefined", "moved"] as const)
 }
 
 test("several holds on one failing issue log once, while a different failing issue has its own log", async () => {
-	h = harness();
+	h = await harness();
 	h.app.config.github = github;
-	h.call("report", {
+	await h.call("report", {
 		target: { session: "shared-issue" },
 		results: ["Alpha failure", "Beta failure", "Gamma failure"].map((message, i) => ({
 			test: { key: `test-${i}` },
@@ -445,10 +452,10 @@ test("several holds on one failing issue log once, while a different failing iss
 			failure: { message },
 		})),
 	});
-	const questions = h.call<InboxReply>("inbox", { kind: "failure" }).items;
+	const questions = (await h.call<InboxReply>("inbox", { kind: "failure" })).items;
 	expect(questions).toHaveLength(3);
 	for (const [i, q] of questions.entries())
-		h.call("decide", {
+		await h.call("decide", {
 			q: q.q,
 			onEvidence: q.evidenceHash,
 			answer: { is: "defect", ref: i === 2 ? "github:example/shop#43" : item.url },
@@ -468,7 +475,7 @@ test("several holds on one failing issue log once, while a different failing iss
 		await pollDefectHolds(h.app, adapter);
 		expect(logged.mock.calls).toHaveLength(2);
 		expect(
-			h.call<InboxReply>("inbox", { state: "decided" }).items.filter((q) => q.decision?.trackerError),
+			(await h.call<InboxReply>("inbox", { state: "decided" })).items.filter((q) => q.decision?.trackerError),
 		).toHaveLength(3);
 		expect(JSON.stringify(logged.mock.calls)).not.toContain(credential);
 	} finally {
@@ -477,7 +484,7 @@ test("several holds on one failing issue log once, while a different failing iss
 });
 
 test("open issues and failed reads keep holds, back off persistently, and a later closure changes the gate", async () => {
-	heldDefect();
+	await heldDefect();
 	let calls = 0;
 	let state: "fail" | "open" | "closed" = "fail";
 	const adapter: TrackerPort = {
@@ -488,7 +495,7 @@ test("open issues and failed reads keep holds, back off persistently, and a late
 			return { ...item, state };
 		},
 	};
-	expect(h.call("gate", { commit: "abcdef123", repo: "example/shop" })).toMatchObject({
+	expect(await h.call("gate", { commit: "abcdef123", repo: "example/shop" })).toMatchObject({
 		verdict: "failed",
 		tally: { attributed: 1 },
 	});
@@ -510,28 +517,28 @@ test("open issues and failed reads keep holds, back off persistently, and a late
 	h.advance(120_000);
 	expect(await pollDefectHolds(h.app, adapter)).toBe(0);
 	expect(schedule()?.attempts).toBe(0);
-	expect(h.call<InboxReply>("inbox").items.filter((q) => q.kind === "failure")).toHaveLength(0);
+	expect((await h.call<InboxReply>("inbox")).items.filter((q) => q.kind === "failure")).toHaveLength(0);
 	state = "closed";
 	h.advance(60_000);
 	expect(await pollDefectHolds(h.app, adapter)).toBe(1);
-	expect(h.call("gate", { commit: "abcdef123", repo: "example/shop" })).toMatchObject({
+	expect(await h.call("gate", { commit: "abcdef123", repo: "example/shop" })).toMatchObject({
 		verdict: "blocked",
 		tally: { unexplained: 1 },
 	});
-	expect(h.call<InboxReply>("inbox").items.filter((q) => q.kind === "failure")).toHaveLength(1);
+	expect((await h.call<InboxReply>("inbox")).items.filter((q) => q.kind === "failure")).toHaveLength(1);
 });
 
 test("tracker closure keeps an ended defect and its reason in Settled when its change is gone", async () => {
-	h = harness();
+	h = await harness();
 	h.app.config.github = github;
-	h.call(
+	await h.call(
 		"report",
 		ciReport({ commit: "tracker408a", branch: "fix", pr: 408, n: 1, fail: { 0: "expected 90, got 100" } }),
 	);
-	const question = h.call<InboxReply>("inbox", { kind: "failure" }).items[0];
+	const question = (await h.call<InboxReply>("inbox", { kind: "failure" })).items[0];
 	if (!question) throw new Error("expected a failure question");
-	h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "defect", ref: item.url } });
-	h.call("change", { change: "pr:408", state: "closed" });
+	await h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "defect", ref: item.url } });
+	await h.call("change", { change: "pr:408", state: "closed" });
 	expect(await pollDefectHolds(h.app, { ...port, getItem: async () => ({ ...item, state: "closed" }) })).toBe(1);
 	const ended = {
 		q: question.q,
@@ -543,13 +550,13 @@ test("tracker closure keeps an ended defect and its reason in Settled when its c
 			supersedes: { answer: { is: "defect", ref: item.url }, by: ["robin"] },
 		},
 	};
-	expect(h.call("get", { refs: [question.q] })).toMatchObject([ended]);
-	expect(h.call<InboxReply>("inbox", { state: "decided", kind: "failure" }).items).toMatchObject([ended]);
+	expect(await h.call("get", { refs: [question.q] })).toMatchObject([ended]);
+	expect((await h.call<InboxReply>("inbox", { state: "decided", kind: "failure" })).items).toMatchObject([ended]);
 });
 
 for (const change of ["answer", "configuration", "archive"] as const) {
 	test(`a delayed closed reply cannot end a hold after the ${change} changes`, async () => {
-		const { question, decision } = heldDefect();
+		const { question, decision } = await heldDefect();
 		const entered = Promise.withResolvers<void>();
 		const reply = Promise.withResolvers<TrackerItem>();
 		const polling = pollDefectHolds(h.app, {
@@ -561,14 +568,14 @@ for (const change of ["answer", "configuration", "archive"] as const) {
 		});
 		expect(pollDefectHolds(h.app, port)).toBe(polling);
 		await entered.promise;
+		if (change === "answer")
+			await h.call("decide", {
+				q: question.q,
+				onEvidence: question.evidenceHash,
+				answer: { is: "expected" },
+				reason: "Expected while changing checkout",
+			});
 		await h.app.gate.run(() => {
-			if (change === "answer")
-				h.call("decide", {
-					q: question.q,
-					onEvidence: question.evidenceHash,
-					answer: { is: "expected" },
-					reason: "Expected while changing checkout",
-				});
 			if (change === "configuration") h.app.config.github = { ...github, repository: "example/other" };
 			if (change === "archive") {
 				const archive: string[] = [];
@@ -585,7 +592,7 @@ for (const change of ["answer", "configuration", "archive"] as const) {
 		});
 		reply.resolve({ ...item, state: "closed" });
 		expect(await polling).toBe(0);
-		expect(h.call<InboxReply>("inbox").items.filter((q) => q.kind === "failure")).toHaveLength(0);
+		expect((await h.call<InboxReply>("inbox")).items.filter((q) => q.kind === "failure")).toHaveLength(0);
 		expect(
 			h.app.db.raw
 				.query<{ n: number }, [number]>(
@@ -597,13 +604,13 @@ for (const change of ["answer", "configuration", "archive"] as const) {
 }
 
 test("polling only recognizes exact configured issue references and never accepts another issue's closure", async () => {
-	heldDefect("https://github.com/example/elsewhere/issues/42");
+	await heldDefect("https://github.com/example/elsewhere/issues/42");
 	expect(await pollDefectHolds(h.app, port)).toBe(0);
 	expect(h.app.db.raw.query("SELECT count(*) AS n FROM tracker_polls").get()).toEqual({ n: 0 });
 	const q = h.app.db.raw
 		.query<{ no: number; evidence_hash: string }, []>("SELECT no, evidence_hash FROM questions WHERE kind = 'failure'")
 		.get();
-	h.call("decide", { q: `Q-${q?.no}`, onEvidence: q?.evidence_hash, answer: { is: "defect", ref: item.ref } });
+	await h.call("decide", { q: `Q-${q?.no}`, onEvidence: q?.evidence_hash, answer: { is: "defect", ref: item.ref } });
 	expect(
 		await pollDefectHolds(h.app, {
 			...port,
@@ -620,7 +627,7 @@ test("polling only recognizes exact configured issue references and never accept
 });
 
 test("stopping polling waits for its in-flight reply and never starts another read", async () => {
-	heldDefect();
+	await heldDefect();
 	const entered = Promise.withResolvers<void>();
 	const reply = Promise.withResolvers<TrackerItem>();
 	let reads = 0;
@@ -641,7 +648,7 @@ test("stopping polling waits for its in-flight reply and never starts another re
 	expect(await polling).toBe(1);
 	expect(await pollDefectHolds(h.app, adapter)).toBe(0);
 	expect(reads).toBe(1);
-	expect(h.call<InboxReply>("inbox").items.filter((q) => q.kind === "failure")).toHaveLength(1);
+	expect((await h.call<InboxReply>("inbox")).items.filter((q) => q.kind === "failure")).toHaveLength(1);
 });
 
 test("polling back-off survives an instance restart", async () => {
@@ -709,21 +716,21 @@ test("polling back-off survives an instance restart", async () => {
 });
 
 test("ending a defect whose failure has been replaced by a pass does not reopen an obsolete question", async () => {
-	heldDefect();
-	h.call("report", {
+	await heldDefect();
+	await h.call("report", {
 		target: { commit: "abcdef123", repo: "example/shop" },
 		attempt: 2,
 		results: [{ test: { case: "C-1" }, outcome: "pass" }],
 	});
 	await pollDefectHolds(h.app, { ...port, getItem: async () => ({ ...item, state: "closed" }) });
-	expect(h.call<InboxReply>("inbox").items.filter((q) => q.kind === "failure")).toHaveLength(0);
-	expect(h.call("gate", { commit: "abcdef123", repo: "example/shop" })).toMatchObject({ verdict: "passed" });
+	expect((await h.call<InboxReply>("inbox")).items.filter((q) => q.kind === "failure")).toHaveLength(0);
+	expect(await h.call("gate", { commit: "abcdef123", repo: "example/shop" })).toMatchObject({ verdict: "passed" });
 });
 
 test("twenty due polls per minute are fair to later decisions", async () => {
-	h = harness();
+	h = await harness();
 	h.app.config.github = github;
-	h.call("report", {
+	await h.call("report", {
 		target: { session: "many-defects" },
 		results: Array.from({ length: 21 }, (_, index) => ({
 			test: { key: `test-${index}` },
@@ -731,10 +738,10 @@ test("twenty due polls per minute are fair to later decisions", async () => {
 			failure: { message: `Different failure ${String.fromCharCode(65 + index)}` },
 		})),
 	});
-	const questions = h.call<InboxReply>("inbox").items.filter((q) => q.kind === "failure");
+	const questions = (await h.call<InboxReply>("inbox")).items.filter((q) => q.kind === "failure");
 	expect(questions).toHaveLength(21);
 	for (const [index, q] of questions.entries())
-		h.call("decide", {
+		await h.call("decide", {
 			q: q.q,
 			onEvidence: q.evidenceHash,
 			answer: { is: "defect", ref: `https://github.com/example/shop/issues/${index + 1}` },
@@ -755,10 +762,10 @@ test("twenty due polls per minute are fair to later decisions", async () => {
 });
 
 test("a failure can queue a GitHub defect with its recorded case version and build", async () => {
-	const result = failure();
-	h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Renamed case" } }] });
+	const result = await failure();
+	await h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Renamed case" } }] });
 	const input = { do: "create", result, cmd: "tracker-create-01" };
-	expect(h.call<TrackerReceipt>("tracker", input)).toEqual({
+	expect(await h.call<TrackerReceipt>("tracker", input)).toEqual({
 		id: input.cmd,
 		state: "queued",
 		result,
@@ -785,24 +792,28 @@ test("a failure can queue a GitHub defect with its recorded case version and bui
 	])
 		expect(sent[0]?.body).toContain(text);
 	expect(sent[0]?.body).not.toContain("Renamed case");
-	expect(h.call<TrackerReceipt>("tracker-status", { id: input.cmd })).toEqual({
+	expect(await h.call<TrackerReceipt>("tracker-status", { id: input.cmd })).toEqual({
 		id: input.cmd,
 		result,
 		state: "complete",
 		issue: item,
 		error: null,
 	});
-	expect(h.call("tracker", input)).toMatchObject({ state: "queued" });
+	expect(await h.call("tracker", input)).toMatchObject({ state: "queued" });
 	expect(await deliverTrackerRequests(h.app, port)).toBe(0);
-	expect(h.raw("tracker", { ...input, do: "link", key: "42" })).toMatchObject({
+	expect(await h.raw("tracker", { ...input, do: "link", key: "42" })).toMatchObject({
 		ok: false,
 		error: { code: "conflict" },
 	});
-	const question = h.call<InboxReply>("inbox").items.find((q) => q.kind === "failure");
+	const question = (await h.call<InboxReply>("inbox")).items.find((q) => q.kind === "failure");
 	if (!question) throw new Error("expected the failure question");
 	expect(question.state).toBe("open");
 	expect(
-		h.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "defect", ref: item.url } }),
+		await h.call("decide", {
+			q: question.q,
+			onEvidence: question.evidenceHash,
+			answer: { is: "defect", ref: item.url },
+		}),
 	).toMatchObject([{ status: "decided", effects: { defect: item.url } }]);
 });
 
@@ -828,8 +839,8 @@ test("GitHub's port sends the prefilled issue and validates existing issues with
 });
 
 test("link requests record a verified reference and leave the failure decision to the caller", async () => {
-	const result = failure();
-	h.call("tracker", { do: "link", key: "42", result, cmd: "tracker-link-001" });
+	const result = await failure();
+	await h.call("tracker", { do: "link", key: "42", result, cmd: "tracker-link-001" });
 	const keys: string[] = [];
 	await deliverTrackerRequests(h.app, {
 		...port,
@@ -839,15 +850,15 @@ test("link requests record a verified reference and leave the failure decision t
 		},
 	});
 	expect(keys).toEqual(["42"]);
-	expect(h.call("tracker-status", { id: "tracker-link-001" })).toMatchObject({
+	expect(await h.call("tracker-status", { id: "tracker-link-001" })).toMatchObject({
 		state: "complete",
 		issue: { ...item, state: "closed" },
 	});
-	expect(h.call<InboxReply>("inbox").counts.failure).toBe(1);
+	expect((await h.call<InboxReply>("inbox")).counts.failure).toBe(1);
 });
 
 test("GitHub failures and invalid replies expose no response text or credential and never retry creation", async () => {
-	const result = failure();
+	const result = await failure();
 	for (const [index, response] of [
 		new Response(credential, { status: 401 }),
 		Response.json({ number: 42, state: "open", pull_request: {} }, { status: 201 }),
@@ -855,7 +866,7 @@ test("GitHub failures and invalid replies expose no response text or credential 
 		new Response(credential, { status: 201 }),
 	].entries()) {
 		const id = `tracker-error-${index}`;
-		h.call("tracker", { do: "create", result, cmd: id });
+		await h.call("tracker", { do: "create", result, cmd: id });
 		await deliverTrackerRequests(
 			h.app,
 			githubPort(
@@ -863,7 +874,7 @@ test("GitHub failures and invalid replies expose no response text or credential 
 				transport(() => response),
 			),
 		);
-		const status = h.call<TrackerReceipt>("tracker-status", { id });
+		const status = await h.call<TrackerReceipt>("tracker-status", { id });
 		expect(status.state).toBe("failed");
 		expect(status.issue).toBeNull();
 		expect(status.error).toMatch(/GitHub/);
@@ -876,42 +887,49 @@ test("GitHub failures and invalid replies expose no response text or credential 
 	expect(contents.join("")).not.toContain('"t":"tracker_requests"');
 });
 
-test("request validation, project permissions and result ownership are checked before queuing", () => {
-	const result = failure();
+test("request validation, project permissions and result ownership are checked before queuing", async () => {
+	const result = await failure();
 	const input = { do: "create", result, cmd: "tracker-check-01" };
 	const reader = h.actor("reader", "agent", ["read"]);
-	expect(h.raw("tracker", input, reader)).toMatchObject({ ok: false, error: { code: "forbidden" } });
-	expect(h.raw("tracker", { ...input, token: credential })).toMatchObject({ ok: false, error: { code: "invalid" } });
-	expect(h.raw("tracker", { ...input, cmd: undefined })).toMatchObject({ ok: false, error: { code: "invalid" } });
-	expect(h.raw("tracker", { ...input, do: "link", key: "../42" })).toMatchObject({
+	expect(await h.raw("tracker", input, reader)).toMatchObject({ ok: false, error: { code: "forbidden" } });
+	expect(await h.raw("tracker", { ...input, token: credential })).toMatchObject({
+		ok: false,
+		error: { code: "invalid" },
+	});
+	expect(await h.raw("tracker", { ...input, cmd: undefined })).toMatchObject({ ok: false, error: { code: "invalid" } });
+	expect(await h.raw("tracker", { ...input, do: "link", key: "../42" })).toMatchObject({
 		ok: false,
 		error: { code: "invalid" },
 	});
 	h.app.db.raw.query("UPDATE results SET outcome = 'pass' WHERE id = ?").run(result);
-	expect(h.raw("tracker", input)).toMatchObject({
+	expect(await h.raw("tracker", input)).toMatchObject({
 		ok: false,
 		error: { code: "invalid", message: "A defect needs a failed or errored result." },
 	});
-	h.call("admin", { do: "project.create", key: "other" });
+	await h.call("admin", { do: "project.create", key: "other" });
 	const other = h.app.db.raw.query<{ id: number }, []>("SELECT id FROM projects WHERE key = 'other'").get();
 	if (!other) throw new Error("expected the other project");
 	h.app.db.raw.query("UPDATE results SET project = ? WHERE id = ?").run(other.id, result);
-	expect(h.raw("tracker", input)).toMatchObject({
+	expect(await h.raw("tracker", input)).toMatchObject({
 		ok: false,
 		error: { code: "not_found", message: "result not found" },
 	});
 	expect(h.app.db.raw.query("SELECT count(*) AS n FROM tracker_requests").get()).toEqual({ n: 0 });
 });
 
-test("a producer exports only its own result unless it can read the project", () => {
-	const ownerResult = failure();
+test("a producer exports only its own result unless it can read the project", async () => {
+	const ownerResult = await failure();
 	const producer = h.actor("producer", "agent", ["produce"]);
-	const foreign = h.raw("tracker", { do: "create", result: ownerResult, cmd: "tracker-foreign-result" }, producer);
+	const foreign = await h.raw(
+		"tracker",
+		{ do: "create", result: ownerResult, cmd: "tracker-foreign-result" },
+		producer,
+	);
 	expect(foreign).toMatchObject({
 		ok: false,
 		error: { code: "forbidden" },
 	});
-	const absent = h.raw(
+	const absent = await h.raw(
 		"tracker",
 		{ do: "create", result: ownerResult + 1_000_000, cmd: "tracker-absent-result" },
 		producer,
@@ -919,7 +937,7 @@ test("a producer exports only its own result unless it can read the project", ()
 	expect(absent).toEqual(foreign);
 	expect(h.app.db.raw.query("SELECT count(*) AS n FROM tracker_requests").get()).toEqual({ n: 0 });
 
-	h.call(
+	await h.call(
 		"report",
 		{
 			target: { session: "producer-result" },
@@ -932,22 +950,25 @@ test("a producer exports only its own result unless it can read the project", ()
 		.get(producer.id)?.id;
 	if (!ownResult) throw new Error("expected the producer's result");
 	expect(
-		h.call<TrackerReceipt>("tracker", { do: "create", result: ownResult, cmd: "tracker-own-result" }, producer).state,
+		(await h.call<TrackerReceipt>("tracker", { do: "create", result: ownResult, cmd: "tracker-own-result" }, producer))
+			.state,
 	).toBe("queued");
 
 	const readerProducer = h.actor("reader-producer", "agent", ["read", "produce"]);
 	expect(
-		h.call<TrackerReceipt>(
-			"tracker",
-			{ do: "create", result: ownerResult, cmd: "tracker-readable-result" },
-			readerProducer,
+		(
+			await h.call<TrackerReceipt>(
+				"tracker",
+				{ do: "create", result: ownerResult, cmd: "tracker-readable-result" },
+				readerProducer,
+			)
 		).state,
 	).toBe("queued");
 });
 
 test("delivery releases the writer while waiting and overlapping jobs send only once", async () => {
-	const result = failure();
-	h.call("tracker", { do: "create", result, cmd: "tracker-wait-001" });
+	const result = await failure();
+	await h.call("tracker", { do: "create", result, cmd: "tracker-wait-001" });
 	let complete: (value: typeof item) => void = () => {
 		throw new Error("delivery did not start");
 	};
@@ -957,15 +978,15 @@ test("delivery releases the writer while waiting and overlapping jobs send only 
 	const adapter: TrackerPort = { ...port, createDefect: () => waiting };
 	const delivery = deliverTrackerRequests(h.app, adapter);
 	expect(deliverTrackerRequests(h.app, adapter)).toBe(delivery);
-	await h.app.gate.run(() => h.call("propose", { edits: [{ op: "create", outline: "Another case" }] }));
-	expect(h.call("tracker-status", { id: "tracker-wait-001" })).toMatchObject({ state: "sending" });
+	await h.call("propose", { edits: [{ op: "create", outline: "Another case" }] });
+	expect(await h.call("tracker-status", { id: "tracker-wait-001" })).toMatchObject({ state: "sending" });
 	complete(item);
 	expect(await delivery).toBe(1);
 	expect(await deliverTrackerRequests(h.app, adapter)).toBe(0);
 });
 
 test("an archive drops pending delivery and an old response cannot attach to a replacement request", async () => {
-	const result = failure();
+	const result = await failure();
 	const archive: string[] = [];
 	exportArchive(h.app.db, (chunk) => archive.push(chunk));
 	const restored = new Db(":memory:");
@@ -977,7 +998,7 @@ test("an archive drops pending delivery and an old response cannot attach to a r
 		restored.close();
 	}
 	const input = { do: "create", result, cmd: "tracker-restore1" };
-	h.call("tracker", input);
+	await h.call("tracker", input);
 	let complete: (value: TrackerItem) => void = () => {
 		throw new Error("delivery did not start");
 	};
@@ -992,27 +1013,27 @@ test("an archive drops pending delivery and an old response cannot attach to a r
 	await h.app.gate.run(() => {
 		h.app.db.raw.query("DELETE FROM tracker_requests").run();
 		h.app.db.raw.query("DELETE FROM commands WHERE id = ?").run(input.cmd);
-		expect(h.raw("tracker-status", { id: input.cmd })).toMatchObject({ ok: false, error: { code: "not_found" } });
-		h.call("tracker", input);
 	});
+	expect(await h.raw("tracker-status", { id: input.cmd })).toMatchObject({ ok: false, error: { code: "not_found" } });
+	await h.call("tracker", input);
 	complete({ ...item, ref: "github:example/shop#41", url: "https://github.com/example/shop/issues/41" });
 	await delivery;
 	expect(calls).toBe(2);
 	// The old response was ignored. The new request gets its own delivery on the same worker's next turn.
-	expect(h.call("tracker-status", { id: input.cmd })).toMatchObject({ state: "complete", issue: item });
+	expect(await h.call("tracker-status", { id: input.cmd })).toMatchObject({ state: "complete", issue: item });
 	expect(await deliverTrackerRequests(h.app, port)).toBe(0);
 });
 
 test("a sending request is left uncertain after restart and a changed configuration sends nothing", async () => {
-	const result = failure();
-	h.call("tracker", { do: "create", result, cmd: "tracker-crash-01" });
+	const result = await failure();
+	await h.call("tracker", { do: "create", result, cmd: "tracker-crash-01" });
 	h.app.db.raw.query("UPDATE tracker_requests SET state = 'sending'").run();
 	expect(await deliverTrackerRequests(h.app, port)).toBe(0);
-	expect(h.call("tracker-status", { id: "tracker-crash-01" })).toMatchObject({ state: "sending", issue: null });
-	h.call("tracker", { do: "create", result, cmd: "tracker-config1" });
+	expect(await h.call("tracker-status", { id: "tracker-crash-01" })).toMatchObject({ state: "sending", issue: null });
+	await h.call("tracker", { do: "create", result, cmd: "tracker-config1" });
 	h.app.config.github = { ...github, project: "other" };
 	await deliverTrackerRequests(h.app, port);
-	expect(h.call("tracker-status", { id: "tracker-config1" })).toMatchObject({
+	expect(await h.call("tracker-status", { id: "tracker-config1" })).toMatchObject({
 		state: "failed",
 		error: "The configured tracker project or repository changed; the request was not sent.",
 	});

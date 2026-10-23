@@ -14,16 +14,16 @@ export type Harness = {
 	/** Moves the clock forward. */
 	advance: (ms: number) => void;
 	/** Calls an operation and returns its result, or throws with the error code and message. */
-	call: <T = Record<string, unknown>>(op: string, input?: unknown, as?: Actor) => T;
+	call: <T = Record<string, unknown>>(op: string, input?: unknown, as?: Actor) => Promise<T>;
 	/** Calls an operation and returns the whole reply, for tests about refusals. */
-	raw: (op: string, input?: unknown, as?: Actor) => Reply;
+	raw: (op: string, input?: unknown, as?: Actor) => Promise<Reply>;
 	actor: (name: string, kind: ActorKind, can: Capability[]) => Actor;
 	close: () => void;
 };
 
-export function harness(
+export async function harness(
 	options: { preset?: string; project?: string; unlinked?: "ask" | "track" | "create" } = {},
-): Harness {
+): Promise<Harness> {
 	let now = 1_800_000_000_000;
 	const app = openApp(
 		{
@@ -41,16 +41,16 @@ export function harness(
 	);
 	const { owner } = bootstrap(app);
 	const project = options.project ?? "scratch";
-	const raw = (op: string, input: unknown = {}, as: Actor = owner): Reply => {
+	const raw = (op: string, input: unknown = {}, as: Actor = owner): Promise<Reply> => {
 		now += 1;
 		return invoke(app, OPS, { op, project: op === "admin" ? null : project, input, actor: () => as });
 	};
-	const call = <T>(op: string, input: unknown = {}, as: Actor = owner): T => {
-		const reply = raw(op, input, as);
+	const call = async <T>(op: string, input: unknown = {}, as: Actor = owner): Promise<T> => {
+		const reply = await raw(op, input, as);
 		if (!reply.ok) throw new Error(`${op}: ${reply.error.code}: ${reply.error.message}`);
 		return reply.result as T;
 	};
-	call("admin", {
+	await call("admin", {
 		do: "project.create",
 		key: project,
 		preset: options.preset ?? "loose",

@@ -19,7 +19,7 @@ import { type Actor, findProject } from "../server/kernel/ctx.ts";
 import { INTERNAL_ERROR, noProject } from "../server/kernel/errors.ts";
 import { listProjects } from "../server/ops/admin.ts";
 import { OP_LIST, OPS } from "../server/ops/index.ts";
-import { invokeAsync, type Reply } from "../server/ops/registry.ts";
+import { invoke, type Reply } from "../server/ops/registry.ts";
 import { forwardedScheme } from "./headers.ts";
 import { SIGN_IN_BODY_LIMIT, signInRoutes } from "./signin.ts";
 import { type Relay, uiSurface } from "./ui.ts";
@@ -446,7 +446,7 @@ export async function handleOp(
 		return jsonResponse({ ok: false, error: { code: "invalid", message: "the request body is not JSON" } }, 400);
 	}
 	return replyResponse(
-		await invokeAsync(app, OPS, {
+		await invoke(app, OPS, {
 			op,
 			project,
 			input,

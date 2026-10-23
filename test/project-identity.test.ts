@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { Db } from "../src/server/kernel/db.ts";
 import { MIGRATIONS, migrate } from "../src/server/kernel/migrate.ts";
 import { OPS } from "../src/server/ops/index.ts";
-import { invokeAsync } from "../src/server/ops/registry.ts";
+import { invoke } from "../src/server/ops/registry.ts";
 import { removeProject } from "../src/server/transfer/transfer.ts";
 import { harness } from "./helpers.ts";
 
@@ -12,17 +12,17 @@ function one<T>(rows: T[]): T {
 	return row;
 }
 
-test("a saved command cannot decide a replacement project, even after a fresh project-list read", () => {
-	const h = harness({ preset: "standard" });
+test("a saved command cannot decide a replacement project, even after a fresh project-list read", async () => {
+	const h = await harness({ preset: "standard" });
 	try {
 		const agent = h.actor("author", "agent", ["read", "produce"]);
-		const question = () => {
-			h.call("propose", { edits: [{ op: "create", outline: "Saved case\n  Check > Pass" }] }, agent);
-			return one(h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox").items);
+		const question = async () => {
+			await h.call("propose", { edits: [{ op: "create", outline: "Saved case\n  Check > Pass" }] }, agent);
+			return one((await h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox")).items);
 		};
-		const oldQuestion = question();
-		const projects = () => h.call<{ key: string; identity: string }[]>("admin", { do: "project.list" });
-		const identity = one(projects()).identity;
+		const oldQuestion = await question();
+		const projects = async () => await h.call<{ key: string; identity: string }[]>("admin", { do: "project.list" });
+		const identity = one(await projects()).identity;
 		const input = {
 			cmd: "saved-answer-385",
 			projectIdentity: identity,
@@ -32,41 +32,43 @@ test("a saved command cannot decide a replacement project, even after a fresh pr
 			answer: { is: "accept" },
 		};
 		// Reading again cannot protect a command that is delayed past replacement.
-		expect(projects()[0]?.identity).toBe(identity);
+		expect((await projects())[0]?.identity).toBe(identity);
 		removeProject(h.app.db, "scratch");
-		h.call("admin", { do: "project.create", key: "scratch", preset: "standard" });
-		const replacement = question();
+		await h.call("admin", { do: "project.create", key: "scratch", preset: "standard" });
+		const replacement = await question();
 		expect(replacement.q).toBe(oldQuestion.q);
 		expect(replacement.evidenceHash).toBe(oldQuestion.evidenceHash);
-		const reply = h.raw("decide", input);
+		const reply = await h.raw("decide", input);
 		expect(reply).toMatchObject({ ok: false, error: { code: "conflict", details: { projectIdentity: "obsolete" } } });
-		expect(h.call<{ items: { q: string }[] }>("inbox").items.map((q) => q.q)).toEqual([replacement.q]);
-		expect(projects()[0]?.identity).not.toBe(identity);
-		expect(h.raw("decide", { ...input, projectIdentity: one(projects()).identity })).toMatchObject({ ok: true });
+		expect((await h.call<{ items: { q: string }[] }>("inbox")).items.map((q) => q.q)).toEqual([replacement.q]);
+		expect((await projects())[0]?.identity).not.toBe(identity);
+		expect(await h.raw("decide", { ...input, projectIdentity: one(await projects()).identity })).toMatchObject({
+			ok: true,
+		});
 	} finally {
 		h.close();
 	}
 });
 
-test("the shared envelope guards project writes and command replay", () => {
-	const h = harness();
+test("the shared envelope guards project writes and command replay", async () => {
+	const h = await harness();
 	try {
-		const project = one(h.call<{ identity: string }[]>("admin", { do: "project.list" }));
+		const project = one(await h.call<{ identity: string }[]>("admin", { do: "project.list" }));
 		const input = {
 			cmd: "project-write-385",
 			projectIdentity: project.identity,
 			edits: [{ op: "create", outline: "One case\n  Check > Pass" }],
 		};
-		const first = h.raw("propose", input);
+		const first = await h.raw("propose", input);
 		expect(first).toMatchObject({ ok: true });
-		expect(h.raw("propose", input)).toEqual(first);
-		expect(h.raw("propose", { ...input, projectIdentity: "a-different-project" })).toMatchObject({
+		expect(await h.raw("propose", input)).toEqual(first);
+		expect(await h.raw("propose", { ...input, projectIdentity: "a-different-project" })).toMatchObject({
 			ok: false,
 			error: { code: "conflict", details: { projectIdentity: "obsolete" } },
 		});
-		expect(h.call<{ count: number }>("find", { in: "cases" }).count).toBe(1);
+		expect((await h.call<{ count: number }>("find", { in: "cases" })).count).toBe(1);
 		expect(
-			h.raw("propose", { ...input, cmd: "other-command-385", projectIdentity: "a-different-project" }),
+			await h.raw("propose", { ...input, cmd: "other-command-385", projectIdentity: "a-different-project" }),
 		).toMatchObject({
 			ok: false,
 			error: { code: "conflict", details: { projectIdentity: "obsolete" } },
@@ -99,9 +101,9 @@ test("a conditional read cannot follow a reused reference into a replacement pro
 });
 
 test("a command waiting at the write gate checks the replacement identity when it runs", async () => {
-	const h = harness();
+	const h = await harness();
 	try {
-		const identity = one(h.call<{ identity: string }[]>("admin", { do: "project.list" })).identity;
+		const identity = one(await h.call<{ identity: string }[]>("admin", { do: "project.list" })).identity;
 		const release = Promise.withResolvers<void>();
 		const entered = Promise.withResolvers<void>();
 		const blocking = h.app.gate.run(() => {
@@ -109,7 +111,9 @@ test("a command waiting at the write gate checks the replacement identity when i
 			return release.promise;
 		});
 		await entered.promise;
-		const pending = invokeAsync(h.app, OPS, {
+		const removed = h.app.gate.run(() => removeProject(h.app.db, "scratch"));
+		const replaced = h.call("admin", { do: "project.create", key: "scratch" });
+		const pending = invoke(h.app, OPS, {
 			op: "propose",
 			project: "scratch",
 			actor: () => h.owner,
@@ -119,15 +123,15 @@ test("a command waiting at the write gate checks the replacement identity when i
 				edits: [{ op: "create", outline: "Must not appear\n  Check > Pass" }],
 			},
 		});
-		removeProject(h.app.db, "scratch");
-		h.call("admin", { do: "project.create", key: "scratch" });
 		release.resolve();
+		await removed;
+		await replaced;
 		await blocking;
 		expect(await pending).toMatchObject({
 			ok: false,
 			error: { code: "conflict", details: { projectIdentity: "obsolete" } },
 		});
-		expect(h.call<{ count: number }>("find", { in: "cases" }).count).toBe(0);
+		expect((await h.call<{ count: number }>("find", { in: "cases" })).count).toBe(0);
 	} finally {
 		h.close();
 	}

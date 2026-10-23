@@ -121,7 +121,7 @@ export type ReadCall = {
 	clockOffset: number;
 };
 export type ReadPool = {
-	run: (call: ReadCall, fallback: () => Envelope<unknown>) => Promise<Envelope<unknown>>;
+	run: (call: ReadCall, fallback: () => Envelope<unknown> | Promise<Envelope<unknown>>) => Promise<Envelope<unknown>>;
 	refresh: () => void;
 	stop: () => Promise<void>;
 };

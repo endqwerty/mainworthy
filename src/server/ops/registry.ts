@@ -54,16 +54,18 @@ type ProjectBase<I, O> = Base<I, O> & { scope: "project"; effect: "read" | "writ
 /**
  * An operation on one project. A write runs in a transaction stamped with the project's next sequence number.
  * Most operations are one function, `run`. One that can take long gives `steps` instead: a generator that yields
- * between slices of work, so the server can answer reads while it runs. Driven without pausing, it is the same
- * operation; there is no second implementation.
+ * between slices of work, so the server can answer reads while it runs. The registry awaits each step.
  */
 export type ProjectOp<I, O> = ProjectBase<I, O> &
-	({ run: (ctx: Ctx, input: I) => O } | { steps: (ctx: Ctx, input: I) => Generator<Pause, O, void> });
+	(
+		| { run: (ctx: Ctx, input: I) => O | Promise<O> }
+		| { steps: (ctx: Ctx, input: I) => Generator<Pause, O, void> | AsyncGenerator<Pause, O, void> }
+	);
 /** An operation on the instance: projects, actors, tokens. */
 export type InstanceOp<I, O> = Base<I, O> & {
 	scope: "instance";
 	effect: "read" | "write";
-	run: (env: InstanceCtx, input: I) => O;
+	run: (env: InstanceCtx, input: I) => O | Promise<O>;
 	/** True when the reply to this input holds a secret. It is then never stored, so the command cannot be replayed. */
 	secret?: (input: I) => boolean;
 };
@@ -189,16 +191,16 @@ function admitCaller(
 /**
  * Runs one operation: validates the input at the boundary, checks the capability, and for a write wraps the work
  * in a transaction that is idempotent on the command id and stamped with one sequence number (a report commits
- * twice and takes a number for each transaction). After each commit it publishes what changed. Written as a generator so one body serves both drivers below: it yields wherever the
- * operation says other requests may be served.
+ * twice and takes a number for each transaction). After each commit it publishes what changed. It pauses where
+ * the operation says other requests may be served.
  */
-function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Generator<void, Reply, void> {
-	if (ops[call.op]?.effect !== "write") return yield* executeInSnapshot(app, ops, call);
+async function execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> {
+	if (ops[call.op]?.effect !== "write") return await executeInSnapshot(app, ops, call);
 	if (app.db.inTransaction)
-		return fail("internal", "a write is in progress; writes go through invokeAsync, which queues them");
+		return fail("internal", "a write is in progress; writes go through invoke, which queues them");
 	app.db.begin();
 	try {
-		const reply = yield* executeInSnapshot(app, ops, call);
+		const reply = await executeInSnapshot(app, ops, call);
 		if (app.db.inTransaction) {
 			if (reply.ok) app.db.commit();
 			else app.db.rollback();
@@ -209,7 +211,7 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 	}
 }
 
-function* executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Generator<void, Reply, void> {
+async function executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> {
 	const op = ops[call.op];
 	if (!op) return fail("not_found", `no operation named ${call.op}`);
 	// An operation of the instance has one address. Named under a project it is refused, whichever project and
@@ -272,28 +274,25 @@ function* executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>, call
 				session: call.reference ? (caller?.session ?? null) : (call.session?.() ?? null),
 				context: call.reference ? (caller?.context ?? null) : (call.context?.() ?? null),
 			};
-			if (!writing) return { ok: true, result: present(op.run(env, input)), seq: null };
-			const result = app.db.transaction(() => {
-				const prior = cmd ? findCommand(app.db, cmd) : null;
-				if (prior) {
-					if (prior.op !== op.name || prior.actor !== actor.id || prior.project !== 0) throw reused();
-					if (prior.request !== request) throw changed();
-					const kept = json<unknown>(prior.outcome);
-					if (kept === WITHHELD) {
-						throw new OpError(
-							"conflict",
-							"this command already ran, and its reply held a secret that is not kept; it was not run again",
-						);
-					}
-					return kept;
+			if (!writing) return { ok: true, result: present(await op.run(env, input)), seq: null };
+			const prior = cmd ? findCommand(app.db, cmd) : null;
+			if (prior) {
+				if (prior.op !== op.name || prior.actor !== actor.id || prior.project !== 0) throw reused();
+				if (prior.request !== request) throw changed();
+				const kept = json<unknown>(prior.outcome);
+				if (kept === WITHHELD) {
+					throw new OpError(
+						"conflict",
+						"this command already ran, and its reply held a secret that is not kept; it was not run again",
+					);
 				}
-				const made = op.run(env, input);
-				if (cmd) {
-					const outcome = op.secret?.(input) ? WITHHELD : made;
-					recordInstanceCommand(app.db, { id: cmd, op: op.name, actor: actor.id, at: env.now, outcome, request });
-				}
-				return made;
-			});
+				return { ok: true, result: present(kept), seq: null };
+			}
+			const result = await op.run(env, input);
+			if (cmd) {
+				const outcome = op.secret?.(input) ? WITHHELD : result;
+				recordInstanceCommand(app.db, { id: cmd, op: op.name, actor: actor.id, at: env.now, outcome, request });
+			}
 			return { ok: true, result: present(result), seq: null };
 		}
 
@@ -314,7 +313,7 @@ function* executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>, call
 
 		if (!writing) {
 			if (!("run" in op)) throw new Error(`${op.name}: a read is one function`);
-			return { ok: true, result: present(op.run(makeCtx(app, found, actor, false), input)), seq: found.seq };
+			return { ok: true, result: present(await op.run(makeCtx(app, found, actor, false), input)), seq: found.seq };
 		}
 
 		try {
@@ -354,8 +353,8 @@ function* executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>, call
 			};
 			let result: unknown;
 			if ("steps" in op) {
-				const steps = op.steps(ctx, input);
-				for (let step = steps.next(); ; step = steps.next()) {
+				const steps = await op.steps(ctx, input);
+				for (let step = await steps.next(); ; step = await steps.next()) {
 					if (step.done) {
 						result = step.value;
 						break;
@@ -371,9 +370,9 @@ function* executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>, call
 						app.db.begin();
 						ctx.seq += 1;
 					}
-					yield;
+					await nextTick();
 				}
-			} else result = op.run(ctx, input);
+			} else result = await op.run(ctx, input);
 			if (cmd && bound) finishCommand(ctx, { id: cmd, outcome: result });
 			else if (cmd) recordCommand(ctx, { id: cmd, op: op.name, outcome: result, request });
 			stampSeq(ctx);
@@ -394,17 +393,13 @@ function* executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>, call
 	}
 }
 
-/**
- * Runs one operation to completion without pausing. For tests, the CLI's in-process use and start-up work. A
- * server uses `invokeAsync`, which runs the same code and lets other requests in between an operation's steps.
- */
-export function invoke(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Reply {
-	const run = (): Reply => {
-		const running = execute(app, ops, call);
-		for (let step = running.next(); ; step = running.next()) if (step.done) return step.value;
-	};
-	return ops[call.op]?.effect === "read" ? app.reader.snapshot(run) : run();
-}
+/** Runs an inline read in one snapshot, including an awaited handler. */
+const read = (app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> => {
+	const run = () => app.reader.snapshotAsync(() => execute(app, ops, call));
+	// In-memory instances share the writer connection. An idle read owns the gate until its snapshot ends;
+	// a read during a sliced write joins that transaction, as synchronous reads did.
+	return app.reader === app.db && !app.db.inTransaction ? app.gate.run(run) : run();
+};
 
 const nextTick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
@@ -414,18 +409,18 @@ const nextTick = (): Promise<void> => new Promise((resolve) => setImmediate(reso
  * the gate (one writer at a time, and nobody blocks the thread to wait), then runs; where the operation pauses,
  * the event loop serves whatever else has arrived. Every surface calls this and nothing else.
  */
-export function invokeAsync(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> {
+export async function invoke(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> {
 	const op = ops[call.op];
 	const misplaced = misplacedTime(op, call);
-	if (misplaced) return Promise.resolve(misplaced);
+	if (misplaced) return misplaced;
 	if (op?.effect === "read" && app.readers && call.reference) {
 		const project = op.scope === "project" && call.project ? findProject(app.reader, call.project) : null;
-		if (op.scope === "project" && !project) return Promise.resolve(invoke(app, ops, call));
+		if (op.scope === "project" && !project) return read(app, ops, call);
 		const actor = call.actor(project?.id ?? 0);
 		// Who may read is decided here, in the thread that knows the caller, and asked again when the reader has
 		// answered. A reader thread is only ever handed a call its caller is allowed to make; a refusal is answered
 		// inline and never reaches one.
-		if (!actor || !mayRun(actor, op.needs)) return Promise.resolve(invoke(app, ops, call));
+		if (!actor || !mayRun(actor, op.needs)) return read(app, ops, call);
 		return app.readers
 			.run(
 				{
@@ -435,7 +430,7 @@ export function invokeAsync(app: App, ops: Readonly<Record<string, AnyOp>>, call
 					caller: call.reference,
 					clockOffset: app.now() - Date.now(),
 				},
-				() => invoke(app, ops, call),
+				() => read(app, ops, call),
 			)
 			.then((reply) => {
 				// Also refuse a project, credential or capability that ended while the reader was answering. The read
@@ -445,21 +440,16 @@ export function invokeAsync(app: App, ops: Readonly<Record<string, AnyOp>>, call
 					const { code, message } = noProject(call.project);
 					return fail(code, message);
 				}
-				if (current?.identity !== project?.identity) return invoke(app, ops, call);
+				if (current?.identity !== project?.identity) return read(app, ops, call);
 				const admitted = admitCaller(call, op, call.actor(current?.id ?? 0), current?.key ?? null);
 				if ("reply" in admitted) return admitted.reply;
 				return reply.ok ? reply : fail(reply.error.code, reply.error.message, reply.error.details);
 			});
 	}
-	if (ops[call.op]?.effect !== "write") return Promise.resolve(invoke(app, ops, call));
+	if (ops[call.op]?.effect !== "write") return read(app, ops, call);
 	return app.gate.run(async () => {
-		const running = execute(app, ops, call);
-		for (let step = running.next(); ; step = running.next()) {
-			if (step.done) {
-				if (op?.scope === "instance" && step.value.ok) app.readers?.refresh();
-				return step.value;
-			}
-			await nextTick();
-		}
+		const reply = await execute(app, ops, call);
+		if (op?.scope === "instance" && reply.ok) app.readers?.refresh();
+		return reply;
 	});
 }
