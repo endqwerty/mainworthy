@@ -68,22 +68,39 @@ function rootLinks(text: string): string {
 	);
 }
 
+function generatedLine(entry: Fragment): string {
+	const refs = [
+		entry.issue && `[issue](${entry.issue})`,
+		entry.pr && entry.pr !== "pending" && `[PR](${entry.pr})`,
+	].filter(Boolean);
+	const text = rootLinks(entry.text).replace(/\n/g, " ");
+	return `- ${entry.date}: **${entry.category}:** ${text}${refs.length ? ` (${refs.join(", ")})` : ""} <!-- change:${entry.id} -->`;
+}
+
 /** Replace only our generated section. Everything below it remains byte for byte historical. */
 export function assemble(changelog: string, entries: readonly Fragment[]): string {
 	if (!changelog.startsWith(TITLE)) throw new Error("CHANGELOG.md must start with # Changelog and a blank line");
+	const lines = new Map(
+		[...entries]
+			.sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id))
+			.map((entry) => [entry.id, generatedLine(entry)]),
+	);
 	let history = changelog.slice(TITLE.length);
 	if (history.startsWith(`${START}\n`)) {
 		const end = history.indexOf(`${END}\n\n`);
 		if (end < 0) throw new Error("CHANGELOG.md has an unfinished changes section");
 		const section = history.slice(START.length + 1, end).replace(/\n$/, "");
-		const ids = new Set(entries.map((entry) => entry.id));
 		const seen = new Set<string>();
 		for (const line of section ? section.split("\n") : []) {
 			const markers = [...line.matchAll(/<!-- change:([a-z0-9-]+) -->/g)];
 			const id = markers[0]?.[1];
-			if (markers.length !== 1 || id === undefined || !ids.has(id) || seen.has(id))
+			if (markers.length !== 1 || id === undefined || !lines.has(id) || seen.has(id))
 				throw new Error(
 					"CHANGELOG.md contains an unowned generated line; move the entry into a .changes/ fragment before assembling",
+				);
+			if (line !== lines.get(id))
+				throw new Error(
+					`CHANGELOG.md entry ${id} differs from its canonical fragment; restore the entry from .changes/ and add a new fragment for corrections.`,
 				);
 			seen.add(id);
 		}
@@ -91,28 +108,23 @@ export function assemble(changelog: string, entries: readonly Fragment[]): strin
 	}
 	if (history.includes(START) || history.includes(END)) throw new Error("CHANGELOG.md has misplaced changes markers");
 	if (entries.length === 0) return `${TITLE}${history}`;
-	const lines = [...entries]
-		.sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id))
-		.map((entry) => {
-			const refs = [
-				entry.issue && `[issue](${entry.issue})`,
-				entry.pr && entry.pr !== "pending" && `[PR](${entry.pr})`,
-			].filter(Boolean);
-			const text = rootLinks(entry.text).replace(/\n/g, " ");
-			return `- ${entry.date}: **${entry.category}:** ${text}${refs.length ? ` (${refs.join(", ")})` : ""} <!-- change:${entry.id} -->`;
-		});
-	return `${TITLE}${START}\n${lines.join("\n")}\n${END}\n\n${history}`;
+
+	return `${TITLE}${START}\n${[...lines.values()].join("\n")}\n${END}\n\n${history}`;
 }
 
 if (import.meta.main) {
 	try {
 		const args = process.argv.slice(2);
-		if (args.length > 1 || (args.length === 1 && !["--check", "--write"].includes(args[0] ?? "")))
-			throw new Error("usage: bun scripts/changelog.ts [--check | --write]");
+		if (!["", "--check", "--write", "--check --complete", "--complete --check"].includes(args.join(" ")))
+			throw new Error("usage: bun scripts/changelog.ts [--check [--complete] | --write]");
 		const entries = fragments();
 		const changelog = readFileSync("CHANGELOG.md", "utf8");
 		const output = assemble(changelog, entries);
-		if (args[0] === "--write") {
+		if (args.includes("--complete") && output !== changelog)
+			throw new Error(
+				"CHANGELOG.md is not fully assembled; run bun scripts/changelog.ts --write and commit the result.",
+			);
+		if (args.includes("--write")) {
 			const temporary = `.changelog-${randomUUID()}.tmp`;
 			try {
 				writeFileSync(temporary, output, { flag: "wx" });
@@ -121,7 +133,7 @@ if (import.meta.main) {
 				rmSync(temporary, { force: true });
 			}
 			console.log(`Assembled ${entries.length} changelog fragments.`);
-		} else if (args[0] === "--check") {
+		} else if (args.includes("--check")) {
 			const section = changelog.startsWith(`${TITLE}${START}\n`)
 				? changelog.slice(TITLE.length + START.length + 1, changelog.indexOf(END))
 				: "";

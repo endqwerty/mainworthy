@@ -236,29 +236,42 @@ export async function gather(number: number, gh = (args: string[]) => read(["gh"
 	if (!Array.isArray(pages)) throw new Error("GitHub returned an invalid paginated file list");
 	const paths: string[] = [];
 	const fragment = (file: string): boolean => file.startsWith(".changes/") && file.endsWith(".md");
-	for (const page of pages) {
+	const changes = pages.flatMap((page) => {
 		if (!Array.isArray(page)) throw new Error("GitHub returned an invalid page in the file list");
-		for (const row of page) {
-			const change = object(row);
-			const file = change.filename;
-			const status = change.status;
-			const previous = change.previous_filename;
-			if (
-				typeof file !== "string" ||
-				!file ||
-				typeof status !== "string" ||
-				!status ||
-				(previous !== undefined && typeof previous !== "string") ||
-				(status === "renamed" && (typeof previous !== "string" || !previous))
-			)
-				throw new Error("GitHub file list lacks a filename, status or rename source");
-			if (!fragment(file) && !(typeof previous === "string" && fragment(previous))) continue;
-			if (status !== "added")
-				throw new Error(
-					`${previous ?? file}: retained fragments are immutable (${status}); add a new fragment to correct an old entry.`,
-				);
-			paths.push(file);
-		}
+		return page;
+	});
+	const total: unknown = JSON.parse(await gh(["api", `repos/${REPO}/pulls/${number}`, "--jq", ".changed_files"]));
+	if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0)
+		throw new Error("GitHub did not return a valid total changed-file count");
+	if (changes.length !== total)
+		throw new Error(`GitHub returned ${changes.length} of ${total} changed files; refusing an incomplete file list.`);
+	for (const row of changes) {
+		const change = object(row);
+		const file = change.filename;
+		const status = change.status;
+		const previous = change.previous_filename;
+		if (
+			typeof file !== "string" ||
+			!file ||
+			typeof status !== "string" ||
+			!status ||
+			(previous !== undefined && typeof previous !== "string") ||
+			(status === "renamed" && (typeof previous !== "string" || !previous))
+		)
+			throw new Error("GitHub file list lacks a filename, status or rename source");
+		if (
+			["added", "renamed", "copied"].includes(status) &&
+			file.startsWith("docs/decisions/") &&
+			file.endsWith(".md") &&
+			!/^docs\/decisions\/\d{4}-\d{2}-\d{2}-[a-z0-9]+(?:-[a-z0-9]+)*\.md$/.test(file)
+		)
+			throw new Error(`${file}: new decisions must use dated filenames, including when a historical number is unused`);
+		if (!fragment(file) && !(typeof previous === "string" && fragment(previous))) continue;
+		if (status !== "added")
+			throw new Error(
+				`${previous ?? file}: retained fragments are immutable (${status}); add a new fragment to correct an old entry.`,
+			);
+		paths.push(file);
 	}
 	const addedFragments: Facts["addedFragments"][number][] = [];
 	for (const file of paths) {

@@ -534,6 +534,7 @@ test("PR facts read added fragments at the immutable PR head", async () => {
 				isDraft: true,
 				headRefOid: head,
 			});
+		if (args[0] === "api" && args[1] === "repos/endqwerty/mainworthy/pulls/832") return "2";
 		if (args[1]?.endsWith("/pulls/832/files"))
 			return JSON.stringify([
 				[{ status: "modified", filename: "src/example.ts" }],
@@ -567,6 +568,7 @@ for (const change of [
 					isDraft: false,
 					headRefOid: "a".repeat(40),
 				});
+			if (args[0] === "api" && args[1] === "repos/endqwerty/mainworthy/pulls/832") return "2";
 			if (args[1]?.endsWith("/files")) {
 				if (args.includes("--jq")) return ""; // The old added-only API query hides this change.
 				return JSON.stringify([[{ status: "modified", filename: "src/unrelated.ts" }], [change]]);
@@ -578,6 +580,71 @@ for (const change of [
 		expect(reads).toEqual([]);
 	});
 }
+
+test("PR admission refuses a truncated GitHub file list", async () => {
+	let reported = 3001;
+	const pages = Array.from({ length: 30 }, (_, page) =>
+		Array.from({ length: 100 }, (_, index) => ({ status: "modified", filename: `src/file-${page * 100 + index}.ts` })),
+	);
+	const gh = async (args: string[]): Promise<string> => {
+		if (args[0] === "pr")
+			return JSON.stringify({
+				body: NOTE,
+				baseRefName: "main",
+				milestone: null,
+				closingIssuesReferences: [],
+				isDraft: false,
+				headRefOid: "a".repeat(40),
+			});
+		if (args[0] === "api" && args[1] === "repos/endqwerty/mainworthy/pulls/832") return JSON.stringify(reported);
+		if (args[1]?.endsWith("/files")) return JSON.stringify(pages);
+		throw new Error("a truncated listing must be refused before content reads");
+	};
+	await expect(gather(832, gh)).rejects.toThrow(/3000.*3001|incomplete.*file/i);
+	reported = 3000;
+	await expect(gather(832, gh)).resolves.toMatchObject({ addedFragments: [] });
+});
+
+for (const change of [
+	{ status: "added", filename: "docs/decisions/0037-new-record.md" },
+	{ status: "renamed", filename: "docs/decisions/0037-new-record.md", previous_filename: "docs/draft.md" },
+]) {
+	test(`new numbered decisions are refused even in historical gaps (${change.status})`, async () => {
+		const gh = async (args: string[]): Promise<string> => {
+			if (args[0] === "pr")
+				return JSON.stringify({
+					body: NOTE,
+					baseRefName: "main",
+					milestone: null,
+					closingIssuesReferences: [],
+					isDraft: false,
+					headRefOid: "a".repeat(40),
+				});
+			if (args[1]?.endsWith("/files")) return JSON.stringify([[change]]);
+			if (args[1] === "repos/endqwerty/mainworthy/pulls/832") return "1";
+			throw new Error("no content read is needed for a new decision filename");
+		};
+		await expect(gather(832, gh)).rejects.toThrow(/new decisions.*dated/i);
+	});
+}
+
+test("CI requires a changed aggregate to be fully assembled", () => {
+	const workflow = Bun.YAML.parse(readFileSync(".github/workflows/check.yml", "utf8"));
+	expect(workflow).toMatchObject({
+		jobs: {
+			tests: {
+				steps: expect.arrayContaining([
+					expect.objectContaining({
+						name: "A changed changelog is fully assembled",
+						if: expect.stringContaining("matrix.name == 'tests' || matrix.name == 'tests-1'"),
+						run: expect.stringContaining("--check --complete"),
+						env: { BASE: expect.stringContaining("github.event.pull_request.base.sha || github.event.before") },
+					}),
+				]),
+			},
+		},
+	});
+});
 
 test("the check's time is read from its report and judged against the spread between runs of one revision", () => {
 	expect(checkSeconds("typecheck 9.1 s ok\ntests   121.4 s\ntotal   130.0 s\n")).toBe(121.4);

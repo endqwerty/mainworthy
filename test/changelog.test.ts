@@ -209,3 +209,47 @@ test("--check reports pending fragments as information without writing the aggre
 		remove(scratch);
 	}
 });
+
+test("generated lines must match their canonical fragment even when their marker remains", () => {
+	const entries = fragments([fragment("security", "A security entry.")]);
+	const current = assemble("# Changelog\n\nHistory.\n", entries);
+	expect(() => assemble(current.replace("A security entry.", "An edited entry."), entries)).toThrow(
+		/canonical|differs|does not match/i,
+	);
+});
+
+for (const kind of ["edited", "removed", "complete"]) {
+	test(`complete checking ${kind === "complete" ? "accepts a complete aggregate" : `refuses ${kind === "edited" ? "an edited" : "a removed"} assembled entry`}`, () => {
+		const scratch = make("changelog-complete");
+		try {
+			mkdirSync(join(scratch, ".changes"));
+			const input = fragment("security", "A security entry.");
+			writeFileSync(join(scratch, ".changes", input.file), input.text);
+			const current = assemble("# Changelog\n\nHistory.\n", fragments([input]));
+			const changed =
+				kind === "edited"
+					? current.replace("A security entry.", "An edited entry.")
+					: kind === "removed"
+						? current
+								.split("\n")
+								.filter((line) => !line.includes("<!-- change:security -->"))
+								.join("\n")
+						: current;
+			writeFileSync(join(scratch, "CHANGELOG.md"), changed);
+			const run = Bun.spawnSync(
+				[process.execPath, join(process.cwd(), "scripts/changelog.ts"), "--check", "--complete"],
+				{ cwd: scratch, stdout: "pipe", stderr: "pipe" },
+			);
+			if (kind === "complete") expect(run.exitCode, run.stderr.toString()).toBe(0);
+			else {
+				expect(run.exitCode).not.toBe(0);
+				expect(run.stderr.toString()).toMatch(
+					kind === "edited" ? /canonical|differs|does not match/i : /not fully assembled/i,
+				);
+			}
+			expect(readFileSync(join(scratch, "CHANGELOG.md"), "utf8")).toBe(changed);
+		} finally {
+			remove(scratch);
+		}
+	});
+}
