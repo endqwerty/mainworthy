@@ -117,7 +117,9 @@ lists. Non-ASCII text such as `é` and `雪` stays readable. Output also escapes
 GitHub Actions command prefixes so imported text cannot create annotations.
 `get --md` and `fmt` retain Markdown structure and encode controls and command
 prefixes with reversible canonical Markdown escapes. Parsing that output recovers
-the original values. Their JSON forms preserve the canonical document text.
+the original values. Ordinary mid-line syntax such as `std::vector`, `a::before`
+and `[::1]` stays literal; `::` is escaped only where it could start a workflow
+command. Their JSON forms preserve the canonical document text.
 Pretty and compact JSON preserve their values
 and remain valid JSON; saved archives and audit exports retain their original bytes.
 
