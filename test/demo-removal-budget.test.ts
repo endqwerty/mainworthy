@@ -14,6 +14,9 @@ test("removing a demo does not scan another project's excuses for every result",
 	try {
 		migrate(db, ":memory:");
 		removalFixture(db, 5_000);
+		// The fixture plus removal crosses SQLite's auto-checkpoint threshold. Finish the fixture's disk writes
+		// here so the budget includes removal and its commit, without also syncing the setup's WAL pages.
+		db.checkpoint();
 		const start = performance.now();
 		const removed = removeProject(db, "removing");
 		const ms = performance.now() - start;
