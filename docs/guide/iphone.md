@@ -49,6 +49,11 @@ To sign in, follow these steps:
 
 1. Type your name and your password.
 2. Press **Sign in**.
+3. If **One more step** appears, enter your authenticator code or an unused recovery code, then press **Verify code**.
+
+The code field supports the phone's one-time-code AutoFill. The second step lasts five minutes. A wrong or
+expired code shows the same message as web sign-in. Choose **Start again** to enter your password for a new
+challenge. Too many failed attempts show how long to wait. These attempts share the web sign-in limits.
 
 When the instance offers an identity provider, press **Sign in with** and the provider's name instead. Complete the sign-in
 in the system browser sheet. The app returns signed in as the person linked to that provider identity. You
@@ -69,12 +74,11 @@ If the challenge has expired, press **Sign in with a passkey** again to get a ne
 Physical-device checks, including an external credential provider, remain open in
 [issue #205](https://github.com/endqwerty/mainworthy/issues/205).
 
-Password sign-in for an account with an enrolled authenticator requires a second step. The app cannot complete
-that step and keeps no session after accepting the password. Use a passkey, or sign in through the web app.
-An instance that requires a second factor for admins also refuses password-only admin sign-in in the app.
+An instance that requires a second factor for admins refuses a password without an enrolled authenticator.
+Enrol one in the web app under **Your sign-in**, or use a passkey.
 
 After sign-in completes, the app opens a session, as a browser does, and keeps that session in the phone's keychain. It does not keep
-the password or the provider's tokens. The session appears in the web app under Settings, **Your sessions**, as "Mainworthy for
+the password, authenticator or recovery code, or the provider's tokens. The session appears in the web app under Settings, **Your sessions**, as "Mainworthy for
 iPhone", and you can end it there.
 
 ### Fill the password from 1Password or the phone's passwords

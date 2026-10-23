@@ -13,7 +13,6 @@ public enum ClientError: Error, Equatable, Sendable {
 	/// The reply was not one this app can read: the address is not a Mainworthy, or the server is newer than
 	/// the app.
 	case unreadable
-	case secondFactorUnsupported
 
 	public var message: String {
 		switch self {
@@ -26,8 +25,6 @@ public enum ClientError: Error, Equatable, Sendable {
 				"Too many attempts. Try again later."
 			}
 		case .refused(_, let message): message.prefix(1).uppercased() + message.dropFirst()
-		case .secondFactorUnsupported:
-			"This account needs an authenticator or recovery code. This build does not support the second sign-in step yet. Use the web app to sign in."
 		case .unreadable:
 			"The reply could not be read. Install a newer build of the app: the server may be ahead of it."
 		}

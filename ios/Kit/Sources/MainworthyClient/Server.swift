@@ -4,8 +4,19 @@ import Synchronization
 /// A way of proving who one is at sign-in.
 package enum Proof: Sendable {
 	case password(name: String, password: String)
+	case secondFactor(SecondFactorSignIn, code: String)
 	case provider(code: String, verifier: String)
 	case passkey(PasskeyAssertion, ceremony: String)
+}
+
+package struct SecondFactorSignIn: Sendable {
+	let challenge: String
+	let ceremony: String
+}
+
+package enum SignInResult: Sendable {
+	case signedIn(Account)
+	case secondFactor(SecondFactorSignIn)
 }
 
 /// Evidence about every attempt of a command, including an uncertain reply before a later rejection.
@@ -88,11 +99,18 @@ package final class Server: Sendable {
 	// MARK: Signing in and out
 
 	/// Opens a session and keeps its cookie. A proof that is refused throws `.refused` with the server's one
-	/// sentence, whatever was wrong with it.
+	/// sentence, whatever was wrong with it. Password forms use `beginSignIn` to handle a required second step.
 	package func signIn(_ proof: Proof) async throws -> Account {
+		guard case .signedIn(let account) = try await beginSignIn(proof) else { throw ClientError.unreadable }
+		return account
+	}
+
+	/// A password may require a code before a session can be opened. The pending proof stays in memory.
+	package func beginSignIn(_ proof: Proof) async throws -> SignInResult {
 		let body: JSONValue =
 			switch proof {
 			case .password(let name, let password): ["name": .string(name), "password": .string(password)]
+			case .secondFactor(let attempt, let code): ["challenge": .string(attempt.challenge), "code": .string(code)]
 			case .provider(let code, let verifier): ["nativeOidc": [
 				"code": .string(code), "verifier": .string(verifier),
 				"callback": .string(ProviderSignIn.callback), "instance": .string(instance.url.absoluteString)
@@ -100,16 +118,32 @@ package final class Server: Sendable {
 			case .passkey(let assertion, _): ["passkey": assertion.answer]
 			}
 		let ceremony: String?
-		if case .passkey(_, let held) = proof { ceremony = held } else { ceremony = nil }
+		switch proof {
+		case .passkey(_, let held): ceremony = held
+		case .secondFactor(let attempt, _): ceremony = attempt.ceremony
+		default: ceremony = nil
+		}
 		let (data, response) = try await send("POST", "/api/login", body: body, attempts: 1, asSignedIn: false, ceremony: ceremony)
 		guard let reply = try? JSONDecoder().decode(Body<Wire.SignInReply>.self, from: data) else { throw ClientError.unreadable }
-		guard reply.result.signedIn else { throw ClientError.secondFactorUnsupported }
+		if !reply.result.signedIn {
+			guard case .password = proof, let second = reply.result.secondFactor, !second.challenge.isEmpty,
+				let ceremony = Self.ceremonyCookie(in: response)
+			else { throw ClientError.unreadable }
+			return .secondFactor(SecondFactorSignIn(challenge: second.challenge, ceremony: ceremony))
+		}
 		guard let given = Server.sessionCookie(in: response) else { throw ClientError.unreadable }
 		cookie.withLock { $0 = given }
 		Server.store.withLock { _ in
 			secrets.save(try? JSONEncoder().encode(Kept(instance: instance, cookie: given)))
 		}
-		return try await account()
+		return .signedIn(try await account())
+	}
+
+	static func ceremonyCookie(in response: HTTPURLResponse) -> String? {
+		guard let header = response.value(forHTTPHeaderField: "Set-Cookie"),
+			let found = header.firstMatch(of: /(?:^|[,\s])((?:__Host-)?mainworthy_ceremony)=([A-Za-z0-9_-]{43})(?:[;,\s]|$)/)
+		else { return nil }
+		return "\(found.1)=\(found.2)"
 	}
 
 	package func providerName() async throws -> String? {

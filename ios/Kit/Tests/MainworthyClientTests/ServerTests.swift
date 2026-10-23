@@ -128,18 +128,95 @@ struct ServerTests {
 		#expect(again.asked.first?.url?.host() == "mainworthy.example")
 	}
 
-	@Test("a second sign-in step says it is unsupported and stores no cookie")
-	func secondFactorIsExplicit() async {
+	@Test("a second sign-in step keeps its bound challenge in memory and stores no session")
+	func secondFactorIsExplicit() async throws {
 		let needed = #"{"ok":true,"result":{"signedIn":false,"secondFactor":{"challenge":"pending","expiresAt":1800000300000}}}"#
-		let script = Script(.json(needed))
+		let script = Script(.json(needed, headers: ["Set-Cookie": "__Host-mainworthy_ceremony=\(cookie); Path=/; Secure; HttpOnly"]))
 		let secrets = MemoryStore()
 		let client = server(script, secrets: secrets)
-		await #expect(throws: ClientError.secondFactorUnsupported) {
-			_ = try await client.signIn(.password(name: "robin", password: "a password"))
-		}
+		guard case .secondFactor(let attempt) = try await client.beginSignIn(.password(name: "robin", password: "a password"))
+		else { Issue.record("The password must require a code"); return }
+		#expect(attempt.challenge == "pending")
 		#expect(secrets.load() == nil)
 		#expect(client.cookieHeader == nil)
 		#expect(script.asked.count == 1)
+	}
+
+	@Test("authenticator and recovery codes finish the same bound sign-in and restore the saved session", arguments: ["123456", "abcdef01-23456789-abcdef01-23456789"])
+	func secondFactorCompletes(_ code: String) async throws {
+		let needed = #"{"ok":true,"result":{"signedIn":false,"secondFactor":{"challenge":"pending"}}}"#
+		let script = Script(
+			.json(needed, headers: ["Set-Cookie": "__Host-mainworthy_ceremony=\(cookie); Path=/; Secure; HttpOnly"]),
+			.json(signedIn, headers: ["Set-Cookie": "__Host-mainworthy_sid=\(cookie); Path=/; Secure; HttpOnly"]), .json(session)
+		)
+		let secrets = MemoryStore()
+		let client = server(script, secrets: secrets)
+		guard case .secondFactor(let attempt) = try await client.beginSignIn(.password(name: "robin", password: "a password"))
+		else { Issue.record("The password must require a code"); return }
+		#expect(secrets.load() == nil && client.cookieHeader == nil)
+		let account = try await client.signIn(.secondFactor(attempt, code: code))
+		#expect(account.name == "robin")
+		let requests = script.asked
+		#expect(requests.map { $0.url?.path } == ["/api/login", "/api/login", "/api/session"])
+		#expect(requests[1].value(forHTTPHeaderField: "Cookie") == "__Host-mainworthy_ceremony=\(cookie)")
+		#expect(try JSONDecoder().decode(JSONValue.self, from: requests[1].httpBody!) == ["challenge": "pending", "code": .string(code)])
+		let kept = String(decoding: try #require(secrets.load()), as: UTF8.self)
+		#expect(!kept.contains("a password") && !kept.contains(code) && !kept.contains("pending") && !kept.contains("ceremony"))
+		let again = Script(.json(session))
+		#expect(try await Server.kept(in: secrets, transport: again)?.account().name == "robin")
+		#expect(again.asked.first?.value(forHTTPHeaderField: "Cookie") == "__Host-mainworthy_sid=\(cookie)")
+	}
+
+	@Test("a wrong or expired code is refused once, without persisting a session, and can be corrected")
+	func secondFactorRefused() async throws {
+		let needed = #"{"ok":true,"result":{"signedIn":false,"secondFactor":{"challenge":"pending"}}}"#
+		let refusal = #"{"ok":false,"error":{"code":"unauthenticated","message":"that did not sign you in"}}"#
+		let script = Script(
+			.json(needed, headers: ["Set-Cookie": "mainworthy_ceremony=\(cookie); Path=/; HttpOnly"]),
+			.json(status: 401, refusal),
+			.json(signedIn, headers: ["Set-Cookie": "mainworthy_sid=\(cookie); Path=/; HttpOnly"]), .json(session)
+		)
+		let secrets = MemoryStore()
+		let client = server(script, secrets: secrets)
+		guard case .secondFactor(let attempt) = try await client.beginSignIn(.password(name: "robin", password: "a password"))
+		else { Issue.record("The password must require a code"); return }
+		await #expect(throws: ClientError.refused(code: "unauthenticated", message: "that did not sign you in")) {
+			_ = try await client.signIn(.secondFactor(attempt, code: "wrong"))
+		}
+		#expect(script.asked.count == 2 && secrets.load() == nil && client.cookieHeader == nil)
+		#expect(try await client.signIn(.secondFactor(attempt, code: "123456")).name == "robin")
+		#expect(script.asked[2].value(forHTTPHeaderField: "Cookie") == "mainworthy_ceremony=\(cookie)")
+	}
+
+	@Test("a code limit is shown without retrying the proof or creating a session")
+	func secondFactorLimited() async throws {
+		let needed = #"{"ok":true,"result":{"signedIn":false,"secondFactor":{"challenge":"pending"}}}"#
+		let script = Script(
+			.json(needed, headers: ["Set-Cookie": "mainworthy_ceremony=\(cookie); Path=/; HttpOnly"]),
+			.json(status: 429, #"{"ok":false,"error":{"code":"limited","message":"too many attempts"}}"#, headers: ["Retry-After": "8"])
+		)
+		let secrets = MemoryStore()
+		let client = server(script, secrets: secrets)
+		guard case .secondFactor(let attempt) = try await client.beginSignIn(.password(name: "robin", password: "a password"))
+		else { Issue.record("The password must require a code"); return }
+		await #expect(throws: ClientError.limited(seconds: 8)) {
+			_ = try await client.signIn(.secondFactor(attempt, code: "123456"))
+		}
+		#expect(script.asked.count == 2 && secrets.load() == nil)
+	}
+
+	@Test("a pending reply without a challenge or bound cookie cannot open a code step", arguments: [
+		(#"{"ok":true,"result":{"signedIn":false}}"#, true),
+		(#"{"ok":true,"result":{"signedIn":false,"secondFactor":{"challenge":""}}}"#, true),
+		(#"{"ok":true,"result":{"signedIn":false,"secondFactor":{"challenge":"pending"}}}"#, false),
+	])
+	func malformedSecondFactor(_ reply: String, bound: Bool) async {
+		let script = Script(.json(reply, headers: bound ? ["Set-Cookie": "mainworthy_ceremony=\(cookie); Path=/; HttpOnly"] : [:]))
+		let secrets = MemoryStore()
+		await #expect(throws: ClientError.unreadable) {
+			_ = try await server(script, secrets: secrets).beginSignIn(.password(name: "robin", password: "a password"))
+		}
+		#expect(secrets.load() == nil && script.asked.count == 1)
 	}
 
 	@Test("a proof the server refuses is a refusal to show, and no session ends")

@@ -262,7 +262,7 @@ The credential list identifies your authenticator without showing its setup key 
 
 An instance that requires a second factor for admins keeps an admin's authenticator while that person still has a password. The requirement covers personal and team grants on any project. An admin recovery invitation on such an instance must be accepted with a passkey. An admin password without an authenticator does not count as a working sign-in method. Add another passkey or enrol an authenticator before removing the last usable passkey.
 
-The [configuration](./configuration.md#require-a-second-factor-for-admins) page describes the admin requirement. The [command line](./cli.md#sign-in-with-a-password-and-a-code) also supports the second step. The current iPhone build explains when a second step is required and asks you to use the web app.
+The [configuration](./configuration.md#require-a-second-factor-for-admins) page describes the admin requirement. The [command line](./cli.md#sign-in-with-a-password-and-a-code) and [iPhone app](./iphone.md#sign-in) also support the second step.
 
 ## Forget a person
 
