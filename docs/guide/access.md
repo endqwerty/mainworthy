@@ -173,12 +173,12 @@ To create an admin-issued token in Settings, follow these steps:
 2. Open Tokens. Use <kbd>j</kbd> to move down the sections.
 3. Press <kbd>n</kbd> to enter "Token actor".
 4. Fill in the actor's name.
-5. Pick Agent, Pipeline or Person under "Producer".
-6. Tick the "Permissions".
+5. Pick Agent, Pipeline or Person under "Producer" to match the actor's kind.
+6. For a new actor, tick the "Permissions". For an existing actor, these controls are disabled and its grants stay unchanged.
 7. Choose "Create token".
 
 The new secret appears once, with "Copy token" and "Dismiss secret". A token carries its actor's current grants on every project.
-A new actor starts with the selected permissions on the project you are in. For an existing actor, the form shows their personal and team grants, including project names and roles. The selected permissions do not narrow that actor's token. If the form cannot read actor access, it says so.
+A new actor starts with the selected permissions on the project you are in. For an existing actor, the form shows their personal and team grants, including project names and roles, and sends no new permissions when it makes the token. An actor with no personal grants, or only team grants, can still get a token. Change personal grants with `mainworthy actor grant` (`grant.set`), and manage team grants in Settings, People. While actor access is loading, creation waits. If the form cannot read actor access, it says so. A forgotten actor cannot get a token, and the form says so before submission.
 
 From the command line:
 

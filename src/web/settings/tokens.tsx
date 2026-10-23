@@ -10,20 +10,38 @@ import { age, ProducerGlyph, SectionHeading } from "../ui/index.tsx";
 
 const TokenActor = z.object({
 	name: z.string(),
+	disabled: z.boolean(),
 	grants: z.array(TeamGrant.extend({ roles: z.array(z.string()).default([]) })),
 	teams: z.array(TeamSource).default([]),
 });
 
-export function TokenAccess({ name }: { name: string }) {
+type TokenAccessState =
+	| { kind: "loading" | "unavailable" | "new" }
+	| { kind: "existing"; actor: z.infer<typeof TokenActor> };
+
+export function useTokenAccess(name: string): TokenAccessState {
 	const { project } = useApp();
 	const read = useQueryOp({ project, op: "admin", input: { do: "actor.list" } });
+	if (read.isPending) return { kind: "loading" };
 	const listed = TokenActor.array().safeParse(read.isError ? null : read.data);
-	const actor = listed.success ? listed.data.find((actor) => actor.name === name.trim()) : undefined;
+	if (!listed.success) return { kind: "unavailable" };
+	const actor = listed.data.find((actor) => actor.name === name.trim());
+	return actor ? { kind: "existing", actor } : { kind: "new" };
+}
+
+export function TokenAccess({ access }: { access: TokenAccessState }) {
+	const { project } = useApp();
+	if (access.kind === "loading") return null;
+	const actor = access.kind === "existing" ? access.actor : undefined;
+	if (actor?.disabled) return <p className="dim">{actor.name} was forgotten and cannot get a token.</p>;
 	return (
 		<div className="dim">
 			{actor ? (
 				<>
-					<p>Access for {actor.name}. Permissions are for new actors.</p>
+					<p>
+						Access for {actor.name}. Permissions are for new actors. Change grants with mainworthy actor grant
+						(grant.set), or manage team grants in People.
+					</p>
 					<ul>
 						{[
 							...actor.grants.map((grant) => ({ ...grant, source: "Own grant" })),
@@ -38,7 +56,7 @@ export function TokenAccess({ name }: { name: string }) {
 						))}
 					</ul>
 				</>
-			) : listed.success ? (
+			) : access.kind === "new" ? (
 				<p>A new actor starts with the selected permissions on {project}.</p>
 			) : (
 				<p>Access unavailable. New actors get this project's permissions; existing actors keep all grants.</p>
