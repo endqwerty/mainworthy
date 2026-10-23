@@ -24,7 +24,7 @@
   "correctness": "All reported health requests succeeded. Each of the ten CI reports returned fresh=true, counts.total=4000; gate, change, archive, find and Queue calls succeeded and returned populated output. Every policy adoption returned decided with policyVersion=2, ruled=101; a subsequent admin read required version=2 and preset=loose. A separate smoke run of the checked-in harness additionally checks 4000 stored results, 200 stored tries, 20 attachments and an extended demo lease.",
   "profile": {
     "reported": false,
-    "beforeDiagnosticPolicyStepMs": 3312.567458,
+    "beforeDiagnosticPolicyStepMs": 3312.6,
     "beforeDiagnosticPolicyHealthMaxMs": 3188.1,
     "source": "reconsiderPolicySteps -> refold -> per-run inheritance, retally, askUnexplained and dissolveStale; candidate rule questions then settle synchronously",
     "cpuSampleInclusiveMs": {
@@ -38,145 +38,145 @@
     {
       "workload": "report-4000-tries-attachments",
       "before": {
-        "medianLongestHealthMs": 883.449208,
+        "medianLongestHealthMs": 883.4,
         "rangeLongestHealthMs": [
-          720.0895840000003,
-          2419.2818340000013
+          720.1,
+          2419.3
         ],
-        "longestDriftMs": 2209.808874999999,
+        "longestDriftMs": 2209.8,
         "healthSamples": 82
       },
       "after": {
-        "medianLongestHealthMs": 980.8250419999995,
+        "medianLongestHealthMs": 980.8,
         "rangeLongestHealthMs": [
-          598.2056249999996,
-          5020.657625
+          598.2,
+          5020.7
         ],
-        "longestDriftMs": 5159.209208,
+        "longestDriftMs": 5159.2,
         "healthSamples": 79
       }
     },
     {
       "workload": "gate",
       "before": {
-        "medianLongestHealthMs": 7.623458000000028,
+        "medianLongestHealthMs": 7.6,
         "rangeLongestHealthMs": [
-          0.6800839999996242,
-          55.90574999999808
+          0.7,
+          55.9
         ],
-        "longestDriftMs": 100.65099999999802,
+        "longestDriftMs": 100.7,
         "healthSamples": 10
       },
       "after": {
-        "medianLongestHealthMs": 8.637624999999389,
+        "medianLongestHealthMs": 8.6,
         "rangeLongestHealthMs": [
-          2.650582999999642,
-          365.01774999999907
+          2.7,
+          365.0
         ],
-        "longestDriftMs": 1040.6121670000011,
+        "longestDriftMs": 1040.6,
         "healthSamples": 15
       }
     },
     {
       "workload": "change-merge",
       "before": {
-        "medianLongestHealthMs": 128.7547910000012,
+        "medianLongestHealthMs": 128.8,
         "rangeLongestHealthMs": [
-          23.74724999999944,
-          679.468915999998
+          23.7,
+          679.5
         ],
-        "longestDriftMs": 776.942665999999,
+        "longestDriftMs": 776.9,
         "healthSamples": 14
       },
       "after": {
-        "medianLongestHealthMs": 42.83508300000176,
+        "medianLongestHealthMs": 42.8,
         "rangeLongestHealthMs": [
-          1.6486669999994774,
-          961.9485419999983
+          1.6,
+          961.9
         ],
-        "longestDriftMs": 1062.307499999999,
+        "longestDriftMs": 1062.3,
         "healthSamples": 15
       }
     },
     {
       "workload": "change-reopen",
       "before": {
-        "medianLongestHealthMs": 231.1335829999989,
+        "medianLongestHealthMs": 231.1,
         "rangeLongestHealthMs": [
-          0.5647090000002208,
-          817.997583999997
+          0.6,
+          818.0
         ],
-        "longestDriftMs": 875.0187919999989,
+        "longestDriftMs": 875.0,
         "healthSamples": 11
       },
       "after": {
-        "medianLongestHealthMs": 159.25054199999795,
+        "medianLongestHealthMs": 159.3,
         "rangeLongestHealthMs": [
-          111.46387499999946,
-          302.78512500000215
+          111.5,
+          302.8
         ],
-        "longestDriftMs": 406.5087500000009,
+        "longestDriftMs": 406.5,
         "healthSamples": 14
       }
     },
     {
       "workload": "renewDemoWork",
       "before": {
-        "medianLongestHealthMs": 18.975334000000657,
+        "medianLongestHealthMs": 19.0,
         "rangeLongestHealthMs": [
-          4.887582999999722,
-          92.22512500000084
+          4.9,
+          92.2
         ],
-        "longestDriftMs": 251.40012500000012,
+        "longestDriftMs": 251.4,
         "healthSamples": 12
       },
       "after": {
-        "medianLongestHealthMs": 6.821208999999726,
+        "medianLongestHealthMs": 6.8,
         "rangeLongestHealthMs": [
-          0.45629100000041944,
-          329.932499999999
+          0.5,
+          329.9
         ],
-        "longestDriftMs": 285.2316659999997,
+        "longestDriftMs": 285.2,
         "healthSamples": 11
       }
     },
     {
       "workload": "archive-export",
       "before": {
-        "medianLongestHealthMs": 356.0543340000004,
+        "medianLongestHealthMs": 356.1,
         "rangeLongestHealthMs": [
-          135.9675419999985,
-          1239.239875000003
+          136.0,
+          1239.2
         ],
-        "longestDriftMs": 407.5995829999956,
+        "longestDriftMs": 407.6,
         "healthSamples": 667
       },
       "after": {
-        "medianLongestHealthMs": 750.5503329999992,
+        "medianLongestHealthMs": 750.6,
         "rangeLongestHealthMs": [
-          99.22491599999921,
-          1195.4456659999996
+          99.2,
+          1195.4
         ],
-        "longestDriftMs": 423.2159580000007,
+        "longestDriftMs": 423.2,
         "healthSamples": 683
       }
     },
     {
       "workload": "find-large",
       "before": {
-        "medianLongestHealthMs": 4.783416000002035,
+        "medianLongestHealthMs": 4.8,
         "rangeLongestHealthMs": [
-          1.172167000000627,
-          120.5216250000085
+          1.2,
+          120.5
         ],
-        "longestDriftMs": 95.58270800000173,
+        "longestDriftMs": 95.6,
         "healthSamples": 24
       },
       "after": {
-        "medianLongestHealthMs": 3.399333999994269,
+        "medianLongestHealthMs": 3.4,
         "rangeLongestHealthMs": [
-          0.6962500000008731,
-          10.982292000000598
+          0.7,
+          11.0
         ],
         "longestDriftMs": 0,
         "healthSamples": 18
@@ -185,42 +185,42 @@
     {
       "workload": "queue",
       "before": {
-        "medianLongestHealthMs": 7.304750000002969,
+        "medianLongestHealthMs": 7.3,
         "rangeLongestHealthMs": [
-          3.7064169999976,
-          31.632291000001715
+          3.7,
+          31.6
         ],
-        "longestDriftMs": 55.966417000003275,
+        "longestDriftMs": 56.0,
         "healthSamples": 32
       },
       "after": {
-        "medianLongestHealthMs": 5.611915999998018,
+        "medianLongestHealthMs": 5.6,
         "rangeLongestHealthMs": [
-          1.9407499999979336,
-          114.4931660000002
+          1.9,
+          114.5
         ],
-        "longestDriftMs": 91.71241699999518,
+        "longestDriftMs": 91.7,
         "healthSamples": 26
       }
     },
     {
       "workload": "policy-adoption",
       "before": {
-        "medianLongestHealthMs": 5132.302208000001,
+        "medianLongestHealthMs": 5132.3,
         "rangeLongestHealthMs": [
-          4092.7003750000003,
-          10189.142792000006
+          4092.7,
+          10189.1
         ],
-        "longestDriftMs": 10382.723666999998,
+        "longestDriftMs": 10382.7,
         "healthSamples": 27
       },
       "after": {
-        "medianLongestHealthMs": 527.2996249999997,
+        "medianLongestHealthMs": 527.3,
         "rangeLongestHealthMs": [
-          393.494791000001,
-          665.740082999997
+          393.5,
+          665.7
         ],
-        "longestDriftMs": 677.4654999999984,
+        "longestDriftMs": 677.5,
         "healthSamples": 126
       }
     }
@@ -256,4276 +256,16 @@
     }
   ],
   "runs": [
-    {
-      "side": "before",
-      "pair": 1,
-      "load": [
-        52.84130859375,
-        33.716796875,
-        17.01171875
-      ],
-      "errors": 0,
-      "rows": [
-        {
-          "phase": "report-4000-tries-attachments",
-          "ms": 4264.84875,
-          "healthMax": 826.1295409999998,
-          "samples": 15,
-          "output": {
-            "counts": {
-              "total": 4000,
-              "pass": 3920,
-              "fail": 80,
-              "skip": 0,
-              "error": 0,
-              "blocked": 0
-            },
-            "batch": 174
-          },
-          "lagMax": 650.0787499999999
-        },
-        {
-          "phase": "gate",
-          "ms": 31.914082999999664,
-          "healthMax": 0.7407499999999345,
-          "samples": 2,
-          "output": {
-            "run": "R-146",
-            "verdict": "blocked",
-            "reason": "blocked: 80 failures unexplained, 20 questions open",
-            "tally": {
-              "pass": 3920,
-              "excused": 0,
-              "attributed": 0,
-              "unexplained": 80,
-              "missing": 0,
-              "disputed": 0,
-              "skipped": 0
-            },
-            "open": [
-              "Q-421",
-              "Q-422",
-              "Q-423",
-              "Q-424",
-              "Q-425",
-              "Q-426",
-              "Q-427",
-              "Q-428",
-              "Q-429",
-              "Q-5332",
-              "Q-5333",
-              "Q-5334",
-              "Q-5335",
-              "Q-5336",
-              "Q-5337",
-              "Q-5338",
-              "Q-5339",
-              "Q-5340",
-              "Q-5341",
-              "Q-5342"
-            ],
-            "url": null,
-            "stale": false
-          },
-          "lagMax": 0
-        },
-        {
-          "phase": "change-merge",
-          "ms": 32.46283399999993,
-          "healthMax": 23.74724999999944,
-          "samples": 3,
-          "output": {
-            "change": "pr:10000",
-            "state": "merged",
-            "questions": [
-              "Q-461",
-              "Q-462",
-              "Q-463",
-              "Q-464",
-              "Q-465",
-              "Q-466",
-              "Q-467",
-              "Q-468",
-              "Q-469",
-              "Q-470",
-              "Q-471",
-              "Q-472",
-              "Q-473",
-              "Q-474",
-              "Q-475",
-              "Q-476",
-              "Q-477",
-              "Q-478",
-              "Q-479",
-              "Q-480",
-              "Q-481",
-              "Q-482",
-              "Q-483",
-              "Q-484",
-              "Q-485",
-              "Q-486",
-              "Q-487",
-              "Q-488",
-              "Q-489",
-              "Q-490",
-              "Q-491",
-              "Q-492",
-              "Q-493",
-              "Q-494",
-              "Q-495",
-              "Q-496",
-              "Q-497",
-              "Q-498",
-              "Q-499",
-              "Q-500"
-            ],
-            "already": false
-          },
-          "lagMax": 30.31054099999983
-        },
-        {
-          "phase": "change-reopen",
-          "ms": 45.00079199999982,
-          "healthMax": 0.5647090000002208,
-          "samples": 2,
-          "output": {
-            "change": "pr:10000",
-            "state": "open",
-            "questions": [
-              "Q-5344",
-              "Q-5345",
-              "Q-5346",
-              "Q-5347",
-              "Q-5348",
-              "Q-5349",
-              "Q-5350",
-              "Q-5351",
-              "Q-5352",
-              "Q-5353",
-              "Q-5354",
-              "Q-5355",
-              "Q-5356",
-              "Q-5357",
-              "Q-5358",
-              "Q-5359",
-              "Q-5360",
-              "Q-5361",
-              "Q-5362",
-              "Q-5363",
-              "Q-5364",
-              "Q-5365",
-              "Q-5366",
-              "Q-5367",
-              "Q-5368",
-              "Q-5369",
-              "Q-5370",
-              "Q-5371",
-              "Q-5372",
-              "Q-5373",
-              "Q-5374",
-              "Q-5375",
-              "Q-5376",
-              "Q-5377",
-              "Q-5378",
-              "Q-5379",
-              "Q-5380",
-              "Q-5381",
-              "Q-5382",
-              "Q-5383"
-            ],
-            "already": false
-          },
-          "lagMax": 24.480000000000473
-        },
-        {
-          "phase": "renewDemoWork",
-          "ms": 8.32824999999957,
-          "healthMax": 4.887582999999722,
-          "samples": 3,
-          "output": {
-            "type": "renewed"
-          },
-          "lagMax": 0
-        },
-        {
-          "phase": "archive-export",
-          "ms": 9019.305,
-          "healthMax": 135.9675419999985,
-          "samples": 68,
-          "output": {
-            "bytes": 149526265
-          },
-          "lagMax": 186.10625000000073
-        },
-        {
-          "phase": "find-large",
-          "ms": 49.18004099999962,
-          "healthMax": 1.172167000000627,
-          "samples": 3,
-          "output": {
-            "count": null,
-            "items": 500
-          },
-          "lagMax": 13.634416999997484
-        },
-        {
-          "phase": "queue",
-          "ms": 205.544249999999,
-          "healthMax": 3.7064169999976,
-          "samples": 4,
-          "output": {
-            "counts": {
-              "open": 4992,
-              "failure": 4891,
-              "map": 101
-            },
-            "items": 500
-          },
-          "lagMax": 10.527709000001778
-        },
-        {
-          "phase": "policy-adoption",
-          "ms": 4835.382666999998,
-          "healthMax": 4614.950917000002,
-          "samples": 4,
-          "output": [
-            {
-              "q": "Q-5384",
-              "status": "decided",
-              "needs": null,
-              "decision": 379,
-              "effects": {
-                "cases": [],
-                "created": [],
-                "policyVersion": 2,
-                "ruled": 101
-              },
-              "evidence": null
-            }
-          ],
-          "lagMax": 4695.49625
-        }
-      ],
-      "eventsOver250ms": [
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 650.0787499999999,
-          "at": 1792734481857
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 826.1295409999998,
-          "at": 1792734482039
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 579.6630419999997,
-          "at": 1792734482782
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 475.18508299999985,
-          "at": 1792734482785
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 306.23316699999987,
-          "at": 1792734483394
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 350.9767919999995,
-          "at": 1792734484704
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 372.25066700000025,
-          "at": 1792734484704
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 523.6279160000004,
-          "at": 1792734485360
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 636.2192919999998,
-          "at": 1792734485360
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 4695.49625,
-          "at": 1792734502123
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 4614.950917000002,
-          "at": 1792734502125
-        }
-      ]
-    },
-    {
-      "side": "after",
-      "pair": 1,
-      "load": [
-        47.62353515625,
-        34.06494140625,
-        17.62255859375
-      ],
-      "errors": 0,
-      "rows": [
-        {
-          "phase": "report-4000-tries-attachments",
-          "ms": 3175.390958,
-          "healthMax": 598.2056249999996,
-          "samples": 10,
-          "output": {
-            "counts": {
-              "total": 4000,
-              "pass": 3920,
-              "fail": 80,
-              "skip": 0,
-              "error": 0,
-              "blocked": 0
-            },
-            "batch": 174
-          },
-          "lagMax": 596.9865839999998
-        },
-        {
-          "phase": "gate",
-          "ms": 21.89087499999914,
-          "healthMax": 23.894624999999905,
-          "samples": 2,
-          "output": {
-            "run": "R-146",
-            "verdict": "blocked",
-            "reason": "blocked: 80 failures unexplained, 20 questions open",
-            "tally": {
-              "pass": 3920,
-              "excused": 0,
-              "attributed": 0,
-              "unexplained": 80,
-              "missing": 0,
-              "disputed": 0,
-              "skipped": 0
-            },
-            "open": [
-              "Q-421",
-              "Q-422",
-              "Q-423",
-              "Q-424",
-              "Q-425",
-              "Q-426",
-              "Q-427",
-              "Q-428",
-              "Q-429",
-              "Q-5332",
-              "Q-5333",
-              "Q-5334",
-              "Q-5335",
-              "Q-5336",
-              "Q-5337",
-              "Q-5338",
-              "Q-5339",
-              "Q-5340",
-              "Q-5341",
-              "Q-5342"
-            ],
-            "url": null,
-            "stale": false
-          },
-          "lagMax": 24.48395899999923
-        },
-        {
-          "phase": "change-merge",
-          "ms": 70.38499999999931,
-          "healthMax": 6.938834000000497,
-          "samples": 3,
-          "output": {
-            "change": "pr:10000",
-            "state": "merged",
-            "questions": [
-              "Q-461",
-              "Q-462",
-              "Q-463",
-              "Q-464",
-              "Q-465",
-              "Q-466",
-              "Q-467",
-              "Q-468",
-              "Q-469",
-              "Q-470",
-              "Q-471",
-              "Q-472",
-              "Q-473",
-              "Q-474",
-              "Q-475",
-              "Q-476",
-              "Q-477",
-              "Q-478",
-              "Q-479",
-              "Q-480",
-              "Q-481",
-              "Q-482",
-              "Q-483",
-              "Q-484",
-              "Q-485",
-              "Q-486",
-              "Q-487",
-              "Q-488",
-              "Q-489",
-              "Q-490",
-              "Q-491",
-              "Q-492",
-              "Q-493",
-              "Q-494",
-              "Q-495",
-              "Q-496",
-              "Q-497",
-              "Q-498",
-              "Q-499",
-              "Q-500"
-            ],
-            "already": false
-          },
-          "lagMax": 69.49699999999939
-        },
-        {
-          "phase": "change-reopen",
-          "ms": 166.73199999999997,
-          "healthMax": 111.46387499999946,
-          "samples": 3,
-          "output": {
-            "change": "pr:10000",
-            "state": "open",
-            "questions": [
-              "Q-5344",
-              "Q-5345",
-              "Q-5346",
-              "Q-5347",
-              "Q-5348",
-              "Q-5349",
-              "Q-5350",
-              "Q-5351",
-              "Q-5352",
-              "Q-5353",
-              "Q-5354",
-              "Q-5355",
-              "Q-5356",
-              "Q-5357",
-              "Q-5358",
-              "Q-5359",
-              "Q-5360",
-              "Q-5361",
-              "Q-5362",
-              "Q-5363",
-              "Q-5364",
-              "Q-5365",
-              "Q-5366",
-              "Q-5367",
-              "Q-5368",
-              "Q-5369",
-              "Q-5370",
-              "Q-5371",
-              "Q-5372",
-              "Q-5373",
-              "Q-5374",
-              "Q-5375",
-              "Q-5376",
-              "Q-5377",
-              "Q-5378",
-              "Q-5379",
-              "Q-5380",
-              "Q-5381",
-              "Q-5382",
-              "Q-5383"
-            ],
-            "already": false
-          },
-          "lagMax": 166.011125
-        },
-        {
-          "phase": "renewDemoWork",
-          "ms": 23.95874999999978,
-          "healthMax": 6.535917000000154,
-          "samples": 2,
-          "output": {
-            "type": "renewed"
-          },
-          "lagMax": 24.21612499999992
-        },
-        {
-          "phase": "archive-export",
-          "ms": 9654.030958,
-          "healthMax": 99.22491599999921,
-          "samples": 75,
-          "output": {
-            "bytes": 149526265
-          },
-          "lagMax": 82.03920800000014
-        },
-        {
-          "phase": "find-large",
-          "ms": 84.86558299999888,
-          "healthMax": 0.6962500000008731,
-          "samples": 4,
-          "output": {
-            "count": null,
-            "items": 500
-          },
-          "lagMax": 0
-        },
-        {
-          "phase": "queue",
-          "ms": 182.07308399999965,
-          "healthMax": 5.611915999998018,
-          "samples": 3,
-          "output": {
-            "counts": {
-              "open": 4992,
-              "failure": 4891,
-              "map": 101
-            },
-            "items": 500
-          },
-          "lagMax": 11.38904199999888
-        },
-        {
-          "phase": "policy-adoption",
-          "ms": 4494.013999999999,
-          "healthMax": 393.494791000001,
-          "samples": 22,
-          "output": [
-            {
-              "q": "Q-5384",
-              "status": "decided",
-              "needs": null,
-              "decision": 379,
-              "effects": {
-                "cases": [],
-                "created": [],
-                "policyVersion": 2,
-                "ruled": 101
-              },
-              "evidence": null
-            }
-          ],
-          "lagMax": 446.4957910000012
-        }
-      ],
-      "eventsOver250ms": [
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 364.9536250000001,
-          "at": 1792734506592
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 392.0918750000001,
-          "at": 1792734506592
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 598.2056249999996,
-          "at": 1792734507318
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 596.9865839999998,
-          "at": 1792734507318
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 266.0682080000006,
-          "at": 1792734507711
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 324.70975,
-          "at": 1792734507711
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 351.9214579999998,
-          "at": 1792734508219
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 442.7096670000001,
-          "at": 1792734508747
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 403.2474999999995,
-          "at": 1792734508748
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 275.97008300000016,
-          "at": 1792734521865
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 309.50837500000125,
-          "at": 1792734522301
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 357.53145799999766,
-          "at": 1792734522324
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 367.4387080000015,
-          "at": 1792734523458
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 446.4957910000012,
-          "at": 1792734523458
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 393.494791000001,
-          "at": 1792734523978
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 387.49774999999863,
-          "at": 1792734523978
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 255.75145799999882,
-          "at": 1792734524359
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 270.74295800000255,
-          "at": 1792734524362
-        }
-      ]
-    },
-    {
-      "side": "before",
-      "pair": 2,
-      "load": [
-        45.18994140625,
-        34.59912109375,
-        18.2919921875
-      ],
-      "errors": 0,
-      "rows": [
-        {
-          "phase": "report-4000-tries-attachments",
-          "ms": 4595.482625000001,
-          "healthMax": 720.0895840000003,
-          "samples": 16,
-          "output": {
-            "counts": {
-              "total": 4000,
-              "pass": 3920,
-              "fail": 80,
-              "skip": 0,
-              "error": 0,
-              "blocked": 0
-            },
-            "batch": 174
-          },
-          "lagMax": 824.705833
-        },
-        {
-          "phase": "gate",
-          "ms": 24.210374999999658,
-          "healthMax": 7.623458000000028,
-          "samples": 2,
-          "output": {
-            "run": "R-146",
-            "verdict": "blocked",
-            "reason": "blocked: 80 failures unexplained, 20 questions open",
-            "tally": {
-              "pass": 3920,
-              "excused": 0,
-              "attributed": 0,
-              "unexplained": 80,
-              "missing": 0,
-              "disputed": 0,
-              "skipped": 0
-            },
-            "open": [
-              "Q-421",
-              "Q-422",
-              "Q-423",
-              "Q-424",
-              "Q-425",
-              "Q-426",
-              "Q-427",
-              "Q-428",
-              "Q-429",
-              "Q-5332",
-              "Q-5333",
-              "Q-5334",
-              "Q-5335",
-              "Q-5336",
-              "Q-5337",
-              "Q-5338",
-              "Q-5339",
-              "Q-5340",
-              "Q-5341",
-              "Q-5342"
-            ],
-            "url": null,
-            "stale": false
-          },
-          "lagMax": 15.192791999999827
-        },
-        {
-          "phase": "change-merge",
-          "ms": 50.21483400000034,
-          "healthMax": 43.025792000000365,
-          "samples": 3,
-          "output": {
-            "change": "pr:10000",
-            "state": "merged",
-            "questions": [
-              "Q-461",
-              "Q-462",
-              "Q-463",
-              "Q-464",
-              "Q-465",
-              "Q-466",
-              "Q-467",
-              "Q-468",
-              "Q-469",
-              "Q-470",
-              "Q-471",
-              "Q-472",
-              "Q-473",
-              "Q-474",
-              "Q-475",
-              "Q-476",
-              "Q-477",
-              "Q-478",
-              "Q-479",
-              "Q-480",
-              "Q-481",
-              "Q-482",
-              "Q-483",
-              "Q-484",
-              "Q-485",
-              "Q-486",
-              "Q-487",
-              "Q-488",
-              "Q-489",
-              "Q-490",
-              "Q-491",
-              "Q-492",
-              "Q-493",
-              "Q-494",
-              "Q-495",
-              "Q-496",
-              "Q-497",
-              "Q-498",
-              "Q-499",
-              "Q-500"
-            ],
-            "already": false
-          },
-          "lagMax": 46.96216600000025
-        },
-        {
-          "phase": "change-reopen",
-          "ms": 23.308458000001337,
-          "healthMax": 0.6844160000000556,
-          "samples": 2,
-          "output": {
-            "change": "pr:10000",
-            "state": "open",
-            "questions": [
-              "Q-5344",
-              "Q-5345",
-              "Q-5346",
-              "Q-5347",
-              "Q-5348",
-              "Q-5349",
-              "Q-5350",
-              "Q-5351",
-              "Q-5352",
-              "Q-5353",
-              "Q-5354",
-              "Q-5355",
-              "Q-5356",
-              "Q-5357",
-              "Q-5358",
-              "Q-5359",
-              "Q-5360",
-              "Q-5361",
-              "Q-5362",
-              "Q-5363",
-              "Q-5364",
-              "Q-5365",
-              "Q-5366",
-              "Q-5367",
-              "Q-5368",
-              "Q-5369",
-              "Q-5370",
-              "Q-5371",
-              "Q-5372",
-              "Q-5373",
-              "Q-5374",
-              "Q-5375",
-              "Q-5376",
-              "Q-5377",
-              "Q-5378",
-              "Q-5379",
-              "Q-5380",
-              "Q-5381",
-              "Q-5382",
-              "Q-5383"
-            ],
-            "already": false
-          },
-          "lagMax": 13.217875000000276
-        },
-        {
-          "phase": "renewDemoWork",
-          "ms": 24.013167000000976,
-          "healthMax": 15.45666700000038,
-          "samples": 3,
-          "output": {
-            "type": "renewed"
-          },
-          "lagMax": 14.485208000000057
-        },
-        {
-          "phase": "archive-export",
-          "ms": 11104.324249999998,
-          "healthMax": 256.6605000000018,
-          "samples": 85,
-          "output": {
-            "bytes": 149526265
-          },
-          "lagMax": 136.72999999999956
-        },
-        {
-          "phase": "find-large",
-          "ms": 185.02070900000035,
-          "healthMax": 4.783416000002035,
-          "samples": 4,
-          "output": {
-            "count": null,
-            "items": 500
-          },
-          "lagMax": 15.772917000002053
-        },
-        {
-          "phase": "queue",
-          "ms": 48.32620799999859,
-          "healthMax": 7.07837500000096,
-          "samples": 2,
-          "output": {
-            "counts": {
-              "open": 4992,
-              "failure": 4891,
-              "map": 101
-            },
-            "items": 500
-          },
-          "lagMax": 0
-        },
-        {
-          "phase": "policy-adoption",
-          "ms": 4469.538124999999,
-          "healthMax": 4092.7003750000003,
-          "samples": 6,
-          "output": [
-            {
-              "q": "Q-5384",
-              "status": "decided",
-              "needs": null,
-              "decision": 379,
-              "effects": {
-                "cases": [],
-                "created": [],
-                "policyVersion": 2,
-                "ruled": 101
-              },
-              "evidence": null
-            }
-          ],
-          "lagMax": 4210.548208
-        }
-      ],
-      "eventsOver250ms": [
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 274.9536670000002,
-          "at": 1792734529997
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 463.1027919999997,
-          "at": 1792734530070
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 394.9407919999999,
-          "at": 1792734531219
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 289.8710000000001,
-          "at": 1792734531220
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 289.572666,
-          "at": 1792734531607
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 260.8820419999993,
-          "at": 1792734531608
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 299.3949999999995,
-          "at": 1792734532035
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 345.9417080000003,
-          "at": 1792734532035
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 273.4909580000003,
-          "at": 1792734533119
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 720.0895840000003,
-          "at": 1792734534097
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 824.705833,
-          "at": 1792734534097
-        },
-        {
-          "source": "health",
-          "phase": "archive-export",
-          "ms": 256.6605000000018,
-          "at": 1792734546841
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 4092.7003750000003,
-          "at": 1792734552489
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 4210.548208,
-          "at": 1792734552490
-        }
-      ]
-    },
-    {
-      "side": "after",
-      "pair": 2,
-      "load": [
-        45.42822265625,
-        35.421875,
-        19.05517578125
-      ],
-      "errors": 0,
-      "rows": [
-        {
-          "phase": "report-4000-tries-attachments",
-          "ms": 3805.9120000000003,
-          "healthMax": 980.8250419999995,
-          "samples": 11,
-          "output": {
-            "counts": {
-              "total": 4000,
-              "pass": 3920,
-              "fail": 80,
-              "skip": 0,
-              "error": 0,
-              "blocked": 0
-            },
-            "batch": 174
-          },
-          "lagMax": 1083.6818330000006
-        },
-        {
-          "phase": "gate",
-          "ms": 112.49266700000044,
-          "healthMax": 2.650582999999642,
-          "samples": 3,
-          "output": {
-            "run": "R-146",
-            "verdict": "blocked",
-            "reason": "blocked: 80 failures unexplained, 20 questions open",
-            "tally": {
-              "pass": 3920,
-              "excused": 0,
-              "attributed": 0,
-              "unexplained": 80,
-              "missing": 0,
-              "disputed": 0,
-              "skipped": 0
-            },
-            "open": [
-              "Q-421",
-              "Q-422",
-              "Q-423",
-              "Q-424",
-              "Q-425",
-              "Q-426",
-              "Q-427",
-              "Q-428",
-              "Q-429",
-              "Q-5332",
-              "Q-5333",
-              "Q-5334",
-              "Q-5335",
-              "Q-5336",
-              "Q-5337",
-              "Q-5338",
-              "Q-5339",
-              "Q-5340",
-              "Q-5341",
-              "Q-5342"
-            ],
-            "url": null,
-            "stale": false
-          },
-          "lagMax": 83.78079199999956
-        },
-        {
-          "phase": "change-merge",
-          "ms": 60.04033399999935,
-          "healthMax": 1.6486669999994774,
-          "samples": 3,
-          "output": {
-            "change": "pr:10000",
-            "state": "merged",
-            "questions": [
-              "Q-461",
-              "Q-462",
-              "Q-463",
-              "Q-464",
-              "Q-465",
-              "Q-466",
-              "Q-467",
-              "Q-468",
-              "Q-469",
-              "Q-470",
-              "Q-471",
-              "Q-472",
-              "Q-473",
-              "Q-474",
-              "Q-475",
-              "Q-476",
-              "Q-477",
-              "Q-478",
-              "Q-479",
-              "Q-480",
-              "Q-481",
-              "Q-482",
-              "Q-483",
-              "Q-484",
-              "Q-485",
-              "Q-486",
-              "Q-487",
-              "Q-488",
-              "Q-489",
-              "Q-490",
-              "Q-491",
-              "Q-492",
-              "Q-493",
-              "Q-494",
-              "Q-495",
-              "Q-496",
-              "Q-497",
-              "Q-498",
-              "Q-499",
-              "Q-500"
-            ],
-            "already": false
-          },
-          "lagMax": 45.30591700000059
-        },
-        {
-          "phase": "change-reopen",
-          "ms": 192.43729200000053,
-          "healthMax": 117.45054100000016,
-          "samples": 3,
-          "output": {
-            "change": "pr:10000",
-            "state": "open",
-            "questions": [
-              "Q-5344",
-              "Q-5345",
-              "Q-5346",
-              "Q-5347",
-              "Q-5348",
-              "Q-5349",
-              "Q-5350",
-              "Q-5351",
-              "Q-5352",
-              "Q-5353",
-              "Q-5354",
-              "Q-5355",
-              "Q-5356",
-              "Q-5357",
-              "Q-5358",
-              "Q-5359",
-              "Q-5360",
-              "Q-5361",
-              "Q-5362",
-              "Q-5363",
-              "Q-5364",
-              "Q-5365",
-              "Q-5366",
-              "Q-5367",
-              "Q-5368",
-              "Q-5369",
-              "Q-5370",
-              "Q-5371",
-              "Q-5372",
-              "Q-5373",
-              "Q-5374",
-              "Q-5375",
-              "Q-5376",
-              "Q-5377",
-              "Q-5378",
-              "Q-5379",
-              "Q-5380",
-              "Q-5381",
-              "Q-5382",
-              "Q-5383"
-            ],
-            "already": false
-          },
-          "lagMax": 190.43504200000007
-        },
-        {
-          "phase": "renewDemoWork",
-          "ms": 7.829665999999634,
-          "healthMax": 0.45629100000041944,
-          "samples": 2,
-          "output": {
-            "type": "renewed"
-          },
-          "lagMax": 11.85570800000005
-        },
-        {
-          "phase": "archive-export",
-          "ms": 17586.676165999997,
-          "healthMax": 737.7856659999998,
-          "samples": 116,
-          "output": {
-            "bytes": 149526265
-          },
-          "lagMax": 246.9684159999997
-        },
-        {
-          "phase": "find-large",
-          "ms": 289.817833000001,
-          "healthMax": 2.2326670000002196,
-          "samples": 5,
-          "output": {
-            "count": null,
-            "items": 500
-          },
-          "lagMax": 0
-        },
-        {
-          "phase": "queue",
-          "ms": 201.90270899999814,
-          "healthMax": 1.9407499999979336,
-          "samples": 4,
-          "output": {
-            "counts": {
-              "open": 4992,
-              "failure": 4891,
-              "map": 101
-            },
-            "items": 500
-          },
-          "lagMax": 27.029500000000553
-        },
-        {
-          "phase": "policy-adoption",
-          "ms": 7913.8645,
-          "healthMax": 457.83045800000036,
-          "samples": 30,
-          "output": [
-            {
-              "q": "Q-5384",
-              "status": "decided",
-              "needs": null,
-              "decision": 379,
-              "effects": {
-                "cases": [],
-                "created": [],
-                "policyVersion": 2,
-                "ruled": 101
-              },
-              "evidence": null
-            }
-          ],
-          "lagMax": 541.5711660000015
-        }
-      ],
-      "eventsOver250ms": [
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 292.49583399999983,
-          "at": 1792734557003
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 524.4382500000002,
-          "at": 1792734557548
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 896.7416670000002,
-          "at": 1792734557683
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 257.98570900000004,
-          "at": 1792734558218
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 550.0868339999997,
-          "at": 1792734559388
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 484.92762500000026,
-          "at": 1792734559390
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 1083.6818330000006,
-          "at": 1792734560492
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 980.8250419999995,
-          "at": 1792734560497
-        },
-        {
-          "source": "health",
-          "phase": "archive-export",
-          "ms": 737.7856659999998,
-          "at": 1792734578218
-        },
-        {
-          "source": "health",
-          "phase": "archive-export",
-          "ms": 444.1362079999999,
-          "at": 1792734580106
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 434.6763749999991,
-          "at": 1792734582162
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 457.83045800000036,
-          "at": 1792734582171
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 404.1532920000027,
-          "at": 1792734582974
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 292.1261250000025,
-          "at": 1792734582976
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 343.3877079999984,
-          "at": 1792734585053
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 456.13958400000047,
-          "at": 1792734585054
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 329.19079200000124,
-          "at": 1792734585509
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 338.81887500000084,
-          "at": 1792734585520
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 256.98912500000006,
-          "at": 1792734585864
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 261.4459999999999,
-          "at": 1792734586238
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 352.60170800000196,
-          "at": 1792734586633
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 317.6232919999966,
-          "at": 1792734587339
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 457.755250000002,
-          "at": 1792734587440
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 370.5608329999959,
-          "at": 1792734588138
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 541.5711660000015,
-          "at": 1792734588218
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 380.1422089999978,
-          "at": 1792734588777
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 410.91866600000503,
-          "at": 1792734588794
-        }
-      ]
-    },
-    {
-      "side": "before",
-      "pair": 3,
-      "load": [
-        54.53125,
-        38.7666015625,
-        21.01708984375
-      ],
-      "errors": 0,
-      "rows": [
-        {
-          "phase": "report-4000-tries-attachments",
-          "ms": 6763.896083,
-          "healthMax": 1235.7632919999996,
-          "samples": 17,
-          "output": {
-            "counts": {
-              "total": 4000,
-              "pass": 3920,
-              "fail": 80,
-              "skip": 0,
-              "error": 0,
-              "blocked": 0
-            },
-            "batch": 174
-          },
-          "lagMax": 1337.9698750000007
-        },
-        {
-          "phase": "gate",
-          "ms": 71.09295900000143,
-          "healthMax": 30.505833000001076,
-          "samples": 2,
-          "output": {
-            "run": "R-146",
-            "verdict": "blocked",
-            "reason": "blocked: 80 failures unexplained, 20 questions open",
-            "tally": {
-              "pass": 3920,
-              "excused": 0,
-              "attributed": 0,
-              "unexplained": 80,
-              "missing": 0,
-              "disputed": 0,
-              "skipped": 0
-            },
-            "open": [
-              "Q-421",
-              "Q-422",
-              "Q-423",
-              "Q-424",
-              "Q-425",
-              "Q-426",
-              "Q-427",
-              "Q-428",
-              "Q-429",
-              "Q-5332",
-              "Q-5333",
-              "Q-5334",
-              "Q-5335",
-              "Q-5336",
-              "Q-5337",
-              "Q-5338",
-              "Q-5339",
-              "Q-5340",
-              "Q-5341",
-              "Q-5342"
-            ],
-            "url": null,
-            "stale": false
-          },
-          "lagMax": 56.06754100000035
-        },
-        {
-          "phase": "change-merge",
-          "ms": 181.19166600000062,
-          "healthMax": 128.7547910000012,
-          "samples": 3,
-          "output": {
-            "change": "pr:10000",
-            "state": "merged",
-            "questions": [
-              "Q-461",
-              "Q-462",
-              "Q-463",
-              "Q-464",
-              "Q-465",
-              "Q-466",
-              "Q-467",
-              "Q-468",
-              "Q-469",
-              "Q-470",
-              "Q-471",
-              "Q-472",
-              "Q-473",
-              "Q-474",
-              "Q-475",
-              "Q-476",
-              "Q-477",
-              "Q-478",
-              "Q-479",
-              "Q-480",
-              "Q-481",
-              "Q-482",
-              "Q-483",
-              "Q-484",
-              "Q-485",
-              "Q-486",
-              "Q-487",
-              "Q-488",
-              "Q-489",
-              "Q-490",
-              "Q-491",
-              "Q-492",
-              "Q-493",
-              "Q-494",
-              "Q-495",
-              "Q-496",
-              "Q-497",
-              "Q-498",
-              "Q-499",
-              "Q-500"
-            ],
-            "already": false
-          },
-          "lagMax": 172.64979099999982
-        },
-        {
-          "phase": "change-reopen",
-          "ms": 44.08220799999981,
-          "healthMax": 231.1335829999989,
-          "samples": 2,
-          "output": {
-            "change": "pr:10000",
-            "state": "open",
-            "questions": [
-              "Q-5344",
-              "Q-5345",
-              "Q-5346",
-              "Q-5347",
-              "Q-5348",
-              "Q-5349",
-              "Q-5350",
-              "Q-5351",
-              "Q-5352",
-              "Q-5353",
-              "Q-5354",
-              "Q-5355",
-              "Q-5356",
-              "Q-5357",
-              "Q-5358",
-              "Q-5359",
-              "Q-5360",
-              "Q-5361",
-              "Q-5362",
-              "Q-5363",
-              "Q-5364",
-              "Q-5365",
-              "Q-5366",
-              "Q-5367",
-              "Q-5368",
-              "Q-5369",
-              "Q-5370",
-              "Q-5371",
-              "Q-5372",
-              "Q-5373",
-              "Q-5374",
-              "Q-5375",
-              "Q-5376",
-              "Q-5377",
-              "Q-5378",
-              "Q-5379",
-              "Q-5380",
-              "Q-5381",
-              "Q-5382",
-              "Q-5383"
-            ],
-            "already": false
-          },
-          "lagMax": 68.98491699999977
-        },
-        {
-          "phase": "renewDemoWork",
-          "ms": 18.26787499999955,
-          "healthMax": 18.975334000000657,
-          "samples": 2,
-          "output": {
-            "type": "renewed"
-          },
-          "lagMax": 251.40012500000012
-        },
-        {
-          "phase": "archive-export",
-          "ms": 21230.278958000003,
-          "healthMax": 1239.239875000003,
-          "samples": 138,
-          "output": {
-            "bytes": 149526265
-          },
-          "lagMax": 181.05066699999952
-        },
-        {
-          "phase": "find-large",
-          "ms": 380.0986669999984,
-          "healthMax": 10.293250000002445,
-          "samples": 5,
-          "output": {
-            "count": null,
-            "items": 500
-          },
-          "lagMax": 20.301290999996127
-        },
-        {
-          "phase": "queue",
-          "ms": 665.1082499999975,
-          "healthMax": 7.304750000002969,
-          "samples": 7,
-          "output": {
-            "counts": {
-              "open": 4992,
-              "failure": 4891,
-              "map": 101
-            },
-            "items": 500
-          },
-          "lagMax": 0
-        },
-        {
-          "phase": "policy-adoption",
-          "ms": 10695.499083000002,
-          "healthMax": 10189.142792000006,
-          "samples": 6,
-          "output": [
-            {
-              "q": "Q-5384",
-              "status": "decided",
-              "needs": null,
-              "decision": 379,
-              "effects": {
-                "cases": [],
-                "created": [],
-                "policyVersion": 2,
-                "ruled": 101
-              },
-              "evidence": null
-            }
-          ],
-          "lagMax": 10382.723666999998
-        }
-      ],
-      "eventsOver250ms": [
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 250.33466699999917,
-          "at": 1792734596615
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 404.107583,
-          "at": 1792734597088
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 275.97229100000004,
-          "at": 1792734597089
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 289.08941700000014,
-          "at": 1792734597397
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 1168.7018339999995,
-          "at": 1792734599395
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 1115.5097920000007,
-          "at": 1792734599403
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 1337.9698750000007,
-          "at": 1792734600916
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 1235.7632919999996,
-          "at": 1792734600923
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 601.7400419999994,
-          "at": 1792734601538
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 489.98312500000065,
-          "at": 1792734601540
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 553.399625,
-          "at": 1792734602247
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 445.6256659999999,
-          "at": 1792734602248
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 653.7615000000005,
-          "at": 1792734603117
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 573.6897079999999,
-          "at": 1792734603120
-        },
-        {
-          "source": "drift",
-          "phase": "renewDemoWork",
-          "ms": 251.40012500000012,
-          "at": 1792734604738
-        },
-        {
-          "source": "health",
-          "phase": "archive-export",
-          "ms": 1239.239875000003,
-          "at": 1792734624057
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 10189.142792000006,
-          "at": 1792734638977
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 10382.723666999998,
-          "at": 1792734639116
-        }
-      ]
-    },
-    {
-      "side": "after",
-      "pair": 3,
-      "load": [
-        64.5576171875,
-        43.7919921875,
-        23.97314453125
-      ],
-      "errors": 0,
-      "rows": [
-        {
-          "phase": "report-4000-tries-attachments",
-          "ms": 17270.200292,
-          "healthMax": 5020.657625,
-          "samples": 24,
-          "output": {
-            "counts": {
-              "total": 4000,
-              "pass": 3920,
-              "fail": 80,
-              "skip": 0,
-              "error": 0,
-              "blocked": 0
-            },
-            "batch": 174
-          },
-          "lagMax": 5159.209208
-        },
-        {
-          "phase": "gate",
-          "ms": 1049.2629159999997,
-          "healthMax": 365.01774999999907,
-          "samples": 6,
-          "output": {
-            "run": "R-146",
-            "verdict": "blocked",
-            "reason": "blocked: 80 failures unexplained, 20 questions open",
-            "tally": {
-              "pass": 3920,
-              "excused": 0,
-              "attributed": 0,
-              "unexplained": 80,
-              "missing": 0,
-              "disputed": 0,
-              "skipped": 0
-            },
-            "open": [
-              "Q-421",
-              "Q-422",
-              "Q-423",
-              "Q-424",
-              "Q-425",
-              "Q-426",
-              "Q-427",
-              "Q-428",
-              "Q-429",
-              "Q-5332",
-              "Q-5333",
-              "Q-5334",
-              "Q-5335",
-              "Q-5336",
-              "Q-5337",
-              "Q-5338",
-              "Q-5339",
-              "Q-5340",
-              "Q-5341",
-              "Q-5342"
-            ],
-            "url": null,
-            "stale": false
-          },
-          "lagMax": 446.7416250000024
-        },
-        {
-          "phase": "change-merge",
-          "ms": 1113.6619170000013,
-          "healthMax": 961.9485419999983,
-          "samples": 3,
-          "output": {
-            "change": "pr:10000",
-            "state": "merged",
-            "questions": [
-              "Q-461",
-              "Q-462",
-              "Q-463",
-              "Q-464",
-              "Q-465",
-              "Q-466",
-              "Q-467",
-              "Q-468",
-              "Q-469",
-              "Q-470",
-              "Q-471",
-              "Q-472",
-              "Q-473",
-              "Q-474",
-              "Q-475",
-              "Q-476",
-              "Q-477",
-              "Q-478",
-              "Q-479",
-              "Q-480",
-              "Q-481",
-              "Q-482",
-              "Q-483",
-              "Q-484",
-              "Q-485",
-              "Q-486",
-              "Q-487",
-              "Q-488",
-              "Q-489",
-              "Q-490",
-              "Q-491",
-              "Q-492",
-              "Q-493",
-              "Q-494",
-              "Q-495",
-              "Q-496",
-              "Q-497",
-              "Q-498",
-              "Q-499",
-              "Q-500"
-            ],
-            "already": false
-          },
-          "lagMax": 1062.307499999999
-        },
-        {
-          "phase": "change-reopen",
-          "ms": 419.057417,
-          "healthMax": 302.78512500000215,
-          "samples": 3,
-          "output": {
-            "change": "pr:10000",
-            "state": "open",
-            "questions": [
-              "Q-5344",
-              "Q-5345",
-              "Q-5346",
-              "Q-5347",
-              "Q-5348",
-              "Q-5349",
-              "Q-5350",
-              "Q-5351",
-              "Q-5352",
-              "Q-5353",
-              "Q-5354",
-              "Q-5355",
-              "Q-5356",
-              "Q-5357",
-              "Q-5358",
-              "Q-5359",
-              "Q-5360",
-              "Q-5361",
-              "Q-5362",
-              "Q-5363",
-              "Q-5364",
-              "Q-5365",
-              "Q-5366",
-              "Q-5367",
-              "Q-5368",
-              "Q-5369",
-              "Q-5370",
-              "Q-5371",
-              "Q-5372",
-              "Q-5373",
-              "Q-5374",
-              "Q-5375",
-              "Q-5376",
-              "Q-5377",
-              "Q-5378",
-              "Q-5379",
-              "Q-5380",
-              "Q-5381",
-              "Q-5382",
-              "Q-5383"
-            ],
-            "already": false
-          },
-          "lagMax": 406.5087500000009
-        },
-        {
-          "phase": "renewDemoWork",
-          "ms": 307.927334,
-          "healthMax": 329.932499999999,
-          "samples": 3,
-          "output": {
-            "type": "renewed"
-          },
-          "lagMax": 285.2316659999997
-        },
-        {
-          "phase": "archive-export",
-          "ms": 35643.15716599999,
-          "healthMax": 1082.9801250000019,
-          "samples": 231,
-          "output": {
-            "bytes": 149526265
-          },
-          "lagMax": 423.2159580000007
-        },
-        {
-          "phase": "find-large",
-          "ms": 246.2336670000077,
-          "healthMax": 10.643874999994296,
-          "samples": 4,
-          "output": {
-            "count": null,
-            "items": 500
-          },
-          "lagMax": 0
-        },
-        {
-          "phase": "queue",
-          "ms": 792.539208000002,
-          "healthMax": 2.934332999997423,
-          "samples": 9,
-          "output": {
-            "counts": {
-              "open": 4992,
-              "failure": 4891,
-              "map": 101
-            },
-            "items": 500
-          },
-          "lagMax": 0
-        },
-        {
-          "phase": "policy-adoption",
-          "ms": 5528.569583999997,
-          "healthMax": 535.0708750000049,
-          "samples": 21,
-          "output": [
-            {
-              "q": "Q-5384",
-              "status": "decided",
-              "needs": null,
-              "decision": 379,
-              "effects": {
-                "cases": [],
-                "created": [],
-                "policyVersion": 2,
-                "ruled": 101
-              },
-              "evidence": null
-            }
-          ],
-          "lagMax": 552.2211249999964
-        }
-      ],
-      "eventsOver250ms": [
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 1350.689292000001,
-          "at": 1792734651718
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 749.4876249999998,
-          "at": 1792734652488
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 2056.8655419999996,
-          "at": 1792734652541
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 511.55533300000025,
-          "at": 1792734653128
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 462.08837499999936,
-          "at": 1792734653129
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 482.9964169999985,
-          "at": 1792734653631
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 376.51774999999907,
-          "at": 1792734653632
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 390.5701250000002,
-          "at": 1792734654151
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 419.86241599999994,
-          "at": 1792734654151
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 515.5125829999997,
-          "at": 1792734654858
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 434.7826669999995,
-          "at": 1792734654859
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 397.1411250000001,
-          "at": 1792734655388
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 402.96891700000015,
-          "at": 1792734655389
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 677.4642910000002,
-          "at": 1792734656396
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 650.1062500000007,
-          "at": 1792734656397
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 485.91899999999987,
-          "at": 1792734656947
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 424.4446250000001,
-          "at": 1792734656948
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 754.6706250000025,
-          "at": 1792734657839
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 873.3285420000011,
-          "at": 1792734657841
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 427.20524999999907,
-          "at": 1792734658543
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 299.7217920000003,
-          "at": 1792734658549
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 322.36591599999883,
-          "at": 1792734658998
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 417.7686249999988,
-          "at": 1792734659008
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 390.94158300000163,
-          "at": 1792734659419
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 283.7704999999987,
-          "at": 1792734659426
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 548.9666250000009,
-          "at": 1792734660033
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 477.2165840000016,
-          "at": 1792734660051
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 535.3287500000006,
-          "at": 1792734660588
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 380.6311249999999,
-          "at": 1792734660589
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 300.96741699999984,
-          "at": 1792734661014
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 315.18720900000335,
-          "at": 1792734661046
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 920.6910840000019,
-          "at": 1792734662562
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 839.3890829999982,
-          "at": 1792734662586
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 5020.657625,
-          "at": 1792734667742
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 5159.209208,
-          "at": 1792734667742
-        },
-        {
-          "source": "health",
-          "phase": "gate",
-          "ms": 365.01774999999907,
-          "at": 1792734668359
-        },
-        {
-          "source": "drift",
-          "phase": "gate",
-          "ms": 446.7416250000024,
-          "at": 1792734668445
-        },
-        {
-          "source": "drift",
-          "phase": "gate",
-          "ms": 272.8249590000014,
-          "at": 1792734669037
-        },
-        {
-          "source": "drift",
-          "phase": "change-merge",
-          "ms": 1062.307499999999,
-          "at": 1792734670504
-        },
-        {
-          "source": "health",
-          "phase": "change-merge",
-          "ms": 961.9485419999983,
-          "at": 1792734670515
-        },
-        {
-          "source": "drift",
-          "phase": "change-reopen",
-          "ms": 406.5087500000009,
-          "at": 1792734671318
-        },
-        {
-          "source": "health",
-          "phase": "change-reopen",
-          "ms": 302.78512500000215,
-          "at": 1792734671324
-        },
-        {
-          "source": "drift",
-          "phase": "renewDemoWork",
-          "ms": 285.2316659999997,
-          "at": 1792734672207
-        },
-        {
-          "source": "health",
-          "phase": "renewDemoWork",
-          "ms": 329.932499999999,
-          "at": 1792734672211
-        },
-        {
-          "source": "health",
-          "phase": "archive-export",
-          "ms": 393.4971250000017,
-          "at": 1792734703830
-        },
-        {
-          "source": "drift",
-          "phase": "archive-export",
-          "ms": 423.2159580000007,
-          "at": 1792734703830
-        },
-        {
-          "source": "health",
-          "phase": "archive-export",
-          "ms": 295.9295420000053,
-          "at": 1792734704682
-        },
-        {
-          "source": "health",
-          "phase": "archive-export",
-          "ms": 524.4050410000054,
-          "at": 1792734705511
-        },
-        {
-          "source": "health",
-          "phase": "archive-export",
-          "ms": 1082.9801250000019,
-          "at": 1792734708005
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 328.23579200000677,
-          "at": 1792734710696
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 322.91258299999754,
-          "at": 1792734711640
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 418.73983299999963,
-          "at": 1792734712189
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 454.3806249999907,
-          "at": 1792734712190
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 535.0708750000049,
-          "at": 1792734713525
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 552.2211249999964,
-          "at": 1792734713551
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 370.04499999999825,
-          "at": 1792734713982
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 332.5719589999935,
-          "at": 1792734713985
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 386.8690420000057,
-          "at": 1792734714882
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 373.6840419999935,
-          "at": 1792734714890
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 459.55049999999756,
-          "at": 1792734715478
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 495.9592499999999,
-          "at": 1792734715486
-        }
-      ]
-    },
-    {
-      "side": "before",
-      "pair": 4,
-      "load": [
-        64.0029296875,
-        48.52294921875,
-        27.35693359375
-      ],
-      "errors": 0,
-      "rows": [
-        {
-          "phase": "report-4000-tries-attachments",
-          "ms": 5239.24725,
-          "healthMax": 883.449208,
-          "samples": 14,
-          "output": {
-            "counts": {
-              "total": 4000,
-              "pass": 3920,
-              "fail": 80,
-              "skip": 0,
-              "error": 0,
-              "blocked": 0
-            },
-            "batch": 174
-          },
-          "lagMax": 713.5360840000012
-        },
-        {
-          "phase": "gate",
-          "ms": 18.653375000001688,
-          "healthMax": 0.6800839999996242,
-          "samples": 2,
-          "output": {
-            "run": "R-146",
-            "verdict": "blocked",
-            "reason": "blocked: 80 failures unexplained, 20 questions open",
-            "tally": {
-              "pass": 3920,
-              "excused": 0,
-              "attributed": 0,
-              "unexplained": 80,
-              "missing": 0,
-              "disputed": 0,
-              "skipped": 0
-            },
-            "open": [
-              "Q-421",
-              "Q-422",
-              "Q-423",
-              "Q-424",
-              "Q-425",
-              "Q-426",
-              "Q-427",
-              "Q-428",
-              "Q-429",
-              "Q-5332",
-              "Q-5333",
-              "Q-5334",
-              "Q-5335",
-              "Q-5336",
-              "Q-5337",
-              "Q-5338",
-              "Q-5339",
-              "Q-5340",
-              "Q-5341",
-              "Q-5342"
-            ],
-            "url": null,
-            "stale": false
-          },
-          "lagMax": 63.40466600000036
-        },
-        {
-          "phase": "change-merge",
-          "ms": 288.51587499999914,
-          "healthMax": 254.7001250000012,
-          "samples": 3,
-          "output": {
-            "change": "pr:10000",
-            "state": "merged",
-            "questions": [
-              "Q-461",
-              "Q-462",
-              "Q-463",
-              "Q-464",
-              "Q-465",
-              "Q-466",
-              "Q-467",
-              "Q-468",
-              "Q-469",
-              "Q-470",
-              "Q-471",
-              "Q-472",
-              "Q-473",
-              "Q-474",
-              "Q-475",
-              "Q-476",
-              "Q-477",
-              "Q-478",
-              "Q-479",
-              "Q-480",
-              "Q-481",
-              "Q-482",
-              "Q-483",
-              "Q-484",
-              "Q-485",
-              "Q-486",
-              "Q-487",
-              "Q-488",
-              "Q-489",
-              "Q-490",
-              "Q-491",
-              "Q-492",
-              "Q-493",
-              "Q-494",
-              "Q-495",
-              "Q-496",
-              "Q-497",
-              "Q-498",
-              "Q-499",
-              "Q-500"
-            ],
-            "already": false
-          },
-          "lagMax": 278.43566699999974
-        },
-        {
-          "phase": "change-reopen",
-          "ms": 52.2880839999998,
-          "healthMax": 294.9701249999998,
-          "samples": 2,
-          "output": {
-            "change": "pr:10000",
-            "state": "open",
-            "questions": [
-              "Q-5344",
-              "Q-5345",
-              "Q-5346",
-              "Q-5347",
-              "Q-5348",
-              "Q-5349",
-              "Q-5350",
-              "Q-5351",
-              "Q-5352",
-              "Q-5353",
-              "Q-5354",
-              "Q-5355",
-              "Q-5356",
-              "Q-5357",
-              "Q-5358",
-              "Q-5359",
-              "Q-5360",
-              "Q-5361",
-              "Q-5362",
-              "Q-5363",
-              "Q-5364",
-              "Q-5365",
-              "Q-5366",
-              "Q-5367",
-              "Q-5368",
-              "Q-5369",
-              "Q-5370",
-              "Q-5371",
-              "Q-5372",
-              "Q-5373",
-              "Q-5374",
-              "Q-5375",
-              "Q-5376",
-              "Q-5377",
-              "Q-5378",
-              "Q-5379",
-              "Q-5380",
-              "Q-5381",
-              "Q-5382",
-              "Q-5383"
-            ],
-            "already": false
-          },
-          "lagMax": 75.79504199999974
-        },
-        {
-          "phase": "renewDemoWork",
-          "ms": 43.53387500000099,
-          "healthMax": 21.608917000001384,
-          "samples": 2,
-          "output": {
-            "type": "renewed"
-          },
-          "lagMax": 227.63837500000045
-        },
-        {
-          "phase": "archive-export",
-          "ms": 17788.620666000003,
-          "healthMax": 356.0543340000004,
-          "samples": 129,
-          "output": {
-            "bytes": 149526265
-          },
-          "lagMax": 162.83116599999994
-        },
-        {
-          "phase": "find-large",
-          "ms": 110.60099999999875,
-          "healthMax": 2.4917920000007143,
-          "samples": 4,
-          "output": {
-            "count": null,
-            "items": 500
-          },
-          "lagMax": 0
-        },
-        {
-          "phase": "queue",
-          "ms": 836.1211670000012,
-          "healthMax": 15.449749999999767,
-          "samples": 8,
-          "output": {
-            "counts": {
-              "open": 4992,
-              "failure": 4891,
-              "map": 101
-            },
-            "items": 500
-          },
-          "lagMax": 11.271749999999884
-        },
-        {
-          "phase": "policy-adoption",
-          "ms": 6219.665958000001,
-          "healthMax": 5132.302208000001,
-          "samples": 7,
-          "output": [
-            {
-              "q": "Q-5384",
-              "status": "decided",
-              "needs": null,
-              "decision": 379,
-              "effects": {
-                "cases": [],
-                "created": [],
-                "policyVersion": 2,
-                "ruled": 101
-              },
-              "evidence": null
-            }
-          ],
-          "lagMax": 5237.042875000003
-        }
-      ],
-      "eventsOver250ms": [
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 598.972542,
-          "at": 1792734722043
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 883.449208,
-          "at": 1792734722496
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 383.51850000000013,
-          "at": 1792734722496
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 297.4368340000001,
-          "at": 1792734723277
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 389.22970799999985,
-          "at": 1792734723750
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 342.5361670000002,
-          "at": 1792734723751
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 548.6507080000001,
-          "at": 1792734724413
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 536.5492080000004,
-          "at": 1792734724414
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 345.4274580000001,
-          "at": 1792734724886
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 399.4227920000003,
-          "at": 1792734724886
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 296.0196249999999,
-          "at": 1792734725419
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 690.2398749999993,
-          "at": 1792734726683
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 713.5360840000012,
-          "at": 1792734726683
-        },
-        {
-          "source": "health",
-          "phase": "change-merge",
-          "ms": 254.7001250000012,
-          "at": 1792734727801
-        },
-        {
-          "source": "drift",
-          "phase": "change-merge",
-          "ms": 278.43566699999974,
-          "at": 1792734727801
-        },
-        {
-          "source": "health",
-          "phase": "change-reopen",
-          "ms": 294.9701249999998,
-          "at": 1792734728690
-        },
-        {
-          "source": "health",
-          "phase": "archive-export",
-          "ms": 356.0543340000004,
-          "at": 1792734744768
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 374.92349999999715,
-          "at": 1792734749526
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 5237.042875000003,
-          "at": 1792734755078
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 5132.302208000001,
-          "at": 1792734755081
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 463.0506249999962,
-          "at": 1792734755581
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 381.2381249999962,
-          "at": 1792734755588
-        }
-      ]
-    },
-    {
-      "side": "after",
-      "pair": 4,
-      "load": [
-        59.1962890625,
-        49.1845703125,
-        28.56787109375
-      ],
-      "errors": 0,
-      "rows": [
-        {
-          "phase": "report-4000-tries-attachments",
-          "ms": 5894.745666,
-          "healthMax": 929.2389590000002,
-          "samples": 18,
-          "output": {
-            "counts": {
-              "total": 4000,
-              "pass": 3920,
-              "fail": 80,
-              "skip": 0,
-              "error": 0,
-              "blocked": 0
-            },
-            "batch": 174
-          },
-          "lagMax": 764.9727500000008
-        },
-        {
-          "phase": "gate",
-          "ms": 13.764791999999943,
-          "healthMax": 7.902374999999665,
-          "samples": 2,
-          "output": {
-            "run": "R-146",
-            "verdict": "blocked",
-            "reason": "blocked: 80 failures unexplained, 20 questions open",
-            "tally": {
-              "pass": 3920,
-              "excused": 0,
-              "attributed": 0,
-              "unexplained": 80,
-              "missing": 0,
-              "disputed": 0,
-              "skipped": 0
-            },
-            "open": [
-              "Q-421",
-              "Q-422",
-              "Q-423",
-              "Q-424",
-              "Q-425",
-              "Q-426",
-              "Q-427",
-              "Q-428",
-              "Q-429",
-              "Q-5332",
-              "Q-5333",
-              "Q-5334",
-              "Q-5335",
-              "Q-5336",
-              "Q-5337",
-              "Q-5338",
-              "Q-5339",
-              "Q-5340",
-              "Q-5341",
-              "Q-5342"
-            ],
-            "url": null,
-            "stale": false
-          },
-          "lagMax": 1040.6121670000011
-        },
-        {
-          "phase": "change-merge",
-          "ms": 29.178082999998878,
-          "healthMax": 42.83508300000176,
-          "samples": 3,
-          "output": {
-            "change": "pr:10000",
-            "state": "merged",
-            "questions": [
-              "Q-461",
-              "Q-462",
-              "Q-463",
-              "Q-464",
-              "Q-465",
-              "Q-466",
-              "Q-467",
-              "Q-468",
-              "Q-469",
-              "Q-470",
-              "Q-471",
-              "Q-472",
-              "Q-473",
-              "Q-474",
-              "Q-475",
-              "Q-476",
-              "Q-477",
-              "Q-478",
-              "Q-479",
-              "Q-480",
-              "Q-481",
-              "Q-482",
-              "Q-483",
-              "Q-484",
-              "Q-485",
-              "Q-486",
-              "Q-487",
-              "Q-488",
-              "Q-489",
-              "Q-490",
-              "Q-491",
-              "Q-492",
-              "Q-493",
-              "Q-494",
-              "Q-495",
-              "Q-496",
-              "Q-497",
-              "Q-498",
-              "Q-499",
-              "Q-500"
-            ],
-            "already": false
-          },
-          "lagMax": 137.17549999999937
-        },
-        {
-          "phase": "change-reopen",
-          "ms": 42.577124999999796,
-          "healthMax": 172.5700420000012,
-          "samples": 2,
-          "output": {
-            "change": "pr:10000",
-            "state": "open",
-            "questions": [
-              "Q-5344",
-              "Q-5345",
-              "Q-5346",
-              "Q-5347",
-              "Q-5348",
-              "Q-5349",
-              "Q-5350",
-              "Q-5351",
-              "Q-5352",
-              "Q-5353",
-              "Q-5354",
-              "Q-5355",
-              "Q-5356",
-              "Q-5357",
-              "Q-5358",
-              "Q-5359",
-              "Q-5360",
-              "Q-5361",
-              "Q-5362",
-              "Q-5363",
-              "Q-5364",
-              "Q-5365",
-              "Q-5366",
-              "Q-5367",
-              "Q-5368",
-              "Q-5369",
-              "Q-5370",
-              "Q-5371",
-              "Q-5372",
-              "Q-5373",
-              "Q-5374",
-              "Q-5375",
-              "Q-5376",
-              "Q-5377",
-              "Q-5378",
-              "Q-5379",
-              "Q-5380",
-              "Q-5381",
-              "Q-5382",
-              "Q-5383"
-            ],
-            "already": false
-          },
-          "lagMax": 136.93654199999946
-        },
-        {
-          "phase": "renewDemoWork",
-          "ms": 33.000583000000915,
-          "healthMax": 6.821208999999726,
-          "samples": 2,
-          "output": {
-            "type": "renewed"
-          },
-          "lagMax": 29.313874999999825
-        },
-        {
-          "phase": "archive-export",
-          "ms": 23824.326290999998,
-          "healthMax": 1195.4456659999996,
-          "samples": 150,
-          "output": {
-            "bytes": 149526265
-          },
-          "lagMax": 168.51699999999983
-        },
-        {
-          "phase": "find-large",
-          "ms": 121.47137500000099,
-          "healthMax": 10.982292000000598,
-          "samples": 3,
-          "output": {
-            "count": null,
-            "items": 500
-          },
-          "lagMax": 0
-        },
-        {
-          "phase": "queue",
-          "ms": 426.0464159999974,
-          "healthMax": 5.968041000000085,
-          "samples": 6,
-          "output": {
-            "counts": {
-              "open": 4992,
-              "failure": 4891,
-              "map": 101
-            },
-            "items": 500
-          },
-          "lagMax": 10.919999999998254
-        },
-        {
-          "phase": "policy-adoption",
-          "ms": 8423.169749999994,
-          "healthMax": 665.740082999997,
-          "samples": 26,
-          "output": [
-            {
-              "q": "Q-5384",
-              "status": "decided",
-              "needs": null,
-              "decision": 379,
-              "effects": {
-                "cases": [],
-                "created": [],
-                "policyVersion": 2,
-                "ruled": 101
-              },
-              "evidence": null
-            }
-          ],
-          "lagMax": 677.4654999999984
-        }
-      ],
-      "eventsOver250ms": [
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 324.50774999999976,
-          "at": 1792734763649
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 715.1148749999993,
-          "at": 1792734764648
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 764.9727500000008,
-          "at": 1792734764648
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 480.9768749999994,
-          "at": 1792734765149
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 375.9918749999997,
-          "at": 1792734765150
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 453.811208000001,
-          "at": 1792734765730
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 523.735541,
-          "at": 1792734765730
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 444.7584169999991,
-          "at": 1792734766827
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 508.3709579999995,
-          "at": 1792734766827
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 334.3225419999999,
-          "at": 1792734767771
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 929.2389590000002,
-          "at": 1792734768832
-        },
-        {
-          "source": "drift",
-          "phase": "gate",
-          "ms": 1040.6121670000011,
-          "at": 1792734768832
-        },
-        {
-          "source": "health",
-          "phase": "archive-export",
-          "ms": 263.6236250000002,
-          "at": 1792734788670
-        },
-        {
-          "source": "health",
-          "phase": "archive-export",
-          "ms": 1195.4456659999996,
-          "at": 1792734791231
-        },
-        {
-          "source": "health",
-          "phase": "archive-export",
-          "ms": 600.9182499999952,
-          "at": 1792734794014
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 284.59858299999905,
-          "at": 1792734796677
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 405.0605409999989,
-          "at": 1792734797166
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 482.95524999999907,
-          "at": 1792734797179
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 265.31516700000066,
-          "at": 1792734797560
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 305.52162499999395,
-          "at": 1792734797570
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 575.281041000002,
-          "at": 1792734798428
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 612.0158749999973,
-          "at": 1792734798432
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 389.1502499999988,
-          "at": 1792734798895
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 342.7921669999996,
-          "at": 1792734798897
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 258.9918749999997,
-          "at": 1792734799174
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 444.72875000000204,
-          "at": 1792734799751
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 487.55033399999957,
-          "at": 1792734799751
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 507.78533400000015,
-          "at": 1792734800387
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 530.1901670000007,
-          "at": 1792734800387
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 665.740082999997,
-          "at": 1792734801686
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 677.4654999999984,
-          "at": 1792734801688
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 437.69837499999994,
-          "at": 1792734802251
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 435.94549999999435,
-          "at": 1792734802253
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 347.286709,
-          "at": 1792734803732
-        }
-      ]
-    },
-    {
-      "side": "before",
-      "pair": 5,
-      "load": [
-        100.83544921875,
-        69.25732421875,
-        41.03369140625
-      ],
-      "errors": 0,
-      "rows": [
-        {
-          "phase": "report-4000-tries-attachments",
-          "ms": 14437.925834000001,
-          "healthMax": 2419.2818340000013,
-          "samples": 20,
-          "output": {
-            "counts": {
-              "total": 4000,
-              "pass": 3920,
-              "fail": 80,
-              "skip": 0,
-              "error": 0,
-              "blocked": 0
-            },
-            "batch": 174
-          },
-          "lagMax": 2209.808874999999
-        },
-        {
-          "phase": "gate",
-          "ms": 30.27416600000288,
-          "healthMax": 55.90574999999808,
-          "samples": 2,
-          "output": {
-            "run": "R-146",
-            "verdict": "blocked",
-            "reason": "blocked: 80 failures unexplained, 20 questions open",
-            "tally": {
-              "pass": 3920,
-              "excused": 0,
-              "attributed": 0,
-              "unexplained": 80,
-              "missing": 0,
-              "disputed": 0,
-              "skipped": 0
-            },
-            "open": [
-              "Q-421",
-              "Q-422",
-              "Q-423",
-              "Q-424",
-              "Q-425",
-              "Q-426",
-              "Q-427",
-              "Q-428",
-              "Q-429",
-              "Q-5332",
-              "Q-5333",
-              "Q-5334",
-              "Q-5335",
-              "Q-5336",
-              "Q-5337",
-              "Q-5338",
-              "Q-5339",
-              "Q-5340",
-              "Q-5341",
-              "Q-5342"
-            ],
-            "url": null,
-            "stale": false
-          },
-          "lagMax": 100.65099999999802
-        },
-        {
-          "phase": "change-merge",
-          "ms": 736.836083000002,
-          "healthMax": 679.468915999998,
-          "samples": 2,
-          "output": {
-            "change": "pr:10000",
-            "state": "merged",
-            "questions": [
-              "Q-461",
-              "Q-462",
-              "Q-463",
-              "Q-464",
-              "Q-465",
-              "Q-466",
-              "Q-467",
-              "Q-468",
-              "Q-469",
-              "Q-470",
-              "Q-471",
-              "Q-472",
-              "Q-473",
-              "Q-474",
-              "Q-475",
-              "Q-476",
-              "Q-477",
-              "Q-478",
-              "Q-479",
-              "Q-480",
-              "Q-481",
-              "Q-482",
-              "Q-483",
-              "Q-484",
-              "Q-485",
-              "Q-486",
-              "Q-487",
-              "Q-488",
-              "Q-489",
-              "Q-490",
-              "Q-491",
-              "Q-492",
-              "Q-493",
-              "Q-494",
-              "Q-495",
-              "Q-496",
-              "Q-497",
-              "Q-498",
-              "Q-499",
-              "Q-500"
-            ],
-            "already": false
-          },
-          "lagMax": 776.942665999999
-        },
-        {
-          "phase": "change-reopen",
-          "ms": 890.1085419999981,
-          "healthMax": 817.997583999997,
-          "samples": 3,
-          "output": {
-            "change": "pr:10000",
-            "state": "open",
-            "questions": [
-              "Q-5344",
-              "Q-5345",
-              "Q-5346",
-              "Q-5347",
-              "Q-5348",
-              "Q-5349",
-              "Q-5350",
-              "Q-5351",
-              "Q-5352",
-              "Q-5353",
-              "Q-5354",
-              "Q-5355",
-              "Q-5356",
-              "Q-5357",
-              "Q-5358",
-              "Q-5359",
-              "Q-5360",
-              "Q-5361",
-              "Q-5362",
-              "Q-5363",
-              "Q-5364",
-              "Q-5365",
-              "Q-5366",
-              "Q-5367",
-              "Q-5368",
-              "Q-5369",
-              "Q-5370",
-              "Q-5371",
-              "Q-5372",
-              "Q-5373",
-              "Q-5374",
-              "Q-5375",
-              "Q-5376",
-              "Q-5377",
-              "Q-5378",
-              "Q-5379",
-              "Q-5380",
-              "Q-5381",
-              "Q-5382",
-              "Q-5383"
-            ],
-            "already": false
-          },
-          "lagMax": 875.0187919999989
-        },
-        {
-          "phase": "renewDemoWork",
-          "ms": 169.48141600000235,
-          "healthMax": 92.22512500000084,
-          "samples": 2,
-          "output": {
-            "type": "renewed"
-          },
-          "lagMax": 81.29933299999902
-        },
-        {
-          "phase": "archive-export",
-          "ms": 41721.49520799999,
-          "healthMax": 608.8422920000012,
-          "samples": 247,
-          "output": {
-            "bytes": 149526265
-          },
-          "lagMax": 407.5995829999956
-        },
-        {
-          "phase": "find-large",
-          "ms": 873.2438750000001,
-          "healthMax": 120.5216250000085,
-          "samples": 8,
-          "output": {
-            "count": null,
-            "items": 500
-          },
-          "lagMax": 95.58270800000173
-        },
-        {
-          "phase": "queue",
-          "ms": 1229.7424170000013,
-          "healthMax": 31.632291000001715,
-          "samples": 11,
-          "output": {
-            "counts": {
-              "open": 4992,
-              "failure": 4891,
-              "map": 101
-            },
-            "items": 500
-          },
-          "lagMax": 55.966417000003275
-        },
-        {
-          "phase": "policy-adoption",
-          "ms": 8406.753207999995,
-          "healthMax": 8221.951583000002,
-          "samples": 4,
-          "output": [
-            {
-              "q": "Q-5384",
-              "status": "decided",
-              "needs": null,
-              "decision": 379,
-              "effects": {
-                "cases": [],
-                "created": [],
-                "policyVersion": 2,
-                "ruled": 101
-              },
-              "evidence": null
-            }
-          ],
-          "lagMax": 8288.774292000002
-        }
-      ],
-      "eventsOver250ms": [
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 381.07916599999953,
-          "at": 1792734966359
-        },
-        {
-          "source": "health",
-          "phase": "idle",
-          "ms": 416.65691700000025,
-          "at": 1792734966455
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 1146.5968749999993,
-          "at": 1792734967836
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 2419.2818340000013,
-          "at": 1792734969000
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 1143.638499999999,
-          "at": 1792734969000
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 314.7660420000011,
-          "at": 1792734969335
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 349.5292499999996,
-          "at": 1792734969704
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 257.8073750000003,
-          "at": 1792734969718
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 334.49833299999955,
-          "at": 1792734970059
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 1457.796083000001,
-          "at": 1792734971536
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 1361.2520419999983,
-          "at": 1792734971546
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 1000.3124589999989,
-          "at": 1792734972557
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 910.4150829999999,
-          "at": 1792734972583
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 600.0931660000006,
-          "at": 1792734973177
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 457.98658299999806,
-          "at": 1792734973178
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 378.009250000001,
-          "at": 1792734973575
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 271.5515410000007,
-          "at": 1792734973579
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 376.44650000000183,
-          "at": 1792734974081
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 486.1008750000001,
-          "at": 1792734974081
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 903.7680839999994,
-          "at": 1792734975421
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 791.161082999999,
-          "at": 1792734975422
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 525.2234160000007,
-          "at": 1792734976221
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 484.96258300000045,
-          "at": 1792734976226
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 1389.7749999999978,
-          "at": 1792734977963
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 1442.2382089999992,
-          "at": 1792734977969
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 300.72249999999985,
-          "at": 1792734978788
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 374.4610829999983,
-          "at": 1792734978788
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 2209.808874999999,
-          "at": 1792734981103
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 2193.330750000001,
-          "at": 1792734981107
-        },
-        {
-          "source": "drift",
-          "phase": "change-merge",
-          "ms": 776.942665999999,
-          "at": 1792734982384
-        },
-        {
-          "source": "health",
-          "phase": "change-merge",
-          "ms": 679.468915999998,
-          "at": 1792734982471
-        },
-        {
-          "source": "drift",
-          "phase": "change-reopen",
-          "ms": 875.0187919999989,
-          "at": 1792734983560
-        },
-        {
-          "source": "health",
-          "phase": "change-reopen",
-          "ms": 817.997583999997,
-          "at": 1792734983564
-        },
-        {
-          "source": "drift",
-          "phase": "archive-export",
-          "ms": 286.6394169999985,
-          "at": 1792734992735
-        },
-        {
-          "source": "health",
-          "phase": "archive-export",
-          "ms": 289.0330830000021,
-          "at": 1792734992745
-        },
-        {
-          "source": "health",
-          "phase": "archive-export",
-          "ms": 608.8422920000012,
-          "at": 1792735010691
-        },
-        {
-          "source": "health",
-          "phase": "archive-export",
-          "ms": 419.3716659999991,
-          "at": 1792735013646
-        },
-        {
-          "source": "health",
-          "phase": "archive-export",
-          "ms": 296.2137500000026,
-          "at": 1792735018378
-        },
-        {
-          "source": "health",
-          "phase": "archive-export",
-          "ms": 265.0431250000038,
-          "at": 1792735019198
-        },
-        {
-          "source": "drift",
-          "phase": "archive-export",
-          "ms": 251.44374999999854,
-          "at": 1792735019198
-        },
-        {
-          "source": "drift",
-          "phase": "archive-export",
-          "ms": 374.96983300000284,
-          "at": 1792735019668
-        },
-        {
-          "source": "health",
-          "phase": "archive-export",
-          "ms": 376.64270899999246,
-          "at": 1792735019710
-        },
-        {
-          "source": "drift",
-          "phase": "archive-export",
-          "ms": 407.5995829999956,
-          "at": 1792735021037
-        },
-        {
-          "source": "health",
-          "phase": "archive-export",
-          "ms": 378.17595900000015,
-          "at": 1792735021043
-        },
-        {
-          "source": "drift",
-          "phase": "archive-export",
-          "ms": 263.0437499999971,
-          "at": 1792735025704
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 8288.774292000002,
-          "at": 1792735037599
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 8221.951583000002,
-          "at": 1792735037600
-        }
-      ]
-    },
-    {
-      "side": "after",
-      "pair": 5,
-      "load": [
-        99.787109375,
-        76.91650390625,
-        46.66845703125
-      ],
-      "errors": 0,
-      "rows": [
-        {
-          "phase": "report-4000-tries-attachments",
-          "ms": 8688.027625,
-          "healthMax": 1527.0915830000013,
-          "samples": 16,
-          "output": {
-            "counts": {
-              "total": 4000,
-              "pass": 3920,
-              "fail": 80,
-              "skip": 0,
-              "error": 0,
-              "blocked": 0
-            },
-            "batch": 174
-          },
-          "lagMax": 1101.6954590000005
-        },
-        {
-          "phase": "gate",
-          "ms": 11.180916000001162,
-          "healthMax": 8.637624999999389,
-          "samples": 2,
-          "output": {
-            "run": "R-146",
-            "verdict": "blocked",
-            "reason": "blocked: 80 failures unexplained, 20 questions open",
-            "tally": {
-              "pass": 3920,
-              "excused": 0,
-              "attributed": 0,
-              "unexplained": 80,
-              "missing": 0,
-              "disputed": 0,
-              "skipped": 0
-            },
-            "open": [
-              "Q-421",
-              "Q-422",
-              "Q-423",
-              "Q-424",
-              "Q-425",
-              "Q-426",
-              "Q-427",
-              "Q-428",
-              "Q-429",
-              "Q-5332",
-              "Q-5333",
-              "Q-5334",
-              "Q-5335",
-              "Q-5336",
-              "Q-5337",
-              "Q-5338",
-              "Q-5339",
-              "Q-5340",
-              "Q-5341",
-              "Q-5342"
-            ],
-            "url": null,
-            "stale": false
-          },
-          "lagMax": 289.6840830000001
-        },
-        {
-          "phase": "change-merge",
-          "ms": 76.14095799999996,
-          "healthMax": 44.21845899999971,
-          "samples": 3,
-          "output": {
-            "change": "pr:10000",
-            "state": "merged",
-            "questions": [
-              "Q-461",
-              "Q-462",
-              "Q-463",
-              "Q-464",
-              "Q-465",
-              "Q-466",
-              "Q-467",
-              "Q-468",
-              "Q-469",
-              "Q-470",
-              "Q-471",
-              "Q-472",
-              "Q-473",
-              "Q-474",
-              "Q-475",
-              "Q-476",
-              "Q-477",
-              "Q-478",
-              "Q-479",
-              "Q-480",
-              "Q-481",
-              "Q-482",
-              "Q-483",
-              "Q-484",
-              "Q-485",
-              "Q-486",
-              "Q-487",
-              "Q-488",
-              "Q-489",
-              "Q-490",
-              "Q-491",
-              "Q-492",
-              "Q-493",
-              "Q-494",
-              "Q-495",
-              "Q-496",
-              "Q-497",
-              "Q-498",
-              "Q-499",
-              "Q-500"
-            ],
-            "already": false
-          },
-          "lagMax": 65.87874999999985
-        },
-        {
-          "phase": "change-reopen",
-          "ms": 269.65999999999985,
-          "healthMax": 159.25054199999795,
-          "samples": 3,
-          "output": {
-            "change": "pr:10000",
-            "state": "open",
-            "questions": [
-              "Q-5344",
-              "Q-5345",
-              "Q-5346",
-              "Q-5347",
-              "Q-5348",
-              "Q-5349",
-              "Q-5350",
-              "Q-5351",
-              "Q-5352",
-              "Q-5353",
-              "Q-5354",
-              "Q-5355",
-              "Q-5356",
-              "Q-5357",
-              "Q-5358",
-              "Q-5359",
-              "Q-5360",
-              "Q-5361",
-              "Q-5362",
-              "Q-5363",
-              "Q-5364",
-              "Q-5365",
-              "Q-5366",
-              "Q-5367",
-              "Q-5368",
-              "Q-5369",
-              "Q-5370",
-              "Q-5371",
-              "Q-5372",
-              "Q-5373",
-              "Q-5374",
-              "Q-5375",
-              "Q-5376",
-              "Q-5377",
-              "Q-5378",
-              "Q-5379",
-              "Q-5380",
-              "Q-5381",
-              "Q-5382",
-              "Q-5383"
-            ],
-            "already": false
-          },
-          "lagMax": 245.50587499999892
-        },
-        {
-          "phase": "renewDemoWork",
-          "ms": 79.30970900000102,
-          "healthMax": 28.806749999999738,
-          "samples": 2,
-          "output": {
-            "type": "renewed"
-          },
-          "lagMax": 50.453083999997034
-        },
-        {
-          "phase": "archive-export",
-          "ms": 15364.702292000002,
-          "healthMax": 750.5503329999992,
-          "samples": 111,
-          "output": {
-            "bytes": 149526265
-          },
-          "lagMax": 107.47233399999823
-        },
-        {
-          "phase": "find-large",
-          "ms": 48.18675000000076,
-          "healthMax": 3.399333999994269,
-          "samples": 2,
-          "output": {
-            "count": null,
-            "items": 500
-          },
-          "lagMax": 0
-        },
-        {
-          "phase": "queue",
-          "ms": 128.0040829999998,
-          "healthMax": 114.4931660000002,
-          "samples": 4,
-          "output": {
-            "counts": {
-              "open": 4992,
-              "failure": 4891,
-              "map": 101
-            },
-            "items": 500
-          },
-          "lagMax": 91.71241699999518
-        },
-        {
-          "phase": "policy-adoption",
-          "ms": 6533.095042000001,
-          "healthMax": 527.2996249999997,
-          "samples": 27,
-          "output": [
-            {
-              "q": "Q-5384",
-              "status": "decided",
-              "needs": null,
-              "decision": 379,
-              "effects": {
-                "cases": [],
-                "created": [],
-                "policyVersion": 2,
-                "ruled": 101
-              },
-              "evidence": null
-            }
-          ],
-          "lagMax": 556.2581659999996
-        }
-      ],
-      "eventsOver250ms": [
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 1101.6954590000005,
-          "at": 1792735053069
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 1527.0915830000013,
-          "at": 1792735053604
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 449.3109169999989,
-          "at": 1792735053604
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 550.4932499999995,
-          "at": 1792735054232
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 508.7567080000008,
-          "at": 1792735054241
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 516.6871249999986,
-          "at": 1792735055104
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 410.77229199999965,
-          "at": 1792735055106
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 261.5024999999987,
-          "at": 1792735055440
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 568.6741249999995,
-          "at": 1792735056089
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 522.1983330000003,
-          "at": 1792735056090
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 369.3610000000008,
-          "at": 1792735056586
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 476.7131669999999,
-          "at": 1792735056586
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 527.0166659999995,
-          "at": 1792735057133
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 418.6424580000021,
-          "at": 1792735057135
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 575.8910420000011,
-          "at": 1792735057796
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 539.1630000000005,
-          "at": 1792735057800
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 1090.2365829999999,
-          "at": 1792735058906
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 979.6707079999978,
-          "at": 1792735058907
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 335.0052910000013,
-          "at": 1792735059322
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 288.34262500000114,
-          "at": 1792735059325
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 297.8793749999968,
-          "at": 1792735059749
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 317.55712499999936,
-          "at": 1792735059749
-        },
-        {
-          "source": "drift",
-          "phase": "report-4000-tries-attachments",
-          "ms": 855.903624999999,
-          "at": 1792735060625
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 745.4001250000001,
-          "at": 1792735060626
-        },
-        {
-          "source": "drift",
-          "phase": "gate",
-          "ms": 289.6840830000001,
-          "at": 1792735061040
-        },
-        {
-          "source": "health",
-          "phase": "report-4000-tries-attachments",
-          "ms": 288.74733299999934,
-          "at": 1792735061041
-        },
-        {
-          "source": "health",
-          "phase": "archive-export",
-          "ms": 750.5503329999992,
-          "at": 1792735078184
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 267.2882499999978,
-          "at": 1792735079824
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 447.16970800000126,
-          "at": 1792735080332
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 380.60695800000394,
-          "at": 1792735080333
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 268.71216699999786,
-          "at": 1792735081778
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 394.88787500000035,
-          "at": 1792735082974
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 415.1699159999989,
-          "at": 1792735082976
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 366.48104199999943,
-          "at": 1792735083690
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 369.5330000000031,
-          "at": 1792735083690
-        },
-        {
-          "source": "health",
-          "phase": "policy-adoption",
-          "ms": 527.2996249999997,
-          "at": 1792735084473
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 556.2581659999996,
-          "at": 1792735084483
-        },
-        {
-          "source": "drift",
-          "phase": "policy-adoption",
-          "ms": 283.4705840000024,
-          "at": 1792735085971
-        }
-      ]
-    }
+    {"side":"before","pair":1,"load":[52.8,33.7,17.0],"errors":0,"eventsOver250ms":[{"source":"drift","phase":"report-4000-tries-attachments","ms":650.1,"at":1792734481857},{"source":"health","phase":"report-4000-tries-attachments","ms":826.1,"at":1792734482039},{"source":"drift","phase":"report-4000-tries-attachments","ms":579.7,"at":1792734482782},{"source":"health","phase":"report-4000-tries-attachments","ms":475.2,"at":1792734482785},{"source":"drift","phase":"report-4000-tries-attachments","ms":306.2,"at":1792734483394},{"source":"health","phase":"report-4000-tries-attachments","ms":351.0,"at":1792734484704},{"source":"drift","phase":"report-4000-tries-attachments","ms":372.3,"at":1792734484704},{"source":"health","phase":"report-4000-tries-attachments","ms":523.6,"at":1792734485360},{"source":"drift","phase":"report-4000-tries-attachments","ms":636.2,"at":1792734485360},{"source":"drift","phase":"policy-adoption","ms":4695.5,"at":1792734502123},{"source":"health","phase":"policy-adoption","ms":4615.0,"at":1792734502125}]},
+    {"side":"after","pair":1,"load":[47.6,34.1,17.6],"errors":0,"eventsOver250ms":[{"source":"health","phase":"report-4000-tries-attachments","ms":365.0,"at":1792734506592},{"source":"drift","phase":"report-4000-tries-attachments","ms":392.1,"at":1792734506592},{"source":"health","phase":"report-4000-tries-attachments","ms":598.2,"at":1792734507318},{"source":"drift","phase":"report-4000-tries-attachments","ms":597.0,"at":1792734507318},{"source":"health","phase":"report-4000-tries-attachments","ms":266.1,"at":1792734507711},{"source":"drift","phase":"report-4000-tries-attachments","ms":324.7,"at":1792734507711},{"source":"drift","phase":"report-4000-tries-attachments","ms":351.9,"at":1792734508219},{"source":"drift","phase":"report-4000-tries-attachments","ms":442.7,"at":1792734508747},{"source":"health","phase":"report-4000-tries-attachments","ms":403.2,"at":1792734508748},{"source":"drift","phase":"policy-adoption","ms":276.0,"at":1792734521865},{"source":"health","phase":"policy-adoption","ms":309.5,"at":1792734522301},{"source":"drift","phase":"policy-adoption","ms":357.5,"at":1792734522324},{"source":"health","phase":"policy-adoption","ms":367.4,"at":1792734523458},{"source":"drift","phase":"policy-adoption","ms":446.5,"at":1792734523458},{"source":"health","phase":"policy-adoption","ms":393.5,"at":1792734523978},{"source":"drift","phase":"policy-adoption","ms":387.5,"at":1792734523978},{"source":"health","phase":"policy-adoption","ms":255.8,"at":1792734524359},{"source":"drift","phase":"policy-adoption","ms":270.7,"at":1792734524362}]},
+    {"side":"before","pair":2,"load":[45.2,34.6,18.3],"errors":0,"eventsOver250ms":[{"source":"drift","phase":"report-4000-tries-attachments","ms":275.0,"at":1792734529997},{"source":"health","phase":"report-4000-tries-attachments","ms":463.1,"at":1792734530070},{"source":"drift","phase":"report-4000-tries-attachments","ms":394.9,"at":1792734531219},{"source":"health","phase":"report-4000-tries-attachments","ms":289.9,"at":1792734531220},{"source":"drift","phase":"report-4000-tries-attachments","ms":289.6,"at":1792734531607},{"source":"health","phase":"report-4000-tries-attachments","ms":260.9,"at":1792734531608},{"source":"health","phase":"report-4000-tries-attachments","ms":299.4,"at":1792734532035},{"source":"drift","phase":"report-4000-tries-attachments","ms":345.9,"at":1792734532035},{"source":"drift","phase":"report-4000-tries-attachments","ms":273.5,"at":1792734533119},{"source":"health","phase":"report-4000-tries-attachments","ms":720.1,"at":1792734534097},{"source":"drift","phase":"report-4000-tries-attachments","ms":824.7,"at":1792734534097},{"source":"health","phase":"archive-export","ms":256.7,"at":1792734546841},{"source":"health","phase":"policy-adoption","ms":4092.7,"at":1792734552489},{"source":"drift","phase":"policy-adoption","ms":4210.5,"at":1792734552490}]},
+    {"side":"after","pair":2,"load":[45.4,35.4,19.1],"errors":0,"eventsOver250ms":[{"source":"drift","phase":"report-4000-tries-attachments","ms":292.5,"at":1792734557003},{"source":"drift","phase":"report-4000-tries-attachments","ms":524.4,"at":1792734557548},{"source":"health","phase":"report-4000-tries-attachments","ms":896.7,"at":1792734557683},{"source":"drift","phase":"report-4000-tries-attachments","ms":258.0,"at":1792734558218},{"source":"drift","phase":"report-4000-tries-attachments","ms":550.1,"at":1792734559388},{"source":"health","phase":"report-4000-tries-attachments","ms":484.9,"at":1792734559390},{"source":"drift","phase":"report-4000-tries-attachments","ms":1083.7,"at":1792734560492},{"source":"health","phase":"report-4000-tries-attachments","ms":980.8,"at":1792734560497},{"source":"health","phase":"archive-export","ms":737.8,"at":1792734578218},{"source":"health","phase":"archive-export","ms":444.1,"at":1792734580106},{"source":"drift","phase":"policy-adoption","ms":434.7,"at":1792734582162},{"source":"health","phase":"policy-adoption","ms":457.8,"at":1792734582171},{"source":"drift","phase":"policy-adoption","ms":404.2,"at":1792734582974},{"source":"health","phase":"policy-adoption","ms":292.1,"at":1792734582976},{"source":"health","phase":"policy-adoption","ms":343.4,"at":1792734585053},{"source":"drift","phase":"policy-adoption","ms":456.1,"at":1792734585054},{"source":"health","phase":"policy-adoption","ms":329.2,"at":1792734585509},{"source":"drift","phase":"policy-adoption","ms":338.8,"at":1792734585520},{"source":"drift","phase":"policy-adoption","ms":257.0,"at":1792734585864},{"source":"drift","phase":"policy-adoption","ms":261.4,"at":1792734586238},{"source":"drift","phase":"policy-adoption","ms":352.6,"at":1792734586633},{"source":"health","phase":"policy-adoption","ms":317.6,"at":1792734587339},{"source":"drift","phase":"policy-adoption","ms":457.8,"at":1792734587440},{"source":"health","phase":"policy-adoption","ms":370.6,"at":1792734588138},{"source":"drift","phase":"policy-adoption","ms":541.6,"at":1792734588218},{"source":"health","phase":"policy-adoption","ms":380.1,"at":1792734588777},{"source":"drift","phase":"policy-adoption","ms":410.9,"at":1792734588794}]},
+    {"side":"before","pair":3,"load":[54.5,38.8,21.0],"errors":0,"eventsOver250ms":[{"source":"drift","phase":"report-4000-tries-attachments","ms":250.3,"at":1792734596615},{"source":"drift","phase":"report-4000-tries-attachments","ms":404.1,"at":1792734597088},{"source":"health","phase":"report-4000-tries-attachments","ms":276.0,"at":1792734597089},{"source":"drift","phase":"report-4000-tries-attachments","ms":289.1,"at":1792734597397},{"source":"drift","phase":"report-4000-tries-attachments","ms":1168.7,"at":1792734599395},{"source":"health","phase":"report-4000-tries-attachments","ms":1115.5,"at":1792734599403},{"source":"drift","phase":"report-4000-tries-attachments","ms":1338.0,"at":1792734600916},{"source":"health","phase":"report-4000-tries-attachments","ms":1235.8,"at":1792734600923},{"source":"drift","phase":"report-4000-tries-attachments","ms":601.7,"at":1792734601538},{"source":"health","phase":"report-4000-tries-attachments","ms":490.0,"at":1792734601540},{"source":"drift","phase":"report-4000-tries-attachments","ms":553.4,"at":1792734602247},{"source":"health","phase":"report-4000-tries-attachments","ms":445.6,"at":1792734602248},{"source":"drift","phase":"report-4000-tries-attachments","ms":653.8,"at":1792734603117},{"source":"health","phase":"report-4000-tries-attachments","ms":573.7,"at":1792734603120},{"source":"drift","phase":"renewDemoWork","ms":251.4,"at":1792734604738},{"source":"health","phase":"archive-export","ms":1239.2,"at":1792734624057},{"source":"health","phase":"policy-adoption","ms":10189.1,"at":1792734638977},{"source":"drift","phase":"policy-adoption","ms":10382.7,"at":1792734639116}]},
+    {"side":"after","pair":3,"load":[64.6,43.8,24.0],"errors":0,"eventsOver250ms":[{"source":"drift","phase":"report-4000-tries-attachments","ms":1350.7,"at":1792734651718},{"source":"drift","phase":"report-4000-tries-attachments","ms":749.5,"at":1792734652488},{"source":"health","phase":"report-4000-tries-attachments","ms":2056.9,"at":1792734652541},{"source":"drift","phase":"report-4000-tries-attachments","ms":511.6,"at":1792734653128},{"source":"health","phase":"report-4000-tries-attachments","ms":462.1,"at":1792734653129},{"source":"drift","phase":"report-4000-tries-attachments","ms":483.0,"at":1792734653631},{"source":"health","phase":"report-4000-tries-attachments","ms":376.5,"at":1792734653632},{"source":"health","phase":"report-4000-tries-attachments","ms":390.6,"at":1792734654151},{"source":"drift","phase":"report-4000-tries-attachments","ms":419.9,"at":1792734654151},{"source":"drift","phase":"report-4000-tries-attachments","ms":515.5,"at":1792734654858},{"source":"health","phase":"report-4000-tries-attachments","ms":434.8,"at":1792734654859},{"source":"drift","phase":"report-4000-tries-attachments","ms":397.1,"at":1792734655388},{"source":"health","phase":"report-4000-tries-attachments","ms":403.0,"at":1792734655389},{"source":"drift","phase":"report-4000-tries-attachments","ms":677.5,"at":1792734656396},{"source":"health","phase":"report-4000-tries-attachments","ms":650.1,"at":1792734656397},{"source":"drift","phase":"report-4000-tries-attachments","ms":485.9,"at":1792734656947},{"source":"health","phase":"report-4000-tries-attachments","ms":424.4,"at":1792734656948},{"source":"health","phase":"report-4000-tries-attachments","ms":754.7,"at":1792734657839},{"source":"drift","phase":"report-4000-tries-attachments","ms":873.3,"at":1792734657841},{"source":"drift","phase":"report-4000-tries-attachments","ms":427.2,"at":1792734658543},{"source":"health","phase":"report-4000-tries-attachments","ms":299.7,"at":1792734658549},{"source":"health","phase":"report-4000-tries-attachments","ms":322.4,"at":1792734658998},{"source":"drift","phase":"report-4000-tries-attachments","ms":417.8,"at":1792734659008},{"source":"drift","phase":"report-4000-tries-attachments","ms":390.9,"at":1792734659419},{"source":"health","phase":"report-4000-tries-attachments","ms":283.8,"at":1792734659426},{"source":"drift","phase":"report-4000-tries-attachments","ms":549.0,"at":1792734660033},{"source":"health","phase":"report-4000-tries-attachments","ms":477.2,"at":1792734660051},{"source":"drift","phase":"report-4000-tries-attachments","ms":535.3,"at":1792734660588},{"source":"health","phase":"report-4000-tries-attachments","ms":380.6,"at":1792734660589},{"source":"drift","phase":"report-4000-tries-attachments","ms":301.0,"at":1792734661014},{"source":"health","phase":"report-4000-tries-attachments","ms":315.2,"at":1792734661046},{"source":"drift","phase":"report-4000-tries-attachments","ms":920.7,"at":1792734662562},{"source":"health","phase":"report-4000-tries-attachments","ms":839.4,"at":1792734662586},{"source":"health","phase":"report-4000-tries-attachments","ms":5020.7,"at":1792734667742},{"source":"drift","phase":"report-4000-tries-attachments","ms":5159.2,"at":1792734667742},{"source":"health","phase":"gate","ms":365.0,"at":1792734668359},{"source":"drift","phase":"gate","ms":446.7,"at":1792734668445},{"source":"drift","phase":"gate","ms":272.8,"at":1792734669037},{"source":"drift","phase":"change-merge","ms":1062.3,"at":1792734670504},{"source":"health","phase":"change-merge","ms":961.9,"at":1792734670515},{"source":"drift","phase":"change-reopen","ms":406.5,"at":1792734671318},{"source":"health","phase":"change-reopen","ms":302.8,"at":1792734671324},{"source":"drift","phase":"renewDemoWork","ms":285.2,"at":1792734672207},{"source":"health","phase":"renewDemoWork","ms":329.9,"at":1792734672211},{"source":"health","phase":"archive-export","ms":393.5,"at":1792734703830},{"source":"drift","phase":"archive-export","ms":423.2,"at":1792734703830},{"source":"health","phase":"archive-export","ms":295.9,"at":1792734704682},{"source":"health","phase":"archive-export","ms":524.4,"at":1792734705511},{"source":"health","phase":"archive-export","ms":1083.0,"at":1792734708005},{"source":"drift","phase":"policy-adoption","ms":328.2,"at":1792734710696},{"source":"drift","phase":"policy-adoption","ms":322.9,"at":1792734711640},{"source":"health","phase":"policy-adoption","ms":418.7,"at":1792734712189},{"source":"drift","phase":"policy-adoption","ms":454.4,"at":1792734712190},{"source":"health","phase":"policy-adoption","ms":535.1,"at":1792734713525},{"source":"drift","phase":"policy-adoption","ms":552.2,"at":1792734713551},{"source":"drift","phase":"policy-adoption","ms":370.0,"at":1792734713982},{"source":"health","phase":"policy-adoption","ms":332.6,"at":1792734713985},{"source":"health","phase":"policy-adoption","ms":386.9,"at":1792734714882},{"source":"drift","phase":"policy-adoption","ms":373.7,"at":1792734714890},{"source":"health","phase":"policy-adoption","ms":459.6,"at":1792734715478},{"source":"drift","phase":"policy-adoption","ms":496.0,"at":1792734715486}]},
+    {"side":"before","pair":4,"load":[64.0,48.5,27.4],"errors":0,"eventsOver250ms":[{"source":"drift","phase":"report-4000-tries-attachments","ms":599.0,"at":1792734722043},{"source":"health","phase":"report-4000-tries-attachments","ms":883.4,"at":1792734722496},{"source":"drift","phase":"report-4000-tries-attachments","ms":383.5,"at":1792734722496},{"source":"drift","phase":"report-4000-tries-attachments","ms":297.4,"at":1792734723277},{"source":"drift","phase":"report-4000-tries-attachments","ms":389.2,"at":1792734723750},{"source":"health","phase":"report-4000-tries-attachments","ms":342.5,"at":1792734723751},{"source":"drift","phase":"report-4000-tries-attachments","ms":548.7,"at":1792734724413},{"source":"health","phase":"report-4000-tries-attachments","ms":536.5,"at":1792734724414},{"source":"health","phase":"report-4000-tries-attachments","ms":345.4,"at":1792734724886},{"source":"drift","phase":"report-4000-tries-attachments","ms":399.4,"at":1792734724886},{"source":"drift","phase":"report-4000-tries-attachments","ms":296.0,"at":1792734725419},{"source":"health","phase":"report-4000-tries-attachments","ms":690.2,"at":1792734726683},{"source":"drift","phase":"report-4000-tries-attachments","ms":713.5,"at":1792734726683},{"source":"health","phase":"change-merge","ms":254.7,"at":1792734727801},{"source":"drift","phase":"change-merge","ms":278.4,"at":1792734727801},{"source":"health","phase":"change-reopen","ms":295.0,"at":1792734728690},{"source":"health","phase":"archive-export","ms":356.1,"at":1792734744768},{"source":"health","phase":"policy-adoption","ms":374.9,"at":1792734749526},{"source":"drift","phase":"policy-adoption","ms":5237.0,"at":1792734755078},{"source":"health","phase":"policy-adoption","ms":5132.3,"at":1792734755081},{"source":"drift","phase":"policy-adoption","ms":463.1,"at":1792734755581},{"source":"health","phase":"policy-adoption","ms":381.2,"at":1792734755588}]},
+    {"side":"after","pair":4,"load":[59.2,49.2,28.6],"errors":0,"eventsOver250ms":[{"source":"drift","phase":"report-4000-tries-attachments","ms":324.5,"at":1792734763649},{"source":"health","phase":"report-4000-tries-attachments","ms":715.1,"at":1792734764648},{"source":"drift","phase":"report-4000-tries-attachments","ms":765.0,"at":1792734764648},{"source":"drift","phase":"report-4000-tries-attachments","ms":481.0,"at":1792734765149},{"source":"health","phase":"report-4000-tries-attachments","ms":376.0,"at":1792734765150},{"source":"health","phase":"report-4000-tries-attachments","ms":453.8,"at":1792734765730},{"source":"drift","phase":"report-4000-tries-attachments","ms":523.7,"at":1792734765730},{"source":"health","phase":"report-4000-tries-attachments","ms":444.8,"at":1792734766827},{"source":"drift","phase":"report-4000-tries-attachments","ms":508.4,"at":1792734766827},{"source":"drift","phase":"report-4000-tries-attachments","ms":334.3,"at":1792734767771},{"source":"health","phase":"report-4000-tries-attachments","ms":929.2,"at":1792734768832},{"source":"drift","phase":"gate","ms":1040.6,"at":1792734768832},{"source":"health","phase":"archive-export","ms":263.6,"at":1792734788670},{"source":"health","phase":"archive-export","ms":1195.4,"at":1792734791231},{"source":"health","phase":"archive-export","ms":600.9,"at":1792734794014},{"source":"drift","phase":"policy-adoption","ms":284.6,"at":1792734796677},{"source":"health","phase":"policy-adoption","ms":405.1,"at":1792734797166},{"source":"drift","phase":"policy-adoption","ms":483.0,"at":1792734797179},{"source":"health","phase":"policy-adoption","ms":265.3,"at":1792734797560},{"source":"drift","phase":"policy-adoption","ms":305.5,"at":1792734797570},{"source":"health","phase":"policy-adoption","ms":575.3,"at":1792734798428},{"source":"drift","phase":"policy-adoption","ms":612.0,"at":1792734798432},{"source":"drift","phase":"policy-adoption","ms":389.2,"at":1792734798895},{"source":"health","phase":"policy-adoption","ms":342.8,"at":1792734798897},{"source":"drift","phase":"policy-adoption","ms":259.0,"at":1792734799174},{"source":"health","phase":"policy-adoption","ms":444.7,"at":1792734799751},{"source":"drift","phase":"policy-adoption","ms":487.6,"at":1792734799751},{"source":"health","phase":"policy-adoption","ms":507.8,"at":1792734800387},{"source":"drift","phase":"policy-adoption","ms":530.2,"at":1792734800387},{"source":"health","phase":"policy-adoption","ms":665.7,"at":1792734801686},{"source":"drift","phase":"policy-adoption","ms":677.5,"at":1792734801688},{"source":"health","phase":"policy-adoption","ms":437.7,"at":1792734802251},{"source":"drift","phase":"policy-adoption","ms":435.9,"at":1792734802253},{"source":"drift","phase":"policy-adoption","ms":347.3,"at":1792734803732}]},
+    {"side":"before","pair":5,"load":[100.8,69.3,41.0],"errors":0,"eventsOver250ms":[{"source":"drift","phase":"report-4000-tries-attachments","ms":381.1,"at":1792734966359},{"source":"health","phase":"idle","ms":416.7,"at":1792734966455},{"source":"drift","phase":"report-4000-tries-attachments","ms":1146.6,"at":1792734967836},{"source":"health","phase":"report-4000-tries-attachments","ms":2419.3,"at":1792734969000},{"source":"drift","phase":"report-4000-tries-attachments","ms":1143.6,"at":1792734969000},{"source":"drift","phase":"report-4000-tries-attachments","ms":314.8,"at":1792734969335},{"source":"drift","phase":"report-4000-tries-attachments","ms":349.5,"at":1792734969704},{"source":"health","phase":"report-4000-tries-attachments","ms":257.8,"at":1792734969718},{"source":"drift","phase":"report-4000-tries-attachments","ms":334.5,"at":1792734970059},{"source":"drift","phase":"report-4000-tries-attachments","ms":1457.8,"at":1792734971536},{"source":"health","phase":"report-4000-tries-attachments","ms":1361.3,"at":1792734971546},{"source":"drift","phase":"report-4000-tries-attachments","ms":1000.3,"at":1792734972557},{"source":"health","phase":"report-4000-tries-attachments","ms":910.4,"at":1792734972583},{"source":"drift","phase":"report-4000-tries-attachments","ms":600.1,"at":1792734973177},{"source":"health","phase":"report-4000-tries-attachments","ms":458.0,"at":1792734973178},{"source":"drift","phase":"report-4000-tries-attachments","ms":378.0,"at":1792734973575},{"source":"health","phase":"report-4000-tries-attachments","ms":271.6,"at":1792734973579},{"source":"health","phase":"report-4000-tries-attachments","ms":376.4,"at":1792734974081},{"source":"drift","phase":"report-4000-tries-attachments","ms":486.1,"at":1792734974081},{"source":"drift","phase":"report-4000-tries-attachments","ms":903.8,"at":1792734975421},{"source":"health","phase":"report-4000-tries-attachments","ms":791.2,"at":1792734975422},{"source":"drift","phase":"report-4000-tries-attachments","ms":525.2,"at":1792734976221},{"source":"health","phase":"report-4000-tries-attachments","ms":485.0,"at":1792734976226},{"source":"health","phase":"report-4000-tries-attachments","ms":1389.8,"at":1792734977963},{"source":"drift","phase":"report-4000-tries-attachments","ms":1442.2,"at":1792734977969},{"source":"health","phase":"report-4000-tries-attachments","ms":300.7,"at":1792734978788},{"source":"drift","phase":"report-4000-tries-attachments","ms":374.5,"at":1792734978788},{"source":"drift","phase":"report-4000-tries-attachments","ms":2209.8,"at":1792734981103},{"source":"health","phase":"report-4000-tries-attachments","ms":2193.3,"at":1792734981107},{"source":"drift","phase":"change-merge","ms":776.9,"at":1792734982384},{"source":"health","phase":"change-merge","ms":679.5,"at":1792734982471},{"source":"drift","phase":"change-reopen","ms":875.0,"at":1792734983560},{"source":"health","phase":"change-reopen","ms":818.0,"at":1792734983564},{"source":"drift","phase":"archive-export","ms":286.6,"at":1792734992735},{"source":"health","phase":"archive-export","ms":289.0,"at":1792734992745},{"source":"health","phase":"archive-export","ms":608.8,"at":1792735010691},{"source":"health","phase":"archive-export","ms":419.4,"at":1792735013646},{"source":"health","phase":"archive-export","ms":296.2,"at":1792735018378},{"source":"health","phase":"archive-export","ms":265.0,"at":1792735019198},{"source":"drift","phase":"archive-export","ms":251.4,"at":1792735019198},{"source":"drift","phase":"archive-export","ms":375.0,"at":1792735019668},{"source":"health","phase":"archive-export","ms":376.6,"at":1792735019710},{"source":"drift","phase":"archive-export","ms":407.6,"at":1792735021037},{"source":"health","phase":"archive-export","ms":378.2,"at":1792735021043},{"source":"drift","phase":"archive-export","ms":263.0,"at":1792735025704},{"source":"drift","phase":"policy-adoption","ms":8288.8,"at":1792735037599},{"source":"health","phase":"policy-adoption","ms":8222.0,"at":1792735037600}]},
+    {"side":"after","pair":5,"load":[99.8,76.9,46.7],"errors":0,"eventsOver250ms":[{"source":"drift","phase":"report-4000-tries-attachments","ms":1101.7,"at":1792735053069},{"source":"health","phase":"report-4000-tries-attachments","ms":1527.1,"at":1792735053604},{"source":"drift","phase":"report-4000-tries-attachments","ms":449.3,"at":1792735053604},{"source":"drift","phase":"report-4000-tries-attachments","ms":550.5,"at":1792735054232},{"source":"health","phase":"report-4000-tries-attachments","ms":508.8,"at":1792735054241},{"source":"drift","phase":"report-4000-tries-attachments","ms":516.7,"at":1792735055104},{"source":"health","phase":"report-4000-tries-attachments","ms":410.8,"at":1792735055106},{"source":"drift","phase":"report-4000-tries-attachments","ms":261.5,"at":1792735055440},{"source":"drift","phase":"report-4000-tries-attachments","ms":568.7,"at":1792735056089},{"source":"health","phase":"report-4000-tries-attachments","ms":522.2,"at":1792735056090},{"source":"health","phase":"report-4000-tries-attachments","ms":369.4,"at":1792735056586},{"source":"drift","phase":"report-4000-tries-attachments","ms":476.7,"at":1792735056586},{"source":"drift","phase":"report-4000-tries-attachments","ms":527.0,"at":1792735057133},{"source":"health","phase":"report-4000-tries-attachments","ms":418.6,"at":1792735057135},{"source":"drift","phase":"report-4000-tries-attachments","ms":575.9,"at":1792735057796},{"source":"health","phase":"report-4000-tries-attachments","ms":539.2,"at":1792735057800},{"source":"drift","phase":"report-4000-tries-attachments","ms":1090.2,"at":1792735058906},{"source":"health","phase":"report-4000-tries-attachments","ms":979.7,"at":1792735058907},{"source":"drift","phase":"report-4000-tries-attachments","ms":335.0,"at":1792735059322},{"source":"health","phase":"report-4000-tries-attachments","ms":288.3,"at":1792735059325},{"source":"health","phase":"report-4000-tries-attachments","ms":297.9,"at":1792735059749},{"source":"drift","phase":"report-4000-tries-attachments","ms":317.6,"at":1792735059749},{"source":"drift","phase":"report-4000-tries-attachments","ms":855.9,"at":1792735060625},{"source":"health","phase":"report-4000-tries-attachments","ms":745.4,"at":1792735060626},{"source":"drift","phase":"gate","ms":289.7,"at":1792735061040},{"source":"health","phase":"report-4000-tries-attachments","ms":288.7,"at":1792735061041},{"source":"health","phase":"archive-export","ms":750.6,"at":1792735078184},{"source":"drift","phase":"policy-adoption","ms":267.3,"at":1792735079824},{"source":"drift","phase":"policy-adoption","ms":447.2,"at":1792735080332},{"source":"health","phase":"policy-adoption","ms":380.6,"at":1792735080333},{"source":"drift","phase":"policy-adoption","ms":268.7,"at":1792735081778},{"source":"health","phase":"policy-adoption","ms":394.9,"at":1792735082974},{"source":"drift","phase":"policy-adoption","ms":415.2,"at":1792735082976},{"source":"health","phase":"policy-adoption","ms":366.5,"at":1792735083690},{"source":"drift","phase":"policy-adoption","ms":369.5,"at":1792735083690},{"source":"health","phase":"policy-adoption","ms":527.3,"at":1792735084473},{"source":"drift","phase":"policy-adoption","ms":556.3,"at":1792735084483},{"source":"drift","phase":"policy-adoption","ms":283.5,"at":1792735085971}]}
   ],
   "verification": {
     "core": {
@@ -4674,7 +414,7 @@
       "executions": 10,
       "passes": 10,
       "failures": 0,
-      "healthMedianMs": 20.05,
+      "healthMedianMs": 20.1,
       "healthRangeMs": [
         2.8,
         197.5
@@ -4707,8 +447,8 @@
       "oldBestAboveBoundMs": 176.4
     },
     "load1Range": [
-      11.8017578125,
-      27.353515625
+      11.8,
+      27.4
     ],
     "runs": [
       {
@@ -4717,12 +457,12 @@
         "exitCode": 1,
         "healthMs": 6755.1,
         "load": [
-          22.10595703125,
-          37.68359375,
-          46.0615234375
+          22.1,
+          37.7,
+          46.1
         ],
-        "wallSeconds": 46.63046884536743,
-        "startedAt": 1792736957.862902,
+        "wallSeconds": 46.6,
+        "startedAt": 1792736957.9,
         "log": "guard-old-1.log"
       },
       {
@@ -4731,12 +471,12 @@
         "exitCode": 0,
         "healthMs": 27.6,
         "load": [
-          27.353515625,
-          36.76025390625,
-          45.2431640625
+          27.4,
+          36.8,
+          45.2
         ],
-        "wallSeconds": 32.91740298271179,
-        "startedAt": 1792737004.49405,
+        "wallSeconds": 32.9,
+        "startedAt": 1792737004.5,
         "log": "guard-new-1.log"
       },
       {
@@ -4745,12 +485,12 @@
         "exitCode": 1,
         "healthMs": 2914.0,
         "load": [
-          24.92626953125,
-          35.283203125,
-          44.4130859375
+          24.9,
+          35.3,
+          44.4
         ],
-        "wallSeconds": 29.84093403816223,
-        "startedAt": 1792737037.41215,
+        "wallSeconds": 29.8,
+        "startedAt": 1792737037.4,
         "log": "guard-old-2.log"
       },
       {
@@ -4759,12 +499,12 @@
         "exitCode": 0,
         "healthMs": 197.5,
         "load": [
-          20.95556640625,
-          33.3154296875,
-          43.38232421875
+          21.0,
+          33.3,
+          43.4
         ],
-        "wallSeconds": 40.944260120391846,
-        "startedAt": 1792737067.253674,
+        "wallSeconds": 40.9,
+        "startedAt": 1792737067.3,
         "log": "guard-new-2.log"
       },
       {
@@ -4773,12 +513,12 @@
         "exitCode": 1,
         "healthMs": 2249.2,
         "load": [
-          23.90771484375,
-          32.52001953125,
-          42.62744140625
+          23.9,
+          32.5,
+          42.6
         ],
-        "wallSeconds": 31.70946192741394,
-        "startedAt": 1792737108.1988301,
+        "wallSeconds": 31.7,
+        "startedAt": 1792737108.2,
         "log": "guard-old-3.log"
       },
       {
@@ -4787,12 +527,12 @@
         "exitCode": 0,
         "healthMs": 12.5,
         "load": [
-          20.1875,
-          30.64306640625,
-          41.53515625
+          20.2,
+          30.6,
+          41.5
         ],
-        "wallSeconds": 22.321588277816772,
-        "startedAt": 1792737139.9091258,
+        "wallSeconds": 22.3,
+        "startedAt": 1792737139.9,
         "log": "guard-new-3.log"
       },
       {
@@ -4801,12 +541,12 @@
         "exitCode": 1,
         "healthMs": 2227.3,
         "load": [
-          20.162109375,
-          29.97998046875,
-          41.044921875
+          20.2,
+          30.0,
+          41.0
         ],
-        "wallSeconds": 16.43812108039856,
-        "startedAt": 1792737162.231076,
+        "wallSeconds": 16.4,
+        "startedAt": 1792737162.2,
         "log": "guard-old-4.log"
       },
       {
@@ -4815,12 +555,12 @@
         "exitCode": 0,
         "healthMs": 6.4,
         "load": [
-          18.7998046875,
-          29.01318359375,
-          40.439453125
+          18.8,
+          29.0,
+          40.4
         ],
-        "wallSeconds": 20.271278858184814,
-        "startedAt": 1792737178.6697521,
+        "wallSeconds": 20.3,
+        "startedAt": 1792737178.7,
         "log": "guard-new-4.log"
       },
       {
@@ -4829,12 +569,12 @@
         "exitCode": 1,
         "healthMs": 1197.9,
         "load": [
-          19.93212890625,
-          28.6591796875,
-          40.04931640625
+          19.9,
+          28.7,
+          40.0
         ],
-        "wallSeconds": 12.276077032089233,
-        "startedAt": 1792737198.941406,
+        "wallSeconds": 12.3,
+        "startedAt": 1792737198.9,
         "log": "guard-old-5.log"
       },
       {
@@ -4843,12 +583,12 @@
         "exitCode": 0,
         "healthMs": 6.1,
         "load": [
-          18.17724609375,
-          27.9951171875,
-          39.68017578125
+          18.2,
+          28.0,
+          39.7
         ],
-        "wallSeconds": 13.245497941970825,
-        "startedAt": 1792737211.217709,
+        "wallSeconds": 13.2,
+        "startedAt": 1792737211.2,
         "log": "guard-new-5.log"
       },
       {
@@ -4857,12 +597,12 @@
         "exitCode": 1,
         "healthMs": 926.4,
         "load": [
-          16.06396484375,
-          27.0478515625,
-          39.13720703125
+          16.1,
+          27.0,
+          39.1
         ],
-        "wallSeconds": 10.143691062927246,
-        "startedAt": 1792737224.463687,
+        "wallSeconds": 10.1,
+        "startedAt": 1792737224.5,
         "log": "guard-old-6.log"
       },
       {
@@ -4871,12 +611,12 @@
         "exitCode": 0,
         "healthMs": 2.8,
         "load": [
-          14.64453125,
-          26.38623046875,
-          38.76123046875
+          14.6,
+          26.4,
+          38.8
         ],
-        "wallSeconds": 10.275617837905884,
-        "startedAt": 1792737234.607557,
+        "wallSeconds": 10.3,
+        "startedAt": 1792737234.6,
         "log": "guard-new-6.log"
       },
       {
@@ -4885,12 +625,12 @@
         "exitCode": 1,
         "healthMs": 1429.6,
         "load": [
-          13.23486328125,
-          25.69775390625,
-          38.3720703125
+          13.2,
+          25.7,
+          38.4
         ],
-        "wallSeconds": 12.133331060409546,
-        "startedAt": 1792737244.88338,
+        "wallSeconds": 12.1,
+        "startedAt": 1792737244.9,
         "log": "guard-old-7.log"
       },
       {
@@ -4899,12 +639,12 @@
         "exitCode": 0,
         "healthMs": 7.8,
         "load": [
-          12.1220703125,
-          25.048828125,
-          37.9931640625
+          12.1,
+          25.0,
+          38.0
         ],
-        "wallSeconds": 10.575103998184204,
-        "startedAt": 1792737257.016948,
+        "wallSeconds": 10.6,
+        "startedAt": 1792737257.0,
         "log": "guard-new-7.log"
       },
       {
@@ -4913,12 +653,12 @@
         "exitCode": 1,
         "healthMs": 3358.2,
         "load": [
-          11.8017578125,
-          24.55322265625,
-          37.666015625
+          11.8,
+          24.6,
+          37.7
         ],
-        "wallSeconds": 23.729435920715332,
-        "startedAt": 1792737267.592246,
+        "wallSeconds": 23.7,
+        "startedAt": 1792737267.6,
         "log": "guard-old-8.log"
       },
       {
@@ -4927,12 +667,12 @@
         "exitCode": 0,
         "healthMs": 123.0,
         "load": [
-          16.47900390625,
-          24.62255859375,
-          37.310546875
+          16.5,
+          24.6,
+          37.3
         ],
-        "wallSeconds": 37.40916085243225,
-        "startedAt": 1792737291.322397,
+        "wallSeconds": 37.4,
+        "startedAt": 1792737291.3,
         "log": "guard-new-8.log"
       },
       {
@@ -4941,12 +681,12 @@
         "exitCode": 1,
         "healthMs": 4558.4,
         "load": [
-          19.84423828125,
-          24.45263671875,
-          36.6640625
+          19.8,
+          24.5,
+          36.7
         ],
-        "wallSeconds": 32.784842014312744,
-        "startedAt": 1792737328.7319171,
+        "wallSeconds": 32.8,
+        "startedAt": 1792737328.7,
         "log": "guard-old-9.log"
       },
       {
@@ -4955,12 +695,12 @@
         "exitCode": 0,
         "healthMs": 148.3,
         "load": [
-          22.6787109375,
-          24.73388671875,
-          36.34423828125
+          22.7,
+          24.7,
+          36.3
         ],
-        "wallSeconds": 31.029040098190308,
-        "startedAt": 1792737361.5173519,
+        "wallSeconds": 31.0,
+        "startedAt": 1792737361.5,
         "log": "guard-new-9.log"
       },
       {
@@ -4969,12 +709,12 @@
         "exitCode": 1,
         "healthMs": 3532.4,
         "load": [
-          21.958984375,
-          24.38623046875,
-          35.81591796875
+          22.0,
+          24.4,
+          35.8
         ],
-        "wallSeconds": 33.37390208244324,
-        "startedAt": 1792737392.5469608,
+        "wallSeconds": 33.4,
+        "startedAt": 1792737392.5,
         "log": "guard-old-10.log"
       },
       {
@@ -4983,12 +723,12 @@
         "exitCode": 0,
         "healthMs": 146.1,
         "load": [
-          22.78759765625,
-          24.28759765625,
-          35.31640625
+          22.8,
+          24.3,
+          35.3
         ],
-        "wallSeconds": 40.29786205291748,
-        "startedAt": 1792737425.922525,
+        "wallSeconds": 40.3,
+        "startedAt": 1792737425.9,
         "log": "guard-new-10.log"
       }
     ],
@@ -5018,12 +758,12 @@
             "exitCode": 0,
             "healthMs": 359.4,
             "load": [
-              64.53466796875,
-              58.6513671875,
-              53.66455078125
+              64.5,
+              58.7,
+              53.7
             ],
-            "wallSeconds": 34.576395750045776,
-            "startedAt": 1792736293.283375,
+            "wallSeconds": 34.6,
+            "startedAt": 1792736293.3,
             "log": "final-new-1.log"
           },
           {
@@ -5032,12 +772,12 @@
             "exitCode": 1,
             "healthMs": 2140.0,
             "load": [
-              58.66064453125,
-              57.89111328125,
-              53.56787109375
+              58.7,
+              57.9,
+              53.6
             ],
-            "wallSeconds": 32.97574305534363,
-            "startedAt": 1792736327.8605921,
+            "wallSeconds": 33.0,
+            "startedAt": 1792736327.9,
             "log": "final-old-1.log"
           },
           {
@@ -5046,12 +786,12 @@
             "exitCode": 0,
             "healthMs": 346.4,
             "load": [
-              54.595703125,
-              57.00537109375,
-              53.42138671875
+              54.6,
+              57.0,
+              53.4
             ],
-            "wallSeconds": 26.474127054214478,
-            "startedAt": 1792736360.841748,
+            "wallSeconds": 26.5,
+            "startedAt": 1792736360.8,
             "log": "final-new-2.log"
           },
           {
@@ -5060,12 +800,12 @@
             "exitCode": 1,
             "healthMs": 2224.0,
             "load": [
-              60.4765625,
-              58.0634765625,
-              53.89794921875
+              60.5,
+              58.1,
+              53.9
             ],
-            "wallSeconds": 31.185261964797974,
-            "startedAt": 1792736387.323942,
+            "wallSeconds": 31.2,
+            "startedAt": 1792736387.3,
             "log": "final-old-2.log"
           },
           {
@@ -5074,12 +814,12 @@
             "exitCode": 0,
             "healthMs": 358.9,
             "load": [
-              62.6650390625,
-              58.90087890625,
-              54.37109375
+              62.7,
+              58.9,
+              54.4
             ],
-            "wallSeconds": 34.27925109863281,
-            "startedAt": 1792736418.5098639,
+            "wallSeconds": 34.3,
+            "startedAt": 1792736418.5,
             "log": "final-new-3.log"
           },
           {
@@ -5088,12 +828,12 @@
             "exitCode": 1,
             "healthMs": 1743.9,
             "load": [
-              58.00439453125,
-              58.2177734375,
-              54.2841796875
+              58.0,
+              58.2,
+              54.3
             ],
-            "wallSeconds": 17.673822164535522,
-            "startedAt": 1792736452.790279,
+            "wallSeconds": 17.7,
+            "startedAt": 1792736452.8,
             "log": "final-old-3.log"
           },
           {
@@ -5102,12 +842,12 @@
             "exitCode": 0,
             "healthMs": 300.1,
             "load": [
-              51.80810546875,
-              56.77978515625,
-              53.85888671875
+              51.8,
+              56.8,
+              53.9
             ],
-            "wallSeconds": 24.266699075698853,
-            "startedAt": 1792736470.464631,
+            "wallSeconds": 24.3,
+            "startedAt": 1792736470.5,
             "log": "final-new-4.log"
           },
           {
@@ -5116,12 +856,12 @@
             "exitCode": 1,
             "healthMs": 2334.4,
             "load": [
-              49.23388671875,
-              55.73046875,
-              53.5615234375
+              49.2,
+              55.7,
+              53.6
             ],
-            "wallSeconds": 26.461873054504395,
-            "startedAt": 1792736494.732539,
+            "wallSeconds": 26.5,
+            "startedAt": 1792736494.7,
             "log": "final-old-4.log"
           },
           {
@@ -5130,12 +870,12 @@
             "exitCode": 0,
             "healthMs": 397.0,
             "load": [
-              46.84326171875,
-              54.591796875,
-              53.20947265625
+              46.8,
+              54.6,
+              53.2
             ],
-            "wallSeconds": 22.36984872817993,
-            "startedAt": 1792736521.194765,
+            "wallSeconds": 22.4,
+            "startedAt": 1792736521.2,
             "log": "final-new-5.log"
           },
           {
@@ -5144,12 +884,12 @@
             "exitCode": 1,
             "healthMs": 2712.0,
             "load": [
-              48.1884765625,
-              54.34912109375,
-              53.16552734375
+              48.2,
+              54.3,
+              53.2
             ],
-            "wallSeconds": 20.794968843460083,
-            "startedAt": 1792736543.5651221,
+            "wallSeconds": 20.8,
+            "startedAt": 1792736543.6,
             "log": "final-old-5.log"
           },
           {
@@ -5158,12 +898,12 @@
             "exitCode": 0,
             "healthMs": 219.8,
             "load": [
-              53.00927734375,
-              55.130859375,
-              53.4775390625
+              53.0,
+              55.1,
+              53.5
             ],
-            "wallSeconds": 28.981104135513306,
-            "startedAt": 1792736564.3604538,
+            "wallSeconds": 29.0,
+            "startedAt": 1792736564.4,
             "log": "final-new-6.log"
           },
           {
@@ -5172,12 +912,12 @@
             "exitCode": 1,
             "healthMs": 1889.5,
             "load": [
-              51.93896484375,
-              54.67041015625,
-              53.3671875
+              51.9,
+              54.7,
+              53.4
             ],
-            "wallSeconds": 15.842566013336182,
-            "startedAt": 1792736593.342114,
+            "wallSeconds": 15.8,
+            "startedAt": 1792736593.3,
             "log": "final-old-6.log"
           },
           {
@@ -5186,12 +926,12 @@
             "exitCode": 0,
             "healthMs": 184.6,
             "load": [
-              53.24609375,
-              54.7919921875,
-              53.43115234375
+              53.2,
+              54.8,
+              53.4
             ],
-            "wallSeconds": 17.14599609375,
-            "startedAt": 1792736609.185048,
+            "wallSeconds": 17.1,
+            "startedAt": 1792736609.2,
             "log": "final-new-7.log"
           },
           {
@@ -5200,12 +940,12 @@
             "exitCode": 1,
             "healthMs": 2104.8,
             "load": [
-              52.67138671875,
-              54.6025390625,
-              53.38720703125
+              52.7,
+              54.6,
+              53.4
             ],
-            "wallSeconds": 20.158143997192383,
-            "startedAt": 1792736626.331381,
+            "wallSeconds": 20.2,
+            "startedAt": 1792736626.3,
             "log": "final-old-7.log"
           },
           {
@@ -5214,12 +954,12 @@
             "exitCode": 0,
             "healthMs": 111.0,
             "load": [
-              52.84228515625,
-              54.51513671875,
-              53.38330078125
+              52.8,
+              54.5,
+              53.4
             ],
-            "wallSeconds": 12.688732147216797,
-            "startedAt": 1792736646.4900548,
+            "wallSeconds": 12.7,
+            "startedAt": 1792736646.5,
             "log": "final-new-8.log"
           },
           {
@@ -5228,12 +968,12 @@
             "exitCode": 0,
             "healthMs": 814.3,
             "load": [
-              48.41162109375,
-              53.458984375,
-              53.0263671875
+              48.4,
+              53.5,
+              53.0
             ],
-            "wallSeconds": 9.607646942138672,
-            "startedAt": 1792736659.1791759,
+            "wallSeconds": 9.6,
+            "startedAt": 1792736659.2,
             "log": "final-old-8.log"
           },
           {
@@ -5242,12 +982,12 @@
             "exitCode": 0,
             "healthMs": 123.1,
             "load": [
-              44.798828125,
-              52.52099609375,
-              52.6982421875
+              44.8,
+              52.5,
+              52.7
             ],
-            "wallSeconds": 9.967482089996338,
-            "startedAt": 1792736668.7870998,
+            "wallSeconds": 10.0,
+            "startedAt": 1792736668.8,
             "log": "final-new-9.log"
           },
           {
@@ -5256,12 +996,12 @@
             "exitCode": 1,
             "healthMs": 1008.7,
             "load": [
-              43.04150390625,
-              51.90673828125,
-              52.478515625
+              43.0,
+              51.9,
+              52.5
             ],
-            "wallSeconds": 9.623871088027954,
-            "startedAt": 1792736678.755311,
+            "wallSeconds": 9.6,
+            "startedAt": 1792736678.8,
             "log": "final-old-9.log"
           },
           {
@@ -5270,12 +1010,12 @@
             "exitCode": 0,
             "healthMs": 320.9,
             "load": [
-              41.013671875,
-              51.1708984375,
-              52.2099609375
+              41.0,
+              51.2,
+              52.2
             ],
-            "wallSeconds": 9.363605976104736,
-            "startedAt": 1792736688.3796759,
+            "wallSeconds": 9.4,
+            "startedAt": 1792736688.4,
             "log": "final-new-10.log"
           },
           {
@@ -5284,12 +1024,12 @@
             "exitCode": 0,
             "healthMs": 944.8,
             "load": [
-              41.49267578125,
-              51.1015625,
-              52.17919921875
+              41.5,
+              51.1,
+              52.2
             ],
-            "wallSeconds": 8.342037916183472,
-            "startedAt": 1792736697.743484,
+            "wallSeconds": 8.3,
+            "startedAt": 1792736697.7,
             "log": "final-old-10.log"
           }
         ],
@@ -5305,12 +1045,12 @@
             "exitCode": 0,
             "healthMs": 89.6,
             "load": [
-              37.9794921875,
-              46.8876953125,
-              50.40234375
+              38.0,
+              46.9,
+              50.4
             ],
-            "wallSeconds": 8.454841136932373,
-            "startedAt": 1792736792.247179,
+            "wallSeconds": 8.5,
+            "startedAt": 1792736792.2,
             "log": "selected-new-1.log"
           },
           {
@@ -5319,12 +1059,12 @@
             "exitCode": 0,
             "healthMs": 449.2,
             "load": [
-              37.84130859375,
-              46.56201171875,
-              50.24560546875
+              37.8,
+              46.6,
+              50.2
             ],
-            "wallSeconds": 6.187735080718994,
-            "startedAt": 1792736800.702678,
+            "wallSeconds": 6.2,
+            "startedAt": 1792736800.7,
             "log": "selected-old-1.log"
           },
           {
@@ -5333,12 +1073,12 @@
             "exitCode": 0,
             "healthMs": 111.8,
             "load": [
-              36.89306640625,
-              46.22021484375,
-              50.103515625
+              36.9,
+              46.2,
+              50.1
             ],
-            "wallSeconds": 6.928645133972168,
-            "startedAt": 1792736806.8906639,
+            "wallSeconds": 6.9,
+            "startedAt": 1792736806.9,
             "log": "selected-new-2.log"
           },
           {
@@ -5347,12 +1087,12 @@
             "exitCode": 0,
             "healthMs": 501.8,
             "load": [
-              35.57958984375,
-              45.63525390625,
-              49.8505859375
+              35.6,
+              45.6,
+              49.9
             ],
-            "wallSeconds": 5.736804246902466,
-            "startedAt": 1792736813.8195488,
+            "wallSeconds": 5.7,
+            "startedAt": 1792736813.8,
             "log": "selected-old-2.log"
           },
           {
@@ -5361,12 +1101,12 @@
             "exitCode": 0,
             "healthMs": 12.6,
             "load": [
-              33.45068359375,
-              45.02685546875,
-              49.61083984375
+              33.5,
+              45.0,
+              49.6
             ],
-            "wallSeconds": 5.328235864639282,
-            "startedAt": 1792736819.556698,
+            "wallSeconds": 5.3,
+            "startedAt": 1792736819.6,
             "log": "selected-new-3.log"
           },
           {
@@ -5375,12 +1115,12 @@
             "exitCode": 0,
             "healthMs": 422.4,
             "load": [
-              32.29345703125,
-              44.5947265625,
-              49.43115234375
+              32.3,
+              44.6,
+              49.4
             ],
-            "wallSeconds": 4.905596733093262,
-            "startedAt": 1792736824.8851662,
+            "wallSeconds": 4.9,
+            "startedAt": 1792736824.9,
             "log": "selected-old-3.log"
           },
           {
@@ -5389,12 +1129,12 @@
             "exitCode": 0,
             "healthMs": 65.1,
             "load": [
-              30.34765625,
-              43.98681640625,
-              49.18798828125
+              30.3,
+              44.0,
+              49.2
             ],
-            "wallSeconds": 4.879002094268799,
-            "startedAt": 1792736829.7909849,
+            "wallSeconds": 4.9,
+            "startedAt": 1792736829.8,
             "log": "selected-new-4.log"
           },
           {
@@ -5403,12 +1143,12 @@
             "exitCode": 0,
             "healthMs": 529.0,
             "load": [
-              30.7197265625,
-              43.83740234375,
-              49.1044921875
+              30.7,
+              43.8,
+              49.1
             ],
-            "wallSeconds": 5.4764931201934814,
-            "startedAt": 1792736834.6704159,
+            "wallSeconds": 5.5,
+            "startedAt": 1792736834.7,
             "log": "selected-old-4.log"
           },
           {
@@ -5417,12 +1157,12 @@
             "exitCode": 0,
             "healthMs": 66.2,
             "load": [
-              35.38623046875,
-              44.5869140625,
-              49.337890625
+              35.4,
+              44.6,
+              49.3
             ],
-            "wallSeconds": 6.401504039764404,
-            "startedAt": 1792736840.1471958,
+            "wallSeconds": 6.4,
+            "startedAt": 1792736840.1,
             "log": "selected-new-5.log"
           },
           {
@@ -5431,12 +1171,12 @@
             "exitCode": 0,
             "healthMs": 516.6,
             "load": [
-              35.51513671875,
-              44.4609375,
-              49.26513671875
+              35.5,
+              44.5,
+              49.3
             ],
-            "wallSeconds": 6.353715896606445,
-            "startedAt": 1792736846.548967,
+            "wallSeconds": 6.4,
+            "startedAt": 1792736846.5,
             "log": "selected-old-5.log"
           },
           {
@@ -5445,12 +1185,12 @@
             "exitCode": 0,
             "healthMs": 5.5,
             "load": [
-              33.8720703125,
-              43.9716796875,
-              49.06396484375
+              33.9,
+              44.0,
+              49.1
             ],
-            "wallSeconds": 7.359281063079834,
-            "startedAt": 1792736852.902981,
+            "wallSeconds": 7.4,
+            "startedAt": 1792736852.9,
             "log": "selected-new-6.log"
           },
           {
@@ -5459,12 +1199,12 @@
             "exitCode": 0,
             "healthMs": 275.1,
             "load": [
-              31.71923828125,
-              43.1806640625,
-              48.72412109375
+              31.7,
+              43.2,
+              48.7
             ],
-            "wallSeconds": 3.286339044570923,
-            "startedAt": 1792736860.262544,
+            "wallSeconds": 3.3,
+            "startedAt": 1792736860.3,
             "log": "selected-old-6.log"
           },
           {
@@ -5473,12 +1213,12 @@
             "exitCode": 0,
             "healthMs": 46.0,
             "load": [
-              29.49951171875,
-              42.52978515625,
-              48.4619140625
+              29.5,
+              42.5,
+              48.5
             ],
-            "wallSeconds": 3.1098508834838867,
-            "startedAt": 1792736863.549058,
+            "wallSeconds": 3.1,
+            "startedAt": 1792736863.5,
             "log": "selected-new-7.log"
           },
           {
@@ -5487,12 +1227,12 @@
             "exitCode": 0,
             "healthMs": 260.3,
             "load": [
-              29.49951171875,
-              42.52978515625,
-              48.4619140625
+              29.5,
+              42.5,
+              48.5
             ],
-            "wallSeconds": 2.5320751667022705,
-            "startedAt": 1792736866.65918,
+            "wallSeconds": 2.5,
+            "startedAt": 1792736866.7,
             "log": "selected-old-7.log"
           },
           {
@@ -5501,12 +1241,12 @@
             "exitCode": 0,
             "healthMs": 1.9,
             "load": [
-              27.45751953125,
-              41.8896484375,
-              48.201171875
+              27.5,
+              41.9,
+              48.2
             ],
-            "wallSeconds": 2.856311082839966,
-            "startedAt": 1792736869.191433,
+            "wallSeconds": 2.9,
+            "startedAt": 1792736869.2,
             "log": "selected-new-8.log"
           },
           {
@@ -5515,12 +1255,12 @@
             "exitCode": 0,
             "healthMs": 267.8,
             "load": [
-              27.45751953125,
-              41.8896484375,
-              48.201171875
+              27.5,
+              41.9,
+              48.2
             ],
-            "wallSeconds": 2.869943141937256,
-            "startedAt": 1792736872.047967,
+            "wallSeconds": 2.9,
+            "startedAt": 1792736872.0,
             "log": "selected-old-8.log"
           },
           {
@@ -5529,12 +1269,12 @@
             "exitCode": 0,
             "healthMs": 6.8,
             "load": [
-              25.57861328125,
-              41.26025390625,
-              47.94189453125
+              25.6,
+              41.3,
+              47.9
             ],
-            "wallSeconds": 3.135220766067505,
-            "startedAt": 1792736874.918111,
+            "wallSeconds": 3.1,
+            "startedAt": 1792736874.9,
             "log": "selected-new-9.log"
           },
           {
@@ -5543,12 +1283,12 @@
             "exitCode": 0,
             "healthMs": 277.2,
             "load": [
-              25.57861328125,
-              41.26025390625,
-              47.94189453125
+              25.6,
+              41.3,
+              47.9
             ],
-            "wallSeconds": 3.2407121658325195,
-            "startedAt": 1792736878.053532,
+            "wallSeconds": 3.2,
+            "startedAt": 1792736878.1,
             "log": "selected-old-9.log"
           },
           {
@@ -5557,12 +1297,12 @@
             "exitCode": 0,
             "healthMs": 88.3,
             "load": [
-              26.5732421875,
-              41.2060546875,
-              47.88330078125
+              26.6,
+              41.2,
+              47.9
             ],
-            "wallSeconds": 5.801915168762207,
-            "startedAt": 1792736881.2944388,
+            "wallSeconds": 5.8,
+            "startedAt": 1792736881.3,
             "log": "selected-new-10.log"
           },
           {
@@ -5571,12 +1311,12 @@
             "exitCode": 0,
             "healthMs": 627.9,
             "load": [
-              28.76904296875,
-              41.41796875,
-              47.9189453125
+              28.8,
+              41.4,
+              47.9
             ],
-            "wallSeconds": 5.504788160324097,
-            "startedAt": 1792736887.0969348,
+            "wallSeconds": 5.5,
+            "startedAt": 1792736887.1,
             "log": "selected-old-10.log"
           }
         ],
