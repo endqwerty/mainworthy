@@ -27,6 +27,7 @@ In a short desktop window, the question pane scrolls so you can read the evidenc
 An answer key or button pages through unread proposal edits before it records an answer.
 If the buttons have scrolled the evidence out of view, clicking an answer scrolls the question pane to reveal it.
 The sidebar and question list stay in place.
+Each press brings the next unread part into view; after every part has appeared, press again to record the answer.
 Scroll the question pane to reach the buttons again, or continue with the answer key.
 The "Open" view contains questions that need an answer. "Settled" contains decisions,
 including answers that ended when their cause passed, their flaky hold expired, or their tracker issue closed.
