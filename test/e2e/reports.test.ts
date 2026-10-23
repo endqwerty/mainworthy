@@ -103,6 +103,23 @@ import { browserAvailable, openPage, startServer } from "./support.ts";
 				await page.screenshot({ path: process.env.MAINWORTHY_REPORT_SCREENSHOT });
 			await detail.getByText("Showing 20 of 25", { exact: true }).waitFor();
 			expect(await detail.locator("tbody tr").count()).toBe(20);
+			await page.route("**/api/p/scratch/stats", async (route) => {
+				const input = route.request().postDataJSON();
+				if (input.of === "flaky" && input.cursor === 20)
+					await route.fulfill({
+						status: 503,
+						json: { ok: false, error: { code: "internal", message: "Report page unavailable" } },
+					});
+				else await route.continue();
+			});
+			await detail.getByRole("button", { name: "Next page", exact: true }).click();
+			await detail.getByText("Report page unavailable", { exact: true }).waitFor();
+			if (process.env.MAINWORTHY_REPORT_ERROR_SCREENSHOT)
+				await page.screenshot({ path: process.env.MAINWORTHY_REPORT_ERROR_SCREENSHOT });
+			await detail.getByRole("button", { name: "Previous page", exact: true }).click();
+			await detail.getByText("Showing 20 of 25", { exact: true }).waitFor();
+			await page.unroute("**/api/p/scratch/stats");
+
 			await detail.getByRole("button", { name: "Next page", exact: true }).click();
 			await detail.getByRole("link", { name: "T-25", exact: true }).waitFor();
 			await detail.getByText("Showing 5 of 25", { exact: true }).waitFor();

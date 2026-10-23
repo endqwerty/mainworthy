@@ -167,6 +167,7 @@ test.skipIf(!browserAvailable)(
 				["/p/scratch/changes/pr%3A482", "Next change"],
 				["/p/scratch/tests", "Next test"],
 				["/p/scratch/reports", "Next report"],
+				["/p/scratch/reports/flaky", "Next report page"],
 				["/p/scratch/settings", "Next setting"],
 			] satisfies [string, string][];
 			let listed = 0;

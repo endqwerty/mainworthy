@@ -210,6 +210,8 @@ A step number typed before <kbd>f</kbd> marks the failed step. [Planned runs](./
 | --- | --- |
 | <kbd>j</kbd> | Next report |
 | <kbd>k</kbd> | Previous report |
+| <kbd>n</kbd> | Next report page |
+| <kbd>p</kbd> | Previous report page |
 
 ## Settings
 
