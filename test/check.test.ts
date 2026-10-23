@@ -934,20 +934,30 @@ test("only main publishes the image that passed the smoke test, after the gate",
 	expect(readFileSync("Dockerfile", "utf8")).toContain("ENV MAINWORTHY_COMMIT=$MAINWORTHY_COMMIT");
 });
 
-test("image publication pins every action and derives creation time from the commit", () => {
+test("every workflow pins every action to a full commit with a release version comment", () => {
+	const job = z.object({
+		uses: z.string().optional(),
+		steps: z.array(z.object({ uses: z.string().optional() })).default([]),
+	});
+	for (const file of new Glob(".github/workflows/*.{yml,yaml}").scanSync(".")) {
+		const source = readFileSync(file, "utf8");
+		const { jobs } = z.object({ jobs: z.record(z.string(), job) }).parse(Bun.YAML.parse(source));
+		const actions = Object.values(jobs)
+			.flatMap((job) => [job.uses, ...job.steps.map((step) => step.uses)])
+			.filter((uses) => uses !== undefined);
+		const lines = [...source.matchAll(/^[\t ]*(?:-[\t ]+)?uses:[\t ]*(.+)$/gm)];
+		expect(lines.length, `${file}: every action has its own annotated uses line`).toBe(actions.length);
+		for (const uses of actions) expect(uses, file).toMatch(/^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/);
+		for (const line of lines) expect(line[1], file).toMatch(/^[\w.-]+\/[\w./-]+@[0-9a-f]{40} # v\d+\.\d+\.\d+$/);
+	}
+});
+
+test("image publication derives creation time from the commit", () => {
 	const workflow = readFileSync(".github/workflows/check.yml", "utf8");
 	const actionJob = z.object({ steps: z.array(z.object({ uses: z.string().optional(), run: z.string().optional() })) });
 	const { jobs } = z
 		.object({ jobs: z.object({ image: actionJob, publish: actionJob }) })
 		.parse(Bun.YAML.parse(workflow));
-	for (const job of Object.values(jobs)) {
-		for (const step of job.steps) {
-			if (!step.uses) continue;
-			expect(step.uses).toMatch(/^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/);
-			const line = workflow.split("\n").find((line) => line.includes(`uses: ${step.uses}`));
-			expect(line).toMatch(/ # v\d+\.\d+\.\d+$/);
-		}
-	}
 	const created = jobs.image.steps.find((step) => step.run?.includes("time="))?.run ?? "";
 	expect(created).toContain("git log -1 --format=%cI");
 	expect(created).not.toContain("date ");
