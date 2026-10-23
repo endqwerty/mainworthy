@@ -84,7 +84,19 @@ The other five tools write data:
 - `decide` answers a question.
 
 Start with `impact` to find the relevant cases without reading the whole suite.
-Keep the returned cursor. On the next `impact` call, pass that cursor as `since`.
+Each reply holds at most 200 cases. When `next` is not null, pass it as `cursor` with the same
+`change`, `files`, `since`, and `ledger` inputs. Read every page before saving the final reply's
+`cursor` for the next review's `since`. Partial pages keep the previous watermark, or `s:0`
+when no `since` was given, so stopping early cannot skip unread cases.
+
+Counts describe the full selection. Cases sort by unreviewed first, then case number. Every accepted
+path is processed, up to 5,000; `counts.uncovered` includes all uncovered paths, while `uncovered`
+lists the first 50. A continuation belongs to the same caller, project, inputs, and project sequence.
+After a project write, including a review, continuation returns a conflict. Restart without `cursor`
+and keep the original `since`. Finish reading pages before recording reviews.
+
+The CLI prints `next` and `cursor` in its JSON output. Use `mainworthy impact --change pr:482
+--cursor '<next>'` for the following page, repeating any other input flags.
 [API and agent tools](./api.md#agent-tools) lists every tool's inputs.
 
 To record a change review, follow these steps.

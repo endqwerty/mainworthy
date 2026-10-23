@@ -331,13 +331,14 @@ Find cases/tests/runs/slots; cursor pages.
 
 ## impact
 
-Cases and review evidence for change/files; cursor becomes since.
+Cases for change/files. Page next as cursor with the same inputs; only the final cursor becomes since. Restart after project writes.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `change` | `string` | no | A change key, for example pr:482. |
 | `files` | `array<string>` | no | Changed paths, when the change is not known to Mainworthy. |
 | `since` | `string` | no | A cursor from an earlier call: only what moved since. |
+| `cursor` | `string` | no | The previous impact next value. Keep the same inputs; restart after a project change. |
 | `ledger` | `boolean` | no | False for fresh eyes: do not hide what was already reviewed. Default: `true`. |
 | `project` | `string` | no |  |
 

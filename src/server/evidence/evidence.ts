@@ -558,7 +558,7 @@ const Q = {
 		"SELECT * FROM targets WHERE project = $project AND commit_sha >= $low AND commit_sha < $high ORDER BY id",
 	),
 	caseIdsOfFile: sql<{ project: number; file: string }, { case_id: number | null }>(
-		"SELECT case_id FROM tests WHERE project = $project AND file = $file LIMIT 500",
+		"SELECT DISTINCT case_id FROM tests WHERE project = $project AND file = $file",
 	),
 	failedWith: sql<{ project: number; signature: number }, { test: number; target: number }>(
 		`SELECT DISTINCT test, target FROM results

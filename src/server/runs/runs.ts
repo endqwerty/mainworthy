@@ -512,7 +512,7 @@ export function fillsOf(db: Db, slot: number): Fill[] {
 	}
 	return fills.sort((a, b) => a.seq - b.seq || a.ord - b.ord);
 }
-export const failingTestsOf = (db: Db, run: number, limit: number) => db.all(Q.failingRunTests, { run, limit });
+export const failingTestsOf = (db: Db, run: number, limit = -1) => db.all(Q.failingRunTests, { run, limit });
 export const runTestsWith = (db: Db, run: number, outcome: string, limit: number) =>
 	db.all(Q.runTests, { run, outcome, limit });
 /** How many of a run's tests both passed and failed on its commit, leaving out a flip a correction withdrew (#630). */

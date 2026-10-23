@@ -6,6 +6,52 @@ import Testing
 
 @Suite("Changes against the server", .enabled(if: Live.isRunning, "needs `bun scripts/ios.ts test`"))
 struct ChangesLiveTests {
+	@Test("all 450 affected cases are read across impact pages, restarting after a write", arguments: [false, true])
+	func impactPages(_ move: Bool) async throws {
+		let server = Live.server()
+		_ = try await server.signIn(Live.owner)
+		let client = try await server.project(try await Live.project())
+		let edits: [JSONValue] = (1...450).map { index in
+			["op": "create", "outline": .string("Affected case \(index)\n  Check > Works"), "covers": ["REQ-396"]]
+		}
+		let _: JSONValue = try await server.write("propose", in: client.key, ["edits": .array(edits)])
+		let _: JSONValue = try await server.write("report", in: client.key, [
+			"target": ["commit": "iosimpact396", "pr": 396, "title": "REQ-396: review affected cases"],
+			"results": [["test": ["key": "ios-impact"], "outcome": "pass"]],
+		])
+		let reader = Server(instance: Live.instance, secrets: MemoryStore(), transport: MovingImpact(client: client, move: move))
+		_ = try await reader.signIn(Live.owner)
+		let detail = try await reader.project(client.key).details(of: "pr:396")
+		let count = move ? 451 : 450
+		#expect(detail.caseCount == count)
+		#expect(detail.cases.count == count)
+		#expect(Set(detail.cases.map(\.id)).count == count)
+		#expect(detail.cases.map(\.title) == (1...count).map { "Affected case \($0)" })
+	}
+
+	actor MovingImpact: Transport {
+		let client: ProjectClient
+		private var move: Bool
+		private let network = URLSessionTransport()
+
+		init(client: ProjectClient, move: Bool) { self.client = client; self.move = move }
+
+		func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+			if move, request.url?.lastPathComponent == "impact", let body = request.httpBody,
+				try JSONDecoder().decode(JSONValue.self, from: body)["cursor"]?.string != nil {
+				move = false
+				let _: JSONValue = try await client.server.write("propose", in: client.key, [
+					"edits": [["op": "create", "outline": "Affected case 451\n  Check > Works", "covers": ["REQ-396"]]],
+				])
+			}
+			return try await network.send(request)
+		}
+
+		func lines(_ request: URLRequest) async throws -> (AsyncThrowingStream<String, any Error>, HTTPURLResponse) {
+			try await network.lines(request)
+		}
+	}
+
 	@Test("the head's gate, questions, failures and impact are read, and answering unblocks it")
 	func details() async throws {
 		let client = try await Live.signedIn().project(try await Live.project())

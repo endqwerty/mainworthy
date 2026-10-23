@@ -1,7 +1,7 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { z } from "zod";
-import { MergeReceipt, MergeReceiptResult } from "../../core/changes.ts";
+import { type MergeReceipt, MergeReceiptResult } from "../../core/changes.ts";
 import { ANSWER_LABELS, endingText } from "../../core/kinds.ts";
 import {
 	RESULT_STANDING_LABELS,
@@ -10,13 +10,7 @@ import {
 	ShardWait,
 	Verdict,
 } from "../../core/runs.ts";
-import {
-	nullableText as schemaNullableText,
-	number as schemaNumber,
-	optionalFlag as schemaOptionalFlag,
-	text as schemaText,
-	texts as schemaTexts,
-} from "../../core/schema.ts";
+import { nullableText as schemaNullableText, text as schemaText } from "../../core/schema.ts";
 import { call } from "../lib/api.ts";
 import { queryKey, useQueryOp } from "../lib/data.ts";
 import { useBindings } from "../lib/keys.ts";
@@ -51,21 +45,6 @@ const Change = z.object({
 		.nullable(),
 });
 type Change = z.infer<typeof Change>;
-const Impact = z.object({
-	change: z.object({ head: schemaNullableText, mergeReceipt: MergeReceipt.nullable() }),
-	counts: z.object({ cases: schemaNumber, unreviewed: schemaNumber, failing: schemaNumber, uncovered: schemaNumber }),
-	cases: z.array(
-		z.object({
-			id: schemaText,
-			title: schemaText,
-			why: schemaTexts,
-			reviewed: schemaOptionalFlag,
-			last: schemaNullableText,
-		}),
-	),
-	uncovered: schemaTexts,
-	policy: schemaText,
-});
 
 export function ChangesScreen() {
 	const { project } = useApp();
@@ -80,7 +59,8 @@ function ChangesWorkbench() {
 	const changes = parsed.success ? parsed.data : [];
 	const key = route.ref ?? cursor ?? changes[0]?.key ?? null;
 	const current = changes.find((item) => item.key === key);
-	const gate = useQueryOp({ project, op: "gate", input: { change: key ?? "" }, enabled: Boolean(key) });
+	const impactInput = { change: key ?? "" };
+	const gate = useQueryOp({ project, op: "gate", input: impactInput, enabled: Boolean(key) });
 	const open = useQueryOp({
 		project,
 		op: "inbox",
@@ -93,11 +73,21 @@ function ChangesWorkbench() {
 		input: { state: "decided", on: key ?? "", limit: 500 },
 		enabled: Boolean(key),
 	});
-	const impact = useQueryOp({ project, op: "impact", input: { change: key ?? "" }, enabled: Boolean(key) });
+	const impact = useInfiniteQuery({
+		queryKey: [...queryKey({ project, op: "impact", input: impactInput }), "pages"],
+		meta: { restartOnChange: true },
+		enabled: Boolean(key),
+		initialPageParam: "",
+		queryFn: ({ pageParam, signal }) =>
+			call("impact", { ...impactInput, cursor: pageParam || undefined }, { project, signal }),
+		getNextPageParam: (page) => page.next ?? undefined,
+	});
 	const gateData = gate.isPlaceholderData ? undefined : gate.data;
 	const openData = open.isPlaceholderData ? undefined : open.data;
 	const settledData = settled.isPlaceholderData ? undefined : settled.data;
-	const impactData = Impact.safeParse(impact.isPlaceholderData ? undefined : impact.data);
+	const impactData = impact.data?.pages[0];
+	const impactChange = impactData?.change;
+	const affectedCases = impact.data?.pages.flatMap((page) => page.cases) ?? [];
 	const link = linkTo(current?.url ?? null);
 	const go = (ref: string) => navigate(refUrl({ project, ref }));
 	const choose = (change: string) => {
@@ -211,9 +201,10 @@ function ChangesWorkbench() {
 										})}
 								</div>
 							)}
-							{current?.state === "merged" && impactData.success && impactData.data.change.head === current.head && (
-								<MergeGateReceipt receipt={impactData.data.change.mergeReceipt} />
-							)}
+							{current?.state === "merged" &&
+								impactChange &&
+								"head" in impactChange &&
+								impactChange.head === current.head && <MergeGateReceipt receipt={impactChange.mergeReceipt} />}
 							{current && <ChangeEnding change={current} />}
 							<SectionHeading>Open questions</SectionHeading>
 							{open.error && <p role="status">{open.error.message}</p>}
@@ -277,13 +268,13 @@ function ChangesWorkbench() {
 							<ChangeRuns key={`runs:${key}`} change={key} />
 							<SectionHeading>Impact</SectionHeading>
 							{impact.error && <p role="status">{impact.error.message}</p>}
-							{impactData.success && (
+							{impactData && (
 								<>
 									<p className="dim">
-										{impactData.data.counts.cases} cases · {impactData.data.counts.unreviewed} unreviewed ·{" "}
-										{impactData.data.counts.failing} failing
+										{impactData.counts.cases} cases · {impactData.counts.unreviewed} unreviewed ·{" "}
+										{impactData.counts.failing} failing
 									</p>
-									{impactData.data.cases.map((c) => (
+									{affectedCases.map((c) => (
 										<a
 											className="change-impact"
 											key={c.id}
@@ -312,11 +303,16 @@ function ChangesWorkbench() {
 											{c.reviewed && <span className="dim">reviewed by you</span>}
 										</a>
 									))}
-									{!impactData.data.cases.length && <p className="dim">No linked cases touch these files.</p>}
+									{impact.hasNextPage && (
+										<button type="button" disabled={impact.isFetchingNextPage} onClick={() => impact.fetchNextPage()}>
+											More affected cases
+										</button>
+									)}
+									{!affectedCases.length && <p className="dim">No linked cases touch these files.</p>}
 									<SectionHeading>Uncovered files</SectionHeading>
-									{impactData.data.uncovered.length ? (
+									{impactData.uncovered.length ? (
 										<ul className="change-files">
-											{impactData.data.uncovered.map((file) => (
+											{impactData.uncovered.map((file) => (
 												<li key={file}>{file}</li>
 											))}
 										</ul>

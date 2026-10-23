@@ -25,7 +25,7 @@ import { grantedProjects, VERSION } from "./http.ts";
 export const TOOL_TOKEN_GUIDELINE = { total: 5000, perTool: 1500 };
 
 const INSTRUCTIONS =
-	"Start with impact for a change or inbox for questions, and omit project only when the instance has exactly one project. Pass etag back with unless and hashes with onEvidence, and reuse cursors with since. Your answers may be advice; check the reply status, and with admin, read base for policy clauses or settings through CLI policy show --json or HTTP admin policy.show.";
+	"Start with impact for a change or inbox for questions, and omit project only when the instance has exactly one project. Pass etag back with unless and hashes with onEvidence, and page impact's next as cursor before saving its final cursor for since. Your answers may be advice; check the reply status, and with admin, read base for policy clauses or settings through CLI policy show --json or HTTP admin policy.show.";
 const DESCRIPTIONS = new Map([
 	["Exact commit from impact's change.head; required for review reuse.", ""],
 	["Current code host head.", ""],

@@ -1342,6 +1342,21 @@ function landingView(ctx: Ctx, change: ChangeRow) {
  */
 export function impact(ctx: Ctx, input: ImpactInput): Record<string, unknown> {
 	const project = ctx.project.id;
+	const version = contentHash({
+		project: ctx.project.identity,
+		actor: ctx.actor.id,
+		seq: ctx.seq,
+		change: input.change ?? null,
+		files: input.files ?? null,
+		since: input.since ?? null,
+		ledger: input.ledger,
+	});
+	const at = input.cursor ? /^(\d+)\.([0-9a-f]{12})$/.exec(input.cursor) : null;
+	const offset = at ? Number(at[1]) : 0;
+	if (input.cursor && (!at || !Number.isSafeInteger(offset) || offset < 200 || offset % 200 !== 0))
+		throw invalid("that is not an impact continuation");
+	if (at && at[2] !== version)
+		throw conflict("the project or impact inputs changed: restart without cursor, keeping the original since");
 	const change = input.change ? changeByKey(ctx.db, project, input.change) : null;
 	if (input.change && !change && !input.files) throw notFound(`change ${input.change}`);
 	const files = input.files ?? (change ? json<string[]>(change.files) : []);
@@ -1354,7 +1369,7 @@ export function impact(ctx: Ctx, input: ImpactInput): Record<string, unknown> {
 	};
 
 	const uncovered: string[] = [];
-	for (const file of files.slice(0, 2000)) {
+	for (const file of files) {
 		let hit = false;
 		for (const caseId of caseIdsOfFile(ctx.db, project, file)) {
 			note(caseId, `test:${file}`);
@@ -1368,7 +1383,7 @@ export function impact(ctx: Ctx, input: ImpactInput): Record<string, unknown> {
 	const run = change?.head_sha ? gate(ctx, { change: change.key }) : null;
 	const headRun = run?.run ? mustRun(ctx.db, project, run.run) : null;
 	if (headRun) {
-		for (const failing of failingTestsOf(ctx.db, headRun.id, 200)) {
+		for (const failing of failingTestsOf(ctx.db, headRun.id)) {
 			const test = testById(ctx.db, failing.test);
 			if (test?.case_id != null) note(test.case_id, "failing");
 		}
@@ -1385,7 +1400,7 @@ export function impact(ctx: Ctx, input: ImpactInput): Record<string, unknown> {
 		}
 	}
 
-	const cases: Record<string, unknown>[] = [];
+	const cases: z.infer<typeof REPLIES.impact>["cases"] = [];
 	let unreviewed = 0;
 	let failing = 0;
 	for (const [caseId, reasons] of why) {
@@ -1415,7 +1430,13 @@ export function impact(ctx: Ctx, input: ImpactInput): Record<string, unknown> {
 			...(open.length > 0 ? { open: open.map((q) => ({ q: questionRef(q), evidence: q.evidence_hash })) } : {}),
 		});
 	}
-	cases.sort((a, b) => Number(Boolean(a.reviewed)) - Number(Boolean(b.reviewed)));
+	cases.sort(
+		(a, b) =>
+			Number(Boolean(a.reviewed)) - Number(Boolean(b.reviewed)) || Number(a.id.slice(2)) - Number(b.id.slice(2)),
+	);
+	if (input.cursor && offset >= cases.length) throw invalid("that continuation is past the impact cases");
+	const page = cases.slice(offset, offset + 200);
+	const next = offset + page.length < cases.length ? `${offset + page.length}.${version}` : null;
 	const decided = change
 		? questionsOn(ctx.db, project, change.key)
 				.filter((q) => q.state === "decided")
@@ -1446,11 +1467,12 @@ export function impact(ctx: Ctx, input: ImpactInput): Record<string, unknown> {
 			: { files: files.length },
 		gate: run ? { verdict: run.verdict, reason: run.reason, run: run.run } : null,
 		counts: { cases: cases.length, unreviewed, failing, uncovered: uncovered.length },
-		cases: cases.slice(0, 200),
+		cases: page,
 		uncovered: uncovered.slice(0, 50),
 		decided,
 		policy: policyName(currentPolicy(ctx.db, project)),
-		cursor: `s:${ctx.seq}`,
+		cursor: next ? `s:${from ?? 0}` : `s:${ctx.seq}`,
+		next,
 	};
 }
 
@@ -1463,7 +1485,7 @@ export const impactOp = defineOp({
 	needs: "read",
 	scope: "project",
 	effect: "read",
-	mcp: "Cases and review evidence for change/files; cursor becomes since.",
+	mcp: "Cases for change/files. Page next as cursor with the same inputs; only the final cursor becomes since. Restart after project writes.",
 	run: impact,
 });
 

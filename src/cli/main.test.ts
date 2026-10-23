@@ -59,6 +59,45 @@ test("CLI case reads retain the proving result's identity after the case changes
 	});
 });
 
+test("impact prints continuation metadata and --cursor reaches all selected cases", async () => {
+	await withInstance(async ({ client, cli, run }) => {
+		await client.call("propose", {
+			edits: Array.from({ length: 450 }, (_, i) => ({
+				op: "create",
+				outline: `Affected case ${i + 1}\n  Check > Works`,
+				covers: ["REQ-396"],
+			})),
+		});
+		await client.call("report", {
+			target: { commit: "cliimpact396", pr: 396, title: "REQ-396: review cases" },
+			results: [{ test: { case: "C-1" }, outcome: "pass" }],
+		});
+		const read = z.object({
+			cases: z.array(z.object({ id: z.string() })),
+			cursor: z.string(),
+			next: z.string().nullable(),
+		});
+		const first = await cli(["impact", "--change", "pr:396", "--project", "scratch"]);
+		expect(first.code).toBe(0);
+		let page = read.parse(JSON.parse(first.stdout));
+		expect(page.cases).toHaveLength(200);
+		expect(page.cursor).toBe("s:0");
+		const ids = page.cases.map((row) => row.id);
+		while (page.next) {
+			const reply = await run(["impact", "--change", "pr:396", "--cursor", page.next, "--project", "scratch"]);
+			expect(reply.code).toBe(0);
+			page = read.parse(JSON.parse(reply.stdout));
+			ids.push(...page.cases.map((row) => row.id));
+		}
+		expect(ids).toEqual(Array.from({ length: 450 }, (_, i) => `C-${i + 1}`));
+		const changed = await run(["impact", "--change", "pr:396", "--since", page.cursor, "--project", "scratch"]);
+		expect(changed.code).toBe(0);
+		expect(read.parse(JSON.parse(changed.stdout)).cases).toEqual([]);
+		const help = await run(["impact", "--help"]);
+		expect(help.stdout).toContain("--cursor <string>");
+	});
+});
+
 test("an agent's JSON report and CLI reads retain its model", async () => {
 	await withInstance(async ({ client, run }) => {
 		const { token } = Token.parse(

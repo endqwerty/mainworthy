@@ -418,6 +418,10 @@ export const ImpactInput = z.object({
 		.optional()
 		.describe("Changed paths, when the change is not known to Mainworthy."),
 	since: z.string().optional().describe("A cursor from an earlier call: only what moved since."),
+	cursor: z
+		.string()
+		.optional()
+		.describe("The previous impact next value. Keep the same inputs; restart after a project change."),
 	ledger: z.boolean().default(true).describe("False for fresh eyes: do not hide what was already reviewed."),
 });
 export type ImpactInput = z.infer<typeof ImpactInput>;

@@ -9,7 +9,17 @@ import { ProposeReply } from "../core/ops.ts";
 import type { Client } from "./client.ts";
 import { automateOf, type DemoCase, demoBulkProposal, demoCases, random, requirementOf } from "./demo/cases.ts";
 import { DEMO_FIELDS, demoAliases, demoFields } from "./demo/fields.ts";
-import { AGENT_MODEL, dayStart, demoHistory, type Failure, hex, LANDED_CHANGE, REPO, todayAt } from "./demo/history.ts";
+import {
+	AGENT_MODEL,
+	dayStart,
+	demoHistory,
+	type Failure,
+	hex,
+	LANDED_CHANGE,
+	REPO,
+	REVIEW_CHANGE,
+	todayAt,
+} from "./demo/history.ts";
 import { demoAgentScreenshot, demoScreenshot, demoTrail } from "./demo/trails.ts";
 import { DEMO_WORK } from "./demo/work.ts";
 import { CliError } from "./errors.ts";
@@ -511,11 +521,8 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 		target: {
 			commit: change,
 			repo: REPO,
-			branch: "coupon-total",
-			pr: 482,
+			...REVIEW_CHANGE,
 			base: red,
-			title: "Apply a percentage coupon",
-			files: ["src/checkout.ts", "src/shipping.ts"],
 		},
 		job: "shop",
 		results: pipelineResults(broken, 0.6, true),

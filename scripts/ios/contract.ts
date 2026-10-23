@@ -583,6 +583,7 @@ export const ChangeImpact = struct("ChangeImpact", "`impact` of a change: its ba
 	}),
 	gate: maybe(struct("ChangeImpactGate", "The run counted for this head, if any.", { run: maybe(text) })),
 	counts: struct("ChangeImpactCounts", "The complete number of affected cases.", { cases: whole }),
+	next: maybe(text),
 	cases: list(
 		struct("ChangedCase", "An affected case and why it is in the set.", {
 			id: text,
