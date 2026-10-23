@@ -1,6 +1,7 @@
 // The challenges of passkey ceremonies: found by what they were issued for and inside their time, spent once,
 // bounded in number, and gone after an import. The clock is the test's own.
 import { afterEach, expect, test } from "bun:test";
+import { testDatabase } from "../../../test/db.ts";
 import { type App, openApp, SESSION_LIFETIMES } from "../kernel/app.ts";
 import { Ceremonies } from "./ceremonies.ts";
 import { clearChallenges, findChallenge, issueChallenge, spendChallenge } from "./challenges.ts";
@@ -46,15 +47,20 @@ const PARTY = { id: "mainworthy.example", origin: "https://mainworthy.example" }
 const SIGN_IN = { purpose: "sign-in", context: CONTEXT.browser("c".repeat(64)) } as const;
 const BASE64URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 const apps: App[] = [];
-afterEach(() => {
-	for (const app of apps.splice(0)) app.close();
+const fixtures: Awaited<ReturnType<typeof testDatabase>>[] = [];
+afterEach(async () => {
+	for (const app of apps.splice(0)) await app.close();
+	for (const f of fixtures.splice(0)) await f.close();
 });
 
 async function instance(): Promise<{ app: App; advance: (ms: number) => void }> {
 	let now = 1_800_000_000_000;
+	const fixture = await testDatabase();
+	fixtures.push(fixture);
 	const app = await openApp(
 		{
 			dataDir: ":memory:",
+			databaseUrl: fixture.url,
 			host: "127.0.0.1",
 			port: 0,
 			mode: "local",

@@ -38,6 +38,7 @@ import {
 	RECENT_PROOF_MESSAGE,
 	requestReset,
 	resetPassword,
+	resolveCaller,
 	type Session,
 	type SignedIn,
 	showInvitation,
@@ -431,9 +432,20 @@ export function signInRoutes(app: App, tools: Tools) {
 		const why = whyNotPassword(body.data.next);
 		if (why) return failed("invalid", `next: ${why}`);
 		const changed = await changePassword(app, {
-			who: async () => await session.actor(0),
-			session: sessionId,
-			context: () => session.context?.() ?? null,
+			who: async (db) => {
+				const reference = session.reference?.();
+				return db && reference ? ((await resolveCaller(app, db, reference, 0))?.actor ?? null) : await session.actor(0);
+			},
+			session: async (db) => {
+				const reference = session.reference?.();
+				return reference ? ((await resolveCaller(app, db, reference, 0))?.session ?? null) : await sessionId();
+			},
+			context: async (db) => {
+				const reference = session.reference?.();
+				return reference
+					? ((await resolveCaller(app, db, reference, 0))?.context ?? null)
+					: ((await session.context?.()) ?? null);
+			},
 			current: body.data.current,
 			next: body.data.next,
 			address: tools.address(req, server),
@@ -454,14 +466,12 @@ export function signInRoutes(app: App, tools: Tools) {
 		const body = RecentProof.safeParse(read.input);
 		if (!body.success) return failed("invalid", "send one password, passkey assertion or authenticator code");
 		const actor = await session.actor(0);
-		const context = session.context?.() ?? null;
+		const context = (await session.context?.()) ?? null;
 		if (!actor || context === null) return failed("unauthenticated", "sign in again; this session ended");
 		if (actor.kind !== "human") return failed("forbidden", "only a person confirms a sign-in credential");
 		const input = { actor: actor.id, context };
 		if ("begin" in body.data) {
-			const passkey = await app.gate.run(
-				async () => await app.db.transaction(async () => await beginCredentialProof(app, input)),
-			);
+			const passkey = await app.database.read(async (db) => await beginCredentialProof(app, db, input));
 			return answered({ passkey });
 		}
 		const result = await proveCredential(app, { ...input, proof: body.data, address: tools.address(req, server) });

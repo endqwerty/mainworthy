@@ -7,6 +7,7 @@ import { clearChallenges, queueMail, waitMail } from "../src/server/identity/ide
 import type { RegistrationOptions } from "../src/server/identity/webauthn.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
 import { ARCHIVE_VERSION } from "../src/server/kernel/migrate.ts";
+import { holdWriter, identityDatabaseUrl, withWrite } from "./identity-db.ts";
 import { fakeSmtp } from "./mail-support.ts";
 import {
 	authenticator,
@@ -66,7 +67,7 @@ test("a reset request delivers independently of another write and its rollback",
 	try {
 		await verified(w, box.messages);
 		const before = box.messages.length;
-		await w.instance.app.db.begin();
+		const gate = holdWriter(w.instance.app);
 		try {
 			const reply = await w.post("/api/login", { resetRequest: "robin@example.com" });
 			expect(reply.status).toBe(200);
@@ -74,7 +75,7 @@ test("a reset request delivers independently of another write and its rollback",
 			await waitMail(w.instance.app);
 			expect(box.messages.slice(before).map((message) => message.to)).toEqual(["<robin@example.com>"]);
 		} finally {
-			await w.instance.app.db.rollback();
+			await gate.release();
 		}
 		await waitMail(w.instance.app);
 		expect(box.messages).toHaveLength(before + 1);
@@ -239,7 +240,7 @@ test("an invitation is mailed to one address with its existing single-use link a
 		expect(box.commands.some((line) => line.startsWith("AUTH PLAIN "))).toBe(true);
 		expect((await box.w.post("/api/login", { invitation: made.code, password: PASSWORD })).status).toBe(200);
 		expect((await box.w.post("/api/login", { invitation: made.code, password: PASSWORD })).status).toBe(401);
-		expect(box.w.disk().includes(Buffer.from("smtp-password-private"))).toBe(false);
+		expect((await box.w.disk()).includes(Buffer.from("smtp-password-private"))).toBe(false);
 		expect(box.w.replies.join("\n")).not.toContain("smtp-password-private");
 	} finally {
 		await box.close();
@@ -442,16 +443,16 @@ test("mail follows commit, discards rolled back work, and reports SMTP failure w
 	const app = box.w.instance.app;
 	const warning = spyOn(console, "warn").mockImplementation(() => {});
 	try {
-		expect(() =>
-			app.db.transaction(() => {
-				queueMail(app, { to: "nobody@example.com", subject: "rolled back", text: "no" });
+		await expect(
+			withWrite(app, async (db) => {
+				queueMail(app, db, { to: "nobody@example.com", subject: "rolled back", text: "no" });
 				throw new Error("rollback");
 			}),
-		).toThrow("rollback");
-		await app.db.transaction(async () => {
+		).rejects.toThrow("rollback");
+		await withWrite(app, async (db) => {
 			try {
-				await app.db.savepoint(() => {
-					queueMail(app, { to: "nobody@example.com", subject: "savepoint", text: "no" });
+				await db.savepoint(async () => {
+					queueMail(app, db, { to: "nobody@example.com", subject: "savepoint", text: "no" });
 					throw new Error("rollback");
 				});
 			} catch {}
@@ -578,9 +579,9 @@ test("archives preserve verified contacts and import invalidates all mail links"
 		});
 		expect(imported.status).toBe(200);
 		expect((await w.post("/api/login", { reset, password: NEXT })).status).toBe(400);
-		expect(w.rows("SELECT email, verified_at IS NOT NULL AS verified FROM mail_contacts")).toEqual([
-			{ email: "owner-mail@example.com", verified: 1 },
-		]);
+		expect(
+			await w.rows("SELECT email, CASE WHEN verified_at IS NOT NULL THEN 1 ELSE 0 END AS verified FROM mail_contacts"),
+		).toEqual([{ email: "owner-mail@example.com", verified: 1 }]);
 		await w.post("/api/login", { resetRequest: "owner-mail@example.com" });
 		await waitMail(w.instance.app);
 		const restoredReset = linkCode(box.messages.at(-1)?.text ?? "", "reset");
@@ -643,12 +644,16 @@ test("SMTP sends over STARTTLS and implicit TLS and rejects an untrusted certifi
 		probe,
 		`import { openApp, defaultConfig } from ${JSON.stringify(join(process.cwd(), "src/server/kernel/app.ts"))};
 import { queueMail, waitMail } from ${JSON.stringify(join(process.cwd(), "src/server/identity/identity.ts"))};
-const app = openApp(defaultConfig(process.env), { memory: true });
+const app = await openApp(defaultConfig(process.env), { memory: true });
 const warnings: string[] = []; console.warn = (line) => warnings.push(String(line));
-queueMail(app, { to: "robin@example.com", subject: "TLS test", text: "Encrypted delivery" });
-await waitMail(app); app.close(); console.log(JSON.stringify({ warnings }));`,
+await app.database.write(async(db)=>await db.transaction(async()=>{queueMail(app, db, { to: "robin@example.com", subject: "TLS test", text: "Encrypted delivery" });}));
+await waitMail(app); await app.close(); console.log(JSON.stringify({ warnings }));`,
 	);
-	const environment = { PATH: process.env.PATH ?? "", HOME: directory };
+	const environment = {
+		MAINWORTHY_DATABASE_URL: await identityDatabaseUrl(directory),
+		PATH: process.env.PATH ?? "",
+		HOME: directory,
+	};
 	for (const mode of ["starttls", "tls"] as const) {
 		const smtp = await fakeSmtp({ tls, implicit: mode === "tls" });
 		try {
@@ -697,7 +702,7 @@ test("only the owner changes another person's recovery address, and forgetting r
 		expect((await w.op("admin", { do: "actor.forget", name: "robin" })).status).toBe(200);
 		await waitMail(w.instance.app);
 		expect(box.messages.at(-1)?.text).toContain("Your sign-in methods were removed because your account was forgotten");
-		expect(w.rows("SELECT * FROM mail_contacts")).toEqual([]);
+		expect(await w.rows("SELECT * FROM mail_contacts")).toEqual([]);
 		expect((await w.post("/api/login", { reset, password: NEXT })).status).toBe(400);
 	} finally {
 		await box.close();

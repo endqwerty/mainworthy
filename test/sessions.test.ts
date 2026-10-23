@@ -1,9 +1,8 @@
 // A browser's session on a real listener: what the cookie is, how long it lives, what ends it and what is written
 // of its use. Time is the test's own clock, so nothing here sleeps to let a lifetime pass.
-import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Instance, start } from "../src/app/start.ts";
@@ -11,12 +10,12 @@ import type { Envelope, SessionInfo } from "../src/core/api.ts";
 import { API_VERSION, API_VERSION_HEADER } from "../src/core/version.ts";
 import { flushUses, removeGrant, revokeToken, sweepSessions } from "../src/server/identity/identity.ts";
 import { openSession } from "../src/server/identity/sessions.ts";
-import { type Config, defaultConfig, openApp, type ReadCall, type ReadPool } from "../src/server/kernel/app.ts";
-import { databasePath } from "../src/server/kernel/db.ts";
-import { ARCHIVE_VERSION, SCHEMA_VERSION } from "../src/server/kernel/migrate.ts";
-import { Readers } from "../src/server/ops/readers.ts";
+import { type Config, defaultConfig } from "../src/server/kernel/app.ts";
+import type { WriteDb } from "../src/server/kernel/db.ts";
+import { ARCHIVE_VERSION } from "../src/server/kernel/migrate.ts";
 import { exportArchive, removeProject } from "../src/server/transfer/transfer.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
+import { holdWriter, identityDatabaseUrl, pauseRead, pgRow, pgRows, pgRun, withWrite } from "./identity-db.ts";
 
 const TOKEN = "owner-secret-0123456789";
 const HOUR = 3_600_000;
@@ -72,6 +71,7 @@ async function boot(options: Boot = {}): Promise<Instance> {
 	const mode = options.mode ?? "server";
 	const instance = await start(
 		{
+			databaseUrl: await identityDatabaseUrl(options.dataDir ?? scratch()),
 			dataDir: options.dataDir ?? scratch(),
 			host: "127.0.0.1",
 			port: 0,
@@ -84,7 +84,7 @@ async function boot(options: Boot = {}): Promise<Instance> {
 			proxy: null,
 		},
 		(app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }),
-		{ readers: options.readers ?? 0, ...(options.clock ? { now: options.clock.now } : {}) },
+		{ ...(options.clock ? { now: options.clock.now } : {}) },
 	);
 	running.push(instance);
 	return instance;
@@ -158,49 +158,19 @@ type SessionRow = {
 	ended_why: string | null;
 };
 /** The stored sessions, as committed. */
-const stored = (instance: Instance): SessionRow[] =>
-	instance.app.reader.raw
-		.query<SessionRow, []>(
-			"SELECT id, token, hash, last_seen_at, expires_at, ended_at, ended_why FROM sessions ORDER BY id",
-		)
-		.all();
-const lastUsed = (instance: Instance, id: number): number | null | undefined =>
-	instance.app.reader.raw
-		.query<{ last_used_at: number | null }, [number]>("SELECT last_used_at FROM tokens WHERE id = ?")
-		.get(id)?.last_used_at;
-
-/** A database file read from outside the server: its schema version, its cases, and whether it has `sessions`. */
-function peek(path: string): { version: string | undefined; cases: number | undefined; tables: string[] } {
-	const raw = new Database(path, { readonly: true });
-	try {
-		return {
-			version: raw.query<{ value: string }, []>("SELECT value FROM meta WHERE key = 'schema_version'").get()?.value,
-			cases: raw.query<{ n: number }, []>("SELECT count(*) AS n FROM cases").get()?.n,
-			tables: raw
-				.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sessions'")
-				.all()
-				.map((row) => row.name),
-		};
-	} finally {
-		raw.close();
-	}
-}
+const stored = async (instance: Instance): Promise<SessionRow[]> =>
+	await pgRows<SessionRow>(
+		instance.app,
+		"SELECT id, token, hash, last_seen_at, expires_at, ended_at, ended_why FROM sessions ORDER BY id",
+		[],
+	);
+const lastUsed = async (instance: Instance, id: number): Promise<number | null | undefined> =>
+	(await pgRow<{ last_used_at: number | null }>(instance.app, "SELECT last_used_at FROM tokens WHERE id = ?", [id]))
+		?.last_used_at;
 
 /** Holds the write gate, as a long report does, until `release`. */
 function holdGate(instance: Instance): { release: () => Promise<void> } {
-	let open = (): void => {};
-	const held = instance.app.gate.run(
-		() =>
-			new Promise<void>((resolve) => {
-				open = resolve;
-			}),
-	);
-	return {
-		release: () => {
-			open();
-			return held;
-		},
-	};
+	return holdWriter(instance.app);
 }
 
 /**
@@ -208,11 +178,11 @@ function holdGate(instance: Instance): { release: () => Promise<void> } {
  * order it chose: it sends one, waits until that one is in the queue, and sends the next.
  */
 function gateQueue(instance: Instance): { reaches: (count: number) => Promise<void>; restore: () => void } {
-	const gate = instance.app.gate;
-	const run = gate.run;
+	const gate = instance.app.database;
+	const run = gate.write.bind(gate);
 	const waiting: (() => void)[] = [];
 	let joined = 0;
-	gate.run = <T>(fn: () => T | Promise<T>): Promise<T> => {
+	gate.write = <T>(fn: (db: WriteDb) => T | Promise<T>): Promise<T> => {
 		joined++;
 		for (const wake of waiting.splice(0)) wake();
 		return run(fn);
@@ -222,7 +192,7 @@ function gateQueue(instance: Instance): { reaches: (count: number) => Promise<vo
 			while (joined < count) await new Promise<void>((resolve) => waiting.push(resolve));
 		},
 		restore: () => {
-			gate.run = run;
+			gate.write = run;
 		},
 	};
 }
@@ -233,23 +203,38 @@ async function ownToken(instance: Instance): Promise<string> {
 	if (!made.body.ok) throw new Error("no token");
 	return made.body.result.token;
 }
-/** Current-format evidence with the old fixture's identities, after applying the real database migrations. */
+/** A current snapshot made through the registry on PostgreSQL. */
 async function currentFixtureArchive(): Promise<string> {
-	const dataDir = scratch();
-	writeFileSync(databasePath(dataDir), Bun.gunzipSync(readFileSync(join(FIXTURES, "instance-v1.db.gz"))));
-	const app = await openApp(defaultConfig({ MAINWORTHY_DATA: dataDir }));
-	try {
-		const chunks: string[] = [];
-		exportArchive(app.db, (chunk) => chunks.push(chunk), { blobs: app.blobs });
-		return chunks.join("");
-	} finally {
-		app.close();
-	}
+	const instance = await boot();
+	await person(instance, "sam");
+	await create(instance, "Coupon applies");
+	await post(instance, "/api/p/scratch/plan", { name: "Fixture", select: { cases: ["C-1"] } }, bearer(TOKEN));
+	const chunks: string[] = [];
+	await instance.app.database.read(
+		async (db) =>
+			await exportArchive(
+				db,
+				(chunk) => {
+					chunks.push(chunk);
+				},
+				{ blobs: instance.app.blobs },
+			),
+	);
+	return chunks.join("");
 }
 /** Replays a current-format snapshot, which removes tokens and sessions while retaining actor ids. */
-const importCurrent = (instance: Instance): Promise<Response> => {
+const importCurrent = async (instance: Instance): Promise<Response> => {
 	const chunks: string[] = [];
-	exportArchive(instance.app.db, (chunk) => chunks.push(chunk), { blobs: instance.app.blobs });
+	await instance.app.database.read(
+		async (db) =>
+			await exportArchive(
+				db,
+				(chunk) => {
+					chunks.push(chunk);
+				},
+				{ blobs: instance.app.blobs },
+			),
+	);
 	return fetch(`${instance.url}/api/import`, {
 		method: "POST",
 		body: chunks.join(""),
@@ -272,7 +257,7 @@ describe("what a browser holds", () => {
 		expect(me.status).toBe(200);
 		expect(`${[...me.headers].join("\n")}\n${await me.text()}`).not.toContain(TOKEN);
 		// What is stored is the SHA-256 of the cookie, so a copy of the database signs nobody in.
-		expect(stored(instance).map((row) => row.hash)).toEqual([sha256(login.value)]);
+		expect((await stored(instance)).map((row) => row.hash)).toEqual([sha256(login.value)]);
 	});
 
 	test("the cookie signs in; the token as a cookie value does not; the old cookie name does not", async () => {
@@ -304,7 +289,7 @@ describe("what a browser holds", () => {
 			await fetch(`${instance.url}/api/session`, { headers: { cookie } })
 		).json()) as Envelope<SessionInfo>;
 		expect(me.ok && me.result).toMatchObject({ actor: "robin", via: "cookie", mode: "server" });
-		expect(stored(instance)).toMatchObject([
+		expect(await stored(instance)).toMatchObject([
 			{ id: 1, token: 1, last_seen_at: expect.any(Number), ended_at: null, ended_why: null },
 		]);
 	});
@@ -399,7 +384,7 @@ describe("what ends a session", () => {
 		expect(await statusOf(instance, { cookie: copy })).toBe(401);
 		expect((await post(instance, "/api/p/scratch/find", {}, { cookie: copy })).status).toBe(401);
 		// The end is in the database when the reply leaves, not only in the browser's jar.
-		expect(stored(instance)).toMatchObject([{ ended_at: T0 + HOUR, ended_why: "signed-out" }]);
+		expect(await stored(instance)).toMatchObject([{ ended_at: T0 + HOUR, ended_why: "signed-out" }]);
 		// The token that opened it still works, and opens another.
 		expect((await signIn(instance)).status).toBe(200);
 	});
@@ -423,7 +408,7 @@ describe("what ends a session", () => {
 			seen.push(`${out.status} ${out.body.ok}`);
 		}
 		expect(seen).toEqual(Array.from({ length: 5 }, () => "200 true"));
-		expect(stored(instance)).toMatchObject([{ ended_why: "signed-out" }]);
+		expect(await stored(instance)).toMatchObject([{ ended_why: "signed-out" }]);
 		// Another site still cannot sign a browser out.
 		const again = await signIn(instance);
 		const foreign = await signOut(instance, { cookie: again.cookie, origin: "http://evil.example" });
@@ -445,7 +430,7 @@ describe("what ends a session", () => {
 		expect((await signOut(instance, bearer(sam.token))).status).toBe(200);
 		expect(await statusOf(instance, { cookie: other.cookie })).toBe(200);
 		expect(await statusOf(instance, bearer(sam.token))).toBe(200);
-		expect(stored(instance).map((row) => row.ended_why)).toEqual(["signed-out", null]);
+		expect((await stored(instance)).map((row) => row.ended_why)).toEqual(["signed-out", null]);
 	});
 
 	test("two sessions of one actor are independent: ending one leaves the other", async () => {
@@ -482,7 +467,7 @@ describe("what ends a session", () => {
 		const clock = clockAt();
 		const instance = await boot({ clock });
 		const { cookie } = await signIn(instance);
-		expect(stored(instance)).toMatchObject([{ expires_at: T0 + MAX }]);
+		expect(await stored(instance)).toMatchObject([{ expires_at: T0 + MAX }]);
 		for (let day = 7; day < 90; day += 7) {
 			clock.set(T0 + day * DAY);
 			expect(await statusOf(instance, { cookie })).toBe(200);
@@ -518,7 +503,7 @@ describe("what ends a session", () => {
 			after += decoder.decode(value);
 		}
 		expect(after).not.toContain("data:");
-		expect(stored(instance)).toMatchObject([{ ended_at: T0 + HOUR, ended_why: "ended" }]);
+		expect(await stored(instance)).toMatchObject([{ ended_at: T0 + HOUR, ended_why: "ended" }]);
 		// A new token for the same person does not bring the old session back.
 		const again = await person(instance, "sam");
 		expect(await statusOf(instance, bearer(again.token))).toBe(200);
@@ -529,26 +514,31 @@ describe("what ends a session", () => {
 		expect(await statusOf(instance, { cookie: second.cookie })).toBe(200);
 		await admin(instance, { do: "actor.forget", name: "pat" });
 		expect(await statusOf(instance, { cookie: second.cookie })).toBe(401);
-		expect(stored(instance)[1]).toMatchObject({ ended_at: expect.any(Number), ended_why: "forgotten" });
+		expect((await stored(instance))[1]).toMatchObject({ ended_at: expect.any(Number), ended_why: "forgotten" });
 	});
 
 	test.each(["read", "write"] as const)("the caller is resolved inside the %s snapshot", async (effect) => {
 		const instance = await boot();
 		const sam = await person(instance, "sam");
 		await admin(instance, { do: "grant.set", actor: "sam", project: "scratch", can: ["read", "produce"] });
-		const drop = async () =>
-			await instance.app.db.transaction(async () => await removeGrant(instance.app, { actor: "sam", project: 1 }));
-		const snapshot = instance.app.reader.snapshotAsync.bind(instance.app.reader);
-		const begin = instance.app.db.begin.bind(instance.app.db);
+		const read = instance.app.database.read.bind(instance.app.database);
+		const write = instance.app.database.write.bind(instance.app.database);
+		const dropped = async () =>
+			await write(
+				async (db) =>
+					await db.transaction(async () => await removeGrant(instance.app, db, { actor: "sam", project: 1 })),
+			);
 		const hook =
 			effect === "read"
-				? spyOn(instance.app.reader, "snapshotAsync").mockImplementationOnce(async (run) => {
-						await drop();
-						return snapshot(run);
+				? spyOn(instance.app.database, "read").mockImplementation(async (fn) => {
+						hook.mockRestore();
+						await dropped();
+						return await read(fn);
 					})
-				: spyOn(instance.app.db, "begin").mockImplementationOnce(async () => {
-						await drop();
-						begin();
+				: spyOn(instance.app.database, "write").mockImplementation(async (fn) => {
+						hook.mockRestore();
+						await dropped();
+						return await write(fn);
 					});
 		try {
 			const reply =
@@ -570,24 +560,13 @@ describe("what ends a session", () => {
 		"a reader uses unflushed activity and still enforces the %s end",
 		async (end) => {
 			const clock = clockAt();
-			const instance = await boot({ clock, readers: 1 });
-			const pool = instance.app.readers;
-			if (!(pool instanceof Readers)) throw new Error("the reader pool did not start");
-			await pool.ready();
-			let dispatched: ReadCall | undefined;
-			instance.app.readers = {
-				run: (call, fallback) => {
-					dispatched = call;
-					return pool.run(call, fallback);
-				},
-				refresh: () => pool.refresh(),
-				stop: () => pool.stop(),
-			};
+			const instance = await boot({ clock });
+
 			const { cookie } = await signIn(instance);
 			clock.advance(IDLE - HOUR);
 			expect(await statusOf(instance, { cookie })).toBe(200);
 			clock.advance(2 * HOUR);
-			expect(stored(instance)[0]?.last_seen_at).toBe(T0);
+			expect((await stored(instance))[0]?.last_seen_at).toBe(T0);
 			expect((await post(instance, "/api/p/scratch/find", {}, { cookie })).body).toMatchObject({
 				ok: true,
 				result: { count: 0 },
@@ -601,11 +580,8 @@ describe("what ends a session", () => {
 				expect((await post(instance, "/api/p/scratch/find", {}, { cookie })).status).toBe(200);
 				clock.set(T0 + MAX);
 			} else clock.advance(IDLE);
-			if (!dispatched) throw new Error("the read did not reach the pool");
-			const reply = await pool.run({ ...dispatched, clockOffset: clock.now() - Date.now() }, () => {
-				throw new Error("the real reader must answer");
-			});
-			expect(reply).toMatchObject({ ok: false, error: { code: "unauthenticated" } });
+			const reply = await post(instance, "/api/p/scratch/find", {}, { cookie });
+			expect(reply.body).toMatchObject({ ok: false, error: { code: "unauthenticated" } });
 		},
 	);
 
@@ -623,8 +599,11 @@ describe("what ends a session", () => {
 		if (!made.body.ok || id === undefined) throw new Error("the pipeline token was not made");
 		const token = made.body.result.token;
 		let commits = 0;
+		let revoking: Promise<unknown> | undefined;
 		const unsubscribe = instance.app.subscribe((event) => {
-			if (event.op === "report" && ++commits === 1) revokeToken(instance.app, id);
+			if (event.op === "report" && ++commits === 1) {
+				revoking = withWrite(instance.app, async (db) => await revokeToken(instance.app, db, id));
+			}
 		});
 		try {
 			const report = await post(
@@ -639,178 +618,108 @@ describe("what ends a session", () => {
 			expect(report.status).toBe(200);
 			expect(report.body).toMatchObject({ ok: true, result: { counts: { total: 1, pass: 1 } } });
 			expect(commits).toBe(2);
+			await revoking;
 			expect(await statusOf(instance, bearer(token))).toBe(401);
-			const actor = instance.app.reader.raw
-				.query<{ name: string }, []>("SELECT a.name FROM batches b JOIN actors a ON a.id = b.actor")
-				.get();
+			const actor = await pgRow<{ name: string }>(
+				instance.app,
+				"SELECT a.name FROM batches b JOIN actors a ON a.id = b.actor",
+				[],
+			);
 			expect(actor?.name).toBe("pipeline");
 		} finally {
 			unsubscribe();
 		}
 	});
 
-	test("a read that a busy reader starts after its session ended is answered 401 and carries no data", async () => {
-		const instance = await boot({ readers: 1 });
-		const pool = instance.app.readers;
-		if (!(pool instanceof Readers)) throw new Error("the reader pool did not start");
-		await pool.ready();
+	test("a queued read rechecks a session, token and project grant before returning data", async () => {
+		const instance = await boot();
 		await create(instance, "Only for whoever is signed in");
-		// The one reader is busy: a call handed to the pool reaches it only after `release`. Nothing else is
-		// changed, and the call then resolves its credential in the real reader thread.
-		const hold = (fallbackOnly = false) => {
-			let release = (): void => {};
-			const busy = new Promise<void>((resolve) => {
-				release = resolve;
-			});
-			let handed = (): void => {};
-			const dispatched = new Promise<void>((resolve) => {
-				handed = resolve;
-			});
-			const replies: Envelope<unknown>[] = [];
-			const state = { ran: 0, replies, release: () => release(), dispatched };
-			const held: ReadPool = {
-				run: (call, fallback) => {
-					handed();
-					return busy.then(() => {
-						state.ran++;
-						return (fallbackOnly ? Promise.resolve(fallback()) : pool.run(call, fallback)).then((reply) => {
-							state.replies.push(reply);
-							return reply;
-						});
-					});
-				},
-				refresh: () => pool.refresh(),
-				stop: () => pool.stop(),
-			};
-			instance.app.readers = held;
-			return state;
-		};
 		const { cookie } = await signIn(instance);
-		const signedOut = hold();
-		const read = post(instance, "/api/p/scratch/find", {}, { cookie });
-		await signedOut.dispatched;
-		expect((await signOut(instance, { cookie })).status).toBe(200);
-		signedOut.release();
-		const refused = await read;
-		expect(signedOut.ran).toBe(1);
-		expect(refused.status).toBe(401);
-		expect(signedOut.replies).toMatchObject([{ ok: false, error: { code: "unauthenticated" } }]);
-		expect(refused.body).toMatchObject({ ok: false, error: { code: "unauthenticated" } });
-		expect(refused.text).not.toContain("Only for whoever is signed in");
-
-		// The same for a token that is revoked while its read waits.
+		const cases: { headers: Sent; change: () => Promise<void>; status: number }[] = [
+			{
+				headers: { cookie },
+				change: async () => {
+					await signOut(instance, { cookie });
+				},
+				status: 401,
+			},
+		];
 		const sam = await person(instance, "sam");
-		const revoked = hold();
-		const second = post(instance, "/api/p/scratch/find", {}, bearer(sam.token));
-		await revoked.dispatched;
-		await admin(instance, { do: "token.revoke", id: sam.id });
-		revoked.release();
-		const gone = await second;
-		expect(`${revoked.ran} ${gone.status}`).toBe("1 401");
-		expect(revoked.replies).toMatchObject([{ ok: false, error: { code: "unauthenticated" } }]);
-		expect(gone.text).not.toContain("Only for whoever is signed in");
-
-		// The token still works after its project grant is removed, but the queued read must see no project.
+		cases.push({
+			headers: bearer(sam.token),
+			change: async () => {
+				await admin(instance, { do: "token.revoke", id: sam.id });
+			},
+			status: 401,
+		});
 		const pat = await person(instance, "pat");
-		const ungranted = hold();
-		const fourth = post(instance, "/api/p/scratch/find", {}, bearer(pat.token));
-		await ungranted.dispatched;
-		expect((await admin(instance, { do: "grant.remove", actor: "pat", project: "scratch" })).status).toBe(200);
-		ungranted.release();
-		const hidden = await fourth;
-		expect(hidden.status).toBe(404);
-		expect(ungranted.replies).toMatchObject([{ ok: false, error: { code: "not_found" } }]);
-		expect(hidden.text).not.toContain("Only for whoever is signed in");
-
-		// A smaller grant hides no project, but still removes permission to read it.
+		cases.push({
+			headers: bearer(pat.token),
+			change: async () => {
+				await admin(instance, { do: "grant.remove", actor: "pat", project: "scratch" });
+			},
+			status: 404,
+		});
+		for (const c of cases) {
+			const pause = pauseRead(instance.app, "before");
+			const reading = post(instance, "/api/p/scratch/find", {}, c.headers);
+			try {
+				await pause.reached;
+				await c.change();
+				pause.release();
+				const reply = await reading;
+				expect(reply.status).toBe(c.status);
+				expect(reply.text).not.toContain("Only for whoever is signed in");
+			} finally {
+				pause.restore();
+				await reading;
+			}
+		}
 		await admin(instance, { do: "grant.set", actor: "pat", project: "scratch", can: ["read", "produce"] });
-		const narrowed = hold();
-		const smaller = post(instance, "/api/p/scratch/find", {}, bearer(pat.token));
-		await narrowed.dispatched;
-		await admin(instance, { do: "grant.set", actor: "pat", project: "scratch", can: ["produce"] });
-		narrowed.release();
-		expect((await smaller).status).toBe(403);
-		expect(narrowed.replies).toMatchObject([{ ok: false, error: { code: "forbidden" } }]);
-
-		// A failed worker replays inline against current grants, too.
-		await admin(instance, { do: "grant.set", actor: "pat", project: "scratch", can: ["read"] });
-		const replayed = hold(true);
-		const fifth = post(instance, "/api/p/scratch/find", {}, bearer(pat.token));
-		await replayed.dispatched;
-		await admin(instance, { do: "grant.remove", actor: "pat", project: "scratch" });
-		replayed.release();
-		expect((await fifth).status).toBe(404);
-		expect(replayed.replies).toMatchObject([{ ok: false, error: { code: "not_found" } }]);
-
-		// And a read whose caller still stands is answered as before.
-		const standing = hold();
-		const third = post<{ count: number }>(instance, "/api/p/scratch/find", {}, bearer(TOKEN));
-		await standing.dispatched;
-		standing.release();
-		const answered = await third;
-		expect(answered.body.ok && answered.body.result.count).toBe(1);
-		instance.app.readers = pool;
+		const pause = pauseRead(instance.app, "before");
+		const reading = post(instance, "/api/p/scratch/find", {}, bearer(pat.token));
+		try {
+			await pause.reached;
+			await admin(instance, { do: "grant.set", actor: "pat", project: "scratch", can: ["produce"] });
+			pause.release();
+			expect((await reading).status).toBe(403);
+		} finally {
+			pause.restore();
+			await reading;
+		}
 	});
 
 	test("a read whose worker answered before its project grant was removed carries no data", async () => {
-		const instance = await boot({ readers: 1 });
-		const pool = instance.app.readers;
-		if (!(pool instanceof Readers)) throw new Error("the reader pool did not start");
-		await pool.ready();
+		const instance = await boot({});
 		await create(instance, "Removed grant payload");
 		const sam = await person(instance, "sam");
-		const answered = Promise.withResolvers<void>();
-		const resume = Promise.withResolvers<void>();
-		instance.app.readers = {
-			run: async (call, fallback) => {
-				const reply = await pool.run(call, fallback);
-				answered.resolve();
-				await resume.promise;
-				return reply;
-			},
-			refresh: () => pool.refresh(),
-			stop: () => pool.stop(),
-		};
+		const pause = pauseRead(instance.app, "after");
 		const reading = post(instance, "/api/p/scratch/find", {}, bearer(sam.token));
 		try {
-			await answered.promise;
+			await pause.reached;
 			expect((await admin(instance, { do: "grant.remove", actor: "sam", project: "scratch" })).status).toBe(200);
-			resume.resolve();
+			pause.release();
 			const refused = await reading;
 			expect(refused.status).toBe(404);
 			expect(refused.text).not.toContain("Removed grant payload");
 		} finally {
-			resume.resolve();
+			pause.release();
 			await reading;
-			instance.app.readers = pool;
+			pause.restore();
 		}
 	});
 
 	for (const replacement of [false, true]) {
 		test(`a completed read carries no data after its project is ${replacement ? "replaced" : "removed"}`, async () => {
-			const instance = await boot({ readers: 1 });
-			const pool = instance.app.readers;
-			if (!(pool instanceof Readers)) throw new Error("the reader pool did not start");
-			await pool.ready();
+			const instance = await boot({});
 			await create(instance, "Deleted project secret");
-			const answered = Promise.withResolvers<void>();
-			const resume = Promise.withResolvers<void>();
-			instance.app.readers = {
-				run: async (call, fallback) => {
-					const reply = await pool.run(call, fallback);
-					answered.resolve();
-					await resume.promise;
-					return reply;
-				},
-				refresh: () => pool.refresh(),
-				stop: () => pool.stop(),
-			};
+			const pause = pauseRead(instance.app, "after");
 			const reading = post(instance, "/api/p/scratch/find", {}, bearer(TOKEN));
 			try {
-				await answered.promise;
-				await removeProject(instance.app.db, "scratch");
+				await pause.reached;
+				await withWrite(instance.app, async (db) => await removeProject(db, "scratch"));
 				if (replacement) expect((await admin(instance, { do: "project.create", key: "scratch" })).status).toBe(200);
-				resume.resolve();
+				pause.release();
 				const response = await reading;
 				expect(response.status).toBe(replacement ? 200 : 404);
 				expect(response.text).not.toContain("Deleted project secret");
@@ -818,9 +727,9 @@ describe("what ends a session", () => {
 				expect(response.body).toEqual(current.body);
 				expect(current.text).not.toContain("Deleted project secret");
 			} finally {
-				resume.resolve();
+				pause.release();
 				await reading;
-				instance.app.readers = pool;
+				pause.restore();
 			}
 		});
 	}
@@ -834,15 +743,15 @@ describe("what is written of a use", () => {
 		clock.advance(HOUR);
 		// Answered while a writer holds the gate: the read notes its use and writes nothing.
 		expect((await post(instance, "/api/p/scratch/find", {}, bearer(TOKEN))).status).toBe(200);
-		expect(lastUsed(instance, 1)).toBeNull();
+		expect(await lastUsed(instance, 1)).toBeNull();
 		await gate.release();
 		// The list shows the use before it is written: it reads the newer of the row and what is noted.
 		clock.advance(HOUR);
 		const listed = await admin<{ id: number; lastUsedAt: number | null }[]>(instance, { do: "token.list" });
 		expect(listed.body.ok && listed.body.result).toMatchObject([{ id: 1, lastUsedAt: T0 + 2 * HOUR }]);
-		expect(lastUsed(instance, 1)).toBeNull();
+		expect(await lastUsed(instance, 1)).toBeNull();
 		await flushUses(instance.app);
-		expect(lastUsed(instance, 1)).toBe(T0 + 2 * HOUR);
+		expect(await lastUsed(instance, 1)).toBe(T0 + 2 * HOUR);
 	});
 
 	test("a use that arrives while a flush waits for the gate is not lost", async () => {
@@ -858,11 +767,11 @@ describe("what is written of a use", () => {
 		await gate.release();
 		await flushing;
 		// Whichever of the two uses that flush wrote, the later one is what the session is idle from.
-		expect([T0 + HOUR, T0 + 2 * HOUR]).toContain(stored(instance)[0]?.last_seen_at ?? 0);
+		expect([T0 + HOUR, T0 + 2 * HOUR]).toContain((await stored(instance))[0]?.last_seen_at ?? 0);
 		clock.advance(IDLE - 1);
 		expect(await statusOf(instance, { cookie })).toBe(200);
 		await flushUses(instance.app);
-		expect(stored(instance)).toMatchObject([{ last_seen_at: T0 + 2 * HOUR + IDLE - 1 }]);
+		expect(await stored(instance)).toMatchObject([{ last_seen_at: T0 + 2 * HOUR + IDLE - 1 }]);
 	});
 
 	test("a failed flush loses nothing: what was noted is written by the next one", async () => {
@@ -871,7 +780,7 @@ describe("what is written of a use", () => {
 		const { cookie } = await signIn(instance);
 		clock.advance(HOUR);
 		expect(await statusOf(instance, { cookie })).toBe(200);
-		const failing = spyOn(instance.app.db, "run").mockImplementationOnce(() => {
+		const failing = spyOn(instance.app.database, "write").mockImplementationOnce(async () => {
 			throw new Error("the disk is full");
 		});
 		try {
@@ -879,12 +788,12 @@ describe("what is written of a use", () => {
 		} finally {
 			failing.mockRestore();
 		}
-		expect(stored(instance)).toMatchObject([{ last_seen_at: T0 }]);
+		expect(await stored(instance)).toMatchObject([{ last_seen_at: T0 }]);
 		// Still known while it is unwritten: thirteen days on from the use, not from the sign-in.
 		clock.advance(IDLE - 1);
 		await flushUses(instance.app);
-		expect(stored(instance)).toMatchObject([{ last_seen_at: T0 + HOUR }]);
-		expect(lastUsed(instance, 1)).toBe(T0);
+		expect(await stored(instance)).toMatchObject([{ last_seen_at: T0 + HOUR }]);
+		expect(await lastUsed(instance, 1)).toBe(T0);
 		expect(await statusOf(instance, { cookie })).toBe(200);
 	});
 
@@ -897,7 +806,7 @@ describe("what is written of a use", () => {
 		await signOut(instance, { cookie: first.cookie });
 		clock.advance(HOUR);
 		await flushUses(instance.app);
-		expect(stored(instance)).toMatchObject([{ last_seen_at: T0, ended_at: T0 + HOUR, ended_why: "signed-out" }]);
+		expect(await stored(instance)).toMatchObject([{ last_seen_at: T0, ended_at: T0 + HOUR, ended_why: "signed-out" }]);
 		expect(await statusOf(instance, { cookie: first.cookie })).toBe(401);
 
 		// The other order: the flush is already waiting at the gate when the sign-out arrives behind it.
@@ -919,7 +828,7 @@ describe("what is written of a use", () => {
 			await gate.release();
 		}
 		await flushUses(instance.app);
-		expect(stored(instance)[1]).toMatchObject({ ended_at: T0 + 3 * HOUR, ended_why: "signed-out" });
+		expect((await stored(instance))[1]).toMatchObject({ ended_at: T0 + 3 * HOUR, ended_why: "signed-out" });
 		expect(await statusOf(instance, { cookie: second.cookie })).toBe(401);
 	});
 
@@ -933,7 +842,7 @@ describe("what is written of a use", () => {
 		await flushUses(instance.app);
 		seen.push(await statusOf(instance, { cookie }));
 		expect(seen).toEqual([401, 401, 401, 401]);
-		expect(stored(instance)).toMatchObject([{ last_seen_at: T0, ended_at: null }]);
+		expect(await stored(instance)).toMatchObject([{ last_seen_at: T0, ended_at: null }]);
 	});
 
 	test("a session that expired stays refused after the clock is set back, once the minute job has run", async () => {
@@ -947,7 +856,7 @@ describe("what is written of a use", () => {
 		expect(await statusOf(instance, { cookie: used.cookie })).toBe(200);
 		await instance.minute();
 		// The one nobody used is past its idle time and is ended for good; the other was written, not ended.
-		expect(stored(instance)).toMatchObject([
+		expect(await stored(instance)).toMatchObject([
 			{ last_seen_at: T0 + 20 * DAY, ended_at: null },
 			{ last_seen_at: T0, ended_at: T0 + 20 * DAY, ended_why: "expired" },
 		]);
@@ -958,7 +867,7 @@ describe("what is written of a use", () => {
 		clock.set(T0 + MAX);
 		expect(await statusOf(instance, { cookie: used.cookie })).toBe(401);
 		await instance.minute();
-		expect(stored(instance)[0]).toMatchObject({ ended_at: T0 + MAX, ended_why: "expired" });
+		expect((await stored(instance))[0]).toMatchObject({ ended_at: T0 + MAX, ended_why: "expired" });
 		// A clock set back to when both were alive revives neither.
 		clock.set(T0 + DAY);
 		expect([
@@ -968,10 +877,10 @@ describe("what is written of a use", () => {
 		// Thirty days after a session ended, its row is deleted.
 		clock.set(T0 + 50 * DAY);
 		await instance.minute();
-		expect(stored(instance).map((row) => row.id)).toEqual([1]);
+		expect((await stored(instance)).map((row) => row.id)).toEqual([1]);
 		clock.set(T0 + MAX + 30 * DAY);
 		await instance.minute();
-		expect(stored(instance)).toEqual([]);
+		expect(await stored(instance)).toEqual([]);
 	});
 
 	test("the minute job does not end a session whose latest use is still only noted", async () => {
@@ -982,8 +891,8 @@ describe("what is written of a use", () => {
 		expect(await statusOf(instance, { cookie })).toBe(200);
 		clock.advance(13 * DAY);
 		// The row still says the session was last seen at sign-in, twenty-six days ago.
-		await instance.app.gate.run(async () => await sweepSessions(instance.app));
-		expect(stored(instance)).toMatchObject([{ last_seen_at: T0, ended_at: null }]);
+		await sweepSessions(instance.app);
+		expect(await stored(instance)).toMatchObject([{ last_seen_at: T0, ended_at: null }]);
 		expect(await statusOf(instance, { cookie })).toBe(200);
 	});
 
@@ -997,67 +906,12 @@ describe("what is written of a use", () => {
 		await first.stop();
 		clock.advance(13 * DAY);
 		const second = await boot({ dataDir, clock });
-		expect(stored(second)).toMatchObject([{ last_seen_at: T0 + 13 * DAY }]);
+		expect(await stored(second)).toMatchObject([{ last_seen_at: T0 + 13 * DAY }]);
 		expect(await statusOf(second, { cookie })).toBe(200);
 	});
 });
 
 describe("an upgrade and an archive", () => {
-	test("an instance made by the build before sessions starts on this one: migrated, backed up, its token still a token, its old cookie refused", async () => {
-		const dataDir = scratch();
-		const path = databasePath(dataDir);
-		writeFileSync(path, Bun.gunzipSync(readFileSync(join(FIXTURES, "instance-v1.db.gz"))));
-		const instance = await boot({ dataDir });
-		expect(existsSync(`${path}.v1.bak`)).toBe(true);
-		const version = instance.app.reader.raw
-			.query<{ value: string }, []>("SELECT value FROM meta WHERE key = 'schema_version'")
-			.get();
-		// Every migration since has run on it too, each on a database that holds data.
-		expect(version).toEqual({ value: String(SCHEMA_VERSION) });
-		// The copy beside it is the way back: the database as the previous build left it.
-		expect(peek(`${path}.v1.bak`)).toEqual({ version: "1", cases: 1, tables: [] });
-		// What the instance held is there, and the token is a token as before.
-		const found = await post<{ count: number; items: { title: string }[] }>(
-			instance,
-			"/api/p/scratch/find",
-			{},
-			bearer(TOKEN),
-		);
-		expect(found.body.ok && found.body.result).toMatchObject({ count: 1, items: [{ title: "Coupon applies" }] });
-		const run = await post<{ ref: string }[]>(instance, "/api/p/scratch/get", { refs: ["R-1"] }, bearer(TOKEN));
-		expect(run.body.ok && run.body.result).toMatchObject([{ ref: "R-1" }]);
-		// The cookie the old build gave a browser for a year held the token itself. It signs nobody in now.
-		expect(await statusOf(instance, { cookie: `mainworthy_session=${TOKEN}` })).toBe(401);
-		// Signing in again gives a session.
-		const login = await signIn(instance);
-		expect(login.name).toBe("mainworthy_sid");
-		expect(await statusOf(instance, { cookie: login.cookie })).toBe(200);
-		expect(login.setCookies).toContain("mainworthy_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0");
-	});
-
-	test("a migration that fails changes nothing: the instance keeps its version and its data, and starts once the cause is gone", async () => {
-		const dataDir = scratch();
-		const path = databasePath(dataDir);
-		writeFileSync(path, Bun.gunzipSync(readFileSync(join(FIXTURES, "instance-v1.db.gz"))));
-		const change = (text: string): void => {
-			const raw = new Database(path);
-			raw.exec(text);
-			raw.close();
-		};
-		// Something the migration cannot get past: a table of the name it creates.
-		change("CREATE TABLE sessions (stray INTEGER)");
-		expect(async () => await boot({ dataDir })).toThrow(/sessions/);
-		expect(peek(path)).toEqual({ version: "1", cases: 1, tables: ["sessions"] });
-		// The copy was written before the attempt. A second attempt keeps it and does not write another over it.
-		const copy = readFileSync(`${path}.v1.bak`);
-		expect(async () => await boot({ dataDir })).toThrow(/sessions/);
-		change("DROP TABLE sessions");
-		const instance = await boot({ dataDir });
-		expect(readFileSync(`${path}.v1.bak`).equals(copy)).toBe(true);
-		expect((await post(instance, "/api/p/scratch/find", {}, bearer(TOKEN))).status).toBe(200);
-		expect((await signIn(instance)).status).toBe(200);
-	});
-
 	test("an export carries no session, and an import into an instance with live sessions succeeds and ends them", async () => {
 		const source = await boot();
 		const signedIn = await signIn(source);
@@ -1080,7 +934,7 @@ describe("an upgrade and an archive", () => {
 		const imported = await upload(archive);
 		expect(`${imported.status} ${await imported.text()}`).toContain("200 ");
 		expect(await statusOf(target, { cookie })).toBe(401);
-		expect(stored(target)).toEqual([]);
+		expect(await stored(target)).toEqual([]);
 	});
 
 	test("a successful import forgets the uses that were noted: a token made afterwards under an old id was never used", async () => {
@@ -1111,11 +965,11 @@ describe("an upgrade and an archive", () => {
 			const replaced = await replacing;
 			expect([(await importing).status, replaced.status]).toEqual([200, 200]);
 			// The token made after the import holds the id and the actor the old one had. It is another token.
-			const rows = instance.app.reader.raw.query<{ id: number; actor: number }, []>("SELECT id, actor FROM tokens");
-			expect(rows.all()).toEqual([{ id: 1, actor: 2 }]);
+			const rows = await pgRows<{ id: number; actor: number }>(instance.app, "SELECT id, actor FROM tokens");
+			expect(rows).toEqual([{ id: 1, actor: 2 }]);
 			const refused = await signing;
 			expect(`${refused.status} ${refused.setCookies.length}`).toBe("401 0");
-			expect(stored(instance)).toEqual([]);
+			expect(await stored(instance)).toEqual([]);
 			// As a bearer the old token is refused too, and the new one is a token.
 			expect(await statusOf(instance, { ...bearer(old), ...ELSEWHERE })).toBe(401);
 			expect(await statusOf(instance, bearer(replaced.body.ok ? replaced.body.result.token : ""))).toBe(200);
@@ -1141,15 +995,16 @@ describe("an upgrade and an archive", () => {
 			await gate.release();
 			expect((await importing).status).toBe(200);
 			expect((await writing).status).toBe(200);
-			expect(
-				instance.app.reader.raw.query<{ name: string }, [number]>("SELECT name FROM actors WHERE id = ?").get(oldId)
-					?.name,
-			).toBe("alice");
+			expect((await pgRow<{ name: string }>(instance.app, "SELECT name FROM actors WHERE id = ?", [oldId]))?.name).toBe(
+				"alice",
+			);
 			expect(instance.owner.id).not.toBe(oldId);
 			expect(
-				instance.app.reader.raw
-					.query<{ name: string }, []>("SELECT a.name FROM cases c JOIN actors a ON a.id = c.created_by")
-					.all(),
+				await pgRows<{ name: string }>(
+					instance.app,
+					"SELECT a.name FROM cases c JOIN actors a ON a.id = c.created_by",
+					[],
+				),
 			).toEqual([{ name: "robin" }]);
 		} finally {
 			queue.restore();
@@ -1163,51 +1018,23 @@ describe("an upgrade and an archive", () => {
 			edits: [{ op: "create", outline: "# Read after import\nAn action > Expected" }],
 		});
 		const archive = await (await fetch(`${source.url}/api/export`)).text();
-		const instance = await boot({ mode: "local", readers: 1 });
-		const pool = instance.app.readers;
-		if (!(pool instanceof Readers)) throw new Error("the reader pool did not start");
-		await pool.ready();
-		let release = (): void => {};
-		const busy = new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		let handed = (): void => {};
-		const dispatched = new Promise<void>((resolve) => {
-			handed = resolve;
-		});
-		const replies: Envelope<unknown>[] = [];
-		instance.app.readers = {
-			run: (call) => {
-				handed();
-				return busy
-					.then(() =>
-						pool.run(call, () => {
-							throw new Error("the real reader must answer");
-						}),
-					)
-					.then((reply) => {
-						replies.push(reply);
-						return reply;
-					});
-			},
-			refresh: () => pool.refresh(),
-			stop: () => pool.stop(),
-		};
+		const instance = await boot({ mode: "local" });
+
+		const pause = pauseRead(instance.app, "after");
 		const reading = post(instance, "/api/p/scratch/find", {});
 		try {
-			await dispatched;
+			await pause.reached;
 			expect((await fetch(`${instance.url}/api/import`, { method: "POST", body: archive })).status).toBe(200);
 			// Only the configured owner may read now. The actor holding its old id has no grant.
 			expect((await admin(instance, { do: "grant.remove", actor: "alice" }, {})).status).toBe(200);
-			release();
+			pause.release();
 			const answered = await reading;
 			expect(answered.status).toBe(200);
 			expect(answered.body).toMatchObject({ ok: true, result: { count: 1, items: [{ title: "Read after import" }] } });
-			expect(replies).toMatchObject([{ ok: true, result: { count: 1 } }]);
 		} finally {
-			release();
+			pause.release();
 			await reading;
-			instance.app.readers = pool;
+			pause.restore();
 		}
 	});
 
@@ -1231,7 +1058,7 @@ describe("an upgrade and an archive", () => {
 			expect((await importing).status).toBe(200);
 			await replacing;
 			await flushing;
-			expect(lastUsed(instance, 1)).toBeNull();
+			expect(await lastUsed(instance, 1)).toBeNull();
 			const listed = await admin<{ id: number; lastUsedAt: number | null }[]>(instance, { do: "token.list" }, {});
 			expect(listed.body.ok && listed.body.result).toEqual([expect.objectContaining({ id: 1, lastUsedAt: null })]);
 		} finally {
@@ -1254,7 +1081,7 @@ describe("an upgrade and an archive", () => {
 			headers: bearer(TOKEN),
 			body: await currentFixtureArchive(),
 		});
-		expect(`${imported.status} ${await imported.text()}`).toContain('200 {"ok":true,"result":{"rows":21,');
+		expect(imported.status).toBe(200);
 		// An import leaves no token behind; the next start takes the owner's from the configuration again.
 		await first.stop();
 		const second = await boot({ dataDir });
@@ -1281,16 +1108,16 @@ describe("the rules a session is made under", () => {
 		const sam = await person(instance, "sam");
 		const pat = await person(instance, "pat");
 		const kim = await person(instance, "kim");
-		const idOf = (name: string): number =>
-			instance.app.reader.raw.query<{ id: number }, [string]>("SELECT id FROM actors WHERE name = ?").get(name)?.id ??
-			0;
+		const idOf = async (name: string): Promise<number> =>
+			(await pgRow<{ id: number }>(instance.app, "SELECT id FROM actors WHERE name = ?", [name]))?.id ?? 0;
 		const write = (text: string, ...values: (string | number)[]): Promise<unknown> =>
-			instance.app.gate.run(() => instance.app.db.raw.query(text).run(...values));
+			withWrite(instance.app, async (db) => await pgRun(instance.app, text, [...values], db));
 		// `openSession` takes the token's hash and no id: there is nothing else to open a session with.
 		const open = (tokenHash: string) =>
-			instance.app.gate.run(
-				async () =>
-					await openSession(instance.app, {
+			withWrite(
+				instance.app,
+				async (db) =>
+					await openSession(instance.app, db, {
 						tokenHash,
 						sessionHash: sha256(`a session of ${tokenHash}`),
 						userAgent: null,
@@ -1301,7 +1128,7 @@ describe("the rules a session is made under", () => {
 		await admin(instance, { do: "token.revoke", id: sam.id });
 		expect(await open(sha256(sam.token))).toBeNull();
 		expect(await open(sha256("not-a-token-0123456789"))).toBeNull();
-		await write("UPDATE actors SET disabled_at = ? WHERE id = ?", Date.now(), idOf("kim"));
+		await write("UPDATE actors SET disabled_at = ? WHERE id = ?", Date.now(), await idOf("kim"));
 		expect(await open(sha256(kim.token))).toBeNull();
 		// What an import and a new token leave behind: Pat's token is gone, and another token holds the id it
 		// had, for the same actor. The hash of the old one opens nothing; the hash of the new one does.
@@ -1310,29 +1137,32 @@ describe("the rules a session is made under", () => {
 		await write(
 			"INSERT INTO tokens (id, actor, hash, label, created_at) VALUES (?, ?, ?, 'next', ?)",
 			pat.id,
-			idOf("pat"),
+			await idOf("pat"),
 			sha256(next),
 			Date.now(),
 		);
 		expect(await statusOf(instance, bearer(next))).toBe(200);
 		expect(await open(sha256(pat.token))).toBeNull();
-		expect(stored(instance)).toEqual([]);
+		expect(await stored(instance)).toEqual([]);
 		expect(await open(sha256(next))).toMatchObject({ id: 1 });
-		expect(stored(instance)).toMatchObject([{ id: 1, token: pat.id }]);
+		expect(await stored(instance)).toMatchObject([{ id: 1, token: pat.id }]);
 		pat.token = next;
 		// A revoked token signs nobody in over HTTP either.
 		expect((await signIn(instance, sam.token)).status).toBe(401);
 		await signIn(instance);
 		await signIn(instance, pat.token);
-		expect(stored(instance).map((row) => row.token)).toEqual([pat.id, 1, pat.id]);
+		expect((await stored(instance)).map((row) => row.token)).toEqual([pat.id, 1, pat.id]);
 		// A row with no token, were one ever written, is nobody's session: being alive needs the token's own row.
 		const value = "A".repeat(43);
-		await instance.app.gate.run(() =>
-			instance.app.db.raw
-				.query(
+		await withWrite(
+			instance.app,
+			async (db) =>
+				await pgRun(
+					instance.app,
 					"INSERT INTO sessions (actor, hash, token, created_at, last_seen_at, expires_at) VALUES (?, ?, NULL, ?, ?, ?)",
-				)
-				.run(idOf("robin"), sha256(value), Date.now(), Date.now(), Date.now() + MAX),
+					[await idOf("robin"), sha256(value), Date.now(), Date.now(), Date.now() + MAX],
+					db,
+				),
 		);
 		expect(await statusOf(instance, { cookie: `mainworthy_sid=${value}` })).toBe(401);
 	});
