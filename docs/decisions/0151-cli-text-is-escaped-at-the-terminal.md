@@ -7,9 +7,14 @@ output could still print controls from files or server replies. Escape human
 lines and warnings in their shared output functions, using `escapeControls`.
 Keep ordinary Unicode readable and leave stored and imported content unchanged.
 
-`get --md` and `fmt` use a shared Markdown printer that preserves LF separators
-and escapes the other controls. Their JSON forms retain the original document
-values. `printJson` writes `reportJson` directly, because passing serialized JSON
+`get --md` and `fmt` use canonical Markdown's reversible escaping before reaching
+the terminal. Header scalars quote controls and escape them inside JSON strings;
+body text uses the parser's existing Unicode escape grammar, including for workflow
+command prefixes. That keeps titles, tags, fields and body lines lossless through
+`parseCase`, including literal backslashes before command text. The defensive CLI
+printer leaves canonical output unchanged and protects unexpected server text.
+Their JSON forms retain the canonical document text. `printJson` writes `reportJson`
+directly, because passing serialized JSON
 through the human line printer would escape its structural newlines.
 
 All terminal text also neutralizes Actions commands. The modern `::` prefix is

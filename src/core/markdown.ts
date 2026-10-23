@@ -1,5 +1,6 @@
 import { newStepId } from "./ids.ts";
 import { CaseDoc, type Step } from "./model.ts";
+import { escapeControls, reportJson } from "./text.ts";
 
 export type CaseParseResult = { ok: true; doc: CaseDoc } | { ok: false; errors: { line: number; message: string }[] };
 type ParseError = Extract<CaseParseResult, { ok: false }>["errors"][number];
@@ -14,32 +15,25 @@ function scalar(text: string): string {
 	if (
 		text.length === 0 ||
 		text.trim() !== text ||
-		/[\n\r\t\u2028\u2029:"'[\]{},#\\]/.test(text) ||
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: quote controls so JSON escapes remain reversible.
+		/[\u0000-\u001f\u007f-\u009f\u2028-\u202e\u2066-\u2069:"'[\]{},#\\]/.test(text) ||
 		/^[-?!&*|>%@`]/.test(text) ||
-		/^(?:null|true|false|~|[-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?)$/i.test(text) ||
-		Array.from(text).some((char) => char.charCodeAt(0) < 32)
+		/^(?:null|true|false|~|[-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?)$/i.test(text)
 	)
-		return JSON.stringify(text)
-			.replace(/\u2028/g, "\\u2028")
-			.replace(/\u2029/g, "\\u2029");
+		return reportJson(text).replaceAll("##[", "\\u0023#[");
 	return text;
 }
 
+const lineEscapes: Record<string, string> = {
+	"\\": "\\\\",
+	"\t": "\\t",
+	" ": "\\s",
+	"##[": "\\u0023#[",
+	"::": "\\u003a:",
+};
+
 function encodeLine(text: string): string {
-	let output = "";
-	for (let index = 0; index < text.length; index++) {
-		const char = text.charAt(index);
-		if (char === "\\") output += "\\\\";
-		else if (char === "\t") output += "\\t";
-		else if (char === "\r") output += "\\r";
-		else if (char === "^") output += "\\^";
-		else if (index === 0 && char === " ") output += "\\s";
-		else if (index === 0 && (char === ">" || char === "-" || char === "#" || char === "!")) output += `\\${char}`;
-		else if (char.charCodeAt(0) < 32 || char === "\u2028" || char === "\u2029")
-			output += `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`;
-		else output += char;
-	}
-	return output;
+	return escapeControls(text.replace(/##\[|::|[\\\t^]|^[ >#!-]/g, (part) => lineEscapes[part] ?? `\\${part}`));
 }
 
 function decodeLine(text: string): string {
