@@ -423,7 +423,7 @@ async function cases(server: Server, count: number) {
 			await view.page.locator("#app").waitFor();
 			await view.page.waitForSelector('[data-run-document="C-1"][data-active="true"][data-ready="true"]');
 			await view.page.waitForFunction(
-				(id) => document.querySelector(`[data-slot="${id}"]`)?.textContent?.includes("yours"),
+				(id) => document.querySelector(`[data-slot="${id}"]`)?.textContent?.includes("Available"),
 				first.id,
 			);
 			expect(await view.page.getByRole("textbox", { name: "Result note" }).inputValue()).toBe("Keep this failure note");

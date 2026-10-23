@@ -184,8 +184,8 @@ The run view has these keys.
 | <kbd>f</kbd> | Fail and note: type what went wrong, then <kbd>↵</kbd> |
 | <kbd>b</kbd> | Blocked |
 | <kbd>s</kbd> | Skip |
-| <kbd>t</kbd> | Claim the selected slot for a 15-minute work lease. |
-| <kbd>r</kbd> | Release your lease on the selected slot. |
+| <kbd>t</kbd> | Claim slot: a 15-minute work lease on the selected slot |
+| <kbd>r</kbd> | Release slot: end your lease on the selected slot |
 | <kbd>u</kbd> | Correct last result |
 | <kbd>j</kbd> or <kbd>↓</kbd> | Next slot |
 | <kbd>k</kbd> or <kbd>↑</kbd> | Previous slot |
