@@ -44,6 +44,7 @@ import {
 } from "../scripts/chromium-diagnostics.ts";
 import { matrix, outputs } from "../scripts/ci-scope.ts";
 import { OLDEST_BUN, unready } from "../scripts/preflight.ts";
+import { make, remove } from "../scripts/work/scratch.ts";
 import type { ResultIn } from "../src/core/ops.ts";
 import { parseJUnit, TEST_FILE_LIMIT } from "../src/surfaces/formats/junit.ts";
 
@@ -904,13 +905,135 @@ test("only main publishes the image that passed the smoke test, after the gate",
 	expect(image.steps.some((one) => one.uses?.startsWith("docker/login-action@"))).toBe(false);
 	const push = publish.steps.map((one) => one.run ?? "").join("\n");
 	expect(push).toContain("docker load --input");
-	expect(push).not.toContain("docker build");
-	expect(push).toContain('docker push "$image:$GITHUB_SHA"');
-	expect(push).toContain('docker push "$image:main"');
+	expect(push).not.toMatch(/\bdocker (?:build(?:\s|$)|buildx build(?:\s|$))/);
+	expect(push).toContain('--tag "$image:$GITHUB_SHA" "$image@$digest"');
+	expect(push).toContain('--tag "$image:main" "$image@$digest"');
 	expect(push).toContain('if [ "$tip" = "$GITHUB_SHA" ]; then');
 	expect(readFileSync("compose.coolify.yaml", "utf8")).toContain("    build: .\n");
 	expect(readFileSync("Dockerfile", "utf8")).toContain("ENV MAINWORTHY_COMMIT=$MAINWORTHY_COMMIT");
 });
+
+test("image publication pins every action and derives creation time from the commit", () => {
+	const workflow = readFileSync(".github/workflows/check.yml", "utf8");
+	const actionJob = z.object({ steps: z.array(z.object({ uses: z.string().optional(), run: z.string().optional() })) });
+	const { jobs } = z
+		.object({ jobs: z.object({ image: actionJob, publish: actionJob }) })
+		.parse(Bun.YAML.parse(workflow));
+	for (const job of Object.values(jobs)) {
+		for (const step of job.steps) {
+			if (!step.uses) continue;
+			expect(step.uses).toMatch(/^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/);
+			const line = workflow.split("\n").find((line) => line.includes(`uses: ${step.uses}`));
+			expect(line).toMatch(/ # v\d+\.\d+\.\d+$/);
+		}
+	}
+	const created = jobs.image.steps.find((step) => step.run?.includes("time="))?.run ?? "";
+	expect(created).toContain("git log -1 --format=%cI");
+	expect(created).not.toContain("date ");
+	const dependabot = z
+		.object({
+			version: z.literal(2),
+			updates: z.array(
+				z.object({
+					"package-ecosystem": z.string(),
+					directory: z.string(),
+					schedule: z.object({ interval: z.string() }),
+				}),
+			),
+		})
+		.parse(Bun.YAML.parse(readFileSync(".github/dependabot.yml", "utf8")));
+	expect(dependabot.updates).toContainEqual({
+		"package-ecosystem": "github-actions",
+		directory: "/",
+		schedule: { interval: "weekly" },
+	});
+});
+
+for (const mode of ["missing", "same", "different", "unreadable", "bad-digest", "stage-fails", "stale-main"]) {
+	test(`image publication preserves commit tags when the registry is ${mode}`, () => {
+		const { jobs } = z
+			.object({ jobs: z.object({ publish: z.object({ steps: z.array(z.object({ run: z.string().optional() })) }) }) })
+			.parse(Bun.YAML.parse(readFileSync(".github/workflows/check.yml", "utf8")));
+		const script = jobs.publish.steps.find((step) => step.run?.includes("docker load"))?.run;
+		expect(script).toBeDefined();
+		if (!script) throw new Error("publish has no executable step");
+		const root = make("publish-contract");
+		const sha = "0123456789012345678901234567890123456789";
+		const image = "ghcr.io/endqwerty/mainworthy";
+		const digest = `sha256:${"a".repeat(64)}`;
+		try {
+			writeFileSync(
+				join(root, "docker"),
+				`#!/bin/bash
+set -eu
+printf '%s\\n' "$*" >> "$COMMAND_LOG"
+if [ "$1" = push ] && [ "$MODE" = stage-fails ]; then exit 1; fi
+if [ "$1 $\{2:-} $\{3:-}" = 'buildx imagetools inspect' ]; then
+  case "$4" in
+    *:build-*)
+      if [ "$MODE" = bad-digest ]; then echo invalid; else echo "$CANDIDATE_DIGEST"; fi ;;
+    *)
+      case "$MODE" in
+        same) echo "$CANDIDATE_DIGEST" ;;
+        different) echo 'sha256:${"b".repeat(64)}' ;;
+        unreadable) echo 'unauthorized: authentication required' >&2; exit 1 ;;
+        *) echo "ERROR: $4: not found" >&2; exit 1 ;;
+      esac ;;
+  esac
+fi
+`,
+				{ mode: 0o755 },
+			);
+			writeFileSync(
+				join(root, "gh"),
+				`#!/bin/bash
+if [ "$MODE" = stale-main ]; then echo '${"f".repeat(40)}'; else echo "$GITHUB_SHA"; fi
+`,
+				{ mode: 0o755 },
+			);
+			const result = Bun.spawnSync(["/bin/bash", "-euo", "pipefail", "-c", script], {
+				env: {
+					...process.env,
+					PATH: `${root}:${process.env.PATH}`,
+					MODE: mode,
+					CANDIDATE_DIGEST: digest,
+					COMMAND_LOG: join(root, "commands"),
+					RUNNER_TEMP: root,
+					GITHUB_SHA: sha,
+					GITHUB_REPOSITORY: "endqwerty/mainworthy",
+					GITHUB_RUN_ID: "100",
+					GITHUB_RUN_ATTEMPT: "2",
+					GITHUB_STEP_SUMMARY: join(root, "summary"),
+				},
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			const log = readFileSync(join(root, "commands"), "utf8");
+			const output = result.stdout.toString() + result.stderr.toString();
+			const commitWrites = log
+				.split("\n")
+				.filter(
+					(line) =>
+						line === `push ${image}:${sha}` ||
+						(line.startsWith("buildx imagetools create ") && line.includes(`--tag ${image}:${sha} `)),
+				);
+			if (["different", "unreadable", "bad-digest", "stage-fails"].includes(mode)) {
+				expect(result.exitCode).not.toBe(0);
+				expect(commitWrites).toEqual([]);
+				expect(log).not.toContain(`${image}:main`);
+				if (mode === "different") expect(output).toContain("Refusing to overwrite");
+			} else {
+				expect(result.exitCode, output).toBe(0);
+				expect(commitWrites).toHaveLength(mode === "same" ? 0 : 1);
+				expect(readFileSync(join(root, "summary"), "utf8")).toContain(`${image}@${digest}`);
+				if (mode === "stale-main") expect(log).not.toContain(`${image}:main`);
+				else expect(log).toContain(`--tag ${image}:main ${image}@${digest}`);
+			}
+		} finally {
+			remove(root);
+		}
+	});
+}
 
 test("the slowest files are read from the timings Bun writes", () => {
 	expect(slowest({ version: 1, files: { "a.test.ts": 1500, "b.test.ts": 62000, "c.test.ts": 20 } }, 2)).toEqual([

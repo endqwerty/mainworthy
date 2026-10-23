@@ -23,17 +23,40 @@ Only `publish` has `packages: write`, using `GITHUB_TOKEN`; no additional secret
 The tags are:
 
 - `<full-sha>`: the full 40-character commit, for example `ghcr.io/endqwerty/mainworthy:0123456789012345678901234567890123456789`.
+  Once published, this workflow leaves the tag unchanged. A rerun with the same registry manifest digest reuses it;
+  a different digest fails with `Refusing to overwrite` before changing the commit tag or `main`.
 - `main`: the latest published commit that was still the tip of `main` when publishing. An older run or rerun
   publishes its commit tag but skips `main` if the branch has advanced.
+- `build-<run-id>-<run-attempt>`: a staging tag for the tested archive. The publisher pushes it to learn the actual
+  registry manifest digest, then compares the commit tag before promoting that digest. Staging tags remain after
+  successful or failed attempts and are not deployment targets.
 
 The image embeds `MAINWORTHY_COMMIT`, so `/healthz` reports the image's full SHA without a runtime override.
 Its OCI labels name the source repository (`org.opencontainers.image.source`), commit
-(`org.opencontainers.image.revision`), and UTC creation time (`org.opencontainers.image.created`).
+(`org.opencontainers.image.revision`), and the commit's committer timestamp (`org.opencontainers.image.created`,
+from `git log -1 --format=%cI`). The timestamp stays the same on reruns. This removes wall-clock label drift;
+other build inputs can still change the digest, in which case the commit-tag guard refuses replacement.
+An inspection error other than a missing commit tag also fails the job without changing the commit tag or `main`.
+
+The publisher promotes the inspected manifest by digest and records `ghcr.io/endqwerty/mainworthy@sha256:<digest>`
+in the workflow run summary. Future deployments must use that digest reference; a commit tag or `main` is an alias.
 
 Production still builds on the owner's server through Coolify, using `build: .` in `compose.coolify.yaml`.
 Publishing an image changes no deployment trigger or production configuration. Switching production to a
 published image belongs to [issue #821](https://github.com/endqwerty/mainworthy/issues/821), step 5.
 The future check that the server builds nothing does not apply to production yet.
+
+### Update pinned actions
+
+Every action in the `image` and `publish` jobs uses a full 40-character commit SHA, with its release version in
+an adjacent comment. The artifact actions in the other jobs use the same pins. `.github/dependabot.yml` checks
+GitHub Actions weekly and opens pull requests for updates; it does not merge them.
+
+To update a pin, review the action's release notes and changes since the pinned commit. Resolve the exact release
+with `gh api repos/<owner>/<repo>/git/ref/tags/<version> --jq .object`. If its type is `tag`, resolve that SHA with
+`gh api repos/<owner>/<repo>/git/tags/<sha> --jq .object`, repeating until the type is `commit`. Replace the action
+SHA and its `# vN.N.N` comment together, including other occurrences of the same action. Run
+`bun test test/check.test.ts` and `actionlint .github/workflows/check.yml` before accepting the update.
 
 ### Make the package public once
 
@@ -47,9 +70,10 @@ perform it. Until then, anonymous pulls fail. GitHub documents
 
 1. Confirm `image` builds once, passes its health and documentation smoke checks, and uploads `mainworthy-image`.
 2. Confirm `publish` starts only after a successful `gate`, loads the archive without building, and pushes the
-   full-SHA tag and `main` tag. If `main` advanced during the run, expect only the full-SHA tag.
-3. After making the package public, pull the full-SHA tag without registry credentials. Inspect its OCI labels
-   and run it without a commit environment override. Require HTTP 200, `ok: true`, and `commit` equal to that SHA
+   staging tag before creating or reusing the full-SHA tag and updating `main`. If `main` advanced during the run,
+   expect no `main` update. Confirm the summary records the published digest reference.
+3. After making the package public, pull the summary's digest reference without registry credentials. Inspect its
+   OCI labels and run it without a commit environment override. Require HTTP 200, `ok: true`, and `commit` equal to that SHA
    from `/healthz`. Check that both tags resolve to the same digest when the commit is still `main`.
 4. Confirm Coolify still builds from source on its existing schedule. After that deployment, the public
    `/healthz` must report the deployed commit. This checks the existing deploy path, not deployment of the GHCR image.
