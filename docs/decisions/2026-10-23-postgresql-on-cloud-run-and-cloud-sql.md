@@ -202,10 +202,9 @@ So background work becomes jobs behind one job interface (0002 rule 6):
   development, CI and the tests use it, as would any host whose CPU runs between requests. On Cloud Run, a job
   runs inside an HTTP request to a second Cloud Run service, the job service, so its CPU is allocated: Cloud Tasks
   sends one request per job, and Cloud Scheduler sends the periodic work once a minute. The job service runs the
-  same image, scales to zero, and serves only the job endpoint; the public service refuses that path. A job must finish within both its
-  task's
-  dispatch deadline (ten minutes by default, thirty at most) and the service's request timeout (five minutes by
-  default), as step 3 sets them; the transaction timeouts above are far shorter. A job whose request was given up
+  same image, scales to zero, and serves only the job endpoint; the public service refuses that path. A job must
+  finish within both its task's dispatch deadline (ten minutes by default, thirty at most) and the service's
+  request timeout (five minutes by default), as step 3 sets them; the transaction timeouts above are far shorter. A job whose request was given up
   may still be running, and its claim token keeps its late final write from landing. A test finishes a job after
   its claim was taken again.
 - The job service keeps Cloud Run's invoker IAM check on, and only the job service account may invoke it. That is
