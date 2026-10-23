@@ -735,8 +735,16 @@ export const TokenRevoke = struct("TokenRevoke", "`admin` token.revoke: true whe
 // ── The suite ──────────────────────────────────────────────────────────────────────────────────────────────
 
 const SuiteProof = struct("SuiteProof", "The latest evidence of one method, not a gate verdict.", {
+	id: whole,
+	version: nullable(whole),
+	by: text,
+	method: text,
+	model: nullable(text),
+	name: nullable(text),
 	outcome: text,
+	at: moment,
 	current: flag,
+	basis: text,
 });
 const SuiteProofs = struct("SuiteProofs", "The latest evidence by method.", {
 	human: maybe(SuiteProof),
@@ -781,6 +789,7 @@ export const SuiteDocument = struct("SuiteDocument", "A case from get, at the ve
 	automate: text,
 	fields: maybe(dictionary(text)),
 	tags: list(text),
+	proof: maybe(SuiteProofs),
 	folder: struct("SuitePlace", "The current folder, even when reading an older version.", { path: text }),
 });
 export const SuiteHistory = struct("SuiteHistory", "The versions of a case, newest first.", {

@@ -155,6 +155,11 @@ has closed". Press <kbd>e</kbd> or choose "Take over here" to continue the draft
 
 Select a case to read its version, author, proof, and timeline.
 A result names the case version it exercised. Editing the case does not rewrite that result.
+The Proof section shows each method's latest result, with its original version, author, basis, and any model or test name.
+It keeps those details even when the result is older than the timeline's displayed entries.
+An older pass does not prove the current version. If a result has no recorded version, Proof says "unknown version".
+Data replies from `get` and `find --in cases`, including CLI and MCP output, carry each proof's result `id`, `version`,
+`by`, `method`, `model`, `name`, `outcome`, `at`, `current`, and `basis`. A method with no result is `null`.
 
 ![Case with proof and a proposed edit in its timeline](../ui/screenshots/case-light.png)
 

@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
+import { Proofs } from "../core/replies.ts";
 import { withInstance } from "./test-support.ts";
 
 test("MCP connection errors omit credentials from the configured server URL", async () => {
@@ -36,6 +37,13 @@ test.each(["2025-11-25", "2026-07-28"])(
 	async (version) => {
 		await withInstance(async ({ cli, client }) => {
 			await client.call("propose", { edits: [{ op: "create", outline: "From MCP\nAn action > Expected" }] });
+			const run = await client.call("plan", { name: "Proof", select: {} });
+			await client.call("report", { run: run.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+			await client.call("propose", {
+				edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "From MCP, edited" } }],
+			});
+			const [document] = await client.call("get", { refs: ["C-1"] });
+			const proof = Proofs.parse(document?.proof);
 			const meta =
 				version === "2026-07-28"
 					? {
@@ -85,10 +93,19 @@ test.each(["2025-11-25", "2026-07-28"])(
 			const operation = replies.find((reply) => reply.id === 2);
 			const body = z
 				.object({
-					structuredContent: z.object({ result: z.object({ items: z.array(z.object({ ref: z.string() })) }) }),
+					structuredContent: z.object({
+						result: z.object({ items: z.array(z.object({ ref: z.string(), proof: Proofs })) }),
+					}),
+					content: z.array(z.object({ type: z.literal("text"), text: z.string() })),
 				})
 				.parse(operation?.result);
 			expect(body.structuredContent.result.items[0]?.ref).toBe("C-1");
+			expect(body.structuredContent.result.items[0]?.proof).toEqual(proof);
+			expect(proof.human).toMatchObject({ id: expect.any(Number), version: 1, current: false, method: "human" });
+			const text = z
+				.object({ result: z.object({ items: z.array(z.object({ proof: Proofs })) }) })
+				.parse(JSON.parse(body.content[0]?.text ?? "null"));
+			expect(text.result.items[0]?.proof).toEqual(proof);
 		});
 	},
 );

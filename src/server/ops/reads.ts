@@ -244,7 +244,7 @@ export function caseView(
 		out.updated = { at: row.updated_at, by: who(ctx, row.updated_by).name, kind: who(ctx, row.updated_by).kind };
 	}
 	if (want.has("proof")) {
-		out.proof = proofOf(ctx.db, row);
+		out.proof = caseProof(ctx, row);
 		out.open = openCountOn(ctx.db, row.project, caseRef(row));
 	}
 	if (want.has("tests"))
@@ -754,6 +754,27 @@ function questionOfCount(ctx: Ctx, row: CountedTest): string | null {
 	return open ? questionRef(open) : null;
 }
 
+function caseProof(ctx: Ctx, row: CaseRow) {
+	const proofs = proofOf(ctx.db, row);
+	const one = (proof: (typeof proofs)[MethodKind]) => {
+		if (!proof) return null;
+		const { result, current } = proof;
+		return {
+			id: result.id,
+			version: result.basis_version,
+			by: who(ctx, result.actor).name,
+			method: result.method,
+			model: result.model,
+			name: testById(ctx.db, result.test)?.name ?? null,
+			outcome: result.outcome,
+			at: result.at,
+			current,
+			basis: result.basis,
+		};
+	};
+	return { human: one(proofs.human), auto: one(proofs.auto), agent: one(proofs.agent) };
+}
+
 function caseRow(ctx: Ctx, row: CaseRow, rich: boolean): Record<string, unknown> {
 	const base: Record<string, unknown> = {
 		ref: caseRef(row),
@@ -770,7 +791,7 @@ function caseRow(ctx: Ctx, row: CaseRow, rich: boolean): Record<string, unknown>
 		updatedBy: who(ctx, row.updated_by).kind,
 	};
 	if (rich) {
-		base.proof = proofOf(ctx.db, row);
+		base.proof = caseProof(ctx, row);
 		base.open = openCountOn(ctx.db, row.project, caseRef(row));
 	}
 	return base;

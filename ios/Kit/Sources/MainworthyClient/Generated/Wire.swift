@@ -1028,8 +1028,32 @@ enum Wire {
 
 	/// The latest evidence of one method, not a gate verdict.
 	struct SuiteProof: Decodable, Equatable, Sendable {
+		let id: Int
+		let version: Int?
+		let by: String
+		let method: String
+		let model: String?
+		let name: String?
 		let outcome: String
+		let at: Double
 		let current: Bool
+		let basis: String
+
+		private enum CodingKeys: String, CodingKey { case id, version, by, method, model, name, outcome, at, current, basis }
+
+		init(from decoder: any Decoder) throws {
+			let container = try decoder.container(keyedBy: CodingKeys.self)
+			id = try container.decode(Int.self, forKey: .id)
+			version = try container.decode(Int?.self, forKey: .version)
+			by = try container.decode(String.self, forKey: .by)
+			method = try container.decode(String.self, forKey: .method)
+			model = try container.decode(String?.self, forKey: .model)
+			name = try container.decode(String?.self, forKey: .name)
+			outcome = try container.decode(String.self, forKey: .outcome)
+			at = try container.decode(Double.self, forKey: .at)
+			current = try container.decode(Bool.self, forKey: .current)
+			basis = try container.decode(String.self, forKey: .basis)
+		}
 	}
 
 	/// The latest evidence by method.
@@ -1097,6 +1121,7 @@ enum Wire {
 		let automate: String
 		let fields: [String: String]?
 		let tags: [String]
+		let proof: SuiteProofs?
 		let folder: SuitePlace
 	}
 

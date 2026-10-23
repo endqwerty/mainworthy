@@ -21,7 +21,8 @@ struct SuiteLiveTests {
 		let second = try await client.cases(after: cursor, limit: 2)
 		#expect(Set(first.items.map(\.ref)).isDisjoint(with: second.items.map(\.ref)))
 		#expect(first.items.count == 2 && second.items.count == 2)
-		#expect(first.items.contains { !$0.proof.isEmpty })
+		let proven = try #require(first.items.first { !$0.proof.isEmpty })
+		#expect(try await client.caseDocument(proven.ref).proof == proven.proof)
 	}
 
 	@Test("create and edit keep methods, automation and unread fields, and history reads old content")
@@ -106,11 +107,26 @@ struct StepIDTests {
 		}
 	}
 
+}
+
+@Suite("Case proof")
+struct CaseProofTests {
 	@Test("an unfamiliar proof outcome is shown")
 	func futureProof() throws {
-		let wire = try JSONDecoder().decode(Wire.SuiteProof.self, from: Data(#"{"outcome":"inconclusive","current":false}"#.utf8))
-		let proof = CaseProof(method: "agent", wire: wire)
+		let wire = try JSONDecoder().decode(Wire.SuiteProof.self, from: Data(#"{"id":7,"version":null,"by":"robin","method":"agent","model":null,"name":"","outcome":"inconclusive","at":1000,"current":false,"basis":"unresolved"}"#.utf8))
+		let proof = CaseProof(wire)
 		#expect(proof.outcome == .other("inconclusive"))
 		#expect(proof.outcome.word == "inconclusive" && !proof.current && proof.method == "agent")
+		#expect(proof.sentence == "inconclusive on unknown version · basis unresolved · robin")
+	}
+
+	@Test("a case's proof keeps its result identity and version independently of the case version")
+	func oldProof() throws {
+		let wire = try JSONDecoder().decode(Wire.SuiteDocument.self, from: Data(#"{"ref":"C-1","version":103,"title":"Edited","pre":"","steps":[],"methods":["agent"],"automate":"no","tags":[],"folder":{"path":"Unsorted"},"proof":{"human":null,"auto":null,"agent":{"id":42,"version":1,"by":"reviewer","method":"agent","model":"example-model","name":"Checkout","outcome":"pass","at":1000,"current":false,"basis":"exact"}}}"#.utf8))
+		let document = CaseDocument(wire)
+		let proof = try #require(document.proof.first)
+		#expect(document.version == 103 && proof.version == 1 && proof.id == 42 && !proof.current)
+		#expect(proof.method == "agent" && proof.by == "reviewer" && proof.basis == "exact")
+		#expect(proof.sentence == "pass on v1 · basis exact · reviewer · example-model · Checkout")
 	}
 }

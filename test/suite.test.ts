@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { z } from "zod";
 import { open } from "../src/app/start.ts";
 import { Client } from "../src/cli/client.ts";
 import { parseCase } from "../src/core/markdown.ts";
@@ -9,6 +10,7 @@ import { applyMergeChoice, type Conflict } from "../src/core/merge3.ts";
 import { CaseBody, type ConflictAddress, emptyBody } from "../src/core/model.ts";
 import { type DecideReply, type Edit, ProposeReply } from "../src/core/ops.ts";
 import { PRESETS } from "../src/core/presets.ts";
+import { Proofs } from "../src/core/replies.ts";
 import { actorByName } from "../src/server/identity/identity.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
 import { Db } from "../src/server/kernel/db.ts";
@@ -2127,6 +2129,61 @@ describe("organising", () => {
 		expect(read({ version: 1, unless: { "C-1": created.etag } })).toMatchObject({ title: "Checkout", version: 1 });
 		expect(read({ unless: { "C-1": read().hash } })).toMatchObject({ title: "Changed checkout" });
 	});
+
+	test.each(["human", "ci", "agent"] as const)(
+		"%s proof returns the selected result's identity in get and find",
+		(kind) => {
+			h.call("propose", {
+				edits: [{ op: "create", body: { title: "Checkout", methods: ["human", "auto", "agent"] } }],
+			});
+			const method = kind === "ci" ? "auto" : kind;
+			const author = h.actor("proof-author", kind, ["read", "record"]);
+			const other = h.actor("later-author", kind, ["read", "record"]);
+			const report = (run: string, as: typeof author) =>
+				h.call(
+					"report",
+					{
+						run,
+						...(kind === "agent" ? { model: "example-model" } : {}),
+						results: [{ test: { case: "C-1" }, outcome: "pass" }],
+					},
+					as,
+				);
+			h.call("plan", { name: "First", select: {} });
+			report("R-1", author);
+			const original = z
+				.object({ id: z.number(), name: z.string().nullable(), at: z.number() })
+				.parse(
+					h
+						.call<{ entries: Record<string, unknown>[] }>("timeline", { ref: "C-1" })
+						.entries.find((entry) => entry.t === "result"),
+				);
+			const read = () => {
+				const [doc] = h.call<Record<string, unknown>[]>("get", { refs: ["C-1"], fields: ["proof"] });
+				return Proofs.parse(doc?.proof)[method];
+			};
+			expect(read()).toEqual({
+				id: original.id,
+				version: 1,
+				by: "proof-author",
+				method,
+				model: kind === "agent" ? "example-model" : null,
+				name: original.name,
+				outcome: "pass",
+				at: original.at,
+				current: true,
+				basis: "exact",
+			});
+			h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Updated" } }] });
+			expect(read()).toMatchObject({ id: original.id, version: 1, by: "proof-author", current: false });
+			const found = h.call<{ items: Record<string, unknown>[] }>("find", { in: "cases" }).items[0];
+			expect(Proofs.parse(found?.proof)[method]).toEqual(read());
+			h.call("plan", { name: "Second", select: {} });
+			report("R-2", other);
+			expect(read()).toMatchObject({ version: 2, by: "later-author", current: true, basis: "exact" });
+			expect(read()?.id).not.toBe(original.id);
+		},
+	);
 
 	test("conditional data reads refresh proof without a body edit", () => {
 		h.call("propose", { edits: [{ op: "create", outline: "Checkout\n  Check > Pass" }] });

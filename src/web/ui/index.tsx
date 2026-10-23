@@ -1,9 +1,9 @@
 import type { ComponentProps, MouseEvent, ReactNode } from "react";
-import { z } from "zod";
 import { diffBodies, diffWords } from "../../core/diff.ts";
 import { type DocSlug, docUrl } from "../../core/docs.ts";
 import { type CaseBody, stepAction } from "../../core/model.ts";
 import { PASSWORD_LENGTH } from "../../core/people.ts";
+import { Proofs } from "../../core/replies.ts";
 
 export function KeyCap({ children }: { children: ReactNode }) {
 	return <kbd>{children}</kbd>;
@@ -26,9 +26,6 @@ export function age(at: number): string {
 				? `${Math.floor(minutes / 60)}h`
 				: `${Math.floor(minutes / 1440)}d`;
 }
-const Proof = z.object({ outcome: z.string(), current: z.boolean(), at: z.number(), basis: z.string() }).nullable();
-export const Proofs = z.object({ human: Proof, auto: Proof, agent: Proof });
-export type Proofs = z.infer<typeof Proofs>;
 export function ProofStrip({ proof }: { proof?: unknown }) {
 	const parsed = Proofs.safeParse(proof);
 	const values = parsed.success ? parsed.data : { human: null, auto: null, agent: null };
