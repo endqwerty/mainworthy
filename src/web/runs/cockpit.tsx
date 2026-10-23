@@ -238,10 +238,13 @@ function ProjectRunCockpit({
 				}
 			: slot;
 	});
+	const ownFillOf = (slot: Slot) => slot.fills.find((fill) => fill.by === session.actor && fill.method === method);
 	const missing = (slot: Slot) =>
 		(slot.state === "missing" || slot.state === "skipped") && !local.get(slot.id)?.pending;
-	if (cursor === null && slots.length) setCursor((slots.find(missing) ?? slots[0])?.id ?? null);
-	const current = cursor === null ? (slots.find(missing) ?? slots[0]) : slots.find((slot) => slot.id === cursor);
+	const unreported = (slot: Slot) => missing(slot) && !ownFillOf(slot);
+	const first = slots.find(unreported);
+	if (cursor === null && first) setCursor(first.id);
+	const current = cursor === null ? first : slots.find((slot) => slot.id === cursor);
 	const step = current ? (steps[current.id] ?? "") : "";
 	function setStep(value: string | ((previous: string) => string)): void {
 		if (!current || !sessionCurrent(owner)) return;
@@ -268,14 +271,11 @@ function ProjectRunCockpit({
 	}
 	const currentIndex = current ? slots.indexOf(current) : -1;
 	const next = current
-		? [...slots.slice(currentIndex + 1), ...slots.slice(0, currentIndex)].filter(missing).slice(0, 5)
+		? [...slots.slice(currentIndex + 1), ...slots.slice(0, currentIndex)].filter(unreported).slice(0, 5)
 		: [];
 	const documents = current ? [current, ...next.filter((slot) => slot.id !== current.id)] : [];
-	const external = (slot: Slot) =>
-		!missing(slot) &&
-		slot.fills.length > 0 &&
-		!slot.fills.some((fill) => fill.by === session.actor && fill.method === method);
-	const ownFill = current?.fills.find((fill) => fill.by === session.actor && fill.method === method);
+	const external = (slot: Slot) => !missing(slot) && slot.fills.length > 0 && !ownFillOf(slot);
+	const ownFill = current && ownFillOf(current);
 	const note = current ? (notes[current.id] ?? "") : "";
 	const currentRead = useQueryOp({
 		project,
@@ -295,14 +295,14 @@ function ProjectRunCockpit({
 			session.can.includes("produce") &&
 			(reports.uncertain.has(current.id) || (!external(current) && run?.state === "open" && admittedMethod)),
 	);
-	const allFilled = slots.length > 0 && !slots.some(missing) && !slotsRead.hasNextPage;
+	const hasUnreported = slots.some(unreported);
+	const allReported = slots.length > 0 && !hasUnreported && !slotsRead.hasNextPage;
 	useEffect(() => {
 		if (current?.id) document.querySelector(`[data-slot="${current.id}"]`)?.scrollIntoView({ block: "nearest" });
 	}, [current?.id]);
-	const hasMissing = slots.some(missing);
 	useEffect(() => {
-		if (!hasMissing && slotsRead.hasNextPage && !slotsRead.isFetchingNextPage) void slotsRead.fetchNextPage();
-	}, [hasMissing, slotsRead.hasNextPage, slotsRead.isFetchingNextPage, slotsRead.fetchNextPage]);
+		if (!hasUnreported && slotsRead.hasNextPage && !slotsRead.isFetchingNextPage) void slotsRead.fetchNextPage();
+	}, [hasUnreported, slotsRead.hasNextPage, slotsRead.isFetchingNextPage, slotsRead.fetchNextPage]);
 	function move(delta: number): void {
 		if (!current) return;
 		for (let distance = 1; distance <= slots.length; distance++) {
@@ -721,7 +721,7 @@ function ProjectRunCockpit({
 					<b className="run-title">{run?.name ?? "Run"}</b>
 					<span className="dim">
 						{slots.filter(missing).length}
-						{slotsRead.hasNextPage ? "+" : ""} left ·{" "}
+						{slotsRead.hasNextPage ? "+" : ""} left in run ·{" "}
 						{run && (run.workUntil === null || run.workUntil > now)
 							? run.inProgress
 							: storedSlots.filter((slot) => slot.work.kind === "held").length}{" "}
@@ -852,7 +852,7 @@ function ProjectRunCockpit({
 							This slot does not admit results from your method. Pipeline or agent evidence must fill it.
 						</p>
 					)}
-					{allFilled && <p className="dim">Nothing left for you to run. The server verdict is shown above.</p>}
+					{allReported && <p className="dim">Nothing left for you to run. The server verdict is shown above.</p>}
 					<div className="outs">
 						{(
 							[

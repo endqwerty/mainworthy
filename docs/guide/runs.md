@@ -118,7 +118,8 @@ To record a result, follow these steps.
 3. Press the key for the outcome.
 
 <kbd>p</kbd> records "Pass". <kbd>b</kbd> records "Blocked".
-<kbd>s</kbd> records "Skip". These keys move you to the next missing slot.
+<kbd>s</kbd> records "Skip". These keys move you to the next unfinished slot you have not reported.
+Opening the cockpit starts at the first such slot. Automatic advancement stops when none remain.
 To record a failure, follow these steps.
 
 1. Press <kbd>f</kbd> to focus "Result note".
@@ -133,7 +134,11 @@ While the note has the focus, the outcome keys type letters and <kbd>Enter</kbd>
 3. Press the outcome key.
 
 Type a step number before <kbd>f</kbd> to mark the failed step.
-Use <kbd>j</kbd> and <kbd>k</kbd> to move between slots.
+Use <kbd>j</kbd> and <kbd>k</kbd> to move between slots, including your earlier results.
+You can also click a slot to reopen it and correct your result.
+The header's "N left in run" counts unfinished slots across all people. Skipped and blocked slots stay in that count.
+"Nothing left for you to run" means no unfinished slot is waiting for your first report.
+The run can still be pending because a result was skipped or blocked, or another required person has yet to report.
 If browser storage is available, the run keeps unfinished notes on this device until the server records the result.
 If a report's reply is lost, unreadable, interrupted by an internal server error, or arrives after
 you sign in again, the page keeps its outcome unknown and checks the original command.
