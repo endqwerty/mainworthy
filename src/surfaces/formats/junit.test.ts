@@ -402,7 +402,7 @@ describe("parseJUnit recovery and boundaries", () => {
 		expect(tries[1]?.failure?.message).toBe("run 22");
 		expect(tries.at(-1)?.failure?.message).toBe("run 120");
 		expect(parsed.warnings).toContain(
-			"Testcase one: kept the first and the last 99 of its 120 earlier runs; every one failed",
+			'Testcase "one": kept the first and the last 99 of its 120 earlier runs; every one failed',
 		);
 	});
 

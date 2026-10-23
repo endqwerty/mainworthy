@@ -369,6 +369,9 @@ native revisions, results, actors, or decisions. The checked vendor CSV examples
 contain snapshots, not revision history. XML, JSON, XLSX, attachments and replay
 of earlier revisions or results are not supported by these case importers.
 
+Parser diagnostics from `mainworthy import --format csv|testrail|qase` quote and shorten external values,
+escaping terminal control characters. Imported case content stays unchanged.
+
 ## Import into a new instance
 
 Build bindings, artifact provenance and deployment history travel in archives.

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { parseJest } from "./jest.ts";
 import { parseJUnit } from "./junit.ts";
-import type { ParsedReport } from "./native.ts";
+import { type ParsedReport, reportIdentifier } from "./native.ts";
 import { parsePlaywright } from "./playwright.ts";
 import { parsePytest } from "./pytest.ts";
 import { parseTRX } from "./trx.ts";
@@ -68,9 +68,11 @@ export function parseReport(
 						.slice(0, 5)
 						.map((issue) => `${issue.path.join(".") || "report"}: ${issue.message}`)
 						.join("; ")
-				: error instanceof Error
-					? error.message
-					: "Invalid report";
-		throw new Error(`${options.file}: ${detail}`);
+				: error instanceof SyntaxError
+					? reportIdentifier(error.message)
+					: error instanceof Error
+						? error.message
+						: "Invalid report";
+		throw new Error(`${reportIdentifier(options.file)}: ${detail}`);
 	}
 }

@@ -72,3 +72,78 @@ test("native retry diagnostics stay on one stderr line with control-safe identif
 		}
 	});
 });
+
+test("report refusals and parse warnings escape suite names, filenames and attachment paths on stderr", async () => {
+	await withInstance(async ({ cli, run, directory }) => {
+		const name = "\n::error::suite\u001b]0;suite\u0007\u0085\u202e";
+		for (const [index, assertionResults] of [[], [{ title: "one", ancestorTitles: [], status: "passed" }]].entries()) {
+			const file = join(directory, "refused.json");
+			await Bun.write(file, JSON.stringify({ testResults: [{ name, status: "failed", assertionResults }] }));
+			const refused = await (index === 0 ? cli : run)(["report", file, "--session", "safe-error"]);
+			expect(refused).toMatchObject({ code: 4, stdout: "" });
+			expect(refused.stderr.split("\n")).toHaveLength(2);
+			expect(refused.stderr).toContain("\\n::error::suite");
+			expect(refused.stderr).toContain("\\u001b");
+			expect(refused.stderr).not.toContain("\u001b");
+			expect(refused.stderr).not.toContain("\u0085");
+			expect(refused.stderr).not.toContain("\u202e");
+		}
+		const file = join(directory, "warning\n::error::file\u0085.xml");
+		await Bun.write(
+			file,
+			'<testsuite><testcase/><testcase name="two"><properties><property name="attachment" value="missing&#x85;&#x202e;"/></properties></testcase></testsuite>',
+		);
+		const uploaded = await run(["report", file, "--session", "safe-warning", "--attachments", directory, "--json"]);
+		expect(uploaded.code).toBe(0);
+		expect(JSON.parse(uploaded.stdout).counts.total).toBe(2);
+		expect(uploaded.stderr.split("\n")).toHaveLength(3);
+		expect(uploaded.stderr).not.toContain("\n::error::");
+		expect(uploaded.stderr).not.toContain("\u0085");
+		expect(uploaded.stderr).not.toContain("\u202e");
+		const unavailable = await run([
+			"report",
+			file,
+			"--session",
+			"unavailable",
+			"--attachments",
+			join(directory, "missing\u0085\u202e"),
+			"--json",
+		]);
+		expect(unavailable.code).toBe(0);
+		expect(unavailable.stderr).toContain("attachment directory is unavailable");
+		expect(unavailable.stderr).not.toContain("\u0085");
+		expect(unavailable.stderr).not.toContain("\u202e");
+	});
+});
+
+test("human and JSON report receipts escape reporter-controlled failure titles on stdout", async () => {
+	await withInstance(async ({ cli, run, directory }) => {
+		const file = join(directory, "failed.json");
+		await Bun.write(
+			file,
+			JSON.stringify({
+				testResults: [
+					{
+						name: "one.js",
+						status: "failed",
+						assertionResults: [
+							{ title: "one", ancestorTitles: [], status: "failed", failureMessages: ["boom\u0085\u202e"] },
+						],
+					},
+				],
+			}),
+		);
+		const uploaded = await cli(["report", file, "--commit", "abc7771"]);
+		expect(uploaded.code).toBe(0);
+		expect(uploaded.stdout).toContain("boom");
+		expect(uploaded.stdout).toContain("\\u0085");
+		expect(uploaded.stdout).not.toContain("\u0085");
+		expect(uploaded.stdout).not.toContain("\u202e");
+		const json = await run(["report", file, "--commit", "abc7772", "--json"]);
+		expect(json.code).toBe(0);
+		expect(JSON.parse(json.stdout).questions[0].title).toBe("boom\u0085\u202e");
+		expect(json.stdout).toContain("\\u0085");
+		expect(json.stdout).not.toContain("\u0085");
+		expect(json.stdout).not.toContain("\u202e");
+	});
+});

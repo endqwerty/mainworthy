@@ -112,7 +112,7 @@ test.each(["jest", "vitest", "pytest"] as const)(
 test.each([{ invocations: -1 }, { invocations: 1.5 }, { invocations: 102 }, { retryReasons: [42] }])(
 	"malformed or over-limit Jest retry metadata refuses the report: %j",
 	(extra) => {
-		expect(() => parseReport(assertion(extra), options)).toThrow("retries.json:");
+		expect(() => parseReport(assertion(extra), options)).toThrow('"retries.json":');
 	},
 );
 
@@ -131,7 +131,7 @@ test.each([
 test("pytest's rerun marker cannot turn missing or unfinished final stages into a pass", () => {
 	for (const stages of [{ setup: { outcome: "passed", duration: 0 } }, { call: { outcome: "rerun", duration: 0 } }]) {
 		const text = JSON.stringify({ exitcode: 0, tests: [{ nodeid: "test.py::sample", outcome: "rerun", ...stages }] });
-		expect(() => parseReport(text, options)).toThrow("retries.json:");
+		expect(() => parseReport(text, options)).toThrow('"retries.json":');
 	}
 });
 

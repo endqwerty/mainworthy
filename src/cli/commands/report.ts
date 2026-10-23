@@ -1,4 +1,5 @@
 import { ReportInput, type ReportReceipt, type TargetIn } from "../../core/ops.ts";
+import { reportIdentifier } from "../../surfaces/formats/native.ts";
 import { parseReport, ReportFormat } from "../../surfaces/formats/report.ts";
 import { assertPositionals } from "../args.ts";
 import { CliError } from "../errors.ts";
@@ -40,7 +41,7 @@ export function printReceipt(input: {
 					? `decided by rule ${cause.by ?? "policy"}: ${cause.answer ?? "unknown"}`
 					: cause.how;
 		line(
-			`  ${count(cause.tests)} ${disposition}   ${cause.q} ${JSON.stringify(cause.title)}   (${plural(cause.tests, "test")})`,
+			`  ${count(cause.tests)} ${disposition}   ${cause.q} ${reportIdentifier(cause.title)}   (${plural(cause.tests, "test")})`,
 		);
 	}
 	line(`  ${plural(receipt.unlinked, "result")} had no case or version when recorded`);

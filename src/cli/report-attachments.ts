@@ -2,7 +2,7 @@ import { closeSync, constants, fstatSync, openSync, readSync, realpathSync, stat
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { ATTACHMENT_LIMITS, AttachmentInput, attachmentBytes } from "../core/attachments.ts";
 import type { ResultIn } from "../core/ops.ts";
-import type { ParsedReport } from "../surfaces/formats/native.ts";
+import { type ParsedReport, reportIdentifier } from "../surfaces/formats/native.ts";
 
 export type AttachmentBudget = { bytes: number; files: number };
 /** Optional evidence must not prevent the report's results from being uploaded. */
@@ -25,7 +25,7 @@ export function loadReportAttachments(
 	const warnings: string[] = [];
 	const skip = (path: string, reason: string) => {
 		skipped++;
-		warnings.push(`${JSON.stringify(reportFile)}: skipped attachment ${JSON.stringify(path)}: ${reason}`);
+		warnings.push(`${reportIdentifier(reportFile)}: skipped attachment ${reportIdentifier(path)}: ${reason}`);
 	};
 	const results = parsed.results.map(({ attachmentPaths, attachments: inline, ...result }) => {
 		const attachments: AttachmentInput[] = [];
@@ -51,7 +51,7 @@ export function loadReportAttachments(
 				continue;
 			}
 			try {
-				if (permitted === null) throw new Error(`attachment directory is unavailable: ${JSON.stringify(root)}`);
+				if (permitted === null) throw new Error(`attachment directory is unavailable: ${reportIdentifier(root)}`);
 				const boundary = permitted;
 				const candidates = isAbsolute(path) ? [path] : [resolve(permitted, path), resolve(dirname(reportFile), path)];
 				let found: { path: string; name: string } | null = null;
@@ -92,7 +92,7 @@ export function loadReportAttachments(
 					closeSync(fd);
 				}
 			} catch (error) {
-				skip(path, error instanceof Error ? error.message.replace(/[\r\n]/g, " ") : "could not read file");
+				skip(path, error instanceof Error ? reportIdentifier(error.message) : "could not read file");
 			}
 		}
 		return { ...result, ...(attachments.length ? { attachments } : {}) };
