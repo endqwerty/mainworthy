@@ -74,85 +74,102 @@ async function slots(server: Server, run: string) {
 	return Slot.array().parse((await server.api("find", { in: "slots", run })).items);
 }
 
-check(
-	"a mistaken dispute releases confirmed local evidence and lets its author report again (872)",
-	async () => {
-		const { server, run, path } = await fixture(1, 2);
-		let view: Awaited<ReturnType<typeof openPage>> | null = null;
-		try {
-			const second = z.object({ token: z.string() }).parse(
-				await server.api("admin", {
-					do: "token.create",
-					actor: "second-person",
-					kind: "human",
-					can: ["read", "produce"],
-					project: "scratch",
-				}),
-			);
-			const lead = z.object({ token: z.string() }).parse(
-				await server.api("admin", {
-					do: "token.create",
-					actor: "lead",
-					kind: "human",
-					can: ["read", "produce", "answer"],
-					project: "scratch",
-				}),
-			);
-			await server.api("report", { run, results: [{ test: { case: "C-1" }, outcome: "pass" }] }, second);
-			view = await openPage(server, { path });
-			const { page } = view;
-			await ready(page);
-			await fail(page, "Mistaken observation");
-			await page.locator("#stat").filter({ hasText: "C-1 fail recorded" }).waitFor();
-			await page.getByRole("button", { name: "Slot 1: C-1, disputed by robin", exact: true }).waitFor();
-			const receiptQuestion = await page.locator('[data-slot="1"] .run-question').first().innerText();
-			const dispute = (await server.api("inbox", { kind: "failure" })).items.find((item) =>
-				item.title.startsWith(`Disputed C-1 in ${run}:`),
-			);
-			if (!dispute) throw new Error("Slot dispute missing");
-			expect(
-				await server.api(
-					"decide",
-					{
-						q: dispute.q,
-						onEvidence: dispute.evidenceHash,
-						answer: { is: "mistaken" },
-						reason: "The failure was an observation error",
-					},
-					lead,
-				),
-			).toMatchObject([{ status: "decided" }]);
-			expect((await slots(server, run))[0]).toMatchObject({
-				state: "missing",
-				fills: [{ by: "second-person", outcome: "pass" }],
-			});
-			const gate = await server.api("gate", { run });
-			await page.locator(".run-verdict").filter({ hasText: gate.reason }).waitFor();
+for (const timing of ["after slot refresh", "before slot refresh"] as const)
+	check(
+		`a mistaken dispute ${timing} releases confirmed local evidence and lets its author report again (872)`,
+		async () => {
+			const { server, run, path } = await fixture(1, 2);
+			let view: Awaited<ReturnType<typeof openPage>> | null = null;
+			const held = Promise.withResolvers<void>();
+			const reading = Promise.withResolvers<void>();
 			try {
-				await page.getByRole("button", { name: "Slot 1: C-1, missing by second-person", exact: true }).waitFor();
+				const second = z.object({ token: z.string() }).parse(
+					await server.api("admin", {
+						do: "token.create",
+						actor: "second-person",
+						kind: "human",
+						can: ["read", "produce"],
+						project: "scratch",
+					}),
+				);
+				const lead = z.object({ token: z.string() }).parse(
+					await server.api("admin", {
+						do: "token.create",
+						actor: "lead",
+						kind: "human",
+						can: ["read", "produce", "answer"],
+						project: "scratch",
+					}),
+				);
+				await server.api("report", { run, results: [{ test: { case: "C-1" }, outcome: "pass" }] }, second);
+				view = await openPage(server, { path });
+				const { page } = view;
+				await ready(page);
+				if (timing === "before slot refresh")
+					await page.route("**/find", async (route) => {
+						const input = z.object({ in: z.string() }).parse(route.request().postDataJSON());
+						if (input.in === "slots") {
+							reading.resolve();
+							await held.promise;
+						}
+						await route.continue();
+					});
+				await fail(page, "Mistaken observation");
+				await page.locator("#stat").filter({ hasText: "C-1 fail recorded" }).waitFor();
+				if (timing === "before slot refresh") await reading.promise;
+				else await page.getByRole("button", { name: "Slot 1: C-1, disputed by robin", exact: true }).waitFor();
+				const receiptQuestion = await page.locator('[data-slot="1"] .run-question').first().innerText();
+				const dispute = (await server.api("inbox", { kind: "failure" })).items.find((item) =>
+					item.title.startsWith(`Disputed C-1 in ${run}:`),
+				);
+				if (!dispute) throw new Error("Slot dispute missing");
+				expect(
+					await server.api(
+						"decide",
+						{
+							q: dispute.q,
+							onEvidence: dispute.evidenceHash,
+							answer: { is: "mistaken" },
+							reason: "The failure was an observation error",
+						},
+						lead,
+					),
+				).toMatchObject([{ status: "decided" }]);
+				held.resolve();
+				expect((await slots(server, run))[0]).toMatchObject({
+					state: "missing",
+					fills: [{ by: "second-person", outcome: "pass" }],
+				});
+				const gate = await server.api("gate", { run });
+				await page.locator(".run-verdict").filter({ hasText: gate.reason }).waitFor();
+				try {
+					await page.getByRole("button", { name: "Slot 1: C-1, missing by second-person", exact: true }).waitFor();
+				} finally {
+					await screenshot(page, timing === "before slot refresh" ? 8742 : 8741);
+				}
+				await page.locator('[data-slot="1"]').getByRole("link", { name: receiptQuestion, exact: true }).waitFor();
+				await page
+					.getByText("Nothing left for you to run. The server verdict is shown above.", { exact: true })
+					.waitFor({
+						state: "hidden",
+					});
+				await page.keyboard.press("p");
+				await page.locator("#stat").filter({ hasText: "C-1 pass recorded" }).waitFor();
+				expect((await slots(server, run))[0]).toMatchObject({
+					state: "satisfied",
+					fills: [
+						{ by: "second-person", outcome: "pass" },
+						{ by: "robin", outcome: "pass" },
+					],
+				});
 			} finally {
-				await screenshot(page, 8741);
+				held.resolve();
+				await view?.close();
+				await server.stop();
 			}
-			await page.locator('[data-slot="1"]').getByRole("link", { name: receiptQuestion, exact: true }).waitFor();
-			await page.getByText("Nothing left for you to run. The server verdict is shown above.", { exact: true }).waitFor({
-				state: "hidden",
-			});
-			await page.keyboard.press("p");
-			await page.locator("#stat").filter({ hasText: "C-1 pass recorded" }).waitFor();
-			expect((await slots(server, run))[0]).toMatchObject({
-				state: "satisfied",
-				fills: [
-					{ by: "second-person", outcome: "pass" },
-					{ by: "robin", outcome: "pass" },
-				],
-			});
-		} finally {
-			await view?.close();
-			await server.stop();
-		}
-	},
-	30_000,
-);
+		},
+		30_000,
+	);
 
 check(
 	"undo reopens an automatically closed run before correcting its last result (793)",
@@ -961,18 +978,27 @@ for (const outcome of ["skip", "blocked"] as const)
 			const { server, run, path } = await fixture(3);
 			let view: Awaited<ReturnType<typeof openPage>> | null = null;
 			const staleRead = Promise.withResolvers<void>();
+			const freshRead = Promise.withResolvers<void>();
 			try {
 				view = await openPage(server, { path });
 				const { page } = view;
 				await ready(page);
 				// A delayed slot read can predate a report whose receipt has already arrived.
 				let stale: Api["find"]["reply"] | null = null;
+				let served = false;
 				await page.route("**/find", async (route) => {
 					const input = z.object({ in: z.string() }).parse(route.request().postDataJSON());
 					if (input.in === "slots" && stale) {
-						await answer(route, { json: { ok: true, result: stale } });
-						staleRead.resolve();
-					} else await route.continue();
+						if (!served) {
+							served = true;
+							await answer(route, { json: { ok: true, result: stale } });
+							staleRead.resolve();
+							return;
+						}
+						// Later reads must return current server state, not replay the old snapshot.
+						await freshRead.promise;
+					}
+					await route.continue();
 				});
 				await page.route("**/report", async (route) => {
 					const input = z
@@ -985,6 +1011,7 @@ for (const outcome of ["skip", "blocked"] as const)
 						if (reply) await answer(route, { response: reply.response });
 					} else {
 						stale = null;
+						if (input.results[0]?.test.case === "C-3") freshRead.resolve();
 						await route.continue();
 					}
 				});
@@ -1054,6 +1081,7 @@ for (const outcome of ["skip", "blocked"] as const)
 				expect(await page.locator("#list .phead").innerText()).toContain("1 left in run");
 			} finally {
 				staleRead.resolve();
+				freshRead.resolve();
 				await view?.close();
 				await server.stop();
 			}
