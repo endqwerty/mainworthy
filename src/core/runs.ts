@@ -10,6 +10,10 @@ export const SlotWork = z.discriminatedUnion("kind", [
 ]);
 export type SlotWork = z.infer<typeof SlotWork>;
 
+export function workHeldByOther<Actor>(work: { actor: Actor; until: number }, actor: Actor, now: number): boolean {
+	return work.until > now && work.actor !== actor;
+}
+
 /**
  * Which targets count toward a run: one commit, an announced build's artifact, or `self`. A build label is
  * immutable. `self` counts only results typed into the run and proves nothing about a build. The server settles

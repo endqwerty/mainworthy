@@ -4,6 +4,7 @@ import type { Api } from "../../core/api.ts";
 import { ATTACHMENT_LIMITS, AttachmentInput, AttachmentReply, attachmentBytes } from "../../core/attachments.ts";
 import type { ReportReceipt } from "../../core/ops.ts";
 import { REPLIES } from "../../core/replies.ts";
+import { workHeldByOther } from "../../core/runs.ts";
 import { ApiError, call, UnreadableReply } from "../lib/api.ts";
 import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
 import { type DeviceSession, deviceKey, deviceSession, sessionCurrent } from "../lib/device.ts";
@@ -242,7 +243,9 @@ function ProjectRunCockpit({
 	const missing = (slot: Slot) =>
 		(slot.state === "missing" || slot.state === "skipped") && !local.get(slot.id)?.pending;
 	const unreported = (slot: Slot) => missing(slot) && !ownFillOf(slot);
-	const first = slots.find(unreported) ?? slots[0];
+	const held = (slot: Slot) => slot.work.kind === "held" && workHeldByOther(slot.work, session.actor, now);
+	const available = (slot: Slot) => unreported(slot) && !held(slot);
+	const first = slots.find(available) ?? slots.find((slot) => !held(slot));
 	if (cursor === null && first) setCursor(first.id);
 	const current = cursor === null ? first : slots.find((slot) => slot.id === cursor);
 	const step = current ? (steps[current.id] ?? "") : "";
@@ -271,42 +274,34 @@ function ProjectRunCockpit({
 	}
 	const currentIndex = current ? slots.indexOf(current) : -1;
 	const next = current
-		? [...slots.slice(currentIndex + 1), ...slots.slice(0, currentIndex)].filter(unreported).slice(0, 5)
+		? [...slots.slice(currentIndex + 1), ...slots.slice(0, currentIndex)].filter(available).slice(0, 5)
 		: [];
 	const documents = current ? [current, ...next] : [];
 	const external = (slot: Slot) => !missing(slot) && slot.fills.length > 0 && !ownFillOf(slot);
 	const ownFill = current && ownFillOf(current);
 	const note = current ? (notes[current.id] ?? "") : "";
-	const currentRead = useQueryOp({
-		project,
-		op: "get",
-		input: { refs: [current?.case ?? ""], ...(current ? { version: current.version } : {}) },
-		enabled: Boolean(current),
-	});
-	const currentBody = RunCase.safeParse(currentRead.data?.[0]);
-	const bodyMatches =
-		currentBody.success && currentBody.data.ref === current?.case && currentBody.data.version === current?.version;
+	const { body: currentBody } = usePinnedCase(current);
 	const admittedMethod = Boolean(
 		run?.require.some((obligation) => obligation.kind === "exercise" && obligation.methods.includes(method)) &&
-			(!bodyMatches || (currentBody.success && currentBody.data.methods.includes(method))),
+			(!currentBody || currentBody.methods.includes(method)),
 	);
 	const canRecord = Boolean(
 		current &&
 			session.can.includes("produce") &&
 			(reports.uncertain.has(current.id) || (!external(current) && run?.state === "open" && admittedMethod)),
 	);
-	const hasUnreported = slots.some(unreported);
-	const allReported = slots.length > 0 && !hasUnreported && !slotsRead.hasNextPage;
+	const hasAvailable = slots.some(available);
+	const allReported = slots.length > 0 && !slots.some(unreported) && !slotsRead.hasNextPage;
 	useEffect(() => {
 		if (current?.id) document.querySelector(`[data-slot="${current.id}"]`)?.scrollIntoView({ block: "nearest" });
 	}, [current?.id]);
 	useEffect(() => {
-		if (!hasUnreported && slotsRead.hasNextPage && !slotsRead.isFetchingNextPage) void slotsRead.fetchNextPage();
-	}, [hasUnreported, slotsRead.hasNextPage, slotsRead.isFetchingNextPage, slotsRead.fetchNextPage]);
+		if (!hasAvailable && slotsRead.hasNextPage && !slotsRead.isFetchingNextPage) void slotsRead.fetchNextPage();
+	}, [hasAvailable, slotsRead.hasNextPage, slotsRead.isFetchingNextPage, slotsRead.fetchNextPage]);
 	function move(delta: number): void {
-		if (!current) return;
+		const start = current ? currentIndex : delta > 0 ? -1 : slots.length;
 		for (let distance = 1; distance <= slots.length; distance++) {
-			const candidate = slots[currentIndex + distance * delta];
+			const candidate = slots[start + distance * delta];
 			if (!candidate) return;
 			if (!external(candidate)) {
 				setCursor(candidate.id);
@@ -847,7 +842,7 @@ function ProjectRunCockpit({
 							<span>j skips to your next slot.</span>
 						</div>
 					)}
-					{current && currentBody.success && !admittedMethod && (
+					{current && currentBody && !admittedMethod && (
 						<p className="dim">
 							This slot does not admit results from your method. Pipeline or agent evidence must fill it.
 						</p>
@@ -974,20 +969,32 @@ function ProjectRunCockpit({
 	);
 }
 
-function RunDocument({ slot, active, step }: { slot: Slot; active: boolean; step: string }) {
+function usePinnedCase(slot: Slot | undefined) {
 	const { project } = useApp();
-	const read = useQueryOp({ project, op: "get", input: { refs: [slot.case], version: slot.version } });
+	const read = useQueryOp({
+		project,
+		op: "get",
+		input: { refs: [slot?.case ?? ""], ...(slot ? { version: slot.version } : {}) },
+		enabled: Boolean(slot),
+	});
 	const checked = RunCase.safeParse(read.data?.[0]);
-	const parsed =
-		checked.success && checked.data.ref === slot.case && checked.data.version === slot.version
-			? checked
-			: ({ success: false } satisfies { success: boolean });
+	return {
+		body:
+			checked.success && checked.data.ref === slot?.case && checked.data.version === slot?.version
+				? checked.data
+				: null,
+		error: read.error,
+	};
+}
+
+function RunDocument({ slot, active, step }: { slot: Slot; active: boolean; step: string }) {
+	const { body, error } = usePinnedCase(slot);
 	return (
 		<article
 			hidden={!active}
 			data-run-document={slot.case}
 			data-active={active}
-			data-ready={parsed.success}
+			data-ready={Boolean(body)}
 			className="run-document"
 		>
 			<div className="run-document-meta">
@@ -995,12 +1002,12 @@ function RunDocument({ slot, active, step }: { slot: Slot; active: boolean; step
 				<span>v{slot.version}, pinned when the run started</span>
 				{slot.head !== slot.version && <span className="dim">Current case is v{slot.head}</span>}
 			</div>
-			<h2>{parsed.success ? parsed.data.title : slot.title}</h2>
-			{parsed.success ? (
+			<h2>{body ? body.title : slot.title}</h2>
+			{body ? (
 				<>
-					{parsed.data.pre && <p className="run-pre">{parsed.data.pre}</p>}
+					{body.pre && <p className="run-pre">{body.pre}</p>}
 					<ol className="rsteps">
-						{parsed.data.steps.map((entry, index) => (
+						{body.steps.map((entry, index) => (
 							<li key={entry.id} className={Number(step) === index + 1 ? "mark" : ""} data-step={entry.id}>
 								<span className="sn">{index + 1}</span>
 								<div>
@@ -1015,11 +1022,11 @@ function RunDocument({ slot, active, step }: { slot: Slot; active: boolean; step
 							</li>
 						))}
 					</ol>
-					{!parsed.data.steps.length && <p className="dim">This pinned case has no steps.</p>}
+					{!body.steps.length && <p className="dim">This pinned case has no steps.</p>}
 				</>
 			) : (
 				<p className="dim" role="status">
-					{read.error?.message ?? "Reading the pinned case…"}
+					{error?.message ?? "Reading the pinned case…"}
 				</p>
 			)}
 			{slot.fills.map((fill) => (
@@ -1035,23 +1042,17 @@ function RunDocument({ slot, active, step }: { slot: Slot; active: boolean; step
 	);
 }
 function UpNext({ slot }: { slot: Slot }) {
-	const { project } = useApp();
-	const read = useQueryOp({ project, op: "get", input: { refs: [slot.case], version: slot.version } });
-	const checked = RunCase.safeParse(read.data?.[0]);
-	const parsed =
-		checked.success && checked.data.ref === slot.case && checked.data.version === slot.version
-			? checked
-			: ({ success: false } satisfies { success: boolean });
+	const { body } = usePinnedCase(slot);
 	return (
 		<aside className="run-up-next" aria-label="Up next">
 			<div className="sech">
 				Up next <span className="ref">{slot.case}</span>
 				<span className="dim">pinned v{slot.version}</span>
 			</div>
-			<b>{parsed.success ? parsed.data.title : slot.title}</b>
-			{parsed.success && (
+			<b>{body ? body.title : slot.title}</b>
+			{body && (
 				<ol>
-					{parsed.data.steps.slice(0, 2).map((step) => (
+					{body.steps.slice(0, 2).map((step) => (
 						<li key={step.id}>
 							{step.action}
 							{step.expected && <span className="rx"> &gt; {step.expected}</span>}

@@ -1,5 +1,6 @@
 import { WorkInput, type WorkReply } from "../../core/ops.ts";
 import { REPLIES } from "../../core/replies.ts";
+import { workHeldByOther } from "../../core/runs.ts";
 import { actorLabel } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { conflict, invalid } from "../kernel/errors.ts";
@@ -29,7 +30,7 @@ export const workOp = defineOp({
 			if (input.slot === undefined) throw invalid("giving back needs a slot");
 			const slot = workSlot(ctx, run, input.slot);
 			const lease = leaseOf(ctx, slot.id);
-			if (lease && lease.actor !== ctx.actor.id) return busy(ctx, lease);
+			if (lease && workHeldByOther(lease, ctx.actor.id, ctx.app.now())) return busy(ctx, lease);
 			releaseWork(ctx, run, slot);
 			const row = caseById(ctx.db, slot.case_id);
 			return { run: runRef(run), slot: slot.id, case: row ? caseRef(row) : null, work: { kind: "free" } };

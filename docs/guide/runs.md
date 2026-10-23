@@ -119,7 +119,10 @@ To record a result, follow these steps.
 
 <kbd>p</kbd> records "Pass". <kbd>b</kbd> records "Blocked".
 <kbd>s</kbd> records "Skip". These keys move you to the next unfinished slot you have not reported.
-Opening the cockpit starts at the first such slot, or the first slot for reading when none remain.
+Opening the cockpit starts at the first such slot. Automatic selection, advancement, and **Up next** skip
+slots with an unexpired lease held by someone else. Your own held slots remain eligible.
+When no eligible unfinished slot remains, the cockpit opens the first slot not held by someone else for reading.
+If every slot is held by someone else, choose one explicitly or wait for a lease to expire.
 Automatic advancement stops when none remain. Completed and closed runs still open a case to read.
 To record a failure, follow these steps.
 
@@ -336,6 +339,9 @@ planned runs. The web and iPhone planners do not yet offer a build picker.
 The cockpit and iPhone run screen show each live lease's holder and when work began.
 The header counts in-progress slots. Evidence counts and the verdict stay separate.
 Updates from other producers arrive through the existing live connection.
+The web cockpit skips other holders' slots during automatic navigation and includes them again when their leases expire.
+You can still click a held slot or select it with <kbd>j</kbd> or <kbd>k</kbd> and record a result.
+Leases are advisory. Taking and giving back work use the CLI or API.
 
 Take the next free unfinished slot with the CLI:
 
