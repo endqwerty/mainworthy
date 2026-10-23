@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
 import type { InboxReply, ProposeReply, ReportReceipt, ResultIn } from "../src/core/ops.ts";
+import { type SqlValue, sql } from "../src/server/kernel/db.ts";
 import { parseCaseImport } from "../src/surfaces/formats/cases.ts";
 import { parseReport, type ReportFormat } from "../src/surfaces/formats/report.ts";
 import { harness } from "./helpers.ts";
@@ -116,11 +117,21 @@ test.each(nameFormats.flatMap((format) => nameProbes.map(([name, caseId]) => [fo
 				},
 				declined: [],
 			});
-			expect(h.app.db.raw.query("SELECT basis_case FROM results ORDER BY id DESC LIMIT 1").get()).toEqual({
+			expect(
+				await h.app.database.read(
+					async (db) =>
+						await db.get(
+							sql<readonly SqlValue[], Record<string, unknown>>(
+								"SELECT basis_case FROM results ORDER BY id DESC LIMIT 1",
+							),
+							[],
+						),
+				),
+			).toEqual({
 				basis_case: caseId,
 			});
 		} finally {
-			h.close();
+			await h.close();
 		}
 	},
 );
@@ -141,7 +152,7 @@ test.each([...nameFormats])("%s Apply quartet preserves native refs and ignores 
 		expect(receipt.basis).toEqual({ exact: 0, assumed: 3, unresolved: 1 });
 		expect(receipt.declined).toEqual([]);
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -168,11 +179,21 @@ test.each([...nameFormats])("%s ordinary tags preserve a test's queue-decided li
 		const receipt = await h.call<ReportReceipt>("report", { target: { session: "after-link" }, results });
 		expect(receipt.basis).toEqual({ exact: 0, assumed: 1, unresolved: 0 });
 		expect(receipt.declined).toEqual([]);
-		expect(h.app.db.raw.query("SELECT basis_case FROM results ORDER BY id DESC LIMIT 1").get()).toEqual({
+		expect(
+			await h.app.database.read(
+				async (db) =>
+					await db.get(
+						sql<readonly SqlValue[], Record<string, unknown>>(
+							"SELECT basis_case FROM results ORDER BY id DESC LIMIT 1",
+						),
+						[],
+					),
+			),
+		).toEqual({
 			basis_case: 1,
 		});
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -271,14 +292,24 @@ test.each(reportCases)(
 						? [{ index: 2, reason: "the annotation names Missing123, which does not exist: recorded with no case" }]
 						: [],
 			});
-			expect(h.app.db.raw.query("SELECT basis, basis_case, basis_version FROM results ORDER BY id").all()).toEqual([
+			expect(
+				await h.app.database.read(
+					async (db) =>
+						await db.all(
+							sql<readonly SqlValue[], Record<string, unknown>>(
+								"SELECT basis, basis_case, basis_version FROM results ORDER BY id",
+							),
+							[],
+						),
+				),
+			).toEqual([
 				{ basis: "assumed", basis_case: 1, basis_version: 1 },
 				{ basis: "exact", basis_case: 1, basis_version: 1 },
 				{ basis: "unresolved", basis_case: null, basis_version: null },
 				{ basis: "exact", basis_case: 1, basis_version: 1 },
 			]);
 		} finally {
-			h.close();
+			await h.close();
 		}
 	},
 );
@@ -337,9 +368,14 @@ test.each(["junit", "playwright", "pytest"] as const)(
 			});
 			expect(receipt.basis).toEqual({ exact: 0, assumed: 1, unresolved: 0 });
 			expect(receipt.declined).toEqual([]);
-			expect(h.app.db.raw.query("SELECT basis_case FROM results").get()).toEqual({ basis_case: 1 });
+			expect(
+				await h.app.database.read(
+					async (db) =>
+						await db.get(sql<readonly SqlValue[], Record<string, unknown>>("SELECT basis_case FROM results"), []),
+				),
+			).toEqual({ basis_case: 1 });
 		} finally {
-			h.close();
+			await h.close();
 		}
 	},
 );
@@ -358,7 +394,7 @@ test("typed test names use the same alias claims as parsed reports", async () =>
 		expect(receipt.basis).toEqual({ exact: 1, assumed: 0, unresolved: 1 });
 		expect(receipt.declined).toEqual([]);
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -373,11 +409,13 @@ test("aliases are witnessed case creation and idempotent with propose", async ()
 		expect(await h.call<ProposeReply>("propose", input)).toEqual(first);
 		expect(await h.call("get", { refs: ["C1234"] })).toMatchObject([{ ref: "C-1", title: "Imported" }]);
 		expect(await h.call("history", { ref: "C1234" })).toMatchObject({ versions: [{ version: 1 }] });
-		const stored = h.app.db.raw.query<{ aliases: string }, []>("SELECT aliases FROM cases").get();
+		const stored = await h.app.database.read(
+			async (db) => await db.get(sql<readonly SqlValue[], { aliases: string }>("SELECT aliases FROM cases"), []),
+		);
 		expect(stored?.aliases).toBe('["C1234"]');
 		expect(first.status).toBe("adopted");
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -403,7 +441,7 @@ test("an alias conflict rolls back the whole proposal, including earlier new cas
 			}),
 		).toMatchObject({ ok: false, error: { code: "conflict" } });
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -435,7 +473,7 @@ test("pending proposals create no aliases and recheck alias ownership when adopt
 		expect(await h.call("get", { refs: ["C1234"] })).toMatchObject([{ ref: "C-1", title: "Imported" }]);
 		expect((await h.call<{ items: unknown[] }>("find", {})).items).toHaveLength(1);
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -449,7 +487,7 @@ test("the registry rejects reserved aliases and callers without produce capabili
 				ok: false,
 				error: { code: "invalid" },
 			});
-		const reader = h.actor("reader", "human", ["read"]);
+		const reader = await h.actor("reader", "human", ["read"]);
 		expect(
 			await h.raw(
 				"propose",
@@ -459,6 +497,6 @@ test("the registry rejects reserved aliases and callers without produce capabili
 		).toMatchObject({ ok: false, error: { code: "forbidden" } });
 		expect((await h.call<{ items: unknown[] }>("find", {})).items).toHaveLength(0);
 	} finally {
-		h.close();
+		await h.close();
 	}
 });

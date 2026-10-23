@@ -144,6 +144,28 @@ const Q = {
 	caseByAlias: sql<{ project: number; alias: string }, CaseRow>(
 		"SELECT c.* FROM case_aliases a JOIN cases c ON c.id = a.case_id WHERE a.project = $project AND a.alias = $alias",
 	),
+	findCases: sql<
+		{
+			project: number;
+			numberKeys: readonly string[];
+			nos: readonly number[];
+			aliasKeys: readonly string[];
+			aliases: readonly string[];
+		},
+		CaseRow & { lookup: string }
+	>(
+		`SELECT asked.lookup, c.* FROM unnest($numberKeys::text[], $nos::bigint[]) AS asked(lookup, no)
+		 JOIN cases c ON c.project = $project AND c.no = asked.no
+		 UNION ALL
+		 SELECT asked.lookup, c.* FROM unnest($aliasKeys::text[], $aliases::text[]) AS asked(lookup, alias)
+		 JOIN case_aliases a ON a.project = $project AND a.alias = asked.alias
+		 JOIN cases c ON c.id = a.case_id`,
+	),
+	casesByIds: sql<{ ids: readonly number[] }, CaseRow>("SELECT * FROM cases WHERE id = ANY($ids::bigint[])"),
+	versionsOf: sql<{ ids: readonly number[]; nos: readonly number[] }, VersionRow>(
+		`SELECT v.* FROM unnest($ids::bigint[], $nos::bigint[]) AS asked(id, no)
+		 JOIN versions v ON v.case_id = asked.id AND v.no = asked.no`,
+	),
 	version: sql<{ id: number; no: number }, VersionRow>("SELECT * FROM versions WHERE case_id = $id AND no = $no"),
 	folders: sql<{ project: number }, FolderRow>("SELECT * FROM folders WHERE project = $project ORDER BY parent, rank"),
 	folderById: sql<{ id: number }, FolderRow>("SELECT * FROM folders WHERE id = $id"),
@@ -261,7 +283,7 @@ const Q = {
 	),
 	clearTags: sql<{ id: number }>("DELETE FROM case_tags WHERE case_id = $id"),
 	insertTag: sql<{ project: number; tag: string; id: number }>(
-		"INSERT OR IGNORE INTO case_tags (project, tag, case_id) VALUES ($project, $tag, $id)",
+		"INSERT INTO case_tags (project, tag, case_id) VALUES ($project, $tag, $id) ON CONFLICT DO NOTHING",
 	),
 	dropDoc: sql<{ id: number }>("DELETE FROM search_docs WHERE id = $id"),
 	insertDoc: sql<{ id: number; title: string; body: string; tags: string; project: number }>(
@@ -287,17 +309,24 @@ const Q = {
 	proposalByNo: sql<{ project: number; no: number }, ProposalRow>(
 		"SELECT * FROM proposals WHERE project = $project AND no = $no",
 	),
-	requirement: sql<{ project: number; key: string }, { id: number; title: string }>(
-		"SELECT id, title FROM requirements WHERE project = $project AND key = $key",
+	insertRequirements: sql<{ project: number; keys: readonly string[]; titles: readonly string[]; rev: number }>(
+		`INSERT INTO requirements(project, key, title, rev)
+		 SELECT $project, key, title, $rev FROM unnest($keys::text[], $titles::text[]) AS asked(key, title)
+		 ON CONFLICT DO NOTHING`,
 	),
-	insertRequirement: sql<{ project: number; key: string; title: string; rev: number }>(
-		"INSERT INTO requirements (project, key, title, rev) VALUES ($project, $key, $title, $rev)",
+	insertCovers: sql<{ project: number; keys: readonly string[]; ids: readonly number[]; decision: number }>(
+		`INSERT INTO covers(requirement, case_id, decision)
+		 SELECT r.id, asked.id, $decision FROM unnest($keys::text[], $ids::bigint[]) AS asked(key, id)
+		 JOIN requirements r ON r.project = $project AND r.key = asked.key ON CONFLICT DO NOTHING`,
 	),
-	insertCover: sql<{ requirement: number; id: number; decision: number }>(
-		"INSERT OR IGNORE INTO covers (requirement, case_id, decision) VALUES ($requirement, $id, $decision)",
+	dropCovers: sql<{ project: number; keys: readonly string[]; ids: readonly number[] }>(
+		`DELETE FROM covers c USING requirements r, unnest($keys::text[], $ids::bigint[]) AS asked(key, id)
+		 WHERE c.requirement = r.id AND c.case_id = asked.id AND r.project = $project AND r.key = asked.key`,
 	),
-	dropCover: sql<{ requirement: number; id: number }>(
-		"DELETE FROM covers WHERE requirement = $requirement AND case_id = $id",
+	fragmentUsers: sql<{ project: number; fragment: string }, { no: number; head: number; body: string }>(
+		`SELECT c.no, c.head, v.body FROM cases c JOIN versions v ON v.case_id = c.id AND v.no = c.head
+		 WHERE c.project = $project AND EXISTS (SELECT 1 FROM jsonb_array_elements(v.body::jsonb->'steps') s
+		 WHERE s.value#>>'{use,fragment}' = $fragment) ORDER BY c.no`,
 	),
 	coversOf: sql<{ id: number }, { key: string }>(
 		"SELECT r.key FROM covers c JOIN requirements r ON r.id = c.requirement WHERE c.case_id = $id ORDER BY r.key",
@@ -315,6 +344,46 @@ export async function findCase(db: ReadDb, project: number, text: string): Promi
 	if (/^\d+$/.test(text.trim())) return await db.get(Q.caseByNo, { project, no: Number(text.trim()) });
 	return await db.get(Q.caseByAlias, { project, alias: text.trim() });
 }
+
+/** Resolves a batch with findCase's reference, bare-number and alias rules in one read. */
+export async function findCases(
+	db: ReadDb,
+	project: number,
+	refs: readonly string[],
+): Promise<Map<string, CaseRow | null>> {
+	const out = new Map<string, CaseRow | null>();
+	const numberKeys: string[] = [],
+		nos: number[] = [],
+		aliasKeys: string[] = [],
+		aliases: string[] = [];
+	for (const text of refs) {
+		if (out.has(text)) continue;
+		out.set(text, null);
+		const parsed = parseRef(text);
+		if (parsed?.name === "case" || /^\d+$/.test(text.trim())) {
+			numberKeys.push(text);
+			nos.push(parsed?.name === "case" ? parsed.no : Number(text.trim()));
+		} else {
+			aliasKeys.push(text);
+			aliases.push(text.trim());
+		}
+	}
+	if (out.size)
+		for (const { lookup, ...row } of await db.all(Q.findCases, { project, numberKeys, nos, aliasKeys, aliases }))
+			out.set(lookup, row);
+	return out;
+}
+
+export const casesByIds = async (db: ReadDb, ids: readonly number[]): Promise<CaseRow[]> =>
+	ids.length ? await db.all(Q.casesByIds, { ids }) : [];
+
+export const versionsOf = async (
+	db: ReadDb,
+	pairs: readonly { caseId: number; no: number }[],
+): Promise<VersionRow[]> =>
+	pairs.length
+		? await db.all(Q.versionsOf, { ids: pairs.map((pair) => pair.caseId), nos: pairs.map((pair) => pair.no) })
+		: [];
 
 export async function mustCase(db: ReadDb, project: number, text: string): Promise<CaseRow> {
 	const row = await findCase(db, project, text);
@@ -435,7 +504,7 @@ export type Adoption = { body: CaseBody; refused: OpError | null };
 
 /** The policy a proposal's edits are adopted under: the one it sets, if it sets one, or the project's. */
 export async function adoptionPolicy(db: ReadDb, project: number, edits: readonly Resolved[]): Promise<Policy> {
-	return edits.findLast((edit) => edit.op === "policy")?.policy ?? currentPolicy(db, project);
+	return edits.findLast((edit) => edit.op === "policy")?.policy ?? (await currentPolicy(db, project));
 }
 
 /**
@@ -537,10 +606,12 @@ function fromOutline(text: string): { body: PartialBody; tags: string[]; covers:
 	return { body: { title: outline.title ?? "", steps }, tags: outline.tags, covers: outline.covers };
 }
 
-export function searchText(db: ReadDb, project: number, body: CaseBody): string {
+export async function searchText(db: ReadDb, project: number, body: CaseBody): Promise<string> {
 	return [
 		body.pre,
-		...expandSteps(db, project, body).map((step) => (step.expected ? `${step.action}\n${step.expected}` : step.action)),
+		...(await expandSteps(db, project, body)).map((step) =>
+			step.expected ? `${step.action}\n${step.expected}` : step.action,
+		),
 	].join("\n");
 }
 
@@ -589,7 +660,7 @@ export async function* sealSteps(
 	const aliases = new Set<string>();
 	const lookedUp = new Map<string, CaseRow>();
 	const lookup = async (text: string): Promise<CaseRow> => {
-		const row = lookedUp.get(text) ?? mustCase(ctx.db, ctx.project.id, text);
+		const row = lookedUp.get(text) ?? (await mustCase(ctx.db, ctx.project.id, text));
 		lookedUp.set(text, row);
 		cases.add(caseRef(row));
 		return row;
@@ -656,7 +727,7 @@ export async function* sealSteps(
 					),
 				];
 				for (const alias of keptAliases) {
-					if (aliases.has(alias) || ctx.db.get(Q.caseByAlias, { project: ctx.project.id, alias }))
+					if (aliases.has(alias) || (await ctx.db.get(Q.caseByAlias, { project: ctx.project.id, alias })))
 						throw conflict(`case alias ${alias} is already in use`);
 					aliases.add(alias);
 				}
@@ -829,7 +900,7 @@ export async function* sealSteps(
 	if (resolved.some((r) => r.op === "policy")) facts.push("policy");
 	if (resolved.some((r) => r.op === "quarantine")) facts.push("quarantine");
 	const no = await ctx.nextNo("proposal");
-	const { id: lastId } = await ctx.db.one(Q.insertProposal, {
+	const { id } = await ctx.db.one(Q.insertProposal, {
 		project: ctx.project.id,
 		no,
 		author: ctx.actor.id,
@@ -839,7 +910,7 @@ export async function* sealSteps(
 		at: ctx.now,
 		seq: ctx.seq,
 	});
-	const proposal = await ctx.db.get(Q.proposalById, { id: lastId });
+	const proposal = await ctx.db.get(Q.proposalById, { id });
 	if (!proposal) throw new Error("proposal was not stored");
 	ctx.touched.add(ref("proposal", no));
 	return { proposal, resolved, facts, conflicts, cases: [...cases] };
@@ -1330,7 +1401,13 @@ export async function* adoptSteps(
 	};
 	const writeVersion = async (row: CaseRow, body: CaseBody, previous?: CaseBody) => {
 		validateFields(body, policy, previous);
-		await validateFragments(ctx.db, ctx.project.id, body, row.kind, previous ?? bodyOf(ctx.db, row.id, row.head));
+		await validateFragments(
+			ctx.db,
+			ctx.project.id,
+			body,
+			row.kind,
+			previous ?? (await bodyOf(ctx.db, row.id, row.head)),
+		);
 		const no = row.head + 1;
 		const hash = versionHash(body);
 		await insertVersion(ctx, witness, proposal, row.id, no, row.head, body, hash);
@@ -1342,7 +1419,7 @@ export async function* adoptSteps(
 			title: body.title,
 			methods: JSON.stringify(body.methods),
 			automate: body.automate,
-			steps: expandSteps(ctx.db, ctx.project.id, body).length,
+			steps: (await expandSteps(ctx.db, ctx.project.id, body)).length,
 			actor: author,
 			at: ctx.now,
 			rev: ctx.seq,
@@ -1358,12 +1435,14 @@ export async function* adoptSteps(
 
 	const covered = new Set<number>();
 	let work = 0;
-	for (const edit of edits) {
+	for (let at = 0; at < edits.length; at++) {
+		const edit = edits[at];
+		if (!edit) continue;
 		if (++work % SLICE === 0) yield;
 		switch (edit.op) {
 			case "create": {
 				for (const alias of edit.aliases ?? []) {
-					if (ctx.db.get(Q.caseByAlias, { project: ctx.project.id, alias }))
+					if (await ctx.db.get(Q.caseByAlias, { project: ctx.project.id, alias }))
 						throw conflict(`case alias ${alias} is already in use`);
 				}
 				validateFields(edit.body, policy);
@@ -1372,7 +1451,7 @@ export async function* adoptSteps(
 				const rank = await rankAfter(ctx, folder, edit.after);
 				const no = await ctx.nextNo("case");
 				const hash = versionHash(edit.body);
-				const { id: lastId } = await ctx.db.one(Q.insertCase, {
+				const { id } = await ctx.db.one(Q.insertCase, {
 					kind: edit.kind ?? "case",
 					project: ctx.project.id,
 					no,
@@ -1390,12 +1469,15 @@ export async function* adoptSteps(
 					at: ctx.now,
 					rev: ctx.seq,
 				});
-				for (const alias of edit.aliases ?? [])
-					await ctx.db.run(Q.insertAlias, { project: ctx.project.id, alias, id: lastId });
-				await insertVersion(ctx, witness, proposal, lastId, 1, null, edit.body, hash);
-				await writeTags(ctx, lastId, edit.tags);
-				await indexCase(ctx, lastId, edit.body, edit.tags);
-				for (const key of edit.covers) await setCover(ctx, witness, lastId, key, null, true);
+				for (const alias of edit.aliases ?? []) await ctx.db.run(Q.insertAlias, { project: ctx.project.id, alias, id });
+				await insertVersion(ctx, witness, proposal, id, 1, null, edit.body, hash);
+				await writeTags(ctx, id, edit.tags);
+				await indexCase(ctx, id, edit.body, edit.tags);
+				await setCovers(
+					ctx,
+					witness,
+					edit.covers.map((key) => ({ caseId: id, key, title: null, on: true })),
+				);
 				const created = ref("case", no);
 				ctx.touched.add(created);
 				out.created.push(created);
@@ -1475,11 +1557,24 @@ export async function* adoptSteps(
 				break;
 			}
 			case "cover": {
-				await setCover(ctx, witness, edit.caseId, edit.key, edit.title, edit.on);
-				if (!covered.has(edit.caseId)) {
-					ctx.touched.add(caseRef(await mustRow(edit.caseId)));
-					covered.add(edit.caseId);
+				const batch = [edit];
+				while (batch.length < SLICE) {
+					const next = edits[at + 1];
+					if (next?.op !== "cover") break;
+					batch.push(next);
+					at++;
 				}
+				await setCovers(ctx, witness, batch);
+				const ids = [...new Set(batch.map((item) => item.caseId))].filter((id) => !covered.has(id));
+				const rows = new Map((await casesByIds(ctx.db, ids)).map((row) => [row.id, row]));
+				for (const id of ids) {
+					const row = rows.get(id);
+					if (!row) throw notFound(`case ${id}`);
+					ctx.touched.add(caseRef(row));
+					covered.add(id);
+				}
+				work += batch.length - 1;
+				if (batch.length === SLICE) yield;
 				break;
 			}
 			case "quarantine":
@@ -1652,32 +1747,40 @@ async function applyFolder(ctx: Ctx, witness: Witness, edit: Extract<Resolved, {
 	ctx.touched.add("folders");
 }
 
-async function setCover(
-	ctx: Ctx,
-	witness: Witness,
-	caseId: number,
-	key: string,
-	title: string | null,
-	on: boolean,
-): Promise<void> {
-	let requirement = await ctx.db.get(Q.requirement, { project: ctx.project.id, key });
-	if (!requirement) {
-		if (!on) return;
-		const { lastId } = await ctx.db.run(Q.insertRequirement, {
-			project: ctx.project.id,
-			key,
-			title: title ?? "",
+type CoverChange = { caseId: number; key: string; title: string | null; on: boolean };
+
+async function setCovers(ctx: Ctx, witness: Witness, edits: readonly CoverChange[]): Promise<void> {
+	if (!edits.length) return;
+	const decision = decisionOf(witness, "adopt");
+	const project = ctx.project.id;
+	const requirements = new Map<string, string>();
+	const final = new Map<string, CoverChange>();
+	for (const edit of edits) {
+		if (edit.on && !requirements.has(edit.key)) requirements.set(edit.key, edit.title ?? "");
+		final.set(`${edit.caseId}:${edit.key}`, edit);
+	}
+	if (requirements.size)
+		await ctx.db.run(Q.insertRequirements, {
+			project,
+			keys: [...requirements.keys()],
+			titles: [...requirements.values()],
 			rev: ctx.seq,
 		});
-		requirement = { id: lastId, title: title ?? "" };
-	}
-	if (on)
-		await ctx.db.run(Q.insertCover, {
-			requirement: requirement.id,
-			id: caseId,
-			decision: decisionOf(witness, "adopt"),
+	const inserts = [...final.values()].filter((edit) => edit.on);
+	const drops = edits.filter((edit) => !edit.on);
+	if (drops.length)
+		await ctx.db.run(Q.dropCovers, {
+			project,
+			keys: drops.map((edit) => edit.key),
+			ids: drops.map((edit) => edit.caseId),
 		});
-	else await ctx.db.run(Q.dropCover, { requirement: requirement.id, id: caseId });
+	if (inserts.length)
+		await ctx.db.run(Q.insertCovers, {
+			project,
+			keys: inserts.map((edit) => edit.key),
+			ids: inserts.map((edit) => edit.caseId),
+			decision,
+		});
 }
 
 function markdownKind(md: string): CaseKind {
@@ -1712,18 +1815,24 @@ async function validateFragments(
 }
 
 /** Concrete steps carry occurrence-qualified ids so two uses of one fragment stay distinct in results. */
-export function expandSteps(db: ReadDb, project: number, body: CaseBody): ExpandedStep[] {
-	return body.steps.flatMap((step): ExpandedStep[] => {
-		if (!step.use) return [{ id: step.id, action: step.action, expected: step.expected }];
+export async function expandSteps(db: ReadDb, project: number, body: CaseBody): Promise<ExpandedStep[]> {
+	const out: ExpandedStep[] = [];
+	for (const step of body.steps) {
+		if (!step.use) {
+			out.push({ id: step.id, action: step.action, expected: step.expected });
+			continue;
+		}
 		const pin = step.use;
-		const target = mustCase(db, project, pin.fragment);
-		return bodyOf(db, target.id, pin.version).steps.map((part) => ({
-			id: `${step.id}.${part.id}`,
-			action: part.action,
-			expected: part.expected,
-			source: { ...pin, step: part.id, use: step.id },
-		}));
-	});
+		const target = await mustCase(db, project, pin.fragment);
+		for (const part of (await bodyOf(db, target.id, pin.version)).steps)
+			out.push({
+				id: `${step.id}.${part.id}`,
+				action: part.action,
+				expected: part.expected,
+				source: { ...pin, step: part.id, use: step.id },
+			});
+	}
+	return out;
 }
 
 /** Uses come from current immutable bodies, including cases that opted to keep an older pin. */
@@ -1732,13 +1841,7 @@ export async function fragmentUsers(
 	project: number,
 	fragment: string,
 ): Promise<{ case: string; base: number; versions: number[] }[]> {
-	return (
-		await db.allDynamic<{ no: number; head: number; body: string }>(
-			`SELECT c.no, c.head, v.body FROM cases c JOIN versions v ON v.case_id = c.id AND v.no = c.head
-		 WHERE c.project = ? AND EXISTS (SELECT 1 FROM json_each(v.body, '$.steps') s WHERE json_extract(s.value, '$.use.fragment') = ?) ORDER BY c.no`,
-			[project, fragment],
-		)
-	).map((row) => ({
+	return (await db.all(Q.fragmentUsers, { project, fragment })).map((row) => ({
 		case: `C-${row.no}`,
 		base: row.head,
 		versions: [

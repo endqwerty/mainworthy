@@ -6,53 +6,75 @@ import type { Selection } from "../../core/ops.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { json, type ReadDb, type SqlValue, sql } from "../kernel/db.ts";
 import { invalid, notFound } from "../kernel/errors.ts";
-import { type CaseRow, type FolderIndex, type FolderRow, folderIndex, mustCase, type VersionRow } from "./suite.ts";
+import {
+	type CaseRow,
+	casesByIds,
+	type FolderIndex,
+	type FolderRow,
+	findCases,
+	folderIndex,
+	type VersionRow,
+} from "./suite.ts";
 
 type ImpactHead = Pick<CaseRow, "id" | "no" | "head" | "head_hash"> & { failing: boolean };
 
 const Q = {
 	impactHeads: sql<
-		{ project: number; candidates: string; since: number | null },
+		{ project: number; ids: readonly number[]; failing: readonly number[]; since: number | null },
 		Omit<ImpactHead, "failing"> & { failing: number }
 	>(
-		`SELECT c.id, c.no, c.head, c.head_hash, json_extract(asked.value, '$.failing') AS failing
-		 FROM json_each($candidates) asked CROSS JOIN cases c ON c.id = json_extract(asked.value, '$.id')
+		`SELECT c.id, c.no, c.head, c.head_hash, asked.failing
+		 FROM unnest($ids::bigint[], $failing::bigint[]) AS asked(id, failing)
+		 JOIN cases c ON c.id = asked.id
 		 WHERE c.project = $project AND c.state = 'active'
-		 AND ($since IS NULL OR c.rev > $since OR json_extract(asked.value, '$.failing') = 1)`,
+		 AND ($since::bigint IS NULL OR c.rev > $since OR asked.failing = 1)`,
 	),
 	impactCountsAndIds: sql<
-		{ selection: string; offset: number },
+		{
+			ids: readonly number[];
+			nos: readonly number[];
+			reviewed: readonly number[];
+			failing: readonly number[];
+			offset: number;
+		},
 		{ cases: number; unreviewed: number; failing: number; page: string }
 	>(
 		`WITH selected AS MATERIALIZED (
-			SELECT json_extract(value, '$.id') AS id, json_extract(value, '$.no') AS no,
-			 json_extract(value, '$.reviewed') AS reviewed, json_extract(value, '$.failing') AS failing
-			FROM json_each($selection)
+			SELECT * FROM unnest($ids::bigint[], $nos::bigint[], $reviewed::bigint[], $failing::bigint[])
+			 AS asked(id, no, reviewed, failing)
 		)
-		SELECT count(*) AS cases, coalesce(sum(1 - reviewed), 0) AS unreviewed,
-		 coalesce(sum(failing), 0) AS failing,
-		 (SELECT json_group_array(id) FROM (
+		SELECT count(*) AS cases, coalesce(sum(1 - reviewed), 0)::bigint AS unreviewed,
+		 coalesce(sum(failing), 0)::bigint AS failing,
+		 (SELECT coalesce(json_agg(id), '[]')::text FROM (
 			SELECT id FROM selected ORDER BY reviewed, no LIMIT 200 OFFSET $offset
-		 )) AS page FROM selected`,
+		 ) page) AS page FROM selected`,
 	),
-	impactPage: sql<{ project: number; ids: string }, CaseRow>(
-		`SELECT c.* FROM json_each($ids) asked CROSS JOIN cases c ON c.id = asked.value
-		 WHERE c.project = $project ORDER BY CAST(asked.key AS INTEGER)`,
+	impactPage: sql<{ project: number; ids: readonly number[] }, CaseRow>(
+		`SELECT c.* FROM unnest($ids::bigint[]) WITH ORDINALITY AS asked(id, position)
+		 JOIN cases c ON c.id = asked.id WHERE c.project = $project ORDER BY asked.position`,
 	),
-	caseIdsOfRefs: sql<{ project: number; refs: string }, { id: number }>(
+	ranked: sql<{ query: string; ids: readonly number[] }, { id: number }>(
+		`SELECT id FROM search_docs WHERE tsv @@ to_tsquery('mainworthy_search', $query)
+		 AND id = ANY($ids::bigint[])
+		 ORDER BY ts_rank('{0.1,0.1,0.4,0.8}', tsv, to_tsquery('mainworthy_search', $query)) DESC, id`,
+	),
+	caseIdsOfRefs: sql<{ project: number; refs: readonly string[] }, { id: number }>(
 		`SELECT id FROM cases WHERE project = $project
-		 AND no IN (SELECT CAST(substr(value, 3) AS INTEGER) FROM json_each($refs))`,
+		 AND no IN (SELECT substr(value, 3)::bigint FROM unnest($refs::text[]) AS asked(value))`,
 	),
-	caseIdsOfRequirements: sql<{ project: number; keys: string }, { id: number }>(
-		`SELECT DISTINCT v.case_id AS id FROM json_each($keys) asked
-		 CROSS JOIN requirements r ON r.project = $project AND r.key = asked.value
-		 CROSS JOIN covers v ON v.requirement = r.id`,
+	caseIdsOfRequirements: sql<{ project: number; keys: readonly string[] }, { id: number }>(
+		`SELECT DISTINCT v.case_id AS id FROM requirements r JOIN covers v ON v.requirement = r.id
+		 WHERE r.project = $project AND r.key = ANY($keys::text[])`,
 	),
-	caseLinksOfRequirements: sql<{ project: number; keys: string; cases: string }, { id: number; key: string }>(
-		`SELECT v.case_id AS id, r.key FROM json_each($cases) asked
-		 CROSS JOIN covers v ON v.case_id = asked.value
-		 CROSS JOIN requirements r ON r.id = v.requirement
-		 WHERE r.project = $project AND r.key IN (SELECT value FROM json_each($keys))`,
+	caseLinksOfRequirements: sql<
+		{ project: number; keys: readonly string[]; cases: readonly number[] },
+		{ id: number; key: string }
+	>(
+		`SELECT v.case_id AS id, r.key FROM covers v JOIN requirements r ON r.id = v.requirement
+		 WHERE v.case_id = ANY($cases::bigint[]) AND r.project = $project AND r.key = ANY($keys::text[])`,
+	),
+	archived: sql<{ project: number; limit: number }, CaseRow>(
+		"SELECT * FROM cases WHERE project = $project AND state = 'archived' ORDER BY rev DESC LIMIT $limit",
 	),
 	countsByFolder: sql<{ project: number }, { folder: number; n: number }>(
 		"SELECT folder, count(*) AS n FROM cases WHERE project = $project AND state = 'active' GROUP BY folder",
@@ -99,14 +121,14 @@ export type SuiteProblem = { rule: string; total: number; rows: { ref: string; m
  * Structural problems the suite's own data can show, each with a total and its first rows. Deterministic: the
  * same rules a person would apply by reading, with no model involved.
  */
-export function structuralProblems(db: ReadDb, project: number): SuiteProblem[] {
+export async function structuralProblems(db: ReadDb, project: number): Promise<SuiteProblem[]> {
 	const rules: { rule: string; where: string; message: (title: string) => string }[] = [
 		{ rule: "no-steps", where: "c.step_count = 0", message: (title) => `"${title}" has no steps` },
 		{ rule: "no-title", where: "c.title = ''", message: () => "has no title" },
 		{
 			rule: "no-expected",
 			where:
-				"c.step_count > 0 AND NOT EXISTS (SELECT 1 FROM versions v, json_each(v.body, '$.steps') s WHERE v.case_id = c.id AND v.no = c.head AND (json_extract(s.value, '$.expected') IS NOT NULL OR EXISTS (SELECT 1 FROM cases f JOIN versions fv ON fv.case_id = f.id, json_each(fv.body, '$.steps') fs WHERE f.project = c.project AND f.no = CAST(substr(json_extract(s.value, '$.use.fragment'), 3) AS INTEGER) AND fv.no = json_extract(s.value, '$.use.version') AND json_extract(fs.value, '$.expected') IS NOT NULL)))",
+				"c.step_count > 0 AND NOT EXISTS (SELECT 1 FROM versions v, jsonb_array_elements(v.body::jsonb->'steps') s WHERE v.case_id = c.id AND v.no = c.head AND (s.value->>'expected' IS NOT NULL OR EXISTS (SELECT 1 FROM cases f JOIN versions fv ON fv.case_id = f.id, jsonb_array_elements(fv.body::jsonb->'steps') fs WHERE f.project = c.project AND f.no = substr(s.value#>>'{use,fragment}', 3)::bigint AND fv.no = (s.value#>>'{use,version}')::bigint AND fs.value->>'expected' IS NOT NULL)))",
 			message: (title) => `"${title}" has steps but no expected result, so it cannot fail`,
 		},
 		{
@@ -116,22 +138,21 @@ export function structuralProblems(db: ReadDb, project: number): SuiteProblem[] 
 			message: (title) => `"${title}" has the same title as another case in its folder`,
 		},
 	];
-	return rules.map(({ rule, where, message }) => {
-		const scope = `FROM cases c WHERE c.project = ? AND c.state = 'active' AND ${where}`;
-		const total = db.allDynamic<{ n: number }>(`SELECT count(*) AS n ${scope}`, [project])[0]?.n ?? 0;
-		const rows = db.allDynamic<{ no: number; title: string }>(`SELECT no, title ${scope} ORDER BY no LIMIT 50`, [
+	const problems: SuiteProblem[] = [];
+	for (const { rule, where, message } of rules) {
+		const scope = `FROM cases c WHERE c.project = $1 AND c.state = 'active' AND ${where}`;
+		const total = (await db.allDynamic<{ n: number }>(`SELECT count(*) AS n ${scope}`, [project]))[0]?.n ?? 0;
+		const rows = await db.allDynamic<{ no: number; title: string }>(`SELECT no, title ${scope} ORDER BY no LIMIT 50`, [
 			project,
 		]);
-		return { rule, total, rows: rows.map((row) => ({ ref: `C-${row.no}`, message: message(row.title) })) };
-	});
+		problems.push({ rule, total, rows: rows.map((row) => ({ ref: `C-${row.no}`, message: message(row.title) })) });
+	}
+	return problems;
 }
 
 /** Archived cases, newest first: a test still linked to one of these is linked to nothing a run can use. */
 export const archivedCases = async (db: ReadDb, project: number, limit: number): Promise<CaseRow[]> =>
-	await db.allDynamic<CaseRow>(
-		"SELECT * FROM cases WHERE project = ? AND state = 'archived' ORDER BY rev DESC LIMIT ?",
-		[project, limit],
-	);
+	await db.all(Q.archived, { project, limit });
 
 /**
  * The most matches a search scores for relevance. Beyond this a word is too common for a ranking to help, and
@@ -139,11 +160,11 @@ export const archivedCases = async (db: ReadDb, project: number, limit: number):
  */
 export const RANKED_MATCHES = 2000;
 
-/** Turns what a person typed into an FTS5 query: every word must match, and the last one matches as a prefix. */
+/** Turns what a person typed into a tsquery: every word must match, and the last one matches as a prefix. */
 export function ftsQuery(text: string): string | null {
 	const words = text.toLowerCase().match(/[\p{L}\p{N}_]+/gu);
 	if (!words || words.length === 0) return null;
-	return words.map((word, i) => (i === words.length - 1 ? `"${word}"*` : `"${word}"`)).join(" ");
+	return words.map((word, i) => (i === words.length - 1 ? `${word}:*` : word)).join(" & ");
 }
 
 /** A folder and everything under it. */
@@ -185,22 +206,24 @@ export type CaseQuery = {
  * from a place in that order (the cursor). Folder and tag filters are applied by the database in the same query.
  */
 export async function listCases(
-	ctx: Ctx,
+	ctx: Ctx<ReadDb>,
 	query: CaseQuery,
 ): Promise<{ items: CaseRow[]; cursor: string | null; count: number | null }> {
 	const project = ctx.project.id;
-	const where: string[] = ["c.project = ?", "c.state = ?"];
+	const where: string[] = ["c.project = $1", "c.state = $2"];
 	const params: SqlValue[] = [project, query.state === "archived" ? "archived" : "active"];
 	if (query.folder !== undefined) {
 		const index = await folderIndex(ctx.db, project);
 		const root = resolveFolderId(index, query.folder);
 		const ids = query.deep ? subtree(index, root) : [root];
-		where.push(`c.folder IN (${placeholders(ids.length)})`);
-		params.push(...ids);
+		params.push(ids);
+		where.push(`c.folder = ANY($${params.length}::bigint[])`);
 	}
 	for (const tag of query.tags ?? []) {
-		where.push("c.id IN (SELECT case_id FROM case_tags WHERE project = ? AND tag = ?)");
 		params.push(project, tag.toLowerCase().replace(/^#/, ""));
+		where.push(
+			`c.id IN (SELECT case_id FROM case_tags WHERE project = $${params.length - 1} AND tag = $${params.length})`,
+		);
 	}
 
 	if (query.text?.trim()) {
@@ -210,9 +233,7 @@ export async function listCases(
 		// read only as far as its first page needs, and a longer read would change that order, so it answers one page
 		// and no cursor; a cursor into it reads nothing more.
 		const page = exact || from === 0 ? ids.slice(from, from + query.limit) : [];
-		const rows = page.length
-			? await ctx.db.allDynamic<CaseRow>(`SELECT c.* FROM cases c WHERE c.id IN (${placeholders(page.length)})`, page)
-			: [];
+		const rows = page.length ? await casesByIds(ctx.db, page) : [];
 		const order = new Map(page.map((id, i) => [id, i]));
 		rows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
 		// A search is paged by its place in its own order, which is read again for each page. A case that joins or
@@ -227,15 +248,18 @@ export async function listCases(
 
 	// The count is of the whole selection, not the page, so a list can say "2,000 cases" and a plan "214 selected".
 	const count =
-		ctx.db.allDynamic<{ n: number }>(`SELECT count(*) AS n FROM cases c WHERE ${where.join(" AND ")}`, params)[0]?.n ??
-		0;
+		(
+			await ctx.db.allDynamic<{ n: number }>(`SELECT count(*) AS n FROM cases c WHERE ${where.join(" AND ")}`, params)
+		)[0]?.n ?? 0;
 	if (query.cursor) {
 		const [folder, rank] = splitCursor(query.cursor);
-		where.push("(c.folder > ? OR (c.folder = ? AND c.rank > ?))");
-		params.push(folder, folder, rank);
+		params.push(folder, rank);
+		where.push(
+			`(c.folder > $${params.length - 1} OR (c.folder = $${params.length - 1} AND c.rank > $${params.length}))`,
+		);
 	}
 	const rows = await ctx.db.allDynamic<CaseRow>(
-		`SELECT c.* FROM cases c WHERE ${where.join(" AND ")} ORDER BY c.folder, c.rank LIMIT ?`,
+		`SELECT c.* FROM cases c WHERE ${where.join(" AND ")} ORDER BY c.folder, c.rank LIMIT $${params.length + 1}`,
 		[...params, query.limit + 1],
 	);
 	const items = rows.slice(0, query.limit);
@@ -257,12 +281,11 @@ function searchOffset(cursor: string | undefined): number {
  * list is only as long as the page asked for needs.
  */
 async function searchIds(
-	ctx: Ctx,
+	ctx: Ctx<ReadDb>,
 	query: CaseQuery,
 	where: string[],
 	params: SqlValue[],
 ): Promise<{ ids: number[]; exact: boolean }> {
-	const project = ctx.project.id;
 	const text = query.text ?? "";
 	const direct = /^(?:c-)?(\d+)$/i.exec(text.trim());
 	const match = ftsQuery(text);
@@ -270,57 +293,35 @@ async function searchIds(
 	// A ref is found like any match: only where the folder, the tags and the state let it be.
 	if (direct) {
 		const [row] = await ctx.db.allDynamic<{ id: number }>(
-			`SELECT c.id FROM cases c WHERE c.no = ? AND ${where.join(" AND ")}`,
-			[Number(direct[1]), ...params],
+			`SELECT c.id FROM cases c WHERE c.no = $${params.length + 1} AND ${where.join(" AND ")}`,
+			[...params, Number(direct[1])],
 		);
 		if (row) ids.push(row.id);
 	}
 	if (!match) return { ids, exact: true };
-	const filtered = query.folder !== undefined || (query.tags?.length ?? 0) > 0;
-	const candidates = async (match: string, newest: boolean, limit: number): Promise<number[]> => {
-		// Unary + keeps the case index on the filter range instead of probing it once per FTS rowid.
-		if (filtered && !newest)
-			return (
-				await ctx.db.allDynamic<{ id: number }>(
-					`SELECT c.id FROM cases c WHERE ${where.join(" AND ")}
-				 AND +c.id IN (SELECT rowid FROM search_docs WHERE search_docs MATCH ?) LIMIT ?`,
-					[...params, match, limit],
-				)
-			).map((row) => row.id);
-		return (
-			await ctx.db.allDynamic<{ rowid: number }>(
-				`SELECT rowid FROM search_docs WHERE search_docs MATCH ? AND project = ?
-			 AND EXISTS (SELECT 1 FROM cases c WHERE c.id = search_docs.rowid AND ${where.join(" AND ")})
-			 ${newest ? "ORDER BY rowid DESC" : ""} LIMIT ?`,
-				[match, project, ...params, limit],
+	const candidates = async (titleOnly: boolean, newest: boolean, limit: number): Promise<number[]> =>
+		(
+			await ctx.db.allDynamic<{ id: number }>(
+				`SELECT d.id FROM search_docs d JOIN cases c ON c.id = d.id
+			 WHERE ${where.join(" AND ")} AND d.project = $1
+			 AND d.${titleOnly ? "title_tsv" : "tsv"} @@ to_tsquery('mainworthy_search', $${params.length + 1})
+			 ${newest ? "ORDER BY d.id DESC" : ""} LIMIT $${params.length + 2}`,
+				[...params, match, limit],
 			)
-		).map((row) => row.rowid);
-	};
+		).map((row) => row.id);
 	const append = (more: number[]) => {
 		const seen = new Set(ids);
 		for (const id of more) if (!seen.has(id)) ids.push(id);
 	};
 	// How many match? Stop counting past the limit: this read is bounded whatever the word.
-	const probe = await candidates(match, false, RANKED_MATCHES + 1);
+	const probe = await candidates(false, false, RANKED_MATCHES + 1);
 	if (probe.length <= RANKED_MATCHES) {
-		if (probe.length) {
-			// Unary + keeps one MATCH scan and sorts only survivors by the configured rank. Without it,
-			// FTS repeats MATCH per rowid or ranks every full-text match before filtering.
-			append(
-				(
-					await ctx.db.allDynamic<{ rowid: number }>(
-						`SELECT rowid FROM search_docs WHERE search_docs MATCH ? AND +rowid IN (${placeholders(probe.length)})
-					 ORDER BY +rank`,
-						[match, ...probe],
-					)
-				).map((row) => row.rowid),
-			);
-		}
+		if (probe.length) append((await ctx.db.all(Q.ranked, { query: match, ids: probe })).map((row) => row.id));
 		return { ids, exact: true };
 	}
-	const inTitle = await candidates(`title : (${match})`, true, query.limit);
+	const inTitle = await candidates(true, true, query.limit);
 	append(inTitle);
-	if (ids.length < query.limit) append(await candidates(match, true, query.limit));
+	if (ids.length < query.limit) append(await candidates(false, true, query.limit));
 	return { ids, exact: false };
 }
 
@@ -330,45 +331,44 @@ function splitCursor(cursor: string): [number, string] {
 }
 
 /** The active cases a plan selects, in outline order. Criteria narrow each other; `cases` names them outright. */
-export async function selectCases(ctx: Ctx, selection: Selection): Promise<CaseRow[]> {
+export async function selectCases(ctx: Ctx<ReadDb>, selection: Selection): Promise<CaseRow[]> {
 	const project = ctx.project.id;
 	if ((selection.cases?.length ?? 0) > MAX_SELECTION) throw tooMany();
-	const named = selection.cases
-		? [
-				...new Map(
-					selection.cases.map((text) => {
-						const row = mustCase(ctx.db, project, text);
-						return [row.id, row];
-					}),
-				).values(),
-			]
-		: null;
+	const namedRows = selection.cases ? await findCases(ctx.db, project, selection.cases) : null;
+	const namedById = new Map<number, CaseRow>();
+	for (const [text, row] of namedRows ?? []) {
+		if (!row) throw notFound(`case ${text}`);
+		namedById.set(row.id, row);
+	}
+	const named = namedRows ? [...namedById.values()] : null;
 	const narrowing = selection.folders?.length || selection.tags?.length || selection.text;
 	if (named?.some((row) => row.kind === "fragment"))
 		throw invalid("fragments are shared steps; select their cases to run");
 	if (named && !narrowing) return named.filter((row) => row.state === "active");
 
 	const index = await folderIndex(ctx.db, project);
-	const where: string[] = ["c.project = ?", "c.state = 'active'", "c.kind = 'case'"];
+	const where: string[] = ["c.project = $1", "c.state = 'active'", "c.kind = 'case'"];
 	const params: SqlValue[] = [project];
 	if (selection.folders?.length) {
 		const ids = [...new Set(selection.folders.flatMap((folder) => subtree(index, resolveFolderId(index, folder))))];
-		where.push(`c.folder IN (${placeholders(ids.length)})`);
-		params.push(...ids);
+		params.push(ids);
+		where.push(`c.folder = ANY($${params.length}::bigint[])`);
 	}
 	for (const tag of selection.tags ?? []) {
-		where.push("c.id IN (SELECT case_id FROM case_tags WHERE project = ? AND tag = ?)");
 		params.push(project, tag.toLowerCase().replace(/^#/, ""));
+		where.push(
+			`c.id IN (SELECT case_id FROM case_tags WHERE project = $${params.length - 1} AND tag = $${params.length})`,
+		);
 	}
 	if (selection.text) {
 		const match = ftsQuery(selection.text);
 		if (!match) return [];
-		where.push("c.id IN (SELECT rowid FROM search_docs WHERE search_docs MATCH ?)");
 		params.push(match);
+		where.push(`c.id IN (SELECT id FROM search_docs WHERE tsv @@ to_tsquery('mainworthy_search', $${params.length}))`);
 	}
 	if (named) {
-		where.push(`c.id IN (${placeholders(named.length)})`);
-		params.push(...named.map((row) => row.id));
+		params.push(named.map((row) => row.id));
+		where.push(`c.id = ANY($${params.length}::bigint[])`);
 	}
 	// A selection is used whole or not at all: a run planned over part of what was asked for could be signed
 	// off without the rest. More than a run can sensibly hold is refused, with what to do about it.
@@ -409,7 +409,7 @@ export async function folderTree(db: ReadDb, project: number): Promise<{ folders
 		state: row.state,
 		cases: counts.get(row.id) ?? 0,
 	}));
-	return { folders, total: db.get(Q.total, { project })?.n ?? 0 };
+	return { folders, total: (await db.get(Q.total, { project }))?.n ?? 0 };
 }
 
 export type VersionEntry = {
@@ -478,22 +478,17 @@ export const casesCovering = async (db: ReadDb, project: number, key: string): P
 	await db.all(Q.casesCovering, { project, key });
 
 export const caseIdsOfRequirements = async (db: ReadDb, project: number, keys: readonly string[]): Promise<number[]> =>
-	keys.length
-		? (await db.all(Q.caseIdsOfRequirements, { project, keys: JSON.stringify(keys) })).map((row) => row.id)
-		: [];
+	keys.length ? (await db.all(Q.caseIdsOfRequirements, { project, keys })).map((row) => row.id) : [];
 
 export const caseLinksOfRequirements = async (
 	db: ReadDb,
 	project: number,
 	keys: readonly string[],
 	cases: readonly number[],
-) =>
-	keys.length && cases.length
-		? await db.all(Q.caseLinksOfRequirements, { project, keys: JSON.stringify(keys), cases: JSON.stringify(cases) })
-		: [];
+) => (keys.length && cases.length ? await db.all(Q.caseLinksOfRequirements, { project, keys, cases }) : []);
 
 export const caseIdsOfRefs = async (db: ReadDb, project: number, refs: readonly string[]): Promise<number[]> =>
-	refs.length ? (await db.all(Q.caseIdsOfRefs, { project, refs: JSON.stringify(refs) })).map((row) => row.id) : [];
+	refs.length ? (await db.all(Q.caseIdsOfRefs, { project, refs })).map((row) => row.id) : [];
 
 export async function impactHeads(
 	db: ReadDb,
@@ -501,7 +496,14 @@ export async function impactHeads(
 	candidates: readonly { id: number; failing: boolean }[],
 	since: number | null,
 ): Promise<ImpactHead[]> {
-	return (await db.all(Q.impactHeads, { project, candidates: JSON.stringify(candidates), since })).map((row) => ({
+	return (
+		await db.all(Q.impactHeads, {
+			project,
+			ids: candidates.map((row) => row.id),
+			failing: candidates.map((row) => Number(row.failing)),
+			since,
+		})
+	).map((row) => ({
 		...row,
 		failing: row.failing === 1,
 	}));
@@ -513,8 +515,14 @@ export async function impactCasePage(
 	selection: readonly (Pick<ImpactHead, "id" | "no" | "failing"> & { reviewed: boolean })[],
 	offset: number,
 ) {
-	const selected = await db.get(Q.impactCountsAndIds, { selection: JSON.stringify(selection), offset });
+	const selected = await db.get(Q.impactCountsAndIds, {
+		ids: selection.map((row) => row.id),
+		nos: selection.map((row) => row.no),
+		reviewed: selection.map((row) => Number(row.reviewed)),
+		failing: selection.map((row) => Number(row.failing)),
+		offset,
+	});
 	if (!selected) throw new Error("impact aggregate returned no row");
 	const { page, ...counts } = selected;
-	return { counts, rows: await db.all(Q.impactPage, { project, ids: page }) };
+	return { counts, rows: await db.all(Q.impactPage, { project, ids: json<number[]>(page) }) };
 }
