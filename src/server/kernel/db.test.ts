@@ -432,6 +432,15 @@ test("arrays encode empty, quotes, comma, backslashes and bigint values without 
 			{ value: 2 },
 			{ value: Number.MAX_SAFE_INTEGER },
 		]);
+		const nullable = sql<{ values: readonly (string | null)[] }, { value: string | null }>(
+			"SELECT unnest($values::text[]) AS value",
+		);
+		expect(await db.all(nullable, { values: ["a", null, "NULL", null] })).toEqual([
+			{ value: "a" },
+			{ value: null },
+			{ value: "NULL" },
+			{ value: null },
+		]);
 		await expect(db.all(nums, { values: [Number.MAX_SAFE_INTEGER + 1] })).rejects.toThrow("safe");
 		await expect(db.all(nums, { values: [9007199254740992n] })).rejects.toThrow("safe integer");
 		await expect(db.allDynamic("SELECT 9007199254740992::bigint AS enormous")).rejects.toThrow("enormous");
