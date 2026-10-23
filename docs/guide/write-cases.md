@@ -15,7 +15,8 @@ A slow or failed folder-list read keeps the cases returned by the current folder
 
 While the selected case loads, its pane says "Reading case…". Pressing <kbd>e</kbd>
 before it appears explains that the case has not loaded yet. Press <kbd>e</kbd> again
-after it appears to edit it.
+after it appears to edit it. That loading message clears when the case appears.
+A failed read says to reload to try again. A missing case says "Case not found."
 
 ![Suite with cases, folders, tags, and the selected case](../ui/screenshots/suite-light.png)
 
