@@ -1,5 +1,5 @@
 import type { FlakyDetectionSettings, SameCodeEvidence } from "../../core/flaky.ts";
-import { type Db, sql } from "../kernel/db.ts";
+import { type ReadDb, sql } from "../kernel/db.ts";
 import { mustTarget, resultLocation, uncorrectedResults } from "./evidence.ts";
 
 type Flip = {
@@ -64,13 +64,13 @@ const Q = {
 };
 
 /** Suggestions from the incrementally recorded flips. This reads facts and never changes an excuse or a gate. */
-export function sameCodeEvidence(
-	db: Db,
+export async function sameCodeEvidence(
+	db: ReadDb,
 	input: { project: number; test: number; now: number; settings: FlakyDetectionSettings },
-): SameCodeEvidence {
+): Promise<SameCodeEvidence> {
 	const evidence: SameCodeEvidence = { ...input.settings, signals: [] };
 	if (!input.settings.enabled) return evidence;
-	const rows = db.all(Q.evidence, {
+	const rows = await db.all(Q.evidence, {
 		project: input.project,
 		test: input.test,
 		since: input.now - input.settings.windowDays * 86_400_000,
@@ -89,7 +89,7 @@ export function sameCodeEvidence(
 		}
 		signal.samples.push({
 			commit: row.commit_sha,
-			location: resultLocation(db, mustTarget(db, row.target)),
+			location: await resultLocation(db, await mustTarget(db, row.target)),
 			env: row.env,
 			job: row.job,
 			actor: row.actor,

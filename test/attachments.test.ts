@@ -86,7 +86,7 @@ test("attach appends to the producer's result and requires read permission for d
 			op: "attachment",
 			project: "another",
 			input: { result, id: attached.id },
-			actor: () => h.owner,
+			actor: async () => h.owner,
 		}),
 	).toMatchObject({ ok: false, error: { code: "not_found" } });
 	const recorder = h.actor("recorder", "ci", ["record"]);
@@ -166,7 +166,7 @@ test("one-project archives carry only that project's attachment metadata and byt
 	const other = await invoke(h.app, OPS, {
 		op: "report",
 		project: "another",
-		actor: () => h.owner,
+		actor: async () => h.owner,
 		input: {
 			target: { session: "other" },
 			results: [{ test: { key: "other" }, outcome: "pass", attachments: [{ name: "private.txt", data: privateData }] }],
@@ -182,8 +182,8 @@ test("one-project archives carry only that project's attachment metadata and byt
 		expect(archive).not.toContain(project === "scratch" ? privateData : PNG);
 		expect(archive).toContain(project === "scratch" ? "screenshot.png" : "private.txt");
 		const destination = await rig();
-		destination.app.db.exec("DELETE FROM policies; DELETE FROM folders; DELETE FROM projects");
-		importArchive(destination.app.db, linesOf(archive), { blobs: destination.app.blobs });
+		await destination.app.db.exec("DELETE FROM policies; DELETE FROM folders; DELETE FROM projects");
+		await importArchive(destination.app.db, linesOf(archive), { blobs: destination.app.blobs });
 		expect(destination.app.db.raw.query("SELECT key FROM projects").all()).toEqual([{ key: project }]);
 		if (project === "scratch") {
 			const item = listed.parse(await destination.call("attachment", { result })).items[0];
@@ -202,8 +202,8 @@ test("archives carry attachment content and validate its hash before restoring",
 	const destination = await harness();
 	rigs.push(destination);
 	// An archive restores only into an empty instance.
-	destination.app.db.exec("DELETE FROM policies; DELETE FROM folders; DELETE FROM projects");
-	importArchive(destination.app.db, linesOf(archive), { blobs: destination.app.blobs });
+	await destination.app.db.exec("DELETE FROM policies; DELETE FROM folders; DELETE FROM projects");
+	await importArchive(destination.app.db, linesOf(archive), { blobs: destination.app.blobs });
 	expect(listed.parse(await destination.call("attachment", { result })).items).toHaveLength(1);
 	const item = listed.parse(await destination.call("attachment", { result })).items[0];
 	expect(downloaded.parse(await destination.call("attachment", { result, id: item?.id })).data).toBe(PNG);
@@ -215,7 +215,7 @@ test("archives carry attachment content and validate its hash before restoring",
 	attachment.blob = Buffer.from("changed").toString("base64");
 	const bad = await harness();
 	rigs.push(bad);
-	bad.app.db.exec("DELETE FROM policies; DELETE FROM folders; DELETE FROM projects");
+	await bad.app.db.exec("DELETE FROM policies; DELETE FROM folders; DELETE FROM projects");
 	expect(() =>
 		importArchive(bad.app.db, linesOf(corrupt.map((entry) => JSON.stringify(entry)).join("\n")), {
 			blobs: bad.app.blobs,
@@ -233,7 +233,7 @@ test("disk storage survives restart, deduplicates content, and real HTTP replies
 	const dir = mkdtempSync(join(tmpdir(), "mainworthy-attachments-"));
 	dirs.push(dir);
 	const config = defaultConfig({ MAINWORTHY_DATA: dir, MAINWORTHY_OWNER: "robin", MAINWORTHY_PORT: "0" });
-	let instance = start(config, (app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }), { readers: 0 });
+	let instance = await start(config, (app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }), { readers: 0 });
 	instances.push(instance);
 	const call = async (op: string, input: unknown) => {
 		const response = await fetch(`${instance.url}/api/p/scratch/${op}`, {
@@ -259,7 +259,7 @@ test("disk storage survives restart, deduplicates content, and real HTTP replies
 	expect(readFileSync(join(dir, "blobs", item.hash))).toEqual(Buffer.from(PNG, "base64"));
 	await instance.stop();
 	instances.pop();
-	instance = start(config, (app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }), { readers: 0 });
+	instance = await start(config, (app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }), { readers: 0 });
 	instances.push(instance);
 	expect(downloaded.parse(await call("attachment", { result, id: item.id })).data).toBe(PNG);
 	writeFileSync(join(dir, "cli.png"), Buffer.from(PNG, "base64"));
@@ -297,7 +297,7 @@ test("disk storage survives restart, deduplicates content, and real HTTP replies
 					]);
 					return { stdout, stderr, code };
 				})()
-			: await inThisProcess("report without attachments", () => runCli(argv, null, env), {
+			: await inThisProcess("report without attachments", async () => await runCli(argv, null, env), {
 					environment: env,
 					cwd: process.cwd(),
 					input: "",
@@ -328,7 +328,7 @@ test("disk storage survives restart, deduplicates content, and real HTTP replies
 	expect(archive).toContain(PNG);
 	const destination = mkdtempSync(join(tmpdir(), "mainworthy-attachment-import-"));
 	dirs.push(destination);
-	const restored = start(
+	const restored = await start(
 		{ ...config, dataDir: destination },
 		(app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }),
 		{ readers: 1 },
@@ -349,27 +349,28 @@ test("startup prunes orphan bytes and recovers accepted attachment reports", asy
 	const dir = mkdtempSync(join(tmpdir(), "mainworthy-attachment-recovery-"));
 	dirs.push(dir);
 	const config = defaultConfig({ MAINWORTHY_DATA: dir, MAINWORTHY_OWNER: "robin", MAINWORTHY_PORT: "0" });
-	let instance = start(config, () => ({ ui: null }), { readers: 0 });
+	let instance = await start(config, () => ({ ui: null }), { readers: 0 });
 	instances.push(instance);
-	const project = findProject(instance.app.db, "scratch");
+	const project = await findProject(instance.app.db, "scratch");
 	if (!project) throw new Error("No project");
 	const orphan = instance.app.blobs.put(Buffer.from("orphan"));
-	await instance.app.gate.run(() =>
-		instance.app.db.transaction(() => {
-			const ctx = makeCtx(instance.app, project, instance.owner, true);
-			acceptReport(
-				ctx,
-				ReportInput.parse({
-					target: { session: "interrupted" },
-					results: [{ test: { key: "recovered" }, outcome: "fail", attachments: [file] }],
-				}),
-			);
-			stampSeq(ctx);
-		}),
+	await instance.app.gate.run(
+		async () =>
+			await instance.app.db.transaction(async () => {
+				const ctx = makeCtx(instance.app, project, instance.owner, true);
+				await acceptReport(
+					ctx,
+					ReportInput.parse({
+						target: { session: "interrupted" },
+						results: [{ test: { key: "recovered" }, outcome: "fail", attachments: [file] }],
+					}),
+				);
+				await stampSeq(ctx);
+			}),
 	);
 	await instance.stop();
 	instances.pop();
-	instance = start(config, () => ({ ui: null }), { readers: 0 });
+	instance = await start(config, () => ({ ui: null }), { readers: 0 });
 	instances.push(instance);
 	expect(instance.app.blobs.get(orphan)).toBeNull();
 	expect(readdirSync(join(dir, "blobs"))).toHaveLength(1);

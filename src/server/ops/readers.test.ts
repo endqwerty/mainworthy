@@ -148,7 +148,7 @@ describe("reader threads", () => {
 
 	test("the server checkpoints committed rows on its background thread while the writer is idle", async () => {
 		const settings = config();
-		const instance = start(settings, () => ({ ui: null }), { readers: 1 });
+		const instance = await start(settings, () => ({ ui: null }), { readers: 1 });
 		try {
 			const writer = instance.app.db;
 			writer.exec("PRAGMA wal_autocheckpoint = 0");
@@ -324,20 +324,20 @@ describe("reader threads", () => {
 		}
 	});
 
-	test("the worker connection refuses writes and opening it does not migrate a database", () => {
+	test("the worker connection refuses writes and opening it does not migrate a database", async () => {
 		const settings = config();
-		const writer = openApp(settings);
+		const writer = await openApp(settings);
 		apps.push(writer);
-		const reader = openApp(settings, { reader: true });
+		const reader = await openApp(settings, { reader: true });
 		apps.push(reader);
 		expect(reader.reader).toBe(reader.db);
 		expect(() => reader.db.exec("CREATE TABLE reader_must_not_write (value INTEGER)")).toThrow("readonly");
-		expect(() => openApp(config(), { reader: true })).toThrow();
+		expect(async () => await openApp(config(), { reader: true })).toThrow();
 	});
 
 	test("a real worker's database connection refuses an attempted schema write", async () => {
 		const settings = config();
-		apps.push(openApp(settings));
+		apps.push(await openApp(settings));
 		const source = workerUrl(`
 			import { parentPort, workerData } from "node:worker_threads";
 			import { openApp } from ${JSON.stringify(new URL("../kernel/app.ts", import.meta.url).href)};
@@ -363,7 +363,7 @@ describe("reader threads", () => {
 
 	test("a worker error replays all pending requests once, logs once, and replaces the thread", async () => {
 		const settings = config();
-		apps.push(openApp(settings));
+		apps.push(await openApp(settings));
 		let first = true;
 		const crash = workerUrl(
 			'import { parentPort } from "node:worker_threads"; parentPort.on("message", () => { throw new Error("reader crashed"); }); parentPort.postMessage("ready");',
@@ -414,7 +414,7 @@ describe("reader threads", () => {
 
 	test("stop resolves pending work inline, awaits thread exits, and is idempotent", async () => {
 		const settings = config();
-		apps.push(openApp(settings));
+		apps.push(await openApp(settings));
 		const silent = workerUrl(
 			'import { parentPort } from "node:worker_threads"; parentPort.on("message", () => {}); parentPort.postMessage("ready");',
 		);

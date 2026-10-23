@@ -121,7 +121,7 @@ test("a merged head in another project is not the source of a trunk commit here"
 	const commit = "1234567890abcdef1234567890abcdef12345678";
 	await h.call("admin", { do: "project.create", key: "other", preset: "loose" });
 	const other = async (op: string, input: unknown) => {
-		const reply = await invoke(h.app, OPS, { op, project: "other", input, actor: () => h.owner });
+		const reply = await invoke(h.app, OPS, { op, project: "other", input, actor: async () => h.owner });
 		if (!reply.ok) throw new Error(reply.error.message);
 		return reply.result;
 	};

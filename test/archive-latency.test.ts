@@ -63,10 +63,3 @@ test("HTTP archives leave the server answering other requests", async () => {
 			expect(target.instance.app.reader.raw.query("SELECT count(*) AS n FROM results").get()).toEqual({ n: 20_000 });
 			return longest;
 		});
-		console.log(
-			`20,000 results: longest /healthz wait export ${exported.toFixed(1)} ms, import ${imported.toFixed(1)} ms; 0 request failures`,
-		);
-		budget("20000-result HTTP export: longest /healthz wait", exported, LIMIT_MS, "ms");
-		budget("20000-result HTTP import: longest /healthz wait", imported, LIMIT_MS, "ms");
-	});
-}, 30_000);

@@ -2,7 +2,7 @@
 import { z } from "zod";
 import type { ActorKind, Capability, Role } from "../../core/kinds.ts";
 import type { App } from "./app.ts";
-import { type Db, sql } from "./db.ts";
+import { type Db, type ReadDb, type WriteDb, sql } from "./db.ts";
 
 export type Actor = { id: number; kind: ActorKind; name: string; can: readonly Capability[]; roles?: readonly Role[] };
 
@@ -52,7 +52,7 @@ export type Ctx = {
 	 */
 	raised: Map<string, number>;
 	/** The next number for a kind of ref. */
-	nextNo: (name: CounterName) => number;
+	nextNo: (name: CounterName) => Promise<number>;
 	/** A counter that grows within the command, to order rows that share a seq. */
 	ord: () => number;
 };
@@ -116,13 +116,18 @@ const Q = {
 	rewriteReply: sql<{ id: string; outcome: string }>("UPDATE commands SET outcome = $outcome WHERE id = $id"),
 };
 
-export const findProject = (db: Db, key: string): ProjectRow | null => db.get(Q.project, { key });
-export const projectById = (db: Db, id: number): ProjectRow | null => db.get(Q.projectById, { id });
-export const allProjects = (db: Db): ProjectRow[] => db.all(Q.projects);
+export const findProject = async (db: ReadDb, key: string): Promise<ProjectRow | null> =>
+	await db.get(Q.project, { key });
+export const projectById = async (db: ReadDb, id: number): Promise<ProjectRow | null> =>
+	await db.get(Q.projectById, { id });
+export const allProjects = async (db: ReadDb): Promise<ProjectRow[]> => await db.all(Q.projects);
 
-export function insertProject(db: Db, input: { org: number; key: string; name: string; at: number }): ProjectRow {
-	db.run(Q.insertProject, { ...input, identity: crypto.randomUUID() });
-	const row = db.get(Q.project, { key: input.key });
+export async function insertProject(
+	db: WriteDb,
+	input: { org: number; key: string; name: string; at: number },
+): Promise<ProjectRow> {
+	await db.run(Q.insertProject, { ...input, identity: crypto.randomUUID() });
+	const row = await db.get(Q.project, { key: input.key });
 	if (!row) throw new Error("project was not stored");
 	return row;
 }
@@ -134,18 +139,19 @@ const UNTOUCHED_SEQ = 1;
  * When the project became a demo, or null when it is none. A write to a demo may say when it happened
  * (`makeCtx`); no other project takes a time from a caller.
  */
-export const demoSince = (db: Db, project: number): number | null => db.get(Q.demoSince, { project })?.since ?? null;
+export const demoSince = async (db: ReadDb, project: number): Promise<number | null> =>
+	db.get(Q.demoSince, { project })?.since ?? null;
 
 /**
  * Makes a project a demo and returns when it became one. Only a project nothing was written to: one that holds
  * work keeps the server's clock for good, so what it records is never dated by a caller. Null when it is refused.
  * A project that is a demo already keeps the moment it has.
  */
-export function markDemo(db: Db, project: ProjectRow, at: number): number | null {
-	const since = demoSince(db, project.id);
+export async function markDemo(db: WriteDb, project: ProjectRow, at: number): Promise<number | null> {
+	const since = await demoSince(db, project.id);
 	if (since !== null) return since;
 	if (project.seq !== UNTOUCHED_SEQ) return null;
-	db.run(Q.markDemo, { project: project.id, since: at });
+	await db.run(Q.markDemo, { project: project.id, since: at });
 	return at;
 }
 
@@ -190,13 +196,16 @@ export const retiredDemos = (db: Db): { id: number; key: string }[] => db.all(Q.
  * The stored request and reply of a command that already ran, or null. A retry of the same request returns the
  * reply and writes nothing; the same id with other content is refused.
  */
-export const findCommand = (db: Db, id: string) => db.get(Q.command, { id });
+export const findCommand = async (db: ReadDb, id: string) => await db.get(Q.command, { id });
 
 /** Rewrites stored replies without changing which request each command id names, or an unfinished command. */
-export function rewriteCommandReplies(db: Db, rewrite: (op: string, reply: string) => string): void {
-	for (const row of db.all(Q.replies)) {
+export async function rewriteCommandReplies(
+	db: WriteDb,
+	rewrite: (op: string, reply: string) => string,
+): Promise<void> {
+	for (const row of await db.all(Q.replies)) {
 		const outcome = rewrite(row.op, row.outcome);
-		if (outcome !== row.outcome) db.run(Q.rewriteReply, { id: row.id, outcome });
+		if (outcome !== row.outcome) await db.run(Q.rewriteReply, { id: row.id, outcome });
 	}
 }
 
@@ -204,11 +213,11 @@ export function rewriteCommandReplies(db: Db, rewrite: (op: string, reply: strin
  * Records that an instance command ran (project 0: projects, actors, tokens). `outcome` is null when the reply held
  * a secret: a secret is shown once and never stored, so a repeat of that command is refused instead of replayed.
  */
-export function recordInstanceCommand(
-	db: Db,
+export async function recordInstanceCommand(
+	db: WriteDb,
 	input: { id: string; op: string; actor: number; at: number; outcome: unknown; request: string },
-): void {
-	db.run(Q.insertCommand, {
+): Promise<void> {
+	await db.run(Q.insertCommand, {
 		id: input.id,
 		project: 0,
 		op: input.op,
@@ -229,8 +238,8 @@ export const UNFINISHED = "";
  * applied). If the server stops before the operation ends, the id still names that request: other content under
  * it is refused, and the same content runs the rest and gets the reply.
  */
-export function beginCommand(ctx: Ctx, input: { id: string; op: string; request: string }): void {
-	ctx.db.run(Q.insertCommand, {
+export async function beginCommand(ctx: Ctx, input: { id: string; op: string; request: string }): Promise<void> {
+	await ctx.db.run(Q.insertCommand, {
 		id: input.id,
 		project: ctx.project.id,
 		op: input.op,
@@ -247,8 +256,8 @@ export function beginCommand(ctx: Ctx, input: { id: string; op: string; request:
  * The command that `beginCommand` bound in the transaction that committed at `seq`, when it is still unfinished.
  * A report's batch is accepted in that transaction, so a batch that recovery applies finds its command here.
  */
-export function begunCommand(ctx: Ctx, input: { op: string; seq: number }): string | null {
-	const row = ctx.db.get(Q.begunCommand, {
+export async function begunCommand(ctx: Ctx, input: { op: string; seq: number }): Promise<string | null> {
+	const row = await ctx.db.get(Q.begunCommand, {
 		project: ctx.project.id,
 		actor: ctx.actor.id,
 		op: input.op,
@@ -259,8 +268,8 @@ export function begunCommand(ctx: Ctx, input: { op: string; seq: number }): stri
 }
 
 /** Gives a command bound by `beginCommand` its reply. */
-export function finishCommand(ctx: Ctx, input: { id: string; outcome: unknown }): void {
-	ctx.db.run(Q.finishCommand, {
+export async function finishCommand(ctx: Ctx, input: { id: string; outcome: unknown }): Promise<void> {
+	await ctx.db.run(Q.finishCommand, {
 		id: input.id,
 		seq: ctx.seq,
 		touched: JSON.stringify([...ctx.touched]),
@@ -269,8 +278,11 @@ export function finishCommand(ctx: Ctx, input: { id: string; outcome: unknown })
 }
 
 /** Records that a command ran, with its request and its reply, so a retry of the same request is a no-op. */
-export function recordCommand(ctx: Ctx, input: { id: string; op: string; outcome: unknown; request: string }): void {
-	ctx.db.run(Q.insertCommand, {
+export async function recordCommand(
+	ctx: Ctx,
+	input: { id: string; op: string; outcome: unknown; request: string },
+): Promise<void> {
+	await ctx.db.run(Q.insertCommand, {
 		id: input.id,
 		project: ctx.project.id,
 		op: input.op,
@@ -304,8 +316,8 @@ export function makeCtx(app: App, project: ProjectRow, actor: Actor, write: bool
 		dissolveStale: false,
 		changedBases: new Set(),
 		raised: new Map(),
-		nextNo(name) {
-			const row = app.db.get(Q.bumpCounter, { project: project.id, name });
+		async nextNo(name) {
+			const row = await app.db.get(Q.bumpCounter, { project: project.id, name });
 			if (!row) throw new Error(`counter ${name} did not advance`);
 			return row.value;
 		},
@@ -314,8 +326,8 @@ export function makeCtx(app: App, project: ProjectRow, actor: Actor, write: bool
 }
 
 /** Moves the project's clock to this command's sequence number. Called once, as the command's last write. */
-export function stampSeq(ctx: Ctx): void {
-	ctx.db.run(Q.setSeq, { id: ctx.project.id, seq: ctx.seq });
+export async function stampSeq(ctx: Ctx): Promise<void> {
+	await ctx.db.run(Q.setSeq, { id: ctx.project.id, seq: ctx.seq });
 }
 
 export const ref = (name: CounterName, no: number): string => `${REF_PREFIX[name]}-${no}`;

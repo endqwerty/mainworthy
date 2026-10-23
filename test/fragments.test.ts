@@ -154,15 +154,15 @@ test.each(["instance", "project"])("%s archive replay rebuilds pinned search for
 	);
 	const db = new Db(":memory:");
 	try {
-		migrate(db, ":memory:");
-		importArchive(db, linesOf(chunks.join("")));
+		await migrate(db, ":memory:");
+		await importArchive(db, linesOf(chunks.join("")));
 		const app = { ...h.app, db, reader: db };
 		expect(
 			await invoke(app, OPS, {
 				op: "find",
 				project: "scratch",
 				input: { text: "zephyrpassword", folder: "Consumers" },
-				actor: () => h.owner,
+				actor: async () => h.owner,
 			}),
 		).toMatchObject({ ok: true, result: { count: 2 } });
 		expect(
@@ -170,7 +170,7 @@ test.each(["instance", "project"])("%s archive replay rebuilds pinned search for
 				op: "find",
 				project: "scratch",
 				input: { text: "luminousreply", folder: "Consumers" },
-				actor: () => h.owner,
+				actor: async () => h.owner,
 			}),
 		).toMatchObject({ ok: true, result: { count: 1, items: [{ ref: "C-2" }] } });
 		expect(
@@ -178,7 +178,7 @@ test.each(["instance", "project"])("%s archive replay rebuilds pinned search for
 				op: "plan",
 				project: "scratch",
 				input: { name: "Restored password checks", select: { text: "zephyrpassword", folders: ["Consumers"] } },
-				actor: () => h.owner,
+				actor: async () => h.owner,
 			}),
 		).toMatchObject({ ok: true, result: { slots: 2 } });
 	} finally {
@@ -220,9 +220,9 @@ test("upgrading an existing database rebuilds pinned search once", async () => {
 	const documents = () =>
 		db.raw.query("SELECT rowid, title, body, tags, project FROM search_docs ORDER BY rowid").all();
 	const expected = documents();
-	dropResetIndexes(db);
+	await dropResetIndexes(db);
 	// Restore schema 29 before replaying migrations, including columns added since the search upgrade.
-	dropReceiptSchema(db);
+	await dropReceiptSchema(db);
 	db.exec(
 		"DROP TABLE assertion_seen; DROP TABLE assertion_spreads; DROP TABLE assertion_roots; DROP TABLE assertion_index; DROP INDEX results_assertion_rebuild; DROP INDEX flips_first_try; DROP INDEX flips_second_try; ALTER TABLE flips DROP COLUMN first_try; ALTER TABLE flips DROP COLUMN second_try; DROP TABLE result_tries; DROP TABLE handoffs; DROP INDEX change_ends_landing; ALTER TABLE change_ends DROP COLUMN landing_branch; ALTER TABLE change_ends DROP COLUMN landing_repo; ALTER TABLE change_ends DROP COLUMN landing_commit; DROP INDEX projects_identity; ALTER TABLE projects DROP COLUMN identity; ALTER TABLE results RENAME COLUMN trail TO steps; ALTER TABLE results DROP COLUMN model; ALTER TABLE batches DROP COLUMN model",
 	);
@@ -233,7 +233,7 @@ test("upgrading an existing database rebuilds pinned search once", async () => {
 		count: 1,
 		items: [{ ref: "C-3" }],
 	});
-	expect(migrate(db, ":memory:")).toEqual({ from: 29, to: SCHEMA_VERSION, backup: null });
+	expect(await migrate(db, ":memory:")).toEqual({ from: 29, to: SCHEMA_VERSION, backup: null });
 	expect(documents()).toEqual(expected);
 	expect(await h.call("find", { text: "zephyrpassword", folder: "Consumers" })).toMatchObject({ count: 2 });
 	expect(await h.call("find", { text: "luminousreply", folder: "Consumers" })).toMatchObject({
@@ -246,7 +246,7 @@ test("upgrading an existing database rebuilds pinned search once", async () => {
 			select: { text: "zephyrpassword", folders: ["Consumers"] },
 		}),
 	).toEqual({ run: "R-1", slots: 2, already: 0 });
-	expect(migrate(db, ":memory:")).toEqual({ from: SCHEMA_VERSION, to: SCHEMA_VERSION, backup: null });
+	expect(await migrate(db, ":memory:")).toEqual({ from: SCHEMA_VERSION, to: SCHEMA_VERSION, backup: null });
 	expect(await h.call("find", { text: "zephyrpassword", folder: "Consumers" })).toMatchObject({ count: 2 });
 });
 
@@ -550,21 +550,21 @@ test.each(["instance", "project"])(
 		);
 		const db = new Db(":memory:");
 		try {
-			migrate(db, ":memory:");
-			importArchive(db, linesOf(chunks.join("")));
-			const fragment = mustCase(db, 1, "C-1");
-			const consumer = mustCase(db, 1, "C-2");
+			await migrate(db, ":memory:");
+			await importArchive(db, linesOf(chunks.join("")));
+			const fragment = await mustCase(db, 1, "C-1");
+			const consumer = await mustCase(db, 1, "C-2");
 			expect(fragment.kind).toBe("fragment");
 			expect(before).toMatchObject({ hash: consumer.head_hash });
-			expect(expandSteps(db, 1, bodyOf(db, consumer.id, 1))[0]).toMatchObject({
+			expect(expandSteps(db, 1, await bodyOf(db, consumer.id, 1))[0]).toMatchObject({
 				action: "Enter a password",
 				source: { version: 1 },
 			});
-			expect(expandSteps(db, 1, bodyOf(db, consumer.id, 2))[0]).toMatchObject({
+			expect(expandSteps(db, 1, await bodyOf(db, consumer.id, 2))[0]).toMatchObject({
 				action: "Use a passkey",
 				source: { version: 2 },
 			});
-			expect(fragmentUsers(db, 1, "C-1")).toEqual([{ case: "C-2", base: 2, versions: [2] }]);
+			expect(await fragmentUsers(db, 1, "C-1")).toEqual([{ case: "C-2", base: 2, versions: [2] }]);
 		} finally {
 			db.close();
 		}

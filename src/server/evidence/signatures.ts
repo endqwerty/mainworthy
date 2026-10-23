@@ -1,7 +1,7 @@
 import { contentHash } from "../../core/hash.ts";
 import { type NormalisedFailure, normaliseFailure, signatureHash } from "../../core/signature.ts";
 import type { Ctx } from "../kernel/ctx.ts";
-import { type Db, sql } from "../kernel/db.ts";
+import { type ReadDb, sql } from "../kernel/db.ts";
 
 export type SignatureRow = {
 	id: number;
@@ -20,9 +20,10 @@ const Q = {
 		"INSERT INTO signatures (project, hash, class, text, first_seq) VALUES ($project, $hash, $class, $text, $seq)",
 	),
 };
-export const signatureById = (db: Db, id: number): SignatureRow | null => db.get(Q.byId, { id });
-export const signatureByHash = (db: Db, project: number, hash: string): SignatureRow | null =>
-	db.get(Q.signature, { project, hash });
+export const signatureById = async (db: ReadDb, id: number): Promise<SignatureRow | null> =>
+	await db.get(Q.byId, { id });
+export const signatureByHash = async (db: ReadDb, project: number, hash: string): Promise<SignatureRow | null> =>
+	await db.get(Q.signature, { project, hash });
 
 export function fileSignature(signature: Pick<SignatureRow, "hash" | "class" | "text">, file: string | null) {
 	return {
@@ -32,25 +33,28 @@ export function fileSignature(signature: Pick<SignatureRow, "hash" | "class" | "
 	};
 }
 
-export function ensureSignature(
+export async function ensureSignature(
 	ctx: Ctx,
 	testKey: string,
 	failure: { message: string; detail?: string },
-): SignatureRow {
+): Promise<SignatureRow> {
 	const normal = normaliseFailure(failure);
 	if (normal.class === "unknown")
-		return storeSignature(ctx, {
+		return await storeSignature(ctx, {
 			class: normal.class,
 			hash: contentHash({ class: normal.class, test: testKey }),
 			text: "Unknown failure cause",
 		});
-	return storeSignature(ctx, { ...normal, hash: signatureHash(normal) });
+	return await storeSignature(ctx, { ...normal, hash: signatureHash(normal) });
 }
 
-export function storeSignature(ctx: Ctx, signature: Pick<SignatureRow, "hash" | "class" | "text">): SignatureRow {
-	const found = ctx.db.get(Q.signature, { project: ctx.project.id, hash: signature.hash });
+export async function storeSignature(
+	ctx: Ctx,
+	signature: Pick<SignatureRow, "hash" | "class" | "text">,
+): Promise<SignatureRow> {
+	const found = await ctx.db.get(Q.signature, { project: ctx.project.id, hash: signature.hash });
 	if (found) return found;
-	const { lastId } = ctx.db.run(Q.insertSignature, {
+	const { lastId } = await ctx.db.run(Q.insertSignature, {
 		project: ctx.project.id,
 		...signature,
 		seq: ctx.seq,

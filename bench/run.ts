@@ -120,7 +120,7 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 		`Filesystem: ${hardware.filesystem}\nLoad at start: ${hardware.load.map((value) => value.toFixed(2)).join(" / ")}`,
 	);
 	const dataset = await buildDataset({ dir: cli.dir, parameters: cli.parameters });
-	const instance = openDataset(dataset, join(cli.dir, `isolated-${randomUUID()}`));
+	const instance = await openDataset(dataset, join(cli.dir, `isolated-${randomUUID()}`));
 	const rows: Measurement[] = [];
 	const repetitions: { name: string; results: Measurement[] }[] = [];
 	const loads: { after: string; load: number[] }[] = [];
@@ -149,7 +149,7 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 			console.log(`  ${row.name} is within 2× its budget; repeating five complete runs on fresh clones.`);
 			const repeated: Measurement[] = [];
 			for (let round = 0; round < 5; round++) {
-				const peer = openDataset(dataset, join(cli.dir, `repeat-${randomUUID()}`));
+				const peer = await openDataset(dataset, join(cli.dir, `repeat-${randomUUID()}`));
 				try {
 					await prepareRecentChanges(peer);
 					repeated.push(await measure(await repeatWorkload(peer, row.name)));
@@ -262,7 +262,7 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 		const values = underLoads.flatMap((load) => load.reads[name]);
 		console.log(`  ${name}: p95 ${quantile(values, 0.95)} ms, n=${values.length}`);
 	}
-	const profiling = openDataset(dataset, join(cli.dir, `profile-${randomUUID()}`));
+	const profiling = await openDataset(dataset, join(cli.dir, `profile-${randomUUID()}`));
 	try {
 		await prepareRecentChanges(profiling);
 		const workloads = [

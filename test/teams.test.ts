@@ -20,8 +20,8 @@ test("team grants add to personal grants and removal takes away only that team's
 	await h.call("admin", { do: "team.member.add", team: "Quality", person: "sam" });
 	const scratch = findProject(h.app.reader, "scratch")?.id ?? -1;
 	const other = findProject(h.app.reader, "other")?.id ?? -1;
-	expect(actorByName(h.app.reader, "sam", scratch)?.can).toEqual(["read", "record", "produce", "answer"]);
-	expect(actorByName(h.app.reader, "sam", other)?.can).toEqual(["read"]);
+	expect((await actorByName(h.app.reader, "sam", scratch))?.can).toEqual(["read", "record", "produce", "answer"]);
+	expect((await actorByName(h.app.reader, "sam", other))?.can).toEqual(["read"]);
 	expect(await h.call<unknown[]>("admin", { do: "actor.list" })).toContainEqual(
 		expect.objectContaining({
 			name: "sam",
@@ -29,7 +29,7 @@ test("team grants add to personal grants and removal takes away only that team's
 		}),
 	);
 	await h.call("admin", { do: "team.member.remove", team: "Quality", person: "sam" });
-	expect(actorByName(h.app.reader, "sam", scratch)?.can).toEqual(["read"]);
+	expect((await actorByName(h.app.reader, "sam", scratch))?.can).toEqual(["read"]);
 });
 
 test("team changes are attributed and command retries preserve one event", async () => {
@@ -59,9 +59,9 @@ test("overlapping teams and personal grants keep their independent contributions
 		await h.call("admin", { do: "team.member.add", team: name, person: "sam" });
 	}
 	await h.call("admin", { do: "team.grant.remove", team: "Quality" });
-	expect(actorByName(h.app.reader, "sam", 0)?.can).toEqual(["read", "record", "produce", "plan"]);
+	expect((await actorByName(h.app.reader, "sam", 0))?.can).toEqual(["read", "record", "produce", "plan"]);
 	await h.call("admin", { do: "team.member.remove", team: "Release", person: "sam" });
-	expect(actorByName(h.app.reader, "sam", 0)?.can).toEqual(["read"]);
+	expect((await actorByName(h.app.reader, "sam", 0))?.can).toEqual(["read"]);
 });
 
 test("teams require a person who administers the instance and cannot change their own authority", async () => {
@@ -123,7 +123,7 @@ test("a queued write resolves current permission after team removal", async () =
 	await h.call("admin", { do: "team.create", name: "Quality" });
 	await h.call("admin", { do: "team.grant.set", team: "Quality", can: ["produce"] });
 	await h.call("admin", { do: "team.member.add", team: "Quality", person: "sam" });
-	const actor = (id: number) => actorByName(h.app.reader, "sam", id);
+	const actor = async (id: number) => await actorByName(h.app.reader, "sam", id);
 	let release = () => {};
 	const blocker = h.app.gate.run(
 		() =>
@@ -133,7 +133,7 @@ test("a queued write resolves current permission after team removal", async () =
 	);
 	await Promise.resolve();
 	const removed = h.call("admin", { do: "team.member.remove", team: "Quality", person: "sam" });
-	const write = invoke(h.app, OPS, {
+	const write = await invoke(h.app, OPS, {
 		op: "propose",
 		project: "scratch",
 		input: { edits: [{ op: "create", outline: "Must not be written" }] },
@@ -160,17 +160,17 @@ test("teams, grants, members and attribution survive an archive; its version cha
 	expect(archive.split("\n")[0]).toContain(`"schema":${ARCHIVE_VERSION}`);
 	const target = new Db(":memory:");
 	try {
-		migrate(target, ":memory:");
-		const restored = importArchive(target, linesOf(archive));
+		await migrate(target, ":memory:");
+		const restored = await importArchive(target, linesOf(archive));
 		expect(restored.tables).toMatchObject({ teams: 1, team_members: 1, team_grants: 1, team_events: 3 });
-		expect(actorByName(target, "sam", 0)?.can).toEqual(["read", "record", "produce"]);
+		expect((await actorByName(target, "sam", 0))?.can).toEqual(["read", "record", "produce"]);
 		expect(target.raw.query("SELECT count(*) AS n FROM tokens").get()).toEqual({ n: 0 });
 	} finally {
 		target.close();
 	}
 	const empty = new Db(":memory:");
 	try {
-		migrate(empty, ":memory:");
+		await migrate(empty, ":memory:");
 		expect(() => importArchive(empty, linesOf(archive.replace(`"schema":${ARCHIVE_VERSION}`, '"schema":7')))).toThrow(
 			`older than this build's archive schema ${ARCHIVE_VERSION}`,
 		);
@@ -194,11 +194,11 @@ test("a project archive keeps relevant team authority and history without other 
 	exportArchive(h.app.db, (chunk) => chunks.push(chunk), { project: "scratch" });
 	const target = new Db(":memory:");
 	try {
-		migrate(target, ":memory:");
-		importArchive(target, linesOf(chunks.join("")));
-		const project = findProject(target, "scratch");
+		await migrate(target, ":memory:");
+		await importArchive(target, linesOf(chunks.join("")));
+		const project = await findProject(target, "scratch");
 		if (!project) throw new Error("no restored project");
-		expect(actorByName(target, "team-only", project.id)?.can).toEqual(["read", "record", "produce"]);
+		expect((await actorByName(target, "team-only", project.id))?.can).toEqual(["read", "record", "produce"]);
 		expect(target.raw.query("SELECT name FROM teams ORDER BY name").all()).toEqual([{ name: "Shared" }]);
 		expect(target.raw.query("SELECT project, can FROM team_grants ORDER BY project").all()).toEqual([
 			{ project: 0, can: '["read"]' },

@@ -1,9 +1,9 @@
-import type { Db } from "../src/server/kernel/db.ts";
+import type { WriteDb } from "../src/server/kernel/db.ts";
 
 /** Two projects with independent results: only the retained project has excuses. */
-export function removalFixture(db: Db, size: number, retainedSize = size): void {
-	db.transaction(() => {
-		db.exec(`
+export async function removalFixture(db: WriteDb, size: number, retainedSize = size): Promise<void> {
+	await db.transaction(async () => {
+		await db.exec(`
 			INSERT INTO orgs (id, name, created_at) VALUES (900, 'Removal fixture', 1);
 			INSERT INTO actors (id, org, kind, name, created_at) VALUES (900, 900, 'human', 'fixture', 1);
 			INSERT INTO projects (id, org, key, name, created_at, identity) VALUES
@@ -42,9 +42,9 @@ export function removalFixture(db: Db, size: number, retainedSize = size): void 
 }
 
 /** Undo migration 37 when an upgrade fixture reconstructs a schema from before it. */
-export function dropResetIndexes(db: Db): void {
+export async function dropResetIndexes(db: WriteDb): Promise<void> {
 	const indexes = db.raw
 		.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'index' AND name GLOB '*_reset'")
 		.all();
-	for (const { name } of indexes) db.exec(`DROP INDEX "${name.replaceAll('"', '""')}"`);
+	for (const { name } of indexes) await db.exec(`DROP INDEX "${name.replaceAll('"', '""')}"`);
 }

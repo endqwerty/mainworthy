@@ -145,7 +145,7 @@ test("audit exports retained change endings in range and only for its project", 
 		expect(rowsOfType(AuditReply.parse(await h.call("audit", { from })).ndjson, "change-end")).toEqual(ending);
 		expect(rowsOfType(AuditReply.parse(await h.call("audit", { to: from })).ndjson, "change-end")).toEqual([]);
 		await h.call("admin", { do: "project.create", key: "other" });
-		const other = await invoke(h.app, OPS, { op: "audit", project: "other", input: {}, actor: () => h.owner });
+		const other = await invoke(h.app, OPS, { op: "audit", project: "other", input: {}, actor: async () => h.owner });
 		if (!other.ok) throw new Error(other.error.message);
 		expect(rowsOfType(AuditReply.parse(other.result).ndjson, "change-end")).toEqual([]);
 		expect(verifyAudit(file)).toMatchObject({ project: "scratch", records: 5 });
@@ -426,7 +426,7 @@ test("caller-dated demo versions can be audited when their timestamps run backwa
 					? { edits: [{ op: "create", outline: "Demo first" }] }
 					: { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Demo second" } }] };
 			expect(
-				await invoke(h.app, OPS, { op: "propose", project: "scratch", input, actor: () => h.owner, at }),
+				await invoke(h.app, OPS, { op: "propose", project: "scratch", input, actor: async () => h.owner, at }),
 			).toMatchObject({
 				ok: true,
 			});
@@ -490,7 +490,7 @@ test("a demo answer can precede its question's recorded date, but never its open
 			op: "report",
 			project: "scratch",
 			input: ciReport({ commit: "audit-dated-answer", n: 1, fail: { 0: "demo failure" } }),
-			actor: () => h.owner,
+			actor: async () => h.owner,
 			at: 1_790_000_000_000,
 		});
 		expect(reported).toMatchObject({ ok: true });
@@ -501,7 +501,7 @@ test("a demo answer can precede its question's recorded date, but never its open
 				op: "decide",
 				project: "scratch",
 				input: { q: q.q, onEvidence: q.evidenceHash, answer: { is: "flaky" } },
-				actor: () => h.owner,
+				actor: async () => h.owner,
 				at: 1_780_000_000_000,
 			}),
 		).toMatchObject({ ok: true, result: [{ status: "decided" }] });
@@ -541,7 +541,7 @@ test("a range cutting a backward-dated demo chain asks for a wider range", async
 					? { edits: [{ op: "create", outline: "Demo first" }] }
 					: { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Demo second" } }] };
 			expect(
-				await invoke(h.app, OPS, { op: "propose", project: "scratch", input, actor: () => h.owner, at }),
+				await invoke(h.app, OPS, { op: "propose", project: "scratch", input, actor: async () => h.owner, at }),
 			).toMatchObject({
 				ok: true,
 			});
@@ -644,8 +644,8 @@ test("audit includes project and global team grant history, removed memberships 
 		}
 		await h.call("report", ciReport({ commit: "team-signed", n: 1, fail: { 0: "needs a person" } }));
 		const q = (await h.call<{ items: { q: string; evidenceHash: string }[] }>("inbox", { kind: "failure" })).items[0];
-		const project = findProject(h.app.db, "scratch");
-		const signer = actorByName(h.app.db, "reviewer", project?.id ?? -1);
+		const project = await findProject(h.app.db, "scratch");
+		const signer = await actorByName(h.app.db, "reviewer", project?.id ?? -1);
 		if (!q || !signer) throw new Error("missing team signer or question");
 		expect(
 			await h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "flaky" } }, signer),

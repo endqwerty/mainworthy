@@ -84,11 +84,11 @@ const Q = {
 	),
 };
 
-export function enrollCommitStatus(ctx: Ctx, target: TargetRow): void {
-	if (ctx.actor.kind !== "agent") queue(ctx, target, true);
+export async function enrollCommitStatus(ctx: Ctx, target: TargetRow): Promise<void> {
+	if (ctx.actor.kind !== "agent") await queue(ctx, target, true);
 }
 
-function queue(ctx: Ctx, target: TargetRow, reported = false): void {
+async function queue(ctx: Ctx, target: TargetRow, reported = false): Promise<void> {
 	const { app, project } = ctx;
 	const config = app.config.github;
 	if (
@@ -101,18 +101,22 @@ function queue(ctx: Ctx, target: TargetRow, reported = false): void {
 		!/^[0-9a-f]{40}$/.test(target.commit_sha)
 	)
 		return;
-	const status = gate(ctx, { commit: target.commit_sha, repo: config.repository });
+	const status = await gate(ctx, { commit: target.commit_sha, repo: config.repository });
 	if (status.run === null) return;
-	const change = target.change === null ? null : changeById(app.db, target.change);
+	const change = target.change === null ? null : await changeById(app.db, target.change);
 	const path = change ? `changes/${encodeURIComponent(change.key)}` : `runs/${status.run.replace(/^R-/, "")}`;
 	const desired = JSON.stringify({
 		verdict: status.verdict,
 		reason: status.reason,
 		url: `${app.config.publicUrl.replace(/\/$/, "")}/p/${encodeURIComponent(project.key)}/${path}`,
 	});
-	const existing = app.db.get(Q.one, { project: project.id, repository: config.repository, commit: target.commit_sha });
+	const existing = await app.db.get(Q.one, {
+		project: project.id,
+		repository: config.repository,
+		commit: target.commit_sha,
+	});
 	if (!reported && existing?.desired === desired) return;
-	app.db.run(Q.queue, {
+	await app.db.run(Q.queue, {
 		project: project.id,
 		repository: config.repository,
 		commit_sha: target.commit_sha,
@@ -128,15 +132,15 @@ function queue(ctx: Ctx, target: TargetRow, reported = false): void {
 	});
 }
 
-function refresh(app: App): void {
+async function refresh(app: App): Promise<void> {
 	const config = app.config.github;
 	if (!app.config.githubStatuses || !config || !app.config.publicUrl) return;
-	const project = findProject(app.db, config.project);
+	const project = await findProject(app.db, config.project);
 	if (!project) return;
 	const ctx = makeCtx(app, project, { id: 0, kind: "rule", name: "rule", can: [] }, true);
-	for (const row of app.db.all(Q.all, { project: project.id, repository: config.repository, now: app.now() })) {
-		const target = targetByCommit(app.db, project.id, row.commit_sha, config.repository);
-		if (target) queue(ctx, target);
+	for (const row of await app.db.all(Q.all, { project: project.id, repository: config.repository, now: app.now() })) {
+		const target = await targetByCommit(app.db, project.id, row.commit_sha, config.repository);
+		if (target) await queue(ctx, target);
 	}
 }
 
@@ -161,45 +165,51 @@ export async function waitCommitStatuses(app: App): Promise<void> {
 }
 
 async function deliver(app: App, supplied?: StatusPort): Promise<number> {
-	await app.gate.run(() => {
-		if (!stopping.has(app)) app.db.transaction(() => refresh(app));
+	await app.gate.run(async () => {
+		if (!stopping.has(app)) await app.db.transaction(async () => await refresh(app));
 	});
 	let delivered = 0;
 	for (let n = 0; n < 20; n++) {
-		const claimed = await app.gate.run(() =>
-			app.db.transaction(() => {
-				const config = app.config.github;
-				if (stopping.has(app) || !app.config.githubStatuses || !config || !app.config.publicUrl) return null;
-				const project = findProject(app.db, config.project);
-				if (!project) return null;
-				const now = app.now();
-				const delivery = app.db.get(Q.delivery) ?? { posts: "[]", pause_until: 0, failures: 0 };
-				const posts = Posts.parse(json<unknown>(delivery.posts)).filter((at) => at > now - 3_600_000);
-				if (delivery.pause_until > now || posts.length >= 240 || posts.filter((at) => at > now - 60_000).length >= 20)
-					return null;
-				while (true) {
-					const next = app.db.get(Q.next, { project: project.id, repository: config.repository, now: app.now() });
-					if (!next) return null;
-					const target = targetByCommit(app.db, project.id, next.commit_sha, config.repository);
-					if (target) queue(makeCtx(app, project, { id: 0, kind: "rule", name: "rule", can: [] }, true), target);
-					const row = app.db.get(Q.one, {
-						project: project.id,
-						repository: config.repository,
-						commit: next.commit_sha,
-					});
-					if (!row) return null;
-					if (row.state === "complete" || row.state === "stopped") continue;
-					if (row.attempts >= MAX_ATTEMPTS) {
-						app.db.run(Q.halt, { nonce: row.nonce, error: STOP_DIAGNOSTIC });
-						console.error(`[mainworthy] commit status ${row.commit_sha}: ${STOP_DIAGNOSTIC}`);
-						continue;
+		const claimed = await app.gate.run(
+			async () =>
+				await app.db.transaction(async () => {
+					const config = app.config.github;
+					if (stopping.has(app) || !app.config.githubStatuses || !config || !app.config.publicUrl) return null;
+					const project = await findProject(app.db, config.project);
+					if (!project) return null;
+					const now = app.now();
+					const delivery = app.db.get(Q.delivery) ?? { posts: "[]", pause_until: 0, failures: 0 };
+					const posts = Posts.parse(json<unknown>(delivery.posts)).filter((at) => at > now - 3_600_000);
+					if (delivery.pause_until > now || posts.length >= 240 || posts.filter((at) => at > now - 60_000).length >= 20)
+						return null;
+					while (true) {
+						const next = await app.db.get(Q.next, {
+							project: project.id,
+							repository: config.repository,
+							now: app.now(),
+						});
+						if (!next) return null;
+						const target = await targetByCommit(app.db, project.id, next.commit_sha, config.repository);
+						if (target)
+							await queue(makeCtx(app, project, { id: 0, kind: "rule", name: "rule", can: [] }, true), target);
+						const row = await app.db.get(Q.one, {
+							project: project.id,
+							repository: config.repository,
+							commit: next.commit_sha,
+						});
+						if (!row) return null;
+						if (row.state === "complete" || row.state === "stopped") continue;
+						if (row.attempts >= MAX_ATTEMPTS) {
+							await app.db.run(Q.halt, { nonce: row.nonce, error: STOP_DIAGNOSTIC });
+							console.error(`[mainworthy] commit status ${row.commit_sha}: ${STOP_DIAGNOSTIC}`);
+							continue;
+						}
+						const nextAt = now + retryDelay(row.attempts + 1);
+						await app.db.run(Q.saveDelivery, { ...delivery, posts: JSON.stringify([...posts, now]) });
+						await app.db.run(Q.claim, { nonce: row.nonce, next: nextAt });
+						return { row, config, nextAt };
 					}
-					const nextAt = now + retryDelay(row.attempts + 1);
-					app.db.run(Q.saveDelivery, { ...delivery, posts: JSON.stringify([...posts, now]) });
-					app.db.run(Q.claim, { nonce: row.nonce, next: nextAt });
-					return { row, config, nextAt };
-				}
-			}),
+				}),
 		);
 		if (!claimed) break;
 		const { row, config } = claimed;
@@ -212,42 +222,49 @@ async function deliver(app: App, supplied?: StatusPort): Promise<number> {
 			const port = supplied ?? githubStatusesPort(config);
 			await port.post(draft);
 			nextAt = app.now() + 60_000;
-			await app.gate.run(() =>
-				app.db.transaction(() => {
-					app.db.run(Q.finish, { nonce: row.nonce, sent: row.desired, next: nextAt });
-					const delivery = app.db.get(Q.delivery);
-					if (delivery) app.db.run(Q.saveDelivery, { ...delivery, failures: 0 });
-				}),
+			await app.gate.run(
+				async () =>
+					await app.db.transaction(async () => {
+						await app.db.run(Q.finish, { nonce: row.nonce, sent: row.desired, next: nextAt });
+						const delivery = await app.db.get(Q.delivery);
+						if (delivery) await app.db.run(Q.saveDelivery, { ...delivery, failures: 0 });
+					}),
 			);
 		} catch (error) {
 			const exhausted = row.attempts + 1 >= MAX_ATTEMPTS;
 			const message = exhausted ? STOP_DIAGNOSTIC : RETRY_DIAGNOSTIC;
-			await app.gate.run(() =>
-				app.db.transaction(() => {
-					let next = app.now() + retryDelay(row.attempts + 1);
-					if (error instanceof StatusRateLimit) {
-						const delivery = app.db.get(Q.delivery) ?? { posts: "[]", pause_until: 0, failures: 0 };
-						const failures = Math.min(delivery.failures + 1, MAX_ATTEMPTS);
-						const headerDeadline = Math.min(
-							app.now() + MAX_HEADER_PAUSE,
-							Math.max(app.now() + error.retryAfterMs, error.retryAt),
-						);
-						next = Math.max(next, app.now() + retryDelay(failures), headerDeadline);
-						app.db.run(Q.saveDelivery, { ...delivery, failures, pause_until: Math.max(delivery.pause_until, next) });
-					}
-					nextAt = next;
-					app.db.run(Q.fail, { nonce: row.nonce, error: message, next, stopped: exhausted });
-				}),
+			await app.gate.run(
+				async () =>
+					await app.db.transaction(async () => {
+						let next = app.now() + retryDelay(row.attempts + 1);
+						if (error instanceof StatusRateLimit) {
+							const delivery = app.db.get(Q.delivery) ?? { posts: "[]", pause_until: 0, failures: 0 };
+							const failures = Math.min(delivery.failures + 1, MAX_ATTEMPTS);
+							const headerDeadline = Math.min(
+								app.now() + MAX_HEADER_PAUSE,
+								Math.max(app.now() + error.retryAfterMs, error.retryAt),
+							);
+							next = Math.max(next, app.now() + retryDelay(failures), headerDeadline);
+							await app.db.run(Q.saveDelivery, {
+								...delivery,
+								failures,
+								pause_until: Math.max(delivery.pause_until, next),
+							});
+						}
+						nextAt = next;
+						await app.db.run(Q.fail, { nonce: row.nonce, error: message, next, stopped: exhausted });
+					}),
 			);
 			console.error(`[mainworthy] commit status ${row.commit_sha}: ${message}`);
 		}
-		await app.gate.run(() =>
-			app.db.run(Q.defer, {
-				project: row.project,
-				repository: row.repository,
-				commit: row.commit_sha,
-				next: nextAt,
-			}),
+		await app.gate.run(
+			async () =>
+				await app.db.run(Q.defer, {
+					project: row.project,
+					repository: row.repository,
+					commit: row.commit_sha,
+					next: nextAt,
+				}),
 		);
 		delivered++;
 	}

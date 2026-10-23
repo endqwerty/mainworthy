@@ -199,7 +199,7 @@ export async function renewDemoWork(
 		op: "find",
 		project,
 		input: { in: "slots", run: seeded.run, limit: 200 },
-		actor: () => instance.owner,
+		actor: async () => instance.owner,
 	});
 	if (!read.ok) return;
 	const slots = z.object({ items: z.array(z.object({ id: z.number(), state: z.string() })) }).parse(read.result).items;
@@ -209,6 +209,6 @@ export async function renewDemoWork(
 		op: "work",
 		project,
 		input: { do: "take", run: seeded.run, slot: seeded.workSlot, seconds: DEMO_WORK.seconds },
-		actor: () => instance.owner,
+		actor: async () => instance.owner,
 	});
 }

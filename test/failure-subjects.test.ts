@@ -13,20 +13,21 @@ async function fixture() {
 		)
 		.get();
 	if (!row) throw new Error("missing failure question");
-	const about = questions.refsOf(db, row.id)[0];
+	const about = (await questions.refsOf(db, row.id))[0];
 	if (!about) throw new Error("missing question ref");
 	const readers = [
-		() => questions.questionById(db, row.id),
-		() => questions.mustQuestion(db, row.project, `Q-${row.no}`),
-		() => questions.latestByFingerprint(db, row.project, row.fingerprint),
-		() => questions.liveByFingerprint(db, row.project, row.fingerprint)[0],
-		() => questions.questionsOn(db, row.project, about)[0],
-		() => questions.everyQuestionOn(db, row.project, about)[0],
-		() => questions.openQuestionsOn(db, row.project, about)[0],
+		async () => await questions.questionById(db, row.id),
+		async () => await questions.mustQuestion(db, row.project, `Q-${row.no}`),
+		async () => await questions.latestByFingerprint(db, row.project, row.fingerprint),
+		async () => (await questions.liveByFingerprint(db, row.project, row.fingerprint))[0],
+		async () => (await questions.questionsOn(db, row.project, about))[0],
+		async () => (await questions.everyQuestionOn(db, row.project, about))[0],
+		async () => (await questions.openQuestionsOn(db, row.project, about))[0],
 		...([undefined, "failure"] as const).map(
 			(kind) => () => questions.queuePage(db, { project: row.project, kind, state: "open", after: null, limit: 10 })[0],
 		),
-		() => questions.questionsChangedSince(db, row.project, { rev: 0, id: 0 }, 10).find((q) => q.id === row.id),
+		async () =>
+			(await questions.questionsChangedSince(db, row.project, { rev: 0, id: 0 }, 10)).find((q) => q.id === row.id),
 	];
 	return { h, db, row, about, readers };
 }
@@ -63,12 +64,13 @@ test("every question reader parses each legacy failure subject without changing 
 			['{"slot":2,"signature":1,"scope":"run:1"}', { kind: "slot", slot: 2, signature: 1, scope: "run:1" }],
 		] as const) {
 			db.raw.run("UPDATE questions SET subject = ? WHERE id = ?", [stored, row.id]);
-			for (const read of readers) expect(read()?.subject).toEqual(subject);
+			for (const read of readers) expect((await read())?.subject).toEqual(subject);
 			db.raw.run("UPDATE questions SET state = 'decided' WHERE id = ?", [row.id]);
 			for (const kind of [undefined, "failure"] as const) {
 				expect(
-					questions.ledgerPage(db, { project: row.project, kind, before: null, limit: 10 }).find((q) => q.id === row.id)
-						?.subject,
+					(await questions.ledgerPage(db, { project: row.project, kind, before: null, limit: 10 })).find(
+						(q) => q.id === row.id,
+					)?.subject,
 				).toEqual(subject);
 			}
 			db.raw.run("UPDATE questions SET state = 'open' WHERE id = ?", [row.id]);
@@ -116,9 +118,9 @@ test("question readers reject impossible failure subjects at the storage boundar
 test("the attributed cause reader uses the same failure subject boundary", async () => {
 	const { h, db, row, about } = await fixture();
 	try {
-		const open = questions.mustQuestion(db, row.project, `Q-${row.no}`);
+		const open = await questions.mustQuestion(db, row.project, `Q-${row.no}`);
 		await h.call("decide", { q: `Q-${row.no}`, onEvidence: open.evidence_hash, answer: { is: "defect" } });
-		expect(questions.attributedQuestionsOn(db, row.project, about)[0]?.subject).toEqual({
+		expect((await questions.attributedQuestionsOn(db, row.project, about))[0]?.subject).toEqual({
 			kind: "cause",
 			...JSON.parse(row.subject),
 		});

@@ -143,17 +143,17 @@ const InheritedEffects = z.object({
 });
 
 /** Called only inside the registry's read snapshot, with that snapshot's project and authorization. */
-export function exportAudit(ctx: Ctx, input: AuditInput) {
+export async function exportAudit(ctx: Ctx, input: AuditInput) {
 	const to = input.to ?? ctx.now + 1;
 	if (to > ctx.now + 1 || to <= input.from)
 		throw invalid("audit needs from < to <= the server's current time plus one millisecond");
 	const selection = { project: ctx.project.id, to };
 
 	if (input.cursor || input.limit) throw invalid("audit paging needs a receipt id");
-	const questions = new Map(ctx.db.all(Q.questions, selection).map((row) => [row.id, row]));
-	const decisions = new Map(ctx.db.all(Q.decisions, selection).map((row) => [row.id, row]));
-	const policies = ctx.db.all(Q.policies, selection);
-	const versions = ctx.db.all(Q.versions, selection);
+	const questions = new Map((await ctx.db.all(Q.questions, selection)).map((row) => [row.id, row]));
+	const decisions = new Map((await ctx.db.all(Q.decisions, selection)).map((row) => [row.id, row]));
+	const policies = await ctx.db.all(Q.policies, selection);
+	const versions = await ctx.db.all(Q.versions, selection);
 	const records: AuditRecord[] = [];
 	const contexts = new Map<string, AuditRecord>();
 	const inRange = (at: number) => at >= input.from;
@@ -165,8 +165,8 @@ export function exportAudit(ctx: Ctx, input: AuditInput) {
 			);
 		return at < input.from ? { scope: "before-range", id, at } : included(id);
 	};
-	const actor = (id: number) => {
-		const row = ctx.db.get(Q.actor, { id });
+	const actor = async (id: number) => {
+		const row = await ctx.db.get(Q.actor, { id });
 		if (!row) throw invalid(`audit actor ${id} is missing`);
 		return row;
 	};
@@ -202,13 +202,13 @@ export function exportAudit(ctx: Ctx, input: AuditInput) {
 			{ type: "answer" }
 		>["evidence"];
 	};
-	const result = (id: number): AuditReference => {
+	const result = async (id: number): Promise<AuditReference> => {
 		const key = `result:${id}`;
 		if (!contexts.has(key)) {
-			const row = ctx.db.get(Q.result, { ...selection, id });
+			const row = await ctx.db.get(Q.result, { ...selection, id });
 			if (!row) throw invalid(`audit result ${id} is missing or outside the range; widen --to`);
 			const { actor: by, ...rest } = row;
-			contexts.set(key, { ...rest, type: "result", id: key, by: actor(by) });
+			contexts.set(key, { ...rest, type: "result", id: key, by: await actor(by) });
 		}
 		return included(key);
 	};
@@ -237,34 +237,35 @@ export function exportAudit(ctx: Ctx, input: AuditInput) {
 			signers: Signers.parse(json<unknown>(row.signers)).map((signer) => ({ ...signer, by: actor(signer.by) })),
 		});
 	}
-	for (const team of ctx.db.all(Q.teams, { project: selection.project })) {
+	for (const team of await ctx.db.all(Q.teams, { project: selection.project })) {
 		const key = `team:${team.id}`;
 		contexts.set(key, {
 			type: "team",
 			id: key,
 			name: team.name,
 			createdAt: team.created_at,
-			members: ctx.db.all(Q.teamMembers, { team: team.id }).map((row) => actor(row.actor)),
-			grants: ctx.db
-				.all(Q.teamGrants, { team: team.id, project: selection.project })
-				.map((row) => ({ project: row.project === 0 ? "*" : ctx.project.key, can: json(row.can) })),
+			members: (await ctx.db.all(Q.teamMembers, { team: team.id })).map((row) => actor(row.actor)),
+			grants: (await ctx.db.all(Q.teamGrants, { team: team.id, project: selection.project })).map((row) => ({
+				project: row.project === 0 ? "*" : ctx.project.key,
+				can: json(row.can),
+			})),
 		});
-		for (const row of ctx.db.all(Q.teamEvents, { ...selection, team: team.id })) {
+		for (const row of await ctx.db.all(Q.teamEvents, { ...selection, team: team.id })) {
 			if (!inRange(row.at)) continue;
 			records.push({
 				type: "team-event",
 				id: `team-event:${row.id}`,
 				at: row.at,
 				team: included(key),
-				by: actor(row.by_actor),
+				by: await actor(row.by_actor),
 				action: row.action,
-				person: row.person === null ? null : actor(row.person),
+				person: row.person === null ? null : await actor(row.person),
 				project: row.project === null ? null : row.project === 0 ? "*" : ctx.project.key,
 				can: row.can === null ? null : json(row.can),
 			});
 		}
 	}
-	for (const row of ctx.db.all(Q.answers, selection)) {
+	for (const row of await ctx.db.all(Q.answers, selection)) {
 		if (!inRange(row.at)) continue;
 		records.push({
 			type: "answer",
@@ -272,7 +273,7 @@ export function exportAudit(ctx: Ctx, input: AuditInput) {
 			at: row.at,
 			seq: row.seq,
 			question: question(row.question),
-			by: actor(row.actor),
+			by: await actor(row.actor),
 			answer: json(row.answer),
 			reason: row.reason,
 			counts: row.counts !== 0,
@@ -288,7 +289,7 @@ export function exportAudit(ctx: Ctx, input: AuditInput) {
 			version: row.version,
 			at: row.at,
 			seq: row.seq,
-			by: actor(row.actor),
+			by: await actor(row.actor),
 			prior: row.version === 1 ? null : reference(`policy:${row.version - 1}`, policyIndex.get(row.version - 1)?.at),
 			decision: row.decision === null ? null : reference(`decision:${row.decision}`, decisions.get(row.decision)?.at),
 			preset: row.preset,
@@ -308,7 +309,7 @@ export function exportAudit(ctx: Ctx, input: AuditInput) {
 			version: row.no,
 			at: row.at,
 			seq: row.seq,
-			by: actor(row.author),
+			by: await actor(row.author),
 			reason: row.reason,
 			body: json(row.body),
 			hash: row.hash,
@@ -317,7 +318,7 @@ export function exportAudit(ctx: Ctx, input: AuditInput) {
 			decision: reference(`decision:${row.decision}`, decisions.get(row.decision)?.at),
 		});
 	}
-	for (const row of ctx.db.all(Q.mergeReceipts, selection)) {
+	for (const row of await ctx.db.all(Q.mergeReceipts, selection)) {
 		const receipt = MergeReceipt.parse({ ...json<Record<string, unknown>>(row.snapshot), id: row.id });
 		if (inRange(row.at))
 			records.push({
@@ -325,13 +326,13 @@ export function exportAudit(ctx: Ctx, input: AuditInput) {
 				id: `merge-receipt:${row.id}`,
 				change: row.change,
 				key: row.key,
-				by: actor(row.actor),
+				by: await actor(row.actor),
 				at: row.at,
 				seq: row.seq,
 				receipt,
 			});
 	}
-	for (const row of ctx.db.all(Q.changeEnds, selection)) {
+	for (const row of await ctx.db.all(Q.changeEnds, selection)) {
 		if (inRange(row.at)) records.push({ type: "change-end", id: `change-end:${row.change}`, ...row });
 	}
 	return encodeAudit(

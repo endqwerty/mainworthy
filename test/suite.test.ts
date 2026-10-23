@@ -65,10 +65,10 @@ describe("atomic bulk proposals", () => {
 	const creates = (): Edit[] =>
 		Array.from({ length: count }, (_, i) => ({ op: "create", outline: `Bulk case ${i}\n  Check > Pass` }));
 	const tick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
-	const disk = () => {
+	const disk = async () => {
 		const dir = mkdtempSync(join(tmpdir(), "mainworthy-bulk-"));
 		const config = defaultConfig({ MAINWORTHY_DATA: dir, MAINWORTHY_OWNER: "robin" });
-		const instance = open(config);
+		const instance = await open(config);
 		const call = (op: string, input: unknown = {}) => ({ op, input, project: "scratch", actor: () => instance.owner });
 		const raw = async (op: string, input: unknown = {}) => await invoke(instance.app, OPS, call(op, input));
 		return {
@@ -105,7 +105,7 @@ describe("atomic bulk proposals", () => {
 	};
 
 	test("a maximum-size conflict resolution yields while sealing and keeps its replacement atomic", async () => {
-		const instance = disk();
+		const instance = await disk();
 		try {
 			result(await instance.raw("propose", { edits: [{ op: "create", body: { title: "Base" } }] }));
 			result(
@@ -131,7 +131,7 @@ describe("atomic bulk proposals", () => {
 				cmd: "max-merge-01",
 			};
 			let done = false;
-			const saving = invoke(instance.app, OPS, instance.call("decide", input));
+			const saving = await invoke(instance.app, OPS, instance.call("decide", input));
 			void saving.then(() => {
 				done = true;
 			});
@@ -173,7 +173,7 @@ describe("atomic bulk proposals", () => {
 	test.each(["map", "finding", "policy"] as const)(
 		"case creation from %s answers yields without publishing partial effects",
 		async (kind) => {
-			const instance = disk();
+			const instance = await disk();
 			try {
 				const total = kind === "finding" ? 200 : count;
 				const questionKind = kind === "finding" ? "finding" : "map";
@@ -217,7 +217,7 @@ describe("atomic bulk proposals", () => {
 					cmd: `bulk-${kind}`,
 				};
 				let done = false;
-				const saving = invoke(instance.app, OPS, instance.call("decide", input));
+				const saving = await invoke(instance.app, OPS, instance.call("decide", input));
 				void saving.then(() => {
 					done = true;
 				});
@@ -252,11 +252,11 @@ describe("atomic bulk proposals", () => {
 	);
 
 	test("sealing a bulk proposal that needs review also answers reads before publishing it", async () => {
-		const instance = disk();
+		const instance = await disk();
 		try {
 			await strict(instance);
 			let done = false;
-			const sealing = invoke(instance.app, OPS, instance.call("propose", { edits: creates() }));
+			const sealing = await invoke(instance.app, OPS, instance.call("propose", { edits: creates() }));
 			void sealing.then(() => {
 				done = true;
 			});
@@ -281,7 +281,7 @@ describe("atomic bulk proposals", () => {
 	});
 
 	test("sealing a 5,000-case fragment move answers reads even when its last case conflicts", async () => {
-		const instance = disk();
+		const instance = await disk();
 		try {
 			result(
 				await instance.raw("propose", {
@@ -335,7 +335,7 @@ describe("atomic bulk proposals", () => {
 				},
 			];
 			let done = false;
-			const moving = invoke(instance.app, OPS, instance.call("propose", { edits }));
+			const moving = await invoke(instance.app, OPS, instance.call("propose", { edits }));
 			void moving.then(() => {
 				done = true;
 			});
@@ -363,7 +363,7 @@ describe("atomic bulk proposals", () => {
 			expect(await instance.raw("get", { refs: ["P-4"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
 			expect(readDuringSealing).toBe(true);
 
-			const retry = invoke(
+			const retry = await invoke(
 				instance.app,
 				OPS,
 				instance.call("propose", {
@@ -406,12 +406,16 @@ describe("atomic bulk proposals", () => {
 	}, 30000);
 
 	test("a bulk save answers reads between slices and publishes the complete proposal and decision once", async () => {
-		const instance = disk();
+		const instance = await disk();
 		try {
 			const events: unknown[] = [];
 			instance.app.subscribe((event) => events.push(event));
 			let done = false;
-			const saving = invoke(instance.app, OPS, instance.call("propose", { edits: creates(), cmd: "bulk-save-01" }));
+			const saving = await invoke(
+				instance.app,
+				OPS,
+				instance.call("propose", { edits: creates(), cmd: "bulk-save-01" }),
+			);
 			void saving.then(() => {
 				done = true;
 			});
@@ -447,14 +451,14 @@ describe("atomic bulk proposals", () => {
 	});
 
 	test("accepting a bulk proposal answers reads without exposing half its cases or a decided question", async () => {
-		const instance = disk();
+		const instance = await disk();
 		try {
 			await strict(instance);
 			const proposed = result<ProposeReply>(await instance.raw("propose", { edits: creates() }));
 			expect(proposed.status).toBe("open");
 			const question = result<{ evidenceHash: string }[]>(await instance.raw("get", { refs: [proposed.question] }))[0];
 			let done = false;
-			const accepting = invoke(
+			const accepting = await invoke(
 				instance.app,
 				OPS,
 				instance.call("decide", {
@@ -497,7 +501,7 @@ describe("atomic bulk proposals", () => {
 	test.each(["edit", "place", "state"] as const)(
 		"a bulk %s keeps every case at its previous state between slices",
 		async (op) => {
-			const instance = disk();
+			const instance = await disk();
 			try {
 				const created = result<ProposeReply>(await instance.raw("propose", { edits: creates() }));
 				const refs = created.cases.map((row) => row.ref);
@@ -509,7 +513,7 @@ describe("atomic bulk proposals", () => {
 							: [{ op, cases: refs, to: "archived" }];
 				const condition = op === "edit" ? "head = 2" : op === "place" ? "tags = '[\"changed\"]'" : "state = 'archived'";
 				let done = false;
-				const saving = invoke(instance.app, OPS, instance.call("propose", { edits }));
+				const saving = await invoke(instance.app, OPS, instance.call("propose", { edits }));
 				void saving.then(() => {
 					done = true;
 				});
@@ -540,7 +544,7 @@ describe("atomic bulk proposals", () => {
 	);
 
 	test("a late adoption conflict rolls back earlier slices and leaves the next batched answer usable", async () => {
-		const instance = disk();
+		const instance = await disk();
 		try {
 			await strict(instance);
 			const edits = creates();
@@ -585,7 +589,7 @@ describe("atomic bulk proposals", () => {
 	test.each(["propose", "decide"])(
 		"a process killed between %s slices leaves no partial adoption after restart",
 		async (op) => {
-			const instance = disk();
+			const instance = await disk();
 			let child: ReturnType<typeof Bun.spawn> | undefined;
 			try {
 				let input: unknown = { edits: creates(), cmd: "bulk-crash-01" };
@@ -642,14 +646,14 @@ throw new Error("the operation completed without a partial adoption slice");
 				}
 				child.kill("SIGKILL");
 				await child.exited;
-				const restarted = open(instance.config);
+				const restarted = await open(instance.config);
 				try {
 					const raw = async (operation: string, body: unknown = {}) =>
 						await invoke(restarted.app, OPS, {
 							op: operation,
 							project: "scratch",
 							input: body,
-							actor: () => restarted.owner,
+							actor: async () => restarted.owner,
 						});
 					expect(result(await raw("find"))).toMatchObject({ count: 0 });
 					for (const table of ["cases", "versions", "placements", "search_docs", "commands"]) {
@@ -1102,7 +1106,7 @@ describe("capture", () => {
 				can: ["read", "produce", "answer"],
 				roles: ["approver"],
 			});
-			const approver = actorByName(h.app.db, "approver", 1);
+			const approver = await actorByName(h.app.db, "approver", 1);
 			if (!approver) throw new Error("no approver");
 			const clauses = [...PRESETS.standard.clauses];
 			clauses.splice(
@@ -1223,7 +1227,7 @@ describe("capture", () => {
 			can: ["read", "produce", "answer"],
 			roles: ["approver"],
 		});
-		const approver = actorByName(h.app.db, "approver", 1);
+		const approver = await actorByName(h.app.db, "approver", 1);
 		if (!approver) throw new Error("no approver");
 		if (who === "role:auditor") {
 			h.actor("auditor", "human", ["read", "produce", "answer"]);
@@ -2358,9 +2362,14 @@ describe("conflict storage upgrades", () => {
 	const oldInstance = async (sample: (typeof legacyConflicts)[number]) => {
 		const dir = mkdtempSync(join(tmpdir(), "mainworthy-conflict-upgrade-"));
 		const config = defaultConfig({ MAINWORTHY_DATA: dir, MAINWORTHY_OWNER: "robin" });
-		const instance = open({ ...config, port: 0 });
+		const instance = await open({ ...config, port: 0 });
 		const call = async (op: string, input: unknown) => {
-			const reply = await invoke(instance.app, OPS, { op, input, project: "scratch", actor: () => instance.owner });
+			const reply = await invoke(instance.app, OPS, {
+				op,
+				input,
+				project: "scratch",
+				actor: async () => instance.owner,
+			});
 			if (!reply.ok) throw new Error(JSON.stringify(reply.error));
 			return reply.result;
 		};
@@ -2410,8 +2419,8 @@ describe("conflict storage upgrades", () => {
 				}),
 				input.cmd,
 			);
-			dropResetIndexes(db);
-			dropReceiptSchema(db);
+			await dropResetIndexes(db);
+			await dropReceiptSchema(db);
 			db.exec(
 				"DROP TABLE assertion_seen; DROP TABLE assertion_spreads; DROP TABLE assertion_roots; DROP TABLE assertion_index; DROP INDEX results_assertion_rebuild; DROP INDEX flips_first_try; DROP INDEX flips_second_try; ALTER TABLE flips DROP COLUMN first_try; ALTER TABLE flips DROP COLUMN second_try; DROP TABLE result_tries; DROP TABLE slot_leases; DROP TABLE handoffs",
 			);
@@ -2436,7 +2445,7 @@ describe("conflict storage upgrades", () => {
 		for (const operation of ["get", "replay"] as const) {
 			test(`old ${sample.kind} conflicts survive upgrade and archive: ${operation}`, async () => {
 				const old = await oldInstance(sample);
-				const upgraded = open(old.config);
+				const upgraded = await open(old.config);
 				const server = serve(upgraded.app, upgraded.owner);
 				const client = new Client({ url: `http://127.0.0.1:${server.port}`, project: "scratch", token: undefined });
 				const check = async (reader: Client) => {
@@ -2485,8 +2494,8 @@ describe("conflict storage upgrades", () => {
 					exportArchive(upgraded.app.db, (chunk) => chunks.push(chunk), { blobs: upgraded.app.blobs });
 					const restored = await harness();
 					try {
-						removeBootstrap(restored.app.db);
-						importArchive(restored.app.db, linesOf(chunks.join("")), { blobs: restored.app.blobs });
+						await removeBootstrap(restored.app.db);
+						await importArchive(restored.app.db, linesOf(chunks.join("")), { blobs: restored.app.blobs });
 						const restoredServer = serve(restored.app, restored.owner);
 						try {
 							await check(
@@ -2500,7 +2509,7 @@ describe("conflict storage upgrades", () => {
 					}
 					const empty = await harness();
 					try {
-						removeBootstrap(empty.app.db);
+						await removeBootstrap(empty.app.db);
 						const legacyArchive = chunks.join("").replace(`"schema":${ARCHIVE_VERSION}`, '"schema":23');
 						expect(() => importArchive(empty.app.db, linesOf(legacyArchive), { blobs: empty.app.blobs })).toThrow(
 							`archive schema 23 is older than this build's archive schema ${ARCHIVE_VERSION}`,

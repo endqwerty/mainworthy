@@ -34,14 +34,16 @@ beforeAll(async () => {
 	adminUrl = (await cluster()).adminUrl;
 	fixture = await testDatabase({ schema: "empty" });
 	database = await Database.open({ url: fixture.url, readPool: 1 });
-	await database.write((db) =>
-		db.transaction(() =>
-			db.exec(`
+	await database.write(
+		async (db) =>
+			await db.transaction(
+				async () =>
+					await db.exec(`
 		CREATE TABLE entries(id bigint PRIMARY KEY, text text NOT NULL);
 		CREATE TABLE parents(id bigint PRIMARY KEY);
 		CREATE TABLE children(id bigint PRIMARY KEY, parent bigint REFERENCES parents(id) DEFERRABLE INITIALLY IMMEDIATE);
 	`),
-		),
+			),
 	);
 });
 afterAll(async () => {
@@ -108,13 +110,13 @@ test("named scanner skips literals, casts, identifiers, dollar bodies and nested
 
 test("named binding rejects missing and extra keys before sending, and one requires exactly one row", async () => {
 	await database.read(async (db) => {
-		await expect(db.get(Q.select, { text: "bad" } as unknown as { id: number })).rejects.toThrow(
+		await expect(await db.get(Q.select, { text: "bad" } as unknown as { id: number })).rejects.toThrow(
 			"missing SQL parameter id",
 		);
 		const extra = { id: 1, extra: 2 };
-		await expect(db.get(Q.select, extra)).rejects.toThrow("unexpected SQL parameter extra");
+		await expect(await db.get(Q.select, extra)).rejects.toThrow("unexpected SQL parameter extra");
 		expect(await db.get(Q.select, { id: -1 })).toBeNull();
-		await expect(db.one(Q.select, { id: -1 })).rejects.toThrow("exactly one");
+		await expect(await db.one(Q.select, { id: -1 })).rejects.toThrow("exactly one");
 		const positional = sql<readonly [number], { n: number }>("SELECT $1::bigint AS n");
 		expect(await db.one(positional, [9])).toEqual({ n: 9 });
 	});
@@ -124,48 +126,48 @@ test("normal return releases the lock and scope, run requires a transaction", as
 	let expired: WriteDb | undefined;
 	await database.write(async (db) => {
 		expired = db;
-		await expect(db.run(Q.insert, { id: 1, text: "outside" })).rejects.toThrow("open transaction");
+		await expect(await db.run(Q.insert, { id: 1, text: "outside" })).rejects.toThrow("open transaction");
 		await db.transaction(async () => {
 			expect(await db.one(Q.insert, { id: 1, text: "normal" })).toEqual({ id: 1 });
 			expect(await db.run(sql("UPDATE entries SET text = 'updated' WHERE id = 1"))).toEqual({ changes: 1 });
 		});
 	});
-	await expect(expired?.one(Q.count)).rejects.toThrow("scope has ended");
+	await expect(await expired?.one(Q.count)).rejects.toThrow("scope has ended");
 	await cleanWriter();
 });
 
 test("throw with an open transaction rolls back, and returning one open is refused", async () => {
 	await expect(
-		database.write(async (db) => {
+		await database.write(async (db) => {
 			await db.begin();
 			await db.one(Q.insert, { id: 2, text: "rolled back" });
 			throw new Error("open failure");
 		}),
 	).rejects.toThrow("open failure");
 	await expect(
-		database.write(async (db) => {
+		await database.write(async (db) => {
 			await db.begin();
 		}),
 	).rejects.toThrow("open transaction");
-	expect(await database.read((db) => db.get(Q.select, { id: 2 }))).toBeNull();
+	expect(await database.read(async (db) => await db.get(Q.select, { id: 2 }))).toBeNull();
 	await cleanWriter();
 });
 
 test("throw between two transactions preserves the first commit and unlocks", async () => {
 	await expect(
-		database.write(async (db) => {
-			await db.transaction(() => db.one(Q.insert, { id: 3, text: "accepted" }));
+		await database.write(async (db) => {
+			await db.transaction(async () => await db.one(Q.insert, { id: 3, text: "accepted" }));
 			throw new Error("between transactions");
 		}),
 	).rejects.toThrow("between transactions");
-	expect(await database.read((db) => db.get(Q.select, { id: 3 }))).toEqual({ id: 3, text: "accepted" });
+	expect(await database.read(async (db) => await db.get(Q.select, { id: 3 }))).toEqual({ id: 3, text: "accepted" });
 	await cleanWriter();
 });
 
 test("false unlock destroys its backend; the pool never inherits the session lock", async () => {
 	let pid = 0;
 	await expect(
-		database.write(async (db) => {
+		await database.write(async (db) => {
 			pid = (await db.one(Q.pid)).pid;
 			await db.allDynamic("SELECT pg_advisory_unlock($1::bigint)", [WRITE_LOCK]);
 		}),
@@ -177,10 +179,11 @@ test("false unlock destroys its backend; the pool never inherits the session loc
 test("a failed unlock destroys a backend that still holds the lock", async () => {
 	let pid = 0;
 	await expect(
-		database.write(async (db) => {
+		await database.write(async (db) => {
 			pid = (await db.one(Q.pid)).pid;
-			await db.transaction(() =>
-				db.exec(`
+			await db.transaction(
+				async () =>
+					await db.exec(`
 			CREATE SCHEMA unlock_failure;
 			CREATE FUNCTION unlock_failure.pg_advisory_unlock(bigint) RETURNS boolean LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'unlock failed deliberately'; END $$;
 			SET search_path = unlock_failure, pg_catalog, public;
@@ -196,7 +199,7 @@ test("backend termination while holding the lock yields ConnectionLost and no re
 	let pid = 0;
 	let continued = false;
 	await expect(
-		database.write(async (db) => {
+		await database.write(async (db) => {
 			pid = (await db.one(Q.pid)).pid;
 			await db.begin();
 			await databaseAdmin(adminUrl, (admin) =>
@@ -214,7 +217,7 @@ test("backend termination while holding the lock yields ConnectionLost and no re
 test("a swallowed connection error still fails the lease, and failed rollback destroys its backend", async () => {
 	let pid = 0;
 	await expect(
-		database.write(async (db) => {
+		await database.write(async (db) => {
 			pid = (await db.one(Q.pid)).pid;
 			await databaseAdmin(adminUrl, (admin) =>
 				admin.all("SELECT pg_terminate_backend($1::int)", [pid]).then(() => undefined),
@@ -228,7 +231,7 @@ test("a swallowed connection error still fails the lease, and failed rollback de
 	).rejects.toBeInstanceOf(ConnectionLost);
 	await backendGone(pid);
 	await expect(
-		database.write(async (db) => {
+		await database.write(async (db) => {
 			pid = (await db.one(Q.pid)).pid;
 			await db.begin();
 			await databaseAdmin(adminUrl, (admin) =>
@@ -245,23 +248,23 @@ test("FIFO writer waits through the gap between transactions, and cancellation d
 	const entered = barrier();
 	const finish = barrier();
 	const order: string[] = [];
-	const first = database.write(async (db) => {
-		await db.transaction(() => db.one(Q.count));
+	const first = await database.write(async (db) => {
+		await db.transaction(async () => await db.one(Q.count));
 		order.push("first");
 		entered.release();
 		await finish.promise;
-		await db.transaction(() => db.one(Q.count));
+		await db.transaction(async () => await db.one(Q.count));
 		order.push("first finished");
 	});
 	await entered.promise;
 	const abort = new AbortController();
-	const cancelled = database.write(
+	const cancelled = await database.write(
 		() => {
 			order.push("cancelled");
 		},
 		{ signal: abort.signal },
 	);
-	const second = database.write(() => {
+	const second = await database.write(() => {
 		order.push("second");
 	});
 	abort.abort(new Error("cancel FIFO wait"));
@@ -279,12 +282,12 @@ test("a writer on another Database also waits for the advisory lock", async () =
 	const finish = barrier();
 	let secondEntered = false;
 	try {
-		const first = database.write(async () => {
+		const first = await database.write(async () => {
 			entered.release();
 			await finish.promise;
 		});
 		await entered.promise;
-		const second = other.write(() => {
+		const second = await other.write(() => {
 			secondEntered = true;
 		});
 		await Bun.sleep(20);
@@ -301,96 +304,102 @@ test("a writer on another Database also waits for the advisory lock", async () =
 test("read scopes hold a repeatable snapshot until their second statement", async () => {
 	await database.read(async (db) => {
 		const before = await db.one(Q.count);
-		await database.write((writer) => writer.transaction(() => writer.one(Q.insert, { id: 4, text: "later" })));
+		await database.write(
+			async (writer) => await writer.transaction(async () => await writer.one(Q.insert, { id: 4, text: "later" })),
+		);
 		expect(await db.one(Q.count)).toEqual(before);
 	});
-	expect(await database.read((db) => db.get(Q.select, { id: 4 }))).toEqual({ id: 4, text: "later" });
+	expect(await database.read(async (db) => await db.get(Q.select, { id: 4 }))).toEqual({ id: 4, text: "later" });
 });
 
 test("savepoints recover aborted statements, report the first failure and discard child effects", async () => {
 	const effects: string[] = [];
-	await database.write((db) =>
-		db.transaction(async () => {
-			db.afterCommit(() => {
-				effects.push("outer before");
-			});
-			await expect(
-				db.savepoint(async () => {
-					db.afterCommit(() => {
-						effects.push("discarded");
-					});
-					try {
-						await db.one(Q.insert, { id: 1, text: "duplicate" });
-					} catch (error) {
-						expect(isUniqueViolation(error)).toBe(true);
-					}
-					await expect(db.one(Q.count)).rejects.toBeInstanceOf(TransactionAborted);
-				}),
-			).rejects.toThrow("first failure");
-			await db.savepoint(async () => {
+	await database.write(
+		async (db) =>
+			await db.transaction(async () => {
 				db.afterCommit(() => {
-					effects.push("child");
+					effects.push("outer before");
 				});
-				await db.one(Q.insert, { id: 5, text: "recovered" });
-			});
-			db.afterCommit(() => {
-				effects.push("outer after");
-			});
-			expect(effects).toEqual([]);
-		}),
+				await expect(
+					await db.savepoint(async () => {
+						db.afterCommit(() => {
+							effects.push("discarded");
+						});
+						try {
+							await db.one(Q.insert, { id: 1, text: "duplicate" });
+						} catch (error) {
+							expect(isUniqueViolation(error)).toBe(true);
+						}
+						await expect(await db.one(Q.count)).rejects.toBeInstanceOf(TransactionAborted);
+					}),
+				).rejects.toThrow("first failure");
+				await db.savepoint(async () => {
+					db.afterCommit(() => {
+						effects.push("child");
+					});
+					await db.one(Q.insert, { id: 5, text: "recovered" });
+				});
+				db.afterCommit(() => {
+					effects.push("outer after");
+				});
+				expect(effects).toEqual([]);
+			}),
 	);
 	expect(effects).toEqual(["outer before", "child", "outer after"]);
 	await cleanWriter();
 });
 
 test("async generator savepoints roll back on iterator return and preserve yields/results", async () => {
-	await database.write((db) =>
-		db.transaction(async () => {
-			const steps = db.savepointSteps(async function* () {
-				await db.one(Q.insert, { id: 6, text: "cancelled generator" });
-				yield undefined;
-				return "complete";
-			});
-			expect(await steps.next()).toEqual({ done: false, value: undefined });
-			await steps.return("stopped");
-			expect(await db.get(Q.select, { id: 6 })).toBeNull();
-			const success = db.savepointSteps(async function* () {
-				yield "slice";
-				return 42;
-			});
-			expect(await success.next()).toEqual({ done: false, value: "slice" });
-			expect(await success.next()).toEqual({ done: true, value: 42 });
-		}),
+	await database.write(
+		async (db) =>
+			await db.transaction(async () => {
+				const steps = db.savepointSteps(async function* () {
+					await db.one(Q.insert, { id: 6, text: "cancelled generator" });
+					yield undefined;
+					return "complete";
+				});
+				expect(await steps.next()).toEqual({ done: false, value: undefined });
+				await steps.return("stopped");
+				expect(await db.get(Q.select, { id: 6 })).toBeNull();
+				const success = db.savepointSteps(async function* () {
+					yield "slice";
+					return 42;
+				});
+				expect(await success.next()).toEqual({ done: false, value: "slice" });
+				expect(await success.next()).toEqual({ done: true, value: 42 });
+			}),
 	);
 });
 
 test("failed COMMIT discards effects, checkedBulk checks deferred foreign keys at its boundary", async () => {
 	let fired = false;
 	await expect(
-		database.write((db) =>
-			db.transaction(async () => {
-				await db.exec("SET CONSTRAINTS ALL DEFERRED; INSERT INTO children VALUES (10, 999)");
-				db.afterCommit(() => {
-					fired = true;
-				});
-			}),
+		await database.write(
+			async (db) =>
+				await db.transaction(async () => {
+					await db.exec("SET CONSTRAINTS ALL DEFERRED; INSERT INTO children VALUES (10, 999)");
+					db.afterCommit(() => {
+						fired = true;
+					});
+				}),
 		),
 	).rejects.toHaveProperty("errno", "23503");
 	expect(fired).toBe(false);
-	await database.write((db) =>
-		db.transaction(async () => {
-			try {
-				await db.checkedBulk(() => db.exec("INSERT INTO children VALUES (11, 999)"));
-				throw new Error("expected constraint error");
-			} catch (error) {
-				expect(isConstraintViolation(error)).toBe(true);
-				expect(isForeignKeyViolation(error)).toBe(true);
-			}
-			await db.checkedBulk(async () => {
-				await db.exec("INSERT INTO children VALUES (12, 12); INSERT INTO parents VALUES (12)");
-			});
-			expect(await db.allDynamic("SELECT id FROM children")).toEqual([{ id: 12 }]);
-		}),
+	await database.write(
+		async (db) =>
+			await db.transaction(async () => {
+				try {
+					await db.checkedBulk(async () => await db.exec("INSERT INTO children VALUES (11, 999)"));
+					throw new Error("expected constraint error");
+				} catch (error) {
+					expect(isConstraintViolation(error)).toBe(true);
+					expect(isForeignKeyViolation(error)).toBe(true);
+				}
+				await db.checkedBulk(async () => {
+					await db.exec("INSERT INTO children VALUES (12, 12); INSERT INTO parents VALUES (12)");
+				});
+				expect(await db.allDynamic("SELECT id FROM children")).toEqual([{ id: 12 }]);
+			}),
 	);
 });
 
@@ -432,10 +441,12 @@ test("arrays encode empty, quotes, comma, backslashes and bigint values without 
 			{ value: 2 },
 			{ value: Number.MAX_SAFE_INTEGER },
 		]);
-		await expect(db.all(nums, { values: [Number.MAX_SAFE_INTEGER + 1] })).rejects.toThrow("safe");
-		await expect(db.all(nums, { values: [9007199254740992n] })).rejects.toThrow("safe integer");
-		await expect(db.allDynamic("SELECT 9007199254740992::bigint AS enormous")).rejects.toThrow("enormous");
-		await expect(db.allDynamic("SELECT $1::bigint", [Number.MAX_SAFE_INTEGER + 1])).rejects.toThrow("safe integer");
+		await expect(await db.all(nums, { values: [Number.MAX_SAFE_INTEGER + 1] })).rejects.toThrow("safe");
+		await expect(await db.all(nums, { values: [9007199254740992n] })).rejects.toThrow("safe integer");
+		await expect(await db.allDynamic("SELECT 9007199254740992::bigint AS enormous")).rejects.toThrow("enormous");
+		await expect(await db.allDynamic("SELECT $1::bigint", [Number.MAX_SAFE_INTEGER + 1])).rejects.toThrow(
+			"safe integer",
+		);
 	});
 });
 
@@ -443,14 +454,14 @@ test("pool exhaustion rejects on AbortSignal and cancelled reservations do not c
 	const entered = barrier();
 	const finish = barrier();
 	let expired: ReadDb | undefined;
-	const first = database.read(async (db) => {
+	const first = await database.read(async (db) => {
 		expired = db;
 		entered.release();
 		await finish.promise;
 	});
 	await entered.promise;
 	const controller = new AbortController();
-	const blocked = database.read(
+	const blocked = await database.read(
 		() => {
 			throw new Error("must not acquire");
 		},
@@ -460,12 +471,12 @@ test("pool exhaustion rejects on AbortSignal and cancelled reservations do not c
 	await expect(blocked).rejects.toThrow("pool cancelled");
 	finish.release();
 	await first;
-	await expect(expired?.one(Q.count)).rejects.toThrow("scope has ended");
-	await database.read((db) => db.one(Q.count));
+	await expect(await expired?.one(Q.count)).rejects.toThrow("scope has ended");
+	await database.read(async (db) => await db.one(Q.count));
 });
 
 test("catalog reports columns, ordered primary keys and foreign keys", async () => {
-	const catalog = await database.read((db) => db.catalog());
+	const catalog = await database.read(async (db) => await db.catalog());
 	expect(catalog.find((table) => table.name === "entries")?.primary).toEqual(["id"]);
 	expect(catalog.find((table) => table.name === "children")?.foreignKeys).toEqual([
 		{ columns: ["parent"], parent: "parents", parentColumns: ["id"], deleteAction: "no-action" },
@@ -478,16 +489,16 @@ test("migration lock holds one dedicated backend across ledger transactions", as
 	const finish = barrier();
 	const events: number[] = [];
 	try {
-		const first = migrationLock(database, async (db) => {
+		const first = await migrationLock(database, async (db) => {
 			const pid = (await db.one(Q.pid)).pid;
-			await db.transaction(() => db.one(Q.count));
+			await db.transaction(async () => await db.one(Q.count));
 			entered.release();
 			await finish.promise;
 			expect((await db.one(Q.pid)).pid).toBe(pid);
 			events.push(1);
 		});
 		await entered.promise;
-		const second = migrationLock(other, () => {
+		const second = await migrationLock(other, () => {
 			events.push(2);
 		});
 		await Bun.sleep(20);
@@ -506,16 +517,22 @@ test("testDatabase clones two isolated databases and drops them off the critical
 	const da = await Database.open({ url: a.url });
 	const db = await Database.open({ url: b.url });
 	try {
-		await da.write((writer) =>
-			writer.transaction(() => writer.exec("CREATE TABLE private_row(id bigint); INSERT INTO private_row VALUES (1)")),
+		await da.write(
+			async (writer) =>
+				await writer.transaction(
+					async () => await writer.exec("CREATE TABLE private_row(id bigint); INSERT INTO private_row VALUES (1)"),
+				),
 		);
 		expect(
-			await db.read((reader) =>
-				reader.allDynamic("SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename = 'private_row'"),
+			await db.read(
+				async (reader) =>
+					await reader.allDynamic(
+						"SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename = 'private_row'",
+					),
 			),
 		).toEqual([]);
 	} finally {
-		await Promise.all([da.close(), db.close()]);
+		await Promise.all([await da.close(), await db.close()]);
 		await Promise.all([a.close(), b.close()]);
 	}
 	await drainDatabaseDrops();
@@ -538,13 +555,15 @@ test("openApp migrates its URL asynchronously and owns only Database", async () 
 		expect(app.now()).toBe(123);
 		expect("db" in app || "reader" in app || "gate" in app || "readers" in app).toBe(false);
 		expect(
-			await app.database.read((reader) => reader.allDynamic("SELECT value FROM meta WHERE key = 'schema_version'")),
+			await app.database.read(
+				async (reader) => await reader.allDynamic("SELECT value FROM meta WHERE key = 'schema_version'"),
+			),
 		).toEqual([{ value: "1" }]);
 	} finally {
 		await app.close();
 		await empty.close();
 	}
-	await expect(openApp({ ...config, databaseUrl: "" })).rejects.toThrow(
+	await expect(await openApp({ ...config, databaseUrl: "" })).rejects.toThrow(
 		"MAINWORTHY_DATABASE_URL is required; see compose.yaml",
 	);
 });

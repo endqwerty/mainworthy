@@ -105,7 +105,7 @@ test("receipt history persists and remains in the audit after reopening, while a
 	if (!frozen) throw new Error("Expected receipt");
 	const stored = new Db(h.app.db.raw.serialize());
 	try {
-		expect(mergeReceiptById(stored, 1, frozen.id)).toEqual(frozen);
+		expect(await mergeReceiptById(stored, 1, frozen.id)).toEqual(frozen);
 	} finally {
 		stored.close();
 	}
@@ -127,11 +127,11 @@ test("receipt history persists and remains in the audit after reopening, while a
 
 test("an old merged change gains no invented receipt during migration", async () => {
 	await h.call("report", report("receipt726", false));
-	dropReceiptSchema(h.app.db);
-	h.app.db.exec(
+	await dropReceiptSchema(h.app.db);
+	await h.app.db.exec(
 		"INSERT INTO change_ends (change, ended, at) VALUES (1, 'merged', 1); UPDATE meta SET value = '40' WHERE key = 'schema_version'",
 	);
-	migrate(h.app.db, ":memory:");
+	await migrate(h.app.db, ":memory:");
 	expect(await receipt()).toBeNull();
 	expect((await h.call<GateStatus>("gate", { change: "pr:726" })).verdict).toBe("passed");
 	expect(await end()).toMatchObject({ already: false });
@@ -140,7 +140,7 @@ test("an old merged change gains no invented receipt during migration", async ()
 
 test("a failed landing rolls back the receipt and its active selection", async () => {
 	await h.call("report", report("receipt726", false));
-	h.app.db.exec(
+	await h.app.db.exec(
 		"CREATE TRIGGER fail_landing BEFORE UPDATE OF landing_commit ON change_ends BEGIN SELECT RAISE(ABORT, 'landing interrupted'); END",
 	);
 	expect(
@@ -149,15 +149,15 @@ test("a failed landing rolls back the receipt and its active selection", async (
 	).toBe(false);
 	expect(await receipt()).toBeNull();
 	expect(h.app.db.raw.query("SELECT count(*) AS n FROM merge_receipts").get()).toEqual({ n: 0 });
-	h.app.db.exec("DROP TRIGGER fail_landing");
+	await h.app.db.exec("DROP TRIGGER fail_landing");
 	await end();
 	expect((await receipt())?.gate.verdict).toBe("passed");
 });
 
 test("selecting a merge receipt refuses a value the decision machinery did not mint", async () => {
 	await h.call("report", report());
-	const change = changeByKey(h.app.db, 1, "pr:726");
-	const project = findProject(h.app.db, "scratch");
+	const change = await changeByKey(h.app.db, 1, "pr:726");
+	const project = await findProject(h.app.db, "scratch");
 	if (!change || !project) throw new Error("Expected change and project");
 	const ctx = makeCtx(h.app, project, h.owner, true);
 	expect(() => Reflect.apply(setMergeReceipt, null, [ctx, {}, change])).toThrow("not a witness");
@@ -393,7 +393,7 @@ test("cached receipt pages refresh cause answers, labels and removed result keys
 		...corrected,
 		results: corrected.results.map((row) => ({ ...row, corrects: sent.results[0] })),
 	});
-	h.app.db.exec("UPDATE tests SET name='Renamed test' WHERE id=1");
+	await h.app.db.exec("UPDATE tests SET name='Renamed test' WHERE id=1");
 	await end();
 	expect(
 		(await h.call<{ items: unknown[] }>("find", { in: "receipt-results", receipt: (await receipt())?.id })).items,

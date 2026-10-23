@@ -4,7 +4,7 @@ import { z } from "zod";
 import { MergeReceipt, MergeReceiptResult, receiptNodeHash, receiptSnapshotHash } from "../../core/changes.ts";
 import { type ActorKind, type Ask, ATTRIBUTED, type Kind } from "../../core/kinds.ts";
 import { type Ctx, ref } from "../kernel/ctx.ts";
-import { type Db, json, sql } from "../kernel/db.ts";
+import { type ReadDb, type WriteDb, json, sql } from "../kernel/db.ts";
 import { invalid, notFound } from "../kernel/errors.ts";
 
 const causeFields = { signature: z.number(), scope: z.string() };
@@ -404,15 +404,19 @@ const Q = {
 };
 
 /** Old evidence kept display names. Attribution is outside the material basis and target hashed by raise. */
-export function forgetQuestionNames(db: Db, name: string, pseudonym: string): void {
-	db.run(Q.forgetAuthor, { name, pseudonym });
-	db.run(Q.forgetFinder, { name, pseudonym });
+export async function forgetQuestionNames(db: WriteDb, name: string, pseudonym: string): Promise<void> {
+	await db.run(Q.forgetAuthor, { name, pseudonym });
+	await db.run(Q.forgetFinder, { name, pseudonym });
 }
 
 export const questionRef = (row: { no: number }): string => ref("question", row.no);
 
-export function latestByFingerprint(db: Db, project: number, fingerprint: string): QuestionRow | null {
-	const row = db.get(Q.latest, { project, fingerprint });
+export async function latestByFingerprint(
+	db: ReadDb,
+	project: number,
+	fingerprint: string,
+): Promise<QuestionRow | null> {
+	const row = await db.get(Q.latest, { project, fingerprint });
 	return row ? readQuestion(row) : null;
 }
 
@@ -420,22 +424,22 @@ export function latestByFingerprint(db: Db, project: number, fingerprint: string
  * Every question about a cause that is open or decided with the decision still in force, newest first. Usually
  * one. More when an answer held for certain targets only and the cause was asked about again for the others.
  */
-export const liveByFingerprint = (db: Db, project: number, fingerprint: string): QuestionRow[] =>
-	db.all(Q.live, { project, fingerprint }).map(readQuestion);
+export const liveByFingerprint = async (db: ReadDb, project: number, fingerprint: string): Promise<QuestionRow[]> =>
+	(await db.all(Q.live, { project, fingerprint })).map(readQuestion);
 
-export function questionById(db: Db, id: number): QuestionRow | null {
-	const row = db.get(Q.byId, { id });
+export async function questionById(db: ReadDb, id: number): Promise<QuestionRow | null> {
+	const row = await db.get(Q.byId, { id });
 	return row ? readQuestion(row) : null;
 }
 
-export function mustQuestion(db: Db, project: number, text: string): QuestionRow {
+export async function mustQuestion(db: ReadDb, project: number, text: string): Promise<QuestionRow> {
 	const match = /^(?:Q-)?(\d+)$/i.exec(text.trim());
-	const row = match ? db.get(Q.byNo, { project, no: Number(match[1]) }) : null;
+	const row = match ? await db.get(Q.byNo, { project, no: Number(match[1]) }) : null;
 	if (!row) throw notFound(`question ${text}`);
 	return readQuestion(row);
 }
 
-export function insertQuestion(
+export async function insertQuestion(
 	ctx: Ctx,
 	input: QuestionSubjectInput & {
 		fingerprint: string;
@@ -451,9 +455,9 @@ export function insertQuestion(
 		rank: number;
 		refs: readonly string[];
 	},
-): QuestionRow {
-	const no = ctx.nextNo("question");
-	const { lastId } = ctx.db.run(Q.insert, {
+): Promise<QuestionRow> {
+	const no = await ctx.nextNo("question");
+	const { lastId } = await ctx.db.run(Q.insert, {
 		project: ctx.project.id,
 		no,
 		kind: input.kind,
@@ -472,20 +476,20 @@ export function insertQuestion(
 		rank: input.rank,
 		at: ctx.now,
 	});
-	for (const about of input.refs) ctx.db.run(Q.addRef, { project: ctx.project.id, ref: about, question: lastId });
+	for (const about of input.refs) await ctx.db.run(Q.addRef, { project: ctx.project.id, ref: about, question: lastId });
 	ctx.touched.add(ref("question", no));
-	const row = questionById(ctx.db, lastId);
+	const row = await questionById(ctx.db, lastId);
 	if (!row) throw new Error("question was not stored");
 	return row;
 }
 
-export function attachEvidence(
+export async function attachEvidence(
 	ctx: Ctx,
 	question: QuestionRow,
 	input: { title: string; evidence: unknown; hash: string; basis: string; blocks: number[]; refs: readonly string[] },
-): QuestionRow {
+): Promise<QuestionRow> {
 	const blocks = [...new Set([...json<number[]>(question.blocks), ...input.blocks])];
-	ctx.db.run(Q.attach, {
+	await ctx.db.run(Q.attach, {
 		id: question.id,
 		title: input.title,
 		evidence: JSON.stringify(input.evidence),
@@ -494,83 +498,91 @@ export function attachEvidence(
 		blocks: JSON.stringify(blocks),
 		seq: ctx.seq,
 	});
-	for (const about of input.refs) ctx.db.run(Q.addRef, { project: ctx.project.id, ref: about, question: question.id });
+	for (const about of input.refs)
+		await ctx.db.run(Q.addRef, { project: ctx.project.id, ref: about, question: question.id });
 	ctx.touched.add(questionRef(question));
 	return questionById(ctx.db, question.id) ?? question;
 }
 
 /** Adds things a question is about, so each of them lists it. Returns how many it did not name before. */
-export function alsoAbout(ctx: Ctx, question: QuestionRow, refs: readonly string[]): number {
+export async function alsoAbout(ctx: Ctx, question: QuestionRow, refs: readonly string[]): Promise<number> {
 	let added = 0;
 	for (const about of refs)
-		added += ctx.db.run(Q.addRef, { project: ctx.project.id, ref: about, question: question.id }).changes;
+		added += (await ctx.db.run(Q.addRef, { project: ctx.project.id, ref: about, question: question.id })).changes;
 	if (added > 0) ctx.touched.add(questionRef(question));
 	return added;
 }
 
-export function noteCarried(ctx: Ctx, question: QuestionRow, refs: readonly string[]): void {
-	ctx.db.run(Q.carry, { id: question.id, seq: ctx.seq });
-	for (const about of refs) ctx.db.run(Q.addRef, { project: ctx.project.id, ref: about, question: question.id });
+export async function noteCarried(ctx: Ctx, question: QuestionRow, refs: readonly string[]): Promise<void> {
+	await ctx.db.run(Q.carry, { id: question.id, seq: ctx.seq });
+	for (const about of refs) await ctx.db.run(Q.addRef, { project: ctx.project.id, ref: about, question: question.id });
 }
 
-export function setQuestionState(
+export async function setQuestionState(
 	ctx: Ctx,
 	question: QuestionRow,
 	state: QuestionRow["state"],
 	decision: number | null,
-): void {
-	ctx.db.run(Q.setState, { id: question.id, state, decision, seq: ctx.seq });
+): Promise<void> {
+	await ctx.db.run(Q.setState, { id: question.id, state, decision, seq: ctx.seq });
 	ctx.touched.add(questionRef(question));
 }
 
-export const setQuestionAsk = (ctx: Ctx, question: QuestionRow, ask: Ask): void => {
-	ctx.db.run(Q.setAsk, { id: question.id, ask: JSON.stringify(ask) });
+export const setQuestionAsk = async (ctx: Ctx, question: QuestionRow, ask: Ask): Promise<void> => {
+	await ctx.db.run(Q.setAsk, { id: question.id, ask: JSON.stringify(ask) });
 };
 
 /** Adds to the parties a question keeps: whoever a dispute about its cause is kept from. */
-export const addQuestionParties = (ctx: Ctx, question: QuestionRow, parties: readonly number[]): void => {
+export const addQuestionParties = async (
+	ctx: Ctx,
+	question: QuestionRow,
+	parties: readonly number[],
+): Promise<void> => {
 	const kept = json<{ parties?: number[] }>(question.evidence).parties ?? [];
 	const all = [...new Set([...kept, ...parties])];
-	if (all.length !== kept.length) ctx.db.run(Q.setParties, { id: question.id, parties: JSON.stringify(all) });
+	if (all.length !== kept.length) await ctx.db.run(Q.setParties, { id: question.id, parties: JSON.stringify(all) });
 };
 
 /**
  * Keeps on a question the policy facts its answer was given under and the parties to the dispute it settled, so
  * that changing or withdrawing the answer is held to the same clause and kept from the same people.
  */
-export const setQuestionFacts = (
+export const setQuestionFacts = async (
 	ctx: Ctx,
 	question: QuestionRow,
 	facts: readonly string[],
 	parties: readonly number[],
-): void => {
-	ctx.db.run(Q.setFacts, { id: question.id, facts: JSON.stringify(facts), parties: JSON.stringify(parties) });
+): Promise<void> => {
+	await ctx.db.run(Q.setFacts, { id: question.id, facts: JSON.stringify(facts), parties: JSON.stringify(parties) });
 };
 
-export const refsOf = (db: Db, question: number): string[] => db.all(Q.refsOf, { question }).map((r) => r.ref);
-export const refsOfQuestions = (db: Db, questions: readonly number[]): string[] =>
-	questions.length ? db.all(Q.refsOfQuestions, { questions: JSON.stringify(questions) }).map((row) => row.ref) : [];
+export const refsOf = async (db: ReadDb, question: number): Promise<string[]> =>
+	(await db.all(Q.refsOf, { question })).map((r) => r.ref);
+export const refsOfQuestions = async (db: ReadDb, questions: readonly number[]): Promise<string[]> =>
+	questions.length
+		? (await db.all(Q.refsOfQuestions, { questions: JSON.stringify(questions) })).map((row) => row.ref)
+		: [];
 /** Open summaries among each ref's latest 200 questions, matching questionsOn's bound and order. */
-export function openQuestionSummariesOnRefs(db: Db, project: number, refs: readonly string[]) {
+export async function openQuestionSummariesOnRefs(db: ReadDb, project: number, refs: readonly string[]) {
 	const byRef = new Map<string, { q: string; evidence: string }[]>();
-	for (const row of db.all(Q.openSummariesOnRefs, { project, refs: JSON.stringify(refs) })) {
+	for (const row of await db.all(Q.openSummariesOnRefs, { project, refs: JSON.stringify(refs) })) {
 		const items = byRef.get(row.ref) ?? [];
 		items.push({ q: questionRef(row), evidence: row.evidence_hash });
 		byRef.set(row.ref, items);
 	}
 	return byRef;
 }
-export const questionsOn = (db: Db, project: number, about: string): QuestionRow[] =>
-	db.all(Q.onRef, { project, ref: about }).map(readQuestion);
-export const openQuestionsOn = (db: Db, project: number, about: string) =>
-	db.all(Q.openOnRef, { project, ref: about }).map((row) => ({ ...row, ...readSubject(row) }));
+export const questionsOn = async (db: ReadDb, project: number, about: string): Promise<QuestionRow[]> =>
+	(await db.all(Q.onRef, { project, ref: about })).map(readQuestion);
+export const openQuestionsOn = async (db: ReadDb, project: number, about: string) =>
+	(await db.all(Q.openOnRef, { project, ref: about })).map((row) => ({ ...row, ...readSubject(row) }));
 /** The failure questions about a thing whose standing answer says the target needs a fix (`ATTRIBUTED`). */
-export const attributedQuestionsOn = (db: Db, project: number, about: string): QuestionRow[] =>
-	db.all(Q.attributedOnRef, { project, ref: about }).map(readQuestion);
+export const attributedQuestionsOn = async (db: ReadDb, project: number, about: string): Promise<QuestionRow[]> =>
+	(await db.all(Q.attributedOnRef, { project, ref: about })).map(readQuestion);
 /** Every question about a thing, oldest first, however many there are. */
-export const everyQuestionOn = (db: Db, project: number, about: string): QuestionRow[] =>
-	db.all(Q.allOnRef, { project, ref: about }).map(readQuestion);
-export const openCountOn = (db: Db, project: number, about: string): number =>
+export const everyQuestionOn = async (db: ReadDb, project: number, about: string): Promise<QuestionRow[]> =>
+	(await db.all(Q.allOnRef, { project, ref: about })).map(readQuestion);
+export const openCountOn = async (db: ReadDb, project: number, about: string): Promise<number> =>
 	db.get(Q.openCountOnRef, { project, ref: about })?.n ?? 0;
 
 /** A position in the queue: the rank and id of the last question seen. A client holds it as an opaque string. */
@@ -586,50 +598,53 @@ export function parseQueueCursor(text: string): QueueCursor | undefined {
 	return Number.isSafeInteger(rank) && Number.isSafeInteger(id) ? { rank, id } : undefined;
 }
 
-export function queuePage(
-	db: Db,
+export async function queuePage(
+	db: ReadDb,
 	input: { project: number; state: "open"; kind: Kind | undefined; after: QueueCursor | null; limit: number },
 ) {
 	const at = input.after ?? { rank: Number.MIN_SAFE_INTEGER, id: Number.MIN_SAFE_INTEGER };
 	const base = { project: input.project, state: input.state, rank: at.rank, id: at.id, limit: input.limit };
-	return (input.kind ? db.all(Q.queueOfKind, { ...base, kind: input.kind }) : db.all(Q.queue, base)).map(readQuestion);
+	return (input.kind ? await db.all(Q.queueOfKind, { ...base, kind: input.kind }) : await db.all(Q.queue, base)).map(
+		readQuestion,
+	);
 }
 
 /** A page of the ledger, newest first, after the position `before` (the revision and id of the last row seen). */
-export function ledgerPage(
-	db: Db,
+export async function ledgerPage(
+	db: ReadDb,
 	input: { project: number; kind: Kind | undefined; before: { rev: number; id: number } | null; limit: number },
 ) {
 	const at = input.before ?? { rev: Number.MAX_SAFE_INTEGER, id: Number.MAX_SAFE_INTEGER };
 	const base = { project: input.project, rev: at.rev, id: at.id, limit: input.limit };
-	return (input.kind ? db.all(Q.ledgerOfKind, { ...base, kind: input.kind }) : db.all(Q.ledger, base)).map(
+	return (input.kind ? await db.all(Q.ledgerOfKind, { ...base, kind: input.kind }) : await db.all(Q.ledger, base)).map(
 		readQuestion,
 	);
 }
 
 /** The ids of every open question of a kind in the queue, oldest first, however many there are. */
-export const openQuestionIds = (db: Db, project: number, kind: Kind): number[] =>
-	db.all(Q.openIdsOfKind, { project, kind }).map((row) => row.id);
+export const openQuestionIds = async (db: ReadDb, project: number, kind: Kind): Promise<number[]> =>
+	(await db.all(Q.openIdsOfKind, { project, kind })).map((row) => row.id);
 
-export function openCounts(db: Db, project: number): Record<string, number> {
+export async function openCounts(db: ReadDb, project: number): Promise<Record<string, number>> {
 	const counts: Record<string, number> = { open: db.get(Q.openCount, { project })?.n ?? 0 };
-	for (const row of db.all(Q.openByKind, { project })) counts[row.kind] = row.n;
+	for (const row of await db.all(Q.openByKind, { project })) counts[row.kind] = row.n;
 	return counts;
 }
 
 /** Questions changed at or after a position (a revision and a question id within it), in that order. */
-export const questionsChangedSince = (
-	db: Db,
+export const questionsChangedSince = async (
+	db: ReadDb,
 	project: number,
 	from: { rev: number; id: number },
 	limit: number,
-): QuestionRow[] => db.all(Q.changedSince, { project, rev: from.rev, id: from.id, limit }).map(readQuestion);
+): Promise<QuestionRow[]> =>
+	(await db.all(Q.changedSince, { project, rev: from.rev, id: from.id, limit })).map(readQuestion);
 
-export function insertAnswer(
+export async function insertAnswer(
 	ctx: Ctx,
 	input: { question: number; answer: unknown; reason: string | null; hash: string; counts: boolean },
-): void {
-	ctx.db.run(Q.insertAnswer, {
+): Promise<void> {
+	await ctx.db.run(Q.insertAnswer, {
 		question: input.question,
 		actor: ctx.actor.id,
 		answer: JSON.stringify(input.answer),
@@ -641,9 +656,10 @@ export function insertAnswer(
 	});
 }
 
-export const answersOf = (db: Db, question: number): AnswerRow[] => db.all(Q.answersOf, { question });
+export const answersOf = async (db: ReadDb, question: number): Promise<AnswerRow[]> =>
+	await db.all(Q.answersOf, { question });
 
-export function insertDecision(
+export async function insertDecision(
 	ctx: Ctx,
 	input: {
 		question: QuestionRow;
@@ -652,9 +668,9 @@ export function insertDecision(
 		holds: HoldTerm[];
 		supersedes: number | null;
 	},
-): DecisionRow {
+): Promise<DecisionRow> {
 	const expires = input.holds.flatMap((term) => (term.until === "time" ? [term.at] : []));
-	const { lastId } = ctx.db.run(Q.insertDecision, {
+	const { lastId } = await ctx.db.run(Q.insertDecision, {
 		hash: input.question.evidence_hash,
 		project: ctx.project.id,
 		question: input.question.id,
@@ -668,108 +684,115 @@ export function insertDecision(
 		at: ctx.now,
 		seq: ctx.seq,
 	});
-	const row = ctx.db.get(Q.decisionById, { id: lastId });
+	const row = await ctx.db.get(Q.decisionById, { id: lastId });
 	if (!row) throw new Error("decision was not stored");
 	return row;
 }
 
-export const setDecisionEffects = (ctx: Ctx, decision: number, effects: unknown): void => {
-	ctx.db.run(Q.setEffects, { id: decision, effects: JSON.stringify(effects) });
+export const setDecisionEffects = async (ctx: Ctx, decision: number, effects: unknown): Promise<void> => {
+	await ctx.db.run(Q.setEffects, { id: decision, effects: JSON.stringify(effects) });
 };
 
-export const decisionById = (db: Db, id: number): DecisionRow | null => db.get(Q.decisionById, { id });
-export const holdEndingById = (db: Db, id: number): DecisionRow | null => db.get(Q.holdEndingById, { id });
-export const decisionsOf = (db: Db, question: number): DecisionRow[] => db.all(Q.decisionsOf, { question });
-export const expiredDecisions = (db: Db, project: number, now: number): DecisionRow[] =>
-	db.all(Q.expired, { project, now });
+export const decisionById = async (db: ReadDb, id: number): Promise<DecisionRow | null> =>
+	await db.get(Q.decisionById, { id });
+export const holdEndingById = async (db: ReadDb, id: number): Promise<DecisionRow | null> =>
+	await db.get(Q.holdEndingById, { id });
+export const decisionsOf = async (db: ReadDb, question: number): Promise<DecisionRow[]> =>
+	await db.all(Q.decisionsOf, { question });
+export const expiredDecisions = async (db: ReadDb, project: number, now: number): Promise<DecisionRow[]> =>
+	await db.all(Q.expired, { project, now });
 
-export const liveDefectDecisions = (db: Db, project: number): DecisionRow[] => db.all(Q.defects, { project });
+export const liveDefectDecisions = async (db: ReadDb, project: number): Promise<DecisionRow[]> =>
+	await db.all(Q.defects, { project });
 
 /** An immutable observation decision, independent of question answers and their holds. */
-export function insertMergeReceipt(
+export async function insertMergeReceipt(
 	ctx: Ctx,
 	change: number,
 	snapshot: Omit<MergeReceipt, "id">,
 	evidence: number,
-): number {
-	return ctx.db.run(Q.insertMergeReceipt, {
-		project: ctx.project.id,
-		change,
-		actor: ctx.actor.id,
-		at: ctx.now,
-		seq: ctx.seq,
-		snapshot: JSON.stringify(snapshot),
-		evidence,
-	}).lastId;
+): Promise<number> {
+	return (
+		await ctx.db.one(Q.insertMergeReceipt, {
+			project: ctx.project.id,
+			change,
+			actor: ctx.actor.id,
+			at: ctx.now,
+			seq: ctx.seq,
+			snapshot: JSON.stringify(snapshot),
+			evidence,
+		})
+	).id;
 }
 
-export function mergeReceiptById(db: Db, project: number, id: number | null): MergeReceipt | null {
+export async function mergeReceiptById(db: ReadDb, project: number, id: number | null): Promise<MergeReceipt | null> {
 	if (id === null) return null;
-	const row = db.get(Q.mergeReceipt, { id, project });
+	const row = await db.get(Q.mergeReceipt, { id, project });
 	return row ? MergeReceipt.parse({ ...json<Record<string, unknown>>(row.snapshot), id: row.id }) : null;
 }
 
-export const receiptDecisionAnswer = (db: Db, id: number): string => {
-	const row = db.get(Q.receiptDecision, { id });
+export const receiptDecisionAnswer = async (db: ReadDb, id: number): Promise<string> => {
+	const row = await db.get(Q.receiptDecision, { id });
 	if (!row) throw new Error(`counted decision ${id} is missing`);
 	return row.answer;
 };
 const digest = (body: string) => new Bun.CryptoHasher("sha256").update(body).digest("hex");
-const rootOf = (db: Db, id: number | null): ReceiptRoot | null => (id === null ? null : db.get(Q.node, { id }));
+const rootOf = async (db: ReadDb, id: number | null): Promise<ReceiptRoot | null> =>
+	id === null ? null : await db.get(Q.node, { id });
 
-function payloadOf(ctx: Ctx, body: string): ReceiptRoot {
+async function payloadOf(ctx: Ctx, body: string): Promise<ReceiptRoot> {
 	if (Buffer.byteLength(body) > 32768) throw invalid("merge receipt evidence item exceeds 32 KiB");
 	const hash = digest(body);
 	const project = ctx.project.id;
-	ctx.db.run(Q.insertPayload, { project, hash, body });
-	const row = ctx.db.get(Q.payloadByHash, { project, hash });
+	await ctx.db.run(Q.insertPayload, { project, hash, body });
+	const row = await ctx.db.get(Q.payloadByHash, { project, hash });
 	if (!row) throw new Error("receipt payload was not stored");
 	return { ...row, hash, count: 1 };
 }
-function nodeOf(ctx: Ctx, level: number, members: ReceiptMember[]): ReceiptRoot | null {
+async function nodeOf(ctx: Ctx, level: number, members: ReceiptMember[]): Promise<ReceiptRoot | null> {
 	if (!members.length) return null;
 	members.sort((a, b) => a.slot - b.slot);
 	if (members.length > 32 || new Set(members.map((row) => row.slot)).size !== members.length)
 		throw new Error("receipt page keys are not unique");
 	const hash = receiptNodeHash(level, members);
 	const project = ctx.project.id;
-	const found = ctx.db.get(Q.nodeByHash, { project, hash });
+	const found = await ctx.db.get(Q.nodeByHash, { project, hash });
 	if (found) return found;
 	const count = members.reduce((sum, row) => sum + row.count, 0);
-	const id = ctx.db.run(Q.insertNode, { project, hash, level, count }).lastId;
+	const id = (await ctx.db.one(Q.insertNode, { project, hash, level, count })).id;
 	for (const row of members)
-		ctx.db.run(Q.insertMember, { node: id, slot: row.slot, child: row.child, payload: row.payload });
+		await ctx.db.run(Q.insertMember, { node: id, slot: row.slot, child: row.child, payload: row.payload });
 	return { id, hash, count };
 }
 
 /** Copy only changed leaves and their ancestors. The iterator and recursion hold at most 32 entries per level. */
-function updateTree(
+async function updateTree(
 	ctx: Ctx,
 	root: ReceiptRoot | null,
 	buckets: Iterable<number>,
 	load: (bucket: number) => Iterable<{ key: number; body: string }>,
-): ReceiptRoot | null {
+): Promise<ReceiptRoot | null> {
 	const iterator = buckets[Symbol.iterator]();
 	let next = iterator.next();
 	if (next.done) return root;
-	function update(old: ReceiptRoot | null, level: number, base: number): ReceiptRoot | null {
+	async function update(old: ReceiptRoot | null, level: number, base: number): Promise<ReceiptRoot | null> {
 		if (level === 0) {
 			const members: ReceiptMember[] = [];
 			for (const row of load(base)) {
 				if (!Number.isSafeInteger(row.key) || row.key < 0)
 					throw invalid("receipt key must be a nonnegative safe integer");
-				const payload = payloadOf(ctx, row.body);
+				const payload = await payloadOf(ctx, row.body);
 				members.push({ slot: row.key % 32, child: null, payload: payload.id, hash: payload.hash, count: 1 });
 			}
 			next = iterator.next();
-			return nodeOf(ctx, 0, members);
+			return await nodeOf(ctx, 0, members);
 		}
-		const members = new Map((old ? ctx.db.all(Q.members, { node: old.id }) : []).map((row) => [row.slot, row]));
+		const members = new Map((old ? await ctx.db.all(Q.members, { node: old.id }) : []).map((row) => [row.slot, row]));
 		const span = 32 ** (level - 1);
 		while (!next.done && next.value < base + 32 ** level) {
 			const slot = Math.floor((next.value - base) / span);
 			const held = members.get(slot);
-			const child = update(
+			const child = await update(
 				held?.child ? { id: held.child, hash: held.hash, count: held.count } : null,
 				level - 1,
 				base + slot * span,
@@ -777,14 +800,14 @@ function updateTree(
 			if (child) members.set(slot, { slot, child: child.id, payload: null, hash: child.hash, count: child.count });
 			else members.delete(slot);
 		}
-		return nodeOf(ctx, level, [...members.values()]);
+		return await nodeOf(ctx, level, [...members.values()]);
 	}
-	return update(root, 10, 0);
+	return await update(root, 10, 0);
 }
-function* dirtyBuckets(db: Db, run: number): Generator<number> {
+async function* dirtyBuckets(db: ReadDb, run: number): AsyncGenerator<number> {
 	let after = -1;
 	for (;;) {
-		const page = db.all(Q.dirty, { run, after });
+		const page = await db.all(Q.dirty, { run, after });
 		if (!page.length) return;
 		for (const row of page) {
 			yield row.bucket;
@@ -793,25 +816,25 @@ function* dirtyBuckets(db: Db, run: number): Generator<number> {
 	}
 }
 /** Disposable roots are reused only while source-change triggers leave their dirty set empty. */
-export function storeReceiptResults(
+export async function storeReceiptResults(
 	ctx: Ctx,
 	run: number,
 	buckets: () => Iterable<number>,
 	load: (bucket: number) => Iterable<{ key: number; body: string }>,
-): ReceiptRoot | null {
-	const cached = ctx.db.get(Q.cache, { run, project: ctx.project.id });
-	const root = updateTree(
+): Promise<ReceiptRoot | null> {
+	const cached = await ctx.db.get(Q.cache, { run, project: ctx.project.id });
+	const root = await updateTree(
 		ctx,
-		cached ? rootOf(ctx.db, cached.root) : null,
+		cached ? await rootOf(ctx.db, cached.root) : null,
 		cached ? dirtyBuckets(ctx.db, run) : buckets(),
 		load,
 	);
-	ctx.db.run(Q.setCache, { run, project: ctx.project.id, root: root?.id ?? null });
-	ctx.db.run(Q.clearDirty, { run });
+	await ctx.db.run(Q.setCache, { run, project: ctx.project.id, root: root?.id ?? null });
+	await ctx.db.run(Q.clearDirty, { run });
 	return root;
 }
 /** Gate identity is separate: a new question reference cannot duplicate result memberships. */
-export function storeMergeSnapshot(ctx: Ctx, results: ReceiptRoot | null, gate: Iterable<string>) {
+export async function storeMergeSnapshot(ctx: Ctx, results: ReceiptRoot | null, gate: Iterable<string>) {
 	const iterator = gate[Symbol.iterator]();
 	let next = iterator.next();
 	let key = 0;
@@ -824,33 +847,39 @@ export function storeMergeSnapshot(ctx: Ctx, results: ReceiptRoot | null, gate: 
 			next = iterator.next();
 		}
 	}
-	const gates = updateTree(ctx, null, buckets(), load);
+	const gates = await updateTree(ctx, null, buckets(), load);
 	const hash = receiptSnapshotHash(results?.hash ?? null, gates?.hash ?? null);
 	const project = ctx.project.id;
-	const found = ctx.db.get(Q.snapshotByHash, { project, hash });
+	const found = await ctx.db.get(Q.snapshotByHash, { project, hash });
 	if (found) return { ...found, hash };
 	const count = results?.count ?? 0;
 	const evidence_count = count + (gates?.count ?? 0);
-	const id = ctx.db.run(Q.insertSnapshot, {
-		project,
-		hash,
-		result_root: results?.id ?? null,
-		gate_root: gates?.id ?? null,
-		count,
-		evidence_count,
-	}).lastId;
+	const id = (
+		await ctx.db.one(Q.insertSnapshot, {
+			project,
+			hash,
+			result_root: results?.id ?? null,
+			gate_root: gates?.id ?? null,
+			count,
+			evidence_count,
+		})
+	).id;
 	return { id, hash, count, evidence_count };
 }
-function* treePage(db: Db, node: ReceiptRoot | null, skip: number): Generator<{ hash: string; body: string }> {
+async function* treePage(
+	db: ReadDb,
+	node: ReceiptRoot | null,
+	skip: number,
+): AsyncGenerator<{ hash: string; body: string }> {
 	if (!node) return;
-	for (const row of db.all(Q.members, { node: node.id })) {
+	for (const row of await db.all(Q.members, { node: node.id })) {
 		if (skip >= row.count) {
 			skip -= row.count;
 			continue;
 		}
 		if (row.child !== null) yield* treePage(db, { id: row.child, hash: row.hash, count: row.count }, skip);
 		else if (row.payload !== null) {
-			const payload = db.get(Q.payload, { id: row.payload });
+			const payload = await db.get(Q.payload, { id: row.payload });
 			if (!payload) throw new Error("receipt payload is missing");
 			yield payload;
 		}
@@ -858,16 +887,16 @@ function* treePage(db: Db, node: ReceiptRoot | null, skip: number): Generator<{ 
 	}
 }
 /** Rank cursors are stable because historical roots and subtree counts are immutable. */
-export function mergeReceiptPage(
-	db: Db,
+export async function mergeReceiptPage(
+	db: ReadDb,
 	project: number,
 	receipt: number,
 	cursor: string | undefined,
 	limit: number,
 	collection: "results" | "evidence" = "results",
 ) {
-	const manifest = mergeReceiptById(db, project, receipt);
-	const roots = db.get(Q.roots, { project, receipt });
+	const manifest = await mergeReceiptById(db, project, receipt);
+	const roots = await db.get(Q.roots, { project, receipt });
 	if (!manifest || !roots) throw notFound("merge receipt");
 	const match = cursor ? /^(\d+)\.(results|evidence)\.(\d+)$/.exec(cursor) : null;
 	if (
@@ -876,18 +905,18 @@ export function mergeReceiptPage(
 	)
 		throw invalid("that is not a cursor of this receipt collection");
 	const start = match ? Number(match[3]) + 1 : 0;
-	const resultRoot = rootOf(db, roots.result_root);
-	const gateRoot = rootOf(db, roots.gate_root);
-	function* rows(): Generator<{ kind: "result" | "gate"; hash: string; body: string }> {
+	const resultRoot = await rootOf(db, roots.result_root);
+	const gateRoot = await rootOf(db, roots.gate_root);
+	async function* rows(): AsyncGenerator<{ kind: "result" | "gate"; hash: string; body: string }> {
 		if (collection === "evidence" && start < (gateRoot?.count ?? 0))
-			for (const row of treePage(db, gateRoot, start)) yield { kind: "gate", ...row };
+			for await (const row of treePage(db, gateRoot, start)) yield { kind: "gate", ...row };
 		const after = collection === "results" ? start : Math.max(0, start - (gateRoot?.count ?? 0));
-		for (const row of treePage(db, resultRoot, after)) yield { kind: "result", ...row };
+		for await (const row of treePage(db, resultRoot, after)) yield { kind: "result", ...row };
 	}
 	const page: { ordinal: number; kind: "result" | "gate"; hash: string; body: string }[] = [];
 	let bytes = 0;
 	let more = false;
-	for (const row of rows()) {
+	for await (const row of rows()) {
 		if (page.length >= Math.min(limit, 50) || bytes + Buffer.byteLength(row.body) > 65536) {
 			more = true;
 			break;

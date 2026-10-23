@@ -108,7 +108,7 @@ async function logged(run: () => Promise<void>): Promise<string[]> {
 
 describe("native passkey sign-in", () => {
 	test("native challenges use the HTTPS RP origin while web challenges keep the configured port", async () => {
-		const w = world({ publicUrl: "https://mainworthy.example:8443" });
+		const w = await world({ publicUrl: "https://mainworthy.example:8443" });
 		const cookie = await joined(w, "robin", PASSWORD);
 		const device = authenticator("https://mainworthy.example:8443");
 		await addPasskey(w, cookie, device);
@@ -136,7 +136,7 @@ describe("native passkey sign-in", () => {
 
 	test("native challenges expire and HTTP localhost cannot start one", async () => {
 		const clock = clockAt(1800000000000);
-		const w = world({ clock });
+		const w = await world({ clock });
 		const { device } = await person(w, "robin");
 		const reply = await w.post<{ passkey: AssertionOptions }>("/api/login/challenge", { native: true });
 		expect(reply.status).toBe(200);
@@ -144,7 +144,7 @@ describe("native passkey sign-in", () => {
 		const answer = device.assert(reply.body.result.passkey);
 		clock.advance(CEREMONY_MS + 1);
 		expect((await w.post("/api/login", { passkey: answer }, { cookie: reply.cookie })).text).toBe(REFUSED);
-		const local = world({ publicUrl: "http://localhost:7357" });
+		const local = await world({ publicUrl: "http://localhost:7357" });
 		const unavailable = await local.post("/api/login/challenge", { native: true });
 		expect(unavailable.status).toBe(400);
 		expect(unavailable.body).toEqual({
@@ -161,7 +161,7 @@ describe("native passkey sign-in", () => {
 
 describe("registering a passkey", () => {
 	test("a signed-in person registers a passkey and signs in with it; the session rests on the passkey", async () => {
-		const w = world();
+		const w = await world();
 		const cookie = await joined(w, "robin", PASSWORD);
 		const device = authenticator();
 		const { options, added } = await addPasskey(w, cookie, device, "  Robin's laptop ");
@@ -216,7 +216,7 @@ describe("registering a passkey", () => {
 
 	test("a registration is for the person who asked for the challenge, once, inside its time, and for that purpose", async () => {
 		const clock = clockAt();
-		const w = world({ clock });
+		const w = await world({ clock });
 		const robin = await joined(w, "robin", PASSWORD);
 		const sam = await joined(w, "sam", PASSWORD);
 		const begin = (cookie: string) => w.ok<RegistrationOptions>("credential", { do: "passkey.begin" }, { cookie });
@@ -275,7 +275,7 @@ describe("registering a passkey", () => {
 	});
 
 	test("a credential id is registered once on the instance: not twice by one person, not by another, not after it was removed", async () => {
-		const w = world();
+		const w = await world();
 		const { cookie: robin, device } = await person(w, "robin");
 		const sam = await joined(w, "sam", PASSWORD);
 		const again = async (cookie: string): Promise<string> => {
@@ -308,7 +308,7 @@ describe("registering a passkey", () => {
 	});
 
 	test("an invitation is accepted with a passkey, or with a passkey and a password, and the session rests on the passkey", async () => {
-		const w = world();
+		const w = await world();
 		const first = await invite(w, { name: "robin" });
 		const shown = await w.post<{ invitation: unknown; passkey: RegistrationOptions }>("/api/login/challenge", {
 			invitation: first.code,
@@ -394,7 +394,7 @@ describe("registering a passkey", () => {
 describe("signing in with a passkey", () => {
 	test("a challenge signs in once: the same answer again, an answer to a registration challenge and a late answer are refused", async () => {
 		const clock = clockAt();
-		const w = world({ clock });
+		const w = await world({ clock });
 		const { cookie, device } = await person(w, "robin");
 		const before = sessionCount(w);
 		const answer = device.assert(await challenge(w));
@@ -445,7 +445,7 @@ describe("signing in with a passkey", () => {
 	});
 
 	test("the person is the one the stored passkey names: a user handle that is somebody else's, or none, is refused", async () => {
-		const w = world();
+		const w = await world();
 		const { device } = await person(w, "robin");
 		const { device: sams } = await person(w, "sam");
 		const handles = w.rows<{ actor: number; handle: string }>("SELECT actor, handle FROM passkey_users ORDER BY actor");
@@ -475,7 +475,7 @@ describe("signing in with a passkey", () => {
 	});
 
 	test("a counter that does not grow is refused, logged with the credential's row, and the stored counter stays", async () => {
-		const w = world();
+		const w = await world();
 		const { device } = await person(w, "robin");
 		expect((await withPasskey(w, device.assert(await challenge(w), { signCount: 5 }))).status).toBe(200);
 		expect(passkeyRow(w, device).stored.counter).toBe(5);
@@ -500,7 +500,7 @@ describe("signing in with a passkey", () => {
 	});
 
 	test("two sign-ins racing on one passkey with the same counter above zero open one session, and so do two answers to one challenge", async () => {
-		const w = world();
+		const w = await world();
 		const { device } = await person(w, "robin");
 		const before = sessionCount(w);
 		const lines = await logged(async () => {
@@ -536,7 +536,7 @@ describe("signing in with a passkey", () => {
 	test("two answers to two challenges from an authenticator that does not count both sign in, at the same moment too", async () => {
 		// Zero against a stored zero says nothing of a copy, so the counter refuses neither. What keeps one answer
 		// from signing in twice is its challenge, which the test above holds.
-		const w = world();
+		const w = await world();
 		const { device } = await person(w, "robin");
 		const before = sessionCount(w);
 		const one = device.assert(await challenge(w), { signCount: 0 });
@@ -552,7 +552,7 @@ describe("signing in with a passkey", () => {
 	});
 
 	test("a passkey that was removed, and one whose person was forgotten, sign nobody in", async () => {
-		const w = world();
+		const w = await world();
 		const { cookie, device } = await person(w, "robin");
 		const { device: sams } = await person(w, "sam");
 		const viaPasskey = await withPasskey(w, device.assert(await challenge(w)));
@@ -577,7 +577,7 @@ describe("signing in with a passkey", () => {
 
 describe("removing a credential", () => {
 	test("removing a credential ends the sessions that rest on it, and the last one a person has is not removed", async () => {
-		const w = world();
+		const w = await world();
 		const { cookie, device } = await person(w, "robin");
 		const second = (await signIn(w, "robin", PASSWORD)).cookie;
 		const viaPasskey = (await withPasskey(w, device.assert(await challenge(w)))).cookie;
@@ -620,7 +620,7 @@ describe("removing a credential", () => {
 	});
 
 	test("a credential is its person's to remove, or an admin's who is a person; nobody else learns that it exists", async () => {
-		const w = world();
+		const w = await world();
 		const { cookie: robin } = await person(w, "robin");
 		const { cookie: sam } = await person(w, "sam");
 		const agent = (
@@ -651,7 +651,7 @@ describe("removing a credential", () => {
 
 describe("the relying party", () => {
 	test("the RP ID and the origin come from MAINWORTHY_PUBLIC_URL: a request with another Host header changes nothing", async () => {
-		const w = world();
+		const w = await world();
 		const { cookie, device } = await person(w, "robin");
 		const elsewhere: Sent = { host: "evil.example", "x-forwarded-host": "evil.example", "x-forwarded-proto": "https" };
 		const viaHost = await w.post<{ passkey: AssertionOptions }>("/api/login/challenge", {}, elsewhere);
@@ -692,7 +692,7 @@ describe("the relying party", () => {
 	});
 
 	test("without the variable passkeys are off: methods says so and the passkey routes refuse plainly", async () => {
-		const w = world({ publicUrl: null });
+		const w = await world({ publicUrl: null });
 		const cookie = await joined(w, "robin", PASSWORD);
 		expect((await w.get("/api/login/methods")).body).toEqual({
 			ok: true,
@@ -720,8 +720,8 @@ describe("the relying party", () => {
 	test("a public address no browser takes for passkeys stops the start, with a line that says why", async () => {
 		const { start } = await import("../src/app/start.ts");
 		const { defaultConfig } = await import("../src/server/kernel/app.ts");
-		const boot = (publicUrl: string) =>
-			start(
+		const boot = async (publicUrl: string) =>
+			await start(
 				{
 					...defaultConfig({ MAINWORTHY_DATA: scratch(), MAINWORTHY_PORT: "0", MAINWORTHY_PUBLIC_URL: publicUrl }),
 					owner: OWNER,
@@ -741,7 +741,7 @@ describe("the relying party", () => {
 		// A variable a compose file passes on empty is one that was not set.
 		expect(defaultConfig({ MAINWORTHY_PUBLIC_URL: "" }).publicUrl).toBeUndefined();
 		for (const good of ["https://mainworthy.example", "https://mainworthy.example/", "http://localhost:7357"]) {
-			const instance = boot(good);
+			const instance = await boot(good);
 			try {
 				const methods = await (await fetch(`${instance.url}/api/login/methods`)).json();
 				expect(methods).toMatchObject({ result: { passkey: true } });
@@ -752,7 +752,7 @@ describe("the relying party", () => {
 	});
 
 	test("an import ends every ceremony that was under way: its challenge named a person by a number the import gave away", async () => {
-		const w = world();
+		const w = await world();
 		const archive = await (await fetch(`${w.instance.url}/api/export`, { headers: bearer(TOKEN) })).text();
 		// An import is taken only by an instance that holds its owner and nothing else, so the passkey is the owner's.
 		const recovery = await invite(w, { name: OWNER });
@@ -784,7 +784,7 @@ describe("the relying party", () => {
 describe("the limit on failed attempts", () => {
 	test("a passkey answer that fails is counted under the address; a right one passes a blocked address, and a wrong one there is 429", async () => {
 		const clock = clockAt();
-		const w = world({ clock, proxied: true });
+		const w = await world({ clock, proxied: true });
 		const { device } = await person(w, "robin");
 		const at = (n: number): Sent => from(`203.0.113.${n}`);
 		const before = sessionCount(w);
@@ -834,7 +834,7 @@ describe("a ceremony belongs to where it began", () => {
 	}
 
 	test("a sign-in challenge is answered only by the browser that asked for it: the reply sets a cookie, and an answer without it, with another or with two is refused", async () => {
-		const w = world();
+		const w = await world();
 		const { device } = await person(w, "robin");
 		const mine = await ask(w);
 		// What the browser is handed: a random value it cannot read, for this ceremony's five minutes.
@@ -880,7 +880,7 @@ describe("a ceremony belongs to where it began", () => {
 	});
 
 	test("over https the ceremony cookie has the __Host- name and Secure, and the plain name is no ceremony there", async () => {
-		const w = world();
+		const w = await world();
 		const { device } = await person(w, "robin");
 		const https: Sent = { origin: `https://${new URL(w.instance.url).host}`, "x-forwarded-proto": "https" };
 		const mine = await ask(w, https);
@@ -906,7 +906,7 @@ describe("a ceremony belongs to where it began", () => {
 	});
 
 	test("an answer without its ceremony cookie is counted under the address like any refused answer", async () => {
-		const w = world({ proxied: true });
+		const w = await world({ proxied: true });
 		const { device } = await person(w, "robin");
 		const at: Sent = from("203.0.113.40");
 		const lines = await logged(async () => {
@@ -923,7 +923,7 @@ describe("a ceremony belongs to where it began", () => {
 	});
 
 	test("a registration is completed by the session that began it: not by another session of the same person, and not with a token", async () => {
-		const w = world();
+		const w = await world();
 		const laptop = await joined(w, "robin", PASSWORD);
 		const phone = (await signIn(w, "robin", PASSWORD)).cookie;
 		const begin = (headers: Sent) => w.op<RegistrationOptions>("credential", { do: "passkey.begin" }, headers);
@@ -956,7 +956,7 @@ describe("a ceremony belongs to where it began", () => {
 	});
 
 	test("the owner of the machine, who needs no sign-in in local mode, registers a passkey there, and a browser session does not complete it", async () => {
-		const w = world({ mode: "local" });
+		const w = await world({ mode: "local" });
 		const options = must(await w.op<RegistrationOptions>("credential", { do: "passkey.begin" }, {}));
 		const answer = authenticator().register(options);
 		// A browser that signed in on the same machine is another context than the machine's owner with no sign-in.
@@ -975,7 +975,7 @@ describe("a ceremony belongs to where it began", () => {
 	});
 
 	test("an invitation's passkey is made for that invitation: the answer to one's challenge does not accept another for the same person", async () => {
-		const w = world();
+		const w = await world();
 		const first = await invite(w, { name: "robin" });
 		const forFirst = must(
 			await w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", { invitation: first.code }),
@@ -1017,7 +1017,7 @@ describe("a ceremony belongs to where it began", () => {
 	});
 
 	test("a registration whose client data begins with a byte-order mark is read as the verifier reads it, and is stored", async () => {
-		const w = world();
+		const w = await world();
 		const cookie = await joined(w, "robin", PASSWORD);
 		const options = await w.ok<RegistrationOptions>("credential", { do: "passkey.begin" }, { cookie });
 		const marked = authenticator().register(options, { bom: true });
@@ -1027,7 +1027,7 @@ describe("a ceremony belongs to where it began", () => {
 	});
 
 	test("a sign-in whose client data begins with a byte-order mark is accepted, and the mark is part of what was signed", async () => {
-		const w = world();
+		const w = await world();
 		const { device } = await person(w, "robin");
 		const mine = await ask(w);
 		const answer = device.assert(mine.options, { bom: true });

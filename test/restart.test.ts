@@ -155,7 +155,7 @@ test("an invalid public address is refused before waiting for another server's d
 test("a replacement server waits for a stopping server to release the data directory", async () => {
 	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-lock-handoff-"));
 	dirs.push(dataDir);
-	const first = start(
+	const first = await start(
 		defaultConfig({ MAINWORTHY_DATA: dataDir, MAINWORTHY_PORT: "0", MAINWORTHY_OWNER: "robin" }),
 		() => ({ ui: null }),
 		{ readers: 0 },

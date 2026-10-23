@@ -1,7 +1,7 @@
 import { ATTACHMENT_LIMITS, type Attachment, type AttachmentInput, attachmentBytes } from "../../core/attachments.ts";
 import { attachmentType } from "../kernel/blobs.ts";
 import type { Ctx } from "../kernel/ctx.ts";
-import { type Db, sql } from "../kernel/db.ts";
+import { type ReadDb, sql } from "../kernel/db.ts";
 import { invalid, notFound } from "../kernel/errors.ts";
 
 const Q = {
@@ -11,12 +11,18 @@ const Q = {
 	),
 	hashes: sql<readonly [], { hash: string }>("SELECT DISTINCT hash FROM attachments"),
 };
-export const attachmentsOf = (db: Db, result: number): Attachment[] => db.all(Q.list, { result });
-export const attachmentHashes = (db: Db): Set<string> => new Set(db.all(Q.hashes).map((row) => row.hash));
+export const attachmentsOf = async (db: ReadDb, result: number): Promise<Attachment[]> =>
+	await db.all(Q.list, { result });
+export const attachmentHashes = async (db: ReadDb): Promise<Set<string>> =>
+	new Set((await db.all(Q.hashes)).map((row) => row.hash));
 /** Files are immutable evidence. A retry under its command id never appends twice. */
-export function recordAttachments(ctx: Ctx, result: number, files: readonly AttachmentInput[]): Attachment[] {
+export async function recordAttachments(
+	ctx: Ctx,
+	result: number,
+	files: readonly AttachmentInput[],
+): Promise<Attachment[]> {
 	if (files.length === 0) return [];
-	const existing = attachmentsOf(ctx.db, result);
+	const existing = await attachmentsOf(ctx.db, result);
 	const size =
 		existing.reduce((sum, item) => sum + item.size, 0) +
 		files.reduce((sum, item) => sum + attachmentBytes(item.data), 0);
@@ -37,8 +43,8 @@ export function recordAttachments(ctx: Ctx, result: number, files: readonly Atta
 		return { id: inserted.lastId, ...entry };
 	});
 }
-export function attachmentContent(ctx: Ctx, result: number, id: number) {
-	const attachment = attachmentsOf(ctx.db, result).find((item) => item.id === id);
+export async function attachmentContent(ctx: Ctx, result: number, id: number) {
+	const attachment = (await attachmentsOf(ctx.db, result)).find((item) => item.id === id);
 	if (!attachment) throw notFound("attachment");
 	const bytes = ctx.app.blobs.get(attachment.hash);
 	if (!bytes || bytes.length !== attachment.size || attachmentType(bytes) !== attachment.type)

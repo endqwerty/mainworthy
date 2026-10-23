@@ -11,7 +11,7 @@ import { watchLifetime } from "./lifetime.ts";
 let ahead = 0;
 const Advance = z.object({ advanceMs: z.number().int().min(0) });
 
-const instance = start(
+const instance = await start(
 	{
 		dataDir: process.env.MAINWORTHY_DATA ?? "/tmp/mainworthy-ui",
 		host: "127.0.0.1",
@@ -35,7 +35,7 @@ const instance = start(
 		routes: {
 			...archiveRoutes(app, owner),
 			"/test/clock": async (req, session) => {
-				if (!session.actor(0)?.can.includes("admin")) return new Response(null, { status: 403 });
+				if (!(await session.actor(0))?.can.includes("admin")) return new Response(null, { status: 403 });
 				ahead += Advance.parse(await req.json()).advanceMs;
 				return Response.json({ ok: true, result: { ahead } });
 			},

@@ -62,7 +62,12 @@ async function main() {
 	type Fixture = (typeof fixtures)[number];
 	const call = async (f: Fixture, op: string, input: unknown): Promise<unknown> => {
 		f.h.app.now = () => ++f.now;
-		const reply = await f.engine.invoke(f.h.app, f.engine.ops, { op, project: "scratch", input, actor: () => f.ci });
+		const reply = await f.engine.invoke(f.h.app, f.engine.ops, {
+			op,
+			project: "scratch",
+			input,
+			actor: async () => f.ci,
+		});
 		if (!reply.ok) throw new Error(`${op}: ${reply.error.code}: ${reply.error.message}`);
 		return reply.result;
 	};

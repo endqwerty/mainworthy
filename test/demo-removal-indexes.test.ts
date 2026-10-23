@@ -1,15 +1,15 @@
 import { expect, test } from "bun:test";
-import { Db, declaredSql } from "../src/server/kernel/db.ts";
+import { type ReadDb, declaredSql } from "../src/server/kernel/db.ts";
 import { migrate } from "../src/server/kernel/migrate.ts";
 import { exportArchive, removeProject } from "../src/server/transfer/transfer.ts";
 import { removalFixture } from "./demo-removal-fixture.ts";
 import "../src/server/ops/index.ts";
 import "../src/server/ops/jobs.ts";
 
-test("ordinary lookups use the existing non-null partial indexes after dropping their duplicates", () => {
+test("ordinary lookups use the existing non-null partial indexes after dropping their duplicates", async () => {
 	const db = new Db(":memory:");
 	try {
-		migrate(db, ":memory:");
+		await migrate(db, ":memory:");
 		for (const [table, column, index] of [
 			["results", "corrects", "results_corrects"],
 			["results", "quarantine_exit", "results_quarantine_exit"],
@@ -25,8 +25,8 @@ test("ordinary lookups use the existing non-null partial indexes after dropping 
 				expect.objectContaining({ name: index, partial: 1 }),
 			);
 		}
-		removalFixture(db, 1);
-		expect(removeProject(db, "removing").tables.results).toBe(1);
+		await removalFixture(db, 1);
+		expect((await removeProject(db, "removing")).tables.results).toBe(1);
 		expect(db.raw.query("SELECT key FROM projects").all()).toEqual([{ key: "retained" }]);
 		expect(db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
 		expect(db.raw.query("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
@@ -35,10 +35,10 @@ test("ordinary lookups use the existing non-null partial indexes after dropping 
 	}
 });
 
-test("the retained migration-24 indexes support ordinary statements", () => {
+test("the retained migration-24 indexes support ordinary statements", async () => {
 	const db = new Db(":memory:");
 	try {
-		migrate(db, ":memory:");
+		await migrate(db, ":memory:");
 		const plans = declaredSql().flatMap((text) => {
 			const statement = db.raw.prepare<{ detail: string }, null[]>(`EXPLAIN QUERY PLAN ${text}`);
 			try {
@@ -58,7 +58,7 @@ test("the retained migration-24 indexes support ordinary statements", () => {
 	}
 });
 
-function snapshot(db: Db): string {
+function snapshot(db: ReadDb): string {
 	const chunks: string[] = [];
 	exportArchive(db, (chunk) => chunks.push(chunk), { now: 1 });
 	return chunks.join("");
@@ -66,11 +66,11 @@ function snapshot(db: Db): string {
 
 for (const foreignKeys of [0, 1]) {
 	for (const nested of [false, true]) {
-		test(`a final removal violation rolls back with foreign_keys=${foreignKeys}, nested=${nested}`, () => {
+		test(`a final removal violation rolls back with foreign_keys=${foreignKeys}, nested=${nested}`, async () => {
 			const db = new Db(":memory:");
 			try {
-				migrate(db, ":memory:");
-				removalFixture(db, 2);
+				await migrate(db, ":memory:");
+				await removalFixture(db, 2);
 				db.raw.exec("UPDATE results SET corrects = 1 WHERE project = 901");
 				db.raw.exec(`PRAGMA foreign_keys = ${foreignKeys}`);
 				const before = snapshot(db);
@@ -91,14 +91,14 @@ for (const foreignKeys of [0, 1]) {
 }
 
 for (const action of ["finish", "cancel", "violate"] as const) {
-	test(`the reset transaction checks later writes and restores enforcement on ${action}`, () => {
+	test(`the reset transaction checks later writes and restores enforcement on ${action}`, async () => {
 		const db = new Db(":memory:");
 		try {
-			migrate(db, ":memory:");
-			removalFixture(db, 2);
+			await migrate(db, ":memory:");
+			await removalFixture(db, 2);
 			const before = snapshot(db);
-			const steps = db.checkedBulkSteps(function* () {
-				removeProject(db, "removing");
+			const steps = db.checkedBulkSteps(async function* () {
+				await removeProject(db, "removing");
 				yield;
 				if (action === "violate") db.raw.exec("UPDATE results SET corrects = 1 WHERE project = 901");
 			});
@@ -119,13 +119,13 @@ for (const action of ["finish", "cancel", "violate"] as const) {
 	});
 }
 
-test("every incoming reset reference uses an index, including SQLite's own DELETE checks", () => {
+test("every incoming reset reference uses an index, including SQLite's own DELETE checks", async () => {
 	const db = new Db(":memory:");
 	try {
-		migrate(db, ":memory:");
-		removalFixture(db, 2, 20_000);
+		await migrate(db, ":memory:");
+		await removalFixture(db, 2, 20_000);
 		const parents = new Set<string>();
-		removeProject(db, "removing", (step) => {
+		await removeProject(db, "removing", (step) => {
 			if (step.startsWith("delete ")) parents.add(step.slice(7));
 		});
 		const tables = db.raw

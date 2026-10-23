@@ -3,7 +3,7 @@ import { QuarantineExit as ExitSchema } from "../../core/flaky.ts";
 import type { Edit } from "../../core/ops.ts";
 import { replacesInLane } from "../../core/runs.ts";
 import type { Ctx } from "../kernel/ctx.ts";
-import { type Db, json, sql } from "../kernel/db.ts";
+import { type ReadDb, json, sql } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
 import { decisionOf, type Witness } from "../kernel/witness.ts";
 import { findTest, type ResultRow, resultById, testById } from "./evidence.ts";
@@ -46,26 +46,27 @@ const Q = {
 type Position = Pick<ResultRow, "id" | "seq" | "ord">;
 type TrunkResult = Position &
 	Pick<ResultRow, "attempt" | "outcome" | "corrects"> & { commit_sha: string; lane: string };
-export const quarantineEntries = (db: Db, project: number) => db.all(Q.entries, { project });
-export const quarantineEntry = (db: Db, project: number, test: number) => db.get(Q.entry, { project, test });
+export const quarantineEntries = async (db: ReadDb, project: number) => await db.all(Q.entries, { project });
+export const quarantineEntry = async (db: ReadDb, project: number, test: number) =>
+	await db.get(Q.entry, { project, test });
 
-export function validateQuarantineEdit(ctx: Ctx, edit: Extract<Edit, { op: "quarantine" }>) {
-	const test = findTest(ctx.db, ctx.project.id, edit.test);
+export async function validateQuarantineEdit(ctx: Ctx, edit: Extract<Edit, { op: "quarantine" }>) {
+	const test = await findTest(ctx.db, ctx.project.id, edit.test);
 	if (!test) throw notFound(`test ${edit.test}`);
 	if (test.kind !== "auto") throw invalid("only an automated test can be quarantined");
-	const prior = quarantineEntry(ctx.db, ctx.project.id, test.id);
+	const prior = await quarantineEntry(ctx.db, ctx.project.id, test.id);
 	if ((prior?.decision ?? null) !== edit.base)
 		throw conflict("quarantine changed; read the test and propose on its current decision");
 	if (edit.exit?.kind === "expiry" && edit.exit.at <= ctx.now) throw invalid("quarantine expiry must be in the future");
 	return test;
 }
-export function setQuarantine(
+export async function setQuarantine(
 	ctx: Ctx,
 	witness: Witness,
 	input: { test: number; exit: QuarantineExit | null; reason: string },
-): void {
+): Promise<void> {
 	const decision = decisionOf(witness, "adopt");
-	ctx.db.run(Q.write, {
+	await ctx.db.run(Q.write, {
 		project: ctx.project.id,
 		test: input.test,
 		decision,
@@ -75,11 +76,11 @@ export function setQuarantine(
 		at: ctx.now,
 		seq: ctx.seq,
 	});
-	const test = testById(ctx.db, input.test);
+	const test = await testById(ctx.db, input.test);
 	if (test) ctx.touched.add(`T-${test.no}`);
 }
 
-export function effectiveQuarantine(db: Db, entry: Entry, now: number): boolean {
+export async function effectiveQuarantine(db: ReadDb, entry: Entry, now: number): Promise<boolean> {
 	if (entry.exit_rule === null) return false;
 	const exit = ExitSchema.parse(json<unknown>(entry.exit_rule));
 	if (exit.kind === "person") return true;
@@ -87,15 +88,15 @@ export function effectiveQuarantine(db: Db, entry: Entry, now: number): boolean 
 	return passExit(db, entry, exit.count) === null;
 }
 
-function passExit(db: Db, entry: Entry, count: number): Position | null {
-	const ended = db.get(Q.exit, { decision: entry.decision });
+async function passExit(db: ReadDb, entry: Entry, count: number): Promise<Position | null> {
+	const ended = await db.get(Q.exit, { decision: entry.decision });
 	if (ended) return ended;
 	const commits = new Map<string, { index: number; lanes: Set<string> }>();
 	const lanes = new Map<string, Map<number, TrunkResult>>();
 	const observations = new Map<number, TrunkResult>();
 	const held = new Map<string, TrunkResult>();
 	const clean: boolean[] = [];
-	for (const row of db.all(Q.trunk, { project: entry.project, test: entry.test, since: entry.seq })) {
+	for (const row of await db.all(Q.trunk, { project: entry.project, test: entry.test, since: entry.seq })) {
 		let commit = commits.get(row.commit_sha);
 		if (!commit) {
 			commit = { index: commits.size, lanes: new Set() };
@@ -136,12 +137,12 @@ function passExit(db: Db, entry: Entry, count: number): Position | null {
 	return null;
 }
 
-export function recordQuarantines(ctx: Ctx, results: readonly { id: number }[]): void {
-	const entries = new Map(quarantineEntries(ctx.db, ctx.project.id).map((entry) => [entry.test, entry]));
+export async function recordQuarantines(ctx: Ctx, results: readonly { id: number }[]): Promise<void> {
+	const entries = new Map((await quarantineEntries(ctx.db, ctx.project.id)).map((entry) => [entry.test, entry]));
 	if (entries.size === 0) return;
 	const exits = new Map<number, Position | null>();
 	for (const { id } of results) {
-		const result = resultById(ctx.db, id);
+		const result = await resultById(ctx.db, id);
 		if (result?.method !== "auto") continue;
 		const entry = entries.get(result.test);
 		if (!entry?.exit_rule || result.seq <= entry.seq) continue;
@@ -149,22 +150,22 @@ export function recordQuarantines(ctx: Ctx, results: readonly { id: number }[]):
 		if (exit.kind === "expiry" && result.at >= exit.at) continue;
 		if (exit.kind === "passes") {
 			if (!exits.has(entry.test)) {
-				const ended = passExit(ctx.db, entry, exit.count);
+				const ended = await passExit(ctx.db, entry, exit.count);
 				exits.set(entry.test, ended);
-				if (ended) ctx.db.run(Q.end, { result: ended.id, decision: entry.decision });
+				if (ended) await ctx.db.run(Q.end, { result: ended.id, decision: entry.decision });
 			}
 			const ended = exits.get(entry.test);
 			if (ended && (result.seq > ended.seq || (result.seq === ended.seq && result.ord > ended.ord))) continue;
 		}
-		ctx.db.run(Q.cover, { result: id, decision: entry.decision });
+		await ctx.db.run(Q.cover, { result: id, decision: entry.decision });
 	}
 }
 
-export function quarantineLookup(db: Db, project: number) {
+export async function quarantineLookup(db: ReadDb, project: number) {
 	const present = db.get(Q.exists, { project }) !== null;
-	return (id: number) => {
+	return async (id: number) => {
 		if (!present) return null;
-		const result = resultById(db, id);
+		const result = await resultById(db, id);
 		if (result?.project !== project || result.quarantine_decision === null) return null;
 		return {
 			decision: result.quarantine_decision,

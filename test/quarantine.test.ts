@@ -82,9 +82,9 @@ describe("quarantine covers observations when reported", () => {
 			...input,
 			results: [pass, { ...pass, outcome: "fail", failure: { message: "later in the same report" } }],
 		});
-		const covered = quarantineLookup(h.app.db, 1);
-		expect(covered(receipt.results?.[0] ?? 0)).toMatchObject({ decision: entry?.decision, quarantined: true });
-		expect(covered(receipt.results?.[1] ?? 0)).toBe(null);
+		const covered = await quarantineLookup(h.app.db, 1);
+		expect(await covered(receipt.results?.[0] ?? 0)).toMatchObject({ decision: entry?.decision, quarantined: true });
+		expect(await covered(receipt.results?.[1] ?? 0)).toBe(null);
 		expect(await gate("aaaa0002")).toMatchObject({ verdict: "blocked", tally: { unexplained: 1 } });
 		expect((await h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] }))[0]?.quarantine.active).toBe(false);
 	});
@@ -137,9 +137,9 @@ describe("quarantine covers observations when reported", () => {
 		const second = await quarantine({ kind: "person" }, exit.decision);
 		const newer = (await report("aaaa0004")).results?.[0];
 		if (!second || !newer) throw new Error("missing replacement entry or result");
-		const covered = quarantineLookup(h.app.db, 1);
-		expect(covered(older)).toMatchObject({ decision: first.decision });
-		expect(covered(newer)).toMatchObject({ decision: second.decision });
+		const covered = await quarantineLookup(h.app.db, 1);
+		expect(await covered(older)).toMatchObject({ decision: first.decision });
+		expect(await covered(newer)).toMatchObject({ decision: second.decision });
 		expect(await gate("aaaa0002")).toMatchObject({ verdict: "passed", quarantined: 1 });
 		expect((await gate("aaaa0003")).verdict).toBe("blocked");
 		expect(await gate("aaaa0004")).toMatchObject({ verdict: "passed", quarantined: 1 });
@@ -523,17 +523,20 @@ test("archives retain quarantine decisions, exit rules and observations", async 
 	expect(archive).toContain('"quarantines"');
 	const imported = new Db(":memory:");
 	try {
-		migrate(imported, ":memory:");
-		importArchive(imported, archive.trimEnd().split("\n"));
-		const entry = quarantineEntries(imported, 1)[0];
+		await migrate(imported, ":memory:");
+		await importArchive(imported, archive.trimEnd().split("\n"));
+		const entry = (await quarantineEntries(imported, 1))[0];
 		if (!entry) throw new Error("quarantine did not survive archive import");
 		expect(entry).toMatchObject({
 			actor: h.owner.id,
 			reason: "Keep failures visible while repairing the test",
 			exit_rule: '{"kind":"passes","count":2}',
 		});
-		expect(effectiveQuarantine(imported, entry, h.app.now())).toBe(false);
-		expect(quarantineLookup(imported, 1)(failure.id)).toMatchObject({ decision: entry.decision, quarantined: true });
+		expect(await effectiveQuarantine(imported, entry, h.app.now())).toBe(false);
+		expect(await (await quarantineLookup(imported, 1))(failure.id)).toMatchObject({
+			decision: entry.decision,
+			quarantined: true,
+		});
 	} finally {
 		imported.close();
 	}

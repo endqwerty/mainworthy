@@ -17,8 +17,8 @@ export const csvImportOp = defineOp({
 	scope: "project",
 	effect: "write",
 	mcp: null,
-	*steps(ctx, input): Generator<undefined, CsvImportReply, void> {
-		const policy = currentPolicy(ctx.db, ctx.project.id);
+	async *steps(ctx, input): AsyncGenerator<undefined, CsvImportReply, void> {
+		const policy = await currentPolicy(ctx.db, ctx.project.id);
 		let plan: ReturnType<typeof mapCsv>;
 		try {
 			plan = mapCsv(input.csv, input.mapping, policy.settings.fields ?? {}, input.preset);

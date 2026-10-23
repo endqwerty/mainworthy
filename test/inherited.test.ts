@@ -335,10 +335,10 @@ for (const answer of ["flaky", "defect", "inherited"] as const) {
 		expect(decided[0]?.evidence).not.toHaveProperty("inherited");
 		if (answer === "flaky") {
 			h.advance(13 * 86_400_000);
-			expect(sweep(h.app, h.owner.id)).toBe(0);
+			expect(await sweep(h.app, h.owner.id)).toBe(0);
 			expect(await gate("change01")).toMatchObject(expected);
 			h.advance(2 * 86_400_000);
-			expect(sweep(h.app, h.owner.id)).toBe(1);
+			expect(await sweep(h.app, h.owner.id)).toBe(1);
 			expect(await gate("change01")).toMatchObject({ verdict: "blocked", tally: { excused: 0, unexplained: 1 } });
 			expect((await h.call<InboxReply>("inbox", { on: "pr:69", kind: "failure" })).items).toHaveLength(1);
 			return;
@@ -404,9 +404,9 @@ for (const answer of ["defect", "flaky"] as const) {
 		});
 		if (answer === "flaky") {
 			h.advance(13 * 86_400_000);
-			expect(sweep(h.app, h.owner.id)).toBe(0);
+			expect(await sweep(h.app, h.owner.id)).toBe(0);
 			h.advance(2 * 86_400_000);
-			expect(sweep(h.app, h.owner.id)).toBe(1);
+			expect(await sweep(h.app, h.owner.id)).toBe(1);
 		}
 	});
 }
@@ -874,16 +874,16 @@ test("a duplicate report that changes the base cannot return with stale inherite
 test("accepted base results replayed by startup recovery revoke inheritance", async () => {
 	await base();
 	await change({ 0: "same cause" });
-	h.app.db.transaction(() => {
-		const project = findProject(h.app.db, "scratch");
+	await h.app.db.transaction(async () => {
+		const project = await findProject(h.app.db, "scratch");
 		if (!project) throw new Error("missing project");
 		const ctx = makeCtx(h.app, project, h.owner, true);
-		acceptReport(ctx, ciReport({ commit: "base0001", n: 2, attempt: 2 }));
-		stampSeq(ctx);
+		await acceptReport(ctx, ciReport({ commit: "base0001", n: 2, attempt: 2 }));
+		await stampSeq(ctx);
 	});
-	expect(recoverAccepted(h.app)).toBe(1);
+	expect(await recoverAccepted(h.app)).toBe(1);
 	expect(await gate("change01")).toMatchObject({ verdict: "blocked", tally: { excused: 0, unexplained: 1 } });
-	expect(recoverAccepted(h.app)).toBe(0);
+	expect(await recoverAccepted(h.app)).toBe(0);
 });
 
 test("a base result judged a mistake stops supporting the change, and undo restores it", async () => {
@@ -1003,7 +1003,7 @@ test("mutual base references reconcile from results without cycling decisions", 
 for (const revocation of ["base", "policy"]) {
 	test(`HTTP report and gate expose inheritance and immediate ${revocation} revocation`, async () => {
 		const directory = await mkdtemp(join(tmpdir(), "mainworthy-inherited-"));
-		const instance = start(
+		const instance = await start(
 			defaultConfig({
 				MAINWORTHY_DATA: directory,
 				MAINWORTHY_PORT: "0",

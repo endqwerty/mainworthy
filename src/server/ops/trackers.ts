@@ -24,5 +24,5 @@ export const trackerStatusOp = defineOp({
 	scope: "project",
 	effect: "read",
 	mcp: null,
-	run: (ctx, input) => trackerStatus(ctx.db, ctx.project.id, input.id),
+	run: async (ctx, input) => await trackerStatus(ctx.db, ctx.project.id, input.id),
 });

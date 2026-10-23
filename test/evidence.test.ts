@@ -410,24 +410,24 @@ describe("a red report", () => {
 	});
 
 	test("the guard counts applied reports even when acceptance order is reversed", async () => {
-		const inTx = <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): T =>
-			h.app.db.transaction(() => {
-				const project = findProject(h.app.db, "scratch");
+		const inTx = async <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): Promise<T> =>
+			await h.app.db.transaction(async () => {
+				const project = await findProject(h.app.db, "scratch");
 				if (!project) throw new Error("no project");
 				const ctx = makeCtx(h.app, project, h.owner, true);
 				const out = fn(ctx);
-				stampSeq(ctx);
+				await stampSeq(ctx);
 				return out;
 			});
-		const firstBatch = inTx((ctx) => acceptReport(ctx, assertionShard(0))).batch;
-		const secondBatch = inTx((ctx) => acceptReport(ctx, assertionShard(1))).batch;
-		const firstApplied = inTx((ctx) => processBatch(ctx, secondBatch.id));
+		const firstBatch = (await inTx((ctx) => acceptReport(ctx, assertionShard(0)))).batch;
+		const secondBatch = (await inTx((ctx) => acceptReport(ctx, assertionShard(1)))).batch;
+		const firstApplied = await inTx((ctx) => processBatch(ctx, secondBatch.id));
 		expect(firstApplied.questions).toHaveLength(1);
 		expect(firstApplied.questions[0]?.title).toBe("assertion failed");
-		const secondApplied = inTx((ctx) => processBatch(ctx, firstBatch.id));
+		const secondApplied = await inTx((ctx) => processBatch(ctx, firstBatch.id));
 		expect(secondApplied.questions).toHaveLength(6);
 		expect(await gate("broad001")).toMatchObject({ verdict: "blocked", stale: false, tally: { unexplained: 80 } });
-		expect(recoverAccepted(h.app)).toBe(0);
+		expect(await recoverAccepted(h.app)).toBe(0);
 	});
 
 	test("a broad assertion is split by file, and one answer excuses only that file", async () => {
@@ -1300,10 +1300,10 @@ describe("holds", () => {
 		exportArchive(h.app.db, (chunk) => chunks.push(chunk));
 		const restored = new Db(":memory:");
 		try {
-			migrate(restored, ":memory:");
-			importArchive(restored, linesOf(chunks.join("")));
-			const question = mustQuestion(restored, 1, asked.q);
-			expect(toItem(restored, question)).toMatchObject(ended);
+			await migrate(restored, ":memory:");
+			await importArchive(restored, linesOf(chunks.join("")));
+			const question = await mustQuestion(restored, 1, asked.q);
+			expect(await toItem(restored, question)).toMatchObject(ended);
 		} finally {
 			restored.close();
 		}
@@ -1360,11 +1360,11 @@ describe("holds", () => {
 		exportArchive(h.app.db, (chunk) => chunks.push(chunk));
 		const restored = new Db(":memory:");
 		try {
-			migrate(restored, ":memory:");
-			importArchive(restored, linesOf(chunks.join("")));
+			await migrate(restored, ":memory:");
+			await importArchive(restored, linesOf(chunks.join("")));
 			const question = (await settled("pr:43"))[0];
 			if (!question) throw new Error("expected the ended answer");
-			expect(toItem(restored, mustQuestion(restored, 1, question.q))).toMatchObject(fixed("open")[0] ?? {});
+			expect(await toItem(restored, await mustQuestion(restored, 1, question.q))).toMatchObject(fixed("open")[0] ?? {});
 		} finally {
 			restored.close();
 		}
@@ -1397,8 +1397,8 @@ describe("holds", () => {
 		await decide(asked, { is: "flaky" });
 		await h.call("report", ciReport({ commit: "expired408b", branch: "fix", pr: 408, n: 1 }));
 		h.advance(15 * 86_400_000);
-		const rule = ruleActor(h.app.db);
-		expect(sweep(h.app, rule.id)).toBe(1);
+		const rule = await ruleActor(h.app.db);
+		expect(await sweep(h.app, rule.id)).toBe(1);
 		const ended = {
 			q: asked.q,
 			state: "dissolved",
@@ -1878,13 +1878,13 @@ describe("a commit reported in shards", () => {
 	});
 
 	test("a shard that is accepted and not yet applied keeps the answer until it is", async () => {
-		const inTx = <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): T =>
-			h.app.db.transaction(() => {
-				const project = findProject(h.app.db, "scratch");
+		const inTx = async <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): Promise<T> =>
+			await h.app.db.transaction(async () => {
+				const project = await findProject(h.app.db, "scratch");
 				if (!project) throw new Error("no project");
 				const ctx = makeCtx(h.app, project, h.owner, true);
 				const out = fn(ctx);
-				stampSeq(ctx);
+				await stampSeq(ctx);
 				return out;
 			});
 		const cause = "the receipt total is off by one";
@@ -1897,10 +1897,10 @@ describe("a commit reported in shards", () => {
 		const asked = first((await queue()).items);
 		await decide(asked, { is: "defect" });
 		// Shard 2 of the next commit is accepted, holding a new test that fails with the cause, and is not applied yet.
-		const late = inTx((ctx) => acceptReport(ctx, two("unapp01b", 2, [3, 4, 5], { 3: cause }))).batch;
+		const late = (await inTx((ctx) => acceptReport(ctx, two("unapp01b", 2, [3, 4, 5], { 3: cause })))).batch;
 		await h.call("report", two("unapp01b", 1, [0, 1, 2]));
 		expect(await state(asked.q)).toBe("decided");
-		const applied = inTx((ctx) => processBatch(ctx, late.id));
+		const applied = await inTx((ctx) => processBatch(ctx, late.id));
 		expect(applied.questions[0]).toMatchObject({ how: "already decided", q: asked.q });
 	});
 
@@ -1986,16 +1986,16 @@ describe("the horizon", () => {
 		await h.call("report", ciReport({ commit: "5555555a", n: 5 }));
 		expect((await gate("5555555a")).verdict).toBe("passed");
 
-		const inTx = <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): T =>
-			h.app.db.transaction(() => {
-				const project = findProject(h.app.db, "scratch");
+		const inTx = async <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): Promise<T> =>
+			await h.app.db.transaction(async () => {
+				const project = await findProject(h.app.db, "scratch");
 				if (!project) throw new Error("no project");
 				const ctx = makeCtx(h.app, project, h.owner, true);
 				const out = fn(ctx);
-				stampSeq(ctx);
+				await stampSeq(ctx);
 				return out;
 			});
-		const { batch } = inTx((ctx) =>
+		const { batch } = await inTx((ctx) =>
 			acceptReport(ctx, ciReport({ commit: "5555555a", n: 5, fail: { 1: "expected 1, got 2" }, attempt: 2 })),
 		);
 		const between = await gate("5555555a");
@@ -2005,7 +2005,7 @@ describe("the horizon", () => {
 			reason: "pending: 1 report accepted and not yet applied",
 		});
 
-		inTx((ctx) => processBatch(ctx, batch.id));
+		await inTx((ctx) => processBatch(ctx, batch.id));
 		expect(await gate("5555555a")).toMatchObject({ verdict: "blocked", stale: false });
 	});
 });
@@ -2014,18 +2014,18 @@ describe("work the server does on its own", () => {
 	// The recovery step on its own. `test/restart.test.ts` kills a real server in the middle of a report.
 	test("a report that was accepted and never applied is applied by recovery, once; the gate was pending meanwhile", async () => {
 		await h.call("report", ciReport({ commit: "6666666a", n: 4 }));
-		h.app.db.transaction(() => {
-			const project = findProject(h.app.db, "scratch");
+		await h.app.db.transaction(async () => {
+			const project = await findProject(h.app.db, "scratch");
 			if (!project) throw new Error("no project");
 			const ctx = makeCtx(h.app, project, h.owner, true);
-			acceptReport(ctx, ciReport({ commit: "6666666a", n: 4, fail: { 0: "expected 1, got 2" }, attempt: 2 }));
-			stampSeq(ctx);
+			await acceptReport(ctx, ciReport({ commit: "6666666a", n: 4, fail: { 0: "expected 1, got 2" }, attempt: 2 }));
+			await stampSeq(ctx);
 		});
 		// ...the process dies here. Nothing is lost: the batch is staged, and the gate does not claim green.
 		expect((await gate("6666666a")).verdict).toBe("pending");
-		expect(recoverAccepted(h.app)).toBe(1);
+		expect(await recoverAccepted(h.app)).toBe(1);
 		expect(await gate("6666666a")).toMatchObject({ verdict: "blocked", stale: false });
-		expect(recoverAccepted(h.app)).toBe(0);
+		expect(await recoverAccepted(h.app)).toBe(0);
 	});
 
 	// Issue #123. The server read the id of the policy's actor once, when it started, and an import replaces the
@@ -2044,8 +2044,8 @@ describe("work the server does on its own", () => {
 				MAINWORTHY_MODE: "local",
 			});
 		};
-		const boot = (config: Config): Instance => {
-			const instance = start(config, (app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }), {
+		const boot = async (config: Config): Promise<Instance> => {
+			const instance = await start(config, (app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }), {
 				readers: 0,
 				now: () => now,
 			});
@@ -2061,13 +2061,13 @@ describe("work the server does on its own", () => {
 		});
 		try {
 			const from = await configFor();
-			const seed = openApp(from);
+			const seed = await openApp(from);
 			seed.db.exec(
 				"INSERT INTO orgs (name, created_at) VALUES ('default', 0); INSERT INTO actors (org, kind, name, created_at) VALUES (1, 'human', 'robin', 0)",
 			);
 			seed.close();
-			const source = boot(from);
-			const target = boot(await configFor());
+			const source = await boot(from);
+			const target = await boot(await configFor());
 			expect(actors(source)).toEqual([
 				{ id: 1, name: "robin" },
 				{ id: 2, name: "policy" },
@@ -2118,9 +2118,9 @@ describe("work the server does on its own", () => {
 		await decide(first((await queue()).items), { is: "flaky" });
 		expect((await queue()).counts.open).toBe(0);
 		const rule = h.app.db.raw.query<{ id: number }, []>("SELECT id FROM actors WHERE kind = 'rule'").get()?.id ?? 0;
-		expect(sweep(h.app, rule)).toBe(0); // still holds
+		expect(await sweep(h.app, rule)).toBe(0); // still holds
 		h.advance(15 * 86_400_000);
-		expect(sweep(h.app, rule)).toBe(1);
+		expect(await sweep(h.app, rule)).toBe(1);
 		expect((await queue()).counts.open).toBe(1);
 		expect(await gate("7777777a")).toMatchObject({ verdict: "blocked", stale: false });
 		// The expired decision stays in the ledger, followed by the row that records that it ran out.
@@ -3002,7 +3002,7 @@ describe("a change that ends", () => {
 		await end("pr:13", "closed");
 		h.advance(15 * 86_400_000);
 		const rule = h.app.db.raw.query<{ id: number }, []>("SELECT id FROM actors WHERE kind = 'rule'").get()?.id ?? 0;
-		sweep(h.app, rule);
+		await sweep(h.app, rule);
 		expect((await queue()).counts.open).toBe(0);
 	});
 
@@ -3014,8 +3014,8 @@ describe("a change that ends", () => {
 		expect(chunks.join("")).not.toContain("change_ends");
 		const other = new Db(":memory:");
 		try {
-			migrate(other, ":memory:");
-			importArchive(other, linesOf(chunks.join("")));
+			await migrate(other, ":memory:");
+			await importArchive(other, linesOf(chunks.join("")));
 			expect(other.raw.query("SELECT count(*) AS n FROM change_ends").get()).toEqual({ n: 0 });
 			const rows = other.raw
 				.query<{ key: string; state: string }, []>(

@@ -147,7 +147,7 @@ describe("named role grants", () => {
 			can: ["read"],
 			roles: ["approver"],
 		});
-		expect(actorByName(h.app.db, "team-approver", 1)).toMatchObject({
+		expect(await actorByName(h.app.db, "team-approver", 1)).toMatchObject({
 			can: ["read", "record", "produce", "answer"],
 			roles: ["approver"],
 		});
@@ -279,7 +279,7 @@ describe("named role grants", () => {
 			roles: ["approver", "lead", "approver"],
 		});
 		await h.call("admin", { do: "token.create", actor: reviewer.name, kind: "human" });
-		expect(invitedPerson(h.app, { name: reviewer.name, can: [], project: 0 })).toMatchObject({
+		expect(await invitedPerson(h.app, { name: reviewer.name, can: [], project: 0 })).toMatchObject({
 			name: reviewer.name,
 			isNew: false,
 		});
@@ -297,8 +297,8 @@ describe("named role grants", () => {
 			can: ["read", "produce", "answer"],
 			roles: ["auditor"],
 		});
-		expect(actorByName(h.app.db, reviewer.name, 1)?.roles).toEqual(["auditor", "approver", "lead"]);
-		expect(actorByName(h.app.db, reviewer.name, 2)?.roles).toEqual(["auditor"]);
+		expect((await actorByName(h.app.db, reviewer.name, 1))?.roles).toEqual(["auditor", "approver", "lead"]);
+		expect((await actorByName(h.app.db, reviewer.name, 2))?.roles).toEqual(["auditor"]);
 		await h.call("admin", { do: "grant.set", actor: reviewer.name, can: ["read", "produce", "answer"], roles: [] });
 		await h.call("admin", { do: "grant.remove", actor: reviewer.name, project: "scratch" });
 		expect((await actors()).find((actor) => actor.name === reviewer.name)?.grants).toEqual([
@@ -343,7 +343,7 @@ describe("named role grants", () => {
 			can: ["read", "produce", "answer"],
 			roles: ["approver"],
 		});
-		await h.call("propose", { edits: [{ op: "policy", base: currentPolicy(h.app.db, 1).version, clauses }] });
+		await h.call("propose", { edits: [{ op: "policy", base: (await currentPolicy(h.app.db, 1)).version, clauses }] });
 		const policyQuestion = first((await queue({ kind: "adopt" })).items);
 		await h.call("decide", { q: policyQuestion.q, onEvidence: policyQuestion.evidenceHash, answer: { is: "accept" } });
 		await h.call("admin", { do: "grant.set", actor: reviewer.name, can: ["read", "produce", "answer"], roles: [] });
@@ -373,12 +373,16 @@ describe("named role grants", () => {
 			roles: ["approver"],
 		});
 		// The harness carries actors by value; re-read authority exactly as a real request does.
-		const current = () => actorByName(h.app.db, reviewer.name, 1) ?? reviewer;
-		expect((await answer(current())).status).toBe("invalid");
+		const current = async () => actorByName(h.app.db, reviewer.name, 1) ?? reviewer;
+		expect((await answer(await current())).status).toBe("invalid");
 		expect(await h.raw("get", { refs: ["C-1"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
-		expect((await answer(current(), "independent review complete")).status).toBe("decided");
+		expect((await answer(await current(), "independent review complete")).status).toBe("decided");
 		expect(await title("C-1")).toBe("Role reviewed case");
-		const own = await h.call<Proposed>("propose", { edits: [{ op: "create", outline: "Own proposal" }] }, current());
+		const own = await h.call<Proposed>(
+			"propose",
+			{ edits: [{ op: "create", outline: "Own proposal" }] },
+			await current(),
+		);
 		const ownQuestion = first((await queue({ kind: "adopt" })).items);
 		expect(own.status).toBe("open");
 		expect(
@@ -391,7 +395,7 @@ describe("named role grants", () => {
 						answer: { is: "accept" },
 						reason: "my own review",
 					},
-					current(),
+					await current(),
 				),
 			).status,
 		).toBe("forbidden");
@@ -593,7 +597,7 @@ describe("rule answers", () => {
 		);
 	});
 
-	test("an archive whose current policy holds such a clause is refused whole", () => {
+	test("an archive whose current policy holds such a clause is refused whole", async () => {
 		const row = h.app.db.raw
 			.query<{ version: number; clauses: string }, []>("SELECT version, clauses FROM policies ORDER BY version DESC")
 			.get();
@@ -604,7 +608,7 @@ describe("rule answers", () => {
 		exportArchive(h.app.db, (chunk) => chunks.push(chunk));
 		const restored = new Db(":memory:");
 		try {
-			migrate(restored, ":memory:");
+			await migrate(restored, ":memory:");
 			expect(() => importArchive(restored, linesOf(chunks.join("")))).toThrow(
 				"archive policy of project scratch is refused: Clause map-track needs a valid map rule answer.",
 			);
@@ -2588,11 +2592,11 @@ describe("project custom field definitions", () => {
 		exportArchive(h.app.db, (chunk) => chunks.push(chunk));
 		const restored = new Db(":memory:");
 		try {
-			migrate(restored, ":memory:");
-			importArchive(restored, linesOf(chunks.join("")));
-			expect(currentPolicy(restored, 1)).toEqual(await policy());
-			expect(policyAt(restored, 1, 1)?.settings.fields).toBeUndefined();
-			expect(policyAt(restored, 1, 2)?.settings.fields).toEqual((await policy()).settings.fields);
+			await migrate(restored, ":memory:");
+			await importArchive(restored, linesOf(chunks.join("")));
+			expect(await currentPolicy(restored, 1)).toEqual(await policy());
+			expect((await policyAt(restored, 1, 1))?.settings.fields).toBeUndefined();
+			expect((await policyAt(restored, 1, 2))?.settings.fields).toEqual((await policy()).settings.fields);
 			for (const table of ["versions", "policies", "proposals", "decisions"]) {
 				expect(restored.raw.query(`SELECT * FROM ${table}`).all()).toEqual(
 					h.app.db.raw.query(`SELECT * FROM ${table}`).all(),

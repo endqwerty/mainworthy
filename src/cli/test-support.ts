@@ -149,7 +149,7 @@ export function inThisProcess(label: string, body: () => Promise<number>, given:
 function runInProcess(argv: string[], environment: Record<string, string>, options: CliOptions, directory: string) {
 	if ((argv.length === 0 || argv.includes("serve") || argv.includes("mcp")) && !argv.includes("--help"))
 		throw new Error("serve and mcp take the process's signals and streams: start them with cli, as a process");
-	return inThisProcess(`mainworthy ${argv.join(" ")}`, () => runCli(argv, null), {
+	return inThisProcess(`mainworthy ${argv.join(" ")}`, async () => await runCli(argv, null), {
 		environment: { ...environment, ...options.env },
 		cwd: options.cwd ?? directory,
 		input: options.input ?? "",
@@ -174,7 +174,7 @@ export async function withInstance<T>(
 		MAINWORTHY_MODE: options.mode ?? "local",
 		...options.env,
 	});
-	const instance = start(config, (app, owner) => ({
+	const instance = await start(config, (app, owner) => ({
 		ui: null,
 		routes: { ...archiveRoutes(app, owner), ...options.routes },
 	}));

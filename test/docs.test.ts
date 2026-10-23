@@ -256,7 +256,7 @@ describe("the site", () => {
 	beforeAll(async () => {
 		directory = await mkdtemp(join(tmpdir(), "mainworthy-docs-"));
 		// Server mode, and no token in any request below: the documentation is read without an account.
-		instance = start(
+		instance = await start(
 			defaultConfig({ MAINWORTHY_DATA: directory, MAINWORTHY_PORT: "0", MAINWORTHY_MODE: "server" }),
 			() => ({ ui: null, open: docsRoutes(VERSION) }),
 			{ readers: 0 },

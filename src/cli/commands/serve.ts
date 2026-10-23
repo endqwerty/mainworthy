@@ -38,8 +38,8 @@ export async function serveCommand(args: Args, ui: unknown): Promise<void> {
 			? `owner ${instance.owner.name} · sign in with a token, a password or a passkey`
 			: `you are ${instance.owner.name.includes("@") ? instance.owner.name : `${instance.owner.name}@this-machine`}`;
 	line(`Mainworthy ${VERSION} · ${config.mode} · data in ${data} · ${instance.url}`);
-	const project = findProject(instance.app.db, instance.project);
-	const policy = project ? policyName(currentPolicy(instance.app.db, project.id)) : "unknown";
+	const project = await findProject(instance.app.db, instance.project);
+	const policy = project ? policyName(await currentPolicy(instance.app.db, project.id)) : "unknown";
 	line(`project "${instance.project}" · ${who} · policy: ${policy}`);
 	if (config.mode === "server" && instance.generatedToken) line(`owner token (shown once): ${instance.generatedToken}`);
 	for (const text of instance.warnings) warning(`mainworthy: ${text}`);

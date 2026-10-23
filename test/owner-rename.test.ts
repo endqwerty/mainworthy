@@ -29,9 +29,9 @@ function scratch(): string {
 }
 
 type Boot = { dataDir: string; owner: string; ownerWas?: string; mode?: Config["mode"] };
-function boot(options: Boot): Instance {
+async function boot(options: Boot): Promise<Instance> {
 	const mode = options.mode ?? "server";
-	const instance = start(
+	const instance = await start(
 		{
 			dataDir: options.dataDir,
 			host: "127.0.0.1",
@@ -84,7 +84,7 @@ const names = (instance: Instance): string[] =>
 
 /** An instance whose owner `robin` has a browser session, a password and a token they made for `sam`, stopped. */
 async function asRobin(dataDir: string): Promise<{ cookie: string }> {
-	const first = boot({ dataDir, owner: "robin" });
+	const first = await boot({ dataDir, owner: "robin" });
 	const { cookie } = await post(first, "/api/login", { token: TOKEN });
 	expect((await post(first, "/api/account/password", { next: PASSWORD }, { cookie })).status).toBe(200);
 	const made = await post(
@@ -102,7 +102,7 @@ test("a start that names the owner's former name renames that person: their toke
 	const dataDir = scratch();
 	const { cookie } = await asRobin(dataDir);
 
-	const second = boot({ dataDir, owner: "rowan", ownerWas: "robin" });
+	const second = await boot({ dataDir, owner: "rowan", ownerWas: "robin" });
 	expect(said(second)).toEqual([
 		"MAINWORTHY_OWNER_WAS: robin is now rowan, with the tokens, password, passkeys, sessions and history robin had. rowan signs in under the new name. Unset MAINWORTHY_OWNER_WAS.",
 	]);
@@ -134,7 +134,7 @@ test("a start that names the owner's former name renames that person: their toke
 	await second.stop();
 
 	// The variable left in place renames nobody and makes nobody, and the start says to take it out.
-	const third = boot({ dataDir, owner: "rowan", ownerWas: "robin" });
+	const third = await boot({ dataDir, owner: "rowan", ownerWas: "robin" });
 	expect(said(third)).toEqual([
 		"MAINWORTHY_OWNER_WAS names robin and renamed nobody: rowan is on this instance already. Unset MAINWORTHY_OWNER_WAS.",
 	]);
@@ -164,7 +164,7 @@ test("the former name must be a person who is there to rename, or the start is r
 		);
 	}
 
-	const again = boot({ dataDir, owner: "robin" });
+	const again = await boot({ dataDir, owner: "robin" });
 	expect(
 		(await post(again, "/api/admin", { do: "token.create", actor: "builder", kind: "agent" }, bearer)).status,
 	).toBe(200);
@@ -174,7 +174,7 @@ test("the former name must be a person who is there to rename, or the start is r
 	refused("forgotten-3", "who was forgotten");
 
 	// Every refusal left the instance as it was: the owner is robin, by the same token.
-	const last = boot({ dataDir, owner: "robin" });
+	const last = await boot({ dataDir, owner: "robin" });
 	expect(names(last)).toEqual(["policy", "robin", "forgotten-3", "builder"]);
 	expect([said(last), await me(last, bearer)]).toMatchObject([[], { actor: "robin", owner: true }]);
 });
@@ -183,7 +183,7 @@ test("a former name beside a new name that somebody holds renames nobody, and an
 	const dataDir = scratch();
 	await asRobin(dataDir);
 	// sam exists: the start makes sam the owner as it does without the variable, and robin stays robin.
-	const second = boot({ dataDir, owner: "sam", ownerWas: "robin" });
+	const second = await boot({ dataDir, owner: "sam", ownerWas: "robin" });
 	expect(said(second)).toContain(
 		"MAINWORTHY_OWNER_WAS names robin and renamed nobody: sam is on this instance already. Unset MAINWORTHY_OWNER_WAS.",
 	);
@@ -194,7 +194,7 @@ test("a former name beside a new name that somebody holds renames nobody, and an
 	expect(defaultConfig({ MAINWORTHY_OWNER_WAS: "" })).not.toHaveProperty("ownerWas");
 	expect(defaultConfig({ MAINWORTHY_OWNER_WAS: "robin" }).ownerWas).toBe("robin");
 	// The same name twice asks for nothing.
-	const fourth = boot({ dataDir, owner: "robin", ownerWas: "robin" });
+	const fourth = await boot({ dataDir, owner: "robin", ownerWas: "robin" });
 	expect(said(fourth)).toEqual([
 		"MAINWORTHY_OWNER_WAS names robin and renamed nobody: robin is on this instance already. Unset MAINWORTHY_OWNER_WAS.",
 	]);
@@ -202,10 +202,10 @@ test("a former name beside a new name that somebody holds renames nobody, and an
 
 test("in local mode the owner of the machine is renamed the same way", async () => {
 	const dataDir = scratch();
-	const first = boot({ dataDir, owner: "robin", mode: "local" });
+	const first = await boot({ dataDir, owner: "robin", mode: "local" });
 	expect(await me(first, {})).toMatchObject({ actor: "robin" });
 	await first.stop();
-	const second = boot({ dataDir, owner: "rowan", ownerWas: "robin", mode: "local" });
+	const second = await boot({ dataDir, owner: "rowan", ownerWas: "robin", mode: "local" });
 	expect(said(second)).toEqual([expect.stringContaining("robin is now rowan")]);
 	expect([names(second), await me(second, {})]).toMatchObject([["policy", "rowan"], { actor: "rowan", owner: true }]);
 });

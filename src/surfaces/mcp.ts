@@ -435,8 +435,8 @@ export function mcpRoute(app: App): (req: Request, session: Session) => Promise<
 		}
 		const buildServer = () =>
 			mcpServer(
-				(op, project, input) =>
-					invoke(app, OPS, {
+				async (op, project, input) =>
+					await invoke(app, OPS, {
 						op,
 						project,
 						input,

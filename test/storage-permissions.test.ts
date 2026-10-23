@@ -43,7 +43,7 @@ test("an instance in an existing readable directory keeps its database private",
 	chmodSync(directory, 0o755);
 	const sentinel = join(directory, "unrelated.txt");
 	writeFileSync(sentinel, "operator data", { mode: 0o644 });
-	const instance = start(
+	const instance = await start(
 		defaultConfig({ MAINWORTHY_DATA: directory, MAINWORTHY_PORT: "0", MAINWORTHY_OWNER: "robin" }),
 		() => ({ ui: null }),
 		{ readers: 1 },
@@ -200,7 +200,7 @@ test("an upgrade refuses a retained-copy symlink without changing the database o
 	}
 });
 
-test("upgrade copies are private and retained copies are hardened without changing their bytes", () => {
+test("upgrade copies are private and retained copies are hardened without changing their bytes", async () => {
 	const directory = mkdtempSync(join(tmpdir(), "mainworthy-private-upgrade-"));
 	const path = databasePath(directory);
 	const fixture = Bun.gunzipSync(readFileSync(join(import.meta.dir, "fixtures/sessions/instance-v1.db.gz")));
@@ -232,12 +232,12 @@ test("upgrade copies are private and retained copies are hardened without changi
 			});
 		}) as typeof db.raw.query);
 		try {
-			migrate(db, path);
+			await migrate(db, path);
 			expect(originalQuery("PRAGMA synchronous").get()).toEqual({ synchronous: 1 });
 			expect(temporary).toHaveLength(1);
 			expect(dirname(temporary[0] ?? "").startsWith(`${path}.v1.bak.`)).toBe(true);
 			expect(existsSync(dirname(temporary[0] ?? ""))).toBe(false);
-			expect(schemaVersion(db)).toBe(SCHEMA_VERSION);
+			expect(await schemaVersion(db)).toBe(SCHEMA_VERSION);
 			expect(mode(`${path}.v1.bak`)).toBe(0o600);
 			expect(mode(retained)).toBe(0o600);
 			expect(readFileSync(retained)).toEqual(Buffer.from(fixture));
@@ -254,7 +254,7 @@ test("upgrade copies are private and retained copies are hardened without changi
 		chmodSync(retained, 0o644);
 		const reopened = openDatabase(path);
 		try {
-			expect(schemaVersion(reopened)).toBe(SCHEMA_VERSION);
+			expect(await schemaVersion(reopened)).toBe(SCHEMA_VERSION);
 			expect(mode(retained)).toBe(0o600);
 			expect(readFileSync(retained)).toEqual(Buffer.from(fixture));
 		} finally {

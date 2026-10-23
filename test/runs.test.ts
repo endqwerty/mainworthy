@@ -275,15 +275,15 @@ describe("planned lookups beside change history", () => {
 		await plan("second z", "zzzz0001");
 		await plan("open z", "zzzz0001", "C-2");
 		await h.call("report", report("aaaa0001", "first"));
-		const project = findProject(h.app.db, "scratch");
+		const project = await findProject(h.app.db, "scratch");
 		if (!project) throw new Error("no project");
 		const refs = (ids: number[]) =>
 			ids.map(
 				(id) => `R-${h.app.db.raw.query<{ no: number }, [number]>("SELECT no FROM runs WHERE id = ?").get(id)?.no}`,
 			);
-		expect(refs(plannedCounting(h.app.db, project.id, "zzzz0001"))).toEqual(["R-6", "R-2", "R-7"]);
-		expect(refs(plannedCounting(h.app.db, project.id, "aaaa0001"))).toEqual(["R-3"]);
-		expect(plannedCounting(h.app.db, project.id, "absent01")).toEqual([]);
+		expect(refs(await plannedCounting(h.app.db, project.id, "zzzz0001"))).toEqual(["R-6", "R-2", "R-7"]);
+		expect(refs(await plannedCounting(h.app.db, project.id, "aaaa0001"))).toEqual(["R-3"]);
+		expect(await plannedCounting(h.app.db, project.id, "absent01")).toEqual([]);
 		const horizons = () =>
 			h.app.db.raw
 				.query<{ no: number; accepted_seq: number; applied_seq: number; outstanding: number }, []>(
@@ -291,16 +291,16 @@ describe("planned lookups beside change history", () => {
 				)
 				.all();
 		const before = horizons();
-		const inTx = <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): T =>
-			h.app.db.transaction(() => {
+		const inTx = async <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): Promise<T> =>
+			await h.app.db.transaction(async () => {
 				const ctx = makeCtx(h.app, project, h.owner, true);
 				const result = fn(ctx);
-				stampSeq(ctx);
+				await stampSeq(ctx);
 				return result;
 			});
-		const batch = inTx((ctx) => acceptReport(ctx, report("zzzz0001", "late"))).batch;
-		const target = mustTarget(h.app.db, batch.target);
-		expect(inTx((ctx) => runsFor(ctx, target, null, h.owner.kind)).map((row) => `R-${row.no}`)).toEqual([
+		const batch = (await inTx((ctx) => acceptReport(ctx, report("zzzz0001", "late")))).batch;
+		const target = await mustTarget(h.app.db, batch.target);
+		expect((await inTx((ctx) => runsFor(ctx, target, null, h.owner.kind))).map((row) => `R-${row.no}`)).toEqual([
 			"R-5",
 			"R-6",
 			"R-2",
@@ -315,7 +315,7 @@ describe("planned lookups beside change history", () => {
 				outstanding: 1,
 			});
 		for (const no of [3, 4]) expect(waiting.find((row) => row.no === no)).toEqual(before.find((row) => row.no === no));
-		inTx((ctx) => processBatch(ctx, batch.id));
+		await inTx((ctx) => processBatch(ctx, batch.id));
 		const after = horizons();
 		for (const no of [2, 6, 7])
 			expect(after.find((row) => row.no === no)).toEqual({
@@ -647,13 +647,13 @@ describe("a run that accepts a build", () => {
 			});
 			await h.call("report", input(1));
 			const original = first((await h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" })).items);
-			const inTx = <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): T =>
-				h.app.db.transaction(() => {
-					const project = findProject(h.app.db, "scratch");
+			const inTx = async <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): Promise<T> =>
+				await h.app.db.transaction(async () => {
+					const project = await findProject(h.app.db, "scratch");
 					if (!project) throw new Error("no project");
 					const ctx = makeCtx(h.app, project, h.owner, true);
 					const result = fn(ctx);
-					stampSeq(ctx);
+					await stampSeq(ctx);
 					return result;
 				});
 			const batches = [2, 3].map((attempt) => inTx((ctx) => acceptReport(ctx, input(attempt))).batch);
@@ -663,7 +663,7 @@ describe("a run that accepts a build", () => {
 				stale: true,
 				reason: "pending: 2 reports accepted and not yet applied",
 			});
-			inTx((ctx) => processBatch(ctx, first(batches).id));
+			await inTx((ctx) => processBatch(ctx, first(batches).id));
 			expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
 				verdict: "pending",
 				reason: "pending: 1 report accepted and not yet applied",
@@ -671,7 +671,7 @@ describe("a run that accepts a build", () => {
 			expect(first((await h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" })).items).q).toBe(
 				original.q,
 			);
-			inTx((ctx) => processBatch(ctx, first(batches.slice(1)).id));
+			await inTx((ctx) => processBatch(ctx, first(batches.slice(1)).id));
 			expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({ verdict: "passed", stale: false });
 			expect((await run(planned.run)).state).toBe("closed");
 			const signoffs = (await h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" })).items;
@@ -975,16 +975,16 @@ describe("deploy announcements and release runs", () => {
 		const target = { build: "rc3", env: "staging" };
 		const result = { test: { key: "checkout" }, annotation: { case: "C-1", version: 1 } };
 		await h.call("report", { target, results: [{ ...result, outcome: "pass" }] }, ci);
-		const project = findProject(h.app.db, "scratch");
+		const project = await findProject(h.app.db, "scratch");
 		if (!project) throw new Error("no project");
-		h.app.db.transaction(() => {
+		await h.app.db.transaction(async () => {
 			const ctx = makeCtx(h.app, project, ci, true);
-			acceptReport(ctx, {
+			await acceptReport(ctx, {
 				target,
 				attempt: 2,
 				results: [{ ...result, outcome: "fail", failure: { message: "artifact smoke failed" } }],
 			});
-			stampSeq(ctx);
+			await stampSeq(ctx);
 		});
 		const planned = await h.call<PlanReply>("plan", {
 			name: "Release during upload",
@@ -996,7 +996,7 @@ describe("deploy announcements and release runs", () => {
 			reason: "pending: 1 report accepted and not yet applied",
 		});
 		expect((await run(planned.run)).state).toBe("open");
-		recoverAccepted(h.app);
+		await recoverAccepted(h.app);
 		expect(await h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
 			verdict: "blocked",
 			tally: { unexplained: 1 },
@@ -1053,8 +1053,8 @@ describe("deploy announcements and release runs", () => {
 		exportArchive(h.app.db, (chunk) => chunks.push(chunk));
 		const restored = new Db(":memory:");
 		try {
-			migrate(restored, ":memory:");
-			importArchive(restored, linesOf(chunks.join("")));
+			await migrate(restored, ":memory:");
+			await importArchive(restored, linesOf(chunks.join("")));
 			expect(
 				restored.raw
 					.query(

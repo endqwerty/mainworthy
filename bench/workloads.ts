@@ -37,7 +37,12 @@ export async function operation(
 	input: unknown,
 	actor = instance.owner,
 ): Promise<unknown> {
-	const reply = await invoke(instance.app, OPS, { op, project: instance.metadata.project, input, actor: () => actor });
+	const reply = await invoke(instance.app, OPS, {
+		op,
+		project: instance.metadata.project,
+		input,
+		actor: async () => actor,
+	});
 	if (!reply.ok) throw new Error(`${op}: ${reply.error.code}: ${reply.error.message}`);
 	return reply.result;
 }
@@ -242,7 +247,7 @@ export async function readWorkloads(instance: DatasetInstance, iterations: numbe
 				expectedRef = itemAt(metadata.cases, Math.floor(rng() * metadata.cases.length)).ref;
 				return async () => await operation(instance, "get", { refs: [expectedRef] });
 			},
-			check(value) {
+			async check(value) {
 				const row = itemAt(z.array(CaseView).parse(value), 0);
 				ensure(
 					row.ref === expectedRef && row.steps.length >= 3 && row.steps.length <= 9 && row.head === row.version,
@@ -257,7 +262,7 @@ export async function readWorkloads(instance: DatasetInstance, iterations: numbe
 			correctness: "Fifty cases in the requested folder, each with proof and open-question count.",
 			prepare: () => async () =>
 				await operation(instance, "find", { in: "cases", folder: metadata.hotFolder, limit: 50 }),
-			check(value) {
+			async check(value) {
 				const page = CasePage.parse(value);
 				ensure(
 					page.items.length === 50 &&
@@ -315,7 +320,7 @@ export async function readWorkloads(instance: DatasetInstance, iterations: numbe
 			iterations,
 			correctness: "Latest twenty persisted results of the requested T-ref, newest first.",
 			prepare: () => async () => await operation(instance, "get", { refs: [test.ref] }),
-			check(value) {
+			async check(value) {
 				const row = itemAt(z.array(TestView).parse(value), 0);
 				ensure(
 					row.ref === test.ref &&
@@ -332,7 +337,7 @@ export async function readWorkloads(instance: DatasetInstance, iterations: numbe
 			iterations,
 			correctness: "Persisted commit run, unchanged verdict and tally; no stale accepted batch.",
 			prepare: () => async () => await operation(instance, "gate", { commit: metadata.lastCommit }),
-			check(value) {
+			async check(value) {
 				const gate = Gate.parse(value);
 				ensure(
 					gate.run === expectedGate.run &&
@@ -350,7 +355,7 @@ export async function readWorkloads(instance: DatasetInstance, iterations: numbe
 			iterations,
 			correctness: "Fifty open questions with evidence hashes; total count equals the persisted baseline.",
 			prepare: () => async () => await operation(instance, "inbox", { limit: 50 }),
-			check(value) {
+			async check(value) {
 				const queue = Queue.parse(value);
 				ensure(
 					queue.items.length === 50 &&
@@ -366,7 +371,7 @@ export async function readWorkloads(instance: DatasetInstance, iterations: numbe
 			iterations,
 			correctness: "Bounded changed cases or settled questions, with an advancing sequence cursor.",
 			prepare: () => async () => await operation(instance, "since", { cursor: metadata.since, limit: 200 }),
-			check(value) {
+			async check(value) {
 				const delta = Delta.parse(value);
 				ensure(
 					delta.changed.length <= 200 &&
@@ -385,7 +390,7 @@ export async function readWorkloads(instance: DatasetInstance, iterations: numbe
 			correctness: "Twenty input files; bounded linked candidates with reasons and version hashes.",
 			prepare: () => async () =>
 				await operation(instance, "impact", { change: metadata.change, files: metadata.files, ledger: false }),
-			check(value) {
+			async check(value) {
 				const impact = Impact.parse(value);
 				ensure(
 					impact.change.files === metadata.files.length &&
@@ -405,7 +410,7 @@ export async function readWorkloads(instance: DatasetInstance, iterations: numbe
 			iterations,
 			correctness: "The report asked for, over 30 days, with populated counts and rows from the dataset.",
 			prepare: () => async () => await operation(instance, "stats", { of, days: 30 }),
-			check(value) {
+			async check(value) {
 				const report = StatsReply.parse(value);
 				ensure(report.of === of, "the reply must be the report asked for");
 				if (report.of === "pass-rate")

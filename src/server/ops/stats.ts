@@ -23,17 +23,17 @@ import { defineOp } from "./registry.ts";
 const DAY = 86_400_000;
 
 /** A test as a report lists it: its ref, name, file and case. */
-function testRow(ctx: Ctx, id: number) {
-	const test = testById(ctx.db, id);
+async function testRow(ctx: Ctx, id: number) {
+	const test = await testById(ctx.db, id);
 	if (!test) throw new Error(`a result names test ${id}, which does not exist`);
-	const linked = test.case_id === null ? null : caseById(ctx.db, test.case_id);
+	const linked = test.case_id === null ? null : await caseById(ctx.db, test.case_id);
 	return { test: testRef(test), name: test.name, file: test.file, case: linked ? caseRef(linked) : null };
 }
 
-function passRate(ctx: Ctx, input: Extract<StatsInput, { of: "pass-rate" }>): StatsOf<"pass-rate"> {
+async function passRate(ctx: Ctx, input: Extract<StatsInput, { of: "pass-rate" }>): Promise<StatsOf<"pass-rate">> {
 	const days = localDays(ctx.now, input.days, input.zone);
 	const method = input.method ?? null;
-	const counts = outcomesByDay(ctx.db, { project: ctx.project.id, days, method });
+	const counts = await outcomesByDay(ctx.db, { project: ctx.project.id, days, method });
 	return {
 		of: "pass-rate",
 		zone: input.zone,
@@ -48,12 +48,12 @@ function page(total: number, input: { cursor: number; limit: number }) {
 	return { total, cursor: next < total ? next : null };
 }
 
-function flaky(ctx: Ctx, input: Extract<StatsInput, { of: "flaky" }>): StatsOf<"flaky"> {
+async function flaky(ctx: Ctx, input: Extract<StatsInput, { of: "flaky" }>): Promise<StatsOf<"flaky">> {
 	const since = ctx.now - input.days * DAY;
-	const rows = flakyTests(ctx.db, ctx.project.id, since);
+	const rows = await flakyTests(ctx.db, ctx.project.id, since);
 	return {
 		of: "flaky",
-		tests: testsReporting(ctx.db, ctx.project.id, since),
+		tests: await testsReporting(ctx.db, ctx.project.id, since),
 		flaky: rows.length,
 		...page(rows.length, input),
 		items: rows.slice(input.cursor, input.cursor + input.limit).map((row) => {
@@ -68,8 +68,8 @@ function flaky(ctx: Ctx, input: Extract<StatsInput, { of: "flaky" }>): StatsOf<"
 	};
 }
 
-function reruns(ctx: Ctx, input: Extract<StatsInput, { of: "reruns" }>): StatsOf<"reruns"> {
-	const rows = rerunsByTest(ctx.db, ctx.project.id, ctx.now - input.days * DAY).sort(
+async function reruns(ctx: Ctx, input: Extract<StatsInput, { of: "reruns" }>): Promise<StatsOf<"reruns">> {
+	const rows = (await rerunsByTest(ctx.db, ctx.project.id, ctx.now - input.days * DAY)).sort(
 		(a, b) => b.lost - a.lost || b.reruns - a.reruns || a.test - b.test,
 	);
 	return {
@@ -90,11 +90,13 @@ function reruns(ctx: Ctx, input: Extract<StatsInput, { of: "reruns" }>): StatsOf
 	};
 }
 
-function automation(ctx: Ctx, input: Extract<StatsInput, { of: "automation" }>): StatsOf<"automation"> {
+async function automation(ctx: Ctx, input: Extract<StatsInput, { of: "automation" }>): Promise<StatsOf<"automation">> {
 	const project = ctx.project.id;
-	const cases = automationOfCases(ctx.db, project);
-	const automated = automatedCases(ctx.db, project);
-	const byHand = new Map(runsByHand(ctx.db, project, ctx.now - input.days * DAY).map((row) => [row.case_id, row]));
+	const cases = await automationOfCases(ctx.db, project);
+	const automated = await automatedCases(ctx.db, project);
+	const byHand = new Map(
+		(await runsByHand(ctx.db, project, ctx.now - input.days * DAY)).map((row) => [row.case_id, row]),
+	);
 	const manual = { wanted: 0, none: 0, notApplicable: 0 };
 	const backlog: StatsOf<"automation">["backlog"] = [];
 	let count = 0;
@@ -135,10 +137,10 @@ function automation(ctx: Ctx, input: Extract<StatsInput, { of: "automation" }>):
 	};
 }
 
-function coverage(ctx: Ctx, input: Extract<StatsInput, { of: "coverage" }>): StatsOf<"coverage"> {
-	const requirements = requirementCases(ctx.db, ctx.project.id);
+async function coverage(ctx: Ctx, input: Extract<StatsInput, { of: "coverage" }>): Promise<StatsOf<"coverage">> {
+	const requirements = await requirementCases(ctx.db, ctx.project.id);
 	const listed = requirements.slice(input.cursor, input.cursor + input.limit);
-	const outcomes = caseOutcomes(
+	const outcomes = await caseOutcomes(
 		ctx.db,
 		ctx.project.id,
 		[...new Set(listed.flatMap((requirement) => requirement.cases))],
@@ -157,18 +159,18 @@ function coverage(ctx: Ctx, input: Extract<StatsInput, { of: "coverage" }>): Sta
 	};
 }
 
-export function stats(ctx: Ctx, input: StatsInput): StatsReply {
+export async function stats(ctx: Ctx, input: StatsInput): Promise<StatsReply> {
 	switch (input.of) {
 		case "pass-rate":
-			return passRate(ctx, input);
+			return await passRate(ctx, input);
 		case "flaky":
-			return flaky(ctx, input);
+			return await flaky(ctx, input);
 		case "reruns":
-			return reruns(ctx, input);
+			return await reruns(ctx, input);
 		case "automation":
-			return automation(ctx, input);
+			return await automation(ctx, input);
 		case "coverage":
-			return coverage(ctx, input);
+			return await coverage(ctx, input);
 	}
 }
 

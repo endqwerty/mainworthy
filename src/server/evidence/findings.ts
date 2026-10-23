@@ -2,7 +2,7 @@
 // A review is evidence that someone looked; it is never a result and never fills an exercise slot.
 import { contentHash } from "../../core/hash.ts";
 import type { Ctx } from "../kernel/ctx.ts";
-import { type Db, sql } from "../kernel/db.ts";
+import { type ReadDb, sql } from "../kernel/db.ts";
 
 export type FindingRow = {
 	id: number;
@@ -89,7 +89,7 @@ const Q = {
 	),
 };
 
-export function insertFinding(
+export async function insertFinding(
 	ctx: Ctx,
 	input: {
 		lens: string;
@@ -102,8 +102,8 @@ export function insertFinding(
 		basis: string;
 		question: number;
 	},
-): void {
-	ctx.db.run(Q.insertFinding, {
+): Promise<void> {
+	await ctx.db.run(Q.insertFinding, {
 		project: ctx.project.id,
 		actor: ctx.actor.id,
 		lens: input.lens,
@@ -120,24 +120,35 @@ export function insertFinding(
 	});
 }
 
-export function insertReview(
+export async function insertReview(
 	ctx: Ctx,
 	input: { caseId: number; version: number; basis: string; lens: string; about: string | null },
-): void {
-	ctx.db.run(Q.insertReview, { project: ctx.project.id, reviewer: ctx.actor.id, ...input, at: ctx.now, seq: ctx.seq });
+): Promise<void> {
+	await ctx.db.run(Q.insertReview, {
+		project: ctx.project.id,
+		reviewer: ctx.actor.id,
+		...input,
+		at: ctx.now,
+		seq: ctx.seq,
+	});
 }
 
-export const reviewedAt = (db: Db, caseId: number, basis: string, lens: string, reviewer: number): boolean =>
-	db.get(Q.reviewed, { caseId, basis, lens, reviewer }) !== null;
-export const findingsOfCase = (db: Db, caseId: number, limit: number): FindingRow[] =>
-	db.all(Q.findingsOfCase, { id: caseId, limit });
-export const reviewsOfCase = (db: Db, caseId: number, limit: number): ReviewRow[] =>
-	db.all(Q.reviewsOfCase, { id: caseId, limit });
-export const reviewsAtVersion = (db: Db, caseId: number, version: number): ReviewRow[] =>
-	db.all(Q.reviewsAtVersion, { id: caseId, version });
+export const reviewedAt = async (
+	db: ReadDb,
+	caseId: number,
+	basis: string,
+	lens: string,
+	reviewer: number,
+): Promise<boolean> => db.get(Q.reviewed, { caseId, basis, lens, reviewer }) !== null;
+export const findingsOfCase = async (db: ReadDb, caseId: number, limit: number): Promise<FindingRow[]> =>
+	await db.all(Q.findingsOfCase, { id: caseId, limit });
+export const reviewsOfCase = async (db: ReadDb, caseId: number, limit: number): Promise<ReviewRow[]> =>
+	await db.all(Q.reviewsOfCase, { id: caseId, limit });
+export const reviewsAtVersion = async (db: ReadDb, caseId: number, version: number): Promise<ReviewRow[]> =>
+	await db.all(Q.reviewsAtVersion, { id: caseId, version });
 
-export const reviewedCaseIds = (
-	db: Db,
+export const reviewedCaseIds = async (
+	db: ReadDb,
 	actor: number,
 	cases: readonly { id: number; version: number; basis: string }[],
-) => new Set(db.all(Q.reviewedCases, { actor, cases: JSON.stringify(cases) }).map((row) => row.id));
+) => new Set((await db.all(Q.reviewedCases, { actor, cases: JSON.stringify(cases) })).map((row) => row.id));

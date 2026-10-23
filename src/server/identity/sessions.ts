@@ -10,7 +10,7 @@
 import { randomBytes } from "@noble/hashes/utils.js";
 import type { ActorKind } from "../../core/kinds.ts";
 import type { App } from "../kernel/app.ts";
-import { type Db, sql } from "../kernel/db.ts";
+import { type Db, type ReadDb, type WriteDb, sql } from "../kernel/db.ts";
 import { OpError } from "../kernel/errors.ts";
 import { CONTEXT, sessionHash } from "./contexts.ts";
 import { liveCredentials } from "./credentials.ts";
@@ -180,11 +180,11 @@ export function proofSession(app: App, input: ProofContext, db = app.db): { id: 
 }
 
 /** Called inside each sign-in-changing writer, before it changes a credential or contact. */
-export function requireRecentProof(app: App, input: ProofContext, initial = false): void {
+export async function requireRecentProof(app: App, input: ProofContext, initial = false): Promise<void> {
 	if (app.config.mode === "local" && input.context === CONTEXT.local) return;
 	const session = proofSession(app, input);
 	if (session) {
-		const at = app.db.get(Q.proof, { hash: session.hash })?.reauthenticated_at;
+		const at = (await app.db.get(Q.proof, { hash: session.hash }))?.reauthenticated_at;
 		const now = app.now();
 		if (at != null && at <= now && now - at <= 10 * 60_000) return;
 		if (initial && liveCredentials(app.db, input.actor).length === 0) return;
@@ -193,7 +193,7 @@ export function requireRecentProof(app: App, input: ProofContext, initial = fals
 }
 
 /** A verified credential and this exact session were checked in the writer's transaction. */
-export function dateSessionProof(app: App, input: ProofContext): boolean {
+export async function dateSessionProof(app: App, input: ProofContext): Promise<boolean> {
 	const session = proofSession(app, input);
 	return session !== null && app.db.run(Q.prove, { hash: session.hash, at: app.now() }).changes === 1;
 }
@@ -229,13 +229,13 @@ function inLifetime(
  * `sessionHash` is the SHA-256 of the secret the browser will hold. `address` is where the sign-in came from:
  * the session was opened there and, so far, last seen there.
  */
-export function openSession(
+export async function openSession(
 	app: App,
 	input: { tokenHash: string; sessionHash: string; userAgent: string | null; address: string | null },
-): { id: number; expiresAt: number } | null {
+): Promise<{ id: number; expiresAt: number } | null> {
 	const at = app.now();
 	const expiresAt = at + app.config.sessionMaxMs;
-	const made = app.db.run(Q.insert, {
+	const made = await app.db.run(Q.insert, {
 		tokenHash: input.tokenHash,
 		sessionHash: input.sessionHash,
 		at,
@@ -256,7 +256,7 @@ export function openSession(
  * row with a credential and no token, as `openSession` makes one with a token and no credential, so no session
  * rests on both. `address` is where the sign-in came from, as for a token's session.
  */
-export function openSessionOnCredential(
+export async function openSessionOnCredential(
 	app: App,
 	input: {
 		credential: { id: number; actor: number; data: string };
@@ -264,10 +264,10 @@ export function openSessionOnCredential(
 		userAgent: string | null;
 		address: string | null;
 	},
-): { id: number; expiresAt: number } | null {
+): Promise<{ id: number; expiresAt: number } | null> {
 	const at = app.now();
 	const expiresAt = at + app.config.sessionMaxMs;
-	const made = app.db.run(Q.insertOnCredential, {
+	const made = await app.db.run(Q.insertOnCredential, {
 		actor: input.credential.actor,
 		credential: input.credential.id,
 		data: input.credential.data,
@@ -298,12 +298,12 @@ export function findSession(
 }
 
 /** Whether a cookie names a session that was not ended. A plain read, so a sign-out with nothing to end stops here. */
-export function hasUnendedSession(db: Db, hash: string): boolean {
+export async function hasUnendedSession(db: ReadDb, hash: string): Promise<boolean> {
 	return db.get(Q.unended, { hash }) !== null;
 }
 
 /** Ends the session a cookie names. Under the gate. False when there is none, or it had ended: the first end stands. */
-export function endSession(app: App, hash: string, why: EndedWhy): boolean {
+export async function endSession(app: App, hash: string, why: EndedWhy): Promise<boolean> {
 	return app.db.run(Q.end, { hash, at: app.now(), why }).changes > 0;
 }
 
@@ -311,8 +311,13 @@ export function endSession(app: App, hash: string, why: EndedWhy): boolean {
  * Ends every session of an actor: one that is being forgotten, or (`ended`) one whose every way of signing in
  * is being replaced. Inside the caller's transaction. Returns how many.
  */
-export function endSessionsOf(db: Db, actor: number, at: number, why: "forgotten" | "ended" = "forgotten"): number {
-	return db.run(Q.endOf, { actor, at, why }).changes;
+export async function endSessionsOf(
+	db: WriteDb,
+	actor: number,
+	at: number,
+	why: "forgotten" | "ended" = "forgotten",
+): Promise<number> {
+	return (await db.run(Q.endOf, { actor, at, why })).changes;
 }
 
 /**
@@ -320,28 +325,29 @@ export function endSessionsOf(db: Db, actor: number, at: number, why: "forgotten
  * being alive is read with the credential; ending them says why in each row. Inside the caller's transaction.
  * Returns how many.
  */
-export function endSessionsOn(db: Db, credential: number, at: number): number {
-	return db.run(Q.endOn, { credential, at, why: "ended" }).changes;
+export async function endSessionsOn(db: WriteDb, credential: number, at: number): Promise<number> {
+	return (await db.run(Q.endOn, { credential, at, why: "ended" })).changes;
 }
 
 /** Records a token's revocation in its sessions, inside the transaction that revokes it. */
-export function endSessionsOnToken(db: Db, token: number, at: number): number {
-	return db.run(Q.endOnToken, { token, at }).changes;
+export async function endSessionsOnToken(db: WriteDb, token: number, at: number): Promise<number> {
+	return (await db.run(Q.endOnToken, { token, at })).changes;
 }
 
 /**
  * Puts a session on the password (`to`) that replaced the one it rested on (`from`), so that revoking the old
  * one does not end the session whose own request changed it. False when the session did not rest on `from`.
  */
-export function restSession(db: Db, move: { session: number; from: number; to: number }): boolean {
+export async function restSession(db: WriteDb, move: { session: number; from: number; to: number }): Promise<boolean> {
 	return db.run(Q.rest, { id: move.session, from: move.from, to: move.to }).changes === 1;
 }
 
 /** The actor whose session this is, when it has not ended; else null. */
-export const sessionOwner = (db: Db, id: number): number | null => db.get(Q.owner, { id })?.actor ?? null;
+export const sessionOwner = async (db: ReadDb, id: number): Promise<number | null> =>
+	db.get(Q.owner, { id })?.actor ?? null;
 
 /** Ends one session by its id, as a person does from a list. Under the gate. False when it had ended or is none. */
-export function endSessionById(db: Db, id: number, at: number): boolean {
+export async function endSessionById(db: WriteDb, id: number, at: number): Promise<boolean> {
 	return db.run(Q.endById, { id, at, why: "ended" }).changes > 0;
 }
 
@@ -350,10 +356,9 @@ export function endSessionById(db: Db, id: number, at: number): boolean {
  * it is inside both lifetimes. When and from where each was last used is the newer of the row and what is noted
  * and not yet written.
  */
-export function listSessions(app: App, db: Db, actor: number) {
+export async function listSessions(app: App, db: ReadDb, actor: number) {
 	const now = app.now();
-	return db
-		.all(Q.aliveOf, { actor, now })
+	return (await db.all(Q.aliveOf, { actor, now }))
 		.filter((row) => inLifetime(app, row, now))
 		.map((row) => ({
 			id: row.id,
@@ -376,25 +381,25 @@ export function listSessions(app: App, db: Db, actor: number) {
  * session is refused because the clock says so; afterwards it is refused whatever the clock says, so one that
  * is set back does not revive a session that had expired. Rows that ended more than thirty days ago are deleted.
  */
-export function sweepSessions(app: App): { expired: number; deleted: number } {
+export async function sweepSessions(app: App): Promise<{ expired: number; deleted: number }> {
 	const now = app.now();
-	return app.db.transaction(() => {
+	return await app.db.transaction(async () => {
 		let expired = 0;
-		for (const row of app.db.all(Q.retiredTokens, { now })) {
-			const ended = app.db.run(Q.endById, row).changes;
+		for (const row of await app.db.all(Q.retiredTokens, { now })) {
+			const ended = (await app.db.run(Q.endById, row)).changes;
 			if (row.why === "expired") expired += ended;
 		}
-		for (const row of app.db.all(Q.overdue, { now, idleBefore: now - app.config.sessionIdleMs })) {
+		for (const row of await app.db.all(Q.overdue, { now, idleBefore: now - app.config.sessionIdleMs })) {
 			// The row says idle, and a use noted since the last flush says otherwise.
 			if (inLifetime(app, row, now)) continue;
-			expired += app.db.run(Q.endById, { id: row.id, at: now, why: "expired" }).changes;
+			expired += (await app.db.run(Q.endById, { id: row.id, at: now, why: "expired" })).changes;
 		}
-		return { expired, deleted: app.db.run(Q.drop, { before: now - KEPT_MS }).changes };
+		return { expired, deleted: (await app.db.run(Q.drop, { before: now - KEPT_MS })).changes };
 	});
 }
 
-export function endOtherSessions(db: Db, actor: number, keep: number | null, at: number): number {
-	return db.run(Q.endOthers, { actor, keep: keep ?? 0, at }).changes;
+export async function endOtherSessions(db: WriteDb, actor: number, keep: number | null, at: number): Promise<number> {
+	return (await db.run(Q.endOthers, { actor, keep: keep ?? 0, at })).changes;
 }
 
 /**
@@ -402,6 +407,11 @@ export function endOtherSessions(db: Db, actor: number, keep: number | null, at:
  * with a password, and those opened through the identity provider unless `providerVouches` (the operator's word,
  * `MAINWORTHY_OIDC_MFA`). A passkey's sessions stay.
  */
-export function endSessionsWithoutFactor(db: Db, actor: number, at: number, providerVouches: boolean): number {
-	return db.run(Q.endWithoutFactorOf, { actor, at, vouched: providerVouches ? 1 : 0 }).changes;
+export async function endSessionsWithoutFactor(
+	db: WriteDb,
+	actor: number,
+	at: number,
+	providerVouches: boolean,
+): Promise<number> {
+	return (await db.run(Q.endWithoutFactorOf, { actor, at, vouched: providerVouches ? 1 : 0 })).changes;
 }

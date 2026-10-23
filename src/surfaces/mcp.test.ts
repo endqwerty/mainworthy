@@ -421,7 +421,7 @@ test("MCP report and get keep the session model beside the agent", async () => {
 	const h = await harness();
 	const actor = h.actor("model-runner", "agent", ["read", "produce"]);
 	const server = mcpServer(
-		async (op, project, input) => await invoke(h.app, OPS, { op, project, input, actor: () => actor }),
+		async (op, project, input) => await invoke(h.app, OPS, { op, project, input, actor: async () => actor }),
 		async () => ["scratch"],
 	);
 	const client = new Client({ name: "model-client", version: "1" });
@@ -461,7 +461,12 @@ test("MCP role approval follows the current grant and requires a reason", async 
 	const actor = h.actor("role-reviewer", "human", ["read", "produce", "answer"]);
 	const server = mcpServer(
 		async (op, project, input) =>
-			await invoke(h.app, OPS, { op, project, input, actor: (id) => actorByName(h.app.db, actor.name, id) }),
+			await invoke(h.app, OPS, {
+				op,
+				project,
+				input,
+				actor: async (id) => await actorByName(h.app.db, actor.name, id),
+			}),
 		async () => ["scratch"],
 	);
 	const client = new Client({ name: "role-client", version: "1" });
@@ -551,7 +556,7 @@ test.each(["2025-11-25", "2026-07-28"])(
 		const server = serveStdio(
 			() =>
 				mcpServer(
-					async (op, project, input) => await invoke(h.app, OPS, { op, project, input, actor: () => actor }),
+					async (op, project, input) => await invoke(h.app, OPS, { op, project, input, actor: async () => actor }),
 					async () => ["scratch"],
 				),
 			{ transport: serverTransport, legacy: "serve" },
@@ -703,7 +708,7 @@ test("tool errors name bad fields and require a project when the choice is ambig
 	const h = await harness();
 	await h.call("admin", { do: "project.create", key: "other" });
 	const server = mcpServer(
-		async (op, project, input) => await invoke(h.app, OPS, { op, project, input, actor: () => h.owner }),
+		async (op, project, input) => await invoke(h.app, OPS, { op, project, input, actor: async () => h.owner }),
 		async () => ["scratch", "other"],
 	);
 	const client = new Client({ name: "bad-input", version: "1" });
@@ -812,7 +817,7 @@ test("HTTP tools/list reuses definitions without sharing mutable tool documents"
 
 test("authenticated stateless HTTP answers initialize and tools/list and keeps the caller's permissions", async () => {
 	const h = await harness();
-	const { secret } = createToken(h.app, {
+	const { secret } = await createToken(h.app, {
 		actor: "http-reader",
 		kind: "agent",
 		can: ["read"],
@@ -832,7 +837,7 @@ test("authenticated stateless HTTP answers initialize and tools/list and keeps t
 			},
 			body: JSON.stringify(body),
 		});
-		const session = sessionOf(h.app, req, h.owner);
+		const session = await sessionOf(h.app, req, h.owner);
 		if (!session) throw new Error("The request did not authenticate");
 		return route(req, session);
 	};
@@ -889,7 +894,7 @@ test.each(["2025-03-26", "2025-11-25", "2026-07-28"])(
 	async (version) => {
 		const h = await harness();
 		const http = serve(h.app, h.owner, { ui: null, routes: { "/mcp": mcpRoute(h.app) } });
-		const { secret } = createToken(h.app, {
+		const { secret } = await createToken(h.app, {
 			actor: "v2-reader",
 			kind: "agent",
 			can: ["read"],
@@ -975,7 +980,7 @@ test("an HTTP MCP tool returns its committed reply when a subscriber throws", as
 
 test("an HTTP tool write waits for an applying report and records token use", async () => {
 	const h = await harness();
-	const { secret } = createToken(h.app, {
+	const { secret } = await createToken(h.app, {
 		actor: "queue-writer",
 		kind: "agent",
 		can: ["read", "produce"],
@@ -989,10 +994,10 @@ test("an HTTP tool write waits for an applying report and records token use", as
 	const unsubscribe = h.app.subscribe((event) => {
 		if (event.op === "report") onAccepted();
 	});
-	const pendingReport = invoke(h.app, OPS, {
+	const pendingReport = await invoke(h.app, OPS, {
 		op: "report",
 		project: "scratch",
-		actor: () => h.owner,
+		actor: async () => h.owner,
 		input: { target: { commit: "9f3c2ab" }, results: [{ test: { key: "queue::smoke" }, outcome: "pass" }] },
 	});
 	try {
@@ -1014,7 +1019,7 @@ test("an HTTP tool write waits for an applying report and records token use", as
 				params: { name: "propose", arguments: { edits: [{ op: "create", outline: "Queued case" }] } },
 			}),
 		});
-		const session = sessionOf(h.app, req, h.owner);
+		const session = await sessionOf(h.app, req, h.owner);
 		if (!session) throw new Error("The queued request did not authenticate");
 		const response = await mcpRoute(h.app)(req, session);
 		const tool = z.object({ result: CallToolResultSchema }).parse(await response.json()).result;
@@ -1022,7 +1027,7 @@ test("an HTTP tool write waits for an applying report and records token use", as
 		resultOf(tool, z.object({ status: z.literal("adopted") }));
 		expect((await pendingReport).ok).toBe(true);
 		await h.app.gate.run(() => undefined);
-		expect(listTokens(h.app).find((token) => token.actor === "queue-writer")?.last_used_at).toBe(h.app.now());
+		expect((await listTokens(h.app)).find((token) => token.actor === "queue-writer")?.last_used_at).toBe(h.app.now());
 	} finally {
 		unsubscribe();
 		await pendingReport;
@@ -1035,7 +1040,7 @@ test.each(["2025-03-26", "2025-11-25", "2026-07-28"])(
 	async (version) => {
 		const h = await harness();
 		const http = serve(h.app, h.owner);
-		const { secret } = createToken(h.app, {
+		const { secret } = await createToken(h.app, {
 			actor: "stdio-reader",
 			kind: "agent",
 			can: ["read"],
@@ -1120,7 +1125,7 @@ for (const target of ["commit", "change", "run"] as const) {
 		});
 		const agent = h.actor("slot-reader", "agent", ["read", "produce"]);
 		const server = mcpServer(
-			async (op, project, input) => await invoke(h.app, OPS, { op, project, input, actor: () => agent }),
+			async (op, project, input) => await invoke(h.app, OPS, { op, project, input, actor: async () => agent }),
 			async () => ["scratch"],
 		);
 		const client = new Client({ name: "slot-reader", version: "1" });
@@ -1164,7 +1169,7 @@ test("two MCP producers taking next concurrently receive different slots", async
 		["first", "second"].map(async (name) => {
 			const actor = h.actor(name, "agent", ["read", "produce"]);
 			const server = mcpServer(
-				async (op, project, input) => invoke(h.app, OPS, { op, project, input, actor: () => actor }),
+				async (op, project, input) => await invoke(h.app, OPS, { op, project, input, actor: async () => actor }),
 				async () => ["scratch"],
 			);
 			const client = new Client({ name, version: "1" });
@@ -1198,7 +1203,7 @@ test("MCP discovers and roundtrips a complete result trail", async () => {
 	const h = await harness();
 	const actor = h.actor("trail-runner", "agent", ["read", "produce"]);
 	const server = mcpServer(
-		async (op, project, input) => await invoke(h.app, OPS, { op, project, input, actor: () => actor }),
+		async (op, project, input) => await invoke(h.app, OPS, { op, project, input, actor: async () => actor }),
 		async () => ["scratch"],
 	);
 	const client = new Client({ name: "trail-client", version: "1" });

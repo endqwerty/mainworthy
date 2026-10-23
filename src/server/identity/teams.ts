@@ -2,7 +2,7 @@ import { type Capability, heldCapabilities } from "../../core/kinds.ts";
 import type { TeamEvent, TeamInput } from "../../core/teams.ts";
 import type { App } from "../kernel/app.ts";
 import { type Actor, allProjects } from "../kernel/ctx.ts";
-import { type Db, json, sql } from "../kernel/db.ts";
+import { type ReadDb, type WriteDb, json, sql } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
 import { hasAdminGrant, providerVouches } from "./identity.ts";
 import { endSessionsWithoutFactor, requireRecentProof } from "./sessions.ts";
@@ -71,31 +71,31 @@ const Q = {
 	),
 };
 
-export function teamCapabilities(db: Db, actor: number, project: number | null): Capability[] {
-	return db.all(Q.effective, { actor, project }).flatMap((grant) => json<Capability[]>(grant.can));
+export async function teamCapabilities(db: ReadDb, actor: number, project: number | null): Promise<Capability[]> {
+	return (await db.all(Q.effective, { actor, project })).flatMap((grant) => json<Capability[]>(grant.can));
 }
 
-export function teamsOf(db: Db, actor: number) {
-	return db.all(Q.sources, { actor }).map((team) => ({ name: team.name, grants: grantsOf(db, team.id) }));
+export async function teamsOf(db: ReadDb, actor: number) {
+	return (await db.all(Q.sources, { actor })).map((team) => ({ name: team.name, grants: grantsOf(db, team.id) }));
 }
 
-export function dropTeamMemberships(db: Db, actor: number): void {
-	db.run(Q.forget, { actor });
+export async function dropTeamMemberships(db: WriteDb, actor: number): Promise<void> {
+	await db.run(Q.forget, { actor });
 }
 
-function grantsOf(db: Db, team: number) {
-	return db.all(Q.grants, { team }).map((grant) => ({
+async function grantsOf(db: ReadDb, team: number) {
+	return (await db.all(Q.grants, { team })).map((grant) => ({
 		project: grant.project,
 		can: heldCapabilities("human", json<Capability[]>(grant.can)),
 	}));
 }
 
-export function manageTeams(app: App, by: Actor, org: number, input: TeamInput, context: string | null = null) {
+export async function manageTeams(app: App, by: Actor, org: number, input: TeamInput, context: string | null = null) {
 	const db = app.db;
-	const keys = new Map(allProjects(db).map((project) => [project.id, project.key]));
+	const keys = new Map((await allProjects(db)).map((project) => [project.id, project.key]));
 	const projectKey = (id: number): string => (id === 0 ? "*" : (keys.get(id) ?? `project ${id}`));
-	const displayGrants = (team: number) =>
-		grantsOf(db, team).map((grant) => ({ ...grant, project: projectKey(grant.project) }));
+	const displayGrants = async (team: number) =>
+		(await grantsOf(db, team)).map((grant) => ({ ...grant, project: projectKey(grant.project) }));
 	if (input.do === "team.list") {
 		return db.all(Q.list, { org }).map((team) => ({
 			name: team.name,
@@ -133,9 +133,9 @@ export function manageTeams(app: App, by: Actor, org: number, input: TeamInput, 
 	if (
 		context !== null &&
 		((input.do === "team.grant.set" && input.can.includes("admin")) ||
-			(input.do === "team.member.add" && grantsOf(db, team.id).some((grant) => grant.can.includes("admin"))))
+			(input.do === "team.member.add" && (await grantsOf(db, team.id)).some((grant) => grant.can.includes("admin"))))
 	)
-		requireRecentProof(app, { actor: by.id, context });
+		await requireRecentProof(app, { actor: by.id, context });
 	let person: number | null = null;
 	let project: number | null = null;
 	let can: string | null = null;
@@ -153,7 +153,8 @@ export function manageTeams(app: App, by: Actor, org: number, input: TeamInput, 
 			if (found.kind !== "human") throw invalid("only a person can join a team");
 			person = found.id;
 			action = input.do === "team.member.add" ? "member.add" : "member.remove";
-			if (app.config.requireAdminMfa && action === "member.add") adminsBefore.set(person, hasAdminGrant(db, person));
+			if (app.config.requireAdminMfa && action === "member.add")
+				adminsBefore.set(person, await hasAdminGrant(db, person));
 			changed = db.run(action === "member.add" ? Q.add : Q.remove, { team: team.id, actor: person }).changes > 0;
 			break;
 		}
@@ -161,7 +162,8 @@ export function manageTeams(app: App, by: Actor, org: number, input: TeamInput, 
 		case "team.grant.remove": {
 			if (db.all(Q.members, { team: team.id }).some((person) => person.id === by.id))
 				throw invalid("you cannot change grants of a team you belong to; another admin must do it");
-			project = input.project === undefined ? 0 : (allProjects(db).find((p) => p.key === input.project)?.id ?? null);
+			project =
+				input.project === undefined ? 0 : ((await allProjects(db)).find((p) => p.key === input.project)?.id ?? null);
 			if (project === null) throw notFound(`project ${input.project}`);
 			if (input.do === "team.grant.remove") {
 				action = "grant.remove";
@@ -174,7 +176,7 @@ export function manageTeams(app: App, by: Actor, org: number, input: TeamInput, 
 				if (changed) {
 					if (app.config.requireAdminMfa)
 						for (const member of db.all(Q.members, { team: team.id }))
-							adminsBefore.set(member.id, hasAdminGrant(db, member.id));
+							adminsBefore.set(member.id, await hasAdminGrant(db, member.id));
 					db.run(Q.grant, { team: team.id, project, can });
 				}
 			}
@@ -187,7 +189,7 @@ export function manageTeams(app: App, by: Actor, org: number, input: TeamInput, 
 	}
 	for (const [actor, wasAdmin] of adminsBefore)
 		if (changed && !wasAdmin && hasAdminGrant(db, actor))
-			endSessionsWithoutFactor(db, actor, app.now(), providerVouches(app));
+			await endSessionsWithoutFactor(db, actor, app.now(), providerVouches(app));
 	if (changed) db.run(Q.event, { team: team.id, by: by.id, at: app.now(), action, person, project, can });
 	return { team: name, changed };
 }

@@ -110,13 +110,13 @@ export function forgetNotedAddresses(app: App, kind: Kind, ids: readonly number[
  * stays. A note for a row that is gone, or for a session that has ended, updates nothing and is dropped, which
  * is what keeps the maps as small as the tokens and sessions used since the last flush.
  */
-export function writeUses(app: App): void {
+export async function writeUses(app: App): Promise<void> {
 	const notes = notesOf(app);
 	const taken = { token: [...notes.token], session: [...notes.session] };
 	if (taken.token.length + taken.session.length === 0) return;
-	app.db.transaction(() => {
-		for (const [id, note] of taken.token) app.db.run(Q.touchToken, { id, ...note });
-		for (const [id, note] of taken.session) app.db.run(Q.touchSession, { id, ...note });
+	await app.db.transaction(async () => {
+		for (const [id, note] of taken.token) await app.db.run(Q.touchToken, { id, ...note });
+		for (const [id, note] of taken.session) await app.db.run(Q.touchSession, { id, ...note });
 	});
 	for (const kind of ["token", "session"] as const) {
 		for (const [id, note] of taken[kind]) if (notes[kind].get(id) === note) notes[kind].delete(id);
@@ -125,7 +125,7 @@ export function writeUses(app: App): void {
 
 /** Writes what is noted, waiting its turn at the gate. Rejects when the write failed; nothing is lost then. */
 export function flushUses(app: App): Promise<void> {
-	return app.gate.run(() => writeUses(app));
+	return app.gate.run(async () => await writeUses(app));
 }
 
 /**

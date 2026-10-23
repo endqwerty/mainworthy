@@ -63,7 +63,7 @@ async function archive(task: z.infer<typeof ArchiveTask>): Promise<void> {
 			const { bootstrap } = await import("../identity/identity.ts");
 			const { recoverAccepted } = await import("./jobs.ts");
 			const now = task.now;
-			app = openApp(
+			app = await openApp(
 				defaultConfig({
 					MAINWORTHY_DATA: data.dataDir,
 					MAINWORTHY_OWNER: task.owner,
@@ -74,14 +74,14 @@ async function archive(task: z.infer<typeof ArchiveTask>): Promise<void> {
 				now === undefined ? {} : { now: () => now },
 			);
 			const target = app;
-			const restored = target.db.savepoint(() => {
-				removeBootstrap(target.db);
-				const counts = importArchive(target.db, fileLines(task.path), { blobs: target.blobs });
-				return { counts, owner: task.mode === "local" ? bootstrap(target).owner : null };
+			const restored = target.db.savepoint(async () => {
+				await removeBootstrap(target.db);
+				const counts = await importArchive(target.db, fileLines(task.path), { blobs: target.blobs });
+				return { counts, owner: task.mode === "local" ? (await bootstrap(target)).owner : null };
 			});
 			const events: Extract<z.infer<typeof ArchiveReply>, { ok: true }>["events"] = [];
 			target.subscribe((event) => events.push(event));
-			recoverAccepted(target);
+			await recoverAccepted(target);
 			reply = {
 				ok: true,
 				...restored,
@@ -118,7 +118,7 @@ async function reads(): Promise<void> {
 		// Nor does it ask where a request came from: no request reaches a reader.
 		proxy: null,
 	} as const;
-	let app = openApp(config, { reader: true });
+	let app = await openApp(config, { reader: true });
 	const ReadMessage = z.object({
 		type: z.literal("read"),
 		id: z.number().int(),
@@ -137,14 +137,14 @@ async function reads(): Promise<void> {
 			const call = Message.parse(message);
 			if (call.type === "refresh") {
 				app.close();
-				app = openApp(config, { reader: true });
+				app = await openApp(config, { reader: true });
 				return;
 			}
 			app.now = () => Date.now() + call.clockOffset;
 			const reply: Reply =
 				OPS[call.op]?.effect === "write"
 					? { ok: false, error: { code: "forbidden", message: "reader threads cannot write" } }
-					: await invoke(app, OPS, { ...call, reference: call.caller, actor: () => null });
+					: await invoke(app, OPS, { ...call, reference: call.caller, actor: async () => null });
 			port.postMessage({ type: "reply", id: call.id, reply });
 		});
 	});

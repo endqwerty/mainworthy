@@ -90,7 +90,7 @@ async function result(method: "GET" | "POST", path: string, body?: unknown): Pro
 const op = (key: string, name: string, input: unknown) => result("POST", `/api/p/${key}/${name}`, input);
 
 test("the iPhone reads the bound authenticator step and its completed recovery-code sign-in", async () => {
-	const instance = world();
+	const instance = await world();
 	try {
 		const password = "a password for authenticator sign-in";
 		const cookie = await joined(instance, "phone-code", password);
@@ -134,7 +134,7 @@ test("the iPhone reads the bound authenticator step and its completed recovery-c
 });
 
 test("the iPhone reads a native passkey challenge from the configured instance", async () => {
-	const instance = world({ publicUrl: "https://mainworthy.example:8443" });
+	const instance = await world({ publicUrl: "https://mainworthy.example:8443" });
 	try {
 		const reply = await instance.post("/api/login/challenge", { native: true });
 		expect(reply.status).toBe(200);
@@ -146,7 +146,7 @@ test("the iPhone reads a native passkey challenge from the configured instance",
 });
 
 test("the iPhone reads why native passkey sign-in is unavailable", async () => {
-	const instance = world({ publicUrl: "http://localhost:7357" });
+	const instance = await world({ publicUrl: "http://localhost:7357" });
 	try {
 		const reply = await instance.post("/api/login/challenge", { native: true });
 		expect(reply.status).toBe(400);
