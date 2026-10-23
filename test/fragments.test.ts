@@ -6,8 +6,7 @@ import { mergeBodies } from "../src/core/merge3.ts";
 import { emptyBody, Step } from "../src/core/model.ts";
 import type { PlanReply, ProposeReply } from "../src/core/ops.ts";
 import { REPLIES } from "../src/core/replies.ts";
-import { Db } from "../src/server/kernel/db.ts";
-import { migrate, SCHEMA_VERSION } from "../src/server/kernel/migrate.ts";
+import { Database, type SqlValue, sql } from "../src/server/kernel/db.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
 import { structuralProblems } from "../src/server/suite/read.ts";
@@ -15,8 +14,8 @@ import { bodyOf, expandSteps, fragmentUsers, mustCase } from "../src/server/suit
 import { exportArchive, importArchive, linesOf } from "../src/server/transfer/transfer.ts";
 import { DraftBody } from "../src/web/lib/drafts.ts";
 import { holdsUnfinishedStep, recordable } from "../src/web/lib/merges.ts";
-import { dropResetIndexes } from "./demo-removal-fixture.ts";
-import { dropReceiptSchema, type Harness, harness } from "./helpers.ts";
+import { testDatabase } from "./db.ts";
+import { type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
 beforeEach(async () => {
@@ -145,18 +144,23 @@ test("a run selected by text includes the pinned-only case beside the inline sib
 test.each(["instance", "project"])("%s archive replay rebuilds pinned search for find and plan", async (scope) => {
 	await seedSearchPins();
 	const chunks: string[] = [];
-	exportArchive(
-		h.app.db,
-		(chunk) => {
-			chunks.push(chunk);
-		},
-		scope === "project" ? { project: "scratch" } : {},
+	await h.app.database.read(
+		async (db) =>
+			await exportArchive(
+				db,
+				(chunk) => {
+					chunks.push(chunk);
+				},
+				scope === "project" ? { project: "scratch" } : {},
+			),
 	);
-	const db = new Db(":memory:");
+	const fixture = await testDatabase();
+	const database = await Database.open({ url: fixture.url });
 	try {
-		await migrate(db, ":memory:");
-		await importArchive(db, linesOf(chunks.join("")));
-		const app = { ...h.app, db, reader: db };
+		await database.write(
+			async (db) => await db.transaction(async () => await importArchive(db, linesOf(chunks.join("")))),
+		);
+		const app = { ...h.app, database };
 		expect(
 			await invoke(app, OPS, {
 				op: "find",
@@ -182,72 +186,9 @@ test.each(["instance", "project"])("%s archive replay rebuilds pinned search for
 			}),
 		).toMatchObject({ ok: true, result: { slots: 2 } });
 	} finally {
-		db.close();
+		await database.close();
+		await fixture.close();
 	}
-});
-
-test("upgrading an existing database rebuilds pinned search once", async () => {
-	await seedSearchPins();
-	await h.call("propose", {
-		edits: [
-			{
-				op: "create",
-				body: {
-					title: "Mixed steps",
-					pre: "consumerpre",
-					steps: [
-						{ id: "aa", action: "Before", expected: null },
-						{ id: "bb", use: { fragment: "C-1", version: 1 } },
-						{ id: "cc", use: { fragment: "C-1", version: 2 } },
-						{ id: "dd", action: "After", expected: "Done" },
-					],
-				},
-				tags: ["smoke", "regression"],
-			},
-			{ op: "create", kind: "fragment", body: { title: "Empty fragment", steps: [] } },
-		],
-	});
-	await h.call("propose", {
-		edits: [
-			{
-				op: "create",
-				body: { title: "Empty pin", pre: "emptyconsumer", steps: [{ id: "ee", use: { fragment: "C-5", version: 1 } }] },
-			},
-		],
-	});
-	await h.call("propose", { edits: [{ op: "state", cases: ["C-1"], to: "archived" }] });
-	const db = h.app.db;
-	const documents = () =>
-		db.raw.query("SELECT rowid, title, body, tags, project FROM search_docs ORDER BY rowid").all();
-	const expected = documents();
-	await dropResetIndexes(db);
-	// Restore schema 29 before replaying migrations, including columns added since the search upgrade.
-	await dropReceiptSchema(db);
-	db.exec(
-		"DROP TABLE assertion_seen; DROP TABLE assertion_spreads; DROP TABLE assertion_roots; DROP TABLE assertion_index; DROP INDEX results_assertion_rebuild; DROP INDEX flips_first_try; DROP INDEX flips_second_try; ALTER TABLE flips DROP COLUMN first_try; ALTER TABLE flips DROP COLUMN second_try; DROP TABLE result_tries; DROP TABLE handoffs; DROP INDEX change_ends_landing; ALTER TABLE change_ends DROP COLUMN landing_branch; ALTER TABLE change_ends DROP COLUMN landing_repo; ALTER TABLE change_ends DROP COLUMN landing_commit; DROP INDEX projects_identity; ALTER TABLE projects DROP COLUMN identity; ALTER TABLE results RENAME COLUMN trail TO steps; ALTER TABLE results DROP COLUMN model; ALTER TABLE batches DROP COLUMN model",
-	);
-	db.exec(
-		"DROP TABLE slot_leases; UPDATE search_docs SET body = '' WHERE rowid = 2; UPDATE meta SET value = '29' WHERE key = 'schema_version'",
-	);
-	expect(await h.call("find", { text: "zephyrpassword", folder: "Consumers" })).toMatchObject({
-		count: 1,
-		items: [{ ref: "C-3" }],
-	});
-	expect(await migrate(db, ":memory:")).toEqual({ from: 29, to: SCHEMA_VERSION, backup: null });
-	expect(documents()).toEqual(expected);
-	expect(await h.call("find", { text: "zephyrpassword", folder: "Consumers" })).toMatchObject({ count: 2 });
-	expect(await h.call("find", { text: "luminousreply", folder: "Consumers" })).toMatchObject({
-		count: 1,
-		items: [{ ref: "C-2" }],
-	});
-	expect(
-		await h.call<PlanReply>("plan", {
-			name: "Upgraded password checks",
-			select: { text: "zephyrpassword", folders: ["Consumers"] },
-		}),
-	).toEqual({ run: "R-1", slots: 2, already: 0 });
-	expect(await migrate(db, ":memory:")).toEqual({ from: SCHEMA_VERSION, to: SCHEMA_VERSION, backup: null });
-	expect(await h.call("find", { text: "zephyrpassword", folder: "Consumers" })).toMatchObject({ count: 2 });
 });
 
 test("a case expands its pinned fragment, retaining the editable pin and source marker", async () => {
@@ -348,7 +289,9 @@ test("archived fragments retain existing users but refuse new pins", async () =>
 		status: "adopted",
 	});
 	expect(await view()).toMatchObject({ version: 3, title: "Checkout", steps: [{ action: "Enter a password" }, {}] });
-	const before = h.app.db.raw.query("SELECT * FROM versions").all();
+	const before = await h.app.database.read(
+		async (db) => await db.all(sql<readonly SqlValue[], Record<string, unknown>>("SELECT * FROM versions"), []),
+	);
 	for (const edit of [
 		{ op: "create", body: { title: "New user", steps: [{ id: "gh", use: { fragment: "C-1", version: 1 } }] } },
 		{
@@ -368,7 +311,11 @@ test("archived fragments retain existing users but refuse new pins", async () =>
 			error: { code: "invalid", message: expect.stringContaining("C-1 is archived") },
 		});
 	}
-	expect(h.app.db.raw.query("SELECT * FROM versions").all()).toEqual(before);
+	expect(
+		await h.app.database.read(
+			async (db) => await db.all(sql<readonly SqlValue[], Record<string, unknown>>("SELECT * FROM versions"), []),
+		),
+	).toEqual(before);
 	expect(await h.call("propose", { edits: [{ op: "state", cases: ["C-1"], to: "active" }] })).toMatchObject({
 		status: "adopted",
 	});
@@ -376,10 +323,10 @@ test("archived fragments retain existing users but refuse new pins", async () =>
 });
 
 test("a fragment archived while a new pin waits for acceptance refuses that adoption", async () => {
-	h.close();
+	await h.close();
 	h = await harness({ preset: "standard" });
 	await createFragment();
-	const writer = h.actor("writer", "agent", ["read", "produce"]);
+	const writer = await h.actor("writer", "agent", ["read", "produce"]);
 	const pending = await h.call<ProposeReply>(
 		"propose",
 		{
@@ -453,11 +400,15 @@ test("one batch moves selected users through one attributable decision and leave
 	expect(await view()).toMatchObject({ steps: [{ action: "Use a passkey", source: { version: 2 } }, {}] });
 	expect(await view("C-4")).toMatchObject({ version: 1, steps: [{ action: "Enter a password" }, {}] });
 	expect(await view("C-2", 1)).toMatchObject({ steps: [{ action: "Enter a password" }, {}] });
-	const rows = h.app.db.raw
-		.query<{ decision: number; proposal: number; author: number; reason: string }, []>(
-			"SELECT decision, proposal, author, reason FROM versions WHERE no = 2 AND case_id IN (2, 3) ORDER BY case_id",
-		)
-		.all();
+	const rows = await h.app.database.read(
+		async (db) =>
+			await db.all(
+				sql<readonly SqlValue[], { decision: number; proposal: number; author: number; reason: string }>(
+					"SELECT decision, proposal, author, reason FROM versions WHERE no = 2 AND case_id IN (2, 3) ORDER BY case_id",
+				),
+				[],
+			),
+	);
 	expect(rows).toHaveLength(2);
 	expect(rows[0]).toEqual(rows[1]);
 	expect(rows[0]).toMatchObject({ author: h.owner.id, reason: "Adopt passkeys" });
@@ -541,32 +492,40 @@ test.each(["instance", "project"])(
 		});
 		const before = await view();
 		const chunks: string[] = [];
-		exportArchive(
-			h.app.db,
-			(chunk) => {
-				chunks.push(chunk);
-			},
-			scope === "project" ? { project: "scratch" } : {},
+		await h.app.database.read(
+			async (db) =>
+				await exportArchive(
+					db,
+					(chunk) => {
+						chunks.push(chunk);
+					},
+					scope === "project" ? { project: "scratch" } : {},
+				),
 		);
-		const db = new Db(":memory:");
+		const fixture = await testDatabase();
+		const database = await Database.open({ url: fixture.url });
 		try {
-			await migrate(db, ":memory:");
-			await importArchive(db, linesOf(chunks.join("")));
-			const fragment = await mustCase(db, 1, "C-1");
-			const consumer = await mustCase(db, 1, "C-2");
-			expect(fragment.kind).toBe("fragment");
-			expect(before).toMatchObject({ hash: consumer.head_hash });
-			expect(expandSteps(db, 1, await bodyOf(db, consumer.id, 1))[0]).toMatchObject({
-				action: "Enter a password",
-				source: { version: 1 },
+			await database.write(
+				async (db) => await db.transaction(async () => await importArchive(db, linesOf(chunks.join("")))),
+			);
+			await database.read(async (db) => {
+				const fragment = await mustCase(db, 1, "C-1");
+				const consumer = await mustCase(db, 1, "C-2");
+				expect(fragment.kind).toBe("fragment");
+				expect(before).toMatchObject({ hash: consumer.head_hash });
+				expect((await expandSteps(db, 1, await bodyOf(db, consumer.id, 1)))[0]).toMatchObject({
+					action: "Enter a password",
+					source: { version: 1 },
+				});
+				expect((await expandSteps(db, 1, await bodyOf(db, consumer.id, 2)))[0]).toMatchObject({
+					action: "Use a passkey",
+					source: { version: 2 },
+				});
+				expect(await fragmentUsers(db, 1, "C-1")).toEqual([{ case: "C-2", base: 2, versions: [2] }]);
 			});
-			expect(expandSteps(db, 1, await bodyOf(db, consumer.id, 2))[0]).toMatchObject({
-				action: "Use a passkey",
-				source: { version: 2 },
-			});
-			expect(await fragmentUsers(db, 1, "C-1")).toEqual([{ case: "C-2", base: 2, versions: [2] }]);
 		} finally {
-			db.close();
+			await database.close();
+			await fixture.close();
 		}
 	},
 );
@@ -672,7 +631,7 @@ test("a batch waiting for review refuses a case changed after the proposal was s
 		const question = (await h.call<{ evidenceHash: string }[]>("get", { refs: [policy.question] }))[0];
 		await h.call("decide", { q: policy.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } });
 	}
-	const writer = h.actor("writer", "agent", ["read", "produce"]);
+	const writer = await h.actor("writer", "agent", ["read", "produce"]);
 	const batch = await h.call<ProposeReply>(
 		"propose",
 		{
@@ -735,14 +694,22 @@ test("expected results in pinned fragments count for structural checks", async (
 			},
 		],
 	});
-	expect(structuralProblems(h.app.db, 1).find((problem) => problem.rule === "no-expected")).toMatchObject({ total: 0 });
+	expect(
+		(await h.app.database.read(async (db) => await structuralProblems(db, 1))).find(
+			(problem) => problem.rule === "no-expected",
+		),
+	).toMatchObject({ total: 0 });
 	await h.call("propose", {
 		edits: [
 			{ op: "edit", case: "C-1", base: 1, body: { steps: [{ id: "ab", action: "No outcome", expected: null }] } },
 		],
 	});
 	// The consumer still has the expectation from fragment version 1.
-	expect(structuralProblems(h.app.db, 1).find((problem) => problem.rule === "no-expected")).toMatchObject({
+	expect(
+		(await h.app.database.read(async (db) => await structuralProblems(db, 1))).find(
+			(problem) => problem.rule === "no-expected",
+		),
+	).toMatchObject({
 		total: 1,
 		rows: [{ ref: "C-1" }],
 	});

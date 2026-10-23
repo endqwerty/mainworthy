@@ -372,3 +372,39 @@ test("search vectors follow insert, update and delete; prefixes, accents and tit
 		await db.unsafe("ROLLBACK");
 	}
 });
+
+test("search vector budgets retain UTF-8 prefixes and cannot overflow on oversized metadata", async () => {
+	const vocabulary = Array.from({ length: 100_000 }, (_, i) => `word${i.toString(36).padStart(6, "0")}`).join(" ");
+	await db.unsafe("BEGIN");
+	try {
+		await db.unsafe("INSERT INTO search_docs(id,project,title,tags,body) VALUES(1,1,$1,$2,$3)", [
+			`titlecanary ${vocabulary}`,
+			`tagcanary ${vocabulary}`,
+			`earlycanary ${"éx ".repeat(30_000)} latecanary`,
+		]);
+		const [size] = await db.unsafe<{ bytes: number; title_bytes: number }[]>(
+			"SELECT pg_column_size(tsv) AS bytes, pg_column_size(title_tsv) AS title_bytes FROM search_docs WHERE id=1",
+		);
+		expect(size?.bytes).toBeLessThan(3 * 262144);
+		expect(size?.title_bytes).toBeLessThanOrEqual(262144);
+		for (const word of ["titlecanary", "tagcanary", "earlycanary", "ex"]) {
+			expect(
+				await db.unsafe<{ id: bigint }[]>(
+					"SELECT id FROM search_docs WHERE tsv @@ to_tsquery('mainworthy_search',$1)",
+					[word],
+				),
+			).toEqual([{ id: 1n }]);
+		}
+		expect(
+			await db.unsafe<{ id: bigint }[]>(
+				"SELECT id FROM search_docs WHERE tsv @@ to_tsquery('mainworthy_search','latecanary')",
+			),
+		).toEqual([]);
+		expect(
+			(await db.unsafe<{ bytes: number }[]>("SELECT octet_length(body) AS bytes FROM search_docs WHERE id=1"))[0]
+				?.bytes,
+		).toBeGreaterThan(65536);
+	} finally {
+		await db.unsafe("ROLLBACK");
+	}
+});

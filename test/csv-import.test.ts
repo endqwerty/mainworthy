@@ -80,7 +80,7 @@ test("CSV preview creates no cases, confirms the mapping, and refuses repeated f
 		});
 		expect(await h.call("find", { what: "cases" })).toMatchObject({ count: 1 });
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -112,7 +112,7 @@ test("CSV rows report missing definitions, invalid values, missing ids and title
 		]);
 		expect(await h.call("find", { what: "cases" })).toMatchObject({ count: 0 });
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -130,7 +130,7 @@ test("CSV confirmation refuses changed files and definitions, and policy still d
 		});
 		expect(await h.call("find", { what: "cases" })).toMatchObject({ count: 0 });
 	} finally {
-		h.close();
+		await h.close();
 	}
 	const strict = await harness({ preset: "strict" });
 	try {
@@ -140,7 +140,7 @@ test("CSV confirmation refuses changed files and definitions, and policy still d
 		).toMatchObject({ status: "open", cases: [] });
 		expect(await strict.call("find", { what: "cases" })).toMatchObject({ count: 0 });
 	} finally {
-		strict.close();
+		await strict.close();
 	}
 });
 
@@ -179,7 +179,7 @@ test("CSV maps project fields and execution intent and imports 2,000 cases and e
 		const md = await h.call<{ md: string }[]>("get", { refs: ["OLD2000"], as: "md" });
 		expect(md[0]?.md).toContain("priority: High");
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -232,7 +232,7 @@ test("TestRail preset uses documented headers and section depth, and refuses sep
 		expect(separate).toMatchObject({ refused: 1, confirmation: null });
 		expect(separate.rows[1]?.errors).toContain("foreign id is required");
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -250,7 +250,7 @@ test.each([
 		else expect(Preview.parse(reply.result).rows[0]?.errors.join("; ")).toContain(message);
 		expect(await h.call("find", { what: "cases" })).toMatchObject({ count: 0 });
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -278,7 +278,7 @@ test("CSV refuses the whole confirmed batch when any record is invalid or an ali
 		).toMatchObject({ ok: false, error: { code: "invalid" } });
 		expect(await h.call("find", { what: "cases" })).toMatchObject({ count: 1 });
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -295,13 +295,13 @@ test("CSV mapping changes need a new preview, command ids bind the input, and re
 			ok: false,
 			error: { code: "conflict" },
 		});
-		const reader = h.actor("reader", "human", ["read"]);
+		const reader = await h.actor("reader", "human", ["read"]);
 		expect(await h.raw("import-csv", { csv, mapping }, reader)).toMatchObject({
 			ok: false,
 			error: { code: "forbidden" },
 		});
 		expect(await h.call("find", { what: "cases" })).toMatchObject({ count: 0 });
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
