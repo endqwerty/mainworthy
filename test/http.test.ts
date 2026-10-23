@@ -3579,7 +3579,7 @@ test("a mismatched CLI contract is refused before an operation writes", async ()
 	expect(accepted.body).toMatchObject({ ok: true });
 });
 
-test("an unversioned browser cannot write, while an unversioned native cookie client can", async () => {
+test("an unversioned browser cannot run operations, while native clients and logout still work", async () => {
 	await using instance = boot("local", "owner-secret-0123456789");
 	const signedIn = await post(instance, "/api/login", { token: "owner-secret-0123456789" });
 	const cookie = signedIn.cookie?.split(";")[0];
@@ -3615,8 +3615,8 @@ test("an unversioned browser cannot write, while an unversioned native cookie cl
 		});
 		expect(await native.json()).toMatchObject({ ok: true });
 	}
-	// Signing in, signing out and starting a passkey ceremony must not bypass the version gate either.
-	for (const path of ["/api/login", "/api/logout", "/api/login/challenge"]) {
+	// Signing in and starting a passkey ceremony must not bypass the version gate either.
+	for (const path of ["/api/login", "/api/login/challenge"]) {
 		for (const version of [null, String(API_VERSION - 1)]) {
 			const response = await fetch(`${instance.url}${path}`, {
 				method: "POST",
@@ -3634,4 +3634,32 @@ test("an unversioned browser cannot write, while an unversioned native cookie cl
 	expect(
 		(await fetch(`${instance.url}/api/session`, { headers: { cookie, "sec-fetch-site": "same-origin" } })).status,
 	).toBe(200);
+	// A stale page must still be able to sign out of a shared browser.
+	await using server = boot("server", "owner-secret-0123456789");
+	for (const version of [null, String(API_VERSION - 1)]) {
+		const signedIn = await post(server, "/api/login", { token: "owner-secret-0123456789" });
+		const oldCookie = signedIn.cookie?.split(";")[0];
+		if (!oldCookie) throw new Error("no session cookie");
+		const headers = {
+			cookie: oldCookie,
+			...(version === null ? {} : { "x-mainworthy-api-version": version }),
+		};
+		const foreign = await fetch(`${server.url}/api/logout`, {
+			method: "POST",
+			headers: { ...headers, origin: "https://elsewhere.example" },
+		});
+		expect(foreign.status).toBe(401);
+		expect(foreign.headers.get("set-cookie")).toBeNull();
+		expect((await fetch(`${server.url}/api/session`, { headers: { cookie: oldCookie } })).status).toBe(200);
+		const signedOut = await fetch(`${server.url}/api/logout`, {
+			method: "POST",
+			headers: { ...headers, origin: server.url },
+		});
+		expect(signedOut.status).toBe(200);
+		expect(await signedOut.json()).toMatchObject({ ok: true });
+		const expired = signedOut.headers.getSetCookie().find((value) => value.startsWith("mainworthy_sid="));
+		expect(expired).toStartWith("mainworthy_sid=;");
+		expect(expired).toContain("Max-Age=0");
+		expect((await fetch(`${server.url}/api/session`, { headers: { cookie: oldCookie } })).status).toBe(401);
+	}
 });

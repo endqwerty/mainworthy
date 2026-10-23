@@ -10,8 +10,8 @@ a case already archived by another client, claim a change and then undo the othe
 Checking only an explicitly mismatched header left that old bundle able to write.
 
 The web API client sends the shared API version on each fetch request, including session and sign-in
-requests. The HTTP boundary refuses explicit mismatches and requires the header on browser requests
-other than GET and HEAD. Browser POSTs carry Origin, including on plain HTTP where fetch metadata
+requests. Except for logout, the HTTP boundary refuses explicit mismatches and requires the header on browser
+requests other than GET and HEAD. Browser POSTs carry Origin, including on plain HTTP where fetch metadata
 may be absent. Sec-Fetch-Site also identifies a browser request. These headers are controlled by the
 browser, so an already-open bundle cannot omit them to evade the check. Cross-origin requests still
 follow the existing authentication refusal. No operation runs after a version refusal.
@@ -21,6 +21,11 @@ Requiring the header for every cookie request or every client would require an i
 making old browser tabs safer. Native clients without browser headers remain accepted when unversioned.
 Explicit mismatches are refused for them as before. The CLI already sends its version and checks health.
 EventSource streams use GET, cannot set a custom header and do not write.
+
+Logout is exempt from version enforcement. It still requires the same origin, revokes the session named
+by the cookie and expires the cookie, even when the version is absent or mismatched. A stale page must
+be able to end its session on a shared browser. Login, operations and passkey challenges retain the
+version guard.
 
 The refusal uses the existing conflict envelope and a short reload instruction. Historical bundles
 already display that message, so refusing the request also explains what the person must do. The
