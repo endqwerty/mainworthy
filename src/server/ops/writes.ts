@@ -115,7 +115,8 @@ export function propose(ctx: Ctx, input: ProposeInput): ProposeReply {
 export function* proposeSteps(ctx: Ctx, input: ProposeInput): Generator<undefined, ProposeReply, void> {
 	for (const edit of input.edits) if (edit.op === "quarantine") validateQuarantineEdit(ctx, edit);
 	const sealed = yield* sealSteps(ctx, { edits: input.edits, reason: input.reason });
-	if (!sealed) return { proposal: null, status: "adopted", question: null, needs: null, cases: [], conflicts: [] };
+	if (!sealed)
+		return { proposal: null, status: "adopted", question: null, needs: null, cases: [], placements: [], conflicts: [] };
 	const raised = yield* raiseAdopt(ctx, { raise: raiseSteps }, sealed);
 	const base = {
 		proposal: `P-${sealed.proposal.no}`,
@@ -123,8 +124,18 @@ export function* proposeSteps(ctx: Ctx, input: ProposeInput): Generator<undefine
 		conflicts: sealed.conflicts,
 	};
 	if (raised.s === "decided") {
-		const effects = raised.effects as { cases?: ProposeReply["cases"]; rejected?: boolean };
-		return { ...base, status: effects.rejected ? "rejected" : "adopted", needs: null, cases: effects.cases ?? [] };
+		const effects = raised.effects as {
+			cases?: ProposeReply["cases"];
+			placements?: ProposeReply["placements"];
+			rejected?: boolean;
+		};
+		return {
+			...base,
+			status: effects.rejected ? "rejected" : "adopted",
+			needs: null,
+			cases: effects.cases ?? [],
+			placements: effects.placements ?? [],
+		};
 	}
 	const ask = Ask.parse(json(raised.question.ask));
 	const needs = ask.who;
@@ -140,6 +151,7 @@ export function* proposeSteps(ctx: Ctx, input: ProposeInput): Generator<undefine
 						? "an admin"
 						: "a member who is not an agent",
 		cases: [],
+		placements: [],
 	};
 }
 

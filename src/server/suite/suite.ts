@@ -27,6 +27,7 @@ import {
 } from "../../core/model.ts";
 import { CaseAlias, type CaseStamp, type Edit } from "../../core/ops.ts";
 import { parseOutline } from "../../core/outline.ts";
+import type { PlacementEdit } from "../../core/proposals.ts";
 import { clip } from "../../core/text.ts";
 import { type Ctx, parseRef, ref } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
@@ -1244,7 +1245,12 @@ export const resolvedOf = (proposal: ProposalRow): Resolved[] => json<Resolved[]
 
 // ── Adopt ──────────────────────────────────────────────────────────────────────────────────────────────────
 
-export type Adopted = { cases: CaseStamp[]; created: string[]; policyVersion: number | null };
+export type Adopted = {
+	cases: CaseStamp[];
+	placements: PlacementEdit[];
+	created: string[];
+	policyVersion: number | null;
+};
 
 function validateFields(body: CaseBody, policy: Policy, previous?: CaseBody): void {
 	const errors = fieldErrors(body.fields, policy.settings.fields ?? {}, previous?.fields);
@@ -1259,7 +1265,15 @@ function validateFields(body: CaseBody, policy: Policy, previous?: CaseBody): vo
  */
 export function* adoptSteps(ctx: Ctx, witness: Witness, proposal: ProposalRow): Generator<undefined, Adopted, void> {
 	decisionOf(witness, "adopt");
-	const out: Adopted = { cases: [], created: [], policyVersion: null };
+	const out: Adopted = { cases: [], placements: [], created: [], policyVersion: null };
+	const recordPlacement = (row: CaseRow, to: Placement): void => {
+		for (const inverse of place(ctx, witness, proposal, row, to)) {
+			const previous = out.placements.at(-1);
+			if (previous && JSON.stringify({ ...previous, cases: [] }) === JSON.stringify({ ...inverse, cases: [] }))
+				previous.cases.push(...inverse.cases);
+			else out.placements.push(inverse);
+		}
+	};
 	const author = proposal.author;
 	const edits = resolvedOf(proposal);
 	const index = folderIndex(ctx.db, ctx.project.id);
@@ -1380,7 +1394,7 @@ export function* adoptSteps(ctx: Ctx, witness: Witness, proposal: ProposalRow): 
 					const tags = edit.tags
 						? cleanTags(edit.tags.set ?? [...current, ...edit.tags.add]).filter((tag) => !remove.has(tag))
 						: current;
-					place(ctx, witness, proposal, row, { folder: to, rank, tags, state: row.state });
+					recordPlacement(row, { folder: to, rank, tags, state: row.state });
 				}
 				break;
 			}
@@ -1388,7 +1402,7 @@ export function* adoptSteps(ctx: Ctx, witness: Witness, proposal: ProposalRow): 
 				for (const id of edit.caseIds) {
 					if (++work % SLICE === 0) yield;
 					const row = mustRow(id);
-					place(ctx, witness, proposal, row, {
+					recordPlacement(row, {
 						folder: row.folder,
 						rank: row.rank,
 						tags: json<string[]>(row.tags),
@@ -1429,6 +1443,7 @@ export function* adoptSteps(ctx: Ctx, witness: Witness, proposal: ProposalRow): 
 			}
 		}
 	}
+	out.placements.reverse();
 	return out;
 }
 
@@ -1474,9 +1489,9 @@ function writeTags(ctx: Ctx, id: number, tags: readonly string[]): void {
 	for (const tag of tags) ctx.db.run(Q.insertTag, { project: ctx.project.id, tag, id });
 }
 
-function place(ctx: Ctx, witness: Witness, proposal: ProposalRow, row: CaseRow, to: Placement): void {
+function place(ctx: Ctx, witness: Witness, proposal: ProposalRow, row: CaseRow, to: Placement): PlacementEdit[] {
 	const before: Placement = { folder: row.folder, rank: row.rank, tags: json<string[]>(row.tags), state: row.state };
-	if (JSON.stringify(before) === JSON.stringify(to)) return;
+	if (JSON.stringify(before) === JSON.stringify(to)) return [];
 	ctx.db.run(Q.place, {
 		id: row.id,
 		folder: to.folder,
@@ -1502,6 +1517,26 @@ function place(ctx: Ctx, witness: Witness, proposal: ProposalRow, row: CaseRow, 
 		indexCase(ctx, row.id, bodyOf(ctx.db, row.id, row.head), to.tags);
 	}
 	ctx.touched.add(caseRef(row));
+	const ref = caseRef(row);
+	const inverse: PlacementEdit[] = [];
+	if (before.state !== to.state) inverse.push({ op: "state", cases: [ref], to: before.state });
+	const moved = before.folder !== to.folder || before.rank !== to.rank;
+	const tagged = before.tags.join(" ") !== to.tags.join(" ");
+	if (moved || tagged)
+		inverse.push({
+			op: "place",
+			cases: [ref],
+			...(moved ? { folder: before.folder } : {}),
+			...(tagged
+				? {
+						tags: {
+							add: before.tags.filter((tag) => !to.tags.includes(tag)),
+							remove: to.tags.filter((tag) => !before.tags.includes(tag)),
+						},
+					}
+				: {}),
+		});
+	return inverse;
 }
 
 /** A rank after `after` (a case in that folder), or at the end of the folder when `after` is null. */

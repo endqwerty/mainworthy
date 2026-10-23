@@ -37,6 +37,21 @@ export const QuarantineEdit = z
 		exit: QuarantineExit.nullable(),
 	})
 	.meta({ "x-mcp-hidden": true });
+export const PlaceEdit = z.object({
+	op: z.literal("place"),
+	cases: schemaTexts.min(1),
+	folder: FolderRef.optional(),
+	after: schemaNullableText.optional(),
+	tags: TagChange.optional(),
+});
+export const StateEdit = z.object({
+	op: z.literal("state"),
+	cases: schemaTexts.min(1),
+	to: z.enum(["active", "archived"]),
+});
+export const PlacementEdit = z.discriminatedUnion("op", [PlaceEdit, StateEdit]);
+export type PlacementEdit = z.infer<typeof PlacementEdit>;
+
 export const Edit = z.discriminatedUnion("op", [
 	QuarantineEdit,
 	z
@@ -75,14 +90,8 @@ export const Edit = z.discriminatedUnion("op", [
 		body: CaseBody.partial().optional(),
 		md: schemaOptionalText,
 	}),
-	z.object({
-		op: z.literal("place"),
-		cases: schemaTexts.min(1),
-		folder: FolderRef.optional(),
-		after: schemaNullableText.optional(),
-		tags: TagChange.optional(),
-	}),
-	z.object({ op: z.literal("state"), cases: schemaTexts.min(1), to: z.enum(["active", "archived"]) }),
+	PlaceEdit,
+	StateEdit,
 	z.object({
 		op: z.literal("restore"),
 		case: ref("The case."),

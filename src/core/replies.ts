@@ -25,7 +25,7 @@ import {
 	TotpConfirmed,
 	TotpEnrolment,
 } from "./people-replies.ts";
-import { QuarantineEdit } from "./proposals.ts";
+import { PlacementEdit, QuarantineEdit } from "./proposals.ts";
 import { ResultLocation, ResultTrail } from "./results.ts";
 import { GateStatus, Obligation, ShardWait, SlotWork, TargetMatch, Verdict } from "./runs.ts";
 import {
@@ -60,6 +60,8 @@ export const ProposeReply = z.object({
 	question: schemaNullableText,
 	needs: schemaNullableText,
 	cases: z.array(CaseStamp),
+	/** Ready-to-propose inverse edits for placements actually written. No-ops contribute none. */
+	placements: z.array(PlacementEdit),
 	conflicts: z.array(
 		z.object({
 			case: schemaText,
