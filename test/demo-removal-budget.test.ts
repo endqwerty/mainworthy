@@ -7,7 +7,7 @@ import { migrate } from "../src/server/kernel/migrate.ts";
 import { removeProject } from "../src/server/transfer/transfer.ts";
 import { removalFixture } from "./demo-removal-fixture.ts";
 
-test("removing a demo does not scan another project's excuses for every result", () => {
+test("deferred demo removal does not scan another project's excuses for every result", () => {
 	mkdirSync(join(homedir(), ".cache"), { recursive: true });
 	const directory = mkdtempSync(join(homedir(), ".cache", "mainworthy-removal-"));
 	const db = new Db(join(directory, "mainworthy.db"));
@@ -18,7 +18,12 @@ test("removing a demo does not scan another project's excuses for every result",
 		// here so the budget includes removal and its commit, without also syncing the setup's WAL pages.
 		db.checkpoint();
 		const start = performance.now();
-		const removed = removeProject(db, "removing");
+		// The demo worker's path (`resetDemoSteps`): one transaction, foreign keys enforced and checked at commit.
+		// The standalone path turns foreign keys off and would pass without the indexes this budget guards.
+		const removed = db.transaction(() => {
+			db.raw.exec("PRAGMA defer_foreign_keys = ON");
+			return removeProject(db, "removing", undefined, "deferred");
+		});
 		const ms = performance.now() - start;
 		console.log(`removeProject: ${ms.toFixed(1)} ms, ${removed.tables.results} results removed`);
 		expect(removed.tables.results).toBe(5_000);
