@@ -252,9 +252,11 @@ For a partly stale selection, Undo affects only the cases this action changed.
 Moves return to the folder and position that were current at the write.
 If that folder was archived meanwhile, it stays archived. Find the returned active cases in **All cases**.
 Tag undo reverses only the tags this action added or removed.
-If a placement or Undo reply is lost, press <kbd>u</kbd> again. The page checks the same request's recorded
+If a placement or Undo reply is lost, press <kbd>u</kbd>. The page checks the same request's recorded
 outcome before sending it again, so retrying an already-recorded Undo leaves another person's later move alone.
-For a lost placement reply, <kbd>u</kbd> checks that placement before recording its inverse.
+For a lost placement reply, <kbd>u</kbd> undoes the placement if it reached the server.
+If it never reached the server, <kbd>u</kbd> sends it once and then undoes it.
+That leaves two entries in history and no net change.
 If the project was replaced under the same key, the server refuses the old action. The page discards its Undo
 and asks you to reload before changing cases.
 
