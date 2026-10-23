@@ -495,6 +495,39 @@ check(
 );
 
 check(
+	"proof names the result's version after its timeline page is full of edits",
+	async () => {
+		const server = await startServer();
+		let h: Awaited<ReturnType<typeof openPage>> | undefined;
+		try {
+			await server.api("propose", { edits: [{ op: "create", outline: "Proof case\n  Open cart" }] });
+			const run = await server.api("plan", { name: "Proof run", select: {} });
+			await server.api("report", { run: run.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+			for (let base = 1; base <= 102; base++) {
+				await server.api("propose", {
+					edits: [{ op: "edit", case: "C-1", base, body: { title: `Proof case ${base + 1}` } }],
+				});
+			}
+			expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({
+				version: 103,
+				proof: { human: { outcome: "pass", current: false } },
+			});
+			expect(
+				(await server.api("timeline", { ref: "C-1", limit: 100 })).entries.some((entry) => entry.t === "result"),
+			).toBe(false);
+			h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+			const sentence = h.page.locator(".proof-block .prow").filter({ hasText: "person" }).locator(".pt");
+			await sentence.filter({ hasText: "pass on" }).waitFor();
+			expect(await sentence.innerText()).toContain("person · pass on v1 · basis exact · robin");
+		} finally {
+			await h?.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+check(
 	"A-5 external reports refresh the open case proof and timeline",
 	async () => {
 		const server = await startServer();

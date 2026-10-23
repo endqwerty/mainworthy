@@ -367,8 +367,6 @@ export function CasePane({
 						<SectionHeading>Proof</SectionHeading>
 						{(["human", "auto", "agent"] satisfies (keyof CaseView["proof"])[]).map((method) => {
 							const proof = view?.proof[method];
-							const latest = entries.find((entry) => entry.t === "result" && entry.method === method);
-							const result = latest?.t === "result" ? latest : null;
 							const mark = !proof
 								? "·"
 								: proof.outcome === "pass"
@@ -388,7 +386,7 @@ export function CasePane({
 									<span className="pt">
 										{method === "human" ? "person" : method === "auto" ? "pipeline" : "agent"} ·{" "}
 										{proof
-											? `${proof.outcome} on v${result?.version ?? version} · basis ${proof.basis}${result ? ` · ${result.by}${result.model ? ` · ${result.model}` : ""}${result.name ? ` · ${result.name}` : ""}` : ""}`
+											? `${proof.outcome} on ${proof.version === null ? "unknown version" : `v${proof.version}`} · basis ${proof.basis} · ${proof.by}${proof.model ? ` · ${proof.model}` : ""}${proof.name ? ` · ${proof.name}` : ""}`
 											: "no result yet"}
 									</span>
 									<span className="age">{proof ? age(proof.at) : ""}</span>

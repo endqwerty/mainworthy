@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { CaseBody, CaseKind, ExpandedStep, Step, StepId } from "../../core/model.ts";
+import { Proofs } from "../../core/replies.ts";
 import type { Draft } from "../lib/drafts.ts";
 import { randomId } from "../lib/ids.ts";
-import { Proofs } from "../ui/index.tsx";
 export const CaseRow = z.object({
 	ref: z.string(),
 	title: z.string(),

@@ -512,11 +512,8 @@ const Q = {
 		`SELECT * FROM results WHERE basis_case = $id AND method = $method
 		 ORDER BY seq DESC, ord DESC LIMIT $limit`,
 	),
-	latestOfCaseByMethod: sql<
-		{ id: number; method: string },
-		{ outcome: Outcome; at: number; basis: string; basis_version: number | null }
-	>(
-		`SELECT outcome, at, basis, basis_version FROM results WHERE basis_case = $id AND method = $method
+	latestOfCaseByMethod: sql<{ id: number; method: string }, ResultRow>(
+		`SELECT * FROM results WHERE basis_case = $id AND method = $method
 		 ORDER BY seq DESC, ord DESC LIMIT 1`,
 	),
 	ofBatch: sql<{ batch: number; limit: number }, ResultRow>(
@@ -1764,15 +1761,13 @@ export function listTests(
 	]);
 }
 
-export type Proof = { outcome: Outcome; at: number; current: boolean; basis: string } | null;
+export type Proof = { result: ResultRow; current: boolean } | null;
 
 /** The proof strip of a case: per producer, the latest result and whether it was on the current version. */
 export function proofOf(db: Db, row: { id: number; head: number }): Record<MethodKind, Proof> {
 	const one = (method: MethodKind): Proof => {
 		const latest = db.get(Q.latestOfCaseByMethod, { id: row.id, method });
-		return latest
-			? { outcome: latest.outcome, at: latest.at, current: latest.basis_version === row.head, basis: latest.basis }
-			: null;
+		return latest ? { result: latest, current: latest.basis_version === row.head } : null;
 	};
 	return { human: one("human"), auto: one("auto"), agent: one("agent") };
 }

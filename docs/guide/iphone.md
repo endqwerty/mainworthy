@@ -361,7 +361,7 @@ To browse cases and write a new case or an edit, follow these steps:
 1. Open **Cases**. The tab shows **All cases**, the top folders and the most used tags.
    **All tags** shows the rest.
 2. Open a folder, tag or **All cases** to browse its cases.
-3. Open a case to read its version, preconditions, steps and who may run it.
+3. Open a case to read its version, preconditions, steps, proof and who may run it.
 4. If you may produce evidence, press **+** to write a case in the folder you are in.
    To change an existing case, press **Edit case** on its page instead.
 5. Type a title, preconditions and steps. Each step has an action and an optional expected result.
@@ -375,6 +375,8 @@ Under a case's title, a chip for each way the case was run shows its latest resu
 who ran the case with an icon: a person, a pipeline's gears or an agent's sparkles. The chip also shows
 a tick or a cross and the outcome, such as **passed** or **failed**.
 A grey chip that says **older version** is a result on an earlier version of the case.
+On the case page, **Proof** names each latest result's original version, author, basis, and any model or test name.
+These are the latest results even when you open a saved case version. Editing the case does not change a result's version.
 
 A list you opened recently shows at once. After a change, the app reads that list again in the background.
 The app keeps the last forty lists you left. An older list is read again with a spinner.

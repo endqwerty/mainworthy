@@ -9,6 +9,7 @@ import api1Actors from "../../test/fixtures/cli/actor-list-api1.json";
 import { ciReport } from "../../test/helpers.ts";
 import { Policy } from "../core/kinds.ts";
 import { QuestionItem, type ReportInput } from "../core/ops.ts";
+import { Proofs } from "../core/replies.ts";
 import { SlotWork } from "../core/runs.ts";
 import { API_VERSION } from "../core/version.ts";
 import { OP_LIST } from "../server/ops/index.ts";
@@ -28,6 +29,35 @@ const Inbox = z.object({ items: z.array(Question) });
 const Token = z.object({ token: z.string() });
 const Created = z.object({ cases: z.array(Ref) });
 const Receipt = z.object({ batch: z.number(), fresh: z.boolean(), counts: z.object({ total: z.number() }) });
+
+test("CLI case reads retain the proving result's identity after the case changes", async () => {
+	await withInstance(async ({ client, cli, run }) => {
+		await client.call("propose", { edits: [{ op: "create", outline: "Proof case\n  Open cart" }] });
+		const plan = await client.call("plan", { name: "Proof", select: {} });
+		const receipt = await client.call("report", {
+			run: plan.run,
+			results: [{ test: { case: "C-1" }, outcome: "pass" }],
+		});
+		await client.call("propose", {
+			edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Edited" } }],
+		});
+		const result = await cli(["get", "C-1", "--json"]);
+		expect([result.code, result.stderr]).toEqual([0, ""]);
+		const [document] = z.array(z.object({ proof: Proofs })).parse(JSON.parse(result.stdout));
+		expect(document?.proof.human).toMatchObject({
+			id: receipt.results[0],
+			version: 1,
+			by: "robin",
+			method: "human",
+			current: false,
+			basis: "exact",
+		});
+		const found = await run(["find", "--in", "cases"]);
+		expect([found.code, found.stderr]).toEqual([0, ""]);
+		const page = z.object({ items: z.array(z.object({ proof: Proofs })) }).parse(JSON.parse(found.stdout));
+		expect(page.items[0]?.proof).toEqual(document?.proof);
+	});
+});
 
 test("an agent's JSON report and CLI reads retain its model", async () => {
 	await withInstance(async ({ client, cli, run }) => {

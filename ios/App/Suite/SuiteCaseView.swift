@@ -42,7 +42,7 @@ struct SuiteCaseView: View {
 						.accessibilityIdentifier("case-version")
 					Text(document.folder).font(.subheadline).foregroundStyle(.secondary)
 					if self.version != nil {
-						Text("A saved version. Folder and tags are the case's current placement.")
+						Text("A saved version. Folder and tags are the case's current placement. Proof shows the latest results.")
 							.font(.caption).foregroundStyle(.secondary)
 					}
 					if !document.tags.isEmpty {
@@ -66,6 +66,17 @@ struct SuiteCaseView: View {
 					}
 				}
 				Panel("Who may run it") { MethodBadges(methods: document.content.methods) }
+				if !document.proof.isEmpty {
+					Panel("Proof") {
+						ForEach(document.proof, id: \.method) { proof in
+							VStack(alignment: .leading, spacing: 5) {
+								ProofChips(proof: [proof])
+								Text(proof.sentence).font(.subheadline).foregroundStyle(.secondary)
+							}
+							.accessibilityIdentifier("case-proof-\(proof.method)")
+						}
+					}
+				}
 				NavigationLink(value: SuiteRoute.history(document.ref)) {
 					Label("History", systemImage: "clock.arrow.circlepath").frame(maxWidth: .infinity, alignment: .leading)
 				}

@@ -11,8 +11,7 @@ public struct SuiteCase: Identifiable, Equatable, Sendable {
 		ref = wire.ref
 		title = wire.title
 		tags = wire.tags
-		proof = [("human", wire.proof.human), ("auto", wire.proof.auto), ("agent", wire.proof.agent)]
-			.compactMap { method, proof in proof.map { CaseProof(method: method, wire: $0) } }
+		proof = [wire.proof.human, wire.proof.auto, wire.proof.agent].compactMap { $0.map(CaseProof.init) }
 	}
 }
 
@@ -31,11 +30,31 @@ public struct CaseProof: Equatable, Sendable {
 		}
 	}
 	public let method: String
+	public let id: Int
+	public let version: Int?
+	public let by: String
+	public let model: String?
+	public let name: String?
+	public let at: Date
+	public let basis: String
 	public let outcome: Outcome
 	public let current: Bool
 
-	init(method: String, wire: Wire.SuiteProof) {
-		self.method = method
+	public var sentence: String {
+		let version = version.map { "v\($0)" } ?? "unknown version"
+		return (["\(outcome.word) on \(version)", "basis \(basis)", by] + [model, name].compactMap { $0 }.filter { !$0.isEmpty })
+			.joined(separator: " · ")
+	}
+
+	init(_ wire: Wire.SuiteProof) {
+		method = wire.method
+		id = wire.id
+		version = wire.version
+		by = wire.by
+		model = wire.model
+		name = wire.name
+		at = Date(timeIntervalSince1970: wire.at / 1000)
+		basis = wire.basis
 		current = wire.current
 		outcome = switch wire.outcome {
 		case "pass": .pass
@@ -80,6 +99,7 @@ public struct CaseDocument: Equatable, Sendable {
 	public let hasSharedSteps: Bool
 	public let content: CaseContent
 	public let tags: [String]
+	public let proof: [CaseProof]
 	/// Placement is current even when the document is an older version.
 	public let folder: String
 	/// Nil means the server did not expose the fields. An edit then omits them to keep the base's values.
@@ -95,6 +115,7 @@ public struct CaseDocument: Equatable, Sendable {
 			automate: wire.automate, fields: wire.fields ?? [:]
 		)
 		tags = wire.tags
+		proof = [wire.proof?.human, wire.proof?.auto, wire.proof?.agent].compactMap { $0.map(CaseProof.init) }
 		folder = wire.folder.path
 		readFields = wire.fields
 	}
@@ -205,7 +226,7 @@ extension ProjectClient {
 	package func caseDocument(_ ref: String, version: Int? = nil, includingCustomFields: Bool = true) async throws -> CaseDocument {
 		var input: [String: JSONValue] = ["refs": [.string(ref)]]
 		if let version { input["version"] = .number(Double(version)) }
-		if includingCustomFields { input["fields"] = ["title", "pre", "steps", "methods", "fields", "tags", "place"] }
+		if includingCustomFields { input["fields"] = ["title", "pre", "steps", "methods", "fields", "tags", "place", "proof"] }
 		let reply: [Wire.SuiteDocument] = try await server.read("get", in: key, .object(input))
 		guard let found = reply.first, found.ref == ref, version == nil || found.version == version,
 			!includingCustomFields || found.fields != nil else {

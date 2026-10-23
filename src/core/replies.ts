@@ -265,8 +265,22 @@ const nullableText = text.nullable();
 const counts = z.record(text, number);
 const data = z.record(text, z.unknown());
 const Body = CaseBody;
-const Proof = z.looseObject({ outcome: text, at: number, current: flag, basis: text }).nullable();
-const Proofs = z.looseObject({ human: Proof, auto: Proof, agent: Proof });
+const Proof = z
+	.looseObject({
+		id: whole,
+		version: whole.nullable(),
+		by: text,
+		method: text,
+		model: nullableText,
+		name: nullableText,
+		outcome: text,
+		at: number,
+		current: flag,
+		basis: text,
+	})
+	.nullable();
+export const Proofs = z.object({ human: Proof, auto: Proof, agent: Proof });
+export type Proofs = z.infer<typeof Proofs>;
 const CaseDocument = z.looseObject({
 	ref: text.regex(/^C-\d+$/),
 	version: whole,
