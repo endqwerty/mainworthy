@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import type { Api } from "../../core/api.ts";
-import { PlanInput } from "../../core/ops.ts";
+import { PlanInput } from "../../core/selection.ts";
 import { ApiError, call } from "../lib/api.ts";
 import { invalidateProject, useQueryOp } from "../lib/data.ts";
 import { deviceKey, deviceSession, sessionCurrent } from "../lib/device.ts";

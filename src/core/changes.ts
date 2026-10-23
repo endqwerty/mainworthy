@@ -3,8 +3,17 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import { z } from "zod";
 import { MethodKind } from "./model.ts";
-import { GateStatus } from "./ops.ts";
-import { RESULT_STANDINGS } from "./runs.ts";
+import { GateStatus, RESULT_STANDINGS } from "./runs.ts";
+
+export const ArtifactCode = z
+	.array(
+		z.object({
+			repo: z.string().trim().min(1).max(200),
+			commit: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/, "use a full lowercase commit hash"),
+		}),
+	)
+	.min(1)
+	.max(100);
 
 export const MergeReceipt = z.object({
 	id: z.number().int(),

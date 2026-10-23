@@ -6,9 +6,9 @@
 // (`src/surfaces/signin.ts`), never through an operation: the registry keeps a digest of a request that
 // carries a command id, and the CLI takes an operation's input as flags.
 import { z } from "zod";
+import { cmd } from "./commands.ts";
 import { DURATION_FORMAT, durationMs } from "./duration.ts";
 import { Capability } from "./kinds.ts";
-import { cmd } from "./ops.ts";
 
 const actor = z.string().max(64);
 export const EmailAddress = z

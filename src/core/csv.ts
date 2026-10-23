@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { projectCommand } from "./commands.ts";
 import { CaseBody, cleanPath, emptyBody, type FieldDefinitions, fieldErrors } from "./model.ts";
-import { CaseAlias } from "./ops.ts";
+import { CaseAlias } from "./proposals.ts";
 
 /** RFC 4180 records, including doubled quotes and multiline cells. No delimiter or encoding guesses. */
 export function parseCsv(text: string): string[][] {
