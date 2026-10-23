@@ -216,10 +216,11 @@ test("archives carry attachment content and validate its hash before restoring",
 	const bad = await harness();
 	rigs.push(bad);
 	await bad.app.db.exec("DELETE FROM policies; DELETE FROM folders; DELETE FROM projects");
-	expect(() =>
-		importArchive(bad.app.db, linesOf(corrupt.map((entry) => JSON.stringify(entry)).join("\n")), {
-			blobs: bad.app.blobs,
-		}),
+	expect(
+		async () =>
+			await importArchive(bad.app.db, linesOf(corrupt.map((entry) => JSON.stringify(entry)).join("\n")), {
+				blobs: bad.app.blobs,
+			}),
 	).toThrow(/attachment/);
 	h.app.blobs.prune(new Set());
 	expect(await h.raw("attachment", { result, id: item?.id })).toMatchObject({

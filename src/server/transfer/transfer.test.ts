@@ -691,7 +691,7 @@ function rehash(text: string): string {
 async function refuse(text: string, message: string | RegExp): Promise<void> {
 	const db = await target();
 	const before = allRows(db);
-	expect(() => importArchive(db, linesOf(text))).toThrow(message);
+	expect(async () => await importArchive(db, linesOf(text))).toThrow(message);
 	expect(allRows(db)).toEqual(before);
 	expect(db.raw.inTransaction).toBe(false);
 }
@@ -1163,9 +1163,9 @@ describe("Mainworthy instance archives", () => {
 	test("removing a project that is not there, or with a table nobody owns, changes nothing", () => {
 		const db = source();
 		const before = allRows(db);
-		expect(() => removeProject(db, "missing' OR 1=1 --")).toThrow(/project.*not found/i);
+		expect(async () => await removeProject(db, "missing' OR 1=1 --")).toThrow(/project.*not found/i);
 		db.raw.exec("CREATE TABLE unscoped_private (id INTEGER PRIMARY KEY, note TEXT)");
-		expect(() => removeProject(db, "qa")).toThrow(
+		expect(async () => await removeProject(db, "qa")).toThrow(
 			/removing a project has no ownership rule for table unscoped_private/,
 		);
 		expect({ ...allRows(db), unscoped_private: undefined }).toEqual({ ...before, unscoped_private: undefined });
@@ -1460,7 +1460,9 @@ describe("Mainworthy instance archives", () => {
 		const to = await target();
 		to.raw.exec("ALTER TABLE cases ADD COLUMN required_note TEXT NOT NULL DEFAULT 'new'");
 		const before = allRows(to);
-		expect(() => importArchive(to, linesOf(archive(source())))).toThrow("missing column cases.required_note");
+		expect(async () => await importArchive(to, linesOf(archive(await source())))).toThrow(
+			"missing column cases.required_note",
+		);
 		expect(allRows(to)).toEqual(before);
 	});
 
@@ -1743,7 +1745,7 @@ describe("Mainworthy instance archives", () => {
 		const db = await target();
 		const before = allRows(db);
 		await db.transaction(() => {
-			expect(() => importArchive(db, linesOf(text))).toThrow(/foreign key/i);
+			expect(async () => await importArchive(db, linesOf(text))).toThrow(/foreign key/i);
 		});
 		expect(allRows(db)).toEqual(before);
 	});
@@ -1756,8 +1758,9 @@ describe("Mainworthy instance archives", () => {
 				await db.transaction(async () => {
 					db.raw.exec(`PRAGMA defer_foreign_keys = ${deferred}`);
 					if (fail) {
-						expect(() =>
-							importArchive(db, linesOf(text.replace("Archive organisation", "Brchive organisation"))),
+						expect(
+							async () =>
+								await importArchive(db, linesOf(text.replace("Archive organisation", "Brchive organisation"))),
 						).toThrow(/checksum/);
 					} else {
 						await importArchive(db, linesOf(text));
@@ -1787,7 +1790,7 @@ describe("Mainworthy instance archives", () => {
 			async () =>
 				await db.transaction(() => {
 					db.raw.query("INSERT INTO future_rows VALUES (1, 9999)").run();
-					expect(() => importArchive(db, linesOf(text))).toThrow();
+					expect(async () => await importArchive(db, linesOf(text))).toThrow();
 					expect(db.raw.query<{ defer_foreign_keys: number }, []>("PRAGMA defer_foreign_keys").get()).toEqual({
 						defer_foreign_keys: 0,
 					});

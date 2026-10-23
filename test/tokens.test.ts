@@ -905,7 +905,7 @@ describe("the owner's token from the environment", () => {
 		const unset = await boot({ ownerToken: "" });
 		expect([said(unset), unset.generatedToken]).toEqual([[], expect.stringMatching(/^cb_/)]);
 		// The same rule where the machine's owner needs no token: the value is a token there too.
-		expect(() => boot({ mode: "local", ownerToken: nineteen })).toThrow("shorter than 20 characters");
+		expect(async () => await boot({ mode: "local", ownerToken: nineteen })).toThrow("shorter than 20 characters");
 	});
 
 	test("one longer than 512 characters stops the start, and one of 512 starts and signs a browser in", async () => {
@@ -928,7 +928,7 @@ describe("the owner's token from the environment", () => {
 			(await signIn(instance, longest)).status,
 			(await signIn(instance, `${longest}k`)).status,
 		]).toEqual([[], 200, 200, 401]);
-		expect(() => boot({ mode: "local", ownerToken: `${longest}k` })).toThrow("longer than 512 characters");
+		expect(async () => await boot({ mode: "local", ownerToken: `${longest}k` })).toThrow("longer than 512 characters");
 	});
 
 	test("a token longer than 512 characters, kept from an earlier build, works nowhere: not as a bearer and not at sign-in", async () => {
@@ -1030,12 +1030,12 @@ describe("the owner's token from the environment", () => {
 		const dataDir = scratch();
 		const path = databasePath(dataDir);
 		writeFileSync(path, Bun.gunzipSync(readFileSync(FIXTURE.file)));
-		expect(() => boot({ dataDir, ownerToken: "a1b2c3d4e5f6g7h8i9j" })).toThrow(UNCHANGED);
-		expect(() => boot({ dataDir, ownerToken: "k".repeat(513) })).toThrow(UNCHANGED);
-		expect(() => boot({ dataDir, owner: "policy", ownerToken: FIXTURE.env })).toThrow(
+		expect(async () => await boot({ dataDir, ownerToken: "a1b2c3d4e5f6g7h8i9j" })).toThrow(UNCHANGED);
+		expect(async () => await boot({ dataDir, ownerToken: "k".repeat(513) })).toThrow(UNCHANGED);
+		expect(async () => await boot({ dataDir, owner: "policy", ownerToken: FIXTURE.env })).toThrow(
 			`MAINWORTHY_OWNER names policy, which is the policy's own actor on this instance and not a person. Set MAINWORTHY_OWNER to the owner's name and start again${UNCHANGED}`,
 		);
-		expect(() => boot({ dataDir, owner: "forgotten-9", ownerToken: FIXTURE.env })).toThrow(
+		expect(async () => await boot({ dataDir, owner: "forgotten-9", ownerToken: FIXTURE.env })).toThrow(
 			`MAINWORTHY_OWNER names forgotten-9, and a name that starts with forgotten- is what a forgotten actor is called. Set MAINWORTHY_OWNER to the owner's name and start again${UNCHANGED}`,
 		);
 		// A person who was forgotten (a disabled row, as an archive can hold one) is not made the owner, and the
@@ -1050,7 +1050,7 @@ describe("the owner's token from the environment", () => {
 		} finally {
 			forgetting.close();
 		}
-		expect(() => boot({ dataDir, owner: "sam", ownerToken: FIXTURE.env })).toThrow(
+		expect(async () => await boot({ dataDir, owner: "sam", ownerToken: FIXTURE.env })).toThrow(
 			`MAINWORTHY_OWNER names sam, who was forgotten. Set MAINWORTHY_OWNER to the owner's name and start again${UNCHANGED}`,
 		);
 		// What the sentence says, read from the file: the schema is this build's, the copy from before is beside

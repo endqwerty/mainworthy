@@ -2831,7 +2831,9 @@ describe("what a decision may change", () => {
 		const ctx = makeCtx(h.app, project, h.owner, true);
 		const signature = first(rows<{ id: number }>("SELECT id FROM signatures")).id;
 		const plain = { decision: 999_999, kind: "failure", signers: [h.owner.id], expiresAt: null } as unknown as Witness;
-		expect(() => setExcuse(ctx, plain, { signature, scope: "line:trunk", class: "excused", targets: null })).toThrow();
+		expect(
+			async () => await setExcuse(ctx, plain, { signature, scope: "line:trunk", class: "excused", targets: null }),
+		).toThrow();
 		expect(rows("SELECT count(*) AS n FROM excuses")).toEqual([{ n: 0 }]);
 	});
 
@@ -2910,11 +2912,11 @@ describe("what a decision may change", () => {
 		if (!test || !run) throw new Error("fixture missing");
 		const signature = first(rows<{ id: number }>("SELECT id FROM signatures")).id;
 		// The same witness is refused by every writer that another kind of decision owns, and nothing is written.
-		expect(() => linkTest(ctx, genuine, test, 1)).toThrow("only a map decision");
-		expect(() => setExcuse(ctx, genuine, { signature, scope: "line:trunk", class: "excused", targets: null })).toThrow(
-			"only a failure decision",
-		);
-		expect(() => closeRun(ctx, genuine, run)).toThrow("only a signoff decision");
+		expect(async () => await linkTest(ctx, genuine, test, 1)).toThrow("only a map decision");
+		expect(
+			async () => await setExcuse(ctx, genuine, { signature, scope: "line:trunk", class: "excused", targets: null }),
+		).toThrow("only a failure decision");
+		expect(async () => await closeRun(ctx, genuine, run)).toThrow("only a signoff decision");
 		expect(rows("SELECT case_id, linked_by FROM tests WHERE id = 1")).toEqual([{ case_id: null, linked_by: null }]);
 		expect(rows("SELECT count(*) AS n FROM excuses")).toEqual([{ n: 0 }]);
 		expect(rows("SELECT state FROM runs WHERE id = 1")).toEqual([{ state: "open" }]);

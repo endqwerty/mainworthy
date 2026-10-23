@@ -737,7 +737,7 @@ describe("the relying party", () => {
 			"https://mainworthy.example/app",
 			"https://mainworthy.example/?x=1",
 		])
-			expect(() => boot(bad)).toThrow(/MAINWORTHY_PUBLIC_URL/);
+			expect(async () => await boot(bad)).toThrow(/MAINWORTHY_PUBLIC_URL/);
 		// A variable a compose file passes on empty is one that was not set.
 		expect(defaultConfig({ MAINWORTHY_PUBLIC_URL: "" }).publicUrl).toBeUndefined();
 		for (const good of ["https://mainworthy.example", "https://mainworthy.example/", "http://localhost:7357"]) {

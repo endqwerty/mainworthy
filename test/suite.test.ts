@@ -2511,9 +2511,9 @@ describe("conflict storage upgrades", () => {
 					try {
 						await removeBootstrap(empty.app.db);
 						const legacyArchive = chunks.join("").replace(`"schema":${ARCHIVE_VERSION}`, '"schema":23');
-						expect(() => importArchive(empty.app.db, linesOf(legacyArchive), { blobs: empty.app.blobs })).toThrow(
-							`archive schema 23 is older than this build's archive schema ${ARCHIVE_VERSION}`,
-						);
+						expect(
+							async () => await importArchive(empty.app.db, linesOf(legacyArchive), { blobs: empty.app.blobs }),
+						).toThrow(`archive schema 23 is older than this build's archive schema ${ARCHIVE_VERSION}`);
 					} finally {
 						empty.close();
 					}

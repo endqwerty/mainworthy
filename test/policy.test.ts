@@ -609,7 +609,7 @@ describe("rule answers", () => {
 		const restored = new Db(":memory:");
 		try {
 			await migrate(restored, ":memory:");
-			expect(() => importArchive(restored, linesOf(chunks.join("")))).toThrow(
+			expect(async () => await importArchive(restored, linesOf(chunks.join("")))).toThrow(
 				"archive policy of project scratch is refused: Clause map-track needs a valid map rule answer.",
 			);
 			expect(restored.raw.query("SELECT count(*) AS n FROM projects").get()).toEqual({ n: 0 });

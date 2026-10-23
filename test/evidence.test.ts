@@ -419,12 +419,12 @@ describe("a red report", () => {
 				await stampSeq(ctx);
 				return out;
 			});
-		const firstBatch = (await inTx((ctx) => acceptReport(ctx, assertionShard(0)))).batch;
-		const secondBatch = (await inTx((ctx) => acceptReport(ctx, assertionShard(1)))).batch;
-		const firstApplied = await inTx((ctx) => processBatch(ctx, secondBatch.id));
+		const firstBatch = (await inTx(async (ctx) => await acceptReport(ctx, assertionShard(0)))).batch;
+		const secondBatch = (await inTx(async (ctx) => await acceptReport(ctx, assertionShard(1)))).batch;
+		const firstApplied = await inTx(async (ctx) => await processBatch(ctx, secondBatch.id));
 		expect(firstApplied.questions).toHaveLength(1);
 		expect(firstApplied.questions[0]?.title).toBe("assertion failed");
-		const secondApplied = await inTx((ctx) => processBatch(ctx, firstBatch.id));
+		const secondApplied = await inTx(async (ctx) => await processBatch(ctx, firstBatch.id));
 		expect(secondApplied.questions).toHaveLength(6);
 		expect(await gate("broad001")).toMatchObject({ verdict: "blocked", stale: false, tally: { unexplained: 80 } });
 		expect(await recoverAccepted(h.app)).toBe(0);
@@ -1897,10 +1897,11 @@ describe("a commit reported in shards", () => {
 		const asked = first((await queue()).items);
 		await decide(asked, { is: "defect" });
 		// Shard 2 of the next commit is accepted, holding a new test that fails with the cause, and is not applied yet.
-		const late = (await inTx((ctx) => acceptReport(ctx, two("unapp01b", 2, [3, 4, 5], { 3: cause })))).batch;
+		const late = (await inTx(async (ctx) => await acceptReport(ctx, two("unapp01b", 2, [3, 4, 5], { 3: cause }))))
+			.batch;
 		await h.call("report", two("unapp01b", 1, [0, 1, 2]));
 		expect(await state(asked.q)).toBe("decided");
-		const applied = await inTx((ctx) => processBatch(ctx, late.id));
+		const applied = await inTx(async (ctx) => await processBatch(ctx, late.id));
 		expect(applied.questions[0]).toMatchObject({ how: "already decided", q: asked.q });
 	});
 
@@ -1995,8 +1996,9 @@ describe("the horizon", () => {
 				await stampSeq(ctx);
 				return out;
 			});
-		const { batch } = await inTx((ctx) =>
-			acceptReport(ctx, ciReport({ commit: "5555555a", n: 5, fail: { 1: "expected 1, got 2" }, attempt: 2 })),
+		const { batch } = await inTx(
+			async (ctx) =>
+				await acceptReport(ctx, ciReport({ commit: "5555555a", n: 5, fail: { 1: "expected 1, got 2" }, attempt: 2 })),
 		);
 		const between = await gate("5555555a");
 		expect(between).toMatchObject({
@@ -2005,7 +2007,7 @@ describe("the horizon", () => {
 			reason: "pending: 1 report accepted and not yet applied",
 		});
 
-		await inTx((ctx) => processBatch(ctx, batch.id));
+		await inTx(async (ctx) => await processBatch(ctx, batch.id));
 		expect(await gate("5555555a")).toMatchObject({ verdict: "blocked", stale: false });
 	});
 });
@@ -2062,7 +2064,7 @@ describe("work the server does on its own", () => {
 		try {
 			const from = await configFor();
 			const seed = await openApp(from);
-			seed.db.exec(
+			await seed.db.exec(
 				"INSERT INTO orgs (name, created_at) VALUES ('default', 0); INSERT INTO actors (org, kind, name, created_at) VALUES (1, 'human', 'robin', 0)",
 			);
 			seed.close();

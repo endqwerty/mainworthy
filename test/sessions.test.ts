@@ -1046,11 +1046,11 @@ describe("an upgrade and an archive", () => {
 		};
 		// Something the migration cannot get past: a table of the name it creates.
 		change("CREATE TABLE sessions (stray INTEGER)");
-		expect(() => boot({ dataDir })).toThrow(/sessions/);
+		expect(async () => await boot({ dataDir })).toThrow(/sessions/);
 		expect(peek(path)).toEqual({ version: "1", cases: 1, tables: ["sessions"] });
 		// The copy was written before the attempt. A second attempt keeps it and does not write another over it.
 		const copy = readFileSync(`${path}.v1.bak`);
-		expect(() => boot({ dataDir })).toThrow(/sessions/);
+		expect(async () => await boot({ dataDir })).toThrow(/sessions/);
 		change("DROP TABLE sessions");
 		const instance = await boot({ dataDir });
 		expect(readFileSync(`${path}.v1.bak`).equals(copy)).toBe(true);
