@@ -425,7 +425,8 @@ are excluded. When diagnostic cause text is available, the detector classifies i
 message as assertion, timeout, or infrastructure. If the message contains only whitespace or
 report headers such as `Error:` or `FAILED`, Mainworthy looks for diagnostic cause text in
 `detail` before choosing unknown. Stack frames alone do not supply a failure class. A failed
-result can also supply cause text through its note. Unknown causes stay outside the detector's
+result with no failure message at all can supply cause text through its note; a message, even a
+header-only one such as `failed`, is used instead of the note. Unknown causes stay outside the detector's
 known-cause classes and suggestions.
 An infrastructure suggestion is evidence to investigate, not a diagnosis.
 
