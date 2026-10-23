@@ -13,7 +13,7 @@ const headerPair = /^((?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^:]+)):[ \t]*(.*)$/s;
 
 function scalar(text: string): string {
 	if (
-		text.length === 0 ||
+		text === "" ||
 		text.trim() !== text ||
 		// biome-ignore lint/suspicious/noControlCharactersInRegex: quote controls so JSON escapes remain reversible.
 		/[\u0000-\u001f\u007f-\u009f\u2028-\u202e\u2066-\u2069:"'[\]{},#\\]/.test(text) ||
@@ -25,15 +25,16 @@ function scalar(text: string): string {
 }
 
 const lineEscapes: Record<string, string> = {
-	"\\": "\\\\",
 	"\t": "\\t",
 	" ": "\\s",
 	"##[": "\\u0023#[",
-	"::": "\\u003a:",
 };
 
 function encodeLine(text: string): string {
-	return escapeControls(text.replace(/##\[|::|[\\\t^]|^[ >#!-]/g, (part) => lineEscapes[part] ?? `\\${part}`));
+	return escapeControls(text.replace(/##\[|[\\\t^]|^[ >#!-]/g, (part) => lineEscapes[part] ?? `\\${part}`)).replace(
+		/^(\s*)::/,
+		"$1\\u003a:",
+	);
 }
 
 function decodeLine(text: string): string {

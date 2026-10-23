@@ -23,7 +23,9 @@ function safe(text: string): void {
 test("fmt and get Markdown round-trip terminal-sensitive scalars and body lines losslessly", async () => {
 	await withInstance(async ({ run, directory }) => {
 		const text = "Arabic \u202bمرحبا\u202c and nel\u0085 x\u007f\u009b";
-		const commands = "##[error]Process completed with exit code 1.\n\\##[warning]literal escape\n::error::x";
+		const commands =
+			"##[error]Process completed with exit code 1.\n\\##[warning]literal escape\n::error::x\n\u00a0::error::x";
+		const ordinary = "call std::vector::push_back; Foo::Bar a::before [::1]";
 		const doc: CaseDoc = {
 			ref: null,
 			body: {
@@ -31,7 +33,7 @@ test("fmt and get Markdown round-trip terminal-sensitive scalars and body lines 
 				title: text,
 				pre: commands,
 				fields: { note: text },
-				steps: [{ id: "a1", action: commands, expected: commands }],
+				steps: [{ id: "a1", action: `${ordinary}\n${commands}`, expected: commands }],
 			},
 			tags: ["stable"],
 			covers: [],
@@ -51,6 +53,8 @@ test("fmt and get Markdown round-trip terminal-sensitive scalars and body lines 
 		});
 		expect(formatted.stdout).toBe(printCase(doc));
 		expect(got.stdout).toBe(printCase({ ...doc, ref: "C-1" }));
+		expect(formatted.stdout).toContain(`- ${ordinary} ^a1\n`);
+		expect(got.stdout).toContain(`- ${ordinary} ^a1\n`);
 	});
 }, 15_000);
 

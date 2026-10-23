@@ -5,6 +5,31 @@ import { CaseDoc } from "./model.ts";
 import { docArbitrary, exampleBody } from "./test-support.ts";
 
 describe("canonical case Markdown", () => {
+	test("keeps ordinary double-colon syntax byte-for-byte like existing case files", () => {
+		const doc: CaseDoc = {
+			ref: null,
+			body: {
+				...exampleBody(),
+				title: "Keep code readable",
+				pre: "Use Foo::Bar with a::before at [::1].",
+				steps: [{ id: "a1", action: "call std::vector::push_back", expected: "Foo::Bar has a::before at ::1" }],
+			},
+			tags: [],
+			covers: [],
+		};
+		const canonical =
+			"---\nkind: case\ntitle: Keep code readable\nmethods: [human]\ncovers: []\ntags: []\n---\n## Preconditions\nUse Foo::Bar with a::before at [::1].\n\n## Steps\n- call std::vector::push_back ^a1\n  > Foo::Bar has a::before at ::1\n";
+		expect(printCase(doc)).toBe(canonical);
+		expect(parseCase(canonical)).toEqual({ ok: true, doc });
+	});
+	test("protects modern command prefixes after ASCII and Unicode leading whitespace", () => {
+		for (const prefix of ["", " ", "\t", "\u00a0", "\u2007", "\u202f", "\u3000", "\u00a0 "]) {
+			const doc: CaseDoc = { ref: null, body: { ...exampleBody(), pre: `${prefix}::error::x` }, tags: [], covers: [] };
+			const canonical = printCase(doc);
+			expect(canonical).not.toMatch(/^\s*::/m);
+			expect(parseCase(canonical)).toEqual({ ok: true, doc });
+		}
+	});
 	test.each(["\u007f", "\u0085", "\u009b", "\u202b", "\u202c", "\u202e", "\u2066", "\u2069", "##[error]", "::error::"])(
 		"prints terminal-safe, lossless text for %j in every position",
 		(text) => {

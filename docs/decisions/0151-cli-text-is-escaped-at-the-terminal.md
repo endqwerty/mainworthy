@@ -22,6 +22,11 @@ recognized after leading whitespace; the legacy `##[` prefix can occur anywhere
 in a line. Render the first character of these prefixes as a Unicode escape.
 After JSON serialization, that escape preserves the original decoded value.
 The separate error sink applies the same command protection after folding CR/LF.
+Canonical body text escapes `::` only after leading whitespace in the encoded
+line. Leading ASCII spaces and tabs already print as visible Markdown escapes;
+Unicode whitespace prefixes still need command protection. Mid-line C++ names,
+CSS selectors and IPv6 addresses stay literal. The legacy `##[` form is escaped
+even mid-line because the runner recognizes it there.
 
 Per-field escaping misses other consumers and future fields. Sanitizing imports
 would change the record. The terminal boundary covers previews, receipts, lists,
