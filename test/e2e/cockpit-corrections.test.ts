@@ -880,26 +880,52 @@ for (const outcome of ["skip", "blocked"] as const)
 		async () => {
 			const { server, run, path } = await fixture(3);
 			let view: Awaited<ReturnType<typeof openPage>> | null = null;
+			const staleRead = Promise.withResolvers<void>();
 			try {
 				view = await openPage(server, { path });
 				const { page } = view;
 				await ready(page);
+				// A delayed slot read can predate a report whose receipt has already arrived.
+				let stale: Api["find"]["reply"] | null = null;
+				await page.route("**/find", async (route) => {
+					const input = z.object({ in: z.string() }).parse(route.request().postDataJSON());
+					if (input.in === "slots" && stale) {
+						await answer(route, { json: { ok: true, result: stale } });
+						staleRead.resolve();
+					} else await route.continue();
+				});
+				await page.route("**/report", async (route) => {
+					const input = z
+						.object({ results: z.array(z.object({ test: z.object({ case: z.string() }) })) })
+						.parse(route.request().postDataJSON());
+					if (input.results[0]?.test.case === "C-2") {
+						stale = await server.api("find", { in: "slots", run });
+						const reply = await fetched(route);
+						await staleRead.promise;
+						if (reply) await answer(route, { response: reply.response });
+					} else {
+						stale = null;
+						await route.continue();
+					}
+				});
 				await page.keyboard.press(outcome === "skip" ? "s" : "b");
 				await page
 					.locator("#stat")
 					.filter({ hasText: `C-1 ${outcome} recorded` })
 					.waitFor();
+				await page.locator('[data-run-document="C-2"][data-active="true"][data-ready="true"]').waitFor();
 				await page.keyboard.press("p");
 				await page.locator("#stat").filter({ hasText: "C-2 pass recorded" }).waitFor();
+				await page.locator('[data-run-document="C-3"][data-active="true"][data-ready="true"]').waitFor();
 				await page.keyboard.press("p");
 				await page.locator("#stat").filter({ hasText: "C-3 pass recorded" }).waitFor();
+				await page
+					.getByText("Nothing left for you to run. The server verdict is shown above.", { exact: true })
+					.waitFor();
 				if (outcome === "skip") await screenshot(page, 6121);
 				expect(await page.locator('[data-run-document][data-active="true"]').getAttribute("data-run-document")).toBe(
 					"C-3",
 				);
-				await page
-					.getByText("Nothing left for you to run. The server verdict is shown above.", { exact: true })
-					.waitFor();
 				expect(await page.locator("#list .phead").innerText()).toContain("1 left in run");
 				expect(await page.getByRole("complementary", { name: "Up next" }).count()).toBe(0);
 				expect(await server.api("gate", { run })).toMatchObject({ verdict: "pending", tally: { missing: 1 } });
@@ -947,6 +973,7 @@ for (const outcome of ["skip", "blocked"] as const)
 				);
 				expect(await page.locator("#list .phead").innerText()).toContain("1 left in run");
 			} finally {
+				staleRead.resolve();
 				await view?.close();
 				await server.stop();
 			}
