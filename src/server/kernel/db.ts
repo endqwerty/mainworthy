@@ -572,7 +572,7 @@ export class Database {
 		this.tail = new Promise<void>((resolve) => {
 			release = resolve;
 		});
-		const signal = this.signal(options.signal);
+		const signal = AbortSignal.any([this.shutdown.signal, ...(options.signal ? [options.signal] : [])]);
 		try {
 			await abortable(previous, signal);
 			return await this.locked(this.writers, WRITE_LOCK, fn, signal);
@@ -585,7 +585,7 @@ export class Database {
 	async migration<T>(fn: (db: WriteDb) => T | Promise<T>): Promise<T> {
 		const dedicated = new SQL(this.options.url, { bigint: true, max: 1 });
 		try {
-			return await this.locked(dedicated, MIGRATION_LOCK, fn, this.signal());
+			return await this.locked(dedicated, MIGRATION_LOCK, fn, this.shutdown.signal);
 		} finally {
 			await dedicated.close();
 		}

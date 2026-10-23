@@ -2,7 +2,7 @@
 import { z } from "zod";
 import type { ActorKind, Capability, Role } from "../../core/kinds.ts";
 import type { App } from "./app.ts";
-import { type Db, type ReadDb, type WriteDb, sql } from "./db.ts";
+import { type ReadDb, sql, type WriteDb } from "./db.ts";
 
 export type Actor = { id: number; kind: ActorKind; name: string; can: readonly Capability[]; roles?: readonly Role[] };
 
@@ -20,9 +20,9 @@ export type ProjectRow = {
 export type CounterName = "case" | "question" | "run" | "test" | "proposal";
 export const REF_PREFIX: Record<CounterName, string> = { case: "C", question: "Q", run: "R", test: "T", proposal: "P" };
 
-export type Ctx = {
+export type Ctx<D extends ReadDb = WriteDb> = {
 	app: App;
-	db: Db;
+	db: D;
 	project: ProjectRow;
 	actor: Actor;
 	now: number;
@@ -62,7 +62,7 @@ const Q = {
 	projectById: sql<{ id: number }, ProjectRow>("SELECT * FROM projects WHERE id = $id"),
 	bumpCounter: sql<{ project: number; name: string }, { value: number }>(
 		`INSERT INTO counters (project, name, value) VALUES ($project, $name, 1)
-		 ON CONFLICT (project, name) DO UPDATE SET value = value + 1 RETURNING value`,
+		 ON CONFLICT (project, name) DO UPDATE SET value = counters.value + 1 RETURNING value`,
 	),
 	setSeq: sql<{ id: number; seq: number }>("UPDATE projects SET seq = $seq WHERE id = $id"),
 	projects: sql<readonly [], ProjectRow>(`SELECT p.* FROM projects p WHERE NOT EXISTS
@@ -140,7 +140,7 @@ const UNTOUCHED_SEQ = 1;
  * (`makeCtx`); no other project takes a time from a caller.
  */
 export const demoSince = async (db: ReadDb, project: number): Promise<number | null> =>
-	db.get(Q.demoSince, { project })?.since ?? null;
+	(await db.get(Q.demoSince, { project }))?.since ?? null;
 
 /**
  * Makes a project a demo and returns when it became one. Only a project nothing was written to: one that holds
@@ -299,12 +299,18 @@ export async function recordCommand(
  * `at` is the time the command's rows carry, when it is not the clock's: a write to a demo project that says
  * when it happened, and a report applied after a restart, which keeps the time it was accepted at.
  */
-export function makeCtx(app: App, project: ProjectRow, actor: Actor, write: boolean, at?: number): Ctx {
+export function makeCtx<D extends ReadDb>(
+	app: App,
+	db: D,
+	project: ProjectRow,
+	actor: Actor,
+	write: boolean,
+	at?: number,
+): Ctx<D> {
 	let ord = 0;
 	return {
 		app,
-		// A write runs on the writing connection; a read on the reader, which sees only what is committed.
-		db: write ? app.db : app.reader,
+		db,
 		project,
 		actor,
 		now: at ?? app.now(),
@@ -317,7 +323,8 @@ export function makeCtx(app: App, project: ProjectRow, actor: Actor, write: bool
 		changedBases: new Set(),
 		raised: new Map(),
 		async nextNo(name) {
-			const row = await app.db.get(Q.bumpCounter, { project: project.id, name });
+			if (!("run" in db)) throw new Error("a read cannot allocate a ref");
+			const row = await db.one(Q.bumpCounter, { project: project.id, name });
 			if (!row) throw new Error(`counter ${name} did not advance`);
 			return row.value;
 		},

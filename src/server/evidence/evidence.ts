@@ -12,7 +12,7 @@ import { failedStep, type ResultStep } from "../../core/results.ts";
 import type { ShardWait } from "../../core/runs.ts";
 import { attachmentType } from "../kernel/blobs.ts";
 import type { Ctx } from "../kernel/ctx.ts";
-import { type ReadDb, type WriteDb, json, placeholders, type SqlValue, sql } from "../kernel/db.ts";
+import { json, type ReadDb, type SqlValue, sql, type WriteDb } from "../kernel/db.ts";
 import { conflict, invalid } from "../kernel/errors.ts";
 import { decisionOf, type Witness } from "../kernel/witness.ts";
 import { type CaseRow, caseById, caseRef, findCase, versionOf } from "../suite/suite.ts";

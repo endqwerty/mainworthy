@@ -4,7 +4,7 @@ import { z } from "zod";
 import { MergeReceipt, MergeReceiptResult, receiptNodeHash, receiptSnapshotHash } from "../../core/changes.ts";
 import { type ActorKind, type Ask, ATTRIBUTED, type Kind } from "../../core/kinds.ts";
 import { type Ctx, ref } from "../kernel/ctx.ts";
-import { type ReadDb, type WriteDb, json, sql } from "../kernel/db.ts";
+import { json, type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { invalid, notFound } from "../kernel/errors.ts";
 
 const causeFields = { signature: z.number(), scope: z.string() };
@@ -210,36 +210,39 @@ const Q = {
 		`SELECT q.* FROM questions q LEFT JOIN decisions d ON d.id = q.decision
 		 WHERE q.project = $project AND q.fingerprint = $fingerprint
 		   AND (q.state = 'open' OR (q.state = 'decided' AND d.id IS NOT NULL
-		        AND json_extract(d.answer, '$.is') NOT IN ('expired', 'outdated', 'withdrawn')))
+		        AND (d.answer::jsonb)->>'is' NOT IN ('expired', 'outdated', 'withdrawn')))
 		 ORDER BY q.epoch DESC, q.id DESC`,
 	),
 	byNo: sql<{ project: number; no: number }, StoredQuestionRow>(
 		"SELECT * FROM questions WHERE project = $project AND no = $no",
 	),
 	byId: sql<{ id: number }, StoredQuestionRow>("SELECT * FROM questions WHERE id = $id"),
-	insert: sql<{
-		project: number;
-		no: number;
-		kind: string;
-		subject: string;
-		fingerprint: string;
-		epoch: number;
-		prior: number | null;
-		title: string;
-		producer: string;
-		evidence: string;
-		hash: string;
-		basis: string;
-		seq: number;
-		ask: string;
-		blocks: string;
-		rank: number;
-		at: number;
-	}>(
+	insert: sql<
+		{
+			project: number;
+			no: number;
+			kind: string;
+			subject: string;
+			fingerprint: string;
+			epoch: number;
+			prior: number | null;
+			title: string;
+			producer: string;
+			evidence: string;
+			hash: string;
+			basis: string;
+			seq: number;
+			ask: string;
+			blocks: string;
+			rank: number;
+			at: number;
+		},
+		{ id: number }
+	>(
 		`INSERT INTO questions (project, no, kind, subject, fingerprint, epoch, prior, title, producer, evidence, evidence_hash,
 		                        basis, seen_first, seen_last, ask, blocks, rank, state, opened_at, rev)
 		 VALUES ($project, $no, $kind, $subject, $fingerprint, $epoch, $prior, $title, $producer, $evidence, $hash,
-		         $basis, $seq, $seq, $ask, $blocks, $rank, 'open', $at, $seq)`,
+		         $basis, $seq, $seq, $ask, $blocks, $rank, 'open', $at, $seq) RETURNING id`,
 	),
 	attach: sql<{
 		id: number;
@@ -276,7 +279,7 @@ const Q = {
 		 WHERE id = $id`,
 	),
 	addRef: sql<{ project: number; ref: string; question: number }>(
-		"INSERT OR IGNORE INTO question_refs (project, ref, question) VALUES ($project, $ref, $question)",
+		"INSERT INTO question_refs (project, ref, question) VALUES ($project, $ref, $question) ON CONFLICT DO NOTHING",
 	),
 	refsOf: sql<{ question: number }, { ref: string }>(
 		"SELECT ref FROM question_refs WHERE question = $question ORDER BY ref",
@@ -371,22 +374,25 @@ const Q = {
 		 VALUES ($question, $actor, $answer, $reason, $hash, $counts, $at, $seq)`,
 	),
 	answersOf: sql<{ question: number }, AnswerRow>("SELECT * FROM answers WHERE question = $question ORDER BY id"),
-	insertDecision: sql<{
-		hash: string;
-		project: number;
-		question: number;
-		kind: string;
-		answer: string;
-		signers: string;
-		basis: string;
-		holds: string;
-		expires: number | null;
-		supersedes: number | null;
-		at: number;
-		seq: number;
-	}>(
+	insertDecision: sql<
+		{
+			hash: string;
+			project: number;
+			question: number;
+			kind: string;
+			answer: string;
+			signers: string;
+			basis: string;
+			holds: string;
+			expires: number | null;
+			supersedes: number | null;
+			at: number;
+			seq: number;
+		},
+		{ id: number }
+	>(
 		`INSERT INTO decisions (project, question, kind, answer, signers, basis, holds, expires_at, supersedes, at, seq, on_evidence)
-		 VALUES ($project, $question, $kind, $answer, $signers, $basis, $holds, $expires, $supersedes, $at, $seq, $hash)`,
+		 VALUES ($project, $question, $kind, $answer, $signers, $basis, $holds, $expires, $supersedes, $at, $seq, $hash) RETURNING id`,
 	),
 	setEffects: sql<{ id: number; effects: string }>("UPDATE decisions SET effects = $effects WHERE id = $id"),
 	decisionById: sql<{ id: number }, DecisionRow>("SELECT * FROM decisions WHERE id = $id"),
@@ -457,7 +463,7 @@ export async function insertQuestion(
 	},
 ): Promise<QuestionRow> {
 	const no = await ctx.nextNo("question");
-	const { lastId } = await ctx.db.run(Q.insert, {
+	const { id: lastId } = await ctx.db.one(Q.insert, {
 		project: ctx.project.id,
 		no,
 		kind: input.kind,
@@ -670,7 +676,7 @@ export async function insertDecision(
 	},
 ): Promise<DecisionRow> {
 	const expires = input.holds.flatMap((term) => (term.until === "time" ? [term.at] : []));
-	const { lastId } = await ctx.db.run(Q.insertDecision, {
+	const { id: lastId } = await ctx.db.one(Q.insertDecision, {
 		hash: input.question.evidence_hash,
 		project: ctx.project.id,
 		question: input.question.id,

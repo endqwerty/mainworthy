@@ -30,7 +30,7 @@ import { parseOutline } from "../../core/outline.ts";
 import type { PlacementEdit } from "../../core/proposals.ts";
 import { clip } from "../../core/text.ts";
 import { type Ctx, parseRef, ref } from "../kernel/ctx.ts";
-import { type ReadDb, json, sql } from "../kernel/db.ts";
+import { json, type ReadDb, sql } from "../kernel/db.ts";
 import { conflict, invalid, notFound, OpError } from "../kernel/errors.ts";
 import { complete } from "../kernel/steps.ts";
 import { decisionOf, type Witness } from "../kernel/witness.ts";
@@ -151,10 +151,13 @@ const Q = {
 		"SELECT tags FROM cases WHERE project = $project AND folder = $folder",
 	),
 	lastFolderRank: sql<{ project: number; parent: number | null }, { rank: string }>(
-		"SELECT rank FROM folders WHERE project = $project AND parent IS $parent ORDER BY rank DESC LIMIT 1",
+		"SELECT rank FROM folders WHERE project = $project AND parent IS NOT DISTINCT FROM $parent::bigint ORDER BY rank DESC LIMIT 1",
 	),
-	insertFolder: sql<{ project: number; parent: number | null; name: string; rank: string; rev: number }>(
-		"INSERT INTO folders (project, parent, name, rank, rev) VALUES ($project, $parent, $name, $rank, $rev)",
+	insertFolder: sql<
+		{ project: number; parent: number | null; name: string; rank: string; rev: number },
+		{ id: number }
+	>(
+		"INSERT INTO folders (project, parent, name, rank, rev) VALUES ($project, $parent, $name, $rank, $rev) RETURNING id",
 	),
 	updateFolder: sql<{ id: number; parent: number | null; name: string; state: string; rev: number }>(
 		"UPDATE folders SET parent = $parent, name = $name, state = $state, rev = $rev WHERE id = $id",
@@ -168,27 +171,30 @@ const Q = {
 	nextRank: sql<{ project: number; folder: number; rank: string }, { id: number; rank: string }>(
 		"SELECT id, rank FROM cases WHERE project = $project AND folder = $folder AND rank > $rank ORDER BY rank LIMIT 1",
 	),
-	insertCase: sql<{
-		kind: CaseKind;
-		project: number;
-		no: number;
-		hash: string;
-		claim: string;
-		title: string;
-		methods: string;
-		automate: string;
-		steps: number;
-		aliases: string;
-		folder: number;
-		rank: string;
-		tags: string;
-		actor: number;
-		at: number;
-		rev: number;
-	}>(
+	insertCase: sql<
+		{
+			kind: CaseKind;
+			project: number;
+			no: number;
+			hash: string;
+			claim: string;
+			title: string;
+			methods: string;
+			automate: string;
+			steps: number;
+			aliases: string;
+			folder: number;
+			rank: string;
+			tags: string;
+			actor: number;
+			at: number;
+			rev: number;
+		},
+		{ id: number }
+	>(
 		`INSERT INTO cases (kind, project, no, head, head_hash, claim_hash, title, methods, automate, step_count, folder, rank, tags,
 		                    aliases, created_by, created_at, updated_by, updated_at, rev)
-		 VALUES ($kind, $project, $no, 1, $hash, $claim, $title, $methods, $automate, $steps, $folder, $rank, $tags, $aliases, $actor, $at, $actor, $at, $rev)`,
+		 VALUES ($kind, $project, $no, 1, $hash, $claim, $title, $methods, $automate, $steps, $folder, $rank, $tags, $aliases, $actor, $at, $actor, $at, $rev) RETURNING id`,
 	),
 	insertAlias: sql<{ project: number; alias: string; id: number }>(
 		"INSERT INTO case_aliases (project, alias, case_id) VALUES ($project, $alias, $id)",
@@ -257,22 +263,25 @@ const Q = {
 	insertTag: sql<{ project: number; tag: string; id: number }>(
 		"INSERT OR IGNORE INTO case_tags (project, tag, case_id) VALUES ($project, $tag, $id)",
 	),
-	dropDoc: sql<{ id: number }>("DELETE FROM search_docs WHERE rowid = $id"),
+	dropDoc: sql<{ id: number }>("DELETE FROM search_docs WHERE id = $id"),
 	insertDoc: sql<{ id: number; title: string; body: string; tags: string; project: number }>(
-		"INSERT INTO search_docs (rowid, title, body, tags, project) VALUES ($id, $title, $body, $tags, $project)",
+		"INSERT INTO search_docs (id, title, body, tags, project) VALUES ($id, $title, $body, $tags, $project)",
 	),
-	insertProposal: sql<{
-		project: number;
-		no: number;
-		author: number;
-		reason: string | null;
-		edits: string;
-		resolved: string;
-		at: number;
-		seq: number;
-	}>(
+	insertProposal: sql<
+		{
+			project: number;
+			no: number;
+			author: number;
+			reason: string | null;
+			edits: string;
+			resolved: string;
+			at: number;
+			seq: number;
+		},
+		{ id: number }
+	>(
 		`INSERT INTO proposals (project, no, author, reason, edits, resolved, at, seq)
-		 VALUES ($project, $no, $author, $reason, $edits, $resolved, $at, $seq)`,
+		 VALUES ($project, $no, $author, $reason, $edits, $resolved, $at, $seq) RETURNING id`,
 	),
 	proposalById: sql<{ id: number }, ProposalRow>("SELECT * FROM proposals WHERE id = $id"),
 	proposalByNo: sql<{ project: number; no: number }, ProposalRow>(
@@ -794,7 +803,8 @@ export async function* sealSteps(
 		}
 	}
 	if (resolved.length === 0) return null;
-	const policy = resolved.findLast((edit) => edit.op === "policy")?.policy ?? currentPolicy(ctx.db, ctx.project.id);
+	const policy =
+		resolved.findLast((edit) => edit.op === "policy")?.policy ?? (await currentPolicy(ctx.db, ctx.project.id));
 	for (const edit of resolved) {
 		if (++work % SLICE === 0) yield;
 		if (edit.op === "create" || edit.op === "edit" || edit.op === "restore") {
@@ -819,7 +829,7 @@ export async function* sealSteps(
 	if (resolved.some((r) => r.op === "policy")) facts.push("policy");
 	if (resolved.some((r) => r.op === "quarantine")) facts.push("quarantine");
 	const no = await ctx.nextNo("proposal");
-	const { lastId } = await ctx.db.run(Q.insertProposal, {
+	const { id: lastId } = await ctx.db.one(Q.insertProposal, {
 		project: ctx.project.id,
 		no,
 		author: ctx.actor.id,
@@ -1362,7 +1372,7 @@ export async function* adoptSteps(
 				const rank = await rankAfter(ctx, folder, edit.after);
 				const no = await ctx.nextNo("case");
 				const hash = versionHash(edit.body);
-				const { lastId } = await ctx.db.run(Q.insertCase, {
+				const { id: lastId } = await ctx.db.one(Q.insertCase, {
 					kind: edit.kind ?? "case",
 					project: ctx.project.id,
 					no,
@@ -1371,7 +1381,7 @@ export async function* adoptSteps(
 					title: edit.body.title,
 					methods: JSON.stringify(edit.body.methods),
 					automate: edit.body.automate,
-					steps: expandSteps(ctx.db, ctx.project.id, edit.body).length,
+					steps: (await expandSteps(ctx.db, ctx.project.id, edit.body)).length,
 					folder,
 					rank,
 					tags: JSON.stringify(edit.tags),
@@ -1527,7 +1537,7 @@ async function indexCase(ctx: Ctx, id: number, body: CaseBody, tags: readonly st
 	await ctx.db.run(Q.insertDoc, {
 		id,
 		title: body.title,
-		body: searchText(ctx.db, ctx.project.id, body),
+		body: await searchText(ctx.db, ctx.project.id, body),
 		tags: tags.join(" "),
 		project: ctx.project.id,
 	});

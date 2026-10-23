@@ -67,14 +67,14 @@ export async function createProject(
 ) {
 	const preset = input.preset ?? "loose";
 	if (!isPreset(preset)) throw invalid(`unknown preset ${preset}`);
-	if (findProject(env.app.db, input.key)) throw conflict(`a project named ${input.key} exists`);
-	const project = await insertProject(env.app.db, {
-		org: await orgId(env.app.db),
+	if (await findProject(env.db, input.key)) throw conflict(`a project named ${input.key} exists`);
+	const project = await insertProject(env.db, {
+		org: await orgId(env.db),
 		key: input.key,
 		name: input.name ?? input.key,
 		at: env.now,
 	});
-	const ctx = makeCtx(env.app, project, env.actor, true);
+	const ctx = makeCtx(env.app, env.db, project, env.actor, true);
 	await seedPolicy(ctx, preset, input.unlinked);
 	await stampSeq(ctx);
 	return { key: project.key, identity: project.identity, name: project.name, policy: preset };
@@ -146,7 +146,7 @@ export function refuseToken(
 }
 
 export async function admin(env: InstanceCtx, input: AdminInput): Promise<unknown> {
-	const db = env.app.db;
+	const db = env.db;
 	const owner = env.app.config.owner;
 	switch (input.do) {
 		case "team.create":

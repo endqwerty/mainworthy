@@ -45,7 +45,7 @@ import {
 import { sameCodeEvidence } from "../evidence/flaky.ts";
 import { actorLabel, ruleActor } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
-import { type ReadDb, json } from "../kernel/db.ts";
+import { json, type ReadDb } from "../kernel/db.ts";
 import { conflict, OpError } from "../kernel/errors.ts";
 import { complete } from "../kernel/steps.ts";
 import { claimMint } from "../kernel/witness.ts";
@@ -460,7 +460,7 @@ async function* settleByRuleSteps(
 		const settled = yield* ctx.db.savepointSteps(() => settleSteps(ctx, question, [signer], parsed.data as AnyAnswer));
 		return {
 			s: "decided",
-			question: questionById(ctx.db, question.id) ?? question,
+			question: (await questionById(ctx.db, question.id)) ?? question,
 			decision: settled.decision,
 			effects: settled.effects,
 		};
@@ -741,11 +741,12 @@ async function* settleSteps(
 		// A reopened question: the new decision follows the last row in its ledger (a withdrawal or an expiry). For
 		// a question asked again after its hold ended, it follows the row that says so on the question before it. One
 		// asked again because the earlier answer covered other targets supersedes nothing: that answer still stands.
-		supersedes = (await decisionsOf(ctx.db, question.id)).at(-1)?.id ?? endedBefore(ctx, question);
+		supersedes = (await decisionsOf(ctx.db, question.id)).at(-1)?.id ?? (await endedBefore(ctx, question));
 	}
 	const policy = await currentPolicy(ctx.db, ctx.project.id);
 	const holds = handler.holds({ question, answer: given, now: ctx.now, policy });
-	const byRule = signers.every((signer) => signer.by === ruleActor(ctx.db).id);
+	const rule = await ruleActor(ctx.db);
+	const byRule = signers.every((signer) => signer.by === rule.id);
 	const rested = await endReplaced(ctx, question, holds, byRule);
 	const decision = await insertDecision(ctx, { question, answer: given, signers, holds, supersedes });
 	await setQuestionState(ctx, question, "decided", decision.id);
