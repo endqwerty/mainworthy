@@ -8,7 +8,7 @@
 // An identity at the provider is the exception: its handle (issuer and subject) says who somebody is elsewhere,
 // so revoking the row erases it, and the same identity can be linked again later.
 import { z } from "zod";
-import { type ReadDb, type WriteDb, sql } from "../kernel/db.ts";
+import { type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { ALGORITHMS, type Passkey } from "./webauthn.ts";
 
 export type CredentialKind = "password" | "passkey" | "oidc" | "totp";
@@ -58,9 +58,12 @@ const Q = {
 	oidc: sql<{ handle: string }, CredentialRow>(
 		"SELECT * FROM credentials WHERE kind = 'oidc' AND handle = $handle AND revoked_at IS NULL",
 	),
-	insert: sql<{ actor: number; kind: CredentialKind; handle: string | null; data: string; label: string; at: number }>(
+	insert: sql<
+		{ actor: number; kind: CredentialKind; handle: string | null; data: string; label: string; at: number },
+		{ id: number }
+	>(
 		`INSERT INTO credentials (actor, kind, handle, data, label, created_at)
-		 VALUES ($actor, $kind, $handle, $data, $label, $at)`,
+		 VALUES ($actor, $kind, $handle, $data, $label, $at) RETURNING id`,
 	),
 	// What a revoked row held is erased with it. An old password's hash is of use to nobody but whoever steals
 	// the database, and a key nothing signs in with any more is not worth keeping. The row and its credential
@@ -121,7 +124,7 @@ export async function insertTotp(db: WriteDb, input: { actor: number; data: stri
 }
 
 export async function updateTotp(db: WriteDb, row: CredentialRow, data: string, at: number): Promise<boolean> {
-	return row.kind === "totp" && db.run(Q.counted, { id: row.id, was: row.data, data, at }).changes === 1;
+	return row.kind === "totp" && (await db.run(Q.counted, { id: row.id, was: row.data, data, at })).changes === 1;
 }
 
 export const liveTotp = async (db: ReadDb, actor: number): Promise<CredentialRow | null> =>
@@ -147,7 +150,7 @@ export async function insertOidc(
 	db: WriteDb,
 	input: { actor: number; handle: string; label: string; at: number },
 ): Promise<CredentialRow> {
-	const { lastId } = await db.run(Q.insert, {
+	const { id } = await db.one(Q.insert, {
 		actor: input.actor,
 		kind: "oidc",
 		handle: input.handle,
@@ -155,7 +158,7 @@ export async function insertOidc(
 		label: input.label,
 		at: input.at,
 	});
-	const row = await db.get(Q.byId, { id: lastId });
+	const row = await db.get(Q.byId, { id });
 	if (!row) throw new Error("the identity was not stored");
 	return row;
 }
@@ -192,7 +195,7 @@ export async function insertPasskey(
 	db: WriteDb,
 	input: { actor: number; passkey: Passkey; label: string; at: number },
 ): Promise<CredentialRow> {
-	const { lastId } = await db.run(Q.insert, {
+	const { id } = await db.one(Q.insert, {
 		actor: input.actor,
 		kind: "passkey",
 		handle: input.passkey.credentialId,
@@ -200,7 +203,7 @@ export async function insertPasskey(
 		label: input.label,
 		at: input.at,
 	});
-	const row = await db.get(Q.byId, { id: lastId });
+	const row = await db.get(Q.byId, { id });
 	if (!row) throw new Error("the passkey was not stored");
 	return row;
 }
@@ -218,12 +221,14 @@ export async function countPasskeyUse(
 	const stored = storedPasskey(row);
 	if (!stored) return false;
 	const data = dataOf({ ...stored, publicKey: stored.key, ...shown });
-	return db.run(Q.counted, { id: row.id, was: row.data, data, at }).changes === 1;
+	return (await db.run(Q.counted, { id: row.id, was: row.data, data, at })).changes === 1;
 }
 
 /** Refreshes a legacy password's hash without changing the credential its existing sessions rest on. */
 export async function rehashPassword(db: WriteDb, row: CredentialRow, hash: string, at: number): Promise<boolean> {
-	return row.kind === "password" && db.run(Q.counted, { id: row.id, was: row.data, data: hash, at }).changes === 1;
+	return (
+		row.kind === "password" && (await db.run(Q.counted, { id: row.id, was: row.data, data: hash, at })).changes === 1
+	);
 }
 
 /** Notes that a credential signed its person in. */
@@ -233,7 +238,7 @@ export async function noteCredentialUse(db: WriteDb, id: number, at: number): Pr
 
 /** Revokes one credential and erases what it held. False when it was revoked already or does not exist. */
 export const revokeCredential = async (db: WriteDb, id: number, at: number): Promise<boolean> =>
-	db.run(Q.revoke, { id, at }).changes > 0;
+	(await db.run(Q.revoke, { id, at })).changes > 0;
 
 /** Revokes every credential of a person and erases what each held. Returns how many. */
 export const revokeCredentialsOf = async (db: WriteDb, actor: number, at: number): Promise<number> =>
@@ -258,7 +263,7 @@ export async function credentialSummary(db: ReadDb, actor: number): Promise<{ pa
  * random bytes, base64url, the same for all of the person's passkeys. Null when the person has none yet.
  */
 export const userHandleOf = async (db: ReadDb, actor: number): Promise<string | null> =>
-	db.get(Q.userHandle, { actor })?.handle ?? null;
+	(await db.get(Q.userHandle, { actor }))?.handle ?? null;
 
 /** The person's handle, made now if they had none. In a write transaction. */
 export async function ensureUserHandle(db: WriteDb, actor: number, at: number): Promise<string> {

@@ -10,6 +10,7 @@ import {
 	challengeOf,
 	type RegistrationOptions,
 } from "../src/server/identity/webauthn.ts";
+import { identityDatabaseUrl, pgRun } from "./identity-db.ts";
 import {
 	type Authenticator,
 	authenticator,
@@ -48,14 +49,14 @@ type CredentialRow = {
 	last_used_at: number | null;
 	revoked_at: number | null;
 };
-const credentials = (w: World): CredentialRow[] =>
-	w.rows("SELECT id, actor, kind, handle, data, label, last_used_at, revoked_at FROM credentials ORDER BY id");
-const passkeyRow = (w: World, device: Authenticator): CredentialRow & { stored: Stored } => {
-	const row = credentials(w).find((candidate) => candidate.handle === device.id);
+const credentials = async (w: World): Promise<CredentialRow[]> =>
+	await w.rows("SELECT id, actor, kind, handle, data, label, last_used_at, revoked_at FROM credentials ORDER BY id");
+const passkeyRow = async (w: World, device: Authenticator): Promise<CredentialRow & { stored: Stored }> => {
+	const row = (await credentials(w)).find((candidate) => candidate.handle === device.id);
 	if (!row) throw new Error("no such passkey is stored");
 	return { ...row, stored: JSON.parse(row.data) as Stored };
 };
-const sessionCount = (w: World): number => w.rows("SELECT id FROM sessions").length;
+const sessionCount = async (w: World): Promise<number> => (await w.rows("SELECT id FROM sessions")).length;
 
 /** A signed-in person registers a passkey: begin, the authenticator, add. */
 async function addPasskey(w: World, cookie: string, device: Authenticator, label = "laptop") {
@@ -177,7 +178,7 @@ describe("registering a passkey", () => {
 		// The handle the authenticator files the key under is random bytes, not the person's name or number.
 		expect(Buffer.from(options.user.id, "base64url")).toHaveLength(16);
 		expect(added.body).toEqual({ ok: true, result: { id: 2, label: "Robin's laptop" }, seq: null });
-		const row = passkeyRow(w, device);
+		const row = await passkeyRow(w, device);
 		expect(row).toMatchObject({ id: 2, kind: "passkey", label: "Robin's laptop", revoked_at: null });
 		expect(row.stored).toMatchObject({ algorithm: -7, counter: 0, transports: ["internal"] });
 		// What a list says of a credential is never its key or its hash.
@@ -203,8 +204,10 @@ describe("registering a passkey", () => {
 			ok: true,
 			result: { actor: "robin", via: "cookie", session: 2 },
 		});
-		expect(w.rows("SELECT credential, token FROM sessions WHERE id = 2")).toEqual([{ credential: 2, token: null }]);
-		expect(passkeyRow(w, device)).toMatchObject({ stored: { counter: 1 }, last_used_at: expect.any(Number) });
+		expect(await w.rows("SELECT credential, token FROM sessions WHERE id = 2")).toEqual([
+			{ credential: 2, token: null },
+		]);
+		expect(await passkeyRow(w, device)).toMatchObject({ stored: { counter: 1 }, last_used_at: expect.any(Number) });
 		const sessions = await w.ok<{ id: number; openedWith: string }[]>("session", { do: "list" }, { cookie });
 		expect(sessions.map((row) => `${row.id} ${row.openedWith}`)).toEqual(["1 password", "2 passkey"]);
 		// The next registration is told which authenticators the person already has.
@@ -263,7 +266,7 @@ describe("registering a passkey", () => {
 			"relying party": "400 rp-id",
 			"not verified": "400 user-not-verified",
 		});
-		expect(credentials(w).filter((row) => row.kind === "passkey")).toEqual([]);
+		expect((await credentials(w)).filter((row) => row.kind === "passkey")).toEqual([]);
 		// One millisecond inside its time it is taken, and the same answer is not taken twice.
 		const device = authenticator();
 		const answer = device.register(await begin(robin));
@@ -271,7 +274,7 @@ describe("registering a passkey", () => {
 		expect((await add(robin, answer)).status).toBe(200);
 		const again = await add(robin, answer);
 		expect(again.status).toBe(400);
-		expect(credentials(w).filter((row) => row.kind === "passkey")).toHaveLength(1);
+		expect((await credentials(w)).filter((row) => row.kind === "passkey")).toHaveLength(1);
 	});
 
 	test("a credential id is registered once on the instance: not twice by one person, not by another, not after it was removed", async () => {
@@ -294,17 +297,18 @@ describe("registering a passkey", () => {
 			sessionsEnded: 0,
 		});
 		expect([await again(robin), await again(sam)]).toEqual(["409 conflict", "409 conflict"]);
-		expect(credentials(w).filter((row) => row.kind === "passkey")).toMatchObject([
+		expect((await credentials(w)).filter((row) => row.kind === "passkey")).toMatchObject([
 			{ id: 2, handle: device.id, data: "", revoked_at: expect.any(Number) },
 		]);
 		// The database holds the rule too, whatever the code above it does.
-		expect(() =>
-			w.instance.app.db.raw
-				.query(
+		expect(
+			async () =>
+				await pgRun(
+					w.instance.app,
 					"INSERT INTO credentials (actor, kind, handle, data, label, created_at) VALUES (4, 'passkey', ?, '{}', 'x', 0)",
-				)
-				.run(device.id),
-		).toThrow(/UNIQUE/);
+					[device.id],
+				),
+		).toThrow(/unique constraint/);
 	});
 
 	test("an invitation is accepted with a passkey, or with a passkey and a password, and the session rests on the passkey", async () => {
@@ -326,10 +330,10 @@ describe("registering a passkey", () => {
 		});
 		expect(accepted.status).toBe(200);
 		// The passkey signed its person in just now, and its row says so: it is not "never used".
-		expect(credentials(w)).toMatchObject([
+		expect(await credentials(w)).toMatchObject([
 			{ id: 1, kind: "passkey", label: "phone", handle: device.id, last_used_at: expect.any(Number) },
 		]);
-		expect(w.rows("SELECT credential FROM sessions")).toEqual([{ credential: 1 }]);
+		expect(await w.rows("SELECT credential FROM sessions")).toEqual([{ credential: 1 }]);
 		expect((await withPasskey(w, device.assert(await challenge(w)))).status).toBe(200);
 
 		// Both at once.
@@ -343,11 +347,11 @@ describe("registering a passkey", () => {
 			passkey: other.register(offered.body.result.passkey),
 		});
 		expect(both.status).toBe(200);
-		expect(credentials(w).slice(1)).toMatchObject([
+		expect((await credentials(w)).slice(1)).toMatchObject([
 			{ id: 2, kind: "password", actor: 4, last_used_at: expect.any(Number) },
 			{ id: 3, kind: "passkey", actor: 4, label: "passkey", last_used_at: expect.any(Number) },
 		]);
-		expect(w.rows("SELECT credential FROM sessions WHERE actor = 4")).toEqual([{ credential: 3 }]);
+		expect(await w.rows("SELECT credential FROM sessions WHERE actor = 4")).toEqual([{ credential: 3 }]);
 		expect((await signIn(w, "sam", PASSWORD)).status).toBe(200);
 
 		// A passkey that does not answer the invitation's own challenge accepts nothing, and spends nothing.
@@ -380,7 +384,7 @@ describe("registering a passkey", () => {
 			"[mainworthy] sign-in refused: credential-exists",
 		]);
 		expect(
-			w.rows(
+			await w.rows(
 				"SELECT id FROM actors a WHERE name = 'pat' AND EXISTS (SELECT 1 FROM credentials c WHERE c.actor = a.id)",
 			),
 		).toEqual([]);
@@ -396,7 +400,7 @@ describe("signing in with a passkey", () => {
 		const clock = clockAt();
 		const w = await world({ clock });
 		const { cookie, device } = await person(w, "robin");
-		const before = sessionCount(w);
+		const before = await sessionCount(w);
 		const answer = device.assert(await challenge(w));
 		expect((await withPasskey(w, answer)).status).toBe(200);
 		const lines = await logged(async () => {
@@ -437,7 +441,7 @@ describe("signing in with a passkey", () => {
 			"[mainworthy] sign-in refused: input",
 			"[mainworthy] sign-in refused: user-not-verified",
 		]);
-		expect(sessionCount(w)).toBe(before + 1);
+		expect(await sessionCount(w)).toBe(before + 1);
 		// One millisecond inside its time a challenge still signs in.
 		const inTime = device.assert(await challenge(w));
 		clock.advance(CEREMONY_MS - 1);
@@ -448,10 +452,12 @@ describe("signing in with a passkey", () => {
 		const w = await world();
 		const { device } = await person(w, "robin");
 		const { device: sams } = await person(w, "sam");
-		const handles = w.rows<{ actor: number; handle: string }>("SELECT actor, handle FROM passkey_users ORDER BY actor");
+		const handles = await w.rows<{ actor: number; handle: string }>(
+			"SELECT actor, handle FROM passkey_users ORDER BY actor",
+		);
 		expect(handles.map((row) => row.actor)).toEqual([3, 4]);
 		const samsHandle = handles[1]?.handle ?? "";
-		const before = sessionCount(w);
+		const before = await sessionCount(w);
 		const lines = await logged(async () => {
 			const replies = [
 				await withPasskey(w, device.assert(await challenge(w), { userHandle: samsHandle })),
@@ -463,7 +469,7 @@ describe("signing in with a passkey", () => {
 			);
 		});
 		expect(lines).toEqual(Array.from({ length: 3 }, () => "[mainworthy] sign-in refused: user-handle"));
-		expect(sessionCount(w)).toBe(before);
+		expect(await sessionCount(w)).toBe(before);
 		// Each passkey signs in the person it was registered for, whatever else the request says.
 		const robin = await withPasskey(w, device.assert(await challenge(w)));
 		const sam = await w.post("/api/login", { passkey: sams.assert(await challenge(w)), name: "robin" });
@@ -478,8 +484,8 @@ describe("signing in with a passkey", () => {
 		const w = await world();
 		const { device } = await person(w, "robin");
 		expect((await withPasskey(w, device.assert(await challenge(w), { signCount: 5 }))).status).toBe(200);
-		expect(passkeyRow(w, device).stored.counter).toBe(5);
-		const before = sessionCount(w);
+		expect((await passkeyRow(w, device)).stored.counter).toBe(5);
+		const before = await sessionCount(w);
 		const lines = await logged(async () => {
 			for (const signCount of [5, 4, 0]) {
 				const reply = await withPasskey(w, device.assert(await challenge(w), { signCount }));
@@ -489,10 +495,10 @@ describe("signing in with a passkey", () => {
 		expect(lines).toEqual(
 			Array.from({ length: 3 }, () => "[mainworthy] sign-in refused: possibly-cloned (credential 2)"),
 		);
-		expect(passkeyRow(w, device).stored.counter).toBe(5);
-		expect(sessionCount(w)).toBe(before);
+		expect((await passkeyRow(w, device)).stored.counter).toBe(5);
+		expect(await sessionCount(w)).toBe(before);
 		expect((await withPasskey(w, device.assert(await challenge(w), { signCount: 6 }))).status).toBe(200);
-		expect(passkeyRow(w, device).stored.counter).toBe(6);
+		expect((await passkeyRow(w, device)).stored.counter).toBe(6);
 		// An authenticator that does not count sends zero each time, and that is accepted while zero is stored.
 		const { device: uncounted } = await person(w, "sam");
 		for (let i = 0; i < 2; i++)
@@ -502,7 +508,7 @@ describe("signing in with a passkey", () => {
 	test("two sign-ins racing on one passkey with the same counter above zero open one session, and so do two answers to one challenge", async () => {
 		const w = await world();
 		const { device } = await person(w, "robin");
-		const before = sessionCount(w);
+		const before = await sessionCount(w);
 		const lines = await logged(async () => {
 			// Two answers with the same counter, as a copied key would give, each to a challenge of its own. Both
 			// are checked against the stored counter before either may write.
@@ -514,8 +520,8 @@ describe("signing in with a passkey", () => {
 			await waiting;
 			await gate.release();
 			expect((await Promise.all(racing)).map((reply) => reply.status).sort()).toEqual([200, 401]);
-			expect(sessionCount(w)).toBe(before + 1);
-			expect(passkeyRow(w, device).stored.counter).toBe(7);
+			expect(await sessionCount(w)).toBe(before + 1);
+			expect((await passkeyRow(w, device)).stored.counter).toBe(7);
 
 			// One answer, sent twice at the same moment.
 			const answer = device.assert(await challenge(w), { signCount: 8 });
@@ -525,7 +531,7 @@ describe("signing in with a passkey", () => {
 			await waiting;
 			await gate.release();
 			expect((await Promise.all(racing)).map((reply) => reply.status).sort()).toEqual([200, 401]);
-			expect(sessionCount(w)).toBe(before + 2);
+			expect(await sessionCount(w)).toBe(before + 2);
 		});
 		expect(lines).toEqual([
 			"[mainworthy] sign-in refused: possibly-cloned (credential 2)",
@@ -538,7 +544,7 @@ describe("signing in with a passkey", () => {
 		// from signing in twice is its challenge, which the test above holds.
 		const w = await world();
 		const { device } = await person(w, "robin");
-		const before = sessionCount(w);
+		const before = await sessionCount(w);
 		const one = device.assert(await challenge(w), { signCount: 0 });
 		const two = device.assert(await challenge(w), { signCount: 0 });
 		const gate = holdGate(w.instance);
@@ -547,8 +553,8 @@ describe("signing in with a passkey", () => {
 		await waiting;
 		await gate.release();
 		expect((await Promise.all(racing)).map((reply) => reply.status)).toEqual([200, 200]);
-		expect(sessionCount(w)).toBe(before + 2);
-		expect(passkeyRow(w, device).stored.counter).toBe(0);
+		expect(await sessionCount(w)).toBe(before + 2);
+		expect((await passkeyRow(w, device)).stored.counter).toBe(0);
 	});
 
 	test("a passkey that was removed, and one whose person was forgotten, sign nobody in", async () => {
@@ -591,7 +597,7 @@ describe("removing a credential", () => {
 			await w.status({ cookie: second }),
 			await w.status({ cookie: viaPasskey }),
 		]).toEqual([401, 401, 200]);
-		expect(w.rows("SELECT id, ended_why FROM sessions ORDER BY id")).toEqual([
+		expect(await w.rows("SELECT id, ended_why FROM sessions ORDER BY id")).toEqual([
 			{ id: 1, ended_why: "ended" },
 			{ id: 2, ended_why: "ended" },
 			{ id: 3, ended_why: null },
@@ -631,7 +637,7 @@ describe("removing a credential", () => {
 			expect([403, 404]).toContain(reply.status);
 		}
 		expect((await w.op("credential", { do: "list", actor: "robin" }, { cookie: sam })).status).toBe(403);
-		expect(credentials(w).map((row) => row.revoked_at)).toEqual([null, null, null, null]);
+		expect((await credentials(w)).map((row) => row.revoked_at)).toEqual([null, null, null, null]);
 		// The owner's token lists credentials, but removal needs the owner's own recent session proof.
 		const seen = await w.ok<{ id: number }[]>("credential", { do: "list", actor: "robin" });
 		expect(seen.map((row) => row.id)).toEqual([1, 2]);
@@ -723,11 +729,16 @@ describe("the relying party", () => {
 		const boot = async (publicUrl: string) =>
 			await start(
 				{
-					...defaultConfig({ MAINWORTHY_DATA: scratch(), MAINWORTHY_PORT: "0", MAINWORTHY_PUBLIC_URL: publicUrl }),
+					...defaultConfig({
+						MAINWORTHY_DATA: scratch(),
+						MAINWORTHY_PORT: "0",
+						MAINWORTHY_PUBLIC_URL: publicUrl,
+						MAINWORTHY_DATABASE_URL: await identityDatabaseUrl(crypto.randomUUID()),
+					}),
 					owner: OWNER,
 				},
 				() => ({ ui: null }),
-				{ readers: 0 },
+				{},
 			);
 		for (const bad of [
 			"http://192.168.1.20:7357",
@@ -776,8 +787,8 @@ describe("the relying party", () => {
 			expect((await withPasskey(w, device.assert(offered))).text).toBe(REFUSED);
 		});
 		expect(lines).toEqual(["[mainworthy] sign-in refused: challenge"]);
-		expect(w.rows("SELECT id FROM credentials")).toEqual([]);
-		expect(w.rows("SELECT actor FROM passkey_users")).toEqual([]);
+		expect(await w.rows("SELECT id FROM credentials")).toEqual([]);
+		expect(await w.rows("SELECT actor FROM passkey_users")).toEqual([]);
 	});
 });
 
@@ -787,7 +798,7 @@ describe("the limit on failed attempts", () => {
 		const w = await world({ clock, proxied: true });
 		const { device } = await person(w, "robin");
 		const at = (n: number): Sent => from(`203.0.113.${n}`);
-		const before = sessionCount(w);
+		const before = await sessionCount(w);
 		const lines = await logged(async () => {
 			// Five answers nobody could accept, each for a challenge of its own: a key nobody registered, another
 			// site's origin, a person who was not verified, a challenge never issued, and a body that is no answer.
@@ -820,9 +831,11 @@ describe("the limit on failed attempts", () => {
 			"[mainworthy] sign-in refused: input",
 			"[mainworthy] sign-in refused: unknown-passkey",
 		]);
-		expect(sessionCount(w)).toBe(before + 2);
+		expect(await sessionCount(w)).toBe(before + 2);
 		// The session a passkey opened says where it was opened from.
-		expect(w.rows("SELECT created_addr FROM sessions WHERE credential = 2")).toEqual([{ created_addr: "203.0.113.1" }]);
+		expect(await w.rows("SELECT created_addr FROM sessions WHERE credential = 2")).toEqual([
+			{ created_addr: "203.0.113.1" },
+		]);
 	});
 });
 
@@ -842,11 +855,11 @@ describe("a ceremony belongs to where it began", () => {
 			expect.stringMatching(/^mainworthy_ceremony=[A-Za-z0-9_-]{43}; Path=\/; HttpOnly; SameSite=Strict; Max-Age=300$/),
 		]);
 		// Only its SHA-256 is kept, and that only in memory: the value is nowhere on disk.
-		expect(w.disk().includes(mine.cookie.split("=")[1] ?? "")).toBe(false);
+		expect((await w.disk()).includes(mine.cookie.split("=")[1] ?? "")).toBe(false);
 		const other = await ask(w);
 		expect(other.cookie).not.toBe(mine.cookie);
 		const answer = device.assert(mine.options);
-		const before = sessionCount(w);
+		const before = await sessionCount(w);
 		const lines = await logged(async () => {
 			const replies = [
 				// Another browser, which holds the answer and no cookie; one that asked for a challenge of its own;
@@ -865,7 +878,7 @@ describe("a ceremony belongs to where it began", () => {
 				expect(reply.setCookies).toEqual(["mainworthy_ceremony=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"]);
 		});
 		expect(lines).toEqual(Array.from({ length: 5 }, () => "[mainworthy] sign-in refused: context"));
-		expect(sessionCount(w)).toBe(before);
+		expect(await sessionCount(w)).toBe(before);
 		// None of that spent the challenge: the browser that asked still signs in, and its cookie is cleared.
 		const signedIn = await withPasskey(w, answer, { cookie: mine.cookie });
 		expect(signedIn.status).toBe(200);
@@ -938,7 +951,7 @@ describe("a ceremony belongs to where it began", () => {
 		// Nor after the laptop signed out, which is how an answer would outlive the session that asked for it.
 		expect((await w.post("/api/logout", {}, { cookie: laptop })).status).toBe(200);
 		expect(await add({ cookie: phone }, answer)).toBe("400 context");
-		expect(credentials(w).filter((row) => row.kind === "passkey")).toEqual([]);
+		expect((await credentials(w)).filter((row) => row.kind === "passkey")).toEqual([]);
 		// The session that begins one completes it.
 		const own = authenticator();
 		expect(await add({ cookie: phone }, own.register(must(await begin({ cookie: phone }))))).toBe("200 added");
@@ -991,7 +1004,7 @@ describe("a ceremony belongs to where it began", () => {
 			expect(`${old.status} ${old.text}`).toBe(`401 ${REFUSED}`);
 		});
 		expect(lines).toEqual(["[mainworthy] sign-in refused: context", "[mainworthy] sign-in refused: invitation"]);
-		expect(credentials(w)).toEqual([]);
+		expect(await credentials(w)).toEqual([]);
 		// The second invitation's own challenge accepts it.
 		const forSecond = must(
 			await w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", { invitation: second.code }),

@@ -26,10 +26,10 @@
 //   if (answer.kind === "blocked") {
 //     // A secret outside the generated format is not looked at. One in it is, and passes when it is right and
 //     // the server made it: the owner's token from the environment is a person's choice whatever it looks like.
-//     const token = isGeneratedSecret(secret) ? findToken(app.db, hashToken(secret)) : null;
+//     const token = isGeneratedSecret(secret) ? findToken(db, hashToken(secret)) : null;
 //     return token && !token.chosen ? admitted(token) : limited(answer.retryAfterSeconds); // nothing is reported
 //   }
-//   const token = findToken(app.db, hashToken(secret));
+//   const token = findToken(db, hashToken(secret));
 //   if (!token) {
 //     limiter.failed(keys, app.now());
 //     return unauthorized();

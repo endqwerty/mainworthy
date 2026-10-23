@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import fc from "fast-check";
 import { type Harness, harness } from "../../../test/helpers.ts";
 import { isLoopbackOrPrivate } from "../kernel/address.ts";
+import { sql } from "../kernel/db.ts";
 import { limiterOf } from "./attempts.ts";
 import { admit, createToken, hashToken } from "./identity.ts";
 import {
@@ -622,7 +623,7 @@ describe("as a surface uses it", () => {
 
 	const instances: Harness[] = [];
 	afterEach(async () => {
-		for (const h of instances.splice(0)) h.close();
+		for (const h of instances.splice(0)) await h.close();
 	});
 
 	async function caller() {
@@ -630,9 +631,17 @@ describe("as a surface uses it", () => {
 		instances.push(h);
 		for (const secret of [GENERATED, CHOSEN]) {
 			const token = await createToken(h.app, { actor: "robin", kind: "human", can: [], project: 0, label: "test" });
-			h.app.db.raw
-				.query("UPDATE tokens SET hash = ?, source = ? WHERE id = ?")
-				.run(hashToken(secret), secret === CHOSEN ? "env" : null, token.id);
+			await h.app.database.write(
+				async (db) =>
+					await db.transaction(async () => {
+						await db.run(
+							sql<{ hash: string; source: string | null; id: number }>(
+								"UPDATE tokens SET hash = $hash, source = $source WHERE id = $id",
+							),
+							{ hash: hashToken(secret), source: secret === CHOSEN ? "env" : null, id: token.id },
+						);
+					}),
+			);
 		}
 		return {
 			limiter: limiterOf(h.app),

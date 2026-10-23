@@ -16,6 +16,7 @@ import { defaultConfig } from "../src/server/kernel/app.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
 import { clientAddress } from "../src/surfaces/http.ts";
 import { mcpRoute } from "../src/surfaces/mcp.ts";
+import { identityDatabaseUrl } from "./identity-db.ts";
 
 /** The owner's token as an operator sets it by hand: not in the form the server generates, so it gets no pass. */
 const TOKEN = "owner-secret-0123456789";
@@ -68,10 +69,11 @@ async function boot(
 		...(ownerToken === null ? {} : { MAINWORTHY_OWNER_TOKEN: ownerToken }),
 		...proxy,
 	});
+	config.databaseUrl = await identityDatabaseUrl(config.dataDir);
 	const instance = await start(
 		config,
 		(app, owner) => ({ ui: null, routes: { "/mcp": mcpRoute(app), ...archiveRoutes(app, owner) } }),
-		{ readers: 0, now: clock.now },
+		{ now: clock.now },
 	);
 	running.push(instance);
 	return instance;

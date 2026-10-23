@@ -10,7 +10,7 @@
 import { randomBytes } from "@noble/hashes/utils.js";
 import type { ActorKind } from "../../core/kinds.ts";
 import type { App } from "../kernel/app.ts";
-import { type Db, type ReadDb, type WriteDb, sql } from "../kernel/db.ts";
+import { type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { OpError } from "../kernel/errors.ts";
 import { CONTEXT, sessionHash } from "./contexts.ts";
 import { liveCredentials } from "./credentials.ts";
@@ -62,39 +62,45 @@ const Q = {
 	// The row is made only if, in the statement that makes it, a token with the presented hash exists and works
 	// and its actor stands. The token's id and its actor are read here, from that row, and are never parameters:
 	// an id says which row, not which token, and after an import another token holds it.
-	insert: sql<{
-		tokenHash: string;
-		sessionHash: string;
-		at: number;
-		expires: number;
-		agent: string | null;
-		addr: string | null;
-	}>(
+	insert: sql<
+		{
+			tokenHash: string;
+			sessionHash: string;
+			at: number;
+			expires: number;
+			agent: string | null;
+			addr: string | null;
+		},
+		{ id: number }
+	>(
 		`INSERT INTO sessions
 			(actor, hash, token, created_at, last_seen_at, expires_at, user_agent, created_addr, last_seen_addr)
 		 SELECT a.id, $sessionHash, t.id, $at, $at, $expires, $agent, $addr, $addr
 		 FROM tokens t JOIN actors a ON a.id = t.actor AND a.disabled_at IS NULL
 		 WHERE t.hash = $tokenHash AND t.revoked_at IS NULL
-			AND (t.expires_at IS NULL OR t.expires_at > $at)`,
+			AND (t.expires_at IS NULL OR t.expires_at > $at) RETURNING id`,
 	),
 	// The row is made only if, in the statement that makes it, the credential still holds what was verified
 	// (`data`: a password's hash, a passkey's key and counter), works, and is this person's, who stands. The
 	// credential's id alone would not say that: after an import a new row takes an old id.
-	insertOnCredential: sql<{
-		actor: number;
-		credential: number;
-		data: string;
-		sessionHash: string;
-		at: number;
-		expires: number;
-		agent: string | null;
-		addr: string | null;
-	}>(
+	insertOnCredential: sql<
+		{
+			actor: number;
+			credential: number;
+			data: string;
+			sessionHash: string;
+			at: number;
+			expires: number;
+			agent: string | null;
+			addr: string | null;
+		},
+		{ id: number }
+	>(
 		`INSERT INTO sessions
 			(actor, hash, credential, created_at, last_seen_at, expires_at, user_agent, created_addr, last_seen_addr, reauthenticated_at)
-		 SELECT a.id, $sessionHash, c.id, $at, $at, $expires, $agent, $addr, $addr, CASE WHEN c.kind = 'password' OR c.kind = 'passkey' THEN $at ELSE NULL END
+		 SELECT a.id, $sessionHash, c.id, $at, $at, $expires, $agent, $addr, $addr, CASE WHEN c.kind = 'password' OR c.kind = 'passkey' THEN $at::bigint ELSE NULL END
 		 FROM credentials c JOIN actors a ON a.id = c.actor AND a.disabled_at IS NULL AND a.kind = 'human'
-		 WHERE c.id = $credential AND c.actor = $actor AND c.revoked_at IS NULL AND c.data = $data`,
+		 WHERE c.id = $credential AND c.actor = $actor AND c.revoked_at IS NULL AND c.data = $data RETURNING id`,
 	),
 	// Every session of an actor that is alive but for its lifetimes, which the caller judges (`inLifetime`):
 	// what it rests on works at `now`, by the rules of the two statements above. What a session rests on is the
@@ -141,7 +147,7 @@ const Q = {
 		"UPDATE sessions SET ended_at = $at, ended_why = $why WHERE actor = $actor AND ended_at IS NULL",
 	),
 	endOnToken: sql<{ token: number; at: number }>(
-		`UPDATE sessions SET ended_at = min($at, coalesce(t.expires_at, $at)),
+		`UPDATE sessions SET ended_at = least($at, coalesce(t.expires_at, $at)),
 			ended_why = CASE WHEN t.expires_at < $at THEN 'expired' ELSE 'ended' END
 		 FROM tokens t WHERE t.id = $token AND sessions.token = t.id AND sessions.ended_at IS NULL`,
 	),
@@ -173,29 +179,33 @@ export const RECENT_PROOF_MESSAGE =
 	"confirm your password, passkey or authenticator code from a signed-in browser session before changing sign-in details; the proof lasts ten minutes";
 
 /** Rechecks the session by its hash on the connection that owns the current transaction. */
-export function proofSession(app: App, input: ProofContext, db = app.db): { id: number; hash: string } | null {
+export async function proofSession(
+	app: App,
+	input: ProofContext,
+	db: ReadDb,
+): Promise<{ id: number; hash: string } | null> {
 	const hash = sessionHash(input.context);
-	const session = hash === null ? null : findSession(app, hash, { db });
+	const session = hash === null ? null : await findSession(app, hash, { db });
 	return hash !== null && session?.actor.id === input.actor ? { id: session.id, hash } : null;
 }
 
 /** Called inside each sign-in-changing writer, before it changes a credential or contact. */
-export async function requireRecentProof(app: App, input: ProofContext, initial = false): Promise<void> {
+export async function requireRecentProof(app: App, db: ReadDb, input: ProofContext, initial = false): Promise<void> {
 	if (app.config.mode === "local" && input.context === CONTEXT.local) return;
-	const session = proofSession(app, input);
+	const session = await proofSession(app, input, db);
 	if (session) {
-		const at = (await app.db.get(Q.proof, { hash: session.hash }))?.reauthenticated_at;
+		const at = (await db.get(Q.proof, { hash: session.hash }))?.reauthenticated_at;
 		const now = app.now();
 		if (at != null && at <= now && now - at <= 10 * 60_000) return;
-		if (initial && liveCredentials(app.db, input.actor).length === 0) return;
+		if (initial && (await liveCredentials(db, input.actor)).length === 0) return;
 	}
 	throw new OpError("recent_proof_required", RECENT_PROOF_MESSAGE);
 }
 
 /** A verified credential and this exact session were checked in the writer's transaction. */
-export async function dateSessionProof(app: App, input: ProofContext): Promise<boolean> {
-	const session = proofSession(app, input);
-	return session !== null && app.db.run(Q.prove, { hash: session.hash, at: app.now() }).changes === 1;
+export async function dateSessionProof(app: App, db: WriteDb, input: ProofContext): Promise<boolean> {
+	const session = await proofSession(app, input, db);
+	return session !== null && (await db.run(Q.prove, { hash: session.hash, at: app.now() })).changes === 1;
 }
 
 /**
@@ -231,11 +241,12 @@ function inLifetime(
  */
 export async function openSession(
 	app: App,
+	db: WriteDb,
 	input: { tokenHash: string; sessionHash: string; userAgent: string | null; address: string | null },
 ): Promise<{ id: number; expiresAt: number } | null> {
 	const at = app.now();
 	const expiresAt = at + app.config.sessionMaxMs;
-	const made = await app.db.run(Q.insert, {
+	const made = await db.get(Q.insert, {
 		tokenHash: input.tokenHash,
 		sessionHash: input.sessionHash,
 		at,
@@ -243,7 +254,7 @@ export async function openSession(
 		agent: input.userAgent,
 		addr: input.address,
 	});
-	return made.changes === 1 ? { id: made.lastId, expiresAt } : null;
+	return made ? { id: made.id, expiresAt } : null;
 }
 
 /**
@@ -258,6 +269,7 @@ export async function openSession(
  */
 export async function openSessionOnCredential(
 	app: App,
+	db: WriteDb,
 	input: {
 		credential: { id: number; actor: number; data: string };
 		sessionHash: string;
@@ -267,7 +279,7 @@ export async function openSessionOnCredential(
 ): Promise<{ id: number; expiresAt: number } | null> {
 	const at = app.now();
 	const expiresAt = at + app.config.sessionMaxMs;
-	const made = await app.db.run(Q.insertOnCredential, {
+	const made = await db.get(Q.insertOnCredential, {
 		actor: input.credential.actor,
 		credential: input.credential.id,
 		data: input.credential.data,
@@ -277,7 +289,7 @@ export async function openSessionOnCredential(
 		agent: input.userAgent,
 		addr: input.address,
 	});
-	return made.changes === 1 ? { id: made.lastId, expiresAt } : null;
+	return made ? { id: made.id, expiresAt } : null;
 }
 
 /**
@@ -285,26 +297,30 @@ export async function openSessionOnCredential(
  * token or its credential still working and its actor still standing. Null for anything else. Reads committed rows on the reader
  * and writes nothing, so it is asked on every request and again by a change stream before each event.
  */
-export function findSession(
+export async function findSession(
 	app: App,
 	hash: string,
-	options: { db?: Db; activity?: number; idleMs?: number } = {},
-): { id: number; actor: { id: number; org: number; kind: ActorKind; name: string; disabled_at: null } } | null {
+	options: { db?: ReadDb; activity?: number; idleMs?: number } = {},
+): Promise<{
+	id: number;
+	actor: { id: number; org: number; kind: ActorKind; name: string; disabled_at: null };
+} | null> {
 	const now = app.now();
-	const db = options.db ?? app.reader;
-	const row = db.get(Q.standing, { hash, now }) ?? db.get(Q.standingOnCredential, { hash });
+	if (!options.db) return await app.database.read(async (db) => await findSession(app, hash, { ...options, db }));
+	const db = options.db;
+	const row = (await db.get(Q.standing, { hash, now })) ?? (await db.get(Q.standingOnCredential, { hash }));
 	if (!row || !inLifetime(app, row, now, options)) return null;
 	return { id: row.id, actor: { id: row.actor, org: row.org, kind: row.kind, name: row.name, disabled_at: null } };
 }
 
 /** Whether a cookie names a session that was not ended. A plain read, so a sign-out with nothing to end stops here. */
 export async function hasUnendedSession(db: ReadDb, hash: string): Promise<boolean> {
-	return db.get(Q.unended, { hash }) !== null;
+	return (await db.get(Q.unended, { hash })) !== null;
 }
 
 /** Ends the session a cookie names. Under the gate. False when there is none, or it had ended: the first end stands. */
-export async function endSession(app: App, hash: string, why: EndedWhy): Promise<boolean> {
-	return app.db.run(Q.end, { hash, at: app.now(), why }).changes > 0;
+export async function endSession(app: App, db: WriteDb, hash: string, why: EndedWhy): Promise<boolean> {
+	return (await db.run(Q.end, { hash, at: app.now(), why })).changes > 0;
 }
 
 /**
@@ -339,16 +355,16 @@ export async function endSessionsOnToken(db: WriteDb, token: number, at: number)
  * one does not end the session whose own request changed it. False when the session did not rest on `from`.
  */
 export async function restSession(db: WriteDb, move: { session: number; from: number; to: number }): Promise<boolean> {
-	return db.run(Q.rest, { id: move.session, from: move.from, to: move.to }).changes === 1;
+	return (await db.run(Q.rest, { id: move.session, from: move.from, to: move.to })).changes === 1;
 }
 
 /** The actor whose session this is, when it has not ended; else null. */
 export const sessionOwner = async (db: ReadDb, id: number): Promise<number | null> =>
-	db.get(Q.owner, { id })?.actor ?? null;
+	(await db.get(Q.owner, { id }))?.actor ?? null;
 
 /** Ends one session by its id, as a person does from a list. Under the gate. False when it had ended or is none. */
 export async function endSessionById(db: WriteDb, id: number, at: number): Promise<boolean> {
-	return db.run(Q.endById, { id, at, why: "ended" }).changes > 0;
+	return (await db.run(Q.endById, { id, at, why: "ended" })).changes > 0;
 }
 
 /**
@@ -383,19 +399,22 @@ export async function listSessions(app: App, db: ReadDb, actor: number) {
  */
 export async function sweepSessions(app: App): Promise<{ expired: number; deleted: number }> {
 	const now = app.now();
-	return await app.db.transaction(async () => {
-		let expired = 0;
-		for (const row of await app.db.all(Q.retiredTokens, { now })) {
-			const ended = (await app.db.run(Q.endById, row)).changes;
-			if (row.why === "expired") expired += ended;
-		}
-		for (const row of await app.db.all(Q.overdue, { now, idleBefore: now - app.config.sessionIdleMs })) {
-			// The row says idle, and a use noted since the last flush says otherwise.
-			if (inLifetime(app, row, now)) continue;
-			expired += (await app.db.run(Q.endById, { id: row.id, at: now, why: "expired" })).changes;
-		}
-		return { expired, deleted: (await app.db.run(Q.drop, { before: now - KEPT_MS })).changes };
-	});
+	return await app.database.write(
+		async (db) =>
+			await db.transaction(async () => {
+				let expired = 0;
+				for (const row of await db.all(Q.retiredTokens, { now })) {
+					const ended = (await db.run(Q.endById, row)).changes;
+					if (row.why === "expired") expired += ended;
+				}
+				for (const row of await db.all(Q.overdue, { now, idleBefore: now - app.config.sessionIdleMs })) {
+					// The row says idle, and a use noted since the last flush says otherwise.
+					if (inLifetime(app, row, now)) continue;
+					expired += (await db.run(Q.endById, { id: row.id, at: now, why: "expired" })).changes;
+				}
+				return { expired, deleted: (await db.run(Q.drop, { before: now - KEPT_MS })).changes };
+			}),
+	);
 }
 
 export async function endOtherSessions(db: WriteDb, actor: number, keep: number | null, at: number): Promise<number> {

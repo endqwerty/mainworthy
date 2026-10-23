@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { App } from "../kernel/app.ts";
 import type { Actor } from "../kernel/ctx.ts";
-import { type ReadDb, type WriteDb, sql } from "../kernel/db.ts";
+import { type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { conflict, forbidden, invalid } from "../kernel/errors.ts";
 import { limiterOf } from "./attempts.ts";
 import { insertPassword, livePassword, revokeCredential } from "./credentials.ts";
@@ -74,6 +74,7 @@ export async function getEmail(db: ReadDb, actor: number): Promise<{ email: stri
 }
 export async function setEmail(
 	app: App,
+	db: WriteDb,
 	input: { caller: Actor; person: Actor; context: string | null; email: string | null },
 ): Promise<{ email: string | null; verified: boolean }> {
 	const { caller, person, email } = input;
@@ -83,25 +84,25 @@ export async function setEmail(
 			throw forbidden("an email address is changed from a browser that is signed in, not with a token");
 	} else if (caller.name !== app.config.owner)
 		throw forbidden("a recovery email address is changed by that person or the owner of this instance");
-	await requireRecentProof(app, { actor: caller.id, context: input.context });
+	await requireRecentProof(app, db, { actor: caller.id, context: input.context });
 	const actor = person.id;
 	if (email === null) {
-		await credentialNotice(app, actor, "Your recovery email address was removed");
-		await forgetContact(app.db, actor);
+		await credentialNotice(app, db, actor, "Your recovery email address was removed");
+		await forgetContact(db, actor);
 		return { email: null, verified: false };
 	}
 	// The verified address on file, entered again: nothing changes, so nothing is mailed and it stays verified.
-	const current = await app.db.get(Q.get, { actor });
+	const current = await db.get(Q.get, { actor });
 	if (current?.email === email && current.verified_at !== null) return { email, verified: true };
 	const url = requireMail(app);
-	const owner = await app.db.get(Q.owner, { email });
+	const owner = await db.get(Q.owner, { email });
 	if (owner && owner.actor !== actor) throw conflict("that email address is already assigned");
-	await credentialNotice(app, actor, "Your recovery email address was changed");
+	await credentialNotice(app, db, actor, "Your recovery email address was changed");
 	const revision = newSessionSecret();
-	await app.db.run(Q.put, { actor, email, revision });
-	const contact = await app.db.get(Q.get, { actor });
+	await db.run(Q.put, { actor, email, revision });
+	const contact = await db.get(Q.get, { actor });
 	if (!contact) throw invalid("only a person has an email address");
-	app.db.afterCommit(() => {
+	db.afterCommit(() => {
 		const code = issue(app, { kind: "verify", contact, expires: app.now() + 24 * 3_600_000 });
 		deliverMail(app, {
 			to: email,
@@ -112,24 +113,26 @@ export async function setEmail(
 	return { email, verified: false };
 }
 export async function verifyEmail(app: App, code: string, proven?: () => void): Promise<boolean> {
-	if (find(app, app.reader, code)?.kind !== "verify") return false;
+	if ((await app.database.read(async (db) => await find(app, db, code)))?.kind !== "verify") return false;
 	proven?.();
-	return app.gate.run(
-		async () =>
-			await app.db.transaction(async () => {
-				const link = await find(app, app.db, code);
+	return await app.database.write(
+		async (db) =>
+			await db.transaction(async () => {
+				const link = await find(app, db, code);
 				if (link?.kind !== "verify") return false;
-				await app.db.run(Q.verify, { actor: link.contact.actor, revision: link.contact.revision, at: app.now() });
-				app.db.afterCommit(() => heldLinks(app).delete(hash(code)));
+				await db.run(Q.verify, { actor: link.contact.actor, revision: link.contact.revision, at: app.now() });
+				db.afterCommit(() => {
+					heldLinks(app).delete(hash(code));
+				});
 				return true;
 			}),
 	);
 }
-export async function credentialNotice(app: App, actor: number, change: string): Promise<void> {
+export async function credentialNotice(app: App, db: WriteDb, actor: number, change: string): Promise<void> {
 	if (!app.config.mail) return;
-	const contact = await app.db.get(Q.get, { actor });
+	const contact = await db.get(Q.get, { actor });
 	if (!contact || contact.verified_at === null) return;
-	queueMail(app, {
+	queueMail(app, db, {
 		to: contact.email,
 		subject: "Your Mainworthy sign-in changed",
 		text: `${change} for ${contact.name}.\n\nIf you did not make this change, contact an instance admin.`,
@@ -152,7 +155,7 @@ export async function requestReset(
 		const code = issue(app, {
 			kind: "reset",
 			contact,
-			password: livePassword(app.reader, contact.actor)?.data ?? null,
+			password: await app.database.read(async (db) => (await livePassword(db, contact.actor))?.data ?? null),
 			expires: app.now() + 15 * 60_000,
 		});
 		deliverMail(app, {
@@ -186,19 +189,21 @@ export async function resetPassword(
 		if (error instanceof PasswordWorkBusy) return "busy";
 		throw error;
 	}
-	return app.gate.run(
-		async () =>
-			await app.db.transaction(async () => {
-				const link = await find(app, app.db, input.code);
+	return await app.database.write(
+		async (db) =>
+			await db.transaction(async () => {
+				const link = await find(app, db, input.code);
 				if (link?.kind !== "reset") return "invalid";
-				const current = await livePassword(app.db, link.contact.actor);
+				const current = await livePassword(db, link.contact.actor);
 				if ((current?.data ?? null) !== link.password) return "invalid";
 				const at = app.now();
-				if (current) await revokeCredential(app.db, current.id, at);
-				await insertPassword(app.db, { actor: link.contact.actor, hash: password, at });
-				await endSessionsOf(app.db, link.contact.actor, at, "ended");
-				await credentialNotice(app, link.contact.actor, "Your password was reset");
-				app.db.afterCommit(() => heldLinks(app).delete(hash(input.code)));
+				if (current) await revokeCredential(db, current.id, at);
+				await insertPassword(db, { actor: link.contact.actor, hash: password, at });
+				await endSessionsOf(db, link.contact.actor, at, "ended");
+				await credentialNotice(app, db, link.contact.actor, "Your password was reset");
+				db.afterCommit(() => {
+					heldLinks(app).delete(hash(input.code));
+				});
 				return "changed";
 			}),
 	);

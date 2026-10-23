@@ -1,7 +1,7 @@
 // The headers every reply carries: the policy by itself, then on a real listener for each kind of route, for the
 // web UI as the executable holds it (a list of built files) and as a start from source serves it (Bun's bundle).
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,7 +12,6 @@ import { Client } from "../src/cli/client.ts";
 import { refreshDemo } from "../src/cli/demo.ts";
 import { seed } from "../src/cli/seed.ts";
 import { SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
-import { Db } from "../src/server/kernel/db.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
 import { docsRoutes } from "../src/surfaces/docs/site.ts";
 import {
@@ -25,6 +24,7 @@ import {
 import { mcpRoute } from "../src/surfaces/mcp.ts";
 import { withHeadersOnEvery } from "../src/surfaces/with-headers.ts";
 import sourceUi from "../src/web/index.html";
+import { identityDatabaseUrl } from "./identity-db.ts";
 
 const PAGE =
 	"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
@@ -161,6 +161,7 @@ const scratch = (): string => {
 async function boot(ui: unknown = null): Promise<Instance> {
 	const instance = await start(
 		{
+			databaseUrl: await identityDatabaseUrl(scratch()),
 			dataDir: scratch(),
 			host: "127.0.0.1",
 			port: 0,
@@ -372,6 +373,7 @@ describe("a route that answers without a session and writes the policy of its ow
 	const open = async (): Promise<Instance> => {
 		const instance = await start(
 			{
+				databaseUrl: await identityDatabaseUrl(scratch()),
 				dataDir: scratch(),
 				host: "127.0.0.1",
 				port: 0,
@@ -443,6 +445,7 @@ describe("a route that answers without a session and writes the policy of its ow
 	test("the documentation's pages keep their policy: a page may frame a diagram, and a diagram stays sandboxed", async () => {
 		const instance = await start(
 			{
+				databaseUrl: await identityDatabaseUrl(scratch()),
 				dataDir: scratch(),
 				host: "127.0.0.1",
 				port: 0,
@@ -816,6 +819,7 @@ describe("the executable, built the way `bun run build` builds it", () => {
 				USER: "robin",
 				TMPDIR: data,
 				MAINWORTHY_DATA: data,
+				MAINWORTHY_DATABASE_URL: await identityDatabaseUrl(data),
 				MAINWORTHY_PORT: "0",
 				MAINWORTHY_MODE: "server",
 				MAINWORTHY_OWNER_TOKEN: TOKEN,
@@ -881,33 +885,6 @@ describe("the executable, built the way `bun run build` builds it", () => {
 			expect(carried(api)).toEqual(expected(OTHER, false));
 			// The executable serves its files itself: it has no bundler behind it and so no socket of one.
 			expect(readdirSync(data).filter((name) => name.startsWith("mainworthy-ui-"))).toEqual([]);
-			// A commit below the server writer's 20,000-page fallback must reach the database file while
-			// both connections stay open. The probe writer cannot checkpoint its own commit.
-			const path = join(data, "mainworthy.db");
-			const probe = new Db(path);
-			try {
-				probe.exec("PRAGMA wal_autocheckpoint = 0");
-				probe.exec(
-					"CREATE TABLE checkpoint_probe (value TEXT); INSERT INTO checkpoint_probe VALUES ('compiled checkpoint row')",
-				);
-				const marker = Buffer.from("compiled checkpoint row");
-				expect(readFileSync(`${path}-wal`).includes(marker)).toBe(true);
-				const deadline = Date.now() + 5000;
-				while (!readFileSync(path).includes(marker) && Date.now() < deadline) await Bun.sleep(25);
-				const snapshot = join(scratch(), "snapshot.db");
-				copyFileSync(path, snapshot);
-				const copy = new Db(snapshot, { reader: true });
-				try {
-					expect(copy.raw.query("SELECT value FROM checkpoint_probe").get()).toEqual({
-						value: "compiled checkpoint row",
-					});
-				} finally {
-					copy.close();
-				}
-			} finally {
-				probe.exec("DROP TABLE checkpoint_probe");
-				probe.close();
-			}
 			// Leave a small demo; a later restart of a completed revision must preserve it.
 			await seed(new Client({ url, token: TOKEN, project: "scratch" }), {
 				project: "demo",
@@ -947,6 +924,7 @@ describe("the executable, built the way `bun run build` builds it", () => {
 				HOME: data,
 				USER: "robin",
 				MAINWORTHY_DATA: data,
+				MAINWORTHY_DATABASE_URL: await identityDatabaseUrl(data),
 				MAINWORTHY_PORT: "0",
 				MAINWORTHY_MODE: "server",
 				MAINWORTHY_OWNER_TOKEN: TOKEN,

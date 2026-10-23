@@ -1,6 +1,7 @@
 import { connect, isIP, type Socket } from "node:net";
 import { connect as connectTls } from "node:tls";
 import type { App } from "../kernel/app.ts";
+import type { WriteDb } from "../kernel/db.ts";
 import { invalid } from "../kernel/errors.ts";
 import type { MailConfig } from "../kernel/mail.ts";
 import { publicAddress } from "./people.ts";
@@ -23,8 +24,8 @@ export function requireMail(app: App): string {
 	return url;
 }
 
-export function queueMail(app: App, message: Message): void {
-	app.db.afterCommit(() => deliverMail(app, message));
+export function queueMail(app: App, db: WriteDb, message: Message): void {
+	db.afterCommit(() => deliverMail(app, message));
 }
 
 export function deliverMail(app: App, message: Message): void {

@@ -2,7 +2,7 @@
 // browser and a script make, and an authenticator written from the specification, as the passkey verifier's
 // unit tests have one. Everything said to the server and everything it answered is kept, so a test can search it.
 import { createHash, generateKeyPairSync, randomBytes, sign } from "node:crypto";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Instance, start } from "../src/app/start.ts";
@@ -15,6 +15,7 @@ import type {
 } from "../src/server/identity/webauthn.ts";
 import { type Config, defaultConfig } from "../src/server/kernel/app.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
+import { databaseContents, holdWriter, identityDatabaseUrl, pgRows } from "./identity-db.ts";
 
 /** The owner of every instance here, and the token the owner signs in with. */
 export const OWNER = "kim";
@@ -79,10 +80,10 @@ export type World = {
 	/** The status of `GET /api/session` for whoever the headers say. */
 	status: (headers: Sent) => Promise<number>;
 	/** Every byte the instance has on disk: the database, its write-ahead log and the log's index. */
-	disk: () => Buffer;
+	disk: () => Promise<Buffer>;
 	/** What was written: the database and its log, without the log's index, which a reader marks too. */
-	written: () => Buffer;
-	rows: <T>(query: string) => T[];
+	written: () => Promise<Buffer>;
+	rows: <T>(query: string) => Promise<T[]>;
 };
 
 const worlds: World[] = [];
@@ -123,6 +124,7 @@ export async function world(options: Boot = {}): Promise<World> {
 	const publicUrl = options.publicUrl === undefined ? PUBLIC : options.publicUrl;
 	const instance = await start(
 		{
+			databaseUrl: await identityDatabaseUrl(dataDir),
 			dataDir,
 			host: "127.0.0.1",
 			port: 0,
@@ -142,7 +144,7 @@ export async function world(options: Boot = {}): Promise<World> {
 			...(options.requireAdminMfa ? { requireAdminMfa: true } : {}),
 		},
 		(app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }),
-		{ readers: 0, now: clock.now },
+		{ now: clock.now },
 	);
 	const replies: string[] = [];
 	const send = async <T>(method: string, path: string, body: unknown, headers: Sent): Promise<Answer<T>> => {
@@ -185,14 +187,9 @@ export async function world(options: Boot = {}): Promise<World> {
 			return reply.body.result;
 		},
 		status: async (headers) => (await fetch(`${instance.url}/api/session`, { headers })).status,
-		disk: () => Buffer.concat(readdirSync(dataDir).map((name) => readFileSync(join(dataDir, name)))),
-		written: () =>
-			Buffer.concat(
-				readdirSync(dataDir)
-					.filter((name) => !name.endsWith("-shm"))
-					.map((name) => readFileSync(join(dataDir, name))),
-			),
-		rows: <T>(query: string) => instance.app.reader.raw.query<T, []>(query).all(),
+		disk: async () => await databaseContents(instance.app),
+		written: async () => await databaseContents(instance.app),
+		rows: async <T>(query: string) => await pgRows<T>(instance.app, query),
 	};
 	worlds.push(made);
 	return made;
@@ -221,20 +218,8 @@ export const signIn = (w: World, name: string, password: string, headers: Sent =
 	w.post<{ signedIn: boolean }>("/api/login", { name, password }, headers);
 
 /** Holds the write gate, as a long report does, until `release`. */
-export function holdGate(instance: Instance): { release: () => Promise<void> } {
-	let open = (): void => {};
-	const held = instance.app.gate.run(
-		() =>
-			new Promise<void>((resolve) => {
-				open = resolve;
-			}),
-	);
-	return {
-		release: () => {
-			open();
-			return held;
-		},
-	};
+export function holdGate(instance: Instance) {
+	return holdWriter(instance.app);
 }
 
 /**
@@ -243,14 +228,14 @@ export function holdGate(instance: Instance): { release: () => Promise<void> } {
  * on its way.
  */
 export function waitingAtGate(instance: Instance, count: number): Promise<void> {
-	const gate = instance.app.gate;
-	const run = gate.run;
+	const gate = instance.app.database;
+	const run = gate.write.bind(gate);
 	return new Promise((resolve) => {
 		let seen = 0;
-		gate.run = (fn) => {
+		gate.write = (fn) => {
 			seen++;
 			if (seen === count) {
-				gate.run = run;
+				gate.write = run;
 				// After the caller's own turn of the loop, so that it is in the queue when the test goes on.
 				setImmediate(resolve);
 			}

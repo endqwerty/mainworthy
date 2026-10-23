@@ -2,7 +2,7 @@
 //
 // The link carries a code of 32 random bytes and this file never sees it: it is given the code's SHA-256 and
 // stores that, as `sessions.ts` does for a cookie. An invitation is good once, until it runs out or is revoked.
-import { type ReadDb, type WriteDb, sql } from "../kernel/db.ts";
+import { type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 
 /** `join`: a new person's first way in. `recover`: accepted, it replaces every way the person signed in. */
 export type InvitationPurpose = "join" | "recover";
@@ -20,9 +20,12 @@ export type InvitationRow = {
 
 const Q = {
 	byHash: sql<{ hash: string }, InvitationRow>("SELECT * FROM invitations WHERE hash = $hash"),
-	insert: sql<{ actor: number; hash: string; purpose: InvitationPurpose; by: number; at: number; expires: number }>(
+	insert: sql<
+		{ actor: number; hash: string; purpose: InvitationPurpose; by: number; at: number; expires: number },
+		{ id: number }
+	>(
 		`INSERT INTO invitations (actor, hash, purpose, created_by, created_at, expires_at)
-		 VALUES ($actor, $hash, $purpose, $by, $at, $expires)`,
+		 VALUES ($actor, $hash, $purpose, $by, $at, $expires) RETURNING id`,
 	),
 	// Spent only while it is still good, so of two acceptances of one code the second changes no row.
 	use: sql<{ hash: string; at: number }>(
@@ -73,11 +76,11 @@ export async function insertInvitation(
 
 /** Spends an invitation. False, with nothing written, when it is not good any more: used, revoked or run out. */
 export const spendInvitation = async (db: WriteDb, hash: string, at: number): Promise<boolean> =>
-	db.run(Q.use, { hash, at }).changes === 1;
+	(await db.run(Q.use, { hash, at })).changes === 1;
 
 /** Revokes an invitation nobody has accepted. False when it was used or revoked, or does not exist. */
 export const revokeInvitation = async (db: WriteDb, id: number, at: number): Promise<boolean> =>
-	db.run(Q.revoke, { id, at }).changes > 0;
+	(await db.run(Q.revoke, { id, at })).changes > 0;
 
 /** Revokes every invitation of a person that nobody has accepted. Returns how many. */
 export const revokeInvitationsOf = async (db: WriteDb, actor: number, at: number): Promise<number> =>
