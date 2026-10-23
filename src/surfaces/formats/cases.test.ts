@@ -5,6 +5,21 @@ import { parseCaseImport } from "./cases.ts";
 const cell = (value: string) => `"${value.replaceAll('"', '""')}"`;
 const table = (rows: string[][]) => rows.map((row) => row.map(cell).join(",")).join("\r\n");
 
+test("execution-type diagnostics quote only the value and keep the complete guidance", () => {
+	const kind = `x\n::error::x\u001b]0;x\u0007\u0085\u202e${"y".repeat(200)}`;
+	expect(() =>
+		parseCaseImport(
+			table([
+				["title", "execution_type"],
+				["One", kind],
+			]),
+			"csv",
+		),
+	).toThrow(
+		`CSV record 2: unknown execution type "x\\n::error::x\\u001b]0;x\\u0007\\u0085\\u202e${"y".repeat(200)}"; use manual, automated, to-be-automated or not-applicable`,
+	);
+});
+
 test("CSV keeps multiline text, doubled quotes, commas, Unicode and source history", () => {
 	const history = JSON.stringify([{ at: "2020-01-02", title: "Earlier title" }]);
 	const edits = parseCaseImport(

@@ -18,6 +18,19 @@ export function clipEnd(text: string, max: number): string {
 	return text.slice(low >= 0xdc00 && low <= 0xdfff ? start + 1 : start);
 }
 
+/** Escape terminal controls; JSON serialization may preserve its structural line breaks. */
+export function escapeControls(text: string, options: { preserveNewlines?: boolean } = {}): string {
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: these controls must be escaped before terminal output.
+	return text.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, (char) =>
+		options.preserveNewlines && char === "\n" ? char : `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
+	);
+}
+
+/** Preserve JSON values while escaping controls JSON.stringify leaves literal; an absent value becomes null. */
+export function reportJson(value: unknown, space?: number): string {
+	return escapeControls(JSON.stringify(value, null, space) ?? "null", { preserveNewlines: true });
+}
+
 /**
  * The path of the first string in a value that holds half a character (an unpaired surrogate), or null. Called on
  * every operation's input, so no such text enters the record through any field.

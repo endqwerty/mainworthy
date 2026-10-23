@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { escapeControls } from "../core/text.ts";
 
 /** A user-facing CLI failure. Codes 0–3 belong to gate verdicts; command errors exit 4. */
 export class CliError extends Error {
@@ -11,6 +12,15 @@ export class CliError extends Error {
 	}
 }
 
+/** Use a rendered input label and filesystem code instead of a runtime's raw path message. */
+export function fileReadError(label: string, error: unknown): CliError {
+	const code =
+		typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+			? error.code
+			: "READ_ERROR";
+	return new CliError("invalid", `${label}: ${code}`);
+}
+
 /** Writes a single diagnostic without putting secrets or stack traces in ordinary command output. */
 export function printError(error: unknown): void {
 	const code = error instanceof CliError ? error.code : "invalid";
@@ -20,5 +30,5 @@ export function printError(error: unknown): void {
 			: error instanceof Error
 				? error.message
 				: String(error);
-	process.stderr.write(`${code}: ${message.replace(/[\r\n]+/g, "; ")}\n`);
+	process.stderr.write(`${escapeControls(`${code}: ${message}`.replace(/[\r\n]+/g, "; "))}\n`);
 }

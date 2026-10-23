@@ -2,6 +2,7 @@ import { z } from "zod";
 import { projectCommand } from "./commands.ts";
 import { CaseBody, cleanPath, emptyBody, type FieldDefinitions, fieldErrors } from "./model.ts";
 import { CaseAlias } from "./proposals.ts";
+import { reportJson } from "./text.ts";
 
 /** RFC 4180 records, including doubled quotes and multiline cells. No delimiter or encoding guesses. */
 export function parseCsv(text: string): string[][] {
@@ -60,7 +61,7 @@ export function csvExecution(value: string): Pick<ReturnType<typeof emptyBody>, 
 			return { methods: ["human"], automate: "none" };
 		default:
 			throw new Error(
-				`unknown execution type ${JSON.stringify(value)}; use manual, automated, to-be-automated or not-applicable`,
+				`unknown execution type ${reportJson(value)}; use manual, automated, to-be-automated or not-applicable`,
 			);
 	}
 }

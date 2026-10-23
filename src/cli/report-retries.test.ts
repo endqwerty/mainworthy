@@ -1,7 +1,32 @@
 import { expect, test } from "bun:test";
-import { realpath } from "node:fs/promises";
+import { chmod, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { withInstance } from "./test-support.ts";
+
+test("unreadable reports have a control-safe filename and filesystem code on real CLI stderr", async () => {
+	await withInstance(async ({ cli, run, directory }) => {
+		const name = "\n::error::x\u001b]0;x\u0007\u009b31m\u202e.xml";
+		const file = join(directory, name);
+		await Bun.write(file, "<testsuite/>");
+		await chmod(file, 0);
+		try {
+			const refused = await cli(["report", name, "--session", "unreadable"]);
+			expect(refused).toEqual({
+				code: 4,
+				stdout: "",
+				stderr: 'invalid: "\\n::error::x\\u001b]0;x\\u0007\\u009b31m\\u202e.xml": EACCES\n',
+			});
+			const missing = await run(["report", `missing${name}`, "--session", "unreadable"]);
+			expect(missing).toEqual({
+				code: 4,
+				stdout: "",
+				stderr: 'invalid: "missing\\n::error::x\\u001b]0;x\\u0007\\u009b31m\\u202e.xml": ENOENT\n',
+			});
+		} finally {
+			await chmod(file, 0o600);
+		}
+	});
+});
 
 test("native retry reports upload through the executable and retain recovery evidence on CLI reads", async () => {
 	await withInstance(async ({ cli, run, directory }) => {

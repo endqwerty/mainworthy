@@ -1,4 +1,4 @@
-import { reportJson } from "../surfaces/formats/native.ts";
+import { reportJson } from "../core/text.ts";
 import { printError } from "./errors.ts";
 
 /** A server address for output, without its username or password. Requests keep the original address. */

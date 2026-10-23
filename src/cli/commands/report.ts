@@ -2,7 +2,7 @@ import { ReportInput, type ReportReceipt, type TargetIn } from "../../core/ops.t
 import { reportIdentifier } from "../../surfaces/formats/native.ts";
 import { parseReport, ReportFormat } from "../../surfaces/formats/report.ts";
 import { assertPositionals } from "../args.ts";
-import { CliError } from "../errors.ts";
+import { CliError, fileReadError } from "../errors.ts";
 import { displayUrl, line, printJson, warning } from "../output.ts";
 import { loadReportAttachments } from "../report-attachments.ts";
 import { detectedTarget, reportRoot, reportTarget, TARGET_FLAGS } from "../target.ts";
@@ -132,7 +132,13 @@ export const reportCommand: AdapterCommand = {
 		const attachmentBudget = { bytes: 0, files: 0 };
 		let skippedAttachments = 0;
 		for (const file of args.positionals) {
-			const parsed = parseReport(await Bun.file(file).text(), { file, format, rootDir });
+			let text: string;
+			try {
+				text = await Bun.file(file).text();
+			} catch (error) {
+				throw fileReadError(reportIdentifier(file), error);
+			}
+			const parsed = parseReport(text, { file, format, rootDir });
 			const loaded = loadReportAttachments(parsed, file, args.value("attachments"), attachmentBudget);
 			results.push(...loaded.results);
 			skippedAttachments += loaded.skipped;

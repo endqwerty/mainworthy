@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { Policy } from "../core/kinds.ts";
@@ -7,6 +8,31 @@ import { ReportReceipt } from "../core/ops.ts";
 import { withInstance } from "./test-support.ts";
 
 const Case = z.object({ ref: z.string(), title: z.string(), methods: z.array(z.string()), automate: z.string() });
+
+test("unreadable case imports have a control-safe filename and filesystem code on real CLI stderr", async () => {
+	await withInstance(async ({ cli, run, directory }) => {
+		const name = "\n::error::x\u001b]0;x\u0007\u009b31m\u202e.csv";
+		const file = join(directory, name);
+		await Bun.write(file, "title\nOne");
+		await chmod(file, 0);
+		try {
+			const refused = await cli(["import", name, "--format", "csv"]);
+			expect(refused).toEqual({
+				code: 4,
+				stdout: "",
+				stderr: 'invalid: "\\n::error::x\\u001b]0;x\\u0007\\u009b31m\\u202e.csv": EACCES\n',
+			});
+			const missing = await run(["import", `missing${name}`, "--format", "csv"]);
+			expect(missing).toEqual({
+				code: 4,
+				stdout: "",
+				stderr: 'invalid: "missing\\n::error::x\\u001b]0;x\\u0007\\u009b31m\\u202e.csv": ENOENT\n',
+			});
+		} finally {
+			await chmod(file, 0o600);
+		}
+	});
+});
 
 test("CSV imports 2,000 cases through propose and every foreign alias resolves over HTTP", async () => {
 	await withInstance(async ({ cli, client, directory }) => {
