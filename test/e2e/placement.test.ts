@@ -1,6 +1,69 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
+import { API_VERSION, API_VERSION_HEADER } from "../../src/core/version.ts";
 import { browserAvailable, eventually, openPage, startServer } from "./support.ts";
+
+const legacyBundle = process.env.MAINWORTHY_LEGACY_BUNDLE;
+for (const contract of ["missing", "mismatch", ...(legacyBundle ? ["historical"] : [])]) {
+	test.skipIf(!browserAvailable)(
+		`an open ${contract} browser cannot archive or undo after an API upgrade and asks for a reload`,
+		async () => {
+			const server = await startServer();
+			await server.api("propose", { edits: [{ op: "create", body: { title: "Old tab" } }] });
+			let upgraded = false;
+			let servedLegacy = false;
+			const refused: number[] = [];
+			const h = await openPage(server, {
+				path: "/p/scratch/suite/c/1",
+				setup: async (page, context) => {
+					if (contract === "historical" && legacyBundle) {
+						const body = await Bun.file(legacyBundle).text();
+						await context.route(/\/(?:chunk-[^/]+|main)\.js(?:\?.*)?$/, (route) => {
+							servedLegacy = true;
+							return route.fulfill({ contentType: "application/javascript", body });
+						});
+					}
+					await context.route("**/api/**", async (route) => {
+						const request = route.request();
+						const headers = { ...request.headers() };
+						if (!upgraded) {
+							// Load the old page as before the upgrade; its real requests run unchanged afterwards.
+							headers[API_VERSION_HEADER] = String(API_VERSION);
+						} else if (contract === "missing") delete headers[API_VERSION_HEADER];
+						else if (contract === "mismatch") headers[API_VERSION_HEADER] = String(API_VERSION - 1);
+						await route.continue({ headers });
+					});
+					page.on("response", (response) => {
+						if (response.url().endsWith("/propose")) refused.push(response.status());
+					});
+				},
+			});
+			try {
+				await h.page.getByRole("button", { name: "Old tab", exact: true }).waitFor();
+				if (contract === "historical") expect(servedLegacy).toBe(true);
+				await server.api("propose", { edits: [{ op: "state", cases: ["C-1"], to: "archived" }] });
+				const before = await server.api("get", { refs: ["C-1"] });
+				const timeline = await server.api("timeline", { ref: "C-1" });
+				upgraded = true;
+				await h.page.keyboard.press("#");
+				await h.page.locator("#stat").filter({ hasText: "Reload before trying again." }).waitFor();
+				expect(refused).toContain(409);
+				expect(await server.api("get", { refs: ["C-1"] })).toEqual(before);
+				await h.page.keyboard.press("u");
+				await h.page.waitForLoadState("networkidle");
+				expect(await server.api("get", { refs: ["C-1"] })).toEqual(before);
+				expect(await server.api("timeline", { ref: "C-1" })).toEqual(timeline);
+				if (process.env.MAINWORTHY_VERSION_SCREENSHOT)
+					await h.page.screenshot({ path: `${process.env.MAINWORTHY_VERSION_SCREENSHOT}-${contract}.png` });
+				expect(h.errors.filter((error) => !error.includes("409 (Conflict)"))).toEqual([]);
+			} finally {
+				await h.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+}
 
 async function holdPlacements(page: Awaited<ReturnType<typeof openPage>>["page"]) {
 	let started = false;
