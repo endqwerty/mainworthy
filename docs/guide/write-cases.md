@@ -119,6 +119,12 @@ Later text stays on the version that save made.
 A tab closed before the reply arrives sends nothing more. The draft stays on this device.
 When you open the draft again, the page asks the server about the save.
 
+Saved commands and conflict merge attempts belong to the project they were written for.
+If that project is deleted and another uses the same key, recovery sends nothing to the new project.
+The page explains that the original project is gone or cannot be identified, and keeps your text on this device.
+Older saved attempts without a project identity also keep their text but cannot be retried here.
+Copy the text you want to keep into a new draft in the current project.
+
 The draft status says "Draft, saved on this device" when device storage works.
 If storage is unavailable, it says "Draft, kept in this tab". Keep that tab open
 until a version is recorded. Drafts do not sync between devices.
