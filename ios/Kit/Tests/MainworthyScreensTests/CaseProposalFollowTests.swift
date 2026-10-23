@@ -108,7 +108,7 @@ struct CaseProposalFollowTests {
 		editor.content.title = "My next title keeps the field"
 		guard case .waiting(let next, _) = await editor.save(), let next else { Issue.record("next edit did not wait"); return }
 		#expect(try await decide(key, question: next, answer: "accept") == CaseStamp(ref: ref, version: 4))
-		let saved = try await client.caseDocument(ref, includingCustomFields: true)
+		let saved = try await client.caseDocument(ref)
 		#expect(saved.content.title == "My next title keeps the field" && saved.content.fields == ["priority": "high"])
 	}
 
@@ -139,7 +139,7 @@ struct CaseProposalFollowTests {
 		await screen.refresh()
 		#expect(!editor.locked && !editor.dirty)
 		#expect(editor.notice == "Proposal accepted. Continue editing \(stamp.ref), version 1.")
-		let saved = try await client.caseDocument(stamp.ref, includingCustomFields: true)
+		let saved = try await client.caseDocument(stamp.ref)
 		#expect(saved.content.title == "Create with a configured field" && saved.content.fields == [:])
 		#expect(editor.content == saved.content)
 	}
@@ -175,9 +175,7 @@ struct CaseProposalFollowTests {
 		let saved = try await client.caseDocument(ref)
 		#expect(saved.content.title == "My next title")
 		#expect(saved.content.methods == ["human", "agent"] && saved.content.automate == "wanted")
-		let fields: Wire.ConflictBaseFields = try await Live.signedIn(as: Live.owner).read("history", in: key,
-			["ref": .string(ref), "from": 4, "to": 4])
-		#expect(fields.diff.fields.before == ["priority": "high"])
+		#expect(saved.content.fields == ["priority": "high"])
 		#expect(try await client.caseHistory(ref).map(\.version) == [4, 3, 2, 1])
 		#expect(try await client.cases().items.map(\.ref) == [ref])
 	}

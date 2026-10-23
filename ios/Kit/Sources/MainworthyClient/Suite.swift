@@ -223,13 +223,13 @@ extension ProjectClient {
 		return reply.items.map(SuiteTag.init)
 	}
 
-	package func caseDocument(_ ref: String, version: Int? = nil, includingCustomFields: Bool = true) async throws -> CaseDocument {
+	package func caseDocument(_ ref: String, version: Int? = nil) async throws -> CaseDocument {
 		var input: [String: JSONValue] = ["refs": [.string(ref)]]
 		if let version { input["version"] = .number(Double(version)) }
-		if includingCustomFields { input["fields"] = ["title", "pre", "steps", "methods", "fields", "tags", "place", "proof"] }
+		input["fields"] = ["title", "pre", "steps", "methods", "fields", "tags", "place", "proof"]
 		let reply: [Wire.SuiteDocument] = try await server.read("get", in: key, .object(input))
 		guard let found = reply.first, found.ref == ref, version == nil || found.version == version,
-			!includingCustomFields || found.fields != nil else {
+			found.fields != nil else {
 			throw ClientError.unreadable
 		}
 		return CaseDocument(found, isHistorical: version != nil)

@@ -334,18 +334,6 @@ export const ConflictProposal = struct(
 		),
 	},
 );
-export const ConflictBaseFields = struct(
-	"ConflictBaseFields",
-	"Custom fields at the exact base version, from history.",
-	{
-		ref: text,
-		from: whole,
-		to: whole,
-		diff: struct("ConflictBaseDiff", "The complete custom fields, including when unchanged.", {
-			fields: struct("ConflictCustomFields", "The fields before this comparison.", { before: dictionary(text) }),
-		}),
-	},
-);
 export const MergeReply = struct("MergeReply", "One decide reply, with the effect of a merge.", {
 	q: text,
 	status: text,
@@ -855,7 +843,6 @@ export const SHAPES: readonly Shape[] = [
 	AnswerCommand,
 	Proposal,
 	ConflictProposal,
-	ConflictBaseFields,
 	MergeReply,
 	MergeCommand,
 	ChangeEvent,

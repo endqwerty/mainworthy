@@ -199,7 +199,7 @@ public final class CaseEditorScreen {
 				state = .editing
 				notice = "The proposal was rejected. Your draft is kept here."
 			case .adopted(let stamp):
-				let document = try await project.caseDocument(stamp.ref, version: stamp.version, includingCustomFields: true)
+				let document = try await project.caseDocument(stamp.ref, version: stamp.version)
 				let ids = try await project.usedStepIds(of: document)
 				let differs = document.content != waiting.content
 				source = .edit(document)

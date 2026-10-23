@@ -363,9 +363,20 @@ struct ConflictRecoveryTests {
 		#expect(editor.content.title == "My title")
 	}
 
-	@Test("the exact historical base keeps custom fields across default and partial case reads", arguments: [false, true])
+	struct UnavailableHistory: Transport {
+		let live = URLSessionTransport()
+		func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+			if request.url?.path.hasSuffix("/history") == true { throw URLError(.unsupportedURL) }
+			return try await live.send(request)
+		}
+		func lines(_ request: URLRequest) async throws -> (AsyncThrowingStream<String, any Error>, HTTPURLResponse) {
+			try await live.lines(request)
+		}
+	}
+
+	@Test("conflict recovery keeps exact base fields without history, across default and partial case reads", arguments: [false, true])
 	func customFields(partial: Bool) async throws {
-		let server = try await Live.signedIn()
+		let server = try await Live.signedIn(transport: UnavailableHistory())
 		let project = try await server.project(try await Live.project())
 		let made = try await project.saveCase(SuiteSubmission(source: .create(folder: nil),
 			content: CaseContent(title: "Base", fields: ["priority": "high"]), reason: "Create"))
@@ -378,7 +389,8 @@ struct ConflictRecoveryTests {
 			])
 			opened = CaseDocument(try #require(rows.first))
 		} else {
-			opened = try await project.caseDocument(stamp.ref, includingCustomFields: false)
+			let rows: [Wire.SuiteDocument] = try await server.read("get", in: project.key, ["refs": [.string(stamp.ref)]])
+			opened = CaseDocument(try #require(rows.first))
 		}
 		#expect(opened.readFields == (partial ? nil : ["priority": "high"]))
 		let editor = CaseEditorScreen(project: project, source: .edit(opened))
@@ -387,15 +399,14 @@ struct ConflictRecoveryTests {
 			"op": "edit", "case": .string(stamp.ref), "base": 1,
 			"body": ["title": "Their custom case", "fields": ["priority": "normal"]],
 		]]])
+		#expect(try await project.caseDocument(stamp.ref, version: 1).content.fields == ["priority": "high"])
 		_ = await editor.save()
 		#expect(editor.conflict?.addresses == [.field(.title)])
 		#expect(editor.conflict?.merged.fields == ["priority": "normal"])
 		editor.chooseConflict(.field(.title), side: .mine)
 		_ = await editor.save()
 		#expect(editor.savedDocument?.content.title == "My custom case")
-		let fields: Wire.ConflictBaseFields = try await server.read("history", in: project.key,
-			["ref": .string(stamp.ref), "from": 3, "to": 3])
-		#expect(fields.diff.fields.before == ["priority": "normal"])
+		#expect(try await project.caseDocument(stamp.ref, version: 3).content.fields == ["priority": "normal"])
 	}
 
 	@Test("a question answered elsewhere refuses the merge and retains the draft and choices")

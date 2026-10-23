@@ -448,6 +448,7 @@ You can make these choices:
 - Choose the order when both sides reordered steps.
 
 The app combines changes that do not overlap automatically.
+Custom fields use the saved base version, even when the case you originally opened omitted them.
 If the case changes again, a new conflict keeps your merge for another choice.
 The policy can leave the merge waiting for acceptance in the Queue. A refused answer keeps your draft and choices.
 Literal `#tags` or `@REQ-123` links in fields kept from the conflict's recorded current or base version stay as text.
