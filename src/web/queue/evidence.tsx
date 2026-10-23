@@ -8,16 +8,19 @@ import { CaseBody, ConflictAddress, conflictLabel, emptyBody } from "../../core/
 import type { QuestionItem } from "../../core/ops.ts";
 import { parseOutline } from "../../core/outline.ts";
 import { QuarantineEdit } from "../../core/proposals.ts";
-import { ResultLocation as LocationSchema } from "../../core/results.ts";
+import { ResultLocation as LocationSchema, ResultTrail as TrailSchema } from "../../core/results.ts";
+import { webUrl } from "../changes/results.tsx";
 import { call } from "../lib/api.ts";
 import { queryKey, useQueryOp } from "../lib/data.ts";
 import { policyChanges } from "../lib/policy-changes.ts";
 import { proposalReadMessage, watchProposalShown } from "../lib/proposals.ts";
 import { navigate, refUrl } from "../lib/router.ts";
+import { ResultAttachments } from "../ui/attachments.tsx";
 import { useApp } from "../ui/context.tsx";
 import { DiffView, ProducerGlyph } from "../ui/index.tsx";
 import { QuarantineList, quarantineExitText } from "../ui/quarantine.tsx";
 import { ResultLocation } from "../ui/result-location.tsx";
+import { ResultTrail } from "../ui/result-trail.tsx";
 
 /** Only a recognisable assertion gets a comparison; an arbitrary log stays verbatim. */
 /** One end of a flip as the detector saw it: a result's attempt, or a runner's try inside it (decision 0129). */
@@ -455,6 +458,38 @@ export function questionReadMessage(question: QuestionItem): string | null {
 	return null;
 }
 
+const SampleResult = z.object({
+	id: z.number(),
+	detail: z.string().nullable(),
+	note: z.string().nullable(),
+	steps: TrailSchema.nullable(),
+	build: z.string().nullable(),
+});
+
+function SampleEvidence({ result }: { result: number }) {
+	const { project } = useApp();
+	const read = useQueryOp({ project, op: "get", input: { refs: [`result:${result}`] } });
+	const parsed = SampleResult.safeParse(read.data?.[0]);
+	if (read.isPending || read.isPlaceholderData) return <p className="dim">Reading the sample result…</p>;
+	if (read.error || !parsed.success || parsed.data.id !== result)
+		return <p className="dim">The sample result could not be read.</p>;
+	const sample = parsed.data;
+	const build = webUrl(sample.build);
+	return (
+		<>
+			{sample.detail && <pre className="queue-log">{sample.detail}</pre>}
+			{sample.note && <p>{sample.note}</p>}
+			{build && (
+				<a href={build} target="_blank" rel="noreferrer noopener">
+					build
+				</a>
+			)}
+			<ResultTrail result={result} steps={sample.steps} />
+			<ResultAttachments result={result} />
+		</>
+	);
+}
+
 function SameCodeSignals({ evidence }: { evidence: SameCodeEvidence }) {
 	return evidence.signals.map((signal) => (
 		<details key={signal.signature.id} className="same-code-evidence">
@@ -504,6 +539,7 @@ export function QuestionEvidence({ question, full }: { question: QuestionItem; f
 						</div>
 					)}
 					<pre className="queue-log">{evidence.message ?? question.title}</pre>
+					{full && evidence.sample != null && <SampleEvidence result={evidence.sample} />}
 					<div className="dim">
 						{evidence.location ? (
 							<ResultLocation location={evidence.location} />
@@ -523,7 +559,7 @@ export function QuestionEvidence({ question, full }: { question: QuestionItem; f
 					<ul className="queue-tests">
 						{evidence.tests.slice(0, full ? undefined : 3).map((test) => (
 							<li key={test.t}>
-								<span className="ref">{test.t}</span> {test.name} {test.case && <RefLink refValue={test.case} />}
+								<RefLink refValue={test.t} /> {test.name} {test.case && <RefLink refValue={test.case} />}
 								{test.sameCode && <SameCodeSignals evidence={test.sameCode} />}
 							</li>
 						))}

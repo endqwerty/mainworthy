@@ -20,6 +20,8 @@ That question blocks nothing.
 
 Use <kbd>j</kbd> and <kbd>k</kbd> to move between questions.
 Press <kbd>Space</kbd> to expand the evidence.
+For a failure, expanded evidence includes the sample result's diagnostic detail, step trail, attachments, and build link when reported.
+Use **Download** beside an attachment to save it. Select a test reference to open that test's page.
 In a short desktop window, the question pane scrolls so you can read the evidence and reach its answers.
 An answer key pages through unread proposal edits before it records an answer.
 The "Open" view contains questions that need an answer. "Settled" contains decisions,

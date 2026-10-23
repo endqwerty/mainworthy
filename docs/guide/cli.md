@@ -268,7 +268,7 @@ Every operation of the API is also a command with the same name. Give its input 
 | `mainworthy decide` | Answer a question, or withdraw a decision. Policy says whether your answer settles it, is advice, or is refused. |
 | `mainworthy handoff` | Hand a failure question to the coding agent this instance is configured to start, with its evidence. |
 | `mainworthy inbox` | The queue: every question that needs an answer, most blocking first. With state=decided: the ledger. |
-| `mainworthy get` | Read cases, questions, runs, tests or proposals by ref. |
+| `mainworthy get` | Read cases, questions, runs, tests, results or proposals by ref. |
 | `mainworthy find` | Search and list: cases (by text, folder, tag), tests, runs, slots of a run, folders, requirements, changes. |
 | `mainworthy impact` | The cases a change touches and why, with what was already reviewed or decided. Where to look, instead of the whole suite. |
 | `mainworthy since` | What changed since a cursor: cases with what changed in each, and questions that were settled. |

@@ -385,7 +385,7 @@ export const GetInput = z.object({
 		.describe(
 			"For one proposal: the cursor from its previous page of edits. Restart without it after a project change.",
 		),
-	refs: z.array(z.string()).min(1).max(200).describe("C-, Q-, R-, T-, P-, commit:hash or change:key."),
+	refs: z.array(z.string()).min(1).max(200).describe("C-, Q-, R-, T-, P-, result:id, commit:hash or change:key."),
 	fields: z
 		.array(z.string())
 		.optional()
