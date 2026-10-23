@@ -53,7 +53,7 @@ export { Outcome } from "./results.ts";
 
 // ── report ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-const resultDuration = z
+export const resultDuration = z
 	.number()
 	.int()
 	.min(0)

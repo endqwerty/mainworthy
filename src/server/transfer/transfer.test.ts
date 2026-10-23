@@ -309,7 +309,7 @@ const fixtures: Record<string, Row[]> = {
 			basis_claim: "claim-hash",
 			outcome: "fail",
 			attempt: 1,
-			duration_ms: 9_223_372_036_854_775_807n,
+			duration_ms: 2_592_000_000,
 			signature: 505,
 			message: "雪\nfailed",
 			detail: "",
@@ -993,11 +993,38 @@ describe("Mainworthy instance archives", () => {
 		expect(result.rows).toBe(Object.values(result.tables).reduce((sum, count) => sum + count, 0));
 		expect(text).toContain('"value":9223372036854775807');
 		expect(text).toContain('"value":-9223372036854775808');
-		expect(text).toContain('"duration_ms":9223372036854775807');
+		expect(text).toContain('"duration_ms":2592000000');
 		expect(to.raw.query("SELECT value FROM meta WHERE key = 'schema_version'").get()).toEqual({
 			value: String(SCHEMA_VERSION),
 		});
 		expect(to.raw.query("SELECT * FROM tokens").all()).toEqual([]);
+	});
+
+	test.each([
+		["results", 201],
+		["result_tries", 513],
+	] as const)("an archive refuses out-of-range %s durations without changing the target", (table, id) => {
+		const from = source();
+		for (const duration of [-1, 2_592_000_001, 9_223_372_036_854_775_807n]) {
+			from.raw.query(`UPDATE ${table} SET duration_ms = ? WHERE id = ?`).run(duration, id);
+			const text = archive(from);
+			refuse(text, new RegExp(`${table}\\.duration_ms.*row ${id}.*line \\d+.*0.*2592000000`));
+		}
+	});
+
+	test("result and runner-try durations keep the exact limit, zero and unknown time", () => {
+		const from = source();
+		for (const duration of [2_592_000_000, 0, null]) {
+			from.raw.query("UPDATE results SET duration_ms = ? WHERE id = 201").run(duration);
+			from.raw.query("UPDATE result_tries SET duration_ms = ? WHERE id = 513").run(duration);
+			const to = target();
+			importArchive(to, linesOf(archive(from)));
+			for (const table of ["results", "result_tries"]) {
+				expect(to.raw.query(`SELECT DISTINCT duration_ms FROM ${table} WHERE id IN (201, 513)`).all()).toEqual([
+					{ duration_ms: duration },
+				]);
+			}
+		}
 	});
 
 	test("an archive keeps the moved scope but leaves its audit trail behind", () => {

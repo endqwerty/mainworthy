@@ -391,6 +391,8 @@ Import replaced the bootstrap rows. Your previous session may no longer exist. T
 
 A `.gz` suffix tells the command to decompress. Before keeping anything, the import checks every row count, the checksum, each column and each link between records in the archive. If any check fails, nothing changes.
 
+Import refuses result and runner-try durations outside the report input range of zero through 30 days (2,592,000,000 ms), inclusive. The error names the table, row, archive line and permitted range. Missing or NULL stored durations remain unknown. Pending reports in the archive must pass the report input checks before import can recover them. Import refuses the whole archive rather than changing its evidence; this also applies when importing an archive backup.
+
 An instance that already has data refuses an import and keeps what it has:
 
 ```
