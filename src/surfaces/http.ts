@@ -758,11 +758,11 @@ export type Extra = {
 };
 
 /** Liveness before the database is safe to use. No route here can reach application data. */
-export function upgradingListener(config: Config) {
+export function upgradingListener(config: Config, patience: Patience = PATIENCE) {
 	return Bun.serve<Relay>({
 		hostname: config.host,
 		port: config.port,
-		idleTimeout: PATIENCE.idleSeconds,
+		idleTimeout: patience.idleSeconds,
 		maxRequestBodySize: STREAM_BODY_LIMIT,
 		fetch: (req) =>
 			withHeaders(

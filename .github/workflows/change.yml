@@ -79,7 +79,7 @@ jobs:
             printf '%s' "$status"
           }
           # Upgrading is live for Docker, but cannot accept this lifecycle write yet. Bound the wait so a
-          # stuck upgrade still fails this job; the server has the same 30-minute upgrade deadline.
+          # stuck upgrade still fails this job. This wall-clock wait is separate from the app's idle watchdog.
           upgrade_deadline=$((SECONDS + 1800))
           while :; do
             health_status=$(request -o health.json -w '%{http_code}' "$MAINWORTHY_URL/healthz")

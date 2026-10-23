@@ -100,10 +100,15 @@ export function holdPrivateDatabaseMask(): () => void {
  * covered, here or for any other file (decision 0120). The file is synced there, renamed to `path`, and the rename
  * synced. A crash leaves that directory, still private, beside `path`; the `mainworthy-copy-` marker distinguishes
  * it from an operator's saved copy during upgrade cleanup. The umask is the process's: while `write`
- * runs, a file another thread creates gets no access for group or others either.
+ * runs, a file another thread creates gets no access for group or others either. Startup may lend an already
+ * private workspace it created and owns, so its parent can remove it even if worker termination skips finally.
  */
-export function writePrivateDatabaseFile(path: string, write: (privatePath: string) => void): void {
-	const workspace = mkdtempSync(`${path}.mainworthy-copy-`);
+export function writePrivateDatabaseFile(
+	path: string,
+	write: (privatePath: string) => void,
+	ownedWorkspace?: string,
+): void {
+	const workspace = ownedWorkspace ?? mkdtempSync(`${path}.mainworthy-copy-`);
 	try {
 		const written = join(workspace, basename(path));
 		const releaseMask = holdPrivateDatabaseMask();
@@ -191,12 +196,12 @@ export class Db {
 	private committed: (() => void)[] = [];
 
 	/** VACUUM INTO inherits synchronous from its source. Sync the completed private copy once, not each spill. */
-	copyTo(path: string): void {
+	copyTo(path: string, workspace?: string): void {
 		const sync = this.raw.query<{ synchronous: number }, []>("PRAGMA synchronous").get();
 		if (!sync) throw new Error("SQLite did not report its synchronous setting");
 		this.raw.exec("PRAGMA synchronous = OFF");
 		try {
-			writePrivateDatabaseFile(path, (privatePath) => this.raw.query("VACUUM INTO ?").run(privatePath));
+			writePrivateDatabaseFile(path, (privatePath) => this.raw.query("VACUUM INTO ?").run(privatePath), workspace);
 		} finally {
 			// No source writes run while sync is off; restore it before any migration can write.
 			this.raw.exec(`PRAGMA synchronous = ${sync.synchronous}`);

@@ -181,7 +181,7 @@ test("the browser fixture compiles in its output directory so build files cannot
 	const root = join(scratch, "source tree");
 	const output = join(scratch, "build output");
 	try {
-		for (const dir of ["test/e2e", "src/server/ops", "src/server/kernel", "src/cli"])
+		for (const dir of ["test/e2e", "src/server/ops", "src/server/kernel", "src/app", "src/cli"])
 			mkdirSync(join(root, dir), { recursive: true });
 		mkdirSync(output);
 		// A macro records the compiler's cwd without racing Bun's short-lived .bun-build file.
@@ -193,7 +193,7 @@ test("the browser fixture compiles in its output directory so build files cannot
 		for (const file of [
 			"src/server/ops/read-worker.ts",
 			"src/server/kernel/checkpoint-worker.ts",
-			"src/server/kernel/migrate-worker.ts",
+			"src/app/start-worker.ts",
 			"src/cli/demo-worker.ts",
 		])
 			writeFileSync(join(root, file), "export {};");
