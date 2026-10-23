@@ -88,7 +88,7 @@ The owner is the person named by `MAINWORTHY_OWNER`. See [configuration](./confi
 
 ## Make your own command-line token
 
-Sign in with your password or a passkey, then open Settings, **Your sign-in**, **Your command-line tokens**.
+Sign in with your password, a passkey or an identity provider, then open Settings, **Your sign-in**, **Your command-line tokens**.
 You need no admin capability. As the local owner, you can make one without signing in.
 
 To create a personal token, follow these steps:
@@ -126,7 +126,7 @@ The `credential` operation accepts `token.create` with `label`, optional `expire
 The reply holds `id`, `actor`, `token`, and `expiresAt`, a Unix timestamp in milliseconds.
 An expiry is required internally, defaults to `30d`, and cannot exceed `365d`.
 A command id prevents a repeated creation. Its secret reply is never saved, and a retry receives `conflict`.
-Creation accepts no actor, project, or grants. It requires a password or passkey browser session, or local-owner access.
+Creation accepts no actor, project, or grants. It requires a browser session opened with a password, passkey or identity provider, or local-owner access.
 A bearer token and a browser signed in with a token cannot make a personal token.
 There is no instance setting to disable personal tokens. An admin who is a person may revoke another person's token by id, as with other credentials.
 
@@ -488,7 +488,7 @@ $ mainworthy session --do end --id 2
 }
 ```
 
-`openedWith` is `token`, `password` or `passkey`. `current` is true for the session that sent the request. The command line uses a token, so `current` is always false for command-line requests.
+`openedWith` is `token`, `password`, `passkey` or `oidc`. `current` is true for the session that sent the request. The command line uses a token, so `current` is always false for command-line requests.
 
 `mainworthy credential --do list` shows your password, passkeys and authenticator, each with an id, a label and when it was last used. It never shows a password, a hash or a key. `mainworthy credential --do remove --id <id>` removes one and ends the sessions that used it. Removing an authenticator ends all your sessions. Your last usable way of signing in stays:
 

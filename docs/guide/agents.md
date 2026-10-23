@@ -67,17 +67,17 @@ With exactly one accessible project, the agent can leave it out.
 
 ## The tools and where to start
 
-An agent gets ten tools. The following six tools read data.
+An agent gets ten tools. Five read data:
 
 - `impact` takes a change such as `pr:482` or a list of changed files. It returns affected cases, the reasons they are affected, prior reviews, open questions, and uncovered files.
 - `inbox` lists the open questions with their evidence.
-- `get` reads cases, questions, runs and tests by ref, and `find` searches.
+- `get` reads cases, questions, runs and tests by ref. It also returns the full `gate` for `commit:<hash>`, `change:<key>`, or a run ref such as `R-2`. It includes `passed`, `failed`, `blocked`, or `pending`, the reason, counts, and open questions. `repo` disambiguates a commit reported in several repositories.
+- `find` searches.
 - `since` returns what changed after a cursor.
-- `get` returns the full `gate` for `commit:<hash>`, `change:<key>`, or a run ref such as `R-2`. It includes `passed`, `failed`, `blocked`, or `pending`, the reason, counts, and open questions. `repo` disambiguates a commit reported in several repositories.
-- `work` takes or gives back a planned run slot.
 
-The other four tools write data:
+The other five tools write data:
 
+- `work` takes, renews or gives back a planned run slot's lease.
 - `propose` creates or changes cases.
 - `claim` records a review and its findings.
 - `report` records results.
