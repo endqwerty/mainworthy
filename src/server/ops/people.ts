@@ -49,7 +49,7 @@ import { defineInstanceOp, type InstanceCtx } from "./registry.ts";
  * is told that and learns no name.
  */
 async function subject(env: InstanceCtx, named: string | undefined, what: string): Promise<Actor> {
-	const found = named === undefined || named === env.actor.name ? env.actor : await actorByName(env.app.db, named, 0);
+	const found = named === undefined || named === env.actor.name ? env.actor : await actorByName(env.db, named, 0);
 	// No actor has the id 0, so for a name that is nobody's this asks whether the caller may look at anyone's.
 	if (!mayActFor(env.actor, found?.id ?? 0))
 		throw forbidden(`${what} of somebody else are for a person who administers this instance`);
@@ -79,12 +79,11 @@ export const sessionOp = defineInstanceOp({
 	input: SessionInput,
 	needs: "self",
 	scope: "instance",
-	// A write also when it lists: the list reads what is noted of each session's use, which the thread that
-	// admits requests keeps, so it runs there and not on a reader thread.
+	// A write also when it lists: the list includes session activity noted by this app while admitting requests.
 	effect: "write",
 	mcp: null,
 	async run(env, input) {
-		const db = env.app.db;
+		const db = env.db;
 		switch (input.do) {
 			case "list": {
 				const who = await subject(env, input.actor, "the sessions");
@@ -119,13 +118,13 @@ export const credentialOp = defineInstanceOp({
 		// An agent and a pipeline sign in with a token and nothing else.
 		if (env.actor.kind !== "human")
 			throw forbidden(`${env.actor.name} is ${KIND_NOUN[env.actor.kind]}: only a person has a password or a passkey`);
-		const db = env.app.db;
+		const db = env.db;
 		switch (input.do) {
 			case "email.get":
 				return await getEmail(db, (await subject(env, input.actor, "the email address")).id);
 			case "email.set": {
 				const person = await subject(env, input.actor, "the email address");
-				return await setEmail(env.app, { caller: env.actor, person, context: env.context, email: input.email });
+				return await setEmail(env.app, db, { caller: env.actor, person, context: env.context, email: input.email });
 			}
 			case "list":
 				return await listCredentials(db, (await subject(env, input.actor, "the passwords and passkeys")).id);
@@ -136,9 +135,9 @@ export const credentialOp = defineInstanceOp({
 			// from, so it begins and finishes none, as it sets no password: a way in that a script could add would
 			// outlive the token.
 			case "totp.begin":
-				return await beginTotp(env.app, { actor: env.actor.id, context: signedInAt(env, "an authenticator") });
+				return await beginTotp(env.app, db, { actor: env.actor.id, context: signedInAt(env, "an authenticator") });
 			case "totp.confirm":
-				return await confirmTotp(env.app, {
+				return await confirmTotp(env.app, db, {
 					actor: env.actor.id,
 					session: env.session,
 					context: signedInAt(env, "an authenticator"),
@@ -146,9 +145,9 @@ export const credentialOp = defineInstanceOp({
 					code: input.code,
 				});
 			case "passkey.begin":
-				return await beginPasskey(env.app, { actor: env.actor.id, context: signedInAt(env) });
+				return await beginPasskey(env.app, db, { actor: env.actor.id, context: signedInAt(env) });
 			case "passkey.add":
-				return await addPasskey(env.app, {
+				return await addPasskey(env.app, db, {
 					actor: env.actor.id,
 					context: signedInAt(env),
 					answer: input.passkey,
@@ -156,11 +155,11 @@ export const credentialOp = defineInstanceOp({
 				});
 			case "remove":
 				own(env, await credentialOwner(db, input.id), `credential ${input.id}`);
-				return await removeCredential(env.app, input.id, { actor: env.actor.id, context: env.context });
+				return await removeCredential(env.app, db, input.id, { actor: env.actor.id, context: env.context });
 			case "token.create": {
 				const lastsMs = durationMs(input.expires);
 				if (lastsMs === null) throw invalid("expires: invalid duration");
-				return await createPersonalToken(env.app, {
+				return await createPersonalToken(env.app, db, {
 					actor: env.actor,
 					session: env.session,
 					context: env.context,
@@ -169,10 +168,10 @@ export const credentialOp = defineInstanceOp({
 				});
 			}
 			case "token.list":
-				return await listPersonalTokens(env.app, env.actor.id);
+				return await listPersonalTokens(env.app, db, env.actor.id);
 			case "token.revoke":
 				own(env, await tokenOwner(db, input.id), `token ${input.id}`);
-				return { revoked: await revokeToken(env.app, input.id) };
+				return { revoked: await revokeToken(env.app, db, input.id) };
 			default: {
 				const _exhaustive: never = input;
 				throw invalid(`unknown credential action ${JSON.stringify(_exhaustive)}`);
@@ -196,7 +195,7 @@ export const invitationOp = defineInstanceOp({
 		// Who a person is, is for a person to say (`personOnly` in `admin.ts`): an agent that could invite could
 		// accept, and would then be a person to every rule that says "not an agent".
 		personOnly(env, "an invitation is made, listed or revoked");
-		const db = env.app.db;
+		const db = env.db;
 		switch (input.do) {
 			case "create": {
 				if (input.email !== undefined) requireMail(env.app);
@@ -210,13 +209,13 @@ export const invitationOp = defineInstanceOp({
 				// For a person who exists the invitation is a recovery: whoever accepts it is that person from
 				// then on. So it is theirs or the owner's to make, as a token for them is.
 				refuseToken(env, { kind: "human" }, existing, "invitation");
-				const person = await invitedPerson(env.app, {
+				const person = await invitedPerson(env.app, db, {
 					name: input.name,
 					can: existing === null && input.can.length === 0 ? defaultCapabilities("human") : input.can,
 					project,
 				});
 				const purpose = person.isNew ? "join" : "recover";
-				const made = await createInvitation(env.app, {
+				const made = await createInvitation(env.app, db, {
 					actor: person.id,
 					by: env.actor.id,
 					purpose,
@@ -224,7 +223,7 @@ export const invitationOp = defineInstanceOp({
 					context: env.context,
 				});
 				if (input.email !== undefined)
-					queueMail(env.app, {
+					await queueMail(env.app, db, {
 						to: input.email,
 						subject: "Your Mainworthy invitation",
 						text: `You have been invited as ${person.name}:\n${made.link}\n\nThis link works once, until ${new Date(made.expiresAt).toISOString()}.${purpose === "recover" ? " Accepting it replaces your passwords, passkeys and tokens and ends your sessions." : ""}`,
@@ -235,7 +234,7 @@ export const invitationOp = defineInstanceOp({
 					name: person.name,
 					purpose,
 					// What the person may do on the project asked about, as the registry will see it.
-					can: [...(actorByName(db, person.name, project)?.can ?? [])],
+					can: [...((await actorByName(db, person.name, project))?.can ?? [])],
 					project: input.project ?? "*",
 					expiresAt: made.expiresAt,
 					code: made.code,

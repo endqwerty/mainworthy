@@ -26,7 +26,7 @@ export const csvImportOp = defineOp({
 			throw invalid(error instanceof Error ? error.message : String(error));
 		}
 		for (const row of plan.rows) {
-			if (row.alias && findCase(ctx.db, ctx.project.id, row.alias)) {
+			if (row.alias && (await findCase(ctx.db, ctx.project.id, row.alias))) {
 				row.errors.push(`case alias ${row.alias} is already in use`);
 				row.body = null;
 			}

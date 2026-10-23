@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { QuestionItem } from "../../core/ops.ts";
-import { type ReadDb, type WriteDb, sql } from "../kernel/db.ts";
+import { type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { TRACKER_READ_FAILURES, TrackerReadFailure } from "./port.ts";
 
 type Poll = { decision: number; nonce: string; next_at: number; attempts: number; error: string | null };
 const Q = {
 	ensure: sql<{ decision: number; nonce: string }>(
-		"INSERT OR IGNORE INTO tracker_polls (decision, nonce, next_at, attempts) VALUES ($decision, $nonce, 0, 0)",
+		"INSERT INTO tracker_polls (decision, nonce, next_at, attempts) VALUES ($decision, $nonce, 0, 0) ON CONFLICT DO NOTHING",
 	),
 	one: sql<{ decision: number }, Poll>("SELECT * FROM tracker_polls WHERE decision = $decision"),
 	finish: sql<{ nonce: string; next: number; attempts: number; error: string | null }>(
@@ -61,11 +61,13 @@ export async function finishTrackerPoll(
 	const attempts = failed ? Math.min(poll.attempts + 1, 16) : 0;
 	const delay = failed ? Math.min(60_000 * 2 ** Math.min(attempts - 1, 6), 3_600_000) : 60_000;
 	return (
-		db.run(Q.finish, {
-			nonce: poll.nonce,
-			next: now + delay,
-			attempts,
-			error: reason === null ? null : JSON.stringify({ since: failureOf(poll.error)?.since ?? now, reason }),
-		}).changes === 1
+		(
+			await db.run(Q.finish, {
+				nonce: poll.nonce,
+				next: now + delay,
+				attempts,
+				error: reason === null ? null : JSON.stringify({ since: failureOf(poll.error)?.since ?? now, reason }),
+			})
+		).changes === 1
 	);
 }

@@ -161,24 +161,26 @@ export async function inbox(ctx: Ctx<ReadDb>, input: InboxInput): Promise<InboxR
 	const counts = await openCounts(ctx.db, ctx.project.id);
 	let rows: QuestionRow[];
 	if (input.on) {
-		rows = (
-			await questionsOn(
-				ctx.db,
-				ctx.project.id,
-				input.on.toUpperCase().startsWith("PR:") ? input.on.toLowerCase() : input.on,
-			)
-		)
-			.filter(
-				(row) =>
-					(row.state === input.state ||
-						(input.state === "decided" &&
-							row.state === "dissolved" &&
-							row.decision !== null &&
-							holdEndingById(ctx.db, row.decision) !== null)) &&
-					(!input.kind || row.kind === input.kind),
-			)
-			.slice(0, limit);
-		return { counts, items: rows.map((row) => withTrackerPollError(ctx.db, toItemFor(ctx, row))), cursor: null };
+		rows = [];
+		for (const row of await questionsOn(
+			ctx.db,
+			ctx.project.id,
+			input.on.toUpperCase().startsWith("PR:") ? input.on.toLowerCase() : input.on,
+		)) {
+			const matchesState =
+				row.state === input.state ||
+				(input.state === "decided" &&
+					row.state === "dissolved" &&
+					row.decision !== null &&
+					(await holdEndingById(ctx.db, row.decision)) !== null);
+			if (matchesState && (!input.kind || row.kind === input.kind)) rows.push(row);
+			if (rows.length === limit) break;
+		}
+		return {
+			counts,
+			items: await Array.fromAsync(rows, async (row) => await withTrackerPollError(ctx.db, await toItemFor(ctx, row))),
+			cursor: null,
+		};
 	}
 	if (input.state === "decided") {
 		// The ledger's cursor is the revision and the id of the last row: many questions are decided at one revision.
@@ -201,7 +203,11 @@ export async function inbox(ctx: Ctx<ReadDb>, input: InboxInput): Promise<InboxR
 	const last = page.at(-1);
 	const cursor =
 		rows.length > limit && last ? (input.state === "open" ? queueCursorOf(last) : `${last.rev}.${last.id}`) : null;
-	return { counts, items: page.map((row) => withTrackerPollError(ctx.db, toItemFor(ctx, row))), cursor };
+	return {
+		counts,
+		items: await Array.fromAsync(page, async (row) => await withTrackerPollError(ctx.db, await toItemFor(ctx, row))),
+		cursor,
+	};
 }
 
 export const inboxOp = defineOp({
@@ -294,7 +300,10 @@ async function runTarget(ctx: Ctx<ReadDb>, run: RunRow): Promise<TargetRow | nul
 export async function runView(
 	ctx: Ctx<ReadDb>,
 	run: RunRow,
-	locationOf = async (target: TargetRow) => await resultLocation(ctx.db, target),
+	locationOf: (
+		target: TargetRow,
+	) => ReturnType<typeof resultLocation> | Awaited<ReturnType<typeof resultLocation>> = async (target) =>
+		await resultLocation(ctx.db, target),
 ): Promise<Record<string, unknown>> {
 	const status = await gateOf(ctx, run);
 	const work = await workIn(ctx, run.id);
@@ -323,23 +332,25 @@ export async function runView(
 		require: json(run.require),
 		gate: status,
 		slots: run.origin === "planned" ? await slotCount(ctx.db, run.id) : null,
-		inProgress: work.n,
-		workUntil: work.until,
+		inProgress: work?.n ?? 0,
+		workUntil: work?.until ?? null,
 		flips: run.origin === "change" ? await flippedIn(ctx.db, run.id) : null,
 		failing:
-			failing?.map((row) => {
-				const test = testById(ctx.db, row.test);
-				const linked = test?.case_id != null ? caseById(ctx.db, test.case_id) : null;
-				return {
-					test: test ? testRef(test) : null,
-					name: test?.name ?? null,
-					file: test?.file ?? null,
-					case: linked ? caseRef(linked) : null,
-					quarantine: test ? quarantineView(ctx, test.id) : null,
-					cause: row.signature !== null ? (signatureById(ctx.db, row.signature)?.text ?? null) : null,
-					flipped: flipped.has(row.result),
-				};
-			}) ?? null,
+			failing === null
+				? null
+				: await Array.fromAsync(failing, async (row) => {
+						const test = await testById(ctx.db, row.test);
+						const linked = test?.case_id != null ? await caseById(ctx.db, test.case_id) : null;
+						return {
+							test: test ? testRef(test) : null,
+							name: test?.name ?? null,
+							file: test?.file ?? null,
+							case: linked ? caseRef(linked) : null,
+							quarantine: test ? await quarantineView(ctx, test.id) : null,
+							cause: row.signature !== null ? ((await signatureById(ctx.db, row.signature))?.text ?? null) : null,
+							flipped: flipped.has(row.result),
+						};
+					}),
 		change: change
 			? {
 					key: change.key,
@@ -386,7 +397,7 @@ async function proposalView(
 	const policy = waiting ? await adoptionPolicy(ctx.db, proposal.project, resolved) : null;
 	const inForce = await currentPolicy(ctx.db, proposal.project);
 	if (offset >= resolved.length && cursor) throw invalid("that cursor is past the proposal's edits");
-	const edits = resolved.slice(offset, offset + 200).map((edit) => {
+	const edits = await Array.fromAsync(resolved.slice(offset, offset + 200), async (edit) => {
 		switch (edit.op) {
 			case "create":
 				return {
@@ -395,33 +406,33 @@ async function proposalView(
 					folder: "id" in edit.folder ? index.path(edit.folder.id) : edit.folder.path,
 					tags: edit.tags,
 					covers: edit.covers,
-					after: edit.after === null ? null : refOf(edit.after),
+					after: edit.after === null ? null : await refOf(edit.after),
 				};
 			case "edit": {
-				const row = caseById(ctx.db, edit.caseId);
+				const row = await caseById(ctx.db, edit.caseId);
 				// While it waits, what accepting does now: once the case has moved on, that is not what was proposed.
-				const now = row && policy ? adoption(ctx.db, row, edit, policy) : null;
+				const now = row && policy ? await adoption(ctx.db, row, edit, policy) : null;
 				return {
 					op: edit.op,
-					case: refOf(edit.caseId),
+					case: await refOf(edit.caseId),
 					base: edit.base,
 					head: row?.head ?? edit.head,
 					// An edit that would be refused is shown as it was proposed: it applies to nothing.
 					body: now && now.refused === null ? now.body : edit.body,
 					mine: edit.mine,
-					current: row ? bodyOf(ctx.db, row.id, row.head) : null,
+					current: row ? await bodyOf(ctx.db, row.id, row.head) : null,
 					conflicts: edit.conflicts,
 					refused: now?.refused?.message ?? null,
 				};
 			}
 			case "restore": {
-				const row = caseById(ctx.db, edit.caseId);
+				const row = await caseById(ctx.db, edit.caseId);
 				return {
 					op: edit.op,
-					case: refOf(edit.caseId),
+					case: await refOf(edit.caseId),
 					to: edit.to,
 					body: edit.body,
-					current: row ? bodyOf(ctx.db, row.id, row.head) : null,
+					current: row ? await bodyOf(ctx.db, row.id, row.head) : null,
 				};
 			}
 			case "place":
@@ -430,17 +441,17 @@ async function proposalView(
 				// the read does not predict. A change of tags alone leaves the order as it is, and has no `after`.
 				return {
 					op: edit.op,
-					cases: edit.caseIds.map(refOf),
+					cases: await Array.fromAsync(edit.caseIds, refOf),
 					folder: edit.folder ? ("id" in edit.folder ? index.path(edit.folder.id) : edit.folder.path) : null,
 					tags: edit.tags,
 					...(edit.folder || edit.after !== undefined
-						? { after: typeof edit.after === "number" ? (refOf(edit.after) ?? "") : "" }
+						? { after: typeof edit.after === "number" ? ((await refOf(edit.after)) ?? "") : "" }
 						: {}),
 				};
 			case "state":
-				return { op: edit.op, cases: edit.caseIds.map(refOf), to: edit.to };
+				return { op: edit.op, cases: await Array.fromAsync(edit.caseIds, refOf), to: edit.to };
 			case "cover":
-				return { op: edit.op, case: refOf(edit.caseId), requirement: edit.key, on: edit.on };
+				return { op: edit.op, case: await refOf(edit.caseId), requirement: edit.key, on: edit.on };
 			case "folder":
 				return {
 					op: edit.op,
@@ -492,7 +503,10 @@ async function proposalView(
 async function resultView(
 	ctx: Ctx<ReadDb>,
 	row: ResultRow,
-	locationOf = async (target: TargetRow) => await resultLocation(ctx.db, target),
+	locationOf: (
+		target: TargetRow,
+	) => ReturnType<typeof resultLocation> | Awaited<ReturnType<typeof resultLocation>> = async (target) =>
+		await resultLocation(ctx.db, target),
 ): Promise<Record<string, unknown>> {
 	const test = await testById(ctx.db, row.test);
 	const target = await mustTarget(ctx.db, row.target);
@@ -514,11 +528,11 @@ async function resultView(
 		note: row.note,
 		atStep: resultFailedStep(row),
 		steps: resultTrail(row),
-		signature: row.signature !== null ? (signatureById(ctx.db, row.signature)?.text ?? null) : null,
+		signature: row.signature !== null ? ((await signatureById(ctx.db, row.signature))?.text ?? null) : null,
 		corrects: row.corrects,
 		location: await locationOf(target),
 		commit: target.commit_sha,
-		change: target.change !== null ? (changeById(ctx.db, target.change)?.key ?? null) : null,
+		change: target.change !== null ? ((await changeById(ctx.db, target.change))?.key ?? null) : null,
 		job: batch?.job ?? "",
 		build: batch?.build_url ?? null,
 	};
@@ -543,36 +557,39 @@ export async function get(ctx: Ctx<ReadDb>, input: GetInput): Promise<Record<str
 	const readOne = async (text: string): Promise<Record<string, unknown>> => {
 		if (text.startsWith("result:")) {
 			const id = /^result:([1-9]\d*)$/.exec(text)?.[1];
-			const row = id && Number.isSafeInteger(Number(id)) ? resultById(ctx.db, Number(id)) : null;
+			const row = id && Number.isSafeInteger(Number(id)) ? await resultById(ctx.db, Number(id)) : null;
 			if (!row || row.project !== ctx.project.id) throw notFound(text);
-			return { ref: text, ...resultView(ctx, row), detail: row.detail };
+			return { ref: text, ...(await resultView(ctx, row)), detail: row.detail };
 		}
 		if (text.startsWith("commit:"))
-			return { ref: text, gate: gate(ctx, { commit: text.slice(7), ...(input.repo ? { repo: input.repo } : {}) }) };
-		if (text.startsWith("change:")) return { ref: text, gate: gate(ctx, { change: text.slice(7) }) };
+			return {
+				ref: text,
+				gate: await gate(ctx, { commit: text.slice(7), ...(input.repo ? { repo: input.repo } : {}) }),
+			};
+		if (text.startsWith("change:")) return { ref: text, gate: await gate(ctx, { change: text.slice(7) }) };
 		const kind = text.trim().slice(0, 2).toUpperCase();
 		if (kind === "Q-")
-			return withTrackerPollError(
+			return (await withTrackerPollError(
 				ctx.db,
-				toItem(ctx.db, mustQuestion(ctx.db, ctx.project.id, text)),
-			) as unknown as Record<string, unknown>;
-		if (kind === "R-") return runView(ctx, mustRun(ctx.db, ctx.project.id, text));
+				await toItem(ctx.db, await mustQuestion(ctx.db, ctx.project.id, text)),
+			)) as unknown as Record<string, unknown>;
+		if (kind === "R-") return await runView(ctx, await mustRun(ctx.db, ctx.project.id, text));
 		if (kind === "T-") {
-			const test = findTest(ctx.db, ctx.project.id, text);
+			const test = await findTest(ctx.db, ctx.project.id, text);
 			if (!test) throw notFound(`test ${text}`);
-			const linked = test.case_id !== null ? caseById(ctx.db, test.case_id) : null;
-			const last = lastResultsOfTest(ctx.db, test.project, test.id, 20);
-			const retried = passedOnRetry(
+			const linked = test.case_id !== null ? await caseById(ctx.db, test.case_id) : null;
+			const last = await lastResultsOfTest(ctx.db, test.project, test.id, 20);
+			const retried = await passedOnRetry(
 				ctx.db,
 				last.map((row) => row.id),
 			);
-			const tried = triesOf(
+			const tried = await triesOf(
 				ctx.db,
 				last.map((row) => row.id),
 			);
-			const locationOf = resultLocations(
+			const locationOf = await resultLocations(
 				ctx.db,
-				last.map((row) => mustTarget(ctx.db, row.target)),
+				await Array.fromAsync(last, async (row) => await mustTarget(ctx.db, row.target)),
 			);
 			return {
 				ref: testRef(test),
@@ -581,25 +598,25 @@ export async function get(ctx: Ctx<ReadDb>, input: GetInput): Promise<Record<str
 				name: test.name,
 				file: test.file,
 				case: linked ? caseRef(linked) : null,
-				flips: flipCount(ctx.db, test.project, test.id),
-				quarantine: quarantineView(ctx, test.id),
-				sameCode: sameCodeEvidence(ctx.db, {
+				flips: await flipCount(ctx.db, test.project, test.id),
+				quarantine: await quarantineView(ctx, test.id),
+				sameCode: await sameCodeEvidence(ctx.db, {
 					project: test.project,
 					test: test.id,
 					now: ctx.now,
-					settings: currentPolicy(ctx.db, test.project).settings.flakyDetection,
+					settings: (await currentPolicy(ctx.db, test.project)).settings.flakyDetection,
 				}),
-				last: last.map((row) => ({
-					...resultView(ctx, row, locationOf),
+				last: await Array.fromAsync(last, async (row) => ({
+					...(await resultView(ctx, row, locationOf)),
 					passedOnRetry: retried.get(row.id) ?? null,
 					tries: tried.get(row.id) ?? [],
 				})),
 			};
 		}
 		if (kind === "P-") {
-			const proposal = proposalByNo(ctx.db, ctx.project.id, Number(text.trim().slice(2)));
+			const proposal = await proposalByNo(ctx.db, ctx.project.id, Number(text.trim().slice(2)));
 			if (!proposal) throw notFound(`proposal ${text}`);
-			return proposalView(ctx, proposal, input.cursor);
+			return await proposalView(ctx, proposal, input.cursor);
 		}
 		const row = await mustCase(ctx.db, ctx.project.id, text);
 		const version = input.refs.length === 1 ? input.version : undefined;
@@ -683,16 +700,18 @@ async function countedResults(ctx: Ctx<ReadDb>, input: FindInput, limit: number)
 
 	const rank = (row: CountedTest): number => 2 * RESULT_STANDINGS.indexOf(row.standing) + (row.flipped ? 0 : 1);
 	const text = input.text?.toLowerCase();
-	const matching = counted
-		.filter((row) => {
-			if (wanted !== undefined && row.standing !== wanted) return false;
-			if (!text && !input.unlinked) return true;
-			const test = testById(ctx.db, row.test);
-			if (!test) return false;
-			if (input.unlinked && caseOfCount(ctx, row, test) !== null) return false;
-			return !text || `${test.name} ${test.key} ${test.file ?? ""}`.toLowerCase().includes(text);
-		})
-		.sort((a, b) => rank(a) - rank(b) || a.result - b.result);
+	const matching: CountedTest[] = [];
+	for (const row of counted) {
+		if (wanted !== undefined && row.standing !== wanted) continue;
+		if (text || input.unlinked) {
+			const test = await testById(ctx.db, row.test);
+			if (!test) continue;
+			if (input.unlinked && (await caseOfCount(ctx, row, test)) !== null) continue;
+			if (text && !`${test.name} ${test.key} ${test.file ?? ""}`.toLowerCase().includes(text)) continue;
+		}
+		matching.push(row);
+	}
+	matching.sort((a, b) => rank(a) - rank(b) || a.result - b.result);
 	// The list this query gives, and the query: a row that joins or leaves it, moves in it or changes how it counts
 	// makes a different version, and so does the same cursor sent with another filter.
 	const version = contentHash({
@@ -709,7 +728,7 @@ async function countedResults(ctx: Ctx<ReadDb>, input: FindInput, limit: number)
 	const last = page.at(-1);
 	const locationOf = await resultLocations(
 		ctx.db,
-		page.map((row) => mustTarget(ctx.db, row.target)),
+		await Array.fromAsync(page, async (row) => await mustTarget(ctx.db, row.target)),
 	);
 	// Flips over the same days the flaky report and the detector read, so a row and those agree on a test.
 	const days = (await currentPolicy(ctx.db, ctx.project.id)).settings.flakyDetection.windowDays;
@@ -722,7 +741,10 @@ async function countedResults(ctx: Ctx<ReadDb>, input: FindInput, limit: number)
 	);
 	return {
 		count: matching.length,
-		items: page.map((row) => ({ ...countedView(ctx, row, locationOf), recentFlips: flips.get(row.test) ?? 0 })),
+		items: await Array.fromAsync(page, async (row) => ({
+			...(await countedView(ctx, row, locationOf)),
+			recentFlips: flips.get(row.test) ?? 0,
+		})),
 		cursor: rest.length > limit && last ? `${rank(last)}.${last.result}.${version}` : null,
 		tally,
 		testTime: time,
@@ -743,7 +765,7 @@ function parseResultCursor(cursor: string): { rank: number; result: number; vers
 async function countedView(
 	ctx: Ctx<ReadDb>,
 	row: CountedTest,
-	locationOf: (target: TargetRow) => ReturnType<typeof resultLocation>,
+	locationOf: (target: TargetRow) => ReturnType<typeof resultLocation> | Awaited<ReturnType<typeof resultLocation>>,
 ): Promise<Record<string, unknown>> {
 	const result = await resultById(ctx.db, row.result);
 	const test = await testById(ctx.db, row.test);
@@ -781,7 +803,7 @@ async function caseOfCount(
 	row: CountedTest,
 	test: { case_id: number | null },
 ): Promise<CaseRow | null> {
-	const claimed = resultById(ctx.db, row.result)?.basis_case ?? null;
+	const claimed = (await resultById(ctx.db, row.result))?.basis_case ?? null;
 	const id = claimed ?? test.case_id;
 	return id !== null ? await caseById(ctx.db, id) : null;
 }
@@ -815,7 +837,7 @@ async function caseProof(ctx: Ctx<ReadDb>, row: CaseRow) {
 			by: (await who(ctx, result.actor)).name,
 			method: result.method,
 			model: result.model,
-			name: testById(ctx.db, result.test)?.name ?? null,
+			name: (await testById(ctx.db, result.test))?.name ?? null,
 			outcome: result.outcome,
 			at: result.at,
 			current,
@@ -863,9 +885,9 @@ async function slotRow(ctx: Ctx<ReadDb>, slot: SlotRow): Promise<Record<string, 
 		work: lease
 			? { kind: "held", actor: (await who(ctx, lease.actor)).name, since: lease.since, until: lease.until }
 			: { kind: "free" },
-		fills: fills.map((fill) => ({
+		fills: await Array.fromAsync(fills, async (fill) => ({
 			result: fill.id,
-			by: who(ctx, fill.actor).name,
+			by: (await who(ctx, fill.actor)).name,
 			model: fill.model,
 			method: fill.method,
 			outcome: fill.outcome,
@@ -898,17 +920,17 @@ export async function find(ctx: Ctx<ReadDb>, input: FindInput): Promise<Found> {
 			const page = rows.slice(0, limit);
 			return {
 				count: null,
-				items: page.map((row) => ({
+				items: await Array.fromAsync(page, async (row) => ({
 					...row,
 					code: json<unknown>(row.code),
-					by: actorLabel(ctx.db, row.actor).name,
-					attestation: { by: actorLabel(ctx.db, row.attested_by).name, at: row.attested_at },
+					by: (await actorLabel(ctx.db, row.actor)).name,
+					attestation: { by: (await actorLabel(ctx.db, row.attested_by)).name, at: row.attested_at },
 				})),
 				cursor: rows.length > limit ? String(page.at(-1)?.id ?? "") : null,
 			};
 		}
 		case "cases": {
-			const fieldDefinitions = currentPolicy(ctx.db, project).settings.fields ?? {};
+			const fieldDefinitions = (await currentPolicy(ctx.db, project)).settings.fields ?? {};
 			if (input.select) {
 				const selected = await selectCases(ctx, input.select);
 				const from = input.cursor ? Number(input.cursor) : 0;
@@ -916,7 +938,10 @@ export async function find(ctx: Ctx<ReadDb>, input: FindInput): Promise<Found> {
 				return {
 					fieldDefinitions,
 					count: selected.length,
-					items: selected.slice(from, from + limit).map((row) => caseRow(ctx, row, true)),
+					items: await Array.fromAsync(
+						selected.slice(from, from + limit),
+						async (row) => await caseRow(ctx, row, true),
+					),
 					cursor: selected.length > from + limit ? String(from + limit) : null,
 				};
 			}
@@ -932,7 +957,7 @@ export async function find(ctx: Ctx<ReadDb>, input: FindInput): Promise<Found> {
 			return {
 				fieldDefinitions,
 				count: page.count,
-				items: page.items.map((row) => caseRow(ctx, row, true)),
+				items: await Array.fromAsync(page.items, async (row) => await caseRow(ctx, row, true)),
 				cursor: page.cursor,
 			};
 		}
@@ -955,14 +980,16 @@ export async function find(ctx: Ctx<ReadDb>, input: FindInput): Promise<Found> {
 			const filter = { origin: input.origin ?? null, state, change: change?.id ?? null };
 			const rows = await recentRuns(ctx.db, project, filter, before, limit + 1);
 			const page = rows.slice(0, limit);
-			const targets = page.flatMap((run) => {
-				const target = runTarget(ctx, run);
-				return target ? [target] : [];
-			});
+			const targets = (
+				await Array.fromAsync(page, async (run) => {
+					const target = await runTarget(ctx, run);
+					return target ? [target] : [];
+				})
+			).flat();
 			const locationOf = await resultLocations(ctx.db, targets);
 			return {
 				count: null,
-				items: page.map((run) => runView(ctx, run, locationOf)),
+				items: await Array.fromAsync(page, async (run) => await runView(ctx, run, locationOf)),
 				cursor: rows.length > limit ? String(page.at(-1)?.id ?? "") : null,
 			};
 		}
@@ -974,18 +1001,20 @@ export async function find(ctx: Ctx<ReadDb>, input: FindInput): Promise<Found> {
 			const page = rows.slice(0, limit);
 			return {
 				count: await slotCount(ctx.db, run.id),
-				items: page.map((slot) => slotRow(ctx, slot)),
+				items: await Array.fromAsync(page, async (slot) => await slotRow(ctx, slot)),
 				cursor: rows.length > limit ? String(page.at(-1)?.rank ?? "") : null,
 			};
 		}
 		case "tests": {
 			if (input.state === "quarantined") {
-				const active = (await quarantineEntries(ctx.db, project))
-					.filter((entry) => effectiveQuarantine(ctx.db, entry, ctx.now))
-					.flatMap((entry) => {
-						const test = testById(ctx.db, entry.test);
+				const active = (
+					await Array.fromAsync(await quarantineEntries(ctx.db, project), async (entry) => {
+						if (!(await effectiveQuarantine(ctx.db, entry, ctx.now))) return [];
+						const test = await testById(ctx.db, entry.test);
 						return test ? [test] : [];
 					})
+				)
+					.flat()
 					.filter(
 						(test) =>
 							(!input.text || `${test.key} ${test.name}`.toLowerCase().includes(input.text.toLowerCase())) &&
@@ -995,8 +1024,8 @@ export async function find(ctx: Ctx<ReadDb>, input: FindInput): Promise<Found> {
 				const page = after.slice(0, limit);
 				return {
 					count: active.length,
-					items: page.map((test) => {
-						const linked = test.case_id === null ? null : caseById(ctx.db, test.case_id);
+					items: await Array.fromAsync(page, async (test) => {
+						const linked = test.case_id === null ? null : await caseById(ctx.db, test.case_id);
 						return {
 							ref: testRef(test),
 							kind: test.kind,
@@ -1004,7 +1033,7 @@ export async function find(ctx: Ctx<ReadDb>, input: FindInput): Promise<Found> {
 							file: test.file,
 							key: test.key,
 							case: linked ? caseRef(linked) : null,
-							quarantine: quarantineView(ctx, test.id),
+							quarantine: await quarantineView(ctx, test.id),
 						};
 					}),
 					cursor: after.length > limit ? String(page.at(-1)?.id) : null,
@@ -1020,8 +1049,8 @@ export async function find(ctx: Ctx<ReadDb>, input: FindInput): Promise<Found> {
 			const page = rows.slice(0, limit);
 			return {
 				count: input.unlinked ? await unlinkedCount(ctx.db, project) : null,
-				items: page.map((test) => {
-					const linked = test.case_id !== null ? caseById(ctx.db, test.case_id) : null;
+				items: await Array.fromAsync(page, async (test) => {
+					const linked = test.case_id !== null ? await caseById(ctx.db, test.case_id) : null;
 					return {
 						ref: testRef(test),
 						kind: test.kind,
@@ -1029,15 +1058,15 @@ export async function find(ctx: Ctx<ReadDb>, input: FindInput): Promise<Found> {
 						file: test.file,
 						key: test.key,
 						case: linked ? caseRef(linked) : null,
-						quarantine: quarantineView(ctx, test.id),
+						quarantine: await quarantineView(ctx, test.id),
 					};
 				}),
 				cursor: rows.length > limit ? String(page.at(-1)?.id ?? "") : null,
 			};
 		}
 		case "changes": {
-			const items = (await recentChanges(ctx.db, project, limit)).map((change) => {
-				const status = change.head_sha ? gate(ctx, { change: change.key }) : null;
+			const items = await Array.fromAsync(await recentChanges(ctx.db, project, limit), async (change) => {
+				const status = change.head_sha ? await gate(ctx, { change: change.key }) : null;
 				return {
 					key: change.key,
 					title: change.title,
@@ -1049,7 +1078,7 @@ export async function find(ctx: Ctx<ReadDb>, input: FindInput): Promise<Found> {
 					verdict: status?.verdict ?? null,
 					reason: status?.reason ?? null,
 					...(status?.waiting ? { waiting: status.waiting } : {}),
-					landing: landingView(ctx, change),
+					landing: await landingView(ctx, change),
 				};
 			});
 			return { count: null, items, cursor: null };
@@ -1087,11 +1116,11 @@ export async function history(ctx: Ctx<ReadDb>, input: HistoryInput): Promise<Re
 	return {
 		ref: caseRef(row),
 		head: row.head,
-		versions: (await versionList(ctx.db, row.id)).map((v) => ({
+		versions: await Array.fromAsync(await versionList(ctx.db, row.id), async (v) => ({
 			version: v.version,
 			hash: v.hash,
-			by: who(ctx, v.author).name,
-			kind: who(ctx, v.author).kind,
+			by: (await who(ctx, v.author)).name,
+			kind: (await who(ctx, v.author)).kind,
 			reason: v.reason,
 			at: v.at,
 			summary: v.summary,
@@ -1152,10 +1181,10 @@ export async function timeline(
 			what: what.join("; ") || "reordered",
 		});
 	}
-	const results = lastResultsOfCase(ctx.db, row.id, limit);
+	const results = await lastResultsOfCase(ctx.db, row.id, limit);
 	const locationOf = await resultLocations(
 		ctx.db,
-		results.map((result) => mustTarget(ctx.db, result.target)),
+		await Array.fromAsync(results, async (result) => await mustTarget(ctx.db, result.target)),
 	);
 	for (const r of results)
 		entries.push({ ...(await resultView(ctx, r, locationOf)), t: "result", seq: r.seq, at: r.at, ord: r.ord });
@@ -1184,8 +1213,9 @@ export async function timeline(
 			about: r.about,
 		});
 	}
-	const questions = (await questionsOn(ctx.db, row.project, caseRef(row))).map((q) =>
-		withTrackerPollError(ctx.db, toItem(ctx.db, q)),
+	const questions = await Array.fromAsync(
+		await questionsOn(ctx.db, row.project, caseRef(row)),
+		async (q) => await withTrackerPollError(ctx.db, await toItem(ctx.db, q)),
 	);
 	entries.sort((a, b) => b.seq - a.seq || Number(b.ord ?? 0) - Number(a.ord ?? 0));
 	return { ref: caseRef(row), head: row.head, entries: entries.slice(0, limit), questions };
@@ -1259,13 +1289,13 @@ export async function since(ctx: Ctx<ReadDb>, input: SinceInput): Promise<Record
 	};
 	const cases = page(await casesChangedSince(ctx.db, ctx.project.id, from.cases, limit + 1));
 	const questions = page(await questionsChangedSince(ctx.db, ctx.project.id, from.questions, limit + 1));
-	const changed = cases.rows.map((row) => {
-		const before = versionAt(ctx.db, row.id, from.base);
+	const changed = await Array.fromAsync(cases.rows, async (row) => {
+		const before = await versionAt(ctx.db, row.id, from.base);
 		const summary = !before
 			? "created"
 			: before.no === row.head
 				? "moved or retagged"
-				: summariseDiff(diffBodies(json<CaseBody>(before.body), bodyOf(ctx.db, row.id, row.head)));
+				: summariseDiff(diffBodies(json<CaseBody>(before.body), await bodyOf(ctx.db, row.id, row.head)));
 		return {
 			ref: caseRef(row),
 			version: row.head,
@@ -1275,10 +1305,10 @@ export async function since(ctx: Ctx<ReadDb>, input: SinceInput): Promise<Record
 			changed: summary,
 		};
 	});
-	const settled = questions.rows
-		.filter((q) => q.state !== "open")
-		.map((q) => {
-			const item = toItem(ctx.db, q);
+	const settled = await Array.fromAsync(
+		questions.rows.filter((q) => q.state !== "open"),
+		async (q) => {
+			const item = await toItem(ctx.db, q);
 			return {
 				q: questionRef(q),
 				kind: q.kind,
@@ -1287,7 +1317,8 @@ export async function since(ctx: Ctx<ReadDb>, input: SinceInput): Promise<Record
 				answer: item.decision?.answer ?? null,
 				by: item.decision?.by ?? [],
 			};
-		});
+		},
+	);
 	// The cursor moves past a change only once the change has been returned. `more` says to call again with it.
 	const more = cases.more || questions.more;
 	const at = (position: Position) => `${position.rev}.${position.id}`;
@@ -1326,13 +1357,17 @@ export async function check(
 		counts[rule] = total;
 		for (const row of rows) if (problems.length < limit) problems.push({ rule, ...row });
 	};
-	for (const problem of structuralProblems(ctx.db, project)) add(problem.rule, problem.rows, problem.total);
-	const dangling = (await archivedCases(ctx.db, project, 200)).flatMap((row) =>
-		testsOfCase(ctx.db, project, row.id).map((test) => ({
-			ref: testRef(test),
-			message: `"${test.name}" is linked to ${caseRef(row)}, which is archived`,
-		})),
-	);
+	for (const problem of await structuralProblems(ctx.db, project)) add(problem.rule, problem.rows, problem.total);
+	const dangling = (
+		await Array.fromAsync(await archivedCases(ctx.db, project, 200), async (row) =>
+			(
+				await testsOfCase(ctx.db, project, row.id)
+			).map((test) => ({
+				ref: testRef(test),
+				message: `"${test.name}" is linked to ${caseRef(row)}, which is archived`,
+			})),
+		)
+	).flat();
 	add("linked-to-archived", dangling, dangling.length);
 	counts["unlinked-tests"] = await unlinkedCount(ctx.db, project);
 	return { problems, counts };
@@ -1481,19 +1516,16 @@ export async function impact(ctx: Ctx<ReadDb>, input: ImpactInput): Promise<Reco
 	});
 	const next = offset + page.length < selected.counts.cases ? `${offset + page.length}.${version}` : null;
 	const decided = change
-		? changeQuestions
-				.filter((q) => q.state === "decided")
-				.slice(0, 20)
-				.map((q) => {
-					const item = toItem(ctx.db, q);
-					return {
-						q: item.q,
-						kind: item.kind,
-						title: item.title,
-						answer: item.decision?.answer ?? null,
-						by: item.decision?.by ?? [],
-					};
-				})
+		? await Array.fromAsync(changeQuestions.filter((q) => q.state === "decided").slice(0, 20), async (q) => {
+				const item = await toItem(ctx.db, q);
+				return {
+					q: item.q,
+					kind: item.kind,
+					title: item.title,
+					answer: item.decision?.answer ?? null,
+					by: item.decision?.by ?? [],
+				};
+			})
 		: [];
 	return {
 		change: change

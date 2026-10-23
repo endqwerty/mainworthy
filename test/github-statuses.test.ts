@@ -5,15 +5,16 @@ import { join } from "node:path";
 import { z } from "zod";
 import { type Instance, start } from "../src/app/start.ts";
 import { InboxReply } from "../src/core/ops.ts";
-import { ruleActor } from "../src/server/identity/identity.ts";
 import { defaultConfig, openApp } from "../src/server/kernel/app.ts";
 import { findProject, makeCtx } from "../src/server/kernel/ctx.ts";
+import { type SqlValue, sql } from "../src/server/kernel/db.ts";
 import { sweep } from "../src/server/ops/jobs.ts";
 import { acceptReport } from "../src/server/ops/writes.ts";
 import { githubStatusesPort } from "../src/server/statuses/github.ts";
 import type { StatusDraft } from "../src/server/statuses/port.ts";
 import { deliverCommitStatuses } from "../src/server/statuses/statuses.ts";
 import { exportArchive, importArchive } from "../src/server/transfer/transfer.ts";
+import { testDatabase } from "./db.ts";
 import { type Harness, harness } from "./helpers.ts";
 
 const commit = "a".repeat(40);
@@ -27,7 +28,7 @@ afterEach(async () => {
 	instance = undefined;
 	if (directory) rmSync(directory, { recursive: true, force: true });
 	directory = undefined;
-	h?.close();
+	await h?.close();
 	h = undefined;
 });
 
@@ -86,7 +87,7 @@ test("the minute job posts a commit gate and posts a newer status in the same co
 	directory = mkdtempSync(join(tmpdir(), "mainworthy-statuses-"));
 	let now = 1_800_000_000_000;
 	const config = {
-		...defaultConfig({}),
+		...defaultConfig({ MAINWORTHY_DATABASE_URL: (await testDatabase()).url }),
 		owner: "robin",
 		dataDir: directory,
 		port: 0,
@@ -108,7 +109,7 @@ test("the minute job posts a commit gate and posts a newer status in the same co
 		),
 	);
 	try {
-		instance = await start(config, () => ({ ui: null }), { readers: 0, now: () => now });
+		instance = await start(config, () => ({ ui: null }), { now: () => now });
 		const post = async (op: string, input: unknown = {}) => {
 			const response = await original(`${instance?.url}/api/p/scratch/${op}`, {
 				method: "POST",
@@ -177,15 +178,18 @@ test("all four verdicts map to commit status states", async () => {
 		state: "failure",
 		description: expect.stringContaining("failed:"),
 	});
-	const project = await findProject(fixture.app.db, "scratch");
+	const project = await fixture.app.database.read(async (db) => await findProject(db, "scratch"));
 	if (!project) throw new Error("expected scratch");
-	await fixture.app.db.transaction(
-		async () =>
-			await acceptReport(makeCtx(fixture.app, project, fixture.owner, true), {
-				target: { commit, repo: github.repository, pr: 55 },
-				attempt: 2,
-				results: [{ test: { key: "checkout" }, outcome: "pass" }],
-			}),
+	await fixture.app.database.write(
+		async (db) =>
+			await db.transaction(
+				async () =>
+					await acceptReport(makeCtx(fixture.app, db, project, fixture.owner, true), {
+						target: { commit, repo: github.repository, pr: 55 },
+						attempt: 2,
+						results: [{ test: { key: "checkout" }, outcome: "pass" }],
+					}),
+			),
 	);
 	fixture.advance(60_000);
 	await deliverCommitStatuses(fixture.app, fake.port);
@@ -252,7 +256,15 @@ test("failed status posts stay due and an accepted post clears the last error", 
 	const log = spyOn(console, "error").mockImplementation(() => undefined);
 	try {
 		await deliverCommitStatuses(fixture.app, fake.port);
-		expect(fixture.app.db.raw.query("SELECT state, sent FROM commit_statuses").get()).toEqual({
+		expect(
+			await fixture.app.database.read(
+				async (db) =>
+					await db.get(
+						sql<readonly SqlValue[], Record<string, unknown>>("SELECT state, sent FROM commit_statuses"),
+						[],
+					),
+			),
+		).toEqual({
 			state: "queued",
 			sent: null,
 		});
@@ -260,12 +272,27 @@ test("failed status posts stay due and an accepted post clears the last error", 
 		fixture.advance(60_000);
 		await deliverCommitStatuses(fixture.app, fake.port);
 		expect(fake.requests.map((request) => request.body.state)).toEqual(["error", "error"]);
-		expect(fixture.app.db.raw.query("SELECT state, error FROM commit_statuses").get()).toEqual({
+		expect(
+			await fixture.app.database.read(
+				async (db) =>
+					await db.get(
+						sql<readonly SqlValue[], Record<string, unknown>>("SELECT state, error FROM commit_statuses"),
+						[],
+					),
+			),
+		).toEqual({
 			state: "complete",
 			error: null,
 		});
 		expect(JSON.stringify(log.mock.calls)).not.toContain(credential);
-		expect(JSON.stringify(fixture.app.db.raw.query("SELECT * FROM commit_statuses").all())).not.toContain(credential);
+		expect(
+			JSON.stringify(
+				await fixture.app.database.read(
+					async (db) =>
+						await db.all(sql<readonly SqlValue[], Record<string, unknown>>("SELECT * FROM commit_statuses"), []),
+				),
+			),
+		).not.toContain(credential);
 	} finally {
 		log.mockRestore();
 	}
@@ -292,7 +319,15 @@ test("a lost first reply retries the latest gate without reading remote state", 
 			["POST", "error"],
 			["POST", "success"],
 		]);
-		expect(fixture.app.db.raw.query("SELECT state, error FROM commit_statuses").get()).toEqual({
+		expect(
+			await fixture.app.database.read(
+				async (db) =>
+					await db.get(
+						sql<readonly SqlValue[], Record<string, unknown>>("SELECT state, error FROM commit_statuses"),
+						[],
+					),
+			),
+		).toEqual({
 			state: "complete",
 			error: null,
 		});
@@ -311,7 +346,7 @@ test("only opted-in counted reports for the configured project and repository en
 	await deliverCommitStatuses(fixture.app, fake.port);
 	expect(fake.requests).toEqual([]);
 	await report(fixture, "pass", { commit: "b".repeat(40), repo: "other/repository", pr: 55 });
-	const agent = fixture.actor("agent", "agent", ["read", "produce"]);
+	const agent = await fixture.actor("agent", "agent", ["read", "produce"]);
 	await fixture.call(
 		"report",
 		{
@@ -339,18 +374,28 @@ test("archives omit commit status state and restoring one does not enroll histor
 	const fixture = await setup();
 	await report(fixture, "pass");
 	const chunks: string[] = [];
-	exportArchive(fixture.app.db, (chunk) => chunks.push(chunk));
+	await fixture.app.database.read(async (db) => await exportArchive(db, (chunk) => chunks.push(chunk)));
 	expect(chunks.join("")).not.toContain('"t":"commit_statuses"');
 	expect(chunks.join("")).not.toContain(credential);
-	const restored = await openApp(fixture.app.config, { memory: true });
+	const restored = await openApp({ ...fixture.app.config, databaseUrl: (await testDatabase()).url }, { memory: true });
 	try {
-		await importArchive(restored.db, chunks.join("").trimEnd().split("\n"));
+		await restored.database.write(
+			async (db) => await db.transaction(async () => await importArchive(db, chunks.join("").trimEnd().split("\n"))),
+		);
 		const fake = remote();
 		await deliverCommitStatuses(restored, fake.port);
 		expect(fake.requests).toEqual([]);
-		expect(restored.db.raw.query("SELECT count(*) AS n FROM commit_statuses").get()).toEqual({ n: 0 });
+		expect(
+			await restored.database.read(
+				async (db) =>
+					await db.get(
+						sql<readonly SqlValue[], Record<string, unknown>>("SELECT count(*) AS n FROM commit_statuses"),
+						[],
+					),
+			),
+		).toEqual({ n: 0 });
 	} finally {
-		restored.close();
+		await restored.close();
 	}
 });
 
@@ -402,15 +447,29 @@ test("the adapter bounds descriptions and ignores reply bodies", async () => {
 test("a row interrupted during delivery retries after its existing minute delay", async () => {
 	const fixture = await setup();
 	await report(fixture);
-	fixture.app.db.raw
-		.query("UPDATE commit_statuses SET state = 'sending', sent = NULL, next_at = ?")
-		.run(fixture.app.now() + 60_000);
+	await fixture.app.database.write(
+		async (db) =>
+			await db.transaction(
+				async () =>
+					await db.run(
+						sql<readonly SqlValue[], Record<string, unknown>>(
+							"UPDATE commit_statuses SET state = 'sending', sent = NULL, next_at = $1",
+						),
+						[fixture.app.now() + 60_000],
+					),
+			),
+	);
 	const fake = remote();
 	expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
 	fixture.advance(60_000);
 	await deliverCommitStatuses(fixture.app, fake.port);
 	expect(fake.requests.map((request) => [request.init?.method, request.body.state])).toEqual([["POST", "error"]]);
-	expect(fixture.app.db.raw.query("SELECT state, error FROM commit_statuses").get()).toEqual({
+	expect(
+		await fixture.app.database.read(
+			async (db) =>
+				await db.get(sql<readonly SqlValue[], Record<string, unknown>>("SELECT state, error FROM commit_statuses"), []),
+		),
+	).toEqual({
 		state: "complete",
 		error: null,
 	});
@@ -425,7 +484,7 @@ test("expired holds post the current status after the same sweep the minute job 
 	await deliverCommitStatuses(fixture.app, fake.port);
 	expect(fake.requests.at(-1)?.body).toMatchObject({ state: "success" });
 	fixture.advance(15 * 86_400_000);
-	await fixture.app.gate.run(async () => await sweep(fixture.app, (await ruleActor(fixture.app.db)).id));
+	await sweep(fixture.app);
 	await deliverCommitStatuses(fixture.app, fake.port);
 	expect(fake.requests.at(-1)).toMatchObject({
 		url: `https://api.github.com/repos/example/shop/statuses/${commit}`,
@@ -437,7 +496,7 @@ test("shutdown records the in-flight reply and restart preserves accepted status
 	directory = mkdtempSync(join(tmpdir(), "mainworthy-statuses-stop-"));
 	let now = 1_800_000_000_000;
 	const config = {
-		...defaultConfig({}),
+		...defaultConfig({ MAINWORTHY_DATABASE_URL: (await testDatabase()).url }),
 		owner: "robin",
 		dataDir: directory,
 		port: 0,
@@ -454,7 +513,7 @@ test("shutdown records the in-flight reply and restart preserves accepted status
 		entered.resolve();
 		return finish.promise;
 	});
-	instance = await start(config, () => ({ ui: null }), { readers: 0, now: () => now, statusPort: slow.port });
+	instance = await start(config, () => ({ ui: null }), { now: () => now, statusPort: slow.port });
 	const post = async (op: string, input: unknown) => {
 		const reply = await fetch(`${instance?.url}/api/p/scratch/${op}`, {
 			method: "POST",
@@ -489,8 +548,18 @@ test("shutdown records the in-flight reply and restart preserves accepted status
 		instance = undefined;
 	}
 	const resumed = remote();
-	instance = await start(config, () => ({ ui: null }), { readers: 0, now: () => now, statusPort: resumed.port });
-	expect(instance.app.db.raw.query("SELECT commit_sha, state FROM commit_statuses ORDER BY commit_sha").all()).toEqual([
+	instance = await start(config, () => ({ ui: null }), { now: () => now, statusPort: resumed.port });
+	expect(
+		await instance.app.database.read(
+			async (db) =>
+				await db.all(
+					sql<readonly SqlValue[], Record<string, unknown>>(
+						"SELECT commit_sha, state FROM commit_statuses ORDER BY commit_sha",
+					),
+					[],
+				),
+		),
+	).toEqual([
 		{ commit_sha: commit, state: "complete" },
 		{ commit_sha: "b".repeat(40), state: "queued" },
 	]);
@@ -507,7 +576,9 @@ test("shutdown records the in-flight reply and restart preserves accepted status
 test("an older reply cannot complete a replacement row or bypass its minute limit", async () => {
 	const fixture = await setup();
 	await report(fixture);
-	const old = fixture.app.db.raw.query<{ nonce: string }, []>("SELECT nonce FROM commit_statuses").get();
+	const old = await fixture.app.database.read(
+		async (db) => await db.get(sql<readonly SqlValue[], { nonce: string }>("SELECT nonce FROM commit_statuses"), []),
+	);
 	const entered = Promise.withResolvers<void>();
 	const finish = Promise.withResolvers<Response>();
 	const fake = remote(() => {
@@ -517,7 +588,13 @@ test("an older reply cannot complete a replacement row or bypass its minute limi
 	const delivery = deliverCommitStatuses(fixture.app, fake.port);
 	await entered.promise;
 	try {
-		await fixture.app.gate.run(() => fixture.app.db.raw.query("DELETE FROM commit_statuses").run());
+		await fixture.app.database.write(
+			async (db) =>
+				await db.transaction(
+					async () =>
+						await db.run(sql<readonly SqlValue[], Record<string, unknown>>("DELETE FROM commit_statuses"), []),
+				),
+		);
 		await fixture.call("report", {
 			target: { commit, repo: github.repository, pr: 55 },
 			attempt: 2,
@@ -527,16 +604,25 @@ test("an older reply cannot complete a replacement row or bypass its minute limi
 		finish.resolve(response());
 		await delivery;
 	}
-	const replacement = fixture.app.db.raw
-		.query<{ nonce: string; state: string }, []>("SELECT nonce, state FROM commit_statuses")
-		.get();
+	const replacement = await fixture.app.database.read(
+		async (db) =>
+			await db.get(
+				sql<readonly SqlValue[], { nonce: string; state: string }>("SELECT nonce, state FROM commit_statuses"),
+				[],
+			),
+	);
 	expect(replacement?.nonce).not.toBe(old?.nonce);
 	expect(replacement?.state).toBe("queued");
 	expect(fake.requests.map((request) => request.body.state)).toEqual(["error"]);
 	fixture.advance(60_000);
 	await deliverCommitStatuses(fixture.app, fake.port);
 	expect(fake.requests.map((request) => request.body.state)).toEqual(["error", "success"]);
-	expect(fixture.app.db.raw.query("SELECT state, error FROM commit_statuses").get()).toEqual({
+	expect(
+		await fixture.app.database.read(
+			async (db) =>
+				await db.get(sql<readonly SqlValue[], Record<string, unknown>>("SELECT state, error FROM commit_statuses"), []),
+		),
+	).toEqual({
 		state: "complete",
 		error: null,
 	});
@@ -677,7 +763,15 @@ test("a failed post remains due even after thirty days", async () => {
 		fail = false;
 		await deliverCommitStatuses(fixture.app, fake.port);
 		expect(fake.requests.map((request) => request.body.state)).toEqual(["error", "error"]);
-		expect(fixture.app.db.raw.query("SELECT state, error FROM commit_statuses").get()).toEqual({
+		expect(
+			await fixture.app.database.read(
+				async (db) =>
+					await db.get(
+						sql<readonly SqlValue[], Record<string, unknown>>("SELECT state, error FROM commit_statuses"),
+						[],
+					),
+			),
+		).toEqual({
 			state: "complete",
 			error: null,
 		});
@@ -707,7 +801,15 @@ test("P6 a refused 422 commit backs off and stops during one simulated day until
 			0, 1, 3, 7, 15, 31, 63, 123, 183, 243, 303, 363, 423, 483, 543, 603,
 		]);
 		expect(fake.requests.at(-1)?.body.state).toBe("error");
-		expect(fixture.app.db.raw.query("SELECT state, error FROM commit_statuses").get()).toEqual({
+		expect(
+			await fixture.app.database.read(
+				async (db) =>
+					await db.get(
+						sql<readonly SqlValue[], Record<string, unknown>>("SELECT state, error FROM commit_statuses"),
+						[],
+					),
+			),
+		).toEqual({
 			state: "stopped",
 			error:
 				"GitHub commit status delivery stopped after 16 unsuccessful attempts; check repository access and Commit statuses write permission, then send a new counted report.",
@@ -830,7 +932,12 @@ for (const failure of ["permission", "lost reply"]) {
 				fixture.advance(60_000);
 			}
 			expect(fake.requests).toHaveLength(16);
-			expect(fixture.app.db.raw.query("SELECT state FROM commit_statuses").get()).toEqual({ state: "stopped" });
+			expect(
+				await fixture.app.database.read(
+					async (db) =>
+						await db.get(sql<readonly SqlValue[], Record<string, unknown>>("SELECT state FROM commit_statuses"), []),
+				),
+			).toEqual({ state: "stopped" });
 			reject = false;
 			await fixture.call("report", {
 				target: { commit, repo: github.repository, pr: 55 },
@@ -848,7 +955,15 @@ for (const failure of ["permission", "lost reply"]) {
 			await deliverCommitStatuses(fixture.app, fake.port);
 			expect(fake.requests).toHaveLength(18);
 			expect(fake.requests.at(-1)?.body.state).toBe("error");
-			expect(fixture.app.db.raw.query("SELECT state, attempts FROM commit_statuses").get()).toEqual({
+			expect(
+				await fixture.app.database.read(
+					async (db) =>
+						await db.get(
+							sql<readonly SqlValue[], Record<string, unknown>>("SELECT state, attempts FROM commit_statuses"),
+							[],
+						),
+				),
+			).toEqual({
 				state: "complete",
 				attempts: 0,
 			});
@@ -864,7 +979,7 @@ for (const deadline of ["HTTP date", "ten-year seconds", "ten-year HTTP date", "
 		directory = mkdtempSync(join(tmpdir(), "mainworthy-statuses-rate-"));
 		let now = 1_800_000_000_000;
 		const config = {
-			...defaultConfig({}),
+			...defaultConfig({ MAINWORTHY_DATABASE_URL: (await testDatabase()).url }),
 			owner: "robin",
 			dataDir: directory,
 			port: 0,
@@ -889,7 +1004,7 @@ for (const deadline of ["HTTP date", "ten-year seconds", "ten-year HTTP date", "
 		const limited = remote(() => new Response(credential, { status: 403, headers }));
 		const log = spyOn(console, "error").mockImplementation(() => undefined);
 		try {
-			instance = await start(config, () => ({ ui: null }), { readers: 0, now: () => now, statusPort: limited.port });
+			instance = await start(config, () => ({ ui: null }), { now: () => now, statusPort: limited.port });
 			for (const sha of [commit, "b".repeat(40)]) {
 				const reply = await fetch(`${instance.url}/api/p/scratch/report`, {
 					method: "POST",
@@ -906,14 +1021,22 @@ for (const deadline of ["HTTP date", "ten-year seconds", "ten-year HTTP date", "
 			await instance.stop();
 			instance = undefined;
 			const accepted = remote();
-			instance = await start(config, () => ({ ui: null }), { readers: 0, now: () => now, statusPort: accepted.port });
+			instance = await start(config, () => ({ ui: null }), { now: () => now, statusPort: accepted.port });
 			now += pause - 1000;
 			await instance.minute();
 			expect(accepted.requests).toHaveLength(0);
 			now += 1000;
 			await instance.minute();
 			expect(accepted.requests.map((request) => request.body.state)).toEqual(["success", "success"]);
-			expect(instance.app.db.raw.query("SELECT posts FROM commit_status_delivery").get()).toEqual({
+			expect(
+				await instance.app.database.read(
+					async (db) =>
+						await db.get(
+							sql<readonly SqlValue[], Record<string, unknown>>("SELECT posts FROM commit_status_delivery"),
+							[],
+						),
+				),
+			).toEqual({
 				posts: JSON.stringify(pause < 3_600_000 ? [now - pause, now, now] : [now, now]),
 			});
 		} finally {
@@ -949,14 +1072,30 @@ test("repeated rate limits increase the shared delay even when each post is for 
 test("an interrupted sixteenth attempt stops once and a counted report with unchanged content resumes it", async () => {
 	const fixture = await setup();
 	await report(fixture, "pass");
-	fixture.app.db.raw.query("UPDATE commit_statuses SET state = 'sending', attempts = 16").run();
+	await fixture.app.database.write(
+		async (db) =>
+			await db.transaction(
+				async () =>
+					await db.run(
+						sql<readonly SqlValue[], Record<string, unknown>>(
+							"UPDATE commit_statuses SET state = 'sending', attempts = 16",
+						),
+						[],
+					),
+			),
+	);
 	const fake = remote();
 	const log = spyOn(console, "error").mockImplementation(() => undefined);
 	try {
 		expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
 		expect(await deliverCommitStatuses(fixture.app, fake.port)).toBe(0);
 		expect(log.mock.calls).toHaveLength(1);
-		expect(fixture.app.db.raw.query("SELECT state FROM commit_statuses").get()).toEqual({ state: "stopped" });
+		expect(
+			await fixture.app.database.read(
+				async (db) =>
+					await db.get(sql<readonly SqlValue[], Record<string, unknown>>("SELECT state FROM commit_statuses"), []),
+			),
+		).toEqual({ state: "stopped" });
 		await fixture.call("report", {
 			target: { commit, repo: github.repository, pr: 55 },
 			attempt: 2,
@@ -966,5 +1105,25 @@ test("an interrupted sixteenth attempt stops once and a counted report with unch
 		expect(fake.requests[0]?.body).toMatchObject({ state: "success", description: "passed: 1 result proven" });
 	} finally {
 		log.mockRestore();
+	}
+});
+
+test("a failed completion write stops status delivery without continuing on another lease", async () => {
+	const fixture = await setup();
+	await report(fixture, "pass");
+	const fake = remote();
+	const write = fixture.app.database.write.bind(fixture.app.database);
+	let scopes = 0;
+	const probe = spyOn(fixture.app.database, "write").mockImplementation(async (fn, options) => {
+		scopes++;
+		if (scopes === 3) throw new Error("completion connection lost");
+		return await write(fn, options);
+	});
+	try {
+		await expect(deliverCommitStatuses(fixture.app, fake.port)).rejects.toThrow("completion connection lost");
+		expect(fake.requests).toHaveLength(1);
+		expect(scopes).toBe(3);
+	} finally {
+		probe.mockRestore();
 	}
 });

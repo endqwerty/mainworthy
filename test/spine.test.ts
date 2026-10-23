@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
 import { sql } from "../src/server/kernel/db.ts";
+import { OpError } from "../src/server/kernel/errors.ts";
+import { runArchive } from "../src/server/ops/archives.ts";
 import { COMMIT, defineOp, invoke } from "../src/server/ops/registry.ts";
 import { harness } from "./helpers.ts";
 
@@ -198,6 +200,84 @@ test("a write resolves authority after waiting for the exclusive lease", async (
 		finish.release();
 		await holder;
 		await pending;
+		await h.close();
+	}
+});
+
+test("ref reservations in one command are contiguous and do not overlap", async () => {
+	const h = await harness();
+	const operation = defineOp({
+		name: "reserve",
+		summary: "Reserve ref ranges",
+		input: z.object({}),
+		output: z.array(z.number()),
+		needs: "produce",
+		scope: "project",
+		effect: "write",
+		mcp: null,
+		async run(ctx) {
+			const first = await ctx.nextNo("test", 3);
+			const second = await ctx.nextNo("test", 2);
+			const single = await ctx.nextNo("test");
+			const explicitSingle = await ctx.nextNo("test", 1);
+			return [first, second, single, explicitSingle];
+		},
+	});
+	try {
+		expect(
+			await invoke(
+				h.app,
+				{ reserve: operation },
+				{ op: "reserve", project: "scratch", input: {}, actor: async () => h.owner },
+			),
+		).toMatchObject({ ok: true, result: [3, 5, 6, 7] });
+	} finally {
+		await h.close();
+	}
+});
+
+test("archive authorization waits for the write lease and refuses before replacing bootstrap", async () => {
+	const h = await harness();
+	const entered = barrier();
+	const finish = barrier();
+	let authorized = false;
+	const holder = h.app.database.write(
+		async (db) =>
+			await db.transaction(async () => {
+				entered.release();
+				await finish.promise;
+			}),
+	);
+	await entered.promise;
+	const importing = runArchive(
+		h.app,
+		{ op: "import", path: "/nonexistent-u7-archive", mode: "server", owner: "robin", ownerToken: null },
+		async (db) => {
+			authorized = true;
+			expect(
+				await db.one(sql<readonly [], { name: string }>("SELECT name FROM projects WHERE key = 'scratch'")),
+			).toEqual({ name: "scratch" });
+			await db.run(sql<readonly []>("UPDATE projects SET name = 'authorization transaction' WHERE key = 'scratch'"));
+			throw new OpError("forbidden", "import admission changed");
+		},
+	);
+	try {
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		expect(authorized).toBe(false);
+		finish.release();
+		await holder;
+		await expect(importing).rejects.toThrow("import admission changed");
+		expect(authorized).toBe(true);
+		expect(
+			await h.app.database.read(
+				async (db) =>
+					await db.one(sql<readonly [], { name: string }>("SELECT name FROM projects WHERE key = 'scratch'")),
+			),
+		).toEqual({ name: "scratch" });
+	} finally {
+		finish.release();
+		await holder;
+		await importing.catch(() => undefined);
 		await h.close();
 	}
 });
