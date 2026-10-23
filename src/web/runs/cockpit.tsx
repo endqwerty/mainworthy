@@ -265,17 +265,18 @@ function ProjectRunCockpit({
 	const canCorrect = !!(last && (run?.state === "open" || mayReopen(signoff)));
 	const withdrawn = useRef(new Set<Promise<RecordedResult>>());
 	const method = session.kind === "agent" ? "agent" : "human";
+	const isOwnFill = (fill: Fill) => fill.by === session.actor && fill.method === method;
+	const ownFillOf = (slot: Slot) => slot.fills.find(isOwnFill);
 	const slots: Slot[] = storedSlots.map((slot) => {
 		const own = local.get(slot.id);
-		return own?.pending
+		return own && (own.pending || own.fill.result > (ownFillOf(slot)?.result ?? 0))
 			? {
 					...slot,
 					state: own.fill.outcome === "pass" ? "satisfied" : own.fill.outcome === "fail" ? "failing" : "skipped",
-					fills: [...slot.fills.filter((fill) => fill.by !== session.actor || fill.method !== method), own.fill],
+					fills: [...slot.fills.filter((fill) => !isOwnFill(fill)), own.fill],
 				}
 			: slot;
 	});
-	const ownFillOf = (slot: Slot) => slot.fills.find((fill) => fill.by === session.actor && fill.method === method);
 	const missing = (slot: Slot) =>
 		(slot.state === "missing" || slot.state === "skipped") && !local.get(slot.id)?.pending;
 	const unreported = (slot: Slot) => missing(slot) && !ownFillOf(slot);
@@ -432,7 +433,7 @@ function ProjectRunCockpit({
 		replaceSlot({
 			id: slot.id,
 			state: outcome === "pass" ? "satisfied" : outcome === "fail" ? "failing" : "skipped",
-			fills: [...slot.fills.filter((f) => f.by !== session.actor || f.method !== method), fill],
+			fills: [...slot.fills.filter((fill) => !isOwnFill(fill)), fill],
 		});
 		const pinnedInput = { refs: [slot.case], version: slot.version };
 		const marked = steps[slot.id] ?? "";

@@ -127,6 +127,8 @@ Press **More slots** to retry; the slots already loaded stay usable.
 When no eligible unfinished slot remains, it opens the first slot not held by someone else for reading.
 If every slot is held by someone else, choose one explicitly or wait for a lease to expire.
 Automatic advancement stops when none remain. Completed and closed runs still open a case to read.
+After a result is confirmed, a delayed refresh cannot make automatic navigation revisit that slot.
+You can still select it yourself to read or correct the result.
 To record a failure, follow these steps.
 
 1. Press <kbd>f</kbd> to focus "Result note".
