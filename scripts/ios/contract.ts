@@ -180,6 +180,7 @@ const FACTS = list(text);
 /** A question's evidence, by the question's kind. A kind the app does not know is shown and cannot be answered. */
 export const EVIDENCE = {
 	failure: struct("FailureEvidence", "A failed result nobody has explained.", {
+		sample: [maybe(whole), "The exact result whose detail, trail and files the question shows."],
 		location: maybe(ResultLocation),
 		message: [maybe(text), "The failure as the runner reported it."],
 		scope: [text, "Where it was asked: a change (pr:482), the trunk, or a run."],
@@ -437,6 +438,14 @@ export const AttachmentFile = struct("AttachmentFile", "One attachment and its b
 	kind: text,
 	attachment: Attachment,
 	data: text,
+});
+export const SampleResult = struct("SampleResult", "`get result:<id>`: a failure question's sample result.", {
+	ref: text,
+	id: whole,
+	detail: nullable(text),
+	note: nullable(text),
+	steps: nullable(list(ResultStep)),
+	build: nullable(text),
 });
 const RunFill = struct("RunFill", "An admitted result that fills a slot.", {
 	model: maybe(text),
@@ -868,6 +877,7 @@ export const SHAPES: readonly Shape[] = [
 	CountedResults,
 	AttachmentList,
 	AttachmentFile,
+	SampleResult,
 	TestList,
 	TestDetail,
 	SessionRow,

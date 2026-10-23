@@ -9,6 +9,41 @@ import Testing
 @Suite("The queue screen", .enabled(if: Live.isRunning, "needs the server `bun scripts/ios.ts test` starts"))
 @MainActor
 struct QueueScreenTests {
+	@Test("failure samples can be retried without replacing another sample")
+	func failureSample() async throws {
+		let transport = SwitchableQueueTransport()
+		let project = try await Live.signedIn(transport: transport).project(try await Live.project())
+		let screen = QueueScreen(project: project)
+		await screen.show(.open, filter: .failure)
+		let question = try #require(screen.questions.first)
+		guard case .failure(let failed) = question.evidence else {
+			Issue.record("The failure evidence was not readable")
+			return
+		}
+		let id = try #require(failed.sample)
+		#expect(screen.sample(id) == nil)
+		await screen.readSample(id)
+		guard case .read(let sample) = screen.sample(id) else {
+			Issue.record("The sample result was not read")
+			return
+		}
+		#expect(sample.id == id && sample.detail == nil && sample.steps == nil && sample.attachments.isEmpty)
+		await screen.readSample(Int.max)
+		guard case .failed = screen.sample(Int.max) else {
+			Issue.record("An unavailable sample was not shown as failed")
+			return
+		}
+		#expect(screen.sample(id) == .read(sample))
+		transport.offline.withLock { $0 = true }
+		await screen.readSample(id)
+		guard case .failed = screen.sample(id) else {
+			Issue.record("An interrupted sample read was not shown as failed")
+			return
+		}
+		transport.offline.withLock { $0 = false }
+		await screen.readSample(id)
+		#expect(screen.sample(id) == .read(sample))
+	}
 	func screen(strict: Bool = false) async throws -> QueueScreen {
 		let screen = QueueScreen(project: try await Live.signedIn().project(try await Live.project(strict: strict)))
 		await screen.show(.open, filter: nil)

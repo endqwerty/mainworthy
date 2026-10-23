@@ -204,6 +204,8 @@ enum Wire {
 
 	/// A failed result nobody has explained.
 	struct FailureEvidence: Decodable, Equatable, Sendable {
+		/// The exact result whose detail, trail and files the question shows.
+		let sample: Int?
 		let location: ResultLocation?
 		/// The failure as the runner reported it.
 		let message: String?
@@ -880,6 +882,28 @@ enum Wire {
 		let kind: String
 		let attachment: Attachment
 		let data: String
+	}
+
+	/// `get result:<id>`: a failure question's sample result.
+	struct SampleResult: Decodable, Equatable, Sendable {
+		let ref: String
+		let id: Int
+		let detail: String?
+		let note: String?
+		let steps: [ResultStep]?
+		let build: String?
+
+		private enum CodingKeys: String, CodingKey { case ref, id, detail, note, steps, build }
+
+		init(from decoder: any Decoder) throws {
+			let container = try decoder.container(keyedBy: CodingKeys.self)
+			ref = try container.decode(String.self, forKey: .ref)
+			id = try container.decode(Int.self, forKey: .id)
+			detail = try container.decode(String?.self, forKey: .detail)
+			note = try container.decode(String?.self, forKey: .note)
+			steps = try container.decode([ResultStep]?.self, forKey: .steps)
+			build = try container.decode(String?.self, forKey: .build)
+		}
 	}
 
 	/// A quarantine a test is or was in.

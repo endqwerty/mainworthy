@@ -112,6 +112,9 @@ To answer from a question's page, follow these steps:
 2. Press a question. Its page shows the evidence: what failed and where, what an edit changes, what a review
    found. At the largest standard text size and at accessibility sizes, the question's kind, source and time
    appear on separate lines.
+   A failure's **Sample result** shows its reported note, build link, step trail and files when present.
+   Expand **Diagnostic detail** to read the full log. Press a step's **Screenshot** or a file name to open its attachment.
+   If the sample could not be read, press **Try again**.
    A proposed edit shows why it was proposed and who proposed it. It also says in a sentence what the edit does,
    such as "Adds 1 step." For an edit to an existing case, choose one of three views:
    **Changes** shows the steps with **Added**, **Removed**, **Changed** and **Moved** marks.

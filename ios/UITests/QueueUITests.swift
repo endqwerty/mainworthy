@@ -40,6 +40,51 @@ private func reportUnlinkedTests(in project: String) async throws {
 final class QueueUITests: XCTestCase {
 	private let environment = ProcessInfo.processInfo.environment
 
+	@MainActor func testFailureSampleEvidence() async throws {
+		let project = try await makeProject()
+		let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="
+		let reply = try await call("report", project: project, input: [
+			"target": ["commit": String(repeating: "6", count: 40), "repo": "acme/shop", "pr": 807],
+			"job": "sample", "buildUrl": "https://ci.example/build/807",
+			"results": [["test": ["key": "sample-evidence", "name": "Sample evidence"], "outcome": "fail",
+				"failure": ["message": "Coupon sample evidence", "detail": "Coupon diagnostic detail"],
+				"note": "Observed on the phone",
+				"steps": [["step": "coupon", "outcome": "fail", "attachment": 1,
+					"actions": [["text": "Apply the coupon", "outcome": "fail"]]]],
+				"attachments": [["name": "first.png", "data": png], ["name": "coupon.png", "data": png]],
+			]],
+		])
+		let id = try XCTUnwrap((reply["results"] as? [Int])?.first)
+		let inbox = try await call("inbox", project: project, input: ["kind": "failure"])
+		let question = try XCTUnwrap((inbox["items"] as? [[String: Any]])?.first { $0["title"] as? String == "Coupon sample evidence" })
+		XCTAssertEqual((question["evidence"] as? [String: Any])?["sample"] as? Int, id)
+		let ref = try XCTUnwrap(question["q"] as? String)
+		let app = try launchAtTextSize(.large, project: project)
+		let row = app.buttons["question-\(ref)"]
+		XCTAssertTrue(row.waitForExistence(timeout: 10))
+		row.tap()
+		XCTAssertTrue(app.staticTexts["Coupon sample evidence"].firstMatch.waitForExistence(timeout: 10))
+		let screenshot = app.buttons["Screenshot for step coupon"].firstMatch
+		_ = screenshot.waitForExistence(timeout: 5)
+		shot("failure-sample")
+		XCTAssertTrue(screenshot.exists)
+		XCTAssertTrue(app.staticTexts["Apply the coupon"].exists)
+		app.buttons["sample-detail"].tap()
+		XCTAssertTrue(app.staticTexts["Coupon diagnostic detail"].waitForExistence(timeout: 5))
+		shot("failure-sample-detail")
+		screenshot.tap()
+		XCTAssertTrue(app.staticTexts["screenshot-filename"].waitForExistence(timeout: 10))
+		XCTAssertEqual(app.staticTexts["screenshot-filename"].label, "coupon.png")
+		shot("failure-sample-screenshot")
+		app.buttons["Done"].tap()
+		let first = app.buttons["sample-attachment-0"]
+		for _ in 0..<5 where !first.isHittable { app.swipeUp() }
+		XCTAssertTrue(first.exists)
+		first.tap()
+		XCTAssertTrue(app.staticTexts["screenshot-filename"].waitForExistence(timeout: 10))
+		XCTAssertEqual(app.staticTexts["screenshot-filename"].label, "first.png")
+	}
+
 	override func setUp() {
 		continueAfterFailure = false
 	}

@@ -170,7 +170,7 @@ public struct TestDetail: Equatable, Sendable {
 }
 
 /// A report names its build's address, and only a web address is offered as a link.
-private func webAddress(_ text: String?) -> URL? {
+func webAddress(_ text: String?) -> URL? {
 	guard let text, let url = URL(string: text), let scheme = url.scheme?.lowercased(),
 		scheme == "http" || scheme == "https" else { return nil }
 	return url

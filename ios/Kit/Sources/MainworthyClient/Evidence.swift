@@ -41,6 +41,7 @@ public struct TestRef: Identifiable, Equatable, Sendable {
 
 /// A failed result nobody has explained yet. One question stands for every test that fails for the same cause.
 public struct FailedResult: Equatable, Sendable {
+	public let sample: Int?
 	/// The failure as the runner reported it.
 	public let message: String?
 	/// What was expected and what was seen, when the message is an assertion that says both.
@@ -63,6 +64,7 @@ public struct FailedResult: Equatable, Sendable {
 	}
 
 	init(_ wire: Wire.FailureEvidence) {
+		sample = wire.sample
 		message = wire.message
 		comparison = wire.message.flatMap(FailedResult.comparison)
 		tests = wire.tests.map(TestRef.init)

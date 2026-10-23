@@ -11,7 +11,7 @@ struct EvidenceView: View {
 
 	var body: some View {
 		switch question.evidence {
-		case .failure(let failed): FailureEvidence(failed: failed, timesSeen: question.timesSeen, workspace: workspace)
+		case .failure(let failed): FailureEvidence(failed: failed, timesSeen: question.timesSeen, screen: screen, workspace: workspace)
 		case .unlinked(let tests): UnlinkedEvidence(tests: tests)
 		case .finding(let finding): FindingEvidence(finding: finding)
 		case .proposal(let edit): ProposalEvidence(question: question, edit: edit, screen: screen, viewport: viewport)
@@ -31,6 +31,7 @@ struct EvidenceView: View {
 private struct FailureEvidence: View {
 	let failed: FailedResult
 	let timesSeen: Int
+	let screen: QueueScreen
 	let workspace: Workspace
 
 	var body: some View {
@@ -53,6 +54,7 @@ private struct FailureEvidence: View {
 						.textSelection(.enabled)
 				}
 			}
+			if let sample = failed.sample { sampleEvidence(sample) }
 			if failed.failsOnBase {
 				Label("The same cause also fails on the base of this change.", systemImage: "arrow.triangle.branch")
 					.font(.subheadline)
@@ -78,6 +80,45 @@ private struct FailureEvidence: View {
 				.font(.subheadline)
 				.foregroundStyle(.secondary)
 				TestList(tests: failed.tests, count: failed.count)
+			}
+		}
+		.task(id: failed.sample) {
+			if let sample = failed.sample { await screen.readSample(sample) }
+		}
+		.resultAttachments(screen.attachments)
+	}
+
+	@ViewBuilder private func sampleEvidence(_ id: Int) -> some View {
+		switch screen.sample(id) {
+		case .reading, nil: ProgressView("Reading the sample result…")
+		case .failed(let why):
+			Panel("Sample result could not be read") {
+				Text(why).font(.subheadline)
+				Button("Try again") { Task { await screen.readSample(id) } }
+			}
+		case .read(let sample):
+			Panel("Sample result") {
+				if let detail = sample.detail, !detail.isEmpty {
+					DisclosureGroup("Diagnostic detail") {
+						Text(detail).font(.callout.monospaced()).textSelection(.enabled)
+							.frame(maxWidth: .infinity, alignment: .leading)
+					}
+					.accessibilityIdentifier("sample-detail")
+				}
+				if let note = sample.note { Text(note).font(.subheadline).textSelection(.enabled) }
+				if let build = sample.build { Link("Build", destination: build) }
+				if let steps = sample.steps {
+					ResultTrailView(steps: steps, result: id, attachments: screen.attachments)
+				}
+				ForEach(Array(sample.attachments.enumerated()), id: \.offset) { index, name in
+					Button {
+						Task { await screen.attachments.open(result: id, index: index) }
+					} label: {
+						Label(name, systemImage: "paperclip").font(.subheadline)
+					}
+					.buttonStyle(.borderless)
+					.accessibilityIdentifier("sample-attachment-\(index)")
+				}
 			}
 		}
 	}
