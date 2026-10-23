@@ -3,7 +3,7 @@
 Revision: `6d7d12ccdf2159e5387b59b92f15905734e337b9`, compared with `26b4183a36f29c5d572825786837b04249b13b98`.
 Reviewer: Codex, GPT-6 Astra. No other agents started.
 
-The review checkout is `/home/endqwerty/.cache/mainworthy-arena/verify/dx-r1/tree`, exported with `git archive`. Targeted fixtures, scratch and logs are under its parent. Shared checkout is read-only. Bun install succeeded with frozen lockfile, Bun 1.4.3.
+The review checkout is `$HOME/.cache/mainworthy-arena/verify/dx-r1/tree`, exported with `git archive`. Targeted fixtures, scratch and logs are under its parent. Shared checkout is read-only. Bun install succeeded with frozen lockfile, Bun 1.4.3.
 
 Safety fact: every previously executed test still executes with its assertions intact, and failed or absent checks cannot produce a successful aggregate result.
 
@@ -35,7 +35,7 @@ CI skipped-shard reproduction strengthened with actual Bun output: `workflow-pro
 
 ## Three consecutive full checks
 
-Command: `TMPDIR=/home/endqwerty/.cache/mainworthy-arena/verify/dx-r1/tmp bun run check`, three times without source changes. Machine has 16 available threads. Another agent's selected browser tests were active. Logs are `check-1.log`, `check-2.log`, `check-3.log`.
+Command: `TMPDIR=$HOME/.cache/mainworthy-arena/verify/dx-r1/tmp bun run check`, three times without source changes. Machine has 16 available threads. Another agent's selected browser tests were active. Logs are `check-1.log`, `check-2.log`, `check-3.log`.
 
 | Run | Type-check | Lint | Parallel tests | Quiet tests | Tests / total | Exit |
 | --- | --- | --- | --- | --- | --- | --- |

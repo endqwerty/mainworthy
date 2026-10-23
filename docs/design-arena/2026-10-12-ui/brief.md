@@ -6,7 +6,7 @@ directories. You produce a working interactive mock, not pictures.
 
 ## Read first (in the repository, read-only)
 
-Repository: `/home/endqwerty/.t3/worktrees/mainworthy/t3-639b4b0f`. Do not write
+Repository: `.`. Do not write
 anything inside it.
 
 - `docs/product-design.md`: sections 1, 4.1, 5.1, 5.4 and 8 (thesis, the

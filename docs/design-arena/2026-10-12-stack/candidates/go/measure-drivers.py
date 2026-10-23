@@ -7,7 +7,7 @@ import subprocess
 import time
 
 root = pathlib.Path.cwd()
-seed = "/home/endqwerty/.cache/mainworthy-arena/stack/seed.db"
+seed = pathlib.Path.home() / ".cache/mainworthy-arena/stack/seed.db"
 runs = {"cgo": [], "pure": []}
 for round_number in range(5):
     for driver in ("cgo", "pure"):

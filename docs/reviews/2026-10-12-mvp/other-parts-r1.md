@@ -1,7 +1,7 @@
 # AUX-R1 verification report: the archive (export and import) and the reader threads
 
 - **Revision judged:** `aa7a6050526bf44ebabeef2ca648b37d0bc796ec` (branch `t3/mvp-product-delivery`), from a clean
-  `git archive` export at `/home/endqwerty/.cache/mainworthy-arena/verify/aux-r1/tree`. Nothing in the repository was
+  `git archive` export at `$HOME/.cache/mainworthy-arena/verify/aux-r1/tree`. Nothing in the repository was
   changed. (The checkout itself had moved on to `a1ec56e` with other agents' uncommitted edits by the time I finished;
   none of that was judged.)
 - **Verifier:** Claude Opus 5.5 (Anthropic), independent of the author (GPT 6.1 Sol). Bun 1.4.3, Linux x64, 16 cores,

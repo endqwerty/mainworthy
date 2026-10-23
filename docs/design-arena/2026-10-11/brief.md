@@ -10,7 +10,7 @@ You are one candidate designer in a parallel design exploration (the "architect"
 
 ## Grounding: read these first (read-only)
 
-Repository: /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d (do NOT edit anything inside it).
+Repository: . (do NOT edit anything inside it).
 
 - README.md
 - docs/product-vision.md (ranked priorities: fast backend > agent access > instant UX; core capabilities; draft principles 1-7)

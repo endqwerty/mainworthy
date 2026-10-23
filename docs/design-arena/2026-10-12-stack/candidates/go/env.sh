@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-export GOROOT=/home/endqwerty/.cache/mainworthy-arena/toolchains/go
-export GOPATH=/home/endqwerty/.cache/mainworthy-arena/toolchains/go-gopath
-export GOCACHE=/home/endqwerty/.cache/mainworthy-arena/toolchains/go-cache
-export GOMODCACHE=/home/endqwerty/.cache/mainworthy-arena/toolchains/go-modcache
-export GOTMPDIR=/home/endqwerty/.cache/mainworthy-arena/toolchains/go-tmp
-export TMPDIR=/home/endqwerty/.cache/mainworthy-arena/toolchains/go-tmp
+export GOROOT="$HOME/.cache/mainworthy-arena/toolchains/go"
+export GOPATH="$HOME/.cache/mainworthy-arena/toolchains/go-gopath"
+export GOCACHE="$HOME/.cache/mainworthy-arena/toolchains/go-cache"
+export GOMODCACHE="$HOME/.cache/mainworthy-arena/toolchains/go-modcache"
+export GOTMPDIR="$HOME/.cache/mainworthy-arena/toolchains/go-tmp"
+export TMPDIR="$HOME/.cache/mainworthy-arena/toolchains/go-tmp"
 export GOTOOLCHAIN=local
 export GOENV=off
 export PATH="$GOROOT/bin:$PATH"

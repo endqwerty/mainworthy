@@ -12,8 +12,8 @@ import time
 import urllib.error
 import urllib.request
 
-ROOT = Path('/home/endqwerty/.cache/mainworthy-arena/stack')
-OUT = Path('/home/endqwerty/.cache/mainworthy-arena/judge/stack')
+ROOT = Path.home() / '.cache/mainworthy-arena/stack'
+OUT = Path.home() / '.cache/mainworthy-arena/judge/stack'
 name = sys.argv[1]
 CANDIDATE = Path(sys.argv[2]) if len(sys.argv)>2 else ROOT/name
 label = sys.argv[3] if len(sys.argv)>3 else name

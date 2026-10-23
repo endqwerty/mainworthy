@@ -98,4 +98,4 @@ Outside the spec, so not requested:
 - **Row lock on `cb_rust`:** for the disconnect test I twice took a 2.5-second `FOR UPDATE` lock on `project` and rolled it back, each time with 0 other connections. Data was unchanged: `cb_rust unchanged: True`, `verifier rows: 0`.
 - **Load during profiling:** my SQLite runs overlapped the author's profiling, so their timings in that window may be perturbed.
 
-Scripts and outputs are in `/home/endqwerty/.cache/mainworthy-arena/stack/rust/tmp/verifier` (`verify.py`, `registry.py`, `mixed.py`, `pg.py`, with snapshots in `rev2/` and `rev3/`). Any further source change, including a fix for issue 1, needs a new round.
+Scripts and outputs are in `$HOME/.cache/mainworthy-arena/stack/rust/tmp/verifier` (`verify.py`, `registry.py`, `mixed.py`, `pg.py`, with snapshots in `rev2/` and `rev3/`). Any further source change, including a fix for issue 1, needs a new round.

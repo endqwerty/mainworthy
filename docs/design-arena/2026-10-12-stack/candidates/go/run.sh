@@ -2,7 +2,7 @@
 set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 source ./env.sh
-shared=/home/endqwerty/.cache/mainworthy-arena/stack
+shared="$HOME/.cache/mainworthy-arena/stack"
 driver=$(cat selected-driver.txt 2>/dev/null || printf cgo)
 binary="./mainworthy-$driver"
 rebuild=false

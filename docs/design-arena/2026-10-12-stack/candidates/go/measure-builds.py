@@ -8,7 +8,7 @@ import time
 root = pathlib.Path.cwd()
 metrics = {}
 for driver in ("cgo", "pure"):
-    cache = pathlib.Path(f"/home/endqwerty/.cache/mainworthy-arena/toolchains/go-clean-{driver}-{time.time_ns()}")
+    cache = pathlib.Path.home() / f".cache/mainworthy-arena/toolchains/go-clean-{driver}-{time.time_ns()}"
     cache.mkdir()
     env = dict(os.environ, MAINWORTHY_BUILD_CACHE=str(cache))
     begin = time.monotonic()

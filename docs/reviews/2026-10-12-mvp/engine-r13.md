@@ -8,7 +8,7 @@ The correctness facts at issue are that accepted evidence makes every affected l
 
 Only `git archive` read the shared checkout. All code ran from the clean export under this review directory, with Bun 1.4.3 and dependencies installed using `bun install --frozen-lockfile`. The diff from `de5702371f5e1a6881cb8748a5befdec9a1ca378` was independently compared from two archives; [changed files](logs/changed-files.txt) and [diff](logs/round13.diff) are retained. Required project/design documents were read; only decision 0012's stated behavior was judged as documentation.
 
-Scripts below run from `/home/endqwerty/.cache/mainworthy-arena/verify/engine-r13` as `bun scripts/<name>.mjs` unless a different command is shown. Assertions in new defect probes express the promised behavior, so their exit 1 is the reproduced defect. Inherited defect probes often assert the old wrong behavior, so exit 1 can mean the repair works. [EARLIER.md](EARLIER.md) records each such disposition and unexecuted tail. Do not treat the old orchestration/cleanup utilities in the copied scripts directory as test scenarios.
+Scripts below run from `$HOME/.cache/mainworthy-arena/verify/engine-r13` as `bun scripts/<name>.mjs` unless a different command is shown. Assertions in new defect probes express the promised behavior, so their exit 1 is the reproduced defect. Inherited defect probes often assert the old wrong behavior, so exit 1 can mean the repair works. [EARLIER.md](EARLIER.md) records each such disposition and unexecuted tail. Do not treat the old orchestration/cleanup utilities in the copied scripts directory as test scenarios.
 
 ## Twelve checks
 

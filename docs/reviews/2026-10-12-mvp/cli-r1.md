@@ -175,7 +175,7 @@ $ biome check .
 
 ### missing-report-directory
 
-`bun test src/core --reporter=junit --reporter-outfile=/home/endqwerty/.cache/mainworthy-arena/verify/cli-r1/missing-directory/junit.xml` exited 0.
+`bun test src/core --reporter=junit --reporter-outfile=$HOME/.cache/mainworthy-arena/verify/cli-r1/missing-directory/junit.xml` exited 0.
 
 ```text
 ::group::src/core/text.test.ts:
@@ -188,8 +188,8 @@ $ biome check .
  0 fail
  11869 expect() calls
 Ran 179 tests across 8 files. [1.58s]
-JUnitReportFailed: Failed to write JUnit report to /home/endqwerty/.cache/mainworthy-arena/verify/cli-r1/missing-directory/junit.xml
-ENOENT: /home/endqwerty/.cache/mainworthy-arena/verify/cli-r1/missing-directory/junit.xml: No such file or directory (open())
+JUnitReportFailed: Failed to write JUnit report to $HOME/.cache/mainworthy-arena/verify/cli-r1/missing-directory/junit.xml
+ENOENT: $HOME/.cache/mainworthy-arena/verify/cli-r1/missing-directory/junit.xml: No such file or directory (open())
 ```
 
 ### passing-mkdir
@@ -279,7 +279,7 @@ $ biome check .
 `bun test src/core --reporter=junit --reporter-outfile=test-results/junit.xml` exited 1.
 
 ```text
-::error file=src/core/reviewer-forced-failure.test.ts,line=2,col=72,title=error: expect(received).toBe(expected)::Expected: 2%0AReceived: 1%0A%0A      at <anonymous> (/home/endqwerty/.cache/mainworthy-arena/verify/cli-r1/tree/src/core/reviewer-forced-failure.test.ts:2:72)
+::error file=src/core/reviewer-forced-failure.test.ts,line=2,col=72,title=error: expect(received).toBe(expected)::Expected: 2%0AReceived: 1%0A%0A      at <anonymous> ($HOME/.cache/mainworthy-arena/verify/cli-r1/tree/src/core/reviewer-forced-failure.test.ts:2:72)
 (fail) reviewer deliberately failing workflow check [0.07ms]
 
 ::endgroup::
@@ -345,9 +345,9 @@ Exit 1. Full log: `mutation-all-removed.log`.
 - Expected  - 1
 + Received  + 2
 
-      at <anonymous> (/home/endqwerty/.cache/mainworthy-arena/verify/cli-r1/tree/src/cli/main.test.ts:571:25)
-      at async withInstance (/home/endqwerty/.cache/mainworthy-arena/verify/cli-r1/tree/src/cli/test-support.ts:40:16)
-      at async <anonymous> (/home/endqwerty/.cache/mainworthy-arena/verify/cli-r1/tree/src/cli/main.test.ts:567:8)
+      at <anonymous> ($HOME/.cache/mainworthy-arena/verify/cli-r1/tree/src/cli/main.test.ts:571:25)
+      at async withInstance ($HOME/.cache/mainworthy-arena/verify/cli-r1/tree/src/cli/test-support.ts:40:16)
+      at async <anonymous> ($HOME/.cache/mainworthy-arena/verify/cli-r1/tree/src/cli/main.test.ts:567:8)
 (fail) an empty MAINWORTHY_URL, MAINWORTHY_TOKEN or MAINWORTHY_PROJECT is the same as none [290.56ms]
 
  0 pass
@@ -365,9 +365,9 @@ Exit 1. Full log: `mutation-url-removed.log`.
 - Expected  - 1
 + Received  + 2
 
-      at <anonymous> (/home/endqwerty/.cache/mainworthy-arena/verify/cli-r1/tree/src/cli/main.test.ts:571:25)
-      at async withInstance (/home/endqwerty/.cache/mainworthy-arena/verify/cli-r1/tree/src/cli/test-support.ts:40:16)
-      at async <anonymous> (/home/endqwerty/.cache/mainworthy-arena/verify/cli-r1/tree/src/cli/main.test.ts:567:8)
+      at <anonymous> ($HOME/.cache/mainworthy-arena/verify/cli-r1/tree/src/cli/main.test.ts:571:25)
+      at async withInstance ($HOME/.cache/mainworthy-arena/verify/cli-r1/tree/src/cli/test-support.ts:40:16)
+      at async <anonymous> ($HOME/.cache/mainworthy-arena/verify/cli-r1/tree/src/cli/main.test.ts:567:8)
 (fail) an empty MAINWORTHY_URL, MAINWORTHY_TOKEN or MAINWORTHY_PROJECT is the same as none [275.56ms]
 
  0 pass
@@ -446,7 +446,7 @@ Full commands and environment in `edges.json`. The baseline-client check restore
 
 ## e. Automated checks: pass
 
-- `TMPDIR=/home/endqwerty/.cache/mainworthy-arena/verify/cli-r1/tmp bun test --preload /home/endqwerty/.cache/mainworthy-arena/verify/cli-r1/ports.js src/cli` exited 0. Deciding lines in `cli-tests.log`: `43 pass`, `0 fail`, `314 expect() calls`, `Ran 43 tests across 4 files.` The preload only allocates port-0 listeners within the requested range. Tests and application source were otherwise unmodified during this run.
+- `TMPDIR=$HOME/.cache/mainworthy-arena/verify/cli-r1/tmp bun test --preload $HOME/.cache/mainworthy-arena/verify/cli-r1/ports.js src/cli` exited 0. Deciding lines in `cli-tests.log`: `43 pass`, `0 fail`, `314 expect() calls`, `Ran 43 tests across 4 files.` The preload only allocates port-0 listeners within the requested range. Tests and application source were otherwise unmodified during this run.
 - `bunx tsc --noEmit` exited 0, no output. Log: `tsc.log`.
 - `bunx biome check src test bench` exited 0. `Checked 129 files in 189ms. No fixes applied.` Log: `biome.log`.
 - Both workflow runs also passed `bun run typecheck` and `bun run lint` before their test steps.

@@ -12,7 +12,7 @@ The correctness fact under review: a gate must reflect all and only the evidence
 
 All 117 inherited/hunt/oracle probes were run first. Their individual dispositions, including old assertions that now fail as expected, are in [EARLIER.md](EARLIER.md). The current SQL/writer/caller inventory and the four stated exceptions are in [STANDING.md](STANDING.md). Raw outputs and executable reproductions are retained under `logs/` and `scripts/`.
 
-Reproduction commands in this report run from `/home/endqwerty/.cache/mainworthy-arena/verify/engine-r11`. After cleanup, install dependencies with `bun install --frozen-lockfile` in its `tree/` first. HTTP scripts own ports in 8450–8499 and remove their own temporary data. Each blocking scenario was repeated; B01/B02/B03/B05 were also reproduced over HTTP with two reader threads, and B04 was repeated using a real process stop between report acceptance and application. See [r11-findings-http.log](logs/r11-findings-http.log) and the `*-confirmed.log` files.
+Reproduction commands in this report run from `$HOME/.cache/mainworthy-arena/verify/engine-r11`. After cleanup, install dependencies with `bun install --frozen-lockfile` in its `tree/` first. HTTP scripts own ports in 8450–8499 and remove their own temporary data. Each blocking scenario was repeated; B01/B02/B03/B05 were also reproduced over HTTP with two reader threads, and B04 was repeated using a real process stop between report acceptance and application. See [r11-findings-http.log](logs/r11-findings-http.log) and the `*-confirmed.log` files.
 
 ## Required checks
 

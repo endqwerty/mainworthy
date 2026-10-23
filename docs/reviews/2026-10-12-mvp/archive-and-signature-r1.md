@@ -3,7 +3,7 @@
 Revision: `506e3ece169d30cbfbda312811d5e81f99624f57`, requested branch `mvp/2-engine`.
 Verifier: OpenAI Codex, GPT-6 Astra. I ran these checks myself in a clean `git archive 506e3ec` export, using Bun 1.4.3. I did not change the repository or start other agents. This report establishes the tested behavior; it does not establish a different-provider review if the author was also Codex.
 
-All commands below ran in `ship-r1/tree` unless stated otherwise. Scripts and logs are beside this report. After the initial test run, I set `TMPDIR=/home/endqwerty/.cache/mainworthy-arena/verify/ship-r1/tmp` for server tests and probes. The initial run used the tests' default temporary directories, which their cleanup removed. All deliberate scratch files and this report are under `ship-r1`.
+All commands below ran in `ship-r1/tree` unless stated otherwise. Scripts and logs are beside this report. After the initial test run, I set `TMPDIR=$HOME/.cache/mainworthy-arena/verify/ship-r1/tmp` for server tests and probes. The initial run used the tests' default temporary directories, which their cleanup removed. All deliberate scratch files and this report are under `ship-r1`.
 
 ## Safety facts
 
