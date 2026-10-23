@@ -599,7 +599,7 @@ enum Wire {
 		let methods: [String]
 		/// Whether an automated test is wanted: none, wanted or not-applicable.
 		let automate: String
-		/// Custom field values. A case that is read alone leaves them out.
+		/// Custom field values. An explicit field selection may omit them.
 		let fields: [String: String]?
 	}
 

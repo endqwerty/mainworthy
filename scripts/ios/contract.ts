@@ -479,7 +479,7 @@ export const PinnedCase = struct("PinnedCase", "The content at the slot's pinned
 	ref: text,
 	version: whole,
 	...CaseBodyFields,
-	fields: [maybe(dictionary(text)), "Custom field values. A case that is read alone leaves them out."],
+	fields: [maybe(dictionary(text)), "Custom field values. An explicit field selection may omit them."],
 });
 export const RunFolders = struct("RunFolders", "The folders a run can select.", {
 	items: list(struct("RunFolder", "A folder path.", { path: text })),

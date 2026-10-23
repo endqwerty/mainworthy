@@ -173,7 +173,7 @@ extension ProjectClient {
 		guard let edit = row.edits.first, edit.op == "edit", edit.case == ref,
 			let version = edit.base, let mine = edit.mine, let current = edit.current else { throw ClientError.unreadable }
 		var base = try await caseDocument(ref, version: version).content
-		// A case read alone omits custom fields. A history comparison includes all of them, even when
+		// An explicit partial case read can omit custom fields. A history comparison includes all of them, even when
 		// unchanged. Reading the base against itself supplies the exact values without guessing.
 		let fields: Wire.ConflictBaseFields = try await server.read("history", in: key,
 			["ref": .string(ref), "from": .number(Double(version)), "to": .number(Double(version))])
