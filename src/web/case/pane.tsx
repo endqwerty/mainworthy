@@ -98,7 +98,7 @@ function grouped(entries: Entry[]): TimelineGroup[] {
 export function CasePane({
 	fieldDefinitions,
 	view,
-	loading,
+	readStatus,
 	draft,
 	stored,
 	change,
@@ -117,7 +117,7 @@ export function CasePane({
 }: {
 	fieldDefinitions: FieldDefinitions | undefined;
 	view: CaseView | null;
-	loading: boolean;
+	readStatus: string | null;
 	draft: Draft | null;
 	stored: boolean;
 	change: DraftChange;
@@ -272,8 +272,8 @@ export function CasePane({
 	if (!view && !draft) {
 		const empty = (
 			<EmptyState>
-				{loading ? (
-					<span role="status">Reading case…</span>
+				{readStatus ? (
+					<span role="status">{readStatus}</span>
 				) : (
 					"Select a case to read its steps and evidence. Press c to start a new one."
 				)}
@@ -300,6 +300,7 @@ export function CasePane({
 	const versionEntry = entries.find((entry) => entry.t === "version" && entry.version === version);
 	const privateDraft = draft?.dirty || draft?.ref === null;
 	const waiting = draft?.submission.kind === "waiting" ? draft.submission.question : null;
+	const waitingUrl = waiting ? refUrl({ project, ref: waiting }) : "";
 	return (
 		<section className="pane" id="detail">
 			<div className="pane-scroll">
@@ -316,10 +317,10 @@ export function CasePane({
 								<>
 									Proposed, waiting for a person ·{" "}
 									<a
-										href={refUrl({ project, ref: waiting })}
+										href={waitingUrl}
 										onClick={(event) => {
 											event.preventDefault();
-											navigate(refUrl({ project, ref: waiting }));
+											navigate(waitingUrl);
 										}}
 									>
 										{waiting}
@@ -454,50 +455,50 @@ export function CasePane({
 							/>
 						))}
 						{diffVersion && ref && <VersionDiff refName={ref} to={diffVersion} close={() => setDiffVersion(null)} />}{" "}
-						{groups.map((group) =>
-							group.kind === "versions" ? (
-								group.entries.length > 1 ? (
-									<details className="timeline-group" key={`versions:${group.entries[0]?.seq}`}>
-										<summary>
-											<ProducerGlyph kind={group.entries[0]?.kind ?? "human"} />
-											<span className={group.entries[0]?.kind === "agent" ? "agentv" : ""}>
-												<ProducerGlyph kind={group.entries[0]?.kind ?? "human"} />{" "}
-												<span className={group.entries[0]?.kind === "agent" ? "agentv" : ""}>
-													{group.entries.length} versions by {group.entries[0]?.by}
-													{group.entries[0]?.kind === "agent" ? " · agent" : ""}
-												</span>
-												{group.entries[0]?.kind === "agent" ? " · agent" : ""} ·{" "}
-												{age(group.entries[0]?.at ?? Date.now())}
+						{groups.map((group) => {
+							if (group.kind === "entry")
+								return (
+									<TimelineRow
+										key={`${group.entry.t}:${group.entry.seq}:${group.entry.t === "result" ? group.entry.id : group.entry.t === "finding" ? `${group.entry.on}:${group.entry.note}` : group.entry.by}`}
+										entry={group.entry}
+									/>
+								);
+							const versions = group.entries.map((entry) => (
+								<VersionRow key={entry.seq} entry={entry} diff={() => openDiff(entry.version)} />
+							));
+							if (group.entries.length <= 1) return versions;
+							const first = group.entries[0];
+							const agent = first?.kind === "agent";
+							return (
+								<details className="timeline-group" key={`versions:${first?.seq}`}>
+									<summary>
+										<ProducerGlyph kind={first?.kind ?? "human"} />
+										<span className={agent ? "agentv" : ""}>
+											<ProducerGlyph kind={first?.kind ?? "human"} />{" "}
+											<span className={agent ? "agentv" : ""}>
+												{group.entries.length} versions by {first?.by}
+												{agent ? " · agent" : ""}
 											</span>
-										</summary>
-										{group.entries.map((entry) => (
-											<VersionRow key={entry.seq} entry={entry} diff={() => openDiff(entry.version)} />
-										))}
-									</details>
-								) : (
-									group.entries.map((entry) => (
-										<VersionRow key={entry.seq} entry={entry} diff={() => openDiff(entry.version)} />
-									))
-								)
-							) : (
-								<TimelineRow
-									key={`${group.entry.t}:${group.entry.seq}:${group.entry.t === "result" ? group.entry.id : group.entry.t === "finding" ? `${group.entry.on}:${group.entry.note}` : group.entry.by}`}
-									entry={group.entry}
-								/>
-							),
-						)}
+											{agent ? " · agent" : ""} · {age(first?.at ?? Date.now())}
+										</span>
+									</summary>
+									{versions}
+								</details>
+							);
+						})}
 						{timelineData?.questions
 							.filter((q) => q.kind !== "adopt" || q.state !== "open")
 							.map((q) => {
 								const decision = q.decision?.supersedes ?? q.decision;
+								const url = refUrl({ project, ref: q.q });
 								return (
 									<a
 										className="question-card"
 										key={q.q}
-										href={refUrl({ project, ref: q.q })}
+										href={url}
 										onClick={(event) => {
 											event.preventDefault();
-											navigate(refUrl({ project, ref: q.q }));
+											navigate(url);
 										}}
 									>
 										<ProducerGlyph kind={q.producer} /> {q.q} · {q.title}{" "}
@@ -599,18 +600,14 @@ function ReadBody({
 	);
 }
 function VersionRow({ entry, diff }: { entry: VersionEntry; diff: () => void }) {
+	const agent = entry.kind === "agent";
 	return (
-		<button
-			type="button"
-			data-version={entry.version}
-			className={`ev v ${entry.kind === "agent" ? "prop" : ""}`}
-			onClick={diff}
-		>
+		<button type="button" data-version={entry.version} className={`ev v ${agent ? "prop" : ""}`} onClick={diff}>
 			<ProducerGlyph kind={entry.kind} />
 			<span>
-				<b className={entry.kind === "agent" ? "agentv" : ""}>
+				<b className={agent ? "agentv" : ""}>
 					v{entry.version} · {entry.by}
-					{entry.kind === "agent" ? " · agent" : ""}
+					{agent ? " · agent" : ""}
 				</b>
 				<span className="why"> · {entry.summary}</span>
 				{entry.reason && <span className="why"> · {entry.reason}</span>}
@@ -621,6 +618,7 @@ function VersionRow({ entry, diff }: { entry: VersionEntry; diff: () => void }) 
 }
 function TimelineRow({ entry }: { entry: Exclude<Entry, { t: "version" }> }) {
 	const kind = entry.t === "result" ? entry.method : entry.kind;
+	const agent = kind === "agent";
 	let text = "";
 	switch (entry.t) {
 		case "placement":
@@ -641,13 +639,13 @@ function TimelineRow({ entry }: { entry: Exclude<Entry, { t: "version" }> }) {
 		}
 	}
 	return (
-		<div className={`ev ${kind === "agent" ? "prop" : ""}`}>
+		<div className={`ev ${agent ? "prop" : ""}`}>
 			<ProducerGlyph kind={kind} />
 			<div>
-				<b className={kind === "agent" ? "agentv" : ""}>
+				<b className={agent ? "agentv" : ""}>
 					{entry.by}
 					{entry.t === "result" && entry.model && ` · ${entry.model}`}
-					{kind === "agent" ? " · agent" : ""}
+					{agent ? " · agent" : ""}
 				</b>{" "}
 				<span className="why">{text}</span>
 				{entry.t === "result" && <ResultAttachments result={entry.id} />}
@@ -688,13 +686,14 @@ function ProposalCard({
 	answer: (is: "accept" | "reject") => void;
 	disabled: boolean;
 }) {
+	const agent = question.producer === "agent";
 	return (
-		<div className={`ev ${question.producer === "agent" ? "prop" : ""}`} data-proposal={question.q}>
+		<div className={`ev ${agent ? "prop" : ""}`} data-proposal={question.q}>
 			<ProducerGlyph kind={question.producer} />
 			<div>
-				<b className={question.producer === "agent" ? "agentv" : ""}>
+				<b className={agent ? "agentv" : ""}>
 					{question.q} · {typeof question.evidence.author === "string" ? question.evidence.author : "author"}
-					{question.producer === "agent" ? " · agent" : ""}
+					{agent ? " · agent" : ""}
 				</b>
 				<p className="why">
 					Proposed, waiting for a person.{" "}

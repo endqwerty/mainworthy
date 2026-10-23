@@ -71,6 +71,9 @@ import "./suite.css";
 import "../case/case.css";
 
 const draftStorageFull = "Device storage is full. Keep this tab open until the version is recorded.";
+const caseLoadingEdit = "The case is not loaded yet. Press e when it appears.";
+const caseReadFailed = "Could not read this case. Reload to try again.";
+const caseNotFound = "Case not found.";
 const obsoleteProject = (error: unknown): boolean =>
 	error instanceof ApiError && error.details.projectIdentity === "obsolete";
 
@@ -451,6 +454,19 @@ export function SuiteScreen() {
 		const parsed = CaseView.safeParse(current.data?.find((item) => item.ref === selected));
 		return parsed.success ? parsed.data : null;
 	}, [current.data, selected]);
+	const caseReadMessage =
+		!selected || recordedView || draft
+			? null
+			: current.isFetching
+				? caseLoadingEdit
+				: current.error instanceof ApiError && current.error.code === "not_found"
+					? caseNotFound
+					: caseReadFailed;
+	useEffect(() => {
+		setStatus((shown) =>
+			[caseLoadingEdit, caseReadFailed, caseNotFound].includes(shown) ? (caseReadMessage ?? "") : shown,
+		);
+	}, [caseReadMessage, setStatus]);
 	const view = useMemo(
 		() => (recordedView ? placed(recordedView, placements, folders) : null),
 		[recordedView, placements, folders],
@@ -1812,7 +1828,7 @@ export function SuiteScreen() {
 		}
 		const shown = read ?? recordedView;
 		if (!shown) {
-			if (selected) setStatus("The case is not loaded yet. Press e when it appears.");
+			if (caseReadMessage) setStatus(caseReadMessage);
 			return;
 		}
 		if (owes(shown.ref)) {
@@ -2427,7 +2443,7 @@ export function SuiteScreen() {
 				ending={draft && gone.current?.draft === draft ? ending : null}
 				onTakeOver={takeOver}
 				view={view}
-				loading={current.isLoading}
+				readStatus={caseReadMessage === caseLoadingEdit ? "Reading case…" : caseReadMessage}
 				draft={draft ? placedDraft(draft, recordedView, placements, folders) : null}
 				stored={draftStored}
 				change={change}
