@@ -21,6 +21,114 @@ import {
 
 const check = browserAvailable ? test : test.skip;
 
+for (const outcome of ["succeeds", "is uncertain", "is discarded"] as const)
+	check(
+		`simultaneous fresh plans survive when the other plan ${outcome}`,
+		async () => {
+			const server = await startServer();
+			const view = await openPage(server, { path: "/p/scratch/runs" });
+			const release = [Promise.withResolvers<void>(), Promise.withResolvers<void>()];
+			try {
+				await server.api("propose", { edits: [{ op: "create", outline: "Checkout opens\n  Open checkout > Ready" }] });
+				const { page, context } = view;
+				const other = await context.newPage();
+				await other.goto(`${server.url}/p/scratch/runs`);
+				await other.getByRole("listbox", { name: "Runs", exact: true }).waitFor();
+				const sent: Api["plan"]["input"][][] = [[], []];
+				const arrived = [Promise.withResolvers<void>(), Promise.withResolvers<void>()];
+				for (const [index, tab] of [page, other].entries()) {
+					await tab.route("**/plan", async (route) => {
+						sent[index]?.push(route.request().postDataJSON());
+						if (sent[index]?.length !== 1) return route.continue();
+						arrived[index]?.resolve();
+						await release[index]?.promise;
+						if (index === 1 && outcome === "succeeds") return route.continue();
+						await route.abort().catch(() => {});
+					});
+					await tab.keyboard.press("n");
+					await tab.getByLabel("Run name").fill(index === 0 ? "Plan A" : "Plan B");
+					await tab.getByLabel("Cases", { exact: true }).selectOption("text");
+					await tab.getByLabel("Search cases", { exact: true }).fill("Checkout");
+					await tab.evaluate(() => {
+						const write = Storage.prototype.setItem;
+						const claims: [string, string][] = [];
+						// Delay publishing either claim until both tabs have read the empty store.
+						Storage.prototype.setItem = function (key, value) {
+							if (key.includes(":run-plan:")) claims.push([key, value]);
+							else write.call(this, key, value);
+						};
+						window.addEventListener("publish-plan-claim", () => {
+							Storage.prototype.setItem = write;
+							for (const [key, value] of claims) localStorage.setItem(key, value);
+						});
+					});
+				}
+				await Promise.all([page, other].map((tab) => tab.locator('.run-planner button[type="submit"]').click()));
+				await Promise.all(arrived.map(({ promise }) => promise));
+				expect(sent.map((requests) => requests.length)).toEqual([1, 1]);
+				const originalA = sent[0]?.[0];
+				const originalB = sent[1]?.[0];
+				if (!originalA || !originalB) throw new Error("Both fresh plans must be submitted");
+				expect(originalA.cmd).not.toBe(originalB.cmd);
+				expect(
+					await page.evaluate(() => Object.keys(localStorage).filter((key) => key.includes(":run-plan:"))),
+				).toEqual([]);
+				for (const tab of [page, other])
+					await tab.evaluate(() => window.dispatchEvent(new Event("publish-plan-claim")));
+				release[1]?.resolve();
+				if (outcome === "succeeds") await other.waitForURL("**/runs/1");
+				else await other.getByRole("button", { name: "Enter Retry plan", exact: true }).waitFor();
+				release[0]?.resolve();
+				await eventually(
+					() => page.locator("#stat").textContent(),
+					(text) => Boolean(text?.includes("outcome is unknown") || text?.includes("no longer saved")),
+				);
+				if (outcome === "succeeds" && process.env.MAINWORTHY_PLANNER_RACE_SCREENSHOT)
+					await page.screenshot({ path: process.env.MAINWORTHY_PLANNER_RACE_SCREENSHOT });
+				expect(await page.getByLabel("Run name").inputValue()).toBe("Plan A");
+				expect(await page.getByLabel("Run name").isEditable()).toBe(false);
+				if (outcome === "is discarded")
+					await other.getByRole("button", { name: "Discard this plan", exact: true }).click();
+				const pending = await page.evaluate(() =>
+					Object.keys(localStorage)
+						.filter((key) => key.includes(":run-plan:"))
+						.map((key) => JSON.parse(localStorage.getItem(key) ?? "null")),
+				);
+				const waiting = outcome === "is uncertain" ? [originalA, originalB] : [originalA];
+				expect(pending.toSorted((a, b) => a.name.localeCompare(b.name))).toEqual(
+					waiting.toSorted((a, b) => a.name.localeCompare(b.name)),
+				);
+				while (waiting.length) {
+					await page.goto(`${server.url}/p/scratch/runs`);
+					await page.getByRole("listbox", { name: "Runs", exact: true }).waitFor();
+					await page.keyboard.press("n");
+					const name = await page.getByLabel("Run name").inputValue();
+					const index = waiting.findIndex((input) => input.name === name);
+					expect(index).toBeGreaterThanOrEqual(0);
+					const [original] = waiting.splice(index, 1);
+					expect(await page.getByLabel("Search cases", { exact: true }).inputValue()).toBe("Checkout");
+					await page.getByRole("button", { name: "Enter Retry plan", exact: true }).click();
+					await page.waitForURL(/\/runs\/\d+$/);
+					expect(sent[0]?.at(-1)).toEqual(original);
+				}
+				expect(
+					Run.array()
+						.parse((await server.api("find", { in: "runs", origin: "planned" })).items)
+						.map((run) => run.name)
+						.sort(),
+				).toEqual(outcome === "is discarded" ? ["Plan A"] : ["Plan A", "Plan B"]);
+				expect(
+					await page.evaluate(() => Object.keys(localStorage).filter((key) => key.includes(":run-plan:"))),
+				).toEqual([]);
+			} finally {
+				for (const pending of release) pending.resolve();
+				await view.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+
 for (const failure of ["lost reply", "repeated lost replies", "unreadable reply", "invalid JSON", "not sent"])
 	check(
 		`retrying a plan preserves its command after ${failure}`,
@@ -212,7 +320,7 @@ for (const control of ["name", "radio", "submit"])
 		30000,
 	);
 
-for (const leaving of ["Cancel", "Escape", "another screen", "another project", "reload"])
+for (const leaving of ["Cancel", "Escape", "another screen", "another project", "reload", "reload an older saved plan"])
 	check(
 		`reopening the planner after ${leaving} retries one uncertain plan`,
 		async () => {
@@ -255,7 +363,18 @@ for (const leaving of ["Cancel", "Escape", "another screen", "another project", 
 					await page.waitForURL("**/suite");
 					await page.keyboard.press("g");
 					await page.keyboard.press("r");
-				} else await page.reload();
+				} else {
+					if (leaving === "reload an older saved plan") {
+						const key = `${await devicePrefix(server, server.token)}run-plan:scratch`;
+						await page.evaluate((key) => {
+							const entry = Object.keys(localStorage).find((entry) => entry.startsWith(`${key}:`));
+							if (!entry) throw new Error("No saved command to put in the older key");
+							localStorage.setItem(key, localStorage.getItem(entry) ?? "");
+							localStorage.removeItem(entry);
+						}, key);
+					}
+					await page.reload();
+				}
 				await page.locator(".run-planner").waitFor({ state: "detached" });
 				await page.getByRole("listbox", { name: "Runs", exact: true }).waitFor();
 				await page.keyboard.press("n");
@@ -796,7 +915,9 @@ check(
 				({ status, url }) =>
 					status === "Another tab's plan is waiting; Retry plan sends it." || url.endsWith("/runs/1"),
 			);
-			expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? "null"), key)).toEqual(second[0]);
+			expect(
+				await page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? "null"), `${key}:${second[0]?.cmd}`),
+			).toEqual(second[0]);
 			expect(first).toHaveLength(1);
 			expect(await page.getByLabel("Run name").inputValue()).toBe("Plan Y");
 			expect(await page.getByLabel("Run name").isEditable()).toBe(false);
@@ -830,7 +951,7 @@ check(
 		try {
 			await server.api("propose", { edits: [{ op: "create", outline: "Checkout opens\n  Open checkout > Ready" }] });
 			const { page } = view;
-			const key = `${await devicePrefix(server, server.token)}run-plan:scratch`;
+			let key = `${await devicePrefix(server, server.token)}run-plan:scratch`;
 			const sent: Api["plan"]["input"][] = [];
 			await page.route("**/plan", async (route) => {
 				const input: Api["plan"]["input"] = route.request().postDataJSON();
@@ -856,6 +977,7 @@ check(
 			await page.getByLabel("Run name").fill("Recorded before the format change");
 			await page.locator('.run-planner button[type="submit"]').click();
 			await page.getByRole("button", { name: "Enter Retry plan", exact: true }).waitFor();
+			key += `:${sent[0]?.cmd}`;
 			await page.getByRole("button", { name: "Enter Retry plan", exact: true }).click();
 			await eventually(
 				() => page.locator("#stat").textContent(),
@@ -897,7 +1019,7 @@ for (const path of ["storage event", "late failure", "retry"] as const)
 			try {
 				await server.api("propose", { edits: [{ op: "create", outline: "Checkout opens\n  Open checkout > Ready" }] });
 				const { page, context } = view;
-				const key = `${await devicePrefix(server, server.token)}run-plan:scratch`;
+				let key = `${await devicePrefix(server, server.token)}run-plan:scratch`;
 				const sent: Api["plan"]["input"][] = [];
 				await page.route("**/plan", async (route) => {
 					sent.push(route.request().postDataJSON());
@@ -914,6 +1036,7 @@ for (const path of ["storage event", "late failure", "retry"] as const)
 				await page.getByLabel("Run name").fill("Discarded plan X");
 				await page.locator('.run-planner button[type="submit"]').click();
 				await arrived.promise;
+				key += `:${sent[0]?.cmd}`;
 				if (path === "retry") {
 					release.resolve();
 					await page.getByRole("button", { name: "Enter Retry plan", exact: true }).waitFor();
@@ -964,7 +1087,7 @@ check(
 		try {
 			await server.api("propose", { edits: [{ op: "create", outline: "Checkout opens\n  Open checkout > Ready" }] });
 			const { page } = view;
-			const key = `${await devicePrefix(server, server.token)}run-plan:scratch`;
+			let key = `${await devicePrefix(server, server.token)}run-plan:scratch`;
 			const sent: Api["plan"]["input"][] = [];
 			await page.route("**/plan", async (route) => {
 				sent.push(route.request().postDataJSON());
@@ -975,6 +1098,7 @@ check(
 			await page.getByLabel("Run name").fill("Keep until readable");
 			await page.locator('.run-planner button[type="submit"]').click();
 			await page.getByRole("button", { name: "Enter Retry plan", exact: true }).waitFor();
+			key += `:${sent[0]?.cmd}`;
 			await page.evaluate((key) => {
 				const read = Storage.prototype.getItem;
 				Storage.prototype.getItem = function (entry) {
@@ -1022,7 +1146,7 @@ for (const failure of ["read", "removal"] as const)
 			try {
 				await server.api("propose", { edits: [{ op: "create", outline: "Checkout opens\n  Open checkout > Ready" }] });
 				const { page } = view;
-				const key = `${await devicePrefix(server, server.token)}run-plan:scratch`;
+				let key = `${await devicePrefix(server, server.token)}run-plan:scratch`;
 				const sent: Api["plan"]["input"][] = [];
 				await page.route("**/plan", async (route) => {
 					sent.push(route.request().postDataJSON());
@@ -1035,6 +1159,7 @@ for (const failure of ["read", "removal"] as const)
 				await page.getByLabel("Run name").fill("Plan X");
 				await page.locator('.run-planner button[type="submit"]').click();
 				await page.getByRole("button", { name: "Enter Retry plan", exact: true }).waitFor();
+				key += `:${sent[0]?.cmd}`;
 				await page.evaluate(
 					({ key, failure }) => {
 						const read = Storage.prototype.getItem;
@@ -1185,7 +1310,8 @@ for (const trigger of ["click", "Enter", "queued submit"] as const)
 				await other.keyboard.press("n");
 				await other.getByRole("button", { name: "Enter Retry plan", exact: true }).waitFor();
 				if (trigger === "queued submit") {
-					const key = `${await devicePrefix(server, server.token)}run-plan:scratch`;
+					if (!original) throw new Error("No plan was submitted");
+					const key = `${await devicePrefix(server, server.token)}run-plan:scratch:${original.cmd}`;
 					await other.evaluate((key) => {
 						window.addEventListener("storage", (event) => {
 							if (event.key === key && event.newValue === null)
