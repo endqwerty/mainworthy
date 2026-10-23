@@ -391,7 +391,36 @@ Import replaced the bootstrap rows. Your previous session may no longer exist. T
 
 A `.gz` suffix tells the command to decompress. Before keeping anything, the import checks every row count, the checksum, each column and each link between records in the archive. If any check fails, nothing changes.
 
-Import refuses result and runner-try durations outside the report input range of zero through 30 days (2,592,000,000 ms), inclusive. The error names the table, row, archive line and permitted range. Missing or NULL stored durations remain unknown. Pending reports in the archive must pass the report input checks before import can recover them. Import refuses the whole archive rather than changing its evidence; this also applies when importing an archive backup.
+Import refuses result and runner-try durations outside the report input range of zero through 30 days (2,592,000,000 ms), inclusive. The error names the table, row, archive line and permitted range. Missing or NULL stored durations remain unknown. Pending reports must pass the per-result input checks, including each runner try, before import can recover them. Import does not check report-level batch limits. Import refuses the whole archive rather than changing its evidence; this also applies when importing an archive backup.
+
+**A successful export can produce a backup that this build refuses to import.** Before the report limit added on 2026-10-22, reports could store durations above 30 days. Export preserves those values. When exported duration columns contain invalid values, the CLI warns on stderr after saving the file. HTTP export returns the warning in `X-Mainworthy-Archive-Warning`. Neither changes the archive's evidence.
+
+Keep the original archive. To retain every timing measurement, restore a stopped copy of the data directory as described under [Back up](#back-up). To make an importable archive by discarding invalid timings, first stop the server and copy the data directory. Work on that copy, keeping the original unchanged. Open the copy's `mainworthy.db` with SQLite and inspect the affected rows:
+
+```sql
+SELECT 'results' AS table_name, id, duration_ms FROM results
+WHERE duration_ms IS NOT NULL AND
+  (typeof(duration_ms) <> 'integer' OR duration_ms NOT BETWEEN 0 AND 2592000000)
+UNION ALL
+SELECT 'result_tries', id, duration_ms FROM result_tries
+WHERE duration_ms IS NOT NULL AND
+  (typeof(duration_ms) <> 'integer' OR duration_ms NOT BETWEEN 0 AND 2592000000);
+```
+
+If you accept losing these timing measurements, set only those values to NULL on the copy. Their durations become unknown; the results and tries remain:
+
+```sql
+BEGIN;
+UPDATE results SET duration_ms = NULL
+WHERE duration_ms IS NOT NULL AND
+  (typeof(duration_ms) <> 'integer' OR duration_ms NOT BETWEEN 0 AND 2592000000);
+UPDATE result_tries SET duration_ms = NULL
+WHERE duration_ms IS NOT NULL AND
+  (typeof(duration_ms) <> 'integer' OR duration_ms NOT BETWEEN 0 AND 2592000000);
+COMMIT;
+```
+
+Start the copy with `MAINWORTHY_DATA` pointing at its directory, export again and test import into a throwaway instance. These queries change only the two stored duration columns. A pending report can still fail its per-result checks; its error names the offending field.
 
 An instance that already has data refuses an import and keeps what it has:
 

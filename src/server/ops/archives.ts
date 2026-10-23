@@ -24,6 +24,7 @@ export const ArchiveReply = z.discriminatedUnion("ok", [
 		counts: z.object({
 			rows: z.number().int().nonnegative(),
 			tables: z.record(z.string(), z.number().int().nonnegative()),
+			warnings: z.array(z.string()).optional(),
 		}),
 		owner: z
 			.object({

@@ -1027,6 +1027,21 @@ describe("Mainworthy instance archives", () => {
 		}
 	});
 
+	test.each([
+		{ staged: null, path: "results" },
+		{ staged: JSON.stringify([{ test: { key: "one" }, outcome: "wrong" }]), path: "0\\.outcome" },
+		{ staged: JSON.stringify([{ test: { key: "x".repeat(1001) }, outcome: "pass" }]), path: "0\\.test\\.key" },
+	])("pending result errors name $path on one line without blaming durations", ({ staged, path }) => {
+		const from = source();
+		from.raw.query("UPDATE batches SET staged = ? WHERE id = 504").run(staged);
+		refuse(
+			archive(from),
+			new RegExp(
+				`^invalid archive batches\\.staged for row 504 on line \\d+: pending results fail result input: ${path}: [^\\r\\n]+$`,
+			),
+		);
+	});
+
 	test("an archive keeps the moved scope but leaves its audit trail behind", () => {
 		const from = source();
 		from.raw
