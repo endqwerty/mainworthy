@@ -762,7 +762,18 @@ for (const outcome of ["skip", "blocked"] as const)
 				await page
 					.getByText("Nothing left for you to run. The server verdict is shown above.", { exact: true })
 					.waitFor();
-				expect(await page.locator('[data-run-document][data-active="true"]').count()).toBe(0);
+				expect(await page.locator('[data-run-document][data-active="true"]').getAttribute("data-run-document")).toBe(
+					"C-1",
+				);
+				await ready(page);
+				await page.keyboard.press("j");
+				expect(await page.locator('[data-run-document][data-active="true"]').getAttribute("data-run-document")).toBe(
+					"C-2",
+				);
+				await page.keyboard.press("k");
+				expect(await page.locator('[data-run-document][data-active="true"]').getAttribute("data-run-document")).toBe(
+					"C-1",
+				);
 				expect(await page.locator("#list .phead").innerText()).toContain("1 left in run");
 			} finally {
 				await view?.close();
@@ -790,6 +801,78 @@ for (const outcome of ["skip", "blocked", "pass"] as const)
 				expect(await page.locator('[data-run-document][data-active="true"]').getAttribute("data-run-document")).toBe(
 					"C-1",
 				);
+			} finally {
+				await view?.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+
+for (const mode of ["open", "closed", "read-only"] as const)
+	check(
+		`a fully reported ${mode} run opens a ready document for reading (612)`,
+		async () => {
+			const { server, run, path } = await fixture(3);
+			let view: Awaited<ReturnType<typeof openPage>> | null = null;
+			try {
+				await server.api("report", {
+					run,
+					results: [1, 2, 3].map((id) => ({ test: { case: `C-${id}` }, outcome: "pass" })),
+				});
+				if (mode === "closed") {
+					const signoff = (await server.api("inbox", { kind: "signoff" })).items[0];
+					if (!signoff) throw new Error("Missing sign-off");
+					await server.api("decide", {
+						q: signoff.q,
+						onEvidence: signoff.evidenceHash,
+						answer: { is: "approve" },
+						reason: "All three cases passed.",
+					});
+					expect(z.object({ state: z.string() }).parse((await server.api("get", { refs: [run] }))[0]).state).toBe(
+						"closed",
+					);
+				}
+				const token =
+					mode === "read-only"
+						? z.object({ token: z.string() }).parse(
+								await server.api("admin", {
+									do: "token.create",
+									actor: "viewer",
+									kind: "human",
+									can: ["read"],
+									project: "scratch",
+								}),
+							).token
+						: server.token;
+				view = await openPage({ ...server, token }, { path });
+				const { page } = view;
+				await page.getByRole("option").filter({ hasText: "C-1" }).waitFor();
+				expect(await page.locator('[data-run-document][data-active="true"]').count()).toBe(1);
+				await ready(page);
+				if (mode === "open" && process.env.MAINWORTHY_COCKPIT_EVIDENCE) {
+					await page.setViewportSize({ width: 1600, height: 900 });
+					await screenshot(page, 6122);
+				}
+				expect(await page.getByText("Select a run slot to start.", { exact: true }).count()).toBe(0);
+				if (mode === "read-only") {
+					expect(await page.getByRole("button", { name: "p Pass", exact: true }).isDisabled()).toBe(true);
+				} else {
+					await page.keyboard.press("j");
+					expect(await page.locator('[data-run-document][data-active="true"]').getAttribute("data-run-document")).toBe(
+						"C-2",
+					);
+					await page.keyboard.press("k");
+					expect(await page.locator('[data-run-document][data-active="true"]').getAttribute("data-run-document")).toBe(
+						"C-1",
+					);
+					expect(await page.getByRole("button", { name: "p Pass", exact: true }).isEnabled()).toBe(mode === "open");
+				}
+				expect((await slots(server, run)).map((slot) => slot.fills.map((fill) => fill.outcome))).toEqual([
+					["pass"],
+					["pass"],
+					["pass"],
+				]);
 			} finally {
 				await view?.close();
 				await server.stop();

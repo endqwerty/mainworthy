@@ -119,7 +119,8 @@ To record a result, follow these steps.
 
 <kbd>p</kbd> records "Pass". <kbd>b</kbd> records "Blocked".
 <kbd>s</kbd> records "Skip". These keys move you to the next unfinished slot you have not reported.
-Opening the cockpit starts at the first such slot. Automatic advancement stops when none remain.
+Opening the cockpit starts at the first such slot, or the first slot for reading when none remain.
+Automatic advancement stops when none remain. Completed and closed runs still open a case to read.
 To record a failure, follow these steps.
 
 1. Press <kbd>f</kbd> to focus "Result note".
