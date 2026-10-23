@@ -70,8 +70,10 @@ Redis. Steps 1 to 3 do not wait for Railway account availability.
 
 ## Deployment and rollback
 
-After `gate` passes on `main`, CI builds the commit's image once, labels it with that commit and publishes
-it to public GHCR. CI tells Railway to deploy that image by immutable digest. The Railway project token
+CI builds each commit's image once, smoke-tests that exact image, and after `gate` passes on `main`
+publishes the same image to public GHCR without rebuilding it. CI tells Railway to deploy that image by
+immutable digest, so what runs is what was tested. Pin the Dockerfile's base images by digest and its OS
+packages to fixed versions, so that no rebuild can quietly change what a tested commit contains. The Railway project token
 is scoped to production and stored in a GitHub environment restricted to `main`; pull requests cannot
 read it. Railway's GitHub integration with "wait for CI" is rejected here because it rebuilds the commit.
 
