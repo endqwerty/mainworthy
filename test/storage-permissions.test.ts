@@ -16,11 +16,27 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { start } from "../src/app/start.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
-import { Db, databasePath, writePrivateDatabaseFile } from "../src/server/kernel/db.ts";
+import { Db, databasePath, holdPrivateDatabaseMask, writePrivateDatabaseFile } from "../src/server/kernel/db.ts";
 import { migrate, openDatabase, SCHEMA_VERSION, schemaVersion } from "../src/server/kernel/migrate.ts";
 
 const mode = (path: string): number => statSync(path).mode & 0o777;
 const databaseFiles = (path: string): string[] => [path, `${path}-wal`, `${path}-shm`];
+
+test("overlapping copy workers retain a private umask until the last one finishes", () => {
+	const original = process.umask(0o022);
+	const first = holdPrivateDatabaseMask();
+	const second = holdPrivateDatabaseMask();
+	try {
+		first();
+		expect(process.umask()).toBe(0o077);
+		second();
+		expect(process.umask()).toBe(0o022);
+	} finally {
+		first();
+		second();
+		process.umask(original);
+	}
+});
 
 test("an instance in an existing readable directory keeps its database private", async () => {
 	const directory = mkdtempSync(join(tmpdir(), "mainworthy-private-instance-"));
@@ -206,6 +222,7 @@ test("upgrade copies are private and retained copies are hardened without changi
 						expect(existsSync(destination)).toBe(false);
 						expect(mode(dirname(destination))).toBe(0o700);
 						const result = target.run(destination);
+						expect(originalQuery("PRAGMA synchronous").get()).toEqual({ synchronous: 0 });
 						// SQLite made the file private: an ACL that lets another user into the directory finds nothing
 						// to read before the copy is published.
 						expect(mode(destination)).toBe(0o600);
@@ -216,6 +233,7 @@ test("upgrade copies are private and retained copies are hardened without changi
 		}) as typeof db.raw.query);
 		try {
 			migrate(db, path);
+			expect(originalQuery("PRAGMA synchronous").get()).toEqual({ synchronous: 1 });
 			expect(temporary).toHaveLength(1);
 			expect(dirname(temporary[0] ?? "").startsWith(`${path}.v1.bak.`)).toBe(true);
 			expect(existsSync(dirname(temporary[0] ?? ""))).toBe(false);
@@ -243,6 +261,27 @@ test("upgrade copies are private and retained copies are hardened without changi
 			reopened.close();
 		}
 	} finally {
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+test("a failed copy publishes nothing and restores the source's durability before further writes", () => {
+	const directory = mkdtempSync(join(tmpdir(), "mainworthy-copy-failed-"));
+	const path = databasePath(directory);
+	const db = new Db(path);
+	try {
+		db.exec("PRAGMA synchronous = FULL; CREATE TABLE kept (value); INSERT INTO kept VALUES ('before')");
+		expect(() => db.copyTo(join(directory, "missing", "copy.db"))).toThrow();
+		expect(existsSync(`${path}.bak`)).toBe(false);
+		expect(db.raw.query("PRAGMA synchronous").get()).toEqual({ synchronous: 2 });
+		db.exec("INSERT INTO kept VALUES ('after')");
+		expect(db.raw.query("SELECT value FROM kept ORDER BY rowid").all()).toEqual([
+			{ value: "before" },
+			{ value: "after" },
+		]);
+		expect(readdirSync(directory).some((name) => name.includes("mainworthy-copy-"))).toBe(false);
+	} finally {
+		db.close();
 		rmSync(directory, { recursive: true, force: true });
 	}
 });

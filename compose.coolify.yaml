@@ -99,8 +99,8 @@ services:
     # requests the hold is keeping; only root or a process with CAP_NET_BIND_SERVICE can.
     ports:
       - "127.0.0.1:758:8080"
-    # Until the app is healthy nothing listens on 758, so the hold keeps a request waiting instead of passing
-    # it to an ingress that would answer 502.
+    # App liveness includes upgrading: start the ingress so health can report that state. Application requests
+    # get 503 until ready. Failed upgrades stop the app rather than leaving a healthy upgrading listener.
     depends_on:
       mainworthy:
         condition: service_healthy

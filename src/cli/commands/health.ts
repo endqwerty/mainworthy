@@ -1,5 +1,6 @@
 import { API_VERSION, ApiHealth } from "../../core/version.ts";
 import { assertPositionals } from "../args.ts";
+import { UpgradingHealth } from "../health.ts";
 import { displayUrl, line, printJson } from "../output.ts";
 import type { AdapterCommand } from "./types.ts";
 
@@ -9,7 +10,7 @@ import type { AdapterCommand } from "./types.ts";
  */
 export const healthCommand: AdapterCommand = {
 	name: "health",
-	summary: "Check that the server answers. Exit 0 when it does, 1 when it does not.",
+	summary: "Check that the server answers, including while upgrading. Exit 0 when it does, 1 when it does not.",
 	usage: "health [--url <url>] [--json]",
 	flags: [],
 	async run(args, client) {
@@ -19,12 +20,15 @@ export const healthCommand: AdapterCommand = {
 		let version: string | null = null;
 		let commit: string | null = null;
 		let apiVersion: number | null = null;
+		let upgrading = false;
 		try {
 			const response = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(2500) });
 			const body: unknown = await response.json().catch(() => null);
-			if (response.ok && typeof body === "object" && body !== null && "ok" in body && body.ok === true) {
+			upgrading = UpgradingHealth.safeParse(body).success;
+			if (response.ok && typeof body === "object" && body !== null && "ok" in body && (body.ok === true || upgrading)) {
 				const api = ApiHealth.safeParse(body);
-				apiVersion = api.success ? api.data.apiVersion : null;
+				const progress = UpgradingHealth.safeParse(body);
+				apiVersion = api.success ? api.data.apiVersion : progress.success ? progress.data.apiVersion : null;
 				version = "version" in body && typeof body.version === "string" ? body.version : "";
 				// Only a full commit is shown: the address may be any server, and a reply must not put its own text on the terminal.
 				commit =
@@ -42,12 +46,15 @@ export const healthCommand: AdapterCommand = {
 					commit,
 					apiVersion,
 					compatible: apiVersion === API_VERSION,
+					...(upgrading && version !== null ? { state: "upgrading" } : {}),
 				},
 				args.bool("compact"),
 			);
 		else if (version === null) line(`not answering: ${displayUrl(url)}`);
 		else
-			line(`healthy: Mainworthy ${version}${commit ? ` (commit ${commit.slice(0, 12)})` : ""} at ${displayUrl(url)}`);
+			line(
+				`${upgrading ? "upgrading" : "healthy"}: Mainworthy ${version}${commit ? ` (commit ${commit.slice(0, 12)})` : ""} at ${displayUrl(url)}`,
+			);
 		return version !== null ? 0 : 1;
 	},
 };

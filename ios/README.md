@@ -128,6 +128,10 @@ CI, unless a deploy or a CI re-run lands in the minute the archive takes before 
 of those paths sends nothing. The job keeps its builds off the SSD with
 `MAINWORTHY_IOS_CACHE`, because a job launchd starts may not read a removable volume.
 
+Health also names the build's commit while `state` is `upgrading` and `ok` is false. The external upload job
+must require `ok: true` before treating that commit as deployed. This repository does not change or verify
+the job in the homelab repository.
+
 ## Licence and the App Store
 
 The app is under the Apache License 2.0 like the rest of the repository, copyright held by the owner

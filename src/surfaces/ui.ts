@@ -16,7 +16,7 @@ import { z } from "zod";
 import { withHeaders } from "./with-headers.ts";
 
 /** What one browser's reload socket is relayed to, and what the bundler said on it before the browser's was open. */
-type Relay = { upstream: WebSocket; early: (string | ArrayBuffer)[] };
+export type Relay = { upstream: WebSocket; early: (string | ArrayBuffer)[] };
 
 /** Whether a request comes from this server's own page: the HTTP surface's rule for a browser's requests. */
 type FromThisServer = (req: Request) => boolean;

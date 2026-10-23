@@ -1,7 +1,7 @@
 // Versioned migrations, run on start in every layer (decision 0002, rule 8).
 import { existsSync, readdirSync, rmdirSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { Db, protectDatabaseCopies, writePrivateDatabaseFile } from "./db.ts";
+import { Db, protectDatabaseCopies } from "./db.ts";
 import init from "./migrations/0001_init.sql" with { type: "text" };
 import sessions from "./migrations/0002_sessions.sql" with { type: "text" };
 import tokenLimits from "./migrations/0003_token_limits.sql" with { type: "text" };
@@ -161,7 +161,7 @@ export function migrate(db: Db, path: string): { from: number; to: number; backu
 	if (pending.length > 0 && from > 0 && path !== ":memory:") {
 		backup = `${path}.v${from}.bak`;
 		if (!existsSync(backup)) {
-			writePrivateDatabaseFile(backup, (privatePath) => db.raw.query("VACUUM INTO ?").run(privatePath));
+			db.copyTo(backup);
 			wroteBackup = true;
 		}
 	}

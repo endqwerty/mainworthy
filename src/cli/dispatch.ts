@@ -102,7 +102,7 @@ export async function runCli(
 			printFlags(GLOBAL_FLAGS);
 		} else {
 			const { serveCommand } = await import("./commands/serve.ts");
-			serveCommand(args, ui);
+			await serveCommand(args, ui);
 		}
 		return 0;
 	}

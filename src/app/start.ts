@@ -1,7 +1,8 @@
-// Starting an instance: open the data, make sure an owner and a first project exist, finish interrupted work,
-// then listen. The same function is the Local layer on a laptop and the Server layer in a container; only the
-// configuration differs (decision 0002).
+// Starting an instance: migrate the data, make an owner and first project, and finish interrupted work before
+// serving application routes. The CLI listens for health during migration. Local and Server differ only in
+// configuration (decision 0002).
 
+import { Worker } from "node:worker_threads";
 import { rebuildAssertionIndexes } from "../server/evidence/assertions.ts";
 import { attachmentHashes } from "../server/evidence/attachments.ts";
 import { deliverHandoffs, recoverHandoffs, stopHandoffs, waitHandoffs } from "../server/handoffs/handoffs.ts";
@@ -17,6 +18,7 @@ import {
 } from "../server/identity/identity.ts";
 import { type App, type Config, openApp } from "../server/kernel/app.ts";
 import { type Actor, allProjects } from "../server/kernel/ctx.ts";
+import { databasePath, holdPrivateDatabaseMask } from "../server/kernel/db.ts";
 import { lockInstance } from "../server/kernel/instance-lock.ts";
 import { createProject } from "../server/ops/admin.ts";
 import { recoverAccepted, recoverDisputes, sweep } from "../server/ops/jobs.ts";
@@ -26,7 +28,7 @@ import type { StatusPort } from "../server/statuses/port.ts";
 import { deliverCommitStatuses, stopCommitStatuses, waitCommitStatuses } from "../server/statuses/statuses.ts";
 import type { TrackerPort } from "../server/trackers/port.ts";
 import { deliverTrackerRequests, stopTrackerRequests, waitTrackerRequests } from "../server/trackers/requests.ts";
-import { type Extra, type Patience, serve, VERSION } from "../surfaces/http.ts";
+import { type Extra, type Patience, serve, upgradingListener, VERSION } from "../surfaces/http.ts";
 
 export type Instance = {
 	app: App;
@@ -72,26 +74,84 @@ export function open(
 	}
 }
 
-export function start(
+type StartOptions = {
+	firstProject?: string;
+	readers?: number;
+	patience?: Patience;
+	now?: () => number;
+	trackerPort?: TrackerPort;
+	statusPort?: StatusPort;
+};
+
+/** Starts liveness first; the instance lock covers the worker and the eventual server without a handoff gap. */
+export async function startServing(
 	config: Config,
 	extra: (app: App, owner: Actor) => Extra,
-	/** `now` is the instance's clock: a test passes its own, so nothing in it has to wait for time to pass. */
-	options: {
-		firstProject?: string;
-		readers?: number;
-		patience?: Patience;
-		now?: () => number;
-		trackerPort?: TrackerPort;
-		statusPort?: StatusPort;
-	} = {},
+	options: StartOptions & { signal?: AbortSignal; upgradeTimeoutMs?: number } = {},
+): Promise<Instance> {
+	validateBootstrap(config);
+	const unlock = lockInstance(config.dataDir);
+	let listener: ReturnType<typeof upgradingListener> | undefined;
+	let worker: Worker | undefined;
+	const releaseMask = holdPrivateDatabaseMask();
+	try {
+		options.signal?.throwIfAborted();
+		listener = upgradingListener(config);
+		worker = new Worker(
+			new URL(
+				Bun.isStandaloneExecutable ? "./server/kernel/migrate-worker.js" : "../server/kernel/migrate-worker.ts",
+				import.meta.url,
+			),
+			{ workerData: databasePath(config.dataDir) },
+		);
+		const migrating = worker;
+		await new Promise<void>((resolve, reject) => {
+			const abort = () => reject(options.signal?.reason ?? new Error("startup stopped"));
+			const timeout = setTimeout(
+				() => reject(new Error("database upgrade exceeded its startup deadline")),
+				options.upgradeTimeoutMs ?? 30 * 60_000,
+			);
+			options.signal?.addEventListener("abort", abort, { once: true });
+			migrating.once("error", reject);
+			migrating.once("exit", (code) => {
+				clearTimeout(timeout);
+				options.signal?.removeEventListener("abort", abort);
+				if (code === 0) resolve();
+				else reject(new Error(`database upgrade worker exited ${code}`));
+			});
+		});
+		options.signal?.throwIfAborted();
+		releaseMask();
+		return startLocked(config, extra, options, unlock, listener);
+	} catch (error) {
+		await listener?.stop(true);
+		await worker?.terminate();
+		unlock();
+		throw error;
+	} finally {
+		releaseMask();
+	}
+}
+
+export function start(config: Config, extra: (app: App, owner: Actor) => Extra, options: StartOptions = {}): Instance {
+	validateBootstrap(config);
+	return startLocked(config, extra, options, lockInstance(config.dataDir));
+}
+
+function startLocked(
+	config: Config,
+	extra: (app: App, owner: Actor) => Extra,
+	options: StartOptions,
+	unlock: () => void,
+	listener?: ReturnType<typeof upgradingListener>,
 ): Instance {
 	validateBootstrap(config);
-	const count = readerCount({
-		MAINWORTHY_READERS: options.readers === undefined ? process.env.MAINWORTHY_READERS : String(options.readers),
-	});
-	const unlock = lockInstance(config.dataDir);
+	let count: number;
 	let opened: ReturnType<typeof open>;
 	try {
+		count = readerCount({
+			MAINWORTHY_READERS: options.readers === undefined ? process.env.MAINWORTHY_READERS : String(options.readers),
+		});
 		opened = open(config, options);
 	} catch (error) {
 		unlock();
@@ -105,7 +165,7 @@ export function start(
 		recoverAccepted(app);
 		recoverDisputes(app);
 		recoverHandoffs(app);
-		server = serve(app, owner, extra(app, owner), options.patience);
+		server = serve(app, owner, extra(app, owner), options.patience, listener);
 	} catch (error) {
 		app.close();
 		unlock();

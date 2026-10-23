@@ -85,6 +85,7 @@ The warning does not affect standard output, so `--json` remains valid JSON.
 `mainworthy version --json` prints `{"version":"0.1.0","apiVersion":1}`.
 `mainworthy health --json` reports the server's `apiVersion` and whether it is `compatible` with this CLI.
 Health still exits 0 for a healthy server with an incompatible or unknown API version. It checks availability.
+While the database is upgrading, health also exits 0 and prints `upgrading`; its JSON includes `state: "upgrading"`. The process is alive but cannot accept application requests yet. Other commands report that the server is upgrading. A deployment must require `/healthz` to report `ok: true` and the expected commit before declaring it ready.
 
 Before its first authenticated request, the CLI reads `/healthz` without sending a token.
 If that probe redirects, the error gives the destination's origin for `--url`, without the `/healthz` path.
@@ -140,7 +141,7 @@ Each prints text made to be read, and `--json` where it is listed prints the sam
 | `mainworthy import-csv <file> [--mapping '<column mapping JSON>'] [--preset testrail] [--confirm hash] [--cmd id] [--json]` | Preview a mapped CSV file, then import it with the preview's confirmation. |
 | `mainworthy mcp` | Serve MCP on stdin/stdout, forwarding tools to the running HTTP server. |
 | `mainworthy open [--json]` | Print the web UI URL of the running instance. |
-| `mainworthy health [--url <url>] [--json]` | Check that the server answers. Exit 0 when it does, 1 when it does not. |
+| `mainworthy health [--url <url>] [--json]` | Check that the server answers, including while upgrading. Exit 0 when it does, 1 when it does not. |
 | `mainworthy version [--json]` | Print the CLI version and the API version it requires. No server is contacted. |
 | `mainworthy help` | List every operation and adapter. |
 

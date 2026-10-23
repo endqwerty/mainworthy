@@ -1,4 +1,4 @@
-import { start, VERSION } from "../../app/start.ts";
+import { startServing, VERSION } from "../../app/start.ts";
 import { defaultConfig, defaultDataDir } from "../../server/kernel/app.ts";
 import { findProject } from "../../server/kernel/ctx.ts";
 import { adoptFormerInstall } from "../../server/kernel/former-name.ts";
@@ -13,15 +13,26 @@ import { printError } from "../errors.ts";
 import { line, warning } from "../output.ts";
 
 /** Starts Local or Server with the UI, MCP and archive routes, and releases the listener/database on either signal. */
-export function serveCommand(args: Args, ui: unknown): void {
+export async function serveCommand(args: Args, ui: unknown): Promise<void> {
 	assertPositionals(args, 0, 0, "serve");
 	const config = defaultConfig(process.env);
 	for (const step of adoptFormerInstall(config, process.env)) warning(`mainworthy: ${step}`);
-	const instance = start(config, (app, owner) => ({
-		ui,
-		routes: { "/mcp": mcpRoute(app), ...archiveRoutes(app, owner) },
-		open: docsRoutes(VERSION),
-	}));
+	const startup = new AbortController();
+	const abortStartup = () => startup.abort(new Error("startup stopped"));
+	process.once("SIGINT", abortStartup);
+	process.once("SIGTERM", abortStartup);
+	const instance = await startServing(
+		config,
+		(app, owner) => ({
+			ui,
+			routes: { "/mcp": mcpRoute(app), ...archiveRoutes(app, owner) },
+			open: docsRoutes(VERSION),
+		}),
+		{ signal: startup.signal },
+	).finally(() => {
+		process.removeListener("SIGINT", abortStartup);
+		process.removeListener("SIGTERM", abortStartup);
+	});
 	const data = config.dataDir === defaultDataDir(process.env) ? "~/.mainworthy" : config.dataDir;
 	// Local mode signs the owner in with no step, so the line says who you are. A server signs nobody in on its own.
 	const who =

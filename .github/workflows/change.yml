@@ -30,7 +30,7 @@ jobs:
     # A pull request from a fork is given no secret, so nothing is said about it.
     if: ${{ vars.MAINWORTHY_URL != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 9
+    timeout-minutes: 40
     # One pull request's reports go one at a time, in order, so a close and a reopen during a deploy land as sent.
     concurrency:
       group: change-${{ inputs.pull || github.event.pull_request.number }}
@@ -78,7 +78,18 @@ jobs:
             done
             printf '%s' "$status"
           }
-          health_status=$(request -o health.json -w '%{http_code}' "$MAINWORTHY_URL/healthz")
+          # Upgrading is live for Docker, but cannot accept this lifecycle write yet. Bound the wait so a
+          # stuck upgrade still fails this job; the server has the same 30-minute upgrade deadline.
+          upgrade_deadline=$((SECONDS + 1800))
+          while :; do
+            health_status=$(request -o health.json -w '%{http_code}' "$MAINWORTHY_URL/healthz")
+            if [ "$health_status" != 200 ] || ! jq -e '.ok == false and .state == "upgrading"' health.json > /dev/null; then break; fi
+            if [ "$SECONDS" -ge "$upgrade_deadline" ]; then
+              echo "::error::The instance did not finish upgrading within 30 minutes. Replay this event after recovery."
+              exit 1
+            fi
+            sleep 10
+          done
           if [ "$health_status" != 200 ]; then
             echo "::error::The server answered $health_status to /healthz. Fix the cause, then replay this event with workflow_dispatch."
             exit 1

@@ -22,7 +22,7 @@ import { OP_LIST, OPS } from "../server/ops/index.ts";
 import { invokeAsync, type Reply } from "../server/ops/registry.ts";
 import { forwardedScheme } from "./headers.ts";
 import { SIGN_IN_BODY_LIMIT, signInRoutes } from "./signin.ts";
-import { uiSurface } from "./ui.ts";
+import { type Relay, uiSurface } from "./ui.ts";
 import { keepingPolicyOnEvery, withHeaders, withHeadersOnEvery } from "./with-headers.ts";
 
 export { VERSION } from "../core/version.ts";
@@ -757,6 +757,33 @@ export type Extra = {
 	open?: Record<string, (req: Request) => Response | Promise<Response>>;
 };
 
+/** Liveness before the database is safe to use. No route here can reach application data. */
+export function upgradingListener(config: Config) {
+	return Bun.serve<Relay>({
+		hostname: config.host,
+		port: config.port,
+		idleTimeout: PATIENCE.idleSeconds,
+		maxRequestBodySize: STREAM_BODY_LIMIT,
+		fetch: (req) =>
+			withHeaders(
+				req,
+				new URL(req.url).pathname === "/healthz"
+					? jsonResponse({
+							ok: false,
+							state: "upgrading",
+							version: VERSION,
+							apiVersion: API_VERSION,
+							commit: config.commit,
+						})
+					: jsonResponse(
+							{ ok: false, error: { code: "upgrading", message: "Mainworthy is upgrading; try again shortly." } },
+							503,
+							{ "retry-after": "5" },
+						),
+			),
+	});
+}
+
 /**
  * The routes. Everything that reads or changes a project needs a session. These answer without one, on purpose:
  * `/healthz` (is the process up, and which version and commit: the container's health check),
@@ -773,7 +800,13 @@ export type Extra = {
  * that is given a session has the timeout taken off its connection, so its reply may take as long as the work
  * takes (`sessionFor` says why, and what remains).
  */
-export function serve(app: App, owner: Actor, extra: Extra = { ui: null }, patience: Patience = PATIENCE) {
+export function serve(
+	app: App,
+	owner: Actor,
+	extra: Extra = { ui: null },
+	patience: Patience = PATIENCE,
+	listener?: ReturnType<typeof upgradingListener>,
+) {
 	const closing = new AbortController();
 	// Every route that takes a session takes it here or in `handleOp`, and both through `sessionFor`.
 	const guarded =
@@ -841,7 +874,7 @@ export function serve(app: App, owner: Actor, extra: Extra = { ui: null }, patie
 	// A route that answers without a session (`open`: the documentation) writes the policy of its own pages,
 	// which differ from the app's (a page of the documentation frames its diagrams), and keeps it.
 	const ui = extra.ui ? uiSurface(extra.ui, sameOrigin) : null;
-	const server = Bun.serve({
+	const settings = {
 		hostname: app.config.host,
 		port: app.config.port,
 		idleTimeout: patience.idleSeconds,
@@ -853,13 +886,15 @@ export function serve(app: App, owner: Actor, extra: Extra = { ui: null }, patie
 			...(ui ? { "/*": ui.route } : {}),
 			// biome-ignore lint/suspicious/noExplicitAny: Bun's route table type is a mapped type over literal paths; these are built at run time.
 		} as any,
-		fetch: (req) =>
+		fetch: (req: Request) =>
 			withHeaders(req, jsonResponse({ ok: false, error: { code: "not_found", message: "no such route" } }, 404)),
-		error(error) {
+		error(error: Error) {
 			console.error("[mainworthy] request failed:", error);
 			return withHeaders(null, jsonResponse({ ok: false, error: { code: "internal", message: INTERNAL_ERROR } }, 500));
 		},
-	});
+	};
+	const server = listener ?? Bun.serve(settings);
+	if (listener) listener.reload(settings);
 	let stopping: Promise<void> | null = null;
 	return {
 		port: server.port,
