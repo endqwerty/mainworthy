@@ -36,6 +36,8 @@ The [keyboard guide](./keyboard.md) lists the remaining editor keys.
 
 Put tags in the title with `#tag`. A space separates the tag from the title text.
 Mainworthy removes recognized tags from the title and keeps them as tags.
+In the web editor, inline tags and `@REQ-123` links also work in actions and expected results.
+Tokens can follow whitespace such as tabs, nonbreaking spaces, figure spaces, and full-width spaces.
 
 ```text
 Checkout applies a percentage coupon #checkout #regression
@@ -265,6 +267,7 @@ Resolving submits those changes with the chosen body as one proposal, including 
 You can also type `#tags` and `@REQ-123` links in the merged title, actions or expected results.
 In a field you changed, they leave the text and join the same proposal when you resolve it.
 In a changed title, whitespace becomes spaces before capture, including nonbreaking and full-width spaces before tokens.
+Changed actions and expected results recognize the same whitespace before tokens without flattening their lines.
 Actions and expected results recognize LF, CRLF and bare CR line endings equally and keep every other line of field text.
 Saved titles are one line; actions and expected results can have multiple lines.
 A title, action or expected result equal to that field in the conflict's recorded current or base version

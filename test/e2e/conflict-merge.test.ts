@@ -153,6 +153,57 @@ async function expectTheMergeToStand(server: Server, page: Page) {
 
 const check = test.skipIf(!browserAvailable);
 
+for (const [boundary, space] of [
+	["NBSP", "\u00a0"],
+	["U+3000", "\u3000"],
+] as const) {
+	check(
+		`conflict-card step actions and expected results capture ${boundary} inline metadata`,
+		async () => {
+			const { server, page, close } = await card1({
+				alsoTyped: async (page) => {
+					await page.getByRole("textbox", { name: "Step 2", exact: true }).press("Tab");
+					await page.getByRole("textbox", { name: "Expected result 2", exact: true }).fill("Mine expected");
+				},
+				theirs: (body) => ({
+					title: "Coupon case theirs",
+					steps: body.steps.map((step, index) =>
+						index === 1 ? { ...step, action: "Their coupon action", expected: "Their expected" } : step,
+					),
+				}),
+			});
+			try {
+				const step = (await head(server)).steps[1];
+				if (!step) throw Error("Missing coupon step");
+				await mergedTitle(page).fill(MERGED);
+				await page
+					.getByRole("textbox", { name: `Merged Step ^${step.id} action`, exact: true })
+					.fill(`${space}#smoke${space}#critical Apply the coupon${space}@REQ-101`);
+				await page
+					.getByRole("textbox", { name: `Merged Step ^${step.id} expected`, exact: true })
+					.fill(`${space}#expected Total is correct\n${space}#critical${space}@REQ-102`);
+				const replied = page.waitForResponse((response) => response.url().endsWith("/decide"));
+				await resolve(page);
+				const reply = (await (await replied).json()).result[0];
+				if (process.env.MAINWORTHY_STEP_INLINE_SCREENSHOT)
+					await page.screenshot({ path: `${process.env.MAINWORTHY_STEP_INLINE_SCREENSHOT}-${boundary}.png` });
+				expect(reply).toMatchObject({ status: "decided", effects: { status: "adopted" } });
+				await card(page).waitFor({ state: "detached" });
+				const saved = Head.extend({ tags: z.array(z.string()), covers: z.array(z.string()) }).parse(
+					(await server.api("get", { refs: ["C-1"] }))[0],
+				);
+				expect(saved).toMatchObject({ title: MERGED, covers: ["REQ-101", "REQ-102"] });
+				expect(saved.tags.toSorted()).toEqual(["critical", "expected", "smoke"]);
+				expect(saved.steps[1]).toMatchObject({ action: "Apply the coupon", expected: "Total is correct" });
+				await expectNothingLeftToPropose(page);
+			} finally {
+				await close();
+			}
+		},
+		30_000,
+	);
+}
+
 async function criticalReview(server: Server): Promise<void> {
 	const policy = await server.api("propose", {
 		edits: [
