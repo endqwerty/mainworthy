@@ -122,6 +122,8 @@ To record a result, follow these steps.
 Opening the cockpit starts at the first such slot. Automatic selection, advancement, and **Up next** skip
 slots with an unexpired lease held by someone else. Your own held slots remain eligible.
 The cockpit checks later pages before choosing a slot just for reading.
+If a later page fails, its error appears beside **More slots** and automatic paging stops.
+Press **More slots** to retry; the slots already loaded stay usable.
 When no eligible unfinished slot remains, it opens the first slot not held by someone else for reading.
 If every slot is held by someone else, choose one explicitly or wait for a lease to expire.
 Automatic advancement stops when none remain. Completed and closed runs still open a case to read.
@@ -351,7 +353,12 @@ Updates from other producers arrive through the existing live connection.
 The web cockpit skips other holders' slots during automatic navigation and includes them again when their leases expire.
 You can still click a held slot or select it with <kbd>j</kbd> or <kbd>k</kbd> and record a result.
 Recording a qualifying result releases that slot's lease, including when someone else holds it.
-Leases are advisory. Taking and giving back work use the CLI or API.
+Unassigned slots without a lease say **Available**. **yours** means the slot is assigned to you or leased by you.
+Selecting a slot does not claim it. Press <kbd>t</kbd> to claim the selected slot and <kbd>r</kbd> to release it.
+On a phone, open the slot, then choose **Claim slot** or **Release slot** from **Actions**.
+A claim uses the existing 15-minute work lease. If someone claims it first, the status shows the refusal and
+refreshes the slot's holder. Leases are advisory and never block recording.
+The CLI and API can also take, renew, and give back work.
 
 Take the next free unfinished slot with the CLI:
 
