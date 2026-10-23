@@ -227,3 +227,169 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+async function filterPicked(page: Awaited<ReturnType<typeof openPage>>["page"], count: number) {
+	for (let index = 0; index < count; index++) {
+		if (index) await page.keyboard.press("j");
+		await page.keyboard.press("x");
+	}
+	await page.getByRole("textbox", { name: "Filter cases" }).fill("Visible");
+	await page.getByRole("option").filter({ hasText: "Hidden" }).waitFor({ state: "detached" });
+	await page.getByRole("option").filter({ hasText: "Visible" }).first().click();
+	expect(await page.locator(".bulk-indicator").textContent()).toBe(`${count} selected`);
+}
+
+test.skipIf(!browserAvailable)(
+	"the removal picker includes a tag found only on a hidden selected case",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [
+				{ op: "create", outline: "Hidden case", tags: ["hidden"] },
+				{ op: "create", outline: "Visible case", tags: ["visible"] },
+			],
+		});
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = h;
+			await page.getByRole("button", { name: "Hidden case", exact: true }).waitFor();
+			await filterPicked(page, 1);
+			await page.keyboard.press("Alt+t");
+			await page.getByRole("textbox", { name: "Remove tag from selected cases" }).fill("hidden");
+			await page.getByRole("option").filter({ hasText: "#hidden" }).waitFor();
+			await page.keyboard.press("Enter");
+			const saved = await eventually(
+				() => cases(server, ["C-1", "C-2"]),
+				(rows) => rows[0]?.tags.length === 0,
+			);
+			expect(saved.map((row) => row.tags)).toEqual([[], ["visible"]]);
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"removal undo restores a shared tag to visible and hidden selected cases",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [
+				{ op: "create", outline: "Hidden case", tags: ["shared"] },
+				{ op: "create", outline: "Visible case", tags: ["shared"] },
+			],
+		});
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = h;
+			await page.getByRole("button", { name: "Hidden case", exact: true }).waitFor();
+			await filterPicked(page, 2);
+			await page.keyboard.press("Alt+t");
+			await page.getByRole("textbox", { name: "Remove tag from selected cases" }).fill("shared");
+			await page.keyboard.press("Enter");
+			await eventually(
+				() => cases(server, ["C-1", "C-2"]),
+				(rows) => rows.every((row) => row.tags.length === 0),
+			);
+			await page.keyboard.press("u");
+			const saved = await eventually(
+				() => cases(server, ["C-1", "C-2"]),
+				(rows) => rows[1]?.tags.includes("shared") === true,
+			);
+			expect(saved.map((row) => row.tags)).toEqual([["shared"], ["shared"]]);
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"adding a tag and undoing includes hidden selected cases and preserves their original tags",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [
+				{ op: "create", outline: "Hidden case", tags: [] },
+				{ op: "create", outline: "Visible untagged", tags: [] },
+				{ op: "create", outline: "Visible tagged", tags: ["shared"] },
+			],
+		});
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = h;
+			await page.getByRole("button", { name: "Hidden case", exact: true }).waitFor();
+			await filterPicked(page, 3);
+			await page.keyboard.press("t");
+			await page.getByRole("textbox", { name: "Tag selected cases" }).fill("shared");
+			await page.keyboard.press("Enter");
+			await eventually(
+				() => cases(server, ["C-1", "C-2", "C-3"]),
+				(rows) => rows.every((row) => row.tags.includes("shared")),
+			);
+			await page.keyboard.press("u");
+			const saved = await eventually(
+				() => cases(server, ["C-1", "C-2", "C-3"]),
+				(rows) => rows[1]?.tags.length === 0,
+			);
+			expect(saved.map((row) => row.tags)).toEqual([[], [], ["shared"]]);
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"an unreadable hidden selection changes nothing and tag removal can be retried",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [
+				{ op: "create", outline: "Hidden case", tags: ["hidden"] },
+				{ op: "create", outline: "Visible case", tags: ["visible"] },
+			],
+		});
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = h;
+			await page.getByRole("button", { name: "Hidden case", exact: true }).waitFor();
+			await filterPicked(page, 2);
+			await page.context().route("**/api/p/scratch/get", async (route) => {
+				const input = z.object({ refs: z.array(z.string()) }).parse(route.request().postDataJSON());
+				if (!input.refs.includes("C-1")) return route.continue();
+				await route.fulfill({
+					status: 503,
+					contentType: "application/json",
+					body: JSON.stringify({ ok: false, error: { code: "internal", message: "Selected case unavailable" } }),
+				});
+			});
+			await page.keyboard.press("Alt+t");
+			await page.locator("#stat").filter({ hasText: "Selected case unavailable" }).waitFor();
+			expect(await page.getByRole("textbox", { name: "Remove tag from selected cases" }).count()).toBe(0);
+			expect((await cases(server, ["C-1", "C-2"])).map((row) => row.tags)).toEqual([["hidden"], ["visible"]]);
+			await page.context().unroute("**/api/p/scratch/get");
+			await page.keyboard.press("Alt+t");
+			await page.getByRole("textbox", { name: "Remove tag from selected cases" }).fill("hidden");
+			await page.keyboard.press("Enter");
+			await eventually(
+				() => cases(server, ["C-1"]),
+				(rows) => rows[0]?.tags.length === 0,
+			);
+			expect(h.errors).toEqual([
+				"Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+			]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
