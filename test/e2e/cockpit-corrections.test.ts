@@ -74,6 +74,85 @@ async function slots(server: Server, run: string) {
 	return Slot.array().parse((await server.api("find", { in: "slots", run })).items);
 }
 
+// The read number is taken when a slot read starts, not when it answers: a read that started while the report
+// was in flight, and returns the old snapshot after the receipt, must not hide the result (#872, verifier R3-1).
+check(
+	"a slot read that started before a receipt and returns after it keeps the reported slot (#872)",
+	async () => {
+		const { server, run, path } = await fixture(3);
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		const readStarted = Promise.withResolvers<void>();
+		const accepted = Promise.withResolvers<void>();
+		const freshRead = Promise.withResolvers<void>();
+		let staleArrived = false;
+		try {
+			view = await openPage(server, { path });
+			const { page } = view;
+			await ready(page);
+			let stale: Api["find"]["reply"] | null = null;
+			let served = false;
+			await page.route("**/find", async (route) => {
+				const input = z.object({ in: z.string() }).parse(route.request().postDataJSON());
+				if (input.in === "slots" && stale) {
+					if (!served) {
+						served = true;
+						const snapshot = stale;
+						readStarted.resolve();
+						await accepted.promise;
+						await answer(route, { json: { ok: true, result: snapshot } });
+						staleArrived = true;
+						return;
+					}
+					await freshRead.promise;
+				}
+				await route.continue();
+			});
+			await page.route("**/report", async (route) => {
+				const input = z
+					.object({ results: z.array(z.object({ test: z.object({ case: z.string() }) })) })
+					.parse(route.request().postDataJSON());
+				if (input.results[0]?.test.case === "C-2") {
+					stale = await server.api("find", { in: "slots", run });
+					const reply = await fetched(route);
+					await readStarted.promise;
+					if (reply) await answer(route, { response: reply.response });
+				} else {
+					if (input.results[0]?.test.case === "C-3") freshRead.resolve();
+					await route.continue();
+				}
+			});
+			await page.keyboard.press("p");
+			await page.locator("#stat").filter({ hasText: "C-1 pass recorded" }).waitFor();
+			await page.locator('[data-run-document="C-2"][data-active="true"][data-ready="true"]').waitFor();
+			await page.keyboard.press("p");
+			await page.locator("#stat").filter({ hasText: "C-2 pass recorded" }).waitFor();
+			// The receipt is accepted; only now does the read that started before it return the old snapshot.
+			accepted.resolve();
+			await eventually(
+				async () => staleArrived,
+				(value) => value,
+			);
+			expect(staleArrived).toBe(true);
+			await page.locator('[data-run-document="C-3"][data-active="true"][data-ready="true"]').waitFor();
+			await page.keyboard.press("p");
+			await page.locator("#stat").filter({ hasText: "C-3 pass recorded" }).waitFor();
+			await page
+				.getByText("Nothing left for you to run. The server verdict is shown above.", { exact: true })
+				.waitFor();
+			expect(await page.locator('[data-run-document][data-active="true"]').getAttribute("data-run-document")).toBe(
+				"C-3",
+			);
+		} finally {
+			readStarted.resolve();
+			accepted.resolve();
+			freshRead.resolve();
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
 for (const timing of ["after slot refresh", "before slot refresh"] as const)
 	check(
 		`a mistaken dispute ${timing} releases confirmed local evidence and lets its author report again (872)`,
