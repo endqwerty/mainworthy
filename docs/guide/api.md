@@ -207,6 +207,8 @@ when the window regains focus.
 
 For callers with `read`, the `propose` reply includes `placements`, an array of inverse `place` and `state` edits for case placements actually written.
 Without `read`, this array is empty. Immediate `decide` replies apply the same rule to `effects.placements`, including command replay.
+Conflict-merge decisions include the placement inverses of an adopted replacement, including its tag changes.
+Unchanged, pending, or conflicted replacements return an empty array.
 The edits are already in undo order. To undo those placements, submit `{"edits": reply.placements}` to `propose`.
 Do not submit an empty array: a no-op has `placements: []`.
 Cases that were already in the requested state or already had the requested tags do not appear in these edits.

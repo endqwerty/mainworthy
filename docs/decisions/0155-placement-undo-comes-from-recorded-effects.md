@@ -20,6 +20,8 @@ them in the decision effects.
 proposals, rejections and body-only edits return an empty array. Callers without `read` also receive an empty array.
 The registry applies each operation's caller-visible projection to fresh and replayed `propose` and `decide` replies,
 after keeping full effects internally. Losing read access also hides an earlier command's placement effects.
+Conflict-merge decisions forward the adopted replacement's placements through the same projection.
+Unchanged, pending and conflicted replacements return empty arrays.
 Body-version stamps remain in `cases`.
 The web's shared placement path counts unique case refs in `placements` and uses those edits for Undo.
 A cached inverse is only an optimistic preview while the original request is pending. A queued Undo waits
