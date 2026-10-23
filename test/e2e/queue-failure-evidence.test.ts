@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { readFile } from "node:fs/promises";
+import { text } from "node:stream/consumers";
 import { browserAvailable, eventually, openPage, startServer } from "./support.ts";
 
 test.skipIf(!browserAvailable)(
@@ -37,6 +37,10 @@ test.skipIf(!browserAvailable)(
 			const { page } = h;
 			await page.locator("[data-current-question]").waitFor();
 			await page.keyboard.press("Space");
+			const detail = page.getByText("Coupon response includes the wrong total", { exact: false });
+			await page.getByText("Diagnostic detail", { exact: true }).waitFor();
+			expect(await detail.isVisible()).toBe(false);
+			await page.getByText("Diagnostic detail", { exact: true }).click();
 			await page.getByText("Coupon response includes the wrong total", { exact: false }).waitFor();
 			expect(await page.getByRole("list", { name: "Step trail" }).innerText()).toContain("Apply coupon");
 			expect(await page.getByRole("list", { name: "Step trail" }).innerText()).toContain("Submit coupon SAVE");
@@ -47,9 +51,7 @@ test.skipIf(!browserAvailable)(
 			await page.getByRole("button", { name: "Download trace.txt" }).click();
 			const file = await download;
 			expect(file.suggestedFilename()).toBe("trace.txt");
-			const path = await file.path();
-			if (!path) throw new Error("Attachment download missing");
-			expect(await readFile(path, "utf8")).toBe("checkout diagnostic bytes");
+			expect(await text(await file.createReadStream())).toBe("checkout diagnostic bytes");
 			await page.getByRole("link", { name: "T-1", exact: true }).click();
 			await page.waitForURL("**/p/scratch/tests/1");
 			await page.locator("#detail .test-title").filter({ hasText: "Cart checkout" }).waitFor();

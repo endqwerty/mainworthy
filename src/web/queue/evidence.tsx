@@ -477,7 +477,12 @@ function SampleEvidence({ result }: { result: number }) {
 	const build = webUrl(sample.build);
 	return (
 		<>
-			{sample.detail && <pre className="queue-log">{sample.detail}</pre>}
+			{sample.detail && (
+				<details>
+					<summary>Diagnostic detail</summary>
+					<pre className="queue-log">{sample.detail}</pre>
+				</details>
+			)}
 			{sample.note && <p>{sample.note}</p>}
 			{build && (
 				<a href={build} target="_blank" rel="noreferrer noopener">
