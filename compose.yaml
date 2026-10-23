@@ -1,6 +1,20 @@
-# One service, one volume. `docker compose up -d`, then open http://localhost:7357 and sign in with the owner
+# App and PostgreSQL, each with its own volume. `docker compose up -d`, then open http://localhost:7357 and sign in with the owner
 # token: set MAINWORTHY_OWNER_TOKEN below, or read the generated one from the first lines of `docker compose logs`.
 services:
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mainworthy
+      POSTGRES_DB: mainworthy
+      POSTGRES_PASSWORD: ${MAINWORTHY_POSTGRES_PASSWORD:-mainworthy}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mainworthy -d mainworthy"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+    volumes:
+      - mainworthy-postgres:/var/lib/postgresql
   mainworthy:
     build:
       context: .
@@ -11,7 +25,7 @@ services:
     ports:
       - "7357:7357"
     environment:
-      MAINWORTHY_LOCK_WAIT_SECONDS: ${MAINWORTHY_LOCK_WAIT_SECONDS:-30}
+      MAINWORTHY_DATABASE_URL: postgres://mainworthy:${MAINWORTHY_POSTGRES_PASSWORD:-mainworthy}@postgres:5432/mainworthy
       # A long random string. Leave unset to have one generated and printed once on first start.
       MAINWORTHY_OWNER_TOKEN: ${MAINWORTHY_OWNER_TOKEN:-}
       MAINWORTHY_OWNER: ${MAINWORTHY_OWNER:-owner}
@@ -39,8 +53,12 @@ services:
       MAINWORTHY_SMTP_USER: ${MAINWORTHY_SMTP_USER:-}
       MAINWORTHY_SMTP_PASSWORD: ${MAINWORTHY_SMTP_PASSWORD:-}
       MAINWORTHY_MAIL_FROM: ${MAINWORTHY_MAIL_FROM:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       - mainworthy-data:/data
 
 volumes:
+  mainworthy-postgres:
   mainworthy-data:
