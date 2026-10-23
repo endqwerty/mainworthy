@@ -131,7 +131,7 @@ Propose cases at base: adopted=current, open=needs acceptance, conflict=resolve,
 | `edits[][policy].unlinked` | `"ask" \| "track" \| "create"` | no |  |
 | `edits[][policy].emptyReports` | `"pending" \| "nothing-required"` | no |  |
 | `reason` | `string` | no | Why. Shown in the case history. |
-| `projectIdentity` | `string` | no | Only write if the project key still names this identity. |
+| `projectIdentity` | `string` | no | Only proceed if the project key still names this identity. |
 | `project` | `string` | no |  |
 
 ## report
@@ -199,7 +199,7 @@ Report to target or run; tests by key or case.
 | `results[].tries[].failure.message` | `string` | yes |  |
 | `results[].tries[].failure.detail` | `string` | no |  |
 | `nothingRequired` | `true` | no | CI-only empty declaration; requires policy permission. |
-| `projectIdentity` | `string` | no | Only write if the project key still names this identity. |
+| `projectIdentity` | `string` | no | Only proceed if the project key still names this identity. |
 | `project` | `string` | no |  |
 
 ## claim
@@ -225,7 +225,7 @@ Review cases C-311@hash at about/patch; known reads prior findings.
 | `findings[].suggest[2].step` | `string` | no |  |
 | `findings[].suggest[2].action` | `string` | no |  |
 | `findings[].suggest[2].expected` | `string` | no |  |
-| `projectIdentity` | `string` | no | Only write if the project key still names this identity. |
+| `projectIdentity` | `string` | no | Only proceed if the project key still names this identity. |
 | `project` | `string` | no |  |
 
 ## work
@@ -238,7 +238,7 @@ Take next slot with run; renew with slot. Report or give-back releases.
 | `run` | `string` | yes |  |
 | `slot` | `integer` | no | Slot id from find slots. Omit to take the next free unfinished slot. |
 | `seconds` | `integer` | no | Lease length in seconds, from 30 to 86400. Default: 900. Default: `900`. |
-| `projectIdentity` | `string` | no | Only write if the project key still names this identity. |
+| `projectIdentity` | `string` | no | Only proceed if the project key still names this identity. |
 | `project` | `string` | no |  |
 
 ## decide
@@ -253,7 +253,7 @@ onEvidence=evidenceHash. decided, advised=person decides, forbidden, invalid, al
 | `[1].onEvidence` | `string` | yes | The evidence hash you saw. If the evidence changed since, the reply is a conflict with the new evidence. |
 | `[1].answer` | `record<unknown>` | yes | The answer, for example {"is":"defect"}. The allowed answers depend on the question kind. |
 | `[1].reason` | `string` | no |  |
-| `[1].projectIdentity` | `string` | no | Only write if the project key still names this identity. |
+| `[1].projectIdentity` | `string` | no | Only proceed if the project key still names this identity. |
 | `[2].all` | `array<object>` | yes |  |
 | `[2].all[].q` | `string` | yes | The question, for example Q-12. |
 | `[2].all[].ifOpen` | `boolean` | no | Refuse if the question is no longer open. |
@@ -261,16 +261,16 @@ onEvidence=evidenceHash. decided, advised=person decides, forbidden, invalid, al
 | `[2].all[].answer` | `record<unknown>` | yes | The answer, for example {"is":"defect"}. The allowed answers depend on the question kind. |
 | `[2].all[].reason` | `string` | no |  |
 | `[2].reason` | `string` | no |  |
-| `[2].projectIdentity` | `string` | no | Only write if the project key still names this identity. |
+| `[2].projectIdentity` | `string` | no | Only proceed if the project key still names this identity. |
 | `[3].undo` | `string` | yes | The question whose decision to withdraw. |
 | `[3].ifDecision` | `integer` | no |  |
 | `[3].reason` | `string` | no |  |
-| `[3].projectIdentity` | `string` | no | Only write if the project key still names this identity. |
+| `[3].projectIdentity` | `string` | no | Only proceed if the project key still names this identity. |
 | `[4].undo` | `array<object>` | yes |  |
 | `[4].undo[].q` | `string` | yes | The question whose decision to withdraw. |
 | `[4].undo[].ifDecision` | `integer` | yes |  |
 | `[4].reason` | `string` | no |  |
-| `[4].projectIdentity` | `string` | no | Only write if the project key still names this identity. |
+| `[4].projectIdentity` | `string` | no | Only proceed if the project key still names this identity. |
 
 ## inbox
 
@@ -291,6 +291,7 @@ Read refs including result:id; verdicts: commit:hash, change:key, R-n. unless=et
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
+| `projectIdentity` | `string` | no | Only proceed if the project key still names this identity. |
 | `repo` | `string` | no | For commit refs: disambiguate repositories. |
 | `cursor` | `string` | no | For one proposal: the cursor from its previous page of edits. Restart without it after a project change. |
 | `refs` | `array<string>` | yes | C-, Q-, R-, T-, P-, result:id, commit:hash or change:key. |
