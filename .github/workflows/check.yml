@@ -281,7 +281,8 @@ jobs:
 
   publish:
     needs: [gate, image]
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    # `description` is always skipped on a push, and GitHub's implicit `success()` would skip this job for it (#856).
+    if: ${{ !cancelled() && needs.gate.result == 'success' && needs.image.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

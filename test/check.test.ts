@@ -832,6 +832,23 @@ test("the workflow gives the pipeline's token to the one step that reports, and 
 	).not.toMatch(/(?:^|\s)serve(?:\s|$)/);
 });
 
+// Issue #856. GitHub skips a job whose condition has no status function when any job before it, however far back,
+// was skipped. A job after one that may be skipped therefore says, with a status function, what it waits for.
+test("a job after one that may be skipped names its own condition for running", () => {
+	const job = z.object({ needs: z.array(z.string()).or(z.string()).optional(), if: z.string().optional() });
+	const { jobs } = z
+		.object({ jobs: z.record(z.string(), job) })
+		.parse(Bun.YAML.parse(readFileSync(".github/workflows/check.yml", "utf8")));
+	const needs = (name: string): string[] => [jobs[name]?.needs ?? []].flat();
+	const before = (name: string): string[] => needs(name).flatMap((one) => [one, ...before(one)]);
+	const unguarded = Object.keys(jobs).filter(
+		(name) =>
+			before(name).some((one) => jobs[one]?.if !== undefined) &&
+			!/\b(always|cancelled|failure|success)\(\)/.test(jobs[name]?.if ?? ""),
+	);
+	expect(unguarded).toEqual([]);
+});
+
 test("only main publishes the image that passed the smoke test, after the gate", () => {
 	const step = z.object({
 		uses: z.string().optional(),
@@ -851,7 +868,11 @@ test("only main publishes the image that passed the smoke test, after the gate",
 	const { image, publish, gate } = z.object({ image: job, publish: job, gate: job }).parse(workflow.jobs);
 	const expression = (name: string): string => `$\{{ ${name} }}`;
 	const main = "github.event_name == 'push' && github.ref == 'refs/heads/main'";
-	expect(publish.if).toBe(expression(main));
+	// Issue #856. Without a status function GitHub adds `success()`, which is false when any job the publish
+	// follows, through the gate too, was skipped: `description` always is on a push, so the publish never ran.
+	expect(publish.if).toBe(
+		expression(`!cancelled() && needs.gate.result == 'success' && needs.image.result == 'success' && ${main}`),
+	);
 	expect(publish.needs).toEqual(["gate", "image"]);
 	expect(gate.needs).not.toContain("publish");
 	// Even a prose-only main commit needs its own embedded revision and image tag.
