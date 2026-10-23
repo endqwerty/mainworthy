@@ -477,48 +477,60 @@ check(
 	30_000,
 );
 
-check(
-	"a second required person can navigate to and fill another person's slot (546)",
-	async () => {
-		const { server, run, path } = await fixture(2, 2);
-		let view: Awaited<ReturnType<typeof openPage>> | null = null;
-		try {
-			await server.api("report", { run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
-			const { token } = z.object({ token: z.string() }).parse(
-				await server.api("admin", {
-					do: "token.create",
-					actor: "second-person",
-					kind: "human",
-					can: ["read", "produce"],
-					project: "scratch",
-				}),
-			);
-			view = await openPage({ ...server, token }, { path });
-			const { page } = view;
-			await ready(page);
-			await screenshot(page, 546);
-			expect(await page.getByRole("button", { name: "p Pass", exact: true }).isEnabled()).toBe(true);
-			await page.getByRole("option").filter({ hasText: "C-2" }).click();
-			await page.keyboard.press("k");
-			expect(await page.locator('[data-run-document][data-active="true"]').getAttribute("data-run-document")).toBe(
-				"C-1",
-			);
-			await page.keyboard.press("p");
-			const rows = await eventually(
-				() => slots(server, run),
-				(rows) => rows[0]?.state === "satisfied",
-			);
-			expect(rows[0]?.fills.map(({ by, outcome }) => ({ by, outcome }))).toEqual([
-				{ by: "robin", outcome: "pass" },
-				{ by: "second-person", outcome: "pass" },
-			]);
-		} finally {
-			await view?.close();
-			await server.stop();
-		}
-	},
-	30_000,
-);
+for (const outcome of ["pass", "skip", "blocked"] as const)
+	check(
+		`a second required person can navigate to and fill another person's ${outcome} slot (612)`,
+		async () => {
+			const { server, run, path } = await fixture(2, 2);
+			let view: Awaited<ReturnType<typeof openPage>> | null = null;
+			try {
+				await server.api("report", { run, results: [{ test: { case: "C-1" }, outcome }] });
+				const { token } = z.object({ token: z.string() }).parse(
+					await server.api("admin", {
+						do: "token.create",
+						actor: "second-person",
+						kind: "human",
+						can: ["read", "produce"],
+						project: "scratch",
+					}),
+				);
+				view = await openPage({ ...server, token }, { path });
+				const { page } = view;
+				await page.locator('[data-slot="1"]').click();
+				await ready(page);
+				if (outcome === "skip") await screenshot(page, 612);
+				expect(await page.getByRole("button", { name: "p Pass", exact: true }).isEnabled()).toBe(true);
+				await page.getByRole("option").filter({ hasText: "C-2" }).click();
+				await page.keyboard.press("k");
+				expect(await page.locator('[data-run-document][data-active="true"]').getAttribute("data-run-document")).toBe(
+					"C-1",
+				);
+				await page.keyboard.press("p");
+				const rows = await eventually(
+					() => slots(server, run),
+					(rows) => rows[0]?.fills.some((fill) => fill.by === "second-person") === true,
+				);
+				expect(rows[0]?.fills.map(({ by, outcome }) => ({ by, outcome }))).toEqual([
+					{ by: "robin", outcome },
+					{ by: "second-person", outcome: "pass" },
+				]);
+				expect(rows[0]?.state).toBe(outcome === "pass" ? "satisfied" : "missing");
+				if (outcome !== "pass") {
+					expect((await server.api("gate", { run })).tally.missing).toBe(2);
+					expect((await server.api("inbox", { kind: "signoff" })).items).toHaveLength(0);
+					await server.api("report", {
+						run,
+						results: [{ test: { case: "C-1" }, outcome: "pass", corrects: rows[0]?.fills[0]?.result }],
+					});
+					expect((await slots(server, run))[0]?.state).toBe("satisfied");
+				}
+			} finally {
+				await view?.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
 
 check(
 	"undo restores an earlier failure's attachments and step (548)",
@@ -560,6 +572,129 @@ check(
 			expect(restored).toMatchObject({ outcome: "fail", note: "Original failure", atStep: "open" });
 			await page.getByRole("button", { name: "Download proof.txt" }).waitFor();
 		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+for (const fault of ["list", "file"] as const)
+	check(
+		`undo remains available after an attachment ${fault} read fails (612)`,
+		async () => {
+			const { server, run, path } = await fixture(2);
+			let view: Awaited<ReturnType<typeof openPage>> | null = null;
+			try {
+				view = await openPage(server, { path });
+				const { page } = view;
+				await ready(page);
+				await page.getByLabel("Attach a file").setInputFiles({
+					name: "proof.txt",
+					mimeType: "text/plain",
+					buffer: Buffer.from("Original failure proof"),
+				});
+				await page.getByRole("button", { name: "Remove proof.txt" }).waitFor();
+				await page.keyboard.press("1");
+				await fail(page, "Original failure");
+				await page.locator("#stat").filter({ hasText: "C-1 fail recorded" }).waitFor();
+				await page.keyboard.press("k");
+				await page.keyboard.press("p");
+				await page.locator("#stat").filter({ hasText: "C-1 pass recorded" }).waitFor();
+				const before = (await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "result");
+				let reports = 0;
+				await page.route("**/report", (route) => {
+					reports++;
+					return route.continue();
+				});
+				await page.route("**/attachment", (route) => {
+					const input = z.object({ id: z.number().optional() }).parse(route.request().postDataJSON());
+					if (fault === "file" && !input.id) return route.continue();
+					return route.fulfill({
+						status: fault === "file" ? 404 : 500,
+						json: {
+							ok: false,
+							error: { code: fault === "file" ? "not_found" : "internal", message: "Earlier attachment unavailable" },
+						},
+					});
+				});
+				await page.keyboard.press("u");
+				await page.locator("#stat").filter({ hasText: "Earlier attachment unavailable" }).waitFor();
+				expect(reports).toBe(0);
+				expect((await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "result")).toEqual(
+					before,
+				);
+				if (fault === "file") await screenshot(page, 6120);
+				await page.unroute("**/attachment");
+				expect(await page.getByRole("button", { name: "u correct", exact: true }).count()).toBe(1);
+				await page.keyboard.press("u");
+				await page.locator("#stat").filter({ hasText: "C-1 fail recorded" }).waitFor();
+				const restored = (await slots(server, run))[0]?.fills[0];
+				if (!restored) throw new Error("Restored failure missing");
+				expect(restored).toMatchObject({ outcome: "fail", note: "Original failure", atStep: "open" });
+				expect(reports).toBe(1);
+				const listed = AttachmentReply.parse(await server.api("attachment", { result: restored.result }));
+				expect(listed).toMatchObject({ kind: "list", items: [{ name: "proof.txt", at: "open" }] });
+				if (listed.kind !== "list" || !listed.items[0]) throw new Error("Restored attachment missing");
+				expect(
+					AttachmentReply.parse(await server.api("attachment", { result: restored.result, id: listed.items[0].id })),
+				).toMatchObject({ kind: "file", data: Buffer.from("Original failure proof").toString("base64") });
+				expect(
+					(await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "result"),
+				).toHaveLength(3);
+			} finally {
+				await view?.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+
+check(
+	"a pending undo suppresses duplicates and keeps a newer result available to undo (612)",
+	async () => {
+		const { server, run, path } = await fixture(2);
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		const held = Promise.withResolvers<void>();
+		const sent = Promise.withResolvers<void>();
+		try {
+			view = await openPage(server, { path });
+			const { page } = view;
+			await ready(page);
+			await page.keyboard.press("p");
+			await page.locator("#stat").filter({ hasText: "C-1 pass recorded" }).waitFor();
+			let corrections = 0;
+			await page.route("**/report", async (route) => {
+				const input = z
+					.object({ results: z.array(z.object({ corrects: z.number().optional() })) })
+					.parse(route.request().postDataJSON());
+				if (input.results[0]?.corrects && ++corrections === 1) {
+					sent.resolve();
+					await held.promise;
+				}
+				await route.continue();
+			});
+			await page.keyboard.press("u");
+			await sent.promise;
+			await page.keyboard.press("u");
+			await page.locator('[data-slot="2"]').click();
+			await page.keyboard.press("p");
+			await page.locator("#stat").filter({ hasText: "C-2 pass recorded" }).waitFor();
+			held.resolve();
+			await page.locator("#stat").filter({ hasText: "C-1 skip recorded" }).waitFor();
+			expect(corrections).toBe(1);
+			await page.keyboard.press("u");
+			await page.locator("#stat").filter({ hasText: "C-2 skip recorded" }).waitFor();
+			expect(corrections).toBe(2);
+			expect((await slots(server, run)).map((slot) => slot.fills.map((fill) => fill.outcome))).toEqual([
+				["skip"],
+				["skip"],
+			]);
+			for (const ref of ["C-1", "C-2"])
+				expect((await server.api("timeline", { ref })).entries.filter((entry) => entry.t === "result")).toHaveLength(2);
+			expect(await page.getByRole("button", { name: "u correct", exact: true }).count()).toBe(0);
+		} finally {
+			held.resolve();
 			await view?.close();
 			await server.stop();
 		}

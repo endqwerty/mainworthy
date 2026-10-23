@@ -228,14 +228,18 @@ To record results for a planned run, follow these steps:
 
 1. Open **Runs**.
 2. Open a run. Its page shows the server's verdict, the results it accepts and its cases in order.
-3. Press **Start** to open the first case with no result, or press a slot to open it.
+   Skipped and blocked slots still count as cases left because they have not proven the case.
+3. Press **Start** to open the first unfinished case you have not reported, or press a slot to open it.
    The case is shown at the version pinned when the run was planned.
-   Every slot opens, including one filled only by another producer. That slot is read-only.
+   Every slot opens, including one filled only by another producer. You can record if the server still
+   needs proof, including when earlier results are only skipped or blocked, or another required person has yet to report.
+   A slot with completed or failing evidence is read-only when all its results belong to other producers.
    Its recorded results show the latest fills, step trails and screenshots.
 4. If a step failed, press that step to mark it. Press the step again to clear the mark.
 5. If needed, add a note.
 6. Press **Pass**, **Fail**, **Blocked** or **Skip**. **Fail** records the marked step.
-   After the server confirms the result and the app reads the slots again, it opens the next slot with no result.
+   After the server confirms the result and the app reads the slots again, it opens the next unfinished case
+   you have not reported. Skipped and blocked results do not count toward the required people.
 
 **Undo** corrects the result to your earlier outcome, including its note, failed step, step trail and attachments, or to skipped if there was none.
 It disappears when a refresh shows that result was already replaced. It does not delete the result.

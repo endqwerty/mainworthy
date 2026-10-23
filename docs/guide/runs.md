@@ -161,6 +161,8 @@ A failure opens a question. Answer it in [Queue](./decide.md).
 Press <kbd>u</kbd> to correct the last result while the run remains open.
 Undo waits for pending reports and restores the previous recorded outcome, note, failed step,
 and attachments. A refused report cannot become the outcome restored by undo.
+If an earlier attachment cannot be read, undo records nothing and reports the error.
+Press <kbd>u</kbd> again to retry once the attachment can be read.
 If there was no previous recorded result, the correction is a skip. Both results stay recorded.
 Undo targets only the result recorded by this page. If another tab has replaced it, the page
 reports that it changed and leaves the newer result in place.
@@ -180,7 +182,8 @@ See [report results](./report-results.md#read-the-results-basis).
 
 The web app leaves slots filled by another producer for that producer's evidence, unless the
 slot is still missing a required person. Another admitted person can then record their result.
-The result controls and <kbd>j</kbd>/<kbd>k</kbd> navigation include those slots.
+The result controls and <kbd>j</kbd>/<kbd>k</kbd> navigation include those slots, including
+ones with only skipped or blocked results. These results do not count toward the required people.
 
 ## Require CI jobs
 

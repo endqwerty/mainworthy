@@ -147,7 +147,7 @@ public struct Run: Identifiable, Equatable, Sendable {
 	/// Missing jobs are part of the tally too. Only the slot counts say how many cases remain.
 	public var left: Int? {
 		guard case .planned(let slots?) = kind else { return nil }
-		let filled = ["pass", "excused", "attributed", "unexplained", "disputed", "skipped"]
+		let filled = ["pass", "excused", "attributed", "unexplained", "disputed"]
 			.reduce(0) { $0 + (tally[$1] ?? 0) }
 		return max(0, slots - filled)
 	}
@@ -248,6 +248,8 @@ public struct RunSlot: Identifiable, Equatable, Sendable {
 	public let state: SlotState
 	public let fills: [RunFill]
 	public let work: SlotWork
+	/// The server still needs proof, including when every counted result was skipped or blocked.
+	public var needsProof: Bool { state == .missing || state == .skipped }
 	public func ownFill(by person: String) -> RunFill? {
 		fills.filter { $0.by == person && $0.method == .person }.max { $0.result < $1.result }
 	}

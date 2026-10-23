@@ -238,7 +238,8 @@ function ProjectRunCockpit({
 				}
 			: slot;
 	});
-	const missing = (slot: Slot) => slot.state === "missing" && !local.get(slot.id)?.pending;
+	const missing = (slot: Slot) =>
+		(slot.state === "missing" || slot.state === "skipped") && !local.get(slot.id)?.pending;
 	if (cursor === null && slots.length) setCursor((slots.find(missing) ?? slots[0])?.id ?? null);
 	const current = cursor === null ? (slots.find(missing) ?? slots[0]) : slots.find((slot) => slot.id === cursor);
 	const step = current ? (steps[current.id] ?? "") : "";
@@ -265,20 +266,13 @@ function ProjectRunCockpit({
 			return next;
 		});
 	}
+	const currentIndex = current ? slots.indexOf(current) : -1;
 	const next = current
-		? [
-				...slots.slice(slots.findIndex((slot) => slot.id === current.id) + 1),
-				...slots.slice(
-					0,
-					slots.findIndex((slot) => slot.id === current.id),
-				),
-			]
-				.filter(missing)
-				.slice(0, 5)
+		? [...slots.slice(currentIndex + 1), ...slots.slice(0, currentIndex)].filter(missing).slice(0, 5)
 		: [];
 	const documents = current ? [current, ...next.filter((slot) => slot.id !== current.id)] : [];
 	const external = (slot: Slot) =>
-		slot.state !== "missing" &&
+		!missing(slot) &&
 		slot.fills.length > 0 &&
 		!slot.fills.some((fill) => fill.by === session.actor && fill.method === method);
 	const ownFill = current?.fills.find((fill) => fill.by === session.actor && fill.method === method);
@@ -311,9 +305,8 @@ function ProjectRunCockpit({
 	}, [hasMissing, slotsRead.hasNextPage, slotsRead.isFetchingNextPage, slotsRead.fetchNextPage]);
 	function move(delta: number): void {
 		if (!current) return;
-		const index = slots.findIndex((slot) => slot.id === current.id);
 		for (let distance = 1; distance <= slots.length; distance++) {
-			const candidate = slots[index + distance * delta];
+			const candidate = slots[currentIndex + distance * delta];
 			if (!candidate) return;
 			if (!external(candidate)) {
 				setCursor(candidate.id);
@@ -621,7 +614,10 @@ function ProjectRunCockpit({
 		const correction = record("skip", last.slot, "Withdrawn by the author", false, false, last.ready);
 		if (!correction) return;
 		withdrawn.current.add(last.ready);
-		setLast(null);
+		void correction.then(
+			() => setLast((value) => (value === last ? null : value)),
+			() => withdrawn.current.delete(last.ready),
+		);
 	}
 	const active = () => !noting;
 	const bindings: Binding[] = [
