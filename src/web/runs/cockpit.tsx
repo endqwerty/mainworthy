@@ -245,7 +245,7 @@ function ProjectRunCockpit({
 	const unreported = (slot: Slot) => missing(slot) && !ownFillOf(slot);
 	const held = (slot: Slot) => slot.work.kind === "held" && workHeldByOther(slot.work, session.actor, now);
 	const available = (slot: Slot) => unreported(slot) && !held(slot);
-	const first = slots.find(available) ?? slots.find((slot) => !held(slot));
+	const first = slots.find(available) ?? (slotsRead.hasNextPage ? undefined : slots.find((slot) => !held(slot)));
 	if (cursor === null && first) setCursor(first.id);
 	const current = cursor === null ? first : slots.find((slot) => slot.id === cursor);
 	const step = current ? (steps[current.id] ?? "") : "";
@@ -281,14 +281,14 @@ function ProjectRunCockpit({
 	const ownFill = current && ownFillOf(current);
 	const note = current ? (notes[current.id] ?? "") : "";
 	const { body: currentBody } = usePinnedCase(current);
-	const admittedMethod = Boolean(
+	const admittedMethod = !!(
 		run?.require.some((obligation) => obligation.kind === "exercise" && obligation.methods.includes(method)) &&
-			(!currentBody || currentBody.methods.includes(method)),
+		(!currentBody || currentBody.methods.includes(method))
 	);
-	const canRecord = Boolean(
+	const canRecord = !!(
 		current &&
-			session.can.includes("produce") &&
-			(reports.uncertain.has(current.id) || (!external(current) && run?.state === "open" && admittedMethod)),
+		session.can.includes("produce") &&
+		(reports.uncertain.has(current.id) || (!external(current) && run?.state === "open" && admittedMethod))
 	);
 	const hasAvailable = slots.some(available);
 	const allReported = slots.length > 0 && !slots.some(unreported) && !slotsRead.hasNextPage;
@@ -974,8 +974,8 @@ function usePinnedCase(slot: Slot | undefined) {
 	const read = useQueryOp({
 		project,
 		op: "get",
-		input: { refs: [slot?.case ?? ""], ...(slot ? { version: slot.version } : {}) },
-		enabled: Boolean(slot),
+		input: { refs: [slot?.case ?? ""], version: slot?.version },
+		enabled: !!slot,
 	});
 	const checked = RunCase.safeParse(read.data?.[0]);
 	return {

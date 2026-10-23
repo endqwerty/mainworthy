@@ -2,12 +2,14 @@ import { expect, test } from "bun:test";
 import { z } from "zod";
 import { advanceClock, browserAvailable, eventually, openPage, startServer } from "./support.ts";
 
-for (const count of [1, 201])
+for (const scenario of ["all-held", "mixed-page", "own-page"] as const)
 	test.skipIf(!browserAvailable)(
-		count === 1
+		scenario === "all-held"
 			? "an all-held cockpit waits for expiry before selecting work"
-			: "automatic cockpit paging searches beyond a held page",
+			: `automatic cockpit paging searches beyond a ${scenario === "mixed-page" ? "mixed reported and held" : "reported"} page`,
 		async () => {
+			const count = scenario === "all-held" ? 1 : 201;
+			const reported = scenario === "mixed-page" ? 1 : scenario === "own-page" ? 200 : 0;
 			const server = await startServer({ seed: false });
 			await server.api("propose", {
 				edits: Array.from({ length: count }, (_, n) => ({ op: "create", body: { title: `Held page ${n + 1}` } })),
@@ -22,18 +24,28 @@ for (const count of [1, 201])
 					project: "scratch",
 				}),
 			).token;
-			await Promise.all(
-				Array.from({ length: Math.min(count, 200) }, (_, i) =>
-					server.api("work", { do: "take", run: planned.run, slot: i + 1, seconds: 30 }, { token: other }),
-				),
-			);
+			if (reported)
+				await server.api("report", {
+					run: planned.run,
+					results: Array.from({ length: reported }, (_, n) => ({
+						test: { case: `C-${n + 1}` },
+						outcome: scenario === "own-page" ? "skip" : "pass",
+					})),
+				});
+			for (let slot = reported + 1; slot <= Math.min(count, 200); slot++)
+				await server.api(
+					"work",
+					{ do: "take", run: planned.run, slot, seconds: count === 1 ? 30 : 900 },
+					{ token: other },
+				);
 			const h = await openPage(server, {
 				path: `/p/scratch/runs/${planned.run.slice(2)}`,
 				setup: async (page) => page.clock.install(),
 			});
 			try {
-				await h.page.locator('[data-slot="1"][data-working="true"]').waitFor();
+				await h.page.locator('[data-slot="1"]').waitFor();
 				if (count === 1) {
+					await h.page.locator('[data-slot="1"][data-working="true"]').waitFor();
 					expect(await h.page.locator('[data-run-document][data-active="true"]').count()).toBe(0);
 					expect(await h.page.getByRole("button", { name: "p Pass", exact: true }).isDisabled()).toBe(true);
 					await h.page.keyboard.press("j");
@@ -46,8 +58,23 @@ for (const count of [1, 201])
 					await h.page.clock.fastForward(30_100);
 					await h.page.locator('[data-run-document="C-1"][data-active="true"]').waitFor();
 				} else {
-					await h.page.locator('[data-run-document="C-201"][data-active="true"]').waitFor();
+					await h.page.locator('[data-slot="201"]').waitFor();
+					if (process.env.MAINWORTHY_WORK_EVIDENCE)
+						await h.page.screenshot({
+							path: `${process.env.MAINWORTHY_WORK_EVIDENCE}/794-${scenario}-${process.env.MAINWORTHY_WORK_REVISION}.png`,
+						});
+					expect(
+						await h.page.locator('[data-run-document][data-active="true"]').getAttribute("data-run-document"),
+					).toBe("C-201");
 					expect(await h.page.getByRole("complementary", { name: "Up next" }).count()).toBe(0);
+					await h.page.keyboard.press("p");
+					await eventually(
+						() => server.api("find", { in: "slots", run: planned.run, limit: 500 }),
+						(reply) => reply.items.some((slot) => slot.case === "C-201" && slot.state === "satisfied"),
+					);
+					await h.page.reload();
+					await h.page.locator('[data-slot="201"]').waitFor();
+					await h.page.locator('[data-run-document="C-1"][data-active="true"]').waitFor();
 				}
 				expect(h.errors).toEqual([]);
 			} finally {
