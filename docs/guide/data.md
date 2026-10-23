@@ -369,8 +369,10 @@ native revisions, results, actors, or decisions. The checked vendor CSV examples
 contain snapshots, not revision history. XML, JSON, XLSX, attachments and replay
 of earlier revisions or results are not supported by these case importers.
 
-Parser diagnostics from `mainworthy import --format csv|testrail|qase` quote and shorten external values,
-escaping terminal control characters. Imported case content stays unchanged.
+Parser diagnostics from `mainworthy import --format csv|testrail|qase` quote external values and escape terminal
+control characters. Long suite and step-type identifiers are shortened; invalid execution-type diagnostics keep
+the full value and correction guidance. A CSV read failure shows the quoted filename and filesystem error code.
+All CLI errors fold CR/LF runs into `; ` and escape other controls. Imported case content stays unchanged.
 
 ## Import into a new instance
 

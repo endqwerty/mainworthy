@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 import { parseCaseImport } from "./cases.ts";
 import { parseJest } from "./jest.ts";
 import { parseJUnit } from "./junit.ts";
-import { reportJson } from "./native.ts";
 import { parsePlaywright } from "./playwright.ts";
 import { parsePytest } from "./pytest.ts";
 import { parseReport } from "./report.ts";
@@ -21,16 +20,6 @@ const failure = (run: () => unknown): string => {
 	throw new Error("Expected the report to be refused");
 };
 const suite = (name: string, assertionResults: unknown[] = []) => ({ name, status: "failed", assertionResults });
-
-test.each([undefined, 2])("report JSON escapes controls without shortening keys or values (indent %j)", (space) => {
-	const text = `${identifier}${'long value 🦊"\\'.repeat(30)}`;
-	const value = { [text]: [text, null, 7, true] };
-	const json = reportJson(value, space);
-	expect(JSON.parse(json)).toEqual(value);
-	expect(json.replaceAll("\n", "")).not.toMatch(controls);
-	expect(json).toContain("\\n::error::x");
-	expect(json).toContain("\\u0085");
-});
 
 test.each([
 	["suite execution error", () => parseJest({ testResults: [suite(identifier)] }, "/repo")],

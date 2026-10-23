@@ -1,9 +1,10 @@
 import { z } from "zod";
 import { CaseImportFormat, parseCaseImport } from "../../surfaces/formats/cases.ts";
+import { reportIdentifier } from "../../surfaces/formats/native.ts";
 import { guardedInput } from "../archive-stream.ts";
 import { assertPositionals } from "../args.ts";
 import { readEnvelope, unwrap } from "../client.ts";
-import { CliError } from "../errors.ts";
+import { CliError, fileReadError } from "../errors.ts";
 import { line, printJson } from "../output.ts";
 import type { AdapterCommand } from "./types.ts";
 
@@ -33,12 +34,17 @@ export const importCommand: AdapterCommand = {
 			if (!format.success) throw new CliError("invalid", "--format must be csv, testrail or qase");
 			if (args.has("case-prefix") && format.data !== "qase")
 				throw new CliError("invalid", "--case-prefix is for Qase CSV only");
-			if (!(await Bun.file(file).exists())) throw new CliError("invalid", `case file ${file} does not exist`);
 			if (Bun.file(file).size > 32 * 1024 * 1024) throw new CliError("invalid", "case CSV is larger than 32 MB");
+			let bytes: ArrayBuffer;
+			try {
+				bytes = await Bun.file(file).arrayBuffer();
+			} catch (error) {
+				throw fileReadError(reportIdentifier(file), error);
+			}
 			let edits: ReturnType<typeof parseCaseImport>;
 			try {
 				edits = parseCaseImport(
-					new TextDecoder("utf-8", { fatal: true }).decode(await Bun.file(file).arrayBuffer()),
+					new TextDecoder("utf-8", { fatal: true }).decode(bytes),
 					format.data,
 					args.value("case-prefix"),
 				);

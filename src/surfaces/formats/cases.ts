@@ -131,15 +131,9 @@ export function parseCaseImport(text: string, format: CaseImportFormat, prefix =
 			if (format === "qase") kind = row.automation ?? "";
 			if (format === "testrail")
 				kind = row["Automation Type"] || (/^(automated|manual)$/i.test(row.Type ?? "") ? row.Type : "") || "";
-			let execution: ReturnType<typeof csvExecution>;
-			try {
-				execution = csvExecution(kind);
-			} catch (error) {
-				throw new Error(reportIdentifier(error instanceof Error ? error.message : String(error)));
-			}
 			const body = {
 				...emptyBody(title),
-				...execution,
+				...csvExecution(kind),
 				pre: row[format === "testrail" ? "Preconditions" : "preconditions"] ?? "",
 				fields: { [`import.${format}.row.${i + 2}`]: JSON.stringify(row) },
 			};

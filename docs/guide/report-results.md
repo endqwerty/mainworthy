@@ -367,7 +367,9 @@ The JSON reporters keep different amounts of retry evidence:
 
 Report errors and warnings quote and shorten external identifiers, including suite and test names,
 report filenames and attachment paths, escaping terminal control characters. Human-readable receipts do the same
-for failure titles. JSON output escapes these controls without changing the values a JSON client reads.
+for failure titles. If a report file cannot be read, the error shows its quoted filename and filesystem error code,
+such as `EACCES`. All CLI errors fold CR/LF runs into `; ` and escape other controls.
+JSON output escapes controls while preserving JSON values; an absent top-level value is printed as `null`.
 Parsed test identities and failure evidence stay unchanged.
 Each report keeps at most 1,000 warnings, each at most 1,000 UTF-16 units, followed by one line counting any omitted warnings.
 The warning limit does not drop results or tries.

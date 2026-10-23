@@ -1,5 +1,5 @@
 import type { ResultIn } from "../../core/ops.ts";
-import { clip } from "../../core/text.ts";
+import { clip, reportJson } from "../../core/text.ts";
 
 export type ParsedResult = ResultIn & { attachmentPaths?: string[] };
 export type ParsedReport = { results: ParsedResult[]; warnings: string[] };
@@ -8,14 +8,6 @@ export type ParsedReport = { results: ParsedResult[]; warnings: string[] };
 export function reportIdentifier(value: string): string {
 	const shortened = clip(value, 120);
 	return reportJson(shortened + (shortened.length < value.length ? "…" : ""));
-}
-
-/** JSON output preserves values while escaping terminal controls JSON.stringify leaves literal. */
-export function reportJson(value: unknown, space?: number): string {
-	return JSON.stringify(value, null, space).replace(
-		/[\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g,
-		(char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
-	);
 }
 
 /** JUnit's 1,000-warning policy, shared by native formats without XML byte-offset context. */
