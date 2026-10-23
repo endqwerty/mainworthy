@@ -28,6 +28,78 @@ const refused = (reply: { status: number; body: unknown }) => {
 	expect(reply.body).toMatchObject({ ok: false, error: { code: "recent_proof_required" } });
 };
 
+for (const can of [undefined, ["read"]]) {
+	test(`browser join invitations require own recent proof (${can ? "read-only" : "default admin"})`, async () => {
+		const w = world();
+		const cookie = await joined(w, "ada", PASSWORD, { can: ["read", "admin"] });
+		stale(w);
+		const input = { do: "create", name: "new-person", ...(can ? { can } : {}), cmd: "join-proof" };
+		refused(await w.op("invitation", input, { cookie }));
+		expect(w.rows("SELECT id FROM actors WHERE name = 'new-person'")).toEqual([]);
+		expect(w.rows("SELECT id FROM commands WHERE id = 'join-proof'")).toEqual([]);
+		await signIn(w, "ada", PASSWORD);
+		refused(await w.op("invitation", input, { cookie }));
+		expect((await proof(w, cookie)).status).toBe(200);
+		expect((await w.op("invitation", input, { cookie })).status).toBe(200);
+		expect((await w.op("invitation", { do: "create", name: "token-person" }, bearer(TOKEN))).status).toBe(200);
+		const local = world({ mode: "local" });
+		expect((await local.op("invitation", { do: "create", name: "local-person" }, {})).status).toBe(200);
+	});
+}
+
+for (const via of ["direct", "team-grant", "team-member"] as const) {
+	test(`browser admin authority through ${via} requires own recent proof`, async () => {
+		const w = world();
+		await joined(w, "controlled", "a controlled person's password", { can: ["read"] });
+		const cookie = await joined(w, "ada", PASSWORD, { can: ["read", "admin"] });
+		await w.ok("admin", { do: "team.create", name: "Quality" });
+		if (via === "team-member")
+			await w.ok("admin", { do: "team.grant.set", team: "Quality", can: ["admin"], project: "scratch" });
+		else await w.ok("admin", { do: "team.member.add", team: "Quality", person: "controlled" });
+		stale(w);
+		const input =
+			via === "direct"
+				? { do: "grant.set", actor: "controlled", can: ["admin"], cmd: "elevate-proof" }
+				: via === "team-grant"
+					? { do: "team.grant.set", team: "Quality", can: ["admin"], cmd: "elevate-proof" }
+					: { do: "team.member.add", team: "Quality", person: "controlled", cmd: "elevate-proof" };
+		const before = must(await w.op<unknown[]>("admin", { do: "actor.list" }));
+		refused(await w.op("admin", input, { cookie }));
+		expect(must(await w.op<unknown[]>("admin", { do: "actor.list" }))).toEqual(before);
+		expect(w.rows("SELECT id FROM commands WHERE id = 'elevate-proof'")).toEqual([]);
+		await signIn(w, "ada", PASSWORD);
+		refused(await w.op("admin", input, { cookie }));
+		expect((await proof(w, cookie)).status).toBe(200);
+		expect((await w.op("admin", input, { cookie })).status).toBe(200);
+		stale(w);
+		const { cmd: _cmd, ...operatorInput } = input;
+		expect((await w.op("admin", operatorInput, bearer(TOKEN))).status).toBe(200);
+	});
+}
+
+test("queued team membership checks the current admin grant inside the writer", async () => {
+	const w = world();
+	await joined(w, "controlled", "a controlled person's password");
+	const cookie = await joined(w, "ada", PASSWORD, { can: ["read", "admin"] });
+	await w.ok("admin", { do: "team.create", name: "Quality" });
+	stale(w);
+	const gate = holdGate(w.instance);
+	try {
+		const grantWaiting = waitingAtGate(w.instance, 1);
+		const grant = w.op("admin", { do: "team.grant.set", team: "Quality", can: ["admin"] });
+		await grantWaiting;
+		const memberWaiting = waitingAtGate(w.instance, 1);
+		const member = w.op("admin", { do: "team.member.add", team: "Quality", person: "controlled" }, { cookie });
+		await memberWaiting;
+		await gate.release();
+		expect((await grant).status).toBe(200);
+		refused(await member);
+		expect(must(await w.op("admin", { do: "team.list" }))).toMatchObject([{ name: "Quality", members: [] }]);
+	} finally {
+		await gate.release();
+	}
+});
+
 for (const owner of [false, true]) {
 	for (const operation of ["credential", "admin"] as const) {
 		test(`a stale ${owner ? "owner" : "non-owner admin"} browser cannot mint a ${operation} token to reach recovery authority`, async () => {

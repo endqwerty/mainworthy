@@ -102,12 +102,15 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 		if (busy || !wanted || exists || can.length === 0) return;
 		setBusy(true);
 		setProblem("");
-		void createInvitation({
-			name: wanted,
-			expires,
-			grant: { can, project: onProject || null },
-			...(methods.data?.mail && email ? { email } : {}),
-		})
+		void proof
+			.run(() =>
+				createInvitation({
+					name: wanted,
+					expires,
+					grant: { can, project: onProject || null },
+					...(methods.data?.mail && email ? { email } : {}),
+				}),
+			)
 			.then((link) => {
 				setName("");
 				setEmail("");

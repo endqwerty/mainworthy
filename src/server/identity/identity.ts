@@ -1022,7 +1022,9 @@ function mustActor(db: Db, name: string): ActorRow {
 export function setGrant(
 	app: App,
 	input: { actor: string; project: number; can: readonly Capability[]; roles?: readonly Role[] },
+	caller: ProofContext | null = null,
 ): Role[] {
+	if (input.can.includes("admin") && caller?.context != null) requireRecentProof(app, caller);
 	const row = mustActor(app.db, input.actor);
 	refuseGrant(row.kind, input.can);
 	const wasAdmin = hasAdminGrant(app.db, row.id);

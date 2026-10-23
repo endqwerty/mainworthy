@@ -155,7 +155,7 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 		case "team.grant.remove":
 		case "team.history":
 			personOnly(env, "a team is administered");
-			return manageTeams(env.app, env.actor, orgId(db), input);
+			return manageTeams(env.app, env.actor, orgId(db), input, env.context);
 		case "project.create":
 			return createProject(env, input);
 		case "project.list":
@@ -232,12 +232,16 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 				throw invalid(`${input.actor} owns this instance and may do everything; that is not changed here`);
 			const project = projectOf(db, input.project);
 			if (input.do === "grant.remove") return { removed: removeGrant(env.app, { actor: input.actor, project }) };
-			const roles = setGrant(env.app, {
-				actor: input.actor,
-				project,
-				can: input.can,
-				...(input.roles === undefined ? {} : { roles: input.roles }),
-			});
+			const roles = setGrant(
+				env.app,
+				{
+					actor: input.actor,
+					project,
+					can: input.can,
+					...(input.roles === undefined ? {} : { roles: input.roles }),
+				},
+				{ actor: env.actor.id, context: env.context },
+			);
 			return { actor: input.actor, project: input.project ?? "*", can: input.can, roles };
 		}
 		case "actor.forget": {
@@ -283,7 +287,7 @@ export const adminOp = defineInstanceOp({
 	name: "admin",
 	output: REPLIES.admin,
 	summary:
-		"Projects, actors, teams, grants and tokens. There are no seats: an actor is free, and a token carries what its actor may do. Creating a token from a browser requires recent credential proof.",
+		"Projects, actors, teams, grants and tokens. There are no seats: an actor is free, and a token carries what its actor may do. Creating tokens or granting admin from a browser requires recent credential proof.",
 	input: AdminInput,
 	needs: "admin",
 	scope: "instance",

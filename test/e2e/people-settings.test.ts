@@ -470,6 +470,10 @@ test.skipIf(!browserAvailable)(
 			expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Make invitation link");
 			await page.keyboard.press("Enter");
 
+			const joinProof = page.getByRole("region", { name: "Confirm your sign-in", exact: true });
+			await joinProof.getByLabel("Password", { exact: true }).fill(OLD);
+			await joinProof.getByRole("button", { name: "Confirm credential", exact: true }).click();
+
 			// The keys go to the link's "Copy link": the button that sent the form is for the next person.
 			const link = page.getByLabel("Invitation link");
 			await link.waitFor();
@@ -523,6 +527,7 @@ test.skipIf(!browserAvailable)(
 			expect(await page.getByRole("button", { name: "Make invitation link" }).isDisabled()).toBe(true);
 			await page.locator("#invite-name").fill("");
 
+			await advanceClock(server, 10 * 60_000 + 1);
 			// The recovery link asks first, and says what it replaces.
 			await page.getByRole("button", { name: "Recovery link for tess" }).click();
 			await page.getByText("revokes all their tokens", { exact: false }).waitFor();
@@ -560,6 +565,7 @@ test.skipIf(!browserAvailable)(
 			expect(await page.getByRole("button", { name: "Make invitation link" }).isDisabled()).toBe(true);
 			expect(await invitation("mia", "join")).toMatchObject({ state: "open" });
 			expect(browser.errors).toEqual([
+				"Failed to load resource: the server responded with a status of 403 (Forbidden)",
 				"Failed to load resource: the server responded with a status of 403 (Forbidden)",
 				"Failed to load resource: net::ERR_FAILED",
 			]);

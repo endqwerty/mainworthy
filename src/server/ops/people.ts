@@ -186,7 +186,7 @@ export const invitationOp = defineInstanceOp({
 	name: "invitation",
 	output: REPLIES.invitation,
 	summary:
-		"Invite a person with a link: make one, list them, revoke one. Optionally send it by mail. The link is shown once. Issuing a recovery link from a browser needs the caller's recent credential proof; token and local recovery authority remain.",
+		"Invite a person with a link: make one, list them, revoke one. Optionally send it by mail. The link is shown once. Issuing any invitation from a browser needs the caller's recent credential proof; token and local authority remain.",
 	input: InvitationInput,
 	needs: "admin",
 	scope: "instance",

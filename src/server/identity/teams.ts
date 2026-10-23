@@ -5,7 +5,7 @@ import { type Actor, allProjects } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
 import { hasAdminGrant, providerVouches } from "./identity.ts";
-import { endSessionsWithoutFactor } from "./sessions.ts";
+import { endSessionsWithoutFactor, requireRecentProof } from "./sessions.ts";
 
 type Team = { id: number; name: string; created_at: number };
 type Grant = { project: number; can: string };
@@ -88,7 +88,7 @@ function grantsOf(db: Db, team: number) {
 	}));
 }
 
-export function manageTeams(app: App, by: Actor, org: number, input: TeamInput) {
+export function manageTeams(app: App, by: Actor, org: number, input: TeamInput, context: string | null = null) {
 	const db = app.db;
 	const keys = new Map(allProjects(db).map((project) => [project.id, project.key]));
 	const projectKey = (id: number): string => (id === 0 ? "*" : (keys.get(id) ?? `project ${id}`));
@@ -128,6 +128,12 @@ export function manageTeams(app: App, by: Actor, org: number, input: TeamInput) 
 			can: event.can === null ? null : json<Capability[]>(event.can),
 		}));
 	}
+	if (
+		context !== null &&
+		((input.do === "team.grant.set" && input.can.includes("admin")) ||
+			(input.do === "team.member.add" && grantsOf(db, team.id).some((grant) => grant.can.includes("admin"))))
+	)
+		requireRecentProof(app, { actor: by.id, context });
 	let person: number | null = null;
 	let project: number | null = null;
 	let can: string | null = null;
