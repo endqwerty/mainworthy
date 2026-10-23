@@ -760,6 +760,7 @@ enum Wire {
 		let change: ChangeBasis
 		let gate: ChangeImpactGate?
 		let counts: ChangeImpactCounts
+		let next: String?
 		let cases: [ChangedCase]
 	}
 

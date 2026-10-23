@@ -1,7 +1,7 @@
 // The demo's history: every day has something, in order, before today, and nothing in it comes back open.
 import { describe, expect, test } from "bun:test";
 import { demoCases } from "./cases.ts";
-import { DAY, dayStart, demoHistory, type HistoryEvent, todayAt } from "./history.ts";
+import { DAY, dayStart, demoHistory, type HistoryEvent, REVIEW_CHANGE, todayAt } from "./history.ts";
 
 // A Tuesday afternoon, so the fortnight before it holds two weekends.
 const SINCE = Date.UTC(2026, 9, 13, 15, 30);
@@ -12,6 +12,12 @@ const of = <K extends HistoryEvent["kind"]>(events: HistoryEvent[], kind: K) =>
 	events.filter((event): event is Extract<HistoryEvent, { kind: K }> => event.kind === kind);
 
 describe("the demo's history", () => {
+	test("today's review change selects enough existing checkout cases to show impact continuation", () => {
+		const checkout = suite.flatMap((item) => (item.folder.startsWith("Checkout") && item.test ? [item.test] : []));
+		expect(checkout.length).toBeGreaterThan(200);
+		for (const test of checkout) expect(REVIEW_CHANGE.files).toContain(test.file);
+	});
+
 	test("the same seed gives the same history, and another seed gives another", () => {
 		expect(history()).toEqual(history());
 		expect(history(14, 2)).not.toEqual(history());

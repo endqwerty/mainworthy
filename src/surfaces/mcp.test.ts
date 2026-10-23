@@ -34,9 +34,52 @@ const TOKEN_COUNTS: Record<string, number> = {
 	// The get contract now documents custom fields and result references; decision 0118 records the measured size.
 	get: 274,
 	find: 279,
-	impact: 164,
+	impact: 206,
 	since: 137,
 };
+
+test("MCP impact pages all 450 selected cases before advancing since", async () => {
+	const h = harness();
+	const server = mcpServer(
+		async (op, _project, input) => h.raw(op, input),
+		async () => ["scratch"],
+	);
+	const client = new Client({ name: "impact-pages", version: "1" });
+	const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+	try {
+		h.call("propose", {
+			edits: Array.from({ length: 450 }, (_, i) => ({
+				op: "create",
+				outline: `Affected case ${i + 1}\n  Check > Works`,
+				covers: ["REQ-396"],
+			})),
+		});
+		h.call("report", {
+			target: { commit: "mcpimpact396", pr: 396, title: "REQ-396: review cases" },
+			results: [{ test: { case: "C-1" }, outcome: "pass" }],
+		});
+		await server.connect(serverTransport);
+		await client.connect(clientTransport);
+		const call = (args: Record<string, unknown>) => client.callTool({ name: "impact", arguments: args });
+		let page = resultOf(await call({ change: "pr:396" }), REPLIES.impact);
+		expect(page.cases).toHaveLength(200);
+		expect(typeof page.next).toBe("string");
+		expect(page.cursor).toBe("s:0");
+		const restarted = resultOf(await call({ change: "pr:396", since: page.cursor }), REPLIES.impact);
+		expect(restarted.counts.cases).toBe(450);
+		const ids = page.cases.map((row) => row.id);
+		while (page.next) {
+			page = resultOf(await call({ change: "pr:396", cursor: page.next }), REPLIES.impact);
+			ids.push(...page.cases.map((row) => row.id));
+		}
+		expect(ids).toEqual(Array.from({ length: 450 }, (_, i) => `C-${i + 1}`));
+		expect(resultOf(await call({ change: "pr:396", since: page.cursor }), REPLIES.impact).cases).toEqual([]);
+	} finally {
+		await client.close();
+		await server.close();
+		h.close();
+	}
+});
 
 function resultOf<S extends z.ZodType>(reply: unknown, schema: S): z.output<S> {
 	const result = CallToolResultSchema.parse(reply);

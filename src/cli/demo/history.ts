@@ -16,6 +16,21 @@ export const REPO = "demo/shop";
 /** Today's trunk failure landed through this recorded pull request. No random stream is consumed. */
 export const LANDED_CHANGE = { pr: 481, branch: "coupon-rounding", title: "Round coupon totals consistently" };
 
+export const REVIEW_CHANGE = {
+	pr: 482,
+	branch: "coupon-total",
+	title: "Apply a percentage coupon",
+	files: [
+		"src/checkout.ts",
+		"src/shipping.ts",
+		"tests/checkout/coupons.spec.ts",
+		"tests/checkout/cart.spec.ts",
+		"tests/checkout/payment.spec.ts",
+		"tests/checkout/shipping.spec.ts",
+		"tests/checkout/tax.spec.ts",
+	],
+};
+
 export const AGENT_MODEL = "claude-opus-5-5";
 
 /**

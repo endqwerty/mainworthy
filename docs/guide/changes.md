@@ -45,6 +45,10 @@ See [when the fix arrives](./decide.md#when-the-fix-arrives).
 Once impact loads, "Impact" and "Uncovered files" show the related cases and paths,
 or say that there are none.
 Impact lists related cases and review information. It is not a code coverage measurement.
+The counts cover the full selection. The list starts with at most 200 cases; choose **More affected
+cases** until all cases are shown. Project updates refresh the loaded pages together. Uncovered files
+show the first 50 paths; the API's `counts.uncovered` reports the full count.
+The default demo's `pr:482` selects checkout test files so you can try paging its affected cases.
 
 ## Read the results behind the verdict
 
@@ -223,7 +227,8 @@ or new decisions change the live gate. Correcting `head` records another receipt
 new report time. Correcting only `landing` keeps the receipt. Reopening or closing without
 merging removes the active receipt. A later merge takes a new one. Audit exports retain
 all these observations. `impact --change` includes the active receipt's bounded manifest as
-`change.mergeReceipt`: gate summary, report time, result count and snapshot hash. Frozen results
+`change.mergeReceipt`: gate summary, report time, result count and snapshot hash. This manifest repeats
+on each impact page; impact's `next` pages affected cases, not the receipt. Frozen results
 are separate immutable pages, at most 50 rows and 64 KiB of evidence per call:
 
 ```sh

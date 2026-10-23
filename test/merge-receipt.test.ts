@@ -167,6 +167,7 @@ test("OpenAPI declares merge receipts and landing gates in the impact output sch
 	if (!schema) throw new Error("Expected impact path");
 	expect(JSON.stringify(schema)).toContain('"mergeReceipt":');
 	expect(JSON.stringify(schema)).toContain('"landing":');
+	expect(JSON.stringify(schema)).toContain('"next":');
 });
 
 test("a large report shares its frozen evidence across repeated reopen and merge observations", () => {
@@ -181,11 +182,26 @@ test("a large report shares its frozen evidence across repeated reopen and merge
 });
 
 test("reading a change with a large receipt returns a bounded manifest and pages its frozen results", () => {
-	h.call("report", ciReport({ commit: "receipt726", branch: "feature", pr: 726, n: 3000 }));
+	h.call("propose", {
+		edits: Array.from({ length: 201 }, (_, i) => ({
+			op: "create",
+			outline: `Affected case ${i + 1}\n  Check > Works`,
+			covers: ["REQ-396"],
+		})),
+	});
+	const report = ciReport({ commit: "receipt726", branch: "feature", pr: 726, n: 3000 });
+	h.call("report", { ...report, target: { ...report.target, title: "REQ-396: review affected cases" } });
 	end();
-	const impact = h.call<{ change: { mergeReceipt: { id: number; count: number } } }>("impact", { change: "pr:726" });
+	type Impact = { change: { mergeReceipt: { id: number; count: number } }; cases: unknown[]; next: string | null };
+	const impact = h.call<Impact>("impact", { change: "pr:726" });
 	expect(JSON.stringify(impact.change.mergeReceipt).length).toBeLessThan(4096);
 	expect(impact.change.mergeReceipt.count).toBe(3000);
+	expect(impact.cases).toHaveLength(200);
+	expect(typeof impact.next).toBe("string");
+	const rest = h.call<Impact>("impact", { change: "pr:726", cursor: impact.next });
+	expect(rest.change.mergeReceipt).toEqual(impact.change.mergeReceipt);
+	expect(rest.cases).toHaveLength(1);
+	expect(rest.next).toBeNull();
 	const page = h.call<{ count: number; cursor: string | null; items: unknown[] }>("find", {
 		in: "receipt-results",
 		receipt: impact.change.mergeReceipt.id,

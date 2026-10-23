@@ -301,7 +301,9 @@ To inspect a change and the results its gate counted, follow these steps:
 2. Press a change to read its head and base commits, the gate's verdict and reason, its failing tests and
    linked cases, and the cases it touches. A gate that waits for shards of a job draws them under its reason: tap
    the strip to read which shards reported and which are still due. Pull down to refresh. The list and open page also follow the
-   project's change stream. An open page stays readable when its change leaves the list.
+   project's change stream. An open page stays readable when its change leaves the list. Affected cases
+   are read across every impact page before they are shown. If a project write interrupts paging, the app
+   starts the detail read again once; if it keeps changing, pull down to try again.
 3. Press an open question to read its evidence and answer it, as in Queue. When you answer, the change's
    gate is read again.
 4. Read **Results** to see every test the gate on the page counted, including tests tracked without a case. Each row

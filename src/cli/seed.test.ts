@@ -31,6 +31,17 @@ const Project = z.array(z.object({ key: z.string(), policy: z.string() }));
 
 const on = (client: Client, project: string) => new Client({ ...client.options, project });
 const dayOf = (at: number) => Math.floor(at / DAY);
+
+test("the demo change selects its checkout tests for impact", async () => {
+	await withInstance(async ({ client }) => {
+		await seed(client, { project: "impact-demo", cases: 40, days: 0, unlinkedFiles: 0 });
+		const demo = on(client, "impact-demo");
+		const impact = await demo.call("impact", { change: "pr:482" });
+		expect(impact.cases.some((row) => row.why.some((reason) => reason.startsWith("test:tests/checkout/")))).toBe(true);
+		expect(impact.counts.cases).toBeGreaterThan(1);
+	});
+});
+
 /** Every case's title, archived or not (the history archives two), in the order of the alphabet. */
 const titlesOf = async (client: Client) =>
 	(

@@ -265,6 +265,25 @@ extension ProjectClient {
 
 	private func readChange(_ change: String, known: ChangeSummary?) async throws -> ChangeDetails? {
 		let affected: Wire.ChangeImpact = try await server.read("impact", in: key, ["change": .string(change)])
+		var cases = affected.cases
+		var next = affected.next
+		var cursors: Set<String> = []
+		while let cursor = next {
+			try Task.checkCancellation()
+			guard cursors.insert(cursor).inserted else { throw ClientError.unreadable }
+			let page: Wire.ChangeImpact
+			do {
+				page = try await server.read("impact", in: key, ["change": .string(change), "cursor": .string(cursor)])
+			} catch ClientError.refused(let code, _) where code == "conflict" {
+				return nil
+			}
+			guard page.change == affected.change, page.gate == affected.gate, page.counts == affected.counts else { return nil }
+			cases += page.cases
+			next = page.next
+		}
+		guard cases.count == affected.counts.cases, Set(cases.map(\.id)).count == cases.count else {
+			throw ClientError.unreadable
+		}
 		async let gate: Wire.ChangeGate = server.read("gate", in: key, ["change": .string(change)])
 		async let inbox: Wire.Inbox = server.read(
 			"inbox", in: key, ["state": "open", "on": .string(change), "limit": 500]
@@ -296,7 +315,7 @@ extension ProjectClient {
 			change: ChangeSummary(key: change, basis: affected.change, gate: status, header: header, known: known),
 			base: affected.change.base, gate: ChangeGate(status),
 			questions: questions.items.map(Question.init), failing: failing,
-			cases: affected.cases.map(ChangedCase.init), caseCount: affected.counts.cases
+			cases: cases.map(ChangedCase.init), caseCount: affected.counts.cases
 		)
 	}
 }

@@ -660,6 +660,7 @@ export const ImpactReply = z.looseObject({
 	decided: z.array(Settled),
 	policy: text,
 	cursor: text,
+	next: nullableText,
 });
 export const SinceReply = z.looseObject({
 	changed: z.array(z.looseObject({ ref: text, version: whole, hash: text, title: text, state: text, changed: text })),
