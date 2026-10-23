@@ -545,3 +545,298 @@ for (const queryFolder of ["Original", "original"]) {
 		30_000,
 	);
 }
+
+test.skipIf(!browserAvailable)(
+	"an archived case can be found and restored after reloading",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [{ op: "create", folder: "Original", tags: ["recover"], body: { title: "Recover this case" } }],
+		});
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1?folder=Original" });
+		try {
+			const { page } = h;
+			await page.locator(".ctitle").waitFor();
+			await page.keyboard.press("#");
+			await eventually(
+				() => server.api("get", { refs: ["C-1"] }),
+				(rows) => rows[0]?.state === "archived",
+			);
+			await page.reload();
+			await page.locator("#lcount").filter({ hasText: "0 cases" }).waitFor();
+			expect(await page.locator("#list").getByRole("option").count()).toBe(0);
+			await page.locator("#detail .chip").filter({ hasText: "Archived" }).waitFor();
+			if (process.env.MAINWORTHY_ARCHIVE_SCREENSHOT)
+				await page.screenshot({ path: process.env.MAINWORTHY_ARCHIVE_SCREENSHOT });
+			await page.getByRole("button", { name: "Archived", exact: true }).click();
+			await page.getByRole("textbox", { name: "Filter cases", exact: true }).fill("Recover");
+			await page.waitForURL("**state=archived*text=Recover");
+			await page.getByRole("option").filter({ hasText: "C-1" }).click();
+			await page.locator("#detail .chip").filter({ hasText: "Archived" }).waitFor();
+			await page.reload();
+			await page.locator("#detail .chip").filter({ hasText: "Archived" }).waitFor();
+			await page.keyboard.press("ControlOrMeta+k");
+			await page.getByRole("option", { name: /Restore selected/ }).click();
+			await eventually(
+				() => server.api("get", { refs: ["C-1"] }),
+				(rows) => rows[0]?.state === "active",
+			);
+			await page.reload();
+			await page.getByRole("button", { name: /All cases/ }).click();
+			await page.locator("button.fo").filter({ hasText: "Original" }).click();
+			await page.getByRole("option").filter({ hasText: "C-1" }).waitFor();
+			expect(await page.locator("#detail .chip").filter({ hasText: "Archived" }).count()).toBe(0);
+			const [restored] = await server.api("get", { refs: ["C-1"] });
+			expect(restored?.version).toBe(1);
+			expect(restored?.folder).toMatchObject({ path: "Original" });
+			expect(restored?.tags).toEqual(["recover"]);
+			const timeline = await server.api("timeline", { ref: "C-1" });
+			expect(timeline.entries.filter((entry) => entry.t === "placement")).toHaveLength(2);
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"a phone restores an archived case from its old URL through Actions",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", { edits: [{ op: "create", body: { title: "Phone recovery" } }] });
+		await server.api("propose", { edits: [{ op: "state", cases: ["C-1"], to: "archived" }] });
+		const h = await openPage(server, { device: "phone", path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = h;
+			await page.locator("#detail .chip").filter({ hasText: "Archived" }).waitFor();
+			if (process.env.MAINWORTHY_ARCHIVE_PHONE_SCREENSHOT)
+				await page.screenshot({ path: process.env.MAINWORTHY_ARCHIVE_PHONE_SCREENSHOT });
+			await page.getByRole("button", { name: "Actions", exact: true }).tap();
+			expect(await page.getByRole("option", { name: /Archive selected/ }).count()).toBe(0);
+			await page.getByRole("option", { name: /Restore selected/ }).tap();
+			await eventually(
+				() => server.api("get", { refs: ["C-1"] }),
+				(rows) => rows[0]?.state === "active",
+			);
+			await page.reload();
+			await page.locator(".ctitle").waitFor();
+			expect(await page.locator("#detail .chip").filter({ hasText: "Archived" }).count()).toBe(0);
+			await page.getByRole("button", { name: "Menu", exact: true }).tap();
+			await page.getByRole("button", { name: "Archived", exact: true }).tap();
+			await page.getByText("No archived cases match this view.", { exact: true }).waitFor();
+			await page.getByRole("button", { name: "Actions", exact: true }).tap();
+			expect(await page.getByRole("option", { name: /Restore selected/ }).count()).toBe(0);
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"picking an archived case at its old URL keeps Restore selected",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", { edits: [{ op: "create", body: { title: "Picked archive" } }] });
+		await server.api("propose", { edits: [{ op: "state", cases: ["C-1"], to: "archived" }] });
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = h;
+			await page.locator("#detail .chip").filter({ hasText: "Archived" }).waitFor();
+			await page.keyboard.press("x");
+			await page.keyboard.press("ControlOrMeta+k");
+			if (process.env.MAINWORTHY_PICKED_ARCHIVE_SCREENSHOT) {
+				await page.getByRole("option", { name: /Archive selected|Restore selected/ }).scrollIntoViewIfNeeded();
+				await page.screenshot({ path: process.env.MAINWORTHY_PICKED_ARCHIVE_SCREENSHOT });
+			}
+			await page.getByRole("option", { name: /Restore selected/ }).waitFor();
+			expect(await page.getByRole("option", { name: /Archive selected/ }).count()).toBe(0);
+			await page.keyboard.press("Escape");
+			await page.keyboard.press("#");
+			await eventually(
+				() => server.api("get", { refs: ["C-1"] }),
+				(rows) => rows[0]?.state === "active",
+			);
+			await page.reload();
+			await page.locator(".ctitle").waitFor();
+			expect(await page.locator("#detail .chip").filter({ hasText: "Archived" }).count()).toBe(0);
+			expect(
+				(await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "placement"),
+			).toHaveLength(2);
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"mixed archive states refuse and an unread pick must be opened before restoring",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [
+				{ op: "create", body: { title: "Archived pick" } },
+				{ op: "create", body: { title: "Active pick" } },
+			],
+		});
+		await server.api("propose", { edits: [{ op: "state", cases: ["C-1"], to: "archived" }] });
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = h;
+			await page.locator("#detail .chip").filter({ hasText: "Archived" }).waitFor();
+			await page.keyboard.press("x");
+			await page.locator("#list").getByRole("option").filter({ hasText: "C-2" }).click();
+			await page.getByRole("button", { name: "Active pick", exact: true }).waitFor();
+			await page.keyboard.press("x");
+			await page.goBack();
+			await page.locator("#detail .chip").filter({ hasText: "Archived" }).waitFor();
+			await page.keyboard.press("ControlOrMeta+k");
+			await page.getByRole("option", { name: /Archive\/restore unavailable/ }).waitFor();
+			await page.keyboard.press("Escape");
+			await page.keyboard.press("#");
+			await page.locator("#stat").filter({ hasText: "Select only active or only archived cases." }).waitFor();
+			const states = await server.api("get", { refs: ["C-1", "C-2"] });
+			expect(states.map((row) => row.state)).toEqual(["archived", "active"]);
+			expect(
+				(await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "placement"),
+			).toHaveLength(1);
+			expect(
+				(await server.api("timeline", { ref: "C-2" })).entries.filter((entry) => entry.t === "placement"),
+			).toHaveLength(0);
+			await page.locator("#list").getByRole("option").filter({ hasText: "C-2" }).click();
+			await page.getByRole("button", { name: "Active pick", exact: true }).waitFor();
+			await page.keyboard.press("x");
+			await page.keyboard.press("#");
+			await page.locator("#stat").filter({ hasText: "Open selected cases and wait for their state." }).waitFor();
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.state).toBe("archived");
+			await page.goBack();
+			await page.locator("#detail .chip").filter({ hasText: "Archived" }).waitFor();
+			await page.keyboard.press("#");
+			await eventually(
+				() => server.api("get", { refs: ["C-1", "C-2"] }),
+				(rows) => rows.every((row) => row.state === "active"),
+			);
+			expect(
+				(await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "placement"),
+			).toHaveLength(2);
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"an off-list pick cannot undo another person's restore using its saved state",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [
+				{ op: "create", folder: "A", body: { title: "Picked in A" } },
+				{ op: "create", folder: "B", body: { title: "Reading in B" } },
+			],
+		});
+		await server.api("propose", { edits: [{ op: "state", cases: ["C-1"], to: "archived" }] });
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = h;
+			await page.locator("#detail .chip").filter({ hasText: "Archived" }).waitFor();
+			await page.keyboard.press("x");
+			await page.locator("button.fo").filter({ hasText: "B" }).click();
+			await page.locator("#list").getByRole("option").filter({ hasText: "C-2" }).click();
+			await page.getByRole("button", { name: "Reading in B", exact: true }).waitFor();
+			await server.api("propose", { edits: [{ op: "state", cases: ["C-1"], to: "active" }] });
+			await page.keyboard.press("ControlOrMeta+k");
+			if (process.env.MAINWORTHY_PICKED_UNREAD_SCREENSHOT) {
+				await page
+					.getByRole("option", { name: /Archive selected|Restore selected|unavailable/ })
+					.scrollIntoViewIfNeeded();
+				await page.screenshot({ path: process.env.MAINWORTHY_PICKED_UNREAD_SCREENSHOT });
+			}
+			await page.getByRole("option", { name: /Archive\/restore unavailable/ }).waitFor();
+			await page.keyboard.press("Escape");
+			await page.keyboard.press("#");
+			await page.locator("#stat").filter({ hasText: "Open selected cases and wait for their state." }).waitFor();
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.state).toBe("active");
+			expect(
+				(await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "placement"),
+			).toHaveLength(2);
+			await page.keyboard.press("u");
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.state).toBe("active");
+			expect(
+				(await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "placement"),
+			).toHaveLength(2);
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"a case picked before its detail loads asks to wait rather than claiming a mixed selection",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [
+				{ op: "create", folder: "A", body: { title: "Waiting in A" } },
+				{ op: "create", folder: "B", body: { title: "Loaded in B" } },
+			],
+		});
+		await server.api("propose", { edits: [{ op: "state", cases: ["C-1"], to: "archived" }] });
+		let release = () => {};
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		let requested = false;
+		const h = await openPage(server, {
+			path: "/p/scratch/suite/c/1?folder=B",
+			setup: async (_page, context) => {
+				await context.route("**/api/p/scratch/get", async (route) => {
+					const input = z.object({ refs: z.array(z.string()) }).parse(route.request().postDataJSON());
+					if (input.refs.includes("C-1")) {
+						requested = true;
+						await held;
+					}
+					await route.continue();
+				});
+			},
+		});
+		try {
+			const { page } = h;
+			await page.locator("#list").getByRole("option").filter({ hasText: "C-2" }).waitFor();
+			await eventually(async () => requested, Boolean);
+			await page.keyboard.press("x");
+			await page.keyboard.press("#");
+			await page.locator("#stat").filter({ hasText: "Open selected cases and wait for their state." }).waitFor();
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.state).toBe("archived");
+			release();
+			await page.locator("#detail .chip").filter({ hasText: "Archived" }).waitFor();
+			await page.keyboard.press("#");
+			await eventually(
+				() => server.api("get", { refs: ["C-1"] }),
+				(rows) => rows[0]?.state === "active",
+			);
+			expect(
+				(await server.api("timeline", { ref: "C-1" })).entries.filter((entry) => entry.t === "placement"),
+			).toHaveLength(2);
+			expect(h.errors).toEqual([]);
+		} finally {
+			release();
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);

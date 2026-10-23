@@ -94,7 +94,7 @@ Alt (Option on a Mac) works with the letter or bracket key shown below.
 | <kbd>m</kbd> | Move selected to a folder |
 | <kbd>t</kbd> | Tag selected |
 | <kbd>Alt</kbd> <kbd>t</kbd> | Remove tag from selected cases |
-| <kbd>#</kbd> | Archive selected |
+| <kbd>#</kbd> | Archive selected active cases, or restore selected archived cases. Mixed or unread selections are refused. |
 | <kbd>u</kbd> | Undo the last move, tag or archive. With nothing to undo, restores the version before. |
 | <kbd>Space</kbd> | Peek timeline |
 | <kbd>]</kbd> | Next folder |

@@ -420,6 +420,8 @@ function Workbench({
 		route,
 		palette !== null || help || signOutOpen,
 	);
+	const suiteParams = new URLSearchParams(location.search);
+	const archived = suiteParams.get("state") === "archived";
 	const suiteOpen = route.screen === "suite" || route.screen === "case";
 	useEffect(() => {
 		const change = () =>
@@ -460,7 +462,7 @@ function Workbench({
 			setStatus(error instanceof Error ? error.message : "Cannot read your home. Try again.");
 		}
 	}, [project]);
-	const filterSuite = (changes: { folder?: string | null; tag?: string | null }): void => {
+	const filterSuite = (changes: { folder?: string | null; tag?: string | null; state?: string | null }): void => {
 		const params = new URLSearchParams(location.search);
 		for (const [key, value] of Object.entries(changes)) {
 			if (value === null) params.delete(key);
@@ -742,15 +744,18 @@ function Workbench({
 						<div className="suite-tree">
 							<div className="sech side">Folders</div>
 							<div id="tree">
-								<button
-									className={`fo ${route.folder === null ? "on" : ""}`}
-									type="button"
-									onClick={() => filterSuite({ folder: null })}
-								>
-									<span className="tw" />
-									<span className="fn">All cases</span>
-									<span className="n">{folders.data?.count ?? 0}</span>
-								</button>
+								{["All cases", "Archived"].map((label, index) => (
+									<button
+										key={label}
+										className={`fo ${route.folder === null && archived === Boolean(index) ? "on" : ""}`}
+										type="button"
+										onClick={() => filterSuite({ folder: null, state: index ? "archived" : null })}
+									>
+										<span className="tw" />
+										<span className="fn">{label}</span>
+										{!index && <span className="n">{folders.data?.count ?? 0}</span>}
+									</button>
+								))}
 								{[...(folders.data?.items ?? [])]
 									.sort((a, b) => String(a.path).localeCompare(String(b.path)))
 									.map((folder) => {
@@ -789,7 +794,7 @@ function Workbench({
 							</div>
 							<div className="sidebar-tags">
 								<div className="sech side">Tags</div>
-								{new URLSearchParams(location.search).has("tag") && (
+								{suiteParams.has("tag") && (
 									<button type="button" className="fo" onClick={() => filterSuite({ tag: null })}>
 										All tags
 									</button>
@@ -798,7 +803,7 @@ function Workbench({
 									<button
 										key={tag}
 										type="button"
-										className={`fo ${new URLSearchParams(location.search).getAll("tag").includes(tag) ? "on" : ""}`}
+										className={`fo ${suiteParams.getAll("tag").includes(tag) ? "on" : ""}`}
 										onClick={() => {
 											filterSuite({ tag });
 										}}

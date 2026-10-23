@@ -1,30 +1,14 @@
 import { z } from "zod";
-import { CaseBody, CaseKind, ExpandedStep, Step, StepId } from "../../core/model.ts";
-import { Proofs } from "../../core/replies.ts";
+import { CaseBody, CaseKind, StepId } from "../../core/model.ts";
+import { CaseDocument, CaseSummary } from "../../core/replies.ts";
 import {
 	nullableNumber as schemaNullableNumber,
 	number as schemaNumber,
 	text as schemaText,
-	texts as schemaTexts,
 } from "../../core/schema.ts";
 import type { Draft } from "../lib/drafts.ts";
 import { randomId } from "../lib/ids.ts";
-export const CaseRow = z.object({
-	ref: schemaText,
-	title: schemaText,
-	folder: schemaNumber,
-	rank: schemaText,
-	tags: schemaTexts,
-	version: schemaNumber,
-	hash: schemaText,
-	steps: schemaNumber,
-	methods: schemaTexts,
-	state: schemaText,
-	updatedAt: schemaNumber,
-	updatedBy: schemaText,
-	proof: Proofs,
-	open: schemaNumber,
-});
+export const CaseRow = CaseSummary;
 export type CaseRow = z.infer<typeof CaseRow>;
 export const FolderRow = z.object({
 	id: schemaNumber,
@@ -36,29 +20,16 @@ export const FolderRow = z.object({
 	cases: schemaNumber,
 });
 export type FolderRow = z.infer<typeof FolderRow>;
-export const CaseView = z.object({
-	ref: schemaText,
-	version: schemaNumber,
-	head: schemaNumber,
-	hash: schemaText,
-	state: schemaText,
-	title: schemaText,
-	pre: schemaText,
-	steps: z.array(ExpandedStep),
-	sourceSteps: z.array(Step).optional(),
-	kind: CaseKind.default("case"),
-	users: z.array(z.object({ case: schemaText, base: schemaNumber, versions: z.array(schemaNumber) })).default([]),
-	methods: CaseBody.shape.methods,
-	automate: CaseBody.shape.automate,
-	fields: CaseBody.shape.fields.default({}),
-	tags: schemaTexts,
-	covers: schemaTexts,
-	folder: z.object({ id: schemaNumber, path: schemaText }),
-	updated: z.object({ at: schemaNumber, by: schemaText, kind: schemaText }),
-	proof: Proofs,
-	open: schemaNumber,
-	usedStepIds: z.array(StepId).default([]),
-});
+export const CaseView = CaseDocument.omit({ etag: true, claim: true, hasFragments: true, tests: true })
+	.required()
+	.extend({
+		sourceSteps: CaseDocument.shape.sourceSteps,
+		kind: CaseKind.default("case"),
+		users: CaseDocument.shape.users.default([]),
+		methods: CaseBody.shape.methods,
+		fields: CaseBody.shape.fields.default({}),
+		usedStepIds: z.array(StepId).default([]),
+	});
 export type CaseView = z.infer<typeof CaseView>;
 export function bodyOf(view: CaseView): CaseBody {
 	return {

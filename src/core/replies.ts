@@ -304,8 +304,9 @@ const Proof = z
 	.nullable();
 export const Proofs = z.object({ human: Proof, auto: Proof, agent: Proof });
 export type Proofs = z.infer<typeof Proofs>;
-const CaseDocument = z.looseObject({
-	ref: text.regex(/^C-\d+$/),
+const caseRef = text.regex(/^C-\d+$/);
+export const CaseDocument = z.looseObject({
+	ref: caseRef,
 	version: whole,
 	head: whole,
 	etag: text,
@@ -330,8 +331,8 @@ const CaseDocument = z.looseObject({
 	open: whole.optional(),
 	tests: z.array(z.looseObject({ t: text, name: text, file: nullableText })).optional(),
 });
-const CaseSummary = z.looseObject({
-	ref: text.regex(/^C-\d+$/),
+export const CaseSummary = z.looseObject({
+	ref: caseRef,
 	title: text,
 	folder: whole,
 	rank: text,
@@ -578,8 +579,8 @@ const GetRow: z.ZodType<Record<string, unknown>> = z.union([
 	z.object({ ref: text.regex(/^(commit:|change:)/), gate: GateStatus }),
 	Result.extend({ ref: text.regex(/^result:[1-9]\d*$/), detail: nullableText }),
 	CaseDocument,
-	z.looseObject({ ref: text.regex(/^C-\d+$/), unchanged: z.literal(true), hash: text, etag: text }),
-	z.looseObject({ ref: text.regex(/^C-\d+$/), version: whole, hash: text, etag: text, md: text }),
+	z.looseObject({ ref: caseRef, unchanged: z.literal(true), hash: text, etag: text }),
+	z.looseObject({ ref: caseRef, version: whole, hash: text, etag: text, md: text }),
 	QuestionItem,
 	Run,
 	Proposal,
