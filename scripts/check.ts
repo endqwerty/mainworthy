@@ -44,6 +44,7 @@ import {
 	writeTimings,
 } from "./check-plan.ts";
 import { requireReady } from "./preflight.ts";
+import { ownedChildren } from "./work/processes.ts";
 
 requireReady("check");
 
@@ -60,6 +61,9 @@ const everyFile = phases.length === 2;
 const whole = everyFile && workers === undefined;
 
 const scratch = mkdtempSync(join(tmpdir(), "mainworthy-check-"));
+const ownership = join(scratch, "owned-children");
+mkdirSync(ownership);
+let testOutcome: Outcome | undefined;
 const timings = join(scratch, "timings.json");
 if (existsSync(TIMINGS)) copyFileSync(TIMINGS, timings);
 const children = new Set<Bun.Subprocess>();
@@ -94,8 +98,19 @@ const leave = (code: number): Promise<never> => {
 				clearTimeout(force);
 			}),
 		);
+		const deadline = Date.now() + 4_000;
+		let leaked = await ownedChildren(ownership);
+		while (leaked.length > 0 && Date.now() < deadline) {
+			await Bun.sleep(50);
+			leaked = await ownedChildren(ownership);
+		}
+		console.log(
+			`check: ${leaked.length} owned ${leaked.length === 1 ? "child" : "children"} still alive${leaked.length ? ` (pids: ${leaked.join(", ")})` : ""}`,
+		);
+		const exit = code || (browserFailed || leaked.length > 0 ? 1 : 0);
+		if (junit && testOutcome) await Bun.write(outcomePath(junit), `${JSON.stringify({ ...testOutcome, exit })}\n`);
 		rmSync(scratch, { recursive: true, force: true });
-		process.exit(code || (browserFailed ? 1 : 0));
+		process.exit(exit);
 	})();
 	return leaving;
 };
@@ -126,7 +141,12 @@ async function run(
 		stdin: "ignore",
 		stdout: out,
 		stderr: out,
-		env: { ...process.env, MAINWORTHY_READERS: process.env.MAINWORTHY_READERS ?? testReaders(), ...env },
+		env: {
+			...process.env,
+			MAINWORTHY_TEST_CHILDREN: ownership,
+			MAINWORTHY_READERS: process.env.MAINWORTHY_READERS ?? testReaders(),
+			...env,
+		},
 	});
 	children.add(child);
 	const exit = await child.exited;
@@ -234,8 +254,7 @@ for (const part of parts) {
 }
 
 if (junit) {
-	const outcome: Outcome = { exit: testParts[0]?.exit ?? 1, seconds: testSeconds };
-	await Bun.write(outcomePath(junit), `${JSON.stringify(outcome)}\n`);
+	testOutcome = { exit: testParts[0]?.exit ?? 1, seconds: testSeconds };
 }
 const measured: unknown = existsSync(timings) ? JSON.parse(readFileSync(timings, "utf8")) : null;
 if (record) {
