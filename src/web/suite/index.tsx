@@ -132,7 +132,8 @@ function sentBody(draft: Draft): CaseBody {
 const focusOnce = (node: HTMLElement | null): void => node?.focus();
 
 export function SuiteScreen() {
-	const { project, route, setStatus, openPalette } = useApp();
+	const { project, session, route, setStatus, openPalette } = useApp();
+	const projectIdentity = session.projects.find((entry) => entry.key === project)?.identity;
 	// Cleanup and recursive saves retain the route that owned this render.
 	const navigation = navigationToken();
 	const owner = useRef(deviceSession()).current;
@@ -182,6 +183,28 @@ export function SuiteScreen() {
 	selectedRef.current = selected;
 	const conflict = draft?.conflict ?? (selected ? captures.get(selected)?.conflict : undefined) ?? null;
 	const displayedDraft = draft ?? (conflict ? captures.get(conflict.draftId) : null);
+	const mayRecover = useCallback(
+		(saved: Draft): boolean => {
+			if (!projectIdentity) {
+				setStatus("The current project's identity is unavailable. Reload before saving a draft.");
+				return false;
+			}
+			if (
+				(saved.sent && saved.sent.input.projectIdentity !== projectIdentity) ||
+				saved.conflict?.sentMerges.some((sent) => sent.projectIdentity !== projectIdentity)
+			) {
+				setStatus(
+					"This saved draft cannot be retried here. The project it was written for is gone or cannot be identified. Your text is kept on this device.",
+				);
+				return false;
+			}
+			return true;
+		},
+		[projectIdentity, setStatus],
+	);
+	useEffect(() => {
+		if (displayedDraft?.sent || displayedDraft?.conflict?.sentMerges.length) mayRecover(displayedDraft);
+	}, [displayedDraft, mayRecover]);
 	const ownedElsewhere = Boolean(displayedDraft && displayedDraft.owner !== windowId);
 	const resolving = useRef(new Set<string>());
 	const uncertainMerges = useRef(new Set<string>());
@@ -951,7 +974,9 @@ export function SuiteScreen() {
 	 */
 	const settleAnswered = useCallback(
 		async (state: ConflictState, answer: string): Promise<void> => {
-			for (const sent of [...(cardDraft(state)?.conflict.sentMerges ?? [])].reverse()) {
+			const saved = cardDraft(state);
+			if (!saved || !mayRecover(saved.draft)) return;
+			for (const sent of [...saved.conflict.sentMerges].reverse()) {
 				const found = await call("command", { cmd: sent.cmd }, { project, owner });
 				if (!sessionCurrent(owner) || !mayWrite(state.draftId)) return;
 				if (found.state !== "done") continue;
@@ -976,7 +1001,7 @@ export function SuiteScreen() {
 			uncertainMerges.current.delete(state.q);
 			void invalidateProject(project);
 		},
-		[project, owner, mayWrite, cardDraft, settleMerge, holdCase, dropDraft, forgetRequest, setStatus],
+		[project, owner, mayWrite, mayRecover, cardDraft, settleMerge, holdCase, dropDraft, forgetRequest, setStatus],
 	);
 	useEffect(() => {
 		const read = CardQuestion.safeParse(conflictQuestion.data?.[0]);
@@ -1000,6 +1025,8 @@ export function SuiteScreen() {
 
 	async function resolveConflict(state: ConflictState, merged: CaseBody): Promise<void> {
 		if (resolving.current.has(state.q) || !mayWrite(state.draftId)) return;
+		const saved = cardDraft(state);
+		if (!saved || !mayRecover(saved.draft)) return;
 		resolving.current.add(state.q);
 		let asked = false;
 		const question = async () => CardQuestion.parse((await call("get", { refs: [state.q] }, { project, owner }))[0]);
@@ -1012,7 +1039,13 @@ export function SuiteScreen() {
 			// A new id for every attempt. An earlier attempt may still arrive: the server records one of the two
 			// and refuses the other, and each id says which.
 			const parsed = parseBodyInline(merged, [card.conflict.current, card.conflict.base]);
-			const sent = { cmd: randomId(), body: CaseBody.parse(parsed.body), tags: parsed.tags, covers: parsed.covers };
+			const sent = {
+				cmd: randomId(),
+				body: CaseBody.parse(parsed.body),
+				tags: parsed.tags,
+				covers: parsed.covers,
+				projectIdentity,
+			};
 			storeConflict({ ...card.conflict, sentMerges: [...card.conflict.sentMerges, sent] });
 			if (!mayWrite(state.draftId)) return;
 			asked = true;
@@ -1024,6 +1057,7 @@ export function SuiteScreen() {
 					ifOpen: true,
 					answer: { is: "merge", body: sent.body, tags: sent.tags, covers: sent.covers },
 					cmd: sent.cmd,
+					projectIdentity: sent.projectIdentity,
 				},
 				{ project, owner },
 			);
@@ -1075,6 +1109,7 @@ export function SuiteScreen() {
 		const snapshot = saved ?? draftRef.current;
 		if (!sessionCurrent(owner)) return;
 		if (snapshot && snapshot === endingDraft() && snapshot.owner !== windowId) return;
+		if (snapshot && !mayRecover(snapshot)) return;
 		if (!snapshot || !mayWrite(snapshot.id, !snapshot.dirty || !draftStored) || dropEmpty(snapshot)) return;
 		if (snapshot.ref && readDraft({ project, id: snapshot.id })?.conflict) return;
 		if (!snapshot.dirty) {
@@ -1247,7 +1282,7 @@ export function SuiteScreen() {
 					// typed since follows it under a new id (the review of the first fix for #71, B1).
 				}
 				if (!reply) {
-					const request = recovered?.input ?? { cmd: source.cmd, edits };
+					const request = recovered?.input ?? { cmd: source.cmd, edits, projectIdentity };
 					if (!sessionCurrent(owner) || !mayWrite(source.id, !draftStored)) return;
 					const sent = recovered ?? {
 						input: request,

@@ -42,6 +42,7 @@ export const DraftConflict = z.object({
 				body: CaseBody,
 				tags: schemaOptionalTexts,
 				covers: schemaOptionalTexts,
+				projectIdentity: ProposeInput.shape.projectIdentity,
 			}),
 		)
 		.default([]),
