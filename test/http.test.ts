@@ -1080,33 +1080,48 @@ describe("local mode", () => {
 			]);
 			const read = instance.app.database.read.bind(instance.app.database);
 			let changed = false;
+			const entered = Promise.withResolvers<void>();
+			const finish = Promise.withResolvers<void>();
 			instance.app.database.read = async (fn, options) => {
 				const value = await read(fn, options);
 				if (!changed) {
 					changed = true;
-					if (change === "team membership")
-						await client.call("admin", { do: "team.member.remove", team: "Quality", person: "viewer" });
-					else if (change === "token") await client.call("admin", { do: "token.revoke", id: viewer.id });
-					else {
-						await instance.app.database.write((db) => db.transaction(() => removeProject(db, "scratch")));
-						await client.call("admin", { do: "project.create", key: "scratch" });
-					}
+					entered.resolve();
+					await finish.promise;
 				}
 				return value;
 			};
+			const pending = grantedProjects(instance.app, session);
 			try {
-				const projects = (await grantedProjects(instance.app, session)).map(({ key, can }) => ({ key, can }));
+				await entered.promise;
+				if (change === "team membership")
+					await client.call("admin", { do: "team.member.remove", team: "Quality", person: "viewer" });
+				else if (change === "token") await client.call("admin", { do: "token.revoke", id: viewer.id });
+				else {
+					await instance.app.database.write((db) => db.transaction(() => removeProject(db, "scratch")));
+					await client.call("admin", { do: "project.create", key: "scratch", name: "Recreated scratch" });
+				}
+				finish.resolve();
+				const current = await pending;
+				if (change === "project identity")
+					expect(current.find((project) => project.key === "scratch")?.name).toBe("Recreated scratch");
+				const projects = current.map(({ key, can }) => ({ key, can }));
 				expect(projects).toEqual(
 					change === "token"
 						? []
 						: change === "project identity"
-							? [{ key: "other", can: ["read"] }]
+							? [
+									{ key: "other", can: ["read"] },
+									{ key: "scratch", can: ["read"] },
+								]
 							: [
 									{ key: "scratch", can: ["read"] },
 									{ key: "other", can: ["read"] },
 								],
 				);
 			} finally {
+				finish.resolve();
+				await pending;
 				instance.app.database.read = read;
 			}
 		});

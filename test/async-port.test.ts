@@ -50,7 +50,7 @@ async function semanticDiagnostics(dir: string) {
 }
 
 describe("async port compiler conversion", () => {
-	for (const name of ["safe", "refusals", "generators", "last-id", "reader", "unsupported"]) {
+	for (const name of ["safe", "refusals", "generators", "last-id", "reader", "unsupported", "linked-members"]) {
 		test(`${name}: formatted golden output and a second pass changes nothing`, async () => {
 			const dir = prepare(name, fixture(`${name}.input.ts.txt`));
 			const plan = await planAsyncPort({ root: dir });

@@ -554,6 +554,28 @@ async function planRound(options: PortOptions, virtual: ReadonlyMap<string, stri
 				promiseFunctions.set(node, result);
 				return result;
 			};
+			const flexibleContracts = new Map<FunctionNode, Promise<boolean>>();
+			const flexibleContract = (node: FunctionNode): Promise<boolean> => {
+				if ("body" in node && node.body) return Promise.resolve(false);
+				let result = flexibleContracts.get(node);
+				if (!result) {
+					result = (async () => {
+						const signature = await checker.getSignatureFromDeclaration(node);
+						const type = signature && (await checker.getReturnTypeOfSignature(signature));
+						if (!type?.isUnionType()) return false;
+						const parts = await type.getTypes();
+						let promise = false,
+							value = false;
+						for (const part of parts) {
+							if (await hasPromise(part)) promise = true;
+							else value = true;
+						}
+						return promise && value;
+					})();
+					flexibleContracts.set(node, result);
+				}
+				return result;
+			};
 			const parameterAcceptsPromise = async (call: ts.CallExpression, index: number, containers: boolean) => {
 				const signature = await checker.getResolvedSignature(call);
 				if (!signature) return false;
@@ -861,7 +883,11 @@ async function planRound(options: PortOptions, virtual: ReadonlyMap<string, stri
 						changed = true;
 					}
 				for (const fn of funcs.values())
-					for (const linked of fn.links) changed = merge(fn.colour, linked.colour) || changed;
+					for (const linked of fn.links) {
+						// A contract that already permits either kind of return does not require synchronous siblings to change.
+						const colour = (await flexibleContract(linked.node)) ? { ...linked.colour, async: false } : linked.colour;
+						changed = merge(fn.colour, colour) || changed;
+					}
 				for (const iteration of iterations)
 					if (isGeneratorValue(iteration.call, iteration.receiver) && iteration.owner) {
 						const gen = generator(iteration.owner.node);

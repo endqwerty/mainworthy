@@ -161,7 +161,6 @@ export async function* ensureAssertionIndex(db: WriteDb, project: number): Async
 	await db.run(Q.clearSpreads, { project });
 	let after = 0;
 	let position = -1;
-	const active = new Set<string>();
 	for (;;) {
 		const rows = await db.all(Q.history, { project, after, position });
 		if (rows.length === 0) break;
@@ -176,11 +175,9 @@ export async function* ensureAssertionIndex(db: WriteDb, project: number): Async
 		}
 		for (const root of await signaturesByHashes(db, project, hashes)) candidates.set(root.hash, root);
 		const relations = new Map<number, number>();
-		for (const row of observations) {
-			after = row.result_id;
-			position = row.position;
+		const restored = observations.flatMap((row) => {
 			const signature = row.signature;
-			if (signature?.class !== "assertion") continue;
+			if (signature.class !== "assertion") return [];
 			let root: SignatureRow = signature;
 			if (signatureHash(signature) !== signature.hash) {
 				const prefix = `Split by file (${row.file ?? "no file reported"}): `;
@@ -197,15 +194,58 @@ export async function* ensureAssertionIndex(db: WriteDb, project: number): Async
 				root = candidate;
 			}
 			relations.set(signature.id, root.id);
-			if (row.commit_sha === null) continue;
-			const scope = `commit:${row.what}`;
-			const key = JSON.stringify([scope, root.id]);
-			if (active.has(key)) continue;
-			const state = await recordObservation(db, { project, scope, root: root.id }, { id: row.test, file: row.file });
-			if (state !== "narrow") active.add(key);
+			return row.commit_sha === null
+				? []
+				: [{ root: root.id, scope: `commit:${row.what}`, test: row.test, file: row.file }];
+		});
+		const scopes = new Map<string, Set<number>>();
+		for (const row of restored) {
+			const roots = scopes.get(row.scope) ?? new Set<number>();
+			roots.add(row.root);
+			scopes.set(row.scope, roots);
+		}
+		for (const [scope, roots] of scopes) {
+			const states = new Map(
+				(await db.all(Q.sliceState, { project, scope, roots: [...roots] })).map((row) => [
+					row.root,
+					{
+						active: row.active,
+						seen: new Set(json<[number, string | null][]>(row.seen).map(([test]) => test)),
+						files: new Set(json<(string | null)[]>(row.files)),
+					},
+				]),
+			);
+			const additions: typeof restored = [];
+			const activated = new Set<number>();
+			for (const row of restored) {
+				if (row.scope !== scope) continue;
+				const state = states.get(row.root);
+				if (!state) throw new Error("assertion reconstruction state missing from page");
+				if (state.active) continue;
+				additions.push(row);
+				if (state.seen.size < 51) state.seen.add(row.test);
+				state.files.add(row.file);
+				if (state.seen.size >= 51 && [...state.files].filter((file) => file !== null).length >= 6) {
+					state.active = true;
+					activated.add(row.root);
+				}
+			}
+			if (additions.length)
+				await db.run(Q.seeSlice, {
+					project,
+					scope,
+					roots: additions.map((row) => row.root),
+					tests: additions.map((row) => row.test),
+					files: additions.map((row) => row.file),
+				});
+			if (activated.size) await db.run(Q.activateSlice, { project, scope, roots: [...activated] });
 		}
 		if (relations.size)
 			await db.run(Q.rememberRoots, { project, signatures: [...relations.keys()], roots: [...relations.values()] });
+		const last = rows.at(-1);
+		if (!last) throw new Error("assertion reconstruction page was empty");
+		after = last.result_id;
+		position = last.position;
 		yield;
 	}
 	await db.run(Q.markReady, { project });

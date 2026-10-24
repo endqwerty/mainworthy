@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import type { GateStatus, InboxReply, PlanReply, ReportReceipt } from "../src/core/ops.ts";
 import { type Actor, findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
 // Extended random sequences for the Mainworthy engine, written by an independent defect hunt (Claude Fable 5.1) and
@@ -32,7 +32,7 @@ import { type Actor, findProject, makeCtx, stampSeq } from "../src/server/kernel
 // The tests are in `sequences-extended-loose.test.ts`, `-standard` and `-strict`. This file registers none, so a
 // defect hunt can import `sequence` and `stats` from it.
 // More seeds: MAINWORTHY_SEQUENCE_SEEDS=500 bun test test/sequences-extended-
-import { type ReadDb, type SqlValue, sql } from "../src/server/kernel/db.ts";
+import { Database, type ReadDb, type SqlValue, sql } from "../src/server/kernel/db.ts";
 import { recoverAccepted, sweep } from "../src/server/ops/jobs.ts";
 import { acceptReport } from "../src/server/ops/writes.ts";
 import { harness } from "./helpers.ts";
@@ -66,7 +66,7 @@ const replaces = (held: { attempt: number; outcome: string }, next: { attempt: n
 /** How the commands of every sequence ended, per operation: a check that the random actions are effective. */
 export const stats = new Map<string, number>();
 
-export async function sequence(seed: number, preset: string): Promise<Problem | null> {
+export async function sequence(seed: number, preset: string, steps = STEPS): Promise<Problem | null> {
 	let state = seed * 2654435761 + 1;
 	const rand = (n: number): number => {
 		state ^= state << 13;
@@ -150,7 +150,11 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 					? `line:${target.line}@${target.repo}`
 					: `line:${target.line}`;
 
-	const audit = async (): Promise<{ what: string; detail: unknown } | null> => {
+	const audit = async (db: ReadDb): Promise<{ what: string; detail: unknown } | null> => {
+		const rows = async <T = Row>(query: string, ...args: (string | number | null)[]): Promise<T[]> => {
+			let index = 0;
+			return await db.all(sql<readonly SqlValue[], T>(query.replace(/\?/g, () => `$${++index}`)), args);
+		};
 		let jobRows: Awaited<ReturnType<typeof auditJobs>> | undefined;
 		const runs = await rows("SELECT * FROM runs");
 		const newestInScope = new Map<string, number>();
@@ -180,7 +184,7 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 		const open = (
 			await rows<{ no: number; subject: string; evidence: string; refs: string | null }>(
 				`SELECT q.no, q.subject, q.evidence, string_agg(r.ref, ',' ORDER BY r.ref) AS refs FROM questions q
-			 LEFT JOIN question_refs r ON r.question = q.id WHERE q.state = 'open' AND q.kind = 'failure' GROUP BY q.id`,
+		 LEFT JOIN question_refs r ON r.question = q.id WHERE q.state = 'open' AND q.kind = 'failure' GROUP BY q.id`,
 			)
 		).map((question) => ({
 			...question,
@@ -188,10 +192,10 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 			evidence: JSON.parse(String(question.evidence)) as { targets?: number[]; results?: number[] },
 			refs: String(question.refs ?? "").split(","),
 		}));
-		const excuseSnapshot = await h.app.database.read(async (db) => await auditExcuses(db));
+		const excuseSnapshot = await auditExcuses(db);
 		const excuseOf = async (signature: number, scope: string, target: number, result = 0, slot?: number) =>
 			slot !== undefined
-				? await h.app.database.read(async (db) => await slotSettlement(db, slot, result))
+				? await slotSettlement(db, slot, result)
 				: excuseSnapshot(project, signature, scope, target, result);
 		const verdictOf = (tally: Record<string, number>, blocking: number, outstanding: number): string => {
 			if (outstanding > 0) return "pending";
@@ -218,7 +222,7 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 									id,
 								),
 								async (slot) =>
-									(await h.app.database.read(async (db) => await failingSlotResults(db, slot.id))).map((cause) => ({
+									(await failingSlotResults(db, slot.id)).map((cause) => ({
 										...cause,
 										...(slot.state === "disputed" ? { slot: slot.id } : {}),
 									})),
@@ -240,7 +244,10 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 						);
 					});
 					if (asked.length === 0)
-						return { what: "1: a live run shows an unexplained failure nobody is asked about", detail: { run, cause } };
+						return {
+							what: "1: a live run shows an unexplained failure nobody is asked about",
+							detail: { run, cause },
+						};
 					const blocking = JSON.parse(String(run.blocking)) as string[];
 					if (!asked.some((question) => blocking.includes(`Q-${question.no}`)))
 						return { what: "1: a run's gate does not name the question about its failure", detail: { run, cause } };
@@ -251,10 +258,10 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 				const current = await rows("SELECT * FROM run_tests WHERE run = ?", id);
 				const history = await rows<{ id: number; test: number; target: number; job: string; actor: number } & Row>(
 					`SELECT r.*, b.job FROM results r JOIN batches b ON b.id = r.batch JOIN targets t ON t.id = r.target
-					 WHERE t.what = ? AND t.project = ? AND r.method != 'agent'
-					   AND NOT EXISTS (SELECT 1 FROM results newer WHERE newer.corrects = r.id)
-					   AND NOT EXISTS (SELECT 1 FROM slot_results s WHERE s.result = r.id AND s.discounted_by IS NOT NULL)
-					 ORDER BY r.seq, r.ord`,
+				 WHERE t.what = ? AND t.project = ? AND r.method != 'agent'
+				   AND NOT EXISTS (SELECT 1 FROM results newer WHERE newer.corrects = r.id)
+				   AND NOT EXISTS (SELECT 1 FROM slot_results s WHERE s.result = r.id AND s.discounted_by IS NOT NULL)
+				 ORDER BY r.seq, r.ord`,
 					String(run.accepts_what),
 					project,
 				);
@@ -319,8 +326,8 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 			if (run.state === "closed") {
 				const signoff = await rows(
 					`SELECT d.id FROM decisions d JOIN questions q ON q.id = d.question
-					 WHERE d.id = ? AND q.kind = 'signoff' AND q.state = 'decided' AND q.decision = d.id
-					   AND (d.answer::jsonb)->>'is' = 'approve' AND ((q.subject::jsonb)->>'run')::bigint = ?`,
+				 WHERE d.id = ? AND q.kind = 'signoff' AND q.state = 'decided' AND q.decision = d.id
+				   AND (d.answer::jsonb)->>'is' = 'approve' AND ((q.subject::jsonb)->>'run')::bigint = ?`,
 					Number(run.signoff ?? -1),
 					id,
 				);
@@ -348,7 +355,12 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 
 		for (const run of runs.filter((r) => r.origin === "planned" && r.state === "open")) {
 			const id = Number(run.id);
-			const accepts = JSON.parse(String(run.accepts)) as { commit?: string; repo?: string; env?: string; self?: true };
+			const accepts = JSON.parse(String(run.accepts)) as {
+				commit?: string;
+				repo?: string;
+				env?: string;
+				self?: true;
+			};
 			const obligations = JSON.parse(String(run.require)) as {
 				id: string;
 				kind: string;
@@ -418,7 +430,7 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 					if (!admittedIds.has(result.id)) {
 						const signoffs = await rows(
 							`SELECT q.no, d.id, d.answer, d.seq FROM questions q JOIN decisions d ON d.question = q.id
-							 WHERE q.kind = 'signoff' AND ((q.subject::jsonb)->>'run')::bigint = ? ORDER BY d.id`,
+						 WHERE q.kind = 'signoff' AND ((q.subject::jsonb)->>'run')::bigint = ? ORDER BY d.id`,
 							id,
 						);
 						return {
@@ -512,7 +524,7 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 			// 13'. Jobs: a batch meets a job only by a decisive result that is itself automated.
 			const jobs = obligations.flatMap((o) => (o.kind === "jobs" ? (o.jobs ?? []) : []));
 			if (jobs.length > 0) {
-				jobRows ??= await h.app.database.read(async (db) => await auditJobs(db));
+				jobRows ??= await auditJobs(db);
 				const reported = new Set<string>();
 				for (const batch of jobRows) {
 					const target = targets.get(batch.target);
@@ -565,8 +577,8 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 		// 8. A superseded decision is not in force.
 		const standing = await rows(
 			`SELECT old.id, old.answer, newer.id AS by FROM decisions newer JOIN decisions old ON old.id = newer.supersedes
-			 JOIN questions q ON q.id = old.question WHERE q.state = 'decided' AND q.decision = old.id
-			   AND (old.answer::jsonb)->>'is' NOT IN ('expired', 'outdated', 'withdrawn')`,
+		 JOIN questions q ON q.id = old.question WHERE q.state = 'decided' AND q.decision = old.id
+		   AND (old.answer::jsonb)->>'is' NOT IN ('expired', 'outdated', 'withdrawn')`,
 		);
 		if (standing.length > 0)
 			return { what: "8: a superseded decision is still its question's answer", detail: standing };
@@ -574,14 +586,14 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 		// 4. Excuses and the decisions they belong to.
 		const orphans = await rows(
 			`SELECT e.signature, e.scope, e.target, e.decision FROM excuses e
-			 JOIN decisions d ON d.id = e.decision JOIN questions q ON q.id = d.question
-			 WHERE q.state != 'decided' OR q.decision != d.id`,
+		 JOIN decisions d ON d.id = e.decision JOIN questions q ON q.id = d.question
+		 WHERE q.state != 'decided' OR q.decision != d.id`,
 		);
 		if (orphans.length > 0) return { what: "4: an excuse outlived its decision", detail: orphans };
 		const bare = await rows(
 			`SELECT q.no, d.id, d.answer FROM questions q JOIN decisions d ON d.id = q.decision
-			 WHERE q.kind = 'failure' AND q.state = 'decided' AND (d.effects::jsonb)->>'class' IS NOT NULL
-			   AND NOT EXISTS (SELECT 1 FROM excuses e WHERE e.decision = d.id)
+		 WHERE q.kind = 'failure' AND q.state = 'decided' AND (d.effects::jsonb)->>'class' IS NOT NULL
+		   AND NOT EXISTS (SELECT 1 FROM excuses e WHERE e.decision = d.id)
      AND NOT EXISTS (SELECT 1 FROM result_excuses e WHERE e.decision = d.id)`,
 		);
 		if (bare.length > 0) return { what: "4: an answer is in force with nothing to show for it", detail: bare };
@@ -589,7 +601,7 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 		// 14. Dependencies name decisions in force; none expired after a sweep.
 		const stale = await rows(
 			`SELECT dep.run, dep.decision FROM depends_on dep JOIN decisions d ON d.id = dep.decision JOIN questions q ON q.id = d.question
-			 WHERE q.state != 'decided' OR q.decision != d.id`,
+		 WHERE q.state != 'decided' OR q.decision != d.id`,
 		);
 		if (stale.length > 0) return { what: "14: a run depends on a decision that is not in force", detail: stale };
 		const expired = await rows(
@@ -615,7 +627,7 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 					detail: { target, expected, change },
 				};
 		}
-		const unsupported = await h.app.database.read(async (db) => await invalidInherited(db));
+		const unsupported = await invalidInherited(db);
 		if (unsupported.length > 0)
 			return { what: "an inherited failure does not fail on its base now", detail: unsupported };
 
@@ -658,7 +670,7 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 			);
 			return earlier.length > 0 ? pick(earlier).id : null;
 		};
-		for (let step = 0; step < STEPS; step++) {
+		for (let step = 0; step < steps; step++) {
 			const action = rand(100);
 			if (action < 30) {
 				// A pipeline or a person reports one to three automated tests on trunk, sometimes correcting, sometimes a fork.
@@ -909,7 +921,7 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 				trace.push({ advance: "15 days" });
 				await sweep(h.app, rule);
 			}
-			const problem = await audit();
+			const problem = await h.app.database.read(audit);
 			if (problem) return { seed, step, ...problem, last: trace.slice(-15) };
 		}
 		if (
@@ -921,7 +933,7 @@ export async function sequence(seed: number, preset: string): Promise<Problem | 
 		)
 			return {
 				seed,
-				step: STEPS,
+				step: steps,
 				what: "sequence made no reporting progress",
 				detail: [...successful],
 				last: trace.slice(-15),
@@ -989,6 +1001,16 @@ export function extendedSequences(preset: "loose" | "standard" | "strict"): void
 				await h.close();
 			}
 		});
+
+	test("extended sequence audits keep database snapshots bounded", async () => {
+		const reads = spyOn(Database.prototype, "read");
+		try {
+			expect(await sequence(1, preset, 10)).toBeNull();
+			expect(reads.mock.calls.length).toBeLessThan(200);
+		} finally {
+			reads.mockRestore();
+		}
+	});
 
 	test(`${SEEDS} extended random sequences under the ${preset} policy keep every invariant`, async () => {
 		const problems: Problem[] = [];
