@@ -421,5 +421,5 @@ test("the schema port --check accounts for every reviewed hand edit", async () =
 		new Response(child.stderr).text(),
 	]);
 	expect({ rc, stderr }).toEqual({ rc: 0, stderr: "" });
-	expect(stdout).toContain("11 justified hand edits only.");
+	expect(stdout).toContain("13 justified hand edits only.");
 });

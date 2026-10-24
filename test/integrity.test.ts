@@ -1294,7 +1294,10 @@ describe("what a result may prove", () => {
 			budget(
 				"staged batch scans of an ordinary report",
 				all.mock.calls.filter(
-					([statement]) => statement.text.startsWith("SELECT") && /\bbatches\b/.test(statement.text) && /\bstaged\b/.test(statement.text),
+					([statement]) =>
+						statement.text.startsWith("SELECT") &&
+						/\bbatches\b/.test(statement.text) &&
+						/\bstaged\b/.test(statement.text),
 				).length,
 				0,
 				"scans",

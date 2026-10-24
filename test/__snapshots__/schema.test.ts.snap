@@ -167,6 +167,7 @@ column decisions.question: bigint NOT NULL
 column decisions.seq: bigint NOT NULL
 column decisions.signers: text NOT NULL
 column decisions.supersedes: bigint NULL
+column demo_projects.deployment: text NULL
 column demo_projects.project: bigint NOT NULL
 column demo_projects.since: bigint NOT NULL
 column depends_on.decision: bigint NOT NULL
@@ -802,6 +803,7 @@ constraint decisions.decisions_question_not_null: NOT NULL question
 constraint decisions.decisions_seq_not_null: NOT NULL seq
 constraint decisions.decisions_signers_not_null: NOT NULL signers
 constraint decisions.decisions_supersedes_fkey: FOREIGN KEY (supersedes) REFERENCES decisions(id) DEFERRABLE
+constraint demo_projects.demo_projects_deployment_check: CHECK (((deployment IS NULL) OR ((deployment)::jsonb IS NOT NULL)))
 constraint demo_projects.demo_projects_pkey: PRIMARY KEY (project)
 constraint demo_projects.demo_projects_project_fkey: FOREIGN KEY (project) REFERENCES projects(id) DEFERRABLE
 constraint demo_projects.demo_projects_project_not_null: NOT NULL project

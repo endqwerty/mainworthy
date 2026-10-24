@@ -821,8 +821,8 @@ function sliceKeys(table: SliceTable, alias = ""): string {
 	return `json_build_array(${table.keys.map((key) => `CAST(${alias}${identifier(key)} AS TEXT)`).join(",")})::text`;
 }
 
-function sliceIdentity(table: SliceTable, alias = ""): string {
-	return table.keys.map((key, i) => `${alias}${identifier(key)} = $${2 + i}`).join(" AND ");
+function sliceIdentity(table: SliceTable, alias = "", first = 2): string {
+	return table.keys.map((key, i) => `${alias}${identifier(key)} = $${first + i}`).join(" AND ");
 }
 
 /**
@@ -894,7 +894,7 @@ export async function removeProjectSlice(
 						const childColumns = columns.map(({ from }) => `c.${identifier(from)}`).join(",");
 						const parentColumns = columns.map(({ to }) => `p.${identifier(to)}`).join(",");
 						const dependants = await db.allDynamic<{ keys: string; owned: boolean }>(
-							`SELECT ${sliceKeys(child, "c.")} AS keys, (${child.owned ?? "FALSE"}) AS owned FROM ${identifier(child.name)} c WHERE (${childColumns}) IN (SELECT ${parentColumns} FROM ${identifier(row.table.name)} p WHERE ${sliceIdentity(row.table, "p.")}) LIMIT ${limit + 1}`,
+							`SELECT ${sliceKeys(child, "c.")} AS keys, (${child.owned ?? "FALSE"}) AS owned FROM ${identifier(child.name)} c WHERE (${childColumns}) IN (SELECT ${parentColumns} FROM ${identifier(row.table.name)} p WHERE (${row.table.owned}) AND ${sliceIdentity(row.table, "p.")}) LIMIT ${limit + 1}`,
 							[project.id, ...row.keys],
 						);
 						for (const dependant of dependants) {
@@ -917,10 +917,10 @@ export async function removeProjectSlice(
 					continue;
 				}
 				for (const row of pending.reverse())
-					await db.runDynamic(`DELETE FROM ${identifier(row.table.name)} WHERE ${sliceIdentity(row.table)}`, [
-						project.id,
-						...row.keys,
-					]);
+					await db.runDynamic(
+						`DELETE FROM ${identifier(row.table.name)} WHERE ${sliceIdentity(row.table, "", 1)}`,
+						row.keys,
+					);
 				return { done: false, table: table.name, rows: pending.length };
 			}
 			if (blocked)

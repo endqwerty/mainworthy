@@ -12,6 +12,7 @@ import { Client } from "../src/cli/client.ts";
 import { refreshDemo } from "../src/cli/demo.ts";
 import { seed } from "../src/cli/seed.ts";
 import { SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
+import { Database } from "../src/server/kernel/db.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
 import { docsRoutes } from "../src/surfaces/docs/site.ts";
 import {
@@ -898,8 +899,9 @@ describe("the executable, built the way `bun run build` builds it", () => {
 		}
 		// Complete one deployment through the real refresh/HTTP flow. Serve must leave its retired project alone (#914).
 		const revision = "a".repeat(40);
-		const prepared = start(
+		const prepared = await start(
 			{
+				databaseUrl: await identityDatabaseUrl(data),
 				dataDir: data,
 				host: "127.0.0.1",
 				port: 0,
@@ -950,16 +952,18 @@ describe("the executable, built the way `bun run build` builds it", () => {
 			expect((await fetch(`${url}/healthz`)).status).toBe(200);
 			const demo = new Client({ url, token: TOKEN, project: "demo" });
 			expect((await demo.call("find", { limit: 100 })).items).toHaveLength(30);
-			const retiring = new Db(join(data, "mainworthy.db"), { reader: true });
+			const retiring = await Database.open({ url: await identityDatabaseUrl(data) });
 			try {
-				const remaining = () =>
-					z
-						.object({ n: z.number() })
-						.parse(retiring.raw.query("SELECT count(*) AS n FROM projects WHERE key LIKE '~demo-%'").get()).n;
+				const remaining = async () =>
+					(
+						await retiring.read((db) =>
+							db.allDynamic<{ n: number }>("SELECT count(*) AS n FROM projects WHERE key LIKE '~demo-%'"),
+						)
+					)[0]?.n ?? 0;
 				// Startup runs no cleanup: the retired project stays until #914 moves cleanup off the server's thread.
-				expect(remaining()).toBe(1);
+				expect(await remaining()).toBe(1);
 			} finally {
-				retiring.close();
+				await retiring.close();
 			}
 		} finally {
 			restarted.kill("SIGTERM");

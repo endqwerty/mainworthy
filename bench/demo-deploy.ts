@@ -1,11 +1,14 @@
 // Rehearse #903 on clones of one populated fixture. Source-export the baseline before changing code.
-// MAINWORTHY_READERS=1 bun bench/demo-deploy.ts <work.ts-scratch-dir> <baseline-source-dir> <baseline|new> <run>
+// Use baseline/new source exports with the same PostgreSQL baseline.
+// bun bench/demo-deploy.ts <work.ts-scratch-dir> <baseline-source-dir> <baseline|new> <run>
 // Alternate baseline/new at least five times. Data stays in scratch for inspection and work.ts cleanup.
-import { copyFileSync, cpSync, existsSync, mkdirSync, statSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { cpus, loadavg } from "node:os";
 import { join, resolve } from "node:path";
 import { z } from "zod";
-import type { Config } from "../src/server/kernel/app.ts";
+import { type Config, defaultConfig } from "../src/server/kernel/app.ts";
+import { testDatabase } from "../test/db.ts";
+import { cloneDataset, postgres } from "./dataset.ts";
 
 const root = resolve(z.string().min(1).parse(Bun.argv[2]));
 const baseline = resolve(z.string().min(1).parse(Bun.argv[3]));
@@ -20,7 +23,9 @@ async function modules(source: string) {
 	const database: typeof import("../src/server/kernel/db.ts") = await import(join(source, "src/server/kernel/db.ts"));
 	return { ...startup, ...demo, ...seeding, ...client, ...database };
 }
-const config = (dataDir: string): Config => ({
+const config = (dataDir: string, databaseUrl: string): Config => ({
+	...defaultConfig({}),
+	databaseUrl,
 	dataDir,
 	host: "127.0.0.1",
 	port: 0,
@@ -35,48 +40,69 @@ const config = (dataDir: string): Config => ({
 const old = await modules(baseline);
 const fixture = join(root, "fixture");
 mkdirSync(root, { recursive: true, mode: 0o700 });
-if (!existsSync(join(fixture, "mainworthy.db"))) {
-	const initial = old.start(config(fixture), () => ({ ui: null }));
+if (!existsSync(join(fixture, "baseline.dump"))) {
+	mkdirSync(fixture, { recursive: true });
+	const database = await testDatabase({ schema: "empty" });
+	const initial = await old.start(config(fixture, database.url), () => ({ ui: null }));
 	try {
 		const client = new old.Client({ url: initial.url, token, project: "populated" });
 		for (const project of ["populated", "demo"])
 			await old.seed(client, { project, cases: 2000, days: 14, unlinkedFiles: 60 });
+		await initial.app.database.write((db) =>
+			db.transaction(() =>
+				db.exec(`
+   WITH sample AS(SELECT project,test,batch,target,actor FROM results WHERE project=(SELECT id FROM projects WHERE key='populated') LIMIT 1)
+   INSERT INTO results(project,test,seq,ord,batch,target,method,actor,basis,outcome,at,detail)
+   SELECT sample.project,sample.test,1,n.i,sample.batch,sample.target,'auto',sample.actor,'unresolved','pass',1,(SELECT string_agg(md5(n.i::text || ':' || part::text),'') FROM generate_series(1,128) part) FROM generate_series(1,220000) n(i) CROSS JOIN sample`),
+			),
+		);
+		const bytes = await initial.app.database.read((db) =>
+			db.allDynamic<{ bytes: number }>("SELECT pg_database_size(current_database())::double precision AS bytes"),
+		);
+		writeFileSync(join(fixture, "fixture.json"), JSON.stringify({ bytes: bytes[0]?.bytes ?? 0 }));
+		await initial.stop();
+		postgres("pg_dump", [
+			"--format=custom",
+			"--no-owner",
+			"--no-privileges",
+			"--file",
+			join(fixture, "baseline.dump"),
+			database.url,
+		]);
 	} finally {
 		await initial.stop();
-	}
-	const db = new old.Db(join(fixture, "mainworthy.db"));
-	try {
-		// Append historical detail to real seed results, retaining actual project/test/batch/actor foreign keys.
-		db.transaction(() =>
-			db.exec(`WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<220000),
-   sample AS(SELECT project,test,batch,target,actor FROM results WHERE project=(SELECT id FROM projects WHERE key='populated') LIMIT 1)
-   INSERT INTO results(project,test,seq,ord,batch,target,method,actor,basis,outcome,at,detail)
-   SELECT sample.project,sample.test,1,n.i,sample.batch,sample.target,'auto',sample.actor,'unresolved','pass',1,printf('%04096d',n.i) FROM n CROSS JOIN sample`),
-		);
-		db.checkpoint();
-		if (db.raw.query("PRAGMA foreign_key_check").get()) throw new Error("fixture has invalid foreign keys");
-	} finally {
-		db.close();
+		await database.close();
 	}
 }
-const fixtureBytes = statSync(join(fixture, "mainworthy.db")).size;
+// Deterministic varied detail avoids TOAST compressing the incident-sized physical fixture into a small database.
+const fixtureBytes = z
+	.object({ bytes: z.number() })
+	.parse(JSON.parse(readFileSync(join(fixture, "fixture.json"), "utf8"))).bytes;
 if (fixtureBytes < 880_000_000) throw new Error("fixture is smaller than the incident database");
-console.log(JSON.stringify({ side, run, fixtureBytes, cores: cpus().length, load: loadavg() }));
+console.log(
+	JSON.stringify({
+		side,
+		run,
+		fixtureBytes,
+		fixtureBytesMetric: "pg_database_size",
+		cores: cpus().length,
+		load: loadavg(),
+	}),
+);
 const target = join(root, side);
 mkdirSync(target, { recursive: true });
-if (!existsSync(join(target, "mainworthy.db")))
-	copyFileSync(join(fixture, "mainworthy.db"), join(target, "mainworthy.db"));
+const targetDatabase = await cloneDataset(fixture, target);
 if (!existsSync(join(target, "blobs"))) cpSync(join(fixture, "blobs"), join(target, "blobs"), { recursive: true });
 const m = await modules(side === "baseline" ? baseline : resolve("."));
-const instance = m.start(config(target), () => ({ ui: null }));
+const instance = await m.start(config(target, targetDatabase.url), () => ({ ui: null }));
 instance.app.config.commit = run.toString(16).padStart(40, "0");
 const client = new m.Client({ url: instance.url, token, project: "scratch" });
 const retained = () =>
-	instance.app.db.raw
-		.query(
-			"SELECT count(*) AS n,sum(id) AS ids FROM results WHERE project=(SELECT id FROM projects WHERE key='populated')",
-		)
-		.get();
+	instance.app.database.read((db) =>
+		db.allDynamic(
+			"SELECT count(*) AS n,sum(id)::double precision AS ids FROM results WHERE project=(SELECT id FROM projects WHERE key='populated')",
+		),
+	);
 // Warm the ordinary request paths equally on both sides before attributing a delay to demo work.
 const warming = performance.now();
 await client.call("find", { limit: 1 });
@@ -93,7 +119,7 @@ if (
 )
 	throw new Error("warm-up login failed");
 console.log(JSON.stringify({ side, run, warmupMs: performance.now() - warming }));
-const before = retained();
+const before = await retained();
 const holds: { phase: string; op: string | null; ms: number }[] = [];
 const swaps: number[] = [];
 const slices: number[] = [];
@@ -105,17 +131,17 @@ let writes = 0;
 instance.app.subscribe((event) => {
 	operation = event.op;
 });
-const gate = instance.app.gate.run.bind(instance.app.gate);
-instance.app.gate.run = <T>(fn: () => T | Promise<T>) =>
-	gate(async () => {
+const write = instance.app.database.write.bind(instance.app.database);
+instance.app.database.write = (fn, options) =>
+	write(async (db) => {
 		const began = performance.now();
 		operation = null;
 		try {
-			return await fn();
+			return await fn(db);
 		} finally {
 			holds.push({ phase, op: operation, ms: performance.now() - began });
 		}
-	});
+	}, options);
 const timed = async (kind: string, fn: () => Promise<void>) => {
 	const began = performance.now();
 	try {
@@ -185,9 +211,13 @@ try {
 			.sort((a, b) => a - b);
 		return { kind, count: times.length, min: times[0], median: times[Math.floor(times.length / 2)], max: times.at(-1) };
 	});
-	const retired = instance.app.db.raw.query("SELECT count(*) AS n FROM projects WHERE key LIKE '~demo-%'").get();
-	const violations = instance.app.db.raw.query("PRAGMA foreign_key_check").all();
-	const unchanged = JSON.stringify(before) === JSON.stringify(retained());
+	const retired = await instance.app.database.read((db) =>
+		db.allDynamic("SELECT count(*) AS n FROM projects WHERE key LIKE '~demo-%'"),
+	);
+	const unvalidatedForeignKeys = await instance.app.database.read((db) =>
+		db.allDynamic("SELECT conname FROM pg_constraint WHERE contype='f' AND NOT convalidated"),
+	);
+	const unchanged = JSON.stringify(before) === JSON.stringify(await retained());
 	console.log(
 		JSON.stringify({
 			side,
@@ -202,11 +232,11 @@ try {
 			slices: slices.length,
 			retired,
 			retainedUnchanged: unchanged,
-			foreignKeyViolations: violations.length,
+			unvalidatedForeignKeys: unvalidatedForeignKeys.length,
 			slowest: [...holds].sort((a, b) => b.ms - a.ms).slice(0, 12),
 		}),
 	);
-	if (errors.length || result.cases.length !== 2000 || !unchanged || violations.length)
+	if (errors.length || result.cases.length !== 2000 || !unchanged || unvalidatedForeignKeys.length)
 		throw new Error("incorrect rehearsal output");
 	if (
 		side === "new" &&
@@ -214,6 +244,7 @@ try {
 	)
 		throw new Error("500 ms acceptance bound exceeded");
 } finally {
-	instance.app.gate.run = gate;
+	instance.app.database.write = write;
 	await instance.stop();
+	await targetDatabase.close();
 }

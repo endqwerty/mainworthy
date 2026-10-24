@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { Workload } from "../bench/measure.ts";
-import { budget } from "../scripts/budget.ts";
 import { observeDatabase } from "../bench/profile.ts";
+import { budget } from "../scripts/budget.ts";
 import { withInstance } from "../src/cli/test-support.ts";
 import type { GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
 import { removeProject } from "../src/server/transfer/transfer.ts";
@@ -141,7 +141,9 @@ test("project removal preserves unrelated results and their constraints", async 
 	await withInstance(async ({ instance }) => {
 		const { app } = instance;
 		await app.database.write((db) => removalFixture(db, 5_000, 20_000));
-		await app.database.write((db) => db.transaction(() => db.checkedBulk(() => removeProject(db, "removing", undefined, "deferred"))));
+		await app.database.write((db) =>
+			db.transaction(() => db.checkedBulk(() => removeProject(db, "removing", undefined, "deferred"))),
+		);
 		await app.database.read(async (db) => {
 			expect(await db.allDynamic("SELECT project, count(*) AS n FROM results GROUP BY project")).toEqual([
 				{ project: 901, n: 20_000 },

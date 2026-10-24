@@ -33,7 +33,7 @@ async function modules(root: string) {
 
 async function server(root: string, directory: string, demoFile: string) {
 	const { start, config, archiveRoutes, renewDemoWork, ciActor } = await modules(root);
-	const instance = await start({ ...config(directory), databaseUrl: fixture.url }, (app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }));
+	const instance = await start(config(directory), (app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }));
 	const ci = await ciActor(instance.app);
 	const demo = Demo.parse(JSON.parse(readFileSync(demoFile, "utf8")));
 	let phase = "idle";
@@ -104,7 +104,10 @@ async function seed(directory: string, root: string) {
 	});
 	const { start, config, archiveRoutes, seed: seedDemo, cloneDataset, postgres } = await modules(root);
 	const fixture = await cloneDataset(directory, directory);
-	const instance = await start({ ...config(directory), databaseUrl: fixture.url }, (app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }));
+	const instance = await start({ ...config(directory), databaseUrl: fixture.url }, (app, owner) => ({
+		ui: null,
+		routes: archiveRoutes(app, owner),
+	}));
 	try {
 		const demo = await seedDemo(new Client({ url: instance.url, token: undefined, project: "demo" }), {
 			project: "demo",

@@ -43,7 +43,7 @@ import { Database, type ReadDb, type SqlValue, sql } from "../src/server/kernel/
 import { sweep } from "../src/server/ops/jobs.ts";
 import { testDatabase } from "./db.ts";
 import { harness } from "./helpers.ts";
-import { failingSlotResults, invalidInherited, slotSettlement } from "./inherited-audit.ts";
+import { auditRelations } from "./sequence-audit.ts";
 
 const SEEDS = Number(process.env.MAINWORTHY_SEQUENCE_SEEDS ?? 40);
 const STEPS = 80;
@@ -57,25 +57,33 @@ export const seedPlan = {
 
 type AuditExcuse = { class: string; decision: number };
 
-export async function auditExcuses(db: ReadDb) {
+export async function auditExcuses(
+	db: ReadDb,
+	stored?: {
+		broad: (AuditExcuse & { project: number; signature: number; scope: string; target: number })[];
+		exact: (AuditExcuse & { result: number })[];
+	},
+) {
 	const key = (project: number, signature: number, scope: string, target: number) =>
 		JSON.stringify([project, signature, scope, target]);
 	const broad = new Map(
 		(
-			await db.all(
+			stored?.broad ??
+			(await db.all(
 				sql<readonly [], AuditExcuse & { project: number; signature: number; scope: string; target: number }>(
 					"SELECT project, signature, scope, target, class, decision FROM excuses",
 				),
-			)
+			))
 		).map((row) => [key(row.project, row.signature, row.scope, row.target), row]),
 	);
 	const exact = new Map(
 		(
-			await db.all(
+			stored?.exact ??
+			(await db.all(
 				sql<readonly [], AuditExcuse & { result: number }>(
 					"SELECT result, class, decision FROM result_excuses WHERE slot IS NULL",
 				),
-			)
+			))
 		).map((row) => [row.result, row]),
 	);
 	return (project: number, signature: number, scope: string, target: number, result = 0): AuditExcuse | undefined => {
@@ -90,11 +98,13 @@ export async function auditExcuses(db: ReadDb) {
 
 type Row = Record<string, string | number | null>;
 type Problem = { seed: number; step: number; what: string; detail: unknown; last: unknown[] };
+export type AuditMeasurement = { step: number; statements: number };
 
 export async function sequence(
 	seed: number,
 	preset: string,
 	onFirstPlan?: (step: number) => void,
+	onAudit?: (measurement: AuditMeasurement) => void,
 ): Promise<Problem | null> {
 	let currentStep = -1;
 	let state = seed * 2654435761 + 1;
@@ -139,11 +149,8 @@ export async function sequence(
 
 	const audit = async (): Promise<{ what: string; detail: unknown } | null> =>
 		h.app.database.read(async (db) => {
-			const rows = async <T = Row>(query: string, ...args: (string | number)[]): Promise<T[]> => {
-				let index = 0;
-				return await db.all(sql<readonly SqlValue[], T>(query.replace(/\?/g, () => `$${++index}`)), args);
-			};
-			const runs = await rows("SELECT * FROM runs");
+			const relations = await auditRelations(db, h.app.now());
+			const runs = relations.runs;
 			const newestInScope = new Map<string, number>();
 			for (const run of runs) {
 				if (run.scope !== null) {
@@ -152,7 +159,7 @@ export async function sequence(
 				}
 			}
 			// A change speaks through its observed head only while that run belongs to this scope.
-			for (const change of await rows("SELECT id, project, repo, head_sha FROM changes")) {
+			for (const change of relations.changes) {
 				const scope = `change:${change.id}`;
 				const head =
 					change.head_sha === null
@@ -167,19 +174,14 @@ export async function sequence(
 				if (head) newestInScope.set(scope, Number(head.id));
 				else newestInScope.delete(scope);
 			}
-			const targets = new Map((await rows("SELECT * FROM targets")).map((target) => [Number(target.id), target]));
-			const open = (
-				await rows<{ no: number; subject: string; evidence: string; refs: string | null }>(
-					`SELECT q.no, q.subject, q.evidence, string_agg(r.ref, ',' ORDER BY r.ref) AS refs FROM questions q
-			 LEFT JOIN question_refs r ON r.question = q.id WHERE q.state = 'open' AND q.kind = 'failure' GROUP BY q.id`,
-				)
-			).map((question) => ({
+			const targets = new Map(relations.targets.map((target) => [Number(target.id), target]));
+			const open = relations.open.map((question) => ({
 				...question,
 				subject: JSON.parse(String(question.subject)) as { signature: number; scope: string; slot?: number },
 				evidence: JSON.parse(String(question.evidence)) as { targets?: number[]; results?: number[] },
 				refs: String(question.refs ?? "").split(","),
 			}));
-			const excuseSnapshot = await auditExcuses(db);
+			const excuseSnapshot = await auditExcuses(db, relations.excuses);
 			const excuseOf = async (
 				project: number,
 				signature: number,
@@ -189,7 +191,7 @@ export async function sequence(
 				slot?: number,
 			) =>
 				slot !== undefined
-					? await slotSettlement(db, slot, result)
+					? relations.settlement(slot, result)
 					: excuseSnapshot(project, signature, scope, target, result);
 
 			for (const run of runs) {
@@ -200,17 +202,11 @@ export async function sequence(
 				if (live) {
 					const causes: { signature: number; target: number; result: number; slot?: number }[] =
 						run.origin === "change"
-							? await rows<{ signature: number; target: number; result: number }>(
-									"SELECT signature, target, result FROM run_tests WHERE run = ? AND outcome IN ('fail', 'error')",
-									id,
-								)
+							? relations.lanes(id).filter((row) => row.outcome === "fail" || row.outcome === "error")
 							: await flatMapAsync(
-									await rows<{ id: number; state: string }>(
-										"SELECT id, state FROM slots WHERE run = ? AND state IN ('failing', 'disputed')",
-										id,
-									),
+									relations.slots(id).filter((slot) => slot.state === "failing" || slot.state === "disputed"),
 									async (slot) =>
-										(await failingSlotResults(db, slot.id)).map((cause) => ({
+										relations.failing(slot.id).map((cause) => ({
 											...cause,
 											...(slot.state === "disputed" ? { slot: slot.id } : {}),
 										})),
@@ -242,16 +238,8 @@ export async function sequence(
 
 				if (run.origin === "change") {
 					// 2. The commit's lanes point back to their source history.
-					const current = await rows("SELECT * FROM run_tests WHERE run = ?", id);
-					const history = await rows<{ id: number; test: number; target: number; job: string; actor: number } & Row>(
-						`SELECT r.*, b.job FROM results r JOIN batches b ON b.id = r.batch JOIN targets t ON t.id = r.target
-					 WHERE t.what = ? AND t.project = ? AND r.method != 'agent'
-					   AND NOT EXISTS (SELECT 1 FROM results newer WHERE newer.corrects = r.id)
-					   AND NOT EXISTS (SELECT 1 FROM slot_results s WHERE s.result = r.id AND s.discounted_by IS NOT NULL)
-					 ORDER BY r.seq, r.ord`,
-						String(run.accepts_what),
-						Number(run.project),
-					);
+					const current = relations.lanes(id);
+					const history = relations.history(Number(run.project), String(run.accepts_what));
 					for (const counted of current) {
 						const source = history.find((row) => row.id === counted.result);
 						if (
@@ -288,36 +276,28 @@ export async function sequence(
 
 				// 11. The questions the gate names are open ones.
 				for (const named of JSON.parse(String(run.blocking)) as string[]) {
-					const state = (
-						await rows<{ state: string }>(
-							"SELECT state FROM questions WHERE project = ? AND no = ?",
-							Number(run.project),
-							Number(named.slice(2)),
-						)
-					)[0]?.state;
+					const state = relations.question(Number(run.project), Number(named.slice(2)));
 					if (state !== "open")
 						return { what: "a run's gate names a question that is not open", detail: { run, named, state } };
 				}
 			}
 
 			// Every slot fill belongs to an existing slot and result of the same case.
-			const orphaned = await rows(`SELECT s.* FROM slot_results s
-			LEFT JOIN slots slot ON slot.id = s.slot LEFT JOIN results r ON r.id = s.result
-			WHERE slot.id IS NULL OR r.id IS NULL OR r.basis_case != slot.case_id`);
+			const orphaned = relations.orphaned;
 			if (orphaned.length > 0) return { what: "slot fills have no matching case result", detail: orphaned };
 
 			// 6b. A planned run's stored tally against its slots and the excuses in force.
 			for (const run of runs) {
 				if (run.origin !== "planned" || run.state !== "open") continue;
 				const tally = { pass: 0, excused: 0, attributed: 0, unexplained: 0, missing: 0, disputed: 0, skipped: 0 };
-				for (const slot of await rows("SELECT * FROM slots WHERE run = ?", Number(run.id))) {
+				for (const slot of relations.slots(Number(run.id))) {
 					if (slot.state === "satisfied" || slot.state === "waived") tally.pass++;
 					else if (slot.state === "missing") tally.missing++;
 					else if (slot.state === "skipped") {
 						tally.skipped++;
 						tally.missing++;
 					} else {
-						const causes = await failingSlotResults(db, Number(slot.id));
+						const causes = relations.failing(Number(slot.id));
 						const excuses = await mapAsync(causes, async ({ signature, target, result }) => {
 							const seenOn = targets.get(target);
 							return seenOn
@@ -347,10 +327,7 @@ export async function sequence(
 			}
 
 			// Accepted fills point to the pinned case and a target accepted by their run.
-			for (const fill of await rows(`SELECT sr.*, s.case_id, r.basis_case, t.commit_sha, t.repo, t.env, t.project AS target_project, run.project AS run_project, run.accepts, run.id AS run_id,
-			b.run AS typed FROM slot_results sr JOIN slots s ON s.id = sr.slot
-			JOIN runs run ON run.id = s.run JOIN results r ON r.id = sr.result
-			JOIN targets t ON t.id = r.target JOIN batches b ON b.id = r.batch WHERE run.state = 'open'`)) {
+			for (const fill of relations.acceptedFills) {
 				const accepts = JSON.parse(String(fill.accepts)) as { commit?: string; repo?: string; env?: string };
 				if (
 					fill.case_id !== fill.basis_case ||
@@ -369,17 +346,7 @@ export async function sequence(
 				if (subject.slot !== undefined) {
 					if (
 						(evidence.results ?? []).length > 0 &&
-						(await everyAsync(
-							evidence.results ?? [],
-							async (result) =>
-								(
-									await rows(
-										"SELECT decision FROM result_excuses WHERE slot = ? AND result = ?",
-										subject.slot ?? 0,
-										result,
-									)
-								).length > 0,
-						))
+						(await everyAsync(evidence.results ?? [], async (result) => relations.exact(subject.slot ?? 0, result)))
 					)
 						return { what: "a settled slot still has an open dispute question", detail: question };
 					continue;
@@ -400,14 +367,8 @@ export async function sequence(
 			}
 
 			// 12. Heads and runs come from reports a gate counts.
-			const counted = new Set(
-				(
-					await rows<{ what: string }>(
-						"SELECT DISTINCT t.what FROM batches b JOIN targets t ON t.id = b.target WHERE b.method != 'agent'",
-					)
-				).map((row) => row.what),
-			);
-			for (const change of await rows("SELECT key, repo, head_sha FROM changes WHERE head_sha IS NOT NULL")) {
+			const counted = new Set(relations.counted.map((row) => row.what));
+			for (const change of relations.changes.filter((change) => change.head_sha !== null)) {
 				const what = `code:${change.repo ?? ""}@${change.head_sha}`;
 				if (!counted.has(what))
 					return { what: "a change's head is a commit no pipeline or person reported", detail: change };
@@ -418,29 +379,16 @@ export async function sequence(
 			}
 
 			// 8. A superseded decision is not in force.
-			const standing = await rows(
-				`SELECT old.id, old.answer, newer.id AS by FROM decisions newer JOIN decisions old ON old.id = newer.supersedes
-			 JOIN questions q ON q.id = old.question WHERE q.state = 'decided' AND q.decision = old.id
-			   AND (old.answer::jsonb)->>'is' NOT IN ('expired', 'outdated', 'withdrawn')`,
-			);
+			const standing = relations.standing;
 			if (standing.length > 0)
 				return { what: "a superseded decision is still its question's answer", detail: standing };
 
 			// 4. Excuses and the decisions they belong to.
-			const orphans = await rows(
-				`SELECT e.signature, e.scope, e.target, e.decision FROM excuses e
-			 JOIN decisions d ON d.id = e.decision JOIN questions q ON q.id = d.question
-			 WHERE q.state != 'decided' OR q.decision != d.id`,
-			);
+			const orphans = relations.orphans;
 			if (orphans.length > 0) return { what: "an excuse outlived its decision", detail: orphans };
-			const bare = await rows(
-				`SELECT q.no, d.id, d.answer FROM questions q JOIN decisions d ON d.id = q.decision
-			 WHERE q.kind = 'failure' AND q.state = 'decided' AND (d.effects::jsonb)->>'class' IS NOT NULL
-			   AND NOT EXISTS (SELECT 1 FROM excuses e WHERE e.decision = d.id)
-     AND NOT EXISTS (SELECT 1 FROM result_excuses e WHERE e.decision = d.id)`,
-			);
+			const bare = relations.bare;
 			if (bare.length > 0) return { what: "an answer is in force with nothing to show for it", detail: bare };
-			const unsupported = await invalidInherited(db);
+			const unsupported = relations.unsupported;
 			if (unsupported.length > 0)
 				return { what: "an inherited failure does not fail on its base now", detail: unsupported };
 
@@ -705,7 +653,9 @@ export async function sequence(
 			seen.now = null;
 			keptFrom = null;
 			settled = null;
+			const beforeAudit = h.app.database.statementCount;
 			const problem = await audit();
+			onAudit?.({ step, statements: h.app.database.statementCount - beforeAudit });
 			if (problem) return { seed, step, ...problem, last: trace.slice(-12) };
 			// 10. The commits that had a gate before an agent's report read the same after it.
 			if (gatesBefore) {
@@ -1025,11 +975,20 @@ export function sequences(preset: "loose" | "standard" | "strict"): void {
 	for (let seed = 1; seed <= SEEDS; seed++) {
 		test(`random sequence ${seed}/${SEEDS} under the ${preset} policy keeps every invariant`, async () => {
 			let firstPlan = -1;
-			const problem = await sequence(seed, preset, (step) => {
-				firstPlan = step;
-			});
+			let auditStatements = 0;
+			const problem = await sequence(
+				seed,
+				preset,
+				(step) => {
+					firstPlan = step;
+				},
+				({ statements }) => {
+					auditStatements = Math.max(auditStatements, statements);
+				},
+			);
 			expect(problem).toBeNull();
 			expect(firstPlan).toBeGreaterThanOrEqual(0);
+			expect(auditStatements).toBeLessThanOrEqual(4);
 		}, 120_000);
 	}
 }

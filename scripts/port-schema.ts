@@ -123,6 +123,11 @@ ORDER BY kind,name`);
 
 // Each deliberate hand edit is named, not a wildcard exemption for a class of changes.
 export const HAND_EDITS = new Map([
+	["column:demo_projects.deployment", "text NULL"],
+	[
+		"constraint:demo_projects.demo_projects_deployment_check",
+		"CHECK (((deployment IS NULL) OR ((deployment)::jsonb IS NOT NULL)))",
+	],
 	[
 		"function:search_docs_vector_fn",
 		`CREATE OR REPLACE FUNCTION search_docs_vector_fn()
