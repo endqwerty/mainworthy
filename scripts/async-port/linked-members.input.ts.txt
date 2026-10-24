@@ -1,0 +1,6 @@
+import type { ReadDb } from "./src/server/kernel/db.ts";
+type Operation<T> = { run: (db: ReadDb) => T | Promise<T> };
+function defineOp<T>(operation: Operation<T>): Operation<T> { return operation; }
+export const reader = defineOp({ run(db) { return db.get("SELECT x"); } });
+export const scalar = defineOp({ run() { return "ready"; } });
+export const arrow = defineOp({ run: () => 7 });

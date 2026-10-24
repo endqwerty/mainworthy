@@ -548,7 +548,7 @@ test.each(["rebuild", "archive"])(
 					async (db) => await db.transaction(async () => await importArchive(db, linesOf(chunks.join("")))),
 				);
 			} else await db.write(async (db) => await db.transaction(async () => await rebuildAssertionIndexes(db, true)));
-			if (!imported) expect(db.statementCount - beforeMaintenance).toBeLessThanOrEqual(512);
+			if (!imported) expect(db.statementCount - beforeMaintenance).toBeLessThanOrEqual(100);
 			const write = db.write.bind(db);
 			let rowsRead = 0;
 			db.write = async (fn, options) =>
