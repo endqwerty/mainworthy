@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { z } from "zod";
+import { budget } from "../scripts/budget.ts";
 import type { InboxReply } from "../src/core/ops.ts";
 import { type Harness, harness } from "./helpers.ts";
 
@@ -86,12 +87,12 @@ test("continuation queries and hydrated case rows stay bounded from 450 to 4500 
 	console.log(
 		`impact continuation SQL: 450=${small.queries}, 4500=${large.queries}; full case rows=${small.fullCases}/${large.fullCases}; reason links=${small.reasonLinks}/${large.reasonLinks}`,
 	);
-	expect(large.queries).toBeLessThanOrEqual(small.queries + 2);
-	expect(large.queries).toBeLessThanOrEqual(50);
-	expect(small.fullCases).toBeLessThanOrEqual(200);
-	expect(large.fullCases).toBeLessThanOrEqual(200);
-	expect(small.reasonLinks).toBeLessThanOrEqual(200);
-	expect(large.reasonLinks).toBeLessThanOrEqual(200);
+	budget("impact continuation SQL at 4500 cases over 450", large.queries, small.queries + 2, "queries");
+	budget("impact continuation SQL at 4500 cases", large.queries, 50, "queries");
+	budget("impact full case rows at 450 cases", small.fullCases, 200, "rows");
+	budget("impact full case rows at 4500 cases", large.fullCases, 200, "rows");
+	budget("impact reason links at 450 cases", small.reasonLinks, 200, "rows");
+	budget("impact reason links at 4500 cases", large.reasonLinks, 200, "rows");
 });
 
 test("5000 duplicate paths do the same database work as one path without changing cursor identity", async () => {
@@ -102,8 +103,8 @@ test("5000 duplicate paths do the same database work as one path without changin
 	expect(repeated.reply.cases).toEqual(single.reply.cases);
 	expect(repeated.reply.counts).toEqual(single.reply.counts);
 	console.log(`impact duplicate-path SQL: one=${single.queries}, 5000=${repeated.queries}`);
-	expect(repeated.queries).toBeLessThanOrEqual(single.queries + 1);
-	expect(repeated.reasonLinks).toBeLessThanOrEqual(200);
+	budget("impact SQL for 5000 duplicate paths over one", repeated.queries, single.queries + 1, "queries");
+	budget("impact reason links for 5000 duplicate paths", repeated.reasonLinks, 200, "rows");
 	expect(await h.raw("impact", { files, cursor: single.reply.next })).toMatchObject({
 		ok: false,
 		error: { code: "conflict" },
@@ -252,8 +253,8 @@ test("impact selection includes more than 500 links in one file and more than 20
 	const failed = await databaseWork(async () => await h.call<Impact>("impact", { change: "pr:396" }));
 	expect(failed.reply.counts).toMatchObject({ cases: 450, failing: 450 });
 	expect(failed.testLookups).toBe(0);
-	expect(failed.queries).toBeLessThanOrEqual(50);
-	expect(failed.fullCases).toBeLessThanOrEqual(200);
+	budget("impact SQL of a failing change", failed.queries, 50, "queries");
+	budget("impact full case rows of a failing change", failed.fullCases, 200, "rows");
 });
 
 test("continuations reject another selection, caller, malformed position, or changed project", async () => {

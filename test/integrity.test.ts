@@ -1,6 +1,7 @@
 // Things that must never happen, each found by an independent review of the engine and reproduced here first.
 // One test per promise: what a result may prove, what a decision may change, and what a caller may see.
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { budget } from "../scripts/budget.ts";
 import { emptyBody } from "../src/core/model.ts";
 import type {
 	DecideReply,
@@ -1262,17 +1263,20 @@ describe("what a result may prove", () => {
 			const scans = [...get.mock.calls, ...all.mock.calls].filter(
 				([statement]) => /\bbatches\b/.test(statement.text) && /\bstaged\b/.test(statement.text),
 			);
-			expect(scans.length).toBeLessThanOrEqual(1);
+			budget("staged batch scans of a corrected report", scans.length, 1, "scans");
 			get.mockClear();
 			all.mockClear();
 			expect(await report({ ...input, results: [{ ...observed, note: "ordinary report" }] }, actor)).toMatchObject({
 				counts: { total: 1, pass: 1 },
 			});
-			expect(
+			budget(
+				"staged batch scans of an ordinary report",
 				[...get.mock.calls, ...all.mock.calls].filter(
 					([statement]) => /\bbatches\b/.test(statement.text) && /\bstaged\b/.test(statement.text),
-				),
-			).toHaveLength(0);
+				).length,
+				0,
+				"scans",
+			);
 		} finally {
 			get.mockRestore();
 			all.mockRestore();

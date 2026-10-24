@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { budget } from "../scripts/budget.ts";
 import { open } from "../src/app/start.ts";
 import { Client } from "../src/cli/client.ts";
 import { parseCase } from "../src/core/markdown.ts";
@@ -1391,10 +1392,7 @@ describe("capture", () => {
 		let candidates = 0;
 		const limit = 25_000 + 100 * edits.length;
 		const spy = spyOn(Set.prototype, "add").mockImplementation(function (this: Set<unknown>, value: unknown) {
-			if (typeof value === "string" && value.includes("/")) {
-				candidates++;
-				if (candidates === limit + 1) throw new Error("candidate work exceeded its polynomial bound");
-			}
+			if (typeof value === "string" && value.includes("/")) candidates++;
 			return add.call(this, value);
 		});
 		let reply: Reply;
@@ -1403,7 +1401,7 @@ describe("capture", () => {
 		} finally {
 			spy.mockRestore();
 		}
-		expect(candidates).toBeLessThanOrEqual(limit);
+		budget("folder path candidates", candidates, limit, "candidates");
 		expect(reply).toMatchObject({
 			ok: true,
 			result: {

@@ -857,7 +857,7 @@ test("authenticated stateless HTTP answers initialize and tools/list and keeps t
 		expect(init.instructions).toContain(
 			"read base for policy clauses or settings through CLI policy show --json or HTTP admin policy.show",
 		);
-		expect(init.instructions?.split(/[.!?](?:\s|$)/).filter(Boolean).length).toBeLessThanOrEqual(3);
+		budget("MCP instructions", init.instructions?.split(/[.!?](?:\s|$)/).filter(Boolean).length ?? 0, 3, "sentences");
 		const listed = await post({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
 		expect(listed.status).toBe(200);
 		expect(z.object({ result: ListToolsResultSchema }).parse(await listed.json()).result).toEqual({

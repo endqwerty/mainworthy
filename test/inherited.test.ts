@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { budget } from "../scripts/budget.ts";
 import { start } from "../src/app/start.ts";
 import { Client } from "../src/cli/client.ts";
 import type { Policy } from "../src/core/kinds.ts";
@@ -144,7 +145,12 @@ for (const preset of ["standard", "loose"]) {
 			expect((await gate("change01")).tally).toMatchObject(
 				preset === "loose" ? { excused: 600, unexplained: 0 } : { excused: 0, unexplained: 600 },
 			);
-			expect(reads).toBeLessThanOrEqual(600 * (preset === "loose" ? 6 : 2));
+			budget(
+				`evidence reads for 600 inherited failures (${preset})`,
+				reads,
+				600 * (preset === "loose" ? 6 : 2),
+				"reads",
+			);
 		} finally {
 			spy.mockRestore();
 		}
@@ -185,7 +191,7 @@ test("a report's inherited answer reads only its affected runs, regardless of si
 		});
 		expect((await h.call<InboxReply>("inbox", { on: "pr:2", kind: "failure" })).items).toEqual([]);
 		expect(await gate("sibling0002")).toMatchObject({ verdict: "passed", tally: { excused: 1, unexplained: 0 } });
-		expect(reads).toBeLessThanOrEqual(12);
+		budget("evidence reads for a sibling excuse", reads, 12, "reads");
 	} finally {
 		spy.mockRestore();
 	}

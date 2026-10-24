@@ -2,6 +2,7 @@
 // reports its earlier tries with the result (decision 0129). The result itself is what the gate counts; the tries
 // are evidence: a try that disagrees with the next is a flip, as a retry by the pipeline is.
 import { afterEach, beforeEach, expect, test } from "bun:test";
+import { budget } from "../scripts/budget.ts";
 import { type GateStatus, type InboxReply, ReportInput, type ReportReceipt } from "../src/core/ops.ts";
 import { rebuildAssertionIndexes } from "../src/server/evidence/assertions.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
@@ -528,8 +529,8 @@ test("large assertion history cannot make a report materialize unbounded rows", 
 			},
 			ci,
 		);
-		expect(largestRead).toBeLessThanOrEqual(200);
-		expect(probeRows).toBeLessThanOrEqual(512);
+		budget("largest read of a retried report", largestRead, 200, "rows");
+		budget("probe rows of a retried report", probeRows, 512, "rows");
 	} finally {
 		db.all = all;
 	}
@@ -564,7 +565,7 @@ test.each(["rebuild", "archive"])(
 			try {
 				const app = { ...h.app, db };
 				expect(recoverAccepted(app)).toBe(1);
-				expect(rowsRead).toBeLessThanOrEqual(512);
+				budget("rows read recovering an accepted report", rowsRead, 512, "rows");
 				expect(recoverAccepted(app)).toBe(0);
 			} finally {
 				db.get = get;
