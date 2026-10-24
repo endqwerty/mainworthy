@@ -6,6 +6,7 @@ import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { budget } from "../scripts/budget.ts";
 import { type Instance, start } from "../src/app/start.ts";
 import { Client } from "../src/cli/client.ts";
 import { seed } from "../src/cli/seed.ts";
@@ -865,9 +866,9 @@ describe("the executable, built the way `bun run build` builds it", () => {
 					// The minifier drops the licence comments of the packages in it: the file names where they are.
 					expect(body.startsWith("/*! Mainworthy, Apache-2.0."), "the web script names its licences").toBe(true);
 					expect(body.slice(0, 200)).toContain("/docs/licence */");
-					// 694 KB on 2026-10-15, with about 6 KB left of a 700,000-byte budget; raised to 800,000 for quarantine,
-					// mail and shared steps at the owner's word (issue #334). A raise is the owner's, as for every budget.
-					expect(new TextEncoder().encode(body).byteLength, "the web script outgrew its budget").toBeLessThan(800_000);
+					// 694 KB on 2026-10-15; the baseline was 700,000 bytes, then 800,000 (issue #334). A budget warns and
+					// never fails: a larger script is fine when the user gains from it (the owner, 2026-10-24; #906).
+					budget("the web script", new TextEncoder().encode(body).byteLength, 800_000, "bytes");
 				}
 				const again = await fetch(`${url}${file}`, { headers: { "if-none-match": asset.headers.get("etag") ?? "" } });
 				expect(again.status, file).toBe(304);

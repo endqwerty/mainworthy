@@ -45,9 +45,10 @@ The check runs these steps:
 
 At the end the check prints the wall time and exit of each part, the log of each part that failed, each failed
 test with its file and reason, whether the browser tests ran, and the five slowest files. When the tests take more
-than 130 seconds in total, the check warns. Elapsed-time budget misses warn with the measured number and baseline
-in the local end summary and CI job summary, and change no exit code or gate verdict. A measurement above ten
-times its baseline fails (below). Workload errors and crashes still fail. Deterministic operation-count assertions in `test/budgets.test.ts` remain in the functional check.
+than 130 seconds in total, the check warns. Budget misses (elapsed time, bytes, tokens or operation counts) warn
+with the measured number and baseline in the local end summary and CI job summary, and change no exit code or gate
+verdict. A measurement above ten times its baseline fails (below). Workload errors and crashes still fail. The
+operation-count budgets in `test/budgets.test.ts` run in the functional check.
 
 ## Know the kinds of tests
 
@@ -58,7 +59,7 @@ times its baseline fails (below). Workload errors and crashes still fail. Determ
 | `test/sequences-*.test.ts` | long sequences of operations under each policy preset |
 | `test/architecture.test.ts` | the module map, the registry, the witness writers, migrations, the identity rules, the phone layout and what a public repository may contain |
 | `test/integrity.test.ts` | one test for each thing that must never happen, such as a green gate with nothing proven or an agent's result counted as a pipeline's. Each came from an independent review. |
-| `test/budgets.test.ts` | deterministic operation counts on hot paths |
+| `test/budgets.test.ts` | operation counts on hot paths, reported as budgets |
 | `PERFORMANCE` in `scripts/check-plan.ts` | elapsed-time budgets for the paths people wait on |
 | `test/docs.test.ts` | the guide against the code: the generated tables, links, the operation table in `docs/architecture.md`, the diagrams and the docs site |
 | `test/ios-contract.test.ts`, `test/licences.test.ts`, `test/demo-time.test.ts`, `test/work.test.ts` | the iPhone contract, the licence notices, the server's clock, and `scripts/work.ts` |
@@ -82,6 +83,10 @@ A test that fails by chance is a defect. File an issue with the `flaky-test` lab
 cause instead of retrying.
 
 ## Report a budget
+
+A budget is a baseline, not a limit (the owner, 2026-10-24: "None of them should be hard limits. The end result of
+user experience, user features, and developer experience are all that matters. Numbers are always allowed to be
+broken if the end user gains something from it"). A pull request that breaks one says what the user gains.
 
 Any test file can import `budget` from `scripts/budget.ts` and call
 `budget(name, measured, limit, unit)`. Units can be milliseconds, bytes, tokens or another measured quantity.

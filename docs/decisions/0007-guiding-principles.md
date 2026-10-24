@@ -32,8 +32,11 @@ a four-candidate design arena, not rules the owner wrote.
   P9's "every promise is a failing test"; the bend steps with their numbers (marked "proposed limit"); the floor F1
   to F9; the rejected alternatives' framing.
 - **What it means now.** Before 1.0 these are strong defaults to weigh, not fixed rules (AGENTS.md). P9 turned first
-  measurements into failing tests; a budget is now a measured baseline, and only a hard limit the owner accepts fails
-  (#906).
+  measurements into failing tests, and P1 ruled out "a merged change that breaks a hot-path budget". The owner
+  overruled both on 2026-10-24: "None of them should be hard limits. The end result of user experience, user
+  features, and developer experience are all that matters. Numbers are always allowed to be broken if the end user
+  gains something from it." Every budget is now a measured baseline that warns (#906); speed at the point of thought
+  stays the aim P1 names.
 
 ## The principles, in tie-break order
 

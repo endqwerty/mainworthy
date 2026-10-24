@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Workload } from "../bench/measure.ts";
+import { budget } from "../scripts/budget.ts";
 import { resetDemoSteps } from "../src/cli/demo.ts";
 import { withInstance } from "../src/cli/test-support.ts";
 import type { GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
@@ -69,7 +70,7 @@ test("a report that makes many failures go away recomputes each run once, not on
 		}
 		expect((await counts()).failure ?? 0).toBe(0);
 		// Two commits' runs, each read a few times in one report: nowhere near once per question.
-		expect(tallies).toBeLessThan(12);
+		budget("run reads in one report", tallies, 11, "reads");
 	} finally {
 		h.close();
 	}
@@ -135,9 +136,9 @@ test("a report with existing failures bounds repeated scans and targets reads", 
 	const small = await work(3);
 	const large = await work(30);
 	// One tally and one question-discovery pass. Stale handling already has the tally's failing set.
-	expect(small.scans).toBe(2);
-	expect(large.scans).toBe(2);
-	expect(large.targets).toBe(small.targets);
+	budget("tally scans of a 3-failure report", small.scans, 2, "scans");
+	budget("tally scans of a 30-failure report", large.scans, 2, "scans");
+	budget("target reads of a 30-failure report", large.targets, small.targets, "reads");
 });
 
 test("a 500-result trunk page batches landing reads beside 8000 changes", async () => {

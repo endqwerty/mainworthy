@@ -15,7 +15,7 @@ import { mustTarget, resultLocation } from "../src/server/evidence/evidence.ts";
 import { defaultConfig, openApp } from "../src/server/kernel/app.ts";
 import { Db, databasePath, declaredSql, sql } from "../src/server/kernel/db.ts";
 import { MIGRATIONS, migrate, openDatabase, SCHEMA_VERSION, schemaVersion } from "../src/server/kernel/migrate.ts";
-import { MCP_OPS, OP_LIST } from "../src/server/ops/index.ts";
+import { OP_LIST } from "../src/server/ops/index.ts";
 import { UNEXPORTED } from "../src/server/transfer/transfer.ts";
 import { openApi } from "../src/surfaces/http.ts";
 import "../src/server/ops/jobs.ts";
@@ -1428,10 +1428,10 @@ describe("the registry", () => {
 		expect(declaredSql().length).toBeGreaterThan(150);
 	});
 
-	test("every operation is declared once, with a summary; the agent surface is at most ten tools", () => {
+	// How many MCP tools there are is a budget, reported in src/surfaces/mcp.test.ts (#906).
+	test("every operation is declared once, with a summary", () => {
 		expect(new Set(OP_LIST.map((op) => op.name)).size).toBe(OP_LIST.length);
 		for (const op of OP_LIST) expect(op.summary.length).toBeGreaterThan(20);
-		expect(MCP_OPS.length).toBeLessThanOrEqual(10);
 	});
 
 	test("a pipeline's token reaches attach, report, change, announce, work and gate", () => {

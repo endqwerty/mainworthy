@@ -11,6 +11,7 @@ import {
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { encode } from "gpt-tokenizer/encoding/o200k_base";
 import { z } from "zod";
+import { budget } from "../../scripts/budget.ts";
 import { generateToolReference } from "../../scripts/gen-skill.ts";
 import { harness } from "../../test/helpers.ts";
 import type { Ask } from "../core/kinds.ts";
@@ -114,16 +115,11 @@ test("tools/list accepts a get cursor", () => {
 test("tools come from the registry, and each tool's size is recorded", () => {
 	const tools = mcpTools();
 	expect(tools.map((tool) => tool.name)).toEqual(MCP_OPS.map((op) => op.name));
-	expect(tools.length).toBeLessThanOrEqual(10);
+	budget("MCP tools", tools.length, 10, "tools");
 	const total = tokens({ tools });
 	// A guideline, not a gate (decision 0118): the recorded sizes below make every change visible in review.
-	if (total > TOOL_TOKEN_GUIDELINE.total)
-		console.warn(`tools/list is ${total} tokens, above the ${TOOL_TOKEN_GUIDELINE.total} guideline (decision 0118)`);
-	for (const tool of tools)
-		if (tokens(tool) > TOOL_TOKEN_GUIDELINE.perTool)
-			console.warn(
-				`${tool.name} is ${tokens(tool)} tokens, above the ${TOOL_TOKEN_GUIDELINE.perTool} per-tool guideline`,
-			);
+	budget("tools/list", total, TOOL_TOKEN_GUIDELINE.total, "tokens");
+	for (const tool of tools) budget(`the ${tool.name} tool`, tokens(tool), TOOL_TOKEN_GUIDELINE.perTool, "tokens");
 	for (const tool of tools) {
 		const expected = TOKEN_COUNTS[tool.name];
 		if (expected === undefined) throw new Error(`No token count recorded for ${tool.name}`);
@@ -1109,8 +1105,8 @@ test("the shipped skill stays short and its tool reference matches the registry"
 	const skill = await Bun.file(new URL("../../skill/mainworthy/SKILL.md", import.meta.url)).text();
 	expect(skill).toStartWith("---\nname: mainworthy\ndescription:");
 	const body = skill.replace(/^---\n[\s\S]*?\n---\n/, "");
-	expect(encode(body).length, "Skill body token budget").toBeLessThanOrEqual(400);
-	expect(encode(skill).length, "Whole SKILL.md token budget").toBeLessThanOrEqual(400);
+	budget("the skill's body", encode(body).length, 400, "tokens");
+	budget("the whole SKILL.md", encode(skill).length, 400, "tokens");
 	const committed = await Bun.file(new URL("../../skill/mainworthy/references/tools.md", import.meta.url)).text();
 	expect(committed, "Run bun scripts/gen-skill.ts after a registry change").toBe(generateToolReference());
 });
