@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 import { BUDGETS } from "../bench/contracts.ts";
 import { measure, table } from "../bench/measure.ts";
 import { budget } from "../scripts/budget.ts";
-import { resetDemoSteps } from "../src/cli/demo.ts";
 import { withInstance } from "../src/cli/test-support.ts";
+import { removeProject } from "../src/server/transfer/transfer.ts";
 import { withDiskWorkloads, withLandingWorkload, withLinkProposal, withQuarantineWorkload } from "./budgets-fixture.ts";
 import { removalFixture } from "./demo-removal-fixture.ts";
 
@@ -59,16 +59,15 @@ test("records the 500-result trunk-page baseline beside 8000 changes", async () 
 	});
 });
 
-test("records the reset's indexed constraint-work baseline", async () => {
+test("records project removal's indexed constraint-work baseline", async () => {
 	await withInstance(async ({ instance }) => {
-		const { app, owner } = instance;
+		const { app } = instance;
 		removalFixture(app.db, 5_000, 20_000);
-		let began = 0;
-		const steps = resetDemoSteps(app, owner, "removing", null, (step, ms) => {
-			if (step === "begin reset transaction") began = performance.now() - ms;
+		const began = performance.now();
+		app.db.transaction(() => {
+			app.db.exec("PRAGMA defer_foreign_keys = ON");
+			removeProject(app.db, "removing", undefined, "deferred");
 		});
-		for (const _ of steps) {
-		}
 		const lockedMs = performance.now() - began;
 		expect(app.db.raw.query("SELECT project, count(*) AS n FROM results GROUP BY project").all()).toEqual([
 			{ project: 901, n: 20_000 },

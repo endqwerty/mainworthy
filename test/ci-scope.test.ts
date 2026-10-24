@@ -201,7 +201,6 @@ test("the browser fixture compiles in its output directory so build files cannot
 			"src/server/ops/read-worker.ts",
 			"src/server/kernel/checkpoint-worker.ts",
 			"src/app/start-worker.ts",
-			"src/cli/demo-worker.ts",
 		])
 			writeFileSync(join(root, file), "export {};");
 		const executable = join(output, "fixture");

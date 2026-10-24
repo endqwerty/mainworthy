@@ -46,6 +46,7 @@ import assertionIndex from "./migrations/0040_assertion_index.sql" with { type: 
 import mergeReceipts from "./migrations/0041_merge_receipts.sql" with { type: "text" };
 import unknownCauses from "./migrations/0042_unknown_causes.sql" with { type: "text" };
 import recentProof from "./migrations/0043_recent_proof.sql" with { type: "text" };
+import demoDeployments from "./migrations/0044_demo_deployments.sql" with { type: "text" };
 
 /**
  * In order. A migration is never edited after it ships; a change is a new entry.
@@ -100,6 +101,7 @@ export const MIGRATIONS: readonly { version: number; name: string; sql: string; 
 	{ version: 41, name: "merge_receipts", sql: mergeReceipts, archive: false },
 	{ version: 42, name: "unknown_causes", sql: unknownCauses, archive: true },
 	{ version: 43, name: "recent_proof", sql: recentProof, archive: false },
+	{ version: 44, name: "demo_deployments", sql: demoDeployments, archive: false },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

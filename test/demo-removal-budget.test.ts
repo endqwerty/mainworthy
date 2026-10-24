@@ -19,7 +19,7 @@ test("deferred demo removal does not scan another project's excuses for every re
 		// here so the budget includes removal and its commit, without also syncing the setup's WAL pages.
 		db.checkpoint();
 		const start = performance.now();
-		// The demo worker's path (`resetDemoSteps`): one transaction, foreign keys enforced and checked at commit.
+		// The enforced transfer path: one transaction, foreign keys checked at commit.
 		// The standalone path turns foreign keys off and would pass without the indexes this budget guards.
 		const removed = db.transaction(() => {
 			db.raw.exec("PRAGMA defer_foreign_keys = ON");

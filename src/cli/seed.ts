@@ -2,10 +2,12 @@
 // today's open questions. It is written through the operations a person, a pipeline and an agent would use, so
 // a project filled here holds nothing those three could not have left. What it writes is decided in
 // `src/cli/demo/` from a seed; this file sends it, each request with the time it happened at.
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { Api } from "../core/api.ts";
 import { type ActorKind, type Capability, PolicySettings } from "../core/kinds.ts";
 import { ProposeReply } from "../core/ops.ts";
+import type { DemoSeed } from "../server/kernel/ctx.ts";
 import type { Client } from "./client.ts";
 import { automateOf, type DemoCase, demoBulkProposal, demoCases, random, requirementOf } from "./demo/cases.ts";
 import { DEMO_FIELDS, demoAliases, demoFields } from "./demo/fields.ts";
@@ -24,15 +26,7 @@ import { demoAgentScreenshot, demoScreenshot, demoTrail } from "./demo/trails.ts
 import { DEMO_WORK } from "./demo/work.ts";
 import { CliError } from "./errors.ts";
 
-export type SeedResult = {
-	cases: string[];
-	run: string;
-	/** Today's other planned run, the one an agent and a person both work. */
-	agentRun: string;
-	proposal: string | null;
-	questions: string[];
-	workSlot: number | null;
-};
+export type SeedResult = z.infer<typeof DemoSeed>;
 
 /** The most cases one seed writes: the size the benchmark measures (`bench/`). */
 export const MAX_SEED_CASES = 100_000;
@@ -76,7 +70,7 @@ export function unitTests(files: number): Api["report"]["input"]["results"] {
 	}).flat();
 }
 
-const Projects = z.array(z.object({ key: z.string() }));
+const Projects = z.array(z.object({ key: z.string(), identity: z.string() }));
 const Actors = z.array(z.object({ name: z.string(), kind: z.string() }));
 const Token = z.object({ id: z.number(), token: z.string() });
 const PolicyShown = z.object({ version: z.number(), settings: PolicySettings });
@@ -140,11 +134,15 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 		throw new CliError("invalid", `seed writes from 0 to ${MAX_SEED_DAYS} days of history, not ${days}`);
 	const as = (token: string | undefined) => client.with({ token, project });
 	const owner = as(client.options.token);
-	const id = (step: string) => `demo-${project}-${step}-v2`;
 	const actors = await refuseProducers(owner);
 	const known = (producer: Producer) => actors.find((row) => row.name === producer.actor);
 	const exists = Projects.parse(await owner.call("admin", { do: "project.list" })).some((row) => row.key === project);
 	if (!exists) await owner.call("admin", { do: "project.create", key: project });
+	const identity = Projects.parse(await owner.call("admin", { do: "project.list" })).find(
+		(row) => row.key === project,
+	)?.identity;
+	if (!identity) throw new CliError("conflict", "the demo project no longer exists");
+	const id = (step: string) => createHash("sha256").update(`demo:${identity}:${step}:v2`).digest("hex");
 	const begun = exists && (await owner.call("command", { cmd: id("folders") })).state !== "none";
 	const taken = new CliError(
 		"conflict",
@@ -245,32 +243,36 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 	}
 	await write(owner, "propose", "folders", suiteAt, { edits: folderEdits });
 	const refs: string[] = [];
-	for (let offset = 0; offset < cases; offset += 250) {
-		const edits: Api["propose"]["input"]["edits"] = suite.slice(offset, offset + 250).map((item, n) => {
-			const aliases = demoAliases(item, offset + n);
-			return {
-				op: "create",
-				folder: item.folder,
-				tags: item.tags,
-				...(aliases.length > 0 ? { aliases } : {}),
-				body: {
-					title: item.title,
-					pre: item.pre,
-					methods: ["human", "auto", "agent"],
-					automate: automateOf(item, offset + n),
-					// The first case is the one today's questions are about, and the tests of the web app read it.
-					fields: offset + n === 0 ? {} : demoFields(item),
-					steps: item.steps,
-				},
-			};
-		});
-		const at = suiteAt + Math.min((offset / 250) * 5_000, 25 * MINUTE);
-		const reply = await write(owner, "propose", `cases-${offset}`, at, { edits });
-		refs.push(...reply.cases.map((item) => item.ref));
+	for (let bucket = 0; bucket < cases; bucket += 250) {
+		for (let offset = bucket; offset < Math.min(bucket + 250, cases); offset += 64) {
+			const edits: Api["propose"]["input"]["edits"] = suite
+				.slice(offset, Math.min(offset + 64, bucket + 250))
+				.map((item, n) => {
+					const aliases = demoAliases(item, offset + n);
+					return {
+						op: "create",
+						folder: item.folder,
+						tags: item.tags,
+						...(aliases.length > 0 ? { aliases } : {}),
+						body: {
+							title: item.title,
+							pre: item.pre,
+							methods: ["human", "auto", "agent"],
+							automate: automateOf(item, offset + n),
+							// The first case is the one today's questions are about, and the tests of the web app read it.
+							fields: offset + n === 0 ? {} : demoFields(item),
+							steps: item.steps,
+						},
+					};
+				});
+			const at = suiteAt + Math.min((bucket / 250) * 5_000, 25 * MINUTE);
+			const reply = await write(owner, "propose", `cases-${offset}`, at, { edits });
+			refs.push(...reply.cases.map((item) => item.ref));
+		}
 	}
 	// Each case covers the requirement of its feature, which the coverage report reads (decision 0095).
-	for (let offset = 0; offset < cases; offset += 250) {
-		const edits: Api["propose"]["input"]["edits"] = suite.slice(offset, offset + 250).flatMap((item, n) => {
+	for (let offset = 0; offset < cases; offset += 64) {
+		const edits: Api["propose"]["input"]["edits"] = suite.slice(offset, offset + 64).flatMap((item, n) => {
 			const ref = refs[offset + n];
 			const requirement = requirementOf(item.folder);
 			return ref && requirement
@@ -322,6 +324,37 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 			return [result];
 		});
 
+	// Use ordinary report shards so a seed never holds the writer for all automated cases at once.
+	const report = async (
+		who: Client,
+		step: string,
+		at: number,
+		input: Api["report"]["input"],
+	): Promise<Api["report"]["reply"]> => {
+		// Keep the demonstration's explicit two-of-three runner story intact.
+		if (input.shard) return write(who, "report", step, at, input);
+		const chunks = Math.max(1, Math.ceil(input.results.length / 128));
+		if (chunks === 1) return write(who, "report", step, at, input);
+		let last: Api["report"]["reply"] | null = null;
+		const questions = new Map<string, Api["report"]["reply"]["questions"][number]>();
+		for (let part = 0; part < chunks; part++) {
+			const results = input.results.slice(part * 128, (part + 1) * 128);
+			const receipt = await write(who, "report", `${step}-part-${part}`, at, {
+				...input,
+				results,
+				...(results.length === 0 ? { nothingRequired: true } : {}),
+				shard: {
+					index: part + 1,
+					of: chunks,
+				},
+			});
+			for (const question of receipt.questions) questions.set(question.q, question);
+			last = receipt;
+		}
+		if (last === null) throw new Error("a report shard was not sent");
+		return { ...last, questions: [...questions.values()] };
+	};
+
 	/**
 	 * Links the tests the pipeline has reported to the cases they cover, as a person does on the day a pipeline
 	 * first reports: one answer for each file of tests the queue asks about.
@@ -357,7 +390,7 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 	for (const event of demoHistory({ seed: seedNumber, cases: suite, days, since })) {
 		switch (event.kind) {
 			case "pipeline": {
-				const receipt = await write(ci, "report", event.step, event.at, {
+				const receipt = await report(ci, event.step, event.at, {
 					target: { ...event.target, repo: REPO },
 					job: "shop",
 					...(event.rerun ? { attempt: event.rerun.attempt } : {}),
@@ -392,7 +425,7 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 			case "execute": {
 				const run = runs.get(event.run);
 				if (!run) throw new CliError("internal", `the demo works through ${event.run} before planning it`);
-				const receipt = await write(owner, "report", event.step, event.at, {
+				const receipt = await report(owner, event.step, event.at, {
 					run,
 					results: event.results.map((result) => {
 						const steps = caseOf(result.case).steps;
@@ -500,14 +533,14 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 	const [green, red, change] = [hex(today), hex(today), hex(today)];
 	const broken: Failure[] = [{ case: 0, message: "expected $90.00, got $100.00" }];
 	const before = (ago: number): number => todayAt(since, ago);
-	await write(ci, "report", "green", before(4.5 * HOUR), {
+	await report(ci, "green", before(4.5 * HOUR), {
 		target: { commit: green, repo: REPO, branch: "main" },
 		job: "shop",
 		results: pipelineResults([], 0.5),
 	});
 	// A demo with no history links its tests now, on the first report there is.
 	if (days === 0) await linkTests(before(4 * HOUR));
-	await write(ci, "report", "red", before(3 * HOUR), {
+	await report(ci, "red", before(3 * HOUR), {
 		target: { commit: red, repo: REPO, ...LANDED_CHANGE },
 		job: "shop",
 		results: pipelineResults(broken, 0.4, true),
@@ -517,7 +550,7 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 		state: "merged",
 		landing: { commit: red, branch: "main" },
 	});
-	await write(ci, "report", "pr", before(2 * HOUR), {
+	await report(ci, "pr", before(2 * HOUR), {
 		target: {
 			commit: change,
 			repo: REPO,
@@ -533,7 +566,7 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 	const shardResults = pipelineResults([], 0.55);
 	// A demo with fewer than two automated cases has nothing to put in the second shard, and leaves it out.
 	for (const index of shardResults.length >= 2 ? [1, 2] : []) {
-		await write(ci, "report", `shard-${index}`, before((80 - index * 5) * MINUTE), {
+		await report(ci, `shard-${index}`, before((80 - index * 5) * MINUTE), {
 			target: {
 				commit: sharded,
 				repo: REPO,
@@ -561,11 +594,11 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 		accepts: { commit: change, repo: REPO },
 		require: [{ id: "agent", kind: "exercise", methods: ["human", "agent"], minActors: 1, basis: "exact" }],
 	});
-	await write(owner, "report", "agent-person-result", before(82 * MINUTE), {
+	await report(owner, "agent-person-result", before(82 * MINUTE), {
 		run: agentRun.run,
 		results: [{ test: { case: agentCase }, outcome: "pass" }],
 	});
-	await write(agent, "report", "agent-results", before(80 * MINUTE), {
+	await report(agent, "agent-results", before(80 * MINUTE), {
 		run: agentRun.run,
 		model: AGENT_MODEL,
 		results: [
@@ -622,7 +655,7 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 	// apart, the landed commit's (decision 0127). Both commits come from a stream of their own.
 	const rebased = random(seedNumber ^ 0x165667b1);
 	const [rebasedHead, rebasedLanding] = [hex(rebased), hex(rebased)];
-	await write(ci, "report", "rebased-head", before(23 * MINUTE), {
+	await report(ci, "rebased-head", before(23 * MINUTE), {
 		target: {
 			commit: rebasedHead,
 			repo: REPO,
@@ -643,21 +676,21 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 		landing: { commit: rebasedLanding, branch: "main" },
 	});
 	// The final job arrives after this merge was reported: the receipt stays passed beside a now-blocked head.
-	await write(ci, "report", "rebased-late-job", before(21 * MINUTE), {
+	await report(ci, "rebased-late-job", before(21 * MINUTE), {
 		target: { commit: rebasedHead, repo: REPO, branch: "refund-currency", pr: 484 },
 		job: "refund-smoke",
 		results: [
 			{ test: shippingAddress, outcome: "fail", failure: { message: "The final refund smoke check timed out" } },
 		],
 	});
-	await write(ci, "report", "unlinked", before(20 * MINUTE), {
+	await report(ci, "unlinked", before(20 * MINUTE), {
 		target: { commit: change, repo: REPO, branch: "coupon-total", pr: 482 },
 		job: "misc",
 		results: [{ test: shippingAddress, outcome: "pass" }],
 	});
 	// The shop's unit tests on the pull request, in a job of their own: one more open question for each file.
 	if (unlinkedFiles > 0) {
-		await write(ci, "report", `unit-${unlinkedFiles}`, before(10 * MINUTE), {
+		await report(ci, `unit-${unlinkedFiles}`, before(10 * MINUTE), {
 			target: { commit: change, repo: REPO, branch: "coupon-total", pr: 482 },
 			job: "unit",
 			results: unitTests(unlinkedFiles),
@@ -689,12 +722,6 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 		workSlot: working?.slot ?? null,
 	};
 }
-
-/**
- * The demo's own pipeline and agent. What they may do on the demo is part of it: the seed sets their grants there
- * each time it runs, to what it needs to write the demo.
- */
-export const DEMO_ACTORS: readonly string[] = [PIPELINE.actor, REVIEWER.actor];
 
 /** The trace a test runner writes for a failing test, as a text file to attach to its result. */
 function traceOf(name: string, message: string): { name: string; data: string } {

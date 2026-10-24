@@ -27,7 +27,6 @@ export const ENTRYPOINTS = [
 	"src/server/ops/read-worker.ts",
 	"src/server/kernel/checkpoint-worker.ts",
 	"src/app/start-worker.ts",
-	"src/cli/demo-worker.ts",
 ];
 
 /**

@@ -26,6 +26,7 @@ const Q = {
 	add: sql<{ team: number; actor: number }>("INSERT OR IGNORE INTO team_members (team, actor) VALUES ($team, $actor)"),
 	remove: sql<{ team: number; actor: number }>("DELETE FROM team_members WHERE team = $team AND actor = $actor"),
 	forget: sql<{ actor: number }>("DELETE FROM team_members WHERE actor = $actor"),
+	moveProjectGrants: sql<{ from: number; to: number }>("UPDATE team_grants SET project = $to WHERE project = $from"),
 	grants: sql<{ team: number }, Grant>("SELECT project, can FROM team_grants WHERE team = $team ORDER BY project"),
 	grant: sql<{ team: number; project: number; can: string }>(
 		`INSERT INTO team_grants (team, project, can) VALUES ($team, $project, $can)
@@ -188,4 +189,9 @@ export function manageTeams(app: App, by: Actor, org: number, input: TeamInput, 
 			endSessionsWithoutFactor(db, actor, app.now(), providerVouches(app));
 	if (changed) db.run(Q.event, { team: team.id, by: by.id, at: app.now(), action, person, project, can });
 	return { team: name, changed };
+}
+
+/** The caller holds the transaction that swaps demo projects. */
+export function moveTeamProjectGrants(db: Db, from: number, to: number): void {
+	db.run(Q.moveProjectGrants, { from, to });
 }

@@ -28,7 +28,8 @@ async function modules(root: string) {
 	const archive: typeof import("../src/surfaces/archive.ts") = await import(`${root}/src/surfaces/archive.ts`);
 	const readers: typeof import("../src/server/ops/readers.ts") = await import(`${root}/src/server/ops/readers.ts`);
 	const demo: typeof import("../src/cli/demo.ts") = await import(`${root}/src/cli/demo.ts`);
-	return { ...startup, ...dataset, ...archive, ...demo, ...readers };
+	const seeding: typeof import("../src/cli/seed.ts") = await import(`${root}/src/cli/seed.ts`);
+	return { ...startup, ...dataset, ...archive, ...demo, ...readers, ...seeding };
 }
 
 async function server(root: string, directory: string, demoFile: string) {
@@ -99,10 +100,15 @@ async function seed(directory: string, root: string) {
 			queueTimeMs: 30_000,
 		}),
 	});
-	const { start, config, archiveRoutes, refreshDemo } = await modules(root);
+	const { start, config, archiveRoutes, seed: seedDemo } = await modules(root);
 	const instance = start(config(directory), (app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }));
 	try {
-		const demo = await refreshDemo(instance, "demo", { cases: 500, unlinkedFiles: 10, days: 2 });
+		const demo = await seedDemo(new Client({ url: instance.url, token: undefined, project: "demo" }), {
+			project: "demo",
+			cases: 500,
+			unlinkedFiles: 10,
+			days: 2,
+		});
 		ensure(demo.workSlot !== null, "demo fixture needs its featured work slot");
 		await Bun.write(`${directory}/demo.json`, JSON.stringify({ run: demo.run, workSlot: demo.workSlot }));
 		console.log(JSON.stringify({ counts: dataset.metadata.counts }));

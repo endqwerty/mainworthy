@@ -8,7 +8,7 @@ export function removalFixture(db: Db, size: number, retainedSize = size): void 
 			INSERT INTO actors (id, org, kind, name, created_at) VALUES (900, 900, 'human', 'fixture', 1);
 			INSERT INTO projects (id, org, key, name, created_at, identity) VALUES
 				(900, 900, 'removing', 'Demo', 1, 'removing-identity'), (901, 900, 'retained', 'Other project', 1, 'retained-identity');
-			INSERT INTO demo_projects VALUES (900, 1);
+			INSERT INTO demo_projects (project, since) VALUES (900, 1);
 			INSERT INTO tests (id, project, no, kind, key, name, first_seq, last_seq) VALUES
 				(900, 900, 1, 'auto', 'a', 'A', 1, 1), (901, 901, 1, 'auto', 'b', 'B', 1, 1);
 			INSERT INTO targets (id, project, what, line, first_seq) VALUES

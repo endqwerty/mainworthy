@@ -8,6 +8,7 @@ import { policyProblem, storedPolicy } from "../../core/presets.ts";
 import { readSubject } from "../decisions/questions.ts";
 import { rebuildAssertionIndexes } from "../evidence/assertions.ts";
 import { attachmentType, type BlobStore, blobHash } from "../kernel/blobs.ts";
+import { retiredDemos } from "../kernel/ctx.ts";
 import type { Db } from "../kernel/db.ts";
 import { OpError } from "../kernel/errors.ts";
 import { ARCHIVE_VERSION } from "../kernel/migrate.ts";
@@ -313,6 +314,9 @@ export function exportArchive(
 	if (!Number.isSafeInteger(exportedAt) || exportedAt < 0)
 		throw invalid("exportedAt must be a nonnegative integer millisecond timestamp");
 	return db.snapshot(() => {
+		// An archive omits demo marks, so it cannot preserve a retired project's cleanup obligation.
+		if (retiredDemos(db).some((project) => options.project === undefined || project.key === options.project))
+			throw new OpError("conflict", "retired demo cleanup is still running; export again after it finishes");
 		const metadata = discoverTables(db);
 		const filters = options.project === undefined ? null : projectFilters(db, metadata, options.project);
 		const filter = (table: Table): string => filters?.get(table.name) ?? where(table);
@@ -704,8 +708,7 @@ export function removeBootstrap(db: Db): void {
  * no row names (`start`). The project's key is free afterwards, and a project made under it starts empty.
  * A table with no ownership rule refuses the removal before a row goes, as it refuses a project export.
  *
- * No operation offers this. `mainworthy serve` calls it for the demo it seeds again (`MAINWORTHY_DEMO`, in
- * `src/cli/demo.ts`), and only for a project `mainworthy seed` made.
+ * No operation offers this. Demo deployment uses removeProjectSlice after swapping the visible project.
  */
 export function removeProject(
 	db: Db,
@@ -793,42 +796,226 @@ export function removeProject(
 	return validation === "deferred" ? db.savepoint(remove) : importTransaction(db, remove, progress);
 }
 
-/**
- * The sequence number of the first write to project `key` after it was made, or null when there was none. Every
- * write stamps the instance's sequence on the rows it leaves (`seq`, `first_seq`, and `rev` where a row records
- * its last change), so the smallest one the project owns is its first write. The policy a project is made with is
- * part of making it, and the project's own row keeps a counter, not a write.
- */
-export function firstWrite(db: Db, key: string): number | null {
-	const id = projectLiteral(db, key);
-	const shadow = new Set(
-		TableKind.array()
-			.parse(db.raw.query("PRAGMA table_list").all())
-			.filter((table) => table.type !== "table")
-			.map((table) => table.name),
-	);
-	let first: number | null = null;
-	const names = TableName.array()
-		.parse(db.raw.query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all())
-		.map((table) => table.name)
-		.filter((name) => !name.startsWith("sqlite_") && !shadow.has(name) && !INSTANCE_TABLES.includes(name));
-	for (const name of names) {
-		if (name === "projects") continue;
-		const columns = Column.array()
-			.parse(db.raw.query(`PRAGMA table_info(${identifier(name)})`).all())
+const SliceForeignKey = z.object({
+	id: Count,
+	seq: Count,
+	table: z.string(),
+	from: z.string(),
+	to: z.string().nullable(),
+});
+type SliceReference = { child: SliceTable; columns: { from: string; to: string }[] };
+type SliceTable = {
+	name: string;
+	keys: string[];
+	owned: string | null;
+	incoming: SliceReference[];
+	parents: string[];
+};
+const slicePlans = new WeakMap<Db, { version: number; tables: SliceTable[] }>();
+
+function slicePlan(db: Db): SliceTable[] {
+	const version = db.raw.query<{ schema_version: number }, []>("PRAGMA schema_version").get()?.schema_version ?? 0;
+	const cached = slicePlans.get(db);
+	if (cached?.version === version) return cached.tables;
+	const kinds = TableKind.array().parse(db.raw.query("PRAGMA table_list").all());
+	const tables = new Map<string, SliceTable>();
+	const foreigns = new Map<string, z.infer<typeof SliceForeignKey>[]>();
+	for (const { name, type, schema } of kinds) {
+		if (schema !== "main" || type === "shadow" || name.startsWith("sqlite_")) continue;
+		const columns = Column.array().parse(db.raw.query(`PRAGMA table_info(${identifier(name)})`).all());
+		const keys = columns
+			.filter((column) => column.pk > 0)
+			.sort((a, b) => a.pk - b.pk)
 			.map((column) => column.name);
-		const where = ownedBy({ name, columns }, id, "reading a project's first write");
-		const made = name === "policies" ? " AND version > 1" : "";
-		for (const column of columns.filter((column) => ["seq", "first_seq", "rev"].includes(column))) {
-			const row = db.raw
-				.query<{ n: number | null }, []>(
-					`SELECT min(${identifier(column)}) AS n FROM ${identifier(name)} ${where}${made}`,
-				)
-				.get();
-			if (row?.n != null && (first === null || row.n < first)) first = row.n;
+		const references = SliceForeignKey.array().parse(
+			db.raw.query(`PRAGMA foreign_key_list(${identifier(name)})`).all(),
+		);
+		foreigns.set(name, references);
+		tables.set(name, {
+			name,
+			keys: keys.length > 0 ? keys : ["rowid"],
+			owned: INSTANCE_TABLES.includes(name)
+				? null
+				: ownedBy(
+						{ name, columns: columns.map((column) => column.name) },
+						"CAST(?1 AS INTEGER)",
+						"removing a project",
+					).slice(6),
+			incoming: [],
+			parents: references.map((reference) => reference.table),
+		});
+	}
+	for (const [name, references] of foreigns) {
+		const child = tables.get(name);
+		if (!child) continue;
+		const grouped = new Map<number, typeof references>();
+		for (const reference of references) {
+			const group = grouped.get(reference.id) ?? [];
+			group.push(reference);
+			grouped.set(reference.id, group);
+		}
+		for (const group of grouped.values()) {
+			const first = group[0];
+			const parent = first && tables.get(first.table);
+			if (!parent) throw invalid(`removing a project cannot resolve references from ${name}`);
+			parent.incoming.push({
+				child,
+				columns: group.map((reference) => {
+					const to = reference.to ?? parent.keys[reference.seq];
+					if (!to) throw invalid(`removing a project cannot resolve reference ${name}.${reference.from}`);
+					return { from: reference.from, to };
+				}),
+			});
 		}
 	}
-	return first;
+	const remaining = new Map([...tables].filter(([, table]) => table.owned !== null));
+	const ordered: SliceTable[] = [];
+	const visit = (table: SliceTable): void => {
+		if (!remaining.delete(table.name)) return;
+		for (const child of remaining.values()) {
+			if (child.name in PROJECT_PARENT === table.name in PROJECT_PARENT && child.parents.includes(table.name))
+				visit(child);
+		}
+		ordered.push(table);
+	};
+	for (const table of [...remaining.values()].sort(
+		(a, b) => Number(!(a.name in PROJECT_PARENT)) - Number(!(b.name in PROJECT_PARENT)),
+	))
+		visit(table);
+	// Removing live capture roots first prevents later source deletes from refilling dirty buckets.
+	ordered.sort((a, b) => Number(b.name === "merge_receipt_heads") - Number(a.name === "merge_receipt_heads"));
+	slicePlans.set(db, { version, tables: ordered });
+	return ordered;
+}
+
+function sliceKeys(table: SliceTable, alias = ""): string {
+	return `json_array(${table.keys.map((key) => `CAST(${alias}${identifier(key)} AS TEXT)`).join(",")})`;
+}
+
+function sliceIdentity(table: SliceTable, alias = ""): string {
+	return table.keys.map((key, i) => `${alias}${identifier(key)} = ?${2 + i}`).join(" AND ");
+}
+
+/**
+ * Removes at most `limit` owned rows, including incoming FK dependants, in its own enforced transaction.
+ * Call under the application's gate and yield between calls. No persistent cursor or whole-instance audit is
+ * needed. Leaf rows go first, so cascades cannot turn a small slice into a large deletion. A bounded incoming
+ * closure handles cycles; a larger cycle or a reference from retained data refuses the slice unchanged.
+ * The last transaction deletes the demo mark and project together (at most two rows, even for limit=1).
+ * `rows` counts deleted owned rows, including the mark and cascades; FTS shadow writes and trigger work are additional.
+ */
+export function removeProjectSlice(
+	db: Db,
+	key: string,
+	limit = 128,
+): { done: boolean; table: string | null; rows: number } {
+	if (!Number.isSafeInteger(limit) || limit < 1)
+		throw invalid("project removal slice limit must be a positive safe integer");
+	if (db.raw.inTransaction || db.inTransaction) throw new Error("project removal slice needs its own transaction");
+	if (db.raw.query<{ foreign_keys: number }, []>("PRAGMA foreign_keys").get()?.foreign_keys !== 1)
+		throw new Error("project removal slice needs foreign key enforcement");
+	return db.transaction(() => {
+		const project = db.raw
+			.query<{ id: string }, [string]>("SELECT CAST(id AS TEXT) AS id FROM projects WHERE key=?")
+			.get(key);
+		if (!project) return { done: true, table: null, rows: 0 };
+		const tables = slicePlan(db);
+		const ordinary = tables.filter((table) => table.name !== "projects" && table.name !== "demo_projects");
+		let blocked: string | null = null;
+		for (const table of ordinary) {
+			const blockers = table.incoming.map(({ child, columns }) => {
+				const matches = columns
+					.map(({ from, to }) => `c.${identifier(from)} = ${identifier(table.name)}.${identifier(to)}`)
+					.join(" AND ");
+				const same =
+					child === table
+						? ` AND NOT (${table.keys.map((key) => `c.${identifier(key)} = ${identifier(table.name)}.${identifier(key)}`).join(" AND ")})`
+						: "";
+				return `NOT EXISTS (SELECT 1 FROM ${identifier(child.name)} c WHERE ${matches}${same})`;
+			});
+			const roots = db.raw
+				.query<{ keys: string }, [string, number]>(
+					`SELECT ${sliceKeys(table)} AS keys FROM ${identifier(table.name)} WHERE ${table.owned}${blockers.length ? ` AND ${blockers.join(" AND ")}` : ""} LIMIT ?2`,
+				)
+				.all(project.id, limit);
+			if (roots.length > 0) {
+				const identity = `(${table.keys.map(identifier).join(",")})`;
+				const selected = roots.map(({ keys }) => z.array(z.string()).parse(JSON.parse(keys)));
+				const placeholders = selected
+					.map((keys, row) => `(${keys.map((_, i) => `?${2 + row * table.keys.length + i}`).join(",")})`)
+					.join(",");
+				db.raw
+					.query(`DELETE FROM ${identifier(table.name)} WHERE ${table.owned} AND ${identity} IN (${placeholders})`)
+					.run(project.id, ...selected.flat());
+				return { done: false, table: table.name, rows: roots.length };
+			}
+			const root = db.raw
+				.query<{ keys: string }, [string]>(
+					`SELECT ${sliceKeys(table)} AS keys FROM ${identifier(table.name)} WHERE ${table.owned} LIMIT 1`,
+				)
+				.get(project.id);
+			if (!root) continue;
+			const pending = [{ table, keys: z.array(z.string()).parse(JSON.parse(root.keys)) }];
+			const included = new Set([`${table.name}:${root.keys}`]);
+			let oversized = false;
+			for (let at = 0; at < pending.length && !oversized; at++) {
+				const row = pending[at];
+				if (!row) continue;
+				for (const { child, columns } of row.table.incoming) {
+					const childColumns = columns.map(({ from }) => `c.${identifier(from)}`).join(",");
+					const parentColumns = columns.map(({ to }) => `p.${identifier(to)}`).join(",");
+					const dependants = db.raw
+						.query<{ keys: string; owned: number }, string[]>(
+							`SELECT ${sliceKeys(child, "c.")} AS keys, (${child.owned ?? "0"}) AS owned FROM ${identifier(child.name)} c WHERE (${childColumns}) IN (SELECT ${parentColumns} FROM ${identifier(row.table.name)} p WHERE ${sliceIdentity(row.table, "p.")}) LIMIT ${limit + 1}`,
+						)
+						.all(project.id, ...row.keys);
+					for (const dependant of dependants) {
+						if (dependant.owned !== 1 || child.name === "projects" || child.name === "demo_projects")
+							throw invalid(`removing project ${key} would affect retained rows in ${child.name}`);
+						const identity = `${child.name}:${dependant.keys}`;
+						if (included.has(identity)) continue;
+						included.add(identity);
+						pending.push({ table: child, keys: z.array(z.string()).parse(JSON.parse(dependant.keys)) });
+						if (pending.length > limit) {
+							oversized = true;
+							break;
+						}
+					}
+					if (oversized) break;
+				}
+			}
+			if (oversized) {
+				blocked = table.name;
+				continue;
+			}
+			db.raw.exec("PRAGMA defer_foreign_keys=ON");
+			for (const row of pending.reverse())
+				db.raw
+					.query(`DELETE FROM ${identifier(row.table.name)} WHERE ${sliceIdentity(row.table)}`)
+					.run(project.id, ...row.keys);
+			return { done: false, table: table.name, rows: pending.length };
+		}
+		if (blocked)
+			throw invalid(`removing project ${key} needs a dependency closure above the bounded slice limit in ${blocked}`);
+		for (const table of tables.filter((item) => item.name === "projects" || item.name === "demo_projects")) {
+			for (const { child, columns } of table.incoming) {
+				if (child.name === "demo_projects") continue;
+				const from = columns.map((column) => identifier(column.from)).join(",");
+				const to = columns.map((column) => identifier(column.to)).join(",");
+				if (
+					db.raw
+						.query(
+							`SELECT 1 FROM ${identifier(child.name)} WHERE (${from}) IN (SELECT ${to} FROM ${identifier(table.name)} WHERE ${table.owned}) LIMIT 1`,
+						)
+						.get(project.id)
+				)
+					throw invalid(`removing project ${key} would affect retained rows in ${child.name}`);
+			}
+		}
+		let rows = db.raw.query("DELETE FROM demo_projects WHERE project=?").run(project.id).changes;
+		rows += db.raw.query("DELETE FROM projects WHERE id=?").run(project.id).changes;
+		return { done: true, table: "projects", rows };
+	});
 }
 
 /** Splits LF-delimited text lazily, retaining blank lines and CR bytes. A final LF creates no extra line. */

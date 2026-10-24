@@ -1,4 +1,5 @@
 // The context an operation runs in: who, on which project, at what time and with which sequence number.
+import { z } from "zod";
 import type { ActorKind, Capability, Role } from "../../core/kinds.ts";
 import type { App } from "./app.ts";
 import { type Db, sql } from "./db.ts";
@@ -64,7 +65,20 @@ const Q = {
 		 ON CONFLICT (project, name) DO UPDATE SET value = value + 1 RETURNING value`,
 	),
 	setSeq: sql<{ id: number; seq: number }>("UPDATE projects SET seq = $seq WHERE id = $id"),
-	projects: sql<readonly [], ProjectRow>("SELECT * FROM projects ORDER BY id"),
+	projects: sql<readonly [], ProjectRow>(`SELECT p.* FROM projects p WHERE NOT EXISTS
+  (SELECT 1 FROM demo_projects d WHERE d.project = p.id AND json_extract(d.deployment, '$.kind') = 'retired') ORDER BY p.id`),
+	demoDeployment: sql<{ project: number }, { deployment: string | null }>(
+		"SELECT deployment FROM demo_projects WHERE project = $project",
+	),
+	saveDemoDeployment: sql<{ project: number; deployment: string }>(
+		"UPDATE demo_projects SET deployment = $deployment WHERE project = $project",
+	),
+	retireDemo: sql<{ project: number; key: string }>("UPDATE projects SET key = $key WHERE id = $project"),
+	retiredDemos: sql<
+		readonly [],
+		{ id: number; key: string }
+	>(`SELECT p.id, p.key FROM projects p JOIN demo_projects d ON d.project = p.id
+ WHERE json_extract(d.deployment, '$.kind') = 'retired' ORDER BY p.id`),
 	insertProject: sql<{ org: number; key: string; identity: string; name: string; at: number }>(
 		"INSERT INTO projects (org, key, identity, name, created_at) VALUES ($org, $key, $identity, $name, $at)",
 	),
@@ -134,6 +148,43 @@ export function markDemo(db: Db, project: ProjectRow, at: number): number | null
 	db.run(Q.markDemo, { project: project.id, since: at });
 	return at;
 }
+
+export const DemoSeed = z.object({
+	cases: z.array(z.string()),
+	run: z.string(),
+	agentRun: z.string(),
+	proposal: z.string().nullable(),
+	questions: z.array(z.string()),
+	workSlot: z.number().nullable(),
+});
+export const DemoDeployment = z.discriminatedUnion("kind", [
+	z.object({
+		kind: z.literal("seeding"),
+		revision: z.string(),
+		size: z.object({ cases: z.number(), unlinkedFiles: z.number(), days: z.number() }),
+	}),
+	z.object({ kind: z.literal("ready"), revision: z.string(), seeded: DemoSeed }),
+	z.object({ kind: z.literal("retired") }),
+]);
+export type DemoDeployment = z.infer<typeof DemoDeployment>;
+
+export function demoDeployment(db: Db, project: number): DemoDeployment | null {
+	const text = db.get(Q.demoDeployment, { project })?.deployment;
+	return text == null ? null : DemoDeployment.parse(JSON.parse(text));
+}
+
+/** Deployment bookkeeping is local operational state, not case standing. The caller owns a gate transaction. */
+export function setDemoDeployment(db: Db, project: number, state: DemoDeployment): void {
+	if (demoSince(db, project) === null) throw new Error("deployment state needs a demo mark");
+	db.run(Q.saveDemoDeployment, { project, deployment: JSON.stringify(state) });
+}
+
+export function retireDemo(db: Db, project: ProjectRow): void {
+	setDemoDeployment(db, project.id, { kind: "retired" });
+	db.run(Q.retireDemo, { project: project.id, key: `~demo-${project.id}` });
+}
+
+export const retiredDemos = (db: Db): { id: number; key: string }[] => db.all(Q.retiredDemos);
 
 /**
  * The stored request and reply of a command that already ran, or null. A retry of the same request returns the

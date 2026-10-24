@@ -8,7 +8,7 @@ import { docsRoutes } from "../../surfaces/docs/site.ts";
 import { mcpRoute } from "../../surfaces/mcp.ts";
 import { type Args, assertPositionals } from "../args.ts";
 import { DEMO_WORK } from "../demo/work.ts";
-import { refreshDemo, renewDemoWork } from "../demo.ts";
+import { drainRetiredDemos, refreshDemo, renewDemoWork } from "../demo.ts";
 import { printError } from "../errors.ts";
 import { line, warning } from "../output.ts";
 
@@ -45,32 +45,44 @@ export async function serveCommand(args: Args, ui: unknown): Promise<void> {
 	line(`project "${instance.project}" · ${who} · policy: ${policy}`);
 	if (config.mode === "server" && instance.generatedToken) line(`owner token (shown once): ${instance.generatedToken}`);
 	for (const text of instance.warnings) warning(`mainworthy: ${text}`);
-	// The demo is seeded again after the server listens, so a start is not held up by it (`src/cli/demo.ts`).
+	// Deployment work starts after listening. Durable revision state makes a same-build restart a no-op.
 	const demo = process.env.MAINWORTHY_DEMO || undefined;
 	const refreshController = new AbortController();
+	const cleanup = () =>
+		drainRetiredDemos(instance, { signal: refreshController.signal }).catch((error: unknown) => {
+			if (!refreshController.signal.aborted)
+				warning(`retired demo cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+		});
+	let cleaning = cleanup();
 	let refreshing: Promise<void> = Promise.resolve();
 	let workTimer: ReturnType<typeof setInterval> | undefined;
 	let renewing: Promise<void> = Promise.resolve();
 	if (demo) {
 		const began = performance.now();
-		refreshing = refreshDemo(instance, demo, undefined, { signal: refreshController.signal }).then(
-			(seeded) => {
-				workTimer = setInterval(() => {
-					renewing = renewing
-						.then(() => renewDemoWork(instance, demo, seeded))
-						.catch((error: unknown) =>
-							warning(`demo work renewal failed: ${error instanceof Error ? error.message : String(error)}`),
-						);
-				}, DEMO_WORK.renewEveryMs);
-				line(
-					`demo "${demo}" seeded again in ${((performance.now() - began) / 1000).toFixed(1)} s: ${seeded.cases.length} cases, ${seeded.questions.length} questions`,
-				);
-			},
-			(error: unknown) =>
-				warning(
-					`mainworthy: demo "${demo}" was not seeded again: ${error instanceof Error ? error.message : String(error)}`,
-				),
-		);
+		refreshing = refreshDemo(instance, demo, undefined, { signal: refreshController.signal })
+			.then(
+				(seeded) => {
+					const renew = () => {
+						renewing = renewing
+							.then(() => renewDemoWork(instance, demo, seeded))
+							.catch((error: unknown) =>
+								warning(`demo work renewal failed: ${error instanceof Error ? error.message : String(error)}`),
+							);
+					};
+					renew();
+					workTimer = setInterval(renew, DEMO_WORK.renewEveryMs);
+					line(
+						`demo "${demo}" ready for revision ${config.commit} in ${((performance.now() - began) / 1000).toFixed(1)} s: ${seeded.cases.length} cases, ${seeded.questions.length} questions`,
+					);
+				},
+				(error: unknown) =>
+					warning(
+						`mainworthy: demo "${demo}" is not ready for this revision: ${error instanceof Error ? error.message : String(error)}`,
+					),
+			)
+			.finally(() => {
+				cleaning = cleanup();
+			});
 	}
 	let stopping = false;
 	const stop = (): void => {
@@ -84,6 +96,7 @@ export async function serveCommand(args: Args, ui: unknown): Promise<void> {
 			.then(async () => {
 				clearInterval(workTimer);
 				await renewing;
+				await cleaning;
 				await instance.stop();
 			})
 			.then(
