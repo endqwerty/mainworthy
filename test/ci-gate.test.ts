@@ -199,7 +199,7 @@ async function gate(
 const green: Shard[] = [
 	{ name: "tests-1", files: { "test/a.test.ts": null, "src/b.test.ts": null } },
 	{ name: "tests-2", files: { "test/c.test.ts": null } },
-	{ name: "quiet", files: { "test/budgets.test.ts": null } },
+	{ name: "performance", files: { "test/budgets.test.ts": null } },
 ];
 const withFailure = (message: string): Shard[] =>
 	green.map((shard) => (shard.name === "tests-2" ? { ...shard, files: { "test/c.test.ts": message } } : shard));
@@ -287,7 +287,7 @@ test("the gate waits for a deployment after choosing the instance", async () => 
 	);
 	expect([result.code, result.batches]).toEqual([0, 3]);
 	expect(result.batchJobs).toEqual([
-		{ job: "quiet", shard: null, n: 1 },
+		{ job: "performance", shard: null, n: 1 },
 		{ job: "tests", shard: 1, n: 1 },
 		{ job: "tests", shard: 2, n: 1 },
 	]);
@@ -533,7 +533,7 @@ test("every shard passed: each is reported as a shard of the job tests to the de
 	expect(result.summary).toBe(`${/Reported to the deployed Mainworthy: .*\./.exec(result.output)?.[0]}\n`);
 	expect(result.output).toContain("$ mainworthy report test-results/tests-1.xml --job tests --shard 1/2");
 	expect(result.output).toContain("job tests  shard 2/2");
-	expect(result.output).toContain("job quiet");
+	expect(result.output).toContain("job performance");
 	expect(result.output).toMatch(/mainworthy gate\s+passed/);
 	expect(result.output).not.toContain("::error::");
 	expect([result.code, result.batches]).toEqual([0, 3]);
@@ -753,7 +753,7 @@ test("given the files the change needed, the job expects those in a report and n
 test("a slow shard only warns, and a slow failed test still blocks", async () => {
 	const check = gateVariants();
 	const taking = (shards: Shard[], seconds: number): Shard[] =>
-		shards.map((shard) => (shard.name === "quiet" ? { ...shard, seconds } : shard));
+		shards.map((shard) => (shard.name === "performance" ? { ...shard, seconds } : shard));
 	for (const seconds of [181, 241]) {
 		const result = await check(taking(green, seconds));
 		expect(result.output).toContain(`::warning::the slowest shard's tests took ${seconds.toFixed(1)} s`);

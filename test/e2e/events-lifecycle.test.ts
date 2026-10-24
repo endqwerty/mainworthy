@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
-import { chromium, type Page, type Request } from "playwright-core";
-import { browserAvailable, eventually, launchBrowser, reservePort, startServer } from "./support.ts";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { type Browser, chromium, type Page, type Request } from "playwright-core";
+import { browserAvailable, eventually, launchBrowser, startServer } from "./support.ts";
 
 const check = test.skipIf(!browserAvailable);
 
@@ -10,18 +12,28 @@ async function workbench(setup?: (page: Page) => Promise<void>, seed?: (server: 
 	const server = await startServer({ mode: "server" });
 	await server.api("propose", { edits: [{ op: "create", outline: "Before the pause" }] });
 	await seed?.(server);
-	const port = await reservePort();
-	const browser = await launchBrowser({ args: [`--remote-debugging-port=${port.port}`] });
-	// Playwright normally forces every page visible through its own CDP session. The default context
-	// with noDefaults leaves visibility under Chromium's control, including in the headless shell.
-	const connection = await chromium.connectOverCDP(`http://127.0.0.1:${port.port}`, { noDefaults: true });
+	const browser = await launchBrowser({ args: ["--remote-debugging-port=0", "--enable-automation"] }).catch(
+		async (error: unknown) => {
+			await server.stop();
+			throw error;
+		},
+	);
+	let connection: Browser | undefined;
 	const close = async () => {
-		await connection.close();
+		await connection?.close();
 		await browser.close();
-		await port.release();
 		await server.stop();
 	};
 	try {
+		const session = await browser.newBrowserCDPSession();
+		const { arguments: args } = await session.send("Browser.getBrowserCommandLine");
+		await session.detach();
+		const profile = args.find((arg) => arg.startsWith("--user-data-dir="))?.slice("--user-data-dir=".length);
+		if (!profile) throw new Error("Chromium did not publish its profile directory");
+		const [port] = (await readFile(join(profile, "DevToolsActivePort"), "utf8")).trim().split("\n");
+		// Playwright normally forces every page visible through its own CDP session. The default context
+		// with noDefaults leaves visibility under Chromium's control, including in the headless shell.
+		connection = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { noDefaults: true });
 		const context = connection.contexts()[0];
 		if (!context) throw new Error("Chromium has no default context");
 		await context.request.post(`${server.url}/api/login`, { data: { token: server.token } });

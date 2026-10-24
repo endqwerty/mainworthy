@@ -12,16 +12,7 @@ import { removeProject } from "../../src/server/transfer/transfer.ts";
 import ui from "../../src/web/index.html";
 import { call } from "../../src/web/lib/api.ts";
 import { Slot } from "../../src/web/runs/models.ts";
-import {
-	answer,
-	browserAvailable,
-	eventually,
-	fetched,
-	openPage,
-	reservePort,
-	type Server,
-	startServer,
-} from "./support.ts";
+import { answer, browserAvailable, eventually, fetched, openPage, type Server, startServer } from "./support.ts";
 
 const check = browserAvailable ? test : test.skip;
 
@@ -437,10 +428,9 @@ for (const scenario of ["fresh session", "stale session", "delayed reports", "re
 		async () => {
 			const delayed = scenario === "delayed reports" || scenario === "retired reports";
 			const dataDir = await mkdtemp(join(tmpdir(), "mainworthy-cockpit-identity-"));
-			const port = await reservePort();
 			const token = "cockpit-identity-test-owner-token";
 			const instance = start(
-				{ ...defaultConfig({}), dataDir, port: port.port, owner: "robin", ownerToken: token, mode: "local" },
+				{ ...defaultConfig({}), dataDir, port: 0, owner: "robin", ownerToken: token, mode: "local" },
 				() => ({ ui }),
 				{ readers: 0 },
 			);
@@ -566,7 +556,6 @@ for (const scenario of ["fresh session", "stale session", "delayed reports", "re
 				held.resolve();
 				await view?.close();
 				await instance.stop();
-				await port.release();
 				await rm(dataDir, { recursive: true, force: true });
 			}
 		},

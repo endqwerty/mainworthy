@@ -4,7 +4,7 @@
 import { existsSync, readdirSync, readlinkSync } from "node:fs";
 import { readdir, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { read, run, sleep } from "./run.ts";
+import { read, run } from "./run.ts";
 
 export type Proc = { pid: number; ppid: number; command: string };
 
@@ -64,7 +64,7 @@ export function isServer(command: string): boolean {
 }
 
 /**
- * A test run: `bun test ...` itself (the quiet phase runs with `--parallel=1` and has no worker) or one of the
+ * A test run: `bun test ...` itself (the performance phase runs with `--parallel=1` and has no worker) or one of the
  * `bun test --test-worker ...` processes it starts for its files.
  */
 export const isTestWorker = (command: string): boolean =>
@@ -117,23 +117,6 @@ export async function stopServers(root: string, self = process.pid): Promise<num
 		.map((proc) => proc.pid);
 	for (const pid of mine) process.kill(pid, "SIGTERM");
 	return mine;
-}
-
-/** Waits until no other test run has a worker; returns the workers still there when `timeoutSeconds` ran out. */
-export async function waitForTests(
-	timeoutSeconds: number,
-	{
-		self = process.pid,
-		pollMs = 2000,
-		table = processTable,
-	}: { self?: number; pollMs?: number; table?: () => Promise<Proc[]> } = {},
-): Promise<Proc[]> {
-	const deadline = Date.now() + timeoutSeconds * 1000;
-	for (;;) {
-		const workers = outsideLineage(await table(), self).filter((proc) => isTestWorker(proc.command));
-		if (workers.length === 0 || Date.now() >= deadline) return workers;
-		await sleep(pollMs);
-	}
 }
 
 /** The Bun processes that run from `root` (a server, a test run, a single test file), other than the caller's. */

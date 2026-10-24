@@ -516,8 +516,8 @@ an identity table outside the archive test's explicit allowlist could travel in 
 `self` decides by itself whose things it touches; an operation's input has a field named like a password; or the
 agent surface grows past ten tools. `test/integrity.test.ts` holds one test
 per thing that must never happen (a green gate with nothing proven, an agent's result counted as a pipeline's, a
-conflict used to skip a review), each found by an independent review. `test/budgets.test.ts` fails the check
-when a hot path gets slow.
+conflict used to skip a review), each found by an independent review. `test/budgets.test.ts` checks deterministic operation counts. The separate
+`bun run performance` job checks elapsed-time budgets on an idle machine.
 
 ## Where things are
 

@@ -11,17 +11,16 @@ import { removeProject } from "../../src/server/transfer/transfer.ts";
 import ui from "../../src/web/index.html";
 import { call } from "../../src/web/lib/api.ts";
 import { Draft } from "../../src/web/lib/drafts.ts";
-import { browserAvailable, eventually, openPage, reservePort, type Server, startServer } from "./support.ts";
+import { browserAvailable, eventually, openPage, type Server, startServer } from "./support.ts";
 
 for (const stage of ["waiting for review", "before its first merge"] as const)
 	test.skipIf(!browserAvailable)(
 		`a restored conflict ${stage} cannot follow a replacement project's question`,
 		async () => {
 			const dataDir = await mkdtemp(join(tmpdir(), "mainworthy-draft-state-project-"));
-			const port = await reservePort();
 			const token = "draft-state-project-owner-token";
 			const instance = start(
-				{ ...defaultConfig({}), dataDir, port: port.port, owner: "robin", ownerToken: token, mode: "local" },
+				{ ...defaultConfig({}), dataDir, port: 0, owner: "robin", ownerToken: token, mode: "local" },
 				() => ({ ui }),
 				{ readers: 0 },
 			);
@@ -131,7 +130,6 @@ for (const stage of ["waiting for review", "before its first merge"] as const)
 			} finally {
 				await view?.close();
 				await instance.stop();
-				await port.release();
 				await rm(dataDir, { recursive: true, force: true });
 			}
 		},
@@ -144,10 +142,9 @@ for (const attempt of ["save", "merge"] as const)
 			`a refused ${attempt} keeps a discardable copy and releases its case (${project})`,
 			async () => {
 				const dataDir = await mkdtemp(join(tmpdir(), "mainworthy-draft-project-"));
-				const port = await reservePort();
 				const token = "draft-project-test-owner-token";
 				const instance = start(
-					{ ...defaultConfig({}), dataDir, port: port.port, owner: "robin", ownerToken: token, mode: "local" },
+					{ ...defaultConfig({}), dataDir, port: 0, owner: "robin", ownerToken: token, mode: "local" },
 					() => ({ ui }),
 					{ readers: 0 },
 				);
@@ -324,7 +321,6 @@ for (const attempt of ["save", "merge"] as const)
 				} finally {
 					await view?.close();
 					await instance.stop();
-					await port.release();
 					await rm(dataDir, { recursive: true, force: true });
 				}
 			},

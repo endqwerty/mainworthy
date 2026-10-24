@@ -189,6 +189,7 @@ export async function startServing(
 	options: StartOptions & {
 		signal?: AbortSignal;
 		startupIdleMs?: number;
+		onListening?: (url: string) => void;
 		spawn?: (url: URL, data: StartupData) => Worker;
 	} = {},
 ): Promise<Instance> {
@@ -204,6 +205,7 @@ export async function startServing(
 	try {
 		options.signal?.throwIfAborted();
 		listener = upgradingListener(config, options.patience);
+		options.onListening?.(listener.url.origin);
 		const path = databasePath(config.dataDir);
 		workspace = mkdtempSync(`${path}.mainworthy-start-`);
 		const ownedWorkspace = workspace;

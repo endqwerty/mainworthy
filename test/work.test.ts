@@ -24,11 +24,8 @@ import {
 	isServer,
 	isTestWorker,
 	lineage,
-	type Proc,
 	parseProcessTable,
-	processTable,
 	stopServers,
-	waitForTests,
 	within,
 } from "../scripts/work/processes.ts";
 import { closing, type Facts, gather, problems } from "../scripts/work/pull-request.ts";
@@ -132,7 +129,7 @@ test("CI timings use each file's suite duration, the newest attempt, and preserv
 	expect(readFileSync(timings, "utf8")).toBe(saved);
 });
 
-test("CI timings accept scoped and quiet reports, new files, XML entities and zero durations", () => {
+test("CI timings accept scoped and performance reports, new files, XML entities and zero durations", () => {
 	const root = directory();
 	mkdirSync(join(root, "scripts"));
 	const timings = join(root, "scripts/test-timings.json");
@@ -140,7 +137,7 @@ test("CI timings accept scoped and quiet reports, new files, XML entities and ze
 	const reports = join(root, "reports");
 	for (const [shard, suite] of [
 		["tests", '<testsuite file="test/a&amp;b.test.ts" time="1.25"/>'],
-		["quiet", '<testsuite file="src/core/a.test.ts" time="0"/>'],
+		["performance", '<testsuite file="src/core/a.test.ts" time="0"/>'],
 	]) {
 		const target = join(reports, `results-${shard}-attempt-1`);
 		mkdirSync(target, { recursive: true });
@@ -158,7 +155,7 @@ test("CI timings accept scoped and quiet reports, new files, XML entities and ze
 	});
 	const saved = readFileSync(timings, "utf8");
 	writeFileSync(
-		join(reports, "results-quiet-attempt-1/quiet.xml"),
+		join(reports, "results-performance-attempt-1/performance.xml"),
 		'<testsuites><testsuite file="test/a&amp;b.test.ts" time="1"/></testsuites>',
 	);
 	expect(() => timingsFromReports(root, reports)).toThrow("Duplicate JUnit file across shards");
@@ -260,7 +257,7 @@ test("a server is `bun src/cli/main.ts serve`, not a shell that has those words 
 	expect(isServer("bun start")).toBe(false);
 	expect(isServer("bun src/cli/main.ts report --run 3")).toBe(false);
 	expect(procs.filter((p) => isTestWorker(p.command)).map((p) => p.pid)).toEqual([400]);
-	// The quiet phase of the check runs `bun test --parallel=1`, which starts no worker.
+	// The performance phase of the check runs `bun test --parallel=1`, which starts no worker.
 	expect(isTestWorker("/opt/homebrew/bin/bun test --parallel=1 --no-orphans ./test/budgets.test.ts")).toBe(true);
 	expect(["bun run test", "bun scripts/check.ts test", "bun test/e2e/serve.ts"].map(isTestWorker)).toEqual([
 		false,
@@ -334,48 +331,6 @@ console.log(JSON.stringify({ stopped: await stopServers(${JSON.stringify(mine)})
 	expect(alive(theirs.pid)).toBe(true);
 	expect(await theirs.ping()).toBe("pong");
 	expect(await stopServers(mine)).toEqual([]);
-});
-
-test("wait-tests ends when the other test run's workers end, and does not wait for its own caller", async () => {
-	const root = directory();
-	const worker = await decoy(root, ["--test-worker"], root);
-	// Other test runs on the machine, this one's own workers included, are not what this test is about.
-	const table = async (): Promise<Proc[]> => (await processTable()).filter((p) => p.pid === worker.pid);
-	expect((await waitForTests(0, { pollMs: 50, table })).map((p: Proc) => p.pid)).toEqual([worker.pid]);
-	const observed = Promise.withResolvers<void>();
-	const disappear = Promise.withResolvers<void>();
-	let reads = 0;
-	const waiting = waitForTests(20, {
-		pollMs: 0,
-		table: async () => {
-			if (reads++ === 0) {
-				const live = await table();
-				expect(live.map((p) => p.pid)).toEqual([worker.pid]);
-				return live;
-			}
-			observed.resolve();
-			await disappear.promise;
-			return table();
-		},
-	});
-	await observed.promise;
-	worker.kill();
-	await worker.exited;
-	disappear.resolve();
-	expect(await waiting).toEqual([]);
-	// A caller with `--test-worker` in its own command line (as the shell had `[t]est-worker` under `pgrep -f`).
-	const caller = join(root, "caller.ts");
-	writeFileSync(
-		caller,
-		`import { lineage, processTable, waitForTests } from ${JSON.stringify(join(import.meta.dir, "../scripts/work/processes.ts"))};
-const own = lineage(await processTable(), process.pid);
-const table = async () => (await processTable()).filter((p) => own.has(p.pid));
-console.log(JSON.stringify(await waitForTests(5, { pollMs: 50, table })));`,
-	);
-	const started = Date.now();
-	const done = await run([process.execPath, caller, "--test-worker"]);
-	expect(JSON.parse(done.out)).toEqual([]);
-	expect(Date.now() - started).toBeLessThan(4000);
 });
 
 test("the board's ids are written once, and a move uses them", () => {
@@ -804,17 +759,11 @@ test("a process listing that did not work is an error, so that a release does no
 	expect(some.get(42)).toBe("/a/b");
 });
 
-test("wait-tests takes a number of seconds and nothing else", async () => {
-	for (const timeout of ["oops", "Infinity", "-1"]) {
-		const done = await run([
-			process.execPath,
-			join(import.meta.dir, "../scripts/work.ts"),
-			"wait-tests",
-			`--timeout=${timeout}`,
-		]);
-		expect(done.status).toBe(4);
-		expect(done.err).toContain("usage:");
-	}
+test("the retired suite waiter is rejected without starting a wait", async () => {
+	const done = await run([process.execPath, join(import.meta.dir, "../scripts/work.ts"), "wait-tests"]);
+	expect(done.status).toBe(4);
+	expect(done.err).toContain("usage:");
+	expect(done.err).not.toContain("wait-tests");
 });
 
 test("a code fence the description ends inside is code to its end", () => {

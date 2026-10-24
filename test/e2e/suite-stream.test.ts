@@ -364,6 +364,8 @@ test.skipIf(!browserAvailable)(
 		const server = await startServer();
 		await server.api("propose", { edits: [{ op: "create", body: { title: "Older draft" } }] });
 		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		const detail = Promise.withResolvers<void>();
+		const save = Promise.withResolvers<void>();
 		try {
 			const { page } = h;
 			await page.getByRole("button", { name: "Older draft", exact: true }).waitFor();
@@ -381,28 +383,51 @@ test.skipIf(!browserAvailable)(
 				localStorage.setItem(key, JSON.stringify(saved));
 			});
 			await server.api("propose", { edits: [{ op: "place", cases: ["C-1"], tags: { add: ["gamma"] } }] });
+			await page.route("**/api/p/scratch/get", async (route) => {
+				await detail.promise;
+				await route.continue();
+			});
 			await page.reload();
 			await title.waitFor();
 			await title.focus();
 			await page.getByRole("option").filter({ hasText: "C-1" }).filter({ hasText: "#gamma" }).waitFor();
+			expect(await page.locator(".ctags").textContent()).toBe("#alpha");
+			detail.resolve();
+			await page.waitForFunction(() => document.querySelector(".ctags")?.textContent === "#gamma#alpha");
+			expect(await page.locator(".ctags").textContent()).toBe("#gamma#alpha");
+			await page.route("**/api/p/scratch/propose", async (route) => {
+				if (
+					route
+						.request()
+						.postDataJSON()
+						.edits.some((edit: { op: string }) => edit.op === "place")
+				)
+					await save.promise;
+				await route.continue();
+			});
 			const proposal = page.waitForRequest(
 				(request) =>
 					request.url().endsWith("/propose") &&
 					request.postDataJSON().edits.some((edit: { op: string }) => edit.op === "place"),
 			);
-			const shownTags = await page.locator(".ctags").textContent();
 			await title.press("Control+Enter");
-			expect((await proposal).postDataJSON().edits.filter((edit: { op: string }) => edit.op === "place")).toEqual([
+			const request = await proposal;
+			expect(request.postDataJSON().edits.filter((edit: { op: string }) => edit.op === "place")).toEqual([
 				{ op: "place", cases: ["C-1"], tags: { add: ["alpha"], remove: [] } },
 			]);
-			expect(shownTags).toBe("#gamma#alpha");
-			const saved = await eventually(
-				() => server.api("get", { refs: ["C-1"] }),
-				(rows) => rows[0]?.title === "My older title",
-			);
-			expect(saved[0]?.tags).toEqual(["alpha", "gamma"]);
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.tags).toEqual(["gamma"]);
+			const completed = page.waitForResponse((response) => response.request() === request);
+			save.resolve();
+			const response = await completed;
+			await response.finished();
+			expect(response.ok()).toBe(true);
+			const saved = (await server.api("get", { refs: ["C-1"] }))[0];
+			expect(saved?.title).toBe("My older title");
+			expect(saved?.tags).toEqual(["alpha", "gamma"]);
 			expect(h.errors).toEqual([]);
 		} finally {
+			detail.resolve();
+			save.resolve();
 			await h.close();
 			await server.stop();
 		}

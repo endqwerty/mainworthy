@@ -15,7 +15,7 @@ const instance = start(
 	{
 		dataDir: process.env.MAINWORTHY_DATA ?? "/tmp/mainworthy-ui",
 		host: "127.0.0.1",
-		port: Number(process.env.MAINWORTHY_PORT ?? 7440),
+		port: Number(process.env.MAINWORTHY_PORT ?? 0),
 		mode: process.env.MAINWORTHY_MODE === "server" ? "server" : "local",
 		owner: "robin",
 		ownerToken: process.env.MAINWORTHY_OWNER_TOKEN ?? null,
@@ -44,5 +44,7 @@ const instance = start(
 	}),
 	{ now: () => Date.now() + ahead, firstProject: process.env.MAINWORTHY_FIRST_PROJECT ?? "scratch" },
 );
+if (process.env.MAINWORTHY_PUBLIC_URL === "http://localhost:0")
+	instance.app.config.publicUrl = `http://localhost:${new URL(instance.url).port}`;
 console.info(instance.url);
 watchLifetime(() => instance.stop());

@@ -7,12 +7,14 @@ import { z } from "zod";
 import { chooseRerun, type Gh, type Job, MOST, rerunFailed } from "../scripts/ci-rerun.ts";
 
 const job = (name: string, conclusion = "success", id = name.length): Job => ({ id, name, conclusion });
-const passing = ["scope", "static", "image", "ios", "tests-1", "tests-2", "tests-3", "quiet"].map((name) => job(name));
+const passing = ["scope", "static", "image", "ios", "tests-1", "tests-2", "tests-3", "performance"].map((name) =>
+	job(name),
+);
 const shard = (name: string, failed = 0) => ({ name, failed });
 
 test("a shard whose test failed runs again, and so does another job that can fail by chance", () => {
 	const jobs = [...passing.filter((j) => j.name !== "ios"), job("ios", "failure"), job("gate", "failure")];
-	expect(chooseRerun([shard("tests-1"), shard("tests-3", 1), shard("quiet")], jobs)).toEqual({
+	expect(chooseRerun([shard("tests-1"), shard("tests-3", 1), shard("performance")], jobs)).toEqual({
 		rerun: ["tests-3", "ios"],
 		why: "running again once, one after the other: tests-3, ios",
 	});
@@ -79,7 +81,8 @@ function github(failing: Record<string, string[]>, start = 1) {
 		calls.push(args.join(" "));
 		if (command === "run" && rest[0] === "download") {
 			const directory = rest[rest.indexOf("--dir") + 1] ?? "";
-			for (const name of ["tests-1", "tests-2", "tests-3", "quiet"]) artifact(directory, name, failing[name] ?? []);
+			for (const name of ["tests-1", "tests-2", "tests-3", "performance"])
+				artifact(directory, name, failing[name] ?? []);
 			return "";
 		}
 		const path = args.at(-1) ?? "";
@@ -91,7 +94,7 @@ function github(failing: Record<string, string[]>, start = 1) {
 		if (path.includes("/jobs?")) return JSON.stringify({ jobs: jobs() });
 		if (path.includes("/artifacts?"))
 			return JSON.stringify({
-				artifacts: ["tests-1", "tests-2", "tests-3", "quiet"].map((name) => ({
+				artifacts: ["tests-1", "tests-2", "tests-3", "performance"].map((name) => ({
 					name: `results-${name}-attempt-1`,
 					expired: false,
 				})),
@@ -110,14 +113,14 @@ function github(failing: Record<string, string[]>, start = 1) {
 }
 
 test("each chosen job runs again only once the one before it finished", async () => {
-	const { gh, calls } = github({ "tests-1": ["flaky one"], quiet: ["slow one", "slower one"] });
+	const { gh, calls } = github({ "tests-1": ["flaky one"], performance: ["slow one", "slower one"] });
 	const slept: number[] = [];
 	const done = await rerunFailed("42", { gh, sleep: async (ms) => void slept.push(ms), pollMs: 5 });
 	expect(done).toEqual({
 		exit: 0,
 		lines: [
-			"run 42: running again once, one after the other: quiet, tests-1",
-			"quiet: ran again as attempt 2; the run is now success",
+			"run 42: running again once, one after the other: performance, tests-1",
+			"performance: ran again as attempt 2; the run is now success",
 			"tests-1: ran again as attempt 3; the run is now success",
 		],
 	});

@@ -6,7 +6,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
 import { z } from "zod";
-import { reservePort } from "../../test/e2e/support.ts";
 import { type Instance, prepareStartup, start, startServing } from "../app/start.ts";
 import { API_VERSION, VERSION } from "../core/version.ts";
 import { defaultConfig } from "../server/kernel/app.ts";
@@ -164,16 +163,49 @@ test("startup cancellation removes its partial copy after the worker stops", asy
 	}
 });
 
+test("a failing listening callback closes liveness and releases the instance lock", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "mainworthy-listening-failed-"));
+	let url = "";
+	let opened: Instance | undefined;
+	try {
+		const starting = startServing(
+			defaultConfig({ MAINWORTHY_DATA: directory, MAINWORTHY_PORT: "0" }),
+			() => ({ ui: null }),
+			{
+				readers: 0,
+				onListening: (bound) => {
+					url = bound;
+					throw new Error("listening callback failed");
+				},
+			},
+		);
+		await expect(
+			starting.then((instance) => {
+				opened = instance;
+			}),
+		).rejects.toThrow("listening callback failed");
+		expect(Number(new URL(url).port)).toBeGreaterThan(0);
+		await expect(fetch(`${url}/healthz`)).rejects.toThrow();
+		lockInstance(directory)();
+	} finally {
+		await opened?.stop();
+		await rm(directory, { recursive: true, force: true });
+	}
+});
+
 test("health keeps answering upgrading during synchronously blocked assertion recovery", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "mainworthy-recovery-health-"));
-	const reserved = await reservePort();
+	let url = "";
 	const pause = new SharedArrayBuffer(4);
 	const state = new Int32Array(pause);
 	const starting = startServing(
-		defaultConfig({ MAINWORTHY_DATA: directory, MAINWORTHY_PORT: String(reserved.port), MAINWORTHY_OWNER: "robin" }),
+		defaultConfig({ MAINWORTHY_DATA: directory, MAINWORTHY_PORT: "0", MAINWORTHY_OWNER: "robin" }),
 		() => ({ ui: null }),
 		{
 			readers: 0,
+			onListening: (bound) => {
+				url = bound;
+			},
 			spawn: (_url, data) =>
 				new Worker(new URL("../../test/startup-progress-worker.ts", import.meta.url), {
 					workerData: { ...data, mode: "recovery", pause },
@@ -186,23 +218,22 @@ test("health keeps answering upgrading during synchronously blocked assertion re
 		while (Atomics.load(state, 0) !== 1 && performance.now() < deadline) await Bun.sleep(10);
 		expect(Atomics.load(state, 0)).toBe(1);
 		for (let i = 0; i < 5; i++) {
-			const response = await fetch(`http://127.0.0.1:${reserved.port}/healthz`, { signal: AbortSignal.timeout(1000) });
+			const response = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(1000) });
 			expect(await response.json()).toMatchObject({ ok: false, state: "upgrading" });
-			expect((await fetch(`http://127.0.0.1:${reserved.port}/api/session`)).status).toBe(503);
+			expect((await fetch(`${url}/api/session`)).status).toBe(503);
 		}
 	} finally {
 		Atomics.store(state, 0, 2);
 		Atomics.notify(state, 0);
 		const instance = await starting;
 		await instance.stop();
-		await reserved.release();
 		await rm(directory, { recursive: true, force: true });
 	}
 });
 
 test("serve answers upgrading health and refuses every other request while a migration waits for a writer", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "mainworthy-upgrading-"));
-	const reserved = await reservePort();
+	let url = "";
 	const path = databasePath(directory);
 	const commit = "a".repeat(40);
 	writeFileSync(
@@ -211,21 +242,22 @@ test("serve answers upgrading health and refuses every other request while a mig
 	);
 	const writer = new Db(path);
 	writer.exec("BEGIN IMMEDIATE");
-	const child = Bun.spawn([process.execPath, CLI_ENTRY, "serve"], {
-		env: {
-			PATH: process.env.PATH ?? "",
+	const starting = startServing(
+		defaultConfig({
 			MAINWORTHY_DATA: directory,
-			MAINWORTHY_PORT: String(reserved.port),
+			MAINWORTHY_PORT: "0",
 			MAINWORTHY_OWNER: "robin",
 			MAINWORTHY_COMMIT: commit,
-			MAINWORTHY_READERS: "0",
+		}),
+		() => ({ ui: null }),
+		{
+			readers: 0,
+			onListening: (bound) => {
+				url = bound;
+			},
 		},
-		stdout: "pipe",
-		stderr: "pipe",
-	});
-	const url = `http://127.0.0.1:${reserved.port}`;
-	const stdout = new Response(child.stdout).text();
-	const stderr = new Response(child.stderr).text();
+	);
+	void starting.catch(() => {});
 	try {
 		// The published copy proves the real migration has reached the held write lock.
 		const deadline = performance.now() + 3000;
@@ -267,20 +299,16 @@ test("serve answers upgrading health and refuses every other request while a mig
 		expect((await fetch(`${url}/api/session`)).status).toBe(200);
 	} finally {
 		if (writer.raw.inTransaction) writer.exec("ROLLBACK");
-		child.kill("SIGTERM");
-		const timeout = setTimeout(() => child.kill("SIGKILL"), 2000);
-		await child.exited;
-		clearTimeout(timeout);
-		await Promise.all([stdout, stderr]);
+		const instance = await starting;
+		await instance.stop();
 		writer.close();
 		await rm(directory, { recursive: true, force: true });
-		await reserved.release();
 	}
 }, 12_000);
 
 test("a failed upgrade closes liveness, restores the umask and releases the instance lock", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "mainworthy-upgrade-failed-"));
-	const reserved = await reservePort();
+	let url = "";
 	const path = databasePath(directory);
 	const db = openDatabase(path);
 	db.raw.query("UPDATE meta SET value = ? WHERE key = 'schema_version'").run(String(SCHEMA_VERSION + 1));
@@ -288,15 +316,16 @@ test("a failed upgrade closes liveness, restores the umask and releases the inst
 	const mask = process.umask();
 	try {
 		await expect(
-			startServing(defaultConfig({ MAINWORTHY_DATA: directory, MAINWORTHY_PORT: String(reserved.port) }), () => ({
-				ui: null,
-			})),
+			startServing(defaultConfig({ MAINWORTHY_DATA: directory, MAINWORTHY_PORT: "0" }), () => ({ ui: null }), {
+				onListening: (bound) => {
+					url = bound;
+				},
+			}),
 		).rejects.toThrow("newer than this build");
 		expect(process.umask()).toBe(mask);
-		await expect(fetch(`http://127.0.0.1:${reserved.port}/healthz`)).rejects.toThrow();
+		await expect(fetch(`${url}/healthz`)).rejects.toThrow();
 		lockInstance(directory)();
 	} finally {
-		await reserved.release();
 		await rm(directory, { recursive: true, force: true });
 	}
 });
@@ -332,17 +361,20 @@ test("the upgrading listener retains the caller's idle timeout after installing 
 
 test("a stalled worker stops liveness, and restarting keeps its already published copy", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "mainworthy-upgrade-deadline-"));
-	const reserved = await reservePort();
+	let url = "";
 	const path = databasePath(directory);
 	writeFileSync(
 		path,
 		Bun.gunzipSync(readFileSync(new URL("../../test/fixtures/sessions/instance-v1.db.gz", import.meta.url))),
 	);
 	const starting = startServing(
-		defaultConfig({ MAINWORTHY_DATA: directory, MAINWORTHY_PORT: String(reserved.port) }),
+		defaultConfig({ MAINWORTHY_DATA: directory, MAINWORTHY_PORT: "0" }),
 		() => ({ ui: null }),
 		{
 			readers: 0,
+			onListening: (bound) => {
+				url = bound;
+			},
 			startupIdleMs: 1000,
 			spawn: (_url, data) =>
 				new Worker(new URL("../../test/startup-progress-worker.ts", import.meta.url), {
@@ -351,10 +383,10 @@ test("a stalled worker stops liveness, and restarting keeps its already publishe
 		},
 	);
 	try {
-		const health = await fetch(`http://127.0.0.1:${reserved.port}/healthz`);
+		const health = await fetch(`${url}/healthz`);
 		expect(await health.json()).toMatchObject({ ok: false, state: "upgrading" });
 		await expect(starting).rejects.toThrow("idle deadline");
-		await expect(fetch(`http://127.0.0.1:${reserved.port}/healthz`)).rejects.toThrow();
+		await expect(fetch(`${url}/healthz`)).rejects.toThrow();
 		lockInstance(directory)();
 		expect(
 			readdirSync(directory).filter((name) => name.includes("mainworthy-start-") || name.includes("mainworthy-copy-")),
@@ -374,7 +406,6 @@ test("a stalled worker stops liveness, and restarting keeps its already publishe
 			await restarted.stop();
 		}
 	} finally {
-		await reserved.release();
 		await rm(directory, { recursive: true, force: true });
 	}
 });

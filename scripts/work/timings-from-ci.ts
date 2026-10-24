@@ -43,7 +43,7 @@ function fileTimes(xml: string): Map<string, number> {
 export function timingsFromReports(root: string, directory: string): { files: number; scale: number } {
 	const shards = new Set(
 		readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-			const name = /^results-(tests(?:-[1-9]\d*)?|quiet)-attempt-[1-9]\d*$/.exec(entry.name)?.[1];
+			const name = /^results-(tests(?:-[1-9]\d*)?|performance)-attempt-[1-9]\d*$/.exec(entry.name)?.[1];
 			return entry.isDirectory() && name ? [name] : [];
 		}),
 	);

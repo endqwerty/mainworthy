@@ -9,16 +9,15 @@ import { removeProject } from "../../src/server/transfer/transfer.ts";
 import ui from "../../src/web/index.html";
 import { call } from "../../src/web/lib/api.ts";
 import { Draft } from "../../src/web/lib/drafts.ts";
-import { browserAvailable, openPage, reservePort, type Server } from "./support.ts";
+import { browserAvailable, openPage, type Server } from "./support.ts";
 
 test.skipIf(!browserAvailable)(
 	"an open tab preserves a waiting capture when its project is replaced and its question collides",
 	async () => {
 		const dataDir = await mkdtemp(join(tmpdir(), "mainworthy-draft-project-live-"));
-		const port = await reservePort();
 		const token = "draft-project-live-owner-token";
 		const instance = start(
-			{ ...defaultConfig({}), dataDir, port: port.port, owner: "robin", ownerToken: token, mode: "local" },
+			{ ...defaultConfig({}), dataDir, port: 0, owner: "robin", ownerToken: token, mode: "local" },
 			() => ({ ui }),
 			{ readers: 0 },
 		);
@@ -98,7 +97,6 @@ test.skipIf(!browserAvailable)(
 		} finally {
 			await view?.close();
 			await instance.stop();
-			await port.release();
 			await rm(dataDir, { recursive: true, force: true });
 		}
 	},
@@ -110,10 +108,9 @@ for (const action of ["placement", "undo"] as const) {
 		`an open tab refuses ${action} after its project is replaced`,
 		async () => {
 			const dataDir = await mkdtemp(join(tmpdir(), "mainworthy-placement-project-"));
-			const port = await reservePort();
 			const token = "placement-project-owner-token";
 			const instance = start(
-				{ ...defaultConfig({}), dataDir, port: port.port, owner: "robin", ownerToken: token, mode: "local" },
+				{ ...defaultConfig({}), dataDir, port: 0, owner: "robin", ownerToken: token, mode: "local" },
 				() => ({ ui }),
 				{ readers: 0 },
 			);
@@ -165,7 +162,6 @@ for (const action of ["placement", "undo"] as const) {
 			} finally {
 				await view?.close();
 				await instance.stop();
-				await port.release();
 				await rm(dataDir, { recursive: true, force: true });
 			}
 		},

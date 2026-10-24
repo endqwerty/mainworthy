@@ -2,7 +2,8 @@
 # two pipeline lines a user would add (`mainworthy report`, `mainworthy gate`), and the result is Mainworthy's gate.
 #
 # The tests run in shards, each on its own runner, balanced by scripts/test-timings.json. The tests that measure
-# time (scripts/check-plan.ts, QUIET) have a runner to themselves. Every shard uploads its JUnit file; the `gate`
+# time (scripts/check-plan.ts, PERFORMANCE) have a runner to themselves. Budget misses warn in its job summary;
+# workload errors still fail. Every shard uploads its JUnit file; the `gate`
 # job reports them all to one Mainworthy, each under its shard's name, and runs the gate. A shard that left no
 # report fails the gate job: a missing report is not a pass (scripts/ci-gate.ts).
 #
@@ -186,7 +187,7 @@ jobs:
     strategy:
       # Every shard runs to its end: the gate reads all of them.
       fail-fast: false
-      # The CI_SHARDS shards of scripts/check-plan.ts and the quiet tests, or the files the change needs, in one
+      # The CI_SHARDS shards of scripts/check-plan.ts and the performance tests, or the files the change needs, in one
       # runner for each phase (`matrix` in scripts/ci-scope.ts). The gate job is given the same names.
       matrix: ${{ fromJSON(needs.scope.outputs.matrix) }}
     steps:

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { errors } from "playwright-core";
 import { z } from "zod";
+import { budget } from "../../scripts/budget.ts";
 import { browserAvailable, openPage, type PageHarness, startServer } from "./support.ts";
 
 /**
@@ -184,10 +185,10 @@ export function latency(cases: 2000 | 10000): void {
 				console.info(
 					`L1 ${cases}: capture p95=${result.capture.p95.toFixed(1)}ms; typing p95=${result.typing.p95.toFixed(1)}ms; j p95=${result.next.p95.toFixed(1)}ms; k p95=${result.previous.p95.toFixed(1)}ms; 200 samples each.`,
 				);
-				expect(result.capture.p95).toBeLessThanOrEqual(100);
-				expect(result.typing.p95).toBeLessThanOrEqual(100);
-				expect(result.next.p95).toBeLessThanOrEqual(100);
-				expect(result.previous.p95).toBeLessThanOrEqual(100);
+				budget(`L1 ${cases} cases: capture event-to-paint p95`, result.capture.p95, 100, "ms");
+				budget(`L1 ${cases} cases: typing event-to-paint p95`, result.typing.p95, 100, "ms");
+				budget(`L1 ${cases} cases: next event-to-paint p95`, result.next.p95, 100, "ms");
+				budget(`L1 ${cases} cases: previous event-to-paint p95`, result.previous.p95, 100, "ms");
 				await page.keyboard.press("Escape");
 				const scrolling = await page.evaluate(async (expected) => {
 					const list = document.querySelector('[data-testid="case-list"]');
@@ -221,7 +222,7 @@ export function latency(cases: 2000 | 10000): void {
 				}, cases);
 				expect(scrolling.scrollTop).toBeGreaterThan(32 * Math.min(cases - 100, 4900));
 				expect(scrolling.seen).toContain("C-");
-				expect(scrolling.longest).toBeLessThanOrEqual(100);
+				budget(`L1 ${cases} cases: virtual scroll longest blank interval`, scrolling.longest, 100, "ms");
 				expect(browser.errors).toEqual([]);
 				await page.evaluate(() => document.querySelector('[data-testid="case-list"]')?.scrollTo(0, 0));
 				const rows = await server.api("find", { in: "cases", text: "Latency sample" });

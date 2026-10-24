@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -71,8 +71,6 @@ async function worker(executable?: string) {
 		const data = /"data":"([^"]+)"/.exec(supervisor?.command ?? "")?.[1];
 		const pid = data ? Number(await readFile(join(data, "fixture-pid"), "utf8")) : (direct?.pid ?? 0);
 		if (!pid) throw new Error("worker did not start a fixture");
-		const lock = join(tmpdir(), `mainworthy-e2e-port-${new URL(ready.url).port}`);
-		const inode = (await stat(lock)).ino;
 		return {
 			...ready,
 			owner,
@@ -97,7 +95,6 @@ async function worker(executable?: string) {
 				if (!(await until(() => !alive(pid) && (!supervisor || !alive(supervisor.pid)))))
 					throw new Error(`Bun ${Bun.version} on ${process.platform}: test cleanup could not stop fixture ${pid}`);
 				if (data) await rm(data, { recursive: true, force: true });
-				if ((await stat(lock).catch(() => null))?.ino === inode) await rm(lock, { recursive: true, force: true });
 			},
 		};
 	} catch (error) {
@@ -125,10 +122,6 @@ async function released(server: Awaited<ReturnType<typeof worker>>) {
 			compatibility(server, "supervisor did not exit after cleanup"),
 		).toBe(true);
 	const port = Number(new URL(server.url).port);
-	expect(
-		existsSync(join(tmpdir(), `mainworthy-e2e-port-${port}`)),
-		compatibility(server, "supervisor left its port lock"),
-	).toBe(false);
 	const probe = Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response() });
 	await probe.stop(true);
 }
@@ -182,7 +175,8 @@ test("shutdown reaps descendants in the fixture's private process group", async 
 			stdin: "inherit", stdout: "ignore", stderr: "ignore"
 		});
 		await Bun.write(${JSON.stringify(pidFile)}, String(child.pid));
-		Bun.serve({ hostname: "127.0.0.1", port: Number(process.env.MAINWORTHY_PORT), fetch: () => new Response() });
+		const listener = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
+		console.info(listener.url.href);
 		watchLifetime(async () => {});
 	`,
 		{ mode: 0o700 },
@@ -262,7 +256,8 @@ test("the fixture watchdog force-exits a hanging stop and a grandchild cannot ho
 			detached: true, stdin: "inherit", stdout: "ignore", stderr: "ignore"
 		});
 		writeFileSync(${JSON.stringify(grandchildFile)}, String(grandchild.pid));
-		Bun.serve({ hostname: "127.0.0.1", port: Number(process.env.MAINWORTHY_PORT), fetch: () => new Response() });
+		const listener = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
+		console.info(listener.url.href);
 		watchLifetime(() => new Promise(() => {}));
 	`,
 		{ mode: 0o700 },
