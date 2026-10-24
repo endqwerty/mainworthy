@@ -1,0 +1,1388 @@
+[
+	{
+		"type": "index",
+		"name": "answers_question",
+		"tbl_name": "answers",
+		"sql": "CREATE INDEX answers_question ON answers (question, id)"
+	},
+	{
+		"type": "index",
+		"name": "assertion_roots_project",
+		"tbl_name": "assertion_roots",
+		"sql": "CREATE INDEX assertion_roots_project ON assertion_roots(project)"
+	},
+	{
+		"type": "index",
+		"name": "assertion_roots_root",
+		"tbl_name": "assertion_roots",
+		"sql": "CREATE INDEX assertion_roots_root ON assertion_roots(root)"
+	},
+	{
+		"type": "index",
+		"name": "assertion_seen_files",
+		"tbl_name": "assertion_seen",
+		"sql": "CREATE INDEX assertion_seen_files ON assertion_seen(project, scope, root, file, test)"
+	},
+	{
+		"type": "index",
+		"name": "assertion_seen_root",
+		"tbl_name": "assertion_seen",
+		"sql": "CREATE INDEX assertion_seen_root ON assertion_seen(root)"
+	},
+	{
+		"type": "index",
+		"name": "assertion_seen_test",
+		"tbl_name": "assertion_seen",
+		"sql": "CREATE INDEX assertion_seen_test ON assertion_seen(test)"
+	},
+	{
+		"type": "index",
+		"name": "assertion_spreads_root",
+		"tbl_name": "assertion_spreads",
+		"sql": "CREATE INDEX assertion_spreads_root ON assertion_spreads(root)"
+	},
+	{
+		"type": "index",
+		"name": "attachments_result",
+		"tbl_name": "attachments",
+		"sql": "CREATE INDEX attachments_result ON attachments(result, id)"
+	},
+	{
+		"type": "index",
+		"name": "batches_accepted",
+		"tbl_name": "batches",
+		"sql": "CREATE INDEX batches_accepted ON batches (project, state) WHERE state = 'accepted'"
+	},
+	{
+		"type": "index",
+		"name": "batches_target",
+		"tbl_name": "batches",
+		"sql": "CREATE INDEX batches_target ON batches (target, seq)"
+	},
+	{
+		"type": "index",
+		"name": "batches_target_shards",
+		"tbl_name": "batches",
+		"sql": "CREATE INDEX batches_target_shards ON batches (target, job) WHERE shards IS NOT NULL"
+	},
+	{
+		"type": "index",
+		"name": "builds_artifact_reset",
+		"tbl_name": "builds",
+		"sql": "CREATE INDEX builds_artifact_reset ON builds (artifact)"
+	},
+	{
+		"type": "index",
+		"name": "case_aliases_case_id_reset",
+		"tbl_name": "case_aliases",
+		"sql": "CREATE INDEX case_aliases_case_id_reset ON case_aliases (case_id)"
+	},
+	{
+		"type": "index",
+		"name": "case_tags_case",
+		"tbl_name": "case_tags",
+		"sql": "CREATE INDEX case_tags_case ON case_tags (case_id)"
+	},
+	{
+		"type": "index",
+		"name": "cases_folder",
+		"tbl_name": "cases",
+		"sql": "CREATE INDEX cases_folder ON cases (project, folder, rank)"
+	},
+	{
+		"type": "index",
+		"name": "cases_folder_reset",
+		"tbl_name": "cases",
+		"sql": "CREATE INDEX cases_folder_reset ON cases (folder)"
+	},
+	{
+		"type": "index",
+		"name": "cases_project_kind",
+		"tbl_name": "cases",
+		"sql": "CREATE INDEX cases_project_kind ON cases(project, kind, state)"
+	},
+	{
+		"type": "index",
+		"name": "cases_rev",
+		"tbl_name": "cases",
+		"sql": "CREATE INDEX cases_rev ON cases (project, rev)"
+	},
+	{
+		"type": "index",
+		"name": "cases_state",
+		"tbl_name": "cases",
+		"sql": "CREATE INDEX cases_state ON cases (project, state, folder)"
+	},
+	{
+		"type": "index",
+		"name": "change_ends_landing",
+		"tbl_name": "change_ends",
+		"sql": "CREATE INDEX change_ends_landing ON change_ends (landing_commit, landing_repo, landing_branch) WHERE ended = 'merged'"
+	},
+	{
+		"type": "index",
+		"name": "change_ends_receipt",
+		"tbl_name": "change_ends",
+		"sql": "CREATE INDEX change_ends_receipt ON change_ends (receipt)"
+	},
+	{
+		"type": "index",
+		"name": "changes_base",
+		"tbl_name": "changes",
+		"sql": "CREATE INDEX changes_base ON changes (project, base_sha, repo)"
+	},
+	{
+		"type": "index",
+		"name": "commands_seq",
+		"tbl_name": "commands",
+		"sql": "CREATE INDEX commands_seq ON commands (project, seq)"
+	},
+	{
+		"type": "index",
+		"name": "commit_statuses_watch",
+		"tbl_name": "commit_statuses",
+		"sql": "CREATE INDEX commit_statuses_watch ON commit_statuses(project, repository, state, watch_until)"
+	},
+	{
+		"type": "index",
+		"name": "covers_case",
+		"tbl_name": "covers",
+		"sql": "CREATE INDEX covers_case ON covers (case_id)"
+	},
+	{
+		"type": "index",
+		"name": "covers_decision_reset",
+		"tbl_name": "covers",
+		"sql": "CREATE INDEX covers_decision_reset ON covers (decision)"
+	},
+	{
+		"type": "index",
+		"name": "credentials_actor",
+		"tbl_name": "credentials",
+		"sql": "CREATE INDEX credentials_actor ON credentials (actor, revoked_at)"
+	},
+	{
+		"type": "index",
+		"name": "credentials_handle",
+		"tbl_name": "credentials",
+		"sql": "CREATE UNIQUE INDEX credentials_handle ON credentials (kind, handle) WHERE handle IS NOT NULL"
+	},
+	{
+		"type": "index",
+		"name": "credentials_password",
+		"tbl_name": "credentials",
+		"sql": "CREATE UNIQUE INDEX credentials_password ON credentials (actor) WHERE kind = 'password' AND revoked_at IS NULL"
+	},
+	{
+		"type": "index",
+		"name": "decisions_expiry",
+		"tbl_name": "decisions",
+		"sql": "CREATE INDEX decisions_expiry ON decisions (project, expires_at) WHERE expires_at IS NOT NULL"
+	},
+	{
+		"type": "index",
+		"name": "decisions_question",
+		"tbl_name": "decisions",
+		"sql": "CREATE INDEX decisions_question ON decisions (question, id)"
+	},
+	{
+		"type": "index",
+		"name": "decisions_seq",
+		"tbl_name": "decisions",
+		"sql": "CREATE INDEX decisions_seq ON decisions (project, seq)"
+	},
+	{
+		"type": "index",
+		"name": "decisions_supersedes_reset",
+		"tbl_name": "decisions",
+		"sql": "CREATE INDEX decisions_supersedes_reset ON decisions (supersedes) WHERE supersedes IS NOT NULL"
+	},
+	{
+		"type": "index",
+		"name": "depends_on_decision",
+		"tbl_name": "depends_on",
+		"sql": "CREATE INDEX depends_on_decision ON depends_on (decision)"
+	},
+	{
+		"type": "index",
+		"name": "deployments_build_fk",
+		"tbl_name": "deployments",
+		"sql": "CREATE INDEX deployments_build_fk ON deployments (build)"
+	},
+	{
+		"type": "index",
+		"name": "deployments_project",
+		"tbl_name": "deployments",
+		"sql": "CREATE INDEX deployments_project ON deployments (project, id)"
+	},
+	{
+		"type": "index",
+		"name": "excuses_decision_fk",
+		"tbl_name": "excuses",
+		"sql": "CREATE INDEX excuses_decision_fk ON excuses (decision)"
+	},
+	{
+		"type": "index",
+		"name": "excuses_signature_reset",
+		"tbl_name": "excuses",
+		"sql": "CREATE INDEX excuses_signature_reset ON excuses (signature)"
+	},
+	{
+		"type": "index",
+		"name": "findings_case",
+		"tbl_name": "findings",
+		"sql": "CREATE INDEX findings_case ON findings (case_id, seq DESC)"
+	},
+	{
+		"type": "index",
+		"name": "findings_project_reset",
+		"tbl_name": "findings",
+		"sql": "CREATE INDEX findings_project_reset ON findings (project)"
+	},
+	{
+		"type": "index",
+		"name": "flips_first_try",
+		"tbl_name": "flips",
+		"sql": "CREATE INDEX flips_first_try ON flips (first_try) WHERE first_try IS NOT NULL"
+	},
+	{
+		"type": "index",
+		"name": "flips_second_try",
+		"tbl_name": "flips",
+		"sql": "CREATE INDEX flips_second_try ON flips (second_try) WHERE second_try IS NOT NULL"
+	},
+	{
+		"type": "index",
+		"name": "flips_target_reset",
+		"tbl_name": "flips",
+		"sql": "CREATE INDEX flips_target_reset ON flips (target)"
+	},
+	{
+		"type": "index",
+		"name": "flips_test",
+		"tbl_name": "flips",
+		"sql": "CREATE INDEX flips_test ON flips (project, test, seq DESC)"
+	},
+	{
+		"type": "index",
+		"name": "flips_test_reset",
+		"tbl_name": "flips",
+		"sql": "CREATE INDEX flips_test_reset ON flips (test)"
+	},
+	{
+		"type": "index",
+		"name": "folders_parent_reset",
+		"tbl_name": "folders",
+		"sql": "CREATE INDEX folders_parent_reset ON folders (parent) WHERE parent IS NOT NULL"
+	},
+	{
+		"type": "index",
+		"name": "folders_tree",
+		"tbl_name": "folders",
+		"sql": "CREATE INDEX folders_tree ON folders (project, parent, rank)"
+	},
+	{
+		"type": "index",
+		"name": "handoffs_project",
+		"tbl_name": "handoffs",
+		"sql": "CREATE INDEX handoffs_project ON handoffs(project)"
+	},
+	{
+		"type": "index",
+		"name": "handoffs_question",
+		"tbl_name": "handoffs",
+		"sql": "CREATE INDEX handoffs_question ON handoffs(question, at)"
+	},
+	{
+		"type": "index",
+		"name": "handoffs_queue",
+		"tbl_name": "handoffs",
+		"sql": "CREATE INDEX handoffs_queue ON handoffs(state, at)"
+	},
+	{
+		"type": "index",
+		"name": "invitations_actor",
+		"tbl_name": "invitations",
+		"sql": "CREATE INDEX invitations_actor ON invitations (actor)"
+	},
+	{
+		"type": "index",
+		"name": "merge_receipt_heads_project",
+		"tbl_name": "merge_receipt_heads",
+		"sql": "CREATE INDEX merge_receipt_heads_project ON merge_receipt_heads(project)"
+	},
+	{
+		"type": "index",
+		"name": "merge_receipt_heads_root",
+		"tbl_name": "merge_receipt_heads",
+		"sql": "CREATE INDEX merge_receipt_heads_root ON merge_receipt_heads(root)"
+	},
+	{
+		"type": "index",
+		"name": "merge_receipt_members_child",
+		"tbl_name": "merge_receipt_members",
+		"sql": "CREATE INDEX merge_receipt_members_child ON merge_receipt_members(child)"
+	},
+	{
+		"type": "index",
+		"name": "merge_receipt_members_payload",
+		"tbl_name": "merge_receipt_members",
+		"sql": "CREATE INDEX merge_receipt_members_payload ON merge_receipt_members(payload)"
+	},
+	{
+		"type": "index",
+		"name": "merge_receipt_snapshots_gate",
+		"tbl_name": "merge_receipt_snapshots",
+		"sql": "CREATE INDEX merge_receipt_snapshots_gate ON merge_receipt_snapshots(gate_root)"
+	},
+	{
+		"type": "index",
+		"name": "merge_receipt_snapshots_results",
+		"tbl_name": "merge_receipt_snapshots",
+		"sql": "CREATE INDEX merge_receipt_snapshots_results ON merge_receipt_snapshots(result_root)"
+	},
+	{
+		"type": "index",
+		"name": "merge_receipts_change",
+		"tbl_name": "merge_receipts",
+		"sql": "CREATE INDEX merge_receipts_change ON merge_receipts (change, id)"
+	},
+	{
+		"type": "index",
+		"name": "merge_receipts_evidence",
+		"tbl_name": "merge_receipts",
+		"sql": "CREATE INDEX merge_receipts_evidence ON merge_receipts (evidence)"
+	},
+	{
+		"type": "index",
+		"name": "merge_receipts_project",
+		"tbl_name": "merge_receipts",
+		"sql": "CREATE INDEX merge_receipts_project ON merge_receipts (project, seq)"
+	},
+	{
+		"type": "index",
+		"name": "placements_case",
+		"tbl_name": "placements",
+		"sql": "CREATE INDEX placements_case ON placements (case_id, seq)"
+	},
+	{
+		"type": "index",
+		"name": "placements_decision_reset",
+		"tbl_name": "placements",
+		"sql": "CREATE INDEX placements_decision_reset ON placements (decision)"
+	},
+	{
+		"type": "index",
+		"name": "policies_decision_reset",
+		"tbl_name": "policies",
+		"sql": "CREATE INDEX policies_decision_reset ON policies (decision) WHERE decision IS NOT NULL"
+	},
+	{
+		"type": "index",
+		"name": "projects_identity",
+		"tbl_name": "projects",
+		"sql": "CREATE UNIQUE INDEX projects_identity ON projects(identity)"
+	},
+	{
+		"type": "index",
+		"name": "quarantines_decision_reset",
+		"tbl_name": "quarantines",
+		"sql": "CREATE INDEX quarantines_decision_reset ON quarantines (decision)"
+	},
+	{
+		"type": "index",
+		"name": "quarantines_test_reset",
+		"tbl_name": "quarantines",
+		"sql": "CREATE INDEX quarantines_test_reset ON quarantines (test)"
+	},
+	{
+		"type": "index",
+		"name": "question_refs_question",
+		"tbl_name": "question_refs",
+		"sql": "CREATE INDEX question_refs_question ON question_refs (question)"
+	},
+	{
+		"type": "index",
+		"name": "questions_fingerprint",
+		"tbl_name": "questions",
+		"sql": "CREATE INDEX questions_fingerprint ON questions (project, fingerprint, epoch DESC)"
+	},
+	{
+		"type": "index",
+		"name": "questions_kinds",
+		"tbl_name": "questions",
+		"sql": "CREATE INDEX questions_kinds ON questions (project, state, owner, kind)"
+	},
+	{
+		"type": "index",
+		"name": "questions_prior_reset",
+		"tbl_name": "questions",
+		"sql": "CREATE INDEX questions_prior_reset ON questions (prior) WHERE prior IS NOT NULL"
+	},
+	{
+		"type": "index",
+		"name": "questions_queue",
+		"tbl_name": "questions",
+		"sql": "CREATE INDEX questions_queue ON questions (project, state, owner, rank)"
+	},
+	{
+		"type": "index",
+		"name": "questions_rev",
+		"tbl_name": "questions",
+		"sql": "CREATE INDEX questions_rev ON questions (project, rev)"
+	},
+	{
+		"type": "index",
+		"name": "result_excuses_decision",
+		"tbl_name": "result_excuses",
+		"sql": "CREATE INDEX result_excuses_decision ON result_excuses (decision)"
+	},
+	{
+		"type": "index",
+		"name": "result_excuses_global",
+		"tbl_name": "result_excuses",
+		"sql": "CREATE UNIQUE INDEX result_excuses_global ON result_excuses (result) WHERE slot IS NULL"
+	},
+	{
+		"type": "index",
+		"name": "result_excuses_result_reset",
+		"tbl_name": "result_excuses",
+		"sql": "CREATE INDEX result_excuses_result_reset ON result_excuses (result)"
+	},
+	{
+		"type": "index",
+		"name": "result_excuses_slot",
+		"tbl_name": "result_excuses",
+		"sql": "CREATE UNIQUE INDEX result_excuses_slot ON result_excuses (slot, result) WHERE slot IS NOT NULL"
+	},
+	{
+		"type": "index",
+		"name": "result_tries_project",
+		"tbl_name": "result_tries",
+		"sql": "CREATE INDEX result_tries_project ON result_tries (project)"
+	},
+	{
+		"type": "index",
+		"name": "result_tries_result",
+		"tbl_name": "result_tries",
+		"sql": "CREATE UNIQUE INDEX result_tries_result ON result_tries (result, try)"
+	},
+	{
+		"type": "index",
+		"name": "result_tries_signature",
+		"tbl_name": "result_tries",
+		"sql": "CREATE INDEX result_tries_signature ON result_tries (signature) WHERE signature IS NOT NULL"
+	},
+	{
+		"type": "index",
+		"name": "results_assertion_rebuild",
+		"tbl_name": "results",
+		"sql": "CREATE INDEX results_assertion_rebuild ON results(project, id)"
+	},
+	{
+		"type": "index",
+		"name": "results_at",
+		"tbl_name": "results",
+		"sql": "CREATE INDEX results_at ON results (project, at)"
+	},
+	{
+		"type": "index",
+		"name": "results_batch",
+		"tbl_name": "results",
+		"sql": "CREATE INDEX results_batch ON results (batch, outcome)"
+	},
+	{
+		"type": "index",
+		"name": "results_case",
+		"tbl_name": "results",
+		"sql": "CREATE INDEX results_case ON results (basis_case, method, seq DESC) WHERE basis_case IS NOT NULL"
+	},
+	{
+		"type": "index",
+		"name": "results_corrects",
+		"tbl_name": "results",
+		"sql": "CREATE INDEX results_corrects ON results (corrects) WHERE corrects IS NOT NULL"
+	},
+	{
+		"type": "index",
+		"name": "results_producer",
+		"tbl_name": "results",
+		"sql": "CREATE INDEX results_producer ON results (project, signature, actor, target, run) WHERE signature IS NOT NULL"
+	},
+	{
+		"type": "index",
+		"name": "results_quarantine_decision_reset",
+		"tbl_name": "results",
+		"sql": "CREATE INDEX results_quarantine_decision_reset ON results (quarantine_decision) WHERE quarantine_decision IS NOT NULL"
+	},
+	{
+		"type": "index",
+		"name": "results_quarantine_exit",
+		"tbl_name": "results",
+		"sql": "CREATE INDEX results_quarantine_exit ON results (quarantine_exit) WHERE quarantine_exit IS NOT NULL"
+	},
+	{
+		"type": "index",
+		"name": "results_signature",
+		"tbl_name": "results",
+		"sql": "CREATE INDEX results_signature ON results (project, signature, seq DESC) WHERE signature IS NOT NULL"
+	},
+	{
+		"type": "index",
+		"name": "results_signature_reset",
+		"tbl_name": "results",
+		"sql": "CREATE INDEX results_signature_reset ON results (signature) WHERE signature IS NOT NULL"
+	},
+	{
+		"type": "index",
+		"name": "results_target",
+		"tbl_name": "results",
+		"sql": "CREATE INDEX results_target ON results (target, test, attempt)"
+	},
+	{
+		"type": "index",
+		"name": "results_test",
+		"tbl_name": "results",
+		"sql": "CREATE INDEX results_test ON results (project, test, seq DESC, ord DESC)"
+	},
+	{
+		"type": "index",
+		"name": "results_test_reset",
+		"tbl_name": "results",
+		"sql": "CREATE INDEX results_test_reset ON results (test)"
+	},
+	{
+		"type": "index",
+		"name": "reviews_project_reset",
+		"tbl_name": "reviews",
+		"sql": "CREATE INDEX reviews_project_reset ON reviews (project)"
+	},
+	{
+		"type": "index",
+		"name": "run_tests_cause",
+		"tbl_name": "run_tests",
+		"sql": "CREATE INDEX run_tests_cause ON run_tests (signature, run) WHERE signature IS NOT NULL"
+	},
+	{
+		"type": "index",
+		"name": "run_tests_outcome",
+		"tbl_name": "run_tests",
+		"sql": "CREATE INDEX run_tests_outcome ON run_tests (run, outcome, signature)"
+	},
+	{
+		"type": "index",
+		"name": "run_tests_receipt",
+		"tbl_name": "run_tests",
+		"sql": "CREATE INDEX run_tests_receipt ON run_tests(run,result/32,result)"
+	},
+	{
+		"type": "index",
+		"name": "run_tests_result_reset",
+		"tbl_name": "run_tests",
+		"sql": "CREATE INDEX run_tests_result_reset ON run_tests (result)"
+	},
+	{
+		"type": "index",
+		"name": "run_tests_target_fk",
+		"tbl_name": "run_tests",
+		"sql": "CREATE INDEX run_tests_target_fk ON run_tests (target)"
+	},
+	{
+		"type": "index",
+		"name": "run_tests_test",
+		"tbl_name": "run_tests",
+		"sql": "CREATE INDEX run_tests_test ON run_tests (test, run)"
+	},
+	{
+		"type": "index",
+		"name": "runs_change",
+		"tbl_name": "runs",
+		"sql": "CREATE UNIQUE INDEX runs_change ON runs (project, accepts_what) WHERE origin = 'change'"
+	},
+	{
+		"type": "index",
+		"name": "runs_change_fk",
+		"tbl_name": "runs",
+		"sql": "CREATE INDEX runs_change_fk ON runs (change)"
+	},
+	{
+		"type": "index",
+		"name": "runs_open",
+		"tbl_name": "runs",
+		"sql": "CREATE INDEX runs_open ON runs (project, state, id DESC)"
+	},
+	{
+		"type": "index",
+		"name": "runs_planned_commit",
+		"tbl_name": "runs",
+		"sql": "CREATE INDEX runs_planned_commit ON runs (project, json_extract(accepts, '$.commit'), state, id DESC)\nWHERE origin = 'planned'"
+	},
+	{
+		"type": "index",
+		"name": "runs_planned_receiving",
+		"tbl_name": "runs",
+		"sql": "CREATE INDEX runs_planned_receiving ON runs (project, state, id DESC)\nWHERE origin = 'planned'"
+	},
+	{
+		"type": "index",
+		"name": "runs_scope",
+		"tbl_name": "runs",
+		"sql": "CREATE INDEX runs_scope ON runs (project, scope, id) WHERE scope IS NOT NULL"
+	},
+	{
+		"type": "index",
+		"name": "runs_signoff_reset",
+		"tbl_name": "runs",
+		"sql": "CREATE INDEX runs_signoff_reset ON runs (signoff) WHERE signoff IS NOT NULL"
+	},
+	{
+		"type": "index",
+		"name": "scope_moves_project_reset",
+		"tbl_name": "scope_moves",
+		"sql": "CREATE INDEX scope_moves_project_reset ON scope_moves (project)"
+	},
+	{
+		"type": "index",
+		"name": "sessions_actor",
+		"tbl_name": "sessions",
+		"sql": "CREATE INDEX sessions_actor ON sessions (actor, ended_at)"
+	},
+	{
+		"type": "index",
+		"name": "sessions_credential",
+		"tbl_name": "sessions",
+		"sql": "CREATE INDEX sessions_credential ON sessions (credential) WHERE credential IS NOT NULL"
+	},
+	{
+		"type": "index",
+		"name": "slot_results_discounted_by_fk",
+		"tbl_name": "slot_results",
+		"sql": "CREATE INDEX slot_results_discounted_by_fk ON slot_results (discounted_by)"
+	},
+	{
+		"type": "index",
+		"name": "slot_results_result",
+		"tbl_name": "slot_results",
+		"sql": "CREATE INDEX slot_results_result ON slot_results (result)"
+	},
+	{
+		"type": "index",
+		"name": "slots_case",
+		"tbl_name": "slots",
+		"sql": "CREATE INDEX slots_case ON slots (case_id, run)"
+	},
+	{
+		"type": "index",
+		"name": "slots_disputed",
+		"tbl_name": "slots",
+		"sql": "CREATE INDEX slots_disputed ON slots (run) WHERE state = 'disputed'"
+	},
+	{
+		"type": "index",
+		"name": "slots_next",
+		"tbl_name": "slots",
+		"sql": "CREATE INDEX slots_next ON slots (run, state, rank)"
+	},
+	{
+		"type": "index",
+		"name": "slots_rank",
+		"tbl_name": "slots",
+		"sql": "CREATE INDEX slots_rank ON slots (run, rank)"
+	},
+	{
+		"type": "index",
+		"name": "targets_commit",
+		"tbl_name": "targets",
+		"sql": "CREATE INDEX targets_commit ON targets (project, commit_sha)"
+	},
+	{
+		"type": "index",
+		"name": "team_events_team",
+		"tbl_name": "team_events",
+		"sql": "CREATE INDEX team_events_team ON team_events (team, id)"
+	},
+	{
+		"type": "index",
+		"name": "team_members_actor",
+		"tbl_name": "team_members",
+		"sql": "CREATE INDEX team_members_actor ON team_members (actor, team)"
+	},
+	{
+		"type": "index",
+		"name": "tests_case",
+		"tbl_name": "tests",
+		"sql": "CREATE INDEX tests_case ON tests (project, case_id)"
+	},
+	{
+		"type": "index",
+		"name": "tests_case_id_reset",
+		"tbl_name": "tests",
+		"sql": "CREATE INDEX tests_case_id_reset ON tests (case_id) WHERE case_id IS NOT NULL"
+	},
+	{
+		"type": "index",
+		"name": "tests_file",
+		"tbl_name": "tests",
+		"sql": "CREATE INDEX tests_file ON tests (project, file)"
+	},
+	{
+		"type": "index",
+		"name": "tests_linked_by_reset",
+		"tbl_name": "tests",
+		"sql": "CREATE INDEX tests_linked_by_reset ON tests (linked_by) WHERE linked_by IS NOT NULL"
+	},
+	{
+		"type": "index",
+		"name": "tracker_requests_project_reset",
+		"tbl_name": "tracker_requests",
+		"sql": "CREATE INDEX tracker_requests_project_reset ON tracker_requests (project)"
+	},
+	{
+		"type": "index",
+		"name": "tracker_requests_queue",
+		"tbl_name": "tracker_requests",
+		"sql": "CREATE INDEX tracker_requests_queue ON tracker_requests(state, at)"
+	},
+	{
+		"type": "index",
+		"name": "tracker_requests_result_reset",
+		"tbl_name": "tracker_requests",
+		"sql": "CREATE INDEX tracker_requests_result_reset ON tracker_requests (result)"
+	},
+	{
+		"type": "index",
+		"name": "versions_decision_reset",
+		"tbl_name": "versions",
+		"sql": "CREATE INDEX versions_decision_reset ON versions (decision)"
+	},
+	{
+		"type": "table",
+		"name": "actors",
+		"tbl_name": "actors",
+		"sql": "CREATE TABLE actors (\n\tid INTEGER PRIMARY KEY,\n\torg INTEGER NOT NULL REFERENCES orgs (id),\n\tkind TEXT NOT NULL CHECK (kind IN ('human', 'agent', 'ci', 'rule')),\n\tname TEXT NOT NULL,\n\ton_behalf_of INTEGER REFERENCES actors (id),\n\tcreated_at INTEGER NOT NULL,\n\tdisabled_at INTEGER,\n\tUNIQUE (org, name)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "answers",
+		"tbl_name": "answers",
+		"sql": "CREATE TABLE answers (\n\tid INTEGER PRIMARY KEY,\n\tquestion INTEGER NOT NULL REFERENCES questions (id),\n\tactor INTEGER NOT NULL REFERENCES actors (id),\n\tanswer TEXT NOT NULL,\n\treason TEXT,\n\ton_evidence TEXT NOT NULL,\n\tcounts INTEGER NOT NULL,\n\tat INTEGER NOT NULL,\n\tseq INTEGER NOT NULL\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "artifacts",
+		"tbl_name": "artifacts",
+		"sql": "CREATE TABLE artifacts (\n\tid INTEGER PRIMARY KEY,\n\tproject INTEGER NOT NULL REFERENCES projects (id),\n\tdigest TEXT NOT NULL,\n\tcode TEXT NOT NULL,\n\tactor INTEGER NOT NULL REFERENCES actors (id),\n\tat INTEGER NOT NULL,\n\tseq INTEGER NOT NULL,\n\tUNIQUE (project, digest)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "assertion_index",
+		"tbl_name": "assertion_index",
+		"sql": "CREATE TABLE assertion_index (\n\tproject INTEGER PRIMARY KEY REFERENCES projects(id)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "assertion_roots",
+		"tbl_name": "assertion_roots",
+		"sql": "CREATE TABLE assertion_roots (\n\tproject INTEGER NOT NULL REFERENCES projects(id),\n\tsignature INTEGER PRIMARY KEY REFERENCES signatures(id),\n\troot INTEGER NOT NULL REFERENCES signatures(id)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "assertion_seen",
+		"tbl_name": "assertion_seen",
+		"sql": "CREATE TABLE assertion_seen (\n\tproject INTEGER NOT NULL REFERENCES projects(id),\n\tscope TEXT NOT NULL,\n\troot INTEGER NOT NULL REFERENCES signatures(id),\n\ttest INTEGER NOT NULL REFERENCES tests(id),\n\tfile TEXT,\n\tPRIMARY KEY(project, scope, root, test)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "assertion_spreads",
+		"tbl_name": "assertion_spreads",
+		"sql": "CREATE TABLE assertion_spreads (\n\tproject INTEGER NOT NULL REFERENCES projects(id),\n\tscope TEXT NOT NULL,\n\troot INTEGER NOT NULL REFERENCES signatures(id),\n\tPRIMARY KEY(project, scope, root)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "attachments",
+		"tbl_name": "attachments",
+		"sql": "CREATE TABLE attachments (\n  id INTEGER PRIMARY KEY,\n  result INTEGER NOT NULL REFERENCES results(id),\n  name TEXT NOT NULL,\n  hash TEXT NOT NULL CHECK(length(hash) = 64),\n  size INTEGER NOT NULL CHECK(size >= 0 AND size <= 4194304),\n  type TEXT NOT NULL,\n  at TEXT\n)"
+	},
+	{
+		"type": "table",
+		"name": "batches",
+		"tbl_name": "batches",
+		"sql": "CREATE TABLE batches (\n\tid INTEGER PRIMARY KEY,\n\tproject INTEGER NOT NULL REFERENCES projects (id),\n\tkey TEXT NOT NULL,\n\ttarget INTEGER NOT NULL REFERENCES targets (id),\n\tjob TEXT NOT NULL DEFAULT '',\n\tattempt INTEGER NOT NULL DEFAULT 1,\n\tmethod TEXT NOT NULL CHECK (method IN ('human', 'auto', 'agent')),\n\tactor INTEGER NOT NULL REFERENCES actors (id),\n\trun INTEGER,\n\tbuild_url TEXT,\n\tstate TEXT NOT NULL CHECK (state IN ('accepted', 'processed')),\n\tcounts TEXT NOT NULL,\n\tstaged TEXT,\n\treceipt TEXT,\n\tat INTEGER NOT NULL,\n\tseq INTEGER NOT NULL, nothing_required INTEGER NOT NULL DEFAULT 0 CHECK (nothing_required IN (0, 1)), shard INTEGER CHECK (shard IS NULL OR shard >= 1), shards INTEGER CHECK (shards IS NULL OR shards >= shard), model TEXT CHECK (model IS NULL OR method = 'agent'),\n\tUNIQUE (project, key)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "builds",
+		"tbl_name": "builds",
+		"sql": "CREATE TABLE builds (\n\tid INTEGER PRIMARY KEY,\n\tproject INTEGER NOT NULL REFERENCES projects (id),\n\tlabel TEXT NOT NULL,\n\tartifact INTEGER NOT NULL REFERENCES artifacts (id),\n\tseq INTEGER NOT NULL,\n\tUNIQUE (project, label)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "case_aliases",
+		"tbl_name": "case_aliases",
+		"sql": "CREATE TABLE case_aliases (\n\tproject INTEGER NOT NULL,\n\talias TEXT NOT NULL,\n\tcase_id INTEGER NOT NULL REFERENCES cases (id),\n\tPRIMARY KEY (project, alias)\n) STRICT, WITHOUT ROWID"
+	},
+	{
+		"type": "table",
+		"name": "case_tags",
+		"tbl_name": "case_tags",
+		"sql": "CREATE TABLE case_tags (\n\tproject INTEGER NOT NULL,\n\ttag TEXT NOT NULL,\n\tcase_id INTEGER NOT NULL REFERENCES cases (id),\n\tPRIMARY KEY (project, tag, case_id)\n) STRICT, WITHOUT ROWID"
+	},
+	{
+		"type": "table",
+		"name": "cases",
+		"tbl_name": "cases",
+		"sql": "CREATE TABLE cases (\n\tid INTEGER PRIMARY KEY,\n\tproject INTEGER NOT NULL REFERENCES projects (id),\n\tno INTEGER NOT NULL,\n\t-- STANDING, written only by the effect of an `adopt` decision:\n\thead INTEGER NOT NULL,\n\thead_hash TEXT NOT NULL,\n\tclaim_hash TEXT NOT NULL,\n\ttitle TEXT NOT NULL,          -- copies of head.body fields, so a list page needs no body\n\tmethods TEXT NOT NULL,\n\tautomate TEXT NOT NULL,\n\tstep_count INTEGER NOT NULL,\n\tfolder INTEGER NOT NULL REFERENCES folders (id),\n\trank TEXT NOT NULL,\n\ttags TEXT NOT NULL DEFAULT '[]',\n\tstate TEXT NOT NULL DEFAULT 'active' CHECK (state IN ('active', 'archived')),\n\taliases TEXT NOT NULL DEFAULT '[]',\n\tcreated_by INTEGER NOT NULL REFERENCES actors (id),\n\tcreated_at INTEGER NOT NULL,\n\tupdated_by INTEGER NOT NULL REFERENCES actors (id),\n\tupdated_at INTEGER NOT NULL,\n\trev INTEGER NOT NULL, kind TEXT NOT NULL DEFAULT 'case' CHECK (kind IN ('case', 'fragment')),\n\tUNIQUE (project, no)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "change_ends",
+		"tbl_name": "change_ends",
+		"sql": "CREATE TABLE change_ends (\n\tchange INTEGER PRIMARY KEY REFERENCES changes (id),\n\tended TEXT NOT NULL CHECK (ended IN ('merged', 'closed')),\n\tat INTEGER NOT NULL\n, landing_commit TEXT, landing_repo TEXT, landing_branch TEXT CHECK (\n\t(landing_commit IS NULL AND landing_repo IS NULL AND landing_branch IS NULL)\n\tOR (ended = 'merged' AND landing_commit IS NOT NULL AND landing_branch IS NOT NULL AND landing_branch IN ('main', 'master', 'trunk'))\n), receipt INTEGER REFERENCES merge_receipts (id)) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "changes",
+		"tbl_name": "changes",
+		"sql": "CREATE TABLE changes (\n\tid INTEGER PRIMARY KEY,\n\tproject INTEGER NOT NULL REFERENCES projects (id),\n\tkey TEXT NOT NULL,\n\trepo TEXT,\n\tbase_sha TEXT,\n\thead_sha TEXT,\n\tbranch TEXT,\n\ttitle TEXT,\n\turl TEXT,\n\tfiles TEXT NOT NULL DEFAULT '[]',\n\trev INTEGER NOT NULL, head_observed_seq INTEGER,\n\tUNIQUE (project, key)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "commands",
+		"tbl_name": "commands",
+		"sql": "CREATE TABLE commands (\n\tid TEXT PRIMARY KEY,\n\tproject INTEGER NOT NULL,\n\top TEXT NOT NULL,\n\tactor INTEGER NOT NULL,\n\tat INTEGER NOT NULL,\n\tseq INTEGER NOT NULL,\n\ttouched TEXT NOT NULL,\n\toutcome TEXT NOT NULL,\n\t-- a digest of what was sent: the same id with another request is refused, never answered with this reply\n\trequest TEXT NOT NULL\n) STRICT, WITHOUT ROWID"
+	},
+	{
+		"type": "table",
+		"name": "commit_status_delivery",
+		"tbl_name": "commit_status_delivery",
+		"sql": "CREATE TABLE commit_status_delivery (\n\tid INTEGER PRIMARY KEY CHECK (id = 1),\n\tposts TEXT NOT NULL,\n\tpause_until INTEGER NOT NULL,\n\tfailures INTEGER NOT NULL\n)"
+	},
+	{
+		"type": "table",
+		"name": "commit_statuses",
+		"tbl_name": "commit_statuses",
+		"sql": "CREATE TABLE commit_statuses (\n\tproject INTEGER NOT NULL REFERENCES projects(id),\n\trepository TEXT NOT NULL,\n\tcommit_sha TEXT NOT NULL,\n\tnonce TEXT NOT NULL UNIQUE,\n\tdesired TEXT NOT NULL,\n\tsent TEXT,\n\tstate TEXT NOT NULL CHECK (state IN ('queued', 'sending', 'complete', 'stopped')),\n\tattempts INTEGER NOT NULL DEFAULT 0,\n\tnext_at INTEGER NOT NULL,\n\twatch_until INTEGER NOT NULL,\n\terror TEXT,\n\tPRIMARY KEY (project, repository, commit_sha)\n)"
+	},
+	{
+		"type": "table",
+		"name": "counters",
+		"tbl_name": "counters",
+		"sql": "CREATE TABLE counters (\n\tproject INTEGER NOT NULL,\n\tname TEXT NOT NULL,\n\tvalue INTEGER NOT NULL,\n\tPRIMARY KEY (project, name)\n) STRICT, WITHOUT ROWID"
+	},
+	{
+		"type": "table",
+		"name": "covers",
+		"tbl_name": "covers",
+		"sql": "CREATE TABLE covers (\n\trequirement INTEGER NOT NULL REFERENCES requirements (id),\n\tcase_id INTEGER NOT NULL REFERENCES cases (id),\n\tdecision INTEGER NOT NULL REFERENCES decisions (id),\n\tPRIMARY KEY (requirement, case_id)\n) STRICT, WITHOUT ROWID"
+	},
+	{
+		"type": "table",
+		"name": "credentials",
+		"tbl_name": "credentials",
+		"sql": "CREATE TABLE credentials (\n\tid INTEGER PRIMARY KEY,\n\tactor INTEGER NOT NULL REFERENCES actors (id),\n\t-- oidc and totp are not built. They are named because SQLite cannot widen a CHECK afterwards.\n\tkind TEXT NOT NULL CHECK (kind IN ('password', 'passkey', 'oidc', 'totp')),\n\t-- A passkey's credential id, base64url. Null for a password.\n\thandle TEXT,\n\t-- A password: the argon2id string, which holds its own salt and cost. A passkey: JSON with the public key\n\t-- (SPKI, base64url), its algorithm, the counter of its last sign-in, its transports and its backup flags.\n\tdata TEXT NOT NULL,\n\tlabel TEXT NOT NULL,\n\tcreated_at INTEGER NOT NULL,\n\tlast_used_at INTEGER,\n\trevoked_at INTEGER\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "decisions",
+		"tbl_name": "decisions",
+		"sql": "CREATE TABLE decisions (\n\tid INTEGER PRIMARY KEY,\n\tproject INTEGER NOT NULL REFERENCES projects (id),\n\tquestion INTEGER NOT NULL REFERENCES questions (id),\n\tkind TEXT NOT NULL,\n\tanswer TEXT NOT NULL,\n\tsigners TEXT NOT NULL,\n\tbasis TEXT NOT NULL,\n\tholds TEXT NOT NULL,\n\texpires_at INTEGER,\n\tsupersedes INTEGER REFERENCES decisions (id),\n\teffects TEXT NOT NULL DEFAULT '{}',\n\tat INTEGER NOT NULL,\n\tseq INTEGER NOT NULL\n, on_evidence TEXT) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "demo_projects",
+		"tbl_name": "demo_projects",
+		"sql": "CREATE TABLE demo_projects (\n\tproject INTEGER PRIMARY KEY REFERENCES projects (id),\n\tsince INTEGER NOT NULL\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "depends_on",
+		"tbl_name": "depends_on",
+		"sql": "CREATE TABLE depends_on (\n\trun INTEGER NOT NULL REFERENCES runs (id),\n\tdecision INTEGER NOT NULL REFERENCES decisions (id),\n\texpires_at INTEGER,\n\tPRIMARY KEY (run, decision)\n) STRICT, WITHOUT ROWID"
+	},
+	{
+		"type": "table",
+		"name": "deployments",
+		"tbl_name": "deployments",
+		"sql": "CREATE TABLE deployments (\n\tid INTEGER PRIMARY KEY,\n\tproject INTEGER NOT NULL REFERENCES projects (id),\n\tbuild INTEGER NOT NULL REFERENCES builds (id),\n\tenv TEXT NOT NULL,\n\tactor INTEGER NOT NULL REFERENCES actors (id),\n\tat INTEGER NOT NULL,\n\tseq INTEGER NOT NULL\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "excuses",
+		"tbl_name": "excuses",
+		"sql": "CREATE TABLE excuses (\n\tproject INTEGER NOT NULL,\n\tsignature INTEGER NOT NULL REFERENCES signatures (id),\n\tscope TEXT NOT NULL,\n\ttarget INTEGER NOT NULL DEFAULT 0,\n\tdecision INTEGER NOT NULL REFERENCES decisions (id),\n\tclass TEXT NOT NULL CHECK (class IN ('attributed', 'excused')),\n\texpires_at INTEGER,\n\tPRIMARY KEY (project, signature, scope, target)\n) STRICT, WITHOUT ROWID"
+	},
+	{
+		"type": "table",
+		"name": "findings",
+		"tbl_name": "findings",
+		"sql": "CREATE TABLE findings (\n\tid INTEGER PRIMARY KEY,\n\tproject INTEGER NOT NULL REFERENCES projects (id),\n\tactor INTEGER NOT NULL REFERENCES actors (id),\n\tlens TEXT NOT NULL,\n\tlocus TEXT NOT NULL,\n\tcase_id INTEGER REFERENCES cases (id),\n\tcategory TEXT NOT NULL,\n\tnote TEXT NOT NULL,\n\trepro TEXT,\n\tsuggest TEXT,\n\tbasis TEXT NOT NULL,\n\tquestion INTEGER,\n\tat INTEGER NOT NULL,\n\tseq INTEGER NOT NULL\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "flips",
+		"tbl_name": "flips",
+		"sql": "CREATE TABLE flips (\n\tid INTEGER PRIMARY KEY,\n\tproject INTEGER NOT NULL,\n\ttest INTEGER NOT NULL REFERENCES tests (id),\n\ttarget INTEGER NOT NULL REFERENCES targets (id),\n\tfirst_result INTEGER NOT NULL,\n\tsecond_result INTEGER NOT NULL,\n\tseq INTEGER NOT NULL\n, first_try INTEGER, second_try INTEGER) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "folders",
+		"tbl_name": "folders",
+		"sql": "CREATE TABLE folders (\n\tid INTEGER PRIMARY KEY,\n\tproject INTEGER NOT NULL REFERENCES projects (id),\n\tparent INTEGER REFERENCES folders (id),\n\tname TEXT NOT NULL,\n\trank TEXT NOT NULL,\n\tstate TEXT NOT NULL DEFAULT 'active' CHECK (state IN ('active', 'archived')),\n\trev INTEGER NOT NULL\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "grants",
+		"tbl_name": "grants",
+		"sql": "CREATE TABLE grants (\n\tactor INTEGER NOT NULL REFERENCES actors (id),\n\tproject INTEGER NOT NULL DEFAULT 0,\n\tcan TEXT NOT NULL, roles TEXT NOT NULL DEFAULT '[]',\n\tPRIMARY KEY (actor, project)\n) STRICT, WITHOUT ROWID"
+	},
+	{
+		"type": "table",
+		"name": "handoffs",
+		"tbl_name": "handoffs",
+		"sql": "CREATE TABLE handoffs (\n\tid TEXT PRIMARY KEY,\n\tnonce TEXT NOT NULL,\n\tproject INTEGER NOT NULL REFERENCES projects(id),\n\tquestion INTEGER NOT NULL REFERENCES questions(id),\n\tbody TEXT NOT NULL,\n\tstate TEXT NOT NULL CHECK (state IN ('queued', 'sending', 'sent', 'failed')),\n\terror TEXT,\n\tat INTEGER NOT NULL\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "invitations",
+		"tbl_name": "invitations",
+		"sql": "CREATE TABLE invitations (\n\tid INTEGER PRIMARY KEY,\n\tactor INTEGER NOT NULL REFERENCES actors (id),\n\thash TEXT NOT NULL UNIQUE,\n\tpurpose TEXT NOT NULL CHECK (purpose IN ('join', 'recover')),\n\tcreated_by INTEGER NOT NULL REFERENCES actors (id),\n\tcreated_at INTEGER NOT NULL,\n\texpires_at INTEGER NOT NULL,\n\tused_at INTEGER,\n\trevoked_at INTEGER\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "mail_contacts",
+		"tbl_name": "mail_contacts",
+		"sql": "CREATE TABLE mail_contacts (\n\tactor INTEGER PRIMARY KEY REFERENCES actors(id),\n\temail TEXT NOT NULL UNIQUE,\n\tverified_at INTEGER,\n\trevision TEXT NOT NULL\n)"
+	},
+	{
+		"type": "table",
+		"name": "merge_receipt_dirty",
+		"tbl_name": "merge_receipt_dirty",
+		"sql": "CREATE TABLE merge_receipt_dirty (\n run INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,\n bucket INTEGER NOT NULL,\n PRIMARY KEY(run,bucket)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "merge_receipt_heads",
+		"tbl_name": "merge_receipt_heads",
+		"sql": "CREATE TABLE merge_receipt_heads (\n run INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,\n project INTEGER NOT NULL REFERENCES projects(id),\n root INTEGER REFERENCES merge_receipt_nodes(id)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "merge_receipt_members",
+		"tbl_name": "merge_receipt_members",
+		"sql": "CREATE TABLE merge_receipt_members (\n node INTEGER NOT NULL REFERENCES merge_receipt_nodes(id),\n slot INTEGER NOT NULL CHECK(slot BETWEEN 0 AND 31),\n child INTEGER REFERENCES merge_receipt_nodes(id),\n payload INTEGER REFERENCES merge_receipt_payloads(id),\n CHECK((child IS NULL)!=(payload IS NULL)),\n PRIMARY KEY(node,slot)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "merge_receipt_nodes",
+		"tbl_name": "merge_receipt_nodes",
+		"sql": "CREATE TABLE merge_receipt_nodes (\n id INTEGER PRIMARY KEY,\n project INTEGER NOT NULL REFERENCES projects(id),\n hash TEXT NOT NULL,\n level INTEGER NOT NULL CHECK(level BETWEEN 0 AND 10),\n count INTEGER NOT NULL CHECK(count>0),\n UNIQUE(project,hash)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "merge_receipt_payloads",
+		"tbl_name": "merge_receipt_payloads",
+		"sql": "CREATE TABLE merge_receipt_payloads (\n id INTEGER PRIMARY KEY,\n project INTEGER NOT NULL REFERENCES projects(id),\n hash TEXT NOT NULL,\n body TEXT NOT NULL CHECK(length(CAST(body AS BLOB))<=32768),\n UNIQUE(project,hash)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "merge_receipt_snapshots",
+		"tbl_name": "merge_receipt_snapshots",
+		"sql": "CREATE TABLE merge_receipt_snapshots (\n id INTEGER PRIMARY KEY,\n project INTEGER NOT NULL REFERENCES projects(id),\n hash TEXT NOT NULL,\n result_root INTEGER REFERENCES merge_receipt_nodes(id),\n gate_root INTEGER REFERENCES merge_receipt_nodes(id),\n count INTEGER NOT NULL,\n evidence_count INTEGER NOT NULL,\n UNIQUE(project,hash)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "merge_receipts",
+		"tbl_name": "merge_receipts",
+		"sql": "CREATE TABLE merge_receipts (\n\tid INTEGER PRIMARY KEY,\n\tproject INTEGER NOT NULL REFERENCES projects (id),\n\tchange INTEGER NOT NULL REFERENCES changes (id),\n\tactor INTEGER NOT NULL REFERENCES actors (id),\n\tat INTEGER NOT NULL,\n\tseq INTEGER NOT NULL,\n\tevidence INTEGER NOT NULL REFERENCES merge_receipt_snapshots (id),\n\tsnapshot TEXT NOT NULL CHECK (json_valid(snapshot) AND length(CAST(snapshot AS BLOB)) <= 4096)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "meta",
+		"tbl_name": "meta",
+		"sql": "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT, WITHOUT ROWID"
+	},
+	{
+		"type": "table",
+		"name": "orgs",
+		"tbl_name": "orgs",
+		"sql": "CREATE TABLE orgs (id INTEGER PRIMARY KEY, name TEXT NOT NULL, created_at INTEGER NOT NULL) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "passkey_users",
+		"tbl_name": "passkey_users",
+		"sql": "CREATE TABLE passkey_users (\n\tactor INTEGER PRIMARY KEY REFERENCES actors (id),\n\thandle TEXT NOT NULL UNIQUE,\n\tcreated_at INTEGER NOT NULL\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "placements",
+		"tbl_name": "placements",
+		"sql": "CREATE TABLE placements (\n\tid INTEGER PRIMARY KEY,\n\tcase_id INTEGER NOT NULL REFERENCES cases (id),\n\tbefore TEXT NOT NULL,\n\tafter TEXT NOT NULL,\n\tproposal INTEGER NOT NULL,\n\tdecision INTEGER NOT NULL REFERENCES decisions (id),\n\tactor INTEGER NOT NULL REFERENCES actors (id),\n\tat INTEGER NOT NULL,\n\tseq INTEGER NOT NULL\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "policies",
+		"tbl_name": "policies",
+		"sql": "CREATE TABLE policies (\n\tproject INTEGER NOT NULL REFERENCES projects (id),\n\tversion INTEGER NOT NULL,\n\tpreset TEXT NOT NULL,\n\tclauses TEXT NOT NULL,\n\tsettings TEXT NOT NULL,\n\tactor INTEGER NOT NULL,\n\tdecision INTEGER REFERENCES decisions (id),\n\tat INTEGER NOT NULL,\n\tseq INTEGER NOT NULL,\n\tPRIMARY KEY (project, version)\n) STRICT, WITHOUT ROWID"
+	},
+	{
+		"type": "table",
+		"name": "projects",
+		"tbl_name": "projects",
+		"sql": "CREATE TABLE projects (\n\tid INTEGER PRIMARY KEY,\n\torg INTEGER NOT NULL REFERENCES orgs (id),\n\tkey TEXT NOT NULL UNIQUE,\n\tname TEXT NOT NULL,\n\tseq INTEGER NOT NULL DEFAULT 0,\n\tcreated_at INTEGER NOT NULL\n, identity TEXT NOT NULL DEFAULT '') STRICT"
+	},
+	{
+		"type": "table",
+		"name": "proposals",
+		"tbl_name": "proposals",
+		"sql": "CREATE TABLE proposals (\n\tid INTEGER PRIMARY KEY,\n\tproject INTEGER NOT NULL REFERENCES projects (id),\n\tno INTEGER NOT NULL,\n\tauthor INTEGER NOT NULL REFERENCES actors (id),\n\treason TEXT,\n\tedits TEXT NOT NULL,\n\t-- what the edits resolved to when sealed: created case ids, merged bodies, conflicts. JSON.\n\tresolved TEXT NOT NULL,\n\tcause TEXT,\n\tat INTEGER NOT NULL,\n\tseq INTEGER NOT NULL,\n\tUNIQUE (project, no)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "quarantines",
+		"tbl_name": "quarantines",
+		"sql": "CREATE TABLE quarantines (\n project INTEGER NOT NULL REFERENCES projects (id),\n test INTEGER NOT NULL REFERENCES tests (id),\n decision INTEGER NOT NULL REFERENCES decisions (id),\n actor INTEGER NOT NULL REFERENCES actors (id),\n reason TEXT NOT NULL,\n exit_rule TEXT,\n at INTEGER NOT NULL,\n seq INTEGER NOT NULL,\n PRIMARY KEY (project, test)\n) STRICT, WITHOUT ROWID"
+	},
+	{
+		"type": "table",
+		"name": "question_refs",
+		"tbl_name": "question_refs",
+		"sql": "CREATE TABLE question_refs (\n\tproject INTEGER NOT NULL,\n\tref TEXT NOT NULL,\n\tquestion INTEGER NOT NULL REFERENCES questions (id),\n\tPRIMARY KEY (project, ref, question)\n) STRICT, WITHOUT ROWID"
+	},
+	{
+		"type": "table",
+		"name": "questions",
+		"tbl_name": "questions",
+		"sql": "CREATE TABLE questions (\n\tid INTEGER PRIMARY KEY,\n\tproject INTEGER NOT NULL REFERENCES projects (id),\n\tno INTEGER NOT NULL,\n\tkind TEXT NOT NULL CHECK (kind IN ('adopt', 'map', 'failure', 'finding', 'signoff')),\n\tsubject TEXT NOT NULL,\n\tfingerprint TEXT NOT NULL,\n\tepoch INTEGER NOT NULL DEFAULT 0,\n\tprior INTEGER REFERENCES questions (id),\n\ttitle TEXT NOT NULL,\n\tproducer TEXT NOT NULL CHECK (producer IN ('human', 'agent', 'ci', 'rule')),\n\tevidence TEXT NOT NULL,\n\t-- what a person answering must have seen: the basis and the latest build the cause was seen on\n\tevidence_hash TEXT NOT NULL,\n\t-- what a decision stands on, and carries forward while it is unchanged: the cause, without the build\n\tbasis TEXT NOT NULL,\n\tseen_count INTEGER NOT NULL DEFAULT 1,\n\tseen_first INTEGER NOT NULL,\n\tseen_last INTEGER NOT NULL,\n\tcarried INTEGER NOT NULL DEFAULT 0,\n\task TEXT NOT NULL,\n\tblocks TEXT NOT NULL,\n\towner INTEGER NOT NULL DEFAULT 0,\n\trank INTEGER NOT NULL,\n\tstate TEXT NOT NULL CHECK (state IN ('open', 'decided', 'dissolved')),\n\tdecision INTEGER,\n\topened_at INTEGER NOT NULL,\n\trev INTEGER NOT NULL,\n\tUNIQUE (project, no)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "requirements",
+		"tbl_name": "requirements",
+		"sql": "CREATE TABLE requirements (\n\tid INTEGER PRIMARY KEY,\n\tproject INTEGER NOT NULL REFERENCES projects (id),\n\tkey TEXT NOT NULL,\n\ttitle TEXT NOT NULL DEFAULT '',\n\tsource TEXT,\n\tstate TEXT NOT NULL DEFAULT 'active',\n\trev INTEGER NOT NULL,\n\tUNIQUE (project, key)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "result_excuses",
+		"tbl_name": "result_excuses",
+		"sql": "CREATE TABLE result_excuses (\n\tid INTEGER PRIMARY KEY,\n\tresult INTEGER NOT NULL REFERENCES results (id),\n\tslot INTEGER REFERENCES slots (id),\n\tdecision INTEGER NOT NULL REFERENCES decisions (id),\n\tclass TEXT NOT NULL CHECK (class IN ('attributed', 'excused')),\n\texpires_at INTEGER\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "result_tries",
+		"tbl_name": "result_tries",
+		"sql": "CREATE TABLE result_tries (\n\tid INTEGER PRIMARY KEY,\n\tproject INTEGER NOT NULL,\n\tresult INTEGER NOT NULL REFERENCES results (id),\n\ttry INTEGER NOT NULL,\n\toutcome TEXT NOT NULL CHECK (outcome IN ('pass', 'fail', 'skip', 'blocked', 'error')),\n\tduration_ms INTEGER,\n\tsignature INTEGER REFERENCES signatures (id),\n\tmessage TEXT,\n\tdetail TEXT\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "results",
+		"tbl_name": "results",
+		"sql": "CREATE TABLE results (\n\tid INTEGER PRIMARY KEY,\n\tproject INTEGER NOT NULL,\n\ttest INTEGER NOT NULL REFERENCES tests (id),\n\tseq INTEGER NOT NULL,\n\tord INTEGER NOT NULL,\n\tbatch INTEGER NOT NULL REFERENCES batches (id),\n\ttarget INTEGER NOT NULL REFERENCES targets (id),\n\tmethod TEXT NOT NULL,\n\tactor INTEGER NOT NULL,\n\t-- What this result proves: exact (a pinned slot, a manifest or an annotation), assumed (the case's head at\n\t-- ingest, recorded as an assumption) or unresolved (no case; history only).\n\tbasis TEXT NOT NULL CHECK (basis IN ('exact', 'assumed', 'unresolved')),\n\tbasis_case INTEGER,\n\tbasis_version INTEGER,\n\tbasis_claim TEXT,\n\toutcome TEXT NOT NULL CHECK (outcome IN ('pass', 'fail', 'skip', 'blocked', 'error')),\n\tattempt INTEGER NOT NULL DEFAULT 1,\n\tduration_ms INTEGER,\n\tsignature INTEGER REFERENCES signatures (id),\n\tmessage TEXT,\n\tdetail TEXT,\n\tat_step TEXT,\n\ttrail TEXT,\n\tnote TEXT,\n\trun INTEGER,\n\tcorrects INTEGER REFERENCES results (id),\n\tat INTEGER NOT NULL\n, quarantine_decision INTEGER REFERENCES decisions (id), quarantine_exit INTEGER REFERENCES decisions (id), model TEXT CHECK (model IS NULL OR method = 'agent')) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "reviews",
+		"tbl_name": "reviews",
+		"sql": "CREATE TABLE reviews (\n\tid INTEGER PRIMARY KEY,\n\tproject INTEGER NOT NULL REFERENCES projects (id),\n\treviewer INTEGER NOT NULL REFERENCES actors (id),\n\tlens TEXT NOT NULL,\n\tcase_id INTEGER NOT NULL REFERENCES cases (id),\n\tversion INTEGER NOT NULL,\n\tbasis TEXT NOT NULL,\n\tabout TEXT,\n\tat INTEGER NOT NULL,\n\tseq INTEGER NOT NULL,\n\tUNIQUE (case_id, basis, lens, reviewer)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "run_tests",
+		"tbl_name": "run_tests",
+		"sql": "CREATE TABLE run_tests (\n\trun INTEGER NOT NULL REFERENCES runs (id),\n\ttest INTEGER NOT NULL REFERENCES tests (id),\n\tresult INTEGER NOT NULL REFERENCES results (id),\n\toutcome TEXT NOT NULL,\n\tsignature INTEGER,\n\tattempt INTEGER NOT NULL,\n\tflipped INTEGER NOT NULL DEFAULT 0,\n\t-- who reported it and where: \"<target>:<job>:<actor>\". A test has one row per lane, so one job's pass (or\n\t-- another producer's) never replaces a different job's failure; only a newer attempt in the same lane does.\n\tlane TEXT NOT NULL,\n\t-- the target of the lane (a commit in one environment): an excuse held for one target counts here only\n\ttarget INTEGER NOT NULL REFERENCES targets (id),\n\tPRIMARY KEY (run, test, lane)\n) STRICT, WITHOUT ROWID"
+	},
+	{
+		"type": "table",
+		"name": "runs",
+		"tbl_name": "runs",
+		"sql": "CREATE TABLE runs (\n\tid INTEGER PRIMARY KEY,\n\tproject INTEGER NOT NULL REFERENCES projects (id),\n\tno INTEGER NOT NULL,\n\tname TEXT NOT NULL,\n\torigin TEXT NOT NULL CHECK (origin IN ('change', 'planned')),\n\taccepts TEXT NOT NULL,\n\t-- for a change run: the target's `what`, so the gate read by CI is one lookup\n\taccepts_what TEXT,\n\t-- for a change run: where its failures are answered (\"change:<id>\", \"line:trunk@<repository>\")\n\tscope TEXT,\n\trequire TEXT NOT NULL,\n\tchange INTEGER REFERENCES changes (id),\n\t-- STANDING (signoff):\n\tstate TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'closed')),\n\tsignoff INTEGER REFERENCES decisions (id),\n\t-- the horizon: an accepted upload is outstanding until it is applied, and the gate is pending meanwhile\n\taccepted_seq INTEGER NOT NULL DEFAULT 0,\n\tapplied_seq INTEGER NOT NULL DEFAULT 0,\n\toutstanding INTEGER NOT NULL DEFAULT 0,\n\tnext_expiry INTEGER,\n\t-- projections written only by the run fold:\n\ttally TEXT NOT NULL,\n\tblocking TEXT NOT NULL DEFAULT '[]',\n\tverdict TEXT NOT NULL CHECK (verdict IN ('passed', 'failed', 'blocked', 'pending')),\n\tcreated_by INTEGER NOT NULL,\n\tcreated_at INTEGER NOT NULL,\n\trev INTEGER NOT NULL, quarantined INTEGER NOT NULL DEFAULT 0,\n\tUNIQUE (project, no)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "scope_moves",
+		"tbl_name": "scope_moves",
+		"sql": "CREATE TABLE scope_moves (\n\tid INTEGER PRIMARY KEY,\n\tproject INTEGER NOT NULL REFERENCES projects (id),\n\twhat TEXT NOT NULL,\n\tbefore_scope TEXT NOT NULL,\n\tafter_scope TEXT NOT NULL,\n\tactor INTEGER NOT NULL REFERENCES actors (id),\n\tat INTEGER NOT NULL,\n\tseq INTEGER NOT NULL\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "search_docs",
+		"tbl_name": "search_docs",
+		"sql": "CREATE VIRTUAL TABLE search_docs USING fts5 (\n\ttitle, body, tags, project UNINDEXED,\n\ttokenize = 'unicode61 remove_diacritics 2', prefix = '2 3'\n)"
+	},
+	{
+		"type": "table",
+		"name": "search_docs_config",
+		"tbl_name": "search_docs_config",
+		"sql": "CREATE TABLE 'search_docs_config'(k PRIMARY KEY, v) WITHOUT ROWID"
+	},
+	{
+		"type": "table",
+		"name": "search_docs_content",
+		"tbl_name": "search_docs_content",
+		"sql": "CREATE TABLE 'search_docs_content'(id INTEGER PRIMARY KEY, c0, c1, c2, c3)"
+	},
+	{
+		"type": "table",
+		"name": "search_docs_data",
+		"tbl_name": "search_docs_data",
+		"sql": "CREATE TABLE 'search_docs_data'(id INTEGER PRIMARY KEY, block BLOB)"
+	},
+	{
+		"type": "table",
+		"name": "search_docs_docsize",
+		"tbl_name": "search_docs_docsize",
+		"sql": "CREATE TABLE 'search_docs_docsize'(id INTEGER PRIMARY KEY, sz BLOB)"
+	},
+	{
+		"type": "table",
+		"name": "search_docs_idx",
+		"tbl_name": "search_docs_idx",
+		"sql": "CREATE TABLE 'search_docs_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID"
+	},
+	{
+		"type": "table",
+		"name": "sessions",
+		"tbl_name": "sessions",
+		"sql": "CREATE TABLE sessions (\n\tid INTEGER PRIMARY KEY,\n\tactor INTEGER NOT NULL REFERENCES actors (id),\n\thash TEXT NOT NULL UNIQUE,\n\t-- The token that opened it. While this is set the session lives only as long as that token does.\n\ttoken INTEGER REFERENCES tokens (id),\n\tcreated_at INTEGER NOT NULL,\n\tlast_seen_at INTEGER NOT NULL,\n\texpires_at INTEGER NOT NULL,\n\tuser_agent TEXT,\n\tended_at INTEGER,\n\t-- signed-out: its browser signed out. ended: somebody ended it from a list. forgotten: its actor was\n\t-- forgotten. expired: it passed its idle or its absolute lifetime, and a clock set back does not revive it.\n\tended_why TEXT CHECK (ended_why IN ('signed-out', 'ended', 'forgotten', 'expired'))\n, created_addr TEXT, last_seen_addr TEXT, credential INTEGER REFERENCES credentials (id) CHECK (credential IS NULL OR token IS NULL), reauthenticated_at INTEGER) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "signatures",
+		"tbl_name": "signatures",
+		"sql": "CREATE TABLE signatures (\n\tid INTEGER PRIMARY KEY,\n\tproject INTEGER NOT NULL REFERENCES projects (id),\n\thash TEXT NOT NULL,\n\ttext TEXT NOT NULL,\n\tfirst_seq INTEGER NOT NULL, class TEXT NOT NULL DEFAULT 'assertion'\n CHECK (class IN ('assertion', 'timeout', 'infra', 'unknown')),\n\tUNIQUE (project, hash)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "slot_leases",
+		"tbl_name": "slot_leases",
+		"sql": "CREATE TABLE slot_leases (\n\tslot INTEGER PRIMARY KEY REFERENCES slots (id) ON DELETE CASCADE,\n\tactor INTEGER NOT NULL REFERENCES actors (id),\n\tsince INTEGER NOT NULL,\n\tuntil INTEGER NOT NULL CHECK (until > since)\n)"
+	},
+	{
+		"type": "table",
+		"name": "slot_results",
+		"tbl_name": "slot_results",
+		"sql": "CREATE TABLE slot_results (\n\tslot INTEGER NOT NULL REFERENCES slots (id),\n\tresult INTEGER NOT NULL REFERENCES results (id),\n\trun INTEGER NOT NULL,\n\tadmitted TEXT NOT NULL CHECK (admitted IN ('exact', 'assumed', 'same-claim')),\n\t-- set when the producer corrected this result with a later one (evidence about evidence: no decision)\n\tcorrected INTEGER NOT NULL DEFAULT 0,\n\t-- STANDING (failure, answer `mistaken`): the decision that says this failing result does not count here\n\tdiscounted_by INTEGER REFERENCES decisions (id),\n\tPRIMARY KEY (slot, result)\n) STRICT, WITHOUT ROWID"
+	},
+	{
+		"type": "table",
+		"name": "slots",
+		"tbl_name": "slots",
+		"sql": "CREATE TABLE slots (\n\tid INTEGER PRIMARY KEY,\n\trun INTEGER NOT NULL REFERENCES runs (id),\n\tcase_id INTEGER NOT NULL REFERENCES cases (id),\n\tversion INTEGER NOT NULL,\n\tclaim TEXT NOT NULL,\n\tobligation TEXT NOT NULL,\n\tassignee INTEGER REFERENCES actors (id),\n\trank INTEGER NOT NULL,\n\t-- per actor: passes, uncorrected fails, latest seq. Rebuilt from slot_results; never capped.\n\tagg TEXT NOT NULL DEFAULT '{}',\n\tstate TEXT NOT NULL DEFAULT 'missing' CHECK (state IN ('missing', 'satisfied', 'failing', 'disputed', 'waived', 'skipped')),\n\tsignature INTEGER,\n\t-- every cause currently failing in the slot, as [signature id, target id] pairs; `signature` is the first\n\tcauses TEXT NOT NULL DEFAULT '[]',\n\twaiver INTEGER,\n\trev INTEGER NOT NULL,\n\tUNIQUE (run, case_id, obligation)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "targets",
+		"tbl_name": "targets",
+		"sql": "CREATE TABLE targets (\n\tid INTEGER PRIMARY KEY,\n\tproject INTEGER NOT NULL REFERENCES projects (id),\n\twhat TEXT NOT NULL,\n\tenv TEXT NOT NULL DEFAULT '',\n\trepo TEXT,\n\tcommit_sha TEXT,\n\tbranch TEXT,\n\tline TEXT NOT NULL CHECK (line IN ('trunk', 'change', 'release', 'session')),\n\tchange INTEGER,\n\tfirst_seq INTEGER NOT NULL,\n\tUNIQUE (project, what, env)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "team_events",
+		"tbl_name": "team_events",
+		"sql": "CREATE TABLE team_events (\n\tid INTEGER PRIMARY KEY,\n\tteam INTEGER NOT NULL REFERENCES teams (id),\n\tby_actor INTEGER NOT NULL REFERENCES actors (id),\n\tat INTEGER NOT NULL,\n\taction TEXT NOT NULL CHECK (action IN ('created', 'member.add', 'member.remove', 'grant.set', 'grant.remove')),\n\tperson INTEGER REFERENCES actors (id),\n\tproject INTEGER,\n\tcan TEXT\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "team_grants",
+		"tbl_name": "team_grants",
+		"sql": "CREATE TABLE team_grants (\n\tteam INTEGER NOT NULL REFERENCES teams (id),\n\tproject INTEGER NOT NULL DEFAULT 0,\n\tcan TEXT NOT NULL,\n\tPRIMARY KEY (team, project)\n) STRICT, WITHOUT ROWID"
+	},
+	{
+		"type": "table",
+		"name": "team_members",
+		"tbl_name": "team_members",
+		"sql": "CREATE TABLE team_members (\n\tteam INTEGER NOT NULL REFERENCES teams (id),\n\tactor INTEGER NOT NULL REFERENCES actors (id),\n\tPRIMARY KEY (team, actor)\n) STRICT, WITHOUT ROWID"
+	},
+	{
+		"type": "table",
+		"name": "teams",
+		"tbl_name": "teams",
+		"sql": "CREATE TABLE teams (\n\tid INTEGER PRIMARY KEY,\n\torg INTEGER NOT NULL REFERENCES orgs (id),\n\tname TEXT NOT NULL,\n\tcreated_at INTEGER NOT NULL,\n\tUNIQUE (org, name)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "tests",
+		"tbl_name": "tests",
+		"sql": "CREATE TABLE tests (\n\tid INTEGER PRIMARY KEY,\n\tproject INTEGER NOT NULL REFERENCES projects (id),\n\tno INTEGER NOT NULL,\n\tkind TEXT NOT NULL CHECK (kind IN ('manual', 'auto')),\n\tkey TEXT NOT NULL,\n\tname TEXT NOT NULL,\n\tfile TEXT,\n\tcase_id INTEGER REFERENCES cases (id),   -- STANDING (map)\n\t-- the `map` decision that made the link; null for the manual test of a case, which is that case by definition\n\tlinked_by INTEGER REFERENCES decisions (id),\n\tfirst_seq INTEGER NOT NULL,\n\tlast_seq INTEGER NOT NULL,\n\tUNIQUE (project, key),\n\tUNIQUE (project, no)\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "tokens",
+		"tbl_name": "tokens",
+		"sql": "CREATE TABLE tokens (\n\tid INTEGER PRIMARY KEY,\n\tactor INTEGER NOT NULL REFERENCES actors (id),\n\thash TEXT NOT NULL UNIQUE,\n\tlabel TEXT NOT NULL,\n\tcreated_at INTEGER NOT NULL,\n\tlast_used_at INTEGER,\n\trevoked_at INTEGER\n, expires_at INTEGER, created_by INTEGER REFERENCES actors (id), source TEXT CHECK (source IN ('env', 'generated')), last_used_addr TEXT) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "tracker_polls",
+		"tbl_name": "tracker_polls",
+		"sql": "CREATE TABLE tracker_polls (\n\tdecision INTEGER PRIMARY KEY REFERENCES decisions(id) ON DELETE CASCADE,\n\tnonce TEXT NOT NULL UNIQUE,\n\tnext_at INTEGER NOT NULL,\n\tattempts INTEGER NOT NULL,\n\terror TEXT\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "tracker_requests",
+		"tbl_name": "tracker_requests",
+		"sql": "CREATE TABLE tracker_requests (\n\tid TEXT PRIMARY KEY,\n\tnonce TEXT NOT NULL,\n\tproject INTEGER NOT NULL REFERENCES projects(id),\n\tresult INTEGER NOT NULL REFERENCES results(id),\n\trepository TEXT NOT NULL,\n\taction TEXT NOT NULL CHECK (action IN ('create', 'link')),\n\titem_key TEXT,\n\ttitle TEXT NOT NULL,\n\tbody TEXT NOT NULL,\n\tstate TEXT NOT NULL CHECK (state IN ('queued', 'sending', 'complete', 'failed')),\n\tissue TEXT,\n\terror TEXT,\n\tat INTEGER NOT NULL\n) STRICT"
+	},
+	{
+		"type": "table",
+		"name": "versions",
+		"tbl_name": "versions",
+		"sql": "CREATE TABLE versions (\n\tcase_id INTEGER NOT NULL REFERENCES cases (id),\n\tno INTEGER NOT NULL,\n\tparent INTEGER,\n\tbody TEXT NOT NULL,\n\thash TEXT NOT NULL,\n\tclaim_hash TEXT NOT NULL,\n\tproposal INTEGER NOT NULL,\n\tdecision INTEGER NOT NULL REFERENCES decisions (id),\n\tauthor INTEGER NOT NULL REFERENCES actors (id),\n\treason TEXT,\n\tat INTEGER NOT NULL,\n\tseq INTEGER NOT NULL,\n\tPRIMARY KEY (case_id, no)\n) STRICT, WITHOUT ROWID"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_batch",
+		"tbl_name": "batches",
+		"sql": "CREATE TRIGGER receipt_batch AFTER UPDATE OF job ON batches WHEN OLD.job IS NOT NEW.job BEGIN\n INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.result IN (SELECT id FROM results WHERE batch=NEW.id) ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_correction_delete_old",
+		"tbl_name": "results",
+		"sql": "CREATE TRIGGER receipt_correction_delete_old AFTER DELETE ON results WHEN OLD.corrects IS NOT NULL BEGIN\n INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.test=(SELECT test FROM results WHERE id=OLD.corrects) AND rt.target=(SELECT target FROM results WHERE id=OLD.corrects) ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_correction_insert_new",
+		"tbl_name": "results",
+		"sql": "CREATE TRIGGER receipt_correction_insert_new AFTER INSERT ON results WHEN NEW.corrects IS NOT NULL BEGIN\n INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.test=(SELECT test FROM results WHERE id=NEW.corrects) AND rt.target=(SELECT target FROM results WHERE id=NEW.corrects) ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_correction_update_new",
+		"tbl_name": "results",
+		"sql": "CREATE TRIGGER receipt_correction_update_new AFTER UPDATE ON results WHEN NEW.corrects IS NOT NULL AND OLD.corrects IS NOT NEW.corrects BEGIN\n INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.test=(SELECT test FROM results WHERE id=NEW.corrects) AND rt.target=(SELECT target FROM results WHERE id=NEW.corrects) ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_correction_update_old",
+		"tbl_name": "results",
+		"sql": "CREATE TRIGGER receipt_correction_update_old AFTER UPDATE ON results WHEN OLD.corrects IS NOT NULL AND OLD.corrects IS NOT NEW.corrects BEGIN\n INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.test=(SELECT test FROM results WHERE id=OLD.corrects) AND rt.target=(SELECT target FROM results WHERE id=OLD.corrects) ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_excuses_delete_old",
+		"tbl_name": "excuses",
+		"sql": "CREATE TRIGGER receipt_excuses_delete_old AFTER DELETE ON excuses BEGIN\n INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.signature=OLD.signature AND rt.outcome IN ('fail','error') AND h.project=OLD.project AND (OLD.target=0 OR rt.target=OLD.target) ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_excuses_insert_new",
+		"tbl_name": "excuses",
+		"sql": "CREATE TRIGGER receipt_excuses_insert_new AFTER INSERT ON excuses BEGIN\n INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.signature=NEW.signature AND rt.outcome IN ('fail','error') AND h.project=NEW.project AND (NEW.target=0 OR rt.target=NEW.target) ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_excuses_update_new",
+		"tbl_name": "excuses",
+		"sql": "CREATE TRIGGER receipt_excuses_update_new AFTER UPDATE ON excuses BEGIN\n INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.signature=NEW.signature AND rt.outcome IN ('fail','error') AND h.project=NEW.project AND (NEW.target=0 OR rt.target=NEW.target) ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_excuses_update_old",
+		"tbl_name": "excuses",
+		"sql": "CREATE TRIGGER receipt_excuses_update_old AFTER UPDATE ON excuses BEGIN\n INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.signature=OLD.signature AND rt.outcome IN ('fail','error') AND h.project=OLD.project AND (OLD.target=0 OR rt.target=OLD.target) ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_flips_delete_old",
+		"tbl_name": "flips",
+		"sql": "CREATE TRIGGER receipt_flips_delete_old AFTER DELETE ON flips BEGIN\n INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.test=OLD.test AND rt.target=OLD.target ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_flips_insert_new",
+		"tbl_name": "flips",
+		"sql": "CREATE TRIGGER receipt_flips_insert_new AFTER INSERT ON flips BEGIN\n INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.test=NEW.test AND rt.target=NEW.target ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_flips_update_new",
+		"tbl_name": "flips",
+		"sql": "CREATE TRIGGER receipt_flips_update_new AFTER UPDATE ON flips BEGIN\n INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.test=NEW.test AND rt.target=NEW.target ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_flips_update_old",
+		"tbl_name": "flips",
+		"sql": "CREATE TRIGGER receipt_flips_update_old AFTER UPDATE ON flips BEGIN\n INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.test=OLD.test AND rt.target=OLD.target ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_quarantine_insert",
+		"tbl_name": "quarantines",
+		"sql": "CREATE TRIGGER receipt_quarantine_insert AFTER INSERT ON quarantines\nWHEN (SELECT count(*) FROM quarantines WHERE project=NEW.project)=1\nBEGIN\n INSERT INTO merge_receipt_dirty(run,bucket)\n SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run\n WHERE h.project=NEW.project AND rt.result IN (SELECT id FROM results WHERE quarantine_decision IS NOT NULL)\n ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_quarantine_presence",
+		"tbl_name": "quarantines",
+		"sql": "CREATE TRIGGER receipt_quarantine_presence AFTER DELETE ON quarantines WHEN NOT EXISTS(SELECT 1 FROM quarantines WHERE project=OLD.project) BEGIN\n INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE h.project=OLD.project AND rt.result IN (SELECT id FROM results WHERE quarantine_decision IS NOT NULL) ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_result",
+		"tbl_name": "results",
+		"sql": "CREATE TRIGGER receipt_result AFTER UPDATE OF quarantine_decision,quarantine_exit,signature,method,batch,test,target ON results WHEN OLD.quarantine_decision IS NOT NEW.quarantine_decision OR OLD.quarantine_exit IS NOT NEW.quarantine_exit OR OLD.signature IS NOT NEW.signature OR OLD.method IS NOT NEW.method OR OLD.batch IS NOT NEW.batch OR OLD.test IS NOT NEW.test OR OLD.target IS NOT NEW.target BEGIN\n INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.result=NEW.id ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_result_excuses_delete_old",
+		"tbl_name": "result_excuses",
+		"sql": "CREATE TRIGGER receipt_result_excuses_delete_old AFTER DELETE ON result_excuses BEGIN\n INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE OLD.slot IS NULL AND rt.result=OLD.result ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_result_excuses_insert_new",
+		"tbl_name": "result_excuses",
+		"sql": "CREATE TRIGGER receipt_result_excuses_insert_new AFTER INSERT ON result_excuses BEGIN\n INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE NEW.slot IS NULL AND rt.result=NEW.result ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_result_excuses_update_new",
+		"tbl_name": "result_excuses",
+		"sql": "CREATE TRIGGER receipt_result_excuses_update_new AFTER UPDATE ON result_excuses BEGIN\n INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE NEW.slot IS NULL AND rt.result=NEW.result ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_result_excuses_update_old",
+		"tbl_name": "result_excuses",
+		"sql": "CREATE TRIGGER receipt_result_excuses_update_old AFTER UPDATE ON result_excuses BEGIN\n INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE OLD.slot IS NULL AND rt.result=OLD.result ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_run_delete",
+		"tbl_name": "run_tests",
+		"sql": "CREATE TRIGGER receipt_run_delete AFTER DELETE ON run_tests BEGIN\n INSERT INTO merge_receipt_dirty(run,bucket) SELECT OLD.run,OLD.result/32 WHERE EXISTS(SELECT 1 FROM merge_receipt_heads WHERE run=OLD.run) ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_run_insert",
+		"tbl_name": "run_tests",
+		"sql": "CREATE TRIGGER receipt_run_insert AFTER INSERT ON run_tests BEGIN\n INSERT INTO merge_receipt_dirty(run,bucket) SELECT NEW.run,NEW.result/32 WHERE EXISTS(SELECT 1 FROM merge_receipt_heads WHERE run=NEW.run) ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_run_update_new",
+		"tbl_name": "run_tests",
+		"sql": "CREATE TRIGGER receipt_run_update_new AFTER UPDATE ON run_tests WHEN OLD.run IS NOT NEW.run OR OLD.result IS NOT NEW.result OR OLD.outcome IS NOT NEW.outcome OR OLD.signature IS NOT NEW.signature OR OLD.flipped IS NOT NEW.flipped OR OLD.target IS NOT NEW.target OR OLD.test IS NOT NEW.test BEGIN\n INSERT INTO merge_receipt_dirty(run,bucket) SELECT NEW.run,NEW.result/32 WHERE EXISTS(SELECT 1 FROM merge_receipt_heads WHERE run=NEW.run) ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_run_update_old",
+		"tbl_name": "run_tests",
+		"sql": "CREATE TRIGGER receipt_run_update_old AFTER UPDATE ON run_tests WHEN OLD.run IS NOT NEW.run OR OLD.result IS NOT NEW.result OR OLD.outcome IS NOT NEW.outcome OR OLD.signature IS NOT NEW.signature OR OLD.flipped IS NOT NEW.flipped OR OLD.target IS NOT NEW.target OR OLD.test IS NOT NEW.test BEGIN\n INSERT INTO merge_receipt_dirty(run,bucket) SELECT OLD.run,OLD.result/32 WHERE EXISTS(SELECT 1 FROM merge_receipt_heads WHERE run=OLD.run) ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_target",
+		"tbl_name": "targets",
+		"sql": "CREATE TRIGGER receipt_target AFTER UPDATE OF line,change,repo,what,env ON targets WHEN OLD.line IS NOT NEW.line OR OLD.change IS NOT NEW.change OR OLD.repo IS NOT NEW.repo OR OLD.what IS NOT NEW.what OR OLD.env IS NOT NEW.env BEGIN\n INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.target=NEW.id ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	},
+	{
+		"type": "trigger",
+		"name": "receipt_test",
+		"tbl_name": "tests",
+		"sql": "CREATE TRIGGER receipt_test AFTER UPDATE OF name,file,no,kind ON tests WHEN OLD.name IS NOT NEW.name OR OLD.file IS NOT NEW.file OR OLD.no IS NOT NEW.no OR OLD.kind IS NOT NEW.kind BEGIN\n INSERT INTO merge_receipt_dirty(run,bucket) SELECT rt.run,rt.result/32 FROM run_tests rt JOIN merge_receipt_heads h ON h.run=rt.run WHERE rt.test=NEW.id ON CONFLICT(run,bucket) DO NOTHING;\nEND"
+	}
+]
