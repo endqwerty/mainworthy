@@ -14,7 +14,15 @@ import { Policy } from "../src/core/kinds.ts";
 import type { ClaimReply, CommandFate, DecideReply, GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
 import { stakes } from "../src/core/stakes.ts";
 import { toItem } from "../src/server/decisions/decisions.ts";
-import { mustQuestion } from "../src/server/decisions/questions.ts";
+import {
+	alsoAbout,
+	attachEvidence,
+	insertQuestion,
+	mustQuestion,
+	noteCarried,
+	refsOf,
+} from "../src/server/decisions/questions.ts";
+import { sameCodeEvidence } from "../src/server/evidence/flaky.ts";
 import { ruleActor } from "../src/server/identity/identity.ts";
 import { type Config, defaultConfig, openApp } from "../src/server/kernel/app.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
@@ -51,6 +59,97 @@ const first = <T>(items: T[]): T => {
 	if (item === undefined) throw new Error("expected at least one item");
 	return item;
 };
+
+test("question reference writers batch refs and preserve deduplication, carry and touch semantics", async () => {
+	await h.app.database.write((db) =>
+		db.transaction(async () => {
+			const project = await findProject(db, "scratch");
+			if (!project) throw new Error("missing project");
+			const ctx = makeCtx(h.app, db, project, h.owner, true);
+			const refs = Array.from({ length: 64 }, (_, i) => `C-${i + 1}`);
+			let before = h.app.database.statementCount;
+			let question = await insertQuestion(ctx, {
+				kind: "finding",
+				subject: { finding: 1 },
+				fingerprint: "ref-fixture",
+				epoch: 0,
+				prior: null,
+				title: "Reference fixture",
+				producer: "human",
+				evidence: {},
+				hash: "hash",
+				basis: "basis",
+				ask: { who: "member", agents: "none", notProducer: false, reason: "optional" },
+				blocks: [],
+				rank: 0,
+				refs,
+			});
+			expect(h.app.database.statementCount - before).toBeLessThanOrEqual(4);
+			expect(await refsOf(db, question.id)).toEqual(refs.toSorted());
+			ctx.touched.clear();
+			const more = Array.from({ length: 205 }, (_, i) => `T-${i + 1}`);
+			before = h.app.database.statementCount;
+			expect(await alsoAbout(ctx, question, [...refs, ...more, ...more])).toBe(205);
+			expect(h.app.database.statementCount - before).toBeLessThanOrEqual(3);
+			expect([...ctx.touched]).toEqual([`Q-${question.no}`]);
+			ctx.touched.clear();
+			expect(await alsoAbout(ctx, question, [...more, ...refs])).toBe(0);
+			expect(ctx.touched.size).toBe(0);
+			const unique = Array.from({ length: 401 }, (_, i) => `U-${i + 1}`);
+			before = h.app.database.statementCount;
+			expect(await alsoAbout(ctx, question, unique)).toBe(401);
+			expect(h.app.database.statementCount - before).toBeLessThanOrEqual(3);
+			expect(await refsOf(db, question.id)).toEqual([...refs, ...more, ...unique].toSorted());
+			before = h.app.database.statementCount;
+			question = await attachEvidence(ctx, question, {
+				title: "Attached",
+				evidence: { updated: true },
+				hash: "next",
+				basis: "basis",
+				blocks: [],
+				refs: [...refs, "R-1", "R-1"],
+			});
+			expect(h.app.database.statementCount - before).toBeLessThanOrEqual(3);
+			expect(question.title).toBe("Attached");
+			expect(JSON.parse(question.evidence)).toEqual({ updated: true });
+			before = h.app.database.statementCount;
+			await noteCarried(ctx, question, [...refs, "R-2", "R-2"]);
+			expect(h.app.database.statementCount - before).toBeLessThanOrEqual(2);
+			expect((await mustQuestion(db, project.id, `Q-${question.no}`)).carried).toBe(1);
+			expect(await refsOf(db, question.id)).toEqual([...refs, ...more, ...unique, "R-1", "R-2"].toSorted());
+			before = h.app.database.statementCount;
+			expect(await alsoAbout(ctx, question, [])).toBe(0);
+			expect(h.app.database.statementCount - before).toBe(0);
+			await stampSeq(ctx);
+		}),
+	);
+});
+
+test("same-code sample locations use one batch without changing commit order", async () => {
+	for (let i = 1; i <= 4; i++) {
+		await h.call("report", ciReport({ commit: `samples-${i}`, n: 1, attempt: 1 }));
+		await h.call("report", ciReport({ commit: `samples-${i}`, n: 1, attempt: 2, fail: { 0: "expected stable" } }));
+	}
+	const evidence = await h.app.database.read(async (db) => {
+		const before = h.app.database.statementCount;
+		const result = await sameCodeEvidence(db, {
+			project: 1,
+			test: 1,
+			now: h.app.now(),
+			settings: { enabled: true, windowDays: 14, minFlips: 2 },
+		});
+		expect(h.app.database.statementCount - before).toBeLessThanOrEqual(3);
+		return result;
+	});
+	expect(evidence.signals).toHaveLength(1);
+	expect(evidence.signals[0]).toMatchObject({ flips: 4, suggested: true, signature: { text: "expected stable" } });
+	expect(evidence.signals[0]?.samples.map(({ commit, location }) => ({ commit, location }))).toEqual(
+		[4, 3, 2].map((i) => ({
+			commit: `samples-${i}`,
+			location: { label: "main", commit: `samples-${i}`, change: null },
+		})),
+	);
+});
 
 describe("standing excuse precedence", () => {
 	test("an exact target wins, another target falls back to the cause, and an unanswered cause stays unexplained", async () => {

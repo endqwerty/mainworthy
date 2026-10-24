@@ -289,8 +289,9 @@ const Q = {
 		`UPDATE questions SET evidence = jsonb_set(jsonb_set(evidence::jsonb, '{facts}', $facts::text::jsonb), '{parties}', $parties::text::jsonb)::text
 		 WHERE id = $id`,
 	),
-	addRef: sql<{ project: number; ref: string; question: number }>(
-		"INSERT INTO question_refs (project, ref, question) VALUES ($project, $ref, $question) ON CONFLICT DO NOTHING",
+	addRefs: sql<{ project: number; refs: readonly string[]; question: number }>(
+		`INSERT INTO question_refs (project, ref, question)
+ SELECT $project, requested.ref, $question FROM unnest($refs::text[]) AS requested(ref) ON CONFLICT DO NOTHING`,
 	),
 	refsForItems: sql<{ ids: readonly number[] }, { question: number; ref: string }>(
 		"SELECT question, ref FROM question_refs WHERE question = ANY($ids::bigint[]) ORDER BY question, ref",
@@ -500,6 +501,14 @@ export async function mustQuestion(db: ReadDb, project: number, text: string): P
 	return readQuestion(row);
 }
 
+async function addRefs(ctx: Ctx, question: number, refs: readonly string[]): Promise<number> {
+	let added = 0;
+	for (let start = 0; start < refs.length; start += 200)
+		added += (await ctx.db.run(Q.addRefs, { project: ctx.project.id, question, refs: refs.slice(start, start + 200) }))
+			.changes;
+	return added;
+}
+
 export async function insertQuestion(
 	ctx: Ctx,
 	input: QuestionSubjectInput & {
@@ -537,8 +546,7 @@ export async function insertQuestion(
 		rank: input.rank,
 		at: ctx.now,
 	});
-	for (const about of input.refs)
-		await ctx.db.run(Q.addRef, { project: ctx.project.id, ref: about, question: insertedId });
+	await addRefs(ctx, insertedId, input.refs);
 	ctx.touched.add(ref("question", no));
 	const row = await questionById(ctx.db, insertedId);
 	if (!row) throw new Error("question was not stored");
@@ -560,24 +568,21 @@ export async function attachEvidence(
 		blocks: JSON.stringify(blocks),
 		seq: ctx.seq,
 	});
-	for (const about of input.refs)
-		await ctx.db.run(Q.addRef, { project: ctx.project.id, ref: about, question: question.id });
+	await addRefs(ctx, question.id, input.refs);
 	ctx.touched.add(questionRef(question));
 	return (await questionById(ctx.db, question.id)) ?? question;
 }
 
 /** Adds things a question is about, so each of them lists it. Returns how many it did not name before. */
 export async function alsoAbout(ctx: Ctx, question: QuestionRow, refs: readonly string[]): Promise<number> {
-	let added = 0;
-	for (const about of refs)
-		added += (await ctx.db.run(Q.addRef, { project: ctx.project.id, ref: about, question: question.id })).changes;
+	const added = await addRefs(ctx, question.id, refs);
 	if (added > 0) ctx.touched.add(questionRef(question));
 	return added;
 }
 
 export async function noteCarried(ctx: Ctx, question: QuestionRow, refs: readonly string[]): Promise<void> {
 	await ctx.db.run(Q.carry, { id: question.id, seq: ctx.seq });
-	for (const about of refs) await ctx.db.run(Q.addRef, { project: ctx.project.id, ref: about, question: question.id });
+	await addRefs(ctx, question.id, refs);
 }
 
 export async function setQuestionState(
