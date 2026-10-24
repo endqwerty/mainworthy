@@ -313,6 +313,13 @@ const Q = {
 		"SELECT * FROM targets WHERE project = $project AND what = $what AND env = $env",
 	),
 	targetById: sql<{ id: number }, TargetRow>("SELECT * FROM targets WHERE id = $id"),
+	targetsOfCommits: sql<{ project: number; whats: readonly string[] }, TargetRow>(
+		"SELECT * FROM targets WHERE project = $project AND what = ANY($whats::text[]) ORDER BY id",
+	),
+	changesByIds: sql<{ ids: readonly number[] }, ChangeRow>("SELECT * FROM changes WHERE id = ANY($ids::bigint[])"),
+	shardsForTargets: sql<{ ids: readonly number[] }, { target: number; job: string; shards: number; reported: string }>(
+		"SELECT target, job, shards, string_agg(DISTINCT shard::text, ',') AS reported FROM batches WHERE target = ANY($ids::bigint[]) AND shards IS NOT NULL AND method != 'agent' GROUP BY target, job, shards ORDER BY target, job",
+	),
 	targetsOfCommit: sql<{ project: number; what: string }, TargetRow>(
 		"SELECT * FROM targets WHERE project = $project AND what = $what",
 	),
@@ -563,10 +570,13 @@ const Q = {
 		`SELECT * FROM results WHERE basis_case = $id AND method = $method
 		 ORDER BY seq DESC, ord DESC LIMIT $limit`,
 	),
-	latestOfCaseByMethod: sql<{ id: number; method: string }, ResultRow>(
-		`SELECT * FROM results WHERE basis_case = $id AND method = $method
-		 ORDER BY seq DESC, ord DESC LIMIT 1`,
+	proofsForCases: sql<{ ids: readonly number[] }, ResultRow>(
+		"SELECT r.* FROM unnest($ids::bigint[]) asked(id) CROSS JOIN unnest(ARRAY['human','auto','agent']) methods(method) JOIN LATERAL (SELECT * FROM results WHERE basis_case = asked.id AND method = methods.method ORDER BY seq DESC, ord DESC LIMIT 1) r ON true",
 	),
+	targetsByIds: sql<{ ids: readonly number[] }, TargetRow>("SELECT * FROM targets WHERE id = ANY($ids::bigint[])"),
+	batchesByIds: sql<{ ids: readonly number[] }, BatchRow>("SELECT * FROM batches WHERE id = ANY($ids::bigint[])"),
+	testsByIds: sql<{ ids: readonly number[] }, TestRow>("SELECT * FROM tests WHERE id = ANY($ids::bigint[])"),
+
 	ofBatch: sql<{ batch: number; limit: number }, ResultRow>(
 		"SELECT * FROM results WHERE batch = $batch ORDER BY ord LIMIT $limit",
 	),
@@ -1254,17 +1264,34 @@ export async function* waitingShardPages(db: ReadDb, project: number, what: stri
 	}
 }
 
-export async function waitingShards(db: ReadDb, targets: readonly TargetRow[]): Promise<ShardWait[]> {
-	const out: ShardWait[] = [];
-	for (const target of targets) {
-		for (const row of await db.all(Q.shardsOf, { target: target.id })) {
-			const reported = new Set(row.reported.split(",").map(Number));
-			const missing = Array.from({ length: row.shards }, (_, i) => i + 1).filter((i) => !reported.has(i));
-			if (missing.length) out.push({ job: row.job, env: target.env, missing, of: row.shards });
+/** The missing shards for all requested commits, loaded in one statement. */
+export async function waitingShardsByCommit(
+	db: ReadDb,
+	targets: readonly TargetRow[],
+): Promise<Map<string, ShardWait[]>> {
+	const out = new Map<string, ShardWait[]>();
+	const byId = new Map(targets.map((target) => [target.id, target]));
+	if (!targets.length) return out;
+	for (const row of await db.all(Q.shardsForTargets, { ids: targets.map((target) => target.id) })) {
+		const target = byId.get(row.target);
+		if (!target) throw new Error("shard target was not requested");
+		const reported = new Set(row.reported.split(",").map(Number));
+		const missing = Array.from({ length: row.shards }, (_, i) => i + 1).filter((i) => !reported.has(i));
+		if (missing.length) {
+			const waits = out.get(target.what) ?? [];
+			waits.push({ job: row.job, env: target.env, missing, of: row.shards });
+			out.set(target.what, waits);
 		}
 	}
 	return out;
 }
+export async function waitingShards(db: ReadDb, targets: readonly TargetRow[]): Promise<ShardWait[]> {
+	return [...(await waitingShardsByCommit(db, targets)).values()].flat();
+}
+export const targetsOfCommits = async (db: ReadDb, project: number, whats: readonly string[]): Promise<TargetRow[]> =>
+	await db.all(Q.targetsOfCommits, { project, whats });
+export const changesByIds = async (db: ReadDb, ids: readonly number[]): Promise<ChangeRow[]> =>
+	await db.all(Q.changesByIds, { ids });
 
 /** A declaration proves nothing once any ordinary report exists on any target the commit counts. */
 export async function nothingRequiredOn(db: ReadDb, targets: readonly TargetRow[]): Promise<boolean> {
@@ -2116,13 +2143,33 @@ export async function listTests(
 export type Proof = { result: ResultRow; current: boolean } | null;
 
 /** The proof strip of a case: per producer, the latest result and whether it was on the current version. */
-export async function proofOf(db: ReadDb, row: { id: number; head: number }): Promise<Record<MethodKind, Proof>> {
-	const one = async (method: MethodKind): Promise<Proof> => {
-		const latest = await db.get(Q.latestOfCaseByMethod, { id: row.id, method });
-		return latest ? { result: latest, current: latest.basis_version === row.head } : null;
-	};
-	return { human: await one("human"), auto: await one("auto"), agent: await one("agent") };
+export async function proofsOf(
+	db: ReadDb,
+	rows: readonly { id: number; head: number }[],
+): Promise<Map<number, Record<MethodKind, Proof>>> {
+	const out = new Map<number, Record<MethodKind, Proof>>(
+		rows.map((row) => [row.id, { human: null, auto: null, agent: null }]),
+	);
+	const heads = new Map(rows.map((row) => [row.id, row.head]));
+	if (rows.length)
+		for (const result of await db.all(Q.proofsForCases, { ids: rows.map((row) => row.id) })) {
+			if (result.basis_case === null) continue;
+			const proofs = out.get(result.basis_case);
+			if (proofs) proofs[result.method] = { result, current: result.basis_version === heads.get(result.basis_case) };
+		}
+	return out;
 }
+export async function proofOf(db: ReadDb, row: { id: number; head: number }): Promise<Record<MethodKind, Proof>> {
+	return (await proofsOf(db, [row])).get(row.id) ?? { human: null, auto: null, agent: null };
+}
+export const resultsByIds = async (db: ReadDb, ids: readonly number[]): Promise<ResultRow[]> =>
+	ids.length ? await db.all(Q.resultsByIds, { ids }) : [];
+export const targetsByIds = async (db: ReadDb, ids: readonly number[]): Promise<TargetRow[]> =>
+	ids.length ? await db.all(Q.targetsByIds, { ids }) : [];
+export const batchesByIds = async (db: ReadDb, ids: readonly number[]): Promise<BatchRow[]> =>
+	ids.length ? await db.all(Q.batchesByIds, { ids }) : [];
+export const testsByIds = async (db: ReadDb, ids: readonly number[]): Promise<TestRow[]> =>
+	ids.length ? await db.all(Q.testsByIds, { ids }) : [];
 
 // ── Standing ───────────────────────────────────────────────────────────────────────────────────────────────
 

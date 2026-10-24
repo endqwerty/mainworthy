@@ -51,7 +51,7 @@ export async function operation(
 export async function prepareRecentChanges(instance: DatasetInstance): Promise<void> {
 	// A cursor past everything returns no changes and the cursor of where the project is now.
 	const current = Delta.parse(
-		await operation(instance, "since", { cursor: `s:${Number.MAX_SAFE_INTEGER}`, limit: 1 }),
+		await operation(instance, "since", { cursor: `s:${Number.MAX_SAFE_INTEGER - 1}`, limit: 1 }),
 	).cursor;
 	const seq = Number(current.slice(2));
 	const recent = instance.metadata.cases.filter((stamp) => stamp.version > 1 && stamp.version < 6).slice(0, 20);
@@ -304,15 +304,19 @@ export async function readWorkloads(instance: DatasetInstance, iterations: numbe
 	}
 	const test = itemAt(metadata.tests, 0);
 	const testId = Number(test.ref.slice(2));
-	const historyCount = z
-		.object({ n: z.number().int() })
-		.parse(
-			app.db.raw
-				.query(
-					"SELECT count(*) AS n FROM results WHERE test = (SELECT id FROM tests WHERE no = ? AND project = (SELECT id FROM projects WHERE key = 'benchmark'))",
-				)
-				.get(testId),
-		).n;
+	const historyCount = await app.database.read(
+		async (db) =>
+			z
+				.object({ n: z.number().int() })
+				.parse(
+					(
+						await db.allDynamic(
+							"SELECT count(*) AS n FROM results WHERE test = (SELECT id FROM tests WHERE no = $1 AND project = (SELECT id FROM projects WHERE key = 'benchmark'))",
+							[testId],
+						)
+					)[0],
+				).n,
+	);
 	reads.push(
 		{
 			name: "test history (20)",
@@ -584,7 +588,7 @@ export function ingestWorkload(
 					receipt.counts.fail === Math.floor(size / 50) && receipt.questions.length === 20,
 					"ingest must materialise every failure and all twenty causes",
 				);
-				verifyReport(instance.app, receipt, size);
+				await verifyReport(instance.app, receipt, size);
 			},
 		},
 	};
@@ -611,7 +615,7 @@ export function executeWorkload(instance: DatasetInstance, iterations: number): 
 		},
 		async check(value) {
 			const receipt = Receipt.parse(value);
-			verifyReport(instance.app, receipt, 1);
+			await verifyReport(instance.app, receipt, 1);
 			ensure(
 				receipt.basis.exact === 1 && receipt.basis.assumed === 0,
 				"manual results must have an exact pinned basis",

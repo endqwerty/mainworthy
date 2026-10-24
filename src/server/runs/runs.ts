@@ -55,10 +55,12 @@ import {
 	type TestRow,
 	targetByCommit,
 	targetsOfCommit,
+	targetsOfCommits,
 	targetsWithCommit,
 	testById,
 	waitingShardPages,
 	waitingShards,
+	waitingShardsByCommit,
 } from "../evidence/evidence.ts";
 import { quarantineLookup } from "../evidence/quarantine.ts";
 import { buildWhat } from "../evidence/releases.ts";
@@ -178,7 +180,13 @@ const Q = {
 		"SELECT 1 AS n FROM run_tests WHERE run = $run AND outcome IN ('fail', 'error') AND signature = $signature LIMIT 1",
 	),
 	byNo: sql<{ project: number; no: number }, RunRow>("SELECT * FROM runs WHERE project = $project AND no = $no"),
+	refsByIds: sql<{ ids: readonly number[] }, { id: number; no: number }>(
+		"SELECT id, no FROM runs WHERE id = ANY($ids::bigint[])",
+	),
 	byId: sql<{ id: number }, RunRow>("SELECT * FROM runs WHERE id = $id"),
+	changeRunsByWhat: sql<{ project: number; whats: readonly string[] }, RunRow>(
+		"SELECT * FROM runs WHERE project = $project AND origin = 'change' AND accepts_what = ANY($whats::text[])",
+	),
 	changeRun: sql<{ project: number; what: string }, RunRow>(
 		"SELECT * FROM runs WHERE project = $project AND origin = 'change' AND accepts_what = $what",
 	),
@@ -403,6 +411,8 @@ const Q = {
 	dependents: sql<{ decision: number }, { run: number }>("SELECT run FROM depends_on WHERE decision = $decision"),
 };
 
+export const runRefsByIds = async (db: ReadDb, ids: readonly number[]): Promise<Map<number, string>> =>
+	new Map((await db.all(Q.refsByIds, { ids })).map((row) => [row.id, runRef(row)]));
 export const runRef = (row: { no: number }): string => ref("run", row.no);
 export const runById = async (db: ReadDb, id: number): Promise<RunRow | null> => await db.get(Q.byId, { id });
 export const disputedRuns = async (db: ReadDb, project: number): Promise<number[]> =>
@@ -2083,11 +2093,23 @@ export async function* receiptGateEvidence(db: ReadDb, run: RunRow): AsyncGenera
 			for (const wait of page) yield JSON.stringify({ collection: "waiting", item: wait });
 }
 
-export async function gateOf(ctx: Ctx<ReadDb>, run: RunRow): Promise<GateStatus> {
+/** Refreshes delivery gates without a per-commit sequence of reads. */
+export async function gatesOfCommits(ctx: Ctx<ReadDb>, whats: readonly string[]): Promise<Map<string, GateStatus>> {
+	const targets = await targetsOfCommits(ctx.db, ctx.project.id, whats);
+	const waiting = await waitingShardsByCommit(ctx.db, targets);
+	const gates = new Map<string, GateStatus>();
+	for (const run of await ctx.db.all(Q.changeRunsByWhat, { project: ctx.project.id, whats })) {
+		if (run.accepts_what !== null)
+			gates.set(run.accepts_what, await gateOf(ctx, run, waiting.get(run.accepts_what) ?? []));
+	}
+	return gates;
+}
+
+export async function gateOf(ctx: Ctx<ReadDb>, run: RunRow, knownWaiting?: ShardWait[]): Promise<GateStatus> {
 	const tally = json<Tally>(run.tally);
 	const open = json<string[]>(run.blocking);
 	const expired = run.next_expiry !== null && run.next_expiry <= ctx.now;
-	const waiting = await waitingFor(ctx.db, run);
+	const waiting = knownWaiting ?? (await waitingFor(ctx.db, run));
 	const facts = {
 		tally,
 		blocking: open.length,

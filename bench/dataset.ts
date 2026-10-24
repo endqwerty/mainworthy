@@ -1,25 +1,20 @@
-import {
-	constants,
-	copyFileSync,
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	rmSync,
-	statfsSync,
-	writeFileSync,
-} from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, rmSync, statfsSync, writeFileSync } from "node:fs";
 import { loadavg } from "node:os";
 import { join, resolve } from "node:path";
 import { z } from "zod";
+import { binaries } from "../scripts/pg.ts";
 import { open } from "../src/app/start.ts";
 import type { Edit, ReportInput, ResultIn, TargetIn } from "../src/core/ops.ts";
 import { authenticate, createToken } from "../src/server/identity/identity.ts";
 import { type App, type Config, SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
 import type { Actor } from "../src/server/kernel/ctx.ts";
-import { MIGRATIONS } from "../src/server/kernel/migrate.ts";
+import { Database } from "../src/server/kernel/db.ts";
+import { baselineSchema } from "../src/server/kernel/migrate.ts";
+import { testDatabase } from "../test/db.ts";
 import { call, Decisions, ensure, itemAt, Plan, Proposal, Queue, Receipt, Slots, TestPage } from "./contracts.ts";
 
-const GENERATOR = 1;
+const GENERATOR = 2;
 export const Parameters = z
 	.object({
 		cases: z.number().int().min(1_000).default(100_000),
@@ -79,7 +74,7 @@ export type DatasetInstance = {
 	ciSecret: string;
 	metadata: Metadata;
 	dir: string;
-	close: () => void;
+	close: () => Promise<void>;
 };
 
 /** Reuse requires the actual generator and migration contents, including embedded migrations in a compiled binary. */
@@ -99,7 +94,7 @@ export function fingerprints(): Metadata["fingerprints"] {
 			);
 	return {
 		generator: new Bun.CryptoHasher("sha256").update(generator).digest("hex"),
-		migrations: new Bun.CryptoHasher("sha256").update(JSON.stringify(MIGRATIONS)).digest("hex"),
+		migrations: baselineSchema().hash,
 	};
 }
 
@@ -156,6 +151,7 @@ export function random(seed: number): () => number {
 export function config(dir: string): Config {
 	return {
 		dataDir: dir,
+		databaseUrl: readFileSync(join(dir, "database.url"), "utf8").trim(),
 		host: "127.0.0.1",
 		port: 0,
 		mode: "local",
@@ -192,26 +188,28 @@ export async function ciActor(app: App): Promise<{ actor: Actor; secret: string 
 }
 
 /** Reads persisted counts for the benchmark project; no dataset writes bypass the operation layer. */
-export function counts(app: App): Metadata["counts"] {
-	const count = (sql: string) => {
-		const row = z.object({ n: z.number().int() }).parse(app.db.raw.query(sql).get());
-		return row.n;
-	};
-	const project = "(SELECT id FROM projects WHERE key = 'benchmark')";
-	return {
-		cases: count(`SELECT count(*) AS n FROM cases WHERE project = ${project}`),
-		versions: count(
-			`SELECT count(*) AS n FROM versions WHERE case_id IN (SELECT id FROM cases WHERE project = ${project})`,
-		),
-		tests: count(`SELECT count(*) AS n FROM tests WHERE project = ${project} AND kind = 'auto'`),
-		linked: count(
-			`SELECT count(*) AS n FROM tests WHERE project = ${project} AND kind = 'auto' AND case_id IS NOT NULL`,
-		),
-		results: count(`SELECT count(*) AS n FROM results WHERE project = ${project}`),
-		open: count(`SELECT count(*) AS n FROM questions WHERE project = ${project} AND state = 'open'`),
-		decided: count(`SELECT count(*) AS n FROM questions WHERE project = ${project} AND state = 'decided'`),
-		carried: count(`SELECT COALESCE(sum(carried), 0) AS n FROM questions WHERE project = ${project}`),
-	};
+export async function counts(app: App): Promise<Metadata["counts"]> {
+	return await app.database.read(async (db) => {
+		const count = async (sql: string) => {
+			const row = z.object({ n: z.number().int() }).parse((await db.allDynamic(sql))[0]);
+			return row.n;
+		};
+		const project = "(SELECT id FROM projects WHERE key = 'benchmark')";
+		return {
+			cases: await count(`SELECT count(*) AS n FROM cases WHERE project = ${project}`),
+			versions: await count(
+				`SELECT count(*) AS n FROM versions WHERE case_id IN (SELECT id FROM cases WHERE project = ${project})`,
+			),
+			tests: await count(`SELECT count(*) AS n FROM tests WHERE project = ${project} AND kind = 'auto'`),
+			linked: await count(
+				`SELECT count(*) AS n FROM tests WHERE project = ${project} AND kind = 'auto' AND case_id IS NOT NULL`,
+			),
+			results: await count(`SELECT count(*) AS n FROM results WHERE project = ${project}`),
+			open: await count(`SELECT count(*) AS n FROM questions WHERE project = ${project} AND state = 'open'`),
+			decided: await count(`SELECT count(*) AS n FROM questions WHERE project = ${project} AND state = 'decided'`),
+			carried: await count(`SELECT COALESCE(sum(carried), 0)::bigint AS n FROM questions WHERE project = ${project}`),
+		};
+	});
 }
 
 /** The realistic automated identity for a test; 400 files at the default scale. */
@@ -280,14 +278,18 @@ export function ingestInput(metadata: Metadata, id: string, size = 10_000): Repo
 }
 
 /** Verifies a fresh report wrote every supplied result, rather than timing a replay or a refused batch. */
-export function verifyReport(app: App, receipt: z.infer<typeof Receipt>, expected: number): void {
+export async function verifyReport(app: App, receipt: z.infer<typeof Receipt>, expected: number): Promise<void> {
 	ensure(
 		receipt.fresh && receipt.rejected.length === 0 && receipt.counts.total === expected,
 		"report must be fresh and accept every result",
 	);
 	const row = z
 		.object({ n: z.number().int() })
-		.parse(app.db.raw.query("SELECT count(*) AS n FROM results WHERE batch = ?").get(receipt.batch));
+		.parse(
+			await app.database.read(
+				async (db) => (await db.allDynamic("SELECT count(*) AS n FROM results WHERE batch = $1", [receipt.batch]))[0],
+			),
+		);
 	ensure(row.n === expected, `batch ${receipt.batch} persisted ${row.n}, expected ${expected}`);
 }
 
@@ -303,7 +305,7 @@ export async function buildDataset(options: {
 	const log = options.log ?? console.log;
 	requireDisk(dir);
 	const metadataPath = join(dir, "dataset.json");
-	if (existsSync(metadataPath) && existsSync(join(dir, "mainworthy.db"))) {
+	if (existsSync(metadataPath) && existsSync(join(dir, "baseline.dump"))) {
 		const saved = Metadata.safeParse(JSON.parse(readFileSync(metadataPath, "utf8")));
 		if (
 			saved.success &&
@@ -317,9 +319,11 @@ export async function buildDataset(options: {
 		}
 	}
 	ensure(
-		!existsSync(join(dir, "mainworthy.db")),
+		!existsSync(join(dir, "baseline.dump")),
 		`incomplete or mismatched dataset at ${dir}; choose a new directory or remove this benchmark dataset`,
 	);
+	const fixture = await testDatabase();
+	writeFileSync(join(dir, "database.url"), fixture.url, { mode: 0o600 });
 	const { app, owner } = await open(config(dir));
 	const ci = (await ciActor(app)).actor;
 	const phases: Metadata["phases"] = [];
@@ -448,7 +452,7 @@ export async function buildDataset(options: {
 				results,
 			};
 			const receipt = await call(app, ci, "report", input, Receipt);
-			verifyReport(app, receipt, results.length);
+			await verifyReport(app, receipt, results.length);
 			return receipt;
 		};
 		await phase("test registration", parameters.tests, async () => {
@@ -555,7 +559,7 @@ export async function buildDataset(options: {
 				},
 				Receipt,
 			);
-			verifyReport(app, receipt, retried.length);
+			await verifyReport(app, receipt, retried.length);
 		});
 		const base = lastCommit;
 		const files = [...new Set(tests.map((test) => test.file))].slice(0, 20);
@@ -622,7 +626,7 @@ export async function buildDataset(options: {
 				},
 				Receipt,
 			);
-			verifyReport(app, receipt, 250);
+			await verifyReport(app, receipt, 250);
 			const slots = await call(app, owner, "find", { in: "slots", run: run.run, limit: 500 }, Slots);
 			ensure(
 				slots.items.filter((slot) => slot.state === "satisfied").length === 250 &&
@@ -631,7 +635,7 @@ export async function buildDataset(options: {
 			);
 			return run.run;
 		});
-		const stored = counts(app);
+		const stored = await counts(app);
 		ensure(
 			stored.cases === parameters.cases && stored.tests === parameters.tests,
 			"dataset counts must match requested cases and automated tests",
@@ -649,7 +653,7 @@ export async function buildDataset(options: {
 				app,
 				owner,
 				"since",
-				{ cursor: `s:${Number.MAX_SAFE_INTEGER}`, limit: 1 },
+				{ cursor: `s:${Number.MAX_SAFE_INTEGER - 1}`, limit: 1 },
 				z.object({ cursor: z.string() }),
 			)
 		).cursor;
@@ -677,25 +681,64 @@ export async function buildDataset(options: {
 		log(
 			`Verified dataset: ${JSON.stringify(stored)}; queue ${metadata.queueLimited ? "time-limited" : "target reached"}`,
 		);
-		app.close();
+		await app.database.write((db) => db.transaction(() => db.exec("ANALYZE")));
+		await app.close();
+		postgres("pg_dump", [
+			"--format=custom",
+			"--no-owner",
+			"--no-privileges",
+			"--file",
+			join(dir, "baseline.dump"),
+			fixture.url,
+		]);
+		await fixture.close();
 		writeFileSync(metadataPath, JSON.stringify(metadata));
 		return { dir, metadata, reused: false };
 	} catch (error) {
-		app.close();
+		await app.close();
+		await fixture.close();
 		throw error;
 	}
 }
 
-/** Clones the closed WAL baseline so every repeated run starts with identical history and removes its writes on close. */
-export async function openDataset(dataset: Dataset, dir: string): Promise<DatasetInstance> {
+/** PostgreSQL tools use the same server version as the checkout fixture. */
+export function postgres(command: string, args: string[]): void {
+	const directory = binaries();
+	if (!directory) throw new Error("PostgreSQL 18 client tools are required for benchmark snapshots");
+	execFileSync(join(directory, command), args, { stdio: ["ignore", "ignore", "pipe"] });
+}
+
+/** Restores a closed immutable snapshot into a fresh disposable database, outside operation timers. */
+export async function cloneDataset(dataset: string, dir: string) {
 	requireDisk(dir);
-	copyFileSync(join(dataset.dir, "mainworthy.db"), join(dir, "mainworthy.db"), constants.COPYFILE_FICLONE);
+	const fixture = await testDatabase({ schema: "empty" });
+	try {
+		postgres("pg_restore", [
+			"--no-owner",
+			"--no-privileges",
+			"--exit-on-error",
+			"--dbname",
+			fixture.url,
+			join(dataset, "baseline.dump"),
+		]);
+		const database = await Database.open({ url: fixture.url });
+		try {
+			await database.write((db) => db.transaction(() => db.exec("ANALYZE")));
+		} finally {
+			await database.close();
+		}
+		writeFileSync(join(dir, "database.url"), fixture.url, { mode: 0o600 });
+		return fixture;
+	} catch (error) {
+		await fixture.close();
+		throw error;
+	}
+}
+
+export async function openDataset(dataset: Dataset, dir: string): Promise<DatasetInstance> {
+	const fixture = await cloneDataset(dataset.dir, dir);
 	const { app, owner } = await open(config(dir));
 	const ci = await ciActor(app);
-	ensure(
-		z.object({ journal_mode: z.literal("wal") }).safeParse(app.db.raw.query("PRAGMA journal_mode").get()).success,
-		"on-disk database must use production WAL mode",
-	);
 	return {
 		app,
 		owner,
@@ -703,8 +746,9 @@ export async function openDataset(dataset: Dataset, dir: string): Promise<Datase
 		ciSecret: ci.secret,
 		metadata: dataset.metadata,
 		dir,
-		close() {
-			app.close();
+		async close() {
+			await app.close();
+			await fixture.close();
 			rmSync(dir, { recursive: true, force: true });
 		},
 	};

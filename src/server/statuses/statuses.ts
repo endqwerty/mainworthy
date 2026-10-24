@@ -1,11 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { Verdict } from "../../core/runs.ts";
-import { changeById, type TargetRow, targetByCommit } from "../evidence/evidence.ts";
+import {
+	changeById,
+	changesByIds,
+	codeWhat,
+	type TargetRow,
+	targetByCommit,
+	targetsOfCommits,
+} from "../evidence/evidence.ts";
 import type { App } from "../kernel/app.ts";
 import { type Ctx, findProject, makeCtx } from "../kernel/ctx.ts";
 import { json, sql, type WriteDb } from "../kernel/db.ts";
-import { gate } from "../runs/runs.ts";
+import { gate, gatesOfCommits } from "../runs/runs.ts";
 import { githubStatusesPort } from "./github.ts";
 import { type StatusDraft, type StatusPort, StatusRateLimit } from "./port.ts";
 
@@ -90,7 +97,16 @@ export async function enrollCommitStatus(ctx: Ctx, target: TargetRow): Promise<v
 	if (ctx.actor.kind !== "agent") await queue(ctx, target, true);
 }
 
-async function queue(ctx: Ctx, target: TargetRow, reported = false): Promise<void> {
+async function queue(
+	ctx: Ctx,
+	target: TargetRow,
+	reported = false,
+	known?: {
+		status: Awaited<ReturnType<typeof gate>>;
+		existing: StatusRow;
+		change: Awaited<ReturnType<typeof changeById>>;
+	},
+): Promise<void> {
 	const { app, project } = ctx;
 	const config = app.config.github;
 	if (
@@ -103,20 +119,22 @@ async function queue(ctx: Ctx, target: TargetRow, reported = false): Promise<voi
 		!/^[0-9a-f]{40}$/.test(target.commit_sha)
 	)
 		return;
-	const status = await gate(ctx, { commit: target.commit_sha, repo: config.repository });
+	const status = known?.status ?? (await gate(ctx, { commit: target.commit_sha, repo: config.repository }));
 	if (status.run === null) return;
-	const change = target.change === null ? null : await changeById(ctx.db, target.change);
+	const change = known ? known.change : target.change === null ? null : await changeById(ctx.db, target.change);
 	const path = change ? `changes/${encodeURIComponent(change.key)}` : `runs/${status.run.replace(/^R-/, "")}`;
 	const desired = JSON.stringify({
 		verdict: status.verdict,
 		reason: status.reason,
 		url: `${app.config.publicUrl.replace(/\/$/, "")}/p/${encodeURIComponent(project.key)}/${path}`,
 	});
-	const existing = await ctx.db.get(Q.one, {
-		project: project.id,
-		repository: config.repository,
-		commit: target.commit_sha,
-	});
+	const existing =
+		known?.existing ??
+		(await ctx.db.get(Q.one, {
+			project: project.id,
+			repository: config.repository,
+			commit: target.commit_sha,
+		}));
 	if (!reported && existing?.desired === desired) return;
 	await ctx.db.run(Q.queue, {
 		project: project.id,
@@ -140,9 +158,28 @@ async function refresh(app: App, db: WriteDb): Promise<void> {
 	const project = await findProject(db, config.project);
 	if (!project) return;
 	const ctx = makeCtx(app, db, project, { id: 0, kind: "rule", name: "rule", can: [] }, true);
-	for (const row of await db.all(Q.all, { project: project.id, repository: config.repository, now: app.now() })) {
-		const target = await targetByCommit(db, project.id, row.commit_sha, config.repository);
-		if (target) await queue(ctx, target);
+	const rows = await db.all(Q.all, { project: project.id, repository: config.repository, now: app.now() });
+	if (!rows.length) return;
+	const whats = rows.map((row) => codeWhat(config.repository, row.commit_sha));
+	const targets = await targetsOfCommits(db, project.id, whats);
+	const first = new Map<string, TargetRow>();
+	for (const target of targets) if (!first.has(target.what)) first.set(target.what, target);
+	const gates = await gatesOfCommits(ctx, whats);
+	const changes = new Map(
+		(
+			await changesByIds(db, [...new Set(targets.flatMap((target) => (target.change === null ? [] : [target.change])))])
+		).map((change) => [change.id, change]),
+	);
+	for (const row of rows) {
+		const what = codeWhat(config.repository, row.commit_sha);
+		const target = first.get(what);
+		const status = gates.get(what);
+		if (target && status)
+			await queue(ctx, target, false, {
+				status,
+				existing: row,
+				change: target.change === null ? null : (changes.get(target.change) ?? null),
+			});
 	}
 }
 

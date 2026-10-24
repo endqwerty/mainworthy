@@ -287,6 +287,12 @@ const Q = {
 	addRef: sql<{ project: number; ref: string; question: number }>(
 		"INSERT INTO question_refs (project, ref, question) VALUES ($project, $ref, $question) ON CONFLICT DO NOTHING",
 	),
+	refsForItems: sql<{ ids: readonly number[] }, { question: number; ref: string }>(
+		"SELECT question, ref FROM question_refs WHERE question = ANY($ids::bigint[]) ORDER BY question, ref",
+	),
+	answersForItems: sql<{ ids: readonly number[] }, AnswerRow>(
+		"SELECT * FROM answers WHERE question = ANY($ids::bigint[]) ORDER BY id",
+	),
 	refsOf: sql<{ question: number }, { ref: string }>(
 		"SELECT ref FROM question_refs WHERE question = $question ORDER BY ref",
 	),
@@ -315,22 +321,21 @@ const Q = {
 	),
 	// A cause answer that says the target needs a fix and still stands: it ends when its cause passes.
 	attributedOnRef: sql<{ project: number; ref: string }, StoredQuestionRow>(
-		`SELECT q.* FROM question_refs r JOIN questions q ON q.id = r.question JOIN decisions d ON d.id = q.decision
-		 WHERE r.project = $project AND r.ref = $ref AND q.kind = 'failure' AND q.state = 'decided'
-		   AND (q.subject::jsonb)->>'slot' IS NULL AND (q.subject::jsonb)->>'perResult' IS NULL
-		   AND (d.answer::jsonb)->>'is' IN (${ATTRIBUTED.map((is) => `'${is}'`).join(", ")})
-		 ORDER BY q.id`,
+		"WITH answered AS MATERIALIZED (SELECT q.* FROM questions q JOIN decisions d ON d.id = q.decision WHERE q.project = $project AND q.kind = 'failure' AND q.state = 'decided' AND (q.subject::jsonb)->>'slot' IS NULL AND (q.subject::jsonb)->>'perResult' IS NULL AND (d.answer::jsonb)->>'is' IN (" +
+			ATTRIBUTED.map((is) => "'" + is + "'").join(", ") +
+			")) SELECT q.* FROM answered q JOIN question_refs r ON r.question = q.id WHERE r.project = $project AND r.ref = $ref ORDER BY q.id",
 	),
 	openOnRef: sql<
 		{ project: number; ref: string },
 		{ id: number; no: number; kind: Kind; subject: string; blocks: string }
 	>(
-		`SELECT q.id, q.no, q.kind, q.subject, q.blocks FROM question_refs r JOIN questions q ON q.id = r.question
-		 WHERE r.project = $project AND r.ref = $ref AND q.state = 'open'`,
+		"WITH current_questions AS MATERIALIZED (SELECT id, no, kind, subject, blocks FROM questions WHERE project = $project AND state = 'open') SELECT q.* FROM current_questions q JOIN question_refs r ON r.question = q.id WHERE r.project = $project AND r.ref = $ref ORDER BY q.id",
+	),
+	openCountsOnRefs: sql<{ project: number; refs: readonly string[] }, { ref: string; n: number }>(
+		"WITH current_questions AS MATERIALIZED (SELECT id FROM questions WHERE project = $project AND state = 'open') SELECT r.ref, count(*) AS n FROM current_questions q JOIN question_refs r ON r.question = q.id WHERE r.project = $project AND r.ref = ANY($refs::text[]) GROUP BY r.ref",
 	),
 	openCountOnRef: sql<{ project: number; ref: string }, { n: number }>(
-		`SELECT count(*) AS n FROM question_refs r JOIN questions q ON q.id = r.question
-		 WHERE r.project = $project AND r.ref = $ref AND q.state = 'open'`,
+		"WITH current_questions AS MATERIALIZED (SELECT id FROM questions WHERE project = $project AND state = 'open') SELECT count(*) AS n FROM current_questions q JOIN question_refs r ON r.question = q.id WHERE r.project = $project AND r.ref = $ref",
 	),
 	// The queue is ordered by rank and id together: one report can raise many questions that share a rank, so a page
 	// cut on the rank alone would skip the rest of them. (`questions_queue` ends in the id, so no sort is needed.)
@@ -356,6 +361,14 @@ const Q = {
 		`SELECT q.* FROM questions q LEFT JOIN decisions d ON d.id = q.decision
 		 WHERE q.project = $project AND (q.state = 'decided' OR (q.state = 'dissolved' AND ${HOLD_ENDING}))
 		 AND q.kind = $kind AND (q.rev, q.id) < ($rev, $id) ORDER BY q.rev DESC, q.id DESC LIMIT $limit`,
+	),
+	freshMaps: sql<{ ids: readonly number[]; project: number }, StoredQuestionRow>(
+		"SELECT q.* FROM questions q WHERE q.project = $project AND q.id = ANY($ids::bigint[]) AND q.kind = 'map' AND q.state = 'open' AND q.owner = 0 AND q.prior IS NULL AND q.decision IS NULL AND q.blocks = '[]' AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.question = q.id) AND NOT EXISTS (SELECT 1 FROM question_refs r WHERE r.question = q.id AND r.ref LIKE 'R-%') ORDER BY q.id",
+	),
+	trackFreshMaps: sql<{ rows: string; project: number; at: number; seq: number }, { no: number }>(
+		"WITH asked AS MATERIALIZED (SELECT * FROM jsonb_to_recordset($rows::text::jsonb) AS x(id bigint, ask text, holds text, signers text)), " +
+			"made AS (INSERT INTO decisions (project, question, kind, answer, signers, basis, holds, expires_at, supersedes, at, seq, on_evidence) SELECT $project, q.id, 'map', '{\"is\":\"track\"}', x.signers, q.basis, x.holds, NULL, NULL, $at, $seq, q.evidence_hash FROM asked x JOIN questions q ON q.id = x.id ORDER BY q.id RETURNING id, question) " +
+			"UPDATE questions q SET ask = x.ask, state = 'decided', decision = made.id, rev = $seq FROM made JOIN asked x ON x.id = made.question WHERE q.id = made.question RETURNING q.no",
 	),
 	openIdsOfKind: sql<{ project: number; kind: string }, { id: number }>(
 		"SELECT id FROM questions WHERE project = $project AND state = 'open' AND owner = 0 AND kind = $kind ORDER BY id",
@@ -596,6 +609,12 @@ export const attributedQuestionsOn = async (db: ReadDb, project: number, about: 
 /** Every question about a thing, oldest first, however many there are. */
 export const everyQuestionOn = async (db: ReadDb, project: number, about: string): Promise<QuestionRow[]> =>
 	(await db.all(Q.allOnRef, { project, ref: about })).map(readQuestion);
+export const openCountsOn = async (
+	db: ReadDb,
+	project: number,
+	refs: readonly string[],
+): Promise<Map<string, number>> =>
+	new Map((await db.all(Q.openCountsOnRefs, { project, refs })).map((row) => [row.ref, row.n]));
 export const openCountOn = async (db: ReadDb, project: number, about: string): Promise<number> =>
 	(await db.get(Q.openCountOnRef, { project, ref: about }))?.n ?? 0;
 
@@ -636,6 +655,31 @@ export async function ledgerPage(
 }
 
 /** The ids of every open question of a kind in the queue, oldest first, however many there are. */
+/** A first mapping question with no prior judgement or affected run has no history to reconsider. */
+export const freshMapQuestions = async (db: ReadDb, project: number, ids: readonly number[]): Promise<QuestionRow[]> =>
+	(await db.all(Q.freshMaps, { project, ids })).map(readQuestion);
+
+/** Track has no link or run effect; each question still receives its own immutable decision and hold. */
+export async function trackFreshMapQuestions(
+	ctx: Ctx,
+	rows: readonly { question: QuestionRow; ask: Ask; signers: Signer[]; holds: HoldTerm[] }[],
+): Promise<void> {
+	const updated = await ctx.db.all(Q.trackFreshMaps, {
+		project: ctx.project.id,
+		at: ctx.now,
+		seq: ctx.seq,
+		rows: JSON.stringify(
+			rows.map((row) => ({
+				id: row.question.id,
+				ask: JSON.stringify(row.ask),
+				signers: JSON.stringify(row.signers),
+				holds: JSON.stringify(row.holds),
+			})),
+		),
+	});
+	if (updated.length !== rows.length) throw new Error("map tracking did not record every decision");
+	for (const row of rows) ctx.touched.add(questionRef(row.question));
+}
 export const openQuestionIds = async (db: ReadDb, project: number, kind: Kind): Promise<number[]> =>
 	(await db.all(Q.openIdsOfKind, { project, kind })).map((row) => row.id);
 
@@ -670,6 +714,19 @@ export async function insertAnswer(
 	});
 }
 
+export async function itemReads(
+	db: ReadDb,
+	ids: readonly number[],
+): Promise<Map<number, { answers: AnswerRow[]; refs: string[] }>> {
+	const out = new Map<number, { answers: AnswerRow[]; refs: string[] }>(
+		ids.map((id) => [id, { answers: [], refs: [] }]),
+	);
+	if (ids.length) {
+		for (const row of await db.all(Q.answersForItems, { ids })) out.get(row.question)?.answers.push(row);
+		for (const row of await db.all(Q.refsForItems, { ids })) out.get(row.question)?.refs.push(row.ref);
+	}
+	return out;
+}
 export const answersOf = async (db: ReadDb, question: number): Promise<AnswerRow[]> =>
 	await db.all(Q.answersOf, { question });
 

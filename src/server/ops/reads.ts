@@ -24,7 +24,7 @@ import {
 } from "../../core/ops.ts";
 import { REPLIES } from "../../core/replies.ts";
 import { emptyTally, isResultStanding, RESULT_STANDINGS } from "../../core/runs.ts";
-import { openFailureQuestion, toItem, toItemFor } from "../decisions/decisions.ts";
+import { openFailureQuestion, toItem, toItemFor, toItemsFor } from "../decisions/decisions.ts";
 import {
 	decisionById,
 	holdEndingById,
@@ -34,6 +34,7 @@ import {
 	mustQuestion,
 	openCountOn,
 	openCounts,
+	openCountsOn,
 	openQuestionSummariesOnRefs,
 	openQuestionsOn,
 	parseQueueCursor,
@@ -48,6 +49,7 @@ import {
 } from "../decisions/questions.ts";
 import {
 	batchById,
+	batchesByIds,
 	type ChangeRow,
 	caseIdsOfTests,
 	caseLinksOfFiles,
@@ -65,18 +67,22 @@ import {
 	mustTarget,
 	passedOnRetry,
 	proofOf,
+	proofsOf,
 	type ResultRow,
 	recentChanges,
 	resultById,
 	resultFailedStep,
 	resultLocation,
 	resultLocations,
+	resultsByIds,
 	resultTrail,
 	signatureById,
 	type TargetRow,
 	targetByCommit,
+	targetsByIds,
 	testById,
 	testRef,
+	testsByIds,
 	testsOfCase,
 	testTime,
 	triesOf,
@@ -139,6 +145,7 @@ import {
 	type CaseRow,
 	caseById,
 	caseRef,
+	casesByIds,
 	coversOf,
 	expandSteps,
 	folderIndex,
@@ -152,7 +159,19 @@ import {
 import { withTrackerPollError } from "../trackers/polls.ts";
 import { defineOp } from "./registry.ts";
 
-const who = async (ctx: Ctx<ReadDb>, id: number) => await actorLabel(ctx.db, id);
+const labels = new WeakMap<ReadDb, Map<number, Awaited<ReturnType<typeof actorLabel>>>>();
+const who = async (ctx: Ctx<ReadDb>, id: number) => {
+	let known = labels.get(ctx.db);
+	if (!known) {
+		known = new Map();
+		labels.set(ctx.db, known);
+	}
+	const existing = known.get(id);
+	if (existing) return existing;
+	const found = await actorLabel(ctx.db, id);
+	known.set(id, found);
+	return found;
+};
 
 // ── inbox ──────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -205,7 +224,7 @@ export async function inbox(ctx: Ctx<ReadDb>, input: InboxInput): Promise<InboxR
 		rows.length > limit && last ? (input.state === "open" ? queueCursorOf(last) : `${last.rev}.${last.id}`) : null;
 	return {
 		counts,
-		items: await Array.fromAsync(page, async (row) => await withTrackerPollError(ctx.db, await toItemFor(ctx, row))),
+		items: await Array.fromAsync(await toItemsFor(ctx, page), async (item) => withTrackerPollError(ctx.db, item)),
 		cursor,
 	};
 }
@@ -500,6 +519,30 @@ async function proposalView(
 	};
 }
 
+type ResultDetails = {
+	results: Map<number, ResultRow>;
+	tests: Map<number, Awaited<ReturnType<typeof testsByIds>>[number]>;
+	targets: Map<number, TargetRow>;
+	batches: Map<number, Awaited<ReturnType<typeof batchesByIds>>[number]>;
+	cases: Map<number, CaseRow>;
+};
+async function resultDetails(ctx: Ctx<ReadDb>, rows: readonly ResultRow[]): Promise<ResultDetails> {
+	const unique = (ids: readonly number[]) => [...new Set(ids)];
+	const tests = new Map((await testsByIds(ctx.db, unique(rows.map((row) => row.test)))).map((row) => [row.id, row]));
+	const targets = new Map(
+		(await targetsByIds(ctx.db, unique(rows.map((row) => row.target)))).map((row) => [row.id, row]),
+	);
+	const batches = new Map(
+		(await batchesByIds(ctx.db, unique(rows.map((row) => row.batch)))).map((row) => [row.id, row]),
+	);
+	const caseIds = unique([
+		...rows.flatMap((row) => (row.basis_case === null ? [] : [row.basis_case])),
+		...[...tests.values()].flatMap((row) => (row.case_id === null ? [] : [row.case_id])),
+	]);
+	const cases = new Map((await casesByIds(ctx.db, caseIds)).map((row) => [row.id, row]));
+	return { results: new Map(rows.map((row) => [row.id, row])), tests, targets, batches, cases };
+}
+
 async function resultView(
 	ctx: Ctx<ReadDb>,
 	row: ResultRow,
@@ -507,10 +550,11 @@ async function resultView(
 		target: TargetRow,
 	) => ReturnType<typeof resultLocation> | Awaited<ReturnType<typeof resultLocation>> = async (target) =>
 		await resultLocation(ctx.db, target),
+	known?: ResultDetails,
 ): Promise<Record<string, unknown>> {
-	const test = await testById(ctx.db, row.test);
-	const target = await mustTarget(ctx.db, row.target);
-	const batch = await batchById(ctx.db, row.batch);
+	const test = known ? known.tests.get(row.test) : await testById(ctx.db, row.test);
+	const target = known?.targets.get(row.target) ?? (await mustTarget(ctx.db, row.target));
+	const batch = known ? known.batches.get(row.batch) : await batchById(ctx.db, row.batch);
 	return {
 		id: row.id,
 		test: test ? testRef(test) : null,
@@ -587,10 +631,8 @@ export async function get(ctx: Ctx<ReadDb>, input: GetInput): Promise<Record<str
 				ctx.db,
 				last.map((row) => row.id),
 			);
-			const locationOf = await resultLocations(
-				ctx.db,
-				await Array.fromAsync(last, async (row) => await mustTarget(ctx.db, row.target)),
-			);
+			const details = await resultDetails(ctx, last);
+			const locationOf = await resultLocations(ctx.db, [...details.targets.values()]);
 			return {
 				ref: testRef(test),
 				kind: test.kind,
@@ -607,7 +649,7 @@ export async function get(ctx: Ctx<ReadDb>, input: GetInput): Promise<Record<str
 					settings: (await currentPolicy(ctx.db, test.project)).settings.flakyDetection,
 				}),
 				last: await Array.fromAsync(last, async (row) => ({
-					...(await resultView(ctx, row, locationOf)),
+					...(await resultView(ctx, row, locationOf, details)),
 					passedOnRetry: retried.get(row.id) ?? null,
 					tries: tried.get(row.id) ?? [],
 				})),
@@ -726,10 +768,14 @@ async function countedResults(ctx: Ctx<ReadDb>, input: FindInput, limit: number)
 		: matching;
 	const page = rest.slice(0, limit);
 	const last = page.at(-1);
-	const locationOf = await resultLocations(
-		ctx.db,
-		await Array.fromAsync(page, async (row) => await mustTarget(ctx.db, row.target)),
+	const details = await resultDetails(
+		ctx,
+		await resultsByIds(
+			ctx.db,
+			page.map((row) => row.result),
+		),
 	);
+	const locationOf = await resultLocations(ctx.db, [...details.targets.values()]);
 	// Flips over the same days the flaky report and the detector read, so a row and those agree on a test.
 	const days = (await currentPolicy(ctx.db, ctx.project.id)).settings.flakyDetection.windowDays;
 	const failing = counted.filter((row) => FAILS_GATE.has(row.standing));
@@ -742,7 +788,7 @@ async function countedResults(ctx: Ctx<ReadDb>, input: FindInput, limit: number)
 	return {
 		count: matching.length,
 		items: await Array.fromAsync(page, async (row) => ({
-			...(await countedView(ctx, row, locationOf)),
+			...(await countedView(ctx, row, locationOf, details)),
 			recentFlips: flips.get(row.test) ?? 0,
 		})),
 		cursor: rest.length > limit && last ? `${rank(last)}.${last.result}.${version}` : null,
@@ -766,12 +812,14 @@ async function countedView(
 	ctx: Ctx<ReadDb>,
 	row: CountedTest,
 	locationOf: (target: TargetRow) => ReturnType<typeof resultLocation> | Awaited<ReturnType<typeof resultLocation>>,
+	details: ResultDetails,
 ): Promise<Record<string, unknown>> {
-	const result = await resultById(ctx.db, row.result);
-	const test = await testById(ctx.db, row.test);
+	const result = details.results.get(row.result);
+	const test = details.tests.get(row.test);
 	if (!result || !test) throw new Error(`result ${row.result} of a counted test is missing`);
-	const linked = await caseOfCount(ctx, row, test);
-	const view = await resultView(ctx, result, locationOf);
+	const caseId = result.basis_case ?? test.case_id;
+	const linked = caseId === null ? null : details.cases.get(caseId);
+	const view = await resultView(ctx, result, locationOf, details);
 	return {
 		result: result.id,
 		test: testRef(test),
@@ -826,8 +874,12 @@ async function questionOfCount(ctx: Ctx<ReadDb>, row: CountedTest): Promise<stri
 	return open ? questionRef(open) : null;
 }
 
-async function caseProof(ctx: Ctx<ReadDb>, row: CaseRow) {
-	const proofs = await proofOf(ctx.db, row);
+async function caseProof(
+	ctx: Ctx<ReadDb>,
+	row: CaseRow,
+	known?: { proofs: Awaited<ReturnType<typeof proofOf>>; tests: Map<number, string | null> },
+) {
+	const proofs = known?.proofs ?? (await proofOf(ctx.db, row));
 	const one = async (proof: (typeof proofs)[MethodKind]) => {
 		if (!proof) return null;
 		const { result, current } = proof;
@@ -837,7 +889,7 @@ async function caseProof(ctx: Ctx<ReadDb>, row: CaseRow) {
 			by: (await who(ctx, result.actor)).name,
 			method: result.method,
 			model: result.model,
-			name: (await testById(ctx.db, result.test))?.name ?? null,
+			name: known ? (known.tests.get(result.test) ?? null) : ((await testById(ctx.db, result.test))?.name ?? null),
 			outcome: result.outcome,
 			at: result.at,
 			current,
@@ -847,7 +899,12 @@ async function caseProof(ctx: Ctx<ReadDb>, row: CaseRow) {
 	return { human: await one(proofs.human), auto: await one(proofs.auto), agent: await one(proofs.agent) };
 }
 
-async function caseRow(ctx: Ctx<ReadDb>, row: CaseRow, rich: boolean): Promise<Record<string, unknown>> {
+async function caseRow(
+	ctx: Ctx<ReadDb>,
+	row: CaseRow,
+	rich: boolean,
+	known?: { proofs: Awaited<ReturnType<typeof proofOf>>; tests: Map<number, string | null>; open: number },
+): Promise<Record<string, unknown>> {
 	const base: Record<string, unknown> = {
 		ref: caseRef(row),
 		title: row.title,
@@ -863,10 +920,30 @@ async function caseRow(ctx: Ctx<ReadDb>, row: CaseRow, rich: boolean): Promise<R
 		updatedBy: (await who(ctx, row.updated_by)).kind,
 	};
 	if (rich) {
-		base.proof = await caseProof(ctx, row);
-		base.open = await openCountOn(ctx.db, row.project, caseRef(row));
+		base.proof = await caseProof(ctx, row, known);
+		base.open = known?.open ?? (await openCountOn(ctx.db, row.project, caseRef(row)));
 	}
 	return base;
+}
+
+async function caseRows(ctx: Ctx<ReadDb>, rows: readonly CaseRow[]): Promise<Record<string, unknown>[]> {
+	const proofs = await proofsOf(ctx.db, rows);
+	const open = await openCountsOn(ctx.db, ctx.project.id, rows.map(caseRef));
+	const testIds = [
+		...new Set(
+			[...proofs.values()].flatMap((proof) =>
+				Object.values(proof).flatMap((value) => (value ? [value.result.test] : [])),
+			),
+		),
+	];
+	const tests = new Map((await testsByIds(ctx.db, testIds)).map((row) => [row.id, row.name]));
+	return await Array.fromAsync(rows, async (row) =>
+		caseRow(ctx, row, true, {
+			proofs: proofs.get(row.id) ?? { human: null, auto: null, agent: null },
+			tests,
+			open: open.get(caseRef(row)) ?? 0,
+		}),
+	);
 }
 
 async function slotRow(ctx: Ctx<ReadDb>, slot: SlotRow): Promise<Record<string, unknown>> {
@@ -938,10 +1015,7 @@ export async function find(ctx: Ctx<ReadDb>, input: FindInput): Promise<Found> {
 				return {
 					fieldDefinitions,
 					count: selected.length,
-					items: await Array.fromAsync(
-						selected.slice(from, from + limit),
-						async (row) => await caseRow(ctx, row, true),
-					),
+					items: await caseRows(ctx, selected.slice(from, from + limit)),
 					cursor: selected.length > from + limit ? String(from + limit) : null,
 				};
 			}
@@ -957,7 +1031,7 @@ export async function find(ctx: Ctx<ReadDb>, input: FindInput): Promise<Found> {
 			return {
 				fieldDefinitions,
 				count: page.count,
-				items: await Array.fromAsync(page.items, async (row) => await caseRow(ctx, row, true)),
+				items: await caseRows(ctx, page.items),
 				cursor: page.cursor,
 			};
 		}
