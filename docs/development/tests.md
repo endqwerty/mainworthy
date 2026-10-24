@@ -46,8 +46,8 @@ The check runs these steps:
 At the end the check prints the wall time and exit of each part, the log of each part that failed, each failed
 test with its file and reason, whether the browser tests ran, and the five slowest files. When the tests take more
 than 130 seconds in total, the check warns. Elapsed-time budget misses warn with the measured number and baseline
-in the local end summary and CI job summary. A miss changes no exit code or gate verdict. Workload errors and
-crashes still fail. Deterministic operation-count assertions in `test/budgets.test.ts` remain in the functional check.
+in the local end summary and CI job summary, and change no exit code or gate verdict. A measurement above ten
+times its baseline fails (below). Workload errors and crashes still fail. Deterministic operation-count assertions in `test/budgets.test.ts` remain in the functional check.
 
 ## Know the kinds of tests
 
@@ -85,13 +85,11 @@ cause instead of retrying.
 
 Any test file can import `budget` from `scripts/budget.ts` and call
 `budget(name, measured, limit, unit)`. Units can be milliseconds, bytes, tokens or another measured quantity.
-A value above the baseline records a warning; it never fails an assertion. Invalid measurements and workload
-errors still fail.
-
-Input an attacker controls is the one exception: `hostileInputBudget` warns above its baseline like `budget`, and
-fails above ten times it (`HOSTILE_INPUT_MULTIPLE`). A parser that blows up on a crafted report would stall the
-thread that answers reads, which is a safety question, not a speed one. The hostile-input files are
-`src/core/signature-performance.test.ts` and `src/surfaces/formats/junit-performance.test.ts`.
+A value above the baseline records a warning. A value above ten times the baseline (`FAIL_MULTIPLE`; a baseline of
+0 counts as 1) fails, so the jump is reviewed. The owner, 2026-10-24: "10x is definitely a big enough jump that it's
+fair to mark a test as failed if it suddenly exceeds that and for it to be flagged for review. Only intentionally
+meaning to do that should be allowed." To mean to, change the baseline in the same pull request and say why.
+Invalid measurements and workload errors still fail.
 
 The check collects warnings from every phase into its end summary and appends them to `GITHUB_STEP_SUMMARY`
 in CI. Each run has its own report directory, and each process writes its own file. A standalone `bun test`
