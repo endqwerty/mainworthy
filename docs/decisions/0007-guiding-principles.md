@@ -35,8 +35,9 @@ a four-candidate design arena, not rules the owner wrote.
   measurements into failing tests, and P1 ruled out "a merged change that breaks a hot-path budget". The owner
   overruled both on 2026-10-24: "None of them should be hard limits. The end result of user experience, user
   features, and developer experience are all that matters. Numbers are always allowed to be broken if the end user
-  gains something from it". Every budget is now a measured baseline that warns (#906); speed at the point of thought
-  stays the aim P1 names.
+  gains something from it". Every budget is now a measured baseline that warns, and fails only at ten times it
+  ("10x is definitely a big enough jump that it's fair to mark a test as failed if it suddenly exceeds that and for it
+  to be flagged for review", #906); speed at the point of thought stays the aim P1 names.
 
 ## The principles, in tie-break order
 
