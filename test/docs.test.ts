@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Glob } from "bun";
 import { z } from "zod";
+import { budget } from "../scripts/budget.ts";
 import { assemble, fragments } from "../scripts/changelog.ts";
 import { decisions } from "../scripts/decisions.ts";
 import {
@@ -419,8 +420,11 @@ describe("the site", () => {
 			decompress: false,
 		});
 		expect(zipped.headers.get("content-encoding")).toBe("gzip");
-		const sizes = [(await plain.arrayBuffer()).byteLength, (await zipped.arrayBuffer()).byteLength];
-		expect(sizes[1]).toBeLessThan((sizes[0] ?? 0) / 2);
+		const original = new Uint8Array(await plain.arrayBuffer());
+		const compressed = new Uint8Array(await zipped.arrayBuffer());
+		// What is sent is the page, compressed; how much smaller it is, is a budget.
+		expect(Bun.gunzipSync(compressed)).toEqual(original);
+		budget("a gzipped docs diagram", compressed.byteLength, Math.floor(original.byteLength / 2), "bytes");
 	});
 });
 

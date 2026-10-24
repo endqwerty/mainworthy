@@ -252,7 +252,7 @@ test("impact selection includes more than 500 links in one file and more than 20
 	});
 	const failed = await databaseWork(async () => await h.call<Impact>("impact", { change: "pr:396" }));
 	expect(failed.reply.counts).toMatchObject({ cases: 450, failing: 450 });
-	expect(failed.testLookups).toBe(0);
+	budget("impact test-row lookups of a failing change", failed.testLookups, 0, "lookups");
 	budget("impact SQL of a failing change", failed.queries, 50, "queries");
 	budget("impact full case rows of a failing change", failed.fullCases, 200, "rows");
 });

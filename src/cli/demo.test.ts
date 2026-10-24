@@ -1,5 +1,6 @@
 import { expect, spyOn, test } from "bun:test";
 import { z } from "zod";
+import { budget } from "../../scripts/budget.ts";
 import { removalFixture } from "../../test/demo-removal-fixture.ts";
 import { API_VERSION, API_VERSION_HEADER } from "../core/version.ts";
 import { Db, databasePath } from "../server/kernel/db.ts";
@@ -58,14 +59,14 @@ for (const unrelated of [20, 20_000])
 			});
 			try {
 				expect(steps.next()).toEqual({ value: undefined, done: false });
-				expect(beforeRemoval).toBe(0);
+				budget("scans under the reset lock before removal", beforeRemoval, 0, "scans");
 				expect(app.db.raw.query("SELECT count(*) AS n FROM results WHERE project = 900").get()).toEqual({ n: 0 });
 				expect(app.db.raw.query("SELECT count(*) AS n FROM results WHERE project = 901").get()).toEqual({
 					n: unrelated,
 				});
 				expect(steps.next()).toEqual({ value: undefined, done: true });
 				expect(app.db.raw.query("SELECT key FROM projects WHERE key = 'removing'").get()).toEqual({ key: "removing" });
-				expect(lockedScans).toBe(0);
+				budget("scans under the reset lock", lockedScans, 0, "scans");
 				for (const step of ["begin reset transaction", "defer reset foreign keys", "finish reset transaction"])
 					expect(timings.get(step)).toBeNumber();
 				expect(app.db.raw.query("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
