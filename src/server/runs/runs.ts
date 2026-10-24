@@ -34,8 +34,10 @@ import {
 	changesBasedOn,
 	changesByIds,
 	codeWhat,
+	comparisonsByIds,
 	excuseForDisputedSlot,
 	excuseForResult,
+	excusesForResults,
 	firstCountedReport,
 	flippedLanes,
 	isWithdrawn,
@@ -61,6 +63,7 @@ import {
 	targetsOfCommits,
 	targetsWithCommit,
 	testById,
+	unknownSignatureIds,
 	waitingShardPages,
 	waitingShards,
 	waitingShardsByCommit,
@@ -1045,16 +1048,17 @@ export type Unexplained = { signature: number; target: number; scope: string };
  * make sure each of them has a question somebody can answer.
  */
 export async function unexplainedShown(db: ReadDb, run: RunRow): Promise<Unexplained[]> {
-	const { quarantineFor, scopeFor } = await counting(db, run);
+	const rows = run.origin === "change" ? await countedTestsOf(db, run.id) : undefined;
+	const { quarantineFor, scopeFor, excuseFor } = await counting(db, run, rows);
 	const shown = new Map<string, Unexplained>();
 	const note = async (result: { id: number; signature: number | null; target: number }): Promise<void> => {
 		if (result.signature === null) return;
 		const scope = await scopeFor(result.target);
-		if (!(await quarantineFor(result.id)) && !(await excuseForResult(db, { ...result, project: run.project }, scope)))
+		if (!(await quarantineFor(result.id)) && !(await excuseFor(result)))
 			shown.set(`${result.signature}:${result.target}`, { signature: result.signature, target: result.target, scope });
 	};
 	if (run.origin === "change") {
-		for (const row of await countedTestsOf(db, run.id))
+		for (const row of rows ?? [])
 			if (row.outcome === "fail" || row.outcome === "error") await note({ ...row, id: row.result });
 	} else {
 		for (const slot of await db.all(Q.failingSlots, { run: run.id }))
@@ -1409,33 +1413,52 @@ export async function inheritedResultsOf(db: ReadDb, run: RunRow) {
 
 /** Read each base run once, indexed by the test, cause and matching environment, method and job. */
 export async function inheritedEvidenceOf(db: ReadDb, run: RunRow) {
+	const rows = (await inheritedResultsOf(db, run)).filter(
+		(row) => row.signature !== null && (row.outcome === "fail" || row.outcome === "error"),
+	);
+	const unknown = await unknownSignatureIds(
+		db,
+		rows.map((row) => row.signature),
+	);
+	const compared = await comparisonsByIds(
+		db,
+		rows.map((row) => row.result),
+	);
+	const keyOf = (result: NonNullable<ReturnType<typeof compared.get>>) =>
+		JSON.stringify([result.test, result.signature, result.env, result.method, result.job]);
 	const bases = new Map<number, Map<string, number[]>>();
 	const targets = new Map<number, RunRow | null>();
-	return await flatMapAsync(await inheritedResultsOf(db, run), async (row) => {
-		if (row.signature === null || (row.outcome !== "fail" && row.outcome !== "error")) return [];
-		if ((await signatureById(db, row.signature))?.class === "unknown") return [];
-		const result = await resultById(db, row.result);
-		if (!result || result.method === "agent") return [];
+	const out: ((typeof rows)[number] & { base: number[] })[] = [];
+	for (const row of rows) {
+		const result = compared.get(row.result);
+		if (!result || unknown.has(Number(row.signature)) || result.method === "agent") continue;
 		if (!targets.has(row.target)) targets.set(row.target, await baseRunOf(db, await mustTarget(db, row.target)));
 		const baseRun = targets.get(row.target);
-		if (!baseRun) return [];
+		if (!baseRun) continue;
 		let lanes = bases.get(baseRun.id);
 		if (!lanes) {
 			lanes = new Map();
 			bases.set(baseRun.id, lanes);
-			for (const base of await countedTestsOf(db, baseRun.id)) {
-				if (base.outcome !== "fail" && base.outcome !== "error") continue;
-				const support = await resultById(db, base.result);
+			const baseRows = (await countedTestsOf(db, baseRun.id)).filter(
+				(base) => base.outcome === "fail" || base.outcome === "error",
+			);
+			const supports = await comparisonsByIds(
+				db,
+				baseRows.map((base) => base.result),
+			);
+			for (const base of baseRows) {
+				const support = supports.get(base.result);
 				if (!support || support.method === "agent") continue;
-				const key = await comparisonLane(db, support);
+				const key = keyOf(support);
 				const ids = lanes.get(key) ?? [];
 				ids.push(base.result);
 				lanes.set(key, ids);
 			}
 		}
-		const base = lanes.get(await comparisonLane(db, result)) ?? [];
-		return base.length > 0 ? [{ ...row, base }] : [];
-	});
+		const base = lanes.get(keyOf(result)) ?? [];
+		if (base.length) out.push({ ...row, base });
+	}
+	return out;
 }
 
 /** Runs affected by this commit's base, or by this commit being a base for another change. */
@@ -1488,30 +1511,51 @@ export type CountedTest = {
 type Counting = {
 	quarantineFor: Awaited<ReturnType<typeof quarantineLookup>>;
 	scopeFor: (target: number) => Promise<string>;
+	excuseFor: (result: { id: number; signature: number | null; target: number }) => ReturnType<typeof excuseForResult>;
 };
 
-async function counting(db: ReadDb, run: RunRow): Promise<Counting> {
-	// A failure is answered in the scope of the target it was seen on. For a change run that is the run's own
-	// scope. A planned run that names no repository can count the same commit in two of them: each of its causes
-	// is then classified in its own repository's scope, so one repository's answer never covers the other's failure.
+async function counting(
+	db: ReadDb,
+	run: RunRow,
+	rows?: readonly Awaited<ReturnType<typeof countedTestsOf>>[number][],
+): Promise<Counting> {
+	// Each target retains its own repository scope; a repository-free plan may count several.
 	const scopes = new Map<number, string>();
+	const scopeFor = async (target: number) => {
+		let scope = scopes.get(target);
+		if (scope === undefined) {
+			scope = scopeOf(await mustTarget(db, target), run.id);
+			scopes.set(target, scope);
+		}
+		return scope;
+	};
+	const standing = rows
+		? await excusesForResults(
+				db,
+				run.project,
+				await mapAsync(
+					rows.filter((row) => row.outcome === "fail" || row.outcome === "error"),
+					async (row) => ({
+						id: row.result,
+						signature: row.signature,
+						target: row.target,
+						scope: await scopeFor(row.target),
+					}),
+				),
+			)
+		: null;
 	return {
 		quarantineFor: await quarantineLookup(db, run.project),
-		scopeFor: async (target) => {
-			let found = scopes.get(target);
-			if (found === undefined) {
-				found = scopeOf(await mustTarget(db, target), run.id);
-				scopes.set(target, found);
-			}
-			return found;
-		},
+		scopeFor,
+		excuseFor: async (result) =>
+			standing
+				? (standing.get(result.id) ?? null)
+				: await excuseForResult(db, { ...result, project: run.project }, await scopeFor(result.target)),
 	};
 }
 
 async function standingOf(
-	db: ReadDb,
-	run: RunRow,
-	{ quarantineFor, scopeFor }: Counting,
+	{ quarantineFor, scopeFor, excuseFor }: Counting,
 	row: Awaited<ReturnType<typeof countedTestsOf>>[number],
 ): Promise<CountedTest> {
 	const scope = await scopeFor(row.target);
@@ -1529,11 +1573,7 @@ async function standingOf(
 	if (quarantine)
 		return counted("excused", { decision: quarantine.decision, expires: quarantine.expires_at, quarantined: true });
 	if (row.signature === null) return counted("unexplained");
-	const excuse = await excuseForResult(
-		db,
-		{ id: row.result, project: run.project, signature: row.signature, target: row.target },
-		scope,
-	);
+	const excuse = await excuseFor({ id: row.result, signature: row.signature, target: row.target });
 	if (!excuse) return counted("unexplained");
 	return counted(excuse.class === "attributed" ? "attributed" : "excused", {
 		decision: excuse.decision,
@@ -1545,8 +1585,8 @@ async function standingOf(
 /** Every test a commit's gate counts, one row per test and lane, as `count` counts it. A planned run has none. */
 export async function countedTests(db: ReadDb, run: RunRow): Promise<CountedTest[]> {
 	if (run.origin !== "change") return [];
-	const context = await counting(db, run);
 	const rows = await countedTestsOf(db, run.id);
+	const context = await counting(db, run, rows);
 	// `run_tests.flipped` stays set once a lane flipped; a correction can withdraw the flip (#630).
 	const flipped = await flippedLanes(
 		db,
@@ -1554,7 +1594,7 @@ export async function countedTests(db: ReadDb, run: RunRow): Promise<CountedTest
 	);
 	return await mapAsync(
 		rows,
-		async (row) => await standingOf(db, run, context, { ...row, flipped: flipped.has(row.result) ? 1 : 0 }),
+		async (row) => await standingOf(context, { ...row, flipped: flipped.has(row.result) ? 1 : 0 }),
 	);
 }
 
@@ -1571,14 +1611,14 @@ export async function* receiptResultBuckets(db: ReadDb, run: RunRow): AsyncGener
 }
 export async function countedReceiptBucket(db: ReadDb, run: RunRow, bucket: number): Promise<CountedTest[]> {
 	const rows = await db.all(Q.receiptBucket, { run: run.id, bucket });
-	const context = await counting(db, run);
+	const context = await counting(db, run, rows);
 	const flipped = await flippedLanes(
 		db,
 		rows.filter((row) => row.flipped === 1).map((row) => row.result),
 	);
 	return await mapAsync(
 		rows,
-		async (row) => await standingOf(db, run, context, { ...row, flipped: flipped.has(row.result) ? 1 : 0 }),
+		async (row) => await standingOf(context, { ...row, flipped: flipped.has(row.result) ? 1 : 0 }),
 	);
 }
 
@@ -1591,15 +1631,16 @@ async function count(
 	run: RunRow,
 ): Promise<{ tally: Tally; failing: Set<string>; depends: Map<number, number | null>; quarantined: number }> {
 	let quarantined = 0;
-	const context = await counting(db, run);
+	const rows = run.origin === "change" ? await countedTestsOf(db, run.id) : undefined;
+	const context = await counting(db, run, rows);
 	const { quarantineFor, scopeFor } = context;
 	const tally: Tally = emptyTally();
 	const failing = new Set<string>();
 	const depends = new Map<number, number | null>();
 
 	if (run.origin === "change") {
-		for (const row of await countedTestsOf(db, run.id)) {
-			const counted = await standingOf(db, run, context, row);
+		for (const row of rows ?? []) {
+			const counted = await standingOf(context, row);
 			tally[counted.standing] += 1;
 			if (counted.excuse) {
 				depends.set(counted.excuse.decision, counted.excuse.expires);

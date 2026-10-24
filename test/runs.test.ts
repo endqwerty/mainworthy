@@ -1,18 +1,100 @@
 // Three producers, one run: planned runs, slots and what may fill them (fixtures E1, E3, E5, E7 in the design).
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { AnnounceReply, DecideReply, GateStatus, InboxReply, PlanReply, ReportReceipt } from "../src/core/ops.ts";
-import { batchById, mustTarget, resultById } from "../src/server/evidence/evidence.ts";
+import {
+	batchById,
+	excuseForResult,
+	excusesForResults,
+	mustTarget,
+	resultById,
+} from "../src/server/evidence/evidence.ts";
 import { type Ctx, findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
 import { Database, declaredSql, type SqlValue, sql } from "../src/server/kernel/db.ts";
 import { recoverAccepted } from "../src/server/ops/jobs.ts";
 import { acceptReport, processBatch } from "../src/server/ops/writes.ts";
-import { plannedCounting, type RunTestWrite, runsFor, upsertRunTests } from "../src/server/runs/runs.ts";
+import {
+	countedTests,
+	mustRun,
+	plannedCounting,
+	type RunTestWrite,
+	runsFor,
+	upsertRunTests,
+} from "../src/server/runs/runs.ts";
 import { exportArchive, importArchive, linesOf } from "../src/server/transfer/transfer.ts";
 import { testDatabase } from "./db.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
 afterEach(async () => await h?.close());
+
+test("counting sibling failures reads their standing in batches", async () => {
+	h = await harness();
+	const ci = await h.actor("pipeline", "ci", ["read", "record"]);
+	await h.call(
+		"report",
+		{
+			target: { commit: "sibling-standing", branch: "main" },
+			results: Array.from({ length: 100 }, (_, index) => ({
+				test: { key: `sibling-${index}` },
+				outcome: "fail",
+				failure: { message: "same cause" },
+			})),
+		},
+		ci,
+	);
+	const project = await h.app.database.read((db) => findProject(db, "scratch"));
+	if (!project) throw new Error("no project");
+	const run = await h.app.database.read((db) => mustRun(db, project.id, "R-1"));
+	h.app.database.resetStatementCount();
+	const counted = await h.app.database.read((db) => countedTests(db, run));
+	expect(counted).toHaveLength(100);
+	expect(counted.every((row) => row.standing === "unexplained")).toBe(true);
+	expect(h.app.database.statementCount).toBeLessThanOrEqual(12);
+});
+
+test("batched result standing preserves target priority, exact ties, null expiry and slot isolation", async () => {
+	const fixture = await testDatabase({ schema: "empty" });
+	const database = await Database.open({ url: fixture.url });
+	try {
+		await database.write((db) =>
+			db.transaction(() =>
+				db.exec(`
+ CREATE TABLE excuses(project bigint,signature bigint,scope text,target bigint,decision bigint,class text,expires_at bigint);
+ CREATE TABLE result_excuses(result bigint,slot bigint,decision bigint,class text,expires_at bigint);
+ INSERT INTO excuses VALUES (1,1,'line:main',0,2,'excused',200),(1,1,'line:main',10,1,'attributed',NULL);
+ INSERT INTO result_excuses VALUES (1,NULL,1,'excused',400),(2,NULL,3,'attributed',NULL),
+ (3,NULL,3,'excused',300),(4,NULL,4,'excused',NULL),(5,NULL,5,'attributed',500),(6,3,999,'attributed',NULL);
+ `),
+			),
+		);
+		const requests = [
+			{ id: 1, signature: 1, target: 10, scope: "line:main" },
+			{ id: 2, signature: 1, target: 11, scope: "line:main" },
+			{ id: 3, signature: 1, target: 10, scope: "line:main" },
+			{ id: 4, signature: 2, target: 10, scope: "line:main" },
+			{ id: 5, signature: null, target: 10, scope: "line:main" },
+			{ id: 6, signature: 1, target: 10, scope: "line:elsewhere" },
+			{ id: 7, signature: 1, target: 0, scope: "line:main" },
+		];
+		await database.read(async (db) => {
+			const batch = await excusesForResults(db, 1, requests);
+			expect([...batch].sort(([left], [right]) => left - right)).toEqual([
+				[1, { decision: 1, class: "attributed", expires_at: null }],
+				[2, { decision: 3, class: "attributed", expires_at: null }],
+				[3, { decision: 3, class: "excused", expires_at: 300 }],
+				[4, { decision: 4, class: "excused", expires_at: null }],
+				[5, { decision: 5, class: "attributed", expires_at: 500 }],
+				[7, { decision: 2, class: "excused", expires_at: 200 }],
+			]);
+			for (const row of requests)
+				expect(batch.get(row.id) ?? null).toEqual(await excuseForResult(db, { ...row, project: 1 }, row.scope));
+			expect(await excusesForResults(db, 1, [])).toEqual(new Map());
+		});
+	} finally {
+		await database.close();
+		await fixture.close();
+	}
+});
 
 type Slot = {
 	id: number;

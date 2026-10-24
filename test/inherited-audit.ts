@@ -2,6 +2,20 @@ import { aggregateSlot, type SlotFill } from "../src/core/runs.ts";
 import type { ReadDb } from "../src/server/kernel/db.ts";
 import { type SqlValue, sql } from "../src/server/kernel/db.ts";
 
+export type AuditFill = {
+	id: number;
+	actor: number;
+	method: SlotFill["method"];
+	test: number;
+	target: number;
+	job: string;
+	attempt: number;
+	seq: number;
+	ord: number;
+	outcome: string;
+	signature: number;
+};
+
 /** A slot's recorded classification also covers later agent results of that cause and scope. */
 export async function slotSettlement(db: ReadDb, slot: number, result: number) {
 	return await db.get(
@@ -42,6 +56,10 @@ export async function failingSlotResults(db: ReadDb, slot: number) {
    WHERE s.slot = $1 AND s.corrected = 0 AND s.discounted_by IS NULL`),
 		[slot],
 	);
+	return failingAuditFills(rows);
+}
+
+export function failingAuditFills(rows: readonly AuditFill[]) {
 	const failing = new Set(
 		aggregateSlot(
 			rows.map((row) => ({
@@ -62,12 +80,10 @@ export async function failingSlotResults(db: ReadDb, slot: number) {
 }
 
 /** Independent audit of every inherited rule's support against the stored effective base lanes. */
-export async function invalidInherited(db: ReadDb): Promise<unknown[]> {
-	return await db.all(
-		sql<
-			readonly [],
-			Record<string, unknown>
-		>(`SELECT e.result, e.decision FROM result_excuses e JOIN decisions d ON d.id = e.decision
+export const inheritedAudit = sql<
+	readonly [],
+	Record<string, unknown>
+>(`SELECT e.result, e.decision FROM result_excuses e JOIN decisions d ON d.id = e.decision
   JOIN questions q ON q.id = d.question JOIN results r ON r.id = e.result JOIN targets t ON t.id = r.target
   LEFT JOIN changes c ON c.id = t.change
   WHERE e.slot IS NULL AND (d.answer::jsonb)->>'is' = 'inherited' AND (
@@ -83,6 +99,7 @@ export async function invalidInherited(db: ReadDb): Promise<unknown[]> {
       AND bt.env = t.env AND br.method = r.method AND bb.job = rb.job
       AND rt.test = r.test AND rt.signature = r.signature AND rt.outcome IN ('fail', 'error')
    )
-  )`),
-	);
+  )`);
+export async function invalidInherited(db: ReadDb): Promise<unknown[]> {
+	return await db.all(inheritedAudit);
 }

@@ -1511,11 +1511,22 @@ async function refreshInherited(ctx: Ctx, run: RunRow): Promise<Raised[]> {
 		),
 	);
 	const groups = new Map<number, { target: TargetRow; inherited: { result: number; base: number[] }[] }>();
-	for (const row of await inheritedEvidenceOf(ctx.db, run)) {
+	const evidence = await inheritedEvidenceOf(ctx.db, run);
+	const targets = new Map(
+		(await targetsByIds(ctx.db, [...new Set(evidence.map((row) => row.target))])).map((row) => [row.id, row]),
+	);
+	const excuses = new Map<string, boolean>();
+	for (const row of evidence) {
 		if (row.signature === null || withdrawn.has(row.signature)) continue;
-		const target = await mustTarget(ctx.db, row.target);
+		const target = targets.get(row.target) ?? (await mustTarget(ctx.db, row.target));
 		const scope = scopeOf(target, null);
-		if (await excuseFor(ctx.db, run.project, row.signature, scope, target.id)) continue;
+		const key = JSON.stringify([row.signature, scope, target.id]);
+		let excused = excuses.get(key);
+		if (excused === undefined) {
+			excused = (await excuseFor(ctx.db, run.project, row.signature, scope, target.id)) !== null;
+			excuses.set(key, excused);
+		}
+		if (excused) continue;
 		let group = groups.get(row.signature);
 		if (!group) {
 			group = { target, inherited: [] };

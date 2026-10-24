@@ -345,7 +345,8 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 			)}; ${failed.length} primary misses and ${repeatFailures} repeat misses; ${near.length} workloads at or above half their budget.`,
 	);
 	for (const row of failed)
-		for (const error of [...row.warmupErrors, ...row.errorMessages].slice(0, 3)) console.error(publicLog(`${row.name}: ${error}`));
+		for (const error of [...row.warmupErrors, ...row.errorMessages].slice(0, 3))
+			console.error(publicLog(`${row.name}: ${error}`));
 	// A miss is reported above; only an error or ten times a budget fails the run (scripts/budget.ts).
 	const blocking = (row: Measurement): boolean =>
 		row.errors > 0 ||

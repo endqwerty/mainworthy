@@ -12,6 +12,7 @@ import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
 import { sql, type WriteDb } from "../src/server/kernel/db.ts";
 import { recoverAccepted, sweep } from "../src/server/ops/jobs.ts";
 import { acceptReport } from "../src/server/ops/writes.ts";
+import { inheritedEvidenceOf, mustRun } from "../src/server/runs/runs.ts";
 import { testDatabase } from "./db.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
@@ -25,6 +26,20 @@ const base = async (fail: Record<number, string> = { 0: "same cause" }, attempt 
 	await h.call("report", ciReport({ commit: "base0001", n: 2, fail, attempt }));
 const change = async (fail: Record<number, string>, commit = "change01", attempt = 1) =>
 	await h.call("report", ciReport({ commit, branch: "feature", pr: 69, base: "base0001", n: 2, fail, attempt }));
+
+test("inherited support reads sibling comparison metadata in batches", async () => {
+	const fail = Object.fromEntries(Array.from({ length: 25 }, (_, index) => [index, "same cause"]));
+	await h.call("report", ciReport({ commit: "base0001", n: 25, fail }));
+	await h.call("report", ciReport({ commit: "change01", branch: "feature", pr: 69, base: "base0001", n: 25, fail }));
+	const project = await h.app.database.read((db) => findProject(db, "scratch"));
+	if (!project) throw new Error("no project");
+	const run = await h.app.database.read((db) => mustRun(db, project.id, "R-2"));
+	h.app.database.resetStatementCount();
+	const evidence = await h.app.database.read((db) => inheritedEvidenceOf(db, run));
+	expect(evidence).toHaveLength(25);
+	expect(evidence.every((row) => row.base.length === 1)).toBe(true);
+	expect(h.app.database.statementCount).toBeLessThanOrEqual(20);
+});
 
 test("policy adoption batches changes whose base has never been reported, then inherits later base proof", async () => {
 	await h.close();

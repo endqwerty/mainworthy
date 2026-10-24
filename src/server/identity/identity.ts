@@ -49,7 +49,13 @@ import {
 	sessionOwner,
 	sweepSessions,
 } from "./sessions.ts";
-import { dropTeamMemberships, moveTeamProjectGrants, teamCapabilities, teamProjectCapabilities, teamsOf } from "./teams.ts";
+import {
+	dropTeamMemberships,
+	moveTeamProjectGrants,
+	teamCapabilities,
+	teamProjectCapabilities,
+	teamsOf,
+} from "./teams.ts";
 import { clearUses, flushUses, forgetNotedAddresses, lastAddress, notedUse, noteUse } from "./uses.ts";
 
 export { getEmail, requestReset, resetPassword, setEmail, verifyEmail } from "./contacts.ts";

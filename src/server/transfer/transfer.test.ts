@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
+import { writerDatabase } from "../../../test/pg-scopes.ts";
 import { seed } from "../../cli/seed.ts";
 import { withInstance } from "../../cli/test-support.ts";
-import { writerDatabase } from "../../../test/pg-scopes.ts";
 
 async function harness(...args: Parameters<typeof import("../../../test/helpers.ts")["harness"]>) {
 	return (await import("../../../test/helpers.ts")).harness(...args);

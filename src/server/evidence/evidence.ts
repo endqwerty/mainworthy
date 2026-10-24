@@ -127,6 +127,7 @@ export type ResultRow = {
 	quarantine_decision: number | null;
 	quarantine_exit: number | null;
 };
+export type ResultComparison = ResultRow & { env: string; job: string | null };
 
 export const resultTrail = (row: ResultRow): ResultStep[] | null =>
 	row.trail === null ? null : json<ResultStep[]>(row.trail);
@@ -582,6 +583,12 @@ const Q = {
 	>(
 		"SELECT r.id,t.no,t.name,t.file,r.method,b.job,g.env FROM results r JOIN tests t ON t.id=r.test JOIN batches b ON b.id=r.batch JOIN targets g ON g.id=r.target WHERE r.id=ANY($ids::bigint[])",
 	),
+	comparisons: sql<{ ids: readonly number[] }, ResultComparison>(
+		"SELECT r.*,t.env,b.job FROM results r JOIN targets t ON t.id=r.target LEFT JOIN batches b ON b.id=r.batch WHERE r.id=ANY($ids::bigint[])",
+	),
+	unknownSignatureIds: sql<{ ids: readonly (number | null)[] }, { id: number }>(
+		"SELECT id FROM signatures WHERE id=ANY($ids::bigint[]) AND class='unknown'",
+	),
 	targetsByIds: sql<{ ids: readonly number[] }, TargetRow>("SELECT * FROM targets WHERE id = ANY($ids::bigint[])"),
 	batchesByIds: sql<{ ids: readonly number[] }, BatchRow>("SELECT * FROM batches WHERE id = ANY($ids::bigint[])"),
 	testsByIds: sql<{ ids: readonly number[] }, TestRow>("SELECT * FROM tests WHERE id = ANY($ids::bigint[])"),
@@ -596,6 +603,28 @@ const Q = {
 		`SELECT decision, class, expires_at FROM excuses
 		 WHERE project = $project AND signature = $signature AND scope = $scope AND target = $target`,
 	),
+	excusesForResults: sql<
+		{
+			project: number;
+			ids: readonly number[];
+			signatures: readonly (number | null)[];
+			scopes: readonly string[];
+			targets: readonly number[];
+		},
+		{ id: number; decision: number; class: "attributed" | "excused"; expires_at: number | null }
+	>(`WITH choices AS (
+ SELECT asked.id, coalesce(s.decision,g.decision) AS broad_decision, coalesce(s.class,g.class) AS broad_class,
+  CASE WHEN s.decision IS NOT NULL THEN s.expires_at ELSE g.expires_at END AS broad_expires,
+  e.decision AS exact_decision,e.class AS exact_class,e.expires_at AS exact_expires
+ FROM unnest($ids::bigint[],$signatures::bigint[],$scopes::text[],$targets::bigint[]) asked(id,signature,scope,target)
+ LEFT JOIN excuses s ON s.project=$project AND s.signature=asked.signature AND s.scope=asked.scope AND s.target=asked.target
+ LEFT JOIN excuses g ON g.project=$project AND g.signature=asked.signature AND g.scope=asked.scope AND g.target=0
+ LEFT JOIN result_excuses e ON e.result=asked.id AND e.slot IS NULL
+ ) SELECT id,
+ CASE WHEN exact_decision IS NOT NULL AND (broad_decision IS NULL OR exact_decision>broad_decision) THEN exact_decision ELSE broad_decision END AS decision,
+ CASE WHEN exact_decision IS NOT NULL AND (broad_decision IS NULL OR exact_decision>broad_decision) THEN exact_class ELSE broad_class END AS class,
+ CASE WHEN exact_decision IS NOT NULL AND (broad_decision IS NULL OR exact_decision>broad_decision) THEN exact_expires ELSE broad_expires END AS expires_at
+ FROM choices WHERE coalesce(broad_decision,exact_decision) IS NOT NULL`),
 	setExcuse: sql<{
 		project: number;
 		signature: number;
@@ -2197,6 +2226,20 @@ export const receiptDetails = async (db: ReadDb, ids: readonly number[]) =>
 
 export const resultsByIds = async (db: ReadDb, ids: readonly number[]): Promise<ResultRow[]> =>
 	ids.length ? await db.all(Q.resultsByIds, { ids }) : [];
+export async function unknownSignatureIds(db: ReadDb, ids: readonly (number | null)[]): Promise<Set<number>> {
+	const found = new Set<number>();
+	const unique = [...new Set(ids)];
+	for (let start = 0; start < unique.length; start += SLICE)
+		for (const row of await db.all(Q.unknownSignatureIds, { ids: unique.slice(start, start + SLICE) }))
+			found.add(row.id);
+	return found;
+}
+export async function comparisonsByIds(db: ReadDb, ids: readonly number[]): Promise<Map<number, ResultComparison>> {
+	const found = new Map<number, ResultComparison>();
+	for (let start = 0; start < ids.length; start += SLICE)
+		for (const row of await db.all(Q.comparisons, { ids: ids.slice(start, start + SLICE) })) found.set(row.id, row);
+	return found;
+}
 export const targetsByIds = async (db: ReadDb, ids: readonly number[]): Promise<TargetRow[]> =>
 	ids.length ? await db.all(Q.targetsByIds, { ids }) : [];
 export const batchesByIds = async (db: ReadDb, ids: readonly number[]): Promise<BatchRow[]> =>
@@ -2324,6 +2367,27 @@ export async function excuseForResult(
 		result.signature === null ? null : await excuseFor(db, result.project, result.signature, scope, result.target);
 	const exact = await db.get(Q.resultExcuse, { result: result.id });
 	return exact && (!broad || exact.decision > broad.decision) ? exact : broad;
+}
+
+/** One snapshot of the standing needed by a caller's results; precedence matches excuseForResult. */
+export async function excusesForResults(
+	db: ReadDb,
+	project: number,
+	results: readonly { id: number; signature: number | null; target: number; scope: string }[],
+) {
+	const found = new Map<number, NonNullable<Awaited<ReturnType<typeof excuseForResult>>>>();
+	for (let start = 0; start < results.length; start += SLICE) {
+		const page = results.slice(start, start + SLICE);
+		for (const { id, ...excuse } of await db.all(Q.excusesForResults, {
+			project,
+			ids: page.map((row) => row.id),
+			signatures: page.map((row) => row.signature),
+			scopes: page.map((row) => row.scope),
+			targets: page.map((row) => row.target),
+		}))
+			found.set(id, excuse);
+	}
+	return found;
 }
 
 /** A disputed slot needs its own judgement; a cause or another slot's answer cannot settle it. */
