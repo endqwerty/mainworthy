@@ -1,12 +1,12 @@
 import type { ReadDb } from "./src/server/kernel/db.ts";
 declare const db: ReadDb;
-async function lookup() {
-	return await db.get("SELECT x");
+function lookup() {
+	return db.get("SELECT x");
 }
 export async function defaults(value = lookup()) {
 	return value;
 }
-export async function promiseChain() {
+export function promiseChain() {
 	return lookup().then((value) => value);
 }
 export function removed() {
@@ -16,7 +16,7 @@ export function unrelatedPromises() {
 	return Promise.all([Promise.resolve(1), Promise.resolve(2)]);
 }
 async function* steps() {
-	yield await lookup();
+	yield lookup();
 }
 export function mixed() {
 	lookup();

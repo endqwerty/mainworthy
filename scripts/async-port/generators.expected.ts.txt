@@ -30,10 +30,10 @@ export async function complete<T>(steps: AsyncGenerator<undefined, T, void>): Pr
 	for (let step = await steps.next(); ; step = await steps.next()) if (step.done) return step.value;
 }
 export async function drain(db: WriteDb) {
-	return await complete(child(db));
+	return complete(child(db));
 }
 export async function drainAgain(db: WriteDb) {
-	return await complete(child(db));
+	return complete(child(db));
 }
 export async function* forwardingSavepoint(db: WriteDb): AsyncGenerator<undefined, number, void> {
 	return yield* db.savepointSteps(() => child(db));
