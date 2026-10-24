@@ -10,6 +10,17 @@ for an MVP we can build basics and increase flexibility and more options as we
 go." Every deferral below has a GitHub issue in the milestone `Backlog to 1.0`
 (since 2026-10-13 the seven milestones M1 to M7 of `docs/roadmap.md`).
 
+## How firm this is (added 2026-10-23, issue #905)
+
+The "Answer" column is the owner's: a phrase in quotation marks is their words, the rest a paraphrase. The
+"Consequence" column, "What it settles", "Decided here" and "What this changes in earlier records" are an agent's
+reading and choices, not the owner's, including where they turn an answer into a rule or an issue.
+
+Several answers were tentative, and stay so: 12 ("Why not make it a user setting. Maybe on a per project basis."), 21
+("Roughly yes."), 22 ("I don't know, think about it for me": everything under "Decided here" is an agent's), 23 ("I
+think so."), 26 ("Who knows") and 28 ("Probably."). The general rule the owner gave ("we can build basics and
+increase flexibility and more options as we go") also makes every consequence here revisable before 1.0.
+
 ## Answers
 
 | # | Question | Answer (the owner, 2026-10-11) | Consequence |

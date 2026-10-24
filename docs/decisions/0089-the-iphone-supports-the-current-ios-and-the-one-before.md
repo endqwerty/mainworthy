@@ -2,6 +2,13 @@
 
 Date: 2026-10-16. Asked by the owner in a thread.
 
+## How firm this is (added 2026-10-23, issue #905)
+
+The owner's words were tentative: "maybe only current, next and one previous; I'm not sure one previous is even
+needed". They asked to drop old iOS versions and doubted the "one before". The policy below (the current major iOS
+and the one before, the macOS floor that follows it, and moving the floor when a new iOS ships) is an agent's choice
+that keeps the version the owner doubted. It stands as a working default, not a rule the owner set.
+
 ## Problem
 
 The app was built for iOS 18 and later (`ios/project.yml`, `ios/Kit/Package.swift`). Making the queue's **Select**

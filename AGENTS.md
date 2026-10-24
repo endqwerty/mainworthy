@@ -1,12 +1,12 @@
 # Mainworthy: rules for coding agents
 
-A test case management system: TypeScript on Bun 1.4 (a choice, not a lock-in: decision 0010), one SQLite file, a React
-web UI. Personal project, public on GitHub; the owner (`endqwerty`, the person your global instructions name)
-reviews every change before it lands. Your global `~/.<agent>/AGENTS.md` applies too.
+A test case management system: TypeScript on Bun 1.4, one SQLite file, a React web UI. Personal project, public on
+GitHub; the owner is `endqwerty`, the person your global instructions name. Your global `~/.<agent>/AGENTS.md` applies
+too.
 
 Read [README.md](README.md), then `docs/product-vision.md`, `docs/competitors.md` and `docs/open-questions.md`.
 Where it stands: `docs/roadmap.md`, `docs/decisions/` and [issue #64](https://github.com/endqwerty/mainworthy/issues/64)
-(the work order and every open issue); how it fits together: `docs/architecture.md`. The instance at
+(the work order); how it fits together: `docs/architecture.md`. The instance at
 `https://mainworthy.com` follows `main` (`docs/deploy.md`).
 
 A rule here names what enforces it; one that nothing enforces is a judgment call. A mistake that happens twice is
@@ -16,12 +16,12 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 
 | Command | What |
 | --- | --- |
-| `bun run check` | type-check, lint and every test, about two minutes; a machine that cannot run it says why in one line (`scripts/preflight.ts`) |
+| `bun run check` | type-check, lint and every test, about two minutes |
 | `bun run test`, `bun test <file>`, `bun run dev` | the tests alone; one file; the server on `127.0.0.1:7357` |
 | `bun scripts/ci-scope.ts` | what CI would run for the branch (`.github/workflows/check.yml` says what each job does) |
 | `bun scripts/work.ts scratch new <name>`, `scratch rm <directory>` | scratch files go in `~/.cache`, never in the worktree; `rm` deletes only a directory `new` made. A reviewer works in a `git archive <rev>` export there |
 | `bun scripts/work.ts stop-server`, `wait-tests` | stop the servers you started; wait for another agent's test run (one agent at a time runs the whole suite) |
-| `bun scripts/work.ts release` | last command of a task, and the `release worktree` script of `t3.json`; refuses while a server, a test run or another bun process works from the checkout |
+| `bun scripts/work.ts release` | last command of a task, and the `release worktree` script of `t3.json`; refuses while a server, a test run or another bun process uses the checkout |
 | `bun scripts/work.ts board`, `pr-body`, `sync-branch`, `check-time`, `ci` | below; `bun scripts/work.ts` alone lists every command; `test/work.test.ts` holds each |
 
 ## Rules
@@ -31,36 +31,41 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 | **One registry.** A capability is an operation in `src/server/ops/index.ts`; HTTP, the OpenAPI document, the CLI, the MCP tools and the web client come from it. Add no route, command or tool beside it | `test/architecture.test.ts`, "the registry" |
 | **The module map.** Imports go down the map. SQL is declared with `sql()` in the module that owns the table; read another module's data through its functions. `src/core` is pure (no I/O); `src/web` imports only `src/core`. Fix the design, not the test | `test/architecture.test.ts`, "the module map" |
 | **Standing changes only through a decision.** Anything "current" (a case's head, a link, an excuse, a closed run, the policy) is written by a function that takes a `Witness`. Add no writer without one | `test/architecture.test.ts`, witness tests |
-| **Schema changes are a new migration** in `src/server/kernel/migrations/`; a shipped one is never edited. Mark `archive` as the comment on `MIGRATIONS` says, and test the behaviour too | `test/architecture.test.ts` migration tests keep versions contiguous and the `archive` marks true to the SQL; that a shipped migration is never edited is review judgment |
-| **Who a request is, is asked once.** A surface calls `admit` (`src/server/identity/identity.ts`) and holds no secret. A table with the hash of a secret is in `UNEXPORTED` | `test/architecture.test.ts`, identity tests; the comment on `openSession` says why a hash, not an id, crosses the write gate |
+| **Schema changes are a new migration** in `src/server/kernel/migrations/`; a shipped one is never edited. Mark `archive` as the comment on `MIGRATIONS` says, and test the behaviour too | `test/architecture.test.ts` keeps versions contiguous and `archive` marks true to the SQL; never editing a shipped one is review judgment |
+| **Who a request is, is asked once.** A surface calls `admit` (`src/server/identity/identity.ts`) and holds no secret. A table with the hash of a secret is in `UNEXPORTED` | `test/architecture.test.ts`, identity tests |
 | **A phone is styled in one file**, `src/web/phone.css`, each rule under `:root[data-layout="phone"]`. A screen adds no touch control for what a key does. A binding is `list: true` only when it decides nothing about the selected row | `test/architecture.test.ts`, "the phone layout" |
 | **The iPhone app reads the server through one contract** (decision 0023): `scripts/ios/contract.ts`. Never edit a `Generated/` directory (`bun scripts/ios.ts gen`). Write no team id into the repository | `test/ios-contract.test.ts`; `ios/README.md` says what to do when it fails |
 | **Licences are read from the build** (decision 0025). After changing a dependency run `bun scripts/licences.ts` and commit the result. A licence the script does not name is the owner's call, asked in the pull request | `test/licences.test.ts` |
 | **The time of a write is the server's.** Only a demo project takes one from its caller (decision 0100). Put no time in an operation's input | `test/demo-time.test.ts`; `src/cli/demo/` is pure |
 | **A feature adds to the demo** (the owner, 2026-10-15): `src/cli/demo/` decides what is written, `src/cli/seed.ts` sends it; draw nothing new from an existing random stream. Leave it out only when truly unreasonable, and say why in the pull request | the owner's review (nothing runs) |
-| **Product budgets are tests**; raise no number. Advisory: whole-check and CI shard durations (decision 0097, #77) and the MCP tool list's size (0118). After adding or splitting tests, refresh and commit `scripts/test-timings.json`: `bun scripts/work.ts timings-from-ci <run-id>` from passing CI, or `bun run test --update-timings` locally | `test/budgets.test.ts`, `scripts/check-plan.ts` |
+| **A budget is a measured baseline**, not a ceiling. Only a hard limit fails: a cost a user would feel, measured on a representative workload, accepted by the owner; any other budget warns. Advisory: check and CI shard durations (0097, #77) and the MCP tool list's size (0118). After adding or splitting tests, commit a fresh `scripts/test-timings.json` (`bun scripts/work.ts timings-from-ci <run-id>` from passing CI, or `bun run test --update-timings`) | `test/budgets.test.ts`, `scripts/check-plan.ts`; each number there fails until #906 sorts them |
 | **Tests run beside each other.** Take ports, directories and browser from the helpers; a test that fails only beside others shares something, so fix that. Only a test that compares a time with a limit goes in `QUIET` | `test/helpers.ts`, `test/e2e/support.ts`, `scripts/check-plan.ts` |
 | **A command-line test starts the command once** and asks the rest in-process | review judgment; `scripts/check.ts` reports duration |
 | **A sentence on a screen about what the server does is a claim.** Say only what the screen can know | `test/evidence.test.ts` holds the failure question's sentence to the server; other screen copy is review judgment |
-| **A user-visible change updates `docs/guide/` in the same pull request** and runs `bun scripts/gen-docs.ts` after a change to an operation, command, preset, capability or answer; a new page is also listed in `src/core/docs.ts` and `src/surfaces/docs/content.ts` | `test/docs.test.ts`, `test/e2e/docs.test.ts` (neither can tell whether a sentence is still true: read the page) |
+| **A user-visible change updates `docs/guide/` in the same pull request** and runs `bun scripts/gen-docs.ts` after a change to an operation, command, preset, capability or answer; a new page is also listed in `src/core/docs.ts` and `src/surfaces/docs/content.ts` | `test/docs.test.ts`, `test/e2e/docs.test.ts` (neither knows if a sentence is still true) |
 | **The repository is public.** Write no tailnet name, address on the tailnet or home network, or machine name: `example.ts.net` and a documentation-range address | `test/architecture.test.ts`, "a public repository" (tailnet names only; the rest is review) |
 | **The owner's name is not written here** (their request, 2026-10-13): write "the owner", and `robin` for an example person. The one exception is the copyright line (decision 0025) | `test/licences.test.ts`, "the owner's name is written only in the copyright line" |
 | **The former name** (decision 0015) stays only in the files the architecture test lists | `test/architecture.test.ts`, "the project's name" |
-| **A failing test in CI is yours to fix.** The instance's policy answers it "needs a fix" by rule, so nobody is asked; `gate` stays red until a commit passes it. `bun scripts/work.ts ci` reads what failed (`docs/deploy.md`). Never overrule it with the owner token | the policy (`ci-policy`); `ci` says when a person is asked. The token is judgment |
+| **A failing test in CI is yours to fix.** The instance's policy answers it "needs a fix", so `gate` stays red until a commit passes it. `bun scripts/work.ts ci` reads what failed (`docs/deploy.md`). Never overrule it with the owner token | the policy (`ci-policy`); `ci` says when a person is asked. The token is judgment |
 
 ## Working rules
 
-- Nothing is compatible before 1.0, and the owner says when that is. A change may break stored data, tokens, the
-  API and the CLI when that makes the result simpler. Say what breaks in the changelog; build no migration path.
-- Behaviour changes need tests and a check on the real surface. A user-visible change adds a `.changes/` fragment,
-  a decision a dated file in `docs/decisions/`. Secrets never enter the repository, logs or chat.
+- Nothing here is fixed before 1.0, and the owner says when that is. Any rule, decision, test, budget, feature or
+  dependency may go when something better turns up: say what and why in the pull request. Nothing is compatible either:
+  break stored data, tokens, the API or the CLI when it simplifies the result, say so in the changelog, and build no
+  migration path. Safety, secrets, the public-repository rules and the owner's merge stay.
+- Behaviour changes need tests and a check on the real surface. A user-visible change adds a `.changes/` fragment.
+  Secrets never enter the repository, logs or chat.
+- A decision record (a dated file in `docs/decisions/`) is only for a choice that is hard to reverse, would surprise a
+  reader and came from a real trade-off. A `proposed` record binds nothing. Quote the owner with how firm they were
+  ("maybe", "for now"); never cite them for an agent's choice.
 - After a pull request lands, check that `/healthz` names its commit.
 - Competitor claims in `docs/competitors.md` are hypotheses until verified.
-- A review is sized to the change: the verifier reads the diff, runs `bun run check` and probes what the change
-  could break next to it. The brief names the diff and a time (fifteen minutes for an ordinary change); a whole-area
-  review is for a release or a rewrite. A finding becomes a test. The owner's goal (#77): landing costs minutes.
-- To compare the check's time, `bun scripts/work.ts check-time <base> <head>` times both alternately and judges the
-  spread; a rebase that leaves the tree as it was verified needs no round (it says so). Leave `TMPDIR` alone.
+- A review is sized to the change: the verifier reads the diff, runs `bun run check` and probes what it could break. The
+  brief names the diff and a time (fifteen minutes for an ordinary change); a whole-area review is for a release or a
+  rewrite. A finding becomes a test. The goal (#77): landing costs minutes.
+- `bun scripts/work.ts check-time <base> <head>` compares the check's time, alternating runs and judging the spread. A
+  rebase that leaves the verified tree unchanged needs no new review. Leave `TMPDIR` alone.
 
 ## Issues, pull requests and the board
 
@@ -73,34 +78,34 @@ issue and GitHub's workflows move both. A task the owner gave in a thread needs 
 - **Starting.** Before the first edit, `bun scripts/work.ts board start <number>` for the issue, and again for the
   pull request once it is open. `todo` and `done` set the other statuses; `board check` says when the ids in
   `scripts/work/board.ts` no longer fit the board.
-- **Opening the pull request.** `Closes #123` on a line of its own only when the merge makes everything the issue
-  asks for true; `Part of #123` otherwise. Give it the issue's milestone (`gh pr create --milestone`). Run
-  `bun scripts/work.ts pr-body <number>`: it reads back what GitHub linked, and the `description` job of CI runs it
-  (after a fix, run that job again). A keyword counts only while the base is `main`; in a stack set the issue In
-  Progress by hand and read the links again when the pull request below has merged.
+- **Opening the pull request.** `Closes #123` on a line of its own only when the merge does all the issue asks;
+  `Part of #123` otherwise. Give it the issue's milestone (`gh pr create --milestone`). Run
+  `bun scripts/work.ts pr-body <number>`, as CI's `description` job does (after a fix, rerun that job). A keyword
+  counts only while the base is `main`; in a stack set the issue In Progress by hand and read the links again when
+  the pull request below has merged.
 - **Stopping without finishing.** `board todo <number>` and say on the issue what is left (also for a pull request
   closed unmerged).
-- **After the merge** both cards are Done; close a still-open issue with a comment linking the pull request. A problem found on the way gets its own issue.
-- **Only the owner** changes the board's workflows (in the browser), a renamed or added milestone (the view's filter,
-  `docs/roadmap.md` and #64 together), and approves `gh auth refresh -h github.com -s project` (the `project` scope).
+- **After the merge** both cards are Done; close a still-open issue with a comment linking the pull request. A problem
+  found on the way gets its own issue.
+- **Only the owner** changes the board's workflows, renames or adds a milestone (the view's filter, `docs/roadmap.md`
+  and #64 together) and approves the `project` scope (`gh auth refresh -h github.com -s project`).
 
 ## Model profile
 
-**deep**, the owner's standing choice: delegation takes models and effort from `homelab route models --profile
-deep`, not `balanced`; `max` is for a thread or task the owner names. When `homelab route plan --profile deep --role
-verifier --author codex` names no one, take the verifier from `--profile balanced` and say so in the pull request;
-with no other provider able to verify, report it as not independently verified.
+**deep**, the owner's choice: delegation takes models and effort from `homelab route models --profile deep`; `max` is
+for a thread or task the owner names. When `homelab route plan --profile deep --role verifier --author codex` names no
+one, take the verifier from `--profile balanced` and say so in the pull request; with none, report it unverified.
 
 ## Delivery
 
-**Review-first: the owner merges; you do not.** Work on the T3 branch in your worktree and follow the `build` skill:
-check the change, get the independent verification `verify` asks for, open a non-draft pull request with a
-standalone description that names its issue (above), link it to the thread, run the Daybreak audit every merge
-needs (`docs/security-audit.md`) and stop. Do not merge, arm auto-merge, close it or push to `main`, even when the
-checks are green. Only the owner saying, in the current thread, to merge identified work lets you land it (the
-`ship` skill, by rebase: `gh pr merge --rebase`, keeping the branch). A stack lands in one step when the owner's word
-covers it: `docs/landing-a-stack.md`. Under `build`, `babysit` and `autopilot-stack` nothing merges, a stack included.
+**Review-first: the owner merges; you do not.** On the T3 branch, follow the `build` skill: get the independent
+verification `verify` asks for, open a non-draft pull request with a standalone description naming its issue (above),
+link it to the thread, run the Daybreak audit every merge needs (`docs/security-audit.md`) and stop. Do not merge, arm
+auto-merge, close it or push to `main`, even when checks are green. Only the owner saying, in the current thread, to
+merge identified work lets you land it (the `ship` skill, `gh pr merge --rebase`, keeping the branch). A stack lands in
+one step when the owner's word covers it: `docs/landing-a-stack.md`. Under `build`, `babysit` and `autopilot-stack`
+nothing merges.
 
-After the owner has merged and you start new work on the same T3 branch, run `bun scripts/work.ts sync-branch`:
-it moves the branch onto `origin/main` and pushes it, and refuses while the branch holds a commit that is not on
-`main` or the worktree has changes.
+After the owner has merged and you start new work on the same T3 branch, run `bun scripts/work.ts sync-branch`: it moves
+the branch onto `origin/main` and pushes it, refusing while the branch holds a commit not on `main` or the worktree has
+changes.

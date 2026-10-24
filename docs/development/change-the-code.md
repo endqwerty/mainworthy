@@ -170,6 +170,8 @@ A PR may touch `CHANGELOG.md` only to assemble fragments; it may not add or edit
 
 ## Record a design decision
 
+Write a record only for a choice that is hard to reverse, would surprise a later reader, and came from a real trade-off; a paragraph is often enough. Anything else is said in the pull request. A `proposed` record binds nothing until the owner accepts it. Quote the owner's words as they said them, with how firm they were ("maybe", "for now", a question), and never cite the owner for a choice an agent made. Before 1.0 an earlier record is evidence to weigh again, not a constraint: a pull request may drop or replace one when something better turns up, and says why.
+
 Add `docs/decisions/YYYY-MM-DD-<slug>.md` with an unnumbered first heading and this metadata:
 
 ```markdown

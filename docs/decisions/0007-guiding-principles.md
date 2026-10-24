@@ -17,6 +17,24 @@ before continuing. A large part of QA is getting the contents of a tester's
 head into artifacts; that must get faster. A working product is not enough;
 it must be a better product.
 
+## How firm this is (added 2026-10-23, issue #905)
+
+The owner accepted this record with "probably" (decision 0009, answer 28). The principles are an agent's synthesis of
+a four-candidate design arena, not rules the owner wrote.
+
+- **The owner's words.** The arena's brief quotes the ask: "We'll likely need to create some guiding principals help
+  make decisions on architecture and the like. We'll want to be willing to adjust those principals when necessary to
+  ensure the product is deliverable, but we wouldn't want to deliver a bad product", and "the repo's existing docs are
+  good guidelines, but not set in stone" (`docs/design-arena/2026-10-11/brief.md`). The guidance paragraph above is
+  a paraphrase of that day's thread; only "the record is true above speed" is quoted, and the exact words are not
+  kept.
+- **An agent's choice.** P0 to P10, their wording and order; P1's "a merged change that breaks a hot-path budget" and
+  P9's "every promise is a failing test"; the bend steps with their numbers (marked "proposed limit"); the floor F1
+  to F9; the rejected alternatives' framing.
+- **What it means now.** Before 1.0 these are strong defaults to weigh, not fixed rules (AGENTS.md). P9 turned first
+  measurements into failing tests; a budget is now a measured baseline, and only a hard limit the owner accepts fails
+  (#906).
+
 ## The principles, in tie-break order
 
 When two conflict, the lower number wins. Each names what it rules out.
