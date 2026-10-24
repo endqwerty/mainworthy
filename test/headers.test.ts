@@ -9,6 +9,7 @@ import { z } from "zod";
 import { budget } from "../scripts/budget.ts";
 import { type Instance, start } from "../src/app/start.ts";
 import { Client } from "../src/cli/client.ts";
+import { refreshDemo } from "../src/cli/demo.ts";
 import { seed } from "../src/cli/seed.ts";
 import { SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
 import { Db } from "../src/server/kernel/db.ts";
@@ -907,7 +908,7 @@ describe("the executable, built the way `bun run build` builds it", () => {
 				probe.exec("DROP TABLE checkpoint_probe");
 				probe.close();
 			}
-			// Leave a small demo for a second start, so the compiled reset worker must actually run.
+			// Leave a small demo; a later restart of a completed revision must preserve it.
 			await seed(new Client({ url, token: TOKEN, project: "scratch" }), {
 				project: "demo",
 				cases: 30,
@@ -917,6 +918,27 @@ describe("the executable, built the way `bun run build` builds it", () => {
 		} finally {
 			child.kill("SIGTERM");
 			await child.exited;
+		}
+		// Complete one deployment through the real refresh/HTTP flow. Leave its retired project for serve to drain.
+		const revision = "a".repeat(40);
+		const prepared = start(
+			{
+				dataDir: data,
+				host: "127.0.0.1",
+				port: 0,
+				mode: "server",
+				owner: "robin",
+				ownerToken: TOKEN,
+				commit: revision,
+				...SESSION_LIFETIMES,
+				proxy: null,
+			},
+			() => ({ ui: null }),
+		);
+		try {
+			await refreshDemo(prepared, "demo", { cases: 30, days: 0, unlinkedFiles: 0 });
+		} finally {
+			await prepared.stop();
 		}
 		const restarted = Bun.spawn([executable, "serve"], {
 			cwd: data,
@@ -930,6 +952,7 @@ describe("the executable, built the way `bun run build` builds it", () => {
 				MAINWORTHY_OWNER_TOKEN: TOKEN,
 				MAINWORTHY_READERS: "1",
 				MAINWORTHY_DEMO: "demo",
+				MAINWORTHY_COMMIT: revision,
 			},
 			stdout: "pipe",
 			stderr: "inherit",
@@ -939,17 +962,29 @@ describe("the executable, built the way `bun run build` builds it", () => {
 			const reader = restarted.stdout.getReader();
 			const decoder = new TextDecoder();
 			let printed = "";
-			while (!printed.includes('demo "demo" seeded again')) {
+			while (!printed.includes('demo "demo" ready for revision')) {
 				const chunk = await reader.read();
-				if (chunk.done) throw new Error("the compiled executable stopped before refreshing its demo");
+				if (chunk.done) throw new Error("the compiled executable stopped before making its demo ready");
 				printed += decoder.decode(chunk.value, { stream: true });
 			}
 			reader.releaseLock();
-			expect(printed).toContain("2000 cases");
+			expect(printed).toContain("30 cases");
 			const url = /http:\/\/127\.0\.0\.1:\d+/.exec(printed)?.[0] ?? "";
 			expect((await fetch(`${url}/healthz`)).status).toBe(200);
 			const demo = new Client({ url, token: TOKEN, project: "demo" });
-			expect((await demo.call("find", { limit: 1 })).items).toHaveLength(1);
+			expect((await demo.call("find", { limit: 100 })).items).toHaveLength(30);
+			const retiring = new Db(join(data, "mainworthy.db"), { reader: true });
+			try {
+				const remaining = () =>
+					z
+						.object({ n: z.number() })
+						.parse(retiring.raw.query("SELECT count(*) AS n FROM projects WHERE key LIKE '~demo-%'").get()).n;
+				const deadline = Date.now() + 10_000;
+				while (remaining() > 0 && Date.now() < deadline) await Bun.sleep(10);
+				expect(remaining()).toBe(0);
+			} finally {
+				retiring.close();
+			}
 		} finally {
 			restarted.kill("SIGTERM");
 			await restarted.exited;

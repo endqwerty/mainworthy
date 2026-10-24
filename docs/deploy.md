@@ -111,7 +111,7 @@ sending the token itself.
 | `MAINWORTHY_PUBLIC_URL` | not set | The address people open the instance at, as they type it: `https://mainworthy.example`. A passkey belongs to the host name in it, and an invitation link starts with it. Write https and a host name, or `http://localhost:<port>` on a developer's machine. An IP address or plain http anywhere else stops the start with a line that names the variable, because no browser makes a passkey there. So does a path or a query, because the server wants the root address of the instance. Not set: the instance has no passkeys, people sign in with a name and a password or with a token, and `mainworthy invite` prints a link without a host. The server never takes this address from a request's `Host`. |
 | `MAINWORTHY_APPLE_APPS` | not set | The iPhone apps the site vouches for, so a phone offers the logins it keeps for this site (its own passwords, or a password manager's such as 1Password) on the app's sign-in screen: each a team id and a bundle identifier, `ABCDE12345.com.mainworthy.app.ABCDE12345`, separated by commas. `bun scripts/ios.ts install` prints the one it built when it signs the app with that site (a paid Apple developer team only: `docs/guide/iphone.md`). The server lists them at `/.well-known/apple-app-site-association`, where Apple reads them; the app names the site in its entitlements (`ios/App/Mainworthy.entitlements`, `mainworthy.com`). Not set: that address is not found, and the app's sign-in screen is offered no login. An entry that is not an app's name stops the start with a line that names the variable. |
 | `MAINWORTHY_MODE` | `server` | `server`: every request needs a token. `local` (the default outside a container, on loopback): the browser on the same machine is the owner with no step. Local mode is for that machine only. The server checks what it can see: the connection comes from a loopback address, the `Host` is a loopback name, and the request carries none of the headers a proxy or a tunnel adds; a request that fails one of these needs a token. It cannot see through a relay that passes bytes on unchanged from this machine (`ssh -L`, `socat`, a port forward that adds no header): through one, anyone who reaches the relay is the owner. Never expose a local-mode port that way. To reach an instance from elsewhere, run it in `server` mode. |
-| `MAINWORTHY_DEMO` | not set | A demo project the server empties and fills with the demo again on every start, once it listens (`mainworthy seed`; `docs/guide/customize.md`). A deploy restarts the container, so the demo shows the build that runs. Only a demo project is emptied: any other is left as it is, and the start says so in a line on stderr. The grants on it are kept. `compose.coolify.yaml` sets it to `demo` unless the variable is set, so setting it empty in Coolify switches it off; `compose.yaml` leaves it empty. The reset runs on a worker thread while health checks and reads keep answering; writes wait for its transaction. The seed then partly fills the project through the API. Each step logs its elapsed time. |
+| `MAINWORTHY_DEMO` | not set | A marked demo refreshed once per known deployed revision, after the server listens. `MAINWORTHY_COMMIT` or Coolify's `SOURCE_COMMIT` identifies the revision. A same-revision restart preserves edits and renews featured work. A new revision swaps a fresh project into the same key and moves personal and team grants atomically, then seeds over HTTP. Retired data drains in bounded transactions. See "Demo deployment and cleanup" below. `compose.coolify.yaml` defaults to `demo`; set it empty for none. |
 | `MAINWORTHY_COMMIT` | empty | The commit the build was made from, which `/healthz` reports as `commit` with no sign-in. Exactly 40 lower-case hexadecimal characters, else it counts as not set; the server then reads `SOURCE_COMMIT` (Coolify sets it on the running container), and reports `null` when neither holds a commit. The image takes it as a build argument: `MAINWORTHY_COMMIT=$(git rev-parse HEAD) docker compose build`, or `docker build --build-arg MAINWORTHY_COMMIT=$(git rev-parse HEAD) .`. Without it a plain build reports `null`. |
 
 A container waiting for the data-directory lock ignores `docker stop` until Docker sends SIGKILL after its default 10 seconds, which is harmless with Compose's stop-then-create replacement.
@@ -525,42 +525,50 @@ This setup alone does not enable automatic deployment. To deploy manually, press
 its API (`POST /api/v1/deploy?uuid=<application>`). The owner's instance uses an external deploy job; its
 required check reads are under "Checks a deployment must wait for" below.
 
-The project `demo` on this instance is seeded again on every start (`MAINWORTHY_DEMO=demo` in
-`compose.coolify.yaml`), so each deploy leaves the demo of the code it runs. The start logs
-`demo "demo" seeded again in <n> s: 2000 cases, 66 questions`, or a line that says why it was not. What anyone
-changed in `demo` is gone after the next deploy; keep work in another project.
+### Demo deployment and cleanup
 
-The worker first audits foreign keys without holding the write gate, so writes can continue during that scan.
-It records the connection's database generation before the audit. After taking the gate and beginning a write
-transaction, it compares the generation again. An intervening commit makes it roll back the empty transaction,
-release the gate, and repeat the audit. An existing dangling reference refuses the reset before removal.
+`compose.coolify.yaml` keeps `MAINWORTHY_DEMO=demo` by default. Coolify supplies the deployed image's full
+`SOURCE_COMMIT`, or the image's `MAINWORTHY_COMMIT` takes precedence. No separate host, service, database or
+operator action is needed. The demo remains at `/p/demo`, with the same people and personal and team grants.
+Set the variable empty to stop refresh and renewal. With no known commit, refresh is refused and existing demo
+work is left alone. A project without a demo mark is refused untouched, including old unmarked seeds.
 
-Removal, recreation, the demo mark, and retained grants share one transaction on the worker. `/healthz` and
-ordinary reads keep answering and see the old committed demo until commit. Writes, including administration
-lists and sign-in, wait for this transaction, then proceed alongside the seed's API requests. A stop before
-commit preserves the old demo and grants; a stop afterwards leaves the empty demo and grants for the next seed.
-The worker keeps foreign-key enforcement enabled and defers constraints until commit. SQLite checks outgoing
-references on changed rows and uses child indexes to find incoming references to deleted parent keys, including
-rows in other projects and changes made by triggers. Commit refuses any unresolved reference and rolls back the
-whole reset. The reset performs no whole-database validation inside that transaction. Archive import and
-standalone project removal retain their bulk audits.
+The demo mark records either an in-progress seed with its revision and pinned size, a completed seed with its
+revision and featured slot, or a retired project. A completed same-revision restart does no seed or swap. It
+renews featured work immediately, then every twelve hours. For a new revision, one gate transaction renames the
+old project to an internal retired key, creates and marks a fresh project at `demo`, and moves current personal
+and team grants across. Readers see committed data; subsequent requests may see the fresh demo partly filled.
+The ordinary HTTP seed bounds case proposals and report shards, and dates history from the new demo mark. Its command ids include the project identity,
+so it cannot replay the retired project's commands. A seed interrupted after the swap resumes that same marked
+project, time and command ids on the next start. Any earlier retirement drain finishes before that resumed
+seed runs, keeping the two heavy stages from overlapping. Completion is recorded only after seed token cleanup succeeds.
+Only marked demo data is disposable. Changes someone made in the demo are replaced on the next deployed revision.
 
-Migration 37 adds the 28 missing incoming-reference indexes, using non-null partial indexes for nullable columns.
-The schema test checks all 81 incoming references into tables removal touches, including SQLite's generated
-DELETE programs. These indexes cost storage and maintenance on reports; decision 0087 records that tradeoff.
-The migration changes no archive data or version.
+Retired projects have no project grants and are hidden from the project list. Cleanup runs on start and after
+refresh, including when MAINWORTHY_DEMO is unset. It deletes at most 32 owned rows per gate turn and transaction,
+with foreign keys enforced, then yields to foreground work. A final transaction deletes the mark and project
+together. An interrupted drain continues from remaining rows. A failed slice rolls back and logs the failure;
+its retired mark remains for retry. A new swap first drains earlier retirements, so failed cleanup prevents
+unbounded accumulation across deployments. Normal completion retains no retired project. Deleted pages become
+reusable inside SQLite; cleanup does not run a whole-file VACUUM or promise that the file immediately shrinks.
+Whole-instance exports are refused with a retry message while retired marks remain, because those marks do not
+travel in an archive. Active-project exports remain available.
 
-Step timings go to stderr, for example `[mainworthy] demo "demo": delete results took 12.3 ms`. The log names
-database opening and closing, owner lookup, `preflight foreign keys` (or, after two stale preflights, `check foreign keys under the gate`), transaction setup, provenance, grant capture,
-foreign-key deferral, table discovery, every table count and delete, recreation with grants, `finish reset transaction`,
-the whole reset worker, and the seed. Incremental constraint checks run with each delete and recreation statement;
-`finish reset transaction` includes the final constraint decision and commit or rollback.
+No whole-database audit or worker retry runs under the demo gate. Each swap and deletion slice is checked against
+a 500 ms acceptance ceiling, alongside successful unrelated HTTP reads, writes and token sign-ins on a populated
+local database. Half a second is an interactive ceiling, not an infrastructure latency guarantee. Logs identify
+a cleanup slice exceeding 100 ms. SQLite indexes and foreign-key checks still cost time, including shared CPU
+and disk contention; the rehearsal evidence belongs in the pull request.
 
-After ten minutes the reset requests its worker to stop. It stops only between SQLite statements. A running
-statement must finish before rollback releases waiting writes. The seed gets a fresh fifteen-minute token after
-removal, revoked when seeding ends. A graceful stop during reset skips that token. If seeding has begun, the stop
-waits for the seed and its token cleanup before closing the database.
-[Decision 0087](decisions/0087-responsive-demo-refresh.md) records the design.
+SQLite's existing OS-released instance lock admits one serving actor. In-process refresh calls also serialize
+and reread persisted state. The accepted Cloud Run design keeps this shared database and moves refresh/drain to
+its job/lease interface. That port must fence swap, seeding and completion against stale lease holders, then use
+project locks for the live and retired projects. Scheduled requests must replace the renewal timer when CPU is
+allocated only during requests. Process-local locks are not a Cloud Run coordination mechanism.
+
+This supersedes the reset-in-place implementation described in decision 0087; its incoming-reference indexes
+remain useful to enforced transfer removal and cleanup. Migration 44 adds only local operational demo state,
+which is excluded from archives and does not change their format.
 
 ## This repository's CI reporting to the instance
 

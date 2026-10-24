@@ -902,10 +902,8 @@ describe("the module map", () => {
 		const exceptions: Record<string, string[]> = {
 			// The HTTP client shares the sign-in token length bound.
 			"src/cli/client.ts": ["server/identity"],
-			// Demo refresh issues temporary tokens, resets demo storage and restores grants before HTTP seeding.
+			// Demo deployment issues a short-lived token and drains retired storage after swapping.
 			"src/cli/demo.ts": ["server/identity", "server/transfer"],
-			// The demo reset worker resolves the owner before running that same reset.
-			"src/cli/demo-worker.ts": ["server/identity"],
 		};
 		const offenders: string[] = [];
 		for (const file of files) {

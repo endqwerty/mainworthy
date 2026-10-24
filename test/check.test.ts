@@ -565,8 +565,7 @@ test("a broken browser fixture build fails the check before any test runs, even 
 			copyFileSync(`scripts/${file}`, join(root, "scripts", file));
 		writeFileSync(join(root, "package.json"), "{}");
 		writeFileSync(join(root, "test/e2e/serve.ts"), "const broken = ;");
-		for (const worker of ["src/server/ops/read-worker.ts", "src/cli/demo-worker.ts"])
-			writeFileSync(join(root, worker), "export {};");
+		for (const worker of ["src/server/ops/read-worker.ts"]) writeFileSync(join(root, worker), "export {};");
 		writeFileSync(join(root, "test/e2e/broken.test.ts"), 'throw new Error("TEST_MUST_NOT_RUN");');
 		const child = Bun.spawn(
 			[process.execPath, "scripts/check.ts", "test", "--only=parallel", "test/e2e/broken.test.ts"],

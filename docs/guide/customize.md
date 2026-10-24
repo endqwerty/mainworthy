@@ -117,17 +117,19 @@ A seeded project is a demo project, and stays one. Only a demo project accepts a
 
 `seed` needs a person who administers the instance, because it makes the project and the two actors. In server mode, give that person's token with `--token` or `MAINWORTHY_TOKEN`. The pipeline and the agent hold a grant on the demo project alone. The command revokes the pipeline and agent tokens when seeding ends. If seeding stops early, those tokens expire after an hour.
 
-You cannot delete a project yet, so the demo stays until you start with a new data directory. To seed it again on every start, set `MAINWORTHY_DEMO=demo`. Once `mainworthy serve` listens, it empties the project `demo` and seeds it again. The history ends on the day of the start, and whatever you changed there is gone. The server empties only a demo project and leaves any other project unchanged, with a log line that says so. A project seeded before the demo mark was introduced also qualifies if its first write came from that seed. The server creates the project if it does not exist.
+You cannot delete a project yet, so a manually seeded demo stays until you start with a new data directory.
+For a demo that follows deployments, set `MAINWORTHY_DEMO=demo`. Once the server listens, it compares its
+`MAINWORTHY_COMMIT` or Coolify `SOURCE_COMMIT` with the revision on the demo mark. A restart of a completed
+revision preserves your demo edits. A new deployed revision atomically swaps in a fresh demo at the same URL,
+moves personal and team grants across, and seeds it through the API. Your edits in the demo are then replaced.
+The server creates a missing demo and refuses to replace an unmarked project. With no known commit it leaves
+existing work untouched and logs why it cannot refresh.
 
-Personal and team grants on the demo stay. The seed sets its own `pipeline` and `reviewer` grants again. The reset empties and recreates the project with its grants in one transaction. A stop before commit preserves the old demo and grants. A stop after commit leaves an empty demo that the next start fills.
-
-The reset runs on a worker thread, so `/healthz` and ordinary reads keep answering. It first audits existing references while writes continue. If a write commits during that audit, it repeats the audit before removal. An existing invalid reference refuses the reset.
-
-Writes, including administration lists and sign-in, wait during removal and recreation. Reads see the old demo until the empty demo and its grants commit together. Foreign-key enforcement remains enabled with indexed checks on changed rows and references to deleted rows, including other projects' references. An unresolved reference rolls the whole reset back. Logs distinguish the audit before the write gate from deletion, recreation, and commit.
-
-The seed then fills the project through the API, so readers can see it partly filled. The server creates the seed's fifteen-minute token after the reset and revokes it when seeding ends. A graceful stop during reset skips that token. A stop during seeding waits for the seed to finish and revoke its token.
-
-After ten minutes, the reset requests its worker to stop. The worker can stop only between SQLite statements. A running statement must finish before rollback releases waiting writes. Each reset step and the seed log their elapsed time. See [configuration](./configuration.md).
+If a seed stops, the next start resumes its command ids and original demo time instead of swapping again.
+Featured work renews on both fresh deployments and same-revision restarts. Retired projects are hidden from the
+project list, lose their grants, and are deleted in bounded transactions that yield to other writes and sign-in.
+An interrupted cleanup resumes at the next start, even if `MAINWORTHY_DEMO` is unset. A failed slice rolls back,
+logs the failure and leaves its retirement mark for retry. See [configuration](./configuration.md).
 
 ## Cases, folders and tags
 

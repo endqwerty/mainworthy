@@ -76,7 +76,7 @@ the recorded cause.
 
 ## Export everything
 
-To export the whole instance, run the following command as an instance admin. In server mode, supply an admin token with `--token` or `MAINWORTHY_TOKEN`. The export works while the server runs, and the archive is one consistent snapshot. Other requests keep running while Mainworthy prepares the archive.
+To export the whole instance, run the following command as an instance admin. In server mode, supply an admin token with `--token` or `MAINWORTHY_TOKEN`. The export works while the server runs, and the archive is one consistent snapshot. Other requests keep running while Mainworthy prepares the archive. A whole-instance export is refused while retired demo cleanup is pending. Retry after cleanup. Exporting an active project remains available. This prevents a restore from bringing back retired data without its local cleanup mark.
 
 ```
 $ mainworthy export --out mainworthy.ndjson.gz

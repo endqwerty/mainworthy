@@ -49,7 +49,7 @@ import {
 	sessionOwner,
 	sweepSessions,
 } from "./sessions.ts";
-import { dropTeamMemberships, teamCapabilities, teamsOf } from "./teams.ts";
+import { dropTeamMemberships, moveTeamProjectGrants, teamCapabilities, teamsOf } from "./teams.ts";
 import { clearUses, flushUses, forgetNotedAddresses, lastAddress, notedUse, noteUse } from "./uses.ts";
 
 export { getEmail, requestReset, resetPassword, setEmail, verifyEmail } from "./contacts.ts";
@@ -141,6 +141,7 @@ const Q = {
 		"INSERT INTO actors (org, kind, name, on_behalf_of, created_at) VALUES ($org, $kind, $name, $behalf, $at)",
 	),
 	actors: sql<{ org: number }, ActorRow & { created_at: number }>("SELECT * FROM actors WHERE org = $org ORDER BY id"),
+	moveProjectGrants: sql<{ from: number; to: number }>("UPDATE grants SET project = $to WHERE project = $from"),
 	grants: sql<{ actor: number }, { project: number; can: string; roles: string }>(
 		"SELECT project, can, roles FROM grants WHERE actor = $actor ORDER BY project",
 	),
@@ -1045,6 +1046,12 @@ export function setGrant(
 	return Roles.parse(
 		json(app.db.all(Q.grants, { actor: row.id }).find((grant) => grant.project === input.project)?.roles ?? "[]"),
 	);
+}
+
+/** Moves current personal and team grants during an atomic demo swap, preserving their history and roles. */
+export function moveProjectGrants(db: Db, from: number, to: number): void {
+	db.run(Q.moveProjectGrants, { from, to });
+	moveTeamProjectGrants(db, from, to);
 }
 
 /** Takes away an actor's grant on one project (0: its grant on every project). False when it held none there. */

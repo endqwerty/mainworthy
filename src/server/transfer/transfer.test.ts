@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { harness } from "../../../test/helpers.ts";
+import { seed } from "../../cli/seed.ts";
+import { withInstance } from "../../cli/test-support.ts";
 import { PRESETS } from "../../core/presets.ts";
 import { signatureHash } from "../../core/signature.ts";
 import { type BlobStore, memoryBlobs } from "../kernel/blobs.ts";
@@ -14,6 +16,7 @@ import {
 	linesOfStream,
 	removeBootstrap,
 	removeProject,
+	removeProjectSlice,
 	UNEXPORTED,
 } from "./transfer.ts";
 
@@ -697,6 +700,31 @@ afterEach(() => {
 	for (const db of opened.splice(0)) db.close();
 });
 
+test("archives wait for retired demo cleanup instead of restoring retired data without its mark", async () => {
+	await withInstance(async ({ instance }) => {
+		const { refreshDemo, drainRetiredDemos } = await import("../../cli/demo.ts");
+		const { app } = instance;
+		app.config.commit = "a".repeat(40);
+		await refreshDemo(instance, "demo", { cases: 12, days: 0, unlinkedFiles: 0 });
+		app.config.commit = "b".repeat(40);
+		await refreshDemo(instance, "demo", { cases: 12, days: 0, unlinkedFiles: 0 });
+		let bytes = 0;
+		expect(() =>
+			exportWithBlobs(
+				app.db,
+				(chunk) => {
+					bytes += chunk.length;
+				},
+				{ blobs: app.blobs },
+			),
+		).toThrow("retired demo cleanup");
+		expect(bytes).toBe(0);
+		expect(exportWithBlobs(app.db, () => {}, { project: "demo", blobs: app.blobs }).rows).toBeGreaterThan(0);
+		await drainRetiredDemos(instance);
+		expect(exportWithBlobs(app.db, () => {}, { blobs: app.blobs }).rows).toBeGreaterThan(0);
+	});
+}, 30_000);
+
 describe("Mainworthy instance archives", () => {
 	test("an archive preserves legacy corrections that branch from the same result", () => {
 		const from = source();
@@ -914,7 +942,7 @@ describe("Mainworthy instance archives", () => {
    INSERT INTO merge_receipt_members (node,slot,payload) VALUES (1,0,1);
    INSERT INTO merge_receipts (id,project,change,actor,at,seq,evidence,snapshot) VALUES (1,23,503,71,1,1,1,'{}');
    UPDATE change_ends SET receipt=1 WHERE change=503;
-			INSERT INTO demo_projects VALUES (23, 1);
+			INSERT INTO demo_projects (project,since) VALUES (23, 1);
 			INSERT INTO tracker_polls VALUES (401, 'poll-1', 1, 0, NULL);
 			INSERT INTO tracker_requests (id, nonce, project, result, repository, action, item_key, title, body, state, at)
 				VALUES ('request-1', 'nonce-1', 23, 200, 'demo/shop', 'create', 'key-1', 'Title', 'Body', 'queued', 1);
@@ -972,6 +1000,164 @@ describe("Mainworthy instance archives", () => {
 		expect(kept.map((table) => db.raw.query(`SELECT * FROM ${table}`).all())).toEqual(before.kept);
 		expect(db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
 		expect(db.raw.inTransaction).toBe(false);
+	});
+
+	test("project removal slices commit intact foreign keys, retain the mark, and resume from a reopened database", () => {
+		let db = source();
+		db.exec(`
+			INSERT INTO projects (id,org,key,name,created_at) VALUES (24,17,'other','Kept',1);
+			INSERT INTO folders VALUES (44,24,NULL,'Kept folder','a0','active',1);
+			INSERT INTO demo_projects (project,since) VALUES (23,1);
+			INSERT INTO slot_leases VALUES (602,71,1,30001);
+			INSERT INTO tracker_polls VALUES (401,'poll',1,0,NULL);
+			INSERT INTO change_ends (change,ended,at) VALUES (503,'merged',1);
+			INSERT INTO merge_receipt_payloads (id,project,hash,body) VALUES (1,23,'payload','{}');
+			INSERT INTO merge_receipt_nodes (id,project,hash,level,count) VALUES (1,23,'node',0,1);
+			INSERT INTO merge_receipt_members (node,slot,payload) VALUES (1,0,1);
+			INSERT INTO merge_receipt_heads (run,project,root) VALUES (601,23,1);
+			INSERT INTO merge_receipt_dirty (run,bucket) VALUES (601,1);
+		`);
+		const retained = db.raw.query("SELECT * FROM folders WHERE project=24").all();
+		let slices = 0;
+		for (;;) {
+			const result = removeProjectSlice(db, "qa", 4);
+			expect(db.raw.inTransaction).toBe(false);
+			expect(db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
+			expect(db.raw.query("SELECT * FROM folders WHERE project=24").all()).toEqual(retained);
+			expect(result.rows).toBeLessThanOrEqual(4);
+			slices++;
+			if (result.done) break;
+			expect(result.rows).toBeGreaterThan(0);
+			expect(db.raw.query("SELECT project FROM demo_projects").all()).toEqual([{ project: 23 }]);
+			if (slices === 3) {
+				db = new Db(db.raw.serialize());
+				opened.push(db);
+			}
+			expect(slices).toBeLessThan(200);
+		}
+		expect(slices).toBeGreaterThan(3);
+		expect(db.raw.query("SELECT key FROM projects").all()).toEqual([{ key: "other" }]);
+		expect(db.raw.query("SELECT * FROM demo_projects").all()).toEqual([]);
+		expect(db.raw.query("SELECT rowid FROM search_docs WHERE project=23").all()).toEqual([]);
+		expect(removeProjectSlice(db, "qa")).toEqual({ done: true, table: null, rows: 0 });
+	});
+
+	test("project removal slices drain an HTTP-seeded demo while another project stays readable", async () => {
+		await withInstance(async ({ client, instance }) => {
+			await seed(client, { project: "demo", cases: 30, days: 1 });
+			const db = instance.app.db;
+			const kept = db.raw.query("SELECT * FROM projects WHERE key='scratch'").get();
+			const people = db.raw.query("SELECT * FROM actors ORDER BY id").all();
+			let rows = 0;
+			for (let i = 0; i < 500; i++) {
+				const result = await instance.app.gate.run(() => removeProjectSlice(db, "demo", 16));
+				rows += result.rows;
+				expect(result.rows).toBeLessThanOrEqual(16);
+				expect(db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
+				expect(db.raw.query("SELECT * FROM projects WHERE key='scratch'").get()).toEqual(kept);
+				expect(db.raw.query("SELECT * FROM actors ORDER BY id").all()).toEqual(people);
+				if (result.done) {
+					expect(rows).toBeGreaterThan(100);
+					expect((await client.call("find", { limit: 1 })).items).toEqual([]);
+					return;
+				}
+				await Bun.sleep(0);
+			}
+			throw new Error("seeded demo removal did not finish");
+		});
+	}, 30_000);
+
+	test("project removal slices delete cross-table cycles with composite foreign keys", () => {
+		const db = target();
+		db.exec(`
+			INSERT INTO projects (id,org,key,name,created_at) VALUES (23,1,'qa','Remove',1);
+			CREATE TABLE slice_a (project INTEGER REFERENCES projects(id), id INTEGER, b INTEGER NOT NULL,
+				PRIMARY KEY(project,id), FOREIGN KEY(project,b) REFERENCES slice_b(project,id)) WITHOUT ROWID;
+			CREATE TABLE slice_b (project INTEGER REFERENCES projects(id), id INTEGER, a INTEGER NOT NULL,
+				PRIMARY KEY(project,id), FOREIGN KEY(project,a) REFERENCES slice_a(project,id)) WITHOUT ROWID;
+		`);
+		db.transaction(() => {
+			db.raw.exec("PRAGMA defer_foreign_keys=ON");
+			db.exec("INSERT INTO slice_a VALUES (23,1,2); INSERT INTO slice_b VALUES (23,2,1)");
+		});
+		const result = removeProjectSlice(db, "qa", 2);
+		expect(result).toMatchObject({ done: false, rows: 2 });
+		expect(db.raw.query("SELECT * FROM slice_a").all()).toEqual([]);
+		expect(db.raw.query("SELECT * FROM slice_b").all()).toEqual([]);
+		expect(db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
+		expect(removeProjectSlice(db, "qa", 2).done).toBe(true);
+	});
+
+	test("project removal slices handle self references and bounded cycles without cascading outside the slice", () => {
+		const db = target();
+		db.exec(`
+			INSERT INTO projects (id,org,key,name,created_at) VALUES (23,1,'qa','Remove',1);
+			CREATE TABLE slice_nodes (id INTEGER PRIMARY KEY, project INTEGER NOT NULL REFERENCES projects(id),
+				parent INTEGER REFERENCES slice_nodes(id) ON DELETE CASCADE);
+			CREATE INDEX slice_nodes_parent ON slice_nodes(parent);
+			CREATE INDEX slice_nodes_project ON slice_nodes(project);
+			INSERT INTO slice_nodes VALUES (1,23,NULL),(2,23,1),(3,23,2),(4,23,1),(5,23,1),(6,23,1);
+		`);
+		db.transaction(() => {
+			db.raw.exec("PRAGMA defer_foreign_keys=ON");
+			db.exec("INSERT INTO slice_nodes VALUES (7,23,8),(8,23,7)");
+		});
+		for (let i = 0; i < 30; i++) {
+			const before = db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM slice_nodes").get()?.n ?? 0;
+			const result = removeProjectSlice(db, "qa", 2);
+			const after = db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM slice_nodes").get()?.n ?? 0;
+			expect(before - after).toBeLessThanOrEqual(2);
+			expect(result.rows).toBeLessThanOrEqual(2);
+			expect(db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
+			if (result.done) return;
+		}
+		throw new Error("slice removal did not finish");
+	});
+
+	test("project removal slices roll back incoming retained references, oversized cycles, and unknown ownership", () => {
+		for (const retained of [false, true]) {
+			const db = target();
+			db.exec(`
+				INSERT INTO projects (id,org,key,name,created_at,identity) VALUES (23,1,'qa','Remove',1,'remove'),(24,1,'other','Keep',1,'keep');
+				CREATE TABLE slice_nodes (id INTEGER PRIMARY KEY, project INTEGER NOT NULL REFERENCES projects(id),
+					parent INTEGER REFERENCES slice_nodes(id) ON DELETE CASCADE);
+				CREATE INDEX slice_nodes_parent ON slice_nodes(parent);
+			`);
+			db.transaction(() => {
+				db.raw.exec("PRAGMA defer_foreign_keys=ON");
+				db.exec(
+					retained
+						? "INSERT INTO slice_nodes VALUES (1,23,NULL),(2,24,1)"
+						: "INSERT INTO slice_nodes VALUES (1,23,2),(2,23,3),(3,23,1)",
+				);
+			});
+			const before = allRows(db);
+			expect(() => removeProjectSlice(db, "qa", 2)).toThrow(retained ? /another project|retained/ : /limit|bounded/);
+			expect(allRows(db)).toEqual(before);
+			expect(db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
+		}
+		const db = source();
+		db.exec("CREATE TABLE unscoped_private (id INTEGER PRIMARY KEY)");
+		const before = allRows(db);
+		expect(() => removeProjectSlice(db, "qa")).toThrow(/ownership/);
+		expect(allRows(db)).toEqual(before);
+	});
+
+	test("project removal slices refuse nested or unenforced transactions and never audit unrelated foreign keys", () => {
+		const db = source();
+		db.transaction(() => expect(() => removeProjectSlice(db, "qa")).toThrow(/transaction/));
+		db.exec("PRAGMA foreign_keys=OFF");
+		expect(() => removeProjectSlice(db, "qa")).toThrow(/foreign.key/i);
+		db.exec("CREATE TABLE unrelated_broken (id INTEGER PRIMARY KEY, project INTEGER REFERENCES projects(id))");
+		db.exec("INSERT INTO unrelated_broken VALUES (1,9999)");
+		db.exec("PRAGMA foreign_keys=ON");
+		for (let i = 0; i < 200; i++) {
+			if (removeProjectSlice(db, "qa").done) {
+				expect(db.raw.query("SELECT * FROM unrelated_broken").all()).toEqual([{ id: 1, project: 9999 }]);
+				return;
+			}
+		}
+		throw new Error("slice removal did not finish");
 	});
 
 	test("removing a project that is not there, or with a table nobody owns, changes nothing", () => {

@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
 import type { Workload } from "../bench/measure.ts";
 import { budget } from "../scripts/budget.ts";
-import { resetDemoSteps } from "../src/cli/demo.ts";
 import { withInstance } from "../src/cli/test-support.ts";
 import type { GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
+import { removeProject } from "../src/server/transfer/transfer.ts";
 import { withDiskWorkloads, withLandingWorkload, withLinkProposal, withQuarantineWorkload } from "./budgets-fixture.ts";
 import { removalFixture } from "./demo-removal-fixture.ts";
 import { ciReport, harness } from "./helpers.ts";
@@ -145,13 +145,14 @@ test("a 500-result trunk page batches landing reads beside 8000 changes", async 
 	await withLandingWorkload(checkWorkload);
 });
 
-test("the reset preserves unrelated results and their constraints", async () => {
+test("project removal preserves unrelated results and their constraints", async () => {
 	await withInstance(async ({ instance }) => {
-		const { app, owner } = instance;
+		const { app } = instance;
 		removalFixture(app.db, 5_000, 20_000);
-		const steps = resetDemoSteps(app, owner, "removing", null, () => {});
-		for (const _ of steps) {
-		}
+		app.db.transaction(() => {
+			app.db.exec("PRAGMA defer_foreign_keys = ON");
+			removeProject(app.db, "removing", undefined, "deferred");
+		});
 		expect(app.db.raw.query("SELECT project, count(*) AS n FROM results GROUP BY project").all()).toEqual([
 			{ project: 901, n: 20_000 },
 		]);
