@@ -1,7 +1,6 @@
 import { startServing, VERSION } from "../../app/start.ts";
 import { defaultConfig, defaultDataDir } from "../../server/kernel/app.ts";
 import { findProject } from "../../server/kernel/ctx.ts";
-import { adoptFormerInstall } from "../../server/kernel/former-name.ts";
 import { currentPolicy, policyName } from "../../server/policy/policy.ts";
 import { archiveRoutes } from "../../surfaces/archive.ts";
 import { docsRoutes } from "../../surfaces/docs/site.ts";
@@ -14,7 +13,6 @@ import { line, warning } from "../output.ts";
 export async function serveCommand(args: Args, ui: unknown): Promise<void> {
 	assertPositionals(args, 0, 0, "serve");
 	const config = defaultConfig(process.env);
-	for (const step of adoptFormerInstall(config, process.env)) warning(`mainworthy: ${step}`);
 	const startup = new AbortController();
 	const abortStartup = () => startup.abort(new Error("startup stopped"));
 	process.once("SIGINT", abortStartup);
@@ -38,8 +36,10 @@ export async function serveCommand(args: Args, ui: unknown): Promise<void> {
 			? `owner ${instance.owner.name} · sign in with a token, a password or a passkey`
 			: `you are ${instance.owner.name.includes("@") ? instance.owner.name : `${instance.owner.name}@this-machine`}`;
 	line(`Mainworthy ${VERSION} · ${config.mode} · data in ${data} · ${instance.url}`);
-	const project = await findProject(instance.app.db, instance.project);
-	const policy = project ? policyName(await currentPolicy(instance.app.db, project.id)) : "unknown";
+	const policy = await instance.app.database.read(async (db) => {
+		const project = await findProject(db, instance.project);
+		return project ? policyName(await currentPolicy(db, project.id)) : "unknown";
+	});
 	line(`project "${instance.project}" · ${who} · policy: ${policy}`);
 	if (config.mode === "server" && instance.generatedToken) line(`owner token (shown once): ${instance.generatedToken}`);
 	for (const text of instance.warnings) warning(`mainworthy: ${text}`);

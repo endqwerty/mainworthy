@@ -1,4 +1,17 @@
 import { expect, test } from "bun:test";
+import type { App } from "../server/kernel/app.ts";
+
+async function snapshot(app: App) {
+	return app.database.read(async (db) => {
+		const result: Record<string, unknown[]> = {};
+		for (const table of await db.catalog())
+			result[table.name] = await db.allDynamic(
+				`SELECT row_to_json(t)::text AS row FROM "${table.name}" t ORDER BY to_jsonb(t)::text`,
+			);
+		return result;
+	});
+}
+
 import { z } from "zod";
 import { demoDeployment, demoSince, findProject, retiredDemos, setDemoDeployment } from "../server/kernel/ctx.ts";
 import { drainRetiredDemos, refreshDemo } from "./demo.ts";
@@ -14,7 +27,7 @@ test("the same revision preserves edits; a new revision swaps grants and drains 
 		const { app } = instance;
 		app.config.commit = A;
 		const first = await refreshDemo(instance, "demo", small);
-		const old = findProject(app.db, "demo");
+		const old = await app.database.read((db) => findProject(db, "demo"));
 		expect(old).not.toBeNull();
 		await client.call("admin", {
 			do: "token.create",
@@ -31,14 +44,14 @@ test("the same revision preserves edits; a new revision swaps grants and drains 
 		await client
 			.with({ project: "demo" })
 			.call("propose", { edits: [{ op: "create", body: { title: "An edit to preserve" } }] });
-		const before = app.db.raw.serialize();
+		const before = await snapshot(app);
 		expect(await refreshDemo(instance, "demo", small)).toEqual(first);
-		expect(app.db.raw.serialize()).toEqual(before);
-		expect(findProject(app.db, "demo")?.identity).toBe(old?.identity);
+		expect(await snapshot(app)).toEqual(before);
+		expect((await app.database.read((db) => findProject(db, "demo")))?.identity).toBe(old?.identity);
 		app.config.commit = B;
 		const second = await refreshDemo(instance, "demo", small);
 		expect(second.cases).toHaveLength(30);
-		const fresh = findProject(app.db, "demo");
+		const fresh = await app.database.read((db) => findProject(db, "demo"));
 		expect(fresh?.identity).not.toBe(old?.identity);
 		const actors = z
 			.array(z.object({ name: z.string(), grants: z.array(z.object({ project: z.string() })) }))
@@ -52,7 +65,7 @@ test("the same revision preserves edits; a new revision swaps grants and drains 
 		expect(teams.find((t) => t.name === "testers")?.grants).toContainEqual(
 			expect.objectContaining({ project: "demo" }),
 		);
-		expect(retiredDemos(app.db)).toHaveLength(1);
+		expect(await app.database.read(retiredDemos)).toHaveLength(1);
 		expect(
 			z
 				.array(z.object({ key: z.string() }))
@@ -66,7 +79,7 @@ test("the same revision preserves edits; a new revision swaps grants and drains 
 				},
 			}),
 		).rejects.toThrow("drain interrupted");
-		expect(retiredDemos(app.db)).toHaveLength(1);
+		expect(await app.database.read(retiredDemos)).toHaveLength(1);
 		let slices = 0;
 		await drainRetiredDemos(instance, {
 			onSlice: async () => {
@@ -77,10 +90,13 @@ test("the same revision preserves edits; a new revision swaps grants and drains 
 			},
 		});
 		expect(slices).toBeGreaterThan(1);
-		expect(retiredDemos(app.db)).toEqual([]);
+		expect(await app.database.read(retiredDemos)).toEqual([]);
 		expect(await client.call("admin", { do: "team.history", team: "testers" })).toEqual(teamHistory);
-		expect(app.db.raw.query("SELECT count(*) AS n FROM projects WHERE key LIKE '~demo-%'").get()).toEqual({ n: 0 });
-		expect(app.db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
+		expect(
+			(
+				await app.database.read((db) => db.allDynamic("SELECT count(*) AS n FROM projects WHERE key LIKE '~demo-%'"))
+			)[0],
+		).toEqual({ n: 0 });
 		expect((await client.call("find", { text: "A foreground write" })).items).toHaveLength(1);
 	});
 }, 30_000);
@@ -98,20 +114,20 @@ test("interrupted swap/seed resumes its marked revision, duplicate actors do not
 				},
 			}),
 		).rejects.toThrow("interrupted after swap");
-		const fresh = findProject(app.db, "demo");
-		expect(demoDeployment(app.db, fresh?.id ?? 0)?.kind).toBe("seeding");
-		const since = demoSince(app.db, fresh?.id ?? 0);
+		const fresh = await app.database.read((db) => findProject(db, "demo"));
+		expect((await app.database.read((db) => demoDeployment(db, fresh?.id ?? 0)))?.kind).toBe("seeding");
+		const since = await app.database.read((db) => demoSince(db, fresh?.id ?? 0));
 		const [left, right] = await Promise.all([
 			refreshDemo(instance, "demo", { ...small, cases: 31 }),
 			refreshDemo(instance, "demo", small),
 		]);
 		expect(left).toEqual(right);
 		expect(left.cases).toHaveLength(30);
-		expect(findProject(app.db, "demo")?.id).toBe(fresh?.id);
-		expect(demoSince(app.db, fresh?.id ?? 0)).toBe(since);
-		expect(retiredDemos(app.db)).toEqual([]);
+		expect((await app.database.read((db) => findProject(db, "demo")))?.id).toBe(fresh?.id);
+		expect(await app.database.read((db) => demoSince(db, fresh?.id ?? 0))).toBe(since);
+		expect(await app.database.read(retiredDemos)).toEqual([]);
 		await drainRetiredDemos(instance);
-		expect(retiredDemos(app.db)).toEqual([]);
+		expect(await app.database.read(retiredDemos)).toEqual([]);
 		expect((await client.with({ project: "demo" }).call("find", { limit: 100 })).items).toHaveLength(28);
 	});
 }, 30_000);
@@ -129,13 +145,17 @@ test("a seed interrupted after writing resumes command ids rather than duplicati
 					},
 				}),
 			).rejects.toThrow("interrupted before completion");
-			const project = findProject(app.db, "demo");
-			expect(app.db.raw.query("SELECT count(*) AS n FROM cases").get()).toEqual({ n: 300 });
+			const project = await app.database.read((db) => findProject(db, "demo"));
+			expect((await app.database.read((db) => db.allDynamic("SELECT count(*) AS n FROM cases")))[0]).toEqual({
+				n: 300,
+			});
 			const result = await refreshDemo(instance, "demo", batched);
 			expect(result.cases).toHaveLength(300);
-			expect(app.db.raw.query("SELECT count(*) AS n FROM cases").get()).toEqual({ n: 300 });
-			expect(findProject(app.db, "demo")?.id).toBe(project?.id);
-			expect(demoDeployment(app.db, project?.id ?? 0)?.kind).toBe("ready");
+			expect((await app.database.read((db) => db.allDynamic("SELECT count(*) AS n FROM cases")))[0]).toEqual({
+				n: 300,
+			});
+			expect((await app.database.read((db) => findProject(db, "demo")))?.id).toBe(project?.id);
+			expect((await app.database.read((db) => demoDeployment(db, project?.id ?? 0)))?.kind).toBe("ready");
 		},
 		{ mode: "server" },
 	);
@@ -182,24 +202,32 @@ test("a stale read snapshot cannot make a completed revision refresh again", asy
 		const { app } = instance;
 		app.config.commit = A;
 		const first = await refreshDemo(instance, "demo", small);
-		const project = findProject(app.db, "demo");
+		const project = await app.database.read((db) => findProject(db, "demo"));
 		if (!project) throw new Error("the seeded demo is missing");
-		const completed = demoDeployment(app.db, project.id);
+		const completed = await app.database.read((db) => demoDeployment(db, project.id));
 		if (completed?.kind !== "ready") throw new Error("the seed was not completed");
-		await app.gate.run(() =>
-			app.db.transaction(() =>
-				setDemoDeployment(app.db, project.id, { kind: "seeding", revision: A, size: { ...small, days: 1 } }),
+		await app.database.write((db) =>
+			db.transaction(() =>
+				setDemoDeployment(db, project.id, { kind: "seeding", revision: A, size: { ...small, days: 1 } }),
 			),
 		);
-		app.reader.raw.exec("BEGIN");
+		const observed = Promise.withResolvers<void>();
+		const released = Promise.withResolvers<void>();
+		const stale = app.database.read(async (db) => {
+			expect((await demoDeployment(db, project.id))?.kind).toBe("seeding");
+			observed.resolve();
+			await released.promise;
+			expect((await demoDeployment(db, project.id))?.kind).toBe("seeding");
+		});
+		await observed.promise;
 		try {
-			expect(demoDeployment(app.reader, project.id)?.kind).toBe("seeding");
-			await app.gate.run(() => app.db.transaction(() => setDemoDeployment(app.db, project.id, completed)));
+			await app.database.write((db) => db.transaction(() => setDemoDeployment(db, project.id, completed)));
 			expect(await refreshDemo(instance, "demo", small)).toEqual(first);
-			expect(findProject(app.db, "demo")?.identity).toBe(project.identity);
-			expect(retiredDemos(app.db)).toEqual([]);
+			expect((await app.database.read((db) => findProject(db, "demo")))?.identity).toBe(project.identity);
+			expect(await app.database.read(retiredDemos)).toEqual([]);
 		} finally {
-			app.reader.raw.exec("ROLLBACK");
+			released.resolve();
+			await stale;
 		}
 	});
 }, 30_000);

@@ -211,7 +211,7 @@ export async function manageTeams(
 }
 
 /** The caller holds the transaction that swaps demo projects. */
-export function moveTeamProjectGrants(db: Db, from: number, to: number): void {
-	db.run(Q.moveProjectGrants, { from, to });
-	db.run(Q.moveProjectEvents, { from, to });
+export async function moveTeamProjectGrants(db: WriteDb, from: number, to: number): Promise<void> {
+	await db.run(Q.moveProjectGrants, { from, to });
+	await db.run(Q.moveProjectEvents, { from, to });
 }

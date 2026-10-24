@@ -10,7 +10,7 @@ import { MergeReceipt } from "../../core/changes.ts";
 import type { ActorKind, Kind } from "../../core/kinds.ts";
 import type { TeamEvent } from "../../core/teams.ts";
 import type { Ctx } from "../kernel/ctx.ts";
-import { json, sql } from "../kernel/db.ts";
+import { json, type ReadDb, sql } from "../kernel/db.ts";
 import { invalid } from "../kernel/errors.ts";
 
 type Selection = { project: number; to: number };
@@ -98,7 +98,7 @@ const Q = {
 	),
 	result: sql<{ project: number; id: number; to: number }, Result>(
 		`SELECT r.id, r.at, r.seq, r.test, r.target, r.method, r.actor, r.outcome, r.signature,
-		 t.commit_sha AS 'commit', t.repo, t.env, b.job
+		 t.commit_sha AS "commit", t.repo, t.env, b.job
 		 FROM results r JOIN targets t ON t.id = r.target JOIN batches b ON b.id = r.batch
 		 WHERE r.project = $project AND r.id = $id AND r.at < $to`,
 	),
@@ -143,7 +143,7 @@ const InheritedEffects = z.object({
 });
 
 /** Called only inside the registry's read snapshot, with that snapshot's project and authorization. */
-export async function exportAudit(ctx: Ctx, input: AuditInput) {
+export async function exportAudit(ctx: Ctx<ReadDb>, input: AuditInput) {
 	const to = input.to ?? ctx.now + 1;
 	if (to > ctx.now + 1 || to <= input.from)
 		throw invalid("audit needs from < to <= the server's current time plus one millisecond");
@@ -228,13 +228,17 @@ export async function exportAudit(ctx: Ctx, input: AuditInput) {
 			basis: row.basis,
 			holds: json(row.holds),
 			effects: json(row.effects),
-			inherited: InheritedEffects.parse(effects).inherited.map((item) => ({
-				result: result(item.result),
-				base: item.base.map(result),
-			})),
+			inherited: await Promise.all(
+				InheritedEffects.parse(effects).inherited.map(async (item) => ({
+					result: await result(item.result),
+					base: await Promise.all(item.base.map(result)),
+				})),
+			),
 			expiresAt: row.expires_at,
 			evidence: row.on_evidence === null ? { state: "not-recorded" } : evidence(row.question, row.on_evidence),
-			signers: Signers.parse(json<unknown>(row.signers)).map((signer) => ({ ...signer, by: actor(signer.by) })),
+			signers: await Promise.all(
+				Signers.parse(json<unknown>(row.signers)).map(async (signer) => ({ ...signer, by: await actor(signer.by) })),
+			),
 		});
 	}
 	for (const team of await ctx.db.all(Q.teams, { project: selection.project })) {
@@ -244,7 +248,7 @@ export async function exportAudit(ctx: Ctx, input: AuditInput) {
 			id: key,
 			name: team.name,
 			createdAt: team.created_at,
-			members: (await ctx.db.all(Q.teamMembers, { team: team.id })).map((row) => actor(row.actor)),
+			members: await Promise.all((await ctx.db.all(Q.teamMembers, { team: team.id })).map((row) => actor(row.actor))),
 			grants: (await ctx.db.all(Q.teamGrants, { team: team.id, project: selection.project })).map((row) => ({
 				project: row.project === 0 ? "*" : ctx.project.key,
 				can: json(row.can),

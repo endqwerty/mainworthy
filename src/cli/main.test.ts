@@ -681,7 +681,15 @@ test("red report, blocked gate, generated decision, passed gate without another 
 		expect(passed.code).toBe(0);
 		expect(passed.stdout).toContain("passed:");
 		expect(passed.stdout).not.toContain("needs an answer");
-		expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n).toBe(1);
+		expect(
+			(
+				(
+					await instance.app.database.read((db) =>
+						db.allDynamic<{ n: number }>("SELECT count(*) AS n FROM batches", []),
+					)
+				)[0] ?? null
+			)?.n,
+		).toBe(1);
 		// The same files again are answered with the first receipt, gate line included: it still says blocked, and
 		// the command says on stderr that it is the old one and where the verdict now is.
 		const again = await run([
@@ -733,8 +741,24 @@ test("repeated report returns the same receipt, writes one batch, and names the 
 		expect(first.code).toBe(0);
 		expect(again.code).toBe(0);
 		expect(again.stdout).toBe(`${first.stdout}  already received; nothing was written\n`);
-		expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n).toBe(1);
-		expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM results").get()?.n).toBe(2);
+		expect(
+			(
+				(
+					await instance.app.database.read((db) =>
+						db.allDynamic<{ n: number }>("SELECT count(*) AS n FROM batches", []),
+					)
+				)[0] ?? null
+			)?.n,
+		).toBe(1);
+		expect(
+			(
+				(
+					await instance.app.database.read((db) =>
+						db.allDynamic<{ n: number }>("SELECT count(*) AS n FROM results", []),
+					)
+				)[0] ?? null
+			)?.n,
+		).toBe(2);
 		const machine = outputWith(Receipt, await run([...argv, "--json", "--compact"]));
 		expect(machine.fresh).toBe(false);
 		expect(machine.counts.total).toBe(2);
@@ -937,7 +961,15 @@ test("standard policy records both a proposal and a decision and prints its clau
 			await run(["policy", "show", "--json"]),
 		);
 		expect(snapshot).toEqual({ version: 2, preset: "standard" });
-		expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM decisions").get()?.n).toBe(1);
+		expect(
+			(
+				(
+					await instance.app.database.read((db) =>
+						db.allDynamic<{ n: number }>("SELECT count(*) AS n FROM decisions", []),
+					)
+				)[0] ?? null
+			)?.n,
+		).toBe(1);
 	});
 });
 
@@ -1708,7 +1740,15 @@ test("all native formats use the real report receipt, preserve unlinked tests, a
 			expect(result.code).toBe(4);
 			expect(result.stderr).toContain("invalid:");
 		}
-		expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n).toBe(4);
+		expect(
+			(
+				(
+					await instance.app.database.read((db) =>
+						db.allDynamic<{ n: number }>("SELECT count(*) AS n FROM batches", []),
+					)
+				)[0] ?? null
+			)?.n,
+		).toBe(4);
 		const mixed = await run([
 			"report",
 			RED_XML,
@@ -2541,7 +2581,9 @@ test("real report outputs use git top level or cwd for stable Jest and Vitest ke
 				expect(linked.stderr.startsWith(result.stderr)).toBe(true);
 				expect(JSON.parse(linked.stdout).fresh).toBe(false);
 				expect(
-					instance.app.db.raw.query<{ key: string; file: string }, []>("SELECT key, file FROM tests ORDER BY id").all(),
+					await instance.app.database.read((db) =>
+						db.allDynamic<{ key: string; file: string }>("SELECT key, file FROM tests ORDER BY id", []),
+					),
 				).toEqual(expected);
 			}
 		}
@@ -2568,7 +2610,15 @@ test("real report outputs use git top level or cwd for stable Jest and Vitest ke
 				`${JSON.stringify(relativeRootFile)}: Jest/Vitest root must be absolute: "relative/root"`,
 			);
 		}
-		expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n).toBe(6);
+		expect(
+			(
+				(
+					await instance.app.database.read((db) =>
+						db.allDynamic<{ n: number }>("SELECT count(*) AS n FROM batches", []),
+					)
+				)[0] ?? null
+			)?.n,
+		).toBe(6);
 		for (const [format, counts] of [
 			["pytest", { total: 8, pass: 3, fail: 2, skip: 2, error: 1, blocked: 0 }],
 			["playwright", { total: 7, pass: 4, fail: 1, skip: 2, error: 0, blocked: 0 }],
