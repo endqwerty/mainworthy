@@ -116,6 +116,11 @@ export async function seed(client: Client, options: SeedOptions): Promise<SeedRe
 
 type SeedOptions = { project: string; cases: number; seed?: number; days?: number; unlinkedFiles?: number };
 
+/** A repeatable seed write, scoped to the project's identity so a replacement cannot replay its predecessor. */
+export function seedCommandId(identity: string, step: string): string {
+	return createHash("sha256").update(`demo:${identity}:${step}:v2`).digest("hex");
+}
+
 /** What `seed` writes. */
 async function fill(client: Client, options: SeedOptions, issued: number[]): Promise<SeedResult> {
 	const { project, cases, unlinkedFiles = 0 } = options;
@@ -142,7 +147,7 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 		(row) => row.key === project,
 	)?.identity;
 	if (!identity) throw new CliError("conflict", "the demo project no longer exists");
-	const id = (step: string) => createHash("sha256").update(`demo:${identity}:${step}:v2`).digest("hex");
+	const id = (step: string) => seedCommandId(identity, step);
 	const begun = exists && (await owner.call("command", { cmd: id("folders") })).state !== "none";
 	const taken = new CliError(
 		"conflict",

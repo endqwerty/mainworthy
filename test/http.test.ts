@@ -10,7 +10,7 @@ import { AjvJsonSchemaValidator } from "@modelcontextprotocol/client/validators/
 import { z } from "zod";
 import { type Instance, open, start } from "../src/app/start.ts";
 import { Client } from "../src/cli/client.ts";
-import { seed } from "../src/cli/seed.ts";
+import { seed, seedCommandId } from "../src/cli/seed.ts";
 import type { Envelope, SessionInfo } from "../src/core/api.ts";
 import { ERROR_CODES, type ErrorCode } from "../src/core/api.ts";
 import { verifyAudit } from "../src/core/audit.ts";
@@ -2958,7 +2958,12 @@ describe("the surface", () => {
 		await checked("check");
 		for (const of of ["pass-rate", "flaky", "reruns", "automation", "coverage"])
 			await checked("stats", { of, days: 90 });
-		expect(await checked("command", { cmd: "demo-demo-cases-0-v2" })).toMatchObject({
+		const demo = z
+			.array(z.object({ key: z.string(), identity: z.string() }))
+			.parse(await checked("admin", { do: "project.list" }))
+			.find((project) => project.key === "demo");
+		if (!demo) throw new Error("the seeded demo is missing");
+		expect(await checked("command", { cmd: seedCommandId(demo.identity, "cases-0") })).toMatchObject({
 			state: "done",
 			op: "propose",
 		});

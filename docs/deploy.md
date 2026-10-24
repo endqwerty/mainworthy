@@ -544,8 +544,10 @@ project, time and command ids on the next start. Any earlier retirement drain fi
 seed runs, keeping the two heavy stages from overlapping. Completion is recorded only after seed token cleanup succeeds.
 Only marked demo data is disposable. Changes someone made in the demo are replaced on the next deployed revision.
 
-Retired projects have no project grants and are hidden from the project list. Cleanup runs on start and after
-refresh, including when MAINWORTHY_DEMO is unset. It deletes at most 32 owned rows per gate turn and transaction,
+Retired projects have no project-specific grants and are hidden from the project list. Instance-wide grants,
+including the owner's, still allow reads and writes by the retired key until cleanup deletes the data.
+Cleanup runs on start and after refresh, including when MAINWORTHY_DEMO is unset. It deletes at most 32 owned
+rows per gate turn and transaction,
 with foreign keys enforced, then yields to foreground work. A final transaction deletes the mark and project
 together. An interrupted drain continues from remaining rows. A failed slice rolls back and logs the failure;
 its retired mark remains for retry. A new swap first drains earlier retirements, so failed cleanup prevents

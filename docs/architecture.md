@@ -74,8 +74,8 @@ The check reads dynamic `import()` as well as static imports, including type-onl
 - `src/core` stays pure and is available to every layer. `src/web` imports only itself and core.
 
 The CLI has named identity exceptions in the test's map. `client.ts` shares the sign-in token length bound.
-`demo.ts` and `demo-worker.ts` may call identity directly to issue temporary tokens, resolve the owner and
-restore demo grants. `demo.ts` may also call transfer to reset the demo project. This instance-maintenance code
+`demo.ts` may call identity directly to issue temporary tokens, resolve the owner and move demo grants and their
+team history. It may also call transfer to delete retired demos in slices. This instance-maintenance code
 is an intentional exception to the registry entry point. The seed in `src/cli/seed.ts` writes through HTTP
 operations, and the catalog and history under `src/cli/demo/` stay pure.
 
