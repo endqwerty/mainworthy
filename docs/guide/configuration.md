@@ -187,8 +187,8 @@ and gives PostgreSQL its own `mainworthy-postgres` volume at `/var/lib/postgresq
 $ docker compose up -d
 ```
 
-The app waits for PostgreSQL health before starting. Use a URL-safe `MAINWORTHY_POSTGRES_PASSWORD` to override
-the development password in Compose. Running elsewhere is possible but not yet supported.
+The app waits for PostgreSQL health before starting. `MAINWORTHY_POSTGRES_PASSWORD` overrides the development password
+in `compose.yaml`; in Coolify the password is generated (`docs/deploy.md`). Running elsewhere is possible but not yet supported.
 Compose passes owner, session, proxy, public URL, Apple app, demo and mail settings to the app.
 
 Set `MAINWORTHY_OWNER_TOKEN` to a long random string. If you leave it empty on first start, the server generates one and prints it once in `docker compose logs`. Open `http://localhost:7357` and sign in with it.

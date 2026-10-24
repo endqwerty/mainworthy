@@ -12,8 +12,9 @@ from SQLite do not carry over. This reset is the owner's choice when merging the
 There is no automatic SQLite-file conversion. Archive imports still require matching format and schema.
 
 `compose.coolify.yaml` adds an interim PostgreSQL 18 service, reachable only on an internal database network,
-with a separate named `mainworthy-postgres` volume. Set `MAINWORTHY_POSTGRES_PASSWORD` in Coolify to a URL-safe
-random value before deploying. The app receives its database URL from Compose and waits for database health.
+with a separate named `mainworthy-postgres` volume. Its password is `SERVICE_PASSWORD_POSTGRES`, which Coolify
+generates on the first deploy (32 letters and digits), stores, and reuses on every redeploy; it is listed under
+the resource's environment variables. The app receives its database URL from Compose and waits for database health.
 The existing `mainworthy-data:/data` mount stays exactly where it is. The SQLite file remains on that volume,
 untouched; the app uses it for neither reads nor writes.
 
@@ -375,8 +376,8 @@ dashboard. This page writes the tailnet's name as `example.ts.net` and the node'
    `TS_AUTHKEY` is a single-use Tailscale auth key (admin console → Settings → Keys), needed for the first
    deploy only; never use the sign-in link the sidecar prints, it rotates every minute.
 4. **Storage:** retain `mainworthy-data` at `/data`. PostgreSQL gets the separate `mainworthy-postgres` volume
-   at `/var/lib/postgresql`. Back up PostgreSQL and attachments together. Set a URL-safe
-   `MAINWORTHY_POSTGRES_PASSWORD` before the first deployment.
+   at `/var/lib/postgresql`. Back up PostgreSQL and attachments together. Coolify generates the database password
+   (`SERVICE_PASSWORD_POSTGRES`) on the first deployment; nothing needs setting.
 5. **Network:** the `tailscale` service in `compose.coolify.yaml` is its own tailnet node, `mainworthy`, and serves
    the app at `https://mainworthy.example.ts.net` (Tailscale issues the certificate; the first request can take
    a few seconds). Nothing is published on the LAN; ingress port 758 is bound to `127.0.0.1` for the hold
