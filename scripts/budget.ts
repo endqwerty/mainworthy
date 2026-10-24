@@ -1,31 +1,27 @@
 import { appendFileSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-/** A measured baseline is advisory; invalid measurements remain errors. Any test phase can report one. */
+/**
+ * How far past its baseline a measurement may go before it fails. Above the baseline a budget only warns; ten times
+ * it is "a big enough jump that it's fair to mark a test as failed if it suddenly exceeds that and for it to be
+ * flagged for review. Only intentionally meaning to do that should be allowed" (the owner, 2026-10-24). Meaning to is
+ * changing the baseline in the same pull request and saying why. A baseline of 0 counts as 1 here.
+ */
+export const FAIL_MULTIPLE = 10;
+
+/** Any test phase can report one; invalid measurements are errors. */
 export function budget(name: string, measured: number, limit: number, unit: string): void {
 	if (!Number.isFinite(measured) || !Number.isFinite(limit))
 		throw new Error(`${name}: the measurement and baseline must be finite`);
 	if (measured <= limit) return;
+	if (measured > FAIL_MULTIPLE * Math.max(limit, 1))
+		throw new Error(
+			`${name}: ${measured} ${unit} is more than ${FAIL_MULTIPLE} times its baseline of ${limit} ${unit}. If that is intended, change the baseline in this pull request and say why.`,
+		);
 	const warning = `WARNING: ${name}: ${measured} ${unit} exceeds baseline ${limit} ${unit}.`;
 	const directory = process.env.MAINWORTHY_BUDGET_REPORTS;
 	if (directory) appendFileSync(join(directory, `${process.pid}.txt`), `${warning}\n`);
 	else console.warn(warning);
-}
-
-/**
- * How much slower than its baseline hostile input may be before it fails. A budget never fails, but input an attacker
- * controls is a safety question, not a speed one: a quadratic parser on a crafted report would hold the thread that
- * answers reads for minutes, and no user gains from that. Ten times catches such a blow-up, not a busy machine.
- */
-export const HOSTILE_INPUT_MULTIPLE = 10;
-
-/** A budget for input an attacker controls: it warns above the baseline and fails above ten times it. */
-export function hostileInputBudget(name: string, measured: number, baseline: number, unit: string): void {
-	budget(name, measured, baseline, unit);
-	if (measured > HOSTILE_INPUT_MULTIPLE * baseline)
-		throw new Error(
-			`${name}: ${measured} ${unit} is more than ${HOSTILE_INPUT_MULTIPLE} times its baseline of ${baseline} ${unit}; hostile input must not stall the server`,
-		);
 }
 
 /** Every process writes its own file inside one check run's private directory. */

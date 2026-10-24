@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Glob } from "bun";
 import { z } from "zod";
-import { budget, hostileInputBudget } from "../scripts/budget.ts";
+import { budget } from "../scripts/budget.ts";
 import {
 	CI_SHARDS,
 	chromiumLaunchOptions,
@@ -1385,11 +1385,12 @@ test("workload errors still fail after an advisory miss in either phase", async 
 	expect(() => budget("invalid measurement", Number.NaN, 100, "ms")).toThrow("must be finite");
 }, 30_000);
 
-test("hostile input warns above its baseline and fails only above ten times it", () => {
-	// Audit of e67691da: a parser that blows up on a crafted report is a safety question, not a budget.
-	expect(() => hostileInputBudget("crafted report", 900, 100, "ms")).not.toThrow();
-	expect(() => hostileInputBudget("crafted report", 1001, 100, "ms")).toThrow("more than 10 times its baseline");
-	expect(() => hostileInputBudget("crafted report", Number.NaN, 100, "ms")).toThrow("must be finite");
+test("a budget warns above its baseline and fails above ten times it", () => {
+	// The owner, 2026-10-24: ten times is a jump to fail and review; meaning to is changing the baseline.
+	expect(() => budget("a measurement", 1000, 100, "ms")).not.toThrow();
+	expect(() => budget("a measurement", 1001, 100, "ms")).toThrow("more than 10 times its baseline");
+	expect(() => budget("a zero baseline", 10, 0, "reads")).not.toThrow();
+	expect(() => budget("a zero baseline", 11, 0, "reads")).toThrow("more than 10 times its baseline");
 });
 
 test("a run ends with the tests that failed, and says so when a file did not load", async () => {
