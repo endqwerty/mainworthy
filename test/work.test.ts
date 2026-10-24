@@ -992,7 +992,8 @@ test("under the CI policy a failure needs a fix, asks nobody, and is over when a
 	} finally {
 		await h.close();
 	}
-});
+	// Two 503-result reports that create 502 cases: 1.2 s here, 2.9 s and then over 5 s on one CI worker.
+}, 30_000);
 
 test("ci waits for a pending gate and says when a person is asked", async () => {
 	const h = await harness({ preset: "standard" });
