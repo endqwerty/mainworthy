@@ -25,9 +25,9 @@ both schemas. `seq` is required and is `null` for an instance operation. A field
 declared nullable may hold `null`. An optional field may be absent. Replies
 selected by an action or a ref are described as alternatives.
 
-The current API version is **2**. The CLI checks `/healthz` before sending an operation and sends
-`x-mainworthy-api-version: 2`. A server with another advertised version is refused before a write.
-Clients pinned to API 1 must upgrade with the server.
+The current API version is **3**. The CLI checks `/healthz` before sending an operation and sends
+`x-mainworthy-api-version: 3`. A server with another advertised version is refused before a write.
+Clients pinned to API 1 or 2 must upgrade with the server.
 
 The web client sends the same header on its API fetch requests. An explicit mismatched version is
 refused with `409 conflict` before the operation runs. Except for `/api/logout`, browser requests other than
@@ -62,7 +62,21 @@ When an operation does not run, its reply has `ok: false` and an `error` with a
 | `not_found` | 404 | No such operation, project, or ref. The server returns the same code for a project the caller has no grant on. |
 | `conflict` | 409 | The edit was made on an older version, the command id was used for something else, or the client's API version differs from the server's. |
 | `limited` | 429 | An authentication or anonymous-start allowance has been exhausted. Failed attempts can be wrong tokens from this address or for a token that starts as this one does, wrong passwords or authenticator codes from this address or for this name, or refused passkeys or invitation codes from this address. Anonymous starts have separate, non-escalating limits of 300 successful starts per public IPv4 address or IPv6 /56 per minute. The `Retry-After` header says how many seconds to wait. |
+| `busy` | 503 | A writer could not acquire a lock or connection within its bound, or PostgreSQL detected a deadlock or serialization conflict. Retry unchanged content with the same command id. |
 | `internal` | 500 | The server failed. The message is `internal error`, and the detail is in the server's log. A report can commit in stages, so a failure does not prove that nothing was written. |
+
+A `busy` reply rolls back the current transaction. If the command had not committed acceptance,
+its command id is rolled back too. A same-id retry starts the request again. If a report already committed
+acceptance, its batch and command id remain pending, and a same-id retry resumes application. If the reply
+to a committed operation was lost, its outcome is still uncertain to the client. Query `command` or retry
+with the same id. Changing the content requires a new id.
+
+The CLI reports `busy` and exits with code 4. It does not retry the write automatically. The web client
+keeps the request and its command id so a retry checks or resends that same request. A report's acceptance
+is durable before application. Revoking its token, ending its browser session, or removing the authority
+that permits it cancels application and removes its pending marks. The command records that the report
+was refused. Accepted reports imported from an archive are cancelled because archives contain no admission
+proof or credential hashes.
 
 ## Authenticate
 

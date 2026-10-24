@@ -5,7 +5,7 @@ import type { CaseBody } from "../../core/model.ts";
 import { type TrackerInput, TrackerItem, type TrackerReceipt } from "../../core/tracker.ts";
 import { batchById, mustTarget, resultById, testById, testRef } from "../evidence/evidence.ts";
 import type { App } from "../kernel/app.ts";
-import { type Ctx, projectById } from "../kernel/ctx.ts";
+import { type Ctx, lockProject, projectById } from "../kernel/ctx.ts";
 import { json, type ReadDb, sql } from "../kernel/db.ts";
 import { forbidden, invalid, notFound } from "../kernel/errors.ts";
 import { caseById, caseRef, versionOf } from "../suite/suite.ts";
@@ -141,7 +141,10 @@ async function deliver(app: App, supplied?: TrackerPort): Promise<number> {
 		const claimed = await app.database.write(async (db) =>
 			db.transaction(async () => {
 				if (stopping.has(app)) return null;
+				const hint = await db.get(Q.next);
+				if (hint) await lockProject(db, hint.project);
 				const next = await db.get(Q.next);
+				if (next && next.project !== hint?.project) return null;
 				if (next) await db.run(Q.claim, { id: next.id, nonce: next.nonce });
 				return next ? { row: next, project: (await projectById(db, next.project))?.key } : null;
 			}),
@@ -168,16 +171,16 @@ async function deliver(app: App, supplied?: TrackerPort): Promise<number> {
 					: "The tracker request failed; check the tracker before creating another issue.";
 		}
 		await app.database.write(async (db) =>
-			db.transaction(
-				async () =>
-					await db.run(Q.finish, {
-						id: row.id,
-						nonce: row.nonce,
-						issue: issue ? JSON.stringify(issue) : null,
-						error,
-						state: issue ? "complete" : "failed",
-					}),
-			),
+			db.transaction(async () => {
+				await lockProject(db, row.project);
+				return await db.run(Q.finish, {
+					id: row.id,
+					nonce: row.nonce,
+					issue: issue ? JSON.stringify(issue) : null,
+					error,
+					state: issue ? "complete" : "failed",
+				});
+			}),
 		);
 		delivered++;
 	}

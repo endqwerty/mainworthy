@@ -78,6 +78,9 @@ export class UnreadableReply extends Error {
 }
 
 export class ApiError extends Error {
+	get retryable(): boolean {
+		return this.code === "busy";
+	}
 	constructor(
 		readonly code: Refusal["code"],
 		message: string,

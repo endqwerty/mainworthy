@@ -131,3 +131,5 @@ Each of these has a test or a script behind it, except where the table says othe
 | the schema | `src/server/kernel/schema.sql`, its catalog snapshot and a behaviour test; state stored-data and archive compatibility |
 
 [Write a changelog fragment or decision](change-the-code.md#record-a-visible-change) describes the metadata and assembly commands.
+
+[Project writes and authority](concurrency.md) explains actor and project locks, accepted report admission, and retryable contention.

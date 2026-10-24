@@ -1,10 +1,11 @@
 import { type Capability, heldCapabilities } from "../../core/kinds.ts";
 import type { TeamEvent, TeamInput } from "../../core/teams.ts";
 import type { App } from "../kernel/app.ts";
-import { type Actor, allProjects } from "../kernel/ctx.ts";
+import { type Actor, allProjects, findProject, lockProject } from "../kernel/ctx.ts";
 import { json, type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
 import { hasAdminGrant, providerVouches } from "./identity.ts";
+import { lockCallActors } from "./locks.ts";
 import { endSessionsWithoutFactor, requireRecentProof } from "./sessions.ts";
 
 type Team = { id: number; name: string; created_at: number };
@@ -110,6 +111,11 @@ export async function manageTeams(
 	input: TeamInput,
 	context: string | null = null,
 ) {
+	await lockCallActors(db, by, "admin", input);
+	if ((input.do === "team.grant.set" || input.do === "team.grant.remove") && input.project !== undefined) {
+		const project = await findProject(db, input.project);
+		if (!project || !(await lockProject(db, project.id))) throw notFound(`project ${input.project}`);
+	}
 	const keys = new Map((await allProjects(db)).map((project) => [project.id, project.key]));
 	const projectKey = (id: number): string => (id === 0 ? "*" : (keys.get(id) ?? `project ${id}`));
 	const displayGrants = async (team: number) =>

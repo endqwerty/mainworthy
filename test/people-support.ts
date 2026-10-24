@@ -218,14 +218,14 @@ export async function joined(
 export const signIn = (w: World, name: string, password: string, headers: Sent = {}) =>
 	w.post<{ signedIn: boolean }>("/api/login", { name, password }, headers);
 
-/** Holds the write gate, as a long report does, until `release`. */
+/** Holds the existing actors for a deterministic authority wait, until `release`. */
 export function holdGate(instance: Instance) {
 	return holdWriter(instance.app);
 }
 
 /**
  * Resolves once `count` more callers have asked for the write gate. A request does its reading first and asks
- * for the gate afterwards, so this is how a test knows that a request it sent is waiting there and not still
+ * for a write lease afterwards, so this is how a test knows that a request it sent is waiting there and not still
  * on its way.
  */
 export function waitingAtGate(instance: Instance, count: number): Promise<void> {

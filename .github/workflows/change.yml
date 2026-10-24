@@ -95,8 +95,8 @@ jobs:
             exit 1
           fi
           api_header=()
-          if jq -e '.ok == true and .apiVersion == 2' health.json > /dev/null; then
-            api_header=(-H 'x-mainworthy-api-version: 2')
+          if jq -e '.ok == true and .apiVersion == 3' health.json > /dev/null; then
+            api_header=(-H 'x-mainworthy-api-version: 3')
           elif jq -e 'type == "object" and .ok == true and (has("apiVersion") | not)' health.json > /dev/null; then
             echo "::warning::The instance predates API versions. Sending the lifecycle request without a version header until it is redeployed."
           else

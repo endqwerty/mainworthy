@@ -10,7 +10,7 @@ import { authenticate, createToken } from "../src/server/identity/identity.ts";
 import { type App, type Config, SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
 import type { Actor } from "../src/server/kernel/ctx.ts";
 import { Database } from "../src/server/kernel/db.ts";
-import { baselineSchema } from "../src/server/kernel/migrate.ts";
+import { baselineSchema, migrationHash } from "../src/server/kernel/migrate.ts";
 import { testDatabase } from "../test/db.ts";
 import { call, Decisions, ensure, itemAt, Plan, Proposal, Queue, Receipt, Slots, TestPage } from "./contracts.ts";
 
@@ -96,7 +96,7 @@ export function fingerprints(): Metadata["fingerprints"] {
 			);
 	return {
 		generator: new Bun.CryptoHasher("sha256").update(generator).digest("hex"),
-		migrations: baselineSchema().hash,
+		migrations: new Bun.CryptoHasher("sha256").update(baselineSchema().hash).update(migrationHash).digest("hex"),
 	};
 }
 

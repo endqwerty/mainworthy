@@ -33,9 +33,10 @@ that a pipeline must call needs `record`.
 ## Add a migration
 
 The PostgreSQL baseline is `src/server/kernel/schema.sql`. SQLite migrations and their upgrade-copy
-mechanism have been removed. Change the baseline and the catalog snapshot in `test/schema.test.ts`
-together, and add a test for the behaviour that needs the schema change. The schema test prepares declared
-statements against that baseline. Startup applies it idempotently under a dedicated migration advisory lock.
+mechanism have been removed. Keep the baseline immutable. Add the next SQL migration in `src/server/kernel/migrations/`, register it in
+`migrate.ts`, and update the catalog snapshot in `test/schema.test.ts`. Add a behaviour test and an upgrade
+test from the prior schema. Add new schema before removing old schema so the previous image can continue
+to serve during a rolling deployment. Startup applies migrations under a dedicated migration advisory lock.
 
 This engine conversion starts with a fresh database. It supplies no SQLite-file conversion. Archive import still requires format 1 and schema 43.
 Before a future schema change ships, state its stored-data and archive compatibility explicitly.

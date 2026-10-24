@@ -638,7 +638,7 @@ test.each(["rebuild", "archive"])(
 					);
 				}),
 		);
-		const pending = (
+		let pending = (
 			await inContext(
 				async (ctx) => await acceptReport(ctx, ReportInput.parse({ ...broadReport(tests.slice(-1)), job: "pending" })),
 			)
@@ -659,6 +659,15 @@ test.each(["rebuild", "archive"])(
 				);
 			} else await db.write(async (db) => await db.transaction(async () => await rebuildAssertionIndexes(db, true)));
 			if (!imported) expect(db.statementCount - beforeMaintenance).toBeLessThanOrEqual(100);
+			// Imported acceptance has no private proof. Admit a local probe after restoring its history.
+			if (imported)
+				pending = (
+					await inContext(
+						async (ctx) =>
+							await acceptReport(ctx, ReportInput.parse({ ...broadReport(tests.slice(-1)), job: "local-probe" })),
+						db,
+					)
+				).batch;
 			const write = db.write.bind(db);
 			let rowsRead = 0;
 			db.write = async (fn, options) =>
@@ -725,8 +734,11 @@ test("repeated tries and reports stop retaining threshold observations once the 
 	]);
 });
 
-const inContext = async <T>(fn: (ctx: ReturnType<typeof makeCtx<WriteDb>>) => T): Promise<T> =>
-	await h.app.database.write(
+const inContext = async <T>(
+	fn: (ctx: ReturnType<typeof makeCtx<WriteDb>>) => T,
+	database = h.app.database,
+): Promise<T> =>
+	await database.write(
 		async (db) =>
 			await db.transaction(async () => {
 				const project = await findProject(db, "scratch");

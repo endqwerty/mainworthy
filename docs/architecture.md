@@ -103,8 +103,7 @@ command id, commit, and publish what changed. A command id names one request: se
 first reply and writes nothing; sent again with other content it is refused. A client whose reply was lost can
 also ask `command` what became of the id, which writes nothing (decision 0013). A report is the one command that
 commits twice, and it takes a sequence number for each transaction (see the red build below). A read runs in a
-repeatable-read, read-only PostgreSQL transaction. A write waits in a local FIFO, then holds the
-instance-wide PostgreSQL advisory lock for the whole operation, including both report transactions.
+repeatable-read, read-only PostgreSQL transaction. A write locks its caller and project within each transaction. Report acceptance releases those locks; application reacquires them and checks current authority.
 
 `App.publish` isolates each change subscriber. A throwing subscriber is logged
 without its error text, and later subscribers still receive that event. A
@@ -120,11 +119,18 @@ one connection and runs the callback with a `ReadDb` in a repeatable-read, read-
 Before replying, the registry closes that snapshot and rechecks the caller, project identity and capability
 in a fresh read scope. It discards stale replies when authority or the project changed.
 
-`database.write(fn)` queues locally, reserves a write connection and takes the instance-wide advisory lock.
-Its callback receives a `WriteDb`, which also permits reads. Every statement in the operation uses that
-lease. `transaction(fn)` opens a transaction or joins the one already open; savepoints isolate recoverable
-statement failures. The registry alone uses explicit begin, commit and rollback for a sliced report.
-The lock and connection stay held across its two commits. Project and actor locks remain later work.
+`database.write(fn)` reserves a write connection. Its callback receives a `WriteDb`, which also permits
+reads. A project write locks its caller's actor row for admission and then the project row before reading
+mutable project state or allocating its sequence. Authority changes lock every affected actor exclusively,
+in id order. Different projects can write concurrently, including for one caller. `transaction(fn)` opens
+a transaction or joins the one already open; savepoints isolate recoverable statement failures.
+
+The registry alone uses explicit begin, commit and rollback for a sliced report. Acceptance releases the
+actor and project locks. Application takes them again and checks the private admission reference and actor
+version against current authority. It commits application and the accepting command's completion together.
+Revoked or imported acceptance is cancelled and its pending marks removed. The connection stays reserved
+across the two phases. [Project writes and authority](development/concurrency.md) gives the lock order,
+instance-write rules, and bounded waits that return retryable `busy`.
 
 A write outside a write scope does not compile. A write statement without an active transaction fails.
 `afterCommit` effects run after a confirmed commit; rolled-back savepoints discard their effects.

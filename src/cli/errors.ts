@@ -4,6 +4,9 @@ import { escapeWorkflowCommands } from "./terminal-text.ts";
 
 /** A user-facing CLI failure. Codes 0–3 belong to gate verdicts; command errors exit 4. */
 export class CliError extends Error {
+	get retryable(): boolean {
+		return this.code === "busy";
+	}
 	constructor(
 		readonly code: string,
 		message: string,

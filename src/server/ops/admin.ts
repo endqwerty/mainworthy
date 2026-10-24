@@ -25,6 +25,8 @@ import {
 	demoProjects,
 	findProject,
 	insertProject,
+	lockProject,
+	lockProjectKey,
 	makeCtx,
 	markDemo,
 	rewriteCommandReplies,
@@ -75,6 +77,7 @@ export async function createProject(
 	env: InstanceCtx,
 	input: { key: string; name?: string | undefined; preset?: string | undefined; unlinked?: Unlinked | undefined },
 ) {
+	await lockProjectKey(env.db, input.key);
 	const preset = input.preset ?? "loose";
 	if (!isPreset(preset)) throw invalid(`unknown preset ${preset}`);
 	if (await findProject(env.db, input.key)) throw conflict(`a project named ${input.key} exists`);
@@ -84,6 +87,7 @@ export async function createProject(
 		name: input.name ?? input.key,
 		at: env.now,
 	});
+	await lockProject(env.db, project.id);
 	const ctx = makeCtx(env.app, env.db, project, env.actor, true);
 	await seedPolicy(ctx, preset, input.unlinked);
 	await stampSeq(ctx);
@@ -175,7 +179,9 @@ export async function admin(env: InstanceCtx, input: AdminInput): Promise<unknow
 		case "project.demo": {
 			const project = await findProject(db, input.key);
 			if (!project) throw notFound(`project ${input.key}`);
-			const since = await markDemo(db, project, env.now);
+			const current = await lockProject(db, project.id);
+			if (!current) throw notFound(`project ${input.key}`);
+			const since = await markDemo(db, current, env.now);
 			if (since === null)
 				throw conflict(
 					`project ${input.key} holds work, and what it records keeps the server's clock; a demo is a project nothing was written to`,

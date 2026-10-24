@@ -8,7 +8,7 @@ Mainworthy runs as one server process connected to PostgreSQL 18. This page expl
 
 An instance needs PostgreSQL 18 for structured records. The app keeps attachment bytes in `blobs/` under its data directory. The executable includes the server, web UI, command line, documentation and MCP endpoint. `compose.yaml` starts the app and its database. Running elsewhere is possible but not yet supported.
 
-Writes wait in a queue and hold an instance-wide PostgreSQL advisory lock for the whole operation. Reads use separate connections and repeatable-read, read-only transactions. The registry rechecks authority in a fresh snapshot before sending a read reply. See [configuration](./configuration.md).
+Writes lock the affected actor and project rows until commit. Different projects can write concurrently. Reports commit acceptance before application, then recheck the admitting credential and current authority. A revoked report is cancelled and stops holding runs pending. A lock wait that exceeds its bound returns retryable `busy`. Reads use separate connections and repeatable-read, read-only transactions. The registry rechecks authority in a fresh snapshot before sending a read reply. See [the API](./api.md) for retries and [configuration](./configuration.md) for connections.
 
 ## One list of operations
 

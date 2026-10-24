@@ -1,17 +1,27 @@
 // A deployment swaps the visible demo once per revision. Retired data drains in separate gate turns.
 import { z } from "zod";
 import type { Instance } from "../app/start.ts";
-import { createToken, moveProjectGrants, revokeToken } from "../server/identity/identity.ts";
+import {
+	createToken,
+	lockActors,
+	lockProjectAuthority,
+	moveProjectGrants,
+	revokeToken,
+} from "../server/identity/identity.ts";
 import type { App } from "../server/kernel/app.ts";
 import {
 	demoDeployment,
 	demoSince,
 	findProject,
+	lockNamedProject,
+	lockProject,
+	lockProjectKey,
 	markDemo,
 	retireDemo,
 	retiredDemos,
 	setDemoDeployment,
 } from "../server/kernel/ctx.ts";
+import { Busy } from "../server/kernel/db.ts";
 import { createProject } from "../server/ops/admin.ts";
 import { OPS } from "../server/ops/index.ts";
 import { invoke } from "../server/ops/registry.ts";
@@ -77,7 +87,7 @@ async function refresh(
 		requested.unlinkedFiles > MAX_SEED_UNLINKED_FILES
 	)
 		throw new CliError("invalid", "invalid demo seed size");
-	const state = await app.database.write(async (db) => {
+	const state = await app.database.read(async (db) => {
 		const found = await findProject(db, project);
 		return found ? await demoDeployment(db, found.id) : null;
 	});
@@ -113,7 +123,14 @@ async function refresh(
 			try {
 				return await db.transaction(async () => {
 					options.signal?.throwIfAborted();
-					const old = await findProject(db, project);
+					const hint = await findProject(db, project);
+					if (hint) await lockProjectAuthority(db, hint.id, owner.id);
+					else {
+						await lockActors(db, [owner.id]);
+						await lockProjectKey(db, project);
+						if (await findProject(db, project)) throw new Busy();
+					}
+					const old = await lockNamedProject(db, project);
 					const current = old ? await demoDeployment(db, old.id) : null;
 					if (old && current?.kind === "seeding" && current.revision === revision)
 						return { id: old.id, size: current.size };
@@ -149,6 +166,8 @@ async function refresh(
 	await app.database.write((db) =>
 		db.transaction(async () => {
 			options.signal?.throwIfAborted();
+			await lockActors(db, [owner.id]);
+			if (!(await lockProject(db, target))) throw new CliError("conflict", "demo project changed while seeding");
 			const current = await demoDeployment(db, target);
 			if (current?.kind !== "seeding" || current.revision !== revision)
 				throw new CliError("conflict", "demo deployment changed while seeding");
@@ -172,14 +191,17 @@ export function drainRetiredDemos(
 		const { app } = instance;
 		for (;;) {
 			options.signal?.throwIfAborted();
-			const slice = await app.database.write(async (db) => {
-				options.signal?.throwIfAborted();
-				const retired = (await retiredDemos(db))[0];
-				if (!retired) return null;
-				const began = performance.now();
-				const result = await removeProjectSlice(db, retired.key, 32);
-				return { ...result, ms: performance.now() - began };
-			});
+			const slice = await app.database.write((db) =>
+				db.transaction(async () => {
+					options.signal?.throwIfAborted();
+					const retired = (await retiredDemos(db))[0];
+					if (!retired) return null;
+					await lockProjectAuthority(db, retired.id, instance.owner.id);
+					const began = performance.now();
+					const result = await removeProjectSlice(db, retired.key, 32);
+					return { ...result, ms: performance.now() - began };
+				}),
+			);
 			if (slice === null) return;
 			await options.onSlice?.(slice);
 			if (slice.ms > 100)

@@ -43,6 +43,7 @@ import {
 	applySteps,
 	type BatchRow,
 	batchById,
+	cancelBatch,
 	changeById,
 	changeByKey,
 	ensureTarget,
@@ -62,10 +63,16 @@ import {
 import { insertFinding, insertReview, reviewBasis, reviewedAt } from "../evidence/findings.ts";
 import { recordQuarantines, validateQuarantineEdit } from "../evidence/quarantine.ts";
 import { announce } from "../evidence/releases.ts";
-import { actorByName, actorLabel } from "../identity/identity.ts";
-import { begunCommand, type Ctx, finishCommand } from "../kernel/ctx.ts";
+import {
+	actorByName,
+	actorLabel,
+	batchAllowed,
+	forgetBatchAdmission,
+	keepBatchAdmission,
+} from "../identity/identity.ts";
+import { begunCommand, type Ctx, finishCommand, stampSeq } from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
-import { conflict, forbidden, invalid, notFound } from "../kernel/errors.ts";
+import { AcceptedRefusal, conflict, forbidden, invalid, notFound } from "../kernel/errors.ts";
 import { complete } from "../kernel/steps.ts";
 import { currentPolicy } from "../policy/policy.ts";
 import {
@@ -204,6 +211,7 @@ export async function acceptReport(ctx: Ctx, input: ReportInput): Promise<{ batc
 
 	const accepted = await accept(ctx, { target, run: run?.id ?? null, report: input, nonce: input.cmd ?? `${ctx.seq}` });
 	if (accepted.fresh) {
+		await keepBatchAdmission(ctx, accepted.batch.id);
 		if (input.target && "head" in input.target) await ensureTarget(ctx, input.target);
 		const runs = await runsFor(ctx, target, run?.id ?? null, ctx.actor.kind);
 		await noteAccepted(ctx, runs, accepted.batch.seq);
@@ -242,6 +250,37 @@ async function alsoWaiting(ctx: Ctx, batch: BatchRow, target: TargetRow, runs: r
 export async function* processBatchSteps(ctx: Ctx, batchId: number): AsyncGenerator<Pause, ReportReceipt, void> {
 	const batch = await batchById(ctx.db, batchId);
 	if (!batch) throw notFound(`batch ${batchId}`);
+	ctx.now = batch.at;
+	if (batch.state === "cancelled") throw new AcceptedRefusal();
+	if (batch.state === "processed" && batch.receipt !== null)
+		return { ...json<ReportReceipt>(batch.receipt), fresh: false };
+	if (!(await batchAllowed(ctx.app, ctx.db, batch.id, batch.actor, batch.project))) {
+		const target = await mustTarget(ctx.db, batch.target);
+		const producer = (await actorLabel(ctx.db, batch.actor)).kind;
+		const runs = await runsFor(ctx, target, batch.run, producer);
+		const waiting = await alsoWaiting(ctx, batch, target, runs);
+		await cancelBatch(ctx, batch.id);
+		await forgetBatchAdmission(ctx.db, batch.id);
+		await noteApplied(ctx, [...new Map([...runs, ...waiting].map((run) => [run.id, run])).values()], batch.seq);
+		await refold(
+			ctx,
+			[...runs, ...waiting].map((run) => run.id),
+			{ dissolveStale: true },
+		);
+		for (const run of [...runs, ...waiting]) ctx.touched.add(runRef(run));
+		const cmd = await begunCommand(ctx, { op: "report", seq: batch.seq });
+		if (cmd) await finishCommand(ctx, { id: cmd, outcome: { refused: "report" } });
+		await stampSeq(ctx);
+		const event = {
+			project: ctx.project.key,
+			seq: ctx.seq,
+			op: "report",
+			actor: ctx.actor.name,
+			touched: [...ctx.touched],
+		};
+		ctx.db.afterCommit(() => ctx.app.publish(event));
+		throw new AcceptedRefusal();
+	}
 	const target = await mustTarget(ctx.db, batch.target);
 	const producer = (await actorLabel(ctx.db, batch.actor)).kind;
 	const runs = await runsFor(ctx, target, batch.run, producer);
@@ -319,6 +358,9 @@ export async function* processBatchSteps(ctx: Ctx, batchId: number): AsyncGenera
 		gate: fresh ? await gateOf(ctx, fresh) : target.commit_sha !== null ? nothingCounted() : null,
 	};
 	await keepReceipt(ctx, batch, receipt);
+	const acceptedCommand = await begunCommand(ctx, { op: "report", seq: batch.seq });
+	if (acceptedCommand) await finishCommand(ctx, { id: acceptedCommand, outcome: receipt });
+	await forgetBatchAdmission(ctx.db, batch.id);
 	return receipt;
 }
 

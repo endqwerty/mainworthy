@@ -1,3 +1,16 @@
+import { lockActors, lockCallActors, lockProjectAuthority } from "./locks.ts";
+
+export {
+	batchAllowed,
+	forgetBatchAdmission,
+	keepBatchAdmission,
+	lockActors,
+	lockAllActors,
+	lockCallActors,
+	lockIdentityRoster,
+	lockProjectAuthority,
+} from "./locks.ts";
+
 // Actors, grants and tokens, and who a request is. Owns actors, personal and team grants, memberships, their history, and tokens.
 // There is no seat here: an actor is a free row with capabilities (principle P8).
 //
@@ -22,8 +35,8 @@ import {
 } from "../../core/kinds.ts";
 import type { App, Config } from "../kernel/app.ts";
 import type { CallerReference } from "../kernel/caller.ts";
-import type { Actor } from "../kernel/ctx.ts";
-import { json, type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
+import { type Actor, lockProject } from "../kernel/ctx.ts";
+import { Busy, isBusy, json, type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { conflict, forbidden, invalid, notFound } from "../kernel/errors.ts";
 import { limiterOf } from "./attempts.ts";
 import { clearChallenges } from "./challenges.ts";
@@ -139,6 +152,14 @@ const START_REFUSED =
 const ENDING_SOON_MS = 14 * 86_400_000;
 
 const Q = {
+	bootstrapActors: sql<
+		{ owner: string; was: string | null },
+		{ id: number }
+	>(`SELECT a.id FROM actors a WHERE a.name = $owner OR a.name = $was::text OR a.kind = 'rule'
+ OR EXISTS (SELECT FROM tokens t WHERE t.actor = a.id AND t.source = 'env' AND t.revoked_at IS NULL)
+ OR EXISTS (SELECT FROM grants g WHERE g.actor = a.id AND g.can::jsonb ? 'admin')
+ OR EXISTS (SELECT FROM team_members m JOIN team_grants g ON g.team = m.team WHERE m.actor = a.id AND g.can::jsonb ? 'admin') ORDER BY a.id`),
+	orgGuard: sql<{ id: number }>("SELECT id FROM orgs WHERE id = $id FOR NO KEY UPDATE"),
 	org: sql<readonly [], { id: number }>("SELECT id FROM orgs ORDER BY id LIMIT 1"),
 	insertOrg: sql<{ name: string; at: number }>("INSERT INTO orgs (name, created_at) VALUES ($name, $at)"),
 	actorByName: sql<{ org: number; name: string }, ActorRow>("SELECT * FROM actors WHERE org = $org AND name = $name"),
@@ -229,8 +250,8 @@ const Q = {
 	revokeToken: sql<{ id: number; at: number }>(
 		"UPDATE tokens SET revoked_at = $at WHERE id = $id AND revoked_at IS NULL",
 	),
-	addressesToForget: sql<{ before: number }, { id: number }>(
-		"SELECT id FROM tokens WHERE revoked_at <= $before OR expires_at <= $before",
+	addressesToForget: sql<{ before: number }, { id: number; actor: number }>(
+		"SELECT id,actor FROM tokens WHERE revoked_at <= $before OR expires_at <= $before",
 	),
 	forgetTokenAddress: sql<{ id: number }>(
 		"UPDATE tokens SET last_used_addr = NULL WHERE id = $id AND last_used_addr IS NOT NULL",
@@ -363,14 +384,25 @@ export async function bootstrap(
 ): Promise<{ owner: Actor; generatedToken: string | null; warnings: string[] }> {
 	validateBootstrap(app.config);
 	const configured = app.config.ownerToken;
-	if (!db)
-		return await app.database.write(
-			async (writer) => await writer.transaction(async () => await bootstrap(app, writer)),
-		);
+	if (!db) {
+		for (let attempt = 0; ; attempt++) {
+			try {
+				return await app.database.write((writer) => writer.transaction(() => bootstrap(app, writer)));
+			} catch (error) {
+				if (!isBusy(error) || attempt >= 2) throw error;
+			}
+		}
+	}
+	const discovery = { owner: app.config.owner, was: app.config.ownerWas ?? null };
+	const affected = (await db.all(Q.bootstrapActors, discovery)).map((row) => row.id);
+	await lockActors(db, affected, true);
+	await db.exec("LOCK TABLE orgs IN SHARE ROW EXCLUSIVE MODE");
 	const at = app.now();
 	if (!(await db.get(Q.org))) await db.run(Q.insertOrg, { name: "default", at });
 	const org = await orgId(db);
-	await ensureActor(db, { org, kind: "rule", name: RULE_ACTOR, at });
+	await db.get(Q.orgGuard, { id: org });
+	if ((await db.all(Q.bootstrapActors, discovery)).some((row) => !affected.includes(row.id))) throw new Busy();
+	const policyActor = await ensureActor(db, { org, kind: "rule", name: RULE_ACTOR, at });
 	const renamed = await renameOwner(app, db, org);
 	const existing = await db.get(Q.actorByName, { org, name: app.config.owner });
 	if (existing && existing.kind !== "human") {
@@ -462,7 +494,9 @@ export async function bootstrap(
 	}
 	if (server && app.config.proxy === null) warnings.push(NO_PROXY_NAMED);
 	if (app.config.requireAdminMfa) {
-		for (const actor of await db.all(Q.actors, { org }))
+		for (const actor of (await db.all(Q.actors, { org })).filter(
+			(row) => affected.includes(row.id) || row.id === owner.id || row.id === policyActor.id,
+		))
 			if (await hasAdminGrant(db, actor.id)) await endSessionsWithoutFactor(db, actor.id, at, providerVouches(app));
 	}
 	return { owner: await toActor(db, owner, 0), generatedToken, warnings };
@@ -541,6 +575,9 @@ async function ensureActor(
 ): Promise<ActorRow> {
 	const found = await db.get(Q.actorByName, { org: input.org, name: input.name });
 	if (found) return found;
+	await db.get(Q.orgGuard, { id: input.org });
+	const current = await db.get(Q.actorByName, { org: input.org, name: input.name });
+	if (current) return current;
 	const { id } = await db.one(Q.insertActor, {
 		org: input.org,
 		kind: input.kind,
@@ -824,7 +861,7 @@ export async function admit(app: App, facts: Facts): Promise<Admission> {
 		if (presented.kind !== "standing") return presented;
 		const { token } = presented;
 		const hash = hashToken(facts.bearer);
-		noteUse(app, "token", token.id, app.now(), facts.address);
+		noteUse(app, "token", token.id, app.now(), facts.address, hash);
 		return {
 			kind: "admitted",
 			session: {
@@ -842,7 +879,7 @@ export async function admit(app: App, facts: Facts): Promise<Admission> {
 		const hash = hashToken(facts.cookie);
 		const found = await findSession(app, hash);
 		if (found) {
-			noteUse(app, "session", found.id, app.now(), facts.address);
+			noteUse(app, "session", found.id, app.now(), facts.address, hash);
 			return {
 				kind: "admitted",
 				session: {
@@ -918,7 +955,7 @@ export async function signInWithToken(
 	const { token } = presented;
 	const tokenHash = hashToken(secret);
 	// The use is of the token as it stands now, noted before any wait. An import clears the notes when it commits.
-	noteUse(app, "token", token.id, app.now(), about.address);
+	noteUse(app, "token", token.id, app.now(), about.address, tokenHash);
 	const cookie = newSessionSecret();
 	const signedIn = app.database.write(
 		async (db) =>
@@ -1028,11 +1065,14 @@ export async function createToken(
 		return await app.database.write(
 			async (writer) => await writer.transaction(async () => await createToken(app, input, caller, writer)),
 		);
-	if (caller?.context != null) await requireRecentProof(app, db, caller);
 	if (input.kind === "rule") throw invalid("a rule does not hold a token");
 	mustBeName(input.actor);
 	const org = await orgId(db);
 	const at = app.now();
+	const hint = await db.get(Q.actorByName, { org, name: input.actor });
+	if (caller) await lockCallActors(db, { id: caller.actor }, "admin", { do: "token.create", actor: input.actor });
+	else if (hint) await lockActors(db, [hint.id], true);
+	if (caller?.context != null) await requireRecentProof(app, db, caller);
 	const existing = await db.get(Q.actorByName, { org, name: input.actor });
 	if (existing && existing.kind !== input.kind) {
 		throw conflict(`actor ${input.actor} exists and is a ${existing.kind}, not a ${input.kind}`);
@@ -1045,6 +1085,7 @@ export async function createToken(
 	}
 	refuseGrant(input.kind, input.can);
 	const actor = existing ?? (await ensureActor(db, { org, kind: input.kind, name: input.actor, at }));
+	if (!existing && input.can.length > 0 && input.project > 0) await lockProject(db, input.project);
 	if (!existing && input.can.length > 0)
 		await db.run(Q.setGrant, { actor: actor.id, project: input.project, can: JSON.stringify(input.can) });
 	const secret = newSecret();
@@ -1103,6 +1144,7 @@ export async function invitedPerson(
 	refuseGrant("human", input.can);
 	if (existing) return { id: existing.id, name: existing.name, isNew: false };
 	const made = await ensureActor(db, { org, kind: "human", name: input.name, at: app.now() });
+	if (input.can.length > 0 && input.project > 0) await lockProject(db, input.project);
 	if (input.can.length > 0)
 		await db.run(Q.setGrant, { actor: made.id, project: input.project, can: JSON.stringify(input.can) });
 	return { id: made.id, name: made.name, isNew: true };
@@ -1131,6 +1173,9 @@ export async function setGrant(
 	input: { actor: string; project: number; can: readonly Capability[]; roles?: readonly Role[] },
 	caller: ProofContext | null = null,
 ): Promise<Role[]> {
+	const hint = await mustActor(db, input.actor);
+	await lockActors(db, [hint.id], true);
+	if (input.project > 0) await lockProject(db, input.project);
 	if (input.can.includes("admin") && caller?.context != null) await requireRecentProof(app, db, caller);
 	const row = await mustActor(db, input.actor);
 	refuseGrant(row.kind, input.can);
@@ -1151,12 +1196,16 @@ export async function setGrant(
 
 /** Moves current personal and team grants during an atomic demo swap, preserving their history and roles. */
 export async function moveProjectGrants(db: WriteDb, from: number, to: number): Promise<void> {
+	await lockProjectAuthority(db, [from, to]);
 	await db.run(Q.moveProjectGrants, { from, to });
 	await moveTeamProjectGrants(db, from, to);
 }
 
 /** Takes away an actor's grant on one project (0: its grant on every project). False when it held none there. */
 export async function removeGrant(_app: App, db: WriteDb, input: { actor: string; project: number }): Promise<boolean> {
+	const hint = await mustActor(db, input.actor);
+	await lockActors(db, [hint.id], true);
+	if (input.project > 0) await lockProject(db, input.project);
 	const row = await mustActor(db, input.actor);
 	return (await db.run(Q.dropGrant, { actor: row.id, project: input.project })).changes > 0;
 }
@@ -1192,6 +1241,8 @@ export async function lastTokenOf(db: ReadDb, id: number, now: number): Promise<
 }
 
 export async function revokeToken(app: App, db: WriteDb, id: number): Promise<boolean> {
+	const target = await tokenOwner(db, id);
+	if (target !== null) await lockActors(db, [target], true);
 	const at = app.now();
 	const owner = app.config.owner;
 	if (app.config.mode === "server" && (await lastTokenOf(db, id, at)) === owner) {
@@ -1259,6 +1310,7 @@ export async function createPersonalToken(
 
 /** Revokes every token of an actor, including the owner's last token, during recovery or erasure. */
 export async function revokeTokensOf(db: WriteDb, actor: number, at: number): Promise<number> {
+	await lockActors(db, [actor], true);
 	return (await db.run(Q.revokeTokensOf, { actor, at })).changes;
 }
 
@@ -1268,8 +1320,12 @@ export async function sweepSignInRecords(app: App): Promise<void> {
 	await app.database.write(
 		async (db) =>
 			await db.transaction(async () => {
+				const hints = await db.all(Q.addressesToForget, { before: now - 30 * 86_400_000 });
+				const affected = new Set(hints.map((row) => row.actor));
+				await lockActors(db, [...affected], true);
 				const tokens = await db.all(Q.addressesToForget, { before: now - 30 * 86_400_000 });
-				for (const token of tokens) await db.run(Q.forgetTokenAddress, token);
+				if (tokens.some((row) => !affected.has(row.actor))) throw new Busy();
+				for (const token of tokens) await db.run(Q.forgetTokenAddress, { id: token.id });
 				await sweepInvitations(db, now);
 				forgetNotedAddresses(
 					app,
@@ -1307,6 +1363,8 @@ export async function forgetActor(
 	db: WriteDb,
 	name: string,
 ): Promise<{ forgotten: string; tokensRevoked: number }> {
+	const hint = await db.get(Q.actorByName, { org: await orgId(db), name });
+	if (hint) await lockActors(db, [hint.id], true);
 	const row = await db.get(Q.actorByName, { org: await orgId(db), name });
 	if (!row) throw notFound(`actor ${name}`);
 	if (row.kind === "rule") throw invalid("the policy's own actor cannot be forgotten");

@@ -98,6 +98,7 @@ export const ERROR_CODES = [
 	"not_found",
 	"conflict",
 	"limited",
+	"busy",
 	"internal",
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -111,6 +112,7 @@ export const HTTP_STATUS: Readonly<Record<ErrorCode, number>> = {
 	not_found: 404,
 	conflict: 409,
 	limited: 429,
+	busy: 503,
 	internal: 500,
 };
 

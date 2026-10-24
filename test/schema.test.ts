@@ -110,7 +110,7 @@ test("failed DDL rolls back the entire baseline; the released lease can retry", 
 		expect(await target.read(schemaVersion)).toBe(SCHEMA_VERSION);
 		await raw.unsafe("UPDATE meta SET value='wrong' WHERE key='baseline_hash'");
 		await expect(migrate(target)).rejects.toThrow("baseline does not match");
-		await raw.unsafe("UPDATE meta SET value='2' WHERE key='schema_version'");
+		await raw.unsafe("UPDATE meta SET value='999' WHERE key='schema_version'");
 		await expect(migrate(target)).rejects.toThrow("newer than this build");
 	} finally {
 		await raw.close();
@@ -422,4 +422,37 @@ test("the schema port --check accounts for every reviewed hand edit", async () =
 	]);
 	expect({ rc, stderr }).toEqual({ rc: 0, stderr: "" });
 	expect(stdout).toContain("13 justified hand edits only.");
+});
+
+test("the project-lock migration upgrades the immutable baseline without replacing its rows", async () => {
+	const fixture = await testDatabase({ schema: "empty" });
+	const target = await Database.open({ url: fixture.url });
+	try {
+		await target.write((db) =>
+			db.transaction(async () => {
+				await db.exec(baselineSchema().sql);
+				await db.exec(
+					"INSERT INTO orgs(id,name,created_at) VALUES(1,'existing',0); INSERT INTO actors(id,org,kind,name,created_at) VALUES(1,1,'human','robin',0)",
+				);
+				await db.run(
+					(await import("../src/server/kernel/db.ts")).sql<{ hash: string }>(
+						"INSERT INTO meta(key,value) VALUES ('schema_version','1'),('archive_version','43'),('baseline_hash',$hash)",
+					),
+					{ hash: baselineSchema().hash },
+				);
+			}),
+		);
+		await migrate(target);
+		expect(await target.read((db) => db.allDynamic("SELECT id, name, auth_version FROM actors"))).toEqual([
+			{ id: 1, name: "robin", auth_version: 0 },
+		]);
+		expect(await target.read(schemaVersion)).toBe(2);
+		await migrate(target);
+		expect(await target.read((db) => db.allDynamic("SELECT id, name, auth_version FROM actors"))).toEqual([
+			{ id: 1, name: "robin", auth_version: 0 },
+		]);
+	} finally {
+		await target.close();
+		await fixture.close();
+	}
 });

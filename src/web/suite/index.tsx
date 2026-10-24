@@ -1465,6 +1465,7 @@ export function SuiteScreen() {
 							error instanceof ApiError &&
 							error.status !== null &&
 							error.code !== "internal" &&
+							error.code !== "busy" &&
 							sessionCurrent(owner) &&
 							mayWrite(source.id, !draftStored)
 						)
@@ -2129,7 +2130,7 @@ export function SuiteScreen() {
 			if (obsoleteProject(error)) {
 				undo.current = null;
 				setStatus(placementObsolete);
-			} else if (error instanceof ApiError && error.code !== "internal") {
+			} else if (error instanceof ApiError && error.code !== "internal" && error.code !== "busy") {
 				if (undo.current === action) undo.current = previous;
 				setStatus(error.message);
 			} else {

@@ -13,7 +13,15 @@ async function snapshot(app: App) {
 }
 
 import { z } from "zod";
-import { demoDeployment, demoSince, findProject, retiredDemos, setDemoDeployment } from "../server/kernel/ctx.ts";
+import {
+	demoDeployment,
+	demoSince,
+	findProject,
+	lockProject,
+	retireDemo,
+	retiredDemos,
+	setDemoDeployment,
+} from "../server/kernel/ctx.ts";
 import { drainRetiredDemos, refreshDemo } from "./demo.ts";
 import { seed } from "./seed.ts";
 import { withInstance } from "./test-support.ts";
@@ -231,3 +239,77 @@ test("a stale read snapshot cannot make a completed revision refresh again", asy
 		}
 	});
 }, 30_000);
+
+async function waitingForLock(app: App): Promise<void> {
+	const end = performance.now() + 1000;
+	while (performance.now() < end) {
+		const waiting = await app.database.read((db) =>
+			db.allDynamic<{ n: number }>(
+				"SELECT count(*) AS n FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock'",
+			),
+		);
+		if ((waiting[0]?.n ?? 0) > 0) return;
+		await new Promise<void>((resolve) => setImmediate(resolve));
+	}
+	throw new Error("demo maintenance never waited for its project lock");
+}
+
+for (const phase of ["swap", "ready", "drain"] as const)
+	test(`demo ${phase} waits for the project writer before changing maintenance state`, async () => {
+		await withInstance(async ({ instance }) => {
+			const { app } = instance;
+			const size = { cases: 1, unlinkedFiles: 0, days: 0 };
+			app.config.commit = A;
+			const seeded = Promise.withResolvers<void>();
+			const finishSeed = Promise.withResolvers<void>();
+			const seeding = refreshDemo(instance, "demo", size, {
+				step: async (step) => {
+					if (phase === "ready" && step === "seeded") {
+						seeded.resolve();
+						await finishSeed.promise;
+					}
+				},
+			});
+			if (phase === "ready") await seeded.promise;
+			else await seeding;
+			const project = await app.database.read((db) => findProject(db, "demo"));
+			if (!project) throw new Error("missing demo");
+			if (phase === "drain") await app.database.write((db) => db.transaction(() => retireDemo(db, project)));
+			const entered = Promise.withResolvers<void>();
+			const release = Promise.withResolvers<void>();
+			const holding = app.database.write((db) =>
+				db.transaction(async () => {
+					await lockProject(db, project.id);
+					entered.resolve();
+					await release.promise;
+				}),
+			);
+			await entered.promise;
+			app.config.commit = B;
+			let completed = false;
+			if (phase === "ready") finishSeed.resolve();
+			const changing = (
+				phase === "drain"
+					? drainRetiredDemos(instance)
+					: phase === "ready"
+						? seeding
+						: refreshDemo(instance, "demo", size)
+			).then(() => {
+				completed = true;
+			});
+			try {
+				await waitingForLock(app);
+				expect(completed).toBe(false);
+				if (phase === "swap") expect((await app.database.read((db) => findProject(db, "demo")))?.id).toBe(project.id);
+				if (phase === "ready")
+					expect(await app.database.read((db) => demoDeployment(db, project.id))).toMatchObject({ kind: "seeding" });
+			} finally {
+				release.resolve();
+				await Promise.all([holding, changing]);
+			}
+			if (phase === "swap") expect((await app.database.read((db) => findProject(db, "demo")))?.id).not.toBe(project.id);
+			if (phase === "ready")
+				expect(await app.database.read((db) => demoDeployment(db, project.id))).toMatchObject({ kind: "ready" });
+			if (phase === "drain") expect(await app.database.read(retiredDemos)).toEqual([]);
+		});
+	});

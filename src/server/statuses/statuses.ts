@@ -10,7 +10,7 @@ import {
 	targetsOfCommits,
 } from "../evidence/evidence.ts";
 import type { App } from "../kernel/app.ts";
-import { type Ctx, findProject, makeCtx } from "../kernel/ctx.ts";
+import { type Ctx, findProject, lockProject, makeCtx } from "../kernel/ctx.ts";
 import { json, sql, type WriteDb } from "../kernel/db.ts";
 import { gate, gatesOfCommits } from "../runs/runs.ts";
 import { githubStatusesPort } from "./github.ts";
@@ -24,6 +24,11 @@ const STOP_DIAGNOSTIC =
 	"GitHub commit status delivery stopped after 16 unsuccessful attempts; check repository access and Commit statuses write permission, then send a new counted report.";
 const Posts = z.array(z.number());
 type DeliveryRow = { posts: string; pause_until: number; failures: number };
+
+async function deliveryState(db: WriteDb): Promise<DeliveryRow> {
+	await db.run(Q.ensureDelivery);
+	return db.one(Q.delivery);
+}
 
 function retryDelay(attempts: number): number {
 	return Math.min(60_000 * 2 ** Math.min(attempts - 1, 6), 3_600_000);
@@ -81,8 +86,11 @@ const Q = {
 	halt: sql<{ nonce: string; error: string }>(
 		"UPDATE commit_statuses SET state = 'stopped', error = $error WHERE nonce = $nonce",
 	),
+	ensureDelivery: sql(
+		"INSERT INTO commit_status_delivery(id,posts,pause_until,failures) VALUES (1,'[]',0,0) ON CONFLICT DO NOTHING",
+	),
 	delivery: sql<readonly [], DeliveryRow>(
-		"SELECT posts, pause_until, failures FROM commit_status_delivery WHERE id = 1",
+		"SELECT posts, pause_until, failures FROM commit_status_delivery WHERE id = 1 FOR UPDATE",
 	),
 	saveDelivery: sql<DeliveryRow>(`INSERT INTO commit_status_delivery (id, posts, pause_until, failures)
 		VALUES (1, $posts, $pause_until, $failures) ON CONFLICT (id) DO UPDATE SET
@@ -155,8 +163,9 @@ async function queue(
 async function refresh(app: App, db: WriteDb): Promise<void> {
 	const config = app.config.github;
 	if (!app.config.githubStatuses || !config || !app.config.publicUrl) return;
-	const project = await findProject(db, config.project);
-	if (!project) return;
+	const hint = await findProject(db, config.project);
+	const project = hint ? await lockProject(db, hint.id) : null;
+	if (!project || project.key !== config.project || project.identity !== hint?.identity) return;
 	const ctx = makeCtx(app, db, project, { id: 0, kind: "rule", name: "rule", can: [] }, true);
 	const rows = await db.all(Q.all, { project: project.id, repository: config.repository, now: app.now() });
 	if (!rows.length) return;
@@ -216,10 +225,11 @@ async function deliver(app: App, supplied?: StatusPort): Promise<number> {
 				await db.transaction(async () => {
 					const config = app.config.github;
 					if (stopping.has(app) || !app.config.githubStatuses || !config || !app.config.publicUrl) return null;
-					const project = await findProject(db, config.project);
-					if (!project) return null;
+					const hint = await findProject(db, config.project);
+					const project = hint ? await lockProject(db, hint.id) : null;
+					if (!project || project.key !== config.project || project.identity !== hint?.identity) return null;
 					const now = app.now();
-					const delivery = (await db.get(Q.delivery)) ?? { posts: "[]", pause_until: 0, failures: 0 };
+					const delivery = await deliveryState(db);
 					const posts = Posts.parse(json<unknown>(delivery.posts)).filter((at) => at > now - 3_600_000);
 					if (delivery.pause_until > now || posts.length >= 240 || posts.filter((at) => at > now - 60_000).length >= 20)
 						return null;
@@ -271,8 +281,9 @@ async function deliver(app: App, supplied?: StatusPort): Promise<number> {
 			await app.database.write(
 				async (db) =>
 					await db.transaction(async () => {
+						await lockProject(db, row.project);
 						await db.run(Q.finish, { nonce: row.nonce, sent: row.desired, next: nextAt });
-						const delivery = await db.get(Q.delivery);
+						const delivery = await deliveryState(db);
 						if (delivery) await db.run(Q.saveDelivery, { ...delivery, failures: 0 });
 					}),
 			);
@@ -283,9 +294,10 @@ async function deliver(app: App, supplied?: StatusPort): Promise<number> {
 			await app.database.write(
 				async (db) =>
 					await db.transaction(async () => {
+						await lockProject(db, row.project);
 						let next = app.now() + retryDelay(row.attempts + 1);
 						if (error instanceof StatusRateLimit) {
-							const delivery = (await db.get(Q.delivery)) ?? { posts: "[]", pause_until: 0, failures: 0 };
+							const delivery = await deliveryState(db);
 							const failures = Math.min(delivery.failures + 1, MAX_ATTEMPTS);
 							const headerDeadline = Math.min(
 								app.now() + MAX_HEADER_PAUSE,
@@ -305,15 +317,15 @@ async function deliver(app: App, supplied?: StatusPort): Promise<number> {
 			console.error(`[mainworthy] commit status ${row.commit_sha}: ${message}`);
 		}
 		await app.database.write(async (db) =>
-			db.transaction(
-				async () =>
-					await db.run(Q.defer, {
-						project: row.project,
-						repository: row.repository,
-						commit: row.commit_sha,
-						next: nextAt,
-					}),
-			),
+			db.transaction(async () => {
+				await lockProject(db, row.project);
+				await db.run(Q.defer, {
+					project: row.project,
+					repository: row.repository,
+					commit: row.commit_sha,
+					next: nextAt,
+				});
+			}),
 		);
 		delivered++;
 	}

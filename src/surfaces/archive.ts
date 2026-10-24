@@ -11,7 +11,7 @@ import {
 } from "../server/identity/identity.ts";
 import type { App } from "../server/kernel/app.ts";
 import type { Actor } from "../server/kernel/ctx.ts";
-import type { WriteDb } from "../server/kernel/db.ts";
+import { isBusy, type WriteDb } from "../server/kernel/db.ts";
 import { OpError } from "../server/kernel/errors.ts";
 import { runArchive } from "../server/ops/archives.ts";
 
@@ -23,7 +23,11 @@ const json = (body: unknown, status = 200): Response =>
 	});
 
 function failure(error: unknown): Response {
-	const known = error instanceof OpError ? error : new OpError("internal", "archive transfer failed");
+	const known = isBusy(error)
+		? new OpError("busy", "the writer is busy; retry the same archive request")
+		: error instanceof OpError
+			? error
+			: new OpError("internal", "archive transfer failed");
 	return json({ ok: false, error: { code: known.code, message: known.message } }, HTTP_STATUS[known.code]);
 }
 
@@ -126,8 +130,10 @@ export function archiveRoutes(
 				await stageBody(req, file.path);
 				const result = await (async () => {
 					const authorize = async (db: WriteDb) => {
-						const ref = session.reference?.();
-						const actor = ref ? (await resolveCaller(app, db, ref, 0))?.actor : await session.actor(0);
+						const ref =
+							session.reference?.() ??
+							(session.via === "local" ? { via: "local" as const, owner: app.config.owner } : null);
+						const actor = ref ? (await resolveCaller(app, db, ref, 0))?.actor : null;
 						if (!actor?.can.includes("admin"))
 							throw new OpError(
 								"forbidden",
@@ -155,9 +161,7 @@ export function archiveRoutes(
 					// may not be there any more, and must not be answered for whoever is.
 					clearChallenges(app);
 					if (localOwner && restored.owner) Object.assign(localOwner, restored.owner);
-					// An export taken while a report was between its two transactions holds that report accepted and
-					// not applied. The original applied it a moment later; so does this instance, now, and not only
-					// at its next start.
+					// Recovery cancels imported accepted reports: their admitting credentials never travel in the archive.
 					for (const event of restored.events) app.publish(event);
 					return restored.counts;
 				})();

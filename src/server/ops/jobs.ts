@@ -3,9 +3,10 @@
 import { recoverDisputes as reconcileDisputes, sweepExpired } from "../decisions/decisions.ts";
 import { expiredDecisions } from "../decisions/questions.ts";
 import { acceptedBatches, batchById } from "../evidence/evidence.ts";
-import { actorById, ruleActorId } from "../identity/identity.ts";
+import { actorById, lockActors, ruleActorId } from "../identity/identity.ts";
 import type { App } from "../kernel/app.ts";
-import { allProjects, makeCtx, projectById, stampSeq } from "../kernel/ctx.ts";
+import { allProjects, lockProject, makeCtx, projectById, stampSeq } from "../kernel/ctx.ts";
+import { AcceptedRefusal } from "../kernel/errors.ts";
 import { applyAccepted } from "./writes.ts";
 
 /**
@@ -23,6 +24,8 @@ export async function recoverAccepted(app: App): Promise<number> {
 		try {
 			done = await app.database.write(async (db) =>
 				db.transaction(async () => {
+					await lockActors(db, [batch.actor]);
+					await lockProject(db, batch.project);
 					const current = await batchById(db, batch.id);
 					if (current?.state !== "accepted") return null;
 					const project = await projectById(db, current.project);
@@ -30,7 +33,12 @@ export async function recoverAccepted(app: App): Promise<number> {
 					// A report applied here keeps the time it was accepted at, as one applied by its own request does:
 					// its results are not dated by the restart, and a demo's history stays where the seed put it.
 					const ctx = makeCtx(app, db, project, await actorById(db, current.actor, project.id), true, current.at);
-					await applyAccepted(ctx, current);
+					try {
+						await applyAccepted(ctx, current);
+					} catch (error) {
+						if (error instanceof AcceptedRefusal) return null;
+						throw error;
+					}
 					await stampSeq(ctx);
 					return { key: project.key, seq: ctx.seq, touched: [...ctx.touched], actor: ctx.actor.name };
 				}),
@@ -53,7 +61,8 @@ export async function recoverDisputes(app: App): Promise<number> {
 	for (const { id } of await app.database.read(async (db) => allProjects(db))) {
 		repaired += await app.database.write(async (db) =>
 			db.transaction(async () => {
-				const project = await projectById(db, id);
+				await lockActors(db, [await ruleActorId(db)]);
+				const project = await lockProject(db, id);
 				if (!project) return 0;
 				const ctx = makeCtx(app, db, project, await actorById(db, await ruleActorId(db), id), true);
 				const n = await reconcileDisputes(ctx);
@@ -71,10 +80,11 @@ export async function sweep(app: App, as?: number): Promise<number> {
 	for (const { id } of await app.database.read(async (db) => allProjects(db))) {
 		const done = await app.database.write(async (db) =>
 			db.transaction(async () => {
+				await lockActors(db, [as ?? (await ruleActorId(db))]);
+				const project = await lockProject(db, id);
+				if (!project) return null;
 				const expired = await expiredDecisions(db, id, app.now());
 				if (expired.length === 0) return null;
-				const project = await projectById(db, id);
-				if (!project) return null;
 				const ctx = makeCtx(app, db, project, await actorById(db, as ?? (await ruleActorId(db)), project.id), true);
 				const n = await sweepExpired(ctx, expired);
 				if (n === 0) return null;

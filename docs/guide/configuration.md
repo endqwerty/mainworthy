@@ -60,7 +60,7 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_CLIENT_ADDRESS_HEADER` | none | The header in which that proxy reports the visitor's address. Believed only on a connection from a proxy named above. |
 | `MAINWORTHY_DATABASE_URL` | required | PostgreSQL connection URL. `compose.yaml` starts PostgreSQL 18 and sets this for the app. |
 | `MAINWORTHY_DB_POOL` | `2` | Read-pool connections, an integer from 1 to 64. |
-| `MAINWORTHY_DB_WRITE_POOL` | `1` | Write-pool connections, an integer from 1 to 64. Writes still hold one instance-wide advisory lock. |
+| `MAINWORTHY_DB_WRITE_POOL` | `4` | Write-pool connections, an integer from 1 to 64. Writes lock their actors and projects; different projects can write concurrently. |
 | `MAINWORTHY_DEMO` | none | Paused since 2026-10-24 (#914): the server leaves the demo as it is. A marked demo refreshed once per deployed revision after listening. The commit comes from `MAINWORTHY_COMMIT` or `SOURCE_COMMIT`. Same-revision restarts preserve edits and renew featured work. New revisions swap in a fresh demo with existing grants; retired data drains in bounded transactions. Unknown revisions and unmarked projects are refused. See [demo data](./customize.md#a-project-of-demo-data). |
 | `MAINWORTHY_COMMIT` | none | The commit this server was built from, which `/healthz` reports. It must have 40 lower-case hexadecimal characters. If absent or invalid, the server tries `SOURCE_COMMIT`, then reports unknown. |
 | `MAINWORTHY_GITHUB_PROJECT` | none | The project allowed to send defects and optional gate commit statuses to GitHub. Set the project, repository, and token together. |

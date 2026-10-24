@@ -151,6 +151,22 @@ test("same-code sample locations use one batch without changing commit order", a
 	);
 });
 
+test("a first report reuses a test repeated after an application pause", async () => {
+	const input = ciReport({ commit: "repeated-across-slices", n: 201 });
+	const repeated = input.results[0];
+	if (!repeated) throw new Error("missing first result");
+	input.results[200] = { ...repeated, outcome: "fail", failure: { message: "the later observation failed" } };
+	const receipt = await h.call<ReportReceipt>("report", input);
+	expect(receipt.counts.total).toBe(201);
+	expect(await count("tests")).toBe(200);
+	expect(await count("results")).toBe(201);
+	expect(
+		await h.app.database.read((db) =>
+			db.allDynamic("SELECT count(*) AS n FROM results WHERE test = (SELECT id FROM tests WHERE no = 1)"),
+		),
+	).toEqual([{ n: 2 }]);
+});
+
 describe("standing excuse precedence", () => {
 	test("an exact target wins, another target falls back to the cause, and an unanswered cause stays unexplained", async () => {
 		const report = async (commit: string, attempt = 1, message = "shared cause") =>

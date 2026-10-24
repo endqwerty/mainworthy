@@ -131,7 +131,20 @@ export interface WriteDb extends ReadDb {
 	afterCommit(effect: () => void | Promise<void>): void;
 }
 
-export const WRITE_LOCK = 0x4d57524954450001n;
+// Selected from the supported-report measurement in docs/development/concurrency.md.
+export const LOCK_WAIT_MS = 120_000;
+export function isBusy(error: unknown): boolean {
+	if (error instanceof Busy) return true;
+	if (error instanceof TransactionAborted) return isBusy(error.first);
+	const state = sqlState(error) ?? (error instanceof ConnectionLost ? sqlState(error.cause) : null);
+	return ["55P03", "40P01", "40001", "57014", "25P03", "25P04"].includes(state ?? "");
+}
+export class Busy extends Error {
+	constructor(cause?: unknown) {
+		super("the writer is busy; retry the same request with the same command id", { cause });
+		this.name = "Busy";
+	}
+}
 export const MIGRATION_LOCK = 0x4d574d4947520001n;
 export function sqlState(error: unknown): string | null {
 	if (typeof error !== "object" || error === null) return null;
@@ -271,7 +284,7 @@ async function query<R>(
 		const pending = lease.conn.unsafe<R[] & { count: number }>(text, values);
 		return await (simple ? pending.simple() : pending);
 	} catch (error) {
-		if (lost(error)) {
+		if (lost(error) || ["25P03", "25P04"].includes(sqlState(error) ?? "")) {
 			lease.poisoned = true;
 			lease.lost = error instanceof ConnectionLost ? error : new ConnectionLost(error);
 			throw lease.lost;
@@ -490,14 +503,21 @@ function poolSize(value: number | string | undefined, fallback: number): number 
 		throw new Error("database pool size must be an integer from 1 to 64");
 	return count;
 }
-export type OpenOptions = { url: string; readPool?: number; writePool?: number; acquireTimeoutMs?: number };
+export type OpenOptions = {
+	url: string;
+	readPool?: number;
+	writePool?: number;
+	acquireTimeoutMs?: number;
+	lockWaitMs?: number;
+};
 let migration: <T>(database: Database, fn: (db: WriteDb) => T | Promise<T>) => Promise<T>;
 export class Database {
 	private readonly readers: SQL;
 	private readonly writers: SQL;
 	private readonly shutdown = new AbortController();
-	private tail: Promise<void> = Promise.resolve();
+
 	private count = 0;
+	private readonly activeWrites = new Set<Promise<void>>();
 	private constructor(private readonly options: OpenOptions) {
 		this.readers = new SQL(options.url, {
 			bigint: true,
@@ -505,7 +525,7 @@ export class Database {
 		});
 		this.writers = new SQL(options.url, {
 			bigint: true,
-			max: poolSize(options.writePool ?? process.env.MAINWORTHY_DB_WRITE_POOL, 1),
+			max: poolSize(options.writePool ?? process.env.MAINWORTHY_DB_WRITE_POOL, 4),
 		});
 	}
 	static {
@@ -520,6 +540,10 @@ export class Database {
 	}
 	static async open(input: OpenOptions): Promise<Database> {
 		if (!input.url) throw new Error("MAINWORTHY_DATABASE_URL is required; see compose.yaml");
+		for (const value of [input.lockWaitMs, input.acquireTimeoutMs]) {
+			if (value !== undefined && (!Number.isSafeInteger(value) || value < 1))
+				throw new Error("database timeout must be a positive whole number of milliseconds");
+		}
 		const database = new Database(input);
 		try {
 			await database.read((db) => db.allDynamic("SELECT 1"));
@@ -538,7 +562,7 @@ export class Database {
 	private signal(signal?: AbortSignal): AbortSignal {
 		return AbortSignal.any([
 			this.shutdown.signal,
-			AbortSignal.timeout(this.options.acquireTimeoutMs ?? 30_000),
+			AbortSignal.timeout(this.options.acquireTimeoutMs ?? LOCK_WAIT_MS),
 			...(signal ? [signal] : []),
 		]);
 	}
@@ -587,20 +611,47 @@ export class Database {
 		}
 	}
 	async write<T>(fn: (db: WriteDb) => T | Promise<T>, options: { signal?: AbortSignal } = {}): Promise<T> {
-		const previous = this.tail;
-		let release = () => {};
-		this.tail = new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		const signal = AbortSignal.any([this.shutdown.signal, ...(options.signal ? [options.signal] : [])]);
+		const finished = Promise.withResolvers<void>();
+		this.activeWrites.add(finished.promise);
 		try {
-			await abortable(previous, signal);
-			return await this.locked(this.writers, WRITE_LOCK, fn, signal);
+			return await this.writeLease(fn, options);
 		} finally {
-			// A cancelled waiter cannot let its successor jump ahead of an active lease.
-			void previous.then(release);
+			finished.resolve();
+			this.activeWrites.delete(finished.promise);
 		}
 	}
+	private async writeLease<T>(fn: (db: WriteDb) => T | Promise<T>, options: { signal?: AbortSignal }): Promise<T> {
+		const lease = await this.lease(this.writers, options.signal).catch((error: unknown) => {
+			if (options.signal?.aborted) throw options.signal.reason;
+			if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError"))
+				throw new Busy(error);
+			throw error;
+		});
+		const db = new Scope(lease, true);
+		try {
+			await query(
+				lease,
+				`SET lock_timeout = '${this.options.lockWaitMs ?? LOCK_WAIT_MS}ms';
+ SET statement_timeout = '${LOCK_WAIT_MS}ms';
+ SET transaction_timeout = '${LOCK_WAIT_MS}ms';
+ SET idle_in_transaction_session_timeout = '${LOCK_WAIT_MS}ms'`,
+				[],
+				false,
+				true,
+			);
+			const result = await fn(db);
+			if (lease.lost) throw lease.lost;
+			if (lease.tx) throw new Error("write callback returned with an open transaction");
+			return result;
+		} finally {
+			try {
+				if (lease.tx && !lease.lost) await db.rollback();
+			} finally {
+				await this.dispose(lease);
+			}
+		}
+	}
+
 	private async locked<T>(
 		pool: SQL,
 		key: bigint,
@@ -647,19 +698,9 @@ export class Database {
 	}
 	async close(): Promise<void> {
 		this.shutdown.abort(new Error("database is closed"));
-		await this.tail;
+		await Promise.all(this.activeWrites);
 		await Promise.all([this.readers.close(), this.writers.close()]);
 	}
-}
-function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-	signal.throwIfAborted();
-	return new Promise((resolve, reject) => {
-		const abort = () => {
-			reject(signal.reason);
-		};
-		signal.addEventListener("abort", abort, { once: true });
-		void promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
-	});
 }
 export async function migrationLock<T>(database: Database, fn: (db: WriteDb) => T | Promise<T>): Promise<T> {
 	return migration(database, fn);

@@ -6,7 +6,7 @@ import { z } from "zod";
 import { withInstance } from "../cli/test-support.ts";
 import { Policy } from "../core/kinds.ts";
 import type { GateStatus } from "../core/ops.ts";
-import { actorByName, authenticate, revokeToken, type Session } from "../server/identity/identity.ts";
+import { actorByName, authenticate, hashToken, revokeToken, type Session } from "../server/identity/identity.ts";
 import { findProject, makeCtx, stampSeq } from "../server/kernel/ctx.ts";
 import { acceptReport } from "../server/ops/writes.ts";
 import { archiveRoutes } from "./archive.ts";
@@ -478,6 +478,7 @@ test("a token revoked while the body is uploading cannot complete the import", a
 				if (!token) throw new Error("the second token is missing");
 				const session: Session = {
 					via: "token",
+					reference: () => ({ via: "token", hash: hashToken(secret) }),
 					actor: async (project) => await authenticate(instance.app, secret, project),
 				};
 				let input: ReadableStreamDefaultController<Uint8Array> | undefined;
@@ -542,7 +543,7 @@ test("a local import preserves the configured owner's identity for the next writ
 	);
 });
 
-test("a report the original had accepted and not yet applied is applied by the instance that imports it", async () => {
+test("a report the original accepted is cancelled by the importing instance without its admitting credential", async () => {
 	await withInstance(async (source) => {
 		await source.client.call("propose", { edits: [{ op: "create", outline: "Imported mid-report" }] });
 		// The moment between a report's two transactions, as an export taken under load catches it.
@@ -567,9 +568,15 @@ test("a report the original had accepted and not yet applied is applied by the i
 		if (!archive.body) throw new Error("missing archive body");
 		await withInstance(async (target) => {
 			expect((await target.client.request("/api/import", { method: "POST", body: archive.body })).status).toBe(200);
-			// No restart: the staged report is applied as part of the import, and its gate says what it showed.
+			// No restart: recovery cancels the unproven batch and clears its pending marks during import.
 			const gate = (await target.client.call("gate", { commit: "midreport1" })) as GateStatus;
-			expect(gate).toMatchObject({ verdict: "blocked", tally: { pass: 1, unexplained: 1 } });
+			expect(gate).toMatchObject({ verdict: "pending", tally: { pass: 0, unexplained: 0 } });
+			expect(await target.instance.app.database.read((db) => db.allDynamic("SELECT state FROM batches"))).toEqual([
+				{ state: "cancelled" },
+			]);
+			expect(await target.instance.app.database.read((db) => db.allDynamic("SELECT outstanding FROM runs"))).toEqual([
+				{ outstanding: 0 },
+			]);
 		});
 	});
 });
@@ -583,6 +590,7 @@ test("an archive refuses out-of-range durations in pending reports before recove
 			tries: [{ outcome: "fail" as const, durationMs: 2_592_000_000 }],
 		};
 		const app = source.instance.app;
+		await source.client.call("report", { target: { commit: "processed-duration", branch: "main" }, results: [result] });
 		await app.database.write((db) =>
 			db.transaction(async () => {
 				const project = await findProject(db, "scratch");

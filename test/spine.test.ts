@@ -220,9 +220,12 @@ test("a sliced write commits twice on the same lease while its successor waits",
 	let successor: Promise<unknown> | undefined;
 	try {
 		await gap.promise;
-		successor = h.app.database.write(async () => {
-			successorRan = true;
-		});
+		successor = h.app.database.write((db) =>
+			db.transaction(async () => {
+				await db.all(sql("SELECT id FROM projects WHERE key = 'scratch' FOR UPDATE"));
+				successorRan = true;
+			}),
+		);
 		const projects = await h.app.database.read(
 			async (db) => await db.one(sql<readonly [], { seq: number }>("SELECT seq FROM projects WHERE key = 'scratch'")),
 		);

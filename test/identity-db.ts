@@ -53,19 +53,28 @@ export async function closeIdentityDatabases(): Promise<void> {
 	fixtures.clear();
 }
 afterAll(closeIdentityDatabases);
+/** Orders legacy test interleavings; project-locks.test.ts uses real row-lock barriers. */
 export function holdWriter(app: App) {
+	const original = app.database.write.bind(app.database);
 	const released = Promise.withResolvers<void>();
-	const ready = Promise.withResolvers<WriteDb>();
-	const held = app.database.write(async (db) => {
-		ready.resolve(db);
-		await released.promise;
-	});
+	let tail = released.promise;
+	let opened = true;
+	app.database.write = (fn, options) => {
+		const prior = tail;
+		const finished = Promise.withResolvers<void>();
+		tail = finished.promise;
+		return prior.then(() => original(fn, options)).finally(() => finished.resolve());
+	};
 	return {
 		release: async () => {
-			released.resolve();
-			await held;
+			if (opened) {
+				opened = false;
+				app.database.write = original;
+				released.resolve();
+			}
+			await released.promise;
 		},
-		run: async <T>(fn: (db: WriteDb) => Promise<T>): Promise<T> => await (await ready.promise).transaction(fn),
+		run: async <T>(fn: (db: WriteDb) => Promise<T>): Promise<T> => original((db) => db.transaction(fn)),
 	};
 }
 

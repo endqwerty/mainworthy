@@ -1,7 +1,8 @@
 // Bun Snapshot v1, https://bun.sh/docs/test/snapshots
 
 exports[`PostgreSQL 18 baseline catalog matches the reviewed snapshot 1`] = `
-"column actors.created_at: bigint NOT NULL
+"column actors.auth_version: bigint NOT NULL DEFAULT 0
+column actors.created_at: bigint NOT NULL
 column actors.disabled_at: bigint NULL
 column actors.id: bigint NOT NULL IDENTITY d
 column actors.kind: text NOT NULL
@@ -43,6 +44,10 @@ column attachments.name: text NOT NULL
 column attachments.result: bigint NOT NULL
 column attachments.size: bigint NOT NULL
 column attachments.type: text NOT NULL
+column batch_admissions.actor: bigint NOT NULL
+column batch_admissions.auth_version: bigint NOT NULL
+column batch_admissions.batch: bigint NOT NULL
+column batch_admissions.reference: text NOT NULL
 column batches.actor: bigint NOT NULL
 column batches.at: bigint NOT NULL
 column batches.attempt: bigint NOT NULL DEFAULT 1
@@ -585,6 +590,7 @@ column versions.parent: bigint NULL
 column versions.proposal: bigint NOT NULL
 column versions.reason: text NULL
 column versions.seq: bigint NOT NULL
+constraint actors.actors_auth_version_not_null: NOT NULL auth_version
 constraint actors.actors_created_at_not_null: NOT NULL created_at
 constraint actors.actors_id_not_null: NOT NULL id
 constraint actors.actors_kind_check: CHECK ((kind = ANY (ARRAY['human'::text, 'agent'::text, 'ci'::text, 'rule'::text])))
@@ -651,6 +657,13 @@ constraint attachments.attachments_result_not_null: NOT NULL result
 constraint attachments.attachments_size_check: CHECK (((size >= 0) AND (size <= 4194304)))
 constraint attachments.attachments_size_not_null: NOT NULL size
 constraint attachments.attachments_type_not_null: NOT NULL type
+constraint batch_admissions.batch_admissions_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
+constraint batch_admissions.batch_admissions_actor_not_null: NOT NULL actor
+constraint batch_admissions.batch_admissions_auth_version_not_null: NOT NULL auth_version
+constraint batch_admissions.batch_admissions_batch_fkey: FOREIGN KEY (batch) REFERENCES batches(id) ON DELETE CASCADE DEFERRABLE
+constraint batch_admissions.batch_admissions_batch_not_null: NOT NULL batch
+constraint batch_admissions.batch_admissions_pkey: PRIMARY KEY (batch)
+constraint batch_admissions.batch_admissions_reference_not_null: NOT NULL reference
 constraint batches.batches_actor_fkey: FOREIGN KEY (actor) REFERENCES actors(id) DEFERRABLE
 constraint batches.batches_actor_not_null: NOT NULL actor
 constraint batches.batches_at_not_null: NOT NULL at
@@ -671,8 +684,8 @@ constraint batches.batches_project_key_key: UNIQUE (project, key)
 constraint batches.batches_project_not_null: NOT NULL project
 constraint batches.batches_seq_not_null: NOT NULL seq
 constraint batches.batches_shard_check: CHECK (((shard IS NULL) OR (shard >= 1)))
-constraint batches.batches_state_check: CHECK ((state = ANY (ARRAY['accepted'::text, 'processed'::text])))
 constraint batches.batches_state_not_null: NOT NULL state
+constraint batches.batches_state_v2: CHECK ((state = ANY (ARRAY['accepted'::text, 'processed'::text, 'cancelled'::text])))
 constraint batches.batches_target_fkey: FOREIGN KEY (target) REFERENCES targets(id) DEFERRABLE
 constraint batches.batches_target_not_null: NOT NULL target
 constraint builds.builds_artifact_fkey: FOREIGN KEY (artifact) REFERENCES artifacts(id) DEFERRABLE
@@ -1346,6 +1359,52 @@ constraint versions.versions_no_not_null: NOT NULL no
 constraint versions.versions_pkey: PRIMARY KEY (case_id, no)
 constraint versions.versions_proposal_not_null: NOT NULL proposal
 constraint versions.versions_seq_not_null: NOT NULL seq
+function authority_actor_changed: CREATE OR REPLACE FUNCTION public.authority_actor_changed()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+ IF (NEW.org, NEW.kind, NEW.name, NEW.disabled_at) IS DISTINCT FROM (OLD.org, OLD.kind, OLD.name, OLD.disabled_at) THEN
+  NEW.auth_version := OLD.auth_version + 1;
+ END IF;
+ RETURN NEW;
+END $function$
+
+function authority_changed: CREATE OR REPLACE FUNCTION public.authority_changed()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+DECLARE affected bigint[]; row_actor bigint;
+BEGIN
+ IF TG_OP = 'DELETE' THEN
+  IF TG_TABLE_NAME = 'sessions' THEN
+   IF OLD.ended_at IS NOT NULL THEN RETURN OLD; END IF;
+  ELSIF TG_TABLE_NAME IN ('tokens', 'credentials') THEN
+   IF OLD.revoked_at IS NOT NULL THEN RETURN OLD; END IF;
+  END IF;
+ END IF;
+ IF TG_TABLE_NAME = 'team_grants' THEN
+  SELECT array_agg(actor ORDER BY actor) INTO affected FROM team_members WHERE team IN (NEW.team, OLD.team);
+ ELSIF TG_TABLE_NAME = 'orgs' THEN
+  SELECT array_agg(id ORDER BY id) INTO affected FROM actors WHERE org IN (NEW.id, OLD.id);
+ ELSE
+  affected := ARRAY[NEW.actor, OLD.actor];
+ END IF;
+ FOR row_actor IN SELECT DISTINCT value FROM unnest(affected) AS changed(value) WHERE value IS NOT NULL ORDER BY value LOOP
+  PERFORM id FROM actors WHERE id = row_actor FOR UPDATE;
+  UPDATE actors SET auth_version = auth_version + 1 WHERE id = row_actor;
+ END LOOP;
+ IF TG_TABLE_NAME = 'team_grants' THEN
+  PERFORM id FROM teams WHERE id IN (NEW.team, OLD.team) ORDER BY id FOR NO KEY UPDATE;
+  IF EXISTS (SELECT FROM team_members WHERE team IN (NEW.team, OLD.team) AND NOT (actor = ANY(coalesce(affected, ARRAY[]::bigint[])))) THEN
+   RAISE EXCEPTION 'team membership changed during authority lock discovery' USING ERRCODE = '40001';
+  END IF;
+ ELSIF TG_TABLE_NAME = 'team_members' THEN
+  PERFORM id FROM teams WHERE id IN (NEW.team, OLD.team) ORDER BY id FOR NO KEY UPDATE;
+ END IF;
+ RETURN coalesce(NEW, OLD);
+END $function$
+
 function receipt_batch_fn: CREATE OR REPLACE FUNCTION public.receipt_batch_fn()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1727,6 +1786,7 @@ index assertion_spreads_pkey: CREATE UNIQUE INDEX assertion_spreads_pkey ON publ
 index assertion_spreads_root: CREATE INDEX assertion_spreads_root ON public.assertion_spreads USING btree (root)
 index attachments_pkey: CREATE UNIQUE INDEX attachments_pkey ON public.attachments USING btree (id)
 index attachments_result: CREATE INDEX attachments_result ON public.attachments USING btree (result, id)
+index batch_admissions_pkey: CREATE UNIQUE INDEX batch_admissions_pkey ON public.batch_admissions USING btree (batch)
 index batches_accepted: CREATE INDEX batches_accepted ON public.batches USING btree (project, state) WHERE (state = 'accepted'::text)
 index batches_pkey: CREATE UNIQUE INDEX batches_pkey ON public.batches USING btree (id)
 index batches_project_key_key: CREATE UNIQUE INDEX batches_project_key_key ON public.batches USING btree (project, key)
@@ -1948,6 +2008,7 @@ table assertion_roots:
 table assertion_seen: 
 table assertion_spreads: 
 table attachments: 
+table batch_admissions: 
 table batches: 
 table builds: 
 table case_aliases: 
@@ -2014,7 +2075,9 @@ table tokens:
 table tracker_polls: 
 table tracker_requests: 
 table versions: 
+trigger actors.authority_actor: CREATE TRIGGER authority_actor BEFORE UPDATE ON public.actors FOR EACH ROW EXECUTE FUNCTION authority_actor_changed()
 trigger batches.receipt_batch: CREATE TRIGGER receipt_batch AFTER UPDATE OF job ON public.batches FOR EACH ROW EXECUTE FUNCTION receipt_batch_fn()
+trigger credentials.authority_credential: CREATE TRIGGER authority_credential BEFORE INSERT OR DELETE OR UPDATE OF actor, revoked_at, data ON public.credentials FOR EACH ROW EXECUTE FUNCTION authority_changed()
 trigger excuses.receipt_excuses_delete_old: CREATE TRIGGER receipt_excuses_delete_old AFTER DELETE ON public.excuses FOR EACH ROW EXECUTE FUNCTION receipt_excuses_delete_old_fn()
 trigger excuses.receipt_excuses_insert_new: CREATE TRIGGER receipt_excuses_insert_new AFTER INSERT ON public.excuses FOR EACH ROW EXECUTE FUNCTION receipt_excuses_insert_new_fn()
 trigger excuses.receipt_excuses_update_new: CREATE TRIGGER receipt_excuses_update_new AFTER UPDATE ON public.excuses FOR EACH ROW EXECUTE FUNCTION receipt_excuses_update_new_fn()
@@ -2023,6 +2086,8 @@ trigger flips.receipt_flips_delete_old: CREATE TRIGGER receipt_flips_delete_old 
 trigger flips.receipt_flips_insert_new: CREATE TRIGGER receipt_flips_insert_new AFTER INSERT ON public.flips FOR EACH ROW EXECUTE FUNCTION receipt_flips_insert_new_fn()
 trigger flips.receipt_flips_update_new: CREATE TRIGGER receipt_flips_update_new AFTER UPDATE ON public.flips FOR EACH ROW EXECUTE FUNCTION receipt_flips_update_new_fn()
 trigger flips.receipt_flips_update_old: CREATE TRIGGER receipt_flips_update_old AFTER UPDATE ON public.flips FOR EACH ROW EXECUTE FUNCTION receipt_flips_update_old_fn()
+trigger grants.authority_grant: CREATE TRIGGER authority_grant BEFORE INSERT OR DELETE OR UPDATE ON public.grants FOR EACH ROW EXECUTE FUNCTION authority_changed()
+trigger orgs.authority_org: CREATE TRIGGER authority_org BEFORE UPDATE ON public.orgs FOR EACH ROW EXECUTE FUNCTION authority_changed()
 trigger quarantines.receipt_quarantine_insert: CREATE TRIGGER receipt_quarantine_insert AFTER INSERT ON public.quarantines FOR EACH ROW EXECUTE FUNCTION receipt_quarantine_insert_fn()
 trigger quarantines.receipt_quarantine_presence: CREATE TRIGGER receipt_quarantine_presence AFTER DELETE ON public.quarantines FOR EACH ROW EXECUTE FUNCTION receipt_quarantine_presence_fn()
 trigger result_excuses.receipt_result_excuses_delete_old: CREATE TRIGGER receipt_result_excuses_delete_old AFTER DELETE ON public.result_excuses FOR EACH ROW EXECUTE FUNCTION receipt_result_excuses_delete_old_fn()
@@ -2039,6 +2104,10 @@ trigger run_tests.receipt_run_insert: CREATE TRIGGER receipt_run_insert AFTER IN
 trigger run_tests.receipt_run_update_new: CREATE TRIGGER receipt_run_update_new AFTER UPDATE ON public.run_tests FOR EACH ROW EXECUTE FUNCTION receipt_run_update_new_fn()
 trigger run_tests.receipt_run_update_old: CREATE TRIGGER receipt_run_update_old AFTER UPDATE ON public.run_tests FOR EACH ROW EXECUTE FUNCTION receipt_run_update_old_fn()
 trigger search_docs.search_docs_vector: CREATE TRIGGER search_docs_vector BEFORE INSERT OR UPDATE ON public.search_docs FOR EACH ROW EXECUTE FUNCTION search_docs_vector_fn()
+trigger sessions.authority_session: CREATE TRIGGER authority_session BEFORE DELETE OR UPDATE OF actor, ended_at ON public.sessions FOR EACH ROW EXECUTE FUNCTION authority_changed()
 trigger targets.receipt_target: CREATE TRIGGER receipt_target AFTER UPDATE OF line, change, repo, what, env ON public.targets FOR EACH ROW EXECUTE FUNCTION receipt_target_fn()
-trigger tests.receipt_test: CREATE TRIGGER receipt_test AFTER UPDATE OF name, file, no, kind ON public.tests FOR EACH ROW EXECUTE FUNCTION receipt_test_fn()"
+trigger team_grants.authority_team_grant: CREATE TRIGGER authority_team_grant BEFORE INSERT OR DELETE OR UPDATE ON public.team_grants FOR EACH ROW EXECUTE FUNCTION authority_changed()
+trigger team_members.authority_membership: CREATE TRIGGER authority_membership BEFORE INSERT OR DELETE OR UPDATE ON public.team_members FOR EACH ROW EXECUTE FUNCTION authority_changed()
+trigger tests.receipt_test: CREATE TRIGGER receipt_test AFTER UPDATE OF name, file, no, kind ON public.tests FOR EACH ROW EXECUTE FUNCTION receipt_test_fn()
+trigger tokens.authority_token: CREATE TRIGGER authority_token BEFORE INSERT OR DELETE OR UPDATE OF actor, revoked_at, expires_at, hash ON public.tokens FOR EACH ROW EXECUTE FUNCTION authority_changed()"
 `;

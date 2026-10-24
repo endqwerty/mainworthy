@@ -1,6 +1,6 @@
 // The broad-assertion rule reads distinct observations, never the payload of a commit's raw results or tries.
 import { signatureHash } from "../../core/signature.ts";
-import { allProjects, type Ctx } from "../kernel/ctx.ts";
+import { allProjects, type Ctx, lockProject } from "../kernel/ctx.ts";
 import { json, type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { invalid } from "../kernel/errors.ts";
 import { fileSignature, type SignatureRow, signaturesByHashes, storeSignature, storeSignatures } from "./signatures.ts";
@@ -251,14 +251,15 @@ export async function* ensureAssertionIndex(db: WriteDb, project: number): Async
 	await db.run(Q.markReady, { project });
 }
 
-/** Startup and archive import rebuild privately, before any accepted batch can use the index. */
+/** Startup and archive import rebuild under the same project locks as report application. */
 export async function rebuildAssertionIndexes(
 	db: WriteDb,
 	force = false,
 	progress: () => void = () => {},
 ): Promise<void> {
 	await db.transaction(async () => {
-		for (const { id: project } of await allProjects(db)) {
+		for (const { id: project } of (await allProjects(db)).sort((a, b) => a.id - b.id)) {
+			if (!(await lockProject(db, project))) continue;
 			if (force) await db.run(Q.clearReady, { project });
 			for await (const _ of ensureAssertionIndex(db, project)) {
 				progress();
