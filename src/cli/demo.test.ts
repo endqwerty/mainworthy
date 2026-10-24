@@ -25,6 +25,9 @@ test("the same revision preserves edits; a new revision swaps grants and drains 
 		});
 		await client.call("admin", { do: "team.create", name: "testers" });
 		await client.call("admin", { do: "team.grant.set", team: "testers", project: "demo", can: ["read"] });
+		await client.call("admin", { do: "team.grant.remove", team: "testers", project: "demo" });
+		await client.call("admin", { do: "team.grant.set", team: "testers", project: "demo", can: ["read"] });
+		const teamHistory = await client.call("admin", { do: "team.history", team: "testers" });
 		await client
 			.with({ project: "demo" })
 			.call("propose", { edits: [{ op: "create", body: { title: "An edit to preserve" } }] });
@@ -75,6 +78,7 @@ test("the same revision preserves edits; a new revision swaps grants and drains 
 		});
 		expect(slices).toBeGreaterThan(1);
 		expect(retiredDemos(app.db)).toEqual([]);
+		expect(await client.call("admin", { do: "team.history", team: "testers" })).toEqual(teamHistory);
 		expect(app.db.raw.query("SELECT count(*) AS n FROM projects WHERE key LIKE '~demo-%'").get()).toEqual({ n: 0 });
 		expect(app.db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
 		expect((await client.call("find", { text: "A foreground write" })).items).toHaveLength(1);

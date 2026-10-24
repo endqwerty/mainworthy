@@ -57,8 +57,8 @@ Every domain module may also import `server/kernel`, and no domain module import
 [Diagram: the surfaces, the operations and the record](../diagrams/architecture.html) shows the same modules
 with what each owns.
 
-The CLI has three named exceptions: `client.ts`, `demo.ts` and `demo-worker.ts` may call identity,
-and `demo.ts` may also call transfer, to reset and refill the demo project.
+The CLI has two named exceptions: `client.ts` may call identity for the sign-in token length bound, and
+`demo.ts` may call identity and transfer to swap demo grants and delete retired demo data in slices.
 
 Three more rules come with the map, each held by the same test:
 
