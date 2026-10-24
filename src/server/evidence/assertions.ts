@@ -3,17 +3,8 @@ import { signatureHash } from "../../core/signature.ts";
 import { allProjects, type Ctx } from "../kernel/ctx.ts";
 import { json, type ReadDb, sql, type WriteDb } from "../kernel/db.ts";
 import { invalid } from "../kernel/errors.ts";
-import {
-	fileSignature,
-	type SignatureRow,
-	signatureByHash,
-	signatureById,
-	signaturesByHashes,
-	storeSignature,
-	storeSignatures,
-} from "./signatures.ts";
+import { fileSignature, type SignatureRow, signaturesByHashes, storeSignature, storeSignatures } from "./signatures.ts";
 
-const PAGE = 200;
 const Q = {
 	sliceState: sql<
 		{ project: number; scope: string; roots: readonly number[] },
@@ -45,9 +36,6 @@ const Q = {
 	clearSeen: sql<{ project: number }>("DELETE FROM assertion_seen WHERE project = $project"),
 	clearSpreads: sql<{ project: number }>("DELETE FROM assertion_spreads WHERE project = $project"),
 	clearReady: sql<{ project: number }>("DELETE FROM assertion_index WHERE project = $project"),
-	root: sql<{ signature: number }, SignatureRow>(
-		"SELECT s.* FROM assertion_roots a JOIN signatures s ON s.id = a.root WHERE a.signature = $signature",
-	),
 	rememberRoot: sql<{ project: number; signature: number; root: number }>(
 		"INSERT INTO assertion_roots(project, signature, root) VALUES ($project, $signature, $root) ON CONFLICT DO NOTHING",
 	),
@@ -80,19 +68,23 @@ const Q = {
 		"DELETE FROM assertion_spreads WHERE project = $project AND scope = $scope",
 	),
 	history: sql<
-		{ project: number; after: number },
-		{ id: number; test: number; file: string | null; signature: number | null; what: string; commit_sha: string | null }
-	>(
-		`SELECT r.id, r.test, t.file, r.signature, g.what, g.commit_sha FROM results r
-   JOIN tests t ON t.id = r.test JOIN targets g ON g.id = r.target
-   WHERE r.project = $project AND r.id > $after ORDER BY r.id LIMIT 200`,
-	),
-	firstTries: sql<{ result: number }, { signature: number | null; try: number }>(
-		"SELECT signature, try FROM result_tries WHERE result = $result ORDER BY try LIMIT 200",
-	),
-	nextTries: sql<{ result: number; after: number }, { signature: number | null; try: number }>(
-		"SELECT signature, try FROM result_tries WHERE result = $result AND try > $after ORDER BY try LIMIT 200",
-	),
+		{ project: number; after: number; position: number },
+		SignatureRow & {
+			result_id: number;
+			position: number;
+			test: number;
+			file: string | null;
+			what: string;
+			commit_sha: string | null;
+		}
+	>(`SELECT r.id AS result_id, observation.position, r.test, t.file, stored_signature.*, g.what, g.commit_sha
+ FROM results r JOIN tests t ON t.id = r.test JOIN targets g ON g.id = r.target
+ CROSS JOIN LATERAL (
+  SELECT r.signature, 0::bigint AS position
+  UNION ALL SELECT tr.signature, tr.try AS position FROM result_tries tr WHERE tr.result = r.id
+ ) observation JOIN signatures stored_signature ON stored_signature.id = observation.signature
+ WHERE r.project = $project AND r.id >= $after AND (r.id > $after OR observation.position > $position)
+ ORDER BY r.id, observation.position LIMIT 200`),
 };
 
 export const assertionScope = (target: { what: string; commit_sha: string | null }, batch: number): string =>
@@ -100,30 +92,6 @@ export const assertionScope = (target: { what: string; commit_sha: string | null
 
 async function rememberRoot(db: WriteDb, root: SignatureRow, signature: number): Promise<void> {
 	await db.run(Q.rememberRoot, { project: root.project, root: root.id, signature });
-}
-
-/** Verify both hashes when recovering a file child; a failure message can itself start with "Split by file". */
-async function originalRoot(db: WriteDb, signature: SignatureRow, file: string | null): Promise<SignatureRow> {
-	const known = await db.get(Q.root, { signature: signature.id });
-	if (known) return known;
-	let root = signature;
-	if (signatureHash(signature) !== signature.hash) {
-		const prefix = `Split by file (${file ?? "no file reported"}): `;
-		const text = signature.text.slice(prefix.length);
-		const candidate = await signatureByHash(db, signature.project, signatureHash({ class: signature.class, text }));
-		if (
-			!signature.text.startsWith(prefix) ||
-			!candidate ||
-			candidate.class !== signature.class ||
-			candidate.text !== text ||
-			fileSignature(candidate, file).hash !== signature.hash
-		) {
-			throw invalid(`cannot reconstruct assertion root ${signature.id}`);
-		}
-		root = candidate;
-	}
-	await rememberRoot(db, root, signature.id);
-	return root;
 }
 
 async function child(ctx: Ctx, root: SignatureRow, file: string | null): Promise<void> {
@@ -192,38 +160,52 @@ export async function* ensureAssertionIndex(db: WriteDb, project: number): Async
 	await db.run(Q.clearSeen, { project });
 	await db.run(Q.clearSpreads, { project });
 	let after = 0;
-	let work = 0;
+	let position = -1;
+	const active = new Set<string>();
 	for (;;) {
-		const rows = await db.all(Q.history, { project, after });
+		const rows = await db.all(Q.history, { project, after, position });
 		if (rows.length === 0) break;
-		for (const row of rows) {
-			after = row.id;
-			const remember = async (id: number | null) => {
-				const signature = id === null ? null : await signatureById(db, id);
-				if (signature?.class !== "assertion") return;
-				const root = await originalRoot(db, signature, row.file);
-				if (row.commit_sha !== null)
-					await recordObservation(
-						db,
-						{ project, scope: `commit:${row.what}`, root: root.id },
-						{ id: row.test, file: row.file },
-					);
-			};
-			await remember(row.signature);
-			let tries = await db.all(Q.firstTries, { result: row.id });
-			for (;;) {
-				let last: number | null = null;
-				for (const tried of tries) {
-					await remember(tried.signature);
-					last = tried.try;
-					if (++work % PAGE === 0) yield;
-				}
-				if (tries.length < PAGE || last === null) break;
-				yield;
-				tries = await db.all(Q.nextTries, { result: row.id, after: last });
-			}
-			if (++work % PAGE === 0) yield;
+		const observations = rows.map((row) => ({ ...row, signature: row }));
+		const candidates = new Map<string, SignatureRow>();
+		const hashes: string[] = [];
+		for (const row of observations) {
+			const signature = row.signature;
+			if (signature?.class !== "assertion" || signatureHash(signature) === signature.hash) continue;
+			const prefix = `Split by file (${row.file ?? "no file reported"}): `;
+			hashes.push(signatureHash({ class: signature.class, text: signature.text.slice(prefix.length) }));
 		}
+		for (const root of await signaturesByHashes(db, project, hashes)) candidates.set(root.hash, root);
+		const relations = new Map<number, number>();
+		for (const row of observations) {
+			after = row.result_id;
+			position = row.position;
+			const signature = row.signature;
+			if (signature?.class !== "assertion") continue;
+			let root: SignatureRow = signature;
+			if (signatureHash(signature) !== signature.hash) {
+				const prefix = `Split by file (${row.file ?? "no file reported"}): `;
+				const text = signature.text.slice(prefix.length);
+				const candidate = candidates.get(signatureHash({ class: signature.class, text }));
+				if (
+					!signature.text.startsWith(prefix) ||
+					!candidate ||
+					candidate.class !== signature.class ||
+					candidate.text !== text ||
+					fileSignature(candidate, row.file).hash !== signature.hash
+				)
+					throw invalid(`cannot reconstruct assertion root ${signature.id}`);
+				root = candidate;
+			}
+			relations.set(signature.id, root.id);
+			if (row.commit_sha === null) continue;
+			const scope = `commit:${row.what}`;
+			const key = JSON.stringify([scope, root.id]);
+			if (active.has(key)) continue;
+			const state = await recordObservation(db, { project, scope, root: root.id }, { id: row.test, file: row.file });
+			if (state !== "narrow") active.add(key);
+		}
+		if (relations.size)
+			await db.run(Q.rememberRoots, { project, signatures: [...relations.keys()], roots: [...relations.values()] });
 		yield;
 	}
 	await db.run(Q.markReady, { project });

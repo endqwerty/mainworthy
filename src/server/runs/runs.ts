@@ -28,6 +28,7 @@ import {
 	acceptedBatches,
 	type BatchRow,
 	batchById,
+	batchesByIds,
 	changeById,
 	changeByKey,
 	changesBasedOn,
@@ -46,6 +47,7 @@ import {
 	resolveCommit,
 	resultById,
 	resultFailedStep,
+	resultsByIds,
 	resultsOfCaseOnTargets,
 	resultTrail,
 	type SignatureRow,
@@ -534,17 +536,20 @@ export type Fill = {
 /** The uncorrected results admitted to a slot, oldest first. Results are read through their owner, evidence. */
 export async function fillsOf(db: ReadDb, slot: number): Promise<Fill[]> {
 	const fills: Fill[] = [];
+	const admitted = await db.all(Q.admittedTo, { slot });
+	const results = new Map<number, ResultRow>();
 	const jobs = new Map<number, string>();
-	const jobOf = async (batch: number): Promise<string> => {
-		let job = jobs.get(batch);
-		if (job === undefined) {
-			job = (await batchById(db, batch))?.job ?? "";
-			jobs.set(batch, job);
-		}
-		return job;
-	};
-	for (const row of await db.all(Q.admittedTo, { slot })) {
-		const result = await resultById(db, row.result);
+	for (let start = 0; start < admitted.length; start += SLICE) {
+		const found = await resultsByIds(
+			db,
+			admitted.slice(start, start + SLICE).map((row) => row.result),
+		);
+		for (const result of found) results.set(result.id, result);
+		for (const batch of await batchesByIds(db, [...new Set(found.map((row) => row.batch))]))
+			jobs.set(batch.id, batch.job);
+	}
+	for (const row of admitted) {
+		const result = results.get(row.result);
 		if (!result) continue;
 		fills.push({
 			id: result.id,
@@ -557,7 +562,7 @@ export async function fillsOf(db: ReadDb, slot: number): Promise<Fill[]> {
 			ord: result.ord,
 			signature: result.signature,
 			target: result.target,
-			job: await jobOf(result.batch),
+			job: jobs.get(result.batch) ?? "",
 			method: result.method,
 			admitted: row.admitted,
 			at: result.at,

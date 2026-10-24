@@ -30,7 +30,7 @@ let h: Harness;
 beforeEach(async () => {
 	h = await harness();
 });
-afterEach(async () => await h.close());
+afterEach(async () => await h?.close());
 
 const gate = async (commit: string) => await h.call<GateStatus>("gate", { commit });
 const queue = async () => await h.call<InboxReply>("inbox");

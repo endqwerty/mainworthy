@@ -690,6 +690,11 @@ test("stop-server stops only its checkout cluster, and release deletes it before
  };
  const beforeStop = await leftover();
  try {
+ if (started.owned) await databaseAdmin(started.adminUrl, async admin => {
+  const [setting] = await admin.all("SHOW unix_socket_directories");
+  if (setting.unix_socket_directories !== "") throw new Error("checkout cluster depends on an installation-owned socket directory");
+ });
+
   if (!started.owned) {
    await stopServers(root);
    if (existsSync(beforeStop.directory)) throw new Error("stop-server left an ended manifest");

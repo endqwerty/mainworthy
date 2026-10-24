@@ -129,11 +129,48 @@ export const HAND_EDITS = new Map([
  RETURNS trigger
  LANGUAGE plpgsql
 AS $function$
+DECLARE
+ body_prefix text := coalesce(NEW.body, '');
+ lower_chars integer := 0;
+ upper_chars integer := 65536;
+ middle_chars integer;
+ parts text[];
+ part integer := 1;
+ vector tsvector;
+ vectors tsvector[] := ARRAY[]::tsvector[];
 BEGIN
- NEW.title_tsv := to_tsvector('mainworthy_search', coalesce(NEW.title, ''));
- NEW.tsv := setweight(NEW.title_tsv, 'A') ||
-  setweight(to_tsvector('mainworthy_search', coalesce(NEW.tags, '')), 'B') ||
-  setweight(to_tsvector('mainworthy_search', coalesce(NEW.body, '')), 'D');
+ -- Keep a UTF-8 character boundary within the first 64 KiB of the body.
+ IF octet_length(body_prefix) > 65536 THEN
+  WHILE lower_chars < upper_chars LOOP
+   middle_chars := (lower_chars + upper_chars + 1) / 2;
+   IF octet_length(left(body_prefix, middle_chars)) <= 65536 THEN
+    lower_chars := middle_chars;
+   ELSE
+    upper_chars := middle_chars - 1;
+   END IF;
+  END LOOP;
+  body_prefix := left(body_prefix, lower_chars);
+ END IF;
+ -- Three vectors of at most 256 KiB stay below tsvector's 1 MiB limit when joined.
+ -- Normal titles and tags remain whole; oversized fields retain a searchable prefix.
+ parts := ARRAY[coalesce(NEW.title, ''), coalesce(NEW.tags, ''), body_prefix];
+ WHILE part <= 3 LOOP
+  BEGIN
+   WHILE part <= 3 LOOP
+    vector := to_tsvector('mainworthy_search', parts[part]);
+    IF pg_column_size(vector) > 262144 THEN EXIT; END IF;
+    vectors := array_append(vectors, vector);
+    part := part + 1;
+   END LOOP;
+  EXCEPTION WHEN program_limit_exceeded THEN
+   NULL;
+  END;
+  IF part <= 3 THEN
+   parts[part] := left(parts[part], char_length(parts[part]) / 2);
+  END IF;
+ END LOOP;
+ NEW.title_tsv := vectors[1];
+ NEW.tsv := setweight(vectors[1], 'A') || setweight(vectors[2], 'B') || setweight(vectors[3], 'D');
  RETURN NEW;
 END;
 $function$

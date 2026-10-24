@@ -12,7 +12,7 @@ import { testDatabase } from "./db.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
-afterEach(async () => await h.close());
+afterEach(async () => await h?.close());
 
 type Slot = {
 	id: number;
@@ -1118,10 +1118,14 @@ describe("a person's refusal of a rule's answer", () => {
 		const asked = first((await h.call<InboxReply>("inbox", { kind: "signoff" })).items);
 		await h.call("decide", { q: asked.q, onEvidence: asked.evidenceHash, answer: { is: "reject" }, reason: "not yet" });
 		// The walk back through earlier questions stopped after 100 (issue #369): the rule approved at cycle 101.
+		let lastReportStatements = 0;
 		for (let cycle = 1; cycle <= 101; cycle++) {
 			await report(2 * cycle, "fail");
+			const before = h.app.database.statementCount;
 			await report(2 * cycle + 1, "pass");
+			lastReportStatements = h.app.database.statementCount - before;
 		}
+		expect(lastReportStatements).toBeLessThan(500);
 		expect((await run(planned.run)).state).toBe("open");
 		const decided = (await h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" })).items;
 		expect(decided.map((q) => q.decision?.answer)).not.toContainEqual({ is: "approve" });

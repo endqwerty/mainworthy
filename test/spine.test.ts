@@ -1,9 +1,13 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { z } from "zod";
+import { API_VERSION, API_VERSION_HEADER } from "../src/core/version.ts";
+import { createToken, signInWithToken } from "../src/server/identity/identity.ts";
 import { sql } from "../src/server/kernel/db.ts";
 import { OpError } from "../src/server/kernel/errors.ts";
 import { runArchive } from "../src/server/ops/archives.ts";
-import { COMMIT, defineOp, invoke } from "../src/server/ops/registry.ts";
+import { COMMIT, defineInstanceOp, defineOp, invoke } from "../src/server/ops/registry.ts";
+import { removeProject } from "../src/server/transfer/transfer.ts";
+import { grantedProjects, serve } from "../src/surfaces/http.ts";
 import { harness } from "./helpers.ts";
 
 test("the PostgreSQL spine creates a project and proposes and reads a case", async () => {
@@ -281,3 +285,184 @@ test("archive authorization waits for the write lease and refuses before replaci
 		await h.close();
 	}
 });
+
+test("a cookie operation resolves its session in the operation scope without discarded reads", async () => {
+	const h = await harness();
+	const server = serve(h.app, h.owner);
+	const origin = `http://127.0.0.1:${server.port}`;
+	try {
+		const { secret } = await createToken(h.app, {
+			actor: "browser",
+			kind: "human",
+			can: ["read"],
+			project: 0,
+			label: "browser",
+		});
+		const opening = await signInWithToken(h.app, secret, { userAgent: null, address: null });
+		if (opening.kind !== "opening") throw new Error("no session");
+		const signedIn = await opening.signedIn;
+		if (!signedIn) throw new Error("no cookie");
+		const reads = spyOn(h.app.database, "read");
+		try {
+			const response = await fetch(`${origin}/api/p/scratch/find`, {
+				method: "POST",
+				headers: { cookie: `mainworthy_sid=${signedIn.cookie}`, origin, [API_VERSION_HEADER]: String(API_VERSION) },
+				body: JSON.stringify({ in: "tests" }),
+			});
+			expect(await response.json()).toMatchObject({ ok: true });
+			// Admission, operation snapshot, fresh authority recheck.
+			expect(reads).toHaveBeenCalledTimes(3);
+		} finally {
+			reads.mockRestore();
+		}
+	} finally {
+		await server.stop(true);
+		await h.close();
+	}
+});
+
+test("session projects replay a project recreated after the snapshot closes", async () => {
+	const h = await harness();
+	const entered = barrier();
+	const finish = barrier();
+	const read = h.app.database.read.bind(h.app.database);
+	let reads = 0;
+	const spy = spyOn(h.app.database, "read").mockImplementation(async (fn, options) => {
+		const result = await read(fn, options);
+		if (++reads === 1) {
+			entered.release();
+			await finish.promise;
+		}
+		return result;
+	});
+	const pending = grantedProjects(h.app, {
+		via: "local",
+		reference: () => ({ via: "local", owner: "robin" }),
+		actor: async () => h.owner,
+	});
+	try {
+		await entered.promise;
+		await h.app.database.write((db) => db.transaction(() => removeProject(db, "scratch")));
+		await h.call("admin", { do: "project.create", key: "scratch", name: "Recreated", preset: "loose" });
+		finish.release();
+		expect(await pending).toMatchObject([{ key: "scratch", name: "Recreated", can: expect.arrayContaining(["read"]) }]);
+	} finally {
+		finish.release();
+		await pending;
+		spy.mockRestore();
+		await h.close();
+	}
+});
+
+test("async session and context callbacks resolve after the write lease is admitted", async () => {
+	const h = await harness();
+	const entered = barrier();
+	const finish = barrier();
+	let released = false;
+	const holder = h.app.database.write(async () => {
+		entered.release();
+		await finish.promise;
+		released = true;
+	});
+	await entered.promise;
+	const operation = defineInstanceOp({
+		name: "session-probe",
+		summary: "Resolve instance session",
+		input: z.object({}),
+		output: z.object({ session: z.number().nullable(), context: z.string().nullable() }),
+		needs: "produce",
+		scope: "instance",
+		effect: "write",
+		mcp: null,
+		run: (ctx) => ({ session: ctx.session ?? null, context: ctx.context ?? null }),
+	});
+	const pending = invoke(
+		h.app,
+		{ probe: operation },
+		{
+			op: "probe",
+			project: null,
+			input: {},
+			actor: async () => h.owner,
+			session: async () => {
+				expect(released).toBe(true);
+				return 99;
+			},
+			context: async () => {
+				expect(released).toBe(true);
+				return "current-context";
+			},
+		},
+	);
+	try {
+		finish.release();
+		await holder;
+		expect(await pending).toMatchObject({ ok: true, result: { session: 99, context: "current-context" } });
+	} finally {
+		finish.release();
+		await holder;
+		await pending;
+		await h.close();
+	}
+});
+
+for (const path of ["operation", "session"] as const) {
+	test(`${path} reads stop after three project identity replays`, async () => {
+		const h = await harness();
+		const read = h.app.database.read.bind(h.app.database);
+		let reads = 0;
+		const spy = spyOn(h.app.database, "read").mockImplementation(async (fn, options) => {
+			if (reads > 8) throw new Error("read retries did not stop");
+			const result = await read(fn, options);
+			if (++reads % 2 === 1)
+				await h.app.database.write((db) =>
+					db.transaction(() =>
+						db.run(sql<{ identity: string }>("UPDATE projects SET identity = $identity WHERE key = 'scratch'"), {
+							identity: `replacement-${reads}`,
+						}),
+					),
+				);
+			return result;
+		});
+		try {
+			if (path === "session") {
+				await expect(
+					grantedProjects(h.app, {
+						via: "local",
+						reference: () => ({ via: "local", owner: "robin" }),
+						actor: async () => h.owner,
+					}),
+				).rejects.toThrow("projects changed during all read attempts");
+			} else {
+				const op = defineOp({
+					name: "probe",
+					summary: "Read identity",
+					input: z.object({}),
+					output: z.string(),
+					needs: "read",
+					scope: "project",
+					effect: "read",
+					mcp: null,
+					run: (ctx) => ctx.project.identity,
+				});
+				expect(
+					await invoke(
+						h.app,
+						{ probe: op },
+						{
+							op: "probe",
+							project: "scratch",
+							input: {},
+							reference: { via: "local", owner: "robin" },
+							actor: async () => h.owner,
+						},
+					),
+				).toMatchObject({ ok: false, error: { code: "conflict" } });
+			}
+			expect(reads).toBe(6);
+		} finally {
+			spy.mockRestore();
+			await h.close();
+		}
+	});
+}

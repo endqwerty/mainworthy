@@ -20,7 +20,7 @@ let h: Harness;
 beforeEach(async () => {
 	h = await harness();
 });
-afterEach(async () => await h.close());
+afterEach(async () => await h?.close());
 /** Replaces the default loose project with one under another preset, and another choice for tests with no case. */
 const use = async (preset: string, unlinked?: "ask" | "track" | "create"): Promise<void> => {
 	await h.close();

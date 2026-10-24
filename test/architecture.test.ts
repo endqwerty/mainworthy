@@ -134,11 +134,11 @@ describe("the module map", () => {
 		for (const [pattern, allowed] of [
 			[/\.(?:begin|commit|rollback)\s*\(/, ["src/server/kernel/db.ts", "src/server/ops/registry.ts"]],
 			[/\.(?:runDynamic|catalog)\s*\(/, ["src/server/kernel/db.ts", "src/server/transfer/"]],
+			[/\.migration\s*\(/, ["src/server/kernel/db.ts"]],
 		] as const) {
 			expect(
-				files.filter(
+				[...files, ...new Glob("scripts/**/*.ts").scanSync(".")].filter(
 					(file) =>
-						file.startsWith("src/server/") &&
 						!allowed.some((path) => file === path || (path.endsWith("/") && file.startsWith(path))) &&
 						pattern.test(readFileSync(file, "utf8")),
 				),
@@ -770,6 +770,15 @@ describe("the project's name", () => {
 });
 
 describe("a public repository", () => {
+	test("committed logs contain no absolute Mac volume or home paths", () => {
+		const paths = wholeTree()
+			.filter((file) => file.endsWith(".log"))
+			.flatMap((file) =>
+				[...readFileSync(file, "utf8").matchAll(/\/(?:Volumes|Users)\/[^\s]+/g)].map((match) => `${file}: ${match[0]}`),
+			);
+		expect(paths).toEqual([]);
+	});
+
 	test("no file names a private tailnet or workstation account", () => {
 		// The repository has been public since 2026-10-13 (the owner); commits before that day still carry the
 		// real name, and the history was not rewritten.

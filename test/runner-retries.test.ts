@@ -21,7 +21,7 @@ let h: Harness;
 beforeEach(async () => {
 	h = await harness({ unlinked: "track" });
 });
-afterEach(async () => await h.close());
+afterEach(async () => await h?.close());
 
 type Try = { outcome: string; failure?: { message: string }; durationMs?: number };
 const result = (outcome: string, tries: Try[] = [], extra: Record<string, unknown> = {}) => ({
@@ -536,6 +536,7 @@ test.each(["rebuild", "archive"])(
 		const importedFixture = maintenance === "archive" ? await testDatabase() : null;
 		const imported = importedFixture ? await Database.open({ url: importedFixture.url }) : null;
 		const db = imported ?? h.app.database;
+		const beforeMaintenance = db.statementCount;
 		try {
 			if (imported) {
 				const chunks: string[] = [];
@@ -547,6 +548,7 @@ test.each(["rebuild", "archive"])(
 					async (db) => await db.transaction(async () => await importArchive(db, linesOf(chunks.join("")))),
 				);
 			} else await db.write(async (db) => await db.transaction(async () => await rebuildAssertionIndexes(db, true)));
+			if (!imported) expect(db.statementCount - beforeMaintenance).toBeLessThanOrEqual(512);
 			const write = db.write.bind(db);
 			let rowsRead = 0;
 			db.write = async (fn, options) =>

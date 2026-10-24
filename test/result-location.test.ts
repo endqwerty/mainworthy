@@ -9,7 +9,7 @@ let h: Harness;
 beforeEach(async () => {
 	h = await harness();
 });
-afterEach(async () => await h.close());
+afterEach(async () => await h?.close());
 
 test("failure evidence, test history and runs name only the recorded change for the exact landed commit", async () => {
 	const commit = "1234567890abcdef1234567890abcdef12345678";

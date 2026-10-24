@@ -25,7 +25,7 @@ let h: Harness;
 beforeEach(async () => {
 	h = await harness();
 });
-afterEach(() => h.close());
+afterEach(() => h?.close());
 
 type Proposed = {
 	proposal: string | null;
