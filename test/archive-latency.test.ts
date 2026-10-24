@@ -35,18 +35,14 @@ const LIMIT_MS = 50;
 test("HTTP archives leave the server answering other requests", async () => {
 	await withInstance(async (source) => {
 		await source.client.call("report", ciReport({ commit: "archive-latency", n: 1 }));
-		const db = source.instance.app.db;
-		// One real report supplies all references. Duplicate its result, without building a large request body.
-		const columns = db.raw
-			.query<{ name: string }, []>("PRAGMA table_info(results)")
-			.all()
-			.map((row) => row.name);
-		db.transaction(() =>
-			db.raw.exec(`
-			WITH RECURSIVE n(i) AS (SELECT 2 UNION ALL SELECT i+1 FROM n WHERE i < 20000)
-			INSERT INTO results SELECT ${columns.map((column) => (column === "id" ? "n.i" : `r."${column}"`)).join(",")}
-			FROM results r CROSS JOIN n WHERE r.id = 1
-		`),
+		await source.instance.app.database.write((db) =>
+			db.transaction(async () => {
+				const columns =
+					(await db.catalog()).find((table) => table.name === "results")?.columns.map((column) => column.name) ?? [];
+				await db.runDynamic(
+					`INSERT INTO results (${columns.map((column) => `"${column}"`).join(",")}) SELECT ${columns.map((column) => (column === "id" ? "n.i" : `r."${column}"`)).join(",")} FROM results r CROSS JOIN generate_series(2, 20000) n(i) WHERE r.id = 1`,
+				);
+			}),
 		);
 		let archive: Blob = new Blob();
 		const exported = await whilePolling(source.instance.url, async () => {
@@ -60,6 +56,6 @@ test("HTTP archives leave the server answering other requests", async () => {
 				expect(response.status).toBe(200);
 				expect(await response.json()).toMatchObject({ ok: true, result: { tables: { results: 20_000 } } });
 			});
-			expect(target.instance.app.reader.raw.query("SELECT count(*) AS n FROM results").get()).toEqual({ n: 20_000 });
+			expect((await target.instance.app.database.read((db) => db.allDynamic<Record<string, unknown>>("SELECT count(*) AS n FROM results", [])))[0] ?? null).toEqual({ n: 20_000 });
 			return longest;
 		});

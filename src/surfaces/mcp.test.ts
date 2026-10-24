@@ -78,7 +78,7 @@ test("MCP impact pages all 450 selected cases before advancing since", async () 
 	} finally {
 		await client.close();
 		await server.close();
-		h.close();
+		await h.close();
 	}
 });
 
@@ -419,7 +419,7 @@ test("compact output schemas describe structured results from the registry", () 
 
 test("MCP report and get keep the session model beside the agent", async () => {
 	const h = await harness();
-	const actor = h.actor("model-runner", "agent", ["read", "produce"]);
+	const actor = await h.actor("model-runner", "agent", ["read", "produce"]);
 	const server = mcpServer(
 		async (op, project, input) => await invoke(h.app, OPS, { op, project, input, actor: async () => actor }),
 		async () => ["scratch"],
@@ -452,20 +452,20 @@ test("MCP report and get keep the session model beside the agent", async () => {
 	} finally {
 		await client.close();
 		await server.close();
-		h.close();
+		await h.close();
 	}
 });
 
 test("MCP role approval follows the current grant and requires a reason", async () => {
 	const h = await harness();
-	const actor = h.actor("role-reviewer", "human", ["read", "produce", "answer"]);
+	const actor = await h.actor("role-reviewer", "human", ["read", "produce", "answer"]);
 	const server = mcpServer(
 		async (op, project, input) =>
 			await invoke(h.app, OPS, {
 				op,
 				project,
 				input,
-				actor: async (id) => await actorByName(h.app.db, actor.name, id),
+				actor: async (id) => await h.app.database.read((db) => actorByName(db, actor.name, id)),
 			}),
 		async () => ["scratch"],
 	);
@@ -529,7 +529,7 @@ test("MCP role approval follows the current grant and requires a reason", async 
 	} finally {
 		await client.close();
 		await server.close();
-		h.close();
+		await h.close();
 	}
 });
 
@@ -537,7 +537,7 @@ test.each(["2025-11-25", "2026-07-28"])(
 	"an agent completes a %s session, with hashes, advice, and compact reads",
 	async (version) => {
 		const h = await harness();
-		const actor = h.actor("reviewer", "agent", ["read", "produce"]);
+		const actor = await h.actor("reviewer", "agent", ["read", "produce"]);
 		const client = new Client(
 			{ name: "reference-agent", version: "1" },
 			{
@@ -614,7 +614,7 @@ test.each(["2025-11-25", "2026-07-28"])(
 					target: { commit: "9f3c2ab", pr: 482, branch: "coupon-total", files: ["tests/checkout.spec.ts"] },
 					results: [{ test: { key: "tests/other.spec.ts::smoke" }, outcome: "pass" }],
 				},
-				h.actor("pipeline", "ci", ["read", "record"]),
+				await h.actor("pipeline", "ci", ["read", "record"]),
 			);
 			const reported = resultOf(
 				await call("report", {
@@ -699,7 +699,7 @@ test.each(["2025-11-25", "2026-07-28"])(
 		} finally {
 			await client.close();
 			await server.close();
-			h.close();
+			await h.close();
 		}
 	},
 );
@@ -765,7 +765,7 @@ test("tool errors name bad fields and require a project when the choice is ambig
 	} finally {
 		await client.close();
 		await server.close();
-		h.close();
+		await h.close();
 	}
 });
 
@@ -811,7 +811,7 @@ test("HTTP tools/list reuses definitions without sharing mutable tool documents"
 		}
 	} finally {
 		await http.stop(true);
-		h.close();
+		await h.close();
 	}
 });
 
@@ -885,7 +885,7 @@ test("authenticated stateless HTTP answers initialize and tools/list and keeps t
 		expect(old.isError).not.toBe(true);
 		expect(old.structuredContent).toBeUndefined();
 	} finally {
-		h.close();
+		await h.close();
 	}
 });
 
@@ -942,7 +942,7 @@ test.each(["2025-03-26", "2025-11-25", "2026-07-28"])(
 		} finally {
 			await client.close();
 			await http.stop(true);
-			h.close();
+			await h.close();
 		}
 	},
 );
@@ -974,7 +974,7 @@ test("an HTTP MCP tool returns its committed reply when a subscriber throws", as
 		logged.mockRestore();
 		await client.close();
 		await http.stop(true);
-		h.close();
+		await h.close();
 	}
 });
 
@@ -994,7 +994,7 @@ test("an HTTP tool write waits for an applying report and records token use", as
 	const unsubscribe = h.app.subscribe((event) => {
 		if (event.op === "report") onAccepted();
 	});
-	const pendingReport = await invoke(h.app, OPS, {
+	const pendingReport = invoke(h.app, OPS, {
 		op: "report",
 		project: "scratch",
 		actor: async () => h.owner,
@@ -1002,7 +1002,6 @@ test("an HTTP tool write waits for an applying report and records token use", as
 	});
 	try {
 		await accepted;
-		expect(h.app.db.inTransaction).toBe(true);
 		const req = new Request("http://127.0.0.1/mcp", {
 			method: "POST",
 			headers: {
@@ -1026,12 +1025,15 @@ test("an HTTP tool write waits for an applying report and records token use", as
 		expect(tool.isError, JSON.stringify(tool.content)).not.toBe(true);
 		resultOf(tool, z.object({ status: z.literal("adopted") }));
 		expect((await pendingReport).ok).toBe(true);
-		await h.app.gate.run(() => undefined);
-		expect((await listTokens(h.app)).find((token) => token.actor === "queue-writer")?.last_used_at).toBe(h.app.now());
+		await h.app.database.write(() => undefined);
+		expect(
+			(await h.app.database.read((db) => listTokens(h.app, db))).find((token) => token.actor === "queue-writer")
+				?.last_used_at,
+		).toBe(h.app.now());
 	} finally {
 		unsubscribe();
 		await pendingReport;
-		h.close();
+		await h.close();
 	}
 });
 
@@ -1101,7 +1103,7 @@ test.each(["2025-03-26", "2025-11-25", "2026-07-28"])(
 		} finally {
 			await client.close();
 			await http.stop(true);
-			h.close();
+			await h.close();
 		}
 	},
 );
@@ -1123,7 +1125,7 @@ for (const target of ["commit", "change", "run"] as const) {
 			target: { commit: "abcdef123", pr: 482, branch: "feature" },
 			results: [{ test: { key: "works" }, outcome: "pass" }],
 		});
-		const agent = h.actor("slot-reader", "agent", ["read", "produce"]);
+		const agent = await h.actor("slot-reader", "agent", ["read", "produce"]);
 		const server = mcpServer(
 			async (op, project, input) => await invoke(h.app, OPS, { op, project, input, actor: async () => agent }),
 			async () => ["scratch"],
@@ -1150,7 +1152,7 @@ for (const target of ["commit", "change", "run"] as const) {
 		} finally {
 			await client.close();
 			await server.close();
-			h.close();
+			await h.close();
 		}
 	});
 }
@@ -1167,7 +1169,7 @@ test("two MCP producers taking next concurrently receive different slots", async
 	});
 	const peers = await Promise.all(
 		["first", "second"].map(async (name) => {
-			const actor = h.actor(name, "agent", ["read", "produce"]);
+			const actor = await h.actor(name, "agent", ["read", "produce"]);
 			const server = mcpServer(
 				async (op, project, input) => await invoke(h.app, OPS, { op, project, input, actor: async () => actor }),
 				async () => ["scratch"],
@@ -1195,13 +1197,13 @@ test("two MCP producers taking next concurrently receive different slots", async
 			await p.client.close();
 			await p.server.close();
 		}
-		h.close();
+		await h.close();
 	}
 });
 
 test("MCP discovers and roundtrips a complete result trail", async () => {
 	const h = await harness();
-	const actor = h.actor("trail-runner", "agent", ["read", "produce"]);
+	const actor = await h.actor("trail-runner", "agent", ["read", "produce"]);
 	const server = mcpServer(
 		async (op, project, input) => await invoke(h.app, OPS, { op, project, input, actor: async () => actor }),
 		async () => ["scratch"],
@@ -1253,6 +1255,6 @@ test("MCP discovers and roundtrips a complete result trail", async () => {
 	} finally {
 		await client.close();
 		await server.close();
-		h.close();
+		await h.close();
 	}
 });

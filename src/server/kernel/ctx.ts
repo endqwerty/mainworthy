@@ -66,7 +66,7 @@ const Q = {
 	),
 	setSeq: sql<{ id: number; seq: number }>("UPDATE projects SET seq = $seq WHERE id = $id"),
 	projects: sql<readonly [], ProjectRow>(`SELECT p.* FROM projects p WHERE NOT EXISTS
-  (SELECT 1 FROM demo_projects d WHERE d.project = p.id AND json_extract(d.deployment, '$.kind') = 'retired') ORDER BY p.id`),
+  (SELECT 1 FROM demo_projects d WHERE d.project = p.id AND (d.deployment::jsonb)->>'kind' = 'retired') ORDER BY p.id`),
 	demoDeployment: sql<{ project: number }, { deployment: string | null }>(
 		"SELECT deployment FROM demo_projects WHERE project = $project",
 	),
@@ -78,7 +78,7 @@ const Q = {
 		readonly [],
 		{ id: number; key: string }
 	>(`SELECT p.id, p.key FROM projects p JOIN demo_projects d ON d.project = p.id
- WHERE json_extract(d.deployment, '$.kind') = 'retired' ORDER BY p.id`),
+ WHERE (d.deployment::jsonb)->>'kind' = 'retired' ORDER BY p.id`),
 	insertProject: sql<{ org: number; key: string; identity: string; name: string; at: number }>(
 		"INSERT INTO projects (org, key, identity, name, created_at) VALUES ($org, $key, $identity, $name, $at)",
 	),
@@ -174,23 +174,23 @@ export const DemoDeployment = z.discriminatedUnion("kind", [
 ]);
 export type DemoDeployment = z.infer<typeof DemoDeployment>;
 
-export function demoDeployment(db: Db, project: number): DemoDeployment | null {
-	const text = db.get(Q.demoDeployment, { project })?.deployment;
+export async function demoDeployment(db: ReadDb, project: number): Promise<DemoDeployment | null> {
+	const text = (await db.get(Q.demoDeployment, { project }))?.deployment;
 	return text == null ? null : DemoDeployment.parse(JSON.parse(text));
 }
 
 /** Deployment bookkeeping is local operational state, not case standing. The caller owns a gate transaction. */
-export function setDemoDeployment(db: Db, project: number, state: DemoDeployment): void {
-	if (demoSince(db, project) === null) throw new Error("deployment state needs a demo mark");
-	db.run(Q.saveDemoDeployment, { project, deployment: JSON.stringify(state) });
+export async function setDemoDeployment(db: WriteDb, project: number, state: DemoDeployment): Promise<void> {
+	if ((await demoSince(db, project)) === null) throw new Error("deployment state needs a demo mark");
+	await db.run(Q.saveDemoDeployment, { project, deployment: JSON.stringify(state) });
 }
 
-export function retireDemo(db: Db, project: ProjectRow): void {
-	setDemoDeployment(db, project.id, { kind: "retired" });
-	db.run(Q.retireDemo, { project: project.id, key: `~demo-${project.id}` });
+export async function retireDemo(db: WriteDb, project: ProjectRow): Promise<void> {
+	await setDemoDeployment(db, project.id, { kind: "retired" });
+	await db.run(Q.retireDemo, { project: project.id, key: `~demo-${project.id}` });
 }
 
-export const retiredDemos = (db: Db): { id: number; key: string }[] => db.all(Q.retiredDemos);
+export const retiredDemos = (db: ReadDb): Promise<{ id: number; key: string }[]> => db.all(Q.retiredDemos);
 
 /**
  * The stored request and reply of a command that already ran, or null. A retry of the same request returns the

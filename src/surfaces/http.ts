@@ -7,6 +7,7 @@ import {
 	admit,
 	credentialSummary,
 	type Facts,
+	resolveCaller,
 	type Session,
 	type SignedIn,
 	signInWithToken,
@@ -374,7 +375,7 @@ async function readJson(req: Request, limit = OP_BODY_LIMIT, withinMs?: number):
 	let size = 0;
 	try {
 		for (;;) {
-			const next = await (late ? Promise.race([reader.read(), late]) : reader.read());
+			const next = await (late !== null ? Promise.race([reader.read(), late]) : reader.read());
 			if (next === "late") {
 				void reader.cancel().catch(() => {});
 				throw new BodyTooSlow();
@@ -430,7 +431,7 @@ async function sessionFor(app: App, owner: Actor, req: Request, server: Listener
 	if (admission.kind === "refused") return unauthenticated();
 	if (admission.kind === "limited") return limited(admission.retryAfter);
 	const { session } = admission;
-	if (!sameCaller(req, session)) return changedSession();
+	if (!(await sameCaller(req, session))) return changedSession();
 	server.timeout(req, 0);
 	return session;
 }
@@ -459,6 +460,8 @@ export async function handleOp(
 		if (error instanceof BodyTooLarge) return tooLarge(OP_BODY_LIMIT);
 		return jsonResponse({ ok: false, error: { code: "invalid", message: "the request body is not JSON" } }, 400);
 	}
+	const sessionId = (await session.id?.()) ?? null;
+	const context = (await session.context?.()) ?? null;
 	return replyResponse(
 		await invoke(app, OPS, {
 			op,
@@ -467,9 +470,9 @@ export async function handleOp(
 			actor: session.actor,
 			...(session.reference ? { reference: session.reference() } : {}),
 			// Which of the caller's browser sessions this is, for an operation that lists or ends them.
-			...(session.id ? { session: session.id } : {}),
+			...(session.id ? { session: () => sessionId } : {}),
 			// Where the caller is signed in, for an operation that another request finishes (a passkey registration).
-			...(session.context ? { context: session.context } : {}),
+			...(session.context ? { context: () => context } : {}),
 			...(at === undefined ? {} : { at }),
 		}),
 	);
@@ -480,23 +483,49 @@ export async function handleOp(
  * named. A pipeline's project is named though it cannot read it: that is how it checks its own credential.
  * `handoff` says whether a failure there can be handed to an agent (`MAINWORTHY_HANDOFF_*`).
  */
-export function grantedProjects(app: App, session: Session) {
-	return app.reader.snapshot(async () =>
-		(await app.database.read(async (readDb) => await listProjects(readDb))).flatMap((project) => {
-			const id = findProject(app.reader, project.key)?.id;
-			const can = id === undefined ? [] : (session.actor(id)?.can ?? []);
-			return can.length > 0
-				? [
-						{
-							...project,
-							fieldDefinitions: can.includes("read") ? project.fieldDefinitions : undefined,
-							can,
-							handoff: app.config.handoff?.project === project.key,
-						},
-					]
-				: [];
-		}),
-	);
+export async function grantedProjects(app: App, session: Session) {
+	const projects = await app.database.read(async (db) => {
+		const granted = [];
+		for (const project of await listProjects(db)) {
+			const id = (await findProject(db, project.key))?.id;
+			const reference = session.reference?.();
+			const actor =
+				id === undefined
+					? null
+					: reference
+						? (await resolveCaller(app, db, reference, id))?.actor
+						: await session.actor(id);
+			const can = actor?.can ?? [];
+			if (can.length)
+				granted.push({
+					...project,
+					fieldDefinitions: can.includes("read") ? project.fieldDefinitions : undefined,
+					can,
+					handoff: app.config.handoff?.project === project.key,
+				});
+		}
+		return granted;
+	});
+	// A fresh scope checks identity and authority after the snapshot closes.
+	return app.database.read(async (db) => {
+		const granted = [];
+		for (const project of projects) {
+			const current = await findProject(db, project.key);
+			if (!current || current.identity !== project.identity) continue;
+			const reference = session.reference?.();
+			const actor = reference
+				? (await resolveCaller(app, db, reference, current.id))?.actor
+				: await session.actor(current.id);
+			const can = actor?.can ?? [];
+			if (can.length)
+				granted.push({
+					...project,
+					can,
+					fieldDefinitions: can.includes("read") ? project.fieldDefinitions : undefined,
+				});
+		}
+		return granted;
+	});
 }
 
 /** Who the caller is and which projects it may read. */
@@ -513,7 +542,7 @@ async function sessionInfo(app: App, session: Session): Promise<Response> {
 			mode: app.config.mode,
 			via: session.via,
 			// What a page needs to show a person their own sign-in: which session this is, and what they sign in with.
-			session: session.id?.() ?? null,
+			session: (await session.id?.()) ?? null,
 			credentials:
 				actor.kind === "human"
 					? await app.database.read(async (readDb) => await credentialSummary(readDb, actor.id))
@@ -521,7 +550,7 @@ async function sessionInfo(app: App, session: Session): Promise<Response> {
 			// The owner is the person the configuration names, as `refuseToken` in `ops/admin.ts` takes it.
 			owner: actor.kind === "human" && actor.name === app.config.owner,
 			version: VERSION,
-			projects: grantedProjects(app, session),
+			projects: await grantedProjects(app, session),
 		},
 	});
 }
@@ -532,7 +561,7 @@ async function sessionInfo(app: App, session: Session): Promise<Response> {
  */
 async function mayRead(app: App, session: Session, key: string): Promise<"yes" | "no" | "missing"> {
 	const project = await app.database.read(async (readDb) => await findProject(readDb, key));
-	const can = project ? (session.actor(project.id)?.can ?? []) : [];
+	const can = project ? ((await session.actor(project.id))?.can ?? []) : [];
 	if (can.length === 0) return "missing";
 	return can.includes("read") ? "yes" : "no";
 }
@@ -662,7 +691,7 @@ async function events(
 			// revoked, or an actor that was forgotten, stops receiving at the next event or heartbeat.
 			const stillAllowed = async (): Promise<boolean> => {
 				try {
-					if (mayRead(app, session, project) === "yes") return true;
+					if ((await mayRead(app, session, project)) === "yes") return true;
 				} catch {
 					console.error("[mainworthy] change stream authorization failed");
 				}
@@ -670,10 +699,15 @@ async function events(
 				return false;
 			};
 			unsubscribe = app.subscribe((event: ChangeEvent) => {
-				if (event.project === project && stillAllowed()) send(`data: ${JSON.stringify(event)}\n\n`);
+				if (event.project === project)
+					void stillAllowed().then((allowed) => {
+						if (allowed) send(`data: ${JSON.stringify(event)}\n\n`);
+					});
 			});
 			beat = setInterval(() => {
-				if (stillAllowed()) send(": keep-alive\n\n");
+				void stillAllowed().then((allowed) => {
+					if (allowed) send(": keep-alive\n\n");
+				});
 			}, 20_000);
 			req.signal.addEventListener("abort", close, { once: true });
 			closing.addEventListener("abort", close, { once: true });

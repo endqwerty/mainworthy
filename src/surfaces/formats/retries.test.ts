@@ -108,7 +108,7 @@ test.each(["jest", "vitest", "pytest"] as const)(
 				unexplained: 1,
 			});
 		} finally {
-			h.close();
+			await h.close();
 		}
 	},
 );
@@ -198,9 +198,11 @@ test.each([
 			expect(page?.flips).toBe(2);
 			expect(SameCodeEvidence.parse(page?.sameCode).signals).toEqual([]);
 			expect(normaliseFailure({ message: tried?.failure?.message ?? "" }).class).toBe("unknown");
-			expect(h.app.db.raw.query("SELECT class FROM signatures").all()).toEqual([{ class: "unknown" }]);
+			expect(
+				await h.app.database.read((db) => db.allDynamic<Record<string, unknown>>("SELECT class FROM signatures", [])),
+			).toEqual([{ class: "unknown" }]);
 		} finally {
-			h.close();
+			await h.close();
 		}
 	},
 );
@@ -233,7 +235,7 @@ test.each([
 			expect(page?.flips).toBe(flips);
 			expect(SameCodeEvidence.parse(page?.sameCode).signals).toMatchObject(signals);
 		} finally {
-			h.close();
+			await h.close();
 		}
 	},
 );

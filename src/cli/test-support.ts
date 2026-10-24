@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { z } from "zod";
+import { testDatabase } from "../../test/db.ts";
 import { type Instance, start } from "../app/start.ts";
 import { defaultConfig } from "../server/kernel/app.ts";
 import { archiveRoutes } from "../surfaces/archive.ts";
@@ -167,7 +168,9 @@ export async function withInstance<T>(
 	} = {},
 ): Promise<T> {
 	const directory = await mkdtemp(join(tmpdir(), "mainworthy-cli-"));
+	const database = await testDatabase();
 	const config = defaultConfig({
+		MAINWORTHY_DATABASE_URL: database.url,
 		MAINWORTHY_DATA: directory,
 		MAINWORTHY_PORT: "0",
 		MAINWORTHY_OWNER: options.owner ?? "robin",
@@ -221,6 +224,7 @@ export async function withInstance<T>(
 		throw error;
 	} finally {
 		await instance.stop();
+		await database.close();
 		await rm(directory, { recursive: true, force: true });
 		// A test that failed keeps its own failure; one that passed must not have left output behind.
 		if (failed) endWatch();

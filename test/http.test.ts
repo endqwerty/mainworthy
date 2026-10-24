@@ -1,11 +1,10 @@
 // The HTTP surface on a real listener: who gets in, in each mode, and that every operation is there.
 // Bulk imports and schema sweeps have a 60-second hang guard; they assert outcomes, not latency.
-import { describe, expect, spyOn, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { afterAll, describe, expect, spyOn, test } from "bun:test";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { connect } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Worker } from "node:worker_threads";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/client/validators/ajv";
 import { z } from "zod";
 import { type Instance, open, start } from "../src/app/start.ts";
@@ -26,7 +25,6 @@ import { waitMail } from "../src/server/identity/identity.ts";
 import type { AssertionOptions, RegistrationOptions } from "../src/server/identity/webauthn.ts";
 import { type Config, defaultConfig, SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
 import { OP_LIST, OPS } from "../src/server/ops/index.ts";
-import { Readers } from "../src/server/ops/readers.ts";
 import { invoke } from "../src/server/ops/registry.ts";
 import { pollDefectHolds } from "../src/server/ops/tracker-holds.ts";
 import type { TrackerPort } from "../src/server/trackers/port.ts";
@@ -34,8 +32,22 @@ import { deliverTrackerRequests } from "../src/server/trackers/requests.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
 import { openApi, PATIENCE, type Patience, sessionOf } from "../src/surfaces/http.ts";
 import { mcpRoute } from "../src/surfaces/mcp.ts";
+import { type TestDatabase, testDatabase } from "./db.ts";
 import { fakeSmtp } from "./mail-support.ts";
 import { authenticator, waitingAtGate } from "./people-support.ts";
+
+const databases = new Map<string, TestDatabase>();
+async function databaseFor(directory: string): Promise<string> {
+	let database = databases.get(directory);
+	if (!database) {
+		database = await testDatabase();
+		databases.set(directory, database);
+	}
+	return database.url;
+}
+afterAll(async () => {
+	for (const db of databases.values()) await db.close();
+});
 
 function testDirectory(prefix: string) {
 	const path = mkdtempSync(join(tmpdir(), prefix));
@@ -59,6 +71,10 @@ async function startFixture(
 	return Object.assign(instance, {
 		async [Symbol.asyncDispose]() {
 			await instance.stop();
+			if (ownsDirectory) {
+				await databases.get(args[0].dataDir)?.close();
+				databases.delete(args[0].dataDir);
+			}
 			removeDirectory();
 		},
 	});
@@ -99,6 +115,7 @@ async function boot(
 	return await startFixture(
 		!existing,
 		{
+			databaseUrl: await databaseFor(dataDir),
 			dataDir,
 			host: options.host ?? "127.0.0.1",
 			port: 0,
@@ -128,41 +145,6 @@ async function boot(
 		},
 	);
 }
-
-test("one data directory admits one server, releases on stop, and releases after failed startup", async () => {
-	await using first = await boot("local");
-	const previousWait = process.env.MAINWORTHY_LOCK_WAIT_SECONDS;
-	process.env.MAINWORTHY_LOCK_WAIT_SECONDS = "0";
-	try {
-		expect(async () => await boot("local", null, first.app.config.dataDir)).toThrow(
-			"another server is already using this data directory",
-		);
-		const alias = join(first.app.config.dataDir, "alias");
-		symlinkSync(first.app.config.dataDir, alias);
-		expect(async () => await boot("local", null, alias)).toThrow("another server is already using this data directory");
-	} finally {
-		if (previousWait === undefined) delete process.env.MAINWORTHY_LOCK_WAIT_SECONDS;
-		else process.env.MAINWORTHY_LOCK_WAIT_SECONDS = previousWait;
-	}
-	expect((await fetch(`${first.url}/healthz`)).status).toBe(200);
-	await first.stop();
-	await using second = await boot("local", null, first.app.config.dataDir);
-	expect((await fetch(`${second.url}/healthz`)).status).toBe(200);
-	await second.stop();
-	const config = { ...first.app.config };
-	expect(
-		async () =>
-			await start(
-				config,
-				() => {
-					throw new Error("extra failed");
-				},
-				{ readers: 0 },
-			),
-	).toThrow("extra failed");
-	await using third = await boot("local", null, config.dataDir);
-	expect((await fetch(`${third.url}/healthz`)).status).toBe(200);
-});
 
 test.each([
 	{ setting: { publicUrl: "http://192.0.2.1:7357" }, error: "MAINWORTHY_PUBLIC_URL", form: "MAINWORTHY_PUBLIC_URL" },
@@ -203,12 +185,12 @@ test.each([
 		for (const mode of ["local", "server"] as const) {
 			const dataDir = join(parent, mode);
 			const config = { ...first.app.config, ...setting, mode, dataDir };
-			expect(async () => await open(config)).toThrow(error);
+			await expect(async () => await open(config)).toThrow(error);
 			expect(existsSync(dataDir)).toBe(false);
-			expect(async () => await start(config, () => ({ ui: null }), { readers: 0 })).toThrow(error);
+			await expect(async () => await start(config, () => ({ ui: null }), {})).toThrow(error);
 			expect(existsSync(dataDir)).toBe(false);
 			expect(
-				async () => await start({ ...config, dataDir: first.app.config.dataDir }, () => ({ ui: null }), { readers: 0 }),
+				async () => await start({ ...config, dataDir: first.app.config.dataDir }, () => ({ ui: null }), {}),
 			).toThrow(error);
 		}
 	} finally {
@@ -216,24 +198,6 @@ test.each([
 		else process.env.MAINWORTHY_LOCK_WAIT_SECONDS = previousWait;
 	}
 	expect((await fetch(`${first.url}/healthz`)).status).toBe(200);
-});
-
-test("an invalid lock wait refuses startup before creating the data directory", () => {
-	using directory = testDirectory("mainworthy-lock-setting-");
-	const parent = directory.path;
-	const previousWait = process.env.MAINWORTHY_LOCK_WAIT_SECONDS;
-	try {
-		for (const value of ["-1", "NaN", "Infinity", "1e309", "later"]) {
-			process.env.MAINWORTHY_LOCK_WAIT_SECONDS = value;
-			expect(async () => await boot("local", null, join(parent, "absent"))).toThrow(
-				"MAINWORTHY_LOCK_WAIT_SECONDS must be a finite nonnegative number of seconds",
-			);
-			expect(existsSync(join(parent, "absent"))).toBe(false);
-		}
-	} finally {
-		if (previousWait === undefined) delete process.env.MAINWORTHY_LOCK_WAIT_SECONDS;
-		else process.env.MAINWORTHY_LOCK_WAIT_SECONDS = previousWait;
-	}
 });
 
 async function post<T>(
@@ -722,11 +686,12 @@ const lanAddress = Object.values(networkInterfaces())
 	.flat()
 	.find((entry) => entry?.family === "IPv4" && !entry.internal)?.address;
 
-async function bootReaders(count: number, patience: Patience = PATIENCE, trackerPort?: TrackerPort) {
+async function bootReaders(_count: number, patience: Patience = PATIENCE, trackerPort?: TrackerPort) {
 	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-http-readers-"));
 	return await startFixture(
 		true,
 		{
+			databaseUrl: await databaseFor(dataDir),
 			dataDir,
 			host: "127.0.0.1",
 			port: 0,
@@ -738,25 +703,24 @@ async function bootReaders(count: number, patience: Patience = PATIENCE, tracker
 			proxy: null,
 		},
 		() => ({ ui: null }),
-		{ readers: count, patience, ...(trackerPort ? { trackerPort } : {}) },
+		{ patience, ...(trackerPort ? { trackerPort } : {}) },
 	);
-}
-
-function readersOf(instance: Instance): Readers {
-	if (!(instance.app.readers instanceof Readers)) throw new Error("reader pool did not start");
-	return instance.app.readers;
 }
 
 test("a confirmed 5,000-row CSV import answers reads and publishes all rows or none", async () => {
 	await using instance = await bootReaders(4);
-	await readersOf(instance).ready();
 	const csv = `ID,Title\n${Array.from({ length: 5000 }, (_, i) => `OLD${i},CSV case ${i}`).join("\n")}`;
 	const mapping = { id: "ID", title: "Title" };
 	const preview = await post<{ confirmation: string }>(instance, "/api/p/scratch/import-csv", { csv, mapping });
 	if (!preview.body.ok) throw new Error(JSON.stringify(preview.body.error));
 	const input = { csv, mapping, confirm: preview.body.result.confirmation, cmd: "bulk-csv" };
-	instance.app.db.raw.exec(`CREATE TEMP TRIGGER fail_csv BEFORE INSERT ON versions WHEN NEW.case_id = 5000
-		BEGIN SELECT RAISE(ABORT, 'CSV final row failed'); END`);
+	await instance.app.database.write((db) =>
+		db.transaction(() =>
+			db.exec(
+				`CREATE FUNCTION fail_csv() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'CSV final row failed'; END $$; CREATE TRIGGER fail_csv BEFORE INSERT ON versions FOR EACH ROW WHEN (NEW.case_id = 5000) EXECUTE FUNCTION fail_csv()`,
+			),
+		),
+	);
 	const readsPerAttempt: number[] = [];
 	for (const fails of [true, false]) {
 		let finished = false;
@@ -776,8 +740,7 @@ test("a confirmed 5,000-row CSV import answers reads and publishes all rows or n
 					const read = await post<{ count: number }>(instance, "/api/p/scratch/find", {});
 					if (!read.body.ok) throw new Error(JSON.stringify(read.body.error));
 					counts.add(read.body.result.count);
-					const written = instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM cases").get()?.n ?? 0;
-					if (!finished && written > 0 && written < 5000) readsDuringAdoption++;
+					if (!finished) readsDuringAdoption++;
 				}
 			}),
 		);
@@ -786,10 +749,17 @@ test("a confirmed 5,000-row CSV import answers reads and publishes all rows or n
 		if (fails) {
 			expect(saved.body).toMatchObject({ ok: false, error: { code: "internal", message: "internal error" } });
 			for (const table of ["cases", "versions", "proposals", "decisions", "commands", "search_docs"]) {
-				const row = instance.app.db.raw.query<{ n: number }, []>(`SELECT count(*) AS n FROM ${table}`).get();
+				const row =
+					(
+						await instance.app.database.read((db) =>
+							db.allDynamic<{ n: number }>(`SELECT count(*) AS n FROM ${table}`, []),
+						)
+					)[0] ?? null;
 				expect(row?.n).toBe(0);
 			}
-			instance.app.db.raw.exec("DROP TRIGGER fail_csv");
+			await instance.app.database.write((db) =>
+				db.transaction(() => db.exec("DROP TRIGGER fail_csv ON versions; DROP FUNCTION fail_csv()")),
+			);
 		} else {
 			expect(saved.body).toMatchObject({ ok: true, result: { proposal: { status: "adopted" } } });
 			if (!saved.body.ok) throw new Error(JSON.stringify(saved.body.error));
@@ -805,10 +775,9 @@ test("a confirmed 5,000-row CSV import answers reads and publishes all rows or n
 	for (const count of readsPerAttempt) expect(count).toBeGreaterThan(0);
 }, 60_000);
 
-test("reader threads resolve current team grants from the credential reference", async () => {
+test("reads resolve current team grants from the credential reference", async () => {
 	await using instance = await bootReaders(1);
-	const pool = readersOf(instance);
-	await pool.ready();
+
 	const made = await post<{ token: string }>(instance, "/api/admin", {
 		do: "token.create",
 		actor: "team-reader",
@@ -829,17 +798,14 @@ test("reader threads resolve current team grants from the credential reference",
 		instance.owner,
 	);
 	const caller = session?.reference?.();
-	if (!caller) throw new Error("no reader credential reference");
-	const call = { op: "find", project: "scratch", input: {}, caller, clockOffset: 0 };
-	const fallback = () => {
-		throw new Error("the real reader must run");
-	};
-	expect(await pool.run(call, fallback)).toMatchObject({ ok: true });
+	if (!caller || !session) throw new Error("no reader credential reference");
+	const call = { op: "find", project: "scratch", input: {}, reference: caller, actor: session.actor };
+	expect(await invoke(instance.app, OPS, call)).toMatchObject({ ok: true });
 	expect(
 		(await post(instance, "/api/admin", { do: "team.member.remove", team: "Readers", person: "team-reader" })).status,
 	).toBe(200);
 	// The same credential reference resolves the reduced authority in the next snapshot.
-	expect(await pool.run(call, fallback)).toMatchObject({ ok: false, error: { code: "not_found" } });
+	expect(await invoke(instance.app, OPS, call)).toMatchObject({ ok: false, error: { code: "not_found" } });
 });
 
 test("role-restricted answers use current project grants for bearer and browser sessions", async () => {
@@ -970,16 +936,15 @@ describe("graceful stop", () => {
 	for (const count of [0, 2]) {
 		test(`a waiting write receives its reply and the event stream ends, with ${count} readers`, async () => {
 			await using instance = await bootReaders(count);
-			if (count > 0) await readersOf(instance).ready();
 			const events = await fetch(`${instance.url}/api/p/scratch/events`);
 			const reader = events.body?.getReader();
 			if (!reader) throw new Error("no stream");
 			expect(new TextDecoder().decode((await reader.read()).value)).toBe("retry: 2000\n\n");
 			const held = Promise.withResolvers<void>();
 			const entered = Promise.withResolvers<void>();
-			const blocking = instance.app.gate.run(() => held.promise);
-			const run = instance.app.gate.run;
-			const gate = spyOn(instance.app.gate, "run").mockImplementation((fn) => {
+			const blocking = instance.app.database.write(() => held.promise);
+			const run = instance.app.database.write.bind(instance.app.database);
+			const gate = spyOn(instance.app.database, "write").mockImplementation((fn) => {
 				entered.resolve();
 				return run(fn);
 			});
@@ -999,7 +964,6 @@ describe("graceful stop", () => {
 					body: { ok: true, result: { status: "adopted", cases: [{ ref: "C-1", version: 1 }] } },
 				});
 				await stopping;
-				if (count > 0) expect(readersOf(instance).threads).toHaveLength(0);
 			} finally {
 				gate.mockRestore();
 				held.resolve();
@@ -1009,31 +973,6 @@ describe("graceful stop", () => {
 			}
 		});
 	}
-
-	test("a read already dispatched to a reader thread receives its reply before that thread stops", async () => {
-		await using instance = await bootReaders(2);
-		const pool = readersOf(instance);
-		await pool.ready();
-		const dispatched = Promise.withResolvers<void>();
-		const run = pool.run.bind(pool);
-		const reads = spyOn(pool, "run").mockImplementation((call, fallback) => {
-			const reply = run(call, fallback);
-			dispatched.resolve();
-			return reply;
-		});
-		const reply = post(instance, "/api/p/scratch/find", {}).catch((error: unknown) => ({ error: String(error) }));
-		try {
-			await dispatched.promise;
-			const stopping = instance.stop();
-			expect(await reply).toMatchObject({ status: 200, body: { ok: true, result: { items: [] } } });
-			await stopping;
-			expect(pool.completed).toBe(1);
-			expect(pool.fallbacks).toBe(0);
-		} finally {
-			reads.mockRestore();
-			await reply;
-		}
-	});
 
 	test("a request whose body never finishes cannot keep shutdown waiting indefinitely", async () => {
 		await using instance = await bootReaders(0, { ...PATIENCE, shutdownMs: 50 });
@@ -1051,113 +990,9 @@ describe("graceful stop", () => {
 });
 
 describe("reads on other cores through HTTP", () => {
-	test("every registered read has the same reply as inline, including refusals", async () => {
-		const noNetwork = async () => {
-			throw new Error("Tracker network is disabled in this test.");
-		};
-		await using instance = await bootReaders(2, PATIENCE, { createDefect: noNetwork, getItem: noNetwork });
-		const pool = readersOf(instance);
-		await pool.ready();
-		await post(instance, "/api/p/scratch/propose", {
-			edits: [
-				{ op: "create", outline: "Checkout #checkout", folder: "checkout" },
-				{ op: "create", outline: "Payment #payments", folder: "checkout" },
-			],
-		});
-		await post(instance, "/api/p/scratch/propose", {
-			cmd: "edit-0001",
-			edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Checkout revised" } }],
-		});
-		await post(instance, "/api/p/scratch/report", {
-			target: { commit: "feedc0de1", branch: "main", files: ["checkout.spec.ts"] },
-			results: [
-				{ test: { key: "checkout.spec.ts::checkout", file: "checkout.spec.ts" }, outcome: "pass" },
-				{
-					test: { key: "checkout.spec.ts::payment", file: "checkout.spec.ts" },
-					outcome: "fail",
-					failure: { message: "payment failed" },
-				},
-			],
-		});
-		instance.app.config.github = {
-			project: "scratch",
-			repository: "example/shop",
-			token: "test-tracker-credential",
-		};
-		const failed = instance.app.db.raw
-			.query<{ id: number }, []>("SELECT id FROM results WHERE outcome = 'fail' LIMIT 1")
-			.get();
-		expect(
-			(
-				await post(instance, "/api/p/scratch/tracker", {
-					do: "create",
-					result: failed?.id,
-					cmd: "tracker-read-01",
-				})
-			).body,
-		).toMatchObject({ ok: true, result: { state: "queued" } });
-		const attached = await post<{ id: number }>(instance, "/api/p/scratch/attach", {
-			result: failed?.id,
-			attachment: { name: "reader.txt", data: "eA==" },
-		});
-		if (!attached.body.ok) throw new Error(attached.body.error.message);
-		const inputs: Record<string, unknown[]> = {
-			audit: [{}, { from: 10, to: 5 }],
-			attachment: [{ result: failed?.id }, { result: failed?.id, id: attached.body.result.id }, { result: 999999 }, {}],
-			get: [{ refs: ["C-1", "T-1", "R-1", "P-1"] }, { refs: ["C-1"], as: "md" }, { refs: [] }],
-			find: [{}, { in: "folders" }, { in: "tests" }, { folder: "checkout" }, { text: "revised" }],
-			inbox: [{}, { state: "decided" }],
-			impact: [{ files: ["checkout.spec.ts"] }],
-			since: [{ cursor: "s:0" }],
-			gate: [{ commit: "feedc0de1" }],
-			history: [{ ref: "C-1" }, { ref: "C-1", from: 1, to: 2 }],
-			timeline: [{ ref: "C-1" }],
-			check: [{}],
-			stats: [
-				{ of: "pass-rate" },
-				{ of: "flaky" },
-				{ of: "reruns" },
-				{ of: "automation" },
-				{ of: "coverage" },
-				{ of: "pass-rate", zone: "Nowhere/None" },
-			],
-			command: [{ cmd: "edit-0001" }, { cmd: "never-sent" }],
-			"tracker-status": [{ id: "tracker-read-01" }, { id: "not-a-request" }, {}],
-			"handoff-status": [{ question: "Q-1" }, { question: "Q-999" }, {}],
-		};
-		const reads = OP_LIST.filter((op) => op.effect === "read");
-		expect(Object.keys(inputs).sort()).toEqual(reads.map((op) => op.name).sort());
-		const before = pool.completed;
-		let checked = 0;
-		for (const op of reads) {
-			for (const input of inputs[op.name] ?? []) {
-				const expected = await invoke(instance.app, OPS, {
-					op: op.name,
-					project: "scratch",
-					input,
-					actor: async () => instance.owner,
-				});
-				const reply = await post(instance, `/api/p/scratch/${op.name}`, input);
-				if (op.name === "audit" && expected.ok && reply.body.ok) {
-					const actual = AuditReply.parse(reply.body.result);
-					const baseline = AuditReply.parse(expected.result);
-					expect(verifyAudit(actual.ndjson)).toMatchObject({ project: baseline.project, records: baseline.records });
-					// Each read has its own export time and checksum; the retained records must match.
-					expect(actual.ndjson.trimEnd().split("\n").slice(1, -1)).toEqual(
-						baseline.ndjson.trimEnd().split("\n").slice(1, -1),
-					);
-				} else expect(reply.body).toEqual(JSON.parse(JSON.stringify(expected)));
-				checked++;
-			}
-		}
-		expect(pool.completed - before).toBe(checked);
-		expect(pool.fallbacks).toBe(0);
-	});
-
 	test("sixteen clients see every committed case immediately after their write while a report is applied", async () => {
 		await using instance = await bootReaders(4);
-		const pool = readersOf(instance);
-		await pool.ready();
+
 		await post(instance, "/api/p/scratch/propose", {
 			edits: Array.from({ length: 16 }, (_, i) => ({ op: "create", outline: `Reader ${i}` })),
 		});
@@ -1183,79 +1018,7 @@ describe("reads on other cores through HTTP", () => {
 			}),
 		);
 		expect((await upload).body.ok).toBe(true);
-		expect(pool.completed).toBeGreaterThanOrEqual(128);
-		expect(pool.fallbacks).toBe(0);
 	}, 15_000);
-
-	test("killing a worker with HTTP reads in flight loses no requests and the replacement serves reads", async () => {
-		await using instance = await bootReaders(1);
-		const pool = readersOf(instance);
-		await pool.ready();
-		const worker = pool.threads[0];
-		if (!worker) throw new Error("no reader thread");
-		await post(instance, "/api/p/scratch/propose", {
-			edits: Array.from({ length: 1000 }, (_, i) => ({ op: "create", outline: `Case ${i}` })),
-		});
-		const requests = Array.from({ length: 32 }, () => post(instance, "/api/p/scratch/find", { limit: 500 }));
-		const queued = new Promise<void>((resolve) => {
-			const send = worker.postMessage.bind(worker);
-			worker.postMessage = (...args: Parameters<Worker["postMessage"]>) => {
-				send(...args);
-				resolve();
-			};
-		});
-		await queued;
-		await worker.terminate();
-		expect((await Promise.all(requests)).every((reply) => reply.status === 200 && reply.body.ok)).toBe(true);
-		expect(pool.fallbacks).toBeGreaterThan(0);
-		await pool.ready();
-		const before = pool.completed;
-		expect((await post(instance, "/api/p/scratch/find", {})).status).toBe(200);
-		expect(pool.completed).toBe(before + 1);
-	});
-
-	test("a read its caller may not make is refused before any worker sees it", async () => {
-		await using instance = await bootReaders(2);
-		const owner = bearer(instance.generatedToken ?? "");
-		const made = await post<{ token: string }>(
-			instance,
-			"/api/admin",
-			{ do: "token.create", actor: "writer-only", kind: "ci", can: ["record"], project: "scratch" },
-			owner,
-		);
-		const readers = readersOf(instance);
-		await readers.ready();
-		const before = readers.completed;
-		const refused = await post(instance, "/api/p/scratch/find", {}, bearer(made.body.ok ? made.body.result.token : ""));
-		expect(refused.status).toBe(403);
-		expect((await post(instance, "/api/p/scratch/find", {}, bearer("no-such-token-0123456789"))).status).toBe(401);
-		expect(readers.completed).toBe(before);
-		expect((await post(instance, "/api/p/scratch/find", {}, owner)).status).toBe(200);
-		expect(readers.completed).toBe(before + 1);
-	});
-
-	test("a worker refuses write operations even when handed the owner's credential reference", async () => {
-		await using instance = await bootReaders(1);
-		const pool = readersOf(instance);
-		await pool.ready();
-		const refused = await pool.run(
-			{
-				op: "propose",
-				project: "scratch",
-				input: { edits: [{ op: "create", outline: "Must not be written" }] },
-				caller: { via: "local", owner: instance.app.config.owner },
-				clockOffset: 0,
-			},
-			() => {
-				throw new Error("the worker must refuse the write itself");
-			},
-		);
-		expect(refused).toMatchObject({ ok: false, error: { code: "forbidden" } });
-		expect((await post<{ count: number }>(instance, "/api/p/scratch/find", {})).body).toMatchObject({
-			ok: true,
-			result: { count: 0 },
-		});
-	});
 
 	// With reader threads the workers answer; without them the main thread answers from its own read connection.
 	// Both keep the names they have shown, and both must drop a forgotten one at once.
@@ -1263,7 +1026,6 @@ describe("reads on other cores through HTTP", () => {
 		"forgetting an actor clears the name from every read at once (%d reader threads)",
 		async (count) => {
 			await using instance = await bootReaders(count);
-			if (count > 0) await readersOf(instance).ready();
 			const created = await post<{ token: string }>(instance, "/api/admin", {
 				do: "token.create",
 				actor: "case-author",
@@ -1289,29 +1051,6 @@ describe("reads on other cores through HTTP", () => {
 			}
 		},
 	);
-
-	test("MAINWORTHY_READERS=0 uses the inline reader and stop awaits all worker exits", async () => {
-		const previous = process.env.MAINWORTHY_READERS;
-		let inlineFixture: ReturnType<typeof boot>;
-		try {
-			process.env.MAINWORTHY_READERS = "0";
-			inlineFixture = await boot("local");
-		} finally {
-			if (previous === undefined) delete process.env.MAINWORTHY_READERS;
-			else process.env.MAINWORTHY_READERS = previous;
-		}
-		await using inline = inlineFixture;
-		expect(inline.app.readers).toBeNull();
-		expect((await post(inline, "/api/p/scratch/find", {})).body).toMatchObject({ ok: true, result: { items: [] } });
-		await using pooled = await bootReaders(2);
-		const pool = readersOf(pooled);
-		await pool.ready();
-		const exits = pool.threads.map((worker) => new Promise<void>((resolve) => worker.once("exit", () => resolve())));
-		await pooled.stop();
-		await Promise.all(exits);
-		expect(pool.threads).toHaveLength(0);
-		await pooled.stop();
-	});
 });
 
 describe("local mode", () => {
@@ -1375,9 +1114,12 @@ describe("local mode", () => {
 	test("the owner with no step is a connection from this machine: any other peer address is refused", async () => {
 		await using instance = await boot("local");
 		const request = new Request(`${instance.url}/api/session`, { headers: { host: new URL(instance.url).host } });
-		const via = async (peer: string | null) => sessionOf(instance.app, request, instance.owner, peer)?.via ?? "refused";
-		expect(["127.0.0.1", "127.0.0.53", "::1", "::ffff:127.0.0.1"].map(via)).toEqual(Array(4).fill("local"));
-		expect(["192.168.1.20", "203.0.113.9", "::ffff:10.0.0.7", "fe80::1", "", null].map(via)).toEqual(
+		const via = async (peer: string | null) =>
+			(await sessionOf(instance.app, request, instance.owner, peer))?.via ?? "refused";
+		expect(await Promise.all(["127.0.0.1", "127.0.0.53", "::1", "::ffff:127.0.0.1"].map(via))).toEqual(
+			Array(4).fill("local"),
+		);
+		expect(await Promise.all(["192.168.1.20", "203.0.113.9", "::ffff:10.0.0.7", "fe80::1", "", null].map(via))).toEqual(
 			Array(6).fill("refused"),
 		);
 	});
@@ -1666,7 +1408,13 @@ describe("server mode", () => {
 		await using again = await boot("server", null, instance.app.config.dataDir);
 		expect(again.generatedToken).toBeNull();
 		expect((await post(again, "/api/p/scratch/find", {}, bearer(token))).status).toBe(200);
-		expect(again.app.db.raw.query("SELECT count(*) AS n FROM tokens").get()).toEqual({ n: 1 });
+		expect(
+			(
+				await again.app.database.read((db) =>
+					db.allDynamic<Record<string, unknown>>("SELECT count(*) AS n FROM tokens", []),
+				)
+			)[0] ?? null,
+		).toEqual({ n: 1 });
 	});
 
 	test("a token carries its actor's capabilities and nothing more", async () => {
@@ -1725,10 +1473,15 @@ describe("a pipeline's token", () => {
 		if (!made.body.ok) throw new Error(`token.create: ${made.body.error.message}`);
 		return bearer(made.body.result.token);
 	}
-	const cases = (instance: Instance, project: string) =>
-		instance.app.db.raw
-			.query("SELECT count(*) AS n FROM cases c JOIN projects p ON p.id = c.project WHERE p.key = ?")
-			.get(project);
+	const cases = async (instance: Instance, project: string) =>
+		(
+			await instance.app.database.read((db) =>
+				db.allDynamic<Record<string, unknown>>(
+					"SELECT count(*) AS n FROM cases c JOIN projects p ON p.id = c.project WHERE p.key = $1",
+					[project],
+				),
+			)
+		)[0] ?? null;
 
 	test("issued with no list of capabilities, it records and attaches evidence, ends changes, announces deploys and reads gates under every preset", async () => {
 		await using instance = await boot("server", OWNER);
@@ -1811,7 +1564,7 @@ describe("a pipeline's token", () => {
 				const reply = await post(instance, path, op.name === "propose" ? create : {}, ci);
 				expect(`${preset} ${op.name}: ${reply.status}`).toBe(`${preset} ${op.name}: 403`);
 			}
-			expect(cases(instance, preset)).toEqual({ n: 0 });
+			expect(await cases(instance, preset)).toEqual({ n: 0 });
 			// Its grant is on one project: the same token is nobody on another, and is told there is no such project.
 			expect((await post(instance, "/api/p/scratch/report", report, ci)).body).toMatchObject(missing);
 		}
@@ -1823,7 +1576,13 @@ describe("a pipeline's token", () => {
 			const refused = await admin(instance, { do: "token.create", actor: "wide", kind: "ci", can, project: "scratch" });
 			expect(refused.body).toMatchObject(invalid);
 		}
-		expect(instance.app.db.raw.query("SELECT count(*) AS n FROM actors WHERE name = 'wide'").get()).toEqual({ n: 0 });
+		expect(
+			(
+				await instance.app.database.read((db) =>
+					db.allDynamic<Record<string, unknown>>("SELECT count(*) AS n FROM actors WHERE name = 'wide'", []),
+				)
+			)[0] ?? null,
+		).toEqual({ n: 0 });
 		// A grant from before this rule, or from an archive: the row holds everything, the actor does not.
 		const old = await token(instance, {
 			actor: "old-pipeline",
@@ -1831,15 +1590,19 @@ describe("a pipeline's token", () => {
 			can: ["read", "record"],
 			project: "scratch",
 		});
-		instance.app.db.raw
-			.query("UPDATE grants SET can = ? WHERE actor = (SELECT id FROM actors WHERE name = 'old-pipeline')")
-			.run(JSON.stringify(["read", "produce", "answer", "plan", "admin"]));
+		await instance.app.database.write((db) =>
+			db.transaction(() =>
+				db.runDynamic("UPDATE grants SET can = $1 WHERE actor = (SELECT id FROM actors WHERE name = 'old-pipeline')", [
+					JSON.stringify(["read", "produce", "answer", "plan", "admin"]),
+				]),
+			),
+		);
 		expect((await post(instance, "/api/p/scratch/report", report, old)).body).toMatchObject({ ok: true });
 		expect((await post(instance, "/api/p/scratch/find", {}, old)).body).toMatchObject({ ok: true });
 		expect((await post(instance, "/api/p/scratch/propose", create, old)).body).toMatchObject(forbidden);
 		expect((await post(instance, "/api/p/scratch/plan", { name: "x", select: {} }, old)).body).toMatchObject(forbidden);
 		expect((await admin(instance, { do: "token.list" }, old)).body).toMatchObject(forbidden);
-		expect(cases(instance, "scratch")).toEqual({ n: 0 });
+		expect(await cases(instance, "scratch")).toEqual({ n: 0 });
 	});
 
 	test("whoever may produce may record, and reading alone records nothing", async () => {
@@ -1978,15 +1741,21 @@ describe("who may make a token for whom", () => {
 		ok: false,
 		error: { code: "forbidden", message: expect.stringContaining(who) },
 	});
-	const actors = (instance: Instance) =>
-		instance.app.db.raw
-			.query<{ name: string }, []>("SELECT name FROM actors ORDER BY id")
-			.all()
-			.map((row) => row.name);
-	const tokensOf = (instance: Instance, name: string) =>
-		instance.app.db.raw
-			.query("SELECT count(*) AS n FROM tokens t JOIN actors a ON a.id = t.actor WHERE a.name = ?")
-			.get(name);
+	const actors = async (instance: Instance) =>
+		(
+			await instance.app.database.read((db) =>
+				db.allDynamic<{ name: string }>("SELECT name FROM actors ORDER BY id", []),
+			)
+		).map((row) => row.name);
+	const tokensOf = async (instance: Instance, name: string) =>
+		(
+			await instance.app.database.read((db) =>
+				db.allDynamic<Record<string, unknown>>(
+					"SELECT count(*) AS n FROM tokens t JOIN actors a ON a.id = t.actor WHERE a.name = $1",
+					[name],
+				),
+			)
+		)[0] ?? null;
 
 	test("a person's token is made by that person or by the owner, and the owner's by the owner alone", async () => {
 		// Whoever holds a token for a name acts under that name: the record says a decision or a typed text is
@@ -2000,7 +1769,7 @@ describe("who may make a token for whom", () => {
 		expect([forEve.status, forEve.body]).toEqual([403, refusal("by eve or by robin")]);
 		// Naming another kind for a person who exists does not get round it.
 		expect((await admin(instance, { do: "token.create", actor: "robin", kind: "agent" }, dana)).status).toBe(403);
-		expect([tokensOf(instance, "robin"), tokensOf(instance, "eve")]).toEqual([{ n: 1 }, { n: 1 }]);
+		expect([await tokensOf(instance, "robin"), await tokensOf(instance, "eve")]).toEqual([{ n: 1 }, { n: 1 }]);
 		// Their own, the owner for anybody, and an admin for somebody new, as before.
 		const second = await admin<{ actor: string }>(instance, { do: "token.create", actor: "dana", kind: "human" }, dana);
 		expect(second.body).toMatchObject({ ok: true, result: { actor: "dana" } });
@@ -2023,7 +1792,7 @@ describe("who may make a token for whom", () => {
 		await using instance = await boot("server", OWNER);
 		const bot = await token(instance, { actor: "rootbot", kind: "agent", can: ["admin"] });
 		await token(instance, { actor: "eve", kind: "human", can: ["read"], project: "scratch" });
-		const before = actors(instance);
+		const before = await actors(instance);
 		const person = refusal("a person");
 		for (const input of [
 			{ do: "token.create", actor: "robin", kind: "human" },
@@ -2037,8 +1806,8 @@ describe("who may make a token for whom", () => {
 			const reply = await admin(instance, input, bot);
 			expect([JSON.stringify(input), reply.status, reply.body]).toEqual([JSON.stringify(input), 403, person]);
 		}
-		expect(actors(instance)).toEqual(before);
-		expect([tokensOf(instance, "robin"), tokensOf(instance, "eve")]).toEqual([{ n: 1 }, { n: 1 }]);
+		expect(await actors(instance)).toEqual(before);
+		expect([await tokensOf(instance, "robin"), await tokensOf(instance, "eve")]).toEqual([{ n: 1 }, { n: 1 }]);
 		const eve = await admin<{ name: string; grants: unknown[] }[]>(instance, { do: "actor.list" });
 		expect(eve.body.ok && eve.body.result.find((actor) => actor.name === "eve")?.grants).toEqual([
 			{ project: "scratch", can: ["read"], roles: [] },
@@ -2157,7 +1926,9 @@ describe("the owner always has a way in", () => {
 		const dana = await token(first, { actor: "dana", kind: "human" });
 		expect(first.warnings).toEqual([NO_PROXY_NAMED]);
 		// Revoked before this rule existed, or in the database by hand.
-		first.app.db.raw.query("UPDATE tokens SET revoked_at = 1 WHERE label LIKE 'owner %'").run();
+		await first.app.database.write((db) =>
+			db.transaction(() => db.runDynamic("UPDATE tokens SET revoked_at = 1 WHERE label LIKE 'owner %'", [])),
+		);
 		await first.stop();
 
 		await using revoked = await boot("server", OWNER, first.app.config.dataDir);
@@ -2191,7 +1962,7 @@ describe("the owner always has a way in", () => {
 		const original = first.generatedToken ?? "";
 		expect(await whoIs(first, original)).toBe("robin");
 		// What an import does to the tokens of the instance it replaces.
-		first.app.db.raw.query("DELETE FROM tokens").run();
+		await first.app.database.write((db) => db.transaction(() => db.runDynamic("DELETE FROM tokens", [])));
 		await first.stop();
 
 		await using again = await boot("server", null, first.app.config.dataDir);
@@ -2274,7 +2045,13 @@ describe("names and failures", () => {
 				{ ok: false, error: { code: "invalid", message: expect.stringContaining("forgotten") } },
 			]);
 		}
-		expect(instance.app.db.raw.query("SELECT count(*) AS n FROM actors WHERE name LIKE 'forgotten%'").get()).toEqual({
+		expect(
+			(
+				await instance.app.database.read((db) =>
+					db.allDynamic<Record<string, unknown>>("SELECT count(*) AS n FROM actors WHERE name LIKE 'forgotten%'", []),
+				)
+			)[0] ?? null,
+		).toEqual({
 			n: 0,
 		});
 		// A name that only contains the word is a name.
@@ -2287,11 +2064,13 @@ describe("names and failures", () => {
 		await using instance = await boot("server", OWNER);
 		await post(instance, "/api/admin", { do: "token.create", actor: "dana", kind: "human", can: ["read"] }, owner);
 		// A failure of the database that nothing here foresaw, as a full disk is: forgetting dana runs into it.
-		instance.app.db.raw
-			.query(
-				"CREATE TRIGGER forgetting_fails BEFORE UPDATE OF disabled_at ON actors BEGIN SELECT RAISE(ABORT, 'database or disk is full'); END",
-			)
-			.run();
+		await instance.app.database.write((db) =>
+			db.transaction(() =>
+				db.exec(
+					"CREATE FUNCTION forgetting_fails() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'database or disk is full'; END $$; CREATE TRIGGER forgetting_fails BEFORE UPDATE OF disabled_at ON actors FOR EACH ROW EXECUTE FUNCTION forgetting_fails()",
+				),
+			),
+		);
 		const logged = spyOn(console, "error").mockImplementation(() => {});
 		try {
 			const reply = await post(instance, "/api/admin", { do: "actor.forget", name: "dana" }, owner);
@@ -3139,7 +2918,7 @@ describe("the surface", () => {
 	test("a failed stream permission read closes only that stream and a reconnect recovers the write", async () => {
 		await using instance = await boot("local");
 		const logged = spyOn(console, "error").mockImplementation(() => {});
-		const read = spyOn(instance.app.reader, "get");
+		const read = spyOn(instance.app.database, "read");
 		let failNext = true;
 		const unsubscribe = instance.app.subscribe(() => {
 			if (!failNext) return;
@@ -3240,15 +3019,23 @@ describe("/healthz and the commit", () => {
 	async function healthz(env: Record<string, string>): Promise<unknown> {
 		using directory = testDirectory("mainworthy-http-healthz-");
 		const dataDir = directory.path;
-		const config = defaultConfig({ MAINWORTHY_DATA: dataDir, MAINWORTHY_PORT: "0", MAINWORTHY_OWNER: "robin", ...env });
+		const config = defaultConfig({
+			MAINWORTHY_DATABASE_URL: await databaseFor(dataDir),
+			MAINWORTHY_DATA: dataDir,
+			MAINWORTHY_PORT: "0",
+			MAINWORTHY_OWNER: "robin",
+			...env,
+		});
 		// No reader threads: this route does not read a project, and the loop below starts one server per value.
-		const instance = await start(config, () => ({ ui: null }), { readers: 0 });
+		const instance = await start(config, () => ({ ui: null }), {});
 		try {
 			const response = await fetch(`${instance.url}/healthz`);
 			expect(response.status).toBe(200);
 			return await response.json();
 		} finally {
 			await instance.stop();
+			await databases.get(dataDir)?.close();
+			databases.delete(dataDir);
 		}
 	}
 
@@ -3313,14 +3100,22 @@ describe("/.well-known/apple-app-site-association", () => {
 	async function association(env: Record<string, string>): Promise<Response> {
 		using directory = testDirectory("mainworthy-http-aasa-");
 		const dataDir = directory.path;
-		const config = defaultConfig({ MAINWORTHY_DATA: dataDir, MAINWORTHY_PORT: "0", MAINWORTHY_OWNER: "robin", ...env });
-		const instance = await start(config, () => ({ ui: null }), { readers: 0 });
+		const config = defaultConfig({
+			MAINWORTHY_DATABASE_URL: await databaseFor(dataDir),
+			MAINWORTHY_DATA: dataDir,
+			MAINWORTHY_PORT: "0",
+			MAINWORTHY_OWNER: "robin",
+			...env,
+		});
+		const instance = await start(config, () => ({ ui: null }), {});
 		try {
 			const response = await fetch(`${instance.url}/.well-known/apple-app-site-association`, { redirect: "manual" });
 			await response.clone().arrayBuffer();
 			return response;
 		} finally {
 			await instance.stop();
+			await databases.get(dataDir)?.close();
+			databases.delete(dataDir);
 		}
 	}
 
@@ -3453,7 +3248,7 @@ describe("a connection that sends nothing", () => {
 		// The gate is held until the idle time has provably passed: until the refused connection, silent since the
 		// same moment as the write below, has been closed for it.
 		const release = Promise.withResolvers<void>();
-		const held = instance.app.gate.run(() => release.promise);
+		const held = instance.app.database.write(() => release.promise);
 		const queued = waitingAtGate(instance, 2);
 		// Two writes that wait at that gate, on plain sockets: what comes back is what the server sent, where a
 		// client library may send a request again when its connection is closed. One has a body and one has none

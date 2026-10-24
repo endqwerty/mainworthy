@@ -1105,9 +1105,9 @@ export async function setGrant(
 }
 
 /** Moves current personal and team grants during an atomic demo swap, preserving their history and roles. */
-export function moveProjectGrants(db: Db, from: number, to: number): void {
-	db.run(Q.moveProjectGrants, { from, to });
-	moveTeamProjectGrants(db, from, to);
+export async function moveProjectGrants(db: WriteDb, from: number, to: number): Promise<void> {
+	await db.run(Q.moveProjectGrants, { from, to });
+	await moveTeamProjectGrants(db, from, to);
 }
 
 /** Takes away an actor's grant on one project (0: its grant on every project). False when it held none there. */

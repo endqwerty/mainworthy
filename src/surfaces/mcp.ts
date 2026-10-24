@@ -443,7 +443,7 @@ export function mcpRoute(app: App): (req: Request, session: Session) => Promise<
 						actor: session.actor,
 						...(session.reference ? { reference: session.reference() } : {}),
 					}),
-				async () => grantedProjects(app, session).map((row) => row.key),
+				async () => (await grantedProjects(app, session)).map((row) => row.key),
 				req.headers.get("mcp-protocol-version") ?? DEFAULT_NEGOTIATED_PROTOCOL_VERSION,
 			);
 		if (!(await isLegacyRequest(req))) {

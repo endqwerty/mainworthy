@@ -77,25 +77,30 @@ async function refresh(
 		requested.unlinkedFiles > MAX_SEED_UNLINKED_FILES
 	)
 		throw new CliError("invalid", "invalid demo seed size");
-	const state = await app.gate.run(() => {
-		const found = findProject(app.db, project);
-		return found ? demoDeployment(app.db, found.id) : null;
+	const state = await app.database.write(async (db) => {
+		const found = await findProject(db, project);
+		return found ? await demoDeployment(db, found.id) : null;
 	});
 	if (state?.kind === "ready" && state.revision === revision) return state.seeded;
 	// Finish earlier retirements before another seed, so the heavy stages never overlap.
 	await drainRetiredDemos(instance, { signal: options.signal });
-	const issued = await app.gate.run(() =>
-		app.db.transaction(() => {
+	const issued = await app.database.write((db) =>
+		db.transaction(async () => {
 			options.signal?.throwIfAborted();
-			return createToken(app, {
-				actor: owner.name,
-				kind: "human",
-				can: [],
-				project: 0,
-				label: `demo seed of ${project}`,
-				lastsMs: LASTS_MS,
-				madeBy: owner.id,
-			});
+			return createToken(
+				app,
+				{
+					actor: owner.name,
+					kind: "human",
+					can: [],
+					project: 0,
+					label: `demo seed of ${project}`,
+					lastsMs: LASTS_MS,
+					madeBy: owner.id,
+				},
+				null,
+				db,
+			);
 		}),
 	);
 	let seeded: SeedResult;
@@ -103,27 +108,30 @@ async function refresh(
 	try {
 		const client = new Client({ url: instance.url, token: issued.secret, project });
 		await refuseProducers(client);
-		const chosen = await app.gate.run(() => {
+		const chosen = await app.database.write(async (db) => {
 			const began = performance.now();
 			try {
-				return app.db.transaction(() => {
+				return await db.transaction(async () => {
 					options.signal?.throwIfAborted();
-					const old = findProject(app.db, project);
-					const current = old ? demoDeployment(app.db, old.id) : null;
+					const old = await findProject(db, project);
+					const current = old ? await demoDeployment(db, old.id) : null;
 					if (old && current?.kind === "seeding" && current.revision === revision)
 						return { id: old.id, size: current.size };
-					if (old && demoSince(app.db, old.id) === null)
+					if (old && (await demoSince(db, old.id)) === null)
 						throw new CliError(
 							"conflict",
 							`MAINWORTHY_DEMO names project ${project}, which is not a demo; it is left as it is`,
 						);
-					if (old) retireDemo(app.db, old);
-					createProject({ app, actor: owner, now: app.now(), session: null, context: null }, { key: project });
-					const fresh = findProject(app.db, project);
-					if (!fresh || markDemo(app.db, fresh, app.now()) === null)
+					if (old) await retireDemo(db, old);
+					await createProject(
+						{ app, db, actor: owner, now: app.now(), session: null, context: null },
+						{ key: project },
+					);
+					const fresh = await findProject(db, project);
+					if (!fresh || (await markDemo(db, fresh, app.now())) === null)
 						throw new Error("the fresh demo could not be marked");
-					setDemoDeployment(app.db, fresh.id, { kind: "seeding", revision, size: requested });
-					if (old) moveProjectGrants(app.db, old.id, fresh.id);
+					await setDemoDeployment(db, fresh.id, { kind: "seeding", revision, size: requested });
+					if (old) await moveProjectGrants(db, old.id, fresh.id);
 					return { id: fresh.id, size: requested };
 				});
 			} finally {
@@ -136,15 +144,15 @@ async function refresh(
 		seeded = await seed(client, { project, ...chosen.size });
 		await options.step?.("seeded");
 	} finally {
-		await app.gate.run(() => revokeToken(app, issued.id));
+		await app.database.write((db) => db.transaction(() => revokeToken(app, db, issued.id)));
 	}
-	await app.gate.run(() =>
-		app.db.transaction(() => {
+	await app.database.write((db) =>
+		db.transaction(async () => {
 			options.signal?.throwIfAborted();
-			const current = demoDeployment(app.db, target);
+			const current = await demoDeployment(db, target);
 			if (current?.kind !== "seeding" || current.revision !== revision)
 				throw new CliError("conflict", "demo deployment changed while seeding");
-			setDemoDeployment(app.db, target, { kind: "ready", revision, seeded });
+			await setDemoDeployment(db, target, { kind: "ready", revision, seeded });
 		}),
 	);
 	return seeded;
@@ -164,12 +172,12 @@ export function drainRetiredDemos(
 		const { app } = instance;
 		for (;;) {
 			options.signal?.throwIfAborted();
-			const slice = await app.gate.run(() => {
+			const slice = await app.database.write(async (db) => {
 				options.signal?.throwIfAborted();
-				const retired = retiredDemos(app.db)[0];
+				const retired = (await retiredDemos(db))[0];
 				if (!retired) return null;
 				const began = performance.now();
-				const result = removeProjectSlice(app.db, retired.key, 32);
+				const result = await removeProjectSlice(db, retired.key, 32);
 				return { ...result, ms: performance.now() - began };
 			});
 			if (slice === null) return;
@@ -199,7 +207,7 @@ export async function renewDemoWork(
 		op: "find",
 		project,
 		input: { in: "slots", run: seeded.run, limit: 200 },
-		actor: async () => instance.owner,
+		actor: () => instance.owner,
 	});
 	if (!read.ok) return;
 	const slots = z.object({ items: z.array(z.object({ id: z.number(), state: z.string() })) }).parse(read.result).items;
@@ -209,6 +217,6 @@ export async function renewDemoWork(
 		op: "work",
 		project,
 		input: { do: "take", run: seeded.run, slot: seeded.workSlot, seconds: DEMO_WORK.seconds },
-		actor: async () => instance.owner,
+		actor: () => instance.owner,
 	});
 }
