@@ -61,9 +61,13 @@ export function databaseCreated(path: string | null): void {
 	if (path)
 		appendFileSync(join(path, "..", "events.jsonl"), `${JSON.stringify(["created", basename(path, suffix)])}\n`);
 }
+export function releaseDatabase(path: string | null): void {
+	if (path) writeFileSync(`${path}.released`, "");
+}
 export function databaseDropped(path: string | null): void {
 	if (!path) return;
 	rmSync(path, { force: true });
+	rmSync(`${path}.released`, { force: true });
 	appendFileSync(join(path, "..", "events.jsonl"), `${JSON.stringify(["dropped", basename(path, suffix)])}\n`);
 }
 export function peakDatabases(directory: string): number {
@@ -105,23 +109,76 @@ function parseRecord(directory: string, file: string): Record {
 	if (!["postgres:", "postgresql:"].includes(url.protocol)) throw new Error("invalid test database server");
 	return { name, adminUrl, owned };
 }
-export async function drainRecordedDatabases(directory: string): Promise<number> {
-	const files = readdirSync(directory).filter((name) => name.endsWith(suffix));
-	// Parse every record before issuing anything, so malformed ownership data cannot cause a partial cleanup.
-	const records = files.map((file) => ({ ...parseRecord(directory, file), file }));
-	if (!records.length) return 0;
-	const { databaseAdmin } = await import("../../src/server/kernel/db.ts");
-	const ownUrl = records.some((record) => record.owned) ? (await (await import("../pg.ts")).cluster()).adminUrl : null;
-	const groups = Map.groupBy(records, (record) => (record.owned && ownUrl ? ownUrl : record.adminUrl));
-	for (const [url, entries] of groups) {
-		await databaseAdmin(url, async (admin) => {
-			for (const record of entries) {
-				await admin.exec(`DROP DATABASE IF EXISTS "${record.name}" WITH (FORCE)`);
-				databaseDropped(join(directory, record.file));
-			}
-		});
+/** One exact manifest can be drained by its worker or the runner, never concurrently. */
+export async function dropRecordedDatabase(path: string): Promise<{ ms: number; dropped: boolean }> {
+	const directory = join(path, "..");
+	const file = basename(path);
+	const timing = `${path}.dropped`;
+	if (!existsSync(path)) return { ms: Number(readFileSync(timing, "utf8")), dropped: false };
+	let record: Record;
+	try {
+		record = parseRecord(directory, file);
+	} catch (error) {
+		if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+		return { ms: Number(readFileSync(timing, "utf8")), dropped: false };
 	}
-	return records.length;
+	const { databaseAdmin } = await import("../../src/server/kernel/db.ts");
+	const url = record.owned ? (await (await import("../pg.ts")).cluster()).adminUrl : record.adminUrl;
+	return await databaseAdmin(url, async (admin) => {
+		await admin.all("SELECT pg_advisory_lock(hashtextextended($1::text, 0))", [record.name]);
+		// The lock's connection closes below, including on error. Another cleanup owner may have finished first.
+		if (!existsSync(path)) return { ms: Number(readFileSync(timing, "utf8")), dropped: false };
+		const began = performance.now();
+		await admin.exec(`DROP DATABASE IF EXISTS "${record.name}" WITH (FORCE)`);
+		const ms = performance.now() - began;
+		writeFileSync(timing, String(ms));
+		databaseDropped(path);
+		return { ms, dropped: true };
+	});
+}
+export async function drainRecordedDatabases(directory: string, releasedOnly = false): Promise<number> {
+	const files = readdirSync(directory).filter(
+		(name) => name.endsWith(suffix) && (!releasedOnly || existsSync(`${join(directory, name)}.released`)),
+	);
+	// A release is published only after the manifest and fixture are complete. Validate the whole selection first.
+	const records = files.flatMap((file) => {
+		try {
+			parseRecord(directory, file);
+		} catch (error) {
+			if (error instanceof Error && "code" in error && error.code === "ENOENT") return [];
+			throw error;
+		}
+		return [join(directory, file)];
+	});
+	let count = 0;
+	for (const path of records) {
+		if (!existsSync(path) || (releasedOnly && !existsSync(`${path}.released`))) continue;
+		if ((await dropRecordedDatabase(path)).dropped) count++;
+	}
+	return count;
+}
+
+/** A single consumer releases closed fixtures during a run; open and interrupted fixtures stay owned. */
+export function reapReleasedDatabases(directory: string): { stop(): Promise<number> } {
+	let stopped = false;
+	let count = 0;
+	let failure: unknown;
+	const work = (async () => {
+		while (!stopped) {
+			count += await drainRecordedDatabases(directory, true);
+			if (!stopped) await Bun.sleep(25);
+		}
+	})().catch((error: unknown) => {
+		failure = error;
+	});
+	return {
+		async stop() {
+			stopped = true;
+			await work;
+			if (failure) throw failure;
+			return count;
+		},
+	};
 }
 export async function recoverTestDatabases(root: string): Promise<number> {
 	const parent = runsRoot(root);

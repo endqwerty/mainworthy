@@ -85,6 +85,7 @@ const recoveredDatabases = await databaseRuns.recoverTestDatabases(process.cwd()
 if (recoveredDatabases) console.log(`check: recovered ${recoveredDatabases} recorded test databases from an ended run`);
 const databaseRun = databaseRuns.beginDatabaseRun(process.cwd());
 const ownership = databaseRun.children;
+const databaseReaper = databaseRuns.reapReleasedDatabases(databaseRun.directory);
 const budgetReports = join(scratch, "budget-warnings");
 mkdirSync(budgetReports);
 let testOutcome: Outcome | undefined;
@@ -134,15 +135,22 @@ const leave = (code: number): Promise<never> => {
 			`check: ${leaked.length} owned ${leaked.length === 1 ? "child" : "children"} still alive${leaked.length ? ` (pids: ${leaked.join(", ")})` : ""}`,
 		);
 		let exit = code || (browserFailed || leaked.length > 0 ? 1 : 0);
+		let reaped = 0;
+		try {
+			reaped = await databaseReaper.stop();
+		} catch (error) {
+			exit = 1;
+			console.error("check: released database cleanup failed", error);
+		}
 		if (leaked.length === 0) {
 			try {
 				const peak = databaseRuns.peakDatabases(databaseRun.directory);
 				const before = everyFile ? await databaseRuns.clusterDiskBytes() : null;
 				const started = performance.now();
-				const count = await databaseRuns.drainRecordedDatabases(databaseRun.directory);
+				const count = reaped + (await databaseRuns.drainRecordedDatabases(databaseRun.directory));
 				const after = everyFile ? await databaseRuns.clusterDiskBytes() : null;
 				console.log(
-					`check: ${count} test databases removed; peak live ${peak}; cleanup ${((performance.now() - started) / 1000).toFixed(1)} s`,
+					`check: ${count} test databases removed; peak live ${peak}; final cleanup ${((performance.now() - started) / 1000).toFixed(1)} s (${reaped} removed during tests)`,
 				);
 				if (before !== null && after !== null)
 					console.log(

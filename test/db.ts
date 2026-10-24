@@ -2,7 +2,13 @@
 import { afterAll } from "bun:test";
 import { createHash, randomUUID } from "node:crypto";
 import { cluster } from "../scripts/pg.ts";
-import { databaseCreated, databaseDropped, recordDatabase } from "../scripts/work/test-databases.ts";
+import {
+	databaseCreated,
+	databaseDropped,
+	dropRecordedDatabase,
+	recordDatabase,
+	releaseDatabase,
+} from "../scripts/work/test-databases.ts";
 import { Database, type DatabaseAdmin, databaseAdmin } from "../src/server/kernel/db.ts";
 
 export type TestDatabase = {
@@ -73,6 +79,10 @@ export async function testDatabase(input: { schema?: "baseline" | "empty" } = {}
 			closed = true;
 			fixtures.delete(fixture);
 			const drop = async () => {
+				if (record) {
+					timings.dropMs = (await dropRecordedDatabase(record)).ms;
+					return;
+				}
 				await databaseAdmin(adminUrl, async (admin) => {
 					const start = performance.now();
 					await admin.exec(`DROP DATABASE IF EXISTS ${identifier(name)} WITH (FORCE)`);
@@ -80,8 +90,10 @@ export async function testDatabase(input: { schema?: "baseline" | "empty" } = {}
 				});
 				databaseDropped(record);
 			};
-			if (managed) deferredDrops.add(drop);
-			else scheduleDrop(drop);
+			if (managed) {
+				releaseDatabase(record);
+				deferredDrops.add(drop);
+			} else scheduleDrop(drop);
 		},
 	};
 	fixtures.add(fixture);
@@ -106,7 +118,9 @@ export async function drainDatabaseDrops(): Promise<void> {
 }
 try {
 	afterAll(async () => {
-		await Promise.all([...fixtures].map((fixture) => fixture.close()));
-		if (!managed) await drainDatabaseDrops();
+		if (!managed) {
+			await Promise.all([...fixtures].map((fixture) => fixture.close()));
+			await drainDatabaseDrops();
+		}
 	});
 } catch {}
