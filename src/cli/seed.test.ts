@@ -92,8 +92,11 @@ test("a seeded project holds a suite in folders, a fortnight of history and six 
 	await withInstance(async ({ client, instance }) => {
 		const before = Date.now();
 		let evidenceReads = 0;
-		const restore = observeDatabase(instance.app.database, (text) => {
+		let ruleLookups = 0;
+		const restore = observeDatabase(instance.app.database, (text, params) => {
 			if (text.includes("FROM flips f")) evidenceReads++;
+			if (text === "SELECT * FROM actors WHERE org = $1 AND name = $2" && "name" in params && params.name === "policy")
+				ruleLookups++;
 		});
 		let seeded: Awaited<ReturnType<typeof seed>>;
 		try {
@@ -102,6 +105,7 @@ test("a seeded project holds a suite in folders, a fortnight of history and six 
 			restore();
 		}
 		expect(evidenceReads).toBeLessThanOrEqual(40);
+		expect(ruleLookups).toBe(0);
 		const demo = on(client, "demo");
 		const pipeline = z
 			.array(z.object({ last: z.array(z.object({ steps: ResultTrail.nullable() })) }))

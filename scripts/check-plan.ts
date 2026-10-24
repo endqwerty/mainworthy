@@ -80,7 +80,10 @@ export const parallelWorkers = (cores = availableParallelism(), load = loadavg()
 export const CHECK_WARNING_SECONDS = 130;
 
 /** The shards the scope matrix gives `.github/workflows/check.yml` for the parallel phase. */
-export const CI_SHARDS = 7;
+export const CI_SHARDS = 14;
+
+/** One test worker leaves the other CI CPU for PostgreSQL. Local worker selection stays machine-sized. */
+export const CI_TEST_WORKERS = 1;
 
 /** The existing CI warning threshold. Elapsed time does not change the gate's verdict (decision 0097). */
 export const CI_SHARD_WARNING_SECONDS = 180;

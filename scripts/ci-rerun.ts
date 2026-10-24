@@ -24,7 +24,7 @@ import { newestAttempt } from "./check-plan.ts";
 
 /** Jobs that fail the same way every time they run on a commit: the scope, the type-check and lint, the description. */
 export const STEADY: ReadonlySet<string> = new Set(["scope", "static", "description"]);
-/** The most jobs run again: a third of the test shards. More failing than that is not a test failing by chance. */
+/** At most three jobs run again; more failures need a fixing commit instead of more retries. */
 export const MOST = 3;
 /** How long one job's retry may take, the gate after it included, before the rest are left. */
 const WAIT_MS = 45 * 60_000;

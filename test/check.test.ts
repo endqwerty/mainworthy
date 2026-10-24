@@ -716,12 +716,32 @@ test("the workers fit the machine: the performance phase is alone on a small one
 	expect(testArgs("parallel", { timings: "t.json", workers: 3 })).toContain("--parallel=3");
 });
 
+test("CI functional runners leave a CPU for PostgreSQL", () => {
+	for (const entries of [matrix("all"), matrix(["test/docs.test.ts", "test/policy-latency.test.ts"])]) {
+		for (const entry of entries) {
+			if (entry.name === "performance") {
+				expect(entry.phase).toBe("--only=performance");
+				continue;
+			}
+			const options = parseCheckArgs(["test", ...entry.phase.split(" ")]);
+			expect(options.workers).toBe(1);
+			expect(testArgs("parallel", { timings: "t.json", workers: options.workers, shard: options.shard })).toContain(
+				"--parallel=1",
+			);
+		}
+	}
+});
+
 test("the workflow runs the shards the scope names and its gate reads every one of them", () => {
-	expect(CI_SHARDS).toBe(7);
+	expect(CI_SHARDS).toBe(14);
 	const workflow = readFileSync(".github/workflows/check.yml", "utf8");
 	const shards = Array.from({ length: CI_SHARDS }, (_, i) => `tests-${i + 1}`);
 	expect(matrix("all")).toEqual([
-		...shards.map((name, i) => ({ name, phase: `--only=parallel --shard=${i + 1}/${CI_SHARDS}`, files: "" })),
+		...shards.map((name, i) => ({
+			name,
+			phase: `--only=parallel --workers=1 --shard=${i + 1}/${CI_SHARDS}`,
+			files: "",
+		})),
 		{ name: "performance", phase: "--only=performance", files: "" },
 	]);
 	const all = Object.fromEntries(
