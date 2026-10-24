@@ -1480,6 +1480,22 @@ test("CI installs PostgreSQL snapshot tools before running the test matrix", () 
 	expect(tools).toBeLessThan(steps.findIndex((step) => step.name === "Tests"));
 });
 
+test("every PostgreSQL service declares shared memory for concurrent fixture databases", () => {
+	const workflow = z
+		.object({
+			jobs: z.record(
+				z.string(),
+				z.object({
+					services: z.object({ postgres: z.object({ options: z.string() }) }).optional(),
+				}),
+			),
+		})
+		.parse(Bun.YAML.parse(readFileSync(".github/workflows/check.yml", "utf8")));
+	const services = Object.entries(workflow.jobs).filter(([, job]) => job.services);
+	expect(services.map(([name]) => name)).toEqual(["tests", "gate"]);
+	for (const [name, job] of services) expect(job.services?.postgres.options, name).toContain("--shm-size=256m");
+});
+
 test("the deployment pins every base and Compose image by digest", () => {
 	const bases = [...readFileSync("Dockerfile", "utf8").matchAll(/^\s*FROM\s+(.+)$/gim)];
 	expect(bases.length).toBeGreaterThan(0);

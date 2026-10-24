@@ -215,7 +215,9 @@ jobs:
           POSTGRES_INITDB_ARGS: --locale=C --encoding=UTF8
         ports:
           - 5432:5432
+        # Fixture databases also keep shared statistics; Docker's 64 MiB default exhausted during a shard.
         options: >-
+          --shm-size=256m
           --health-cmd "pg_isready -U postgres"
           --health-interval 2s
           --health-timeout 5s
@@ -299,7 +301,9 @@ jobs:
           POSTGRES_INITDB_ARGS: --locale=C --encoding=UTF8
         ports:
           - 5432:5432
+        # Fixture databases also keep shared statistics; Docker's 64 MiB default exhausted during a shard.
         options: >-
+          --shm-size=256m
           --health-cmd "pg_isready -U postgres"
           --health-interval 2s
           --health-timeout 5s

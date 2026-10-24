@@ -21,7 +21,7 @@ test("a large link proposal does not multiply its edits by the case's tags", asy
 test("on-disk hot paths preserve their results", async () => {
 	await withDiskWorkloads(async (workloads) => {
 		for (const workload of workloads) await checkWorkload(workload);
-	});
+	}, false);
 }, 20_000);
 
 test("quarantined reports remain correct after 3000 earlier trunk commits", async () => {

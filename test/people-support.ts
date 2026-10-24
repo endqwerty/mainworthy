@@ -15,7 +15,7 @@ import type {
 } from "../src/server/identity/webauthn.ts";
 import { type Config, defaultConfig } from "../src/server/kernel/app.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
-import { databaseContents, holdWriter, identityDatabaseUrl, pgRows } from "./identity-db.ts";
+import { closeIdentityDatabases, databaseContents, holdWriter, identityDatabaseUrl, pgRows } from "./identity-db.ts";
 
 /** The owner of every instance here, and the token the owner signs in with. */
 export const OWNER = "kim";
@@ -91,6 +91,7 @@ const dirs: string[] = [];
 /** Stops every instance a test started and removes its directory. Each test file calls it after each test. */
 export async function cleanUp(): Promise<void> {
 	for (const world of worlds.splice(0)) await world.instance.stop();
+	await closeIdentityDatabases();
 	for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 }
 

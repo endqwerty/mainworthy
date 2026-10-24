@@ -22,6 +22,12 @@ export async function snapshots(finalStorageOnly = false) {
 					cursor = page.cursor ?? undefined;
 				} while (cursor);
 			}
+			if (finalStorageOnly) {
+				// Harness calls advance its clock; keep the fixture's write times without discarded gate projections.
+				h.advance(targets.length + 1 + runs.length);
+				return;
+			}
+
 			stages.push({
 				step,
 				evidence: await storedEvidence(h),

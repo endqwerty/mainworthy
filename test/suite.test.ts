@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { observeDatabase } from "../bench/profile.ts";
 import { budget } from "../scripts/budget.ts";
 import { open } from "../src/app/start.ts";
 import { Client } from "../src/cli/client.ts";
@@ -56,6 +57,32 @@ const storedBody = async () => {
 	if (!parsed.ok) throw new Error(JSON.stringify(parsed.errors));
 	return parsed.doc.body;
 };
+
+test("sealing sibling edits reads their base versions together", async () => {
+	await h.call("propose", { edits: Array.from({ length: 64 }, (_, n) => ({ op: "create", outline: `Case ${n}` })) });
+	let reads = 0;
+	const restore = observeDatabase(h.app.database, (text) => {
+		if (text === "SELECT * FROM versions WHERE case_id = $1 AND no = $2") reads++;
+	});
+	try {
+		const reply = await h.call<Proposed>("propose", {
+			edits: Array.from({ length: 64 }, (_, n) => ({
+				op: "edit",
+				case: `C-${n + 1}`,
+				base: 1,
+				body: { pre: "Updated" },
+			})),
+		});
+		expect(reply.cases).toHaveLength(64);
+		expect(reads).toBeLessThanOrEqual(130);
+		const rows = await h.app.database.read((db) =>
+			db.all(sql<readonly [], { n: number }>("SELECT count(*) AS n FROM cases WHERE head=2")),
+		);
+		expect(rows).toEqual([{ n: 64 }]);
+	} finally {
+		restore();
+	}
+});
 
 test("bulk suite reads preserve reference and alias resolution and pair versions exactly", async () => {
 	await h.call("propose", {

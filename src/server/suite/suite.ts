@@ -733,9 +733,28 @@ export async function* sealSteps(
 		}
 	});
 	const lookedUp = await findCases(ctx.db, ctx.project.id, references);
+	const byId = new Map([...lookedUp.values()].filter((row) => row !== null).map((row) => [row.id, row]));
+	const requested = new Map<string, { caseId: number; no: number }>();
+	for (const edit of input.edits) {
+		if (edit.op !== "edit" && edit.op !== "restore") continue;
+		const row = lookedUp.get(edit.case);
+		if (!row) continue;
+		for (const no of [row.head, edit.op === "edit" ? edit.base : edit.to])
+			requested.set(`${row.id}:${no}`, { caseId: row.id, no });
+	}
+	const versions = new Map<string, VersionRow>();
+	const pairs = [...requested.values()];
+	for (let start = 0; start < pairs.length; start += SLICE)
+		for (const row of await versionsOf(ctx.db, pairs.slice(start, start + SLICE)))
+			versions.set(`${row.case_id}:${row.no}`, row);
+	const body = async (caseId: number, no: number): Promise<CaseBody> => {
+		const cached = versions.get(`${caseId}:${no}`);
+		return cached ? json<CaseBody>(cached.body) : await bodyOf(ctx.db, caseId, no);
+	};
 	const lookup = async (text: string): Promise<CaseRow> => {
 		const row = lookedUp.get(text) ?? (await mustCase(ctx.db, ctx.project.id, text));
 		lookedUp.set(text, row);
+		byId.set(row.id, row);
 		cases.add(caseRef(row));
 		return row;
 	};
@@ -749,8 +768,8 @@ export async function* sealSteps(
 				const fragment = await mustCase(ctx.db, ctx.project.id, edit.fragment);
 				if (fragment.kind !== "fragment") throw invalid("the target must be a fragment");
 				if (edit.from === edit.to) throw invalid("choose a different fragment version");
-				await bodyOf(ctx.db, fragment.id, edit.from);
-				await bodyOf(ctx.db, fragment.id, edit.to);
+				await body(fragment.id, edit.from);
+				await body(fragment.id, edit.to);
 				const consumerRows = edit.cases.flatMap((consumer) => {
 					const row = lookedUp.get(consumer.case);
 					return row ? [{ caseId: row.id, no: row.head }] : [];
@@ -836,9 +855,9 @@ export async function* sealSteps(
 				const row = await lookup(edit.case);
 				if (edit.base < 1 || edit.base > row.head) throw invalid(`${caseRef(row)} has no version ${edit.base}`);
 				if (edit.md !== undefined && markdownKind(edit.md) !== row.kind) throw invalid("a case kind cannot be changed");
-				const base = await bodyOf(ctx.db, row.id, edit.base);
+				const base = await body(row.id, edit.base);
 				const mine = cleanBody(edit.md !== undefined ? fromMarkdown(edit.md, base).body : (edit.body ?? {}), base);
-				const head = edit.base === row.head ? base : await bodyOf(ctx.db, row.id, row.head);
+				const head = edit.base === row.head ? base : await body(row.id, row.head);
 				const merge =
 					edit.base === row.head ? { merged: mine, conflicts: [] } : mergeBodies({ base, mine, theirs: head });
 				if (versionHash(merge.merged) === row.head_hash && merge.conflicts.length === 0) break;
@@ -901,7 +920,7 @@ export async function* sealSteps(
 			}
 			case "restore": {
 				const row = await lookup(edit.case);
-				const version = await versionOf(ctx.db, row.id, edit.to);
+				const version = versions.get(`${row.id}:${edit.to}`) ?? (await versionOf(ctx.db, row.id, edit.to));
 				if (!version) throw invalid(`${caseRef(row)} has no version ${edit.to}`);
 				if (version.hash === row.head_hash) break;
 				resolved.push({ op: "restore", caseId: row.id, to: edit.to, body: json<CaseBody>(version.body) });
@@ -960,18 +979,18 @@ export async function* sealSteps(
 	for (const edit of resolved) {
 		if (++work % SLICE === 0) yield;
 		if (edit.op === "create" || edit.op === "edit" || edit.op === "restore") {
-			const row = edit.op === "create" ? null : await caseById(ctx.db, edit.caseId);
+			const row = edit.op === "create" ? null : (byId.get(edit.caseId) ?? (await caseById(ctx.db, edit.caseId)));
 			await validateFragments(
 				ctx.db,
 				ctx.project.id,
 				edit.body,
 				edit.op === "create" ? edit.kind : (row?.kind ?? "case"),
-				row ? await bodyOf(ctx.db, row.id, row.head) : undefined,
+				row ? await body(row.id, row.head) : undefined,
 				fragments,
 			);
 		}
 		if (edit.op === "create" || edit.op === "restore") validateFields(edit.body, policy);
-		else if (edit.op === "edit") validateFields(edit.body, policy, await bodyOf(ctx.db, edit.caseId, edit.head));
+		else if (edit.op === "edit") validateFields(edit.body, policy, await body(edit.caseId, edit.head));
 	}
 
 	const folders = yield* projectFoldersSteps(index, resolved);

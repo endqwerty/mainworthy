@@ -7,10 +7,13 @@ import { OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
 import { exportArchive, importArchive, linesOf, removeBootstrap } from "../src/server/transfer/transfer.ts";
 import { type Harness, harness } from "./helpers.ts";
-import { holdWriter, identityDatabaseUrl, pgRows, withWrite } from "./identity-db.ts";
+import { closeIdentityDatabases, holdWriter, identityDatabaseUrl, pgRows, withWrite } from "./identity-db.ts";
 
 let h: Harness;
-afterEach(() => h?.close());
+afterEach(async () => {
+	await h?.close();
+	await closeIdentityDatabases();
+});
 
 test("team grants add to personal grants and removal takes away only that team's contribution", async () => {
 	h = await harness();

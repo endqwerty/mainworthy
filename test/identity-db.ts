@@ -47,10 +47,12 @@ export async function identityDatabaseUrl(key: string): Promise<string> {
 
 import { afterAll } from "bun:test";
 
-afterAll(async () => {
+/** Called after every server using these fixtures has stopped. */
+export async function closeIdentityDatabases(): Promise<void> {
 	for (const f of fixtures.values()) await f.close();
 	fixtures.clear();
-});
+}
+afterAll(closeIdentityDatabases);
 export function holdWriter(app: App) {
 	const released = Promise.withResolvers<void>();
 	const ready = Promise.withResolvers<WriteDb>();

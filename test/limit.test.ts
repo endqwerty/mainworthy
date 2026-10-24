@@ -16,7 +16,7 @@ import { defaultConfig } from "../src/server/kernel/app.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
 import { clientAddress } from "../src/surfaces/http.ts";
 import { mcpRoute } from "../src/surfaces/mcp.ts";
-import { identityDatabaseUrl } from "./identity-db.ts";
+import { closeIdentityDatabases, identityDatabaseUrl } from "./identity-db.ts";
 
 /** The owner's token as an operator sets it by hand: not in the form the server generates, so it gets no pass. */
 const TOKEN = "owner-secret-0123456789";
@@ -28,6 +28,7 @@ const dirs: string[] = [];
 const running: Instance[] = [];
 afterEach(async () => {
 	for (const instance of running.splice(0)) await instance.stop();
+	await closeIdentityDatabases();
 	for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
