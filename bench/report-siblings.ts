@@ -12,7 +12,7 @@ type Engine = { name: string; invoke: typeof invoke; ops: typeof OPS };
 
 async function fixture(siblings: number) {
 	const h = await harness();
-	const ci = h.actor("pipeline", "ci", ["read", "record"]);
+	const ci = await h.actor("pipeline", "ci", ["read", "record"]);
 	await h.call("report", ciReport({ commit: "base0001", n: 1, fail: { 0: "same cause" } }), ci);
 	for (let i = 1; i <= siblings; i++) {
 		await h.call(
@@ -126,10 +126,11 @@ async function main() {
 					correctness: "fresh inherited failure",
 					prepare: () => {
 						const report = input(f);
-						return async () => {
+						const runReport = async () => {
 							result = await call(f, "report", report);
 							return result;
 						};
+						return runReport;
 					},
 					check: async (result) => await check(f, result),
 				}),
@@ -150,7 +151,7 @@ async function main() {
 			),
 		);
 	} finally {
-		for (const f of fixtures) f.h.close();
+		for (const f of fixtures) await f.h.close();
 	}
 }
 

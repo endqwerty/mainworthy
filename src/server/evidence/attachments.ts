@@ -5,10 +5,22 @@ import { type ReadDb, sql } from "../kernel/db.ts";
 import { invalid, notFound } from "../kernel/errors.ts";
 
 const Q = {
+	insertSlice: sql<
+		{
+			results: readonly number[];
+			names: readonly string[];
+			hashes: readonly string[];
+			sizes: readonly number[];
+			types: readonly string[];
+			ats: readonly (string | null)[];
+		},
+		Attachment
+	>(`
+ INSERT INTO attachments(result,name,hash,size,type,at)
+ SELECT u.result,u.name,u.hash,u.size,u.type,u.at FROM unnest($results::bigint[],$names::text[],$hashes::text[],$sizes::bigint[],$types::text[],$ats::text[]) WITH ORDINALITY AS u(result,name,hash,size,type,at,position)
+ ORDER BY u.position RETURNING *`),
+
 	list: sql<{ result: number }, Attachment>("SELECT * FROM attachments WHERE result = $result ORDER BY id"),
-	insert: sql<{ result: number; name: string; hash: string; size: number; type: string; at: string | null }>(
-		"INSERT INTO attachments (result, name, hash, size, type, at) VALUES ($result, $name, $hash, $size, $type, $at)",
-	),
 	hashes: sql<readonly [], { hash: string }>("SELECT DISTINCT hash FROM attachments"),
 };
 export const attachmentsOf = async (db: ReadDb, result: number): Promise<Attachment[]> =>
@@ -28,26 +40,48 @@ export async function recordAttachments(
 		files.reduce((sum, item) => sum + attachmentBytes(item.data), 0);
 	if (existing.length + files.length > ATTACHMENT_LIMITS.perResult || size > ATTACHMENT_LIMITS.report)
 		throw invalid("A result may carry at most 20 attachments and 16 MiB");
-	return files.map((file) => {
-		const bytes = Buffer.from(file.data, "base64");
-		const hash = ctx.app.blobs.put(bytes);
-		const entry = {
-			result,
-			name: file.name,
-			hash,
-			size: bytes.length,
-			type: attachmentType(bytes),
-			at: file.at ?? null,
-		};
-		const inserted = ctx.db.run(Q.insert, entry);
-		return { id: inserted.lastId, ...entry };
-	});
+	return await recordAttachmentSlice(ctx, [{ result, files }]);
 }
-export async function attachmentContent(ctx: Ctx, result: number, id: number) {
+export async function attachmentContent(ctx: Ctx<ReadDb>, result: number, id: number) {
 	const attachment = (await attachmentsOf(ctx.db, result)).find((item) => item.id === id);
 	if (!attachment) throw notFound("attachment");
 	const bytes = ctx.app.blobs.get(attachment.hash);
 	if (!bytes || bytes.length !== attachment.size || attachmentType(bytes) !== attachment.type)
 		throw notFound("attachment content is missing or damaged; restore it from a backup");
 	return { kind: "file" as const, attachment, data: Buffer.from(bytes).toString("base64") };
+}
+
+/** Report application passes only newly inserted result ids, so no existing attachment read is needed. */
+export async function recordAttachmentSlice(
+	ctx: Ctx,
+	entries: readonly { result: number; files: readonly AttachmentInput[] }[],
+): Promise<Attachment[]> {
+	const rows: Omit<Attachment, "id">[] = [];
+	for (const { result, files } of entries) {
+		if (
+			files.length > ATTACHMENT_LIMITS.perResult ||
+			files.reduce((sum, file) => sum + attachmentBytes(file.data), 0) > ATTACHMENT_LIMITS.report
+		)
+			throw invalid("A result may carry at most 20 attachments and 16 MiB");
+		for (const file of files) {
+			const bytes = Buffer.from(file.data, "base64");
+			rows.push({
+				result,
+				name: file.name,
+				hash: ctx.app.blobs.put(bytes),
+				size: bytes.length,
+				type: attachmentType(bytes),
+				at: file.at ?? null,
+			});
+		}
+	}
+	if (!rows.length) return [];
+	return await ctx.db.all(Q.insertSlice, {
+		results: rows.map((row) => row.result),
+		names: rows.map((row) => row.name),
+		hashes: rows.map((row) => row.hash),
+		sizes: rows.map((row) => row.size),
+		types: rows.map((row) => row.type),
+		ats: rows.map((row) => row.at),
+	});
 }
