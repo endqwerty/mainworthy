@@ -3,6 +3,7 @@ import { Worker } from "node:worker_threads";
 import { z } from "zod";
 import { budget } from "../scripts/budget.ts";
 import { withInstance } from "../src/cli/test-support.ts";
+import { sql } from "../src/server/kernel/db.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
 import { ciReport } from "./helpers.ts";
@@ -46,18 +47,22 @@ async function adoptWhilePolling(): Promise<number> {
 				worker.once("error", reject);
 			});
 			const states = new Set<string>();
-			const snapshot = () => {
-				const state = instance.app.reader.snapshot(() =>
-					instance.app.reader.raw
-						.query(
-							"SELECT (SELECT max(version) FROM policies WHERE project = (SELECT id FROM projects WHERE key = 'policy-latency')) version, (SELECT count(*) FROM questions WHERE project = (SELECT id FROM projects WHERE key = 'policy-latency') AND kind = 'map' AND state = 'open') open",
-						)
-						.get(),
+			const snapshot = async () => {
+				const state = await instance.app.database.read(
+					async (db) =>
+						await db.get(
+							sql<readonly [], { version: number; open: number }>(
+								"SELECT (SELECT max(version) FROM policies WHERE project = (SELECT id FROM projects WHERE key = 'policy-latency')) version, (SELECT count(*) FROM questions WHERE project = (SELECT id FROM projects WHERE key = 'policy-latency') AND kind = 'map' AND state = 'open') open",
+							),
+						),
 				);
 				states.add(JSON.stringify(state));
 			};
-			snapshot();
-			const watching = setInterval(snapshot, 5);
+			await snapshot();
+			const polling: Promise<void>[] = [];
+			const watching = setInterval(() => {
+				polling.push(snapshot());
+			}, 5);
 			try {
 				expect(
 					await project.call("decide", {
@@ -69,9 +74,10 @@ async function adoptWhilePolling(): Promise<number> {
 				).toMatchObject([{ status: "decided" }]);
 			} finally {
 				clearInterval(watching);
+				await Promise.all(polling);
 				worker.postMessage("stop");
 			}
-			snapshot();
+			await snapshot();
 			expect([...states].map((state) => JSON.parse(state))).toEqual([
 				{ version: 1, open: 1 },
 				{ version: 2, open: 0 },

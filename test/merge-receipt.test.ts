@@ -8,17 +8,18 @@ import { AuditReply } from "../src/core/replies.ts";
 import { mergeReceiptById } from "../src/server/decisions/questions.ts";
 import { changeByKey, setMergeReceipt } from "../src/server/evidence/evidence.ts";
 import { findProject, makeCtx } from "../src/server/kernel/ctx.ts";
-import { Db } from "../src/server/kernel/db.ts";
-import { migrate } from "../src/server/kernel/migrate.ts";
+import { Database, sql, type WriteDb } from "../src/server/kernel/db.ts";
+
 import { exportArchive } from "../src/server/transfer/transfer.ts";
 import { openApi } from "../src/surfaces/http.ts";
-import { ciReport, dropReceiptSchema, type Harness, harness } from "./helpers.ts";
+
+import { ciReport, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
 beforeEach(async () => {
 	h = await harness();
 });
-afterEach(() => h.close());
+afterEach(async () => await h.close());
 const receipt = async () => {
 	const found = await h.call<{ change: unknown }>("impact", { change: "pr:726" });
 	return z.object({ mergeReceipt: MergeReceipt.nullable() }).parse(found.change).mergeReceipt;
@@ -103,11 +104,11 @@ test("receipt history persists and remains in the audit after reopening, while a
 	await end();
 	const frozen = await receipt();
 	if (!frozen) throw new Error("Expected receipt");
-	const stored = new Db(h.app.db.raw.serialize());
+	const stored = await Database.open({ url: h.app.config.databaseUrl });
 	try {
-		expect(await mergeReceiptById(stored, 1, frozen.id)).toEqual(frozen);
+		expect(await stored.read(async (db) => await mergeReceiptById(db, 1, frozen.id))).toEqual(frozen);
 	} finally {
-		stored.close();
+		await stored.close();
 	}
 	await h.call("change", { change: "pr:726", state: "open" });
 	expect(await receipt()).toBeNull();
@@ -121,46 +122,56 @@ test("receipt history persists and remains in the audit after reopening, while a
 	expect(history).toHaveLength(2);
 	expect(history[0]).toMatchObject({ receipt: frozen });
 	const chunks: string[] = [];
-	exportArchive(h.app.db, (chunk) => chunks.push(chunk), { project: "scratch" });
-	expect(chunks.join("")).not.toContain('"t":"merge_receipts"');
-});
-
-test("an old merged change gains no invented receipt during migration", async () => {
-	await h.call("report", report("receipt726", false));
-	await dropReceiptSchema(h.app.db);
-	await h.app.db.exec(
-		"INSERT INTO change_ends (change, ended, at) VALUES (1, 'merged', 1); UPDATE meta SET value = '40' WHERE key = 'schema_version'",
+	await h.app.database.write(
+		async (db) =>
+			await db.transaction(async () => await exportArchive(db, (chunk) => chunks.push(chunk), { project: "scratch" })),
 	);
-	await migrate(h.app.db, ":memory:");
-	expect(await receipt()).toBeNull();
-	expect((await h.call<GateStatus>("gate", { change: "pr:726" })).verdict).toBe("passed");
-	expect(await end()).toMatchObject({ already: false });
-	expect(await receipt()).toMatchObject({ head: "receipt726", gate: { verdict: "passed" } });
+	expect(chunks.join("")).not.toContain('"t":"merge_receipts"');
 });
 
 test("a failed landing rolls back the receipt and its active selection", async () => {
 	await h.call("report", report("receipt726", false));
-	await h.app.db.exec(
-		"CREATE TRIGGER fail_landing BEFORE UPDATE OF landing_commit ON change_ends BEGIN SELECT RAISE(ABORT, 'landing interrupted'); END",
+	await h.app.database.write(
+		async (db) =>
+			await db.transaction(
+				async () =>
+					await db.exec(
+						"CREATE FUNCTION fail_landing_fn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'landing interrupted'; END $$; CREATE TRIGGER fail_landing BEFORE UPDATE OF landing_commit ON change_ends FOR EACH ROW EXECUTE FUNCTION fail_landing_fn()",
+					),
+			),
 	);
 	expect(
 		(await h.raw("change", { change: "pr:726", state: "merged", landing: { commit: "receipt726", branch: "main" } }))
 			.ok,
 	).toBe(false);
 	expect(await receipt()).toBeNull();
-	expect(h.app.db.raw.query("SELECT count(*) AS n FROM merge_receipts").get()).toEqual({ n: 0 });
-	await h.app.db.exec("DROP TRIGGER fail_landing");
+	expect(
+		await h.app.database.read(
+			async (db) => await db.get(sql<readonly [], { n: number }>("SELECT count(*) AS n FROM merge_receipts")),
+		),
+	).toEqual({ n: 0 });
+	await h.app.database.write(
+		async (db) =>
+			await db.transaction(
+				async () => await db.exec("DROP TRIGGER fail_landing ON change_ends; DROP FUNCTION fail_landing_fn()"),
+			),
+	);
 	await end();
 	expect((await receipt())?.gate.verdict).toBe("passed");
 });
 
 test("selecting a merge receipt refuses a value the decision machinery did not mint", async () => {
 	await h.call("report", report());
-	const change = await changeByKey(h.app.db, 1, "pr:726");
-	const project = await findProject(h.app.db, "scratch");
+	const change = await h.app.database.read(async (db) => await changeByKey(db, 1, "pr:726"));
+	const project = await h.app.database.read(async (db) => await findProject(db, "scratch"));
 	if (!change || !project) throw new Error("Expected change and project");
-	const ctx = makeCtx(h.app, project, h.owner, true);
-	expect(() => Reflect.apply(setMergeReceipt, null, [ctx, {}, change])).toThrow("not a witness");
+	await h.app.database.write(
+		async (db) =>
+			await db.transaction(async () => {
+				const ctx = makeCtx(h.app, db, project, h.owner, true);
+				await expect(Reflect.apply(setMergeReceipt, null, [ctx, {}, change])).rejects.toThrow("not a witness");
+			}),
+	);
 	expect(await receipt()).toBeNull();
 });
 
@@ -177,12 +188,12 @@ test("OpenAPI declares merge receipts and landing gates in the impact output sch
 test("a large report shares its frozen evidence across repeated reopen and merge observations", async () => {
 	await h.call("report", ciReport({ commit: "receipt726", branch: "feature", pr: 726, n: 3000 }));
 	await end();
-	const before = h.app.db.raw.serialize().byteLength;
+	const before = await receiptBytes();
 	for (let i = 0; i < 6; i++) {
 		await h.call("change", { change: "pr:726", state: "open" });
 		await end();
 	}
-	budget("database growth of six reopened changes", h.app.db.raw.serialize().byteLength - before, 65535, "bytes");
+	budget("database growth of six reopened changes", (await receiptBytes()) - before, 65535, "bytes");
 });
 
 test("reading a change with a large receipt returns a bounded manifest and pages its frozen results", async () => {
@@ -318,10 +329,17 @@ for (const mutation of ["questions", "one result"] as const)
 			.parse(process.env.MAINWORTHY_RECEIPT_TEST_RESULTS ?? 3000);
 		await h.call("report", ciReport({ commit: "receipt726", branch: "feature", pr: 726, n, fail: { 7: "boom" } }));
 		await end();
-		const before = h.app.db.raw.serialize().byteLength;
-		const members = () =>
-			z.object({ n: z.number() }).parse(h.app.db.raw.query("SELECT count(*) AS n FROM merge_receipt_members").get()).n;
-		const initial = members();
+		const before = await receiptBytes();
+		const members = async () =>
+			z
+				.object({ n: z.number() })
+				.parse(
+					await h.app.database.read(
+						async (db) =>
+							await db.get(sql<readonly [], { n: number }>("SELECT count(*) AS n FROM merge_receipt_members")),
+					),
+				).n;
+		const initial = await members();
 		const mergeMs: number[] = [];
 		for (let i = 0; i < 6; i++) {
 			await h.call("change", { change: "pr:726", state: "open" });
@@ -337,19 +355,19 @@ for (const mutation of ["questions", "one result"] as const)
 					mutation,
 					n,
 					mergeMs,
-					members: members() - initial,
-					growthBytes: h.app.db.raw.serialize().byteLength - before,
+					members: (await members()) - initial,
+					growthBytes: (await receiptBytes()) - before,
 				}),
 			);
-		budget(`receipt members added changing ${mutation}`, members() - initial, 1499, "rows");
-		budget(`database growth changing ${mutation}`, h.app.db.raw.serialize().byteLength - before, 262143, "bytes");
+		budget(`receipt members added changing ${mutation}`, (await members()) - initial, 1499, "rows");
+		budget(`database growth changing ${mutation}`, (await receiptBytes()) - before, 262143, "bytes");
 	});
 
 test("a clean result tree performs no result-page reads on reopen and merge", async () => {
 	await h.call("report", ciReport({ commit: "receipt726", branch: "feature", pr: 726, n: 3000, fail: { 7: "boom" } }));
 	await end();
 	await h.call("change", { change: "pr:726", state: "open" });
-	const reads = spyOn(h.app.db, "all");
+	const reads = spyOn(await h.app.database.write((db) => Object.getPrototypeOf(db) as WriteDb), "all");
 	try {
 		await end();
 		budget(
@@ -393,7 +411,9 @@ test("cached receipt pages refresh cause answers, labels and removed result keys
 		...corrected,
 		results: corrected.results.map((row) => ({ ...row, corrects: sent.results[0] })),
 	});
-	await h.app.db.exec("UPDATE tests SET name='Renamed test' WHERE id=1");
+	await h.app.database.write(
+		async (db) => await db.transaction(async () => await db.exec("UPDATE tests SET name='Renamed test' WHERE id=1")),
+	);
 	await end();
 	expect(
 		(await h.call<{ items: unknown[] }>("find", { in: "receipt-results", receipt: (await receipt())?.id })).items,
@@ -428,3 +448,22 @@ test("one test in many lanes keeps bounded tree leaves and complete result pages
 	expect(ids).toHaveLength(100);
 	expect(new Set(ids).size).toBe(100);
 });
+
+async function receiptBytes(): Promise<number> {
+	return await h.app.database.read(async (db) => {
+		let bytes = 0;
+		for (const table of [
+			"merge_receipts",
+			"merge_receipt_nodes",
+			"merge_receipt_members",
+			"merge_receipt_payloads",
+			"merge_receipt_snapshots",
+		]) {
+			const rows = await db.allDynamic<{ bytes: number }>(
+				`SELECT coalesce(sum(pg_column_size(t)), 0)::bigint AS bytes FROM ${table} t`,
+			);
+			bytes += rows[0]?.bytes ?? 0;
+		}
+		return bytes;
+	});
+}

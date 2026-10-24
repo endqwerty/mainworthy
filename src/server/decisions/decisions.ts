@@ -268,7 +268,11 @@ export async function* raiseSteps(ctx: Ctx, r: Raise): AsyncGenerator<undefined,
 			blocks: blockedRuns(clause.blocks, r.runs),
 			refs: r.refs,
 		});
-		if (clause.ask.who === "rule" && !heldOpen(ctx, question, basis) && !overruled(ctx, question, clause.answer)) {
+		if (
+			clause.ask.who === "rule" &&
+			!(await heldOpen(ctx, question, basis)) &&
+			!(await overruled(ctx, question, clause.answer))
+		) {
 			await setQuestionAsk(ctx, question, clause.ask);
 			raised = yield* settleByRuleSteps(ctx, question, clause.id, clause.answer);
 		} else raised = { s: "attached", question };
@@ -280,8 +284,8 @@ export async function* raiseSteps(ctx: Ctx, r: Raise): AsyncGenerator<undefined,
 	// a run planned on it, a run since closed. The question asked in its place names them, and they are recomputed
 	// now: none is left reading `passed` on an answer that no longer stands, or blocked with nobody asked.
 	if (rested.length > 0 || ctx.recompute.size > 0) {
-		const named = rested.flatMap((id) => {
-			const run = runById(ctx.db, id);
+		const named = await flatMapAsync(rested, async (id) => {
+			const run = await runById(ctx.db, id);
 			return run ? [runRef(run)] : [];
 		});
 		await alsoAbout(ctx, raised.question, named);
@@ -292,9 +296,9 @@ export async function* raiseSteps(ctx: Ctx, r: Raise): AsyncGenerator<undefined,
 
 /** The decisions in force about a cause, newest question first. */
 async function standingOn(ctx: Ctx, fingerprint: string): Promise<{ question: QuestionRow; decision: DecisionRow }[]> {
-	return (await liveByFingerprint(ctx.db, ctx.project.id, fingerprint)).flatMap((question) => {
+	return await flatMapAsync(await liveByFingerprint(ctx.db, ctx.project.id, fingerprint), async (question) => {
 		const decision =
-			question.state === "decided" && question.decision !== null ? decisionById(ctx.db, question.decision) : null;
+			question.state === "decided" && question.decision !== null ? await decisionById(ctx.db, question.decision) : null;
 		return decision ? [{ question, decision }] : [];
 	});
 }
@@ -398,7 +402,9 @@ async function overruled(ctx: Ctx, question: QuestionRow | null, ruleAnswer: unk
 		);
 		const last = given.at(-1);
 		if (last) {
-			return json<Signer[]>(last.signers).some(overRule) && json<{ is?: string }>(last.answer).is !== wanted;
+			return (
+				(await someAsync(json<Signer[]>(last.signers), overRule)) && json<{ is?: string }>(last.answer).is !== wanted
+			);
 		}
 	}
 	return false;
@@ -417,7 +423,9 @@ async function* openSteps(
 	const found = clauseFor(policy, { kind: r.kind, facts: new Set(r.facts) });
 	// Where the clause is a rule that a person has overruled on this question, a person is asked.
 	const refused =
-		found.ask.who === "rule" && prior !== null && overruled(ctx, await questionById(ctx.db, prior), found.answer);
+		found.ask.who === "rule" &&
+		prior !== null &&
+		(await overruled(ctx, await questionById(ctx.db, prior), found.answer));
 	const clause = refused ? { ...found, ask: { ...found.ask, who: "member" as const } } : found;
 	const question = await insertQuestion(ctx, {
 		...r,
@@ -478,7 +486,10 @@ async function* reconsiderPolicySteps(ctx: Ctx): AsyncGenerator<undefined, numbe
 	const kinds = new Set(policy.clauses.filter((clause) => clause.ask.who === "rule").map((clause) => clause.kind));
 	let taken = 0;
 	// Every one of them, by id: answering one changes the queue the loop would be reading.
-	for (const id of [...kinds].flatMap((kind) => openQuestionIds(ctx.db, ctx.project.id, kind))) {
+	for (const id of await flatMapAsync(
+		[...kinds],
+		async (kind) => await openQuestionIds(ctx.db, ctx.project.id, kind),
+	)) {
 		yield;
 		const question = await questionById(ctx.db, id);
 		if (question?.state !== "open") continue;
@@ -487,7 +498,7 @@ async function* reconsiderPolicySteps(ctx: Ctx): AsyncGenerator<undefined, numbe
 			facts: await factsNow(ctx.db, question),
 		});
 		if (clause.ask.who !== "rule") continue;
-		if (heldOpen(ctx, question, question.basis) || overruled(ctx, question, clause.answer)) continue;
+		if ((await heldOpen(ctx, question, question.basis)) || (await overruled(ctx, question, clause.answer))) continue;
 		await setQuestionAsk(ctx, question, clause.ask);
 		if ((yield* settleByRuleSteps(ctx, question, clause.id, clause.answer)).s === "decided") taken++;
 	}
@@ -609,7 +620,7 @@ export async function* answerSteps(
 		ask,
 		isAuthor: await HANDLERS[question.kind].isAuthor(ctx, question),
 		// Read from the results, and only where the clause asks: most clauses do not.
-		isProducer: ask.notProducer && HANDLERS[question.kind].isProducer(ctx, question),
+		isProducer: ask.notProducer && (await HANDLERS[question.kind].isProducer(ctx, question)),
 	});
 	if (standing === "forbidden") return reply(question, "forbidden", { needs: describeAsk(ask) });
 	if (ask.reason === "required" && !input.reason?.trim()) return reply(question, "invalid", { needs: "a reason" });
@@ -676,14 +687,22 @@ async function* replaceInheritedSteps(
 		const signature = await signatureById(ctx.db, subject.signature);
 		const target = json<{ targetId: number }>(question.evidence).targetId;
 		const cause = signature
-			? (openFailureQuestion(ctx.db, ctx.project.id, { signature: signature.hash, scope: subject.scope, target }) ??
-				(await standingOn(ctx, failureFingerprint(signature.hash, subject.scope))).find(({ question, decision }) =>
-					stillHolds(json<HoldTerm[]>(decision.holds), {
-						hash: question.basis,
-						target,
-						facts: [...factsNow(ctx.db, question)],
-						now: ctx.now,
-					}),
+			? ((await openFailureQuestion(ctx.db, ctx.project.id, {
+					signature: signature.hash,
+					scope: subject.scope,
+					target,
+				})) ??
+				(
+					await findAsync(
+						await standingOn(ctx, failureFingerprint(signature.hash, subject.scope)),
+						async ({ question, decision }) =>
+							stillHolds(json<HoldTerm[]>(decision.holds), {
+								hash: question.basis,
+								target,
+								facts: [...(await factsNow(ctx.db, question))],
+								now: ctx.now,
+							}),
+					)
 				)?.question)
 			: null;
 		if (cause?.kind !== "failure" || cause.subject.kind !== "cause")
@@ -808,7 +827,7 @@ async function endReplaced(
 		// The answer to a dispute, when whoever is answering now may not settle that dispute: it is not theirs
 		// to replace by answering another question about the cause. An answer for certain targets stays the
 		// answer for those targets under their answer for the whole cause; `answer` has refused the rest.
-		if (!maySettle(ctx, other, decision, byRule)) {
+		if (!(await maySettle(ctx, other, decision, byRule))) {
 			if (mine === "all" && theirs !== "all") continue;
 			throw conflict(`${questionRef(other)} answers a dispute that this answer may not replace`);
 		}
@@ -843,7 +862,7 @@ async function maySettle(ctx: Ctx, question: QuestionRow, decision: DecisionRow,
 		actor: ctx.actor,
 		ask,
 		isAuthor: await handler.isAuthor(ctx, question),
-		isProducer: ask.notProducer && handler.isProducer(ctx, question),
+		isProducer: ask.notProducer && (await handler.isProducer(ctx, question)),
 	});
 	return standing === "counts";
 }
@@ -864,7 +883,7 @@ async function wouldOverturn(ctx: Ctx, question: QuestionRow, given: AnyAnswer):
 		if (theirs === "results") continue;
 		const same = mine === "all" || (theirs !== "all" && theirs.some((target) => mine.includes(target)));
 		if (!same || (mine === "all" && theirs !== "all")) continue;
-		if (!maySettle(ctx, other, decision, false)) return other;
+		if (!(await maySettle(ctx, other, decision, false))) return other;
 	}
 	return null;
 }
@@ -895,7 +914,10 @@ async function closeAnswered(ctx: Ctx, question: QuestionRow): Promise<number[]>
 		const targets = seen.targets ?? (seen.targetId !== undefined ? [seen.targetId] : []);
 		const covered =
 			targets.length > 0 &&
-			targets.every((target) => excuseFor(ctx.db, ctx.project.id, signature, scope, target) !== null);
+			(await everyAsync(
+				targets,
+				async (target) => (await excuseFor(ctx.db, ctx.project.id, signature, scope, target)) !== null,
+			));
 		if (!covered) continue;
 		runs.push(...(await runsAbout(ctx, other)));
 		await setQuestionState(ctx, other, "dissolved", null);
@@ -954,11 +976,11 @@ async function askAgain(
 	if (latest === undefined) return;
 	const subject = question.subject;
 	const key = causeKey(subject.signature, subject.scope);
-	const runs = (await runsAbout(ctx, question)).flatMap((id) => {
-		const run = runById(ctx.db, id);
-		return run && unexplainedIn(ctx.db, run).has(key) ? [run] : [];
+	const runs = await flatMapAsync(await runsAbout(ctx, question), async (id) => {
+		const run = await runById(ctx.db, id);
+		return run && (await unexplainedIn(ctx.db, run)).has(key) ? [run] : [];
 	});
-	const newest = latestByFingerprint(ctx.db, ctx.project.id, question.fingerprint) ?? question;
+	const newest = (await latestByFingerprint(ctx.db, ctx.project.id, question.fingerprint)) ?? question;
 	await complete(
 		openSteps(
 			ctx,
@@ -1014,7 +1036,7 @@ export async function undo(
 		actor: ctx.actor,
 		ask,
 		isAuthor: await handler.isAuthor(ctx, question),
-		isProducer: ask.notProducer && handler.isProducer(ctx, question),
+		isProducer: ask.notProducer && (await handler.isProducer(ctx, question)),
 	});
 	if (standing !== "counts") return reply(question, "forbidden", { needs: describeAsk(ask) });
 	if (ask.reason === "required" && !input.reason?.trim()) return reply(question, "invalid", { needs: "a reason" });
@@ -1044,9 +1066,9 @@ export async function undo(
 	// under an answer for one target): then nothing is left to ask, and the question is closed, not left open.
 	const closed = await closeAnswered(ctx, question);
 	await refold(ctx, [...(await runsAbout(ctx, question)), ...(await runsDependingOn(ctx.db, prior.id)), ...closed]);
-	const covered = questionById(ctx.db, question.id)?.state === "dissolved";
-	const ended = !covered && endedUnawaited(ctx, question);
-	const gone = !covered && closeIfGone(ctx, question.id);
+	const covered = (await questionById(ctx.db, question.id))?.state === "dissolved";
+	const ended = !covered && (await endedUnawaited(ctx, question));
+	const gone = !covered && (await closeIfGone(ctx, question.id));
 	return reply(question, "reopened", {
 		decision: decision.id,
 		...(covered
@@ -1062,19 +1084,20 @@ export async function undo(
 // ── Failures ───────────────────────────────────────────────────────────────────────────────────────────────
 
 /** Reconcile inherited standing once for all the causes in a report, before raising their questions. */
-export function raiseFailures(ctx: Ctx, inputs: readonly Parameters<typeof raiseFailure>[1][]): Raised[] {
+export async function raiseFailures(
+	ctx: Ctx,
+	inputs: readonly Parameters<typeof raiseFailure>[1][],
+): Promise<Raised[]> {
 	const active = ctx.folding;
 	ctx.folding = true;
 	try {
 		const runs = new Map(inputs.flatMap(({ group }) => group.runs.map((run) => [run.id, run] as const)));
 		const automatic = new Map(
-			[...runs.values()]
-				.flatMap((run) => refreshInherited(ctx, run))
-				.flatMap((raised) =>
-					raised.question.kind === "failure" ? [[raised.question.subject.signature, raised] as const] : [],
-				),
+			(await flatMapAsync([...runs.values()], async (run) => await refreshInherited(ctx, run))).flatMap((raised) =>
+				raised.question.kind === "failure" ? [[raised.question.subject.signature, raised] as const] : [],
+			),
 		);
-		return inputs.map((input) => raiseFailure(ctx, input, automatic));
+		return await mapAsync(inputs, async (input) => await raiseFailure(ctx, input, automatic));
 	} finally {
 		ctx.folding = active;
 	}
@@ -1104,10 +1127,10 @@ export async function raiseFailure(
 	if (
 		automatic.size > 0 &&
 		group.results.length > 0 &&
-		group.results.every((id) => {
-			const row = resultById(ctx.db, id);
-			return row && excuseForResult(ctx.db, row, group.scope);
-		})
+		(await everyAsync(group.results, async (id) => {
+			const row = await resultById(ctx.db, id);
+			return row && (await excuseForResult(ctx.db, row, group.scope));
+		}))
 	) {
 		const matching = automatic.get(group.signature.id);
 		if (matching) return matching;
@@ -1150,7 +1173,7 @@ export async function raiseFailure(
 	if (
 		scopeKind === "change" &&
 		group.results.length > 0 &&
-		group.results.every((result) => failsOnBase(ctx.db, result))
+		(await everyAsync(group.results, async (result) => await failsOnBase(ctx.db, result)))
 	)
 		shown.push("hint:fails-on-base");
 	const change = target.change !== null ? await changeById(ctx.db, target.change) : null;
@@ -1169,8 +1192,8 @@ export async function raiseFailure(
 			// An occurrence that brings no failing result of its own (a pass that makes the slot a dispute) leaves
 			// what the question already shows of the failure.
 			message: group.message ?? earlier.message ?? null,
-			tests: listed.slice(0, 50).map((test) => {
-				const sameCode = sameCodeEvidence(ctx.db, {
+			tests: await mapAsync(listed.slice(0, 50), async (test) => {
+				const sameCode = await sameCodeEvidence(ctx.db, {
 					project: ctx.project.id,
 					test: test.id,
 					now: ctx.now,
@@ -1220,8 +1243,8 @@ async function askUnexplained(ctx: Ctx, run: RunRow): Promise<boolean> {
 		run.origin === "planned"
 			? run.state === "open"
 			: run.scope !== null &&
-				!scopeEnded(ctx.db, run.scope) &&
-				newestInScope(ctx.db, run.project, run.scope)?.id === run.id;
+				!(await scopeEnded(ctx.db, run.scope)) &&
+				(await newestInScope(ctx.db, run.project, run.scope))?.id === run.id;
 	if (!speaks) return false;
 	let asked = false;
 	for (const cause of await unexplainedShown(ctx.db, run)) {
@@ -1234,7 +1257,7 @@ async function askUnexplained(ctx: Ctx, run: RunRow): Promise<boolean> {
 		});
 		if (open && (json<{ targets?: number[] }>(open.evidence).targets ?? []).includes(cause.target)) {
 			// Already asked. If the question did not name this run yet, the run is recomputed to list it.
-			if (alsoAbout(ctx, open, [runRef(run)]) > 0) asked = true;
+			if ((await alsoAbout(ctx, open, [runRef(run)])) > 0) asked = true;
 			continue;
 		}
 		const shown = await shownFailure(ctx, run, cause);
@@ -1262,7 +1285,7 @@ export async function stopAskingAbout(ctx: Ctx, change: ChangeRow): Promise<stri
 	for (const asked of await openQuestionsOn(ctx.db, ctx.project.id, `scope:${scope}`)) {
 		const question = await questionById(ctx.db, asked.id);
 		if (question?.kind !== "failure" || question.state !== "open" || question.subject.scope !== scope) continue;
-		if (!endedUnawaited(ctx, question)) continue;
+		if (!(await endedUnawaited(ctx, question))) continue;
 		await dissolve(ctx, question);
 		ctx.touched.add(questionRef(question));
 		closed.push(questionRef(question));
@@ -1373,12 +1396,12 @@ export async function askWhereCommitIs(ctx: Ctx, target: TargetRow): Promise<voi
 	for (const [id, cause] of causes) {
 		const signature = await signatureById(ctx.db, id);
 		if (!signature) continue;
-		const tests = [...cause.tests.keys()].flatMap((test) => {
-			const row = testById(ctx.db, test);
+		const tests = await flatMapAsync([...cause.tests.keys()], async (test) => {
+			const row = await testById(ctx.db, test);
 			return row ? [row] : [];
 		});
-		const refs = [...cause.runs].flatMap((run) => {
-			const row = runById(ctx.db, run);
+		const refs = await flatMapAsync([...cause.runs], async (run) => {
+			const row = await runById(ctx.db, run);
 			return row ? [runRef(row)] : [];
 		});
 		for (const at of cause.targets) {
@@ -1409,7 +1432,10 @@ export async function askWhereCommitIs(ctx: Ctx, target: TargetRow): Promise<voi
 	}
 	for (const question of moved) {
 		const seen = json<Seen>(question.evidence);
-		const left = (seen.targets ?? []).some((id) => scopeOf(mustTarget(ctx.db, id), null) === before);
+		const left = await someAsync(
+			seen.targets ?? [],
+			async (id) => scopeOf(await mustTarget(ctx.db, id), null) === before,
+		);
 		if (!left) await setQuestionState(ctx, question, "dissolved", null);
 	}
 }
@@ -1441,9 +1467,9 @@ async function refreshInherited(ctx: Ctx, run: RunRow): Promise<Raised[]> {
 	);
 	if (!enabled && questions.length === 0) return [];
 	const withdrawn = new Set(
-		questions.flatMap((question) =>
+		await flatMapAsync(questions, async (question) =>
 			question.decision !== null &&
-			json<{ is?: string }>(decisionById(ctx.db, question.decision)?.answer ?? "{}").is === "withdrawn"
+			json<{ is?: string }>((await decisionById(ctx.db, question.decision))?.answer ?? "{}").is === "withdrawn"
 				? [question.subject.signature]
 				: [],
 		),
@@ -1453,7 +1479,7 @@ async function refreshInherited(ctx: Ctx, run: RunRow): Promise<Raised[]> {
 		if (row.signature === null || withdrawn.has(row.signature)) continue;
 		const target = await mustTarget(ctx.db, row.target);
 		const scope = scopeOf(target, null);
-		if (excuseFor(ctx.db, run.project, row.signature, scope, target.id)) continue;
+		if (await excuseFor(ctx.db, run.project, row.signature, scope, target.id)) continue;
 		let group = groups.get(row.signature);
 		if (!group) {
 			group = { target, inherited: [] };
@@ -1461,13 +1487,14 @@ async function refreshInherited(ctx: Ctx, run: RunRow): Promise<Raised[]> {
 		}
 		group.inherited.push({ result: row.result, base: row.base });
 	}
-	const live = questions.filter(
-		(question) =>
+	const live = await filterAsync(
+		questions,
+		async (question) =>
 			question.state === "open" ||
 			(question.state === "decided" &&
 				question.decision !== null &&
 				!["outdated", "expired", "withdrawn"].includes(
-					json<{ is: string }>(decisionById(ctx.db, question.decision)?.answer ?? "{}").is,
+					json<{ is: string }>((await decisionById(ctx.db, question.decision))?.answer ?? "{}").is,
 				)),
 	);
 	const raised: Raised[] = [];
@@ -1483,7 +1510,7 @@ async function refreshInherited(ctx: Ctx, run: RunRow): Promise<Raised[]> {
 				for (const id of await runsDependingOn(ctx.db, decision.id)) ctx.recompute.add(id);
 			}
 		}
-		await setQuestionState(ctx, question, "dissolved", questionById(ctx.db, question.id)?.decision ?? null);
+		await setQuestionState(ctx, question, "dissolved", (await questionById(ctx.db, question.id))?.decision ?? null);
 	}
 	for (const [signatureId, group] of groups) {
 		const signature = await signatureById(ctx.db, signatureId);
@@ -1504,7 +1531,8 @@ async function refreshInherited(ctx: Ctx, run: RunRow): Promise<Raised[]> {
 					for (const id of await runsDependingOn(ctx.db, decision.id)) ctx.recompute.add(id);
 				}
 			}
-			if (prior) await setQuestionState(ctx, prior, "dissolved", questionById(ctx.db, prior.id)?.decision ?? null);
+			if (prior)
+				await setQuestionState(ctx, prior, "dissolved", (await questionById(ctx.db, prior.id))?.decision ?? null);
 			continue;
 		}
 		if (prior?.state === "decided" && prior.decision !== null && prior.basis === contentHash(material)) {
@@ -1515,9 +1543,9 @@ async function refreshInherited(ctx: Ctx, run: RunRow): Promise<Raised[]> {
 			}
 		}
 		const change = target.change === null ? null : await changeById(ctx.db, target.change);
-		const tests = inherited.flatMap((item) => {
-			const result = resultById(ctx.db, item.result);
-			const test = result ? testById(ctx.db, result.test) : null;
+		const tests = await flatMapAsync(inherited, async (item) => {
+			const result = await resultById(ctx.db, item.result);
+			const test = result ? await testById(ctx.db, result.test) : null;
 			return test ? [{ id: test.id, t: testRef(test), name: test.name, case: null, counted: true }] : [];
 		});
 		raised.push(
@@ -1535,8 +1563,8 @@ async function refreshInherited(ctx: Ctx, run: RunRow): Promise<Raised[]> {
 					target: target.commit_sha,
 					targets: [
 						...new Set(
-							inherited.flatMap((item) => {
-								const result = resultById(ctx.db, item.result);
+							await flatMapAsync(inherited, async (item) => {
+								const result = await resultById(ctx.db, item.result);
 								return result ? [result.target] : [];
 							}),
 						),
@@ -1562,17 +1590,25 @@ async function unchangedSlotSettlement(ctx: Ctx, question: QuestionRow, run: Run
 	if (!decision || ["withdrawn", "expired", "outdated", "mistaken"].includes(json<{ is: string }>(decision.answer).is))
 		return false;
 	if (decision.expires_at !== null && decision.expires_at <= ctx.now) return false;
-	if (!json<Signer[]>(decision.signers).some((signer) => actorLabel(ctx.db, signer.by).kind === "human")) return false;
+	if (
+		!(await someAsync(
+			json<Signer[]>(decision.signers),
+			async (signer) => (await actorLabel(ctx.db, signer.by)).kind === "human",
+		))
+	)
+		return false;
 	const subject = question.subject;
 	const evidence = json<{ effective: number[]; results: number[] }>(question.evidence);
 	if (
-		evidence.results.some((id) => {
-			const result = resultById(ctx.db, id);
-			return !result || scopeOf(mustTarget(ctx.db, result.target), run.id) !== subject.scope;
+		await someAsync(evidence.results, async (id) => {
+			const result = await resultById(ctx.db, id);
+			return !result || scopeOf(await mustTarget(ctx.db, result.target), run.id) !== subject.scope;
 		})
 	)
 		return false;
-	const before = evidence.effective.filter((id) => resultById(ctx.db, id)?.method !== "agent").sort((a, b) => a - b);
+	const before = (
+		await filterAsync(evidence.effective, async (id) => (await resultById(ctx.db, id))?.method !== "agent")
+	).sort((a, b) => a - b);
 	const now = (await effectiveFillsOf(ctx.db, subject.slot))
 		.filter((fill) => fill.method !== "agent")
 		.map((fill) => fill.id)
@@ -1594,7 +1630,7 @@ async function refreshDisputes(ctx: Ctx, run: RunRow): Promise<void> {
 		const material = { results: effective.map((fill) => fill.id).sort((a, b) => a - b) };
 		const prior = await latestByFingerprint(ctx.db, ctx.project.id, fingerprint);
 		if (prior?.basis === contentHash(material) && (prior.state === "open" || prior.state === "decided")) continue;
-		if (prior && unchangedSlotSettlement(ctx, prior, run)) continue;
+		if (prior && (await unchangedSlotSettlement(ctx, prior, run))) continue;
 		const cause = await signatureById(ctx.db, signature);
 		const latest = failures.at(-1);
 		if (!cause || !latest) continue;
@@ -1603,8 +1639,8 @@ async function refreshDisputes(ctx: Ctx, run: RunRow): Promise<void> {
 		const target = await mustTarget(ctx.db, latest.target);
 		const change = target.change === null ? null : await changeById(ctx.db, target.change);
 		const caseRow = await caseById(ctx.db, slot.case_id);
-		const tests = [...new Set(failures.map((fill) => fill.test))].flatMap((id) => {
-			const test = testById(ctx.db, id);
+		const tests = await flatMapAsync([...new Set(failures.map((fill) => fill.test))], async (id) => {
+			const test = await testById(ctx.db, id);
 			return test ? [{ id, t: testRef(test), name: test.name, case: caseRow ? caseRef(caseRow) : null }] : [];
 		});
 		await raise(ctx, {
@@ -1639,7 +1675,7 @@ async function refreshDisputes(ctx: Ctx, run: RunRow): Promise<void> {
 	}
 	for (const question of previous) {
 		if (active.has(question.fingerprint)) continue;
-		if (unchangedSlotSettlement(ctx, question, run)) continue;
+		if (await unchangedSlotSettlement(ctx, question, run)) continue;
 		if (question.state === "decided" && question.decision !== null) {
 			const decision = await decisionById(ctx.db, question.decision);
 			if (!decision || json<{ is: string }>(decision.answer).is === "mistaken") continue;
@@ -1649,15 +1685,15 @@ async function refreshDisputes(ctx: Ctx, run: RunRow): Promise<void> {
 			for (const id of await runsDependingOn(ctx.db, decision.id)) ctx.recompute.add(id);
 		}
 		if (question.state === "open" || question.state === "decided")
-			await setQuestionState(ctx, question, "dissolved", questionById(ctx.db, question.id)?.decision ?? null);
+			await setQuestionState(ctx, question, "dissolved", (await questionById(ctx.db, question.id))?.decision ?? null);
 	}
 }
 
 /** Upgrade earlier disputes before serving reads. Later starts find their slot questions and do no work. */
 export async function recoverDisputes(ctx: Ctx): Promise<number> {
-	const missing = (await disputedRuns(ctx.db, ctx.project.id)).filter((id) => {
-		const run = runById(ctx.db, id);
-		return run && everyQuestionOn(ctx.db, ctx.project.id, `dispute:${runRef(run)}`).length === 0;
+	const missing = await filterAsync(await disputedRuns(ctx.db, ctx.project.id), async (id) => {
+		const run = await runById(ctx.db, id);
+		return run && (await everyQuestionOn(ctx.db, ctx.project.id, `dispute:${runRef(run)}`)).length === 0;
 	});
 	if (missing.length > 0) await refold(ctx, missing, { dissolveStale: true });
 	return missing.length;
@@ -1712,7 +1748,7 @@ async function* refoldSteps(
 					await blockersOf(ctx, existing),
 					(await currentPolicy(ctx.db, ctx.project.id)).settings.emptyReports,
 				);
-				if (result.failing.size > 0 && askUnexplained(ctx, result.run))
+				if (result.failing.size > 0 && (await askUnexplained(ctx, result.run)))
 					result = await retally(
 						ctx,
 						id,
@@ -1736,7 +1772,8 @@ async function* refoldSteps(
 					run.origin === "planned" &&
 					json<{ commit?: string }>(run.accepts).commit !== undefined &&
 					run.outstanding === 0 &&
-					((run.state === "closed" && approval?.basis !== contentHash(material)) || renewedApproval(ctx, asked));
+					((run.state === "closed" && approval?.basis !== contentHash(material)) ||
+						(await renewedApproval(ctx, asked)));
 				if (!result.wantsSignoff && !reconsider) {
 					// A first sign-off was asked while the run passed. It no longer does, so nobody can approve it on
 					// what it showed then. A late report to an approved commit run is reconsidered above instead.
@@ -1794,7 +1831,8 @@ async function dissolveStale(ctx: Ctx, { run, failing }: Pick<Retallied, "run" |
 	const waited = new Set<number>();
 	for (const id of candidates) {
 		const question = await questionById(ctx.db, id);
-		if (question?.state === "open" && stoppedFailing(ctx, question, shown)) await dissolve(ctx, question, waited);
+		if (question?.state === "open" && (await stoppedFailing(ctx, question, shown)))
+			await dissolve(ctx, question, waited);
 	}
 	for (const id of waited) {
 		const named = await runById(ctx.db, id);
@@ -1816,7 +1854,7 @@ async function dissolveStale(ctx: Ctx, { run, failing }: Pick<Retallied, "run" |
  */
 async function endPassed(ctx: Ctx, run: RunRow): Promise<void> {
 	if (run.origin !== "change" || run.scope === null) return;
-	if (newestInScope(ctx.db, ctx.project.id, run.scope)?.id !== run.id) return;
+	if ((await newestInScope(ctx.db, ctx.project.id, run.scope))?.id !== run.id) return;
 	for (const question of await attributedQuestionsOn(ctx.db, ctx.project.id, `scope:${run.scope}`)) {
 		if (question.kind !== "failure" || question.subject.scope !== run.scope || question.decision === null) continue;
 		const decision = await decisionById(ctx.db, question.decision);
@@ -1848,16 +1886,16 @@ async function passedIn(
 	const evidence = json<{ tests?: { id: number }[]; count?: number }>(question.evidence);
 	const listed = new Set((evidence.tests ?? []).map((test) => test.id));
 	if (listed.size === 0 || (evidence.count ?? 0) > listed.size) return null;
-	const planned = (await runsAbout(ctx, question)).some((id) => {
-		const named = runById(ctx.db, id);
+	const planned = await someAsync(await runsAbout(ctx, question), async (id) => {
+		const named = await runById(ctx.db, id);
 		return named?.origin === "planned" && named.state === "open";
 	});
 	if (planned) return null;
 	const tests = [...listed];
 	// The cheap questions first: they settle the usual report, in which the cause still fails or did not run.
-	if (failsWith(ctx.db, run.id, signature) || !passesAny(ctx.db, run.id, tests)) return null;
+	if ((await failsWith(ctx.db, run.id, signature)) || !(await passesAny(ctx.db, run.id, tests))) return null;
 	// A report not yet applied, or a shard that has not reported, may hold the cause failing (decision 0092).
-	if (stillArriving(ctx.db, run)) return null;
+	if (await stillArriving(ctx.db, run)) return null;
 	// Where the cause has failed: every listed test in every environment a pipeline or a person saw it fail with
 	// the cause in this scope, as reported. No point in time bounds it, so no way of raising a question can leave a
 	// failure out; a retry that passed changes nothing.
@@ -1907,7 +1945,7 @@ async function dissolve(ctx: Ctx, question: QuestionRow, later?: Set<number>): P
 async function closeIfGone(ctx: Ctx, id: number): Promise<boolean> {
 	const question = await questionById(ctx.db, id);
 	if (question?.kind !== "failure" || question.state !== "open") return false;
-	if (!endedUnawaited(ctx, question) && !stoppedFailing(ctx, question, new Map())) return false;
+	if (!(await endedUnawaited(ctx, question)) && !(await stoppedFailing(ctx, question, new Map()))) return false;
 	await dissolve(ctx, question);
 	return true;
 }
@@ -1920,12 +1958,12 @@ async function closeIfGone(ctx: Ctx, id: number): Promise<boolean> {
 async function endedUnawaited(ctx: Ctx, question: QuestionRow): Promise<boolean> {
 	if (question.kind !== "failure" || question.subject.kind === "slot") return false;
 	const subject = question.subject;
-	if (!scopeEnded(ctx.db, subject.scope)) return false;
+	if (!(await scopeEnded(ctx.db, subject.scope))) return false;
 	const key = causeKey(subject.signature, subject.scope);
-	return !(await runsAbout(ctx, question)).some((id) => {
-		const run = runById(ctx.db, id);
-		return run?.origin === "planned" && run.state === "open" && unexplainedIn(ctx.db, run).has(key);
-	});
+	return !(await someAsync(await runsAbout(ctx, question), async (id) => {
+		const run = await runById(ctx.db, id);
+		return run?.origin === "planned" && run.state === "open" && (await unexplainedIn(ctx.db, run)).has(key);
+	}));
 }
 
 /**
@@ -1944,7 +1982,7 @@ async function endedUnawaited(ctx: Ctx, question: QuestionRow): Promise<boolean>
 async function stoppedFailing(ctx: Ctx, question: QuestionRow, shown: Map<number, Set<string>>): Promise<boolean> {
 	if (question.kind !== "failure") return false;
 	const subject = question.subject;
-	if (subject.kind === "slot") return slotById(ctx.db, subject.slot)?.state !== "disputed";
+	if (subject.kind === "slot") return (await slotById(ctx.db, subject.slot))?.state !== "disputed";
 	const key = causeKey(subject.signature, subject.scope);
 	const shows = async (run: RunRow): Promise<boolean> => {
 		let causes = shown.get(run.id);
@@ -1958,30 +1996,31 @@ async function stoppedFailing(ctx: Ctx, question: QuestionRow, shown: Map<number
 	const newest = await newestInScope(ctx.db, ctx.project.id, subject.scope);
 	// A commit whose results are still arriving (a report not yet applied, a shard of a job not yet reported) may yet
 	// show the cause: nothing closes the question meanwhile, not even a planned run that cleared (decision 0092).
-	if (newest && stillArriving(ctx.db, newest)) return false;
+	if (newest && (await stillArriving(ctx.db, newest))) return false;
 	if (newest) {
-		if (shows(newest)) return false;
+		if (await shows(newest)) return false;
 		// A commit's gate counts pipelines and people, so its pass speaks only for a test it counted as failing.
 		const tests = (json<{ tests?: { id: number; counted?: boolean }[] }>(question.evidence).tests ?? []).flatMap(
 			(test) => (test.counted ? [test.id] : []),
 		);
 		gone =
-			passesAny(ctx.db, newest.id, tests) ||
-			(await countedTestsOf(ctx.db, newest.id)).some(
-				(row) =>
+			(await passesAny(ctx.db, newest.id, tests)) ||
+			(await someAsync(
+				await countedTestsOf(ctx.db, newest.id),
+				async (row) =>
 					row.signature === subject.signature &&
 					tests.includes(row.test) &&
-					excuseForResult(
+					(await excuseForResult(
 						ctx.db,
 						{ id: row.result, project: newest.project, signature: row.signature, target: row.target },
 						subject.scope,
-					) !== null,
-			);
+					)) !== null,
+			));
 	}
 	for (const id of await runsAbout(ctx, question)) {
 		const run = await runById(ctx.db, id);
 		if (run?.origin !== "planned" || run.state !== "open") continue;
-		if (shows(run)) return false;
+		if (await shows(run)) return false;
 		gone = true;
 	}
 	return gone;
@@ -1996,7 +2035,7 @@ async function stoppedFailing(ctx: Ctx, question: QuestionRow, shown: Map<number
 export async function sweepExpired(ctx: Ctx, expired: readonly DecisionRow[]): Promise<number> {
 	let reopened = 0;
 	for (const decision of expired) {
-		if (endHold(ctx, decision, { is: "expired", clause: "hold-expired", reason: null })) reopened++;
+		if (await endHold(ctx, decision, { is: "expired", clause: "hold-expired", reason: null })) reopened++;
 	}
 	return reopened;
 }
@@ -2045,7 +2084,7 @@ async function endHold(ctx: Ctx, decision: DecisionRow, ending: Ending): Promise
 	const closed = await closeAnswered(ctx, question);
 	await refold(ctx, [...(await runsAbout(ctx, question)), ...(await runsDependingOn(ctx.db, decision.id)), ...closed]);
 	await closeIfGone(ctx, question.id);
-	if (questionById(ctx.db, question.id)?.state === "dissolved")
+	if ((await questionById(ctx.db, question.id))?.state === "dissolved")
 		await setQuestionState(ctx, question, "dissolved", ended.id);
 	return true;
 }
@@ -2104,7 +2143,7 @@ export async function toItem(db: ReadDb, row: QuestionRow): Promise<QuestionItem
  * facts and who is asked are read once for both: a queue page reads them for every question it shows.
  */
 export async function toItemFor(
-	ctx: Ctx,
+	ctx: Ctx<ReadDb>,
 	row: QuestionRow,
 ): Promise<QuestionItem & { you: "counts" | "advice" | "forbidden" }> {
 	const facts = await factsNow(ctx.db, row);
@@ -2139,7 +2178,7 @@ async function itemOf(db: ReadDb, row: QuestionRow, facts: ReadonlySet<string>, 
 	const answers = await answersOf(db, row.id);
 	const decision = row.decision !== null ? await decisionById(db, row.decision) : null;
 	const supersedes =
-		decision && decision.supersedes !== null && holdEndingById(db, decision.id) !== null
+		decision && decision.supersedes !== null && (await holdEndingById(db, decision.id)) !== null
 			? await decisionById(db, decision.supersedes)
 			: null;
 	const fixedIn = decision && supersedes ? await fixedInOf(db, row, decision) : null;
@@ -2159,25 +2198,26 @@ async function itemOf(db: ReadDb, row: QuestionRow, facts: ReadonlySet<string>, 
 				.map((fact) => `accepting refused: ${fact.slice("refused:".length)}`),
 		].join("; "),
 		answers: applicableAnswers(row.kind, facts),
-		blocks: json<number[]>(row.blocks).flatMap((id) => {
-			const run = runById(db, id);
+		blocks: await flatMapAsync(json<number[]>(row.blocks), async (id) => {
+			const run = await runById(db, id);
 			return run ? [runRef(run)] : [];
 		}),
 		about: await refsOf(db, row.id),
 		openedAt: row.opened_at,
-		advice: answers
-			.filter((a) => a.counts === 0 && a.on_evidence === row.evidence_hash)
-			.map((a) => ({
-				by: actorLabel(db, a.actor).name,
-				kind: actorLabel(db, a.actor).kind,
+		advice: await mapAsync(
+			answers.filter((a) => a.counts === 0 && a.on_evidence === row.evidence_hash),
+			async (a) => ({
+				by: (await actorLabel(db, a.actor)).name,
+				kind: (await actorLabel(db, a.actor)).kind,
 				answer: json<Record<string, unknown>>(a.answer),
 				reason: a.reason,
-			})),
+			}),
+		),
 		decision: decision
 			? {
-					...decisionItem(db, decision),
+					...(await decisionItem(db, decision)),
 					effects: json<Record<string, unknown>>(decision.effects),
-					...(supersedes ? { supersedes: decisionItem(db, supersedes) } : {}),
+					...(supersedes ? { supersedes: await decisionItem(db, supersedes) } : {}),
 					...(fixedIn ? { fixedIn } : {}),
 				}
 			: null,
@@ -2198,26 +2238,27 @@ async function fixedInOf(db: ReadDb, question: QuestionRow, ending: DecisionRow)
 	return change ? { change: change.key, state: change.ended ?? "open" } : null;
 }
 
-function decisionItem(db: ReadDb, decision: DecisionRow) {
+async function decisionItem(db: ReadDb, decision: DecisionRow) {
 	const signers = json<Signer[]>(decision.signers);
 	return {
 		id: decision.id,
 		answer: json<Record<string, unknown>>(decision.answer),
-		by: signers.map((signer) => actorLabel(db, signer.by).name),
-		rule: signers.find((signer) => actorLabel(db, signer.by).kind === "rule")?.clause ?? null,
+		by: await mapAsync(signers, async (signer) => (await actorLabel(db, signer.by)).name),
+		rule:
+			(await findAsync(signers, async (signer) => (await actorLabel(db, signer.by)).kind === "rule"))?.clause ?? null,
 		reason: signers.find((signer) => signer.reason)?.reason ?? null,
 		at: decision.at,
 	};
 }
 
 /** Whether the acting actor may settle this question, so a surface can show the keys or say who is needed. */
-async function standingFor(ctx: Ctx, row: QuestionRow, ask: Ask): Promise<"counts" | "advice" | "forbidden"> {
+async function standingFor(ctx: Ctx<ReadDb>, row: QuestionRow, ask: Ask): Promise<"counts" | "advice" | "forbidden"> {
 	const handler = HANDLERS[row.kind];
 	return standingOf({
 		actor: ctx.actor,
 		ask: ask.who === "rule" ? { ...ask, who: "member" } : ask,
 		isAuthor: await handler.isAuthor(ctx, row),
-		isProducer: ask.notProducer && handler.isProducer(ctx, row),
+		isProducer: ask.notProducer && (await handler.isProducer(ctx, row)),
 	});
 }
 
@@ -2261,7 +2302,11 @@ export async function recordMergeReceipt(ctx: Ctx, change: ChangeRow): Promise<C
 	const results = run
 		? await storeReceiptResults(ctx, run.id, () => receiptResultBuckets(ctx.db, run), contents)
 		: null;
-	const evidence = await storeMergeSnapshot(ctx, results, run ? receiptGateEvidence(ctx.db, run) : []);
+	async function* gates(): AsyncGenerator<string> {
+		if (run) yield* receiptGateEvidence(ctx.db, run);
+	}
+	const gate = gates();
+	const evidence = await storeMergeSnapshot(ctx, results, gate);
 
 	const snapshot: Omit<MergeReceipt, "id"> = {
 		head: change.head_sha,
@@ -2280,4 +2325,40 @@ export async function recordMergeReceipt(ctx: Ctx, change: ChangeRow): Promise<C
 	const id = await insertMergeReceipt(ctx, change.id, snapshot, evidence.id);
 	await setMergeReceipt(ctx, mintWitness(id, "merge-receipt", [ctx.actor.id], null), now);
 	return { ...now, receipt: id };
+}
+
+async function flatMapAsync<T, R>(rows: readonly T[], callback: (value: T) => Promise<R | R[]>) {
+	const out: R[] = [];
+	for (const row of rows) {
+		const found = await callback(row);
+		out.push(...(Array.isArray(found) ? found : [found]));
+	}
+	return out;
+}
+
+async function findAsync<T>(rows: readonly T[], callback: (value: T) => Promise<unknown>) {
+	for (const row of rows) if (await callback(row)) return row;
+	return undefined;
+}
+
+async function everyAsync<T>(rows: readonly T[], callback: (value: T) => Promise<unknown>) {
+	for (const row of rows) if (!(await callback(row))) return false;
+	return true;
+}
+
+async function mapAsync<T, R>(rows: readonly T[], callback: (value: T) => Promise<R>) {
+	const out: R[] = [];
+	for (const row of rows) out.push(await callback(row));
+	return out;
+}
+
+async function someAsync<T>(rows: readonly T[], callback: (value: T) => Promise<unknown>) {
+	for (const row of rows) if (await callback(row)) return true;
+	return false;
+}
+
+async function filterAsync<T>(rows: readonly T[], callback: (value: T) => Promise<unknown>) {
+	const out: T[] = [];
+	for (const row of rows) if (await callback(row)) out.push(row);
+	return out;
 }
