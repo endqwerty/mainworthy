@@ -2,11 +2,12 @@
 # token: set MAINWORTHY_OWNER_TOKEN below, or read the generated one from the first lines of `docker compose logs`.
 services:
   postgres:
-    image: postgres:18
+    image: postgres:18@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6
     restart: unless-stopped
     environment:
       POSTGRES_USER: mainworthy
       POSTGRES_DB: mainworthy
+      POSTGRES_INITDB_ARGS: --locale=C --encoding=UTF8
       POSTGRES_PASSWORD: ${MAINWORTHY_POSTGRES_PASSWORD:-mainworthy}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U mainworthy -d mainworthy"]

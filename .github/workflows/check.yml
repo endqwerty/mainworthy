@@ -116,7 +116,19 @@ jobs:
           cache-to: type=gha,mode=max
       - name: The container answers, and carries the documentation with its diagrams and screenshots
         run: |
-          docker run --detach --name mainworthy --publish 7357:7357 mainworthy:check
+          docker network create mainworthy-check
+          docker run --detach --name postgres --network mainworthy-check \
+            --env POSTGRES_HOST_AUTH_METHOD=trust \
+            --env 'POSTGRES_INITDB_ARGS=--locale=C --encoding=UTF8' \
+            --health-cmd 'pg_isready -U postgres' --health-interval 2s \
+            --health-timeout 5s --health-retries 30 postgres:18@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6
+          for attempt in $(seq 1 60); do
+            if docker exec postgres pg_isready -U postgres; then break; fi
+            sleep 1
+          done
+          docker exec postgres pg_isready -U postgres
+          docker run --detach --name mainworthy --network mainworthy-check --publish 7357:7357 \
+            --env MAINWORTHY_DATABASE_URL=postgres://postgres@postgres:5432/postgres mainworthy:check
           ready=false
           for attempt in $(seq 1 60); do
             if curl --fail --silent http://127.0.0.1:7357/healthz | jq --exit-status --arg commit "$GITHUB_SHA" '.ok == true and .commit == $commit'; then ready=true; break; fi
@@ -153,6 +165,10 @@ jobs:
         with:
           bun-version: 1.4.3
       - run: bun install --frozen-lockfile
+      - name: Native PostgreSQL 18 for the live server fixtures
+        run: |
+          brew install postgresql@18
+          echo "MAINWORTHY_PG_BIN=$(brew --prefix postgresql@18)/bin" >> "$GITHUB_ENV"
       - name: The package's tests, against a Mainworthy started from this commit
         run: bun scripts/ios.ts test
       - name: With no Mainworthy to reach, live suites skip and the other package tests pass
@@ -190,6 +206,21 @@ jobs:
       # The CI_SHARDS shards of scripts/check-plan.ts and the performance tests, or the files the change needs, in one
       # runner for each phase (`matrix` in scripts/ci-scope.ts). The gate job is given the same names.
       matrix: ${{ fromJSON(needs.scope.outputs.matrix) }}
+    services:
+      postgres:
+        image: postgres:18@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_INITDB_ARGS: --locale=C --encoding=UTF8
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      MAINWORTHY_TEST_PG: postgres://postgres@127.0.0.1:5432/postgres
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -246,6 +277,21 @@ jobs:
       contents: read
       # For the tailnet step: GitHub signs who this job is, and Tailscale admits it on that.
       id-token: write
+    services:
+      postgres:
+        image: postgres:18@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_INITDB_ARGS: --locale=C --encoding=UTF8
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      MAINWORTHY_TEST_PG: postgres://postgres@127.0.0.1:5432/postgres
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0

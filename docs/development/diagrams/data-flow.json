@@ -8,7 +8,7 @@
     "quality_profile": "showcase",
     "repository": {
       "url": "git@github.com:endqwerty/mainworthy.git",
-      "revision": "35f1b3b43de241180d1946c48853eb8a38bd2042",
+      "revision": "0f0e9f5182fc5fbe811f29a764bcb314c81f9939",
       "link_mode": "local-only"
     },
     "legend": {
@@ -41,7 +41,7 @@
       "id": "person",
       "type": "frontend",
       "label": "A person",
-      "sublabel": "Web UI \u00b7 iPhone app",
+      "sublabel": "Web UI · iPhone app",
       "stage": 0,
       "row": 0,
       "width": 150,
@@ -103,7 +103,7 @@
       "id": "operations",
       "type": "backend",
       "label": "Write operations",
-      "sublabel": "HTTP \u00b7 CLI \u00b7 MCP",
+      "sublabel": "HTTP · CLI · MCP",
       "tag": "Permissions checked",
       "stage": 1,
       "row": 1,
@@ -131,7 +131,7 @@
       "id": "identity",
       "type": "database",
       "label": "Identity",
-      "sublabel": "actors \u00b7 tokens \u00b7 sessions",
+      "sublabel": "actors · tokens · sessions",
       "tag": "grants",
       "stage": 1,
       "row": 4,
@@ -149,9 +149,8 @@
           "end_line": 48
         },
         {
-          "path": "src/server/kernel/migrations/0002_sessions.sql",
-          "line": 2,
-          "end_line": 17
+          "path": "src/server/kernel/schema.sql",
+          "label": "PostgreSQL baseline"
         }
       ],
       "yOffset": -28
@@ -160,8 +159,8 @@
       "id": "suite",
       "type": "database",
       "label": "Suite",
-      "sublabel": "cases \u00b7 versions \u00b7 proposals",
-      "tag": "folders \u00b7 placements",
+      "sublabel": "cases · versions · proposals",
+      "tag": "folders · placements",
       "stage": 2,
       "row": 0,
       "width": 150,
@@ -178,9 +177,8 @@
           "end_line": 285
         },
         {
-          "path": "src/server/kernel/migrations/0001_init.sql",
-          "line": 88,
-          "end_line": 212
+          "path": "src/server/kernel/schema.sql",
+          "label": "PostgreSQL baseline"
         }
       ]
     },
@@ -188,8 +186,8 @@
       "id": "evidence",
       "type": "database",
       "label": "Evidence",
-      "sublabel": "tests \u00b7 batches \u00b7 results",
-      "tag": "signatures \u00b7 findings \u00b7 files",
+      "sublabel": "tests · batches · results",
+      "tag": "signatures · findings · files",
       "stage": 2,
       "row": 1,
       "width": 150,
@@ -201,9 +199,8 @@
           "end_line": 1170
         },
         {
-          "path": "src/server/kernel/migrations/0001_init.sql",
-          "line": 224,
-          "end_line": 398
+          "path": "src/server/kernel/schema.sql",
+          "label": "PostgreSQL baseline"
         },
         {
           "path": "src/server/evidence/attachments.ts",
@@ -216,17 +213,16 @@
       "id": "decisions",
       "type": "database",
       "label": "Decisions",
-      "sublabel": "questions \u00b7 answers \u00b7 ledger",
-      "tag": "Witness \u00b7 standing",
+      "sublabel": "questions · answers · ledger",
+      "tag": "Witness · standing",
       "stage": 3,
       "row": 2,
       "width": 150,
       "height": 66,
       "sources": [
         {
-          "path": "src/server/kernel/migrations/0001_init.sql",
-          "line": 411,
-          "end_line": 490
+          "path": "src/server/kernel/schema.sql",
+          "label": "PostgreSQL baseline"
         },
         {
           "path": "src/server/decisions/decisions.ts",
@@ -244,7 +240,7 @@
       "id": "policy",
       "type": "database",
       "label": "Policy",
-      "sublabel": "policies \u00b7 clauses",
+      "sublabel": "policies · clauses",
       "stage": 2,
       "row": 2,
       "width": 150,
@@ -256,9 +252,8 @@
           "end_line": 46
         },
         {
-          "path": "src/server/kernel/migrations/0001_init.sql",
-          "line": 491,
-          "end_line": 505
+          "path": "src/server/kernel/schema.sql",
+          "label": "PostgreSQL baseline"
         }
       ]
     },
@@ -266,17 +261,16 @@
       "id": "runs",
       "type": "database",
       "label": "Runs",
-      "sublabel": "runs \u00b7 slots \u00b7 run_tests",
-      "tag": "slot_results \u00b7 depends_on",
+      "sublabel": "runs · slots · run_tests",
+      "tag": "slot_results · depends_on",
       "stage": 2,
       "row": 3,
       "width": 150,
       "height": 66,
       "sources": [
         {
-          "path": "src/server/kernel/migrations/0001_init.sql",
-          "line": 508,
-          "end_line": 609
+          "path": "src/server/kernel/schema.sql",
+          "label": "PostgreSQL baseline"
         },
         {
           "path": "src/server/runs/runs.ts",
@@ -368,7 +362,7 @@
       "id": "exports",
       "type": "external",
       "label": "Archive and audit",
-      "sublabel": "transfer \u00b7 archive and audit",
+      "sublabel": "transfer · archive and audit",
       "stage": 4,
       "row": 0,
       "width": 150,
@@ -390,7 +384,7 @@
       "id": "stats",
       "type": "frontend",
       "label": "Reports and stats",
-      "sublabel": "stats \u00b7 suite and evidence",
+      "sublabel": "stats · suite and evidence",
       "stage": 4,
       "row": 1,
       "width": 150,
@@ -408,7 +402,7 @@
       "id": "issues",
       "type": "external",
       "label": "Defect issues",
-      "sublabel": "trackers \u00b7 GitHub or Jira",
+      "sublabel": "trackers · GitHub or Jira",
       "stage": 4,
       "row": 2,
       "width": 150,
@@ -430,7 +424,7 @@
       "id": "statuses",
       "type": "external",
       "label": "Commit statuses",
-      "sublabel": "statuses \u00b7 GitHub",
+      "sublabel": "statuses · GitHub",
       "stage": 4,
       "row": 2,
       "width": 150,
@@ -770,7 +764,7 @@
     },
     {
       "dot": "emerald",
-      "title": "One SQLite file; six owning modules",
+      "title": "PostgreSQL; six owning modules",
       "items": [
         "Suite: cases, versions, folders, proposals, placements, case_aliases, case_tags, requirements, covers and search_docs.",
         "Evidence: tests, targets, changes, batches, results, signatures, flips, findings, reviews, excuses, result_excuses, quarantines, artifacts, builds, deployments and attachments. Attachment bytes live in the blobs directory, addressed by hash.",

@@ -56,6 +56,20 @@ test("HTTP archives leave the server answering other requests", async () => {
 				expect(response.status).toBe(200);
 				expect(await response.json()).toMatchObject({ ok: true, result: { tables: { results: 20_000 } } });
 			});
-			expect((await target.instance.app.database.read((db) => db.allDynamic<Record<string, unknown>>("SELECT count(*) AS n FROM results", [])))[0] ?? null).toEqual({ n: 20_000 });
+			expect(
+				(
+					await target.instance.app.database.read((db) =>
+						db.allDynamic<Record<string, unknown>>("SELECT count(*) AS n FROM results", []),
+					)
+				)[0] ?? null,
+			).toEqual({ n: 20_000 });
 			return longest;
 		});
+
+		console.log(
+			`20,000 results: longest /healthz wait export ${exported.toFixed(1)} ms, import ${imported.toFixed(1)} ms; 0 request failures`,
+		);
+		budget("archive export: longest /healthz wait", exported, LIMIT_MS, "ms");
+		budget("archive import: longest /healthz wait", imported, LIMIT_MS, "ms");
+	});
+}, 30_000);

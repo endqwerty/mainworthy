@@ -7,7 +7,7 @@
     "output": "docs/development/diagrams/request-path.html",
     "repository": {
       "url": "git@github.com:endqwerty/mainworthy.git",
-      "revision": "35f1b3b43de241180d1946c48853eb8a38bd2042",
+      "revision": "0f0e9f5182fc5fbe811f29a764bcb314c81f9939",
       "link_mode": "local-only"
     },
     "quality_profile": "showcase",
@@ -87,7 +87,7 @@
       "id": "registry",
       "type": "backend",
       "label": "Registry",
-      "sublabel": "invoke / invokeAsync",
+      "sublabel": "invoke",
       "sources": [
         {
           "path": "src/server/ops/registry.ts",
@@ -109,18 +109,18 @@
     {
       "id": "readers",
       "type": "backend",
-      "label": "Reader threads",
+      "label": "Read scopes",
       "sublabel": "Read-only connection",
       "sources": [
         {
-          "path": "src/server/ops/readers.ts",
-          "line": 108,
-          "end_line": 125
+          "path": "src/server/kernel/db.ts",
+          "line": 554,
+          "end_line": 575
         },
         {
-          "path": "src/server/ops/read-worker.ts",
-          "line": 103,
-          "end_line": 148
+          "path": "src/server/kernel/db.ts",
+          "line": 554,
+          "end_line": 575
         },
         {
           "path": "src/server/kernel/db.ts",
@@ -155,7 +155,7 @@
     {
       "id": "sqlite",
       "type": "database",
-      "label": "SQLite",
+      "label": "PostgreSQL 18",
       "sublabel": "Kernel: db + ctx",
       "sources": [
         {
@@ -205,7 +205,7 @@
       "to": "http",
       "y": 175,
       "label": "POST operation",
-      "note": "http.ts:424\u2013461",
+      "note": "http.ts:424–461",
       "variant": "emphasis"
     },
     {
@@ -214,7 +214,7 @@
       "to": "identity",
       "y": 225,
       "label": "Admit request facts",
-      "note": "http.ts:230\u2013238, 415",
+      "note": "http.ts:230–238, 415",
       "variant": "security"
     },
     {
@@ -223,7 +223,7 @@
       "to": "http",
       "y": 275,
       "label": "Session: actor and grants",
-      "note": "identity.ts:735\u2013792",
+      "note": "identity.ts:735–792",
       "variant": "return"
     },
     {
@@ -232,7 +232,7 @@
       "to": "registry",
       "y": 325,
       "label": "Invoke the named operation",
-      "note": "http.ts:448\u2013460",
+      "note": "http.ts:448–460",
       "variant": "emphasis"
     },
     {
@@ -241,7 +241,7 @@
       "to": "readers",
       "y": 400,
       "label": "Check capability; dispatch",
-      "note": "registry.ts:383\u2013401",
+      "note": "registry.ts:383–401",
       "variant": "default"
     },
     {
@@ -250,7 +250,7 @@
       "to": "domain",
       "y": 450,
       "label": "Resolve grants; parse; read",
-      "note": "registry.ts:208\u2013239, 277\u2013279",
+      "note": "registry.ts:208–239, 277–279",
       "variant": "default"
     },
     {
@@ -259,7 +259,7 @@
       "to": "sqlite",
       "y": 500,
       "label": "Read in one snapshot",
-      "note": "registry.ts:368; db.ts:284\u2013294",
+      "note": "registry.ts:368; db.ts:284–294",
       "variant": "default"
     },
     {
@@ -268,7 +268,7 @@
       "to": "domain",
       "y": 550,
       "label": "Committed rows",
-      "note": "db.ts:62\u201384",
+      "note": "db.ts:62–84",
       "variant": "return"
     },
     {
@@ -277,7 +277,7 @@
       "to": "readers",
       "y": 600,
       "label": "Result and sequence",
-      "note": "registry.ts:277\u2013279",
+      "note": "registry.ts:277–279",
       "variant": "return"
     },
     {
@@ -286,7 +286,7 @@
       "to": "registry",
       "y": 650,
       "label": "Reply; recheck caller",
-      "note": "registry.ts:402\u2013406",
+      "note": "registry.ts:402–406",
       "variant": "return"
     },
     {
@@ -295,7 +295,7 @@
       "to": "registry",
       "y": 725,
       "label": "Wait at the one write gate",
-      "note": "registry.ts:410\u2013418",
+      "note": "registry.ts:410–418",
       "variant": "default"
     },
     {
@@ -304,7 +304,7 @@
       "to": "sqlite",
       "y": 775,
       "label": "Begin write transaction",
-      "note": "registry.ts:173; db.ts:113\u2013116",
+      "note": "registry.ts:173; db.ts:113–116",
       "variant": "emphasis"
     },
     {
@@ -313,7 +313,7 @@
       "to": "identity",
       "y": 825,
       "label": "Resolve actor and grants again",
-      "note": "registry.ts:208\u2013221",
+      "note": "registry.ts:208–221",
       "variant": "security"
     },
     {
@@ -322,7 +322,7 @@
       "to": "registry",
       "y": 875,
       "label": "Current actor and grants",
-      "note": "identity.ts:619\u2013645",
+      "note": "identity.ts:619–645",
       "variant": "return"
     },
     {
@@ -331,7 +331,7 @@
       "to": "sqlite",
       "y": 925,
       "label": "Parse input; take next sequence",
-      "note": "registry.ts:223\u2013239, 302\u2013312",
+      "note": "registry.ts:223–239, 302–312",
       "variant": "default"
     },
     {
@@ -340,7 +340,7 @@
       "to": "domain",
       "y": 975,
       "label": "Run the command",
-      "note": "registry.ts:318\u2013338",
+      "note": "registry.ts:318–338",
       "variant": "emphasis"
     },
     {
@@ -349,7 +349,7 @@
       "to": "sqlite",
       "y": 1025,
       "label": "Write rows with the sequence",
-      "note": "suite.ts:1270\u20131335",
+      "note": "suite.ts:1270–1335",
       "variant": "emphasis"
     },
     {
@@ -358,7 +358,7 @@
       "to": "registry",
       "y": 1075,
       "label": "Result and changed refs",
-      "note": "registry.ts:338\u2013344",
+      "note": "registry.ts:338–344",
       "variant": "return"
     },
     {
@@ -367,7 +367,7 @@
       "to": "sqlite",
       "y": 1125,
       "label": "Record command id; stamp clock",
-      "note": "registry.ts:339\u2013341; ctx.ts:213\u2013259",
+      "note": "registry.ts:339–341; ctx.ts:213–259",
       "variant": "default"
     },
     {
@@ -376,7 +376,7 @@
       "to": "sqlite",
       "y": 1175,
       "label": "Commit",
-      "note": "registry.ts:342; db.ts:119\u2013122",
+      "note": "registry.ts:342; db.ts:119–122",
       "variant": "emphasis"
     },
     {
@@ -385,7 +385,7 @@
       "to": "http",
       "y": 1225,
       "label": "Publish the committed change",
-      "note": "registry.ts:313\u2013315, 343",
+      "note": "registry.ts:313–315, 343",
       "variant": "dashed"
     },
     {
@@ -394,7 +394,7 @@
       "to": "client",
       "y": 1275,
       "label": "Event on an open stream",
-      "note": "http.ts:633\u2013646",
+      "note": "http.ts:633–646",
       "variant": "dashed"
     },
     {
@@ -403,7 +403,7 @@
       "to": "http",
       "y": 1350,
       "label": "Common reply envelope",
-      "note": "registry.ts:93\u201395, 344",
+      "note": "registry.ts:93–95, 344",
       "variant": "return"
     },
     {
@@ -412,7 +412,7 @@
       "to": "client",
       "y": 1400,
       "label": "JSON reply and common headers",
-      "note": "http.ts:58; headers.ts:165\u2013184",
+      "note": "http.ts:58; headers.ts:165–184",
       "variant": "return"
     }
   ],
@@ -421,18 +421,18 @@
       "dot": "cyan",
       "title": "One process, one registry",
       "items": [
-        "This is the HTTP operation path. The web UI, CLI, pipeline and agent use the same operation registry. Reader threads belong to the same Bun process.",
+        "The web UI, CLI, pipeline and agent use the same operation registry. The Bun app opens scoped connections to PostgreSQL 18.",
         "POST /api/p/:project/:op. A bearer token, session cookie or verified local-owner request supplies the identity facts. Cookie and local admission require the same origin.",
-        "Sources: src/surfaces/http.ts:230\u2013248, 410\u2013461, 819\u2013846; src/server/ops/registry.ts:1\u20132; src/server/ops/readers.ts:154\u2013160."
+        "Sources: src/server/kernel/db.ts:554–590; src/server/ops/registry.ts; src/server/kernel/ctx.ts."
       ]
     },
     {
       "dot": "violet",
       "title": "Reads and writes are alternatives",
       "items": [
-        "Read: invokeAsync checks capability before dispatch. The worker runs invoke, resolves the caller and grants, validates input and reads in one snapshot. With no ready worker, the read runs inline on the reader connection.",
+        "Read: invoke resolves authority and reads in a repeatable-read transaction. It closes that snapshot and rechecks authority and project identity in a fresh read scope before replying.",
         "Write: after waiting at the gate, begin the transaction, resolve authority, check capability and parse input. makeCtx takes project.seq + 1. Domain modules own their tables; examples stamp seq or rev from ctx.seq.",
-        "Sources: src/server/ops/registry.ts:169\u2013239, 277\u2013344, 363\u2013419; src/server/ops/read-worker.ts:103\u2013148; src/server/ops/readers.ts:108\u2013125; src/server/kernel/ctx.ts:231\u2013259."
+        "Sources: src/server/kernel/db.ts:554–590; src/server/ops/registry.ts; src/server/kernel/ctx.ts."
       ]
     },
     {
@@ -442,7 +442,7 @@
         "When cmd is supplied, record its request and result before commit. A finished project command retried unchanged by the same actor returns the stored reply and writes nothing; changed content under that id is refused.",
         "A fresh report has two transactions: accept, then apply. Each commit takes a sequence number and publishes a change. The write branch above shows an ordinary command.",
         "The event uses a separate, already open GET /api/p/:project/events stream with read access. It is a change hint; a client that misses it refetches. The reply carries the common security headers; HSTS depends on HTTPS.",
-        "Sources: src/server/ops/registry.ts:286\u2013344; src/server/ops/writes.ts:362\u2013372; src/surfaces/http.ts:583\u2013646; src/surfaces/headers.ts:165\u2013184; src/surfaces/with-headers.ts:14\u201316."
+        "Sources: src/server/ops/registry.ts:286–344; src/server/ops/writes.ts:362–372; src/surfaces/http.ts:583–646; src/surfaces/headers.ts:165–184; src/surfaces/with-headers.ts:14–16."
       ]
     }
   ]

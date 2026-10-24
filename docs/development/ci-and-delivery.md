@@ -106,7 +106,7 @@ failure still open on that pull request is then no longer asked about. To replay
 
 ## Follow the deploy
 
-Coolify on the home server follows `main` and deploys `compose.coolify.yaml`: one container, one SQLite volume
+Coolify on the home server follows `main` and deploys `compose.coolify.yaml`: an app container, PostgreSQL 18 on an internal network with its own volume, and the retained SQLite volume
 and a Tailscale sidecar. The deploy job lives outside this repository. Before it deploys a commit, it must see
 that the newest push run of `check.yml` for that commit completed, that its `gate` job succeeded in the run's
 current attempt, and that `main` has not moved for ten minutes. [docs/deploy.md](../deploy.md#checks-a-deployment-must-wait-for)

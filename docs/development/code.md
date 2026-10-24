@@ -1,6 +1,6 @@
 # How the code is organised
 
-Mainworthy is one Bun process and one SQLite file. Every client, from the web UI to an agent, calls the same
+Mainworthy is one Bun process connected to PostgreSQL 18. Every client, from the web UI to an agent, calls the same
 operations, and every operation goes through one function. This page shows where the parts live, which imports
 the module map allows, and the path a request takes. [docs/architecture.md](../architecture.md) has the full
 design. Read it before you change identity, sessions, runs or policy.
@@ -10,7 +10,7 @@ design. Read it before you change identity, sessions, runs or policy.
 | Path | What it holds |
 | --- | --- |
 | `src/core/` | pure functions and schemas with no I/O: the case document, the outline grammar, Markdown, diff, three-way merge, hashes, failure signatures, policy presets, the verdict, the API's types. The browser and the server both run them. |
-| `src/server/kernel/` | the SQLite wrapper, migrations, the command context, the `Witness`, configuration, blobs, the instance lock |
+| `src/server/kernel/` | the PostgreSQL scopes, baseline, command context, `Witness`, configuration and blobs |
 | `src/server/suite/` | cases, versions, folders, tags and proposals |
 | `src/server/evidence/` | tests, targets, batches, results, causes, findings, flaky detection, quarantine, attachments, stats |
 | `src/server/runs/` | change runs, planned runs, slots and the verdict |
@@ -19,9 +19,9 @@ design. Read it before you change identity, sessions, runs or policy.
 | `src/server/policy/` | the clause table that says who answers each kind of question |
 | `src/server/trackers/`, `src/server/statuses/` | defect issues on GitHub or Jira, and commit statuses on GitHub |
 | `src/server/transfer/` | archive export and import, and audit export |
-| `src/server/ops/` | the registry (`index.ts`, `registry.ts`), `invoke`, the reader threads, recovery jobs and tracker holds |
+| `src/server/ops/` | the registry (`index.ts`, `registry.ts`), `invoke`, recovery jobs and tracker holds |
 | `src/surfaces/` | HTTP, MCP, the JUnit reader, CI environment detection, archive routes, sign-in routes, the docs site, the web UI's files and the headers on every reply. Adapters only, no product logic. |
-| `src/app/start.ts` | starts and stops the instance: database, HTTP, readers, recovery and periodic jobs |
+| `src/app/start.ts` | starts and stops the instance: database, HTTP, recovery and periodic jobs |
 | `src/cli/` | the `mainworthy` command. Most commands are generated from the registry. `commands/` holds the adapters, and `demo/` the pure demo catalog that `seed.ts` writes. |
 | `src/web/` | the React web UI. One directory per screen, with `lib/` and `ui/` shared. `SHELL.md` is the contract a screen follows. |
 | `ios/` | the SwiftUI iPhone app ([ios/README.md](../../ios/README.md)) |
@@ -62,7 +62,7 @@ The CLI has two named exceptions: `client.ts` may call identity for the sign-in 
 
 Three more rules come with the map, each held by the same test:
 
-- Only `server/kernel` imports `bun:sqlite`.
+- Only `server/kernel/db.ts` uses the PostgreSQL driver.
 - Each table has one owning module. SQL is declared with `sql()` in that module, and another module reads the
   rows through the owner's functions.
 - `src/core` imports no I/O module, and `src/web` imports only itself and `src/core`.
@@ -82,7 +82,7 @@ Some facts about this path matter when you change it:
 - A command id names one request. Sent again with the same content, it gets the first reply and writes nothing.
   Sent again with other content, it is refused. A client whose reply was lost asks `command` what became of it.
 - A `report` commits twice. The first transaction accepts the results, and the second applies them in slices of
-  200, so a large report does not block other requests for long.
+  200, while retaining the same write lease and advisory lock across both transactions.
 - The web UI listens on the change stream and refetches only what an event says was touched (`changed` in
   `src/web/lib/data.ts`).
 

@@ -4,7 +4,7 @@ The server reads its settings from environment variables. These settings control
 
 ## Local mode and server mode
 
-The same program runs in two modes. The mode decides how a request proves who sent it.
+Both modes require PostgreSQL 18. The Local product layer has ended; local mode remains a development authentication option. Running the code elsewhere is possible but not yet supported. The mode decides how a request proves who sent it.
 
 In local mode you are the owner. The server listens on the loopback address, and a request from this machine needs no token. The web UI opens signed in, and commands run without `--token`. A request counts as yours when three conditions hold:
 
@@ -35,8 +35,7 @@ project "scratch" · you are robin@this-machine · policy: loose
 | --- | --- | --- |
 | `MAINWORTHY_HOST` | `127.0.0.1` | The address to listen on. Use `0.0.0.0` to listen on every interface. A value that is not loopback selects server mode. |
 | `MAINWORTHY_PORT` | `PORT`, else `7357` | The port to listen on. |
-| `MAINWORTHY_DATA` | `~/.mainworthy` | The data directory. It holds `mainworthy.db`, its WAL and shared-memory files while running, `server.lock` (with `server.lock-journal` while a server holds it), `blobs/` for result attachments, and `spool/` for archive transfers. On POSIX hosts, the database files and upgrade copies are limited to the server's operating-system user; the directory and unrelated files keep their existing permissions. See [your data](./data.md#where-the-data-lives) for the host boundary. |
-| `MAINWORTHY_LOCK_WAIT_SECONDS` | `30` | Seconds to wait for another server to release the data directory. A finite nonnegative number, including fractions. `0` refuses immediately. |
+| `MAINWORTHY_DATA` | `~/.mainworthy` | Local attachment storage in `blobs/` and archive staging in `spool/`. PostgreSQL stores structured records separately. |
 | `MAINWORTHY_MODE` | none | `server` selects server mode. |
 | `MAINWORTHY_OWNER` | `USER`, else `owner` | The name of the owner, who holds every capability on every project. |
 | `MAINWORTHY_OWNER_WAS` | none | The name the owner has now, when `MAINWORTHY_OWNER` holds a new name for the same person. The start renames them. See [rename the owner](#rename-the-owner). |
@@ -59,7 +58,9 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_APPLE_APPS` | none | The iPhone apps whose sign-in screen may offer the logins the phone keeps for this site. List each app as a team id and a bundle identifier (`ABCDE12345.com.mainworthy.app`). Separate the entries with commas. The server lists them at `/.well-known/apple-app-site-association`. Without it that address is not found. See [the iPhone app](./iphone.md#sign-in). |
 | `MAINWORTHY_TRUSTED_PROXY` | none | The addresses or CIDR ranges of the proxy in front, comma-separated. Set it together with the next one, or neither. |
 | `MAINWORTHY_CLIENT_ADDRESS_HEADER` | none | The header in which that proxy reports the visitor's address. Believed only on a connection from a proxy named above. |
-| `MAINWORTHY_READERS` | the CPU count minus 2, at least 1 and at most 8 | How many reader threads answer reads, from `0` to `8`. `0` answers them on the main thread. |
+| `MAINWORTHY_DATABASE_URL` | required | PostgreSQL connection URL. `compose.yaml` starts PostgreSQL 18 and sets this for the app. |
+| `MAINWORTHY_DB_POOL` | `2` | Read-pool connections, an integer from 1 to 64. |
+| `MAINWORTHY_DB_WRITE_POOL` | `1` | Write-pool connections, an integer from 1 to 64. Writes still hold one instance-wide advisory lock. |
 | `MAINWORTHY_DEMO` | none | Paused since 2026-10-24 (#914): the server leaves the demo as it is. A marked demo refreshed once per deployed revision after listening. The commit comes from `MAINWORTHY_COMMIT` or `SOURCE_COMMIT`. Same-revision restarts preserve edits and renew featured work. New revisions swap in a fresh demo with existing grants; retired data drains in bounded transactions. Unknown revisions and unmarked projects are refused. See [demo data](./customize.md#a-project-of-demo-data). |
 | `MAINWORTHY_COMMIT` | none | The commit this server was built from, which `/healthz` reports. It must have 40 lower-case hexadecimal characters. If absent or invalid, the server tries `SOURCE_COMMIT`, then reports unknown. |
 | `MAINWORTHY_GITHUB_PROJECT` | none | The project allowed to send defects and optional gate commit statuses to GitHub. Set the project, repository, and token together. |
@@ -76,17 +77,16 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_HANDOFF_URL` | none | The address the server posts a hand-off to, for example a T3 Code webhook. It must be `https`, or `http` on `127.0.0.1` or `localhost`. Treat it as a secret when it carries a token, as a T3 Code webhook address does. It is never stored in the database or an archive. |
 | `MAINWORTHY_HANDOFF_SECRET` | none | At least 16 characters without whitespace. The server signs each post with it (HMAC-SHA256, hex, in `X-Mainworthy-Signature: sha256=<digest>`). Give the receiver the same secret. Keep it in the server's secret environment. |
 
-A value outside the whole numbers `0` through `8` for `MAINWORTHY_READERS` stops startup with `invalid: MAINWORTHY_READERS must be an integer between 0 and 8`. An invalid session duration also stops startup with a line that names the variable. Each entry in `MAINWORTHY_APPLE_APPS` must have a team id and bundle identifier.
+An invalid session duration also stops startup with a line that names the variable. Each entry in `MAINWORTHY_APPLE_APPS` must have a team id and bundle identifier.
 
 For `MAINWORTHY_PUBLIC_URL`, use `https` and a host name with nothing after it, or `http://localhost` with its optional port. The server refuses IP addresses and plain `http` anywhere else because browsers do not make passkeys there. Paths and queries are refused because the server needs the instance's root address.
 
 The server checks configuration before creating the data directory or taking its lock. A refused public address, owner token length or form, or reserved owner name creates no files.
 
-The first start creates the data directory, one owner and a project named `scratch`. It does not need any variable. The server holds `server.lock` in that directory until it stops. Another server using the same directory waits up to `MAINWORTHY_LOCK_WAIT_SECONDS` before it opens the application database. It says once on standard error that it is waiting for another server on the data directory. If the lock is still held at the deadline, startup is refused with `another server is already using this data directory; stop it or choose another MAINWORTHY_DATA`. This permits a replacement to start when the previous server finishes stopping. A deployment must let the previous server stop while the replacement waits. Waiting for the replacement to become healthy first prevents that handoff. The operating system releases the lock if the process is killed. The file stays in place. Do not delete or replace it while a server runs.
 
-A reader thread that fails to start retries after 100 ms, then doubles the wait up to 30 seconds. A thread that becomes ready resets that wait. Reads use ready threads or run inline when none is ready. The server starts without waiting for the full pool.
+Reads use pooled PostgreSQL connections. `MAINWORTHY_READERS` is removed. The server starts only with a PostgreSQL URL.
 
-With reader threads enabled, a background thread checkpoints the write-ahead log every half second. The writer keeps its 20,000-page automatic checkpoint fallback. After readers move on and a checkpoint completes, log reuse trims the file to at most 4 MiB. This retention limit does not change checkpoint timing or cap growth during active snapshots and large transactions. See [data and backups](./data.md).
+PostgreSQL owns its write-ahead log and checkpoints. Back up PostgreSQL and local attachments together; Mainworthy creates no automatic upgrade copy.
 
 GitHub Issues and Jira Cloud are optional. Each supports one destination for one project per instance, through the API and command line. See [create or link a tracker defect](./decide.md#create-or-link-a-tracker-defect). A partial or malformed configuration stops the server with a message that names the variables without quoting credentials. If both trackers name the same Mainworthy project, new defects go to Jira. GitHub remains available for commit statuses and existing defect holds.
 
@@ -148,7 +148,7 @@ A start that is refused for the owner's name or the owner's token changes no act
 
 For the first server-mode sign-in, use the owner's token. Later you can set up a password or passkey. If you set `MAINWORTHY_OWNER_TOKEN`, the server adds that value as a token for the owner. Otherwise, a start on which the owner has no working token prints a generated one. The first start and a start after an import do this.
 
-To replace a lost token, set `MAINWORTHY_OWNER_TOKEN` to a new value and restart. The start revokes every token previously issued through that variable, whoever the owner was then. It ends browser sessions opened with those tokens and names each token and actor in one log line. Tokens you made yourself and tokens the server generated keep working. An older manually issued token with a label beginning `owner (from ` is an exception. The database upgrade marked those tokens as issued through the variable, so a new value revokes them too.
+To replace a lost token, set `MAINWORTHY_OWNER_TOKEN` to a new value and restart. The start revokes every token previously issued through that variable, whoever the owner was then. It ends browser sessions opened with those tokens and names each token and actor in one log line. Tokens you made yourself and tokens the server generated keep working.
 
 A value shorter than 20 characters or longer than 512 stops startup. Only visible ASCII characters are accepted: letters, digits and punctuation, with no spaces, tabs, line breaks, other control characters or non-ASCII characters. The server uses the exact value for browser sign-in and HTTP bearer authentication. An invalid value stops startup before any token is created or revoked, so a refused rotation leaves the previous token and its browser sessions working. If an earlier build accepted an invalid value, replace it. `openssl rand -hex 32` makes a suitable value. Keep it out of version control.
 
@@ -177,17 +177,19 @@ Prefer `MAINWORTHY_TOKEN` or `--token-file` to `--token`. The process list and t
 
 `MAINWORTHY_COMMIT`, `MAINWORTHY_BRANCH`, `MAINWORTHY_PR`, `MAINWORTHY_BASE`, `MAINWORTHY_ATTEMPT`, `MAINWORTHY_JOB`, `MAINWORTHY_BUILD_URL`, `MAINWORTHY_REPO` and `MAINWORTHY_ENV` tell `mainworthy report` which build produced the results. The server also reads `MAINWORTHY_COMMIT` to identify its own build, as the table above describes. A CI job sets these variables when Mainworthy cannot detect the build. [Report results](./report-results.md#identify-the-tested-build) explains each.
 
-## Run one container with one volume
+## Run the app and PostgreSQL
 
-Mainworthy runs as one container with one volume. The container runs the single executable as an unprivileged user, in server mode, on port 7357. It keeps its data in `/data`. Nothing else, such as a separate database, is needed. The source tree has a `Dockerfile` and a `compose.yaml`, and Compose builds the image from them.
+The source tree includes a `Dockerfile` and `compose.yaml`. Compose builds the app and starts PostgreSQL 18.
+It publishes the app on port 7357, mounts `mainworthy-data` at `/data` for attachments and staging,
+and gives PostgreSQL its own `mainworthy-postgres` volume at `/var/lib/postgresql`.
 
 ```
 $ docker compose up -d
 ```
 
-The file defines one service, `mainworthy`. It publishes port 7357, restarts the container unless you stop it, and mounts a named volume, `mainworthy-data`, at `/data`.
-
-Compose passes through the owner token and names, session lifetimes, lock wait, proxy settings, public URL, Apple app identifiers, demo project and mail settings. It defaults `MAINWORTHY_OWNER` to `owner` and `MAINWORTHY_LOCK_WAIT_SECONDS` to `30`. The other passed-through settings take the server's defaults when empty. To pass another server setting, such as `MAINWORTHY_REQUIRE_ADMIN_MFA`, add it to the service's `environment` map.
+The app waits for PostgreSQL health before starting. Use a URL-safe `MAINWORTHY_POSTGRES_PASSWORD` to override
+the development password in Compose. Running elsewhere is possible but not yet supported.
+Compose passes owner, session, proxy, public URL, Apple app, demo and mail settings to the app.
 
 Set `MAINWORTHY_OWNER_TOKEN` to a long random string. If you leave it empty on first start, the server generates one and prints it once in `docker compose logs`. Open `http://localhost:7357` and sign in with it.
 
@@ -202,11 +204,11 @@ healthy: Mainworthy 0.1.0 at http://127.0.0.1:7357
 
 `mainworthy health` exits 0 when the server answers and 1 when it does not. Use `/healthz` for a monitor of your own. Its `apiVersion` is the CLI compatibility contract. `mainworthy health --json` also reports `compatible`, which is false for an older server that advertises no API version. An incompatible healthy server still exits 0. [CLI and server versions](./cli.md#cli-and-server-versions) explains refusal of operations.
 
-During an upgrade, health answers HTTP 200 with `ok: false, state: "upgrading"`. The health command exits 0 and prints `upgrading`, so Docker can start dependent services. Other requests receive HTTP 503 until ready. A readiness monitor must require `ok: true` and, for a deployment, the expected commit. Upgrade failures close the listener; the startup worker stops after 30 minutes without observable copy/database writes or recovery progress. This is an inactivity allowance, so an upgrade that keeps progressing may take longer. Bootstrap and recovery also run on the worker, with health still answering.
+During startup, health answers HTTP 200 with `ok: false, state: "upgrading"`. The health command exits 0 and prints `upgrading`, so Docker can start dependent services. Other requests receive HTTP 503 until ready. A readiness monitor must require `ok: true` and, for a deployment, the expected commit. Startup failure closes the listener.
 
 `commit` identifies the server's build when the commit was supplied. To include the commit, build the image with `MAINWORTHY_COMMIT=$(git rev-parse HEAD) docker compose build`. Then `/healthz` names that commit, and `mainworthy health` prints its first 12 characters. Without a supplied commit, the answer is `null`.
 
-Back up the volume. [Your data](./data.md) explains how.
+Back up PostgreSQL and the attachment volume. [Your data](./data.md) explains how.
 
 ## Run behind a proxy that ends TLS
 

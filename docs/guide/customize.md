@@ -8,7 +8,7 @@ Mainworthy has settings for the instance, each project, cases, runs, and your br
 
 Settings sit at five levels. The level tells you who is affected when you change a setting:
 
-- The instance is one running server and its data. The server's address, mode, data directory and reader threads belong here. People, agents, pipelines and their tokens belong here too. You set the server through environment variables. You set the rest in Settings or with the `mainworthy` command.
+- The instance is one running server and its data. The server's address, mode, data directory and PostgreSQL connection pools belong here. People, agents, pipelines and their tokens belong here too. You set the server through environment variables. You set the rest in Settings or with the `mainworthy` command.
 - A project is its own set of cases, runs, queue and policy. One instance can hold several. A person, an agent or a pipeline can have different rights in each.
 - A case says which producers may test it: people, the pipeline, agents, or any mix.
 - A run says what it needs before it is complete. You choose that when you plan the run.
@@ -38,7 +38,7 @@ Two words recur below. An instance admin holds the `admin` capability on every p
 | Your home | Settings, Your home | You, for yourself in this browser and project | [This page](#choose-your-home) |
 | The theme | The "Theme" button at the bottom of the sidebar | You, in your own browser | This page |
 | The sidebar, open or collapsed | The button beside "Mainworthy" at the top of the sidebar, or <kbd>[</kbd> | You, in your own browser | [This page](#the-sidebar) |
-| Where the server listens, its mode, data directory and reader threads | Environment variables | Whoever starts the server | [Configuration](./configuration.md) |
+| Where the server listens, its mode, data directory and PostgreSQL connection pools | Environment variables | Whoever starts the server | [Configuration](./configuration.md) |
 | How CI reports | A pipeline token, and `MAINWORTHY_URL`, `MAINWORTHY_TOKEN` and `MAINWORTHY_PROJECT` in the job | An admin makes the token. Whoever edits the pipeline sets the rest | [Report results](./report-results.md#give-a-pipeline-its-own-token) |
 | Backups and moving machines | `mainworthy export` and `mainworthy import` | An instance admin | [Your data](./data.md) |
 
@@ -185,7 +185,7 @@ The following behavior is fixed on every instance:
 - Three named presets. A policy with different clauses is called `custom`. Settings edits its clauses under Policy.
 - The shape of a case: a title, preconditions, steps with expected results, methods, an automation intent, tags, a folder and the requirements it covers. A case can carry free `fields` of text in its Markdown, and project definitions can require values or limit them to a choice. The web capture and edit editor shows every defined field, marks required values and validates them before saving. Values can also be edited through Markdown or a `propose` body. [Policy](./policy.md#custom-fields) explains the definitions.
 - Sign-in uses a token, or a person uses a name and password or a passkey set up through an admin's invitation. A password can require an authenticator code. The instance can also offer single sign-on through one OpenID Connect identity provider. With [mail configured](./configuration.md#turn-on-mail), a person can reset a lost password through their verified email address. Without mail, the owner can make a [recovery invitation](./access.md#a-lost-password-or-passkey). A password is 12 to 256 characters and has no other rule. A token works until you revoke it or until the end you gave it.
-- The database is one SQLite file.
+- The instance needs PostgreSQL 18; `compose.yaml` starts it. The Local product layer has ended. Running the code elsewhere is possible but not yet supported.
 
 Stable-trunk flakiness detection, a requirements coverage matrix, two-person approval, frozen evidence, gap waivers and dashboards you arrange yourself are not built yet. [Same-code detection and quarantine](./report-results.md#quarantine-an-unreliable-test) are available, as are [CSV imports](./import-cases.md) and [five fixed reports](./reports.md).
 

@@ -16,7 +16,7 @@ Mainworthy keeps three kinds of record: what the software should do (cases, with
 (results from people, pipelines and agents, in one shape), and what people decided about it. Producers append
 evidence; detectors turn evidence into questions, one per cause; a decision answers a question and is the only
 thing that can change what is "current". Every surface (web, command line, API, agent tools) calls operations
-from the same registry. The whole instance is one process and one SQLite file.
+from the same registry. The whole instance is one Bun process connected to PostgreSQL 18.
 
 ## One process
 
@@ -37,7 +37,7 @@ from the same registry. The whole instance is one process and one SQLite file.
         └──────────────┴────────┬───────┴───────────────┴──────────────┘
                     src/server/kernel   db · migrations · ctx · witness · app
                                  │
-                          one SQLite file (WAL)          one writer connection, reader threads
+                          PostgreSQL 18                 scoped read and write connections
 ```
 
 `src/server/trackers` handles tracker delivery, and `src/server/statuses` publishes commit statuses.
@@ -60,12 +60,11 @@ The check reads dynamic `import()` as well as static imports, including type-onl
 - `src/cli` starts the instance and adapts commands. It imports `app`, surfaces, the registry, kernel configuration
   and policy reads. The entry point bundles the web UI.
 - `src/app/start.ts` composes the instance above the surfaces. It opens the database, starts HTTP, recovery,
-  reader threads and periodic jobs, and stops them together. Server modules never import a surface.
+  periodic jobs, and stops them together. Server modules never import a surface.
 - `src/surfaces` adapts HTTP, MCP and file formats to operations. It reads identity and kernel request context,
   and bundles documentation and web assets.
 - `src/server/ops` composes all domain modules. It also owns recovery jobs, tracker hold coordination,
-  the operation reader pool and the read/archive worker. The checkpoint worker lives in `server/kernel` because
-  it only copies committed SQLite pages.
+  and archive coordination. The kernel owns PostgreSQL connection pools and scoped leases.
 - Domain modules keep their existing dependency rules: decisions may read identity, policy, suite, evidence and
   runs; runs may read suite and evidence; evidence may read suite; suite may read policy. Trackers may read
   evidence and suite, statuses may read evidence and runs, and transfer may read suite and evidence to rebuild
@@ -103,9 +102,9 @@ boundary, and for a write, open a transaction, give the command the project's ne
 command id, commit, and publish what changed. A command id names one request: sent again unchanged it gets the
 first reply and writes nothing; sent again with other content it is refused. A client whose reply was lost can
 also ask `command` what became of the id, which writes nothing (decision 0013). A report is the one command that
-commits twice, and it takes a sequence number for each transaction (see the red build below). A read runs on a
-reader thread with its own read-only connection, so a long write does not hold it up; a write waits its turn at
-one gate, because the file has one writer.
+commits twice, and it takes a sequence number for each transaction (see the red build below). A read runs in a
+repeatable-read, read-only PostgreSQL transaction. A write waits in a local FIFO, then holds the
+instance-wide PostgreSQL advisory lock for the whole operation, including both report transactions.
 
 `App.publish` isolates each change subscriber. A throwing subscriber is logged
 without its error text, and later subscribers still receive that event. A
@@ -113,6 +112,24 @@ notification failure cannot change a committed reply or interrupt a report
 between commits. An HTTP stream closes if its permission check throws, including
 on a heartbeat, so its client can reconnect and reload. The stream is best effort;
 reads and `since` recover changes that a client missed.
+
+## Kernel scopes
+
+`App.database` is a `Database`, with separate small read and write pools. `database.read(fn)` reserves
+one connection and runs the callback with a `ReadDb` in a repeatable-read, read-only transaction.
+Before replying, the registry closes that snapshot and rechecks the caller, project identity and capability
+in a fresh read scope. It discards stale replies when authority or the project changed.
+
+`database.write(fn)` queues locally, reserves a write connection and takes the instance-wide advisory lock.
+Its callback receives a `WriteDb`, which also permits reads. Every statement in the operation uses that
+lease. `transaction(fn)` opens a transaction or joins the one already open; savepoints isolate recoverable
+statement failures. The registry alone uses explicit begin, commit and rollback for a sliced report.
+The lock and connection stay held across its two commits. Project and actor locks remain later work.
+
+A write outside a write scope does not compile. A write statement without an active transaction fails.
+`afterCommit` effects run after a confirmed commit; rolled-back savepoints discard their effects.
+A lost connection fails the operation and is never replaced mid-operation. Migrations use a separate
+advisory lock and dedicated connection. There are no reader threads, checkpoint workers or database-file locks.
 
 ## Who may call
 
@@ -182,8 +199,7 @@ address, and none of the headers a proxy or a tunnel adds. That is the immediate
 client: a relay on this machine that passes bytes on unchanged looks the same, so a local-mode port is never
 exposed through one. A cookie or the local owner is accepted only from the server's own page
 (`Origin`, and `Sec-Fetch-Site` where the browser sends it). What `admit` answers with holds no secret. It can
-be asked again who the caller is now, and an operation that waited at the gate, a read that ran on a reader
-thread and the change stream before each event all ask. A failure that is not one of the operation's own
+be asked again who the caller is now, and an operation that waited at the gate, a read that finished its first snapshot and the change stream before each event all ask. A failure that is not one of the operation's own
 refusals is answered `internal error` and nothing more; what failed is in the server's log.
 
 A browser does not hold a token (decision 0017). `POST /api/login` takes a token and opens a session: a row in
@@ -508,7 +524,7 @@ all retained observations. Reopening clears the selection, and archives omit bot
 `test/architecture.test.ts` fails the check when: a source file belongs to an unlisted layer; a static or
 dynamic import goes up the map (the suite reaching into decisions); a module runs SQL on a table another
 module owns (each domain table has one owner, and a
-read of someone else's data goes through their functions); anything but the kernel talks to SQLite; anything
+read of someone else's data goes through their functions); anything but the kernel talks to the PostgreSQL driver; anything
 but the decision machinery mints a witness; a writer that undoes a withdrawn decision is called from anywhere
 but a kind handler; the core imports I/O; the web UI imports the server; a declared SQL statement does not
 prepare against the schema; the error codes of a reply are written out a second time outside `src/core/api.ts`;

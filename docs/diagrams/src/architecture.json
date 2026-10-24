@@ -8,7 +8,7 @@
     "quality_profile": "showcase",
     "repository": {
       "url": "git@github.com:endqwerty/mainworthy.git",
-      "revision": "de737a44d10e90ba00789642f160298f6f165bd3",
+      "revision": "0f0e9f5182fc5fbe811f29a764bcb314c81f9939",
       "link_mode": "local-only"
     },
     "views": [
@@ -312,7 +312,7 @@
     {
       "id": "invoke",
       "type": "backend",
-      "label": "invoke · invokeAsync",
+      "label": "invoke",
       "sublabel": "Parse, authorize, execute",
       "pos": [
         445,
@@ -325,7 +325,7 @@
       "sources": [
         {
           "path": "src/server/ops/registry.ts",
-          "label": "execute; invoke; invokeAsync"
+          "label": "execute; invoke; invoke"
         }
       ],
       "tag": "One operation implementation"
@@ -521,24 +521,24 @@
       "sources": [
         {
           "path": "src/server/kernel/app.ts",
-          "label": "openApp: writer, reader, write gate"
+          "label": "openApp: App.database"
         },
         {
           "path": "src/server/kernel/ctx.ts",
-          "label": "makeCtx: choose writing or reading Db"
+          "label": "makeCtx: scoped database handle"
         },
         {
           "path": "src/server/kernel/db.ts",
-          "label": "Db: WAL; transactions; snapshots"
+          "label": "ReadDb; WriteDb; savepoints"
         }
       ],
-      "tag": "All modules use Db"
+      "tag": "Explicit database scopes"
     },
     {
       "id": "gate",
       "type": "security",
-      "label": "app.gate",
-      "sublabel": "WriteGate; one queued writer",
+      "label": "Write lock",
+      "sublabel": "FIFO; advisory lock",
       "pos": [
         870,
         1840
@@ -550,19 +550,19 @@
       "sources": [
         {
           "path": "src/server/kernel/app.ts",
-          "label": "WriteGate; writeGate"
+          "label": "Database.write: advisory lock"
         },
         {
           "path": "src/server/ops/registry.ts",
-          "label": "invokeAsync: queue writes"
+          "label": "invoke: scoped operations"
         }
       ]
     },
     {
       "id": "writer",
       "type": "database",
-      "label": "app.db",
-      "sublabel": "Writer connection",
+      "label": "WriteDb",
+      "sublabel": "Reserved write connection",
       "pos": [
         870,
         2060
@@ -574,7 +574,7 @@
       "sources": [
         {
           "path": "src/server/kernel/app.ts",
-          "label": "openApp: app.db"
+          "label": "openApp: App.database"
         },
         {
           "path": "src/server/kernel/db.ts",
@@ -590,8 +590,8 @@
     {
       "id": "reader",
       "type": "database",
-      "label": "Reader threads",
-      "sublabel": "A read-only connection each",
+      "label": "Read scopes",
+      "sublabel": "Repeatable-read snapshots",
       "pos": [
         445,
         2060
@@ -602,25 +602,29 @@
       ],
       "sources": [
         {
-          "path": "src/server/ops/readers.ts",
-          "label": "Readers: the pool; readerCount"
-        },
-        {
-          "path": "src/server/ops/read-worker.ts",
-          "label": "read and checkpoint roles"
+          "path": "src/server/kernel/db.ts",
+          "label": "Database.read: read pool",
+          "line": 554,
+          "end_line": 575
         },
         {
           "path": "src/server/kernel/db.ts",
-          "label": "query_only; snapshot; checkpoint"
+          "label": "read: repeatable-read transaction",
+          "line": 554,
+          "end_line": 575
+        },
+        {
+          "path": "src/server/kernel/db.ts",
+          "label": "READ ONLY; REPEATABLE READ"
         }
       ],
-      "tag": "A read never waits for a write"
+      "tag": "Read-only snapshots"
     },
     {
       "id": "store",
       "type": "database",
-      "label": "mainworthy.db",
-      "sublabel": "One SQLite file; WAL",
+      "label": "PostgreSQL 18",
+      "sublabel": "PostgreSQL 18; WAL",
       "pos": [
         650,
         2280
@@ -632,11 +636,11 @@
       "sources": [
         {
           "path": "src/server/kernel/app.ts",
-          "label": "openApp: mainworthy.db"
+          "label": "openApp: databaseUrl"
         },
         {
           "path": "src/server/kernel/db.ts",
-          "label": "WAL; query_only"
+          "label": "PostgreSQL transactions"
         }
       ],
       "tag": "mainworthy-data volume at /data"
@@ -896,8 +900,8 @@
       "items": [
         "reportSteps commits acceptance first. outstanding makes each affected gate pending.",
         "processBatchSteps applies the batch in one second transaction. SLICE is 200; a yield keeps that transaction open.",
-        "invokeAsync yields to the event loop. Reader threads see committed snapshots while app.gate queues other writes.",
-        "The container stores mainworthy.db in mainworthy-data at /data. The React UI runs in the browser."
+        "Read scopes see committed snapshots while the write advisory lock queues other writes.",
+        "PostgreSQL stores records. The app volume holds attachments; the React UI runs in the browser."
       ]
     }
   ]
