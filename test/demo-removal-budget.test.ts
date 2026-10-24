@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { budget } from "../scripts/budget.ts";
 import { Db } from "../src/server/kernel/db.ts";
 import { migrate } from "../src/server/kernel/migrate.ts";
 import { removeProject } from "../src/server/transfer/transfer.ts";
@@ -29,7 +30,7 @@ test("deferred demo removal does not scan another project's excuses for every re
 		expect(removed.tables.results).toBe(5_000);
 		expect(db.raw.query("SELECT count(*) AS n FROM result_excuses").get()).toEqual({ n: 5_000 });
 		expect(db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
-		expect(ms).toBeLessThan(250);
+		budget("deferred removal of 5000 results: transaction and commit elapsed", ms, 250, "ms");
 	} finally {
 		db.close();
 		rmSync(directory, { recursive: true, force: true });

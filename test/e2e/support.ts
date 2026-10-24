@@ -1,9 +1,10 @@
 import { afterAll } from "bun:test";
 import { readFileSync, rmSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type APIResponse, type Browser, type BrowserContext, chromium, type Page, type Route } from "playwright-core";
+import { z } from "zod";
 import { chromiumLaunchOptions, findChromium, sharedBrowserEndpoint, testReaders } from "../../scripts/check-plan.ts";
 import { Client } from "../../src/cli/client.ts";
 import { type SeedResult, seed } from "../../src/cli/seed.ts";
@@ -32,82 +33,12 @@ const ownedDirectories = new Set<string>();
 process.once("exit", () => {
 	for (const path of ownedDirectories) rmSync(path, { recursive: true, force: true });
 });
-/**
- * The ports of the servers the browser tests start. Any number of test processes share them (parallel workers,
- * a second checkout on the same machine): a port is held by the directory `mainworthy-e2e-port-<port>` in the
- * temporary directory, made with mkdir, which only one process can do. 7400 to 7449 is the range the protocol
- * began with and 7500 to 7599 was added for parallel workers; a process that knows only the first fifty takes
- * and frees the same directories. 7450 to 7499 stays out: four test files (agent, execution, settings and
- * triage) pick their own ports there, with no lock.
- */
-const PORTS = [...Array.from({ length: 50 }, (_, i) => 7400 + i), ...Array.from({ length: 100 }, (_, i) => 7500 + i)];
-/** No test keeps a server for ten minutes: a lock that old was left by a process that was killed. */
-const ABANDONED_MS = 10 * 60_000;
-let nextPort = process.pid % PORTS.length;
-const made = (lock: string): Promise<boolean> =>
-	mkdir(lock).then(
-		() => true,
-		() => false,
+const BoundUrl = z.url().refine((value) => {
+	const url = new URL(value);
+	return (
+		url.protocol === "http:" && url.hostname === "127.0.0.1" && Number(url.port) > 0 && url.href === `${url.origin}/`
 	);
-const alive = (pid: number): boolean => {
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch (error) {
-		return error instanceof Error && "code" in error && error.code === "EPERM";
-	}
-};
-/**
- * Frees a lock nobody holds. A killed process cannot release its ports, and a lock was never given up otherwise:
- * on 2026-10-12 thirteen of the fifty were held by processes that had ended hours before. A lock names its
- * owner in `pid`; one without the file (the first protocol's) is abandoned when it is old.
- */
-async function reclaimed(lock: string): Promise<boolean> {
-	const held = await stat(lock).catch(() => null);
-	if (!held) return true;
-	const owner = Number(await readFile(join(lock, "pid"), "utf8").catch(() => ""));
-	const ownerGone = Number.isInteger(owner) && owner > 0 && !alive(owner);
-	if (!ownerGone && Date.now() - held.mtimeMs < ABANDONED_MS) return false;
-	// Several processes can find the same abandoned lock. A rename moves it for exactly one of them.
-	const grave = `${lock}-abandoned-${process.pid}`;
-	try {
-		await rename(lock, grave);
-	} catch {
-		return false;
-	}
-	// If the lock was freed and taken again in between, this moved a live one: put it back.
-	if ((await stat(grave)).ino !== held.ino) {
-		await rename(grave, lock).catch(() => {});
-		return false;
-	}
-	await rm(grave, { recursive: true, force: true });
-	return true;
-}
-/** Takes a port nobody holds, here or in another process. `ports` and `directory` are for the test of this. */
-export async function reservePort(
-	ports: readonly number[] = PORTS,
-	directory = tmpdir(),
-): Promise<{ port: number; release: () => Promise<void> }> {
-	for (let i = 0; i < ports.length; i++) {
-		const port = ports[nextPort++ % ports.length] ?? 0;
-		const lock = join(directory, `mainworthy-e2e-port-${port}`);
-		if (!(await made(lock)) && !((await reclaimed(lock)) && (await made(lock)))) continue;
-		ownedDirectories.add(lock);
-		await writeFile(join(lock, "pid"), String(process.pid));
-		const release = async () => {
-			await rm(lock, { recursive: true, force: true });
-			ownedDirectories.delete(lock);
-		};
-		try {
-			const probe = Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response("probe") });
-			await probe.stop(true);
-			return { port, release };
-		} catch {
-			await release();
-		}
-	}
-	throw new Error("No free Mainworthy e2e port in 7400..7449 or 7500..7599");
-}
+}, "fixture readiness must name its bound loopback URL");
 export async function startServer({
 	source = false,
 	cases = 0,
@@ -146,14 +77,10 @@ export async function startServer({
 } = {}): Promise<Server> {
 	const dataDir = await mkdtemp(join(tmpdir(), `mainworthy-e2e-${process.pid}-`));
 	ownedDirectories.add(dataDir);
-	const reservation = await reservePort();
-	const port = reservation.port;
 	const token = crypto.randomUUID();
-	const url = `http://127.0.0.1:${port}`;
 	const executable = source ? undefined : process.env.MAINWORTHY_E2E_SERVER;
-	let child: Bun.Subprocess<"pipe", "ignore", "pipe">;
+	let child: Bun.Subprocess<"pipe", "pipe", "pipe">;
 	try {
-		const lock = join(tmpdir(), `mainworthy-e2e-port-${port}`);
 		child = Bun.spawn(
 			[
 				// Observed on Bun 1.4.3: Linux no-orphans spawn installs PDEATHSIG even if the child disables it.
@@ -167,8 +94,6 @@ export async function startServer({
 				JSON.stringify({
 					command: executable === undefined ? [process.execPath, "test/e2e/serve.ts"] : [executable],
 					data: dataDir,
-					lock,
-					inode: (await stat(lock)).ino,
 				}),
 			],
 			{
@@ -180,11 +105,11 @@ export async function startServer({
 					BUN_FEATURE_FLAG_NO_ORPHANS: "0",
 					NODE_ENV: "production",
 					MAINWORTHY_DATA: dataDir,
-					MAINWORTHY_PORT: String(port),
+					MAINWORTHY_PORT: "0",
 					MAINWORTHY_MODE: mode,
 					MAINWORTHY_FIRST_PROJECT: firstProject,
 					MAINWORTHY_OWNER_TOKEN: token,
-					MAINWORTHY_PUBLIC_URL: passkeys || mail || oidc ? `http://localhost:${port}` : "",
+					MAINWORTHY_PUBLIC_URL: passkeys || mail || oidc ? "http://localhost:0" : "",
 					MAINWORTHY_OIDC_ISSUER: oidc?.issuer ?? "",
 					MAINWORTHY_OIDC_CLIENT_ID: oidc?.clientId ?? "",
 					MAINWORTHY_OIDC_CLIENT_SECRET: oidc?.clientSecret ?? "",
@@ -200,7 +125,7 @@ export async function startServer({
 					MAINWORTHY_HANDOFF_SECRET: handoff?.secret ?? "",
 					MAINWORTHY_READERS: process.env.MAINWORTHY_READERS ?? testReaders(),
 				},
-				stdout: "ignore",
+				stdout: "pipe",
 				stderr: "pipe",
 				stdin: "pipe",
 				detached: true,
@@ -210,11 +135,9 @@ export async function startServer({
 		// worker exit under Bun 1.4.3 --no-orphans can kill the supervisor before cleanup, leaving directories
 		// behind. Do not delete them in the worker's exit hook: the fixture can still own its database then.
 		ownedDirectories.delete(dataDir);
-		ownedDirectories.delete(lock);
 	} catch (error) {
 		await rm(dataDir, { recursive: true, force: true });
 		ownedDirectories.delete(dataDir);
-		await reservation.release();
 		throw error;
 	}
 	let stopping: Promise<void> | undefined;
@@ -239,18 +162,30 @@ export async function startServer({
 				clearTimeout(force);
 			}
 		})());
-	try {
-		let ready = false;
-		for (let i = 0; i < 300; i++) {
-			if (child.exitCode !== null)
-				throw new Error(`Mainworthy failed to start: ${await new Response(child.stderr).text()}`);
-			try {
-				ready = (await fetch(`${url}/healthz`)).ok;
-			} catch {}
-			if (ready) break;
-			await Bun.sleep(50);
+	const stderr = new Response(child.stderr).text();
+	const readiness = Promise.withResolvers<string>();
+	void (async () => {
+		const decoder = new TextDecoder();
+		let output = "";
+		let published = false;
+		for await (const chunk of child.stdout) {
+			if (published) continue;
+			output += decoder.decode(chunk, { stream: true });
+			const end = output.indexOf("\n");
+			if (end < 0) continue;
+			const url = new URL(BoundUrl.parse(output.slice(0, end).trim())).origin;
+			published = true;
+			readiness.resolve(url);
 		}
-		if (!ready) throw new Error("Mainworthy e2e server did not become ready");
+		if (!published) throw new Error(`Mainworthy failed to start: ${await stderr}`);
+	})().catch(readiness.reject);
+	const deadline = setTimeout(
+		() => readiness.reject(new Error("Mainworthy e2e server did not publish readiness")),
+		15_000,
+	);
+	try {
+		const url = await readiness.promise;
+		clearTimeout(deadline);
 		const api = <O extends OpName>(op: O, input: Api[O]["input"], options: { token?: string } = {}) =>
 			call(op, input, { url, project: firstProject, token: options.token ?? token });
 		const seeded = seedData
@@ -271,6 +206,8 @@ export async function startServer({
 	} catch (error) {
 		await stop();
 		throw error;
+	} finally {
+		clearTimeout(deadline);
 	}
 }
 /**

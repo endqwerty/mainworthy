@@ -15,7 +15,7 @@ export async function release(root: string, self = process.pid): Promise<string>
 	if (busy.length > 0)
 		throw new Error(
 			`not released: ${busy.length} bun process(es) still run from ${root} (pid ${busy.map((p) => p.pid).join(" ")}). ` +
-				"Stop your own server with `bun scripts/work.ts stop-server`, and wait for a test run with `bun scripts/work.ts wait-tests`.",
+				"Stop your own server with `bun scripts/work.ts stop-server`, and let the processes using this checkout finish before releasing it.",
 		);
 	for (const name of RELEASED) rmSync(join(root, name), { recursive: true, force: true });
 	return `released ${RELEASED.join(", ")} in ${root}`;

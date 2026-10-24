@@ -16,11 +16,11 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 
 | Command | What |
 | --- | --- |
-| `bun run check` | type-check, lint and every test, about two minutes |
+| `bun run check` | type-check, lint and functional tests, browsers included |
 | `bun run test`, `bun test <file>`, `bun run dev` | the tests alone; one file; the server on `127.0.0.1:7357` |
 | `bun scripts/ci-scope.ts` | what CI would run for the branch (`.github/workflows/check.yml` says what each job does) |
 | `bun scripts/work.ts scratch new <name>`, `scratch rm <directory>` | scratch files go in `~/.cache`, never in the worktree; `rm` deletes only a directory `new` made. A reviewer works in a `git archive <rev>` export there |
-| `bun scripts/work.ts stop-server`, `wait-tests` | stop the servers you started; wait for another agent's test run (one agent at a time runs the whole suite) |
+| `bun scripts/work.ts stop-server` | stop the servers you started |
 | `bun scripts/work.ts release` | last command of a task, and the `release worktree` script of `t3.json`; refuses while a server, a test run or another bun process uses the checkout |
 | `bun scripts/work.ts board`, `pr-body`, `sync-branch`, `check-time`, `ci` | below; `bun scripts/work.ts` alone lists every command; `test/work.test.ts` holds each |
 
@@ -39,7 +39,7 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 | **The time of a write is the server's.** Only a demo project takes one from its caller (decision 0100). Put no time in an operation's input | `test/demo-time.test.ts`; `src/cli/demo/` is pure |
 | **A feature adds to the demo** (the owner, 2026-10-15): `src/cli/demo/` decides what is written, `src/cli/seed.ts` sends it; draw nothing new from an existing random stream. Leave it out only when truly unreasonable, and say why in the pull request | the owner's review (nothing runs) |
 | **A budget is a measured baseline**, not a ceiling. Only a hard limit fails: a cost a user would feel, measured on a representative workload, accepted by the owner; any other budget warns. Advisory: check and CI shard durations (0097, #77) and the MCP tool list's size (0118). After adding or splitting tests, commit a fresh `scripts/test-timings.json` (`bun scripts/work.ts timings-from-ci <run-id>` from passing CI, or `bun run test --update-timings`) | `test/budgets.test.ts`, `scripts/check-plan.ts`; each number there fails until #906 sorts them |
-| **Tests run beside each other.** Take ports, directories and browser from the helpers; a test that fails only beside others shares something, so fix that. Only a test that compares a time with a limit goes in `QUIET` | `test/helpers.ts`, `test/e2e/support.ts`, `scripts/check-plan.ts` |
+| **Tests run beside each other.** Take ports, directories and browser from the helpers; a test that fails only beside others shares something, so fix that. Elapsed-time measurements run separately with `bun run performance`; budget misses warn | `test/helpers.ts`, `test/e2e/support.ts`, `scripts/check-plan.ts` |
 | **A command-line test starts the command once** and asks the rest in-process | review judgment; `scripts/check.ts` reports duration |
 | **A sentence on a screen about what the server does is a claim.** Say only what the screen can know | `test/evidence.test.ts` holds the failure question's sentence to the server; other screen copy is review judgment |
 | **A user-visible change updates `docs/guide/` in the same pull request** and runs `bun scripts/gen-docs.ts` after a change to an operation, command, preset, capability or answer; a new page is also listed in `src/core/docs.ts` and `src/surfaces/docs/content.ts` | `test/docs.test.ts`, `test/e2e/docs.test.ts` (neither knows if a sentence is still true) |

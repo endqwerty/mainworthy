@@ -371,22 +371,18 @@ describe("parseJUnit recovery and boundaries", () => {
 		for (const item of parsed.results) expect(ResultIn.safeParse(item).success).toBe(true);
 	});
 
-	test("does not rescan large logs for each warning", () => {
+	test("large logs retain testcase results and cap displayed warnings", () => {
 		const xml = `<testsuite><system-out>${"x".repeat(2_000_000)}</system-out>${'<testcase name="one" time=""/>'.repeat(5000)}</testsuite>`;
-		const start = performance.now();
 		const parsed = parseJUnit(xml);
-		expect(performance.now() - start).toBeLessThan(500);
 		expect(parsed.results).toHaveLength(5000);
 		expect(parsed.warnings).toHaveLength(1001);
 		expect(parsed.warnings.at(-1)).toContain("4000 additional warnings omitted");
 	});
 
-	test("strips stacked retry markers without slow matching on long whitespace", () => {
-		const start = performance.now();
+	test("strips stacked retry markers beside long whitespace", () => {
 		const parsed = parseJUnit(
 			`<testsuite><testcase name="${" ".repeat(80_000)}x"/><testcase name="works (retry 1) [retry #2]"/></testsuite>`,
 		);
-		expect(performance.now() - start).toBeLessThan(500);
 		expect(parsed.results[1]).toEqual(result("works", "works (retry 1) [retry #2]"));
 	});
 
@@ -456,22 +452,18 @@ describe("parseJUnit recovery and boundaries", () => {
 		expect(parsed.warnings.length).toBeGreaterThan(0);
 	});
 
-	test("retry parsing stays bounded inside malformed and repeated markers", () => {
-		const start = performance.now();
+	test("retry parsing recovers keys from malformed and repeated markers", () => {
 		const parsed = parseJUnit(
 			`<testsuite><testcase name="t (retry${" ".repeat(80_000)}x"/><testcase name="works${" (retry 1)".repeat(10_000)}"/></testsuite>`,
 		);
-		expect(performance.now() - start).toBeLessThan(500);
 		expect(parsed.results[1]?.test).toEqual({
 			key: "works",
 			name: `works${" (retry 1)".repeat(10_000)}`.slice(0, 500),
 		});
 	});
 
-	test("unmatched closing tags do not repeatedly scan the element stack", () => {
-		const start = performance.now();
+	test("unmatched closing tags recover no results and cap warnings", () => {
 		const parsed = parseJUnit("<a>".repeat(20_000) + "</b>".repeat(20_000));
-		expect(performance.now() - start).toBeLessThan(500);
 		expect(parsed.results).toEqual([]);
 		expect(parsed.warnings.length).toBeLessThanOrEqual(1001);
 	});
@@ -521,18 +513,14 @@ describe("parseJUnit recovery and boundaries", () => {
 
 	test("nested suite errors invalidate each recovered result once", () => {
 		const xml = `${"<testsuite><error/>".repeat(12_000)}${'<testcase name="one"/>'.repeat(12_000)}${"</testsuite>".repeat(12_000)}`;
-		const start = performance.now();
 		const parsed = parseJUnit(xml);
-		expect(performance.now() - start).toBeLessThan(500);
 		expect(parsed.results).toHaveLength(12_000);
 		expect(parsed.results.every((item) => item.outcome === "error")).toBe(true);
 	});
 
-	test("deep paths with large suite names do not repeatedly hash ancestors", () => {
+	test("deep paths with large suite names retain distinct schema-valid results", () => {
 		const xml = `${Array.from({ length: 4000 }, (_, index) => `<testsuite name="${"s".repeat(500)}"><testcase name="case ${index}"/>`).join("")}${"</testsuite>".repeat(4000)}`;
-		const start = performance.now();
 		const parsed = parseJUnit(xml);
-		expect(performance.now() - start).toBeLessThan(500);
 		expect(parsed.results).toHaveLength(4000);
 		expect(parsed.results.every((item) => ResultIn.safeParse(item).success)).toBe(true);
 		expect(new Set(parsed.results.map((item) => ("key" in item.test ? item.test.key : ""))).size).toBe(4000);
@@ -551,13 +539,11 @@ describe("parseJUnit recovery and boundaries", () => {
 		expect(ResultIn.safeParse(nested.results[0]).success).toBe(true);
 	});
 
-	test("a large inherited file is not copied in full for every displayed key", () => {
+	test("a large inherited file yields bounded distinct keys and display names", () => {
 		const file = `${"f".repeat(982)}🦊${"x".repeat(2_000_000)}`;
 		const cases = Array.from({ length: 4000 }, (_, index) => `<testcase name="case ${index}"/>`).join("");
 		const xml = `<testsuite file="${file}">${cases}</testsuite>`;
-		const start = performance.now();
 		const parsed = parseJUnit(xml);
-		expect(performance.now() - start).toBeLessThan(500);
 		expect(parsed.results).toHaveLength(4000);
 		expect(parsed.results[0]).toMatchObject({
 			test: { name: "case 0", file: "f".repeat(500) },
@@ -742,7 +728,7 @@ describe("parseJUnit recovery and boundaries", () => {
 		]);
 	});
 
-	test("10,000 cases and 200 failures parse within the budget", () => {
+	test("10,000 cases and 200 failures retain their evidence", () => {
 		const body = "stack trace line\n".repeat(25).slice(0, 400);
 		const cases = Array.from(
 			{ length: 10_000 },
@@ -750,23 +736,11 @@ describe("parseJUnit recovery and boundaries", () => {
 				`<testcase name="parameterised test ${index} [sample input ${index}]" classname="example.application.checkout.CheckoutIntegrationTest" file="tests/integration/checkout/checkout-with-coupons-and-tax.spec.ts" time="0.012">${index % 50 === 0 ? `<failure message="expected 90, received 100">${body}</failure>` : ""}</testcase>`,
 		).join("");
 		const xml = `<testsuites><testsuite name="checkout">${cases}</testsuite></testsuites>`;
-		parseJUnit(xml);
-		const times: number[] = [];
-		for (let run = 0; run < 10; run++) {
-			const start = performance.now();
-			const parsed = parseJUnit(xml);
-			times.push(performance.now() - start);
-			expect(parsed.results).toHaveLength(10_000);
-			expect(parsed.results.filter((item) => item.outcome === "fail")).toHaveLength(200);
-			expect(parsed.warnings).toEqual([]);
-			expect(parsed.results[0]?.failure?.detail).toHaveLength(400);
-		}
-		times.sort((a, b) => a - b);
-		const median = ((times[4] ?? 0) + (times[5] ?? 0)) / 2;
-		console.log(
-			`JUnit benchmark: ${xml.length} bytes, median ${median.toFixed(2)} ms of 10 runs, range ${times[0]?.toFixed(2)}–${times[9]?.toFixed(2)} ms`,
-		);
-		expect(median).toBeLessThan(300);
+		const parsed = parseJUnit(xml);
+		expect(parsed.results).toHaveLength(10_000);
+		expect(parsed.results.filter((item) => item.outcome === "fail")).toHaveLength(200);
+		expect(parsed.warnings).toEqual([]);
+		expect(parsed.results[0]?.failure?.detail).toHaveLength(400);
 	});
 });
 

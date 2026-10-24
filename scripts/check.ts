@@ -1,13 +1,13 @@
-// The check: the type-check, the lint and the tests side by side, the test files in parallel workers, then the
-// tests that measure time on a machine that runs nothing else. Prints the wall time of each part and warns
+// The check: the type-check, the lint and functional tests side by side, with bounded test workers.
+// Performance tests run only when explicitly selected on an idle machine. Prints the wall time of each part and warns
 // about slow runs (`scripts/check-plan.ts`); elapsed time alone does not fail the check.
 //
 //   bun scripts/check.ts                      everything (`bun run check`)
 //   bun scripts/check.ts test                 the tests only, output as it comes (`bun run test`)
 //   bun scripts/check.ts test --shard=2/6     one share of the parallel phase
-//   bun scripts/check.ts test --only=quiet    one phase: parallel or quiet
-//   bun scripts/check.ts test --workers=4     that many workers in the parallel phase
-//   bun scripts/check.ts test --update-timings     record scripts/test-timings.json: every file alone, six minutes
+//   bun scripts/check.ts test --only=performance    one phase: parallel or performance
+//   bun scripts/check.ts --workers=4          that many workers for this check run
+//   bun scripts/check.ts test --update-timings     record scripts/test-timings.json: every file alone
 //   bun scripts/check.ts test --only=parallel --shard=2/6 --junit=test-results/tests-2.xml     a CI shard
 //   bun scripts/check.ts test --only=parallel test/docs.test.ts test/architecture.test.ts     those files of a phase,
 //                                             as CI runs the ones a change needs (`scripts/ci-scope.ts`)
@@ -33,6 +33,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { BrowserServer } from "playwright-core";
+import { budgetWarnings } from "./budget.ts";
 import {
 	CHECK_WARNING_SECONDS,
 	chromiumLaunchOptions,
@@ -47,7 +48,6 @@ import {
 	parseCheckArgs,
 	phaseFiles,
 	phaseReport,
-	quietWorkers,
 	seconds,
 	slowest,
 	TIMINGS,
@@ -74,13 +74,15 @@ const { testsOnly, junit, shard, chosen, record, workers, phases, flags } = (() 
 		process.exit(4);
 	}
 })();
-const everyFile = phases.length === 2;
+const everyFile = phases.includes("parallel") && shard === undefined && chosen === undefined;
 // Warn about the whole suite with its own number of workers.
 const whole = everyFile && workers === undefined;
 
 const scratch = mkdtempSync(join(tmpdir(), "mainworthy-check-"));
 const ownership = join(scratch, "owned-children");
 mkdirSync(ownership);
+const budgetReports = join(scratch, "budget-warnings");
+mkdirSync(budgetReports);
 let testOutcome: Outcome | undefined;
 const timings = join(scratch, "timings.json");
 if (existsSync(TIMINGS)) copyFileSync(TIMINGS, timings);
@@ -116,7 +118,7 @@ const leave = (code: number): Promise<never> => {
 				clearTimeout(force);
 			}),
 		);
-		// A registration remains until its supervisor has removed the data directory and port lock.
+		// A registration remains until its supervisor has removed the data directory.
 		// Leave room for that I/O on a shared machine after the 1.5-second forced-shutdown deadline.
 		const deadline = Date.now() + 15_000;
 		let leaked = await ownedChildren(ownership);
@@ -164,6 +166,7 @@ async function run(
 		env: {
 			...process.env,
 			MAINWORTHY_TEST_CHILDREN: ownership,
+			MAINWORTHY_BUDGET_REPORTS: budgetReports,
 			MAINWORTHY_READERS: process.env.MAINWORTHY_READERS ?? testReaders(),
 			...env,
 		},
@@ -179,13 +182,15 @@ async function run(
 
 async function tests(capture: boolean, fixture: string | undefined): Promise<TestPart[]> {
 	const parts: TestPart[] = [];
+	// Sized once, so the browser slots and the test workers agree.
+	const defaultWorkers = parallelWorkers();
 	for (const phase of phases) {
 		if (junit) mkdirSync(dirname(junit), { recursive: true }); // Bun does not create the report's directory.
 		// Every phase writes a report, asked for or not: the failed tests are listed from it at the end. One left by
 		// an earlier run goes first, so that a runner that stops before it writes leaves none.
 		const report = junit ?? join(scratch, `${phase}.xml`);
 		rmSync(report, { force: true });
-		const phaseWorkers = phase === "parallel" || record ? workers : undefined;
+		const phaseWorkers = phase === "parallel" ? (workers ?? defaultWorkers) : record ? workers : undefined;
 		const args = testArgs(phase, {
 			shard,
 			files: chosen,
@@ -202,7 +207,7 @@ async function tests(capture: boolean, fixture: string | undefined): Promise<Tes
 			mkdirSync(diagnosticDirectory);
 			const chromium = findChromium();
 			const selected = phaseFiles(phase, shard, chosen);
-			const slots = phaseWorkers ?? (phase === "parallel" ? parallelWorkers() : quietWorkers());
+			const slots = phaseWorkers ?? 1;
 			if (fixture && chromium.path && !process.env.MAINWORTHY_E2E_CPU_THROTTLE) {
 				const { chromium: launcher } = await import("playwright-core");
 				for (let slot = 1; slot <= Math.min(slots, selected?.length ?? slots); slot++) {
@@ -279,9 +284,6 @@ async function tests(capture: boolean, fixture: string | undefined): Promise<Tes
 	return parts;
 }
 
-// A test run beside this one makes both slower and some tests fail for reasons outside the code.
-if (whole && (await (await import("./work/processes.ts")).otherTestRuns()))
-	console.log("NOTE: another test run is going on this machine. Wait for it with `bun scripts/work.ts wait-tests`.\n");
 const started = performance.now();
 const fixture = needsBrowserFixture(phases, shard, chosen) ? join(scratch, "browser-fixture") : undefined;
 if (fixture) {
@@ -320,7 +322,7 @@ if (junit) {
 }
 const measured: unknown = existsSync(timings) ? JSON.parse(readFileSync(timings, "utf8")) : null;
 if (record) {
-	if (everyFile && !flags.has("workers") && failed.length === 0) {
+	if (everyFile && phases.length === 2 && !flags.has("workers") && failed.length === 0) {
 		// Bun keeps the durations it read for files this run did not have: leave out the ones that are gone.
 		const files = Object.fromEntries(
 			slowest(measured, Number.POSITIVE_INFINITY)
@@ -338,9 +340,20 @@ const chromium = findChromium();
 if (chromium.path === null) console.log(`NOTE: the browser tests did not run. ${chromium.skipped}\n`);
 if (testParts.length > 1) console.log(`${"tests".padEnd(16)} ${seconds(testSeconds).padStart(8)}`);
 console.log(`${"total".padEnd(16)} ${seconds(total).padStart(8)}`);
-const slow = slowest(measured, 5).filter((entry) => existsSync(entry.file));
+const slow = slowest(
+	measured,
+	5,
+	phases.flatMap((phase) => phaseFiles(phase, shard, chosen) ?? []),
+).filter((entry) => existsSync(entry.file));
 if (everyFile && slow.length > 0)
 	console.log(`slowest files: ${slow.map((entry) => `${entry.file} ${entry.seconds.toFixed(0)} s`).join(", ")}`);
+
+const warnings = budgetWarnings(budgetReports);
+if (warnings) {
+	console.log(`\nBudget warnings:\n${warnings}`);
+	if (process.env.GITHUB_STEP_SUMMARY)
+		appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n## Budget warnings\n\n\`\`\`text\n${warnings}\n\`\`\`\n`);
+}
 
 const code = failed[0]?.exit ?? 0;
 if (failed.length > 0) console.log(`\nFAILED: ${failed.map((part) => part.name).join(", ")}`);

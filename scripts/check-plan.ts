@@ -1,7 +1,7 @@
 // What the check runs and when its duration warrants a warning. One place, read by `scripts/check.ts`, `scripts/ci-gate.ts`,
 // the browser tests' set-up and `test/check.test.ts`.
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { availableParallelism } from "node:os";
+import { availableParallelism, loadavg } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { Glob } from "bun";
 import type { LaunchOptions } from "playwright-core";
@@ -43,41 +43,30 @@ export function writeTimings(path: string, durations: Readonly<Record<string, nu
 	writeFileSync(path, `${JSON.stringify({ version: TIMINGS_VERSION, files }, null, 2)}\n`);
 }
 
-/**
- * The tests that compare a measured time with a limit. They run after the parallel phase, on a machine that
- * runs nothing else, so that what they measure is the product. Beside sixteen workers on 2026-10-12 the capture
- * latency was 143 ms at the 95th percentile against a budget of 100 (13 ms alone), the 5,000-result ingest
- * 1,178 ms against 1,000 (182 alone) and the JUnit parse 623 ms against 500.
- * A test belongs here only if it measures time: one that fails beside other tests for another reason shares
- * something it should not, and that is what to fix.
- */
-export const QUIET = [
+/** Elapsed-time assertions run serially on a dedicated CI runner or explicitly on an idle local machine. */
+export const PERFORMANCE = [
 	"test/demo-removal-budget.test.ts",
 	"test/archive-latency.test.ts",
 	"test/report-latency.test.ts",
 	"test/policy-latency.test.ts",
 	"test/e2e/latency-10000.test.ts",
 	"test/e2e/latency-2000.test.ts",
-	"test/budgets.test.ts",
-	"src/surfaces/formats/junit.test.ts",
-	"src/core/signature.test.ts",
+	"test/budgets-performance.test.ts",
+	"src/surfaces/formats/junit-performance.test.ts",
+	"src/core/signature-performance.test.ts",
 ];
 
 /**
- * How many of the quiet files run at once. On the 16-thread desktop the two latency files side by side measured
- * what each measures alone (95th percentiles of 11.7, 15.3, 16.2 and 16.2 ms for both sizes; alone 13.1, 15.4,
- * 16.2 and 16.2; the budget is 100), and one after the other they are 69 s of the check. Two there, one
- * anywhere smaller.
+ * How many workers the parallel phase has: half the threads the machine has free, so a check alone keeps its speed
+ * and several worktrees checking at once share the machine without a lock. Never more than half the threads (a
+ * browser test is a test process, a server and a browser; on the 16-thread desktop, 2026-10-12: 6 workers 79 s,
+ * 8 workers 70 s, 16 workers 81 s with tests running out of time), and never fewer than two, which four
+ * concurrent checks passed with (#902). The load average trails new work by about a minute.
  */
-export const quietWorkers = (cores = availableParallelism()): number => (cores >= 16 ? 2 : 1);
-
-/**
- * How many workers the parallel phase has: half the threads. A browser test is a test process, a server and a
- * browser, so more workers than cores only wait for each other. The parallel phase on the 16-thread desktop,
- * 2026-10-12: 6 workers 79 s, 8 workers 70 s, 10 workers 75 s, 12 workers 81 s, 16 workers 81 s with tests
- * running out of their time.
- */
-export const parallelWorkers = (cores = availableParallelism()): number => Math.max(1, Math.floor(cores / 2));
+export const parallelWorkers = (cores = availableParallelism(), load = loadavg()[0] ?? 0): number => {
+	const most = Math.max(1, Math.floor(cores / 2));
+	return Math.min(most, Math.max(Math.min(2, most), Math.floor((cores - load) / 2)));
+};
 
 /**
  * The reader threads of a server a test starts, where MAINWORTHY_READERS does not say. A server takes the cores
@@ -101,7 +90,7 @@ export const CI_SHARD_WARNING_SECONDS = 180;
 
 export const seconds = (value: number): string => `${value.toFixed(1)} s`;
 
-export type Phase = "parallel" | "quiet";
+export type Phase = "parallel" | "performance";
 
 export function chromiumLaunchOptions(executablePath: string, args: string[] = []): LaunchOptions {
 	return {
@@ -174,7 +163,7 @@ export type TestOptions = {
 
 /** The `bun test` arguments of one phase. Every test file is in exactly one of the two. */
 export function testArgs(phase: Phase, options: TestOptions): string[] {
-	const workers = options.workers ?? (phase === "quiet" ? quietWorkers() : parallelWorkers());
+	const workers = phase === "performance" ? 1 : (options.workers ?? parallelWorkers());
 	return [
 		"test",
 		// Workers also when there is one: each file then has its own globals and modules, as beside the others.
@@ -187,10 +176,10 @@ export function testArgs(phase: Phase, options: TestOptions): string[] {
 		...(options.failuresOnly ? ["--only-failures"] : []),
 		...(options.files
 			? (phaseFiles(phase, undefined, options.files) ?? []).map((file) => `./${file}`)
-			: phase === "quiet"
-				? QUIET.map((file) => `./${file}`)
+			: phase === "performance"
+				? PERFORMANCE.map((file) => `./${file}`)
 				: [
-						...QUIET.map((file) => `--path-ignore-patterns=${file}`),
+						...PERFORMANCE.map((file) => `--path-ignore-patterns=${file}`),
 						...(options.shard ? [`--shard=${options.shard}`] : []),
 						"src",
 						"test",
@@ -239,11 +228,16 @@ export function newestAttempt(directory: string, shard: string): { directory: st
 }
 
 /** The slowest files of a run, from the timings Bun wrote. */
-export function slowest(timings: unknown, count: number): { file: string; seconds: number }[] {
+export function slowest(
+	timings: unknown,
+	count: number,
+	selected?: readonly string[],
+): { file: string; seconds: number }[] {
 	if (typeof timings !== "object" || timings === null || !("files" in timings)) return [];
 	const files = timings.files;
 	if (typeof files !== "object" || files === null) return [];
 	return Object.entries(files)
+		.filter(([file]) => selected === undefined || selected.includes(file))
 		.filter((entry): entry is [string, number] => typeof entry[1] === "number")
 		.sort((a, b) => b[1] - a[1])
 		.slice(0, count)
@@ -310,11 +304,11 @@ export function failedTests(results: readonly ResultIn[]): FailedTest[] {
 
 /** The test files of a phase, of `only` when given, or null for a shard, whose share of them Bun chooses. */
 export function phaseFiles(phase: Phase, shard?: string | undefined, only?: readonly string[]): string[] | null {
-	if (only) return [...only].filter((file) => QUIET.includes(file) === (phase === "quiet")).sort();
-	if (phase === "quiet") return QUIET;
+	if (only) return [...only].filter((file) => PERFORMANCE.includes(file) === (phase === "performance")).sort();
+	if (phase === "performance") return PERFORMANCE;
 	if (shard) return null;
 	const files = [...new Glob("{src,test}/**/*.test.{ts,tsx}").scanSync(".")];
-	return files.filter((file) => !QUIET.includes(file)).sort();
+	return files.filter((file) => !PERFORMANCE.includes(file)).sort();
 }
 
 /** What a test phase that did not exit 0 left behind. */
@@ -384,7 +378,7 @@ export function parseCheckArgs(argv: string[]) {
 			continue;
 		}
 		const match = /^--(shard|only|junit|workers)=(.+)$/.exec(arg) ?? /^--(update-timings)()$/.exec(arg);
-		if (!match?.[1] || (!testsOnly && match[1] !== "update-timings")) {
+		if (!match?.[1] || (!testsOnly && !["update-timings", "workers"].includes(match[1]))) {
 			throw new Error(
 				`check: unknown argument ${arg}. One file is \`bun test <file>\`; scripts/check.ts lists the rest.`,
 			);
@@ -392,8 +386,8 @@ export function parseCheckArgs(argv: string[]) {
 		flags.set(match[1], match[2] ?? "");
 	}
 	const only = flags.get("only");
-	if (only !== undefined && only !== "parallel" && only !== "quiet") {
-		throw new Error("check: --only is parallel or quiet");
+	if (only !== undefined && only !== "parallel" && only !== "performance") {
+		throw new Error("check: --only is parallel or performance");
 	}
 	const junit = flags.get("junit");
 	if (junit !== undefined && (only === undefined || !junit.endsWith(".xml"))) {
@@ -402,7 +396,7 @@ export function parseCheckArgs(argv: string[]) {
 	const shard = flags.get("shard");
 	// A phase given no file would run every file: each named file is a test of this checkout and of the phase named.
 	const notTests = files.filter((file) => !/^(src|test)\/.+\.test\.tsx?$/.test(file) || !existsSync(file));
-	const otherPhase = files.filter((file) => QUIET.includes(file) !== (only === "quiet"));
+	const otherPhase = files.filter((file) => PERFORMANCE.includes(file) !== (only === "performance"));
 	if (
 		notTests.length > 0 ||
 		(files.length > 0 && (only === undefined || shard !== undefined)) ||
@@ -412,7 +406,7 @@ export function parseCheckArgs(argv: string[]) {
 			notTests.length > 0
 				? `check: not a test file of this checkout: ${notTests.join(", ")}`
 				: otherPhase.length > 0
-					? `check: not a file of the ${only} phase (QUIET in scripts/check-plan.ts): ${otherPhase.join(", ")}`
+					? `check: not a file of the ${only} phase (PERFORMANCE in scripts/check-plan.ts): ${otherPhase.join(", ")}`
 					: "check: test files are named with --only and without --shard, one phase at a time",
 		);
 	}
@@ -423,6 +417,8 @@ export function parseCheckArgs(argv: string[]) {
 	if (workers !== undefined && !(Number.isInteger(workers) && workers > 0)) {
 		throw new Error("check: --workers is a positive number");
 	}
-	const phases: Phase[] = only ? [only] : shard ? ["parallel"] : ["parallel", "quiet"];
+	if (only === "performance" && workers !== undefined && workers !== 1)
+		throw new Error("check: performance runs with one worker");
+	const phases: Phase[] = only ? [only] : record && shard === undefined ? ["parallel", "performance"] : ["parallel"];
 	return { testsOnly, junit, shard, chosen, record, workers, phases, flags };
 }

@@ -828,12 +828,23 @@ check(
 		await failures(server);
 		const h = await openPage(server, { path: "/p/scratch/queue" });
 		const gate = latch();
+		const secondAnswer = latch();
+		const sync = latch();
 		try {
 			const { page } = h;
 			await page.locator("[data-current-question]").waitFor();
 			const q = await qref(page);
 			if (!q) throw Error("No question");
+			const withdrawing = page
+				.locator(".queue-needs")
+				.getByText("Withdrawing the answer. An answer key queues a replacement.", { exact: true });
 			const sent: string[] = [];
+			await page.route("**/inbox", async (route) => {
+				const reply = await fetched(route);
+				if (!reply) return;
+				if (sent.includes(`${q}:undo`)) await sync.held;
+				await answer(route, { response: reply.response });
+			});
 			await page.route("**/decide", async (route) => {
 				const raw = z
 					.object({
@@ -844,6 +855,7 @@ check(
 					.parse(route.request().postDataJSON());
 				sent.push(`${raw.undo ?? raw.q}:${raw.undo ? "undo" : raw.answer?.is}`);
 				if (sent.length === 1) await gate.held;
+				if (raw.answer?.is === "infra") await secondAnswer.held;
 				await route.continue();
 			});
 			await page.keyboard.press("f");
@@ -852,11 +864,20 @@ check(
 			expect(await page.locator(`[data-question="${q}"]`).count()).toBe(0);
 			gate.release();
 			await page.locator(".queue-last").getByText("Answer withdrawn.", { exact: false }).waitFor();
+			await withdrawing.waitFor();
+			sync.release();
 			await page.locator(`[data-question="${q}"]`).click();
+			await page.locator(`[data-current-question="${q}"]`).waitFor();
+			await withdrawing.waitFor({ state: "detached" });
 			await page.keyboard.press("i");
 			await page.keyboard.press("u");
+			await page.locator(".queue-last").getByText("withdrawing the answer", { exact: false }).waitFor();
+			expect(await page.locator(`[data-question="${q}"]`).count()).toBe(0);
+			secondAnswer.release();
 			await page.locator(".queue-last").getByText("Answer withdrawn.", { exact: false }).waitFor();
 			await page.locator(`[data-question="${q}"]`).click();
+			await page.locator(`[data-current-question="${q}"]`).waitFor();
+			await withdrawing.waitFor({ state: "detached" });
 			await page.keyboard.press("t");
 			const saved = await eventually(
 				() => server.api("get", { refs: [q] }),
@@ -867,6 +888,8 @@ check(
 			expect(sent).toEqual([`${q}:flaky`, `${q}:undo`, `${q}:infra`, `${q}:undo`, `${q}:test`]);
 		} finally {
 			gate.release();
+			secondAnswer.release();
+			sync.release();
 			await h.close();
 			await server.stop();
 		}

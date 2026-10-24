@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { Worker } from "node:worker_threads";
 import { z } from "zod";
+import { budget } from "../scripts/budget.ts";
 import { withInstance } from "../src/cli/test-support.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
@@ -96,5 +97,5 @@ async function adoptWhilePolling(): Promise<number> {
 test("HTTP policy adoption across change runs leaves health requests answering", async () => {
 	const longest = await adoptWhilePolling();
 	console.log(`Policy adoption across ${CHANGE_RUNS} changes: longest /healthz wait ${longest.toFixed(1)} ms`);
-	expect(longest).toBeLessThan(LIMIT_MS);
+	budget(`policy adoption across ${CHANGE_RUNS} changes: longest /healthz wait`, longest, LIMIT_MS, "ms");
 }, 180_000);

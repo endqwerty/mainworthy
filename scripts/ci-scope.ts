@@ -14,7 +14,7 @@
 // `test/ci-scope.test.ts`.
 import { appendFileSync, readFileSync } from "node:fs";
 import { Glob } from "bun";
-import { CI_SHARDS, QUIET } from "./check-plan.ts";
+import { CI_SHARDS, PERFORMANCE } from "./check-plan.ts";
 
 /** Patterns, and patterns a file must not match. */
 type Paths = { include: readonly string[]; exclude?: readonly string[] };
@@ -164,7 +164,7 @@ export function plan(changed: readonly string[] | null, tests: readonly TestFile
 /** One runner of the tests job: its name is the report's and the gate's, `files` empty for every file. */
 export type Entry = { name: string; phase: string; files: string };
 
-/** The tests job's runners: the shards and the quiet tests, or the chosen files in one runner for each phase. */
+/** The tests job's runners: the shards and the performance tests, or the chosen files in one runner for each phase. */
 export function matrix(tests: Plan["tests"]): Entry[] {
 	if (tests === "all")
 		return [
@@ -173,13 +173,15 @@ export function matrix(tests: Plan["tests"]): Entry[] {
 				phase: `--only=parallel --shard=${i + 1}/${CI_SHARDS}`,
 				files: "",
 			})),
-			{ name: "quiet", phase: "--only=quiet", files: "" },
+			{ name: "performance", phase: "--only=performance", files: "" },
 		];
-	const quiet = tests.filter((file) => QUIET.includes(file));
-	const parallel = tests.filter((file) => !QUIET.includes(file));
+	const performance = tests.filter((file) => PERFORMANCE.includes(file));
+	const parallel = tests.filter((file) => !PERFORMANCE.includes(file));
 	return [
 		...(parallel.length > 0 ? [{ name: "tests", phase: "--only=parallel", files: parallel.join(" ") }] : []),
-		...(quiet.length > 0 ? [{ name: "quiet", phase: "--only=quiet", files: quiet.join(" ") }] : []),
+		...(performance.length > 0
+			? [{ name: "performance", phase: "--only=performance", files: performance.join(" ") }]
+			: []),
 	];
 }
 

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { Worker } from "node:worker_threads";
 import { z } from "zod";
+import { budget } from "../scripts/budget.ts";
 import { withInstance } from "../src/cli/test-support.ts";
 import { ciReport } from "./helpers.ts";
 
@@ -46,13 +47,13 @@ async function reportWhilePolling(files: number): Promise<number> {
 for (const files of [1, 200]) {
 	const label = files === 1 ? "one file" : `${files} files`;
 	test(`HTTP reports creating cases across ${label} leave health requests answering`, async () => {
-		let longest = await reportWhilePolling(files);
-		// As for archive latency, repeat the work on a fresh instance if the runner paused a thread once.
-		if (longest >= 50) {
-			console.log(`${label}: /healthz waited ${longest.toFixed(1)} ms; repeating the report`);
-			longest = await reportWhilePolling(files);
-		}
+		const longest = await reportWhilePolling(files);
 		console.log(`Report-created cases in ${label}: longest /healthz wait ${longest.toFixed(1)} ms`);
-		expect(longest).toBeLessThan(50);
+		budget(
+			`report creating ${files === 1 ? 500 : 2000} cases across ${label}: longest /healthz wait`,
+			longest,
+			50,
+			"ms",
+		);
 	}, 15_000);
 }

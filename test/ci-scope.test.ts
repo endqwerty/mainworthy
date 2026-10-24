@@ -14,7 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Glob } from "bun";
-import { fixtureBuildArgs, parseCheckArgs, QUIET, testArgs } from "../scripts/check-plan.ts";
+import { fixtureBuildArgs, PERFORMANCE, parseCheckArgs, testArgs } from "../scripts/check-plan.ts";
 import {
 	changedFiles,
 	IMAGE,
@@ -327,10 +327,10 @@ test("no module outside the tests reads a file that only the tests naming it are
 });
 
 test("the chosen files go to one runner for each phase, and a file name that is not plain is not narrowed", () => {
-	const quiet = QUIET[0] ?? "";
-	expect(matrix(["test/a.test.ts", quiet, "test/b.test.ts"])).toEqual([
+	const performance = PERFORMANCE[0] ?? "";
+	expect(matrix(["test/a.test.ts", performance, "test/b.test.ts"])).toEqual([
 		{ name: "tests", phase: "--only=parallel", files: "test/a.test.ts test/b.test.ts" },
-		{ name: "quiet", phase: "--only=quiet", files: quiet },
+		{ name: "performance", phase: "--only=performance", files: performance },
 	]);
 	const read = (lines: string[]) => Object.fromEntries(lines.map((line) => line.split(/=(.*)/s)));
 	const jobs = { static: false, image: false, ios: true };
@@ -352,11 +352,11 @@ test("the chosen files go to one runner for each phase, and a file name that is 
 });
 
 test("a phase given files runs those and no other", () => {
-	const quiet = QUIET[0] ?? "";
-	const parallel = testArgs("parallel", { timings: "t.json", files: ["test/docs.test.ts", quiet] });
+	const performance = PERFORMANCE[0] ?? "";
+	const parallel = testArgs("parallel", { timings: "t.json", files: ["test/docs.test.ts", performance] });
 	expect(parallel.filter((arg) => !arg.startsWith("-"))).toEqual(["test", "./test/docs.test.ts"]);
-	const only = testArgs("quiet", { timings: "t.json", files: ["test/docs.test.ts", quiet] });
-	expect(only.filter((arg) => !arg.startsWith("-"))).toEqual(["test", `./${quiet}`]);
+	const only = testArgs("performance", { timings: "t.json", files: ["test/docs.test.ts", performance] });
+	expect(only.filter((arg) => !arg.startsWith("-"))).toEqual(["test", `./${performance}`]);
 });
 
 test("the check refuses files it would not run as named, before it runs anything", () => {
@@ -367,10 +367,10 @@ test("the check refuses files it would not run as named, before it runs anything
 		});
 		return { exit: run.exitCode, said: run.stderr.toString() };
 	};
-	// Each of these, run, would be every file of a phase or none: a quiet phase given no quiet file has no path.
-	expect(refused(["--only=quiet", "test/docs.test.ts"])).toEqual({
+	// Each of these, run, would be every file of a phase or none: a performance phase given no performance file has no path.
+	expect(refused(["--only=performance", "test/docs.test.ts"])).toEqual({
 		exit: 4,
-		said: "check: not a file of the quiet phase (QUIET in scripts/check-plan.ts): test/docs.test.ts\n",
+		said: "check: not a file of the performance phase (PERFORMANCE in scripts/check-plan.ts): test/docs.test.ts\n",
 	});
 	expect(() => parseCheckArgs(["test", "test/docs.test.ts"])).toThrow(
 		"test files are named with --only and without --shard",

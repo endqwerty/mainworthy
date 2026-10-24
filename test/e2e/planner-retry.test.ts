@@ -9,15 +9,7 @@ import { removeProject } from "../../src/server/transfer/transfer.ts";
 import ui from "../../src/web/index.html";
 import { call } from "../../src/web/lib/api.ts";
 import { Run, Slot } from "../../src/web/runs/models.ts";
-import {
-	browserAvailable,
-	devicePrefix,
-	eventually,
-	openPage,
-	reservePort,
-	type Server,
-	startServer,
-} from "./support.ts";
+import { browserAvailable, devicePrefix, eventually, openPage, type Server, startServer } from "./support.ts";
 
 const check = browserAvailable ? test : test.skip;
 
@@ -787,10 +779,9 @@ for (const reload of [false, true])
 		`an uncertain plan cannot write into a replacement project${reload ? " after reload" : " while open"}`,
 		async () => {
 			const dataDir = await mkdtemp(join(tmpdir(), "mainworthy-planner-identity-"));
-			const port = await reservePort();
 			const token = "planner-identity-test-owner-token";
 			const instance = start(
-				{ ...defaultConfig({}), dataDir, port: port.port, owner: "robin", ownerToken: token, mode: "local" },
+				{ ...defaultConfig({}), dataDir, port: 0, owner: "robin", ownerToken: token, mode: "local" },
 				() => ({ ui }),
 				{ readers: 0 },
 			);
@@ -861,7 +852,6 @@ for (const reload of [false, true])
 			} finally {
 				await view?.close();
 				await instance.stop();
-				await port.release();
 				await rm(dataDir, { recursive: true, force: true });
 			}
 		},

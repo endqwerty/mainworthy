@@ -92,7 +92,7 @@ export async function compare(
 		return `${base} and ${head} have the same tree: nothing to time, and a verdict on one holds for the other.`;
 	if (await (options.busy ?? otherTestRuns)())
 		throw new Error(
-			"another test run is going, and a time taken beside it says nothing. Wait with `bun scripts/work.ts wait-tests`.",
+			"another test run is going, and a time taken beside it says nothing. Run check-time again when the machine is idle.",
 		);
 	const times: Record<"base" | "head", number[]> = { base: [], head: [] };
 	for (let round = 0; round < options.rounds; round++) {

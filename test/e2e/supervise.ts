@@ -1,21 +1,21 @@
 import { spawn } from "node:child_process";
-import { rm, stat, writeFile } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { registerOwnedChild } from "../../scripts/work/processes.ts";
 
 const config = z
-	.object({ command: z.array(z.string()).min(1), data: z.string(), lock: z.string(), inode: z.number() })
+	.object({ command: z.array(z.string()).min(1), data: z.string() })
 	.parse(JSON.parse(process.argv[2] ?? "null"));
 const unregister = await registerOwnedChild(process.pid);
-await writeFile(join(config.lock, "pid"), String(process.pid));
 // detached creates a new session/process group on macOS as well as Linux. Explicit stdio keeps the
 // worker's lifetime pipe out of the fixture; it receives a new pipe with this supervisor as sole writer.
 const child = spawn(config.command[0] ?? "", config.command.slice(1), {
 	detached: true,
-	stdio: ["pipe", "ignore", "inherit"],
+	stdio: ["pipe", "pipe", "inherit"],
 	env: { ...process.env, MAINWORTHY_TEST_LIFETIME: crypto.randomUUID() },
 });
+child.stdout?.pipe(process.stdout);
 const exited = new Promise<number>((resolve) => {
 	child.once("exit", (code) => resolve(code ?? 1));
 	child.once("error", (error) => {
@@ -46,8 +46,6 @@ const shutdown = () =>
 		signal("SIGKILL");
 		await unregisterFixture();
 		await rm(config.data, { recursive: true, force: true });
-		if ((await stat(config.lock).catch(() => null))?.ino === config.inode)
-			await rm(config.lock, { recursive: true, force: true });
 		await unregister();
 		process.exit(0);
 	})());

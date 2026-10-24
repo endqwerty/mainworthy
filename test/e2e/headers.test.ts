@@ -8,7 +8,7 @@ import { z } from "zod";
 import { start } from "../../src/app/start.ts";
 import { SESSION_LIFETIMES } from "../../src/server/kernel/app.ts";
 import { securityHeaders } from "../../src/surfaces/headers.ts";
-import { browserAvailable, eventually, launchBrowser, openPage, reservePort, startServer } from "./support.ts";
+import { browserAvailable, eventually, launchBrowser, openPage, startServer } from "./support.ts";
 
 type Violation = { directive: string; blocked: string };
 
@@ -80,11 +80,10 @@ test.skipIf(!browserAvailable)(
 	"a page on another origin cannot put the local workbench, which needs no sign-in, in a frame",
 	async () => {
 		const server = await startServer({ cases: 1 });
-		const reservation = await reservePort();
 		// The other origin: a page that frames the app and says when the frame has settled, loaded or refused.
 		const other = Bun.serve({
 			hostname: "127.0.0.1",
-			port: reservation.port,
+			port: 0,
 			fetch: () =>
 				new Response(
 					`<!doctype html><title>waiting</title><iframe src="${server.url}/p/scratch/suite" onload="document.title = 'settled'"></iframe>`,
@@ -96,7 +95,7 @@ test.skipIf(!browserAvailable)(
 			const { page } = browser;
 			// The app itself opens for this browser without a token: that is what a frame would show.
 			expect(await page.locator("#app").count()).toBe(1);
-			await page.goto(`http://127.0.0.1:${reservation.port}/`);
+			await page.goto(other.url.href);
 			await page.waitForFunction(() => document.title === "settled");
 			const frame = page.frames().find((candidate) => candidate !== page.mainFrame());
 			expect(frame).toBeDefined();
@@ -105,7 +104,6 @@ test.skipIf(!browserAvailable)(
 		} finally {
 			await browser.close();
 			await other.stop(true);
-			await reservation.release();
 			await server.stop();
 		}
 	},
@@ -134,13 +132,11 @@ test.skipIf(!browserAvailable)(
 			writeFileSync(join(directory, "page.js"), `document.getElementById("text").textContent = "${text}";\n`);
 		write("as first written");
 		const imported = z.object({ default: z.unknown() }).parse(await import(join(directory, "index.html")));
-		const app = await reservePort();
-		const elsewhere = await reservePort();
 		const instance = start(
 			{
 				dataDir: join(directory, "data"),
 				host: "127.0.0.1",
-				port: app.port,
+				port: 0,
 				mode: "local",
 				owner: "robin",
 				ownerToken: null,
@@ -152,7 +148,7 @@ test.skipIf(!browserAvailable)(
 		);
 		const other = Bun.serve({
 			hostname: "127.0.0.1",
-			port: elsewhere.port,
+			port: 0,
 			fetch: () =>
 				new Response("<!doctype html><title>another origin</title>", { headers: { "content-type": "text/html" } }),
 		});
@@ -187,15 +183,13 @@ test.skipIf(!browserAvailable)(
 			// The same address from a page on another origin: this machine too, another port. Bun's own check lets
 			// that Origin in; the server's rule for its own page does not.
 			const foreign = await browser.newPage();
-			await foreign.goto(`http://127.0.0.1:${elsewhere.port}/`);
+			await foreign.goto(other.url.href);
 			expect(await foreign.evaluate(opens, reload)).toBe(false);
 			expect(await page.evaluate(opens, reload)).toBe(true);
 		} finally {
 			await browser.close();
 			await other.stop(true);
 			await instance.stop();
-			await app.release();
-			await elsewhere.release();
 			rmSync(directory, { recursive: true, force: true });
 		}
 	},

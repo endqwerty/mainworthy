@@ -3,7 +3,6 @@
 //   bun scripts/work.ts scratch new <name>            a directory under ~/.cache for this task's scratch files
 //   bun scripts/work.ts scratch rm <directory>        deletes a directory `scratch new` made, and nothing else
 //   bun scripts/work.ts stop-server                   stops the servers running from this checkout
-//   bun scripts/work.ts wait-tests [--timeout=<s>]    waits until no other test run has workers (default 1800 s)
 //   bun scripts/work.ts board start|todo|done <n>     moves an issue's or a pull request's card on the board
 //   bun scripts/work.ts board check                   says which of the board's ids in the code no longer fit
 //   bun scripts/work.ts pr-body <n>                   checks a pull request's description, milestone and fragment PR references
@@ -19,7 +18,7 @@ import { join } from "node:path";
 import { check as checkBoard, isMove, move } from "./work/board.ts";
 import { compare } from "./work/check-time.ts";
 import type { Call, Target } from "./work/ci.ts";
-import { stopServers, waitForTests } from "./work/processes.ts";
+import { stopServers } from "./work/processes.ts";
 import { gather, problems } from "./work/pull-request.ts";
 import { release } from "./work/release.ts";
 import { read } from "./work/run.ts";
@@ -30,7 +29,6 @@ const ROOT = realpathSync(join(import.meta.dir, ".."));
 const USAGE = `usage: bun scripts/work.ts <command>
   scratch new <name> | scratch rm <directory>
   stop-server
-  wait-tests [--timeout=<seconds>]
   board start|todo|done <issue or pull request number> | board check
   pr-body <pull request number>
   sync-branch
@@ -93,17 +91,6 @@ async function main(args: string[]): Promise<void> {
 					? `stopped ${stopped.length} server(s) running from ${ROOT}: ${stopped.join(" ")}`
 					: `no server runs from ${ROOT}`,
 			);
-			return;
-		}
-		case "wait-tests": {
-			const timeout = Number(flag(rest, "timeout") ?? 1800);
-			if (!Number.isFinite(timeout) || timeout < 0) return fail(USAGE, 4);
-			const left = await waitForTests(timeout);
-			if (left.length > 0)
-				fail(
-					`${left.length} test worker(s) still running after ${timeout} s (pid ${left.map((p) => p.pid).join(" ")})`,
-				);
-			console.log("no test run is going");
 			return;
 		}
 		case "board": {

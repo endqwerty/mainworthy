@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Glob } from "bun";
 import { z } from "zod";
+import { budget } from "../scripts/budget.ts";
 import {
 	CI_SHARDS,
 	chromiumLaunchOptions,
@@ -24,13 +25,13 @@ import {
 	fixtureBuildArgs,
 	needsBrowserFixture,
 	newestAttempt,
+	PERFORMANCE,
 	parallelWorkers,
 	parseCheckArgs,
 	phaseFiles,
 	phaseReport,
 	playwrightChromium,
-	QUIET,
-	quietWorkers,
+	readOutcome,
 	sharedBrowserEndpoint,
 	slowest,
 	testArgs,
@@ -279,12 +280,12 @@ test("a non-browser support import stays silent under diagnostics and an install
 		writeFileSync(
 			file,
 			`import {afterAll,expect,test} from "bun:test";
-import {reservePort} from ${JSON.stringify(join(process.cwd(), "test/e2e/support.ts"))};
+import {startServer} from ${JSON.stringify(join(process.cwd(), "test/e2e/support.ts"))};
 const original=process.stderr.write;
 const late=[];
 afterAll(()=>{process.stderr.write=original;});
 test("installs a command's late-output guard",()=>{
- expect(typeof reservePort).toBe("function");
+ expect(typeof startServer).toBe("function");
  process.stderr.write=(chunk)=>{late.push(String(chunk));return true;};
 });
 test("does not capture diagnostic output from a port-only import",()=>{
@@ -539,9 +540,9 @@ test("the browser fixture uses the production compiler flags and worker layout",
 	expect(args.slice(-2)).toEqual(["--outfile", "/scratch/fixture"]);
 });
 
-test("a browser phase builds once, including quiet and shards, but named server tests need no fixture", () => {
-	expect(needsBrowserFixture(["parallel", "quiet"])).toBe(true);
-	expect(needsBrowserFixture(["quiet"])).toBe(true);
+test("a browser phase builds once, including performance and shards, but named server tests need no fixture", () => {
+	expect(needsBrowserFixture(["parallel", "performance"])).toBe(true);
+	expect(needsBrowserFixture(["performance"])).toBe(true);
 	expect(needsBrowserFixture(["parallel"], "2/6")).toBe(true);
 	expect(needsBrowserFixture(["parallel"], undefined, ["test/e2e/phone.test.ts"])).toBe(true);
 	expect(needsBrowserFixture(["parallel"], undefined, ["test/check.test.ts"])).toBe(false);
@@ -553,6 +554,7 @@ test("a broken browser fixture build fails the check before any test runs, even 
 		for (const dir of ["scripts/work", "test/e2e", "src/server/ops", "src/cli"])
 			mkdirSync(join(root, dir), { recursive: true });
 		for (const file of [
+			"budget.ts",
 			"check.ts",
 			"check-plan.ts",
 			"chromium-diagnostics.ts",
@@ -642,16 +644,34 @@ test("check waits beyond four seconds for a registry entry to disappear while it
 	}
 }, 40_000);
 
-test("every test file is in exactly one phase: the quiet files, and everything but them", () => {
-	expect(phaseFiles("quiet")).toContain("test/policy-latency.test.ts");
+test("the default check runs functional files with a bounded per-run worker count", () => {
+	expect(parseCheckArgs([]).phases).toEqual(["parallel"]);
+	expect(parseCheckArgs(["test"]).phases).toEqual(["parallel"]);
+	expect(parseCheckArgs(["--workers=3"]).workers).toBe(3);
+	expect(parseCheckArgs(["test", "--update-timings"]).phases).toEqual(["parallel", "performance"]);
+	expect(parseCheckArgs(["test", "--update-timings"]).workers).toBe(1);
+	// Half the free threads, at most half of all of them and at least two (#902).
+	expect(parallelWorkers(16, 0)).toBe(8);
+	expect(parallelWorkers(16, 6)).toBe(5);
+	expect(parallelWorkers(10, 40)).toBe(2);
+	expect(parallelWorkers(64, 0)).toBe(32);
+	expect(parallelWorkers(2, 0)).toBe(1);
+	expect(parallelWorkers(1, 5)).toBe(1);
+	for (const workers of ["0", "-1", "2.5", "NaN", "Infinity"])
+		expect(() => parseCheckArgs([`--workers=${workers}`])).toThrow("positive number");
+});
+
+test("every test file is in exactly one phase: the performance files, and everything but them", () => {
+	expect(phaseFiles("performance")).toContain("test/policy-latency.test.ts");
 	expect(phaseFiles("parallel")).not.toContain("test/policy-latency.test.ts");
-	for (const file of QUIET) expect(existsSync(file), `${file} is listed as quiet and is not there`).toBe(true);
-	const quiet = testArgs("quiet", { timings: "t.json" });
+	for (const file of PERFORMANCE)
+		expect(existsSync(file), `${file} is listed as performance and is not there`).toBe(true);
+	const performance = testArgs("performance", { timings: "t.json" });
 	const parallel = testArgs("parallel", { timings: "t.json" });
-	expect(quiet.filter((arg) => arg.startsWith("./"))).toEqual(QUIET.map((file) => `./${file}`));
-	expect(quiet).not.toContain("src");
+	expect(performance.filter((arg) => arg.startsWith("./"))).toEqual(PERFORMANCE.map((file) => `./${file}`));
+	expect(performance).not.toContain("src");
 	expect(parallel.filter((arg) => arg.startsWith("--path-ignore-patterns="))).toEqual(
-		QUIET.map((file) => `--path-ignore-patterns=${file}`),
+		PERFORMANCE.map((file) => `--path-ignore-patterns=${file}`),
 	);
 	expect(parallel.slice(-2)).toEqual(["src", "test"]);
 });
@@ -669,14 +689,14 @@ test("a shard is a share of the parallel phase, with its report beside it", () =
 	expect(args).toContain("--shard=2/5");
 	expect(args).toContain("--reporter=junit");
 	expect(args).toContain("--reporter-outfile=test-results/tests-2.xml");
-	expect(testArgs("quiet", { timings: "t.json", shard: "2/5" })).not.toContain("--shard=2/5");
+	expect(testArgs("performance", { timings: "t.json", shard: "2/5" })).not.toContain("--shard=2/5");
 });
 
-test("the workers fit the machine: the quiet phase is alone on a small one", () => {
-	expect(quietWorkers(2)).toBe(1);
-	expect(quietWorkers(16)).toBeLessThanOrEqual(2);
+test("the workers fit the machine: the performance phase is alone on a small one", () => {
+	expect(testArgs("performance", { timings: "t.json" })).toContain("--parallel=1");
+	expect(() => parseCheckArgs(["test", "--only=performance", "--workers=2"])).toThrow("one worker");
 	expect(parallelWorkers(2)).toBeGreaterThanOrEqual(1);
-	expect(testArgs("quiet", { timings: "t.json" })).toContain(`--parallel=${quietWorkers()}`);
+	expect(testArgs("performance", { timings: "t.json", workers: 8 })).toContain("--parallel=1");
 	expect(testArgs("parallel", { timings: "t.json", workers: 3 })).toContain("--parallel=3");
 	expect(testReaders()).toBe("1");
 });
@@ -686,14 +706,14 @@ test("the workflow runs the shards the scope names and its gate reads every one 
 	const shards = Array.from({ length: CI_SHARDS }, (_, i) => `tests-${i + 1}`);
 	expect(matrix("all")).toEqual([
 		...shards.map((name, i) => ({ name, phase: `--only=parallel --shard=${i + 1}/${CI_SHARDS}`, files: "" })),
-		{ name: "quiet", phase: "--only=quiet", files: "" },
+		{ name: "performance", phase: "--only=performance", files: "" },
 	]);
 	const all = Object.fromEntries(
 		outputs({ why: "", jobs: { static: true, image: true, ios: true }, tests: "all" }).map((line) =>
 			line.split(/=(.*)/s),
 		),
 	);
-	expect(all.shards).toBe(`${shards.join(" ")} quiet`);
+	expect(all.shards).toBe(`${shards.join(" ")} performance`);
 	expect(all.files).toBe("");
 	// The tests job takes its runners, and the gate its shard names and files, from the scope job's outputs.
 	// What GitHub replaces in the workflow's text, written so that it is not read as a placeholder of this file.
@@ -765,7 +785,7 @@ test("a shard's artifact is named for its attempt and downloaded into its own di
 		for (const attempt of ["0", "011", "12x", "-13", "1.5", ""]) mkdirSync(join(root, named("tests-2", attempt)));
 		expect(newestAttempt(root, "tests-2")).toEqual({ directory: join(root, named("tests-2", "10")), attempt: 10 });
 		expect(newestAttempt(root, "tests")).toEqual({ directory: join(root, named("tests", "40")), attempt: 40 });
-		expect(newestAttempt(root, "quiet")).toEqual({ directory: root, attempt: null });
+		expect(newestAttempt(root, "performance")).toEqual({ directory: root, attempt: null });
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
@@ -1055,6 +1075,9 @@ test("the slowest files are read from the timings Bun writes", () => {
 		{ file: "a.test.ts", seconds: 1.5 },
 	]);
 	expect(slowest(null, 2)).toEqual([]);
+	expect(
+		slowest({ files: { "functional.test.ts": 10, "performance.test.ts": 5000 } }, 1, ["functional.test.ts"]),
+	).toEqual([{ file: "functional.test.ts", seconds: 0.01 }]);
 });
 
 test("the check refuses an argument it does not know, so a mistyped one does not run everything", async () => {
@@ -1064,7 +1087,7 @@ test("the check refuses an argument it does not know, so a mistyped one does not
 	for (const [argv, message] of [
 		[["test", "test/suite.test.ts"], "check: test files are named with --only and without --shard"],
 		[["test", "--junit=a.xml"], "check: --junit names an .xml file and needs --only"],
-		[["test", "--only=fast"], "check: --only is parallel or quiet"],
+		[["test", "--only=fast"], "check: --only is parallel or performance"],
 	] satisfies [string[], string][])
 		expect(() => parseCheckArgs(argv)).toThrow(message);
 });
@@ -1153,6 +1176,7 @@ test("every way to run a test asks the machine first, and the Bun asked for is o
 		);
 	expect(loaded("scripts/check.ts").sort()).toEqual(
 		[
+			"./budget.ts",
 			"./check-plan.ts",
 			"./chromium-diagnostics.ts",
 			"./preflight.ts",
@@ -1259,19 +1283,107 @@ test("the failed tests of a report are listed with what each said and where", ()
 	]);
 	// A phase that failed with nothing to name (a shard's files are not known), and one whose runner did not
 	// live to write a report.
-	expect(failureLines([phaseReport("tests: parallel", [], null), phaseReport("tests: quiet", null, QUIET)])).toEqual([
+	expect(
+		failureLines([phaseReport("tests: parallel", [], null), phaseReport("tests: performance", null, PERFORMANCE)]),
+	).toEqual([
 		'tests: parallel failed and no test in it did: something failed outside a test. Look above for "error:".',
-		"tests: quiet left no report of its tests: the runner stopped before its end. Its last lines say why.",
+		"tests: performance left no report of its tests: the runner stopped before its end. Its last lines say why.",
 	]);
 	// The files of a phase are the ones `bun test` is given: every test file is in one of the two, and a shard's
 	// share is Bun's to choose.
 	const parallel = phaseFiles("parallel") ?? [];
-	expect(phaseFiles("quiet")).toEqual(QUIET);
+	expect(phaseFiles("performance")).toEqual(PERFORMANCE);
 	expect(phaseFiles("parallel", "2/6")).toBeNull();
 	expect(parallel).toContain("test/check.test.ts");
-	expect(parallel.filter((file) => QUIET.includes(file))).toEqual([]);
-	expect(parallel.length + QUIET.length).toBe([...new Glob("{src,test}/**/*.test.{ts,tsx}").scanSync(".")].length);
+	expect(parallel.filter((file) => PERFORMANCE.includes(file))).toEqual([]);
+	expect(parallel.length + PERFORMANCE.length).toBe(
+		[...new Glob("{src,test}/**/*.test.{ts,tsx}").scanSync(".")].length,
+	);
 });
+
+async function budgetRun(phase: "parallel" | "performance", body: string) {
+	const root = mkdtempSync(join(tmpdir(), "mainworthy-budget-run-"));
+	const summary = join(root, "summary.md");
+	const report = join(root, "results.xml");
+	const files =
+		phase === "performance"
+			? ["test/budgets-performance.test.ts", "test/demo-removal-budget.test.ts"]
+			: ["test/budget-warning.test.ts", "test/other-budget-warning.test.ts"];
+	try {
+		mkdirSync(join(root, "test"));
+		for (const file of files)
+			writeFileSync(
+				join(root, file),
+				`import { test } from "bun:test";
+import { budget } from ${JSON.stringify(join(import.meta.dir, "../scripts/budget.ts"))};
+test("a real workload", () => { ${body} });\n`,
+			);
+		const child = Bun.spawn(
+			[
+				process.execPath,
+				join(import.meta.dir, "../scripts/check.ts"),
+				"test",
+				`--only=${phase}`,
+				`--junit=${report}`,
+				...files,
+			],
+			{
+				cwd: root,
+				stdout: "pipe",
+				stderr: "pipe",
+				env: { ...process.env, GITHUB_STEP_SUMMARY: summary, MAINWORTHY_CHROMIUM: "" },
+			},
+		);
+		const [out, err, exit] = await Promise.all([
+			new Response(child.stdout).text(),
+			new Response(child.stderr).text(),
+			child.exited,
+		]);
+		return {
+			out,
+			err,
+			exit,
+			outcome: readOutcome(join(root, "results.json")),
+			results: existsSync(report) ? parseJUnit(readFileSync(report, "utf8")).results : [],
+			summary: existsSync(summary) ? readFileSync(summary, "utf8") : "",
+		};
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+}
+
+test("budget misses warn in local and CI summaries without failing either phase", async () => {
+	for (const phase of ["parallel", "performance"] as const) {
+		const result = await budgetRun(
+			phase,
+			'budget("synthetic latency", 125, 100, "ms"); budget("synthetic size", 321, 300, "tokens"); budget("at baseline", 100, 100, "ms");',
+		);
+		expect(result.exit, result.out + result.err).toBe(0);
+		expect(result.outcome?.exit).toBe(0);
+		expect(result.results.map((row) => row.outcome)).toEqual(["pass", "pass"]);
+		expect(result.out).toContain("Budget warnings:\n");
+		const warning = "WARNING: synthetic latency: 125 ms exceeds baseline 100 ms.";
+		expect(result.out).toContain(warning);
+		expect(result.summary).toContain(warning);
+		expect(result.summary).toContain("321 tokens exceeds baseline 300 tokens");
+		expect(result.summary).not.toContain("at baseline");
+		expect(result.summary.match(/WARNING: synthetic latency:/g)).toHaveLength(2);
+	}
+}, 30_000);
+
+test("workload errors still fail after an advisory miss in either phase", async () => {
+	for (const phase of ["parallel", "performance"] as const) {
+		const result = await budgetRun(
+			phase,
+			'budget("synthetic latency", 125, 100, "ms"); throw new Error("workload failed");',
+		);
+		expect(result.exit).toBe(1);
+		expect(result.outcome?.exit).toBe(1);
+		expect(result.out + result.err).toContain("workload failed");
+		expect(result.summary).toContain("125 ms exceeds baseline 100 ms");
+	}
+	expect(() => budget("invalid measurement", Number.NaN, 100, "ms")).toThrow("must be finite");
+}, 30_000);
 
 test("a run ends with the tests that failed, and says so when a file did not load", async () => {
 	const check = join(import.meta.dir, "../scripts/check.ts");
