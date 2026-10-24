@@ -30,7 +30,12 @@ async function workbench(setup?: (page: Page) => Promise<void>, seed?: (server: 
 		await session.detach();
 		const profile = args.find((arg) => arg.startsWith("--user-data-dir="))?.slice("--user-data-dir=".length);
 		if (!profile) throw new Error("Chromium did not publish its profile directory");
-		const [port] = (await readFile(join(profile, "DevToolsActivePort"), "utf8")).trim().split("\n");
+		// Chromium writes the file a moment after it starts; CI once read it before it existed.
+		const published = await eventually(
+			() => readFile(join(profile, "DevToolsActivePort"), "utf8").catch(() => ""),
+			(text) => text.includes("\n"),
+		);
+		const [port] = published.trim().split("\n");
 		// Playwright normally forces every page visible through its own CDP session. The default context
 		// with noDefaults leaves visibility under Chromium's control, including in the headless shell.
 		connection = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { noDefaults: true });
