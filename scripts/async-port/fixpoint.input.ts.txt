@@ -1,0 +1,8 @@
+import { openApp } from "./src/server/kernel/app.ts";
+export function caller() {
+	const app = openApp();
+	return app.database.read((db) => {
+		db.get("SELECT x");
+		return 1;
+	});
+}

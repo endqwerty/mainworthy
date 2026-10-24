@@ -9,6 +9,7 @@ import {
 	SignatureKind,
 	SymbolFlags,
 	type Type,
+	TypeFlags,
 } from "typescript/unstable/async";
 import { z } from "zod";
 
@@ -136,10 +137,6 @@ function outerExpression(node: ts.Node): ts.Node {
 	while (node.parent && ts.isParenthesizedExpression(node.parent)) node = node.parent;
 	return node;
 }
-function awaited(node: ts.Node): boolean {
-	while (node.parent && ts.isParenthesizedExpression(node.parent)) node = node.parent;
-	return !!node.parent && ts.isAwaitExpression(node.parent);
-}
 function arrayCallback(node: FunctionNode): boolean {
 	let parent: ts.Node = node;
 	while (parent.parent && ts.isParenthesizedExpression(parent.parent)) parent = parent.parent;
@@ -204,9 +201,22 @@ function booleanPosition(node: ts.Node): boolean {
 	}
 	return false;
 }
-async function canonical(checker: Checker, node: ts.Node): Promise<CompilerSymbol | undefined> {
-	const symbol = await checker.getSymbolAtLocation(node);
-	return symbol && symbol.flags & SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol;
+const canonicalSymbols = new WeakMap<Checker, WeakMap<ts.Node, Promise<CompilerSymbol | undefined>>>();
+function canonical(checker: Checker, node: ts.Node): Promise<CompilerSymbol | undefined> {
+	const symbols = canonicalSymbols.get(checker) ?? new WeakMap<ts.Node, Promise<CompilerSymbol | undefined>>();
+	canonicalSymbols.set(checker, symbols);
+	let result = symbols.get(node);
+	if (!result) {
+		result = (async () => {
+			const symbol =
+				ts.isIdentifier(node) && ts.isShorthandPropertyAssignment(node.parent)
+					? await checker.getShorthandAssignmentValueSymbol(node.parent)
+					: await checker.getSymbolAtLocation(node);
+			return symbol && symbol.flags & SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol;
+		})();
+		symbols.set(node, result);
+	}
+	return result;
 }
 async function returnColour(checker: Checker, node: ts.CallExpression): Promise<Colour> {
 	const signature = await checker.getResolvedSignature(node);
@@ -242,7 +252,7 @@ function format(text: string, file: string): string {
 }
 
 /** Uses compiler identities, never spelling alone, to connect declarations and call sites. */
-export async function planAsyncPort(options: PortOptions): Promise<PortPlan> {
+async function planRound(options: PortOptions, virtual: ReadonlyMap<string, string>): Promise<PortPlan> {
 	const root = resolve(options.root);
 	// The removed legacy import is resolved only in the compiler's virtual view. It is never written back.
 	// Callers still need its identity during the single conversion wave after U0 deletes the export.
@@ -251,10 +261,10 @@ export async function planAsyncPort(options: PortOptions): Promise<PortPlan> {
 		cwd: root,
 		fs: {
 			readFile(file) {
-				if (file !== kernelPath) return undefined;
+				if (file !== kernelPath) return virtual.get(file);
 				let text: string;
 				try {
-					text = readFileSync(file, "utf8");
+					text = virtual.get(file) ?? readFileSync(file, "utf8");
 				} catch {
 					return undefined;
 				}
@@ -312,6 +322,7 @@ export async function planAsyncPort(options: PortOptions): Promise<PortPlan> {
 			const calls: CallInfo[] = [];
 			const imports: ts.ImportDeclaration[] = [];
 			const nodes: ts.Node[] = [];
+			const identifiers = new Map<string, ts.Identifier[]>();
 			const edits = new Map<ts.SourceFile, Splice[]>();
 			const diagnosticKeys = new Set<string>();
 			const refuse = (node: ts.Node, kind: RefusalKind, message: string): void => {
@@ -340,6 +351,11 @@ export async function planAsyncPort(options: PortOptions): Promise<PortPlan> {
 			for (const file of files)
 				walk(file, (node) => {
 					nodes.push(node);
+					if (ts.isIdentifier(node)) {
+						const entries = identifiers.get(node.text) ?? [];
+						entries.push(node);
+						identifiers.set(node.text, entries);
+					}
 					if (functionLike(node)) funcs.set(key(node), { node, colour: blank(), links: new Set(), blocked: false });
 					if (ts.isImportDeclaration(node)) imports.push(node);
 				});
@@ -502,6 +518,265 @@ export async function planAsyncPort(options: PortOptions): Promise<PortPlan> {
 				return before !== `${into.async}:${into.generator}:${into.writes}`;
 			};
 			const callsByNode = new Map(calls.map((call) => [call.node, call]));
+			const promiseTypes = new Map<number, boolean>();
+			const acceptsPromise = async (type: Type | undefined, containers = false, explicit = false): Promise<boolean> => {
+				if (!type || type.isErrorType()) return false;
+				if (type.flags & (TypeFlags.Any | TypeFlags.Unknown)) return !explicit;
+				if (type.isTypeParameter()) {
+					const constraint = await checker.getBaseConstraintOfType(type);
+					return constraint ? acceptsPromise(constraint, containers, explicit) : !explicit;
+				}
+				if (type.isUnionType()) {
+					for (const part of await type.getTypes()) if (await acceptsPromise(part, containers, explicit)) return true;
+					return false;
+				}
+				if (await checker.getPropertyOfType(type, "then")) return true;
+				if (containers && type.isTypeReference())
+					for (const part of await checker.getTypeArguments(type))
+						if (await acceptsPromise(part, true, explicit)) return true;
+				return false;
+			};
+			const hasPromise = async (type: Type | undefined): Promise<boolean> => {
+				if (!type || type.isErrorType()) return false;
+				if (type.isUnionType()) {
+					for (const part of await type.getTypes()) if (await hasPromise(part)) return true;
+					return false;
+				}
+				return !!(await checker.getPropertyOfType(type, "then"));
+			};
+			const promiseFunctions = new Map<FunctionNode, boolean>();
+			const returnsPromise = async (node: FunctionNode): Promise<boolean> => {
+				const cached = promiseFunctions.get(node);
+				if (cached !== undefined) return cached;
+				const signature = await checker.getSignatureFromDeclaration(node);
+				const type = signature && (await checker.getReturnTypeOfSignature(signature));
+				const result = await hasPromise(type);
+				promiseFunctions.set(node, result);
+				return result;
+			};
+			const parameterAcceptsPromise = async (call: ts.CallExpression, index: number, containers: boolean) => {
+				const signature = await checker.getResolvedSignature(call);
+				if (!signature) return false;
+				const declaration = await signature.declaration?.resolve();
+				const result = outerExpression(call).parent;
+				if (ts.isPropertyAccessExpression(result) && ["rejects", "resolves"].includes(result.name.text)) return true;
+				if (declaration && name(declaration.parent) === "PromiseConstructor") return true;
+				const parameter = declaration && functionLike(declaration) ? declaration.parameters[index] : undefined;
+				const expected = await checker.getParameterType(signature, index);
+				const declared = parameter?.type && (await checker.getTypeAtLocation(parameter.type));
+				if ((await acceptsPromise(expected, containers, true)) || (await acceptsPromise(declared, containers, true)))
+					return true;
+				// Do not turn a synchronous value into a promise merely because a data sink uses unknown or T.
+				// Once a value already is a promise, generic consumers can preserve it (including expect).
+				const argument = call.arguments[index];
+				const actual = argument && (await checker.getTypeAtLocation(argument));
+				return (
+					(await acceptsPromise(actual, containers, true)) &&
+					((await acceptsPromise(expected, containers)) || (await acceptsPromise(declared, containers)))
+				);
+			};
+			const references = new Map<number, ts.Identifier[]>();
+			const usesOf = async (binding: ts.Identifier): Promise<ts.Identifier[]> => {
+				const symbol = await canonical(checker, binding);
+				if (!symbol) return [];
+				const cached = references.get(symbol.id);
+				if (cached) return cached;
+				const uses: ts.Identifier[] = [];
+				for (const candidate of identifiers.get(binding.text) ?? []) {
+					if (candidate === binding) continue;
+					if ((await canonical(checker, candidate))?.id === symbol.id) uses.push(candidate);
+				}
+				references.set(symbol.id, uses);
+				return uses;
+			};
+			const forwardedValues = new Map<string, boolean>();
+			const forwarded = async (
+				value: ts.Node,
+				owner: FunctionNode,
+				visiting = new Set<ts.Node>(),
+			): Promise<boolean> => {
+				const node = outerExpression(value);
+				if (visiting.has(node)) return false;
+				const cacheKey = `${key(owner)}:${key(node)}`;
+				const cached = forwardedValues.get(cacheKey);
+				if (cached !== undefined) return cached;
+				const next = new Set(visiting).add(node);
+				const parent = node.parent;
+				let result = false;
+				if (
+					ts.isReturnStatement(parent) ||
+					ts.isYieldExpression(parent) ||
+					(ts.isArrowFunction(parent) && parent.body === node)
+				)
+					result = true;
+				else if (
+					(ts.isConditionalExpression(parent) && parent.condition !== node) ||
+					ts.isAsExpression(parent) ||
+					ts.isSatisfiesExpression(parent) ||
+					ts.isNonNullExpression(parent) ||
+					(ts.isBinaryExpression(parent) &&
+						parent.right === node &&
+						[
+							ts.SyntaxKind.QuestionQuestionToken,
+							ts.SyntaxKind.BarBarToken,
+							ts.SyntaxKind.AmpersandAmpersandToken,
+						].includes(parent.operatorToken.kind))
+				)
+					result = await forwarded(parent, owner, next);
+				else {
+					const binding =
+						ts.isVariableDeclaration(parent) && parent.initializer === node && ts.isIdentifier(parent.name)
+							? parent.name
+							: ts.isBinaryExpression(parent) &&
+									parent.right === node &&
+									ts.isIdentifier(parent.left) &&
+									[
+										ts.SyntaxKind.EqualsToken,
+										ts.SyntaxKind.QuestionQuestionEqualsToken,
+										ts.SyntaxKind.BarBarEqualsToken,
+										ts.SyntaxKind.AmpersandAmpersandEqualsToken,
+									].includes(parent.operatorToken.kind)
+								? parent.left
+								: undefined;
+					if (binding)
+						for (const use of await usesOf(binding)) {
+							if (enclosing(use) === owner && (await forwarded(use, owner, next))) {
+								result = true;
+								break;
+							}
+						}
+				}
+				forwardedValues.set(cacheKey, result);
+				return result;
+			};
+			const promiseValue = async (node: ts.Node): Promise<boolean> => {
+				const expression = unparen(node);
+				const type = await checker.getTypeAtLocation(expression);
+				if (!type) return false;
+				let value = promiseTypes.get(type.id);
+				if (value === undefined) {
+					value = await hasPromise(type);
+					promiseTypes.set(type.id, value);
+				}
+				return value;
+			};
+			const classify = async (value: ts.Node, visiting: Set<ts.Node>, containers: boolean): Promise<boolean> => {
+				const node = outerExpression(value);
+				if (visiting.has(node)) return false;
+				const next = new Set(visiting).add(node);
+				const parent = node.parent;
+				if (!parent) return false;
+				if (ts.isAwaitExpression(parent) || ts.isReturnStatement(parent) || ts.isYieldExpression(parent))
+					return !containers;
+				if (ts.isArrowFunction(parent) && parent.body === node) return !containers;
+				const valueType = booleanPosition(node) ? await checker.getTypeAtLocation(node) : undefined;
+				if (valueType?.isUnionType()) {
+					const parts = await valueType.getTypes();
+					if (
+						parts.some((part) => !!(part.flags & (TypeFlags.Undefined | TypeFlags.Null))) &&
+						(await hasPromise(valueType))
+					)
+						return true;
+				}
+				if (ts.isConditionalExpression(parent) && parent.condition !== node) return handled(parent, next, containers);
+				if (ts.isNonNullExpression(parent) || ts.isAsExpression(parent) || ts.isSatisfiesExpression(parent))
+					return handled(parent, next, containers);
+				if (
+					ts.isPropertyAccessExpression(parent) &&
+					parent.expression === node &&
+					["then", "catch", "finally"].includes(parent.name.text) &&
+					ts.isCallExpression(parent.parent) &&
+					parent.parent.expression === parent
+				)
+					return true;
+				if (ts.isCallExpression(parent)) {
+					const index = ts.isExpression(node) ? parent.arguments.indexOf(node) : -1;
+					return index >= 0 && parameterAcceptsPromise(parent, index, containers);
+				}
+				if (ts.isPropertyAssignment(parent) || ts.isShorthandPropertyAssignment(parent)) {
+					const actual = await checker.getTypeAtLocation(node);
+					const promise = await hasPromise(actual);
+					if (ts.isObjectLiteralExpression(parent.parent)) {
+						const context = await checker.getContextualType(parent.parent);
+						const property = context && (await checker.getPropertyOfType(context, name(parent)));
+						if (property) {
+							const expected = await checker.getTypeOfSymbolAtLocation(property, parent);
+							return (await acceptsPromise(expected, false, true)) || (promise && (await acceptsPromise(expected)));
+						}
+					}
+					if (ts.isIdentifier(node) && promise) return handled(parent.parent, next, containers);
+				}
+				if (ts.isArrayLiteralExpression(parent)) return handled(parent, next, true);
+				if (
+					ts.isBinaryExpression(parent) &&
+					[
+						ts.SyntaxKind.EqualsEqualsEqualsToken,
+						ts.SyntaxKind.ExclamationEqualsEqualsToken,
+						ts.SyntaxKind.EqualsEqualsToken,
+						ts.SyntaxKind.ExclamationEqualsToken,
+					].includes(parent.operatorToken.kind)
+				)
+					return promiseValue(parent.left === node ? parent.right : parent.left);
+				if (
+					ts.isBinaryExpression(parent) &&
+					parent.right === node &&
+					[
+						ts.SyntaxKind.QuestionQuestionToken,
+						ts.SyntaxKind.BarBarToken,
+						ts.SyntaxKind.AmpersandAmpersandToken,
+					].includes(parent.operatorToken.kind)
+				)
+					return handled(parent, next, containers);
+				let binding: ts.Identifier | undefined;
+				if (ts.isVariableDeclaration(parent) && parent.initializer === node && ts.isIdentifier(parent.name))
+					binding = parent.name;
+				else if (
+					ts.isBinaryExpression(parent) &&
+					[
+						ts.SyntaxKind.EqualsToken,
+						ts.SyntaxKind.QuestionQuestionEqualsToken,
+						ts.SyntaxKind.BarBarEqualsToken,
+						ts.SyntaxKind.AmpersandAmpersandEqualsToken,
+					].includes(parent.operatorToken.kind) &&
+					parent.right === node &&
+					ts.isIdentifier(parent.left)
+				)
+					binding = parent.left;
+				if (binding) {
+					let consumed = false;
+					for (const use of await usesOf(binding)) {
+						if (ts.isVariableDeclaration(use.parent) && use.parent.name === use) continue;
+						if (
+							ts.isBinaryExpression(use.parent) &&
+							[
+								ts.SyntaxKind.EqualsToken,
+								ts.SyntaxKind.QuestionQuestionEqualsToken,
+								ts.SyntaxKind.BarBarEqualsToken,
+								ts.SyntaxKind.AmpersandAmpersandEqualsToken,
+							].includes(use.parent.operatorToken.kind) &&
+							use.parent.left === use
+						)
+							continue;
+						if (!(await handled(use, next, containers))) return false;
+						consumed = true;
+					}
+					return consumed;
+				}
+				return false;
+			};
+			const handledCache = new Map<ts.Node, Map<boolean, Promise<boolean>>>();
+			const handled = (value: ts.Node, visiting = new Set<ts.Node>(), containers = false): Promise<boolean> => {
+				const node = outerExpression(value);
+				if (visiting.has(node)) return Promise.resolve(false);
+				const cached = handledCache.get(node) ?? new Map<boolean, Promise<boolean>>();
+				handledCache.set(node, cached);
+				let result = cached.get(containers);
+				if (!result) {
+					result = classify(node, visiting, containers);
+					cached.set(containers, result);
+				}
+				return result;
+			};
 			const generatorBindings = new Map<number, CallInfo>();
 			for (const call of calls) {
 				const declaration = call.node.parent;
@@ -569,6 +844,7 @@ export async function planAsyncPort(options: PortOptions): Promise<PortPlan> {
 				(symbol !== undefined && (generatorSymbols.has(symbol) || !!generatorBindings.get(symbol)?.colour.generator));
 			let changed = true;
 			while (changed) {
+				handledCache.clear();
 				changed = false;
 				for (const flow of parameterFlows)
 					if (isGeneratorValue(flow.source, flow.receiver)) {
@@ -611,7 +887,21 @@ export async function planAsyncPort(options: PortOptions): Promise<PortPlan> {
 							merge(call.owner.colour, { async: false, generator: true, writes: call.colour.writes }) || changed;
 					const iteration =
 						call.colour.generator && ts.isForOfStatement(call.node.parent) && call.node.parent.expression === call.node;
-					if (call.colour.async || delegates || iteration) {
+					const expressionParent = expression.parent;
+					const forwards =
+						ts.isReturnStatement(expressionParent) ||
+						ts.isYieldExpression(expressionParent) ||
+						(ts.isArrowFunction(expressionParent) && expressionParent.body === expression);
+					if (
+						(call.colour.async &&
+							(forwards ||
+								asyncModifier(call.owner.node) ||
+								(await returnsPromise(call.owner.node)) ||
+								(await forwarded(call.node, call.owner.node)) ||
+								!(await handled(call.node)))) ||
+						delegates ||
+						iteration
+					) {
 						const gen = generator(call.owner.node);
 						changed = merge(call.owner.colour, { async: !gen, generator: gen, writes: call.colour.writes }) || changed;
 					} else if (call.colour.writes && !call.owner.colour.writes) {
@@ -620,6 +910,8 @@ export async function planAsyncPort(options: PortOptions): Promise<PortPlan> {
 					}
 				}
 			}
+			const handledCalls = new Set<ts.CallExpression>();
+			for (const call of calls) if (call.colour.async && (await handled(call.node))) handledCalls.add(call.node);
 			for (const parameter of generatorParams.values()) {
 				if (!parameter.type) continue;
 				const type = parameter.type;
@@ -628,6 +920,21 @@ export async function planAsyncPort(options: PortOptions): Promise<PortPlan> {
 				else if (!/^AsyncGenerator\s*</u.test(type.getText()))
 					refuse(type, "generator-use", "Convert this generator parameter alias to AsyncGenerator explicitly");
 			}
+			const callbackAcceptsPromise = async (node: FunctionNode): Promise<boolean> => {
+				const parent = outerExpression(node).parent;
+				if (!ts.isCallExpression(parent)) return false;
+				const signature = await checker.getResolvedSignature(parent);
+				const declaration = await signature?.declaration?.resolve();
+				if (!declaration || !functionLike(declaration)) return false;
+				const argument = outerExpression(node);
+				const index = ts.isExpression(argument) ? parent.arguments.indexOf(argument) : -1;
+				const parameter = declaration.parameters[index];
+				const type = parameter?.type && (await checker.getTypeAtLocation(parameter.type));
+				if (!type) return false;
+				for (const expected of await checker.getSignaturesOfType(type, SignatureKind.Call))
+					if (await acceptsPromise(await checker.getReturnTypeOfSignature(expected))) return true;
+				return false;
+			};
 			// A callback's contextual return type determines whether changing it would break its caller.
 			for (const fn of funcs.values()) {
 				if (!fn.colour.async && !fn.colour.generator) continue;
@@ -644,7 +951,15 @@ export async function planAsyncPort(options: PortOptions): Promise<PortPlan> {
 					fn.blocked = true;
 					refuse(node, "external-contract", "A type predicate cannot become an async predicate");
 				}
-				if (arrayCallback(node)) {
+				if (
+					arrayCallback(node) &&
+					!(
+						ts.isCallExpression(node.parent) &&
+						ts.isPropertyAccessExpression(node.parent.expression) &&
+						node.parent.expression.name.text === "map" &&
+						(await handled(node.parent, new Set(), true))
+					)
+				) {
 					fn.blocked = true;
 					refuse(node, "array-callback", "Convert array iteration deliberately; promise callbacks change its contract");
 				}
@@ -656,13 +971,18 @@ export async function planAsyncPort(options: PortOptions): Promise<PortPlan> {
 					fn.blocked = true;
 					refuse(node, "constructor-accessor-field", "An accessor or constructor cannot become async");
 				}
-				if ((ts.isArrowFunction(node) || ts.isFunctionExpression(node)) && !fn.links.size) {
+				if (
+					(ts.isArrowFunction(node) || ts.isFunctionExpression(node)) &&
+					!asyncModifier(node) &&
+					!fn.links.size &&
+					!(await callbackAcceptsPromise(node))
+				) {
 					const type = await checker.getContextualType(node);
 					if (type)
 						for (const signature of await checker.getSignaturesOfType(type, SignatureKind.Call)) {
 							const ret = await checker.getReturnTypeOfSignature(signature);
 							const text = ret && (await checker.typeToString(ret));
-							if (text && !/\b(?:Promise(?:Like)?|AsyncGenerator)\b/u.test(text) && !text.includes("=>")) {
+							if (text && !(await acceptsPromise(ret)) && !/\bAsyncGenerator\b/u.test(text) && !text.includes("=>")) {
 								fn.blocked = true;
 								refuse(node, "sync-callback", `Callback expects synchronous ${text}`);
 							}
@@ -687,7 +1007,7 @@ export async function planAsyncPort(options: PortOptions): Promise<PortPlan> {
 					for (const expected of await checker.getSignaturesOfType(type, SignatureKind.Call)) {
 						const ret = await checker.getReturnTypeOfSignature(expected);
 						const text = ret && (await checker.typeToString(ret));
-						if (text && !/\b(?:Promise(?:Like)?|AsyncGenerator)\b/u.test(text))
+						if (text && !(await acceptsPromise(ret)) && !/\bAsyncGenerator\b/u.test(text))
 							refuse(arg, "sync-callback", `Coloured function passed to synchronous ${text} callback`);
 					}
 				}
@@ -700,7 +1020,9 @@ export async function planAsyncPort(options: PortOptions): Promise<PortPlan> {
 				if (kernel) continue; // U0 owns these declarations, which are seeds, not conversion targets.
 				if (editable(node)) plan.counts.functionsColoured++;
 				if (fn.blocked) continue;
-				if (body && !asyncModifier(node) && (fn.colour.async || generator(node))) {
+				const needsAwait = calls.some((call) => call.owner === fn && call.colour.async && !handledCalls.has(call.node));
+				const alreadyPromise = await returnsPromise(node);
+				if (body && !asyncModifier(node) && (needsAwait || generator(node) || (fn.colour.async && !alreadyPromise))) {
 					let start = node.getStart();
 					if (ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node)) {
 						const offset = node.getText().search(/\bfunction\b/u);
@@ -715,7 +1037,7 @@ export async function planAsyncPort(options: PortOptions): Promise<PortPlan> {
 					const text = node.type.getText();
 					if (fn.colour.generator && /^Generator\s*</u.test(text))
 						replace(node.type, text.replace(/^Generator/u, "AsyncGenerator"));
-					else if (fn.colour.async && !/^Promise(?:Like)?\s*</u.test(text)) replace(node.type, `Promise<${text}>`);
+					else if (fn.colour.async && !alreadyPromise) replace(node.type, `Promise<${text}>`);
 				}
 			}
 			for (const { node, call, receiver, owner } of iterations)
@@ -733,10 +1055,7 @@ export async function planAsyncPort(options: PortOptions): Promise<PortPlan> {
 						node.expression.expression.name.text === "run";
 					if (!direct)
 						refuse(node, "returning-id", "Stored run result uses lastId; read RETURNING id with one/get instead");
-				} else if (
-					(ts.isBindingElement(node) && name(node) === "lastId") ||
-					(ts.isBindingElement(node) && node.propertyName?.getText() === "lastId")
-				) {
+				} else if (ts.isBindingElement(node) && (node.propertyName?.getText() ?? name(node)) === "lastId") {
 					refuse(node, "returning-id", "Destructured lastId needs RETURNING id and a one/get call");
 				}
 			}
@@ -778,7 +1097,7 @@ export async function planAsyncPort(options: PortOptions): Promise<PortPlan> {
 					}
 					continue;
 				}
-				if (!call.colour.async || awaited(node)) continue;
+				if (!call.colour.async || handledCalls.has(node)) continue;
 				if (editable(node)) {
 					const prefix = node.getSourceFile().text.slice(0, node.getStart());
 					plan.pendingCalls.push({
@@ -802,13 +1121,6 @@ export async function planAsyncPort(options: PortOptions): Promise<PortPlan> {
 					parameter = parameter.parent;
 				if (parameter && ts.isParameterDeclaration(parameter)) {
 					refuse(node, "external-contract", "Parameter initializers cannot await; move this work into the body");
-					continue;
-				}
-				if (
-					ts.isPropertyAccessExpression(node.parent) &&
-					["then", "catch", "finally"].includes(node.parent.name.text)
-				) {
-					refuse(node, "external-contract", "Existing promise chain needs review rather than awaiting its receiver");
 					continue;
 				}
 				if (booleanPosition(node)) {
@@ -904,7 +1216,7 @@ export async function planAsyncPort(options: PortOptions): Promise<PortPlan> {
 					call,
 					call.getStart(),
 					call.getStart(),
-					`(await ${first.expression.getText()}.database.read(async (${local}) => `,
+					`${handledCalls.has(call) ? "(" : "(await "}${first.expression.getText()}.database.read(async (${local}) => `,
 				);
 				splice(call, call.end, call.end, "))");
 			}
@@ -994,6 +1306,39 @@ export async function planAsyncPort(options: PortOptions): Promise<PortPlan> {
 		}
 	} finally {
 		await api.close();
+	}
+}
+
+/** Re-infer edited return types without writing any intermediate source to disk. */
+export async function planAsyncPort(options: PortOptions): Promise<PortPlan> {
+	const virtual = new Map<string, string>();
+	const changes = new Map<string, PortPlan["changes"][number]>();
+	const pending = new Map<string, PortPlan["pendingCalls"][number]>();
+	const seen = new Set<string>();
+	let callsAwaited = 0;
+	let generatorsConverted = 0;
+	let functionsColoured = 0;
+	for (;;) {
+		const plan = await planRound(options, virtual);
+		functionsColoured = Math.max(functionsColoured, plan.counts.functionsColoured);
+		callsAwaited += plan.counts.callsAwaited;
+		generatorsConverted += plan.counts.generatorsConverted;
+		for (const call of plan.pendingCalls) pending.set(`${call.file}:${call.line}:${call.column}`, call);
+		if (!plan.changes.length)
+			return {
+				...plan,
+				changes: [...changes.values()].sort((a, b) => a.file.localeCompare(b.file)),
+				pendingCalls: [...pending.values()],
+				counts: { ...plan.counts, functionsColoured, callsAwaited, generatorsConverted },
+			};
+		for (const change of plan.changes) {
+			const previous = changes.get(change.file);
+			changes.set(change.file, { ...change, before: previous?.before ?? change.before });
+			virtual.set(resolve(options.root, change.file), change.after);
+		}
+		const state = JSON.stringify([...virtual]);
+		if (seen.has(state)) throw new Error("Async conversion did not converge");
+		seen.add(state);
 	}
 }
 

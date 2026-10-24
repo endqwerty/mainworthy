@@ -1,7 +1,7 @@
 import type { ReadDb } from "./src/server/kernel/db.ts";
 declare const db: ReadDb;
-async function lookup() {
-	return await db.get("SELECT x");
+function lookup() {
+	return db.get("SELECT x");
 }
 export async function branches() {
 	const no = !lookup();

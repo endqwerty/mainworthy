@@ -1,8 +1,8 @@
 import type { ReadDb, WriteDb } from "./src/server/kernel/db.ts";
 import { openApp as open } from "./src/server/kernel/app.ts";
 const S = "SELECT x";
-export async function lookup(db: ReadDb) {
-	return await db.get(S);
+export function lookup(db: ReadDb) {
+	return db.get(S);
 }
 export async function property(db: ReadDb) {
 	return (await lookup(db))?.x;
@@ -20,32 +20,32 @@ export interface Reader {
 	lookup(db: ReadDb): Promise<{ x: number; id: number } | null>;
 }
 export class Impl implements Reader {
-	async lookup(db: ReadDb) {
-		return await lookup(db);
+	lookup(db: ReadDb) {
+		return lookup(db);
 	}
 }
 export async function throughInterface(reader: Reader, db: ReadDb) {
-	return await reader.lookup(db);
+	return reader.lookup(db);
 }
-export async function start() {
-	return await open();
+export function start() {
+	return open();
 }
 export function unrelated() {
 	const db = { get: () => 3 };
 	return db.get();
 }
 export type Contract = { lookup: (db: ReadDb) => Promise<{ x: number; id: number } | null> };
-export const implementation: Contract = { lookup: async (db: ReadDb) => await lookup(db) };
+export const implementation: Contract = { lookup: (db: ReadDb) => lookup(db) };
 export function overloaded(db: ReadDb): Promise<{ x: number; id: number } | null>;
-export async function overloaded(db: ReadDb) {
-	return await lookup(db);
+export function overloaded(db: ReadDb) {
+	return lookup(db);
 }
 export async function holder(db: ReadDb) {
 	await lookup(db);
-	return { read: async () => await lookup(db) };
+	return { read: () => lookup(db) };
 }
 export async function nested(db: ReadDb) {
-	return await (await holder(db)).read();
+	return (await holder(db)).read();
 }
 export function effect(db: WriteDb) {
 	db.afterCommit(() => {});

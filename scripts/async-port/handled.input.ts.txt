@@ -1,0 +1,91 @@
+import type { ReadDb, Database } from "./src/server/kernel/db.ts";
+declare const db: ReadDb;
+declare const database: Database;
+declare function expect<T>(value: T): { rejects: { toThrow(): Promise<void> }; resolves: { toBe(value: unknown): Promise<void> } };
+declare function consume(value: PromiseLike<unknown>): void;
+declare function sync(callback: () => void): void;
+function lookup() { return db.get("SELECT x"); }
+export async function expectations() {
+	await expect(db.get("SELECT x")).rejects.toThrow();
+	await expect(lookup()).resolves.toBe(null);
+}
+export async function collections() {
+	await Promise.all([lookup(), db.get("SELECT x")]);
+	await Promise.race([lookup(), db.get("SELECT x")]);
+	await Promise.allSettled([lookup(), db.get("SELECT x")]);
+	const mapped = [1, 2].map(async () => { await lookup(); return db.get("SELECT x"); });
+	await Promise.all(mapped);
+	await Promise.all([1, 2].map(() => lookup()));
+}
+export async function parked() {
+	const holder = lookup();
+	const alias = holder;
+	await db.one("SELECT x");
+	await alias;
+	let assigned: Promise<unknown>;
+	assigned = lookup();
+	await assigned;
+}
+export function passedOn() {
+	const pending = lookup();
+	consume(pending);
+	return lookup();
+}
+export function identity() {
+	const pending = lookup();
+	const same = pending === lookup();
+	return same;
+}
+export function chains() {
+	sync(() => { void lookup().then(() => {}); });
+	sync(() => { lookup().catch(() => {}); });
+	sync(() => { void lookup().then(() => {}).catch(() => {}); });
+}
+export async function scopes() {
+	await database.read(async (read) => { await read.get("SELECT x"); return [1]; });
+	await database.write(async (write) => { await write.run("UPDATE items SET x = 1"); return 1; });
+}
+export async function* yielded() { yield lookup(); }
+export async function presence(flag: boolean) {
+	const late = flag ? lookup() : undefined;
+	if (late) await late;
+	const next = await (late ? Promise.race([lookup(), late]) : lookup());
+	const missing = !late;
+	const withFallback = late ?? lookup();
+	const either = late || lookup();
+	const both = late && lookup();
+	await Promise.all([withFallback, either, both]);
+	return { next, missing };
+}
+export function optional(flag: boolean) { return flag ? lookup() : null; }
+export function optionalPresence(flag: boolean) {
+	if (optional(flag)) return true;
+	return !optional(flag);
+}
+export async function insertedId() {
+	const { id: lastId } = await db.one("INSERT INTO items DEFAULT VALUES RETURNING id");
+	return lastId;
+}
+declare function acceptsUnknown(callback: () => unknown): void;
+acceptsUnknown(async () => { await lookup(); });
+let stopping: Promise<unknown> | null = null;
+export function stop() {
+	stopping ??= (async () => { await lookup(); })();
+	return stopping;
+}
+export async function opening(): Promise<{ signedIn: Promise<unknown> }> {
+	const signedIn = lookup();
+	return { signedIn };
+}
+export function returnedHolder() {
+	const pending = lookup();
+	return { pending };
+}
+declare function boxed(value: { pending: PromiseLike<unknown> }): void;
+export function passedProperty() { boxed({ pending: lookup() }); }
+declare function ignoresReturn(callback: () => void): void;
+ignoresReturn(async () => { await lookup(); });
+declare function opaquePromise(value: unknown): void;
+export function passOpaque() { opaquePromise(lookup()); }
+async function namedRead(read: ReadDb) { await read.get("SELECT x"); return [1]; }
+export async function namedScope() { await database.read(namedRead); }
