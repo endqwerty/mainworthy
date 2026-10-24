@@ -122,9 +122,7 @@ async function main(args: string[]): Promise<void> {
 			if (!Number.isInteger(number) || number < 1) return fail(USAGE, 4);
 			const found = problems(await gather(number));
 			if (found.length > 0) fail(`pull request #${number}:\n- ${found.join("\n- ")}`);
-			console.log(
-				`pull request #${number}: closing words, linked issues, milestone and fragment PR references agree`,
-			);
+			console.log(`pull request #${number}: closing words, linked issues, milestone and fragment PR references agree`);
 			return;
 		}
 		case "sync-branch":
